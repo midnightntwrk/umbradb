@@ -338,6 +338,18 @@ before the review.
       key equal to a secret's text shows the secret. Under the bounded-review rule no further automated round runs: M1
       and C-F2's residual are the owner's (Q-23), with Q-1, Q-11, Q-19, Q-20, Q-21, Q-22 and the design amendments
       of 8.5. **Open for the owner.**
+- [x] 10.3 The design amendments the owner approved on 2026-11-02 (the organizer's questions Q-2, Q-3, Q-6, Q-7, Q-10,
+      Q-12, Q-13, Q-16, Q-17, Q-18; their texts written in 8.5) applied to the approved designs. Q-9's is not: that
+      question is still open.
+      **Acceptance:** each text is in its section, checked against the code it describes at `989cba1`: this change's
+      `design.md` §1 (Q-16), §3.1 (Q-6), §3.2 (Q-2, Q-3), §4 (Q-7), §5.2 (Q-18), §5.4 (Q-10), §8 (Q-12, Q-13), and
+      `core-arch` design §12's **Command** paragraph (Q-17); `git diff 989cba1` touches only the two `design.md` files
+      and this file; what the document tests read from the designs (§12's **Values** and **Types**, §4's **Exports**,
+      §7.2's six codes, §11) is unchanged.
+      **Done (2026-11-02, `1bafd4a`, `e511449`):** two corrections of the drafts, each to what the code is at `989cba1`:
+      §1 also names `src/runner/host-signal.ts`, added after the draft (`fc9e3e0`), so that the layout lists every
+      file of `src/` the change added; §8 cites the limits at `src/runner/api-session.ts:44-46` (the draft's `43-45`
+      was one line early). The targeted check of these edits is the organizer's plan's P11.3.
 
 ## 11. Close-out
 
