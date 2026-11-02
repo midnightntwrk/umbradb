@@ -2,8 +2,8 @@
 
 Modifies `core-arch`'s `specs/ledger/spec.md` (`ledger-refcount` `design.md` §0: `core-arch` is archived first, then
 `start-umbradb`, then this change). EARS forms and terms as in `core-arch`'s `specs/runner/spec.md`; the ledger's terms
-as in `core-arch`'s `specs/ledger/spec.md`. Each modified requirement is restated in full; the change is reclamation of
-stored ledger nodes by reference counting (`design.md` §3).
+as in `core-arch`'s `specs/ledger/spec.md`. Each modified requirement is restated in full; the change is storage of every
+ledger node in one form and reclamation of stored nodes by reference counting (`design.md` §2–§4).
 
 ## RENAMED Requirements
 
@@ -15,16 +15,23 @@ stored ledger nodes by reference counting (`design.md` §3).
 ### Requirement: LG-11 The ledger state lives in the database
 
 THE system SHALL store the ledger state only in `core_ledger_state`, on the ledger's storage contract with the node's
-`layout-v2` layout: each ledger node as its key, `data` and `children` (the ledger's serialization of its child list,
-references and embedded children included); root counts per key; and, for reclamation (LG-14), the reference count of
-every key that stored nodes reference (`ref_counts`) and the queue of stored nodes that have neither a reference nor a
-root count (`unreferenced`). Per block, `core-ledger-state` SHALL write the ledger's flushed batch (inserted nodes,
-changed root counts) with the block's row of `core_ledger_state.states` and the block's reclamation step in the
-block's `on-db-write`, and persist the state after the block. Whole serialized states SHALL NOT be stored. Reads SHALL
-check each node's hash against its key. WHEN the process restarts THE ledger worker SHALL load the state at the cursor
-from its state key and the stored nodes, and reclamation SHALL continue from the stored counts and queue. THE flushed
-batch SHALL carry each changed root count as a signed change, which the writer adds to the stored count, deleting a
-count that reaches 0 (owner decision Q53).
+`layout-v2` layout: each stored ledger node as its key, `data` and `children` (the ledger's serialization of its child
+list, references and embedded children included); root counts per key; and, for reclamation (LG-14), the reference
+count of every key that stored nodes reference (`ref_counts`) and the queue of stored nodes that have neither a
+reference nor a root count (`unreferenced`). THE stored child list of every node SHALL be its **one form**: from the
+leaves up, each child embedded, in its own one form, when that form is small by the ledger's rule (at most 1,024 bytes
+by `child_from`'s size test), and referenced by key otherwise — the form the ledger builds for fresh content, whatever
+form the package holds — computed in the ledger worker with the package's own code. A node SHALL be stored exactly when
+its one form is not small or its key has a root count; a small node without one SHALL exist only embedded in its
+parents, and a node the package flushed in that case SHALL be kept by the ledger worker in memory, served to its package
+by key, evicted with any stored node it reaches when that node is deleted, and dropped once the package forgets it.
+Per block, `core-ledger-state` SHALL write the ledger's flushed batch (inserted nodes in their one form, changed root
+counts) with the block's row of `core_ledger_state.states` and the block's reclamation step in the block's
+`on-db-write`, and persist the state after the block. Whole serialized states SHALL NOT be stored. Reads SHALL check
+each node's hash against its key. WHEN the process restarts THE ledger worker SHALL load the state at the cursor from
+its state key and the stored nodes, and reclamation SHALL continue from the stored counts and queue. THE flushed batch
+SHALL carry each changed root count as a signed change, which the writer adds to the stored count, deleting a count
+that reaches 0 (owner decision Q53).
 
 #### Scenario: Restart from the database alone
 - **WHEN** the process is killed and restarted at cursor h
@@ -34,6 +41,16 @@ count that reaches 0 (owner decision Q53).
 - **WHEN** the process is killed and restarted at cursor h, and syncs on to h + 100
 - **THEN** after every block from h + 1 its `ref_counts`, `unreferenced` and `nodes` equal those of a run that was not
   restarted
+
+#### Scenario: The same rows whatever the worker's history
+- **WHEN** two indexers process the same chain, one restarted at h and one not, and the package of one holds a small
+  node by reference where the other holds it embedded
+- **THEN** after every block their `core_ledger_state` rows and digests are identical
+
+#### Scenario: A small node the package holds by key
+- **WHEN** the package flushes a small node that it holds by reference and whose key has no root count
+- **THEN** no row is written for it, its parents' stored child lists embed it, and the package reads it back by key
+  from its worker until it forgets it
 
 ### Requirement: LG-13 Contract states stay alive
 
@@ -54,18 +71,17 @@ stored nodes that have neither a reference nor a root count (`core_ledger_state.
 `core-ledger-state` SHALL compute in `on-compute`, from the tables as committed at h − 1 and the block's flushed batch,
 and SHALL write in `on-db-write`, in the block's transaction, this step:
 (1) the block's **new nodes** are the batch's inserted nodes whose keys were not stored at h − 1, and only they change
-counts: a node inserted again keeps its stored child list and changes none;
+counts: a node inserted again changes none;
 (2) each new node adds 1 to the count of each key its child list references, per occurrence;
-(3) a key is **protected** in h, and not deleted in h, when it has a root count after h − 1 or after h, or when a node
-of the batch, new or inserted again, references it in the batch's child list;
+(3) a key that has a root count after h − 1 or after h is **protected** and not deleted in h;
 (4) starting from the keys queued at h − 1, every key with count 0 that is not protected is deleted; each deleted node
 subtracts 1 from the count of each key its stored child list references, per occurrence; a key whose count so reaches 0
 and that is not protected is deleted too, in the same block, until no key is left to delete; no limit bounds the
 deletions of a block;
 (5) after the step the queue holds exactly the stored nodes with neither a reference nor a root count, and a key that
 enters it in h is deleted no earlier than block h + 1.
-IF a count would fall below 0, a reference in the batch's child list of a node the batch inserts, or a key whose root
-count rises in h, is not a stored node after the step, or a write of the step affects another number of rows than the step computed, THEN
+IF a count would fall below 0, a reference in a new node's child list or a key whose root count rises in h is not a
+stored node after the step, or a write of the step affects another number of rows than the step computed, THEN
 processing SHALL halt with `ledger-refcount-invalid`, naming the reason, and nothing of the block SHALL be stored. Nodes
 the step deletes SHALL be evicted from the worker's caches before the block's transaction; IF the ledger package still
 refuses an eviction after the worker freed every object it can, THEN THE system SHALL end the worker thread and start a
@@ -85,7 +101,7 @@ the first block with `sweep: on` again SHALL delete the queue by step (4).
 #### Scenario: A released state is deleted the block after its release
 - **WHEN** `retainStates` is 0 and block h releases the state after h − 1
 - **THEN** no node of that state is deleted at h, and at h + 1 every node of it that neither the states after h and
-  h + 1 nor a node of block h + 1's batch reaches is deleted
+  h + 1 nor a new node of block h + 1 reaches is deleted
 
 #### Scenario: A re-inserted node changes no count
 - **WHEN** block h's batch inserts again a node stored at h − 1
@@ -94,12 +110,6 @@ the first block with `sweep: on` again SHALL delete the queue by step (4).
 #### Scenario: A node queued and referenced again is kept
 - **WHEN** a key is queued at h − 1 and one new node of block h references it once
 - **THEN** it is not deleted at h, it leaves the queue, and its count is 1
-
-#### Scenario: A node only the batch references
-- **WHEN** block h inserts again a node whose stored child list embeds a small node X while its child list in the
-  batch references X by key, so that X is a new node nothing stored references
-- **THEN** X is queued at h, not deleted at h, and deleted at the first later block in which nothing references or
-  persists it and no batch references it
 
 #### Scenario: A reference to a missing node
 - **WHEN** a test package flushes, at block h, a new node that references a key that is not stored and not new

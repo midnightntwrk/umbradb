@@ -1,6 +1,7 @@
 # 00078 — A stored ledger node can arrive again in another child-list form, so the batch may depend on the worker's history
 
-- **Status:** OPEN
+- **Status:** OPEN — the fix is specified in the `ledger-refcount` change (`openspec/changes/ledger-refcount/`,
+  `design.md` §2.2–§2.3 and §4.4; owner decision O-8, 2026-11-02); closed when that change is implemented
 - **Area:** ledger storage (`core-ledger-state`, LG-11)
 - **Severity:** unknown — no divergence has been seen; if the packages produce it on a real chain, two indexers with
   different worker histories (one restarted) store different rows for a block and their per-block digests differ from
@@ -44,10 +45,17 @@ such a row for a block or deletes it, but cannot make its insertion deterministi
 
 (`upstream:` is `midnight-ledger` at tag `ledger-9.1.0.0-rc.5`, `67f9f97246339539af0091c4d8c6bc5ab236a191`.)
 
-## Suggested fix
+## Fix (specified in `ledger-refcount`)
 
-1. Measure: on every recorded tape, count the nodes inserted again whose batch child list differs from the stored one,
-   and the new small nodes referenced only by such a form (the `ledger-refcount` change's R21 does this).
-2. If any appear: store a canonical form (each child embedded exactly when small, by `child_from`'s rule) computed by
-   UmbraDB before writing, so a key has one stored form whatever the package's history; check that the package loads
-   that form; or halt on a form that differs from the stored one, so a divergence is never silent.
+The owner chose to make storage deterministic by design, in the `ledger-refcount` change:
+
+1. Every stored node's child list is its **one form**: each child embedded, in its own one form, when that is small by
+   the ledger's rule (`upstream:storage-core/src/storable.rs:139-159`), referenced otherwise — the form the ledger
+   builds for fresh content. The ledger worker computes it with the package's own code (a patch in each vendored
+   package). The package accepts it, since it checks only that a node's content hashes to its key
+   (`vendor/ledger/v9/patches/0001-storage-core-external-node-store.patch:133-141`).
+2. A node is a row exactly when its one form is not small or its key is persisted. A small node the package flushed
+   without being persisted is kept in the worker's memory and served to its package by key, so it never becomes a row
+   on one machine only.
+3. Its criteria R27 (every row in its one form), R28 (each package's one form equals an independent oracle; the tapes
+   still sync) and R29 (three runs with different worker histories store identical rows and digests) verify it.
