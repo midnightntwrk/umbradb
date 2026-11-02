@@ -234,11 +234,13 @@ count rose in h (`sweep.ts:197-208`), following the batch form of a node the bat
 otherwise (`sweep.ts:218`), and deletes every unmarked node. Counting keeps `K_h` (§4.3). The two are the same set
 provided every node of the batch is reachable from a key whose root count rose (the flush, §4.5) **and every node the
 batch inserts again carries its stored form** (§4.6): then a batch form's references are its stored form's, and every
-new node is reached from a rising root. When a node arrives in its second form the two can differ for that block in
-either direction (the sweep follows the batch form, counting keeps the stored form's references too): a stored form
-referencing a leaf the batch form embeds keeps the leaf under counting and not under the sweep. This precondition is
-§4.7's assumption; R2 and the DAG fixture's case of R4 exclude second forms, and R4 on the recorded tapes asserts the
-equality, so a second form on a real chain would fail R4 there and fall under issue `docs/issues/00078`. Both start empty at genesis, so they store the same nodes at every
+new node is reached from a rising root. When a node arrives in its second form, counting can keep more than a
+one-block sweep cycle started from the same stored rows (counting keeps the stored form's references as well as the
+batch form's; the sweep follows the batch form only): a stored form referencing a leaf the batch form embeds keeps the
+leaf under counting and not under the sweep, when nothing else reaches it. This precondition is §4.7's assumption; R2
+and the DAG fixture's case of R4 exclude second forms. R4 on the recorded tapes asserts the equality, so a second form
+there may fail it — not always, since R4 compares stored sets, not forms; R21 counts second forms directly, and either
+result falls under issue `docs/issues/00078`. Both start empty at genesis, so they store the same nodes at every
 height up to the first block whose cycle does not fit. On preprod every block so far ran a whole cycle in-block
 (`sweep.cycle` = height + 1, cycle 46,739 when the run stopped near 46,738: organizer plan P13.3 and questions Q-37).
 Where a cycle spans blocks, the sweep deletes a node only if nothing reachable from the roots at the cycle's start or
