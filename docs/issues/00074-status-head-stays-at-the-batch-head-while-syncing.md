@@ -1,7 +1,19 @@
 # 00074 — `/status`'s finalized head, the lag and readiness stay at the head the loop read when its batch began
 
-- **Status:** OPEN — waiting on the owner's decision (`start-umbradb` plan, question Q-29): `core-arch`'s design defines
-  the lag as "the head the loop last read minus the cursor", so following the latest head is a design amendment.
+- **Status:** CLOSED — fixed 2026-11-02 (`start-umbradb` P12.C; the owner's answer to question Q-29: from the data the
+  loop already holds, with no second call to the chain). The block-source interface has a read of the latest finalized
+  head the source holds, `latestHead()`, with no call and no effect: the node source's head from its finalized-heads
+  subscription, the in-memory source's `finalize`d head, a private process's source's highest public cursor read. The
+  process reports the head the loop last read raised to it, so `status().head`, `/status`'s `head` and
+  `node.finalizedHead`, the lag, the state and readiness follow the node during a batch; the loop still reads the head
+  once per batch, so processing, the prefetch's bound and each head's `on-finalized` are unchanged. `core-arch`'s design
+  sentence amended (the owner approved). Tests, each seen failing first: `test/runner/status-head.test.ts` (the probe
+  below, PostgreSQL 18 and PGlite: head 600 at cursor 9, `syncing` and not ready at cursor 397 where it read
+  `following` and ready, and the order of the points unchanged), the browser build's core in headless Chrome
+  (`test/browser/browser.test.ts` › «issue 00074: …»: held at 5 in a batch to 6 while the node finalized 9, `head` and
+  `node.finalizedHead` 9, lag 4, `syncing`, where it read 6, 1, `following`), and the three sources' reads
+  (`node-source.test.ts` — no node call, the prefetch still bound by the loop's head —, `in-memory-source.test.ts`,
+  `core-private-source.test.ts`).
 - **Area:** runner (the process's state, `src/runner/process.ts`; the finalized loop, `src/runner/loop.ts`); admin
   (`/status`)
 - **Severity:** medium — while the process syncs, `status().head`, `/status`'s `node.finalizedHead`, the lag, the

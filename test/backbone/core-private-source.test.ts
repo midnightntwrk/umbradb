@@ -332,6 +332,33 @@ describe("the private block source (PP-3)", () => {
     expect(state.reads).toBe(4);
   });
 
+  it("its latest head is the public cursor it last read, raised by each read, never lowered; reading it reads nothing (issue 00074)", async () => {
+    let head: bigint | null = 4n;
+    const { db, state } = fakePublic((sql, params) => publicAnswers({ head })(sql, params));
+    const manual = manualWakes();
+    const source = new PrivateBlockSource(db, manual.wakes);
+    // Before any read: none, and no read made for it.
+    expect(source.latestHead()).toBeNull();
+    expect(state.reads).toBe(0);
+    expect(await source.finalizedHead()).toEqual({ height: 4n, hash: bytes(4), parentHash: bytes(0) });
+    expect(source.latestHead()).toEqual({ height: 4n, hash: bytes(4), parentHash: bytes(0) });
+    expect(state.reads).toBe(1);
+    // A wait's reads at its wake-ups raise it: the public cursor moved to 6 while the loop waited above 5.
+    const waiting = source.waitForHead(5n, new AbortController().signal);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    head = 6n;
+    manual.wake();
+    await waiting;
+    expect(source.latestHead()).toEqual({ height: 6n, hash: bytes(6), parentHash: bytes(0) });
+    const reads = state.reads;
+    expect(source.latestHead()?.height).toBe(6n);
+    expect(state.reads).toBe(reads);
+    // A later read that finds a lower public cursor (a public database restored behind it) does not lower it.
+    head = 5n;
+    expect((await source.finalizedHead()).height).toBe(5n);
+    expect(source.latestHead()?.height).toBe(6n);
+  });
+
   it("stops waiting with the signal's reason, aborted before or during the wait", async () => {
     const source = new PrivateBlockSource(fakePublic(publicAnswers({ head: 4n })).db, manualWakes().wakes);
     const before = new AbortController();

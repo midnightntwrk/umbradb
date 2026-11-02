@@ -86,14 +86,21 @@
  * **The state** ({@link ProcessStatus}) is exactly one of these [AE-3; CORE-ARCH §4.18]:
  * - `starting` until the loop runs;
  * - `refused` when startup refused;
- * - `syncing` or `following`, by the lag (the finalized head the loop last read minus the cursor) against
- *   `followingThreshold`;
+ * - `syncing` or `following`, by the lag (the latest finalized head the block source holds, at least the one the loop
+ *   last read, minus the cursor) against `followingThreshold`;
  * - `stopped` once processing ended at the core's stop or before an upgrade boundary. At a boundary it has the
  *   condition `upgrade-required`. The process stays up, and the module API answers at the cursor [RN-12];
  * - `halted` when processing failed. A failure before the `COMMIT` left nothing of its height (the loop rolled it
  *   back); one after it left the height committed. The process stays up: the module API answers at the cursor, and the
  *   database stays open until the process is stopped [RN-8];
  * - `stopping` from {@link ProcessHandle.stop} on.
+ *
+ * **The finalized head reported** (`status().head`, hence `/status`'s, the lag, the state and readiness) is the head
+ * the loop last read, raised at each read of the status to the latest one the block source holds
+ * (`BlockSource.latestHead`). That read asks nothing of the chain and changes nothing of processing: the loop still
+ * reads the head once per batch. So a head the node finalizes during a batch shows at once, rather than once the loop
+ * has processed the batch and read the head again. The reported head never goes back, and is null until the loop has
+ * read one: a first startup shows none. [AE-3, AE-5]
  *
  * `refused` and `halted` carry their reason ({@link ProcessReason}: the error code, the height, the module and the
  * point; `./failures.ts`). The process is ready (`/health/ready`, `readinessOf`) when `stopped`, and otherwise unless a
@@ -715,7 +722,10 @@ export interface ProcessStatus {
   readonly conditions: readonly ProcessCondition[];
   /** The last committed height, null before any. */
   readonly cursor: bigint | null;
-  /** The finalized head the loop last read, null before it read one. */
+  /**
+   * The finalized head: the latest one the block source holds, at least the one the loop last read; null before the
+   * loop read one. [AE-3, AE-5]
+   */
   readonly head: bigint | null;
   /** The head minus the cursor (minus S − 1 before any height committed), at least 0; null without a head. */
   readonly lag: bigint | null;
@@ -1184,6 +1194,7 @@ class Process implements ProcessHandle {
   #cursor: bigint | null = null;
   /** Whether startup has read the cursor from the database: until then a stop's line knows no height committed. */
   #cursorRead = false;
+  /** The finalized head reported (see the module comment): the loop's reads, raised by the source's; only rises. */
   #head: bigint | null = null;
   #upgrade: UpgradeBoundary | null = null;
   #conditions: ProcessCondition[] = [];
@@ -1341,7 +1352,7 @@ class Process implements ProcessHandle {
       phase: this.#phase,
       start: this.#start,
       cursor: this.#cursor,
-      head: this.#head,
+      head: this.#reportedHead(),
       followingThreshold: (settings?.followingThreshold as number | undefined) ?? 0,
       readinessLag: (settings?.readinessLag as number | undefined) ?? null,
       conditions: [
@@ -1358,6 +1369,17 @@ class Process implements ProcessHandle {
       ended: this.#end,
       reason: this.#reason,
     });
+  }
+
+  /**
+   * The finalized head reported (see the module comment): the head the loop last read, raised to the latest head the
+   * block source holds now, which is read without a call to the chain; null before the loop read one. [AE-3, AE-5]
+   */
+  #reportedHead(): bigint | null {
+    if (this.#head === null) return null;
+    const latest = this.#source?.latestHead()?.height ?? null;
+    if (latest !== null && latest > this.#head) this.#head = latest;
+    return this.#head;
   }
 
   listening(): ProcessListening {
@@ -2194,7 +2216,7 @@ class Process implements ProcessHandle {
       observer: {
         slow: (event) => this.#slowBlockEvent(event, settings.slowBlockMs as number),
         head: (head) => {
-          this.#head = head.height;
+          if (this.#head === null || head.height > this.#head) this.#head = head.height;
           // Nothing to process (the loop waits): whatever was retried works again.
           if (head.height < (this.#cursor === null ? graph.start : this.#cursor + 1n)) this.#recovered();
         },

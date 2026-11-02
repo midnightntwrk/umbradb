@@ -36,7 +36,9 @@
  * **Block intake** is the finalized loop (`src/runner/loop.ts`) running over this part's block source
  * ({@link PrivateBlockSource}):
  * - its cursor is the private cursor;
- * - its finalized head is the public cursor, read in a consistent read of the public database;
+ * - its finalized head is the public cursor, read in a consistent read of the public database; the head the process
+ *   reports is the highest public cursor it read so far ({@link PrivateBlockSource.latestHead}), so it is as fresh as
+ *   the loop's last read or wake-up, never read for the report;
  * - its block at h is the public block at h;
  * - it waits for the public cursor to pass a height by reading the cursor each time it is woken: by the core's
  *   `committed` messages and every connection or reconnection of its transport, or, without a transport, by a poll
@@ -444,6 +446,8 @@ export class PrivateBlockSource implements BlockSource {
   #position: BlockRef | null | undefined;
   /** The binding the private database recorded, as the last read of the cursor found it; null before any or without. */
   #recorded: PublicIdentity | null = null;
+  /** The highest public cursor {@link finalizedHead} has read (the loop's reads and a wait's); null before any. */
+  #latest: BlockRef | null = null;
   /** The public configuration hash startup's chain check read; null before it, or before the table exists. [PP-14] */
   #publicConfigHash: string | null = null;
   /** The count of public database reconnections at the last configuration check. [PP-14] */
@@ -588,8 +592,8 @@ export class PrivateBlockSource implements BlockSource {
    * public S, with 32 zero bytes for its hashes; the loop never processes it, because a private S is at least the
    * public S. [PP-2]
    */
-  finalizedHead(): Promise<BlockRef> {
-    return this.#read(async (read) => {
+  async finalizedHead(): Promise<BlockRef> {
+    const head = await this.#read(async (read) => {
       const cursor = await readPublicCursor(read);
       if (cursor !== null) return cursor;
       const identity = await readPublicIdentity(read);
@@ -598,6 +602,17 @@ export class PrivateBlockSource implements BlockSource {
       }
       return Object.freeze({ height: identity.start - 1n, hash: new Uint8Array(32), parentHash: new Uint8Array(32) });
     });
+    if (this.#latest === null || head.height > this.#latest.height) this.#latest = head;
+    return head;
+  }
+
+  /**
+   * The highest public cursor this source has read ({@link finalizedHead}: the loop's read of each batch, and each read
+   * of a wait at its wake-ups); null before any. It reads nothing, so a private process's head is as fresh as its last
+   * read of the public database. [AE-3, AE-5, PP-3]
+   */
+  latestHead(): BlockRef | null {
+    return this.#latest;
   }
 
   /**

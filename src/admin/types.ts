@@ -49,7 +49,10 @@ export interface InstanceStatus {
  * client's connection, the block source's best head and queue), `null` where nothing reports a value yet. [AE-5]
  */
 export interface NodeStatus {
-  /** The node's finalized head the loop last read (decimal text), null before it read one. */
+  /**
+   * The node's finalized head (decimal text): the latest one the node source holds, from its finalized-heads
+   * subscription, at least the one the loop last read; null before the loop read one. [AE-3, AE-5]
+   */
   readonly finalizedHead: string | null;
   /** The best head the node announced last (decimal text); null before it announced one, or without a node source. */
   readonly bestHead: string | null;
@@ -133,7 +136,7 @@ export interface StatusSnapshot {
   readonly conditions: readonly PlainObject[];
   /** The last committed height, null before any. */
   readonly cursor: string | null;
-  /** The finalized head the loop last read, null before it read one. */
+  /** `status().head`: the latest finalized head the block source holds, null before the loop read one. */
   readonly head: string | null;
   readonly lag: string | null;
   /** Why the process is refused or halted (kept once it is stopping); null before either. */

@@ -55,6 +55,18 @@ describe("InMemoryBlockSource: the block source over blocks in memory (RN-14)", 
     expect(await source.finalizedHead()).toEqual(inMemoryBlock(4n));
   });
 
+  it("its latest head is the block at the head now, raised by finalize at once; reading it changes nothing (issue 00074)", async () => {
+    const custom = { height: 6n, hash: new Uint8Array(32).fill(6), parentHash: new Uint8Array(32).fill(5) };
+    const source = new InMemoryBlockSource({ head: 4n, blocks: [custom] });
+    expect(source.latestHead()).toEqual(inMemoryBlock(4n));
+    source.finalize(6n);
+    expect(source.latestHead()).toBe(custom);
+    // Read again: the same, and what the loop's read finds is unchanged by it.
+    expect(source.latestHead()).toBe(custom);
+    expect(source.head).toBe(6n);
+    expect(await source.finalizedHead()).toBe(custom);
+  });
+
   it("gives the finalized block at every height up to the head, and refuses one above it or below 0", async () => {
     const source = new InMemoryBlockSource({ head: 3n });
     expect(await source.block(0n)).toEqual(inMemoryBlock(0n));

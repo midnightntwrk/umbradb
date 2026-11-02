@@ -19,6 +19,11 @@
  * The runner exposes `on-best-block` and `on-rollback` only through that interface, and never calls them itself. A
  * source without `prepared` (the in-memory one, a private process's) leaves `on-fetch` and `on-parse` to the loop.
  * [RN-1]
+ *
+ * **Two heads.** The loop reads the finalized head once per batch ({@link BlockSource.finalizedHead}) and processes
+ * every height up to it before reading it again. Meanwhile the source may learn a higher one, which the process reports
+ * as its finalized head, with the lag and the state from it ({@link BlockSource.latestHead}): a read of what the source
+ * already holds, never a call to the chain, which changes nothing the loop reads. [AE-3, AE-5]
  */
 
 import type { ChainCheck, ChainCheckInput } from "../backbone/core-chain/core-chain.js";
@@ -39,6 +44,14 @@ export interface BlockSource {
   cursor(read: Pick<ReadHandle, "query">): Promise<BlockRef | null>;
   /** The highest height the runner may process, as a block. */
   finalizedHead(): Promise<BlockRef>;
+  /**
+   * The latest finalized head the source holds now, as a block; null before it holds one. It is what the source has
+   * already learned — the node source's head from its finalized-heads subscription, the in-memory source's `finalize`d
+   * head, a private process's source's highest public cursor read —, read without asking the chain or the database,
+   * and it changes nothing: the heights the loop processes, the prefetch's bound and the order of a head's
+   * `on-finalized` stay {@link finalizedHead}'s. It only rises. Never throws. [AE-3, AE-5]
+   */
+  latestHead(): BlockRef | null;
   /**
    * Resolves when the finalized head exceeds `above`, at once if it does already; rejects with `signal`'s reason when
    * `signal` aborts, also when it was aborted before the call.

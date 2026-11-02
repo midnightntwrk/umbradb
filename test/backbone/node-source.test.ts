@@ -471,6 +471,45 @@ describe("the finalized prefetch (IN-5)", () => {
     expect(node.count("chain_getBlockHash", [11])).toBe(1);
   }, PATIENCE_MS);
 
+  it("reports its latest head with no node call, the prefetch still bound by the head the loop read (issue 00074)", async () => {
+    // As above: the notification of 12 goes out once heights 1–5 are answered, while the loop's head is 10.
+    const records: TapeRecord[] = [
+      ...subscriptions(),
+      ...headRead(at(10)),
+      ...chain.slice(1, 6).flatMap(hashAndBlock),
+      finalizedHead(at(12)),
+      ...chain.slice(6, 13).flatMap(hashAndBlock),
+    ];
+    const { source, node } = await open(records, { prefetchWindow: 64 });
+    // Before its first use the source holds no head.
+    expect(source.latestHead()).toBeNull();
+    source.attach(new Recorder());
+    expect((await source.finalizedHead()).height).toBe(10n);
+    expect(source.latestHead()).toEqual({ height: 10n, hash: at(10).hash, parentHash: at(9).hash });
+    for (let height = 1n; height <= 5n; height++) await source.prepared(height);
+    await source.waitForHead(11n, never);
+    // The notification raised the head to 12: reported at once, from what the subscription gave.
+    expect(source.latestHead()).toEqual({ height: 12n, hash: at(12).hash, parentHash: at(11).hash });
+    expect(source.latestHead()?.height).toBe(12n);
+    // The prefetch stays bound by the head the loop read (10), so 12's on-finalized still comes before 11 and 12.
+    for (let height = 6n; height <= 10n; height++) await source.prepared(height);
+    expect(node.count("chain_getBlockHash", [11]) + node.count("chain_getBlockHash", [12])).toBe(0);
+    expect((await source.finalizedHead()).height).toBe(12n);
+    await source.prepared(11n);
+    await source.prepared(12n);
+    expect(node.count("chain_getBlockHash", [11])).toBe(1);
+    expect(source.latestHead()?.height).toBe(12n);
+    // No node call for any of the reads: the node saw the source's first use, then the heights' hashes and blocks only.
+    // Every request sent before the last height's was received before it was answered, on the one connection.
+    const methods = node.calls.map((call) => call.method);
+    expect(methods.filter((method) => method !== "chain_getBlockHash" && method !== "chain_getBlock")).toEqual([
+      "chain_subscribeFinalizedHeads",
+      "chain_subscribeNewHeads",
+      "chain_getFinalizedHead",
+      "chain_getHeader",
+    ]);
+  }, PATIENCE_MS);
+
   it("fails the height when the node answers chain_getBlock with a block of another height", async () => {
     const records: TapeRecord[] = [
       ...subscriptions(),

@@ -107,6 +107,12 @@ is refused. For the `umbradb` command, only those two keys break. The change is 
   process's addresses as bound; `/status`'s `instance.role` is null until the side is known.
 - **Changed, not breaking:** the `node:sqlite` `ExperimentalWarning` (printed when a PGlite directory's lock first
   loads `node:sqlite`) no longer prints, for the command too.
+- **Changed, not breaking: `/status`'s finalized head follows the node during a batch** (issue 00074). `status().head`,
+  `/status`'s `head` and `node.finalizedHead`, the lag, the state and readiness come from the latest finalized head the
+  block source holds (on the core, from the node's finalized-heads subscription, read without a node call), where
+  before they stayed at the head the loop read when its batch began — on a new database, the chain's head when
+  processing started —, so the lag was understated and the state could turn `following` near a batch's end, then
+  `syncing` again. Processing is unchanged. `InMemoryBlockSource` has `latestHead()`, the block at its finalized head.
 - **Changed, not breaking: a stop is logged** (issue 00072). `umbradb run` on SIGTERM or SIGINT, and a host's `log` on
   `stop()` or its `signal`, get two lines, where before they got none: when the stop begins, what asked for it and the
   height in progress (`stopping (signal: SIGTERM): height 412 is in progress; …`), and once processing has ended by it,

@@ -364,6 +364,20 @@ before the review.
       **Done (2026-11-02, `20a856a`, `1f862cc`, `8fb6c7b`).** The targeted check of these edits is the organizer's
       plan's P11.5.
 
+- [x] 10.5 The owner's answer (2026-11-02) to the organizer's question Q-29 (finding 6 of a user run of the README,
+      issue 00074): `/status`'s finalized head from the data the loop already holds, with no second call to the chain.
+      `core-arch` design.md's sentence on the state (the lag, "the head the loop last read minus the cursor") amended
+      to the latest finalized head the block source holds, at least the head the loop last read
+      (`BlockSource.latestHead`, read with no call to the chain); only that sentence's meaning changed.
+      **Acceptance:** `status().head`, `/status`'s `head` and `node.finalizedHead`, the lag, the state and readiness
+      follow a head the source learns while the loop is in an earlier batch (`test/runner/status-head.test.ts` on both
+      backends; the browser build's core, `test/browser/browser.test.ts` › «issue 00074: …»), each seen failing first;
+      the loop's read once per batch, the prefetch's bound and the order of each head's `on-finalized` unchanged (the
+      probe's order of points; `test/backbone/node-source.test.ts` › «reports its latest head with no node call …», seen
+      failing with the read made to move the prefetch's bound and with it made to call the node); every source
+      implements the read (node, in-memory, private; the browser build runs the same two classes).
+      **Done (2026-11-02, the organizer's plan P12.C).**
+
 ## 11. Close-out
 
 - [ ] 11.1 Check off every task above with the criteria it demonstrated, the acceptance map complete.

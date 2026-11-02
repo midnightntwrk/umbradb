@@ -42,6 +42,7 @@ import {
   heldClock,
   KEPT_OPEN,
   otherGenesisSession,
+  raisedHeadSession,
   restoreSession,
   resumeSession,
   syncSession,
@@ -221,6 +222,28 @@ describe("the browser build in headless Chrome (task 16.1)", () => {
         ...resumeProblems("the core", { cursor: core.cursor, hash: before.core.hash }, { status: coreAfter, ...after.core }),
         ...resumeProblems("p1", { cursor: p1.cursor, hash: before.p1.hash }, { status: p1After, ...after.p1 }),
       ]).toEqual([]);
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "issue 00074: the core's /status reports the head its node source holds while the loop is in an older batch: " +
+      "head, node.finalizedHead, the lag and the state from it",
+    async () => {
+      // The loop reads head 6 and processes 4 to 6; once 4 and 5 are fetched the node finalizes 9, and the core is held
+      // before 6 (its first node call of 6 unanswered until the hold is released). [AE-3, AE-5]
+      const hold = heldClock();
+      const node = await tapeNode([...headSession(chain, 3n), ...heldBefore(raisedHeadSession(chain, 3n, 6n, 9n), 6n)], hold.clock);
+      const browser = await chrome();
+      const tab = await browser.open(pageUrl(bench.server.origin, params({ node: node.url })));
+      await statusWhen(tab, "core", (s) => s.cursor === "5", "the core at 5, held before 6");
+      // The head the loop read is 6 (lag 1, following); the source's is 9.
+      const held = await statusWhen(tab, "core", (s) => s.head === "9", "the head at 9 while held at 5", 30_000);
+      expect(held).toMatchObject({ state: "syncing", cursor: "5", head: "9", lag: "4", node: { finalizedHead: "9" } });
+      hold.release();
+      const synced = await statusWhen(tab, "core", (s) => s.cursor === "9" && s.state === "following", "following at 9");
+      expect(synced).toMatchObject({ head: "9", lag: "0", node: { finalizedHead: "9" } });
+      expect(networkProblems(tab.requests, { origin: bench.server.origin, node: node.url, files: bench.build.files })).toEqual([]);
     },
     BROWSER_TEST_TIMEOUT_MS,
   );

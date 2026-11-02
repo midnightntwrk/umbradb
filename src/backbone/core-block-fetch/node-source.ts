@@ -60,6 +60,11 @@
  * announced. That is the height of each new-heads notification, taken before anything decides whether the block is
  * queued, so it is also shown during startup, during a catch-up and while the queue is full. [AE-5]
  *
+ * The finalized head the process reports is the head the source holds ({@link NodeBlockSource.latestHead}): each
+ * finalized notification that raises it shows at once, while the loop is still in the batch of the head it read. That
+ * read makes no node call and leaves the prefetch bound by the head the loop last read, so a head's `on-finalized`
+ * still comes before its heights. [AE-3, AE-5, IN-5]
+ *
  * **While the loop runs only.** The source runs callbacks only between the loop's `attach` and the function it returns;
  * when a run ends (stopped, halted, retried) the queue and the prefetch are dropped, and the next run starts afresh.
  * `close` (the process's stop) ends its subscriptions and counts as its failure: a pending wait, and every later call,
@@ -273,6 +278,15 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     const head = this.#head as BlockRef;
     if (this.#runner !== undefined) this.#announced = head.height;
     return head;
+  }
+
+  /**
+   * The head the source holds now (see the module comment): read at its first use, raised by each finalized
+   * notification and by the read after a reconnect; null before its first use. No node call, and none of
+   * {@link finalizedHead}'s effects. [AE-3, AE-5, IN-4]
+   */
+  latestHead(): BlockRef | null {
+    return this.#head ?? null;
   }
 
   async waitForHead(above: bigint, signal: AbortSignal): Promise<void> {

@@ -150,6 +150,7 @@ export function askedSource(head: bigint, memory = new InMemoryBlockSource({ hea
   const source: BlockSource & BlockItemSource & BlockEventSource = {
     cursor: (read) => memory.cursor(read),
     finalizedHead: () => memory.finalizedHead(),
+    latestHead: () => memory.latestHead(),
     waitForHead: (above, signal) => memory.waitForHead(above, signal),
     block: async (height) => {
       if (!asked.has(height)) asked.set(height, performance.now());

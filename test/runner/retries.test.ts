@@ -52,6 +52,7 @@ function flakySource(
       return source.cursor(read);
     },
     finalizedHead: () => source.finalizedHead(),
+    latestHead: () => source.latestHead(),
     waitForHead: (above, signal) => source.waitForHead(above, signal),
     // core-block-fetch's items, as the source gives them.
     blockItems: (block: BlockRef) => source.blockItems(block),

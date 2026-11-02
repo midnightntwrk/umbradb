@@ -445,6 +445,7 @@ describe("the restore's own transaction", () => {
           block: (height) => inner.block(height),
           blockItems: (block: BlockRef) => inner.blockItems(block),
           blockEvents: (block: BlockRef) => inner.blockEvents(block),
+          latestHead: () => inner.latestHead(),
           async finalizedHead() {
             const admin = postgres(urlOf(db.setting), { max: 1, onnotice: () => undefined });
             try {

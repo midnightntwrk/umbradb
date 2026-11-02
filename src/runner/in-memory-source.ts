@@ -129,6 +129,11 @@ export class InMemoryBlockSource implements BlockSource {
     return this.#blockAt(this.#head);
   }
 
+  /** The block at the finalized head now: what {@link finalize} raised it to, at once. Changes nothing. [AE-3, AE-5] */
+  latestHead(): BlockRef {
+    return this.#blockAt(this.#head);
+  }
+
   async block(height: bigint): Promise<BlockRef> {
     if (height > this.#head) {
       throw new RangeError(`the in-memory source has no finalized block at ${height}: its finalized head is ${this.#head}`);

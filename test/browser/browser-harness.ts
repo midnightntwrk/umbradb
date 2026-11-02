@@ -86,9 +86,11 @@ export interface StatusBody {
   readonly ready: boolean;
   readonly cursor: string | null;
   readonly head: string | null;
+  readonly lag?: string | null;
   readonly reason: { readonly code: string; readonly module: string | null; readonly message: string } | null;
   readonly conditions: readonly { readonly code: string }[];
   readonly public?: { readonly cursor: string | null; readonly lockstep: boolean | null } | null;
+  readonly node?: { readonly finalizedHead: string | null } | null;
 }
 
 /** An event a worker told the page (`browser/src/protocol.ts`). */

@@ -125,7 +125,9 @@ stops a write the rules miss.
 On the core, `/status` (the admin endpoints on `listen.admin`) shows in `node` what the process knows of its node
 (AE-5). Heights are decimal text:
 
-- `finalizedHead`: the node's finalized head the process last read.
+- `finalizedHead`: the node's latest finalized head the process holds, from its subscription to the node's finalized
+  heads, read without asking the node. It rises as the node finalizes, also while the process is still working through
+  the heights up to an earlier head; `head` and the lag are the same.
 - `bestHead`: the best head the node announced last, the height of its latest new-heads notification (lower than an
   earlier one after the node switched to another branch); null until the node announced one.
 - `connection`: the state of the process's one connection to the node. `connecting` before it first connected,
@@ -156,11 +158,13 @@ The loop that processes finalized blocks can be paused between two heights: by a
 - `by`: `pause` while a host program's `pause()` holds the loop — it goes on only after `resume()` —, else `signal`
   while only a backup on SIGUSR2 does; it goes on once the backup is written.
 
-The condition is gone as soon as the loop may run again, and is published at once when it appears or goes. A paused
-loop reads no new head, so `head` and `lag` are those it read before the pause, and readiness does not change:
-`/health/ready` answers as for an unpaused process with that lag (AE-4). A pause that lasts while the chain moves on
-therefore keeps a ready instance ready on data that grows stale; watch for `paused` with an old `since` if a host
-program pauses the loop for long.
+The condition is gone as soon as the loop may run again, and is published at once when it appears or goes. It does
+not change readiness itself: `/health/ready` answers as for an unpaused process with the same lag (AE-4). A paused loop
+processes nothing, but on the core `head` is the node's finalized head as the process holds it, so while the chain
+moves on the lag grows: with `readinessLag` set, a long pause takes the core out of traffic once the lag exceeds it;
+without it, the core stays ready on data that grows stale. A private process's `head` is the public cursor it last
+read, which a paused loop does not read again, so its `head` and `lag` stay as they were. Watch for `paused` with an
+old `since` if a host program pauses the loop for long.
 
 ## Backups
 

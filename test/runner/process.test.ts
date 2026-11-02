@@ -833,6 +833,7 @@ describe("startProcess without a database", () => {
         throw new Error("the source cannot read the cursor");
       },
       finalizedHead: async (): Promise<BlockRef> => given.finalizedHead(),
+      latestHead: () => given.latestHead(),
       waitForHead: (above, signal) => given.waitForHead(above, signal),
       block: (height) => given.block(height),
     };

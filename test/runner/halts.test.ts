@@ -299,6 +299,7 @@ function shiftedSource(): BlockSource & BlockItemSource {
   return {
     cursor: (read) => source.cursor(read),
     finalizedHead: () => source.finalizedHead(),
+    latestHead: () => source.latestHead(),
     waitForHead: (above, signal) => source.waitForHead(above, signal),
     // core-block-fetch's items, as the source gives them.
     blockItems: (block: BlockRef) => source.blockItems(block),
@@ -563,6 +564,7 @@ describe.each(PROCESS_BACKENDS)("halts (RN-8, design §11) on $name", (backend) 
       const failing: BlockSource & BlockItemSource = {
         cursor: (read) => source.cursor(read),
         finalizedHead: () => source.finalizedHead(),
+        latestHead: () => source.latestHead(),
         waitForHead: (above, signal) => source.waitForHead(above, signal),
         // core-block-fetch's items, as the source gives them.
         blockItems: (block: BlockRef) => source.blockItems(block),

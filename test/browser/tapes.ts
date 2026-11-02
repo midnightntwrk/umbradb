@@ -24,6 +24,8 @@ import {
  *   connection of its own (`chain_getFinalizedHead`, then the head's header), which then ends [BR-2];
  * - {@link syncSession}: the process on a new database from S, the head S at first, then each height to `to` finalized
  *   in turn (a finalized-head notification once the height before was fetched), so the process commits S to `to`;
+ * - {@link raisedHeadSession}: the same from S, but the heights after S in two notifications: `batch` once S was
+ *   fetched, then `to` once the heights below `batch` were, while the loop is in its batch to `batch`;
  * - {@link resumeSession}: the process again on a database whose cursor is `cursor` (an OPFS database after a reload):
  *   the node's head is the cursor, so it resumes there and waits; {@link continueSession}: the same, then each height
  *   to `to` finalized in turn;
@@ -112,6 +114,21 @@ export function headSession(chain: BrowserChain, head: bigint): TapeRecord[] {
 export function syncSession(chain: BrowserChain, start: bigint, to: bigint): TapeRecord[] {
   const records: TapeRecord[] = [...opening(at(chain, 0n), at(chain, start)), ...height(chain, start, true)];
   for (let h = start + 1n; h <= to; h++) records.push(finalizedHead(at(chain, h)), ...height(chain, h, false));
+  return records;
+}
+
+/**
+ * The process on a new database from S = `start`, the head raised in two notifications: `batch` once S was fetched,
+ * then `to` once the heights below `batch` were (see the module comment). The loop reads `batch` and processes up to
+ * it; the node source holds `to` meanwhile, and the loop reads it after `batch`. With {@link heldBefore} at `batch`, the
+ * process waits at `batch` − 1 with the two heads apart. [AE-5]
+ */
+export function raisedHeadSession(chain: BrowserChain, start: bigint, batch: bigint, to: bigint): TapeRecord[] {
+  const records: TapeRecord[] = [...opening(at(chain, 0n), at(chain, start)), ...height(chain, start, true)];
+  records.push(finalizedHead(at(chain, batch)));
+  for (let h = start + 1n; h < batch; h++) records.push(...height(chain, h, false));
+  records.push(finalizedHead(at(chain, to)));
+  for (let h = batch; h <= to; h++) records.push(...height(chain, h, false));
   return records;
 }
 

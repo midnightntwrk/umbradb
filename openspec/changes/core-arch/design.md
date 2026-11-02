@@ -114,7 +114,8 @@ each with a read at h; at a restart it first re-delivers the cursor's `on-after-
 It ends after the core's stop (with the cursor at or above it, processing nothing) and after the height before the
 upgrade boundary — the lowest start of a scheduled revision (RN-12) —, and the process enters `stopped`, ready, the
 module API still answering, with `upgrade-required` (entry, needed, build) at a boundary. The state is `starting`,
-then `syncing` or `following` by the lag (the head the loop last read minus the cursor) against `followingThreshold`,
+then `syncing` or `following` by the lag (the latest finalized head the block source holds — at least the head the loop
+last read; `BlockSource.latestHead`, read with no call to the chain — minus the cursor) against `followingThreshold`,
 `stopped`, `stopping`; ready when `following` or `stopped`, or `syncing` within a set `readinessLag` (`refused` and
 `halted` below); the block source's conditions (`finality-stall`) are the process's too, and so is `paused` while the
 loop is paused between heights (§9.1; `since`, the time it paused in RFC 3339 UTC text, and `by`: `pause` while a
