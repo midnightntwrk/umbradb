@@ -1,0 +1,99 @@
+# Spec delta — `ledger` capability
+
+Modifies `core-arch`'s `specs/ledger/spec.md` (`ledger-refcount` `design.md` §0: `core-arch` is archived first, then
+`start-umbradb`, then this change). EARS forms and terms as in `core-arch`'s `specs/runner/spec.md`; the ledger's terms
+as in `core-arch`'s `specs/ledger/spec.md`. Each modified requirement is restated in full; the change is reclamation of
+stored ledger nodes by reference counting (`design.md` §3).
+
+## RENAMED Requirements
+
+- FROM: `### Requirement: LG-14 Unused ledger nodes are reclaimed by a fixed-budget mark-and-sweep`
+- TO: `### Requirement: LG-14 Unused ledger nodes are reclaimed by reference counting`
+
+## MODIFIED Requirements
+
+### Requirement: LG-11 The ledger state lives in the database
+
+THE system SHALL store the ledger state only in `core_ledger_state`, on the ledger's storage contract with the node's
+`layout-v2` layout: each ledger node as its key, `data` and `children` (the ledger's serialization of its child list,
+references and embedded children included); root counts per key; and, for reclamation (LG-14), the reference count of
+every key that stored nodes reference (`ref_counts`) and the queue of stored nodes that have neither a reference nor a
+root count (`unreferenced`). Per block, `core-ledger-state` SHALL write the ledger's flushed batch (inserted nodes,
+changed root counts) with the block's row of `core_ledger_state.states` and the block's reclamation step in the
+block's `on-db-write`, and persist the state after the block. Whole serialized states SHALL NOT be stored. Reads SHALL
+check each node's hash against its key. WHEN the process restarts THE ledger worker SHALL load the state at the cursor
+from its state key and the stored nodes, and reclamation SHALL continue from the stored counts and queue. THE flushed
+batch SHALL carry each changed root count as a signed change, which the writer adds to the stored count, deleting a
+count that reaches 0 (owner decision Q53).
+
+#### Scenario: Restart from the database alone
+- **WHEN** the process is killed and restarted at cursor h
+- **THEN** the state loaded from the database has the root stored for h, and the next block's root matches the node's
+
+#### Scenario: Counts survive a restart
+- **WHEN** the process is killed and restarted at cursor h, and syncs on to h + 100
+- **THEN** after every block from h + 1 its `ref_counts`, `unreferenced` and `nodes` equal those of a run that was not
+  restarted
+
+### Requirement: LG-13 Contract states stay alive
+
+THE system SHALL persist every contract state key and zswap-state key that `core-contract-states` stores, and SHALL
+never release them.
+
+#### Scenario: An old contract state survives reclamation
+- **WHEN** a contract's state stored at height 10 has not changed for 10,000 blocks and every ledger state that held it
+  has been released and its unused nodes deleted
+- **THEN** that state still loads from its stored key
+
+### Requirement: LG-14 Unused ledger nodes are reclaimed by reference counting
+
+THE system SHALL keep, for every key that stored ledger nodes reference, its **reference count**: the number of times
+the key occurs as a reference (`ArenaKey::Ref`) in the child lists of the stored nodes, found through embedded children,
+each occurrence counted (`core_ledger_state.ref_counts`; a key without a row has 0); and the **queue** of stored nodes
+that have neither a reference nor a root count (`core_ledger_state.unreferenced`). Per block h, `core-ledger-state`
+SHALL compute in `on-compute`, from the tables as committed at h − 1 and the block's flushed batch, and SHALL write in
+`on-db-write`, in the block's transaction, this step:
+(1) the block's **new nodes** are the batch's inserted nodes whose keys were not stored at h − 1, and only they change
+counts: a node inserted again changes none;
+(2) each new node adds 1 to the count of each key its child list references, per occurrence;
+(3) a key queued at h − 1 whose count or root count rises in h leaves the queue and is kept;
+(4) every other key queued at h − 1 is deleted; each deleted node subtracts 1 from the count of each key its stored
+child list references, per occurrence; a key whose count so reaches 0, with no root count after h − 1 and none after h,
+is deleted too, in the same block, until no key is left to delete; no limit bounds the deletions of a block;
+(5) a stored key whose count is 0 after h and whose root count fell to 0 in h is queued, and is deleted no earlier than
+block h + 1.
+IF a count would fall below 0, a new node references a key that was not stored at h − 1 and is not a new node or that
+is deleted in h, a new node ends the block with neither a reference nor a root count, or a write of the step affects
+another number of rows than the step computed, THEN processing SHALL halt with `ledger-refcount-invalid`, naming the
+reason, and nothing of the block SHALL be stored. Nodes the step deletes SHALL be evicted from the worker's caches before
+the block's transaction; IF the ledger package still refuses an eviction after the worker freed every object it can,
+THEN THE system SHALL end the worker thread and start a new one, which loads the state at h − 1 from the database and
+applies block h again, the step included, without halting — only a refusal on that retry SHALL fail the block, with
+`callback-error` (owner decision Q144). WHERE the `core` entry sets `sweep: off` (development only), step (4) SHALL
+delete no node while steps (1)–(3) and (5) still run; the first block with `sweep: on` again SHALL delete the queue by
+step (4).
+
+#### Scenario: Same deletions on two machines
+- **WHEN** the same chain is synced on PostgreSQL and on PGlite
+- **THEN** after every block the stored ledger nodes, reference counts and queue are identical
+
+#### Scenario: Reused content after a deletion
+- **WHEN** a node deleted at block h1 is needed again by the state at h2
+- **THEN** the ledger inserts it again at h2, its references are counted again, and loading the state at h2 succeeds
+
+#### Scenario: A released state is deleted the block after its release
+- **WHEN** `retainStates` is 0 and block h releases the state after h − 1
+- **THEN** no node of that state is deleted at h, and at h + 1 every node of it that the states after h and h + 1 do
+  not reach is deleted
+
+#### Scenario: A re-inserted node changes no count
+- **WHEN** block h's batch inserts again a node stored at h − 1
+- **THEN** no reference count changes because of it
+
+#### Scenario: A node queued and referenced again is kept
+- **WHEN** a key is queued at h − 1 and one new node of block h references it once
+- **THEN** it is not deleted at h, it leaves the queue, and its count is 1
+
+#### Scenario: A reference to a missing node
+- **WHEN** a test package flushes, at block h, a new node that references a key that is not stored and not new
+- **THEN** processing halts at h with `ledger-refcount-invalid` (`missing-reference`) and nothing of h is stored
