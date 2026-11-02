@@ -162,9 +162,13 @@ The condition is gone as soon as the loop may run again, and is published at onc
 not change readiness itself: `/health/ready` answers as for an unpaused process with the same lag (AE-4). A paused loop
 processes nothing, but on the core `head` is the node's finalized head as the process holds it, so while the chain
 moves on the lag grows: with `readinessLag` set, a long pause takes the core out of traffic once the lag exceeds it;
-without it, the core stays ready on data that grows stale. A private process's `head` is the public cursor it last
-read, which a paused loop does not read again, so its `head` and `lag` stay as they were. Watch for `paused` with an
-old `since` if a host program pauses the loop for long.
+without it, the core stays ready on data that grows stale. A private process's `head` is the highest public cursor its
+source has read. If its loop paused while it was waiting for the public process to commit its next height, that wait
+goes on and reads the public cursor once the public process has committed that height, so `head` can still rise while
+the cursor stays: the lag grows and, with `readinessLag` set, can take the private process out of traffic. Nothing else
+raises a private process's `head` during a pause: one paused while it was not waiting, or once that wait has ended,
+keeps its `head` and `lag` until the loop runs again. Watch for `paused` with an old `since` if a host program pauses
+the loop for long.
 
 ## Backups
 
