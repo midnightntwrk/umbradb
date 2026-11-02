@@ -22,3 +22,23 @@ system SHALL NOT load a module by name at run time.
 #### Scenario: A declaration with an unknown point name
 - **WHEN** a module declares a callback under `on-fetched`
 - **THEN** the TypeScript compiler rejects it, and startup validation refuses it if it was built without types
+
+### Requirement: MD-7 Process items are published once, at startup
+
+THE system SHALL let the provider of an item with a `process` lifetime publish it once, from its `on-start-db` callback,
+through `ProcessContext.publish(item, value)`; the value SHALL be visible in `ProcessContext.items` to every callback of
+a module requiring it from `on-start-api` on, for the whole process. IF an item is published twice, published from any
+other point, or published by a module that does not declare it, THEN that callback SHALL fail; IF a required `process`
+item has not been published when every `on-start-db` callback has run, THEN startup SHALL refuse and name the item —
+except the item `node-client` WHERE the host gives an in-memory `source` (LM-8): the engine then makes no node client,
+so `node-client` SHALL NOT be published and startup SHALL NOT refuse for it, and a module that requires it finds none in
+its `ProcessContext.items`.
+
+#### Scenario: A required process item is never published
+- **WHEN** module `consumer` requires the process item `client` and its provider's `on-start-db` does not publish it
+- **THEN** startup refuses with `process-item-missing` and the item
+
+#### Scenario: `node-client` with an in-memory source
+- **WHEN** a host starts a public process with an in-memory `source`, and a module requires `node-client`, as
+  `core-block-fetch` always does
+- **THEN** startup goes on and the chain is processed, and the module finds no `node-client` in its items

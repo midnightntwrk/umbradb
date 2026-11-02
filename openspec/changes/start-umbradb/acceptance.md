@@ -237,6 +237,12 @@ Each replaces the `core-arch` criterion of the same id; only what is in bold cha
 
 - **A1** `[STATIC]` A test pins the sorted value exports and the type exports of `"."` to `core-arch` `design.md` §12
   **as amended by `start-umbradb` `design.md` §4**; adding or removing an export fails it with the name. (LS-1)
+- **A74** `[CI]` A process item published in its provider's `on-start-db` is visible to a requiring module from
+  `on-start-api` on; publishing twice, publishing from `on-compute`, or publishing an undeclared item fails the
+  callback; a required process item left unpublished refuses startup with `process-item-missing`, **except
+  `node-client` when the host gives an in-memory `source`: a module requiring it finds none in its items, and startup
+  goes on and processes the chain; with the same `source`, another required process item left unpublished is still
+  refused**. (MD-7, **LM-8**)
 - **A157** `[CI]` A configuration file that cannot be loaded, one that is not plain data and one that fails its
   schemas, and a build whose module declarations fail MD-2 (an invalid declaration), each make `umbradb run` log every
   finding with its path and exit with a non-zero code, and make **`startUmbraDB` end `refused` with `closed` resolved**,
@@ -290,7 +296,7 @@ the `network` field of `/config` (`design.md` §5.2); A66's text is unchanged.
 | LM-5 | L25–L29, L61 |
 | LM-6 | L33–L42, L66, L67 |
 | LM-7 | L43–L46, L63 |
-| LM-8 | L48, L49 |
+| LM-8 | L48, L49, A74 |
 | LM-9 | L14, L21, L29, L30, L32, L50, L52 |
 | LM-10 | L29, L30, L62 |
 | LM-11 | L58 |
@@ -298,6 +304,7 @@ the `network` field of `/config` (`design.md` §5.2); A66's text is unchanged.
 | RN-13, RN-15, RN-16 | L14, L23, L26, L31, A162, A167, A169 |
 | CF-1, CF-4 | L7, L18, L20, L51, L64, A166, A177 |
 | MD-1 | L46 |
+| MD-7 | A74 |
 | PP-4, PP-14 | L19, L33, L37, L50, A162 |
 | BK-1 | L47, A174, A175 |
 | LS-1 | L54, L59, A1 |

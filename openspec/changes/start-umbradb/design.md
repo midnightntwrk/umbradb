@@ -211,8 +211,8 @@ export function messagePortChannel(port: MessagePortLike): PrivateLinkChannel;  
   has none of the engine's hook members (`checkChain`, `committedHeight`, `checkModules`, `attach`, `prepared`,
   `fetchRead`); otherwise `source-refused`. With a `source` the engine creates no node client: `node` is validated
   (the configuration format requires it) and never contacted, and the process item `node-client` is absent — a module
-  that requires it finds none in its items, and the process contexts' seal does not refuse it (`core-block-fetch` reads
-  the bound block source, not the client).
+  that requires it finds none in its items, and the process contexts' seal does not refuse it (MD-7's exception,
+  `specs/modules/spec.md`; `core-block-fetch` reads the bound block source, not the client).
 - **Exports** (`core-arch` design §12, amended): added `startUmbraDB`, `finalizedHeight`, `messagePortChannel`, and the
   types `UmbraDBOptions`, `UmbraDBHandle`, `UmbraDBStatus`, `UmbraDBStarted`, `UmbraDBEnd`, `UmbraDBBackup`,
   `UmbraDBReason`, `UmbraDBCondition`, `UmbraDBNetwork`, `PrivateLinkChannel`, `MessagePortLike`, `Address`,
