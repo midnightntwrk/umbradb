@@ -1,7 +1,7 @@
 # Design — LEDGER-REFCOUNT: ledger nodes stored as the node stores them, compared by content, reclaimed by reference counting
 
 Section numbers of `core-arch` are cited as `core-arch design §n`. Requirement ids are `core-arch`'s (`LG-*`, `CF-*`,
-`DB-*`, `DT-*`, `BK-*`, `RN-*`); criteria are this change's `R1` … `R29` and the rewritten `core-arch` criteria
+`DB-*`, `DT-*`, `BK-*`, `RN-*`); criteria are this change's `R1` … `R30` and the rewritten `core-arch` criteria
 (`acceptance.md`). `organizer:` names a path under `/Users/edwardalvarado/todo/Umbra` (the owner's workspace, not in
 this repository); `upstream:` names the `midnight-ledger` checkout at tag `ledger-9.1.0.0-rc.5`
 (`67f9f97246339539af0091c4d8c6bc5ab236a191`, the commit `vendor/ledger/v9/upstream.json` builds from).
@@ -298,18 +298,26 @@ form contributes its own references to its parent's child list (`childRefKeys` r
 every form of a node reaches the same content; the rows it reaches differ at most by the small child itself, which
 one form references as a row and the other holds inline.
 
-### 4.2 Safety: no deleted row is live
+### 4.2 Safety: no deleted row is live in the stored graph; the eviction covers the rest
 
-Every key of `D` is in neither `R_{h−1}` nor `R_h`, no root after h − 1 or after h, and referenced by no child list
-the worker holds for the states after h − 1 and after h. By induction on the rounds of rule 5: a deleted key d is not
-protected (no root, not in a rewritten node's old child list), and `refs_h(d) = 0`, which counts every reference in
-the child lists stored after h. So every row that referenced d at h − 1 was deleted in an earlier round (in neither set,
-by induction) or rewritten — and then d would be protected by rule 3 — and no node the batch writes references d. So
-neither the state the worker holds at h − 1 (its child lists are the ones stored at h − 1, or for the rewritten nodes,
-the ones rule 3 protects) nor the state it builds at h (the batch's and the stored child lists) reaches d: the
-condition `docs/issues/00019` sets (the eviction does not refuse a live state's root, so this is kept by the rule, not
-by the refusal). Only an object outside those states (a kept parse) can still hold d; the existing free-and-retry and
-restart path handles it (§5).
+**Through the stored child lists.** Every key of `D` is in neither `R_{h−1}` nor `R_h`, no root after h − 1 or after
+h, and referenced by no child list stored at h − 1 or after h's writes. By induction on the rounds of rule 5: a deleted
+key d is not protected (no root, not in a rewritten node's old child list), and `refs_h(d) = 0`, which counts every
+reference in the child lists stored after h. So every row that referenced d at h − 1 was deleted in an earlier round
+(in neither set, by induction) or rewritten — and then d would be protected by rule 3 — and no node the batch writes
+references d. This is the condition `docs/issues/00019` sets, for every state as the database stores it: the eviction
+does not refuse a live state's root, so this part is kept by the rule, not by the refusal.
+
+**Through what the worker holds in memory.** The worker's objects need not carry the stored child lists: the ledger's
+back-end keeps the form it first cached for a key while a live object built later may carry the other form
+(`upstream:storage-core/src/backend.rs:485-512`, `upstream:storage-core/src/arena.rs:566-609`; issue 00079), and a kept
+parse can hold any node. So a live object can hold d by reference while every stored child list embeds it or no longer
+reaches it. That case is not prevented by the rules; it is caught: the package refuses to forget a node a live object
+holds (`vendor/ledger/v9/patches/0001-storage-core-external-node-store.patch:8-30`), the worker frees its kept parses
+and tries again, and a second refusal ends the worker and starts a new one (LG-14, Q144 B). The new worker loads the
+state at h − 1 from the stored child lists, in which d is not reached, and computes the block again; a refusal on
+that retry fails the block with `callback-error`, before anything is stored. So no deleted row is ever needed by the
+state a worker builds from the database, and a worker whose memory holds one is replaced. R30 forces this path.
 
 ### 4.3 No leak (I5) and the exact set (I6)
 
@@ -542,7 +550,7 @@ adjusted for Q-B, Q-E and O-8:
 | 0 | Measure on the recorded tapes: per-block figures, the conversion spike, the nodes written again and how many of them change their child list | R21 |
 | 1 | Reference model and reachability oracle; the model against the sweep's model | R1, R2 |
 | 2 | The replacing node write; `refcountStep` behind its tables seam; content-defined tables in the contents hash and change capture; the migrations of §2.4; the halt code; every negative control seen failing | R11, R12, R16, R19, R27, R29 |
-| 3 | Wiring on both backends: model equality, backend equality, determinism across worker histories, the sweep differential (also against the runtime sweep, recorded before it is removed), restart, crash points, A160, nodes written again, a queued key referenced again, the lag, reuse, a lowered window, `sweep: off`, backups, the conversion | A104, A105, A160, R3–R10, R13–R15, R17, R22, R28 |
+| 3 | Wiring on both backends: model equality, backend equality, determinism across worker histories, a live object holding a deleted row (R30), the sweep differential (also against the runtime sweep, recorded before it is removed), restart, crash points, A160, nodes written again, a queued key referenced again, the lag, reuse, a lowered window, `sweep: off`, backups, the conversion | A104, A105, A160, R3–R10, R13–R15, R17, R22, R28 |
 | 4 | Remove the runtime sweep (with the split of `sweep-tapes.ts`, §11); documents; the required test id; `npm run graph:refresh` | A134 (deferred, Q191), R18, R20, R26 |
 | 5 | The local preprod runs | R23–R25 |
 | 6 | Close-out: retire `sweep-model.ts` with R2's and R4's tests (Q-E); close issue 00078; `tasks.md` checked; the proposal's status; `ROADMAP.md`; `npm run graph:refresh` and `graphify-out/` committed with the close-out | — |

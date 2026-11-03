@@ -165,6 +165,15 @@ each criterion verifies are in parentheses.
   two spellings' hashes differ; a constant in place of the node set's contribution makes the one-more-node case's
   hashes equal; skipping the key check lets the changed-payload case through. (LG-11, DT-3)
 
+- **R30** `[FAULT][NEG]` A live object holding a row that the stored child lists no longer reach, on both backends: on
+  the DAG fixture, the test package's state holds row x by reference while the stored child list of its parent embeds
+  x, and x is queued with no root and no stored reference; at the next block the step deletes x, the package refuses to
+  forget x (as the v9 package does for a node a live object holds), refuses again after its kept parses are freed, and
+  the worker is replaced; the new worker loads the state at h − 1 from the database, applies the block again, and the
+  block commits with its state root the node's, R3 passing, and its node set equal to a run whose worker never held x by
+  reference; the state after the block loads from the database. **Negative control:** with the worker restart disabled,
+  the block fails with `callback-error` and nothing of it is stored. (LG-11, LG-14, owner decision Q144)
+
 ## 3. Removal, codes and the required test
 
 - **R18** `[STATIC]` `src/backbone/core-ledger-state/sweep.ts` does not exist; no file under `src/` names `sweepStep`,
@@ -273,7 +282,7 @@ Each replaces the `core-arch` criterion of the same id; only what is in bold cha
 |---|---|
 | LG-11 (layout, the replacing node write, content-defined tables, restart, determinism across worker histories) | R1, R3, R5, R8, R13–R18, R21, R24, R25, R27–R29, A105, A134 |
 | LG-13 (contract states) | A104, R1, R3, R22 |
-| LG-14 (reclamation) | R1–R12, R14, R18–R27, A105, A134, A160 |
+| LG-14 (reclamation) | R1–R12, R14, R18–R27, R30, A105, A134, A160 |
 | LG-12 (window; unchanged, exercised) | R7, R9 |
 | LG-9 (conversion; unchanged, exercised and measured) | R21, R22 |
 | CF-9 (`sweep: off` gate; unchanged) | R10 |

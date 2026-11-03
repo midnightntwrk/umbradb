@@ -82,7 +82,7 @@ Q-A … Q-F; organizer `spec/00034-ledger-node-refcount.md` §3, O-1 … O-8; re
    statements in `sql.ts`, `sweepReset`, the grey picker seam and `SWEEP_BUDGET`. The tests of the runtime sweep go
    with it; the sweep's reference model stays in the tests as the differential oracle and is retired, with the two
    criteria that use it, by a close-out task once the local preprod criteria pass.
-8. **Acceptance:** criteria R1 … R29 (`acceptance.md`); `core-arch`'s A104, A105, A134 and A160 rewritten. A105's
+8. **Acceptance:** criteria R1 … R30 (`acceptance.md`); `core-arch`'s A55, A57, A104, A105, A126, A134 and A160 rewritten. A105's
    required test id `ledger.sweep-cross-backend-identical` is replaced by `ledger.refcount-cross-backend-identical`.
 
 ## Non-goals (what this change does NOT cover)
