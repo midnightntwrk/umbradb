@@ -297,7 +297,7 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
       tests pass unchanged on both backends (Codex `3.7-sweep-suites`: `ledger-sweep*`, `ledger-storage*`,
       `ledger-eviction-restart*`, `worker-sweep`, 10 files, 62 tests). For 3.8: the extended DAG's tape needs
       `rootOf(h, "extended")` as the node's roots (`sweepTape` gives the original's).
-- [ ] 3.8 **The switch.** `core-ledger-state` computes the counting step in `on-compute`, evicts the deleted rows before
+- [x] 3.8 **The switch.** `core-ledger-state` computes the counting step in `on-compute`, evicts the deleted rows before
       the block's transaction (with the worker restart of Q144 B), writes it after the node writes in `on-db-write`,
       empties rule 5's deleted set under `sweep: off`, and declares `nodes`, `ref_counts` and `unreferenced`
       content-defined; the runtime sweep is no longer called. In the same change set, test first: R3's database check;
@@ -313,6 +313,38 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
       new text; R29 (but its `node-key.ts` clause), A55, A126 and A57 with the build's own declarations; the sweep's own
       unit tests (`ledger-sweep.test.ts`, `ledger-sweep-tables.test.ts`) still pass against `sweep.ts`; the whole suite
       on both backends has no failure that §0 did not have.
+      **Done (2026-11-03, this commit):** `core-ledger-state`'s `on-compute` computes `refcountStep` from its read
+      at h − 1 (`refcountOf`: `on` from the `core` revision's `sweep`; `step.deleted` evicted before the transaction;
+      the Q144 B restart recomputes it on the new thread's batch) and `on-db-write` runs `writeRefcount(w, step, await
+      writeBlock(w, applied))`; the `ledger-state` item declares `contentDefined: LEDGER_NODE_TABLES`; `sweepOf`, the
+      `sweepBudget` and `greyPicker` options go (`sweep.ts` and its tables stay, unused, for 5.1). Negative-control
+      seams of `coreLedgerState`: `refcountFault` (R12, into the tables seam), `refcountUnchecked` (one check left out,
+      `RefcountCheck` in `refcount.ts`), `refcountWriter` (the handle the step's statements run through). Test first
+      (seen failing on the sweep wiring: A105, A160 and R11 — nothing counted, no halt; and, without the declaration,
+      R29/A55/A126/A57 on the build's own declarations — hashed by bytes, nothing refused, digested). Tests:
+      `test/backbone/refcount-checks.ts`, R3's check (its own queries and `node-format.ts` parsing; `R_{h−1}`, `R_h`,
+      `K_h` from the fixture's roots and the batches the watcher saw); `ledger-refcount-process.test.ts`, A105 on the
+      extended DAG, both backends (R1's model fed each block's batch: rows, counts, roots, queue, new and rewritten
+      nodes, evicted keys; every `core_ledger_state` table equal across backends after every block; R3 after every
+      block; reuse at REVERT; `sweep: off`), its controls (R12's six, each seen making its own clause fail: (a) R3 (a)
+      at 6 and (d) at 16, (b) (a) at AGAIN, (c) (b) and (c) at 6, (d) (c) at 1, (e) `missing-reference` at REQUEUE + 1,
+      (f) (d) at 2; R3's own, state 20's root and the rows only it reaches deleted in block 20's transaction: (b) and
+      (c) fail); `ledger-refcount-halts.test.ts`, R11 (a count lowered in a copy of the database built to 5, the PGlite
+      directory copied or `CREATE DATABASE … TEMPLATE`: `negative-count` at 6; the test package's `withhold` and
+      `persistUnknown`: `missing-reference` at 10, TO_REF and 20; a queue insert one key short: `row-count-mismatch` at
+      3; each with its details, its log line and the database at h − 1) and its controls (each check left out:
+      `database-error` from `ref_counts`' CHECK, or the block commits and R3 reports I1, I4 or I3). Moved to the
+      counting tables and R1's model: `sweep-tapes.ts`'s helpers (names kept for 5.1's split; a host wrapper records
+      each block's batch and evictions), `eviction-restart.ts` (on the new `refcount-process.ts`), A160 to its new text,
+      A104 to its new text with its control moved to `ledger-storage.negative-control.test.ts`, A103's "sweep ran" line
+      to R3's (a), (b). R19: the registry names R11's three tests, `PENDING` is empty, its control rewritten. R20: the
+      manifest and `core-arch` acceptance §17. 3.5's tests on the build's declarations: `node-set.test.ts` (the exported
+      `contentsHash` itself), `restore-content-defined.test.ts` (`LEDGER_CORE`), `digests.test.ts`.
+      `refcount-tables.test.ts` uses `insertNodes`. Codex: `3.8-red`, `3.8-green-1`…`3`, `3.8-touched-1` (16 files with
+      the tapes, the sweep's unit tests among them, 172 passed), `3.8-declared-red`, `3.8-declared-1` (17 files, 225
+      passed). The whole suite with the tapes (`3.8-full`): 405 files, 6,430 tests passed, 12 skipped, 1 failed — A114
+      (`test/private/transport-intake.test.ts`, "expected 1 to be 2" disconnects), a known load-only failure, which
+      passes alone (`3.8-full-a114-alone`, diagnostic only); §0 had none.
 
 ## 4. The process on both backends (`design.md` §4–§8; §13 phase 3)
 

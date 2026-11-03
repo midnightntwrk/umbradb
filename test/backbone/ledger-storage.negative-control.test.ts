@@ -9,10 +9,21 @@ import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import type { TapeRecord } from "../../tools/tape/index.js";
 import { NETWORK_ID, RAW, zswapOutputTransaction } from "../ledger/adapter-fixtures.js";
 import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../runner/process-backends.js";
-import { ingest, PATIENCE_MS, until } from "./ingest-harness.js";
+import { nodesOfTagged, rebuildTagged } from "../ledger/stored-values.js";
+import { committed, ingest, PATIENCE_MS, until } from "./ingest-harness.js";
 import { cappedAt, LEDGER_CORE, recordingLoads, restartAt, type SeenLoad } from "./ledger-restart.js";
-import { a100Problems, a102Problems, loaded, retentionSeen, retentionWatcher } from "./ledger-storage-checks.js";
+import {
+  a100Problems,
+  a102Problems,
+  a104Scenario,
+  contractNodeKeys,
+  heldReach,
+  loaded,
+  retentionSeen,
+  retentionWatcher,
+} from "./ledger-storage-checks.js";
 import { type LedgerScenario, ledgerScenario, type LedgerTx, RUNTIME_2_1 } from "./ledger-tapes.js";
+import { seenTables, sweepTables, sweepWatcher } from "./sweep-tapes.js";
 
 /**
  * The committed negative controls of the ledger storage tests. Each is the real `core-ledger-state` with one rule
@@ -25,7 +36,12 @@ import { type LedgerScenario, ledgerScenario, type LedgerTx, RUNTIME_2_1 } from 
  *   node's: `root-mismatch` at F. [A100]
  * - A window that releases one state too early has the state at 4,000 released at cursor 5,000, so its load fails.
  *   [A103]
+ * - The contract run of A104 without persisting the contract's keys (no `core-contract-states`): the nodes of its state
+ *   of 10 that only those keys held, stored while the states held them, are deleted once those states are released, and
+ *   its keys do not load. [A104]
  */
+
+const plain = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
 
 /** The ledger's core modules with `core-ledger-state`'s rules `options` replaced. */
 const coreWith = (options: CoreLedgerStateOptions): readonly ModuleDeclaration[] => [CORE_CHAIN_EVENTS, CORE_BLOCK_PARSED, CORE_TX_RESULTS, coreLedgerState(options)];
@@ -84,6 +100,30 @@ describe.each(PROCESS_BACKENDS)("task 12.4's negative controls on $name", (backe
     expect(problems.some((problem) => problem.startsWith("the process halted with") && problem.includes("root-mismatch"))).toBe(true);
     expect(problems).toContain("the cursor is 3, not 7");
   }, PATIENCE_MS * 4);
+
+  it("A104's control: without the contract's keys persisted, the nodes of its state of 10 that only they held are deleted", async () => {
+    const { scenario, contract } = await a104Scenario();
+    const db = await backend.database();
+    const seen = seenTables();
+    const process = await ingest(db, scenario.records, { start: 0n, core: LEDGER_CORE, user: [sweepWatcher(seen)] });
+    try {
+      await committed(process, scenario.head, PATIENCE_MS * 2);
+    } finally {
+      await process.close();
+    }
+    const end = new Set((await sweepTables(db)).rows.keys());
+    const held = await heldReach(db);
+    const only = [...contractNodeKeys(scenario, contract.address, 10n)].filter((key) => !held.has(key));
+    // Those nodes were stored while the ledger states held the contract's state of 10 …
+    const stored15 = seen.tables.get(15n)?.rows ?? new Map<string, Uint8Array>();
+    expect(only.filter((key) => stored15.has(key)).length).toBeGreaterThan(0);
+    // … and none of them is stored now: the oracle fails. [A104]
+    expect(only.filter((key) => end.has(key))).toEqual([]);
+    // The contract's state of 10 no longer loads from its key: its value cannot be rebuilt from the stored nodes.
+    const value = scenario.heights[10]?.contracts.get(`0x${plain(contract.address)}`)?.state as Uint8Array;
+    const nodes = new Map((await db.query("SELECT encode(node_key, 'hex') AS k, data, children FROM core_ledger_state.nodes")).map((r) => [r.k as string, { data: r.data as Uint8Array, children: r.children as Uint8Array }]));
+    expect(() => rebuildTagged("contract-state[v8]", nodesOfTagged(value).root, (k) => nodes.get(k))).toThrow(/is not stored/);
+  }, PATIENCE_MS * 3);
 });
 
 describe("A103's control (PGlite: 5,000 blocks once)", () => {

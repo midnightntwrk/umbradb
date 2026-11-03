@@ -230,7 +230,7 @@ export async function a104KeyProblems(db: ProcessDatabase, scenario: LedgerScena
 }
 
 /**
- * Every node a held key reaches is stored, so it loads from the database whatever the sweep deleted. Empty when it
+ * Every node a held key reaches is stored, so it loads from the database whatever reclamation deleted. Empty when it
  * holds. [LG-11]
  */
 export async function heldNodeProblems(db: ProcessDatabase): Promise<string[]> {

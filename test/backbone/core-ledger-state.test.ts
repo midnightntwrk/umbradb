@@ -143,9 +143,8 @@ function reading(
         if (rest.state === null) return [];
         return [{ state_key: hash(0x30), state_root: STORED_ROOT, hash: hash(Number(params[0]) + 1), ledger_version: "v9", ...rest.state }];
       }
-      // The sweep's tables: its row idle, every set empty.
-      if (sql.includes("FROM core_ledger_state.sweep")) return [{ cycle: 0n, phase: "idle", sweep_after: null }];
-      if (/FROM core_ledger_state\.(root_counts|grey|marks|nodes)/.test(sql)) return [];
+      // Reclamation's tables: no row, no count, the queue empty.
+      if (/FROM core_ledger_state\.(nodes|ref_counts|root_counts|unreferenced)/.test(sql)) return [];
       // The contracts deployed below a block, which are read at F (the first v9 block after v8 blocks). [CC-1]
       if (sql.includes("kind = 'contract-deploy'")) return (rest.deployed ?? []).map((address) => ({ contract_address: address }));
       if (sql.includes("height >= $1")) {
@@ -503,14 +502,18 @@ describe("core-block-parsed in the ledger worker (CD-5, LG-7)", () => {
 });
 
 describe("a refused eviction (task 12.5a; LG-14, owner decision Q144 B)", () => {
-  /** A read at h − 1 whose sweep is scanning: one unmarked stored node, 0x77…, which the block's step deletes. */
+  /**
+   * A read at h − 1 whose queue holds one stored node, 0x77…, with no reference, no root count and an empty child list,
+   * which the block's step deletes.
+   */
   const sweeping = () => {
     const base = reading([{ ms: 1n }]);
     return {
       ...base,
       async query(sql: string, params: unknown[] = []) {
-        if (sql.includes("FROM core_ledger_state.sweep")) return [{ cycle: 1n, phase: "sweep", sweep_after: null }];
-        if (sql.includes("FROM core_ledger_state.nodes n")) return [{ node_key: hash(0x77), marked: false }];
+        if (sql.includes("FROM core_ledger_state.unreferenced")) return [{ node_key: hash(0x77) }];
+        if (sql.includes("AS stored")) return [{ node_key: hash(0x77), stored: true, refs: 0, roots: 0 }];
+        if (sql.startsWith("SELECT node_key, children FROM core_ledger_state.nodes")) return [{ node_key: hash(0x77), children: Uint8Array.of(0) }];
         return base.query(sql, params);
       },
     };
@@ -549,7 +552,7 @@ describe("a refused eviction (task 12.5a; LG-14, owner decision Q144 B)", () => 
     const computed = await computeBlock(p, block(3n), sweeping());
     expect(restarts()).toBe(1);
     expect(computed.applied).toBe(again);
-    expect(computed.sweep?.deleted).toEqual([hash(0x77)]);
+    expect(computed.step.deleted).toEqual([hash(0x77)]);
     expect(evictions).toEqual([[hash(0x77)], [hash(0x77)]]);
     // load, apply, restart, then load and apply again (the new thread's state at h − 1 read from the database).
     expect(asked.map((call) => Object.keys(call as object)[0])).toEqual(["load", "apply", "restart", "load", "apply"]);

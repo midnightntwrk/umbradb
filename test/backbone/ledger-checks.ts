@@ -202,12 +202,11 @@ async function reachableNodes(
 }
 
 /**
- * The ledger's storage and sweep rules, as the ledger's tables hold them:
- * - every node the held keys (`root_counts`) reach is stored. The sweep deletes only what no held key reaches, so the
- *   nodes of released states may be gone;
- * - every stored node is reached by some stored state. Nothing but the states' nodes is written, so this holds between
- *   sweep cycles. With the budget K at its default, every cycle of these tests' small states completes within its
- *   block, so it holds after each of their blocks;
+ * The ledger's storage and reclamation rules, as the ledger's tables hold them:
+ * - every node the held keys (`root_counts`) reach is stored. Reclamation deletes only what no held key reaches, so
+ *   the nodes of released states may be gone;
+ * - every stored node is reached by some stored state. Nothing but the states' nodes is written, and a released
+ *   state's unused nodes are deleted by the block after its release, so this holds after each block;
  * - the root counts are the latest state's key at 1 (with `retainStates` 0, the state before it was released).
  * [LG-11, LG-14]
  */

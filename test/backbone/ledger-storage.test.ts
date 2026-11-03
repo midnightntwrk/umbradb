@@ -33,7 +33,8 @@ import {
   wholeStateProblems,
 } from "./ledger-storage-checks.js";
 import { type LedgerScenario, ledgerScenario, type LedgerTx, RUNTIME_2_1 } from "./ledger-tapes.js";
-import { sweepTables, sweepWatcher, type TableSnapshot } from "./sweep-tapes.js";
+import { closureProblems, reachIn, retainedProblems } from "./refcount-checks.js";
+import { seenTables, sweepTables, sweepWatcher, type TableSnapshot } from "./sweep-tapes.js";
 
 /**
  * `core-ledger-state`'s stored state through the real process, on PostgreSQL 18 and PGlite 0.5.10. The setup:
@@ -55,8 +56,9 @@ import { sweepTables, sweepWatcher, type TableSnapshot } from "./sweep-tapes.js"
  *   with `state-not-retained`) is in `ledger-window.test.ts`: 5,000 blocks once on PGlite, and PostgreSQL from its
  *   backup. [A103, LG-12, Q122]
  * - With `retainStates` 0, a contract's state and zswap-state keys persisted at 10 stay held and load from their keys
- *   alone. This holds after the contract changed at 20, every state holding them was released, and two sweep cycles
- *   completed. The run without persisting them is in `ledger-sweep.negative-control.test.ts`. [A104, LG-13]
+ *   alone. This holds after the contract changed at 20, every state holding them was released, and the blocks after
+ *   their releases deleted their unused rows. The run without persisting them is in
+ *   `ledger-storage.negative-control.test.ts`. [A104, LG-13]
  */
 
 const WORKER = fileURLToPath(new URL("./ledger-restart.worker.ts", import.meta.url));
@@ -230,36 +232,47 @@ describe.each(PROCESS_BACKENDS)("core-ledger-state's stored state through the pr
     expect(seen.held.get(19n)).toEqual(range(14, 19));
     expect(seen.held.get(20n)).toEqual(range(19, 20));
     expect(seen.held.get(29n)).toEqual(range(28, 29));
-    // The sweep ran meanwhile (on by default) and deleted nothing a retained state reaches.
-    expect((await sweepTables(db)).cycle).toBeGreaterThan(2n);
+    // Reclamation ran meanwhile (on by default) and deleted nothing a retained state reaches: R3's (a) and (b) hold.
+    const end = await sweepTables(db);
+    expect(closureProblems(end)).toEqual([]);
+    expect(retainedProblems(end, 29n)).toEqual([]);
     expect(await heldNodeProblems(db)).toEqual([]);
   }, PATIENCE_MS * 4);
 
-  it("A104: with retainStates 0, a contract's state and zswap-state keys stored at 10 still load from their keys after it changed at 20, its states were released and two sweep cycles completed", async () => {
+  it("A104: with retainStates 0, a contract's state and zswap-state keys stored at 10 still load from their keys after it changed at 20, its states were released and the blocks after their releases deleted their unused rows", async () => {
     const { scenario, contract } = await a104Scenario();
     const db = await backend.database();
-    const sweeps = new Map<bigint, TableSnapshot>();
-    const process = await runTo(db, scenario.records, scenario.head, { core: [...LEDGER_CORE, CORE_CONTRACT_STATES], user: [sweepWatcher(sweeps)] });
+    const seen = seenTables();
+    const process = await runTo(db, scenario.records, scenario.head, { core: [...LEDGER_CORE, CORE_CONTRACT_STATES], user: [sweepWatcher(seen)] });
     expect(process.status).toMatchObject({ cursor: 40n, reason: null });
     // The rows of 10 and 20; the keys of 10 held, loading from their keys alone, no held state holding the state of 10.
     expect((await db.query("SELECT height::text AS h FROM core_contract_states.states ORDER BY height")).map((r) => r.h)).toEqual(["5", "10", "20"]);
     expect(await a104KeyProblems(db, scenario, contract.address, 10n)).toEqual([]);
     expect(await a104KeyProblems(db, scenario, contract.address, 5n)).toEqual([]);
-    // Two sweep cycles at least completed after the states holding C's state of 10 were released (block 20 released 19).
-    const at20 = sweeps.get(20n) as TableSnapshot;
-    const end = await sweepTables(db);
-    const completed = end.cycle - at20.cycle - (end.phase === "idle" ? 0n : 1n) + (at20.phase === "idle" ? 0n : 1n);
-    expect(completed).toBeGreaterThanOrEqual(2n);
-    // The sweep deleted nodes — every one stored at some cursor is no longer — and none a held key reaches.
-    const ever = new Set([...sweeps.values()].flatMap((tables) => tables.nodes));
-    expect(ever.size).toBeGreaterThan(end.nodes.length);
+    // The ledger states holding C's state of 10, those after 10 to 19, were released by the blocks 11 to 20; the block
+    // after each release deleted the rows of the released state that neither the persisted keys before it nor those
+    // after it reach. [A104, LG-14]
+    const tables = new Map(seen.tables);
+    tables.set(40n, await sweepTables(db));
+    const unused: string[] = [];
+    for (let h = 10n; h <= 19n; h++) {
+      const released = tables.get(h + 1n) as TableSnapshot;
+      const after = tables.get(h + 2n) as TableSnapshot;
+      const reached = (snapshot: TableSnapshot, keys: Iterable<string>): Set<string> => reachIn(snapshot.rows, keys).reached;
+      const kept = new Set([...reached(released, released.roots.keys()), ...reached(after, after.roots.keys())]);
+      const rows = [...reached(released, [released.states.get(h) as string])].filter((key) => released.rows.has(key) && !kept.has(key));
+      unused.push(...rows);
+      expect(rows.filter((key) => after.rows.has(key)), `the rows of the state after ${h} at ${h + 2n}`).toEqual([]);
+    }
+    expect(unused.length).toBeGreaterThan(0);
     expect(await heldNodeProblems(db)).toEqual([]);
     // The nodes of C's state of 10 that the ledger state stored as rows of their own are stored still (the run without
-    // persisting the keys, where the sweep deletes them, is the negative control).
-    const stored = new Set(end.nodes);
+    // persisting the keys, where they are deleted, is the negative control).
+    const ever = new Set([...tables.values()].flatMap((snapshot) => [...snapshot.rows.keys()]));
+    const end = tables.get(40n) as TableSnapshot;
     const rows = [...contractNodeKeys(scenario, contract.address, 10n)].filter((key) => ever.has(key));
     expect(rows.length).toBeGreaterThan(0);
-    expect(rows.filter((key) => !stored.has(key))).toEqual([]);
+    expect(rows.filter((key) => !end.rows.has(key))).toEqual([]);
   }, PATIENCE_MS * 4);
 });
 

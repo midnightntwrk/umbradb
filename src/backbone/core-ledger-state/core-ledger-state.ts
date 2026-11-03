@@ -42,9 +42,12 @@
  * - the block's `states` row: the state key and root, and the first free index and root of the zswap tree and of the
  *   DUST commitment and generation trees, none null, read as the official indexer reads them (the packages'
  *   `stateTrees`);
- * - its `segment_results`, and its ledger `events` (each transaction's numbered from 0 in emission order).
+ * - its `segment_results`, and its ledger `events` (each transaction's numbered from 0 in emission order);
+ * - then the block's reclamation step (see below).
  *
- * **The tables** and every statement are in `./sql.ts`.
+ * **The tables** and every statement are in `./sql.ts`. The `ledger-state` item declares `nodes`, `ref_counts` and
+ * `unreferenced` content-defined (`./node-set.ts`): the contents hash takes `nodes` by its node set and checks the counts
+ * and the queue against the rows, and no block captures or digests them. [LG-11, DT-3, DT-4]
  *
  * **At `on-after-db-write`** it tells the worker the block committed, so the state after h becomes the one h + 1 is
  * applied on. It does not wait for the answer, since that callback holds a read (see the callback).
@@ -76,15 +79,16 @@
  * `on-start-db`). A module that requires it loads the state after a height inside the window at its read's cursor, in
  * the worker, and gets it as plain data. Outside the window the load fails with `state-not-retained`. [LG-12]
  *
- * **The sweep** (`./sweep.ts`). After the root check, `on-compute` computes the block's step of the fixed-budget
- * mark-and-sweep, from `sweep`, `grey`, `marks`, `nodes` and `root_counts` as committed at h − 1 and the block's batch.
- * It has the worker evict the nodes the step deletes (`LedgerHost.evict`) before the block commits; `on-db-write`
- * writes the step after the batch. With the `core` entry's `sweep` off at h no step runs, and the first such block
- * after one with it on clears the sweep's sets. [LG-14]
+ * **Reclamation** (`./refcount.ts`). After the root check, `on-compute` computes the block's reference-counting step
+ * from `nodes`, `ref_counts`, `root_counts` and `unreferenced` as committed at h − 1 and the block's batch. It has the
+ * worker evict the nodes the step deletes (`LedgerHost.evict`) before the block's transaction; `on-db-write` writes
+ * the step after the batch's node writes, since a rewritten node can be deleted. A failed check halts the block with
+ * `ledger-refcount-invalid` before anything of it is stored. With the `core` entry's `sweep` off at h the step deletes
+ * nothing and evicts nothing, and still counts and queues; no reset is written when it turns off or on. [LG-14]
  *
  * If the package still refuses an eviction after the worker freed what it can, the worker thread is ended. A new one
- * loads the state at h − 1 from the database and applies h again; only a second refusal fails the block
- * ({@link computeBlock}). [LG-14, Q144 B]
+ * loads the state at h − 1 from the database, applies h again and computes its step again; only a second refusal
+ * fails the block ({@link computeBlock}). [LG-14, Q144 B]
  *
  * The declaration ({@link CORE_LEDGER_STATE}) is a constant built over its rules. A negative control's build composes
  * its own with {@link coreLedgerState}, with one rule replaced.
@@ -105,6 +109,7 @@ import type { BlockLedgerSource } from "../core-block-fetch/ledger-source.js";
 import { blockParsedItemOf } from "../core-block-parsed/core-block-parsed.js";
 import { chainEventsItemOf } from "../core-chain-events/core-chain-events.js";
 import { txResultsItemOf } from "../core-tx-results/core-tx-results.js";
+import { LEDGER_NODE_TABLES } from "./node-set.js";
 import { type CoreRevision, coreRevisionsOf, releasedBy, retainedFrom, retentionWindow, revisionAt } from "./retention.js";
 import {
   addRootCounts,
@@ -120,14 +125,13 @@ import {
   stateKeysBetween,
 } from "./sql.js";
 import {
-  type GreyPicker,
-  SWEEP_BUDGET,
-  sqlSweepTables,
-  sweepReset,
-  sweepStep,
-  type SweepWrites,
-  writeSweep,
-} from "./sweep.js";
+  type RefcountCheck,
+  type RefcountFault,
+  type RefcountStep,
+  refcountStep,
+  sqlRefcountTables,
+  writeRefcount,
+} from "./refcount.js";
 
 /** The module's id. */
 export const CORE_LEDGER_STATE_ID = "core-ledger-state";
@@ -228,10 +232,15 @@ export interface CoreLedgerStateOptions {
   readonly retainedFrom?: (revisions: readonly CoreRevision[], height: bigint) => bigint;
   /** Whether the block's contracts' keys are persisted: while `core-contract-states` is active. [LG-13] */
   readonly persistsContracts?: (b: BlockContext) => boolean;
-  /** The node units of each block's sweep step: {@link SWEEP_BUDGET}, or a test's smaller K. [LG-14] */
-  readonly sweepBudget?: number;
-  /** Which grey keys a marking round visits: the smallest in byte order. [LG-14] */
-  readonly greyPicker?: GreyPicker;
+  /** A fault put into the reclamation step through its tables (`./refcount.ts`); none in a build. [R12] */
+  readonly refcountFault?: RefcountFault;
+  /** A check of the reclamation step left out; every check runs in a build. [R11] */
+  readonly refcountUnchecked?: RefcountCheck;
+  /**
+   * The handle the block's reclamation statements run through, given the block's own and its height: that handle. A
+   * negative control's changes what a statement affects. [R3, R11]
+   */
+  readonly refcountWriter?: (w: Pick<BlockWriteHandle, "execute">, height: bigint) => Pick<BlockWriteHandle, "execute">;
   /**
    * Whether an eviction the package still refuses after the worker freed what it can ends the worker thread and
    * applies the block again in a new one; true by default. False halts at the first refusal. [LG-14, Q144 B]
@@ -257,8 +266,14 @@ export async function parentTimeOf(read: Pick<ReadHandle, "query">, b: BlockCont
   return parentTimestampMs(ms, ownMs);
 }
 
-/** The pending writes of each process context: the block `on-compute` applied and its sweep step, for its `on-db-write`. */
-const PENDING = new WeakMap<ProcessContext, { readonly applied: AppliedState; readonly sweep: SweepWrites | null }>();
+/** What `on-compute` computed for a block, for its `on-db-write`: the applied block and its reclamation step. */
+export interface ComputedBlock {
+  readonly applied: AppliedState;
+  readonly step: RefcountStep;
+}
+
+/** The pending writes of each process context: the block `on-compute` computed, for its `on-db-write`. */
+const PENDING = new WeakMap<ProcessContext, ComputedBlock>();
 
 /** The `core` revisions of each process context, read once from its `config` item. */
 const REVISIONS = new WeakMap<ProcessContext, readonly CoreRevision[]>();
@@ -476,8 +491,8 @@ export async function writeBlock(w: Pick<BlockWriteHandle, "execute">, applied: 
   return written;
 }
 
-/** The block `on-compute` applied for `b`, with its sweep step, taken for its `on-db-write`; throws when it is not `b`'s. */
-function pendingOf(p: ProcessContext, b: BlockContext): { readonly applied: AppliedState; readonly sweep: SweepWrites | null } {
+/** The block `on-compute` computed for `b`, taken for its `on-db-write`; throws when it is not `b`'s. */
+function pendingOf(p: ProcessContext, b: BlockContext): ComputedBlock {
   const pending = PENDING.get(p);
   if (pending === undefined || pending.applied.height !== b.height || !sameBytes(pending.applied.hash, b.hash)) {
     throw new Error(`block ${b.height}: core-ledger-state's on-compute applied no such block for its on-db-write`);
@@ -487,56 +502,55 @@ function pendingOf(p: ProcessContext, b: BlockContext): { readonly applied: Appl
 }
 
 /**
- * Block `b`'s sweep step (`./sweep.ts`). There is none while the `core` entry's `sweep` is off at h, and the reset at
- * the first such block after one with it on. The nodes it deletes are evicted from the worker before the block
- * commits. [LG-14]
+ * Block `b`'s reclamation step (`./refcount.ts`), from the tables as `read` holds them at h − 1 and the block's batch,
+ * the `core` entry's `sweep` at h saying whether it deletes. The nodes it deletes are evicted from the worker before the
+ * block's transaction. [LG-14]
  */
-export async function sweepOf(
+export async function refcountOf(
   p: ProcessContext,
   b: BlockContext,
   read: Pick<ReadHandle, "query">,
   applied: AppliedState,
   options: CoreLedgerStateOptions = {},
-): Promise<SweepWrites | null> {
-  const revisions = revisionsOf(p);
-  const on = (height: bigint): boolean => revisionAt(revisions, height)?.sweep !== "off";
-  const tables = sqlSweepTables(read);
-  if (!on(b.height)) return b.height > 0n && revisionAt(revisions, b.height - 1n) !== undefined && on(b.height - 1n) ? sweepReset(await tables.state()) : null;
-  const step = await sweepStep(tables, applied.batch, {
-    budget: options.sweepBudget ?? SWEEP_BUDGET,
-    ...(options.greyPicker === undefined ? {} : { picker: options.greyPicker }),
-  });
+): Promise<RefcountStep> {
+  const on = revisionAt(revisionsOf(p), b.height)?.sweep !== "off";
+  const tables = sqlRefcountTables(read);
+  const step = await refcountStep(
+    options.refcountFault === undefined ? tables : { ...tables, fault: options.refcountFault },
+    applied.batch,
+    { height: b.height, on, ...(options.refcountUnchecked === undefined ? {} : { unchecked: options.refcountUnchecked }) },
+  );
   if (step.deleted.length > 0) await boundLedger(p).ledger.evict(step.deleted);
   return step;
 }
 
 /**
- * Block `b`'s `on-compute` work (see the module comment): the block is applied, its root checked, its sweep step
+ * Block `b`'s `on-compute` work (see the module comment): the block is applied, its root checked, its reclamation step
  * computed, and the nodes the step deletes evicted.
  *
  * When the package still refuses that eviction after the worker freed what it can (`EvictionRefused`), the worker
  * thread is ended and a new one started. The new one loads the state at h − 1 from the database (the apply's usual
- * load) and applies the block again, and the sweep step is computed and evicted again; a refusal then fails the block.
- * [LG-14, Q144 B]
+ * load) and applies the block again, and the step is computed again from the same read at h − 1 and the new thread's
+ * batch, and evicted; a refusal then fails the block. [LG-14, Q144 B]
  *
- * The stored nodes and roots do not depend on the restart: the new thread applies the same block to the same stored
- * state; a node it writes again with its stored child list touches no row, and one it writes with another child list
- * replaces the stored one, as any write of the block does.
+ * The stored node set and roots do not depend on the restart: the new thread applies the same block to the same stored
+ * state; a node it writes again with its stored child list touches no row and changes no count, and one it writes with
+ * another child list replaces the stored one, as any write of the block does.
  */
 export async function computeBlock(
   p: ProcessContext,
   b: BlockContext,
   read: Pick<ReadHandle, "query">,
   options: CoreLedgerStateOptions = {},
-): Promise<{ readonly applied: AppliedState; readonly sweep: SweepWrites | null }> {
+): Promise<ComputedBlock> {
   const applied = await applyBlock(p, b, read, options);
   try {
-    return { applied, sweep: await sweepOf(p, b, read, applied, options) };
+    return { applied, step: await refcountOf(p, b, read, applied, options) };
   } catch (error) {
     if (!isEvictionRefused(error) || options.restartOnRefusedEviction === false) throw error;
     await boundLedger(p).ledger.restart();
     const again = await applyBlock(p, b, read, options);
-    return { applied: again, sweep: await sweepOf(p, b, read, again, options) };
+    return { applied: again, step: await refcountOf(p, b, read, again, options) };
   }
 }
 
@@ -596,6 +610,9 @@ export function coreLedgerState(options: CoreLedgerStateOptions = {}): DefinedMo
           schema: "core_ledger_state",
           tables: ["nodes", "root_counts", "states", "ref_counts", "unreferenced", "sweep", "grey", "marks"],
           kind: "mutable",
+          // The node tables take part in the contents hash by the nodes they hold, and no block captures them; the
+          // counts and the queue are checked against the rows. [LG-11, DT-3, DT-4]
+          contentDefined: LEDGER_NODE_TABLES,
         },
       },
       {
@@ -627,9 +644,15 @@ export function coreLedgerState(options: CoreLedgerStateOptions = {}): DefinedMo
         out.put(VM_LOGS_ITEM, items.logs);
       },
       async "on-db-write"(p, b, w) {
-        const { applied, sweep } = pendingOf(p, b);
-        await writeBlock(w, applied);
-        if (sweep !== null) await writeSweep(w, sweep);
+        const { applied, step } = pendingOf(p, b);
+        // The node writes first: a rewritten node can be among those the step deletes. [LG-14]
+        const written = await writeBlock(w, applied);
+        await writeRefcount(
+          options.refcountWriter?.(w, b.height) ?? w,
+          step,
+          written,
+          options.refcountUnchecked === undefined ? {} : { unchecked: options.refcountUnchecked },
+        );
       },
       async "on-after-db-write"(p, b) {
         // Not awaited: this callback runs inside a read, which on PGlite holds the one queue, and the commit may wait

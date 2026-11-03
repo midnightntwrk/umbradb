@@ -48,15 +48,18 @@ describe("A87 negative controls: the registry's check", () => {
     expect(registryProblems(input())).toEqual([]);
   });
 
-  it("fails on ledger-refcount's pending halt code once that change's task 3.8 is checked done without its test (R19)", () => {
-    const open = /^- \[ \] 3\.8 /m;
-    expect(LEDGER_REFCOUNT_TASKS).toMatch(open);
-    const ticked = LEDGER_REFCOUNT_TASKS.replace(open, "- [x] 3.8 ");
-    expect(registryProblems(input({ tasks: allTasks(ticked) }))).toEqual([
+  it("fails on ledger-refcount's halt code pending, without its test, for that change's task 3.8 once it is checked done (R19)", () => {
+    // The code as task 3.1 left it: pending for task 3.8, no test registered.
+    const { "halt:ledger-refcount-invalid": _registered, ...registry } = REGISTRY;
+    const pending = { ...PENDING, "halt:ledger-refcount-invalid": "ledger-refcount 3.8" };
+    const baseline = Object.keys(pending);
+    const ticked = LEDGER_REFCOUNT_TASKS.replace(/^- \[[ x]\] 3\.8 /m, "- [x] 3.8 ");
+    expect(ticked).toMatch(/^- \[x\] 3\.8 /m);
+    expect(registryProblems(input({ registry, pending, baseline, tasks: allTasks(ticked) }))).toEqual([
       "halt:ledger-refcount-invalid: pending for task ledger-refcount 3.8, which tasks.md checks done: register its test",
     ]);
     // Its id is the change's own: core-arch's tasks alone have no such task.
-    expect(registryProblems(input({ tasks: tasksDone(TASKS) }))).toEqual([
+    expect(registryProblems(input({ registry, pending, baseline, tasks: tasksDone(TASKS) }))).toEqual([
       "halt:ledger-refcount-invalid: pending for task ledger-refcount 3.8, which tasks.md does not have",
     ]);
   });

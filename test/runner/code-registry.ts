@@ -608,17 +608,37 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
         "before another height; the same configuration, or only secrets changed, changes nothing; X-Umbra-Config-Hash holds no secret",
     },
   ],
+  // The `ledger-refcount` change's halt code, which each check of the reclamation step raises. [R11, R19]
+  "halt:ledger-refcount-invalid": [
+    {
+      file: "test/backbone/ledger-refcount-halts.test.ts",
+      test:
+        "R11: a stored count lowered in a copy of the database so that a deletion takes it below 0 halts at that block with " +
+        "ledger-refcount-invalid (negative-count), naming the key and the height; nothing of the block is stored",
+    },
+    {
+      file: "test/backbone/ledger-refcount-halts.test.ts",
+      test:
+        "R11: a test package flushing a new node that references a key not stored, one rewriting a stored node with a child " +
+        "list that references a key not stored, and one raising the root count of a key it neither flushes nor has stored " +
+        "each halt at that block with ledger-refcount-invalid (missing-reference), naming the key and the height; nothing of " +
+        "the block is stored",
+    },
+    {
+      file: "test/backbone/ledger-refcount-halts.test.ts",
+      test:
+        "R11: a test seam making one of the step's statements affect one row fewer halts at that block with " +
+        "ledger-refcount-invalid (row-count-mismatch), naming the statement, the rows computed and affected, and the height; " +
+        "the block's transaction rolls back",
+    },
+  ],
 });
 
 /**
  * The codes whose tasks have not run yet, by `<list>:<code>`, each with the task of `tasks.md` that adds it and its test
  * (see the module comment); a task of another change's `tasks.md` is named `<change> <id>` ({@link changeTasks}).
  */
-export const PENDING: Readonly<Record<string, string>> = Object.freeze({
-  // The `ledger-refcount` change lists its halt code with its task 3.1; the counting step that triggers it, and the
-  // test that checks it, come with its task 3.8. [R19]
-  "halt:ledger-refcount-invalid": "ledger-refcount 3.8",
-});
+export const PENDING: Readonly<Record<string, string>> = Object.freeze({});
 
 /** The tasks of `tasks.md` (its text) by id, and whether each is checked done. */
 export function tasksDone(text: string): ReadonlyMap<string, boolean> {

@@ -707,7 +707,7 @@ Q191); `runner.crash-sweep.contents-hash-equal`, `runner.crash-sweep.negative-co
 | `db.block.truncate-refused` | A73 |
 | `ingest.no-unfinalized-rows-after-crash` | A76 |
 | `ingest.uncertain-commit-recovery` | A86 |
-| `ledger.sweep-cross-backend-identical` | A105 |
+| `ledger.refcount-cross-backend-identical` | A105 |
 | `ledger.root-check-halts` | A106 |
 | `contract-logs.fast-equals-full` | A110 |
 | `private.lockstep-waits-no-transaction` | A117 |

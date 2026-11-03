@@ -3,9 +3,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { cursorHeight } from "../../src/backbone/core-block-commit/sql.js";
-import { CORE_BLOCK_PARSED } from "../../src/backbone/core-block-parsed/core-block-parsed.js";
-import { CORE_CHAIN_EVENTS } from "../../src/backbone/core-chain-events/core-chain-events.js";
-import { CORE_TX_RESULTS } from "../../src/backbone/core-tx-results/core-tx-results.js";
 import { writeBackup } from "../../src/backup/backup.js";
 import { isEmptyDatabase } from "../../src/backup/restore.js";
 import { declaredOptOuts } from "../../src/cli/configured.js";
@@ -18,8 +15,8 @@ import { declaredContentDefined } from "../../src/modules/adapters.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import { validateDeclarations } from "../../src/modules/validation.js";
 import { chainDeclarations } from "../backbone/chain-build.js";
-import { contentDefinedLedgerState } from "../backbone/content-defined-build.js";
 import { committed, ingest, watched, watcher } from "../backbone/ingest-harness.js";
+import { LEDGER_CORE } from "../backbone/ledger-restart.js";
 import { childKey, type Child, decodeChildren, encodeChildren, hex } from "../ledger/node-format.js";
 import type { ProcessDatabase } from "../runner/process-backends.js";
 import { entryOf } from "../runner/process-build.js";
@@ -28,10 +25,10 @@ import { type LedgerBackup, ledgerBackup, ledgerChain, type RestoreBuild, restor
 
 /**
  * `core-ledger-state`'s content-defined node tables in a backup and a restore, on PostgreSQL 18.6 and PGlite 0.5.10,
- * with a test build whose `core-ledger-state` declares them content-defined and writes, after each block, the counts
- * and queue its rows give (`../backbone/content-defined-build.ts`): the ledger chain of `./restore-ledger.ts`, synced
- * from genesis by the process and backed up by it (`ProcessHandle.backup`), then restored with `restoreBackup` and that
- * build. [R29, A126, BK-3, DT-3, LG-11]
+ * with the build's own ledger core, whose `core-ledger-state` declares them content-defined and writes the counts and
+ * the queue each block's reclamation step gives: the ledger chain of `./restore-ledger.ts`, synced from genesis by the
+ * process and backed up by it (`ProcessHandle.backup`), then restored with `restoreBackup` and that build. [R29, A126,
+ * BK-3, DT-3, LG-11]
  *
  * - The process's backup takes the node tables by their content: its manifest's contents hash is the build's, not the
  *   bytes'.
@@ -48,13 +45,8 @@ import { type LedgerBackup, ledgerBackup, ledgerChain, type RestoreBuild, restor
 
 const TEST_TIMEOUT_MS = 900_000;
 
-/** The build's core modules: the ledger's, its `core-ledger-state` the test build's. */
-const BUILD_CORE: readonly ModuleDeclaration[] = [
-  CORE_CHAIN_EVENTS,
-  CORE_BLOCK_PARSED,
-  CORE_TX_RESULTS,
-  contentDefinedLedgerState({ writesCounts: true }),
-];
+/** The build's core modules: the ledger's own. */
+const BUILD_CORE: readonly ModuleDeclaration[] = LEDGER_CORE;
 
 /** The restore's build: {@link BUILD_CORE}, each enabled from 0. */
 const RESTORE_BUILD: RestoreBuild = { core: BUILD_CORE, entry: (module) => entryOf(module, 0) };

@@ -34,9 +34,13 @@
 //   thread first built it; so after `rewrite to-embedded` is written embedding its small child, a live state still
 //   holds that child by reference, and the package refuses to forget a node a live state holds by reference, as the
 //   v9 package does; a new thread, whose state is loaded from the node store, holds the stored form [R30, Q144 B].
-// [A105, R27, R28, R30; LG-11, LG-14]
+// By `withhold` and `persistUnknown` ({@link FixtureData}) it also makes the batches the reclamation checks refuse: a
+// flush that leaves out one node a node of its batch references (a new node's child, or the child a rewritten node now
+// references), and one that persists a key no node has [R11].
+// [A105, R11, R27, R28, R30; LG-11, LG-14]
 // Erasable TypeScript only: the worker runs it through Node.js's type stripping.
 
+import { createHash } from "node:crypto";
 import type { LedgerName, LedgerPackage, LedgerPackageOptions, NodeBatch, NodeStore, StateHandle } from "../../../src/ledger/types.js";
 import { AGAIN, contentOf, extendedCases, type FixtureDag, type FixtureNode, rootOf, stateKeys, stateNodes } from "./sweep-fixture.js";
 
@@ -78,7 +82,17 @@ export interface FixtureData extends RefusalData {
   readonly dag?: FixtureDag;
   /** How it keeps the extended DAG's nodes: `"writes-again"` unless given; refused with the original DAG. */
   readonly keeping?: Keeping;
+  /**
+   * The extended DAG only: the flush after the height `at` (decimal text) leaves out the node `key` (hex), which it then
+   * believes stored. [R11]
+   */
+  readonly withhold?: { readonly at: string; readonly key: string };
+  /** The extended DAG only: the flush after this height (decimal text) also persists {@link UNKNOWN_KEY}. [R11] */
+  readonly persistUnknown?: string;
 }
+
+/** A key no node of the fixture has: what `persistUnknown` persists. [R11] */
+export const UNKNOWN_KEY: Uint8Array = Uint8Array.from(createHash("sha256").update("a key no node of the fixture has").digest());
 
 /** A state of this package: the height whose fixture state it is. */
 interface FakeState {
@@ -90,7 +104,9 @@ const evicted: string[] = [];
 /** The ledger worker's loader: the fake adapter (see the module comment). */
 export async function loadLedger(ledger: LedgerName, _options: LedgerPackageOptions, data?: FixtureData | null): Promise<LedgerPackage> {
   if (data?.dag === "extended") return extendedPackage(ledger, data);
-  if (data?.keeping !== undefined) throw new Error(`the sweep test package's keeping "${data.keeping}" applies to the extended DAG only (dag: "extended")`);
+  for (const field of ["keeping", "withhold", "persistUnknown"] as const) {
+    if (data?.[field] !== undefined) throw new Error(`the sweep test package's ${field} applies to the extended DAG only (dag: "extended")`);
+  }
   const counters = data?.counters === undefined ? new Int32Array(Object.keys(COUNTERS).length) : new Int32Array(data.counters);
   const thread = Atomics.add(counters, COUNTERS.threads, 1);
   const refusing = data?.refuseAt !== undefined && thread < (data.threads ?? 1);
@@ -346,6 +362,7 @@ function extendedPackage(ledger: LedgerName, data: FixtureData): LedgerPackage {
     },
     stateKey: (handle) => rootKey(heightOf(handle)),
     flush(): NodeBatch {
+      if (data.persistUnknown !== undefined && `${applied}` === data.persistUnknown) change(UNKNOWN_KEY, 1);
       const taken = new Map<string, FixtureNode>();
       const frontier = [...deltas.values()].filter((d) => d.delta > 0).map((d) => hex(d.key));
       while (frontier.length > 0) {
@@ -356,6 +373,8 @@ function extendedPackage(ledger: LedgerName, data: FixtureData): LedgerPackage {
         for (const ref of node.refs) frontier.push(hex(ref));
       }
       for (const [key, node] of taken) stored.set(key, hex(node.children));
+      // A node left out of the batch, though the package now believes it stored. [R11]
+      if (data.withhold !== undefined && `${applied}` === data.withhold.at) taken.delete(data.withhold.key);
       const rootCounts = [...deltas.values()].filter((d) => d.delta !== 0).sort((a, b) => (hex(a.key) < hex(b.key) ? -1 : 1));
       deltas = new Map();
       const inserts = [...taken.values()].sort((a, b) => (hex(a.key) < hex(b.key) ? -1 : 1)).map((n) => ({ key: n.key, data: n.data, children: n.children }));

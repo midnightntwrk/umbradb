@@ -36,7 +36,8 @@
  * runs over at most {@link KEYS_PER_STATEMENT} keys, and must affect the rows the step computed, else the block halts
  * (`row-count-mismatch`) and its transaction rolls back. [LG-14]
  *
- * {@link RefcountFault} is the seam through which a negative control puts a fault into the step. [R12]
+ * {@link RefcountFault} is the seam through which a negative control puts a fault into the step [R12], and
+ * {@link RefcountCheck} names the check one leaves out [R11].
  */
 
 import type { BlockWriteHandle, ReadHandle } from "../../db/api.js";
@@ -78,6 +79,13 @@ export type RefcountFault =
   | "released-in-block"
   | "referenced-queued-deleted"
   | "first-round-only";
+
+/**
+ * The checks of the step, by the reason they halt with: rule 8's two, and the affected rows of
+ * {@link writeRefcount}'s statements. A negative control leaves one out to show what it catches; a build runs every
+ * one. [R11]
+ */
+export type RefcountCheck = "negative-count" | "missing-reference" | "row-count-mismatch";
 
 /** A key at h − 1: whether it is a row, its reference count and its root count (0 where its table has no row). */
 export interface KeyCounts {
@@ -156,14 +164,15 @@ function invalid(height: bigint, reason: string, message: string, details: Recor
 
 /**
  * Block `height`'s step (see the module comment): `tables` as committed at h − 1, `batch` the block's, `on` whether
- * the `core` entry's `sweep` is on at h. Throws `ledger-refcount-invalid` when a check fails. [LG-14]
+ * the `core` entry's `sweep` is on at h. Throws `ledger-refcount-invalid` when a check fails; a negative control's
+ * `unchecked` check is left out. [LG-14, R11]
  */
 export async function refcountStep(
   tables: RefcountTables,
   batch: NodeBatch,
-  options: { readonly height: bigint; readonly on: boolean },
+  options: { readonly height: bigint; readonly on: boolean; readonly unchecked?: RefcountCheck },
 ): Promise<RefcountStep> {
-  const { height, on } = options;
+  const { height, on, unchecked } = options;
   const fault = tables.fault;
   const inserts = new Map<string, Pick<StoredNode, "key" | "children">>();
   for (const node of batch.inserts) {
@@ -291,22 +300,23 @@ export async function refcountStep(
 
   // (8) The checks, before the eviction.
   for (const k of sorted(delta.keys())) {
-    if (count(k) < 0) {
+    if (count(k) < 0 && unchecked !== "negative-count") {
       throw invalid(height, "negative-count", `the reference count of 0x${k} would fall below 0`, { key: `0x${k}` });
     }
   }
   const rowAfter = (k: string): boolean => newKeys.has(k) || (isRow.get(k) === true && !deleted.has(k));
+  const referencesChecked = unchecked !== "missing-reference";
   for (const k of sorted(written.keys())) {
     for (const ref of written.get(k) as Uint8Array[]) {
       const r = hexOf(ref);
-      if (!rowAfter(r)) {
+      if (!rowAfter(r) && referencesChecked) {
         const message = `0x${k}, which the block writes, references 0x${r}, which is not stored after it`;
         throw invalid(height, "missing-reference", message, { key: `0x${r}` });
       }
     }
   }
   for (const k of sorted(rootChange.keys())) {
-    if ((rootChange.get(k) as number) > 0 && !rowAfter(k)) {
+    if ((rootChange.get(k) as number) > 0 && !rowAfter(k) && referencesChecked) {
       const message = `the block persists 0x${k}, which is not stored after it`;
       throw invalid(height, "missing-reference", message, { key: `0x${k}` });
     }
@@ -381,15 +391,17 @@ export function sqlRefcountTables(read: Pick<ReadHandle, "query">): RefcountTabl
  * Writes block `step.height`'s step, in its transaction after the batch's node writes (see the module comment), which
  * affected `written` rows: the counts' changes merged into `ref_counts`, the queue's changes, then the deleted rows.
  * Each statement must affect the rows the step computed (the node writes: its new and rewritten nodes), summed over its
- * chunks; otherwise it throws `ledger-refcount-invalid` (`row-count-mismatch`), naming the statement. [LG-14]
+ * chunks; otherwise it throws `ledger-refcount-invalid` (`row-count-mismatch`), naming the statement. A negative
+ * control's `unchecked` `row-count-mismatch` leaves that check out. [LG-14, R11]
  */
 export async function writeRefcount(
   w: Pick<BlockWriteHandle, "execute">,
   step: RefcountStep,
   written: number,
+  options: { readonly unchecked?: RefcountCheck } = {},
 ): Promise<void> {
   const check = (statement: RefcountStatement, expected: number, actual: number): void => {
-    if (actual === expected) return;
+    if (actual === expected || options.unchecked === "row-count-mismatch") return;
     throw invalid(
       step.height,
       "row-count-mismatch",

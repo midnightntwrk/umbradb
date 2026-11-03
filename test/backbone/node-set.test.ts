@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { CORE_LEDGER_STATE } from "../../src/backbone/core-ledger-state/core-ledger-state.js";
 import { LEDGER_NODE_TABLES, nodeTablesContent } from "../../src/backbone/core-ledger-state/node-set.js";
 import { CORE_LEDGER_STATE_MIGRATIONS } from "../../src/backbone/core-ledger-state/sql.js";
 import { CORE_MODULES, PUBLIC_BACKBONE } from "../../src/cli/build-modules.js";
@@ -15,28 +16,28 @@ import { contentDefinedLedgerState, countsAndQueue, type StoredRow } from "./con
 
 /**
  * The contents hash of `core-ledger-state`'s node tables, content-defined (`src/backbone/core-ledger-state/node-set.ts`),
- * on PostgreSQL 18 and PGlite 0.5.10, with a test build whose `core-ledger-state` declares them so
- * (`./content-defined-build.ts`), on databases built for it: the part's own migration, rows of real node format
- * (`../ledger/node-format.ts`, independent of `src/`), and the counts and queue its rows give. [R29, A55, DT-3, LG-11]
+ * on PostgreSQL 18 and PGlite 0.5.10, with the build's own declaration (`CORE_LEDGER_STATE`'s `ledger-state` item), on
+ * databases built for it: the part's own migration, rows of real node format (`../ledger/node-format.ts`, independent
+ * of `src/`), and the counts and queue its rows give. [R29, A55, DT-3, LG-11]
  *
  * - R29: two databases holding the same nodes, one with a small node embedded in its parent and the other with it
  *   referenced and stored as its own row, hash equal; one more queued node (its row and its `unreferenced` entry) makes
  *   the hash differ; one byte of a row's payload or child list changed fails the computation with
  *   `ledger-refcount-invalid` (`details.check` `node-key`), and counts or a queue its rows do not give fail it with
- *   reason `tables-inconsistent` (`closure`, `roots`, `counts`, `queue`) — here through the exported `contentsHash`'s
- *   code (`contentsHashOf`) with the test build's declarations; the backup and the restore are
- *   `../backup/restore-content-defined.test.ts`. Its three negative controls: `nodes` hashed by its raw rows, a
+ *   reason `tables-inconsistent` (`closure`, `roots`, `counts`, `queue`) — here through the exported `contentsHash`
+ *   itself; the backup and the restore are `../backup/restore-content-defined.test.ts`. Its three negative controls,
+ *   each a test build (`./content-defined-build.ts`) declaring the tables otherwise: `nodes` hashed by its raw rows, a
  *   constant in place of the node set, the key check skipped. The clause of `src/ledger/node-key.ts` on the tapes is
  *   `../ledger/node-key-tape-*.test.ts`.
  * - A55: the same rows give the same hash on both backends; one byte of a table that is not content-defined changes
  *   it; one byte of a `nodes` row fails the computation.
  */
 
-/** The build whose declarations the hash is computed with: the test build's `core-ledger-state`. */
-const BUILD: readonly ModuleDeclaration[] = [contentDefinedLedgerState()];
+/** The build whose declarations the hash is computed with: the build's own `core-ledger-state`. */
+const BUILD: readonly ModuleDeclaration[] = [CORE_LEDGER_STATE];
 
-/** The contents hash as the exported function computes it for {@link BUILD}. */
-const buildHash = contentsHashOf(BUILD);
+/** The contents hash: the exported function, which takes the build's own declarations. */
+const buildHash = umbra.contentsHash;
 
 /** A node: its payload and its children. */
 interface Node {
@@ -288,7 +289,7 @@ describe.each(DETERMINISM_BACKENDS)("core-ledger-state's node tables in the cont
     const build = [...PUBLIC_BACKBONE, ...CORE_MODULES];
     const own = await db.read(async (read) => hexOf(await contentsHash(read, { contentDefined: declaredContentDefined(build) })));
     expect(await hashOf(db, umbra.contentsHash)).toBe(own);
-    // With the test build's declarations, the exported function's code takes the node tables by their content.
+    // With the build's own declarations, the exported function takes the node tables by their content.
     const content = await db.read(async (read) => hexOf(await contentsHash(read, { contentDefined: declaredContentDefined(BUILD) })));
     expect(await hashOf(db)).toBe(content);
     expect(declaredContentDefined(BUILD)).toEqual([

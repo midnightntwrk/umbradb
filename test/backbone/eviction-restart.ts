@@ -1,35 +1,36 @@
 import { CORE_LEDGER_STATE_ID, type CoreLedgerStateOptions } from "../../src/backbone/core-ledger-state/core-ledger-state.js";
-import { type LedgerHost, startLedgerWorker } from "../../src/ledger/worker/host.js";
+import type { NodeBatch } from "../../src/ledger/types.js";
 import { COUNTERS, countersMemory, type RefusalData } from "../ledger/fixtures/sweep-test-loader.js";
-import { LAST } from "../ledger/fixtures/sweep-fixture.js";
 import type { ProcessDatabase } from "../runner/process-backends.js";
-import { committed, halted, ingest, PATIENCE_MS } from "./ingest-harness.js";
-import { modelOfFixture, SWEEP_LOADER, sweepCore, sweepTape, sweepWatcher, type TableSnapshot, tablesByHeight } from "./sweep-tapes.js";
+import { nodeSet } from "./refcount-model.js";
+import { runDag } from "./refcount-process.js";
+import { modelOfFixture, type TableSnapshot } from "./sweep-tapes.js";
 
 /**
  * The eviction-restart runs, shared by `ledger-eviction-restart.test.ts` and its negative controls. Imports nothing of
  * Vitest. [A160, LG-14, Q144 B]
- * - The sweep's DAG fixture runs through the real process (`./sweep-tapes.ts`: K = 50, a new root every block, nodes
- *   deleted from block {@link refusalHeight} on).
+ * - The original DAG fixture runs through the real process (`./refcount-process.ts`: a new root every block, the rows
+ *   of a released state deleted from the block after its release, {@link refusalHeight} the first).
  * - Its test package (`test/ledger/fixtures/sweep-test-loader.ts`) refuses every eviction after applying block h in
- *   the first `threads` worker threads, as if a live object the worker cannot free held a swept node.
+ *   the first `threads` worker threads, as if a live object the worker cannot free held a deleted node.
  * - The threads' counters are read from memory they share with this thread.
  */
 
-const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
-
-/** The first block whose sweep step deletes nodes: where the test package refuses. */
+/** The first block whose reclamation step deletes nodes, by R1's model of the fixture: where the test package refuses. */
 export function refusalHeight(): bigint {
-  const at = modelOfFixture().findIndex((snapshot) => snapshot.deleted.length > 0);
-  if (at <= 0) throw new Error("the sweep fixture deletes no node");
+  const at = modelOfFixture().findIndex((step) => step.deleted.length > 0);
+  if (at <= 0) throw new Error("the DAG fixture deletes no node");
   return BigInt(at);
 }
 
-/** What a run gave: its status, its tables after every height, its `states` rows, its counters and its worker. */
+/** What a run gave: its status, its tables after every height and batches, its `states` rows, its counters, its worker. */
 export interface FixtureRun {
-  readonly status: ReturnType<Awaited<ReturnType<typeof ingest>>["handle"]["status"]>;
+  readonly status: Awaited<ReturnType<typeof runDag>>["status"];
   readonly lines: readonly string[];
   readonly tables: Map<bigint, TableSnapshot>;
+  readonly batches: Map<bigint, NodeBatch>;
+  /** The keys each height had the worker evict. */
+  readonly evicted: ReadonlyMap<bigint, readonly string[]>;
   /** `height state_key state_root`, `0x`-less hex, in height order. */
   readonly states: readonly string[];
   /** The test package's counters, by {@link COUNTERS}' names. */
@@ -53,55 +54,49 @@ export async function runFixture(db: ProcessDatabase, options: FixtureRunOptions
     counters: memory,
     ...(options.refuse === undefined ? {} : { refuseAt: `${options.refuse.at}`, threads: options.refuse.threads }),
   };
-  const seen = new Map<bigint, TableSnapshot>();
-  let host: LedgerHost | undefined;
-  const process = await ingest(db, sweepTape().records, {
-    start: 0n,
-    core: sweepCore(options.core),
-    user: [sweepWatcher(seen)],
-    ledgerWorker: () => (host = startLedgerWorker({ loader: SWEEP_LOADER, loaderData: data })),
+  const run = await runDag(db, {
+    data,
+    ...(options.core === undefined ? {} : { core: options.core }),
+    ...(options.halts === undefined ? {} : { halts: options.halts }),
   });
-  let status;
-  let restarts = 0;
-  let failure: string | null = null;
-  try {
-    if (options.halts === true) await halted(process);
-    else await committed(process, BigInt(LAST), PATIENCE_MS * 2);
-    status = process.handle.status();
-    restarts = host?.restarts ?? 0;
-    failure = host?.failure?.message ?? null;
-  } finally {
-    await process.close();
-  }
-  const last = (status.cursor ?? 0n) as bigint;
   const rows = await db.query(
     "SELECT height::text AS h, encode(state_key, 'hex') AS k, encode(state_root, 'hex') AS r FROM core_ledger_state.states ORDER BY height",
   );
   const shared = new Int32Array(memory);
   const counters = Object.fromEntries(Object.entries(COUNTERS).map(([name, slot]) => [name, Atomics.load(shared, slot)])) as Record<keyof typeof COUNTERS, number>;
   return {
-    status,
-    lines: process.lines,
-    tables: await tablesByHeight(seen, db, last),
+    status: run.status,
+    lines: run.lines,
+    tables: run.tables,
+    batches: run.batches,
+    evicted: run.evicted,
     states: rows.map((row) => `${row.h as string} ${row.k as string} ${row.r as string}`),
     counters,
-    restarts,
-    failure,
+    restarts: run.restarts,
+    failure: run.failure,
   };
 }
 
-/** The heights whose sweep tables differ between two runs, each with what differs; empty when they agree throughout. */
+/** The tables whose rows count byte for byte: every table of `core_ledger_state` but its content-defined three. */
+const BYTE_TABLES = (snapshot: TableSnapshot): string[] =>
+  [...snapshot.digests.keys()].filter((table) => !["nodes", "ref_counts", "unreferenced"].includes(table));
+
+/**
+ * The heights at which two runs differ in the rows of a table that is not content-defined or in their node sets, each
+ * with what differs; empty when they agree throughout. [A160]
+ */
 export function tableDifferences(got: ReadonlyMap<bigint, TableSnapshot>, expected: ReadonlyMap<bigint, TableSnapshot>): string[] {
-  const text = (value: unknown): string => JSON.stringify(value, (_k, v: unknown) => (typeof v === "bigint" ? `${v}` : v));
   const problems: string[] = [];
+  const keys = (snapshot: TableSnapshot): string => [...nodeSet(snapshot.rows)].sort().join(",");
   for (const [height, want] of expected) {
     const have = got.get(height);
     if (have === undefined) {
       problems.push(`no tables after ${height}`);
       continue;
     }
-    const fields = (["cycle", "phase", "sweepAfter", "grey", "marks", "nodes"] as const).filter((field) => text(have[field]) !== text(want[field]));
-    if (fields.length > 0) problems.push(`after ${height}: ${fields.join(", ")} differ`);
+    const tables = BYTE_TABLES(want).filter((table) => have.digests.get(table) !== want.digests.get(table));
+    if (keys(have) !== keys(want)) tables.push("the node set");
+    if (tables.length > 0) problems.push(`after ${height}: ${tables.join(", ")} differ`);
   }
   for (const height of got.keys()) if (!expected.has(height)) problems.push(`tables after ${height}, which the other run has not`);
   return problems;
@@ -113,5 +108,3 @@ export const refusalHalt = (height: bigint) => ({
   cursor: height - 1n,
   reason: { code: "callback-error", height, module: CORE_LEDGER_STATE_ID, point: "on-compute" },
 });
-
-export { hex };

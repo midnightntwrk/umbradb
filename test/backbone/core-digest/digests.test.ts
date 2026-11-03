@@ -6,11 +6,11 @@ import type { BlockWriteHandle, Database } from "../../../src/db/api.js";
 import type { ItemDeclaration, ModuleDeclaration } from "../../../src/modules/declaration.js";
 import { BACKBONE_ORDER } from "../../../src/modules/graph.js";
 import { validateDeclarations } from "../../../src/modules/validation.js";
+import { CORE_LEDGER_STATE } from "../../../src/backbone/core-ledger-state/core-ledger-state.js";
 import { LEDGER_NODE_TABLES } from "../../../src/backbone/core-ledger-state/node-set.js";
 import { CORE_LEDGER_STATE_MIGRATIONS } from "../../../src/backbone/core-ledger-state/sql.js";
 import { BACKENDS } from "../../db/backends.js";
 import { concatBytes, fromHex } from "../../determinism/cbor-decoder.js";
-import { contentDefinedLedgerState } from "../content-defined-build.js";
 import { BLOCK_COMMIT, type Chain, checkpointRows, digestRows, runBlocks, startChain, testModule } from "./chain.js";
 
 /**
@@ -19,8 +19,8 @@ import { BLOCK_COMMIT, type Chain, checkpointRows, digestRows, runBlocks, startC
  *   table and kept otherwise, with 32 zero bytes before its first change;
  * - writes checkpoints at exactly the heights h ≥ S with h mod 14,400 = 0, equal to the tables' rows there;
  * - digests every module table with no flag set, and not a table declared `deterministic: false`, nor a
- *   content-defined one (`core-ledger-state`'s node tables as a test build declares them), whose `TRUNCATE` guard and
- *   column rules stay.
+ *   content-defined one (`core-ledger-state`'s node tables, as the build's own `ledger-state` item declares them),
+ *   whose `TRUNCATE` guard and column rules stay.
  * [A57, DT-4, DT-5, DT-6, DB-14, Q84, Q86]
  *
  * The chains run through `schemaPlan`, `startDatabase` and the block write handles, with a block loop standing in for
@@ -87,13 +87,13 @@ function moduleM(differ: string): ModuleDeclaration {
 const key32 = (byte: number): Uint8Array => new Uint8Array(32).fill(byte);
 
 /**
- * `core-ledger-state`'s tables as the test build declares them (`../content-defined-build.ts`: `nodes`, `ref_counts`
- * and `unreferenced` content-defined), made by the part's own migration and written by a stand-in that inserts,
+ * `core-ledger-state`'s tables as the build's own `ledger-state` item declares them (`nodes`, `ref_counts` and
+ * `unreferenced` content-defined), made by the part's own migration and written by a stand-in that inserts,
  * rewrites and deletes nodes, and changes the counts, the queue and `root_counts`, at heights 1 to 3; at
  * `truncateAt`, it truncates `table` instead. [A57, R17, DT-4, DB-14]
  */
 function ledgerTables(options: { readonly truncateAt?: bigint; readonly table?: string } = {}): ModuleDeclaration {
-  const item = contentDefinedLedgerState().provides.find((candidate) => candidate.name === "ledger-state");
+  const item = CORE_LEDGER_STATE.provides.find((candidate) => candidate.name === "ledger-state");
   const writes: Readonly<Record<string, readonly (readonly [string, unknown[]])[]>> = {
     "1": [
       ["INSERT INTO core_ledger_state.nodes VALUES ($1, '\\x01', '\\x00'), ($2, '\\x02', '\\x00')", [key32(1), key32(2)]],

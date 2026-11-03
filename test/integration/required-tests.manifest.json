@@ -88,9 +88,9 @@
       "description": "18.4: A86: the writer's backend terminated during h's COMMIT recovers by the cursor: h kept and not processed again, h processed again, or a halt with unexpected-cursor."
     },
     {
-      "id": "ledger.sweep-cross-backend-identical",
-      "file": "test/backbone/ledger-sweep-process.test.ts",
-      "description": "18.4: A105: the ledger sweep's grey, marked and stored sets equal the reference model's after every block, on PostgreSQL and PGlite."
+      "id": "ledger.refcount-cross-backend-identical",
+      "file": "test/backbone/ledger-refcount-process.test.ts",
+      "description": "ledger-refcount 3.8: A105: reclamation by reference counting matches R1's model after every block of the DAG fixture, with R3's check, every core_ledger_state table equal on PostgreSQL and PGlite."
     },
     {
       "id": "ledger.root-check-halts",

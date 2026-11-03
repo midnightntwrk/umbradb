@@ -10,6 +10,7 @@ import {
 import {
   addRootCounts,
   CORE_LEDGER_STATE_MIGRATIONS,
+  insertNodes,
   NODES_TABLE,
   REF_COUNTS_TABLE,
   ROOT_COUNTS_TABLE,
@@ -37,8 +38,8 @@ import {
  * - the property (fast-check, seed 20261105): on R1's histories, the step computed from the database at h − 1 and
  *   written after the block's node writes leaves the tables equal to the reference model's after every block.
  *
- * The node writes come first, as `core-ledger-state`'s `writeBlock` makes them: {@link WRITE_NODES} is that statement
- * (a new key inserted, a changed child list replacing the stored one, an unchanged one touching no row).
+ * The node writes come first, as `core-ledger-state`'s `writeBlock` makes them, with its statement (`insertNodes`: a
+ * new key inserted, a changed child list replacing the stored one, an unchanged one touching no row).
  */
 
 /** The fast-check seed and run count of the property here (its blocks run statements on both backends). */
@@ -48,21 +49,10 @@ const H = 41n;
 
 const SCHEMA = `CREATE SCHEMA core_ledger_state;\n${CORE_LEDGER_STATE_MIGRATIONS.map((m) => m.sql).join("\n")}`;
 
-/** The node write of a block's batch: a new key inserted, a changed child list replacing the stored one. */
-const WRITE_NODES = `INSERT INTO ${NODES_TABLE} (node_key, data, children)
-  SELECT n.node_key, n.data, n.children
-  FROM unnest($1::bytea[], $2::bytea[], $3::bytea[]) AS n (node_key, data, children)
-  ON CONFLICT (node_key) DO UPDATE SET children = EXCLUDED.children
-  WHERE nodes.children IS DISTINCT FROM EXCLUDED.children`;
-
-/** Writes `nodes` with {@link WRITE_NODES}, {@link KEYS_PER_STATEMENT} per statement; resolves with the rows written. */
+/** Writes `nodes` with `insertNodes`, {@link KEYS_PER_STATEMENT} per statement; resolves with the rows written. */
 async function writeNodes(w: Pick<BlockWriteHandle, "execute">, nodes: readonly StoredNode[]): Promise<number> {
   let written = 0;
-  for (let at = 0; at < nodes.length; at += KEYS_PER_STATEMENT) {
-    const chunk = nodes.slice(at, at + KEYS_PER_STATEMENT);
-    const params = [chunk.map((n) => n.key), chunk.map((n) => n.data), chunk.map((n) => n.children)];
-    written += await w.execute(WRITE_NODES, params);
-  }
+  for (let at = 0; at < nodes.length; at += KEYS_PER_STATEMENT) written += await insertNodes(w, nodes.slice(at, at + KEYS_PER_STATEMENT));
   return written;
 }
 
