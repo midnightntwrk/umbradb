@@ -16,7 +16,7 @@ import { E } from "./chain-data-tapes.js";
 import { eventsValue, finalizedWithEvents, RUNTIME_2_0 } from "./events-fixtures.js";
 import { type ChainBlock, chainOf, opening } from "./fetch-fixtures.js";
 import { committed, ingest } from "./ingest-harness.js";
-import { cappedAt, LEDGER_CORE } from "./ledger-restart.js";
+import { cappedAt, devnetSettings, LEDGER_CORE } from "./ledger-restart.js";
 import { nodeSet, type RefcountBatch, RefcountModel, type RefcountModelStep, type RefcountTables } from "./refcount-model.js";
 import { SweepModel } from "./sweep-model.js";
 
@@ -440,17 +440,7 @@ export interface TapeComparison {
 
 /** The `core` settings of a recorded tape: its network's, and for the devnet its custom network and v8/v9 table. */
 export function tapeSettings(found: FoundTape): Readonly<Record<string, unknown>> {
-  if (found.tape.network !== "custom") return { network: found.tape.network };
-  return {
-    network: "custom",
-    genesisHash: (found.tape.notes as { genesis: { hash: string } }).genesis.hash,
-    ledgerTable: {
-      rows: [
-        { specVersionMin: 1_000_000, specVersionMax: 1_999_999, ledger: "v8" },
-        { specVersionMin: 2_000_000, specVersionMax: 2_999_999, ledger: "v9" },
-      ],
-    },
-  };
+  return found.tape.network === "custom" ? devnetSettings(found) : { network: found.tape.network };
 }
 
 /**

@@ -4,7 +4,7 @@ import type { LedgerName, StoredNode } from "../../src/ledger/types.js";
 import type { AppliedState } from "../../src/ledger/worker/engine.js";
 import { type LedgerHost, startLedgerWorker } from "../../src/ledger/worker/host.js";
 import { committed, ingest } from "../backbone/ingest-harness.js";
-import { cappedAt, LEDGER_CORE } from "../backbone/ledger-restart.js";
+import { cappedAt, devnetSettings, LEDGER_CORE } from "../backbone/ledger-restart.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
 import { type FoundTape, tapeTest } from "../tape/real/real-tapes.js";
 import { V8_PACKAGE_PATH, V9_PACKAGE_PATH, V9_RC3_PACKAGE_PATH } from "./ledger-states.js";
@@ -118,18 +118,6 @@ function recording(host: LedgerHost, written: Written): LedgerHost {
     },
   });
 }
-
-/** The devnet's `core` settings: a custom network, its genesis from the manifest, its table v8 then v9. */
-const devnetSettings = (found: FoundTape): Readonly<Record<string, unknown>> => ({
-  network: "custom",
-  genesisHash: (found.tape.notes as { readonly genesis: { readonly hash: string } }).genesis.hash,
-  ledgerTable: {
-    rows: [
-      { specVersionMin: 1_000_000, specVersionMax: 1_999_999, ledger: "v8" },
-      { specVersionMin: 2_000_000, specVersionMax: 2_999_999, ledger: "v9" },
-    ],
-  },
-});
 
 /** Replays `found` from genesis to its end and checks every node's key against the package's (see the module comment). */
 async function checkTape(found: FoundTape, settings: Readonly<Record<string, unknown>>, every: bigint): Promise<void> {

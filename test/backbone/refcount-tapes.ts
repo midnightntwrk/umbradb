@@ -11,8 +11,8 @@ import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
 import { type FoundTape, tapeTest } from "../tape/real/real-tapes.js";
 import { committed, ingest } from "./ingest-harness.js";
-import { cappedAt } from "./ledger-restart.js";
-import { type StoredCheck, storedProblems } from "./refcount-checks.js";
+import { cappedAt, devnetSettings } from "./ledger-restart.js";
+import { NO_TABLES, type StoredCheck, storedProblems } from "./refcount-checks.js";
 import { recordingWorker, sweepTables, type TableSnapshot, type WorkerRecord, workerRecord } from "./sweep-tapes.js";
 
 /**
@@ -62,17 +62,6 @@ export function sampledHeights(name: RefcountTape, last: bigint): bigint[] {
   if (name === "devnet-v8-v9-0-235") for (const h of DEVNET_CONVERSION) if (h <= last) heights.add(h);
   return [...heights].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }
-
-/** The tables before block 0. */
-const NO_TABLES: TableSnapshot = Object.freeze({
-  rows: new Map(),
-  refs: new Map(),
-  roots: new Map(),
-  queue: new Set<string>(),
-  states: new Map(),
-  contracts: [],
-  digests: new Map(),
-});
 
 type Reader = Parameters<typeof sweepTables>[0];
 
@@ -139,18 +128,6 @@ function sampling(sampler: Sampler): ModuleDeclaration {
     },
   };
 }
-
-/** The devnet's `core` settings: a custom network, its genesis from the manifest, its table v8 then v9. */
-const devnetSettings = (found: FoundTape): Readonly<Record<string, unknown>> => ({
-  network: "custom",
-  genesisHash: (found.tape.notes as { readonly genesis: { readonly hash: string } }).genesis.hash,
-  ledgerTable: {
-    rows: [
-      { specVersionMin: 1_000_000, specVersionMax: 1_999_999, ledger: "v8" },
-      { specVersionMin: 2_000_000, specVersionMax: 2_999_999, ledger: "v9" },
-    ],
-  },
-});
 
 /** A tape's `core` settings: its network's, the devnet's own. */
 export const tapeSettings = (found: FoundTape): Readonly<Record<string, unknown>> =>

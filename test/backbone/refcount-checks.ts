@@ -245,21 +245,44 @@ export function fixtureProblems(
   return problems;
 }
 
+/** The keys persisted after a block: those with a root count. [design §1] */
+const persistedIn = (tables: TableSnapshot): string[] => [...tables.roots].filter(([, count]) => count > 0).map(([key]) => key);
+
+/** The tables before block 0. */
+export const NO_TABLES: TableSnapshot = Object.freeze({
+  rows: new Map(),
+  refs: new Map(),
+  roots: new Map(),
+  queue: new Set<string>(),
+  states: new Map(),
+  contracts: [],
+  digests: new Map(),
+});
+
 /**
  * What block h keeps by the stored rows' account, on a recorded tape: `R_{h−1}` and `R_h` reached from the persisted
- * keys (the keys of `root_counts`) after h − 1 and after h through the child lists stored then, and `K_h` from those, the
- * nodes of `batch` that are new or rewritten, and the stored child lists their rewrites replaced. A key reached that is
- * no row is reached all the same, so (c) also names it. [R3; design §1]
+ * keys (those with a root count) after h − 1 and after h through the child lists stored then, and `K_h` from those, the
+ * nodes of `batch` that are new or rewritten, and the stored child lists their rewrites replaced; `before` is
+ * {@link NO_TABLES} at block 0. A key reached that is no row is reached all the same, so (c) also names it.
+ * [R3, R13; design §1]
+ *
+ * `K_h`'s reach from the persisted keys after h and the new and rewritten nodes goes through the child lists stored
+ * after h, as design §1 defines it; with `through` `"written"`, through those stored after h − 1 with the batch's over
+ * them (R13's runs, `./refcount-restart.ts`). The two give the same `K_h` while every key that reach meets is stored
+ * after h and holds the child list h − 1 or the batch gave it; where one is not stored, (c) fails either way, the
+ * second naming more keys; where the rows after h hold a row or a child list neither gave, the second follows what the
+ * block was given, the first what was stored.
  */
-export function storedReach(before: TableSnapshot, after: TableSnapshot, batch: NodeBatch): Reach {
+export function storedReach(before: TableSnapshot, after: TableSnapshot, batch: NodeBatch, through: "stored" | "written" = "stored"): Reach {
   const written = writtenOf(batch);
   const fresh = [...written.keys()].filter((key) => !before.rows.has(key));
   const rewritten = [...written.keys()].filter((key) => before.rows.has(key) && Buffer.compare(before.rows.get(key) as Uint8Array, written.get(key) as Uint8Array) !== 0);
-  const prior = reachIn(before.rows, before.roots.keys()).reached;
-  const reached = reachIn(after.rows, after.roots.keys()).reached;
+  const prior = reachIn(before.rows, persistedIn(before)).reached;
+  const reached = reachIn(after.rows, persistedIn(after)).reached;
+  const lists = through === "stored" ? after.rows : new Map([...before.rows, ...written]);
   const kept = new Set([
     ...prior,
-    ...reachIn(after.rows, [...after.roots.keys(), ...fresh, ...rewritten]).reached,
+    ...reachIn(lists, [...persistedIn(after), ...fresh, ...rewritten]).reached,
     ...reachIn(before.rows, rewritten.flatMap((key) => referencesOf(before.rows.get(key) as Uint8Array))).reached,
   ]);
   return { before: prior, reached, kept };
@@ -276,19 +299,20 @@ export interface StoredCheck {
 }
 
 /**
- * R3's clauses (a)–(d) after block `height` of a recorded tape: `before` the tables after h − 1 (empty ones before block
- * 0), `after` those after h, `batch` the block's, `on` whether `sweep` is on at h, the retention window after h from
- * `height − retainStates`. Each problem names its height and clause. [R3]
+ * R3's clauses (a)–(d) after block `height` of a recorded tape: `before` the tables after h − 1 ({@link NO_TABLES}
+ * before block 0), `after` those after h, `batch` the block's, `on` whether `sweep` is on at h, the retention window
+ * after h from `height − retainStates`, `through` the child lists `K_h`'s reach goes through ({@link storedReach}).
+ * Each problem names its height and clause. [R3, R13, R22]
  */
 export function storedProblems(
   height: bigint,
   before: TableSnapshot,
   after: TableSnapshot,
   batch: NodeBatch,
-  options: { readonly retainStates?: number; readonly on?: boolean } = {},
+  options: { readonly retainStates?: number; readonly on?: boolean; readonly through?: "stored" | "written" } = {},
 ): StoredCheck {
   const on = options.on ?? true;
-  const reach = storedReach(before, after, batch);
+  const reach = storedReach(before, after, batch, options.through);
   const windowFrom = height - BigInt(options.retainStates ?? 0);
   const found = [
     ...closureProblems(after).map((p) => `(a) ${p}`),

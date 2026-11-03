@@ -8,8 +8,8 @@ import { rebuildTagged } from "../ledger/stored-values.js";
 import type { ProcessDatabase } from "../runner/process-backends.js";
 import type { FoundTape } from "../tape/real/real-tapes.js";
 import { committed, ingest, PATIENCE_MS } from "./ingest-harness.js";
-import { cappedAt } from "./ledger-restart.js";
-import { closureProblems, leakProblems, type Reach, reachIn, reachProblems, referencesOf, retainedProblems } from "./refcount-checks.js";
+import { cappedAt, devnetSettings } from "./ledger-restart.js";
+import { NO_TABLES, reachIn, storedProblems, storedReach } from "./refcount-checks.js";
 import { recordingWorker, seenTables, sweepCore, sweepTables, sweepWatcher, type TableSnapshot, workerRecord } from "./sweep-tapes.js";
 
 /**
@@ -18,7 +18,8 @@ import { recordingWorker, seenTables, sweepCore, sweepTables, sweepWatcher, type
  * block's batch, and the checks on it. Each check lists what it finds broken, none when it holds. Imports nothing of
  * Vitest. [R22, LG-9, LG-13, LG-14]
  * - {@link conversionR3}: R3's clauses (a)–(d) at the heights given, `R_{h−1}`, `R_h` and `K_h` computed from the
- *   stored rows and the block's batch ({@link storedKeep}), with the rows outside `R_{h−1} ∪ R_h` counted;
+ *   stored rows and the block's batch (`./refcount-checks.ts`, {@link storedProblems}), with the rows outside
+ *   `R_{h−1} ∪ R_h` counted;
  * - {@link releaseProblems}: each v8 state held until the block its window sets releases it, its rows kept until the
  *   block after, and those outside `K_{b+1}` deleted there;
  * - {@link loadProblems}: every contract state and zswap state stored below F loads from its stored key at the end.
@@ -29,13 +30,6 @@ export const DEVNET_F = 103n;
 
 /** The last height of a run: F + 4. */
 export const CONVERSION_LAST = DEVNET_F + 4n;
-
-/** The devnet's `core` settings: a custom network, its genesis from the manifest, its table v8 then v9. */
-export const devnetSettings = (found: FoundTape): Readonly<Record<string, unknown>> => ({
-  network: "custom",
-  genesisHash: (found.tape.notes as { genesis: { hash: string } }).genesis.hash,
-  ledgerTable: { rows: [{ specVersionMin: 1_000_000, specVersionMax: 1_999_999, ledger: "v8" }, { specVersionMin: 2_000_000, specVersionMax: 2_999_999, ledger: "v9" }] },
-});
 
 /** A `core_contract_states.states` row: its height, contract (hex) and keys (hex). */
 export interface ContractRow {
@@ -107,37 +101,6 @@ export async function conversionRun(
   return { retainStates, tables, batches: seen.batches, ledgers, nodes, contracts };
 }
 
-/** The keys with a root count in `tables`: the persisted keys after its block. [design §1] */
-const persisted = (tables: TableSnapshot): string[] => [...tables.roots].filter(([, count]) => count > 0).map(([key]) => key);
-
-/** What block h keeps by the stored rows' account, and how many rows after h are outside `R_{h−1} ∪ R_h`. */
-export interface StoredKeep extends Reach {
-  readonly outside: number;
-}
-
-/**
- * `R_{h−1}`, `R_h` and `K_h` computed from the stored rows: `before` the tables after h − 1 (none at genesis), `after`
- * those after h, `batch` block h's. The persisted keys are those with a root count; `N` and `W` are the batch's nodes
- * absent from `before`'s rows or stored there with another child list; a reach goes through the child lists stored
- * after the block it names (a node of the batch through its own). [R3 (c) on the tapes; design §1]
- */
-export function storedKeep(before: TableSnapshot | undefined, after: TableSnapshot, batch: NodeBatch): StoredKeep {
-  const previous: ReadonlyMap<string, Uint8Array> = before?.rows ?? new Map();
-  const written = new Map(batch.inserts.map((node) => [hex(node.key), node.children]));
-  const fresh = [...written.keys()].filter((key) => !previous.has(key));
-  const rewritten = [...written.keys()].filter((key) => previous.has(key) && Buffer.compare(previous.get(key) as Uint8Array, written.get(key) as Uint8Array) !== 0);
-  const lists = new Map([...written, ...after.rows]);
-  const prior = before === undefined ? new Set<string>() : reachIn(previous, persisted(before)).reached;
-  const reached = reachIn(after.rows, persisted(after)).reached;
-  const kept = new Set([
-    ...prior,
-    ...reachIn(lists, [...persisted(after), ...fresh, ...rewritten]).reached,
-    ...reachIn(previous, rewritten.flatMap((key) => referencesOf(previous.get(key) as Uint8Array))).reached,
-  ]);
-  const outside = [...after.rows.keys()].filter((key) => !prior.has(key) && !reached.has(key)).length;
-  return { before: prior, reached, kept, outside };
-}
-
 /** The tables after `h`, or an error naming the height. */
 function tablesAt(run: ConversionRun, h: bigint): TableSnapshot {
   const tables = run.tables.get(h);
@@ -153,26 +116,18 @@ function batchAt(run: ConversionRun, h: bigint): NodeBatch {
 }
 
 /**
- * R3's clauses (a)–(d) after every height of `heights`, `sweep` on, the retention window after h from h − `retainStates`
- * (no later revision): each problem with its height; and, by height, the rows outside `R_{h−1} ∪ R_h`. [R3, R22]
+ * R3's clauses (a)–(d) after every height of `heights` ({@link storedProblems}), `sweep` on, the retention window after
+ * h from h − `retainStates` (no later revision): each problem with its height; and, by height, the rows outside
+ * `R_{h−1} ∪ R_h`. [R3, R22]
  */
 export function conversionR3(run: ConversionRun, heights: readonly bigint[]): { readonly problems: string[]; readonly outside: Map<bigint, number> } {
   const problems: string[] = [];
   const outside = new Map<bigint, number>();
   for (const h of heights) {
-    const before = h === 0n ? undefined : tablesAt(run, h - 1n);
-    const after = tablesAt(run, h);
-    const batch = batchAt(run, h);
-    const reach = storedKeep(before, after, batch);
-    outside.set(h, reach.outside);
-    const windowFrom = h - BigInt(run.retainStates) > 0n ? h - BigInt(run.retainStates) : 0n;
-    const found = [
-      ...closureProblems(after).map((p) => `(a) ${p}`),
-      ...retainedProblems(after, windowFrom).map((p) => `(b) ${p}`),
-      ...reachProblems(after, reach, true).map((p) => `(c) ${p}`),
-      ...(before === undefined ? [] : leakProblems(before, after, batch, true).map((p) => `(d) ${p}`)),
-    ];
-    problems.push(...found.map((p) => `after ${h}: ${p}`));
+    const before = h === 0n ? NO_TABLES : tablesAt(run, h - 1n);
+    const check = storedProblems(h, before, tablesAt(run, h), batchAt(run, h), { retainStates: run.retainStates });
+    outside.set(h, check.outside);
+    problems.push(...check.problems);
   }
   return { problems, outside };
 }
@@ -199,7 +154,7 @@ export interface Released {
  * - `s` has root count 1 after h … b − 1, and b's batch gives it −1, leaving no root count after b;
  * - none of its rows is deleted before b + 1: at each t of h … b, what `s` reaches through the child lists stored
  *   after t is stored, and no row it reached after t − 1 is gone after t;
- * - after b + 1 no row it reached after b is stored unless it is in `K_{b+1}` ({@link storedKeep}).
+ * - after b + 1 no row it reached after b is stored unless it is in `K_{b+1}` ({@link storedReach}).
  * [R22, LG-14; design §5, §9.2]
  */
 export function releaseProblems(run: ConversionRun): Released {
@@ -231,7 +186,7 @@ export function releaseProblems(run: ConversionRun): Released {
     }
     const rows = [...reachIn(tablesAt(run, b).rows, [s]).reached];
     const next = tablesAt(run, b + 1n);
-    const keep = storedKeep(tablesAt(run, b), next, batchAt(run, b + 1n)).kept;
+    const keep = storedReach(tablesAt(run, b), next, batchAt(run, b + 1n)).kept;
     const unkept = rows.filter((key) => !keep.has(key));
     for (const key of unkept.filter((k) => next.rows.has(k)).sort()) {
       problems.push(`${key}, a row of the state of ${h} after its release at ${b}, is outside K_${b + 1n} and still stored after ${b + 1n}`);

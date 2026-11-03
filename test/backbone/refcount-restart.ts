@@ -22,16 +22,7 @@ import type { FixtureDag } from "../ledger/fixtures/sweep-fixture.js";
 import { cursorIn, type ProcessDatabase } from "../runner/process-backends.js";
 import { ingest, type Ingest } from "./ingest-harness.js";
 import { cappedAt, restartAt } from "./ledger-restart.js";
-import {
-  closureProblems,
-  fixtureProblems,
-  leakProblems,
-  type Reach,
-  reachIn,
-  reachProblems,
-  referencesOf,
-  retainedProblems,
-} from "./refcount-checks.js";
+import { fixtureProblems, storedProblems } from "./refcount-checks.js";
 import { nodeSet } from "./refcount-model.js";
 import { recordingWorker, SWEEP_LOADER, sweepCore, sweepTables, sweepTape, type TableSnapshot, type WorkerRecord, workerRecord } from "./sweep-tapes.js";
 
@@ -349,7 +340,7 @@ function restartWatcher(
         const batch = record.batches.get(b.height);
         if (heights.checked(h) && was !== undefined) {
           before.delete(h);
-          r3 = batch === undefined ? { problems: [`after ${h}: R3 had no batch`], outside: 0 } : storedRowsProblems(was, tables, batch, h);
+          r3 = batch === undefined ? { problems: [`after ${h}: R3 had no batch`], outside: 0 } : storedRowsProblems(was, tables, batch, b.height);
         }
         sink({
           kind: "after",
@@ -816,37 +807,19 @@ export async function databaseNow(db: ProcessDatabase, patience: number): Promis
 }
 
 /**
- * R3 on a recorded tape after height h, from the stored rows (`before` after h − 1, `after` after h, `batch` h's): its
- * clauses (a)–(d), `R_{h−1}`, `R_h` and `K_h` computed from the stored rows and root counts and the block's written
- * nodes, and the number of rows outside `R_{h−1} ∪ R_h`. [R3, R13]
+ * R3 on a recorded tape after height `h`, from the stored rows (`before` after h − 1, `after` after h, `batch` h's):
+ * its clauses (a)–(d) ({@link storedProblems}), `K_h`'s reach going through the child lists stored after h − 1 with
+ * the batch's over them (`through` `"written"`), and the number of rows outside `R_{h−1} ∪ R_h`, as a line of the
+ * observation file carries them. [R3, R13]
  */
 export function storedRowsProblems(
   before: TableSnapshot,
   after: TableSnapshot,
   batch: NodeBatch,
-  h: number,
+  h: bigint,
 ): { readonly problems: string[]; readonly outside: number } {
-  const written = new Map(batch.inserts.map((node) => [hex(node.key), node.children]));
-  const fresh = [...written.keys()].filter((key) => !before.rows.has(key));
-  const rewritten = [...written.keys()].filter((key) => before.rows.has(key) && Buffer.compare(before.rows.get(key) as Uint8Array, written.get(key) as Uint8Array) !== 0);
-  const lists = new Map([...before.rows, ...written]);
-  const reachFrom = (starts: Iterable<string>, through: ReadonlyMap<string, Uint8Array>): Set<string> => reachIn(through, starts).reached;
-  const was = reachFrom(before.roots.keys(), before.rows);
-  const is = reachFrom(after.roots.keys(), after.rows);
-  const kept = new Set([
-    ...was,
-    ...reachFrom([...after.roots.keys(), ...fresh, ...rewritten], lists),
-    ...reachFrom(rewritten.flatMap((key) => referencesOf(before.rows.get(key) as Uint8Array)), before.rows),
-  ]);
-  const reach: Reach = { before: was, reached: is, kept };
-  const problems = [
-    ...closureProblems(after).map((p) => `(a) ${p}`),
-    ...retainedProblems(after, BigInt(h)).map((p) => `(b) ${p}`),
-    ...reachProblems(after, reach, true).map((p) => `(c) ${p}`),
-    ...leakProblems(before, after, batch, true).map((p) => `(d) ${p}`),
-  ].map((p) => `after ${h}: ${p}`);
-  const outside = [...after.rows.keys()].filter((key) => !was.has(key) && !is.has(key)).length;
-  return { problems, outside };
+  const check = storedProblems(h, before, after, batch, { through: "written" });
+  return { problems: [...check.problems], outside: check.outside };
 }
 
 /** What every segment of a run shares. */

@@ -43,5 +43,5 @@ Make the role's creation tolerate the race: create each missing role in a sub-tr
 as done (`DO $$ BEGIN CREATE ROLE … NOLOGIN; EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL; END $$`,
 then re-read the role's facts), or retry the schema transaction once when `CREATE ROLE` fails with `23505` on
 `pg_authid_rolname_index`, or take a server-wide advisory lock (`pg_advisory_xact_lock` on a fixed key) before
-reading the roles in `prepareSchemas` and `restoreOwnership`, so startups on one server set roles up one at a time. A test: two processes started at the same moment on two new databases of one server, both
-reaching their first block.
+reading the roles in `prepareSchemas` and `restoreOwnership`, so startups on one server set roles up one at a time.
+A test: two processes started at the same moment on two new databases of one server, both reaching their first block.

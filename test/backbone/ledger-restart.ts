@@ -5,11 +5,12 @@ import { CORE_TX_RESULTS } from "../../src/backbone/core-tx-results/core-tx-resu
 import type { LedgerHost } from "../../src/ledger/worker/host.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import type { TapeRecord } from "../../tools/tape/index.js";
+import type { FoundTape } from "../tape/real/real-tapes.js";
 
 /**
- * A ledger process stopped and started again on a tape: the core modules of the ledger, the records a restart at a
- * cursor needs, and a ledger worker that reports its loads. Imports nothing of Vitest, so that a worker process
- * (`ledger-restart.worker.ts`) builds the same. [LG-11, A102]
+ * A ledger process stopped and started again on a tape: the core modules of the ledger, the devnet tape's `core`
+ * settings, the records a restart at a cursor needs, and a ledger worker that reports its loads. Imports nothing of
+ * Vitest, so that a worker process (`ledger-restart.worker.ts`) builds the same. [LG-11, A102]
  *
  * A tape replays to a client what was recorded, answering calls by method and params. [TT-2]
  *
@@ -25,6 +26,18 @@ import type { TapeRecord } from "../../tools/tape/index.js";
 
 /** The ledger's core modules as the build enables them (`core-ledger-state` and what it requires). */
 export const LEDGER_CORE: readonly ModuleDeclaration[] = Object.freeze([CORE_CHAIN_EVENTS, CORE_BLOCK_PARSED, CORE_TX_RESULTS, CORE_LEDGER_STATE]);
+
+/** The devnet's `core` settings: a custom network, its genesis from the manifest, its table v8 then v9. */
+export const devnetSettings = (found: FoundTape): Readonly<Record<string, unknown>> => ({
+  network: "custom",
+  genesisHash: (found.tape.notes as { readonly genesis: { readonly hash: string } }).genesis.hash,
+  ledgerTable: {
+    rows: [
+      { specVersionMin: 1_000_000, specVersionMax: 1_999_999, ledger: "v8" },
+      { specVersionMin: 2_000_000, specVersionMax: 2_999_999, ledger: "v9" },
+    ],
+  },
+});
 
 type Call = Extract<TapeRecord, { readonly method: string; readonly result: unknown }>;
 

@@ -44,7 +44,7 @@ import {
   recordedGenesis,
   RUNTIME_1_0,
 } from "./ledger-tapes.js";
-import { cappedAt, hashAt, recordingLoads, restartAt, type SeenLoad } from "./ledger-restart.js";
+import { cappedAt, devnetSettings, hashAt, recordingLoads, restartAt, type SeenLoad } from "./ledger-restart.js";
 
 /**
  * `core-ledger-state` through the real process, on PostgreSQL 18 and PGlite 0.5.10. The setup:
@@ -330,13 +330,6 @@ describe("A99 on task 0.3's recorded ranges from genesis (owner decision Q133 C;
   const backend = PROCESS_BACKENDS.find((candidate) => candidate.kind === "pglite") as ProcessBackend;
   /** Six hours of replay: 10,000 heights on a loaded machine. */
   const REPLAY_MS = 6 * 3_600_000;
-
-  /** The devnet's `core` settings: a custom network, its genesis from the manifest, its table v8 then v9. */
-  const devnetSettings = (found: FoundTape): Readonly<Record<string, unknown>> => ({
-    network: "custom",
-    genesisHash: (found.tape.notes as { genesis: { hash: string } }).genesis.hash,
-    ledgerTable: { rows: [{ specVersionMin: 1_000_000, specVersionMax: 1_999_999, ledger: "v8" }, { specVersionMin: 2_000_000, specVersionMax: 2_999_999, ledger: "v9" }] },
-  });
 
   /** `records` with `chain_getFinalizedHead` answering block `to` (the recording day's head is past the range). */
   const capTo = (records: readonly TapeRecord[], to: bigint): TapeRecord[] => cappedAt(records, to);
