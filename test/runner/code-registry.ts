@@ -636,7 +636,7 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
 
 /**
  * The codes whose tasks have not run yet, by `<list>:<code>`, each with the task of `tasks.md` that adds it and its test
- * (see the module comment); a task of another change's `tasks.md` is named `<change> <id>` ({@link changeTasks}).
+ * (see the module comment).
  */
 export const PENDING: Readonly<Record<string, string>> = Object.freeze({});
 
@@ -645,14 +645,6 @@ export function tasksDone(text: string): ReadonlyMap<string, boolean> {
   const tasks = new Map<string, boolean>();
   for (const match of text.matchAll(/^- \[([ x])\] (\d+\.\d+[a-z]?) /gm)) tasks.set(match[2] as string, match[1] === "x");
   return tasks;
-}
-
-/**
- * The tasks of another OpenSpec change's `tasks.md` (its text), as {@link tasksDone} reads them, each id prefixed with
- * the change's name and a space (`ledger-refcount 3.8`), so that they do not collide with `core-arch`'s. [R19]
- */
-export function changeTasks(change: string, text: string): ReadonlyMap<string, boolean> {
-  return new Map([...tasksDone(text)].map(([task, done]) => [`${change} ${task}`, done] as const));
 }
 
 /** What {@link registryProblems} checks. */
