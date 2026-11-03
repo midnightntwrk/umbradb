@@ -348,9 +348,40 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
 
 ## 4. The process on both backends (`design.md` §4–§8; §13 phase 3)
 
-- [ ] 4.1 R3 on the tapes, and the rewrite.
+- [x] 4.1 R3 on the tapes, and the rewrite.
       **Acceptance:** R3's clause "at every 100th height and the last of the recorded preprod 0–10,000, stagenet
       0–10,000 and devnet v8 → v9 tapes" (R3 whole with 3.8's part); R27.
+      **Done (2026-11-03, this commit):** R3 on the tapes: `test/backbone/refcount-tapes.ts` replays a tape from
+      genesis through the process with the ledger's core modules and `core-contract-states`; a watcher module keeps,
+      at each sampled height h (every 100th, the last; on the devnet also U 102, F 103, F + 1 104), the tables at
+      h − 1 (`sweepTables`, its own queries, digests skipped) and the worker's batch for h, reads the tables after h at
+      h + 1, and runs R3's (a)–(d) there (`storedProblems`), (c)'s `R_{h−1}`, `R_h`, `K_h` from the stored rows and the
+      block's written nodes (`storedReach`, `refcount-checks.ts`), the rows outside `R_{h−1} ∪ R_h` logged. Files:
+      `ledger-refcount-tape-{preprod,stagenet}-{postgres,pglite}.test.ts` (one PostgreSQL replay takes ~28 minutes
+      under load, so each tape's backends run side by side) and `ledger-refcount-tape-devnet.test.ts` (both);
+      skipped by name without `UMBRADB_TAPES`. Result: 101 heights checked on preprod and on stagenet and 7 on the
+      devnet, on both backends, no problem, no row outside `R_{h−1} ∪ R_h`. R3's control on the tape
+      (`ledger-refcount-tape.negative-control.test.ts`): at 200 on the devnet the state's new root and the block's
+      written nodes deleted in its transaction (`refcountWriter`): (b) `I4` and (c) `S_h ≠ K_h` fail at 200, nothing
+      before. R27 (`ledger-refcount-rewrite.test.ts`, both backends, the extended DAG): at TO_REF and TO_EMBEDDED the
+      row holds the new child list, R3 (a) holds there and R3 after every block; `small to-embedded` keeps its row,
+      queued, at TO_EMBEDDED and is deleted (and evicted) at TO_EMBEDDED + 1; kept when a new node references it by
+      then (`requeue` at REQUEUE + 1) or when persisted by then (the test package's new `persist` option at
+      TO_EMBEDDED + 1); a new process after each rewrite loads the new child list (the rows the node-store bridge read
+      for its load, `readingLoads`) and its next root is the node's. Controls
+      (`ledger-refcount-rewrite.negative-control.test.ts`): the first copy kept (`ON CONFLICT (node_key) DO NOTHING`
+      through the new `core-ledger-state` seam `nodeWriter`, the write count's check left out so the block commits)
+      fails the row check at TO_REF; `small to-embedded` deleted in TO_EMBEDDED's transaction fails R3 (c)'s
+      `R_{h−1} ⊆ S_h`. Shared helpers extended, existing behavior kept: `sweepTables`' `digests` option,
+      `fixtureReach`'s `persisted`, `runDag`'s `worker`, the test package's `persist`. Outside the task's test files:
+      `core-ledger-state.ts`'s `nodeWriter` option (one field, one call). R27 seen failing with the first-copy write
+      put back in `sql.ts` (all six tests halt at TO_REF). Codex: `4.1-devnet-1`, `4.1-tapes-1`, `4.1-r27-1`,
+      `4.1-tape-control-1`, `4.1-r27-red-first-copy`, `4.1-touched-1` (14 files, 99 passed). The whole suite with the
+      tapes (`4.1-full`, 3,756 s at a load average of 40–63): 413 files, 6,444 tests passed, 12 skipped, 5 failed, none
+      in a file this task touches — A12 (`postgres-pool`), L17 and L18 (`library/network`, issue 00064), A114
+      (`transport-intake`) and A47's PostgreSQL teardown (`upgrade-boundary`, Docker refusing to remove a running
+      container; recorded as `docs/issues/00081-postgres-test-server-stop-fails-under-load.md`); the four files
+      alone pass (`4.1-full-failed-alone`, 38 passed, diagnostic only); §0 had none.
 - [x] 4.2 Written again, a queued key referenced again, the lag, reuse, a lowered window.
       **Acceptance:** R5, R6, R7, R8, R9.
       **Done (2026-11-03, this commit):** `test/backbone/ledger-refcount-blocks.test.ts`, on the extended DAG through

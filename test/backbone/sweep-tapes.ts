@@ -72,8 +72,11 @@ type Reader = { query(sql: string): Promise<Record<string, unknown>[]> };
 
 const bytesOf = (value: unknown): Uint8Array => Uint8Array.from(value as Uint8Array);
 
-/** The tables read through `read` (see {@link TableSnapshot}). */
-export async function sweepTables(read: Reader): Promise<TableSnapshot> {
+/**
+ * The tables read through `read` (see {@link TableSnapshot}); without their digests (an empty map) when `digests` is
+ * false, for a check that reads the tables at many heights of a long run. [R3]
+ */
+export async function sweepTables(read: Reader, options: { readonly digests?: boolean } = {}): Promise<TableSnapshot> {
   const counts = async (table: string): Promise<Map<string, number>> =>
     new Map((await read.query(`SELECT encode(node_key, 'hex') AS k, count FROM core_ledger_state.${table} ORDER BY node_key`)).map((r) => [r.k as string, Number(r.count)]));
   const rows = new Map(
@@ -97,7 +100,7 @@ export async function sweepTables(read: Reader): Promise<TableSnapshot> {
      WHERE n.nspname = 'core_ledger_state' AND c.relkind IN ('r', 'p') AND NOT c.relispartition ORDER BY 1`,
   );
   const digests = new Map<string, string>();
-  for (const { t } of names) {
+  for (const { t } of options.digests === false ? [] : names) {
     const [row] = await read.query(`SELECT md5(coalesce(string_agg(r::text, ',' ORDER BY r::text), '')) AS d FROM core_ledger_state.${t as string} r`);
     digests.set(t as string, row?.d as string);
   }

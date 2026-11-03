@@ -48,6 +48,8 @@ export interface DagRunOptions {
   readonly user?: readonly ModuleDeclaration[];
   /** Called with the running process once it reached the last height or halted, before it stops (a backup). [R15] */
   readonly atLast?: (process: Ingest) => Promise<void>;
+  /** The ledger worker as the process gets it: the recording one, wrapped by an instrument of the test's. */
+  readonly worker?: (host: LedgerHost) => LedgerHost;
 }
 
 /** What a run gave. */
@@ -105,7 +107,11 @@ export async function runDag(db: ProcessDatabase, options: DagRunOptions = {}): 
     user: [sweepWatcher(seen, record), ...(options.user ?? [])],
     ...(options.settings === undefined ? {} : { settings: options.settings }),
     ...(options.revisions === undefined ? {} : { revisions: options.revisions }),
-    ledgerWorker: () => (host = recordingWorker(startLedgerWorker({ loader: SWEEP_LOADER, loaderData: data }), record)),
+    ledgerWorker: () => {
+      const recording = recordingWorker(startLedgerWorker({ loader: SWEEP_LOADER, loaderData: data }), record);
+      host = options.worker === undefined ? recording : options.worker(recording);
+      return host;
+    },
   });
   let status;
   let restarts = 0;

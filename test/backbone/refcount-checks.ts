@@ -13,7 +13,8 @@ import type { TableSnapshot } from "./sweep-tapes.js";
  * - (b) I4, and every state key of `states` inside the retention window and every key `core_contract_states.states`
  *   stores a row whose whole reachable set is stored ({@link retainedProblems});
  * - (c) `R_{h−1} ⊆ S_h`, and with `sweep` on at h `S_h = K_h`, `R_{h−1}`, `R_h` and `K_h` computed elsewhere: on the
- *   DAG fixture by {@link fixtureReach}, from the fixture's states and the blocks' written nodes, not from the database
+ *   DAG fixture by {@link fixtureReach}, from the fixture's states and the blocks' written nodes, not from the database;
+ *   on the recorded tapes by {@link storedReach}, from the stored rows and the block's written nodes
  *   ({@link reachProblems});
  * - (d) with `sweep` on at h, I5 against the queue read at h − 1 ({@link leakProblems}).
  *
@@ -139,13 +140,15 @@ export function leakProblems(before: TableSnapshot, after: TableSnapshot, batch:
 
 /**
  * A run's configuration as the oracle takes it: `retainStates` (0 unless given), or `retainedFrom`, the lowest height
- * whose state is alive after block h, for a window a revision changes (`retainStates` R gives `max(0, h − R)`); and
- * whether `sweep` is on at a height (on unless `on` says otherwise). [R3, LG-12]
+ * whose state is alive after block h, for a window a revision changes (`retainStates` R gives `max(0, h − R)`);
+ * whether `sweep` is on at a height (on unless `on` says otherwise); and the keys a test package persists itself after
+ * a height (`persisted`). [R3, R27, LG-12]
  */
 export interface FixtureConfig {
   readonly retainStates?: number;
   readonly retainedFrom?: (h: number) => number;
   readonly on?: (h: number) => boolean;
+  readonly persisted?: (h: number) => readonly string[];
 }
 
 /** The lowest height whose state is alive after block `h`, by `options`. */
@@ -154,9 +157,10 @@ const lowestAlive = (options: FixtureConfig, h: number): number => options.retai
 /**
  * The oracle's account of the DAG fixture `dag`, heights 0 to `last`: at each height h, `R_{h−1}`, `R_h` and `K_h`,
  * from the fixture's states (the persisted keys after h: the roots of the states alive after h, those after
- * `h − retainStates` to h unless `retainedFrom` says otherwise) and the nodes `batches` wrote (each key's child list the
- * one last written for it), never from the database. The stored set it carries from block to block is `K_h` where `on`
- * says `sweep` is on, else the set before with the new nodes. [R3; design §1, §4.3]
+ * `h − retainStates` to h unless `retainedFrom` says otherwise, and the keys `persisted` adds, a test package's own)
+ * and the nodes `batches` wrote (each key's child list the one last written for it), never from the database. The
+ * stored set it carries from block to block is `K_h` where `on` says `sweep` is on, else the set before with the new
+ * nodes. [R3; design §1, §4.3]
  */
 export function fixtureReach(
   dag: FixtureDag,
@@ -166,7 +170,10 @@ export function fixtureReach(
 ): Map<bigint, Reach> {
   const persisted = (h: number): string[] => {
     const from = lowestAlive(options, h);
-    return Array.from({ length: h - from + 1 }, (_, i) => hex(rootOf(h - i, dag).slice(1)));
+    return [
+      ...Array.from({ length: h - from + 1 }, (_, i) => hex(rootOf(h - i, dag).slice(1))),
+      ...(options.persisted?.(h) ?? []),
+    ];
   };
   const reachFrom = (starts: Iterable<string>, lists: ReadonlyMap<string, Uint8Array>): Set<string> => {
     const reached = new Set<string>();
@@ -236,4 +243,59 @@ export function fixtureProblems(
     problems.push(...found.map((p) => `after ${h}: ${p}`));
   }
   return problems;
+}
+
+/**
+ * What block h keeps by the stored rows' account, on a recorded tape: `R_{h−1}` and `R_h` reached from the persisted
+ * keys (the keys of `root_counts`) after h − 1 and after h through the child lists stored then, and `K_h` from those, the
+ * nodes of `batch` that are new or rewritten, and the stored child lists their rewrites replaced. A key reached that is
+ * no row is reached all the same, so (c) also names it. [R3; design §1]
+ */
+export function storedReach(before: TableSnapshot, after: TableSnapshot, batch: NodeBatch): Reach {
+  const written = writtenOf(batch);
+  const fresh = [...written.keys()].filter((key) => !before.rows.has(key));
+  const rewritten = [...written.keys()].filter((key) => before.rows.has(key) && Buffer.compare(before.rows.get(key) as Uint8Array, written.get(key) as Uint8Array) !== 0);
+  const prior = reachIn(before.rows, before.roots.keys()).reached;
+  const reached = reachIn(after.rows, after.roots.keys()).reached;
+  const kept = new Set([
+    ...prior,
+    ...reachIn(after.rows, [...after.roots.keys(), ...fresh, ...rewritten]).reached,
+    ...reachIn(before.rows, rewritten.flatMap((key) => referencesOf(before.rows.get(key) as Uint8Array))).reached,
+  ]);
+  return { before: prior, reached, kept };
+}
+
+/** R3's check at one height of a recorded tape: the problems found, and the rows outside `R_{h−1} ∪ R_h`. [R3] */
+export interface StoredCheck {
+  readonly height: bigint;
+  /** `S_h`'s size. */
+  readonly rows: number;
+  /** The rows of `S_h` in neither `R_{h−1}` nor `R_h`. */
+  readonly outside: number;
+  readonly problems: readonly string[];
+}
+
+/**
+ * R3's clauses (a)–(d) after block `height` of a recorded tape: `before` the tables after h − 1 (empty ones before block
+ * 0), `after` those after h, `batch` the block's, `on` whether `sweep` is on at h, the retention window after h from
+ * `height − retainStates`. Each problem names its height and clause. [R3]
+ */
+export function storedProblems(
+  height: bigint,
+  before: TableSnapshot,
+  after: TableSnapshot,
+  batch: NodeBatch,
+  options: { readonly retainStates?: number; readonly on?: boolean } = {},
+): StoredCheck {
+  const on = options.on ?? true;
+  const reach = storedReach(before, after, batch);
+  const windowFrom = height - BigInt(options.retainStates ?? 0);
+  const found = [
+    ...closureProblems(after).map((p) => `(a) ${p}`),
+    ...retainedProblems(after, windowFrom < 0n ? 0n : windowFrom).map((p) => `(b) ${p}`),
+    ...reachProblems(after, reach, on).map((p) => `(c) ${p}`),
+    ...leakProblems(before, after, batch, on).map((p) => `(d) ${p}`),
+  ];
+  const outside = [...after.rows.keys()].filter((key) => !reach.before.has(key) && !reach.reached.has(key)).length;
+  return { height, rows: after.rows.size, outside, problems: found.map((p) => `after ${height}: ${p}`) };
 }

@@ -242,6 +242,11 @@ export interface CoreLedgerStateOptions {
    */
   readonly refcountWriter?: (w: Pick<BlockWriteHandle, "execute">, height: bigint) => Pick<BlockWriteHandle, "execute">;
   /**
+   * The handle the block's node writes run through, given the block's own and its height: that handle. A negative
+   * control's changes how a stored node is written again. [R27]
+   */
+  readonly nodeWriter?: (w: Pick<BlockWriteHandle, "execute">, height: bigint) => Pick<BlockWriteHandle, "execute">;
+  /**
    * Whether an eviction the package still refuses after the worker freed what it can ends the worker thread and
    * applies the block again in a new one; true by default. False halts at the first refusal. [LG-14, Q144 B]
    */
@@ -646,7 +651,7 @@ export function coreLedgerState(options: CoreLedgerStateOptions = {}): DefinedMo
       async "on-db-write"(p, b, w) {
         const { applied, step } = pendingOf(p, b);
         // The node writes first: a rewritten node can be among those the step deletes. [LG-14]
-        const written = await writeBlock(w, applied);
+        const written = await writeBlock(options.nodeWriter?.(w, b.height) ?? w, applied);
         await writeRefcount(
           options.refcountWriter?.(w, b.height) ?? w,
           step,
