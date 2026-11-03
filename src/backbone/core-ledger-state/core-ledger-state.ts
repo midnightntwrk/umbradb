@@ -586,7 +586,11 @@ export function coreLedgerState(options: CoreLedgerStateOptions = {}): DefinedMo
       {
         name: LEDGER_STATE_ITEM,
         lifetimes: ["block", "table", "process"],
-        table: { schema: "core_ledger_state", tables: ["nodes", "root_counts", "states", "sweep", "grey", "marks"], kind: "mutable" },
+        table: {
+          schema: "core_ledger_state",
+          tables: ["nodes", "root_counts", "states", "ref_counts", "unreferenced", "sweep", "grey", "marks"],
+          kind: "mutable",
+        },
       },
       {
         name: LEDGER_EVENTS_ITEM,

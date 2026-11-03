@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CONFIG_MIGRATION, readHistory, recordHistory } from "../../src/backbone/core-chain/index.js";
+import { CORE_CHAIN_MIGRATION, readHistory, recordHistory } from "../../src/backbone/core-chain/index.js";
 import {
   checkHistory,
   graphInputOf,
@@ -63,8 +63,8 @@ interface Holder {
 }
 
 /**
- * A stand-in for `core-chain`: `core_chain.config`'s migration (`001`; the real part's `002`, its identity, is not
- * needed here), and the history recorded in its `on-start-db`.
+ * A stand-in for `core-chain`: its migration (`001`, which creates `core_chain.config` and the identity's table, not
+ * used here), and the history recorded in its `on-start-db`.
  */
 function coreChain(holder: Holder): ModuleDeclaration {
   return defineModule({
@@ -75,7 +75,7 @@ function coreChain(holder: Holder): ModuleDeclaration {
     provides: [],
     startsMidChain: true,
     configSchema: z.object({}),
-    migrations: [{ id: CONFIG_MIGRATION.id, sql: CONFIG_MIGRATION.sql }],
+    migrations: [{ id: CORE_CHAIN_MIGRATION.id, sql: CORE_CHAIN_MIGRATION.sql }],
     points: {
       async "on-start-db"(_p, w) {
         if (holder.input === undefined) throw new Error("core-chain's on-start-db ran before the history was checked");

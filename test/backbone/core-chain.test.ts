@@ -5,14 +5,13 @@ import { bindCoreBlockFetch, CORE_BLOCK_FETCH_ID } from "../../src/backbone/core
 import {
   bindCoreChain,
   checkChain,
-  CONFIG_MIGRATION,
   type ConfiguredGenesis,
   configuredGenesisOf,
   CORE_CHAIN,
   CORE_CHAIN_ID,
+  CORE_CHAIN_MIGRATION,
   CORE_CHAIN_MIGRATIONS,
   type CoreChainFacts,
-  IDENTITY_MIGRATION,
   IDENTITY_TABLE,
   nodeOptionsOf,
   readHistory,
@@ -51,7 +50,7 @@ import { chainDeclarations } from "./chain-build.js";
 /**
  * The backbone part `core-chain`. These tests cover:
  * - its declaration [CORE-ARCH §4.11];
- * - its migrations: `001` the configuration history's table, `002` `core_chain.identity` [design §10];
+ * - its one migration, `001`: the configuration history's table and `core_chain.identity` [design §10];
  * - the startup checks ({@link checkChain}, {@link waitForNode}), which ask the block source (the node, through
  *   `core-block-fetch`, or the in-memory source) for the genesis hash (block 0's), the finalized head and the
  *   finalized hash at the cursor [IN-2, IN-3; CORE-ARCH §4.4];
@@ -116,17 +115,20 @@ describe("core-chain's declaration (CD-1, design §10, task 3.2's note (e))", ()
     expect(Object.keys(CORE_CHAIN.points)).toEqual(["on-start-db", "on-db-write"]);
   });
 
-  it("has migrations 001 (the history's table, its provides column task 14.1a's) and 002 (the identity)", () => {
-    expect(CORE_CHAIN_MIGRATIONS).toEqual([CONFIG_MIGRATION, IDENTITY_MIGRATION]);
+  it("has one migration, 001: the history's table (its provides column task 14.1a's) and the identity's", () => {
+    expect(CORE_CHAIN_MIGRATIONS).toEqual([CORE_CHAIN_MIGRATION]);
     expect(CORE_CHAIN.migrations).toEqual(CORE_CHAIN_MIGRATIONS.map(({ id, sql }) => ({ id, sql })));
-    expect(CORE_CHAIN_MIGRATIONS.map(({ id }) => id)).toEqual(["001", "002"]);
+    expect(CORE_CHAIN_MIGRATIONS.map(({ id }) => id)).toEqual(["001"]);
     const sha = (sql: string) => createHash("sha256").update(sql, "utf8").digest("hex");
-    // 001 is the configuration history's original text (`ed1b51f`) with the column `provides` added for private
-    // processes, changed in place since no database exists yet. From now on a database that applied it keeps its
-    // checksum. [PP-13]
-    expect(sha(CONFIG_MIGRATION.sql)).toBe(CONFIG_MIGRATION_SHA256);
-    expect(CONFIG_MIGRATION.sql).toContain("  provides text[] NOT NULL,\n");
-    expect(sha(IDENTITY_MIGRATION.sql)).toBe(IDENTITY_MIGRATION_SHA256);
+    // 001 is the two migrations of the builds before one migration per part, the configuration history's (with the
+    // column `provides` for private processes) and the identity's, in one; those builds' databases recorded another
+    // 001 and are refused. From now on a database that applied it keeps its checksum. [PP-13, R16]
+    expect(sha(CORE_CHAIN_MIGRATION.sql)).toBe(CORE_CHAIN_MIGRATION_SHA256);
+    expect(CORE_CHAIN_MIGRATION.sql).toContain("  provides text[] NOT NULL,\n");
+    expect([...CORE_CHAIN_MIGRATION.sql.matchAll(/CREATE TABLE (\S+) \(/g)].map((match) => match[1])).toEqual([
+      "core_chain.config",
+      IDENTITY_TABLE,
+    ]);
     expect(Object.isFrozen(CORE_CHAIN_MIGRATIONS)).toBe(true);
   });
 
@@ -137,10 +139,8 @@ describe("core-chain's declaration (CD-1, design §10, task 3.2's note (e))", ()
   });
 });
 
-/** The pinned SHA-256 of migration 001 (`core_chain.config`, with the private processes' `provides`). */
-const CONFIG_MIGRATION_SHA256 = "33861745ea470f413c9f6d042c2398e366d3b42be2e5dbf12e2c0147eff43a74";
-/** The pinned SHA-256 of migration 002 (`core_chain.identity`). */
-const IDENTITY_MIGRATION_SHA256 = "c5474e25be7bdd0bf5a68965a20471039819cbb222750a5099252d130e074fc1";
+/** The pinned SHA-256 of migration 001: `core_chain.config` (with the private processes' `provides`) and `core_chain.identity`. */
+const CORE_CHAIN_MIGRATION_SHA256 = "b8656c45d3574634d6622d017d06fc97a0aa9eeea5827ba0c31eb69e26048ef3";
 
 describe("the startup checks (IN-3) and the wait for the node (IN-2, IN-3)", () => {
   const signal = () => new AbortController().signal;
@@ -571,7 +571,6 @@ describe.each(BACKENDS)("core-chain bound to a process on $name", (backend: Test
       await db.read((read) => read.query("SELECT module, migration_id FROM core_chain.migrations WHERE module = 'core-chain' ORDER BY position")),
     ).toEqual([
       { module: "core-chain", migration_id: "001" },
-      { module: "core-chain", migration_id: "002" },
     ]);
     // A module role reads it (through the database API's default privileges on core_chain), never writes it. [DB-6]
     const role = schemaPlan(started.graph.modules).writeRole("core-block-commit");
@@ -598,7 +597,7 @@ describe.each(BACKENDS)("core-chain bound to a process on $name", (backend: Test
   it("reads no identity before the table exists, nor while it holds no row", async () => {
     const { db } = await backend.database("SELECT 1", cursorHeight);
     expect(await db.read((read) => readIdentity(read))).toBeNull();
-    const { db: empty } = await backend.database(`CREATE SCHEMA core_chain; ${IDENTITY_MIGRATION.sql}`, cursorHeight);
+    const { db: empty } = await backend.database(`CREATE SCHEMA core_chain; ${CORE_CHAIN_MIGRATION.sql}`, cursorHeight);
     expect(await empty.read((read) => readIdentity(read))).toBeNull();
   }, 60_000);
 

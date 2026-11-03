@@ -2,10 +2,10 @@
  * The SQL of `core-chain` (`./core-chain.ts`, `./history.ts`): its tables, its migrations, the statements that record
  * the identity and the configuration history, and the reads of both.
  *
- * **Its tables** live in its reserved schema `core_chain`. Its migrations create them as the writer's login, and every
- * module role can read them: [DB-6, DB-8; design §10]
- * - `001`: the history's `core_chain.config` ({@link CONFIG_MIGRATION});
- * - `002`: `core_chain.identity`, one row holding the genesis hash, S, and the anchor hash, which is null until block S
+ * **Its tables** live in its reserved schema `core_chain`. Its one migration, `001` ({@link CORE_CHAIN_MIGRATION}),
+ * creates them as the writer's login, and every module role can read them: [DB-6, DB-8; design §10]
+ * - the history's `core_chain.config`;
+ * - `core_chain.identity`, one row holding the genesis hash, S, and the anchor hash, which is null until block S
  *   commits. [CD-1]
  *
  * **The history table's columns**: [design §10]
@@ -28,13 +28,17 @@ import type { PlainObject } from "../../config/plain-data.js";
 import type { BlockWriteHandle, ReadHandle, Transaction } from "../../db/api.js";
 import { keyOrderTerm } from "../../deterministic-postgresql/index.js";
 
+/** The identity's table: one row (id = 1). */
+export const IDENTITY_TABLE = "core_chain.identity";
+
 /**
- * `core-chain`'s migration `001`, which creates the history's table. It is applied once and recorded under
- * `core-chain`, and it never changes once a database has applied it, since its checksum is fixed by the databases that
- * applied it. (`provides` was added in place before any database existed.) The part's other migrations follow it
- * ({@link CORE_CHAIN_MIGRATIONS}). [DB-9]
+ * `core-chain`'s one migration, `001`, which creates the history's table and the identity's. It is applied once and
+ * recorded under `core-chain`, and it never changes once a database has applied it, since its checksum is fixed by the
+ * databases that applied it; a later version adds its migrations after it. Earlier builds created the two tables with
+ * two migrations, `001` and `002`: a database they wrote recorded another `001`, so startup refuses it before any
+ * migration runs (`migration-checksum-changed`). [DB-9, R16]
  */
-export const CONFIG_MIGRATION: { readonly id: string; readonly sql: string } = Object.freeze({
+export const CORE_CHAIN_MIGRATION: { readonly id: string; readonly sql: string } = Object.freeze({
   id: "001",
   sql: `CREATE TABLE core_chain.config (
   entry_id text NOT NULL,
@@ -47,16 +51,8 @@ export const CONFIG_MIGRATION: { readonly id: string; readonly sql: string } = O
   PRIMARY KEY (entry_id, start),
   CHECK ((data IS NULL AND data_hash IS NULL) OR (data IS NOT NULL AND octet_length(data_hash) = 32)),
   CHECK (entry_id <> 'core' OR stop IS NULL)
-);`,
-});
-
-/** The identity's table: one row (id = 1). */
-export const IDENTITY_TABLE = "core_chain.identity";
-
-/** `core-chain`'s migration `002`, which creates the identity's table; it never changes. [DB-9] */
-export const IDENTITY_MIGRATION: { readonly id: string; readonly sql: string } = Object.freeze({
-  id: "002",
-  sql: `CREATE TABLE ${IDENTITY_TABLE} (
+);
+CREATE TABLE ${IDENTITY_TABLE} (
   id smallint PRIMARY KEY CHECK (id = 1),
   genesis_hash bytea NOT NULL CHECK (octet_length(genesis_hash) = 32),
   start_height bigint NOT NULL CHECK (start_height >= 0),
@@ -64,10 +60,9 @@ export const IDENTITY_MIGRATION: { readonly id: string; readonly sql: string } =
 );`,
 });
 
-/** `core-chain`'s migrations, in order: `001` creates the history's table, `002` the identity's. [DB-9] */
+/** `core-chain`'s migrations: its one, `001`, which creates the history's table and the identity's. [DB-9, R16] */
 export const CORE_CHAIN_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
-  CONFIG_MIGRATION,
-  IDENTITY_MIGRATION,
+  CORE_CHAIN_MIGRATION,
 ]);
 
 /** The chain's identity as `core_chain.identity` holds it. [CD-1] */

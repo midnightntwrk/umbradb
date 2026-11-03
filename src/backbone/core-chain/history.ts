@@ -5,8 +5,8 @@
  * - recording a startup's configuration in the table ({@link recordHistory}).
  *
  * What is compared and recorded is decided by `checkHistory` (`src/config/history.ts`). The backbone part `core-chain`
- * itself (`./core-chain.ts`) lists `CONFIG_MIGRATION` first among its migrations and calls {@link recordHistory} in its
- * `on-start-db`. [CF-5, CF-6, CF-7, CF-8; CORE-ARCH §4.12; design §7]
+ * itself (`./core-chain.ts`) declares the migration that creates the table (`CORE_CHAIN_MIGRATION`) and calls
+ * {@link recordHistory} in its `on-start-db`. [CF-5, CF-6, CF-7, CF-8; CORE-ARCH §4.12; design §7]
  *
  * **The tables** and every statement are in `./sql.ts`.
  *

@@ -3,7 +3,8 @@
  * writes the binding, the accepted hash and the private cursor with, and the reads of its own rows. It also holds the
  * statements a private process reads the public database with (`./public-database.ts`), on tables of the public core.
  *
- * **Its table**, created by its migration under its own role, is `core_private_source.cursor`, with one row (`id = 1`):
+ * **Its tables** are created by its one migration, `001`, under its own role. `core_private_source.cursor` has one row
+ * (`id = 1`):
  * - the private cursor: the public block the private process last committed (`height`, `hash` and `parent_hash`), null
  *   before its first block. The runner's cursor needs the parent hash, and so does delivering the block at the cursor
  *   again after a restart. [RN-11, Q124]
@@ -11,9 +12,12 @@
  * It is a module table of the private plan like any other: the determinism check covers it, its `CHECK`s and change
  * capture are added, `core-digest` digests it and the contents hash reads it. [DT-6, Q75; design §10]
  *
- * Its migration `002` adds `core_private_source.accepted_config` (one row, `id = 1`: `config_hash`, 32 bytes): the
- * public configuration hash the private process last accepted, left out of change capture, the digests and the contents
- * hash (see `./core-private-source.ts`). [PP-14, Q159]
+ * `core_private_source.accepted_config` (one row, `id = 1`: `config_hash`, 32 bytes) holds the public configuration
+ * hash the private process last accepted, left out of change capture, the digests and the contents hash (see
+ * `./core-private-source.ts`). [PP-14, Q159]
+ *
+ * Earlier builds created the two tables with two migrations, `001` and `002`: a database they wrote recorded another
+ * `001`, so startup refuses it before any migration runs (`migration-checksum-changed`). [DB-9, R16]
  */
 
 import { publicItemRanges } from "../../config/history.js";
@@ -23,7 +27,10 @@ import type { BlockRef } from "../../runner/block-source.js";
 import { BLOCKS_TABLE } from "../core-block-commit/sql.js";
 import type { PublicIdentity } from "./public-database.js";
 
-/** `core-private-source`'s migrations: applied once, in order, and never changed. [DB-9] */
+/**
+ * `core-private-source`'s migrations: its one, `001`, which creates the private cursor's table and the accepted hash's.
+ * Applied once and never changed; a later version adds its own after it. [DB-9, PP-14, R16]
+ */
 export const CORE_PRIVATE_SOURCE_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
   {
     id: "001",
@@ -35,12 +42,8 @@ export const CORE_PRIVATE_SOURCE_MIGRATIONS: readonly { readonly id: string; rea
   public_genesis_hash bytea NOT NULL CHECK (octet_length(public_genesis_hash) = 32),
   public_start_height bigint NOT NULL,
   CHECK ((height IS NULL) = (hash IS NULL) AND (height IS NULL) = (parent_hash IS NULL))
-)`,
-  },
-  {
-    // The public configuration hash the private process accepted. [PP-14, Q159]
-    id: "002",
-    sql: `CREATE TABLE core_private_source.accepted_config (
+);
+CREATE TABLE core_private_source.accepted_config (
   id smallint PRIMARY KEY CHECK (id = 1),
   config_hash bytea NOT NULL CHECK (octet_length(config_hash) = 32)
 )`,
@@ -114,7 +117,7 @@ export const privateCursorHeight = async (read: Pick<ReadHandle, "query">): Prom
 
 /**
  * The public configuration hash a private database accepted, as `0x` hex, read through `read`. Null before its first
- * start recorded one, and before its table exists (migration `002`). [PP-14, Q159]
+ * start recorded one, and before its table exists (before the part's migration ran). [PP-14, Q159]
  */
 export async function readAcceptedConfigHash(read: Pick<ReadHandle, "query">): Promise<string | null> {
   const [table] = await read.query(ACCEPTED_PRESENT_SQL);

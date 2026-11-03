@@ -94,10 +94,10 @@
  *
  * **The public configuration hash it accepted.** The part keeps the public configuration hash the private process last
  * accepted in its own table `core_private_source.accepted_config` (one row, `id = 1`: `config_hash`, 32 bytes;
- * migration `002`). The table is declared `deterministic: false` (item `accepted-config-hash`), so neither change
- * capture nor the digests nor the contents hash read its row. It records an operator's acceptance at a start, which
- * does not follow from the chain, and two private processes bound to one public database hold the same private data
- * whatever hashes each accepted along the way. [PP-14, Q159, Q75]
+ * created with the cursor's by the part's migration `001`). The table is declared `deterministic: false` (item
+ * `accepted-config-hash`), so neither change capture nor the digests nor the contents hash read its row. It records
+ * an operator's acceptance at a start, which does not follow from the chain, and two private processes bound to one
+ * public database hold the same private data whatever hashes each accepted along the way. [PP-14, Q159, Q75]
  *
  * Startup's read of the private cursor reads this hash too ({@link readAcceptedConfigHash}). The chain check, after the
  * binding checks and before the graph, compares it with the hashes this start found (the public history's, and with

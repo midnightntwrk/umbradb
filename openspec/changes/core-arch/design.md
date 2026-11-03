@@ -1456,17 +1456,18 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   paragraph); the halt's message names `--update-hash=<found>`. The protocol's `v` stays 1: no transport of an earlier
   build exists.
 - **The public configuration hash a private process accepted** (PP-14, owner decision Q159, task 14.1c). *Where it is
-  kept:* `core-private-source`'s own table `core_private_source.accepted_config` (§10; migration `002` of the part), one
-  row, `config_hash`, the hash the private process last accepted — a table of its own, provided as the item
+  kept:* `core-private-source`'s own table `core_private_source.accepted_config` (§10; created with its cursor by the
+  part's one migration, `001`), one row, `config_hash`, the hash the private process last accepted — a table of its
+  own, provided as the item
   `accepted-config-hash` declared `deterministic: false` (MD-1, Q76), so change capture, the digests (DT-4) and the
   contents hash (DT-3) leave its row out: it records an operator's acceptance at a start, not a function of the chain,
   and two private processes bound to one public database hold the same private data at a height whichever hashes each
   accepted on the way (Q75); a column of `core_private_source.cursor` would have entered every block's digest of that
   row. A backup of a private database (PP-12's opt-in) holds the row, so a restored private process starts with the
   hash its source had accepted (§9.1). *At each start* (`src/backbone/core-private-source/`): startup's read of the
-  private cursor also reads the accepted hash (`readAcceptedConfigHash`; null on a first start, and before migration
-  `002` created the table); the source's chain check, after PP-2's checks and the core's `hello-ack` and before the
-  graph, compares it with the hashes this start found — the public history's it read and, with `coreTransport`, the
+  private cursor also reads the accepted hash (`readAcceptedConfigHash`; null on a first start, and before the part's
+  migration created the table); the source's chain check, after PP-2's checks and the core's `hello-ack` and before
+  the graph, compares it with the hashes this start found — the public history's it read and, with `coreTransport`, the
   `hello-ack`'s — and the operator's `updateHash` (`startHashDecision`): two hashes found that differ — the core's
   configuration changed between the read of the history and the `hello-ack`, or `coreTransport` and `publicDatabase`
   are not one core's (Q149) — stop the start whatever was given; else the hash found is the `hello-ack`'s, or the
@@ -1697,7 +1698,7 @@ per-block tables are append-only and partitioned by height range; no table store
 
 | Owner | Table | Primary key | Other columns |
 |---|---|---|---|
-| `core-chain` | `core_chain.identity` | id = 1 | genesis_hash, start_height, anchor_hash (null until block S commits; recorded in block S's transaction) — migration `002`; genesis hash and S recorded at every start until S commits (IN-2) |
+| `core-chain` | `core_chain.identity` | id = 1 | genesis_hash, start_height, anchor_hash (null until block S commits; recorded in block S's transaction) — created by the part's one migration `001`, with `core_chain.config`; genesis hash and S recorded at every start until S commits (IN-2) |
 | `core-chain` | `core_chain.config` | (entry_id, start) | stop (null; always null for `core`, a `CHECK`), version (text), data (jsonb, canonical; null for a scheduled revision, CF-3), data_hash (32 bytes; null with data, a `CHECK`), provides (`text[]`: the names of the `table` items the revision provides — a module's from its declaration, `core`'s the backbone parts' —, each once, in UTF-8 byte order; what a private process's graph counts, PP-13, task 14.1a) |
 | database API | `core_chain.migrations` | (module, migration_id) | checksum (SHA-256 of the UTF-8 SQL), position (int, from 1; unique per module) |
 | `core-block-commit` | `core_block_commit.blocks` | height | hash, parent_hash, spec_version (int), ledger_version (text), block_time (`timestamptz`, converted exactly from the node's milliseconds by PostgreSQL's integer interval input, never through a float, Q74) — range-partitioned by height as 0.9.5's `chain_archive` store was: 1,000,000 heights per partition, five from 0 and a default (`src/backbone/height-partitions.ts`, task 10.2) |
@@ -1710,6 +1711,8 @@ per-block tables are append-only and partitioned by height range; no table store
 | `core-ledger-state` | `core_ledger_state.nodes` | node_key | data, children (ledger serialization) — an existing key is left as it is (a node is its key's content) (task 12.3) |
 | `core-ledger-state` | `core_ledger_state.root_counts` | node_key | count (int > 0) — each block adds its batch's signed changes, a count reaching 0 deleted (task 12.3) |
 | `core-ledger-state` | `core_ledger_state.states` | height | state_key, state_root, zswap_first_free, zswap_root, dust_commitment_first_free, dust_commitment_root, dust_generation_first_free, dust_generation_root — none null, LG-16's tree values as the official indexer reads them (the packages' `stateTrees`, owner decision Q138 A, task 12.1b); range-partitioned by height (task 12.3) |
+| `core-ledger-state` | `core_ledger_state.ref_counts` | node_key | count (int > 0) — the references to the key in the stored nodes' child lists (embedded children included, a key listed twice counted twice), a row only while above 0; with `unreferenced`, the stored nodes that have neither a reference nor a root count, reclamation's counts and queue (the ledger-refcount change's design §2.1, §3) |
+| `core-ledger-state` | `core_ledger_state.unreferenced` | node_key | — |
 | `core-ledger-state` | `core_ledger_state.sweep` | id = 1 | cycle, phase (`idle`, `mark`, `sweep`), sweep_after (null) |
 | `core-ledger-state` | `core_ledger_state.grey`, `core_ledger_state.marks` | node_key | — |
 | `core-ledger-state` | `core_ledger_state.segment_results` | (height, tx_index, segment) | success (boolean) — range-partitioned by height (task 12.3) |
@@ -1717,7 +1720,7 @@ per-block tables are append-only and partitioned by height range; no table store
 | `core-contract-states` | `core_contract_states.states` | (contract_address, height) | state_key, zswap_state_key — each 32 bytes, persisted (LG-13); range-partitioned by height (task 13.1) |
 | `core-contract-logs-*` | `contract_logs.logs` | (height, tx_index, log_index) | contract_address, entry_point, logical_segment (int), log_version (bigint), event_type (text), data (ledger serialization) — log_index numbers the block's logs from 0 in emission order; event_type one of the eleven MIP-0002 types; the shared item's one migration `001`, recorded under `contract-logs`; range-partitioned by height (task 13.1) |
 | `core-private-source` (private) | `core_private_source.cursor` | id = 1 | height (null), hash (null), parent_hash (null; Q124), public_genesis_hash, public_start_height |
-| `core-private-source` (private) | `core_private_source.accepted_config` | id = 1 | config_hash (32 bytes): the public configuration hash the private process accepted (PP-14, Q159, task 14.1c) — migration `002`; its item `accepted-config-hash` declared `deterministic: false`, so no change capture, digest or contents of its row (§8) |
+| `core-private-source` (private) | `core_private_source.accepted_config` | id = 1 | config_hash (32 bytes): the public configuration hash the private process accepted (PP-14, Q159, task 14.1c) — created by the part's one migration `001`, with its cursor; its item `accepted-config-hash` declared `deterministic: false`, so no change capture, digest or contents of its row (§8) |
 
 **Storage helpers' tables (SH-1, SH-2; CORE-ARCH §4.11a, Q30).** A helper's table belongs to the module that calls the
 helper: a migration the module includes in its own `migrations` creates it in the module's schema, and the module writes

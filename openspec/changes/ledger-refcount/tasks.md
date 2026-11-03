@@ -95,7 +95,7 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
       second baseline holding this one code, and a new negative control shows the registry failing once 3.8 is ticked
       with the code still pending. R19's first clause demonstrated; `code-registry.test.ts` and its negative controls
       pass. Task 3.8 registers R11's test and removes the pending entry.
-- [ ] 3.2 One migration per part (`design.md` §2.4): `core-ledger-state`'s, `core-chain`'s and
+- [x] 3.2 One migration per part (`design.md` §2.4): `core-ledger-state`'s, `core-chain`'s and
       `core-private-source`'s `002` folded into their `001`; `core-ledger-state`'s `001` also creates `ref_counts` and
       `unreferenced`, and keeps the sweep's `sweep`, `grey` and `marks` until 5.1 removes the sweep; `core-arch` design
       §10's tables (the two new ones, the `002` notes of `core_chain.identity` and `core_private_source.accepted_config`)
@@ -107,6 +107,21 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
       carrying those migrations is refused by `umbradb restore` with `backup-build-mismatch`", on both backends; A102
       (`test/backbone/ledger-storage.test.ts`) and the migration cases of `core-chain.test.ts` and
       `core-private-source.test.ts` pass. R16's "and none of `sweep`, `grey`, `marks`" is 5.1's.
+      **Done (2026-11-03, this commit):** each part's `002` folded into its `001` (`CORE_CHAIN_MIGRATION` replaces
+      `CONFIG_MIGRATION` and `IDENTITY_MIGRATION`); `core-ledger-state`'s `001` also creates `ref_counts` and
+      `unreferenced` (design §2.1's columns and checks) and keeps `sweep`, `grey`, `marks`; the `ledger-state` item lists
+      the two new tables (`core-ledger-state.test.ts` refuses a created table the item does not declare); `core-arch`
+      design §10 (two rows; the `002` notes) and §8. Test first, seen failing before the fold (Codex `3.2-red`): R16's
+      clauses on both backends in `test/backbone/part-migrations.test.ts` (the public process: a new database's
+      tables from each part's `001`; an earlier build's records refuse startup with `migration-checksum-changed`,
+      naming the part, `001` and both checksums, no migration run, on a database holding only those records and on one
+      this build wrote), `test/private/part-migrations.test.ts` (the same for `core-private-source` on a private
+      process) and `test/backup/restore-earlier-build.test.ts` (a ledger backup and a private backup carrying an
+      earlier build's rows of each part refused with `backup-build-mismatch`, the target empty); the earlier build's
+      checksums (`v0.10.0-rc.2`, identical to this branch's base) and the rewrites in `test/backbone/earlier-build.ts`.
+      `core-chain.test.ts`'s and `core-private-source.test.ts`'s migration cases rewritten to one migration (the new
+      pinned checksum of `core-chain`'s `001`); `test/config/history-startup.ts`'s stand-in takes the new `001`. A102,
+      the migration cases and R16's clauses pass on both backends (Codex `3.2-green`, 11 files).
 - [ ] 3.3 The node write replaces a changed child list (`design.md` §2.2) and `writeBlock` returns the written count;
       `core-arch` design §10's `nodes` row ("an existing key is left as it is" replaced by §2.2's rule).
       **Acceptance:** a statement test on both backends: a node written again with its stored child list leaves its row

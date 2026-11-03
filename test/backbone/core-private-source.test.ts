@@ -1086,11 +1086,15 @@ describe("PP-14 at a start: the public configuration hash a private process acce
     expect(executed).toHaveLength(1);
   });
 
-  it("keeps the hash in a table of its own, declared deterministic: false, created by its migration 002", () => {
+  it("keeps the hash in a table of its own, declared deterministic: false, created with the cursor's by its one migration 001", () => {
     const item = privateIntake().part.provides.find((provided) => provided.name === "accepted-config-hash");
     expect(item?.table).toEqual({ schema: "core_private_source", tables: ["accepted_config"], kind: "mutable", deterministic: false });
-    expect(CORE_PRIVATE_SOURCE_MIGRATIONS.map((migration) => migration.id)).toEqual(["001", "002"]);
-    expect(CORE_PRIVATE_SOURCE_MIGRATIONS[1]?.sql).toContain("CREATE TABLE core_private_source.accepted_config");
+    // The two migrations of the builds before one migration per part, in one; those builds' databases are refused. [R16]
+    expect(CORE_PRIVATE_SOURCE_MIGRATIONS.map((migration) => migration.id)).toEqual(["001"]);
+    expect([...(CORE_PRIVATE_SOURCE_MIGRATIONS[0]?.sql ?? "").matchAll(/CREATE TABLE (\S+) \(/g)].map((match) => match[1])).toEqual([
+      "core_private_source.cursor",
+      "core_private_source.accepted_config",
+    ]);
   });
 
   it("the halt at a later message names the new hash with --update-hash, so the restart that accepts it is named", () => {

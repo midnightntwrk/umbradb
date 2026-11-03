@@ -3,17 +3,22 @@
  * it writes each block's batch, state, results, events and sweep step with, and the reads of the stored state and of
  * the sweep's sets. [LG-11, LG-14, LG-16; design §10]
  *
- * **The tables**, created by its migrations under the part's role: [design §10]
- * - `001`: `core_ledger_state.nodes (node_key) → data, children` and
- *   `core_ledger_state.root_counts (node_key) → count`, the stored nodes and the positive root counts (keys are 32
- *   bytes); `core_ledger_state.states (height)`, the state after each block (its key and root, and the first free
- *   index and root of the zswap tree and of the DUST commitment and generation trees);
- *   `core_ledger_state.segment_results (height, tx_index, segment) → success` and
+ * **The tables**, created by its one migration, `001`, under the part's role: [design §10]
+ * - `core_ledger_state.nodes (node_key) → data, children` and `core_ledger_state.root_counts (node_key) → count`, the
+ *   stored nodes and the positive root counts (keys are 32 bytes); `core_ledger_state.states (height)`, the state after
+ *   each block (its key and root, and the first free index and root of the zswap tree and of the DUST commitment and
+ *   generation trees); `core_ledger_state.segment_results (height, tx_index, segment) → success` and
  *   `core_ledger_state.events (height, tx_index, event_index)`, whose `kind` is one of {@link EVENT_KINDS}. The last
  *   three are range-partitioned by height (`../height-partitions.ts`). [LG-11, LG-16]
- * - `002`: the mark-and-sweep's (`./sweep.ts`): `core_ledger_state.sweep`, its one row (the cycle, the phase and the
- *   sweep position), inserted `idle` by the migration; `core_ledger_state.grey` and `core_ledger_state.marks`, its
- *   grey set and its marks, one key per row. [LG-14]
+ * - `core_ledger_state.ref_counts (node_key) → count`, the number of references to each key in the stored nodes' child
+ *   lists, a row only while it is above 0, and `core_ledger_state.unreferenced (node_key)`, the stored nodes with
+ *   neither a reference nor a root count: reclamation's counts and queue. [LG-11, LG-14]
+ * - the mark-and-sweep's (`./sweep.ts`): `core_ledger_state.sweep`, its one row (the cycle, the phase and the sweep
+ *   position), inserted `idle` by the migration; `core_ledger_state.grey` and `core_ledger_state.marks`, its grey set
+ *   and its marks, one key per row. [LG-14]
+ *
+ * Earlier builds had two migrations, `001` and `002` (the mark-and-sweep's); a database they wrote recorded another
+ * `001`, so startup refuses it before any migration runs (`migration-checksum-changed`). [DB-9, R16]
  */
 
 import type { BlockWriteHandle, ReadHandle } from "../../db/api.js";
@@ -28,6 +33,10 @@ export const ROOT_COUNTS_TABLE = "core_ledger_state.root_counts";
 export const STATES_TABLE = "core_ledger_state.states";
 export const SEGMENT_RESULTS_TABLE = "core_ledger_state.segment_results";
 export const EVENTS_TABLE = "core_ledger_state.events";
+
+/** Reclamation's counts and queue. [LG-11, LG-14; design §10] */
+export const REF_COUNTS_TABLE = "core_ledger_state.ref_counts";
+export const UNREFERENCED_TABLE = "core_ledger_state.unreferenced";
 
 /** The mark-and-sweep's tables (`./sweep.ts`). [design §10] */
 export const SWEEP_TABLE = "core_ledger_state.sweep";
@@ -47,7 +56,10 @@ export const EVENT_KINDS = Object.freeze([
 
 const kinds = EVENT_KINDS.map((kind) => `'${kind}'`).join(", ");
 
-/** `core-ledger-state`'s migrations: applied once, recorded under `core-ledger-state`, never changed. [DB-9] */
+/**
+ * `core-ledger-state`'s migrations: its one, `001`, which creates every table of the part. Applied once, recorded under
+ * `core-ledger-state`, never changed; a later version adds its own after it. [DB-9, R16]
+ */
 export const CORE_LEDGER_STATE_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
   {
     id: "001",
@@ -97,12 +109,17 @@ CREATE TABLE ${EVENTS_TABLE} (
   contract_address bytea,
   PRIMARY KEY (height, tx_index, event_index)
 ) PARTITION BY RANGE (height);
-${heightPartitionsSql(EVENTS_TABLE)}`,
-  },
-  {
-    // The mark-and-sweep (`./sweep.ts`): its row, its grey set and its marks. [LG-14]
-    id: "002",
-    sql: `CREATE TABLE ${SWEEP_TABLE} (
+${heightPartitionsSql(EVENTS_TABLE)}
+CREATE TABLE ${REF_COUNTS_TABLE} (
+  node_key bytea NOT NULL CHECK (octet_length(node_key) = 32),
+  count integer NOT NULL CHECK (count > 0),
+  PRIMARY KEY (node_key)
+);
+CREATE TABLE ${UNREFERENCED_TABLE} (
+  node_key bytea NOT NULL CHECK (octet_length(node_key) = 32),
+  PRIMARY KEY (node_key)
+);
+CREATE TABLE ${SWEEP_TABLE} (
   id smallint NOT NULL CHECK (id = 1),
   cycle bigint NOT NULL CHECK (cycle >= 0),
   phase text NOT NULL CHECK (phase IN ('idle', 'mark', 'sweep')),
