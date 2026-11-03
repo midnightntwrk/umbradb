@@ -179,12 +179,30 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
       backends: R29 (but its `node-key.ts` clause, 3.4's) on databases built for it, with its three negative controls;
       A55's and A126's new text; A57's "nor a content-defined one"; a user module declaring a content-defined table is
       refused. 3.8 runs them again with the build's own declarations.
-- [ ] 3.6 `src/backbone/core-ledger-state/refcount.ts`: `refcountStep` behind its tables seam (rules 1–10 of
+- [x] 3.6 `src/backbone/core-ledger-state/refcount.ts`: `refcountStep` behind its tables seam (rules 1–10 of
       `design.md` §3.2, the checks of §3.3, the reads of §3.4), `writeRefcount`, and the six faults of R12 as seams of the
       tables seam.
       **Acceptance:** given tables at h − 1 and batches from 2.1's generators, the step gives R1's model's new and
       rewritten nodes, counts, queue and deleted set after every block; each check fires on its fault at the step's
       level. R11 and R12 are checked whole in 3.8.
+      **Done (2026-11-03, this commit):** `refcountStep(tables, batch, { height, on })` (rules 1–8; the eviction, rule
+      9, is the caller's: `step.deleted`), `RefcountTables` (`rows`, `changed`, `queue`, `counts`, `references`, and
+      `fault`, R12's seam: `second-occurrence-not-decremented`, `unchanged-counted`, `increment-once-per-parent`,
+      `released-in-block` as Q-2.1-2's A, `referenced-queued-deleted`, `first-round-only`), `sqlRefcountTables(read)`
+      and `writeRefcount(w, step, written)` (rule 10: called after the batch's node writes with their count; the
+      `ref_counts` merge, the queue's delete and insert, then the deletion of `D`, each over at most `KEYS_PER_STATEMENT`
+      (1,000) keys, each statement's rows checked, `write-nodes` included: `row-count-mismatch` with the statement,
+      expected and actual). Its statements are in `sql.ts` (`deleteNodes` now returns its count). The step holds
+      nothing between blocks; `missing-reference` checks every reference of every new and rewritten node's batch list
+      (Q-2.1-1). Tests, seen failing first (module missing): `test/backbone/refcount-step.test.ts` (the step through an
+      in-memory seam over the model's tables at h − 1 gives `refcountModelStep`'s new, rewritten and unchanged nodes,
+      count changes, counts, deleted set, rounds, queue and rows after every block of `driveHistory`, seed 20261105, 200
+      runs; with `released-in-block` and `first-round-only` it gives the model's same faults, halts included; each
+      check fires as the model halts; each of R12's six faults by hand) and `test/backbone/refcount-tables.test.ts`
+      (PostgreSQL 18 and PGlite: each read, chunked; a block's writes, each statement reporting the rows the step
+      computed, chunks summed; `row-count-mismatch` for all five statements, the transaction rolled back; the other two
+      checks through the database's reads; on 30 histories, seed 20261105, the tables equal the model's after every
+      block). Coverage of `refcount.ts`: 100 % lines, 100 % branches. R11 and R12 stay 3.8's.
 - [x] 3.7 The DAG fixture (`test/ledger/fixtures/sweep-fixture.ts`, `sweep-test-loader.ts`) extended as A105 says, and
       with the test packages R28 and R30 need (one that keeps a node's old child list when it creates the node again;
       one whose live state holds a row by reference while the stored parent embeds it). The extension is additive: the

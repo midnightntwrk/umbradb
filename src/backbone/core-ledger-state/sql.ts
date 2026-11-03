@@ -1,7 +1,8 @@
 /**
- * The SQL of `core-ledger-state` (`./core-ledger-state.ts`, `./sweep.ts`): its tables, its migrations, the statements
- * it writes each block's batch, state, results, events and sweep step with, and the reads of the stored state and of
- * the sweep's sets. [LG-11, LG-14, LG-16; design §10]
+ * The SQL of `core-ledger-state` (`./core-ledger-state.ts`, `./sweep.ts`, `./refcount.ts`): its tables, its migrations,
+ * the statements it writes each block's batch, state, results, events, sweep step and reclamation step with, and the
+ * reads of the stored state, of the sweep's sets and of reclamation's counts and queue.
+ * [LG-11, LG-14, LG-16; design §10]
  *
  * **The tables**, created by its one migration, `001`, under the part's role: [design §10]
  * - `core_ledger_state.nodes (node_key) → data, children` and `core_ledger_state.root_counts (node_key) → count`, the
@@ -413,12 +414,101 @@ export async function insertMarks(w: Pick<BlockWriteHandle, "execute">, keys: re
   await w.execute(INSERT_MARKS_SQL, [[...keys]]);
 }
 
-/** Deletes the nodes of `keys` from `nodes`. */
-export async function deleteNodes(w: Pick<BlockWriteHandle, "execute">, keys: readonly Uint8Array[]): Promise<void> {
-  await w.execute(DELETE_NODES_SQL, [[...keys]]);
+/** Deletes the nodes of `keys` from `nodes`; resolves with the rows deleted. */
+export async function deleteNodes(w: Pick<BlockWriteHandle, "execute">, keys: readonly Uint8Array[]): Promise<number> {
+  return w.execute(DELETE_NODES_SQL, [[...keys]]);
 }
 
 /** Sets the sweep's row to `state`. */
 export async function updateSweepRow(w: Pick<BlockWriteHandle, "execute">, state: SweepState): Promise<void> {
   await w.execute(UPDATE_SWEEP_SQL, [state.cycle, state.phase, state.sweepAfter]);
+}
+
+/**
+ * Reclamation's reads, of the tables as committed at h − 1, and its writes (`./refcount.ts`). Each is one statement
+ * over a key list, which the caller sends in chunks. [LG-14]
+ */
+const STORED_KEYS_SQL = `SELECT node_key FROM ${NODES_TABLE} WHERE node_key = ANY($1::bytea[])`;
+/** The given nodes stored with another child list, with the stored one: the database compares the bytes. */
+const CHANGED_SQL = `SELECT b.node_key, n.children FROM unnest($1::bytea[], $2::bytea[]) AS b (node_key, children)
+  JOIN ${NODES_TABLE} n USING (node_key) WHERE n.children IS DISTINCT FROM b.children`;
+const UNREFERENCED_KEYS_SQL = `SELECT node_key FROM ${UNREFERENCED_TABLE}`;
+const KEY_COUNTS_SQL = `SELECT k.node_key,
+    EXISTS (SELECT 1 FROM ${NODES_TABLE} n WHERE n.node_key = k.node_key) AS stored,
+    coalesce(r.count, 0) AS refs, coalesce(c.count, 0) AS roots
+  FROM unnest($1::bytea[]) AS k (node_key)
+  LEFT JOIN ${REF_COUNTS_TABLE} r ON r.node_key = k.node_key
+  LEFT JOIN ${ROOT_COUNTS_TABLE} c ON c.node_key = k.node_key`;
+/** The shape of the root counts' merge: it reports the keys whose count stays above 0 (its `WITH` delete is not). */
+const REF_COUNTS_SQL = `WITH d AS (SELECT * FROM unnest($1::bytea[], $2::integer[]) AS d (node_key, delta)),
+  merged AS (SELECT d.node_key, coalesce(r.count, 0) + d.delta AS count FROM d LEFT JOIN ${REF_COUNTS_TABLE} r USING (node_key)),
+  gone AS (DELETE FROM ${REF_COUNTS_TABLE} r USING merged m WHERE r.node_key = m.node_key AND m.count = 0)
+  INSERT INTO ${REF_COUNTS_TABLE} (node_key, count) SELECT node_key, count FROM merged WHERE count <> 0
+  ON CONFLICT (node_key) DO UPDATE SET count = EXCLUDED.count`;
+const DELETE_UNREFERENCED_SQL = `DELETE FROM ${UNREFERENCED_TABLE} WHERE node_key = ANY($1::bytea[])`;
+/** A key already queued is not inserted again, and not counted. */
+const INSERT_UNREFERENCED_SQL =
+  `INSERT INTO ${UNREFERENCED_TABLE} (node_key) SELECT unnest($1::bytea[]) ON CONFLICT (node_key) DO NOTHING`;
+
+/** Those of `keys` that `nodes` holds. */
+export async function storedKeys(read: Pick<ReadHandle, "query">, keys: readonly Uint8Array[]): Promise<Uint8Array[]> {
+  return keysOf(await read.query(STORED_KEYS_SQL, [[...keys]]), NODES_TABLE);
+}
+
+/** Those of `nodes` that `nodes` holds with another child list, each with its stored one (see {@link CHANGED_SQL}). */
+export async function changedNodes(
+  read: Pick<ReadHandle, "query">,
+  nodes: readonly { readonly key: Uint8Array; readonly children: Uint8Array }[],
+): Promise<{ readonly key: Uint8Array; readonly children: Uint8Array }[]> {
+  const rows = await read.query(CHANGED_SQL, [nodes.map((n) => n.key), nodes.map((n) => n.children)]);
+  return rows.map((row) => ({
+    key: bytesOf(row.node_key, `${NODES_TABLE}.node_key`),
+    children: bytesOf(row.children, `${NODES_TABLE}.children`),
+  }));
+}
+
+/** Every key of `unreferenced`. */
+export async function unreferencedKeys(read: Pick<ReadHandle, "query">): Promise<Uint8Array[]> {
+  return keysOf(await read.query(UNREFERENCED_KEYS_SQL), UNREFERENCED_TABLE);
+}
+
+/** Each of `keys` with whether `nodes` holds it, its reference count and its root count (0 without a row). */
+export async function keyCounts(
+  read: Pick<ReadHandle, "query">,
+  keys: readonly Uint8Array[],
+): Promise<{ readonly key: Uint8Array; readonly row: boolean; readonly refs: number; readonly roots: number }[]> {
+  const rows = await read.query(KEY_COUNTS_SQL, [[...keys]]);
+  return rows.map((row) => ({
+    key: bytesOf(row.node_key, "a key"),
+    row: row.stored === true,
+    refs: row.refs as number,
+    roots: row.roots as number,
+  }));
+}
+
+/**
+ * Adds each signed change of `deltas` to the stored reference count, deleting a count that reaches 0; resolves with
+ * the rows written: the keys whose count stays above 0.
+ */
+export async function addRefCounts(
+  w: Pick<BlockWriteHandle, "execute">,
+  deltas: readonly { readonly key: Uint8Array; readonly delta: number }[],
+): Promise<number> {
+  return w.execute(REF_COUNTS_SQL, [deltas.map((d) => d.key), deltas.map((d) => d.delta)]);
+}
+
+/** Deletes `keys` from `unreferenced`; resolves with the rows deleted. */
+export async function deleteUnreferenced(
+  w: Pick<BlockWriteHandle, "execute">,
+  keys: readonly Uint8Array[],
+): Promise<number> {
+  return w.execute(DELETE_UNREFERENCED_SQL, [[...keys]]);
+}
+
+/** Inserts `keys` into `unreferenced`; resolves with the rows inserted. */
+export async function insertUnreferenced(
+  w: Pick<BlockWriteHandle, "execute">,
+  keys: readonly Uint8Array[],
+): Promise<number> {
+  return w.execute(INSERT_UNREFERENCED_SQL, [[...keys]]);
 }
