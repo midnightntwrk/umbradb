@@ -25,7 +25,7 @@ each criterion verifies are in parentheses.
    run passes); their last passing run is recorded in the pull request.
 3. R23–R25 are manual evidence from local runs (`design.md` §12), recorded in the pull request; they are never part of
    CI or of the required-test manifest.
-4. The `core-arch` criteria rewritten in §7 pass with their new text; every other `core-arch` and `start-umbradb`
+4. The `core-arch` criteria rewritten in §7 (A55, A57, A104, A105, A134, A160) pass with their new text; every other `core-arch` and `start-umbradb`
    criterion passes unchanged.
 5. Every new or changed crash, property or differential test has run at least five times before the change merges.
 6. The conformance gate passes on the pull request's head.
@@ -40,12 +40,14 @@ each criterion verifies are in parentheses.
   produce non-admissible batches too, so that the boundary is exercised. The generators cover shared children (one key under parents of
   different states), a key repeated in one child list, embedded children holding references, nodes written again
   unchanged, nodes rewritten with a small child embedded in one form and referenced in the other (both directions), a
-  queued key referenced again, `retainStates` 0 and > 0, contract keys persisted and never released, a lowered window
+  queued unrooted node rewritten to reference a node the same batch writes new, with no root count rising (the new node
+  is kept that block and queued), a queued key referenced again, `retainStates` 0 and > 0, contract keys persisted and never released, a lowered window
   releasing several states in one block, and `sweep` turned off and on. **Negative control:** the model with rule 4's
   root conditions removed (a released state's rows deleted in the block that releases it) fails the oracle's
   `R_{h−1} ⊆ S_h`. (LG-11, LG-14)
-- **R2** `[PROP][DIFF][NEG]` On the same generated histories with no rewritten node (the sweep's model keeps a node's
-  first child list, `design.md` §4.5), the model's node set equals the sweep's reference
+- **R2** `[PROP][DIFF][NEG]` On the generated histories of admissible batches in which every key is written in one
+  form throughout, deletions and re-insertions included (the sweep's model keeps a node's first child list,
+  `design.md` §4.5), the model's node set equals the sweep's reference
   model's (`test/backbone/sweep-model.ts`) at every height when its budget lets each cycle start and end in one block,
   and is a subset of it at every height with a budget of 50. **Negative control:** the model with its cascade stopped
   after the first round differs from the sweep's model where each cycle fits. (LG-14; `design.md` §4.5)
@@ -63,8 +65,8 @@ each criterion verifies are in parentheses.
   `sweep` on, I5 against the queue read at h − 1. **Negative control:** a test seam that, at one block, deletes the
   state's newly persisted root and the rows only it reaches makes (b) and (c) fail. (LG-11, LG-14)
 - **R4** `[DIFF][NEG]` The counting run's batches, fed after every block to the sweep's reference model: on the DAG
-  fixture without its rewrite cases, and on each recorded tape up to the first rewrite R21 counts there (the heights
-  compared are reported), with a budget that fits each cycle in one block, the two node sets are equal at every
+  fixture without its rewrite cases, and on each recorded tape up to the first block at which R21 sees a key written in
+  a form other than an earlier one (the heights compared are reported), with a budget that fits each cycle in one block, the two node sets are equal at every
   height; on the DAG fixture with a budget of 50, the counted node set is a subset of the swept one at every
   height. Before the runtime sweep is removed, the same comparison is also made against the runtime sweep itself (its
   own run and database) on the DAG fixture and the preprod and stagenet tapes, and recorded in `tasks.md`. **Negative
@@ -106,21 +108,24 @@ each criterion verifies are in parentheses.
   stopping the cascade after its first round (R3 (d)). (LG-14)
 - **R13** `[FAULT][NEG]` The process stopped and restarted at a named point after the commit of every 37th height of
   the DAG fixture and of 20 seeded heights of the preprod 0–10,000 tape, each point reporting it was reached, continues
-  with `nodes`, `ref_counts`, `unreferenced` and `root_counts` equal, after every later block, to an uninterrupted
-  run's. **Negative control:** a restart that empties `unreferenced` (a test seam) makes the tables differ after the
+  with, after every later block, the node set, `root_counts`, `states` and the contents hash equal to an uninterrupted
+  run's and R3 passing (the bytes of the content-defined tables may differ, `design.md` §4.4). **Negative control:** a restart that empties `unreferenced` (a test seam) makes the node sets differ after the
   next block. (LG-11)
 - **R14** `[FAULT][NEG]` A crash at each named point — in `on-compute` before the step; after the eviction and before
   the block's transaction; in `on-db-write` after the node writes and before the step's other writes; between the
   step's writes; just before and just after `COMMIT` — each reporting it was reached at its height, leaves the database
-  at h − 1 or h, never a mix, and a restarted run's tables equal an uninterrupted run's. **Negative control:** a build
+  at h − 1 or h, never a mix, and a restarted run's node set, byte-hashed tables and contents hash equal an
+  uninterrupted run's, with R3 passing. **Negative control:** a build
   that writes `ref_counts` and `unreferenced` in a transaction of their own, committed before the block's, crashed
   between the two commits, is detected (R3 (a) fails after the restart, or the tables differ). (LG-11, LG-14, RN-6)
 - **R15** `[CI][NEG]` A backup taken at h of a database built by this change restores (BK-3: its contents-hash check
   passes, the node set compared and `ref_counts` and `unreferenced` checked against the rows), and the restored database
-  continues to h + 50 with R3 passing and its tables equal to an uninterrupted run's. **Negative controls:** a backup
+  continues to h + 50 with R3 passing and its node set, byte-hashed tables and contents hash equal to an uninterrupted
+  run's. **Negative controls:** a backup
   whose file lacks the `ref_counts` rows is refused by the restore (its contents-hash step fails with
   `ledger-refcount-invalid`, reason `tables-inconsistent`, and the restore rolls back); one whose file lacks one row of
-  `nodes` is refused the same way (a reference, root or queue entry names the missing node). (LG-11, BK-3, DT-3)
+  `nodes` is refused the same way (a reference, root or queue entry names the missing node); one with one byte of a
+  `nodes` row's payload changed is refused the same way (`details.check` `node-key`). (LG-11, BK-3, DT-3)
 - **R16** `[CI]` A new database gets `ref_counts` and `unreferenced` and none of `sweep`, `grey`, `marks`, and
   `core_chain.identity` and `core_private_source.accepted_config` from their parts' `001`; a database whose recorded
   migrations are an earlier build's (`core-ledger-state`'s, `core-chain`'s or `core-private-source`'s `001` and `002`)
@@ -148,12 +153,15 @@ each criterion verifies are in parentheses.
   contents hashes. (LG-11, DT-3)
 - **R29** `[CI][NEG]` The content-based contents hash, on both backends: two databases holding the same ledger nodes,
   one with a small node embedded in its parent and the other with it referenced and stored as its own row, each with
-  the counts and queue its rows give, have equal contents hashes; a database that also holds one more persisted state
-  (its root count and the nodes only it reaches, with consistent counts), or one fewer, has a different hash; one whose `ref_counts` or `unreferenced` differ from what its rows give makes the computation
+  the counts and queue its rows give, have equal contents hashes; with every other table held fixed, one that also
+  holds one more queued node (its row and its `unreferenced` entry, no reference, no root count) has a different
+  hash; one with one byte of a `nodes` row's payload or child list changed makes the computation fail with
+  `ledger-refcount-invalid` (`details.check` `node-key`); one whose `ref_counts` or `unreferenced` differ from what its rows give makes the computation
   fail with `ledger-refcount-invalid` (reason `tables-inconsistent`), in a backup (nothing written), a restore (rolled
   back) and the exported `contentsHash`; and `src/ledger/node-key.ts` gives, for every node embedded in the rows of the
-  recorded tapes, the key the ledger package gives it. **Negative control:** `nodes` hashed by its raw rows makes the two
-  spellings' hashes differ. (LG-11, DT-3)
+  recorded tapes, the key the ledger package gives it. **Negative controls:** `nodes` hashed by its raw rows makes the
+  two spellings' hashes differ; a constant in place of the node set's contribution makes the one-more-node case's
+  hashes equal; skipping the key check lets the changed-payload case through. (LG-11, DT-3)
 
 ## 3. Removal, codes and the required test
 
@@ -170,7 +178,8 @@ each criterion verifies are in parentheses.
 ## 4. The recorded tapes and the conversion
 
 - **R21** `[MEASURE]` On the recorded stagenet 0–10,000, preprod 0–10,000 and devnet v8 → v9 tapes, per block: the
-  batch's nodes; the nodes written again unchanged; the rewritten nodes; the new nodes' references; new nodes left
+  batch's nodes; the nodes written again unchanged; the rewritten nodes; the keys written in a form other than one
+  written for them earlier, deletions and re-insertions included; the new nodes' references; new nodes left
   unreferenced; the root counts released; the keys whose count changed before and after netting; the rows deleted; the
   cascade's rounds; and the step's time — reported per tape as distributions (median, 99th percentile, maximum). On the
   devnet tape also the block after the v8 state's release (F + 1 with `retainStates` 0): the rows stored at F − 1, the
@@ -200,7 +209,8 @@ each criterion verifies are in parentheses.
   replaces its stored child list; the ledger's node tables hashed by the nodes they hold; one migration per part;
   databases and backups of earlier builds refused); `ROADMAP.md`'s lines on the sweep, `core-arch` design §4 (the
   determinism component's content-defined tables), §5.4, §8, §10 and §11, `core-arch` acceptance §17 and the
-  `src/ledger/` comments describe the change; issue `docs/issues/00078` is closed naming this change; no document
+  `src/ledger/` comments describe the change; the module guide says that the bytes of `nodes`, `ref_counts` and
+  `unreferenced` are not part of the determinism contract and that modules read ledger state through ledger tasks; issue `docs/issues/00078` is closed naming this change; no document
   outside `CHANGELOG.md` and the archived history describes the mark-and-sweep, or the first copy kept, as current.
   (LG-11, LG-14)
 
@@ -230,9 +240,19 @@ Each replaces the `core-arch` criterion of the same id; only what is in bold cha
   covers the step's crash points meanwhile.
 - **A160** `[FAULT]` A test package that refuses one eviction at block h, after the worker freed what it can, makes
   the worker thread end and a new one start, which loads the state at h − 1 from the database and applies h again
-  **with the reclamation step computed again**: the process does not halt, and its stored rows, **reference counts,
-  queue** and state roots equal an uninterrupted run's; a package that refuses again on that retry fails the block with
+  **with the reclamation step computed again**: the process does not halt, and its stored rows **of the tables that
+  are not content-defined, its node set, R3's checks** and state roots equal an uninterrupted run's; a package that refuses again on that retry fails the block with
   `callback-error`; on both backends. (LG-14, owner decision Q144)
+
+- **A55** `[DIFF]` The same rows give the same contents hash on both backends; changing one byte of one row **of a
+  table that is not content-defined** changes it; **changing one byte of a `core_ledger_state.nodes` row makes the
+  computation fail with `ledger-refcount-invalid`**. (DT-3)
+- **A57** `[CI]` Two chains differing only in one module's value in its table t at height 7 give equal rows of
+  `core_digest.tables` for every other table and, for t, the same digest up to height 6 and a different one from 7; a
+  table without changes at a height keeps its row; a table's first digest is `SHA-256(32 zero bytes ‖ CBOR(h) ‖ changes
+  at h)`; checkpoints exist exactly at the heights h ≥ S with h mod 14,400 = 0 and equal the tables' rows at those
+  heights; every module table is digested with no flag set, and a table declared `deterministic: false` is not, **nor a
+  content-defined one**. (DT-4, DT-5)
 
 ## 8. Required test ids
 
@@ -251,5 +271,5 @@ Each replaces the `core-arch` criterion of the same id; only what is in bold cha
 | LG-9 (conversion; unchanged, exercised and measured) | R21, R22 |
 | CF-9 (`sweep: off` gate; unchanged) | R10 |
 | DB-9, BK-3 (refusals of an earlier build's database) | R16 |
-| DT-3, DT-4 (content-defined tables; modified) | R15, R17, R28, R29 |
+| DT-3, DT-4 (content-defined tables; modified) | R15, R17, R28, R29, A55, A57 |
 | DT-5 (no digest rows for content-defined tables; unchanged rule) | R17, R25 |

@@ -23,12 +23,20 @@ appear by its content: `core_ledger_state.nodes` as `[schema, table, ["node_key"
 in byte order]]`, its node set being the keys of its rows and of every node embedded in them, each once, an embedded
 node's key computed as the ledger computes a node's key; `core_ledger_state.ref_counts` and
 `core_ledger_state.unreferenced` as `[schema, table, null, null]`, after a check in the same snapshot that they hold
-exactly the reference counts and the queue that the rows of `nodes` and `root_counts` give (LG-14). IF that check fails
-THEN the computation SHALL fail with `ledger-refcount-invalid`.
+exactly the reference counts and the queue that the rows of `nodes` and `root_counts` give (LG-14). While computing
+the node set, every row's key SHALL be checked against its content (the hash of its payload and its children's keys).
+IF a row's key does not match its content, or that check fails, THEN the computation SHALL fail with
+`ledger-refcount-invalid`. The bytes of a content-defined table SHALL NOT be part of what this hash guarantees, as the
+rows of a `deterministic: false` table are not.
 
 #### Scenario: Same data, two backends
 - **WHEN** the same rows are written to PostgreSQL and to PGlite
-- **THEN** the two contents hashes are equal, and changing one byte of one row changes the hash
+- **THEN** the two contents hashes are equal, and changing one byte of one row of a table that is not content-defined
+  changes the hash
+
+#### Scenario: A changed node row
+- **WHEN** one byte of one row of `core_ledger_state.nodes` is changed
+- **THEN** computing the contents hash fails with `ledger-refcount-invalid`, naming the row's key
 
 #### Scenario: Same nodes, two spellings
 - **WHEN** two databases hold the same ledger nodes, one with a small node embedded in its parent and the other with it

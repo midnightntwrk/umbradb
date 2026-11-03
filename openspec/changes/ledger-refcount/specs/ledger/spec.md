@@ -28,9 +28,10 @@ the block. Whole serialized states SHALL NOT be stored. Reads SHALL check each n
 process restarts THE ledger worker SHALL load the state at the cursor from its state key and the stored nodes, and
 reclamation SHALL continue from the stored counts and queue. `nodes`, `ref_counts` and `unreferenced` SHALL be
 content-defined tables (DT-3, DT-4): `nodes` takes part in the contents hash by its **node set** — the keys of its rows
-and of every node embedded in them, each once — and `ref_counts` and `unreferenced` by a check that they hold exactly
-the counts and queue its rows and `root_counts` give, which, IF it fails, SHALL fail the computation with
-`ledger-refcount-invalid`; none of the three SHALL be captured or digested per block. Two indexers that processed the
+and of every node embedded in them, each once, every row's key checked against its content — and `ref_counts` and
+`unreferenced` by a check that they hold exactly the counts and queue its rows and `root_counts` give, which, IF it
+fails, SHALL fail the computation with `ledger-refcount-invalid`; none of the three SHALL be captured or digested per
+block. Two indexers that processed the
 same chain with the same configuration SHALL hold the same node set after every block, whatever their restart
 histories. THE flushed batch SHALL carry each changed root count as a signed change, which the
 writer adds to the stored count, deleting a count that reaches 0 (owner decision Q53).
@@ -72,8 +73,8 @@ those stored at h − 1 with another child list; a node written again with its s
 (2) each new or rewritten node adds 1 to the count of each key its child list references, per occurrence;
 (3) each rewritten node subtracts 1 from the count of each key its stored child list referenced at h − 1, per
 occurrence;
-(4) a key that has a root count after h − 1 or after h, or that rule (3) decremented, is **protected** and not deleted
-in h;
+(4) a key that has a root count after h − 1 or after h, that rule (3) decremented, or of a new node, is **protected**
+and not deleted in h;
 (5) starting from the keys queued at h − 1, every key with count 0 that is not protected is deleted; each deleted node
 subtracts 1 from the count of each key its child list references as stored after the block's writes, per occurrence; a key whose count so reaches 0
 and that is not protected is deleted too, in the same block, until no key is left to delete; no limit bounds the

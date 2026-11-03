@@ -57,7 +57,7 @@ PR #16 (decision Q-F).
 | new nodes `N` | The nodes of `B.inserts` whose key is not in `S_{h−1}`. |
 | rewritten nodes `W` | The nodes of `B.inserts` whose key is in `S_{h−1}` with another child list than the stored one. A node of `B.inserts` with its stored child list is **written again unchanged** (the package writes content again after its memory dropped the stored copy, `upstream:storage-core/src/backend.rs:532-534`, and on a restarted worker). |
 | `K_h` | What block h keeps: `R_{h−1}`; the rows that the persisted keys after h and the nodes of `N` and `W` reach through the child lists stored after h; and the rows that the stored child lists of `W` at h − 1 reached through the child lists stored at h − 1. |
-| protected in h | A key with a root count after h − 1 or after h, or a key that a stored child list of `W` at h − 1 references. |
+| protected in h | A key with a root count after h − 1 or after h, a key that a stored child list of `W` at h − 1 references, or a key of `N`. |
 | queue `Q_h` | The keys of `unreferenced` after block h. |
 | node set | Every key a database holds as a row or embedded in a row (an embedded node's key computed from its payload and its children's hashes, as the ledger computes keys). It does not depend on forms: two forms of a node hold the same keys (§2.5). |
 | content-defined table | A table that takes part in the contents hash by what it holds rather than by its bytes, and whose rows are not captured per block (DT-3, DT-4 as this change modifies them): `nodes`, `ref_counts`, `unreferenced` (§2.5). |
@@ -165,11 +165,16 @@ So `core-ledger-state`'s node tables take part in the contents hash by content:
   the ledger's hash (the 4-byte little-endian payload length, the payload, and each child's key, SHA-256 —
   `upstream:storage-core/src/arena.rs` `hash`; `test/ledger/node-format.ts:140-148` implements it independently), in a
   new `src/ledger/node-key.ts` whose output a test checks against the package's keys.
+- **Every row is authenticated** while the node set is computed: its key must be the hash of its payload and its
+  children's keys (the check LG-11 already makes on every read), so a changed payload or child list fails the
+  computation instead of leaving the node set unchanged.
 - **`ref_counts`** and **`unreferenced`** appear as `[schema, table, null, null]`, after a check, in the same
   snapshot, that they hold exactly the counts and the queue the rows and `root_counts` give (I1–I4). They are
-  bookkeeping derived from the spelling, so they are checked, not compared. IF the check fails THEN the computation
-  fails with `ledger-refcount-invalid` (reason `tables-inconsistent`): a backup is not written, a restore rolls back and
-  refuses, the exported `contentsHash` rejects.
+  bookkeeping derived from the spelling, so they are checked, not compared.
+- IF a row's key does not match its content, or a check fails, THEN the computation fails with
+  `ledger-refcount-invalid` (reason `tables-inconsistent`, `details.check` naming `node-key`, `closure`, `roots`,
+  `counts` or `queue`, and the key): a backup is not written, a restore rolls back and refuses, the exported
+  `contentsHash` rejects.
 - **Per block**, none of the three is captured (DT-4) or digested (DT-5). What they hold after block h is fixed by data
   that is captured and digested: with `sweep` on, the node set after h is what the persisted keys after h − 1 and after
   h reach (I6), and those are `root_counts`' rows; with it off, what every persisted key since it was turned off
@@ -177,8 +182,16 @@ So `core-ledger-state`'s node tables take part in the contents hash by content:
 
 What this guarantees, by construction rather than by test: two indexers that processed the same chain with the same
 configuration have equal node sets after every block, hence equal contents hashes and equal digests of every captured
-table, whatever their restart histories (§4.4). What it does not: equal bytes in these three tables. A spelling that
-would ever change a state result is still caught by the per-block root check (LG-15), which halts.
+table that UmbraDB writes, whatever their restart histories (§4.4). What it does not: equal bytes in these three
+tables. A spelling that would ever change a state result is still caught by the per-block root check (LG-15), which
+halts.
+
+**The bytes of a content-defined table are not part of the determinism contract**, like the rows of a `deterministic:
+false` table. A module that copies them — `nodes.children`, a count of `nodes` rows, a `ref_counts` value — into its
+own tables, or a private process that reads them over the private link, makes its own output depend on more than the
+chain, as one copying a `deterministic: false` table's rows would; a module reads ledger state through ledger tasks
+(LG-17) and `core-ledger-state`'s items instead. Modules stay trusted code (DB-6, owner decision Q46): the roles let
+them read these tables and nothing more is enforced; the module guide says so.
 
 The mechanism stays inside UmbraDB: the build gives `contentsHash` the content-defined tables and their content
 function as it gives it the opted-out ones today (`src/determinism/contents-hash.ts:34-49`, `options.optedOut`);
@@ -211,14 +224,17 @@ Inputs: on-compute's read at h − 1, giving `S_{h−1}` with each row's stored 
 3. **Rewrites.** For each node of `W`, for each reference k in its child list stored at h − 1: `Δ(k) −= 1`. Every key
    so decremented is protected in h: the state after h − 1, which the worker still holds during h, may reach it through
    the old child list.
-4. **Protection.** A key with a root count after h − 1 or after h, or decremented by rule 3, is not deleted in h.
+4. **Protection.** A key with a root count after h − 1 or after h, decremented by rule 3, or of a node of `N`, is not
+   deleted in h: a node is never deleted in the block that writes it.
 5. **Deletions, when `on`.** Starting from the keys of `Q_{h−1}`, repeat: every candidate k not yet deleted, not
    protected, with `refs_{h−1}(k) + Δ(k) = 0`, is deleted; for each node deleted in that round, for each reference k in
-   its child list as stored after the block's writes (the batch's list for a node of `W`, else the stored one),
+   its child list as stored after the block's writes (the batch's list for a node of `W`, else the stored one; a node
+   of `N` is protected, so never deleted here),
    `Δ(k) −= 1` and k becomes a candidate — until a round deletes none. `D` is the set deleted. When not `on`, `D` is
    empty. No limit bounds `D` (Q-C); it holds a released state's whole chain of newly unreferenced rows (Q-D).
 6. **Counts after h.** `refs_h(k) = refs_{h−1}(k) + Δ(k)` for every key with `Δ(k) ≠ 0`.
-7. **Queue after h.** `Q_h = { k ∈ S_h : refs_h(k) = 0 and roots'(k) = 0 }`, where `S_h = (S_{h−1} \ D) ∪ keys(N)`,
+7. **Queue after h.** `Q_h = { k ∈ S_h : refs_h(k) = 0 and roots'(k) = 0 }`, where `S_h = (S_{h−1} \ D) ∪ keys(N)`
+   (`D` holds no key of `N`, rule 4),
    computed over the keys whose membership can change in h — `Q_{h−1}`, the keys of `N`, the keys with `Δ(k) ≠ 0`, the
    keys of `B.rootCounts` — since any other row keeps its count and its root count. A key that enters the queue in h is
    deleted no earlier than block h + 1. In practice it holds the roots the block released.
@@ -307,7 +323,8 @@ of `R_{h−1}`. This holds also at the first block with `sweep` on after blocks 
 
 **What is guaranteed.** Two indexers that processed the same chain with the same configuration hold, after every
 block, the same node set, the same `root_counts`, `states`, `segment_results` and `events`, hence equal contents
-hashes and equal digests of every captured table — whatever their restart histories. By induction over blocks:
+hashes and equal digests of every captured table — whatever their restart histories — as long as no module copies the
+bytes of a content-defined table into its own (§2.5). By induction over blocks:
 
 - the root counts are the engine's (the new state persisted, the released states, the contract keys, `core-arch`
   design §5.4), functions of the chain; a worker restart gives the same (`core-arch` A160);
@@ -345,9 +362,12 @@ When the sweep's model is fed the counting run's batches (R4), the comparison is
 without rewritten nodes: the sweep model deletes a node only after counting deleted it (subset), so the counting run's
 package, which evicted it, writes it again whenever a later state needs it, and the sweep model sees that insert. With a
 rewrite the two keep different rows (the sweep model keeps the first child list, counting the new one; a small node a
-rewrite makes a row can then outlive, under counting, what the sweep keeps), so R2 and R4 compare only histories
-without rewrites, and on a recorded tape only the heights before the first rewrite R21 counts there; rewrites are
-covered by R1, R3, R27 and R28.
+rewrite makes a row can then outlive, under counting, what the sweep keeps). The same holds when a key is deleted and
+written again later in another form, and for a batch that writes a node no rising key reaches (counting keeps it one
+block, a complete sweep cycle deletes it at once). So R2 and R4 compare only histories of admissible batches in which
+every key is written in one form throughout, the deletions and re-insertions included; on a recorded tape, only the
+heights before the first block at which R21 sees a key written in a form other than an earlier one; the other cases
+are covered by R1, R3, R27 and R28.
 
 ### 4.6 The flush
 
