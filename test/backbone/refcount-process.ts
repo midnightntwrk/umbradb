@@ -44,7 +44,7 @@ export interface DagRunOptions {
   readonly halts?: boolean;
   /** The cursor the database already holds, for a run that restarts there: the tape answers the startup's checks. */
   readonly resume?: bigint;
-  /** More user modules, after the watcher (one recording more of what each block left in the database). [R17] */
+  /** More user modules, after the watcher (another reading of the tables at each cursor). [R5, R17] */
   readonly user?: readonly ModuleDeclaration[];
   /** Called with the running process once it reached the last height or halted, before it stops (a backup). [R15] */
   readonly atLast?: (process: Ingest) => Promise<void>;

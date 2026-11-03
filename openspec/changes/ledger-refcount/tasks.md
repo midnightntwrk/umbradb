@@ -351,8 +351,37 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
 - [ ] 4.1 R3 on the tapes, and the rewrite.
       **Acceptance:** R3's clause "at every 100th height and the last of the recorded preprod 0–10,000, stagenet
       0–10,000 and devnet v8 → v9 tapes" (R3 whole with 3.8's part); R27.
-- [ ] 4.2 Written again, a queued key referenced again, the lag, reuse, a lowered window.
+- [x] 4.2 Written again, a queued key referenced again, the lag, reuse, a lowered window.
       **Acceptance:** R5, R6, R7, R8, R9.
+      **Done (2026-11-03, this commit):** `test/backbone/ledger-refcount-blocks.test.ts`, on the extended DAG through
+      the process, both backends, each run also checked by R3 and R1's model. R5: `again`, written again unchanged by
+      the test package at AGAIN, and `requeued`, written again unchanged by a restarted worker's first block (the
+      process stopped at REQUEUE and started again; its new thread loads the state after REQUEUE, where `requeue` embeds
+      `requeued`): the counts of the keys it references as before, its row's `xmin` unchanged, the rows carrying the
+      block's transaction id (its `states` row's) exactly its new and rewritten nodes, no row of the three
+      content-defined tables in `core_digest.tables`, and the restarted run's tables after REQUEUE + 1 those of the run
+      that never restarted. R6: `requeued` at REQUEUE + 1 (queued at REQUEUE, referenced once by one new node, `requeue
+      holder`): kept, out of the queue, counted 1, `requeued leaf`'s count unchanged. R7: `retainStates` 0 with the
+      package holding by reference (it refuses to forget a node a live state reaches, as the v9 package does), every h
+      from 1 to 52: the released root queued at h, no row of the state deleted at h, its rows outside `K_{h+1}` deleted
+      and evicted at h + 1, no refusal, no restart; `retainStates` 2, every h from 1 to 97: released and queued at h +
+      2, no row of it deleted before h + 3, its rows outside `K_{h+3}` gone after h + 3. A state's rows are those its
+      root reaches through the child lists as written at each height: a rewrite can take one out (`small to-embedded`,
+      embedded from TO_EMBEDDED, is deleted at TO_EMBEDDED + 1 while the states after 51 and 52 are retained, which then
+      hold it embedded). R8: subtree 0's first version deleted at 9 and inserted again at REVERT, each of its five rows
+      counted 1 there; a new process's worker then loads the state after REVERT from the database (the package checks
+      every row it reads against its content and the fixture's state). R9: `retainStates` 5 lowered to 0 at REQUEUE: the
+      six roots released and queued there, none of their rows deleted; at REQUEUE + 1 every row of theirs outside `K`
+      deleted and evicted, rows only the earlier five states reach among them; `requeued` (a row of the state after
+      REQUEUE − 1, embedded by the state after REQUEUE, referenced again after REQUEUE + 1) kept. Helpers, additive:
+      `runDag` takes more `user` modules; `fixtureReach` and `fixtureProblems` take `retainedFrom` (a window a revision
+      changes). Seen failing (diagnostic, the source restored after each): R12 (b) fails R5's counts; the node write
+      without its `WHERE` (the write-count check left out) fails R5's `xmin` clauses; R12 (e) fails R6
+      (`missing-reference` at REQUEUE + 1); R12 (d) fails R7 (the eviction refused at 1; the rows gone at the release)
+      and R9 (the six roots deleted at REQUEUE); no eviction fails R8 (`missing-reference` at REVERT). Codex:
+      `4.2-green-1` (R7's `retainStates` 2 case failing on the test's first reading of a state's rows, fixed as above),
+      `4.2-green-2` (12 passed), `4.2-red`, `4.2-red-touch`, `4.2-touched` (with the tapes: this file, A105, A160, R11,
+      A100–A104 and their controls; 9 files, 70 passed).
 - [ ] 4.3 `sweep: off`.
       **Acceptance:** R10.
 - [ ] 4.4 Restarts and crashes.

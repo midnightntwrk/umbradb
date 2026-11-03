@@ -138,21 +138,36 @@ export function leakProblems(before: TableSnapshot, after: TableSnapshot, batch:
 }
 
 /**
+ * A run's configuration as the oracle takes it: `retainStates` (0 unless given), or `retainedFrom`, the lowest height
+ * whose state is alive after block h, for a window a revision changes (`retainStates` R gives `max(0, h − R)`); and
+ * whether `sweep` is on at a height (on unless `on` says otherwise). [R3, LG-12]
+ */
+export interface FixtureConfig {
+  readonly retainStates?: number;
+  readonly retainedFrom?: (h: number) => number;
+  readonly on?: (h: number) => boolean;
+}
+
+/** The lowest height whose state is alive after block `h`, by `options`. */
+const lowestAlive = (options: FixtureConfig, h: number): number => options.retainedFrom?.(h) ?? Math.max(0, h - (options.retainStates ?? 0));
+
+/**
  * The oracle's account of the DAG fixture `dag`, heights 0 to `last`: at each height h, `R_{h−1}`, `R_h` and `K_h`,
- * from the fixture's states (the persisted keys after h: the roots of the states after `h − retainStates` to h) and the
- * nodes `batches` wrote (each key's child list the one last written for it), never from the database. The stored set it
- * carries from block to block is `K_h` where `on` says `sweep` is on, else the set before with the new nodes. [R3; design
- * §1, §4.3]
+ * from the fixture's states (the persisted keys after h: the roots of the states alive after h, those after
+ * `h − retainStates` to h unless `retainedFrom` says otherwise) and the nodes `batches` wrote (each key's child list the
+ * one last written for it), never from the database. The stored set it carries from block to block is `K_h` where `on`
+ * says `sweep` is on, else the set before with the new nodes. [R3; design §1, §4.3]
  */
 export function fixtureReach(
   dag: FixtureDag,
   batches: ReadonlyMap<bigint, NodeBatch>,
   last: number,
-  options: { readonly retainStates?: number; readonly on?: (h: number) => boolean } = {},
+  options: FixtureConfig = {},
 ): Map<bigint, Reach> {
-  const retain = options.retainStates ?? 0;
-  const persisted = (h: number): string[] =>
-    Array.from({ length: Math.min(h, retain) + 1 }, (_, i) => hex(rootOf(h - i, dag).slice(1)));
+  const persisted = (h: number): string[] => {
+    const from = lowestAlive(options, h);
+    return Array.from({ length: h - from + 1 }, (_, i) => hex(rootOf(h - i, dag).slice(1)));
+  };
   const reachFrom = (starts: Iterable<string>, lists: ReadonlyMap<string, Uint8Array>): Set<string> => {
     const reached = new Set<string>();
     const frontier = [...starts];
@@ -192,14 +207,15 @@ export function fixtureReach(
 
 /**
  * R3's clauses (a)–(d) after every height of a run on the DAG fixture `dag`, heights 0 to `last`: `tables` after every
- * height, `batches` every block's, `on` whether `sweep` is on at a height. Each problem names its height. [R3]
+ * height, `batches` every block's, `options` the run's window and whether `sweep` is on at a height. Each problem names
+ * its height. [R3]
  */
 export function fixtureProblems(
   dag: FixtureDag,
   tables: ReadonlyMap<bigint, TableSnapshot>,
   batches: ReadonlyMap<bigint, NodeBatch>,
   last: number,
-  options: { readonly retainStates?: number; readonly on?: (h: number) => boolean } = {},
+  options: FixtureConfig = {},
 ): string[] {
   const reach = fixtureReach(dag, batches, last, options);
   const problems: string[] = [];
@@ -213,7 +229,7 @@ export function fixtureProblems(
     const before = tables.get(BigInt(h - 1));
     const found = [
       ...closureProblems(after).map((p) => `(a) ${p}`),
-      ...retainedProblems(after, BigInt(Math.max(0, h - (options.retainStates ?? 0)))).map((p) => `(b) ${p}`),
+      ...retainedProblems(after, BigInt(lowestAlive(options, h))).map((p) => `(b) ${p}`),
       ...reachProblems(after, reach.get(BigInt(h)) as Reach, on).map((p) => `(c) ${p}`),
       ...(before === undefined ? [] : leakProblems(before, after, batches.get(BigInt(h)) as NodeBatch, on).map((p) => `(d) ${p}`)),
     ];
