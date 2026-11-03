@@ -174,7 +174,10 @@ export function historyWatcher(
   };
 }
 
-/** Runs `body` on a read of `db` through the database API, once no process holds it (PGlite's directory included). */
+/**
+ * Runs `body` on a read of `db` through the database API, once no process holds it (PGlite's directory included).
+ * [R28, R30]
+ */
 export async function readStopped<T>(db: ProcessDatabase, body: (read: ReadHandle) => Promise<T>): Promise<T> {
   const setting = db.setting;
   let database;

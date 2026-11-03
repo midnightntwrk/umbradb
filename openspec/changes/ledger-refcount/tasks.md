@@ -521,8 +521,29 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
       files with `UMBRADB_TAPES`: 4 passed, 1,919 s). Issue recorded: two first startups at once on one PostgreSQL
       server race on creating its module roles
       (`docs/issues/00082-concurrent-first-startups-race-on-module-roles.md`, which 4.4 recorded first).
-- [ ] 4.7 A live object holding a deleted row.
+- [x] 4.7 A live object holding a deleted row.
       **Acceptance:** R30.
+      **Done (2026-11-03, this commit):** `test/backbone/refcount-live-object.ts`: the extended DAG fixture through the
+      real process (`runDag`) to TO_EMBEDDED + 1 = h, its test package `holds-by-reference` (its live states keep
+      `small to-embedded`, x, by reference after `rewrite to-embedded` is stored embedding it) or `writes-again` (the
+      same batches, x never held by reference); the state after h loaded from the database by a new worker once the
+      process stopped. `ledger-refcount-live-object.test.ts`, both backends: after h − 1, x is a row, queued, with no
+      root count and no stored reference, its parent's stored child list embedding it; at h the step deletes x, the
+      package refuses both tries (2 refusals in the first thread), the worker is replaced (1 restart, 2 threads), the
+      new thread loads the state at h − 1 from the database and applies h again, and x is evicted (the keys the other
+      run evicts); h commits with the node's root, R3 passes after every block, the node set and every table that is
+      not content-defined equal the other run's after every block (`eviction-restart.ts`'s `tableDifferences`), every
+      held key's nodes are stored, and the state after h loads from the database with the node's root. `[NEG]`
+      committed in `ledger-refcount-live-object.negative-control.test.ts` (`restartOnRefusedEviction: false`:
+      `callback-error` at h in `core-ledger-state`'s `on-compute`, the halt's log line naming x; no `states` row for h,
+      every `core_ledger_state` table as the other run's after h − 1, x still a row); seen failing with the fault put
+      back in the main test (`restarts` 0, not 1, both backends). Codex: `4.7-live-1` (the test passed at the first
+      run; the control failed on its own harness, h − 1 not recorded in-process at a halted block, and now compares
+      with the other run's tables), `4.7-live-control-2`, `4.7-fault-put-back`, `4.6-4.7-runs-2to5`,
+      `4.6-dag-devnet-2`. The whole suite with `UMBRADB_TAPES` (`4.7-full-2`, 1,848 s): 412 files, 6,442 tests passed,
+      12 skipped, 1 failed — A162's control `test/private/config-hash.negative-control.test.ts` on PostgreSQL
+      (`writer-lock-held` on the restarted process), a known load-only failure, which passes alone
+      (`4.7-full-a162-alone`, diagnostic only); §0 had none. `readStopped`'s comment now cites R30 too.
 - [x] 4.8 The conversion.
       **Acceptance:** R22.
       **Done (2026-11-03, this commit):** no `src/` change — the conversion runs through 3.8's step with no rule of its
