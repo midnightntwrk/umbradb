@@ -172,9 +172,10 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
 ## 6. Full verification (AGENTS.md stage 3)
 
 - [ ] 6.1 `npm run typecheck`, the full `npx vitest run` and `npm run test:coverage`.
-      **Acceptance:** typecheck exit 0; the full run passes; a failing test is either a defect, fixed here, or a known
-      load-only flake that passes alone and in a second full run, named with its issue; every coverage floor met
-      (`vitest.config.ts`), none lowered.
+      **Acceptance:** typecheck exit 0; the full run passes; a failing test is fixed here, or, if it is flaky and
+      neither a required test of the manifest, a crash test nor a differential test, quarantined as AGENTS.md's "Flaky
+      tests" rule allows (an owner, a root-cause note and a fix-or-retire date in an issue in `docs/issues/`) — a rerun
+      that passes is diagnostic, never evidence; every coverage floor met (`vitest.config.ts`), none lowered.
 - [ ] 6.2 Each new or changed crash, property and differential test run five times.
       **Acceptance:** Definition of done 5; the five runs of each recorded here with the commit.
 - [ ] 6.3 The mutation gate, the pack smoke, the graph check and the conformance gate.
