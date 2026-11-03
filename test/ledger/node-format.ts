@@ -121,6 +121,31 @@ function scale(value: number): Uint8Array {
   throw new Error("lengths of 2^30 or more are not needed here");
 }
 
+/** The fewest bytes a SCALE-compact integer below 2^30 is spelled in: the only spelling the ledger reads. */
+export function scaleWidth(value: number): 1 | 2 | 4 {
+  return value < 1 << 6 ? 1 : value < 1 << 14 ? 2 : 4;
+}
+
+/**
+ * `value` as a SCALE-compact integer in `width` bytes, in that width's mode, whether or not it is the fewest bytes
+ * that spell it ({@link scaleWidth}). The ledger refuses a wider spelling as "non-canonical scale encoding"
+ * (`serialize/src/util.rs` `ScaleBigInt::deserialize`: a second byte of 0 in 2 bytes, a third and fourth of 0 in 4), so
+ * a wider one is a test's malformed input.
+ */
+export function scaleIn(value: number, width: 1 | 2 | 4): Uint8Array {
+  if (value < 0 || value >= 2 ** (8 * width - 2)) throw new Error(`${value} is no SCALE-compact integer in ${width} bytes`);
+  const spelled = value * 4 + (width === 1 ? 0b00 : width === 2 ? 0b01 : 0b10);
+  return Uint8Array.from({ length: width }, (_, i) => Math.floor(spelled / 256 ** i) % 256);
+}
+
+/** The numbers either side of each SCALE width's limit (2^6, 2^14), and 0 and 1: a length test's cases. */
+export const LENGTH_BOUNDARIES: readonly number[] = [0, 1, 63, 64, 16_383, 16_384];
+
+/** Each width `value` can be spelled in: the fewest bytes ({@link scaleWidth}), canonical, and each wider one. */
+export function spellingsOf(value: number): readonly { readonly width: 1 | 2 | 4; readonly canonical: boolean }[] {
+  return ([1, 2, 4] as const).filter((width) => width >= scaleWidth(value)).map((width) => ({ width, canonical: width === scaleWidth(value) }));
+}
+
 function concat(parts: Uint8Array[]): Uint8Array {
   return Uint8Array.from(Buffer.concat(parts));
 }

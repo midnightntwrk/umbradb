@@ -3,7 +3,7 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { childRefKeys } from "../../src/ledger/node-refs.js";
 import { RAW } from "./adapter-fixtures.js";
-import { type Child, decodeChildren, encodeChildren, free, hex, refsOf } from "./node-format.js";
+import { type Child, decodeChildren, encodeChildren, free, hex, LENGTH_BOUNDARIES, refsOf, scaleIn, spellingsOf } from "./node-format.js";
 
 // The main thread reads a stored node's referenced keys from its serialized child list, without the ledger package,
 // which it never loads; a miss prefetches those keys. The oracle is the independent node format
@@ -66,6 +66,31 @@ describe("childRefKeys: a stored node's referenced keys, read on the main thread
     // A two-byte length of 255 children in two bytes.
     expect(() => childRefKeys(Uint8Array.of(0xfd, 0x03))).toThrow(/a length of 255/);
     expect(childRefKeys(Uint8Array.of(0))).toEqual([]);
+  });
+
+  it("reads a length in the fewest bytes that spell it and refuses it in more, as the ledger does, for the number of children and an embedded payload's length: 0, 1, 63/64, 16383/16384 in each width (LG-11, R29)", () => {
+    for (const value of LENGTH_BOUNDARIES) {
+      const refs = Array.from({ length: value }, (_, i) => new Uint8Array(32).fill(i & 0xff));
+      const listed = Buffer.concat(refs.flatMap((ref) => [Uint8Array.of(0), ref]));
+      for (const { width, canonical } of spellingsOf(value)) {
+        const what = `${value} in ${width} bytes`;
+        const count = Uint8Array.from(Buffer.concat([scaleIn(value, width), listed]));
+        // One embedded child of `value` payload bytes and no child of its own.
+        const payload = Uint8Array.from(Buffer.concat([Uint8Array.of(4, 1), scaleIn(value, width), new Uint8Array(value).fill(5), Uint8Array.of(0)]));
+        if (canonical) {
+          expect(childRefKeys(count).map(hex), what).toEqual(refs.map(hex));
+          expect(childRefKeys(payload), what).toEqual([]);
+        } else {
+          const refused = new RegExp(`^not a ledger node's child list: a length of ${value} in ${width} bytes, more than it needs `);
+          expect(() => childRefKeys(count), what).toThrow(refused);
+          expect(() => childRefKeys(payload), what).toThrow(refused);
+        }
+      }
+    }
+    // The ledger's own two refusals, byte by byte: a second byte of 0 in 2 bytes, a third and a fourth of 0 in 4.
+    expect(() => childRefKeys(Uint8Array.of(0b01, 0))).toThrow(/a length of 0 in 2 bytes, more than it needs/);
+    expect(() => childRefKeys(Uint8Array.of(0b10, 0, 0, 0))).toThrow(/a length of 0 in 4 bytes, more than it needs/);
+    expect(() => childRefKeys(Uint8Array.of(0xfe, 0xff, 0, 0))).toThrow(/a length of 16383 in 4 bytes, more than it needs/);
   });
 
   it("reads every SCALE length form: one, two and four bytes", () => {

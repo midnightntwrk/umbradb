@@ -23,7 +23,8 @@ import { contentDefinedLedgerState, countsAndQueue, type StoredRow } from "./con
  * - R29: two databases holding the same nodes, one with a small node embedded in its parent and the other with it
  *   referenced and stored as its own row, hash equal; one more queued node (its row and its `unreferenced` entry) makes
  *   the hash differ; one byte of a row's payload or child list changed fails the computation with
- *   `ledger-refcount-invalid` (`details.check` `node-key`), and counts or a queue its rows do not give fail it with
+ *   `ledger-refcount-invalid` (`details.check` `node-key`), as does a child list with a length in more bytes than it
+ *   needs (the ledger refuses it, LG-11), and counts or a queue its rows do not give fail it with
  *   reason `tables-inconsistent` (`closure`, `roots`, `counts`, `queue`) — here through the exported `contentsHash`
  *   itself; the backup and the restore are `../backup/restore-content-defined.test.ts`. Its three negative controls,
  *   each a test build (`./content-defined-build.ts`) declaring the tables otherwise: `nodes` hashed by its raw rows, a
@@ -126,6 +127,16 @@ function flipped(bytes: Uint8Array, at: number): Uint8Array {
 }
 
 const hexOf = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
+
+/**
+ * `bytes` with the SCALE length at `at`, in one byte, spelled in `width` bytes instead: the same number in more bytes
+ * than it needs, which the ledger refuses ("non-canonical scale encoding"). [LG-11]
+ */
+function widened(bytes: Uint8Array, at: number, width: 2 | 4): Uint8Array {
+  const first = bytes[at] as number;
+  const spelled = width === 2 ? [first | 0b01, 0] : [first | 0b10, 0, 0, 0];
+  return Uint8Array.from([...bytes.subarray(0, at), ...spelled, ...bytes.subarray(at + 1)]);
+}
 
 /** What computing the hash with `hash` rejects with, or "hashed". */
 async function outcome(db: TestDatabase, hash = buildHash): Promise<unknown> {
@@ -238,6 +249,31 @@ describe.each(DETERMINISM_BACKENDS)("core-ledger-state's node tables in the cont
       for (const [what, change] of cases) {
         const db = await database({ rows: changedRow(EMBEDDED_ROWS, PARENT, change), counts, queue });
         expect(await outcome(db), what).toEqual(inconsistent("node-key", PARENT));
+      }
+    },
+    120_000,
+  );
+
+  it(
+    "R29 (LG-11): a nodes row whose child list has a length in more bytes than it needs, which the ledger refuses, its " +
+      "key, payload, counts and queue unchanged, makes the computation fail with ledger-refcount-invalid " +
+      "(details.check node-key), naming the row's key",
+    async () => {
+      const leaf = hex(keyOf(LEAF_ONE));
+      const cases: readonly (readonly [string, string, (row: StoredRow) => StoredRow])[] = [
+        // A leaf's empty list, `00`, as `01 00` and as `02 00 00 00`.
+        ["a leaf's empty list in 2 bytes", leaf, (row) => ({ ...row, children: widened(row.children, 0, 2) })],
+        ["a leaf's empty list in 4 bytes", leaf, (row) => ({ ...row, children: widened(row.children, 0, 4) })],
+        ["the parent's number of children in 2 bytes", PARENT, (row) => ({ ...row, children: widened(row.children, 0, 2) })],
+        // The embedded node's payload length, after the list's length and the child's kind.
+        ["the embedded node's payload length in 2 bytes", PARENT, (row) => ({ ...row, children: widened(row.children, 2, 2) })],
+        ["the embedded node's payload length in 4 bytes", PARENT, (row) => ({ ...row, children: widened(row.children, 2, 4) })],
+      ];
+      const { counts, queue } = countsAndQueue(EMBEDDED_ROWS, new Set([PARENT]));
+      for (const [what, key, change] of cases) {
+        const db = await database({ rows: changedRow(EMBEDDED_ROWS, key, change), counts, queue });
+        expect(await outcome(db), what).toEqual(inconsistent("node-key", key));
+        expect(((await outcome(db)) as Error).message, what).toMatch(/more than it needs/);
       }
     },
     120_000,

@@ -32,7 +32,8 @@ import { type LedgerBackup, ledgerBackup, ledgerChain, type RestoreBuild, restor
  *
  * - The process's backup takes the node tables by their content: its manifest's contents hash is the build's, not the
  *   bytes'.
- * - A126: a changed byte in a `core_ledger_state.nodes` row of the file (its payload, its child list) refuses with
+ * - A126: a changed byte in a `core_ledger_state.nodes` row of the file (its payload, its child list), or its child
+ *   list's length in more bytes than it needs (the ledger refuses it: LG-11), refuses with
  *   `ledger-refcount-invalid`; a node respelled with consistent counts and queue (a small child its stored child list
  *   embeds, referenced and stored as its own row instead) passes the contents-hash step, and the restore goes on to
  *   its state root's check and commits; a changed value in a row the hash covers byte by byte (`root_counts`) still
@@ -248,6 +249,24 @@ describe.each(BACKUP_BACKENDS)("content-defined node tables in a backup and a re
       ] as const) {
         const refused = await restoreInto(file);
         expect(refused.outcome, what).toEqual(inconsistent("node-key", parent.key));
+        expect(await empty(refused.target), what).toBe(true);
+      }
+
+      // A126 (LG-11): a row's child list with its number of children in more bytes than it needs, which the ledger
+      // refuses ("non-canonical scale encoding"), its key, payload, counts and queue unchanged: the same children, so
+      // the same key and node set, yet ledger-refcount-invalid, the target empty.
+      // The row: a leaf (its list `00`, as `01 00` and `02 00 00 00`), else the first whose number is in one byte.
+      const oneByte = (row: FileRow): boolean => (Number.parseInt(row.children.slice(0, 2), 16) & 0b11) === 0;
+      const widened = (rows.find((row) => row.children === "00") ?? rows.find(oneByte)) as FileRow;
+      expect(widened).toBeDefined();
+      const first = Number.parseInt(widened.children.slice(0, 2), 16);
+      for (const [what, spelled] of [
+        ["the number of children in 2 bytes", hex(Uint8Array.of(first | 0b01, 0))],
+        ["the number of children in 4 bytes", hex(Uint8Array.of(first | 0b10, 0, 0, 0))],
+      ] as const) {
+        const line = nodeLine(widened.key, widened.data, `${spelled}${widened.children.slice(2)}`);
+        const refused = await restoreInto(variant(backup, text.replace(widened.line, line)));
+        expect(refused.outcome, what).toEqual(inconsistent("node-key", widened.key));
         expect(await empty(refused.target), what).toBe(true);
       }
 

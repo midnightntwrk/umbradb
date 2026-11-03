@@ -5,7 +5,18 @@ import { nodeKey, nodeKeys } from "../../src/ledger/node-key.js";
 import { type Ledger, RAW } from "./adapter-fixtures.js";
 import { runInFreshInstance, type StoredNode } from "./fresh-instance.js";
 import { V8_PACKAGE_PATH, V9_PACKAGE_PATH, V9_RC3_PACKAGE_PATH } from "./ledger-states.js";
-import { type Child, childKey, decodeChildren, encodeChildren, free, hex, nodeKey as formatNodeKey } from "./node-format.js";
+import {
+  type Child,
+  childKey,
+  decodeChildren,
+  encodeChildren,
+  free,
+  hex,
+  LENGTH_BOUNDARIES,
+  nodeKey as formatNodeKey,
+  scaleIn,
+  spellingsOf,
+} from "./node-format.js";
 import { byReference, oneWrongKey, walkInFreshInstance } from "./package-keys.js";
 
 // A ledger node's key computed on the main thread, without the ledger package, from its payload and its serialized
@@ -102,11 +113,42 @@ describe("nodeKey and nodeKeys: a ledger node's key and its embedded nodes' keys
       Uint8Array.of(4, 1, 4, 1),
       // A length in the big-integer mode.
       Uint8Array.of(0b11, 0xff, 0xff, 0xff, 0xff),
+      // An empty list's length in 2 bytes and in 4, which the ledger refuses (a non-canonical SCALE encoding).
+      Uint8Array.of(0b01, 0),
+      Uint8Array.of(0b10, 0, 0, 0),
+      // An embedded child whose empty payload's length is in 2 bytes, and in 4.
+      Uint8Array.of(4, 1, 0b01, 0, 0),
+      Uint8Array.of(4, 1, 0b10, 0, 0, 0, 0),
     ]) {
       expect(() => nodeKey(data, bytes)).toThrow(/^not a ledger node's child list: /);
       expect(() => nodeKeys(data, bytes)).toThrow(/^not a ledger node's child list: /);
     }
     expect(() => nodeKey(data, Uint8Array.of(0xfd, 0x03))).toThrow(/a length of 255 at byte 2 of 2/);
+  });
+
+  it("read a length in the fewest bytes that spell it and refuse it in more, as the ledger does, for the number of children and an embedded payload's length: 0, 1, 63/64, 16383/16384 in each width (LG-11, R29)", () => {
+    const data = Uint8Array.of(1);
+    for (const value of LENGTH_BOUNDARIES) {
+      const refs = Array.from({ length: value }, (_, i) => new Uint8Array(32).fill(i & 0xff));
+      const listed = Buffer.concat(refs.flatMap((ref) => [Uint8Array.of(0), ref]));
+      const payload = new Uint8Array(value).fill(5);
+      for (const { width, canonical } of spellingsOf(value)) {
+        const what = `${value} in ${width} bytes`;
+        const count = Uint8Array.from(Buffer.concat([scaleIn(value, width), listed]));
+        // One embedded child of `value` payload bytes and no child of its own.
+        const embedded = Uint8Array.from(Buffer.concat([Uint8Array.of(4, 1), scaleIn(value, width), payload, Uint8Array.of(0)]));
+        if (canonical) {
+          expect(hex(nodeKey(data, count)), what).toBe(hex(formatNodeKey(data, refs)));
+          const inner = formatNodeKey(payload, []);
+          expect(nodeKeys(data, embedded).embedded.map(hex), what).toEqual([hex(inner)]);
+          expect(hex(nodeKey(data, embedded)), what).toBe(hex(formatNodeKey(data, [inner])));
+        } else {
+          const refused = new RegExp(`^not a ledger node's child list: a length of ${value} in ${width} bytes, more than it needs `);
+          expect(() => nodeKey(data, count), what).toThrow(refused);
+          expect(() => nodeKeys(data, embedded), what).toThrow(refused);
+        }
+      }
+    }
   });
 });
 
@@ -191,6 +233,24 @@ describe("nodeKey against the vendored packages, on the nodes of real genesis st
       expect(refused.error).toBeDefined();
       expect(refused.serialized).toBeUndefined();
       expect(parents).toContain(refused.requested.at(-1));
+    });
+
+    it(`${ledger}'s control: the package refuses a stored node whose child list's length is in more bytes than it needs, under the node's key, as nodeKey refuses it (LG-11, R29)`, async () => {
+      const { stateKey, inserts } = genesisNodes(ledger, file);
+      const moved = byReference(inserts);
+      // A leaf the load reads from the store (an embedded node, now a row of its own), its empty list respelled.
+      const leaf = moved.nodes.find((n) => moved.embedded.has(hex(n.key)) && hex(n.children) === "00");
+      expect(leaf).toBeDefined();
+      const id = hex(leaf!.key);
+      for (const children of [Uint8Array.of(0b01, 0), Uint8Array.of(0b10, 0, 0, 0)]) {
+        const what = `the list 00 as ${hex(children)}`;
+        expect(() => nodeKey(leaf!.data, children), what).toThrow(/more than it needs/);
+        const nodes = moved.nodes.map((n) => (hex(n.key) === id ? { ...n, children } : n));
+        const refused = await runInFreshInstance({ packagePath, op: "load", key: stateKey, nodes });
+        expect(refused.error, what).toBeDefined();
+        expect(refused.serialized, what).toBeUndefined();
+        expect(refused.requested.at(-1), what).toBe(id);
+      }
     });
 
     it(`${ledger}: a walk of a fresh instance through the state, twice, reads every embedded node under nodeKey's key; one wrong key stops it`, async () => {
