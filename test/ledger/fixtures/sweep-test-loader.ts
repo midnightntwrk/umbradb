@@ -39,6 +39,7 @@
 // references), and one that persists a key no node has [R11]. By `persist`, a flush also persists a node it holds and
 // never releases it: a queued key that a later block persists [R27].
 // [A105, R11, R27, R28, R30; LG-11, LG-14]
+// The one-form DAG (`dag: "one-form"`, the extended DAG without its rewrite cases) is served by the same package. [R4]
 // Erasable TypeScript only: the worker runs it through Node.js's type stripping.
 
 import { createHash } from "node:crypto";
@@ -79,7 +80,7 @@ export type Keeping = "writes-again" | "keeps-old-copy" | "holds-by-reference";
 
 /** What a test asks of the package: a refusal ({@link RefusalData}), and the DAG and the way it keeps nodes. */
 export interface FixtureData extends RefusalData {
-  /** The DAG it serves: the original unless `"extended"`. */
+  /** The DAG it serves: the original unless `"extended"` or `"one-form"`. */
   readonly dag?: FixtureDag;
   /** How it keeps the extended DAG's nodes: `"writes-again"` unless given; refused with the original DAG. */
   readonly keeping?: Keeping;
@@ -109,7 +110,7 @@ const evicted: string[] = [];
 
 /** The ledger worker's loader: the fake adapter (see the module comment). */
 export async function loadLedger(ledger: LedgerName, _options: LedgerPackageOptions, data?: FixtureData | null): Promise<LedgerPackage> {
-  if (data?.dag === "extended") return extendedPackage(ledger, data);
+  if (data?.dag === "extended" || data?.dag === "one-form") return extendedPackage(ledger, data);
   for (const field of ["keeping", "withhold", "persistUnknown", "persist"] as const) {
     if (data?.[field] !== undefined) throw new Error(`the sweep test package's ${field} applies to the extended DAG only (dag: "extended")`);
   }
@@ -230,8 +231,9 @@ interface ExtendedState {
   readonly holds: ReadonlySet<string>;
 }
 
-/** The package of the extended DAG (see the module comment). [A105, R27, R28, R30; LG-11, LG-14] */
+/** The package of the extended DAG or the one-form DAG (see the module comment). [A105, R4, R27, R28, R30; LG-14] */
 function extendedPackage(ledger: LedgerName, data: FixtureData): LedgerPackage {
+  const dag: FixtureDag = data.dag ?? "extended";
   const keeping = data.keeping ?? "writes-again";
   const counters = data.counters === undefined ? new Int32Array(Object.keys(COUNTERS).length) : new Int32Array(data.counters);
   const thread = Atomics.add(counters, COUNTERS.threads, 1);
@@ -251,7 +253,7 @@ function extendedPackage(ledger: LedgerName, data: FixtureData): LedgerPackage {
   const reads = new Map<string, ReadonlySet<string>>();
   const states = new Set<ExtendedState>();
   let deltas = new Map<string, { key: Uint8Array; delta: number }>();
-  const rootKey = (height: number): Uint8Array => rootOf(height, "extended").slice(1);
+  const rootKey = (height: number): Uint8Array => rootOf(height, dag).slice(1);
   const heightOf = (handle: StateHandle): number => (handle as unknown as ExtendedState).height;
   /** The keys `root` reaches by reference through `nodes`, `root` included. */
   const reach = (root: string, nodes: ReadonlyMap<string, FixtureNode>): Set<string> => {
@@ -278,7 +280,7 @@ function extendedPackage(ledger: LedgerName, data: FixtureData): LedgerPackage {
       held.delete(again);
       stored.delete(again);
     }
-    for (const node of stateNodes(height, "extended")) {
+    for (const node of stateNodes(height, dag)) {
       const key = hex(node.key);
       if (keeping !== "keeps-old-copy" || !held.has(key)) held.set(key, node);
       if (!carried.has(key)) carried.set(key, node);
@@ -313,7 +315,7 @@ function extendedPackage(ledger: LedgerName, data: FixtureData): LedgerPackage {
       stored.set(name, hex(row.children));
       frontier.push(...content.refs);
     }
-    const expected = stateKeys(at, "extended");
+    const expected = stateKeys(at, dag);
     const found = [...keys].sort();
     if (JSON.stringify(found) !== JSON.stringify(expected)) {
       throw new Error(`the node store holds ${found.length} nodes of the state after ${at}, not the fixture's ${expected.length}`);
@@ -353,7 +355,7 @@ function extendedPackage(ledger: LedgerName, data: FixtureData): LedgerPackage {
         output: { results: [], events: [], logs: [], parameters: Uint8Array.of(0) },
       };
     },
-    stateRoot: (handle) => rootOf(heightOf(handle), "extended"),
+    stateRoot: (handle) => rootOf(heightOf(handle), dag),
     // The six state tree values, none null: this package's states hold no trees, so empty ones' values. [LG-16]
     stateSummary: () => ({
       zswapFirstFree: 0n,

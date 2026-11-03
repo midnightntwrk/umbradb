@@ -547,6 +547,65 @@ describe("the DAG fixture extended for reference counting, and its test packages
     expect(worker.failure).toBeNull();
   });
 
+  it("one-form (R4's DAG): each state is the extended one without the rewrite cases, and the package writes every key with one child list throughout, only `again` written again", async () => {
+    const problems: string[] = [];
+    const gone = (h: number): FixtureNode[] => {
+      const c = extendedCases(h);
+      return [c.toRef.node, c.toRef.small, c.toEmbedded.node, c.toEmbedded.small, c.requeue.node, c.requeue.requeued, c.requeue.leaf];
+    };
+    for (let h = 0; h <= LAST; h++) {
+      const nodes = stateNodes(h, "one-form");
+      const rows = new Set(nodes.map((node) => hex(node.key)));
+      const embedded = new Set(nodes.flatMap((node) => embeddedOf(decodeChildren(node.children))));
+      for (const node of nodes) {
+        if (hex(storedNodeKey(node.data, node.children)) !== hex(node.key)) problems.push(`${h}: ${hex(node.key)}'s key is not its content's`);
+        for (const ref of node.refs) if (!rows.has(hex(ref))) problems.push(`${h}: ${hex(node.key)} references ${hex(ref)}, no row`);
+      }
+      const root = nodes[0] as FixtureNode;
+      if (hex(rootOf(h, "one-form")) !== `00${hex(root.key)}`) problems.push(`${h}: rootOf`);
+      // The extended DAG's rows but the rewrite cases', the original's subtrees first under the root.
+      const extended = stateNodes(h, "extended").slice(1).map((node) => hex(node.key));
+      const without = new Set(gone(h).map((node) => hex(node.key)));
+      const holder = extendedCases(h).requeue.holder;
+      if (holder !== null) without.add(hex(holder.key));
+      const expected = extended.filter((key) => !without.has(key)).sort();
+      if (JSON.stringify(nodes.slice(1).map((node) => hex(node.key)).sort()) !== JSON.stringify(expected)) problems.push(`${h}: the rows are not the extended DAG's without its rewrite cases`);
+      if (JSON.stringify(root.refs.slice(0, 24).map(hex)) !== JSON.stringify((stateNodes(h)[0] as FixtureNode).refs.map(hex))) problems.push(`${h}: the original subtrees`);
+      for (const key of without) if (rows.has(key) || embedded.has(key)) problems.push(`${h}: a rewrite case's node ${key} is in the state`);
+      if (JSON.stringify(stateKeys(h, "one-form")) !== JSON.stringify([...new Set([...rows, ...embedded])].sort())) problems.push(`${h}: stateKeys`);
+    }
+    expect(problems).toEqual([]);
+    // Through the package: each key one child list in every batch that writes it; written again only `again`, at
+    // AGAIN, unchanged; each case's nodes written; every batch admissible.
+    const run = driver(await packageOf({ dag: "one-form" })).to(LAST);
+    const forms = new Map<string, Set<string>>();
+    const writtenAgain: Record<number, string[]> = {};
+    for (const [h, b] of run.batches) {
+      for (const node of b.inserts) {
+        const key = hex(node.key);
+        if (forms.has(key)) (writtenAgain[h] ??= []).push(key);
+        (forms.get(key) ?? forms.set(key, new Set()).get(key)!).add(hex(node.children));
+      }
+      expect(hex(run.pkg.stateRoot(run.pkg.load(rootOf(h, "one-form").slice(1), storeOf(run.rows)))), `${h}`).toBe(hex(rootOf(h, "one-form")));
+      const byKey = new Map(b.inserts.map((n) => [hex(n.key), n]));
+      const reached = new Set<string>();
+      const frontier = b.rootCounts.filter((change) => change.delta > 0).map((change) => hex(change.key));
+      while (frontier.length > 0) {
+        const key = frontier.pop() as string;
+        const node = byKey.get(key);
+        if (reached.has(key) || node === undefined) continue;
+        reached.add(key);
+        for (const ref of childRefKeys(node.children)) frontier.push(hex(ref));
+      }
+      expect(keysOf(b).filter((key) => !reached.has(key)), `${h}`).toEqual([]);
+    }
+    expect([...forms].filter(([, lists]) => lists.size > 1).map(([key]) => key)).toEqual([]);
+    expect(writtenAgain).toEqual({ [AGAIN]: [hex(extendedCases(AGAIN).again.node.key)] });
+    const c = extendedCases(LAST);
+    for (const node of [c.shared.node, c.repeated.node, c.embedded.node, ...c.embedded.leaves, c.again.node]) expect(forms.has(hex(node.key))).toBe(true);
+    for (const node of gone(LAST)) expect(forms.has(hex(node.key))).toBe(false);
+  });
+
   it("a fresh package refuses a stored state that lacks a row or holds a row whose content is not its key; keeping is refused without the extended DAG", async () => {
     const run = driver(await packageOf({ dag: "extended" })).to(TO_REF, [TO_REF]);
     const rows = run.kept.get(TO_REF) as Map<string, StoredNode>;

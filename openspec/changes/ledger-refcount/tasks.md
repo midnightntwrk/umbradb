@@ -526,10 +526,45 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
       "expected 8 to be greater than or equal to 10") and L16–L18's controls (`test/library/network.test.ts`, issue
       00064: "startup completed" not reached), known load-only failures that pass alone (`4.8-full-known-alone`,
       diagnostic only); §0 had none.
-- [ ] 4.9 The comparison with the sweep.
+- [x] 4.9 The comparison with the sweep.
       **Acceptance:** R4. Its runtime half ("Before the runtime sweep is removed, the same comparison is also made
       against the runtime sweep itself (its own run and database) […] and recorded in `tasks.md`") runs the base
       commit's build (§0), in its own worktree and database; the result is recorded here.
+      **Done (2026-11-03, this commit):** "the DAG fixture without its rewrite cases" is a third DAG of
+      `test/ledger/fixtures/sweep-fixture.ts`, `"one-form"`: the extended DAG without `rewrite to-ref`, `rewrite
+      to-embedded` and `requeue` (with `requeued`, its leaf and `requeue holder`), every other case kept (shared
+      children, a repeated child, embedded children, `again` written again unchanged, subtree 0 reused at REVERT), every
+      key in one child list throughout; the extended package serves it (`sweep-test-loader.ts`), and a test in
+      `test/ledger/sweep-fixture.test.ts` pins it. R4's comparison is in `test/backbone/sweep-tapes.ts` (the part kept
+      for R2 and R4, design §11): `SweepComparison` feeds each block's batch of the counting run to the sweep's model
+      and compares node sets (rows and embedded keys, `nodeSet`) after the block, refusing a key written in another form
+      and, where the budget must fit, a cycle that does not end in its block.
+      *Model half.* `test/backbone/ledger-refcount-sweep.test.ts`, through the process on both backends: on the one-form
+      DAG, the node sets are equal at every height 0–100 with a budget of 1,000,000 (each cycle ends in its block), and
+      the counted one is a subset of the swept one at every height with 50 (cycles span blocks; the sweep holds more at
+      most heights; both asserted); R3 passes on the run. On the recorded tapes (`ledger-refcount-sweep-tape-*.test.ts`,
+      helper `ledger-refcount-sweep-tapes.ts`, one file per tape and backend but the devnet's): the first other-form
+      height is none on every tape (1.1), so **the heights compared are every height: preprod 0–10,000, stagenet
+      0–10,000, devnet 0–235**, node sets equal at each, on PostgreSQL and on PGlite; the counting run's rows are
+      tracked from its batches and evictions and held to the database's after every block (a digest of keys and child
+      lists). `[NEG]`: `ledger-refcount-sweep.negative-control.test.ts`, the step with its cascade stopped after the
+      first round (`refcountFault: "first-round-only"`): the counting run holds rows the sweep's model deleted, from 2
+      on; with that fault put into the main test it fails R4's equality at 2 (and at 98 more heights) on both backends.
+      *Runtime half* (against the runtime sweep's own run and database, base build `5bcffec` in its own worktree;
+      organizer `research/00034-ledger-node-refcount-data/measure/`, `runtime-half.sh`, `dag-sets.ts`,
+      `compare-sets.ts`). DAG fixture (one-form, the lane's fixture given to the base build's worker; PostgreSQL and
+      PGlite, each run on its own database): with the base build's own budget (10,000; every cycle ends in its block)
+      the counting build's node sets and rows equal the runtime sweep's at all 101 heights; with a budget of 50 the
+      counting build's are a subset at all 101 (strictly at 99; cycles unfinished after 98 blocks). Preprod and stagenet
+      0–10,000 (and the devnet, 0–235), both module sets of 1.1, PGlite: the counting build's stored rows after every
+      block (4.10's captures) equal the runtime sweep's (1.1's `runtime-sweep-node-sets/`) at every height, and the two
+      runs' captures are byte-identical: the same batches, and the same keys deleted at the same blocks.
+      Codex: `4.9-dag-1` (PostgreSQL's case past vitest's default timeout, given A105's), `4.9-dag-2` (4 passed),
+      `4.9-fault-put-back`, `-2` (the fault in the main test: R4's equality fails at 2 on both backends),
+      `4.9-tape-devnet-1`, `4.9-no-tapes` (the tape files skip by name, no container), `4.9-runtime-dag-1`,
+      `4.9-runtime-tapes-1`, `4.9-touched-1` (with the tapes: this task's files, the fixture's test, every
+      `ledger-refcount-*` suite, A100–A104, A160, the sweep's own and R1/R2's tests; 24 files, 132 passed, 2,258 s, the
+      PostgreSQL replays of preprod 2,137 s and stagenet 2,252 s at load averages 7–34).
 - [ ] 4.10 The rest of R21, with 1.1's measurement extended to the step.
       **Acceptance:** R21's clauses "new nodes left unreferenced; […] the keys whose count changed before and after
       netting; the rows deleted; the cascade's rounds; and the step's time — reported per tape as distributions

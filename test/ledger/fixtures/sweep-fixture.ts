@@ -9,7 +9,7 @@
 // Shared by the test package the ledger worker loads (`sweep-test-loader.ts`) and the tests' reference model
 // (`test/backbone/sweep-model.ts`). Erasable TypeScript only: the worker runs it through Node.js's type stripping.
 //
-// Two DAGs, selected by name ({@link FixtureDag}); every function takes the name, `"original"` unless given:
+// Three DAGs, selected by name ({@link FixtureDag}); every function takes the name, `"original"` unless given:
 // - `"original"`: the DAG above, which the sweep's tests run, unchanged.
 // - `"extended"`: the same states with more children under each root, the cases of the reference-counting tests
 //   ({@link extendedCases}). Their child lists also embed children (`ArenaKey::Direct`: the byte 1, the payload as a
@@ -35,6 +35,10 @@
 //   listed; {@link contentOf} reads a stored node back (its key from its content, its references, its embedded keys).
 //   The tape of the extended DAG carries `rootOf(h, "extended")` as the node's roots. [A105, R27, R28, R30; LG-11,
 //   LG-14]
+// - `"one-form"`: the extended DAG without its rewrite cases (`rewrite to-ref`, `rewrite to-embedded`, and `requeue`
+//   with `requeued`, its leaf and `requeue holder`); every other case as there. Each key is written with one child list
+//   throughout, deletions and re-insertions included, which the comparison with the sweep's model needs (the sweep
+//   keeps a node's first child list). [R4]
 
 import { createHash } from "node:crypto";
 
@@ -58,8 +62,11 @@ export const REQUEUE = 63;
 /** The extended DAG: the test package writes `again` again, unchanged, at this height. */
 export const AGAIN = 71;
 
-/** Which DAG: the original, which the sweep's tests run, or the one extended with the reference-counting cases. */
-export type FixtureDag = "original" | "extended";
+/**
+ * Which DAG: the original, which the sweep's tests run; the one extended with the reference-counting cases; or that one
+ * without its rewrite cases, every key in one form.
+ */
+export type FixtureDag = "original" | "extended" | "one-form";
 
 /** A node of the fixture: its key, payload and serialized child list, and its children's keys. */
 export interface FixtureNode {
@@ -111,7 +118,7 @@ function subtree(i: number, v: number): FixtureNode[] {
 
 /** The state after height `h` of `dag`: its root node first, then every node it holds as a row. */
 export function stateNodes(h: number, dag: FixtureDag = "original"): FixtureNode[] {
-  if (dag === "extended") return extendedStateNodes(h);
+  if (dag !== "original") return extendedStateNodes(h, dag);
   const parts = Array.from({ length: WIDTH }, (_, i) => subtree(i, versionOf(i, h)));
   const root = node(utf8(`state ${h}`), parts.map((part) => (part[0] as FixtureNode).key));
   return [root, ...parts.flat()];
@@ -245,24 +252,28 @@ export function extendedCases(h: number): ExtendedCases {
   };
 }
 
-const extendedStates = new Map<number, FixtureNode[]>();
+const extendedStates = new Map<string, FixtureNode[]>();
 
-/** The extended DAG's state after `h`: its root (the original's subtrees, then the cases' nodes), then its rows. */
-function extendedStateNodes(h: number): FixtureNode[] {
-  let nodes = extendedStates.get(h);
+/**
+ * The extended DAG's state after `h` (or the one-form DAG's): its root (the original's subtrees, then the cases'
+ * nodes), then its rows.
+ */
+function extendedStateNodes(h: number, dag: Exclude<FixtureDag, "original">): FixtureNode[] {
+  let nodes = extendedStates.get(`${dag} ${h}`);
   if (nodes === undefined) {
-    nodes = buildExtendedState(h);
-    extendedStates.set(h, nodes);
+    nodes = buildExtendedState(h, dag);
+    extendedStates.set(`${dag} ${h}`, nodes);
   }
   return [...nodes];
 }
 
-/** {@link extendedStateNodes}, built. */
-function buildExtendedState(h: number): FixtureNode[] {
+/** {@link extendedStateNodes}, built: the one-form DAG leaves the rewrite cases out of the root. [R4] */
+function buildExtendedState(h: number, dag: Exclude<FixtureDag, "original">): FixtureNode[] {
   const parts = Array.from({ length: WIDTH }, (_, i) => subtree(i, versionOf(i, h)));
   const c = extendedCases(h);
-  const tops = [c.shared.node, c.repeated.node, c.embedded.node, c.toRef.node, c.toEmbedded.node, c.requeue.node, c.again.node];
-  if (c.requeue.holder !== null) tops.push(c.requeue.holder);
+  const rewrites = dag === "extended" ? [c.toRef.node, c.toEmbedded.node, c.requeue.node] : [];
+  const tops = [c.shared.node, c.repeated.node, c.embedded.node, ...rewrites, c.again.node];
+  if (dag === "extended" && c.requeue.holder !== null) tops.push(c.requeue.holder);
   const root = nodeOver(`state ${h}`, [...parts.map((part) => ({ ref: part[0] as FixtureNode })), ...tops.map((top) => ({ ref: top }))]);
   const rows = new Map<string, FixtureNode>();
   const add = (row: FixtureNode): void => {
