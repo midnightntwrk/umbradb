@@ -1,6 +1,7 @@
 # Proposal — LEDGER-REFCOUNT: ledger nodes stored as the node stores them, compared by content, reclaimed by reference counting (`ledger-refcount`)
 
-> **Status:** Proposed — at the stage-1 gate (the cold adversarial review, then the owner's approval); no code.
+> **Status:** Approved (2026-11-02, the owner, at the stage-1 gate: the cold adversarial review and thirteen targeted
+> fix checks, the last PASS). No code yet.
 
 ## Why
 
