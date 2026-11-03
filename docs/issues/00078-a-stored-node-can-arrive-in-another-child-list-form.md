@@ -1,7 +1,8 @@
 # 00078 — A stored ledger node can arrive again in another child-list form, so the batch may depend on the worker's history
 
 - **Status:** OPEN — the fix is specified in the `ledger-refcount` change (`openspec/changes/ledger-refcount/`,
-  `design.md` §2.2–§2.3 and §4.4; owner decision O-8, 2026-11-02); closed when that change is implemented
+  `design.md` §2.2 and §4.4; owner decision O-8, 2026-11-02: "lets match the node"); closed when that change is
+  implemented
 - **Area:** ledger storage (`core-ledger-state`, LG-11)
 - **Severity:** unknown — no divergence has been seen; if the packages produce it on a real chain, two indexers with
   different worker histories (one restarted) store different rows for a block and their per-block digests differ from
@@ -47,15 +48,18 @@ such a row for a block or deletes it, but cannot make its insertion deterministi
 
 ## Fix (specified in `ledger-refcount`)
 
-The owner chose to make storage deterministic by design, in the `ledger-refcount` change:
+Rewriting stored child lists into one form would not do: the ledger's storage-cost accounting reads a node's child
+list and counts referenced and embedded children differently (`upstream:storage/src/delta_tracking/mod.rs:199-300`),
+so a restarted worker reading a rewritten form could compute another state than the node. The owner chose to match the
+node instead:
 
-1. Every stored node's child list is its **one form**: each child embedded, in its own one form, when that is small by
-   the ledger's rule (`upstream:storage-core/src/storable.rs:139-159`), referenced otherwise — the form the ledger
-   builds for fresh content. The ledger worker computes it with the package's own code (a patch in each vendored
-   package). The package accepts it, since it checks only that a node's content hashes to its key
-   (`vendor/ledger/v9/patches/0001-storage-core-external-node-store.patch:133-141`).
-2. A node is a row exactly when its one form is not small or its key is persisted. A small node the package flushed
-   without being persisted is kept in the worker's memory and served to its package by key, so it never becomes a row
-   on one machine only.
-3. Its criteria R27 (every row in its one form), R28 (each package's one form equals an independent oracle; the tapes
-   still sync) and R29 (three runs with different worker histories store identical rows and digests) verify it.
+1. When the ledger writes again a node already stored with another child list, the stored child list is replaced, as
+   both of the node's storage back-ends do (`upstream:storage-core/src/db/sql.rs:578-590`, `INSERT OR REPLACE`;
+   `upstream:storage-core/src/db/paritydb.rs:261-280`, `Set`); a node written again unchanged touches no row. A
+   restarted worker then rebuilds its memory from the child lists the ledger last wrote, as a restarted node does.
+2. Reference counting subtracts a rewritten node's old references and adds its new ones, and keeps a reference a
+   rewrite drops one block longer, since the state the worker still holds may reach it.
+3. Criteria R27 (a rewrite replaces the row and counts it) and R28 (a never-restarted run and runs restarted at 20
+   heights store identical rows and digests, on the fixture and the recorded tapes) verify it; R21 counts rewrites on
+   the tapes. If R28 ever fails, the fallback is to start every block from the database with nothing carried in the
+   ledger's memory.
