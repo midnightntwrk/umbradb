@@ -122,12 +122,23 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
       `core-chain.test.ts`'s and `core-private-source.test.ts`'s migration cases rewritten to one migration (the new
       pinned checksum of `core-chain`'s `001`); `test/config/history-startup.ts`'s stand-in takes the new `001`. A102,
       the migration cases and R16's clauses pass on both backends (Codex `3.2-green`, 11 files).
-- [ ] 3.3 The node write replaces a changed child list (`design.md` §2.2) and `writeBlock` returns the written count;
+- [x] 3.3 The node write replaces a changed child list (`design.md` §2.2) and `writeBlock` returns the written count;
       `core-arch` design §10's `nodes` row ("an existing key is left as it is" replaced by §2.2's rule).
       **Acceptance:** a statement test on both backends: a node written again with its stored child list leaves its row
       untouched and is not counted, one written with another child list replaces it and is counted, a new one is
       inserted and counted (the shape `design.md` §14 probes); A100–A104 pass. R5 and R27 are checked whole in 4.2 and
       4.1.
+      **Done (2026-11-03, this commit):** the node insert is `… ON CONFLICT (node_key) DO UPDATE SET children =
+      EXCLUDED.children WHERE nodes.children IS DISTINCT FROM EXCLUDED.children`; `insertNodes` resolves with the rows
+      it affected and `writeBlock` with their sum over its statements; `core-arch` design §10's `nodes` row and
+      `core-ledger-state.ts`'s comments say the replacing rule. Test first: `test/backbone/ledger-node-write.test.ts`,
+      on both backends through the database API on the part's own migration (a node written again unchanged keeps its
+      row version and is not counted, one with another child list is replaced and counted, a new one inserted and
+      counted; `writeBlock`'s count over two statements), seen failing before (no count) and, with the first-copy write
+      (`DO NOTHING`) put back, failing on the rewritten node (expected 2, got 1). A100–A104 (`ledger-storage.test.ts`
+      and its negative controls) and the sweep's tests (`ledger-sweep*.test.ts`, the eviction restart, the worker's
+      eviction) pass with the replacing write, the tapes included: no sweep test differed. The whole suite with the
+      tapes, compared with §0, is in the plan's P3 notes.
 - [ ] 3.4 `src/ledger/node-key.ts`: a node's key from its payload and its children's keys.
       **Acceptance:** R29's clause "`src/ledger/node-key.ts` gives, for every node embedded in the rows of the recorded
       tapes, the key the ledger package gives it"; checked against `test/ledger/node-format.ts` too.

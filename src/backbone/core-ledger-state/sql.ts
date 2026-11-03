@@ -149,9 +149,14 @@ const DEPLOYED_SQL =
 /** The keys of the states stored after the blocks `$1` to `$2` − 1, in height order: a block's releases. [LG-12] */
 const KEYS_SQL =
   `SELECT height, state_key FROM ${STATES_TABLE} WHERE height >= $1 AND height < $2 ORDER BY height`;
+/**
+ * The node write: a new key is inserted; a stored key written with another child list takes it, as the node's own
+ * storage replaces a node written again; one written with its stored child list touches no row. A row's `data` never
+ * changes (a key is its node's hash). It affects exactly the new and the rewritten nodes. [LG-11, R27]
+ */
 const NODES_SQL = `INSERT INTO ${NODES_TABLE} (node_key, data, children)
   SELECT n.node_key, n.data, n.children FROM unnest($1::bytea[], $2::bytea[], $3::bytea[]) AS n (node_key, data, children)
-  ON CONFLICT (node_key) DO NOTHING`;
+  ON CONFLICT (node_key) DO UPDATE SET children = EXCLUDED.children WHERE nodes.children IS DISTINCT FROM EXCLUDED.children`;
 const ROOT_COUNTS_SQL = `WITH d AS (SELECT * FROM unnest($1::bytea[], $2::integer[]) AS d (node_key, delta)),
   merged AS (SELECT d.node_key, coalesce(r.count, 0) + d.delta AS count FROM d LEFT JOIN ${ROOT_COUNTS_TABLE} r USING (node_key)),
   gone AS (DELETE FROM ${ROOT_COUNTS_TABLE} r USING merged m WHERE r.node_key = m.node_key AND m.count = 0)
@@ -240,9 +245,13 @@ export async function deployedBelow(read: Pick<ReadHandle, "query">, height: big
   return rows.map((row) => bytesOf(row.contract_address, `${EVENTS_TABLE}.contract_address`));
 }
 
-/** Inserts `nodes` into the nodes table in one statement; a key already there is left as it is. [LG-11] */
-export async function insertNodes(w: Pick<BlockWriteHandle, "execute">, nodes: NodeBatch["inserts"]): Promise<void> {
-  await w.execute(NODES_SQL, [nodes.map((n) => n.key), nodes.map((n) => n.data), nodes.map((n) => n.children)]);
+/**
+ * Writes `nodes` into the nodes table in one statement (see {@link NODES_SQL}): a stored key written with another child
+ * list takes it, one written with its stored child list is left untouched. Resolves with the rows written: the new
+ * and the rewritten nodes. [LG-11]
+ */
+export async function insertNodes(w: Pick<BlockWriteHandle, "execute">, nodes: NodeBatch["inserts"]): Promise<number> {
+  return w.execute(NODES_SQL, [nodes.map((n) => n.key), nodes.map((n) => n.data), nodes.map((n) => n.children)]);
 }
 
 /** Adds each signed change of `counts` to the stored root count, deleting a count that reaches 0. [LG-11] */

@@ -36,9 +36,9 @@
  *
  * **At `on-db-write`** it writes, in the block's transaction: [LG-11, LG-16, Q53, Q138 A]
  * - the batch the worker flushed: the nodes created since the previous block that the new state reaches
- *   (`core_ledger_state.nodes`; an existing key is left as it is, since a node is its key's content), and each changed
- *   root count as a signed change added to the stored one, a count that reaches 0 being deleted
- *   (`core_ledger_state.root_counts`);
+ *   (`core_ledger_state.nodes`; a stored key written with another child list takes it, as the node's own storage does,
+ *   and one written with its stored child list is left untouched), and each changed root count as a signed change
+ *   added to the stored one, a count that reaches 0 being deleted (`core_ledger_state.root_counts`);
  * - the block's `states` row: the state key and root, and the first free index and root of the zswap tree and of the
  *   DUST commitment and generation trees, none null, read as the official indexer reads them (the packages'
  *   `stateTrees`);
@@ -448,12 +448,16 @@ export function itemsOf(applied: AppliedState): {
   });
 }
 
-/** Writes the block `applied` describes, in its transaction (see the module comment). */
-export async function writeBlock(w: Pick<BlockWriteHandle, "execute">, applied: AppliedState): Promise<void> {
+/**
+ * Writes the block `applied` describes, in its transaction (see the module comment). Resolves with the nodes it wrote,
+ * summed over its statements: the batch's new nodes and those it rewrote with another child list. [LG-11]
+ */
+export async function writeBlock(w: Pick<BlockWriteHandle, "execute">, applied: AppliedState): Promise<number> {
   const { batch, output, summary, height, stateKey, stateRoot } = applied;
+  let written = 0;
   for (let at = 0; at < batch.inserts.length; at += NODES_PER_STATEMENT) {
     const chunk = batch.inserts.slice(at, at + NODES_PER_STATEMENT);
-    await insertNodes(w, chunk);
+    written += await insertNodes(w, chunk);
   }
   const counts = batch.rootCounts.filter((count) => count.delta !== 0);
   if (counts.length > 0) await addRootCounts(w, counts);
@@ -469,6 +473,7 @@ export async function writeBlock(w: Pick<BlockWriteHandle, "execute">, applied: 
     });
     await insertEvents(w, height, output.events, indexes);
   }
+  return written;
 }
 
 /** The block `on-compute` applied for `b`, with its sweep step, taken for its `on-db-write`; throws when it is not `b`'s. */
@@ -514,8 +519,9 @@ export async function sweepOf(
  * load) and applies the block again, and the sweep step is computed and evicted again; a refusal then fails the block.
  * [LG-14, Q144 B]
  *
- * The stored rows and roots do not depend on the restart: the new thread applies the same block to the same stored
- * state, and a node it writes again is left as it is (`ON CONFLICT DO NOTHING`).
+ * The stored nodes and roots do not depend on the restart: the new thread applies the same block to the same stored
+ * state; a node it writes again with its stored child list touches no row, and one it writes with another child list
+ * replaces the stored one, as any write of the block does.
  */
 export async function computeBlock(
   p: ProcessContext,
