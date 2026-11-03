@@ -382,8 +382,29 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
       `4.2-green-1` (R7's `retainStates` 2 case failing on the test's first reading of a state's rows, fixed as above),
       `4.2-green-2` (12 passed), `4.2-red`, `4.2-red-touch`, `4.2-touched` (with the tapes: this file, A105, A160, R11,
       A100–A104 and their controls; 9 files, 70 passed).
-- [ ] 4.3 `sweep: off`.
+- [x] 4.3 `sweep: off`.
       **Acceptance:** R10.
+      **Done (2026-11-03, this commit):** `test/backbone/ledger-refcount-sweep-off.test.ts`, on the extended DAG through
+      the process, both backends, `retainStates` 0, `sweep: off` from 30 to 65 under the development opt-in (the stretch
+      holds both rewrites and the queued key referenced again) and on again from 66: switched off while the queue holds
+      the root of the state after 28, released at 29; from 30 to 65 no row deleted or evicted (that state's rows
+      included), the queue after every block exactly the rows no stored child list references and no root count
+      persists, every root released meanwhile queued after 65; at 66 the whole queue deleted with its cascade (rows
+      outside the queue among the deleted, R1's model counting more than one round), every deleted row evicted, the
+      state's rows outside `K` gone; R3 after every block with `sweep` as configured ((a), (b) and `R_{h−1} ⊆ S_h`
+      throughout, `S_h = K_h` and (d) where it is on). No reset at either switch: R1's model (no reset in its rules)
+      holds the tables after every block, and no table of `core_ledger_state` but those the rules write changes at
+      either switch (at 30 and at 66). Without the opt-in the same configuration is refused at startup with
+      `development-opt-in-required` before anything is written: on PostgreSQL the history check names `sweep-off`; on
+      PGlite the database itself needs the opt-in and refuses first (`pglite`), so no PGlite process runs `sweep: off`
+      without it — the history check's own refusal is backend-independent (CF-9,
+      `test/config/development-opt-in.test.ts`). Seen failing (diagnostic, the source restored after each): the step
+      deleting while `sweep` is off fails the first case on both backends (rows deleted from 30, the state's rows gone);
+      the history check without its `sweep-off` rule fails the refusal on PostgreSQL (the process starts). Codex:
+      `4.3-green-1` (4 passed), `4.3-red` (the refusal under its fault waited for the started process's end until its
+      timeout; the test now stops a process that starts at once), `4.3-green-2` (4 passed), `4.3-red-2`. Whole suite
+      before this commit (`4.3-full`, `npx vitest run` with the tapes, the final tree but this sentence): 407 files,
+      6,447 tests passed, 12 skipped, no failure (§0: 387, 6,252, 12).
 - [ ] 4.4 Restarts and crashes.
       **Acceptance:** R13, R14.
 - [x] 4.5 Backups and the per-block capture.
