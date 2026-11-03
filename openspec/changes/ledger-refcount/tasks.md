@@ -565,12 +565,42 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
       `4.9-runtime-tapes-1`, `4.9-touched-1` (with the tapes: this task's files, the fixture's test, every
       `ledger-refcount-*` suite, A100–A104, A160, the sweep's own and R1/R2's tests; 24 files, 132 passed, 2,258 s, the
       PostgreSQL replays of preprod 2,137 s and stagenet 2,252 s at load averages 7–34).
-- [ ] 4.10 The rest of R21, with 1.1's measurement extended to the step.
+- [x] 4.10 The rest of R21, with 1.1's measurement extended to the step.
       **Acceptance:** R21's clauses "new nodes left unreferenced; […] the keys whose count changed before and after
       netting; the rows deleted; the cascade's rounds; and the step's time — reported per tape as distributions
       (median, 99th percentile, maximum). On the devnet tape also the block after the v8 state's release (F + 1 with
       `retainStates` 0): the rows stored at F − 1, the rows deleted, the cascade's rounds, the step's time and the
       block's total time" (R21 whole with 1.1's part); recorded here and in the pull request.
+      **Done (2026-11-03, this commit):** measured on this build (`fc7f02e`: `core-ledger-state` reclaims by reference
+      counting) by 1.1's harness, extended to the step and still outside the repository, editing nothing here
+      (organizer `research/00034-ledger-node-refcount-data/measure/`: `capture.ts`'s step mode, `analyze.ts`): the
+      same process, tapes, settings (`retainStates` 0, `sweep` on, PGlite) and two module sets as 1.1. The step's
+      figures are the build's own `refcountStep` run again on `on-compute`'s read at h − 1 and the block's batch; its
+      time is the build's own run, timed through `core-ledger-state`'s wrapped points (`compute`: from the step's first
+      read after the apply to the eviction; `write`: `writeRefcount`, from the `refcountWriter` seam to `on-db-write`'s
+      end); the keys whose count changes before netting are recomputed from the child lists the batches wrote. Checks
+      on every capture: 1.1's C1–C7, and C8 (the step's deletions are the eviction's), C9 (the changes recomputed net to
+      the step's deltas), C10 (R1's model, fed the batches, agrees on deletions, rounds, netted keys, queued new nodes);
+      controls fail each its own check (Codex `4.10-step-controls-2`). Per block, median / p99 / max over every block
+      (ledger core; with `core-contract-states` the counts are the same on stagenet and preprod, and on the devnet but
+      the two maxima after a semicolon); times in ms on a machine shared with other lanes' test runs (load averages
+      62 → 8 over the stagenet and preprod captures, 26 at the devnet's):
+
+      | Tape | new left unreferenced | keys changed, before netting | after netting | rows deleted | rounds | step, ms |
+      |---|---|---|---|---|---|---|
+      | stagenet 0–10,000 | 0 / 0 / 0 | 70 / 99 / 422 | 18 / 18 / 306 | 10 / 10 / 90 | 4 / 4 / 6 | 5.5 / 19.5 / 129.4 |
+      | preprod 0–10,000 | 0 / 0 / 0 | 163 / 372 / 378 | 14 / 25 / 204 | 8 / 9 / 10 | 4 / 4 / 4 | 6.5 / 23.6 / 85.5 |
+      | devnet 0–235 | 0 / 0 / 0 | 24 / 50 / 54 | 10 / 40 / 42; 40 | 6 / 15 / 36; 33 | 3 / 5 / 5 | 3.6 / 6.1 / 7.1 |
+
+      With contract states the step took 6.1 / 20.7 / 212.8 ms (stagenet), 5.3 / 8.5 / 13.9 (preprod, at the lowest
+      load), 3.6 / 5.6 / 7.0 (devnet). **The devnet's F + 1** (104, `retainStates` 0, F = 103): 48 rows stored after
+      F − 1 (52 with contract states); 36 rows deleted (33) in 5 rounds; the step 4.87 ms (6.99), the eviction 0.85 ms
+      (0.76), the block's total time 23 ms (26), of which 3.87 ms (4.53) the harness's second run of the step. The
+      captures are byte-identical to 1.1's base-build ones (4.9's runtime half). Codex runs: `4.10-step-devnet-1`,
+      `4.10-step-tapes-1` (exit 0, 1,452 s), `4.10-step-devnet-2`, `4.10-step-controls-1`, `-2`. The full report, for
+      the pull request: `measure/r21-step-figures.md` there. Whole suite before this commit (`4.10-full`, `npx vitest
+      run` with the tapes, the final tree but this sentence): 416 files, 6,469 tests passed, 12 skipped, no failure
+      (§0: 387, 6,252, 12).
 
 ## 5. The sweep removed, the documents (`design.md` §11; §13 phase 4)
 
