@@ -6,6 +6,7 @@ import type { LedgerHost } from "../../src/ledger/worker/host.js";
 import type { RuntimeMetadataEntry } from "../../src/ledger/metadata.js";
 import type { BlockHeader, ModuleDeclaration } from "../../src/modules/declaration.js";
 import type { NodeClient, NodeClientOptions } from "../../src/node/client.js";
+import type { FinalizedLoop, LoopInput } from "../../src/runner/loop.js";
 import type { ProcessHandle, SourceShared } from "../../src/runner/process.js";
 import { type TapeRecord, TapeNode } from "../../tools/tape/index.js";
 import type { ProcessDatabase } from "../runner/process-backends.js";
@@ -160,6 +161,8 @@ export interface IngestOptions {
   readonly stopOf?: (id: string) => number | undefined;
   /** The process's ledger worker (a test package's, a negative control's); `startLedgerWorker` unless given. */
   readonly ledgerWorker?: () => LedgerHost;
+  /** The process's finalized loop (one reporting named points, a negative control's); the runner's unless given. */
+  readonly loop?: new (input: LoopInput) => FinalizedLoop;
   /** The admin listener, as the engine's `adminListener` port takes it; none unless given. */
   readonly admin?: AdminStarter;
 }
@@ -219,6 +222,7 @@ export async function ingest(db: ProcessDatabase, records: readonly TapeRecord[]
     },
     log: (line) => lines.push(line),
     ...(options.ledgerWorker === undefined ? {} : { ledgerWorker: options.ledgerWorker }),
+    ...(options.loop === undefined ? {} : { loop: options.loop }),
     ...(options.admin === undefined ? {} : { adminListener: options.admin }),
     ...(options.nodeClient === undefined ? {} : { nodeClient: options.nodeClient }),
   });

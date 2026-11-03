@@ -436,8 +436,44 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
       timeout; the test now stops a process that starts at once), `4.3-green-2` (4 passed), `4.3-red-2`. Whole suite
       before this commit (`4.3-full`, `npx vitest run` with the tapes, the final tree but this sentence): 407 files,
       6,447 tests passed, 12 skipped, no failure (§0: 387, 6,252, 12).
-- [ ] 4.4 Restarts and crashes.
+- [x] 4.4 Restarts and crashes.
       **Acceptance:** R13, R14.
+      **Done (2026-11-03, this commit):** a run is one or more segments, each a process of its own
+      (`test/backbone/refcount-restart.worker.ts`, started with `spawnChild`) that reads back only the database the one
+      before it left; its watcher module records after every block it commits the node set (kept from the rows each
+      block wrote or deleted, read back, its row count checked against `nodes`), `root_counts`, the block's `states` row
+      and their number, and `core_digest.tables`, and where asked the tables, the batch and the contents hash, into a
+      file the test reads back (`test/backbone/refcount-restart.ts`). The named points, each reporting it was reached at
+      its height, all sit on seams the process already has, so none was added to `src/`: `before-step` and
+      `after-eviction` on the worker's answers to the block's apply and eviction, `after-node-writes` and
+      `between-step-writes` on `refcountWriter`, `before-commit` and `after-commit` on a `FinalizedLoop` (its `write`
+      and `commit`). R13 (`ledger-refcount-restart.test.ts`): the extended DAG fixture stopped after the `COMMIT` of 37
+      and 74 and restarted has, after every block, the uninterrupted run's node set, `root_counts`, `states`, rows of
+      every `core_ledger_state` table that is not content-defined, `core_digest.tables` and contents hash, and R3
+      passes after every block; on the recorded preprod 0–10,000 tape (`ledger-refcount-restart-preprod-{postgres,
+      pglite}.test.ts`) stopped after 20 heights drawn with seed 4413 (320, 575, 756, 1143, 1660, 2400, 2829, 3097,
+      3572, 3809, 5095, 6097, 6354, 7019, 7714, 7861, 8399, 8524, 9056, 9762), the same after every block but the
+      contents hash and the rows, read at every 100th height, each stop and the block after it, and R3 at every 100th
+      height from the stored rows, no row outside `R_{h−1} ∪ R_h` (questions file Q-4.4-1, B, needs the owner's
+      review). R14: a SIGKILL at each point (`before-step` at TO_REF, `after-eviction` at TO_EMBEDDED + 1,
+      `after-node-writes` at REQUEUE, `between-step-writes` at REQUEUE + 1, `before-commit` at AGAIN, `after-commit`
+      at REVERT) leaves every `core_ledger_state` table byte for byte and the contents hash of the uninterrupted run
+      after h − 1 (h after the `COMMIT`), read from outside by a process of its own; the restarted run's node set and
+      byte-hashed tables after every block and contents hash after h − 1, h, h + 1 and 100 are the uninterrupted
+      run's, with R3 after every block. Negative controls (`ledger-refcount-restart.negative-control.test.ts`), each
+      seen making its check fail: a restart that empties `unreferenced` (a segment's seam) after the stop at 37 — the
+      node sets are equal through 37 and differ from 38; a build writing `ref_counts` and `unreferenced` in a
+      transaction of their own committed before the block's (its loop computes the step and runs those statements),
+      crashed between the two commits at REQUEUE + 1 — the database is a mix (those two tables differ from h − 1's and
+      the contents hash is refused) and after the restart the node sets differ from h on. Both backends throughout. One
+      shared helper extended: `ingest`'s optional `loop`. Codex: `4.4-dag-1`…`5` (the DAG files; `4.4-dag-5` 18
+      passed), `4.4-preprod-1`, `-2` (PGlite passed), `4.4-preprod-pg-diagnostic`, `-2`, `4.4-preprod-pg-1`
+      (PostgreSQL passed). Found and filed, not fixed: two first starts at once on one PostgreSQL server race on
+      creating the module roles (`docs/issues/00082-concurrent-first-startups-race-on-module-roles.md`); the preprod
+      test starts its second run once the first committed a block. The whole suite with the tapes (`4.4-full`, the
+      final tree but this sentence, 2,812 s): 409 files, 6,450 tests passed, 12 skipped, 1 failed — L38
+      (`test/library/channel-queue.test.ts` on PostgreSQL, its 120 s timeout, at load ~20–50), which passes alone
+      (`4.4-full-l38-alone`, 36 of 36, diagnostic only); §0 had none.
 - [x] 4.5 Backups and the per-block capture.
       **Acceptance:** R15, R17.
       **Done (2026-11-03, this commit):** no `src/` change — the build's mechanism (3.5) and declaration (3.8) are what
