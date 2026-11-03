@@ -510,12 +510,14 @@ tests themselves are always present.
   height 20; enough blocks pass for the ledger states holding the height-10 contract state to be released and for two
   sweep cycles to complete; the contract state and zswap state stored at height 10 still load from their keys; a
   control run without persisting them shows those nodes deleted. (LG-13)
+  Replaced by `ledger-refcount`'s acceptance §7 (its rewritten A104).
 - **A105** `[DIFF]` A reference model of LG-14 (an independent in-memory implementation in the tests) computes, for
   each block of a fixture built so that one marking round does not fit in the budget (K = 50, wide trees, interleaved
   new roots), the grey, marked and deleted sets; the implementation matches the model after every block on PostgreSQL
   and on PGlite; a node deleted by the sweep and needed again is reinserted; with `sweep: off` nothing is deleted;
   **negative control:** a sweep that takes grey keys in insertion order instead of byte order differs from the model
   on this fixture. (LG-14)
+  Replaced by `ledger-refcount`'s acceptance §7 (its rewritten A105).
 - **A160** `[FAULT]` A test package that refuses one eviction at block h, after the worker freed what it can, makes
   the worker thread end and a new one start, which loads the state at h − 1 from the database and applies h again: the
   process does not halt, and its stored rows and state roots equal an uninterrupted run's; a package that refuses again
@@ -665,6 +667,7 @@ host reports with CI without treating absent, skipped or failed required tests a
   height, and a contents hash equal to an uninterrupted run's; **negative control:** a build that writes the ledger
   nodes in a transaction of their own is detected. (RN-6, IN-1, LG-11, LG-14)
   **Deferred after 0.10.0** (owner decision Q191): run for a later release; 0.10.0 is a pre-release without it.
+  Replaced by `ledger-refcount`'s acceptance §7 (its rewritten A134).
 - **A135** `[DIFF]` For this campaign, the same fixed preprod range and configuration on PostgreSQL, on PGlite in Node.js and on PGlite in Chrome give
   equal contents hashes. Deliberate data/root mismatches, including the browser leg, must fail. (DT-3, BR-4)
   **Deferred after 0.10.0** (owner decision Q191): run for a later release; 0.10.0 is a pre-release without it.

@@ -25,8 +25,8 @@ each criterion verifies are in parentheses.
    run passes); their last passing run is recorded in the pull request.
 3. R23–R25 are manual evidence from local runs (`design.md` §12), recorded in the pull request; they are never part of
    CI or of the required-test manifest.
-4. The `core-arch` criteria rewritten in §7 (A55, A57, A104, A105, A126, A134, A160) pass with their new text; every other `core-arch` and `start-umbradb`
-   criterion passes unchanged.
+4. The `core-arch` criteria rewritten in §7 (A55, A57, A104, A105, A126, A134 (A134 deferred, Q191), A160) pass with
+   their new text; every other `core-arch` and `start-umbradb` criterion passes unchanged.
 5. Every new or changed crash, property or differential test has run at least five times before the change merges.
 6. The conformance gate passes on the pull request's head.
 
@@ -105,9 +105,9 @@ each criterion verifies are in parentheses.
   counting the references of a node written again unchanged (R3 (a) at that block); (c) counting a repeated child once
   per parent on increment but per occurrence on decrement (a count reaches 0 early: R3 (b) or (c) finds a live row gone,
   or `negative-count` halts); (d) deleting a released state's rows in the block that releases it (R3 (c) finds a row of
-  `R_{h−1}` gone; the v9 package would refuse that eviction, as `test/ledger/worker-sweep.test.ts` shows for a node of a
-  held state); (e) deleting a queued key that a new node references in the same block (`missing-reference` halts); (f)
-  stopping the cascade after its first round (R3 (d)). (LG-14)
+  `R_{h−1}` gone; the v9 package would refuse that eviction, as `test/ledger/worker-eviction.test.ts` shows for a node
+  of a held state); (e) deleting a queued key that a new node references in the same block (`missing-reference` halts);
+  (f) stopping the cascade after its first round (R3 (d)). (LG-14)
 - **R13** `[FAULT][NEG]` The process stopped and restarted at a named point after the commit of every 37th height of
   the DAG fixture and of 20 seeded heights of the preprod 0–10,000 tape, each point reporting it was reached, continues
   with, after every later block, the node set, `root_counts`, `states` and the contents hash equal to an uninterrupted
