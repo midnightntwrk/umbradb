@@ -52,7 +52,8 @@ curl http://127.0.0.1:18081/status
 The routes are:
 - `GET /stats-module/latest`;
 - `GET /stats-module/blocks/:height`;
-- `GET /stats-module/recent?limit=N`;
+- `GET /stats-module/recent?limit=N`: the newest N blocks that have transactions (`tx_count > 0`); empty blocks are
+  skipped, so its first height can be below `/latest`'s;
 - the subscription `stats-module-blocks`, which takes `args: { "minTx": n }`.
 
 Three environment variables change where it connects and listens. They apply to both scripts:

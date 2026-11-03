@@ -111,8 +111,7 @@ modules); name your own module to change it.
 
 ```sh
 git clone https://github.com/midnightntwrk/umbradb my-web-indexer
-cd my-web-indexer
-git checkout -q v0.10.0-rc.2                                  # the release's code
+cd my-web-indexer   # for the last release, v0.10.0-rc.2, check out its tag here
 npm ci
 node browser/build.ts --configuration browser/src/config.ts   # builds the page into dist-browser/
 node browser/serve.ts                                         # serves it on 127.0.0.1:8090; Ctrl-C stops it
@@ -523,7 +522,9 @@ checks the chain and subscribes to it, then the first fetch reads block 0 (300 K
 `/status` shows `starting`, then `syncing` with `cursor` null.
 
 Its routes: `GET /stats-module/latest`, `GET /stats-module/blocks/:height`, `GET /stats-module/recent?limit=N`, and the
-subscription `stats-module-blocks` (`args: { "minTx": n }`). At height 10,000 of preview:
+subscription `stats-module-blocks` (`args: { "minTx": n }`). `/recent` lists only blocks with transactions
+(`tx_count > 0`), newest first, so its heights can lag `/latest` by the empty blocks between. At height 10,000 of
+preview:
 
 ```text
 $ curl http://127.0.0.1:18080/stats-module/recent?limit=2

@@ -8,7 +8,7 @@ UmbraDB straight from a clone. Both need Node.js 24 or later and git.
 
 ```sh
 git clone https://github.com/midnightntwrk/umbradb
-cd umbradb && git checkout -q v0.10.0-rc.2             # the release's code
+cd umbradb                                             # the code of the branch you clone
 npm ci && npm run build && npm pack                    # writes umbradb-0.10.0.tgz
 cd .. && mkdir my-indexer && cd my-indexer
 npm init -y && npm pkg set type=module
@@ -19,8 +19,9 @@ The tarball holds what a release's tarball holds: `npm pack` follows `package.js
 quick start goes on as written: `umbradb.config.ts`, then `npx umbradb config check umbradb.config.ts` and
 `npx umbradb run`.
 
-The commands build `v0.10.0-rc.2`; for another version, check out its tag instead. The tarball's SHA-256
-(`shasum -a 256 umbradb-0.10.0.tgz`) can be compared with the one the release lists; a different npm or Node.js
+The commands build the code you cloned, which can be ahead of the last release. To build a release, check out its tag
+after `cd umbradb` (`git checkout -q v0.10.0-rc.2` for the last one); its tarball's SHA-256
+(`shasum -a 256 umbradb-0.10.0.tgz`) can then be compared with the one the release lists. A different npm or Node.js
 version may give a different tarball from the same sources.
 
 ## Run from a clone
@@ -29,7 +30,7 @@ Without packing anything: build once, then run the command from `dist/`.
 
 ```sh
 git clone https://github.com/midnightntwrk/umbradb
-cd umbradb && git checkout -q v0.10.0-rc.2             # the release's code
+cd umbradb                                             # the code of the branch you clone
 npm ci && npm run build
 node dist/cli/main.js config check umbradb.config.ts
 node dist/cli/main.js run                                # reads ./umbradb.config.ts; Ctrl-C stops it
@@ -41,6 +42,10 @@ its `exports`. `npx umbradb` does not work here, because the package's own comma
 [`examples/stats-module/run.sh`](../examples/stats-module/run.sh) runs the example this way.
 
 After pulling new commits, run `npm ci && npm run build` again.
+
+`npm ci` in a clone reports moderate advisories in development tooling only (the mutation tester Stryker, the test
+containers' archive dependencies, typedoc), for which no compatible fixed version exists yet. The package's own
+dependencies have none: `npm audit --omit=dev` reports 0, and CI blocks on it at `high`.
 
 ## Build commands
 

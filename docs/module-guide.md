@@ -211,7 +211,7 @@ Routes are registered in `on-start-api`, and only there; each request gets a rea
 503 before the first height commits. The body goes out as JSON: a `bigint` as decimal text, bytes as `0x` hex, and
 `block_time` as the RFC 3339 text it reads back as. `on-after-db-write` runs after the commit: it notifies and writes
 nothing. The example file has two more routes, `/stats-module/blocks/:height` and `/stats-module/recent` (which uses
-`recentLimit`).
+`recentLimit` and lists only blocks with transactions).
 
 ### 2.5 The configuration file
 
