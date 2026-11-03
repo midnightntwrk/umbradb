@@ -5,7 +5,7 @@ import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import { type FixtureDag, LAST } from "../ledger/fixtures/sweep-fixture.js";
 import type { FixtureData } from "../ledger/fixtures/sweep-test-loader.js";
 import type { ProcessDatabase } from "../runner/process-backends.js";
-import { committed, ingest, PATIENCE_MS, until } from "./ingest-harness.js";
+import { committed, type Ingest, ingest, PATIENCE_MS, until } from "./ingest-harness.js";
 import { restartAt } from "./ledger-restart.js";
 import { fixtureProblems } from "./refcount-checks.js";
 import {
@@ -44,6 +44,10 @@ export interface DagRunOptions {
   readonly halts?: boolean;
   /** The cursor the database already holds, for a run that restarts there: the tape answers the startup's checks. */
   readonly resume?: bigint;
+  /** More user modules, after the watcher (one recording more of what each block left in the database). [R17] */
+  readonly user?: readonly ModuleDeclaration[];
+  /** Called with the running process once it reached the last height or halted, before it stops (a backup). [R15] */
+  readonly atLast?: (process: Ingest) => Promise<void>;
 }
 
 /** What a run gave. */
@@ -98,7 +102,7 @@ export async function runDag(db: ProcessDatabase, options: DagRunOptions = {}): 
   const process = await ingest(db, options.resume === undefined ? records : restartAt(records, options.resume), {
     start: 0n,
     core,
-    user: [sweepWatcher(seen, record)],
+    user: [sweepWatcher(seen, record), ...(options.user ?? [])],
     ...(options.settings === undefined ? {} : { settings: options.settings }),
     ...(options.revisions === undefined ? {} : { revisions: options.revisions }),
     ledgerWorker: () => (host = recordingWorker(startLedgerWorker({ loader: SWEEP_LOADER, loaderData: data }), record)),
@@ -111,6 +115,7 @@ export async function runDag(db: ProcessDatabase, options: DagRunOptions = {}): 
       const stopped = (): boolean => process.handle.status().state === "halted" || process.handle.status().cursor === BigInt(last);
       await until(process, stopped, `a halt or the cursor at ${last}`, PATIENCE_MS * 2);
     } else await committed(process, BigInt(last), PATIENCE_MS * 2);
+    await options.atLast?.(process);
     status = process.handle.status();
     restarts = host?.restarts ?? 0;
     failure = host?.failure?.message ?? null;

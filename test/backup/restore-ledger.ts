@@ -99,18 +99,30 @@ export async function ledgerBackup(
 export interface RestoreBuild {
   readonly core: readonly ModuleDeclaration[];
   readonly entry: (module: ModuleDeclaration) => Record<string, unknown>;
+  /** More user modules, after the watcher: those the backed-up process also ran, each from 0. [BK-3, R15] */
+  readonly user?: readonly ModuleDeclaration[];
+}
+
+/**
+ * What a restore takes of a backup: its file, and the tape whose genesis the configuration names (a ledger scenario's,
+ * or another chain's). [BK-3, R15]
+ */
+export interface RestorableBackup {
+  readonly file: string;
+  readonly scenario: Pick<LedgerScenario, "records">;
 }
 
 /** The configuration and build the ingest's process ran with, its database `database` (secret, so not recorded). */
 function restoreConfig(database: DatabaseParts, records: readonly TapeRecord[], build?: RestoreBuild) {
   const coreModules = build?.core ?? LEDGER_CORE;
-  const declarations = validateDeclarations(chainDeclarations([watcher(watched())], { core: coreModules }));
+  const user = [watcher(watched()), ...(build?.user ?? [])];
+  const declarations = validateDeclarations(chainDeclarations(user, { core: coreModules }));
   const genesisHash = genesisOf(records) as string;
   const extra = { node: "ws://127.0.0.1:9/node", genesisHash };
   const entries = [
     core(database, 0, { extra }),
     ...coreModules.map((module) => build?.entry(module) ?? entryOf(module, 0)),
-    entryOf(watcher(watched()), 0),
+    ...user.map((module) => entryOf(module, 0)),
   ];
   const config = validateConfig({
     config: { file: undefined, data: plainData({ entries }, undefined) },
@@ -127,7 +139,7 @@ function restoreConfig(database: DatabaseParts, records: readonly TapeRecord[], 
 export async function restoreLedger(
   backend: BackupBackend,
   target: BackupDatabase,
-  backup: LedgerBackup,
+  backup: RestorableBackup,
   records: readonly TapeRecord[],
   seams: RestoreSeams = {},
   chain?: BlockSource,

@@ -357,8 +357,30 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
       **Acceptance:** R10.
 - [ ] 4.4 Restarts and crashes.
       **Acceptance:** R13, R14.
-- [ ] 4.5 Backups and the per-block capture.
+- [x] 4.5 Backups and the per-block capture.
       **Acceptance:** R15, R17.
+      **Done (2026-11-03, this commit):** no `src/` change — the build's mechanism (3.5) and declaration (3.8) are what
+      R15 and R17 check. `test/backbone/ledger-refcount-backup.test.ts` (R15, both backends): the extended DAG synced
+      by the process and backed up by it at h = TO_EMBEDDED (its queue holds `small to-embedded` and the released
+      root), restored by `restoreBackup` with the same build (the manifest's hash the build's, not the bytes'), a new
+      process on the restored database to h + 50; the restored tables at h equal the backed-up ones, the queue goes at
+      h + 1, R3 passes after every block of 0 … h + 50 (the run before the backup and the run after the restore
+      together), the node set and `core_ledger_state`'s byte tables equal an uninterrupted run's after every block from
+      h, every byte-hashed table and the exported `contentsHash` at h + 50. Its controls, each refused with
+      `ledger-refcount-invalid` (`tables-inconsistent`), the target empty: the file without its `ref_counts` rows
+      (`counts`), without one `nodes` row — a referenced one (`closure`), the root at h (`roots`), the queued leaf
+      (`queue`) —, each naming the missing key. R15's third control (one payload byte, `node-key`) is A126's case in
+      `test/backup/restore-content-defined.test.ts`. `ledger-refcount-capture.test.ts` (R17): the extended DAG with a
+      module recording `core_digest.tables` at every cursor; TO_REF and TO_EMBEDDED each insert, rewrite and delete;
+      the three tables carry no capture trigger and no shadow table and have no digest row at any height; `root_counts`
+      has both, and its digest row after every block is DT-4's, recomputed with CBOR written out by the test; the
+      exported `contentsHash` equal on both backends after the fixture. R17's `TRUNCATE` clause is
+      `test/backbone/core-digest/digests.test.ts` (the build's `ledger-state` item). Helpers, additive: `runDag`'s
+      `user` and `atLast`; `restore-ledger.ts`'s `RestoreBuild.user` and `RestorableBackup`; new
+      `refcount-contents.ts`. Controls seen failing with the fault put back (each check of `node-set.ts` skipped in
+      turn, `no-key-check`, the declaration removed): each fails its own case only. Codex: `4.5-green-1`, `-2`,
+      `4.5-controls`, `4.5-touched-1` (16 files with the tapes, every user of the changed helpers, 121 passed). The
+      whole suite with the tapes (`4.5-full`): 407 files, 6,442 tests passed, 12 skipped, no failure; §0 had none.
 - [ ] 4.6 Determinism across worker histories.
       **Acceptance:** R28.
 - [ ] 4.7 A live object holding a deleted row.
