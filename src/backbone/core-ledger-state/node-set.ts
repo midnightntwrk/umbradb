@@ -70,7 +70,10 @@ function first(keys: Iterable<string>): string | undefined {
   return found;
 }
 
-/** Every row of `table` in key order, `columns` first among them its key `node_key`, a page at a time. */
+/**
+ * Every row of `table` in key order, `columns` first among them its key `node_key`, a page at a time. The page size,
+ * as the last key read, is a bound parameter: no value is spliced into the statement. [DT-3]
+ */
 async function* keyOrdered(
   read: ConsistentRead,
   table: string,
@@ -81,10 +84,8 @@ async function* keyOrdered(
   for (;;) {
     const rows =
       after === undefined
-        ? await read.query(`SELECT ${columns} FROM ${table} ORDER BY node_key LIMIT ${pageSize}`)
-        : await read.query(`SELECT ${columns} FROM ${table} WHERE node_key > $1 ORDER BY node_key LIMIT ${pageSize}`, [
-            after,
-          ]);
+        ? await read.query(`SELECT ${columns} FROM ${table} ORDER BY node_key LIMIT $1`, [pageSize])
+        : await read.query(`SELECT ${columns} FROM ${table} WHERE node_key > $1 ORDER BY node_key LIMIT $2`, [after, pageSize]);
     yield* rows;
     if (rows.length < pageSize) return;
     after = (rows[rows.length - 1] as Record<string, unknown>).node_key as Uint8Array;
