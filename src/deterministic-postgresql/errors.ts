@@ -219,6 +219,23 @@ export const ERROR_CODES = [
    */
   "state-not-retained",
   /**
+   * `core-ledger-state`'s reclamation found its node tables inconsistent (`src/backbone/core-ledger-state/`); nothing is
+   * repaired. Its `details.reason`:
+   * - `negative-count`: a reference count would fall below 0 at the block;
+   * - `missing-reference`: a reference in the child list of a node the block writes new or rewritten, or a key whose
+   *   root count rises, is not a stored node after the block;
+   * - `row-count-mismatch`: a write of the block affected another number of rows than computed, and its transaction
+   *   rolled back;
+   * - `tables-inconsistent`: the contents hash, reading the node tables, found a row whose key is not its content's, or
+   *   counts, a queue or roots its rows do not give (`details.check`, and the key).
+   *
+   * The first three halt processing at the block's height with nothing of the block stored, with `details.height` and
+   * either the key as `0x` hex (`details.key`: `negative-count`, `missing-reference`) or the statement's name and the
+   * expected and actual row counts (`details.statement`, `expected`, `actual`: `row-count-mismatch`). No reason carries
+   * a configuration value. Not retryable. [LG-11, LG-14]
+   */
+  "ledger-refcount-invalid",
+  /**
    * `core-contract-logs-fast` cannot read a block's MIP-0002 log exactly from the transcripts: a value that is not a
    * literal (read from the contract's state, or computed), one behind a `branch`, or any log of a partially successful
    * transaction (`src/backbone/core-contract-logs-fast/`). Processing halts at that height, with nothing of the block

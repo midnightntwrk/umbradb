@@ -81,10 +81,20 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
 
 ## 3. Storage, the step, and the switch (`design.md` §2, §3, §10; §13 phase 2)
 
-- [ ] 3.1 The halt code `ledger-refcount-invalid` in `ERROR_CODES` (`src/deterministic-postgresql/errors.ts`) and
+- [x] 3.1 The halt code `ledger-refcount-invalid` in `ERROR_CODES` (`src/deterministic-postgresql/errors.ts`) and
       `HALT_CODES` (`src/runner/failures.ts`), with the details of `design.md` §10, and in `core-arch` design §11's halts.
       **Acceptance:** R19's clause "`ledger-refcount-invalid` is in `ERROR_CODES`, in `HALT_CODES` and in `core-arch`
       design §11's halts"; `test/runner/code-registry.test.ts` passes. The registry's naming of R11's test is 3.8's.
+      **Done (2026-11-03, this commit):** the code in `ERROR_CODES` (its comment gives §10's details: `reason`,
+      `height`, `key` or `statement`/`expected`/`actual`, and §2.5's `tables-inconsistent` with `check`), in
+      `HALT_CODES` and in `core-arch` design §11's halts. Test first: `test/runner/failures.test.ts` gains a case (the
+      code raised in `on-compute` and `on-db-write` halts with that code, its height, module and point, never
+      `callback-error`), seen failing (`callback-error`) before the code was listed. The registry (A87) lists the code
+      as pending for this change's task 3.8 (questions file Q-3.1-1, A, for the owner's review): `code-registry.ts`
+      reads this change's `tasks.md` (`changeTasks`, ids prefixed `ledger-refcount `), `code-registry.test.ts` takes a
+      second baseline holding this one code, and a new negative control shows the registry failing once 3.8 is ticked
+      with the code still pending. R19's first clause demonstrated; `code-registry.test.ts` and its negative controls
+      pass. Task 3.8 registers R11's test and removes the pending entry.
 - [ ] 3.2 One migration per part (`design.md` §2.4): `core-ledger-state`'s, `core-chain`'s and
       `core-private-source`'s `002` folded into their `001`; `core-ledger-state`'s `001` also creates `ref_counts` and
       `unreferenced`, and keeps the sweep's `sweep`, `grey` and `marks` until 5.1 removes the sweep; `core-arch` design

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ERROR_CODES } from "../../src/db/errors.js";
 import { HALT_CODES, REFUSAL_CODES } from "../../src/runner/failures.js";
 import {
+  changeTasks,
   PENDING,
   readRepositoryFile,
   REGISTRY,
@@ -38,8 +39,16 @@ const PENDING_AT_10_4 = Object.freeze([
   "halt:report-hash-mismatch",
 ]);
 
+/**
+ * The code the `ledger-refcount` change added to design §11 with its task 3.1, pending until its task 3.8 brings the
+ * counting step and the test that triggers the code: that task's id is read from the change's own `tasks.md`, so ticking
+ * it with the code still pending fails here. [R19]
+ */
+const PENDING_IN_LEDGER_REFCOUNT = Object.freeze(["halt:ledger-refcount-invalid"]);
+
 const DESIGN = readRepositoryFile("openspec/changes/core-arch/design.md") as string;
 const TASKS = readRepositoryFile("openspec/changes/core-arch/tasks.md") as string;
+const LEDGER_REFCOUNT_TASKS = readRepositoryFile("openspec/changes/ledger-refcount/tasks.md") as string;
 
 describe("A87: the refusal and halt registry (IN-12)", () => {
   it("every refusal and halt code of design §11 has a test that triggers it and checks its code, or is pending with its task", async ({ annotate }) => {
@@ -48,8 +57,8 @@ describe("A87: the refusal and halt registry (IN-12)", () => {
       codes,
       registry: REGISTRY,
       pending: PENDING,
-      baseline: PENDING_AT_10_4,
-      tasks: tasksDone(TASKS),
+      baseline: [...PENDING_AT_10_4, ...PENDING_IN_LEDGER_REFCOUNT],
+      tasks: new Map([...tasksDone(TASKS), ...changeTasks("ledger-refcount", LEDGER_REFCOUNT_TASKS)]),
       read: readRepositoryFile,
     });
     expect(problems).toEqual([]);

@@ -1795,7 +1795,9 @@ owner decision Q153; task 15.2a).
 **Processing halts** (state `halted`, live, not ready, the database at the last committed height), with these codes:
 `callback-error` (with point and module), `database-error`, `parent-mismatch`, `finality-conflict`, `node-requirement`,
 `duplicate-block-hash`, `unknown-runtime`, `bad-version-digest`, `pin-mismatch`, `metadata-mismatch`, `root-mismatch`,
-`fast-log-unsupported`, `unexpected-cursor`, `writer-lock-lost`, `truncate-not-allowed` (a callback error); for a
+`ledger-refcount-invalid` (a reclamation check of core-ledger-state, with its reason and nothing of the block stored:
+the ledger-refcount change's design §3.3 and §10), `fast-log-unsupported`, `unexpected-cursor`, `writer-lock-lost`,
+`truncate-not-allowed` (a callback error); for a
 private instance, `lockstep-behind`, `report-hash-mismatch` and `public-config-changed` (PP-14, §8's configuration
 hash; task 14.1b).
 

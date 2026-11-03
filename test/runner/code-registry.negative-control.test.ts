@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  changeTasks,
   PENDING,
   readRepositoryFile,
   REGISTRY,
@@ -23,6 +24,11 @@ import {
 
 const DESIGN = readRepositoryFile("openspec/changes/core-arch/design.md") as string;
 const TASKS = readRepositoryFile("openspec/changes/core-arch/tasks.md") as string;
+const LEDGER_REFCOUNT_TASKS = readRepositoryFile("openspec/changes/ledger-refcount/tasks.md") as string;
+
+/** `core-arch`'s tasks and the `ledger-refcount` change's (its ids prefixed), from `ledgerRefcount`'s text. [R19] */
+const allTasks = (ledgerRefcount: string = LEDGER_REFCOUNT_TASKS): ReadonlyMap<string, boolean> =>
+  new Map([...tasksDone(TASKS), ...changeTasks("ledger-refcount", ledgerRefcount)]);
 
 /** The real registry's input, with `change` applied. */
 function input(change: Partial<RegistryInput> = {}): RegistryInput {
@@ -31,7 +37,7 @@ function input(change: Partial<RegistryInput> = {}): RegistryInput {
     registry: REGISTRY,
     pending: PENDING,
     baseline: Object.keys(PENDING),
-    tasks: tasksDone(TASKS),
+    tasks: allTasks(),
     read: readRepositoryFile,
     ...change,
   };
@@ -40,6 +46,19 @@ function input(change: Partial<RegistryInput> = {}): RegistryInput {
 describe("A87 negative controls: the registry's check", () => {
   it("passes the real registry (the baseline being today's pending list)", () => {
     expect(registryProblems(input())).toEqual([]);
+  });
+
+  it("fails on ledger-refcount's pending halt code once that change's task 3.8 is checked done without its test (R19)", () => {
+    const open = /^- \[ \] 3\.8 /m;
+    expect(LEDGER_REFCOUNT_TASKS).toMatch(open);
+    const ticked = LEDGER_REFCOUNT_TASKS.replace(open, "- [x] 3.8 ");
+    expect(registryProblems(input({ tasks: allTasks(ticked) }))).toEqual([
+      "halt:ledger-refcount-invalid: pending for task ledger-refcount 3.8, which tasks.md checks done: register its test",
+    ]);
+    // Its id is the change's own: core-arch's tasks alone have no such task.
+    expect(registryProblems(input({ tasks: tasksDone(TASKS) }))).toEqual([
+      "halt:ledger-refcount-invalid: pending for task ledger-refcount 3.8, which tasks.md does not have",
+    ]);
   });
 
   it("fails on a code planted in design §11's halts with no test", () => {

@@ -96,6 +96,26 @@ describe("reasonOf: a failure's code, height, module and point (RN-8, AE-5, AE-6
     }
   });
 
+  it("a reclamation check's ledger-refcount-invalid halts with that code, in on-compute and on-db-write, never callback-error (LG-14)", () => {
+    // The step's checks in on-compute, before eviction; the written row counts in on-db-write. The reason keeps the
+    // code, the height, the module and the point, and nothing of the details (a key, a statement's counts). [R19]
+    const checks = [
+      ["on-compute", new UmbraError("ledger-refcount-invalid", "negative count", { reason: "negative-count", height: 9n, key: `0x${"ab".repeat(32)}` })],
+      ["on-db-write", new UmbraError("ledger-refcount-invalid", "row counts", { reason: "row-count-mismatch", height: 9n, statement: "nodes", expected: 3, actual: 2 })],
+    ] as const;
+    for (const [point, cause] of checks) {
+      const failure = new HeightFailure(9n, new CallbackFailure(point, "core-ledger-state", cause), {
+        point,
+        module: "core-ledger-state",
+        committed: false,
+      });
+      expect(reasonOf(failure)).toEqual(reason("ledger-refcount-invalid", { height: 9n, module: "core-ledger-state", point }));
+    }
+    expect(HALT_CODES).toContain("ledger-refcount-invalid");
+    expect(REFUSAL_CODES).not.toContain("ledger-refcount-invalid");
+    expect(new UmbraError("ledger-refcount-invalid", "x").retryable).toBe(false);
+  });
+
   it("a misuse the loop kept (handle-closed) is a callback error of the module that kept the handle", () => {
     const misuse = new UmbraError("handle-closed", "the block write handle was used after its callback", {
       module: "keeper",
