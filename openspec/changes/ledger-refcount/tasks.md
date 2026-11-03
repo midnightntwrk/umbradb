@@ -49,8 +49,23 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
 
 ## 2. The reference model and the reachability oracle (`design.md` §2.3, §3.2, §4; §13 phase 1)
 
-- [ ] 2.1 `test/backbone/refcount-model.ts`: the model, the reachability oracle and the generators of R1.
+- [x] 2.1 `test/backbone/refcount-model.ts`: the model, the reachability oracle and the generators of R1.
       **Acceptance:** R1.
+      **Done (2026-11-03, this commit):** the model (`refcountModelStep(tables, batch, { on, fault? })`: rules 1–8 and
+      10 of `design.md` §3.2 over hex keys, `childRefKeys` the only import from `src/`; `RefcountModel` across blocks;
+      `RefcountModelHalt` for `negative-count` and `missing-reference`), `nodeSet`, the generators (`historyScripts`,
+      `driveHistory`: real `layout-v2` child lists built with `test/ledger/node-format.ts`) and the oracle (`oracle`:
+      `R_{h−1}`, `R_h`, `K_h`, counts, queue and protection recomputed from the generated persisted keys and the lists
+      last written). R1 in `test/backbone/refcount-model.test.ts`: the property (seed 20261103, 200 runs) finds I1–I5
+      after every block, I6 (with `S_h = K_h` where `sweep` is on) after every admissible one and `R_{h−1} ⊆ S_h` after
+      every block, and asserts that the runs show each of R1's cases (`R1_CASES`, 19, admissible and non-admissible
+      batches among them); five hand-made blocks pin both queued-node rewrites, a released state's deletion the block
+      after and the halts. `[NEG]`: the committed control runs the model with rule 4's root conditions removed
+      (`no-root-conditions`) and with a released state's rows also deleted in the block that releases it
+      (`released-in-block`); each is seen failing the oracle's `R_{h−1} ⊆ S_h` (the second naming "a row of a state
+      released at h"); with the fault put into the property itself it fails after one run. Questions Q-2.1-1
+      (`missing-reference` checks a deleted rewritten node's new list too, as written: the generators avoid the case,
+      a test pins the halt) and Q-2.1-2 (both faults committed). Five Codex runs green (`2.1-r1-run1`…`5`).
 - [ ] 2.2 The model against the sweep's model (`test/backbone/sweep-model.ts`).
       **Acceptance:** R2.
 
