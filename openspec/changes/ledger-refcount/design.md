@@ -301,7 +301,8 @@ one form references as a row and the other holds inline.
 ### 4.2 Safety: no deleted row is live in the stored graph; the eviction covers the rest
 
 **Through the stored child lists.** Every key of `D` is in neither `R_{h−1}` nor `R_h`, no root after h − 1 or after
-h, and referenced by no child list stored at h − 1 or after h's writes. By induction on the rounds of rule 5: a deleted
+h, and referenced by no row that survives h nor by any node the batch writes; the rows that referenced it at h − 1 are
+themselves in `D`, deleted in an earlier round of the same cascade. By induction on the rounds of rule 5: a deleted
 key d is not protected (no root, not in a rewritten node's old child list), and `refs_h(d) = 0`, which counts every
 reference in the child lists stored after h. So every row that referenced d at h − 1 was deleted in an earlier round
 (in neither set, by induction) or rewritten — and then d would be protected by rule 3 — and no node the batch writes
