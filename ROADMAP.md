@@ -33,9 +33,10 @@ in the same pull request before 0.10.0 is final (owner decision D-9).
   migrations, a single-writer lock, and the `deterministic_postgresql` component that holds every rule UmbraDB
   imposes on PostgreSQL.
 - **Versioned ledger parsing.** The official `midnight-ledger` packages, v8 and v9, built from pinned sources in
-  `vendor/ledger/`, parse and apply each block behind one adapter; the ledger runs in a worker, its state is stored in
-  the database with a retention window and a fixed-budget sweep, and every block's state root is checked against the
-  node's.
+  `vendor/ledger/`, parse and apply each block behind one adapter; the ledger runs in a worker; its state is stored in
+  the database as the node stores it, with a retention window, and each block deletes the stored nodes that nothing
+  references or persists any more, by reference counting (`ledger-refcount`); every block's state root is checked
+  against the node's.
 - **Determinism.** A canonical CBOR encoding, a digest per table updated every block, and one contents hash that two
   instances compare; backups are `pg_dump` files checked against it on restore.
 - **Private processes** run private modules on their own databases, fed from the public one, independently or in
@@ -84,7 +85,7 @@ supply-chain gate, the vendored ledger rebuild, and `npm run graph:check`.
 
 - **The crash sweeps** (18.1): kill the runner at every point that matters and at 100 random ones, with test modules,
   and check every restart ends with the same data as a run that never stopped; the same with 20 restarts; and a
-  negative control the sweep must catch.
+  negative control the crash sweep must catch.
 - **The full-core runs** (18.2): local preprod from genesis to block 10,000 (Q195) with every core module, every
   ledger state root matching the node's; the crash sweep repeated on that chain; PostgreSQL, PGlite in Node.js and
   PGlite in Chrome giving the same contents hash.

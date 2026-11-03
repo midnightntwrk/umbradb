@@ -325,7 +325,7 @@ function fallibleSegments(transaction: RawTransaction): number[] {
   const offers = transaction.fallibleOffer;
   const segments = new Set<number>([...(intents?.keys() ?? []), ...(offers?.keys() ?? [])]);
   // The getters give new objects, which hold the transaction's values until freed. They are freed at once, so that no
-  // object the garbage collector has not reached yet keeps alive a node the sweep deletes. [LG-14]
+  // object the garbage collector has not reached yet keeps alive a node that reclamation deletes. [LG-14]
   for (const value of [...(intents?.values() ?? []), ...(offers?.values() ?? [])]) freeGot(value);
   segments.delete(0);
   return [...segments].sort((a, b) => a - b);

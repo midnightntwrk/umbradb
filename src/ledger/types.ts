@@ -267,8 +267,8 @@ export interface LedgerPackage {
   nativeTransaction(bytes: Uint8Array): unknown;
   /**
    * Frees now the native objects parsed from these very arrays, which the ledger worker no longer needs. This way no
-   * object the garbage collector has not reached yet keeps alive a node the sweep deletes. They are parsed again if
-   * asked for again. [LG-14]
+   * object the garbage collector has not reached yet keeps alive a node that reclamation deletes. They are parsed again
+   * if asked for again. [LG-14]
    */
   forgetTransactions(transactions: readonly Uint8Array[]): void;
   /**

@@ -18,7 +18,7 @@ this change relies on is restated in `specs/`. Owner decisions cited as Qn are i
 | `src/node/` | The node client (refactored from `chain-archive-sync/node-rpc-client.ts`): JSON-RPC over WebSocket, subscriptions, reconnect, back-off |
 | `src/backbone/` | `core-chain`, `core-block-fetch` (the queue and the finalized prefetch), `core-block-commit`, `core-digest`; the admin endpoints `core-health`, `core-status`, `core-config` (Q70), each in its own folder with its tests; private: `core-private-source` |
 | `src/core-modules/` | `core-chain-events`, `core-block-parsed`, `core-tx-results`, `core-ledger-state`, `core-contract-states`, `core-contract-logs-full`, `core-contract-logs-fast` |
-| `src/ledger/` | The `LedgerPackage` adapters (v8 from the 0.9.5 `chain-archive-sync/tx-replay-decoder.ts`, v9), the ledger worker, the node-store bridge, the sweep, the built-in version tables (`networks.json`) |
+| `src/ledger/` | The `LedgerPackage` adapters (v8 from the 0.9.5 `chain-archive-sync/tx-replay-decoder.ts`, v9), the ledger worker, the node-store bridge, the built-in version tables (`networks.json`) |
 | `vendor/ledger/` | Vendored ledger builds: per version the pinned upstream source reference, the patches, the build script and the built WASM with its SHA-256 (§5.2) |
 | `src/private/` | The process transport (core server, private client), lockstep bookkeeping, the core's view of its instances (no keys: a module's, Q70, Q154) |
 | `src/backup/` | `umbradb backup` and `umbradb restore` around `pg_dump` and `pglite-tools` (§9.1) |
@@ -938,13 +938,15 @@ one `LedgerWorkerFailure`: the module awaiting it fails, and processing halts wi
 and the point (§11). Loading a stored state through the bridge (`load`) is how a restarted process gets the state at
 its cursor (task 12.4, §5.4).
 
-### 5.4 Storage, retention and sweep (LG-11 to LG-14)
+### 5.4 Storage, retention and reclamation (LG-11 to LG-14)
 
-Tables in §10. Per block, `on-compute` runs the apply, the conversion when due, the root check and the sweep step's
-computation; `on-db-write` writes the flushed batch, the `states` row, the retention releases and the sweep tables. The
-sweep follows `gc-v1` (`storage-core/src/gc.rs:93-250`) with a node budget; its grey and mark sets are tables, its
-rounds take keys in byte order, and deleted nodes are evicted from the worker's caches so later blocks insert them again
-(`layout-v2` writes every created node, `storage-core/src/backend.rs:771-790`).
+Tables in §10. Per block, `on-compute` runs the apply, the conversion when due, the root check and the reclamation
+step's computation and eviction; `on-db-write` writes the flushed batch, the `states` row, the retention releases and
+the step's counts, queue and deletions. Unused ledger nodes are reclaimed by reference counting computed in the
+process: the `ledger-refcount` change's design §2–§7 gives the storage (a node the ledger writes again replaces its
+stored child list, and the node tables are content-defined, §4), the step's rules, checks and reads, its properties, the
+eviction and the one-block lag, `sweep: off`, and crash safety. Deleted nodes are evicted from the worker's caches so
+later blocks insert them again (`layout-v2` writes every created node, `storage-core/src/backend.rs:771-790`).
 
 As built (task 12.4, `src/backbone/core-ledger-state/`, `src/ledger/worker/engine.ts`): **the state at h − 1.** Before
 each apply after block 0, `on-compute` reads the state stored after h − 1 (`states.state_key`, `state_root`) with that
@@ -972,34 +974,35 @@ a maintenance update changes the contract's state too), and at F every contract 
 rows of `core_ledger_state.events`, read at h − 1), so that CC-1's rows at F carry the converted keys; each once, on the
 state after the block.
 
-As built (task 12.5, `src/backbone/core-ledger-state/sweep.ts`): the step is computed on the main thread in
-`on-compute`, after the root check, from the tables as committed at h − 1 (read through on-compute's read: `sweep`,
-`grey` and `marks` by key, `root_counts`, `nodes`' child lists, read with `src/ledger/node-refs.ts`) with the block's
-batch held over them in memory, and written in `on-db-write` after the batch; only the eviction runs in the worker
-(`LedgerHost.evict`, awaited in `on-compute`, before the block commits: a node forgotten and still stored is merely
-written again, one deleted and not forgotten would never be). K = 10,000 (`SWEEP_BUDGET`). Step 1's roots are the
-counts as committed at h − 1, before the block's batch: the state after h − 1 is still alive in the worker while h is
-computed, and a package refuses to forget a node a live object holds, so that state must be marked in a cycle that
-starts at h. "Stored" is the committed nodes with the block's inserts; a scan that gives fewer nodes than the budget it
-had passed the last node. The first block with `sweep: off` after one with it on clears `grey`, `marks` and
-`sweep_after` and makes the phase `idle`; while off, nothing else is written. The worker frees a kept parse's native
-objects when it drops the parse (`forgetTransactions`), so that no object the garbage collector has not reached yet
-holds a deleted node; should a later block's kept transaction still hold one, it frees every kept parse's natives and
-evicts again (those transactions are parsed again at their apply), and a refusal then fails the block as task 12.5
-built it; under owner decision Q144 B the worker thread is ended instead and a new one started, which loads the state at
-h − 1 from the database and applies h again, a refusal on that retry failing the block (LG-14; task 12.5a).
+As built (task 12.5; reference counting since the `ledger-refcount` change,
+`src/backbone/core-ledger-state/refcount.ts`): the step is computed on the main thread in `on-compute`, after the root
+check, from the tables as committed at h − 1 (read through on-compute's read: `nodes`, `ref_counts` and `root_counts`
+by key lists, `unreferenced` whole, child lists parsed with `src/ledger/node-refs.ts`) with the block's batch held in
+memory, and written in `on-db-write` with the batch; only the eviction runs in the worker (`LedgerHost.evict`, awaited
+in `on-compute`, before the block commits: a node forgotten and still stored is merely written again, while one deleted
+and not forgotten would be referenced by a later node without being written, which the step's `missing-reference`
+check halts). The state after h − 1 is still alive in the worker while h is computed, and a package refuses to forget a
+node a live object holds, so a key with a root count after h − 1 is never deleted in h: the one-block lag of the
+`ledger-refcount` change's design §3.2 and §5. The worker frees a kept parse's native objects when it drops the parse
+(`forgetTransactions`), so that no object the garbage collector has not reached yet holds a deleted node; should a
+later block's kept transaction still hold one, it frees every kept parse's natives and evicts again (those transactions
+are parsed again at their apply), and a refusal then fails the block as task 12.5 built it; under owner decision Q144 B
+the worker thread is ended instead and a new one started, which loads the state at h − 1 from the database and applies
+h again, a refusal on that retry failing the block (LG-14; task 12.5a).
 
 As built (task 12.5a): the engine names that second refusal (`EvictionRefused`, its name kept across the threads; a trap
 is never retried), and `core-ledger-state`'s `on-compute` (`computeBlock`) answers it with `LedgerHost.restart()` and
 the block's whole computation again — the load of the state at h − 1 (the new thread holds none, so it reads it through
-the bridge from on-compute's read), the apply, the root check, the sweep step and its eviction —; any error of that
-second pass fails the block as `callback-error`. `restart` ends the thread and starts one with the same options, keeps
-the host (the runner's bindings stay), sends the new thread every parse kept for a block not yet released, in their
-order (a parse in flight is answered there; any other request in flight fails), and counts the restarts (`restarts`); a
-worker that failed or was closed is not restarted. The rows written do not depend on the restart: the new thread applies
-the same block to the same stored state, and a node its fresh package writes again (one the old package knew stored) is
-left as it is (`ON CONFLICT DO NOTHING`), so the sweep's "stored" set — the committed nodes and the batch's inserts — is
-the same.
+the bridge from on-compute's read), the apply, the root check, the reclamation step and its eviction —; any error of
+that second pass fails the block as `callback-error`. `restart` ends the thread and starts one with the same options,
+keeps the host (the runner's bindings stay), sends the new thread every parse kept for a block not yet released, in
+their order (a parse in flight is answered there; any other request in flight fails), and counts the restarts
+(`restarts`); a worker that failed or was closed is not restarted. The restart changes nothing the block stores but how
+nodes are spelled: the new thread applies the same block to the same stored state, so the rows of the tables that are
+not content-defined, the node set and the state roots equal an uninterrupted run's (A160 as the `ledger-refcount`
+change rewrites it); a node the fresh package writes again with another child list (one it holds with a small child
+embedded where the old package referenced it, or the reverse) replaces the stored row, as the node's own storage does,
+and the step computed again counts that list (the `ledger-refcount` change's design §2.2, §4.4 and §5).
 
 ### 5.5 Ledger tasks (LG-17, Q49)
 
@@ -1010,7 +1013,8 @@ native parsed objects, `rawPackages()` and, for a task that declares `needsState
 (read-only) — checks that each result is
 structured-cloneable plain data (a `structuredClone` round trip that preserves it), and posts `block-parsed` and the
 task results to the main thread, where they become `block` items before `on-compute`. `core-ledger-state`'s apply, the
-conversion and the sweep step then run in the worker as part of `on-compute`. Ledger tasks keep no state between blocks.
+conversion and the eviction of the nodes its reclamation step deletes then run in the worker as part of `on-compute`.
+Ledger tasks keep no state between blocks.
 
 As built (task 13.1, before task 12.6): `core-contract-logs-fast` reads the transcripts with a function shaped as a
 ledger task without `needsState` — the native transaction and `rawPackages()` in, each `log` operation's site out as

@@ -687,11 +687,42 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
       branches). Whole suite before this commit (`5.1-full`, `npx vitest run` with the tapes, the final tree but this
       sentence, 2,578 s): 435 files, 6,506 tests passed, 12 skipped, no failure (§0: 387, 6,252, 12); R2's and R4's
       files among them, the tape files included.
-- [ ] 5.2 The documents (`design.md` §11, "Documents") not changed earlier, and `scripts/local-preprod-sync.mjs`
+- [x] 5.2 The documents (`design.md` §11, "Documents") not changed earlier, and `scripts/local-preprod-sync.mjs`
       (`design.md` §12.1).
       **Acceptance:** R26 but its clause "issue `docs/issues/00078` is closed naming this change" (9.2's), checked whole
       over every document R26 names, those changed in §3 and 5.1 included; the script, run without
       `UMBRADB_LOCAL_NODE`, exits non-zero naming the variable.
+      **Done (2026-11-03, this commit):** `CHANGELOG.md`: R26's one line, in a subsection "Changed since
+      `v0.10.0-rc.2`" after start-umbradb's (whose check, L59, reads only that one). `ROADMAP.md`: the ledger line
+      (`:37`) says reference counting; `:88`, the line §11 names, meant the crash test and now says "the crash sweep".
+      `core-arch` design: §1's `src/ledger/` row no longer lists the sweep; §5.4, "Storage, retention and
+      reclamation", points to this design's §2–§7 and keeps the eviction, `forgetTransactions` and Q144 B's restart,
+      with the one-block lag; its 12.5a paragraph's first-copy sentence replaced (a restart changes only how nodes are
+      spelled, A160's rewritten text); §5.5: the eviction, not a sweep step, runs in the worker. The module guide: a
+      new §4.4 (the bytes of `nodes`, `ref_counts` and `unreferenced` are not part of the determinism contract;
+      modules read ledger state through ledger tasks and `core-ledger-state`'s items; the module role can read the
+      tables, nothing more enforced), and `ledger-refcount-invalid` among Appendix A.2's halts (beyond R26's words).
+      The `src/ledger/` comments of §11 (`types.ts`, `adapter.ts`, `worker/host.ts`, `worker/engine.ts`) say
+      reclamation, and name the refusal's other cause, a live object holding a node by reference where the stored
+      lists embed it. Checked whole over every document R26 names after 5.1: `core-arch` design §4, §8, §10, §11 and
+      acceptance §17 (3.1–3.8, 5.1) describe the change; what still says "sweep" elsewhere is the `sweep` key (O-1),
+      the crash sweep (A50), historical comparisons (§13's and the configurations' past floor and measurements), the
+      upstream `gc-v1` feature, `CHANGELOG.md`, or records of their time (`docs/issues/`, `docs/releases/`,
+      `docs/research/`, `core-arch`'s `tasks.md` and proposal); `core-arch`'s ledger spec and its A104, A105 and A134,
+      which this change's delta and acceptance §7 replace, left as they are but for one pointer line under each of
+      A104, A105 and A134 to acceptance §7 (questions file Q-5.2-1: the runner's A, then the owner's B, `0e24347`).
+      Nothing of 5.1's needed fixing. `scripts/local-preprod-sync.mjs` (design §12.1, with §12.3's probe): the build's
+      `umbradb run` in `node:24.9.0-alpine` on a Docker network of its own beside the repository's one PostgreSQL 18
+      image (`test/postgres-image.ts`'s pin, which A148 requires; `postgres:18` first, caught by
+      `test/dependencies/postgres-image.test.ts`); per 1,000-height window the wall time (interpolated between
+      `/status` samples) and the `nodes` row count; the probe's answers and each window's slow mark; without
+      `UMBRADB_LOCAL_NODE` (unset, empty or no `ws` URL) it exits 2 naming it before anything else. Never run against a
+      node. Its test `test/integration/local-preprod-sync.test.ts` (with no `docker` on `PATH` it still names the
+      variable; no output folder). Codex: `5.2-script-red` (the script missing: 4 failing), `5.2-docs-1`,
+      `5.2-docs-2` (before and after the rebase onto 5.1: the script test and every test that reads a document, 21
+      files, 313 passed), `5.2-docs-3` (with A148's pin test: 22 files, 321 passed). Whole suite before this commit
+      (`5.2-full-2`, `npx vitest run` with the tapes, the final tree but this sentence, 2,939 s): 436 files, 6,510
+      tests passed, 12 skipped, no failure (§0: 387, 6,252, 12; 5.1's: 435, 6,506, 12).
 
 ## 6. Full verification (AGENTS.md stage 3)
 

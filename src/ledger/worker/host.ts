@@ -104,7 +104,7 @@ export interface LedgerHost {
   /** A retained state's root: the state is loaded by its key, through `read`, beside the committed one. [LG-12] */
   retained(input: LoadState, read?: NodeReader): Promise<{ readonly stateRoot: Uint8Array }>;
   /**
-   * Makes the worker's packages forget the nodes the sweep deletes. Rejects when one is still in use, with an
+   * Makes the worker's packages forget the nodes reclamation deletes. Rejects when one is still in use, with an
    * `EvictionRefused` (`./engine.ts`), once the worker has freed what it can. [LG-14]
    */
   evict(keys: readonly Uint8Array[]): Promise<number>;

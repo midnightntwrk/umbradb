@@ -365,6 +365,24 @@ table: { schema: "keys", tables: ["requests"], kind: "append-only", deterministi
 - **Shared items** (§13): every provider of a shared item declares the same flag, else startup refuses with
   `shared-item-migrations-differ`.
 
+### 4.4 The ledger's node tables
+
+`core-ledger-state` keeps the ledger's nodes in `core_ledger_state.nodes`, each with the child list the ledger last
+wrote for it, and in `ref_counts` and `unreferenced` the counts and the queue that decide which nodes a block deletes.
+The ledger can write one node two ways, a small child embedded in it or referenced by key, depending on what its worker
+held; so two machines fed the same chain hold the same nodes there, but not always in the same bytes, nor with the same
+counts and queue (after a restart, for one).
+
+- **Not part of the determinism contract.** The bytes of `nodes`, `ref_counts` and `unreferenced` are not: the
+  contents hash takes `nodes` by the nodes it holds (the keys of its rows and of every node embedded in them) and checks
+  the other two against it, and no block digests them.
+- **Copy nothing of them.** Store nothing taken from these tables — a child list, a count of their rows, a count — and
+  compute nothing deterministic from them, in a public or a private module: your rows would then depend on more than
+  the chain, as rows taken from a `deterministic: false` table (§4.3) would. Read ledger state through ledger tasks
+  (the declaration's `ledgerTasks`: functions the ledger worker runs on each block's parsed transactions, given the
+  state before the block when one declares `needsState`) and through `core-ledger-state`'s items (§9). Your role can
+  read these tables, and nothing more is enforced: the rule is yours to keep.
+
 ## 5. Reading and writing tables
 
 - **The handles.** `on-db-write` gets the block write handle and `on-start-db` a schema write handle: `query(sql,
@@ -900,7 +918,7 @@ command ignores it. `/config` shows the addresses as bound and, in `network`, ea
     `requires-resync`, `no-primary-key`, `unsupported-column-type`, `unsupported-key-type`,
     `non-deterministic-column`, `non-deterministic-table`, `shared-item-migrations-differ`.
   - Processing halts: `callback-error`, `handle-closed`, `truncate-not-allowed`, `database-error`, `root-mismatch`,
-    `fast-log-unsupported`, `lockstep-behind`, `public-config-changed`.
+    `ledger-refcount-invalid`, `fast-log-unsupported`, `lockstep-behind`, `public-config-changed`.
   - A call your code may catch: `query-timeout`, `no-committed-height`, `state-not-retained`, `read-refused`.
   - A host's start (§18): `invalid-configuration` (`invalid-option`, `renamed-setting`), `modules-given-twice`,
     `ledger-tasks-need-modules-from`, `source-refused`, `library-setting-refused`, `network-address-conflict`,

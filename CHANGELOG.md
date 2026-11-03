@@ -119,6 +119,17 @@ is refused. For the `umbradb` command, only those two keys break. The change is 
   the last height the process saw committed (`processing stopped (signal: SIGTERM): the last height this process saw
   committed is 412; a restart resumes after the stored cursor`).
 
+### Changed since `v0.10.0-rc.2`: ledger nodes reclaimed by reference counting (`ledger-refcount`)
+
+- **Ledger nodes are reclaimed by reference counting**, in place of the mark-and-sweep: each block counts the
+  references its nodes gain and lose and deletes the stored nodes that nothing references or persists any more, so its
+  cost follows what the block changes; a node the ledger writes again replaces its stored child list, as the node's own
+  storage does; the contents hash takes the ledger's node tables (`nodes`, `ref_counts`, `unreferenced`) by the nodes
+  they hold, not by their bytes; every core part with migrations has one, `001`; a failed check halts with
+  `ledger-refcount-invalid`. A database or a backup written by an earlier build, `v0.10.0-rc.1` and `rc.2` included,
+  is refused (`migration-checksum-changed`, `backup-build-mismatch`): resync into a new database. The change is the
+  OpenSpec change [`ledger-refcount`](openspec/changes/ledger-refcount/).
+
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 
 The first importable, published public surface. Everything below is imported from the package root

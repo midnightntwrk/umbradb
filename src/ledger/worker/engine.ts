@@ -64,13 +64,15 @@
  * **A retained state** ({@link LedgerEngine.retained}) is loaded by its key beside the held states, its root read, and
  * the state dropped. The states the engine holds are left as they are. [LG-12]
  *
- * **Eviction** ({@link LedgerEngine.evict}): every loaded package forgets the nodes the sweep deletes, so a node needed
- * again is flushed again. A package refuses to forget a node that a live object holds. The states the engine holds
- * never hold a deleted node (the sweep marks them), so the engine frees a kept parse's native objects when it drops the
- * parse. If a later block's kept transaction still holds one, it frees every kept parse's native objects and tries
- * again (those transactions are parsed again at their apply). A refusal after that rejects with
- * {@link EvictionRefused}: an object this thread cannot reach holds the node. The main thread then ends the thread,
- * starts a new one, and applies the block again there on the state at h − 1 loaded from the database (`./host.ts`'s
+ * **Eviction** ({@link LedgerEngine.evict}): every loaded package forgets the nodes reclamation deletes, so a node
+ * needed again is flushed again. A package refuses to forget a node that a live object holds. Reclamation deletes no
+ * node that the states the engine holds reach through the child lists the database stores (it keeps, for one block,
+ * what the state before the block reaches), so the engine frees a kept parse's native objects when it drops the parse.
+ * If a later block's kept transaction still holds one, it frees every kept parse's native objects and tries again
+ * (those transactions are parsed again at their apply). A refusal after that rejects with {@link EvictionRefused}: an
+ * object this thread cannot reach holds the node, or a live object holds it by reference where the stored child lists
+ * embed it (the package keeps the child list it first cached for a key). The main thread then ends the thread, starts
+ * a new one, and applies the block again there on the state at h − 1 loaded from the database (`./host.ts`'s
  * `restart`). [LG-14, Q144 B]
  *
  * **The node store is installed from the first block on** (in the worker, the bridge's store). To the package, a
@@ -639,10 +641,10 @@ export class LedgerEngine {
   }
 
   /**
-   * Drops the nodes the sweep deletes from every loaded package's caches, so a later block that needs one again flushes
-   * it again. When the package refuses (a live object still holds one), the kept parses' native objects are freed and
-   * the eviction is tried once more. A second refusal rejects with {@link EvictionRefused}; the main thread answers by
-   * ending this thread and starting a new one. A trap is never retried. [LG-14, Q144 B]
+   * Drops the nodes reclamation deletes from every loaded package's caches, so a later block that needs one again
+   * flushes it again. When the package refuses (a live object still holds one), the kept parses' native objects are
+   * freed and the eviction is tried once more. A second refusal rejects with {@link EvictionRefused}; the main thread
+   * answers by ending this thread and starting a new one. A trap is never retried. [LG-14, Q144 B]
    */
   async evict(keys: readonly Uint8Array[]): Promise<number> {
     if (keys.length === 0) return 0;
@@ -654,8 +656,9 @@ export class LedgerEngine {
         adapter.evict([...keys]);
       } catch (first) {
         if (first instanceof WebAssembly.RuntimeError) throw first;
-        // A live object holds one: the states the engine holds are marked, so it is a kept parse's (a later block's
-        // transaction carrying the same value) or, should one hold it, an object nothing here can reach. The kept
+        // A live object holds one: reclamation keeps what the held states reach through the stored child lists, so
+        // it is a kept parse's (a later block's transaction carrying the same value) or, should one hold it, an
+        // object nothing here can reach, or one holding it by reference where the stored lists embed it. The kept
         // parses' native objects are freed — the block's apply parses them again — and the eviction tried once more.
         for (const kept of this.#kept.values()) await this.#forget(kept);
         try {
