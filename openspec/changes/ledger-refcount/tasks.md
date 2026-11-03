@@ -38,7 +38,7 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
 
 ## 1. Measurements on the recorded tapes (`design.md` §9, §13 phase 0)
 
-- [ ] 1.1 R21's batch figures, from the batches the base build flushes, each node classified against the child list
+- [x] 1.1 R21's batch figures, from the batches the base build flushes, each node classified against the child list
       last written for its key (tracked across the batches, a deletion ending it).
       **Acceptance:** R21's clauses "On the recorded stagenet 0–10,000, preprod 0–10,000 and devnet v8 → v9 tapes, per
       block: the batch's nodes; the nodes written again unchanged; the rewritten nodes; the keys written in a form other
@@ -46,6 +46,32 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
       counts released; […] — reported per tape as distributions (median, 99th percentile, maximum)", with the first
       height per tape at which a key is written in another form (R4's comparison stops there); recorded here and in the
       pull request. The rest of R21 is 4.10's.
+      **Done (2026-11-03, this commit):** measured on the base build (`5bcffec`, the runtime sweep running) by a harness
+      outside the repository that edits nothing here (organizer `research/00034-ledger-node-refcount-data/measure/`):
+      the real process from genesis on PGlite over a tape node, with the A99 tape replays' settings, `retainStates` 0
+      and `sweep` on; the ledger worker's flushed batches and the sweep's evictions recorded; each batch node
+      classified against the child list last written for its key, a deletion ending it. Two module sets (Q-1.1-1,
+      decided by the runner): the ledger core (A99's) and with `core-contract-states` (R22's); their figures differ
+      only on the devnet ("core; contracts" below). **First height at which a key is written in another form: none**
+      on any of the three tapes in either set — no rewrite, and no key written with two child lists, the 18,757
+      re-insertions after a deletion on stagenet and 553 on preprod included — so R4 compares every height of each
+      tape. Checks, passing on every run: the new nodes are the base build's node inserts counted from the database
+      (its row count after every block plus the sweep's deletions: stagenet 91,070, preprod 75,290, devnet 1,493 and
+      1,499); no key is reported rewritten, so C3 (two different child lists for each) holds vacuously, and a control
+      that writes a stored node again with a referenced child embedded is seen as one rewrite and one other form; the
+      tracked node set is the database's at every block; every key is its node's hash. Codex runs: `1.1-measure-sets`
+      (exit 0, all six captures, checks C1–C7 pass), reproduced byte for byte by `1.1-measure-tapes`; controls
+      `1.1-measure-controls-3` (each fault fails its own check); the whole suite `1.1-full`: 386 of 387 files, the
+      one failure A130's load-only hang (issue 00041), the file passing alone (`1.1-browser-alone`). The full report,
+      for the pull request: `measure/r21-batch-figures.md` there; the runtime sweep's node set after every block, for
+      4.9 (R4's runtime half): `measure/runtime-sweep-node-sets/`. Per block, median / p99 / max over every block of
+      the range ("released": the root counts released, each by 1):
+
+      | Tape | batch's nodes | written again unchanged | rewritten | other form | new nodes' references | released |
+      |---|---|---|---|---|---|---|
+      | stagenet 0–10,000 | 10 / 10 / 112 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 | 349 / 694 / 714 | 1 / 1 / 1 |
+      | preprod 0–10,000 | 8 / 9 / 24 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 | 156 / 364 / 370 | 1 / 1 / 1 |
+      | devnet 0–235 | 6 / 17 / 31 | 0 / 0 / 1; 0 / 0 / 2 | 0 / 0 / 0 | 0 / 0 / 0 | 19 / 37 / 40 | 1 / 1 / 1 |
 
 ## 2. The reference model and the reachability oracle (`design.md` §2.3, §3.2, §4; §13 phase 1)
 
