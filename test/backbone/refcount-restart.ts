@@ -116,7 +116,7 @@ export interface SegmentJob {
 /** What a segment reports on its standard output, one JSON line each; and what an inspection reports. */
 export type SegmentEvent =
   | { readonly event: "reached"; readonly point: RestartPoint; readonly height: number }
-  | { readonly event: "inspected"; readonly cursor: number | null; readonly tables: SnapshotJson; readonly contents: string }
+  | { readonly event: "inspected"; readonly cursor: number | null; readonly tables: SnapshotJson; readonly contents: ContentsHash }
   | {
       readonly event: "ended";
       readonly cursor: string | null;
@@ -144,6 +144,14 @@ export interface Summary {
   readonly nodeSet: string;
 }
 
+/**
+ * A contents hash as a segment or an inspection recorded it: the hash, as hex; or the computation's refusal, its text
+ * and its code (`ledger-refcount-invalid` for tables whose counts or queue are not their rows'). The two are kept
+ * apart so that two refusals are never taken for two equal hashes: only two hashes compare equal. [DT-3, LG-11, R13,
+ * R14]
+ */
+export type ContentsHash = { readonly hash: string } | { readonly refused: string; readonly code: string | null };
+
 /** One block's observation (see the module comment). */
 export interface Observed {
   readonly height: number;
@@ -153,7 +161,7 @@ export interface Observed {
   /** Where R3 ran in the segment: what it found, and the rows outside `R_{h−1} ∪ R_h`. */
   readonly r3?: { readonly problems: readonly string[]; readonly outside: number };
   readonly tables?: TableSnapshot;
-  readonly contents?: string;
+  readonly contents?: ContentsHash;
   /** What the watcher found wrong in itself: a node set kept apart from the table's. */
   readonly problems: readonly string[];
 }
@@ -215,18 +223,44 @@ type Line =
       readonly summary?: Summary;
       readonly r3?: { readonly problems: string[]; readonly outside: number };
       readonly tables?: SnapshotJson;
-      readonly contents?: string;
+      readonly contents?: ContentsHash;
       readonly problems: string[];
     };
 
 // ── The segment's own side: the watcher, the points, the process ───────────────────────────────────────────────────
 
 /**
- * The contents hash `read` sees, as hex; or, for a database whose counts or queue do not match its rows, which the
- * computation refuses (`ledger-refcount-invalid`), `refused: ` and the error. [DT-3, LG-11]
+ * The contents hash `read` sees ({@link ContentsHash}): its hash; or, for a database whose counts or queue do not
+ * match its rows, which the computation refuses (`ledger-refcount-invalid`), the refusal. [DT-3, LG-11]
  */
-async function contentsOf(read: Pick<ReadHandle, "query">): Promise<string> {
-  return contentsHash(read).then(hex, (error: unknown) => `refused: ${String(error)}`);
+async function contentsOf(read: Pick<ReadHandle, "query">): Promise<ContentsHash> {
+  return contentsHash(read).then(
+    (hash) => ({ hash: hex(hash) }),
+    (error: unknown) => {
+      const code = (error as { code?: unknown } | null)?.code;
+      return { refused: String(error), code: typeof code === "string" ? code : null };
+    },
+  );
+}
+
+/**
+ * Why `have` does not show the contents hash `expected` shows: a refusal on either side, however alike the two, or two
+ * hashes that differ; undefined only for two equal hashes. [R13, R14]
+ */
+export function contentsDifference(have: ContentsHash, expected: ContentsHash): string | undefined {
+  if ("refused" in expected) return `the contents hash (the run compared with refused it: ${expected.refused})`;
+  if ("refused" in have) return `the contents hash (refused: ${have.refused})`;
+  return have.hash === expected.hash ? undefined : "the contents hash";
+}
+
+/** Each height after which `run` recorded a contents hash that was refused, with the refusal: none in a run that hashed. */
+export function refusedContents(run: ObservedRun): string[] {
+  return [...run.after].flatMap(([h, o]) => (o.contents !== undefined && "refused" in o.contents ? [`after ${h}: ${o.contents.refused}`] : []));
+}
+
+/** The heights after which `run` recorded a contents hash, a hash or a refusal, in order. */
+export function hashedHeights(run: ObservedRun): number[] {
+  return [...run.after].filter(([, o]) => o.contents !== undefined).map(([h]) => h).sort((a, b) => a - b);
 }
 
 /** One statement's read of what {@link Light} holds, at height `$1`. */
@@ -755,7 +789,8 @@ const LIGHT_NAMES: Readonly<Record<Exclude<keyof Light, "rows">, string>> = {
 /**
  * Where `got` differs from `want` at heights `from` to `to`: a height either has not observed; after every height the
  * node set, `root_counts`, the `states` row and count, and `core_digest.tables` ({@link Light}); and where both recorded
- * them, the contents hash. Empty when they agree. [R13, R14]
+ * them, the contents hash, which agrees only as two equal hashes ({@link contentsDifference}). Empty when they agree.
+ * [R13, R14]
  */
 export function observedDifferences(got: ObservedRun, want: ObservedRun, from: number, to: number): string[] {
   const problems: string[] = [];
@@ -767,7 +802,9 @@ export function observedDifferences(got: ObservedRun, want: ObservedRun, from: n
       continue;
     }
     const named = (Object.keys(LIGHT_NAMES) as (keyof typeof LIGHT_NAMES)[]).filter((field) => have.light[field] !== expected.light[field]).map((field) => LIGHT_NAMES[field]);
-    if (have.contents !== undefined && expected.contents !== undefined && have.contents !== expected.contents) named.push("the contents hash");
+    // Where both recorded it, the contents hash: two hashes, equal; a refusal on either side is a difference. [R13, R14]
+    const contents = have.contents === undefined || expected.contents === undefined ? undefined : contentsDifference(have.contents, expected.contents);
+    if (contents !== undefined) named.push(contents);
     if (named.length > 0) problems.push(`after ${h}: ${named.join(", ")} differ`);
   }
   return problems;
@@ -777,8 +814,8 @@ export function observedDifferences(got: ObservedRun, want: ObservedRun, from: n
 export interface DatabaseNow {
   readonly cursor: number | null;
   readonly tables: TableSnapshot;
-  /** The contents hash as hex, or why it was refused. */
-  readonly contents: string;
+  /** The contents hash, or its refusal. */
+  readonly contents: ContentsHash;
 }
 
 /**
@@ -865,14 +902,19 @@ export function restartProblems(restarted: ObservedRun, uninterrupted: ObservedR
 /**
  * Where the database a crash left (`now`, read from outside once the process was killed) is not the uninterrupted
  * run's after `cursor`: its cursor, a table of `core_ledger_state` (by its bytes: the killed run's history is the
- * uninterrupted one's), the contents hash. Empty when it is that run's database after that height, nothing of
- * another height mixed in. [R14, RN-6]
+ * uninterrupted one's), the contents hash, which agrees only as two equal hashes: a refusal on either side is a
+ * problem of its own. Empty when it is that run's database after that height, nothing of another height mixed in.
+ * [R14, RN-6]
  */
 export function mixProblems(now: DatabaseNow, uninterrupted: ObservedRun, cursor: number): string[] {
   if (now.cursor !== cursor) return [`the crash left the cursor at ${now.cursor}, not ${cursor}`];
   const want = uninterrupted.after.get(cursor);
   if (want?.tables === undefined || want.contents === undefined) return [`the uninterrupted run recorded no tables after ${cursor}`];
+  if ("refused" in want.contents) return [`the uninterrupted run's contents hash after ${cursor} was refused: ${want.contents.refused}`];
   const tables = [...new Set([...want.tables.digests.keys(), ...now.tables.digests.keys()])].filter((t) => want.tables?.digests.get(t) !== now.tables.digests.get(t));
-  if (want.contents !== now.contents) tables.push("the contents hash");
-  return tables.length === 0 ? [] : [`the database the crash left is not the uninterrupted run's after ${cursor}: ${tables.join(", ")} differ`];
+  if (!("refused" in now.contents) && now.contents.hash !== want.contents.hash) tables.push("the contents hash");
+  return [
+    ...(tables.length === 0 ? [] : [`the database the crash left is not the uninterrupted run's after ${cursor}: ${tables.join(", ")} differ`]),
+    ...("refused" in now.contents ? [`the database the crash left refused its contents hash: ${now.contents.refused}`] : []),
+  ];
 }

@@ -5,13 +5,20 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AGAIN, LAST, REQUEUE, REVERT, TO_EMBEDDED, TO_REF } from "../ledger/fixtures/sweep-fixture.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
 import { PATIENCE_MS } from "./ingest-harness.js";
+import type { TableSnapshot } from "./ledger-graph-tapes.js";
 import {
+  type ContentsHash,
   databaseNow,
+  type DatabaseNow,
   type Hold,
+  hashedHeights,
   jobFor,
+  type Light,
   mixProblems,
   type ObservedRun,
+  observedDifferences,
   observedRun,
+  refusedContents,
   type RestartPoint,
   restartProblems,
   type RunPlan,
@@ -35,6 +42,9 @@ import {
  *   every `core_ledger_state` table, byte for byte, and the contents hash; and the restarted run's node set and
  *   byte-hashed tables (`core_ledger_state`'s rows, `core_digest.tables`) are the uninterrupted run's after every
  *   block, its contents hash after h − 1, h, h + 1 and the last height, and R3 passes after every block.
+ *
+ * A contents hash compares equal only to another hash: a refusal on either side is a difference, so two runs whose
+ * computations both refuse never agree, and the uninterrupted run's every hash must have succeeded.
  *
  * The committed negative controls (a restart that empties `unreferenced`; a build writing `ref_counts` and
  * `unreferenced` in a transaction of their own) are in `ledger-refcount-restart.negative-control.test.ts`.
@@ -99,6 +109,9 @@ describe.each(PROCESS_BACKENDS)("R13, R14 (LG-11, LG-14, RN-6): restarts and cra
       expect(outcome.ended).toMatchObject({ why: "last", cursor: `${LAST}`, reason: null });
       const run = observedRun(plan.observe);
       expect(run.problems).toEqual([]);
+      // Its contents hash was computed after every height, and succeeded: the runs compared with it compare hashes.
+      expect(refusedContents(run)).toEqual([]);
+      expect(hashedHeights(run)).toEqual(Array.from({ length: LAST + 1 }, (_, h) => h));
       return run;
     })());
 
@@ -132,4 +145,37 @@ describe.each(PROCESS_BACKENDS)("R13, R14 (LG-11, LG-14, RN-6): restarts and cra
       expect(restartProblems(observedRun(plan.observe), expected, "extended", LAST)).toEqual([]);
     }, SEGMENT_MS * 3);
   }
+});
+
+describe("R13, R14: a contents hash compares equal only to another hash", () => {
+  const light: Light = { nodeSet: "n", nodes: 1, rows: 1, roots: "r", state: "s", states: 1, digests: "d" };
+  const tables: TableSnapshot = { rows: new Map(), refs: new Map(), roots: new Map(), queue: new Set(), states: new Map(), contracts: [], digests: new Map() };
+  /** A run observed after height 0 only, with the contents hash `contents`. */
+  const runOf = (contents: ContentsHash): ObservedRun => ({
+    after: new Map([[0, { height: 0, light, tables, contents, problems: [] }]]),
+    batches: new Map(),
+    problems: [],
+  });
+  const nowOf = (contents: ContentsHash): DatabaseNow => ({ cursor: 0, tables, contents });
+  const refused: ContentsHash = { refused: "UmbraError: the ledger's node tables are inconsistent", code: "ledger-refcount-invalid" };
+  const hash: ContentsHash = { hash: "ab".repeat(32) };
+
+  it("two identical refusals, or a refusal and a hash, differ; two equal hashes agree", () => {
+    expect(observedDifferences(runOf(refused), runOf(refused), 0, 0)).toEqual([expect.stringMatching(/^after 0: the contents hash \(/)]);
+    expect(observedDifferences(runOf(refused), runOf(hash), 0, 0)).toEqual([expect.stringMatching(/^after 0: the contents hash \(refused: /)]);
+    expect(observedDifferences(runOf(hash), runOf(refused), 0, 0)).toEqual([expect.stringMatching(/^after 0: the contents hash \(the run compared with/)]);
+    expect(observedDifferences(runOf({ hash: "cd".repeat(32) }), runOf(hash), 0, 0)).toEqual(["after 0: the contents hash differ"]);
+    expect(observedDifferences(runOf({ ...hash }), runOf(hash), 0, 0)).toEqual([]);
+    expect(refusedContents(runOf(refused))).toEqual([`after 0: ${refused.refused}`]);
+    expect(refusedContents(runOf(hash))).toEqual([]);
+  });
+
+  it("the database a crash left agrees with the uninterrupted run's only as two equal hashes", () => {
+    expect(mixProblems(nowOf(refused), runOf(refused), 0)).toEqual([expect.stringMatching(/^the uninterrupted run's contents hash after 0 was refused: /)]);
+    expect(mixProblems(nowOf(refused), runOf(hash), 0)).toEqual([expect.stringMatching(/^the database the crash left refused its contents hash: /)]);
+    expect(mixProblems(nowOf({ hash: "cd".repeat(32) }), runOf(hash), 0)).toEqual([
+      "the database the crash left is not the uninterrupted run's after 0: the contents hash differ",
+    ]);
+    expect(mixProblems(nowOf({ ...hash }), runOf(hash), 0)).toEqual([]);
+  });
 });

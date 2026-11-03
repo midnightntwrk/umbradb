@@ -25,7 +25,8 @@ import {
  * - **R14**: a build that writes `ref_counts` and `unreferenced` in a transaction of their own, committed before the
  *   block's (`./refcount-restart.ts`, `control: "own-transaction"`), crashed between the two commits at REQUEUE + 1,
  *   is detected: the database the crash left is a mix (`ref_counts` and `unreferenced` after h, the rest after
- *   h − 1, its contents hash refused), and after the restart the node sets differ from h on.
+ *   h − 1, its contents hash refused with `ledger-refcount-invalid`), and after the restart the node sets differ from
+ *   h on.
  */
 
 /** How long one segment on the DAG fixture may take on a loaded machine. */
@@ -54,7 +55,10 @@ describe.each(PROCESS_BACKENDS)("R13, R14 negative controls, on $name", (backend
       const plan = dagPlan([REQUEUE]);
       const outcome = await runSegment(db, await jobFor(db, plan), SEGMENT_MS);
       expect(outcome.ended).toMatchObject({ why: "last", cursor: `${LAST}`, reason: null });
-      return observedRun(plan.observe);
+      const run = observedRun(plan.observe);
+      // The baseline's contents hash at REQUEUE succeeded: the mix is compared with a hash.
+      expect(run.after.get(REQUEUE)?.contents).toEqual({ hash: expect.stringMatching(/^[0-9a-f]+$/) });
+      return run;
     })());
 
   it("R13's negative control: a restart that empties unreferenced makes the node sets differ after the next block", async () => {
@@ -81,9 +85,13 @@ describe.each(PROCESS_BACKENDS)("R13, R14 negative controls, on $name", (backend
     const h = REQUEUE + 1;
     const killed = await runSegment(db, await jobFor(db, plan, { control: "own-transaction", hold: { point: "between-commits", height: h, then: "hold" } }), SEGMENT_MS);
     expect(killed.reached).toEqual({ event: "reached", point: "between-commits", height: h });
-    // The crash left a mix: the two tables after h, the rest after h − 1.
-    expect(mixProblems(await databaseNow(db, PATIENCE_MS), expected, h - 1)).toEqual([
-      `the database the crash left is not the uninterrupted run's after ${h - 1}: ref_counts, unreferenced, the contents hash differ`,
+    // The crash left a mix: the two tables after h, the rest after h − 1, so its counts and queue are not its rows'
+    // and its contents hash is refused. This damaged case alone inspects a refusal.
+    const now = await databaseNow(db, PATIENCE_MS);
+    expect(now.contents).toEqual({ refused: expect.stringContaining("tables-inconsistent"), code: "ledger-refcount-invalid" });
+    expect(mixProblems(now, expected, h - 1)).toEqual([
+      `the database the crash left is not the uninterrupted run's after ${h - 1}: ref_counts, unreferenced differ`,
+      expect.stringMatching(/^the database the crash left refused its contents hash: /),
     ]);
     const restarted = await runSegment(db, await jobFor(db, plan), SEGMENT_MS);
     expect(restarted.ended).toMatchObject({ why: "last", cursor: `${LAST}` });
