@@ -646,7 +646,7 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
 
 ## 5. The sweep removed, the documents (`design.md` §11; §13 phase 4)
 
-- [ ] 5.1 The runtime mark-and-sweep removed: `sweep.ts`, its statements and readers in `sql.ts`, `sweepReset`, the
+- [x] 5.1 The runtime mark-and-sweep removed: `sweep.ts`, its statements and readers in `sql.ts`, `sweepReset`, the
       grey picker seam, `SWEEP_BUDGET`, the `sweepBudget` and `greyPicker` options; `sweep`, `grey` and `marks` gone from
       `core-ledger-state`'s `001` and from `core-arch` design §10; the sweep's own tests removed; what is left of
       `sweep-tapes.ts` split as `design.md` §11's table says (the DAG plumbing into `test/backbone/ledger-graph-tapes.ts`;
@@ -657,6 +657,35 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
       **Acceptance:** R18; R16's clause "and none of `sweep`, `grey`, `marks`" (R16 whole with 3.2's part); A5
       (`test/library-surface/retirement.test.ts`) passes; R2 and R4 still pass; the whole suite has no failure that §0
       did not have.
+      **Done (2026-11-03, this commit):** `src/backbone/core-ledger-state/sweep.ts` deleted (its step, reset, budget,
+      grey picker, tables seam and writes); from `sql.ts` the three tables' `CREATE TABLE`s in `001` and their
+      constants, and the sweep's statements and readers (`nodeChildren` and `deleteNodes`, which the counting step uses,
+      kept with its reads and writes); the barrel no longer exports it; the `ledger-state` item's tables are the five;
+      `core-arch` design §10's two sweep rows removed. The `sweepBudget` and `greyPicker` options had gone with 3.8. The
+      sweep's own tests `test/backbone/ledger-sweep.test.ts` and `ledger-sweep-tables.test.ts` deleted. `sweep-tapes.ts`
+      split: the DAG fixture's plumbing (`SWEEP_LOADER`, `sweepTape`, `sweepCore`, `sweepTables`, `sweepWatcher`,
+      `tablesByHeight`, with `TableSnapshot`, the recording worker, the watcher's record and R1's model helpers) moved,
+      under the names §11 lists, to `test/backbone/ledger-graph-tapes.ts`, which its 24 importers now read;
+      `sweep-tapes.ts` keeps R4's comparison only. `test/ledger/worker-sweep.test.ts` renamed `worker-eviction.test.ts`,
+      its comments and title reworded (R12's parenthesis in `acceptance.md` keeps the old path: questions file Q-5.1-1,
+      A). Owner decision Q-1 A: `refcount.ts` replaces `sweep.ts` as a mutation target (`stryker.conf.json`; its fast
+      tests `refcount-step.test.ts` and `refcount-tables.test.ts` in `vitest.mutation.config.ts`) and takes its 95/90
+      floor (`vitest.config.ts`), with `core-arch` design §13's floor and mutation rows, `retirement.ts` (targets,
+      floors, §13's terms), `retirement.test.ts`'s pending-floor case and the comment of
+      `.github/workflows/conformance.yml`'s mutation job; nine targets still. Tests: R18 in the new
+      `test/backbone/ledger-refcount-removal.test.ts` (`sweep.ts` absent; no file under `src/` names R18's seven
+      identifiers, as whole words, the scan checked on a planted line; the item's five tables; every part either side
+      declares with migrations has exactly `001`, and the four without, `core-block-fetch`, `core-config`,
+      `core-health`, `core-status`, none); R16's clause in `test/backbone/part-migrations.test.ts`'s new-database case
+      (no `core_ledger_state` relation named `sweep`, `grey` or `marks`, both backends). Codex: `5.1-red` (before the
+      removal: 4 failing for the intended reasons — `sweep.ts` present, the item listing the three tables, a new
+      database holding them on PostgreSQL and on PGlite), `5.1-touched-1` (with the tapes: R18, R16's three files, A5,
+      R2, R4's DAG test, control and devnet tape file, A102, A160, the step's unit tests, every DAG file reading the
+      plumbing, `worker-eviction`: 37 files, 246 tests passed), `5.1-mutation-refcount` (`refcount.ts` alone: 92.17 % of
+      332 valid mutants, break 65), `5.1-refcount-coverage-2` (its two unit tests alone cover 100 % of its lines and
+      branches). Whole suite before this commit (`5.1-full`, `npx vitest run` with the tapes, the final tree but this
+      sentence, 2,578 s): 435 files, 6,506 tests passed, 12 skipped, no failure (§0: 387, 6,252, 12); R2's and R4's
+      files among them, the tape files included.
 - [ ] 5.2 The documents (`design.md` §11, "Documents") not changed earlier, and `scripts/local-preprod-sync.mjs`
       (`design.md` §12.1).
       **Acceptance:** R26 but its clause "issue `docs/issues/00078` is closed naming this change" (9.2's), checked whole

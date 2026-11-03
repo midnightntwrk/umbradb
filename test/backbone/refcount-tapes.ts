@@ -11,9 +11,9 @@ import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
 import { type FoundTape, tapeTest } from "../tape/real/real-tapes.js";
 import { committed, ingest } from "./ingest-harness.js";
+import { recordingWorker, sweepTables, type TableSnapshot, type WorkerRecord, workerRecord } from "./ledger-graph-tapes.js";
 import { cappedAt, devnetSettings } from "./ledger-restart.js";
 import { NO_TABLES, type StoredCheck, storedProblems } from "./refcount-checks.js";
-import { recordingWorker, sweepTables, type TableSnapshot, type WorkerRecord, workerRecord } from "./sweep-tapes.js";
 
 /**
  * R3 on a recorded tape (`UMBRADB_TAPES`; the test skipped by name without its tape), on PostgreSQL 18 and PGlite

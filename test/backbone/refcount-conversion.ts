@@ -8,9 +8,9 @@ import { rebuildTagged } from "../ledger/stored-values.js";
 import type { ProcessDatabase } from "../runner/process-backends.js";
 import type { FoundTape } from "../tape/real/real-tapes.js";
 import { committed, ingest, PATIENCE_MS } from "./ingest-harness.js";
+import { recordingWorker, seenTables, sweepCore, sweepTables, sweepWatcher, type TableSnapshot, workerRecord } from "./ledger-graph-tapes.js";
 import { cappedAt, devnetSettings } from "./ledger-restart.js";
 import { NO_TABLES, reachIn, storedProblems, storedReach } from "./refcount-checks.js";
-import { recordingWorker, seenTables, sweepCore, sweepTables, sweepWatcher, type TableSnapshot, workerRecord } from "./sweep-tapes.js";
 
 /**
  * The ledger conversion on the recorded devnet v8 → v9 tape, through the real process with `core-contract-states`

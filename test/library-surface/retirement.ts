@@ -231,7 +231,9 @@ export function manifestProblems(
 /**
  * The retirement list's mutation targets, at the paths the build gave them. The list named: [Q157; design §13]
  * - `src/runner/order.ts`, the order within a point, now `src/runner/dispatch.ts` [RN-3];
- * - `src/ledger/sweep.ts`, the ledger state's sweep step, now `src/backbone/core-ledger-state/sweep.ts` [LG-14];
+ * - `src/ledger/sweep.ts`, the ledger state's sweep step, built as `src/backbone/core-ledger-state/sweep.ts`; the sweep
+ *   removed, the reclamation step that replaced it, `src/backbone/core-ledger-state/refcount.ts`, is the target in its
+ *   place [LG-14];
  * - `src/backbone/block-fetch-queue.ts`, the best-block queue and the finalized prefetch, now
  *   `src/backbone/core-block-fetch/node-source.ts` [IN-5, IN-6].
  *
@@ -249,9 +251,9 @@ export const MUTATION_TARGETS: Readonly<Record<string, readonly string[]>> = {
     "test/helpers/height-versioned.property.test.ts",
   ],
   "src/helpers/cursor-table.ts": ["test/helpers/cursor-table.test.ts", "test/helpers/cursor-table.property.test.ts"],
-  "src/backbone/core-ledger-state/sweep.ts": [
-    "test/backbone/ledger-sweep.test.ts",
-    "test/backbone/ledger-sweep-tables.test.ts",
+  "src/backbone/core-ledger-state/refcount.ts": [
+    "test/backbone/refcount-step.test.ts",
+    "test/backbone/refcount-tables.test.ts",
   ],
   "src/backbone/core-block-fetch/node-source.ts": ["test/backbone/node-source.test.ts"],
 };
@@ -317,9 +319,9 @@ export const RETIRED_FLOORS: readonly string[] = [
 /**
  * The floors the retirement list keeps at their moved paths and adds, each at least the figure given:
  * `durability-probe`, `migrate`, `errors` (the database API's and the `deterministic_postgresql` component's, which
- * holds `UmbraError`), the 95/90 directories, the sweep (`src/ledger/sweep*` in the list; as built,
- * `src/backbone/core-ledger-state/sweep.ts`) and the test tape. The list's default for `src/**` (90/85) is
- * {@link DEFAULT_SRC_FLOOR}, one glob per directory. [Q79, Q157; design §13]
+ * holds `UmbraError`), the 95/90 directories, the reclamation step (`src/backbone/core-ledger-state/refcount.ts`, the
+ * sweep's floor, `src/ledger/sweep*` in the list, given to the step that replaced it) and the test tape. The list's
+ * default for `src/**` (90/85) is {@link DEFAULT_SRC_FLOOR}, one glob per directory. [Q79, Q157; design §13]
  */
 export const REQUIRED_FLOORS: Readonly<Record<string, Floor>> = {
   "**/src/db/durability-probe.ts": { lines: 97, branches: 92 },
@@ -329,13 +331,14 @@ export const REQUIRED_FLOORS: Readonly<Record<string, Floor>> = {
   "**/src/determinism/**": { lines: 95, branches: 90 },
   "**/src/deterministic-postgresql/**": { lines: 95, branches: 90 },
   "**/src/helpers/**": { lines: 95, branches: 90 },
-  "**/src/backbone/core-ledger-state/sweep.ts": { lines: 95, branches: 90 },
+  "**/src/backbone/core-ledger-state/refcount.ts": { lines: 95, branches: 90 },
   "**/tools/tape/**": { lines: 90, branches: 85 },
 };
 
 /**
  * The retirement list's floors not yet in `vitest.config.ts`, each with the reason; a pending floor may be absent,
- * never weaker. Empty: the last one, the sweep's 95/90, has been applied. [Q158 A; design §13]
+ * never weaker. Empty: the last one, the sweep's 95/90 (now the reclamation step's), has been applied.
+ * [Q158 A; design §13]
  */
 export const PENDING_FLOORS: readonly string[] = [];
 
@@ -576,7 +579,7 @@ export const SECTION_13_TERMS: readonly string[] = [
   "The five 0.9.5 adapters",
   "Break threshold 65",
   ...Object.keys(MUTATION_TARGETS).map((file) => `\`${file}\``),
-  "`src/backbone/core-ledger-state/sweep.ts` 95/90",
+  "`src/backbone/core-ledger-state/refcount.ts` 95/90",
   "`archive:sync`",
   "Status set to Archived: its laws (C2a, C2b, L1, T1 cross-writer) are retired",
   "TemporalKV, Watermarks, CheckpointStore, Lease and TransactionHistory workloads and their baseline",

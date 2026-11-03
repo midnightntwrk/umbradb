@@ -4,9 +4,9 @@ import { startLedgerWorker } from "../../src/ledger/worker/host.js";
 import { extendedCases, type FixtureNode, TO_EMBEDDED } from "../ledger/fixtures/sweep-fixture.js";
 import { COUNTERS, countersMemory, type FixtureData, type Keeping } from "../ledger/fixtures/sweep-test-loader.js";
 import type { ProcessDatabase } from "../runner/process-backends.js";
+import { SWEEP_LOADER, sweepTape } from "./ledger-graph-tapes.js";
 import { readStopped } from "./refcount-histories.js";
 import { type DagRun, runDag } from "./refcount-process.js";
-import { SWEEP_LOADER, sweepTape } from "./sweep-tapes.js";
 
 /**
  * The runs of a live object holding a row the stored child lists no longer reach, shared by

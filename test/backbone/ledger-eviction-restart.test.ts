@@ -3,9 +3,9 @@ import { LAST } from "../ledger/fixtures/sweep-fixture.js";
 import { PROCESS_BACKENDS } from "../runner/process-backends.js";
 import { refusalHalt, refusalHeight, runFixture, tableDifferences } from "./eviction-restart.js";
 import { PATIENCE_MS } from "./ingest-harness.js";
+import { modelOfFixture, modelProblems } from "./ledger-graph-tapes.js";
 import { heldNodeProblems } from "./ledger-storage-checks.js";
 import { fixtureProblems } from "./refcount-checks.js";
-import { modelOfFixture, modelProblems } from "./sweep-tapes.js";
 
 /**
  * `[FAULT]` A refused eviction restarts the ledger worker, on PostgreSQL 18 and PGlite 0.5.10. [A160 FAULT, LG-14, Q144 B]

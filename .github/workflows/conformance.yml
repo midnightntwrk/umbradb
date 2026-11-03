@@ -81,7 +81,7 @@ jobs:
   mutation:
     # The StrykerJS mutation gate (openspec/changes/core-arch design.md §13, task 17.2): a SEPARATE still-required job
     # (never optional, never live-gated) so mutation cost is off the `test` job's clock. SCOPE: the nine targets
-    # `stryker.conf.json` mutates (graph, dispatch, history, cbor, digest, height-versioned, cursor-table, sweep,
+    # `stryker.conf.json` mutates (graph, dispatch, history, cbor, digest, height-versioned, cursor-table, refcount,
     # node-source), each with its fast tests in `vitest.mutation.config.ts`; `break` is 65 on the AGGREGATE over
     # valid mutants, which `scripts/mutation-per-adapter.mjs` sums over one `stryker run --mutate <file>` per target.
     #

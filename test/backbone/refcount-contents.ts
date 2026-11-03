@@ -7,8 +7,8 @@ import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import { validateDeclarations } from "../../src/modules/validation.js";
 import { chainDeclarations } from "./chain-build.js";
 import { watched, watcher } from "./ingest-harness.js";
+import { seenTables, sweepCore, sweepWatcher, type TableSnapshot } from "./ledger-graph-tapes.js";
 import { nodeSet } from "./refcount-model.js";
-import { seenTables, sweepCore, sweepWatcher, type TableSnapshot } from "./sweep-tapes.js";
 
 /**
  * What the reclamation tests compare between databases the DAG fixture's process wrote (`./refcount-process.ts`): the

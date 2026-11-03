@@ -1,8 +1,7 @@
 /**
- * The SQL of `core-ledger-state` (`./core-ledger-state.ts`, `./sweep.ts`, `./refcount.ts`): its tables, its migrations,
- * the statements it writes each block's batch, state, results, events, sweep step and reclamation step with, and the
- * reads of the stored state, of the sweep's sets and of reclamation's counts and queue.
- * [LG-11, LG-14, LG-16; design §10]
+ * The SQL of `core-ledger-state` (`./core-ledger-state.ts`, `./refcount.ts`): its tables, its migrations, the
+ * statements it writes each block's batch, state, results, events and reclamation step with, and the reads of the
+ * stored state and of reclamation's counts and queue. [LG-11, LG-14, LG-16; design §10]
  *
  * **The tables**, created by its one migration, `001`, under the part's role: [design §10]
  * - `core_ledger_state.nodes (node_key) → data, children` and `core_ledger_state.root_counts (node_key) → count`, the
@@ -14,19 +13,15 @@
  * - `core_ledger_state.ref_counts (node_key) → count`, the number of references to each key in the stored nodes' child
  *   lists, a row only while it is above 0, and `core_ledger_state.unreferenced (node_key)`, the stored nodes with
  *   neither a reference nor a root count: reclamation's counts and queue. [LG-11, LG-14]
- * - the mark-and-sweep's (`./sweep.ts`): `core_ledger_state.sweep`, its one row (the cycle, the phase and the sweep
- *   position), inserted `idle` by the migration; `core_ledger_state.grey` and `core_ledger_state.marks`, its grey set
- *   and its marks, one key per row. [LG-14]
  *
- * Earlier builds had two migrations, `001` and `002` (the mark-and-sweep's); a database they wrote recorded another
- * `001`, so startup refuses it before any migration runs (`migration-checksum-changed`). [DB-9, R16]
+ * A database an earlier build wrote recorded another `001` (and, before one migration per part, a `002`), so startup
+ * refuses it before any migration runs (`migration-checksum-changed`). [DB-9, R16]
  */
 
 import type { BlockWriteHandle, ReadHandle } from "../../db/api.js";
 import type { LedgerEvent, LedgerName, NodeBatch, StateSummary } from "../../ledger/types.js";
 import { BLOCKS_TABLE } from "../core-block-commit/sql.js";
 import { heightPartitionsSql } from "../height-partitions.js";
-import type { SweepPhase, SweepState } from "./sweep.js";
 
 /** Its tables. [design §10] */
 export const NODES_TABLE = "core_ledger_state.nodes";
@@ -38,11 +33,6 @@ export const EVENTS_TABLE = "core_ledger_state.events";
 /** Reclamation's counts and queue. [LG-11, LG-14; design §10] */
 export const REF_COUNTS_TABLE = "core_ledger_state.ref_counts";
 export const UNREFERENCED_TABLE = "core_ledger_state.unreferenced";
-
-/** The mark-and-sweep's tables (`./sweep.ts`). [design §10] */
-export const SWEEP_TABLE = "core_ledger_state.sweep";
-export const GREY_TABLE = "core_ledger_state.grey";
-export const MARKS_TABLE = "core_ledger_state.marks";
 
 /** The kinds of `core_ledger_state.events`, including `contract-deploy`, which is stored too. [LG-16; design §10] */
 export const EVENT_KINDS = Object.freeze([
@@ -119,22 +109,6 @@ CREATE TABLE ${REF_COUNTS_TABLE} (
 CREATE TABLE ${UNREFERENCED_TABLE} (
   node_key bytea NOT NULL CHECK (octet_length(node_key) = 32),
   PRIMARY KEY (node_key)
-);
-CREATE TABLE ${SWEEP_TABLE} (
-  id smallint NOT NULL CHECK (id = 1),
-  cycle bigint NOT NULL CHECK (cycle >= 0),
-  phase text NOT NULL CHECK (phase IN ('idle', 'mark', 'sweep')),
-  sweep_after bytea CHECK (octet_length(sweep_after) = 32),
-  PRIMARY KEY (id)
-);
-INSERT INTO ${SWEEP_TABLE} (id, cycle, phase, sweep_after) VALUES (1, 0, 'idle', NULL);
-CREATE TABLE ${GREY_TABLE} (
-  node_key bytea NOT NULL CHECK (octet_length(node_key) = 32),
-  PRIMARY KEY (node_key)
-);
-CREATE TABLE ${MARKS_TABLE} (
-  node_key bytea NOT NULL CHECK (octet_length(node_key) = 32),
-  PRIMARY KEY (node_key)
 );`,
   },
 ]);
@@ -177,27 +151,6 @@ const EVENTS_SQL = `INSERT INTO ${EVENTS_TABLE} (height, tx_index, event_index, 
     $10::bigint[], $11::bytea[])
     AS e (tx_index, event_index, kind, logical_segment, physical_segment, bytes, nullifier, commitment, tree_index,
       contract_address)`;
-
-/** The mark-and-sweep's reads, of the tables as committed at h − 1, and its writes. [LG-14] */
-const SWEEP_ROW_SQL = `SELECT cycle, phase, sweep_after FROM ${SWEEP_TABLE} WHERE id = 1`;
-const ROOT_KEYS_SQL = `SELECT node_key FROM ${ROOT_COUNTS_TABLE} ORDER BY node_key`;
-const SMALLEST_GREY_SQL = `SELECT node_key FROM ${GREY_TABLE} ORDER BY node_key LIMIT $1`;
-const ALL_GREY_SQL = `SELECT node_key FROM ${GREY_TABLE} ORDER BY node_key`;
-const FLAGS_SQL = `SELECT k.node_key, EXISTS (SELECT 1 FROM ${GREY_TABLE} g WHERE g.node_key = k.node_key) AS grey,
-           EXISTS (SELECT 1 FROM ${MARKS_TABLE} m WHERE m.node_key = k.node_key) AS marked
-         FROM unnest($1::bytea[]) AS k (node_key)`;
-const CHILDREN_SQL = `SELECT node_key, children FROM ${NODES_TABLE} WHERE node_key = ANY($1::bytea[])`;
-const MARKED = `EXISTS (SELECT 1 FROM ${MARKS_TABLE} m WHERE m.node_key = n.node_key) AS marked`;
-const SCAN_SQL = `SELECT n.node_key, ${MARKED} FROM ${NODES_TABLE} n ORDER BY n.node_key LIMIT $1`;
-const SCAN_AFTER_SQL =
-  `SELECT n.node_key, ${MARKED} FROM ${NODES_TABLE} n WHERE n.node_key > $1 ORDER BY n.node_key LIMIT $2`;
-const CLEAR_GREY_SQL = `DELETE FROM ${GREY_TABLE}`;
-const DELETE_GREY_SQL = `DELETE FROM ${GREY_TABLE} WHERE node_key = ANY($1::bytea[])`;
-const INSERT_GREY_SQL = `INSERT INTO ${GREY_TABLE} (node_key) SELECT unnest($1::bytea[])`;
-const CLEAR_MARKS_SQL = `DELETE FROM ${MARKS_TABLE}`;
-const INSERT_MARKS_SQL = `INSERT INTO ${MARKS_TABLE} (node_key) SELECT unnest($1::bytea[])`;
-const DELETE_NODES_SQL = `DELETE FROM ${NODES_TABLE} WHERE node_key = ANY($1::bytea[])`;
-const UPDATE_SWEEP_SQL = `UPDATE ${SWEEP_TABLE} SET cycle = $1, phase = $2, sweep_after = $3 WHERE id = 1`;
 
 const bytesOf = (value: unknown, what: string): Uint8Array => {
   if (!(value instanceof Uint8Array)) throw new TypeError(`${what} is not bytes`);
@@ -321,114 +274,12 @@ export async function insertEvents(
   ]);
 }
 
-/** The sweep's row, or `undefined` when the table holds none. [LG-14] */
-export async function readSweepRow(read: Pick<ReadHandle, "query">): Promise<SweepState | undefined> {
-  const [row] = await read.query(SWEEP_ROW_SQL);
-  if (row === undefined) return undefined;
-  return {
-    cycle: BigInt(row.cycle as bigint | number | string),
-    phase: row.phase as SweepPhase,
-    sweepAfter: row.sweep_after === null ? null : bytesOf(row.sweep_after, `${SWEEP_TABLE}.sweep_after`),
-  };
-}
-
-const keysOf = (rows: Record<string, unknown>[], table: string): Uint8Array[] =>
-  rows.map((row) => bytesOf(row.node_key, `${table}.node_key`));
-
-/** The keys of `root_counts` (each count positive), in byte order. */
-export async function rootKeys(read: Pick<ReadHandle, "query">): Promise<Uint8Array[]> {
-  return keysOf(await read.query(ROOT_KEYS_SQL), ROOT_COUNTS_TABLE);
-}
-
-/** The `limit` smallest keys of `grey`, in byte order. */
-export async function smallestGreyKeys(read: Pick<ReadHandle, "query">, limit: number): Promise<Uint8Array[]> {
-  return keysOf(await read.query(SMALLEST_GREY_SQL, [limit]), GREY_TABLE);
-}
-
-/** Every key of `grey`, in byte order. */
-export async function allGreyKeys(read: Pick<ReadHandle, "query">): Promise<Uint8Array[]> {
-  return keysOf(await read.query(ALL_GREY_SQL), GREY_TABLE);
-}
-
-/** Each of `keys` with whether it is in `grey` and whether it is in `marks`, in one statement. */
-export async function keyFlags(
-  read: Pick<ReadHandle, "query">,
-  keys: readonly Uint8Array[],
-): Promise<{ readonly key: Uint8Array; readonly grey: boolean; readonly marked: boolean }[]> {
-  const rows = await read.query(FLAGS_SQL, [[...keys]]);
-  return rows.map((row) => ({
-    key: bytesOf(row.node_key, "a key"),
-    grey: row.grey === true,
-    marked: row.marked === true,
-  }));
-}
-
-/** The child lists of those of `keys` that `nodes` holds. */
-export async function nodeChildren(
-  read: Pick<ReadHandle, "query">,
-  keys: readonly Uint8Array[],
-): Promise<{ readonly key: Uint8Array; readonly children: Uint8Array }[]> {
-  const rows = await read.query(CHILDREN_SQL, [[...keys]]);
-  return rows.map((row) => ({
-    key: bytesOf(row.node_key, `${NODES_TABLE}.node_key`),
-    children: bytesOf(row.children, `${NODES_TABLE}.children`),
-  }));
-}
-
-/**
- * The keys of `nodes` after `after` (all of them for null), in byte order, at most `limit`, each with whether it is in
- * `marks`, in one statement.
- */
-export async function scanNodes(
-  read: Pick<ReadHandle, "query">,
-  after: Uint8Array | null,
-  limit: number,
-): Promise<{ readonly key: Uint8Array; readonly marked: boolean }[]> {
-  const rows =
-    after === null ? await read.query(SCAN_SQL, [limit]) : await read.query(SCAN_AFTER_SQL, [after, limit]);
-  return rows.map((row) => ({ key: bytesOf(row.node_key, `${NODES_TABLE}.node_key`), marked: row.marked === true }));
-}
-
-/** Empties `grey`. */
-export async function clearGrey(w: Pick<BlockWriteHandle, "execute">): Promise<void> {
-  await w.execute(CLEAR_GREY_SQL);
-}
-
-/** Deletes `keys` from `grey`. */
-export async function deleteGrey(w: Pick<BlockWriteHandle, "execute">, keys: readonly Uint8Array[]): Promise<void> {
-  await w.execute(DELETE_GREY_SQL, [[...keys]]);
-}
-
-/** Inserts `keys` into `grey`. */
-export async function insertGrey(w: Pick<BlockWriteHandle, "execute">, keys: readonly Uint8Array[]): Promise<void> {
-  await w.execute(INSERT_GREY_SQL, [[...keys]]);
-}
-
-/** Empties `marks`. */
-export async function clearMarks(w: Pick<BlockWriteHandle, "execute">): Promise<void> {
-  await w.execute(CLEAR_MARKS_SQL);
-}
-
-/** Inserts `keys` into `marks`. */
-export async function insertMarks(w: Pick<BlockWriteHandle, "execute">, keys: readonly Uint8Array[]): Promise<void> {
-  await w.execute(INSERT_MARKS_SQL, [[...keys]]);
-}
-
-/** Deletes the nodes of `keys` from `nodes`; resolves with the rows deleted. */
-export async function deleteNodes(w: Pick<BlockWriteHandle, "execute">, keys: readonly Uint8Array[]): Promise<number> {
-  return w.execute(DELETE_NODES_SQL, [[...keys]]);
-}
-
-/** Sets the sweep's row to `state`. */
-export async function updateSweepRow(w: Pick<BlockWriteHandle, "execute">, state: SweepState): Promise<void> {
-  await w.execute(UPDATE_SWEEP_SQL, [state.cycle, state.phase, state.sweepAfter]);
-}
-
 /**
  * Reclamation's reads, of the tables as committed at h − 1, and its writes (`./refcount.ts`). Each is one statement
  * over a key list, which the caller sends in chunks. [LG-14]
  */
 const STORED_KEYS_SQL = `SELECT node_key FROM ${NODES_TABLE} WHERE node_key = ANY($1::bytea[])`;
+const CHILDREN_SQL = `SELECT node_key, children FROM ${NODES_TABLE} WHERE node_key = ANY($1::bytea[])`;
 /** The given nodes stored with another child list, with the stored one: the database compares the bytes. */
 const CHANGED_SQL = `SELECT b.node_key, n.children FROM unnest($1::bytea[], $2::bytea[]) AS b (node_key, children)
   JOIN ${NODES_TABLE} n USING (node_key) WHERE n.children IS DISTINCT FROM b.children`;
@@ -445,10 +296,14 @@ const REF_COUNTS_SQL = `WITH d AS (SELECT * FROM unnest($1::bytea[], $2::integer
   gone AS (DELETE FROM ${REF_COUNTS_TABLE} r USING merged m WHERE r.node_key = m.node_key AND m.count = 0)
   INSERT INTO ${REF_COUNTS_TABLE} (node_key, count) SELECT node_key, count FROM merged WHERE count <> 0
   ON CONFLICT (node_key) DO UPDATE SET count = EXCLUDED.count`;
+const DELETE_NODES_SQL = `DELETE FROM ${NODES_TABLE} WHERE node_key = ANY($1::bytea[])`;
 const DELETE_UNREFERENCED_SQL = `DELETE FROM ${UNREFERENCED_TABLE} WHERE node_key = ANY($1::bytea[])`;
 /** A key already queued is not inserted again, and not counted. */
 const INSERT_UNREFERENCED_SQL =
   `INSERT INTO ${UNREFERENCED_TABLE} (node_key) SELECT unnest($1::bytea[]) ON CONFLICT (node_key) DO NOTHING`;
+
+const keysOf = (rows: Record<string, unknown>[], table: string): Uint8Array[] =>
+  rows.map((row) => bytesOf(row.node_key, `${table}.node_key`));
 
 /** Those of `keys` that `nodes` holds. */
 export async function storedKeys(read: Pick<ReadHandle, "query">, keys: readonly Uint8Array[]): Promise<Uint8Array[]> {
@@ -461,6 +316,18 @@ export async function changedNodes(
   nodes: readonly { readonly key: Uint8Array; readonly children: Uint8Array }[],
 ): Promise<{ readonly key: Uint8Array; readonly children: Uint8Array }[]> {
   const rows = await read.query(CHANGED_SQL, [nodes.map((n) => n.key), nodes.map((n) => n.children)]);
+  return rows.map((row) => ({
+    key: bytesOf(row.node_key, `${NODES_TABLE}.node_key`),
+    children: bytesOf(row.children, `${NODES_TABLE}.children`),
+  }));
+}
+
+/** The child lists of those of `keys` that `nodes` holds. */
+export async function nodeChildren(
+  read: Pick<ReadHandle, "query">,
+  keys: readonly Uint8Array[],
+): Promise<{ readonly key: Uint8Array; readonly children: Uint8Array }[]> {
+  const rows = await read.query(CHILDREN_SQL, [[...keys]]);
   return rows.map((row) => ({
     key: bytesOf(row.node_key, `${NODES_TABLE}.node_key`),
     children: bytesOf(row.children, `${NODES_TABLE}.children`),
@@ -495,6 +362,11 @@ export async function addRefCounts(
   deltas: readonly { readonly key: Uint8Array; readonly delta: number }[],
 ): Promise<number> {
   return w.execute(REF_COUNTS_SQL, [deltas.map((d) => d.key), deltas.map((d) => d.delta)]);
+}
+
+/** Deletes the nodes of `keys` from `nodes`; resolves with the rows deleted. */
+export async function deleteNodes(w: Pick<BlockWriteHandle, "execute">, keys: readonly Uint8Array[]): Promise<number> {
+  return w.execute(DELETE_NODES_SQL, [[...keys]]);
 }
 
 /** Deletes `keys` from `unreferenced`; resolves with the rows deleted. */

@@ -11,6 +11,7 @@ import { NETWORK_ID, RAW, zswapOutputTransaction } from "../ledger/adapter-fixtu
 import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../runner/process-backends.js";
 import { nodesOfTagged, rebuildTagged } from "../ledger/stored-values.js";
 import { committed, ingest, PATIENCE_MS, until } from "./ingest-harness.js";
+import { seenTables, sweepTables, sweepWatcher } from "./ledger-graph-tapes.js";
 import { cappedAt, LEDGER_CORE, recordingLoads, restartAt, type SeenLoad } from "./ledger-restart.js";
 import {
   a100Problems,
@@ -23,7 +24,6 @@ import {
   retentionWatcher,
 } from "./ledger-storage-checks.js";
 import { type LedgerScenario, ledgerScenario, type LedgerTx, RUNTIME_2_1 } from "./ledger-tapes.js";
-import { seenTables, sweepTables, sweepWatcher } from "./sweep-tapes.js";
 
 /**
  * The committed negative controls of the ledger storage tests. Each is the real `core-ledger-state` with one rule

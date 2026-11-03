@@ -5,9 +5,9 @@ import { startLedgerWorker } from "../../src/ledger/worker/host.js";
 import { REQUEUE, rootOf, stateNodes, TO_EMBEDDED, TO_REF } from "../ledger/fixtures/sweep-fixture.js";
 import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../runner/process-backends.js";
 import { ingest, PATIENCE_MS } from "./ingest-harness.js";
+import { modelOfBatches, modelProblems, SWEEP_LOADER, sweepCore, sweepTape, type TableSnapshot } from "./ledger-graph-tapes.js";
 import { fixtureReach, type Reach, referencesOf } from "./refcount-checks.js";
 import { runDag, runProblems } from "./refcount-process.js";
-import { modelOfBatches, modelProblems, SWEEP_LOADER, sweepCore, sweepTape, type TableSnapshot } from "./sweep-tapes.js";
 
 /**
  * `sweep: off` from {@link OFF} to {@link ON} − 1 and on again from {@link ON}, through the real process under the

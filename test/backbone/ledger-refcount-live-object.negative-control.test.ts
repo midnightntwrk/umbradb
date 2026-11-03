@@ -2,8 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PROCESS_BACKENDS } from "../runner/process-backends.js";
 import { refusalHalt } from "./eviction-restart.js";
 import { PATIENCE_MS } from "./ingest-harness.js";
+import type { TableSnapshot } from "./ledger-graph-tapes.js";
 import { HELD, LIVE_AT, runLiveObject } from "./refcount-live-object.js";
-import type { TableSnapshot } from "./sweep-tapes.js";
 
 /**
  * The committed negative control of a live object holding a deleted row, on PostgreSQL 18 and PGlite 0.5.10: the run of

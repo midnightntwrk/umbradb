@@ -2,9 +2,9 @@ import { describe, expect } from "vitest";
 import type { BlockWriteHandle } from "../../src/db/api.js";
 import { PROCESS_BACKENDS } from "../runner/process-backends.js";
 import { tapeTest } from "../tape/real/real-tapes.js";
+import type { WorkerRecord } from "./ledger-graph-tapes.js";
 import type { StoredCheck } from "./refcount-checks.js";
 import { replayRefcountTape, sampledHeights } from "./refcount-tapes.js";
-import type { WorkerRecord } from "./sweep-tapes.js";
 
 /**
  * R3's committed negative control on a recorded tape (the devnet's, `UMBRADB_TAPES`; skipped by name without it), on

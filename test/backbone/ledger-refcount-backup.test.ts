@@ -9,6 +9,7 @@ import { type RestorableBackup, type RestoreBuild, restoreLedger } from "../back
 import { extendedCases, rootOf, TO_EMBEDDED } from "../ledger/fixtures/sweep-fixture.js";
 import { entryOf } from "../runner/process-build.js";
 import { PATIENCE_MS } from "./ingest-harness.js";
+import { seenTables, sweepCore, sweepTape, sweepWatcher, type TableSnapshot } from "./ledger-graph-tapes.js";
 import { restartAt } from "./ledger-restart.js";
 import { fixtureProblems, referencesOf } from "./refcount-checks.js";
 import {
@@ -20,7 +21,6 @@ import {
   nodeSetOf,
 } from "./refcount-contents.js";
 import { type DagRun, runDag } from "./refcount-process.js";
-import { seenTables, sweepCore, sweepTape, sweepWatcher, type TableSnapshot } from "./sweep-tapes.js";
 
 /**
  * R15: a backup of a database this build wrote, restored and run on, on PostgreSQL 18.6 and PGlite 0.5.10.

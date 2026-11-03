@@ -21,10 +21,10 @@ import { spawnChild } from "../child-processes.js";
 import type { FixtureDag } from "../ledger/fixtures/sweep-fixture.js";
 import { cursorIn, type ProcessDatabase } from "../runner/process-backends.js";
 import { ingest, type Ingest } from "./ingest-harness.js";
+import { recordingWorker, SWEEP_LOADER, sweepCore, sweepTables, sweepTape, type TableSnapshot, type WorkerRecord, workerRecord } from "./ledger-graph-tapes.js";
 import { cappedAt, restartAt } from "./ledger-restart.js";
 import { fixtureProblems, storedProblems } from "./refcount-checks.js";
 import { nodeSet } from "./refcount-model.js";
-import { recordingWorker, SWEEP_LOADER, sweepCore, sweepTables, sweepTape, type TableSnapshot, type WorkerRecord, workerRecord } from "./sweep-tapes.js";
 
 /**
  * Restarts and crashes of the process at named points, for R13 and R14: a run is one or more **segments**, each a
@@ -50,9 +50,9 @@ import { recordingWorker, SWEEP_LOADER, sweepCore, sweepTables, sweepTape, type 
  * a recorded tape — the node set (kept from one full read of `nodes` when the process starts, then from the rows the
  * block wrote or deleted, read back; its row count checked against the table's), `root_counts`, the block's `states`
  * row and the number of them, and `core_digest.tables` (each byte-hashed table's running digest); and, after the heights
- * the job names, `core_ledger_state`'s tables as `./sweep-tapes.ts` reads them and the block's batch (a line of its
- * own, written at `on-compute`), with the contents hash where the job asks it (or why the computation refused it). A
- * line is written synchronously, so a killed segment loses none. [R13, R14, R3]
+ * the job names, `core_ledger_state`'s tables as `./ledger-graph-tapes.ts` reads them and the block's batch (a line of
+ * its own, written at `on-compute`), with the contents hash where the job asks it (or why the computation refused
+ * it). A line is written synchronously, so a killed segment loses none. [R13, R14, R3]
  *
  * **The negative controls' seams.** R13's ({@link SegmentJob.emptiesQueue}): a segment that empties `unreferenced`
  * before its process starts. R14's ({@link SegmentJob.control}): a build whose `ref_counts` and `unreferenced`

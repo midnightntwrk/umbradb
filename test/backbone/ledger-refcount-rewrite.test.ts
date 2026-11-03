@@ -3,10 +3,10 @@ import { extendedCases, REQUEUE, rootOf, TO_EMBEDDED, TO_REF } from "../ledger/f
 import { COUNTERS, countersMemory } from "../ledger/fixtures/sweep-test-loader.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
 import { PATIENCE_MS } from "./ingest-harness.js";
+import type { TableSnapshot } from "./ledger-graph-tapes.js";
 import { closureProblems, fixtureProblems } from "./refcount-checks.js";
 import { runDag, runProblems } from "./refcount-process.js";
 import { joined, readingLoads, rowProblems } from "./refcount-rewrite.js";
-import type { TableSnapshot } from "./sweep-tapes.js";
 
 /**
  * R27: a stored node written again in its other form, through the real process on PostgreSQL 18 and PGlite 0.5.10, on

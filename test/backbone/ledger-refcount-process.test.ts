@@ -2,10 +2,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AGAIN, CHANGE, extendedCases, LAST, REQUEUE, REVERT, stateNodes, TO_EMBEDDED, TO_REF } from "../ledger/fixtures/sweep-fixture.js";
 import { PROCESS_BACKENDS } from "../runner/process-backends.js";
 import { PATIENCE_MS } from "./ingest-harness.js";
+import { modelOfBatches, modelProblems, type TableSnapshot } from "./ledger-graph-tapes.js";
 import { heldNodeProblems } from "./ledger-storage-checks.js";
 import type { RefcountModelStep } from "./refcount-model.js";
 import { type DagRun, runDag, runProblems } from "./refcount-process.js";
-import { modelOfBatches, modelProblems, type TableSnapshot } from "./sweep-tapes.js";
 
 /**
  * `core-ledger-state`'s reclamation by reference counting through the real process, on PostgreSQL 18 and PGlite

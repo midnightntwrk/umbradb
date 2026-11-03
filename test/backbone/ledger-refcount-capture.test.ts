@@ -6,9 +6,9 @@ import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import { BACKUP_BACKENDS, type BackupDatabase } from "../backup/backup-fixtures.js";
 import { LAST, TO_EMBEDDED, TO_REF } from "../ledger/fixtures/sweep-fixture.js";
 import { PATIENCE_MS } from "./ingest-harness.js";
+import type { TableSnapshot } from "./ledger-graph-tapes.js";
 import { buildContentsHash, bytesContentsHash, CONTENT_DEFINED_TABLES, dagOptedOut } from "./refcount-contents.js";
 import { type DagRun, runDag } from "./refcount-process.js";
-import type { TableSnapshot } from "./sweep-tapes.js";
 
 /**
  * R17: `core-ledger-state`'s node tables are content-defined in the running process, on PostgreSQL 18.6 and PGlite

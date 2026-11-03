@@ -6,9 +6,9 @@ import { AGAIN, CHANGE, extendedCases, LAST, LEAVES, REQUEUE, REVERT, rootOf, st
 import { COUNTERS, countersMemory } from "../ledger/fixtures/sweep-test-loader.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
 import { PATIENCE_MS } from "./ingest-harness.js";
+import { modelOfBatches, modelProblems, type TableSnapshot } from "./ledger-graph-tapes.js";
 import { fixtureProblems, fixtureReach, type Reach, reachIn, referencesOf } from "./refcount-checks.js";
 import { type DagRun, runDag, runProblems } from "./refcount-process.js";
-import { modelOfBatches, modelProblems, type TableSnapshot } from "./sweep-tapes.js";
 
 /**
  * The reclamation step's rules seen block by block through the real process, on PostgreSQL 18 and PGlite 0.5.10, on

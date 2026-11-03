@@ -4,12 +4,12 @@ import type { AppliedState, ApplyBlock, BlockId } from "../../src/ledger/worker/
 import { type LedgerHost, startLedgerWorker } from "../../src/ledger/worker/host.js";
 import { callTransaction, cellValue, contractFixture, hex, NETWORK_ID, RAW, T0 } from "./adapter-fixtures.js";
 
-// The ledger worker's side of the sweep, in a real worker thread over a map of the nodes written so far. The thread has
-// its own instance of the v9 package, which nothing of this thread's (the transactions built here, their builders'
-// objects) can hold. Checked:
-// - the nodes the sweep deletes are evicted from the package, so a node needed again is flushed again;
+// The ledger worker's eviction, in a real worker thread over a map of the nodes written so far. The thread has its own
+// instance of the v9 package, which nothing of this thread's (the transactions built here, their builders' objects) can
+// hold. Checked:
+// - the nodes reclamation deletes are evicted from the package, so a node needed again is flushed again;
 // - a kept parse's native objects are freed when the parse is dropped, and freed at once when a kept transaction holds
-//   a node the sweep deletes (the eviction is then tried again);
+//   a node reclamation deletes (the eviction is then tried again);
 // - evicting a node of a state the engine holds is refused.
 //
 // The test package's loader records what the package was asked. [LG-14; design §5.4]
@@ -56,7 +56,7 @@ interface Probe {
 let host: LedgerHost | undefined;
 afterEach(() => host?.close());
 
-describe("the ledger worker's side of the sweep (task 12.5; LG-14)", () => {
+describe("the ledger worker's eviction (task 12.5; LG-14)", () => {
   it("evicts deleted nodes, so a node needed again is flushed again; frees a dropped parse's natives; frees kept parses when one holds a deleted node", { timeout: LONG }, async () => {
     host = startLedgerWorker({ loader: LOADER, loaderData: { recordEvictions: true } });
     const worker = host;
@@ -90,7 +90,7 @@ describe("the ledger worker's side of the sweep (task 12.5; LG-14)", () => {
     // Each dropped parse's native objects were freed.
     expect(((await worker.probe()) as Probe).forgotten).toEqual([1, 1, 1]);
 
-    // Block 4 sets X again: its transaction, parsed and kept, holds X's value while the sweep deletes X's node. The
+    // Block 4 sets X again: its transaction, parsed and kept, holds X's value while reclamation deletes X's node. The
     // first eviction is refused; the kept parses' natives are freed; the second takes.
     await worker.parse("v9", at(4n), [setCell(contract, 7, 4n)]);
     expect(await worker.evict([cellX.key])).toBe(1);

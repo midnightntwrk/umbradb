@@ -16,10 +16,10 @@ import { COUNTERS, countersMemory, type Keeping } from "../ledger/fixtures/sweep
 import type { ProcessDatabase } from "../runner/process-backends.js";
 import { contentDefinedLedgerState } from "./content-defined-build.js";
 import { bigintText, committed, ingest, PATIENCE_MS, until } from "./ingest-harness.js";
+import type { TableSnapshot } from "./ledger-graph-tapes.js";
 import { cappedAt, LEDGER_CORE, recordingLoads, restartAt, type SeenLoad } from "./ledger-restart.js";
 import { nodeSet } from "./refcount-model.js";
 import { type DagRun, runDag } from "./refcount-process.js";
-import type { TableSnapshot } from "./sweep-tapes.js";
 
 /**
  * Runs of one chain with different worker histories, and what they hold after every block, for the determinism tests
@@ -234,7 +234,7 @@ export interface DagHistory {
   readonly runs: readonly DagRun[];
   /** What the database held after every height, contents hashes (both) and every row included. */
   readonly facets: Map<bigint, Facets>;
-  /** `core_ledger_state`'s tables after every height, and every block's batch (`./sweep-tapes.ts`). */
+  /** `core_ledger_state`'s tables after every height, and every block's batch (`./ledger-graph-tapes.ts`). */
   readonly tables: Map<bigint, TableSnapshot>;
   readonly batches: Map<bigint, NodeBatch>;
   /** The test package's counters over every thread of every segment, by {@link COUNTERS}' names. */

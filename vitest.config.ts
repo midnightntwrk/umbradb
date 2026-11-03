@@ -44,10 +44,10 @@ const CORE_ARCH = {
   // §13's default for `src/**`, added with the backbone parts' directory (tasks 7.1 and 5.2: `core-digest`,
   // `core-block-commit`'s cursor table).
   "**/src/backbone/**": { lines: 90, branches: 85, perFile: true },
-  // §13's sweep floor (`src/ledger/sweep*` in §13; as built `src/backbone/core-ledger-state/sweep.ts`, task 12.5),
-  // added by task 17.5b (decision record Q158 A): its tables' reads and writes tested on their own
-  // (`test/backbone/ledger-sweep-tables.test.ts`), the three branches no step could reach removed.
-  "**/src/backbone/core-ledger-state/sweep.ts": { lines: 95, branches: 90, perFile: true },
+  // §13's 95/90 floor for the ledger state's reclamation: first the sweep's (`src/ledger/sweep*` in §13, added by
+  // task 17.5b, decision record Q158 A), given by the `ledger-refcount` change, which removed the sweep, to the step
+  // that replaced it (its owner decision Q-1 A).
+  "**/src/backbone/core-ledger-state/refcount.ts": { lines: 95, branches: 90, perFile: true },
   // §13's default for `src/**`, added with the node client's directory (task 10.1).
   "**/src/node/**": { lines: 90, branches: 85, perFile: true },
   // §13's default for `src/**`, added with the admin endpoints' directory (task 8.1).

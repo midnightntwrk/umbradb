@@ -6,8 +6,6 @@ import { type FixtureDag, LAST } from "../ledger/fixtures/sweep-fixture.js";
 import type { FixtureData } from "../ledger/fixtures/sweep-test-loader.js";
 import type { ProcessDatabase } from "../runner/process-backends.js";
 import { committed, type Ingest, ingest, PATIENCE_MS, until } from "./ingest-harness.js";
-import { restartAt } from "./ledger-restart.js";
-import { fixtureProblems } from "./refcount-checks.js";
 import {
   recordingWorker,
   seenTables,
@@ -18,13 +16,16 @@ import {
   sweepWatcher,
   type TableSnapshot,
   workerRecord,
-} from "./sweep-tapes.js";
+} from "./ledger-graph-tapes.js";
+import { restartAt } from "./ledger-restart.js";
+import { fixtureProblems } from "./refcount-checks.js";
 
 /**
  * A run of the DAG fixture through the real process, shared by the reclamation tests on it (A105 and R12's controls,
- * R3, R11, A160): the tape of `./sweep-tapes.ts`, its test package told what `FixtureData` asks, `core-ledger-state`
- * with a negative control's rules, the watcher recording the tables at every cursor and every block's batch, and every
- * error `core-ledger-state`'s callbacks threw. Imports nothing of Vitest. [A105, R3, R11, LG-14]
+ * R3, R11, A160): the tape of `./ledger-graph-tapes.ts`, its test package told what `FixtureData` asks,
+ * `core-ledger-state` with a negative control's rules, the watcher recording the tables at every cursor and every
+ * block's batch, and every error `core-ledger-state`'s callbacks threw. Imports nothing of Vitest.
+ * [A105, R3, R11, LG-14]
  */
 
 /** What a run is given. */

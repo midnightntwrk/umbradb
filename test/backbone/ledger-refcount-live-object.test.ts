@@ -3,12 +3,12 @@ import { rootOf } from "../ledger/fixtures/sweep-fixture.js";
 import { PROCESS_BACKENDS } from "../runner/process-backends.js";
 import { tableDifferences } from "./eviction-restart.js";
 import { PATIENCE_MS } from "./ingest-harness.js";
+import type { TableSnapshot } from "./ledger-graph-tapes.js";
 import { heldNodeProblems } from "./ledger-storage-checks.js";
 import { referencesOf } from "./refcount-checks.js";
 import { HELD, LIVE_AT, PARENT, runLiveObject } from "./refcount-live-object.js";
 import { nodeSet } from "./refcount-model.js";
 import { runProblems } from "./refcount-process.js";
-import type { TableSnapshot } from "./sweep-tapes.js";
 
 /**
  * `[FAULT]` A live object holding a row that the stored child lists no longer reach, on PostgreSQL 18 and PGlite

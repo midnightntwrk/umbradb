@@ -18,6 +18,7 @@ import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../
 import { core, entryOf } from "../runner/process-build.js";
 import { committed, genesisOf, halted, ingest, PATIENCE_MS, watched, watcher } from "./ingest-harness.js";
 import { a107Problems } from "./ledger-checks.js";
+import { seenTables, sweepTables, sweepWatcher, type TableSnapshot } from "./ledger-graph-tapes.js";
 import { cappedAt, LEDGER_CORE, recordingLoads, restartAt, type SeenLoad } from "./ledger-restart.js";
 import type { RestartEvent, RestartJob } from "./ledger-restart.worker.js";
 import {
@@ -34,7 +35,6 @@ import {
 } from "./ledger-storage-checks.js";
 import { type LedgerScenario, ledgerScenario, type LedgerTx, RUNTIME_2_1 } from "./ledger-tapes.js";
 import { closureProblems, reachIn, retainedProblems } from "./refcount-checks.js";
-import { seenTables, sweepTables, sweepWatcher, type TableSnapshot } from "./sweep-tapes.js";
 
 /**
  * `core-ledger-state`'s stored state through the real process, on PostgreSQL 18 and PGlite 0.5.10. The setup:

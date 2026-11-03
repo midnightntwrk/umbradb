@@ -22,7 +22,8 @@ import { type LedgerScenario, ledgerScenario } from "./ledger-tapes.js";
  * PGlite 0.5.10. [R16, LG-11, DB-9]
  *
  * - A new database gets `core_ledger_state.ref_counts` and `core_ledger_state.unreferenced` from `core-ledger-state`'s
- *   `001`, and `core_chain.identity` from `core-chain`'s `001`: each part records one migration, `001`.
+ *   `001`, and none of `sweep`, `grey`, `marks`, and `core_chain.identity` from `core-chain`'s `001`: each part records
+ *   one migration, `001`.
  * - A database whose recorded migrations are an earlier build's (a part's `001` and `002`, `./earlier-build.ts`)
  *   refuses startup with `migration-checksum-changed`, naming the part, `001` and both checksums, and runs no migration:
  *   on a database holding only those records every part's migrations are pending, and none runs; on a database this
@@ -81,7 +82,8 @@ describe.each(PROCESS_BACKENDS)("R16: one migration per part, through the proces
   afterAll(() => backend.stop(), 60_000);
 
   it(
-    "R16: a new database gets ref_counts and unreferenced from core-ledger-state's 001, and core_chain.identity from core-chain's 001",
+    "R16: a new database gets ref_counts and unreferenced from core-ledger-state's 001, and none of sweep, grey, marks, " +
+      "and core_chain.identity from core-chain's 001",
     async () => {
       const ledger = await scenario();
       const db = await backend.database();
@@ -97,6 +99,12 @@ describe.each(PROCESS_BACKENDS)("R16: one migration per part, through the proces
           "to_regclass('core_chain.identity') IS NOT NULL AS identity, to_regclass('core_chain.config') IS NOT NULL AS config",
       );
       expect(present).toEqual({ ref_counts: true, unreferenced: true, identity: true, config: true });
+      // None of the mark-and-sweep's tables: no relation of `core_ledger_state` (table, view or other) by their names.
+      const swept = await db.query(
+        "SELECT c.relname AS name FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace " +
+          "WHERE n.nspname = 'core_ledger_state' AND c.relname IN ('sweep', 'grey', 'marks') ORDER BY c.relname",
+      );
+      expect(swept.map((row) => row.name)).toEqual([]);
       // As design §2.1 gives them: a 32-byte key; a count above 0. [LG-11]
       const columns = await db.query(
         "SELECT table_name || '.' || column_name || ' ' || data_type || ' ' || is_nullable AS c FROM information_schema.columns " +

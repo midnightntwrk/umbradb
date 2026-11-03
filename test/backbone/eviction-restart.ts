@@ -2,9 +2,9 @@ import { CORE_LEDGER_STATE_ID, type CoreLedgerStateOptions } from "../../src/bac
 import type { NodeBatch } from "../../src/ledger/types.js";
 import { COUNTERS, countersMemory, type RefusalData } from "../ledger/fixtures/sweep-test-loader.js";
 import type { ProcessDatabase } from "../runner/process-backends.js";
+import { modelOfFixture, type TableSnapshot } from "./ledger-graph-tapes.js";
 import { nodeSet } from "./refcount-model.js";
 import { runDag } from "./refcount-process.js";
-import { modelOfFixture, type TableSnapshot } from "./sweep-tapes.js";
 
 /**
  * The eviction-restart runs, shared by `ledger-eviction-restart.test.ts` and its negative controls. Imports nothing of

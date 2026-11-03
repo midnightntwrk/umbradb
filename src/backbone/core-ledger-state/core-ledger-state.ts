@@ -613,7 +613,7 @@ export function coreLedgerState(options: CoreLedgerStateOptions = {}): DefinedMo
         lifetimes: ["block", "table", "process"],
         table: {
           schema: "core_ledger_state",
-          tables: ["nodes", "root_counts", "states", "ref_counts", "unreferenced", "sweep", "grey", "marks"],
+          tables: ["nodes", "root_counts", "states", "ref_counts", "unreferenced"],
           kind: "mutable",
           // The node tables take part in the contents hash by the nodes they hold, and no block captures them; the
           // counts and the queue are checked against the rows. [LG-11, DT-3, DT-4]

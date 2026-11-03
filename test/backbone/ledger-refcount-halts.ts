@@ -8,9 +8,9 @@ import { UmbraError } from "../../src/db/errors.js";
 import { extendedCases, TO_REF } from "../ledger/fixtures/sweep-fixture.js";
 import { UNKNOWN_KEY } from "../ledger/fixtures/sweep-test-loader.js";
 import type { ProcessDatabase } from "../runner/process-backends.js";
+import { modelOfBatches, modelProblems, sweepTables, type TableSnapshot } from "./ledger-graph-tapes.js";
 import type { DagRun, DagRunOptions } from "./refcount-process.js";
 import { runDag, runProblems } from "./refcount-process.js";
-import { modelOfBatches, modelProblems, sweepTables, type TableSnapshot } from "./sweep-tapes.js";
 
 /**
  * R11's faults on the extended DAG fixture, shared by `ledger-refcount-halts.test.ts` and its negative controls. Each

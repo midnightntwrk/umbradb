@@ -2,8 +2,8 @@ import type { NodeBatch } from "../../src/ledger/types.js";
 import type { LedgerHost } from "../../src/ledger/worker/host.js";
 import { NODES_SQL } from "../../src/ledger/worker/node-bridge.js";
 import type { FixtureNode } from "../ledger/fixtures/sweep-fixture.js";
+import type { TableSnapshot } from "./ledger-graph-tapes.js";
 import type { DagRun } from "./refcount-process.js";
-import type { TableSnapshot } from "./sweep-tapes.js";
 
 /**
  * What R27's tests read of a rewrite on the DAG fixture, shared by `ledger-refcount-rewrite.test.ts` and its negative

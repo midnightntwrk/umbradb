@@ -3,9 +3,9 @@ import type { BlockWriteHandle } from "../../src/db/api.js";
 import { extendedCases, TO_EMBEDDED, TO_REF } from "../ledger/fixtures/sweep-fixture.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
 import { PATIENCE_MS } from "./ingest-harness.js";
+import type { TableSnapshot } from "./ledger-graph-tapes.js";
 import { type DagRun, runDag, runProblems } from "./refcount-process.js";
 import { rowProblems } from "./refcount-rewrite.js";
-import type { TableSnapshot } from "./sweep-tapes.js";
 
 /**
  * R27's committed negative controls, on PostgreSQL 18 and PGlite 0.5.10: each runs the extended DAG fixture through the
