@@ -498,8 +498,29 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
       turn, `no-key-check`, the declaration removed): each fails its own case only. Codex: `4.5-green-1`, `-2`,
       `4.5-controls`, `4.5-touched-1` (16 files with the tapes, every user of the changed helpers, 121 passed). The
       whole suite with the tapes (`4.5-full`): 407 files, 6,442 tests passed, 12 skipped, no failure; §0 had none.
-- [ ] 4.6 Determinism across worker histories.
+- [x] 4.6 Determinism across worker histories.
       **Acceptance:** R28.
+      **Done (2026-11-03, this commit):** `test/backbone/refcount-histories.ts`: a run of one chain in segments, each a
+      new process with a new ledger worker thread (the first from genesis, each later one from the cursor the one
+      before stopped at, so it reads back only the database), a user module recording at every cursor the node set,
+      the `nodes` rows (allowed to differ), `root_counts`, the block's rows of `states`, `segment_results` and
+      `events`, `core_digest.tables` and the contents hash, the last height read once the process stopped; `runDag`
+      gains a `user` option (nothing else of it changes). The DAG case (`ledger-refcount-determinism.test.ts`, both
+      backends): `keeps-old-copy`, a run that never restarts against one restarted before TO_REF, TO_EMBEDDED and
+      REQUEUE; their batches at those blocks and their `nodes` rows (TO_REF to 100) differ, and after every block the
+      node set, `root_counts`, every row of the three tables, `core_digest.tables` and the contents hash are equal, R3
+      passing on both. The tapes (`ledger-refcount-determinism-devnet.test.ts`, `-preprod-postgres.test.ts`,
+      `-preprod-pglite.test.ts`; both runs side by side, the second started once the first committed a block): 20
+      restart heights drawn from seed 20261103, each restarted segment loading the state at its cursor from the
+      database; devnet with the contents hash after every block, preprod at every 100th height, the restart heights and
+      10,000, the rest after every block (questions file Q-4.6-1, B, needs the owner's review). `[NEG]` committed in
+      `ledger-refcount-determinism.negative-control.test.ts` (`nodes` hashed by its raw rows: the runs' hashes differ
+      from TO_REF); seen failing with the fault put back in the main test (the raw rule as its contents hash: "after
+      33: contents hash differ" to 100, both backends). Codex: `4.6-dag-1`, `4.6-fault-put-back`, `4.6-touched-1`
+      (`runDag`'s users, 8 files, 40 passed), `4.6-4.7-runs-2to5`, `4.6-dag-devnet-2`, `4.6-tapes-3` (the three tape
+      files with `UMBRADB_TAPES`: 4 passed, 1,919 s). Issue recorded: two first startups at once on one PostgreSQL
+      server race on creating its module roles
+      (`docs/issues/00082-concurrent-first-startups-race-on-module-roles.md`, which 4.4 recorded first).
 - [ ] 4.7 A live object holding a deleted row.
       **Acceptance:** R30.
 - [x] 4.8 The conversion.
