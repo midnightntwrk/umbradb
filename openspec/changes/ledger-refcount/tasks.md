@@ -120,7 +120,8 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
       reads this change's `tasks.md` (`changeTasks`, ids prefixed `ledger-refcount `), `code-registry.test.ts` takes a
       second baseline holding this one code, and a new negative control shows the registry failing once 3.8 is ticked
       with the code still pending. R19's first clause demonstrated; `code-registry.test.ts` and its negative controls
-      pass. Task 3.8 registers R11's test and removes the pending entry.
+      pass. Task 3.8 registers R11's test and removes the pending entry. (After 3.8, the owner had the pending path
+      removed, its one use done: `changeTasks` and its control are gone in `382cfb5`; Q-3.1-1.)
 - [x] 3.2 One migration per part (`design.md` §2.4): `core-ledger-state`'s, `core-chain`'s and
       `core-private-source`'s `002` folded into their `001`; `core-ledger-state`'s `001` also creates `ref_counts` and
       `unreferenced`, and keeps the sweep's `sweep`, `grey` and `marks` until 5.1 removes the sweep; `core-arch` design
@@ -667,8 +668,8 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
       `tablesByHeight`, with `TableSnapshot`, the recording worker, the watcher's record and R1's model helpers) moved,
       under the names §11 lists, to `test/backbone/ledger-graph-tapes.ts`, which its 24 importers now read;
       `sweep-tapes.ts` keeps R4's comparison only. `test/ledger/worker-sweep.test.ts` renamed `worker-eviction.test.ts`,
-      its comments and title reworded (R12's parenthesis in `acceptance.md` keeps the old path: questions file Q-5.1-1,
-      A). Owner decision Q-1 A: `refcount.ts` replaces `sweep.ts` as a mutation target (`stryker.conf.json`; its fast
+      its comments and title reworded (R12's parenthesis in `acceptance.md` kept the old path, Q-5.1-1 A; the owner
+      then chose B, and `0e24347` names `worker-eviction.test.ts` there). Owner decision Q-1 A: `refcount.ts` replaces `sweep.ts` as a mutation target (`stryker.conf.json`; its fast
       tests `refcount-step.test.ts` and `refcount-tables.test.ts` in `vitest.mutation.config.ts`) and takes its 95/90
       floor (`vitest.config.ts`), with `core-arch` design §13's floor and mutation rows, `retirement.ts` (targets,
       floors, §13's terms), `retirement.test.ts`'s pending-floor case and the comment of
