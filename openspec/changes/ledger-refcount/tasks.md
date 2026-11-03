@@ -435,8 +435,30 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
       **Acceptance:** R28.
 - [ ] 4.7 A live object holding a deleted row.
       **Acceptance:** R30.
-- [ ] 4.8 The conversion.
+- [x] 4.8 The conversion.
       **Acceptance:** R22.
+      **Done (2026-11-03, this commit):** no `src/` change — the conversion runs through 3.8's step with no rule of its
+      own (design §9.2). `test/backbone/ledger-refcount-conversion.test.ts` (R22, both backends, `UMBRADB_TAPES`;
+      skipped by name without the tape): the devnet tape from genesis to F + 4 (107) through the real process with
+      `core-contract-states`, `retainStates` 0 and then 2, the tables after every height and each block's batch recorded
+      (`sweepWatcher`, `recordingWorker`); F read from `core_block_commit.blocks` (the first `v9` block, 103). R3's
+      (a)–(d) after every block of 100 … 107 through `refcount-checks.ts`'s clauses, `R_{h−1}`, `R_h` and `K_h` from the
+      stored rows and the block's batch, the rows outside `R_{h−1} ∪ R_h` reported (0 at each). Each v8 state (after 0 …
+      102, the tape's state keys distinct): root count 1 after h … b − 1, b = h + 1 + `retainStates`; b's batch −1 and
+      no count after b; what its key reaches through the lists stored after each t of h … b stored, none of its rows
+      after t − 1 gone after t; after b + 1 none of its rows after b stored outside `K_{b+1}` (the state after 102: 46
+      rows, 33 deleted at 104 with `retainStates` 0, at 106 with 2). After 107 the three `core_contract_states` rows
+      below F (11, 16, 23) load: both keys held, rebuilt from the stored nodes, deserialized by the v8 package, the
+      value's root key the stored one. Helper `test/backbone/refcount-conversion.ts` (new; no shared helper changed).
+      Test first: the code under test is 3.8's, so the test passed at its first run; diagnostic faults put in (scratch
+      file, deleted): the cascade stopped after one round (the release clause fails from block 2 on, R3 (c) at each of
+      100 … 107), the window one state late (each release a block late), a contract-state node dropped and a payload
+      byte changed (the row named as not loading). Codex: `4.8-green-1`, `4.8-green-2` (2 passed, 101 s),
+      `4.8-faults-diagnostic`, `4.8-no-tapes` (without `UMBRADB_TAPES`: 2 skipped by name). The whole suite with the
+      tapes (`4.8-full`): 408 files, 6,440 tests passed, 12 skipped, 4 failed — A12 (`test/db/postgres-pool.test.ts`,
+      "expected 8 to be greater than or equal to 10") and L16–L18's controls (`test/library/network.test.ts`, issue
+      00064: "startup completed" not reached), known load-only failures that pass alone (`4.8-full-known-alone`,
+      diagnostic only); §0 had none.
 - [ ] 4.9 The comparison with the sweep.
       **Acceptance:** R4. Its runtime half ("Before the runtime sweep is removed, the same comparison is also made
       against the runtime sweep itself (its own run and database) […] and recorded in `tasks.md`") runs the base
