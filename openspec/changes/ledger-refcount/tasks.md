@@ -29,10 +29,12 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
 
 ## 0. Baseline
 
-- [ ] 0.1 Record the base commit and the state of the tree before any change.
+- [x] 0.1 Record the base commit and the state of the tree before any change.
       **Acceptance:** `npm run typecheck` exit 0 and a full `npx vitest run` on the base, its failures listed, each
       unrelated one filed in `docs/issues/` (or the existing issue named). The list is diagnostic: no later gate passes
       by pointing at it.
+      **Done (2026-11-03):** base `5bcffec`. `npm run typecheck` exit 0; `npx vitest run` with `UMBRADB_TAPES` set: 387
+      files, 6,252 tests passed, 12 skipped, no failure (1,585 s). No known failures: every later full run must pass.
 
 ## 1. Measurements on the recorded tapes (`design.md` §9, §13 phase 0)
 
