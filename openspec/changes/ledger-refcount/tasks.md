@@ -148,13 +148,36 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
       **Acceptance:** given tables at h − 1 and batches from 2.1's generators, the step gives R1's model's new and
       rewritten nodes, counts, queue and deleted set after every block; each check fires on its fault at the step's
       level. R11 and R12 are checked whole in 3.8.
-- [ ] 3.7 The DAG fixture (`test/ledger/fixtures/sweep-fixture.ts`, `sweep-test-loader.ts`) extended as A105 says, and
+- [x] 3.7 The DAG fixture (`test/ledger/fixtures/sweep-fixture.ts`, `sweep-test-loader.ts`) extended as A105 says, and
       with the test packages R28 and R30 need (one that keeps a node's old child list when it creates the node again;
       one whose live state holds a row by reference while the stored parent embeds it). The extension is additive: the
       fixture's existing cases, which the sweep's tests run, are unchanged.
       **Acceptance:** a fixture test shows each new case's batches (a rewrite in each direction, a repeated child, an
       embedded child holding a reference, children shared between versions, the two packages' behaviours); the sweep's
       tests still pass.
+      **Done (2026-11-03, this commit):** the fixture's functions take a DAG name, `"original"` unless given (the DAG
+      the sweep's tests run, unchanged) or `"extended"`, whose roots add, after the original's 24 subtrees: children
+      shared between versions (`shared v`), a child repeated in one child list (`repeat v`), embedded children holding
+      references (`embed v`, one embedded node nested in another), and a stored node written again with its small child
+      in the other form, both ways (`rewrite to-ref` at `TO_REF` 33, `rewrite to-embedded` at `TO_EMBEDDED` 53); and,
+      beyond A105's list so that R12 (b) and (e) have a batch to bite on (questions file Q-3.7-1, A), a node written
+      again unchanged (`again` at `AGAIN` 71) and a child a rewrite stops referencing that a new node references at the
+      next block (`requeued`, at `REQUEUE` 63 and 64). `extendedCases(h)` names each case's nodes, `stateKeys(h, dag)`
+      gives a state's node set, `contentOf` reads a stored node back. The test package takes `FixtureData`
+      (`dag`, `keeping`); with `dag: "extended"` it keeps nodes as `writes-again` (the default: the fixture's child
+      lists, restarted or not), `keeps-old-copy` (R28: a thread that never restarted keeps a rewritten node's old child
+      list; a thread that read the state before from the node store writes the new one) or `holds-by-reference` (R30:
+      writes what `writes-again` writes, but its live state still holds `small to-embedded` by reference after its
+      parent is written embedding it, so it refuses to forget it at 54; a new thread does not); a state it did not make
+      is read lazily from the node store, each row's key checked against its content and the keys reached against the
+      fixture's node set. Test first, `test/ledger/sweep-fixture.test.ts` (Codex `3.7-red`: 7 failing on the missing
+      extension, the original's guard passing): the original DAG's states and its package's batches over 0–100 pinned
+      by digest at `5bcffec`; every extended node checked against `test/ledger/node-format.ts` and `childRefKeys`; each
+      case's batches; the three packages' behaviours, R30's also in the ledger worker (`EvictionRefused` after two
+      tries, a new worker loading the state at 53 from the node store, the same batch, the eviction taken). The sweep's
+      tests pass unchanged on both backends (Codex `3.7-sweep-suites`: `ledger-sweep*`, `ledger-storage*`,
+      `ledger-eviction-restart*`, `worker-sweep`, 10 files, 62 tests). For 3.8: the extended DAG's tape needs
+      `rootOf(h, "extended")` as the node's roots (`sweepTape` gives the original's).
 - [ ] 3.8 **The switch.** `core-ledger-state` computes the counting step in `on-compute`, evicts the deleted rows before
       the block's transaction (with the worker restart of Q144 B), writes it after the node writes in `on-db-write`,
       empties rule 5's deleted set under `sweep: off`, and declares `nodes`, `ref_counts` and `unreferenced`
