@@ -165,9 +165,27 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
       and its negative controls) and the sweep's tests (`ledger-sweep*.test.ts`, the eviction restart, the worker's
       eviction) pass with the replacing write, the tapes included: no sweep test differed. The whole suite with the
       tapes, compared with §0, is in the plan's P3 notes.
-- [ ] 3.4 `src/ledger/node-key.ts`: a node's key from its payload and its children's keys.
+- [x] 3.4 `src/ledger/node-key.ts`: a node's key from its payload and its children's keys.
       **Acceptance:** R29's clause "`src/ledger/node-key.ts` gives, for every node embedded in the rows of the recorded
       tapes, the key the ledger package gives it"; checked against `test/ledger/node-format.ts` too.
+      **Done (2026-11-03, this commit):** `nodeKeys(data, children)` gives a node's key and the key of every node its
+      child list embeds (what 3.5's node set and row check take in one parse), `nodeKey` the key alone; the child list
+      is read by `node-refs.ts`'s one reader, now `readChildList` with a visitor, `childRefKeys` on top of it (same
+      keys, order and refusals; `src/ledger/node-refs.ts` is the one file touched outside the task's). Test first (seen
+      failing: no module). `test/ledger/node-key.test.ts`: properties against `node-format.ts` (seed 20261103), a key
+      written by hand, every SCALE length form, malformed child lists refused; on real genesis states of v8, v9 and
+      v9-rc3 every flushed node's key, and the package's own key for every embedded node — `test/ledger/package-keys.ts`
+      moves each embedded child out under `node-key.ts`'s key and a fresh package instance, reading it from its store,
+      accepts it only if its own hash of it is that key; its controls (a node changed under its key, one wrong key) are
+      refused. The clause on the recorded stagenet 0–10,000, preprod 0–10,000 and devnet v8 → v9 tapes
+      (`test/ledger/node-key-tape-*.test.ts` over `node-key-tapes.ts`): each replayed from genesis on PGlite, every row
+      written and every row stored at the end has `nodeKey`'s key (a row's key hashes its children's keys, so this fixes
+      every embedded node's key), `nodeKeys`' embedded keys are the ones checked, and a fresh instance of the package
+      that wrote them loads and serializes the state of every devnet and preprod height and of every 10th stagenet
+      height and the last, reading and accepting every node embedded in those heights' rows under `nodeKey`'s key
+      (stagenet's sample: Q-3.4-1, B, needs the owner's review). Seen failing with a fault in `node-key.ts` put back: an
+      embedded node hashed without its children's keys, and a wrong `embedded` list with right row keys. Coverage of
+      `node-key.ts` and `node-refs.ts`: 100 %.
 - [ ] 3.5 The content-defined table mechanism (`design.md` §2.5): the declaration of a table item as content-defined,
       refused for user modules; the contents hash's content function (the node set, every row's key checked, the
       checks of `ref_counts` and `unreferenced`, `ledger-refcount-invalid` with reason `tables-inconsistent` and
