@@ -25,7 +25,7 @@ each criterion verifies are in parentheses.
    run passes); their last passing run is recorded in the pull request.
 3. R23–R25 are manual evidence from local runs (`design.md` §12), recorded in the pull request; they are never part of
    CI or of the required-test manifest.
-4. The `core-arch` criteria rewritten in §7 (A55, A57, A104, A105, A134, A160) pass with their new text; every other `core-arch` and `start-umbradb`
+4. The `core-arch` criteria rewritten in §7 (A55, A57, A104, A105, A126, A134, A160) pass with their new text; every other `core-arch` and `start-umbradb`
    criterion passes unchanged.
 5. Every new or changed crash, property or differential test has run at least five times before the change merges.
 6. The conformance gate passes on the pull request's head.
@@ -41,7 +41,8 @@ each criterion verifies are in parentheses.
   different states), a key repeated in one child list, embedded children holding references, nodes written again
   unchanged, nodes rewritten with a small child embedded in one form and referenced in the other (both directions), a
   queued unrooted node rewritten to reference a node the same batch writes new, with no root count rising (the new node
-  is kept that block and queued), a queued key referenced again, `retainStates` 0 and > 0, contract keys persisted and never released, a lowered window
+  is kept that block and queued), a queued unrooted node rewritten to embed a child it referenced (the node deleted,
+  the child kept and queued), a queued key referenced again, `retainStates` 0 and > 0, contract keys persisted and never released, a lowered window
   releasing several states in one block, and `sweep` turned off and on. **Negative control:** the model with rule 4's
   root conditions removed (a released state's rows deleted in the block that releases it) fails the oracle's
   `R_{h−1} ⊆ S_h`. (LG-11, LG-14)
@@ -86,7 +87,8 @@ each criterion verifies are in parentheses.
 - **R9** `[CI]` With the window full, a revision lowering `retainStates` from 5 to 0 at h releases the six states after
   h − 6 … h − 1 at h; at h + 1, in that one block, every row of theirs outside `K_{h+1}` is deleted, and a row of
   theirs that the state after h + 1 holds again stays. (LG-12, LG-14)
-- **R10** `[CI]` With `sweep: off` from h1 to h2 (the development opt-in set) no row is deleted, R3's (a) and (b) pass,
+- **R10** `[CI]` With `sweep: off` from h1 to h2 (the development opt-in set), switched off at h1 while the queue holds
+  a state released at h1 − 1, no row is deleted (that state's rows included), R3's (a) and (b) pass,
   and the queue holds every row with no reference and no root count; the first block with `sweep: on` again deletes the
   queue and its cascade, after which R3's (c) passes; no reset is written at either switch. Without the opt-in,
   `sweep: off` is still refused (`development-opt-in-required`, CF-9). (LG-14, CF-9)
@@ -244,6 +246,11 @@ Each replaces the `core-arch` criterion of the same id; only what is in bold cha
   are not content-defined, its node set, R3's checks** and state roots equal an uninterrupted run's; a package that refuses again on that retry fails the block with
   `callback-error`; on both backends. (LG-14, owner decision Q144)
 
+- **A126** `[CI]` Each restore refusal of BK-3 is triggered and checked before or after loading, as BK-3 orders them,
+  including a changed value in an `INSERT` of a row the contents hash covers **byte by byte** (DT-3) giving
+  `contents-hash-mismatch`, **and a changed byte in a `core_ledger_state.nodes` row giving `ledger-refcount-invalid`; a
+  node respelled with consistent counts and queue passes the contents-hash step**; after every refusal the target is as
+  it was before the restore: unchanged after `restore-target-not-empty`, empty after every other. (BK-3)
 - **A55** `[DIFF]` The same rows give the same contents hash on both backends; changing one byte of one row **of a
   table that is not content-defined** changes it; **changing one byte of a `core_ledger_state.nodes` row makes the
   computation fail with `ledger-refcount-invalid`**. (DT-3)
@@ -270,6 +277,6 @@ Each replaces the `core-arch` criterion of the same id; only what is in bold cha
 | LG-12 (window; unchanged, exercised) | R7, R9 |
 | LG-9 (conversion; unchanged, exercised and measured) | R21, R22 |
 | CF-9 (`sweep: off` gate; unchanged) | R10 |
-| DB-9, BK-3 (refusals of an earlier build's database) | R16 |
+| DB-9, BK-3 (refusals of an earlier build's database; the restore's contents-hash step, modified) | R15, R16, A126 |
 | DT-3, DT-4 (content-defined tables; modified) | R15, R17, R28, R29, A55, A57 |
 | DT-5 (no digest rows for content-defined tables; unchanged rule) | R17, R25 |

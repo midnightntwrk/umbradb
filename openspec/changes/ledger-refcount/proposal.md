@@ -56,7 +56,8 @@ Q-A … Q-F; organizer `spec/00034-ledger-node-refcount.md` §3, O-1 … O-8; re
    keys of its rows and of every node embedded in them) and checks `ref_counts` and `unreferenced` against the rows;
    none of the three is captured or digested per block, since what they hold is fixed by `root_counts`, which is. Two
    indexers that processed the same chain then have equal contents hashes and digests whatever their restart
-   histories (R28, R29).
+   histories (R28, R29). BK-3's restore check follows (modified): an invalid node table refuses with
+   `ledger-refcount-invalid`.
 3. **Reclamation by reference counting** (LG-14, rewritten and renamed; `design.md` §3–§5): `core-ledger-state`
    keeps, for every stored node, the number of references to it in the stored child lists (with repeats, through
    embedded children). Each block, from the tables as committed at h − 1 and the block's flushed batch, it counts the

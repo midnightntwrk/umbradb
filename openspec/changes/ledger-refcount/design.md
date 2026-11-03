@@ -15,8 +15,9 @@ then this change. `start-umbradb` modifies no `ledger` requirement (its deltas: 
 changes touch no requirement in common. This change's `ledger` delta (`specs/ledger/spec.md`) renames LG-14
 (`## RENAMED Requirements`, FROM/TO, as the repository's OpenSpec skill describes it,
 `.claude/skills/openspec-sync-specs/SKILL.md:46, 75-76, 112-115`) and restates LG-11, LG-13 and LG-14 whole under
-`## MODIFIED Requirements`; its `determinism` delta (`specs/determinism/spec.md`) restates DT-3 and DT-4 whole; each
-header matches `core-arch`'s exactly (LG-14's after the rename), and `start-umbradb` modifies neither capability. It
+`## MODIFIED Requirements`; its `determinism` delta (`specs/determinism/spec.md`) restates DT-3 and DT-4 whole, and its
+`backups` delta (`specs/backups/spec.md`) restates BK-3 whole; each header matches `core-arch`'s exactly (LG-14's after
+the rename). `start-umbradb` modifies neither `ledger` nor `determinism`, and of `backups` only BK-1. It
 changes no `configuration` requirement, since the `sweep` key stays (O-1), and not MD-1 (§2.5). Both changes land in
 PR #16 (decision Q-F).
 
@@ -117,8 +118,10 @@ After every committed block h with `core-ledger-state` active:
 - **I3 (queue):** `Q_h = { k ∈ S_h : refs_h(k) = 0 and roots_h(k) = 0 }`.
 - **I4 (roots resolve):** every key with `roots_h(k) > 0` is a row. With I1, every retained state and every persisted
   contract and zswap state loads from the database with all it reaches.
-- **I5 (no leak):** with `sweep` on at h, every key of `Q_{h−1}` that is not protected in h and gains no reference in h
-  is gone after h, and so is every row that only such keys reached.
+- **I5 (no leak):** with `sweep` on at h, every row of `Q_{h−1}` that is not protected in h and gains no reference in h
+  is gone after h; and, recursively, every row whose references at h − 1 all came from rows deleted in h, that gains
+  no reference in h (from a node the batch writes) and is not protected in h, is gone after h. A protected row whose
+  count reaches 0 is kept and queued (I3): for example, a key a rewrite stops referencing.
 - **I6 (exact set):** for a batch in which every node of `N` and `W` is reached, through the batch's child lists and
   the stored ones, from a key whose root count rises in h — what `flushNodes` takes (§4.6) —: `R_{h−1} ∪ R_h ⊆ K_h ⊆
   S_h`; with `sweep` on at h, `S_h = K_h`; and when every node of `W` was in `R_{h−1}`, `K_h = R_{h−1} ∪ R_h`. For any
@@ -177,8 +180,8 @@ So `core-ledger-state`'s node tables take part in the contents hash by content:
   `contentsHash` rejects.
 - **Per block**, none of the three is captured (DT-4) or digested (DT-5). What they hold after block h is fixed by data
   that is captured and digested: with `sweep` on, the node set after h is what the persisted keys after h − 1 and after
-  h reach (I6), and those are `root_counts`' rows; with it off, what every persisted key since it was turned off
-  reached, from the same history. The configuration that sets `sweep` is in `core_chain.config`, hashed too.
+  h reach (I6), and those are `root_counts`' rows; with it off from block b on, the node set after b − 1 together
+  with what every persisted key since b reached, from the same history. The configuration that sets `sweep` is in `core_chain.config`, hashed too.
 
 What this guarantees, by construction rather than by test: two indexers that processed the same chain with the same
 configuration have equal node sets after every block, hence equal contents hashes and equal digests of every captured
@@ -225,7 +228,9 @@ Inputs: on-compute's read at h − 1, giving `S_{h−1}` with each row's stored 
    so decremented is protected in h: the state after h − 1, which the worker still holds during h, may reach it through
    the old child list.
 4. **Protection.** A key with a root count after h − 1 or after h, decremented by rule 3, or of a node of `N`, is not
-   deleted in h: a node is never deleted in the block that writes it.
+   deleted in h: a new node is never deleted in the block that inserts it. A rewritten node is not protected for being
+   rewritten: if it is queued and nothing references or persists it, rule 5 deletes it, subtracting its new child
+   list's references.
 5. **Deletions, when `on`.** Starting from the keys of `Q_{h−1}`, repeat: every candidate k not yet deleted, not
    protected, with `refs_{h−1}(k) + Δ(k) = 0`, is deleted; for each node deleted in that round, for each reference k in
    its child list as stored after the block's writes (the batch's list for a node of `W`, else the stored one; a node
@@ -245,8 +250,10 @@ Inputs: on-compute's read at h − 1, giving `S_{h−1}` with each row's stored 
 10. **Writes**, in `on-db-write`: the batch's nodes with the replacing insert of §2.2 (in `writeBlock`, chunked by
     `NODES_PER_STATEMENT`, 1,000, `core-ledger-state.ts:146`); the netted `Δ` of every key with `Δ(k) ≠ 0` merged into
     `ref_counts` (the shape of `root_counts`' merge, `sql.ts:138-142`: deltas added, a count reaching 0 deleted);
-    `Q_{h−1} \ Q_h` deleted from `unreferenced` and `Q_h \ Q_{h−1}` inserted; `D` deleted from `nodes`. Each statement
-    over a key list is chunked by 1,000 keys. The result does not depend on the statements' order or chunking.
+    `Q_{h−1} \ Q_h` deleted from `unreferenced` and `Q_h \ Q_{h−1}` inserted; `D` deleted from `nodes`. The node
+    writes come before the deletion of `D`, since a rewritten node can be in `D` (deleting first and writing after would
+    store it again); the `ref_counts` merge and the `unreferenced` changes touch other tables and commute with the rest.
+    Each statement over a key list is chunked by 1,000 keys; the result does not depend on the chunking.
 
 Why rule 4's root conditions: a key whose count reaches 0 but had a root count at h − 1 is in `R_{h−1}`, still held by
 the worker during h (`docs/issues/00019`); if its root count also fell to 0 in h, rule 7 queues it and it is deleted at
@@ -330,7 +337,8 @@ bytes of a content-defined table into its own (§2.5). By induction over blocks:
   design §5.4), functions of the chain; a worker restart gives the same (`core-arch` A160);
 - with `sweep` on, the node set after h is what the persisted keys after h − 1 and after h reach (I6, for the batches
   `flushNodes` gives); a key is a hash of content, so what a key reaches does not depend on how any node is spelled;
-- with `sweep` off, nothing is deleted, and the node set is what every persisted key since then reached;
+- with `sweep` off from block b on, nothing is deleted, and the node set is the node set after b − 1 together with
+  what every persisted key since b reached;
 - the state roots are checked against the node's at every block (LG-15), so the `states` rows are the node's.
 
 **What is not guaranteed: equal bytes in `nodes`, `ref_counts`, `unreferenced`.** A running worker can keep an old

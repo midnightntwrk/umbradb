@@ -92,8 +92,9 @@ halting — only a refusal on that retry SHALL fail the block, with `callback-er
 the first block with `sweep: on` again SHALL delete the queue by step (5).
 
 #### Scenario: Same deletions on two machines
-- **WHEN** the same chain is synced on PostgreSQL and on PGlite
-- **THEN** after every block the stored ledger nodes, reference counts and queue are identical
+- **WHEN** the same chain is synced on PostgreSQL and on PGlite from the same batches
+- **THEN** after every block the stored ledger nodes, reference counts and queue are identical; from different batches
+  (different worker histories) their node sets are identical
 
 #### Scenario: Reused content after a deletion
 - **WHEN** a node deleted at block h1 is needed again by the state at h2
