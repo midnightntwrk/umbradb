@@ -186,7 +186,7 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
       (stagenet's sample: Q-3.4-1, B, needs the owner's review). Seen failing with a fault in `node-key.ts` put back: an
       embedded node hashed without its children's keys, and a wrong `embedded` list with right row keys. Coverage of
       `node-key.ts` and `node-refs.ts`: 100 %.
-- [ ] 3.5 The content-defined table mechanism (`design.md` §2.5): the declaration of a table item as content-defined,
+- [x] 3.5 The content-defined table mechanism (`design.md` §2.5): the declaration of a table item as content-defined,
       refused for user modules; the contents hash's content function (the node set, every row's key checked, the
       checks of `ref_counts` and `unreferenced`, `ledger-refcount-invalid` with reason `tables-inconsistent` and
       `details.check`); change capture and the digests skipping such tables; DT-6's rules and the `TRUNCATE` guard kept;
@@ -197,6 +197,52 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
       backends: R29 (but its `node-key.ts` clause, 3.4's) on databases built for it, with its three negative controls;
       A55's and A126's new text; A57's "nor a content-defined one"; a user module declaring a content-defined table is
       refused. 3.8 runs them again with the build's own declarations.
+      **Done (2026-11-03, this commit):** a `table` item declares some of its tables content-defined with
+      `table.contentDefined: { tables, content }` (`ContentDefinition`, `src/modules/declaration.ts`): `tables` some of
+      the item's tables, `content` a `ContentFunction` (`src/determinism/contents-hash.ts`) that reads the hash's
+      snapshot and gives each table's content, or null for one recorded by name only. Validation refuses it from a
+      user module (`invalid-declaration`, field `provides[i].table.contentDefined`), and with an unknown property, no
+      table, a table the item does not list, no function, or on an item declared `deterministic: false`. The schema
+      plan lists the groups (`SchemaPlan.contentDefined`); change capture skips their tables (`uncaptured`), so they
+      get no digest, while the column rules, the integer `CHECK`s and the `TRUNCATE` guard, which take the opt-out
+      alone, still apply; `contentsHash` takes them by their content (option `contentDefined`, the content computed
+      once per hash through its read); the backups (`DumpInput.contentDefined`: the process's, `umbradb backup`'s from
+      `declaredContentDefined`, the browser worker's) and the restore (BK-3, `checked.plan`) pass them; the exported
+      `contentsHash` is now the build's (`src/library/contents-hash.ts`: `contentsHashOf(declarations)` over UmbraDB's
+      own backbone parts and core modules; same name and signature). `core-ledger-state`'s content function,
+      `src/backbone/core-ledger-state/node-set.ts`: `nodeTablesContent()` reads `nodes` in key order a page at a time,
+      checks each row's key with `node-key.ts`'s `nodeKeys` (a malformed child list fails as `node-key` too), gives
+      `nodes` as its node set and `ref_counts`, `unreferenced` by name after the `closure`, `roots`, `counts` and
+      `queue` checks; a failure is `ledger-refcount-invalid`, `details` `{ reason: "tables-inconsistent", check, key }`
+      (the first such key in byte order); `LEDGER_NODE_TABLES` (`{ tables: ["nodes", "ref_counts", "unreferenced"],
+      content: nodeTablesContent() }`) is what a `ledger-state` item declares — **3.8 adds `contentDefined:
+      LEDGER_NODE_TABLES` to the `table` of `coreLedgerState()`'s `ledger-state` item**; the production build does
+      not carry it yet. `core-arch` design §4 (change capture; a paragraph on content-defined tables, outside the
+      `deterministic_postgresql` component's table, which A138 pins to the component's own rules). Files beyond the
+      task's: `src/modules/adapters.ts`, `src/backup/pglite-backup.ts`, `src/runner/process.ts`, `src/cli/backup.ts`,
+      `browser/src/process-worker.ts`, the two new modules, and `test/backbone/core-digest/chain.ts` (takes core
+      modules). Test first (seen failing: four files at import, the generic mechanism's eight cases on the
+      declaration ignored), on PostgreSQL 18 and PGlite: `test/determinism/content-defined.test.ts` (the mechanism, a
+      hash computed by hand); `test/backbone/node-set.test.ts` — R29 but `node-key.ts`'s clause, on databases made by
+      the part's migration with rows of `test/ledger/node-format.ts`'s format and the counts and queue their rows give
+      (the two spellings equal; one more queued node different; `node-key` for a payload byte, a referenced key's
+      byte, an embedded node's byte, a byte added; `tables-inconsistent` for `counts`, `queue`, `closure`, `roots`),
+      A55's new text and the backends compared, and R29's three negative controls, committed (each also seen failing
+      R29 with its fault put into `LEDGER_NODE_TABLES`: the spellings' hashes differ, the one-more-node hashes equal,
+      the changed payload hashed); `test/backup/restore-content-defined.test.ts` — on `restore-ledger.ts`'s ledger
+      chain synced by the process with the test build, A126's new text (a changed payload or child-list byte refuses
+      with `ledger-refcount-invalid`, a node respelled with consistent counts and queue restores, a `root_counts`
+      value still gives `contents-hash-mismatch`, the target empty after each refusal) and R29's backup, restore and
+      export clauses (counts or queue refused in a restore; counts and a payload byte refused by `writeBackup` and by
+      the process's own backup, no file written; the same through `contentsHashOf`, the exported function's code);
+      `digests.test.ts` — A57's "nor a content-defined one" (seen failing with change capture not skipping them) and
+      its control, the `TRUNCATE` guard and the column rules kept; `validation.test.ts` — a user module refused.
+      R29's export clause is shown with the test build through `contentsHashOf`; a test pins `contentsHash` of
+      `src/index.ts` to the production declarations' groups, so 3.8 reruns the clause on the export itself. The test
+      build is `test/backbone/content-defined-build.ts`: `contentDefinedLedgerState({ base?, contentDefined?,
+      writesCounts? })` (with `writesCounts`, the counts and queue written after each block from the rows, by the
+      independent node format: `countsAndQueue`). Coverage: `node-set.ts` 100 % lines, 91.7 % branches; the hash's
+      content-defined path 100 %. The whole suite with the tapes, compared with §0, is in the plan's P3 notes.
 - [x] 3.6 `src/backbone/core-ledger-state/refcount.ts`: `refcountStep` behind its tables seam (rules 1–10 of
       `design.md` §3.2, the checks of §3.3, the reads of §3.4), `writeRefcount`, and the six faults of R12 as seams of the
       tables seam.

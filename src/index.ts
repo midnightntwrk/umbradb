@@ -8,8 +8,9 @@
  * - **A configuration**: {@link defineConfig}, {@link coreEntry}, {@link versionEntry}, and the core modules'
  *   declarations, whose `entry` writes their entries (`CORE_BLOCK_PARSED.entry({ start, config: {} })`). [CF-1, CF-2]
  * - **A module**: {@link defineModule} and its types, the points ({@link POINTS}), the handles, the cursor-table and
- *   height-versioned-table helpers, the canonical encodings and the contents hash, the module API's envelope helpers,
- *   `hexBytes` for a settings schema, and `retainedStatesOf`. [MD-1, SH-1, SH-2, SH-3, DT-1, DT-2, DT-3, RN-16, LG-12]
+ *   height-versioned-table helpers, the canonical encodings and the contents hash (with the content-defined tables of
+ *   UmbraDB's own declarations), the module API's envelope helpers, `hexBytes` for a settings schema, and
+ *   `retainedStatesOf`. [MD-1, SH-1, SH-2, SH-3, DT-1, DT-2, DT-3, RN-16, LG-12]
  * - **A host program**: {@link startUmbraDB}, UmbraDB run in the host's own process, with its options, its handle and
  *   their types (the network request, the mounted handlers, the private link's channel); {@link finalizedHeight}, a
  *   node's finalized height for a new database's start; {@link InMemoryBlockSource} and `BlockRef`, an in-memory chain;
@@ -32,7 +33,7 @@ export { hexBytes } from "./config/core-settings.js";
 export { coreEntry, defineConfig, type Entry, type UmbraConfig, versionEntry } from "./config/entries.js";
 export type { BlockWriteHandle, ReadHandle, SchemaWriteHandle } from "./db/api.js";
 export { type ErrorCode, UmbraError } from "./db/errors.js";
-export { contentsHash } from "./determinism/contents-hash.js";
+export { contentsHash } from "./library/contents-hash.js";
 export { encodeCanonical, encodeRow } from "./determinism/cbor.js";
 export { cursorTable } from "./helpers/cursor-table.js";
 export { heightVersionedTable } from "./helpers/height-versioned.js";

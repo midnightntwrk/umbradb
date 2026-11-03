@@ -8,13 +8,42 @@
 import type { SchemaWriteHandle } from "../db/api.js";
 import { type MigrationPart, OWN_PARTS } from "../db/migrate.js";
 import { planSchemas, type SchemaItem, type SchemaModule, type SchemaPlan } from "../db/roles.js";
+import type { ContentDefinedTables } from "../determinism/contents-hash.js";
 import type { ItemDeclaration, ModuleDeclaration, ProcessContext } from "./declaration.js";
 
-/** An item as the schema plan reads it: its name and, for a `table` item, its schema, tables and `deterministic` flag. */
+/**
+ * An item as the schema plan reads it: its name and, for a `table` item, its schema, tables, `deterministic` flag and
+ * content-defined tables.
+ */
 function schemaItem(item: ItemDeclaration): SchemaItem {
   if (item.table === undefined) return { name: item.name };
-  const { schema, tables, deterministic } = item.table;
-  return { name: item.name, table: { schema, tables, ...(deterministic === false ? { deterministic } : {}) } };
+  const { schema, tables, deterministic, contentDefined } = item.table;
+  return {
+    name: item.name,
+    table: {
+      schema,
+      tables,
+      ...(deterministic === false ? { deterministic } : {}),
+      ...(contentDefined === undefined ? {} : { contentDefined }),
+    },
+  };
+}
+
+/**
+ * The content-defined tables `declarations` declare, each item's once, with their schema and content function: what a
+ * contents hash computed outside a process's schema plan is given (`umbradb backup`, the exported `contentsHash`).
+ * [DT-3, LG-11]
+ */
+export function declaredContentDefined(declarations: readonly ModuleDeclaration[]): ContentDefinedTables[] {
+  const out = new Map<string, ContentDefinedTables>();
+  for (const declaration of declarations) {
+    for (const item of declaration.provides) {
+      const declared = item.table?.contentDefined;
+      if (item.table === undefined || declared === undefined || out.has(item.name)) continue;
+      out.set(item.name, { schema: item.table.schema, tables: [...declared.tables], content: declared.content });
+    }
+  }
+  return [...out.values()];
 }
 
 /** What the schema plan reads of a declaration: id, requirements, items with their tables, migrations. [DB-6, DB-8] */

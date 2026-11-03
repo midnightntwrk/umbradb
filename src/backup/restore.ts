@@ -29,8 +29,9 @@
  * - every setting the file set is reset (`RESET ALL`);
  * - the owners and grants of a database built by migrations are given (`restoreOwnership`, `src/db/roles.ts`, and
  *   `restoreGrants`, `src/db/migrate.ts`), and the module roles are created where the server lacks them [DB-6, DB-7];
- * - the contents hash is recomputed, with the tables declared `deterministic: false` by name only, and compared with
- *   the manifest's (`contents-hash-mismatch`);
+ * - the contents hash is recomputed, with the tables declared `deterministic: false` by name only and the build's
+ *   content-defined tables by their content, and compared with the manifest's (`contents-hash-mismatch`); a
+ *   content-defined table its content function refuses (`ledger-refcount-invalid`) fails the restore there;
  * - when `core-ledger-state` is in the history, the stored state root at the manifest's height is compared with the
  *   chain's (`backup-root-mismatch`; the node's root is read before the transaction).
  *
@@ -437,7 +438,9 @@ async function load(tx: Transaction, input: RestoreInput, checked: Checked, seam
   await restoreGrants(tx, checked.plan);
   const { manifest } = checked;
   if (seams.skip?.contentsHash !== true) {
-    const hash = hex(await contentsHash({ query: (sql, params) => tx.query(sql, params) }, { optedOut: checked.plan.optedOut }));
+    const read = { query: (sql: string, params?: unknown[]) => tx.query(sql, params) };
+    const { optedOut, contentDefined } = checked.plan;
+    const hash = hex(await contentsHash(read, { optedOut, contentDefined }));
     if (hash !== manifest.contentsHash) {
       throw new UmbraError(
         "contents-hash-mismatch",

@@ -3,11 +3,14 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CORE_DIGEST, CORE_DIGEST_MIGRATIONS } from "../../../src/backbone/core-digest/index.js";
 import { CAPTURE_TRIGGER, SHADOW_SCHEMA, shadowTableName } from "../../../src/db/change-capture.js";
 import type { BlockWriteHandle, Database } from "../../../src/db/api.js";
-import type { ModuleDeclaration } from "../../../src/modules/declaration.js";
+import type { ItemDeclaration, ModuleDeclaration } from "../../../src/modules/declaration.js";
 import { BACKBONE_ORDER } from "../../../src/modules/graph.js";
 import { validateDeclarations } from "../../../src/modules/validation.js";
+import { LEDGER_NODE_TABLES } from "../../../src/backbone/core-ledger-state/node-set.js";
+import { CORE_LEDGER_STATE_MIGRATIONS } from "../../../src/backbone/core-ledger-state/sql.js";
 import { BACKENDS } from "../../db/backends.js";
 import { concatBytes, fromHex } from "../../determinism/cbor-decoder.js";
+import { contentDefinedLedgerState } from "../content-defined-build.js";
 import { BLOCK_COMMIT, type Chain, checkpointRows, digestRows, runBlocks, startChain, testModule } from "./chain.js";
 
 /**
@@ -15,8 +18,10 @@ import { BLOCK_COMMIT, type Chain, checkpointRows, digestRows, runBlocks, startC
  * - keeps one digest per module table, `SHA-256(previous ‖ CBOR(h) ‖ changes at h)`, set in a block that changes the
  *   table and kept otherwise, with 32 zero bytes before its first change;
  * - writes checkpoints at exactly the heights h ≥ S with h mod 14,400 = 0, equal to the tables' rows there;
- * - digests every module table with no flag set, and not a table declared `deterministic: false`.
- * [A57, DT-4, DT-5, Q84, Q86]
+ * - digests every module table with no flag set, and not a table declared `deterministic: false`, nor a
+ *   content-defined one (`core-ledger-state`'s node tables as a test build declares them), whose `TRUNCATE` guard and
+ *   column rules stay.
+ * [A57, DT-4, DT-5, DT-6, DB-14, Q84, Q86]
  *
  * The chains run through `schemaPlan`, `startDatabase` and the block write handles, with a block loop standing in for
  * the runner's (`./chain.ts`). The interval shortened by a build flag is tested in `checkpoints.build-flag.test.ts`.
@@ -76,6 +81,48 @@ function moduleM(differ: string): ModuleDeclaration {
         },
       },
     });
+}
+
+/** A key of 32 bytes, all `byte`. */
+const key32 = (byte: number): Uint8Array => new Uint8Array(32).fill(byte);
+
+/**
+ * `core-ledger-state`'s tables as the test build declares them (`../content-defined-build.ts`: `nodes`, `ref_counts`
+ * and `unreferenced` content-defined), made by the part's own migration and written by a stand-in that inserts,
+ * rewrites and deletes nodes, and changes the counts, the queue and `root_counts`, at heights 1 to 3; at
+ * `truncateAt`, it truncates `table` instead. [A57, R17, DT-4, DB-14]
+ */
+function ledgerTables(options: { readonly truncateAt?: bigint; readonly table?: string } = {}): ModuleDeclaration {
+  const item = contentDefinedLedgerState().provides.find((candidate) => candidate.name === "ledger-state");
+  const writes: Readonly<Record<string, readonly (readonly [string, unknown[]])[]>> = {
+    "1": [
+      ["INSERT INTO core_ledger_state.nodes VALUES ($1, '\\x01', '\\x00'), ($2, '\\x02', '\\x00')", [key32(1), key32(2)]],
+      ["INSERT INTO core_ledger_state.root_counts VALUES ($1, 1)", [key32(1)]],
+      ["INSERT INTO core_ledger_state.unreferenced VALUES ($1)", [key32(2)]],
+    ],
+    "2": [
+      ["UPDATE core_ledger_state.nodes SET children = $2 WHERE node_key = $1", [key32(1), Uint8Array.of(4, 0, ...key32(2))]],
+      ["INSERT INTO core_ledger_state.ref_counts VALUES ($1, 1)", [key32(2)]],
+      ["DELETE FROM core_ledger_state.unreferenced WHERE node_key = $1", [key32(2)]],
+    ],
+    "3": [
+      ["UPDATE core_ledger_state.root_counts SET count = 2 WHERE node_key = $1", [key32(1)]],
+      ["INSERT INTO core_ledger_state.nodes VALUES ($1, '\\x03', '\\x00')", [key32(3)]],
+      ["INSERT INTO core_ledger_state.unreferenced VALUES ($1)", [key32(3)]],
+      ["DELETE FROM core_ledger_state.nodes WHERE node_key = $1", [key32(3)]],
+      ["DELETE FROM core_ledger_state.unreferenced WHERE node_key = $1", [key32(3)]],
+    ],
+  };
+  return testModule("core-ledger-state", {
+    provides: [{ ...(item as ItemDeclaration), lifetimes: ["table"] }],
+    migrations: CORE_LEDGER_STATE_MIGRATIONS.map(({ id, sql }) => ({ id, sql })),
+    points: {
+      async "on-db-write"(_p, b, w: BlockWriteHandle) {
+        if (b.height === options.truncateAt) await w.execute(`TRUNCATE core_ledger_state.${options.table ?? "nodes"}`);
+        for (const [sql, params] of writes[String(b.height)] ?? []) await w.execute(sql, params);
+      },
+    },
+  });
 }
 
 describe.each(BACKENDS)("A57: core-digest's per-table digests and checkpoints, on $name (DT-4, DT-5)", (backend) => {
@@ -173,6 +220,57 @@ describe.each(BACKENDS)("A57: core-digest's per-table digests and checkpoints, o
     const chain = await startChain(db, [moduleM("x")], { plan: (plan) => ({ ...plan, optedOut: [] }) });
     await runBlocks(chain, 3n);
     expect(await undigested(db, "m", "cache")).toBe(false);
+  }, 120_000);
+
+  it("A57: nor a content-defined one: core_ledger_state's nodes, ref_counts and unreferenced are not digested, its root_counts are", async () => {
+    const { db } = await backend.database("SELECT 1");
+    const chain = await startChain(db, [moduleM("x")], { core: [ledgerTables()] });
+    expect(chain.plan.contentDefined.map(({ schema, tables }) => ({ schema, tables }))).toEqual([
+      { schema: "core_ledger_state", tables: ["nodes", "ref_counts", "unreferenced"] },
+    ]);
+    // Content-defined tables are deterministic: no opt-out. [DT-6]
+    expect(chain.plan.optedOut).toEqual([{ schema: "m", table: "cache" }]);
+    const after = new Map<bigint, Awaited<ReturnType<typeof digestRows>>>();
+    await runBlocks(chain, 3n, async (h) => {
+      after.set(h, await digestRows(db));
+    });
+    for (const table of ["nodes", "ref_counts", "unreferenced"]) {
+      expect(await undigested(db, "core_ledger_state", table), table).toBe(true);
+    }
+    expect(await undigested(db, "core_ledger_state", "root_counts")).toBe(false);
+    // root_counts changes at 1 and 3; its digest rows are set at those heights, as any digested table's.
+    expect([...after.values()].map((rows) => rows["core_ledger_state.root_counts"]?.height)).toEqual([1n, 1n, 3n]);
+    expect(Object.keys(after.get(3n) ?? {}).sort()).toEqual(["core_block_commit.blocks", "core_ledger_state.root_counts", "m.t", "m.u"]);
+    const [stored] = await db.read((read) => read.query("SELECT count(*)::int AS n FROM core_ledger_state.nodes"));
+    expect(stored?.n).toBe(2);
+  }, 120_000);
+
+  it("negative control: change capture that does not skip the content-defined tables digests them, which A57's clause catches", async () => {
+    const { db } = await backend.database("SELECT 1");
+    const chain = await startChain(db, [moduleM("x")], { core: [ledgerTables()], plan: (plan) => ({ ...plan, contentDefined: [] }) });
+    await runBlocks(chain, 3n);
+    expect(await undigested(db, "core_ledger_state", "nodes")).toBe(false);
+  }, 120_000);
+
+  it("keeps DT-6's rules and the TRUNCATE guard on content-defined tables", async () => {
+    for (const table of ["nodes", "ref_counts", "unreferenced"]) {
+      const { db } = await backend.database("SELECT 1");
+      const chain = await startChain(db, [], { core: [ledgerTables({ truncateAt: 2n, table })] });
+      await runBlocks(chain, 1n);
+      await expect(runBlocks(chain, 2n), table).rejects.toMatchObject({ code: "truncate-not-allowed" });
+    }
+    const { db } = await backend.database("SELECT 1");
+    const floats = testModule("core-floats", {
+      provides: [
+        {
+          name: "floats",
+          lifetimes: ["table"],
+          table: { schema: "core_floats", tables: ["f"], kind: "mutable", contentDefined: { tables: ["f"], content: LEDGER_NODE_TABLES.content } },
+        },
+      ],
+      migrations: [{ id: "001", sql: "CREATE TABLE core_floats.f (k bigint PRIMARY KEY, v real)" }],
+    });
+    await expect(startChain(db, [], { core: [floats] })).rejects.toMatchObject({ code: "non-deterministic-column" });
   }, 120_000);
 
   it("A57: checkpoints exist exactly at the heights h >= S with h mod 14,400 = 0, equal to the tables' rows there", async () => {

@@ -99,7 +99,7 @@ const coreCommittedHeight: CommittedHeight = async (read) => (await readCursor(r
 const RESTORE_SEAMS: RestoreSeams =
   __UMBRADB_BROWSER_CONTROL__ === "restore-skips-contents-hash" ? { skip: { contentsHash: true } } : {};
 
-/** The process's database and its `deterministic: false` tables while its module API is open, or null. */
+/** The process's database, its opted-out and content-defined tables while its module API is open, or null. */
 const openedProcess = (): OpenedProcess | null => handle?.opened() ?? null;
 
 /** A backup of this worker's process's database (see the module comment): its manifest's facts and the file's text. */
@@ -109,7 +109,7 @@ async function backUp(): Promise<unknown> {
   // The database the process opened and handed its module API: a PGlite database (exclusiveJob checks it).
   const { db } = opened;
   const { manifest, text } = await pgliteBackupText(
-    { db, optedOut: opened.optedOut, side, developmentOptIn: true },
+    { db, optedOut: opened.optedOut, contentDefined: opened.contentDefined, side, developmentOptIn: true },
     pgDump as unknown as PgliteDump,
   );
   return {
@@ -276,7 +276,7 @@ async function answer(method: string, args: readonly unknown[]): Promise<unknown
       if (opened === null) throw new Error("the process has not completed its startup, or has stopped");
       return opened.db.read(async (read) => ({
         height: jsonSafe(read.height),
-        hash: jsonSafe(await contentsHash(read, { optedOut: opened.optedOut })),
+        hash: jsonSafe(await contentsHash(read, { optedOut: opened.optedOut, contentDefined: opened.contentDefined })),
       }));
     }
     case "read": {

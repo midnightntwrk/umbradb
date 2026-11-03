@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import * as mini from "zod/mini";
 import { UmbraError } from "../../src/db/errors.js";
-import { planSchemas } from "../../src/db/roles.js";
+import { LEDGER_NODE_TABLES } from "../../src/backbone/core-ledger-state/node-set.js";
+import { planSchemas, schemaName } from "../../src/db/roles.js";
 import { schemaModules } from "../../src/modules/adapters.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import {
@@ -595,5 +596,77 @@ describe("MD-1: a declaration of a shape its type forbids is refused (invalid-de
     }
     const instance = new Stats();
     expect(validateDeclarations(userModules([instance])).user[0]).toBe(instance);
+  });
+});
+
+/** A content function of the tests: `core-ledger-state`'s, which these declarations never run. */
+const CONTENT = LEDGER_NODE_TABLES.content;
+
+/** Module `id` whose one item has the tables `rows` and `keys`, the given `contentDefined` on its table. */
+function contentDeclared(id: string, contentDefined: unknown, table: Record<string, unknown> = {}): Record<string, unknown> {
+  return loose(id, (d) => {
+    firstItem(d).table = { schema: schemaName(id), tables: ["rows", "keys"], kind: "mutable", contentDefined, ...table };
+  });
+}
+
+describe("a table item's content-defined tables: UmbraDB's own parts only, refused for user modules (DT-3, MD-1)", () => {
+  it("a user module declaring a content-defined table is refused with invalid-declaration, naming the field", () => {
+    for (const declared of [{ tables: ["rows"], content: CONTENT }, "rows", null]) {
+      const error = refusal(() => validateDeclarations(userModules([contentDeclared("stats", declared)])));
+      expect(error.code).toBe("invalid-declaration");
+      expect(error.retryable).toBe(false);
+      expect(error.details).toMatchObject({ module: "stats", origin: "user", index: 0, field: "provides[0].table.contentDefined" });
+      for (const text of ["the user module stats", "content-defined", "only UmbraDB's own backbone parts and core modules"]) {
+        expect(error.message, text).toContain(text);
+      }
+      expect(error.message).not.toMatch(SPEC_ID);
+    }
+  });
+
+  it("a core module and a backbone part may declare some of an item's tables content-defined", () => {
+    const core = contentDeclared("core-stats", { tables: ["keys"], content: CONTENT });
+    const backbone = contentDeclared("core-other", { tables: ["rows", "keys"], content: CONTENT });
+    const set = validateDeclarations(userModules([], { core: [core], backbone: [backbone] }));
+    expect(set.core).toEqual([core]);
+    expect(set.backbone).toEqual([backbone]);
+  });
+
+  const shapes: readonly (readonly [string, unknown, Record<string, unknown>, string, readonly string[]])[] = [
+    ["not an object", ["keys"], {}, "provides[0].table.contentDefined", ["{ tables, content }"]],
+    ["an unknown property", { tables: ["keys"], content: CONTENT, digest: true }, {}, "provides[0].table.contentDefined.digest", []],
+    ["tables not a list", { tables: "keys", content: CONTENT }, {}, "provides[0].table.contentDefined.tables", []],
+    ["no table", { tables: [], content: CONTENT }, {}, "provides[0].table.contentDefined.tables", ["at least one"]],
+    [
+      "a table that is not the item's",
+      { tables: ["keys", "other"], content: CONTENT },
+      {},
+      "provides[0].table.contentDefined.tables[1]",
+      ["other", "not one of the item's tables", "rows, keys"],
+    ],
+    ["no content function", { tables: ["keys"] }, {}, "provides[0].table.contentDefined.content", ["a function"]],
+    [
+      "with deterministic: false",
+      { tables: ["keys"], content: CONTENT },
+      { deterministic: false },
+      "provides[0].table.contentDefined",
+      ["deterministic: false", "content-defined"],
+    ],
+  ];
+  for (const [name, declared, table, field, says] of shapes) {
+    it(`a core module's content-defined tables of a shape the type forbids are refused: ${name}`, () => {
+      const error = refusal(() => validateDeclarations(userModules([], { core: [contentDeclared("core-stats", declared, table)] })));
+      expect(error.code).toBe("invalid-declaration");
+      expect(error.details).toMatchObject({ module: "core-stats", origin: "core", index: 0, field });
+      for (const text of says) expect(error.message, text).toContain(text);
+      expect(error.message).not.toMatch(SPEC_ID);
+    });
+  }
+
+  it("the schema plan lists the content-defined tables with their schema and content function, and does not opt them out", () => {
+    const core = contentDeclared("core-stats", { tables: ["keys"], content: CONTENT }) as unknown as ModuleDeclaration;
+    const plan = planSchemas(schemaModules([core, declaration("stats")]));
+    expect(plan.contentDefined).toEqual([{ schema: "core_stats", tables: ["keys"], content: CONTENT }]);
+    expect(plan.optedOut).toEqual([]);
+    expect(planSchemas(schemaModules([declaration("stats")])).contentDefined).toEqual([]);
   });
 });

@@ -48,6 +48,7 @@
 
 import { createHash } from "node:crypto";
 import { quoteIdentifier } from "../deterministic-postgresql/index.js";
+import type { ContentDefinedTables, ContentFunction } from "../determinism/contents-hash.js";
 import type { Transaction } from "./api.js";
 import { UmbraError } from "./errors.js";
 
@@ -105,6 +106,11 @@ export interface SchemaTable {
   readonly tables: readonly string[];
   /** `false` opts the tables out of the determinism rules; they keep no `TRUNCATE` trigger. [MD-1, Q76, DB-14] */
   readonly deterministic?: false;
+  /**
+   * Those of the tables that take part in the contents hash by their content, and its function: not captured per
+   * block, and still under the determinism rules and the `TRUNCATE` guard. [DT-3, DT-4, LG-11]
+   */
+  readonly contentDefined?: { readonly tables: readonly string[]; readonly content: ContentFunction };
 }
 
 /** An item a module provides. */
@@ -150,6 +156,8 @@ export interface SchemaPlan {
   readonly schemas: readonly PlannedSchema[];
   /** The tables declared `deterministic: false`. */
   readonly optedOut: readonly QualifiedTable[];
+  /** The content-defined tables, each item's once, with their schema and content function. [DT-3, DT-4] */
+  readonly contentDefined: readonly ContentDefinedTables[];
   /** The role a module's callbacks, `on-start-db` and migrations run under: its own, or its shared item's. [Q89] */
   writeRole(moduleId: string): string;
   /** The schema that role owns. */
@@ -354,6 +362,18 @@ export function planSchemas(modules: readonly SchemaModule[], ownParts: readonly
     }
   }
 
+  // Each item's content-defined tables once, as its first provider declares them.
+  const contentDefined: ContentDefinedTables[] = [];
+  const contentDefinedItems = new Set<string>();
+  for (const module of modules) {
+    for (const item of module.provides) {
+      const declared = item.table?.contentDefined;
+      if (item.table === undefined || declared === undefined || contentDefinedItems.has(item.name)) continue;
+      contentDefinedItems.add(item.name);
+      contentDefined.push({ schema: item.table.schema, tables: [...declared.tables], content: declared.content });
+    }
+  }
+
   const writeSchema = (moduleId: string): string => {
     const schema = writeSchemas.get(moduleId);
     if (schema === undefined) throw new Error(`module ${moduleId} is not in the schema plan`);
@@ -373,7 +393,7 @@ export function planSchemas(modules: readonly SchemaModule[], ownParts: readonly
     return users;
   };
 
-  return { schemas, optedOut, writeRole, writeSchema, functionUsers };
+  return { schemas, optedOut, contentDefined, writeRole, writeSchema, functionUsers };
 }
 
 /** Runs `SET LOCAL ROLE` to the module's write role, for the rest of the transaction. [DB-6] */

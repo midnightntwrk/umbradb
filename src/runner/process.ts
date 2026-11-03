@@ -386,6 +386,7 @@ import { type CoreTransport, startCoreTransport } from "../private/core-socket.j
 import { type BackupInput, type BackupSeams, type BackupWritten, backupAtStop, writeBackup } from "../backup/backup.js";
 import { databaseTarget } from "../config/database.js";
 import { handleClosed, UmbraError } from "../db/errors.js";
+import type { ContentDefinedTables } from "../determinism/contents-hash.js";
 import type { TableName } from "../deterministic-postgresql/index.js";
 import { privateInstancesOf } from "../private/instances.js";
 import { Lockstep, type LockstepCondition } from "../private/lockstep.js";
@@ -770,6 +771,8 @@ export interface ProcessListening {
 export interface OpenedProcess {
   readonly db: Database;
   readonly optedOut: readonly TableName[];
+  /** The schema plan's content-defined tables, which a backup's contents hash takes by their content. [DT-3] */
+  readonly contentDefined: readonly ContentDefinedTables[];
 }
 
 /** A process {@link startProcess} started. */
@@ -1246,6 +1249,8 @@ class Process implements ProcessHandle {
   #lockstep: Lockstep | undefined;
   /** The schema plan's tables declared `deterministic: false`, for a backup's contents hash. [BK-2, Q76] */
   #optedOut: readonly TableName[] = [];
+  /** The schema plan's content-defined tables, for a backup's contents hash. [BK-2, DT-3] */
+  #contentDefined: readonly ContentDefinedTables[] = [];
   /**
    * The holds that pause the loop between heights: {@link pause}'s and SIGUSR2's. A change of the pause that `/status`
    * shows is published at once. [BK-1, Q152 B, Q174 B]
@@ -1395,7 +1400,8 @@ class Process implements ProcessHandle {
 
   opened(): OpenedProcess | null {
     const db = this.#db;
-    return this.#openApi() === undefined || db === undefined ? null : Object.freeze({ db, optedOut: this.#optedOut });
+    if (this.#openApi() === undefined || db === undefined) return null;
+    return Object.freeze({ db, optedOut: this.#optedOut, contentDefined: this.#contentDefined });
   }
 
   /**
@@ -1557,8 +1563,8 @@ class Process implements ProcessHandle {
   }
 
   /**
-   * What a backup of the process's database is given: its backend, its opted-out tables, its side and its opt-in.
-   * [BK-1]
+   * What a backup of the process's database is given: its backend, its opted-out and content-defined tables, its side
+   * and its opt-in. [BK-1, DT-3]
    */
   #backupInput(out: string): BackupInput {
     const settings = (this.#core as CheckedEntry).settings as PlainObject;
@@ -1568,6 +1574,7 @@ class Process implements ProcessHandle {
       target: target.backend === "postgres" ? { backend: "postgres", connection: target.connection } : { backend: "pglite" },
       out,
       optedOut: this.#optedOut,
+      contentDefined: this.#contentDefined,
       side: this.#side,
       developmentOptIn: settings.developmentOptIn === true,
     };
@@ -2068,6 +2075,7 @@ class Process implements ProcessHandle {
     source.checkModules?.(graph.modules);
     const plan = schemaPlan(graph.modules);
     this.#optedOut = plan.optedOut;
+    this.#contentDefined = plan.contentDefined;
     // Reading a host's in-memory chain, the process has no node client to publish. [LM-8, L49]
     const contexts = new ProcessContexts({
       graph,

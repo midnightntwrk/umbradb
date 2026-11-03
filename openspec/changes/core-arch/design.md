@@ -527,7 +527,8 @@ interface QueueRunner {                                      // given by the fin
   `synchronous_commit=off` is a warning `startWriter` returns. A refused writer ends its session, so it holds no lock.
   PGlite refuses without the development opt-in (`development-opt-in-required`) before anything is opened or created.
   0.9.5's file stays for 0.9.5's `runMigrations` until task 17.2.
-- **Change capture for digests (DT-4, DT-5; Q84, Q86).** On every module table not declared `deterministic: false`, a
+- **Change capture for digests (DT-4, DT-5; Q84, Q86).** On every module table not declared `deterministic: false` and
+  not content-defined (below), a
   row-level `AFTER INSERT OR UPDATE OR DELETE` trigger copies, on the first touch of a primary key in the transaction,
   the old row (or a tombstone) into `core_digest_shadow.t_<first 32 hex digits of SHA-256(schema.table)>`;
   `core-digest`, last in `on-db-write`, reads each shadow row and the current row, computes each table's net changes,
@@ -545,7 +546,8 @@ interface QueueRunner {                                      // given by the fin
   migration mark: a migration's writes are no block's changes, and a migration may change the table's columns before
   the function is written again. After each part's migrations the database API writes again the shadow table,
   function and trigger of each table whose columns changed (a fingerprint in the shadow table's comment), attaches
-  them to new tables, re-enables a disabled trigger and drops the trigger of a table declared `deterministic: false`;
+  them to new tables, re-enables a disabled trigger and drops the trigger of a table declared `deterministic: false`
+  or content-defined;
   the parts before `core-digest` are captured once its migrations created `core_digest_shadow` (Q95). When startup
   ends, the shadow tables are emptied of what `on-start-db` callbacks wrote and those no table uses are dropped, so they
   are empty whenever no block is open; the contents hash leaves `core_digest_shadow` out (DT-3, Q101, task 7.1a), so
@@ -554,6 +556,19 @@ interface QueueRunner {                                      // given by the fin
   and digested by `src/determinism/digest.ts`; `core-digest` (`src/backbone/core-digest/`, migrations only, no
   `on-start-db`) has its checkpoint interval as a build flag (`build-flags.ts`, like A11's), which only a test's own
   build changes. Every role of the plan may read `core_digest`.
+- **Content-defined tables (DT-3, DT-4, DT-5; `ledger-refcount` O-8).** A `table` item of UmbraDB's own backbone parts
+  and core modules may name some of its tables content-defined, `table.contentDefined: { tables, content }`, with a
+  content function; a user module that does is refused (`invalid-declaration`, `src/modules/validation.ts`). The
+  schema plan lists them (`contentDefined`, `src/db/roles.ts`); the contents hash — backups, restores, the exported
+  `contentsHash` — takes each as its function gives it, through the hash's one snapshot
+  (`src/determinism/contents-hash.ts`); change capture skips them (`src/db/change-capture.ts`), so they have no digest;
+  the column rules, the integer `CHECK`s and the `TRUNCATE` guard apply to them as to any deterministic table. They
+  rest on the `deterministic_postgresql` component's rules and add none to them. `core-ledger-state`'s `nodes` takes
+  part by its node set (the keys of its rows and of every node embedded in them, each row's key checked against its
+  content), and `ref_counts` and `unreferenced` as `[schema, table, null, null]` after a check that they hold the
+  counts and the queue its rows and `root_counts` give; a failure is `ledger-refcount-invalid` (reason
+  `tables-inconsistent`, `details.check` and the key) (`src/backbone/core-ledger-state/node-set.ts`; `ledger-refcount`
+  design §2.5).
 - **Errors.** `UmbraError { code, retryable, details }`, keeping the 0.9.5 retryable split
   (`design/design-interfaces.md` §1.1); a lost connection is `connection-lost` (retryable); an API read ended by its
   timeout is `query-timeout` (not retryable, DB-15).

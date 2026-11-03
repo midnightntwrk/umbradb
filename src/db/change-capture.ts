@@ -1,9 +1,11 @@
 /**
- * Change capture for the per-block digests. On every module table not declared `deterministic: false`, a row trigger
- * records, on the first touch of a primary key in a transaction, the row as it was (or that there was none). It writes
- * it to a shadow table, `core_digest_shadow.t_<first 32 hex digits of SHA-256(schema.table)>`. At the end of the
- * block `core-digest` reads each touched key's row as it was and as it is ({@link takeChanges}), and the digests are
- * computed from them (`src/determinism/digest.ts`, `src/backbone/core-digest/`). [DT-4, Q76, Q84, Q86; design §4]
+ * Change capture for the per-block digests. On every module table not declared `deterministic: false` and not
+ * content-defined (the schema plan's `contentDefined`: such a table takes part in the contents hash by its content, and
+ * its rows are not captured per block), a row trigger records, on the first touch of a primary key in a transaction,
+ * the row as it was (or that there was none). It writes it to a shadow table, `core_digest_shadow.t_<first 32 hex
+ * digits of SHA-256(schema.table)>`. At the end of the block `core-digest` reads each touched key's row as it was and
+ * as it is ({@link takeChanges}), and the digests are computed from them (`src/determinism/digest.ts`,
+ * `src/backbone/core-digest/`). [DT-4, Q76, Q84, Q86, LG-11; design §4]
  *
  * Every statement that writes a row fires the trigger: a module's own, a helper trigger's, a provider function's, a
  * cascade's. `TRUNCATE`, which fires none, is rejected in blocks, so no change escapes. [DB-14]
@@ -36,11 +38,13 @@
  * - a table a migration added gets it;
  * - a table whose columns changed gets its shadow table and function written again (each shadow table's comment holds
  *   a fingerprint of the definitions);
- * - a table declared `deterministic: false` loses its trigger.
+ * - a table declared `deterministic: false` or content-defined loses its trigger.
  *
  * Then {@link finishCapture} drops the shadow tables and functions no table uses any more. The tables are those of the
  * `TRUNCATE` guard: every table of the plan's schemas, a partition with its partitioned table
- * (`TRUNCATE_GUARD_TABLES_SQL`), with the opt-out decided by the component's `optOut`. [DT-6]
+ * (`TRUNCATE_GUARD_TABLES_SQL`), with the tables left out decided by the component's `optOut` over the opted-out and
+ * the content-defined tables ({@link uncaptured}). A content-defined table keeps the `TRUNCATE` guard and the column
+ * rules, which take the opt-out alone. [DT-4, DT-6]
  */
 
 import { createHash } from "node:crypto";
@@ -51,6 +55,7 @@ import {
   type GuardTableRow,
   keyOrderTerm,
   MIGRATION_MARKED_CONDITION,
+  type OptOut,
   optOut,
   quoteIdentifier,
   TRUNCATE_GUARD_TABLES_SQL,
@@ -58,6 +63,12 @@ import {
 import type { TouchedRow } from "../determinism/digest.js";
 import type { Transaction } from "./api.js";
 import type { SchemaPlan } from "./roles.js";
+
+/** The tables of `plan` whose changes are not captured: those declared `deterministic: false`, and the content-defined. */
+export function uncaptured(plan: Pick<SchemaPlan, "optedOut" | "contentDefined">): OptOut {
+  const contentDefined = plan.contentDefined.flatMap(({ schema, tables }) => tables.map((table) => ({ schema, table })));
+  return optOut([...plan.optedOut, ...contentDefined]);
+}
 
 /** The schema of the shadow tables and the capture functions, created by `core-digest`'s migrations. */
 export const SHADOW_SCHEMA = "core_digest_shadow";
@@ -116,12 +127,13 @@ export async function captureReady(tx: ConsistentRead): Promise<boolean> {
 /**
  * Makes the capture of the tables of `schemas` match them (see the module comment): creates or rewrites each table's
  * shadow table, function and trigger where they are missing, disabled or written for other columns, and drops the
- * trigger of each table declared `deterministic: false`. Run by the writer's login, after the determinism check of the
- * same tables (so a table reaching it has a primary key). A no-op for a table whose capture is current. [DT-6]
+ * trigger of each table declared `deterministic: false` or content-defined. Run by the writer's login, after the
+ * determinism check of the same tables (so a table reaching it has a primary key). A no-op for a table whose capture is
+ * current. [DT-4, DT-6]
  */
 export async function captureTables(tx: Transaction, plan: SchemaPlan, schemas: readonly string[]): Promise<void> {
   if (schemas.length === 0) return;
-  const out = optOut(plan.optedOut);
+  const out = uncaptured(plan);
   const tables = await describeTables(tx, schemas);
   const state = await captureState(tx, schemas);
   for (const table of tables) {
@@ -146,13 +158,13 @@ export async function captureTables(tx: Transaction, plan: SchemaPlan, schemas: 
 
 /**
  * At the end of startup, before any block: drops the shadow tables and functions no module table of the plan uses any
- * more (a table dropped or renamed, or declared `deterministic: false`), and empties the others: the rows a part's
- * `on-start-db` wrote are no block's changes, and the shadow tables are empty whenever no block is open. A no-op before
- * `core-digest`'s migrations created the shadow schema. [design §4]
+ * more (a table dropped or renamed, declared `deterministic: false` or content-defined), and empties the others: the
+ * rows a part's `on-start-db` wrote are no block's changes, and the shadow tables are empty whenever no block is open.
+ * A no-op before `core-digest`'s migrations created the shadow schema. [design §4]
  */
 export async function finishCapture(tx: Transaction, plan: SchemaPlan): Promise<void> {
   if (!(await captureReady(tx))) return;
-  const out = optOut(plan.optedOut);
+  const out = uncaptured(plan);
   const kept = new Set<string>();
   for (const table of await describeTables(tx, plan.schemas.map((schema) => schema.name))) {
     if (!out.covers({ schema: table.schema, table: table.name })) kept.add(shadowDigits(table.schema, table.name));

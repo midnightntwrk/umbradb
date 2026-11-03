@@ -103,6 +103,8 @@ export interface ChainOptions {
   readonly start?: bigint;
   /** Changes the plan before startup (a negative control's deliberately wrong plan). */
   readonly plan?: (plan: SchemaPlan) => SchemaPlan;
+  /** Core modules, started after the backbone and before the modules, and written before them. */
+  readonly core?: readonly ModuleDeclaration[];
 }
 
 /** Validates the parts, plans their schemas and starts the database with them. [DB-9] */
@@ -111,9 +113,9 @@ export async function startChain(
   modules: readonly ModuleDeclaration[],
   options: ChainOptions = {},
 ): Promise<Chain> {
-  const set = validateDeclarations({ backbone: [BLOCK_COMMIT, CORE_DIGEST], core: [], user: modules });
+  const set = validateDeclarations({ backbone: [BLOCK_COMMIT, CORE_DIGEST], core: [...(options.core ?? [])], user: modules });
   const backbone = set.backbone;
-  const startup = [...backbone, ...set.user];
+  const startup = [...backbone, ...set.core, ...set.user];
   const plan = (options.plan ?? ((p: SchemaPlan) => p))(schemaPlan(startup));
   const context = processContext();
   await startDatabase(db, {
@@ -127,7 +129,7 @@ export async function startChain(
     db,
     plan,
     startup,
-    writeOrder: [blockCommit, ...set.user, digest],
+    writeOrder: [blockCommit, ...set.core, ...set.user, digest],
     start: options.start ?? 1n,
     cursor: null,
   };

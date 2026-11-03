@@ -6,7 +6,9 @@
  * (`./declaration.ts`); one written in JavaScript or built at run time was not. So validation takes `unknown` and
  * rejects, with `invalid-declaration` and the field's name, everything `ModuleDeclaration`'s type forbids: a missing
  * or misspelled property, a value of the wrong type, a version that is not semver, `deterministic: true`. It also
- * rejects `needsLockstep` on a public module, since only a private process can run in lockstep. [MD-1, A20, PP-6]
+ * rejects `needsLockstep` on a public module, since only a private process can run in lockstep, and content-defined
+ * tables (`contentDefined`) declared by a user module, or naming a table the item does not list, or on an item declared
+ * `deterministic: false`. [MD-1, A20, PP-6, DT-3]
  *
  * **The rules.** Once every declaration has a valid shape, each rule of {@link DECLARATION_RULES} runs over all of
  * them, in this order, each with its own error code [MD-2]:
@@ -92,7 +94,8 @@ const DECLARATION_PROPERTIES = [
   "points",
 ];
 const ITEM_PROPERTIES = ["name", "lifetimes", "table"];
-const TABLE_PROPERTIES = ["schema", "tables", "kind", "deterministic"];
+const TABLE_PROPERTIES = ["schema", "tables", "kind", "deterministic", "contentDefined"];
+const CONTENT_PROPERTIES = ["tables", "content"];
 const MIGRATION_PROPERTIES = ["id", "sql"];
 const TASK_PROPERTIES = ["name", "needsState", "run"];
 
@@ -246,6 +249,9 @@ function checkItem(shape: Shape, item: unknown, at: string, tables: Map<string, 
       "tables are deterministic unless declared deterministic: false, so omit it for a deterministic table",
     );
   }
+  if (table.contentDefined !== undefined) {
+    checkContentDefined(shape, table.contentDefined, `${at}.table.contentDefined`, names, table.deterministic === false);
+  }
   if (Array.isArray(lifetimes) && lifetimes.length > 0 && !lifetimes.includes("table")) {
     shape.refuse(
       `${at}.table`,
@@ -268,6 +274,45 @@ function checkItem(shape: Shape, item: unknown, at: string, tables: Map<string, 
     tables.set(qualified, name);
   });
   return name;
+}
+
+/**
+ * Checks a table's `contentDefined`: refused for a user module, whose tables are hashed by their rows; for UmbraDB's own
+ * parts, `{ tables, content }`, with at least one of the item's `tables` and a function, on a deterministic item.
+ * [DT-3, LG-11]
+ */
+function checkContentDefined(shape: Shape, value: unknown, at: string, names: readonly string[], optedOut: boolean): void {
+  if (shape.origin === "user") {
+    shape.refuse(
+      at,
+      "nothing: a user module's tables are hashed by their rows",
+      `${shape.who} declares content-defined tables (${at}): only UmbraDB's own backbone parts and core modules may, ` +
+        "since such a table takes part in the contents hash by a content function UmbraDB ships, not by its rows; " +
+        `remove ${at}, and the item's tables are hashed by their rows`,
+    );
+  }
+  if (!isObject(value)) return shape.wrong(at, value, "the content-defined tables, { tables, content }");
+  shape.onlyKnown(value, at, CONTENT_PROPERTIES);
+  const tables = shape.strings(value.tables, `${at}.tables`, true) as string[];
+  if (tables.length === 0) shape.wrong(`${at}.tables`, tables, "at least one of the item's tables");
+  tables.forEach((table, index) => {
+    if (names.includes(table)) return;
+    shape.refuse(
+      `${at}.tables[${index}]`,
+      "one of the item's tables",
+      `${shape.who} declares ${table} content-defined, which is not one of the item's tables (${names.join(", ")}); ` +
+        "list it in the item's tables, or correct its name",
+    );
+  });
+  if (typeof value.content !== "function") shape.wrong(`${at}.content`, value.content, "a function");
+  if (optedOut) {
+    shape.refuse(
+      at,
+      "no content-defined tables on an item declared deterministic: false",
+      `${shape.who} declares content-defined tables on an item declared deterministic: false: a content-defined ` +
+        "table is deterministic and takes part in the contents hash by its content; remove one of the two",
+    );
+  }
 }
 
 /**

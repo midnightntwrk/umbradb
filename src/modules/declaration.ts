@@ -17,6 +17,7 @@ import type { LedgerTask } from "../ledger/types.js";
 import type { z } from "zod";
 import { type EntryBuilder, moduleEntryBuilder } from "../config/entries.js";
 import type { BlockWriteHandle, ReadHandle, SchemaWriteHandle } from "../db/api.js";
+import type { ContentFunction } from "../determinism/contents-hash.js";
 
 /** The points: the runner's steps where module callbacks attach, in the order the runner reaches them. [RN-1] */
 export const POINTS = Object.freeze([
@@ -65,6 +66,20 @@ export interface Migration {
   sql: string;
 }
 
+/**
+ * Tables of a `table` item that take part in the contents hash by what they hold rather than by their bytes, and the
+ * function that gives it (`src/determinism/contents-hash.ts`). They are not captured or digested per block; they stay
+ * deterministic, so the column rules and the `TRUNCATE` guard apply to them. Only UmbraDB's own backbone parts and
+ * core modules declare them: a user module that does is refused (`invalid-declaration`), since its tables are hashed
+ * by their rows. [DT-3, DT-4, LG-11]
+ */
+export interface ContentDefinition {
+  /** Some of the item's tables, at least one. */
+  tables: string[];
+  /** Their content, read from the snapshot the contents hash reads. */
+  content: ContentFunction;
+}
+
 /** Where a `table` item's data lives: its schema, its tables and their kind. [MD-1, DB-8, Q76, Q89] */
 export interface TableDeclaration {
   /** The module's id with `-` replaced by `_`; for a shared item, the item's name with `-` replaced by `_`. [Q89] */
@@ -76,6 +91,8 @@ export interface TableDeclaration {
    * Tables are deterministic by default, so `false` is the only value allowed here. [MD-1, DT-3, DT-4, DT-6, Q76]
    */
   deterministic?: false;
+  /** The item's content-defined tables ({@link ContentDefinition}): UmbraDB's own parts only. [DT-3, DT-4, LG-11] */
+  contentDefined?: ContentDefinition;
 }
 
 /** An item a module provides. [MD-1] */

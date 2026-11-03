@@ -23,6 +23,7 @@ import type { ProcessSide } from "../config/core-settings.js";
 import type { Database } from "../db/api.js";
 import { UmbraError } from "../db/errors.js";
 import { exclusiveJob } from "../db/pglite.js";
+import type { ContentDefinedTables } from "../determinism/contents-hash.js";
 import type { TableName } from "../deterministic-postgresql/index.js";
 import { type BackupFacts, isPrivateDatabase, readBackupFacts } from "./facts.js";
 import { BACKUP_FORMAT, type Manifest, type ManifestTool } from "./manifest.js";
@@ -46,6 +47,11 @@ export interface DumpInput {
   readonly db: Database;
   /** The tables declared `deterministic: false`: the contents hash records them by name only. [MD-1, Q76] */
   readonly optedOut: readonly TableName[];
+  /**
+   * The build's content-defined tables: the contents hash takes them by their content, and a content function's
+   * refusal writes no backup. None unless given. [DT-3, LG-11]
+   */
+  readonly contentDefined?: readonly ContentDefinedTables[];
   /** The process's side: a private process's backup needs the development opt-in. [PP-12] */
   readonly side?: ProcessSide;
   /** The development opt-in of the process's `core` revision. [CF-4, Q102] */
@@ -81,7 +87,7 @@ export function manifestOf(facts: BackupFacts, tool: ManifestTool): Manifest {
 /** The facts of the database `read` sees, a private database refused without the opt-in. [PP-12] */
 export async function factsOf(read: Parameters<typeof readBackupFacts>[0], input: DumpInput): Promise<BackupFacts> {
   if (!input.developmentOptIn && (await isPrivateDatabase(read))) throw privateRefused();
-  return readBackupFacts(read, { optedOut: input.optedOut });
+  return readBackupFacts(read, { optedOut: input.optedOut, contentDefined: input.contentDefined ?? [] });
 }
 
 /** The dump's own header line naming its `pg_dump`'s version, and that version. */
