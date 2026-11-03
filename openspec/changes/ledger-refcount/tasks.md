@@ -184,7 +184,7 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
       every embedded node's key), `nodeKeys`' embedded keys are the ones checked, and a fresh instance of the package
       that wrote them loads and serializes the state of every devnet and preprod height and of every 10th stagenet
       height and the last, reading and accepting every node embedded in those heights' rows under `nodeKey`'s key
-      (stagenet's sample: Q-3.4-1, B, needs the owner's review). Seen failing with a fault in `node-key.ts` put back: an
+      (stagenet's sample: Q-3.4-1, B, kept by the owner). Seen failing with a fault in `node-key.ts` put back: an
       embedded node hashed without its children's keys, and a wrong `embedded` list with right row keys. Coverage of
       `node-key.ts` and `node-refs.ts`: 100 %.
 - [x] 3.5 The content-defined table mechanism (`design.md` §2.5): the declaration of a table item as content-defined,
@@ -455,8 +455,8 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
       pglite}.test.ts`) stopped after 20 heights drawn with seed 4413 (320, 575, 756, 1143, 1660, 2400, 2829, 3097,
       3572, 3809, 5095, 6097, 6354, 7019, 7714, 7861, 8399, 8524, 9056, 9762), the same after every block but the
       contents hash and the rows, read at every 100th height, each stop and the block after it, and R3 at every 100th
-      height from the stored rows, no row outside `R_{h−1} ∪ R_h` (questions file Q-4.4-1, B, needs the owner's
-      review). R14: a SIGKILL at each point (`before-step` at TO_REF, `after-eviction` at TO_EMBEDDED + 1,
+      height from the stored rows, no row outside `R_{h−1} ∪ R_h` (questions file Q-4.4-1, B, kept by the owner
+      2026-11-03). R14: a SIGKILL at each point (`before-step` at TO_REF, `after-eviction` at TO_EMBEDDED + 1,
       `after-node-writes` at REQUEUE, `between-step-writes` at REQUEUE + 1, `before-commit` at AGAIN, `after-commit`
       at REVERT) leaves every `core_ledger_state` table byte for byte and the contents hash of the uninterrupted run
       after h − 1 (h after the `COMMIT`), read from outside by a process of its own; the restarted run's node set and
@@ -475,6 +475,9 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
       final tree but this sentence, 2,812 s): 409 files, 6,450 tests passed, 12 skipped, 1 failed — L38
       (`test/library/channel-queue.test.ts` on PostgreSQL, its 120 s timeout, at load ~20–50), which passes alone
       (`4.4-full-l38-alone`, 36 of 36, diagnostic only); §0 had none.
+      Crash points (review S2): the six R14 points are reached through existing seams (the worker's apply and evict
+      answers, `refcountWriter`, a `FinalizedLoop` subclass), each reporting that it was reached at its height, not
+      through `crash-module.ts` or `UMBRADB_CRASH_HOOK` as the acceptance preamble names them; none uses a timer.
 - [x] 4.5 Backups and the per-block capture.
       **Acceptance:** R15, R17.
       **Done (2026-11-03, this commit):** no `src/` change — the build's mechanism (3.5) and declaration (3.8) are what
@@ -514,7 +517,7 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
       `-preprod-pglite.test.ts`; both runs side by side, the second started once the first committed a block): 20
       restart heights drawn from seed 20261103, each restarted segment loading the state at its cursor from the
       database; devnet with the contents hash after every block, preprod at every 100th height, the restart heights and
-      10,000, the rest after every block (questions file Q-4.6-1, B, needs the owner's review). `[NEG]` committed in
+      10,000, the rest after every block (questions file Q-4.6-1, B, kept by the owner 2026-11-03). `[NEG]` committed in
       `ledger-refcount-determinism.negative-control.test.ts` (`nodes` hashed by its raw rows: the runs' hashes differ
       from TO_REF); seen failing with the fault put back in the main test (the raw rule as its contents hash: "after
       33: contents hash differ" to 100, both backends). Codex: `4.6-dag-1`, `4.6-fault-put-back`, `4.6-touched-1`

@@ -1,4 +1,4 @@
-# TBD — The contents hash's key-ordered read splices its page size into `LIMIT`
+# 00084 — The contents hash's key-ordered read splices its page size into `LIMIT`
 
 - **Status:** OPEN
 - **Area:** determinism (contents hash, primary-key order)
