@@ -3,7 +3,8 @@
 Modifies `core-arch`'s `specs/ledger/spec.md` (`ledger-refcount` `design.md` §0: `core-arch` is archived first, then
 `start-umbradb`, then this change). EARS forms and terms as in `core-arch`'s `specs/runner/spec.md`; the ledger's terms
 as in `core-arch`'s `specs/ledger/spec.md`. Each modified requirement is restated in full; the change is storing ledger
-nodes as the node stores them and reclaiming them by reference counting (`design.md` §2–§4).
+nodes as the node stores them, comparing them by the nodes they hold, and reclaiming them by reference counting
+(`design.md` §2–§4).
 
 ## RENAMED Requirements
 
@@ -25,17 +26,23 @@ the node's own storage does, and a node written again with the same child list S
 `core_ledger_state.states` and the block's reclamation step in the block's `on-db-write`, and persist the state after
 the block. Whole serialized states SHALL NOT be stored. Reads SHALL check each node's hash against its key. WHEN the
 process restarts THE ledger worker SHALL load the state at the cursor from its state key and the stored nodes, and
-reclamation SHALL continue from the stored counts and queue; a worker restarted at any height SHALL store the same
-rows as one that never restarted. THE flushed batch SHALL carry each changed root count as a signed change, which the
+reclamation SHALL continue from the stored counts and queue. `nodes`, `ref_counts` and `unreferenced` SHALL be
+content-defined tables (DT-3, DT-4): `nodes` takes part in the contents hash by its **node set** — the keys of its rows
+and of every node embedded in them, each once — and `ref_counts` and `unreferenced` by a check that they hold exactly
+the counts and queue its rows and `root_counts` give, which, IF it fails, SHALL fail the computation with
+`ledger-refcount-invalid`; none of the three SHALL be captured or digested per block. Two indexers that processed the
+same chain with the same configuration SHALL hold the same node set after every block, whatever their restart
+histories. THE flushed batch SHALL carry each changed root count as a signed change, which the
 writer adds to the stored count, deleting a count that reaches 0 (owner decision Q53).
 
 #### Scenario: Restart from the database alone
 - **WHEN** the process is killed and restarted at cursor h
 - **THEN** the state loaded from the database has the root stored for h, and the next block's root matches the node's
 
-#### Scenario: The same rows whatever the worker's history
-- **WHEN** two indexers process the same chain, one restarted at several heights and one never restarted
-- **THEN** after every block their `core_ledger_state` rows and digests are identical
+#### Scenario: The same node set whatever the worker's history
+- **WHEN** two indexers process the same chain, one restarted at several heights and one never restarted, and the
+  ledger of one keeps a node spelled with a small child referenced where the other writes it embedded
+- **THEN** after every block their node sets, `root_counts`, `states`, digests and contents hashes are identical
 
 #### Scenario: A node written again with another child list
 - **WHEN** block h's batch writes a stored node with a small child referenced where its stored child list embeds it

@@ -1,7 +1,7 @@
-# Design — LEDGER-REFCOUNT: stored ledger nodes stored as the node stores them, reclaimed by reference counting
+# Design — LEDGER-REFCOUNT: ledger nodes stored as the node stores them, compared by content, reclaimed by reference counting
 
 Section numbers of `core-arch` are cited as `core-arch design §n`. Requirement ids are `core-arch`'s (`LG-*`, `CF-*`,
-`DB-*`, `DT-*`, `BK-*`, `RN-*`); criteria are this change's `R1` … `R28` and the rewritten `core-arch` criteria
+`DB-*`, `DT-*`, `BK-*`, `RN-*`); criteria are this change's `R1` … `R29` and the rewritten `core-arch` criteria
 (`acceptance.md`). `organizer:` names a path under `/Users/edwardalvarado/todo/Umbra` (the owner's workspace, not in
 this repository); `upstream:` names the `midnight-ledger` checkout at tag `ledger-9.1.0.0-rc.5`
 (`67f9f97246339539af0091c4d8c6bc5ab236a191`, the commit `vendor/ledger/v9/upstream.json` builds from).
@@ -12,11 +12,13 @@ this repository); `upstream:` names the `midnight-ledger` checkout at tag `ledge
 `openspec/specs/` holds no baseline for the `ledger` capability. `core-arch` is archived first, then `start-umbradb`,
 then this change. `start-umbradb` modifies no `ledger` requirement (its deltas: `admin-endpoints`, `backups`,
 `configuration` CF-1 and CF-4, `library-mode`, `library-surface`, `modules`, `private-processes`, `runner`), so the two
-changes touch no requirement in common. This change's delta (`specs/ledger/spec.md`) renames LG-14 (`## RENAMED
-Requirements`, FROM/TO, as the repository's OpenSpec skill describes it,
+changes touch no requirement in common. This change's `ledger` delta (`specs/ledger/spec.md`) renames LG-14
+(`## RENAMED Requirements`, FROM/TO, as the repository's OpenSpec skill describes it,
 `.claude/skills/openspec-sync-specs/SKILL.md:46, 75-76, 112-115`) and restates LG-11, LG-13 and LG-14 whole under
-`## MODIFIED Requirements`, each header matching `core-arch`'s exactly (LG-14's after the rename). It changes no
-`configuration` requirement, since the `sweep` key stays (O-1). Both changes land in PR #16 (decision Q-F).
+`## MODIFIED Requirements`; its `determinism` delta (`specs/determinism/spec.md`) restates DT-3 and DT-4 whole; each
+header matches `core-arch`'s exactly (LG-14's after the rename), and `start-umbradb` modifies neither capability. It
+changes no `configuration` requirement, since the `sweep` key stays (O-1), and not MD-1 (§2.5). Both changes land in
+PR #16 (decision Q-F).
 
 **The owner's decisions** (2026-11-02; organizer `research/00034-ledger-node-refcount.md` §7 for Q-A … Q-F, organizer
 `spec/00034-ledger-node-refcount.md` §3 for O-1 … O-8):
@@ -36,7 +38,8 @@ Requirements`, FROM/TO, as the repository's OpenSpec skill describes it,
 | O-5 | The node's runtime-version call per block is a separate work item | the proposal's Non-goals |
 | O-6 | One halt code, `ledger-refcount-invalid`, with a reason | §10 |
 | O-7 | Q-38 (which performance work first) is resolved by this change | none (workspace record) |
-| O-8 | "Lets match the node": a node the ledger writes again replaces its stored child list, as both of the node's storage back-ends do; a restarted worker then reads back what the ledger last wrote, which is how the in-memory state is rebuilt after a restart | §2.2, §3.2, §4.4; R27, R28; issue `docs/issues/00078` |
+| O-8 | "Lets match the node": a node the ledger writes again replaces its stored child list, as both of the node's storage back-ends do; a restarted worker then reads back what the ledger last wrote. Then "Content-based": the node tables take part in the contents hash by the nodes they hold, not by their bytes, since the ledger itself can spell one node two ways depending on its memory | §2.2, §2.5, §3.2, §4.4; R27–R29; issues `docs/issues/00078`, `00079` |
+| D-7 | The vendored ledger only exposes inner workings; no change to how it computes, caches or serializes | §2.2, §11: no new ledger patch |
 
 ## 1. Words
 
@@ -56,7 +59,8 @@ Requirements`, FROM/TO, as the repository's OpenSpec skill describes it,
 | `K_h` | What block h keeps: `R_{h−1}`; the rows that the persisted keys after h and the nodes of `N` and `W` reach through the child lists stored after h; and the rows that the stored child lists of `W` at h − 1 reached through the child lists stored at h − 1. |
 | protected in h | A key with a root count after h − 1 or after h, or a key that a stored child list of `W` at h − 1 references. |
 | queue `Q_h` | The keys of `unreferenced` after block h. |
-| content set | Every key a database holds as a row or embedded in a row; it does not depend on forms (§4.5). |
+| node set | Every key a database holds as a row or embedded in a row (an embedded node's key computed from its payload and its children's hashes, as the ledger computes keys). It does not depend on forms: two forms of a node hold the same keys (§2.5). |
+| content-defined table | A table that takes part in the contents hash by what it holds rather than by its bytes, and whose rows are not captured per block (DT-3, DT-4 as this change modifies them): `nodes`, `ref_counts`, `unreferenced` (§2.5). |
 
 ## 2. Storage
 
@@ -72,9 +76,11 @@ Requirements`, FROM/TO, as the repository's OpenSpec skill describes it,
 
 `sweep`, `grey` and `marks` are gone. The `ledger-state` table item lists
 `["nodes", "root_counts", "states", "ref_counts", "unreferenced"]`, kind `mutable` (`core-ledger-state.ts:589` today
-lists the sweep's three). Every table stays in the contents hash (DT-3), captured per block (DT-4) and digested
-(DT-5); none is `deterministic: false`, so a count that differs between two machines shows in that block's
-`ref_counts` digest. Their column types and keys are ones DT-6's startup check accepts (as `root_counts`).
+lists the sweep's three). `nodes`, `ref_counts` and `unreferenced` are **content-defined** (§2.5): the contents hash
+takes `nodes` by its node set and checks the other two against it, and none of the three is captured or digested per
+block. `root_counts`, `states`, `segment_results` and `events` stay byte-hashed, captured and digested as today. None
+of the five is `deterministic: false`: DT-6's column rules and the `TRUNCATE` guard (DB-14) apply to all of them.
+Their column types and keys are ones DT-6's startup check accepts (as `root_counts`).
 
 ### 2.2 Forms, and storing them as the node does (O-8)
 
@@ -113,9 +119,10 @@ After every committed block h with `core-ledger-state` active:
   contract and zswap state loads from the database with all it reaches.
 - **I5 (no leak):** with `sweep` on at h, every key of `Q_{h−1}` that is not protected in h and gains no reference in h
   is gone after h, and so is every row that only such keys reached.
-- **I6 (exact set):** `R_{h−1} ∪ R_h ⊆ K_h ⊆ S_h`; with `sweep` on at h, `S_h = K_h`; and when every node of `N` and
-  `W` is reached from a persisted key after h (the flush, §4.6) and every node of `W` was in `R_{h−1}`,
-  `K_h = R_{h−1} ∪ R_h`.
+- **I6 (exact set):** for a batch in which every node of `N` and `W` is reached, through the batch's child lists and
+  the stored ones, from a key whose root count rises in h — what `flushNodes` takes (§4.6) —: `R_{h−1} ∪ R_h ⊆ K_h ⊆
+  S_h`; with `sweep` on at h, `S_h = K_h`; and when every node of `W` was in `R_{h−1}`, `K_h = R_{h−1} ∪ R_h`. For any
+  other batch, I1–I5 still hold.
 
 By I1 and I3, every row is reached from a persisted key or from a queued key, so the queue names all the garbage.
 
@@ -139,6 +146,47 @@ this change) recorded the old `001` of these parts, so its startup refuses befor
 `checkApplied`); `umbradb restore` of its backup refuses with `backup-build-mismatch` (BK-3). It resyncs into a new
 database (decision Q-B). `requiresResync` (DB-10) could not express this: every core part carries `UMBRADB_VERSION`
 (`src/config/build.ts:46`, `"0.10.0"`, the version of `rc.1` and `rc.2` too), and the check compares versions.
+
+### 2.5 Content-based determinism (O-8; DT-3, DT-4)
+
+The ledger can spell one node two ways (§2.2), and which way it writes depends on its memory: when it creates again a
+node it already holds, its back-end keeps the old copy (`upstream:storage-core/src/backend.rs:485-512`, "only
+reference counts can vary for a given key"), while a worker that does not hold the node creates and writes it anew.
+So two indexers with different restart histories can hold one node in different bytes — and then also differ in which
+small nodes are rows, and in the counts and queue derived from that. Changing the ledger to prevent it is ruled out
+(D-7; reported upstream, issue `docs/issues/00079`). What they cannot differ in is **which nodes they hold**: a key is
+the hash of a node's payload and its children's hashes, the same in every spelling, and every node a spelling embeds
+is still held, with the same key.
+
+So `core-ledger-state`'s node tables take part in the contents hash by content:
+
+- **`nodes`** appears as `[schema, table, ["node_key"], [[k] for every k of its node set, in byte order]]`: the keys
+  of its rows and of every node embedded in them, each once. An embedded node's key is computed on the main thread by
+  the ledger's hash (the 4-byte little-endian payload length, the payload, and each child's key, SHA-256 —
+  `upstream:storage-core/src/arena.rs` `hash`; `test/ledger/node-format.ts:140-148` implements it independently), in a
+  new `src/ledger/node-key.ts` whose output a test checks against the package's keys.
+- **`ref_counts`** and **`unreferenced`** appear as `[schema, table, null, null]`, after a check, in the same
+  snapshot, that they hold exactly the counts and the queue the rows and `root_counts` give (I1–I4). They are
+  bookkeeping derived from the spelling, so they are checked, not compared. IF the check fails THEN the computation
+  fails with `ledger-refcount-invalid` (reason `tables-inconsistent`): a backup is not written, a restore rolls back and
+  refuses, the exported `contentsHash` rejects.
+- **Per block**, none of the three is captured (DT-4) or digested (DT-5). What they hold after block h is fixed by data
+  that is captured and digested: with `sweep` on, the node set after h is what the persisted keys after h − 1 and after
+  h reach (I6), and those are `root_counts`' rows; with it off, what every persisted key since it was turned off
+  reached, from the same history. The configuration that sets `sweep` is in `core_chain.config`, hashed too.
+
+What this guarantees, by construction rather than by test: two indexers that processed the same chain with the same
+configuration have equal node sets after every block, hence equal contents hashes and equal digests of every captured
+table, whatever their restart histories (§4.4). What it does not: equal bytes in these three tables. A spelling that
+would ever change a state result is still caught by the per-block root check (LG-15), which halts.
+
+The mechanism stays inside UmbraDB: the build gives `contentsHash` the content-defined tables and their content
+function as it gives it the opted-out ones today (`src/determinism/contents-hash.ts:34-49`, `options.optedOut`);
+`core-ledger-state` names its three tables content-defined in its declaration, a field only UmbraDB's own core modules
+may set (a user module setting it is refused, `invalid-declaration`), so MD-1, which `start-umbradb` also amends, is
+not changed. The contents hash is computed for backups and restores (`src/backup/facts.ts:108`,
+`src/backup/restore.ts:439-447`) and by the exported `contentsHash` (`src/index.ts:35`); computing a node set reads
+every row once.
 
 ## 3. The reclamation step
 
@@ -212,7 +260,8 @@ All through on-compute's read at h − 1, each an indexed lookup by key list (`=
 the stored child list (one statement that sends the batch's child lists and returns only the rows that differ, so the
 database compares the bytes; probe, §14); which keys of the references of `N` and `W` and of `B.rootCounts` are rows;
 `unreferenced` in full (on preprod 1–2 rows); `root_counts` and `ref_counts` of the keys of `Q_{h−1}`, of
-`B.rootCounts` and of each round's candidates; and, per round of rule 5, the stored child lists of the nodes the round
+`B.rootCounts`, of every key rule 3 decrements, and of each round's candidates — every key whose count can fall, so
+the step knows each such key's count after h, its queue membership and the merge's row count; and, per round of rule 5, the stored child lists of the nodes the round
 deletes. Child lists are parsed to references (`childRefKeys`) and their bytes dropped before the next chunk, so memory
 follows the number of references, not the child lists' size. The number of rounds is at most the depth of the deleted
 chain (5 on the preprod snapshot).
@@ -256,46 +305,49 @@ of `R_{h−1}`. This holds also at the first block with `sweep` on after blocks 
 
 ### 4.4 Determinism across worker histories (O-8)
 
-What UmbraDB stores is a function of the rows after h − 1, block h and the batch's child lists; the step is a function
-of the tables at h − 1 and the batch (§3). The batch's child lists come from the package's memory, which differs between
-a worker that has run since genesis and one restarted from the database. With the row replaced on a rewrite, the
-database holds the child list the ledger last wrote for every row, so a restarted worker rebuilds its memory from the
-same child lists the running worker wrote, and, by induction over blocks, writes the same ones:
+**What is guaranteed.** Two indexers that processed the same chain with the same configuration hold, after every
+block, the same node set, the same `root_counts`, `states`, `segment_results` and `events`, hence equal contents
+hashes and equal digests of every captured table — whatever their restart histories. By induction over blocks:
 
-- a node the package builds afresh gets its children's forms from `child_from` (embedded exactly when small) or from
-  the child objects it holds, and those are either built afresh too or loaded from rows that hold what was last written;
-- the operations that make a small node referenced (`Sp::persist`, `RcMap`, UmbraDB's `hold_as_node` for persisted
-  roots) are steps of the block's own computation, the same in both workers; the vendored patches persist roots through
-  a fresh object (`hold_as_node`, `vendor/ledger/v9/patches/0003-…:333-334`), never by changing an object a state holds;
-- which nodes the package flushes again unchanged depends on its cache, but a node written again unchanged changes no
-  row and no count (§2.2, rule 1).
+- the root counts are the engine's (the new state persisted, the released states, the contract keys, `core-arch`
+  design §5.4), functions of the chain; a worker restart gives the same (`core-arch` A160);
+- with `sweep` on, the node set after h is what the persisted keys after h − 1 and after h reach (I6, for the batches
+  `flushNodes` gives); a key is a hash of content, so what a key reaches does not depend on how any node is spelled;
+- with `sweep` off, nothing is deleted, and the node set is what every persisted key since then reached;
+- the state roots are checked against the node's at every block (LG-15), so the `states` rows are the node's.
 
-This is the property Midnight's own consensus needs: a validator restarted at any block must compute the same state as
-one that never stopped, and both of the node's back-ends replace a rewritten node as UmbraDB now does. *The argument
-covers the paths read here; in general it is unconfirmed.* R28 tests it: a worker that never restarts and workers
-restarted at several heights store identical rows and digests, on the DAG fixture (including a small child the test
-package holds by reference) and on the recorded tapes; R21 counts the rewrites that change a node's bytes on the tapes;
-and the state root is checked against the node's at every block (LG-15). If R28 ever fails, the fallback is to start
-every block from the database with nothing carried in the ledger's memory; it is not part of this change.
+**What is not guaranteed: equal bytes in `nodes`, `ref_counts`, `unreferenced`.** A running worker can keep an old
+spelling of a node that a restarted worker writes anew (`upstream:storage-core/src/backend.rs:485-512`), so two
+indexers' rows for that node can differ; the content-based contents hash (§2.5) does not see it, by design. Replacing a
+node written again (§2.2) keeps each indexer's restarts consistent with what its own ledger last wrote, as the node's
+storage does. If a spelling difference ever changed a state result, the per-block root check halts that indexer.
+
+R28 tests the guarantee with a test package that keeps an old spelling in a never-restarted run and writes the new one
+in a restarted run, and on the recorded tapes with runs restarted at 20 heights; R29 tests the content-based hash
+itself.
 
 ### 4.5 Equal to the sweep where its cycle fits one block
 
 The runtime sweep keeps the first copy of a node written again, and counting replaces it, so their rows can differ in
-form; compare the **content sets** instead (every key a database holds as a row or embedded in a row, each embedded
+form; compare the **node sets** instead (§2.5: every key a database holds as a row or embedded in a row, each embedded
 node's key computed with `test/ledger/node-format.ts`'s `nodeKey`), which do not depend on forms. LG-14's sweep, when a
 whole cycle starts and ends in block h, marks from the root counts at h − 1 and the keys whose count rose in h
 (`sweep.ts:197-208`) through stored and batch child lists (`sweep.ts:218`) and deletes every unmarked row, keeping the
 content reachable from the persisted keys after h − 1 and after h; counting keeps the same content when the nodes the
-batch writes are reached from a rising key (§4.3, §4.6). Both start empty at genesis, so their content sets are equal
+batch writes are reached from a rising key (§4.3, §4.6). Both start empty at genesis, so their node sets are equal
 at every height up to the first block whose cycle does not fit. On preprod every block so far ran a whole cycle
 in-block (`sweep.cycle` = height + 1, cycle 46,739 when the run stopped near 46,738: organizer plan P13.3 and questions
 Q-37). Where a cycle spans blocks, the sweep deletes a row only if nothing reachable from the roots at the cycle's start
-or from any key that rose during it reaches it, a superset of what counting keeps: counting's content set is a subset of
+or from any key that rose during it reaches it, a superset of what counting keeps: counting's node set is a subset of
 the sweep's. *Derived here; R2 and R4 test both claims.*
 
-When the sweep's model is fed the counting run's batches (R4), the comparison is valid in both regimes: the sweep model
-deletes a node only after counting deleted it (subset), so the counting run's package, which evicted it, writes it
-again whenever a later state needs it, and the sweep model sees that insert.
+When the sweep's model is fed the counting run's batches (R4), the comparison is valid in both regimes for histories
+without rewritten nodes: the sweep model deletes a node only after counting deleted it (subset), so the counting run's
+package, which evicted it, writes it again whenever a later state needs it, and the sweep model sees that insert. With a
+rewrite the two keep different rows (the sweep model keeps the first child list, counting the new one; a small node a
+rewrite makes a row can then outlive, under counting, what the sweep keeps), so R2 and R4 compare only histories
+without rewrites, and on a recorded tape only the heights before the first rewrite R21 counts there; rewrites are
+covered by R1, R3, R27 and R28.
 
 ### 4.6 The flush
 
@@ -336,8 +388,8 @@ the step keeps nothing in memory between blocks.
 ## 8. Determinism across backends
 
 `ref_counts` after h is a function of the rows and their child lists after h (I2), and `S_h` and `Q_h` are fixed by
-the rules from the tables at h − 1 and the batch; with §4.4, every machine that processed the same chain stores the
-same rows. The cascade's fixed point does not depend on the order of its rounds or of a round's keys; the writes are
+the rules from the tables at h − 1 and the batch; for the same batch, PostgreSQL and PGlite store the same rows (R3,
+A105). Across indexers with different worker histories, §4.4 gives equal node sets and equal hashes. The cascade's fixed point does not depend on the order of its rounds or of a round's keys; the writes are
 set operations; the statements are the shapes both backends run (`unnest` of `bytea[]`, `= ANY`, `ON CONFLICT … DO
 UPDATE … WHERE`, a data-modifying `WITH`), with the same affected-row counts on PostgreSQL 18.6 and PGlite 0.5.10
 (§14). The digests compare each key's row before and after the block (DT-4), so netting is not visible in them.
@@ -389,6 +441,9 @@ names the test that triggers it (A87).
 | `src/backbone/core-ledger-state/core-ledger-state.ts` | `sweepOf` → the counting step; the `sweepBudget` and `greyPicker` options removed; the `ledger-state` item's tables (§2.1); `writeBlock` returns the written count |
 | `src/backbone/core-chain/sql.ts`, `src/backbone/core-private-source/sql.ts` | One migration `001` each (§2.4) |
 | `src/deterministic-postgresql/errors.ts`, `src/runner/failures.ts` | The halt code (§10) |
+| `src/determinism/contents-hash.ts`, `src/db/change-capture.ts`, the schema plan (`src/db/roles.ts`) | Content-defined tables: hashed by their content function, not captured per block; DT-6's rules and the `TRUNCATE` guard kept (§2.5) |
+| `src/ledger/node-key.ts` | New: a node's key from its payload and its children's keys (the node set's embedded keys) |
+| `src/modules/declaration.ts`, `src/modules/validation.ts` | The content-defined declaration of a table item, refused for user modules (§2.5) |
 | `src/ledger/` comments that name "the sweep" (`adapter.ts:328`, `types.ts:270`, `worker/engine.ts:67-69, 642`, `worker/host.ts:107`) | Reworded to reclamation; no behaviour change |
 | `src/config/core-settings.ts:177`, `src/config/history.ts`, `src/cli/config-check.ts` | Unchanged (O-1) |
 | `vendor/ledger/` | Unchanged: no new patch |
@@ -407,10 +462,11 @@ names the test that triggers it (A87).
 | `test/backbone/ledger-eviction-restart.test.ts`, `.negative-control.test.ts` (A160) | Kept; the restart recomputes the counting step |
 | `test/ledger/worker-sweep.test.ts` | Kept (the worker's eviction is unchanged); renamed `worker-eviction.test.ts`, its comments reworded |
 | `test/ledger/fixtures/sweep-fixture.ts`, `sweep-test-loader.ts` | Kept as the DAG fixture and test package of the counting tests and of A160; extended as A105 says |
-| New | the reference model and reachability oracle (`test/backbone/refcount-model.ts`, R1, R2); the step's unit tests; R3–R17's, R22's, R27's and R28's tests |
+| New | the reference model and reachability oracle (`test/backbone/refcount-model.ts`, R1, R2); the step's unit tests; R3–R17's, R22's and R27–R29's tests; `node-key.ts` checked against the packages' keys |
 
 **Documents.** `CHANGELOG.md` (one line: reclamation by reference counting; a node written again replaces its stored
-child list; one migration per part; databases of earlier builds refused); `ROADMAP.md:37, 87`; `core-arch` design
+child list; the ledger's node tables hashed by the nodes they hold; one migration per part; databases of earlier
+builds refused); `core-arch` design §4 (the determinism component: content-defined tables); `ROADMAP.md:37, 87`; `core-arch` design
 §5.4 (its sweep paragraphs replaced by a pointer to this design's §2–§7), §8 (`accepted_config`'s migration,
 design.md:1459), §10 (the `nodes` row's "an existing key is left as it is" replaced by §2.2's rule; the three sweep rows
 replaced by the two tables; the `002` notes of `core_chain.identity` and `core_private_source.accepted_config`) and §11
@@ -457,7 +513,7 @@ adjusted for Q-B, Q-E and O-8:
 |---|---|---|
 | 0 | Measure on the recorded tapes: per-block figures, the conversion spike, the nodes written again and how many of them change their child list | R21 |
 | 1 | Reference model and reachability oracle; the model against the sweep's model | R1, R2 |
-| 2 | The replacing node write; `refcountStep` behind its tables seam; the migrations of §2.4; the halt code; every negative control seen failing | R11, R12, R16, R19, R27 |
+| 2 | The replacing node write; `refcountStep` behind its tables seam; content-defined tables in the contents hash and change capture; the migrations of §2.4; the halt code; every negative control seen failing | R11, R12, R16, R19, R27, R29 |
 | 3 | Wiring on both backends: model equality, backend equality, determinism across worker histories, the sweep differential (also against the runtime sweep, recorded before it is removed), restart, crash points, A160, nodes written again, a queued key referenced again, the lag, reuse, a lowered window, `sweep: off`, backups, the conversion | A104, A105, A160, R3–R10, R13–R15, R17, R22, R28 |
 | 4 | Remove the runtime sweep (with the split of `sweep-tapes.ts`, §11); documents; the required test id; `npm run graph:refresh` | A134 (deferred, Q191), R18, R20, R26 |
 | 5 | The local preprod runs | R23–R25 |
@@ -483,7 +539,9 @@ every block on the DAG fixture and at sampled heights on the tapes.
 | `flushNodes` takes only nodes reachable from a key whose root count rose, stopping at nodes believed stored | `vendor/ledger/v9/patches/0001-storage-core-external-node-store.patch:143-190`, `0003-…:386-423` | Verified (repository); not relied on for safety (§4.6) |
 | `layout-v2` writes a re-created node again | `upstream:storage-core/src/backend.rs:532-534` | Verified (upstream, pinned) |
 | `midnight-storage-core` `layout-v1` kept a reference count per node and deleted at zero, decrementing children with multiplicity; `layout-v2` removed it | `upstream:storage-core/src/backend.rs:1202-1218`, `upstream:storage-core/src/db/sql.rs:250-266, 340-399`, `upstream:CHANGELOG_storage_core.md:23` | Verified (upstream, pinned); the reason for the removal is not given there (unconfirmed, not built on) |
-| A restarted and a never-restarted worker write the same child lists once rewrites replace the stored row | §4.4's argument over the paths above | Unconfirmed in general; R28 tests it on the fixture and the tapes, R21 measures rewrites |
+| A running worker keeps the old copy of a node it creates again; a worker that does not hold it creates it anew | `upstream:storage-core/src/backend.rs:485-512, 531-534` | Verified (upstream, pinned); the reason the bytes, not the node set, can differ across histories (§2.5, §4.4) |
+| The contents hash is computed for backups, restores and the exported `contentsHash`; opted-out tables are passed in by the build | `src/backup/facts.ts:108`, `src/backup/restore.ts:439-447`, `src/index.ts:35`, `src/determinism/contents-hash.ts:34-49` | Verified (repository) |
+| The ledger's node key is SHA-256 over the 4-byte little-endian payload length, the payload and each child's key | `upstream:storage-core/src/arena.rs` `hash`; `test/ledger/node-format.ts:140-148` (an independent implementation the tests already check against the packages) | Verified (repository and upstream); `src/ledger/node-key.ts` checked against the packages by a test (§11) |
 | The sweep's cycle fit one block at every preprod height of the stopped run | Organizer plan P13.3, questions Q-37 | Measured |
 | The devnet v8 → v9 tape converts at F = 103 with contracts deployed on v8 | `test/backbone/contract-data.test.ts:209` | Verified (repository) |
 | Every core part's migrations, and `main`'s lack of them | `git grep 'id: "00'` over `src/` (three parts with a `002`; `core-health`, `core-config`, `core-status`, `core-block-fetch` with none); `main` (`c8b6ff1`) has no `src/backbone/` and no `src/db/migrate.ts` | Verified (repository) |

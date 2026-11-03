@@ -49,17 +49,21 @@ such a row for a block or deletes it, but cannot make its insertion deterministi
 ## Fix (specified in `ledger-refcount`)
 
 Rewriting stored child lists into one form would not do: the ledger's storage-cost accounting reads a node's child
-list and counts referenced and embedded children differently (`upstream:storage/src/delta_tracking/mod.rs:199-300`),
-so a restarted worker reading a rewritten form could compute another state than the node. The owner chose to match the
-node instead:
+list and counts referenced and embedded children differently (`upstream:storage/src/delta_tracking/mod.rs:199-300`).
+And when the ledger creates again a node it already holds, its back-end keeps the old copy
+(`upstream:storage-core/src/backend.rs:485-512`), so even a database that stores exactly what the ledger last wrote can
+differ in bytes between two indexers with different restart histories (reported upstream as issue 00079). The owner's
+decisions (O-8, D-7):
 
-1. When the ledger writes again a node already stored with another child list, the stored child list is replaced, as
-   both of the node's storage back-ends do (`upstream:storage-core/src/db/sql.rs:578-590`, `INSERT OR REPLACE`;
-   `upstream:storage-core/src/db/paritydb.rs:261-280`, `Set`); a node written again unchanged touches no row. A
-   restarted worker then rebuilds its memory from the child lists the ledger last wrote, as a restarted node does.
-2. Reference counting subtracts a rewritten node's old references and adds its new ones, and keeps a reference a
-   rewrite drops one block longer, since the state the worker still holds may reach it.
-3. Criteria R27 (a rewrite replaces the row and counts it) and R28 (a never-restarted run and runs restarted at 20
-   heights store identical rows and digests, on the fixture and the recorded tapes) verify it; R21 counts rewrites on
-   the tapes. If R28 ever fails, the fallback is to start every block from the database with nothing carried in the
-   ledger's memory.
+1. **Match the node.** A node written again with another child list replaces the stored one, as both of the node's
+   storage back-ends do (`upstream:storage-core/src/db/sql.rs:578-590`, `INSERT OR REPLACE`;
+   `upstream:storage-core/src/db/paritydb.rs:261-280`, `Set`); a node written again unchanged touches no row.
+2. **Compare by content.** `nodes`, `ref_counts` and `unreferenced` become content-defined tables (DT-3, DT-4 as the
+   change modifies them): the contents hash takes `nodes` by its node set — the keys of its rows and of every node
+   embedded in them, which no spelling changes — and checks the other two against the rows; none of the three is
+   captured or digested per block, since what they hold is fixed by `root_counts`, which is.
+3. **No change to the ledger.** The vendored packages only expose inner workings.
+
+Two indexers that processed the same chain then hold the same node set and have equal contents hashes and digests,
+whatever their restart histories; R28 and R29 test it. Their bytes for these three tables can still differ, as the
+ledger itself does not make them equal.
