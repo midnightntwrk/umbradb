@@ -66,8 +66,18 @@ R24. Every commit is the corporate identity's, signed and with its DCO line; non
       released at h"); with the fault put into the property itself it fails after one run. Questions Q-2.1-1
       (`missing-reference` checks a deleted rewritten node's new list too, as written: the generators avoid the case,
       a test pins the halt) and Q-2.1-2 (both faults committed). Five Codex runs green (`2.1-r1-run1`…`5`).
-- [ ] 2.2 The model against the sweep's model (`test/backbone/sweep-model.ts`).
+- [x] 2.2 The model against the sweep's model (`test/backbone/sweep-model.ts`).
       **Acceptance:** R2.
+      **Done (2026-11-03, this commit):** `test/backbone/refcount-sweep-differential.test.ts` feeds 2.1's histories in
+      one form (`historyScripts({ oneForm: true })`: admissible batches, no rewrite, no other form after a deletion;
+      the test checks each batch admissible and each key's child list unchanged) to the counting model and to
+      `SweepModel`, and compares node sets (`nodeSet`) after every block (seed 20261104, 150 runs each): equal with a
+      budget of 1,000,000, under which the sweep ends its cycle in every block with `sweep` on (checked); a subset with
+      a budget of 50. The runs delete and write rows again and turn `sweep` off (2,423 deletions, 712 rows written
+      again, 273 heights off), and with budget 50 cycles span blocks (534 blocks) and the sweep holds more at 446
+      heights; the test asserts floors on these. `[NEG]`: the counting model with its cascade stopped after the first
+      round differs from the sweep's where each cycle fits (committed control; with the fault put into the equality
+      property it fails at height 2 of its first run). Five Codex runs green (`2.2-r2-run1`…`5`).
 
 ## 3. Storage, the step, and the switch (`design.md` §2, §3, §10; §13 phase 2)
 

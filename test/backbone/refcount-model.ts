@@ -327,11 +327,12 @@ export interface HistoryScript {
 
 /**
  * Generated histories. With `oneForm`, no node is rewritten, none is written again in another form after its
- * deletion, and every batch is admissible (no node nothing reaches, no rewrite). [R1, R2]
+ * deletion, and every batch is admissible: no new node that a rising key does not reach, no rewrite. [R1, R2]
  */
-export function historyScripts(options: { readonly oneForm: boolean; readonly maxBlocks?: number }): fc.Arbitrary<
-  HistoryScript
-> {
+export function historyScripts(options: {
+  readonly oneForm: boolean;
+  readonly maxBlocks?: number;
+}): fc.Arbitrary<HistoryScript> {
   const none = fc.constant(0);
   const rarely = fc.oneof({ weight: 4, arbitrary: none }, { weight: 1, arbitrary: fc.constant(1) });
   const kind: fc.Arbitrary<BlockKind> = fc.oneof(
@@ -436,7 +437,7 @@ const treeRefs = (tree: readonly Child[]): string[] => refsOf([...tree]).map(hex
  * previous state's root shares, new ones, queued or older nodes), releases the states outside the window, and flushes,
  * as `flushNodes` does, every node reached from a key whose root count rises down to the nodes the package holds as
  * stored; then the block's script adds rewrites, nodes written again, new nodes nothing reaches and the rewrites of a
- * queued node. The package learns of deletions by their eviction ({@link commit}). [R1]
+ * queued node. The package learns of deletions by their eviction ({@link GraphWorld.commit}). [R1]
  */
 export class GraphWorld {
   readonly #oneForm: boolean;
