@@ -1,123 +1,94 @@
-# Proposal — TOKEN-METADATA: MIP-0018 token metadata from contract logs (`token-metadata`)
+# Proposal — TOKEN-METADATA: port the MIP-0018 token indexer's metadata core to UmbraDB 0.10.0 (`token-metadata`)
 
-> **Status:** Proposed (2026-11-05, second draft: revised for a start at any height and computed colors after an
-> internal review; Jonathan took the recommended answers to Q-1 … Q-4 and D-A … D-C, and answered D-D, on 2026-11-05. Not yet through the
-> stage-1 cold adversarial review or the owner's approval). No code yet.
+> **Status:** Proposed (2026-11-05, third draft: rewritten as a port of the proof of concept, acedward/umbradb PR #26 and
+> #27; decisions P-1 … P-3 and the corrected D-D taken by Jonathan on 2026-11-05. Not yet through the stage-1 cold
+> adversarial review or the owner's approval). Requires `fast-logs-unresolved`. No code yet.
 
 ## Why
 
-Midnight wallets and explorers cannot tell what a token is: a contract-issued UTXO carries a 32-byte color and no
-name, and a contract token has no generic way to be found or labelled. MIP-0018 ("On-Chain Token Metadata Emission",
-status Proposed, text pinned at commit
+MIP-0018 ("On-Chain Token Metadata Emission", pinned at
 [`338ea19`](https://github.com/midnightntwrk/midnight-improvement-proposals/blob/338ea19/mips/mip-0018-on-chain-token-metadata.md),
-7 Oct 2026) lets a contract describe its own tokens in MIP-0002 `Misc` events named `mip-0018:token-metadata[v1]`; a
-consumer folds them into one current value per key. It needs only ledger v9's contract logs: today stagenet (rc.3), and
-preview once its hard fork to v9 lands (expected by the end of November 2026), when stagenet is retired.
+the same file as `eb94bc1`, the merge of MIP PR #372) lets a contract describe its own tokens in MIP-0002 `Misc` events.
+A working token indexer and explorer for it already exists on UmbraDB's 0.9.5 line: the **proof of concept**,
+[acedward/umbradb PR #26](https://github.com/acedward/umbradb/pull/26) (server, `760d3e9`, final audit passed, 119/119
+required tests) and [PR #27](https://github.com/acedward/umbradb/pull/27) (the same in a Chrome tab on PGlite, preview at
+https://stagenet.umbradb.pages.dev). It runs on the npm package `@midnightntwrk/ledger-v9` 1.0.0-rc.3 and depends on the
+official indexer's GraphQL for per-segment outcomes.
 
-The project's goal is a showcase anyone can run: a developer opens UmbraDB's browser build against the network,
-submits metadata events, and sees them appear — from whatever height the page started at, with a partial view where
-earlier data is missing. UmbraDB already stores every MIP-0002 log of a block in the shared item `contract-logs`
-(`core-arch` CC-2 … CC-4; `src/backbone/contract-logs/contract-logs.ts`), and `core-contract-logs-fast` gives it from
-any height without the ledger state (CC-3). The roadmap lists token metadata as feature **F4, priority P1**, built on
-`contract-logs` (`ROADMAP.md:125`); F10 builds on it (`ROADMAP.md:131`).
-
-The MIP becomes Active once at least two independent consumers pass every normative vector (MIP-0018 "Path to
-Active"). Its reference implementation,
+Stagenet (ledger v9-rc3) goes away when preview gets ledger v9 by hard fork, expected by the end of November 2026.
+UmbraDB 0.10.0 (`core-arch`) already selects vendored ledgers per runtime (v9-rc3, v9), ingests from the node alone, keeps
+deterministic module tables, and has its own browser build. Porting the proof of concept onto it keeps the explorer
+working across the hard fork, from any start height, without the official indexer. The roadmap lists token metadata as
+feature **F4, P1** (`ROADMAP.md:125`). The MIP's reference implementation,
 [`midnight-experiments/mip-0018`](https://github.com/midnight-experiments/mip-0018/tree/e8295792d9363be37ff2f7f716c740fcdf3f195e),
-is the first, pinned to an earlier MIP text (`274a84f`); its README lists the second as "not provided". The official
-indexer decodes no MIP-0018 (`indexer-common/src/domain/ledger/ledger_state.rs:2077-2097` at
-[`4930c4e`](https://github.com/midnightntwrk/midnight-indexer/tree/4930c4e059b5ede24b5f4055a07453dbabfac3cc)).
+supplies the codec, vectors and stagenet cases both use.
 
 ## What changes
 
-1. **A new module `token-metadata`** (`design.md` §D1) shipped in the package and enabled by a configuration entry.
-   It requires only `contract-logs`, declares no ledger task, and can start at any height (`startsMidChain: true`,
-   MD-4), with either log provider, in the browser and on a server (TM-1).
-2. **Facts, not state** (TM-2, TM-8; `design.md` §D4): per block, the module stores each candidate event with its
-   outcome and each accepted record. Nothing it stores depends on earlier blocks, so rows are the same whatever the
-   start height.
-3. **Reading the events** (TM-3 … TM-6): `Misc` logs with the exact v1 name, the 256-byte payload zero-extended as the
-   MIP's "Consuming" requires, checked by the MIP's three checks and six value types; a bad event is rejected whole and
-   never affects another. A log serialization this build does not know halts the module rather than emptying it (TM-4).
-   The decoder is written from the MIP text (Q-1).
-4. **Colors computed** (TM-7, TM-12; `design.md` §D2): for kinds 1 and 2 the color is computed from `domainSep` and the
-   emitting contract (the MIP's `tokenType`), never read from a payload. No mint scanning.
-5. **Answers are replays with their coverage** (TM-9 … TM-17; `design.md` §D5): each answer applies the identity's
-   records in chain order (tombstones, vanished identities), then the serving rules: only defined keys, unusable values
-   shown without fallback, names and symbols truncated by grapheme clusters, symbol groups per contract, marked history
-   (Q-2). Every answer says which heights it covers and whether that is the whole chain.
-6. **Routes and a subscription** (TM-18, TM-19): by color and kind, a contract's identities, one identity, its history,
-   a contract's groups, and a subscription of changed identities after each commit.
-7. **Acceptance** (`acceptance.md`): every normative MIP vector (A1–A6, R1–R6, the ignore rule, S1–S12); the reference
-   repository's vectors with the ones the current text supersedes listed; UmbraDB's adapter for the reference runner;
-   the reference repository's 13 stagenet cases replayed in CI from a tape with a mid-chain start (Q-4).
+1. **A module `token-metadata`** (`design.md` D1): the proof of concept's metadata core as a module that requires only
+   `contract-logs`, with the core's finalized loop in place of its archive and scanner. Shipped in the package, enabled
+   by a configuration entry, from the database's first height on any network (TM-1).
+2. **Its rules, reused** (D7): the vendored reference codec and vectors, `classify.ts` (UTF-8 keys), and `state.ts`
+   (defined keys, per-key tombstones, withdrawal, usability, truncation, groups of two or more, marks) (TM-2 … TM-11).
+3. **Unresolved logs, not halts** (TM-5, TM-11): the unresolved sites of `fast-logs-unresolved` stored as `unresolved`
+   events and reflected in marks, as the proof of concept does.
+4. **Its `/v1` API** (TM-12, TM-13; D5): status, tokens, a color, an identity, a contract's tokens and groups, the
+   lookup and events, with the API contract's shapes and rules; mint-, activity- and image-derived fields served empty
+   until the changes that add them.
+5. **Evidence** (`acceptance.md`): every vendored and UmbraDB vector on both backends; the proof of concept's stagenet
+   ranges re-recorded as UmbraDB tapes, with its case fixtures, and its own API answers recorded from it as the
+   reference for the port's; the module in the browser build.
 
 ## Non-goals (what this change does NOT cover)
 
-- **No change to the core.** No new or changed `core-arch` requirement; no change to `CORE_MODULES`, the ledger worker
-  or `ParsedTransaction`.
-- **No browser page.** The screen that shows events arriving is a separate change, chained after this one (D-B). This
-  change gives it the API and makes the module run in the browser build.
-- **No change to `core-contract-logs-fast`.** It stays development-only and keeps halting on a partially successful
-  transaction that logs (D-C); recorded as issue `docs/issues/00085`.
-- **No complete view from a mid-chain start.** A token described before the start height shows nothing until described
-  again; answers say so (TM-9). No backfill from earlier blocks.
-- **No mint scanning** and no `segment-results`: colors are computed (`design.md` §D2).
-- **No official-indexer compatibility.** No GraphQL, no `MiscContractEvent` shape, no id numbering: that is F1 and F2.
-- **No ledger v8 metadata.** v8 has no contract logs (`core-arch` Q54); nothing is read from circuits or registries.
-- **No later MIP-0018 version** (`[v2]` events are ignored, as the MIP requires) and no key a later MIP defines.
-- **No off-chain fetching.** `image` is served as the URI it is; checking content against `image_sha256` is the
-  client's.
-- **No curation**, allowlists, or cross-contract grouping, and **no amount display** (S8 concerns consumers that
-  display amounts; `decimals` is served).
-- **No reorganization handling.** UmbraDB applies finalized blocks only (`core-arch` RN-6, RN-14), the MIP's alternative
-  to recomputing state (S4).
-- **No change to the reference repository** and no move of it to ledger rc.5 or rc.7.
-- **No fix for preview's v9 runtime or ledger release.** If preview's hard fork ships runtime 3,000,000 or higher, or a
-  ledger rc other than the vendored rc.5, UmbraDB needs those changes first (the runtime table's cap, the vendored
-  ledger); they are separate changes.
+- **No explorer page.** Ported in the next change (the proof of concept's `ui/`, into 0.10.0's browser build); this
+  change makes the module run there and serves the API the page reads.
+- **No mints, seen colors, activity, Bech32m or `minted` statistics** (a later change; it needs mint effects, which a
+  ledger task gives). Lookup resolves described identities only until then.
+- **No image fetching** (`/v1/images`, the fetcher; a later, server-only change).
+- **No JSON RPC tab** (PR #27's; it belongs to `evm-compat`).
+- **No change to the core** beyond `fast-logs-unresolved`, a separate change.
+- **No late start.** The module cannot be added to a database above its first height (TM-1).
+- **No official-indexer dependency** and no reorganization handling (finalized blocks only, RN-6, RN-14).
+- **No fix for preview's v9 runtime or ledger release** if its hard fork needs one (the runtime table's cap, the vendored
+  ledger); separate changes.
+- **No change to the proof of concept or the reference repository.**
 
 ## Decisions taken (2026-11-05)
 
-- **Q-1** Decoder written from the MIP text; the reference vectors are tests only.
-- **Q-2** Replaced values are served as marked history.
-- **Q-3** Shipped in the `umbradb` package as `src/features/token-metadata/`, id `token-metadata`, outside
-  `CORE_MODULES`.
-- **Q-4** CI replays the stagenet cases from a tape with a mid-chain start; no full replay from genesis is required.
-- **D-A** The module starts at any height and answers with its coverage.
-- **D-B** The browser page is a separate change.
-- **D-C** `core-contract-logs-fast`'s halt stays; an issue records it.
-
-- **D-D** The "working proof of concept with a different ledger version" of the project's overview is
-  `midnight-experiments/mip-0018` at `e8295792…`, the reference repository this change already uses. Its ledger
-  version is rc.3 (stagenet's, `toolchain.json` `ledgerTarget`), not the v9 release preview's hard fork will bring; this
-  change follows the logs of whichever v9 package the block's runtime selects, so it needs no change for that, beyond
-  the runtime and ledger dependencies in the non-goals.
+- **P-1** Port in a chain of changes: (1) this metadata module and API, (2) the explorer page in the browser build, (3)
+  mints, seen colors, activity, NIGHT/DUST amounts, (4) images, server only. PR #27's JSON RPC tab is out of scope.
+- **P-2** The proof of concept's `/v1` contract is kept, with `/v1/status` mapped to the process (D5).
+- **P-3** `core-contract-logs-fast` records unresolved sites instead of halting (`fast-logs-unresolved`); issue `00085`.
+- **E-3** The proof of concept's readings: an identity exists by its defined keys, groups need two members, no history;
+  but `name` and `symbol` are cut when served, not stored, to keep stored rows independent of the Node version.
+- **Q-1 (revised)** The reference codec is vendored, as the proof of concept does.
+- **Q-3** Shipped in `umbradb` as `src/features/token-metadata/`, outside `CORE_MODULES`.
+- **Q-4 (revised)** Stagenet evidence from tapes over the proof of concept's ranges.
+- **D-B** The explorer page is the next change.
+- **D-D (corrected)** The proof of concept is acedward/umbradb PR #26 and #27; `midnight-experiments/mip-0018` is the
+  MIP's reference implementation.
 
 ## Capabilities
 
 ### New Capabilities
 
-- `token-metadata`: reading MIP-0018 `TokenMetadata` events from contract logs at any height, storing them as per-block
-  facts, and serving identities' current fields, colors, groups and history with their coverage.
+- `token-metadata`: MIP-0018 metadata from contract logs, kept per identity, served as the proof of concept's `/v1` API.
 
 ### Modified Capabilities
 
-None.
+None (the core's `contract-data` change is `fast-logs-unresolved`).
 
 ## Impact
 
-- **Code:** a new `src/features/token-metadata/` (module, decoder, log reader, color, SQL, routes) and its export from
-  `src/index.ts`.
-- **Databases:** two new append-only tables in the module's own schema `token_metadata`, deterministic and in the
-  contents hash; no existing table changes. Only databases with a `token-metadata` entry get them, and an existing
-  database can add one at any height.
-- **Configuration:** a new module entry; with `core-contract-logs-fast` (development opt-in) from any height, or with
-  `core-contract-logs-full` for a complete view from 0. A network on ledger v8 accepts it and stores nothing until it
-  upgrades.
-- **Tests and fixtures:** the MIP vectors; the reference vectors and stagenet cases copied under
-  `test/fixtures/mip-0018/`; a new stagenet tape over 710,806–724,957 added to the tapes release and to
-  `test/tape/real/manifest.json`.
-- **Docs:** `docs/module-guide.md`, `docs/operator-guide.md`, `docs/browser.md` (adding the module to a browser
-  configuration), `ROADMAP.md` (F4's status), `README.md`; issue `docs/issues/00085`.
-- **Dependencies:** none new at runtime.
+- **Code:** `src/features/token-metadata/` (module, log reader, ported `classify.ts` and `state.ts`, vendored codec, SQL,
+  routes); its export from `src/index.ts`.
+- **Databases:** schema `token_metadata`, three tables, deterministic and in the contents hash; only with an entry.
+- **Configuration:** a module entry from the database's first height; with `core-contract-logs-fast` (development
+  opt-in) at any height, or `core-contract-logs-full` from 0.
+- **Tests and fixtures:** `test/fixtures/mip0018/` (vendored vectors, UmbraDB vectors, cases, the proof of concept's
+  recorded API answers);
+  two stagenet tapes added to the tapes release and `test/tape/real/manifest.json`.
+- **Docs:** `docs/module-guide.md`, `docs/operator-guide.md`, `docs/browser.md`, `ROADMAP.md` (F4), `README.md`,
+  `NOTICE` for the vendored codec.
+- **Dependencies:** none at runtime beyond the vendored codec (Apache-2.0).

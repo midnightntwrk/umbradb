@@ -2,8 +2,10 @@
 
 - **Status:** OPEN
 - **Area:** contract data (`core-contract-logs-fast`)
-- **Severity:** medium for the `token-metadata` change's showcase (a live browser demo stops), low for the core.
-- **Effort:** medium — a spec change to CC-3 and its acceptance, then the module.
+- **Severity:** high for any mid-chain deployment, the browser build included: anyone can deploy a circuit whose log
+  `-fast` cannot read (a value from state, or behind a branch) and so halt every UmbraDB that follows the network with
+  `-fast`.
+- **Effort:** medium — the change `openspec/changes/fast-logs-unresolved/` (CC-3 rewritten, CC-5 added).
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-11-05, while drafting `openspec/changes/token-metadata/` (proposal decision D-C), on branch
   `00028-core-arch` at `dd56c93`.
@@ -28,6 +30,11 @@ deployment meets:
 - `openspec/changes/token-metadata/design.md`, Risks.
 
 ## Suggested fix
+
+Drafted as `openspec/changes/fast-logs-unresolved/` (decision P-3 of the `token-metadata` port, 2026-11-05): record each
+log `-fast` cannot read as an unresolved site with its reason, as the MIP-0018 proof of concept (acedward/umbradb PR
+#26, `token-indexer/README.md`, "Known limitation") records `unresolved` events, instead of halting. The alternative
+considered first:
 
 A change to CC-3 that, instead of halting, stores no log for a partially successful transaction and records the
 transaction as skipped in a table of its own (so consumers can tell a gap from an absence), or reads the segment
