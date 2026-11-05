@@ -1,0 +1,84 @@
+{
+ "about": "Files ported from the MIP-0018 proof of concept, acedward/umbradb PR #26 at 760d3e9c8a060577257ca3b2c42dd09a680e70f8: each is the original with only the listed replacements (import paths for this repository's layout). test/features/token-metadata/provenance.test.ts undoes them and checks the original's SHA-256.",
+ "ports": [
+  {
+   "file": "src/features/token-metadata/classify.ts",
+   "from": "token-indexer/mip0018/classify.ts",
+   "sha256Original": "a4ed0695d0db7269e9c9ee054e946dacb7931d43156f9b1496adc4a8db346b88",
+   "replacements": [
+    {
+     "ported": "from \"./vendor/mip0018/codec/src/index.ts\";",
+     "original": "from \"../vendor/mip0018/codec/src/index.ts\";"
+    }
+   ]
+  },
+  {
+   "file": "src/features/token-metadata/state.ts",
+   "from": "token-indexer/mip0018/state.ts",
+   "sha256Original": "ec027dbab4a2d5de5fdf111f1af6b2fd08c01478f9ce517464a0b862414ab483",
+   "replacements": [
+    {
+     "ported": "} from \"./vendor/mip0018/codec/src/index.ts\";",
+     "original": "} from \"../vendor/mip0018/codec/src/index.ts\";"
+    }
+   ]
+  },
+  {
+   "file": "test/features/token-metadata/vector-adapter.ts",
+   "from": "token-indexer/mip0018/vector-adapter.ts",
+   "sha256Original": "94522f8efc8e0b03f1bb5b54dd95ec8e80b358ba80e0b6cefea011a46797583e",
+   "replacements": [
+    {
+     "ported": "import type { Classification } from \"../../../src/features/token-metadata/vendor/mip0018/codec/src/index.ts\";",
+     "original": "import type { Classification } from \"../vendor/mip0018/codec/src/index.ts\";"
+    },
+    {
+     "ported": "import { classifyMip0018Event } from \"../../../src/features/token-metadata/classify.ts\";",
+     "original": "import { classifyMip0018Event } from \"./classify.ts\";"
+    },
+    {
+     "ported": "} from \"../../../src/features/token-metadata/state.ts\";",
+     "original": "} from \"./state.ts\";"
+    }
+   ]
+  },
+  {
+   "file": "test/features/token-metadata/run-vectors.ts",
+   "from": "token-indexer/mip0018/run-vectors.ts",
+   "sha256Original": "01c449729d27b528f03a242ae922bbd90ef9446b9974c248cc5d8beb38a61172",
+   "replacements": [
+    {
+     "ported": "export const VENDORED_VECTORS_DIR = join(HERE, \"..\", \"..\", \"fixtures\", \"mip0018\", \"vectors\");",
+     "original": "export const VENDORED_VECTORS_DIR = join(HERE, \"..\", \"vendor\", \"mip0018\", \"vectors\");"
+    },
+    {
+     "ported": "export const UMBRADB_VECTORS_DIR = join(HERE, \"..\", \"..\", \"fixtures\", \"mip0018\", \"vectors-umbradb\");",
+     "original": "export const UMBRADB_VECTORS_DIR = join(HERE, \"vectors-umbradb\");"
+    }
+   ]
+  },
+  {
+   "file": "test/features/token-metadata/vectors.test.ts",
+   "from": "token-indexer/test/mip0018-vectors.test.ts",
+   "sha256Original": "903dc9a19c50698e4e9aa6ea630797a63169fb6542c85e623211dac4b6b9c8ce",
+   "replacements": [
+    {
+     "ported": "from \"../../fixtures/mip0018/vectors/tools/common.ts\";",
+     "original": "from \"../vendor/mip0018/vectors/tools/common.ts\";"
+    },
+    {
+     "ported": "from \"../../fixtures/mip0018/vectors/tools/runner-core.ts\";",
+     "original": "from \"../vendor/mip0018/vectors/tools/runner-core.ts\";"
+    },
+    {
+     "ported": "from \"./vector-adapter.ts\";",
+     "original": "from \"../mip0018/vector-adapter.ts\";"
+    },
+    {
+     "ported": "from \"./run-vectors.ts\";",
+     "original": "from \"../mip0018/run-vectors.ts\";"
+    }
+   ]
+  }
+ ]
+}
