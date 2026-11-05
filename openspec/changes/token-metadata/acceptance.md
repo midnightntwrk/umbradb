@@ -1,150 +1,95 @@
-# Acceptance — TOKEN-METADATA: MIP-0018 token metadata from contract logs
+# Acceptance — TOKEN-METADATA: port the MIP-0018 token indexer's metadata core to UmbraDB 0.10.0
 
-Every criterion is numbered (`M1` …, so as not to clash with the MIP's own vector names A1–A6, R1–R6 and S1–S12),
-individually checkable, and tagged with how it is verified (the tags of `core-arch`'s `acceptance.md`): `[CI]` CI test,
-`[PROP]` property test (fast-check, seed pinned and named in the test's title, explicit `numRuns`), `[DIFF]`
-differential, `[STATIC]` static check, `[DOC]` documentation artifact, `[MEASURE]` a measurement run and reported, which
-fails only if it cannot run. `[NEG]` marks a criterion whose test carries a negative control that is seen failing for
-its own reason with the fault put back. Database criteria run on PostgreSQL 18 in Docker and on PGlite unless a
-criterion names one backend.
+Every criterion is numbered (`M1` …, so as not to clash with the MIP's vector names), individually checkable, and tagged
+with how it is verified (the tags of `core-arch`'s `acceptance.md`): `[CI]` CI test, `[PROP]` property test (seed
+pinned, explicit `numRuns`), `[DIFF]` differential, `[STATIC]` static check, `[DOC]` documentation artifact. `[NEG]`
+marks a criterion whose test carries a negative control that is seen failing for its own reason with the fault put back.
+Database criteria run on PostgreSQL 18 in Docker and on PGlite unless a criterion names one backend.
 
-**The MIP** is MIP-0018 at `338ea19`. **The reference repository** is `midnight-experiments/mip-0018` at
-`e8295792d9363be37ff2f7f716c740fcdf3f195e`; its `vectors/` and its stagenet cases' JSON are copied, with their SHA-256,
-under `test/fixtures/mip-0018/`, beside **the supersession list** `SUPERSEDED.md`: each reference vector or case
-expectation the MIP's text at `338ea19` changes (written for `274a84f`), with UmbraDB's expected outcome and the MIP
-sentence that decides it. **The module harness** runs `token-metadata` on blocks from `InMemoryBlockSource` with a
-test-only module providing `contract-logs` (`design.md` §D9). **The stagenet tape** holds heights 710,806–724,957 of
-stagenet (`test/tape/real/manifest.json`). The requirements each criterion verifies are in parentheses.
+**The proof of concept** is acedward/umbradb PR #26 at `760d3e9c8a060577257ca3b2c42dd09a680e70f8`. **The fixtures**
+under `test/fixtures/mip0018/` are copied from it with `SOURCE.md` (each file's source path, commit and SHA-256, checked
+by a test): `vendor/mip0018/` (the reference's codec, vectors and runner at `e8295792…`), `vectors-umbradb/`, and the case
+expectations `mip0018-cases/` and `mip0018-cases-umbradb/`. **The recorded API answers** are the proof of
+concept's own answers at `760d3e9`, run on its stagenet fixtures, to a fixed request list covering every route and
+every identity of the cases (task 1.1), stored with the command that produced them. **The stagenet tapes** are
+UmbraDB tapes (`tools/tape`) of stagenet 714,485–715,183 and 715,402–715,433 (`test/tape/real/manifest.json`). **The
+module harness** runs the module on blocks from `InMemoryBlockSource` with a test-only module providing
+`contract-logs` (logs and unresolved sites). The requirements each criterion verifies are in parentheses.
 
 ## Definition of done
 
 1. Every criterion below passes; every `[NEG]` control fails for its own reason with the fault put back.
-2. Every `core-arch`, `start-umbradb` and `ledger-refcount` criterion passes unchanged.
+2. `fast-logs-unresolved` is merged first; every `core-arch`, `start-umbradb`, `ledger-refcount` and
+   `fast-logs-unresolved` criterion passes unchanged.
 3. The conformance gate passes on the pull request's head, with coverage floors for every new file.
 
-## 1. Starting and storing (TM-1, TM-2, TM-20)
+## 1. Starting and storing (TM-1, TM-14)
 
-- **M1** `[CI]` TM-1's scenarios: a new database starts `core-contract-logs-fast` and `token-metadata` above 0 and
-  creates the schema `token_metadata`; a database synced from 0 with `core-ledger-state` and `core-contract-logs-full`
-  accepts `token-metadata` added above its cursor; the devnet tape's v8 heights store no module row. (TM-1)
-- **M2** `[CI][NEG]` Over generated chains of blocks with candidates (M15's generator), a run from height 0 and runs
-  started at three other heights hold byte-identical module rows at every height they share. **Negative control:** a
-  module that stores, with each record, the identity's earlier record count differs between start heights. (TM-2)
-- **M3** `[CI][DIFF]` The same generated chains on PostgreSQL and on PGlite give equal per-block digests of both module
-  tables and equal contents hashes. (TM-20)
-- **M4** `[STATIC]` No stored value and no accept or reject decision depends on `Intl`: a static check finds `Intl`
-  only in the module's serving file. (TM-20)
+- **M1** `[CI]` A new database at S > 0 with `core-contract-logs-fast` and the module from S starts; a database with
+  S = 0 adding the module above its cursor is refused with `token-metadata-start-after-database`; v8 blocks store no
+  module row. (TM-1)
+- **M2** `[CI][DIFF]` Generated chains processed on PostgreSQL and on PGlite give equal per-block digests of the
+  module's tables and equal contents hashes. (TM-14)
+- **M3** `[STATIC]` `Intl` is used only in the module's serving code. (TM-14)
 
-## 2. Finding candidates (TM-3, TM-4)
+## 2. Candidates and classification (TM-2 … TM-5)
 
-- **M5** `[CI]` A `Misc` log named `pad(32, "mip-0018:token-metadata[v2]")`, a `Misc` log with another name, a `Misc`
-  log whose value has two atoms or one of 289 bytes, and a log of each of the ten other MIP-0002 event types, each with
-  a valid v1 payload, store no row and change no answer (the MIP's "Must ignore"). (TM-3)
-- **M6** `[CI][DIFF]` The log reader (`design.md` §D7) gives, for generated byte strings of 0–288 bytes wrapped as a
-  one-atom cell and serialized by each vendored v9 package (rc.3, rc.5) itself, the zero-extended name and payload; for
-  generated values of other shapes, not a candidate. (TM-3)
-- **M7** `[CI]` The `data` bytes of the reference case C01's `Misc` log, recorded as UmbraDB stores them (task 1.2),
-  read as the event name and the payload in the case's `record.json`. (TM-3)
-- **M8** `[CI]` Every informative vector `INF-ZEXT-*` (trailing zeros dropped) decodes exactly as its full 256 bytes.
-  (TM-3)
-- **M9** `[CI][NEG]` A `Misc` log whose data carries a tag other than `impact-state-value[v2]` halts processing at its
-  height with `callback-error` naming the height, transaction, log and tag, and nothing of the block is stored.
-  **Negative control:** a reader that treats an unknown tag as not a candidate lets the block commit. (TM-4)
+- **M4** `[CI]` A `Misc` log of another name (`[v2]` included), a `Misc` value of two atoms or of 289 bytes, and a log of
+  each other MIP-0002 type store no row. (TM-2)
+- **M5** `[CI][DIFF]` The log reader gives, for generated byte strings of 0–288 bytes serialized as one-atom cells by
+  each vendored v9 package (rc.3, rc.5), the zero-extended name and payload, and for other shapes no candidate. (TM-2)
+- **M6** `[CI][NEG]` A `Misc` log with an unknown tag halts the block with `callback-error` naming height, transaction,
+  log and tag. **Negative control:** a reader that skips unknown tags lets the block commit. (TM-3)
+- **M7** `[CI]` Every vendored normative and informative vector, and every vector of `vectors-umbradb/` in place of the
+  vendored one with the same id, gives its expected classification and reason through the module's classifier. (TM-4)
+- **M8** `[CI]` Through the module harness: S7 (two candidates in one transaction, one malformed) stores one `reject`
+  with its reason and applies the other; an unresolved site is stored `unresolved` with its reason and changes no field.
+  (TM-4, TM-5)
 
-## 3. The decoder (TM-5, TM-6, TM-21)
+## 3. State (TM-6 … TM-11)
 
-- **M10** `[CI][NEG]` The MIP's payload vectors A1–A6 and R1–R6, written by UmbraDB from the MIP's "Testing" text,
-  give their outcomes; A1's payload equals the MIP's Appendix A byte for byte, records at offsets 33, 50, 63 and 75,
-  content ending at 95. **Negative control:** the decoder without the trailing-zero check accepts R3. (TM-5, TM-6)
-- **M11** `[CI]` Every normative and informative payload vector of the reference repository, including the 26 URI
-  cases, gives its expected outcome, except the entries of the supersession list, which give the list's outcome (A3c,
-  the key `ff6b6579`, is rejected under R5). Reason names are compared through the mapping kept in the tests. (TM-5,
-  TM-6)
-- **M12** `[PROP][NEG]` For 200,000 structured payloads (seed pinned; a generator of headers and records valid and
-  near-valid by one field) and 50,000 uniform random ones, the decoder never throws, reads only inside the 256 bytes
-  (run over a view that throws on any read outside), and every accepted payload equals the test encoder's bytes for
-  its decoded records. **Negative control:** one length check removed makes a generated payload read past its record.
-  (TM-5, TM-21)
-- **M13** `[CI]` `JSON.parse`'s acceptance of a lone surrogate escape (`"\ud800"`) as a type-3 value is pinned: the
-  event is accepted. (TM-6)
+- **M9** `[CI]` Every vendored state vector (S1–S9) and UmbraDB's per-key tombstone versions, through a pure adapter and
+  through the module on both backends, give their expected state. (TM-6, TM-7, TM-8, TM-10)
+- **M10** `[CI]` S3, S5, S10, S11 and S12 as TM-8's and TM-9's scenarios state, read through the routes, including the
+  only-undefined-keys identity referenced nowhere. (TM-8, TM-9)
+- **M11** `[PROP][NEG]` For generated chains (valid, invalid and foreign-named candidates, unresolved sites, several per
+  block and per field, tombstones and withdrawals; seed pinned), the module's state after every block equals the
+  proof of concept's `state.ts` applied as a reference model. **Negative control:** applying a block's candidates in
+  reverse log order differs from the model. (TM-7, TM-8)
+- **M12** `[CI]` S6 through the harness: four identities, independent updates, kind 3 without color; the colors of kinds
+  1 and 2 equal `rawTokenType` of the vendored v8, v9-rc3 and v9 packages. (TM-6)
+- **M13** `[CI]` Marks: one identity per mark (`ok`, `partial`, `incorrect`, `unresolved`, `none`) with the precedence
+  and reasons of the API contract's "Marks" rule. (TM-11)
 
-## 4. Binding, outcomes and colors (TM-7, TM-8, TM-12)
+## 4. The API (TM-12, TM-13, TM-15)
 
-- **M14** `[CI]` S6 through the module harness: kinds 1, 2 and 3 of one contract and the same payload from a second
-  contract give four identities; an update to one changes no other; kind 3 has no color. (TM-7)
-- **M15** `[CI][DIFF]` For generated `(domainSep, contract)` pairs, the module's color equals `rawTokenType` of the
-  vendored v8, v9-rc3 and v9 packages. (TM-7)
-- **M16** `[CI]` S7 through the module harness: of two candidates in one transaction, the malformed one is stored with
-  `accepted = false` and its reason and offset, and the valid one is applied. (TM-8)
-- **M17** `[CI]` A color looked up with kind 1 answers the kind-1 identity whose computed color it is; with kind 2 and no
-  kind-2 identity under that `domainSep`, 404; a color no identity has, 404; a payload whose value is another
-  contract's color changes no lookup. (TM-12)
+- **M14** `[CI]` The proof of concept's recorded API answers, requested after the same blocks from the stagenet tapes,
+  are equal byte for byte with TM-13's fields masked; each masked field holds TM-13's value. (TM-12, TM-13)
+- **M15** `[CI]` The API contract's general rules on every route: errors and codes (400, 404, 405, 503 `BUSY` beyond
+  eight requests), cursors bound to their endpoint, limits 1–500, ASCII-escaped JSON with hostile text, the response
+  headers, and the core's `X-Umbra-View`, `X-Umbra-Height` and `X-Umbra-Hash`. (TM-12)
+- **M16** `[CI]` Bounded cost: an identity with 10,000 fields, a contract with 10,000 rejected events and a symbol with
+  1,000 members answer with one field page, 100 reasons and 100 members, reading a bounded number of rows (the proof
+  of concept's `bounded-cost` checks, ported). (TM-12)
+- **M17** `[CI]` `/v1/lookup` of a described kind-1 identity's computed color with `held=shielded` gives `identity`;
+  with `held=unshielded` and no kind 2, `not-minted-in-indexed-range`; the zero color held shielded,
+  `shielded-zero-color`; held unshielded, `builtin`. (TM-13)
+- **M18** `[CI]` No network request: tests run with outbound connections refused except to the node and the database,
+  and an identity with an `image` URI is served without one. (TM-15)
+- **M19** `[PROP]` For 200,000 generated payloads the classifier never throws and reads only inside the 256 bytes.
+  (TM-15)
 
-## 5. State (TM-9 … TM-11)
+## 5. Real chain and browser
 
-- **M18** `[CI]` S1 and S2 through the module harness and the routes. (TM-10)
-- **M19** `[CI]` S3 through the module harness, every step read through the routes, including the second tombstone at
-  `name` and the one at `retire` changing nothing. (TM-11)
-- **M20** `[PROP][NEG]` For generated chains (valid, invalid and foreign-named candidates, several per block and per
-  field, tombstones and withdrawals; seed pinned), each identity's answer at every height equals a reference model
-  (an independent in-memory implementation in the tests) replaying every accepted record of the coverage in chain
-  order. **Negative control:** a replay in reverse log order within a transaction differs from the model. (TM-10, TM-11)
-- **M21** `[CI]` TM-9's scenarios: a module started at 1,000,000 answers at 1,000,500 with coverage 1,000,000–1,000,500,
-  incomplete; one run from 0 answers 0–h, complete; one with a stop and a later restart answers two ranges, incomplete;
-  every route and the subscription carry the coverage. (TM-9)
-- **M22** `[CI]` A transaction with logs in the guaranteed and fallible parts of two intents (built on the devnet or
-  taken from a recorded tape) gives `contract-logs` in the MIP's order — both guaranteed parts by segment id, then each
-  successful fallible segment by id — and the module applies its candidates in that order. (TM-10)
+- **M20** `[CI]` The stagenet tapes replayed with `core-contract-logs-fast` and the module from 714,485: every case of
+  the fixtures (C01–C10, IDX, U1, with `mip0018-cases-umbradb/` amendments) equals its expectation as the proof of
+  concept's `mip0018-cases.test.ts` compares it, and no unresolved site is recorded. (TM-2 … TM-11)
+- **M21** `[CI]` The browser build, served the stagenet tapes by the browser suites' tape node, with a configuration
+  listing `core-contract-logs-fast` and the module, starts at the tape's first height in headless Chrome and answers
+  `/v1/identities` for case C01's identity as the server does. (TM-16)
 
-## 6. Serving (TM-13 … TM-19)
+## 6. Documentation
 
-- **M23** `[CI]` S10: `foo = "x"` is accepted and stored and never served; with a test-only standard `S` defining key
-  `k`, `k` is served exactly while the identity's current usable `standards` lists `S`. (TM-13)
-- **M24** `[CI]` S5 and S12 through the routes: an empty `name`, a type-1 `decimals` of `"6"`, `standards` with two
-  spaces, a `standards` with a byte `0x7f`, and a 31-byte `image_sha256` are each served as unusable with no value and
-  no earlier value; an empty `standards` is usable; a `decimals` never set is absent, never 0. (TM-14)
-- **M25** `[CI]` S11: a 70-character `name` (including multi-code-point grapheme clusters) is served as its first 64
-  grapheme clusters, a 15-character `symbol` as its first 12; the `records` rows hold both whole. (TM-15)
-- **M26** `[CI]` S9: the groups of TM-16's scenario, after each of its steps. (TM-16)
-- **M27** `[CI]` A rename `ACME` → `SCAM` shows `ACME` in the history, marked replaced, with both positions; the first
-  value after an identity is described again is in its history once replaced; after a tombstone and a new value, no
-  value from before the tombstone is shown. (TM-17)
-- **M28** `[CI]` Every route of `design.md` §D8 answers with `X-Umbra-View: finalized`, `X-Umbra-Height` and
-  `X-Umbra-Hash` of the height read; before the first commit each answers 503; a withdrawn identity and one never
-  described give byte-identical 404 bodies apart from the envelope; a malformed address, `domainSep`, kind, color or
-  cursor answers 400; a contract with 2,500 kind-3 identities is listed in pages of at most 1,000 that give each
-  identity once; a 31-byte integer is served as its exact decimal digits; a type-3 value is served as its stored text.
-  (TM-18)
-- **M29** `[CI]` A subscriber gets one message per block with accepted records, naming every identity they name, with
-  the block's height, hash and coverage, and none for a block without; after a restart at cursor c, c's message may come
-  again and is identical. (TM-19)
-- **M30** `[MEASURE]` The identity route's latency on PostgreSQL for an identity with 10,000 records, and the groups
-  route for a contract with 1,000 identities, reported in the pull request. (TM-18)
-
-## 7. Safety (TM-21)
-
-- **M31** `[CI]` The module makes no network request: its tests run with outbound HTTP refused except to the node and
-  the database, and an identity whose `image` is `javascript:alert(1)` or `https://example.org/acme.png` is served
-  without one. (TM-21)
-
-## 8. Conformance and the real chain
-
-- **M32** `[CI]` UmbraDB's adapter for the reference runner (`vectors/tools/run.ts`) runs every normative vector,
-  rollbacks and networks as `design.md` §D9 says, and reports every one passed except the supersession list's entries,
-  which give the list's outcome, and S8, reported not applicable. (TM-3 … TM-16)
-- **M33** `[CI]` The stagenet tape replayed with `core-contract-logs-fast` and `token-metadata` started at 710,806: for
-  every reference case (C01–C11, IDX, U1) the module's answers equal its `expected.json`, as amended by the supersession
-  list (C07: its non-UTF-8 key rejected and its counts recomputed; non-common keys not served). If the tape holds a
-  partially successful transaction that logs, the run halts with `fast-log-unsupported`: the criterion then records it
-  and is escalated, never weakened. (TM-3 … TM-17)
-- **M34** `[CI]` The browser build with a configuration listing `core-contract-logs-fast` and `TOKEN_METADATA`, served
-  the stagenet tape's heights of case C01 by the browser suites' tape node (`test/browser/tapes.ts`), starts at the
-  tape's first height in headless Chrome and answers the identity route for C01's identity from the page's worker, with
-  the case's fields (the module runs in the browser build; no page UI). (TM-1)
-
-## 9. Documentation
-
-- **M35** `[DOC]` `docs/module-guide.md` describes `token-metadata`, its routes, coverage, and that every served value is
-  untrusted (not to be rendered as inline SVG or followed as a script URI); `docs/operator-guide.md` gives both ways to
-  run it (from any height with the fast provider, complete from 0 with the full one); `docs/browser.md` shows it in a
-  browser configuration; `ROADMAP.md`'s F4 row gives this change's status; `docs/issues/00085` exists.
+- **M22** `[DOC]` `docs/module-guide.md` describes the module, its API (linking the ported contract) and that served
+  values are untrusted; `docs/operator-guide.md` and `docs/browser.md` show how to enable it and that it starts with its
+  database; `NOTICE` names the vendored codec; `ROADMAP.md`'s F4 row gives this change's status.
