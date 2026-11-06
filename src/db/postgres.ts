@@ -422,9 +422,16 @@ class Session {
 const READ_BEGIN = "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY";
 
 /**
+ * Sets a bounded read's two timeouts for its transaction only (`set_config(…, true)`), the timeout in milliseconds as
+ * its one bound parameter, so they end with the read's `ROLLBACK`. [DB-15]
+ */
+const READ_TIMEOUTS =
+  "SELECT set_config('statement_timeout', $1, true), set_config('idle_in_transaction_session_timeout', $1, true)";
+
+/**
  * A read bounded by the read option, on its session. Its transaction starts with `statement_timeout` and
- * `idle_in_transaction_session_timeout` set to the timeout (`SET LOCAL`, in the `BEGIN`'s message, so they end with the
- * read's `ROLLBACK` and the session returns to the pool with its zeros). The server cancels a statement that runs that
+ * `idle_in_transaction_session_timeout` set to the timeout (right after its `BEGIN`, for that transaction only, so they
+ * end with the read's `ROLLBACK` and the session returns to the pool with its zeros). The server cancels a statement that runs that
  * long (`57014`; the session stays usable), and ends the session once the read has been idle in its transaction that
  * long — which never reaches the caller as an error: `postgres` 3.4.9 drops a server error that arrives while no
  * statement is pending (`connection.js`, `ErrorResponse`), and the session is merely lost (`onclose`). So the read tells
@@ -453,10 +460,8 @@ class BoundedRead {
 
   /** Starts the read's transaction with its two timeouts. */
   async begin(): Promise<void> {
-    const ms = this.timeoutMs;
-    await this.session.script(
-      `${READ_BEGIN}; SET LOCAL statement_timeout = ${ms}; SET LOCAL idle_in_transaction_session_timeout = ${ms}`,
-    );
+    await this.session.run(READ_BEGIN, [], true);
+    await this.session.run(READ_TIMEOUTS, [String(this.timeoutMs)]);
     this.idleSince = performance.now();
   }
 

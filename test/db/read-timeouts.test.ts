@@ -12,7 +12,7 @@ import { type PostgresTestDatabase, type PostgresTestServer, startPostgresServer
  * [DB-15, A141, CF-4]
  *
  * - On PostgreSQL that one read runs with `statement_timeout` and `idle_in_transaction_session_timeout` set to it
- *   (`SET LOCAL`, so they end with the read). A read that either one ends fails with `query-timeout`, not retryable.
+ *   (`set_config(…, true)`, so they end with the read). A read that either one ends fails with `query-timeout`, not retryable.
  *   `statement_timeout` cancels the statement and leaves the connection usable; `idle_in_transaction_session_timeout`
  *   ends the session, and the pool replaces it.
  * - PGlite enforces neither and hangs on the second, so on PGlite an API read sets neither and is not bounded.

@@ -43,7 +43,7 @@ export const PINNED_SETTINGS: readonly (readonly [string, string])[] = [
  * - `idle_session_timeout` (PostgreSQL 14 and later): a default would end the writer's session while it waits between
  *   blocks, and the writer lock with it, and would end idle pooled read connections. [DB-11, Q93]
  *
- * A read for a module API request sets two of them for that read only (`SET LOCAL`, `src/db/postgres.ts`).
+ * A read for a module API request sets two of them for that read only (`set_config(…, true)`, `src/db/postgres.ts`).
  *
  * PGlite enforces none of them, but one that fires hangs it, synchronously, with the whole process: a nonzero
  * `idle_in_transaction_session_timeout`, `transaction_timeout` or `idle_session_timeout` does so once its time passes
