@@ -79,6 +79,48 @@
      "original": "from \"../mip0018/run-vectors.ts\";"
     }
    ]
+  },
+  {
+   "file": "test/features/token-metadata/mip0018-classify.test.ts",
+   "from": "token-indexer/test/mip0018-classify.test.ts",
+   "sha256Original": "0ef815ec9575bde031c3db9646846e3f698b4626e569dd7a7d970ffd37951bac",
+   "replacements": [
+    {
+     "ported": "from \"../../../src/features/token-metadata/classify.ts\";",
+     "original": "from \"../mip0018/classify.ts\";"
+    },
+    {
+     "ported": "from \"../../../src/features/token-metadata/state.ts\";",
+     "original": "from \"../mip0018/state.ts\";"
+    },
+    {
+     "ported": "from \"../../../src/features/token-metadata/vendor/mip0018/codec/src/index.ts\";",
+     "original": "from \"../vendor/mip0018/codec/src/index.ts\";"
+    },
+    {
+     "ported": "new URL(\"../../../src/features/token-metadata/\", import.meta.url)",
+     "original": "new URL(\"../mip0018/\", import.meta.url)"
+    },
+    {
+     "ported": "    for (const f of [\"apply.ts\", \"state.ts\"])",
+     "original": "    for (const f of [\"scan.ts\", \"fields.ts\", \"state.ts\", \"vector-adapter.ts\", \"vector-adapter-pg.ts\"])"
+    }
+   ]
+  },
+  {
+   "file": "test/features/token-metadata/mip0018-state.test.ts",
+   "from": "token-indexer/test/mip0018-state.test.ts",
+   "sha256Original": "74f9c5202929d833ca8df8655444609e6db5b2b591678605e3ca670c8f08b4c0",
+   "replacements": [
+    {
+     "ported": "from \"../../../src/features/token-metadata/vendor/mip0018/codec/src/index.ts\";",
+     "original": "from \"../vendor/mip0018/codec/src/index.ts\";"
+    },
+    {
+     "ported": "} from \"../../../src/features/token-metadata/state.ts\";",
+     "original": "} from \"../mip0018/state.ts\";"
+    }
+   ]
   }
  ]
 }

@@ -12,6 +12,8 @@ export default defineConfig({
     testTimeout: 120_000,
     include: [
       "test/features/token-metadata/vectors.test.ts",
+      "test/features/token-metadata/mip0018-state.test.ts",
+      "test/features/token-metadata/mip0018-classify.test.ts",
       "test/features/token-metadata/log-reader.test.ts",
       "test/features/token-metadata/color.test.ts",
       "test/features/token-metadata/fuzz.test.ts",

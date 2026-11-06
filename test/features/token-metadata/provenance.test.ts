@@ -27,6 +27,8 @@ describe("token-metadata copies from the proof of concept", () => {
     expect(ports().map((port) => port.file).sort()).toEqual([
       "src/features/token-metadata/classify.ts",
       "src/features/token-metadata/state.ts",
+      "test/features/token-metadata/mip0018-classify.test.ts",
+      "test/features/token-metadata/mip0018-state.test.ts",
       "test/features/token-metadata/run-vectors.ts",
       "test/features/token-metadata/vector-adapter.ts",
       "test/features/token-metadata/vectors.test.ts",
