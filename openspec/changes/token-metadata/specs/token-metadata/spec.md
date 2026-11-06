@@ -149,8 +149,8 @@ the field unusable and serve no common value, with no fallback and no default `d
 
 ### Requirement: TM-10 Symbol groups have two or more members of one contract
 
-THE module SHALL group the existing identities of one contract whose usable `symbol` values are equal as exact bytes,
-serving a group only when it has two or more members, and never across contracts.
+THE module SHALL group the existing identities of one contract whose usable `symbol` values, as served (TM-9), are
+equal as exact bytes, serving a group only when it has two or more members, and never across contracts.
 
 #### Scenario: Symbol grouping (S9)
 - **WHEN** kinds 1 and 3 of contract C under one `domainSep`, and an identity of C under another `domainSep`, have
@@ -173,7 +173,8 @@ has a rejected event, else `unresolved` when its contract has an unresolved site
 WHERE `listen.api` is set, THE module SHALL answer the API contract's `GET /v1/status`, `/v1/tokens`,
 `/v1/tokens/{color}`, `/v1/identities/{contract}/{domainSep}/{kind}`, `/v1/contracts/{address}/tokens`,
 `/v1/lookup/{color}?held=` and `/v1/events` with its paths, parameters, JSON shapes, errors, pagination, bounded cost
-and hostile-text rules, from one committed height (RN-16), except as TM-13 says.
+and hostile-text rules, from one committed height (RN-16), except as TM-13 says. Bounded cost holds for every answer but
+the group of a served symbol of 12 characters, which reads every symbol of its contract starting with it.
 
 #### Scenario: A recorded answer
 - **WHEN** the requests whose answers were recorded from the proof of concept are sent after the same blocks
@@ -188,7 +189,9 @@ and hostile-text rules, from one committed height (RN-16), except as TM-13 says.
 THE module SHALL serve, until the changes that add them: `minted`, `firstSeen` as `null` and `evidence` as `[]`; no
 `seen` rows; NIGHT and DUST as the contract's built-in rows; `image` with status `pending` and no `imageUrl`;
 `/v1/lookup` resolving the held kind's existing identity by its computed color, else `not-minted-in-indexed-range`;
-`/v1/events` with `segment` and `phase` `null`; `/v1/status` from the process's own heights.
+`/v1/events` with `segment` and `phase` `null`; `/v1/status` from the process's own heights; no identity known only from
+a mint (not listed, its routes 404); a described kind 1 or 2 identity's `color` as its computed color; a contract known
+from the module's own rows only; and, for a path or method no route has, the module API's own answers, with no `HEAD`.
 
 #### Scenario: Lookup of a described token
 - **WHEN** contract C described kind 1 under `d`, and a client looks up `tokenType(d, C)` with `held=shielded`

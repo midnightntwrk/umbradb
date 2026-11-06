@@ -51,7 +51,9 @@ halting — the proof of concept's `unresolved` classification.
 | `api.ts` on `node:http` | Routes registered in `on-start-api` on the module API (RN-15), the same handlers (D5) |
 
 The module is `src/features/token-metadata/`, id `token-metadata`, exported as `TOKEN_METADATA` with an `entry(...)`
-helper; not in `CORE_MODULES`. It has no ledger task, so it loads like any user module, in the browser too
+helper (D9); not in `CORE_MODULES`. It requires `contract-logs` and `block-parsed`: contract logs carry a transaction's
+index, not its hash, and `/v1/events` serves and filters by the hash, so each event stores its transaction's hash from
+`block-parsed` (both providers of `contract-logs` run with `core-block-parsed`). It has no ledger task, so it loads like any user module, in the browser too
 (`docs/browser.md:91-94`).
 
 ### D2. Starting with the database (TM-1)
@@ -72,21 +74,31 @@ Two `table` items, each one kind (`src/modules/declaration.ts:84-96`):
 
 | Item | Table | Primary key | Other columns |
 |---|---|---|---|
-| `token-metadata-events` (append-only, by height) | `events` | (height, tx_index, log_index) | contract_address, entry_point (first 128 bytes), classification (`accept`, `reject`, `unresolved`), reason (null iff `accept`); for candidates also domain_sep, kind (null for `unresolved`) |
-| `token-metadata-state` (mutable) | `fields` | (contract_address, domain_sep, kind, key) | val_type, value, set_height, set_tx, set_log, set_record |
-| | `withdrawals` | (contract_address, domain_sep, kind) | height, tx_index, log_index of the identity's last withdrawal |
+| `token-metadata-events` (append-only, by height) | `events` | (height, tx_index, event_index) | tx_hash, contract_address, entry_point (first 128 bytes), classification (`accept`, `reject`, `unresolved`), reason (null iff `accept`); domain_sep and kind for an accepted event |
+| `token-metadata-state` (mutable) | `fields` | (contract_address, domain_sep, kind, key) | val_type, value (whole), uint_value (a `UInt` as `numeric(80, 0)`), usable (the common-field rule's answer, null for other keys), defined (served, MIP "Keys"), set_height, set_tx, set_event, set_record |
+| | `withdrawals` | (contract_address, domain_sep, kind) | height, tx_index, event_index, record_index of the identity's last withdrawal |
 
-Indexes follow the proof of concept's (`001_mip0018_core.ts`): events by contract, by transaction hash's height and
-index, unresolved and rejected events per contract; fields by `(contract_address, key)` for symbols. No `jsonb`; every
-length and enumeration has a `CHECK`. Values are stored whole (TM-9, TM-14); the proof of concept stores `name` and
-`symbol` cut, so its recorded answers and this port's agree, but its stored rows do not.
+`event_index` is the log's position among its transaction's logs (the proof of concept's `eventIndex`); an `ignore`d
+log (another name, type or shape) is not stored, and no event's raw name or payload is kept, since nothing is
+recomputed (finalized blocks only, RN-14). `uint_value`, `usable` and `defined` are kept so that the served-row, symbol
+and mark reads need no decoding.
+
+Indexes: `events` by contract (`events_contract_idx`), by transaction hash (`events_tx_idx`, for `?tx=`), and the
+rejected and unresolved events per contract (partial indexes); `fields` by its defined rows (`fields_defined_idx`), by
+`(contract_address, value)` for usable symbols (`fields_symbol_idx`), and by computed color and kind for the defined
+kind 1 and 2 rows (`fields_color_idx`, an expression index on SQL's `sha256` of `pad(32, "midnight:derive_token") ‖
+domain_sep ‖ contract_address`, so `/v1/tokens/{color}` and `/v1/lookup` find an identity by color and the write path
+computes no color). No `jsonb`; every length and enumeration has a `CHECK`. Values are stored whole (TM-9, TM-14); the
+proof of concept stores `name` and `symbol` cut, so its recorded answers and this port's agree, but its stored rows do
+not.
 
 ### D4. Per block
 
-| Point | Work |
-|---|---|
-| `on-compute` | Read the block's `contract-logs` item; find candidates (D6); classify (D7); load the touched identities' fields at h − 1 (RN-4); apply `state.ts`'s rules in chain order; build the change set |
-| `on-db-write` | Insert `events`; upsert and delete `fields`; upsert `withdrawals` |
+Everything happens in `on-db-write`, inside the block transaction: read the block's `contract-logs` and `block-parsed`
+items; find the candidates (D6) and classify them (D7); insert each candidate's `events` row with its transaction's
+hash; and apply each accepted event's records in chain order with `state.ts`'s rules, reading and writing the module's
+own rows (`fields`, `withdrawals`) as it goes. Nothing needs `on-compute`: the rules read only the module's own rows, which
+the block transaction already sees.
 
 ### D5. The API
 
@@ -101,7 +113,25 @@ eight-request limit (`BUSY`), and one read per answer at one committed height (`
 | `/v1/lookup` | the held kind's existing identity whose computed color matches; else `not-minted-in-indexed-range`; `indexedRange` = the module's S to the cursor | the activity change (the mint table) |
 | `image` | `{ url, status: "pending", imageUrl: null }` for a usable `image` | the image change |
 | `/v1/events` `segment`, `phase` | `null` (contract logs carry no segment of origin) | — |
-| `/v1/status` | `startHeight` = S, `indexedHeight` = `archiveHeight` = the cursor, `scanner` = `following` / `stalled` (halted) / `off` (no worker), `vendored` and `mip` as the contract | — |
+| `/v1/status` | `startHeight` = S, `indexedHeight` = `archiveHeight` = the answer's committed height, `scanner` = `following`, `network` the name UmbraDB knows for the genesis hash (else the hash), `vendored` and `mip` as the contract | — |
+| An identity minted but never described | not listed; its identity, color and contract routes 404 | the activity change |
+| `color` (lists, identities) | the computed color, `tokenType(domainSep, contract)`, of a described kind 1 or 2 identity (the proof of concept: its first mint's color, else `null`) | — |
+| `/v1/contracts/{address}/tokens` | known from the module's own rows (a MIP-0018 event or a defined field); else 404 (the proof of concept: any applied call) | the activity change |
+| A path or method no route has; `HEAD` | the module API's answers: 404 `not-found`, 405 `method-not-allowed` with `Allow: GET`, 500 `internal-error`; no `HEAD` (the proof of concept: `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `INTERNAL` or 503 `UNAVAILABLE`, and `HEAD`) | — |
+
+A query parameter given twice reaches a handler as its first value (the module API's `params`), so it is not refused.
+
+**Groups by the served symbol.** The proof of concept stores `symbol` cut to 12 characters and groups by those bytes;
+this port stores it whole (TM-14) and groups by the served (cut) bytes, so the groups agree. A served symbol under 12
+characters is whole: its group is the rows with exactly that value, an index-only count and the first 100 members. A
+served symbol of 12 characters may be the cut of longer ones: its group reads every symbol of the contract that starts
+with it and keeps those whose own cut equals it, so that read grows with the contract's identities sharing the prefix
+(owner decision, 2026-11-06: accepted; only the contract that publishes them can make its own groups costly, and
+`apiReadTimeoutMs` bounds each request). Storing the cut would need a grapheme segmentation that does not depend on the
+platform's Unicode data, which a later change may vendor.
+
+**Field order.** `commonFields` are in the order their values were last set and `fields` in key byte order, both as
+the proof of concept serves them.
 
 ### D6. Candidates from a log's `data` (TM-2, TM-3)
 
@@ -121,14 +151,18 @@ code with the reference, as the proof of concept already does (decision Q-1 revi
 
 ### D8. Testing
 
-- **Vectors:** every vendored vector (normative and informative) and `vectors-umbradb/` (A3c, the per-key tombstone
-  versions) through a pure adapter and the module on both backends, as the proof of concept's
-  `mip0018-vectors*.test.ts`.
+- **Vectors:** every vendored vector (normative and informative) and `vectors-umbradb/` (A3c) through a pure adapter,
+  and every vendored state vector (which follow per-key tombstones) through the module on both backends, as the proof
+  of concept's `mip0018-vectors*.test.ts`.
 - **Stagenet:** tapes in UmbraDB's format (`tools/tape`) over the proof of concept's ranges 714,485–715,183 and
-  715,402–715,433, replayed with `core-contract-logs-fast` and the module from 714,485; every case of
+  715,402–715,433, replayed with `core-contract-logs-fast` and the module from one block after each tape's first
+  (714,486 and 715,403: the first block fetched needs its parent's runtime version, and neither first block holds an
+  event), with stagenet's genesis hash and header (from the `stagenet-0-10000` tape) put before the tape's records, as
+  startup asks for them; every case of
   `test/fixtures/mip0018-cases*` (C01–C10, IDX, U1, with UmbraDB's amendments) compared; the proof of concept's answers, recorded from it
   at `760d3e9` on its own fixtures (its tests hold their expectations inline, `token-indexer/test/mip0018-api.test.ts`),
-  compared with TM-13's differences masked.
+  compared with TM-13's differences applied. The cases' `ignored` counts (other-named `Misc` logs, which the module
+  does not store) are counted from `contract_logs.logs`.
 - **Browser:** the browser suites' tape node serving those tapes to a page with the module (TM-16).
 
 ### D9. Exports (task 4.3)

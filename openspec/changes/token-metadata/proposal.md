@@ -25,8 +25,8 @@ supplies the codec, vectors and stagenet cases both use.
 
 ## What changes
 
-1. **A module `token-metadata`** (`design.md` D1): the proof of concept's metadata core as a module that requires only
-   `contract-logs`, with the core's finalized loop in place of its archive and scanner. Shipped in the package, enabled
+1. **A module `token-metadata`** (`design.md` D1): the proof of concept's metadata core as a module that requires
+   `contract-logs` and `block-parsed` (each event's transaction hash), with the core's finalized loop in place of its archive and scanner. Shipped in the package, enabled
    by a configuration entry, from the database's first height on any network (TM-1).
 2. **Its rules, reused** (D7): the vendored reference codec and vectors, `classify.ts` (UTF-8 keys), and `state.ts`
    (defined keys, per-key tombstones, withdrawal, usability, truncation, groups of two or more, marks) (TM-2 … TM-11).
