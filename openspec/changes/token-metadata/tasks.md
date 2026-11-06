@@ -108,7 +108,8 @@ Built test first only in part: the spike's code came with its tests, and each `[
 | 3.1 | M1: S = 1,000,000 with the module (test provider) and with `core-contract-logs-fast`; the refusal at S = 0, cursor 5, from 6 | M1's v8 clause (needs a v8 chain with calls) |
 | 3.2 | M8's first half (S7a, S7b); M9 (all 36 state vectors, also against `state.ts`); M11 (25 chains per backend; a reverse-order fault fails it); M12's colors (v8, v9-rc3, v9); M2 (10 chains, per-block digests and contents hashes); M3 | M8's unresolved half (needs `fast-logs-unresolved`); M12's S6 through the routes (4.1) |
 | 3.3 | M13: `ok`, `partial`, `incorrect` (reasons, count) through the routes; `none`, `unresolved` and the precedence through `markJson` | M13's `unresolved` through a chain (needs `fast-logs-unresolved`) |
-| 4.1 | M10 (S3 at two heights, S5/S12, S11, undefined keys only; a whole-symbol grouping fault fails it); M15's module part (400s, 404s, cursors bound, limits, ASCII JSON, headers, `X-Umbra-*`, `BUSY`); M17; M18's served part (`image` pending) | M14 (needs 1.1's recorded answers); M15's HEAD; M18's refused outbound connections |
+| 4.1 | M10 (S3 at two heights, S5/S12, S11, undefined keys only; a whole-symbol grouping fault fails it); M15's module part (400s, 404s, cursors bound, limits, ASCII JSON, headers, `X-Umbra-*`, `BUSY`); M17; M18's served part (`image` pending) | M15's HEAD; M18's refused outbound connections |
+| 5.1 | M20 on both backends (each case at its own last block, 45 comparisons, later cases absent; C09; U1; C06 per step; the 35 + 1 v1-named events against the reference index with block hash, transaction hash and entry point; IDX's identity entries; every case identity's mark against the mark rule, C06 per step; no unresolved site; `[NEG]` another case's and an earlier step's expectation are seen); M14 (101 recorded answers equal after TM-13's differences, 11 of them changed by those differences; `[NEG]` a changed name is seen) | the reference's mints, colors, deploys and activity (the activity change); the payload bytes of the events (not stored) |
 
 **Findings for the spec (to settle before the gate):**
 
@@ -151,3 +152,15 @@ Built test first only in part: the spike's code came with its tests, and each `[
     order, both as the proof of concept serves them; only `read.ts`'s whole-table read uses key order.
 13. **The browser build.** `api.ts` computes colors with `color.ts`, which uses `node:crypto`; task 5.2 needs them from
     SQL or Web Crypto.
+14. **Replaying a mid-chain tape.** Startup asks for the genesis block's hash and header, which a mid-chain tape does
+    not hold (the test puts the two records of `stagenet-0-10000` before it), and the first block fetched needs its
+    parent's runtime version, so a run starts one block after the tape's first: 714,486 and 715,403. Neither first block
+    holds an event, so M20 and M14 are unaffected; M14 masks the start height (`startHeight`, `indexedRange.from`).
+    M20's wording ("the module from 714,485") should say so, or the tapes be recorded from one block earlier.
+15. **TM-13's differences, as the recorded answers show them.** Without a mint table: the one token minted and never
+    described in the range (contract `7771c9e5…`) is not listed, its identity, color and contract are 404, and a lookup
+    of a color held as a minted but undescribed kind is `not-minted-in-indexed-range` (7 lookups). Everything else of the
+    101 answers is equal once `minted`, `firstSeen`, `evidence`, `color`, `image`, `segment`, `phase`, `seen`, the
+    status's `scanner` and the start height are masked. TM-13 should name the unlisted minted-only identity.
+16. **The `ignored` counts.** The cases' expectations count other-named `Misc` logs (`ignored`: C07's 4), which the
+    module does not store (TM-2); M20 counts them from `contract_logs.logs`.
