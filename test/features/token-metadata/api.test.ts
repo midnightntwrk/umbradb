@@ -13,7 +13,7 @@ import type { ApiRegistry } from "../../../src/modules/declaration.js";
 import type { UmbraDBHandle } from "../../../src/library/start-umbradb.js";
 import { cursorReaches } from "../../library/library-fixtures.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../../runner/process-backends.js";
-import { blockLogs, contract, domain, eventData, get, type Got, miscData, startRun } from "./harness.js";
+import { blockLogs, contract, domain, eventData, get, type Got, miscData, startRun, txHashOf } from "./harness.js";
 
 /**
  * `token-metadata`'s `/v1` API on the module API listener, on PostgreSQL 18 and PGlite, over one chain with an
@@ -98,6 +98,13 @@ describe.each(PROCESS_BACKENDS)("token-metadata's API on $name", (backend: Proce
       ["accept", null],
       ["reject", incorrect.json.mark.reasons[0]],
     ]);
+    // Each event carries its transaction's hash (block-parsed's), and ?tx= finds that transaction's events.
+    const tx = hex(txHashOf(S + 1, 2));
+    expect(events.json.items.map((e: { txHash: string }) => e.txHash)).toEqual([tx, tx]);
+    const byTx = (await at(`/v1/events?tx=${tx}`)).json;
+    expect(byTx.items).toEqual(events.json.items);
+    expect((await at(`/v1/events?tx=${tx}&contract=${hex(A)}`)).json.items).toEqual([]);
+    expect((await at(`/v1/events?tx=${hex(txHashOf(S + 1, 0))}`)).json.items.map((e: { contractAddress: string }) => e.contractAddress)).toEqual([hex(A)]);
   }, 60_000);
 
   it("serves an identity: common fields, a key-ordered field page, its group by symbol, its image pending (M18)", async () => {

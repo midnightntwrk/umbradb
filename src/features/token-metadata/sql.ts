@@ -7,7 +7,7 @@
  * finalized blocks only, RN-14), and its activity listing (a later change):
  *
  * - `events`, append-only: one row per MIP-0018 candidate at its chain position — height, the transaction's index in
- *   the block, and `event_index`, the log's position among its transaction's logs (the proof of concept's
+ *   the block and its hash (from `block-parsed`, indexed for `/v1/events?tx=`), and `event_index`, the log's position among its transaction's logs (the proof of concept's
  *   `eventIndex`). Its classification is `accept`, `reject` or `unresolved` (an unresolved site of
  *   `fast-logs-unresolved`; an `ignore`d log is not stored, TM-2); `reason` is null iff `accept`; an accepted event's identity is its `domain_sep` and `kind`. `entry_point` keeps the first 128 bytes.
  * - `fields`, mutable: one row per field of an identity, holding only its current value, whole (TM-9: names and
@@ -36,6 +36,7 @@ export const MIGRATION_001 = `CREATE TABLE ${SCHEMA}.events (
   height bigint NOT NULL CHECK (height >= 0),
   tx_index integer NOT NULL CHECK (tx_index >= 0),
   event_index integer NOT NULL CHECK (event_index >= 0),
+  tx_hash bytea NOT NULL CHECK (octet_length(tx_hash) = 32),
   contract_address bytea NOT NULL CHECK (octet_length(contract_address) = 32),
   entry_point bytea NOT NULL CHECK (octet_length(entry_point) <= 128),
   classification text NOT NULL CHECK (classification IN ('accept', 'reject', 'unresolved')),
@@ -46,6 +47,7 @@ export const MIGRATION_001 = `CREATE TABLE ${SCHEMA}.events (
   CHECK ((classification = 'accept') = (domain_sep IS NOT NULL AND kind IS NOT NULL)),
   PRIMARY KEY (height, tx_index, event_index)
 );
+CREATE INDEX events_tx_idx ON ${SCHEMA}.events (tx_hash, height, tx_index, event_index);
 CREATE INDEX events_contract_idx ON ${SCHEMA}.events (contract_address, height, tx_index, event_index);
 CREATE INDEX events_reject_idx ON ${SCHEMA}.events (contract_address, height, tx_index, event_index) INCLUDE (reason)
   WHERE classification = 'reject';
@@ -105,6 +107,8 @@ export interface Position {
 
 /** One `events` row. */
 export interface EventRow extends Position {
+  /** The transaction's hash, from `block-parsed`. */
+  readonly txHash: Uint8Array;
   readonly contract: Uint8Array;
   readonly entryPoint: Uint8Array;
   readonly classification: "accept" | "reject" | "unresolved";
@@ -132,9 +136,9 @@ const identityParams = (id: IdentityKey): unknown[] => [id.contract, id.domainSe
 /** Writes one event row. */
 export async function insertEvent(w: Write, row: EventRow): Promise<void> {
   await w.execute(
-    `INSERT INTO ${SCHEMA}.events (height, tx_index, event_index, contract_address, entry_point, classification, reason,
-      domain_sep, kind) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-    [row.height, row.tx, row.event, row.contract, row.entryPoint, row.classification, row.reason, row.domainSep, row.kind],
+    `INSERT INTO ${SCHEMA}.events (height, tx_index, event_index, tx_hash, contract_address, entry_point, classification,
+      reason, domain_sep, kind) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    [row.height, row.tx, row.event, row.txHash, row.contract, row.entryPoint, row.classification, row.reason, row.domainSep, row.kind],
   );
 }
 

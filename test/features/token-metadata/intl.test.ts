@@ -63,7 +63,7 @@ describe("M3: Intl only where the module serves", () => {
       },
     };
     const long = "x".repeat(70);
-    await writeBlock(w, 5n, blockLogs([0, contract(1), eventData(domain(1), 1, commonRecords({ name: long, symbol: long }))]));
+    await writeBlock(w, 5n, blockLogs([0, contract(1), eventData(domain(1), 1, commonRecords({ name: long, symbol: long }))]), () => new Uint8Array(32));
     expect(statements.some((s) => s.sql.includes("INSERT INTO token_metadata.fields"))).toBe(true);
     expect(segment).not.toHaveBeenCalled();
     const [identity] = await servedIdentities(w, "n");

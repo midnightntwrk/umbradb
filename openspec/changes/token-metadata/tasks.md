@@ -102,7 +102,7 @@ Built test first only in part: the spike's code came with its tests, and each `[
 | Task | Criteria passing on PostgreSQL 18 and PGlite | Left |
 |---|---|---|
 | 1.1 | the provenance tests (copies byte for byte, ports by their replacements) | record the proof of concept's API answers |
-| 1.2 | the two stagenet tapes recorded (`~/umbradb-tapes`), 49 real `Misc` logs as a fixture | the tapes release and `manifest.json` |
+| 1.2 | the two stagenet tapes recorded (`~/umbradb-tapes`), 49 real `Misc` logs as a fixture; both in `test/tape/real/manifest.json` (the real-tape tests pass, 50) | uploading them to the tapes release (owner) |
 | 2.1 | M4 (the reader and the module), M5, M6 with its control | — |
 | 2.2 | M7 (66/66 normative, 43/43 informative, A3c) | M19 |
 | 3.1 | M1: S = 1,000,000 with the module (test provider) and with `core-contract-logs-fast`; the refusal at S = 0, cursor 5, from 6 | M1's v8 clause (needs a v8 chain with calls) |
@@ -129,7 +129,9 @@ Built test first only in part: the spike's code came with its tests, and each `[
    key order. The vectors do not compare order; the recorded answers (M14) will show whether the API's does.
 7. **M9's wording.** `vectors-umbradb/` holds no state vector (only A3c, a payload vector); "UmbraDB's per-key
    tombstone versions" names nothing. The vendored state vectors already follow per-key tombstones.
-8. **`/v1/events`' transaction hashes.** Contract logs carry a transaction's index, not its hash. The API reads the
+8. **`/v1/events`' transaction hashes.** `RESOLVED` (owner, 2026-11-06: option 1): the module requires `block-parsed`
+   and stores each event's `tx_hash` in `events`, indexed by `events_tx_idx`; TM-1 and D1 must name the second
+   requirement. Was: contract logs carry a transaction's index, not its hash. The API reads the
    hash from `core_block_parsed.transactions` (a module the module does not require), `""` where it has no row; `?tx=`
    matches through that table, which has no index on the hash, so it is not bounded. Either the module requires
    `block-parsed` and stores the hash in `events` (indexed), or the core indexes `tx_hash`.
