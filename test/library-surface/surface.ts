@@ -55,6 +55,12 @@ export interface SurfaceAmendment {
   readonly removed: readonly string[];
 }
 
+/**
+ * The opening of the token-metadata change's design D9 bullet that amends §12 again, after start-umbradb's (read with
+ * {@link section4Amendment}, up to its section's end).
+ */
+export const TOKEN_METADATA_EXPORTS_BULLET = "- **Exports** (`core-arch` design §12, amended after start-umbradb):";
+
 /** The opening of the start-umbradb change's design §4 bullet that amends §12. */
 const EXPORTS_BULLET = "- **Exports** (`core-arch` design §12, amended):";
 
@@ -64,11 +70,11 @@ const EXPORTS_BULLET = "- **Exports** (`core-arch` design §12, amended):";
  * `removed` (names). Throws when the bullet or one of its parts moved, so a reworded bullet fails rather than amending
  * nothing. [A1; start-umbradb design §4]
  */
-export function section4Amendment(design: string): SurfaceAmendment {
-  const start = design.indexOf(EXPORTS_BULLET);
-  const end = design.indexOf("\n## 5.", start);
-  if (start < 0 || end < start) throw new Error("the start-umbradb design has no §4 Exports bullet before §5");
-  const bullet = design.slice(start + EXPORTS_BULLET.length, end).replace(/\s+/g, " ");
+export function section4Amendment(design: string, opening: string = EXPORTS_BULLET, until = "\n## 5."): SurfaceAmendment {
+  const start = design.indexOf(opening);
+  const end = design.indexOf(until, start);
+  if (start < 0 || end < start) throw new Error(`the design has no Exports bullet "${opening}" before "${until.trim()}"`);
+  const bullet = design.slice(start + opening.length, end).replace(/\s+/g, " ");
   const part = (from: string, to: string | null): string => {
     const at = bullet.indexOf(from);
     const until = to === null ? bullet.length : bullet.indexOf(to, at);
@@ -116,8 +122,10 @@ export const PENDING_EXPORTS: Surface = Object.freeze({
  * change's §4 (`changeDesign`) amends it, less {@link PENDING_EXPORTS}. What A1 pins and the pack smoke's consumer
  * imports. [A1, A2, LS-1]
  */
-export function pinnedSurface(coreDesign: string, changeDesign: string): Surface {
-  return withoutPending(amendedSurface(section12Surface(coreDesign), section4Amendment(changeDesign)), PENDING_EXPORTS);
+export function pinnedSurface(coreDesign: string, changeDesign: string, tokenMetadataDesign: string): Surface {
+  const once = amendedSurface(section12Surface(coreDesign), section4Amendment(changeDesign));
+  const twice = amendedSurface(once, section4Amendment(tokenMetadataDesign, TOKEN_METADATA_EXPORTS_BULLET, "\n## Risks"));
+  return withoutPending(twice, PENDING_EXPORTS);
 }
 
 /** Whether an export is a value at run time: its target has a value meaning and it is not exported as a type only. */

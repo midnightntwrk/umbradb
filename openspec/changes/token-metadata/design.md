@@ -131,6 +131,14 @@ code with the reference, as the proof of concept already does (decision Q-1 revi
   compared with TM-13's differences masked.
 - **Browser:** the browser suites' tape node serving those tapes to a page with the module (TM-16).
 
+### D9. Exports (task 4.3)
+
+`src/index.ts` exports the module's declaration, so a configuration writes `TOKEN_METADATA.entry({ start, config: {} })`
+as it writes a core module's, and the error a refused start carries as its cause, so a host can tell it by `instanceof`.
+
+- **Exports** (`core-arch` design §12, amended after start-umbradb): added `TOKEN_METADATA` and
+  `TokenMetadataStartAfterDatabase`, and the types none; kept every other name; removed none.
+
 ## Risks / Trade-offs
 
 - **[Depends on `fast-logs-unresolved`.]** Without it, a mid-chain run halts on any log `-fast` cannot read. → Built and

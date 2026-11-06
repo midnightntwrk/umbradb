@@ -17,6 +17,7 @@
  */
 
 import { z } from "zod";
+import { UMBRADB_VERSION } from "../../config/build.js";
 import { CONTRACT_LOGS_ITEM, contractLogsItemOf } from "../../backbone/contract-logs/contract-logs.js";
 import type { BlockParsed } from "../../backbone/core-block-parsed/core-block-parsed.js";
 import { defineModule } from "../../modules/declaration.js";
@@ -54,7 +55,7 @@ export class TokenMetadataStartAfterDatabase extends Error {
 export function tokenMetadataWith(reader: LogReader) {
   return defineModule({
     id: TOKEN_METADATA_ID,
-    version: "0.1.0",
+    version: UMBRADB_VERSION,
     side: "public",
     requires: [CONTRACT_LOGS_ITEM, BLOCK_PARSED_ITEM],
     provides: [

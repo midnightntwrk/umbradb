@@ -109,6 +109,8 @@ Built test first only in part: the spike's code came with its tests, and each `[
 | 3.2 | M8's first half (S7a, S7b); M9 (all 36 state vectors, also against `state.ts`); M11 (25 chains per backend; a reverse-order fault fails it); M12's colors (v8, v9-rc3, v9); M2 (10 chains, per-block digests and contents hashes); M3 | M8's unresolved half (needs `fast-logs-unresolved`); M12's S6 through the routes (4.1) |
 | 3.3 | M13: `ok`, `partial`, `incorrect` (reasons, count) through the routes; `none`, `unresolved` and the precedence through `markJson` | M13's `unresolved` through a chain (needs `fast-logs-unresolved`) |
 | 4.1 | M10 (S3 at two heights, S5/S12, S11, undefined keys only; a whole-symbol grouping fault fails it); M15's module part (400s, 404s, cursors bound, limits, ASCII JSON, headers, `X-Umbra-*`, `BUSY`); M17; M18's served part (`image` pending) | M15's HEAD; M18's refused outbound connections |
+| 4.2 | M16 (10,000 keys, 10,000 rejected events, a 1,000-member group: one field page and keyset pages of 500, 100 reasons, 100 members, each answer under the proof of concept's size bounds and reading back fewer than 1,000 rows; `[NEG]` a 12-character symbol's group reads more) | the 12-character prefix read (finding 11) |
+| 4.3 | `TOKEN_METADATA` and `TokenMetadataStartAfterDatabase` exported (design D9 amends the surface; the surface test and the pack smoke read it); an installed project's configuration with `TOKEN_METADATA.entry(...)` passes `umbradb config check` (`[NEG]` its entry without the module listed fails); the module declares `UMBRADB_VERSION`; the gates the spike had broken (a `src/features/` coverage floor, the vendored README's upstream link, the version) pass | — |
 | 5.1 | M20 on both backends (each case at its own last block, 45 comparisons, later cases absent; C09; U1; C06 per step; the 35 + 1 v1-named events against the reference index with block hash, transaction hash and entry point; IDX's identity entries; every case identity's mark against the mark rule, C06 per step; no unresolved site; `[NEG]` another case's and an earlier step's expectation are seen); M14 (101 recorded answers equal after TM-13's differences, 11 of them changed by those differences; `[NEG]` a changed name is seen) | the reference's mints, colors, deploys and activity (the activity change); the payload bytes of the events (not stored) |
 
 **Findings for the spec (to settle before the gate):**
@@ -145,9 +147,11 @@ Built test first only in part: the spike's code came with its tests, and each `[
     `fields_color_idx` (SQL `sha256`, so the write path computes no color). `/v1/contracts/{a}/tokens` knows a contract
     from its MIP-0018 events and fields only (the proof of concept: any applied call). `network` is the known name of
     the genesis hash, else the hash; `scanner` is always `following`. TM-13 should say so.
-11. **Grouping by the cut symbol (finding 5), done.** A group reads the rows whose whole symbol starts with the cut one
-    (a range of `fields_symbol_idx`) and keeps those whose own cut equals it, so `memberCount` reads every such row:
-    M16 (task 4.2) must bound it.
+11. **Grouping by the cut symbol (finding 5).** A served symbol under 12 characters is whole, so its group is an
+    index-only count and its first 100 members (M16 passes). A 12-character one may be the cut of longer symbols, so its
+    group reads every row whose symbol starts with it and keeps those whose own cut equals it: unbounded in the rows
+    sharing that prefix (M16's negative control). Bounding it needs the cut stored, which TM-14 forbids with `Intl`
+    (it depends on the platform's Unicode data); a decision for the owner.
 12. **Field order (finding 6), settled for the API.** `commonFields` keep the order they were last set and `fields` key
     order, both as the proof of concept serves them; only `read.ts`'s whole-table read uses key order.
 13. **The browser build.** `api.ts` computes colors with `color.ts`, which uses `node:crypto`; task 5.2 needs them from
