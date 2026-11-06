@@ -107,10 +107,12 @@ Built test first only in part: the spike's code came with its tests, and each `[
 | 2.2 | M7 (66/66 normative, 43/43 informative, A3c) | M19 |
 | 3.1 | M1: S = 1,000,000 with the module (test provider) and with `core-contract-logs-fast`; the refusal at S = 0, cursor 5, from 6 | M1's v8 clause (needs a v8 chain with calls) |
 | 3.2 | M8's first half (S7a, S7b); M9 (all 36 state vectors, also against `state.ts`); M11 (25 chains per backend; a reverse-order fault fails it); M12's colors (v8, v9-rc3, v9); M2 (10 chains, per-block digests and contents hashes); M3 | M8's unresolved half (needs `fast-logs-unresolved`); M12's S6 through the routes (4.1) |
+| 3.3 | M13: `ok`, `partial`, `incorrect` (reasons, count) through the routes; `none`, `unresolved` and the precedence through `markJson` | M13's `unresolved` through a chain (needs `fast-logs-unresolved`) |
+| 4.1 | M10 (S3 at two heights, S5/S12, S11, undefined keys only; a whole-symbol grouping fault fails it); M15's module part (400s, 404s, cursors bound, limits, ASCII JSON, headers, `X-Umbra-*`, `BUSY`); M17; M18's served part (`image` pending) | M14 (needs 1.1's recorded answers); M15's HEAD; M18's refused outbound connections |
 
 **Findings for the spec (to settle before the gate):**
 
-1. **TM-1's refusal code.** A module cannot give a process refusal its own code: the process refuses with
+1. **TM-1's refusal code.** `RESOLVED` (owner, 2026-11-06: option 1, TM-1, D2 and M1 now say so). A module cannot give a process refusal its own code: the process refuses with
    `callback-error` at `on-start-db` of `token-metadata`, and the error it carries (`cause`) has the code
    `token-metadata-start-after-database`. Either TM-1 says so, or the core lets a module name a refusal code.
 2. **Only the first revision counts.** A later revision (a new version) starts above S by nature; the refusal reads
@@ -127,3 +129,23 @@ Built test first only in part: the spike's code came with its tests, and each `[
    key order. The vectors do not compare order; the recorded answers (M14) will show whether the API's does.
 7. **M9's wording.** `vectors-umbradb/` holds no state vector (only A3c, a payload vector); "UmbraDB's per-key
    tombstone versions" names nothing. The vendored state vectors already follow per-key tombstones.
+8. **`/v1/events`' transaction hashes.** Contract logs carry a transaction's index, not its hash. The API reads the
+   hash from `core_block_parsed.transactions` (a module the module does not require), `""` where it has no row; `?tx=`
+   matches through that table, which has no index on the hash, so it is not bounded. Either the module requires
+   `block-parsed` and stores the hash in `events` (indexed), or the core indexes `tx_hash`.
+9. **What the module API answers itself.** It has no HEAD; an unknown path is 404 `not-found` and another method 405
+   `method-not-allowed` with `Allow: GET` (the proof of concept: `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `GET, HEAD`); a
+   failure is 500 `internal-error` (the proof of concept: 500 `INTERNAL`, or 503 `UNAVAILABLE` for the database); a
+   repeated query parameter reaches the handler as its first value, so it cannot be refused. TM-13 should list these.
+10. **Colors without mints.** A described kind 1 or 2 identity's `color` is its computed color (the proof of concept:
+    its first mint's color, else null); `/v1/tokens/{color}` and `/v1/lookup` find it through the expression index
+    `fields_color_idx` (SQL `sha256`, so the write path computes no color). `/v1/contracts/{a}/tokens` knows a contract
+    from its MIP-0018 events and fields only (the proof of concept: any applied call). `network` is the known name of
+    the genesis hash, else the hash; `scanner` is always `following`. TM-13 should say so.
+11. **Grouping by the cut symbol (finding 5), done.** A group reads the rows whose whole symbol starts with the cut one
+    (a range of `fields_symbol_idx`) and keeps those whose own cut equals it, so `memberCount` reads every such row:
+    M16 (task 4.2) must bound it.
+12. **Field order (finding 6), settled for the API.** `commonFields` keep the order they were last set and `fields` key
+    order, both as the proof of concept serves them; only `read.ts`'s whole-table read uses key order.
+13. **The browser build.** `api.ts` computes colors with `color.ts`, which uses `node:crypto`; task 5.2 needs them from
+    SQL or Web Crypto.

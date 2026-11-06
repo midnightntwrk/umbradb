@@ -8,8 +8,8 @@
  *
  * - `events`, append-only: one row per MIP-0018 candidate at its chain position — height, the transaction's index in
  *   the block, and `event_index`, the log's position among its transaction's logs (the proof of concept's
- *   `eventIndex`). Its classification is `accept` or `reject` (an `ignore`d log is not stored, TM-2); `reason` is null
- *   iff `accept`; an accepted event's identity is its `domain_sep` and `kind`. `entry_point` keeps the first 128 bytes.
+ *   `eventIndex`). Its classification is `accept`, `reject` or `unresolved` (an unresolved site of
+ *   `fast-logs-unresolved`; an `ignore`d log is not stored, TM-2); `reason` is null iff `accept`; an accepted event's identity is its `domain_sep` and `kind`. `entry_point` keeps the first 128 bytes.
  * - `fields`, mutable: one row per field of an identity, holding only its current value, whole (TM-9: names and
  *   symbols are cut when served, never when stored). `uint_value` is a `UInt` value as a number; `usable` is the
  *   common-field rule's answer for a common key, else null; `defined` says whether the key is served (MIP "Keys").
@@ -23,6 +23,14 @@ import type { BlockWriteHandle, SchemaWriteHandle } from "../../db/api.js";
 /** The module's schema: its id with `-` replaced by `_`. */
 export const SCHEMA = "token_metadata";
 
+/**
+ * A row's color (`./color.ts`, MIP "Lookup") in SQL: `sha256(pad(32, "midnight:derive_token") ‖ domain_sep ‖
+ * contract_address)`. The API finds an identity by its color through the expression index `fields_color_idx`, so no
+ * color is stored and the write path computes none. [TM-13]
+ */
+export const COLOR_SQL =
+  "sha256('\\x6d69646e696768743a6465726976655f746f6b656e0000000000000000000000'::bytea || domain_sep || contract_address)";
+
 /** Migration `001`: the three tables and their indexes. Never edited once released; a change is a new migration. */
 export const MIGRATION_001 = `CREATE TABLE ${SCHEMA}.events (
   height bigint NOT NULL CHECK (height >= 0),
@@ -30,7 +38,7 @@ export const MIGRATION_001 = `CREATE TABLE ${SCHEMA}.events (
   event_index integer NOT NULL CHECK (event_index >= 0),
   contract_address bytea NOT NULL CHECK (octet_length(contract_address) = 32),
   entry_point bytea NOT NULL CHECK (octet_length(entry_point) <= 128),
-  classification text NOT NULL CHECK (classification IN ('accept', 'reject')),
+  classification text NOT NULL CHECK (classification IN ('accept', 'reject', 'unresolved')),
   reason text CHECK (reason IS NULL OR reason ~ '^[a-z0-9-]{1,64}$'),
   domain_sep bytea CHECK (domain_sep IS NULL OR octet_length(domain_sep) = 32),
   kind smallint CHECK (kind IS NULL OR kind IN (1, 2, 3)),
@@ -41,6 +49,8 @@ export const MIGRATION_001 = `CREATE TABLE ${SCHEMA}.events (
 CREATE INDEX events_contract_idx ON ${SCHEMA}.events (contract_address, height, tx_index, event_index);
 CREATE INDEX events_reject_idx ON ${SCHEMA}.events (contract_address, height, tx_index, event_index) INCLUDE (reason)
   WHERE classification = 'reject';
+CREATE INDEX events_unresolved_idx ON ${SCHEMA}.events (contract_address, height, tx_index, event_index)
+  WHERE classification = 'unresolved';
 CREATE TABLE ${SCHEMA}.fields (
   contract_address bytea NOT NULL CHECK (octet_length(contract_address) = 32),
   domain_sep bytea NOT NULL CHECK (octet_length(domain_sep) = 32),
@@ -61,6 +71,8 @@ CREATE TABLE ${SCHEMA}.fields (
 CREATE INDEX fields_defined_idx ON ${SCHEMA}.fields (contract_address, domain_sep, kind, key) WHERE defined;
 CREATE INDEX fields_symbol_idx ON ${SCHEMA}.fields (contract_address, value)
   WHERE key = '\\x73796d626f6c'::bytea AND usable;
+CREATE INDEX fields_color_idx ON ${SCHEMA}.fields (${COLOR_SQL}, kind)
+  WHERE defined AND kind IN (1, 2);
 CREATE TABLE ${SCHEMA}.withdrawals (
   contract_address bytea NOT NULL CHECK (octet_length(contract_address) = 32),
   domain_sep bytea NOT NULL CHECK (octet_length(domain_sep) = 32),
@@ -95,7 +107,7 @@ export interface Position {
 export interface EventRow extends Position {
   readonly contract: Uint8Array;
   readonly entryPoint: Uint8Array;
-  readonly classification: "accept" | "reject";
+  readonly classification: "accept" | "reject" | "unresolved";
   readonly reason: string | null;
   readonly domainSep: Uint8Array | null;
   readonly kind: number | null;

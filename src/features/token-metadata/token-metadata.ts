@@ -10,6 +10,7 @@
  *   `on-start-db` an entry starting above S. The process refuses with `callback-error` at `on-start-db` of
  *   `token-metadata`; the error itself is a {@link TokenMetadataStartAfterDatabase}, whose code is
  *   `token-metadata-start-after-database`.
+ * - **Its API** (`./api.ts`) is the proof of concept's `/v1` routes on the module API, registered in `on-start-api`.
  * - **Per block** it writes in `on-db-write` (`./apply.ts`): the block's candidates and their effect on the fields, in
  *   chain order, reading its own rows inside the block transaction. A v8 block has no contract logs, so nothing.
  */
@@ -17,6 +18,7 @@
 import { z } from "zod";
 import { CONTRACT_LOGS_ITEM, contractLogsItemOf } from "../../backbone/contract-logs/contract-logs.js";
 import { defineModule } from "../../modules/declaration.js";
+import { registerMetadataApi } from "./api.ts";
 import { type LogReader, writeBlock } from "./apply.ts";
 import { miscAtom } from "./log-reader.ts";
 import { databaseStart, MIGRATIONS, SCHEMA } from "./sql.ts";
@@ -68,6 +70,9 @@ export function tokenMetadataWith(reader: LogReader) {
         const first = p.revisions[0];
         if (start === null || first === undefined) return;
         if (first.start > start) throw new TokenMetadataStartAfterDatabase(first.start, start);
+      },
+      async "on-start-api"(_p, api) {
+        registerMetadataApi(api);
       },
       async "on-db-write"(_p, b, w) {
         await writeBlock(w, b.height, contractLogsItemOf(b, TOKEN_METADATA_ID), reader);

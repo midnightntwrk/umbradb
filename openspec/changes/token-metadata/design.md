@@ -59,8 +59,9 @@ helper; not in `CORE_MODULES`. It has no ledger task, so it loads like any user 
 The proof of concept starts its scan wherever its archive starts, and its state is complete for that range. On 0.10.0
 a module's rows must not depend on when it was added (MD-4's promise), but the materialized state of D3 does. The module
 therefore declares `startsMidChain: true` — so a new database at any S, the browser's included, accepts it — and refuses
-in `on-start-db` an entry starting above the database's S (read from `core_chain.identity`), with
-`token-metadata-start-after-database`. Started at S, its rows equal those of any other database with the same S.
+in `on-start-db` an entry whose first revision starts above the database's S (read from `core_chain.identity`) by
+throwing `token-metadata-start-after-database`; a module cannot name a process refusal's code, so the process refuses
+with `callback-error` at `on-start-db` of `token-metadata`, with that error as its cause (owner decision, 2026-11-06). Started at S, its rows equal those of any other database with the same S.
 *Alternative:* store only per-block facts and replay at read time (the previous draft) — rejected because it breaks the
 API contract's bounded cost (an identity's fields come in keyset pages; marks read six keys), which the proof of
 concept's final audit (finding F2) required.

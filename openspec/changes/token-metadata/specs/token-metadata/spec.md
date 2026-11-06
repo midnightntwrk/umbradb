@@ -28,8 +28,8 @@ in the block, then the record's position in its payload.
 
 WHERE a configuration has an entry for `token-metadata`, THE system SHALL run it as a public module that requires only
 `contract-logs`, writes only to its own schema `token_metadata` (DB-6), and declares `startsMidChain: true` (MD-4). IF
-its entry starts above the database's first height S THEN THE module SHALL refuse startup with
-`token-metadata-start-after-database`. WHILE a block's ledger has no contract logs (v8) it SHALL store nothing.
+its first revision starts above the database's first height S THEN startup SHALL refuse with `callback-error` at
+`on-start-db` of `token-metadata`, whose cause has the code `token-metadata-start-after-database`. WHILE a block's ledger has no contract logs (v8) it SHALL store nothing.
 
 #### Scenario: A new database at the tip
 - **WHEN** a new database starts at S = 1,000,000 with `core-contract-logs-fast` and `token-metadata` from S
@@ -37,7 +37,8 @@ its entry starts above the database's first height S THEN THE module SHALL refus
 
 #### Scenario: Added later
 - **WHEN** a database with S = 0 and cursor 500,000 adds `token-metadata` from 500,001
-- **THEN** startup refuses with `token-metadata-start-after-database`
+- **THEN** startup refuses with `callback-error` at `on-start-db` of `token-metadata`, caused by
+  `token-metadata-start-after-database`
 
 ### Requirement: TM-2 Candidates are found by event type and exact name
 
