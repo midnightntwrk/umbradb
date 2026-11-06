@@ -99,9 +99,9 @@ its transactions numbered in body order, each fully successful; its ledger state
 `system_properties.genesis_state` — IF that state's root equals the node's `midnight_ledgerStateRoot` at block 0 THEN
 the transactions SHALL be applied to an empty state only to produce their results, segment results, events and logs,
 and the genesis state SHALL become the state after block 0; OTHERWISE they SHALL be applied to the genesis state; the
-root after block 0 SHALL be checked like any other; its cNight registrations SHALL be read from pallet storage at block
-0 — their keys enumerated with `state_getKeysPaged` in key order and their values read with `state_getStorage` — and
-numbered in that order.
+root after block 0 SHALL be checked like any other. Block 0's cNight registrations (pallet storage at block 0) are not
+read by this change: no module of it consumes them, and the feature module that does reads them (owner decision,
+2026-11-06, spec-compliance review).
 
 #### Scenario: A genesis state that already includes block 0
 - **WHEN** the genesis state's root equals the node's root at block 0
@@ -112,7 +112,7 @@ numbered in that order.
 
 THE system SHALL read chain data only from the node, only through `chain_subscribeNewHeads`,
 `chain_subscribeFinalizedHeads`, `chain_getFinalizedHead`, `chain_getBlockHash`, `chain_getBlock`, `chain_getHeader`,
-`state_getStorage`, `state_getKeysPaged` (block 0's registrations only), `state_getMetadata`, `state_getRuntimeVersion`,
+`state_getStorage`, `state_getKeysPaged` (block 0's registrations only, for the feature module that reads them), `state_getMetadata`, `state_getRuntimeVersion`,
 `midnight_ledgerStateRoot` and `system_properties`,
 and SHALL NOT depend on the official indexer or a wallet SDK at run time.
 

@@ -72,8 +72,8 @@
  *
  * **Block 0** goes the same path: `chain_getBlockHash(0)`, `chain_getBlock`, its metadata read at its own hash
  * (`contentStateOf`), and its runtime from its `MNSV` digest. Its time is 0 when it has no `Timestamp::set`
- * (`./extrinsics.ts`). Its ledger path (the genesis state, the root at block 0, the cNight registrations) belongs to
- * `core-ledger-state` and `core-chain-events`. [IN-7]
+ * (`./extrinsics.ts`). Its ledger path (the genesis state and the root at block 0) belongs to `core-ledger-state` and
+ * `core-chain-events`; its cNight registrations are not read, since no core module consumes them. [IN-7]
  *
  * **The items** `core-block-fetch` publishes for a block ({@link NodeBlockSource.blockItems}, `./items.ts`) come from
  * the block fetched, the ledger table (`selectLedgerVersion`), and the metadata of the runtime in its parent's state

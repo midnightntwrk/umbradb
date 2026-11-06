@@ -87,6 +87,8 @@ split; this change is one feature by the owner's decision, recorded here as the 
 - **No migration of 0.9.5 databases**: the indexer always starts a new database (CORE-ARCH §3.4).
 - **No security boundary against modules**: modules are trusted code (Q46).
 - **No data source other than the Midnight node**, Celestia included (Q39).
+- **No reading of block 0's cNight registrations**: no core module consumes them; the feature module that does reads
+  them (IN-7, owner decision 2026-11-06).
 
 ## Impact
 
