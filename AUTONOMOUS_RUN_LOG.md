@@ -581,3 +581,13 @@ Orchestrated by `orchestrator / claude-opus-5-5 / review-v2`. Not yet committed 
   the owner's answer to Q-30, 2026-11-02; `/status`'s head, finding 6, in `abddf7b`); the README run of P12.A, after
   `v0.10.0-rc.2`, stops every command it starts and compares each command's whole output, its last lines included, with
   what the README and the scripts say.
+- **R10 — The token-metadata spike broke three library-surface gates and the child-process guard without noticing**
+  (`token-metadata` spike, branch `spike/token-metadata`, `claude-opus-5-5`, 2026-11-05 to 2026-11-06; found by the
+  same session's surface run in task 4.3 and its full run in task 6.1). Adding `src/features/token-metadata/` broke
+  `release-version` (the module declared `0.1.0`, not `UMBRADB_VERSION`), `retirement` (no coverage floor for
+  `src/features/`) and `documents` (the vendored reference's README links into its own repository), and the vendored
+  vector runner started a child without the guard (`child-processes.test.ts`); each task ran only the module's own
+  tests. *Second story:* a spike was treated as outside the repository's gates, so the checks that guard every new
+  directory were not run until the export task touched the surface. *Follow-up:* fixed in `4e9deb9` and `4e5b25a`; a
+  change that adds a directory under `src/` or `test/fixtures/` runs `test/library-surface` and
+  `test/child-processes.test.ts` with its first task, spike or not.
