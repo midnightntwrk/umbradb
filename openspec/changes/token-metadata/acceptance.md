@@ -49,8 +49,9 @@ module harness** runs the module on blocks from `InMemoryBlockSource` with a tes
 
 ## 3. State (TM-6 … TM-11)
 
-- **M9** `[CI]` Every vendored state vector (S1–S9) and UmbraDB's per-key tombstone versions, through a pure adapter and
-  through the module on both backends, give their expected state. (TM-6, TM-7, TM-8, TM-10)
+- **M9** `[CI]` Every vendored state vector (S1–S9 and the informative ones; they follow per-key tombstones), through a
+  pure adapter and through the module on both backends, gives its expected state, and the module's state equals the
+  proof of concept's `state.ts` on the same steps. (TM-6, TM-7, TM-8, TM-10)
 - **M10** `[CI]` S3, S5, S10, S11 and S12 as TM-8's and TM-9's scenarios state, read through the routes, including the
   only-undefined-keys identity referenced nowhere. (TM-8, TM-9)
 - **M11** `[PROP][NEG]` For generated chains (valid, invalid and foreign-named candidates, unresolved sites, several per
@@ -64,14 +65,20 @@ module harness** runs the module on blocks from `InMemoryBlockSource` with a tes
 
 ## 4. The API (TM-12, TM-13, TM-15)
 
-- **M14** `[CI]` The proof of concept's recorded API answers, requested after the same blocks from the stagenet tapes,
-  are equal byte for byte with TM-13's fields masked; each masked field holds TM-13's value. (TM-12, TM-13)
-- **M15** `[CI]` The API contract's general rules on every route: errors and codes (400, 404, 405, 503 `BUSY` beyond
-  eight requests), cursors bound to their endpoint, limits 1–500, ASCII-escaped JSON with hostile text, the response
+- **M14** `[CI][NEG]` The proof of concept's recorded API answers, requested after the same blocks from the stagenet
+  tapes, are equal byte for byte with TM-13's differences applied: `minted`, `firstSeen`, `evidence`, `color`, `image`,
+  `segment`, `phase`, `seen`, the status's `scanner` and the start height masked; the identity known only from a mint
+  dropped from the lists and its routes 404; a lookup that resolved to an undescribed identity
+  `not-minted-in-indexed-range`; the answers these change listed. **Negative control:** a recorded answer with a
+  changed name is not equal. (TM-12, TM-13)
+- **M15** `[CI]` The API contract's general rules on every route: errors and codes (400 `BAD_REQUEST`, 404 `NOT_FOUND`,
+  503 `BUSY` beyond eight requests; a path or method no route has answered by the module API, 404 `not-found` and 405
+  `method-not-allowed`), cursors bound to their endpoint, limits 1–500, ASCII-escaped JSON with hostile text, the response
   headers, and the core's `X-Umbra-View`, `X-Umbra-Height` and `X-Umbra-Hash`. (TM-12)
-- **M16** `[CI]` Bounded cost: an identity with 10,000 fields, a contract with 10,000 rejected events and a symbol with
+- **M16** `[CI][NEG]` Bounded cost: an identity with 10,000 fields, a contract with 10,000 rejected events and a symbol with
   1,000 members answer with one field page, 100 reasons and 100 members, reading a bounded number of rows (the proof
-  of concept's `bounded-cost` checks, ported). (TM-12)
+  of concept's `bounded-cost` checks, ported), for a symbol under 12 characters. **Negative control:** the same group
+  under a 12-character symbol reads more rows than the bound (TM-12's exception). (TM-12)
 - **M17** `[CI]` `/v1/lookup` of a described kind-1 identity's computed color with `held=shielded` gives `identity`;
   with `held=unshielded` and no kind 2, `not-minted-in-indexed-range`; the zero color held shielded,
   `shielded-zero-color`; held unshielded, `builtin`. (TM-13)
@@ -82,9 +89,11 @@ module harness** runs the module on blocks from `InMemoryBlockSource` with a tes
 
 ## 5. Real chain and browser
 
-- **M20** `[CI]` The stagenet tapes replayed with `core-contract-logs-fast` and the module from 714,485: every case of
+- **M20** `[CI][NEG]` The stagenet tapes replayed with `core-contract-logs-fast` and the module from one block after each
+  tape's first (714,486 and 715,403), stagenet's genesis hash and header put before the tape's records: every case of
   the fixtures (C01–C10, IDX, U1, with `mip0018-cases-umbradb/` amendments) equals its expectation as the proof of
-  concept's `mip0018-cases.test.ts` compares it, and no unresolved site is recorded. (TM-2 … TM-11)
+  concept's `mip0018-cases.test.ts` compares it (its `ignored` counts from `contract_logs.logs`), and no unresolved site
+  is recorded. **Negative control:** another case's expectation, and an earlier C06 step's, differ. (TM-2 … TM-11)
 - **M21** `[CI]` The browser build, served the stagenet tapes by the browser suites' tape node, with a configuration
   listing `core-contract-logs-fast` and the module, starts at the tape's first height in headless Chrome and answers
   `/v1/identities` for case C01's identity as the server does. (TM-16)

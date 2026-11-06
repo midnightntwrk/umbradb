@@ -122,19 +122,19 @@ Built test first only in part: the spike's code came with its tests, and each `[
 1. **TM-1's refusal code.** `RESOLVED` (owner, 2026-11-06: option 1, TM-1, D2 and M1 now say so). A module cannot give a process refusal its own code: the process refuses with
    `callback-error` at `on-start-db` of `token-metadata`, and the error it carries (`cause`) has the code
    `token-metadata-start-after-database`. Either TM-1 says so, or the core lets a module name a refusal code.
-2. **Only the first revision counts.** A later revision (a new version) starts above S by nature; the refusal reads
+2. **Only the first revision counts.** `RESOLVED` (in design D2). A later revision (a new version) starts above S by nature; the refusal reads
    the first revision's start only.
-3. **D4's split.** The spike computes and writes in `on-db-write` alone, reading its own rows in the block
+3. **D4's split.** `RESOLVED` (in design D4). The spike computes and writes in `on-db-write` alone, reading its own rows in the block
    transaction; nothing needs `on-compute`. D4 should say so, or say why the split is needed.
-4. **D3's columns.** `fields` also keeps the proof of concept's `uint_value`, `usable` and `defined` (the served-row
+4. **D3's columns.** `RESOLVED` (in design D3). `fields` also keeps the proof of concept's `uint_value`, `usable` and `defined` (the served-row
    and symbol indexes need them); `events` keys on `(height, tx_index, event_index)`, `event_index` counting the
    transaction's logs (the proof of concept's `eventIndex`), and keeps no raw name or payload (no recompute).
-5. **Grouping by the cut symbol.** Values are stored whole, but the proof of concept groups by the cut symbol (its
+5. **Grouping by the cut symbol.** `RESOLVED` (in spec TM-10, design D5). Values are stored whole, but the proof of concept groups by the cut symbol (its
    stored value): two symbols longer than 12 characters that share their first 12 group there. The API must group by
    the cut value, not by `fields_symbol_idx`'s whole value (task 4.1).
-6. **Field order.** `state.ts` keeps an identity's fields in the order they were last set; the module reads them in
+6. **Field order.** `RESOLVED` (in design D5, field order). `state.ts` keeps an identity's fields in the order they were last set; the module reads them in
    key order. The vectors do not compare order; the recorded answers (M14) will show whether the API's does.
-7. **M9's wording.** `vectors-umbradb/` holds no state vector (only A3c, a payload vector); "UmbraDB's per-key
+7. **M9's wording.** `RESOLVED` (in acceptance M9, design D8). `vectors-umbradb/` holds no state vector (only A3c, a payload vector); "UmbraDB's per-key
    tombstone versions" names nothing. The vendored state vectors already follow per-key tombstones.
 8. **`/v1/events`' transaction hashes.** `RESOLVED` (owner, 2026-11-06: option 1): the module requires `block-parsed`
    and stores each event's `tx_hash` in `events`, indexed by `events_tx_idx`; TM-1 and D1 must name the second
@@ -142,33 +142,33 @@ Built test first only in part: the spike's code came with its tests, and each `[
    hash from `core_block_parsed.transactions` (a module the module does not require), `""` where it has no row; `?tx=`
    matches through that table, which has no index on the hash, so it is not bounded. Either the module requires
    `block-parsed` and stores the hash in `events` (indexed), or the core indexes `tx_hash`.
-9. **What the module API answers itself.** It has no HEAD; an unknown path is 404 `not-found` and another method 405
+9. **What the module API answers itself.** `RESOLVED` (in spec TM-13, design D5, acceptance M15). It has no HEAD; an unknown path is 404 `not-found` and another method 405
    `method-not-allowed` with `Allow: GET` (the proof of concept: `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `GET, HEAD`); a
    failure is 500 `internal-error` (the proof of concept: 500 `INTERNAL`, or 503 `UNAVAILABLE` for the database); a
    repeated query parameter reaches the handler as its first value, so it cannot be refused. TM-13 should list these.
-10. **Colors without mints.** A described kind 1 or 2 identity's `color` is its computed color (the proof of concept:
+10. **Colors without mints.** `RESOLVED` (in spec TM-13, design D3 and D5). A described kind 1 or 2 identity's `color` is its computed color (the proof of concept:
     its first mint's color, else null); `/v1/tokens/{color}` and `/v1/lookup` find it through the expression index
     `fields_color_idx` (SQL `sha256`, so the write path computes no color). `/v1/contracts/{a}/tokens` knows a contract
     from its MIP-0018 events and fields only (the proof of concept: any applied call). `network` is the known name of
     the genesis hash, else the hash; `scanner` is always `following`. TM-13 should say so.
-11. **Grouping by the cut symbol (finding 5).** A served symbol under 12 characters is whole, so its group is an
+11. **Grouping by the cut symbol (finding 5).** `RESOLVED` (in owner decision 2026-11-06, option 1: spec TM-12, design D5, acceptance M16). A served symbol under 12 characters is whole, so its group is an
     index-only count and its first 100 members (M16 passes). A 12-character one may be the cut of longer symbols, so its
     group reads every row whose symbol starts with it and keeps those whose own cut equals it: unbounded in the rows
     sharing that prefix (M16's negative control). Bounding it needs the cut stored, which TM-14 forbids with `Intl`
     (it depends on the platform's Unicode data); a decision for the owner.
-12. **Field order (finding 6), settled for the API.** `commonFields` keep the order they were last set and `fields` key
+12. **Field order (finding 6), settled for the API.** `RESOLVED` (in design D5, field order). `commonFields` keep the order they were last set and `fields` key
     order, both as the proof of concept serves them; only `read.ts`'s whole-table read uses key order.
 13. **The browser build.** `RESOLVED`, no change: the browser build maps `node:crypto` to its SHA-256 shim
     (`browser/src/shims/crypto.ts`), so `color.ts` runs in the page as it is (M21).
-14. **Replaying a mid-chain tape.** Startup asks for the genesis block's hash and header, which a mid-chain tape does
+14. **Replaying a mid-chain tape.** `RESOLVED` (in design D8, acceptance M20). Startup asks for the genesis block's hash and header, which a mid-chain tape does
     not hold (the test puts the two records of `stagenet-0-10000` before it), and the first block fetched needs its
     parent's runtime version, so a run starts one block after the tape's first: 714,486 and 715,403. Neither first block
     holds an event, so M20 and M14 are unaffected; M14 masks the start height (`startHeight`, `indexedRange.from`).
     M20's wording ("the module from 714,485") should say so, or the tapes be recorded from one block earlier.
-15. **TM-13's differences, as the recorded answers show them.** Without a mint table: the one token minted and never
+15. **TM-13's differences, as the recorded answers show them.** `RESOLVED` (in spec TM-13, design D5, acceptance M14). Without a mint table: the one token minted and never
     described in the range (contract `7771c9e5…`) is not listed, its identity, color and contract are 404, and a lookup
     of a color held as a minted but undescribed kind is `not-minted-in-indexed-range` (7 lookups). Everything else of the
     101 answers is equal once `minted`, `firstSeen`, `evidence`, `color`, `image`, `segment`, `phase`, `seen`, the
     status's `scanner` and the start height are masked. TM-13 should name the unlisted minted-only identity.
-16. **The `ignored` counts.** The cases' expectations count other-named `Misc` logs (`ignored`: C07's 4), which the
+16. **The `ignored` counts.** `RESOLVED` (in design D8, acceptance M20). The cases' expectations count other-named `Misc` logs (`ignored`: C07's 4), which the
     module does not store (TM-2); M20 counts them from `contract_logs.logs`.
