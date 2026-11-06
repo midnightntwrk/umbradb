@@ -1,0 +1,33 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "_comment": "Mutation run of token-metadata (openspec/changes/token-metadata tasks.md 6.1): the module's own files, the vendored codec excluded, with vitest.token-metadata-mutation.config.ts's tests on PGlite only. Run with UMBRADB_PROCESS_BACKENDS=pglite npx stryker run stryker.token-metadata.conf.json. break 65, as the core's gate.",
+  "testRunner": "vitest",
+  "vitest": {
+    "configFile": "vitest.token-metadata-mutation.config.ts"
+  },
+  "mutate": [
+    "src/features/token-metadata/*.ts"
+  ],
+  "coverageAnalysis": "perTest",
+  "reporters": [
+    "clear-text",
+    "html",
+    "json"
+  ],
+  "concurrency": 3,
+  "timeoutMS": 25000,
+  "timeoutFactor": 2,
+  "thresholds": {
+    "high": 90,
+    "low": 70,
+    "break": 65
+  },
+  "tempDirName": ".stryker-tmp",
+  "cleanTempDir": true,
+  "htmlReporter": {
+    "fileName": "reports/mutation/token-metadata.html"
+  },
+  "jsonReporter": {
+    "fileName": "reports/mutation/token-metadata.json"
+  }
+}
