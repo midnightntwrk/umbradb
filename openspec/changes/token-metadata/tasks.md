@@ -104,7 +104,7 @@ Built test first only in part: the spike's code came with its tests, and each `[
 | 1.1 | the provenance tests (copies byte for byte, ports by their replacements); the proof of concept's answers recorded at `760d3e9` on its own stagenet fixtures (`test/fixtures/mip0018-answers/`: 97 + 14 requests over every TM-12 route, a second run byte-identical), their hashes checked with a `[NEG]` control | — |
 | 1.2 | the two stagenet tapes recorded (`~/umbradb-tapes`), 49 real `Misc` logs as a fixture; both in `test/tape/real/manifest.json` (the real-tape tests pass, 50) | uploading them to the tapes release (owner) |
 | 2.1 | M4 (the reader and the module), M5, M6 with its control | — |
-| 2.2 | M7 (66/66 normative, 43/43 informative, A3c) | M19 |
+| 2.2 | M7 (66/66 normative, 43/43 informative, A3c); M19 (200,000 payloads — random, built near the bounds, mutated encodings — never throw, so never read outside the 256 bytes; `[NEG]` with the bounds rule off some payload classifies otherwise, and every out-of-bounds reason occurs) | — |
 | 3.1 | M1: S = 1,000,000 with the module (test provider) and with `core-contract-logs-fast`; the refusal at S = 0, cursor 5, from 6 | M1's v8 clause (needs a v8 chain with calls) |
 | 3.2 | M8's first half (S7a, S7b); M9 (all 36 state vectors, also against `state.ts`); M11 (25 chains per backend; a reverse-order fault fails it); M12's colors (v8, v9-rc3, v9); M2 (10 chains, per-block digests and contents hashes); M3 | M8's unresolved half (needs `fast-logs-unresolved`); M12's S6 through the routes (4.1) |
 | 3.3 | M13: `ok`, `partial`, `incorrect` (reasons, count) through the routes; `none`, `unresolved` and the precedence through `markJson` | M13's `unresolved` through a chain (needs `fast-logs-unresolved`) |
