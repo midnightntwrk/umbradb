@@ -14,6 +14,7 @@ import {
   section12,
   section12Surface,
   section4Amendment,
+  TOKEN_METADATA_EXPORTS_BULLET,
   type Surface,
   surfaceOf,
   surfaceProblems,
@@ -44,7 +45,10 @@ const design = readFileSync(path.join(ROOT, "openspec/changes/core-arch/design.m
 const change = readFileSync(path.join(ROOT, "openspec/changes/start-umbradb/design.md"), "utf8");
 const base = section12Surface(design);
 const amendment = section4Amendment(change);
-const amended = amendedSurface(base, amendment);
+const amendedOnce = amendedSurface(base, amendment);
+const tokenMetadata = readFileSync(path.join(ROOT, "openspec/changes/token-metadata/design.md"), "utf8");
+const tokenMetadataAmendment = section4Amendment(tokenMetadata, TOKEN_METADATA_EXPORTS_BULLET, "\n## Risks");
+const amended = amendedSurface(amendedOnce, tokenMetadataAmendment);
 
 /** The amendment's names not exported yet (see the module comment and `PENDING_EXPORTS`). */
 const PENDING: Surface = PENDING_EXPORTS;
@@ -67,7 +71,11 @@ describe("A1: src/index.ts exports exactly design.md §12's surface, as start-um
     expect(amendment.addedTypes).toEqual(expect.arrayContaining(["UmbraDBOptions", "UmbraDBHandle", "PrivateLinkChannel"]));
     expect([...amendment.removed].sort()).toEqual(["BlockSource", "ProcessHandle", "ProcessState", "runLedgerWorker", "startProcess"]);
     for (const name of amendment.removed) expect([...base.values, ...base.types]).toContain(name);
-    expect(amended.values).toHaveLength(28);
+    expect(amendedOnce.values).toHaveLength(28);
+    expect(amendedOnce.types).toHaveLength(38);
+    // The token-metadata change adds its module and its refusal's error. [token-metadata design D9]
+    expect(tokenMetadataAmendment).toEqual({ addedValues: ["TOKEN_METADATA", "TokenMetadataStartAfterDatabase"], addedTypes: [], removed: [] });
+    expect(amended.values).toHaveLength(30);
     expect(amended.types).toHaveLength(38);
     // What §4 keeps stays: the in-memory chain and its block reference.
     expect(amended.values).toContain("InMemoryBlockSource");
@@ -87,13 +95,13 @@ describe("A1: src/index.ts exports exactly design.md §12's surface, as start-um
   });
 
   it("the pinned surface is the amended one, as the pack smoke's consumer imports it", () => {
-    expect(pinnedSurface(design, change)).toEqual(expected);
+    expect(pinnedSurface(design, change, tokenMetadata)).toEqual(expected);
     expect(expected).toEqual(amended);
   });
 
   it("a reworded §4 Exports bullet fails rather than amending nothing", () => {
     expect(() => section4Amendment(change.replace("- **Exports** (`core-arch` design §12, amended):", "- **Exports:**"))).toThrow(
-      /no §4 Exports bullet/,
+      /no Exports bullet/,
     );
     expect(() => section4Amendment(change.replace("; removed ", "; dropped "))).toThrow(/no longer has "; removed "/);
   });

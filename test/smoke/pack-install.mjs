@@ -81,11 +81,12 @@ if (!existsSync(tscBin)) fail(`typescript compiler not found at ${tscBin} -- ins
 
 /**
  * The exported surface, as the library-surface pin reads it: `core-arch`'s `design.md` §12 as the start-umbradb change's
- * `design.md` §4 amends it, less the names not exported yet. [A1, A2; design §12; start-umbradb design §4]
+ * `design.md` §4 and the token-metadata change's D9 amend it, less the names not exported yet. [A1, A2; design §12; start-umbradb design §4]
  */
 const SURFACE = pinnedSurface(
   readFileSync(join(repoRoot, "openspec/changes/core-arch/design.md"), "utf8"),
   readFileSync(join(repoRoot, "openspec/changes/start-umbradb/design.md"), "utf8"),
+  readFileSync(join(repoRoot, "openspec/changes/token-metadata/design.md"), "utf8"),
 );
 if (SURFACE.values.length === 0 || SURFACE.types.length === 0) fail("design.md §12 lists no values or no types.");
 
