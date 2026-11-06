@@ -92,6 +92,12 @@ export default configuration;
   file does. A module's own settings can read the page's parameters through `run.params`. A module that declares
   ledger tasks is refused (`ledger-tasks-need-modules-from`): the page's ledger worker has no way to import user
   modules yet.
+- **`token-metadata`:** the MIP-0018 module the package ships runs in the page like a user module: add
+  `TOKEN_METADATA` to `modules`, and its entry, `core-chain-events`', `core-block-parsed`'s and
+  `core-contract-logs-fast`'s to `data.entries`, each from `run.start`. It starts with its database: for a new database
+  the page's S is the node's finalized head, so the module serves the metadata published from then on; a database that
+  ran without it refuses it. Its `/v1` routes ([token-metadata-api.md](token-metadata-api.md)) answer through the
+  page's `api` calls. `test/features/token-metadata/fixtures/browser-configuration.ts` is a complete configuration.
 - **Private instances:** `instances(run)` returns `{ id, configure(run) }` for each; each runs in a worker of its own
   beside the core. The private link needs no address: whenever a private instance connects to the core (at its start,
   and again after a lost connection), the page makes a new `MessageChannel` and hands one end to the core worker and
