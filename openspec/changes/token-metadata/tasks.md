@@ -94,3 +94,36 @@ when its last part passes. A criterion that proves ambiguous or untestable is es
 - Draft the next changes of the port (proposal P-1): the explorer page in the browser build; mints, seen colors and
   activity; images (server only).
 - Archive the change after merge (`/opsx:archive`), once `core-arch` is archived.
+
+## Spike notes (branch `spike/token-metadata`; not for merge before the stage-1 gate)
+
+Built test first only in part: the spike's code came with its tests, and each `[NEG]` control was seen failing.
+
+| Task | Criteria passing on PostgreSQL 18 and PGlite | Left |
+|---|---|---|
+| 1.1 | the provenance tests (copies byte for byte, ports by their replacements) | record the proof of concept's API answers |
+| 1.2 | the two stagenet tapes recorded (`~/umbradb-tapes`), 49 real `Misc` logs as a fixture | the tapes release and `manifest.json` |
+| 2.1 | M4 (the reader and the module), M5, M6 with its control | — |
+| 2.2 | M7 (66/66 normative, 43/43 informative, A3c) | M19 |
+| 3.1 | M1: S = 1,000,000 with the module (test provider) and with `core-contract-logs-fast`; the refusal at S = 0, cursor 5, from 6 | M1's v8 clause (needs a v8 chain with calls) |
+| 3.2 | M8's first half (S7a, S7b); M9 (all 36 state vectors, also against `state.ts`); M11 (25 chains per backend; a reverse-order fault fails it); M12's colors (v8, v9-rc3, v9); M2 (10 chains, per-block digests and contents hashes); M3 | M8's unresolved half (needs `fast-logs-unresolved`); M12's S6 through the routes (4.1) |
+
+**Findings for the spec (to settle before the gate):**
+
+1. **TM-1's refusal code.** A module cannot give a process refusal its own code: the process refuses with
+   `callback-error` at `on-start-db` of `token-metadata`, and the error it carries (`cause`) has the code
+   `token-metadata-start-after-database`. Either TM-1 says so, or the core lets a module name a refusal code.
+2. **Only the first revision counts.** A later revision (a new version) starts above S by nature; the refusal reads
+   the first revision's start only.
+3. **D4's split.** The spike computes and writes in `on-db-write` alone, reading its own rows in the block
+   transaction; nothing needs `on-compute`. D4 should say so, or say why the split is needed.
+4. **D3's columns.** `fields` also keeps the proof of concept's `uint_value`, `usable` and `defined` (the served-row
+   and symbol indexes need them); `events` keys on `(height, tx_index, event_index)`, `event_index` counting the
+   transaction's logs (the proof of concept's `eventIndex`), and keeps no raw name or payload (no recompute).
+5. **Grouping by the cut symbol.** Values are stored whole, but the proof of concept groups by the cut symbol (its
+   stored value): two symbols longer than 12 characters that share their first 12 group there. The API must group by
+   the cut value, not by `fields_symbol_idx`'s whole value (task 4.1).
+6. **Field order.** `state.ts` keeps an identity's fields in the order they were last set; the module reads them in
+   key order. The vectors do not compare order; the recorded answers (M14) will show whether the API's does.
+7. **M9's wording.** `vectors-umbradb/` holds no state vector (only A3c, a payload vector); "UmbraDB's per-key
+   tombstone versions" names nothing. The vendored state vectors already follow per-key tombstones.

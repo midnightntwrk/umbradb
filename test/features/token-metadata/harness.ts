@@ -1,0 +1,232 @@
+import { z } from "zod";
+import {
+  type ContractLog,
+  contractLogsItem,
+  contractLogsMigrations,
+  frozenLogs,
+  writeLogRows,
+} from "../../../src/backbone/contract-logs/contract-logs.js";
+import { cursorHeight } from "../../../src/backbone/core-block-commit/sql.js";
+import { UMBRADB_VERSION } from "../../../src/config/build.js";
+import type { PostgresParts } from "../../../src/config/database-parts.js";
+import type { ReadHandle } from "../../../src/db/api.js";
+import { openPglite } from "../../../src/db/pglite.js";
+import { openPostgres } from "../../../src/db/postgres.js";
+import { startUmbraDB, type UmbraDBHandle } from "../../../src/library/start-umbradb.js";
+import { defineModule, type ModuleDeclaration } from "../../../src/modules/declaration.js";
+import { InMemoryBlockSource, type InMemoryItems } from "../../../src/runner/in-memory-source.js";
+import {
+  EVENT_NAME,
+  encodePayload,
+  type MetadataRecord,
+} from "../../../src/features/token-metadata/vendor/mip0018/codec/src/index.ts";
+import { TOKEN_METADATA } from "../../../src/features/token-metadata/token-metadata.ts";
+import * as v9 from "../../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js";
+import { cursorReaches, libraryData } from "../../library/library-fixtures.js";
+import type { ProcessDatabase } from "../../runner/process-backends.js";
+
+/**
+ * The module harness of `token-metadata` (acceptance.md: "the module harness"): the real process through
+ * `startUmbraDB`, on blocks from an `InMemoryBlockSource`, with a test-only module `test-contract-logs` that provides
+ * `contract-logs` — the item's own declaration and migrations, its `block` item put at `on-parse` from the logs a test
+ * gives per height, and its rows written as the real providers write them. [TM-1; task 3.1]
+ */
+
+/** The test provider's id. */
+export const TEST_LOGS_ID = "test-contract-logs";
+
+/** A provider of `contract-logs` giving `logs`' logs at each height (none elsewhere). */
+export function logsProvider(logs: ReadonlyMap<bigint, readonly ContractLog[]>): ModuleDeclaration {
+  return defineModule({
+    id: TEST_LOGS_ID,
+    version: "1.0.0",
+    side: "public",
+    requires: ["block-header"],
+    provides: [contractLogsItem()],
+    startsMidChain: true,
+    configSchema: z.object({}),
+    migrations: contractLogsMigrations(),
+    points: {
+      async "on-parse"(_p, b, out) {
+        out.put("contract-logs", frozenLogs(logs.get(b.height) ?? []));
+      },
+      async "on-db-write"(_p, b, w) {
+        await writeLogRows(w, b.height, logs.get(b.height) ?? []);
+      },
+    },
+  }) as ModuleDeclaration;
+}
+
+/** A contract address: 32 bytes of `byte`. */
+export const contract = (byte: number): Uint8Array => new Uint8Array(32).fill(byte);
+
+/** A domain separator: 32 bytes of `byte`. */
+export const domain = (byte: number): Uint8Array => new Uint8Array(32).fill(byte);
+
+/** `bytes` without trailing zero bytes (the ledger's normal form of an atom). */
+function normal(bytes: Uint8Array): Uint8Array {
+  let end = bytes.length;
+  while (end > 0 && bytes[end - 1] === 0) end--;
+  return bytes.slice(0, end);
+}
+
+/** The ledger's tagged serialization of a cell holding `bytes` as one atom declared `Bytes<288>`, as Compact logs it. */
+export function cellData(bytes: Uint8Array): Uint8Array {
+  const value = v9.StateValue.newCell({ value: [normal(bytes)], alignment: [{ tag: "atom", value: { tag: "bytes", length: 288 } }] });
+  return v9.serializeStateValue(value);
+}
+
+/** A `Misc` log's data: `name` (zero-extended to 32 bytes) then `payload`. */
+export function miscData(name: Uint8Array, payload: Uint8Array): Uint8Array {
+  const bytes = new Uint8Array(32 + payload.length);
+  bytes.set(name.subarray(0, 32), 0);
+  bytes.set(payload, 32);
+  return cellData(bytes);
+}
+
+/** A MIP-0018 event's data: the v1 name and the encoded payload of `records` for (`domainSep`, `kind`). */
+export function eventData(domainSep: Uint8Array, kind: number, records: readonly MetadataRecord[]): Uint8Array {
+  return miscData(EVENT_NAME, encodePayload({ domainSep, kind }, records));
+}
+
+/** A log of transaction `transaction` at block index `index` (the rest of a contract call's fields fixed). */
+export function log(
+  transaction: number,
+  index: number,
+  address: Uint8Array,
+  data: Uint8Array,
+  eventType: ContractLog["eventType"] = "Misc",
+): ContractLog {
+  return {
+    transaction,
+    index,
+    address,
+    entryPoint: new TextEncoder().encode("setMetadata"),
+    logicalSegment: 1,
+    version: 1,
+    eventType,
+    data,
+  };
+}
+
+/** Numbers `logs` (each `[transaction, address, data, type?]`) by their order in the block, as `contract-logs` does. */
+export function blockLogs(
+  ...logs: readonly (readonly [number, Uint8Array, Uint8Array, ContractLog["eventType"]?])[]
+): ContractLog[] {
+  return logs.map(([transaction, address, data, type], index) => log(transaction, index, address, data, type ?? "Misc"));
+}
+
+/** The core modules that give `contract-logs` without the ledger's state: `-fast` and what it requires. */
+export const FAST_CORE = Object.freeze(["core-chain-events", "core-block-parsed", "core-contract-logs-fast"]);
+
+/** What a run gives: the handle (stopped) and its database. */
+export interface Run {
+  readonly handle: UmbraDBHandle;
+  readonly db: ProcessDatabase;
+}
+
+/** How a run is set up. */
+export interface RunOptions {
+  /** S, and the module's start unless `moduleStart` says otherwise. */
+  readonly start: number;
+  /** The in-memory chain's finalized head: the run processes up to it, then stops. */
+  readonly head: number;
+  readonly logs?: ReadonlyMap<bigint, readonly ContractLog[]>;
+  /** The modules besides the provider (default: `token-metadata`). */
+  readonly modules?: readonly ModuleDeclaration[];
+  /** Each module's entry start (default: `start`). */
+  readonly moduleStart?: (id: string) => number;
+  /**
+   * Gives `contract-logs` with UmbraDB's own development-only provider, `core-contract-logs-fast` (and the core modules
+   * it needs, `core-chain-events` and `core-block-parsed`), from S, in place of the test provider.
+   */
+  readonly fast?: boolean;
+  /** Each in-memory block's own items (its ledger, its runtime). */
+  readonly items?: (height: bigint) => InMemoryItems;
+}
+
+/** The configuration data of a run: the `core` entry from S, the provider and the modules from their starts. */
+function runData(db: ProcessDatabase, modules: readonly ModuleDeclaration[], options: RunOptions) {
+  const data = libraryData(db.setting, [], {}, options.start);
+  const core = options.fast === true ? FAST_CORE.map((id) => ({ id, start: options.start, version: UMBRADB_VERSION, config: {} })) : [];
+  return {
+    entries: [
+      ...data.entries,
+      ...core,
+      ...modules.map((m) => ({ id: m.id, start: options.moduleStart?.(m.id) ?? options.start, version: m.version, config: {} })),
+    ],
+  };
+}
+
+/** Starts a process on `db` with the provider and `options.modules`; resolves with its handle once `started` settles. */
+export function startRun(db: ProcessDatabase, options: RunOptions): UmbraDBHandle {
+  const modules = [...(options.fast === true ? [] : [logsProvider(options.logs ?? new Map())]), ...(options.modules ?? [TOKEN_METADATA as ModuleDeclaration])];
+  const source = new InMemoryBlockSource({
+    head: BigInt(options.head),
+    ...(options.items === undefined ? {} : { items: (block) => options.items!(block.height) }),
+  });
+  return startUmbraDB({ config: { data: runData(db, modules, options) }, modules, source });
+}
+
+/** Runs the process on `db` up to the head, then stops it. */
+export async function runTo(db: ProcessDatabase, options: RunOptions): Promise<Run> {
+  const handle = startRun(db, options);
+  try {
+    await handle.started;
+    await cursorReaches(handle, BigInt(options.head));
+  } finally {
+    await handle.stop();
+  }
+  return { handle, db };
+}
+
+/** What a halted run gives: its status when it halted, and the failure `ended` gave. */
+export interface Halt {
+  readonly status: ReturnType<UmbraDBHandle["status"]>;
+  readonly error: unknown;
+}
+
+/** Runs the process on `db` until processing ends (a halt, expected before the head), then stops it. */
+export async function runToHalt(db: ProcessDatabase, options: RunOptions): Promise<Halt> {
+  const handle = startRun(db, options);
+  try {
+    await handle.started;
+    const ended = await Promise.race([
+      handle.ended,
+      cursorReaches(handle, BigInt(options.head)).then(() => ({ kind: "reached the head" as const })),
+    ]);
+    if (ended.kind !== "failed") throw new Error(`expected a halt, but processing ${ended.kind}`);
+    return { status: handle.status(), error: ended.error };
+  } finally {
+    await handle.stop();
+  }
+}
+
+/** An error and its causes, outermost first. */
+export function causes(error: unknown): unknown[] {
+  const out: unknown[] = [];
+  for (let at = error; at !== undefined && at !== null && out.length < 10; at = (at as { cause?: unknown }).cause) out.push(at);
+  return out;
+}
+
+/**
+ * Runs `body` on a read of a stopped run's database through UmbraDB's own database API, at its cursor (PGlite: only
+ * while no process holds the directory).
+ */
+export async function readStopped<T>(db: ProcessDatabase, body: (read: ReadHandle) => Promise<T>): Promise<T> {
+  if (db.setting.kind === "pglite") {
+    const opened = await openPglite({ dataDir: db.directory!, committedHeight: cursorHeight, developmentOptIn: true });
+    try {
+      return await opened.read(body);
+    } finally {
+      await opened.close();
+    }
+  }
+  const { kind: _kind, ...connection } = db.setting as PostgresParts;
+  const opened = openPostgres({ connection, committedHeight: cursorHeight, readConnections: 1 });
+  try {
+    return await opened.read(body);
+  } finally {
+    await opened.close();
+  }
+}
