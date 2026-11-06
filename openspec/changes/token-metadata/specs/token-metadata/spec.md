@@ -26,8 +26,8 @@ in the block, then the record's position in its payload.
 
 ### Requirement: TM-1 An opt-in module that starts with its database
 
-WHERE a configuration has an entry for `token-metadata`, THE system SHALL run it as a public module that requires only
-`contract-logs`, writes only to its own schema `token_metadata` (DB-6), and declares `startsMidChain: true` (MD-4). IF
+WHERE a configuration has an entry for `token-metadata`, THE system SHALL run it as a public module that requires
+`contract-logs` and `block-parsed` (each event's transaction hash), writes only to its own schema `token_metadata` (DB-6), and declares `startsMidChain: true` (MD-4). IF
 its first revision starts above the database's first height S THEN startup SHALL refuse with `callback-error` at
 `on-start-db` of `token-metadata`, whose cause has the code `token-metadata-start-after-database`. WHILE a block's ledger has no contract logs (v8) it SHALL store nothing.
 

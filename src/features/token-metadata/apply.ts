@@ -62,7 +62,8 @@ export class TokenMetadataLogError extends Error {
 
 /** One candidate of a block, classified: what its event row holds, and an accepted event's records. */
 export interface Candidate {
-  readonly row: EventRow;
+  /** Its event row but the transaction's hash, which `writeBlock` adds. */
+  readonly row: Omit<EventRow, "txHash">;
   readonly records: readonly DecodedRecord[];
 }
 
@@ -139,15 +140,31 @@ async function applyRecords(w: Pick<BlockWriteHandle, "execute" | "query">, id: 
   }
 }
 
-/** Writes block `height`'s candidates and applies the accepted ones, in chain order. */
+/** A block's transactions' hashes by their index (`block-parsed`'s). */
+export type TransactionHashes = (transaction: number) => Uint8Array | undefined;
+
+/**
+ * Writes block `height`'s candidates, each with its transaction's hash from `hashes`, and applies the accepted ones, in
+ * chain order. A candidate of a transaction `hashes` does not know throws: the providers of `contract-logs` and
+ * `block-parsed` disagree on the block.
+ */
 export async function writeBlock(
   w: Pick<BlockWriteHandle, "execute" | "query">,
   height: bigint,
   logs: readonly ContractLog[],
+  hashes: TransactionHashes,
   reader: LogReader = miscAtom,
 ): Promise<number> {
   const candidates = candidatesOf(height, logs, reader);
-  for (const { row, records } of candidates) {
+  for (const { row: candidate, records } of candidates) {
+    const txHash = hashes(candidate.tx);
+    if (txHash === undefined) {
+      throw new Error(
+        `token-metadata: the log of transaction ${candidate.tx} at height ${height} has no transaction of that index in ` +
+          "block-parsed: its contract-logs and block-parsed providers disagree",
+      );
+    }
+    const row: EventRow = { ...candidate, txHash };
     await insertEvent(w, row);
     if (row.classification === "accept") {
       await applyRecords(w, { contract: row.contract, domainSep: row.domainSep!, kind: row.kind! }, row, records);

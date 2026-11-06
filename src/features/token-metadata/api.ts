@@ -18,9 +18,8 @@
  * **TM-13.** No mint table yet: `minted` and `firstSeen` are null, `evidence` is `[]`, there are no `seen` rows; NIGHT
  * and DUST are fixed rows; a kind 1 or 2 identity's `color` is its computed color (`fields_color_idx`), and
  * `/v1/tokens/{color}` and `/v1/lookup` resolve a color to the described identities with that color; `image` is
- * `{ url, status: "pending", imageUrl: null }`; `/v1/events` has `segment` and `phase` null, and its `txHash` comes
- * from `core_block_parsed.transactions` (`""` where that table has no row); `/v1/status` reports the process's S and
- * committed height.
+ * `{ url, status: "pending", imageUrl: null }`; `/v1/events` has `segment` and `phase` null; `/v1/status` reports the
+ * process's S and committed height.
  *
  * Names and symbols are cut to their served length here (`lengthLimited`), never where they are stored (TM-9, TM-14).
  * Nothing here fetches anything (TM-15).
@@ -801,36 +800,31 @@ export interface EventJson {
 }
 
 /**
- * `GET /v1/events`: the module's events of a contract and/or a transaction, in chain order: position, contract,
- * classification and reason. The transaction's hash is `core_block_parsed.transactions`', when that table exists.
+ * `GET /v1/events`: the module's events of a contract and/or a transaction, in chain order: position, transaction hash,
+ * contract, classification and reason (`events_contract_idx`, `events_tx_idx`).
  */
 async function eventsPage(ctx: Ctx, filter: EventFilter, limit: number, cursor: EventsCursor | undefined): Promise<Page<EventJson>> {
-  const [table] = await ctx.read.query("SELECT to_regclass('core_block_parsed.transactions')::text AS t");
-  const hashes = table?.t !== null && table?.t !== undefined;
-  if (!hashes && filter.tx !== undefined) return { items: [], nextCursor: null };
   const params: unknown[] = [limit + 1];
   const where: string[] = [];
-  if (filter.contract !== undefined) where.push(`e.contract_address = $${params.push(bytes(filter.contract))}`);
-  if (filter.tx !== undefined) where.push(`t.tx_hash = $${params.push(bytes(filter.tx))}`);
+  if (filter.contract !== undefined) where.push(`contract_address = $${params.push(bytes(filter.contract))}`);
+  if (filter.tx !== undefined) where.push(`tx_hash = $${params.push(bytes(filter.tx))}`);
   if (cursor !== undefined) {
     where.push(
-      `(e.height, e.tx_index, e.event_index) > ($${params.push(String(cursor.k[0]))}::bigint, $${params.push(cursor.k[1])}::int, $${params.push(cursor.k[2])}::int)`,
+      `(height, tx_index, event_index) > ($${params.push(String(cursor.k[0]))}::bigint, $${params.push(cursor.k[1])}::int, $${params.push(cursor.k[2])}::int)`,
     );
   }
   const rows = await ctx.read.query(
-    `SELECT e.height::text AS height, e.tx_index::int AS tx_index, e.event_index::int AS event_index, e.contract_address,
-       e.classification, e.reason, ${hashes ? "t.tx_hash" : "NULL::bytea AS tx_hash"}
-     FROM ${SCHEMA}.events e
-     ${hashes ? "LEFT JOIN core_block_parsed.transactions t ON t.height = e.height AND t.tx_index = e.tx_index" : ""}
-     WHERE ${where.join(" AND ")}
-     ORDER BY e.height, e.tx_index, e.event_index LIMIT $1`,
+    `SELECT height::text AS height, tx_index::int AS tx_index, event_index::int AS event_index, tx_hash, contract_address,
+       classification, reason
+     FROM ${SCHEMA}.events WHERE ${where.join(" AND ")}
+     ORDER BY height, tx_index, event_index LIMIT $1`,
     params,
   );
   const items = rows.slice(0, limit).map(
     (r): EventJson => ({
       height: num(r.height),
       txIndex: num(r.tx_index),
-      txHash: r.tx_hash === null ? "" : toHex(r.tx_hash as Uint8Array),
+      txHash: toHex(r.tx_hash as Uint8Array),
       eventIndex: num(r.event_index),
       segment: null,
       phase: null,

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
   type ContractLog,
@@ -35,20 +36,35 @@ import type { ProcessDatabase } from "../../runner/process-backends.js";
 /** The test provider's id. */
 export const TEST_LOGS_ID = "test-contract-logs";
 
-/** A provider of `contract-logs` giving `logs`' logs at each height (none elsewhere). */
+/** The hash the test provider gives transaction `transaction` of block `height`: SHA-256 of `tx:height:transaction`. */
+export function txHashOf(height: bigint | number, transaction: number): Uint8Array {
+  return new Uint8Array(createHash("sha256").update(`tx:${height}:${transaction}`).digest());
+}
+
+/** The test provider's `block-parsed` of a block whose logs are `logs`: transactions 0 … the last log's, hashes only. */
+function blockParsedOf(height: bigint, logs: readonly ContractLog[]) {
+  const last = Math.max(-1, ...logs.map((l) => l.transaction));
+  const transactions = Array.from({ length: last + 1 }, (_, index) =>
+    Object.freeze({ index, hash: txHashOf(height, index), kind: "regular", size: 1, bytes: new Uint8Array(), segments: [] }),
+  );
+  return Object.freeze({ ledger: "test", transactions: Object.freeze(transactions) });
+}
+
+/** A provider of `contract-logs` giving `logs`' logs at each height (none elsewhere), and of `block-parsed`'s hashes. */
 export function logsProvider(logs: ReadonlyMap<bigint, readonly ContractLog[]>): ModuleDeclaration {
   return defineModule({
     id: TEST_LOGS_ID,
     version: "1.0.0",
     side: "public",
     requires: ["block-header"],
-    provides: [contractLogsItem()],
+    provides: [contractLogsItem(), { name: "block-parsed", lifetimes: ["block"] }],
     startsMidChain: true,
     configSchema: z.object({}),
     migrations: contractLogsMigrations(),
     points: {
       async "on-parse"(_p, b, out) {
         out.put("contract-logs", frozenLogs(logs.get(b.height) ?? []));
+        out.put("block-parsed", blockParsedOf(b.height, logs.get(b.height) ?? []));
       },
       async "on-db-write"(_p, b, w) {
         await writeLogRows(w, b.height, logs.get(b.height) ?? []);

@@ -2,7 +2,8 @@
  * The `token-metadata` module: MIP-0018 token metadata from the `contract-logs` item. A public module, not one of the
  * core's: a configuration enables it with `TOKEN_METADATA.entry(...)`. [TM-1; design D1, D2, D4]
  *
- * - **Requires** only `contract-logs`, so it runs with either provider (`core-contract-logs-full`, or the
+ * - **Requires** `contract-logs` and `block-parsed` (each event's transaction hash, for `/v1/events`), so it runs with
+ *   either logs provider (`core-contract-logs-full`, or the
  *   development-only `core-contract-logs-fast` from any height). It has no ledger task, so it loads in the browser
  *   build like any user module.
  * - **Starts with its database** (TM-1, design D2). Its rows are materialized state, so they depend on where it
@@ -17,11 +18,15 @@
 
 import { z } from "zod";
 import { CONTRACT_LOGS_ITEM, contractLogsItemOf } from "../../backbone/contract-logs/contract-logs.js";
+import type { BlockParsed } from "../../backbone/core-block-parsed/core-block-parsed.js";
 import { defineModule } from "../../modules/declaration.js";
 import { registerMetadataApi } from "./api.ts";
 import { type LogReader, writeBlock } from "./apply.ts";
 import { miscAtom } from "./log-reader.ts";
 import { databaseStart, MIGRATIONS, SCHEMA } from "./sql.ts";
+
+/** `core-block-parsed`'s item (named here so the module loads none of that module's code). */
+const BLOCK_PARSED_ITEM = "block-parsed";
 
 /** The module's id. */
 export const TOKEN_METADATA_ID = "token-metadata";
@@ -51,7 +56,7 @@ export function tokenMetadataWith(reader: LogReader) {
     id: TOKEN_METADATA_ID,
     version: "0.1.0",
     side: "public",
-    requires: [CONTRACT_LOGS_ITEM],
+    requires: [CONTRACT_LOGS_ITEM, BLOCK_PARSED_ITEM],
     provides: [
       { name: "token-metadata-events", lifetimes: ["table"], table: { schema: SCHEMA, tables: ["events"], kind: "append-only" } },
       {
@@ -75,7 +80,9 @@ export function tokenMetadataWith(reader: LogReader) {
         registerMetadataApi(api);
       },
       async "on-db-write"(_p, b, w) {
-        await writeBlock(w, b.height, contractLogsItemOf(b, TOKEN_METADATA_ID), reader);
+        const parsed = b.items.get(BLOCK_PARSED_ITEM) as BlockParsed | undefined;
+        const hashes = new Map((parsed?.transactions ?? []).map((t) => [t.index, t.hash]));
+        await writeBlock(w, b.height, contractLogsItemOf(b, TOKEN_METADATA_ID), (tx) => hashes.get(tx), reader);
       },
     },
   });
