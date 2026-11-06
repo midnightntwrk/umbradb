@@ -159,13 +159,18 @@ function runData(db: ProcessDatabase, modules: readonly ModuleDeclaration[], opt
 }
 
 /** Starts a process on `db` with the provider and `options.modules`; resolves with its handle once `started` settles. */
-export function startRun(db: ProcessDatabase, options: RunOptions): UmbraDBHandle {
+export function startRun(db: ProcessDatabase, options: RunOptions, serve = false): UmbraDBHandle {
   const modules = [...(options.fast === true ? [] : [logsProvider(options.logs ?? new Map())]), ...(options.modules ?? [TOKEN_METADATA as ModuleDeclaration])];
   const source = new InMemoryBlockSource({
     head: BigInt(options.head),
     ...(options.items === undefined ? {} : { items: (block) => options.items!(block.height) }),
   });
-  return startUmbraDB({ config: { data: runData(db, modules, options) }, modules, source });
+  return startUmbraDB({
+    config: { data: runData(db, modules, options) },
+    modules,
+    source,
+    ...(serve ? { network: { api: { port: 0 } } } : {}),
+  });
 }
 
 /** Runs the process on `db` up to the head, then stops it. */
@@ -178,6 +183,44 @@ export async function runTo(db: ProcessDatabase, options: RunOptions): Promise<R
     await handle.stop();
   }
   return { handle, db };
+}
+
+/** A GET's answer: its status, headers (names in lower case) and body as text and as JSON (undefined if none). */
+export interface Got {
+  readonly status: number;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly text: string;
+  readonly json: any;
+}
+
+/** GETs `path` (with its query) of a listener at `origin`. */
+export async function get(origin: string, path: string, method = "GET"): Promise<Got> {
+  const response = await fetch(`${origin}${path}`, { method });
+  const text = await response.text();
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    json = undefined;
+  }
+  return { status: response.status, headers: Object.fromEntries(response.headers), text, json };
+}
+
+/**
+ * Runs the process on `db` up to the head with the module API listening on a free port, then runs `body` with its
+ * origin while it still serves, then stops it.
+ */
+export async function serve<T>(db: ProcessDatabase, options: RunOptions, body: (origin: string, handle: UmbraDBHandle) => Promise<T>): Promise<T> {
+  const handle = startRun(db, options, true);
+  try {
+    await handle.started;
+    await cursorReaches(handle, BigInt(options.head));
+    const api = handle.status().listening.api;
+    if (api === null) throw new Error("the module API does not listen");
+    return await body(`http://${api.host.includes(":") ? `[${api.host}]` : api.host}:${api.port}`, handle);
+  } finally {
+    await handle.stop();
+  }
 }
 
 /** What a halted run gives: its status when it halted, and the failure `ended` gave. */

@@ -26,7 +26,8 @@ module harness** runs the module on blocks from `InMemoryBlockSource` with a tes
 ## 1. Starting and storing (TM-1, TM-14)
 
 - **M1** `[CI]` A new database at S > 0 with `core-contract-logs-fast` and the module from S starts; a database with
-  S = 0 adding the module above its cursor is refused with `token-metadata-start-after-database`; v8 blocks store no
+  S = 0 adding the module above its cursor is refused with `callback-error` at `on-start-db` of `token-metadata`, its
+  cause coded `token-metadata-start-after-database`; v8 blocks store no
   module row. (TM-1)
 - **M2** `[CI][DIFF]` Generated chains processed on PostgreSQL and on PGlite give equal per-block digests of the
   module's tables and equal contents hashes. (TM-14)
