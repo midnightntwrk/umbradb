@@ -101,7 +101,7 @@ Built test first only in part: the spike's code came with its tests, and each `[
 
 | Task | Criteria passing on PostgreSQL 18 and PGlite | Left |
 |---|---|---|
-| 1.1 | the provenance tests (copies byte for byte, ports by their replacements) | record the proof of concept's API answers |
+| 1.1 | the provenance tests (copies byte for byte, ports by their replacements); the proof of concept's answers recorded at `760d3e9` on its own stagenet fixtures (`test/fixtures/mip0018-answers/`: 97 + 14 requests over every TM-12 route, a second run byte-identical), their hashes checked with a `[NEG]` control | — |
 | 1.2 | the two stagenet tapes recorded (`~/umbradb-tapes`), 49 real `Misc` logs as a fixture; both in `test/tape/real/manifest.json` (the real-tape tests pass, 50) | uploading them to the tapes release (owner) |
 | 2.1 | M4 (the reader and the module), M5, M6 with its control | — |
 | 2.2 | M7 (66/66 normative, 43/43 informative, A3c) | M19 |
