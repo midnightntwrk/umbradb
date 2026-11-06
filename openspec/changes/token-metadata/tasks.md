@@ -112,6 +112,7 @@ Built test first only in part: the spike's code came with its tests, and each `[
 | 4.2 | M16 (10,000 keys, 10,000 rejected events, a 1,000-member group: one field page and keyset pages of 500, 100 reasons, 100 members, each answer under the proof of concept's size bounds and reading back fewer than 1,000 rows; `[NEG]` a 12-character symbol's group reads more) | the 12-character prefix read (finding 11) |
 | 4.3 | `TOKEN_METADATA` and `TokenMetadataStartAfterDatabase` exported (design D9 amends the surface; the surface test and the pack smoke read it); an installed project's configuration with `TOKEN_METADATA.entry(...)` passes `umbradb config check` (`[NEG]` its entry without the module listed fails); the module declares `UMBRADB_VERSION`; the gates the spike had broken (a `src/features/` coverage floor, the vendored README's upstream link, the version) pass | — |
 | 5.1 | M20 on both backends (each case at its own last block, 45 comparisons, later cases absent; C09; U1; C06 per step; the 35 + 1 v1-named events against the reference index with block hash, transaction hash and entry point; IDX's identity entries; every case identity's mark against the mark rule, C06 per step; no unresolved site; `[NEG]` another case's and an earlier step's expectation are seen); M14 (101 recorded answers equal after TM-13's differences, 11 of them changed by those differences; `[NEG]` a changed name is seen) | the reference's mints, colors, deploys and activity (the activity change); the payload bytes of the events (not stored) |
+| 5.2 | M21 (headless Chrome, the page given S = 714,486 through the start it keeps, `core-contract-logs-fast` and the module over the stagenet tape to 715,183: C01's identity answered with the same status, body and view headers as a Node.js process) | — |
 
 **Findings for the spec (to settle before the gate):**
 
@@ -154,8 +155,8 @@ Built test first only in part: the spike's code came with its tests, and each `[
     (it depends on the platform's Unicode data); a decision for the owner.
 12. **Field order (finding 6), settled for the API.** `commonFields` keep the order they were last set and `fields` key
     order, both as the proof of concept serves them; only `read.ts`'s whole-table read uses key order.
-13. **The browser build.** `api.ts` computes colors with `color.ts`, which uses `node:crypto`; task 5.2 needs them from
-    SQL or Web Crypto.
+13. **The browser build.** `RESOLVED`, no change: the browser build maps `node:crypto` to its SHA-256 shim
+    (`browser/src/shims/crypto.ts`), so `color.ts` runs in the page as it is (M21).
 14. **Replaying a mid-chain tape.** Startup asks for the genesis block's hash and header, which a mid-chain tape does
     not hold (the test puts the two records of `stagenet-0-10000` before it), and the first block fetched needs its
     parent's runtime version, so a run starts one block after the tape's first: 714,486 and 715,403. Neither first block
