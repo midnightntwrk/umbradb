@@ -6,7 +6,7 @@ concept, [acedward/umbradb PR #26](https://github.com/acedward/umbradb/pull/26) 
 `test/features/token-metadata/provenance.test.ts` recomputes every SHA-256 below and fails on a modified, missing or
 unlisted file.
 
-This directory holds the reference vectors and runner (`vectors/`), UmbraDB's own versions of the vectors the MIP's final text changes (`vectors-umbradb/`), and the stagenet cases' expectations (`cases/`, with UmbraDB's amendments in `cases-umbradb/`).
+This directory holds the reference vectors and runner (`vectors/`), UmbraDB's own versions of the vectors the MIP's final text changes (`vectors-umbradb/`), the stagenet cases' expectations (`cases/`, with UmbraDB's amendments in `cases-umbradb/`), and the proof of concept's index of those cases (`case-index.json`: each case's contract, steps, heights and transactions).
 
 The files under `token-indexer/vendor/mip0018/` are themselves verbatim copies of the MIP's reference implementation, [`midnight-experiments/mip-0018`](https://github.com/midnight-experiments/mip-0018/tree/e8295792d9363be37ff2f7f716c740fcdf3f195e) at `e8295792d9363be37ff2f7f716c740fcdf3f195e` (Apache-2.0; its `LICENSE` and `NOTICE` are copied beside them), as the proof of concept's own `token-indexer/vendor/mip0018/SOURCE.md` lists.
 
@@ -14,6 +14,7 @@ The files under `token-indexer/vendor/mip0018/` are themselves verbatim copies o
 |---|---|---|
 | `LICENSE` | `token-indexer/vendor/mip0018/LICENSE` | `c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4` |
 | `NOTICE` | `token-indexer/vendor/mip0018/NOTICE` | `7dfa652b7aee31524aa22622276d56cc5f96faf191ee353c5510aafd8af6e0f7` |
+| `case-index.json` | `test/integration/fixtures/stagenet-archive/case-index.json` | `5296c3d575b9c5508343faefba25aa3159e6a9c888409b85b44c60e151261382` |
 | `cases-umbradb/C07/expected.json` | `token-indexer/test/fixtures/mip0018-cases-umbradb/C07/expected.json` | `f295fc54b7d37f284de553c7d211065af17911ebf0f293dd1156ed8d7ec442b0` |
 | `cases-umbradb/IDX/index-summary-differences.json` | `token-indexer/test/fixtures/mip0018-cases-umbradb/IDX/index-summary-differences.json` | `2d1b28da1c24233b428c748c2703aa65daef410c2ca2b58eeb2e7fb63b03904d` |
 | `cases-umbradb/README.md` | `token-indexer/test/fixtures/mip0018-cases-umbradb/README.md` | `149e0e13194907b805fb77d534d89a0a8120f4ad2fe62ad5d7160083699ad3f9` |
