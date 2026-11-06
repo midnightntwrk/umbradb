@@ -34,6 +34,7 @@ import {
   COMMON_KEY_HEX,
   type Field,
   fieldUsable,
+  firstCharacters,
   IMAGE_KEY_HEX,
   lengthLimited,
   parseStandards,
@@ -503,19 +504,38 @@ function prefixEnd(prefix: Uint8Array): Uint8Array | null {
   return null;
 }
 
+/** The served length of a symbol, in characters (TM-9). */
+const SYMBOL_CHARACTERS = 12;
+
 /**
  * The symbol group of an identity whose served `symbol` is `symbol` (cut, TM-9): its member count and first `limit`
  * members by (domainSep, kind), or `undefined` with fewer than two members. The proof of concept stored the cut symbol
- * and grouped by it; the module stores the whole one, so the rows read are those whose whole symbol starts with the cut
- * one (a range of `fields_symbol_idx`), kept when their own cut equals it, and grouped by `symbolGroups`.
+ * and grouped by it; the module stores the whole one. A served symbol of fewer than 12 characters is whole, and only a
+ * whole symbol equal to it serves it, so the group is the rows with exactly that value: an index-only count and the
+ * first `limit` members from `fields_symbol_idx`. A served symbol of 12 characters may be the cut of longer ones, so
+ * the rows read are those whose whole symbol starts with it (a range of the same index), kept when their own cut equals
+ * it: those reads grow with the rows sharing that prefix (finding 11).
  */
 async function boundedGroup(read: ReadHandle, ref: IdKey, symbol: Uint8Array, limit: number): Promise<GroupJson | undefined> {
+  const text = utf8OrNull(symbol);
+  const contract = bytes(ref.contractAddress);
+  if (text !== null && firstCharacters(text, SYMBOL_CHARACTERS - 1) === text) {
+    const at = `contract_address = $1 AND key = $2 AND usable AND defined AND value = $3`;
+    const [c] = await read.query(`SELECT count(*)::int AS n FROM ${SCHEMA}.fields WHERE ${at}`, [contract, SYMBOL_KEY, symbol]);
+    const memberCount = num(c?.n ?? 0);
+    if (memberCount < 2) return undefined;
+    const rows = await read.query(
+      `SELECT domain_sep, kind::int AS kind FROM ${SCHEMA}.fields WHERE ${at} ORDER BY domain_sep, kind LIMIT $4`,
+      [contract, SYMBOL_KEY, symbol, limit],
+    );
+    return { symbol: bytesJson(symbol), memberCount, members: rows.map((r) => ({ domainSep: toHex(r.domain_sep as Uint8Array), kind: num(r.kind) })) };
+  }
   const end = prefixEnd(symbol);
   const rows = await read.query(
     `SELECT domain_sep, kind::int AS kind, value, usable FROM ${SCHEMA}.fields
      WHERE contract_address = $1 AND key = $2 AND usable AND defined AND value >= $3 ${end === null ? "" : "AND value < $4"}
      ORDER BY domain_sep, kind`,
-    end === null ? [bytes(ref.contractAddress), SYMBOL_KEY, symbol] : [bytes(ref.contractAddress), SYMBOL_KEY, symbol, end],
+    end === null ? [contract, SYMBOL_KEY, symbol] : [contract, SYMBOL_KEY, symbol, end],
   );
   const [group] = symbolGroups(
     rows
