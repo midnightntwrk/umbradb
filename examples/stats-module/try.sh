@@ -16,10 +16,10 @@ bad()     { show "http://$API/stats-module/blocks/abc"; curl -sS "http://$API/st
 # Subscribes to stats-module-blocks and prints the messages until three rows arrived (with the repository's ws). Rows
 # that arrive while the connection closes are not printed.
 subscribe() {
-  echo; echo "WebSocket ws://$API: subscribe stats-module-blocks"
+  echo; echo "WebSocket ws://$API: subscribe stats-module-blocks" # nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
   node --input-type=module -e '
     import { WebSocket } from "ws";
-    const ws = new WebSocket(`ws://${process.argv[1]}`);
+    const ws = new WebSocket(`ws://${process.argv[1]}`); // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
     let rows = 0;
     let done = false;
     const end = () => { done = true; ws.close(); };

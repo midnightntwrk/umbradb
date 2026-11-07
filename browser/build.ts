@@ -220,7 +220,7 @@ export function browserLedgerEntry(text: string, version: string, sums: string):
   const match = FS_ENTRY_INSTANCE.exec(out);
   if (match === null) throw new Error(`the vendored ledger ${version}'s _fs.js no longer reads its .wasm as expected: update browser/build.ts`);
   const file = match[1] as string;
-  const sum = new RegExp(`^([0-9a-f]{64})  pkg/${file.replace(/[.]/g, "\\.")}$`, "m").exec(sums)?.[1];
+  const sum = new RegExp(`^([0-9a-f]{64})  pkg/${file.replace(/[.]/g, "\\.")}$`, "m").exec(sums)?.[1]; // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
   if (sum === undefined) throw new Error(`vendor/ledger/${version}/SHA256SUMS lists no pkg/${file}`);
   const instantiate = JSON.stringify(join(BROWSER, "src/ledger/instantiate.ts"));
   return (

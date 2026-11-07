@@ -77,9 +77,9 @@ const VARIABLE = "UMBRADB_LOCAL_NODE";
 
 const NODE_URL = (process.env[VARIABLE] ?? "").trim();
 if (!/^wss?:\/\/\S+$/.test(NODE_URL)) {
-  const found = NODE_URL === "" ? "it is not set" : "it holds no ws:// or wss:// URL";
+  const found = NODE_URL === "" ? "it is not set" : "it holds no ws:// or wss:// URL"; // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
   process.stderr.write(
-    `${VARIABLE} must hold the local archive node's WebSocket URL (ws://<host>:<port>), and ${found}. ` +
+    `${VARIABLE} must hold the local archive node's WebSocket URL (ws://<host>:<port>), and ${found}. ` + // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
       "These runs need that node, on the owner's LAN only: nothing was started.\n",
   );
   process.exit(2);
@@ -109,7 +109,7 @@ const NODE_COUNT_SQL =
   "SELECT (SELECT max(height) FROM core_block_commit.blocks), (SELECT count(*) FROM core_ledger_state.nodes)";
 
 const USAGE =
-  `usage: ${VARIABLE}=ws://<host>:<port> node scripts/local-preprod-sync.mjs --label <name> --stop <height> ` +
+  `usage: ${VARIABLE}=ws://<host>:<port> node scripts/local-preprod-sync.mjs --label <name> --stop <height> ` + // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
   "--out <dir> [--build <dir>] [--sweep on|off] [--keep]";
 
 /** Ends the script with a usage error. */

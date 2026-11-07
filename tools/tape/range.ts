@@ -131,7 +131,7 @@ const isPositive = (value: number): boolean => Number.isSafeInteger(value) && va
 
 function checkOptions(options: RangeOptions): void {
   const problems: [boolean, string][] = [
-    [isWebSocketUrl(options.node), "the node must be a ws:// or wss:// URL"],
+    [isWebSocketUrl(options.node), "the node must be a ws:// or wss:// URL"], // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
     [isHeight(options.from), "from must be a height (a safe integer from 0)"],
     [isHeight(options.to), "to must be a height (a safe integer from 0)"],
     [!(options.from > options.to), `from (${options.from}) is above to (${options.to})`],

@@ -1,0 +1,15 @@
+# Path ignores for the opengrep SAST scan in .github/workflows/scan.yaml.
+#
+# A .semgrepignore REPLACES the scanner's built-in default ignore list, so the defaults that
+# matter are restated by including .gitignore (node_modules, build outputs, caches).
+:include .gitignore
+.git/
+
+# Prose and generated reports. Several registry rules are bare regexes — e.g.
+# javascript.lang.security.detect-insecure-websocket is `\bws://` with only localhost and
+# 127.0.0.1 exempted — and match documentation the same as code. `ws://` is an accepted
+# node-URL scheme here by design (src/config/core-settings.ts, NODE), so every mention in
+# prose is a false positive. Code stays scanned; a flagged code line is suppressed on the
+# line itself with `nosemgrep: <rule-id>`.
+*.md
+graphify-out/

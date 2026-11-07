@@ -372,7 +372,7 @@ function holds(value: Plain, path: SettingPath): boolean {
   let at: PlainData = value;
   for (const key of path) {
     if (!isObject(at) || !Object.hasOwn(at, key)) return false;
-    at = at[key] as PlainData;
+    at = at[key] as PlainData; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop
   }
   return true;
 }

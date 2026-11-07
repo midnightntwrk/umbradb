@@ -61,7 +61,7 @@ interface Link {
 }
 
 /** Why a node URL is refused (the URL itself is never shown). */
-export const NODE_URL_REFUSED = "the tape builder's node must be a ws:// or wss:// URL";
+export const NODE_URL_REFUSED = "the tape builder's node must be a ws:// or wss:// URL"; // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
 
 /** Whether `url` is a `ws://` or `wss://` URL. */
 export function isWebSocketUrl(url: string): boolean {

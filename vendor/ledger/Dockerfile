@@ -13,6 +13,9 @@
 #     to run on the same input), built with `cargo install --locked`;
 #   - binaryen (wasm-opt) version_133, the release tarball checked against its SHA-256.
 # The image is built from this file alone (no build context). See vendor/ledger/README.md.
+#
+# checkov:skip=CKV_DOCKER_2:Build-only image; it runs a build and exits, never as a service, so HEALTHCHECK does not apply.
+# checkov:skip=CKV_DOCKER_3:Build-only image; the build runs once in a throwaway container and needs root to install pinned toolchains, so no service user applies.
 FROM rust@sha256:ff521445a372125ed4f76e1453a1f8098f2d05332d1601d30db1c1f62757e730
 
 RUN set -eux; \

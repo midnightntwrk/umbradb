@@ -88,7 +88,7 @@ LOG=$WORK/devnet.log
 log() { echo "== $(date -u +%FT%TZ) $*" | tee -a "$LOG"; }
 NETWORK=$PREFIX-net
 NODE=$PREFIX-node
-RPC=ws://node:9944
+RPC=ws://node:9944 # nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
 if [ -z "${PORT:-}" ]; then
   PORT=$(python3 -I -c 'import random, socket
 for _ in range(100):
