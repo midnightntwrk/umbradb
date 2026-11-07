@@ -2,7 +2,7 @@
 #
 # generate-test-wallet.sh -- create a FRESH, untracked Preview testnet wallet locally.
 #
-# WHY: no wallet key with any value is ever committed to this repo (see ../../../docs/THREAT_MODEL.md and
+# WHY: no wallet key with any value is ever committed to this repo (see ../../../SECURITY.md and
 # ./README.md). Instead of committing a shared secret, each machine generates its own throwaway
 # Preview wallet with this script and funds it once from the faucet. The generated file
 # (preview-test-wallet.json) is git-ignored, must never be committed, and is written mode 0600.
@@ -12,7 +12,8 @@
 # with a freshly generated `seedHex`.
 #
 # DERIVATION TOOLING (named) -- the REAL Midnight wallet SDK, resolved exactly the way this repo's
-# live-fixtures loader resolves it (test/integration/live-fixtures/midnight-wallet-sdk-loader.ts):
+# live-fixtures loader resolves it
+# (legacy/transaction-history/test/integration/live-fixtures/midnight-wallet-sdk-loader.ts):
 #   * @midnightntwrk/wallet-sdk-hd                -- HD key derivation -> nightSecretKeyHex
 #   * @midnightntwrk/wallet-sdk-unshielded-wallet -- keystore + PublicKey.address -> address
 #   * @midnightntwrk/wallet-sdk-abstractions      -- the NetworkId enum (already a dev dependency)
@@ -58,7 +59,8 @@ const { pathToFileURL } = require("url");
 const seedHex = crypto.randomBytes(32).toString("hex");
 const out = process.argv[2];
 
-// Resolve a package the way test/integration/live-fixtures/midnight-wallet-sdk-loader.ts does:
+// Resolve a package the way
+// legacy/transaction-history/test/integration/live-fixtures/midnight-wallet-sdk-loader.ts does:
 // prefer a BUILT sibling `midnight-wallet` checkout's dist, else normal package-name resolution.
 const repoRoot =
   process.env.MIDNIGHT_WALLET_REPO || path.join(process.env.HOME || "", "repos", "midnight-wallet");
@@ -75,7 +77,8 @@ function namedToolFailure(missing) {
     "  The real Midnight wallet SDK derivation tooling is not resolvable in this tree:\n" +
     "    " + missing + "\n" +
     "  This repo deliberately does NOT carry these as devDependencies (see\n" +
-    "  test/integration/live-fixtures/midnight-wallet-sdk-loader.ts). Resolve them one of two ways:\n" +
+    "  legacy/transaction-history/test/integration/live-fixtures/midnight-wallet-sdk-loader.ts).\n" +
+    "  Resolve them one of two ways:\n" +
     "    * point MIDNIGHT_WALLET_REPO at a BUILT 'midnight-wallet' checkout (default\n" +
     "      ~/repos/midnight-wallet), with packages/hd/dist and packages/unshielded-wallet/dist present; OR\n" +
     "    * install them here (npm i -D @midnightntwrk/wallet-sdk-hd @midnightntwrk/wallet-sdk-unshielded-wallet).\n" +

@@ -1,6 +1,9 @@
 # 00003 — The `v1.1.0-formal-completion` headings say "v1.0.0"
 
-- **Status:** OPEN
+- **Status:** CLOSED — fixed 2026-10-29: the change's `tasks.md`, `acceptance.md` and `proposal.md` headings read
+  "v1.1.0", and its status line names the Option-A deferral of `docs/releases/v0.9.5.md`.
+- **Area:** docs
+- **Severity:** low
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-21, during the Codex review of the guideline amendment
 

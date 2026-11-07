@@ -7,24 +7,34 @@ component is fixed — this is the security signal: `sha256` / image `@sha256:` 
 locked rev is the real pin behind a range).
 
 - **Project license:** Apache-2.0 (`LICENSE`, `NOTICE` — Copyright 2026 Charles Hoskinson).
-- **npm totals:** 11 direct (2 runtime + 9 dev) · **307 packages total** in `package-lock.json`
+- **npm totals:** 19 direct (5 runtime + 14 dev) · **307 packages total** in `package-lock.json`
   (lockfileVersion 3) · **307/307 resolved from `registry.npmjs.org` with a `sha512` integrity
   hash** · 5 packages declare an install script (all dev/optional — see npm-dev note).
 - **Nix:** 6 flake inputs (5 locked + 1 source-only) · 3 pinned release binaries (sha256) ·
   2 Docker images (digest) · ~15 nixpkgs packages.
+- **Test image:** 1 Docker image (digest), the PostgreSQL of the tests, benchmarks and pack smoke test (§5).
 - **Lean:** toolchain `v4.32.0` · 9 Lake packages (mathlib + 8 transitive), each an exact git rev.
+- **Vendored ledger WASM:** 2 runtime packages (ledger v8, v9) built in this repository from pinned
+  `midnight-ledger` commits plus the patches in `vendor/ledger/`, every output file pinned by SHA-256 and rebuilt
+  and compared by CI (§9).
 
 ---
 
 ## 1. npm — runtime dependencies
 
-Source: `package.json` (`dependencies`) + resolved from `package-lock.json`. Both are
-**zero-dependency** packages, so the entire *runtime* trust surface is these two nodes.
+Source: `package.json` (`dependencies`) + resolved from `package-lock.json`. All five are
+**zero-dependency** packages (`ws`'s optional peers `bufferutil` and `utf-8-validate` are not
+installed), so the entire *runtime* trust surface is these five nodes. `@electric-sql/pglite`
+and `ws` are pinned exactly, at the versions their characterization tests in
+`test/dependencies/` run against.
 
 | Component | Version/Pin | Pinning | Source | Integrity (sha512, truncated) | License | Purpose | Update-watch |
 |---|---|---|---|---|---|---|---|
-| `postgres` | `^3.4.9` → **3.4.9** | range → locked | registry.npmjs.org | `sha512-GD3qdB0x…KDLnaw==` | Unlicense | The Postgres client driver — UmbraDB's sole database access library | GH advisories / `npm audit` on `postgres` |
-| `zod` | `^4.0.0` → **4.4.3** | range → locked | registry.npmjs.org | `sha512-ytENFjIJ…HJyTQ==` | MIT | Runtime schema validation of stored/loaded state | advisories / `npm audit` on `zod` |
+| `@electric-sql/pglite` | **0.5.10** | exact (no caret) | registry.npmjs.org | `sha512-tXc/25U3…hCOBYw==` | Apache-2.0 | PostgreSQL compiled to WASM — the in-process database backend (Node.js and browser) | PGlite releases / advisories |
+| `postgres` | `^3.4.9` → **3.4.9** | range → locked | registry.npmjs.org | `sha512-GD3qdB0x…KDLnaw==` | Unlicense | The Postgres client driver | GH advisories / `npm audit` on `postgres` |
+| `typescript` | `^5.9.0` → **5.9.3** | range → locked | registry.npmjs.org | `sha512-jl1vZzPD…5TgSw==` | Apache-2.0 | Compiler API for `umbradb config check`; also typechecking (`tsc --noEmit`), `.d.ts` | TS releases / advisories |
+| `ws` | **8.22.0** | exact (no caret) | registry.npmjs.org | `sha512-Ydggc987…U+1DOg==` | MIT | WebSocket server of the process transport, with opt-in mutual TLS | ws releases / advisories |
+| `zod` | `^4.6.7` → **4.6.7** | range → locked | registry.npmjs.org | `sha512-g8W2D2kU…+3CGwg==` | MIT | Runtime schema validation (settings schemas, messages, stored/loaded state) | advisories / `npm audit` on `zod` |
 
 ---
 
@@ -35,9 +45,10 @@ tooling only — never shipped in the runtime path.
 
 | Component | Version/Pin | Pinning | Source | Integrity (truncated) | License | Purpose | Update-watch |
 |---|---|---|---|---|---|---|---|
-| `typescript` | `^5.9.0` → **5.9.3** | range → locked | registry.npmjs.org | `sha512-jl1vZzPD…5TgSw==` | Apache-2.0 | Typechecking (`tsc --noEmit`), `.d.ts` | TS releases / advisories |
+| `esbuild` | **0.28.2** | exact (no caret) | registry.npmjs.org | `sha512-HKVLS8dv…h32wIA==` | MIT | Bundler for the browser build (page and workers with WASM assets) | esbuild releases / advisories |
+| `@types/ws` | **8.18.2** | exact (no caret) | registry.npmjs.org | `sha512-67MQl+fp…iVd0/w==` | MIT | Type declarations for `ws` | DefinitelyTyped |
 | `vitest` | `^4.1.10` → **4.1.10** | range → locked | registry.npmjs.org | `sha512-R9jUTe5S…GUPw==` | MIT | Test runner (conformance + live tiers) | vitest releases / advisories |
-| `tsx` | `^4.23.1` → **4.23.1** | range → locked | registry.npmjs.org | `sha512-GQHnkIfx…2wcWQ==` | MIT | TS execution for the `archive:sync` CLI | advisories (pulls `esbuild`) |
+| `tsx` | `^4.23.1` → **4.23.1** | range → locked | registry.npmjs.org | `sha512-GQHnkIfx…2wcWQ==` | MIT | TS execution for the `bench` scripts | advisories (pulls `esbuild`) |
 | `typedoc` | `^0.28.0` → **0.28.20** | range → locked | registry.npmjs.org | `sha512-uSKqkh8C…mplg==` | Apache-2.0 | API docs generation (`docs:storage`) | typedoc releases |
 | `@testcontainers/postgresql` | `^12.0.4` → **12.0.4** | range → locked | registry.npmjs.org | `sha512-a/pLU6j5…qhgZA==` | MIT | Disposable Postgres container for conformance tests | testcontainers releases |
 | `@types/node` | `^26.1.1` → **26.1.1** | range → locked | registry.npmjs.org | `sha512-nxAkRSVk…GgZREw==` | MIT | Node type definitions (matches Node ≥24) | DefinitelyTyped |
@@ -46,8 +57,8 @@ tooling only — never shipped in the runtime path.
 | `@midnightntwrk/wallet-sdk-abstractions` | **3.0.0-canary.20260716150734-e744d99** | exact canary build | registry.npmjs.org | `sha512-8oJ+0o09…7LDLw==` | Apache-2.0 | Wallet-state type/shape reference for test fixtures; test-only per the indexer-agnostic boundary | Midnight SDK — canary, watch closely |
 
 > **Install scripts.** 5 of the 307 packages declare an install/lifecycle script — all in the
-> **dev/optional** Testcontainers→dockerode→ssh2 toolchain, **none in the runtime (`postgres`,
-> `zod`) tree**: `esbuild@0.28.1`, `protobufjs@7.6.5`, `ssh2@1.17.0`, and the optional
+> **dev/optional** toolchain, **none in the runtime (`@electric-sql/pglite`, `postgres`,
+> `typescript`, `ws`, `zod`) tree**: `esbuild@0.28.2`, `protobufjs@7.6.5`, `ssh2@1.17.0`, and the optional
 > `cpu-features@0.0.10` + `fsevents@2.3.3` (darwin-only). This corrects the "zero install scripts"
 > phrasing in `openspec/changes/v1.0.0-infosec-signoff/design.md §4`: the lockfile flags five.
 > The planned G18 `.npmrc` `ignore-scripts=true` neutralizes all of them (and any future one)
@@ -99,6 +110,15 @@ freedom — hence the scheduled Trivy scan (G18).
 |---|---|---|---|---|---|
 | `midnightntwrk/indexer-standalone` | 4.3.3 | `sha256:03afd079b00bcd229df29a24771439c5e7695c339cd89216d0763ce40731cc4b` | image digest | Standalone Midnight indexer (test infra) | G18 Trivy scan (weekly) + Midnight releases |
 | `midnightntwrk/proof-server` | 8.1.0 | `sha256:801bbc0340e9e96f16735f77b523f23c7459e3359842f7c79c2c53f4e994d531` | image digest | Midnight proof server | G18 Trivy scan + Midnight releases |
+
+The PostgreSQL image of the tests, their Testcontainers helpers, the benchmarks and the pack smoke test is pinned the
+same way, once, in `test/postgres-image.ts` (owner decision Q82, `openspec/changes/core-arch` A148). The supply-chain
+gate's image-pin agreement step checks it against the reviewed pin, and `test/dependencies/postgres-image.test.ts` fails
+if any file names another PostgreSQL image. It is test infrastructure, not in the Trivy scan.
+
+| Image | Tag | Digest | Pinning | Purpose | Update-watch |
+|---|---|---|---|---|---|
+| `postgres` (official image) | 18-alpine (PostgreSQL 18.6, Alpine 3.24.2) | `sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873` | image index digest (multi-platform) | Disposable PostgreSQL for tests, benchmarks and the pack smoke test | `docker-library/repo-info` `repos/postgres/remote/18-alpine.md`; a build at least 7 days old when bumped |
 
 ---
 
@@ -159,6 +179,27 @@ Tools the build, test, and CI depend on that are not captured as package entries
 
 ---
 
+## 9. Vendored ledger WASM builds (`vendor/ledger/`)
+
+Source: `vendor/ledger/*/upstream.json`, `vendor/ledger/*/patches/`, `vendor/ledger/Dockerfile`,
+`vendor/ledger/*/SHA256SUMS` (`vendor/ledger/README.md`). The ledger the indexer runs, built from source rather than
+taken from npm: the published `@midnight-ntwrk/ledger-v*` packages lack the node-store functions UmbraDB needs, which
+the patches add. Each package is rebuilt by `npm run vendor:ledger` and by `.github/workflows/vendored-ledger.yml` (amd64
+and arm64 runners), which fail on any file whose SHA-256 differs from `SHA256SUMS`. These are **runtime** artifacts,
+outside `npm audit`'s scope: their Rust crate graphs are pinned by the patched `Cargo.lock` (crates.io checksums, git
+commits).
+
+| Component | Version/Pin | Pinning | Source | Purpose | Update-watch |
+|---|---|---|---|---|---|
+| ledger v8 package (`vendor/ledger/v8/pkg/`) | `ledger-8.1.2` | exact commit `36d7442172136758e33009f75ff4aa56616cff40` + patches; output SHA-256 | github.com/midnightntwrk/midnight-ledger | Ledger v8 for blocks built by v8 runtimes | midnight-ledger releases; the v8 ledger midnight-node pins |
+| ledger v9-rc3 package (`vendor/ledger/v9-rc3/pkg/`) | `ledger-9.1.0.0-rc.3` | exact commit `4823b5351b17cc49e30f19760dbd30a73cf95e22` + patches; output SHA-256 | github.com/midnightntwrk/midnight-ledger | Ledger v9 as runtime 2.0 built it (`spec_version` 2,000,000–2,000,999; stagenet) | the v9 ledger midnight-node 2.0 pins (`crate-ledger-9.1.0.0-rc.3`) |
+| ledger v9 package (`vendor/ledger/v9/pkg/`) | `ledger-9.1.0.0-rc.5` | exact commit `67f9f97246339539af0091c4d8c6bc5ab236a191` + patches; output SHA-256 | github.com/midnightntwrk/midnight-ledger | Ledger v9, and the v8 → v9 state translation | midnight-ledger releases; the v9 ledger midnight-node pins |
+| `v8-to-v9-state-translation` (in the v9 package) | rev `da96e33d78ee9b7d3867b15c1037510d499cd909` | exact git rev in the patched `Cargo.lock` | github.com/midnightntwrk/midnight-ledger | The ledger team's v8 → v9 state translation (LG-9) | the revision midnight-node pins |
+| Build image base `rust:1.98.1-slim-bookworm` | 1.98.1 | index digest `sha256:ff521445a372125ed4f76e1453a1f8098f2d05332d1601d30db1c1f62757e730` | Docker Hub (official image) | Rust toolchain for the builds | Rust releases |
+| clang 14, llvm 14, git, jq, curl (in the image) | `1:14.0.6-12`, `1:2.39.5-0+deb12u3`, `1.6-2.1+deb12u2`, `7.88.1-10+deb12u15` | exact versions from snapshot.debian.org `20260918T000000Z` | Debian bookworm | C toolchain for `blst` on wasm32; source fetch; build scripting | Debian security updates |
+| `wasm-bindgen-cli` (in the image) | 0.2.108 | exact version, `cargo install --locked` | crates.io | JavaScript bindings (the version ledger-9.1.0.0-rc.5 pins; the v8 and v9-rc3 patches move ledger-8.1.2 and ledger-9.1.0.0-rc.3 from 0.2.104, whose output varies from run to run, to it) | wasm-bindgen releases |
+| binaryen `wasm-opt` (in the image) | `version_133` | release tarball SHA-256 (`x86_64` `2dc9c781…7489`, `aarch64` `89c07ea5…9bf8`) | github.com/WebAssembly/binaryen releases | Size optimization (`-Os`), as upstream's release recipe | binaryen releases |
+
 ## License summary
 
 - **UmbraDB:** Apache-2.0.
@@ -171,3 +212,5 @@ Tools the build, test, and CI depend on that are not captured as package entries
   `package-lock.json`.)
 - **Pinned binaries / images:** Cardano components Apache-2.0 (IntersectMBO); Midnight components
   Apache-2.0 (midnightntwrk). Lean/mathlib: Apache-2.0.
+- **Vendored ledger builds:** `midnight-ledger` and the translation crate Apache-2.0 (midnightntwrk); the patches
+  are UmbraDB's (Apache-2.0); their crate dependencies are listed in each patched `Cargo.lock`.

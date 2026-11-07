@@ -1,6 +1,9 @@
 # 00002 — Most OpenSpec proposals carry a stale or non-standard status line
 
-- **Status:** OPEN
+- **Status:** CLOSED — fixed 2026-10-29: every proposal's status line uses a standard state (Implemented, with the merge
+  commit, for the merged changes; Proposed for `v1.1.0-formal-completion`), keeping its note after the state.
+- **Area:** docs
+- **Severity:** low
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-21, while adding the status-line rule to `openspec/config.yaml`
 

@@ -1,0 +1,4169 @@
+# Tasks — CORE-ARCH: the standalone indexer's core architecture
+
+No implementation code before the stage-1 gate (the cold adversarial review of this spec, its fix check, and the owner's
+approval). Then one task per change set, test first: write the tests for the task's criteria, watch them fail for the
+intended reason, implement until they pass. One task is one atomic change set; no placeholders, stubs or `TODO`s.
+Independent tasks may be built at the same time in separate worktrees, each verified on its own and integrated one at a
+time (AGENTS.md stage 2). After each task: `npm run typecheck` and `npm test` green, and the task checked here with the
+criteria it demonstrated.
+
+Order: sections 0–9 build the platform; 10–16 build the chain, ledger, contract, private, backup and browser parts on
+it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system checks; 19 closes out.
+
+## 0. Pins and verification
+
+- [x] 0.1 Pin `@electric-sql/pglite` 0.5.10 and `ws` 8.22.0 (runtime) and `esbuild` 0.28.2 (development) — the
+      versions verified by the stage-1 probes (`design.md` §14) — through the supply-chain gate; move `typescript` to
+      `dependencies`; keep `zod` 4. Commit the probes as tests (PGlite roles, `SET LOCAL ROLE`, provider functions,
+      triggers, `TRUNCATE` refusal, `jsonpath` check; zod metadata; `ws` mutual TLS; esbuild worker bundle).
+      **Acceptance:** the probe tests pass in CI; `npm run test:conformance` is green on the unchanged code.
+      **Done (2026-10-22):** pins exact in `package.json` and `package-lock.json` (`@electric-sql/pglite` 0.5.10, `ws`
+      8.22.0, `esbuild` 0.28.2; `typescript` ^5.9.0 → 5.9.3 in `dependencies`; `zod` ^4.0.0 → 4.4.3), plus
+      `@types/ws` 8.18.2 (development; Q52). Probes in `test/dependencies/`: `pglite.test.ts` (15), `zod.test.ts` (7),
+      `ws-mutual-tls.test.ts` (4), `esbuild-worker-bundle.test.ts` (2), `sqlite-writer-lock.test.ts` (3, the
+      operating-system writer lock of `design.md` §4), `pins.test.ts` (4; seen failing on the previous manifest) — 35
+      pass. Supply-chain gate steps pass locally (`ignore-scripts` effective, `npm ci`, `npm run typecheck`, blocking
+      `npm audit --omit=dev` 0 vulnerabilities, image pins agree, `flake.lock` unchanged, gitleaks). `npm run
+      test:conformance` green on the otherwise unchanged code: 553 tests passed, 17 skipped (the environment-gated
+      ones), 25/25 required ids. The CI run is pending until the branch is pushed (Phase 3).
+- [x] 0.2 Vendored ledger builds (`vendor/ledger/`, `design.md` §5.2): pin the v8 release; build v9 and the v8→v9
+      conversion (`v8-to-v9-state-translation`, `midnight-ledger` `da96e33d78ee9b7d3867b15c1037510d499cd909`) from one
+      aligned v9 version; list each function of `LedgerPackage` the published packages lack and write the patches; make
+      the build reproducible and record each SHA-256; add the CI job that rebuilds and compares; run the conversion on
+      a v8 test state and compare its result with the node's root at a devnet fork's F.
+      **Acceptance:** two runs of `npm run vendor:ledger` give the recorded SHA-256; the conversion's root matches the
+      node's at F.
+      **Partial (2026-10-23):** `vendor/ledger/v8` pins `ledger-8.1.2` (`36d7442`, the v8 ledger `midnight-node`
+      2.1.0-rc.4 pins; its build moves wasm-bindgen 0.2.104 → 0.2.108, as 0.2.104's output varies run to run) and
+      `vendor/ledger/v9` `ledger-9.1.0.0-rc.5` (`67f9f97`), with the conversion at `da96e33` and ledger v8 8.1.2 built
+      against it exactly as the node builds them (aligned on rc.5: the node's `Cargo.lock` links the conversion to the
+      rc.5 crates, and rc.3 → rc.5 changes DUST semantics that roots after F depend on; evidence in the plan). Each
+      version has `upstream.json`, `patches/` (v8: 3, v9: 5), `build.sh` (Docker, `rust:1.98.1-slim-bookworm` by index
+      digest, every tool pinned), `pkg/` and `SHA256SUMS`; `npm run vendor:ledger` rebuilds and compares;
+      `.github/workflows/vendored-ledger.yml` does so on amd64 and arm64 runners. Exports added (both): `loadState`,
+      `stateRoot`, `stateKey`, `flushNodes`, `persistKey`, `releaseKey`, `childRefs`, `evictKeys`, `contractStateKey`,
+      `contractZswapStateKey`; (v9) `decodeLogItem`, `serializeStateValue`, `convertFromV8`. Tests in `test/ledger/`
+      (29, seen failing on the unpatched builds first) pass, including `stateRoot` equal to the node's
+      `midnight_ledgerStateRoot` at block 0 on mainnet and preview (v8) and a dev chain (v9), and the conversion of a
+      v8 state giving the same v9 root in two fresh instances. First acceptance item met locally (arm64): two runs of
+      `npm run vendor:ledger` gave the recorded SHA-256; the CI run (amd64 and arm64) is pending until the branch is
+      pushed (Phase 3).
+      **Done (2026-10-27, lane 2):** the second acceptance item, on task 0.3's devnet tape (`devnet-v8-v9-0-235`: v8
+      runtime 1_000_000 until U = 102 enacts 2_001_000, ledger v9, at F = 103), a tape test of
+      `test/ledger/devnet-upgrade.test.ts` (skipped by name without the tape). The process replays the devnet from
+      genesis to F on PGlite; the v8 state at U it stored, loaded from the stored nodes alone in a fresh instance of the
+      vendored v8 package, has the node's root at U (`00e81880…bc093c`); the vendored v9 package's `convertFromV8` on
+      it, in a fresh instance (twice: the same state), followed by F — the node's three DUST reapply system
+      transactions, as the process gave them to its worker — applied by the reference replay (`adapter-fixtures.ts`, not
+      the adapters or the worker's engine), gives the node's `midnight_ledgerStateRoot` at F (`00d88519…29beb7`). The
+      node reports no root between its conversion and F, so the converted state's own root has no node value; it, and
+      the root after an F without its transactions, differ from the node's at F. Task 12.4's A100 tape test checks the
+      same through the worker's engine. No v8 `decodeLogItem` patch: the v8 adapter returns null (owner decision Q54,
+      task 12.1). Q53 (root counts as signed changes) and Q55 (`stateKey` in `LedgerPackage`): owner decisions A.
+      Proposing the patches upstream is the owner's, later (Q56).
+      **Pending:** the CI rebuild on amd64 and arm64 runners (`vendored-ledger.yml`) runs when the branch is pushed
+      (Phase 3).
+- [x] 0.3 Tapes (owner decisions Q123, Q130): record, with the builder of task 9.2, mainnet ranges around 1,774,492 and
+      1,788,980 (`rpc.mainnet.midnight.network`), preview 0–10,000 and a preview range across the runtime 1.0.300
+      upgrade (`rpc.preview`), preprod 0–10,000 (`rpc.preprod`), and an undeployed devnet we build (`midnight-node` 2.x
+      in Docker; no public network runs ledger v9) that starts on a v8 runtime, enacts the v9 upgrade and carries our
+      own transactions — deploys, calls, transfers, a partial success, a failed extrinsic, system transactions — so that
+      every event and outcome kind the core stores appears; stagenet (a temporary network) where it helps, the owner
+      choosing between it and the undeployed devnet once both exist. Read each network's genesis hash, runtime at
+      genesis and upgrade boundaries (U and F hashes and `MNSV`) for the built-in tables. Recorded once, when a task
+      first needs real data (11.1's A91, 12.3's A99, 18.2), with a complete per-height recording: every IN-8 call for
+      every height of each range — `state_getMetadata` once per runtime, at the range's first block and at each
+      upgrade's U, its answer being the same at every block of a runtime (owner decision Q135) — and both head
+      subscriptions, so any client that makes any subset of those calls replays against the same tape; checked for
+      completeness and replayed, and never recorded again. Kept on this machine (`~/todo/Umbra/tapes/`, each with its
+      SHA-256) until the owner decides where they are stored; tests find them through `UMBRADB_TAPES` and are skipped
+      with a named reason when a tape is absent.
+      **Acceptance:** each tape replays against the tape node and its SHA-256 matches; the boundary data is recorded
+      with its source; every IN-8 call of every height is on the tape (`state_getMetadata` once per runtime, Q135); a
+      test whose tape is absent is reported as skipped with the tape's name. (Runs after task 9.2, when first needed.)
+      **Done (2026-10-26):** seven tapes recorded through the builder and kept in `~/todo/Umbra/tapes/` (none in the
+      repository), listed with name, network, range, SHA-256, size, records, endpoint, node version, day and why their
+      bounds in `test/tape/real/manifest.json`: `preview-0-10000`, `preview-1073620-1075620` (the 1.0.300 upgrade, U
+      1,074,620), `preprod-0-10000`, `mainnet-1774000-1780000` (the 1.0 pin, U 1,774,491, F 1,774,492),
+      `mainnet-1780000-1790000` (contiguous with it, block 1,788,980), `stagenet-0-10000` (third-party node, runtime
+      2.0 since genesis) and `devnet-v8-v9-0-235` (ours: `tools/devnet/devnet.sh`, images by digest, v8 traffic, the
+      governance upgrade to 2.1 enacted at U 102, v9 traffic; TxApplied, TxPartialSuccess, ExtrinsicFailed — governance
+      — and SystemTransactionApplied, contract deploys, calls and maintenance on both ledgers). **Recording**
+      (`tools/tape/range.ts`, `npx tsx tools/tape/main.ts range`): per height `chain_getBlockHash`, then at its hash
+      `chain_getHeader`, `chain_getBlock`, `state_getRuntimeVersion`, `state_getStorage [System.Events]`,
+      `midnight_ledgerStateRoot`; `state_getMetadata` at the range's first block and at each runtime change (Q135:
+      not at every height, about 200 KB a call); block 0's `system_properties` and every page of the cNight
+      registrations with their values; a 60 s live window of both head subscriptions, last; one session, 500 heights a
+      connection, at most 8 requests in flight (about 5.2 heights a second from the public nodes), a failed chunk
+      recorded again after a back-off. **Lookup** (`test/tape/real/real-tapes.ts`): `UMBRADB_TAPES` names the
+      directory; an absent tape skips its test with the tape's name (`tapeTest`), a tape of another size or SHA-256 is
+      refused. **Checks** (`test/tape/real/`): each tape replays against the tape node through the node client
+      (`tools/tape/replay-tape.ts`) and holds every IN-8 call of every height (`tools/tape/completeness.ts`); negative
+      controls: a byte changed is refused, a height's call removed fails, an absent tape is reported skipped by Vitest
+      itself. **Boundary data** (`tools/tape/boundaries.ts`, `… main.ts boundaries`): every network's genesis hash and
+      runtime and every boundary to the head, read from its node, in `src/ledger/networks.json` with the node's answers
+      in `test/ledger/fixtures/networks/` — mainnet's two pins (1,774,492 and 2,738,211), preprod's two, preview's one.
+- [x] 0.4 PostgreSQL 18 everywhere (owner decision Q82): every `postgres:17-alpine` pin (test setups, Testcontainers
+      helpers, benchmarks, the pack smoke test, design documents that name the image) becomes one pinned
+      `postgres:18-alpine`, through the supply-chain gate's image-pin agreement; the facts §14 records as checked on
+      PostgreSQL 17.11 are re-checked on 18 by the suites that rely on them; the 0.9.5 durability probe's facts too.
+      Runs after 2.2b (owner, 2026-10-24).
+      **Acceptance:** A148.
+      **Done (2026-10-24):** one pin, `test/postgres-image.ts`'s `POSTGRES_IMAGE` =
+      `postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873` (the official image's
+      index, PostgreSQL 18.6 on Alpine 3.24.2, the tag's build of 2026-09-21, 33 days old when pinned), taken by every
+      `new PostgreSqlContainer(…)`: 15 test files, `bench/environment.ts` (its 17 digest replaced) and
+      `test/smoke/pack-install.mjs`. The supply-chain gate's image-pin agreement step holds the same pin
+      (`EXP_POSTGRES`) and checks `test/postgres-image.ts` against it. A148's test,
+      `test/dependencies/postgres-image.test.ts` (8; seen failing first, naming the 16 `postgres:17-alpine` files and the
+      bench's digest), fails on any other PostgreSQL image named in a code or configuration file and on a container
+      started from anything but the constant; its negative controls plant a second pin (another digest, `17-alpine`, a
+      tag without a digest, a registry path, a digest without a tag, another `EXP_POSTGRES`) and each is caught. The
+      §14 facts re-checked on PostgreSQL 18.6 by the suites that rely on them, and the row that had no PostgreSQL
+      test by a new `test/dependencies/postgresql.test.ts` (12: `SET LOCAL ROLE`, `SECURITY DEFINER` with the `pg_temp`
+      control, triggers, the `TRUNCATE` refusal, the `jsonpath` check and `.string()`, `REPEATABLE READ READ ONLY`,
+      advisory locks); the 0.9.5 durability probe (12) and the crash suites pass on 18. Nothing behaved differently from
+      17. `npm run test:conformance` green on 18: 1,343 tests passed, 17 skipped (the environment-gated ones), 25/25
+      required ids; the pack smoke test passes on 18. §4's detection sentence and §14's rows say what was re-checked;
+      the 0.9.5 research documents under `design/` keep naming the image they were run on (history; nothing reads
+      them). The CI run is pending until the branch is pushed (Phase 3).
+- [x] 0.5 Load-sensitive tests (owner decision Q122): explicit timeouts fit for PostgreSQL under load in the database
+      suites the plan's Phase 3 "Load-sensitive tests" lists, the writer-lock negative control's lost connection, the
+      Testcontainers start-up timeout, and an orphan guard for every test child process (issues 00015, 00021, 00022).
+      **Acceptance:** A153.
+      **Done (2026-10-26):** the causes, found in full runs at load averages of 20–100 (before the fix, one at 60–85
+      failed 27 tests in five of the listed files; the other listed failures are the plan's and task 8.1's runs). (1)
+      Vitest's default 5 s in the database suites and the static scans (`test/db/migrate.test.ts`, `roles.test.ts`,
+      `roles-login.test.ts`, `requires-resync.test.ts`, `test/config/history-database.test.ts`,
+      `development-opt-in.test.ts`, `test/postgres/checkpoint-store.test.ts`,
+      `test/node/no-indexer-or-wallet-sdk.test.ts`, `test/deterministic-postgresql/checks.test.ts`,
+      `block-transactions.test.ts`): a budget too short for a loaded machine — the tests await database work or parse
+      files, none waits on wall time; `vitest.config.ts` sets `testTimeout` 60 s, about three times the slowest such
+      test measured (21.0 s at a median load average of 77), and `test/timeouts/timeouts.test.ts` runs a fixture under
+      the repository's configuration: a 6 s test passes, one that never ends fails at 60 s. The longest tests' own
+      budgets, overrun at a median of 77, were raised the same way: the A59 and A60 property suites 10 → 20 min (the
+      timed-out A60 run went on against the shared database and failed the next test), `test/private/` 480 → 900 s per
+      test and 180 → 600 s for a private process to reach a height. (2) The writer-lock negative control's
+      `CONNECTION_CLOSED` on `BEGIN`: a race in A17's checks, not in the API — `terminate` returns once PostgreSQL no
+      longer lists the backend, but the driver learns of the close only when it comes through Docker's port proxy, and a
+      transaction begun before then fails on its `BEGIN` with `connection-lost` (DB-13: retryable, its body not run), as
+      `postgres-faults.test.ts`'s "at most one connection-lost" says; reproduced by a probe (1 of 40 rounds at load
+      about 22). The re-take and lost-lock checks (`writer-lock-checks.ts`) allow one `connection-lost` before the body
+      (`nextTransaction`, its cases tested in the negative-control file), and their waits for a backend's end are 30 s
+      deadlines instead of 5 s. (3) Testcontainers' "ports to be bound" 10 s is fixed in its code
+      (`inspectContainerUntilPortsExposed`, out of `withStartupTimeout`'s reach) and left the container running:
+      `test/containers.ts`'s `startContainer` removes what a failed attempt left and tries again (4 attempts) and labels
+      every container (repository, pid); `startContainers` stops the started ones when one fails (both durability-probe
+      setups, which had left six containers); every container start under `test/` goes through them (static check). (4)
+      The pool keeps Vitest's default: capped at 8 workers the tail was shorter but the run 28 % longer at the same
+      load, and neither failed. (5) An orphan guard for every test child and container: `spawnChild`
+      (`test/child-processes.ts`) lists each child with a watcher of the test process (`test/orphan-watcher.mjs`) that
+      kills it with SIGKILL when that process ends — also a stopped child or one with a blocked event loop, which an
+      in-process check cannot end — and removes the process's labelled containers; every async child start under `test/`
+      (11 files) uses it; `test/child-processes.test.ts` and `test/containers.test.ts` orphan children and a container
+      on purpose, with negative controls (plain `spawn`, Testcontainers' own `start`), and fail on any other start. (6)
+      `test/db/pglite-queue.test.ts` keeps its data directories in one temporary root. (7)
+      `test/db/zero-timeouts.negative-control.test.ts`'s setup, cut by its own 1 s timeouts at load 85, is tried again
+      on `connection-lost`. Issues 00015, 00021, 00022 closed. Mutation pass over the new helpers: 46 wrong variants of
+      the watcher, `spawnChild`, `guardPid`, `guardContainers`, `startContainer(s)` and `nextTransaction`, run in a
+      scratch copy (`RESTORED-OK`): 39 caught, 7 survived, each equivalent (a second check dropping pids 0 and 1 that
+      the first already drops, `end` beside `close`, the watcher's own exit, one of the two label filters, unlisting an
+      exited pid, the error handler of a watcher that died). A153: six consecutive `npm run test:conformance` runs,
+      started 11:33–12:32 at load averages of 40–55 (the other lanes and the mutation pass; medians 42–64, peaks up to
+      111; no CPU burner needed), each exit 0, `Test Files 196 passed | 1 skipped (197)`, 3,890 tests passed, all 25
+      required ids, 449–690 s, the last on the committed sources (after a fix to the new container test's cleanup);
+      after each, no container of this worktree's labels and no test child process left.
+- [x] 0.6 The owner's answer to issue 00032 (bump zod): zod at `^4.6.7` — `package.json`'s range, the lock file,
+      `test/dependencies/zod.test.ts` (task 0.1's probes), `docs/supply-chain/inventory.md`'s zod row and the version
+      `design.md` §7 names —; the runtime `npm audit --audit-level=high --omit=dev` passing; issue 00032 closed.
+      **Acceptance:** the runtime `npm audit` passes; the zod probes pass.
+      **Done (2026-10-27):** `npm install zod@^4.6.7` under `.npmrc`'s `min-release-age=7` and `ignore-scripts=true`:
+      `package.json` `^4.6.7`, the lock file 4.6.7 (`latest`, published 2026-10-12; zod's entry the only change; still
+      no dependency and no install script). The runtime `npm audit --audit-level=high --omit=dev`: 0 vulnerabilities,
+      exit 0 (1 high before: GHSA-mrhx-c7xc-m3w5); the full audit 9 → 8, the dev graph's 8 as before. The zod probes:
+      task 0.1's 7 pass on 4.6.7; three new ones — an array or a set longer than its `max` refused with one `too_big`
+      issue, its elements not parsed, and an array within its `max` still reporting each failing element — pass, and
+      the first two fail on 4.4.3 (resolved to `npm pack zod@4.4.3` by a scratch Vitest configuration: 100,001 issues
+      and 6). The fix caps collections with a `max` only; elsewhere one issue per failing element stays, bounded by the
+      input (the transport's messages by `ws`'s `maxPayload`). Suites: `test/dependencies`, `test/config`,
+      `test/modules`, the transport's and messages' files of `test/private`, `test/backbone/core-config` (33 files,
+      950 tests). `design.md` §7 and §14 and the inventory's row name 4.6.7; issue 00032 closed.
+
+## 1. Determinism primitives
+
+- [x] 1.1 `src/determinism/cbor.ts`: the canonical encoder of DT-1, `encodeCanonical`, `encodeRow`.
+      **Acceptance:** A52, A53 pass.
+      **Done (2026-10-23):** `encodeCanonical(value)`, `encodeRow(values, types)` (column types named as PostgreSQL's
+      `format_type(type, NULL)` names them, scalar or `T[]`), `encodeArrayHead(length)` (an array's head, so the
+      contents hash and the digests can stream rows into one array) and `CanonicalEncodingError` (`reason`, `path`);
+      no CBOR dependency; an explicit stack (100,000-deep values encode), cycles refused. A `number` must be a safe
+      integer (DB-2 gives larger integers as `bigint`); `jsonb` integers lie within the signed 64-bit range of DT-6;
+      `numeric` text is `-?[0-9]+`, written canonically, and any fraction fails, `100.00` included — Q57 (owner decision
+      C) confirms that a zero fraction counts. Tests in `test/determinism/`: `cbor.test.ts` (159: A52 —
+      every RFC 8949 Appendix A example in the subset with the RFC's bytes, and the examples outside it refused — plus
+      the spec's key-order scenario, integer and length boundaries at 23/24/255/256/65535/65536/2^32 and ±2^64,
+      non-ASCII text, every column mapping and failure); `cbor.property.test.ts` (12, A53, seed 20261023: random
+      `jsonb` objects checked by `cbor-decoder.ts`, a decoder written independently of the encoder — keys in §4.2.1
+      order, shortest heads, round trip, insertion-order independence; fractional numerics, non-integer, unsafe and
+      out-of-range JSON numbers fail; negative controls: the checker flags reordered maps and non-canonical bytes, the
+      reorderings are real, JavaScript's sort differs from the canonical order). Seen failing first (no module), then
+      passing; 14 deliberately wrong encoders were each caught. Coverage floor `src/determinism/**` 95/90 (§13) added
+      in `vitest.config.ts`; `cbor.ts` 99.52 % lines, 100 % branches. Stryker on `cbor.ts` (temporary configuration,
+      informative; the mutation targets are task 17.2's): 97.07 %.
+- [x] 1.2 Primary-key order and `contentsHash` (DT-2, DT-3), over a database handle.
+      **Acceptance:** A54 and A55 pass on both backends (after task 2.2 provides PGlite; until then on PostgreSQL, and
+      re-run in 2.2).
+      **Partial (2026-10-23):** A54 and A55 pass on PostgreSQL 17; the PGlite half is pending until task 2.2.
+      `src/determinism/public-tables.ts`: `ConsistentRead` (exactly the `query` of CORE-ARCH §4.10's `ReadHandle`; a
+      `BlockWriteHandle` is one too), `publicTables` (the public tables in DT-3's order), `countRows`,
+      `rowsInKeyOrder` (DT-2, keyset pages of `pageSize` rows, default 1,000; text key columns `COLLATE "C"`) and
+      `PublicContentsError` (`no-primary-key`, `unsupported-key-type`, `unsupported-column-type`, `unencodable-row`,
+      `row-count-changed`); `src/determinism/contents-hash.ts`: `contentsHash(read, { pageSize }?)`, SHA-256 of DT-3's
+      array streamed row by row (each table's row count read first, in the same snapshot, and checked). Public schemas:
+      every schema but DB-8's reserved `pg_*`, `information_schema` and `public` (the public database holds only
+      public-side schemas, PP-1; `core_chain` included); tables: ordinary and partitioned tables that are not
+      partitions (a partitioned table is read whole, an ordinary one with `ONLY`); schemas and tables sorted by the
+      UTF-8 bytes of their names, columns in column order (dropped ones skipped) with `format_type(atttypid, NULL)`'s
+      types, key columns in `pg_index.indkey` order — no OIDs, no creation order. Tests in `test/determinism/`
+      (seen failing first: modules missing): `public-tables.test.ts` (14: A54 — text keys `"B" < "a" < "b"` through
+      an `und-x-icu` column and the default one, `bytea` keys, `smallint`/`integer`/`bigint` keys with negatives and
+      the 64-bit limits, a composite key in declared order, a partitioned table, inheritance; page sizes 1, 2, 3 and
+      the default; the table list and its refusals), `contents-hash.test.ts` (27: A55 — a fixed database's hash equal
+      to SHA-256 of DT-3's CBOR written out by hand; equal hashes for the same rows built three ways; one byte changed
+      and restored; 16 negative controls, each changing one thing a wrong hash could ignore and undoing it; the
+      snapshot test with a commit between statements and its control handle; DT-1 failures; the handle's type),
+      `postgres-database.ts` (a test-only adapter over `postgres`: one `REPEATABLE READ READ ONLY` transaction per
+      read, DB-2's mapping with a lossless `jsonb` parser). 19 deliberately wrong variants of the two source files
+      were each caught. Coverage 100 % lines and branches on both files (`src/determinism/**` floor 95/90). Q58 (owner
+      decision: D plus `boolean` keys) moves these refusals to startup too; its code is task 1.3.
+      **PGlite half (task 2.2, 2026-10-23):** done — `public-tables.test.ts` and `contents-hash.test.ts` run on
+      PostgreSQL 17 and PGlite 0.5.10 (the concurrent-commit snapshot test stays PostgreSQL's: on PGlite nothing
+      commits while a read runs, which A11 checks); A55's cross-backend comparison,
+      `[[determinism.contents-hash.cross-backend]]`, is `test/determinism/cross-backend.test.ts` (equal hashes of
+      one fixture on both backends at three page sizes, a one-byte negative control, A54's row lists compared).
+
+- [x] 1.3 Column-type rules (owner decision Q58): `src/determinism/column-rules.ts`, one table deciding for each column
+      type whether it is allowed as a value and as a key, with the reason and the alternative of `design.md` §4's
+      column-type table and a comment at each rule, used by the contents hash now and by task 7.1's migration-time
+      check; `varchar(n)` and `uuid` in the encoder; `varchar`, `uuid` and `boolean` keys in the hash; every refusal of
+      the encoder and the hash naming the table, the column and its type, with the reason and what to use instead.
+      **Acceptance:** A52; A54 on PostgreSQL (its PGlite half in task 2.2); the contents-hash half of A58 (same codes
+      and messages as startup).
+      **Done (2026-10-23):** `column-rules.ts` takes a column as the catalog describes it (`format_type(atttypid,
+      NULL)`, `format_type(atttypid, atttypmod)`, `atttypmod` — `numeric`'s scale, negative scales included —
+      `typtype` of the type and of an array's element, and whether it is in the primary key) and holds 16 rules, one
+      per row of the column-type table, each with the row's cells verbatim, a comment, and a reason and alternative
+      written for a developer; `TABLE_RULES` holds the paragraph's no-primary-key, sequence and default refusals.
+      `tableRefusals` lists a table's refusals (no primary key first, then columns in column order; a type no table may
+      store is refused for that, with its own code, even in the key) and `refusalMessage` gives `code: [module "…", ]
+      table "s"."t", column "c" (declared type): what. Why. Instead, what to use.` — the hash's message exactly, and
+      task 7.1's with the module id. `public-tables.ts` exports `catalogTables` (those facts, for 7.1) and refuses with
+      the first refusal; `PublicContentsError` gains `declaredType`; floating-point columns are now
+      `non-deterministic-column` (design §11). The encoder takes `character varying` (as `text`) and `uuid` (its 16
+      bytes; only PostgreSQL's lowercase 8-4-4-4-12 form, anything else `uuid-invalid`), and refuses any other type
+      name with its rule's code and reason. A value the encoder refuses in the hash names the row by its primary key
+      and, for a `numeric` fraction or `NaN` or a `jsonb` number, says why and what to store instead. Tests (seen
+      failing first): `column-rules.test.ts` (35, no database: every rule, key orders, refusal order and messages, the
+      encoder's refusals, and the rules kept in step with `design.md` §4 — the table is found by its heading anywhere
+      under `openspec/`, so archiving the change does not break it — with 7 negative controls on that check),
+      `column-refusals.test.ts` (41, PostgreSQL 17: the rule of every type the table names, read from a real catalog;
+      `numeric`'s scale for 44 declarations; A58's hash half for 29 cases — no primary key, `numeric`/`jsonb`/array
+      keys, `numeric(38,2)`, each date and time type, `json`, `char(4)`, `money`, enum, domain, composite, range,
+      `real`, `double precision`, `inet`, arrays of refused types — each with its code, location, mechanism and
+      alternative, and the same message as `tableRefusals` + `refusalMessage` give over the same catalog facts; the
+      messages' mechanisms checked through the driver), A52's `varchar`/`uuid` additions in `cbor.test.ts`, A54's
+      `varchar`, `uuid`, `boolean` and composite keys in `public-tables.test.ts`, a hand-written hash oracle for them
+      in `contents-hash.test.ts`. 26 deliberately wrong variants of the sources were each caught. `src/determinism/`
+      coverage 100 % except `cbor.ts`'s one unreachable line. Two rows of the design table state reasons that are not
+      true of every type they cover: the date and time row for `time` and `timetz` (Q59) and the floating-point example
+      for `real` (Q60); per-type reasons ship meanwhile. Q61 asks whether the hash should also refuse sequence and
+      default columns, as DT-6's last sentence reads literally. `postgres` 3.4.9 reads NULL array elements wrongly
+      (docs/issues/00006; for task 2.1).
+      **PGlite half (task 2.2, 2026-10-23):** done — the `varchar`, `uuid` and `boolean` key tests and
+      `column-refusals.test.ts` pass on PGlite 0.5.10 too.
+
+- [x] 1.4 Non-deterministic tables and columns (owner decision Q61) and per-type reasons (Q59, Q60): in
+      `column-rules.ts`, detect identity and `serial` columns, defaults that are not immutable (a function marked stable
+      or volatile, or an SQL value function, in `pg_attrdef.adbin`) and public schemas holding a sequence or an unlogged
+      table, with `design.md` §4's reasons and alternatives; the contents hash refuses them now, in any public schema,
+      and task 7.1's startup check calls the same detection; the date and time and floating-point rules' verbatim copies
+      follow §4's amended rows.
+      **Acceptance:** the contents-hash half of A58, its Q61 cases included; the design-table sync test.
+      **Done (2026-10-23):** `column-rules.ts` reads a column's `attidentity` and its default's expression tree
+      (`parseExpressionTree`, tokenized as PostgreSQL's reader does) and lists what in it is not immutable as
+      PostgreSQL's own check, `contain_mutable_functions`, finds it (`defaultReferences`, `notImmutableParts`): every
+      function id (`:funcid`, `:opfuncid`, `:hashfuncid`, `:negfuncid`; an operator stored without one, through
+      `pg_operator`), a conversion through text (`COERCEVIAIO`: the result type's input and the argument type's output
+      function), a row comparison's operators, `SQLVALUEFUNCTION` and `NEXTVALUEEXPR`, each function looked up in
+      `pg_proc.provolatile`; SQL/JSON nodes are refused outright, with a message that says so (Q63). A generated
+      column's expression is no default. `tableRefusals` adds, per column after its type, its identity, a sequence draw
+      (`nextval()`: a `serial` column) and the rest of a default that is not immutable (`non-deterministic-column`);
+      `relationRefusals` refuses every sequence and every unlogged table or partition of a public schema
+      (`non-deterministic-table`); `databaseRefusals` lists the tables' refusals, then the relations' (a `serial` or
+      identity column before its own sequence). `public-tables.ts` reads the facts (`catalogTables`,
+      `catalogRelations`), and the hash refuses with the first refusal, in every public schema.
+      `PublicContentsError` takes a place (`{ schema, table }` or `{ schema, sequence }`). The floating-point and
+      date and time rules' verbatim cells follow the amended rows; each date and time reason names its type. Messages
+      name what is not immutable (`calls now(), which PostgreSQL marks stable`), not the default's text, which depends
+      on the session's `TimeZone`. Tests on PostgreSQL 17: every Q61 case of A58's contents-hash half, the refusal
+      order, the catalog facts, the allowed controls, 36 defaults against PostgreSQL's own check (a stored generated
+      column), the design sync (the rows, the paragraph's refusals, its allowed and detection sentences); 29 negative
+      controls caught. The messages of 11 cases were byte-identical on PostgreSQL 17.11 and PGlite 0.5.10 (a scratch
+      check). Q62–Q64 raised, none blocking: §4's detection sentence misses what the code and PostgreSQL also read
+      (Q62); SQL/JSON defaults are refused outright (Q63); §4 gives no alternative for a sequence or an unlogged table
+      (Q64).
+      **PGlite run (task 2.2, 2026-10-23):** done — every A58 case, the refusal order, the catalog facts, the controls
+      and the 36-default oracle pass on PGlite 0.5.10; 11 refusals' codes and messages are compared across the two
+      backends in `test/determinism/cross-backend.test.ts`.
+      **For task 7.1:** read `catalogTables` and `catalogRelations` (or their SQL) for the module's schemas, call
+      `databaseRefusals`, and refuse with the first: `refusalMessage(refusal, { module, ...place })`.
+
+## 2. Database API
+
+- [x] 2.1 `src/db/api.ts` and the PostgreSQL backend (refactored from `src/postgres/client.ts`): writer connection, read
+      pool, read handles at one height, result mapping, errors with retryability (`connection-lost`).
+      **Acceptance:** A9 (including lossless `jsonb`), A12, A19 pass; A8 passes on PostgreSQL.
+      **Done (2026-10-23):** `src/db/api.ts` (CORE-ARCH §4.10's `ReadHandle`, `BlockWriteHandle`, `SchemaWriteHandle`;
+      `Transaction`; `CommittedHeight`; `Database { read, transaction, close }`), `src/db/errors.ts` (`UmbraError {
+      code, retryable, details }`, `ERROR_CODES`; retryable for `connection-lost` only, DB-13), `src/db/mapping.ts` (the
+      result mapping by type OID with its own array reader, lossless JSON for `json` and `jsonb`, parameter texts) and
+      `src/db/postgres.ts` (`openPostgres`): each connection is a single-connection driver client, marked lost by the
+      driver's `onclose` and never reused (the driver otherwise reconnects silently mid-transaction, or crashes on a
+      reserved connection used after its loss); the writer runs transactions one at a time; reads use a pool (default
+      10) and are `REPEATABLE READ READ ONLY` transactions whose first statement reads the committed height, ended by
+      `ROLLBACK`; every connection pins `bytea_output`, `DateStyle`, `IntervalStyle`, `TimeZone` and
+      `extra_float_digits`, and a `database` URL setting one is refused; a `COMMIT` that PostgreSQL turns into
+      `ROLLBACK` is an error, never a commit; a handle used after it ended fails with `handle-closed`. The driver hands
+      over text only, so `docs/issues/00006` (NULL array elements) is fixed and closed. `CanonicalEncodingError` and
+      `PublicContentsError` are now `UmbraError`s (code = reason), so §12's `UmbraError` covers them with no new
+      export. The determinism suites read through the real backend (`test/determinism/postgres-database.ts` keeps only
+      setup SQL and the snapshot control). Tests in `test/db/` (82, seen failing first: modules missing; issue 00006's
+      three reproductions in `contents-hash.test.ts` failed through the old adapter): `mapping.test.ts`,
+      `errors.test.ts`, `results.test.ts` (A9 — the `jsonb` pair as two `bigint`s and 42 as 42, every mapped type and
+      its array with NULL elements, hostile database defaults, a seeded round-trip property), `handles.test.ts` (DB-2,
+      DB-5, the handles' types), `read-height.property.test.ts` (A8, seed 20261023, with two negative controls that
+      must fail it), `postgres-pool.test.ts` (A12, with the writer seeing its own rows as the control),
+      `postgres-faults.test.ts` (A19 `[[db.connection-lost.retryable]]`: `pg_terminate_backend` of the writer
+      mid-transaction, during a statement and before `COMMIT`, of a reader, of idle connections, a refused connection;
+      constraint violations and other errors not retryable). 27 deliberately wrong variants of the sources were each
+      caught but one equivalent. Coverage floors `src/db/**` 90/85 and `src/db/errors.ts` 95/91 (§13) added.
+      **Questions, since decided (2026-10-23):** Q65 (the pinned session settings: A), Q66 (types the mapping does not
+      name: A, and DB-2 now says arrays map element by element), Q67 (0.9.5's timeouts: a redesign, Q70–Q72; Q68 makes
+      date and time values text, task 2.2b). **For task 2.2:** add PGlite to `test/db/backends.ts`; hand over text and
+      map with `src/db/mapping.ts`; pin the same five settings; send the same parameter texts. The CI run is pending
+      until the branch is pushed (Phase 3).
+- [x] 2.2 The PGlite backend with its single queue, behind the same API.
+      **Acceptance:** A7, A8 (PGlite), A11 including its negative control.
+      **Done (2026-10-23):** `src/db/pglite.ts` (`openPglite({ dataDir, committedHeight })`, `openPgliteOn(engine, …)`,
+      `PGLITE_START_PARAMS`, `classifyPgliteError`). Every read and every transaction is one job of one FIFO queue that
+      holds PGlite's one session from its first statement to its last, so a block transaction is one exclusive job
+      (DB-4); a job runs in its caller's async context. A read is `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY`,
+      `RESET ALL` and `RESET ROLE` (no setting or role a transaction left on the session reaches it), the committed
+      height, the body, `ROLLBACK`; a transaction is `BEGIN`, the body, then `COMMIT` — a `COMMIT` answered with
+      `ROLLBACK` is an error — or `ROLLBACK`; `handle-closed` and `commit-rolled-back` exactly as on PostgreSQL (both
+      now in `src/db/errors.ts`). Values reach `src/db/mapping.ts` as PostgreSQL's text (every PGlite parser replaced
+      by the identity, `rowMode: "array"`) and parameters go as `parameterText`'s texts through identity serializers;
+      the engine starts with the five `PINNED_SETTINGS` (moved to `mapping.ts`) as `-c` start parameters, which beat
+      `postgresql.conf` and `ALTER SYSTEM`, and an engine without them is refused (`invalid-configuration`). Errors
+      (DB-13): PGlite has no connection, so nothing is `connection-lost`; a server `ERROR` is `database-error` with its
+      SQLSTATE and names; anything else (`FATAL`, a WebAssembly trap, a failed `ROLLBACK`, …) is `database-error`,
+      `reason: engine-failed`, for every later call too, until the database is opened again. Closing refuses the
+      waiting jobs and every later statement, waits for a statement in flight, then closes the engine. A call from
+      inside a running job of the same database (or through another database's job) is refused with `nested-call`
+      (Q73, resolved E by the owner with this guard kept). A11's negative-control flag is `READS_BYPASS_QUEUE` in
+      `src/db/pglite-build-flags.ts`: a `const false` that no option, setting or environment variable reads and §12 does
+      not export, so only a different build turns it on. Tests (seen failing first: module missing):
+      `differential.test.ts` (A7, 36: the same statements on both backends — mapped rows, errors with their messages,
+      row counts, a `COMMIT` turned `ROLLBACK`, a seeded round trip — compared with each other);
+      `read-height.property.test.ts` (A8 on PGlite, a model of the queue, two negative controls; interleavings now up
+      to 30 steps evenly);
+      `pglite-no-outside-read.test.ts` (A11 `[[db.pglite.no-outside-read-in-transaction]]`: 200 blocks under four
+      readers, every engine statement traced with who asked for it — 0 outside reads, 4 reads waiting in the middle of
+      every block, no read saw a half-written block) and `pglite-no-outside-read.negative-control.test.ts`
+      (`[[db.pglite.no-outside-read.negative-control-fires]]`: the bypass build fails A11's assertions with 1,600 read
+      statements inside the blocks' windows); `pglite-queue.test.ts` (25: order, holding, Q73, closing, errors, opening,
+      the pinned settings over a hostile `postgresql.conf`/`ALTER SYSTEM`); `results.test.ts` and `handles.test.ts` on
+      both backends; the PGlite halves of 1.2–1.4 and `test/determinism/cross-backend.test.ts`. **Found and fixed:**
+      Node.js 24.9.0's `JSON.parse` can read a one-escape object key (`"\t"`) as a backslash once another parse read the
+      key `"\\"` — A7's round trip failed on both backends — so `parseJsonLossless` is now the mapping's own JSON reader
+      (Q78). 46 deliberately wrong variants: 43 caught at once, 2 more after new tests, 1 equivalent. Coverage
+      `pglite.ts` 98.44 % lines / 96.61 % branches, `mapping.ts` 100 / 100 (floors `src/db/**` 90/85).
+      **Open question (not blocking):** Q78 (`design.md` §4 and §14 still prescribe `JSON.parse`). The CI run is
+      pending until the branch is pushed (Phase 3).
+- [x] 2.2a The `deterministic_postgresql` component (Q69): move into `src/deterministic-postgresql/` the column-type
+      rules with the default detection and the catalog reads they need (`src/determinism/column-rules.ts` and the rule
+      parts of `public-tables.ts`), the pinned session settings (`PINNED_SETTINGS`, in `src/db/mapping.ts` since task
+      2.2) and the result mapping with the parameter texts and its JSON reader (`src/db/mapping.ts`); `src/db/` and
+      `src/determinism/` import every rule from it; their tests move to `test/deterministic-postgresql/` and run on both
+      backends; the design-sync test keeps finding §4's table; the coverage floor of §13.
+      **Acceptance:** A138; every moved test passes unchanged in what it asserts.
+      **Done (2026-10-23):** `src/deterministic-postgresql/` holds `column-rules.ts` (moved from `src/determinism/`: the
+      column-type rules and the default detection, with `SCALAR_COLUMN_TYPES` and `ColumnType` from `cbor.ts`, and
+      `keyOrderTerm`, the `ORDER BY` term with `COLLATE "C"` that `rowsInKeyOrder` wrote inline), `catalog.ts` (the
+      catalog reads moved from `public-tables.ts`: `catalogTables`, `catalogRelations`, their SQL, and the handle
+      `ConsistentRead`, declared here so nothing of `src/db/` is imported), `settings.ts` (`PINNED_SETTINGS`),
+      `mapping.ts` (moved from `src/db/`: the result mapping, the parameter texts, the JSON reader), `errors.ts`
+      (`UmbraError`, `ERROR_CODES`, `ErrorCode`, `ErrorDetails`, which the mapping throws; `src/db/errors.ts` re-exports
+      them, so `design.md` §12 is unchanged — Q79) and `index.ts`, the entry `src/db/` and `src/determinism/` import
+      every rule from (its comment maps each row of §4's component table to its file, and names where the rows still to
+      be built go). The component imports nothing else of `src/`, and `src/determinism/` no longer imports `src/db/`.
+      `public-tables.ts` keeps `PublicContentsError`, `publicTables`, `countRows` and `rowsInKeyOrder`, and re-exports
+      `ConsistentRead`. Tests moved with `git mv`, only their imports and doc comments changed: `column-rules.test.ts`
+      (no database; with the design sync), `column-refusals.test.ts` (both backends), `mapping.test.ts` (no database),
+      `results.test.ts` (A9, both backends). New, seen failing first (the component missing; the moved tests not yet in
+      the suite): `boundary.test.ts` (the import boundary over every import form, by the TypeScript compiler's parse;
+      "defined nowhere else" checked as names, pinned settings written with their values, `COLLATE "C"`, functions and
+      values defined again under any name, and texts of 30 or more characters, each with a fixture copy),
+      `component-table.test.ts` (§4's component table mirrored row by row: the suite files that run each row, on both
+      backends, and the task each part not built yet waits for, which this file must still list as open) and
+      `both-backends.test.ts` (one fixture on PostgreSQL 17 and PGlite: equal catalog facts, equal refusal messages for
+      every refused row and every refusal of the paragraph, text keys in byte order whatever the collation, the pinned
+      settings and the texts they print). 9 deliberate breaks (four forbidden imports, five rules defined again outside)
+      each caught by the intended test; 36 wrong variants of the component's code: 32 caught by the suite at once, and
+      the other 4 after new tests (`errors.test.ts`: unreadable output's code, never asserted since task 2.1;
+      `UmbraError`'s frozen details; and schemas and tables in byte order with a partitioned table listed once, which
+      only `test/determinism/` had checked) — 36 of 36 on the final suite. Coverage floor
+      `src/deterministic-postgresql/**` 95/90, and the `errors` floor 95/91 at the class's new path, in
+      `vitest.config.ts`; `design.md` §1 and §4 and `docs/issues/00007` name the new paths.
+      **A138 covers now:** the column-type rules with their refusals, the `COLLATE "C"` key order, identity, `serial`
+      and non-immutable defaults, sequences and unlogged tables (rows 1–4), the pinned session settings (row 7) and the
+      result mapping and parameter texts (row 8). **Pending:** the `jsonb` and `numeric` `CHECK`s (row 5, task 7.1,
+      done); the `BEFORE TRUNCATE` trigger (row 6, task 2.3, done); the zero timeouts (row 7, task 2.7); date and time
+      as RFC 3339 text (row 8, task 2.2b, done); the opt-out (row 9: its declaration task 3.1, its skips task 7.1, done;
+      backups carrying its rows, task 15.2).
+      **For tasks 2.2b, 2.3, 2.7, 3.1 and 7.1:** put each rule in the component (`index.ts` says which file), test it in
+      `test/deterministic-postgresql/` on both backends, and move its part in `component-table.test.ts` from `pending`
+      to `tests`.
+      **Question, since decided:** Q79 (where `UmbraError` lives): A, by the owner (2026-10-23). The CI run is pending
+      until the branch is pushed (Phase 3).
+- [x] 2.2b Date and time (Q68, Q74) and one set of rules (Q75): values as RFC 3339 text in the component's mapping;
+      `timestamptz` allowed as a value and a key (the encoder's integer microseconds since 1970, key order by time),
+      the other date and time types refused with "use `timestamptz`"; the date-and-time row of `design.md` §4 split
+      and reworded, and "public" in its paragraph made "module" (every database), together with their verbatim copies
+      in the component; the A7 differential compares date and time values as values; the module guide says
+      `timestamptz` is the preferred time type, and every time UmbraDB represents uses it and its `Z` form. Runs next,
+      before 0.4 (owner, 2026-10-24); it closes the fix check's TC-01, which the owner accepted until then.
+      **Acceptance:** A139, A145 (the column rules and the encoding; the core's `block_time` is task 10.2's).
+      **Done (2026-10-24):** the component's mapping (`mapping.ts`) rewrites PostgreSQL's ISO text by moving its
+      characters, never through a JavaScript `Date`: `timestamptz` → `2025-05-21T14:30:00.123456Z` (the fraction as
+      printed), `timestamp` the same without `Z`, `date` its text, `infinity` and `-infinity` as words, arrays element by
+      element; only the pinned form is read (four-digit year, offset `+00`), so a year outside 0001–9999, BC or another
+      offset is the existing `unreadable-result` (Q81, no new rule); a `Date` parameter is still sent as its ISO text.
+      `timestamptz` is allowed as a value and a key (`column-rules.ts`: rule `timestamptz`, key order `by-time`, which
+      `keyOrderTerm` writes without a collation; `src/determinism/cbor.ts`: the integer microseconds since 1970 in
+      `bigint`, `infinity`/`-infinity` → `timestamptz-infinite`, other text → `timestamptz-invalid`, both in
+      `ERROR_CODES`; `valueFailureBecause` explains an infinite value). `timestamp`, `date`, `time`, `timetz` and
+      `interval` are refused with reasons true of each that no longer cite the drivers' `Date`, and "use timestamptz,
+      written with Z" (plus `bigint` microseconds for a time of day or a length of time, Q87). `design.md` §4: the
+      date-and-time row split into an allowed `timestamptz` row and the five refused types; "module" for "public" in
+      the paragraph, the "Column types and stored values" bullet and the component table's row 4; the "Date and time
+      values" bullet in the present tense. Q75 in the code, where "public" meant DT-3's schemas:
+      `src/determinism/module-tables.ts` (was `public-tables.ts`) with `moduleTables`, `ModuleContentsError`,
+      `ModuleContentsFailure`, `ModuleTable`, `ModuleColumn`; the messages "this type cannot be stored in a module
+      table" and "a module schema cannot hold …". The A7 differential compares date and time values as values, and
+      against values written out by hand. `docs/module-guide.md` created with its "Time values" section. Tests, seen
+      failing first: A139 (`time-values.test.ts`, both backends, three child processes with `TZ` UTC, America/New_York
+      and Asia/Tokyo, with controls that the zones took effect and that the old `Date` mapping differs between them),
+      A145's column rules and encoding (`cbor.test.ts` with 18 hand-computed values, `contents-hash.test.ts` with a
+      hand-written oracle beyond 2^53, `module-tables.test.ts`, `cross-backend.test.ts`, `both-backends.test.ts`,
+      `column-refusals.test.ts`, `column-rules.test.ts` and its design sync at 17 rows), `results.test.ts` (A9's `Date`
+      expectations replaced by DB-2's text) and `mapping.test.ts`; row 8's part of `component-table.test.ts` moved to its
+      tests. 36 wrong variants of the mapping, rules and encoder: 34 caught (two by hanging the suite, recorded as
+      `docs/issues/00008`), 2 equivalent. Closes the fix check's TC-01. **Pending for A145:** the startup refusal (task
+      7.1) and the core's `block_time` (task 10.2). **Question, since decided:** Q87 B (owner, 2026-10-24).
+- [x] 2.3 Roles and `SET LOCAL ROLE`, provider functions (fixed `search_path`, `PUBLIC` revoked), the id pattern and
+      schema-name collisions, shared-item schemas, and the `TRUNCATE` refusal.
+      **Acceptance:** A13 including its negative control, A14, A15, A73.
+      **Done (2026-10-24):** roles, grants and names in `src/db/roles.ts` behind a small input of each module's id,
+      required items, provided items (a `table` item's schema, tables and `deterministic` flag) and migrations, which
+      tasks 3.1 and 3.2 will feed from the real declarations: `planSchemas` checks ids and item names against DB-8's
+      pattern within 40 bytes (`bad-id`), one namespace of module schemas, item names and reserved schemas
+      (`schema-collision`, naming both), a `table` item's declared schema (its module's own, or the item's, which makes
+      a shared item with one schema owned by `umbradb_i_<item>`, written by every provider under that role; Q89) and the
+      providers of one item declared alike — schema, `deterministic` flag, migrations by id and SHA-256 checksum
+      (`shared-item-migrations-differ`); `prepareSchemas`, before any migration, creates `core_chain`, each `NOLOGIN`
+      role and schema and, as each schema's owner, grants `USAGE` and `SELECT` to every other role, revokes `EXECUTE`
+      from `PUBLIC` by default privilege and grants it to the modules requiring an item the schema's writer provides;
+      `setModuleRole` runs `SET LOCAL ROLE`. The writer's login is a superuser, or holds `CREATEROLE` and `CREATE` on
+      the database and grants itself each role `WITH INHERIT TRUE, SET TRUE` (PostgreSQL 16 and later give a role's
+      creator `ADMIN` only; probed on 18.6 and checked against its documentation); lacking a privilege, or facing
+      another login's role, startup refuses with `invalid-configuration` (`reason: writer-privileges`) naming each and
+      its `GRANT` (Q90). The `TRUNCATE` refusal is the component's
+      (`src/deterministic-postgresql/block-transactions.ts`: `core_chain.truncate_not_allowed()`, SQLSTATE `UM014`, the
+      trigger statements; applied by `src/db/truncate-guard.ts`): a `BEFORE TRUNCATE … FOR EACH STATEMENT` trigger on
+      every table and partition of the plan's schemas not declared `deterministic: false`, refusing unless the
+      transaction carries the migration mark (`umbradb.migration` = its own `pg_current_xact_id()`, set
+      transaction-locally by `markMigration`), so it fails closed and no mark outlives its transaction; both backends
+      report it as `truncate-not-allowed`. New codes in `ERROR_CODES`: `truncate-not-allowed`, `bad-id`,
+      `schema-collision`, `shared-item-migrations-differ`. Tests, seen failing first: `test/db/schema-names.test.ts`
+      (A15's names and refusals), `test/db/roles.test.ts` (A13 with `[[db.roles.cross-schema-write-rejected]]` and its
+      committed negative control, A14 with task 0.1's `pg_temp` control, A15's roles and shared schema; both backends),
+      `test/db/roles-login.test.ts` (a `CREATEROLE` login on PostgreSQL, Q90),
+      `test/deterministic-postgresql/block-transactions.test.ts` (A73 with `[[db.block.truncate-refused]]`, both
+      backends; row 6 of the component table moved to its tests), `test/db/errors.test.ts`. 73 wrong variants of the new
+      code (a scratch runner outside the clone): 66 caught on the first run; the 5 survivors that were gaps closed by
+      new tests (an id's bytes counted as characters; a role the login created itself beforehand, refused or left
+      without the self-grant; the privilege checks run for a superuser; the migration mark set session-wide); 71 of 73
+      caught on the final sources, 2 equivalent (a schema's owner granted privileges it holds already; the guard
+      function without its fixed `search_path`, as it names only built-ins). `design.md` §4 ("Roles", "Provider
+      functions", "`TRUNCATE`", the component table's row 6) and §14 updated. **Pending:** A13's and A73's "processing
+      halts" (tasks 2.6, 5.x); A15's "startup refuses" (tasks 3.1, 3.2, 5.x); A73's migration half through the migration
+      runner (task 2.4). **Questions, since decided:** Q89 (a `table` item's schema and a shared item's writer) and Q90
+      (roles per server and the writer's login): A, by the owner (2026-10-24).
+- [x] 2.4 Migrations with checksums (refactored from `src/postgres/migrate.ts`), `core_chain.migrations`, setup after
+      migrations, and `requiresResync`.
+      **Acceptance:** A16, A72; the refactored `migrate` and `migration-lock-timeout` tests pass or are retired per
+      `design.md` §13.
+      **Done (2026-10-24):** `src/db/migrate.ts` (`startDatabase`) behind a small input — the schema plan of task 2.3,
+      the backbone parts and modules in RN-3's order (`id`, `version`, `requiresResync`, `migrations`, `onStartDb`;
+      tasks 3.1 and 3.2 feed them from the declarations) and, for DB-10, each part's versions whose revisions cover a
+      committed height (task 4.3 reads them from the configuration history and the cursor). One bootstrap transaction
+      runs `prepareSchemas`, creates `core_chain.migrations` (module text, migration id text, checksum `bytea` = SHA-256
+      of the UTF-8 SQL, position from 1; primary key `(module, migration_id)`, `UNIQUE (module, position)`), grants
+      every module role `USAGE` and `SELECT` on `core_chain` (now and by default privilege), attaches the `TRUNCATE`
+      guard, and checks every part before any migration runs: `requires-resync`, `migration-checksum-changed`,
+      `migration-missing` — also, with `reason: out-of-order`, for a pending migration declared before an applied one
+      or a record whose position no longer matches (Q91); a refusal rolls all of it back. Then per part: each pending
+      migration in its own transaction — the migration mark, the part's role (a shared item's provider under the
+      item's, recorded under the item's name; UmbraDB's own `core-chain` and `core-digest` as the login), the SQL as
+      one text of several statements on the simple protocol (`src/db/multi-statement.ts`: registered by both backends
+      for each transaction, reached only by the runner; `Transaction`'s methods stay one statement each), a check that
+      the SQL did not end the transaction, then its row; a failure rolls back with its row and refuses with
+      `migration-failed` (the database's error as its cause), a lost connection stays `connection-lost`; then the
+      `TRUNCATE` guard again for the part's new tables; then its `on-start-db` in a transaction of its own under its
+      role, unmarked. The component gains `MIGRATION_MARKED_SQL`; `ERROR_CODES` gains `migration-checksum-changed`,
+      `migration-missing`, `migration-failed`, `requires-resync`. `docs/module-guide.md` gains "Migrations" and
+      "Upgrades" (the additive-only rule, `requiresResync`). Tests, seen failing first (`Cannot find module
+      '../../src/db/migrate.js'`; the guide's sections missing): `test/db/migrate.test.ts` (A16's three cases on both
+      backends, with its committed negative control — a runner recording each row in a transaction of its own, first
+      or last, fails them; refactored from 0.9.5's `migrate.test.ts`: the idempotent second start, nothing left on the
+      writer's session, a refused connection and one lost during a migration as `connection-lost`),
+      `test/db/requires-resync.test.ts` (A72 on both backends, its control, the `[DOC]` checks),
+      `test/deterministic-postgresql/block-transactions.test.ts` (A73's migration half through the runner;
+      `TRUNCATE` refused in `on-start-db`; the guard at every startup), `test/db/roles-login.test.ts` (the runner under
+      a `CREATEROLE` login). 55 wrong variants of the new and changed code (a scratch runner outside the clone): 45
+      caught on the first run, the 8 survivors that were gaps closed by new tests, 53 of 55 caught on the final
+      sources, 2 equivalent (checking every provider of a shared item, whose lists are equal; the moved `send` not
+      marking a lost session, which the driver's `onclose` marks). `design.md` §4 ("Migrations and setup"), §10
+      (`core_chain.migrations`) and §13 updated: 0.9.5's `migration-lock-timeout` test is retired with the migration
+      advisory lock (§4) — its concerns are A17's and A141's — and 0.9.5's runner and its tests stay until task 17.2
+      removes them with the parts they migrate; the `migrate` floor 90/85 at `**/src/db/migrate.ts`. **Pending:**
+      where `committedVersions` comes from (task 4.3, with the cursor of tasks 5.2/10.2), so A72's "committed blocks"
+      are given as that history would give them; the declarations and RN-3's order fed in (tasks 3.1, 3.2); the
+      refusal state and the writer lock before startup (tasks 5.x, 2.5); the schema write handle around `on-start-db`
+      (task 2.6). **Question, since decided:** Q91 (a pending migration declared before an applied one): A, by the
+      owner (2026-10-24), refused with `migration-missing`, `reason: out-of-order`.
+- [x] 2.5 Writer lock (refactored from `src/postgres/transaction-lease.ts`) and the PGlite operating-system lock
+      (`node:sqlite` exclusive transaction); the durability probe moved to `src/db/`.
+      **Acceptance:** A17, A18; `durability-probe.test.ts` passes at its new path.
+      **Done (2026-10-24):** `src/db/writer-lock.ts` — the PostgreSQL writer lock, `pg_try_advisory_lock(3,
+      hashtext('umbradb-writer'))`, taken by the writer whenever it opens a session, before that session's first
+      transaction (from 0.9.5's lease: a session advisory lock on a connection of its own, taken without waiting, its
+      loss the connection's): the first time another holder is `writer-lock-held` and nothing was written; on a session
+      opened after a lost one, `writer-lock-lost`, after which that database never writes again — and `startWriter(db)`,
+      startup's first step (lock, then probe, before `startDatabase`), reached through a registry both backends fill.
+      `src/db/postgres.ts` wires both into the writer; `PostgresOptions.fullPageWritesOffAllowed` (CF-4).
+      `src/db/pglite-lock.ts` — the PGlite operating-system lock: `<data directory>.lock.sqlite` opened with `node:sqlite`
+      (loaded only then), `busy_timeout` 100 ms (decision record Q92: with 0, ten processes started together could all
+      refuse), `BEGIN EXCLUSIVE`, never committed, held for the process's life; the path resolved and its links followed,
+      so every spelling of a directory shares one lock; the same process may reopen a directory it closed, one opening at
+      a time; none for `memory://`; `idb://` and `opfs-ahp://` refused in Node.js. `openPglite` refuses without
+      `developmentOptIn` (`development-opt-in-required`) before anything is created, then locks, then opens PGlite.
+      `src/db/durability-probe.ts` — 0.9.5's probe unchanged in behaviour (`fsync`, `full_page_writes` with the
+      override, the pooler check, the `synchronous_commit` warning), now with §11's codes (`durability-fsync-off`,
+      `durability-full-page-writes-off`, `durability-pooler`) and run on the writer's session right after the lock; a
+      refused writer ends its session and holds no lock. `ERROR_CODES` gains those, `writer-lock-held`,
+      `writer-lock-lost` and `development-opt-in-required`; the `durability-probe` floor 97/92 at
+      `**/src/db/durability-probe.ts`. Tests, seen failing first (`Cannot find module '../../src/db/writer-lock.js'`,
+      `…/durability-probe.js`, `…/pglite-lock.js`): `test/db/writer-lock.test.ts` (`[[db.writer-lock.single-writer]]`,
+      PostgreSQL and PGlite in one test; the re-take checked from inside the next transaction; `writer-lock-lost` for
+      good; the PGlite lock in this process), `test/db/pglite-writer-processes.test.ts` (child processes: a writer
+      stopped with `SIGSTOP` for A17's full 5 minutes — `UMBRADB_A17_SIGSTOP_SECONDS` shortens it for iteration only —,
+      `SIGKILL` and a restart from the cursor, ten processes started together), `test/db/durability-probe.test.ts`
+      (0.9.5's cases at the new path on six PostgreSQL 18 servers; a pooler simulated by statements alternating between
+      two backends; A18's PGlite half). Committed negative controls: a lock released when its statement ends (PostgreSQL
+      `pg_try_advisory_xact_lock`; PGlite `BEGIN EXCLUSIVE; COMMIT`) and a writer that skips the re-take each fail A17's
+      checks (`writer-lock.negative-control.test.ts`, `pglite-writer-processes.test.ts`); a probe that ignores `fsync`
+      fails A18's (`durability-probe.negative-control.test.ts`). 65 wrong variants of the new and changed code (a scratch runner outside the clone): 62 caught on the first run; the three survivors were two gaps (the probe run before the lock; a directory not created yet written as `…/new/.`), closed by tests, and one equivalent check, removed from the source as redundant; on the final sources all 64 are caught — `busy_timeout` 0 by a test that holds a SHARED lock on the lock file for 50 ms, since the ten-process races catch it only some of the time. `design.md` §4 ("Writer lock",
+      "Durability probe"), §13 and §14 updated. 0.9.5's `transaction-lease.ts`, `durability-probe.ts` and their tests
+      stay until task 17.2. **Pending:** the refused state ("stays up, not ready", "startup refuses") and the halt on
+      `writer-lock-lost` (task 5.x); the configuration's `developmentOptIn` and `fullPageWritesOffAllowed` (task 4.x);
+      "continues from the cursor" with the runner's cursor (tasks 5.2, 5.4, 10.2, 18.1); the browser's Web Locks (task
+      16.1). **Question, since decided:** Q92 (`busy_timeout` 100 ms instead of design §4's 0): A, by the
+      owner (2026-10-25).
+- [x] 2.6 Write handles and their closing.
+      **Acceptance:** A10.
+      **Done (2026-10-25):** `src/db/write-handles.ts` — `openBlockWrites(tx, plan, { height, onClosedUse })` runs the
+      parts' `on-db-write` callbacks inside the block transaction the runner opens, one `write(part, callback)` at a time
+      (one asked for while another runs is refused before anything is sent): each callback first sets its part's role —
+      `SET LOCAL ROLE` to its write role (a shared item's provider: the item's, Q89), or `RESET ROLE` for `core-chain`
+      and `core-digest`, which write as the login — so no part runs under the role the one before it left; `RESET ROLE`
+      returns the block to the login, also undoing a role a callback selected itself, before an own part's callback and
+      at `writes.end()` after the last one (ingest profile 00033: between two modules' callbacks the next
+      `SET LOCAL ROLE` replaces the role directly); `runOnStartDb` runs `on-start-db` the same way in a transaction of its own, and `startDatabase` calls it
+      (`StartupInput.handles`: the cursor at startup and the report hook; `MigrationPart.onStartDb` takes a
+      `SchemaWriteHandle`). A handle offers exactly `height`, `query` and `execute` — not the transaction, not the
+      migrations' script path, never the migration mark (A73's block test now goes through it). When its callback
+      returns or throws the handle closes: every later `query` or `execute` — a stored reference, a timer, during the
+      block or after it — fails at once with `handle-closed` (`details { handle, module, point }`, `writeHandleClosed` in
+      `src/db/errors.ts`) before anything is sent, so never under the role of the part that runs now, and on PGlite
+      without waiting in the queue; each such use is also passed to `onClosedUse`, so the runner halts even when the
+      module's own code caught the error. `OWN_PARTS` moved to `src/db/roles.ts` (re-exported by `migrate.ts`). Tests,
+      seen failing first (`Cannot find module '../../src/db/write-handles.js'`): `test/db/write-handles.test.ts` (both
+      backends); A13's and A73's helpers in `roles.test.ts` and `block-transactions.test.ts` now run the body as an
+      `on-db-write` callback through the real handle, their assertions unchanged. Committed negative controls: a block
+      whose handles never close fails A10's in-block check (the kept handle of `a` writes `b`'s table under `b`'s role),
+      and a block that keeps the first callback's role fails the role check. 31 wrong variants of the new and changed
+      code (a scratch runner outside the clone): 29 caught on the first run; the two survivors were gaps (`SET ROLE` for
+      `SET LOCAL ROLE`; `startDatabase` dropping the height), closed by tests; on the final sources all 31 are caught.
+      `design.md` §4 ("Write handles") and the module guide's "Writing in callbacks" added. **Pending:** "which halts
+      processing" — the runner turns a callback's error and every `onClosedUse` report into the `callback-error` halt
+      with the point and the module (task 5.x, with A13's and A73's halts); the runner's loop over the parts in RN-3's
+      order and the cursor it passes as `height` (tasks 3.2, 5.x).
+- [x] 2.7 Timeouts by connection role (Q71): a read option bounding one read by `statement_timeout` and
+      `idle_in_transaction_session_timeout` (`SET LOCAL`), `query-timeout`; the zero timeouts pinned on the writer,
+      migrations, setup and callback reads, in the component's session settings; on PGlite, API reads set neither
+      timeout (it enforces neither and hangs on the idle one, `design.md` §14).
+      **Acceptance:** A141.
+      **Done (2026-10-25):** the zero timeouts are the component's `ZERO_TIMEOUTS` (`statement_timeout`, `lock_timeout`,
+      `idle_in_transaction_session_timeout`, `transaction_timeout` and — decision record Q93, owner's answer A
+      — `idle_session_timeout`, each 0), next to `PINNED_SETTINGS` in `src/deterministic-postgresql/settings.ts`;
+      `SESSION_SETTINGS` (both) is what every session starts with: PostgreSQL startup parameters of the writer and every
+      pooled read connection (so the reads given to callbacks, and migrations, setup and blocks on the writer, run with
+      them), refused in a `database` URL like the five; PGlite `-c` start parameters, checked by `checkPinnedSettings`.
+      The read option is `db.read(body, { timeoutMs })` (`ReadOptions`, `src/db/api.ts`; a whole number of milliseconds
+      from 1 to 2147483647, else `invalid-configuration`, checked alike on both backends, `src/db/read-options.ts`): on
+      PostgreSQL the read's `BEGIN` message also sets the two timeouts with `SET LOCAL`; a `57014` in it, and the read
+      having been idle in its transaction for the timeout (told by its own clock: `postgres` 3.4.9 drops the server's
+      `25P03`, which arrives while no statement is pending), fail with `query-timeout` (`details { timeoutMs, setting }`,
+      not retryable; a new code), the first keeping the connection, the second leaving the session to the pool to drop;
+      once ended, every later statement and the read itself fail with it, even when the body caught it; elsewhere a
+      `57014` stays `database-error` and a lost session `connection-lost`. On PGlite the option is checked and sets
+      nothing. Tests, seen failing first (the 1 s database defaults reaching the API's sessions; `pg_sleep(60)` running
+      its 60 s; the option's `SHOW` reading 0; `SESSION_SETTINGS` undefined): `test/deterministic-postgresql/
+      zero-timeouts.test.ts` (both backends, under database — PGlite: configuration-file — defaults of 1 s for all five:
+      a 5 s migration, setup idle 2 s, a block idle 5 s while a callback awaits, a callback's 5 s read on its block write
+      handle and on a read handle outside the block, the writer idle 2 s between blocks, a writer transaction waiting
+      2 s for a lock (PostgreSQL), each completing with `SHOW` 0), `test/db/read-timeouts.test.ts` (A141's request half
+      in the database API; the option checked on both), `test/db/pglite-timeouts.test.ts` (PGlite in processes of their
+      own, killed when a statement hangs). Committed negative controls: a build without the zeros (`vi.mock`) has every
+      long-work check cut off on PostgreSQL, and its session and lock lost after 2 s idle; on PGlite the start
+      parameters without the zeros read the file's 1 s and hang; a read that sets the two timeouts fails PGlite's check
+      (it reads 1 s and hangs); a `57014` reported as anything but `query-timeout` fails A141's check. 42 wrong variants
+      of the new and changed code (a scratch runner outside the clone): 37 caught on the first run; of the 5 survivors 2
+      are equivalent (`SET` for `SET LOCAL` in a read that always rolls back; `>` for `>=` on a real clock) and 3 were
+      gaps (an engine without the zeros not refused; a read idle from its `BEGIN` with no statement; a statement in
+      flight counted as idle), closed by tests; on the final sources 40 of 42 are caught, the 2 equivalent ones survive.
+      `design.md` §4's "Session settings (Q65) and timeouts (Q71)" bullet and §14's PGlite row updated; §4's component
+      table row 7 now runs its zero timeouts in `zero-timeouts.test.ts`. **Pending:** "a read for an API request"
+      through a registered handler, with `apiReadTimeoutMs` from the configuration (tasks 5.2a, 4.2). Q93 resolved A
+      (owner, 2026-10-25): DB-15, its new scenario and A141 now name `idle_session_timeout`.
+- [x] 2.8 The read-only database for the `db` item (Q73): `read` only, nothing that writes, opens a transaction or
+      closes; the `nested-call` refusal on PGlite kept from task 2.2; the module guide's database rules (inside a
+      callback its handle, `db.read` for work outside the points).
+      **Acceptance:** A144.
+      **Done (2026-10-25):** `ReadOnlyDatabase` (`src/db/api.ts`: `read<T>(body, options?: ReadOptions)`, typed as
+      `Database["read"]`) and `readOnlyDatabase(db)` (`src/db/read-only.ts`), which `core-chain` will publish as the
+      `db` item: a frozen object whose one property is `read`, an arrow function holding the database in its closure
+      only, so `Object.keys`, `in` and property reads find no `transaction`, `close`, write or anything else of the
+      database, and no property, prototype or value leads to it; frozen because one item is shared by every module that
+      requires it, so an assignment (a mistake in one module) throws instead of changing it for the others. The body and
+      the read option reach the database's `read` unchanged (the same objects; no default timeout), and its result and
+      error come back unchanged; a destructured `read` works. On PGlite a `db.read` from inside a running job — a
+      callback in the block's transaction, `on-start-db`'s, a read's body — fails at once with `nested-call` (task 2.2's
+      guard, unchanged); on PostgreSQL, from inside `on-db-write`, it reports h − 1 and sees none of the block's rows.
+      Tests, seen failing first (`Cannot find module '../../src/db/read-only.js'`; `tsc`: no exported member
+      `ReadOnlyDatabase`; the `[DOC]` checks against the guide before this task): `test/db/read-only-database.test.ts`
+      (the type test with `@ts-expect-error` on `transaction`, `close`, `execute`, `query`; A144's runtime check; one
+      committed height per read; A144's `on-db-write` case and the same from `on-start-db` and a read's body, on both
+      backends; the read option passed through; the item over `openPglite`'s own object; the guide). Committed negative
+      controls: the type predicate is false for `Database` and for the item plus `transaction`, `close` or a `database`
+      property; the runtime check finds the database itself, `transaction` or `close` beside `read`, a prototype path,
+      `Object.create(db)`, a held database. 18 wrong variants (a scratch runner outside the clone): 16 caught on the
+      first run; of the 2 survivors one is equivalent (`read: db.read.bind(db)`) and one was a gap (`read: db.read`,
+      which breaks on `openPglite`'s own object, whose `read` uses `this`, while the test server's PGlite wrapper hid
+      it), closed by a test over that object; on the final sources 17 of 18 are caught, the equivalent one survives.
+      `docs/module-guide.md`'s "Reading through `db`" (A144's `[DOC]`) and `design.md` §6 (`read(body, options?)`, the
+      file, the frozen object) added. **Pending:** "a module that requires `db` gets" it through `ProcessContext.items`
+      — `core-chain` publishing `readOnlyDatabase(db)` as the item (task 10.2) and the runner handing process items to
+      modules (task 5.2a); the `on-db-write` case through the runner's own block loop, where a `nested-call` rejects the
+      callback (`callback-error`, tasks 5.2 and 5.x).
+- [x] 2.2c The owner's answer Q163 A: a process (`startProcess`, `umbradb run`) and a restore into its target create a
+      `pglite:<directory>` with any missing parent directory, before the writer lock is taken (`src/db/pglite-lock.ts`
+      puts the lock's file beside the directory and today refuses a missing parent); `umbradb config check
+      --database` and `umbradb backup` create none; `design.md` §7 and the operator guide.
+      **Acceptance:** A166.
+      **Done (2026-10-27):** `createPgliteDirectory` (`src/db/pglite-lock.ts`) reads the data directory as the lock
+      does (`file://` and a bare path, nothing for `memory://`, the browser's file systems `invalid-configuration`)
+      and creates a missing one with its missing parents (`mkdirSync`, `recursive`); a failure is `database-error`
+      (`open-failed`) naming no path. `openConfiguredDatabase` (`src/config/database.ts`) calls it under the
+      development opt-in only, before `openPglite` takes the lock — so `startProcess` and `umbradb run` create the
+      directory, and without the opt-in nothing is created (CF-9) —; `umbradb restore` opens its target through
+      `openRestoreTarget` (`src/cli/configured.ts`, one line in `src/cli/restore.ts`), called once the checks before
+      loading passed, so a refused restore creates nothing. `openPglite`, `umbradb config check --database` and
+      `umbradb backup` are unchanged and create nothing (the lock still refuses a missing parent). A166 passes
+      (`test/config/pglite-directory.test.ts`): `startProcess` on `<tmp>/a/b`, `umbradb run` in this process on an
+      absolute path and as the command in a child process on CF-4's relative `pglite:data/preview`, each committing
+      block S with the lock file beside the directory; a restore into `<tmp>/c/d` (a PGlite backup at height 3) and
+      one refused before loading (`backup-format-unknown`, nothing created); `config check --database` and `backup`
+      creating nothing; at `openConfiguredDatabase`: no opt-in, `file://`, a path through a file, an existing
+      directory, `pglite:memory` and `idb://`. The committed negative control
+      (`pglite-directory.negative-control.test.ts`, `vi.mock` of `createPgliteDirectory`) fails the first clause with
+      `database-error open-failed` and passes with the real function. The new tests failed on `4c2a5df` for the
+      intended reason (6 of 11, each `database-error`, `open-failed`). `design.md` §7 ("As built") and
+      `docs/operator-guide.md` ("The database"; the restore's target) updated.
+
+## 3. Modules
+
+- [x] 3.1 Declaration types, `defineModule`, declaration validation; a `table` item's optional `deterministic: false`
+      (Q76).
+      **Acceptance:** A20, A21.
+      **Done (2026-10-25):** `src/modules/declaration.ts`: CORE-ARCH §4.10's types (`ModuleDeclaration` with
+      `requiresResync?`, `ItemDeclaration`, `Lifetime`, `FieldKind`, `FieldSchema`, `Migration`, `Revision`,
+      `ProcessContext` with MD-7's `publish`, `BlockContext`, `ItemSink`, `ApiRegistry`, `PointCallbacks`, and
+      `BlockHeader` and `PendingKey`, which CORE-ARCH names without defining), `POINTS` (design §2's thirteen, in order)
+      and `defineModule`, which returns its argument and whose type refuses a callback under a name that is not a point,
+      also in a declaration built first and passed later. `src/modules/validation.ts`: `validateDeclarations({ backbone,
+      core, user })` validates declarations given as `unknown`, so a module built without types is held to the same
+      declaration: every shape the type forbids is refused with `invalid-declaration` naming the field (plus a `table` on
+      an item without the `table` lifetime, an item provided twice, a table listed by two items, `keyKinds` without
+      `validateKey`), then MD-2's causes, one rule and one code each (`DECLARATION_RULES`): `bad-id` (the schema plan's
+      own check, `checkNames`, now exported by `src/db/roles.ts`), `reserved-prefix` (user modules), `duplicate-id`
+      (before the schema plan would call it a schema collision), `no-requirement` (not for backbone parts),
+      `item-no-lifetime`, `table-item-no-kind`, `field-no-kind` (the field's outermost schema's `meta().kind`), and MD-1's
+      `unknown-point`; every message names the module, the cause and the fix. Five codes are new in `design.md` §11
+      (decision record Q94, owner's answer A). `src/modules/adapters.ts`: `schemaModule`/`schemaModules` (`OWN_PARTS`
+      left out) for `planSchemas`, and `migrationPart(declaration, context)` for `startDatabase` (`on-start-db` called as a
+      method of `points` with the module's process context). `deterministic: false`: carried to the schema plan's
+      `optedOut`; the skip is the component's, written once in `src/deterministic-postgresql/opt-out.ts` (`optOut`), which
+      `databaseRefusals(tables, relations, { optedOut })` (each relation now knows the table it belongs to:
+      `catalogRelations`' `belongsTo`) and the `TRUNCATE` guard use; `docs/module-guide.md`'s "Data that is not a function
+      of the chain". Tests, seen failing first (`tsc`: A20's five `@ts-expect-error` lines unused, the modules missing;
+      the suites failed to load; `column-refusals.test.ts` without `belongsTo`; the `[DOC]` checks before the section):
+      `test/modules/declarations.test.ts` (A20 — the type test with its committed negative control, a loose definer
+      that accepts `on-fetched`; the runtime half for the same declaration built anyway and written in JavaScript),
+      `test/modules/validation.test.ts` (A21's table, 14 cases with code, names and words, and its committed negative
+      control: the validation without one rule fails exactly that rule's cases; `bad-id`; 49 shapes the type forbids),
+      `test/modules/adapters.test.ts` and `test/deterministic-postgresql/opt-out.test.ts` (both backends).
+      71 wrong variants (a scratch runner outside the clone): 68 caught on the first run; the 3 survivors were gaps — a
+      declaration without `requires`, one item listing a table twice, how a shape refusal names a declaration with an id —
+      closed by tests; on the final sources 71 of 71 are caught, none equivalent.
+      **Pending:** "refused at startup" through the runner's refusal state (task 5.x, which calls the validation first);
+      the requirement graph and the plan's module set (3.2); the startup check, `CHECK`s, change capture and contents
+      hash that skip opted-out tables (7.1); `ledgerTasks` in the declaration (12.6); CF-2's `entry` builder (4.1).
+- [x] 3.2 Graph resolution per height range, Kahn order, mid-chain rule, development-only rule, shared-item providers.
+      **Acceptance:** A22, A23, A24, A25.
+      **Done (2026-10-25):** `src/modules/graph.ts`: `resolveGraph({ declarations, start, entries, developmentOptIn })`,
+      pure, takes 3.1's validated declarations, S, every revision of every module entry with its effective stop (task
+      4.3 gives them) and the `core` entry's development opt-in; backbone parts run from S with no stop, and a module is
+      enabled when it has an entry. Heights split at S, every revision's start and every stop + 1 into closed ranges
+      `[from, to]` — adjacent providers share no height, overlapping ones share one —; a module's revisions continue
+      each other where one's stop + 1 is the next's start (CF-5), and after a gap the next one starts it again. The
+      refusals, as rules checked in order (`GRAPH_RULES`), each naming its range — merged over consecutive ranges —,
+      module and item: `development-opt-in-required` (MD-5, `details.feature` `development-only-module`),
+      `providers-overlap` (MD-3, MD-6), `item-no-provider`, `item-not-available` (MD-3's uncovered range),
+      `graph-cycle` (in a range, or only in the union of the ranges, which leaves startup no order), and
+      `cannot-start-mid-chain` (MD-4: the module, or its provider at that height). The order (RN-3): the backbone in
+      `BACKBONE_ORDER`, then Kahn's algorithm with the smallest id by UTF-8 bytes first (`utf8Order`); `core-digest`
+      last at `on-db-write`, after the core and private processes' parts everywhere else and at startup. The outputs:
+      `modules`, every part of the database in startup order — `startDatabase`'s parts through `migrationPart`, the
+      plan through `schemaPlan` (`src/modules/adapters.ts`) —, `segments`, and per range `order`, `writeOrder` and
+      `providerOf`, with `rangeAt(h)`. The `db`/`config` name gap is closed in `planSchemas`, whose one namespace now
+      holds the items of `core-chain` and `core-digest` (`OwnPart`): a user module named `db` or `config` is refused
+      with `schema-collision`. Five codes join `ERROR_CODES` (all in `design.md` §11); §6 and §4 describe the rest.
+      Decision record Q95 (`core-digest`'s place at startup and one startup order) resolved A as shipped; Q96 (a start
+      at S above genesis), Q97 (which ranges are checked) and Q98 (MD-4's providers) resolved B (owner, 2026-10-25),
+      applied by task 3.2a. Tests, seen failing first (`tsc`: `graph.js`,
+      `schemaPlan`, the codes and `planSchemas`' second argument missing; the suites failed to load; three of
+      `schema-names`' new tests): `test/modules/graph.test.ts` (A22's table with A23's, A24's and A25's refusals — code,
+      details with range, module and item, words — and its committed negative control: the resolution without one rule
+      fails exactly that rule's cases; the acceptances; RN-3's order with committed negative controls: a tie-break by the
+      order given, by Czech or by numeric collation gives another order; the ranges; the startup order; the name gap;
+      the caller's errors, thrown), `test/modules/graph-database.test.ts` (both backends: A25's two providers with
+      adjacent ranges writing one table under the item's role, which the consumer reads whole at every height; the
+      provider's migrations before its consumer's view, with the control in plain id order), `test/db/schema-names.test.ts`
+      (the own parts' items). 68 wrong variants (a scratch runner outside the clone): 64 caught on the first run; of the
+      4 survivors 3 were gaps — a cross-range cycle's requirement named by its last span, the order dropping a cycle's
+      modules without the cycle rule, every module's items passed as own items — closed by tests; on the final sources
+      67 of 68 are caught, the survivor equivalent (activity read at a range's last height instead of its first).
+      `docs/issues/00012` recorded (a user module may be named `core`).
+      **Pending:** "startup refuses" through the runner's refusal state, the dispatch per point and A38's property test
+      (5.x, 5.1); the entries with their effective stops from the configuration history, and A34's module half with a
+      configuration (4.3); the providers' writes through the real block loop (5.2); Q96–Q98 (task 3.2a).
+- [x] 3.2a The owner's answers Q96, Q97 and Q98 in the resolver (`src/modules/graph.ts`): a start above 0 (genesis) is a
+      mid-chain start, at an S above 0 too (Q96); startup checks the ranges that hold a height above the cursor, a range
+      that ends at the cursor for a cycle only, the starts above the cursor and the development-only modules active at
+      the cursor or later, with the cursor as the resolver's input (Q97); a provider active at the height before a
+      module's start needs no `startsMidChain: true` (Q98).
+      **Acceptance:** A22, A23, A24 (as amended for Q96–Q98).
+      **Done (2026-10-25):** `GraphInput.cursor`, `bigint | null`: the last committed height, null on a new database; a
+      cursor below S, or one neither a bigint nor null, is the caller's error (thrown). A range is checked `whole` when
+      it holds a height above the cursor (every range on a new database), for a `cycle` only when it ends at the cursor,
+      and not at all when it ends below it (`RangeCheck`); a refusal names the span of its checked ranges. Q95's union
+      of every range's requirements, past ranges included, still orders startup and refuses its cycles. The result's
+      `ranges` start at the range holding the cursor (`rangeAt` is undefined below it); `providerOf` holds the items
+      exactly one active part provides — in the range ending at the cursor, whose providers are not checked, an item
+      several parts provide is left out —; `modules` and `segments` still hold every part from S. MD-4: every segment
+      start above 0 and above the cursor, backbone parts' included, needs `startsMidChain: true` (Q96), and so does each
+      provider of a required item there that is not active at the start − 1 (at a start at S none is; Q98); at one
+      start a refusal naming a provider comes before a module's own, so a module and the provider starting with it are
+      named together. MD-5: only a development-only module with a segment holding the cursor or a later height (any
+      segment on a new database). `design.md` §6 gains one clause on the result's ranges and `providerOf`. Tests changed
+      to the owner's rules, each naming its decision: a start at S = 1 is now mid-chain (Q96; the genesis cases start at
+      S = 0), MD-4's provider case (Q98: the provider now starts with the module); added: the new scenarios of MD-3 and
+      MD-4, the cursor's boundaries, the result's ranges, the caller's error — `graph.test.ts` from 66 to 101 tests.
+      Seen failing first: `tsc` (`cursor` not in `GraphInput`) and, types stripped, 27 of the then 96 tests (every
+      range and start checked whatever the cursor, a start at S accepted, 3.2's messages). Committed negative controls:
+      A22's table without one rule fails exactly that rule's cases; ignoring the cursor refuses each of the 11 faults
+      at or below it; checking the range that ends at the cursor whole refuses MD-3's "An upgrade adds a requirement".
+      Wrong variants (a scratch runner outside the clone): 30 of 32 caught on the first run, the 2 survivors gaps (h − 2
+      read for h − 1, the backbone check in the cursor's range) closed by tests; on the final sources 34 of 34 caught,
+      none equivalent. Question Q99 raised (A22's "not refused" against Q95's union over every range; shipped as
+      RN-3 says, not blocking 5.1).
+      **Pending:** the cursor passed, and "startup refuses" through the runner's refusal state (5.x); A34's module half
+      with a configuration (4.3); every backbone part declaring `startsMidChain: true` (10.x).
+
+## 4. Configuration
+
+- [x] 4.1 `defineConfig`, `coreEntry`, `versionEntry`, the module `entry` builder; the loader; the plain-data check.
+      **Acceptance:** A26, A27.
+      **Done (2026-10-25):** `src/config/` (design §1, §7). `entries.ts`: `defineConfig` (returns its argument),
+      `coreEntry` (the id `core`, `CORE_ENTRY_ID`, and the build's core version), `versionEntry` (a version the build
+      does not carry: a `CoreVersion` for `core`, a semver string for a module; its `config` typed as plain data and
+      absent for a scheduled revision), `moduleEntryBuilder`, and the types `Entry`, `UmbraConfig` and `CoreSettings`
+      (CF-4's table: a public process's fields with `node`, or a private one's with `instanceId`, each excluding the
+      other's); every builder returns a new plain entry — its own id and version, every other field given passed
+      through for task 4.2 to refuse, a field that is `undefined` left out. `build.ts`: `buildCoreVersion()`
+      (`{ umbradb, ledgers }`), with `UMBRADB_VERSION` a constant held equal to `package.json` (the browser cannot
+      read the file) and no ledger version until tasks 12.1–12.2. `defineModule` (`src/modules/declaration.ts`) adds
+      the module's `entry` builder to the declaration it returns, a non-enumerable, read-only property typed by
+      `z.input` of its `configSchema`, so validation and copies see the declaration unchanged; a frozen declaration
+      gets a `TypeError`. `plain-data.ts`: `plainData(value, file?)`, CF-1's definition as fourteen rules checked at
+      each place, depth first in property order (`PLAIN_DATA_RULES`: an empty array slot, a property of an array
+      besides its elements, a symbol key, a non-enumerable property, a getter or setter — never called —,
+      `undefined`, a function, a bigint, a symbol, a non-integer, a negative integer, an integer above 2^53 − 1, a
+      class instance, a cycle), refusing with `not-plain-data` and `details { path, found, file? }`
+      (`entries[1].config.onError`; `["feed-url"]` for a key that is not an identifier; `""` for the default export)
+      and returning a deeply frozen copy (−0 as 0, a key `__proto__` kept as data). `load.ts`: `loadConfig({ file?,
+      cwd? })` — `umbradb.config.ts` in the working directory by default, imported (on Node.js through its type
+      stripping), its default export checked and returned as `{ file, data }`; `invalid-configuration` with
+      `details.reason` `file-not-found`, `load-failed` (the cause and its `errorCode`; Node.js's refusal of an `enum`
+      adds "erasable TypeScript only") or `no-default-export`. One code joins `ERROR_CODES`, `not-plain-data`
+      (already in design §11). `docs/issues/00012` closed: MD-2's validation refuses a user module whose id is `core`
+      with `reserved-prefix`, and MD-2's text and A21 name the case. Tests, seen failing first (`tsc` exit 2, 41
+      lines: the `src/config/` modules missing, 12 `@ts-expect-error` lines unused, `entry` missing on declarations,
+      `not-plain-data` not an `ErrorCode`; three suites failed to load; the compiler test found `Cannot find module`;
+      A21's `core` row accepted): `test/config/plain-data.test.ts` (A26's seven values, each in a configuration file
+      loaded by `loadConfig`, with code, path, found and words; 19 more values, one rule each; paths; accepted values
+      and the frozen copy; a getter never read; its committed negative control: the check without one rule fails
+      exactly that rule's rows), `test/config/builders.test.ts` (A27: `@ts-expect-error` on a misspelled core field,
+      a wrong field type and a module `entry` given another module's settings — each shown needed, its error the
+      intended one on its line — and the committed negative control, a builder typed loosely that accepts all three;
+      the builders at run time), `test/config/typed-config.test.ts` (the TypeScript compiler on a configuration file:
+      each fault at its line with its words, the corrected file clean), `test/config/load.test.ts` (the loader; and in
+      a plain Node.js process, the loader bundled with esbuild: erasable TypeScript loads, an `enum` is refused), and
+      `test/modules/validation.test.ts` (A21's `core` row). 97 wrong variants (a scratch runner outside the clone): 90
+      caught on the first run; the 7 survivors were gaps — array properties named like elements (`"01"`, `"1.5"`), a
+      getter read, and four in the types (`node` and `instanceId` required; the exclusions, which only an object built
+      first exercises) — closed by tests; on the final sources 101 of 101 are caught (4 variants added for the other
+      exclusions), none equivalent.
+      **Pending:** "startup refuses" through the runner's refused state (task 5.x, which calls the loader); the
+      entries' shape, the settings schemas, the `core` fields' kinds, defaults and validation, and the redaction
+      (4.2); the history, the effective stops for the graph and the version check (4.3); `umbradb config check` and
+      `--config` (4.4); the ledger versions of the core version (12.1–12.2).
+- [x] 4.2 Schema validation with kinds, defaults and the `core` fields of CF-4; secret redaction helper.
+      **Acceptance:** A28; A29 (completed in 8.1).
+      **Done (2026-10-25):** `src/config/` (design §7). `core-settings.ts`: `PUBLIC_CORE_SCHEMA` and
+      `PRIVATE_CORE_SCHEMA`, CF-4's table as zod 4 objects strict at every depth, each field's kind on its outermost
+      schema and its default (`ledgerSources` each `vendored`, `sweep` `on`, `retainStates` 0, `listen.admin`
+      `0.0.0.0:8081`, 600, 64, 30000, no lockstep instance, 30000, 30000, 60000, 3, false, false; `testKeys` a secret,
+      default none); `genesisHash` required with `custom` and refused with the four known networks; hashes 32 bytes,
+      byte values `0x` lowercase hex (`hexBytes`, `hashHex`); addresses `host:port`; `apiReadTimeoutMs` from 1 to
+      2,147,483,647; `CORE_VERSION_SCHEMA`; the builders' `CoreSettings` held equal to the schemas' input types by a
+      type test. `validate.ts`: `validateConfig({ config, declarations, side })`, fourteen rules (`CONFIG_RULES`) each
+      reporting every violation at once as `invalid-configuration`, `details { file, reason: "invalid-entries",
+      findings }`, each finding with its path (`entries[1].config.pollMs`), its entry `{ index, id, start }`, its field
+      and a message that never holds a setting's value: the top level `{ entries }`; each entry an object with no
+      unknown property, an id of `core` or of a core or user module (a backbone part's refused), heights with `stop ≥
+      start`, a semver version or a core version, an object `config`, required for the build's version; `(id, start)`
+      once; a `core` entry; no lone UTF-16 surrogate (the history could not hash it); for a revision of the build's
+      version, no setting its schema lacks (a key check against `schema.shape`, since `z.object` strips unknown keys;
+      the other side's `core` fields named as such; a likely misspelling suggested), the schema's own `safeParse` (its
+      messages and errors redacted) and settings that stay plain data. It returns every revision with its parsed
+      settings (defaults applied), kinds and data fields, and S; a `versionEntry` revision is not validated against this
+      build's schema. `entriesAtCursor(checked, cursor)` (`CURSOR_RULES`) refuses a scheduled `versionEntry` carrying a
+      `config` and an earlier one without its recorded `config`, and places each revision (`started`, `scheduled`).
+      `redact.ts`: `configRedactor(checked)` (`text`, `settings`), `redactor`, `redactorWith`, `secretStrings`,
+      `REDACTED`: each string of a `secret` field, and the password of every URL in the other fields, hidden as written,
+      decoded and in each encoding (`SECRET_PARTS`, `SECRET_ENCODINGS`), URL userinfo and credential query parameters
+      in any text (`TEXT_PATTERNS`); `settings` shows a `secret` field, or one of unknown kind, as `[redacted]`.
+      `plain-data.ts`: `samePlainData` and `pathOf` exported. Module guide: "Settings". No code added to
+      `ERROR_CODES`. Q102 raised (not blocking: which `core` revision's operational fields a process uses).
+      Tests, seen failing first (`tsc` exit 2, 37 lines: the three new modules missing; the three new suites failed to
+      load):
+      `test/config/validate.test.ts` (A28's table of 61 rows, one rule each, through `validateConfig`, checking code,
+      details, path, entry, field and words; the defaults; kinds and data fields; the output; CF-3's `versionEntry`
+      scenarios; 4 cursor rows; no secret in a refusal; a file through the loader; the committed negative controls — the
+      validation without one rule loses exactly that rule's findings, row by row, and zod's own parse accepts the
+      misspelled setting the validation refuses), `core-settings.test.ts` (CF-4's table, written out, against both
+      schemas: kinds, defaults, required fields; the formats; the type test), `redact.test.ts` (A29's helper half: the
+      password of a `database` URL in none of its six forms in `/config`'s settings or in eight texts built from the
+      setting; URL credentials in any field and text; the committed negative control — without one part, encoding
+      or pattern, exactly the texts that need it leak), `plain-data.test.ts` (`samePlainData`). 177 wrong variants (a
+      scratch runner outside the clone): 168 caught on the first run; of the 9 survivors 8 were gaps — the private
+      schema's genesis rule and strictness, heights given without the plain-data check, a surrogate pair taken for a
+      lone surrogate, the first rather than the closest suggestion, an inherited key in `samePlainData` and the kinds, a
+      URL password not decoded — closed by tests; on the final sources 176 of 177 are caught, the survivor equivalent
+      (an unknown setting's value never reaches the schema, so no message to redact can hold it).
+      **Pending:** "startup refuses" through the runner's refused state, and which `core` revision's operational
+      settings the process uses (task 5.x, Q102); the history — a `versionEntry` equal to or differing from its
+      recorded row, a scheduled one recorded with id, start, stop and version, an entry above the cursor re-recorded —,
+      effective stops and overlapping revisions, `missing-entry`, the version check and CF-9's development opt-in (task
+      4.3); `umbradb config check` (task 4.4); `/config`, `/status` and the logs through the redaction (A29, tasks
+      8.1–8.4 and 5.x); `ledgerTable`'s default, the built-in table (task 12.2).
+- [x] 4.3 `core-chain`'s configuration history: revisions, future-only comparison, `data_hash`, the version check, the
+      development opt-in.
+      **Acceptance:** A30, A31, A32, A33, A34.
+      **Done (2026-10-25):** `src/config/history.ts` (pure), `src/backbone/core-chain/history.ts` (the table),
+      `src/config/process.ts`, `src/config/database.ts` (design §7, §10). `core_chain.config` is created by
+      `core-chain`'s migration `001` (`CORE_CHAIN_MIGRATIONS`, as the login; design §10's owner): key `(entry_id,
+      start)`, `stop` null when absent and always for `core` (a `CHECK`), `version` text, `data` `jsonb` and `data_hash`
+      32 bytes, both null for a scheduled revision (CF-3: id, start, stop and version only) and otherwise both present
+      (a `CHECK`); module roles read it, none writes it. A revision's row (`rowOf`): its stop as written, its version (a
+      module's semver; the core version's canonical JSON, `canonicalJson`: RFC 8785 on plain data, keys by UTF-16 code
+      units), its data fields (the build's version's parsed `data` settings, defaults applied; an earlier
+      `versionEntry`'s `config` as written) and `dataHash`, SHA-256 of their canonical encoding (DT-1). Effective stops
+      (CF-5): the next revision's start − 1, or the revision's own stop when lower (a gap, then a new start MD-4
+      checks); an own stop at or above the next start is superseded; the core's stop bounds nothing. `checkHistory({
+      config, cursor, declarations, history })` places the entries (`entriesAtCursor`), takes the process's `core`
+      revision (`processCoreEntry`: the latest of the build's version, Q102 resolved A (owner); none →
+      `invalid-configuration`, `reason: no-build-core-revision`) and runs `HISTORY_RULES`, refusing with the first code
+      that has findings, every finding of it at once (`details.findings`, each with its path, entry, field, message and
+      `about`, never a setting's value): `missing-entry` (rule `listed`: a recorded `(id, start)` the file omits,
+      `details.missing`; CF-5), `changes-past` (`recorded`, `version`, `data`, `stop`: an entry at or below the cursor
+      not recorded, or differing in its version, a data field at any depth, or a module's stop unless both stops are
+      above the cursor — no stop counts as above it, `stopChangeAllowed`; CF-6), `upgrade-required` (`build-version`:
+      the revision covering cursor + 1, S on a new database, not of the build's version; `details { height, entries: [{
+      id, start, needed, build }] }`; CF-8), `development-opt-in-required` (`sweep-off`: a `core` revision with `sweep:
+      "off"` running above the cursor without the opt-in, `feature: "sweep-off"`; CF-9). It gives `graphEntries` (every
+      module revision with its effective stop; `graphInputOf` adds S, the opt-in and the cursor for `resolveGraph`),
+      `committedVersions` (DB-10, from the recorded rows over S..cursor) and the `writes`: every entry above the cursor
+      that differs from its row or has none, and a module's stop changed above the cursor. The runner calls it before
+      `resolveGraph` and `startDatabase`, so every refusal comes before any migration (A33); `core-chain`'s
+      `on-start-db` calls `recordHistory(w, input)`, which reads the rows in its own transaction, checks again and
+      records the writes there (CF-6: one transaction). `openConfiguredDatabase` (`databaseOptions`) opens what
+      `database` names — `pglite:memory`, `pglite:<directory>`, a PostgreSQL URL — with the revision's
+      `developmentOptIn` (PGlite refuses without it, task 2.5's `openPglite`, reused) or `fullPageWritesOffAllowed`.
+      `ERROR_CODES` gains `missing-entry`, `changes-past`, `upgrade-required` (design §11 had them). Q103 raised (not
+      blocking: CF-5 refuses omitting a recorded entry above the cursor too; shipped A, CF-5 as written). Tests, seen
+      failing first (`tsc` exit 2, 28 lines: `src/config/history.js`, `process.js`, `database.js` and
+      `src/backbone/core-chain/index.js` missing, and the implicit `any`s that follow; the four suites failed to load,
+      `Cannot find module`): `test/config/history.test.ts` (CF-7's row, canonical JSON and `data_hash` against CBOR
+      written by hand; CF-5's effective stops, `revisionAt` and a module that cannot start mid-chain continuing at its
+      later revision — the gap as the control; A30's `missing-entry`; A31's table of 15 refusals and 13 acceptances with
+      what each records; A28's renaming upgrade; A33's newer and older builds of a module and of UmbraDB, S on a new
+      database, the boundary restart, the core's operational stop; DB-10's committed versions; Q102 A; CF-9's sweep; the
+      caller's errors; the committed negative controls: each rule left out accepts exactly its cases, stops compared
+      strictly refuse exactly the stop allowance's cases, operational settings recorded refuse exactly the operational
+      ones), `history.property.test.ts` (A32, seed 20261025: `data_hash` independent of property order at every depth
+      and changed by any value; the controls: a hash in written order fails the first, a hash of the keys the second),
+      `development-opt-in.test.ts` (A34 through configuration files: PGlite with and without the opt-in, nothing
+      created; a development-only module through the graph; `sweep: off`; Q102 A's opt-in), `history-database.test.ts`
+      (PostgreSQL 18.6 and PGlite 0.5.10, through a startup standing in for the runner's, `history-startup.ts`: the
+      table's columns, checks, owner and privileges; the rows recorded in one transaction; A31's refusals changing
+      nothing, a stop raised above the cursor, a revision above it recorded, the recording rolled back with its
+      transaction and comparing what that transaction sees, operational changes leaving every row and its `xmin`, the
+      core's stop raised or removed at cursor 10; A30; A28's history half; A33 adding no `core_chain.migrations` row
+      and, as its committed negative control, the version check after the migrations adding `m/002`; `requires-resync`
+      from the history). 110 wrong variants (a scratch runner outside the clone): 98 caught on the first run; the 12
+      survivors were gaps — a revision superseded before S counted for DB-10, `(id, start)` keys run together, nested
+      data fields, a sweep-off revision ending at the cursor, a module's own `sweep` setting, the order of
+      `historyFindings`, `upgrade-required` before the opt-in, a cursor at S, an above-cursor revision changing only its
+      stop or its version (also in the table), the graph's cursor — closed by tests; on the final sources 110 of 110 are
+      caught, none equivalent.
+      **Pending:** "startup refuses" through the runner's refused state, "processing continues" past a raised core stop,
+      the cursor from the `blocks` table and the operational settings in use (tasks 5.x, 5.3, 10.2: `processCoreEntry`);
+      `core-chain`'s declaration calling `recordHistory` (10.2); `umbradb config check --database` (4.4); `/config`
+      showing a `versionEntry`'s settings once checked (8.4); the ledger versions in the core version (12.1–12.2);
+      private backups under the opt-in (15.x).
+- [x] 4.4 `umbradb config check` and the `umbradb` command.
+      **Acceptance:** A35, A6.
+      **Done (2026-10-25):** `src/cli/` (design §1, §7, §12): `main.ts`, the package's `bin` `umbradb`
+      (`dist/cli/main.js`, a node shebang; in `package.json` and the lockfile's root entry), running `runMain`;
+      `command.ts` — `runCommand` over `COMMANDS` (`run`, `config`, `backup`, `restore`), arguments by Node.js's
+      `util.parseArgs` (no dependency), the usage (design §12's forms, the exit statuses: 0 passed, 1 a check failed or
+      could not be completed, 2 the usage, 3 not available in this build). No command, an unknown one (`sync`, 0.9.5's
+      archive sync, among them) or a wrong argument of `config check` prints a one-line reason and the usage on stderr
+      and exits 2; `--help` or `-h` alone prints it on stdout and exits 0; `run`, `backup` and `restore` are recognized
+      and exit 3, "not available in this build", whatever their arguments, until tasks 5.x and 15.x replace their
+      entries; a `--database` value (once, a value, the `database` setting's format, not `pglite:memory`) is never
+      echoed, and any argument a message repeats has its URL credentials hidden. `config-check.ts` — `configCheck`
+      runs three checks (`CHECK_STEPS`) and reports every finding of each with its path: the type check
+      (`type-check.ts`: the TypeScript compiler — `typescript`, a runtime dependency since task 0.1, loaded when a file
+      is checked — with `noEmit` and fixed options, those of a Node.js ES module under type stripping: `NodeNext`,
+      `erasableSyntaxOnly`, `verbatimModuleSyntax`, `allowImportingTsExtensions`, `strict`, `skipLibCheck`; a `.ts` file
+      under a `package.json` without `type` read as an ES module, as Node.js detects it; each diagnostic at
+      `file:line:column`, a package's left out); the configuration (the loader, which runs the operator's code, Q44;
+      the validation, every finding at once; the process's `core` revision, Q102); and, with `--database` only, the
+      history (`database.ts`: the cursor and `core_chain.config` in one read-only read — PostgreSQL through a read
+      connection, no writer lock, so beside a running process; PGlite under the file's opt-in, its directory's lock
+      taken, a directory without `PG_VERSION` checked as a new database and not created —, then `entriesAtCursor` and
+      `historyFindings`, every finding of every code). Without `--database` no database is opened and the report says
+      the history checks were not run. The side comes from the file (`inferSide`); the modules are the command's
+      build's (`build-modules.ts`: `core-block-commit`, `core-digest`; no user module, MD-1), a host program passing
+      its own to `configCheck` (question Q106). Every text is redacted (`configSecrets`, new in
+      `src/config/validate.ts`; the `--database` value; the URL patterns). Design §7's bullet and §12's command say
+      what was built; the `src/cli/**` coverage floor (90/85) is added and `main.ts`, run only as a process, left out
+      of coverage; the pack smoke test runs the installed command (oracle 4b). Tests, seen failing first (`tsc` exit 2,
+      29 lines: `src/cli/command.js`, `config-check.js`, `build-modules.js` missing and the implicit `any`s that
+      follow; the four suites failed to load, `Cannot find module`; oracle 4b failed with no `umbradb` in
+      `node_modules/.bin` while `bin` was left out): `test/cli/command.test.ts` (A6 in this process: the usage and exit
+      2 for no argument, `sync` and 15 other commands, `--help`, the four commands recognized, `config check`'s 9
+      argument errors, no `--database` echoed, `runMain`, the `bin` entry; the committed controls: a command table
+      recognizing `sync` fails A6's check, one printing the usage for `run` fails "recognized"),
+      `config-check.test.ts` (A35 without `--database`: a valid file, a type error and a schema error printed with
+      their paths, CF-10's scenario found by both checks, CF-1's refusals, an `enum`, the module formats, the options,
+      local and package files, the side, a host's declarations, no database opened — a TCP listener counting 0
+      connections, a PGlite directory not created —, no secret printed; the committed controls: a check stopping at
+      its first finding fails "prints both", one without the redaction prints the `--database` password),
+      `config-check-database.test.ts` (A35 with `--database` on PostgreSQL 18.6 and PGlite 0.5.10: `changes-past`, exit
+      1, the database unchanged — every table's row count and the rows of `core_chain.migrations` and
+      `core_chain.config` with their `xmin` —; the same file passing; every finding of every code; CF-3's cursor rules;
+      new, empty and uncommitted databases; the opt-in; a held PGlite directory; PostgreSQL beside a running writer;
+      the committed control: recording the history, or running the migrations, changes the snapshot),
+      `umbradb.test.ts` (the command bundled with esbuild and run by Node.js in a child process: A6; A35 without and
+      with `--database` on both backends; Node.js's own `enum` refusal; the module formats; a PGlite directory another
+      process holds). Wrong variants (a scratch runner outside the clone): 127 of 144 caught on the first run; of the 17
+      survivors one was redundant code (the type finding's message repeating its path; removed) and 16 were gaps — a
+      URL typed as a command, `--help` with more arguments, commands named like `Object.prototype` members, `config`
+      alone, the backends' own refusals shown as they are, the report's findings redacted, `strict`, `skipLibCheck`,
+      the target's library, declaration and `.cts` files' format, a directory below a CommonJS package, a package's
+      TypeScript sources, a directory as the file, an empty PGlite directory — closed by tests; on the final sources
+      143 of 143 caught, none equivalent. Question Q106 raised (not blocking); issue
+      `docs/issues/00014-history-start-above-cursor-throws.md` recorded (OPEN).
+      **Pending:** `umbradb run` (tasks 5.x) and `backup`, `restore` (15.1, 15.2); an operator's user modules in the
+      command (Q106); `core-chain`'s declaration and the core modules in the command's build (10.2, 11.x–13.x); the
+      §12 surface and the pack smoke's rewrite with §12's imports (17.3); a file whose S is above the cursor refused
+      with a code (the issue).
+- [x] 4.3a The owner's answer Q103 B: a recorded entry that starts above the cursor may be omitted or moved; its history
+      row is deleted in the transaction that records the configuration.
+      **Acceptance:** A30 (as amended).
+      **Done (2026-10-26):** `src/config/history.ts`: `omissionAllowed(row, cursor)` — a recorded row the configuration
+      omits starts above the cursor, or nothing has committed (a null cursor) — is CF-5's allowance, replaceable through
+      `HistoryOptions.omissionAllowed` like CF-6's two; the `listed` rule refuses `missing-entry` only for an omitted
+      row starting at or below the cursor (its message and the refusal's say so and cite Q103); `HistoryCheck.deletes`
+      holds the omitted rows above the cursor, as read, never one at or below it even with the `listed` rule left out.
+      A move is an omission and a new entry: an entry is its `(id, start)` (CF-5), so moving `(m, 50)` to 100 deletes
+      `(m, 50)` and records `(m, 100)`; moved to cursor + 1 or above it is accepted, to the cursor or below refused
+      `changes-past` (`recorded`: the past was processed without it), nothing deleted. `recordHistory`
+      (`src/backbone/core-chain/history.ts`) deletes the check's deletes by key, then records its writes, in the one
+      transaction of `core-chain`'s `on-start-db` (the two never share a key). `design.md` §7 "History" says so. Tests,
+      seen failing first (`tsc` exit 2, 18 errors: `deletes`, `omissionAllowed` unknown; 38 pure and 10 database tests
+      failing, each above-cursor omission refused `missing-entry`): `test/config/history.test.ts` (A30's refusals at a
+      cursor at or above the omitted start; Q103 B — an omission, CF-5's moved scenario for a revision and a scheduled
+      one, Q103's slipped upgrade, the boundary at the cursor and cursor + 1, a move into the past, every kind of row at
+      once, a null cursor; four omission rows in CF-6's acceptance table), `history-database.test.ts` (both backends:
+      the boundary, only the omitted row deleted, the moved scenario, both writes rolled back with the caller's
+      transaction, a failure between the delete and the insert leaving the history as it was),
+      `test/cli/config-check-database.test.ts` (every history finding at once: an omitted row at or below the cursor,
+      none for one above it). Committed negative controls: omissions refused (the rule before Q103) refuse exactly the
+      omission cases; the delete committed outside the recording transaction fails the atomicity test. Wrong variants
+      (a scratch runner outside the clone): 22, 20 caught on the first run — a gap (a `DELETE` by id from the start on,
+      closed by a test) and an equivalent one (the deletes after the writes) — and 21 on the final sources, the
+      equivalent one left.
+- [x] 4.4a The owner's answer Q106 B: the configuration file's exported `modules` are the build's user modules for
+      `umbradb config check` and `umbradb run`, next to UmbraDB's own.
+      **Acceptance:** A152.
+      **Done (2026-10-26):** `src/config/load.ts`: `loadConfig` returns the file's `modules` export as
+      `LoadedConfig.modules` (the declarations as given, in the file's order, frozen list, not checked there; empty
+      without the export; a `modules` export that is no array refuses, `invalid-configuration` `modules-not-a-list`).
+      `src/cli/build-modules.ts`: `commandBuild(user, { side })` — a public process's backbone (`core-chain`,
+      `core-block-fetch`, `core-block-commit`, `core-digest`, the admin parts) and core modules, or a private one's
+      (`core-chain`, one `privateIntake()`'s private backbone, the admin parts; no core module) — with the file's
+      modules as its user modules, after UmbraDB's own; `buildDeclarations(user, { side })` validates it (MD-2: a module
+      listed twice `duplicate-id`, a user module with an id of UmbraDB's own `reserved-prefix`, an element that is no
+      declaration `invalid-declaration`). `umbradb config check` builds its declarations from the loaded file unless a
+      host program gives its own; a declaration fault is the configuration check's finding at `modules[<index>]` (with
+      the field), the entries then not validated; the unknown-module finding now says the module is neither UmbraDB's
+      nor in the file's `modules` list (`src/config/validate.ts`). **`umbradb run` is wired here** (no earlier task did
+      it; 5.3's, 5.4's, 8.1's, 8.1a's and 10.3's notes addressed it to 4.4): `src/cli/run.ts` loads the file once
+      (`--config`, default `umbradb.config.ts`; `run`'s arguments parsed in `src/cli/command.ts`, a wrong one exit 2)
+      and calls the runner's `startProcess` with its data, the command's build with the file's modules, the side from
+      the file (public: `nodeSourceOf`; private: the intake's source), the admin endpoints by default (Q128 B), the log
+      on stderr; a file that cannot be loaded is given to startup as the file, which refuses it as itself; the first
+      SIGTERM or SIGINT stops it (RN-13), and it exits once closed — 1 when it ended `refused` or `failed`, else 0. For
+      a refusal before the validation (logged by the process by its code only) the command adds `config check`'s
+      findings of the step that refused, redacted, one `umbradb run: <path>: <message> [<code>]` line each. Design §7
+      (the loader, `config check`'s modules, a `umbradb run` bullet) and §12; the module guide's "Running a module with
+      the `umbradb` command". Tests, seen failing first (`tsc` exit 2, 12 errors: `runProcessCommand`, `commandBuild`,
+      `LoadedConfig.modules`, `userModules` missing; 29 of the new and changed tests failing, stats's entry refused as
+      no module of the build): `test/cli/modules.test.ts` (A152's `config check` half: the entry checked against stats's
+      schema, a wrong, an unknown and a missing setting with their paths, the type check's TS2322 too; a module neither
+      exported nor shipped refused naming it; the merge rules; the private build; a host's declarations used as given;
+      the committed negative control: a check ignoring the file's modules refuses stats's entry), `test/cli/run.test.ts`
+      (A152's `run` half on PostgreSQL 18.6 and PGlite 0.5.10: in this process and through the bundled command in a
+      child process against a tape node, stats writes every height from S to the head, `/status` shows it, SIGTERM exits
+      0; a file listing stats without exporting it refused naming it, up and refused until SIGTERM, exit 1; a halt exit
+      1; SIGINT; the default file; a file that cannot be loaded, refused as itself (exit 1); a private file; `run`'s
+      arguments; the refusal lines and their redaction; the committed negative control: a run ignoring the file's
+      modules is refused), `test/cli/command.test.ts`, `umbradb.test.ts`, `config-check.test.ts` and the pack smoke's
+      oracle 4b updated for the wired `run` (the CLI's child-process bundle now has the admin worker beside it,
+      `test/cli/cli-fixtures.ts`). Wrong variants (a scratch runner outside the clone): 50, 41 caught on the full run;
+      of the 9 survivors 5 were gaps (the private build's backbone and modules, a private file's check, a halt's exit
+      status, the refusal lines' redaction), closed by tests, and 4 equivalent (a declaration fault's origin, the file
+      given as data or as a file under Node.js's module cache, the working directory of a file that failed to load, the
+      signals' listeners removed again after the signal removed them); 46 of 50 caught on the final sources. No question
+      raised; no issue recorded.
+      **Pending:** `configCheck` and the `modules` export in §12's surface (17.3); `core-chain`'s and the core modules'
+      declarations as they come (10.x–13.x, `build-modules.ts`); the ledger worker's entry importing the file's modules
+      (MD-1, §5.5; 12.3); a private process's history check with `--database` (its cursor is
+      `core_private_source.cursor`, not `core_block_commit.blocks`: issue
+      `docs/issues/00029-private-config-check-cursor.md`, recorded with task 14.2).
+
+- [x] 4.5 The owner's answers Q167 A and Q165 B: `database` and a private process's `publicDatabase` given as parts
+      (`{ kind: "postgres", host, port, user, password, name, ssl }`, `{ kind: "pglite", path }`, `{ kind:
+      "pglite", memory: true }`), a connection string refused; only `password` secret, the other parts shown in
+      `/config` and the log; `umbradb config check --database` without a value, reading the file's own database; a
+      process or a restore that creates a PGlite directory logs it, naming the path. Every configuration the code,
+      the tests, the browser page and the docs build moves to the parts; design §7, §8 and §12, the operator guide.
+      Owner decision Q166 A: the browser page passes no `updateHash`. `ssl` reaches the PostgreSQL driver: `require`
+      by default, `verify-full` checking the server's certificate and host name, `disable` only when set (the threat
+      model draft's gap 2: no TLS option is passed today). Owner decision Q182 B: a loopback host (`localhost`,
+      `127.0.0.1`, `::1`) or a socket directory defaults to `disable`. Owner decision Q183 A: `verify-full` uses
+      Node.js's built-in roots, no CA setting. Owner decision Q175 A: `core.transportReader` (`{ user, password }`),
+      required on PostgreSQL with `listen.transport`, refused on PGlite; the transport's reads run on its own pool;
+      startup refuses `transport-reader-can-write` (a new refusal code: design §11 and the registry) for a login that
+      could write; task 14.2b's gate stays on both backends; the operator guide says how to create that login.
+      **Acceptance:** A170, A177; A166 and A35 as amended.
+      **Done (2026-10-28):** `src/config/database-parts.ts` (the parts' types, `defaultSsl`: `disable` for `localhost`,
+      `127.0.0.1`, `::1` and a `host` starting with `/`, else `require`, Q182 B; `databaseText`, how the log names a
+      database without its password); `src/config/core-settings.ts`: `databaseSetting()` (a discriminated union on
+      `kind`, typed by hand as the parts' union; a string refused as a connection string, the message never repeating
+      it; `port` 5432; PGlite exactly one of `path` and `memory: true`) for `database` and `publicDatabase`, both
+      operational; the public `transportReader` (`{ user, password? }`, strict, operational) and its rule — required
+      with a PostgreSQL database and `listen.transport`, refused on PGlite, each at `entries[i].config.transportReader`;
+      `src/config/redact.ts`: a `password` part inside an operational field is secret (`SECRET_PART`: searched for in
+      text, `[redacted]` in `/config`), so the other parts are shown; `src/db/postgres.ts`: `PostgresOptions.connection`
+      (the parts) replaces the URL, and the URL-parameter refusal goes with it (no URL is left to carry a startup
+      parameter); `driverConnectionOptions` maps the parts to `postgres` 3.4.9's options as its source reads them
+      (`src/index.js:438-479`, `src/connection.js:265-289`): host and port as one-element lists (its text form splits a
+      host at `:`), a socket directory as `path`, `disable` as `false` (the text would ask for TLS), `require` as
+      `"require"` (TLS, `rejectUnauthorized: false`), `verify-full` as `{ rejectUnauthorized: true, host }` merged into
+      `tls.connect` (Node.js's built-in roots, the host name checked; Q183 A); a negative control's `driverOptions`
+      seam; `src/backup/backup.ts`: `pg_dump` gets the parts as libpq's environment (`pgDumpEnvironment`: `PGHOST` …
+      `PGSSLMODE`, `PGPASSWORD`, `PGSSLROOTCERT=system` for `verify-full`), the caller's own `PG*` connection variables
+      dropped, no URL on its command line; `src/config/database.ts`, `src/cli/configured.ts`: a PGlite directory created
+      is said, naming the path as configured (`createPgliteDirectory` returns how many missing parents it made;
+      `createdDirectoryLine`): `created a new PGlite data directory <path> (and <n> missing parent directories)` in the
+      process's log and on the restore's standard output (Q165 B); the process logs `database: <databaseText>` once its
+      database opened; `umbradb config check --database` takes no value (`src/cli/command.ts`: `--database=<x>` a usage
+      error) and reads the file's own `core` revision's database (`src/cli/config-check.ts`, `src/cli/database.ts`), a
+      PGlite database in memory a finding at `--database`; `src/private/transport-reader.ts` and `src/runner/process.ts`
+      (`#transportReads`): on PostgreSQL with `listen.transport` the transport's reads (`read`s and `report` checks) run
+      on a read pool logged in as `transportReader`, opened after the migrations and closed with the transport; before
+      the transport listens startup reads the login's facts on that pool and refuses `transport-reader-can-write`
+      (`details { user, found }`) for a superuser, `CREATEROLE`, `CREATEDB`, `BYPASSRLS`, a member of `database`'s
+      login, or `CREATE` on the database or a public schema, a write privilege on a public table, view or foreign table,
+      `USAGE` or `UPDATE` on a public sequence; logs `transport reads as <login>, a login that may only read`; seams
+      `transportReads` (A177's gate off) and `transportReaderCheck` (its negative control); the code in `ERROR_CODES`,
+      `REFUSAL_CODES`, design §11 and the registry; the browser build (`browser/src/configuration.ts`'s `databaseOf`
+      gives parts; `browser/src/db/database.ts` takes them; Q166 A: no `updateHash`, unchanged). Every configuration the
+      tests, the pack smoke, the browser fixtures and the docs build moved to the parts (`test/db/connection.ts`:
+      `partsOfUrl`, `connectionOfUrl`, `ssl: "disable"` for the test servers). Design §7, §8 (**The transport reader**),
+      §11; the operator guide ("The database"); the module guide's example; the threat model's gaps 1 and 2 and its
+      "after task 4.5" passages as built; the changelog's 0.10.0 configuration bullet. Tests, seen failing first (`tsc`
+      59 errors, all the missing API and the string setting): `test/config/database-parts.test.ts` (A170's schema half,
+      A177's `ssl` defaults, `transportReader`'s rules, the redaction; the committed negative control: a schema that
+      also takes a URL fails it), `test/config/database-parts-process.test.ts` (A170's process half on both backends:
+      `/config` and the log show every part, the password only `[redacted]`), `test/db/postgres-tls.test.ts` with
+      `postgres-tls-server.ts` (the mapping; against a PostgreSQL 18.6 container serving TLS only, its certificate made
+      at run time by `openssl`: `require` encrypted per `pg_stat_ssl`, `disable` refused (28000), `verify-full` refused
+      for a CA outside the roots, connected once the CA is among the default roots, refused for a host name the
+      certificate does not name; the committed negative control: a mapping that drops `ssl` fails the `require` test),
+      `test/private/transport-reader.test.ts` (A177 on PostgreSQL 18.6) and its committed negative control (a check that
+      accepts a superuser lets that core start), A166's `test/config/pglite-directory*.ts` (the line naming the path;
+      the negative control's expected problems gain it) and A35's `test/cli/config-check-database.test.ts` (`--database`
+      without a value, on the file's database). No mutation pass (deferred to task 17.5 by the owner).
+
+## 5. Runner
+
+- [x] 5.1 Point dispatch and order within points; parallel waves.
+      **Acceptance:** A38.
+      **Done (2026-10-25):** `src/runner/dispatch.ts`: given a resolved range and a point, `scheduleAt` gives the parts
+      registered there in RN-3's order as waves — in series one part per wave, `writeOrder` at `on-db-write`
+      (`core-digest` last), `order` at the other points in series; at `on-fetch`, `on-parse` and `on-compute`
+      (`PARALLEL_POINTS`, checked against `design.md` §2's table) the backbone parts in series in their fixed order,
+      then the other modules in Kahn's waves restricted to the modules registered at the point, a module one wave
+      after the latest registered module on a requirement path from it, through modules that do not register the
+      point too; `startHeightSchedule` (the core's parts first when the core's entry starts, then the starting
+      modules in order, RN-9) and `stopHeightSchedule` (the stopping modules in reverse order, then the core's parts
+      in their fixed order, RN-10); `seriesOf` for an order given (startup's `on-start-api`); `scheduleAt` refuses
+      `on-start-db` (the migration runner's) and the start and stop points. `runSchedule(schedule, { contextOf,
+      invoke })` calls each callback as a method of its declaration's `points`, its module's process context first,
+      then the arguments `invoke` hands it (task 5.2's handles, block context and sink); a wave's callbacks start in
+      order and are all awaited (`Promise.allSettled`); a failure ends the point — nothing later in series, nothing
+      of the next wave, the wave's others awaited, never cancelled — and rejects with a `CallbackFailure` (point,
+      module, the error unchanged as `cause`) for the first failing part in the point's order. `design.md` §2's wave
+      paragraph says what was built; the `src/runner/**` coverage floor (90/85) is added. Tests, seen failing first
+      (`tsc`: `src/runner/dispatch.js` missing; both suites failed to load): `test/runner/dispatch.test.ts` (the
+      points' modes against design §2's table; `this`, the context and the arguments at every point; RN-3's two
+      scenarios; series and waves, transitive waits, the backbone at parallel points, each range's providers, a core
+      module; a failing callback in series and in a wave, two failures, a wave that does not settle, a failing
+      backbone part, a malformed schedule; the start and stop orders) and `test/runner/order.property.test.ts` (A38:
+      random acyclic graphs of up to 12 modules through `resolveGraph`, seed 20261025, 200 runs, against the test's
+      own oracle, with committed negative controls: ties by the order given, by Czech and by numeric collation fail
+      only the `on-db-write` order; all callbacks at once, and waits on direct providers only, fail only the parallel
+      waits; `core-digest` in its backbone place fails only "core-digest last"). Wrong variants (a scratch runner
+      outside the clone): 59 of 62 caught on the first run; of the 3 survivors one was equivalent (a filter of empty
+      waves, which never occur; removed) and two were gaps — a core module's `core-` id read as a backbone part's, an
+      unfrozen wave — closed by tests; on the final sources 61 of 61 caught. Question Q100 raised (the read
+      handles RN-4 and design §2 give `on-finalized`, `on-start-height`, `on-stop-height` and `on-key` are not in
+      `PointCallbacks`; not blocking 5.1).
+      **Pending:** the finalized loop calling the dispatch per height with the handles, block context and item sink
+      `invoke` hands each callback, and A38 through it (5.2); the process contexts shared with `migrationPart`, and
+      `on-start-api` (5.2a); which entries start and stop at a height, and their arguments (5.3); the halt on a
+      `CallbackFailure` (5.4); the slow-block watchdog around `invoke` (5.5).
+- [x] 5.2 The finalized loop over the block-source interface; `InMemoryBlockSource` with its `core-block-commit`
+      cursor table; block context and item sink; per-point handles; the chain-data envelope of module API responses.
+      **Acceptance:** A36, A37, A39, A40, A41, A49; RN-16 is covered by A75.
+      **Done (2026-10-25):** `src/runner/loop.ts`: `FinalizedLoop` processes every height from the cursor + 1 (S on a
+      new database) up to the block source's finalized head, then waits for it to rise (`waitForHead`) with no read or
+      transaction open. Per new head `on-finalized` runs once, before the head's heights, for the modules active at the
+      first of them, each callback with its own read at the cursor. Per height, through task 5.1's dispatch in the order
+      of the range holding it: `on-fetch` and `on-parse` (the block context and an item sink); `on-compute` (a read at
+      h − 1 and a sink, each callback inside its own `Database.read`, so on PGlite a `db.read` from it fails with
+      `nested-call`, and a failing statement aborts no other callback's read); one `BEGIN … COMMIT` holding every
+      `on-db-write` through `openBlockWrites` (the handles' height the cursor before h) and, before the `COMMIT`, a
+      check that the cursor is h with the block's hash; then `on-after-db-write` (a read at h, no `block` items). A
+      failure stops the loop with a `HeightFailure` (height, point, module, whether h committed); a use of a closed
+      write handle or of a kept item sink is one too, even when no callback rejects with it (kept first, named, checked
+      before each point, before the `COMMIT` and after the height's last point). `src/runner/block-context.ts`:
+      `BlockItems` — a callback's puts buffered and published when it completes, dropped when it fails, a callback
+      seeing the items published before it started; only the module declaring an item with the `block` lifetime may put
+      it, once per block; a refused put fails its callback even when caught; a put from a kept sink is reported — and
+      `revisionAt` (a block context's settings: the revision covering h). `src/runner/block-source.ts`: `BlockRef` and
+      `BlockSource` (design §3). `src/runner/in-memory-source.ts`: `InMemoryBlockSource` (a head that only rises, the
+      blocks given or a default linked chain, `waiting(above)`) and `inMemoryBlock`.
+      `src/backbone/core-block-commit/core-block-commit.ts`: the cursor table `core_block_commit.blocks` (height, hash,
+      parent hash), written first in every block by the part's `on-db-write`; `readCursor`, and `cursorHeight` for the
+      database API's committed height. `src/runner/envelope.ts`: `readChainDataView`, `chainDataHeaders`
+      (`X-Umbra-View`, `X-Umbra-Height` in decimal, `X-Umbra-Hash` in `0x`-prefixed hex), `withViewExtensions` (a
+      GraphQL response's `extensions`, `data` unchanged), `answerChainData` (503 `no-committed-height` before block S
+      commits; the code joins `ERROR_CODES`). Q100 resolved A (owner, 2026-10-25): `on-finalized`, `on-start-height`,
+      `on-stop-height` and `on-key` take a `read: ReadHandle` (`src/modules/declaration.ts`). `design.md` §3 says what
+      was built; the `src/backbone/**` coverage floor (90/85) is added. Tests, seen failing first (`tsc` exit 2, 81
+      errors: the six new modules missing, Q100's four signatures in the type test, the dispatch fixtures' arguments;
+      six suites failed to load): `test/runner/loop.test.ts` (A36, A37, A39, A40; failures and stopping; A10's and
+      A144's halves through the loop; the block context), `test/runner/catch-up.test.ts` (A41, A49),
+      `block-context.test.ts`, `in-memory-source.test.ts`, `envelope.test.ts` and
+      `test/backbone/core-block-commit.test.ts`, on PostgreSQL 18.6 and PGlite 0.5.10, with committed negative controls:
+      two heights in one transaction fail A41, waiting inside a read fails A49, a put published at once or items kept
+      for h + 1 fail A40, `on-compute` given a read at h fails A39, a loop writing a row itself fails A37. Wrong
+      variants (a scratch runner outside the clone): 150 of 162 caught on the first run; of the 12 survivors, four were
+      redundant code (the wait's stop result, which the loop's own stop check made unreachable, and a second height
+      check in the source's `block`; removed), two are equivalent (a block context built before or inside `collect`,
+      which calls its body at once; the order of the envelope's header spread, after a filter that leaves no name in
+      common) and six were gaps (a loop woken by a rising head announcing the old head again, one read shared by a
+      wave's `on-compute` callbacks, a failure after the commit that is no callback's, `HeightFailure`'s name, a header
+      name in another case, the cursor not frozen), closed by tests; on the final sources 157 of 159 caught, the two
+      survivors equivalent.
+      **Pending:** `on-start-api` (5.2a); `on-start-height` and `on-stop-height` through the loop, and the settings'
+      switch (5.3); the `halted` state, retries and RN-11's re-delivery (5.4); the watchdog (5.5); the node source
+      and IN-4's parent check (10.3); the cursor table's other columns and `duplicate-block-hash` (10.2);
+      `core-digest` through the loop (7.1, 5.x); the exports (17.x).
+- [x] 5.2a Process items (`ProcessContext.publish`) and module API registration (`ApiRegistry` mounted on `listen.api`,
+      WebSocket subscriptions, duplicate routes refused); each request's read bounded by `apiReadTimeoutMs` (DB-15).
+      **Acceptance:** A74, A75; A141's request half through a registered handler.
+      **Done (2026-10-25):** `src/runner/process-context.ts`: `ProcessContexts`, one context per module, the same
+      object in its `on-start-db` (`startDbPart`: the migration runner's part, run in the module's publishing window)
+      and at every point; `publish` only from the module's own `on-start-db`, only an item it declares with the
+      `process` lifetime, once per item for the whole process (another provider's second publish too) — any other call
+      throws and fails the callback even when caught: `on-start-db` there, `on-start-api` in `registerModuleApis`, the
+      loop's points through `LoopInput.misuses`, which `FinalizedLoop.run` watches, naming the module and the point it
+      dispatched (none while it waits); `items` a read-only view of the published items the module requires or
+      provides, from `on-start-api` on (empty before); `seal()` once every `on-start-db` ran: a late refusal, then
+      `process-item-missing` for an item a module running in this process requires (not one whose revisions all ended
+      below the cursor's range), naming the item, the modules and the providers. `src/runner/module-api.ts`:
+      `ApiRoutes` (a registry per module, closed when its `on-start-api` ends; `GET`/`POST` routes of `/` and segments
+      with `:name` parameters, a literal winning; subscription names; `duplicate-api-route` naming the route and both
+      modules), `registerModuleApis` (`on-start-api` once, in series in the startup order, for the parts active in a
+      range the process may run: a part whose revisions all ended serves no API), `ModuleApi` (each request one
+      `db.read` with `{ timeoutMs: apiReadTimeoutMs }`, the handler inside it; RN-16's envelope on every module route,
+      a GraphQL response told by its shape; JSON bodies, `bigint`s as decimal text and bytes as `0x` hex, unless the
+      handler typed its text or bytes; errors `{ error: { code, message } }` — 400 `invalid-request`, 404, 405 with
+      `Allow`, 413, 500 `internal-error` with a fixed message (the error to `onError`), 503 `no-committed-height`, 504
+      `query-timeout`; `subscribe`). `src/runner/api-server.ts`: `listenModuleApi` (`node:http` on `listen.api`, `ws`
+      subscriptions on any path: `subscribe`/`subscribed`/`next`/`unsubscribe`/`complete`/`error`; a subscriber more
+      than 1 MiB behind disconnected, so `emit` never waits; closing ends every connection) and `startModuleApi`
+      (`on-start-api` and its checks, then the listener, so a refused startup listens nowhere; none without
+      `listen.api`). `ERROR_CODES` gains `process-item-missing` and `duplicate-api-route`; `design.md` §2 and the module
+      guide's "Process items and APIs" say what was built. Questions Q104 (a subscription notification and RN-16's
+      envelope; shipped A, the value only) and Q105 (how a GraphQL response is told; shipped A, by its shape), not
+      blocking 5.3. Tests, seen failing first (`tsc` exit 2, 40 lines: the three modules missing, the two codes unknown,
+      `LoopInput.misuses` unknown; the four suites failed to load): `test/runner/process-context.test.ts` (A74 through
+      the runner's startup and loop; the rules without a database), `module-api.test.ts`, `api-server.test.ts` (A75;
+      A36/A39 with `on-start-api`; the listener's own behaviour), `api-timeouts.test.ts` (A141's request half on
+      PostgreSQL 18.6, PGlite setting neither timeout), with `process-harness.ts`, on PostgreSQL 18.6 and PGlite 0.5.10;
+      committed negative controls: contexts allowing a second publish, or one outside `on-start-db`, fail A74; a
+      registry accepting a duplicate route fails A75's duplicate checks, responses without the envelope its envelope
+      checks; a handler's read ignoring `apiReadTimeoutMs` fails A141's request half. Wrong variants (a scratch runner
+      outside the clone): 166 of 174 caught on the first run; of the 8 survivors, 3 were gaps (an address that is not a
+      string, the 413's `Connection: close`, closing with a request in flight; closed by tests), 2 unused options (the
+      subscriber buffer limit and the start's listener options; removed) and 3 equivalent; on the final sources 170 of
+      173 caught, the 3 survivors equivalent (chunks of a refused body still buffered, the request's `error` listener
+      without which Node.js swallows the error, a stopped loop that keeps watching).
+      **Pending:** the startup assembled with the configuration — `listen.api` and `apiReadTimeoutMs` from the latest
+      `core` revision of the build's version (Q102), each module's revisions, the API closed at SIGTERM — (5.3); the
+      `refused` state for `process-item-missing`, `duplicate-api-route`, a failing `on-start-db` or `on-start-api` and a
+      listener that cannot listen, and the `halted` state for a refused publish (5.4); `core-chain` publishing the real
+      process items (10.2); the browser's `postMessage` transport (16.1); the exports (17.x).
+- [x] 5.3 Revisions and settings; start and stop heights; the upgrade-boundary stop; SIGTERM; the `core` entry's
+      operational fields from its latest revision of the build's version (Q102).
+      **Acceptance:** A42, A45, A47, A48, A149.
+      **Done (2026-10-25):** `src/runner/process.ts`: `startProcess({ declarations, config, source, signal?, log?,
+      onChecked? })` returns a handle at once and starts up — the declarations validated, the configuration loaded (a
+      file, CF-1, or its data, held to CF-1's plain data) and validated, the `core` entry's operational and secret
+      fields from its latest revision of the build's version for the whole run (`processCoreEntry`, Q102: the database,
+      the node — a block source given as a function is made from that revision —, `listen.api`, `apiReadTimeoutMs`, the
+      opt-in, `followingThreshold`, `readinessLag`, the core's stop), the database opened and its writer started (the
+      durability probe's warnings logged), the cursor and the history read in one read and checked (`checkHistory`:
+      CF-5, CF-6, CF-8 before any migration), the facts handed to the backbone (`onChecked`: until task 10.2 builds
+      `core-chain`, which records the history and publishes the database read-only with them), the graph, the schema
+      plan, the process contexts with each part's revisions (`processRevisions`: a module's from its entries with their
+      effective stops and settings; every backbone part's the `core` entry's, each revision's data fields with the
+      process revision's operational and secret fields), `startDatabase`, the seal, `startModuleApi`, then the finalized
+      loop with the core's stop and the upgrade boundary (`upgradeBoundary`: the lowest start of a scheduled revision,
+      with each entry starting there, the version needed and the build's). A refusal closes what startup opened and
+      rejects `started` with its typed error; `ended` tells how processing ended (`stopped`, `signal`, `refused`,
+      `failed`). The state (`statusOf`, CORE-ARCH §4.18's part of this task): `starting`, `syncing` or `following` by
+      the lag against `followingThreshold`, `stopped` (with `upgrade-required` at a boundary), `stopping`; ready when
+      `following` or `stopped`, or `syncing` within a set `readinessLag`. `terminationSignal` (SIGTERM aborts it) and
+      `stop()`: `stopping`, the loop's signal aborted and the loop awaited — the height in progress, its transaction
+      included, finishes —, then the module API and the database closed; during startup it stops before the next step.
+      Log lines go through `configRedactor(checked).text`; a refusal before the configuration is validated is logged by
+      its code only. `src/runner/loop.ts`: `on-start-height` between `on-parse` and `on-compute` for the core's parts at
+      S and the modules a segment of which starts at h (revisions continuing each other are one segment, CF-5), each
+      with its entry and a read at h − 1; `on-stop-height` after `on-after-db-write` for the modules a segment of which
+      ends at h, in reverse order, then the core's parts at and above its stop, each with a read at h; RN-11's
+      re-delivery of the cursor's `on-after-db-write` and `on-stop-height` at every `run()` before c + 1; the loop ends
+      after its last height — the core's stop, or the height before the upgrade boundary, the lower — and at a restart
+      at or above the core's stop processes nothing; `run()` resolves with a `LoopEnd`; `LoopInput` gains `coreStop`,
+      `boundary` and an `observer` (heads read, heights committed). `src/runner/dispatch.ts`: `isBackbonePart` and
+      `entryIdOf` exported. `design.md` §2 says what was built; the module guide gains "Start and stop heights".
+      Question Q109 raised (the core's stop lowered below the cursor; shipped A, not blocking 5.4); issue
+      `docs/issues/00015-pglite-writer-worker-has-no-orphan-guard.md` recorded (OPEN). Tests, seen failing first
+      (`tsc` exit 2, 21 errors: `src/runner/process.js` missing, `isBackbonePart` not exported, the loop's new seams and
+      `boundary` unknown; the five suites failed to load): `test/runner/revisions.test.ts` (A42), `stop-heights.test.ts`
+      (A45; RN-9's and RN-10's orders and handles, a raised and a lowered core stop, failures, the re-delivery),
+      `upgrade-boundary.test.ts` (A47; the core's stop beside the boundary; the old build refused at the boundary;
+      DB-10), `process.test.ts` (A149; startup, refusals, logs, the state, the signal; `statusOf`, `upgradeBoundary`,
+      `processRevisions`, `terminationSignal`), `sigterm.test.ts` with `sigterm.worker.ts` (A48 with a real process and
+      a real SIGTERM), with `process-build.ts`, `process-backends.ts` and `sigterm-module.ts`, on PostgreSQL 18.6 and
+      PGlite 0.5.10; committed negative controls: a loop that fires `on-start-height` at a continuing revision fails
+      A42; one whose core gets `on-stop-height` before the stopping modules, and one that does not re-deliver after a
+      restart at the stop, fail A45; one that commits the boundary height, and a recording that stores the revision's
+      operational and secret settings, fail A47; a process that exits on SIGTERM without awaiting the block fails A48
+      (no stop completed; PostgreSQL counts its sessions abandoned, PGlite's `pg_control` stays in production); a
+      process taking the first `core` revision's operational fields fails A149. `loop.test.ts` and `api-server.test.ts`
+      updated for RN-9 and RN-11 (the recording module sees `on-start-height` at its start; a loop run again re-delivers
+      the cursor's `on-after-db-write`; `run()` resolves `{ kind: "signal" }`). Wrong variants (a scratch runner outside
+      the clone): 105 of 123 caught on the first run; of the 18 survivors one was equivalent (closing the module API
+      again in a refused startup, which only a stop reaches after the API opens, and the stop closes it; removed), one
+      was caught by `process-context.test.ts`, which the runner's file list left out, and 16 were gaps (the core
+      revisions out of order, a caller awaiting only `ended`, a lag within `followingThreshold`, the module API and the
+      database closed by `stop()` and before `closed`, configuration data held to CF-1, the control's backbone settings,
+      DB-10's committed versions, `on-start-db`'s height, `apiReadTimeoutMs`, a refusal releasing the database without
+      `stop()`, the logs of a failure and of a stop, `status().ended`, a misuse in a re-delivered `on-stop-height`, a
+      frozen entry), closed by tests; on the final sources 122 of 122 caught.
+      **Pending:** the `refused` and `halted` states, their codes and the process staying up after a refusal, A43, A44
+      and A46's fault tests (5.4); the slow-block watchdog around the loop's points (5.5); `umbradb run` calling
+      `startProcess` with `terminationSignal` (4.4); `core-chain` built with the runner instead of `onChecked`
+      (10.2); the node block source made from the process's `core` revision (10.3); the admin endpoints over
+      `status()` (8.x); the backup at the core's stop (15.x); the exports `startProcess`, `ProcessHandle` and
+      `ProcessState` (17.x); the required id in the manifest (18.4).
+- [x] 5.4 Failure handling and the delivery guarantees after restart.
+      **Acceptance:** A43, A44, A46.
+      **Done (2026-10-26):** `src/runner/process.ts`: the states `refused` and `halted` (`ProcessState`'s seven, AE-3),
+      not ready (AE-4), each with its reason (`ProcessStatus.reason`: a code of design §11, the height, the module and
+      the point, never a message; AE-5, AE-6), kept once the process is `stopping`. A startup refusal leaves the
+      process up in `refused`, its database closed and its writer lock released; a failure of the loop leaves it up in
+      `halted` (RN-8: before the `COMMIT` the loop rolled the height back, after it the height stays committed), the
+      module API answering at the cursor and the database open until `stop()`. A failing `on-start-db` names its point
+      and module (a `CallbackFailure`, as a failing `on-start-api`'s). The retries (IN-10, CORE-ARCH §4.6): a lost
+      database connection (`connection-lost`) or an unreachable node (`node-unreachable`), wherever startup's database
+      steps or the loop meet them, never halts or refuses — the condition `database-retrying` or `node-retrying` with
+      the attempts and the height, IN-10's back-off (1 s doubling up to the process revision's `backoffCeilingMs`), then
+      startup again from its database steps or the loop again from the cursor, which it re-delivers (so a height whose
+      transaction was lost is processed again and one whose `COMMIT` landed continues with its `on-after-db-write`);
+      the condition clears once startup completes, a height commits or the loop has nothing to process, and a stop ends
+      the wait. A writer that finds its lock taken when it reconnects halts with `writer-lock-lost`, for good. Logs:
+      `startup refused: <code>: …`, `processing halted (<code>): …`, `processing retries in <ms> ms (<condition>,
+      attempt <n>): …`. `src/runner/failures.ts` (new): `reasonOf` — the failure's own code where §11 lists it
+      (`REFUSAL_CODES`, `HALT_CODES`, bound to §11's text by a test), else `callback-error` for a callback's failure or
+      misuse, `unexpected-cursor` for the loop's cursor check, `listen-failed` for a listener that cannot listen
+      (Q115), `database-error` otherwise — and `retryOf`. `src/runner/loop.ts`: the cursor check throws
+      `UnexpectedCursor`; `afterWriteItems` (none, a map per callback; a negative control's seam).
+      RN-9's at-least-once and RN-11's re-delivery were built by 5.3; A44 and A46 add their crash tests. `design.md` §2
+      gains "Failures"; the module guide gains "When a callback fails". Question Q115 raised (refusal codes for a
+      failing `on-start-db` or `on-start-api` and for a listener; shipped A, not blocking 5.5 or 8.1); issues
+      `docs/issues/00020-reserved-word-module-ids.md` and `00021-pglite-queue-test-leaves-lock-files.md` recorded
+      (OPEN). Tests, seen failing first (`tsc` exit 2, 14 errors: `src/runner/failures.js` missing, `UnexpectedCursor`
+      not exported, `reason` and the two states unknown, `afterWriteItems` not in the loop; the suites that loaded
+      failed 40 of 44 tests — every state, reason and retry assertion, A43's table ("Cannot read properties of undefined
+      (reading 'code')": no reason) and its controls, and the A46 control needing the seam; A44, A46 and two of their
+      controls passed against 5.3's code, which built what they check): `test/runner/halts.test.ts` (A43's table in one
+      test over both backends — `on-fetch`, `on-parse`, `on-start-height`, `on-compute`, the first `on-db-write`
+      callback (`core-block-commit`, after the cursor row) and the last (after every module's row), `on-after-db-write`
+      and `on-stop-height` — and the halts' codes through the process: `truncate-not-allowed`, `database-error`,
+      `callback-error` for a kept handle, `unexpected-cursor`, a source's failure, `node-requirement`, a halt while
+      stopping), `refusals.test.ts` (AE-3's changed migration checksum, `on-start-db`, `on-start-api`, `EADDRINUSE`, a
+      refusal without a database, a value thrown that is no `Error`), `retries.test.ts` (an unreachable node, a lost
+      connection at the cursor read, a stop during the back-off, the condition clearing; PostgreSQL: the writer
+      terminated during `on-db-write` and during `on-start-db`, and `writer-lock-lost`), `failures.test.ts`
+      (`reasonOf`, `retryOf`, §11's lists, `statusOf`), `crash.test.ts` with `crash.worker.ts` and `crash-module.ts`
+      (A44 and A46 with a real process and SIGKILL, on both backends, the worker with 5.3's orphan guard);
+      `process.test.ts` and `stop-heights.test.ts` updated (a failing `on-start-db` names its point and module; the
+      halt's log line carries its code). Committed negative controls: a loop that commits h despite a failure in the
+      last `on-db-write`, and a process whose state stays `syncing` after a halt, fail A43; a restart that skips the
+      re-delivered `on-start-height` fails A44; a re-delivered `on-after-db-write` carrying block items, and one after a
+      callback of h + 1, fail A46. Wrong variants (a scratch runner outside the clone): 69, 68 caught (2 by `tsc`, none
+      hitting the run's limit), the survivor equivalent (a `HeightFailure`'s point and module preferred over its
+      cause's, which the loop always gives the same). Every file of `src/runner/` 100 % statements, branches, functions
+      and lines.
+      **Pending:** IN-10's refinement — the items published before `on-compute` kept and h redone from `on-compute`
+      (A85), the node client's own retries reported as `node-retrying` — and IN-11's cursor check after an uncertain
+      `COMMIT` (A86), §11's registry (A87) with Q115's codes (10.4); the `slow-block` condition (5.5); the admin
+      endpoints over `status()` (8.1–8.3); `umbradb run` staying up on a refusal (4.4); the required ids in the manifest
+      (18.4).
+- [x] 5.2b The owner's answers Q104 A and Q105: the module API never changes a module's answer — no envelope headers or
+      GraphQL `extensions` added, no GraphQL response told apart, a subscription's notification exactly the value the
+      module emitted; the envelope's headers and extensions stay as helpers a module calls itself; an uncaught
+      `no-committed-height` still answers 503.
+      **Acceptance:** A75 (as amended).
+      **Done (2026-10-26):** `src/runner/module-api.ts`: `ModuleApi.answer` runs the handler in its bounded read and
+      sends its answer as the handler wrote it — status, headers (its own `X-Umbra-*` among them) and body: no
+      envelope header, no `extensions`, no GraphQL response told apart (`isGraphQLResponse` and the `chainData` seam
+      removed; the protected `handle` checks the answer and returns it unchanged). The handler is called before block
+      S commits too; `readChainDataView`'s `no-committed-height`, uncaught, is answered 503 with the envelope's
+      message, not told to `onError`. Wire encoding unchanged: an object body written as JSON with its type, a typed
+      string or bytes as they are. A notification stays `{ type: "next", id, value }`, the value as emitted.
+      `src/runner/envelope.ts` (comments only): its helpers are the module's to call. `docs/module-guide.md` (the
+      answer as written, the helpers, the value of a notification), `src/runner/index.ts` and `errors.ts` (comments).
+      Tests, seen failing first (`tsc` exit 2, 4 errors: `handle` not in `ModuleApi`; 9 of 71 tests failing, the
+      envelope added, the handler not called before S, GraphQL `extensions` added): `test/runner/module-api.test.ts`
+      (the module's headers kept, its own `x-umbra-height` among them; the handler called before S, an uncaught
+      `no-committed-height` answered 503, one caught answered as written; every body — GraphQL's shape included —
+      unchanged; the helpers stating the view where a handler calls them), `test/runner/api-server.test.ts` (A75 on
+      both backends: `untouchedProblems` — a module's own status, headers and bytes, and a GraphQL-shaped body, byte
+      for byte, before S and after —, `helperProblems` over routes that call the helpers, the subscription values as
+      emitted); `halts`, `stop-heights`, `upgrade-boundary` and `api-timeouts` tests' handlers call
+      `chainDataHeaders(await readChainDataView(read))`. Committed negative controls: a module API that adds the
+      envelope's headers (`answerChainData` around the handler), and one that adds a GraphQL-shaped body's
+      `extensions`, each fail `untouchedProblems` while the real one passes. Wrong variants (a scratch runner outside
+      the clone): 12, all caught — the 503's mapping, message and reporting, the envelope's headers and extensions put
+      back, the handler skipped before S, the module's answer changed. Issue
+      `docs/issues/00024-api-413-closes-before-body-read.md` recorded (OPEN).
+- [x] 5.2c The owner's answer Q131 A: the module API sets `X-Umbra-Version` to the build's version (`UMBRADB_VERSION`)
+      on every HTTP answer on `listen.api` — handler answers, the module API's own errors (400, 404, 405, 413, 500, 503,
+      504) and the subscription upgrade response — replacing a module's own header of that name, and changes nothing
+      else; the module guide says the `X-Umbra-` prefix holds the shared headers.
+      **Acceptance:** A75 (as amended), RN-16's scenario "Every answer names its build".
+      **Done (2026-10-26):** `src/runner/api-server.ts`: the listener sets `X-Umbra-Version` (`VERSION_HEADER`) to
+      `UMBRADB_VERSION` on every HTTP answer it gives, once, a header of that name in any letter case replaced, nothing
+      else changed — every answer written through its response class `VersionedResponse` (`writeHead` in each form:
+      an object, a flat list, with a status message, implicit): the handlers' answers, the module API's own errors
+      (400, 404, 405, 413, 500, 503, 504) and the answers Node.js writes itself through a response (400 without
+      `Host`, 417 for an unmet `Expect`); the subscription upgrade's 101 (`ws`'s `headers` event); `ws`'s refusals of
+      an upgrade it cannot complete, written as `ws` writes them with the header (`wsClientError`: 405 for a method
+      other than GET, else 400, `Sec-WebSocket-Version: 13, 8` for a version it does not speak); Node.js's answers to
+      bytes that are no request (`clientError`, `unreadableAnswer`: 400, 408, 413, 431). A `100 Continue` is an
+      interim answer; WebSocket messages and closes have no headers. `ModuleApi.answer` is unchanged (another
+      transport, task 16.x, carries the answer as the handler gave it). `ModuleApiServerOptions.response` (the
+      answers' class) is the negative controls' seam. `docs/module-guide.md`: the header, and the `X-Umbra-` prefix
+      holding the shared headers; comments of `module-api.ts` and `envelope.ts`. Tests, seen failing first (`tsc`
+      exit 2, 5 errors: the three exports and the option missing; 12 of 37 tests failing, the header absent):
+      `test/runner/api-server.test.ts` — A75's "as the module wrote it but for `X-Umbra-Version`"
+      (`untouchedProblems`, `GET /raw` with its own `x-Umbra-version: 9`), RN-16's "Every answer names its build"
+      (`versionProblems` on both backends, before and after block S: handler answers, 404, 405, two 400s, 500, 503,
+      504, the 101), `VersionedResponse` in every form of `writeHead`, the listener's own and Node.js's answers, a
+      client reset in a request's head, `unreadableAnswer`, the 101 and `ws`'s four refusals, a refused upgrade
+      closed for a half-open client. Committed negative controls: a module API that sets the version on the handlers'
+      answers only (`VersionsAnswersOnly`, served by Node.js's own response) fails `versionProblems` on every error,
+      before S and after; one that sends it beside a module's own (`AppendsVersion`) fails on `GET /raw`
+      (`["9","0.9.5"]`); Node.js's own response leaves it out of every answer written through one. Wrong variants (a
+      scratch runner outside the clone): 34, 33 caught on the first run, the survivor (a refused upgrade's socket not
+      destroyed) closed by the half-open test; 34 of 34 caught on the final sources. Issue
+      `docs/issues/00025-non-websocket-upgrade-refused.md` recorded (OPEN).
+- [x] 5.5 The slow-block watchdog (Q71): the condition `slow-block` with height, point and module, cleared at the
+      commit; never a cancel or a retry.
+      **Acceptance:** A142.
+      **Done (2026-10-26):** the finalized loop (`src/runner/loop.ts`) keeps a window for each run of a height, from
+      its first callback after `on-finalized` to its `COMMIT`: from its `on-fetch`; for a height the source prepares
+      ahead (the node source's queue), from when the loop asks for it if its `on-fetch` or `on-parse` runs there then,
+      else from the first that starts (the queue's earlier work and the node's fetch are not its time); for a held
+      height's retry (10.4), from where it resumes (no back-off is in a window). While it is open the loop knows the
+      point the height is in — the last that began; `on-db-write` from the block transaction's request on (`BEGIN`, the
+      cursor check, `COMMIT`) — and the modules whose callbacks run (a callback's read waiting in PGlite's queue is its
+      module's). A main-thread timer of the process revision's `slowBlockMs` (`LoopInput.slowBlockMs`) makes the height
+      slow: `FinalizedLoop.slowBlock()` gives its height, point, first running module in the point's order (null for
+      none) and time, and `LoopObserver.slow` is told when it became slow and when its window closed (committed, or its
+      run failed: a halt, or a retry whose run is a window of its own). The process (`src/runner/process.ts`) lists
+      `{ code: "slow-block", height, point, module }` in `status().conditions` (`SlowBlockCondition`), logs `slow block:
+      height <h> is still processing after slowBlockMs (<ms> ms), in <point>[ of <module>]` and `… committed after <ms>
+      ms` or `… stopped without committing after <ms> ms`, and publishes the snapshot at once each time; `/status`
+      shows it through `core-status` with no admin change; it changes no readiness. Nothing cancels, times out or
+      retries a height. `on-finalized`, RN-11's re-delivery and the points after the `COMMIT` are in no window
+      (Q145). A callback that blocks the main thread stops the timer and every publication: `/status` keeps the
+      snapshot from before it (no `slow-block`), `/health/live` is the signal; afterwards the condition may show until
+      the commit (seen on PostgreSQL, not on PGlite). The ledger worker's step is named by its module
+      (`core-ledger-state`, `core-block-parsed`), not in the condition. Tests (both backends): A142
+      `test/runner/slow-block.test.ts` (oracles in `slow-block-harness.ts`), the settled cases
+      `slow-block-cases.test.ts` (a point in waves, the block transaction with no callback running, a height that
+      commits in time, a halt, a held height's retry, a height prepared in the queue — asked while its `on-parse` runs,
+      already running, prepared earlier —, the node's fetch, a callback blocking the main thread), committed negative
+      controls `slow-block.negative-control.test.ts` (a watchdog that never clears, one that retries the slow height,
+      one that cancels it, two with a fixed threshold); `/status`'s schema gained the condition
+      (`test/backbone/core-status/status.schema.json`), AE-4's cases a slow block. Wrong variants (a scratch runner
+      outside the clone): 26, 24 caught (one once a test of a committed height's timer was added), 2 survivors
+      explained (the queue's entry for a height never removed: a leak only; no publication at once: the heartbeat
+      publishes within A142's 2 s). **Waits:** Q145 (the points after the `COMMIT`, `on-finalized` and RN-11's
+      re-delivery are in no window).
+- [x] 5.5a The owner's answer Q145 B: `slow-block` also over the callbacks the loop awaits outside a height's
+      processing (RN-17 as amended) — `on-after-db-write` and `on-stop-height` after each `COMMIT` (one window, from the
+      commit to the end of `on-stop-height`), each `on-finalized`, and RN-11's re-delivery at a run's start —, each a
+      window of its own timed against `slowBlockMs`, raising the same condition with the height (committed or not), the
+      point and the module, and clearing it when its window ends; nothing cancelled or retried; `design.md` §2's "A slow
+      block", the `/status` schema if it changes, and the tests.
+      **Acceptance:** A161; A142 unchanged.
+      **Done (2026-10-27):** besides a height's window, the finalized loop (`src/runner/loop.ts`) opens one for each
+      run of callbacks it awaits outside a height's processing (`SlowWindow`: `after-commit`, `finalized`,
+      `redelivery`): a height's `on-after-db-write` and `on-stop-height`, from the commit — the height's window closes
+      and this one opens in one synchronous step — to the end of `on-stop-height` (after a `COMMIT` that landed though
+      its connection was lost, from the retry's start of them, IN-11); each `on-finalized`, named by the height of the
+      head it announces (before S there is no cursor to name; Q162); RN-11's re-delivery at a run's start, at the
+      cursor's height. Each is timed against the same `slowBlockMs`, with the point that began last and the first
+      module running there, as a height's is; one window is open at a time; it closes when its callbacks end or fail;
+      nothing is cancelled or retried. `HeightActivity` and the end event of `SlowBlockEvent` name the window
+      (`window`; the end's `committed` is now `completed`); the negative controls' seam is `slowBlockMs(window)`. A
+      height stopped at the lockstep wait (14.3) now closes its window: before, its timer could still raise
+      `slow-block` once the loop had ended. The process (`src/runner/process.ts`) lists the same `{ code: "slow-block",
+      height, point, module }` — `/status`'s schema is unchanged, its `point` takes every point — and its log lines
+      name the window: `… in <point>[ of <module>] (after its commit)`, `(the new finalized head)`, `(its re-delivery
+      at the run's start)`; at the end `slow block: height <h>'s points after its commit` (`on-finalized`,
+      `re-delivery`) `ended after <ms> ms` or `failed after <ms> ms`. Tests first: on the old sources the 20 new tests
+      (both backends) failed for the intended reason ("status() never showed slow-block", no event of the window,
+      `slowBlock()` not null after a stop at the lockstep wait). Tests (PostgreSQL 18.6, PGlite 0.5.10): A161
+      `test/runner/slow-block-outside.test.ts` (oracle `a161Problems` in `slow-block-harness.ts`: `on-after-db-write`
+      and `on-finalized` at height 2 awaiting 3 s; also RN-11's re-delivery at a restart, and a failure after the
+      commit that halts); the windows at the loop level, `slow-block-windows.test.ts` (one window over both points
+      after a commit, each `on-finalized` alone, the re-delivery, a landed `COMMIT`'s retry, a failure, a stop at the
+      lockstep wait); committed negative controls `slow-block-outside.negative-control.test.ts` (a watchdog that never
+      times the points after a commit, one that never times `on-finalized`, one that does not clear when the point
+      ends). A142's tests are unchanged but for the seam's argument. No mutation pass here (deferred to the end, owner
+      2026-10-27).
+- [x] 5.3b A stop during startup with the node unreachable (found in the playground, 2026-10-27): SIGTERM, or
+      `ProcessHandle.stop()`, while startup waits on the node — `core-chain`'s `checkChain` reading block 0 through a
+      node client that keeps reconnecting — enters `stopping` but never ends; only a second signal does, through
+      Node.js's default handler. `#close()` awaits startup's end before it closes the node client
+      (`src/runner/process.ts`), and the wait is not tied to the stop. RN-13 as amended: every node call of startup
+      ends at the stop, and the process exits without a second signal.
+      **Acceptance:** A167.
+      **Done (2026-10-27):** the cause confirmed: at the stop startup's one pending call was `chain_getBlockHash(0)`
+      (`checkChain`'s block 0), retried without limit and given no signal, while `#close()` awaited `ended` before it
+      closed the node client; a private process whose core transport accepts and never answers hung the same way (its
+      transport's handshake). A stop during startup (`starting`) now closes the node client and the block source at
+      once, before awaiting startup's end (`#endStartupWaits` in `src/runner/process.ts`): every node call startup
+      awaits — `checkChain`'s blocks, the node source's subscriptions and head read, the wait for the head, a module's
+      call in `on-start-db` — ends with `handle-closed`, its retries and the client's reconnection included, and on a
+      private process the wait for its public side ends too; a step cut short fails, its transaction rolled back, and
+      startup ends with the stop (`ended` of kind `signal`); both are closed again with the rest, as before. A stop
+      while the loop runs is unchanged. `design.md` §2 says so. Tests first: on the old sources the four new tests
+      failed for the intended reason on both backends (no close within 5 s, no end, the client open, 7 connection
+      attempts after the stop; `umbradb run` not exited within 5 s). Tests (PostgreSQL 18.6, PGlite 0.5.10): A167
+      `test/runner/startup-stop.test.ts` (oracle `a167Problems` in `startup-stop-harness.ts`: a new database, the node
+      on a closed port, `backoffCeilingMs` 1 s; `ProcessHandle.stop()` and SIGTERM through `terminationSignal` once
+      startup shows `node-retrying` at 2 attempts: `stopping`, closed within 5 s, `ended` `signal`, the client closed,
+      no connection attempt over 2.5 s after, the database closed; `umbradb run`, the bundled command in a child, one
+      real SIGTERM: exit 0 by itself within 5 s, its admin listener closed; a private process whose core transport
+      never answers ends at its stop within 5 s); committed negative control
+      `startup-stop.negative-control.test.ts` (a startup whose wait for block 0 goes through a client of its own,
+      which the stop does not reach). Found on the way and recorded, not fixed: a stop while the loop waits on an
+      unreachable node outside a height's transaction does not end either (issue 00042). No mutation pass here
+      (deferred to the end, owner 2026-10-27).
+- [x] 5.3c A stop while the running loop waits on an unreachable node (issue 00042, found by task 5.3b from the code):
+      `#close()` closes the node client only after the loop ended, and the loop's node calls outside a transaction —
+      the next height's block through the node source's prefetch, `core-ledger-state`'s state root in `on-compute` —
+      are retried without limit and not tied to the stop. Reproduce it first (a test that fails on the current
+      sources); if it does not reproduce, close the issue with the evidence. Otherwise end those waits at the stop
+      (the loop's signal through the block source and the client, or closing the client when no transaction is
+      open), a height in progress storing nothing and processed again after a restart (RN-13 as amended).
+      **Acceptance:** A169; A48 and A167 unchanged.
+      **Done (2026-10-27):** reproduced first: on `f183850` the four A169 tests failed on both backends for the
+      intended reason (no close within 5 s, no end, the client open, 7 connection attempts after the stop), while the
+      loop waited for h + 1's block (`chain_getBlockHash` in the node source's prefetch) and while `core-ledger-state`'s
+      `on-compute` at h + 1 awaited `midnight_ledgerStateRoot`. The fix (`src/runner/process.ts`, `loop.ts`; `design.md`
+      §2): once the loop runs, a stop closes the node client at once when the loop has no block transaction open
+      (`FinalizedLoop.blockTransaction`, new), else as soon as the open one has committed or rolled back; each node
+      call the loop awaits ends with `handle-closed`, its retries and the reconnection included, and the loop's failure
+      that follows (`handle-closed` of the node client, itself or as a cause) ends processing with the signal: the
+      height in progress stores nothing and is processed again after a restart (after a commit, its later points are
+      re-delivered then, RN-11). The process closes its client once (a later close awaits the first). Not taken: the
+      loop's signal through the block source, which leaves the client reconnecting for its subscriptions until it is
+      closed. 5.3b's startup path and A48 unchanged. Tests (PostgreSQL 18.6, PGlite 0.5.10): A169
+      `test/runner/loop-stop.test.ts` (harness and oracle `a169Problems` in `loop-stop-harness.ts`: a tape node cut at
+      h + 1's request, after which it no longer listens, `prefetchWindow` 1, `backoffCeilingMs` 1 s; `stop()` and
+      SIGTERM once the loop at cursor h shows `node-retrying` at 2 attempts: `stopping`, closed within 5 s, `ended`
+      `signal`, the client closed, no connection attempt over 2.5 s after, nothing above h stored, the database closed;
+      a restart against a node that answers again commits h + 1), and a stop while `on-db-write` holds the block
+      transaction open closes the client only once it committed; committed negative control
+      `loop-stop.negative-control.test.ts` (the node source on a client of its own, which the stop does not reach).
+      Issue 00042 closed. No mutation pass here (deferred to the end, owner 2026-10-27).
+
+## 6. Storage helpers
+
+- [x] 6.1 Cursor table (refactored from `src/postgres/watermarks.ts`); P9 retargeted.
+      **Acceptance:** A59.
+      **Done (2026-10-26):** `src/helpers/cursor-table.ts` (design §1, §10, §12; SH-1; Q27, Q30): `cursorTable({ schema,
+      table })`, a library function — no module, no point, no connection or transaction of its own; the file imports
+      types only, which a test checks — giving a frozen value with the table's `schema` and `table`, `migration(id)` for
+      the module's own `migrations` (`CREATE TABLE "<schema>"."<table>" (key text PRIMARY KEY, value jsonb NOT NULL)
+      WITH (fillfactor = 90)`, a fixed text whose bytes and SHA-256 a test pins, since it is in each module's migration
+      checksum, DB-9), `write(w, key, value)` through the block write handle of `on-db-write` (one upsert: inside the
+      block's transaction, under the module's role; the last write wins) and `read(handle, key)` through any handle's
+      `query` (`undefined` for a key never written, JSON `null` a value). Schema and table are lowercase identifiers of
+      at most 63 bytes, quoted in the SQL, else a `TypeError`. From 0.9.5's Watermarks: last write wins, `fillfactor =
+      90` and no index on `value` kept; `kind` (SH-1 has one key) and `updated_at DEFAULT now()` (wall-clock time, a
+      non-immutable default) gone; values sent as JSON text by the API's parameter mapping (a `bigint` exact, so 0.9.5's
+      decimal-string convention is gone; `invalid-parameter`, nothing sent, for what JSON cannot hold) and held to Q57's
+      `CHECK` (a fraction or an integer beyond 64 bits fails the block, `23514`); the key a plain `text`: unique by
+      bytes, read in DT-2's byte order by the component, so the table names no collation (A138, Q69: the first
+      conformance run failed A138's boundary test while the table wrote `COLLATE "C"`). SH-3 is not the cursor table's
+      (SH-3 names the height-versioned table; SH-1 says the last write wins): a second write of a key in one block
+      replaces the first. Writing only from `on-db-write` is the module's obligation (Q46; a schema write handle has the
+      same shape). 0.9.5's `PgWatermarks`, `src/interfaces/watermarks.ts`, `003_watermarks.ts` and their tests are
+      unchanged, for the 0.9.5 code that still uses them (`saveAndAdvance`, the chain archive, the crash and soak tests,
+      `src/index.ts`), until 17.2. P9 retargeted as a copy: `test/helpers/cursor-table.property.test.ts` (A59 on
+      PostgreSQL 18.6 and PGlite 0.5.10, seed 20261026: 40 sequences of up to 10 blocks through the real block write
+      handles, some rolling back; 140 overwrites, 91 rewrites within a block, 69 rolled-back writes, 935 reads checked),
+      the old `test/postgres/watermarks.property.test.ts` kept on `PgWatermarks` until 17.2;
+      `test/helpers/cursor-table.test.ts` (the helper; on both backends the table as made — owner, columns, collation,
+      the key's index only, fill factor, the `CHECK` —, values, both refusals, SH-3 not shared, the role-and-transaction
+      check, another module's write refused `42501` while its read works, a kept handle `handle-closed`, digests per
+      block (DT-4), DT-2's byte order and the contents hash, SH-1's scenario through the finalized loop; with the cases
+      of 0.9.5's `watermarks.test.ts` that still apply); `test/helpers/cursor-harness.ts`. Seen failing first: `tsc`
+      exit 2 (the module missing, the implicit `any`s and the type tests), both suites failing to load (`Cannot find
+      module '../../src/helpers/cursor-table.js'`). Committed controls: a helper keeping each key's first write fails
+      A59 on both backends (at the first run, "expected { ref: null } to deeply equal false"); one writing on a
+      connection of its own (PostgreSQL: as the login, in another transaction, kept after its block rolled back) or in a
+      transaction of its own (PGlite: refused, `nested-call`) fails the role-and-transaction check. Wrong variants (a
+      scratch runner outside the clone): 39 of 41 caught; the 2 survivors are equivalent (the read taking the last row
+      of a unique key's one; the write sent through `query` instead of `execute`); the 10 table and migration variants
+      are caught again with the SQL pin left out. Design §10 says what was built; the module guide has "Cursor tables";
+      the `**/src/helpers/**` floor (95/90) is added. Question Q108 raised (not blocking).
+      **Pending:** `cursorTable` in `src/index.ts` (17.3); `PgWatermarks`, its interface, migration and two test files,
+      the `**/postgres/watermarks.ts` floor, its mutation target and the re-binding of W1/P9 in
+      `Formal/STORAGE_ALGEBRA.md` and `ROADMAP.md` (17.2, with Q108 for `test/postgres/watermarks.test.ts`); the
+      mutation target `src/helpers/cursor-table.ts` (17.2); the height-versioned table, A60 and A61 (6.2).
+- [x] 6.2 Height-versioned table (refactored from `src/postgres/temporal-kv.ts`).
+      **Acceptance:** A60, A61.
+      **Done (2026-10-26):** `src/helpers/height-versioned.ts` (design §1, §10, §12; SH-2, SH-3; Q27, Q30), in the
+      cursor table's shape: `heightVersionedTable({ schema, table })`, a library function — no module, no point, no
+      connection or transaction of its own; the file imports types only, which a test checks — giving a frozen value
+      with `schema`, `table`, `historyTable` (`<table>_history`), `migration(id)` (one fixed SQL text whose bytes and
+      SHA-256 a test pins: the current table `<table> (key text PRIMARY KEY, value jsonb NOT NULL, from_height bigint
+      NOT NULL) WITH (fillfactor = 90)`, the history table `<table>_history (key, from_height, to_height, value)` keyed
+      by `(key, from_height)` with `CHECK (from_height < to_height)`, and the trigger `versions`, `BEFORE INSERT OR
+      UPDATE OR DELETE … FOR EACH ROW`, whose PL/pgSQL function `<table>_versions()` is the module role's and fills the
+      history), `write(w, b, key, value)` and `delete(w, b, key)` through the block write handle of `on-db-write` at
+      `b.height` (the block is passed: the handle's own `height` is the cursor before the block, null for the first),
+      and `read(handle, key, height?)` through any handle's `query` (as of a height: the version with `from_height ≤ h
+      < to_height`; without one, the current value; `undefined` for none). SH-2: a write closes the key's current
+      version at h and makes the value current from h; the value the key has adds no version (jsonb equality; the row
+      is left untouched, so nothing is captured or digested); a delete closes it at h with no new one, in one `DELETE`
+      that first sets the transaction-local `umbradb.delete_height` for the trigger. SH-3: the trigger refuses a write
+      or delete of a key that already changed at h (its version starts at h, or its last closed version ends at h) with
+      SQLSTATE `23505`, so the write rejects with `database-error` (`details.sqlstate`, `schema`, `table`), a callback
+      error that halts the loop at that height (`HeightFailure`, the module, `on-db-write`); a module catching it cannot
+      commit the block (its next statement fails with `25P02`); writes that change nothing (the value a key has, a
+      delete of a key with none) are neither refused nor counted (Q110, shipped A). The trigger also refuses a height
+      below the key's versions (`23P01`) and a `DELETE` or key change the helper did not make (`0A000`). Table names at
+      most 54 bytes (so that `<table>_versions` and `<table>_history` fit 63), schemas 63, else a `TypeError`; the name
+      rule is the cursor table's but not shared (a shared file would be a value import, which both helpers' types-only
+      rule forbids). From 0.9.5's TemporalKV: the trigger-filled history, the half-open ranges (T5, now heights), one
+      write per key per block (its per-transaction rule, `UB001`, now SH-3's `23505`), `fillfactor = 90` and no index on
+      the current `value` kept; `ns`/`scope`, the version counter and CAS, the wall-clock times, `updated_xact`, the
+      `bigserial` id, the `tstzrange` column and its `btree_gist` exclusion constraint gone. 0.9.5's `PgTemporalKV`,
+      `src/interfaces/temporal-kv.ts`, migrations `001_temporal_kv.ts` and `005_kv_current_fillfactor.ts` and their
+      tests are unchanged, for the 0.9.5 code that still uses them (`src/index.ts`, the benchmarks, the other 0.9.5
+      interfaces' shared validators), until 17.2. Tests (PostgreSQL 18.6 and PGlite 0.5.10, through the real block write
+      handles and the real `core-digest`): `test/helpers/height-versioned.property.test.ts` (A60, seed 20261026: 40
+      sequences of up to 10 blocks, each changing up to 4 of 5 keys once — writes, same-value writes, deletes — some
+      rolling back; after each block, every key's stored versions checked for overlaps, empty versions and gaps where
+      nothing was deleted, and against the model, and the key read at every height of the sequence; 65 versions closed
+      by writes, 23 by deletes, 14 same-value writes, 35 deletes of keys with none, 76 rolled-back changes, 14 gaps,
+      4,540 height reads per backend); `test/helpers/height-versioned.test.ts` (the helper alone: the pinned SQL, frozen
+      values, name refusals, handle types, types-only imports; on both backends: both tables, the trigger and its
+      function as made, SH-2's scenario through the finalized loop (A at 10, B at 20, deleted at 30, read at heights 0
+      to 40), reads through the block write handle, same-value writes (members reordered, `1` as `1n`; the row's `xmin`
+      unchanged, no digest), JSON null, lossless values, Q57's refusal, `invalid-parameter`, A61 — a new key twice, two
+      values, a write then a delete, a delete then a write, after several versions, caught or not, through the
+      finalized loop — and its control, what SH-3 does not refuse (Q110), the misuse refusals, `42501` for another
+      module, `handle-closed`, digests of both tables per block, DT-2's byte order and the contents hash, a rolled-back
+      block); `test/helpers/height-versioned-harness.ts`; `test/helpers/cursor-harness.ts` generalized
+      (`helperDatabase`). Seen failing first: `tsc` exit 2 (12 errors: `Cannot find module
+      '../../src/helpers/height-versioned.js'` three times and the type tests that follow); both suites failed to load
+      (`Cannot find module`). Committed controls: a table closing versions one height late fails A60 ("the versions
+      [148, 150) and [149, …) overlap"), one closing them a height early fails it ("a gap between [152, 152) and [153,
+      …), where nothing was deleted"), each at its second run on both backends; a table letting a second change through
+      (SH-3's refusal left out) fails A61's check; the cursor table still lets it through (6.1's test unchanged).
+      Wrong variants (a scratch runner outside the clone, the SQL pin test left out): 83 (the tables 8, the trigger 37,
+      reads 13, writes and deletes 9, names and the returned value 16), 78 caught (1 by the type check alone), the 5
+      survivors equivalent — the value compared as jsonb text instead of by jsonb equality (equal for every value the
+      helper can send), the closed-version read without `LIMIT 1` and the read taking its last row (versions never
+      overlap, so at most one row), and the write and the delete sent through `query` instead of `execute`; the first
+      run left 2 more, both closed by new tests (the trigger reading a key's first closed version instead of its last; a
+      same-value write rewriting the row with its own contents). Design §10 says what was built; the module guide has
+      "Height-versioned tables". Question Q110 raised (not blocking).
+      **Pending:** `heightVersionedTable` in `src/index.ts` (17.3); `PgTemporalKV`, its interface, its two migrations,
+      its two test files, the required id `property.p3.replay-fold-equivalence`, the `**/postgres/temporal-kv.ts` floor,
+      its mutation target and benchmark workload, and the restatement of T5 for heights in `Formal/STORAGE_ALGEBRA.md`
+      (17.2); the mutation target `src/helpers/height-versioned.ts` (17.2); Q110's answer (SH-3 and A61's wording).
+
+## 7. Digests
+
+- [x] 7.1 Change capture (shadow tables and triggers) on every module table not declared `deterministic: false`, and
+      `core-digest` with `core_digest.tables` and the checkpoints at h mod 14,400 = 0 (Q84, Q86; a test may shorten the
+      interval only through a build flag no exported surface reaches, as A11's); the migration-time check of DT-6
+      through `column-rules.ts` (no primary key, key and column types, identity and `serial` columns, floats, defaults
+      that are not immutable, sequences and unlogged tables; Q58, Q61; the detection is task 1.4's), and the `jsonb` and
+      `numeric` `CHECK`s, arrays included (a `jsonb` number: an integer in the signed 64-bit range whose `jsonpath`
+      `.string()` is `-?[0-9]+`, Q57; a `numeric`: `c IS NULL OR coalesce(scale(c) = 0, false)`, which refuses the
+      infinities and allows NULL);
+      tables declared `deterministic: false` skipped by the check, the `CHECK`s and change capture, and hashed by name
+      only (Q76).
+      **Acceptance:** A56 including its negative control, A57, A58, A147 (with 14.1 and 15.2 for its private and
+      backup parts).
+      **Done (2026-10-25):** `core-digest`, a backbone part (`src/backbone/core-digest/`): `CORE_DIGEST`, declared with
+      `defineModule` (its id in `BACKBONE_ORDER`), requires `blocks` and provides `digest-tables` and
+      `digest-checkpoints`; its migration creates `core_digest.tables (schema, table) → (height, digest)`,
+      `core_digest.checkpoints (height, schema, table) → digest` and the schema `core_digest_shadow`; its `on-db-write`,
+      last of the block, sets each changed table's row to `SHA-256(previous ‖ CBOR(h) ‖ changes at h)` (32 zero bytes
+      before the first) and at each h with h mod 14,400 = 0 copies every row into the checkpoints, `0` included; no
+      `on-start-db` (what startup does for the digests must follow every module's migrations, which come after
+      `core-digest`'s, Q95). The interval is a build flag (`build-flags.ts`), which only a test's own build changes
+      (`vi.mock`, as A11's). DT-4's changes and DT-5's digest as pure functions: `src/determinism/digest.ts`. Change
+      capture in the database API (`src/db/change-capture.ts`): on every table of the plan's schemas not declared
+      `deterministic: false` (a partitioned table's trigger cloned onto its partitions), a row trigger with a function
+      of the table's own (`SECURITY DEFINER`, the login's) records each key's first touch in the transaction — its old
+      row, or none — in `core_digest_shadow.t_<32 hex digits>`, stamped with the transaction; nothing in a migration
+      (the migration mark), so a migration's writes are no block's changes and it may change the table's columns; after
+      each part's migrations the capture is attached, rewritten (a fingerprint), re-enabled or dropped for the opt-out
+      (the parts before `core-digest` once its migration ran); when startup ends the shadow tables are emptied of what
+      `on-start-db` wrote and the unused ones dropped; `core_digest` readable by every role. DT-6 at startup
+      (`src/db/module-rules.ts`, task 1.4's detection through the component's `databaseRefusals` with `plan.optedOut`
+      and `refusalMessage` with the module): in each migration's own transaction before its record — a migration leaving
+      a table the rules refuse rolls back unrecorded, and startup refuses with the rule's code (§11's five), module,
+      table or sequence, column, type and migration — and after each part's migrations at every startup, over the schema
+      the part writes and its own. The `jsonb` and `numeric` `CHECK`s (the component's `checks.ts`:
+      `core_chain.jsonb_numbers_ok` and `numeric_ok` with their array forms, created in the bootstrap; one
+      `umbradb_integers_<column>` `CHECK` per such column, dropped on opt-out). The contents hash records opted-out
+      tables as `[schema, table, null, null]` (`contentsHash(read, { optedOut })`). `design.md` §4 and §14, the module
+      guide's "Stored values and digests". Question Q101 (the contents hash reads the scratch schema
+      `core_digest_shadow`; shipped A, DT-3 as written; not blocking). Issue `docs/issues/00013` (a nondeterministic
+      collation compares differently on PGlite). Tests, seen failing first on the base sources (the new modules missing; startup
+      not refusing — 29 tests per backend got `started`; the component's `checks.ts` and `compareUtf8` absent):
+      `test/determinism/digest.test.ts` (hand-written CBOR and SHA-256), `test/deterministic-postgresql/checks.test.ts`
+      (A58's writes, both backends, with each rule's negative control), `startup-check.test.ts` (A58's startup half,
+      A145's), `opt-out.test.ts` (A147's core part; its 3.1 setup now makes the refused tables by hand, since startup
+      refuses them), `test/backbone/core-digest/` (`changes.property.test.ts` A56 with its negative control,
+      `digests.test.ts` and `checkpoints.build-flag.test.ts` A57, `capture.test.ts` startups), `test/db/roles-login` (a
+      `CREATEROLE` login); `component-table.test.ts` rows 5 and 9, `boundary.test.ts` the new names. Committed negative
+      controls: A56's (the trigger disabled on one table fails the property), A57's (capture skipping the opt-out
+      digests the opted-out table), each `CHECK` rule's (the functions built without it let exactly its cases through),
+      the CHECKs dropped (every refused value stored), A147's (the hash without the list refuses the table). 74 wrong
+      variants on the final sources (a scratch runner outside the clone): 71 caught, 3 equivalent (a byte comparison
+      without its length test, CBOR rows being prefix-free; `lax` for `strict` in the `jsonpath`; DT-6's check after the
+      record, in the same transaction); a first run's 4 other survivors were gaps, closed by tests.
+      **Pending:** A147's private-process part (14.1) and backup part (15.2); A56/A57 through the real runner (5.2) and
+      `core-block-commit` (10.2, `blocks`); "startup refuses" through the runner's refusal state (5.x); the ingest cost
+      of the triggers (A136, 18.3).
+- [x] 7.1a The owner's answer Q101 B: the contents hash leaves out `core_digest_shadow` (DT-3) — in every place that
+      lists the hashed schemas (`MODULE_TABLE_FILTER` in `src/deterministic-postgresql/catalog.ts`,
+      `src/determinism/module-tables.ts`), each other user of those lists checked to keep its own scope.
+      **Acceptance:** A150.
+      **Done (2026-10-25):** one list of the hashed schemas, `MODULE_SCHEMA_FILTER` in the component's `catalog.ts`
+      (every schema but `pg_*`, `information_schema`, `public` and `core_digest_shadow`), which both catalog reads take:
+      `MODULE_TABLE_FILTER` (the tables and their columns) and the relations' statement, which held its own copy of the
+      list before. Per user: the contents hash (`moduleTables`, every module schema) leaves the scratch schema out —
+      its tables, rows, and what the rules would refuse there; DT-6 at startup and the `CHECK`s (`module-rules.ts`,
+      the part's schemas) are unaffected, since DB-8 keeps reserved names out of a plan, and the filter now leaves the
+      scratch schema out even when it is asked for; the `TRUNCATE` guard and change capture keep their own lists
+      (`TRUNCATE_GUARD_TABLES_SQL`, the plan's schemas; the shadow schema by name) and their scope; DB-8's
+      `RESERVED_SCHEMAS` keeps the name. No split was needed. `core_chain` and `core_digest` stay hashed (Q101 rejected
+      C). The comments of `module-tables.ts` and `change-capture.ts` (which said the hash reads the shadow tables)
+      corrected. Tests: `test/determinism/shadow-schema.test.ts` (A150, 21 per backend): a database built by hand,
+      hashed against CBOR written out by hand — `core_chain`, `core_digest`, an operator's `core_digest_shadow_x` and a
+      module schema in, the scratch schema out with a row, a table without a key, a `timestamp` defaulting to `now()`,
+      an unlogged table and a sequence; a column, a shadow table, a row, a refused table, a sequence and an unlogged
+      table added there leave the hash unchanged, the same in `m`, `core_digest`, `core_chain`,
+      `core_digest_shadow_x` and `pgx` change it, and the refused table in `m` refuses the hash; the catalog reads
+      given schemas skip the scratch schema; two chains through the real capture, one with a column more in every
+      shadow table and an orphan shadow table holding a row, hash and digest equal, and the same change in `m` changes
+      the hash. Seen failing first on the old filter, all 40 (`no-primary-key: table
+      "core_digest_shadow"."t_nokey"`; the catalog reads listing 5 tables for `m`'s 1; the chains' hashes `97b6…`
+      against `6676…`). Committed negative controls: the scratch schema back in the list (a handle rewriting the 3
+      catalog statements of a hash) refuses the hand-built database and splits the two chains; `core_digest` left out
+      too (option C) gives another hash and misses a changed digest. 20 wrong variants of the changed lines (a scratch
+      runner outside the clone): all 20 caught on the final sources; the first run's one survivor (`'pg'` for `'pg_'`)
+      was a gap, closed by the `pgx` case. A55 and every neighbouring suite pass.
+
+## 8. Admin endpoints
+
+- [x] 8.1 The admin server in its own worker thread reading the runner's published state, mounting only backbone parts'
+      endpoints (Q70), 404 for anything else; the main-thread heartbeat; states and conditions; the shared redaction and
+      sanitized-error helpers. No endpoint tests exist in 0.9.5 to migrate; each part's tests live in its folder.
+      **Acceptance:** A62 (its 404 and response-time halves), A64.
+      **Done (2026-10-26):** `src/admin/` (new): the admin listener in a worker thread of its own (`server.ts` starts
+      `worker.ts`, which runs `serve.ts`: `node:http` on `listen.admin`, parsed by the module API's `parseAddress`, the
+      one thing the two listeners share), answering the admin route table (`routes.ts`) from the snapshot the runner
+      publishes, never the database. The snapshot (`snapshot.ts`, `types.ts`): `status()` — 5.3's and 5.4's states,
+      readiness, conditions and reason, the one source, not redefined — encoded on the main thread for JSON (heights as
+      decimal text, the conditions as raised, the reason a sanitized error, never `ended`), with the process revision's
+      `livenessTimeoutMs` and its redacted `core` settings; it crosses whole as one message, and the worker answers each
+      request from the one it holds (no torn read). The heartbeat (`src/runner/heartbeat.ts`, AE-2): the main thread
+      ticks every second into one 64-bit slot of a `SharedArrayBuffer` (`process.hrtime.bigint()`, one `Atomics.store`),
+      which the worker reads at each request (one `Atomics.load`). The route table mounts only backbone parts' endpoints
+      (Q70; any other part is refused): `core-health` (`/health/live` 200 while the last tick is within the liveness
+      timeout, else 503; `/health/ready` from the published readiness), `core-status` (`/status`, the published status),
+      `core-config` (`/config`, the process's `core` revision redacted), each in `src/backbone/<part>/`, minimal
+      functions of the snapshot that 8.2–8.4 complete; `GET` of their paths only (the query aside), anything else 404
+      `not-found`; a throwing endpoint 500 with a fixed message. The shared helpers: `redaction.ts` (`shownSettings`
+      over 4.2's `configRedactor`, a `versionEntry` redacted until recorded; `earlyRedactor` over 4.4's
+      `configSecrets`), `errors.ts` (`sanitizedError`: the reason's code, height, module and point, a message from those
+      alone, and the allowlisted details of its own `UmbraError` — `reason`, `migration`, invalid-configuration's
+      `findings` — each checked and redacted, AE-6). The runner's side (`process-admin.ts`, `ProcessAdmin`) and
+      `src/runner/process.ts`'s wiring: `startProcess({ admin: true })` (Q128) runs the heartbeat from `startProcess`
+      on, publishing at each tick when the snapshot changed and at once when startup ends, processing ends and the stop
+      begins; the listener starts on `listen.admin` once the process's `core` revision is chosen, before the database
+      opens (a listener that cannot listen refuses with `listen-failed`, Q115's code), or at a refusal before that on
+      the configuration's `listen.admin` as loaded, else `0.0.0.0:8081` (Q127); at `stop()`, after the database, the
+      heartbeat and the thread end. Questions Q127 (where a refusal before the validation listens; shipped A) and Q128
+      (whether `startProcess` serves them unless told not to; shipped A, opt-in) raised, neither blocking. Tests, seen
+      failing first (`tsc` exit 2, 47 lines: `src/admin/*.js` and `src/runner/heartbeat.js` missing, `admin` not in
+      `ProcessInput`, the implicit `any`s that follow; all 7 suites failed to load): `test/admin/admin-server.test.ts`
+      (A62 on both backends: the four endpoints and 23 other methods and paths, a module's own route among them, which
+      answers on `listen.api` only; a 10 s synchronous loop on the main thread and a 5 s held block transaction —
+      PGlite's one queue, checked held by a read that waits; PostgreSQL's writer `idle in transaction` — each endpoint
+      timed by `prober.mjs`, a worker thread of the test's own, from the request on the shared monotonic clock, at least
+      4 requests of each inside the hold, each answered within 1 s), `states.test.ts` (A64 on both: `starting` — also
+      with `waiting-for-node` (task 10.2) while S is above the head —, `refused` — AE-3's changed migration checksum,
+      up, live 200, ready 503 —, `syncing`, `following`, `stopped` at the core's stop and at an upgrade boundary with
+      `upgrade-required`, `halted` with its reason and no message, `stopping`, then the listener closed; `node-retrying`
+      and `database-retrying`), `lifecycle.test.ts` (`admin: true`, the listen failure before the database opens, the
+      early refusal's address, findings and redaction, publication at once, a stop while the listener starts,
+      `ProcessAdmin`, and real child processes — running, refused, and with its admin port taken, started through task
+      0.5's `spawnChild` — that stay up until SIGTERM and then exit by themselves), `serve.test.ts`, `routes.test.ts`,
+      `snapshot.test.ts`, `test/runner/heartbeat.test.ts`: 91 tests, 2 of them for one backend only; on task 10.2's real
+      `core-chain`, the network `custom` with its own ledger table and the in-memory chain's genesis, the process's
+      database read through a user module keeping the `db` item. Committed negative controls: an admin server on the
+      main thread fails A62's loop case; one whose `/status` reads the database fails A62's held-queue case (PGlite); a
+      route table that serves a module's path fails A62's 404 case; a refused start that stops the process fails A64's
+      live-200 check. Wrong variants (a scratch runner outside the clone): 128 on the first run, 120 caught (5 by
+      `tsc`); of the 8 survivors 4 were equivalent — 2 of them guarding redundant code, removed (a `HEAD` body Node.js
+      never sends, a snapshot not posted to a closing worker) — and 4 gaps, closed by tests (the configuration's
+      redaction after `serve`, the early one after `loaded`, an admin closed before it listened, the listener closed
+      after the database). On the final sources 126, 124 caught; the 2 survivors equivalent (a plain store of the tick
+      for `Atomics.store`, untearable on a 64-bit platform; the listener told before the tick is written, which no
+      reader sees). Every new file 100 % statements, branches, functions and lines (`src/admin/worker.ts`, the thread's
+      entry, out of coverage like `src/cli/main.ts`; `**/src/admin/**` floor 90/85).
+      **Pending:** the endpoints' full bodies, their declarations and A63, A65, A140 (8.2), A66's `/status`, A67, A140
+      (8.3), A66's `/config`, A29, A140 (8.4); the conditions `slow-block` (5.5), `finality-stall` (10.3),
+      `waiting-for-lockstep` (14.3); the private process's lag (14.x); `umbradb run` passing `admin: true` (Q128; the
+      task that wires `run` to `startProcess`); the browser's message channel (16.1).
+- [x] 8.1a The owner's answer Q128 B: `startProcess` serves the admin endpoints unless its caller passes `admin: false`
+      (opt-out, as AE-1 says); `umbradb run` needs no flag; an admin address that is taken refuses startup with
+      `listen-failed` before the database opens (the owner: "check if free; or it does not start"); every existing test
+      that starts a process opts out or listens on a port of its own (port 0), so parallel tests never collide on
+      `0.0.0.0:8081`.
+      **Acceptance:** A62, A64 with the default; a process started without `admin` answers on its admin listener; a
+      second process given the same admin address refuses with `listen-failed` and opens no database session.
+      **Done (2026-10-26):** `src/runner/process.ts`: `ProcessInput.admin` is opt-out — absent or `true` serves the
+      admin endpoints on `listen.admin` from the admin worker, a starter through it, `false` none — so `umbradb run`
+      needs no flag; the listener still starts once the process's `core` revision is known, before the database
+      opens, and an address another listener holds refuses startup with `listen-failed` (task 8.1's path, now the
+      default's); a refusal before the validation listens where task 8.1 listens (Q127, open, unchanged). `design.md`
+      §1's `src/admin/` row. The tests: `test/runner/process-build.ts` gives them `startProcess`, the runner's with
+      `admin: false` unless the test passes one; the 16 files outside `test/admin/` that took the runner's own take it
+      (one import each); `test/admin/` passes `admin` everywhere already (8.1–8.4: a starter on `127.0.0.1:0`).
+      Tests, seen failing first (`tsc` exit 2: the shared `startProcess` missing; 12 of 14 tests failing — no admin
+      listener by default, a second process on a taken address started and ran, the 16 files found): new
+      `test/admin/default.test.ts` (both backends: a process started without `admin` answers on its admin listener;
+      A62's routes and A64's `following` and `refused` through it; a second process given the same admin address
+      refuses with `listen-failed`, stays up and opens no database session — PostgreSQL's cumulative session count of
+      its database unchanged, PGlite's data directory absent — while the first still answers) and
+      `test/admin/test-processes.test.ts` (the guard: any file under `test/` outside `test/admin/` that takes the
+      runner's `startProcess` — named, renamed, namespace, dynamic, re-exported, from `process` or `index` — fails;
+      the shared one opts out unless asked, `admin: undefined` included). Committed negative controls: task 8.1's
+      opt-in default fails "a process started without `admin` answers" (ECONNREFUSED on all four); a process that
+      opens and reads its database before listening (an admin starter) fails "opens no database session" (one session
+      on PostgreSQL, the directory on PGlite). Wrong variants (a scratch runner outside the clone): 25, 24
+      caught; the survivor equivalent (the 8.1 spread `{ start: undefined }`, which `ProcessAdmin` takes for none).
+- [x] 8.1b The owner's answer Q137 B: a refused configuration ends the process. A configuration that cannot be loaded,
+      is not plain data or fails its schemas logs every finding (its path and message) and ends the process before any
+      admin listener opens — `umbradb run` exits with a non-zero code, `startProcess` ends `refused` —; task 8.1's
+      listener before validation (`ProcessAdmin.loaded`, `refused` before the `core` revision is known,
+      `earlyAdminAddress`, Q127) and its tests go. Every refusal after the configuration is validated keeps AE-3's
+      stay-up behaviour.
+      **Acceptance:** A157.
+      **Done (2026-10-27):** `src/runner/process.ts`: a refusal before the process's `core` revision is known — the
+      configuration's loading and plain data (CF-1), its validation (CF-2, CF-3), the choice of its `core` revision
+      (Q102's `no-build-core-revision`, on the line) and, before them, the build's declarations (MD-2; Q148) — ends
+      the process: it logs every finding with its path (`src/runner/configuration-refusal.ts`: `startup refused: <code>
+      (<n> findings); the process ends`, then one `startup refused: <path>: <message> [<code>]` per finding, named as
+      `umbradb config check` names them — `src/config/findings.ts`, which `config check` now shares —, redacted with the
+      configuration's secrets as the validation reads them, else the URL patterns), opens no admin listener, and ends
+      `refused` (the reason the refusal's code) with `closed` resolved by itself and the heartbeat stopped; `stop()`
+      then returns `closed`, the state left `refused`. `umbradb run` exits 1 at once and adds no line of its own (4.4a's
+      `refusalLines` removed: no finding is printed twice). Every later refusal stays up as AE-3 says, by step, not by
+      code — an `invalid-configuration` raised once the configuration is validated (the database's, the node client's, a
+      private source's) included, and `development-opt-in-required`, the history checks (CF-5, CF-6), `listen-failed`.
+      Task 8.1's listener before validation removed from `src/admin/process-admin.ts` (`loaded`, `refused`,
+      `earlyAdminAddress`, Q127) with its tests. `design.md` §1, §2, §7, §11, §12; the module guide. Question Q148
+      (a fault of the build's declarations ends the process too; shipped A), not blocking. Tests, seen failing first
+      (`tsc` 4 errors: the new module missing; 21 tests failing — the processes stayed up, asked for an admin listener
+      on the configuration's `listen.admin` or CF-4's default, and logged the code only —, and the new unit suite
+      failing to load): new `test/admin/refused-configuration.test.ts` (A157, 19 tests: on PostgreSQL 18.6 and PGlite
+      0.5.10, a file that does not exist, a file whose evaluation throws, a function in a setting and two settings
+      failing their schemas each end `startProcess` `refused` by itself, every finding logged once with its path and no
+      secret, no admin listener asked for and the test's own port — the configuration's `listen.admin` and the address
+      any starter is given — probed from the start and never answering, the database never opened; the same with the
+      real admin worker; on the line, a configuration with no `core` revision of the build's version; a changed
+      migration checksum, after the validation, answering the four endpoints and staying up; `umbradb run` on the four
+      files in this process exiting 1 unsignalled with the process's lines only, a file refused after the validation
+      keeping it up and answering until SIGTERM, and the schema failure through the bundled command in a child process
+      exiting 1 by itself with nothing on its `listen.admin`), `test/runner/configuration-refusal.test.ts` (9: the lines
+      of every kind of refusal, the redaction given), `test/config/findings.test.ts` (3: the shared findings); changed:
+      `test/admin/lifecycle.test.ts` (a real process whose configuration is refused exits by itself, unsignalled; the
+      Q127 tests and `refused()`'s removed), `snapshot.test.ts` (`earlyAdminAddress`'s cases removed),
+      `test/runner/process.test.ts`, `refusals.test.ts` (an invalid declaration ends the process; its registered title
+      in `test/runner/code-registry.ts`), `test/cli/run.test.ts` (refused files exit 1 unsignalled with the process's
+      lines; `refusalLines`' cases moved to the unit suite), and 8.2–8.4's refused processes
+      (`test/backbone/core-health/core-health.test.ts`, `core-status/core-status.test.ts`, `status-schema.test.ts`,
+      `core-config/core-config.test.ts`, `config-schema.test.ts`) now refused once validated, before their database
+      opens (PGlite without the development opt-in). Committed negative controls: a process that opens its admin
+      listener at a refusal of its configuration (Q127's rule) fails "no admin listener opened"; one that ends on every
+      refusal fails the stay-up half, in the process and through the command; one that logs only the code fails "every
+      finding with its path", in the process and through the command. Wrong variants (a scratch runner outside the
+      clone): 23 — which refusals end the process and how, what it logs, the lines, the shared findings, `config
+      check`'s line, the admin listener's refusal, the command's wait —, 22 caught; the survivor equivalent (the log's
+      redaction by the configuration as loaded replaced by the URL patterns alone: the validation already redacts its
+      findings with the same secrets, and nothing else is logged once the configuration is loaded).
+- [x] 8.2 `core-health` (`src/backbone/core-health/`): `/health/live` and `/health/ready` with readiness precedence.
+      **Acceptance:** A63, A65; A140 for these endpoints.
+      **Done (2026-10-26):** the part in its own folder: its declaration `CORE_HEALTH` (`core-health.ts`: a backbone
+      part with no points, no items and no migrations, in RN-3's place after `core-digest`, in the command's build
+      `src/cli/build-modules.ts`; like `core-block-fetch` it gets an empty schema and role, DB-8), its endpoints
+      `CORE_HEALTH_ENDPOINTS` (`endpoints.ts`, which the admin route table mounts) and `readinessOf` (`readiness.ts`).
+      `/health/live`: 200 while the last heartbeat tick is within `livenessTimeoutMs`, 503 after, in every state, body
+      `{ live, heartbeatAgeMs, livenessTimeoutMs }`. `/health/ready`: AE-4's order — not while `starting`, `refused`,
+      `halted` or `stopping`; always while `stopped`; otherwise within `readinessLag` if one is set (`following` too:
+      5.3's `statusOf` had `following` always ready, which A65's third case refuses) — decided from the published
+      state, lag and readiness lag (new in the snapshot), body `{ ready, state, lag, readinessLag }`; the runner's
+      `statusOf` takes `ready` from the same `readinessOf`, so `/status` and `/health/ready` agree. Conditions are no
+      rule of AE-4 and change nothing. Tests (`test/backbone/core-health/`, seen failing first: `tsc` exit 2, 14 lines,
+      the new exports and the snapshot's `readinessLag` missing; 8 tests failing on the old endpoints): A63 on
+      PostgreSQL 18.6 and PGlite 0.5.10 with a 5 s liveness timeout — an awaited 15 s operation, live 200 throughout; a
+      15 s synchronous loop, live 503 to every request from 5 s into it, every endpoint within 1 s (8.1's prober), 200
+      again from 1 s after it —; A65 — readiness lag 10 and lag 500, 503 until the lag is 10, then 200, every answer of
+      the 490-block catch-up checked against AE-4 (on PGlite: 152 s on PostgreSQL under load, 7 s on PGlite; the
+      decision does not depend on the backend), stopped with lag 100 200, following with threshold 20 and lag 15 503,
+      on both —; a halted and a stopping process within the readiness lag 503; a retry condition changing nothing; a
+      refused process answering both (A140); AE-4's cases (`readiness-cases.ts`), each built to fail a decision that
+      applies another rule first. Committed negative controls: the rules in three wrong orders and a rule AE-4 lacks
+      (conditions), each failing exactly its rule's cases; through the process, `/health/ready` with 5.3's order fails
+      A65's third case; an admin server on the main thread fails A63's "every endpoint within 1 s". Wrong variants (a
+      scratch copy of the tree): 33, all caught. Also changed: `src/runner/process.ts` (`statusOf`'s `ready`, one
+      import, one comment line), `src/admin/` (the snapshot's `readinessLag`), `test/admin/` (the bodies, the build's
+      `ADMIN_BACKBONE`), `test/cli/config-check.test.ts` (the build's backbone ids).
+- [x] 8.3 `core-status` (`src/backbone/core-status/`): `/status` and its JSON schema, times as RFC 3339 text (Q68).
+      **Acceptance:** A66 (`/status`), A67; A140 for this endpoint.
+      **Done (2026-10-26):** the part as `core-health`'s: its declaration `CORE_STATUS` (no points, no items; after
+      `core-health` in RN-3's order and in the command's build) and its endpoint `CORE_STATUS_ENDPOINTS`: 200 with the
+      published status and `uptimeMs`, computed at the request from the published start (`process.hrtime.bigint()`,
+      the clock every thread reads alike; the view now carries the request's clock, `nowNs`). AE-5's fields
+      (`src/admin/snapshot.ts`, `types.ts`): the state, readiness, conditions, cursor, head, lag and reason as before;
+      `instance` (`core` or `private` with its `instanceId`); `lastCommitAt`, the wall-clock time of the last commit as
+      RFC 3339 UTC text with the fraction only when it has one (`utcText`, Q68; the loop's commit observer calls
+      `ProcessAdmin.committed`); `node` on the core (the finalized head the loop read, `node-retrying`'s attempts,
+      `tipCap`, whether `finality-stall` is raised; best head, connection and queue depth null until 10.3 reports
+      them); `modules`, every part of the database in startup order with its origin, version, side, first start, last
+      stop, whether the cursor reached it, and each table item's row of `core_digest.tables` (DT-5) — read on the main
+      thread from the process's database at a publication after a commit, one read at a time (`ProcessAdmin.opened`,
+      called in `#open` once the database is migrated) —; `public` on a private process (the public cursor; lockstep
+      null until 14.3); `ledger` and `privateInstances` null until 12.x and 14.x. The JSON schema
+      `test/backbone/core-status/status.schema.json` (draft 2020-12), checked by Ajv 8.18.0 in strict mode
+      (`test/admin/json-schema.ts`; `ajv` an exact development dependency, already in the tree as Stryker's: zod's
+      `fromJSONSchema` accepts a misspelled keyword silently). Tests (`test/backbone/core-status/`, seen failing first:
+      `tsc` exit 2, 51 lines; 28 of 33 tests): A66 through the process on PostgreSQL 18.6 and PGlite 0.5.10 — every
+      body validates while migrating, waiting for the node, following, retrying, at an upgrade boundary, past a
+      module's stop, stopping, halted, refused before and after the validation; `cursor` null before S commits (while
+      migrating and while S is above the head); the digests shown equal `core_digest.tables`; the uptime grows —; A67 on
+      both: a callback's error holding a secret in six forms (the `node` URL's password, a module's `secret` setting,
+      on PostgreSQL the `database` URL's password) halts, `/status` shows code, height, module and point, and no form is
+      in any of the four bodies or any log line; A140: mounted as the part gives it, its folder and tests, a refused
+      process (public and private) answering it. Committed negative controls: a body missing each required field, with
+      an extra one, or with 14 wrong forms fails the schema; a `/status` that adds the exception's message shows the
+      secret, and the search finds it. Wrong variants (a scratch copy of the tree): 53; 49 caught, 2 equivalent (their
+      redundant code removed), 2 gaps closed by tests (a table of one name in two schemas; a declaration with a
+      callback), both caught on the final sources. The tests ask for the admin endpoints explicitly, each process on
+      `127.0.0.1:0` (so they hold when Q128's default flips, task 8.1a). Also changed:
+      `src/runner/process.ts` (the admin's side, `opened` after the seal, `committed` in the commit observer),
+      `src/admin/serve.ts` (`nowNs`), `package.json` and `package-lock.json` (`ajv` 8.18.0),
+      `test/dependencies/pins.test.ts`, `design.md` §14 (the Ajv row), `test/admin/` (the snapshot helpers, `side`),
+      `test/cli/config-check.test.ts`.
+- [x] 8.4 `core-config` (`src/backbone/core-config/`): `/config` and its JSON schema.
+      **Acceptance:** A66 (`/config`), A29; A140 for this endpoint.
+      **Done (2026-10-26):** the part as `core-health`'s: its declaration `CORE_CONFIG` (no points, no items; last in
+      RN-3's order and in the command's build) and its endpoint `CORE_CONFIG_ENDPOINTS`: 200 with the published
+      configuration, built on the main thread by `configOf` (`src/admin/configuration.ts`; AE-5): `core`, the process's
+      revision (Q102); `entries`, every revision as validated, each one's settings through 4.2's redaction (secret
+      fields and URL credentials `[redacted]`, a `versionEntry`'s fields all redacted until the history check found it
+      equal to its row, then shown as data), placed against startup's cursor (`started`, `scheduled`) once read;
+      `history`, `core_chain.config` as recorded after startup (the rows read, replaced and added to by the check's
+      writes: `recordedHistory`), data fields with URL credentials redacted, heights as decimal text, `dataHash` as
+      `0x` hex; `modules`, every part of the database with its declaration without callbacks (items with their tables,
+      kinds and determinism, the flags, key kinds, each setting's kind, migrations by id and checksum, the points it
+      has); `chain` (network, genesis hash — configured, then the chain's —, S, the anchor once block S committed);
+      `ledger` (the process revision's `ledgerTable` in effect and the build's package identities); `database`
+      (backend, the server's `server_version` read once, the writer lock as the process knows it: from the writer's
+      start, not while a lost connection is retried, never after `writer-lock-lost`); `build` (UmbraDB's version;
+      `commit` null — no build records one: question Q134). Before the validation, the build only. `ProcessAdmin`
+      reads the version, the anchor and the digests each in a read of its own (one that fails leaves the others). The
+      JSON schema `test/backbone/core-config/config.schema.json` (draft 2020-12, Ajv 8.18.0 strict, as 8.3's). Tests
+      (`test/backbone/core-config/`, seen failing first: `tsc` exit 2, 15 lines; A29 failing on the old `/config`): A66
+      through the process on PostgreSQL 18.6 and PGlite 0.5.10 — refused before the validation, refused after it,
+      running (the history equal to `core_chain.config`, the anchor to `core_chain.identity`), a recorded
+      `versionEntry` shown as data —; A29 on PostgreSQL (a login role whose password is the test secret, in six forms,
+      also in a halting callback's error with the URL): in neither `/config`, `/status` nor any log line; A140: mounted
+      as the part gives it, its folder and tests, a refused process answering it. Committed negative controls: a body
+      without each required field, with an extra one, or with 14 wrong forms fails the schema; a `/config` showing the
+      settings without the redaction shows the password, and the search finds it. Wrong variants (a scratch copy of the
+      tree): 54; 49 caught, 4 gaps closed by tests (an unplaced `versionEntry`, the chain's genesis over the
+      configured one, key kinds, the history's read rows), caught on the final sources, 1 equivalent (the identity
+      passed from startup: `ProcessAdmin` reads it, so the argument was removed). The tests ask for the admin
+      endpoints explicitly, each process on `127.0.0.1:0` (task 8.1a's flip). Found by the conformance run and fixed:
+      8.1's `serve.test.ts` waited for the worker's `threadId` to read -1 before its error was reported, which a loaded
+      machine reorders (the test now waits for both). Also changed: `src/runner/process.ts` (`opened`'s facts: the
+      check, the history, the genesis hash), `src/admin/` (`ConfigSnapshot`'s fields, `ProcessAdmin`'s reads: the
+      identity read there), `test/admin/` and the 8.2–8.3 tests (the configuration's new fields),
+      `test/cli/config-check.test.ts`.
+- [x] 8.4a The owner's answer Q134 D: `/config` shows the runtime configuration (secrets redacted) and the build's
+      version, and no build commit (AE-5 as amended) — `build.commit` removed from `configOf`
+      (`src/admin/configuration.ts`), its type and `test/backbone/core-config/config.schema.json`, with the tests.
+      **Acceptance:** A66 (`/config`).
+      **Done (2026-10-27):** `/config`'s `build` is `{ umbradb }` — `BUILD` in `src/admin/configuration.ts` (also
+      `UNVALIDATED_CONFIG`'s, the build only before the validation) and `ConfigSnapshot.build`'s type
+      (`src/admin/types.ts`) without `commit`, their comments citing Q134 D; the schema's `build` requires `umbradb`
+      only, with `additionalProperties: false`, so a body naming a commit — `null` or a hash — fails it (two committed
+      negative controls in `config-schema.test.ts`, replacing "a commit before a build records one");
+      `core-config.test.ts` expects the build without it. Tests first: on the old sources 7 of the folder's 21 failed
+      for the intended reason (`/build: must NOT have additional properties {"additionalProperty":"commit"}` for the
+      full body and for every `/config` read through the process on PostgreSQL 18.6 and PGlite 0.5.10; the build with
+      `commit: null` in the two expectations). A66 for `/config` passes on both backends; with `test/admin`,
+      `test/backbone/core-status` and `core-health`: 18 files, 198 tests passed (3 skipped, environment-gated).
+- [x] 8.3a `/status`'s node fields (AE-5 as amended): `node.bestHead`, `node.connection` and `node.queueDepth` are
+      always `null` — `src/admin/types.ts` types `connection` as `null`, and 8.3 left the three to 10.3, which reports
+      none. The node source and its client report the best head, the connection's state (`connecting`, `connected`,
+      `retrying`, `closed`) and the best-block queue's depth to the process's published state; the schema and
+      `docs/operator-guide.md` follow. On a private process, which has no node, they stay `null`.
+      **Acceptance:** A168; A66 with the three fields.
+      **Done (2026-10-27):** `NodeClient.connection` (`NodeConnection`: `connecting` before the first connection opened,
+      `connected` while one is open, `retrying` from a failed or lost connection until the next one opens, `closed`)
+      and `onConnectionChange`, told each change once; the node source's `nodeView()` (`BlockSource.nodeView`,
+      `SourceNodeView`): the best head the node announced last — each new-heads notification's height, taken before
+      the queue decides anything, so also during startup, a catch-up and a full queue — and the queue's length. The
+      process gives both to `ProcessAdmin` (`node`, `NodeFacts`) at each snapshot, and publishes at once on a connection
+      change and once its client and source are made; `NodeStatus.connection` is the four or null, and so is the
+      schema's; `queueDepth` is null only for a source without a queue (the in-memory one). On a private process `node`
+      stays null, so the three are null with it. `docs/operator-guide.md` ("The node on `/status`") and `design.md` §3
+      follow. Tests first: on `0465efa`'s sources the new unit tests failed for the intended reason (`connection`
+      undefined, `nodeView is not a function`, the three fields null, the schema refusing a state), and A168's process
+      test on both backends with exactly the three fields null in each of its six phases. A168 passes on PostgreSQL
+      18.6 and PGlite 0.5.10 (`test/backbone/core-status/node-fields.test.ts`: a core against a tape node, `/status`
+      read over HTTP, every body validated against the schema), with its committed negative control
+      (`node-fields.negative-control.test.ts`: the three published null fail it in exactly those fields).
+- [x] 8.3b The owner's answer Q174 B: while the finalized loop is paused — `ProcessHandle.pause()`, or a backup on
+      SIGUSR2 waiting for its pause and being written (task 15.1a) — `/status` lists a condition `paused` with `since`
+      (RFC 3339 text in UTC, Q68) and `by` (`pause` or `signal`), gone once the loop runs again; readiness is unchanged
+      (AE-4). AE-3 as amended, `/status`'s JSON schema, the conditions' registry, `docs/operator-guide.md`.
+      **Acceptance:** A176.
+      **Done (2026-10-28):** `LoopPauses.pausedAt` (`src/runner/pause.ts`): while the loop is paused, the time it paused
+      — kept while any hold is kept, the step from the wait for the head to the next pause included — and `by`: `pause`
+      while a hold of `pause()` is kept, else `signal`; each change told once to `onChange`. The process lists it as
+      `PausedCondition` (`since` through `utcText`) and publishes each change to the admin endpoints at once; holds are
+      taken as `pause` by `pause()` and `signal` by the backup on SIGUSR2. The schema's `condition` has `paused`
+      (`since` a `utcTime`, `by` the two words, nothing else); the registry check (`status-schema.test.ts`) holds AE-3's
+      conditions and the schema's to one list. `docs/operator-guide.md` ("A paused loop on `/status`"), `design.md` §3.
+      Tests first: on `82f7fc0`'s sources the new tests failed for the intended reason (`pausedAt` undefined, the
+      schema without `paused`, A176's four pause phases and its SIGUSR2 phase never showing it, readiness passing).
+      A176 passes on PostgreSQL 18.6 and PGlite 0.5.10 (`test/backbone/core-status/paused.test.ts`, with
+      `paused-harness.ts`: `/status` and `/health/ready` read over HTTP, every body validated; the SIGUSR2 half on
+      PGlite, a read of the test holding PGlite's queue so the backup waits while `/status` is read), with its committed
+      negative controls (`paused.negative-control.test.ts`: a publication without `paused` and one keeping it after the
+      loop runs again, each failing in exactly its phases); `LoopPauses.pausedAt` alone in
+      `test/runner/pause-condition.test.ts`.
+
+## 9. Test tape
+
+- [x] 9.1 Tape reader and writer (including `delayMs`); the tape node.
+      **Acceptance:** A68, A69, A70.
+      **Done (2026-10-25):** the test tape in `tools/tape/` (design §1: unexported, outside `tsconfig.build.json` and
+      the package; tests import `tools/tape/index.js`; `tsconfig.json` and the coverage take `tools/**`, held to §13's
+      default as `**/tools/tape/**` 90/85, design §13). **Format and reader/writer** (`records.ts`, `tape.ts`): TT-1's
+      five kinds as plain values, each field checked (an unknown or missing field, `result` and `error` both or
+      neither, `delayMs` outside 0 to 2^31 − 1, an id that is not a string or a safe integer, a `fault` other than
+      `timeout`/`error`, a `code` that is not an integer; a field set to `undefined` is left out), and TT-3's rules
+      across lines (a subscription id unique in its session, each notification after its `subscribe` in the same
+      session); one form per record — fields in TT-1's order, JSON without spaces as `JSON.stringify` writes it, big
+      integers as digits (read without loss by the own JSON reader, Q78) — and a newline after each; the reader
+      accepts a line only in that form (`not-canonical`, naming the line the writer would write), so every readable
+      tape round-trips byte for byte and has one id (Q107, shipped A); the tape id is the SHA-256 of the bytes.
+      `bad-tape-record` is the tools' `TapeError` (line, `reason`), not an `UmbraError` code (design §11 now says
+      so). **The tape node** (`node.ts`, `session.ts`, `rules.ts`, `port.ts`): WebSocket JSON-RPC 2.0 on 127.0.0.1 at
+      a random free port ≥ 10000; the k-th connection gets the k-th session (the records up to each `disconnect`),
+      one beyond the last an empty session; in a session the k-th request of a method and params pair (params
+      compared as JSON values) gets the pair's k-th call, subscription or fault record, then the last call record
+      again (a subscription is not repeated); none: `not-on-tape` (JSON-RPC −32090, naming the method, with params and
+      session in `data`), which the node client reads as `node-error` `rpc-error` and never retries; `delayMs` on the
+      node's clock (injectable; a timer that fires early is set again, so no answer leaves early); notifications in
+      file order, each once every record before it is done, as Substrate's `chain_newHead`/`chain_finalizedHead`; a
+      `disconnect` drops the connection (1006) once the frames before it are written out, answering nothing
+      meanwhile, and a session starting with one drops at once (an outage is a run of them); a timeout fault answers
+      nothing, an error fault `{ code (−32603 without one), "tape fault: <method>" }`; a call log (session, method,
+      params, occurrence, record line, outcome) with `count(method, params?)`. Tests, seen failing first (all four
+      files: `Cannot find module '../../tools/tape/index.js'`): `test/tape/format.test.ts` (A68: the committed
+      `fixtures/every-kind.tape.jsonl`, written by hand, against the writer both ways, its pinned SHA-256; a seeded
+      property; 53 malformed lines at line 12 with their reasons, file-level refusals, 18 writer refusals),
+      `node.test.ts` (A69, A70 over a bare WebSocket client: exact frames, `not-on-tape`, `delayMs` on a hand-moved
+      clock and its lower bound on the real one, notifications, sessions, disconnects, faults, the call log, malformed
+      frames, the port and clock), `node-client.test.ts` (A69, A70 through `src/node/`'s `NodeClient`, unchanged:
+      occurrence, `not-on-tape` an unretried `node-error`, delays, headers after their calls, TT-3's reconnect with
+      `restarted`, an outage's back-off, both faults; every request inside IN-8). Committed negative controls
+      (`tape.negative-control.test.ts`): a writer ordering fields otherwise, a node answering by first match, one
+      ignoring `delayMs`, one delaying the next record too, one delivering a notification before the calls ahead of
+      it — each fails its check. 176 wrong variants on the final sources (a scratch runner outside the clone, the
+      tree checked byte for byte after): 174 caught, 2 equivalent (the tape id taken from the written bytes, which
+      equal the bytes read; a fired delay timer left in the set `close` clears); a first run's 4 other survivors were
+      redundant code, removed.
+      **Pending:** the recording builder and the variant transforms (9.2); the real tapes (0.3); A83's `[CI]` sync
+      through the tape node (10.3); A84 and A85 against tapes (10.4); restarted processes against one tape node (18.1,
+      18.2).
+- [x] 9.2 The recording builder and the variant transforms.
+      **Acceptance:** A71 (`[CI]` part); the `[MANUAL]` record-and-replay against a real node is recorded for the PR.
+      **Done (2026-10-26):** in `tools/tape/` (unexported, as 9.1). **The builder** (`builder.ts`, its recorder
+      `recording.ts`): `TapeBuilder.start({ node })`, a WebSocket proxy on 127.0.0.1 at a random free port ≥ 10000;
+      each accepted connection opens its own to the node (`ws://` or `wss://`, never shown in an error) and is one
+      session, in accept order; frames pass unchanged both ways (the client's held while the node's connection opens;
+      pings answered by `ws`); `stop()` ends what is open and returns the records, checked as a tape, for
+      `writeTapeFile`. It records a call with the params the client sent (absent: `[]`), an answer to a head
+      subscription as `subscribe`, each notification as it came, a request still waiting when its connection ended as
+      a `timeout` fault, and a `disconnect` after each session but the last (and the last too when the node ended it);
+      no delays. Records follow the node's frames, except that answers of one method and params are written in request
+      order (a later one waits behind an earlier one, TT-2's occurrence rule). Each answer and notification must be the
+      very text the tape node writes for its record (`frames.ts`, now shared with `node.ts`: `jsonrpsee`'s field
+      order, the tape's JSON form), else the recording is void: `cannot-record` (`RecordingError`: session, side,
+      `reason` — `bad-request`, `duplicate-id`, `not-json-rpc`, `unknown-answer`, `unknown-subscription`,
+      `notification-method`, `out-of-order`, `bad-record`, `not-replayable`), every connection closed with 1011,
+      `failed` resolved, `stop()` rejected; strict on spelling (Q111, shipped A). A node that ends a connection
+      (or whose handshake fails: an empty session) has the client's dropped without a close frame once the frames
+      before are written out, as the tape node drops it. **The transforms** (`transforms.ts`, helpers `select.ts`),
+      pure, input and output checked with `checkTape`, `bad-transform` (`TransformError`) otherwise:
+      `dropNotifications` (from the `from`-th on), `skipNotifications` (`count` from the `from`-th),
+      `repeatNotification` (`times` copies after the `nth`), `insertDisconnect` (`count` disconnects after a line, a
+      `subscribe` record per live subscription in the next session, ids kept), `delayAnswers` (exactly the selected
+      calls), `replaceWithError`, `stateUnavailable` (Substrate's 4003 "State already discarded for <block>", the block
+      the call's last parameter), `spliceNotifications` (a range replaced one for one by another tape's, under the
+      target's id). **A71's `[MANUAL]` check** (`replay-check.ts`): `recordAndReplay` runs a `NodeClient` session
+      (default: the IN-8 tour, every IN-8 call once at the finalized head, then one new and two finalized heads)
+      through the builder, replays the tape to a new client and compares every frame of every connection.
+      **The command** (`command.ts`, entry `main.ts`, left out of coverage like `src/cli/main.ts`):
+      `npx tsx tools/tape/main.ts record --node <ws-url> --out <file>` (until Ctrl-C) and
+      `… check --node <ws-url> --out <file>`. Tests, seen failing first (6 files, 107 tests:
+      `Cannot read properties of undefined (reading 'start')`, `insertDisconnect is not a function`, …):
+      `test/tape/builder.test.ts` (A71 against the scripted server `scripted-node.ts`, which writes its frames with
+      `JSON.stringify`: record → replay byte-identical per connection, the committed `fixtures/a71-recorded.tape.jsonl`
+      written by hand and its SHA-256, frames forwarded unchanged; ordering, ends, concurrency, start and stop; 40
+      tests of refusals), `frames.test.ts`, `transforms.test.ts` (each transform against its committed expected output
+      in `fixtures/transforms/`, made from the recorded tape by line edits, with its SHA-256; the delay on exactly lines
+      5 and 19; refusals), `record-and-replay.test.ts` (through `src/node/`'s `NodeClient`, unchanged: the IN-8 tour on
+      the recorded mainnet answers, and a session with a drop, the back-off, the new subscription and the retried
+      call), `command.test.ts` (in this process and as a process of its own, Ctrl-C as SIGINT). Committed negative
+      controls: a builder that drops a notification, or records params other than the client's, fails the
+      byte-identical replay (`builder.negative-control.test.ts`); a delay set on an unselected call fails its expected
+      output, and an "insert a disconnect" that does not subscribe again fails its replay — no tape, or the client's
+      new subscription `not-on-tape` (`transforms.negative-control.test.ts`). Wrong variants (a scratch runner outside
+      the clone, the tree checked byte for byte after): a first full run of 191 left 26 survivors — 15 gaps, closed by
+      tests; 5 redundant checks, removed; 6 equivalent —; the final run on the final sources, 189 variants: 183 caught
+      (7 by the typecheck, whose type-correct forms the tests catch), 6 equivalent survivors (checks a tape already
+      passes by construction: the joined sessions and each transform's output; the `return` after a refusal, whose
+      sockets are already ending; a `disconnect` record's own session; a repeat placed before or after its equal).
+      Coverage of `tools/tape/` 100 %.
+      **`[MANUAL]`, for the owner with 0.3:** against a local devnet or Stagenet node,
+      `npx tsx tools/tape/main.ts check --node <ws-url> --out a71-<network>.tape.jsonl`: exit 0 and `identical: …`;
+      the PR records the network, the node's version, the command and the printed `<sha256>  <file>` line.
+      **Pending:** the `[MANUAL]` run (owner, with 0.3); the real tapes (0.3, best recorded through the builder by the
+      client that replays them); Q111; `docs/issues/00016-heartbeat-above-timer-limit.md`.
+      **The `[MANUAL]` run (task 0.3, 2026-10-26):** `check` against the undeployed devnet (node 2.1.0-1b2b31c7):
+      `fc1895ac1a3714c10c9196d724ce6a6e754d757abd0157fabb33ef28773b5d29`, identical, 12 frames sent and 16 received;
+      the same against preview (node 1.0.400-87c0fbdb), identical. The pull request records them (19.5).
+
+## 10. Node client and ingest
+
+- [x] 10.1 The node client (refactored from `chain-archive-sync/node-rpc-client.ts`): JSON-RPC over WebSocket,
+      subscriptions, reconnect, timeouts, back-off; delete `chain-archive-sync/indexer-client.ts`.
+      **Acceptance:** A83 (`[STATIC]` part); the refactored node-client tests pass.
+      **Done (2026-10-25):** the node client, `NodeClient` (`src/node/`): JSON-RPC 2.0 over one WebSocket (`ws`,
+      behind a small transport interface, `socket.ts`, so the browser build and the tests give their own), one method
+      per IN-8 call — `finalizedHead`, `blockHash(height)`, `header(hash)`, `block(hash)`, `runtimeVersion(at)`,
+      `metadata(at)`, `storage(key, at)`, `storageKeys(prefix, count, startKey, at)`, `ledgerStateRoot(at)`,
+      `systemProperties()` — each naming its block (never the node's best block) and reading the answer into frozen
+      typed values (32-byte hashes; a header with `parentHash`, `number` as a `bigint`, `stateRoot`, `extrinsicsRoot`
+      and its digest items; a block's extrinsics; a runtime version; the ledger root from its byte array); `call()`
+      refuses a method outside IN-8 before sending (`NODE_METHODS`, bound to IN-8's text by a test); and
+      `subscribeNewHeads`, `subscribeFinalizedHeads`, cancelled on the client's side only (IN-8 has no unsubscribe
+      call) and made again after a reconnect, the subscriber told (`restarted`) before its next header. One connection
+      from the first use until `close()`, connected again after IN-10's back-off (1 s doubling up to
+      `backoffCeilingMs`, without limit, counted over the connections the node did not answer on); a heartbeat (30 s)
+      ends a connection that answers no ping; each try of a call has a timeout (30 s by default), and a call retries a
+      retryable failure with its own back-off unless `retry: false` (the best-block queue's calls). Errors are
+      `UmbraError`s with three new codes: `node-unreachable`, retryable (`UmbraError.retryable` is now true for it and
+      `connection-lost`): a connection failed, lost or refused with HTTP 429 or 5xx, a timeout, the node's rate limit
+      (`-32999`, the open connection's form of 429); `node-requirement`, IN-9's halt: a `null` block, or Substrate's
+      "State already discarded"; `node-error`: any other error answer, handshake status, malformed answer or frame, or
+      a method outside IN-8. None shows the node's URL (CF-4). `chain-archive-sync/indexer-client.ts` deleted, with the
+      0.9.5 sync path that needed it (`sync-service.ts`, `sync-cli.ts`, the `archive:sync` script) and the tests that
+      drove it (`test/integration/chain-archive-{sync,sync-retry,preprod-cloud-crossval}`, retired by `design.md`
+      §13); `node-rpc-client.ts` and its test refactored into `src/node/` and
+      `test/node/refactored-node-rpc-client.test.ts` (each assertion that still applies kept; the `fetch` signal and
+      "carrying the URL" no longer apply). `design.md` §3 and §14, `docs/features/full-chain-storage.md`. No question
+      raised. Tests, seen failing first (the modules missing; A83's scan finding 0.9.5's indexer client and its users
+      in `chain-archive-sync/`, 13 findings; `node-unreachable` not a code): `test/node/` — `client.test.ts` (a
+      scripted node on a random port ≥ 10000, the client's clock moved by hand: every call against the recorded
+      answers of a mainnet node, subscriptions, reconnects, the back-off to the millisecond, timeouts, which failures
+      are retried and which halt, the URL kept out of every error, `close()`, abort signals, the heartbeat),
+      `classification.test.ts`, `methods.test.ts`, `refactored-node-rpc-client.test.ts`,
+      `no-indexer-or-wallet-sdk.test.ts` (A83 `[STATIC]`); `test/db/errors.test.ts` and
+      `test/deterministic-postgresql/errors.test.ts` (the retryable codes). Committed negative controls: A83's fixtures
+      (every import form of a forbidden package caught, a clean file not, a forbidden run-time dependency caught);
+      IN-8's check of every request the fake nodes received, with its control naming `rpc_methods`; halting errors
+      sent once with retries on; the back-off's exact delays. 113 wrong variants (a scratch runner outside the clone,
+      the tree checked byte for byte after): 112 caught, 1 equivalent (`#try`'s check that the client is open, which the
+      connection check already implies); a first run's 6 other survivors were gaps, closed by tests.
+      **Pending:** A83's `[CI]` half, a 1,000-height sync against the tape node (9.1, 10.3); the node half of A85
+      against a tape (9.x, 10.4); the halts these errors lead to (10.4); the hash of a notified header (10.3).
+- [x] 10.2 `core-chain` (identity, bootstrap, startup checks) and `core-block-commit` (the `blocks` table from the
+      `chain_archive` store, keeping range partitioning; block time as `block_time timestamptz`, converted exactly from
+      the node's milliseconds, never through a floating-point value, Q74).
+      **Acceptance:** A77, A78, A88, A90; A145's block-time part.
+      **Done (2026-10-26):** `core-block-commit` completed (`src/backbone/core-block-commit/`, its migration `001`
+      replaced — no database exists): `core_block_commit.blocks (height) → hash, parent_hash, spec_version,
+      ledger_version, block_time`, range-partitioned by height as 0.9.5's `chain_archive` store was — 1,000,000 heights
+      per partition, five from 0 and a default (`src/backbone/height-partitions.ts`, new, for every per-block table) —,
+      and the unpartitioned `core_block_commit.hashes (hash) → height`; per block the block's row (the cursor, first)
+      from the block context and the `block` items it now requires, `block-header` (`specVersion`, `timestampMs`) and
+      `ledger-version`, refused before anything is sent when unreadable, the time converted by PostgreSQL's integer
+      interval input (`'<ms> milliseconds'`), never through a float — `to_timestamp` and `bigint * interval` round far
+      from 1970 —; then the hash's row, whose primary-key violation is `duplicate-block-hash`; then IN-4's parent check
+      against the block stored at h − 1 (`parent-mismatch`; none for the anchor), after the duplicate, for every block
+      source. `BLOCKS_TABLE` and `HASHES_TABLE`; `CURSOR_TABLE` kept as a deprecated alias for the loop (task 6.1's
+      note). `core-chain` (`src/backbone/core-chain/core-chain.ts`, new): a constant declaration `CORE_CHAIN` that the
+      runner binds to its process context (`bindCoreChain`) with what startup checked and opened; migrations `001` (task
+      4.3's `core_chain.config`, its text unchanged, now `CONFIG_MIGRATION`) and `002` (`core_chain.identity`: genesis
+      hash, S, anchor hash); its `on-start-db` records the history (CF-6), the genesis hash and S on a database without
+      a cursor — at every start until block S commits, so an interrupted bootstrap is repeated (IN-2) —, and publishes
+      `config`, `node-client` (a `NodeClient` from the process's `node`, closed at stop), `db` (`readOnlyDatabase`) and
+      `ledger-table` (empty until tasks 12.x); its `on-db-write` records the anchor hash in block S's transaction. Its
+      startup checks ask the block source (RN-14) — the node through `core-block-fetch` (task 10.3), or the in-memory
+      source —: `checkChain` reads the genesis hash (block 0's) and on a database with a cursor refuses another one
+      (`genesis-mismatch`), waits while the head is below the cursor (`waiting-for-node`) and refuses another hash at
+      the cursor (`cursor-hash-mismatch`), all before any migration; `waitForNode` is the bootstrap's wait while S is
+      above the head. `src/runner/process.ts`: `onChecked` replaced — the identity read with the cursor and the history,
+      `checkChain` after the history's check (a negative controls' seam `checkChain`), `core-chain` bound after the
+      contexts (again, the earlier binding closed, when task 5.4 retries startup), the bootstrap's wait after the seal
+      and before `startModuleApi` (still `starting`; so a retried startup never finds the module API listening), the
+      condition `waiting-for-node` (the height waited for, the head) while either wait runs, beside 5.4's
+      `node-retrying` or `database-retrying` when a retry is raised; a refused startup closes the node client with the
+      database, and `stop()` closes it. Rebased onto task 5.4 (`d0e989a`): the four codes in 5.4's `REFUSAL_CODES`
+      (`genesis-mismatch`, `cursor-hash-mismatch`) and `HALT_CODES` (`duplicate-block-hash`, `parent-mismatch`), so a
+      refused start is `refused` and a repeated hash `halted` with the code as its reason; the `onChecked` lines of
+      5.4's tests removed. `buildDeclarations()` holds `core-chain`. Codes `genesis-mismatch`, `cursor-hash-mismatch`,
+      `duplicate-block-hash`, `parent-mismatch` in `ERROR_CODES`. `design.md` §2, §3, §10; the module guide ("Time
+      values", "Process items and APIs"). Questions Q118 (CD-3's "first" against RN-3's order once `core-chain`
+      writes the anchor at `on-db-write`; shipped A), Q119 (the partitions past 5,000,000; shipped A) and Q120
+      (the node's genesis hash not compared with the configured network's; shipped A) raised, none blocking. Tests, seen
+      failing first (`tsc` exit 2, 45 errors: the new exports, `height-partitions.js`, the seam and the condition
+      missing; Vitest 58 of 58 failed): `test/backbone/core-block-commit.test.ts` (rewritten: the declaration, migration
+      `001` pinned, the partitions, the items' refusals; on both backends the tables' shape, A145's five times exact, a
+      duplicate in another partition, `parent-mismatch`, the anchor, the precedence, the cursor across partitions),
+      `core-chain.test.ts` (the declaration and migrations; `checkChain` and `waitForNode`; on both backends the
+      identity's table, its bootstrap and repeat, the anchor in S's transaction, the four items — `db` by 2.8's runtime
+      check, moved to `test/db/read-only-checks.ts` —, the node client closed), `chain-process.test.ts` (through the
+      process on PostgreSQL 18.6 and PGlite 0.5.10: A77 — with a real SIGKILL while waiting and inside block S's
+      transaction, `chain-bootstrap.worker.ts` —, A88 at S = 0 and 12, A78, a failing bootstrap wait, A90 from S =
+      999,998 across partitions p0 and p1, A145, A144 through the real part), with `chain-build.ts` and
+      `block-fetch-stand-in.ts` (the `core-block-fetch` stand-in putting the items, also in `LOOP_BACKBONE`). The
+      5.2–5.3 runner tests follow the new contract without a weaker assertion (`onChecked` lines removed,
+      `process-build.ts`'s `core-chain` the real one, A37 counting a partitioned table once and `core-block-commit`'s
+      two rows per height). Committed negative controls: an anchor recorded in the next block's transaction fails A77; a
+      startup check that skips the genesis or the cursor's hash comparison fails A78; no hash row (the repeat commits,
+      the next block halts with `parent-mismatch`) and the parent check first (an earlier block delivered again named
+      `parent-mismatch`) fail A90; a block time through `to_timestamp` fails A145 on 99,999,999,999,999 and
+      253,402,300,799,999 ms. Wrong variants (a scratch runner outside the clone): 106 on the first run, 103 caught —
+      the 3 survivors one gap (the hash row's translation keyed on the constraint alone; closed by a test) and 2
+      equivalent (the parent comparison's length check, both hashes being 32 bytes by the blocks table's `CHECK`s; the
+      bootstrap's wait also at a start with a cursor, whose head is then already at or above S) —; on the final sources
+      104 of 106 caught, the 2 survivors equivalent.
+      **Pending:** the node source answering
+      `core-chain`'s checks, the real `core-block-fetch` putting the items, one node connection, IN-4's finality check
+      (10.3); `node-retrying` during the startup waits and the halt registry (10.4); the ledger table (12.x); the
+      exports and codes in the surface pin (17.x); Q118 to Q120 (owner).
+- [x] 10.3 `core-block-fetch`: finalized processing, the finalized prefetch, the best-block queue with branch switches,
+      block 0's fetch path.
+      **Acceptance:** A76, A79, A80, A81, A83, A89.
+      **Done (2026-10-26):** `core-block-fetch` (`src/backbone/core-block-fetch/`, new): the declaration
+      `CORE_BLOCK_FETCH` (requires `node-client` and `ledger-table`; at `on-fetch` it puts the four `block` items its
+      block source gives, through `bindCoreBlockFetch`) and the node-backed block source `NodeBlockSource`
+      (`nodeSourceOf(core, { nodeClient })`, what `umbradb run` passes as `source`). **The finalized head** (IN-4): at
+      first use the source subscribes to the finalized and the new heads, then reads the head (`chain_getFinalizedHead`,
+      `chain_getHeader`); notifications only raise it, a reconnect (`restarted`) reads it again; a notified header's
+      hash is BLAKE2b-256 of its SCALE encoding (`blake2b.ts`, `header.ts`: checked against RFC 7693's and Python's
+      vectors and the real mainnet header of 3,174,332). **`finality-conflict`** (new `ErrorCode` and halt): a finalized
+      notification naming another hash than the one the source read at its height, or at or below the loop's cursor the
+      database's (`QueueRunner.storedHash`), fails the source and the loop halts at its next call. **The finalized
+      prefetch** (IN-5): from the cursor + 1 to the lower of the cursor + `prefetchWindow` and the head the loop last
+      read (so its `on-finalized` comes first), eight heights at a time: `chain_getBlockHash`, then the queued block of
+      that hash — the heights looking into the queue in height order — or `chain_getBlock`, and `on-fetch`/`on-parse`
+      through the runner. **The best-block queue** (IN-6), one change at a time: `on-best-block`, `chain_getBlock`,
+      `on-fetch`/`on-parse`, appended on its parent or the walk over `chain_getHeader` to a queued block or the head,
+      the blocks above the ancestor dropped with one `on-rollback` and the branch fetched; calls without retries, any
+      error dropping the block (IN-10); `tipCap` with the condition `finality-stall` (`status().conditions`); queued
+      only while the head is within `prefetchWindow` of the cursor (Q129); a head naming another hash at a queued
+      height drops from there; at finality a queued block with the finalized hash goes on with its items, unfetched;
+      `close` ends the subscriptions and every pending wait and later call. **The runner** (`src/runner/`):
+      `BlockSource` gains optional `attach` (the loop gives a `QueueRunner` — `prepare` (`on-fetch`, `on-parse`),
+      `bestBlock`, `rollback`, `storedHash` — for each run and takes it back at its end; RN-1: the queue's points only
+      through it), `prepared` (the loop goes on from `on-start-height` with the source's items, `HeightRun.prepared`)
+      and `conditions` (`close`, task 14.1's, the node source has too); the in-memory source gives `core-block-fetch`
+      its own items (`blockItems`: runtime 2.0, `v9`, six-second blocks, or a block's own through `items`). **The
+      items** (CD-2): `block-header` (heights, hashes, roots, digest, the `MNSV` `spec_version`, the time from the
+      `Timestamp::set` inherent, 0 for a block 0 without one), `block-body` (each extrinsic's version and, unsigned, its
+      call named by the metadata: `extrinsics.ts`), `runtime-metadata` (`RuntimeMetadata.forBlock`: the parent's state's
+      runtime, block 0's own, LG-4) and `ledger-version` (`selectLedgerVersion` over `ledger-table`, as text); the
+      metadata read as V14 — what `state_getMetadata` answers — or V15 to its pallets (`metadata.ts`, `scale.ts`; the
+      type registry reader checked on the six Midnight node metadata files of `midnight-indexer` 2.1.0-rc.4, in a
+      scratch probe). **Block 0** (IN-7) takes the same path. **The wiring** (`src/runner/process.ts`): the process
+      makes its one `NodeClient` from the `core` revision's `node`, gives it to the source factory and to `core-chain`,
+      whose `node-client` it is, binds `core-block-fetch` to the source, shows the source's conditions in `status()` and
+      closes the client and, after the database, the source at stop or refusal (14.1's order); `core-chain` publishes
+      the revision's ledger table in effect as `ledger-table` (`PENDING_LEDGER_TABLE` removed); `buildDeclarations()`
+      holds `CORE_BLOCK_FETCH`. `design.md` §2, §3; the module guide ("Blocks from the node"). Question Q129 (best
+      blocks during a catch-up: IN-6 against A80) raised, not blocking, shipped B. Tests, seen failing first against the
+      task's starting sources (`src/` stashed: `tsc` exit 2, 50 errors — `Cannot find module` for
+      `src/backbone/core-block-fetch/*` (12), the missing exports and `blockItems` —; Vitest: the three suites written
+      first failed to load; `core-block-fetch.test.ts`, the controls and `ingest-crash.test.ts`, written next, were seen
+      failing through their controls and the wrong variants): `test/backbone/block-fetch-decode.test.ts` (22: BLAKE2b,
+      the mainnet header's hash, SCALE, metadata V14/V15 and refusals, the real mainnet block 3,174,332's seven
+      extrinsics named and its time 2026-10-25T22:20:12Z), `node-source.test.ts` (47: the head, reconnects, close,
+      conflicts, the prefetch's window, bound, concurrency and runs, the queue's appends, switches, walks, `tipCap`,
+      errors without retries, drops at finality in height order, the items), `core-block-fetch.test.ts` (6),
+      `ingest.test.ts` (20, through the process on PostgreSQL 18.6 and PGlite 0.5.10: A79's three cases, A80 and A83
+      over 1,000 heights (200 on PostgreSQL, whose 1,000 one-transaction heights outlast the gate under load), A81's
+      switch and `tipCap`, A89 at a synthetic upgrade, block 0 with and without `Timestamp::set`, the stop closing the
+      client, then the source), `ingest-crash.test.ts` (A76 with a real SIGKILL, PostgreSQL and PGlite, and its restart;
+      tagged `[[ingest.no-unfinalized-rows-after-crash]]`); synthetic tapes in the node's answer shapes
+      (`fetch-fixtures.ts`, `ingest-tapes.ts`). Committed negative controls (`ingest.negative-control.test.ts`,
+      `ingest-crash.test.ts`): a source writing best blocks to the database fails A76; one not reading the head again
+      misses A79's heights after the disconnect; a prefetch without a window fails A80; a switch fetching 101′ again
+      fails A81's counts; a source asking a method outside IN-8 fails A83; a decode with the block's own metadata fails
+      A89 at U. Process tests run the real `core-block-fetch` (the stand-in stays for the loop's own tests);
+      `core-chain`'s tests give the shared client and the table. Wrong variants (scratch runners over copies of the
+      clone, outside it: each alone, `tsc` and its group's suites, per-test timeouts, no `--bail`, a suite over 900 s
+      counted caught): 157 run on three copies, 144 caught (5 by `tsc`, 3 by the time limit), 13 survived — 10 gaps,
+      each closed by a test seen failing on the variant; 2 the process cannot reach (the last run's head kept as the
+      prefetch's bound, which every run reads again first; the best-block check against a cursor above the head, which
+      the loop never attaches with), closed at the source's API; 1 on code since changed (`close` now fails the source,
+      its new variant caught) —; the 6 caught only by the time limit or by the A80 PostgreSQL wait timing out under load
+      were given direct tests, one of which showed the prefetch looking into the queue in the order its hash reads came
+      back (a drop at finality could be two `on-rollback`s, the higher first: now in height order). On the final sources
+      the 29 variants of the survivors, the changed functions and the load-only catches, rerun: 29 caught.
+      **Pending:** IN-10's items kept across a retried height and IN-11 with the node source, `node-retrying` from the
+      client, the registry (10.4); `chain-events`, the ledger transactions and signed extrinsics' calls (11.1); block
+      0's ledger path (12.3); real tapes for every criterion (0.3, 18.2); `/status` serving `finality-stall` (8.3);
+      `umbradb run` passing `nodeSourceOf` (4.4); Q129 (owner).
+- [x] 10.4 Error handling, retries and halts; recovery after an uncertain COMMIT; the refusal and halt registry.
+      **Acceptance:** A84, A85, A86, A87.
+      **Done (2026-10-26):** the finalized loop (`src/runner/loop.ts`) holds a height a retryable failure
+      (`connection-lost`, `node-unreachable`, directly or as a callback's) stopped after its `on-parse` and before it
+      committed (`HeldHeight`: the block, the cursor before it, its `block` items as `on-fetch` and `on-parse` left
+      them — `BlockItems.restore` drops the failed `on-compute`'s —, the point it resumes at, and whether the failure
+      came from the `COMMIT`); the process's retry runs the same loop, which first reads the cursor inside a transaction
+      on the writer — a new session after a lost connection, which takes the writer lock again first (DB-11) — and then
+      (`commitOutcome`, IN-11): h with the block's hash after a failed `COMMIT` — `on-after-db-write` and
+      `on-stop-height` for h, then h + 1; the cursor before h — h again from `on-compute` (from `on-start-height` when
+      the failure came before `on-compute` began), nothing fetched or parsed again, the cursor's `on-after-db-write` not
+      re-delivered (a retryable failure on the way to h keeps it held); anything else — `unexpected-cursor` at h. A
+      failure before `on-parse` ended holds nothing (the loop runs from the cursor, re-delivered, as before). The node
+      client's own retries (it retries without limit, so a finalized call never fails with `node-unreachable`) are the
+      process's `node-retrying` (the most attempts it counted, the height processed or waited for, none during
+      startup; the process's own when both) and a log line each (`src/runner/process.ts`; `ProcessInput.nodeClient`,
+      the tests' clock). IN-9's halt was built by 10.1, 5.4 and 10.3; A84 is now tested through the process. A87:
+      `test/runner/code-registry.ts` names, for each refusal and halt code of design §11, the tests that trigger it
+      and check it, or the task that adds it — a shrink-only list of 15 pending codes (14.3, 14.4, 15.1, 15.2, 13.1's
+      `fast-log-unsupported`; 12.3's `root-mismatch` registered at integration). Tests:
+      `test/runner/held-height.test.ts` (both backends, a database whose `COMMIT` fails after its body),
+      `recovery.test.ts` (PostgreSQL: `pg_terminate_backend` during `on-db-write`, and during the `COMMIT` through a
+      proxy holding it or its answer, `commit-proxy.ts`; tagged `[[ingest.uncertain-commit-recovery]]`, not yet in the
+      manifest, 18.4), `retries.test.ts` (the process on both backends), `test/backbone/ingest-faults.test.ts` (A84 and
+      A85's node clauses against tapes, the two-minute outage on a node-client clock 100 times faster),
+      `code-registry.test.ts`; committed negative controls (a client asking again after "state unavailable", a process
+      whose client reports nothing, a loop dropping the held height, two reading a lost `COMMIT` the wrong way, a
+      registry missing a code). **Waits:** A85's "the ledger state is reloaded at the cursor, and h's root matches
+      the node's" (12.3, 12.4); issue 00028-parent-check-passes-a-gap (a block above a missing height commits).
+- [x] 10.2a The owner's answers Q117 A and Q120 B: the node's genesis hash compared with the configured network's at
+      every start (built in, or `genesisHash` for `custom`); a known network whose built-in table records no genesis
+      hash is refused until task 0.3 records it.
+      **Acceptance:** A78 (as amended).
+      **Done (2026-10-26):** `checkChain` (`src/backbone/core-chain/core-chain.ts`) takes the configured network's
+      genesis (`configuredGenesisOf` of the process's `core` revision: the built-in table's hash for a known network,
+      read through task 12.2's `builtInNetwork`, never a constant; `genesisHash` for `custom`) and checks, in order: a
+      known network whose built-in table records no genesis hash — refused before the node is asked (`genesis-mismatch`,
+      `details { network, configured: null }`; since task 0.3 every known network has one, so it applies to none in this
+      build); the node's genesis hash against the configured one at every start, on an empty database too (`details {
+      network, configured, node }`); on a database with a cursor, against the stored one (`details { stored, node }`);
+      the wait while the head is below the cursor; the hash at the cursor, last (the node's hash there is a finalized
+      one only once its head reached it). A `custom` network without `genesisHash` never reaches them: the configuration
+      refuses it (CF-4, `invalid-configuration`, before the database opens). A private process's check stays its
+      source's, which compares nothing with its configured network (question Q136, shipped A).
+      `src/runner/process.ts` passes `configured` (one line). The process tests' network is now `custom` with the
+      in-memory chain's genesis and LG-3's rows (`test/runner/process-build.ts`'s `coreSettings`, overridden by a test
+      naming another network), the ingest harness gives a tape's `chain_getBlockHash [0]` as `genesisHash`. `design.md`
+      §2, §3, §5.6. Tests, seen failing first (`tsc` 20 errors: `configured` not in `ChainCheckInput`,
+      `configuredGenesisOf` and `ConfiguredGenesis` missing; Vitest 7 unit tests and A78's cases failing, the empty
+      database's three accepted): `test/backbone/core-chain.test.ts` (the configured comparison on new and old
+      databases, its order, Q117's refusal before the node is asked, `configuredGenesisOf` over 12.2's table and a
+      networks file whose stagenet records none), `chain-process.test.ts` (A78 as amended on PostgreSQL 18.6 and PGlite
+      0.5.10: a node of another network on an empty database and at a start with a cursor, a mainnet configuration
+      against a preprod node, a known network without a recorded genesis — planted through `builtInNetwork` —, a
+      database whose stored genesis is not the node's, the cursor's hash, the wait; a `custom` network without
+      `genesisHash`; with task 0.3's preprod tape, the real node's genesis refusing a mainnet configuration and starting
+      a preprod one, skipped without `UMBRADB_TAPES`). Committed negative controls: a check that skips the configured
+      genesis on an empty database accepts A78's three empty-database cases, one that skips the stored genesis and one
+      that skips the cursor's hash each fail exactly their case. Wrong variants (a scratch copy outside the clone): 18
+      on the new logic (`configuredGenesisOf` 6, `checkChain` 10, the process 2), 17 caught (one by the run's limit
+      after the unit tests failed: a retryable code retried startup for ever), 1 gap — a known network taking a
+      `genesisHash` the configuration refuses — closed by an assertion and caught on rerun. Issues
+      `00026-core-revisions-name-different-networks` and `00027-v8-fatal-wasm-free-hangs-test-worker` recorded.
+      **Pending:** the configured network's genesis on a private process (Q136, owner).
+- [x] 10.2b The owner's answer Q136 B: a private process's configured network compared with its public database's
+      genesis. `PrivateBlockSource.checkChain` (task 14.1; it receives `configured` since 10.2a) compares the
+      configured network's genesis hash (`configuredGenesisOf`) with the public database's identity before PP-2's
+      binding and before any migration, and refuses a difference with `private-binding-mismatch` (`details.reason`
+      `network`, both hashes); `design.md` §5 and §11 name the reason; A113's committed control changes, since its
+      other-network case is now refused by this check first.
+      **Acceptance:** A156.
+      **Done (2026-10-27):** `PrivateBlockSource.checkChain(input)` (`src/backbone/core-private-source/`) checks, before
+      any migration, in order: the public database's identity (`public-not-started`, Q125), then its genesis hash
+      against `input.configured` (`networkRefusal`: the whole hash; `details { reason: "network", network, configured,
+      public }`, both as `0x` hex; a known network whose built-in table records none refused alike with `configured:
+      null`, as Q117 on the core). PP-2's comparisons with the recorded binding (`genesis`, `start`,
+      `private-start-below`) stay the part's `on-start-db`, after it. `hello-ack.genesis` (14.2) is not compared: with a
+      PGlite or no `publicDatabase` the identity read comes through that transport, and with a PostgreSQL one the
+      transport connects after startup's checks. The intake takes the negative controls' `network` check. The private
+      process's chain check is described in `design.md` §3 and §8 (§5 is the ledger's; the private chain check and the
+      binding are §8's), and §11 names `private-binding-mismatch`'s five reasons in a paragraph of their own (after the
+      code lists, so the registry of task 10.4 reads no reason as a code). Tests, seen failing first (`tsc` 15 errors:
+      `networkRefusal` missing, `checkChain` taking no input, no `network` seam; Vitest 9 failing):
+      `test/backbone/core-private-source.test.ts` (the comparison, by the whole hash, for `custom` and a known network,
+      the unrecorded case, `public-not-started` first, the seam) and `test/private/binding.test.ts` on PostgreSQL 18.6
+      and PGlite 0.5.10 — A156: configured for mainnet, and for a custom network whose hash differs from preprod's in
+      one byte, against the public database of a core whose genesis is preprod's, refused with both hashes, their
+      databases holding no table, schema or binding afterwards; configured for preprod it binds —, A113 asserting its
+      reasons (`network` for the other network's public database, `start`, `private-start-below`), and with the network
+      check skipped PP-2's binding alone refusing that database (`genesis`). Committed negative controls: a check that
+      skips the configured network binds A156's two other-network starts; A113's control is now a chain check that
+      compares nothing — no configured network and no binding (with the network check left in, a binding comparing
+      nothing no longer reaches the other-network case). Registry (A87): A156's test added under
+      `private-binding-mismatch`. Wrong variants (a scratch copy outside the clone): 13 on the new logic, 13 caught by
+      the unit suite; 7 of them run again against the process suite alone, 5 caught there, the 2 that compare one byte
+      of the hash surviving (the process tests' hashes differed in every byte), closed by A156's custom hash differing
+      from preprod's in one middle byte, then caught; none equivalent.
+
+## 11. Chain data
+
+- [x] 11.1 `core-chain-events`, `core-block-parsed`, `core-tx-results`.
+      **Acceptance:** A91, A92, A93.
+      **Done (2026-10-26):** three core modules, off unless configured, each with its `block` item and an append-only
+      table range-partitioned by height (`design.md` §10), in the build's core list. **`core-chain-events`**
+      (`src/backbone/core-chain-events/`): at `on-fetch` the block's `System::Events` — read by the block source it is
+      bound to (`bindCoreChainEvents`; the node source's `blockEvents`: `state_getStorage` of `twox128(System) ++
+      twox128(Events)` at the block's own hash, a best block's without retries; the in-memory source has none) — decoded
+      with the `runtime-metadata` item, the runtime in the parent's state that wrote them, as `chain-events` (index,
+      phase, extrinsic index, pallet, name, fields, topics, the record's SCALE bytes) and one row per event, the fields
+      as canonical JSON (64-bit and wider integers as text). The metadata reader now keeps each pallet's storage
+      entries; every type of the registry is read (`scale-value.ts`); the encoding is pinned against `polkadot-sdk`
+      `stable2606` (`frame_system`'s `Events`, `EventRecord`, `Phase`) and `midnight-node` 2.1.0-rc.4.
+      **`core-block-parsed`**: at `on-parse` the transactions placed in the order of their chain events, each outcome
+      event matched to its extrinsic by phase, a system transaction's bytes from its
+      `MidnightSystem::SystemTransactionApplied`, block 0's in body order (`placement.ts`); a block whose events do not
+      account for each Midnight transaction exactly once is refused (Q132); each transaction parsed once through a
+      `TransactionParser` — in this thread with the block's ledger adapter until 12.3's ledger worker — and its kind
+      checked against the chain's, as `block-parsed` (`{ ledger, transactions }`: the ledger's `ParsedTransaction` and
+      the phase, extrinsic and event indices) and rows (hash, kind, size). **`core-tx-results`**: each outcome from the
+      event that placed it — `TxApplied` and `SystemTransactionApplied` `success`, `TxPartialSuccess` `partial`,
+      `ExtrinsicFailed` `failure`, block 0's `success` — as `tx-results`, the form `ApplyInput.outcomes` takes, and
+      rows. **The node source** (10.3's): a best block the finalized head reaches while it is being prepared is now
+      queued as it is and used, or dropped with `on-rollback`, at its height's take — before, it was dropped and fetched
+      and parsed again (found by A92's counted parses). Tests (seen failing against `76de1b1`'s sources: `tsc` 64 errors
+      — the eight new modules missing, no `blockEvents` —, 6 of 6 Vitest files):
+      `test/backbone/chain-events-decode.test.ts` (25: the key against XXH64 written in the test, storage entries, every
+      value kind and refusal, canonical JSON, a block's events with every phase, topics and bytes, an upgrade block
+      against both runtimes' metadata, the types found by name), `chain-events-source.test.ts` (3),
+      `chain-placement.test.ts` (19: the official indexer's cases, each divergence refused, outcomes, the parse),
+      `chain-data.test.ts` (14, through `startProcess` over the node source on PostgreSQL 18.6 and PGlite 0.5.10: A91's
+      range and upgrade, A92 with counted native parses — the system transaction between two regular ones, a queued best
+      block, block 0 —, A93), three `node-source.test.ts` cases (the queue's change and its order guard); synthetic
+      tapes (`chain-data-tapes.ts`, `events-fixtures.ts`) with real ledger v9 transactions. Committed negative controls
+      (`chain-data.negative-control.test.ts`, both backends): events decoded with the block's own state's metadata halt
+      at U; a parse counted twice and a body-order placement fail A92; outcomes matched by event order fail A93. A probe
+      decoded the official indexer's recorded devnet blocks (`System::Events` as the node served them) with the node's
+      metadata registries byte for byte, and placed their transactions as its golden summaries (the 26 genesis
+      transactions in body order included). Wrong variants (a scratch copy, outside the clone): 91, 84 caught; of the 7
+      survivors 5 gaps closed by tests seen failing on them, 1 redundant check removed, 1 equivalent (a copy of the
+      bytes before the parse: the item keeps the parsed array); on the final sources 47 of 48 rerun caught, the one
+      survivor that equivalent.
+      **Pending:** A91's real devnet upgrade tape and every criterion on real tapes (0.3); CD-5's parse in the ledger
+      worker (12.3); Q132 (owner).
+
+## 12. Ledger
+
+- [x] 12.1 The `LedgerPackage` adapters for v8 (from `chain-archive-sync/tx-replay-decoder.ts`) and v9 (the v8
+      adapter's `decodeLogItem` returns null and its `apply` no logs, Q54); the adapter test suite.
+      **Acceptance:** A98.
+      **Done (2026-10-26):** in `src/ledger/` (internal; task 17.3 exports §12's `LedgerPackage`, `ParsedTransaction`
+      and `LedgerTask` from `types.ts`). **The interface** (`types.ts`): §5.1's, with the refinements of Q114
+      (shipped A, recorded in `design.md` §5.1): `apply` returns `{ state, output }`; `parseTransaction(bytes, index)`
+      parses once per `Uint8Array` (a `WeakMap`), which `apply` and the new `nativeTransaction(bytes)` (for ledger
+      tasks) reuse; an adapter is made for one network id; `LedgerEvent`, `LogItem`, `VmLog` and an opaque
+      `StateHandle` defined. **The adapters:** `adapter.ts`, shared, refactored from 0.9.5's replay decoder (the
+      self-tag, the deserialization markers — now read from the tag —, the walk over the intents by segment); `v8.ts`
+      (ledger-8.1.2: `decodeLogItem` null for every input, `apply` with no logs and no contract-log events, Q54; no
+      `convertFromV8`); `v9.ts` (ledger-9.1.0.0-rc.5: the VM's `decodeLogItem`, each contract log as a `VmLog` whose
+      value is `serializeStateValue`'s, `convertFromV8`); `releases.ts` (`LEDGER_RELEASES`, each version's release and
+      package name and version, held equal to `vendor/ledger`'s records); `load.ts` (`loadLedgerPackage(ledger,
+      { networkId })`: the version's vendored Node.js entry, imported when first asked for, so a thread pays only for
+      the packages it loads; a browser build calls `createV8Adapter`/`createV9Adapter` with its own entry, 16.1).
+      `apply` replays as the official indexer and the node do (LG-8: well formed at the block time or — for the
+      regular transactions up to the first that applies, where `firstRegularAtParentTime` — at the parent's time
+      + 12 s; no proof checks and no balancing, LG-15; a malformed, uncostable or ledger-failed transaction is a
+      `failure` that leaves the state as it was; the post-block update gets the summed stateless cost normalized and
+      its largest dimension, zero when nothing applied); a transaction's hash is SHA-256 of its serialization, the
+      ledger's own definition; every event but contract logs is a `LedgerEvent` with LG-16's fields (its kinds add
+      `contract-deploy`, which §10 lacks); the packages' `successfulSegments` is true for the segments that **failed**,
+      which the adapter inverts (issue 00018-wasm-successful-segments-are-failed-segments). **What crosses
+      threads** (LG-7, Q49): `ParsedTransaction`, `ApplyOutput`, `NodeBatch`, keys and roots, all plain (structured
+      clone round trips); states, parsed transactions, the packages and the node store stay in the thread that made
+      them. **Q113** (raised; not blocking 12.1, to be answered before 12.3's A99): the published API takes the
+      post-block fullness as JavaScript numbers (the node's `FixedPoint` loses its low bits), has no
+      system-transaction cost and no block limits, and `ApplyInput` has no dispatch outcomes — shipped C, the
+      published API, exact for blocks that apply nothing. `buildCoreVersion()`'s ledgers (4.1's note (e)) are left to
+      12.2, which checks the identity they record. Tests (`test/ledger/`, no node and no network; 4 files, 72 tests):
+      `adapter-suite.ts`, the one suite, its Q54 clause the parameter `logs`, run by `adapter-v8.test.ts` and
+      `adapter-v9.test.ts` (the latter also `convertFromV8` from a v8 state the v8 adapter stored, in a fresh worker and
+      here); `adapter-core.test.ts` (the event and log mapping, and `apply` on a package that records what it is
+      handed: block context, current state, strictness, times, fullness, largest dimension); fixtures
+      `adapter-fixtures.ts` (deploys proven with an empty prover and bound, proof-erased calls and zswap outputs as
+      `midnight-ledger`'s own tests apply them, 0.9.5's `DistributeReserve` sample, a reference replay with the
+      published API), `adapter-worker-host.ts` (bundles `fixtures/adapter-worker.ts` with esbuild, the vendored entries
+      left external, and runs it in a fresh worker), `fixtures/verifier-key/` (`midnight-ledger`'s `spend.verifier`,
+      Apache-2.0, its source recorded). Seen failing first: `Cannot find module '../../src/ledger/load.js'` (3 files);
+      the first run after the code, 7 of 43 failing, showed two wrong expectations, both fixed in the tests: `evictKeys`
+      does not refuse a live state's root (issue 00019-evict-keys-does-not-refuse-a-live-states-root; the test now
+      evicts a contract state's child nodes), and the ledger's replay protection fails at the block time a
+      transaction whose TTL is too far ahead even when it is well formed at the parent's time + 12 s (the replay-rule
+      tests now spy on the times each transaction is checked at). Oracles: the node's block-0 roots of mainnet, preview
+      and an undeployed devnet, reached and reloaded by `stateKey`; the vendor records; the reference replay's root and
+      parameters. Committed negative controls (`adapter.negative-control.test.ts`): a v8 adapter whose `decodeLogItem`
+      returns a value, or whose `apply` reports a log, fails Q54's clause; a `stateKey` taken from `stateRoot` fails
+      Q55's reload of a blank state (below the embedding limit); the v9 package, or its release, under the v8 adapter
+      fails the `rawPackages()` check. Wrong variants (a scratch runner outside the clone, the covering files only, the
+      tree checked byte for byte after): a first run of 130 left 11 survivors — 10 gaps, closed by tests (the state a
+      transaction context is given, segment order and segment 0 of a fallible offer, the intents' order, a maintenance
+      update among an intent's actions, a UTF-8 entry point, tags that are almost a transaction's), 1 redundant check,
+      removed —; the final run on the final sources, 130 variants: 130 caught, none equivalent. Coverage of
+      `src/ledger/` 100 %; its floor 90/85 (§13's default) added to `vitest.config.ts`.
+      **Pending:** Q113 (before 12.3's A99) and Q114; the two issues; 12.2 (the core version's ledgers and the
+      package identity check); 16.1 (the browser entry, `node:crypto` and `Buffer`); 17.2 (0.9.5's decoder, still used
+      by `test/integration/chain-archive-replay-decode.integration.test.ts`); 17.3 (the surface and `package.json`'s
+      `files`).
+- [x] 12.2 Version selection, the built-in tables (`networks.json`, from task 0.3), pins, package identity checks,
+      metadata selection at upgrades.
+      **Acceptance:** A94, A95, A96, A97.
+      **Partial (2026-10-26):** in `src/ledger/`. **Selection** (`version-table.ts`, LG-1, LG-2):
+      `selectLedgerVersion(table, { height, hash, digest })` reads the one `MNSV` digest — the header's
+      `DigestItem::Consensus(*b"MNSV", u32)`, as the node's version pallet writes and reads it, ten bytes — then checks
+      every pin at the block's height, then takes the one row covering the version; it throws `bad-version-digest`
+      (`missing`, `several`, `malformed`), `pin-mismatch` (what differs: the hash, the `spec_version`) and
+      `unknown-runtime` (no row, or two and more in a table no validation checked), typed `UmbraError`s the loop turns
+      into §11's halts (5.4). **The built-in tables** (`networks.json`, read and checked by `networks.ts` when it loads,
+      every problem with its path): per known network its `genesis` (hash and runtime at genesis with their source:
+      the node, the day, the file of this repository holding the answers), LG-3's `rows`, and its `boundaries` (U and F,
+      each height, hash and `MNSV` version, read from the node, with the source); each boundary's F is a pin and nothing
+      else is. The file holds LG-3's rows for mainnet, preprod, preview and stagenet, and the genesis hashes of mainnet
+      and preview that task 0.2 read from their nodes; no runtime at genesis, no boundary and so no pin is recorded
+      yet (task 0.3). **The table in effect** (LG-3; `ledgerTableOf`): a configured row maps the versions it covers, the
+      built-in rows the rest (cut around it); a configured pin replaces the built-in one at its height or adds one; a
+      `custom` network sets its own rows. Both `core` schemas check LG-1 and LG-2's rules on the configured table
+      (`u32` versions, bounds in order, a ledger the build carries, no version in two configured rows, one pin a height,
+      each pin's version covered) and give the table in effect as the parsed `ledgerTable` (`.overwrite`), so the
+      history records it (CF-7); `ledgerTable` had no default until now. **Metadata** (`metadata.ts`, LG-4):
+      `RuntimeMetadata.forBlock` reads the runtime version at the parent's hash (block 0: its own), halts with
+      `metadata-mismatch` unless it is the block's `MNSV` version, and returns that version's metadata read once at that
+      hash (concurrent first reads share one call, a failed read is not kept); `forState(hash)` is the runtime of a
+      block's own state. **Package identity** (`identity.ts`, `releases.ts`, LG-5): a package's SHA-256 is its
+      `SHA256SUMS` manifest's, which lists every file with its own; `buildCoreVersion()` now lists v8 and v9, each with
+      its release and its package's name, version and SHA-256 (constants, held equal to the manifests by a test); the
+      startup check `verifyLedgerPackages` refuses with `package-hash-mismatch` (the version, the file, `changed`,
+      `missing` or `malformed`, expected and found) and refuses a `released` source with `invalid-configuration`
+      (`ledger-source-unavailable`, Q116). The CI rebuild is task 0.2's `vendored-ledger.yml`, its own workflow
+      outside `npm test`; no job added. `ERROR_CODES` gains the five codes. Tests (`test/ledger/`, no node and no
+      network): `version-selection.test.ts` (A94's three halts on synthetic tables and headers; the real mainnet header
+      of block 3,174,332, whose digest is the `spec_version` its node reported, through the node client's decoder),
+      `networks.test.ts` (the committed file; A95 `[STATIC]`; A94's last clause over every built-in pin and its
+      recorded header; 29 format rows), `ledger-table-config.test.ts` (the default, the layering, the rules; A95's
+      synthetic `[CI]` half: "every `spec_version` → v8" selecting and parsing with v8),
+      `runtime-metadata.test.ts` (A96 on a synthetic devnet upgrade tape through the tape node and the node client),
+      `package-identity.test.ts` (A97: every file of both packages, and each manifest, changed by one byte refuses),
+      `version-checks.ts`, and the committed negative controls `version.negative-control.test.ts` (a selector ignoring
+      pins fails A94's pin clause; a cache keyed by the block's own version and state fails A96; a check skipping a
+      package file fails A97). Seen failing first: `Cannot find module` for the new modules, and the core version's
+      `ledgers: []`. Wrong variants: 145 on the first run, 129 caught, 16 survivors — 13 gaps closed by tests, 1
+      redundant check removed (the date's pattern), 2 equivalent —; the final run on the final sources: 144 variants,
+      142 caught, the 2 survivors equivalent. Coverage of the new code 100 %.
+      **Done (2026-10-27, lane 2):** what waited for task 0.3. **The built-in tables' data:** task 0.3 read every known
+      network's genesis (hash and runtime) and every boundary (U and F: height, hash, `MNSV`) from its node into
+      `networks.json`, the node's answers in `test/ledger/fixtures/networks/`, so each boundary's F is a pin (mainnet
+      1,774,492 and 2,738,211; preprod 1,568,258 and 2,648,469; preview 1,074,621; stagenet none). Checked here against
+      task 0.3's tapes (`networks.test.ts`, a tape test per public tape, skipped by name without it): each of the 48,006
+      headers of the six public tapes selects its ledger through its network's built-in table, its `MNSV` the runtime in
+      its parent's state (LG-4); the pins in the tapes' ranges (1,774,492, 1,074,621) pass; every runtime change on a
+      tape is a built-in boundary with the same hashes and versions; and the tapes from genesis carry the built-in
+      genesis hash and runtime (preview, preprod, stagenet). A second read of the public nodes (2026-10-27, 42 calls,
+      not committed) gave every genesis and boundary again, the three no tape covers (mainnet 2,738,210; preprod
+      1,568,257 and 2,648,468) among them, and each network's finalized head still on its last boundary's runtime.
+      **A94's last clause:** block 1,774,492's header as the mainnet tape holds it passes the built-in pin (v8,
+      1,000,000), and under U's hash, or with U's `MNSV`, halts with `pin-mismatch` naming what differs. **A95 `[CI]`**
+      (`devnet-upgrade.test.ts`, on the devnet tape): a configured table "every `spec_version` → v8" selects v8 for all
+      236 blocks; the process parses and applies every block the devnet's v8 runtime built (0 to U = 102) with v8, each
+      root the node's; at F = 103, built by runtime 2.1 on ledger v9, v8's parse of its v9 transactions fails and the
+      process halts (`callback-error`, `core-block-parsed`, `on-parse`). **A96 `[CI]`** (`runtime-metadata.test.ts`, on
+      the devnet tape through the tape node and the node client): U = 102 decoded with the old runtime's metadata and F
+      with the new, from genesis and from a cold cache at U (a restart at 101, its metadata record added as Q135 A
+      says), each runtime's metadata read once and the runtime at every parent; every block's events decoded with that
+      metadata (U's `System.CodeUpdated`, F's three `SystemTransactionApplied`), U's not decoding with the new
+      runtime's; U's header forged to the new `MNSV` halts with `metadata-mismatch`. Committed control
+      (`version.negative-control.test.ts`): the cache keyed by the block's own version and read at its own state fails
+      the same check on the tape (`block 102 from 102`). `version-checks.ts`' A96 check takes the upgrade it checks
+      (`UpgradeCase`, `devnetUpgradeOf`, `TapeAnswers`, `tapeMetadataNode`). No `src/` change. Q116 and Q117: owner
+      decisions (resolved).
+      **Pending:** A97's CI rebuild of every vendored package runs when the branch is pushed (Phase 3).
+- [x] 12.1a The owner's answer Q113 A: patches for v8 and v9 exporting the node's exact post-block update (the summed
+      `SyntheticCost` normalized and clamped to the block limits in Rust) and a system transaction's cost; the packages
+      rebuilt and their `SHA256SUMS` re-recorded; `ApplyInput` gains each transaction's chain outcome, and the adapters
+      skip an extrinsic the chain reports failed, as the official indexer does.
+      **Acceptance:** A151; A97 with the rebuilt packages.
+      **Done (2026-10-26):** **The patches** `vendor/ledger/v8/patches/0004-ledger-wasm-exact-post-block-update.patch`
+      and `v9/patches/0006-…` add to `ledger-wasm/src/umbradb.rs` and the declarations, following `midnight-node`
+      2.1.0-rc.4 (each function cited in the code): `postBlockUpdateExact(state, tblock, fullness)` — the summed cost
+      clamped to the state's block limits and normalized (`ledger/helpers/src/ledger_8/mod.rs` `clamp_and_normalize`),
+      its largest dimension (`compute_overall_fullness`), then the ledger's `post_block_update` (v8) or
+      `apply_post_block_update` (v9), as `Ledger::apply_post_block_update` runs them in `on_finalize`; no JavaScript
+      number in between, and no refusal above the limits —, `blockFullness(params, fullness)` (those `FixedPoint`s,
+      each the integer `value × 2^64`) and `systemTransactionCost(tx, params)` (`Ledger::apply_system_tx`'s
+      `tx.cost`). **Rebuilt** twice in Docker (`npm run vendor:ledger -- --record`, 8 min 49 s; then
+      `npm run vendor:ledger`, 5 min 38 s: both versions match, exit 0); `SHA256SUMS` re-recorded (v8 `0x9c0167…05f5`,
+      v9 `0xd70c49…7cc9`, the constants in `src/ledger/releases.ts`). **`ApplyInput.outcomes?: ChainOutcome[]`**
+      (`"success" | "partial" | "failure"`, CD-6's words for CD-5's events), one per transaction or refused
+      (`RangeError`): a `failure` is skipped as the official indexer skips it (`failed_regular_transaction`: not given
+      to the ledger, a failure of every segment, no cost, not the first regular transaction of LG-8's rule; a system
+      transaction alike); absent, every transaction is replayed and the ledger decides (12.1's behaviour), exact
+      wherever the chain applied them all or the ledger fails each one the chain failed — task 12.3 passes them.
+      **The adapter** (`adapter.ts`): system transactions' costs join the fullness, taken with the parameters before
+      each applies; costs add up saturating at 2^64 − 1 (`addCosts`, `COST_MAX`); the post-block update is
+      `postBlockUpdateExact` (12.1's throw above the limits is gone: the adapter suite's expectation changed to the
+      node's clamp). The reference replay (`test/ledger/adapter-fixtures.ts`) follows the same algorithm. **The node's
+      values:** `test/ledger/fixtures/post-block-update/` — `oracle/main.rs` and `run.sh`, built natively in the
+      vendored build image against unpatched `midnight-ledger` at each pinned commit, with the node's two helpers
+      copied; `expected.json` for 12 block costs (among them 2,635 of 200,000: `FixedPoint(243035853171123343)`, the
+      round trip `…328`; costs above the limits and the saturated sum; blocks of the fixtures' deploy, a deploy and a
+      call, twenty deploys above the bytes-written limit, the system transaction with a deploy and a call) and two
+      system transactions. **Tests** (`test/ledger/post-block-update.test.ts`, `post-block-update-checks.ts`,
+      `adapter-core.test.ts`): A151 on both versions — the packages' fullness, fee prices and state roots equal the
+      node's for every case; the adapter's fee prices after blocks of fixture transactions; each system transaction's
+      cost; a chain-failed extrinsic skipped (the ledger not asked, the state as without it, the reference replay
+      agreeing, the first-regular rule kept). Seen failing first, on 71e019f's packages and adapter: `raw.blockFullness
+      is not a function`; `v8, a block of one deploy: the fee prices after the block: expected … to contain …`; `the
+      ledger is asked about the applied transaction only: expected "wellFormed" to be called 1 times, but got 2`; 54 of
+      82. **Committed negative controls** (`post-block-update.negative-control.test.ts`): the published round trip
+      loses the `FixedPoint` fullness, fee prices and root in 5 cases and refuses 3; an adapter on the published
+      update, one without system-transaction costs, and one ignoring the outcomes each fail their check; A97's byte
+      change is `package-identity.test.ts`'s, on the rebuilt packages. **Wrong variants:** 30 over the new adapter
+      logic, first run 28 caught, 2 survivors (the saturation bound) closed by a test with `u64::MAX` written out;
+      final run 30 of 30 caught. Coverage of `src/ledger/` 100 %. No question raised.
+- [x] 12.1b The owner's answer Q138 A: patches for each vendored ledger package exporting LG-16's six tree values from
+      the ledger state as the official indexer reads them (the zswap tree's first free index and root, the DUST
+      commitment and generation trees' first free indexes and roots); the adapters' `stateSummary` fills them (none
+      `null`), `core_ledger_state.states` stores them at every height and its five columns become `NOT NULL` (no
+      database exists yet: migration `001` is edited); the packages rebuilt, `SHA256SUMS` and the core version
+      re-recorded; `design.md` §5.1, §5.2, §10 and `vendor/ledger/README.md` updated. After 12.2a, or with it, so the
+      rc.3 package carries the patch too.
+      **Acceptance:** A158.
+      **Done (2026-10-27, lane 2):** **The patches** `vendor/ledger/v8/patches/0005-ledger-wasm-state-trees.patch`,
+      `v9-rc3/patches/0006-…` and `v9/patches/0007-…` (the same added lines in each, held equal by a test) export
+      `stateTrees(state)`: `{ zswapFirstFree, zswapRoot, dustCommitmentFirstFree, dustCommitmentRoot,
+      dustGenerationFirstFree, dustGenerationRoot }` — one export, plain data (Q49): each index a `bigint`, each root
+      its tree's root after `rehash()` in the ledger's untagged serialization, read as the official indexer reads them
+      (`indexer-common/src/domain/ledger/ledger_state.rs`); a tree without a root is an error. Ledger 8 has DUST state
+      too, so the six exist in every version; an empty tree (mainnet's genesis has three) has first free index 0 and
+      root `00`. Checked first with `cargo check --target wasm32-unknown-unknown` (no warning). **Rebuilt** in Docker:
+      `npm run vendor:ledger -- --record` (5 min 52 s), then `npm run vendor:ledger` twice (5 min 51 s, 6 min 26 s): all
+      three match `SHA256SUMS`; identities v8 `0x0eee0a22…1173`, v9-rc3 `0xce415cc5…012e`, v9 `0xc770c79d…45eb`
+      (`src/ledger/releases.ts`; the core version changes with them). **The adapters' `stateSummary`** gives the six
+      from `stateTrees` (the `zswap` getter path gone); `StateSummary`'s fields are no longer nullable; migration `001`
+      makes the five columns `NOT NULL` (first frees with their `CHECK`s). **The Rust oracle**
+      `test/ledger/fixtures/state-trees/oracle/` (`main.rs`, `run.sh`), built in the vendored build image against
+      unpatched `midnight-ledger` at each pinned commit, writes the six values of fixed states (`expected.json`): the
+      genesis states of `fixtures/genesis/`, stagenet after blocks 3 and 4,950 (`stagenet-3.state`,
+      `stagenet-4950.state`; v9-rc3 and v9) and preview after block 687 (`preview-687.state`; v8), the last three each
+      with its node's root from task 0.3's tapes; 4,950 and 687 are states whose DUST trees' first free indexes differ,
+      one per version. Run three times (the last with `stagenet-4950.state` added): each state's values the same in
+      every run that had it. **Tests:** `test/ledger/state-trees.test.ts` (A158 per package: the export and the adapter
+      equal to the oracle on every fixed state, none null, plain data, also for a state loaded from its stored nodes in
+      a fresh worker), `state-trees-checks.ts`; `worker-engine.test.ts`, `adapter-core.test.ts`,
+      `core-ledger-state.test.ts` (the six written; the columns `NOT NULL`; the row written on PGlite with each value
+      read back from its own column and a null refused in each of the five), `ledger-checks.ts`/`ledger-tapes.ts`
+      (A107's rows: the six of the reference state), the tape ranges of `ledger-state.test.ts` (none null at any
+      height), `vendored-ledger-files.test.ts`. Seen failing first: `raw.stateTrees is not a function`, the nulls.
+      **Committed negative control** (`state-trees.negative-control.test.ts`): a summary whose DUST commitment root is
+      the zswap tree's (or whose generation root is the commitment tree's) fails A158's check on every package. **Wrong
+      variants:** 20 on the final sources (each field read from another tree, 11; an index off by one; a null; each of
+      the five `NOT NULL`s dropped; the row's DUST roots swapped in its parameters; two first-free columns swapped in
+      its `INSERT`), 20 caught; the column swap only by the PGlite check (written for it before the pass). **Gates:**
+      `npm run typecheck` exit 0; `test/ledger` and `test/backbone` (run by Codex): 69 files, 933 tests passed, 11
+      skipped, 816 s; the tape file `ledger-state.test.ts` with `UMBRADB_TAPES`: 20 of 20, 2,979 s;
+      `npm run test:conformance` (run by Codex): run 1 exit 1 under load 57–63, its one failure task 12.4's
+      `ledger-storage.test.ts` (A103 at 5,000 on PostgreSQL timing out at cursor 1,462), run 2 exit 0 (272 files passed,
+      1 skipped; 4,900 tests passed; all 25 required ids; 835 s; coverage 99.26 % / 98.62 % / 99.01 % / 99.62 %).
+      **Pending:** A97's CI rebuild of the three packages runs when the branch is pushed (Phase 3).
+- [x] 12.2a The owner's answer Q139 A: a third vendored ledger package, v9 at `crate-ledger-9.1.0.0-rc.3` (the ledger
+      node 2.0 builds, runtime 2.0), as a ledger version of its own — its name settled in `design.md` §5.2 (the
+      reading: `v9-rc3`) and carried through `ledgerSources`, `ledgerTable` and the core version — built by
+      `npm run vendor:ledger` from its pinned tag with task 12.1a's (and 12.1b's) patches where they apply, with its
+      adapter (the v9 one where the API is the same); LG-3's built-in rows map `spec_version` 2,000,000–2,000,999 to
+      it; a state stored by it loads in the rc.5 package (a 2.0 → 2.1 upgrade; a question if it does not); A99's
+      stagenet test changed from the halt at block 1 to "every root is the node's".
+      **Acceptance:** A99 (stagenet), A159.
+      **Done (2026-10-27):** **The package** `vendor/ledger/v9-rc3/` — the ledger version `v9-rc3` (design §5.2):
+      `midnight-ledger` `ledger-9.1.0.0-rc.3` (`4823b53`, the workspace tag; the per-crate tags `midnight-node`
+      2.0.0-rc.4 builds are isolate commits of it or hold the same crate sources; its crates.io storage crates differ
+      from the tree's in dependency versions, a refactoring and one panic guard: `vendor/ledger/README.md`),
+      `@umbradb/vendored-ledger-v9-rc3` 1.0.0-rc.3; patches `0001`–`0003` v9's (the first byte for byte, the third with
+      this tree's `midnight-storage-core 1.2.0` lock line), `0004` the wasm-bindgen 0.2.108 move (as v8's; also the
+      stale lock's member versions), `0005` v9's exact post-block update without the conversion, citing node 2.0.0-rc.4;
+      no conversion (that node has none). Recorded (77 s) and rebuilt (64 s) in Docker: the rebuild matches
+      `SHA256SUMS`; 10 MB, its `.wasm` 10.2 MB; identity `0x7e77e5a3…8c3c`. **The ledger version** `v9-rc3` in
+      `LedgerName`, `ledgerSources` (vendored unless given), `ledgerTable`'s rows, `networks.json` (every known network:
+      2,000,000–2,000,999 → `v9-rc3`, 2,001,000–2,999,999 → `v9`), the core version (v8, v9-rc3, v9 in release order),
+      the identity check (A97 over every file of the three packages) and the CI matrix. **Its adapter**
+      (`createV9Rc3Adapter`, `src/ledger/v9.ts`): the v9 one over the rc.3 package, without `convertFromV8`. **The 2.0 →
+      2.1 upgrade:** the engine loads a committed `v9-rc3` state at F in the rc.5 package by its key from the node store
+      and applies F to it; any other change but v8 → v9 is refused. **Tests:** `test/ledger/ledger-v9-rc3.test.ts` (A159
+      on stagenet's genesis state and blocks 1–3, `fixtures/stagenet/blocks.json` and
+      `fixtures/genesis/genesis_state_stagenet.mn` from task 0.3's tape: every root the node's; the state after block 3
+      loads in a fresh rc.5 instance with the same root and serialization; the tables; the core version),
+      `adapter-v9-rc3.test.ts` (the adapter suite), `worker-storage.test.ts` (the carry against the reference replay;
+      the refusals), the tape test `ledger-state.test.ts` (stagenet 0–10,000, every root the node's, the state at 10,000
+      loading in rc.5 from the database), and the identity, files, node-roots, networks and config tests extended. Seen
+      failing first: `this build carries no ledger v9-rc3 adapter`, the core version's two ledgers, the rows.
+      **Committed negative controls:** `ledger-v9-rc3.negative-control.test.ts` (the rc.5 package — the old table —
+      gives another root than stagenet's node from block 1; the v8 package, of another storage format, does not load
+      rc.3's state as rc.3 stored it) and the tape control in `ledger-state.test.ts` (the old table halts stagenet at
+      block 1 with `root-mismatch`). The tests' own `custom` network keeps runtime 2.x on rc.5
+      (`test/runner/process-build.ts`), the release their synthetic v9 transactions are built with. Tapes
+      (`UMBRADB_TAPES`, `ledger-state.test.ts`, PGlite): 20 of 20, 1,978 s — stagenet 0–10,000 every root the node's and
+      the state at 10,000 loading in rc.5 with it, its control halting at block 1, preview, preprod and the devnet as
+      before. **Wrong variants:** 19 (the engine's carry 7, the adapter 4, the loader, the releases 2, the tables 2, the
+      schemas 3); first run 18 caught, the survivor (F applied by the rc.3 package itself) closed by a carry test on
+      stagenet's block 1, whose rules differ; final run 19 of 19. Issue 00036 (the in-memory blocks' runtime 2.0
+      named `v9`). **Pending:** A97's CI rebuild of the third package runs when the branch is pushed (Phase 3).
+- [x] 12.2b The threat model draft's gap 3 (owner, 2026-10-28): `verifyLedgerPackages`
+      (`src/ledger/identity.ts`) has no caller, so the vendored ledger packages load without the startup check
+      design §5.2 describes. Call it before any ledger package is imported — in the process and in the ledger
+      worker —, so a package whose JS or WASM differs from its recorded SHA-256, or `ledgerSources: released`,
+      refuses startup naming the file or the setting; the browser build checks the bytes it bundles when it builds
+      (or `design.md` §5.2 says why not).
+      **Acceptance:** A173.
+      **Done (2026-10-28):** a thread checks a version's package before it imports it and hashes its files once
+      (`checkLedgerPackages`, `checkLedgerPackage` in `src/ledger/identity.ts`: each directory and version that
+      passed is remembered per thread, a refusal is not). The process calls `checkLedgerPackages` with its
+      `ledgerSources` when its graph has `core-block-parsed` or `core-ledger-state`, before it starts the ledger
+      worker and before block S (`src/runner/process.ts`: `ProcessInput.checkLedgerPackages`, three lines): a
+      changed file refuses with `package-hash-mismatch` naming the version and the file, `released` with
+      `invalid-configuration` naming `ledgerSources.<version>` (`src/ledger/sources.ts`, no Node.js). The ledger
+      worker's loader (`src/ledger/load.ts`) calls `checkLedgerPackage` before each version's import. Cost: the three
+      packages (35 MB) 15–20 ms of startup on an idle Apple M4 Max, up to 40 ms loaded; one version 4–7 ms in the
+      worker; never per block. The browser build checks the bytes it bundles: each `SHA256SUMS` against
+      `LEDGER_RELEASES`, then every package file its bundles hold and every `.wasm` it writes, each read once
+      (`browser/build.ts`, `ledgerRoot` for a test's copy); in the bundles `browser/src/ledger/identity.ts`
+      replaces the Node.js check (`ledgerSources` refused, no file read). Design §5.2 "As built (task 12.2b)".
+      Tests: `test/ledger/package-startup.test.ts` with `package-startup-checks.ts` (A173 over a copy of `src/` and
+      `vendor/ledger/`: the process; the worker over the copy's `load.ts`, a changed entry recording its import;
+      the per-thread memo), `test/browser/build.test.ts` (a changed manifest, JS file or `.wasm` fails the build
+      naming it) and `test/browser/ledger-identity.test.ts`; seen failing first on `3f3e00a` (5 tests in 4 files,
+      each for its intended reason). Committed negative control `package-startup.negative-control.test.ts`: a process
+      whose check does nothing, and a worker over a `load.ts` without its calls, fail A173. Question Q176 (a
+      process that loads no package checks none): the owner's answer A (2026-10-28). No mutation pass (deferred).
+- [x] 12.3 The ledger worker and the node-store bridge; `core-ledger-state` apply, replay rules, block 0's ledger path,
+      root check, outputs.
+      **Acceptance:** A82, A99 (the ranges from genesis, Q133), A101, A106, A107.
+      **Done (2026-10-26):** **The ledger worker** (`src/ledger/worker/`): one per process, started by the runner when
+      the graph has `core-block-parsed` or `core-ledger-state` (`startLedgerWorker`; `ProcessInput.ledgerWorker` for a
+      test package) and closed with it; plain data both ways (`protocol.ts`), requests answered in order; its engine
+      (`engine.ts`, run in the main thread by the tests and by `inThreadLedger`) loads each version's adapter once,
+      keeps each block's parse under its hash for the block's apply (LG-7: `core-block-parsed` now parses there,
+      `workerParser`; released at `on-after-db-write` and `on-rollback`), holds the committed state and one pending
+      state, applies only on the state at h − 1, gives the same result again for the same block while pending, and
+      commits at `on-after-db-write`. A step is not bounded (RN-17) and is reported (`activity()`, timed from when it
+      began); a thread that ends,
+      throws or whose package traps fails every request with one `LedgerWorkerFailure` (a halt, `callback-error`). **The
+      node-store bridge** (`node-bridge.ts`): a growable `SharedArrayBuffer`, the worker blocked on `Atomics.wait` while
+      the main thread reads the node through the request's read handle — a request given none (a parse) through another
+      request's read, else the process's database or a read that comes meanwhile (on PGlite the database waits behind
+      `on-compute`'s read) — and sends its referenced nodes along (`src/ledger/node-refs.ts` reads a child list without
+      the package); the pending block's nodes the worker serves itself; a failed read answers no node and names itself
+      in the request's error. The store is installed in each package from the first block (its cache drops flushed
+      nodes' bytes and reads them again: without it preview aborted at block 3,772), and a transaction's hash is taken
+      over its bytes (`core-block-parsed` checks it against its chain event's). **`core-ledger-state`**
+      (`src/backbone/core-ledger-state/`, in the build's core list; never mid-chain, so above 0
+      `cannot-start-mid-chain`): at `on-compute` the worker applies the block with `tx-results` as outcomes (12.1a), the
+      parent's time from `core_block_commit.blocks` and LG-8's rule (`src/ledger/replay.ts`), while the node's root is
+      read through the block source (`ledgerStateRoot`, `genesisState`: `midnight_ledgerStateRoot`, `system_properties`,
+      IN-8); block 0 per IN-7 (the genesis state's root against the node's: its transactions on an empty state of the
+      genesis state's own network id for their results, or applied to it); **the root check** throws `root-mismatch`
+      (new `ErrorCode`, a halt) before the block's transaction; items `ledger-state`, `ledger-events`,
+      `segment-results`, `vm-logs`; at `on-db-write` the batch (nodes; root counts as signed changes, Q53) and the
+      `states`, `segment_results`, `events` rows (§10, with `contract-deploy`; the five tree values the packages do not
+      export null, Q138). Tests (seen failing first: `Cannot find module` in 9 of 10 files, `config-check.test.ts`'s
+      core list): `test/ledger/node-refs.test.ts`, `replay-rules.test.ts`, `worker-engine.test.ts`,
+      `worker-host.test.ts` (the worker and the bridge, over a database on both backends), `node-bridge.test.ts`;
+      `test/backbone/core-ledger-state.test.ts`, `ledger-source.test.ts`, `ledger-worker-process.test.ts`,
+      `ledger-state.test.ts` (A82, A99, A106, A107 through the process on PostgreSQL 18.6 and PGlite 0.5.10 over
+      synthetic tapes of real transactions and task 0.2's real genesis states, and A99 on task 0.3's recorded tapes:
+      preview and preprod 0–10,000 and the devnet to its U, 102, every root the node's, skipped by name without
+      `UMBRADB_TAPES`), `ledger-liveness.test.ts` (A101, a 60 s step); `chain-data.test.ts` counts A92's parses in the
+      worker; `chain-data.negative-control.test.ts`'s A93 control turns the hash check off (`chainHash`), which would
+      refuse its placement first, and a second control shows the check halting it. Committed negative controls
+      (`ledger-state.negative-control.test.ts`, both backends; `ledger-liveness.test.ts`): a root check comparing
+      nothing passes A106's wrong root; outcomes ignored halt a range with a chain-failed extrinsic; block 0 in the
+      wrong IN-7 case halts at 0; the step on the main thread loses `/health/live`. Wrong variants (a scratch copy,
+      outside the clone): 71, 65 caught; of the 6 survivors 5 gaps closed by tests seen failing on them (the empty
+      state's network id, block 0's parent time and LG-8's flag passed to the adapter, the worker closed with the
+      process and started once) and one redundant line removed; after the real tapes' fixes, on the final sources, 83,
+      81 caught (one more gap closed: the runner giving the worker its database), the 2 survivors equivalent on every
+      input the tests build (the root read after the flush, the hash serialized again: safeguards against the package's
+      cache dropping a node's bytes, which a long real run shows); then 5 of the step's timing and the chain-hash
+      check's option, 5 caught.
+      **Pending:** A99's devnet range from F (103), with the conversion (12.4); stagenet (runtime 2.0 runs ledger
+      9.1.0.0-rc.3: its roots differ from block 1, Q139, owner); restart, retention, contract keys (12.4); Q138
+      (owner).
+- [x] 12.4 Storage of the ledger state, restart, retention, contract-key persistence, the v8→v9 conversion.
+      **Acceptance:** A100, A102, A103, A104 (A104 PARTIAL: its two sweep cycles and its control wait for 12.5).
+      **Done (2026-10-26):** **The state at h − 1** (LG-11): before each apply after block 0, `core-ledger-state`'s
+      `on-compute` reads the state stored after h − 1 (key, root, the block's ledger) and asks the worker to hold it
+      (`LedgerHost.load`, now idempotent: a state it holds — committed, or pending and committed since — is kept and
+      nothing read; a fresh worker, after a restart, loads it from its key through the node-store bridge); the root it
+      gives must be the stored one. A node changed under its key aborts the package at that read (a trap): the worker
+      fails and processing halts with `callback-error` naming `core-ledger-state` — no new code. **The conversion**
+      (LG-9): a v9 block on a v8 state is F; the engine converts the state with the v9 package's `convertFromV8` (the v8
+      nodes read by the v8 state's key through the bridge) and applies F to it, also with no transaction, F's batch the
+      v9 package's; any other ledger change is refused. **The window** (LG-12,
+      `src/backbone/core-ledger-state/retention.ts`): from the `core` revisions in the `config` item (now required),
+      L(h) = max(L(h − 1), h − R(h)); block h releases the states of L(h − 1) to L(h) − 1, their keys read from `states`
+      (`ApplyBlock.release`); `ledger-state` is also a `process` item, published at `on-start-db`
+      (`retainedStatesOf(p).load(height, read)`, `window(cursor)`), whose load gives a retained state's key and root,
+      loaded aside in the worker (`LedgerHost.retained`), and fails with the new `state-not-retained` (`ERROR_CODES`;
+      design §11, a module call's failure, not a halt) outside the window at the read's cursor. **Contract keys**
+      (LG-13): while `core-contract-states` (13.1) is active, the worker persists the state and zswap-state keys of each
+      contract the block's transactions call or deploy (`ApplyBlock.contracts`), never released; the `ledger-state` item
+      carries them (`contracts`). Tests (seen failing first: `tsc` 28 errors in the new tests, `Cannot find module
+      …/retention.js`, the engine suite 6 of 6 failing): `test/ledger/worker-storage.test.ts` (6: releases, the parent's
+      load, the conversion against the v9 package's own conversion in a fresh instance, contract keys rebuilt from the
+      stored nodes without the packages — `test/ledger/stored-values.ts`, the arena's normal form —, retained loads),
+      `test/backbone/ledger-retention.test.ts` (6, fast-check seed 20261026 against the rule block by block),
+      `core-ledger-state.test.ts` (4 more), and `ledger-storage.test.ts` through the process on PostgreSQL 18.6 and
+      PGlite 0.5.10: A100 (F with no transaction, F with one; the synthetic tapes' reference converts in a fresh v9
+      instance), A102 (a SIGKILL at U, the restart loading the state at U once and converting at F; a tampered node
+      halting the restart; `[STATIC]` the migrations' tables and columns are design §10's, no source serializes a state,
+      and no stored value is one), A103 (`retainStates` 1,000 at cursor 5,000: 4,000 loads, 3,999 refuses; a raise
+      filling the window from its revision, a lowering releasing five states in its first block), A104's keys (persisted
+      at 10, held, loading from their keys alone; task 12.5 found that the call meant to change the contract at 20 had
+      failed for an expired TTL, and replaced the test); on task 0.3's devnet tape (`ledger-state.test.ts`, `tapeTest`):
+      every root from genesis to 235 across F 103, and a restart at 150 loading the state once. Committed negative
+      controls (`ledger-storage.negative-control.test.ts`): a restart that does not load the state halts at the next
+      block; F applied without the conversion halts with `root-mismatch`; a window one state short fails the load of
+      4,000.
+      **Pending:** A104's two sweep cycles and its control without persisted keys (12.5); question Q143 (how
+      `core-contract-states` gets its keys persisted: design §4's `persist(key)` provider function, or the worker's
+      batch, which ships).
+- [x] 12.5 The fixed-budget mark-and-sweep.
+      **Acceptance:** A105 including its negative control; A104's rest (from 12.4).
+      **Done (2026-10-26):** `src/backbone/core-ledger-state/sweep.ts`: LG-14's step — computed in `on-compute` after
+      the root check from `sweep`, `grey`, `marks`, `root_counts` and `nodes` as committed at h − 1 with the block's
+      batch held over them, written in `on-db-write` after the batch (migration `002`: the one-row `sweep`, its row
+      inserted `idle`, `grey`, `marks`); K = 10,000 (`SWEEP_BUDGET`; a test's smaller K through `coreLedgerState({
+      sweepBudget })`); grey keys in byte order (`GreyPicker`, a negative control's seam); step 1's roots the counts
+      before the block's batch (the state at h − 1 is alive in the worker while h is computed); the first block with
+      `sweep: off` after one with it on resets the sets. Deleted nodes are evicted in the worker (`LedgerHost.evict`)
+      before the block commits; the worker frees a dropped parse's native objects (`LedgerPackage.forgetTransactions`,
+      new; the adapter also frees the intents and actions it reads), and when a later block's kept transaction holds a
+      deleted node frees every kept parse's natives and evicts again (Q144). Tests (seen failing first: `Cannot find
+      module …/sweep.js`; the process tests on 12.4's module, which has no `sweep` table):
+      `test/backbone/sweep-model.ts` (the reference model, an independent in-memory LG-14), `ledger-sweep.test.ts` (the
+      step against the model on the fixture, on hand cases and on 400 random histories, fast-check seed 20261027; its
+      writes), `test/ledger/worker-sweep.test.ts` (in a real worker: eviction, a node needed again flushed again by the
+      real package, a kept transaction's refusal and the retry, a live state's refusal), `ledger-sweep-process.test.ts`
+      (A105 through the process with a test package serving the DAG fixture of `test/ledger/fixtures/sweep-fixture.ts`,
+      K = 50: the tables after every block the model's on PostgreSQL 18.6 and PGlite 0.5.10, equal across them,
+      `[[ledger.sweep-cross-backend-identical]]`; subtree 0's nodes deleted while its second version stood and inserted
+      again at its return; a revision turning the sweep off mid-cycle, which clears its sets, and one turning it on
+      again; `sweep: off` deleting nothing), `ledger-storage.test.ts`'s A104 (a contract state of 1,500
+      bytes at 10, changed at 20; its keys held and loading after the states holding it were released and two or more
+      sweep cycles completed). Committed negative controls (`ledger-sweep.negative-control.test.ts`, both backends):
+      grey keys in insertion order differ from the model after block 1; A104 without `core-contract-states` has the
+      sweep delete the nodes only those keys held. A103's two 5,000-block runs (12.4's) now set `sweep: off`: the window
+      does not depend on the sweep, and with it on — its full budget every block over 1,001 held states — they fell from
+      about 30 to 3–4.4 blocks a second (load averages 35–48); A103's revisions run keeps the sweep on and checks that
+      it deleted nothing a retained state reaches.
+      **Pending:** Q144 (a deleted node a live object still holds after the retry); K's cost on real states is
+      A136's to measure.
+- [x] 12.5a The owner's answer Q144 B: when the ledger package still refuses an eviction after the worker freed what it
+      can (12.5's second attempt), the worker thread is ended and a new one started, which loads the state at h − 1 from
+      the database (task 12.4's load) and applies block h again; processing does not halt, and only a refusal on that
+      retry fails the block with `callback-error` (LG-14 as amended); `design.md` §5.4; a test package that refuses one
+      eviction, and the tests.
+      **Acceptance:** A160.
+      **Done (2026-10-27):** the engine names a refusal after its freeing (`EvictionRefused`, its name kept across the
+      threads; a trap never retried); `LedgerHost.restart()` ends the thread and starts one with the same options,
+      keeping the host the runner bound, sending the new thread every parse kept for a block not yet released (a parse
+      in flight answered there, any other request in flight failed) and counting restarts (`inThreadLedger` alike: a
+      new engine); `core-ledger-state`'s `on-compute` (`computeBlock`) answers the refusal with a restart and the
+      block's whole computation again — the load of the state at h − 1 through the bridge, the apply, the root check,
+      the sweep step and its eviction —, any error of that pass failing the block (`restartOnRefusedEviction`, the
+      negative control's seam); design §5.4's "As built". Tests (seen failing first on the base tree: no restart, a halt
+      at h = 14): `test/backbone/ledger-eviction-restart.test.ts` (A160 on PostgreSQL 18.6 and PGlite 0.5.10 over task
+      12.5's DAG fixture with K = 50, h its first deleting block: the first thread's package refuses both tries, one
+      restart, the new thread loads the state at h − 1 from the node store, no halt, the sweep tables after every block
+      and every `states` row equal to an uninterrupted run's; refused again on the retry: `callback-error` in
+      `core-ledger-state`'s `on-compute`, one restart, nothing of h stored), `test/ledger/worker-restart.test.ts` (a
+      real thread: kept parses sent again, in-flight requests, the old thread ended, the bridge's counts kept, the main
+      thread's engine, the named refusal), `core-ledger-state.test.ts` (+2, `computeBlock`); the test package
+      (`sweep-test-loader.ts`) loads a state it did not make from the node store and refuses by thread. Committed
+      negative controls (`ledger-eviction-restart.negative-control.test.ts`, both backends): task 12.5's halt on the
+      first refusal halts at h; a retry without the state at h − 1 halts at h ("holds no state"). **A103's load
+      sensitivity** (owner decision Q122): its 5,000-block run on PostgreSQL — about 4 blocks a second there at load
+      averages near 40 against PGlite's 30, 1.3 in a loaded conformance run, past an hour — now runs once, on PGlite, to
+      4,990, where the process backs up; PGlite continues to 5,001 and PostgreSQL continues from that backup restored
+      with `umbradb restore`'s code (BK-2, BK-4), A103's loads and holdings checked on both
+      (`test/backbone/ledger-window.test.ts`, about 110 s in all); its revisions test and its control are unchanged.
+      **Pending:** nothing of 12.5a.
+- [x] 12.6 Ledger tasks and the plain-data `block-parsed` (`runLedgerWorker`, the host's worker entry, the
+      structured-clone check).
+      **Acceptance:** A137.
+      **Done (2026-10-27):** **the declaration** (`src/modules/declaration.ts`, `validation.ts`): `ledgerTasks` holds
+      §5.1's `LedgerTask`s (`src/ledger/types.ts`; `LedgerTaskBlock`: height, hash, ledger, the native transactions,
+      `packages`, `stateBefore` for `needsState`), each named after a `block` item its module provides, once; a module
+      with tasks requires `block-parsed`, one with a `needsState` task `ledger-state` (so the graph refuses it with
+      `item-no-provider` where `core-ledger-state` is not active); a private module has none; each other shape is
+      `invalid-declaration`, naming the field (no new code). **The main thread** (`src/ledger/tasks.ts`): startup gives
+      each module with tasks the points that run them (`withLedgerTaskPoints`) and binds it to the process's ledger
+      worker (`src/runner/process.ts`, two lines): a task without `needsState` runs at the module's `on-parse`, one with
+      it at the module's `on-compute` after `core-ledger-state`'s, on the committed state at h − 1; each result, frozen,
+      is put as the module's item before its own callback. **The worker:** `runLedgerWorker(modules)`
+      (`src/ledger/worker/run.ts`, the old entry's body) is the thread's main; UmbraDB's entry (`entry.ts`) calls it
+      with the core modules' tasks (`src/backbone/ledger-tasks.ts`) and the `modules` export of
+      `LedgerWorkerOptions.modules`, for `umbradb run` the configuration file (`src/cli/run.ts`); `typeScriptEntry`
+      starts a host's own entry from its sources. The request kind `tasks` (`LedgerEngine.tasks`) runs a module's tasks
+      on the block's kept parse (`nativeTransaction`: no second parse) with `rawPackages()`, and checks each result, and
+      each block's parse, as plain data (`src/ledger/plain-data.ts`: the protocol's types walked, a class instance
+      refused by its class and path, then a structured-clone round trip that must give the same value); a throw, a
+      result that is not plain data, or a task the entry lacks fails with `LedgerTaskFailed` (module, task, height:
+      `callback-error` at the module's point); a trap ends the worker; a task's request in flight at a restart (12.5a)
+      runs again on the new thread. **`-fast`** reads its log sites in its ledger
+      task `contract-log-sites` (`core-contract-logs-fast/task.ts`, its new `block` item) in the worker; `reader.ts`,
+      the main thread's second parse, is gone (a test helper now, `test/backbone/main-thread-log-reader.ts`), and
+      `logSitesOf` reads with rc.3's package on runtime 2.0 blocks, which task 13.1's reading refused. The browser build
+      bundles `run.ts`, `-fast`'s task and the three vendored versions' WebAssembly. `docs/module-guide.md`: "Ledger
+      tasks". `vitest.config.ts`: `run.ts` out of coverage as `entry.ts` is (a thread only). Tests (seen failing first:
+      on `ceea780` with only the new tests, 7 files, 24 of 25 tests; the rc.3 read and the restart before their fixes):
+      `test/ledger/ledger-tasks.test.ts` (9: the engine — one parse per transaction, the state before the block, block
+      0, the failures and their messages, the parse's check —, a real thread from UmbraDB's entry and from a host's
+      own, a trap ending it, a task in flight at a restart, the main thread's points), `plain-data.test.ts` (4),
+      `test/modules/ledger-tasks-validation.test.ts` (14), `test/cli/run-ledger-tasks.test.ts` (`umbradb run`'s worker
+      runs a task of a module its configuration file exports), `contract-modules.test.ts` (-fast's task on v8, v9 and
+      v9-rc3, its rows the package's own logs), and `test/backbone/ledger-tasks.test.ts`, A137 through the process on
+      PostgreSQL 18.6 and PGlite 0.5.10: a test module's task decodes each call's pushed arguments and its `on-compute`
+      receives them; with it, a `needsState` task, `-fast`'s task and three readers of `block-parsed` the package
+      deserializes each transaction once, in the worker, never on the main thread; every `block` item a main-thread
+      callback receives passes a structured-clone round trip; a task returning a `LedgerState`, and one that throws,
+      halt with `callback-error` naming the module, the task and the point; a task without `needsState` runs from S = 2
+      without `core-ledger-state` and gets no state; a module with a `needsState` task is refused (`item-no-provider`).
+      Committed negative controls (`ledger-tasks.negative-control.test.ts`, both backends): the plain-data check off,
+      a task's WebAssembly-backed object reaches a main-thread callback, which the round trip catches; `-fast` reading
+      on the main thread again parses each calling transaction a second time.
+      **Pending:** nothing of 12.6.
+
+## 13. Contract data
+
+- [x] 13.1 `core-contract-states`; `core-contract-logs-full`; `core-contract-logs-fast`; the shared `contract-logs`
+      item.
+      **Acceptance:** A108, A109, A110, A111.
+      **Done (2026-10-27):** **`core-contract-states`** (`src/backbone/core-contract-states/`; requires `ledger-state`,
+      cannot start mid-chain) stores, per contract a block touched, one row of `core_contract_states.states` with the
+      keys `core-ledger-state` persisted for it (Q143's route: the `ledger-state` item's `contracts`), a contract the
+      state does not hold left out. `core-ledger-state` now also persists the keys of the contracts the block's chain
+      events name maintained (`Midnight::ContractMaintain`, its tagged address) and, at F, of every contract deployed
+      below it (its `contract-deploy` events, read at h − 1), so F's rows carry the converted keys. **The shared item**
+      (`src/backbone/contract-logs/`): one declaration and one migration for both providers, `contract_logs.logs` under
+      `umbradb_i_contract_logs`. **`-full`** (requires `vm-logs`) stores the ledger's logs. **`-fast`** (requires
+      `chain-events` and `block-parsed`; development only; may start mid-chain) reads each call's transcripts in the
+      ledger's emission order (every intent's guaranteed transcripts by segment, then the fallible ones) and stores a
+      successful transaction's literal logs (a `push` right before the `log`, no `branch` or `jmp` before them that can
+      skip either; `decodeLogItem`'s decoding), nothing of a chain-failed transaction, none on v8 (Q54); on any other
+      log, and on any log of a partial success, it halts with the new code `fast-log-unsupported` (height,
+      transaction, segment, call, op, reason). It reads in the calling thread (`inThreadLogReader`) until task 12.6's
+      ledger tasks, through a function shaped as one. The restore's dump reader splits lines itself: `node:readline`'s
+      iterator failed A111's restore on PostgreSQL (`ERR_USE_AFTER_CLOSE`). Tests (seen failing first: `tsc` 33 errors,
+      5 of 6 files failing): `contract-modules.test.ts` (the literal rule; the emission order against the v9 package's
+      own apply of a transaction of two intents; rows and halts per outcome; the reader; both tables against design
+      §10), `core-ledger-state.test.ts` (+1), `contract-data.test.ts` on PostgreSQL 18.6 and PGlite 0.5.10 (A108: two
+      calls of one contract in one block give one row with the state after both, each key loading from the stored
+      nodes, and at F every contract has its row; A109; A110's halts; `[[contract-logs.fast-equals-full]]`, a range of
+      literal, malformed and oversized logs identical with `-full` and `-fast` on both backends; the devnet tape: each
+      deploy, call and maintenance has its row, F every contract's, `-fast` stores what `-full` stores),
+      `contract-logs-handoff.test.ts` (A111 on both: `-full` to 3, a backup at 3, its restore, `-fast` from 4, every
+      log once); committed controls in `contract-data.negative-control.test.ts`. The code registry's last pending code
+      has its tests (`PENDING` empty).
+      **Pending:** a recorded tape with a MIP-0002 log (the devnet's contracts log none); issue
+      00033-restore-future-module. (`-fast` reads in its ledger task in the worker since task 12.6.)
+
+## 14. Private processes
+
+- [x] 14.1 The private backbone (`core-private-source`, `core-key-registry`), binding, block intake; the determinism
+      rules of DT-6 checked at a private process's startup and its contents hash (Q75).
+      **Acceptance:** A112, A113, A114, A116, A146.
+      **Done (2026-10-26):** a private process is task 5.3's `startProcess` with `side: "private"`: the private `core`
+      schema, its own database, and the private backbone — `core-chain` (task 10.2's, unchanged: its history, its
+      identity, the items `config`, `db`, `ledger-table`), then `src/backbone/private.ts`'s `core-private-source`,
+      `core-key-registry` and `core-digest` (the core's part, requiring `private-cursor` where the core's requires
+      `blocks`), in RN-3's order; no `core-block-fetch` or `core-block-commit`; its states, reasons and retries are
+      5.4's, and 5.2a's process contexts and module API serve it unchanged (5.2a's note (g)). `core-private-source`
+      (`src/backbone/core-private-source/`, new): `privateIntake()` gives one start its part and its block source, which
+      share the public database. Its table `core_private_source.cursor` (one row: the private cursor — height, hash and
+      `parent_hash`, Q124 — and the binding). Its `on-start-db` binds (PP-2): the public identity
+      (`core_chain.identity`'s genesis hash and S, 10.2's table) recorded at the first start, and on every start a
+      different genesis hash or S, or a private S below the public S, refused with `private-binding-mismatch` (new
+      `ErrorCode`, in `REFUSAL_CODES`), as is a public database whose core never started (Q125) — the latter already at
+      startup's chain check, which on a private process is its source's (`PrivateBlockSource.checkChain`, in place of
+      `core-chain`'s checks against a node, which a private process never talks to): it reads the public identity and
+      gives `core-chain` the public genesis hash, which it records with the private S; the bootstrap's wait waits for
+      the public cursor to reach the private S. Its `PrivateBlockSource` runs under the finalized loop unchanged (PP-3,
+      PP-5): its cursor and committed height the private cursor's, its head the public cursor (`readCursor` on the
+      public database), its block at h the public block at h, its `waitForHead` reading the public cursor at every
+      wake-up (`PublicWakes`: a 1 s poll until 14.2's `committed` messages and reconnections), and `fetchRead`, each
+      private `on-fetch` callback's read of public data at the public cursor, at least h (Q100;
+      `PointCallbacks["on-fetch"]` gains its optional `read`). Every read of public tables is in `public-database.ts`;
+      the public database is read directly on PostgreSQL (`publicDatabase`, reads only), and a PGlite or missing one is
+      refused until 14.2's transport (`public-database-transport`). `core-key-registry` (new): its table
+      `core_key_registry.keys` and the item `admitted-keys`, empty at every `on-compute` until 14.4. The runner
+      (`src/runner/`): `BlockSource` gains the optional `fetchRead`, `committedHeight`, `checkChain` and `close`; the
+      loop gives on-fetch its read and checks the source's cursor before the `COMMIT`; the process opens its database
+      with the source's committed height and closes the source with it. Which side runs what (3.1's note (g)): a public
+      declaration with `keyKinds`, `validateKey` or `needsLockstep` is `invalid-declaration`; a configuration entry of
+      the other side's module is refused (`entry-side`). DT-6 and the contents hash need nothing new on a private plan
+      (7.1's machinery, Q75). `design.md` §2, §3, §6, §7, §8, §10; the module guide's "Private modules". Questions Q124
+      (the cursor's parent hash; shipped A), Q125 (a public database never started; shipped A) and Q126 (a private
+      module's requirement on a public `table` item; shipped A, nothing changed) raised, none blocking. Tests, seen
+      failing first (`tsc` exit 2, 12 errors: the modules `core-private-source` and `private` missing, `on-fetch` with
+      no fourth parameter; the five suites failed to load): `test/private/` — `separation.test.ts` (A112: every session
+      of each PostgreSQL database logged by a login event trigger, by login; every PGlite engine by the process that
+      opened it), `binding.test.ts` (A113, a public database never started), `intake.test.ts` (A114 with `link.ts`, the
+      transport's stand-in, dropped while the core commits 50 heights; A116, the instance stopped for 100 blocks),
+      `determinism.test.ts` (A146: `serial`, `now()` and `double precision` refused with the core's code and message;
+      three instances' contents hashes; A147's private part) — on PostgreSQL 18.6 and PGlite 0.5.10, a core and each
+      private process with its own database, on 10.2's real backbone (a custom network with its own ledger table, its
+      genesis the in-memory chain's block 0), the PGlite public database read by direct calls through the core's `db`
+      item; `test/backbone/core-private-source.test.ts` (the source, the poll, the binding's refusals,
+      `openPublicDatabase`); rows in `test/modules/validation.test.ts` and `test/config/validate.test.ts`. Committed
+      negative controls: a private process reaching its database through the core's settings fails A112; a binding check
+      that compares nothing fails A113; an intake that skips a height after a reconnect fails A114; a core that waits
+      for an independent instance fails A116; a private plan without DT-6's check
+      (`determinism.negative-control.test.ts`) accepts the `serial` column and fails A146. Wrong variants (a scratch
+      runner outside the clone), 62 over two runs on the final sources: run 1, 53, 52 caught (10 by `tsc`, one at the
+      run's limit), the survivor a gap — a refused private process kept its public database's connections until it was
+      stopped — closed by `binding.test.ts` counting them while it is refused; run 2, eight of run 1's `tsc`-caught
+      variants written to type-check and the survivor again, 9 of 9 caught; run 3, after the rebase onto 10.2, 4 on the
+      source's chain check and the identity read, 4 caught; no equivalent survivor. Every new file of `src/backbone/`
+      100 %, `src/runner/` still 100 %.
+      **Pending:** the process transport, `hello`/`hello-ack`/`committed`/`read` and the PGlite public database (14.2,
+      which replaces `PublicWakes`' poll and `openPublicDatabase`'s refusal); lockstep and its check in the read of
+      public data (14.3); test keys made pending, `on-key`, the admission cutoff and CF-11's checks, and A146 with the
+      keys admitted (14.4); the configured network's genesis check on a private process (10.2b, Q136 B); the
+      private-backup refusal (15.1); the browser's transport (16.1); public `table` items in the private graph (14.1a,
+      Q126 B).
+- [x] 14.1a The owner's answer Q126 B: a private module's requirement on a public `table` item resolved against the
+      public database (PP-13). **Design first**, recorded in `design.md` §8 and §10 before any code: where the public
+      database says which `table` items each module provides at which heights, so that a private process needs neither
+      the public build nor its user modules — the reading in Q126's resolution, to be confirmed or replaced by a
+      question: a `provides` column (`text[]`) of `core_chain.config`, written by `core-chain` with each revision from
+      the module's declaration. Then the private graph (`resolveGraph`, MD-3, MD-4) counts those items as provided in
+      their ranges; the module guide's "Private modules" and `test/private/builds.ts`'s modules declare the public
+      tables they read.
+      **Acceptance:** A155.
+      **Done (2026-10-27):** design first (`design.md` §8's "Public `table` items", §10's row), the reading of Q126's
+      resolution confirmed: `core_chain.config` gains `provides text[] NOT NULL` (migration `001` changed in place: no
+      database exists), which `core-chain`'s `recordHistory` writes with each row (`tableItemsOf`: the names of the
+      build's declaration's `table` items for a module — for a scheduled revision the declaration the build has, as the
+      graph judges it —, of the build's backbone parts for `core`; each once, by UTF-8 bytes) and gives every other
+      revision above the cursor again where it differs (`IS DISTINCT FROM`, so an unchanged restart writes nothing); a
+      revision at or below the cursor keeps its items (CF-6). `PrivateBlockSource.checkChain` reads them with the public
+      identity (`readPublicItems`, `publicItemRanges` in `src/config/history.ts`: each item from its row's start to its
+      last height by CF-5) and returns them as `ChainCheck.publicItems`, which `src/runner/process.ts` gives
+      `resolveGraph` (`GraphInput.publicItems`; two lines). `src/modules/graph.ts`: a public item active at a range's
+      first height counts as provided (`item-no-provider` when nothing provides it at any height, `item-not-available`
+      with `details.publicProviders` otherwise), the ranges split at the public items' starts and after their stops; a
+      public item named like a backbone item of the build is the backbone's (`chain-identity`, the digests), and a
+      private module providing a public item's name at a common height is `providers-overlap` (`details.publicModules`;
+      question Q146, shipped A); public providers take no part in the order, segments, `providerOf`, cycles or
+      MD-4; each resolved range lists its public items, on which `src/runner/dispatch.ts`'s Kahn waves wait for no part
+      (one line). PP-2's comparisons with the recorded binding now run in `checkChain` too, after the configured network
+      and before the graph — the startup read of the private cursor reads the binding from its row — and again in
+      `on-start-db`, so a private process against the wrong public database is refused for that and never by the graph
+      reading that database's items. Only `table` items are recorded, so a public `block` or `process` item still finds
+      no provider. The public items are read at the private process's startup only (question Q147, shipped A). The
+      module guide's "Private modules" says what to require (and the binding's reasons); `test/private/builds.ts`'s `pm`
+      requires `blocks`. Tests, seen failing first (`tsc` 15 errors; Vitest 38 failing, every private process refused
+      `item-no-provider` for `blocks`): `test/modules/graph-public-items.test.ts` (PP-13's scenario, a backbone item,
+      heights, stops, a handoff and a gap, no `block` item, the private backbone's names, overlaps, the resolved graph,
+      the cursor, none given), `test/runner/dispatch.test.ts` (no wait on a public item), `test/config/history.test.ts`
+      (`publicItemRanges`), `test/backbone/core-chain.test.ts` (the migration's pin, `tableItemsOf` on the command's
+      builds), `test/config/history-database.test.ts` (the column; `provides` recorded and refreshed above the cursor on
+      both backends), `test/backbone/core-private-source.test.ts` (the items read with the identity, the binding
+      compared in `checkChain` and its order, the seams) and `test/private/public-items.test.ts` (A155 on PostgreSQL
+      18.6 and PGlite 0.5.10: `reader`, requiring `pub-rows` of the public module `pub` and `blocks`, starts and reads
+      both at every height when `pub` runs from S; `item-no-provider` naming `pub-rows` without `pub`;
+      `item-not-available` when `pub` starts at 2 (range 1–1) or stops at 2 (from 3 on); it starts from 2 when `pub`
+      does; a module requiring `block-header` is refused). Committed negative controls: a graph given no public items
+      refuses A155's provided case; one given every public item at every height starts its two `item-not-available`
+      cases. Wrong variants (a scratch copy outside the clone): 35 on the new logic (the graph 12, the dispatch 2, the
+      item ranges 3, the recording 8, the private source 9, the runner 1), 35 caught (34 by the unit suites, 1 by A155);
+      the 24 with an effect a process can show run again against A155's and A113's suites alone, 21 caught there, the 3
+      left — an item a part provides in a range ending at the cursor, a public revision superseded before its own stop,
+      a binding recorded before any commit — being cases no process test sets up, each caught by its unit test; none
+      equivalent.
+- [x] 14.1b The owner's answer Q147 (the owner's design, none of the options): the core computes its configuration
+      hash once at startup, in memory, without secrets — its exact input settled in `design.md` §8 (for example the
+      configuration history's per-revision `data_hash` values) — and sets `X-Umbra-Config-Hash` beside
+      `X-Umbra-Version` on every `listen.api` answer (RN-16); `hello-ack`, `committed` and `read-result` carry it as
+      `configHash` (PP-4, design §8's schemas); a private process records it after its full startup checks and halts
+      with the new code `public-config-changed` when a message carries another, and without a transport reads the
+      public configuration history again at each reconnection to its public database (PP-14); the code in design §11's
+      halts, `ErrorCode` and the code registry with its test (A87); the module guide; the tests.
+      **Acceptance:** A162; A115 with the new field; A87.
+      **Done (2026-10-27):** the hash's input settled in `design.md` §8 ("The configuration hash"): SHA-256 of the
+      canonical encoding (DT-1) of `["umbradb-config-hash", 1, rows]`, each row of the process's own `core_chain.config`
+      as `core-chain` recorded it at startup — `[entry_id, start, stop, version, data_hash, provides]`, by `entry_id`'s
+      UTF-8 bytes and `start` —, so every data field of every revision (through `data_hash`), its heights, version and
+      `table` items count, and nothing operational or secret (never recorded, CF-4); the rows, so that a private process
+      computes the same hash from the public database (`configHashOf`, `src/config/history.ts`; `readConfigRows`,
+      `readConfigHash`, `src/backbone/core-chain/history.ts`). Each process reads its own once at startup, after
+      `on-start-db` recorded the configuration, and keeps it for the run (`src/runner/process.ts`: three lines and the
+      negative control's seam `ProcessInput.configHash`). `src/runner/api-server.ts`: `X-Umbra-Config-Hash`
+      (`CONFIG_HASH_HEADER`) beside `X-Umbra-Version` on every answer of a listener given the hash — the handlers', the
+      module API's errors, Node.js's own (`unreadableAnswer`), the upgrade and `ws`'s refusals —, a module's own header
+      of either name replaced (`coreHeadersResponse`; `VersionedResponse` is its form without a hash).
+      `src/private/messages.ts`: `configHash` (32 bytes) on `hello-ack`, `committed` and `read-result`;
+      `core-transport.ts` sends the process's on each. A private process (PP-14): its transport (`private-transport.ts`)
+      records the first `hello-ack`'s `configHash` and, on a later `hello-ack`, `committed` or `read-result` carrying
+      another, refuses itself for good with the new halt `public-config-changed` (`publicConfigChanged`, `details {
+      recorded, found, via }`): it closes the connection (1000), connects no more, fails every wait and read, and the
+      source (`core-private-source`) fails its next read of public data with that refusal even when it reads PostgreSQL
+      directly, so no other height is processed. Without `coreTransport`, startup's chain check reads the public rows
+      with the identity (`readPublicConfiguration`) and records their hash; the PostgreSQL public database counts its
+      read pool's lost sessions (`onReadSessionLost`, `src/db/postgres.ts`, `PublicDatabase.reconnections`), and the
+      source's first read after one reads the rows again, in that read and before its body, and halts alike (`via:
+      "public-database"`). The code is in `ERROR_CODES`, `HALT_CODES`, design §11's halts and the registry
+      (`test/runner/code-registry.ts`, A87). The module guide's "Answer…" and "The `X-Umbra-` prefix" bullets, and "A
+      changed public configuration halts you". Tests, seen failing first (`tsc` exit 2, 50 errors: `configHashOf`,
+      `ConfigHashRow`, `readConfigHash`, `readPublicConfiguration`, `publicConfigChanged`,
+      `PublicDatabase.reconnections`, `SourceTransport.refusal`, `PrivateChecks.configHash`, `ProcessInput.configHash`,
+      the messages' `configHash`; Vitest 7 files failed, 47 tests — no header, no halt: the private process went on to
+      16 on both backends and both paths, the schemas without the field, the registry's code not in §11):
+      `test/private/config-hash.test.ts` with `config-hash-checks.ts` (A162 on PostgreSQL 18.6 and PGlite 0.5.10: a core
+      restarted at 8 with the same configuration, at 11 with only secrets changed — the node URL's password, and on
+      PostgreSQL its own login's password in `database` —, at 11 with the data field `level` of the public module
+      `pub`'s revision from 30 changed, then on to 16: the private process with `coreTransport` reaches 8 and 11 and
+      halts with `public-config-changed` at 11; the core's and the private process's module API answers carry
+      `X-Umbra-Config-Hash`, the same through the first two restarts, another after the third, holding no secret as text
+      or hex; on PostgreSQL the same without a transport, every session of its public login ended after each restart),
+      and unit rows in `test/config/history.test.ts` (`configHashOf`), `history-database.test.ts` (`readConfigHash` and
+      `readPublicConfiguration` on both backends), `test/private/messages.test.ts` (A115 with the field),
+      `transport.test.ts` (the core's three messages carry one hash), `transport-faults.test.ts` (the core's side; the
+      private side refused for good by a `committed`, a `read-result` or a reconnection's `hello-ack` with another hash;
+      the same hash changes nothing), `test/backbone/core-private-source.test.ts` (the reread at a reconnection, the
+      transport's refusal at the next read) and `test/runner/api-server.test.ts` (every answer, `coreHeadersResponse`,
+      `unreadableAnswer`). Committed negative controls: a private process that ignores `configHash`
+      (`PrivateIntakeOptions.configHash: "ignore"`) reaches 16 — with a transport on both backends, without one on
+      PostgreSQL — and fails A162; a configuration hash over the core's secrets that shows them (the node URL's password
+      as hex) changes with only that password and holds it, failing A162 (`config-hash.negative-control.test.ts`); a
+      transport that ignores the hash keeps its connection; a source that ignores it reads on; task 5.2c's listener
+      without a hash fails the header oracle on every answer. Wrong variants (a scratch copy outside the clone, run
+      through Codex): run 1, 46 on the new logic — the hash 10, its reading 3, the listener's headers 5, the process 3,
+      the messages 2, the core's transport 2, the private transport 10, the source 7, the public database's count and
+      the PostgreSQL hook 3, the code lists 1 —, 46 caught (39 by the unit suites, 7 by A162), none equivalent; run 2,
+      the unchanged final sources against A162, its negative controls and the transport and history suites on a fresh
+      copy, nothing failing (a baseline: A162's catches are the variants'). Question Q159 (startup records the
+      first hello-ack's hash without comparing it with the public history it read) raised, not blocking, shipped A;
+      issue `docs/issues/00038-registry-conditional-tests.md` (the A87 registry cannot name an `it.runIf` test)
+      recorded (OPEN). Waits: Q159 (owner).
+- [x] 14.1c The owner's answer Q159: a private process keeps the public configuration hash it accepted in its private
+      database; at every start it compares it with the core's first `hello-ack`'s and with the hash of the public
+      history it read, and on a difference stops with `public-config-changed`, naming the new hash and
+      `--update-hash=<hash>`; `umbradb run --update-hash=<hash>` (and `startProcess`'s `updateHash`) accepts it after
+      the full checks; a first start records the hash it finds (PP-14 as amended); `design.md` §8, the module guide and
+      the operator guide; the tests.
+      **Acceptance:** A165; A162 unchanged.
+      **Done (2026-10-27):** where the hash is kept (design §8, §10): `core-private-source`'s migration `002` creates
+      `core_private_source.accepted_config` (one row, `config_hash`, 32 bytes), provided as the item
+      `accepted-config-hash` declared `deterministic: false`, so change capture, the digests and the contents hash
+      leave its row out — an operator's acceptance at a start, not a function of the chain; two private databases bound
+      to one public database hold the same data whichever hashes each accepted. Startup's read of the private cursor
+      reads it (`readAcceptedConfigHash`); `PrivateBlockSource.checkChain`, after PP-2's checks and the core's
+      `hello-ack` and before the graph, compares it with the hashes found — the public history's and, with
+      `coreTransport`, the `hello-ack`'s — and the hash given (`startHashDecision`): two hashes found that differ stop
+      the start whatever was given; a first start records the hash found; the hash accepted runs on; another stops the
+      start with `public-config-changed` (`details { via: "startup", recorded, found, history, core, given }`), its
+      message naming the new hash and `--update-hash=<hash>`, unless it is the one given; the part's `on-start-db`
+      records it in its transaction after the binding, so only once the full checks passed (a start the graph refuses
+      records nothing). The runtime halt's message (14.1b's `publicConfigChanged`) names `--update-hash=<found>` too,
+      which also covers a PGlite public database, read through the core after the first `hello-ack`. The hash given:
+      `startProcess`'s `updateHash` (`ProcessInput.updateHash`, passed in `SourceShared`; a public process's source
+      ignores it) and `umbradb run --update-hash=<hash>` (or `--update-hash <hash>`; `0x` and 64 lowercase hex digits,
+      once, else the usage and exit 2). `public-config-changed` joins §11's startup refusals, `REFUSAL_CODES` and the
+      code registry (A87, A165's test); design §8, §9.1, §10, §11, §12, the module guide's bullet and the operator
+      guide's new section. Tests, seen failing first (`tsc` 19 errors: `startHashDecision`, `StartHashes`,
+      `readAcceptedConfigHash`, `pendingAcceptedHash`, `PrivateIntakeOptions.acceptance`, `ProcessInput.updateHash`,
+      the source's options; Vitest 6 files, 28 tests — no hash stored, no stop, no `--update-hash` in any message, the
+      flag unknown to `run`, §11 without the code): `test/private/accepted-hash.test.ts` with `accepted-hash-checks.ts`
+      (A165 on PostgreSQL 18.6 with and without a transport and on PGlite 0.5.10 with one: a first start records H1; the
+      core restarted with a data field changed (H2): a start stops naming H2 and `--update-hash=H2`, H1 kept, the
+      cursor unchanged; `updateHash` H1 stops alike; `updateHash` H2 with a module requiring an item no public module
+      provides is refused by the graph (`item-no-provider`), H1 kept; `updateHash` H2 runs on and records H2; a start
+      without it then runs on; a new private database at the same height has the same contents hash; with a transport,
+      a core restarted (H3) between the history's read and the `hello-ack` (PostgreSQL: the `hello` held by a relay) or
+      between the `hello-ack` and the first read through the core (PGlite: the `read` held) stops the start naming
+      H3), `test/private/relays.ts`'s `HoldingRelay`, unit rows in `test/backbone/core-private-source.test.ts` (the
+      decision, the read, the check's order, the `hello-ack`'s hash, the record in `on-start-db`, the item and
+      migration, the logs, the halt's message) and `test/cli/` (the flag reaching `startProcess`, its refused forms,
+      the usage). Committed negative controls (`test/private/accepted-hash.negative-control.test.ts`, both backends):
+      a start that never compares the hash it recorded runs on after a changed configuration, and an `--update-hash`
+      that accepts any hash runs on with the old hash given — each fails A165. Test rows changed by the new item or
+      check: `core-chain.test.ts` (the private `core`'s items), `core-private-source.test.ts` (the part's items; the
+      stand-in core's `hello-ack` carries its history's hash), `binding.test.ts`'s A113 negative control (also skips
+      the hash comparison), `test/backup/restore-private.ts` (`privateHashOf` with the process's opted-out table). A162
+      unchanged. Question Q166 (the browser page cannot pass `updateHash` to a private instance) raised, not
+      blocking.
+- [x] 14.2 The process transport and its messages; opt-in mutual TLS.
+      **Acceptance:** A115, A121.
+      **Done (2026-10-26):** `src/private/` (new; design §1's row): `messages.ts` — design §8's eight messages as zod
+      strict schemas (32-byte hashes, ids of 1–128 characters, a `read-result` or `api-result` with exactly one of its
+      branches, rows of one value per column), `parseMessage` telling `not-json`, `unknown-version`, `unknown-type` and
+      `invalid-message` apart, the wire's JSON exact for every integer (written with `bigint`s as numbers, read with the
+      component's lossless reader), and the values by column type (`bigint` and `numeric` decimal text, `bytea` `0x`
+      hex, `json`/`jsonb` their value, arrays element by element) read back to the value the database API gives;
+      `core-transport.ts` — the core's WebSocket server on `listen.transport` (`https` with `requestCert` and
+      `rejectUnauthorized` against `trustedRoots` when `tls` is set, PP-11), a connection speaking after its `hello`, a
+      `hello` of a connected id (or a second on one connection) answered `refused: duplicate-instance` and closed,
+      `hello-ack` with the lockstep flag, the genesis, S and the public cursor, `committed` after each public commit,
+      each `read` in one `Database.read` bounded by `apiReadTimeoutMs` with each column's type name (the database API
+      now keeps a result's columns on its rows, `resultColumns`; other types named by `format_type` in the same read)
+      and an error as a code only, every `api` answered `error: not-found` (Q140), a `report` kept for 14.3, and a
+      connection closed (1008) on a fault, a binary frame, a message only the core sends, a message before `hello`, more
+      than 64 reads at once, a slow reader (128 MiB waiting), a message over 64 MiB, no pong within 15 s;
+      `private-transport.ts` — a private process's connection to `coreTransport` (made at its first wait or read through
+      it), its `hello` with the private cursor or S − 1, woken by every `hello-ack` that connects it and every
+      `committed` (PP-3), reconnecting after IN-10's back-off up to `backoffCeilingMs` without end, its reads failing
+      `connection-lost` (retried by the runner) while the core is away, and a read of public data through the core
+      (`read` messages: the handle's height first, then one per `query`; Q142). `core-private-source`
+      (`public-database.ts`'s `openPublicSide`): with `coreTransport` the wake-ups are the transport's and nothing else,
+      replacing 14.1's poll, which stays only for a private process without one; a PGlite or missing `publicDatabase` is
+      read through the transport, and one with neither is refused (`public-database-transport`); the source tracks its
+      position for `hello` (startup's cursor, then each block `on-after-db-write` sees committed) and closes the
+      transport with the public database. The runner: a public process with `listen.transport` starts the transport once
+      its database is open and its chain known, before the bootstrap's wait (a taken address refuses, `listen-failed`),
+      sends `committed` from the loop's observer and closes it at its stop or a refusal; `SourceShared` gains S and the
+      log; `umbradb run` passes them to a private intake. Design §8 (as built, mutual TLS, taking blocks), the module
+      guide's "Private modules", `vitest.config.ts` (`**/src/private/**` 90/85). Questions Q140 (what an `api`
+      calls; shipped A, not-found), Q141 (a `read`'s parameters' types; shipped A, `0x` hex is bytes) and Q142
+      (a read through the core is not one snapshot across statements; shipped A) raised, none blocking; issue
+      `docs/issues/00029-private-config-check-cursor.md` recorded (OPEN). Tests, seen failing first (`tsc` exit 2, 22
+      errors: `src/private/` missing, `resultColumns`, the intake's two-argument `source`; the four new suites failed to
+      load, the core's transport did not listen, 14.1's refusal message, `resultColumns is not a function`):
+      `test/private/messages.test.ts` (A115's schemas: every type round-trips, each field missing, mistyped or extra
+      fails, `v`, `type` and non-JSON told apart, the values' encoding and its inverse), `transport.test.ts` (A115
+      through a running core on PostgreSQL 18.6 and PGlite 0.5.10: `hello-ack`, `committed`, a `read-result`'s id,
+      height and columns, a `bigint`, `numeric`, `bytea` and `jsonb` read back as the core read them — through a raw
+      client and through the private process's own client —, a height `null` on an empty public database, an
+      `api-result`'s id, every fault closing the connection, `duplicate-instance`), `tls.test.ts` (A121 with
+      certificates the test makes with `openssl`, never committed: no certificate, a stranger's and plain WebSocket
+      refused, a trusted one answered; a private process with a trusted certificate processes heights, one without is
+      never connected), `transport-intake.test.ts` (A114 with the real transport: a proxy drops it while the core
+      commits 50 heights, the private process stays put — no poll —, reconnects and processes them in order, on both
+      backends; on PGlite its public reads through the core), `transport-faults.test.ts` (the limits and faults on both
+      sides against stand-ins), rows in `test/deterministic-postgresql/mapping.test.ts` and
+      `test/backbone/core-private-source.test.ts`; `test/private/builds.ts` gains `extra` settings, the core's log and
+      transport address, `coreTransport`, `tls` and a private process's log. Committed negative controls: a decoder that
+      drops a `bigint`'s precision or a `bytea`'s bytes fails A115's value oracle; a core that does not require a client
+      certificate under `tls` fails A121's; a core that accepts a second `hello` of a connected id fails the duplicate
+      oracle. Wrong variants (a scratch runner outside the clone): 90, 81 caught on the first run; the 9 survivors were
+      gaps — an extra field on `hello`, a second `hello` of another id on one connection, the reads' bound, the back-off
+      not started again after a connection, parameters sent without their encoding, the transport preferred to a direct
+      PostgreSQL read, `hello`'s position, the transport left open by a stopped private process and by a stopped core —
+      closed by tests; on the final sources 90 of 90 caught, none equivalent.
+      **Pending:** lockstep — `report`'s hash check, `lockstep-behind` in `hello-ack`, the core's wait (14.3); the
+      core's `/status` of its instances (PP-9, 14.4); test keys (14.4); the browser's `postMessage` transport (16.1);
+      Q140 to Q142 (owner).
+- [x] 14.2a The owner's answer Q140 C: the transport's `api` and `api-result` messages removed — from `design.md` §8's
+      table and schemas, `src/private/messages.ts`, `core-transport.ts` and `private-transport.ts` (their `not-found`
+      answers), the module guide and the tests; an `api` message is then an unknown `type`, which closes the connection
+      as any other does (A115 as amended).
+      **Acceptance:** A115.
+      **Done (2026-10-27):** `src/private/messages.ts` holds design §8's six schemas (`hello`, `hello-ack`,
+      `committed`, `report`, `read`, `read-result`) and no `API`, `API_RESULT`, `Api` or `ApiResult`, so `parseMessage`
+      reads an `api` or `api-result` text as `unknown-type`; the core's transport (`core-transport.ts`) closes the
+      connection (1008, `unknown-type`) without an answer, as for any unknown type, and a private process's
+      (`private-transport.ts`) closes on one from the core and connects again. Design §8: the table and the as-built
+      paragraph without the two types ("no other message", Q140 C). The module guide said nothing of `api`: nothing to
+      remove there. Tests, seen failing first (`tsc`: `SAMPLES` without the two types; Vitest 8 failing — the
+      messages suite not loading, the core answering `api` and keeping the connection, the private side keeping one
+      from the core): `test/private/messages.test.ts` (the six types; `api` and `api-result` texts `unknown-type`; the
+      JSON-integer and deep-nesting cases moved to `read` and `read-result`), `transport.test.ts` (A115's oracle
+      `apiProblems`: an `api` message closes the connection, 1008 `unknown-type`, unanswered, on PostgreSQL 18.6 and
+      PGlite 0.5.10; both texts among the faults that close; the duplicate oracle's "still served" through a `read`),
+      `transport-faults.test.ts` (both texts from the core close the private side's connection, which is made again; a
+      `read-result` of no read ignored). Committed negative control: task 14.2's answer (a stand-in core that answers
+      `api` with `api-result` `not-found` and keeps the connection) fails `apiProblems`. Wrong variants (a scratch copy
+      outside the clone): 11 (either type's schema put back, the unknown-type check and its reason, a wrong-direction
+      message ignored, on both sides), 11 caught; the three schema variants again against the transport suites alone,
+      3 caught; none equivalent.
+- [x] 14.2b The threat model draft's gap 1 (owner, 2026-10-28): the transport's `read` runs each statement a
+      private process sends (`src/private/core-transport.ts`) in a read-only transaction on a session whose login
+      may write, so a `COMMIT` ends the read and the next statement writes; PGlite's read shares the writer's
+      session. Confine a `read` so that nothing it sends can write or change session state, on both backends, with
+      the database refusing the write rather than a statement parser where the backend allows it (a login or role
+      that cannot write; a question if that needs a new setting); refuse transaction and session control with an
+      error naming the statement, the transport staying up. `design.md` §8 says how.
+      **Acceptance:** A172; A115 and A117 unchanged.
+      **Done (2026-10-28):** the escape reproduced first: on task 14.2's path, on PostgreSQL 18.6 and PGlite 0.5.10,
+      `COMMIT`, `ROLLBACK` or `END` then `INSERT` wrote `pub.rows`, `COMMIT` then `nextval` moved `pub.log_id_seq`,
+      `pg_advisory_lock` left its lock held, and each was answered as a read. `src/private/read-gate.ts` (new): before
+      any statement of a `read` runs, each must be one read — first word `SELECT`, `WITH`, `VALUES` or `TABLE`, one
+      statement, no name starting `pg_`, `dblink` or `binary_upgrade_` and none of `set_config`, `setseed`,
+      `nextval`, `setval`, the functions that run SQL given as text, BRIN/GIN maintenance or large objects, and
+      readable —, the text read into tokens as PostgreSQL 18's lexer reads it, plain strings with
+      `standard_conforming_strings` on and off; so the read-only transaction `Database.read` opens, in which the
+      database refuses the write, is never left. Otherwise the core (`core-transport.ts`) runs none of the read's
+      statements, answers `read-result` `error: read-refused` with `refused: { statement, reason, name }`, logs the
+      instance and the statement's place and name (never its text; names in printable ASCII, at most 64 characters)
+      and keeps the connection; a private process's client (`private-transport.ts`) fails the query with the
+      `UmbraError` `read-refused` (new in `ERROR_CODES`; not retryable), naming the statement. A login that may only
+      read on PostgreSQL would need a new setting: question Q175; PGlite has one session,
+      the writer's, so the gate is what holds there. Design §8 (**Confined reads**, `refused` in the table), PP-4
+      amended (the `refused` field and the confined-reads sentence), the module guide. Tests: `read-gate.test.ts`
+      (units, `refused`'s schema), `read-confinement.test.ts` (A172 through a running core on both backends: every
+      escape refused naming its statement, the next read served, the contents hash, row counts and sequences
+      unchanged, no advisory lock held; a private client's `read-refused`), the committed negative control
+      `read-confinement.negative-control.test.ts` (task 14.2's path fails the oracle), `transport-faults.test.ts`
+      (each reason's answer and log line, nothing run; the private side's message per reason). A115's and A117's
+      suites pass unchanged. No mutation pass (deferred to task 17.5 by the owner).
+- [x] 14.3 Lockstep and the behind-instance refusal. Through the core, a read of public data is one `read` per
+      statement (owner decision Q142): a lockstep instance reads the public cursor again after its block's data and
+      halts with `lockstep-behind` if it moved past h.
+      **Acceptance:** A117, A118.
+      **Done (2026-10-27):** `src/private/lockstep.ts` (new): the core's bookkeeping of its `lockstepInstances` — per
+      listed instance whether a connection past its `hello` holds its id, its committed height last learned (the
+      `hello`'s, then each counted `report`'s) and whether the core refused it (`lockstep-behind`,
+      `report-hash-mismatch`) — and the wait: a listed instance holds height h while not connected (one not seen since
+      the core started included, Q24), refused or below h − 1; `wait(h)` resolves once none does, false on a stop;
+      meanwhile the condition `waiting-for-lockstep` (`height`, each holding instance with `connected`, `height`,
+      `refused`; `/status`'s JSON schema has it), and a log line for the instances down or refused. The finalized loop
+      (`src/runner/loop.ts`, `LoopInput.lockstep`, the seam `lockstepWait`) awaits it after h's `on-compute` and before
+      h's block transaction, every read ended — no transaction open, PGlite's one queue free —, and ends with its
+      signal, h not committed, when a stop ends the wait. The process (`src/runner/process.ts`) keeps one bookkeeping
+      per run when its `core` revision lists instances (also without `listen.transport`: then the core waits for them),
+      gives it to its transport and its loop, and shows the condition. The core's transport (`core-transport.ts`): a
+      listed instance's `hello` below the public cursor − 1 is answered `refused: lockstep-behind` (PP-7), its
+      connection kept and the core holding for it; a `report` counts once its hash is the public block's (a bounded read
+      of `core_block_commit.blocks`), another hash or no block there closes the connection 1008 `report-hash-mismatch`,
+      one the core cannot check 1011 `report-unchecked`; the bookkeeping is told of hellos, counted reports and closes.
+      A private process (`private-transport.ts`, `core-private-source`): it connects at startup's chain check and waits
+      for its `hello-ack`, whose `genesis` is compared with the configured network's (`private-binding-mismatch`,
+      `network`; task 10.2b's note (a)); a lockstep-behind ack connects it; it is lockstep when startup's ack said so
+      (kept for the run) or a later one does; after the graph and before any migration a module declaring
+      `needsLockstep` refuses to start on an instance that is not lockstep or has no `coreTransport` (new
+      `BlockSource.checkModules`; `needs-lockstep-not-listed`, `details { modules, transport }`); a lockstep instance
+      takes h only where the public cursor is h — its block read at h, each `on-fetch` read (`BlockSource.fetchRead`,
+      now given the height) beginning at h and reading the cursor again after the callback (Q142) — else halts with
+      `lockstep-behind` (`details { height, cursor }`); each committed block is sent as `report` to a core that lists
+      it; the core's close for `report-hash-mismatch` refuses its transport for good, which halts it with that code. The
+      three codes are in `ERROR_CODES`, `REFUSAL_CODES`/`HALT_CODES` and the registry (`test/runner/code-registry.ts`).
+      Design §8 (the transport bullet, the private process's check, **Lockstep**), the module guide's "Private modules".
+      Question Q149 raised (the transport's core of another S than the public database's; not blocking, shipped A).
+      Tests, seen failing first (`tsc` 72 errors: `src/private/lockstep.ts`, `LockstepWait`, `checkModules`,
+      `connection`, `report`, `lockstep` missing; Vitest: the new unit suites not loading, the source's 5 new tests
+      failing, the process tests timing out with no wait): `test/private/lockstep-table.test.ts` (the bookkeeping, the
+      wait, its log, the condition in `/status`'s schema), `test/runner/lockstep-wait.test.ts` (the loop on PostgreSQL
+      18.6 and PGlite 0.5.10: the wait after `on-compute` and before `BEGIN`, no transaction open — `pg_stat_activity`,
+      PGlite's engine — and a read served; a stop or a false wait ends it, nothing committed),
+      `test/private/transport-faults.test.ts` (lockstep-behind kept and held, the report oracle `reportProblems`,
+      `report-unchecked`, the private side's `connection()`, `report()` and refusal for good),
+      `test/backbone/core-private-source.test.ts` (the ack's genesis and flag, `checkModules`, the block and fetch
+      checks, the reread, the sticky flag, the report), and on both backends `test/private/lockstep-wait.test.ts` (A117
+      `[[private.lockstep-waits-no-transaction]]`: the wait at S for an instance never seen, then for it stopped, no
+      transaction open and the queue free, `waiting-for-lockstep` naming it, the resume, every on-fetch read at its
+      height, a core restart with the instance at its cursor not deadlocking; a core without `listen.transport`),
+      `lockstep-refusals.test.ts` (A118; a report hash mismatch through a relay; `needsLockstep`),
+      `lockstep-reads.test.ts` (Q142). Committed negative controls: a core that opens its block transaction before it
+      waits (both the loop's and A117's oracles: `pg_stat_activity` on PostgreSQL, the held queue on PGlite), one that
+      skips an instance not seen since its start, a report check that compares nothing (`reports: "accept"`), an
+      instance that does not read the cursor again (`reread: false`); a status body without the condition's instances
+      fails the schema. Wrong variants (a scratch copy outside the clone): 71 on the new logic (the bookkeeping 17, the
+      core's transport 18, the private transport 10, the private source 15, the loop 5, the process 5, the code lists
+      3), 69 caught, one malformed (its edit did not parse) and one survivor — a refused instance's report moving the
+      transport's own view of it, which the bookkeeping already ignored —, a gap closed by a test; both again, caught.
+      **Pending:** the core's `/status` of its instances (PP-9's `privateInstances`) and a private process's
+      `public.lockstep` (14.4, from the bookkeeping's `instances()` and the source's `lockstep`); the browser's
+      `postMessage` transport carrying `report` and the lockstep-behind ack (16.1); question Q149 (owner).
+- [x] 14.4 Test keys through the key registry (the key API is not core and leaves this change, Q70) and privacy checks
+      (the private-backup refusal is task 15.1's).
+      **Acceptance:** A119, A120, A123.
+      **Done (2026-10-27):** test keys reach `core-key-registry` (`src/backbone/core-key-registry/`) as the private
+      `core` entry's `testKeys`, a secret field, so every revision of the backbone part has the process revision's list
+      (Q102). CF-11's checks of the configuration alone are the validation's new rule `test-keys`
+      (`src/config/validate.ts`, `testKeysRule`): each key of a kind some module the configuration enables declares in
+      `keyKinds`, its bytes taken by the `validateKey` of every such module (only `true` takes them; a throw refuses),
+      no key listed twice — `invalid-configuration`, a finding at `testKeys[i].kind` or `.bytes` that never holds the
+      key, before the database opens (a refusal of the configuration itself, which ends the process, Q137 B; `umbradb
+      config check` reports it too). The registry's `on-start-db` — before any private module migrates — reads each
+      key's row (`key_id` = SHA-256(UTF-8 kind ‖ bytes)) and refuses `test-key-conflict` (new `ErrorCode`, in
+      `REFUSAL_CODES` and the registry `test/runner/code-registry.ts`) for a key admitted with another start
+      (`details.reason` `start-changed`) or one not admitted whose start is at or below the private cursor, S − 1
+      before the first block (`start-passed`; question Q150), naming the key by its place in `testKeys`; it keeps
+      the keys not admitted for the run, by start. The finalized loop (`LoopInput.keys`, the seam `keyPoint`) fires
+      `on-key` for each key that becomes pending at h after h's `on-start-height` and before its `on-compute`, one key
+      after the other, each callback in series in the range's order with its own read at the cursor; a retry resuming
+      at `on-compute` fires none again. The registry's `on-compute` puts them as `admitted-keys` with `arrived_height`
+      h, none at other heights, and its `on-db-write` writes them, an id already admitted left unchanged; a halt, stop
+      or crash drops the run, and the restart makes them pending again at h. `/status` (`src/admin/`, `src/private/
+      instances.ts`): on the core `privateInstances` — every listed instance from the lockstep bookkeeping (connected or
+      not, its learned height, null when never seen) and every other connected one from the transport (its `hello`'s
+      height: an independent instance sends no `report`, question Q151), each with exactly `id`, `connected`,
+      `lockstep`, `height` —, null before startup opened the database and on a private process; on a private process
+      `public.lockstep`, its source's flag once startup's chain check knows it (`PrivateBlockSource.lockstepShown`).
+      The `/status` JSON schema has both. Design §2, §7, §8, §11 and the module guide's "Private modules". Tests, seen
+      failing first (`tsc` exit 2, 28 errors: the registry's new exports, `LoopInput.keys`, `PendingKeys`, `keyPoint`,
+      `testKeysRule`, `publicLockstepOf`, `src/private/instances.js`, the admin's `privateSide` missing; Vitest: 4 files
+      failed, 22 tests), on PostgreSQL 18.6 and PGlite 0.5.10: `test/private/keys.test.ts` (A119: an undeclared kind and
+      bytes `validateKey` rejects refused before the private database opens; a key with start 4 fires `on-key` once,
+      between 4's `on-fetch` and its `on-compute`, read at 3, and is stored at 4; a private process killed with SIGKILL
+      inside 4's block transaction (`key-crash.worker.ts`) stores nothing and its restart admits the key at 4 — A123: a
+      restart keeps `arrived_height`, fires no `on-key`; another start refuses `test-key-conflict`, as does a new key at
+      the cursor; a removed key stays), `test/private/privacy.test.ts` (A120 `[[private.no-key-bytes-public]]`: a core
+      and two instances, one lockstep with a key of 32 random bytes, 100 blocks; every public table's rows, every log
+      line of the three, every `/status`, `/config` and health answer, the module APIs' answers and every transport
+      message searched for the key's bytes and id in nine forms, the private database holding them as the positive
+      control; the core's `/status` with the four fields only; a listed instance never seen), `test/runner/
+      key-point.test.ts` (the loop's `on-key`), and unit suites (`test/backbone/core-key-registry.test.ts`,
+      `test/private/instances.test.ts`, A28's rows and A119's checks in `test/config/validate.test.ts`, the source's
+      flag, the snapshot and `ProcessAdmin`, the `/status` schema); A146 now asserts the key admitted at 5 in both
+      instances. Committed negative controls: a `test-keys` rule that skips `validateKey` accepts A119's bad bytes; a
+      registry admitting a known key again at a new height (`coreKeyRegistry({ admission: "again" })`) fails A123; a
+      private process logging the key's bytes (a module's error) and a `/config` showing them fail A120's scan; a loop
+      firing `on-key` after `on-compute` fails its oracle. Wrong variants (a scratch copy outside the clone): run 1, 59
+      on the new logic (the registry 23, the loop 7, the validation rule 10, `/status` 13, the process 5, the code
+      lists 1), 56 caught, 2 equivalent (`test-keys` run on a public process too, whose `core` schema has no `testKeys`;
+      an unlisted instance's flag taken from the transport, which gives it `false`) and 1 survivor, a gap — every
+      `on-key` callback of a key sharing one read — closed by a test (one callback's failed statement leaves the next
+      one's read whole), caught in run 2. Issues 00030-concurrent-role-provisioning and
+      00031-key-bytes-in-module-error-messages recorded.
+      **Pending:** questions Q150 and Q151 (owner); the private-backup refusal (15.1); the browser's transport
+      (16.1).
+- [x] 14.4a The owner's answer Q154 A2: keys, and private items in general, are a module's, not the core's (FEATURES
+      records `user-secrets` as a feature module, specified later). Removed from the code: `core-key-registry`
+      (`src/backbone/core-key-registry/`, its table `core_key_registry.keys`, the item `admitted-keys`, its place in the
+      private backbone), the point `on-key` (`POINTS`, `PointCallbacks`, `LoopInput.keys`), the private `core` entry's
+      `testKeys` and the configuration rule `test-keys`, a declaration's `keyKinds` and `validateKey` (the types, the
+      validation, `/config`'s declarations and their schema), and the code `test-key-conflict`; `design.md` §1's and
+      §2's tables (the part and the `on-key` row), §10's `core_key_registry` row and §11's `test-key-conflict`, with the
+      code registry; the module guide; the tests of A119, A123 and A120's key half, with their negative controls
+      (A120's `/status` half kept); issue 00031 (a key's bytes in a module's error message) closed or rewritten for what
+      is left of it.
+      **Acceptance:** A120 (its PP-9 half), A146, A87; A119 and A123 withdrawn.
+      **Done (2026-10-27):** removed — `src/backbone/core-key-registry/` (the part, its table and migration,
+      `admitted-keys`, `keyIdOf`, `testKeyConflict`, `pendingKeysOf`), the registry in `privateBackbone` (now
+      `core-private-source` and `core-digest`) and in `BACKBONE_ORDER`; `on-key` from `POINTS` (twelve points),
+      `PointCallbacks` and `PendingKey`; `LoopInput.keys`, `PendingKeys` and `keyPoint` (`src/runner/loop.ts`, task
+      14.4's lines reversed) and their wiring in `src/runner/process.ts` (an import, a comment, three lines); the
+      private `core` entry's `testKeys` (schema, `CoreSettings`, `TestKey`) and the rule `test-keys`; `keyKinds` and
+      `validateKey` (the type, the validation — `needsLockstep` is now a public module's one refused field —,
+      `/config`'s declarations and `config.schema.json`); `test-key-conflict` (`ERROR_CODES`, `REFUSAL_CODES`, the
+      registry and its 10.4 baseline). `design.md` §1, §2, §6, §7, §8, §10 and §11 say nothing of them but that keys
+      are a module's; the module guide's "Private modules" says a module takes its private inputs itself (its `secret`
+      settings, its own API) and keeps them in its tables; `src/backup/backup.ts`'s refusal message no longer speaks of
+      admitted keys. Issue 00031 rewritten for what is left (a module's `secret` byte setting in another form in a
+      halt's log line). Tests: the files of A119, A123 and the loop's `on-key` deleted with their negative controls;
+      A120 keeps its PP-9 half (`test/private/privacy.test.ts`: a core, a lockstep and an independent instance, 20
+      heights, the core's `/status` with exactly `id`, `connected`, `lockstep`, `height`; a listed instance never
+      seen), its required id `private.no-key-bytes-public` dropped from the title (the manifest never listed it: task
+      18.4's), with a new committed negative control (a core whose `/status` shows a fifth field of an instance fails
+      the oracle); A146 without keys; every other test that named a removed part changed to what is left (private
+      modules require `blocks` or `private-cursor`). New static test, seen failing first (leftovers in 53 files):
+      `test/private/key-handling-removed.test.ts` — no removed file or folder exists, and no name of the removed parts
+      is left in `src/`, `browser/`, `test/`, the module guide or this change's design (`key-handling-checks.ts`), with
+      its committed negative control (`on-key` put back in `POINTS`, the part's folder, a removed test file,
+      `testKeys`, `keyKinds`, `validateKey`, the code and the prose "key registry" each found).
+
+## 15. Backups
+
+- [x] 15.1 `umbradb backup` (command and at stop): `pg_dump` 18 on PostgreSQL in the read transaction's snapshot,
+      `pglite-tools` on PGlite in one queued job, both looked up only when the command runs (`backup-tools-missing`),
+      the manifest line; `private-backup-refused` (Q83, Q85).
+      **Acceptance:** A124, A122.
+      **Done (2026-10-27):** `src/backup/`: `writeBackup` — a private process's backup refused without the development
+      opt-in (its side, or `core_private_source.cursor` in the database, PP-12), then the tool found (`tools.ts`:
+      `UMBRADB_PG_DUMP` or `PATH`, `pg_dump --version` of major 18; `@electric-sql/pglite-tools` imported only now),
+      then one snapshot: on PostgreSQL one database API read that reads the manifest's facts (`facts.ts`: cursor,
+      identity, every `core_chain.config` and `core_chain.migrations` row, the stored state root, the server version,
+      the contents hash with the opted-out tables by name only), exports its snapshot and runs `pg_dump
+      --snapshot=<id> --inserts --no-owner --no-privileges` (the password in `PGPASSWORD`); on PGlite one exclusive job
+      of the queue (`exclusiveJob`, `src/db/pglite.ts`: a read, then the engine for `pgDump`, then `RESET ALL` and
+      `RESET ROLE`); the manifest line (`manifest.ts`, format 1) then the dump, written under a temporary name and
+      renamed once complete. `umbradb backup --out <file> [--config <file>]` (`src/cli/backup.ts`, `configured.ts`);
+      `ProcessHandle.backup(out)` and `backupAtStop` at the core's stop (`src/runner/process.ts`: skipped while the
+      file is a backup of that height, a backup of another height replaced, a file that is no backup kept and the
+      failure logged). `@electric-sql/pglite-tools` 0.4.10 is an exact development dependency and an optional peer.
+      A124 and A122 pass on PostgreSQL 18.6 and PGlite 0.5.10 with the committed negative control
+      (`test/backup/backup.negative-control.test.ts`). The command cannot back up a PGlite directory a running
+      process holds (`writer-lock-held`; Q152, not blocking); the restore is task 15.2. Issue 00032 (the
+      runtime `npm audit`'s zod advisory, found while checking the new dependency) recorded.
+- [x] 15.1a The owner's answer Q152 B: the finalized loop pauses and continues between heights (no transaction open,
+      the height's reads finished) — `ProcessHandle.pause()` and `resume()` —, and a running process given
+      `backupOnSignal` (CF-4) writes, on SIGUSR2, a backup to that path at its next pause, as the backup at stop writes
+      one, then continues: the way to back up a running PGlite process from a shell (BK-1 as amended); the `core`
+      schema's new field, `design.md` §9.1, the operator guide and the tests.
+      **Acceptance:** A163.
+      **Done (2026-10-27):** `src/runner/pause.ts` (new): `LoopPauses`, counted holds (`hold()`: `reached`,
+      `release()`); the loop (`LoopInput.pause`) stops at each point between two heights — before it reads the head and
+      before each height — while one is kept (`pauseBetween`, a negative control's seam), its wait for the head counting
+      as between heights; its signal ends a pause (RN-13). `ProcessHandle.pause()` (resolves once paused, once
+      processing ended, or once `resume()` came first) and `resume()`; `backupOnSignal` (operational, both sides) and
+      `ProcessInput.backupSignals` (Node.js's `process` unless given): SIGUSR2, listened for from the `core` revision's
+      choice until the process closed, takes a hold and writes the backup of the cursor's height at the pause by the
+      backup at stop's rules, then releases it; a second one while pending adds none, one after processing ended writes
+      at once, one while stopping or after a refused startup none; a stop waits for a backup being written. Design §9.1
+      ("As built (task 15.1a)"), the operator guide's "A backup of a running process (SIGUSR2)". Tests, seen failing
+      first (`tsc` 30 errors; Vitest 16 failed): `test/runner/pause.test.ts` (the holds; the loop on PostgreSQL 18.6
+      and PGlite 0.5.10: a hold asked for at `on-fetch`, at `on-compute` or in the block transaction reached once the
+      height committed and its later points ended, no transaction open; while waiting for the head at once; released,
+      every height once; a stop while paused ends the run), `test/backup/pause.test.ts` (A163 on PGlite: three pauses
+      to the core's stop at 60 — every height's points once, committed heights and contents hash an unpaused run's;
+      the idle pause, RN-13 while paused; SIGUSR2 at height 20 writes the backup of 20 at the next pause with nothing
+      run meanwhile, the process goes on, the file restores with every check of BK-3 and an unpaused run's contents
+      hash; after the core's stop, while stopping, before any commit, after a refused startup),
+      `test/backup/signal-backup.test.ts` (a real SIGUSR2 to a process of its own while blocks commit, then SIGTERM,
+      the file restored; `umbradb run` on PGlite given SIGUSR2 from outside writes it, keeps running, exits 0 on
+      SIGTERM), `test/config/core-settings.test.ts`'s row. Committed negative controls
+      (`test/backup/pause.negative-control.test.ts`): a loop that pauses inside the height, one that does not hold, one
+      that stays paused, one whose pause a stop does not end, and one that pauses by ending its run each fail A163's
+      oracle. Q173 (SIGUSR2 without `backupOnSignal`) and Q174 (`/status` does not show a paused loop)
+      raised, not blocking. Issue 00027 (a V8 fatal error in a test worker's wasm code hung the conformance gate)
+      seen again; issues 00049 (`a141-read-timeout-bound-under-load`) and 00050
+      (`a165-race-step-fails-once-under-load`) recorded.
+- [x] 15.1b The threat model draft's gap 7 (owner, 2026-10-28): a backup file's mode depends on the umask
+      (`src/backup/backup.ts` creates its temporary file without one). Every backup UmbraDB writes on Node.js —
+      `umbradb backup`, at stop, on SIGUSR2, `ProcessHandle.backup` — is created owner-only (`0600`) from its first
+      byte and keeps that mode through its rename; the operator guide says so.
+      **Acceptance:** A174.
+      **Done (2026-10-28):** `src/backup/backup.ts`: `BACKUP_FILE_MODE` (`0o600`); `writeBackup`'s temporary file is
+      created by `ownerOnlyFile` — `open(path, "wx", 0o600)`, then `chmod(0o600)` on its handle before its first byte
+      (a refused `chmod` closes and removes it and fails the backup) — and written through that one handle
+      (`createWriteStream({ flush: true })`: fsynced and closed when it ends), the reopen by name to `sync` it removed;
+      `BackupSeams.createTemporary` (the negative control's seam). Design §9.1 ("As built (task 15.1b)"), the operator
+      guide's "What a backup holds". Tests, seen failing first (11 of 13 for the mode, `0666`):
+      `test/backup/file-modes.ts` (the observer: Node.js's `open`, `writeFile`, `appendFile`, `copyFile` and `rename`
+      wrapped on a watched directory, a 1 ms poll, a `pg_dump` wrapper listing the modes while it runs; the oracle) and
+      `file-modes.preload.ts` (the observer in a child); `test/backup/file-mode.test.ts` (A174 under umask `000` on
+      PostgreSQL 18.6 and PGlite 0.5.10: `ProcessHandle.backup` while blocks commit, an earlier `0644` file replaced;
+      `backupAtStop`; SIGUSR2 through `backupSignals`; `umbradb backup` in this process and the bundled command in a
+      child under `sh -c 'umask 000 && exec …'`; a refused `chmod` fails the backup, no file left; the observer's
+      self-check). Committed negative control (`test/backup/file-mode.negative-control.test.ts`): a temporary file
+      created with the umask's mode, and one created `0666` then narrowed, fail A174's oracle; an unwatched backup is
+      reported as not checked. `startTicker` takes `TickerOptions` (`backupSignals`).
+- [x] 15.1c The owner's answer Q173 C: `umbradb run` always listens for SIGUSR2. Without `backupOnSignal`, one is
+      logged as ignored (the line names `backupOnSignal`) and the process keeps running; with it, as task 15.1a. A
+      process a host program starts with `startProcess` without `backupOnSignal` adds no SIGUSR2 listener, so Node.js's
+      default or the host's own handler applies. BK-1 as amended, the operator guide's "A backup of a running process
+      (SIGUSR2)".
+      **Acceptance:** A175.
+      **Done (2026-10-28):** `src/cli/run.ts`: `backupSignalRelay` (and `IGNORED_SIGUSR2`, its three lines) listens for
+      SIGUSR2 from before the configuration file is loaded until `runProcess` returns and is the process's
+      `backupSignals`: a signal goes to the process's listener when it has one, else one line naming `backupOnSignal`
+      (`SIGUSR2 ignored: backupOnSignal is not set, so no backup is written` once startup settled; a starting and a
+      closed variant); `RunSeams.backupSignals`. The runner unchanged but for `ProcessInput.backupSignals`'s comment.
+      BK-1: one sentence that every backup file is created owner-only (`0600`) from its first byte (task 15.1b's
+      behaviour, which A174 cites). Design §9.1 ("As built (task 15.1c)"), the operator guide's "A backup of a running
+      process (SIGUSR2)". Tests, seen failing first (the command ended on SIGUSR2): `test/backup/signal-ignored.test.ts`
+      (A175: the bundled `umbradb run` on PGlite in a child, a tape node's chain answered slowly so heights keep
+      committing, SIGUSR2 at height ≥ 3, then SIGTERM, exit 0; `startProcess`'s SIGUSR2 listener count, unchanged
+      without `backupOnSignal`, one more while it runs with it) with `signal-ignored-fixtures.ts` (the paced chain, the
+      two oracles) and `signal-ignored.worker.ts` (`runProcess` in a child); `test/cli/backup-signal-relay.test.ts`.
+      Committed negative controls (`test/backup/signal-ignored.negative-control.test.ts`): the command's stand-in
+      whose SIGUSR2 reaches no listener (task 15.1a's command) ends on the signal and fails A175's oracle, the same
+      stand-in with the command's signals passes; a `startProcess` given the command's relay (every process listening,
+      Q173's option B) fails the listener count. `test/cli/run.test.ts`'s two handle stubs given `started`.
+- [x] 15.2 `umbradb restore`: the checks before loading, the file's SQL run in one transaction, owners and grants, the
+      contents hash and state root checked before the commit; the operator guide's "restore only trusted backups".
+      **Acceptance:** A125, A126, A127, A128.
+      **Done (2026-10-27):** `src/backup/restore.ts` (`restoreBackup`): before loading, in BK-3's order, the target
+      empty (`isEmptyDatabase`; a PGlite directory without a database not opened), the manifest and the whole dump read
+      without running it (`statements.ts`: statements split as PostgreSQL's lexer reads them, `\restrict` and
+      `\unrestrict` as `psql` takes them, anything else `psql` alone runs refused), S and `checkHistory` against the
+      manifest's rows, `checkRecordedMigrations` (`src/db/migrate.ts`, the bootstrap's own checks), block 0, the
+      finalized head and block at the height through the block source, the node's ledger root read; then one transaction
+      on the writer connection (one job on PGlite): each statement, `RESET ALL`, `restoreOwnership` (`src/db/roles.ts`:
+      module roles created where missing, owners given) and `restoreGrants` (`src/db/migrate.ts`), the contents hash and
+      the stored root checked before the commit. `umbradb restore <file> [--config <file>]` (`src/cli/restore.ts`, its
+      chain the configuration's node). The operator guide's restore section ("restore only backups from a source you
+      trust"). A125 (both directions, catalogs equal to a migrated database's up to an ACL's item order, a `CREATEROLE`
+      login that is not a superuser included), A126 (every code in BK-3's order, the target as it was after each), A127
+      (a restore killed while loading, in a process of its own) and A128 (`[[backup.restore-equals-uninterrupted]]`;
+      PostgreSQL → PGlite, PostgreSQL → PostgreSQL, PGlite → PostgreSQL, continued to h + 100) pass on PostgreSQL 18.6
+      and PGlite 0.5.10, with A147's backup part and the committed negative controls
+      (`test/backup/restore.negative-control.test.ts`). Waits: restoring a private process's backup (Q153, not
+      blocking); BK-5's page (16.x).
+- [x] 15.2a The owner's answer Q153 B: `umbradb restore` restores a private process's backup with BK-3's logic, its
+      checks against the node made against the configured public database — the binding (PP-2: the public genesis hash
+      and S) refused with `private-binding-mismatch` and its `details.reason`, the manifest's block checked against the
+      public database's committed block — and the process continues from its height + 1 (BK-3, BK-4, PP-12 as
+      amended); `src/cli/restore.ts`'s refusal of a private configuration removed; `design.md` §9.1, and §11's backup
+      refusals with the code registry; the tests.
+      **Acceptance:** A164.
+      **Done (2026-10-27):** `restoreBackup` (`src/backup/restore.ts`) takes a chain: the node's block source, or a
+      private process's public database (`RestoreChain`); `umbradb restore` gives the latter for a configuration whose
+      `core` entry has no `node`, read as the private process reads it (`openPublicSide`: a PostgreSQL `publicDatabase`
+      directly, else the core's transport, its `hello` at S − 1 with no hash). After the history check, one read of
+      the public database (identity, `table` items, cursor, block at the height); PP-2's refusals in a private start's
+      order with its own functions — `public-not-started`, `network`, `private-start-below` — before the graph, which
+      counts those items (PP-13); the build's checks; `backup-block-not-finalized` against the public cursor and block;
+      after loading and the contents hash, the binding the backup's `core_private_source.cursor` row records against
+      the public identity (`genesis`, `start`; `readPrivateBinding`, new in `core-private-source`), rolled back on a
+      mismatch. `private-binding-mismatch` is in §11's backup refusals and the code registry; the operator guide's
+      restore section covers a private backup. A164 passes on PostgreSQL 18.6 (public database read directly) and
+      PGlite 0.5.10 (through the core's transport): restored, continued from 13 to 40 equal to an uninterrupted
+      instance; refused against another public database (`start`), and before loading for a public database never
+      started, of another network, of a higher S, with a lower head or another block at the height, the target left
+      empty each time; with the committed negative control (`test/backup/restore-private.negative-control.test.ts`:
+      without the binding's check the backup commits, and the private process then refuses to start on it).
+
+## 16. Browser
+
+- [x] 16.1 The browser build (page, core, ledger and private workers, PGlite, Web Locks, backup and restore) and its
+      headless-Chrome tests in CI.
+      **Acceptance:** A129, A130, A131, A132.
+      **Done (2026-10-27):** `browser/` (design §9.2's "As built"):
+      `browser/build.ts` (`npm run build:browser`, esbuild 0.28.2, writes `dist-browser/`, ignored) bundles the page and
+      three worker entries — the core and private workers each run one process as `umbradb run` starts one
+      (`commandBuild`, the bundled configuration module's data for the run with the development opt-in set on every
+      `core` entry, `nodeSourceOf` or the private intake), the ledger worker runs `src/ledger/worker/entry.ts`
+      unchanged. The workers bundle UmbraDB's sources unchanged and replace only Node.js's built-in modules for the
+      files of `src/` (SHA-256 for `node:crypto`; no asynchronous context for `node:async_hooks`, so PGlite's
+      nested-call guard is off in the browser; Web Workers for `node:worker_threads`; the page's message network for
+      `node:http`, `node:https` and `ws`; POSIX paths for `node:path`), `Buffer`, `process.hrtime.bigint`, six whole
+      modules (the database's opening: PGlite in memory or OPFS; the writer lock: a Web Lock per database; the
+      configuration loader; the node client's socket; the module API's listener: the worker's channel; PostgreSQL,
+      refused) and, as a stub whose exports fail when used, `umbradb backup`'s module (task 15.1, so the build holds
+      once 15.1 is integrated: checked with 15.1's committed sources overlaid in a scratch copy, the whole browser suite
+      passing); the vendored ledger packages' entries read their `.wasm` synchronously, checked against `SHA256SUMS`.
+      The process transport of `src/private/` runs unchanged over `MessageChannel`s the page hands out; its only change
+      is `src/private/timers.ts` (`unrefTimer`, since a browser's timer is a number). The admin endpoints are calls on
+      the worker's channel (`ProcessInput.admin` given a starter, BR-3); for a new database the core worker takes the
+      node's finalized head as S and the page keeps it per OPFS database (BR-2). Tests (`test/browser/`, the machine's
+      Chrome over the DevTools protocol, no new dependency; CI uses the runner's Google Chrome): A129 in memory (the
+      core, the ledger worker parsing heights 4 and 6, a lockstep private instance; the development opt-in the build
+      sets; the admin endpoints and the module API on the channels) and with OPFS (one Web Lock per database; a second
+      tab refused `writer-lock-held`, the first untouched; a reload resumes from the cursor with the same contents hash,
+      the core and the private instance), A130 (S the head at creation, recorded; `core-ledger-state` refused
+      `cannot-start-mid-chain`, named), A131's network half (only the page's files and the node), A132 (Chrome and
+      Node.js on PGlite, the same tape and configuration, a table declared `deterministic: false` among it: equal
+      contents hashes), with their committed negative controls (no Web Lock: the second tab is refused `database-error`
+      by OPFS, not `writer-lock-held`; a foreign request; `JSON.parse` as the JSON reader: the core halts at S and never
+      has Node.js's hash); unit tests hold the SHA-256, `Buffer` and `node:path` replacements equal to Node.js's
+      (fast-check, seed 20261027), and check the Web Lock, the worker shims, the page's message network and the build's
+      inputs, replacements, stubs and built-in guard.
+      **Done (A131's backup and restore half, BK-5, 2026-10-27):** the page's "Back up" asks the core worker for a
+      backup — the manifest and `pglite-tools`' `pg_dump` (bundled; `pg_dump.wasm` copied beside the bundles) in one
+      exclusive job of the database's queue, `umbradb backup`'s PGlite code moved to `src/backup/pglite-backup.ts`,
+      which imports nothing of Node.js — and saves its text as `umbradb-<storage>-<height>.backup`. With the `restore`
+      parameter the page does not start the core: the file the user picks in "Restore a backup" (BR-3) is restored
+      into the core's OPFS database by `restoreBackup` itself, every check of BK-3 in its order, over the file's text
+      (`src/backup/text.ts`: `blobText`, the line splitting `dumpLines` now shares), with the bundled configuration
+      for the backup's S and the configured node on a client of the restore's own; a refused restore leaves the
+      database empty and the page waiting for another file; a restored one sets the page's kept S and starts the core,
+      which resumes from the backup's height + 1. `node:fs`'s browser shim gains a failing `createReadStream`
+      (a restore by path, never called there). A131 passes in Chrome: a page synced from S 3 to 6 backed up through
+      its button (the file saved by Chrome); the backup refused `restore-target-not-empty` in the same profile and
+      `backup-history-mismatch` in a fresh one with other modules; in the fresh profile's page a file that is no
+      backup refused `backup-format-unknown`, the backup against another chain's genesis
+      `backup-genesis-mismatch`, against a node whose head is below it `backup-block-not-finalized`, a tampered copy
+      `contents-hash-mismatch`, then the backup restored (its contents hash the first page's at 6) and the core going
+      on from 7 to 9 with S 3 kept, every block once and the contents hash of an uninterrupted Node.js run; both
+      pages reaching only the build's files and the node. Committed negative control
+      (`browser.negative-control.test.ts`, build control `restore-skips-contents-hash`): without the contents hash
+      check the page commits the tampered backup and the oracle fails. Unit tests: `test/backup/text.test.ts`.
+      Q156 resolved A (owner, 2026-10-27): CI's browser tests run the runner image's Google Chrome, as shipped.
+
+## 17. Library surface and gates
+
+- [x] 17.1 Move TransactionHistory and its tests to `legacy/transaction-history/`, excluded from build, package and run.
+      **Acceptance:** A3.
+      **Done (2026-10-26):** TransactionHistory moved with `git mv` to `legacy/transaction-history/`, each file at its
+      repository path below the folder (design §1, §13; LS-3; Q27, F9): the source
+      (`src/interfaces/transaction-history-storage.ts`, `src/postgres/transaction-history-storage.ts`) with its table's
+      migration `src/postgres/migrations/004_transaction_history.ts`, which left 0.9.5's `tier1_wallet` lineage
+      (`src/postgres/migrate.ts`: a schema `runMigrations` creates no longer has `transaction_history`; one that has it
+      keeps it and its `_migrations` row, which the runner never reads); its tests and doubles
+      (`test/postgres/transaction-history-storage{,.property}.test.ts`, `in-memory-transaction-history-storage.ts`,
+      `reference-merge.ts`, `reference-merge-parity.test.ts`, `test/integration/pg-tx-history-adapter{,.test}.ts`), the
+      two live preprod tests (`preprod-db-sync`, `cold-boot-recovery`) and the wallet-SDK loaders only they use
+      (`test/integration/live-fixtures/`); and its benchmark workload (`bench/workloads/transaction-history.ts`,
+      `tx-history-merge.ts`), which `bench/harness.ts` and `bench/types.ts` no longer run or type (the committed
+      baseline keeps its two entries until 17.2). The moved files import each other as before; their 29 imports of files
+      that stayed point two levels further up. Added in the folder: `README.md`; `tsconfig.json`, its own program, which
+      `npm run typecheck` now runs after the repository's, so the kept code still compiles against the 0.9.5 modules it
+      imports (Q112); `vitest.config.ts`, its own run, by hand (`npm run test:live` uses it);
+      `test/postgres/setup.ts`, the repository's test database plus migration 004, at the path the moved tests already
+      import. Exclusions: `tsconfig.build.json` and `tsconfig.json` unchanged (neither includes `legacy/`; A3's test
+      checks their programs, imports followed); `package.json` `files` unchanged; `vitest.config.ts` excludes
+      `legacy/**` from the run and from coverage (Vitest matches coverage globs anywhere in a loaded file's path, so
+      `src/**/*.ts` would reach `legacy/…/src/`); Stryker's `mutate` and the mutation include name no TransactionHistory
+      file (unchanged); the conformance gate runs `vitest run` with that configuration; `npm run build` now empties
+      `dist/` first, so a moved source's old output is not packed (the smoke test's first run packed 12 such files left
+      by an earlier build). Exports, a breaking change: `src/index.ts` no longer exports `PgTransactionHistoryStorage`
+      or its 12 types (`TransactionHistoryStorage`, `…Reader`, `…Writer`, `…Entry`, `…Status`, `EntryContent`,
+      `EntryLifecycle`, `EntryLifecycleStatus`, `PendingLifecycle`, `FinalizedLifecycle`, `RejectedLifecycle`,
+      `MergeEntriesFn`); 35 of 0.9.5's 36 values remain until 17.3. The surface pins follow the new surface (LS-3), none
+      weakened: `barrel-resolves` counts 35 and checks the class is absent; `excluded-not-exported` adds the class's
+      absence and 12 `@ts-expect-error` type imports that `npm run typecheck` holds; `frozen-types` drops the removed
+      names. 0.9.5's `test/postgres/migrate.test.ts` and `durability-probe.test.ts` pin the lineage without 004 (exact
+      names; 6 rows, not 7). Tests: `test/library-surface/legacy.ts` (the inventory and the checks) and
+      `legacy-excluded.test.ts` (14: A3 on the real lists — `npm pack --dry-run --json`, the programs of
+      `tsconfig.build.json` and `tsconfig.json`, `vitest list --filesOnly --json`, the coverage and mutation
+      configurations, the folder's exact inventory — and the negative controls); the pack smoke's oracle 1b (the tarball
+      of a clean build holds nothing of `legacy/` or of TransactionHistory) and 4c (importing the class or its type from
+      the installed package fails to type-check). Seen failing first, before any move: `tsc` with 12 × TS2578 (an unused
+      `@ts-expect-error`); Vitest 15 of 72 tests in 5 files (`expected […] to have a length of 35 but got 36`;
+      `PgTransactionHistoryStorage must NOT be exported`; A3's inventory 38 problems, the build 3, the repository's
+      program 17, the run 6, the two controls that need legacy's configurations unable to load them; the two lineage
+      tests 7, `expected 7 to be 6` and the name lists); the smoke `FAIL -- the packed tarball holds files of legacy/ or
+      of TransactionHistory (A3, LS-3)` (12 `dist/` files); the coverage check, once it matched as Vitest does, with
+      `legacy/**` left out of `coverage.exclude` (3 files). The moved tests pass from their new place (legacy's
+      configuration, PostgreSQL 18.6: 6 files, 98 passed, 4 skipped — the two live tests and the parity file's two
+      real-SDK comparisons, as before). Committed controls, each failing A3: a tarball listing with a `legacy/` file or
+      a TransactionHistory build output (`-`, `_`, camel case, `tx`); a real `npm pack` of a package whose `files` names
+      `legacy`; a run list with a `legacy/` test or a moved test's old path; the list legacy's own Vitest configuration
+      runs; legacy's own TypeScript program; a program whose file imports a legacy file; coverage globs reaching
+      `legacy/`; a missing or stray legacy file, and a file left at its old path. Wrong variants (a scratch runner
+      outside the clone: `tsc`, then `test/library-surface/`): first run 54, 34 caught, 20 survived (the inventory never
+      compared with the folder 7, `underLegacy`'s edges 4, the name pattern's `_`, camel case and case 3, a legacy file
+      reported twice, coverage of the added files, the programs following imports, the package-file filter, the child
+      environment, the file-system oracle replaced), closed by gap tests each seen failing on its variant; the
+      child-environment stripping had no effect in a plain or a coverage run and was removed; on the final sources 63
+      variants, 63 caught (one of them, a planted type error, by the type check). No required id among the moved tests
+      (25 required and 1 deferred, in 10 files, none moved; the manifest unchanged). Question Q112 raised (not
+      blocking); issue `docs/issues/00017-vitest-config-not-type-checked.md` recorded (OPEN).
+      **Pending:** the 0.9.5 modules the kept code imports, and legacy's program and run when they go (17.2, Q112);
+      the TransactionHistory workload in `legacy/transaction-history/bench/` with the baseline's two entries and
+      `Performance/CEILINGS.md` SC-5 (17.2, §13); the §12 surface pin, keeping the LS-3 checks, and the pack smoke
+      rewritten with oracles 1b and 4c (17.3); the breaking-change notice naming the removed exports and that
+      `runMigrations` no longer creates `transaction_history`, and `README.md`'s TransactionHistory sections (17.4); the
+      refactor of the kept code (FEATURES F9).
+- [x] 17.2 Remove the retired parts, the `chain_archive` store, `chain-archive-sync`, their tests, the Lean modules,
+      benchmarks, manifest ids, coverage floors and mutation targets exactly as listed in `design.md` §13, and update
+      the aggregators it lists; mark the retired laws in `Formal/STORAGE_ALGEBRA.md` and the roadmaps; set
+      `openspec/changes/v1.1.0-quint-model-checking`'s status to Archived with the reason; remove the `archive:sync`
+      script; drop `legacy/transaction-history/`'s TypeScript program from `npm run typecheck` and its Vitest
+      configuration and `test:live`, keeping its files, and name in its README the last commit where it compiled and its
+      tests passed (owner decision Q112).
+      **Acceptance:** A5; `lake build --wfail` and the trust audit pass; `npm run test:mutation:ci` passes at break 65
+      on the new targets.
+      **Done (2026-10-27):** §13 applied; 101 files removed (21,739 lines). Removed: 0.9.5's `src/postgres/` and
+      `src/interfaces/` whole — TemporalKV, CheckpointStore, Watermarks, the transaction/lease layer,
+      `saveAndAdvance`, WalletStateEnvelope, the `chain_archive` store with its rollover and partitions, the
+      `tier1_wallet` lineage and the plumbing `src/db/` refactored (client, migration runner, durability probe, errors,
+      abort helper) — and `chain-archive-sync/` (`bootstrap.ts`, `tx-replay-decoder.ts`); their tests: 32 of
+      `test/postgres/` (all but `no-sdk-import-guard.test.ts`, kept, and `setup.ts`), the five 0.9.5 crash tests, the
+      soak and load-under-prune runs, the chain-archive replay test, and the 0.9.5 API pins of `test/api-surface/`
+      (`barrel-resolves`, `frozen-types`, `error-catalog-drift`, `retryability-table`, `withtx-methods`,
+      `chain-archive-routing`; `excluded-not-exported` and `package-json-strict` kept); the benchmarks' five workloads,
+      the baseline, `bench/harness.ts` and `bench/smoke.ts` (only they ran them), and legacy's TransactionHistory
+      workload; the Lean `UmbraDBFormal/TemporalKV/**`, `Checkpoint/**`, `Checkpoint.lean` and their tests, and
+      `APISmoke`'s `checkpoint_union_comm/assoc/idem`. Aggregators: `UmbraDBFormal.lean` imports `APISmoke` and
+      `Watermarks`, `Trust.lean` the two test modules and Watermarks'; `src/index.ts` is empty until 17.3 exports §12;
+      the manifest holds ids 1–4 (`EXPECTED_REQUIRED_COUNT` 4, `EXPECTED_DEFERRED_COUNT` 0; `loadManifest` takes the
+      pins as an argument so the deferred checks keep their tests); `vitest.config.ts` without the five 0.9.5 floors,
+      the three old paths of the moved ones and the chain-archive exclusions; `stryker.conf.json` mutates §13's nine
+      targets with their tests in `vitest.mutation.config.ts`; `tsconfig.json` without `chain-archive-sync/`;
+      `typedoc.json` with no entry point until 17.3; `bench/environment.ts` and `bench/types.ts` without 0.9.5's client
+      and baseline types; A148's record exemption emptied and issue 00010 closed. Kept for ids 1–4 until 18.1:
+      `test/postgres/setup.ts` (the fault primitives on a plain `postgres` connection, nothing migrated) and a crash
+      worker that holds a transaction open before its `COMMIT`. `Formal/STORAGE_ALGEBRA.md` and the two formalization
+      roadmaps mark T1–T4, C1, C2a, C2b, L1 and P1–P8, P10, P11 retired (header notes, kept as history), re-bind W1 and
+      P9 to the cursor table and restate T5 for heights; `ROADMAP.md`'s P1–P10 line and `Performance/CEILINGS.md` say
+      so. `v1.1.0-quint-model-checking` is Archived with §13's reason. Q112 B: `npm run typecheck` is `tsc --noEmit`,
+      `test:live` is gone, legacy's `tsconfig.json` and `vitest.config.ts` are kept unused, and its README names
+      `e31fcf85f2f0228d7c21c6e3f320a4f430f3ea94` as the last commit where it compiled (exit 0) and its tests passed
+      (6 files, 98 passed, 4 skipped; checked by this task). `archive:sync` was already gone (10.1). §13's three
+      mutation targets the build placed elsewhere are named as built (`src/runner/dispatch.ts`,
+      `src/backbone/core-ledger-state/sweep.ts`, `src/backbone/core-block-fetch/node-source.ts`; Q157, shipped A);
+      the sweep's 95/90 floor waits (branches 89.33 %; Q158, shipped A pending). A5:
+      `test/library-surface/retirement.ts` (§13's lists, checked against §13's words) and `retirement.test.ts` (9
+      checks on the real tree — the manifest, `mutate` and break, the floors, `Formal/Lean`'s files, imports and
+      lemmas, the retired files, the scripts, the barrel's names with types, the Quint status — and 9 negative
+      controls); seen failing first, before any removal: 11 of 18 (each check on its retired item, the floor control
+      and §13's words). Lean: `lake build --wfail` and the trust audit pass (Lean 4.32.0 through elan 4.2.4; a planted
+      axiom fails the audit), `leanchecker` passes. Mutation (`npm run test:mutation:ci`, about 58 min at load averages
+      25–45): aggregate 85.33 % over 3,163 valid mutants at break 65 — graph 87.81 %, dispatch 95.80 %, history
+      86.10 %, cbor 98.18 %, digest 96.05 %, height-versioned 74.07 %, cursor-table 78.38 %, sweep 60.62 % (79 mutants
+      reached by no test of its one file), node-source 77.80 %. Conformance (`env -u UMBRADB_TAPES npm run
+      test:conformance`, through Codex, twice, load averages 25–40): 257 of 258 files passed, 4,832 tests passed and 35
+      skipped, all 4 required ids passed, every coverage floor held; the one failure both times is task 12.4's A103 on
+      PostgreSQL in `test/backbone/ledger-storage.test.ts` (5,001 blocks in 960 s: the cursor at 4,163, then 947, when
+      the wait ended; its PGlite twin passed), which passes alone (17 of 17, 716 s).
+      **Waits:** the §12 barrel and pins, the pack smoke rewritten (its oracles 4 and 5 import 0.9.5's surface and
+      fail until then), the bench smoke and its baseline (`npm run bench` and `bench:smoke` name files this task
+      removed) and `typedoc.json`'s entry points (17.3); the crash worker driving the runner (18.1); the §17 ids (18.4);
+      the sweep's floor (Q158).
+- [x] 17.3 `src/index.ts` with exactly the §12 surface; the surface pin; the `umbradb` command; the pack smoke rewritten
+      (§12 imports, the retired-name failure, a tape sync on PostgreSQL in Docker, `umbradb config check`); the bench
+      smoke retargeted with a fresh baseline; `typedoc.json` entry points. `package.json`'s `files` carries the
+      vendored ledger packages (`vendor/ledger/*/pkg`, `SHA256SUMS`, `upstream.json`): without them an installed
+      package halts at height 0 once `core-block-parsed` runs (`src/ledger/load.ts` imports them; found by the README
+      draft, 2026-10-27), so the pack smoke's configuration enables `core-block-parsed`.
+      **Acceptance:** A1, A2, A6; `npm run test:smoke` passes.
+      **Done (2026-10-28):** `src/index.ts` exports §12's 27 values and 27 types. §12 now names the core modules'
+      declarations by their source constants (Q186, shipped A): `CORE_CHAIN_EVENTS`, `CORE_BLOCK_PARSED`,
+      `CORE_TX_RESULTS`, `CORE_LEDGER_STATE`, `CORE_CONTRACT_STATES`, `CORE_CONTRACT_LOGS_FULL`,
+      `CORE_CONTRACT_LOGS_FAST` (a configuration writes `CORE_BLOCK_PARSED.entry({ start, config: {} })`); the four
+      built by factories return `DefinedModule<ModuleDeclaration>`, so `entry` is in their type. Nothing else is
+      exported (Q187, shipped A: types §12's signatures name, such as `ProcessInput` or `CursorTable`, stay
+      unexported; `typedoc.json` has `src/index.ts` as its entry point and `validation.notExported` off, and
+      `npm run docs:storage:check` exits 0). A1: `test/library-surface/surface.ts` and `surface.test.ts` read §12's
+      **Values** and **Types** from this design and compare them with the barrel's exports as the compiler resolves
+      them (value or type by meaning) and with the run-time namespace; committed controls compile barrels that add,
+      drop or re-export a 0.9.5 name or export a class type-only, each failing with the name. A2:
+      `excluded-not-exported.test.ts` holds the six LS-2 names absent (at run time and as `@ts-expect-error` type
+      imports), and the pack smoke type-checks, in a consumer of the installed tarball, a file importing every §12
+      export (none `any`) and a file importing any LS-2 or TransactionHistory name (each fails as not exported). A6:
+      the smoke runs the installed command (usage and exit 2 for none and `sync`; `run`, `backup`, `restore`
+      recognized; `config check` passing a file that imports §12's builders from `umbradb`). The pack smoke rewritten:
+      the tarball ships `dist/index.d.ts` and exactly the vendored packages' files (`package.json` `files`:
+      `vendor/ledger/*/pkg/**` — npm skips the `pkg` directory written without `/**`, as it holds its own
+      `package.json` —, `SHA256SUMS`, `upstream.json`, and `!vendor/ledger/README.md`; 106 files, 18.6 MB packed) and
+      nothing of `legacy/`; the deep import `umbradb/dist/runner/process.js` is blocked; with Docker, the installed
+      `umbradb run` syncs a tape (`test/smoke/tape-node.ts`: the browser tests' chain, ledger v9 transactions at 4 and
+      6) on PostgreSQL from 3 to 9 with `core-chain-events` and `core-block-parsed`, storing 2 and 3 transactions, and
+      exits 0 on SIGTERM; a start that refuses or halts fails it at once. Seen failing first: the tarball check (no
+      vendored file packed); and a scratch variant without that check or the vendored `files` entries, whose sync
+      refused at startup (`package-hash-mismatch … its SHA256SUMS is missing`). The bench smoke: `bench/core.ts` measures `runner.commitEmptyBlock` per backend (the
+      command's build over an `InMemoryBlockSource`, through §12's `startProcess`); `npm run bench` (`bench/harness.ts`)
+      wrote `bench/baseline.json` (500 blocks each, on a loaded 16-core machine: PGlite p99 7.0 ms, PostgreSQL 18.6 p99
+      69.2 ms, CV 0.77); `npm run bench:smoke` (`bench/smoke.ts`, `bench/compare.ts`) warns above 10× and exits 0;
+      `test/bench/compare.test.ts`. A5's transcription no longer lists `bench/harness.ts` and `bench/smoke.ts` as
+      retired: §13 keeps the job and these are its new files. The CI mutation job's timeout (`conformance.yml`) goes
+      from 45 to 120 minutes: task 17.2 measured `npm run test:mutation:ci` at about 58 minutes.
+- [x] 17.3a The module guide rewritten (owner, 2026-10-27; decisions Q160 A, Q161 A), after 17.3: `docs/module-guide.md`
+      replaced by the reviewed outline and first draft (an overview, one complete example, then the detail sections; a
+      "Deterministic PostgreSQL" section for the column types; migrations and upgrades late), every code block
+      importing from `umbradb`; the example in the repository at `examples/stats-module/` (module id `stats-module`,
+      renamed by the owner, 2026-10-27, so it is not read as metadata: the module, its configuration file, the run
+      and try scripts), type-checked with the code; the old guide's content each moved, shortened or cut as the
+      outline maps it. The main `README.md` replaced by the reviewed draft (owner, 2026-10-27), and `npm run web`,
+      which builds the browser page and serves it with the two headers it needs (COOP and COEP).
+      **Acceptance:** `examples/stats-module/` type-checks against `src/index.ts`; `umbradb config check` passes on its
+      configuration file; the README's two quick starts run as written.
+      **Done (2026-10-28):** `docs/module-guide.md` rewritten from the outline and draft (§1 overview, §2 the example,
+      §3–§14 the details with §4 "Deterministic PostgreSQL", §15 migrations, §16 upgrades, §17, appendix A), every
+      `ts` block importing from `umbradb`, `zod` or the example's file; the database as parts, confined reads,
+      `--update-hash` and Q180's seen reads folded in. `examples/stats-module/`: `stats-module.ts`, `umbradb.config.ts`,
+      `run.sh` (`run`, `check`), `try.sh`, `tsconfig.json` (`umbradb` mapped to `src/index.ts`; `npm run typecheck`
+      runs it). `test/examples/stats-module.test.ts`: the type check, `umbradb config check` on the configuration in a
+      project whose `node_modules/umbradb` is the package built from the sources, the guide's and README's imports
+      against the barrel's exports, and the guide's §2 lines against the example's files; its negative control fails
+      each on a changed copy. The guide's draft assumed `BlockParsed`, `ChainOutcome`, `ReadOnlyDatabase` and
+      `commandBuild`, which §12 does not export (Q187): the guide uses `ParsedTransaction` and local types, and leaves
+      out the `startProcess` recipe (question Q188; issue `00053-start-process-declarations`). The [DOC]
+      tests of A72, A144 and Q76 read the new sections. `README.md` replaced by the reviewed draft, updated to the tree
+      (parts, `npm run web`, SIGUSR2 backups, `--update-hash`, the restore warning of Q177 A linking
+      `docs/THREAT_MODEL.md`); its "Choosing a database" section is `docs/choosing-a-database.md`. `npm run web`:
+      `browser/serve.ts` (COOP, COEP; `--dir`, `--port`/`WEB_PORT`), which the browser tests' page server now shares;
+      `test/browser/serve.test.ts` and its negative control. Both quick starts run as written: the CLI one from a
+      packed tarball (`config check` passed, `run` syncing preview), the browser one (`following`, lag 0, in headless
+      Chrome); the README's PostgreSQL configuration also ran against PostgreSQL 18 in Docker.
+- [x] 17.4 Version `0.10.0` and the breaking-change notice in `CHANGELOG.md`; every backbone part and core module
+      names the build's version (`UMBRADB_VERSION`), `core-digest` among them, which names `0.10.0` by hand
+      (`src/backbone/core-digest/core-digest.ts`).
+      **Acceptance:** A4.
+      **Done (2026-10-27):** `package.json` and the lock's own entry at `0.10.0`; the code's one source stays
+      `UMBRADB_VERSION` (`src/config/build.ts`, a constant because the browser build reads no file), now `0.10.0`, held
+      equal to `package.json` by `test/config/builders.test.ts` and, for the lock and the newest dated changelog
+      heading, by `test/api-surface/package-json-strict.test.ts`. Of the 15 backbone parts and core modules of the
+      command's build (both sides), `core-digest` was the one that wrote its version as a literal; it now names
+      `UMBRADB_VERSION` like the other 14. `CHANGELOG.md`'s `0.10.0` section opens with `### Breaking changes`: every
+      0.9.5 export is removed or replaced and 0.9.5 databases are not migrated; it names all 87 exports of 0.9.5's
+      `src/index.ts` (36 values, 51 types; release commit `19e225b`) by part with what replaces each (`Migration`
+      replaced by a module's `{ id, sql }`; TransactionHistory's 13 in `legacy/`), the other removals (the
+      `chain_archive` store and `chain-archive-sync`, `archive:sync` and `test:live`, the retired laws, property tests,
+      Quint change, required ids, mutation targets, floors and benchmarks), then what the release adds. Tests: A4 and
+      the version rules in `test/library-surface/release-version{,.test}.ts` (19): the version and lock; the 87 names
+      against A5's `RETIRED_EXPORTS`, TransactionHistory's 13 and `Migration`; the notice; a scan of `src/` (parsed, no
+      type checker) that every module declaration — an object literal with its own `side: "public"|"private"` and an
+      `id` or a spread — has `version` bound to `build.ts`'s `UMBRADB_VERSION` (aliases allowed; a literal, another
+      name, a shorthand, a local or hidden constant, a type-only or other import refused) and that it finds each of the
+      15 ids; that no file of `src/` but `build.ts` writes the version string; the run-time versions of the command's
+      build. Committed negative controls: `core-digest`'s declaration as found (line and id named), each refused form,
+      a missing or computed id, the version written in another file or twice, a changed run-time version, and
+      changelogs without the section, with another heading first, missing a name (also when only another subsection
+      or release names it) or either statement, the real changelog with a name or a statement removed. Seen failing
+      first (5 of 19: `core-digest`'s literal in the scan and the string check, its control, and the missing section).
+      Tests that pinned the version: `test/ledger/package-identity.test.ts` (`0.10.0`), `test/config/history.test.ts`
+      (the written-out core version `0.10.0`; the build's rows and message by `UMBRADB_VERSION`; an older and a newer
+      build `0.9.4` and `0.10.1`), `test/runner/process.test.ts` (a newer core `0.11.0`). Questions Q168 (the
+      heading's date; shipped 2026-10-27, the close-out sets the release's) and Q169 (the 0.9.5 documents,
+      changelog preamble and `description` that describe the removed surface) raised, not blocking. No mutation pass
+      (deferred to 17.5, owner 2026-10-27).
+- [x] 17.4a The owner's answer Q169: 0.9.5's documents removed, not marked (owner, 2026-10-27: "Lets remove the
+      documentation if it no longer exists. It will still be available in the git history… breaking changes are OK
+      and we dont need to notify them"). Classify every document under `docs/` and at the root (current, 0.9.5's,
+      or process history such as `docs/issues/` and `openspec/`); delete 0.9.5's — at least `docs/STABILITY.md`,
+      `CONTRACT.md`, `ERROR-CATALOG.md`, `SCHEMA.md`, `durability-contract.md`, `checkpoint-store-contract.md` —
+      and the tests that read them; fix every link to them; `CHANGELOG.md`'s preamble and planned `1.0.0` entry
+      removed and 17.4's `0.10.0` notice cut to one breaking line (A4 as amended); `package.json`'s `description`
+      describes the indexer. A document whose status is unclear is a question, not a deletion. `ROADMAP.md` stays
+      19.3's; `README.md` and the module guide stay 17.3a's. Owner decision Q168 A: the `0.10.0` heading keeps
+      17.4's date until the close-out (19.x) sets the merge or tag date.
+      **Acceptance:** A171; A4 as amended.
+      **Done (2026-10-27):** every document outside `openspec/`, `docs/issues/`, `graphify-out/` and `node_modules/`
+      classified (the task's record holds the table). Deleted as 0.9.5's, 11: `docs/STABILITY.md`, `CONTRACT.md`,
+      `ERROR-CATALOG.md`, `SCHEMA.md`, `durability-contract.md`, `checkpoint-store-contract.md`,
+      `features/full-chain-storage.md`, `releases/v1.0.0.md`, `roadmapv1.html`,
+      `visualizations/cardano-midnight-flow.html`, `notes/2026-07-23-resume-checkpoint.md`; no test read them (0.9.5's
+      doc tests left with 17.2). Links to them dropped in `README.md` (three lines; 17.3a rewrites it), `ROADMAP.md`
+      (one; 19.3) and `docs/releases/v0.9.5.md` (one); the eight links 17.2 left pointing at removed files
+      (`Formal/STORAGE_ALGEBRA_LEAN_RESEARCH.md`, `Performance/CEILINGS.md`) unlinked. `CHANGELOG.md`: the preamble's
+      `docs/STABILITY.md` sentence, the planned `[1.0.0]` entry and its link reference removed, `[Unreleased]` compared
+      from `v0.10.0`; the `0.10.0` notice is one line, "UmbraDB 0.10.0 is a new architecture: nothing of 0.9.5's API
+      or databases is carried over."; the `0.9.5` entry kept, its links to the deleted documents unlinked; the
+      heading keeps 17.4's date (Q168 A). `package.json`'s `description` names the indexer. Tests: A171 in
+      `test/library-surface/documents{,.test}.ts` (the 11 absent; the changelog's preamble and 1.0.0 entry; the
+      description; every inline link, image and reference definition of every `.md` in the tree resolves to a file or
+      directory of the tree, code skipped) and A4 as amended in `release-version{,.test}.ts` (one line under
+      `### Breaking changes`, not a list, at most 120 characters, its four terms; no A5 retired export named in the
+      section; 17.4's 87-name lists removed), with committed negative controls (the real tree with a link to a deleted
+      document added or the document put back, the real changelog with 17.4's preamble, 1.0.0 entry or notice put
+      back). Seen failing first: 7 of 29. Documents whose status is unclear kept and asked: Q170 (0.9.5's release
+      record and 1.0.0 program documents), Q171 (`design/`, `Formal/`, `Performance/`, `docs/research/`,
+      `docs/superpowers/`), Q172 (`docs/THREAT_MODEL.md`). No mutation pass (deferred to 17.5).
+- [x] 17.4b The owner's answer Q172 A: `docs/THREAT_MODEL.md` (0.9.5's trust model) deleted, its commit policy —
+      no secret of any value in git, restrictive file modes, the one suppression kept by its exact fingerprint —
+      moved to `SECURITY.md` first; the pointers to it in `README.md`, `ROADMAP.md` and `nix/midnight-env/` changed
+      (their link lines only, pointing at `SECURITY.md` until task 17.4c writes the 0.10.0 model at the same path,
+      owner decision Q181 A); A171's list does not gain it.
+      The owner's answer Q170 C (2026-10-28): `docs/releases/v0.9.5.md`, `docs/releases/v0.9.5-notes.md` and
+      `docs/recovery/EVIDENCE.md` kept as 0.9.5's release record; `docs/v1-implementation-guideline.md` and
+      `docs/v1-lessons-learned.md` deleted, after the guideline's rules still in force move into `AGENTS.md`, which
+      drops its pointer to the guideline (`AGENTS.md:4`). The rules, as the owner confirmed them (2026-10-28):
+      acceptance criteria are the contract; verify external claims; test first on real databases; traceability;
+      deterministic tests; no placeholders; SQL discipline; typed errors; stop and escalate; review evidence and
+      negative controls; test honesty; floors only go up, except with the owner's approval; the flaky-test policy; the
+      Lean gate; the supply-chain gates; secrets; per-change security checks; no AI attribution. Each is restated for
+      0.10.0 (its 0.9.5 file names, suites, versions and figures replaced or removed); a rule `AGENTS.md` already
+      carries in part is merged into its stage or section. Dropped: the guideline's §0 (its invariants included), §1,
+      §2.4, §2.5's G15–G17 and Z1–Z6, §2.1's scope and §2.3's performance and deferred-behaviour rules, §3 to §6.
+      The owner's answer Q171 A (2026-10-28): deleted — `design/` (every file), `Formal/*.md` except
+      `Formal/STORAGE_ALGEBRA.md`, `Performance/`, `docs/research/` except `indexer-parallelism-roadmap.md` and
+      `midnight-node-peer-flapping.md`, and `docs/superpowers/`; `Formal/STORAGE_ALGEBRA.md` cut to the current laws W1
+      (the cursor table) and T5 (heights), the retired laws and property tests removed; the `Formal/Lean` code
+      unchanged. Every link to a deleted document (`ROADMAP.md`, `README.md`, `nix/midnight-env/`, the kept documents)
+      changed, its link line only; design §13 and §15 as amended.
+      **Acceptance:** A171 with every document above listed.
+      **Done (2026-10-28):** `SECURITY.md` gained a "Commit policy" section (no secret of any value in git; secret
+      files generated locally, ignored and created 0600; the Preview wallet's one historical finding suppressed by its
+      exact fingerprints in `.gitleaksignore`, no global path allowlist; the full-history gitleaks job) before
+      `docs/THREAT_MODEL.md` was deleted. `AGENTS.md` drops its pointer to the guideline and holds the 18 rules,
+      restated for 0.10.0 against the tree: verify external claims in stage 1; acceptance criteria as the contract,
+      test first on real databases (PostgreSQL in Docker and PGlite), no placeholders and traceability in stage 2;
+      floors only go up (the floors of `vitest.config.ts`, mutation break 65) in stage 3; review evidence and negative
+      controls with the review lanes; the Lean gate in "Lean"; the other ten in a new "Engineering rules" section.
+      Deleted (32 files): `docs/v1-implementation-guideline.md`, `docs/v1-lessons-learned.md`, `design/` (14),
+      `Formal/*.md` but `STORAGE_ALGEBRA.md` (6), `Performance/` (4), `docs/research/a1-unbounded-bytea-insert.md`,
+      `docs/superpowers/` (4), `docs/THREAT_MODEL.md`. `Formal/STORAGE_ALGEBRA.md` rewritten to W1 (§3) and T5 (§2),
+      their Lean model and property tests (A59, A60); no Lean file, workflow or test read a deleted document. Links
+      changed: `README.md` (2), `ROADMAP.md` (3), `nix/midnight-env/test-wallets/README.md`; pointers in
+      `nix/midnight-env/README.md` and three of its scripts' comments. A171's test lists the 42 documents of 17.4a and
+      17.4b and checks `AGENTS.md` (the 18 rules' leads, no deleted document, no 0.9.5 name) and
+      `Formal/STORAGE_ALGEBRA.md` (W1 and T5 headings, no retired law), with negative controls. Comments and
+      `openspec/config.yaml` still naming deleted documents: issue 00052.
+- [x] 17.4c The owner's answer Q181 A: the 0.10.0 threat model at `docs/THREAT_MODEL.md`, after 17.4b and before
+      17.3a. Codex redrafts it from `~/todo/Umbra/experiments/00028-threat-model-draft.md` against the tree, adding the
+      owner's review (2026-10-28): backups (Q177 A: a restore runs the file's SQL with the writer's rights before its
+      checks — restore only backups you wrote; Q178 A: origin and confidentiality are the operator's — store, move and
+      encrypt them yourself), the node (Q179 A: the core trusts its node for finality and contents; its checks catch an
+      inconsistent node, not a lying one; run or trust your own node, and use `wss://` across networks) and private
+      reads (Q180 A: a private process's read text and parameters reach the public database's operator and its logs,
+      and through the transport the core; UmbraDB's logs and errors may carry them; keep private-derived values out of
+      queries where you can). The gaps say what each task fixed (14.2b, 12.2b, 15.1b, 4.5, 17.4b) and point at issues
+      00045–00048 for the rest. Every `file:line` it cites checked against the tree; `README.md` and `SECURITY.md` link
+      it; the operator guide's backup and restore sections, and the module guide's private modules (Q180), say the same
+      in a sentence each.
+      **Acceptance:** A178.
+      **Done (2026-10-28):** Codex (`gpt-6.1-sol`, `codex exec -s read-only`, the id from the CLI's header; the session
+      did not report it) redrafted the model from the draft against `69dba1f`: the draft's ten boundaries, then "The
+      Midnight node", "Private reads of public data" and "Backups and restore" (Q179 A, Q180 A, Q177 A and Q178 A, each
+      documented, not fixed), the exposure defaults and hash limits (task 4.5's database parts, `ssl` per Q182 B and
+      Q183 A, and `core.transportReader` per Q175 A described as still to come), residual risks, and "Known gaps": 1, 3,
+      7, 9 as built by 14.2b, 12.2b, 15.1b and 17.4b, 2 to come in 4.5, 4, 5, 6, 8 as issues 00045–00048, and issue
+      00051. All 278 `path:line` citations were checked against the tree. Five line numbers were fixed (three had moved
+      with this task's own edits to `SECURITY.md` and the operator guide), and three wordings (the 256 MiB bridge is a
+      maximum, not a default; the scope paragraph; "requires" in restore). `README.md`'s "Security" link points at the
+      model again, `SECURITY.md` has a "Threat model" section linking it, and the operator guide's "What a backup holds"
+      (Q178) and "Restoring a backup" (Q177) and the module guide's "Private modules" (Q180) each have the sentence.
+      A178's test: `test/library-surface/threat-model{,.test}.ts`, with committed negative controls.
+- [x] 17.5 The deferred extensive testing (owner, 2026-10-27: "we want to move all the extensive testing to the end,
+      before the full test"), run after 17.4 and before the whole-system runs: the mutation passes the tasks from
+      2026-10-27 on deferred (each record's "Deferred testing" sub-item names the logic to cover), and the coverage
+      floors §13 sets that are still pending — the sweep's 95/90 (`src/backbone/core-ledger-state/sweep.ts`, owner
+      decision Q158 A: tests for its eight unreached branches, or the unreachable ones removed, then the floor; A5's
+      `PENDING_FLOORS` emptied); every coverage floor a task lowered to keep the main scope moving raised back (owner,
+      2026-10-27: "lower the testing floor for lines, branches, so we can move forward"; each record's "Deferred
+      testing" names the file, the floor it had and the one it was given); `npm run test:mutation:ci` at break 65.
+      **Acceptance:** A5 (no pending floor); every lowered floor back at its figure; every deferred mutation pass run,
+      its survivors explained.
+      **Done in part (task 17.5a, 2026-10-27):** the load-bound slow-block tests of issues 00035, 00040 and 00043 fixed
+      — each case compares only the windows it holds open, or raises `slowBlockMs` with its holds — and the issues
+      closed; issue 00041 (A128, A130) given diagnostics and left open. A142, A161, A128 and A130 unchanged.
+      **Done (task 17.5b, 2026-10-28):** the sweep at 100 % lines and branches — its tables' reads and writes tested on
+      their own (`test/backbone/ledger-sweep-tables.test.ts`, also a test of its mutation target), three branches no
+      step reaches removed (`byBytes`' tie, `makeGrey`'s `removed.delete`, `greyDeleted`'s filter) — and the 95/90
+      floor applied; `PENDING_FLOORS` empty (A5). No floor had been lowered (`vitest.config.ts`' history since the
+      floors began). The deferred mutation passes of 21 tasks run as scoped Stryker passes, their survivors killed by
+      new tests or explained (equivalent, unreachable, the runner's limits, outside the deferred logic, or a gap) in
+      the task's record; four functions exported for their tests (`nodeClientClosed`, `checkPublicBlock`,
+      `pgDumpChildEnvironment`, `checkedLedgers`). `npm run test:mutation:ci`: aggregate 87.98 % over 3,162 valid
+      mutants, break 65 (was 85.33 %; the sweep 90.33 %, was 60.62 %).
+
+## 18. Whole-system faults, differentials and measurements
+
+- [ ] 18.1 The crash worker retargeted to the runner (harness ids 1–4 kept); the crash sweep with test modules and its
+      negative control; the restart-20 and cross-backend differential.
+      **Acceptance:** A50, A51; required ids 1–4 pass.
+      Run and verified by the owner; suggested by the orchestrator only once every other task is done (owner decision
+      Q155).
+      **Moved after 0.10.0 (2026-10-28, owner decision Q191):** 0.10.0 goes out as a pre-release without this run;
+      `ROADMAP.md` lists it with the release gates still to run.
+- [ ] 18.2 The full-core runs for this campaign (Q195): local preprod 0–10,000 inclusive from genesis; the full-core crash sweep and its negative
+      control; the three-backend comparison.
+      **Acceptance:** A133, A134, A135.
+      Run and verified by the owner; suggested by the orchestrator only once every other task is done (owner decision
+      Q155).
+      **Moved after 0.10.0 (2026-10-28, owner decision Q191):** 0.10.0 goes out as a pre-release without this run;
+      `ROADMAP.md` lists it with the release gates still to run.
+      A smoke check on `a81462d` (2026-10-28; not A133): stagenet 0–100 from genesis, every core module except
+      `-fast`, the node `wss://rpc.stagenet.shielded.tools`, in Docker; the core stopped at 100 with every state root
+      checked, on PostgreSQL 18 and on PGlite in Node.js, and both backups give contents hash
+      `0x7d8ee00280d74919703b5a6e8289225c6471f75fb34b6d5b9014373a2e3bc878`.
+- [ ] 18.3 The local preprod 0–10,000 ingest benchmark against a verified compatible official indexer (`bench/ingest-vs-official/`), recorded in the PR.
+      **Acceptance:** A136.
+      Run and verified by the owner; suggested by the orchestrator only once every other task is done (owner decision
+      Q155).
+      **Moved after 0.10.0 (2026-10-28, owner decision Q191):** 0.10.0 goes out as a pre-release without this run;
+      `ROADMAP.md` lists it with the release gates still to run.
+- [x] 18.4 Add the 22 ids of `acceptance.md` §17 to the manifest and set the pinned count to 26 (A120's key-half id
+      withdrawn, owner decision Q154).
+      **Acceptance:** `npm run test:conformance` passes with every required id reported passed in its file.
+      Run and verified by the owner; suggested by the orchestrator only once every other task is done (owner decision
+      Q155).
+      **Done for 0.10.0 (2026-10-28, owner decision Q191 A):** the 18 ids whose tests exist are in the manifest and the
+      pinned count is 22; A5's check allows only the four ids the crash runs bring (`runner.crash-sweep.*`,
+      `runner.restart-20.contents-hash-equal`, `core.full-crash-sweep`), which make it 26 after 0.10.0.
+- [ ] 18.5 The local-RPC ingest baseline (Q195): the host measurement of A143, its committed reference
+      (`bench/baselines/preprod-local-ingest.json`), and the check of `slowBlockMs`'s default against it.
+      **Acceptance:** A143; its figures recorded in the pull request.
+      Run and verified by the owner; suggested by the orchestrator only once every other task is done (owner decision
+      Q155).
+      **Moved after 0.10.0 (2026-10-28, owner decision Q191):** 0.10.0 goes out as a pre-release without this run;
+      `ROADMAP.md` lists it with the release gates still to run.
+
+## 19. Close-out
+
+- [x] 19.1 Check off every task above with the criteria it demonstrated; map every acceptance criterion to its test in
+      the pull request.
+      **Done (2026-10-28):** every task of §0–§17 is checked with its **Done** paragraph and the ids it demonstrated,
+      17.5 included (task 17.5b, integrated after this check), except the dependency pins 0.1 and 0.6, whose acceptance
+      is their probe tests and audit rather than an `A` id; §18 is the owner's and stays open. The dated **Pending**
+      clauses are kept as written: each names a later task that is done, except the CI runs that wait for the push
+      (0.1, 0.2, 0.4, 2.1, 2.2, 2.2a; A97's rebuild on amd64 and arm64) and 9.2's `[MANUAL]` run, which task 0.3 did
+      (9.2 now says so). The map, one row per criterion of `acceptance.md` with its test files and titles, its tasks
+      and its status, read from the conformance report and the test titles' ids, is kept outside the repository for
+      the pull request (19.5): 178 rows, 167 PASSING (each with a test that passed in the conformance run; the
+      recorded-tape cases of A78, A94–A96, A99, A100, A102, A108 and A159 skip by name without `UMBRADB_TAPES` and
+      passed in their tasks' runs with the tapes), 2 MANUAL (A136, the owner's with 18.3; A153, task 0.5's six
+      consecutive runs), 6 deferred to §18 (A50, A51: 18.1; A133–A135: 18.2; A143: 18.5), 3 withdrawn (A119, A123,
+      A154) and none missing. Of §17's 22 required ids, 19 are already in their tests' titles; the other three
+      (`runner.crash-sweep.*`, `runner.restart-20.*`, `core.full-crash-sweep`) come with 18.1 and 18.2.
+- [x] 19.2 Set the proposal's status line to Implemented.
+      **Done (2026-10-28):** Implemented, with what is left named: §18's whole-system runs and the pull-request record
+      (19.5); the approval at `52cc6d4` and decisions Q53–Q56 kept. (Its first wording also named 17.5, then running;
+      the close-out commit, 19.4, removed it once 17.5b was integrated.)
+- [x] 19.3 Update `ROADMAP.md`: this change, the new architecture, and the "36 symbols" statement at `ROADMAP.md:455`
+      (`docs/v1-implementation-guideline.md` is deleted by task 17.4b, owner decision Q170 C).
+      **Done (2026-10-28):** rewritten for 0.10.0: 0.9.5 as released, with its kept release record; the architecture;
+      the surface as design §12 lists it, 54 names (27 values, 27 types) pinned by A1, replacing the 36 symbols; the
+      change's status by `tasks.md` section, the gates, what comes after 0.10.0 and the non-goals. 0.9.5's milestones,
+      the 1.0.0 program and its checklist, the WSL incident and the unmerged design tracks are deleted.
+- [x] 19.4 Run `npm run graph:refresh` and commit `graphify-out/` with the close-out commit; `npm run graph:check`
+      exits 0.
+      **Done (2026-10-28):** the close-out commit, after 17.5b: the proposal's status and 19.1/19.2's paragraphs no
+      longer name 17.5 as running; `docs/THREAT_MODEL.md`'s citations re-pointed to the lines the tasks since 4.5
+      moved (each matched by its exact text, none ambiguous); `graphify-out/` refreshed with this commit and
+      `npm run graph:check` 0.
+- [ ] 19.5 Record in the pull request, per `docs/PULL_REQUEST_CHECKLIST.md`: the reviewed commit, each lane's verdict
+      and model id, the fix check, the owner's decisions (including the approval of `design.md` §13), the
+      `[MANUAL]` evidence (A71, A136), and the CI runs.

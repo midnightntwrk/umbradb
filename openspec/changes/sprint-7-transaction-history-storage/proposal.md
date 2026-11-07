@@ -1,6 +1,7 @@
 # Proposal — Sprint 7: Transaction History Storage (Wallet Integration Surface)
 
-> **Status:** Draft, translated from `design/sprint-5-recommendation.md` (second post-audit
+> **Status:** Implemented: merged to `main` in `9c47568`. The note below is the draft's, kept as history:
+> translated from `design/sprint-5-recommendation.md` (second post-audit
 > revision — two rounds of independent review: 2 Opus reviewers + Codex GPT-5.6 Sol, then a
 > final Opus verification + Codex re-audit round). This openspec change itself has **not yet**
 > been through this repo's own 3-persona panel/Codex audit (`AGENTS.md`) — that is Phase 0 of

@@ -1,0 +1,175 @@
+{
+  "description": "LG-16's tree values of fixed ledger states, read from the ledger's Rust state as the official indexer reads them (midnight-indexer indexer-common/src/domain/ledger/ledger_state.rs: zswap.first_free, zswap.coin_coms.rehash().root(), dust.utxo.commitments_first_free, dust.utxo.commitments.rehash().root(), dust.generation.generating_tree_first_free, dust.generation.generating_tree.rehash().root()), computed by oracle/main.rs (run by oracle/run.sh in the vendored ledger build image) against an unpatched midnight-ledger checkout at each vendored version's pinned commit. First free indexes are decimal strings; roots are hex, each its tree's root after rehash() in the ledger's untagged serialization (as the official indexer stores it). Each state file is a state's tagged serialization: the genesis states of genesis/node-roots.json; stagenet-3.state, stagenet's state after block 3 (the rc.3 package's replay of fixtures/stagenet/blocks.json); stagenet-4950.state, stagenet's state after block 4950 of task 0.3's tape stagenet-0-10000, a height whose DUST commitment and generation trees' first free indexes differ (DUST spends), as core-ledger-state stored it replaying the tape with the rc.3 package (node, the node's root after that block; the v9 versions' state with differing first free indexes); preview-687.state, preview's state after block 687, the first height of task 0.3's tape preview-0-10000 whose DUST commitment and generation trees' first free indexes differ (a DUST spend), as core-ledger-state stored it replaying the tape (node, the node's root after that block). Task 12.1b, owner decision Q138 A, A158.",
+  "computed": "2026-10-27",
+  "versions": {
+    "v8": {
+      "release": "ledger-8.1.2",
+      "commit": "36d7442172136758e33009f75ff4aa56616cff40",
+      "states": [
+        {
+          "name": "mainnet-genesis",
+          "file": "genesis/genesis_state_mainnet.mn",
+          "sha256": "ce56fbd30245677d3af6968fe3f321edf991c202a503e9737de15593f93b1d12",
+          "zswapFirstFree": "0",
+          "zswapRoot": "00",
+          "dustCommitmentFirstFree": "0",
+          "dustCommitmentRoot": "00",
+          "dustGenerationFirstFree": "0",
+          "dustGenerationRoot": "00"
+        },
+        {
+          "name": "preview-genesis",
+          "file": "genesis/genesis_state_preview.mn",
+          "sha256": "51a028ab0c248bdc8c34c675b4a313545e0cbf30f61f2d56f62b969884a6fc35",
+          "zswapFirstFree": "28",
+          "zswapRoot": "73868cc1649775f9b4f1f8fb9a88f81226f6b34f6d911c6deef254261c8aa7df6f",
+          "dustCommitmentFirstFree": "20",
+          "dustCommitmentRoot": "73a47f1dbbb8ca089a53c90b7e430eaa932f826078af507b7ca3a83b8aa8d5e509",
+          "dustGenerationFirstFree": "20",
+          "dustGenerationRoot": "73f5154820b62a36d1d42aee5fd95521530a6e4b38652a8269b16a2146b3620e01"
+        },
+        {
+          "name": "preview-687",
+          "file": "state-trees/preview-687.state",
+          "sha256": "22914c587a853a2cffb4376cfe1eef1ef48245d752b5c43c9df4a5afa5002ac5",
+          "zswapFirstFree": "28",
+          "zswapRoot": "73868cc1649775f9b4f1f8fb9a88f81226f6b34f6d911c6deef254261c8aa7df6f",
+          "dustCommitmentFirstFree": "1767",
+          "dustCommitmentRoot": "732bb75dcbf2317d33a4b3868e4f6c7d05bee875ebde609d666859c534b087b74b",
+          "dustGenerationFirstFree": "1766",
+          "dustGenerationRoot": "734adbc897b9d1a12887d90b8f9f643c34807392979a040345aa5d79f01bf75e44",
+          "node": {
+            "network": "preview",
+            "height": 687,
+            "hash": "0xb11091932cc65b181579b997c4efe22da841b24f3e61fd86b619b8f9bbfdd04c",
+            "stateRoot": "0018512d6fc244ef5ed31c333baa1b484dd3c27de60a63956cba89b010511bfd97"
+          }
+        }
+      ]
+    },
+    "v9-rc3": {
+      "release": "ledger-9.1.0.0-rc.3",
+      "commit": "4823b5351b17cc49e30f19760dbd30a73cf95e22",
+      "states": [
+        {
+          "name": "undeployed-genesis",
+          "file": "genesis/genesis_state_undeployed.mn",
+          "sha256": "203123b300a29319040208b420251738e1c1b5e01c644ea67d87da9b706df4d2",
+          "zswapFirstFree": "28",
+          "zswapRoot": "73b35bda8df702a240f2b7605bca3ea4f7bdb4110f5c6d35c58ed512faf7697303",
+          "dustCommitmentFirstFree": "20",
+          "dustCommitmentRoot": "73aab58e33489e418eb112107b90563cc4406daefb26e3de02a1edea6668d56429",
+          "dustGenerationFirstFree": "20",
+          "dustGenerationRoot": "73c4ed3cfd580081d0979d3629d06c5093f78ea5d9c86c3bb69d17630fd1fdd946"
+        },
+        {
+          "name": "stagenet-genesis",
+          "file": "genesis/genesis_state_stagenet.mn",
+          "sha256": "35dabdabc470cad12648cddd6f8fdbb1176ba8a1c6c4c5431b69e3c6b1c68c50",
+          "zswapFirstFree": "28",
+          "zswapRoot": "7350654856019725f19fc67c80cd4d619c205609b24d0cf1f8ac34505dcfe6bd14",
+          "dustCommitmentFirstFree": "20",
+          "dustCommitmentRoot": "738c212f539a0b5f3abf1ef7a7df03b829084a691a18f5acb8e0f6d00481b25a3e",
+          "dustGenerationFirstFree": "20",
+          "dustGenerationRoot": "732fb2e990a920fb8f459fc9988b81223f629d854f86ad6ccb65085ad7d3f59e12"
+        },
+        {
+          "name": "stagenet-3",
+          "file": "state-trees/stagenet-3.state",
+          "sha256": "4a66238046cd572de9f0375eda6aa02499c9d8cc6a0a87b902ff617896d7fa1a",
+          "zswapFirstFree": "28",
+          "zswapRoot": "7350654856019725f19fc67c80cd4d619c205609b24d0cf1f8ac34505dcfe6bd14",
+          "dustCommitmentFirstFree": "119",
+          "dustCommitmentRoot": "7361d2d39ac0c8ce36e7638eb8ce032bd7a05696ad2e4bd2042714c08d45f5a40b",
+          "dustGenerationFirstFree": "119",
+          "dustGenerationRoot": "73a9e734ebc614359acab7efadf4815ccfc1f2bfd2790c0b673ca1b27535278b39",
+          "node": {
+            "network": "stagenet",
+            "height": 3,
+            "hash": "0x551a8589124014ce52d4576b025bee7e44889b3a647fd7a6c70c29e872881dab",
+            "stateRoot": "00d7895bf63efcd8f4c37a94ea1bfee17ffcdf5d06d7710c3fdc353c9d62bb153f"
+          }
+        },
+        {
+          "name": "stagenet-4950",
+          "file": "state-trees/stagenet-4950.state",
+          "sha256": "f15a31247d711e85096c9429a990958f22ba927fe26d71a686815d2cd595d879",
+          "zswapFirstFree": "28",
+          "zswapRoot": "7350654856019725f19fc67c80cd4d619c205609b24d0cf1f8ac34505dcfe6bd14",
+          "dustCommitmentFirstFree": "2102",
+          "dustCommitmentRoot": "73fffd5bbfe6b34d6fc9a811fa0f6a4d18c589637ad6d29e7953cefe5d402cae4b",
+          "dustGenerationFirstFree": "2101",
+          "dustGenerationRoot": "737db2c39ce2c6c6ce8819f5277aa8038439a453aa320dde7e828e2cf726a1de56",
+          "node": {
+            "network": "stagenet",
+            "height": 4950,
+            "hash": "0xf47cfe0b8e05e23a01462b3a236f9ddf7e0cf3d864e53d66bb37eef1ce61bc38",
+            "stateRoot": "0015858398cc5c978ddd2c7e7e3318cd85559580f21c17fb9771589791da5a3735"
+          }
+        }
+      ]
+    },
+    "v9": {
+      "release": "ledger-9.1.0.0-rc.5",
+      "commit": "67f9f97246339539af0091c4d8c6bc5ab236a191",
+      "states": [
+        {
+          "name": "undeployed-genesis",
+          "file": "genesis/genesis_state_undeployed.mn",
+          "sha256": "203123b300a29319040208b420251738e1c1b5e01c644ea67d87da9b706df4d2",
+          "zswapFirstFree": "28",
+          "zswapRoot": "73b35bda8df702a240f2b7605bca3ea4f7bdb4110f5c6d35c58ed512faf7697303",
+          "dustCommitmentFirstFree": "20",
+          "dustCommitmentRoot": "73aab58e33489e418eb112107b90563cc4406daefb26e3de02a1edea6668d56429",
+          "dustGenerationFirstFree": "20",
+          "dustGenerationRoot": "73c4ed3cfd580081d0979d3629d06c5093f78ea5d9c86c3bb69d17630fd1fdd946"
+        },
+        {
+          "name": "stagenet-genesis",
+          "file": "genesis/genesis_state_stagenet.mn",
+          "sha256": "35dabdabc470cad12648cddd6f8fdbb1176ba8a1c6c4c5431b69e3c6b1c68c50",
+          "zswapFirstFree": "28",
+          "zswapRoot": "7350654856019725f19fc67c80cd4d619c205609b24d0cf1f8ac34505dcfe6bd14",
+          "dustCommitmentFirstFree": "20",
+          "dustCommitmentRoot": "738c212f539a0b5f3abf1ef7a7df03b829084a691a18f5acb8e0f6d00481b25a3e",
+          "dustGenerationFirstFree": "20",
+          "dustGenerationRoot": "732fb2e990a920fb8f459fc9988b81223f629d854f86ad6ccb65085ad7d3f59e12"
+        },
+        {
+          "name": "stagenet-3",
+          "file": "state-trees/stagenet-3.state",
+          "sha256": "4a66238046cd572de9f0375eda6aa02499c9d8cc6a0a87b902ff617896d7fa1a",
+          "zswapFirstFree": "28",
+          "zswapRoot": "7350654856019725f19fc67c80cd4d619c205609b24d0cf1f8ac34505dcfe6bd14",
+          "dustCommitmentFirstFree": "119",
+          "dustCommitmentRoot": "7361d2d39ac0c8ce36e7638eb8ce032bd7a05696ad2e4bd2042714c08d45f5a40b",
+          "dustGenerationFirstFree": "119",
+          "dustGenerationRoot": "73a9e734ebc614359acab7efadf4815ccfc1f2bfd2790c0b673ca1b27535278b39",
+          "node": {
+            "network": "stagenet",
+            "height": 3,
+            "hash": "0x551a8589124014ce52d4576b025bee7e44889b3a647fd7a6c70c29e872881dab",
+            "stateRoot": "00d7895bf63efcd8f4c37a94ea1bfee17ffcdf5d06d7710c3fdc353c9d62bb153f"
+          }
+        },
+        {
+          "name": "stagenet-4950",
+          "file": "state-trees/stagenet-4950.state",
+          "sha256": "f15a31247d711e85096c9429a990958f22ba927fe26d71a686815d2cd595d879",
+          "zswapFirstFree": "28",
+          "zswapRoot": "7350654856019725f19fc67c80cd4d619c205609b24d0cf1f8ac34505dcfe6bd14",
+          "dustCommitmentFirstFree": "2102",
+          "dustCommitmentRoot": "73fffd5bbfe6b34d6fc9a811fa0f6a4d18c589637ad6d29e7953cefe5d402cae4b",
+          "dustGenerationFirstFree": "2101",
+          "dustGenerationRoot": "737db2c39ce2c6c6ce8819f5277aa8038439a453aa320dde7e828e2cf726a1de56",
+          "node": {
+            "network": "stagenet",
+            "height": 4950,
+            "hash": "0xf47cfe0b8e05e23a01462b3a236f9ddf7e0cf3d864e53d66bb37eef1ce61bc38",
+            "stateRoot": "0015858398cc5c978ddd2c7e7e3318cd85559580f21c17fb9771589791da5a3735"
+          }
+        }
+      ]
+    }
+  }
+}

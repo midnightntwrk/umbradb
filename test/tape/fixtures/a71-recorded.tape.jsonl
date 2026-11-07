@@ -1,0 +1,24 @@
+{"method":"system_properties","params":[],"result":{"ss58Format":42,"existentialDeposit":18446744073709551616}}
+{"method":"chain_getBlockHash","params":[0],"result":"0xa0"}
+{"subscribe":"f-1","method":"chain_subscribeFinalizedHeads","params":[]}
+{"notify":"f-1","result":{"number":"0x1"}}
+{"method":"chain_getFinalizedHead","params":[],"result":"0xf1"}
+{"method":"chain_getHeader","params":["0xf1"],"result":{"parentHash":"0xf0","number":"0x1"}}
+{"notify":"f-1","result":{"number":"0x2"}}
+{"method":"chain_getFinalizedHead","params":[],"result":"0xf2"}
+{"method":"state_getStorage","params":["0x26aa","0xf2"],"error":{"code":4003,"message":"Client error: UnknownBlock: State already discarded for 0xf2"}}
+{"subscribe":7,"method":"chain_subscribeNewHeads","params":[]}
+{"notify":7,"result":{"number":"0x3"}}
+{"notify":"f-1","result":{"number":"0x3"}}
+{"method":"state_getMetadata","params":{"at":"0xf2"},"result":"0x6d657461"}
+{"notify":7,"result":{"number":"0x4"}}
+{"fault":"timeout","method":"chain_getBlock","params":["0xf2"]}
+{"disconnect":true}
+{"subscribe":"f-2","method":"chain_subscribeFinalizedHeads","params":[]}
+{"notify":"f-2","result":{"number":"0x4"}}
+{"method":"chain_getBlock","params":["0xf2"],"result":{"block":{"header":{"number":"0x2"},"extrinsics":["0x00"]},"justifications":null}}
+{"method":"state_getStorage","params":["0x26aa","0xf1"],"result":"0x0100"}
+{"method":"chain_getBlockHash","params":[0],"result":"0xa0"}
+{"disconnect":true}
+{"disconnect":true}
+{"method":"chain_getFinalizedHead","params":[],"result":"0xf3"}

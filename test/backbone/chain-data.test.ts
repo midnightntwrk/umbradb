@@ -1,0 +1,205 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { CORE_BLOCK_PARSED } from "../../src/backbone/core-block-parsed/core-block-parsed.js";
+import { CORE_CHAIN_EVENTS } from "../../src/backbone/core-chain-events/core-chain-events.js";
+import { canonicalJson } from "../../src/backbone/core-chain-events/scale-value.js";
+import { CORE_TX_RESULTS } from "../../src/backbone/core-tx-results/core-tx-results.js";
+import { type LedgerHost, startLedgerWorker } from "../../src/ledger/worker/host.js";
+import type { TapeRecord } from "../../tools/tape/index.js";
+import { outsideIn8 } from "../node/in8.js";
+import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
+import { a91Problems, a92Problems, a93Problems, itemsSeen, itemsWatcher } from "./chain-data-checks.js";
+import {
+  a91RangeScenario,
+  a91UpgradeScenario,
+  a92GenesisScenario,
+  a92Scenario,
+  a93Scenario,
+  E,
+  ledgerTransactions,
+  type Scenario,
+  transactionSpec,
+  U,
+} from "./chain-data-tapes.js";
+import { eventsRead, eventsValue, finalizedWithEvents, RUNTIME_2_0 } from "./events-fixtures.js";
+import { type ChainBlock, chainOf, content, finalizedHead, hex, ledgerTransaction, newHead, opening } from "./fetch-fixtures.js";
+import { committed, ingest, PATIENCE_MS } from "./ingest-harness.js";
+
+/**
+ * Chain data through the real process, on PostgreSQL 18 and PGlite 0.5.10. The test runs `startProcess` with UmbraDB's
+ * backbone over the node source (what `umbradb run` passes) and the core modules `core-chain-events`,
+ * `core-block-parsed` and `core-tx-results` enabled from S. A tape node serves synthetic tapes in the node's answer
+ * shapes (`./chain-data-tapes.ts`); the real recorded tapes (`test/tape/real/`) replace them. [CD-4, CD-5, CD-6]
+ *
+ * - Every event of blocks 1–6 is stored, byte for byte, with its phase, extrinsic index, pallet, name and fields. At a
+ *   synthetic upgrade, U's events are decoded with the metadata of U's parent's state, and F's with the new runtime's.
+ *   U's events are the old runtime's, whose `CodeUpdated` the new runtime's metadata would read differently.
+ *   [CD-4, A91]
+ * - A system transaction between two regular ones is stored as 0, 1, 2, in that order; block 0's transactions are in
+ *   body order. Each is parsed once, in the ledger worker. The test packages' loader
+ *   (`test/ledger/fixtures/ledger-test-loader.ts`), which the worker imports, counts the vendored v9 package's
+ *   `Transaction.deserialize` and `SystemTransaction.deserialize` there while the process runs. [CD-5, A92]
+ * - `TxApplied`, `TxPartialSuccess` and `ExtrinsicFailed` (and `SystemTransactionApplied`) give `success`, `partial`,
+ *   `failure` (and `success`), matched to their extrinsics by phase. The `tx-results` item has the form
+ *   `ApplyInput.outcomes` takes. [CD-6, A93]
+ *
+ * Every call the tape node received is one of the allowed node calls. [IN-8, A83]
+ */
+
+const CORE = [CORE_CHAIN_EVENTS, CORE_BLOCK_PARSED, CORE_TX_RESULTS];
+
+/** The test packages' loader, which the ledger worker imports: it counts the package's native parses. */
+const COUNTING = new URL("../ledger/fixtures/ledger-test-loader.ts", import.meta.url);
+
+/** Every call the tape node received is one of the allowed node calls, and none went unanswered. [IN-8, A83] */
+function in8Problems(calls: readonly { readonly method: unknown; readonly outcome?: unknown }[]): string[] {
+  const outside = outsideIn8(calls.map((call) => call.method as string));
+  const unanswered = calls.filter((call) => call.outcome === "not-on-tape" || call.outcome === "invalid-request");
+  return [...outside.map((method) => `called ${method}`), ...unanswered.map((call) => `${String(call.method)}: ${String(call.outcome)}`)];
+}
+
+describe.each(PROCESS_BACKENDS)("chain data through the process on $name", (backend: ProcessBackend) => {
+  beforeAll(() => backend.start(), 180_000);
+  afterAll(() => backend.stop(), 60_000);
+
+  /**
+   * Runs `scenario` to its head with the core modules and the items watcher, and returns what it saw. That includes the
+   * bytes of every native parse the ledger package made in the ledger worker, where `core-block-parsed` parses.
+   */
+  async function run(scenario: Scenario, items: Parameters<typeof itemsWatcher>[1] = ["chain-events", "block-parsed", "tx-results"]) {
+    const db = await backend.database();
+    const seen = itemsSeen();
+    let worker: LedgerHost | undefined;
+    const process = await ingest(db, scenario.records, {
+      start: scenario.start,
+      core: CORE,
+      user: [itemsWatcher(seen, items)],
+      ledgerWorker: () => (worker = startLedgerWorker({ loader: COUNTING, loaderData: { count: true } })),
+    });
+    let deserialized: Uint8Array[] = [];
+    try {
+      await committed(process, scenario.head);
+      ({ deserialized } = (await worker?.probe()) as { deserialized: Uint8Array[] });
+    } finally {
+      await process.close();
+    }
+    expect(in8Problems(process.node.calls)).toEqual([]);
+    return { db, seen, process, deserialized };
+  }
+
+  it("A91: core-chain-events stores every event of a range, byte for byte, with its decoded fields", async () => {
+    const scenario = a91RangeScenario();
+    const { db, seen } = await run(scenario, ["chain-events"]);
+    expect(await a91Problems(db, scenario)).toEqual([]);
+    // The item is the events in their order, as the rows hold them.
+    expect([...seen.events.keys()]).toEqual([1n, 2n, 3n, 4n, 5n, 6n]);
+    expect(seen.events.get(5n)).toHaveLength(42);
+    expect(seen.events.get(4n)).toEqual([]);
+    expect(seen.events.get(1n)?.map((e) => `${e.phase} ${e.pallet}.${e.name}`)).toEqual([
+      "initialization Session.NewSession",
+      "apply-extrinsic System.ExtrinsicSuccess",
+      "apply-extrinsic System.Remarked",
+      "apply-extrinsic System.ExtrinsicSuccess",
+      "finalization Grandpa.NewAuthorities",
+    ]);
+    // A u128 and a u64 above the signed 64-bit range are decimal text in the jsonb, so the determinism CHECK holds.
+    const [payout] = await db.query(
+      "SELECT fields ->> 'amount' AS amount, jsonb_typeof(fields -> 'amount') AS type FROM core_chain_events.events " +
+        "WHERE height = 6 AND event_index = 0",
+    );
+    expect(payout?.type).toBe("string");
+    expect(payout?.amount).toBe("1267650600228229401496703205376");
+  }, PATIENCE_MS * 2);
+
+  it("A91: at a runtime upgrade, U's events are decoded with the old runtime's metadata, F's with the new", async () => {
+    const scenario = a91UpgradeScenario();
+    const { db, seen } = await run(scenario, ["chain-events"]);
+    expect(await a91Problems(db, scenario)).toEqual([]);
+    expect(seen.events.get(U)?.map((e) => `${e.pallet}.${e.name} ${canonicalJson(e.fields)}`)).toEqual([
+      expect.stringMatching(/^System\.ExtrinsicSuccess /),
+      "System.CodeUpdated []",
+      expect.stringMatching(/^System\.ExtrinsicSuccess /),
+    ]);
+    const [f] = await db.query("SELECT fields::text AS fields FROM core_chain_events.events WHERE height = 4 AND event_index = 0");
+    expect(JSON.parse(f?.fields as string)).toEqual({ hash: hex(new Uint8Array(32).fill(0x77)) });
+  }, PATIENCE_MS * 2);
+
+  it("A91: the events' metadata is the runtime-metadata item's, read at each runtime's first block's parent only", async () => {
+    const scenario = a91UpgradeScenario();
+    const { process } = await run(scenario, ["chain-events"]);
+    const reads = scenario.chain.map((block) => process.node.count("state_getMetadata", [block.hex]));
+    // Block 0's state (the old runtime, for 1–3) and U's (the new one, for 4–5); no block's own state otherwise.
+    expect(reads).toEqual([1, 0, 0, 1, 0, 0]);
+  }, PATIENCE_MS * 2);
+
+  it("A92: a system transaction between two regular ones is stored 0, 1, 2 in that order, each parsed once", async () => {
+    const scenario = a92Scenario();
+    const { db, seen, deserialized } = await run(scenario);
+    expect(await a92Problems(db, scenario, deserialized)).toEqual([]);
+    expect(deserialized).toHaveLength(3);
+    const parsed = seen.parsed.get(1n);
+    expect(parsed?.ledger).toBe("v9");
+    expect(parsed?.transactions.map((t) => [t.index, t.kind, t.phase, t.extrinsicIndex, t.eventIndex])).toEqual([
+      [0, "regular", "apply-extrinsic", 1, 1],
+      [1, "system", "apply-extrinsic", 2, 3],
+      [2, "regular", "apply-extrinsic", 3, 5],
+    ]);
+    // The very bytes the ledger parsed are the item's: nothing parses them again.
+    expect(parsed?.transactions.map((t) => hex(t.bytes))).toEqual(scenario.transactions.map((t) => hex(t.bytes)));
+    expect(seen.parsed.get(2n)?.transactions).toEqual([]);
+    expect(await a93Problems(db, scenario)).toEqual([]);
+  }, PATIENCE_MS * 2);
+
+  it("A92: a best block queued with its transactions, then finalized with its hash, is not parsed again", async () => {
+    const { regular: [r], system: [s] } = ledgerTransactions(1, 1) as { regular: [Uint8Array]; system: [Uint8Array] };
+    const chain = chainOf(2n, (h) => ({ extrinsics: h === 2n ? [ledgerTransaction([...r])] : [] }));
+    const block = (h: number) => chain[h] as ChainBlock;
+    const events = eventsValue([E.success(0), E.txApplied(1, r), E.success(1), E.systemApplied("finalization", s)].map((e) => e.record));
+    const records: TapeRecord[] = [
+      ...opening(block(0), block(1)),
+      ...finalizedWithEvents(block(1), RUNTIME_2_0, eventsValue([E.success(0).record]), true),
+      // Following at the head 1: block 2 is announced, fetched, its metadata read (the best-block calls' own cache, no
+      // retries), its events read and its transactions parsed — then finalized with that hash and taken as queued.
+      newHead(block(2)),
+      ...content(block(2), RUNTIME_2_0, true),
+      eventsRead(block(2), events),
+      finalizedHead(block(2)),
+      { method: "chain_getBlockHash", params: [2], result: block(2).hex },
+    ];
+    const scenario = { start: 1n, head: 2n, records, transactions: [] } as unknown as Scenario;
+    const { db, seen, process, deserialized } = await run(scenario);
+    const expected = { transactions: [transactionSpec(2n, 0, "regular", r), transactionSpec(2n, 1, "system", s)] } as unknown as Scenario;
+    expect(await a92Problems(db, expected, deserialized)).toEqual([]);
+    expect(process.seen.queue).toEqual([`best 2 ${block(2).hex.slice(0, 10)}`]);
+    expect(process.node.count("chain_getBlock", [block(2).hex])).toBe(1);
+    expect(seen.results.get(2n)).toEqual(["success", "success"]);
+  }, PATIENCE_MS * 2);
+
+  it("A92: block 0's transactions are stored in body order, each parsed once", async () => {
+    const scenario = a92GenesisScenario();
+    const { db, seen, deserialized } = await run(scenario);
+    expect(await a92Problems(db, scenario, deserialized)).toEqual([]);
+    expect(seen.parsed.get(0n)?.transactions.map((t) => [t.index, t.kind, t.extrinsicIndex, t.eventIndex])).toEqual([
+      [0, "system", 0, null],
+      [1, "regular", 1, null],
+      [2, "regular", 3, null],
+    ]);
+    // Block 0 has no events: every transaction applied, as the official indexer takes the genesis transactions.
+    expect(seen.results.get(0n)).toEqual(["success", "success", "success"]);
+    expect(await a93Problems(db, scenario)).toEqual([]);
+    const [events] = await db.query("SELECT count(*)::text AS n FROM core_chain_events.events WHERE height = 0");
+    expect(events?.n).toBe("0");
+  }, PATIENCE_MS * 2);
+
+  it("A93: TxApplied, TxPartialSuccess and ExtrinsicFailed give success, partial and failure, matched by phase", async () => {
+    const scenario = a93Scenario();
+    const { db, seen, deserialized } = await run(scenario);
+    expect(await a93Problems(db, scenario)).toEqual([]);
+    // A failed transaction is parsed too: block-parsed lists it, and the ledger's apply skips it.
+    expect(await a92Problems(db, scenario, deserialized)).toEqual([]);
+    // tx-results is ApplyInput.outcomes' form: one ChainOutcome per transaction, in block-parsed's order.
+    expect(seen.results.get(1n)).toEqual(["success", "partial", "failure", "success"]);
+    expect(Object.isFrozen(seen.results.get(1n))).toBe(true);
+    expect(seen.parsed.get(1n)?.transactions.map((t) => t.kind)).toEqual(["regular", "regular", "regular", "system"]);
+    expect(seen.results.get(2n)).toEqual([]);
+  }, PATIENCE_MS * 2);
+});

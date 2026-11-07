@@ -55,3 +55,17 @@ regexes = ['''^0{64}$''']
 # The single historical secret is instead suppressed by its EXACT fingerprint in `.gitleaksignore`
 # (commit:path:rule:line) -- a one-finding exemption. Any new or different secret, on any path
 # including those two, fails the gate.
+
+# The RFC 6455 example WebSocket nonce (base64 of "the sample nonce"), which two test helpers send
+# in hand-written upgrade requests and the stock generic-api-key rule matches on the header's name.
+# It is the spec's own published example of a per-connection nonce, never a credential anywhere.
+# `condition = "AND"` scopes the exemption: only this exact value, and only under test/ — any other
+# value in those files, and this value outside test/, still fails the gate. This covers the
+# working-tree `gitleaks dir` scan of the scan workflow, where line numbers drift and the
+# commit-pinned fingerprints in .gitleaksignore (which guard the full-history `detect` scan at the
+# commits that added the lines) never match.
+[[allowlists]]
+description = "RFC 6455 example WebSocket nonce in test helpers"
+condition = "AND"
+paths = ['''^test/''']
+regexes = ['''dGhlIHNhbXBsZSBub25jZQ==''']

@@ -435,3 +435,149 @@ Orchestrated by `orchestrator / claude-opus-5-5 / review-v2`. Not yet committed 
   temp directory, a git index, an exporter return value) met a pinned-graphify behavior the previous
   round had not read, so each check found narrower cases. *Follow-up (done):* the owner capped the
   loop at one last check; local and Linux rebuilds are byte-identical.
+
+---
+
+## Change: `start-umbradb` — UmbraDB as a library (2026-11-01)
+
+### Rework (class 4)
+
+- **R1 — A117's no-transaction oracle counted admin's short reads** (`plan-task-runner / claude-opus-5-5 / P9`).
+  Since `start-umbradb` gave every engine process admin (design §5.3: mounted admin keeps the fact reads), admin reads
+  the server version, the identity anchor and `core_digest.tables` on the core's own login right after `opened()` and
+  after commits. A117's oracle (`test/private/lockstep-wait.test.ts`) counted any session of that login with a
+  transaction open at one of its five `pg_stat_activity` looks, so one full run on a loaded machine failed it while the
+  core itself waited outside any transaction (PP-6 met). Eight full runs after the change passed before that one did.
+  *Second story:* the oracle was written when the tests' processes had no admin, so "a transaction of the core's login"
+  and "the core's wait holding a transaction" were the same thing; adding a reader on the same login split them, and
+  only load made a look land on the reader. An instrumented count (each session's `state`, `query`, `xact_start`)
+  confirmed it: a forced 0.4 s admin read reproduced the failure, and 80 looks at real waits saw nothing open. The
+  oracle now counts a transaction only when the same one (`pid`, `xact_start`) is open in two consecutive looks; the
+  negative control still fails it. *Follow-up:* a single fact read slower than the 200 ms between looks would still be
+  counted (one took 241 ms under 14 CPU burners); if it recurs, require three consecutive looks.
+- **R2 — Five code defects escaped P1–P9 and were found by stage 4's cold lane** (`plan-task-runner / claude-opus-5-5 /
+  P10.4a`; found by Codex, gpt-6-astra, P10.2). A malformed subscription id (`{"toString":null}`) threw out of the
+  socket's and the channel's callback (C-F1); a `modulesFrom` that failed to import logged, and rejected `started` with,
+  a credential the configuration held (C-F2); option reads below the top level threw synchronously (C-F3, also the spec
+  lane's F1); the private side's sends and the envelope's pings and pongs bypassed `bufferedAmount`'s limit (C-F4); a
+  closed process kept its listener on the host's signal (C-F5). *Second story:* each phase's tests were written from its
+  criteria's words, and each criterion named one path: L68's malformed messages were the shapes the listener's own test
+  had (no object where an id goes), L35 named "the channel" and its test took the core's application send, L62 listed
+  the malformed values of design §5.1 (a getter only at the top level), and the redaction tests started from validated
+  configurations — so the paths beside the named one had no test, and a review that read for "every path the
+  requirement covers" found them. The fixes add each missing path's test (seen failing first; the private side's and the
+  queue's L35 controls and C-F2's committed): `79d34d4`, `7b27e48`, `fc9e3e0`, `c2b782b`, `572bb24`. *Follow-up:*
+  none dated; Q-20 records C-F2's readings (fail closed before the user modules are known, the redacted copy, the kept
+  cause) for the owner.
+- **R3 — Weak tests and controls escaped P3–P8 and were found by stage 4's spec and release lanes**
+  (`plan-task-runner / claude-opus-5-5 / P10.4b`; the tests from P3–P6's rounds; found by claude-opus-5-5, P10.1, and
+  Codex, gpt-6-astra, P10.3). L61's facts ran only with a listening admin, so the base's early return without one
+  passed every test (R-F2 = S-F2); L4, L5, L7, L9 and L14 ran on one or two backends of definition of done item 3's
+  three while the acceptance map said three (S-F3); five `[NEG]` controls could not fail or failed for another reason
+  — L62's asserted a reason only the facade gives, L39's ran an accepting process, L63's called the configuration
+  file's loader, L18's schema case had none, L34's accepted any `hello-ack` (S-F4); eleven oracles checked part of their
+  criterion (S-F5). Strengthening L21 found a real defect: the private link's address was logged before
+  `status().listening` showed it (fixed, `11a6147`). *Second story:* each phase's agent wrote the test from the clause
+  that named the mechanism it was building (the listener it had just made mounted, the backend its fixture opened, the
+  check it had just added) and took a passing control as proof, without running it against the fault the criterion
+  names; the phase checks counted controls, not faults, and the map was written from the tests' titles. The fixes run
+  each control against its criterion's own oracle with the named fault put back (`vi.mock` in
+  `*.negative-control.test.ts` files, or the fault in the source for one recorded run), and the map's backends were read
+  from each test: `e725b72`, `c18aabb`, `3a22d31`, `09a5b82`, `11a6147`, `a075ec9`. *Follow-up:* questions Q-21 (L3's
+  "either order") and Q-11 (L37 on PGlite, a way without a product seam added) for the owner; issue 00067 fixed beside
+  (`a469e20`).
+- **R4 — Three defects introduced by stage 4's own fixes, and a fix that did not reach every route, found by the
+  targeted fix check** (`plan-task-runner / claude-opus-5-5 / P10.4c`; the fixes from P10.4a, the same role and model;
+  found by Codex, gpt-6-astra, the fix check on `26f8048`). C-F3's fix copied an array option with `slice`, which keeps
+  the host's species, then called `map` on the copy: an `Array` subclass whose `map` getter throws made `startUmbraDB`
+  throw (N1, `fc9e3e0`). C-F4's fix put a `bufferedAmount` check before every send, and the property was read before the
+  guard that held only its call: a getter that throws escaped the endpoint's send, its ping and the core's answer to a
+  hello (N2, `c2b782b`). C-F2's fix redacted every string of a refused start's details and its log lines whole: a
+  password equal to `load-failed` replaced the reason, a rule and the log's codes, and `/status` dropped the reason
+  (N3, `7b27e48`). And C-F2's fix knew the secrets of plain data only: data that was not plain, or a `{ file }` refused at
+  its plain-data check, still showed a credential the host's text quoted. *Second story:* each fix was written against
+  its finding's counterexample and the paths beside it, and each was checked by tests that varied the input the finding
+  named (getters and proxies, the amount's value, the secret's place); none varied what the fix itself added — a
+  host's own array methods, a throwing read of the member the new check reads, a secret equal to the words the new
+  redaction passes over — because the fixer read its new code as safe plumbing, not as a new boundary with the host. A
+  reviewer that read the fix diff as new attack surface found all three in one pass. The fixes (`3ec84de`, `2ae0985`,
+  `e13b9df`, `63207b9`) each add the test that varies what the fix added, seen failing first and with the fault put
+  back. *Follow-up:* the second targeted fix check (AGENTS.md "Bounded review"), then the owner; Q-20 (the `cause`
+  chains, with the fix check's evidence) and Q-22 (a configuration file whose own import throws) for the owner; issues
+  00068 and 00069 filed beside, skipped.
+- **R5 — A fix of one reader of a host's channel left the change's other readers with the same unguarded reads**
+  (`plan-task-runner / claude-opus-5-5 / P10.4d`; the code from P6.2, P6.3 and P7.1, the same role and model; found by
+  the P10.4c fixer while fixing N2, filed as issue 00068 and brought into scope by the orchestrator). The private side's
+  carrier checked a channel `connect()` resolved with by reading its members outside any guard, inside the handler of a
+  discarded promise: a getter that threw was an unhandled rejection (G6) and a connection that never failed, ended or
+  reconnected; its log of a rejection read the error's prototype, code and name the same way. `api.connect`'s carrier
+  read `bufferedAmount` before its guard, so the getter's error escaped into the host carrier's own message listener
+  and a module's `emit`, and a throwing call was read as no limit. The search of the change's channel code found one
+  more: `messagePortChannel` read a host port's `event.data` outside a guard, into the port's dispatch. *Second story:*
+  each reader was written against the channel's typed interface, whose members are methods, so a read of a member
+  looked like data, not like a call into the host; N2's fix was scoped to the file its finding named, and the same
+  reads one module away were filed rather than fixed. The fixes (`7a10576`, `9bf97d6`, `dc16a06`) each add the test
+  with the getter or trap that throws, seen failing first and again with the fix put back; the search is recorded place
+  by place in the plan. *Follow-up:* issue 00070 (a host channel that tells its close at once makes `api.connect`'s
+  slow-subscriber disconnect unsubscribe inside the module's emit), filed beside, skipped; P10.4c's and P10.4d's
+  targeted fix check next.
+- **R6 — N3's fix kept whole fields that carry host-written text, found by the second targeted fix check**
+  (`plan-task-runner / claude-opus-5-5 / P10.4c`, the fix; found by Codex, gpt-6-astra, the second fix check on
+  `74ebc7b`; recorded by the orchestrator, `claude-opus-5-5`). To keep a refusal's machine-readable words when a
+  secret's text equals them (N3), `e13b9df` left a set of detail fields unredacted by name — a finding's `path` and
+  `field`, a declaration's field, a class name in `found` — but those fields are built from the host's own keys and
+  names: a configuration key equal to the password's text shows it in the log, `started`'s details and `status()`
+  (M1, CF-4). C-F2's residual fix collects the secrets of data that is not plain data, but a nested `Proxy` whose
+  `ownKeys` throws stops the walk and drops readable sibling secrets. *Second story:* the redaction is a text
+  substitution of known secret values over whatever is shown, and each fix narrowed or widened it by field name; a
+  rule by field name cannot tell UmbraDB's own words from host text built into the same field, and each round's
+  regression varied only the field the finding named. *Follow-up:* the bounded review's automated rounds are spent
+  (one full round, a targeted fix check, and the edit's own check); M1 and the residual go to the owner as Q-23
+  (fix by value and context, accept with a reason, or revisit the redaction's design), 2026-11-02.
+- **R7 — Two regressions our own pushed fixes introduced, which the fixes' checks did not catch before the push**
+  (introduced by the `core-arch` issue-fix batch of 2026-10-29, `8f55772` and `40b30d3`, pushed to PR #16; the model id
+  is not recorded in those commits; found by the `start-umbradb` P0 baseline, the orchestrator `claude-opus-5-5`; fixed
+  by `plan-task-runner / claude-opus-5-5 / P11.1`). The instance id rule (issue 00051, `8f55772`) refused ids with a
+  space, and A115's nine fault cases greet with ids built from their labels (`fault-${name}`, `after-${name}`), so 18
+  transport tests waited 30 s for a `hello-ack` that never came (issue 00059). The parent check above a missing height
+  (issue 00028, `40b30d3`) refused block 4 at height 3 inside the block transaction, and the halt test that staged
+  `unexpected-cursor` that way met `parent-mismatch` first, 2 tests (issue 00060). *Second story:* each fix was checked
+  against the tests it knew to touch: `8f55772`'s message says "every instance id of the tests and fixtures already
+  matched it", from a search of the ids written as literals, not of ids a test builds at run time; `40b30d3` updated the
+  two tests it saw stage a block above a gap (the loop's and A86's control) and lists them, but not the process-level
+  halt test that staged the same thing. No full-suite run of that batch, compared with a baseline, is recorded before
+  the push; the full run would have shown the 20 failures (P0 saw them at once, deterministic, on both backends).
+  *Follow-up:* fixed in P11.1 (`f35dbbc`: the ids derived from the labels; `7d7bd0b`: the halt test restaged on a real case on PostgreSQL —
+  another writer's row above the height — and on PGlite through a test `core-block-commit` without its parent check,
+  plus a test of the old staging's `parent-mismatch`); issue 00071 filed beside (a module can change the bytes of the
+  block's hash the core commits). A fix that narrows what a check accepts is checked by the full suite against the last
+  baseline before it is pushed, and its search for affected tests covers values the tests build, not only literals.
+- **R8 — The suppression of a secret-scan false positive quoted the value it suppressed, and was checked before it
+  was committed** (`orchestrator / claude-opus-5-5 / start-umbradb P11`; found by CI's `deps` job on `cccdb2e`,
+  2026-11-02). The supply-chain gate's full-history gitleaks scan flagged the WebSocket standard's example key in two
+  test helpers (a nonce, not a secret); `cccdb2e` suppressed both by exact fingerprint in `.gitleaksignore`, but its
+  comment quoted the header with the key, so the comment itself became a new `generic-api-key` finding. The local scan
+  that "verified" the fix ran before the commit, and `gitleaks detect` in git mode reads committed history only, so it
+  could not see the new line; CI scans the pull request's merge commit. *Second story:* the check was run at the moment
+  the file was edited, not on what would be pushed. The fix (`165c55f`) drops the quoted key from the comment and pins
+  the earlier comment's line by fingerprint (the commit is pushed, so the history keeps it); verified after committing,
+  on all refs and on a merge commit of the branch into the PR's base built the way CI builds it: no leaks. A scan that
+  checks a suppression runs on the committed tree, merged as CI merges it.
+- **R9 — The README's acceptance check missed two findings of a user run, and the stop line written for one of them
+  claimed more than the process knew** (the check: `core-arch` task 17.3a, "the README's two quick starts run as
+  written", done 2026-10-28, its model id not recorded in the task; the stop line: `plan-task-runner / claude-opus-5-5 /
+  P12.B`; found by an agent's user run of the README on `v0.10.0-rc.1` and by P12.B's targeted check, Codex,
+  gpt-6-astra, S1, 2026-11-02; recorded by `plan-task-runner / claude-opus-5-5 / P12.C`). 17.3a ran both quick starts
+  and saw them reach `syncing` and `following`; it did not stop the command it started and read what it printed last
+  (finding 3: `umbradb run` stopped by SIGTERM or SIGINT logged nothing), nor count what `try.sh subscribe` printed
+  against the three rows the script says it prints (finding 4: it printed every row that arrived before its close).
+  P12.B's fix of finding 3 then logged, at a stop, "the last committed height is N, where a restart resumes", N being
+  the process's cursor in memory: after a `COMMIT` whose answer was lost, the database holds N + 1 and a restart resumes
+  at N + 2 (Q-30). *Second story:* "runs as written" was checked by each command's happy path, read for success, not by
+  the operator's whole session — start, watch, stop, read the last lines, run again —; and the stop line's words were
+  chosen for what an operator wants to know (where a restart resumes), while its value came from what the process knows,
+  which every test of the fix shared (none lost a `COMMIT`'s answer). *Follow-up:* the line now says only what the
+  process saw, "the last height this process saw committed is N; a restart resumes after the stored cursor" (`86213bb`,
+  the owner's answer to Q-30, 2026-11-02; `/status`'s head, finding 6, in `abddf7b`); the README run of P12.A, after
+  `v0.10.0-rc.2`, stops every command it starts and compares each command's whole output, its last lines included, with
+  what the README and the scripts say.

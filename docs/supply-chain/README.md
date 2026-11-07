@@ -9,9 +9,10 @@ UmbraDB itself is licensed **Apache-2.0** (`LICENSE`, `NOTICE`; Copyright 2026 C
 ## Why this exists
 
 UmbraDB is the Postgres persistence layer for a Midnight/Cardano dependency chain. Its trust
-surface is not just its own two runtime npm packages — it is the full transitive npm graph used
+surface is not just its own five runtime npm packages — it is the full transitive npm graph used
 to build and test it, the pinned Cardano/Midnight release binaries and Docker images the dev
-environment runs, and the Lean/mathlib toolchain that checks the formal proofs. This directory
+environment runs, the Midnight ledger WASM packages it builds from source (`vendor/ledger/`), and the
+Lean/mathlib toolchain that checks the formal proofs. This directory
 makes that surface explicit so it can be watched, audited, and updated deliberately.
 
 ## How the inventory is organized
@@ -33,19 +34,23 @@ Every entry is grounded in a real manifest in this repo. The authoritative sourc
 | npm runtime + dev | `package.json`, `package-lock.json` (lockfileVersion 3) |
 | Nix dev environment | `nix/midnight-env/flake.nix`, `nix/midnight-env/flake.lock` |
 | Lean proofs | `Formal/Lean/lean-toolchain`, `Formal/Lean/lake-manifest.json` |
+| Vendored ledger WASM | `vendor/ledger/*/upstream.json`, `vendor/ledger/*/patches/`, `vendor/ledger/Dockerfile`, `vendor/ledger/*/SHA256SUMS` |
 | CI trust gate | `.github/workflows/conformance.yml` (and the planned `supply-chain.yml`, G18) |
 
 ## Update process — how and when to bump each ecosystem
 
 The governing rule differs by ecosystem, because the *security value* of each pin differs.
 
-- **npm runtime deps (`postgres`, `zod`)** — carry caret ranges in `package.json`, but the
-  **resolved version + integrity hash in `package-lock.json` is the real pin**. Bump by editing
-  the range (or `npm update` within range) and committing the regenerated lockfile. Runtime scope
-  is deliberately tiny (2 packages, both zero-dependency) so `npm audit --omit=dev` stays quiet and
-  fast. Watch: GitHub advisories / `npm audit` for `postgres` and `zod`.
+- **npm runtime deps (`@electric-sql/pglite`, `postgres`, `typescript`, `ws`, `zod`)** —
+  `@electric-sql/pglite` and `ws` are pinned exactly (their characterization tests in
+  `test/dependencies/` run against those versions; bump the pin and the tests together);
+  `postgres`, `typescript` and `zod` carry caret ranges in `package.json`, but the **resolved
+  version + integrity hash in `package-lock.json` is the real pin**. Bump by editing the pin or
+  range and committing the regenerated lockfile. Runtime scope is deliberately small (5
+  packages, all zero-dependency) so `npm audit --omit=dev` stays quiet and fast. Watch: GitHub
+  advisories / `npm audit` for each of them.
 - **npm dev deps + transitive graph (307 packages total)** — `npm ci` reinstalls the exact locked
-  tree; never `npm install` in CI. Bump dev tooling (vitest, tsx, typedoc, typescript,
+  tree; never `npm install` in CI. Bump dev tooling (vitest, tsx, typedoc, esbuild,
   Testcontainers, `@types/node`, effect, fast-check, the wallet-sdk canary) deliberately, run the
   conformance suite, and commit the new lockfile. A non-blocking full `npm audit` gives dev-graph
   visibility without gating merges on the large dev tree.
@@ -62,6 +67,17 @@ The governing rule differs by ecosystem, because the *security value* of each pi
 - **Docker images (indexer-standalone, proof-server)** — pinned by `@sha256:` digest. Digest
   pinning gives immutability, **not** freedom from CVEs, so the images are watched by a scheduled
   Trivy scan (G18) rather than by version bumps alone. Bump = replace the digest, re-verify.
+- **PostgreSQL test image (`postgres:18-alpine`)** — pinned by `@sha256:` digest, once, in
+  `test/postgres-image.ts` (owner decision Q82); the image-pin agreement step of the supply-chain
+  gate and a conformance test keep every container on it. Bump = replace the digest there, in
+  `supply-chain.yml` (`EXP_POSTGRES`) and in `test/dependencies/postgres-image.test.ts`, with a
+  build at least 7 days old.
+- **Vendored ledger builds (`vendor/ledger/`)** — each ledger version is built in Docker from an
+  exact `midnight-ledger` commit plus the patches kept in the repository, with every tool pinned (`Dockerfile`), and
+  every output file is pinned by SHA-256 (`SHA256SUMS`). Bump = change the commit in `upstream.json`, rebase the
+  patches, `npm run vendor:ledger -- --record <version>`, and commit the result; `.github/workflows/vendored-ledger.yml`
+  rebuilds every package on amd64 and arm64 and fails on any difference. Watch: midnight-ledger releases and the
+  ledger versions midnight-node pins.
 - **Lean toolchain + mathlib (`lean-toolchain`, `lake-manifest.json`)** — bump the Lean version
   and re-run `lake update` to a mathlib tag matching that toolchain; the transitive Lake deps
   (batteries, aesop, Qq, …) move with mathlib and are recorded as exact git revs in the manifest.
@@ -83,7 +99,7 @@ blocking/scheduled sub-gates:
    hooks, so any needed build/typecheck must be an explicit CI step — it already is.)
 4. **`gitleaks`** full git-history secret scan, allowlisting exactly the one valueless Preview
    testnet wallet path + its `.example` template.
-5. **`trivy image --severity HIGH,CRITICAL`** on **both** digest-pinned images, on a schedule, with
+5. **`trivy image --severity HIGH,CRITICAL`** on **both** digest-pinned images of the dev stack, on a schedule, with
    the scan targets asserted equal to the `flake.nix` digests so a bump cannot silently diverge.
 6. **`flake.lock` change-control** — fail any PR that changes `flake.lock` unless it carries an
    explicit `flake-lock-update` label, so an unreviewed `nix flake update` cannot land.
@@ -91,6 +107,10 @@ blocking/scheduled sub-gates:
 > Note: the G18 config files (`.npmrc`, `.gitleaks.toml`, `SECURITY.md`, `supply-chain.yml`) are
 > **committed as part of this change** (`v1.0.0-infosec-signoff`) and are **pending merge to `main`**.
 > This directory documents the posture and the current state honestly; see `slsa.md` for the gap mapping.
+
+The vendored ledger builds have their own gate, **`.github/workflows/vendored-ledger.yml`**: it rebuilds every
+`vendor/ledger/` package from its pinned commit and patches on amd64 and arm64 runners and fails if any output file's
+SHA-256 differs from the recorded `SHA256SUMS` (or the committed `pkg/` does).
 
 ## SLSA posture in one paragraph
 

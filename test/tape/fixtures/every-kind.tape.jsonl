@@ -1,0 +1,18 @@
+{"method":"system_properties","params":[],"result":{"genesis_state":"0x00","ss58Format":42,"tokenDecimals":6}}
+{"method":"chain_getBlockHash","params":[0],"result":"0x1111111111111111111111111111111111111111111111111111111111111111"}
+{"method":"chain_getFinalizedHead","params":[],"result":"0x2222222222222222222222222222222222222222222222222222222222222222","delayMs":2000}
+{"method":"state_getStorage","params":["0x26aa394eea5630e07c48ae0c9558cef7","0x3333333333333333333333333333333333333333333333333333333333333333"],"error":{"code":4003,"message":"Client error: UnknownBlock: State already discarded for 0x3333333333333333333333333333333333333333333333333333333333333333"}}
+{"subscribe":"s-1","method":"chain_subscribeFinalizedHeads","params":[]}
+{"notify":"s-1","result":{"parentHash":"0x00","number":"0x1","stateRoot":"0x00","extrinsicsRoot":"0x00","digest":{"logs":[]}}}
+{"fault":"timeout","method":"chain_getBlock","params":["0x4444444444444444444444444444444444444444444444444444444444444444"]}
+{"fault":"error","method":"chain_getBlock","params":["0x4444444444444444444444444444444444444444444444444444444444444444"],"code":-32999}
+{"fault":"error","method":"midnight_ledgerStateRoot","params":["0x55"]}
+{"method":"state_getMetadata","params":{"at":"0x66","flag":true},"result":[1,-2,3.5,1e+21,5e-7,18446744073709551616,-9007199254740993,true,false,null,"é\"\\\n\u0001\u001f😀/"]}
+{"method":"chain_getHeader","params":["0x77"],"result":{"1":"one","b":{"d":[],"c":{}},"a":""}}
+{"disconnect":true}
+{"subscribe":7,"method":"chain_subscribeNewHeads","params":[]}
+{"notify":7,"result":null}
+{"subscribe":"s-1","method":"chain_subscribeFinalizedHeads","params":[]}
+{"notify":"s-1","result":{"number":"0x2"}}
+{"method":"chain_getFinalizedHead","params":[],"result":"0x2222222222222222222222222222222222222222222222222222222222222222","delayMs":0}
+{"disconnect":true}

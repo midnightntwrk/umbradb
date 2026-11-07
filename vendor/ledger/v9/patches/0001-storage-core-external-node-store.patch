@@ -1,0 +1,235 @@
+diff --git a/storage-core/src/arena.rs b/storage-core/src/arena.rs
+index 97dad37..054b5b1 100644
+--- a/storage-core/src/arena.rs
++++ b/storage-core/src/arena.rs
+@@ -518,6 +518,32 @@ impl<D: DB> Arena<D> {
+         f(&mut RefCell::borrow_mut(&self.lock_backend()))
+     }
+ 
++    #[cfg(feature = "layout-v2")]
++    /// Forget the in-memory copies of objects that were deleted from the store, so that each is
++    /// created, and taken by [`StorageBackend::take_reachable_pending`], again if it is needed
++    /// again (see [`StorageBackend::forget_stored`]).
++    ///
++    /// Fails, changing nothing, with the first key that an `Sp` in this arena still holds: an
++    /// object that is still in use must stay readable, so it must not have been deleted.
++    pub fn forget_stored(
++        &self,
++        keys: &[ArenaHash<D::Hasher>],
++    ) -> Result<(), ArenaHash<D::Hasher>> {
++        let metadata = self.lock_metadata();
++        if let Some(live) = keys
++            .iter()
++            .find(|key| RefCell::borrow(&metadata).contains_key(*key))
++        {
++            return Err(live.clone());
++        }
++        let backend = self.lock_backend();
++        let mut backend = RefCell::borrow_mut(&backend);
++        for key in keys {
++            backend.forget_stored(key);
++        }
++        Ok(())
++    }
++
+     /// Insert `value` into the arena, and cache its data in the back-end until
+     /// all `Sp`s for this data are dropped.
+     pub fn alloc<T: Storable<D>>(&self, value: T) -> Sp<T, D> {
+diff --git a/storage-core/src/backend.rs b/storage-core/src/backend.rs
+index 315b651..a3ecb3a 100644
+--- a/storage-core/src/backend.rs
++++ b/storage-core/src/backend.rs
+@@ -34,6 +34,43 @@ use std::{
+     collections::{HashMap, HashSet},
+ };
+ 
++#[cfg(feature = "layout-v2")]
++/// The result of a [`NodeSource`] lookup: an object's binary payload and its child keys.
++pub type SourcedNode<H> = (std::vec::Vec<u8>, std::vec::Vec<ArenaKey<H>>);
++
++#[cfg(feature = "layout-v2")]
++/// A synchronous source of stored objects, consulted by [`StorageBackend::get`] when an object is
++/// neither in memory nor in the database. This lets a caller keep the persistent store outside
++/// this process and serve objects to the arena on demand.
++///
++/// [`StorageBackend::get`] checks that a sourced object's payload and child keys hash to the
++/// requested key, and panics if they do not: a store that returns other bytes than the ones
++/// written under a key is corrupt, and no ledger computation may proceed on it.
++///
++/// The source must not call back into the arena.
++#[derive(Clone)]
++pub struct NodeSource<H: WellBehavedHasher>(
++    #[allow(clippy::type_complexity)]
++    std::sync::Arc<dyn Fn(&ArenaHash<H>) -> Option<SourcedNode<H>> + Send + Sync>,
++);
++
++#[cfg(feature = "layout-v2")]
++impl<H: WellBehavedHasher> NodeSource<H> {
++    /// Wrap a lookup function.
++    pub fn new(
++        lookup: impl Fn(&ArenaHash<H>) -> Option<SourcedNode<H>> + Send + Sync + 'static,
++    ) -> Self {
++        NodeSource(std::sync::Arc::new(lookup))
++    }
++}
++
++#[cfg(feature = "layout-v2")]
++impl<H: WellBehavedHasher> std::fmt::Debug for NodeSource<H> {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        f.write_str("NodeSource(..)")
++    }
++}
++
+ #[derive(PartialEq, Debug, Clone, Copy)]
+ /// A non-trivial update delta for a value stored under an [`ArenaHash`] in
+ /// memory in [`StorageBackend`].
+@@ -294,6 +331,9 @@ pub struct StorageBackend<D: DB> {
+     /// Intermediate garbage collection state
+     #[cfg(all(feature = "layout-v2", feature = "gc-v1"))]
+     gc_state: GcState<D>,
++    /// Consulted when an object is neither in memory nor in `database`.
++    #[cfg(feature = "layout-v2")]
++    node_source: Option<NodeSource<D::Hasher>>,
+ }
+ 
+ /// Run-time stats to help with performance tuning.
+@@ -337,6 +377,8 @@ impl<D: DB> StorageBackend<D> {
+             }),
+             #[cfg(feature = "gc-v1")]
+             gc_state: Default::default(),
++            #[cfg(feature = "layout-v2")]
++            node_source: None,
+         }
+     }
+ 
+@@ -379,7 +421,14 @@ impl<D: DB> StorageBackend<D> {
+ 
+         // Attempt to read from DB.
+         self.stats.borrow_mut().get_cache_misses += 1;
+-        if let Some(obj) = self.database.get_node(key) {
++        #[cfg(not(feature = "layout-v2"))]
++        let found = self.database.get_node(key);
++        #[cfg(feature = "layout-v2")]
++        let found = self
++            .database
++            .get_node(key)
++            .or_else(|| self.get_from_node_source(key));
++        if let Some(obj) = found {
+             let cache_value = if let Some(CacheValue::Update { delta }) = self.peek_from_memory(key)
+             {
+                 let delta = *delta;
+@@ -399,6 +448,102 @@ impl<D: DB> StorageBackend<D> {
+         self.peek_from_memory(key).and_then(|cv| cv.get_obj())
+     }
+ 
++    #[cfg(feature = "layout-v2")]
++    /// Set or clear the [`NodeSource`] consulted when an object is neither in memory nor in the
++    /// database.
++    pub fn set_node_source(&mut self, source: Option<NodeSource<D::Hasher>>) {
++        self.node_source = source;
++    }
++
++    #[cfg(feature = "layout-v2")]
++    fn get_from_node_source(&self, key: &ArenaHash<D::Hasher>) -> Option<OnDiskObject<D::Hasher>> {
++        let (data, children) = (self.node_source.as_ref()?.0)(key)?;
++        let actual = crate::arena::hash::<D::Hasher>(&data, children.iter().map(ArenaKey::hash));
++        assert!(
++            actual == *key,
++            "node source returned an object for key {key:?} whose content hashes to {actual:?}"
++        );
++        Some(OnDiskObject { data, children })
++    }
++
++    #[cfg(feature = "layout-v2")]
++    /// Take the pending objects reachable from `roots` for writing to a store kept outside this
++    /// back-end, instead of writing them to the database.
++    ///
++    /// The search starts at each root and follows child keys (through embedded children). It
++    /// collects every object it reaches that is pending creation (cached since the last time it
++    /// was written, in any `Create` state), and stops at objects that are stored: those read from
++    /// the database or the [`NodeSource`], those taken by an earlier call, and keys not in memory
++    /// (under the arena's invariants, a key referenced by an object in memory and not itself in
++    /// memory is stored). The collected objects become stored (`Read`) objects. Pending objects
++    /// that no root reaches stay pending, so they are collected later if a root reaches them.
++    ///
++    /// The caller keeps the GC-root counts itself: pending reference-count and root-count changes
++    /// of stored objects are discarded, as under `layout-v2` they only matter to this back-end's
++    /// own GC, which is not used together with this method.
++    ///
++    /// Returns the collected objects in key order.
++    pub fn take_reachable_pending<I>(
++        &mut self,
++        roots: I,
++    ) -> std::vec::Vec<(ArenaHash<D::Hasher>, OnDiskObject<D::Hasher>)>
++    where
++        I: IntoIterator<Item = ArenaHash<D::Hasher>>,
++    {
++        let mut taken = std::collections::BTreeMap::new();
++        let mut visited = HashSet::new();
++        let mut frontier: std::vec::Vec<ArenaHash<D::Hasher>> = roots.into_iter().collect();
++        while let Some(key) = frontier.pop() {
++            if !visited.insert(key.clone()) {
++                continue;
++            }
++            let obj = match self.peek_from_memory(&key) {
++                Some(CacheValue::Create { obj })
++                | Some(CacheValue::CreateAndUpdate { obj, .. })
++                | Some(CacheValue::CreateAndDelete { obj, .. }) => obj.clone(),
++                _ => continue,
++            };
++            frontier.extend(obj.children.iter().flat_map(ArenaKey::refs).cloned());
++            taken.insert(key, obj);
++        }
++        for (key, obj) in taken.iter() {
++            self.remove_from_memory(key);
++            self.cache_insert_new_key(key.clone(), CacheValue::Read { obj: obj.clone() });
++        }
++        let stale: std::vec::Vec<_> = self
++            .write_cache
++            .iter()
++            .filter(|(_, value)| {
++                matches!(
++                    value,
++                    CacheValue::Update { .. } | CacheValue::ReadAndUpdate { .. }
++                )
++            })
++            .map(|(key, _)| key.clone())
++            .collect();
++        for key in stale {
++            if let CacheValue::ReadAndUpdate { obj, .. } = self.remove_from_memory(&key) {
++                self.cache_insert_new_key(key, CacheValue::Read { obj });
++            }
++        }
++        taken.into_iter().collect()
++    }
++
++    #[cfg(feature = "layout-v2")]
++    /// Forget the in-memory copy of a stored object that was deleted from the store, so that the
++    /// object is created, and taken by [`Self::take_reachable_pending`], again if it is needed
++    /// again. Pending objects are kept: they are written when a root reaches them.
++    pub(crate) fn forget_stored(&mut self, key: &ArenaHash<D::Hasher>) {
++        if matches!(
++            self.peek_from_memory(key),
++            Some(CacheValue::Read { .. })
++                | Some(CacheValue::ReadAndUpdate { .. })
++                | Some(CacheValue::Update { .. })
++        ) {
++            self.remove_from_memory(key);
++        }
++    }
++
+     /// Get the root count for `key`, incorporating any pending in-memory updates.
+     pub(crate) fn get_root_count(&self, key: &ArenaHash<D::Hasher>) -> u32 {
+         let db_root_count = self.database.get_root_count(key);
+@@ -1277,6 +1422,11 @@ impl<H: WellBehavedHasher> OnDiskObject<H> {
+         }
+     }
+ 
++    /// The object's binary payload.
++    pub fn data(&self) -> &[u8] {
++        &self.data
++    }
++
+     /// Return the size in bytes of this object.
+     pub fn size(&self) -> usize {
+         let data_size = self.data.len();

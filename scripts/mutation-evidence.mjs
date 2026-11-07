@@ -1,4 +1,4 @@
-// Pure, unit-testable mutation-EVIDENCE tally + gate for the per-adapter runner (round-3 BLOCK 5).
+// Pure, unit-testable mutation-EVIDENCE tally + gate for the per-adapter runner.
 //
 // A durability adapter contributes mutation EVIDENCE only if it produced a valid report with a POSITIVE
 // number of VALID mutants (Killed + Timeout + Survived + NoCoverage). CompileError / RuntimeError /

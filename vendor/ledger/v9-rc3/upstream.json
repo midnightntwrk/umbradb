@@ -1,0 +1,16 @@
+{
+  "repository": "https://github.com/midnightntwrk/midnight-ledger",
+  "commit": "4823b5351b17cc49e30f19760dbd30a73cf95e22",
+  "tag": "ledger-9.1.0.0-rc.3",
+  "versionName": "ledger-9.1.0.0-rc.3",
+  "build": {
+    "crate": "midnight-ledger-wasm-v9",
+    "wasmBindgen": "0.2.108",
+    "dtsTemplate": "ledger-wasm/ledger-v9.template.d.ts",
+    "dtsName": "ledger-v9.d.ts"
+  },
+  "package": {
+    "name": "@umbradb/vendored-ledger-v9-rc3",
+    "version": "1.0.0-rc.3"
+  }
+}

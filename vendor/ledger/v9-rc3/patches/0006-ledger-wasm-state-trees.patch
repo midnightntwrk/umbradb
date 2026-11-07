@@ -1,0 +1,91 @@
+diff --git a/ledger-wasm/ledger-v9.template.d.ts b/ledger-wasm/ledger-v9.template.d.ts
+index 0c018cb..a0eb0ce 100644
+--- a/ledger-wasm/ledger-v9.template.d.ts
++++ b/ledger-wasm/ledger-v9.template.d.ts
+@@ -2343,3 +2343,22 @@ export function postBlockUpdateExact(state: LedgerState, tblock: Date, fullness:
+ 
+ /** A system transaction's cost, which the node adds to the block's fullness. */
+ export function systemTransactionCost(transaction: SystemTransaction, params: LedgerParameters): SyntheticCost;
++
++// UmbraDB additions: LG-16's tree values, as the official indexer reads them.
++
++/**
++ * A state's zswap commitment tree's first free index and root, and its DUST commitment and
++ * generation trees' first free indexes and roots; each root its tree's root after `rehash()`, in
++ * the ledger's untagged serialization (as the official indexer stores it).
++ */
++export interface StateTrees {
++  zswapFirstFree: bigint;
++  zswapRoot: Uint8Array;
++  dustCommitmentFirstFree: bigint;
++  dustCommitmentRoot: Uint8Array;
++  dustGenerationFirstFree: bigint;
++  dustGenerationRoot: Uint8Array;
++}
++
++/** LG-16's tree values of `state`. */
++export function stateTrees(state: LedgerState): StateTrees;
+diff --git a/ledger-wasm/src/umbradb.rs b/ledger-wasm/src/umbradb.rs
+index dab9f9e..e878806 100644
+--- a/ledger-wasm/src/umbradb.rs
++++ b/ledger-wasm/src/umbradb.rs
+@@ -523,3 +523,59 @@ pub fn system_transaction_cost(
+     report_panics();
+     Ok(to_value(&transaction.0.cost(params))?)
+ }
++
++// LG-16's tree values (UmbraDB task 12.1b, owner decision Q138 A): what the official indexer stores
++// of a ledger state besides its root, read from the state as it reads them (`midnight-indexer`
++// `indexer-common/src/domain/ledger/ledger_state.rs`: `zswap_first_free`,
++// `zswap_merkle_tree_root`, `dust_commitments_first_free`, `dust_commitment_merkle_tree_root`,
++// `dust_generations_first_free`, `dust_generation_merkle_tree_root`). The published package gives
++// the zswap tree's first free index only.
++
++/// A Merkle tree's root after `rehash()`, in the ledger's untagged serialization, as the official
++/// indexer stores it; an error where the tree has no root (the indexer's `expect`).
++fn tree_root<T: Serializable>(root: Option<T>, tree: &str) -> Result<Uint8Array, JsError> {
++    let root =
++        root.ok_or_else(|| JsError::new(&format!("stateTrees: the {tree} tree has no root")))?;
++    let mut bytes = Vec::new();
++    Serializable::serialize(&root, &mut bytes)?;
++    Ok(Uint8Array::from(&bytes[..]))
++}
++
++/// The state's zswap commitment tree's first free index and root, and its DUST commitment and
++/// generation trees' first free indexes and roots: `{ zswapFirstFree, zswapRoot,
++/// dustCommitmentFirstFree, dustCommitmentRoot, dustGenerationFirstFree, dustGenerationRoot }`,
++/// each index a `bigint`, each root its tree's root after `rehash()` in the ledger's untagged
++/// serialization.
++#[wasm_bindgen(js_name = "stateTrees")]
++pub fn state_trees(state: &LedgerState) -> Result<JsValue, JsError> {
++    report_panics();
++    let state = &state.0;
++    let result = Object::new();
++    set_field(&result, "zswapFirstFree", &BigInt::from(state.zswap.first_free).into())?;
++    set_field(
++        &result,
++        "zswapRoot",
++        &tree_root(state.zswap.coin_coms.rehash().root(), "zswap commitment")?.into(),
++    )?;
++    set_field(
++        &result,
++        "dustCommitmentFirstFree",
++        &BigInt::from(state.dust.utxo.commitments_first_free).into(),
++    )?;
++    set_field(
++        &result,
++        "dustCommitmentRoot",
++        &tree_root(state.dust.utxo.commitments.rehash().root(), "DUST commitment")?.into(),
++    )?;
++    set_field(
++        &result,
++        "dustGenerationFirstFree",
++        &BigInt::from(state.dust.generation.generating_tree_first_free).into(),
++    )?;
++    set_field(
++        &result,
++        "dustGenerationRoot",
++        &tree_root(state.dust.generation.generating_tree.rehash().root(), "DUST generation")?.into(),
++    )?;
++    Ok(result.into())
++}

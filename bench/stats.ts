@@ -4,8 +4,8 @@ import type { LatencyStats } from "./types.js";
 /**
  * Summarise a sample array (per-iteration times in ms) into the {@link LatencyStats} block the
  * baseline records. Percentiles use the nearest-rank method on the sorted samples; `cv` is the
- * coefficient of variation (sd/mean), the statistic a future CV-aware regression gate keys off
- * (`design.md` §5). Standard deviation is the sample sd (n-1 denominator).
+ * coefficient of variation (sd/mean), the statistic a future CV-aware regression gate keys off.
+ * Standard deviation is the sample sd (n-1 denominator). [perf-baseline design §5]
  */
 export function summarize(samplesMs: number[]): LatencyStats {
   if (samplesMs.length === 0) throw new Error("summarize: no samples");
@@ -41,10 +41,10 @@ export interface TinybenchOpts {
 
 /**
  * Warmup-aware microbench via `tinybench` (the explicit devDependency, NOT the transitive vitest
- * copy — `design.md` §4). Returns the raw per-iteration sample array (`task.result.samples`) so
+ * copy). Returns the raw per-iteration sample array (`task.result.samples`) so
  * {@link summarize} owns the p50/p95/p99/CV computation uniformly across tinybench-measured and
  * manually-measured workloads. `tinybench.run()` does not warm up on its own — {@link Bench.warmup}
- * is called first, so the returned samples are post-warmup.
+ * is called first, so the returned samples are post-warmup. [perf-baseline design §4]
  */
 export async function tinybenchSamples(
   name: string,

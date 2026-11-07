@@ -1,0 +1,50 @@
+/**
+ * The `TRUNCATE` refusal, applied. The `deterministic_postgresql` component holds the trigger, its function, the
+ * migration mark and the rule of which tables it guards (`../deterministic-postgresql/block-transactions.ts`); this file
+ * runs them in a transaction of the database API. [DB-14; design §4]
+ *
+ * - {@link guardTables} runs at every startup, because a migration can add tables: in the bootstrap, before any
+ *   migration, and again after each part that applied a migration, before that part's `on-start-db` (`./migrate.ts`).
+ * - {@link markMigration} runs first in each migration's transaction. Those are the only transactions in which
+ *   `TRUNCATE` of a guarded table is allowed. [A73]
+ * - {@link stillMarked} tells the runner that the migration's SQL did not end its transaction.
+ */
+
+import {
+  type GuardTableRow,
+  MARK_MIGRATION_SQL,
+  MIGRATION_MARKED_SQL,
+  TRUNCATE_GUARD_FUNCTION_SQL,
+  TRUNCATE_GUARD_TABLES_SQL,
+  truncateGuardStatements,
+} from "../deterministic-postgresql/index.js";
+import type { Transaction } from "./api.js";
+import type { SchemaPlan } from "./roles.js";
+
+/**
+ * Creates (or replaces) the trigger function in `core_chain`, which `prepareSchemas` (`./roles.ts`) creates, then
+ * attaches the trigger to every table and partition of the plan's schemas that is not declared `deterministic: false`
+ * and lacks it, and removes it from those that are. Run by the writer's login, which owns the function and inherits
+ * every module role (`./roles.ts`).
+ */
+export async function guardTables(tx: Transaction, plan: SchemaPlan): Promise<void> {
+  await tx.execute(TRUNCATE_GUARD_FUNCTION_SQL);
+  const tables = await tx.query(TRUNCATE_GUARD_TABLES_SQL, [plan.schemas.map((schema) => schema.name)]);
+  for (const statement of truncateGuardStatements(tables as unknown as GuardTableRow[], plan.optedOut)) {
+    await tx.execute(statement);
+  }
+}
+
+/** Marks the transaction as a migration's, so that `TRUNCATE` of a guarded table is allowed in it. [A73] */
+export async function markMigration(tx: Transaction): Promise<void> {
+  await tx.query(MARK_MIGRATION_SQL);
+}
+
+/**
+ * True while `tx` is still the transaction {@link markMigration} marked; false once SQL run in it ended it with a
+ * `COMMIT` or `ROLLBACK` of its own (the migration runner's check, `./migrate.ts`).
+ */
+export async function stillMarked(tx: Transaction): Promise<boolean> {
+  const [row] = await tx.query(MIGRATION_MARKED_SQL);
+  return row?.marked === true;
+}

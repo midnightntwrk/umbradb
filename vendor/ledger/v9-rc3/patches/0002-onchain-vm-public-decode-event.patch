@@ -1,0 +1,17 @@
+diff --git a/onchain-vm/src/vm.rs b/onchain-vm/src/vm.rs
+index 015055c..ce77d7e 100644
+--- a/onchain-vm/src/vm.rs
++++ b/onchain-vm/src/vm.rs
+@@ -265,7 +265,11 @@ fn try_decode_event<D: DB>(value: &StateValue<D>) -> Option<VersionedLogItem<D>>
+     })
+ }
+ 
+-fn decode_event<D: DB>(value: StateValue<D>) -> Option<VersionedLogItem<D>> {
++/// Decodes the value a `log` operation takes into the log item the VM emits: a well-formed
++/// `[version, event type, data]` array becomes that item, and any other value a version-0 `Misc`
++/// item of the whole value. Returns `None` when the item's data is larger than
++/// [`MAX_LOG_EMITTED`], in which case the VM emits no log.
++pub fn decode_event<D: DB>(value: StateValue<D>) -> Option<VersionedLogItem<D>> {
+     let candidate = try_decode_event(&value).unwrap_or_else(|| VersionedLogItem {
+         version: 0,
+         event_type: LogEventType::Misc,
