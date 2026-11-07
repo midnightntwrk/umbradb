@@ -902,6 +902,47 @@ command ignores it. `/config` shows the addresses as bound and, in `network`, ea
   to 64 MiB, the reads confined, one channel per instance id. `messagePortChannel(port)` adapts a browser or
   `worker_threads` `MessagePort`.
 
+## 19. A module UmbraDB ships: `token-metadata`
+
+UmbraDB's package carries one public module that is not a core module: `token-metadata`, the token metadata of
+[MIP-0018](https://github.com/midnightntwrk/midnight-improvement-proposals/blob/eb94bc182221cd937a84ed66a5f903b060f165ab/mips/mip-0018-on-chain-token-metadata.md).
+It reads the `contract-logs` item (§9), keeps each token's current metadata fields, and serves the `/v1` API of
+[docs/token-metadata-api.md](token-metadata-api.md). Its code is `src/features/token-metadata/`, a module written as
+this guide describes; read it as a larger example.
+
+- **What it requires:** `contract-logs` (either provider) and `block-parsed` (each event's transaction hash). A
+  configuration enables it with its entry, and lists it in `modules` as any user module:
+
+```ts
+import { CORE_BLOCK_PARSED, CORE_CHAIN_EVENTS, CORE_CONTRACT_LOGS_FAST, coreEntry, defineConfig, TOKEN_METADATA } from "umbradb";
+
+export const modules = [TOKEN_METADATA];
+
+const start = 1_000_000;
+
+export default defineConfig({
+  entries: [
+    coreEntry({ start, config: { network: "preview", node: "wss://rpc.preview.midnight.network", database: { kind: "pglite", path: "data/preview" }, developmentOptIn: true } }),
+    CORE_CHAIN_EVENTS.entry({ start, config: {} }),
+    CORE_BLOCK_PARSED.entry({ start, config: {} }),
+    CORE_CONTRACT_LOGS_FAST.entry({ start, config: {} }),
+    TOKEN_METADATA.entry({ start, config: {} }),
+  ],
+});
+```
+
+- **It starts with its database.** Its rows are materialized state — each token's current fields — so they depend on
+  where it started. It may start at any S (`startsMidChain: true`), but its first entry may not start above S: a
+  database that has run without it refuses it at startup (`callback-error` at `on-start-db` of `token-metadata`, its
+  cause a `TokenMetadataStartAfterDatabase` with the code `token-metadata-start-after-database`). Add it to a new
+  database.
+- **Its tables** (schema `token_metadata`): `events` (append-only: each MIP-0018 event's position, transaction hash,
+  contract, classification and reason; other logs are not stored), `fields` and `withdrawals` (mutable: each identity's
+  current fields, whole, and its last withdrawal). They are deterministic module tables (§4): names and symbols are
+  stored whole and cut to 64 and 12 characters only when served, since the cut depends on the platform's Unicode data.
+- **Its values are untrusted.** Everything it serves is what a contract published: show text as text, never follow a
+  URI without your own checks. The module itself never fetches anything.
+
 ## Appendix A. Reference
 
 - **A.1 The declaration's fields.** Required: `id`, `version`, `side`, `requires` (at least one item), `provides`,

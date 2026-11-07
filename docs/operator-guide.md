@@ -170,6 +170,33 @@ raises a private process's `head` during a pause: one paused while it was not wa
 keeps its `head` and `lag` until the loop runs again. Watch for `paused` with an old `since` if a host program pauses
 the loop for long.
 
+## Token metadata (MIP-0018): `token-metadata`
+
+The package ships the public module `token-metadata`, which serves MIP-0018 token metadata on the module API
+(`listen.api`; its routes are in [token-metadata-api.md](token-metadata-api.md)). To run it, the configuration file
+imports `TOKEN_METADATA` from `umbradb`, lists it in its `modules` export, and adds its entry with the core modules it
+needs: a `contract-logs` provider and `core-block-parsed` (`core-contract-logs-fast` also needs `core-chain-events`):
+
+```ts
+export const modules = [TOKEN_METADATA];
+// in `entries`, each from the same start:
+CORE_CHAIN_EVENTS.entry({ start, config: {} }),
+CORE_BLOCK_PARSED.entry({ start, config: {} }),
+CORE_CONTRACT_LOGS_FAST.entry({ start, config: {} }), // or CORE_CONTRACT_LOGS_FULL from 0
+TOKEN_METADATA.entry({ start, config: {} }),
+```
+
+`umbradb config check` checks the file; a missing provider is refused when the process starts.
+
+- **It starts with its database.** Give it the same start as the core entry, in a new database. A database that has
+  already run from a lower height refuses it: startup ends with `callback-error` at `on-start-db` of
+  `token-metadata`, and the log names the cause, `token-metadata-start-after-database`, with both heights. Its state is
+  built from the database's first block, so to add it later, start a new database with it.
+- **Which logs provider.** `core-contract-logs-full` gives every log from the ledger but starts only at 0 (it needs
+  `core-ledger-state`). `core-contract-logs-fast` starts anywhere but is development only (the core entry's
+  `developmentOptIn`), and halts at a log it cannot read from the transcripts.
+- **What it stores and serves** is what contracts published: untrusted text and URIs. It fetches nothing.
+
 ## Backups
 
 A backup is a `pg_dump` file of the indexer's database at one committed height, with UmbraDB's manifest as its first

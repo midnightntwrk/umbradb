@@ -1,0 +1,1174 @@
+{
+ "about": "The MIP-0018 proof of concept's API answers (acedward/umbradb PR #26 at 760d3e9), range idx (714485–715183), recorded by record-answers.test.ts",
+ "range": {
+  "name": "idx",
+  "from": 714485,
+  "to": 715183
+ },
+ "answers": [
+  {
+   "path": "/v1/status",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"network\":\"stagenet\",\"genesisHash\":\"0x2f76825abc239fecf6107c9df99016de57037b451ae57a4394b76c8cf53a9491\",\"startHeight\":714485,\"indexedHeight\":715183,\"archiveHeight\":715183,\"mip\":{\"id\":\"MIP-0018\",\"repository\":\"midnightntwrk/midnight-improvement-proposals\",\"commit\":\"eb94bc182221cd937a84ed66a5f903b060f165ab\",\"path\":\"mips/mip-0018-on-chain-token-metadata.md\",\"sha256\":\"8d4204e7aa24428faa44740ba99612f5556f628347c50e38903e4bea83f17245\",\"url\":\"https://github.com/midnightntwrk/midnight-improvement-proposals/blob/eb94bc182221cd937a84ed66a5f903b060f165ab/mips/mip-0018-on-chain-token-metadata.md\",\"pr\":\"https://github.com/midnightntwrk/midnight-improvement-proposals/pull/372\"},\"vendored\":{\"repository\":\"https://github.com/midnight-experiments/mip-0018\",\"commit\":\"e8295792d9363be37ff2f7f716c740fcdf3f195e\"},\"scanner\":\"off\",\"unresolvedEvents\":0}"
+  },
+  {
+   "path": "/v1/tokens?limit=500",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"id\":\"builtin/NIGHT\",\"source\":\"builtin\",\"kind\":null,\"kindName\":null,\"color\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"contractAddress\":null,\"domainSep\":null,\"name\":\"NIGHT\",\"symbol\":\"NIGHT\",\"decimals\":\"6\",\"described\":false,\"minted\":null,\"firstSeen\":null,\"evidence\":[],\"mark\":null,\"note\":\"Protocol token (outside MIP-0018): the unshielded native token, color 32 zero bytes.\",\"image\":null},{\"id\":\"builtin/DUST\",\"source\":\"builtin\",\"kind\":null,\"kindName\":null,\"color\":null,\"contractAddress\":null,\"domainSep\":null,\"name\":\"DUST\",\"symbol\":\"DUST\",\"decimals\":\"15\",\"described\":false,\"minted\":null,\"firstSeen\":null,\"evidence\":[],\"mark\":null,\"note\":\"Protocol token (outside MIP-0018): the fee resource; it has no color.\",\"image\":null},{\"id\":\"identity/048ec49aacdde9ef2fee1bd51c651df46d3224578e36a1e89bdbb88842edf0f6/1111111111111111111111111111111111111111111111111111111111111111/3\",\"source\":\"identity\",\"kind\":3,\"kindName\":\"contract-token\",\"color\":null,\"contractAddress\":\"048ec49aacdde9ef2fee1bd51c651df46d3224578e36a1e89bdbb88842edf0f6\",\"domainSep\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"name\":\"Acme Token\",\"symbol\":\"ACME\",\"decimals\":\"6\",\"described\":true,\"minted\":null,\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[\"mip-0004\"]},\"note\":null,\"image\":null},{\"id\":\"identity/0ee5f31961f9df197055c49dda8f87275af50c3554ba701ffa1837537735e532/6d69702d303031383a6578616d706c653a736869656c64656400000000000000/1\",\"source\":\"identity\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"be34ef4b78717b031040bf625e04ee033106efae4c766915d3cac2b7fda8f11b\",\"contractAddress\":\"0ee5f31961f9df197055c49dda8f87275af50c3554ba701ffa1837537735e532\",\"domainSep\":\"6d69702d303031383a6578616d706c653a736869656c64656400000000000000\",\"name\":\"Acme Shield\",\"symbol\":\"ASHD\",\"decimals\":\"6\",\"described\":true,\"minted\":{\"firstMint\":{\"height\":714557,\"txIndex\":0,\"txHash\":\"90dbd77e00c6c4dda189488ac7c45420089b43b81a6fff0b845db4a64853dfcd\"},\"mints\":1,\"amount\":\"1000000\",\"amountDisplay\":\"1.000000\"},\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null},{\"id\":\"identity/23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b/1111111111111111111111111111111111111111111111111111111111111111/3\",\"source\":\"identity\",\"kind\":3,\"kindName\":\"contract-token\",\"color\":null,\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"domainSep\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"name\":\"Acme\",\"symbol\":\"ACME\",\"decimals\":\"6\",\"described\":true,\"minted\":null,\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"incorrect\",\"reasons\":[\"no-records\",\"vallen-out-of-bounds\",\"nonzero-padding\",\"nonzero-padding\",\"invalid-utf8\",\"bad-kind\",\"invalid-utf8\",\"invalid-uri\",\"bad-null-length\",\"reserved-valtype\"],\"reasonCount\":10,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null},{\"id\":\"identity/65553c655286664ccb3f69f9313bf725900c46eee2289ae611d18fdf6f90ceb9/1111111111111111111111111111111111111111111111111111111111111111/3\",\"source\":\"identity\",\"kind\":3,\"kindName\":\"contract-token\",\"color\":null,\"contractAddress\":\"65553c655286664ccb3f69f9313bf725900c46eee2289ae611d18fdf6f90ceb9\",\"domainSep\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"name\":\"Good\",\"symbol\":null,\"decimals\":null,\"described\":true,\"minted\":null,\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"incorrect\",\"reasons\":[\"reserved-valtype\"],\"reasonCount\":1,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[\"symbol\",\"decimals\"],\"tags\":[]},\"note\":null,\"image\":null},{\"id\":\"identity/7771c9e53afb45291ae2cecd48b5d55262734b08a98fc8276ed0f980031cd637/953ecfdd939bcb9df7bb4ddb9deeb4ebfa2447563c08f7973576c7ac492f9600/1\",\"source\":\"identity\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"e5afe273bcb1252cfbc81ad6ca1caaafe22312c8c29f9b104a2fe3ead980bb2d\",\"contractAddress\":\"7771c9e53afb45291ae2cecd48b5d55262734b08a98fc8276ed0f980031cd637\",\"domainSep\":\"953ecfdd939bcb9df7bb4ddb9deeb4ebfa2447563c08f7973576c7ac492f9600\",\"name\":null,\"symbol\":null,\"decimals\":null,\"described\":false,\"minted\":{\"firstMint\":{\"height\":714802,\"txIndex\":0,\"txHash\":\"eeb09e684fab8931b36f70de2691758d40f4766840db0979b0fd3e54fb1e6472\"},\"mints\":1,\"amount\":\"1040000\",\"amountDisplay\":null},\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"none\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null},{\"id\":\"identity/86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f/6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000/1\",\"source\":\"identity\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"042399246139df031a4780c684df8eaecd48b7e03a195bfe986cf22766bcbc16\",\"contractAddress\":\"86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f\",\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"name\":\"Acme Dollar\",\"symbol\":\"ACD\",\"decimals\":\"2\",\"described\":true,\"minted\":{\"firstMint\":{\"height\":714643,\"txIndex\":0,\"txHash\":\"395076e79043745ffc02877f90f225a05eaa7437f798996aa1632bf454175ed1\"},\"mints\":1,\"amount\":\"100000\",\"amountDisplay\":\"1000.00\"},\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null},{\"id\":\"identity/86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f/6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000/2\",\"source\":\"identity\",\"kind\":2,\"kindName\":\"unshielded-utxo\",\"color\":\"042399246139df031a4780c684df8eaecd48b7e03a195bfe986cf22766bcbc16\",\"contractAddress\":\"86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f\",\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"name\":\"Acme Dollar\",\"symbol\":\"ACD\",\"decimals\":\"2\",\"described\":true,\"minted\":{\"firstMint\":{\"height\":714649,\"txIndex\":0,\"txHash\":\"7895124817e86946fae9da9865c3d35923e45e587852b8253c6310e37db2f0a7\"},\"mints\":1,\"amount\":\"100000\",\"amountDisplay\":\"1000.00\"},\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null},{\"id\":\"identity/86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f/6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000/3\",\"source\":\"identity\",\"kind\":3,\"kindName\":\"contract-token\",\"color\":null,\"contractAddress\":\"86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f\",\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"name\":\"Acme Dollar\",\"symbol\":\"ACD\",\"decimals\":\"2\",\"described\":true,\"minted\":null,\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null},{\"id\":\"identity/98a90519419e2ebb514b7c6ce87ee7f6f4f9753d9ee6f533c5d1c25b9d437dcf/6d69702d303031383a6578616d706c653a66756e6769626c6500000000000000/3\",\"source\":\"identity\",\"kind\":3,\"kindName\":\"contract-token\",\"color\":null,\"contractAddress\":\"98a90519419e2ebb514b7c6ce87ee7f6f4f9753d9ee6f533c5d1c25b9d437dcf\",\"domainSep\":\"6d69702d303031383a6578616d706c653a66756e6769626c6500000000000000\",\"name\":\"Acme Gold\",\"symbol\":\"AGLD\",\"decimals\":\"6\",\"described\":true,\"minted\":null,\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null},{\"id\":\"identity/9d93b91942530f66f381daf5d9856caf9dfaa24444f0803a6c5d02e8c28040e3/1111111111111111111111111111111111111111111111111111111111111111/3\",\"source\":\"identity\",\"kind\":3,\"kindName\":\"contract-token\",\"color\":null,\"contractAddress\":\"9d93b91942530f66f381daf5d9856caf9dfaa24444f0803a6c5d02e8c28040e3\",\"domainSep\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"name\":\"Acme Again\",\"symbol\":\"ACMA\",\"decimals\":\"6\",\"described\":true,\"minted\":null,\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[\"mip-0004\"]},\"note\":null,\"image\":null},{\"id\":\"identity/a3df52605d8b7210aa3e5cdc82de4bb2911975bc42c1a68be77044723b705f21/6d69702d303031383a6578616d706c653a756e736869656c6465640000000000/2\",\"source\":\"identity\",\"kind\":2,\"kindName\":\"unshielded-utxo\",\"color\":\"8e01e39293a9e21ee2685da06ce487fffafbc1a982d53fcb1a72520f18518484\",\"contractAddress\":\"a3df52605d8b7210aa3e5cdc82de4bb2911975bc42c1a68be77044723b705f21\",\"domainSep\":\"6d69702d303031383a6578616d706c653a756e736869656c6465640000000000\",\"name\":\"Acme Public\",\"symbol\":\"APUB\",\"decimals\":\"6\",\"described\":true,\"minted\":{\"firstMint\":{\"height\":714617,\"txIndex\":0,\"txHash\":\"2ec3accadb3e77a05f0ca29d73ccbe879372d9c31587e109acc5d3076d9a437e\"},\"mints\":1,\"amount\":\"1000000\",\"amountDisplay\":\"1.000000\"},\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null},{\"id\":\"identity/f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6/6d69702d303031383a6578616d706c653a66616d696c793a62726f6e7a650000/1\",\"source\":\"identity\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":null,\"contractAddress\":\"f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6\",\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a62726f6e7a650000\",\"name\":\"Acme Medals\",\"symbol\":\"MEDAL\",\"decimals\":\"0\",\"described\":true,\"minted\":null,\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null},{\"id\":\"identity/f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6/6d69702d303031383a6578616d706c653a66616d696c793a676f6c6400000000/1\",\"source\":\"identity\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"81db4eef83089c5403c6af29d926d57ee6b6359ff7dc291dd19cb4c3e9cf7aa1\",\"contractAddress\":\"f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6\",\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a676f6c6400000000\",\"name\":\"Acme Medals\",\"symbol\":\"MEDAL\",\"decimals\":\"0\",\"described\":true,\"minted\":{\"firstMint\":{\"height\":714683,\"txIndex\":0,\"txHash\":\"bea96f3da8bc4b205f16f03742ebdcfe735fc1c63ca714d4dd2f666480568734\"},\"mints\":1,\"amount\":\"3\",\"amountDisplay\":\"3\"},\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null},{\"id\":\"identity/f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6/6d69702d303031383a6578616d706c653a66616d696c793a73696c7665720000/1\",\"source\":\"identity\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"8c74ec4a937d296f8234a2373812c2df3d962dba06dfe98cda390f9dea38491d\",\"contractAddress\":\"f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6\",\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a73696c7665720000\",\"name\":\"Acme Medals\",\"symbol\":\"MEDAL\",\"decimals\":\"0\",\"described\":true,\"minted\":{\"firstMint\":{\"height\":714689,\"txIndex\":0,\"txHash\":\"b126b3e2f3e00145ae7dbb3a678147f52f72a71ebd940b692db1055d9a8291e1\"},\"mints\":1,\"amount\":\"5\",\"amountDisplay\":\"5\"},\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/tokens?limit=2",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"id\":\"builtin/NIGHT\",\"source\":\"builtin\",\"kind\":null,\"kindName\":null,\"color\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"contractAddress\":null,\"domainSep\":null,\"name\":\"NIGHT\",\"symbol\":\"NIGHT\",\"decimals\":\"6\",\"described\":false,\"minted\":null,\"firstSeen\":null,\"evidence\":[],\"mark\":null,\"note\":\"Protocol token (outside MIP-0018): the unshielded native token, color 32 zero bytes.\",\"image\":null},{\"id\":\"builtin/DUST\",\"source\":\"builtin\",\"kind\":null,\"kindName\":null,\"color\":null,\"contractAddress\":null,\"domainSep\":null,\"name\":\"DUST\",\"symbol\":\"DUST\",\"decimals\":\"15\",\"described\":false,\"minted\":null,\"firstSeen\":null,\"evidence\":[],\"mark\":null,\"note\":\"Protocol token (outside MIP-0018): the fee resource; it has no color.\",\"image\":null}],\"nextCursor\":\"eyJlIjoidG9rZW5zIiwicyI6MCwiayI6WyJEVVNUIl19\"}"
+  },
+  {
+   "path": "/v1/tokens?limit=2&cursor=eyJlIjoidG9rZW5zIiwicyI6MCwiayI6WyJEVVNUIl19",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"id\":\"identity/048ec49aacdde9ef2fee1bd51c651df46d3224578e36a1e89bdbb88842edf0f6/1111111111111111111111111111111111111111111111111111111111111111/3\",\"source\":\"identity\",\"kind\":3,\"kindName\":\"contract-token\",\"color\":null,\"contractAddress\":\"048ec49aacdde9ef2fee1bd51c651df46d3224578e36a1e89bdbb88842edf0f6\",\"domainSep\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"name\":\"Acme Token\",\"symbol\":\"ACME\",\"decimals\":\"6\",\"described\":true,\"minted\":null,\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[\"mip-0004\"]},\"note\":null,\"image\":null},{\"id\":\"identity/0ee5f31961f9df197055c49dda8f87275af50c3554ba701ffa1837537735e532/6d69702d303031383a6578616d706c653a736869656c64656400000000000000/1\",\"source\":\"identity\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"be34ef4b78717b031040bf625e04ee033106efae4c766915d3cac2b7fda8f11b\",\"contractAddress\":\"0ee5f31961f9df197055c49dda8f87275af50c3554ba701ffa1837537735e532\",\"domainSep\":\"6d69702d303031383a6578616d706c653a736869656c64656400000000000000\",\"name\":\"Acme Shield\",\"symbol\":\"ASHD\",\"decimals\":\"6\",\"described\":true,\"minted\":{\"firstMint\":{\"height\":714557,\"txIndex\":0,\"txHash\":\"90dbd77e00c6c4dda189488ac7c45420089b43b81a6fff0b845db4a64853dfcd\"},\"mints\":1,\"amount\":\"1000000\",\"amountDisplay\":\"1.000000\"},\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null}],\"nextCursor\":\"eyJlIjoidG9rZW5zIiwicyI6MSwiayI6WyIwZWU1ZjMxOTYxZjlkZjE5NzA1NWM0OWRkYThmODcyNzVhZjUwYzM1NTRiYTcwMWZmYTE4Mzc1Mzc3MzVlNTMyIiwiNmQ2OTcwMmQzMDMwMzEzODNhNjU3ODYxNmQ3MDZjNjUzYTczNjg2OTY1NmM2NDY1NjQwMDAwMDAwMDAwMDAwMCIsMV19\"}"
+  },
+  {
+   "path": "/v1/tokens?limit=2&cursor=eyJlIjoidG9rZW5zIiwicyI6MSwiayI6WyIwZWU1ZjMxOTYxZjlkZjE5NzA1NWM0OWRkYThmODcyNzVhZjUwYzM1NTRiYTcwMWZmYTE4Mzc1Mzc3MzVlNTMyIiwiNmQ2OTcwMmQzMDMwMzEzODNhNjU3ODYxNmQ3MDZjNjUzYTczNjg2OTY1NmM2NDY1NjQwMDAwMDAwMDAwMDAwMCIsMV19",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"id\":\"identity/23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b/1111111111111111111111111111111111111111111111111111111111111111/3\",\"source\":\"identity\",\"kind\":3,\"kindName\":\"contract-token\",\"color\":null,\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"domainSep\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"name\":\"Acme\",\"symbol\":\"ACME\",\"decimals\":\"6\",\"described\":true,\"minted\":null,\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"incorrect\",\"reasons\":[\"no-records\",\"vallen-out-of-bounds\",\"nonzero-padding\",\"nonzero-padding\",\"invalid-utf8\",\"bad-kind\",\"invalid-utf8\",\"invalid-uri\",\"bad-null-length\",\"reserved-valtype\"],\"reasonCount\":10,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null},{\"id\":\"identity/65553c655286664ccb3f69f9313bf725900c46eee2289ae611d18fdf6f90ceb9/1111111111111111111111111111111111111111111111111111111111111111/3\",\"source\":\"identity\",\"kind\":3,\"kindName\":\"contract-token\",\"color\":null,\"contractAddress\":\"65553c655286664ccb3f69f9313bf725900c46eee2289ae611d18fdf6f90ceb9\",\"domainSep\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"name\":\"Good\",\"symbol\":null,\"decimals\":null,\"described\":true,\"minted\":null,\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"incorrect\",\"reasons\":[\"reserved-valtype\"],\"reasonCount\":1,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[\"symbol\",\"decimals\"],\"tags\":[]},\"note\":null,\"image\":null}],\"nextCursor\":\"eyJlIjoidG9rZW5zIiwicyI6MSwiayI6WyI2NTU1M2M2NTUyODY2NjRjY2IzZjY5ZjkzMTNiZjcyNTkwMGM0NmVlZTIyODlhZTYxMWQxOGZkZjZmOTBjZWI5IiwiMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMSIsM119\"}"
+  },
+  {
+   "path": "/v1/tokens?limit=2&cursor=eyJlIjoidG9rZW5zIiwicyI6MSwiayI6WyI2NTU1M2M2NTUyODY2NjRjY2IzZjY5ZjkzMTNiZjcyNTkwMGM0NmVlZTIyODlhZTYxMWQxOGZkZjZmOTBjZWI5IiwiMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMSIsM119",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"id\":\"identity/7771c9e53afb45291ae2cecd48b5d55262734b08a98fc8276ed0f980031cd637/953ecfdd939bcb9df7bb4ddb9deeb4ebfa2447563c08f7973576c7ac492f9600/1\",\"source\":\"identity\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"e5afe273bcb1252cfbc81ad6ca1caaafe22312c8c29f9b104a2fe3ead980bb2d\",\"contractAddress\":\"7771c9e53afb45291ae2cecd48b5d55262734b08a98fc8276ed0f980031cd637\",\"domainSep\":\"953ecfdd939bcb9df7bb4ddb9deeb4ebfa2447563c08f7973576c7ac492f9600\",\"name\":null,\"symbol\":null,\"decimals\":null,\"described\":false,\"minted\":{\"firstMint\":{\"height\":714802,\"txIndex\":0,\"txHash\":\"eeb09e684fab8931b36f70de2691758d40f4766840db0979b0fd3e54fb1e6472\"},\"mints\":1,\"amount\":\"1040000\",\"amountDisplay\":null},\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"none\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null},{\"id\":\"identity/86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f/6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000/1\",\"source\":\"identity\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"042399246139df031a4780c684df8eaecd48b7e03a195bfe986cf22766bcbc16\",\"contractAddress\":\"86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f\",\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"name\":\"Acme Dollar\",\"symbol\":\"ACD\",\"decimals\":\"2\",\"described\":true,\"minted\":{\"firstMint\":{\"height\":714643,\"txIndex\":0,\"txHash\":\"395076e79043745ffc02877f90f225a05eaa7437f798996aa1632bf454175ed1\"},\"mints\":1,\"amount\":\"100000\",\"amountDisplay\":\"1000.00\"},\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null}],\"nextCursor\":\"eyJlIjoidG9rZW5zIiwicyI6MSwiayI6WyI4NmFjZjgwZmYzODZhYmI2MTBhYWRiZWEwNDA2MDM5ZTdmZTM5ODkzZjQ0MDc5NGMzYzJiYWQ4NmRkNDg1NzBmIiwiNmQ2OTcwMmQzMDMwMzEzODNhNjU3ODYxNmQ3MDZjNjUzYTZkNzU2Yzc0NjkyZDZiNjk2ZTY0MDAwMDAwMDAwMCIsMV19\"}"
+  },
+  {
+   "path": "/v1/tokens?limit=2&cursor=eyJlIjoidG9rZW5zIiwicyI6MSwiayI6WyI4NmFjZjgwZmYzODZhYmI2MTBhYWRiZWEwNDA2MDM5ZTdmZTM5ODkzZjQ0MDc5NGMzYzJiYWQ4NmRkNDg1NzBmIiwiNmQ2OTcwMmQzMDMwMzEzODNhNjU3ODYxNmQ3MDZjNjUzYTZkNzU2Yzc0NjkyZDZiNjk2ZTY0MDAwMDAwMDAwMCIsMV19",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"id\":\"identity/86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f/6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000/2\",\"source\":\"identity\",\"kind\":2,\"kindName\":\"unshielded-utxo\",\"color\":\"042399246139df031a4780c684df8eaecd48b7e03a195bfe986cf22766bcbc16\",\"contractAddress\":\"86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f\",\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"name\":\"Acme Dollar\",\"symbol\":\"ACD\",\"decimals\":\"2\",\"described\":true,\"minted\":{\"firstMint\":{\"height\":714649,\"txIndex\":0,\"txHash\":\"7895124817e86946fae9da9865c3d35923e45e587852b8253c6310e37db2f0a7\"},\"mints\":1,\"amount\":\"100000\",\"amountDisplay\":\"1000.00\"},\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null},{\"id\":\"identity/86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f/6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000/3\",\"source\":\"identity\",\"kind\":3,\"kindName\":\"contract-token\",\"color\":null,\"contractAddress\":\"86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f\",\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"name\":\"Acme Dollar\",\"symbol\":\"ACD\",\"decimals\":\"2\",\"described\":true,\"minted\":null,\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null}],\"nextCursor\":\"eyJlIjoidG9rZW5zIiwicyI6MSwiayI6WyI4NmFjZjgwZmYzODZhYmI2MTBhYWRiZWEwNDA2MDM5ZTdmZTM5ODkzZjQ0MDc5NGMzYzJiYWQ4NmRkNDg1NzBmIiwiNmQ2OTcwMmQzMDMwMzEzODNhNjU3ODYxNmQ3MDZjNjUzYTZkNzU2Yzc0NjkyZDZiNjk2ZTY0MDAwMDAwMDAwMCIsM119\"}"
+  },
+  {
+   "path": "/v1/tokens?limit=2&cursor=eyJlIjoidG9rZW5zIiwicyI6MSwiayI6WyI4NmFjZjgwZmYzODZhYmI2MTBhYWRiZWEwNDA2MDM5ZTdmZTM5ODkzZjQ0MDc5NGMzYzJiYWQ4NmRkNDg1NzBmIiwiNmQ2OTcwMmQzMDMwMzEzODNhNjU3ODYxNmQ3MDZjNjUzYTZkNzU2Yzc0NjkyZDZiNjk2ZTY0MDAwMDAwMDAwMCIsM119",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"id\":\"identity/98a90519419e2ebb514b7c6ce87ee7f6f4f9753d9ee6f533c5d1c25b9d437dcf/6d69702d303031383a6578616d706c653a66756e6769626c6500000000000000/3\",\"source\":\"identity\",\"kind\":3,\"kindName\":\"contract-token\",\"color\":null,\"contractAddress\":\"98a90519419e2ebb514b7c6ce87ee7f6f4f9753d9ee6f533c5d1c25b9d437dcf\",\"domainSep\":\"6d69702d303031383a6578616d706c653a66756e6769626c6500000000000000\",\"name\":\"Acme Gold\",\"symbol\":\"AGLD\",\"decimals\":\"6\",\"described\":true,\"minted\":null,\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null},{\"id\":\"identity/9d93b91942530f66f381daf5d9856caf9dfaa24444f0803a6c5d02e8c28040e3/1111111111111111111111111111111111111111111111111111111111111111/3\",\"source\":\"identity\",\"kind\":3,\"kindName\":\"contract-token\",\"color\":null,\"contractAddress\":\"9d93b91942530f66f381daf5d9856caf9dfaa24444f0803a6c5d02e8c28040e3\",\"domainSep\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"name\":\"Acme Again\",\"symbol\":\"ACMA\",\"decimals\":\"6\",\"described\":true,\"minted\":null,\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[\"mip-0004\"]},\"note\":null,\"image\":null}],\"nextCursor\":\"eyJlIjoidG9rZW5zIiwicyI6MSwiayI6WyI5ZDkzYjkxOTQyNTMwZjY2ZjM4MWRhZjVkOTg1NmNhZjlkZmFhMjQ0NDRmMDgwM2E2YzVkMDJlOGMyODA0MGUzIiwiMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMSIsM119\"}"
+  },
+  {
+   "path": "/v1/tokens?limit=2&cursor=eyJlIjoidG9rZW5zIiwicyI6MSwiayI6WyI5ZDkzYjkxOTQyNTMwZjY2ZjM4MWRhZjVkOTg1NmNhZjlkZmFhMjQ0NDRmMDgwM2E2YzVkMDJlOGMyODA0MGUzIiwiMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMSIsM119",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"id\":\"identity/a3df52605d8b7210aa3e5cdc82de4bb2911975bc42c1a68be77044723b705f21/6d69702d303031383a6578616d706c653a756e736869656c6465640000000000/2\",\"source\":\"identity\",\"kind\":2,\"kindName\":\"unshielded-utxo\",\"color\":\"8e01e39293a9e21ee2685da06ce487fffafbc1a982d53fcb1a72520f18518484\",\"contractAddress\":\"a3df52605d8b7210aa3e5cdc82de4bb2911975bc42c1a68be77044723b705f21\",\"domainSep\":\"6d69702d303031383a6578616d706c653a756e736869656c6465640000000000\",\"name\":\"Acme Public\",\"symbol\":\"APUB\",\"decimals\":\"6\",\"described\":true,\"minted\":{\"firstMint\":{\"height\":714617,\"txIndex\":0,\"txHash\":\"2ec3accadb3e77a05f0ca29d73ccbe879372d9c31587e109acc5d3076d9a437e\"},\"mints\":1,\"amount\":\"1000000\",\"amountDisplay\":\"1.000000\"},\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null},{\"id\":\"identity/f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6/6d69702d303031383a6578616d706c653a66616d696c793a62726f6e7a650000/1\",\"source\":\"identity\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":null,\"contractAddress\":\"f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6\",\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a62726f6e7a650000\",\"name\":\"Acme Medals\",\"symbol\":\"MEDAL\",\"decimals\":\"0\",\"described\":true,\"minted\":null,\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null}],\"nextCursor\":\"eyJlIjoidG9rZW5zIiwicyI6MSwiayI6WyJmMmQxYjZlYmZlYTQ0NmNmMjYyNGNkNDk4ZmM1ODVlZWI4NmRkZGY5NGUzMzIyOWNlNDcxMDcwMzhkMjI1MWQ2IiwiNmQ2OTcwMmQzMDMwMzEzODNhNjU3ODYxNmQ3MDZjNjUzYTY2NjE2ZDY5NmM3OTNhNjI3MjZmNmU3YTY1MDAwMCIsMV19\"}"
+  },
+  {
+   "path": "/v1/tokens?limit=2&cursor=eyJlIjoidG9rZW5zIiwicyI6MSwiayI6WyJmMmQxYjZlYmZlYTQ0NmNmMjYyNGNkNDk4ZmM1ODVlZWI4NmRkZGY5NGUzMzIyOWNlNDcxMDcwMzhkMjI1MWQ2IiwiNmQ2OTcwMmQzMDMwMzEzODNhNjU3ODYxNmQ3MDZjNjUzYTY2NjE2ZDY5NmM3OTNhNjI3MjZmNmU3YTY1MDAwMCIsMV19",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"id\":\"identity/f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6/6d69702d303031383a6578616d706c653a66616d696c793a676f6c6400000000/1\",\"source\":\"identity\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"81db4eef83089c5403c6af29d926d57ee6b6359ff7dc291dd19cb4c3e9cf7aa1\",\"contractAddress\":\"f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6\",\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a676f6c6400000000\",\"name\":\"Acme Medals\",\"symbol\":\"MEDAL\",\"decimals\":\"0\",\"described\":true,\"minted\":{\"firstMint\":{\"height\":714683,\"txIndex\":0,\"txHash\":\"bea96f3da8bc4b205f16f03742ebdcfe735fc1c63ca714d4dd2f666480568734\"},\"mints\":1,\"amount\":\"3\",\"amountDisplay\":\"3\"},\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null},{\"id\":\"identity/f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6/6d69702d303031383a6578616d706c653a66616d696c793a73696c7665720000/1\",\"source\":\"identity\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"8c74ec4a937d296f8234a2373812c2df3d962dba06dfe98cda390f9dea38491d\",\"contractAddress\":\"f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6\",\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a73696c7665720000\",\"name\":\"Acme Medals\",\"symbol\":\"MEDAL\",\"decimals\":\"0\",\"described\":true,\"minted\":{\"firstMint\":{\"height\":714689,\"txIndex\":0,\"txHash\":\"b126b3e2f3e00145ae7dbb3a678147f52f72a71ebd940b692db1055d9a8291e1\"},\"mints\":1,\"amount\":\"5\",\"amountDisplay\":\"5\"},\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/tokens/0000000000000000000000000000000000000000000000000000000000000000",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"color\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"builtin\":{\"symbol\":\"NIGHT\",\"name\":\"NIGHT\",\"decimals\":\"6\",\"color\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"note\":\"Protocol token (outside MIP-0018): the unshielded native token, color 32 zero bytes.\"},\"contractAddress\":null,\"domainSep\":null,\"firstSeen\":null,\"evidence\":[],\"identities\":[],\"related\":[]}"
+  },
+  {
+   "path": "/v1/lookup/0000000000000000000000000000000000000000000000000000000000000000?held=shielded",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"color\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"held\":\"shielded\",\"builtin\":null,\"identity\":null,\"seen\":null,\"indexedRange\":{\"from\":714485,\"to\":715183},\"found\":false,\"result\":\"shielded-zero-color\"}"
+  },
+  {
+   "path": "/v1/lookup/0000000000000000000000000000000000000000000000000000000000000000?held=unshielded",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"color\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"held\":\"unshielded\",\"builtin\":{\"symbol\":\"NIGHT\",\"name\":\"NIGHT\",\"decimals\":\"6\",\"color\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"note\":\"Protocol token (outside MIP-0018): the unshielded native token, color 32 zero bytes.\"},\"identity\":null,\"seen\":null,\"indexedRange\":{\"from\":714485,\"to\":715183},\"found\":true,\"result\":\"builtin\"}"
+  },
+  {
+   "path": "/v1/identities/048ec49aacdde9ef2fee1bd51c651df46d3224578e36a1e89bdbb88842edf0f6/1111111111111111111111111111111111111111111111111111111111111111/3",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"network\":\"stagenet\",\"contractAddress\":\"048ec49aacdde9ef2fee1bd51c651df46d3224578e36a1e89bdbb88842edf0f6\",\"domainSep\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"kind\":3,\"kindName\":\"contract-token\",\"color\":null,\"minted\":null,\"described\":true,\"common\":{\"name\":\"Acme Token\",\"symbol\":\"ACME\",\"decimals\":\"6\",\"standards\":[\"mip-0004\"]},\"commonFields\":[{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d6520546f6b656e\",\"text\":\"Acme Token\"},\"usable\":true,\"updatedAt\":{\"height\":715177,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41434d45\",\"text\":\"ACME\"},\"usable\":true,\"updatedAt\":{\"height\":715177,\"txIndex\":0,\"eventIndex\":0,\"record\":1}},{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"06\",\"integer\":\"6\"},\"usable\":true,\"updatedAt\":{\"height\":715177,\"txIndex\":0,\"eventIndex\":0,\"record\":2}},{\"key\":{\"hex\":\"7374616e6461726473\",\"utf8\":\"standards\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"6d69702d30303034\",\"text\":\"mip-0004\"},\"usable\":true,\"updatedAt\":{\"height\":715177,\"txIndex\":0,\"eventIndex\":0,\"record\":3}}],\"fields\":[{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"06\",\"integer\":\"6\"},\"usable\":true,\"updatedAt\":{\"height\":715177,\"txIndex\":0,\"eventIndex\":0,\"record\":2}},{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d6520546f6b656e\",\"text\":\"Acme Token\"},\"usable\":true,\"updatedAt\":{\"height\":715177,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"7374616e6461726473\",\"utf8\":\"standards\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"6d69702d30303034\",\"text\":\"mip-0004\"},\"usable\":true,\"updatedAt\":{\"height\":715177,\"txIndex\":0,\"eventIndex\":0,\"record\":3}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41434d45\",\"text\":\"ACME\"},\"usable\":true,\"updatedAt\":{\"height\":715177,\"txIndex\":0,\"eventIndex\":0,\"record\":1}}],\"fieldCount\":4,\"fieldsNextCursor\":null,\"group\":null,\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[\"mip-0004\"]},\"image\":null}"
+  },
+  {
+   "path": "/v1/identities/0ee5f31961f9df197055c49dda8f87275af50c3554ba701ffa1837537735e532/6d69702d303031383a6578616d706c653a736869656c64656400000000000000/1",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"network\":\"stagenet\",\"contractAddress\":\"0ee5f31961f9df197055c49dda8f87275af50c3554ba701ffa1837537735e532\",\"domainSep\":\"6d69702d303031383a6578616d706c653a736869656c64656400000000000000\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"be34ef4b78717b031040bf625e04ee033106efae4c766915d3cac2b7fda8f11b\",\"minted\":{\"firstMint\":{\"height\":714557,\"txIndex\":0,\"txHash\":\"90dbd77e00c6c4dda189488ac7c45420089b43b81a6fff0b845db4a64853dfcd\"},\"mints\":1,\"amount\":\"1000000\",\"amountDisplay\":\"1.000000\"},\"described\":true,\"common\":{\"name\":\"Acme Shield\",\"symbol\":\"ASHD\",\"decimals\":\"6\",\"standards\":null},\"commonFields\":[{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d6520536869656c64\",\"text\":\"Acme Shield\"},\"usable\":true,\"updatedAt\":{\"height\":714564,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41534844\",\"text\":\"ASHD\"},\"usable\":true,\"updatedAt\":{\"height\":714564,\"txIndex\":0,\"eventIndex\":0,\"record\":1}},{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"06\",\"integer\":\"6\"},\"usable\":true,\"updatedAt\":{\"height\":714564,\"txIndex\":0,\"eventIndex\":0,\"record\":2}}],\"fields\":[{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"06\",\"integer\":\"6\"},\"usable\":true,\"updatedAt\":{\"height\":714564,\"txIndex\":0,\"eventIndex\":0,\"record\":2}},{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d6520536869656c64\",\"text\":\"Acme Shield\"},\"usable\":true,\"updatedAt\":{\"height\":714564,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41534844\",\"text\":\"ASHD\"},\"usable\":true,\"updatedAt\":{\"height\":714564,\"txIndex\":0,\"eventIndex\":0,\"record\":1}}],\"fieldCount\":3,\"fieldsNextCursor\":null,\"group\":null,\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null}"
+  },
+  {
+   "path": "/v1/tokens/be34ef4b78717b031040bf625e04ee033106efae4c766915d3cac2b7fda8f11b",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"color\":\"be34ef4b78717b031040bf625e04ee033106efae4c766915d3cac2b7fda8f11b\",\"builtin\":null,\"contractAddress\":\"0ee5f31961f9df197055c49dda8f87275af50c3554ba701ffa1837537735e532\",\"domainSep\":\"6d69702d303031383a6578616d706c653a736869656c64656400000000000000\",\"firstSeen\":{\"height\":714557,\"txIndex\":0,\"txHash\":\"90dbd77e00c6c4dda189488ac7c45420089b43b81a6fff0b845db4a64853dfcd\"},\"evidence\":[\"shielded-offer\"],\"identities\":[{\"network\":\"stagenet\",\"contractAddress\":\"0ee5f31961f9df197055c49dda8f87275af50c3554ba701ffa1837537735e532\",\"domainSep\":\"6d69702d303031383a6578616d706c653a736869656c64656400000000000000\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"be34ef4b78717b031040bf625e04ee033106efae4c766915d3cac2b7fda8f11b\",\"minted\":{\"firstMint\":{\"height\":714557,\"txIndex\":0,\"txHash\":\"90dbd77e00c6c4dda189488ac7c45420089b43b81a6fff0b845db4a64853dfcd\"},\"mints\":1,\"amount\":\"1000000\",\"amountDisplay\":\"1.000000\"},\"described\":true,\"common\":{\"name\":\"Acme Shield\",\"symbol\":\"ASHD\",\"decimals\":\"6\",\"standards\":null},\"commonFields\":[{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d6520536869656c64\",\"text\":\"Acme Shield\"},\"usable\":true,\"updatedAt\":{\"height\":714564,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41534844\",\"text\":\"ASHD\"},\"usable\":true,\"updatedAt\":{\"height\":714564,\"txIndex\":0,\"eventIndex\":0,\"record\":1}},{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"06\",\"integer\":\"6\"},\"usable\":true,\"updatedAt\":{\"height\":714564,\"txIndex\":0,\"eventIndex\":0,\"record\":2}}],\"fields\":[{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"06\",\"integer\":\"6\"},\"usable\":true,\"updatedAt\":{\"height\":714564,\"txIndex\":0,\"eventIndex\":0,\"record\":2}},{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d6520536869656c64\",\"text\":\"Acme Shield\"},\"usable\":true,\"updatedAt\":{\"height\":714564,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41534844\",\"text\":\"ASHD\"},\"usable\":true,\"updatedAt\":{\"height\":714564,\"txIndex\":0,\"eventIndex\":0,\"record\":1}}],\"fieldCount\":3,\"fieldsNextCursor\":null,\"group\":null,\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null}],\"related\":[]}"
+  },
+  {
+   "path": "/v1/lookup/be34ef4b78717b031040bf625e04ee033106efae4c766915d3cac2b7fda8f11b?held=shielded",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"color\":\"be34ef4b78717b031040bf625e04ee033106efae4c766915d3cac2b7fda8f11b\",\"held\":\"shielded\",\"builtin\":null,\"identity\":{\"network\":\"stagenet\",\"contractAddress\":\"0ee5f31961f9df197055c49dda8f87275af50c3554ba701ffa1837537735e532\",\"domainSep\":\"6d69702d303031383a6578616d706c653a736869656c64656400000000000000\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"be34ef4b78717b031040bf625e04ee033106efae4c766915d3cac2b7fda8f11b\",\"minted\":{\"firstMint\":{\"height\":714557,\"txIndex\":0,\"txHash\":\"90dbd77e00c6c4dda189488ac7c45420089b43b81a6fff0b845db4a64853dfcd\"},\"mints\":1,\"amount\":\"1000000\",\"amountDisplay\":\"1.000000\"},\"described\":true,\"common\":{\"name\":\"Acme Shield\",\"symbol\":\"ASHD\",\"decimals\":\"6\",\"standards\":null},\"commonFields\":[{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d6520536869656c64\",\"text\":\"Acme Shield\"},\"usable\":true,\"updatedAt\":{\"height\":714564,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41534844\",\"text\":\"ASHD\"},\"usable\":true,\"updatedAt\":{\"height\":714564,\"txIndex\":0,\"eventIndex\":0,\"record\":1}},{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"06\",\"integer\":\"6\"},\"usable\":true,\"updatedAt\":{\"height\":714564,\"txIndex\":0,\"eventIndex\":0,\"record\":2}}],\"fields\":[{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"06\",\"integer\":\"6\"},\"usable\":true,\"updatedAt\":{\"height\":714564,\"txIndex\":0,\"eventIndex\":0,\"record\":2}},{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d6520536869656c64\",\"text\":\"Acme Shield\"},\"usable\":true,\"updatedAt\":{\"height\":714564,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41534844\",\"text\":\"ASHD\"},\"usable\":true,\"updatedAt\":{\"height\":714564,\"txIndex\":0,\"eventIndex\":0,\"record\":1}}],\"fieldCount\":3,\"fieldsNextCursor\":null,\"group\":null,\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null},\"seen\":null,\"indexedRange\":{\"from\":714485,\"to\":715183},\"found\":true,\"result\":\"identity\"}"
+  },
+  {
+   "path": "/v1/lookup/be34ef4b78717b031040bf625e04ee033106efae4c766915d3cac2b7fda8f11b?held=unshielded",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"color\":\"be34ef4b78717b031040bf625e04ee033106efae4c766915d3cac2b7fda8f11b\",\"held\":\"unshielded\",\"builtin\":null,\"identity\":{\"network\":\"stagenet\",\"contractAddress\":\"0ee5f31961f9df197055c49dda8f87275af50c3554ba701ffa1837537735e532\",\"domainSep\":\"6d69702d303031383a6578616d706c653a736869656c64656400000000000000\",\"kind\":2,\"kindName\":\"unshielded-utxo\",\"color\":\"be34ef4b78717b031040bf625e04ee033106efae4c766915d3cac2b7fda8f11b\",\"minted\":null,\"described\":false,\"common\":{\"name\":null,\"symbol\":null,\"decimals\":null,\"standards\":null},\"commonFields\":[],\"fields\":[],\"fieldCount\":0,\"fieldsNextCursor\":null,\"group\":null,\"mark\":{\"mark\":\"none\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null},\"seen\":null,\"indexedRange\":{\"from\":714485,\"to\":715183},\"found\":true,\"result\":\"identity\"}"
+  },
+  {
+   "path": "/v1/identities/23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b/1111111111111111111111111111111111111111111111111111111111111111/3",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"network\":\"stagenet\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"domainSep\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"kind\":3,\"kindName\":\"contract-token\",\"color\":null,\"minted\":null,\"described\":true,\"common\":{\"name\":\"Acme\",\"symbol\":\"ACME\",\"decimals\":\"6\",\"standards\":null},\"commonFields\":[{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41434d45\",\"text\":\"ACME\"},\"usable\":true,\"updatedAt\":{\"height\":714923,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"06000000000000000000000000000000\",\"integer\":\"6\"},\"usable\":true,\"updatedAt\":{\"height\":714972,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d65\",\"text\":\"Acme\"},\"usable\":true,\"updatedAt\":{\"height\":715019,\"txIndex\":0,\"eventIndex\":0,\"record\":0}}],\"fields\":[{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"06000000000000000000000000000000\",\"integer\":\"6\"},\"usable\":true,\"updatedAt\":{\"height\":714972,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d65\",\"text\":\"Acme\"},\"usable\":true,\"updatedAt\":{\"height\":715019,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41434d45\",\"text\":\"ACME\"},\"usable\":true,\"updatedAt\":{\"height\":714923,\"txIndex\":0,\"eventIndex\":0,\"record\":0}}],\"fieldCount\":3,\"fieldsNextCursor\":null,\"group\":null,\"mark\":{\"mark\":\"incorrect\",\"reasons\":[\"no-records\",\"vallen-out-of-bounds\",\"nonzero-padding\",\"nonzero-padding\",\"invalid-utf8\",\"bad-kind\",\"invalid-utf8\",\"invalid-uri\",\"bad-null-length\",\"reserved-valtype\"],\"reasonCount\":10,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null}"
+  },
+  {
+   "path": "/v1/identities/65553c655286664ccb3f69f9313bf725900c46eee2289ae611d18fdf6f90ceb9/1111111111111111111111111111111111111111111111111111111111111111/3",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"network\":\"stagenet\",\"contractAddress\":\"65553c655286664ccb3f69f9313bf725900c46eee2289ae611d18fdf6f90ceb9\",\"domainSep\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"kind\":3,\"kindName\":\"contract-token\",\"color\":null,\"minted\":null,\"described\":true,\"common\":{\"name\":\"Good\",\"symbol\":null,\"decimals\":null,\"standards\":null},\"commonFields\":[{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"476f6f64\",\"text\":\"Good\"},\"usable\":true,\"updatedAt\":{\"height\":715109,\"txIndex\":0,\"eventIndex\":0,\"record\":0}}],\"fields\":[{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"476f6f64\",\"text\":\"Good\"},\"usable\":true,\"updatedAt\":{\"height\":715109,\"txIndex\":0,\"eventIndex\":0,\"record\":0}}],\"fieldCount\":1,\"fieldsNextCursor\":null,\"group\":null,\"mark\":{\"mark\":\"incorrect\",\"reasons\":[\"reserved-valtype\"],\"reasonCount\":1,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[\"symbol\",\"decimals\"],\"tags\":[]},\"image\":null}"
+  },
+  {
+   "path": "/v1/identities/7771c9e53afb45291ae2cecd48b5d55262734b08a98fc8276ed0f980031cd637/953ecfdd939bcb9df7bb4ddb9deeb4ebfa2447563c08f7973576c7ac492f9600/1",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"network\":\"stagenet\",\"contractAddress\":\"7771c9e53afb45291ae2cecd48b5d55262734b08a98fc8276ed0f980031cd637\",\"domainSep\":\"953ecfdd939bcb9df7bb4ddb9deeb4ebfa2447563c08f7973576c7ac492f9600\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"e5afe273bcb1252cfbc81ad6ca1caaafe22312c8c29f9b104a2fe3ead980bb2d\",\"minted\":{\"firstMint\":{\"height\":714802,\"txIndex\":0,\"txHash\":\"eeb09e684fab8931b36f70de2691758d40f4766840db0979b0fd3e54fb1e6472\"},\"mints\":1,\"amount\":\"1040000\",\"amountDisplay\":null},\"described\":false,\"common\":{\"name\":null,\"symbol\":null,\"decimals\":null,\"standards\":null},\"commonFields\":[],\"fields\":[],\"fieldCount\":0,\"fieldsNextCursor\":null,\"group\":null,\"mark\":{\"mark\":\"none\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null}"
+  },
+  {
+   "path": "/v1/tokens/e5afe273bcb1252cfbc81ad6ca1caaafe22312c8c29f9b104a2fe3ead980bb2d",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"color\":\"e5afe273bcb1252cfbc81ad6ca1caaafe22312c8c29f9b104a2fe3ead980bb2d\",\"builtin\":null,\"contractAddress\":\"7771c9e53afb45291ae2cecd48b5d55262734b08a98fc8276ed0f980031cd637\",\"domainSep\":\"953ecfdd939bcb9df7bb4ddb9deeb4ebfa2447563c08f7973576c7ac492f9600\",\"firstSeen\":{\"height\":714802,\"txIndex\":0,\"txHash\":\"eeb09e684fab8931b36f70de2691758d40f4766840db0979b0fd3e54fb1e6472\"},\"evidence\":[\"shielded-offer\"],\"identities\":[{\"network\":\"stagenet\",\"contractAddress\":\"7771c9e53afb45291ae2cecd48b5d55262734b08a98fc8276ed0f980031cd637\",\"domainSep\":\"953ecfdd939bcb9df7bb4ddb9deeb4ebfa2447563c08f7973576c7ac492f9600\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"e5afe273bcb1252cfbc81ad6ca1caaafe22312c8c29f9b104a2fe3ead980bb2d\",\"minted\":{\"firstMint\":{\"height\":714802,\"txIndex\":0,\"txHash\":\"eeb09e684fab8931b36f70de2691758d40f4766840db0979b0fd3e54fb1e6472\"},\"mints\":1,\"amount\":\"1040000\",\"amountDisplay\":null},\"described\":false,\"common\":{\"name\":null,\"symbol\":null,\"decimals\":null,\"standards\":null},\"commonFields\":[],\"fields\":[],\"fieldCount\":0,\"fieldsNextCursor\":null,\"group\":null,\"mark\":{\"mark\":\"none\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null}],\"related\":[]}"
+  },
+  {
+   "path": "/v1/lookup/e5afe273bcb1252cfbc81ad6ca1caaafe22312c8c29f9b104a2fe3ead980bb2d?held=shielded",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"color\":\"e5afe273bcb1252cfbc81ad6ca1caaafe22312c8c29f9b104a2fe3ead980bb2d\",\"held\":\"shielded\",\"builtin\":null,\"identity\":{\"network\":\"stagenet\",\"contractAddress\":\"7771c9e53afb45291ae2cecd48b5d55262734b08a98fc8276ed0f980031cd637\",\"domainSep\":\"953ecfdd939bcb9df7bb4ddb9deeb4ebfa2447563c08f7973576c7ac492f9600\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"e5afe273bcb1252cfbc81ad6ca1caaafe22312c8c29f9b104a2fe3ead980bb2d\",\"minted\":{\"firstMint\":{\"height\":714802,\"txIndex\":0,\"txHash\":\"eeb09e684fab8931b36f70de2691758d40f4766840db0979b0fd3e54fb1e6472\"},\"mints\":1,\"amount\":\"1040000\",\"amountDisplay\":null},\"described\":false,\"common\":{\"name\":null,\"symbol\":null,\"decimals\":null,\"standards\":null},\"commonFields\":[],\"fields\":[],\"fieldCount\":0,\"fieldsNextCursor\":null,\"group\":null,\"mark\":{\"mark\":\"none\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null},\"seen\":null,\"indexedRange\":{\"from\":714485,\"to\":715183},\"found\":true,\"result\":\"identity\"}"
+  },
+  {
+   "path": "/v1/lookup/e5afe273bcb1252cfbc81ad6ca1caaafe22312c8c29f9b104a2fe3ead980bb2d?held=unshielded",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"color\":\"e5afe273bcb1252cfbc81ad6ca1caaafe22312c8c29f9b104a2fe3ead980bb2d\",\"held\":\"unshielded\",\"builtin\":null,\"identity\":{\"network\":\"stagenet\",\"contractAddress\":\"7771c9e53afb45291ae2cecd48b5d55262734b08a98fc8276ed0f980031cd637\",\"domainSep\":\"953ecfdd939bcb9df7bb4ddb9deeb4ebfa2447563c08f7973576c7ac492f9600\",\"kind\":2,\"kindName\":\"unshielded-utxo\",\"color\":\"e5afe273bcb1252cfbc81ad6ca1caaafe22312c8c29f9b104a2fe3ead980bb2d\",\"minted\":null,\"described\":false,\"common\":{\"name\":null,\"symbol\":null,\"decimals\":null,\"standards\":null},\"commonFields\":[],\"fields\":[],\"fieldCount\":0,\"fieldsNextCursor\":null,\"group\":null,\"mark\":{\"mark\":\"none\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null},\"seen\":null,\"indexedRange\":{\"from\":714485,\"to\":715183},\"found\":true,\"result\":\"identity\"}"
+  },
+  {
+   "path": "/v1/identities/86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f/6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000/1",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"network\":\"stagenet\",\"contractAddress\":\"86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f\",\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"042399246139df031a4780c684df8eaecd48b7e03a195bfe986cf22766bcbc16\",\"minted\":{\"firstMint\":{\"height\":714643,\"txIndex\":0,\"txHash\":\"395076e79043745ffc02877f90f225a05eaa7437f798996aa1632bf454175ed1\"},\"mints\":1,\"amount\":\"100000\",\"amountDisplay\":\"1000.00\"},\"described\":true,\"common\":{\"name\":\"Acme Dollar\",\"symbol\":\"ACD\",\"decimals\":\"2\",\"standards\":null},\"commonFields\":[{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d6520446f6c6c6172\",\"text\":\"Acme Dollar\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"414344\",\"text\":\"ACD\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":0,\"record\":1}},{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"02\",\"integer\":\"2\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":0,\"record\":2}}],\"fields\":[{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"02\",\"integer\":\"2\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":0,\"record\":2}},{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d6520446f6c6c6172\",\"text\":\"Acme Dollar\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"414344\",\"text\":\"ACD\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":0,\"record\":1}}],\"fieldCount\":3,\"fieldsNextCursor\":null,\"group\":{\"symbol\":{\"hex\":\"414344\",\"utf8\":\"ACD\"},\"memberCount\":3,\"members\":[{\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":1},{\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":2},{\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":3}]},\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null}"
+  },
+  {
+   "path": "/v1/tokens/042399246139df031a4780c684df8eaecd48b7e03a195bfe986cf22766bcbc16",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"color\":\"042399246139df031a4780c684df8eaecd48b7e03a195bfe986cf22766bcbc16\",\"builtin\":null,\"contractAddress\":\"86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f\",\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"firstSeen\":{\"height\":714643,\"txIndex\":0,\"txHash\":\"395076e79043745ffc02877f90f225a05eaa7437f798996aa1632bf454175ed1\"},\"evidence\":[\"contract-unshielded\",\"shielded-offer\",\"unshielded-utxo\"],\"identities\":[{\"network\":\"stagenet\",\"contractAddress\":\"86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f\",\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"042399246139df031a4780c684df8eaecd48b7e03a195bfe986cf22766bcbc16\",\"minted\":{\"firstMint\":{\"height\":714643,\"txIndex\":0,\"txHash\":\"395076e79043745ffc02877f90f225a05eaa7437f798996aa1632bf454175ed1\"},\"mints\":1,\"amount\":\"100000\",\"amountDisplay\":\"1000.00\"},\"described\":true,\"common\":{\"name\":\"Acme Dollar\",\"symbol\":\"ACD\",\"decimals\":\"2\",\"standards\":null},\"commonFields\":[{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d6520446f6c6c6172\",\"text\":\"Acme Dollar\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"414344\",\"text\":\"ACD\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":0,\"record\":1}},{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"02\",\"integer\":\"2\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":0,\"record\":2}}],\"fields\":[{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"02\",\"integer\":\"2\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":0,\"record\":2}},{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d6520446f6c6c6172\",\"text\":\"Acme Dollar\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"414344\",\"text\":\"ACD\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":0,\"record\":1}}],\"fieldCount\":3,\"fieldsNextCursor\":null,\"group\":{\"symbol\":{\"hex\":\"414344\",\"utf8\":\"ACD\"},\"memberCount\":3,\"members\":[{\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":1},{\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":2},{\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":3}]},\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null},{\"network\":\"stagenet\",\"contractAddress\":\"86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f\",\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":2,\"kindName\":\"unshielded-utxo\",\"color\":\"042399246139df031a4780c684df8eaecd48b7e03a195bfe986cf22766bcbc16\",\"minted\":{\"firstMint\":{\"height\":714649,\"txIndex\":0,\"txHash\":\"7895124817e86946fae9da9865c3d35923e45e587852b8253c6310e37db2f0a7\"},\"mints\":1,\"amount\":\"100000\",\"amountDisplay\":\"1000.00\"},\"described\":true,\"common\":{\"name\":\"Acme Dollar\",\"symbol\":\"ACD\",\"decimals\":\"2\",\"standards\":null},\"commonFields\":[{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d6520446f6c6c6172\",\"text\":\"Acme Dollar\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":1,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"414344\",\"text\":\"ACD\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":1,\"record\":1}},{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"02\",\"integer\":\"2\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":1,\"record\":2}}],\"fields\":[{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"02\",\"integer\":\"2\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":1,\"record\":2}},{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d6520446f6c6c6172\",\"text\":\"Acme Dollar\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":1,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"414344\",\"text\":\"ACD\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":1,\"record\":1}}],\"fieldCount\":3,\"fieldsNextCursor\":null,\"group\":{\"symbol\":{\"hex\":\"414344\",\"utf8\":\"ACD\"},\"memberCount\":3,\"members\":[{\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":1},{\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":2},{\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":3}]},\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null}],\"related\":[{\"contractAddress\":\"86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f\",\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":3}]}"
+  },
+  {
+   "path": "/v1/lookup/042399246139df031a4780c684df8eaecd48b7e03a195bfe986cf22766bcbc16?held=shielded",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"color\":\"042399246139df031a4780c684df8eaecd48b7e03a195bfe986cf22766bcbc16\",\"held\":\"shielded\",\"builtin\":null,\"identity\":{\"network\":\"stagenet\",\"contractAddress\":\"86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f\",\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"042399246139df031a4780c684df8eaecd48b7e03a195bfe986cf22766bcbc16\",\"minted\":{\"firstMint\":{\"height\":714643,\"txIndex\":0,\"txHash\":\"395076e79043745ffc02877f90f225a05eaa7437f798996aa1632bf454175ed1\"},\"mints\":1,\"amount\":\"100000\",\"amountDisplay\":\"1000.00\"},\"described\":true,\"common\":{\"name\":\"Acme Dollar\",\"symbol\":\"ACD\",\"decimals\":\"2\",\"standards\":null},\"commonFields\":[{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d6520446f6c6c6172\",\"text\":\"Acme Dollar\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"414344\",\"text\":\"ACD\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":0,\"record\":1}},{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"02\",\"integer\":\"2\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":0,\"record\":2}}],\"fields\":[{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"02\",\"integer\":\"2\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":0,\"record\":2}},{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d6520446f6c6c6172\",\"text\":\"Acme Dollar\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"414344\",\"text\":\"ACD\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":0,\"record\":1}}],\"fieldCount\":3,\"fieldsNextCursor\":null,\"group\":{\"symbol\":{\"hex\":\"414344\",\"utf8\":\"ACD\"},\"memberCount\":3,\"members\":[{\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":1},{\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":2},{\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":3}]},\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null},\"seen\":null,\"indexedRange\":{\"from\":714485,\"to\":715183},\"found\":true,\"result\":\"identity\"}"
+  },
+  {
+   "path": "/v1/lookup/042399246139df031a4780c684df8eaecd48b7e03a195bfe986cf22766bcbc16?held=unshielded",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"color\":\"042399246139df031a4780c684df8eaecd48b7e03a195bfe986cf22766bcbc16\",\"held\":\"unshielded\",\"builtin\":null,\"identity\":{\"network\":\"stagenet\",\"contractAddress\":\"86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f\",\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":2,\"kindName\":\"unshielded-utxo\",\"color\":\"042399246139df031a4780c684df8eaecd48b7e03a195bfe986cf22766bcbc16\",\"minted\":{\"firstMint\":{\"height\":714649,\"txIndex\":0,\"txHash\":\"7895124817e86946fae9da9865c3d35923e45e587852b8253c6310e37db2f0a7\"},\"mints\":1,\"amount\":\"100000\",\"amountDisplay\":\"1000.00\"},\"described\":true,\"common\":{\"name\":\"Acme Dollar\",\"symbol\":\"ACD\",\"decimals\":\"2\",\"standards\":null},\"commonFields\":[{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d6520446f6c6c6172\",\"text\":\"Acme Dollar\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":1,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"414344\",\"text\":\"ACD\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":1,\"record\":1}},{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"02\",\"integer\":\"2\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":1,\"record\":2}}],\"fields\":[{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"02\",\"integer\":\"2\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":1,\"record\":2}},{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d6520446f6c6c6172\",\"text\":\"Acme Dollar\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":1,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"414344\",\"text\":\"ACD\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":1,\"record\":1}}],\"fieldCount\":3,\"fieldsNextCursor\":null,\"group\":{\"symbol\":{\"hex\":\"414344\",\"utf8\":\"ACD\"},\"memberCount\":3,\"members\":[{\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":1},{\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":2},{\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":3}]},\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null},\"seen\":null,\"indexedRange\":{\"from\":714485,\"to\":715183},\"found\":true,\"result\":\"identity\"}"
+  },
+  {
+   "path": "/v1/identities/86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f/6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000/2",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"network\":\"stagenet\",\"contractAddress\":\"86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f\",\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":2,\"kindName\":\"unshielded-utxo\",\"color\":\"042399246139df031a4780c684df8eaecd48b7e03a195bfe986cf22766bcbc16\",\"minted\":{\"firstMint\":{\"height\":714649,\"txIndex\":0,\"txHash\":\"7895124817e86946fae9da9865c3d35923e45e587852b8253c6310e37db2f0a7\"},\"mints\":1,\"amount\":\"100000\",\"amountDisplay\":\"1000.00\"},\"described\":true,\"common\":{\"name\":\"Acme Dollar\",\"symbol\":\"ACD\",\"decimals\":\"2\",\"standards\":null},\"commonFields\":[{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d6520446f6c6c6172\",\"text\":\"Acme Dollar\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":1,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"414344\",\"text\":\"ACD\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":1,\"record\":1}},{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"02\",\"integer\":\"2\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":1,\"record\":2}}],\"fields\":[{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"02\",\"integer\":\"2\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":1,\"record\":2}},{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d6520446f6c6c6172\",\"text\":\"Acme Dollar\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":1,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"414344\",\"text\":\"ACD\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":1,\"record\":1}}],\"fieldCount\":3,\"fieldsNextCursor\":null,\"group\":{\"symbol\":{\"hex\":\"414344\",\"utf8\":\"ACD\"},\"memberCount\":3,\"members\":[{\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":1},{\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":2},{\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":3}]},\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null}"
+  },
+  {
+   "path": "/v1/identities/86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f/6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000/3",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"network\":\"stagenet\",\"contractAddress\":\"86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f\",\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":3,\"kindName\":\"contract-token\",\"color\":null,\"minted\":null,\"described\":true,\"common\":{\"name\":\"Acme Dollar\",\"symbol\":\"ACD\",\"decimals\":\"2\",\"standards\":null},\"commonFields\":[{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d6520446f6c6c6172\",\"text\":\"Acme Dollar\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":2,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"414344\",\"text\":\"ACD\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":2,\"record\":1}},{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"02\",\"integer\":\"2\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":2,\"record\":2}}],\"fields\":[{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"02\",\"integer\":\"2\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":2,\"record\":2}},{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d6520446f6c6c6172\",\"text\":\"Acme Dollar\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":2,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"414344\",\"text\":\"ACD\"},\"usable\":true,\"updatedAt\":{\"height\":714663,\"txIndex\":0,\"eventIndex\":2,\"record\":1}}],\"fieldCount\":3,\"fieldsNextCursor\":null,\"group\":{\"symbol\":{\"hex\":\"414344\",\"utf8\":\"ACD\"},\"memberCount\":3,\"members\":[{\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":1},{\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":2},{\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":3}]},\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null}"
+  },
+  {
+   "path": "/v1/identities/98a90519419e2ebb514b7c6ce87ee7f6f4f9753d9ee6f533c5d1c25b9d437dcf/6d69702d303031383a6578616d706c653a66756e6769626c6500000000000000/3",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"network\":\"stagenet\",\"contractAddress\":\"98a90519419e2ebb514b7c6ce87ee7f6f4f9753d9ee6f533c5d1c25b9d437dcf\",\"domainSep\":\"6d69702d303031383a6578616d706c653a66756e6769626c6500000000000000\",\"kind\":3,\"kindName\":\"contract-token\",\"color\":null,\"minted\":null,\"described\":true,\"common\":{\"name\":\"Acme Gold\",\"symbol\":\"AGLD\",\"decimals\":\"6\",\"standards\":null},\"commonFields\":[{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d6520476f6c64\",\"text\":\"Acme Gold\"},\"usable\":true,\"updatedAt\":{\"height\":714501,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41474c44\",\"text\":\"AGLD\"},\"usable\":true,\"updatedAt\":{\"height\":714501,\"txIndex\":0,\"eventIndex\":0,\"record\":1}},{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"06\",\"integer\":\"6\"},\"usable\":true,\"updatedAt\":{\"height\":714501,\"txIndex\":0,\"eventIndex\":0,\"record\":2}}],\"fields\":[{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"06\",\"integer\":\"6\"},\"usable\":true,\"updatedAt\":{\"height\":714501,\"txIndex\":0,\"eventIndex\":0,\"record\":2}},{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d6520476f6c64\",\"text\":\"Acme Gold\"},\"usable\":true,\"updatedAt\":{\"height\":714501,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41474c44\",\"text\":\"AGLD\"},\"usable\":true,\"updatedAt\":{\"height\":714501,\"txIndex\":0,\"eventIndex\":0,\"record\":1}}],\"fieldCount\":3,\"fieldsNextCursor\":null,\"group\":null,\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null}"
+  },
+  {
+   "path": "/v1/identities/9d93b91942530f66f381daf5d9856caf9dfaa24444f0803a6c5d02e8c28040e3/1111111111111111111111111111111111111111111111111111111111111111/3",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"network\":\"stagenet\",\"contractAddress\":\"9d93b91942530f66f381daf5d9856caf9dfaa24444f0803a6c5d02e8c28040e3\",\"domainSep\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"kind\":3,\"kindName\":\"contract-token\",\"color\":null,\"minted\":null,\"described\":true,\"common\":{\"name\":\"Acme Again\",\"symbol\":\"ACMA\",\"decimals\":\"6\",\"standards\":[\"mip-0004\"]},\"commonFields\":[{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"06\",\"integer\":\"6\"},\"usable\":true,\"updatedAt\":{\"height\":714796,\"txIndex\":0,\"eventIndex\":0,\"record\":2}},{\"key\":{\"hex\":\"7374616e6461726473\",\"utf8\":\"standards\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"6d69702d30303034\",\"text\":\"mip-0004\"},\"usable\":true,\"updatedAt\":{\"height\":714796,\"txIndex\":0,\"eventIndex\":0,\"record\":3}},{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d6520416761696e\",\"text\":\"Acme Again\"},\"usable\":true,\"updatedAt\":{\"height\":714835,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41434d41\",\"text\":\"ACMA\"},\"usable\":true,\"updatedAt\":{\"height\":714835,\"txIndex\":0,\"eventIndex\":0,\"record\":1}}],\"fields\":[{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"06\",\"integer\":\"6\"},\"usable\":true,\"updatedAt\":{\"height\":714796,\"txIndex\":0,\"eventIndex\":0,\"record\":2}},{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d6520416761696e\",\"text\":\"Acme Again\"},\"usable\":true,\"updatedAt\":{\"height\":714835,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"7374616e6461726473\",\"utf8\":\"standards\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"6d69702d30303034\",\"text\":\"mip-0004\"},\"usable\":true,\"updatedAt\":{\"height\":714796,\"txIndex\":0,\"eventIndex\":0,\"record\":3}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41434d41\",\"text\":\"ACMA\"},\"usable\":true,\"updatedAt\":{\"height\":714835,\"txIndex\":0,\"eventIndex\":0,\"record\":1}}],\"fieldCount\":4,\"fieldsNextCursor\":null,\"group\":null,\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[\"mip-0004\"]},\"image\":null}"
+  },
+  {
+   "path": "/v1/identities/a3df52605d8b7210aa3e5cdc82de4bb2911975bc42c1a68be77044723b705f21/6d69702d303031383a6578616d706c653a756e736869656c6465640000000000/2",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"network\":\"stagenet\",\"contractAddress\":\"a3df52605d8b7210aa3e5cdc82de4bb2911975bc42c1a68be77044723b705f21\",\"domainSep\":\"6d69702d303031383a6578616d706c653a756e736869656c6465640000000000\",\"kind\":2,\"kindName\":\"unshielded-utxo\",\"color\":\"8e01e39293a9e21ee2685da06ce487fffafbc1a982d53fcb1a72520f18518484\",\"minted\":{\"firstMint\":{\"height\":714617,\"txIndex\":0,\"txHash\":\"2ec3accadb3e77a05f0ca29d73ccbe879372d9c31587e109acc5d3076d9a437e\"},\"mints\":1,\"amount\":\"1000000\",\"amountDisplay\":\"1.000000\"},\"described\":true,\"common\":{\"name\":\"Acme Public\",\"symbol\":\"APUB\",\"decimals\":\"6\",\"standards\":null},\"commonFields\":[{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d65205075626c6963\",\"text\":\"Acme Public\"},\"usable\":true,\"updatedAt\":{\"height\":714624,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41505542\",\"text\":\"APUB\"},\"usable\":true,\"updatedAt\":{\"height\":714624,\"txIndex\":0,\"eventIndex\":0,\"record\":1}},{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"06\",\"integer\":\"6\"},\"usable\":true,\"updatedAt\":{\"height\":714624,\"txIndex\":0,\"eventIndex\":0,\"record\":2}}],\"fields\":[{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"06\",\"integer\":\"6\"},\"usable\":true,\"updatedAt\":{\"height\":714624,\"txIndex\":0,\"eventIndex\":0,\"record\":2}},{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d65205075626c6963\",\"text\":\"Acme Public\"},\"usable\":true,\"updatedAt\":{\"height\":714624,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41505542\",\"text\":\"APUB\"},\"usable\":true,\"updatedAt\":{\"height\":714624,\"txIndex\":0,\"eventIndex\":0,\"record\":1}}],\"fieldCount\":3,\"fieldsNextCursor\":null,\"group\":null,\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null}"
+  },
+  {
+   "path": "/v1/tokens/8e01e39293a9e21ee2685da06ce487fffafbc1a982d53fcb1a72520f18518484",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"color\":\"8e01e39293a9e21ee2685da06ce487fffafbc1a982d53fcb1a72520f18518484\",\"builtin\":null,\"contractAddress\":\"a3df52605d8b7210aa3e5cdc82de4bb2911975bc42c1a68be77044723b705f21\",\"domainSep\":\"6d69702d303031383a6578616d706c653a756e736869656c6465640000000000\",\"firstSeen\":{\"height\":714617,\"txIndex\":0,\"txHash\":\"2ec3accadb3e77a05f0ca29d73ccbe879372d9c31587e109acc5d3076d9a437e\"},\"evidence\":[\"contract-unshielded\",\"unshielded-utxo\"],\"identities\":[{\"network\":\"stagenet\",\"contractAddress\":\"a3df52605d8b7210aa3e5cdc82de4bb2911975bc42c1a68be77044723b705f21\",\"domainSep\":\"6d69702d303031383a6578616d706c653a756e736869656c6465640000000000\",\"kind\":2,\"kindName\":\"unshielded-utxo\",\"color\":\"8e01e39293a9e21ee2685da06ce487fffafbc1a982d53fcb1a72520f18518484\",\"minted\":{\"firstMint\":{\"height\":714617,\"txIndex\":0,\"txHash\":\"2ec3accadb3e77a05f0ca29d73ccbe879372d9c31587e109acc5d3076d9a437e\"},\"mints\":1,\"amount\":\"1000000\",\"amountDisplay\":\"1.000000\"},\"described\":true,\"common\":{\"name\":\"Acme Public\",\"symbol\":\"APUB\",\"decimals\":\"6\",\"standards\":null},\"commonFields\":[{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d65205075626c6963\",\"text\":\"Acme Public\"},\"usable\":true,\"updatedAt\":{\"height\":714624,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41505542\",\"text\":\"APUB\"},\"usable\":true,\"updatedAt\":{\"height\":714624,\"txIndex\":0,\"eventIndex\":0,\"record\":1}},{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"06\",\"integer\":\"6\"},\"usable\":true,\"updatedAt\":{\"height\":714624,\"txIndex\":0,\"eventIndex\":0,\"record\":2}}],\"fields\":[{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"06\",\"integer\":\"6\"},\"usable\":true,\"updatedAt\":{\"height\":714624,\"txIndex\":0,\"eventIndex\":0,\"record\":2}},{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d65205075626c6963\",\"text\":\"Acme Public\"},\"usable\":true,\"updatedAt\":{\"height\":714624,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41505542\",\"text\":\"APUB\"},\"usable\":true,\"updatedAt\":{\"height\":714624,\"txIndex\":0,\"eventIndex\":0,\"record\":1}}],\"fieldCount\":3,\"fieldsNextCursor\":null,\"group\":null,\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null}],\"related\":[]}"
+  },
+  {
+   "path": "/v1/lookup/8e01e39293a9e21ee2685da06ce487fffafbc1a982d53fcb1a72520f18518484?held=shielded",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"color\":\"8e01e39293a9e21ee2685da06ce487fffafbc1a982d53fcb1a72520f18518484\",\"held\":\"shielded\",\"builtin\":null,\"identity\":{\"network\":\"stagenet\",\"contractAddress\":\"a3df52605d8b7210aa3e5cdc82de4bb2911975bc42c1a68be77044723b705f21\",\"domainSep\":\"6d69702d303031383a6578616d706c653a756e736869656c6465640000000000\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"8e01e39293a9e21ee2685da06ce487fffafbc1a982d53fcb1a72520f18518484\",\"minted\":null,\"described\":false,\"common\":{\"name\":null,\"symbol\":null,\"decimals\":null,\"standards\":null},\"commonFields\":[],\"fields\":[],\"fieldCount\":0,\"fieldsNextCursor\":null,\"group\":null,\"mark\":{\"mark\":\"none\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null},\"seen\":null,\"indexedRange\":{\"from\":714485,\"to\":715183},\"found\":true,\"result\":\"identity\"}"
+  },
+  {
+   "path": "/v1/lookup/8e01e39293a9e21ee2685da06ce487fffafbc1a982d53fcb1a72520f18518484?held=unshielded",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"color\":\"8e01e39293a9e21ee2685da06ce487fffafbc1a982d53fcb1a72520f18518484\",\"held\":\"unshielded\",\"builtin\":null,\"identity\":{\"network\":\"stagenet\",\"contractAddress\":\"a3df52605d8b7210aa3e5cdc82de4bb2911975bc42c1a68be77044723b705f21\",\"domainSep\":\"6d69702d303031383a6578616d706c653a756e736869656c6465640000000000\",\"kind\":2,\"kindName\":\"unshielded-utxo\",\"color\":\"8e01e39293a9e21ee2685da06ce487fffafbc1a982d53fcb1a72520f18518484\",\"minted\":{\"firstMint\":{\"height\":714617,\"txIndex\":0,\"txHash\":\"2ec3accadb3e77a05f0ca29d73ccbe879372d9c31587e109acc5d3076d9a437e\"},\"mints\":1,\"amount\":\"1000000\",\"amountDisplay\":\"1.000000\"},\"described\":true,\"common\":{\"name\":\"Acme Public\",\"symbol\":\"APUB\",\"decimals\":\"6\",\"standards\":null},\"commonFields\":[{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d65205075626c6963\",\"text\":\"Acme Public\"},\"usable\":true,\"updatedAt\":{\"height\":714624,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41505542\",\"text\":\"APUB\"},\"usable\":true,\"updatedAt\":{\"height\":714624,\"txIndex\":0,\"eventIndex\":0,\"record\":1}},{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"06\",\"integer\":\"6\"},\"usable\":true,\"updatedAt\":{\"height\":714624,\"txIndex\":0,\"eventIndex\":0,\"record\":2}}],\"fields\":[{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"06\",\"integer\":\"6\"},\"usable\":true,\"updatedAt\":{\"height\":714624,\"txIndex\":0,\"eventIndex\":0,\"record\":2}},{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d65205075626c6963\",\"text\":\"Acme Public\"},\"usable\":true,\"updatedAt\":{\"height\":714624,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41505542\",\"text\":\"APUB\"},\"usable\":true,\"updatedAt\":{\"height\":714624,\"txIndex\":0,\"eventIndex\":0,\"record\":1}}],\"fieldCount\":3,\"fieldsNextCursor\":null,\"group\":null,\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null},\"seen\":null,\"indexedRange\":{\"from\":714485,\"to\":715183},\"found\":true,\"result\":\"identity\"}"
+  },
+  {
+   "path": "/v1/identities/f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6/6d69702d303031383a6578616d706c653a66616d696c793a62726f6e7a650000/1",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"network\":\"stagenet\",\"contractAddress\":\"f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6\",\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a62726f6e7a650000\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":null,\"minted\":null,\"described\":true,\"common\":{\"name\":\"Acme Medals\",\"symbol\":\"MEDAL\",\"decimals\":\"0\",\"standards\":null},\"commonFields\":[{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d65204d6564616c73\",\"text\":\"Acme Medals\"},\"usable\":true,\"updatedAt\":{\"height\":714712,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"4d4544414c\",\"text\":\"MEDAL\"},\"usable\":true,\"updatedAt\":{\"height\":714712,\"txIndex\":0,\"eventIndex\":0,\"record\":1}},{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"00\",\"integer\":\"0\"},\"usable\":true,\"updatedAt\":{\"height\":714712,\"txIndex\":0,\"eventIndex\":0,\"record\":2}}],\"fields\":[{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"00\",\"integer\":\"0\"},\"usable\":true,\"updatedAt\":{\"height\":714712,\"txIndex\":0,\"eventIndex\":0,\"record\":2}},{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d65204d6564616c73\",\"text\":\"Acme Medals\"},\"usable\":true,\"updatedAt\":{\"height\":714712,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"4d4544414c\",\"text\":\"MEDAL\"},\"usable\":true,\"updatedAt\":{\"height\":714712,\"txIndex\":0,\"eventIndex\":0,\"record\":1}}],\"fieldCount\":3,\"fieldsNextCursor\":null,\"group\":{\"symbol\":{\"hex\":\"4d4544414c\",\"utf8\":\"MEDAL\"},\"memberCount\":3,\"members\":[{\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a62726f6e7a650000\",\"kind\":1},{\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a676f6c6400000000\",\"kind\":1},{\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a73696c7665720000\",\"kind\":1}]},\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null}"
+  },
+  {
+   "path": "/v1/identities/f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6/6d69702d303031383a6578616d706c653a66616d696c793a676f6c6400000000/1",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"network\":\"stagenet\",\"contractAddress\":\"f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6\",\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a676f6c6400000000\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"81db4eef83089c5403c6af29d926d57ee6b6359ff7dc291dd19cb4c3e9cf7aa1\",\"minted\":{\"firstMint\":{\"height\":714683,\"txIndex\":0,\"txHash\":\"bea96f3da8bc4b205f16f03742ebdcfe735fc1c63ca714d4dd2f666480568734\"},\"mints\":1,\"amount\":\"3\",\"amountDisplay\":\"3\"},\"described\":true,\"common\":{\"name\":\"Acme Medals\",\"symbol\":\"MEDAL\",\"decimals\":\"0\",\"standards\":null},\"commonFields\":[{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d65204d6564616c73\",\"text\":\"Acme Medals\"},\"usable\":true,\"updatedAt\":{\"height\":714696,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"4d4544414c\",\"text\":\"MEDAL\"},\"usable\":true,\"updatedAt\":{\"height\":714696,\"txIndex\":0,\"eventIndex\":0,\"record\":1}},{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"00\",\"integer\":\"0\"},\"usable\":true,\"updatedAt\":{\"height\":714696,\"txIndex\":0,\"eventIndex\":0,\"record\":2}}],\"fields\":[{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"00\",\"integer\":\"0\"},\"usable\":true,\"updatedAt\":{\"height\":714696,\"txIndex\":0,\"eventIndex\":0,\"record\":2}},{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d65204d6564616c73\",\"text\":\"Acme Medals\"},\"usable\":true,\"updatedAt\":{\"height\":714696,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"4d4544414c\",\"text\":\"MEDAL\"},\"usable\":true,\"updatedAt\":{\"height\":714696,\"txIndex\":0,\"eventIndex\":0,\"record\":1}}],\"fieldCount\":3,\"fieldsNextCursor\":null,\"group\":{\"symbol\":{\"hex\":\"4d4544414c\",\"utf8\":\"MEDAL\"},\"memberCount\":3,\"members\":[{\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a62726f6e7a650000\",\"kind\":1},{\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a676f6c6400000000\",\"kind\":1},{\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a73696c7665720000\",\"kind\":1}]},\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null}"
+  },
+  {
+   "path": "/v1/tokens/81db4eef83089c5403c6af29d926d57ee6b6359ff7dc291dd19cb4c3e9cf7aa1",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"color\":\"81db4eef83089c5403c6af29d926d57ee6b6359ff7dc291dd19cb4c3e9cf7aa1\",\"builtin\":null,\"contractAddress\":\"f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6\",\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a676f6c6400000000\",\"firstSeen\":{\"height\":714683,\"txIndex\":0,\"txHash\":\"bea96f3da8bc4b205f16f03742ebdcfe735fc1c63ca714d4dd2f666480568734\"},\"evidence\":[\"shielded-offer\"],\"identities\":[{\"network\":\"stagenet\",\"contractAddress\":\"f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6\",\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a676f6c6400000000\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"81db4eef83089c5403c6af29d926d57ee6b6359ff7dc291dd19cb4c3e9cf7aa1\",\"minted\":{\"firstMint\":{\"height\":714683,\"txIndex\":0,\"txHash\":\"bea96f3da8bc4b205f16f03742ebdcfe735fc1c63ca714d4dd2f666480568734\"},\"mints\":1,\"amount\":\"3\",\"amountDisplay\":\"3\"},\"described\":true,\"common\":{\"name\":\"Acme Medals\",\"symbol\":\"MEDAL\",\"decimals\":\"0\",\"standards\":null},\"commonFields\":[{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d65204d6564616c73\",\"text\":\"Acme Medals\"},\"usable\":true,\"updatedAt\":{\"height\":714696,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"4d4544414c\",\"text\":\"MEDAL\"},\"usable\":true,\"updatedAt\":{\"height\":714696,\"txIndex\":0,\"eventIndex\":0,\"record\":1}},{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"00\",\"integer\":\"0\"},\"usable\":true,\"updatedAt\":{\"height\":714696,\"txIndex\":0,\"eventIndex\":0,\"record\":2}}],\"fields\":[{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"00\",\"integer\":\"0\"},\"usable\":true,\"updatedAt\":{\"height\":714696,\"txIndex\":0,\"eventIndex\":0,\"record\":2}},{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d65204d6564616c73\",\"text\":\"Acme Medals\"},\"usable\":true,\"updatedAt\":{\"height\":714696,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"4d4544414c\",\"text\":\"MEDAL\"},\"usable\":true,\"updatedAt\":{\"height\":714696,\"txIndex\":0,\"eventIndex\":0,\"record\":1}}],\"fieldCount\":3,\"fieldsNextCursor\":null,\"group\":{\"symbol\":{\"hex\":\"4d4544414c\",\"utf8\":\"MEDAL\"},\"memberCount\":3,\"members\":[{\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a62726f6e7a650000\",\"kind\":1},{\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a676f6c6400000000\",\"kind\":1},{\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a73696c7665720000\",\"kind\":1}]},\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null}],\"related\":[]}"
+  },
+  {
+   "path": "/v1/lookup/81db4eef83089c5403c6af29d926d57ee6b6359ff7dc291dd19cb4c3e9cf7aa1?held=shielded",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"color\":\"81db4eef83089c5403c6af29d926d57ee6b6359ff7dc291dd19cb4c3e9cf7aa1\",\"held\":\"shielded\",\"builtin\":null,\"identity\":{\"network\":\"stagenet\",\"contractAddress\":\"f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6\",\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a676f6c6400000000\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"81db4eef83089c5403c6af29d926d57ee6b6359ff7dc291dd19cb4c3e9cf7aa1\",\"minted\":{\"firstMint\":{\"height\":714683,\"txIndex\":0,\"txHash\":\"bea96f3da8bc4b205f16f03742ebdcfe735fc1c63ca714d4dd2f666480568734\"},\"mints\":1,\"amount\":\"3\",\"amountDisplay\":\"3\"},\"described\":true,\"common\":{\"name\":\"Acme Medals\",\"symbol\":\"MEDAL\",\"decimals\":\"0\",\"standards\":null},\"commonFields\":[{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d65204d6564616c73\",\"text\":\"Acme Medals\"},\"usable\":true,\"updatedAt\":{\"height\":714696,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"4d4544414c\",\"text\":\"MEDAL\"},\"usable\":true,\"updatedAt\":{\"height\":714696,\"txIndex\":0,\"eventIndex\":0,\"record\":1}},{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"00\",\"integer\":\"0\"},\"usable\":true,\"updatedAt\":{\"height\":714696,\"txIndex\":0,\"eventIndex\":0,\"record\":2}}],\"fields\":[{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"00\",\"integer\":\"0\"},\"usable\":true,\"updatedAt\":{\"height\":714696,\"txIndex\":0,\"eventIndex\":0,\"record\":2}},{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d65204d6564616c73\",\"text\":\"Acme Medals\"},\"usable\":true,\"updatedAt\":{\"height\":714696,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"4d4544414c\",\"text\":\"MEDAL\"},\"usable\":true,\"updatedAt\":{\"height\":714696,\"txIndex\":0,\"eventIndex\":0,\"record\":1}}],\"fieldCount\":3,\"fieldsNextCursor\":null,\"group\":{\"symbol\":{\"hex\":\"4d4544414c\",\"utf8\":\"MEDAL\"},\"memberCount\":3,\"members\":[{\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a62726f6e7a650000\",\"kind\":1},{\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a676f6c6400000000\",\"kind\":1},{\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a73696c7665720000\",\"kind\":1}]},\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null},\"seen\":null,\"indexedRange\":{\"from\":714485,\"to\":715183},\"found\":true,\"result\":\"identity\"}"
+  },
+  {
+   "path": "/v1/lookup/81db4eef83089c5403c6af29d926d57ee6b6359ff7dc291dd19cb4c3e9cf7aa1?held=unshielded",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"color\":\"81db4eef83089c5403c6af29d926d57ee6b6359ff7dc291dd19cb4c3e9cf7aa1\",\"held\":\"unshielded\",\"builtin\":null,\"identity\":{\"network\":\"stagenet\",\"contractAddress\":\"f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6\",\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a676f6c6400000000\",\"kind\":2,\"kindName\":\"unshielded-utxo\",\"color\":\"81db4eef83089c5403c6af29d926d57ee6b6359ff7dc291dd19cb4c3e9cf7aa1\",\"minted\":null,\"described\":false,\"common\":{\"name\":null,\"symbol\":null,\"decimals\":null,\"standards\":null},\"commonFields\":[],\"fields\":[],\"fieldCount\":0,\"fieldsNextCursor\":null,\"group\":null,\"mark\":{\"mark\":\"none\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null},\"seen\":null,\"indexedRange\":{\"from\":714485,\"to\":715183},\"found\":true,\"result\":\"identity\"}"
+  },
+  {
+   "path": "/v1/identities/f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6/6d69702d303031383a6578616d706c653a66616d696c793a73696c7665720000/1",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"network\":\"stagenet\",\"contractAddress\":\"f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6\",\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a73696c7665720000\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"8c74ec4a937d296f8234a2373812c2df3d962dba06dfe98cda390f9dea38491d\",\"minted\":{\"firstMint\":{\"height\":714689,\"txIndex\":0,\"txHash\":\"b126b3e2f3e00145ae7dbb3a678147f52f72a71ebd940b692db1055d9a8291e1\"},\"mints\":1,\"amount\":\"5\",\"amountDisplay\":\"5\"},\"described\":true,\"common\":{\"name\":\"Acme Medals\",\"symbol\":\"MEDAL\",\"decimals\":\"0\",\"standards\":null},\"commonFields\":[{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d65204d6564616c73\",\"text\":\"Acme Medals\"},\"usable\":true,\"updatedAt\":{\"height\":714703,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"4d4544414c\",\"text\":\"MEDAL\"},\"usable\":true,\"updatedAt\":{\"height\":714703,\"txIndex\":0,\"eventIndex\":0,\"record\":1}},{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"00\",\"integer\":\"0\"},\"usable\":true,\"updatedAt\":{\"height\":714703,\"txIndex\":0,\"eventIndex\":0,\"record\":2}}],\"fields\":[{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"00\",\"integer\":\"0\"},\"usable\":true,\"updatedAt\":{\"height\":714703,\"txIndex\":0,\"eventIndex\":0,\"record\":2}},{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d65204d6564616c73\",\"text\":\"Acme Medals\"},\"usable\":true,\"updatedAt\":{\"height\":714703,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"4d4544414c\",\"text\":\"MEDAL\"},\"usable\":true,\"updatedAt\":{\"height\":714703,\"txIndex\":0,\"eventIndex\":0,\"record\":1}}],\"fieldCount\":3,\"fieldsNextCursor\":null,\"group\":{\"symbol\":{\"hex\":\"4d4544414c\",\"utf8\":\"MEDAL\"},\"memberCount\":3,\"members\":[{\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a62726f6e7a650000\",\"kind\":1},{\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a676f6c6400000000\",\"kind\":1},{\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a73696c7665720000\",\"kind\":1}]},\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null}"
+  },
+  {
+   "path": "/v1/tokens/8c74ec4a937d296f8234a2373812c2df3d962dba06dfe98cda390f9dea38491d",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"color\":\"8c74ec4a937d296f8234a2373812c2df3d962dba06dfe98cda390f9dea38491d\",\"builtin\":null,\"contractAddress\":\"f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6\",\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a73696c7665720000\",\"firstSeen\":{\"height\":714689,\"txIndex\":0,\"txHash\":\"b126b3e2f3e00145ae7dbb3a678147f52f72a71ebd940b692db1055d9a8291e1\"},\"evidence\":[\"shielded-offer\"],\"identities\":[{\"network\":\"stagenet\",\"contractAddress\":\"f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6\",\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a73696c7665720000\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"8c74ec4a937d296f8234a2373812c2df3d962dba06dfe98cda390f9dea38491d\",\"minted\":{\"firstMint\":{\"height\":714689,\"txIndex\":0,\"txHash\":\"b126b3e2f3e00145ae7dbb3a678147f52f72a71ebd940b692db1055d9a8291e1\"},\"mints\":1,\"amount\":\"5\",\"amountDisplay\":\"5\"},\"described\":true,\"common\":{\"name\":\"Acme Medals\",\"symbol\":\"MEDAL\",\"decimals\":\"0\",\"standards\":null},\"commonFields\":[{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d65204d6564616c73\",\"text\":\"Acme Medals\"},\"usable\":true,\"updatedAt\":{\"height\":714703,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"4d4544414c\",\"text\":\"MEDAL\"},\"usable\":true,\"updatedAt\":{\"height\":714703,\"txIndex\":0,\"eventIndex\":0,\"record\":1}},{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"00\",\"integer\":\"0\"},\"usable\":true,\"updatedAt\":{\"height\":714703,\"txIndex\":0,\"eventIndex\":0,\"record\":2}}],\"fields\":[{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"00\",\"integer\":\"0\"},\"usable\":true,\"updatedAt\":{\"height\":714703,\"txIndex\":0,\"eventIndex\":0,\"record\":2}},{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d65204d6564616c73\",\"text\":\"Acme Medals\"},\"usable\":true,\"updatedAt\":{\"height\":714703,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"4d4544414c\",\"text\":\"MEDAL\"},\"usable\":true,\"updatedAt\":{\"height\":714703,\"txIndex\":0,\"eventIndex\":0,\"record\":1}}],\"fieldCount\":3,\"fieldsNextCursor\":null,\"group\":{\"symbol\":{\"hex\":\"4d4544414c\",\"utf8\":\"MEDAL\"},\"memberCount\":3,\"members\":[{\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a62726f6e7a650000\",\"kind\":1},{\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a676f6c6400000000\",\"kind\":1},{\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a73696c7665720000\",\"kind\":1}]},\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null}],\"related\":[]}"
+  },
+  {
+   "path": "/v1/lookup/8c74ec4a937d296f8234a2373812c2df3d962dba06dfe98cda390f9dea38491d?held=shielded",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"color\":\"8c74ec4a937d296f8234a2373812c2df3d962dba06dfe98cda390f9dea38491d\",\"held\":\"shielded\",\"builtin\":null,\"identity\":{\"network\":\"stagenet\",\"contractAddress\":\"f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6\",\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a73696c7665720000\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"8c74ec4a937d296f8234a2373812c2df3d962dba06dfe98cda390f9dea38491d\",\"minted\":{\"firstMint\":{\"height\":714689,\"txIndex\":0,\"txHash\":\"b126b3e2f3e00145ae7dbb3a678147f52f72a71ebd940b692db1055d9a8291e1\"},\"mints\":1,\"amount\":\"5\",\"amountDisplay\":\"5\"},\"described\":true,\"common\":{\"name\":\"Acme Medals\",\"symbol\":\"MEDAL\",\"decimals\":\"0\",\"standards\":null},\"commonFields\":[{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d65204d6564616c73\",\"text\":\"Acme Medals\"},\"usable\":true,\"updatedAt\":{\"height\":714703,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"4d4544414c\",\"text\":\"MEDAL\"},\"usable\":true,\"updatedAt\":{\"height\":714703,\"txIndex\":0,\"eventIndex\":0,\"record\":1}},{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"00\",\"integer\":\"0\"},\"usable\":true,\"updatedAt\":{\"height\":714703,\"txIndex\":0,\"eventIndex\":0,\"record\":2}}],\"fields\":[{\"key\":{\"hex\":\"646563696d616c73\",\"utf8\":\"decimals\"},\"valType\":2,\"valTypeName\":\"uint\",\"value\":{\"hex\":\"00\",\"integer\":\"0\"},\"usable\":true,\"updatedAt\":{\"height\":714703,\"txIndex\":0,\"eventIndex\":0,\"record\":2}},{\"key\":{\"hex\":\"6e616d65\",\"utf8\":\"name\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"41636d65204d6564616c73\",\"text\":\"Acme Medals\"},\"usable\":true,\"updatedAt\":{\"height\":714703,\"txIndex\":0,\"eventIndex\":0,\"record\":0}},{\"key\":{\"hex\":\"73796d626f6c\",\"utf8\":\"symbol\"},\"valType\":1,\"valTypeName\":\"utf8\",\"value\":{\"hex\":\"4d4544414c\",\"text\":\"MEDAL\"},\"usable\":true,\"updatedAt\":{\"height\":714703,\"txIndex\":0,\"eventIndex\":0,\"record\":1}}],\"fieldCount\":3,\"fieldsNextCursor\":null,\"group\":{\"symbol\":{\"hex\":\"4d4544414c\",\"utf8\":\"MEDAL\"},\"memberCount\":3,\"members\":[{\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a62726f6e7a650000\",\"kind\":1},{\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a676f6c6400000000\",\"kind\":1},{\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a73696c7665720000\",\"kind\":1}]},\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null},\"seen\":null,\"indexedRange\":{\"from\":714485,\"to\":715183},\"found\":true,\"result\":\"identity\"}"
+  },
+  {
+   "path": "/v1/lookup/8c74ec4a937d296f8234a2373812c2df3d962dba06dfe98cda390f9dea38491d?held=unshielded",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"color\":\"8c74ec4a937d296f8234a2373812c2df3d962dba06dfe98cda390f9dea38491d\",\"held\":\"unshielded\",\"builtin\":null,\"identity\":{\"network\":\"stagenet\",\"contractAddress\":\"f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6\",\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a73696c7665720000\",\"kind\":2,\"kindName\":\"unshielded-utxo\",\"color\":\"8c74ec4a937d296f8234a2373812c2df3d962dba06dfe98cda390f9dea38491d\",\"minted\":null,\"described\":false,\"common\":{\"name\":null,\"symbol\":null,\"decimals\":null,\"standards\":null},\"commonFields\":[],\"fields\":[],\"fieldCount\":0,\"fieldsNextCursor\":null,\"group\":null,\"mark\":{\"mark\":\"none\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"image\":null},\"seen\":null,\"indexedRange\":{\"from\":714485,\"to\":715183},\"found\":true,\"result\":\"identity\"}"
+  },
+  {
+   "path": "/v1/contracts/048ec49aacdde9ef2fee1bd51c651df46d3224578e36a1e89bdbb88842edf0f6/tokens",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"contractAddress\":\"048ec49aacdde9ef2fee1bd51c651df46d3224578e36a1e89bdbb88842edf0f6\",\"groups\":[],\"items\":[{\"id\":\"identity/048ec49aacdde9ef2fee1bd51c651df46d3224578e36a1e89bdbb88842edf0f6/1111111111111111111111111111111111111111111111111111111111111111/3\",\"source\":\"identity\",\"kind\":3,\"kindName\":\"contract-token\",\"color\":null,\"contractAddress\":\"048ec49aacdde9ef2fee1bd51c651df46d3224578e36a1e89bdbb88842edf0f6\",\"domainSep\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"name\":\"Acme Token\",\"symbol\":\"ACME\",\"decimals\":\"6\",\"described\":true,\"minted\":null,\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[\"mip-0004\"]},\"note\":null,\"image\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?contract=048ec49aacdde9ef2fee1bd51c651df46d3224578e36a1e89bdbb88842edf0f6&limit=500",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":715177,\"txIndex\":0,\"txHash\":\"85d6f8a241ceff9935dc1aec51e5c5c1c51818dd0a41ebf7b850e2ff413a5b4d\",\"eventIndex\":0,\"segment\":44633,\"phase\":\"guaranteed\",\"contractAddress\":\"048ec49aacdde9ef2fee1bd51c651df46d3224578e36a1e89bdbb88842edf0f6\",\"classification\":\"accept\",\"reason\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/contracts/0ee5f31961f9df197055c49dda8f87275af50c3554ba701ffa1837537735e532/tokens",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"contractAddress\":\"0ee5f31961f9df197055c49dda8f87275af50c3554ba701ffa1837537735e532\",\"groups\":[],\"items\":[{\"id\":\"identity/0ee5f31961f9df197055c49dda8f87275af50c3554ba701ffa1837537735e532/6d69702d303031383a6578616d706c653a736869656c64656400000000000000/1\",\"source\":\"identity\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"be34ef4b78717b031040bf625e04ee033106efae4c766915d3cac2b7fda8f11b\",\"contractAddress\":\"0ee5f31961f9df197055c49dda8f87275af50c3554ba701ffa1837537735e532\",\"domainSep\":\"6d69702d303031383a6578616d706c653a736869656c64656400000000000000\",\"name\":\"Acme Shield\",\"symbol\":\"ASHD\",\"decimals\":\"6\",\"described\":true,\"minted\":{\"firstMint\":{\"height\":714557,\"txIndex\":0,\"txHash\":\"90dbd77e00c6c4dda189488ac7c45420089b43b81a6fff0b845db4a64853dfcd\"},\"mints\":1,\"amount\":\"1000000\",\"amountDisplay\":\"1.000000\"},\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?contract=0ee5f31961f9df197055c49dda8f87275af50c3554ba701ffa1837537735e532&limit=500",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714564,\"txIndex\":0,\"txHash\":\"133501d0ee8b313926579b8c1b1b9a5e17450d8091dc3b10666939ca4c30f809\",\"eventIndex\":0,\"segment\":49394,\"phase\":\"guaranteed\",\"contractAddress\":\"0ee5f31961f9df197055c49dda8f87275af50c3554ba701ffa1837537735e532\",\"classification\":\"accept\",\"reason\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/contracts/23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b/tokens",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"groups\":[],\"items\":[{\"id\":\"identity/23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b/1111111111111111111111111111111111111111111111111111111111111111/3\",\"source\":\"identity\",\"kind\":3,\"kindName\":\"contract-token\",\"color\":null,\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"domainSep\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"name\":\"Acme\",\"symbol\":\"ACME\",\"decimals\":\"6\",\"described\":true,\"minted\":null,\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"incorrect\",\"reasons\":[\"no-records\",\"vallen-out-of-bounds\",\"nonzero-padding\",\"nonzero-padding\",\"invalid-utf8\",\"bad-kind\",\"invalid-utf8\",\"invalid-uri\",\"bad-null-length\",\"reserved-valtype\"],\"reasonCount\":10,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?contract=23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b&limit=500",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714891,\"txIndex\":0,\"txHash\":\"a20cbf24e4f227a1e3f723fce51e16d22f0c378f8270b4c65d5bd5d654b35c35\",\"eventIndex\":0,\"segment\":20446,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"accept\",\"reason\":null},{\"height\":714899,\"txIndex\":0,\"txHash\":\"add090cf2b57b55ccee5e20c0ff4e0bdabbb9f3a3f341e4d252ba88cf35c1785\",\"eventIndex\":0,\"segment\":39552,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"reject\",\"reason\":\"no-records\"},{\"height\":714907,\"txIndex\":0,\"txHash\":\"5cc3f643dcbd3e17d03a5317a63266877fa513a645bdd51c7aba9b5ff3fc57cc\",\"eventIndex\":0,\"segment\":64739,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"accept\",\"reason\":null},{\"height\":714915,\"txIndex\":0,\"txHash\":\"1103ab6c110bea6a1e37913023adaf6ec701892c17b9e3342872e8ba303d8078\",\"eventIndex\":0,\"segment\":51753,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"reject\",\"reason\":\"vallen-out-of-bounds\"},{\"height\":714923,\"txIndex\":0,\"txHash\":\"999e6011a3f6a90f3ab62533d949a5154d040ef1b323b894b3b6e21694310dec\",\"eventIndex\":0,\"segment\":29319,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"accept\",\"reason\":null},{\"height\":714931,\"txIndex\":0,\"txHash\":\"3581d73c8dd3dc5c116eeb80dd70f22a5d127fb3d2d6fa538ec96e22e18e280a\",\"eventIndex\":0,\"segment\":13191,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"reject\",\"reason\":\"nonzero-padding\"},{\"height\":714942,\"txIndex\":0,\"txHash\":\"3bc49f9e2c89d4e51380f3b6ff8d2228cabe56bead23c707e66b202108e8e60b\",\"eventIndex\":0,\"segment\":52956,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"accept\",\"reason\":null},{\"height\":714949,\"txIndex\":0,\"txHash\":\"9fbed24dda14d449718801b6d11d3a1b8afea64b64b9867a7b46931cfcf3e6f8\",\"eventIndex\":0,\"segment\":17523,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"reject\",\"reason\":\"nonzero-padding\"},{\"height\":714956,\"txIndex\":0,\"txHash\":\"ea3e64f05d57dab178dc65b420857036fcf75809b4123a2525a0312c77a3a142\",\"eventIndex\":0,\"segment\":23795,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"reject\",\"reason\":\"invalid-utf8\"},{\"height\":714964,\"txIndex\":0,\"txHash\":\"eb7413fcb12bb7d5516d17f2676b8263898f7b5b351bdd1fdbe1bdb5c71e1e3e\",\"eventIndex\":0,\"segment\":30907,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"reject\",\"reason\":\"bad-kind\"},{\"height\":714972,\"txIndex\":0,\"txHash\":\"5921d60d0307851e8f1e159ee49def234d1c66e5f559ebb857c3be0a99b52713\",\"eventIndex\":0,\"segment\":39547,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"accept\",\"reason\":null},{\"height\":714980,\"txIndex\":0,\"txHash\":\"b69041011ae6cbf9708d7abf3526fd13b79c842289b950a48039542e19cfffed\",\"eventIndex\":0,\"segment\":2382,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"reject\",\"reason\":\"invalid-utf8\"},{\"height\":714988,\"txIndex\":0,\"txHash\":\"e71ebc1ab0fc4cde6ba9048994824401dceb6270e57c3cc169298a8cd999628c\",\"eventIndex\":0,\"segment\":53015,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"accept\",\"reason\":null},{\"height\":714996,\"txIndex\":0,\"txHash\":\"9e297d8d0312a07d9f03955c41032890a975773c834d4224969feab785443a17\",\"eventIndex\":0,\"segment\":22282,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"reject\",\"reason\":\"invalid-uri\"},{\"height\":715004,\"txIndex\":0,\"txHash\":\"86b668c478ea445fbb70ba721adecb4604fe99cc8a2b796a12d1ed4a1a0501aa\",\"eventIndex\":0,\"segment\":56285,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"accept\",\"reason\":null},{\"height\":715012,\"txIndex\":0,\"txHash\":\"d6fba088b353296bb3ad4616172edd41e6d41713cdb4105dbdac72803a037c8c\",\"eventIndex\":0,\"segment\":30781,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"reject\",\"reason\":\"bad-null-length\"},{\"height\":715019,\"txIndex\":0,\"txHash\":\"e4ec50b55430e0bf621e6c13c9735fd5ccb5afa43e67cf1a1722d1619786b5a2\",\"eventIndex\":0,\"segment\":4548,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"accept\",\"reason\":null},{\"height\":715026,\"txIndex\":0,\"txHash\":\"8b9b82cd60b891d9816297c1911ee85b1b780f5b0f6dae7ba77fdf5b11532cd7\",\"eventIndex\":0,\"segment\":43712,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"reject\",\"reason\":\"reserved-valtype\"}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/contracts/65553c655286664ccb3f69f9313bf725900c46eee2289ae611d18fdf6f90ceb9/tokens",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"contractAddress\":\"65553c655286664ccb3f69f9313bf725900c46eee2289ae611d18fdf6f90ceb9\",\"groups\":[],\"items\":[{\"id\":\"identity/65553c655286664ccb3f69f9313bf725900c46eee2289ae611d18fdf6f90ceb9/1111111111111111111111111111111111111111111111111111111111111111/3\",\"source\":\"identity\",\"kind\":3,\"kindName\":\"contract-token\",\"color\":null,\"contractAddress\":\"65553c655286664ccb3f69f9313bf725900c46eee2289ae611d18fdf6f90ceb9\",\"domainSep\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"name\":\"Good\",\"symbol\":null,\"decimals\":null,\"described\":true,\"minted\":null,\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"incorrect\",\"reasons\":[\"reserved-valtype\"],\"reasonCount\":1,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[\"symbol\",\"decimals\"],\"tags\":[]},\"note\":null,\"image\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?contract=65553c655286664ccb3f69f9313bf725900c46eee2289ae611d18fdf6f90ceb9&limit=500",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":715109,\"txIndex\":0,\"txHash\":\"75c43430395cc8608ccad188a9c0cb45051476f2cc7759d46f34f95204cb86c9\",\"eventIndex\":0,\"segment\":53948,\"phase\":\"guaranteed\",\"contractAddress\":\"65553c655286664ccb3f69f9313bf725900c46eee2289ae611d18fdf6f90ceb9\",\"classification\":\"accept\",\"reason\":null},{\"height\":715109,\"txIndex\":0,\"txHash\":\"75c43430395cc8608ccad188a9c0cb45051476f2cc7759d46f34f95204cb86c9\",\"eventIndex\":1,\"segment\":53948,\"phase\":\"guaranteed\",\"contractAddress\":\"65553c655286664ccb3f69f9313bf725900c46eee2289ae611d18fdf6f90ceb9\",\"classification\":\"reject\",\"reason\":\"reserved-valtype\"}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/contracts/7771c9e53afb45291ae2cecd48b5d55262734b08a98fc8276ed0f980031cd637/tokens",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"contractAddress\":\"7771c9e53afb45291ae2cecd48b5d55262734b08a98fc8276ed0f980031cd637\",\"groups\":[],\"items\":[{\"id\":\"identity/7771c9e53afb45291ae2cecd48b5d55262734b08a98fc8276ed0f980031cd637/953ecfdd939bcb9df7bb4ddb9deeb4ebfa2447563c08f7973576c7ac492f9600/1\",\"source\":\"identity\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"e5afe273bcb1252cfbc81ad6ca1caaafe22312c8c29f9b104a2fe3ead980bb2d\",\"contractAddress\":\"7771c9e53afb45291ae2cecd48b5d55262734b08a98fc8276ed0f980031cd637\",\"domainSep\":\"953ecfdd939bcb9df7bb4ddb9deeb4ebfa2447563c08f7973576c7ac492f9600\",\"name\":null,\"symbol\":null,\"decimals\":null,\"described\":false,\"minted\":{\"firstMint\":{\"height\":714802,\"txIndex\":0,\"txHash\":\"eeb09e684fab8931b36f70de2691758d40f4766840db0979b0fd3e54fb1e6472\"},\"mints\":1,\"amount\":\"1040000\",\"amountDisplay\":null},\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"none\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?contract=7771c9e53afb45291ae2cecd48b5d55262734b08a98fc8276ed0f980031cd637&limit=500",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/contracts/86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f/tokens",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"contractAddress\":\"86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f\",\"groups\":[{\"symbol\":{\"hex\":\"414344\",\"utf8\":\"ACD\"},\"memberCount\":3,\"members\":[{\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":1},{\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":2},{\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"kind\":3}]}],\"items\":[{\"id\":\"identity/86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f/6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000/1\",\"source\":\"identity\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"042399246139df031a4780c684df8eaecd48b7e03a195bfe986cf22766bcbc16\",\"contractAddress\":\"86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f\",\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"name\":\"Acme Dollar\",\"symbol\":\"ACD\",\"decimals\":\"2\",\"described\":true,\"minted\":{\"firstMint\":{\"height\":714643,\"txIndex\":0,\"txHash\":\"395076e79043745ffc02877f90f225a05eaa7437f798996aa1632bf454175ed1\"},\"mints\":1,\"amount\":\"100000\",\"amountDisplay\":\"1000.00\"},\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null},{\"id\":\"identity/86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f/6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000/2\",\"source\":\"identity\",\"kind\":2,\"kindName\":\"unshielded-utxo\",\"color\":\"042399246139df031a4780c684df8eaecd48b7e03a195bfe986cf22766bcbc16\",\"contractAddress\":\"86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f\",\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"name\":\"Acme Dollar\",\"symbol\":\"ACD\",\"decimals\":\"2\",\"described\":true,\"minted\":{\"firstMint\":{\"height\":714649,\"txIndex\":0,\"txHash\":\"7895124817e86946fae9da9865c3d35923e45e587852b8253c6310e37db2f0a7\"},\"mints\":1,\"amount\":\"100000\",\"amountDisplay\":\"1000.00\"},\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null},{\"id\":\"identity/86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f/6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000/3\",\"source\":\"identity\",\"kind\":3,\"kindName\":\"contract-token\",\"color\":null,\"contractAddress\":\"86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f\",\"domainSep\":\"6d69702d303031383a6578616d706c653a6d756c74692d6b696e640000000000\",\"name\":\"Acme Dollar\",\"symbol\":\"ACD\",\"decimals\":\"2\",\"described\":true,\"minted\":null,\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?contract=86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f&limit=500",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714663,\"txIndex\":0,\"txHash\":\"13315bf9ef66ed0b69cba300acb04c9aca5a99cdd361fa2e53cd1704e1a95a06\",\"eventIndex\":0,\"segment\":14875,\"phase\":\"guaranteed\",\"contractAddress\":\"86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f\",\"classification\":\"accept\",\"reason\":null},{\"height\":714663,\"txIndex\":0,\"txHash\":\"13315bf9ef66ed0b69cba300acb04c9aca5a99cdd361fa2e53cd1704e1a95a06\",\"eventIndex\":1,\"segment\":14875,\"phase\":\"guaranteed\",\"contractAddress\":\"86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f\",\"classification\":\"accept\",\"reason\":null},{\"height\":714663,\"txIndex\":0,\"txHash\":\"13315bf9ef66ed0b69cba300acb04c9aca5a99cdd361fa2e53cd1704e1a95a06\",\"eventIndex\":2,\"segment\":14875,\"phase\":\"guaranteed\",\"contractAddress\":\"86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f\",\"classification\":\"accept\",\"reason\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/contracts/98a90519419e2ebb514b7c6ce87ee7f6f4f9753d9ee6f533c5d1c25b9d437dcf/tokens",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"contractAddress\":\"98a90519419e2ebb514b7c6ce87ee7f6f4f9753d9ee6f533c5d1c25b9d437dcf\",\"groups\":[],\"items\":[{\"id\":\"identity/98a90519419e2ebb514b7c6ce87ee7f6f4f9753d9ee6f533c5d1c25b9d437dcf/6d69702d303031383a6578616d706c653a66756e6769626c6500000000000000/3\",\"source\":\"identity\",\"kind\":3,\"kindName\":\"contract-token\",\"color\":null,\"contractAddress\":\"98a90519419e2ebb514b7c6ce87ee7f6f4f9753d9ee6f533c5d1c25b9d437dcf\",\"domainSep\":\"6d69702d303031383a6578616d706c653a66756e6769626c6500000000000000\",\"name\":\"Acme Gold\",\"symbol\":\"AGLD\",\"decimals\":\"6\",\"described\":true,\"minted\":null,\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?contract=98a90519419e2ebb514b7c6ce87ee7f6f4f9753d9ee6f533c5d1c25b9d437dcf&limit=500",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714501,\"txIndex\":0,\"txHash\":\"a6fff9fb3f034aea393ff37fcd4343c418c3bfcc7cb22c502c1c1a6ffbc55dfd\",\"eventIndex\":0,\"segment\":22981,\"phase\":\"guaranteed\",\"contractAddress\":\"98a90519419e2ebb514b7c6ce87ee7f6f4f9753d9ee6f533c5d1c25b9d437dcf\",\"classification\":\"accept\",\"reason\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/contracts/9d93b91942530f66f381daf5d9856caf9dfaa24444f0803a6c5d02e8c28040e3/tokens",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"contractAddress\":\"9d93b91942530f66f381daf5d9856caf9dfaa24444f0803a6c5d02e8c28040e3\",\"groups\":[],\"items\":[{\"id\":\"identity/9d93b91942530f66f381daf5d9856caf9dfaa24444f0803a6c5d02e8c28040e3/1111111111111111111111111111111111111111111111111111111111111111/3\",\"source\":\"identity\",\"kind\":3,\"kindName\":\"contract-token\",\"color\":null,\"contractAddress\":\"9d93b91942530f66f381daf5d9856caf9dfaa24444f0803a6c5d02e8c28040e3\",\"domainSep\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"name\":\"Acme Again\",\"symbol\":\"ACMA\",\"decimals\":\"6\",\"described\":true,\"minted\":null,\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[\"mip-0004\"]},\"note\":null,\"image\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?contract=9d93b91942530f66f381daf5d9856caf9dfaa24444f0803a6c5d02e8c28040e3&limit=500",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714796,\"txIndex\":0,\"txHash\":\"71fb2c2d9ade1a3906ad92b3d245e6578478d58cac52d4f3f4c01fdbea2fc7e2\",\"eventIndex\":0,\"segment\":65300,\"phase\":\"guaranteed\",\"contractAddress\":\"9d93b91942530f66f381daf5d9856caf9dfaa24444f0803a6c5d02e8c28040e3\",\"classification\":\"accept\",\"reason\":null},{\"height\":714804,\"txIndex\":0,\"txHash\":\"2514eeca34a802c11ade6a3da9dd6bd19c44aa5dc9328d5f989a063a5cc9c2e9\",\"eventIndex\":0,\"segment\":27814,\"phase\":\"guaranteed\",\"contractAddress\":\"9d93b91942530f66f381daf5d9856caf9dfaa24444f0803a6c5d02e8c28040e3\",\"classification\":\"accept\",\"reason\":null},{\"height\":714813,\"txIndex\":0,\"txHash\":\"35858a38a3f507ce06b0e878b79d5b3e183a2bc73cac04e1b193ca5b4712a8d6\",\"eventIndex\":0,\"segment\":19336,\"phase\":\"guaranteed\",\"contractAddress\":\"9d93b91942530f66f381daf5d9856caf9dfaa24444f0803a6c5d02e8c28040e3\",\"classification\":\"accept\",\"reason\":null},{\"height\":714827,\"txIndex\":0,\"txHash\":\"2b093d32576032256e8d97fc504647e43e68e89de840c6944b52d532be0e087e\",\"eventIndex\":0,\"segment\":42016,\"phase\":\"guaranteed\",\"contractAddress\":\"9d93b91942530f66f381daf5d9856caf9dfaa24444f0803a6c5d02e8c28040e3\",\"classification\":\"accept\",\"reason\":null},{\"height\":714835,\"txIndex\":0,\"txHash\":\"0b6a1497a203361bdb33cbc31be7c821d3deb5b4d864716f192bb8aa5b498a91\",\"eventIndex\":0,\"segment\":50566,\"phase\":\"guaranteed\",\"contractAddress\":\"9d93b91942530f66f381daf5d9856caf9dfaa24444f0803a6c5d02e8c28040e3\",\"classification\":\"accept\",\"reason\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/contracts/a3df52605d8b7210aa3e5cdc82de4bb2911975bc42c1a68be77044723b705f21/tokens",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"contractAddress\":\"a3df52605d8b7210aa3e5cdc82de4bb2911975bc42c1a68be77044723b705f21\",\"groups\":[],\"items\":[{\"id\":\"identity/a3df52605d8b7210aa3e5cdc82de4bb2911975bc42c1a68be77044723b705f21/6d69702d303031383a6578616d706c653a756e736869656c6465640000000000/2\",\"source\":\"identity\",\"kind\":2,\"kindName\":\"unshielded-utxo\",\"color\":\"8e01e39293a9e21ee2685da06ce487fffafbc1a982d53fcb1a72520f18518484\",\"contractAddress\":\"a3df52605d8b7210aa3e5cdc82de4bb2911975bc42c1a68be77044723b705f21\",\"domainSep\":\"6d69702d303031383a6578616d706c653a756e736869656c6465640000000000\",\"name\":\"Acme Public\",\"symbol\":\"APUB\",\"decimals\":\"6\",\"described\":true,\"minted\":{\"firstMint\":{\"height\":714617,\"txIndex\":0,\"txHash\":\"2ec3accadb3e77a05f0ca29d73ccbe879372d9c31587e109acc5d3076d9a437e\"},\"mints\":1,\"amount\":\"1000000\",\"amountDisplay\":\"1.000000\"},\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?contract=a3df52605d8b7210aa3e5cdc82de4bb2911975bc42c1a68be77044723b705f21&limit=500",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714624,\"txIndex\":0,\"txHash\":\"7f7cc752db67acf3a91ce468a404bf0228f019799f9f31d521a54cdf4c8d2fa9\",\"eventIndex\":0,\"segment\":35387,\"phase\":\"guaranteed\",\"contractAddress\":\"a3df52605d8b7210aa3e5cdc82de4bb2911975bc42c1a68be77044723b705f21\",\"classification\":\"accept\",\"reason\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/contracts/f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6/tokens",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"contractAddress\":\"f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6\",\"groups\":[{\"symbol\":{\"hex\":\"4d4544414c\",\"utf8\":\"MEDAL\"},\"memberCount\":3,\"members\":[{\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a62726f6e7a650000\",\"kind\":1},{\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a676f6c6400000000\",\"kind\":1},{\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a73696c7665720000\",\"kind\":1}]}],\"items\":[{\"id\":\"identity/f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6/6d69702d303031383a6578616d706c653a66616d696c793a62726f6e7a650000/1\",\"source\":\"identity\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":null,\"contractAddress\":\"f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6\",\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a62726f6e7a650000\",\"name\":\"Acme Medals\",\"symbol\":\"MEDAL\",\"decimals\":\"0\",\"described\":true,\"minted\":null,\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null},{\"id\":\"identity/f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6/6d69702d303031383a6578616d706c653a66616d696c793a676f6c6400000000/1\",\"source\":\"identity\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"81db4eef83089c5403c6af29d926d57ee6b6359ff7dc291dd19cb4c3e9cf7aa1\",\"contractAddress\":\"f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6\",\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a676f6c6400000000\",\"name\":\"Acme Medals\",\"symbol\":\"MEDAL\",\"decimals\":\"0\",\"described\":true,\"minted\":{\"firstMint\":{\"height\":714683,\"txIndex\":0,\"txHash\":\"bea96f3da8bc4b205f16f03742ebdcfe735fc1c63ca714d4dd2f666480568734\"},\"mints\":1,\"amount\":\"3\",\"amountDisplay\":\"3\"},\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null},{\"id\":\"identity/f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6/6d69702d303031383a6578616d706c653a66616d696c793a73696c7665720000/1\",\"source\":\"identity\",\"kind\":1,\"kindName\":\"shielded-utxo\",\"color\":\"8c74ec4a937d296f8234a2373812c2df3d962dba06dfe98cda390f9dea38491d\",\"contractAddress\":\"f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6\",\"domainSep\":\"6d69702d303031383a6578616d706c653a66616d696c793a73696c7665720000\",\"name\":\"Acme Medals\",\"symbol\":\"MEDAL\",\"decimals\":\"0\",\"described\":true,\"minted\":{\"firstMint\":{\"height\":714689,\"txIndex\":0,\"txHash\":\"b126b3e2f3e00145ae7dbb3a678147f52f72a71ebd940b692db1055d9a8291e1\"},\"mints\":1,\"amount\":\"5\",\"amountDisplay\":\"5\"},\"firstSeen\":null,\"evidence\":[],\"mark\":{\"mark\":\"ok\",\"reasons\":[],\"reasonCount\":0,\"unresolved\":{\"count\":0,\"positions\":[]},\"missing\":[],\"tags\":[]},\"note\":null,\"image\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?contract=f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6&limit=500",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714696,\"txIndex\":0,\"txHash\":\"ce45f95fde9706739139fbf0f53dd0e7b38dcd16f492f014fceff5c70e28a26f\",\"eventIndex\":0,\"segment\":51428,\"phase\":\"guaranteed\",\"contractAddress\":\"f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6\",\"classification\":\"accept\",\"reason\":null},{\"height\":714703,\"txIndex\":0,\"txHash\":\"a865ad4799b76eb9233affd9dd7da44c460105a7d5566b27bc063c6e11612e44\",\"eventIndex\":0,\"segment\":60715,\"phase\":\"guaranteed\",\"contractAddress\":\"f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6\",\"classification\":\"accept\",\"reason\":null},{\"height\":714712,\"txIndex\":0,\"txHash\":\"ed5b20cd4e071de0713079bdfe8c46095baa863b0a1318598be9f8da9a4f7e7a\",\"eventIndex\":0,\"segment\":25830,\"phase\":\"guaranteed\",\"contractAddress\":\"f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6\",\"classification\":\"accept\",\"reason\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=0b6a1497a203361bdb33cbc31be7c821d3deb5b4d864716f192bb8aa5b498a91",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714835,\"txIndex\":0,\"txHash\":\"0b6a1497a203361bdb33cbc31be7c821d3deb5b4d864716f192bb8aa5b498a91\",\"eventIndex\":0,\"segment\":50566,\"phase\":\"guaranteed\",\"contractAddress\":\"9d93b91942530f66f381daf5d9856caf9dfaa24444f0803a6c5d02e8c28040e3\",\"classification\":\"accept\",\"reason\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=1103ab6c110bea6a1e37913023adaf6ec701892c17b9e3342872e8ba303d8078",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714915,\"txIndex\":0,\"txHash\":\"1103ab6c110bea6a1e37913023adaf6ec701892c17b9e3342872e8ba303d8078\",\"eventIndex\":0,\"segment\":51753,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"reject\",\"reason\":\"vallen-out-of-bounds\"}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=13315bf9ef66ed0b69cba300acb04c9aca5a99cdd361fa2e53cd1704e1a95a06",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714663,\"txIndex\":0,\"txHash\":\"13315bf9ef66ed0b69cba300acb04c9aca5a99cdd361fa2e53cd1704e1a95a06\",\"eventIndex\":0,\"segment\":14875,\"phase\":\"guaranteed\",\"contractAddress\":\"86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f\",\"classification\":\"accept\",\"reason\":null},{\"height\":714663,\"txIndex\":0,\"txHash\":\"13315bf9ef66ed0b69cba300acb04c9aca5a99cdd361fa2e53cd1704e1a95a06\",\"eventIndex\":1,\"segment\":14875,\"phase\":\"guaranteed\",\"contractAddress\":\"86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f\",\"classification\":\"accept\",\"reason\":null},{\"height\":714663,\"txIndex\":0,\"txHash\":\"13315bf9ef66ed0b69cba300acb04c9aca5a99cdd361fa2e53cd1704e1a95a06\",\"eventIndex\":2,\"segment\":14875,\"phase\":\"guaranteed\",\"contractAddress\":\"86acf80ff386abb610aadbea0406039e7fe39893f440794c3c2bad86dd48570f\",\"classification\":\"accept\",\"reason\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=133501d0ee8b313926579b8c1b1b9a5e17450d8091dc3b10666939ca4c30f809",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714564,\"txIndex\":0,\"txHash\":\"133501d0ee8b313926579b8c1b1b9a5e17450d8091dc3b10666939ca4c30f809\",\"eventIndex\":0,\"segment\":49394,\"phase\":\"guaranteed\",\"contractAddress\":\"0ee5f31961f9df197055c49dda8f87275af50c3554ba701ffa1837537735e532\",\"classification\":\"accept\",\"reason\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=2514eeca34a802c11ade6a3da9dd6bd19c44aa5dc9328d5f989a063a5cc9c2e9",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714804,\"txIndex\":0,\"txHash\":\"2514eeca34a802c11ade6a3da9dd6bd19c44aa5dc9328d5f989a063a5cc9c2e9\",\"eventIndex\":0,\"segment\":27814,\"phase\":\"guaranteed\",\"contractAddress\":\"9d93b91942530f66f381daf5d9856caf9dfaa24444f0803a6c5d02e8c28040e3\",\"classification\":\"accept\",\"reason\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=2b093d32576032256e8d97fc504647e43e68e89de840c6944b52d532be0e087e",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714827,\"txIndex\":0,\"txHash\":\"2b093d32576032256e8d97fc504647e43e68e89de840c6944b52d532be0e087e\",\"eventIndex\":0,\"segment\":42016,\"phase\":\"guaranteed\",\"contractAddress\":\"9d93b91942530f66f381daf5d9856caf9dfaa24444f0803a6c5d02e8c28040e3\",\"classification\":\"accept\",\"reason\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=3581d73c8dd3dc5c116eeb80dd70f22a5d127fb3d2d6fa538ec96e22e18e280a",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714931,\"txIndex\":0,\"txHash\":\"3581d73c8dd3dc5c116eeb80dd70f22a5d127fb3d2d6fa538ec96e22e18e280a\",\"eventIndex\":0,\"segment\":13191,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"reject\",\"reason\":\"nonzero-padding\"}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=35858a38a3f507ce06b0e878b79d5b3e183a2bc73cac04e1b193ca5b4712a8d6",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714813,\"txIndex\":0,\"txHash\":\"35858a38a3f507ce06b0e878b79d5b3e183a2bc73cac04e1b193ca5b4712a8d6\",\"eventIndex\":0,\"segment\":19336,\"phase\":\"guaranteed\",\"contractAddress\":\"9d93b91942530f66f381daf5d9856caf9dfaa24444f0803a6c5d02e8c28040e3\",\"classification\":\"accept\",\"reason\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=3bc49f9e2c89d4e51380f3b6ff8d2228cabe56bead23c707e66b202108e8e60b",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714942,\"txIndex\":0,\"txHash\":\"3bc49f9e2c89d4e51380f3b6ff8d2228cabe56bead23c707e66b202108e8e60b\",\"eventIndex\":0,\"segment\":52956,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"accept\",\"reason\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=5921d60d0307851e8f1e159ee49def234d1c66e5f559ebb857c3be0a99b52713",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714972,\"txIndex\":0,\"txHash\":\"5921d60d0307851e8f1e159ee49def234d1c66e5f559ebb857c3be0a99b52713\",\"eventIndex\":0,\"segment\":39547,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"accept\",\"reason\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=5cc3f643dcbd3e17d03a5317a63266877fa513a645bdd51c7aba9b5ff3fc57cc",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714907,\"txIndex\":0,\"txHash\":\"5cc3f643dcbd3e17d03a5317a63266877fa513a645bdd51c7aba9b5ff3fc57cc\",\"eventIndex\":0,\"segment\":64739,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"accept\",\"reason\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=71fb2c2d9ade1a3906ad92b3d245e6578478d58cac52d4f3f4c01fdbea2fc7e2",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714796,\"txIndex\":0,\"txHash\":\"71fb2c2d9ade1a3906ad92b3d245e6578478d58cac52d4f3f4c01fdbea2fc7e2\",\"eventIndex\":0,\"segment\":65300,\"phase\":\"guaranteed\",\"contractAddress\":\"9d93b91942530f66f381daf5d9856caf9dfaa24444f0803a6c5d02e8c28040e3\",\"classification\":\"accept\",\"reason\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=75c43430395cc8608ccad188a9c0cb45051476f2cc7759d46f34f95204cb86c9",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":715109,\"txIndex\":0,\"txHash\":\"75c43430395cc8608ccad188a9c0cb45051476f2cc7759d46f34f95204cb86c9\",\"eventIndex\":0,\"segment\":53948,\"phase\":\"guaranteed\",\"contractAddress\":\"65553c655286664ccb3f69f9313bf725900c46eee2289ae611d18fdf6f90ceb9\",\"classification\":\"accept\",\"reason\":null},{\"height\":715109,\"txIndex\":0,\"txHash\":\"75c43430395cc8608ccad188a9c0cb45051476f2cc7759d46f34f95204cb86c9\",\"eventIndex\":1,\"segment\":53948,\"phase\":\"guaranteed\",\"contractAddress\":\"65553c655286664ccb3f69f9313bf725900c46eee2289ae611d18fdf6f90ceb9\",\"classification\":\"reject\",\"reason\":\"reserved-valtype\"}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=7f7cc752db67acf3a91ce468a404bf0228f019799f9f31d521a54cdf4c8d2fa9",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714624,\"txIndex\":0,\"txHash\":\"7f7cc752db67acf3a91ce468a404bf0228f019799f9f31d521a54cdf4c8d2fa9\",\"eventIndex\":0,\"segment\":35387,\"phase\":\"guaranteed\",\"contractAddress\":\"a3df52605d8b7210aa3e5cdc82de4bb2911975bc42c1a68be77044723b705f21\",\"classification\":\"accept\",\"reason\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=85d6f8a241ceff9935dc1aec51e5c5c1c51818dd0a41ebf7b850e2ff413a5b4d",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":715177,\"txIndex\":0,\"txHash\":\"85d6f8a241ceff9935dc1aec51e5c5c1c51818dd0a41ebf7b850e2ff413a5b4d\",\"eventIndex\":0,\"segment\":44633,\"phase\":\"guaranteed\",\"contractAddress\":\"048ec49aacdde9ef2fee1bd51c651df46d3224578e36a1e89bdbb88842edf0f6\",\"classification\":\"accept\",\"reason\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=86b668c478ea445fbb70ba721adecb4604fe99cc8a2b796a12d1ed4a1a0501aa",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":715004,\"txIndex\":0,\"txHash\":\"86b668c478ea445fbb70ba721adecb4604fe99cc8a2b796a12d1ed4a1a0501aa\",\"eventIndex\":0,\"segment\":56285,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"accept\",\"reason\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=8b9b82cd60b891d9816297c1911ee85b1b780f5b0f6dae7ba77fdf5b11532cd7",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":715026,\"txIndex\":0,\"txHash\":\"8b9b82cd60b891d9816297c1911ee85b1b780f5b0f6dae7ba77fdf5b11532cd7\",\"eventIndex\":0,\"segment\":43712,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"reject\",\"reason\":\"reserved-valtype\"}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=999e6011a3f6a90f3ab62533d949a5154d040ef1b323b894b3b6e21694310dec",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714923,\"txIndex\":0,\"txHash\":\"999e6011a3f6a90f3ab62533d949a5154d040ef1b323b894b3b6e21694310dec\",\"eventIndex\":0,\"segment\":29319,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"accept\",\"reason\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=9e297d8d0312a07d9f03955c41032890a975773c834d4224969feab785443a17",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714996,\"txIndex\":0,\"txHash\":\"9e297d8d0312a07d9f03955c41032890a975773c834d4224969feab785443a17\",\"eventIndex\":0,\"segment\":22282,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"reject\",\"reason\":\"invalid-uri\"}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=9fbed24dda14d449718801b6d11d3a1b8afea64b64b9867a7b46931cfcf3e6f8",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714949,\"txIndex\":0,\"txHash\":\"9fbed24dda14d449718801b6d11d3a1b8afea64b64b9867a7b46931cfcf3e6f8\",\"eventIndex\":0,\"segment\":17523,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"reject\",\"reason\":\"nonzero-padding\"}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=a20cbf24e4f227a1e3f723fce51e16d22f0c378f8270b4c65d5bd5d654b35c35",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714891,\"txIndex\":0,\"txHash\":\"a20cbf24e4f227a1e3f723fce51e16d22f0c378f8270b4c65d5bd5d654b35c35\",\"eventIndex\":0,\"segment\":20446,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"accept\",\"reason\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=a6fff9fb3f034aea393ff37fcd4343c418c3bfcc7cb22c502c1c1a6ffbc55dfd",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714501,\"txIndex\":0,\"txHash\":\"a6fff9fb3f034aea393ff37fcd4343c418c3bfcc7cb22c502c1c1a6ffbc55dfd\",\"eventIndex\":0,\"segment\":22981,\"phase\":\"guaranteed\",\"contractAddress\":\"98a90519419e2ebb514b7c6ce87ee7f6f4f9753d9ee6f533c5d1c25b9d437dcf\",\"classification\":\"accept\",\"reason\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=a865ad4799b76eb9233affd9dd7da44c460105a7d5566b27bc063c6e11612e44",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714703,\"txIndex\":0,\"txHash\":\"a865ad4799b76eb9233affd9dd7da44c460105a7d5566b27bc063c6e11612e44\",\"eventIndex\":0,\"segment\":60715,\"phase\":\"guaranteed\",\"contractAddress\":\"f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6\",\"classification\":\"accept\",\"reason\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=add090cf2b57b55ccee5e20c0ff4e0bdabbb9f3a3f341e4d252ba88cf35c1785",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714899,\"txIndex\":0,\"txHash\":\"add090cf2b57b55ccee5e20c0ff4e0bdabbb9f3a3f341e4d252ba88cf35c1785\",\"eventIndex\":0,\"segment\":39552,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"reject\",\"reason\":\"no-records\"}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=b69041011ae6cbf9708d7abf3526fd13b79c842289b950a48039542e19cfffed",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714980,\"txIndex\":0,\"txHash\":\"b69041011ae6cbf9708d7abf3526fd13b79c842289b950a48039542e19cfffed\",\"eventIndex\":0,\"segment\":2382,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"reject\",\"reason\":\"invalid-utf8\"}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=ce45f95fde9706739139fbf0f53dd0e7b38dcd16f492f014fceff5c70e28a26f",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714696,\"txIndex\":0,\"txHash\":\"ce45f95fde9706739139fbf0f53dd0e7b38dcd16f492f014fceff5c70e28a26f\",\"eventIndex\":0,\"segment\":51428,\"phase\":\"guaranteed\",\"contractAddress\":\"f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6\",\"classification\":\"accept\",\"reason\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=d6fba088b353296bb3ad4616172edd41e6d41713cdb4105dbdac72803a037c8c",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":715012,\"txIndex\":0,\"txHash\":\"d6fba088b353296bb3ad4616172edd41e6d41713cdb4105dbdac72803a037c8c\",\"eventIndex\":0,\"segment\":30781,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"reject\",\"reason\":\"bad-null-length\"}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=e4ec50b55430e0bf621e6c13c9735fd5ccb5afa43e67cf1a1722d1619786b5a2",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":715019,\"txIndex\":0,\"txHash\":\"e4ec50b55430e0bf621e6c13c9735fd5ccb5afa43e67cf1a1722d1619786b5a2\",\"eventIndex\":0,\"segment\":4548,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"accept\",\"reason\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=e71ebc1ab0fc4cde6ba9048994824401dceb6270e57c3cc169298a8cd999628c",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714988,\"txIndex\":0,\"txHash\":\"e71ebc1ab0fc4cde6ba9048994824401dceb6270e57c3cc169298a8cd999628c\",\"eventIndex\":0,\"segment\":53015,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"accept\",\"reason\":null}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=ea3e64f05d57dab178dc65b420857036fcf75809b4123a2525a0312c77a3a142",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714956,\"txIndex\":0,\"txHash\":\"ea3e64f05d57dab178dc65b420857036fcf75809b4123a2525a0312c77a3a142\",\"eventIndex\":0,\"segment\":23795,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"reject\",\"reason\":\"invalid-utf8\"}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=eb7413fcb12bb7d5516d17f2676b8263898f7b5b351bdd1fdbe1bdb5c71e1e3e",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714964,\"txIndex\":0,\"txHash\":\"eb7413fcb12bb7d5516d17f2676b8263898f7b5b351bdd1fdbe1bdb5c71e1e3e\",\"eventIndex\":0,\"segment\":30907,\"phase\":\"guaranteed\",\"contractAddress\":\"23aa27cbc948fb6df9072750b879e9b7f78206f77c638674a8e01b418ee3355b\",\"classification\":\"reject\",\"reason\":\"bad-kind\"}],\"nextCursor\":null}"
+  },
+  {
+   "path": "/v1/events?tx=ed5b20cd4e071de0713079bdfe8c46095baa863b0a1318598be9f8da9a4f7e7a",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer"
+   },
+   "body": "{\"items\":[{\"height\":714712,\"txIndex\":0,\"txHash\":\"ed5b20cd4e071de0713079bdfe8c46095baa863b0a1318598be9f8da9a4f7e7a\",\"eventIndex\":0,\"segment\":25830,\"phase\":\"guaranteed\",\"contractAddress\":\"f2d1b6ebfea446cf2624cd498fc585eeb86dddf94e33229ce47107038d2251d6\",\"classification\":\"accept\",\"reason\":null}],\"nextCursor\":null}"
+  }
+ ]
+}
