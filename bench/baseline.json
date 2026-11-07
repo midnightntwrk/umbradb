@@ -1,0 +1,43 @@
+{
+  "umbradb": "0.10.0",
+  "recordedOn": "2026-10-28",
+  "environment": {
+    "node": "v24.9.0",
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpus": 16,
+    "postgresImage": "postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873",
+    "postgresServer": "PostgreSQL 18.6 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
+    "postgresImageId": "sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873"
+  },
+  "method": {
+    "warmup": 50,
+    "iterations": 500
+  },
+  "workloads": {
+    "runner.commitEmptyBlock.pglite": {
+      "unit": "ms",
+      "samples": 500,
+      "min": 4.063499999999294,
+      "max": 8.901290999999219,
+      "mean": 5.394405743999983,
+      "sd": 0.6350677993940327,
+      "cv": 0.11772711018269201,
+      "p50": 5.340208999999959,
+      "p95": 6.467458000000079,
+      "p99": 7.039999999999964
+    },
+    "runner.commitEmptyBlock.postgres": {
+      "unit": "ms",
+      "samples": 500,
+      "min": 7.431082999999489,
+      "max": 156.48220800000126,
+      "mean": 19.142612986000007,
+      "sd": 14.81404004054003,
+      "cv": 0.7738776337051955,
+      "p50": 11.567915999999968,
+      "p95": 45.633083000000624,
+      "p99": 69.2333749999998
+    }
+  }
+}

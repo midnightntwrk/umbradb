@@ -7,13 +7,17 @@
     "noUncheckedIndexedAccess": true,
     "noEmit": true,
     "esModuleInterop": true,
+    "resolveJsonModule": true,
     "skipLibCheck": true,
     "declaration": false
   },
   "include": [
     "src/**/*.ts",
     "test/**/*.ts",
-    "chain-archive-sync/**/*.ts",
-    "bench/**/*.ts"
+    "bench/**/*.ts",
+    "tools/**/*.ts",
+    "browser/**/*.ts",
+    "vitest.config.ts",
+    "vitest.mutation.config.ts"
   ]
 }

@@ -1,6 +1,6 @@
-# Proposal — v1.0.0: Formal completion (`formal-completion`)
+# Proposal — v1.1.0: Formal completion (`formal-completion`)
 
-> **Status:** Proposed for the 1.0.0 program (optional hardening). Change id `v1.1.0-formal-completion`, capability `formal-completion`. Authored by an Opus 5 write-council (3 facets) → consolidation → an audit council (2 Opus 5 + GPT-5.6 Sol capstone) → this audit-reframed v2. Full analysis: `Formal/FORMAL-COMPLETION-ROADMAP.md`; audit trail: `Formal/FORMAL-COMPLETION-AUDIT.md`; gap map: `Formal/FORMALIZATION_ROADMAP.md`.
+> **Status:** Proposed (optional hardening, deferred past 1.0.0 by the Option-A ruling of `docs/releases/v0.9.5.md`). Change id `v1.1.0-formal-completion`, capability `formal-completion`. Authored by an Opus 5 write-council (3 facets) → consolidation → an audit council (2 Opus 5 + GPT-5.6 Sol capstone) → this audit-reframed v2. Full analysis: `Formal/FORMAL-COMPLETION-ROADMAP.md`; audit trail: `Formal/FORMAL-COMPLETION-AUDIT.md`; gap map: `Formal/FORMALIZATION_ROADMAP.md`.
 
 ## Governance framing (read first)
 

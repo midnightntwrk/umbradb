@@ -1,6 +1,7 @@
 # Exact-fingerprint suppressions for `gitleaks detect` (format: commit:path:rule:line).
 #
-# These are the ONLY suppressed findings. G19 deliberately performs no git-history rewrite, so the
+# These are the ONLY suppressed findings: the Preview wallet's two lines and the two WebSocket keys
+# below. G19 deliberately performs no git-history rewrite, so the
 # valueless Preview testnet wallet secret committed before it was untracked recurs on every
 # full-history scan. Pinning fingerprints suppresses precisely those occurrences: a different
 # secret, the same file at a different commit, or either field in the working tree still fails.
@@ -16,3 +17,14 @@
 # planting a fresh hex value in EITHER field of the tracked .example template fails the gate.
 be646fcff58052a77e848914a79ccef2279cf78f:nix/midnight-env/test-wallets/preview-test-wallet.json:umbradb-wallet-seed-hex:4
 be646fcff58052a77e848914a79ccef2279cf78f:nix/midnight-env/test-wallets/preview-test-wallet.json:umbradb-wallet-seed-hex:5
+#
+# Two test helpers open a WebSocket by hand and send a `Sec-WebSocket-Key` header holding the example
+# key of RFC 6455 (base64 of "the sample nonce"): a per-connection nonce, never a secret, which the
+# stock generic-api-key rule matches. Pinned to the commits that added the lines; a later edit of
+# either line is a new finding, and the helper should then build its key at run time. The third
+# entry is this file's own earlier comment (commit cccdb2e), which quoted the key; never quote it here.
+# Verified: with these entries a full-history scan, and one of the pull request's merge commit,
+# report no leaks.
+ba38a29fea6c4291859432520ddcbb30b1eb1b1d:test/library/mounted-fixtures.ts:generic-api-key:122
+770fcfd3a41c3c6fcf26cb93e05c13803ec8949e:test/library/start-umbradb.test.ts:generic-api-key:421
+cccdb2eb3878c624f59fca8328430b355a6cb280:.gitleaksignore:generic-api-key:21

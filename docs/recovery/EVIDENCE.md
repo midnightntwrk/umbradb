@@ -29,6 +29,11 @@ captured output is recorded below.*
 | Package version at run time | `1.0.0` (the tree was later re-versioned to `0.9.5`; no `src/` or `test/` change accompanied it) |
 | Result | **2 passed / 0 failed**, exit 0 |
 
+Note (added 2026-10-29): at `8a684fc` the test setup started PostgreSQL from the tag `postgres:17-alpine` alone, not a
+digest (`test/postgres/setup.ts:26`), so the "digest-pinned" above is not true of this run and its image cannot be
+identified after the fact. Every PostgreSQL container has started from one digest-pinned image
+(`test/postgres-image.ts`) only since 2026-10-24.
+
 ## Chain / wallet state at run time
 
 | Field | Value |

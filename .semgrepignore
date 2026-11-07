@@ -1,0 +1,32 @@
+# Path ignores for the opengrep SAST scan in .github/workflows/scan.yaml.
+#
+# ASCII ONLY: opengrep's ignore-file parser (semgrep/ignores.py) decodes this file as ASCII and
+# exits 2 on any other byte, which kills the whole scan stage. No em dashes, no curly quotes.
+#
+# This file REPLACES opengrep's built-in default ignore list, so that list is restated first.
+# Dropping it is how test/ (never scanned by default) once produced sixty-odd alerts in one run.
+:include .gitignore
+.git/
+node_modules/
+build/
+dist/
+vendor/
+.env/
+.venv/
+.tox/
+*.min.js
+test/
+tests/
+*_test.go
+.semgrep
+.semgrep_logs
+
+# Prose and generated reports. Several registry rules are bare regexes over raw bytes: the
+# insecure-websocket rule matches the plain "ws" URL scheme anywhere but localhost, in comments,
+# in documentation, and in this file itself if it were spelled out here. That scheme is accepted
+# by design (src/config/core-settings.ts, NODE), so every mention in prose is a false positive.
+# Code stays scanned: comments and messages there write the schemes as "ws or wss://", which the
+# rule does not match. A `nosemgrep: <rule-id>` marker does NOT stop a GitHub alert (the SARIF
+# keeps marked findings, and GitHub ignores the suppression); see docs/issues/00086.
+*.md
+graphify-out/

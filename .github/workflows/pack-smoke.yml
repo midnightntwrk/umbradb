@@ -1,20 +1,16 @@
 name: Pack-install smoke test
 
-# G1 (openspec/changes/v1.0.0-api-surface, task 7.1): proves the PACKED tarball's frozen surface
-# resolves for a real consumer. It `npm pack`s UmbraDB, installs the tarball into a throwaway scratch
-# project, and from that project imports `{ createClient, runMigrations, PgTemporalKV, StorageError }`
-# from "umbradb", runs `runMigrations` + a `PgTemporalKV.put`/`get` round-trip against a
-# Testcontainers Postgres, asserts the deep import `umbradb/src/postgres/temporal-kv.js` is blocked by
-# the strict `exports` map, and asserts `dist/index.d.ts` ships in the tarball.
+# The packed-tarball smoke test (`test/smoke/pack-install.mjs`; openspec/changes/core-arch task 17.3, design.md §12
+# and §13): it `npm pack`s UmbraDB, installs the tarball in a throwaway project and, from there, type-checks a consumer
+# of every export of design.md §12, checks that 0.9.5's retired names and TransactionHistory's fail to type-check, that
+# a deep import is blocked by the strict `exports` map, that the tarball ships the vendored ledger packages and nothing
+# of legacy/, runs the installed `umbradb` command (usage, run, backup, restore, config check), and syncs a tape on
+# PostgreSQL in Docker with `umbradb run` and `core-block-parsed` enabled.
 #
-# This is a SEPARATE workflow (not the required conformance gate) so its `npm pack` + tarball install
-# never runs inside `vitest run`. Like `bench-smoke.yml` it uses Testcontainers (@testcontainers/
-# postgresql), which starts its own disposable Postgres 17 container via the Docker daemon present on
-# ubuntu-latest runners -- no `services: postgres` block is needed. The Docker-INDEPENDENT oracles
-# (npm pack, install, root import, deep-import rejection, .d.ts present, and a tsc consumer compile of
-# the shipped declarations) run UNCONDITIONALLY; only the migrate + round-trip needs Docker. In CI a
-# MISSING Docker FAILS the smoke script (a required workflow must never report green having tested
-# nothing); a local no-Docker run skips ONLY the round-trip.
+# A SEPARATE workflow (not the required conformance gate), so its `npm pack` and install never run inside `vitest
+# run`. Testcontainers starts its own PostgreSQL through the runner's Docker daemon (no `services:` block). Every
+# oracle but the tape sync runs unconditionally; in CI a missing Docker FAILS the smoke (a required workflow must never
+# report green having tested nothing); a local run without Docker skips only the sync.
 
 permissions:
   contents: read
@@ -46,9 +42,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Packed-tarball install smoke test (build -> pack -> install -> import + round-trip)
-        # `npm run test:smoke` runs `npm run build` first (task 3 dist dependency), then the standalone
-        # smoke harness. The pack/install/import/type-declaration oracles run unconditionally; the
-        # migrate + round-trip needs Docker (present on ubuntu-latest). In CI (`process.env.CI`) a
-        # missing Docker FAILS the job rather than skipping, so a green run always exercised the surface.
+      - name: Packed-tarball install smoke test (build -> pack -> install -> surface, command, tape sync)
+        # `npm run test:smoke` runs `npm run build` first, then the smoke script. The tape sync needs Docker
+        # (present on ubuntu-latest); in CI (`process.env.CI`) a missing Docker FAILS the job rather than skipping.
         run: npm run test:smoke

@@ -1,11 +1,5 @@
 import Mathlib.Util.AssertNoSorry
 import UmbraDBFormalTest.APISmoke
-import UmbraDBFormalTest.Checkpoint.ChunkMap
-import UmbraDBFormalTest.Checkpoint.Projection
-import UmbraDBFormalTest.TemporalKV.Model
-import UmbraDBFormalTest.TemporalKV.Laws
-import UmbraDBFormalTest.TemporalKV.Retention.Model
-import UmbraDBFormalTest.TemporalKV.Retention.Laws
 import UmbraDBFormalTest.Watermarks.Model
 import UmbraDBFormalTest.Watermarks.Laws
 
@@ -15,6 +9,10 @@ import UmbraDBFormalTest.Watermarks.Laws
 The source scanner is a fast first line of defense, but source text alone cannot establish an
 environment property: a command elaborator can add a declaration without spelling a standalone
 forbidden keyword. This module therefore audits the elaborated environment on every default build.
+
+The TemporalKV (T1–T5, retention) and Checkpoint (C1) modules were retired with the 0.9.5 parts they
+model (core-arch task 17.2, `openspec/changes/core-arch/design.md` §13); the Watermarks laws (W1, the
+cursor table's law) and `APISmoke` remain, and every module of both libraries is imported here.
 -/
 
 namespace UmbraDBFormalTest.Trust

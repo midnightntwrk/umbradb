@@ -71,9 +71,10 @@ jobs:
         run: npm run typecheck
 
       - name: npm audit -- blocking, runtime dependencies only (G18 D3)
-        # Runtime deps are exactly `postgres` + `zod` (package.json). --omit=dev keeps the large dev
-        # graph (vitest/testcontainers/stryker/...) out of the blocking gate, so a dev-only advisory
-        # cannot fail it; a HIGH/CRITICAL advisory in a RUNTIME dep does.
+        # Runtime deps are exactly `@electric-sql/pglite`, `postgres`, `typescript`, `ws` + `zod`
+        # (package.json). --omit=dev keeps the large dev graph (vitest/testcontainers/stryker/esbuild/...)
+        # out of the blocking gate, so a dev-only advisory cannot fail it; a HIGH/CRITICAL advisory in a
+        # RUNTIME dep does.
         run: npm audit --audit-level=high --omit=dev
 
       - name: npm audit -- full graph, NON-blocking (developer visibility)
@@ -107,7 +108,7 @@ jobs:
         # the night key and address are derived from -- was previously undetectable.
         run: gitleaks detect --source . --config .gitleaks.toml --redact --no-banner --log-opts="--all"
 
-      - name: Image pins agree across flake.nix and start-stack.sh (G18 — audit gap)
+      - name: Image pins agree across flake.nix and start-stack.sh, and the PostgreSQL test image is the reviewed pin (G18 — audit gap; Q82)
         # The Trivy job derives its scan targets from flake.nix ONLY, and it runs on schedule /
         # workflow_dispatch. start-stack.sh independently hard-codes the references that actually
         # launch the containers. So a digest changed in start-stack.sh alone left flake.nix — and
@@ -154,6 +155,25 @@ jobs:
             fi
             echo "${image}: pins agree — ${flake_refs[0]}"
           done
+
+          # PostgreSQL (owner decision Q82, openspec/changes/core-arch A148): every PostgreSQL container the
+          # tests, their Testcontainers helpers, the benchmarks and the pack smoke test start is the one
+          # digest-pinned image of test/postgres-image.ts, and it must be this one, so a bump is reviewed
+          # here too. test/dependencies/postgres-image.test.ts (conformance gate) fails if any other file
+          # names a different PostgreSQL image or starts a container from anything but that constant.
+          EXP_POSTGRES="postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873"
+          # Comment lines dropped (//, /*, *): only the constant's live code counts.
+          mapfile -t pg_refs < <(grep -vE '^[[:space:]]*(//|/\*|\*)' test/postgres-image.ts | grep -oE "postgres(:[A-Za-z0-9._-]+)?(@sha256:[0-9a-f]{64})?" | grep -E "[:@]" | sort -u)
+          if [ "${#pg_refs[@]}" -ne 1 ]; then
+            echo "::error::expected exactly 1 distinct PostgreSQL image pin in test/postgres-image.ts, found ${#pg_refs[@]}"; fail=1
+          elif [ "${pg_refs[0]}" != "$EXP_POSTGRES" ]; then
+            echo "::error::the PostgreSQL image pin diverges — test/postgres-image.ts is not the reviewed pin."
+            echo "::error::  test/postgres-image.ts:  ${pg_refs[0]}"
+            echo "::error::  expected:                ${EXP_POSTGRES}"
+            fail=1
+          else
+            echo "PostgreSQL image: pin agrees — ${pg_refs[0]}"
+          fi
           exit "$fail"
 
       - name: flake.lock change-control on direct push (G18 D6 — audit gap)
@@ -178,7 +198,7 @@ jobs:
 
           # A MERGE commit landing on main is the prescribed roll-forward path: the PR-side check
           # above already adjudicated it (label present, or the PR failed). Rejecting it here would
-          # fail the very workflow the guideline tells contributors to use. Enforce only against a
+          # fail the very workflow contributors are told to use. Enforce only against a
           # NON-merge direct push, which bypasses PR review entirely.
           if [ "$(git rev-list --parents -n 1 "$GITHUB_SHA" | wc -w)" -gt 2 ]; then
             echo "flake.lock changed via a MERGE commit — already adjudicated by the PR-side check; ok"
