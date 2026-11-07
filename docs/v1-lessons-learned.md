@@ -1,5 +1,10 @@
 # UmbraDB V1.0.0 — Lessons-Learned Living Log
 
+> **History (2026-10-21).** The release-retro and iteration-2 intake process this log served was
+> retired when the workflow moved to `AGENTS.md`. The entries below are kept as a record; new events go
+> to `AUTONOMOUS_RUN_LOG.md`, the single run log. Section references below point to the guideline as
+> it stood before its 2026-10-21 compaction (git history).
+
 *Companion to `v1-implementation-guideline.md` §5. This is the durable, append-only, blameless log for
 the entire 1.0.0 release. It is seeded empty but ready to fill during the run. Governed by
 guideline §5.1–§5.6; the eventual canonical home is `docs/retro/v1.0.0.md` (+ the standing format in
@@ -39,7 +44,7 @@ Write in "how", not "why". No single-root-cause narratives. This log is never pr
   owned, due-dated, tracked, and tagged `mitigative` (this gap) vs `preventative` (this class of
   failure)**. A preventative action MUST name the guideline condition / gate / test / auditor-persona
   to strengthen. **Owner convention:** a human owner is named directly; an **agent** owner is recorded as
-  `role + model + round-id` (e.g. `adversarial-persona / Codex-GPT-5.6-Sol / round-3`) so ownership never
+  `role + model + round-id` (e.g. `adversarial-persona / <exact Codex model id> / round-3`) so ownership never
   defaults to nobody (guideline §5.2).
 - **Four classes, always classified** (§5.3): `defect-escape` · `gate-miss` · `agent-workflow-friction`
   · `rework-cause`.
@@ -269,7 +274,7 @@ prior entries.*
 
 ---
 
-## Iteration-2 intake
+## Iteration-2 intake (retired 2026-10-21 — kept as history, not a gate)
 
 *The entry gate for iteration-2 spec drafting. Iteration 2 MUST NOT begin until every `preventative`
 action item below is either LANDED (a concrete workflow change committed) or RE-DEFERRED

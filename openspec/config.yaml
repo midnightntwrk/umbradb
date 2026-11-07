@@ -34,6 +34,14 @@ rules:
   proposal:
     - Every proposal must state what it does NOT cover (explicit non-goals),
       matching this project's existing proposal.md style.
+    - One change is one independently deliverable feature, landed by one
+      pull request. If the work bundles more than one, split it into
+      separate changes now, at spec time; changes may depend on or be
+      chained after each other, but each must stand on its own.
+    - Every proposal opens with a status line, `> **Status:** <state>`,
+      where <state> is one of Proposed, Approved, In progress, Blocked,
+      Implemented, or Archived, optionally followed by a short note. Update
+      it the moment the state changes, not at the end.
   design:
     - Cite design/design.md, design/design-interfaces.md, and
       Formal/STORAGE_ALGEBRA.md by section number wherever a new design

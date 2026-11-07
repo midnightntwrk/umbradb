@@ -1,0 +1,75 @@
+name: Knowledge graph
+
+# Keeps graphify-out/ (the committed knowledge graph, see CLAUDE.md "Keep the knowledge graph
+# current") honest. graphify-out/ is refreshed at close-out, not on every change, so a merely
+# STALE graph is a warning here, never a failure. What fails:
+#   - a graph.json that `npm run graph:refresh` did not write (bare `graphify update` output has
+#     no corpus_fingerprint and is one line of JSON), that is malformed, or that is not in
+#     canonical form;
+#   - a fresh graph that differs from what the pinned pipeline rebuilds from this tree (hand
+#     edits, another graphify or Python version);
+#   - a pull request that changes graphify-out/ but leaves it stale for the PR's own tree.
+# The refresh is deterministic (a from-scratch rebuild over a snapshot of the tracked files, fixed
+# graphify + dependency hashes, Python 3.12, PYTHONHASHSEED=0; scripts/graphify/), which is what
+# makes the byte-for-byte reproducibility check possible.
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  # Pull requests by number, pushes by ref: a fork's PR from a branch named `main` must not share
+  # (and cancel) the group of pushes to this repository's main.
+  group: graph-${{ github.workflow }}-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  graph:
+    # Pinned rather than ubuntu-latest: Python 3.12 is part of the graph's pin and ubuntu-24.04
+    # ships it as python3.12 (run.sh builds the hash-verified environment with it).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # The PR head, not the merge commit: a graph describes the tree it was committed with.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Full history so a PR's changes to graphify-out/ can be found against its base.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check graphify-out/
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -uo pipefail
+          # GitHub runs this step under `bash -e`; capture the status instead of letting a
+          # stale (1) or invalid (2) result end the step before it is classified.
+          status=0
+          bash scripts/graphify/run.sh check || status=$?
+          if [ "$status" -eq 0 ]; then
+            bash scripts/graphify/run.sh refresh || exit 1
+            if [ -n "$(git status --porcelain -- graphify-out/)" ]; then
+              git status --short -- graphify-out/
+              echo "::error::graphify-out/ is fresh but is not what npm run graph:refresh produces from this tree; rerun it and commit the result"
+              exit 1
+            fi
+            exit 0
+          fi
+          # 2 = invalid (not written by graph:refresh): always a failure.
+          [ "$status" -eq 1 ] || exit "$status"
+          touched=""
+          if [ -n "$BASE_REF" ]; then
+            touched="$(git diff --name-only "$(git merge-base "origin/$BASE_REF" HEAD)" HEAD -- graphify-out/)"
+          fi
+          if [ -n "$touched" ]; then
+            echo "::error::this change updates graphify-out/ but leaves it stale; run npm run graph:refresh and commit the result"
+            exit 1
+          fi
+          echo "::warning::graphify-out/ is stale; refresh it at close-out with npm run graph:refresh"

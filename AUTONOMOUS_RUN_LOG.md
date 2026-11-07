@@ -395,3 +395,43 @@ ENTIRE `Formal/Lean` tree (rejects `sorry`/`admit`/`axiom`/`unsafe`, then `lake 
 (`attempt_applied_version`, `attempt_conflict_iff_snapshot_mismatch`, `dual_address_agrees` in
 `TemporalKV/Laws.lean`) are also gated but not part of the frozen commitment surface — no longer claimed as the
 entire gated set.
+
+---
+
+## Change: process — guideline corrections, model floors, workflow moved to `AGENTS.md` (2026-10-20 → 10-21)
+
+Orchestrated by `orchestrator / claude-opus-5-5 / review-v2`. Not yet committed when written.
+
+### Rework (class 4)
+
+- **R1 — Three Codex review rounds on the guideline amendment** (three cold personas plus a fix-check
+  lane, `gpt-6.1-sol`): round 1 raised 4 BLOCKs, round 2 raised 4 (the fix check confirmed every
+  round-1 fix), round 3 raised 5 — two from round-2 fixes, two not. *Second story:* each round's fixes
+  added new rules, chiefly the audit termination rule itself, which the next fresh reviewer could probe,
+  so the findings drifted from substance to the new rule's edge cases. The owner stopped the loop and
+  adopted bounded review. *Preventative (done):* `AGENTS.md` bounded review — one round, one targeted
+  fix check, then the owner decides.
+- **R2 — Bounded review of the workflow change:** spec compliance PASS (`claude-opus-5-5`); cold
+  adversarial BLOCK and release BLOCK (`gpt-6.1-sol`). Blocking findings fixed: review not bound to the
+  final tree, a circular release-entry condition, and this missing run-log entry; clear non-blocking
+  findings fixed alongside. A targeted fix check follows; the owner decides what remains.
+
+### Workflow friction (class 3)
+
+- **F1 — The review patch omitted the `CLAUDE.md` change.** Its diff was a single hunk spanning both
+  the graph section (another session's uncommitted work) and the replaced review policy, and the
+  orchestrator's filter kept only hunks starting at line 39 or later. Both Codex lanes caught it; they
+  had read the working tree, so the round still covered the change. *Preventative:* build review
+  patches with `git diff -U0` or per-section snapshots, never by hunk start line.
+- **F2 — A heads-up to the graph-refresh session expired undelivered** (the two sessions run in
+  different permission modes). That session was paused, so no edits collided. *Preventative:* confirm
+  delivery before editing a file another session has uncommitted work in, or ask the owner to relay.
+- **R3 — Graph tooling: from-scratch rebuild and three fix checks** (`orchestrator / claude-opus-5-5`;
+  reviews by `gpt-6.1-sol`). The graph-refresh tooling another session built drew three BLOCK verdicts
+  (10 findings). On the owner's decision the refresh became a from-scratch rebuild over a snapshot of
+  the tracked files, dropping the frozen LLM-extracted layer. Fix check 1: 9 of 10 fixed, 3 new issues;
+  fix check 2: 3 of 4 fixed, 3 new edge cases; fix check 3, the last by the owner's rule: PASS.
+  *Second story:* the snapshot fixed the big findings at once, but every new mechanism it added (a
+  temp directory, a git index, an exporter return value) met a pinned-graphify behavior the previous
+  round had not read, so each check found narrower cases. *Follow-up (done):* the owner capped the
+  loop at one last check; local and Linux rebuilds are byte-identical.

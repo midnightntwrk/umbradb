@@ -24,7 +24,9 @@ C2b is **deferred, not front-loaded**: register row "conditional on a GC pass ru
 
 ## Definition-of-done for a gate to CLOSE
 1. Universal green (tasks.md) + the **six** anti-vacuity criteria (incl. the `_can_violate` witness and the pinned-signature manifest entry).
-2. Both Opus auditors (spec-faithfulness + scope-honesty) approve.
+2. Both Claude auditors (spec-faithfulness + scope-honesty; latest Opus model or better) approve, or
+   the owner accepts each finding still open, with a written reason, under `AGENTS.md`'s bounded
+   review.
 3. The `law-manifest.json` entry + faithfulness-ledger row exist; negative CI control (weakening the theorem fails CI) is green.
 4. No widening of `permittedProjectAxioms`; `#audit_umbradb_trust` allowlist unchanged.
 
