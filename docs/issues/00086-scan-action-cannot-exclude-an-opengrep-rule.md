@@ -27,6 +27,19 @@ In this repository `ws://` is an accepted node-URL scheme by design (`src/config
   comments), `README.md:28`, `docs/THREAT_MODEL.md:288` (markdown), before the suppressions
   this issue was recorded alongside.
 
+Two further constraints, found by reproducing the scan locally (semgrep 1.184, the fork base,
+with the registry rules at their registry ids):
+
+- A repository `.semgrepignore` REPLACES the scanner's built-in default ignore list
+  (`node_modules/`, `build/`, `dist/`, `vendor/`, `test/`, `tests/`, `*.min.js`, ...), so the
+  defaults must be restated or never-scanned paths such as `test/` suddenly alert; one run on
+  the core-arch branch produced 116 alerts this way.
+- A `nosemgrep: <rule-id>` marker removes the finding from the scanner's own report, but the
+  SARIF still lists it with `suppressions: [{kind: inSource}]`, and GitHub code scanning opens
+  an alert for suppressed results all the same (observed: alert 118). So every false positive
+  outside an ignored path needs a one-time GitHub dismissal, marker or not, and the marker's
+  only lasting value is documenting the line and keeping the scanner's console report clean.
+
 ## Suggested fix
 
 Add an `opengrep_exclude_rules` input (comma-separated rule ids) to
