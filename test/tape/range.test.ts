@@ -357,7 +357,7 @@ describe("recordRange: gentle with the node — a fixed concurrency, retries wit
   it("refuses options it cannot record with", async () => {
     const base: RangeOptions = { node: "ws://127.0.0.1:1", from: 0, to: 1 };
     const rows: readonly [Partial<RangeOptions>, string][] = [
-      [{ node: "http://x" }, "the node must be a ws:// or wss:// URL"],
+      [{ node: "http://x" }, "the node must be a ws or wss:// URL"],
       [{ from: -1 }, "from must be a height (a safe integer from 0)"],
       [{ from: 1.5 }, "from must be a height (a safe integer from 0)"],
       [{ to: Number.MAX_SAFE_INTEGER + 1 }, "to must be a height (a safe integer from 0)"],

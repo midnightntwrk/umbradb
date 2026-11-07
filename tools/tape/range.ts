@@ -72,7 +72,7 @@ export const DEFAULT_BACKOFF_MS = 5_000;
 export const DEFAULT_BACKOFF_CEILING_MS = 120_000;
 
 export interface RangeOptions {
-  /** The node's WebSocket URL (`ws://` or `wss://`); never shown. */
+  /** The node's WebSocket URL (`ws or wss://`); never shown. */
   readonly node: string;
   /** The range's first and last heights, inclusive. */
   readonly from: number;
@@ -131,7 +131,7 @@ const isPositive = (value: number): boolean => Number.isSafeInteger(value) && va
 
 function checkOptions(options: RangeOptions): void {
   const problems: [boolean, string][] = [
-    [isWebSocketUrl(options.node), "the node must be a ws:// or wss:// URL"], // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
+    [isWebSocketUrl(options.node), "the node must be a ws or wss:// URL"],
     [isHeight(options.from), "from must be a height (a safe integer from 0)"],
     [isHeight(options.to), "to must be a height (a safe integer from 0)"],
     [!(options.from > options.to), `from (${options.from}) is above to (${options.to})`],

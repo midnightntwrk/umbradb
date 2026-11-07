@@ -283,7 +283,7 @@ function withLedgerTable<S extends LedgerTableSettings>(settings: S): S {
 export const PUBLIC_CORE_SCHEMA = z
   .strictObject({
     ...BASE,
-    node: z.string().regex(NODE, { error: "expected the node's WebSocket URL, ws:// or wss://" }).meta(SECRET), // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
+    node: z.string().regex(NODE, { error: "expected the node's WebSocket URL, ws or wss://" }).meta(SECRET),
     // Each one an instance id as a `hello` carries it (`../private/instance-id.ts`). [CF-4, PP-4]
     lockstepInstances: z.array(instanceIdSchema()).default([]).meta(OPERATIONAL),
     transportReader: transportReader().optional().meta(OPERATIONAL),

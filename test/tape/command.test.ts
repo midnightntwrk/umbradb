@@ -108,7 +108,7 @@ describe("the tape command", { timeout: TEST_TIMEOUT_MS }, () => {
     expect(await runTapeCommand(["record", "--node", "https://example.test", "--out", join(directory, "t")], url)).toBe(
       2,
     );
-    expect(url.errors).toEqual(["the tape builder's node must be a ws:// or wss:// URL"]);
+    expect(url.errors).toEqual(["the tape builder's node must be a ws or wss:// URL"]);
   });
 
   it("record: points the client at the builder, records until stopped, writes the tape, prints its id", async () => {

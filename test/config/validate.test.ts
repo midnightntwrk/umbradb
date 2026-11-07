@@ -613,7 +613,7 @@ const A28: readonly Row[] = [
     name: "a node that is not a WebSocket URL",
     rule: "settings-schema",
     config: () => withCore({ ...CORE_SETTINGS, node: "http://127.0.0.1:9944" }),
-    findings: [{ path: "entries[0].config.node", entry: core0, field: "node", says: ["ws://", "wss://"] }],
+    findings: [{ path: "entries[0].config.node", entry: core0, field: "node", says: ["ws or wss://"] }],
   },
   {
     name: "an unknown field inside a core setting",

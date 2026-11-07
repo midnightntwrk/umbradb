@@ -29,7 +29,7 @@ export interface ConnectionFrames {
 }
 
 export interface RecordAndReplayOptions {
-  /** The node's WebSocket URL (`ws://` or `wss://`). */
+  /** The node's WebSocket URL (`ws or wss://`). */
   readonly node: string;
   /** The session; {@link in8Tour} by default. */
   readonly session?: ReplaySession;

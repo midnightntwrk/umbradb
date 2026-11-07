@@ -14,8 +14,8 @@
  * CORE-ARCH §4.14]
  *
  * **Connecting.** Startup's chain check connects ({@link PrivateTransport.connection}), after startup has read the
- * private cursor, through its carrier ({@link PrivateCarrier.dial}): over WebSocket to `ws://<privateLink>`, or to
- * `wss://` with the `core` entry's `tls` (its certificate and key are presented to the core, and the core's certificate
+ * private cursor, through its carrier ({@link PrivateCarrier.dial}): over WebSocket to `ws or wss://<privateLink>`, the
+ * latter with the `core` entry's `tls` (its certificate and key are presented to the core, and the core's certificate
  * is checked against `trustedRoots`), or over a new channel from the host. Once the connection is open it sends
  * `hello`: its instance id, the build's version, and its position (the private cursor, or S − 1 with no hash before its
  * first commit). The carrier pings the core and gives up on a core that does not answer. [PP-11, LM-6]

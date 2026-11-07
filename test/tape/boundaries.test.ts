@@ -127,7 +127,7 @@ describe("readBoundaries", () => {
   });
 
   it("refuses options it cannot read with", async () => {
-    await expect(readBoundaries({ node: "https://x" })).rejects.toThrow("the node must be a ws:// or wss:// URL");
+    await expect(readBoundaries({ node: "https://x" })).rejects.toThrow("the node must be a ws or wss:// URL");
     await expect(readBoundaries({ node: "ws://127.0.0.1:1", step: 0 })).rejects.toThrow("step must be a positive integer");
     await expect(readBoundaries({ node: "ws://127.0.0.1:1", concurrency: 0 })).rejects.toThrow(
       "concurrency must be a positive integer",

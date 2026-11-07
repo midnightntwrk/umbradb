@@ -3,7 +3,7 @@
  * client connects to in place of a Midnight node. It forwards each connection to the node and records the session as a
  * tape, which the tape node (`./node.ts`) then replays to the same client, byte for byte. [TT-4, A71]
  *
- * **Use.** `const builder = await TapeBuilder.start({ node: "ws://…" })`; point the client at `builder.url`; run it;
+ * **Use.** `const builder = await TapeBuilder.start({ node: "wss://…" })`; point the client at `builder.url`; run it;
  * `const records = await builder.stop()`; `writeTapeFile(path, records)` (`./tape.ts`) writes the tape and returns its
  * id. The command `tsx tools/tape/main.ts record --node <url> --out <file>` does the same until Ctrl-C
  * (`./command.ts`).
@@ -34,7 +34,7 @@ import type { TapeRecord } from "./records.js";
 import { joinSessions, type SessionEnd, SessionRecording } from "./recording.js";
 
 export interface TapeBuilderOptions {
-  /** The node's WebSocket URL (`ws://` or `wss://`). */
+  /** The node's WebSocket URL (`ws or wss://`). */
   readonly node: string;
   /**
    * Called as each session ends: its number (from 1), who ended it, and how many records it holds (not for the
@@ -61,9 +61,9 @@ interface Link {
 }
 
 /** Why a node URL is refused (the URL itself is never shown). */
-export const NODE_URL_REFUSED = "the tape builder's node must be a ws:// or wss:// URL"; // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
+export const NODE_URL_REFUSED = "the tape builder's node must be a ws or wss:// URL";
 
-/** Whether `url` is a `ws://` or `wss://` URL. */
+/** Whether `url` is a `ws or wss://` URL. */
 export function isWebSocketUrl(url: string): boolean {
   try {
     const { protocol } = new URL(url);

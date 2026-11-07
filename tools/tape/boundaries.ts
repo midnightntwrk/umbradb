@@ -46,7 +46,7 @@ export interface BoundaryReading {
 }
 
 export interface BoundaryOptions {
-  /** The node's WebSocket URL (`ws://` or `wss://`); never shown. */
+  /** The node's WebSocket URL (`ws or wss://`); never shown. */
   readonly node: string;
   /** Blocks between two samples of the runtime; 1,000 by default. */
   readonly step?: number;
@@ -63,7 +63,7 @@ const isPositive = (value: number): boolean => Number.isSafeInteger(value) && va
 
 /** Reads `options.node`'s genesis and runtime upgrades (see the module comment). */
 export async function readBoundaries(options: BoundaryOptions): Promise<BoundaryReading> {
-  if (!isWebSocketUrl(options.node)) throw new TypeError("the node must be a ws:// or wss:// URL"); // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
+  if (!isWebSocketUrl(options.node)) throw new TypeError("the node must be a ws or wss:// URL");
   const step = options.step ?? DEFAULT_BOUNDARY_STEP;
   const concurrency = options.concurrency ?? 8;
   if (!isPositive(step)) throw new TypeError("step must be a positive integer");

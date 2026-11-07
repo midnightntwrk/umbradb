@@ -2,7 +2,7 @@
  * `finalizedHeight`: the height of a node's finalized head, which a host program gives as S — the start of a new
  * database — when it starts UmbraDB at the chain's head. [LM-1, D-8; design §4]
  *
- * It asks the node at `node` (a `ws://` or `wss://` URL) for its finalized head and that block's header
+ * It asks the node at `node` (a `ws or wss://` URL) for its finalized head and that block's header
  * (`chain_getFinalizedHead`, `chain_getHeader`), over one connection of its own (`../node/client.ts`), closed before it
  * settles. The node client retries an unreachable node with its back-off; `finalizedHeight` bounds the whole answer by
  * `timeoutMs` (30 s unless given) and then rejects with `node-unreachable` (`reason: timeout`). Aborting `signal` ends

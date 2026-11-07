@@ -582,7 +582,7 @@ describe("the builder's records", { timeout: TEST_TIMEOUT_MS }, () => {
       expect(error).toBeInstanceOf(TypeError);
       expect(String((error as Error).message)).not.toContain("secret");
       expect(String((error as Error).message)).not.toContain("example");
-      expect((error as Error).message).toBe("the tape builder's node must be a ws:// or wss:// URL");
+      expect((error as Error).message).toBe("the tape builder's node must be a ws or wss:// URL");
     }
   });
 });

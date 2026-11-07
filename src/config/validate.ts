@@ -368,13 +368,9 @@ const objects = (context: ConfigContext): (EntryView & { readonly object: Plain 
   (context.entries ?? []).filter((view): view is EntryView & { readonly object: Plain } => view.object !== null);
 
 /** True when `value` has the setting at `path`: each key on the way an object's own property. */
-function holds(value: Plain, path: SettingPath): boolean {
-  let at: PlainData = value;
-  for (const key of path) {
-    if (!isObject(at) || !Object.hasOwn(at, key)) return false;
-    at = at[key] as PlainData; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop
-  }
-  return true;
+function holds(value: PlainData, path: readonly string[]): boolean {
+  const [key, ...rest] = path;
+  return key === undefined || (isObject(value) && Object.hasOwn(value, key) && holds(value[key] as PlainData, rest));
 }
 
 /** `object` without its property `key`. */

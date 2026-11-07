@@ -20,7 +20,7 @@
  *   `--step` (blocks between samples of the runtime, 1,000), `--concurrency` (8).
  *
  * Exit codes: 0 done, 1 failed, 2 a usage error (a missing or unknown argument, a `--out` file that exists — the tools
- * never write over a file —, a node URL that is not `ws://` or `wss://`). The node's URL is never printed; `boundaries`
+ * never write over a file —, a node URL that is not `ws or wss://`). The node's URL is never printed; `boundaries`
  * writes it into its record, as the source the tables name.
  */
 

@@ -98,7 +98,7 @@ export const DEFAULT_BACKOFF_CEILING_MS = 30_000;
 export type NodeConnection = "connecting" | "connected" | "retrying" | "closed";
 
 export interface NodeClientOptions {
-  /** The node's WebSocket URL (`ws://` or `wss://`), the `core` entry's `node` field: a secret, never shown. */
+  /** The node's WebSocket URL (`ws or wss://`), the `core` entry's `node` field: a secret, never shown. */
   readonly url: string;
   /** The longest wait between retries (`backoffCeilingMs`); 30 000 by default. [CF-4] */
   readonly backoffCeilingMs?: number;

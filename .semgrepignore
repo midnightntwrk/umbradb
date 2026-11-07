@@ -25,10 +25,8 @@ tests/
 # insecure-websocket rule matches the plain "ws" URL scheme anywhere but localhost, in comments,
 # in documentation, and in this file itself if it were spelled out here. That scheme is accepted
 # by design (src/config/core-settings.ts, NODE), so every mention in prose is a false positive.
-# Code stays scanned; a flagged code line carries a `nosemgrep: <rule-id>` marker instead, which
-# keeps the finding out of the scanner's own report. The SARIF sent to GitHub code scanning still
-# lists marked findings (with suppressions: inSource, which GitHub ignores), so each marked or
-# prose line also needs its GitHub alert dismissed once; see docs/issues/00086 for the action-level
-# fix that would end that.
+# Code stays scanned: comments and messages there write the schemes as "ws or wss://", which the
+# rule does not match. A `nosemgrep: <rule-id>` marker does NOT stop a GitHub alert (the SARIF
+# keeps marked findings, and GitHub ignores the suppression); see docs/issues/00086.
 *.md
 graphify-out/

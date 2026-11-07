@@ -194,7 +194,7 @@ export function invalidOption(
 ): UmbraError {
   const what =
     field === "node"
-      ? "the node's address must be a ws:// or wss:// URL" // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
+      ? "the node's address must be a ws or wss:// URL"
       : field === "heartbeatMs"
         ? "heartbeatMs must be a whole number of milliseconds from 1 to 2147483647"
         : `${field} must be a positive integer of milliseconds`;

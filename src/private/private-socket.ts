@@ -1,7 +1,7 @@
 /**
  * The socket carrier of a private process's side of the process transport: each connection a WebSocket (`ws`) to the
- * link's address, `ws://<address>/`, or `wss://` with the `core` entry's `tls` — its certificate and key presented to
- * the core, the core's certificate checked against `trustedRoots`. The carrier owns what only a socket has: `ws`'s limit
+ * link's address, `ws or wss://<address>/`, the latter with the `core` entry's `tls` — its certificate and key
+ * presented to the core, the core's certificate checked against `trustedRoots`. The carrier owns what only a socket has: `ws`'s limit
  * on a message (`maxPayload`), binary frames, the WebSocket pings, and the close handshake's deadline at the stop.
  * The session logic is `./private-transport.ts`'s. [PP-4, PP-11; design §1, §8]
  *

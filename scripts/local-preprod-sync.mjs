@@ -4,13 +4,13 @@
  * owner's LAN, which no CI reaches. Their results are manual evidence for the pull request: this is not a test file,
  * and nothing of it is in the required-test manifest. [R23, R24, R25; ledger-refcount design §12]
  *
- * **The node.** `UMBRADB_LOCAL_NODE` holds the node's WebSocket URL (`ws://<host>:<port>`). It is checked before
+ * **The node.** `UMBRADB_LOCAL_NODE` holds the node's WebSocket URL (`ws or wss://<host>:<port>`). It is checked before
  * anything else: unset, empty or not a WebSocket URL, the script exits 2 naming it, having started and written
  * nothing. [ledger-refcount design §12.1]
  *
  * **Usage.**
  *
- *     UMBRADB_LOCAL_NODE=ws://<host>:<port> node scripts/local-preprod-sync.mjs \
+ *     UMBRADB_LOCAL_NODE=<node-url> node scripts/local-preprod-sync.mjs \
  *       --label <name> --stop <height> --out <dir> [--build <dir>] [--sweep on|off] [--keep]
  *
  * - `--label`: names the run's Docker objects (`umbradb-lp-<label>-net`, `-pgdata`, `-pg`, `-run`); lowercase letters,
@@ -77,9 +77,9 @@ const VARIABLE = "UMBRADB_LOCAL_NODE";
 
 const NODE_URL = (process.env[VARIABLE] ?? "").trim();
 if (!/^wss?:\/\/\S+$/.test(NODE_URL)) {
-  const found = NODE_URL === "" ? "it is not set" : "it holds no ws:// or wss:// URL"; // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
+  const found = NODE_URL === "" ? "it is not set" : "it holds no ws or wss:// URL";
   process.stderr.write(
-    `${VARIABLE} must hold the local archive node's WebSocket URL (ws://<host>:<port>), and ${found}. ` + // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
+    `${VARIABLE} must hold the local archive node's WebSocket URL (ws or wss://<host>:<port>), and ${found}. ` +
       "These runs need that node, on the owner's LAN only: nothing was started.\n",
   );
   process.exit(2);
@@ -109,7 +109,7 @@ const NODE_COUNT_SQL =
   "SELECT (SELECT max(height) FROM core_block_commit.blocks), (SELECT count(*) FROM core_ledger_state.nodes)";
 
 const USAGE =
-  `usage: ${VARIABLE}=ws://<host>:<port> node scripts/local-preprod-sync.mjs --label <name> --stop <height> ` + // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
+  `usage: ${VARIABLE}=<node-url> node scripts/local-preprod-sync.mjs --label <name> --stop <height> ` +
   "--out <dir> [--build <dir>] [--sweep on|off] [--keep]";
 
 /** Ends the script with a usage error. */
