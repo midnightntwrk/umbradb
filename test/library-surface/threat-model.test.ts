@@ -4,17 +4,18 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
-  BOUNDARIES, citationProblems, citations, GAP_ISSUES, GAP_TASKS, headingProblems, knownGapProblems,
-  lineCountOf, lineLengthProblems, LINKING_DOCUMENTS, OWNER_AREAS, retiredPartProblems, THREAT_MODEL,
+  BOUNDARIES, citationProblems, citations, COMMIT_POLICY, commitPolicyProblems, GAP_ISSUES, GAP_TASKS, headingProblems,
+  knownGapProblems, lineCountOf, lineLengthProblems, LINKING_DOCUMENTS, OWNER_AREAS, retiredPartProblems, THREAT_MODEL,
   threatModelLinkProblems,
 } from "./threat-model.js";
 
 /**
  * `docs/THREAT_MODEL.md` describes 0.10.0 — no 0.9.5 part named, the draft's ten boundaries and the owner's three areas
  * each a heading, its known gaps naming the tasks and issues, every `path:line` it cites naming a file of the tree with
- * at least that many lines — and `README.md` and `SECURITY.md` link it. The checks are `./threat-model.ts`'s, on the
- * tree as git lists it (tracked and untracked files that exist, ignored ones left out). Committed negative controls
- * below: a missing area, a cited line past a file's end, a 0.9.5 term and a missing link each fail. [A178 STATIC, Q177–Q181]
+ * at least that many lines, the commit policy a section of it — and `README.md` links it. The checks are
+ * `./threat-model.ts`'s, on the tree as git lists it (tracked and untracked files that exist, ignored ones left out).
+ * Committed negative controls below: a missing area, a cited line past a file's end, a 0.9.5 term, a missing link and a
+ * missing commit policy each fail. [A178 STATIC, Q177–Q181]
  */
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -44,7 +45,7 @@ const lineCount = (file: string): number | null => (tree.has(file) ? lineCountOf
 const model = tree.has(THREAT_MODEL) ? read(THREAT_MODEL) : "";
 const linking = (): { file: string; text: string }[] => LINKING_DOCUMENTS.map((file) => ({ file, text: read(file) }));
 
-describe("A178 (Q181 A): docs/THREAT_MODEL.md describes 0.10.0, and README.md and SECURITY.md link it", () => {
+describe("A178 (Q181 A): docs/THREAT_MODEL.md describes 0.10.0, holds the commit policy, README.md links it", () => {
   it("is in the tree", () => {
     expect(tree.has(THREAT_MODEL)).toBe(true);
   });
@@ -71,8 +72,12 @@ describe("A178 (Q181 A): docs/THREAT_MODEL.md describes 0.10.0, and README.md an
     expect(citationProblems(model, lineCount)).toEqual([]);
   });
 
-  it("README.md and SECURITY.md link it", () => {
+  it("README.md links it", () => {
     expect(threatModelLinkProblems(linking())).toEqual([]);
+  });
+
+  it("holds the commit policy, as a section of its own", () => {
+    expect(commitPolicyProblems(model)).toEqual([]);
   });
 
   it("keeps its lines to 120 columns", () => {
@@ -117,21 +122,26 @@ describe("A178 (Q181 A): docs/THREAT_MODEL.md describes 0.10.0, and README.md an
       ]);
     });
 
-    it("the real README.md and SECURITY.md fail without their link, or with it in a code span", () => {
+    it("the real README.md fails without its link, or with it in a code span", () => {
       const unlink = (text: string): string => text.replaceAll("](docs/THREAT_MODEL.md", "](SECURITY.md");
-      const [readme, security] = linking();
+      const [readme] = linking();
       expect(threatModelLinkProblems([{ file: "README.md", text: unlink(readme?.text ?? "") }])).toEqual([
         `README.md does not link ${THREAT_MODEL} (A178)`,
-      ]);
-      const renamed = (security?.text ?? "").replaceAll(THREAT_MODEL, "x.md");
-      expect(threatModelLinkProblems([{ file: "SECURITY.md", text: renamed }])).toEqual([
-        `SECURITY.md does not link ${THREAT_MODEL} (A178)`,
       ]);
       const span = "See `[the model](docs/THREAT_MODEL.md)`.\n";
       expect(threatModelLinkProblems([{ file: "README.md", text: span }])).toEqual([
         `README.md does not link ${THREAT_MODEL} (A178)`,
       ]);
       expect(threatModelLinkProblems([{ file: "docs/x.md", text: "[model](THREAT_MODEL.md#gaps)\n" }])).toEqual([]);
+    });
+
+    it("the real model fails without its commit policy section, or with the title only in its text", () => {
+      const heading = `\n## ${COMMIT_POLICY}\n`;
+      expect(model).toContain(heading);
+      const problem = [`${THREAT_MODEL} has no "${COMMIT_POLICY}" section (A178)`];
+      expect(commitPolicyProblems(model.replace(heading, "\n## Commits\n"))).toEqual(problem);
+      const mentioned = `See the ${COMMIT_POLICY.toLowerCase()} below.\n### ${COMMIT_POLICY}\n`;
+      expect(commitPolicyProblems(mentioned)).toEqual(problem);
     });
 
     it("the real model fails with a known gap's task or issue missing", () => {

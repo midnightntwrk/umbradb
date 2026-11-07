@@ -56,7 +56,9 @@ tests themselves are always present.
 - **A178** `[STATIC]` `docs/THREAT_MODEL.md` describes 0.10.0 (no 0.9.5 part named as current: checkpoint store,
   chunk pool, wallet envelope, TemporalKV), covers the draft's ten boundaries and the owner's three areas (backups and
   restore, the node, private reads), and each `path:line` it cites names an existing file with at least that many
-  lines; `README.md` and `SECURITY.md` link it. (owner decision Q181)
+  lines; it holds the commit policy as a section of its own, and `README.md` links it. `SECURITY.md` stays the
+  organization's template, which `CODEOWNERS` gives to the security and SRE teams. (owner decision Q181; answered
+  2026-11-07: `SECURITY.md` unchanged)
 - **A5** `[STATIC]` A test compares the required-test manifest, `stryker.conf.json` `mutate`, the coverage floors of
   `vitest.config.ts` and the file list of `Formal/Lean` with the lists in `design.md` §13 and fails on any difference.
   (LS-5)

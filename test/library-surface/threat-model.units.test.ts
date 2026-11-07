@@ -21,8 +21,8 @@ function model(extra = ""): string {
 }
 
 describe("threat-model.ts's checks (task 17.5b)", () => {
-  it("names the two documents that must link the model", () => {
-    expect(LINKING_DOCUMENTS).toEqual(["README.md", "SECURITY.md"]);
+  it("names the one document that must link the model", () => {
+    expect(LINKING_DOCUMENTS).toEqual(["README.md"]);
   });
 
   it("reads a range's end with spaces around the dash, and an end of several digits", () => {

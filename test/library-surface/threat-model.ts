@@ -9,8 +9,9 @@
  *   gap ({@link GAP_TASKS}) and the issues that record the rest ({@link GAP_ISSUES}).
  * - **Every `path:line` it cites** ({@link citations}, {@link citationProblems}) names a file of the tree with at least
  *   that many lines (a range `path:a-b`, its end).
- * - **`README.md` and `SECURITY.md` link it** ({@link threatModelLinkProblems}): a Markdown link of each resolves to
- *   {@link THREAT_MODEL}.
+ * - **`README.md` links it** ({@link threatModelLinkProblems}): a Markdown link of it resolves to {@link THREAT_MODEL}.
+ *   `SECURITY.md` is not required to: it is the organization's template, which its security and SRE teams own.
+ * - **It holds the commit policy** ({@link commitPolicyProblems}): a `## Commit policy` section.
  * - **Lines at most 120 columns** ({@link lineLengthProblems}), the repository's Markdown rule.
  *
  * Pure functions over texts and repository-relative paths; `./threat-model.test.ts` gives them the tree.
@@ -22,7 +23,10 @@ import { linkedPath, markdownLinks } from "./documents.js";
 export const THREAT_MODEL = "docs/THREAT_MODEL.md";
 
 /** The documents that must link {@link THREAT_MODEL}. [A178 STATIC] */
-export const LINKING_DOCUMENTS: readonly string[] = ["README.md", "SECURITY.md"];
+export const LINKING_DOCUMENTS: readonly string[] = ["README.md"];
+
+/** The title of the model's section holding the commit policy. [A178 STATIC] */
+export const COMMIT_POLICY = "Commit policy";
 
 /**
  * The 0.9.5 parts the model must not name: as patterns, so `checkpoint-store`, `chunk_pool` and `TemporalKV`'s
@@ -215,6 +219,13 @@ export function threatModelLinkProblems(
   return documents
     .filter(({ file, text }) => !markdownLinks(text).some(({ target }) => linkedPath(file, target) === THREAT_MODEL))
     .map(({ file }) => `${file} does not link ${THREAT_MODEL} (A178)`);
+}
+
+/** The problem when the model has no `## Commit policy` section. [A178 STATIC] */
+export function commitPolicyProblems(text: string): string[] {
+  return text.split("\n").some((line) => line.trim() === `## ${COMMIT_POLICY}`)
+    ? []
+    : [`${THREAT_MODEL} has no "${COMMIT_POLICY}" section (A178)`];
 }
 
 /** Lines longer than 120 columns (characters, not bytes: `→` counts one). */

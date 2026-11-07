@@ -442,9 +442,30 @@ Resource exhaustion, node unavailability and lockstep peer failures remain avail
 The controls described here do not establish protection against a hostile host, database administrator,
 module, backup producer or browser origin.
 
-Commit policy belongs in [SECURITY.md](../SECURITY.md#commit-policy).
-Vulnerability reporting, including the private reporting route and fallback contact, also belongs in
+Vulnerability reporting, including the private reporting route and fallback contact, belongs in
 [SECURITY.md](../SECURITY.md#disclosing-a-security-issue).
+
+## Commit policy
+
+What may go into this repository's git history:
+
+- **No secret of any value is committed.** No key, seed, password or credential with any value, ever: not a mainnet
+  one, not a testnet key with funds, not "for now". A file that holds a secret is generated locally, ignored by git and
+  created with a restrictive mode, 0600 (only its owner reads and writes it). The Preview test wallet is the example:
+  `nix/midnight-env/test-wallets/generate-test-wallet.sh` writes `preview-test-wallet.json` with mode 0600,
+  `.gitignore` lists it, and only `preview-test-wallet.example.json`, which holds placeholders, is tracked (see
+  `nix/midnight-env/test-wallets/README.md`).
+- **One historical finding is suppressed, by its exact fingerprint.** A Preview testnet wallet,
+  `nix/midnight-env/test-wallets/preview-test-wallet.json`, was committed before this policy. Preview tDUST has no
+  monetary value, so the history was not rewritten, and the file's bytes stay in it. That one finding is suppressed in
+  `.gitleaksignore` by its exact fingerprints (commit, path, rule and line: the file's seed and the key derived from
+  it), not by a path allowlist in `.gitleaks.toml`, which would exempt the path for ever and hide a real key committed
+  there later. `.gitleaks.toml` has no global path allowlist. Each of its two allowlists requires both a path and a
+  value (`condition = "AND"`): the template's all-zero placeholder, only in the template, and the RFC 6455 example
+  WebSocket nonce, only under `test/`.
+- **CI enforces it.** The `deps` job of `.github/workflows/supply-chain.yml` runs `gitleaks detect` with
+  `.gitleaks.toml` over the full git history on every pull request and every push to `main`. A new secret fails it on
+  any path, the historical wallet file's included, since the suppression names the finding, not the path.
 
 ## Known gaps
 
@@ -492,10 +513,10 @@ Vulnerability reporting, including the private reporting route and fallback cont
    `docs/issues/00048-vendored-crates-advisories-and-provenance.md:8`,
    `.github/workflows/vendored-ledger.yml:45`, `.github/workflows/supply-chain.yml:78`).
 
-9. **Commit policy — fixed by task 17.4b, as built.** [SECURITY.md](../SECURITY.md#commit-policy) now holds the
+9. **Commit policy — fixed by task 17.4b, as built.** [The commit policy](#commit-policy) above holds the
    no-secrets rule and locally generated, ignored `0600` secret-file policy, with exact historical fingerprints in
    `.gitleaksignore` and full-history gitleaks configured in CI
-   (`SECURITY.md:70`, `SECURITY.md:76`, `.gitleaksignore:17`,
+   (`nix/midnight-env/test-wallets/generate-test-wallet.sh:170`, `.gitignore:42`, `.gitleaksignore:17`,
    `.github/workflows/supply-chain.yml:109`).
 
 Related **issue 00051 remains open**: transport instance ids accept arbitrary non-empty text, including line

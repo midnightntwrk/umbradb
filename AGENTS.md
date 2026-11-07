@@ -188,7 +188,7 @@ The rules every change is checked against, besides those of the stages above.
   decides where release automation lives (owner decision, 2026-10-28) before one is written, and
   until then the owner runs these steps by hand. A release is the owner's: agents prepare the
   tarball and its checksum and never push a tag or create a release.
-- **Secrets.** The commit policy is `SECURITY.md`'s: no secret of any value in git, files holding one
+- **Secrets.** The commit policy is `docs/THREAT_MODEL.md`'s: no secret of any value in git, files holding one
   generated locally with mode 0600 and ignored, the one historical finding suppressed by its exact
   fingerprints in `.gitleaksignore`. `.gitleaks.toml` keeps no global path allowlist, and git history
   is not rewritten.

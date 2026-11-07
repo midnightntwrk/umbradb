@@ -4066,6 +4066,9 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       model again, `SECURITY.md` has a "Threat model" section linking it, and the operator guide's "What a backup holds"
       (Q178) and "Restoring a backup" (Q177) and the module guide's "Private modules" (Q180) each have the sentence.
       A178's test: `test/library-surface/threat-model{,.test}.ts`, with committed negative controls.
+      **Answered 2026-11-07:** `SECURITY.md` is the organization's template again. `CODEOWNERS` gives it to the
+      security and SRE teams, so any change to it needs their review. The commit policy is the model's "Commit policy"
+      section, gap 9 cites the files that enforce it, and A178 checks that section and `README.md`'s link only.
 - [x] 17.5 The deferred extensive testing (owner, 2026-10-27: "we want to move all the extensive testing to the end,
       before the full test"), run after 17.4 and before the whole-system runs: the mutation passes the tasks from
       2026-10-27 on deferred (each record's "Deferred testing" sub-item names the logic to cover), and the coverage
