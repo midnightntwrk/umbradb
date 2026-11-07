@@ -129,6 +129,12 @@ export default defineConfig({
         // not see; `test/browser/` holds it (headless Chrome; its replacements of Node.js against Node.js's own). The
         // match anywhere would otherwise take `browser/src/` in, held to `src/**`'s floors by its Node.js tests alone.
         "browser/**",
+        // Verbatim copies of another repository (token-metadata, task 6.1): the MIP-0018 reference's codec, and its
+        // vector runner's tools, which `tools/**/*.ts` above would take in anywhere in a path. They are checked byte for
+        // byte against their `SOURCE.md` (`test/features/token-metadata/provenance.test.ts`), never edited, and tested
+        // through the module and the vectors, as the module's mutation run excludes them too.
+        "src/features/token-metadata/vendor/**",
+        "test/fixtures/**",
       ],
       reporter: ["text", "json-summary", "html"],
       reportsDirectory: "./coverage",
