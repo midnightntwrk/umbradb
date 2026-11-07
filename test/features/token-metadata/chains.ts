@@ -98,4 +98,3 @@ function rawOf(g: Generated): Uint8Array {
   out.set(payload, 32);
   return out;
 }
-
