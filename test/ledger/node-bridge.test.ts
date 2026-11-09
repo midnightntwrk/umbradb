@@ -15,7 +15,7 @@ import { encodeChildren, hex } from "./node-format.js";
 // - the worker's store, whose request this test answers at once inside `ask`, as the main thread would (the protocol
 //   is written out here from the layout);
 // - the main thread's server, given a reader.
-// `worker-host.test.ts` runs them in two threads over a database. [LG-11; design §5.3]
+// `worker-host.test.ts` runs them in two threads over a database.
 
 const { STATE, LENGTH, STATUS, HEADER_BYTES, KEY_BYTES, ASKED, ANSWERED, NODES, ERROR, IDLE } = BRIDGE_LAYOUT;
 const key = (byte: number): Uint8Array => new Uint8Array(32).fill(byte);
@@ -50,7 +50,7 @@ function answering(memory: SharedArrayBuffer, answer: (asked: Uint8Array) => Sto
   };
 }
 
-describe("the node-store bridge's two sides (design §5.3)", () => {
+describe("the node-store bridge's two sides", () => {
   it("encodes and decodes a node list, empty included", () => {
     const nodes = [node(1, [2, 3]), node(2, [], 0), node(3, [], 2000)];
     const target = new Uint8Array(10_000);

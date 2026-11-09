@@ -1,19 +1,18 @@
 /**
  * Reading a database for `umbradb config check --database`. The database is the one the file's `core` revision
  * configures (the flag takes no value). The command reads the cursor and the rows of `core_chain.config` read-only (no
- * migration, no write, no writer lock), in one read, so the two are of one committed height. [CF-10, Q167 A; design §7]
+ * migration, no write, no writer lock), in one read, so the two are of one committed height.
  *
  * - **PostgreSQL:** the database API's PostgreSQL backend with one read connection. Only `Database.read` runs
  *   (`BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY` … `ROLLBACK`), so the writer session is never opened and the
- *   writer lock never taken: the check runs beside a process writing the same database. [DB-2]
+ *   writer lock never taken: the check runs beside a process writing the same database.
  * - **PGlite:** only under the development opt-in. The opt-in comes from the configuration file (the process's `core`
  *   revision), and without it the read is refused before anything is opened (`development-opt-in-required`).
- *   [CF-9, Q102]
  * - A PGlite directory that holds no database yet (no `PG_VERSION`) is a new database, which startup would create. It is
  *   neither opened nor created, and reads as one (no cursor, no history), since opening it would run PGlite's `initdb`
  *   there.
  * - Otherwise the backend opens it as the process does, taking the directory's operating-system lock: a database that
- *   another process has open is refused with `writer-lock-held`. [DB-11]
+ *   another process has open is refused with `writer-lock-held`.
  * - PGlite has no read-only mode. Opening, reading and closing the directory change PostgreSQL's own files in it
  *   (probed on 0.5.10: hint bits on the pages read, the relation cache's init files, `pg_control`, the write-ahead log),
  *   as any read and restart does on PostgreSQL. But no statement writes a row, a table or a migration: the read is the
@@ -48,7 +47,7 @@ export type DatabaseState =
 export interface ReadDatabaseOptions {
   /** The directory a relative PGlite directory is read from. */
   readonly cwd: string;
-  /** The development opt-in of the process's `core` revision: PGlite opens only under it. [Q102] */
+  /** The development opt-in of the process's `core` revision: PGlite opens only under it. */
   readonly developmentOptIn: boolean;
 }
 

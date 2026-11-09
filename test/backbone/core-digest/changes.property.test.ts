@@ -13,18 +13,18 @@ import { type Chain, digestRows, runBlock, startChain, testModule } from "./chai
 /**
  * Property tests on both backends. For random sequences of inserts, updates, deletes and same-value rewrites within
  * one block (upserts, key changes, rows moved between partitions, several rows per statement), the changes that change
- * capture records equal the difference between each table's state before and after the block. [A56, DT-4]
+ * capture records equal the difference between each table's state before and after the block.
  *
  * The oracle:
  * - reads each table whole at the start and at the end of the block (inside it, in the module's own `on-db-write`);
  * - takes the difference by primary key;
  * - writes the changes' CBOR from the row encoding and hashes it with `node:crypto`, as
  *   `SHA-256(previous ‖ CBOR(h) ‖ changes at h)`.
- * The block's digest must be that, and a table without changes must keep its row. [DT-1, DT-5]
+ * The block's digest must be that, and a table without changes must keep its row.
  *
- * `TRUNCATE`, which fires no row trigger, is refused in the block, so no change escapes the triggers. [A73]
+ * `TRUNCATE`, which fires no row trigger, is refused in the block, so no change escapes the triggers.
  *
- * **Negative control:** with the capture trigger disabled on one table, the property fails. [A56]
+ * **Negative control:** with the capture trigger disabled on one table, the property fails.
  *
  * Determinism: every property runs with a pinned, reported fast-check seed.
  */
@@ -32,7 +32,7 @@ import { type Chain, digestRows, runBlock, startChain, testModule } from "./chai
 const SEED = 20261025;
 const RUNS = 100;
 
-/** The tables of module `p`, each with its column types and its key's columns (indexes) in key order. [DT-1] */
+/** The tables of module `p`, each with its column types and its key's columns (indexes) in key order. */
 const TABLES = {
   "p.kv": { columns: ["k", "v", "n"], types: ["bigint", "text", "bigint"], key: [0] },
   "p.ck": { columns: ["a", "b", "doc"], types: ["text", "bigint", "jsonb"], key: [0, 1] },
@@ -119,7 +119,7 @@ function keyId(key: readonly unknown[]): string {
 
 const utf8 = new TextEncoder();
 
-/** The key order of two keys of `table`, written here: text by its UTF-8 bytes, integers by value. [DT-2] */
+/** The key order of two keys of `table`, written here: text by its UTF-8 bytes, integers by value. */
 function compareKeys(a: readonly unknown[], b: readonly unknown[]): number {
   for (let i = 0; i < a.length; i++) {
     const [x, y] = [a[i], b[i]];
@@ -134,7 +134,7 @@ function compareKeys(a: readonly unknown[], b: readonly unknown[]): number {
   return 0;
 }
 
-/** The oracle: `table`'s changes between two of its states, as the changes' CBOR array, written out here. [DT-4] */
+/** The oracle: `table`'s changes between two of its states, as the changes' CBOR array, written out here. */
 function expectedChanges(name: TableName, before: Map<string, unknown[]>, after: Map<string, unknown[]>): Uint8Array | null {
   const table = TABLES[name];
   const keys = [...new Set([...before.keys(), ...after.keys()])]
@@ -154,7 +154,7 @@ function expectedChanges(name: TableName, before: Map<string, unknown[]>, after:
   return changes.length === 0 ? null : concatBytes(encodeArrayHead(changes.length), ...changes);
 }
 
-describe.each(BACKENDS)("A56: recorded changes equal the difference of the block's states, on $name (DT-4)", (backend) => {
+describe.each(BACKENDS)("recorded changes equal the difference of the block's states, on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop());
 
@@ -216,14 +216,14 @@ describe.each(BACKENDS)("A56: recorded changes equal the difference of the block
       }
     });
 
-  it("A56: for random blocks, every table's recorded changes equal the difference of its states", async () => {
+  it("for random blocks, every table's recorded changes equal the difference of its states", async () => {
     await fc.assert(property(), { seed: SEED, numRuns: RUNS });
     // Not vacuous: the blocks changed every table, and each table's digest moved on.
     const rows = await digestRows(chain.db);
     expect(Object.keys(rows).sort()).toEqual(["core_block_commit.blocks", "p.ck", "p.kv", "p.part"]);
   }, 300_000);
 
-  it("A56: a block that only rewrites rows as they were, or inserts and deletes the same row, records no change", async () => {
+  it("a block that only rewrites rows as they were, or inserts and deletes the same row, records no change", async () => {
     await fc.assert(property(), { seed: SEED, numRuns: 5 });
     const before = await digestRows(chain.db);
     expect(await blockAgrees(chain.db, [["UPDATE p.kv SET v = v", []], ["UPDATE p.ck SET doc = doc", []]])).toBe(true);
@@ -238,7 +238,7 @@ describe.each(BACKENDS)("A56: recorded changes equal the difference of the block
     for (const name of Object.keys(TABLES)) expect(after[name], name).toEqual(before[name]);
   }, 120_000);
 
-  it("A56 with A73: TRUNCATE in the block is refused, so no change escapes the triggers", async () => {
+  it("TRUNCATE in the block is refused, so no change escapes the triggers", async () => {
     const before = await digestRows(chain.db);
     next.ops = [["INSERT INTO p.kv (k, v) VALUES (200, 'x') ON CONFLICT (k) DO NOTHING", []], ["TRUNCATE p.kv", []]];
     const refused = await runBlock(chain).then(

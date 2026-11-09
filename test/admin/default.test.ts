@@ -31,9 +31,9 @@ import type { DatabaseParts } from "../../src/config/database-parts.js";
  * - the command gives the engine its admin port (`adminListener: startAdminServer`, `src/cli/run.ts`), so the process
  *   serves them on `listen.admin` with nothing configured for them: it answers on its admin listener in every state it
  *   reaches, its four endpoints, and 404 elsewhere. The engine without that port, as a library host starts it, serves
- *   none (the negative control). [Q128 B, AE-1, A62, A64, L55]
- * - An admin address another listener holds refuses startup with `listen-failed` before the database opens: no
- *   session on PostgreSQL 18.6, no data directory on PGlite 0.5.10. [Q128 B]
+ *   none (the negative control).
+ * - an admin address another listener holds refuses startup with `listen-failed` before the database opens: no
+ *   session on PostgreSQL 18.6, no data directory on PGlite 0.5.10.
  */
 
 /** How a test starts a process: as `umbradb run` does, or a negative control's. */
@@ -41,12 +41,12 @@ type Start = (input: EngineInput) => ProcessHandle;
 
 /**
  * The process `umbradb run` starts, as far as the admin endpoints go: the engine given the command's admin port
- * (`startAdminServer`), unless the test gives its own starter. [Q128 B, L55]
+ * (`startAdminServer`), unless the test gives its own starter.
  */
 const commandProcess: Start = (input) =>
   startProcess(input.adminListener === undefined ? { ...input, adminListener: startAdminServer } : input);
 
-/** A negative control: the engine without the admin port, as a library host starts it, which serves none. [Q128 A] */
+/** A negative control: the engine without the admin port, as a library host starts it, which serves none. */
 const optIn: Start = (input) => startProcess(input);
 
 /** The entries of a process of the tests on `database` with `listen.admin` at `address`, with `user`'s from 1. */
@@ -89,7 +89,7 @@ async function stateOf(handle: ProcessHandle, state: string, patienceMs = 60_000
  * Checks that a process started without `admin` answers on its admin listener. The process is started by `start`
  * without `admin` on `database`, its `listen.admin` a free port. Once it says it is `following` at the head, the
  * endpoint-state oracle runs over its four endpoints: live 200, ready 200, `/status` `following`, `/config` 200.
- * None when it answers. [Q128 B, A64]
+ * None when it answers.
  */
 async function defaultProblems(start: Start, database: DatabaseParts): Promise<string[]> {
   const port = await freePort();
@@ -133,7 +133,7 @@ async function takenProblems(backend: ProcessBackend, start: Start, admin?: (dat
     await first.handle.started;
     const before = backend.kind === "postgres" ? await sessionsOf(firstDb, secondDb) : null;
     const second = started(start, secondDb.setting, address, admin === undefined ? {} : { admin: admin(secondDb.setting) });
-    // The rejection is listen-failed, Node.js's error of `listen` its cause. [LM-9]
+    // The rejection is listen-failed, Node.js's error of `listen` its cause.
     const outcome = await second.handle.started.then(
       () => "started",
       (error: { readonly code?: unknown; readonly cause?: NodeJS.ErrnoException }) =>
@@ -189,7 +189,7 @@ const databaseFirst =
     }
   };
 
-describe.each(PROCESS_BACKENDS)("the admin endpoints by default on $name (task 8.1a, Q128 B)", (backend) => {
+describe.each(PROCESS_BACKENDS)("the admin endpoints by default on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
@@ -206,7 +206,7 @@ describe.each(PROCESS_BACKENDS)("the admin endpoints by default on $name (task 8
     ]);
   }, 120_000);
 
-  it("A62 and A64 with the default: the four endpoints and 404 elsewhere, following, a refused start live and not ready", async () => {
+  it("with the default: the four endpoints and 404 elsewhere, following, a refused start live and not ready", async () => {
     const port = await freePort();
     const origin = `http://127.0.0.1:${port}`;
     const run = started(commandProcess, (await backend.database()).setting, `127.0.0.1:${port}`);

@@ -1,9 +1,9 @@
 /**
  * A database's module tables and their rows in primary-key order, read through a read handle of the database API. This
- * is the table list the contents hash covers, and the row order it uses. [DT-2, DT-3]
+ * is the table list the contents hash covers, and the row order it uses.
  *
  * **Which tables count.** The contents hash covers every schema of a database, the core's database or a private
- * process's, under the same rules. It leaves out [DT-3, Q75, Q101]:
+ * process's, under the same rules. It leaves out:
  * - PostgreSQL's own schemas (`pg_catalog`, `pg_toast`, the temporary schemas: every name starting with `pg_`);
  * - `information_schema`;
  * - `public`, where extensions install their tables;
@@ -19,14 +19,13 @@
  * whose rows it holds, not a table of its own, so the storage layout of a height-partitioned table never reaches the
  * hash. Views, materialized views, sequences, composite types and foreign tables hold no rows of their own and are not
  * tables. An ordinary table is read with `ONLY`, so a table inheriting from it is listed once, as itself.
- * [design §10]
  *
  * **How the catalog is read.** By name, never by OID or creation order:
- * - schemas and tables are sorted by the bytes of their names' UTF-8 encoding [DT-3];
+ * - schemas and tables are sorted by the bytes of their names' UTF-8 encoding;
  * - a table's columns are in column order: its attribute numbers with dropped columns skipped, which the table's
- *   migrations fix and every database built by them shares [DT-1, DB-9];
+ *   migrations fix and every database built by them shares;
  * - column types are `format_type(atttypid, NULL)`'s names, the column types of the canonical encoding (`integer`,
- *   `bigint[]`, …) [DT-1];
+ *   `bigint[]`, …);
  * - the primary key's columns are in the order the key declares them (`pg_index.indkey`), which may differ from column
  *   order.
  *
@@ -36,7 +35,7 @@
  *
  * **One snapshot.** Every statement goes through one handle, which must see exactly one committed height: on
  * PostgreSQL one `REPEATABLE READ READ ONLY` transaction, on PGlite one queued job. So the catalog, the row counts and
- * the rows are read from the same state. [DB-2]
+ * the rows are read from the same state.
  *
  * **Streaming.** Rows are read a page at a time with keyset pagination over the primary key (`WHERE (key) > (last
  * key) ORDER BY key LIMIT n`), so a large table is never held in memory and only the handle's `query` is needed.
@@ -46,7 +45,7 @@
  * faults are: a table without a primary key, a key column whose type has no defined order, a column whose type the
  * canonical encoding does not cover, an identity or `serial` column, a default that is not immutable, or a module
  * schema holding a sequence or an unlogged table. They apply in every schema it hashes, including a table no module
- * declared. [DT-1, DT-2, DT-6, Q58, Q61]
+ * declared.
  */
 
 import {
@@ -70,7 +69,7 @@ import {
 /** The handle the contents are read through: the `deterministic_postgresql` component's (`catalog.ts`). */
 export type { ConsistentRead } from "../deterministic-postgresql/index.js";
 
-/** A column of a module table: its name, its column type, and its type as declared (for messages). [DT-1] */
+/** A column of a module table: its name, its column type, and its type as declared (for messages). */
 export interface ModuleColumn {
   readonly name: string;
   readonly type: ColumnType;
@@ -78,14 +77,14 @@ export interface ModuleColumn {
   readonly declaredType: string;
 }
 
-/** A module table as the primary-key order and the contents hash see it. [DT-2, DT-3] */
+/** A module table as the primary-key order and the contents hash see it. */
 export interface ModuleTable {
   readonly schema: string;
   readonly name: string;
   /**
    * `false` for a table declared `deterministic: false`, and absent otherwise. The contents hash records such a table's
    * schema and name only, `[schema, table, null, null]`, and nothing below describes it (`columns` and `key` are
-   * empty), since its columns need not follow the rules. [MD-1, DT-3, Q76]
+   * empty), since its columns need not follow the rules.
    */
   readonly deterministic?: false;
   /** A partitioned table, read whole across its partitions; an ordinary table is read with `ONLY`. */
@@ -107,7 +106,7 @@ export interface ModuleTableOptions {
   /**
    * The tables declared `deterministic: false` (the schema plan's `optedOut`). The rules do not refuse them, their
    * partitions or the sequences their columns own (the component's `optOut`), and they are listed by name only
-   * ({@link ModuleTable.deterministic} `false`). Every other table is read as without it. [MD-1, Q76]
+   * ({@link ModuleTable.deterministic} `false`). Every other table is read as without it.
    */
   readonly optedOut?: readonly TableName[];
 }
@@ -118,10 +117,10 @@ export type ModuleContentsFailure =
    * What the rules refuse, with the code startup gives it (`src/deterministic-postgresql/column-rules.ts`): no primary
    * key, a key column whose type has no defined order, a column type the canonical encoding does not cover, a
    * floating-point, identity or `serial` column or a default that is not immutable (`non-deterministic-column`), a
-   * sequence or an unlogged table (`non-deterministic-table`). [DT-1, DT-2, DT-6]
+   * sequence or an unlogged table (`non-deterministic-table`).
    */
   | RefusalCode
-  /** A row that cannot be encoded canonically (the cause is the encoder's error). [DT-1] */
+  /** A row that cannot be encoded canonically (the cause is the encoder's error). */
   | "unencodable-row"
   /** A table's rows, read after its row count, were not as many: the handle did not read one snapshot. */
   | "row-count-changed";
@@ -131,7 +130,7 @@ export type ModuleContentsFailure =
  * its `declaredType` (null for the table or sequence itself) say where. The message is the code, the location, and an
  * explanation: for a refusal, exactly what `refusalMessage` of the component's rules gives, the message startup gives.
  * It is an `UmbraError` (the package exports `UmbraError`, not this class): its code is its `reason`, it is not
- * retryable, and its details hold where it is. [design §12]
+ * retryable, and its details hold where it is.
  */
 export class ModuleContentsError extends UmbraError {
   override readonly name = "ModuleContentsError";
@@ -168,7 +167,7 @@ export class ModuleContentsError extends UmbraError {
  * The module tables of the database `read` sees, in the contents hash's order (by the bytes of their names). A
  * database the rules refuse fails with its first refusal, with the code and the message startup gives
  * (`databaseRefusals` of the component's rules: the tables' refusals in that order, then the sequences' and unlogged
- * tables'). [DT-2, DT-3, DT-6]
+ * tables').
  */
 export async function moduleTables(read: ConsistentRead, options: ModuleTableOptions = {}): Promise<ModuleTable[]> {
   const tables = await catalogTables(read);
@@ -195,7 +194,7 @@ export async function countRows(read: ConsistentRead, table: ModuleTable): Promi
 /**
  * The rows of `table` in primary-key order: the key's columns in order, integers numerically, `boolean` with `false`
  * first, `bytea`, `text`, `varchar` and `uuid` by their bytes (`COLLATE "C"` for `text` and `varchar`). Each row is its
- * column values in column order, read `pageSize` rows per statement. [DT-2]
+ * column values in column order, read `pageSize` rows per statement.
  */
 export async function* rowsInKeyOrder(
   read: ConsistentRead,
@@ -236,7 +235,6 @@ function fromClause(table: ModuleTable): string {
 
 /**
  * The table as the primary-key order and the contents hash read it; every table reaching it passed the rules.
- * [DT-2, DT-3]
  */
 function describeTable(table: CatalogTable): ModuleTable {
   const key = table.columns

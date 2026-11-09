@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds and runs `main.rs` (LG-16's tree values, read from the ledger's Rust state as the official
+# Builds and runs `main.rs` (the tree values, read from the ledger's Rust state as the official
 # indexer reads them) against an unpatched checkout of `midnight-ledger` at a vendored version's
 # pinned commit, inside the vendored ledger build image (`vendor/ledger/Dockerfile`), for the state
 # files it is given as `<name>=<path>`, and writes that version's JSON to `/out/<version>.json`

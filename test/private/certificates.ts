@@ -9,7 +9,7 @@ import { join } from "node:path";
  * (as the probe `test/dependencies/ws-mutual-tls.test.ts` makes its own), in a temporary directory removed afterwards,
  * so no key is ever committed: a CA the core trusts, the core's server certificate (for `127.0.0.1`), a client
  * certificate that CA issued, and a stranger's, issued by another CA. Each is PEM text, as the `tls` setting takes them
- * (`certificate`, `key`, `trustedRoots`). Imports nothing of Vitest. [PP-11, A121, CF-4]
+ * (`certificate`, `key`, `trustedRoots`). Imports nothing of Vitest.
  */
 
 /** One certificate and its key, PEM text. */

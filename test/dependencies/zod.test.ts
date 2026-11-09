@@ -4,10 +4,10 @@ import { z } from "zod";
 // Characterization tests of `zod` 4 (installed 4.6.7, kept on major version 4) for module settings schemas. A field's
 // kind (`data`, `operational` or `secret`) is carried in its metadata and read back with
 // `schema.shape[field].meta().kind`; defaults fill absent fields; issues name the offending field's path;
-// `z.toJSONSchema` keeps `kind`. [Q45, CF-4; design §7, §14]
+// `z.toJSONSchema` keeps `kind`.
 //
 // They also check the fix of GHSA-mrhx-c7xc-m3w5 (zod below 4.6.6): a collection longer than its `max` is refused with
-// one issue, its elements not parsed. They test zod itself, not UmbraDB code. [docs/issues/00032]
+// one issue, its elements not parsed. They test zod itself, not UmbraDB code.
 
 const settings = z.object({
   network: z.enum(["mainnet", "preview"]).meta({ kind: "data" }),
@@ -100,7 +100,7 @@ describe("zod 4 — issue paths", () => {
   });
 });
 
-describe("zod 4 — oversized constrained collections (GHSA-mrhx-c7xc-m3w5, fixed in 4.6.6; task 0.6)", () => {
+describe("zod 4 — oversized constrained collections (GHSA-mrhx-c7xc-m3w5, fixed in 4.6.6)", () => {
   // zod 4.4.3 parsed every element of an array or set longer than its `max` and kept one issue per failing element
   // (100,001 issues for the array below): memory grows with the input. From 4.6.6 a collection over its `max` is
   // refused with its `too_big` issue alone, before any element is parsed.

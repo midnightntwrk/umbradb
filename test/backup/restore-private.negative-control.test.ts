@@ -24,7 +24,7 @@ import {
  * what the private restore test would see without it. A private process's backup taken against one public database (S
  * 1), restored against another of the same chain (S 2), commits: the restored database is bound to the first, and the
  * private process then started on it against the second refuses at startup with `private-binding-mismatch` (`start`),
- * where the guarded restore refused it and left the target empty. [A164, BK-3, PP-2, PP-12]
+ * where the guarded restore refused it and left the target empty.
  */
 
 const TEST_TIMEOUT_MS = 900_000;

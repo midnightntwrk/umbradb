@@ -5,13 +5,12 @@ import { runInFreshInstance } from "./fresh-instance.js";
 
 // Checks for ledger v9 as runtime 2.0 built it (rc.3). The tests (`ledger-v9-rc3.test.ts`) run them against the real
 // packages, and the committed negative controls (`ledger-v9-rc3.negative-control.test.ts`) against wrong ones.
-// [A159, A99, LG-3, LG-5]
 //
 // The oracle is stagenet's node: its genesis state and the roots it reported after blocks 0 to 3, and blocks 1 to 3 as
 // `core-ledger-state` hands them to the ledger worker. Each of these blocks has one `CNightGeneratesDustUpdate` system
 // transaction (DUST generation, whose rules changed from ledger-9.1.0.0-rc.3 to rc.5). All of it is extracted from the
 // recorded tape stagenet-0-10000 (`fixtures/stagenet/blocks.json`). Each check returns a line per problem, none when it
-// holds. [Q139 A]
+// holds.
 
 interface StagenetBlockJson {
   height: number;
@@ -68,7 +67,7 @@ export interface StagenetReplay {
 
 /**
  * State roots at the adapter: stagenet's genesis state (block 0's, whose root is the node's) and blocks 1 to 3 applied
- * with `adapter`, each root held to the node's. [A99]
+ * with `adapter`, each root held to the node's.
  */
 export function stagenetReplay(adapter: LedgerPackage): StagenetReplay {
   const problems: string[] = [];
@@ -105,7 +104,7 @@ function flushInto(adapter: LedgerPackage): StoredNode[] {
  * The state `from` holds after stagenet's block 3 is persisted and flushed (the nodes a database holds), then loaded by
  * its key in a fresh instance of the package at `packagePath` (a worker of its own, which holds nothing of this
  * thread's). It has the state's own root, which is the node's, and the same serialization. So a 2.0 → 2.1 upgrade,
- * whose first rc.5 block applies on the state rc.3 stored, carries it. [A159]
+ * whose first rc.5 block applies on the state rc.3 stored, carries it.
  */
 export async function carriedLoadProblems(from: LedgerPackage, packagePath: string): Promise<string[]> {
   const replay = stagenetReplay(from);

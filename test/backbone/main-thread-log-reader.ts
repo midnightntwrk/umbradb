@@ -9,7 +9,7 @@ import type { LedgerName, LedgerPackage, LedgerPackageOptions } from "../../src/
  * ledger task (`src/backbone/core-contract-logs-fast/task.ts`):
  * - the adapter of the block's ledger is loaded here once (and again after a failed load);
  * - each calling transaction is deserialized here a second time, and its native objects are freed once read;
- * - a ledger without logs (v8) reads none. [Q54]
+ * - a ledger without logs (v8) reads none.
  *
  * The tests use it to read a transaction's sites on this thread, and as the negative control of the ledger task's
  * parse count (a second parse on the main thread).

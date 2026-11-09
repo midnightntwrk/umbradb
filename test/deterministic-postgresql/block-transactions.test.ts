@@ -17,7 +17,7 @@ import { BACKENDS } from "../db/backends.js";
  * capture without an error. The `deterministic_postgresql` component's `BEFORE TRUNCATE` trigger
  * (`src/deterministic-postgresql/block-transactions.ts`), which the database API attaches to every module table not
  * declared `deterministic: false` (`src/db/truncate-guard.ts`), refuses it with `truncate-not-allowed`: in a block, in
- * `on-start-db`, anywhere, except in a transaction the migration runner marked as a migration. [A73, DB-14, DT-4]
+ * `on-start-db`, anywhere, except in a transaction the migration runner marked as a migration.
  *
  * A block is played by module `a`'s `on-db-write` in a block transaction of the database API, through the block write
  * handle it would get (`src/db/write-handles.ts`), which never carries the migration mark. A migration runs through
@@ -59,7 +59,7 @@ function outcome(run: Promise<unknown>): Promise<unknown> {
   );
 }
 
-describe.each(BACKENDS)("A73: TRUNCATE in a block transaction is refused, on $name (DB-14)", (backend) => {
+describe.each(BACKENDS)("TRUNCATE in a block transaction is refused, on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop());
 
@@ -98,7 +98,7 @@ describe.each(BACKENDS)("A73: TRUNCATE in a block transaction is refused, on $na
 
   // The required id names one test (the gate refuses an id two tests carry): the PostgreSQL 18 copy.
   const requiredId = backend.name.startsWith("PostgreSQL") ? "[[db.block.truncate-refused]] " : "";
-  it(`${requiredId}A73: TRUNCATE of a module's own table in a block fails with truncate-not-allowed and the block rolls back`, async () => {
+  it(`${requiredId}TRUNCATE of a module's own table in a block fails with truncate-not-allowed and the block rolls back`, async () => {
     const { db, plan } = await guarded();
     const result = await outcome(
       block(db, plan, async (tx) => {
@@ -111,7 +111,7 @@ describe.each(BACKENDS)("A73: TRUNCATE in a block transaction is refused, on $na
     expect(await db.read((read) => read.query("SELECT k FROM a.t ORDER BY k"))).toEqual([{ k: 1n }, { k: 2n }]);
   });
 
-  it("A73: the same statement in a migration succeeds, through the migration runner", async () => {
+  it("the same statement in a migration succeeds, through the migration runner", async () => {
     const { db } = await backend.database("SELECT 1");
     const first = [{ id: "001", sql: TABLES.join(";\n") }];
     const part = (migrations: MigrationPart["migrations"], onStartDb?: MigrationPart["onStartDb"]) => ({
@@ -133,7 +133,7 @@ describe.each(BACKENDS)("A73: TRUNCATE in a block transaction is refused, on $na
     expect(await db.read((read) => read.query("SELECT k FROM a.t"))).toEqual([{ k: 3n }]);
   });
 
-  it("A73: refuses TRUNCATE in on-start-db, which runs unmarked, also of a table a migration of the same startup created", async () => {
+  it("refuses TRUNCATE in on-start-db, which runs unmarked, also of a table a migration of the same startup created", async () => {
     const { db } = await backend.database("SELECT 1");
     const declared = (statement: string) => ({
       ...MODULE,
@@ -179,7 +179,7 @@ describe.each(BACKENDS)("A73: TRUNCATE in a block transaction is refused, on $na
     expect(await rows(db, "a.t")).toBe(0);
   });
 
-  it("A73: the mark the migration runner sets allows TRUNCATE in the transaction that carries it", async () => {
+  it("the mark the migration runner sets allows TRUNCATE in the transaction that carries it", async () => {
     const { db, plan } = await guarded();
     await db.transaction(async (tx) => {
       await setModuleRole(tx, plan, "a");
@@ -244,7 +244,7 @@ describe.each(BACKENDS)("A73: TRUNCATE in a block transaction is refused, on $na
     expect(await rows(db, "a.t")).toBe(2);
   });
 
-  it("allows TRUNCATE of a table declared deterministic: false, and of its partitions (Q76)", async () => {
+  it("allows TRUNCATE of a table declared deterministic: false, and of its partitions", async () => {
     const { db, plan } = await guarded();
     await block(db, plan, async (tx) => {
       await tx.execute("TRUNCATE a.cache");

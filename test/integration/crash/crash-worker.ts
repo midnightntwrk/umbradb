@@ -6,7 +6,7 @@
  *
  * The 0.9.5 operations this worker used to run (a checkpoint save, a watermark, a key-value write, a held lease) were
  * retired with the required ids 5–25 that drove them; the worker is to be retargeted to drive the runner. It imports
- * nothing of `src/` and does not import `setup.ts` (which loads Vitest and Testcontainers). [design §13]
+ * nothing of `src/` and does not import `setup.ts` (which loads Vitest and Testcontainers).
  */
 import postgres from "postgres";
 

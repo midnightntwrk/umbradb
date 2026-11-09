@@ -29,15 +29,15 @@ import { browserChain, headSession, KEPT_OPEN, restoreSession, resumeSession, sy
  * over it, which must then fail — the real build passing the same oracle is `./browser.test.ts`.
  *
  * - The second-tab check: a page that takes no Web Lock (`ignore-web-lock`) lets the second tab's core go for the
- *   database the first tab holds, and the check that it refused with `writer-lock-held` fails [A129].
+ *   database the first tab holds, and the check that it refused with `writer-lock-held` fails.
  * - The network check: a page that requests one URL beside the node (`foreign-request`) fails it, naming the URL
- *   [A131].
+ *.
  * - The equality with Node.js: a page whose JSON reader is `JSON.parse` (`plain-json-reader`) reads the `probe`
  *   module's `jsonb` integers beyond 2^53 rounded. The canonical encoding then refuses them, so its core halts at S,
- *   and it never has Node.js's contents hash [A132].
+ *   and it never has Node.js's contents hash.
  * - The restore check: a page whose restore skips the backup's contents hash check (`restore-skips-contents-hash`)
  *   commits a tampered backup into a fresh profile, and the check that it is refused `contents-hash-mismatch` fails
- *   [A131, BK-3, BK-5].
+ *.
  */
 
 const chain = browserChain();
@@ -78,9 +78,9 @@ afterAll(async () => {
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
 }, BROWSER_TEST_TIMEOUT_MS);
 
-describe("the browser build's negative controls (task 16.1)", () => {
+describe("the browser build's negative controls", () => {
   it(
-    "A129's control: a page that takes no Web Lock lets a second tab's core go for the held database, and the " +
+    "control: a page that takes no Web Lock lets a second tab's core go for the held database, and the " +
       "writer-lock-held check fails",
     async () => {
       const node = await tapeNode([...headSession(chain, 3n), ...syncSession(chain, 3n, 6n), ...KEPT_OPEN, ...resumeSession(chain, 6n)]);
@@ -106,7 +106,7 @@ describe("the browser build's negative controls (task 16.1)", () => {
   );
 
   it(
-    "A131's control: a page that requests a URL beside the node fails the network check, naming it",
+    "control: a page that requests a URL beside the node fails the network check, naming it",
     async () => {
       const elsewhere = createServer((_request, response) => response.end("elsewhere"));
       const port = await listenOnRandomPort(elsewhere);
@@ -126,7 +126,7 @@ describe("the browser build's negative controls (task 16.1)", () => {
   );
 
   it(
-    "A132's control: a page whose JSON reader is JSON.parse gives another contents hash than Node.js's on the same tape",
+    "control: a page whose JSON reader is JSON.parse gives another contents hash than Node.js's on the same tape",
     async () => {
       const records = [...headSession(chain, 3n), ...syncSession(chain, 3n, 9n)];
       const node = await tapeNode(records);
@@ -146,8 +146,8 @@ describe("the browser build's negative controls (task 16.1)", () => {
   );
 
   it(
-    "A131's restore control: a page whose restore skips the contents hash check commits a tampered backup, and the " +
-      "check that BK-3 refuses it fails",
+    "restore control: a page whose restore skips the contents hash check commits a tampered backup, and the " +
+      "check that the restore refuses it fails",
     async () => {
       const node = await tapeNode([
         ...headSession(chain, 3n),

@@ -6,7 +6,7 @@ import { restoreArguments } from "../../src/cli/restore.js";
  * The statements of a backup's dump as a restore runs them (`src/backup/statements.ts`): split as PostgreSQL's lexer
  * reads SQL — strings, escape strings, quoted identifiers, dollar-quoted bodies, line and nested block comments —,
  * `psql`'s `\restrict`/`\unrestrict` taken as `psql` takes them, and every other meta-command, a `COPY … FROM stdin`
- * and a file ending inside a statement refused (`backup-format-unknown`); and `restore`'s arguments. [BK-3]
+ * and a file ending inside a statement refused (`backup-format-unknown`); and `restore`'s arguments.
  */
 
 /** The SQL of every statement of `text` (lines after a manifest). */
@@ -27,7 +27,7 @@ const check = (text: string) =>
     })(),
   );
 
-describe("splitting a dump into statements (BK-3)", () => {
+describe("splitting a dump into statements", () => {
   it("ends a statement at a semicolon outside strings, identifiers, bodies and comments", async () => {
     const text = [
       "SET statement_timeout = 0;",

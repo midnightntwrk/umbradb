@@ -46,20 +46,19 @@ import { STAND_IN_LEDGER, STAND_IN_SPEC_VERSION, standInHeader, standInItems } f
  * - the parent check, after it, which fails with `parent-mismatch` a block whose parent is not the block stored at
  *   h − 1, or a block other than S with no block stored at h − 1 (its stored hash null). S comes from the part's
  *   process context, as the runner gives it (`contextAt`).
- * [CD-3, IN-4, Q74; design §3, §10; CORE-ARCH §4.11]
  *
  * The block time is the node's milliseconds, converted to `timestamptz` exactly (by PostgreSQL's integer interval
- * input, never through a floating-point value) and read back as RFC 3339 text. [DB-2]
+ * input, never through a floating-point value) and read back as RFC 3339 text.
  *
  * The blocks here are written as the finalized loop writes them: `core-block-commit`'s `on-db-write` through its block
  * write handle (`openBlockWrites`), one block transaction per block, with the block items the stand-in `core-block-fetch`
- * puts (`./block-fetch-stand-in.ts`). The same checks through the real process are in `chain-process.test.ts`. [A90]
+ * puts (`./block-fetch-stand-in.ts`). The same checks through the real process are in `chain-process.test.ts`.
  */
 
 /**
  * The part's process context in a process whose start height is `start`. The runner gives every backbone part the
  * `core` entry's revisions, in start order (`processRevisions`), so the first one starts at S: the parent check reads
- * S there. [CF-2, IN-4, MD-7]
+ * S there.
  */
 function contextAt(start: bigint): ProcessContext {
   const core = Object.freeze({ start, stop: null, version: UMBRADB_VERSION, settings: Object.freeze({}) });
@@ -140,14 +139,14 @@ async function failureOf(run: Promise<void>): Promise<unknown> {
 const codeOf = (error: unknown): string =>
   error instanceof UmbraError ? error.code : error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 
-describe("core-block-commit's declaration (CD-3, design §10)", () => {
+describe("core-block-commit's declaration", () => {
   it("is a valid backbone part with defineModule's entry builder, starting mid-chain, at UmbraDB's version", () => {
     const set = validateDeclarations({ backbone: [CORE_BLOCK_COMMIT], core: [], user: [] });
     expect(set.backbone).toEqual([CORE_BLOCK_COMMIT]);
     expect(CORE_BLOCK_COMMIT.id).toBe("core-block-commit");
     expect(CORE_BLOCK_COMMIT.version).toBe(UMBRADB_VERSION);
     expect(CORE_BLOCK_COMMIT.side).toBe("public");
-    // Every backbone part starts at S, a mid-chain start when S is above 0. [Q96]
+    // Every backbone part starts at S, a mid-chain start when S is above 0.
     expect(CORE_BLOCK_COMMIT.startsMidChain).toBe(true);
     expect(typeof (CORE_BLOCK_COMMIT as { entry?: unknown }).entry).toBe("function");
     expect(Object.keys(CORE_BLOCK_COMMIT)).not.toContain("entry");
@@ -166,7 +165,7 @@ describe("core-block-commit's declaration (CD-3, design §10)", () => {
     expect(CORE_BLOCK_COMMIT.migrations).toEqual(CORE_BLOCK_COMMIT_MIGRATIONS.map(({ id, sql }) => ({ id, sql })));
   });
 
-  it("names its tables the blocks table and the hashes table; the cursor is the blocks table's last row (task 6.1's note)", () => {
+  it("names its tables the blocks table and the hashes table; the cursor is the blocks table's last row (the note)", () => {
     expect(BLOCKS_TABLE).toBe("core_block_commit.blocks");
     expect(HASHES_TABLE).toBe("core_block_commit.hashes");
     // The old name, kept for the finalized loop's message until it says BLOCKS_TABLE (the cursor-table helper is
@@ -174,7 +173,7 @@ describe("core-block-commit's declaration (CD-3, design §10)", () => {
     expect(CURSOR_TABLE).toBe(BLOCKS_TABLE);
   });
 
-  it("has one migration, 001, whose text is fixed: its SHA-256 is in every database's record (DB-9)", () => {
+  it("has one migration, 001, whose text is fixed: its SHA-256 is in every database's record", () => {
     expect(CORE_BLOCK_COMMIT_MIGRATIONS.map(({ id }) => id)).toEqual(["001"]);
     const [migration] = CORE_BLOCK_COMMIT_MIGRATIONS;
     const sql = migration?.sql as string;
@@ -185,7 +184,7 @@ describe("core-block-commit's declaration (CD-3, design §10)", () => {
   });
 });
 
-/** The pinned SHA-256 of migration 001's text: changing the text changes every database's checksum. [DB-9] */
+/** The pinned SHA-256 of migration 001's text: changing the text changes every database's checksum. */
 const MIGRATION_001_SHA256 = "709223680f3fa5cdc25fd580b8c9eab24cf3cef6cd3891618b54a9e16a85d3da";
 
 describe("the height partitions (0.9.5's chain_archive layout, kept)", () => {
@@ -211,7 +210,7 @@ describe("the height partitions (0.9.5's chain_archive layout, kept)", () => {
   });
 });
 
-describe("the block items core-block-commit reads (CD-2's block-header and ledger-version)", () => {
+describe("the block items core-block-commit reads (the block-header and ledger-version)", () => {
   // Refused before anything is sent: a handle that records every statement shows none.
   const recording = (): { readonly w: BlockWriteHandle; readonly sent: string[] } => {
     const sent: string[] = [];
@@ -339,7 +338,7 @@ describe.each(BACKENDS)("core_block_commit's tables on $name", (backend) => {
     ).toEqual([{ kind: "r", partition: false }]);
   }, 60_000);
 
-  it("gives both tables design §10's columns, keys and checks, owned by the part's role", async () => {
+  it("gives both tables the columns, keys and checks, owned by the part's role", async () => {
     const { rows } = await committed(backend);
     const columns = await rows(
       "SELECT table_name AS t, column_name AS c, data_type AS type, is_nullable AS nullable FROM information_schema.columns " +
@@ -387,7 +386,7 @@ describe.each(BACKENDS)("core_block_commit's tables on $name", (backend) => {
     ]);
   }, 60_000);
 
-  it("writes each block's row and its hash's row in the block's transaction, under the part's role (CD-3)", async () => {
+  it("writes each block's row and its hash's row in the block's transaction, under the part's role", async () => {
     const { block, rows } = await committed(backend);
     for (const height of [1n, 2n, 3n]) await block(contextOf(inMemoryBlock(height)));
     const blocks = await rows(
@@ -412,7 +411,7 @@ describe.each(BACKENDS)("core_block_commit's tables on $name", (backend) => {
     expect(new Set(blocks.map((row) => row.x)).size).toBe(3);
   }, 60_000);
 
-  it("stores the node's block time in milliseconds exactly, also where a floating-point conversion rounds (A145, Q74)", async () => {
+  it("stores the node's block time in milliseconds exactly, also where a floating-point conversion rounds", async () => {
     const { block, rows } = await committed(backend);
     for (const [index, { ms }] of A145_TIMES.entries()) {
       const height = BigInt(index + 1);
@@ -422,7 +421,7 @@ describe.each(BACKENDS)("core_block_commit's tables on $name", (backend) => {
     expect(await a145Stored(rows)).toEqual(A145_TIMES.map(({ ms, text }) => ({ text, microseconds: ms * 1000n })));
   }, 60_000);
 
-  it("negative control: a block time converted through a float (to_timestamp) fails A145's exactness", async () => {
+  it("negative control: a block time converted through a float (to_timestamp) fails the exactness", async () => {
     const { block, rows } = await committed(backend);
     const throughFloat: Commit = async (w, b) => {
       const header = b.items.get("block-header") as { specVersion: number; timestampMs: bigint };
@@ -445,7 +444,7 @@ describe.each(BACKENDS)("core_block_commit's tables on $name", (backend) => {
     expect(wrong.map((row) => row.text)).toEqual(["5138-11-16T09:46:39.998992Z", "9999-12-31T23:59:59.999008Z"]);
   }, 60_000);
 
-  it("refuses a hash a block already has — in another height partition too — with duplicate-block-hash (CD-3)", async () => {
+  it("refuses a hash a block already has — in another height partition too — with duplicate-block-hash", async () => {
     const { block, rows } = await committed(backend, BigInt(HEIGHT_PARTITION_SIZE - 2));
     const p0 = HEIGHT_PARTITION_SIZE - 2;
     for (const height of [p0, p0 + 1, p0 + 2].map(BigInt)) await block(contextOf(inMemoryBlock(height)));
@@ -473,7 +472,7 @@ describe.each(BACKENDS)("core_block_commit's tables on $name", (backend) => {
     ]);
   }, 60_000);
 
-  it("refuses a block whose parent is not the block stored at h − 1 with parent-mismatch (IN-4)", async () => {
+  it("refuses a block whose parent is not the block stored at h − 1 with parent-mismatch", async () => {
     const { block, rows } = await committed(backend, 5n);
     for (const height of [5n, 6n]) await block(contextOf(inMemoryBlock(height)));
     const other = new Uint8Array(32).fill(9);
@@ -495,7 +494,7 @@ describe.each(BACKENDS)("core_block_commit's tables on $name", (backend) => {
     expect(await rows("SELECT height FROM core_block_commit.blocks")).toEqual([{ height: 40n }]);
   }, 60_000);
 
-  it("refuses a block above S whose h − 1 holds no block, never written or deleted by another writer, with parent-mismatch and no stored hash (IN-4)", async () => {
+  it("refuses a block above S whose h − 1 holds no block, never written or deleted by another writer, with parent-mismatch and no stored hash", async () => {
     const { block, rows, exec } = await committed(backend, 5n);
     for (const height of [5n, 6n]) await block(contextOf(inMemoryBlock(height)));
     const refusedAbove = async (height: bigint): Promise<void> => {
@@ -523,7 +522,7 @@ describe.each(BACKENDS)("core_block_commit's tables on $name", (backend) => {
     expect(await rows("SELECT max(height) AS h FROM core_block_commit.blocks")).toEqual([{ h: 8n }]);
   }, 60_000);
 
-  it("refuses as the first block of an empty database any block but S, with parent-mismatch and no stored hash (IN-4)", async () => {
+  it("refuses as the first block of an empty database any block but S, with parent-mismatch and no stored hash", async () => {
     const { block, rows } = await committed(backend, 5n);
     for (const height of [6n, 4n]) {
       const error = await failureOf(block(contextOf(inMemoryBlock(height))));
@@ -615,7 +614,7 @@ describe.each(BACKENDS)("core_block_commit's tables on $name", (backend) => {
   }, 60_000);
 });
 
-/** The block times under test: the milliseconds, and the RFC 3339 text the database API reads back. [A145, DB-2] */
+/** The block times under test: the milliseconds, and the RFC 3339 text the database API reads back. */
 const A145_TIMES: readonly { readonly ms: bigint; readonly text: string }[] = [
   { ms: 0n, text: "1970-01-01T00:00:00Z" },
   { ms: 1n, text: "1970-01-01T00:00:00.001Z" },

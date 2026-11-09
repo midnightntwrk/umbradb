@@ -1,7 +1,7 @@
 # Vendored ledger builds
 
 UmbraDB runs Midnight's ledger (`midnight-ledger`) as WebAssembly, one package per ledger major version
-(`openspec/changes/core-arch/design.md` §5.2, requirement LG-5). The published `@midnight-ntwrk/ledger-v*` packages
+. The published `@midnight-ntwrk/ledger-v*` packages
 keep the ledger state in memory and serialize it whole; UmbraDB keeps it in its database as the node keeps it on disk,
 one content-addressed node at a time. The functions that needs are added by patches to the upstream source, and the
 packages are built here, reproducibly, from a pinned upstream commit.
@@ -9,7 +9,7 @@ packages are built here, reproducibly, from a pinned upstream commit.
 | Directory | Upstream source | Release (`versionName`) | Why this release |
 |---|---|---|---|
 | `v8/` | `midnightntwrk/midnight-ledger` `36d7442172136758e33009f75ff4aa56616cff40` | `ledger-8.1.2` | The v8 ledger of `midnight-node` 2.1.0-rc.4 (`Cargo.toml` `mn-ledger-8 = "=8.1.2"`); the mainnet node reports `=8.1.2` for block 0 |
-| `v9-rc3/` | `midnightntwrk/midnight-ledger` `4823b5351b17cc49e30f19760dbd30a73cf95e22` | `ledger-9.1.0.0-rc.3` | The v9 ledger of `midnight-node` 2.0.0-rc.4, which runtime 2.0 (`spec_version` 2,000,000–2,000,999; stagenet) builds (`Cargo.toml:445` `crate-ledger-9.1.0.0-rc.3`); a package of its own (owner decision Q139 A, task 12.2a) |
+| `v9-rc3/` | `midnightntwrk/midnight-ledger` `4823b5351b17cc49e30f19760dbd30a73cf95e22` | `ledger-9.1.0.0-rc.3` | The v9 ledger of `midnight-node` 2.0.0-rc.4, which runtime 2.0 (`spec_version` 2,000,000–2,000,999; stagenet) builds (`Cargo.toml:445` `crate-ledger-9.1.0.0-rc.3`); a package of its own |
 | `v9/` | `midnightntwrk/midnight-ledger` `67f9f97246339539af0091c4d8c6bc5ab236a191` | `ledger-9.1.0.0-rc.5` | The v9 ledger of `midnight-node` 2.1.0-rc.4 (per-crate tags `crate-ledger-9.1.0.0-rc.5` etc., each an isolate commit of this tree), runtime 2.1 on |
 
 The v9 package also contains the ledger team's v8 → v9 state translation (`v8-to-v9-state-translation` at
@@ -26,17 +26,17 @@ Each version directory holds:
 - `pkg/` — the built package (the WASM module, the JavaScript bindings, the TypeScript declarations, a Node.js entry
   `*_fs.js`, a browser entry, `package.json`);
 - `SHA256SUMS` — the SHA-256 of every file in `pkg/`. Its own SHA-256 is the package's identity in the core version
-  (LG-5; `src/ledger/releases.ts`), and startup refuses with `package-hash-mismatch` when it, or any file it lists, is
+  (`src/ledger/releases.ts`), and startup refuses with `package-hash-mismatch` when it, or any file it lists, is
   not the recorded one (`src/ledger/identity.ts`).
 
 ### v9-rc3: ledger v9 as runtime 2.0 built it
 
 Runtime 2.0 is `midnight-node` 2.0.0-rc.4's, which builds v9 from `crate-ledger-9.1.0.0-rc.3`; rc.3 → rc.5 changed rules
 the state root depends on (DUST generation's uniqueness, `fresh_dust_output`'s times, `verify.rs`), so the rc.5 package
-gives stagenet another root than its node's from block 1 on (decision record Q139). The two releases share one storage
+gives stagenet another root than its node's from block 1 on. The two releases share one storage
 format — no stored type's tag differs, nor `storage-core`'s hashing — so a state the rc.3 package stored loads in the
 rc.5 package with the same root and serialization, which is how a chain's 2.0 → 2.1 upgrade carries its state (the
-ledger worker's engine; acceptance A159).
+ledger worker's engine).
 
 `v9-rc3/` is built from the workspace tag `ledger-9.1.0.0-rc.3` (`4823b53`), as `v9/` is from its workspace tag. The
 node's `Cargo.lock` takes the v9 crates from per-crate tags: `crate-ledger-9.1.0.0-rc.3`, `zswap-9.0.0-rc.3`,
@@ -63,7 +63,7 @@ Its patches are v9's where they apply:
   `compute_overall_fullness`; `ledger/src/versions/common/api/ledger.rs` `Ledger::post_block_update`,
   `apply_system_tx`): the update is the ledger's `post_block_update`, whose prevalidation a clamped fullness always
   passes, as that node calls it;
-- `0006-ledger-wasm-state-trees.patch` — LG-16's tree values, as v8's `0005-…` and v9's `0007-…` (below).
+- `0006-ledger-wasm-state-trees.patch` — the tree values, as v8's `0005-…` and v9's `0007-…` (below).
 
 v9's `0004-…` (the translation's timers) and `0005-…` (the conversion) do not apply: `midnight-node` 2.0.0-rc.4 carries
 no v8 → v9 translation, and the rc.3 package has no `convertFromV8`. The build takes about a minute and a half on this
@@ -125,7 +125,7 @@ profiling timers zero on `wasm32`, where `std::time::Instant` panics). The expor
 before the module aborts (the build aborts on panic, so a panic is fatal to the instance). Builds keep the node's
 storage layout (`layout-v2`, `gc-v1`). `v8/patches/0002-…` moves ledger-8.1.2 from wasm-bindgen 0.2.104 to 0.2.108 (above).
 
-The node's end-of-block update (`v8/patches/0004-…`, `v9/patches/0006-…`; owner decision Q113 A, task 12.1a). The
+The node's end-of-block update (`v8/patches/0004-…`, `v9/patches/0006-…`). The
 published `LedgerParameters.normalizeFullness` and `LedgerState.postBlockUpdate` pass a block's fullness through
 JavaScript numbers, which cannot hold a `FixedPoint` (a deploy's block usage of 2,635 of 200,000 is the node's
 `FixedPoint(243035853171123343)` and comes back as `…328`), and refuse a block above its limits; the published
@@ -142,8 +142,7 @@ JavaScript numbers, which cannot hold a `FixedPoint` (a deploy's block usage of 
 `test/ledger/fixtures/post-block-update/` holds the node's values for a table of block costs, computed in Rust at the
 pinned commits (`oracle/`), which `test/ledger/post-block-update.test.ts` checks the packages and the adapters against.
 
-LG-16's tree values (`v8/patches/0005-…`, `v9/patches/0007-…`, `v9-rc3/patches/0006-…`; owner decision Q138 A, task
-12.1b). The published packages give a state's zswap first free index only; the official indexer stores, per block, the
+The tree values (`v8/patches/0005-…`, `v9/patches/0007-…`, `v9-rc3/patches/0006-…`). The published packages give a state's zswap first free index only; the official indexer stores, per block, the
 zswap commitment tree's first free index and root and the DUST commitment and generation trees' first free indexes and
 roots. Every package exports `stateTrees(state)`: `{ zswapFirstFree, zswapRoot, dustCommitmentFirstFree,
 dustCommitmentRoot, dustGenerationFirstFree, dustGenerationRoot }`, read from the ledger's Rust state as that indexer
@@ -156,8 +155,8 @@ and each root its untagged serialization. Ledger 8 has DUST state too, so the si
 (`oracle/`), which `test/ledger/state-trees.test.ts` checks the packages and the adapters against.
 
 The v8 package has no `decodeLogItem`: v8 contract logs are not MIP-0002 events, and the v8 adapter returns null for
-them (owner decision Q54). The owner proposes these patches upstream, as a few pull requests, once `midnight-ledger`
-is stable (owner decision Q56); each is dropped once upstream releases it (LG-5).
+them. The owner proposes these patches upstream, as a few pull requests, once `midnight-ledger`
+is stable; each is dropped once upstream releases it.
 
 ## Updating a version
 

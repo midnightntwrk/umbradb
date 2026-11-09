@@ -1,15 +1,14 @@
 /**
  * UmbraDB's own ledger worker entry: the thread `startLedgerWorker` starts unless it is given another entry. It runs
  * the ledger worker (`./run.ts`) with the ledger tasks of UmbraDB's core modules (`src/backbone/ledger-tasks.ts`).
- * [MD-1; design §5.3, §5.5]
  *
  * If `workerData.modules` names a module, the tasks of that module's user modules are added: its `modules` export, the
  * same export a configuration file uses for its user modules (`src/config/load.ts`'s `MODULES_EXPORT`). For the
  * `umbradb` command that module is the configuration file, which is the host program and is imported here just as on
- * the main thread; nothing is loaded by name. [MD-1, CF-1, Q106]
+ * the main thread; nothing is loaded by name.
  *
  * The browser build bundles this entry and names no module there. It runs only as a thread of its own, so it is out
- * of coverage. [design §9.2]
+ * of coverage.
  */
 
 import { workerData } from "node:worker_threads";

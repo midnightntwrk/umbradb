@@ -14,7 +14,6 @@ import { REPOSITORY } from "./config-fixtures.js";
  *
  * The same file with the faults corrected compiles without a diagnostic. `./builders.test.ts` holds the same cases as
  * `@ts-expect-error` lines, checked by `npm run typecheck`. `umbradb config check` runs the compiler the same way.
- * [A27 STATIC, CF-2, CF-3]
  */
 
 /** The builders and the fixture modules, imported by absolute path (the compiler does not resolve a `file:` URL). */
@@ -90,7 +89,7 @@ function check(name: string, text: string): Finding[] {
     }));
 }
 
-describe("A27: the compiler reports each fault of a configuration file at its line (CF-2)", () => {
+describe("the compiler reports each fault of a configuration file at its line", () => {
   it("a misspelled core field, a wrong field type and another module's settings, and nothing else", () => {
     const findings = check("umbradb.config.ts", lines(false).join("\n"));
     expect(findings.map(({ line, code }) => ({ line, code }))).toEqual([

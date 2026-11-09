@@ -7,7 +7,7 @@ import type { LatencyStats } from "./types.js";
  * (`./core.ts`, `runner.commitEmptyBlock` on PGlite and on PostgreSQL in Docker) compared with the committed baseline
  * (`bench/baseline.json`, `npm run bench`). A p99 more than ten times the baseline's is a warning for a person to look
  * at; the guard exits 0 whatever the numbers, and 1 only when it could not run (Docker or the process failing), which
- * is not a performance result. [design §13]
+ * is not a performance result.
  */
 
 const METHOD = { warmup: 20, iterations: 100 } as const;

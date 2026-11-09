@@ -13,22 +13,21 @@ import { startProcess } from "../runner/process-build.js";
 import { cursorReaches, libraryData, PGLITE_MEMORY, rowsModule } from "./library-fixtures.js";
 
 /**
- * A host's in-memory chain, `startUmbraDB`'s `source` (`src/library/options.ts`, `src/runner/process.ts`). [LM-8]
+ * A host's in-memory chain, `startUmbraDB`'s `source` (`src/library/options.ts`, `src/runner/process.ts`).
  *
- * - L48 `[NEG]`: a `source` that is not exactly an `InMemoryBlockSource` — a subclass carrying one of the engine's hook
+ * - `[NEG]`: a `source` that is not exactly an `InMemoryBlockSource` — a subclass carrying one of the engine's hook
  *   members, a hook-free subclass, a plain object implementing the block source's interface, an instance given a hook
  *   of its own, a proxy of one, a value of another kind —, and a `source` on a private process, are refused
  *   `source-refused`, the process ending `refused` by itself with nothing opened. The negative control gives the same
  *   sources to the engine through its test seam, unchecked: none is refused, and the subclass's hook runs.
- * - L49: with an in-memory `source` the process makes no node client — the engine's node client factory is never
+ * - With an in-memory `source` the process makes no node client — the engine's node client factory is never
  *   called for the input `startUmbraDB` gives it — and opens no connection to `node` (a TCP server listening at the
  *   `node` address sees none) while the process starts, processes the in-memory chain and stops, on PostgreSQL and
  *   PGlite. The controls: the same input with the in-memory chain given through the engine's test seam makes the node
  *   client; the node source on the same `node` connects to the server.
- * - A74 (MD-7's exception): with an in-memory `source` the process item `node-client` is not published and startup
+ * - (the exception): with an in-memory `source` the process item `node-client` is not published and startup
  *   goes on — a module requiring it finds none in its items, and the chain is processed —, while another required
- *   process item left unpublished is still refused `process-item-missing`, on PostgreSQL and PGlite. [MD-7, A74 CI,
- *   LM-8]
+ *   process item left unpublished is still refused `process-item-missing`, on PostgreSQL and PGlite.
  */
 
 /** A hook member's stand-in of the subclass below: it notes that it ran, then fails the start. */
@@ -57,7 +56,7 @@ function lookalike(head: bigint): object {
   };
 }
 
-/** L48's sources that are not exactly an `InMemoryBlockSource`, with the reason each refusal names. */
+/** The sources that are not exactly an `InMemoryBlockSource`, with the reason each refusal names. */
 const NOT_EXACT: readonly (readonly [string, () => unknown, string])[] = [
   ["a subclass carrying a hook (checkChain)", () => new HookedSource({ head: 2n }), "not-in-memory-source"],
   ["a hook-free subclass", () => new PlainSubclass({ head: 2n }), "not-in-memory-source"],
@@ -84,7 +83,7 @@ async function closedByItself(handle: { readonly closed: Promise<void> }): Promi
   }
 }
 
-describe.each(PROCESS_BACKENDS)("L48: source-refused (LM-8) on $name", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("source-refused on $name", (backend: ProcessBackend) => {
   beforeAll(async () => {
     await backend.start();
   }, 180_000);
@@ -161,7 +160,7 @@ async function countingNode(): Promise<{ readonly url: string; readonly connecti
   };
 }
 
-describe.each(PROCESS_BACKENDS)("L49: with an in-memory source, no node client and no connection to node (LM-8), on $name", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("with an in-memory source, no node client and no connection to node, on $name", (backend: ProcessBackend) => {
   beforeAll(async () => {
     await backend.start();
   }, 180_000);
@@ -252,7 +251,7 @@ describe.each(PROCESS_BACKENDS)("L49: with an in-memory source, no node client a
   }, 120_000);
 });
 
-describe("L49: the in-memory chain without a node client", () => {
+describe("the in-memory chain without a node client", () => {
   it("a module requiring the node-client item finds none; the chain is processed", async () => {
     const found: unknown[] = [];
     const m = rowsModule("asks", undefined, {
@@ -282,12 +281,12 @@ describe("L49: the in-memory chain without a node client", () => {
 });
 
 /**
- * MD-7's one exception: with a host's in-memory chain the engine makes no node client, so `node-client` is never
+ * The one exception: with a host's in-memory chain the engine makes no node client, so `node-client` is never
  * published and the seal does not refuse it; any other required process item left unpublished is refused. The module
  * `asks` requires `node-client` beside `core-block-fetch`; `needs` also requires `client`, which its provider `silent`
- * never publishes. [MD-7, A74 CI, LM-8]
+ * never publishes.
  */
-describe.each(PROCESS_BACKENDS)("A74: node-client with an in-memory source, MD-7's exception (LM-8), on $name", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("node-client with an in-memory source, the exception, on $name", (backend: ProcessBackend) => {
   beforeAll(async () => {
     await backend.start();
   }, 180_000);

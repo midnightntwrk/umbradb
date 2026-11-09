@@ -10,7 +10,7 @@ import { a165Problems, a165Run } from "./accepted-hash-checks.js";
  *   after the core's configuration changed);
  * - an `--update-hash` that accepts any hash (a start given the hash it had accepted, not the new one, runs on).
  *
- * Each run ends after the scenario's third start (`short`). [A165, PP-14, Q159]
+ * Each run ends after the scenario's third start (`short`).
  */
 
 /** A start that never compares the recorded hash: every start records what it finds, as a first start does. */
@@ -20,12 +20,12 @@ const neverCompares = (hashes: StartHashes) => startHashDecision({ ...hashes, re
 const acceptsAny = (hashes: StartHashes) =>
   startHashDecision(hashes.given === null ? hashes : { ...hashes, given: hashes.core ?? hashes.history });
 
-describe.each(PRIVATE_BACKENDS)("A165's negative controls on $name (PP-14, Q159)", (backend) => {
+describe.each(PRIVATE_BACKENDS)("negative controls on $name", (backend) => {
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 
   it(
-    "negative control: a start that never compares the hash it recorded runs on after a changed configuration and fails A165",
+    "negative control: a start that never compares the hash it recorded runs on after a changed configuration and fails",
     async () => {
       const run = await a165Run(backend, { transport: true, acceptance: neverCompares, short: true });
       const problems = a165Problems(run);
@@ -37,7 +37,7 @@ describe.each(PRIVATE_BACKENDS)("A165's negative controls on $name (PP-14, Q159)
   );
 
   it(
-    "negative control: an --update-hash that accepts any hash runs on with another hash given and fails A165",
+    "negative control: an --update-hash that accepts any hash runs on with another hash given and fails",
     async () => {
       const run = await a165Run(backend, { transport: true, acceptance: acceptsAny, short: true });
       const problems = a165Problems(run);
@@ -50,7 +50,7 @@ describe.each(PRIVATE_BACKENDS)("A165's negative controls on $name (PP-14, Q159)
   );
 
   it.runIf(backend.kind === "postgres")(
-    "negative control: without a transport, a start that never compares the hash it recorded fails A165 alike",
+    "negative control: without a transport, a start that never compares the hash it recorded fails alike",
     async () => {
       const run = await a165Run(backend, { transport: false, acceptance: neverCompares, short: true });
       expect(run.changed.started).toBe(true);

@@ -26,22 +26,22 @@ import { mountHandlers } from "./mounted-fixtures.js";
 
 /**
  * Where a library process listens and connects, from its network plan `[CI]`, on PostgreSQL 18 (Docker) and PGlite
- * 0.5.10 [LM-3, PP-4, PP-11, AE-5]:
- * - **L19**: a library private process connects over TCP to a library public process listening at
+ * 0.5.10:
+ * - A library private process connects over TCP to a library public process listening at
  *   `publicSide: { host: "127.0.0.1", port: 0 }` (the address read from `status().listening`), and over mutual TLS with
  *   `publicSide: true` / `privateSide: true` and the addresses and `tls` written in the configurations; in both the
  *   private process follows, in lockstep (the core waits at S for the instance it lists until it connects).
- * - **L21**: with `port: 0` on the module API, admin and the link, each bound address is in `status().listening` as it
+ * - With `port: 0` on the module API, admin and the link, each bound address is in `status().listening` as it
  *   binds: admin's and the link's in the very call that logs their bind, admin's before the database opens (while
  *   `on-start-db` is held), the link's before the module API's (while `on-start-api` is held), the module API's at
  *   `started`'s first reaction; after a class-B refusal admin's stays and answers, the link's (closed) is null, the
  *   module API's (never bound) null; after `closed`, all are null.
- * - **L22**: `/config` of a library process shows its revision's `listen` and `privateLink` as the plan's addresses as
+ * - `/config` of a library process shows its revision's `listen` and `privateLink` as the plan's addresses as
  *   bound, absent where nothing listens or connects at an address — admin mounted, the module API mounted, a link over
  *   channels or `connect` — and `network` naming each surface's mode (`mounted`, `listening`, `channels`, `connect`,
  *   `none`); the command's keeps its `listen` as written and gains `network`, through the engine's `"configured"` mode
- *   and through `umbradb run` itself. Each body validates against A66's schema.
- * - **L64**: a private configuration that writes `listen.privateLink` (no surface of a private process): `umbradb run`
+ *   and through `umbradb run` itself. Each body validates against the schema.
+ * - A private configuration that writes `listen.privateLink` (no surface of a private process): `umbradb run`
  *   starts as today, listens nowhere for it and refuses nothing; `startUmbraDB` on the same configuration likewise.
  */
 
@@ -84,7 +84,7 @@ async function until(holds: () => boolean, what: string, ms = 60_000): Promise<v
   }
 }
 
-/** `/config` at `origin` once `wanted` holds of it, checked against A66's schema. */
+/** `/config` at `origin` once `wanted` holds of it, checked against the schema. */
 async function configWhen(origin: string, wanted: (config: Record<string, any>) => boolean): Promise<Record<string, any>> {
   const deadline = Date.now() + 30_000;
   for (;;) {
@@ -106,7 +106,7 @@ function adminOrigin(handle: UmbraDBHandle): string {
   return `http://127.0.0.1:${admin.port}`;
 }
 
-/** The `core` settings a public library process on `db` adds for its link: the reader login on PostgreSQL. [CF-4] */
+/** The `core` settings a public library process on `db` adds for its link: the reader login on PostgreSQL. */
 const readerOf = (db: TestDatabase): Readonly<Record<string, unknown>> =>
   db.transportReader === undefined ? {} : { transportReader: db.transportReader };
 
@@ -130,13 +130,13 @@ function libraryCore(db: TestDatabase, head: bigint, extra: Readonly<Record<stri
   });
 }
 
-/** Waits until the core waits at S for its lockstep instance: its lockstep is real, not a pass-through. [PP-6] */
+/** Waits until the core waits at S for its lockstep instance: its lockstep is real, not a pass-through. */
 async function waitsForLockstep(core: UmbraDBHandle): Promise<void> {
   await until(() => core.status().conditions.some((condition) => condition.code === "waiting-for-lockstep"), "waiting-for-lockstep");
   expect(core.status().cursor).toBeNull();
 }
 
-describe.each(PRIVATE_BACKENDS)("L19: library private processes over the private link, on $name (LM-3, PP-4)", (backend: PrivateBackend) => {
+describe.each(PRIVATE_BACKENDS)("library private processes over the private link, on $name", (backend: PrivateBackend) => {
   let certs: TestCertificates;
   beforeAll(async () => {
     certs = makeCertificates();
@@ -147,7 +147,7 @@ describe.each(PRIVATE_BACKENDS)("L19: library private processes over the private
     await backend.stop();
   }, START_TIMEOUT_MS);
 
-  it("L19, L22: privateSide: { host, port } connects to publicSide: { host: 127.0.0.1, port: 0 }; it follows in lockstep; /config shows the link connecting", async () => {
+  it("privateSide: { host, port } connects to publicSide: { host: 127.0.0.1, port: 0 }; it follows in lockstep; /config shows the link connecting", async () => {
     const publicDb = await backend.database("public");
     const privateDb = await backend.database("private");
     const core = libraryCore(publicDb, 4n, { lockstepInstances: ["lib-tcp"] }, {
@@ -169,7 +169,7 @@ describe.each(PRIVATE_BACKENDS)("L19: library private processes over the private
         await cursorReaches(instance, 4n, FOLLOWS_MS);
         // A private process connects; it listens for nothing of its link.
         expect(instance.status().listening.privateLink).toBeNull();
-        // L22: its revision's privateLink is the address it connects to, its listen only admin's, as bound.
+        // Its revision's privateLink is the address it connects to, its listen only admin's, as bound.
         const admin = instance.status().listening.admin;
         const config = await configWhen(adminOrigin(instance), (shown) => shown.network !== null);
         expect(config.network).toEqual({ api: "mounted", admin: "listening", privateLink: "connecting" });
@@ -183,7 +183,7 @@ describe.each(PRIVATE_BACKENDS)("L19: library private processes over the private
     }
   }, FOLLOWS_MS * 2);
 
-  it("L19: publicSide: true and privateSide: true with the addresses and mutual tls written connect over TLS; it follows in lockstep", async () => {
+  it("publicSide: true and privateSide: true with the addresses and mutual tls written connect over TLS; it follows in lockstep", async () => {
     const publicDb = await backend.database("public");
     const privateDb = await backend.database("private");
     const lines: string[] = [];
@@ -226,13 +226,13 @@ describe.each(PRIVATE_BACKENDS)("L19: library private processes over the private
   }, FOLLOWS_MS * 2);
 });
 
-describe.each(PRIVATE_BACKENDS)("L21, L22: listeners at port 0 and what /config shows of them, on $name (LM-3, LM-9)", (backend: PrivateBackend) => {
+describe.each(PRIVATE_BACKENDS)("listeners at port 0 and what /config shows of them, on $name", (backend: PrivateBackend) => {
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 
   const everywhere = { api: { port: 0 }, admin: { port: 0 }, privateLink: { publicSide: { port: 0 } } } as const;
 
-  it("L21, L22: each address in status().listening as it binds, /config's listen as bound; after closed all are null", async () => {
+  it("each address in status().listening as it binds, /config's listen as bound; after closed all are null", async () => {
     const db = await backend.database("public");
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -322,7 +322,7 @@ describe.each(PRIVATE_BACKENDS)("L21, L22: listeners at port 0 and what /config 
     }
   }, 240_000);
 
-  it("L21: after a class-B refusal admin's address stays and answers, the closed link's and the unbound module API's are null", async () => {
+  it("after a class-B refusal admin's address stays and answers, the closed link's and the unbound module API's are null", async () => {
     const db = await backend.database("public");
     const lines: string[] = [];
     const failing = rowsModule("failing", undefined, {
@@ -363,7 +363,7 @@ describe.each(PRIVATE_BACKENDS)("L21, L22: listeners at port 0 and what /config 
     expect(handle.status().listening).toEqual({ api: null, admin: null, privateLink: null });
   }, 240_000);
 
-  it("L22: mounted module API, listening admin, the link over channels: /config's listen holds admin's only", async () => {
+  it("mounted module API, listening admin, the link over channels: /config's listen holds admin's only", async () => {
     const db = await backend.database("public");
     const handle = libraryCore(db, 3n, {}, { network: { admin: { port: 0 }, privateLink: { publicSide: { channels: true } } } });
     try {
@@ -379,7 +379,7 @@ describe.each(PRIVATE_BACKENDS)("L21, L22: listeners at port 0 and what /config 
     }
   }, 240_000);
 
-  it("L22: mounted admin and module API, no link: /config's listen holds no address, network names each mounted", async () => {
+  it("mounted admin and module API, no link: /config's listen holds no address, network names each mounted", async () => {
     const db = await backend.database("public");
     const handle = libraryCore(db, 3n, {}, {});
     const host = await mountHandlers(handle);
@@ -397,7 +397,7 @@ describe.each(PRIVATE_BACKENDS)("L21, L22: listeners at port 0 and what /config 
     }
   }, 240_000);
 
-  it("L22: a private process over { connect }: /config names the link's mode connect, with no address", async () => {
+  it("a private process over { connect }: /config names the link's mode connect, with no address", async () => {
     const publicDb = await backend.database("public");
     const privateDb = await backend.database("private");
     const core = channelCore(publicDb, { head: 3n });
@@ -421,7 +421,7 @@ describe.each(PRIVATE_BACKENDS)("L21, L22: listeners at port 0 and what /config 
     }
   }, 300_000);
 
-  it("L22: the command's /config keeps its listen as written and gains network", async () => {
+  it("the command's /config keeps its listen as written and gains network", async () => {
     const db = await backend.database("public");
     const listen = { api: "127.0.0.1:0", admin: "127.0.0.1:0" };
     const handle: ProcessHandle = startProcess({
@@ -464,7 +464,7 @@ describe.each(PRIVATE_BACKENDS)("L21, L22: listeners at port 0 and what /config 
   }, 240_000);
 });
 
-describe.each(PRIVATE_BACKENDS)("L64: a private configuration that writes listen.privateLink, on $name (LM-3, CF-4)", (backend: PrivateBackend) => {
+describe.each(PRIVATE_BACKENDS)("a private configuration that writes listen.privateLink, on $name", (backend: PrivateBackend) => {
   let directory: string;
   let core: PublicCore | undefined;
   let publicDb: TestDatabase;
@@ -496,7 +496,7 @@ describe.each(PRIVATE_BACKENDS)("L64: a private configuration that writes listen
     };
   };
 
-  it("L64: umbradb run starts as today, opens no listener for it and refuses nothing", async () => {
+  it("umbradb run starts as today, opens no listener for it and refuses nothing", async () => {
     const ignored = await freePort();
     writeFileSync(join(directory, "private.config.ts"), `export default ${JSON.stringify(await privateConfig("l64-command", ignored))};\n`);
     const signals = new EventEmitter();
@@ -521,7 +521,7 @@ describe.each(PRIVATE_BACKENDS)("L64: a private configuration that writes listen
     expect((await running)?.kind).toBe("signal");
   }, FOLLOWS_MS * 2);
 
-  it("L64: startUmbraDB on the same configuration does the same", async () => {
+  it("startUmbraDB on the same configuration does the same", async () => {
     const ignored = await freePort();
     const sockets = listeningSockets();
     const handle = startUmbraDB({

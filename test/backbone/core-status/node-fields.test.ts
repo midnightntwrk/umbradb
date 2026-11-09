@@ -4,7 +4,7 @@ import { PATIENCE_MS } from "../ingest-harness.js";
 import { a168Problems, a168Run, privateRun } from "./node-fields-harness.js";
 
 /**
- * A core against a tape node shows its node on `/status`, on PostgreSQL 18.6 and PGlite 0.5.10. [A168 CI, AE-5]
+ * A core against a tape node shows its node on `/status`, on PostgreSQL 18.6 and PGlite 0.5.10.
  * - Before the first connection, the connection is `connecting`.
  * - Once connected, it is `connected`, with `node.bestHead` the best head the node announced last and `node.queueDepth`
  *   the best-block queue's length.
@@ -12,7 +12,7 @@ import { a168Problems, a168Run, privateRun } from "./node-fields-harness.js";
  * - After the stop, it is `closed`.
  *
  * A private process shows no node: the three fields are null with it. Every body read validates against
- * `./status.schema.json`. [A66]
+ * `./status.schema.json`.
  *
  * The run and the oracle are in `./node-fields-harness.ts`. The committed negative control, a process whose published
  * state carries none of the three fields, is `./node-fields.negative-control.test.ts`.
@@ -21,11 +21,11 @@ import { a168Problems, a168Run, privateRun } from "./node-fields-harness.js";
 /** How long a phase reads `/status` for what it expects once the process shows its precondition (a loaded machine). */
 const PHASE_PATIENCE_MS = 30_000;
 
-describe.each(PROCESS_BACKENDS)("A168: the node's fields on /status on $name", (backend) => {
+describe.each(PROCESS_BACKENDS)("the node's fields on /status on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("A168: connecting, then connected with the best head announced last and the queue's depth, retrying, closed", async () => {
+  it("connecting, then connected with the best head announced last and the queue's depth, retrying, closed", async () => {
     const observed = await a168Run(await backend.database(), { patienceMs: PHASE_PATIENCE_MS });
     expect(a168Problems(observed)).toEqual([]);
     expect(observed.phases.map((phase) => phase.name)).toEqual([
@@ -38,7 +38,7 @@ describe.each(PROCESS_BACKENDS)("A168: the node's fields on /status on $name", (
     ]);
   }, PATIENCE_MS * 2);
 
-  it("A168: a private process shows no node, so none of the three", async () => {
+  it("a private process shows no node, so none of the three", async () => {
     const observed = await privateRun(backend, PHASE_PATIENCE_MS);
     expect(a168Problems(observed)).toEqual([]);
     expect(observed.phases.map((phase) => phase.name)).toEqual(["a private process at 3"]);

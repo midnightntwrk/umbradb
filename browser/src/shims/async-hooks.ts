@@ -1,7 +1,7 @@
 /**
  * `node:async_hooks` in the browser build. A browser has no asynchronous context (TC39's `AsyncContext` is not
  * shipped). So `src/db/pglite.ts`'s guard against a nested call (a body that calls `db.read` or `db.transaction` on its
- * own database instead of using its handle) cannot tell such a call from any other. [Q73; design §9.2]
+ * own database instead of using its handle) cannot tell such a call from any other.
  *
  * Here a store is never seen (`getStore()` is undefined) and a bound function runs as it is. Every call is then an
  * ordinary caller's, so the guard is off in the browser: a nested call waits in the queue for ever instead of being

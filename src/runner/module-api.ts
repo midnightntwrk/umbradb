@@ -1,8 +1,7 @@
 /**
  * The module API: what modules register in `on-start-api`, and how a request and a subscription are answered. It has
  * no transport of its own, so the browser build can carry the same requests over `postMessage`; Node.js's HTTP and
- * WebSocket listener on `listen.api` is `./api-server.ts`. [RN-1, RN-15, RN-16, DB-15; design §2; CORE-ARCH §4.10's
- * `ApiRegistry`, §4.20]
+ * WebSocket listener on `listen.api` is `./api-server.ts`.
  *
  * **Registration.** {@link registerModuleApis} runs `on-start-api` once, at startup, after the process contexts are
  * sealed. It runs for the parts this process may run: those active in a range of the graph's `ranges`, the cursor's
@@ -11,7 +10,6 @@
  * closed when the callback ends ({@link ApiRoutes.open}). A malformed registration throws at the call. Once every
  * `on-start-api` has run, two registrations of one method and path (parameters' names aside), or of one subscription
  * name, refuse startup with `duplicate-api-route`, naming the route and both modules, before anything listens.
- * [RN-15, MD-7, Q95]
  *
  * **Paths.** `/` or `/` and segments, each a literal of `A–Z a–z 0–9 - . _ ~ ! $ & ' ( ) * + , ; = @` or a parameter
  * `:name`. A request's segments are percent-decoded before they are compared, and a literal segment wins over a
@@ -20,7 +18,7 @@
  *
  * **A request** ({@link ModuleApi.answer}) gets one read of the latest committed height, and the handler runs inside it.
  * The read is bounded by `apiReadTimeoutMs` (`db.read(…, { timeoutMs })`, on PostgreSQL only). So on PGlite a
- * `db.read` from a handler fails with `nested-call` rather than waiting. [DB-15, Q73]
+ * `db.read` from a handler fails with `nested-call` rather than waiting.
  *
  * **The answer is the module's.** The module API adds no header and no `extensions` to it, treats a GraphQL response
  * like any other, and calls the handler before block S commits too. Only its HTTP listener sets `X-Umbra-Version`, the
@@ -28,10 +26,10 @@
  * the answer as the handler gave it. A module that states the view, height and hash it read does so itself with the
  * envelope's helpers (`./envelope.ts`: `readChainDataView`, `chainDataHeaders`, `withViewExtensions`,
  * `answerChainData`). Before block S commits, `readChainDataView` fails with `no-committed-height`, answered 503 when
- * the handler does not catch it. [RN-16, Q104, Q105, Q131]
+ * the handler does not catch it.
  *
  * A POST's body is read as JSON by the component's own reader, which returns integers beyond ±(2^53 − 1) as `bigint`; a
- * GET's body is ignored. [Q78]
+ * GET's body is ignored.
  *
  * **Bodies.** An answer's body is written as JSON, with `Content-Type: application/json; charset=utf-8`: a `bigint` as
  * decimal text and bytes as `0x`-prefixed lowercase hex, as the envelope writes heights and hashes. If the handler gave
@@ -46,12 +44,12 @@
  * - a `no-committed-height` the handler did not catch: 503 `no-committed-height`, with the envelope's message;
  * - anything else (a handler that throws or answers what is no answer, a database error): 500 `internal-error` with a
  *   fixed message, so no exception text, which may hold a credential, reaches a client. The error itself goes to
- *   `onError`. [AE-6]
+ *   `onError`.
  *
  * **Subscriptions** ({@link ModuleApi.subscribe}). The module's handler gets the subscriber's arguments and an `emit`,
  * and returns its unsubscribe. The module notifies its subscribers from its own `on-after-db-write`; nothing here checks
  * where `emit` is called from, since modules are trusted. `emit` never waits: it hands the value to the transport,
- * which writes it or drops a subscriber that fell behind. After the unsubscribe it does nothing. [RN-15, Q46]
+ * which writes it or drops a subscriber that fell behind. After the unsubscribe it does nothing.
  */
 
 import type { ReadHandle, ReadOptions } from "../db/api.js";
@@ -63,7 +61,7 @@ import { runSchedule, seriesOf } from "./dispatch.js";
 import type { ChainDataAnswer } from "./envelope.js";
 import type { ProcessContexts } from "./process-context.js";
 
-/** A route's method. [CORE-ARCH §4.10] */
+/** A route's method. */
 export type HttpMethod = "GET" | "POST";
 
 /** A module's HTTP handler. */
@@ -149,7 +147,7 @@ export interface ApiResponse {
 export interface ModuleApiOptions {
   /** The database (or its read-only item): each request is one of its reads. */
   readonly db: { read<T>(body: (read: ReadHandle) => Promise<T>, options?: ReadOptions): Promise<T> };
-  /** `apiReadTimeoutMs`: each request's read is bounded by it. [CF-4, DB-15] */
+  /** `apiReadTimeoutMs`: each request's read is bounded by it. */
   readonly timeoutMs: number;
   /** Told of every failure answered 500, with the route: the runner logs it (redacted). */
   readonly onError?: (error: unknown, where: { readonly module: string; readonly route: string }) => void;
@@ -161,7 +159,7 @@ export const JSON_CONTENT_TYPE = "application/json; charset=utf-8";
 const INTERNAL = "the module API could not answer the request";
 const LITERAL = /^[A-Za-z0-9\-._~!$&'()*+,;=@]+$/;
 const PARAMETER = /^:([A-Za-z_][A-Za-z0-9_]*)$/;
-/** A header's name (RFC 9110 §5.1, a token) and value (§5.5: tabs, visible ASCII and obs-text), as Node.js checks them. */
+/** A header's name (RFC 9110 §5.1, a token) and value (tabs, visible ASCII and obs-text), as Node.js checks them. */
 const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 const HEADER_VALUE = /^[\t\x20-\x7e\x80-\xff]*$/;
 const PATH_RULE =
@@ -377,7 +375,7 @@ export class ModuleApi {
       return this.#encode(answered);
     } catch (error) {
       if (error instanceof UmbraError && error.code === "query-timeout") return apiErrorResponse("query-timeout", error.message);
-      // The view of a read before block S (`readChainDataView`), which the handler did not catch. [RN-16]
+      // The view of a read before block S (`readChainDataView`), which the handler did not catch.
       if (error instanceof UmbraError && error.code === "no-committed-height") {
         return apiErrorResponse("no-committed-height", error.message);
       }
@@ -437,7 +435,7 @@ export class ModuleApi {
   /**
    * `route`'s handler called with `req` and `read`, its answer checked and returned as the handler wrote it: the module
    * API adds nothing to it. The listener's `X-Umbra-Version` is set where it sends. Protected for the negative
-   * controls, which add the envelope back or set the version here. [RN-16, Q104, Q105, Q131]
+   * controls, which add the envelope back or set the version here.
    */
   protected async handle(route: HttpRoute, req: Parameters<HttpHandler>[0], read: ReadHandle): Promise<ChainDataAnswer> {
     const answer: unknown = await route.handler(req, read);
@@ -480,13 +478,12 @@ export class ModuleApi {
 export interface ApiStartup {
   /** The database's resolved graph: `modules` in startup order, and the `ranges` this process may run. */
   readonly graph: Pick<ResolvedGraph, "modules" | "ranges">;
-  /** The process contexts, sealed. [MD-7] */
+  /** The process contexts, sealed. */
   readonly contexts: ProcessContexts;
 }
 
 /**
  * Runs `on-start-api` (see the module comment) into `routes`, then refuses duplicates; resolves with `routes`.
- * [RN-1, RN-15]
  *
  * Rejects with:
  * - the dispatch's `CallbackFailure` (point `on-start-api`, the module) for a callback that fails, a malformed

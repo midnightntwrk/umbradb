@@ -7,10 +7,10 @@ import { cursorReaches, libraryData } from "./library-fixtures.js";
 
 /**
  * A host program whose working directory was removed under it, run by `./start-umbradb.test.ts` through
- * `./quiet-child.ts` (issue 00067): it moves into a directory of its own, removes it — `process.cwd()` then throws
+ * `./quiet-child.ts`: it moves into a directory of its own, removes it — `process.cwd()` then throws
  * (`ENOENT … uv_cwd`) — and starts UmbraDB three times on a PGlite directory at the relative `path` `data/db`: with the
  * job's absolute `cwd`, without `cwd`, and with a relative one. It writes how each call went to its result file: whether
- * `startUmbraDB` threw, how `started` settled, the cursor reached and the state at `closed`. [LM-1, LM-2, G8, D-14]
+ * `startUmbraDB` threw, how `started` settled, the cursor reached and the state at `closed`.
  */
 
 interface Job {

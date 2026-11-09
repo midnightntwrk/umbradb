@@ -7,7 +7,7 @@ import { historyDifferences, tapeDeterminism, tapeRunProblems } from "./refcount
 /**
  * `[DIFF]` Determinism across worker histories on the recorded preprod 0–10,000 tape, on PostgreSQL 18 (PGlite's case
  * is `ledger-refcount-determinism-preprod-pglite.test.ts`, so the two run in separate workers), skipped by name without
- * the tape. [R28, DT-3, LG-11; design §4.4]
+ * the tape.
  *
  * Two runs from genesis with the ledger's core modules and the real packages, side by side
  * (`./refcount-histories.ts`): one that never restarts, and one stopped at 20 heights drawn from {@link SEED} and
@@ -15,21 +15,21 @@ import { historyDifferences, tapeDeterminism, tapeRunProblems } from "./refcount
  * database. After every block they hold the same node set, `root_counts`, rows of `states`, `segment_results` and
  * `events` written at the block, and `core_digest.tables` (whose running digests equal at every block mean equal
  * changes of every captured table); the contents hash and every row of `states`, `segment_results` and `events` at
- * every 100th height, at each restart height and at 10,000. [R28]
+ * every 100th height, at each restart height and at 10,000.
  */
 
 /** The seed the restart heights are drawn from. */
 const SEED = 20261103;
 
-/** One run of the tape may take six hours on a loaded machine, as the replay of A99 does. */
+/** One run of the tape may take six hours on a loaded machine, as a replay from genesis does. */
 const REPLAY_MS = 6 * 3_600_000;
 
 const backend = PROCESS_BACKENDS.find((candidate) => candidate.kind === "postgres") as ProcessBackend;
 
-describe(`R28 (DT-3, LG-11) on the recorded preprod 0–10,000 tape, on ${backend.name} (restart heights from seed ${SEED}; skipped by name without the tape)`, () => {
+describe(`on the recorded preprod 0–10,000 tape, on ${backend.name} (restart heights from seed ${SEED}; skipped by name without the tape)`, () => {
   tapeTest(
     "preprod-0-10000",
-    `R28 on ${backend.name}: a run restarted at 20 seeded heights (seed ${SEED}), a new process each reading back only the database, holds after every block the node set, root_counts, the block's rows of states, segment_results and events, and core_digest.tables of a run that never restarts, and its contents hash at every 100th height, every restart height and the last`,
+    `on ${backend.name}: a run restarted at 20 seeded heights (seed ${SEED}), a new process each reading back only the database, holds after every block the node set, root_counts, the block's rows of states, segment_results and events, and core_digest.tables of a run that never restarts, and its contents hash at every 100th height, every restart height and the last`,
     async (found) => {
       const to = BigInt(found.tape.to);
       const records = cappedAt(found.read().records, to);

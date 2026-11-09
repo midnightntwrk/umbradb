@@ -10,7 +10,7 @@ import { backupAt, chain, emptied, restoreRun, restoreTarget } from "./restore-f
 /**
  * On PostgreSQL 18.6 and PGlite 0.5.10: `umbradb restore`'s work in a process of its own (`./restore-kill.worker.ts`),
  * killed with SIGKILL while it runs the file's SQL — 20 statements in, inside its one transaction —, leaves the target
- * empty, and a new restore into it then succeeds. [A127 FAULT, BK-3]
+ * empty, and a new restore into it then succeeds.
  *
  * Its committed negative control (the statements each committed on their own) is `./restore.negative-control.test.ts`.
  */
@@ -37,9 +37,9 @@ afterAll(async () => {
   project?.remove();
 }, 120_000);
 
-describe.each(BACKUP_BACKENDS)("A127: a restore killed while loading on $name (BK-3)", (backend) => {
+describe.each(BACKUP_BACKENDS)("a restore killed while loading on $name", (backend) => {
   it(
-    "A127: a restore killed while running the file's SQL leaves the target empty, and a new restore into it then succeeds",
+    "a restore killed while running the file's SQL leaves the target empty, and a new restore into it then succeeds",
     async () => {
       const { file } = await backupAt(project, backend, H, join(dir, `${backend.kind}.backup`));
       const { db, config } = await restoreTarget(project, backend);

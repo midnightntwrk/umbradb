@@ -25,7 +25,7 @@ import { chainBackbone } from "./chain-build.js";
 /**
  * The backbone part `core-block-fetch`: its declaration, its `on-fetch` over the block source the runner binds to its
  * context, and the in-memory source's items (what module authors' builds with UmbraDB's backbone get). Its node source
- * is tested in `node-source.test.ts`, the process in `ingest.test.ts`. [CD-2; CORE-ARCH §4.11; design §3]
+ * is tested in `node-source.test.ts`, the process in `ingest.test.ts`.
  */
 
 const context = (items: ReadonlyMap<string, unknown> = new Map()): ProcessContext =>
@@ -39,7 +39,7 @@ function recordingSink(): { readonly sink: ItemSink; readonly puts: [string, unk
 
 const blockContext = (height: bigint) => Object.freeze({ ...inMemoryBlock(height), items: new Map(), settings: {}, active: () => true });
 
-describe("core-block-fetch's declaration (CD-2, CORE-ARCH §4.11)", () => {
+describe("core-block-fetch's declaration", () => {
   it("is the second backbone part: it requires node-client and ledger-table and provides the four block items", () => {
     expect(CORE_BLOCK_FETCH_ID).toBe(BACKBONE_ORDER[1]);
     expect(CORE_BLOCK_FETCH).toMatchObject({ id: "core-block-fetch", side: "public", startsMidChain: true, migrations: [] });
@@ -92,7 +92,7 @@ describe("core-block-fetch's on-fetch", () => {
   });
 });
 
-describe("the in-memory source's block items (design §3, for tests and module authors)", () => {
+describe("the in-memory source's block items (for tests and module authors)", () => {
   it("gives runtime 2.1's v9 blocks, six seconds apart, with no extrinsics and empty metadata, frozen", async () => {
     const items = await new InMemoryBlockSource({ head: 3n }).blockItems(inMemoryBlock(3n));
     expect(items["block-header"]).toEqual({
@@ -114,7 +114,7 @@ describe("the in-memory source's block items (design §3, for tests and module a
 
   // The default runtime and the default ledger are the pair every known network's built-in ledger table holds, so a
   // module author who gives an in-memory block transactions on the defaults gets the ledger a real block of that
-  // runtime would select. [CD-2, LG-3]
+  // runtime would select.
   it("pairs its default runtime with its default ledger as every built-in network's ledger table does", () => {
     for (const network of KNOWN_NETWORKS) {
       const table = builtInLedgerTable(network) as LedgerTable;

@@ -24,7 +24,7 @@ import { BACKENDS } from "./backends.js";
  * component's session settings lacking the zero timeouts (`vi.mock` of `src/deterministic-postgresql/settings.ts`), so
  * the database API pins only the five pinned session settings. With every timeout defaulting to 1 s, each check of
  * `test/deterministic-postgresql/zero-timeouts-checks.ts` that passes on the real build must fail here: the database's
- * timeouts reach the writer, the migrations, setup and the callbacks' reads, and cut their work off. [A141, Q65]
+ * timeouts reach the writer, the migrations, setup and the callbacks' reads, and cut their work off.
  *
  * PostgreSQL only: on PGlite such a build hangs the process (a timeout that fires hangs the engine synchronously), so
  * PGlite's half runs, bounded, in processes of their own (`pglite-timeouts.test.ts`).
@@ -70,7 +70,7 @@ async function rejection(run: Promise<unknown>): Promise<unknown> {
   );
 }
 
-describe("negative control: without the zero timeouts, A141's long work is cut off on PostgreSQL 18", () => {
+describe("negative control: without the zero timeouts, the long work is cut off on PostgreSQL 18", () => {
   beforeAll(() => postgres.start(), 180_000);
   afterAll(() => postgres.stop(), 60_000);
 

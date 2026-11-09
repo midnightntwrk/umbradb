@@ -2,17 +2,16 @@
  * The SQL of `core-block-commit` (`./core-block-commit.ts`): its tables, its migration, the statements it writes each
  * block with, and the cursor reads.
  *
- * **The tables**, created by its migration `001` under the part's role: [design §10]
+ * **The tables**, created by its migration `001` under the part's role:
  * - `core_block_commit.blocks (height) → hash, parent_hash, spec_version, ledger_version, block_time`,
  *   range-partitioned by height as 0.9.5's `chain_archive` store was (`../height-partitions.ts`); hashes are 32 bytes
  *   (`CHECK`s). `block_time` is the block's own time, a `timestamptz` converted exactly from the node's milliseconds
  *   and read back as RFC 3339 text. The conversion uses PostgreSQL's integer interval input (`'<ms> milliseconds'`),
  *   never a floating-point value: `to_timestamp`, and `bigint * interval` (which multiplies by a `double precision`),
  *   both round far from 1970. On PostgreSQL 18.6 and PGlite 0.5.10, 253402300799999 ms becomes `…59.999008Z` that way.
- *   [Q74, DB-2]
  * - `core_block_commit.hashes (hash) → height`, not partitioned. PostgreSQL cannot enforce a unique hash on the
  *   height-partitioned `blocks` table (a unique index there must include the partition key), so this table's primary
- *   key enforces it across every partition. [CD-3]
+ *   key enforces it across every partition.
  */
 
 import type { BlockWriteHandle, CommittedHeight, ReadHandle } from "../../db/api.js";
@@ -22,7 +21,7 @@ import { heightPartitionsSql } from "../height-partitions.js";
 /** The blocks table, whose last row is the cursor. */
 export const BLOCKS_TABLE = "core_block_commit.blocks";
 
-/** The hashes table: one row per block hash, with the hash as its primary key. [CD-3] */
+/** The hashes table: one row per block hash, with the hash as its primary key. */
 export const HASHES_TABLE = "core_block_commit.hashes";
 
 /**
@@ -35,7 +34,7 @@ export const CURSOR_TABLE = BLOCKS_TABLE;
 /** The hashes table's primary key, whose violation is `duplicate-block-hash`. */
 export const HASHES_PRIMARY_KEY = "hashes_pkey";
 
-/** `core-block-commit`'s migrations: applied once and recorded under `core-block-commit`; they never change. [DB-9] */
+/** `core-block-commit`'s migrations: applied once and recorded under `core-block-commit`; they never change. */
 export const CORE_BLOCK_COMMIT_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
   {
     id: "001",
@@ -111,13 +110,12 @@ export async function readCursor(read: Pick<ReadHandle, "query">): Promise<Block
   });
 }
 
-/** The database API's committed height: the cursor's height, read through the read's own handle. [DB-2] */
+/** The database API's committed height: the cursor's height, read through the read's own handle. */
 export const cursorHeight: CommittedHeight = async (read) => (await readCursor(read))?.height ?? null;
 
 /**
  * {@link cursorHeight} for one opened database: once a read found the blocks table, later reads skip the `to_regclass`
  * check, one statement fewer in every read. The table is append-only and never dropped while the database is open.
- * [DB-2]
  */
 export function openedCursorHeight(): CommittedHeight {
   let present = false;

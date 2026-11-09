@@ -27,12 +27,12 @@ import { copyVendoredLedger } from "./version-checks.js";
  *
  * Each thread hashes a version's files once. Runs on PGlite only, since this is about startup, not stored data. The
  * checks are `./package-startup-checks.ts`; the negative control, a startup that never calls the check, is
- * `package-startup.negative-control.test.ts`. [A173, LG-5; acceptance §12; design §5.2]
+ * `package-startup.negative-control.test.ts`.
  */
 
 const backend = PROCESS_BACKENDS.find((candidate) => candidate.kind === "pglite") as ProcessBackend;
 
-describe("A173: the vendored ledger packages checked before any is imported (LG-5)", () => {
+describe("the vendored ledger packages checked before any is imported", () => {
   let copy: InstallationCopy;
   beforeAll(async () => {
     copy = installationCopy();
@@ -96,7 +96,7 @@ describe("A173: the vendored ledger packages checked before any is imported (LG-
   );
 });
 
-describe("the startup check's cost: each version's files hashed once per thread (task 12.2b)", () => {
+describe("the startup check's cost: each version's files hashed once per thread", () => {
   let packages: ReturnType<typeof copyVendoredLedger>;
   beforeAll(() => {
     packages = copyVendoredLedger();

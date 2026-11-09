@@ -21,7 +21,7 @@ import type { TestLoaderData } from "./fixtures/ledger-test-loader.js";
 // The ledger worker (a worker thread running the engine of `worker-engine.test.ts`) and the node-store bridge, through
 // which the worker reads stored nodes synchronously from a database the main thread owns. What crosses is plain data.
 // A crash of the thread, or a trap of the package, fails every request from then on. A request's step is reported
-// while it runs. [LG-7, LG-10, LG-11; design §5.3]
+// while it runs.
 
 const LONG = 240_000;
 const LOADER = new URL("./fixtures/ledger-test-loader.ts", import.meta.url);
@@ -76,7 +76,7 @@ function mapReader(stored: ReadonlyMap<string, StoredNode>) {
   };
 }
 
-describe("the ledger worker (design §5.3; LG-7, LG-10)", () => {
+describe("the ledger worker", () => {
   it("parses and applies in its thread, giving the engine's plain data and parsing each transaction once", { timeout: LONG }, async () => {
     const host = started({ count: true });
     const engine = new LedgerEngine({ load: loadLedgerPackage });
@@ -104,7 +104,7 @@ describe("the ledger worker (design §5.3; LG-7, LG-10)", () => {
     expect(host.failure).toBeNull();
   });
 
-  it("reports the step it runs while it runs, and nothing after (LG-10)", { timeout: LONG }, async () => {
+  it("reports the step it runs while it runs, and nothing after", { timeout: LONG }, async () => {
     const host = started({ slowAt: { height: "1", ms: 1_500 } });
     await host.genesis(genesisInput(RAW.v9.LedgerState.blank(NETWORK_ID).serialize()));
     await host.commit(at(0n));
@@ -119,7 +119,7 @@ describe("the ledger worker (design §5.3; LG-7, LG-10)", () => {
     expect(BigInt(hold.end) - BigInt(hold.start)).toBeGreaterThanOrEqual(1_500_000_000n);
   });
 
-  it("times a step from when it began, not from when it was sent behind another (LG-10)", { timeout: LONG }, async () => {
+  it("times a step from when it began, not from when it was sent behind another", { timeout: LONG }, async () => {
     const host = started({ slowAt: [{ height: "1", ms: 3_000 }, { height: "2", ms: 3_000 }, { height: "3", ms: 1_000 }] });
     await host.genesis(genesisInput(RAW.v9.LedgerState.blank(NETWORK_ID).serialize()));
     await host.commit(at(0n));
@@ -251,7 +251,7 @@ describe("the ledger worker (design §5.3; LG-7, LG-10)", () => {
   });
 });
 
-describe("the node-store bridge (design §5.3, LG-11): the worker reads stored nodes through the main thread", () => {
+describe("the node-store bridge: the worker reads stored nodes through the main thread", () => {
   /** The nodes of a v9 state with a contract and a zswap output, flushed in this thread: the store a writer wrote. */
   async function storedState(): Promise<{ stateKey: Uint8Array; stateRoot: Uint8Array; nodes: StoredNode[] }> {
     const engine = new LedgerEngine({ load: loadLedgerPackage });
@@ -303,7 +303,7 @@ describe("the node-store bridge (design §5.3, LG-11): the worker reads stored n
     expect(host.failure).toBeNull();
     await expect(host.load({ ledger: "v9", ...at(1n), stateKey })).rejects.toThrow(/no read/);
     expect(host.failure).toBeNull();
-    // A stored root whose bytes were changed: the package checks every node against its key and aborts. [LG-11]
+    // A stored root whose bytes were changed: the package checks every node against its key and aborts.
     const tampered = new Map(nodes.map((node) => [hex(node.key), node]));
     const root = tampered.get(hex(stateKey)) as StoredNode;
     const data = Uint8Array.from(root.data);

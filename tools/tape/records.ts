@@ -1,6 +1,5 @@
 /**
  * The tape's records: their five kinds, the check that a value is one, and the one line the writer writes for each.
- * [TT-1]
  *
  * A record is the object its line holds, so a test writes records as plain values:
  * - a **call**: `{ "method", "params", "result" | "error", "delayMs"? }` — answered with `result` (or the JSON-RPC
@@ -15,10 +14,10 @@
  *
  * `method` is a non-empty string; `params` an array or an object (JSON-RPC 2.0's "structured value"). A record has no
  * other field. Given as a value, a record's field set to `undefined` is left out, as `JSON.stringify` leaves it out (so
- * `{ ...call, delayMs: undefined }` is the call without a delay); inside a value, `undefined` is refused. [TT-1]
+ * `{ ...call, delayMs: undefined }` is the call without a delay); inside a value, `undefined` is refused.
  *
  * **The line** ({@link recordText}): the record's fields in the order listed above, each value in the tape's one JSON
- * form (`./json.ts`), with no space; the reader accepts a line only in this form (`./tape.ts`). [TT-1]
+ * form (`./json.ts`), with no space; the reader accepts a line only in this form (`./tape.ts`).
  */
 
 import { TapeError, type TapeProblem } from "./errors.js";
@@ -65,7 +64,7 @@ export type TapeRecord = CallRecord | SubscribeRecord | NotifyRecord | Disconnec
 
 export type RecordKind = "call" | "subscribe" | "notify" | "disconnect" | "fault";
 
-/** Each kind's fields, in the tape format's order: the order the writer writes them in. [TT-1] */
+/** Each kind's fields, in the tape format's order: the order the writer writes them in. */
 export const FIELD_ORDER: Readonly<Record<RecordKind, readonly string[]>> = Object.freeze({
   call: Object.freeze(["method", "params", "result", "error", "delayMs"]),
   subscribe: Object.freeze(["subscribe", "method", "params"]),
@@ -127,7 +126,7 @@ export function recordKind(record: TapeRecord): RecordKind {
   return kindOf(record) as RecordKind;
 }
 
-/** Checks that `value` is a tape record and returns its kind; throws `bad-tape-record` at `line` otherwise. [TT-1] */
+/** Checks that `value` is a tape record and returns its kind; throws `bad-tape-record` at `line` otherwise. */
 export function checkRecord(value: unknown, line: number): RecordKind {
   const fail = (reason: TapeProblem, detail: string): never => {
     throw new TapeError(line, reason, detail);
@@ -209,7 +208,7 @@ export function recordLine(value: unknown, line: number): string {
 /**
  * A check of what subscriptions need across lines, given each record in turn with its line: each session's
  * subscription ids are unique, and each notification follows a `subscribe` record with its id in the same session (ids
- * compared as JSON: the string `"1"` is not the number `1`). Throws `bad-tape-record` at the record's line. [TT-3]
+ * compared as JSON: the string `"1"` is not the number `1`). Throws `bad-tape-record` at the record's line.
  */
 export function sessionCheck(): (record: TapeRecord, line: number) => void {
   let ids = new Set<string>();
@@ -232,7 +231,7 @@ export function sessionCheck(): (record: TapeRecord, line: number) => void {
 
 /**
  * Checks records as a tape: each one a tape record (`bad-tape-record` at its place, from 1), and the subscription rules
- * held. [TT-1, TT-3]
+ * held.
  */
 export function checkTape(records: readonly TapeRecord[]): void {
   const check = sessionCheck();

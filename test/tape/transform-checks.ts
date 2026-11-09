@@ -31,13 +31,12 @@ import { A71_TAPE_PATH } from "./builder-checks.js";
  * give the tape committed as its expected output (`fixtures/transforms/<name>.tape.jsonl`, each written by hand from
  * the recorded tape by line edits, not by the transforms); and a disconnect inserted into a session with a live
  * subscription must replay through the node client, which subscribes again after it reconnects.
- * [A71, TT-4; acceptance §9]
  */
 
 /** The committed expected outputs, and the fork tape the splice takes its notifications from. */
 export const TRANSFORMS = new URL("./fixtures/transforms/", import.meta.url);
 
-/** The recorded tape (`fixtures/a71-recorded.tape.jsonl`): the input of every variant. [A71] */
+/** The recorded tape (`fixtures/a71-recorded.tape.jsonl`): the input of every variant. */
 export function baseRecords(): readonly TapeRecord[] {
   return readTapeFile(fileURLToPath(A71_TAPE_PATH)).records;
 }
@@ -52,7 +51,7 @@ export function expectedText(name: string): string {
   return readFileSync(new URL(`${name}.tape.jsonl`, TRANSFORMS), "utf8");
 }
 
-/** Each variant transform as the checks apply it to the recorded tape, with its committed output's SHA-256. [A71] */
+/** Each variant transform as the checks apply it to the recorded tape, with its committed output's SHA-256. */
 export const VARIANTS: readonly {
   readonly name: string;
   readonly id: string;
@@ -108,7 +107,7 @@ export const VARIANTS: readonly {
   },
 ];
 
-/** The variant `name` applied to the recorded tape gives its committed expected output, byte for byte. [A71] */
+/** The variant `name` applied to the recorded tape gives its committed expected output, byte for byte. */
 export function expectVariantOutput(name: string): void {
   const variant = VARIANTS.find((candidate) => candidate.name === name);
   if (variant === undefined) throw new Error(`no variant ${name}`);

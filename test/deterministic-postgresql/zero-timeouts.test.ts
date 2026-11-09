@@ -24,7 +24,6 @@ import {
  * `idle_in_transaction_session_timeout`, `transaction_timeout` and `idle_session_timeout` at 0, whatever the database's
  * defaults (PostgreSQL: `ALTER DATABASE` and `ALTER ROLE … IN DATABASE`; PGlite: its configuration file). This is
  * because the writer, migrations, setup and the read handles given to callbacks run work the runner must finish.
- * [A141, DB-15, Q65, Q71; design §4]
  *
  * Here every timeout defaults to 1 s, and all of these complete, with `SHOW` reporting 0 in each:
  * - a 5 s migration;
@@ -32,14 +31,13 @@ import {
  * - a block transaction left idle 5 s while a callback awaits;
  * - a callback's read running 5 s, on the block write handle and on a read handle outside the block;
  * - the writer idle 2 s between blocks (`idle_session_timeout`, the fifth timeout).
- * [A141, DB-15, Q93]
  *
  * Before its long work, each test checks that a read and a transaction report the zeros: on PGlite a nonzero
  * `idle_in_transaction_session_timeout`, `transaction_timeout` or `idle_session_timeout` hangs the engine — the whole
  * process, synchronously (probe 2026-10-25) — so a build without the zeros must fail there, at once, not hang the
  * suite. That such a build fails the long work itself is shown on PostgreSQL by
  * `test/db/zero-timeouts.negative-control.test.ts`, and the PGlite hang, bounded, in a process of its own by
- * `test/db/pglite-timeouts.test.ts`. [design §14]
+ * `test/db/pglite-timeouts.test.ts`.
  *
  * These tests wait seconds on purpose; each has a timeout far above its work (the default 5 s fails under load).
  */
@@ -52,7 +50,7 @@ const TEST_TIMEOUT = 60_000;
  */
 const CLOCK_SLACK_MS = 50;
 
-describe("the zero timeouts are session settings of the component (DB-15, Q71, Q93)", () => {
+describe("the zero timeouts are session settings of the component", () => {
   it("names the five timeouts at 0, and every session starts with them after the five pinned settings", () => {
     expect(ZERO_TIMEOUTS).toEqual([
       ["statement_timeout", "0"],
@@ -66,7 +64,7 @@ describe("the zero timeouts are session settings of the component (DB-15, Q71, Q
   });
 });
 
-describe.each(BACKENDS)("A141: the writer, migrations, setup and callback reads are never cut off on $name", (backend) => {
+describe.each(BACKENDS)("the writer, migrations, setup and callback reads are never cut off on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
@@ -130,7 +128,7 @@ describe.each(BACKENDS)("A141: the writer, migrations, setup and callback reads 
     expect(outcome.ms).toBeGreaterThanOrEqual(LONG_MS + IDLE_GAP_MS - CLOCK_SLACK_MS);
   }, TEST_TIMEOUT);
 
-  it("keeps the writer's session across 2 s idle between blocks (idle_session_timeout, Q93)", async () => {
+  it("keeps the writer's session across 2 s idle between blocks (idle_session_timeout)", async () => {
     const db = await hostile();
     await expectZeros(db);
     const { before, after, settings } = await writerIdleBetweenBlocks(db);

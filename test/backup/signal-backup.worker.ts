@@ -11,7 +11,7 @@ import { startProcess } from "../runner/process-build.js";
  * process itself (`backupSignals: process`, the port the command gives through its relay) — over an in-memory chain that finalizes one block every `feedMs` once
  * startup completed, as a node does, so that blocks keep committing. It reports each event as one JSON line on stdout
  * ({@link SignalEvent}): its log lines, each new cursor, and `closed` once the process has stopped and closed; then it
- * lets Node.js end by itself. It exits on its own once its parent is no longer the test's. [A163, BK-1, Q152 B]
+ * lets Node.js end by itself. It exits on its own once its parent is no longer the test's.
  */
 
 export interface SignalJob {

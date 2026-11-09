@@ -4,7 +4,7 @@ import { type GenericContainer, getContainerRuntimeClient } from "testcontainers
 import { guardContainers } from "./child-processes.js";
 
 /**
- * How every test starts a Testcontainers container: {@link startContainer}. [A153]
+ * How every test starts a Testcontainers container: {@link startContainer}.
  *
  * **The start-up timeout.** Once Docker has started a container, Testcontainers 12.0.4 waits for Docker to report the
  * container's ports bound to the host, polling every 250 ms for at most 10 s — a value fixed in its code
@@ -20,7 +20,7 @@ import { guardContainers } from "./child-processes.js";
  * test process that started it), so that a container left behind by a run can be told from another run's — the check
  * that no container outlives its run lists the containers of this repository whose process is gone — and so that the
  * test process's orphan watcher (`child-processes.ts`, `guardContainers`) removes them when that process ends, also
- * when it ends without its `afterAll` (Vitest's `--bail`, a run interrupted, the process killed). [A153]
+ * when it ends without its `afterAll` (Vitest's `--bail`, a run interrupted, the process killed).
  */
 
 const REPOSITORY = fileURLToPath(new URL("..", import.meta.url));

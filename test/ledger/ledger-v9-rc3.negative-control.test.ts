@@ -7,20 +7,20 @@ import { carriedLoadProblems, stagenetReplay } from "./v9-rc3-checks.js";
 
 /**
  * Committed negative controls of the rc.3 package checks: each runs a check of `./v9-rc3-checks.ts` with one thing
- * wrong and must see it fail, and the real packages pass the same check here. [A159, A99, Q139 A]
+ * wrong and must see it fail, and the real packages pass the same check here.
  *
  * - **The old table** (runtime 2.0 → rc.5, what an earlier build shipped): the rc.5 package replaying stagenet's
  *   runtime 2.0 blocks gives another root than the node's from block 1 on, the block of its first DUST generation. This
- *   is the adapter-level form of the stagenet tape's control in `test/backbone/ledger-state.test.ts`. [A99]
+ *   is the adapter-level form of the stagenet tape's control in `test/backbone/ledger-state.test.ts`.
  * - **A package that does not share rc.3's storage format**: the v8 package (another `LedgerState` type, under another
  *   tag) reads the state rc.3 stored by its key, since the root of a state loaded by its key is that key in any
  *   package. But it does not read it as rc.3's state: what it serializes is another, so the load check fails. The rc.5
- *   package, which shares the format, passes. [A159]
+ *   package, which shares the format, passes.
  */
 
 const LONG = 240_000;
 
-describe("A159's and A99's checks fail on the wrong package, and pass on the right one", () => {
+describe("checks fail on the wrong package, and pass on the right one", () => {
   let rc3: LedgerPackage;
   let rc5: LedgerPackage;
   beforeAll(async () => {

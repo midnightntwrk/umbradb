@@ -16,15 +16,15 @@ import { MAX_BUFFERED_BYTES, MAX_MESSAGE_BYTES, PING_INTERVAL_MS } from "../../s
 import { channelPair, controlledTimers, rawPeer, until } from "./channel-fixtures.js";
 
 /**
- * The private link's channels, unit by unit `[CI]` [LM-6; design §5.4]:
+ * The private link's channels, unit by unit `[CI]`:
  * - `messagePortChannel` over a real `worker_threads` `MessageChannel`: text both ways, a message kept until the
  *   listener registers, the peer's close heard, the listeners disposed; over a host's port-like object, an event whose
- *   data cannot be read is a message that is no text, nothing thrown into the port's dispatch (issue 00068);
+ *   data cannot be read is a message that is no text, nothing thrown into the port's dispatch;
  * - the envelope: each kind, and every fault of its shape;
  * - the UTF-8 count of a message, against Node.js's own (`Buffer.byteLength`);
- * - an endpoint: its own close and terminate end the channel whatever the carrier tells (L42), the pings on a
- *   controlled clock (L34's rule), the size of a message (L36's rule), `bufferedAmount`, and a carrier that throws;
- * - L35's rule on every send of an endpoint, either side's: a message of the link, a ping, a pong — over the limit
+ * - an endpoint: its own close and terminate end the channel whatever the carrier tells, the pings on a
+ *   controlled clock, the size of a message, `bufferedAmount`, and a carrier that throws;
+ * - the rule on every send of an endpoint, either side's: a message of the link, a ping, a pong — over the limit
  *   the channel ends `too-slow` (1008), its owner told once, the close itself sent unchecked, never again.
  */
 
@@ -57,7 +57,7 @@ function recorder() {
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
-describe("messagePortChannel over a worker_threads MessageChannel (LM-6)", () => {
+describe("messagePortChannel over a worker_threads MessageChannel", () => {
   it("carries text both ways, keeps a message sent before the listener, hears the peer's close, disposes its listeners", async () => {
     const { port1, port2 } = new MessageChannel();
     const a = messagePortChannel(port1);
@@ -99,7 +99,7 @@ describe("messagePortChannel over a worker_threads MessageChannel (LM-6)", () =>
   });
 });
 
-describe("messagePortChannel over a host's port-like object (LM-6)", () => {
+describe("messagePortChannel over a host's port-like object", () => {
   /** A port-like object of a host's own: it dispatches each event it is given to its message listeners. */
   function hostPort() {
     const listeners = new Set<(event: { readonly data: unknown }) => void>();
@@ -122,7 +122,7 @@ describe("messagePortChannel over a host's port-like object (LM-6)", () => {
     return { port, dispatch, listeners, posted };
   }
 
-  it("a message whose data cannot be read is no text: nothing is thrown into the port's dispatch, the endpoint is told not-text, the next message is read (issue 00068)", async () => {
+  it("a message whose data cannot be read is no text: nothing is thrown into the port's dispatch, the endpoint is told not-text, the next message is read", async () => {
     const { port, dispatch, listeners, posted } = hostPort();
     const { seen, events } = recorder();
     const endpoint = new ChannelEndpoint(messagePortChannel(port), events);
@@ -149,7 +149,7 @@ describe("messagePortChannel over a host's port-like object (LM-6)", () => {
   });
 });
 
-describe("the envelope (LM-6)", () => {
+describe("the envelope", () => {
   it("reads each kind", () => {
     expect(readEnvelope('{"link":1,"kind":"ping"}')).toEqual({ kind: "ping" });
     expect(readEnvelope('{"link":1,"kind":"pong"}')).toEqual({ kind: "pong" });
@@ -197,7 +197,7 @@ describe("the envelope (LM-6)", () => {
   });
 });
 
-describe("a peer's malformed envelope is a fault, never a throw (LM-6, LM-10)", () => {
+describe("a peer's malformed envelope is a fault, never a throw", () => {
   it("each field of the envelope, and of the hello it carries, replaced by any JSON value or a poisoned object (fast-check, seed 2849, 500 runs)", () => {
     // Values whose conversion to text throws (`String(value)`), among any JSON value.
     const poisoned = fc.constantFrom<unknown>({ toString: null }, { toString: {}, valueOf: {} }, [{ toString: null }]);
@@ -227,7 +227,7 @@ describe("a peer's malformed envelope is a fault, never a throw (LM-6, LM-10)", 
   });
 });
 
-describe("a message's size in UTF-8 bytes (LM-6)", () => {
+describe("a message's size in UTF-8 bytes", () => {
   it("agrees with Buffer.byteLength at and around every limit (fast-check, seed 6006, 300 runs)", () => {
     fc.assert(
       fc.property(fc.string({ unit: "binary", maxLength: 40 }), fc.integer({ min: 0, max: 200 }), (text, limit) => {
@@ -251,8 +251,8 @@ describe("a message's size in UTF-8 bytes (LM-6)", () => {
   });
 });
 
-describe("an endpoint (LM-6)", () => {
-  it("L42: its own close ends the channel at once — listeners disposed, the owner told — when the carrier never tells a close", async () => {
+describe("an endpoint", () => {
+  it("its own close ends the channel at once — listeners disposed, the owner told — when the carrier never tells a close", async () => {
     const [ours, theirs] = channelPair({ silent: true });
     const peer = rawPeer(theirs);
     const { seen, events } = recorder();
@@ -338,7 +338,7 @@ describe("an endpoint (LM-6)", () => {
     expect(clock.active).toBe(0);
   });
 
-  it("L36's rule: a message over its limit in UTF-8 bytes (beside the envelope's own) is told oversized, one at it is read", async () => {
+  it("a message over its limit in UTF-8 bytes (beside the envelope's own) is told oversized, one at it is read", async () => {
     const [ours, theirs] = channelPair();
     const { seen, events } = recorder();
     new ChannelEndpoint(ours, events, { maxMessageBytes: 100 });
@@ -467,7 +467,7 @@ describe("an endpoint (LM-6)", () => {
     return { received: peer.received.length, pings: peer.pings, pongs, end: peer.end, backlogged: seen.backlogged, ended: seen.ended, closes: mine.closes };
   }
 
-  it("L35's rule on every send: a message, a ping, a pong at MAX_BUFFERED_BYTES undelivered go out; above it the channel ends too-slow, its owner told once", async () => {
+  it("on every send: a message, a ping, a pong at MAX_BUFFERED_BYTES undelivered go out; above it the channel ends too-slow, its owner told once", async () => {
     for (const kind of ["message", "ping", "pong"] as const) {
       const at = await sendHolding(kind, MAX_BUFFERED_BYTES);
       expect([kind, at.received + at.pings + at.pongs, at.end, at.backlogged]).toEqual([kind, 1, null, []]);
@@ -480,7 +480,7 @@ describe("an endpoint (LM-6)", () => {
     }
   });
 
-  it("L35's close cannot recur: an owner that sends and closes again when told is told once, and the close itself goes out unchecked", async () => {
+  it("close cannot recur: an owner that sends and closes again when told is told once, and the close itself goes out unchecked", async () => {
     const [mine, theirs] = channelPair({ bufferedAmount: () => MAX_BUFFERED_BYTES + 1 });
     const peer = rawPeer(theirs);
     let told = 0;

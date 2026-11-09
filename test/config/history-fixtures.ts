@@ -24,7 +24,7 @@ import { CORE_SETTINGS } from "./config-fixtures.js";
  * `checkHistory` over the validated configuration, the cursor, the build's declarations and the rows of
  * `core_chain.config`. A startup records its `writes` and deletes its `deletes`, so a sequence of startups is
  * simulated here without a database: each one's changes are applied to the rows the next one reads
- * ({@link Simulation}). [CF-5, CF-6, CF-7, CF-8, CF-9, A28, A30, A31, A32, A33, A34]
+ * ({@link Simulation}).
  * The database tests run the same sequence through `core_chain.config` (`./history-startup.ts`).
  */
 
@@ -49,7 +49,7 @@ export function moduleM(version: string, rest: Partial<ModuleDeclaration> = {}) 
 
 /** `m` 1.0.0, the version most tests' builds carry. */
 export const M_1_0 = moduleM("1.0.0");
-/** `m` 1.1.0, a newer version: its migration 002 only adds a column. [DB-10] */
+/** `m` 1.1.0, a newer version: its migration 002 only adds a column. */
 export const M_1_1 = moduleM("1.1.0", { migrations: [M_001, M_002] });
 /** `m` 0.9.0, an older version. */
 export const M_0_9 = moduleM("0.9.0");
@@ -62,15 +62,14 @@ export function moduleN(version: string) {
 /** `n` 1.0.0. */
 export const N = moduleN("1.0.0");
 
-/** A module that cannot start mid-chain: its revisions must continue each other. [MD-4, CF-5] */
+/** A module that cannot start mid-chain: its revisions must continue each other. */
 export const HISTORIC = defineModule({ ...declaration("historic"), startsMidChain: false, configSchema: M_SETTINGS });
 
-/** A development-only module. [MD-5, CF-9] */
+/** A development-only module. */
 export const DEVTOOL = defineModule({ ...declaration("devtool"), developmentOnly: true, configSchema: M_SETTINGS });
 
 /**
- * `m` 1.0.0 with the setting `foo`, and 1.1.0 whose schema renames it `bar` (the scenario "An upgrade that renames").
- * [CF-3]
+ * `m` 1.0.0 with the setting `foo`, and 1.1.0 whose schema renames it `bar`.
  */
 export const M_FOO = defineModule({
   ...declaration("m"),
@@ -87,7 +86,7 @@ export const M_BAR = defineModule({
 
 /**
  * The data fields of a public `core` entry written with {@link CORE_SETTINGS} only: the `core` defaults applied, the
- * ledger table among them (the network's built-in one). [CF-4]
+ * ledger table among them (the network's built-in one).
  */
 export const CORE_DATA = {
   network: "preprod",
@@ -124,7 +123,7 @@ export function checked(entries: readonly unknown[], declarations: DeclarationSe
 
 /**
  * The history check's input `input` with its configuration's process revision (`processCoreEntry`), as the resolver
- * gives it to the runner (`src/runner/resolve.ts`). [Q102]
+ * gives it to the runner (`src/runner/resolve.ts`).
  */
 export function withProcess<T extends Omit<HistoryInput, "process">>(input: T): T & { readonly process: CheckedEntry } {
   return { ...input, process: processCoreEntry(input.config) };

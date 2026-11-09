@@ -16,8 +16,8 @@ import { NO_TABLES, reachIn, storedProblems, storedReach } from "./refcount-chec
  * The ledger conversion on the recorded devnet v8 → v9 tape, through the real process with `core-contract-states`
  * (`ledger-refcount-conversion.test.ts`): a run from genesis to F + 4 recording the tables after every height and each
  * block's batch, and the checks on it. Each check lists what it finds broken, none when it holds. Imports nothing of
- * Vitest. [R22, LG-9, LG-13, LG-14]
- * - {@link conversionR3}: R3's clauses (a)–(d) at the heights given, `R_{h−1}`, `R_h` and `K_h` computed from the
+ * Vitest.
+ * - {@link conversionR3}: The clauses (a)–(d) at the heights given, `R_{h−1}`, `R_h` and `K_h` computed from the
  *   stored rows and the block's batch (`./refcount-checks.ts`, {@link storedProblems}), with the rows outside
  *   `R_{h−1} ∪ R_h` counted;
  * - {@link releaseProblems}: each v8 state held until the block its window sets releases it, its rows kept until the
@@ -25,7 +25,7 @@ import { NO_TABLES, reachIn, storedProblems, storedReach } from "./refcount-chec
  * - {@link loadProblems}: every contract state and zswap state stored below F loads from its stored key at the end.
  */
 
-/** The devnet's v8 → v9 conversion block: the first block applied with ledger v9. [LG-9] */
+/** The devnet's v8 → v9 conversion block: the first block applied with ledger v9. */
 export const DEVNET_F = 103n;
 
 /** The last height of a run: F + 4. */
@@ -59,7 +59,7 @@ const bytesOf = (value: unknown): Uint8Array => Uint8Array.from(value as Uint8Ar
 /**
  * Runs the devnet tape `found` on `db` from genesis to {@link CONVERSION_LAST} with `core-contract-states` and
  * `retainStates` (`core` gives `core-ledger-state`'s rules: a diagnostic's fault; none for the criterion), and reads
- * what the checks need once the process stopped. [R22]
+ * what the checks need once the process stopped.
  */
 export async function conversionRun(
   db: ProcessDatabase,
@@ -116,9 +116,9 @@ function batchAt(run: ConversionRun, h: bigint): NodeBatch {
 }
 
 /**
- * R3's clauses (a)–(d) after every height of `heights` ({@link storedProblems}), `sweep` on, the retention window after
+ * The clauses (a)–(d) after every height of `heights` ({@link storedProblems}), `sweep` on, the retention window after
  * h from h − `retainStates` (no later revision): each problem with its height; and, by height, the rows outside
- * `R_{h−1} ∪ R_h`. [R3, R22]
+ * `R_{h−1} ∪ R_h`.
  */
 export function conversionR3(run: ConversionRun, heights: readonly bigint[]): { readonly problems: string[]; readonly outside: Map<bigint, number> } {
   const problems: string[] = [];
@@ -132,7 +132,7 @@ export function conversionR3(run: ConversionRun, heights: readonly bigint[]): { 
   return { problems, outside };
 }
 
-/** The v8 states: the heights below the first block applied with v9, which must be `DEVNET_F`. [LG-9] */
+/** The v8 states: the heights below the first block applied with v9, which must be `DEVNET_F`. */
 export function v8Heights(run: ConversionRun): bigint[] {
   const first = [...run.ledgers].find(([, ledger]) => ledger !== "v8");
   if (first === undefined || first[1] !== "v9" || first[0] !== DEVNET_F) {
@@ -155,7 +155,6 @@ export interface Released {
  * - none of its rows is deleted before b + 1: at each t of h … b, what `s` reaches through the child lists stored
  *   after t is stored, and no row it reached after t − 1 is gone after t;
  * - after b + 1 no row it reached after b is stored unless it is in `K_{b+1}` ({@link storedReach}).
- * [R22, LG-14; design §5, §9.2]
  */
 export function releaseProblems(run: ConversionRun): Released {
   const problems: string[] = [];
@@ -213,7 +212,7 @@ function tagsOf(ledger: Ledger): { readonly state: string; readonly zswap: strin
  * Every contract state and zswap state `core_contract_states.states` stores below F loads from its stored key once
  * the run ended: the key has a root count, the value rebuilt from the stored nodes alone (`../ledger/stored-values.ts`)
  * is deserialized by the package of the row's block's ledger, and that value's root key is the stored key. Each loaded
- * row is listed as `<height> <address>`. [R22, LG-13]
+ * row is listed as `<height> <address>`.
  */
 export function loadProblems(run: ConversionRun): { readonly problems: string[]; readonly loaded: string[] } {
   const problems: string[] = [];

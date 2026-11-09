@@ -8,13 +8,13 @@ import { openHold } from "./fixtures/import-holds.js";
 import { libraryData, PGLITE_MEMORY, rowsModule } from "./library-fixtures.js";
 
 /**
- * `started`'s rejection (`src/runner/process.ts`, `src/runner/failures.ts`): one code for one failure. [LM-9, LM-10]
+ * `started`'s rejection (`src/runner/process.ts`, `src/runner/failures.ts`): one code for one failure.
  *
- * - LM-9's scenario: a module's `on-start-db` that throws `new Error("x")` makes `started` reject with an `UmbraError`
+ * - The scenario: a module's `on-start-db` that throws `new Error("x")` makes `started` reject with an `UmbraError`
  *   of code `callback-error` naming the module and the point, whose `cause` is that error; `status().reason.code` is
  *   `callback-error`, and `ended`'s error is the same rejection. A refusal that is itself an `UmbraError` of its reason's
  *   code (a migration whose checksum changed) is the rejection as thrown. On PostgreSQL and PGlite.
- * - L32: a stop during startup — `stop()` during a slow `{ file }` import — ends the start: `started` rejects with an
+ * - A stop during startup — `stop()` during a slow `{ file }` import — ends the start: `started` rejects with an
  *   `AbortError`, the state is `stopping` with no reason, `closed` resolves; aborting the host's `signal` with a reason R
  *   during startup makes `started` reject with R itself; with no handler on `started`, no rejection is unhandled. The
  *   slow import waits at a hold the test opens and releases (`./fixtures/import-holds.ts`), so the stop lands while it
@@ -45,7 +45,7 @@ async function rejectionOf(handle: UmbraDBHandle): Promise<unknown> {
   );
 }
 
-describe.each(PROCESS_BACKENDS)("LM-9: a refusal's rejection is the reason's code, on $name", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("a refusal's rejection is the reason's code, on $name", (backend: ProcessBackend) => {
   beforeAll(async () => {
     await backend.start();
   }, 180_000);
@@ -109,7 +109,7 @@ describe.each(PROCESS_BACKENDS)("LM-9: a refusal's rejection is the reason's cod
   }, 60_000);
 });
 
-describe("L32: a stop during startup ends it, and started rejects with the abort reason (LM-1, LM-9)", () => {
+describe("a stop during startup ends it, and started rejects with the abort reason", () => {
   it("stop() during a slow { file } import: an AbortError, stopping with no reason, closed resolved", async () => {
     const hold = openHold("held-stop");
     const file = fileURLToPath(new URL("./fixtures/held-stop.config.ts", import.meta.url));

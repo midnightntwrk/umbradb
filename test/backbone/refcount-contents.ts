@@ -14,7 +14,7 @@ import { nodeSet } from "./refcount-model.js";
  * What the reclamation tests compare between databases the DAG fixture's process wrote (`./refcount-process.ts`): the
  * contents hash as the build computes it (the exported `contentsHash`, which takes `core-ledger-state`'s node tables
  * by their content), the tables it takes by their bytes, each read whole through this file's own queries, and a
- * table snapshot's node set. Imports nothing of Vitest. [R15, R17, DT-3, LG-11]
+ * table snapshot's node set. Imports nothing of Vitest.
  */
 
 /** A database read through the database API: a backup test's database (`../backup/backup-fixtures.ts`). */
@@ -27,7 +27,7 @@ export const CONTENT_DEFINED_TABLES: readonly string[] = ["nodes", "ref_counts",
 
 /**
  * The tables declared `deterministic: false` by the DAG fixture's process — the ledger's core modules, the ingest's
- * watcher, the fixture's watcher and `user` — which the contents hash records by name only. [DT-3, MD-1]
+ * watcher, the fixture's watcher and `user` — which the contents hash records by name only.
  */
 export function dagOptedOut(user: readonly ModuleDeclaration[] = []): { schema: string; table: string }[] {
   const modules = [watcher(watched()), sweepWatcher(seenTables()), ...user];
@@ -36,12 +36,12 @@ export function dagOptedOut(user: readonly ModuleDeclaration[] = []): { schema: 
 
 const hexOf = (bytes: Uint8Array): string => `0x${Buffer.from(bytes).toString("hex")}`;
 
-/** The contents hash of `db` as the build computes it (the package's export), `0x` hex. [DT-3, LG-11] */
+/** The contents hash of `db` as the build computes it (the package's export), `0x` hex. */
 export function buildContentsHash(db: ReadableDatabase, optedOut: readonly { schema: string; table: string }[]): Promise<string> {
   return db.read(async (read) => hexOf(await contentsHash(read, { optedOut })));
 }
 
-/** The contents hash of `db` with every table taken by its bytes (no content-defined table), `0x` hex. [DT-3] */
+/** The contents hash of `db` with every table taken by its bytes (no content-defined table), `0x` hex. */
 export function bytesContentsHash(db: ReadableDatabase, optedOut: readonly { schema: string; table: string }[]): Promise<string> {
   return db.read(async (read) => hexOf(await hashByBytes(read, { optedOut })));
 }
@@ -57,7 +57,7 @@ const MODULE_TABLES_SQL = `SELECT n.nspname AS s, c.relname AS t FROM pg_class c
 
 /**
  * The tables the contents hash takes by their bytes — every module table but `core-ledger-state`'s content-defined
- * ones and those `optedOut` names — each as the MD5 of its rows' text in order, by `schema.table`. [R15, DT-3]
+ * ones and those `optedOut` names — each as the MD5 of its rows' text in order, by `schema.table`.
  */
 export function byteHashedTables(db: ReadableDatabase, optedOut: readonly { schema: string; table: string }[]): Promise<Map<string, string>> {
   return db.read(async (read) => {
@@ -73,9 +73,9 @@ export function byteHashedTables(db: ReadableDatabase, optedOut: readonly { sche
   });
 }
 
-/** A snapshot's node set (its rows' keys and the keys of every node they embed), sorted. [design §1] */
+/** A snapshot's node set (its rows' keys and the keys of every node they embed), sorted. */
 export const nodeSetOf = (tables: TableSnapshot): string[] => [...nodeSet(tables.rows)].sort();
 
-/** A snapshot's `core_ledger_state` tables that are not content-defined, by name, each its rows' MD5. [R15, DT-3] */
+/** A snapshot's `core_ledger_state` tables that are not content-defined, by name, each its rows' MD5. */
 export const byteDigestsOf = (tables: TableSnapshot): [string, string][] =>
   [...tables.digests].filter(([table]) => !CONTENT_DEFINED_TABLES.includes(table));

@@ -11,7 +11,6 @@ import { connectionOfUrl } from "./connection.js";
  * Terminating the writer's backend mid-transaction yields `connection-lost` with `retryable: true`; a constraint
  * violation yields an error that is not retryable, and so does every other database error. The faults are real:
  * `pg_terminate_backend` from another connection, a server that refuses connections, a wrong password.
- * [A19 FAULT, DB-13]
  */
 
 let server: PostgresTestServer;
@@ -46,7 +45,7 @@ const pidOf = async (handle: { query(sql: string): Promise<Record<string, unknow
 const rowsOf = async (database: PostgresTestDatabase) =>
   (await database.admin.unsafe("SELECT height FROM t.blocks ORDER BY height")).map((row) => BigInt(row.height));
 
-describe("A19 (DB-13) — a lost connection is connection-lost, retryable", () => {
+describe("a lost connection is connection-lost, retryable", () => {
   it(
     "[[db.connection-lost.retryable]] terminating the writer's backend mid-transaction gives connection-lost, " +
       "retryable; nothing commits; the next transaction runs on a new connection",
@@ -191,7 +190,7 @@ describe("A19 (DB-13) — a lost connection is connection-lost, retryable", () =
   }, 60_000);
 });
 
-describe("A19 (DB-13) — every other database error is not retryable", () => {
+describe("every other database error is not retryable", () => {
   const violations: readonly (readonly [string, string, string, string])[] = [
     ["a unique violation", "INSERT INTO t.rows VALUES (1, 'a'), (1, 'b')", "23505", "rows_pkey"],
     ["a check violation", "INSERT INTO t.checked VALUES (-1)", "23514", "checked_v_check"],
@@ -248,7 +247,7 @@ describe("A19 (DB-13) — every other database error is not retryable", () => {
   }, 60_000);
 });
 
-describe("classifyDriverError — the driver's errors as UmbraErrors (DB-13)", () => {
+describe("classifyDriverError — the driver's errors as UmbraErrors", () => {
   const driverError = (fields: Record<string, unknown>) => Object.assign(new Error("driver"), fields);
 
   it("marks the connection failures connection-lost, retryable", () => {

@@ -8,7 +8,7 @@ import { expectProcessChecks, expectWorkerChecks, type InstallationCopy, install
 
 /**
  * The committed negative control for the package checks: a startup that never calls the check fails the checks of
- * `./package-startup-checks.ts`. [A173, LG-5; acceptance §12]
+ * `./package-startup-checks.ts`.
  * - **The process** started without its check (`EngineInput.checkLedgerPackages` checking nothing) goes on to start
  *   its ledger worker over a package whose Node.js entry changed, and fails the check `ledger workers started`.
  * - **The ledger worker** over a copy whose `src/ledger/load.ts` never calls `checkLedgerPackage` imports the changed
@@ -30,7 +30,7 @@ async function assertionFailure(check: () => unknown): Promise<Error> {
   throw new Error("the check passed against a startup that never calls it");
 }
 
-describe("A173's negative control: a startup that never calls the check", () => {
+describe("negative control: a startup that never calls the check", () => {
   let copy: InstallationCopy;
   let unchecked: InstallationCopy;
   beforeAll(async () => {
@@ -45,7 +45,7 @@ describe("A173's negative control: a startup that never calls the check", () => 
   }, 60_000);
 
   it(
-    "the process that never calls it starts its ledger worker over a changed package, and fails A173",
+    "the process that never calls it starts its ledger worker over a changed package, and fails",
     async () => {
       const failure = await assertionFailure(() =>
         expectProcessChecks(copy, () => backend.database(), (_startup, input) => startProcess({ ...input, checkLedgerPackages: () => undefined })),
@@ -56,7 +56,7 @@ describe("A173's negative control: a startup that never calls the check", () => 
   );
 
   it(
-    "the ledger worker that never calls it imports a changed package, and fails A173",
+    "the ledger worker that never calls it imports a changed package, and fails",
     async () => {
       const failure = await assertionFailure(() => expectWorkerChecks(unchecked, () => startLedgerWorker({ loader: unchecked.loader })));
       // The changed entry ran: it recorded its import.
@@ -66,7 +66,7 @@ describe("A173's negative control: a startup that never calls the check", () => 
   );
 
   it(
-    "the real ones pass A173 in this file's build",
+    "the real ones pass the check in this file's build",
     async () => {
       await expectProcessChecks(copy, () => backend.database(), (startup, input) =>
         startProcess({ ...input, checkLedgerPackages: (options) => checkLedgerPackages({ ...options, root: startup.root }) }),

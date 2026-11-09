@@ -14,8 +14,8 @@ import { cursorReaches } from "./library-fixtures.js";
 import { l39Problems } from "./refused-channels.js";
 
 /**
- * The channel link's queue and its ends `[CI]`, on PostgreSQL 18 (Docker) and PGlite 0.5.10 [LM-6, N9]:
- * - **L38** `[NEG]`: before the link starts (a module's `on-start-db` held), 64 channels queue and answer pings and the
+ * The channel link's queue and its ends `[CI]`, on PostgreSQL 18 (Docker) and PGlite 0.5.10:
+ * - `[NEG]`: before the link starts (a module's `on-start-db` held), 64 channels queue and answer pings and the
  *   65th closes 1013 `try-again`; a queued channel whose first message is not a `hello` closes `hello-first`, one sending
  *   a second message `hello-pending`, one whose `hello` is over 64 KiB `too-large`; a queued peer that sends its `hello`
  *   and answers pings through three intervals (a controlled clock) stays queued and is activated (`hello-ack`) when the
@@ -24,19 +24,19 @@ import { l39Problems } from "./refused-channels.js";
  *   right after is queued only in the freed place; at a class-B refusal (the held `on-start-db` throws) every queued
  *   channel closes `private-link-not-accepting`. Negative control: the queue's limit lifted (the channel link's seam),
  *   the 65th is queued, and the oracle fails.
- * - **L39** `[NEG]`: `accept()` on a process not accepting channels (no channel request), after a refusal and after
+ * - `[NEG]`: `accept()` on a process not accepting channels (no channel request), after a refusal and after
  *   `stop()`: the channel closes `private-link-not-accepting`, a line is logged, nothing throws (a carrier that throws
  *   included; the run and oracle are `./refused-channels.ts`'s). Negative control,
  *   `./channel-queue.negative-control.test.ts`: the not-accepting paths keeping the channel fail the same oracle.
- * - **L40**: a `connect()` that rejects is retried with the back-off (1 s, doubling up to `backoffCeilingMs`), each
+ * - A `connect()` that rejects is retried with the back-off (1 s, doubling up to `backoffCeilingMs`), each
  *   logged, until one resolves; the private process then follows. A value whose channel members cannot be read (a
  *   getter or a proxy's trap that throws) is no channel, and a rejection whose error cannot be read is logged by its
- *   type: each a lost connection (`failed`, then `ended` 1006), with no rejection unhandled (issue 00068, G6).
- * - **L41** `[NEG]`: a `connect()` that never settles does not delay `stop()`; a channel it resolves after `stop()` is
+ *   type: each a lost connection (`failed`, then `ended` 1006), with no rejection unhandled.
+ * - `[NEG]`: a `connect()` that never settles does not delay `stop()`; a channel it resolves after `stop()` is
  *   closed; a rejection after it is not unhandled; no retry starts; a value whose members cannot be read, resolved
  *   after it, is left alone, nothing unhandled. Negative control: a carrier that waits for its `connect()` at the stop
  *   and ignores the signal (the fault) fails the same oracle, at the transport.
- * - **L35** `[NEG]` beyond the core's own sends (`./channel-link.test.ts`): on the private side, a channel holding more
+ * - `[NEG]` beyond the core's own sends (`./channel-link.test.ts`): on the private side, a channel holding more
  *   than `MAX_BUFFERED_BYTES` undelivered is closed 1008 `too-slow` at its next send (the `hello`), and the transport
  *   connects again; on a queued channel of the core, at its next ping, and at its answer to the peer's ping. Negative
  *   controls: the limit raised beyond any amount (the carrier's and the queue's seams, channels only): the slow channel
@@ -90,7 +90,7 @@ function accepted(core: Logged): { peer: RawPeer; end: TestEnd } {
   return { peer: rawPeer(peerEnd), end: coreEnd };
 }
 
-/** What one L38 run saw. */
+/** What one run saw. */
 interface QueueRun {
   readonly sixtyFifth: unknown;
   /** How many of the 64 queued channels were pinged by the first interval and still open then. */
@@ -106,7 +106,7 @@ interface QueueRun {
 }
 
 /**
- * One L38 run on `backend` with the queue's limit `queueMax` (the control's seam), or the link's own. The queue stays
+ * One run on `backend` with the queue's limit `queueMax` (the control's seam), or the link's own. The queue stays
  * full — 64 channels, the three faults among them, silent — until the dead peer's `no-pong` at the second interval, so
  * that the late channel accepted then is queued only when the dead one freed its place; the faults' messages come
  * after it.
@@ -181,7 +181,7 @@ async function queueRun(backend: PrivateBackend, queueMax?: number): Promise<Que
   }
 }
 
-/** The L38 oracle: every problem of `run`, none when it holds. */
+/** The oracle: every problem of `run`, none when it holds. */
 function queueProblems(run: QueueRun): string[] {
   const problems: string[] = [];
   const json = (value: unknown) => JSON.stringify(value);
@@ -199,20 +199,20 @@ function queueProblems(run: QueueRun): string[] {
   return problems;
 }
 
-describe.each(PRIVATE_BACKENDS)("the channel link's queue and ends on $name (LM-6)", (backend: PrivateBackend) => {
+describe.each(PRIVATE_BACKENDS)("the channel link's queue and ends on $name", (backend: PrivateBackend) => {
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 
-  it("L38: 64 channels queue and answer pings, the 65th try-again; hello-first, hello-pending, too-large; a healthy peer stays and is activated; a dead one no-pong", async () => {
+  it("64 channels queue and answer pings, the 65th try-again; hello-first, hello-pending, too-large; a healthy peer stays and is activated; a dead one no-pong", async () => {
     expect(queueProblems(await queueRun(backend))).toEqual([]);
   }, 120_000);
 
-  it("L38 negative control (committed): with the queue's limit lifted, the 65th is queued, and the oracle fails", async () => {
+  it("negative control (committed): with the queue's limit lifted, the 65th is queued, and the oracle fails", async () => {
     const problems = queueProblems(await queueRun(backend, Number.POSITIVE_INFINITY));
     expect(problems.some((problem) => problem.startsWith("the 65th:"))).toBe(true);
   }, 120_000);
 
-  it("L38: at a class-B refusal every queued channel closes private-link-not-accepting; L39: one accepted after it too", async () => {
+  it("at a class-B refusal every queued channel closes private-link-not-accepting; one accepted after it too", async () => {
     const held = gate();
     const core = channelCore(await backend.database("public"), { head: 2n, modules: [heldModule(held)] });
     try {
@@ -236,12 +236,12 @@ describe.each(PRIVATE_BACKENDS)("the channel link's queue and ends on $name (LM-
     }
   }, 120_000);
 
-  it("L39: accept() on a process not accepting channels, or after stop(): closed private-link-not-accepting, a line logged, nothing thrown", async () => {
+  it("accept() on a process not accepting channels, or after stop(): closed private-link-not-accepting, a line logged, nothing thrown", async () => {
     // The run and its oracle (`./refused-channels.ts`): no channel request, then a channel core after its stop.
     expect(await l39Problems(backend)).toEqual([]);
   }, 120_000);
 
-  it("L40: a rejecting connect() is retried with the back-off, each attempt logged, until one resolves; the private process then follows", async () => {
+  it("a rejecting connect() is retried with the back-off, each attempt logged, until one resolves; the private process then follows", async () => {
     const publicDb = await backend.database("public");
     const privateDb = await backend.database("private");
     const core = channelCore(publicDb, { head: 3n });
@@ -276,7 +276,7 @@ describe.each(PRIVATE_BACKENDS)("the channel link's queue and ends on $name (LM-
     }
   }, 600_000);
 
-  it("L41: a connect() that never settles does not delay stop(); a channel it resolves after stop() is closed; no retry starts", async () => {
+  it("a connect() that never settles does not delay stop(); a channel it resolves after stop() is closed; no retry starts", async () => {
     const publicDb = await backend.database("public");
     const privateDb = await backend.database("private");
     let resolve!: (channel: PrivateLinkChannel) => void;
@@ -303,7 +303,7 @@ describe.each(PRIVATE_BACKENDS)("the channel link's queue and ends on $name (LM-
     expect(signals).toHaveLength(1);
   }, 120_000);
 
-  it("L41: a rejection of connect() after stop() is consumed, not unhandled, and starts no retry", async () => {
+  it("a rejection of connect() after stop() is consumed, not unhandled, and starts no retry", async () => {
     const publicDb = await backend.database("public");
     const privateDb = await backend.database("private");
     let reject!: (error: unknown) => void;
@@ -332,7 +332,7 @@ describe.each(PRIVATE_BACKENDS)("the channel link's queue and ends on $name (LM-
   }, 120_000);
 });
 
-/** The L41 oracle at the transport: a stop with a `connect()` pending, then a channel resolved after it. */
+/** The oracle at the transport: a stop with a `connect()` pending, then a channel resolved after it. */
 async function stopProblems(carrierOf: (connect: (signal: AbortSignal) => Promise<PrivateLinkChannel>) => PrivateCarrier): Promise<string[]> {
   const problems: string[] = [];
   let resolve!: (channel: PrivateLinkChannel) => void;
@@ -380,7 +380,7 @@ function waitingCarrier(connect: (signal: AbortSignal) => Promise<PrivateLinkCha
   };
 }
 
-describe("L41 at the transport: the stop and a pending connect() (LM-6)", () => {
+describe("at the transport: the stop and a pending connect()", () => {
   it("the channel carrier: the stop does not wait, the late channel is closed, no retry", async () => {
     expect(await stopProblems((connect) => channelCarrier(connect))).toEqual([]);
   }, 30_000);
@@ -419,7 +419,7 @@ const ACK = {
   configHash: `0x${"c1".repeat(32)}`,
 };
 
-/** The unhandled rejections seen until `stop()` (G6: UmbraDB leaves none). */
+/** The unhandled rejections seen until `stop()` (UmbraDB leaves none). */
 function unhandledRejections(): { readonly unhandled: unknown[]; stop(): void } {
   const unhandled: unknown[] = [];
   const listener = (reason: unknown): void => {
@@ -449,7 +449,7 @@ function unreadableMember(member: "send" | "onMessage" | "onClose" | "close"): (
 }
 
 /**
- * Values a host's `connect()` may resolve with whose channel members cannot be read (issue 00068): each member's getter
+ * Values a host's `connect()` may resolve with whose channel members cannot be read: each member's getter
  * that throws, and a proxy whose trap throws for them (not for `then`, which the promise reads first).
  */
 const UNREADABLE_CHANNELS: readonly (readonly [string, () => unknown])[] = [
@@ -502,7 +502,7 @@ async function dialed(connect: () => Promise<unknown>, when: "running" | "stoppe
   return { seen, unhandled };
 }
 
-describe("the channel carrier at the transport (LM-6)", () => {
+describe("the channel carrier at the transport", () => {
   it("a connect() that resolves with no channel, or throws, is a lost connection; the next one connects", async () => {
     const cores: RawPeer[] = [];
     let calls = 0;
@@ -532,7 +532,7 @@ describe("the channel carrier at the transport (LM-6)", () => {
     }
   }, 30_000);
 
-  it("a value that is no channel, resolved after the stop, is left alone; a channel is closed (L41)", async () => {
+  it("a value that is no channel, resolved after the stop, is left alone; a channel is closed", async () => {
     const pending: ((value: unknown) => void)[] = [];
     const { transport } = transportOver(
       channelCarrier(() => new Promise<PrivateLinkChannel>((resolve) => pending.push(resolve as (value: unknown) => void))),
@@ -545,7 +545,7 @@ describe("the channel carrier at the transport (LM-6)", () => {
   }, 30_000);
 
   it.each(UNREADABLE_CHANNELS)(
-    "a connect() that resolves with %s resolved with no channel: the connection failed, then ended (1006), and no rejection is unhandled (issue 00068, LM-2)",
+    "a connect() that resolves with %s resolved with no channel: the connection failed, then ended (1006), and no rejection is unhandled",
     async (_name, channelOf) => {
       const { seen, unhandled } = await dialed(async () => channelOf(), "running");
       expect([seen, unhandled]).toEqual([["failed the host's connect() resolved with no channel", "ended 1006"], []]);
@@ -553,7 +553,7 @@ describe("the channel carrier at the transport (LM-6)", () => {
   );
 
   it.each(UNREADABLE_CHANNELS)(
-    "%s, resolved after the stop or after the connection's own close, is left alone: no event, and no rejection is unhandled (issue 00068, L41)",
+    "%s, resolved after the stop or after the connection's own close, is left alone: no event, and no rejection is unhandled",
     async (_name, channelOf) => {
       for (const when of ["stopped", "closed"] as const) {
         const { seen, unhandled } = await dialed(async () => channelOf(), when);
@@ -562,7 +562,7 @@ describe("the channel carrier at the transport (LM-6)", () => {
     },
   );
 
-  it("a connect() whose channel's members cannot be read is a lost connection, logged as no channel; the next one connects, and nothing is unhandled (issue 00068)", async () => {
+  it("a connect() whose channel's members cannot be read is a lost connection, logged as no channel; the next one connects, and nothing is unhandled", async () => {
     // A getter that throws, then a proxy's trap that throws, then a channel.
     const unreadable = [UNREADABLE_CHANNELS[0], UNREADABLE_CHANNELS[4]].map((found) => (found as (typeof UNREADABLE_CHANNELS)[number])[1]);
     const cores: RawPeer[] = [];
@@ -593,7 +593,7 @@ describe("the channel carrier at the transport (LM-6)", () => {
     }
   }, 30_000);
 
-  it("a connect() that rejects with an error that cannot be read is a lost connection, logged by its type; the next one connects, and nothing is unhandled (issue 00068)", async () => {
+  it("a connect() that rejects with an error that cannot be read is a lost connection, logged by its type; the next one connects, and nothing is unhandled", async () => {
     const errors: readonly unknown[] = [
       // A name whose getter throws.
       Object.defineProperty(new Error("x"), "name", {
@@ -706,7 +706,7 @@ describe("the channel carrier at the transport (LM-6)", () => {
 });
 
 /**
- * The private side's L35 run over a channel carrier with `seams`: its first channel holds more than
+ * The private side's run over a channel carrier with `seams`: its first channel holds more than
  * `MAX_BUFFERED_BYTES` undelivered, its second none. Every problem, none when the first was closed `too-slow` before
  * the `hello` went out and the transport connected again.
  */
@@ -735,7 +735,7 @@ async function privateSlowProblems(seams: Parameters<typeof channelCarrier>[1] =
   return problems;
 }
 
-describe("L35 on the private side and on a queued channel (LM-6)", () => {
+describe("on the private side and on a queued channel", () => {
   it("the private side: a channel over MAX_BUFFERED_BYTES is closed too-slow at its hello, and the transport connects again", async () => {
     expect(await privateSlowProblems()).toEqual([]);
   }, 30_000);
@@ -746,7 +746,7 @@ describe("L35 on the private side and on a queued channel (LM-6)", () => {
     expect(problems).toContain("the slow channel carried 1 message(s)");
   }, 30_000);
 
-  /** One queued channel's L35 run on a core link not started, its limit `maxBufferedBytes` (the default unless given). */
+  /** One queued channel's run on a core link not started, its limit `maxBufferedBytes` (the default unless given). */
   async function queuedSlowProblems(maxBufferedBytes?: number): Promise<string[]> {
     const clock = controlledTimers();
     const lines: string[] = [];

@@ -18,7 +18,7 @@ import { VENDORED_LEDGERS } from "./version-checks.js";
  * Checks that the vendored ledger packages are checked against their recorded SHA-256 before any of them is imported:
  * at the process's startup, before block S, and in the ledger worker, before it imports a version's package. They also
  * check that `ledgerSources: released` refuses startup naming the setting. Shared by `package-startup.test.ts` and its
- * negative control (a startup that never calls the check). [A173, LG-5; acceptance §12; design §5.2]
+ * negative control (a startup that never calls the check).
  *
  * The packages a test changes are a copy's: {@link installationCopy} copies `src/` and `vendor/ledger/` into a
  * temporary directory, so that the copy's `src/ledger/load.ts` — the ledger worker's loader, given to it as a test
@@ -129,7 +129,7 @@ const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
  * records its import) and, separately, its WebAssembly is changed by one byte. The worker's first request needing that
  * version (a genesis state's root) then fails naming the version's package and the file, and the package was not
  * imported. With the package unchanged, the same request gives the node's root. `start` starts a ledger worker over
- * `copy`'s packages. [A173]
+ * `copy`'s packages.
  */
 export async function expectWorkerChecks(copy: InstallationCopy, start: () => LedgerHost): Promise<void> {
   for (const ledger of VENDORED_LEDGERS) {
@@ -214,7 +214,7 @@ function packageProcess(start: StartPackageProcess, startup: PackageStartup): { 
  * - With the packages unchanged, the process starts its ledger worker (over the copy's packages) and commits S to the
  *   head.
  *
- * `database` gives each process a new database. [A173]
+ * `database` gives each process a new database.
  */
 export async function expectProcessChecks(
   copy: InstallationCopy,

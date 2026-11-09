@@ -17,7 +17,7 @@ function wrapped(inner: unknown, depth: number): unknown {
   return error;
 }
 
-describe("nodeClientClosed (task 17.5b)", () => {
+describe("nodeClientClosed", () => {
   it("finds the node client's handle-closed itself and as a cause up to the eighth level", () => {
     expect(nodeClientClosed(closed())).toBe(true);
     expect(nodeClientClosed(wrapped(closed(), 1))).toBe(true);

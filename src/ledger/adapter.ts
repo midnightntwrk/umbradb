@@ -3,16 +3,15 @@
  * published API and the node-store exports its patches add (`vendor/ledger/README.md`). It is refactored from 0.9.5's
  * replay decoder (`chain-archive-sync/tx-replay-decoder.ts`): a transaction's kind from its self-tag, the
  * deserialization with its markers, and the walk over its intents by segment.
- * [LG-6, LG-7, LG-8, LG-15, LG-16; design §5.1]
  *
  * `./v8.ts` and `./v9.ts` give it their package and what differs between them: contract logs and the v8 → v9
- * conversion. [LG-9, Q54]
+ * conversion.
  *
  * **Parsing.** A transaction is parsed at most once per `Uint8Array`: the native object is kept in a `WeakMap`
  * under the very array it came from, and `parseTransaction`, `nativeTransaction` and `apply` all take it from there.
  * The markers `Transaction.deserialize` needs are read from the transaction's own tag
  * (`midnight:transaction[vN](S,P,B):`), so a proven chain transaction and a proof-erased test transaction parse alike;
- * the package checks the tag's version. [LG-7]
+ * the package checks the tag's version.
  *
  * A transaction's hash is SHA-256 over the package's own serialization of it, the ledger's definition for both kinds
  * (`midnight-ledger` `ledger/src/structure.rs` `Transaction::transaction_hash`, `SystemTransaction::transaction_hash`).
@@ -27,16 +26,16 @@
  * `chain-indexer/src/domain/ledger_state.rs` `apply_transactions`, `failed_regular_transaction`;
  * `indexer-common/src/domain/ledger/ledger_state.rs` `apply_regular_transaction`, `apply_system_transaction`,
  * `finalize_apply_transactions`) and the node (`midnight-node` 2.1.0-rc.4 `ledger/src/ledger_8/api/ledger.rs` and
- * `ledger_9/api/ledger.rs` `apply_verified_transaction`, `apply_system_tx`, `apply_post_block_update`). [LG-8]
+ * `ledger_9/api/ledger.rs` `apply_verified_transaction`, `apply_system_tx`, `apply_post_block_update`).
  * - a transaction the chain reports failed (its {@link ApplyInput.outcomes} entry is `failure`) failed at dispatch
  *   and left the node's state as it was: it is skipped — no well-formedness check, no cost, a `failure` whose segments
- *   all failed — and is not the first regular transaction to apply [Q113 A];
+ *   all failed — and is not the first regular transaction to apply;
  * - a system transaction is applied at the block time and adds its cost, taken with the parameters before it applies
  *   (the patches' `systemTransactionCost`), to the block's fullness; one that fails cannot be replayed, so `apply`
  *   throws;
  * - a regular transaction must be well formed at the block time, or, while no regular transaction of the block has
  *   applied and `firstRegularAtParentTime` is set, at the parent block's timestamp + 12,000 ms; well-formedness checks
- *   no proof and does not enforce balancing (as the official indexer), but checks signatures and limits [LG-15];
+ *   no proof and does not enforce balancing (as the official indexer), but checks signatures and limits;
  * - a malformed transaction, one whose cost cannot be computed, and one the ledger fails are a `failure` whose
  *   segments all failed: the node's extrinsic fails and the state stays as it was, so nothing of it is kept and its
  *   cost is not counted;
@@ -55,9 +54,7 @@
  * - A system transaction has no segments.
  * - Each ledger event other than a contract log becomes a {@link LedgerEvent}.
  * - Contract logs become {@link VmLog}s, numbered in emission order, where the version decodes them (v9); they are
- *   dropped where it does not (v8). [Q54]
- *
- * [LG-16]
+ *   dropped where it does not (v8).
  */
 
 import { createHash } from "node:crypto";
@@ -170,7 +167,7 @@ export interface RawLedgerPackage {
   systemTransactionCost(transaction: RawSystemTransaction, params: RawParameters): SyntheticCost;
   /**
    * The six commitment-tree values of a state that `core_ledger_state.states` stores, as the official indexer reads
-   * them. [LG-16]
+   * them.
    */
   stateTrees(state: RawState): StateSummary;
 }
@@ -189,7 +186,7 @@ export interface AdapterSpec {
   readonly raw: RawLedgerPackage;
   readonly networkId: string;
   readonly decodeLogItem: (value: Uint8Array) => LogItem | null;
-  /** The tagged serialization of a logged item's value; null where contract logs are not reported (v8). [Q54] */
+  /** The tagged serialization of a logged item's value; null where contract logs are not reported (v8). */
   readonly loggedValue: ((data: unknown) => Uint8Array) | null;
   readonly convertFromV8?: (v8StateKey: Uint8Array, store: NodeStore) => RawState;
 }
@@ -202,7 +199,7 @@ type Native =
   | { readonly kind: "regular"; readonly transaction: RawTransaction }
   | { readonly kind: "system"; readonly transaction: RawSystemTransaction };
 
-/** The parent block's timestamp + this: the second time a skewed first regular transaction is checked at. [LG-8] */
+/** The parent block's timestamp + this: the second time a skewed first regular transaction is checked at. */
 export const PARENT_TIME_BUMP_MS = 12_000n;
 
 /** `tblock_err`, the error on the block time a transaction context allows, in seconds (the official indexer's). */
@@ -325,7 +322,7 @@ function fallibleSegments(transaction: RawTransaction): number[] {
   const offers = transaction.fallibleOffer;
   const segments = new Set<number>([...(intents?.keys() ?? []), ...(offers?.keys() ?? [])]);
   // The getters give new objects, which hold the transaction's values until freed. They are freed at once, so that no
-  // object the garbage collector has not reached yet keeps alive a node that reclamation deletes. [LG-14]
+  // object the garbage collector has not reached yet keeps alive a node that reclamation deletes.
   for (const value of [...(intents?.values() ?? []), ...(offers?.values() ?? [])]) freeGot(value);
   segments.delete(0);
   return [...segments].sort((a, b) => a - b);
@@ -343,7 +340,7 @@ export function eventKindOf(event: RawEvent): EventKind {
   return byVariant;
 }
 
-/** A ledger event other than a contract log, with the fields `core-ledger-state` extracts from it. [LG-16] */
+/** A ledger event other than a contract log, with the fields `core-ledger-state` extracts from it. */
 export function ledgerEventOf(event: RawEvent, kind: LedgerEventKind, transaction: number): LedgerEvent {
   const content = event.content as Record<string, unknown>;
   const optionalAddress = (value: unknown): Uint8Array | null => (typeof value === "string" ? bytesOf(value) : null);

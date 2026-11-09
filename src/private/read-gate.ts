@@ -1,7 +1,7 @@
 /**
  * The core's gate on the statements of a transport `read`. A private process sends SQL text that the core runs on the
  * public database in one read (`Database.read`): a `REPEATABLE READ READ ONLY` transaction, in which the database
- * itself refuses every write. [PP-4, A172; design §8]
+ * itself refuses every write.
  *
  * What the read-only transaction cannot stop:
  * - a statement that leaves it (`COMMIT`, `ROLLBACK`), after which the next statement runs with the core's own login,
@@ -44,7 +44,7 @@
  * write. On PostgreSQL the read pool logs in as the writer's login (OUTDATED), and a role entered with `SET ROLE` is left with
  * `RESET ROLE` or `set_config('role', …)`: a login that may only read needs a setting of its own
  * (`core.transportReader`, `./transport-reader.ts`). Either way the database refuses the write; the gate keeps every
- * statement inside the read-only transaction in which the database refuses it. [PP-4; design §8]
+ * statement inside the read-only transaction in which the database refuses it.
  */
 
 /** Why the core refuses a statement of a `read` (`read-result.refused.reason`), in the order the gate checks them. */

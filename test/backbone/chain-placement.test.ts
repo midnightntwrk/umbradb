@@ -36,7 +36,7 @@ import {
 import { bareExtrinsic, compact, ledgerTransaction, timestampSet } from "./fetch-fixtures.js";
 
 /**
- * The placement of a block's transactions, their outcomes and their parse, tested without a process. [CD-5, CD-6]
+ * The placement of a block's transactions, their outcomes and their parse, tested without a process.
  *
  * The tests cover the official indexer's cases (the tests of `midnight-indexer`
  * `chain-indexer/src/infra/subxt_node/runtimes.rs`):
@@ -47,7 +47,7 @@ import { bareExtrinsic, compact, ledgerTransaction, timestampSet } from "./fetch
  * - a top-level `MidnightSystem` extrinsic is no transaction.
  *
  * They also cover each divergence from those cases, refused here, and the parser's one parse per transaction. The
- * process-level criteria are tested in `chain-data.test.ts`. [A91, A92, A93]
+ * process-level criteria are tested in `chain-data.test.ts`.
  */
 
 const METADATA = midnightMetadata(V2_0);
@@ -77,7 +77,7 @@ const place = (height: bigint, extrinsics: readonly Uint8Array[], records: reado
   return () => placeTransactions(height, body, events, () => VIEW);
 };
 
-describe("placing a block's transactions (CD-5)", () => {
+describe("placing a block's transactions", () => {
   it("numbers a system transaction between two regular ones 0, 1, 2 in the order of their events", () => {
     const extrinsics = [timestampSet(1n), ledgerTransaction([...tx(1)]), remarkExtrinsic(), ledgerTransaction([...tx(3)])];
     const records = [
@@ -228,7 +228,7 @@ describe("placing a block's transactions (CD-5)", () => {
   });
 });
 
-describe("each transaction's chain outcome (CD-6)", () => {
+describe("each transaction's chain outcome", () => {
   const transaction = (index: number, eventIndex: number | null): BlockTransaction =>
     ({ index, eventIndex, phase: "apply-extrinsic", extrinsicIndex: 0, hash: fill(0), kind: "regular", size: 1, bytes: tx(0), segments: [] }) as BlockTransaction;
 
@@ -256,7 +256,7 @@ describe("each transaction's chain outcome (CD-6)", () => {
   });
 });
 
-describe("the parse (CD-5, LG-7)", () => {
+describe("the parse", () => {
   /** A loader that counts loads and wraps the real adapter's parse to count parses. */
   function counting(fail = 0) {
     const counts = { loads: 0, parses: 0 };
@@ -321,7 +321,7 @@ describe("the parse (CD-5, LG-7)", () => {
     await expect(blockParsedOf(context, { parser: short })).rejects.toThrow(/block 8: the parser gave 0 transactions for 1/);
   });
 
-  it("refuses a transaction whose ledger hash is not the one its chain event carries (task 12.3)", async () => {
+  it("refuses a transaction whose ledger hash is not the one its chain event carries", async () => {
     const regular = zswapOutputTransaction(RAW.v9);
     const system = systemTransaction("v9");
     const own = (bytes: Uint8Array) => Uint8Array.from(createHash("sha256").update(bytes).digest());

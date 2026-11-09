@@ -10,10 +10,10 @@ import type { DatabaseParts } from "../../../src/config/database-parts.js";
 
 /**
  * A halt caused by an error whose message contains a secret shows the error code, height, module and point, and the
- * secret appears nowhere in the response. The test runs the process on PostgreSQL 18 and PGlite. [A67, AE-6]
+ * secret appears nowhere in the response. The test runs the process on PostgreSQL 18 and PGlite.
  *
  * The secret (`test/admin/secrets.ts`), in each of its six forms, is a real secret of the configuration:
- * - the `node` URL's password, a secret field [CF-4];
+ * - the `node` URL's password, a secret field;
  * - a user module's `secret` setting;
  * - on PostgreSQL, the `database` parts' password (a login role of the test's own).
  *
@@ -53,11 +53,11 @@ function halting(database: DatabaseParts, starter?: Parameters<typeof startWithA
   });
 }
 
-describe.each(PROCESS_BACKENDS)("A67: a halt whose error holds a secret, on $name", (backend) => {
+describe.each(PROCESS_BACKENDS)("a halt whose error holds a secret, on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("A67: /status shows the code, height, module and point; the secret is in no response and no log line", async () => {
+  it("/status shows the code, height, module and point; the secret is in no response and no log line", async () => {
     const database = await secretDatabase(await backend.database());
     const run = halting(database);
     const origin = await run.origin();

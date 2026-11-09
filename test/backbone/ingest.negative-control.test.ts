@@ -1,11 +1,8 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { WebSocket } from "ws";
-import type { BlockItemSource } from "../../src/backbone/core-block-fetch/index.js";
 import { NodeBlockSource } from "../../src/backbone/core-block-fetch/index.js";
 import { type MetadataBlock, RuntimeMetadata, type RuntimeMetadataEntry } from "../../src/ledger/metadata.js";
 import type { NodeClient } from "../../src/node/client.js";
-import type { BlockRef } from "../../src/runner/block-source.js";
 import type { TapeRecord } from "../../tools/tape/index.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
 import {
@@ -19,7 +16,7 @@ import {
   opening,
   RUNTIME,
 } from "./fetch-fixtures.js";
-import { a79Problems, a80Problems, a81Problems, a83Problems, a89Problems, type FetchSeen } from "./ingest-checks.js";
+import { a79Problems, a80Problems, a81Problems, a89Problems, type FetchSeen } from "./ingest-checks.js";
 import { committed, halted, ingest, PATIENCE_MS, slow, until } from "./ingest-harness.js";
 import { a79Tape, upgradeTape } from "./ingest-tapes.js";
 
@@ -27,31 +24,31 @@ import { a79Tape, upgradeTape } from "./ingest-tapes.js";
  * The committed negative controls of the ingest tests; the crash test's control is in `ingest-crash.test.ts`. Each is a
  * wrong node source, a subclass through the node source's seams. It runs through the test's own oracle
  * (`./ingest-checks.ts`) on PostgreSQL 18 and PGlite 0.5.10, and fails it. The real source passes the same oracles in
- * `ingest.test.ts`. [A79, A80, A81, A83, A89, A76]
+ * `ingest.test.ts`.
  */
 
-/** The reconnect control: trusts the notifications after a reconnect, without reading the head again. [A79] */
+/** The reconnect control: trusts the notifications after a reconnect, without reading the head again. */
 class TrustsNotifications extends NodeBlockSource {
   protected override restarted(): void {
     // The lost notifications are not made up for: the next one is awaited.
   }
 }
 
-/** The window control: a prefetch without a window, up to the head. [A80] */
+/** The window control: a prefetch without a window, up to the head. */
 class NoWindow extends NodeBlockSource {
   protected override windowEnd(_cursor: bigint, head: bigint): bigint {
     return head;
   }
 }
 
-/** The best-chain control: a queued block with the finalized hash is fetched again at finality. [A81] */
+/** The best-chain control: a queued block with the finalized hash is fetched again at finality. */
 class Refetches extends NodeBlockSource {
   protected override usesQueued(): boolean {
     return false;
   }
 }
 
-/** The upgrade control: a block decoded with the metadata of its own state, not its parent's. [A89] */
+/** The upgrade control: a block decoded with the metadata of its own state, not its parent's. */
 class OwnStateMetadata extends NodeBlockSource {
   readonly #own = new RuntimeMetadata(this.client);
 
@@ -60,35 +57,13 @@ class OwnStateMetadata extends NodeBlockSource {
   }
 }
 
-/**
- * The node-methods control: once, while it fetches, it also asks the node a method outside the allowed node methods, on
- * a connection of its own. The call is sent beside its work and not awaited, so that its own calls keep their order.
- * [A83, IN-8]
- */
-function askingOutsideIn8(url: () => string): typeof NodeBlockSource {
-  return class extends NodeBlockSource implements BlockItemSource {
-    #asked = false;
-
-    override blockItems(block: BlockRef, table: Parameters<NodeBlockSource["blockItems"]>[1]) {
-      if (!this.#asked) {
-        this.#asked = true;
-        const socket = new WebSocket(url());
-        socket.on("open", () => socket.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "state_getKeys", params: ["0x"] })));
-        socket.on("message", () => socket.close());
-        socket.on("error", () => undefined);
-      }
-      return super.blockItems(block, table);
-    }
-  };
-}
-
-describe.each(PROCESS_BACKENDS)("task 10.3's negative controls on $name", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("the negative controls on $name", (backend: ProcessBackend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
   const chain = chainOf(20n);
 
-  it("a source that trusts the notifications without reading the head again misses the heights after A79's disconnect", async () => {
+  it("a source that trusts the notifications without reading the head again misses the heights after the disconnect", async () => {
     const db = await backend.database();
     const run = await ingest(db, a79Tape(chain), { start: 11n, Source: TrustsNotifications });
     try {
@@ -106,7 +81,7 @@ describe.each(PROCESS_BACKENDS)("task 10.3's negative controls on $name", (backe
     ]);
   }, PATIENCE_MS * 2);
 
-  it("a prefetch without a window fails A80", async () => {
+  it("a prefetch without a window fails", async () => {
     const db = await backend.database();
     const long = chainOf(200n);
     const records = [
@@ -140,7 +115,7 @@ describe.each(PROCESS_BACKENDS)("task 10.3's negative controls on $name", (backe
     expect(problems[0]).toMatch(/^\d+ fetches were more than 64 heights above the cursor, the farthest \d+ at cursor \d+$/);
   }, PATIENCE_MS * 3);
 
-  it("a switch that fetches 101′ again at finality fails A81's call counts", async () => {
+  it("a switch that fetches 101′ again at finality fails the call counts", async () => {
     const db = await backend.database();
     const head = chainOf(100n);
     const b100 = head[100] as ChainBlock;
@@ -164,29 +139,7 @@ describe.each(PROCESS_BACKENDS)("task 10.3's negative controls on $name", (backe
     ]);
   }, PATIENCE_MS * 2);
 
-  it("a source calling a method outside IN-8 fails A83", async () => {
-    const db = await backend.database();
-    const short = chainOf(5n);
-    const records = [
-      ...opening(short[0] as ChainBlock, short[5] as ChainBlock),
-      ...short.slice(1).flatMap((block, index) => finalized(block, RUNTIME, index === 0)),
-    ];
-    let url = "";
-    const run = await ingest(db, records, { start: 1n, Source: askingOutsideIn8(() => url) });
-    url = run.node.url;
-    try {
-      await committed(run, 5n);
-      await until(run, () => run.node.calls.some((call) => call.method === "state_getKeys"), "the call outside IN-8");
-    } finally {
-      await run.close();
-    }
-    expect(a83Problems(run.node)).toEqual([
-      "the node received state_getKeys, which IN-8 does not list",
-      'the node answered state_getKeys ["0x"] not-on-tape',
-    ]);
-  }, PATIENCE_MS * 2);
-
-  it("a decode with the block's own metadata instead of its parent's fails A89 at the upgrade", async () => {
+  it("a decode with the block's own metadata instead of its parent's fails at the upgrade", async () => {
     const db = await backend.database();
     const { records, upgrade, expected } = upgradeTape();
     const run = await ingest(db, records, { start: 1n, Source: OwnStateMetadata });

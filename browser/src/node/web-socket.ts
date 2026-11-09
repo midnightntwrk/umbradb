@@ -1,16 +1,16 @@
 /**
  * The node client's transport in the browser build, in place of `src/node/ws-socket.ts`: the browser's own
  * `WebSocket`, behind the same `connect` interface (`src/node/socket.ts`), so the node client (`src/node/client.ts`)
- * runs unchanged. [design §9.2]
+ * runs unchanged.
  *
  * What the browser does not give:
  * - a handshake's HTTP status: a refused handshake and a connection that could not be made both end with `error`, then
- *   `close` 1006, before `open`. So every failed handshake reads as `connect-failed` and is retried [IN-10];
+ *   `close` 1006, before `open`. So every failed handshake reads as `connect-failed` and is retried;
  * - the system's error code;
  * - WebSocket pings, which only the browser itself sends. So the transport has no heartbeat of its own: a connection
  *   that goes quiet is found by the client's own call timeouts.
  *
- * The node must allow the page's origin (a Substrate node's `--rpc-cors`). [BR-3]
+ * The node must allow the page's origin (a Substrate node's `--rpc-cors`).
  */
 
 import type { NodeSocket, NodeSocketEvents, NodeTimers } from "../../../src/node/socket.js";

@@ -3,9 +3,9 @@ import { startUmbraDB, type UmbraDBOptions } from "../../src/library/start-umbra
 import { MALFORMED, optionProblems, UNREADABLE } from "./option-cases.js";
 
 /**
- * L62's committed negative controls, each through the criterion's own cases and oracle (`./option-cases.ts`), with the
+ * The committed negative controls, each through the criterion's own cases and oracle (`./option-cases.ts`), with the
  * fault put back in the facade's own path — `startUmbraDB` with `../../src/library/options.ts` replaced here:
- * - **the option check removed** (`optionFindings` finds nothing): every malformed option of L62's table reaches the
+ * - **the option check removed** (`optionFindings` finds nothing): every malformed option of the table reaches the
  *   engine, and the oracle sees no `invalid-option` refusal naming its path in every case — or the call throw, for a
  *   signal that is no `AbortSignal`, which the engine reads;
  * - **the options passed as given** (`readOptions` reads nothing once, the options themselves the values) with the
@@ -13,7 +13,7 @@ import { MALFORMED, optionProblems, UNREADABLE } from "./option-cases.js";
  *   in every case — and its other half, "startUmbraDB throws in none", sees the call throw for the options that are a
  *   hostile or revoked proxy, or no object.
  *
- * With the real module, the same cases and oracle pass (`./start-umbradb.test.ts`). [L62, LM-1, LM-10]
+ * With the real module, the same cases and oracle pass (`./start-umbradb.test.ts`).
  */
 
 const control = vi.hoisted(() => ({ unchecked: false, asGiven: false }));
@@ -35,7 +35,7 @@ async function problemsOf(cases: readonly (readonly [string, () => unknown, stri
   return found;
 }
 
-describe("L62's negative controls: the facade's option check removed fails the oracle (LM-1, L62)", () => {
+describe("negative controls: the facade's option check removed fails the oracle", () => {
   it("without the option check, every malformed option fails the oracle: no invalid-option refusal names its path, or the call throws", async () => {
     control.unchecked = true;
     control.asGiven = false;
@@ -46,7 +46,7 @@ describe("L62's negative controls: the facade's option check removed fails the o
         const failed = problems.some((problem) => problem.includes("not invalid-option at") || problem.startsWith("startUmbraDB threw: "));
         expect(failed, `${name}: ${problems.join("; ")}`).toBe(true);
       }
-      // The engine reads the signal it is given: one that is no AbortSignal throws out of the call. [LM-1]
+      // The engine reads the signal it is given: one that is no AbortSignal throws out of the call.
       expect(found["signal not an AbortSignal"]?.[0]).toMatch(/^startUmbraDB threw: TypeError/);
     } finally {
       control.unchecked = false;

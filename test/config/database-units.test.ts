@@ -16,7 +16,7 @@ import { refuseWritingReader, type TransportReaderFacts } from "../../src/privat
 const LIBPQ = ["PGHOST", "PGHOSTADDR", "PGPORT", "PGUSER", "PGDATABASE", "PGPASSWORD", "PGPASSFILE", "PGSERVICE",
   "PGSERVICEFILE", "PGSSLMODE", "PGSSLROOTCERT", "PGREQUIRESSL", "PGSSLCERT", "PGSSLKEY"];
 
-describe("pg_dump's environment (task 17.5b)", () => {
+describe("pg_dump's environment", () => {
   const caller = { ...Object.fromEntries(LIBPQ.map((name) => [name, `caller-${name}`])), PATH: "/bin", UNSET: undefined };
   const connection = { host: "db.internal", port: 5433, user: "umbradb", name: "indexer", ssl: "require" as const };
 
@@ -40,7 +40,7 @@ describe("pg_dump's environment (task 17.5b)", () => {
   });
 });
 
-describe("database parts as the log names them (task 17.5b)", () => {
+describe("database parts as the log names them", () => {
   it("tells a memory database, and brackets an IPv6 host", () => {
     expect(isMemoryDatabase({ kind: "pglite", memory: true })).toBe(true);
     expect(isMemoryDatabase({ kind: "pglite", path: "data" })).toBe(false);
@@ -51,7 +51,7 @@ describe("database parts as the log names them (task 17.5b)", () => {
   });
 });
 
-describe("password parts beside null values (task 17.5b)", () => {
+describe("password parts beside null values", () => {
   it("finds and redacts the password of an operational field holding null and lists", () => {
     const settings = { database: { password: "p1", cert: null, replicas: [{ password: "p2" }, null, 3] } };
     expect(secretStrings(settings, { database: "operational" })).toEqual(["p1", "p2"]);
@@ -61,7 +61,7 @@ describe("password parts beside null values (task 17.5b)", () => {
   });
 });
 
-describe("the transport reader's refusal (task 17.5b)", () => {
+describe("the transport reader's refusal", () => {
   const facts = (count: number): TransportReaderFacts => ({
     user: "reader",
     writer: "umbradb",

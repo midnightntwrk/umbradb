@@ -2,28 +2,28 @@
  * The recording driver of the real tapes. Through the recording builder (`./builder.ts`), the node client of
  * `src/node/` makes **every allowed node call for every height of a range**, spelled as the node client spells it. So
  * any client making any subset of those calls (the core's sync among them) replays against the one tape. The tape node
- * answers by method and params, so the order of different calls does not matter. [Q123, IN-8, TT-2]
+ * answers by method and params, so the order of different calls does not matter.
  *
  * **Per height h** of `from`–`to`: `chain_getBlockHash [h]`, then at its hash H:
  * - `chain_getHeader`, `chain_getBlock`;
- * - `state_getRuntimeVersion`: the runtime of h's own state, which is also the runtime h + 1 is decoded with [LG-4];
- * - `state_getStorage [System.Events, H]` [CD-4];
- * - `midnight_ledgerStateRoot` [LG-15].
+ * - `state_getRuntimeVersion`: the runtime of h's own state, which is also the runtime h + 1 is decoded with;
+ * - `state_getStorage [System.Events, H]`;
+ * - `midnight_ledgerStateRoot`.
  *
  * **Metadata** (`state_getMetadata`) is read at the range's first block and wherever the state's runtime changes (the
  * first block of each runtime's state: an upgrade's U), not at every height. A runtime's metadata is about 200 KB, the
  * same bytes at every block of the runtime; at every height it would make a 10,000-block tape about 2 GB instead of
- * about 40 MB. [Q135]
+ * about 40 MB.
  *
  * **Block 0**, when the range holds it: `system_properties` (its `genesis_state`), and the cNight registrations. Those
  * are every page of `state_getKeysPaged` under `CNightObservation.Mappings` (runtimes 0.22 and 1.0) and
  * `CNightObservation.Mapping` (2.x), {@link KEYS_PAGE} keys a page, the next page starting after the last key, then
- * each key's value (`state_getStorage [key, H0]`). [IN-7]
+ * each key's value (`state_getStorage [key, H0]`).
  *
  * **The live window**, last: both head subscriptions, the finalized head (`chain_getFinalizedHead`) with its header,
  * then `liveWindowMs` of notifications. On replay those notifications come only after every record before them is
  * answered, so a client replaying a part of the range gets quiet subscriptions and the head as the node reported it at
- * recording time. [TT-3]
+ * recording time.
  *
  * **One session.** A tape node serves a connection one session, so the tape is one: the range is recorded in chunks of
  * `chunkHeights` heights, each on a builder and a connection of its own, with every call made once and without the
@@ -31,7 +31,7 @@
  * answers an error (its rate limit, −32999, among them) is recorded again from its start after a back-off —
  * `backoffMs`, doubling, up to `backoffCeilingMs` — up to `attempts` times; the chunks' records, each one session of
  * calls only, are joined into one session, the live window's last. Nothing is retried that cannot change: a block the
- * node does not have (`node-requirement`), a chain that does not link, a frame the builder cannot record. [TT-3]
+ * node does not have (`node-requirement`), a chain that does not link, a frame the builder cannot record.
  *
  * **Gentle with the node:** one connection at a time, at most `concurrency` requests in flight on it, each request
  * counted; the rate is reported (`stats`), and the waits are the back-offs only.
@@ -52,10 +52,10 @@ import { checkTape, type TapeRecord } from "./records.js";
 import { errorText } from "./replay-check.js";
 import { storagePrefix } from "./twox.js";
 
-/** `System.Events`: the block's runtime events. [CD-4] */
+/** `System.Events`: the block's runtime events. */
 export const EVENTS_KEY = toHex(storagePrefix("System", "Events"));
 
-/** Block 0's cNight registrations: `CNightObservation.Mappings` (runtimes 0.22, 1.0), `.Mapping` (2.x). [IN-7] */
+/** Block 0's cNight registrations: `CNightObservation.Mappings` (runtimes 0.22, 1.0), `.Mapping` (2.x). */
 export const REGISTRATION_PREFIXES: readonly string[] = Object.freeze([
   toHex(storagePrefix("CNightObservation", "Mappings")),
   toHex(storagePrefix("CNightObservation", "Mapping")),
@@ -402,7 +402,7 @@ async function recordHeights(
   return heights;
 }
 
-/** Block 0's calls: `system_properties`; every page of each registration prefix, and each key's value. [IN-7] */
+/** Block 0's calls: `system_properties`; every page of each registration prefix, and each key's value. */
 async function recordBlockZero(
   client: NodeClient,
   call: <R>(run: () => Promise<R>) => Promise<R>,

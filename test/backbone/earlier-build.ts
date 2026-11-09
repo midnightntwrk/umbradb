@@ -6,7 +6,7 @@ import { type ManifestMigration, manifestLine, readManifestLine } from "../../sr
 import { UmbraError } from "../../src/db/errors.js";
 
 /**
- * A database written by an earlier build, as this build's one migration per part meets it. [R16, DB-9, BK-3]
+ * A database written by an earlier build, as this build's one migration per part meets it.
  *
  * The builds before one migration per part (`v0.10.0-rc.2`, and this branch before it) gave `core-chain`,
  * `core-ledger-state` and `core-private-source` two migrations each, `001` and `002`, and a database they wrote

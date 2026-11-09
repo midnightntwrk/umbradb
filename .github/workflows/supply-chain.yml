@@ -108,7 +108,7 @@ jobs:
         # the night key and address are derived from -- was previously undetectable.
         run: gitleaks detect --source . --config .gitleaks.toml --redact --no-banner --log-opts="--all"
 
-      - name: Image pins agree across flake.nix and start-stack.sh, and the PostgreSQL test image is the reviewed pin (G18 — audit gap; Q82)
+      - name: Image pins agree across flake.nix and start-stack.sh, and the PostgreSQL test image is the reviewed pin
         # The Trivy job derives its scan targets from flake.nix ONLY, and it runs on schedule /
         # workflow_dispatch. start-stack.sh independently hard-codes the references that actually
         # launch the containers. So a digest changed in start-stack.sh alone left flake.nix — and
@@ -156,7 +156,7 @@ jobs:
             echo "${image}: pins agree — ${flake_refs[0]}"
           done
 
-          # PostgreSQL (owner decision Q82, openspec/changes/core-arch A148): every PostgreSQL container the
+          # PostgreSQL: every PostgreSQL container the
           # tests, their Testcontainers helpers, the benchmarks and the pack smoke test start is the one
           # digest-pinned image of test/postgres-image.ts, and it must be this one, so a bump is reviewed
           # here too. test/dependencies/postgres-image.test.ts (conformance gate) fails if any other file

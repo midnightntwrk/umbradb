@@ -7,7 +7,7 @@ import { AdapterWorkerHost, type LoadedState } from "./adapter-worker-host.js";
 
 // The adapter test suite against the v9 adapter (`src/ledger/v9.ts`, ledger-9.1.0.0-rc.5 from `vendor/ledger/v9`),
 // whose `apply` reports contract logs, and the v9-only `convertFromV8` through both adapters, since every version has
-// one interface. [A98, LG-6]
+// one interface.
 
 describeLedgerPackage({
   ledger: "v9",
@@ -15,7 +15,7 @@ describeLedgerPackage({
   logs: "decoded",
 });
 
-describe("v9 adapter: convertFromV8, from a v8 state the v8 adapter stored (LG-9)", () => {
+describe("v9 adapter: convertFromV8, from a v8 state the v8 adapter stored", () => {
   const host = new AdapterWorkerHost();
   let v8: LedgerPackage;
   let v9: LedgerPackage;

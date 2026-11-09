@@ -22,7 +22,7 @@ import { type Child, childKey, decodeChildren, storedNodeKey } from "./node-form
 
 /**
  * The DAG fixture (`./fixtures/sweep-fixture.ts`) and its test package (`./fixtures/sweep-test-loader.ts`), extended
- * for the reference-counting tests. [A105, R27, R28, R30; LG-11, LG-14]
+ * for the reference-counting tests.
  *
  * - The original DAG and package, which the sweep's tests run, are unchanged: their states and batches hash as at the
  *   base build, with no selection and with `dag: "original"`.
@@ -80,7 +80,7 @@ const embeddedOf = (children: readonly Child[]): string[] =>
 const shape = (children: Uint8Array): string[] =>
   decodeChildren(children).map((child) => ("ref" in child ? `ref ${hex(child.ref)}` : `direct ${hex(childKey(child))}`));
 
-/** Every key `rows` holds as a row or embedded in a row: the database's node set (`design.md` §1). */
+/** Every key `rows` holds as a row or embedded in a row: the database's node set. */
 const nodeSetOf = (rows: ReadonlyMap<string, StoredNode>): string[] =>
   [...new Set([...rows.values()].flatMap((node) => [hex(node.key), ...embeddedOf(decodeChildren(node.children))]))].sort();
 
@@ -187,7 +187,7 @@ afterEach(async () => {
   host = undefined;
 });
 
-describe("the DAG fixture extended for reference counting, and its test packages (task 3.7; A105, R27, R28, R30)", () => {
+describe("the DAG fixture extended for reference counting, and its test packages", () => {
   it("the original DAG and package are unchanged: states and batches over heights 0–100 hash as at the base build, with no selection and with dag: original", async () => {
     const states = (pick: (h: number) => FixtureNode[], root: (h: number) => Uint8Array): string => {
       const hash = createHash("sha256");
@@ -197,7 +197,7 @@ describe("the DAG fixture extended for reference counting, and its test packages
       }
       return hash.digest("hex");
     };
-    // The digests of `5bcffec`'s fixture, before the extension. [A105]
+    // The digests of `5bcffec`'s fixture, before the extension.
     const STATES = "d8b550cf8f67cde3e81b873fac18a42037560e28b57722d593591c825efccd7f";
     const BATCHES = "f1d456109f635b16b897d273182405984f5fddc1d29f2dd0f4697ddebad6a066";
     expect(states((h) => stateNodes(h), (h) => rootOf(h))).toBe(STATES);
@@ -416,7 +416,7 @@ describe("the DAG fixture extended for reference counting, and its test packages
     }
   });
 
-  it("keeps-old-copy (R28's case): a never-restarted package keeps the old child list when it creates a node again; a fresh package that loaded the state before writes the new one, and every new one the old run kept; the two databases hold different rows of one node set", async () => {
+  it("keeps-old-copy: a never-restarted package keeps the old child list when it creates a node again; a fresh package that loaded the state before writes the new one, and every new one the old run kept; the two databases hold different rows of one node set", async () => {
     const rewrites = [TO_REF, TO_EMBEDDED, REQUEUE];
     const writesAgain = driver(await packageOf({ dag: "extended" })).to(LAST);
     const keeps = driver(await packageOf({ dag: "extended", keeping: "keeps-old-copy" })).to(LAST, rewrites.map((h) => h - 1));
@@ -473,7 +473,7 @@ describe("the DAG fixture extended for reference counting, and its test packages
     }
   });
 
-  it("holds-by-reference (R30's case): writes writes-again's batches, but its live state holds small to-embedded by reference after its parent was written embedding it, so it refuses to forget it; a fresh package and writes-again forget it at once", async () => {
+  it("holds-by-reference: writes writes-again's batches, but its live state holds small to-embedded by reference after its parent was written embedding it, so it refuses to forget it; a fresh package and writes-again forget it at once", async () => {
     const h = TO_EMBEDDED + 1;
     const { small } = extendedCases(TO_EMBEDDED).toEmbedded;
     const writesAgain = driver(await packageOf({ dag: "extended" })).to(h, [TO_EMBEDDED]);
@@ -547,7 +547,7 @@ describe("the DAG fixture extended for reference counting, and its test packages
     expect(worker.failure).toBeNull();
   });
 
-  it("one-form (R4's DAG): each state is the extended one without the rewrite cases, and the package writes every key with one child list throughout, only `again` written again", async () => {
+  it("one-form (the DAG): each state is the extended one without the rewrite cases, and the package writes every key with one child list throughout, only `again` written again", async () => {
     const problems: string[] = [];
     const gone = (h: number): FixtureNode[] => {
       const c = extendedCases(h);

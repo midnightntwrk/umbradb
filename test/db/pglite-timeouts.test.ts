@@ -21,14 +21,14 @@ import { spawnChild } from "../child-processes.js";
  * The zero session timeouts on PGlite 0.5.10. There, a timeout that fires hangs the engine: the whole process,
  * synchronously (`electric-sql/pglite#1058`; seen in a probe on 2026-10-25). So each case runs in a process of its own
  * (`pglite-timeouts.worker.ts`), which this file kills if the statement after 2 s idle in a transaction has not
- * answered {@link HANG_MS} after it was sent. A statement that answers does so in milliseconds. [DB-15; design §14]
+ * answered {@link HANG_MS} after it was sent. A statement that answers does so in milliseconds.
  *
  * - The zero timeouts, on PGlite, under a configuration file setting every timeout to 1 s: an engine started with the
  *   backend's start parameters (`PGLITE_START_PARAMS`) reports 0 and answers. The same engine started without their
- *   zero timeouts (the negative control of "a writer without the zeros") reports 1 s and hangs. [A141]
+ *   zero timeouts (the negative control of "a writer without the zeros") reports 1 s and hangs.
  * - The read option: an API read with `timeoutMs` reports both timeouts at 0 and answers after idling past it, since on
  *   PGlite an API read sets neither timeout. A read that sets them, as a PGlite backend applying the option would,
- *   fails that check: it reports 1 s and hangs. That is the committed negative control of the check. [A141]
+ *   fails that check: it reports 1 s and hangs. That is the committed negative control of the check.
  */
 
 const WORKER = fileURLToPath(new URL("./pglite-timeouts.worker.ts", import.meta.url));
@@ -90,7 +90,7 @@ function settings(run: Run): unknown {
   return run.events.find((event) => event.event === "settings")?.settings;
 }
 
-/** The PGlite timeout check: every timeout 0 where the work runs, and the statement after 2 s idle answered. [A141] */
+/** The PGlite timeout check: every timeout 0 where the work runs, and the statement after 2 s idle answered. */
 function expectNeverCutOffNorHung(run: Run): void {
   expect(run.events.filter((event) => event.event === "failed"), run.stderr.slice(-2_000)).toEqual([]);
   expect(settings(run)).toEqual(ALL_ZERO);
@@ -98,7 +98,7 @@ function expectNeverCutOffNorHung(run: Run): void {
   expect(run.events.map((event) => event.event)).toEqual(["settings", "sent", "answered"]);
 }
 
-/** A data directory whose configuration file (`postgresql.auto.conf`) sets every timeout to 1 s. [A141] */
+/** A data directory whose configuration file (`postgresql.auto.conf`) sets every timeout to 1 s. */
 async function hostileDirectory(): Promise<string> {
   const root = mkdtempSync(join(tmpdir(), "umbradb-pglite-timeouts-"));
   directories.push(root);
@@ -121,7 +121,7 @@ function withoutZeros(params: readonly string[]): string[] {
   return out;
 }
 
-describe("A141 on PGlite 0.5.10, each case in a process of its own (DB-15)", () => {
+describe("on PGlite 0.5.10, each case in a process of its own", () => {
   it("never cuts off nor hangs the writer under 1 s configuration-file timeouts; without the zeros it hangs", async () => {
     const dataDir = await hostileDirectory();
     const without = withoutZeros(PGLITE_START_PARAMS);

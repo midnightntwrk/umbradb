@@ -11,9 +11,9 @@ import { branchOf, type ChainBlock, chainOf, finalizedHead, headRead, hex, newHe
  * What the node source reports of the node for `/status`, tested on its own against a tape node. The report is
  * {@link NodeBlockSource.nodeView}:
  * - the best head the node announced last: each new-heads notification's height, whether the queue takes the block or
- *   not, also before the loop runs; a lower one after a higher one is then the best head [AE-5, A168];
+ *   not, also before the loop runs; a lower one after a higher one is then the best head;
  * - the best-block queue's length, as blocks are queued, while the queue is full at `tipCap`, when the loop takes one
- *   at finality, and when a run ends [IN-6, AE-5, A168].
+ *   at finality, and when a run ends.
  *
  * The process and `/status` itself are tested in `./core-status/node-fields.test.ts`.
  */
@@ -55,7 +55,7 @@ async function until(check: () => boolean, what: string): Promise<void> {
   }
 }
 
-/** Call records the test makes through the client itself, so that the notifications after each wait for it. [TT-3] */
+/** Call records the test makes through the client itself, so that the notifications after each wait for it. */
 const fence = (n: number): TapeRecord => ({ method: "chain_getBlockHash", params: [999_990 + n], result: hex(new Uint8Array(32).fill(n)) });
 const pass = (client: NodeClient, n: number) => client.blockHash(BigInt(999_990 + n));
 
@@ -75,7 +75,7 @@ function cursorRead(cursor: ChainBlock): { query(sql: string): Promise<Record<st
   };
 }
 
-describe("the node as the node source reports it to /status (AE-5; task 8.3a)", () => {
+describe("the node as the node source reports it to /status", () => {
   it("bestHead: null before any announcement, then the height announced last — lower after higher too, loop or not", async () => {
     const records: TapeRecord[] = [
       ...subscriptions(),

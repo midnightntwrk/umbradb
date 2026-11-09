@@ -12,17 +12,17 @@ import { libraryData } from "./library-fixtures.js";
 import { commandRefusalProblems, CONTROL_SETTLES_MS, type Expected, listeningSockets, refusedProblems } from "./network-refusals.js";
 
 /**
- * The network plan's refusals through `startUmbraDB` `[CI][NEG]` (L15–L18): a host's request at odds with the
+ * The network plan's refusals through `startUmbraDB` `[CI][NEG]`: a host's request at odds with the
  * addresses the configuration writes is refused at startup's configuration step — `started` rejects with
  * `network-address-conflict` (`both`, `no-address`, `unused`) or `private-link-misconfigured` (`wrong-side`,
  * `reader-missing`), the process ends `refused` by itself (`closed` resolves), and nothing was opened: no listener (no
  * listening socket in this process, the addresses involved still free), no database (no PGlite directory, no schema on
  * PostgreSQL). On PostgreSQL 18 (Docker) and a PGlite directory. Each case's committed negative control starts the
  * engine with the facade's exact input but the plan without that rule (`networkRules`): the oracle then fails, for the
- * rule's own reason. L18's schema case (a written `listen.privateLink`, no `transportReader`) is refused through the
+ * rule's own reason. The schema case (a written `listen.privateLink`, no `transportReader`) is refused through the
  * schema by `startUmbraDB` and by `umbradb run`; its control, the schema's rule removed, is
  * `./network.negative-control.test.ts`. The oracle is `./network-refusals.ts`'s. The plan's every row is in
- * `test/runner/network-plan.test.ts`. [LM-3, LM-10, L15–L18]
+ * `test/runner/network-plan.test.ts`.
  */
 
 /** A private process's configuration data on `database`: the tests' network, no `node`, `extra` settings. */
@@ -35,7 +35,7 @@ const connect = async (): Promise<PrivateLinkChannel> => {
   throw new Error("the plan's tests never connect");
 };
 
-/** The facade over the engine started with `options`' exact input but the network plan without `rule`. [L15–L18] */
+/** The facade over the engine started with `options`' exact input but the network plan without `rule`. */
 function startWithout(rule: NetworkRuleName, options: UmbraDBOptions): UmbraDBHandle {
   const { input } = engineInputOf(options);
   return handleOf(startProcess({ ...input, networkRules: NETWORK_RULES.filter((one) => one.name !== rule) }));
@@ -69,11 +69,11 @@ async function judged(
   }
 }
 
-describe.each(PROCESS_BACKENDS)("the network plan's refusals through startUmbraDB on $name (L15–L18)", (backend) => {
+describe.each(PROCESS_BACKENDS)("the network plan's refusals through startUmbraDB on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("L15: listen.api written and api: { port } in code is refused network-address-conflict (both); no port opened", async () => {
+  it("listen.api written and api: { port } in code is refused network-address-conflict (both); no port opened", async () => {
     const written = await freePort();
     const given = await freePort();
     const { problems, control } = await judged(
@@ -91,7 +91,7 @@ describe.each(PROCESS_BACKENDS)("the network plan's refusals through startUmbraD
     expect(control).toEqual(expect.arrayContaining(["startup completed", `port ${given} is bound`]));
   }, 240_000);
 
-  it("L15: a private process's privateLink written and privateSide: { port } in code is refused network-address-conflict (both)", async () => {
+  it("a private process's privateLink written and privateSide: { port } in code is refused network-address-conflict (both)", async () => {
     const written = await freePort();
     const given = await freePort();
     const { problems, control } = await judged(
@@ -108,7 +108,7 @@ describe.each(PROCESS_BACKENDS)("the network plan's refusals through startUmbraD
     expect(control).toContain(`startup did not settle within ${CONTROL_SETTLES_MS} ms`);
   }, 240_000);
 
-  it("L16: admin: true with no listen.admin written is refused network-address-conflict (no-address); no admin thread", async () => {
+  it("admin: true with no listen.admin written is refused network-address-conflict (no-address); no admin thread", async () => {
     const { problems, control } = await judged(
       backend,
       (db) => ({
@@ -123,7 +123,7 @@ describe.each(PROCESS_BACKENDS)("the network plan's refusals through startUmbraD
     expect(control).toContain("startup completed");
   }, 240_000);
 
-  it("L17: listen.api written and api not requested is refused network-address-conflict (unused)", async () => {
+  it("listen.api written and api not requested is refused network-address-conflict (unused)", async () => {
     const written = await freePort();
     const { problems, control } = await judged(
       backend,
@@ -138,7 +138,7 @@ describe.each(PROCESS_BACKENDS)("the network plan's refusals through startUmbraD
     expect(control).toContain("startup completed");
   }, 240_000);
 
-  it("L17: listen.privateLink written while publicSide is { channels: true } is refused network-address-conflict (unused)", async () => {
+  it("listen.privateLink written while publicSide is { channels: true } is refused network-address-conflict (unused)", async () => {
     const written = await freePort();
     const reader = backend.kind === "postgres" ? { transportReader: { user: "reader", password: "reader" } } : {};
     const { problems, control } = await judged(
@@ -158,7 +158,7 @@ describe.each(PROCESS_BACKENDS)("the network plan's refusals through startUmbraD
     expect(control?.some((problem) => problem.startsWith("refused with ") || problem === "startup completed")).toBe(true);
   }, 240_000);
 
-  it("L17: a private process's privateLink written while privateSide is { connect } is refused network-address-conflict (unused)", async () => {
+  it("a private process's privateLink written while privateSide is { connect } is refused network-address-conflict (unused)", async () => {
     const written = await freePort();
     const { problems, control } = await judged(
       backend,
@@ -173,7 +173,7 @@ describe.each(PROCESS_BACKENDS)("the network plan's refusals through startUmbraD
     expect(control?.some((problem) => problem.startsWith("refused with ") || problem.startsWith("startup did not"))).toBe(true);
   }, 240_000);
 
-  it("L18: privateSide on a public process is refused private-link-misconfigured (wrong-side)", async () => {
+  it("privateSide on a public process is refused private-link-misconfigured (wrong-side)", async () => {
     const given = await freePort();
     const { problems, control } = await judged(
       backend,
@@ -189,7 +189,7 @@ describe.each(PROCESS_BACKENDS)("the network plan's refusals through startUmbraD
     expect(control).toContain("startup completed");
   }, 240_000);
 
-  it("L18: publicSide on a private process is refused private-link-misconfigured (wrong-side)", async () => {
+  it("publicSide on a private process is refused private-link-misconfigured (wrong-side)", async () => {
     const given = await freePort();
     const { problems, control } = await judged(
       backend,
@@ -206,12 +206,12 @@ describe.each(PROCESS_BACKENDS)("the network plan's refusals through startUmbraD
   }, 240_000);
 });
 
-describe("the reader login of a public link given in the request, on PostgreSQL 18 (L18, N5)", () => {
+describe("the reader login of a public link given in the request, on PostgreSQL 18", () => {
   const backend = PROCESS_BACKENDS.find((one) => one.kind === "postgres") as ProcessBackend;
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("L18: publicSide: { channels: true } without transportReader is refused private-link-misconfigured (reader-missing)", async () => {
+  it("publicSide: { channels: true } without transportReader is refused private-link-misconfigured (reader-missing)", async () => {
     const { problems, control } = await judged(
       backend,
       (db) => ({
@@ -228,7 +228,7 @@ describe("the reader login of a public link given in the request, on PostgreSQL 
     expect(control?.some((problem) => problem.startsWith("refused with "))).toBe(true);
   }, 240_000);
 
-  it("L18: publicSide: { host, port } without transportReader is refused private-link-misconfigured (reader-missing)", async () => {
+  it("publicSide: { host, port } without transportReader is refused private-link-misconfigured (reader-missing)", async () => {
     const given = await freePort();
     const { problems, control } = await judged(
       backend,
@@ -245,7 +245,7 @@ describe("the reader login of a public link given in the request, on PostgreSQL 
     expect(control?.some((problem) => problem.startsWith("refused with ") || problem === "startup completed")).toBe(true);
   }, 240_000);
 
-  it("L18: publicSide: true with listen.privateLink written and no transportReader is refused by the schema, as umbradb run is (A177)", async () => {
+  it("publicSide: true with listen.privateLink written and no transportReader is refused by the schema, as umbradb run is", async () => {
     const written = await freePort();
     const { problems } = await judged(
       backend,
@@ -258,7 +258,7 @@ describe("the reader login of a public link given in the request, on PostgreSQL 
       null,
     );
     expect(problems).toEqual([]);
-    // The command's half: umbradb run on the same configuration, written to its file. [L18, A177]
+    // The command's half: umbradb run on the same configuration, written to its file.
     const db = await backend.database();
     expect(await commandRefusalProblems(db.setting, written, "entries[0].config.transportReader")).toEqual([]);
   }, 240_000);

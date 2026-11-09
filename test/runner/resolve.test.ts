@@ -26,10 +26,10 @@ import { coreSettings } from "./process-build.js";
  * The resolver (`src/runner/resolve.ts`) `[CI]`: the one place where a build's declarations and its configuration are
  * assembled, for the engine, `umbradb config check`, `umbradb backup`, `umbradb restore` and the browser demo. Each
  * stage gives what the steps it replaces gave, and throws their refusals unchanged, carrying the loaded configuration's
- * secrets for the caller's redaction. [LM-1, L56, L57, CF-1, CF-2, CF-3, MD-2, Q102]
+ * secrets for the caller's redaction.
  *
  * Also the secrets known before the validation (`knownSecrets`), for a refusal that comes before it: by the kinds the
- * build's modules declare, fail closed for an entry whose module is not known yet or not readable. [CF-4, AE-6]
+ * build's modules declare, fail closed for an entry whose module is not known yet or not readable.
  */
 
 const MEMORY = { kind: "pglite", memory: true } as const;
@@ -96,7 +96,7 @@ describe("the side (inferSide, resolveSide)", () => {
   });
 });
 
-describe("resolveDeclarations: the command's build for a side, validated (MD-2)", () => {
+describe("resolveDeclarations: the command's build for a side, validated", () => {
   it("a public build: UmbraDB's backbone and core modules, then the user modules in their order, the same objects", () => {
     const stats = userModule("stats");
     const prices = userModule("prices");
@@ -134,7 +134,7 @@ describe("resolveDeclarations: the command's build for a side, validated (MD-2)"
   });
 });
 
-describe("resolveConfig: plain data, validation, the process's core revision and its written addresses (CF-1, CF-3, Q102)", () => {
+describe("resolveConfig: plain data, validation, the process's core revision and its written addresses", () => {
   const declarations = resolveDeclarations({ userModules: [], side: "public" });
 
   it("gives what validateConfig and processCoreEntry give, with the side inferred from the data", () => {
@@ -285,7 +285,7 @@ describe("resolve: the declarations, then the configuration, and how the engine 
   });
 });
 
-describe("knownSecrets: the data's secrets before the validation (CF-4, AE-6)", () => {
+describe("knownSecrets: the data's secrets before the validation", () => {
   /** A user module entry of `module` holding `config`. */
   const entryOf = (id: string, config: Readonly<Record<string, unknown>>) => ({ id, start: 1, version: "1.2.0", config });
   const secretModule = defineModule({

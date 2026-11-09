@@ -5,9 +5,7 @@ import { configDefaults, defineConfig } from "vitest/config";
  *
  * Behaviour of `vitest run` is unchanged from the pre-config defaults (default `forks` pool,
  * default `**​/*.{test,spec}.ts` include, no global setup) — this file exists to add the
- * **coverage gate** that `v1.0.0-recovery-testing` owns and must CI-wire before G9 is declared
- * CLOSED (the coverage rules are now in `AGENTS.md`). `src/` behaviour is untouched;
- * coverage only READS `src`.
+ * **coverage gate**. `src/` behaviour is untouched; coverage only READS `src`.
  *
  * ── Coverage floors ──────────────────────────────────────────────────────────────────────────────────────────────
  * Lines and branches, per file. The repo-wide per-file floor (85 lines / 78 branches) applies to every included file no
@@ -15,56 +13,55 @@ import { configDefaults, defineConfig } from "vitest/config";
  * global thresholds are NOT inherited), glob keys must be real patterns, and each glob sets `perFile: true` itself.
  *
  * 0.9.5's durability floors (`checkpoint-store`, `save-and-advance`, `watermarks`, `temporal-kv`, `transaction-lease`)
- * and its chain-archive exclusions were retired with those parts by core-arch task 17.2 (`openspec/changes/core-arch/
- * design.md` §13); `durability-probe`, `migrate` and `errors` keep their floors at the paths they moved to, below.
+ * and its chain-archive exclusions were retired with those parts; `durability-probe`, `migrate` and `errors` keep their
+ * floors at the paths they moved to, below.
  */
 
-// CORE-ARCH floors (`openspec/changes/core-arch/design.md` §13, "Coverage floors" row), added with the directory each
+// The floors of `src/`, each added with the directory it
 // covers. The canonical encoding, the contents hash and digests decide whether two databases agree, so they are held
 // above the default.
 const CORE_ARCH = {
   "**/src/determinism/**": { lines: 95, branches: 90, perFile: true },
-  // §13's default for `src/**`, added with the database API's directory; its errors module carries the `errors` floor
-  // §13 keeps at the moved path.
+  // The default for `src/**`, added with the database API's directory; its errors module carries the `errors` floor
+  // at the moved path.
   "**/src/db/**": { lines: 90, branches: 85, perFile: true },
   "**/src/db/errors.ts": { lines: 95, branches: 91, perFile: true },
-  // §13's `migrate` floor at its moved path (task 2.4).
+  // The `migrate` floor at its moved path.
   "**/src/db/migrate.ts": { lines: 90, branches: 85, perFile: true },
-  // §13's `durability-probe` floor at its moved path (task 2.5).
+  // The `durability-probe` floor at its moved path.
   "**/src/db/durability-probe.ts": { lines: 97, branches: 92, perFile: true },
-  // §13's default for `src/**`, added with the modules' directory (task 3.1).
+  // The default for `src/**`, added with the modules' directory.
   "**/src/modules/**": { lines: 90, branches: 85, perFile: true },
-  // §13's default for `src/**`, added with the configuration's directory (task 4.1).
+  // The default for `src/**`, added with the configuration's directory.
   "**/src/config/**": { lines: 90, branches: 85, perFile: true },
-  // §13's default for `src/**`, added with the runner's directory (task 5.1).
+  // The default for `src/**`, added with the runner's directory.
   "**/src/runner/**": { lines: 90, branches: 85, perFile: true },
-  // §13's default for `src/**`, added with the `umbradb` command's directory (task 4.4).
+  // The default for `src/**`, added with the `umbradb` command's directory.
   "**/src/cli/**": { lines: 90, branches: 85, perFile: true },
   "**/src/backup/**": { lines: 90, branches: 85, perFile: true },
-  // §13's default for `src/**`, added with the backbone parts' directory (tasks 7.1 and 5.2: `core-digest`,
+  // The default for `src/**`, added with the backbone parts' directory (`core-digest`,
   // `core-block-commit`'s cursor table).
   "**/src/backbone/**": { lines: 90, branches: 85, perFile: true },
-  // §13's 95/90 floor for the ledger state's reclamation: first the sweep's (`src/ledger/sweep*` in §13, added by
-  // task 17.5b, decision record Q158 A), given by the `ledger-refcount` change, which removed the sweep, to the step
-  // that replaced it (its owner decision Q-1 A).
+  // The 95/90 floor for the ledger state's reclamation: first the sweep's (`src/ledger/sweep*`), given by the
+  // change that removed the sweep to the step that replaced it.
   "**/src/backbone/core-ledger-state/refcount.ts": { lines: 95, branches: 90, perFile: true },
-  // §13's default for `src/**`, added with the node client's directory (task 10.1).
+  // The default for `src/**`, added with the node client's directory.
   "**/src/node/**": { lines: 90, branches: 85, perFile: true },
-  // §13's default for `src/**`, added with the admin endpoints' directory (task 8.1).
+  // The default for `src/**`, added with the admin endpoints' directory.
   "**/src/admin/**": { lines: 90, branches: 85, perFile: true },
-  // §13's default for `src/**`, added with the process transport's directory (task 14.2).
+  // The default for `src/**`, added with the process transport's directory.
   "**/src/private/**": { lines: 90, branches: 85, perFile: true },
-  // §13's default for `src/**`, added with the library entry's directory (`start-umbradb` design §1).
+  // The default for `src/**`, added with the library entry's directory.
   "**/src/library/**": { lines: 90, branches: 85, perFile: true },
-  // §13's default for `src/**`, added with the ledger adapters' directory (task 12.1).
+  // The default for `src/**`, added with the ledger adapters' directory.
   "**/src/ledger/**": { lines: 90, branches: 85, perFile: true },
-  // The test tape (task 9.1): not in the package, but the tests of ingest, faults and differentials stand on it, so it
-  // is measured and held to §13's default like `src/**`.
+  // The test tape: not in the package, but the tests of ingest, faults and differentials stand on it, so it
+  // is measured and held to the default like `src/**`.
   "**/tools/tape/**": { lines: 90, branches: 85, perFile: true },
-  // The storage helpers (§13: held above the default like determinism), added with the cursor table (task 6.1).
+  // The storage helpers (held above the default like determinism), added with the cursor table.
   "**/src/helpers/**": { lines: 95, branches: 90, perFile: true },
-  // The `deterministic_postgresql` component (task 2.2a, owner decision Q69), held above the default like determinism;
-  // `UmbraError` moved into it (decision record Q79), and the `errors` floor moved with the class.
+  // The `deterministic_postgresql` component, held above the default like determinism;
+  // `UmbraError` moved into it, and the `errors` floor moved with the class.
   "**/src/deterministic-postgresql/**": { lines: 95, branches: 90, perFile: true },
   "**/src/deterministic-postgresql/errors.ts": { lines: 95, branches: 91, perFile: true },
 } as const;
@@ -72,14 +69,14 @@ const CORE_ARCH = {
 export default defineConfig({
   test: {
     // TransactionHistory's source and tests are kept in `legacy/transaction-history/`, outside the build, the package
-    // and this run (core-arch task 17.1, LS-3, A3); that folder has its own configuration for a run by hand.
+    // and this run; that folder has its own configuration for a run by hand.
     exclude: [...configDefaults.exclude, "legacy/**"],
     // Teardown budget. `registerSuiteLifecycle`'s afterAll already sets 60s explicitly because
     // `container.stop()` can exceed the 10s default under heavy host load; suites with a plain
     // inline afterAll inherit this global so coverage-instrumented,
     // fully-parallel runs don't flake on teardown. Inline explicit timeouts still win.
     hookTimeout: 60_000,
-    // Each test's budget (core-arch task 0.5, owner decision Q122, acceptance A153), for the same reason: Vitest's
+    // Each test's budget, for the same reason: Vitest's
     // default of 5 s is a unit test's. The database suites' tests — a fresh PostgreSQL database or PGlite engine,
     // migrations, several transactions through Docker's port proxy — take 0.2–3 s on a quiet machine and over 5 s on a
     // loaded one (the plan's Phase 3 "Load-sensitive tests": `test/db/migrate.test.ts`,
@@ -103,27 +100,27 @@ export default defineConfig({
       exclude: [
         "src/**/index.ts",
         // The `umbradb` command's `bin` entry runs only as a process of its own (`test/cli/umbradb.test.ts`, the pack
-        // smoke test), outside coverage; what it calls, `runMain`, is covered (task 4.4).
+        // smoke test), outside coverage; what it calls, `runMain`, is covered.
         "src/cli/main.ts",
         "tools/**/index.ts",
         // The tape command's entry runs only as a process of its own (`test/tape/command.test.ts`); what it calls,
-        // `runTapeCommand`, is covered (task 9.2).
+        // `runTapeCommand`, is covered.
         "tools/tape/main.ts",
         // The admin worker thread's entry runs only as a thread of its own (`test/admin/`); what it runs, `serveAdmin`,
-        // is covered on the main thread too (task 8.1).
+        // is covered on the main thread too.
         "src/admin/worker.ts",
         // The ledger worker thread's entry runs only as a thread of its own (`test/ledger/worker-host.test.ts`, the
-        // process tests); what it runs, the engine and the bridge, is covered on the main thread too (task 12.3).
+        // process tests); what it runs, the engine and the bridge, is covered on the main thread too.
         "src/ledger/worker/entry.ts",
-        // The ledger worker thread's main, which task 12.6 moved out of `entry.ts` so another entry can run it
+        // The ledger worker thread's main, moved out of `entry.ts` so another entry can run it
         // (`runLedgerWorker`, internal: UmbraDB's own entry and the tests' entries call it): it too runs only as a
         // thread of its own; the engine it runs, ledger tasks included, is covered on the main thread
         // (`test/ledger/ledger-tasks.test.ts`).
         "src/ledger/worker/run.ts",
-        // TransactionHistory, kept outside the run (task 17.1, LS-3, A3). Vitest matches these globs anywhere in a
+        // TransactionHistory, kept outside the run. Vitest matches these globs anywhere in a
         // file's path, so `src/**/*.ts` above would also take in `legacy/transaction-history/src/` if a test loaded it.
         "legacy/**",
-        // The browser build (task 16.1, `browser/`): its code runs in Chrome's workers, which Node.js's coverage does
+        // The browser build (`browser/`): its code runs in Chrome's workers, which Node.js's coverage does
         // not see; `test/browser/` holds it (headless Chrome; its replacements of Node.js against Node.js's own). The
         // match anywhere would otherwise take `browser/src/` in, held to `src/**`'s floors by its Node.js tests alone.
         "browser/**",

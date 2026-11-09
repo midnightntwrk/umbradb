@@ -7,26 +7,26 @@
  *   `shownSettings` (`./redaction.ts`). A `secret` field, or one of unknown kind, shows as `[redacted]`; every other
  *   string has its URL credentials redacted; and a `versionEntry` has all its fields redacted until the history check
  *   finds it equal to its recorded row. Once startup has read the cursor, each revision is placed against it
- *   (`started`, `scheduled`). [AE-5, AE-6, CF-3, CF-4, CF-5, CF-6, Q102]
+ *   (`started`, `scheduled`).
  * - **the configuration history** as startup read it from `core_chain.config`: data fields only, with their URL
- *   credentials redacted. [CF-7]
- * - **the parts of the database with their declarations**, without callbacks ({@link declarationView}). [AE-5]
+ *   credentials redacted.
+ * - **the parts of the database with their declarations**, without callbacks ({@link declarationView}).
  * - **the chain identity**: the network, the genesis hash (as configured, then the chain's), S, and the anchor hash
- *   once block S has committed. [CD-1]
+ *   once block S has committed.
  * - **the ledger version table in effect** (the process revision's `ledgerTable`: the built-in table with the
- *   configuration's rows and pins), **with the build's package identities** (`buildCoreVersion().ledgers`). [LG-3]
+ *   configuration's rows and pins), **with the build's package identities** (`buildCoreVersion().ledgers`).
  * - **the database**: its backend, the server's version, and whether the process holds its writer lock. The caller
  *   supplies the last, since the process knows it from its writer's start and failures.
  * - **the build**: UmbraDB's version. There is no commit, since a running build does not know the commit it was built
- *   from. [AE-5, Q134 D]
+ *   from.
  * - **the network** ({@link withNetwork}): how each surface runs, as the process's network plan has it, and, for a
  *   library process, the process revision's `listen` and `privateLink` as the plan's addresses as bound — a requested
  *   port 0 shown as the port bound, an address absent where nothing listens or connects at it. The command's revision
  *   keeps its `listen` as written (its plan is the written addresses, admin's default among them). The entries in
- *   effect show every revision as validated. [LM-3, AE-5]
+ *   effect show every revision as validated.
  *
  * Before the configuration is validated, nothing of it is shown ({@link UNVALIDATED_CONFIG}), since its secrets are not
- * known yet. [AE-6; CORE-ARCH §4.18]
+ * known yet.
  */
 
 import type { DatabaseParts } from "../config/database-parts.js";
@@ -66,7 +66,7 @@ export const UNVALIDATED_CONFIG: ConfigSnapshot = Object.freeze({
 /**
  * What `/config` shows of the process's network (see the module comment): each surface's mode, and the process
  * revision's addresses as the plan has them bound — `listen`'s `api`, `admin` and (a public process's) `privateLink`,
- * and a private process's `privateLink` — or null to show the revision's own (the command's). [LM-3, AE-5]
+ * and a private process's `privateLink` — or null to show the revision's own (the command's).
  */
 export interface NetworkShown {
   readonly modes: { readonly api: string; readonly admin: string; readonly privateLink: string };
@@ -75,7 +75,7 @@ export interface NetworkShown {
 
 /**
  * `config` with the network `shown` (see {@link NetworkShown}); unchanged before the configuration is validated, where
- * every field but the build is null, and without a plan. [LM-3, AE-5]
+ * every field but the build is null, and without a plan.
  */
 export function withNetwork(config: ConfigSnapshot, shown: NetworkShown | null): ConfigSnapshot {
   if (config.core === null || shown === null) return config;
@@ -113,7 +113,7 @@ export interface ConfigFacts {
   /** The configuration's redaction. */
   readonly redactor: Redactor;
   readonly checked: CheckedConfig;
-  /** The process's `core` revision: the one whose operational and secret fields the process uses. [Q102] */
+  /** The process's `core` revision: the one whose operational and secret fields the process uses. */
   readonly core: CheckedEntry;
   /** Null until the database is open. */
   readonly opened: OpenedConfig | null;
@@ -156,7 +156,7 @@ export function declarationView(declaration: ModuleDeclaration, origin: Declarat
 
 /** One revision as `/config` shows it; `placed` once startup placed it against the cursor. */
 function entryView(redactor: Redactor, entry: CheckedEntry, placed: PlacedEntry | undefined): EntryView {
-  // A started revision passed the history check: it equals its recorded row, so a `versionEntry` shows as data. [CF-6]
+  // A started revision passed the history check: it equals its recorded row, so a `versionEntry` shows as data.
   const recorded = placed?.started === true;
   return Object.freeze({
     id: entry.id,
@@ -217,7 +217,7 @@ export function configOf(facts: ConfigFacts, writerLock: boolean): ConfigSnapsho
       writerLock,
     }),
     build: BUILD,
-    // The network plan's modes join at each snapshot (`withNetwork`). [LM-3]
+    // The network plan's modes join at each snapshot (`withNetwork`).
     network: null,
   });
 }

@@ -4,14 +4,14 @@ import { startPostgresServer, type PostgresTestServer } from "../db/postgres-ser
 
 // The PostgreSQL facts the design relies on, re-checked on the pinned PostgreSQL 18 image (`test/postgres-image.ts`).
 // They were checked on PostgreSQL 17 before the image was pinned, and `pglite.test.ts` checks the same on PGlite
-// 0.5.10 (PostgreSQL 18.6): [Q82, A148; design §14]
-// - per-module roles under `SET LOCAL ROLE` [DB-6];
-// - provider functions [DB-7];
-// - PL/pgSQL row triggers [DT-4];
-// - the `TRUNCATE` refusal [DB-14];
-// - the `jsonb` number check and `.string()` keeping a number's scale [DT-6, Q57];
-// - `REPEATABLE READ READ ONLY` reads [DB-2];
-// - advisory locks [DB-11].
+// 0.5.10 (PostgreSQL 18.6):
+// - per-module roles under `SET LOCAL ROLE`;
+// - provider functions;
+// - PL/pgSQL row triggers;
+// - the `TRUNCATE` refusal;
+// - the `jsonb` number check and `.string()` keeping a number's scale;
+// - `REPEATABLE READ READ ONLY` reads;
+// - advisory locks.
 //
 // They test PostgreSQL itself, not UmbraDB code: a failure here means the pinned image no longer behaves as the design
 // assumes.
@@ -55,7 +55,7 @@ beforeAll(async () => {
   const database = await server.createDatabase();
   sql = database.admin;
   other = postgres(database.url, { max: 1, onnotice: () => undefined });
-  // The same roles, schemas and grants as `pglite.test.ts`. [design §4]
+  // The same roles, schemas and grants as `pglite.test.ts`.
   await database.exec(`
     CREATE ROLE umbradb_m_a NOLOGIN;
     CREATE ROLE umbradb_m_b NOLOGIN;
@@ -76,7 +76,7 @@ afterAll(async () => {
   await server?.stop();
 });
 
-describe("the pinned image is PostgreSQL 18.6 (Q82)", () => {
+describe("the pinned image is PostgreSQL 18.6", () => {
   it("reports PostgreSQL 18.6, the version PGlite 0.5.10 embeds", async () => {
     const rows = await sql.unsafe<{ version: string; num: number }[]>(
       "SELECT version() AS version, current_setting('server_version_num')::int AS num",
@@ -86,7 +86,7 @@ describe("the pinned image is PostgreSQL 18.6 (Q82)", () => {
   });
 });
 
-describe("PostgreSQL 18 — roles and SET LOCAL ROLE (DB-6)", () => {
+describe("PostgreSQL 18 — roles and SET LOCAL ROLE", () => {
   it("switches the current role for one transaction only, and the role writes its own schema", async () => {
     const inside = await asRole("umbradb_m_a", async (tx) => {
       await tx.unsafe("CREATE TABLE a.items (k text PRIMARY KEY, v bigint NOT NULL)");
@@ -130,7 +130,7 @@ describe("PostgreSQL 18 — roles and SET LOCAL ROLE (DB-6)", () => {
   });
 });
 
-describe("PostgreSQL 18 — provider functions (DB-7)", () => {
+describe("PostgreSQL 18 — provider functions", () => {
   beforeAll(async () => {
     await asRole("umbradb_m_a", (tx) =>
       tx
@@ -193,7 +193,7 @@ describe("PostgreSQL 18 — provider functions (DB-7)", () => {
   });
 });
 
-describe("PostgreSQL 18 — triggers (DT-4, DB-14)", () => {
+describe("PostgreSQL 18 — triggers", () => {
   beforeAll(async () => {
     await asRole("umbradb_m_a", (tx) =>
       tx
@@ -262,7 +262,7 @@ describe("PostgreSQL 18 — triggers (DT-4, DB-14)", () => {
   });
 });
 
-describe("PostgreSQL 18 — jsonpath number check and .string() (DT-6, Q57)", () => {
+describe("PostgreSQL 18 — jsonpath number check and .string()", () => {
   beforeAll(async () => {
     await asRole("umbradb_m_a", (tx) =>
       tx
@@ -297,7 +297,7 @@ describe("PostgreSQL 18 — jsonpath number check and .string() (DT-6, Q57)", ()
     expect(await count("a.docs")).toBe(4);
   });
 
-  it("keeps a JSON number's scale in .string(): 1.0, 100.00, 1e2 (design.md §14, Q57)", async () => {
+  it("keeps a JSON number's scale in .string(): 1.0, 100.00, 1e2", async () => {
     const rows = await sql.unsafe<{ input: string; text: string }[]>(
       "SELECT input, jsonb_path_query(input::jsonb, '$.string()') #>> '{}' AS text FROM unnest(ARRAY['1.0', '100.00', '1e2', '-0', '7']) WITH ORDINALITY AS t(input, n) ORDER BY n",
     );
@@ -311,7 +311,7 @@ describe("PostgreSQL 18 — jsonpath number check and .string() (DT-6, Q57)", ()
   });
 });
 
-describe("PostgreSQL 18 — REPEATABLE READ READ ONLY reads (DB-2) and advisory locks (DB-11)", () => {
+describe("PostgreSQL 18 — REPEATABLE READ READ ONLY reads and advisory locks", () => {
   it("reads one snapshot through a later commit, and refuses a write", async () => {
     await sql.unsafe("CREATE TABLE public.snap (k int PRIMARY KEY)");
     await sql.unsafe("INSERT INTO public.snap VALUES (1)");

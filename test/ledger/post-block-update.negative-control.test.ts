@@ -21,7 +21,7 @@ import {
 /**
  * The committed negative controls of the post-block update checks: a wrong path or a wrong adapter, each of which
  * must make the check that `post-block-update.test.ts` runs (`post-block-update-checks.ts`) fail. The real ones pass
- * the same checks in this file's build. [A151, Q113 A]
+ * the same checks in this file's build.
  *
  * - **The round trip** — the published `normalizeFullness` and `postBlockUpdate`, which pass the fullness through
  *   JavaScript numbers — gives another `FixedPoint` fullness, and so other fee prices and another state root, for
@@ -34,7 +34,7 @@ import {
  * - **An adapter on the published post-block update** (the round trip inside `apply`) fails the adapter's fee prices.
  *
  * That a package file changed by one byte refuses startup with `package-hash-mismatch` is tested by
- * `package-identity.test.ts` and `version.negative-control.test.ts`, which run on the rebuilt packages. [A97]
+ * `package-identity.test.ts` and `version.negative-control.test.ts`, which run on the rebuilt packages.
  */
 
 /** The assertion error a check fails with; fails the test if the check passes or fails otherwise. */
@@ -69,7 +69,7 @@ function publishedPostBlockUpdate(ledger: "v8" | "v9") {
 for (const ledger of ["v8", "v9"] as const) {
   const raw = RAW[ledger];
 
-  describe(`${ledger}: A151's negative controls`, () => {
+  describe(`${ledger}: The negative controls`, () => {
     let real: LedgerPackage;
     beforeAll(async () => {
       real = await loadLedgerPackage(ledger, { networkId: NETWORK_ID });

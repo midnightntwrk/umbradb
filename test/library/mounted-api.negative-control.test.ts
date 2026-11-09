@@ -3,13 +3,13 @@ import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backend
 import { hashesOfSecrets, hashProblems } from "./config-hash-cases.js";
 
 /**
- * L68's configuration-hash negative control on the mounted path only, through the criterion's own run and oracle
+ * The configuration-hash negative control on the mounted path only, through the criterion's own run and oracle
  * (`./config-hash-cases.ts`): the module API's mounted handlers (`moduleApiHandlers` of
  * `../../src/runner/api-socket.ts`, which `startModuleApi` makes them with — the module replaced here) given a hash
  * over the process's first secret, its UTF-8 bytes as hex in the hash's form, in place of the configuration's. The
  * mounted upgrade's hash then changes with only a secret changed and holds it, and the oracle fails; the listener's,
  * made by the same module's own listener, stays the real one. On PostgreSQL 18 (the database's password) and PGlite (a
- * TLS key). [L68, RN-16]
+ * TLS key).
  */
 
 const control = vi.hoisted(() => ({ hash: null as string | null }));
@@ -28,7 +28,7 @@ vi.mock("../../src/runner/api-socket.js", async (importOriginal) => {
 /** `secret` as a configuration hash: its UTF-8 bytes as hex, in the hash's form. */
 const hashOver = (secret: string): string => `0x${Buffer.from(secret, "utf8").toString("hex").padEnd(64, "0").slice(0, 64)}`;
 
-describe.each(PROCESS_BACKENDS)("L68's configuration-hash negative control on the mounted path, on $name (LM-4, RN-16)", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("configuration-hash negative control on the mounted path, on $name", (backend: ProcessBackend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 

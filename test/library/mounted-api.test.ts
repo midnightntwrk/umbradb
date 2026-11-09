@@ -26,19 +26,18 @@ import {
 
 /**
  * The module API's handlers mounted in a host's own server (`startUmbraDB`'s `api.http` and `api.upgrade`), against
- * UmbraDB's own listener on the same process (`network.api: { port: 0 }`), on PostgreSQL 18 and PGlite. [LM-4, RN-15,
- * RN-16, DB-15]
+ * UmbraDB's own listener on the same process (`network.api: { port: 0 }`), on PostgreSQL 18 and PGlite.
  *
- * - **L23**: every module-API answer, mounted and on the listener, carries `X-Umbra-Version` once; before the
+ * - Every module-API answer, mounted and on the listener, carries `X-Umbra-Version` once; before the
  *   configuration hash exists (a module's `on-start-db` held) the mounted answers — the lifecycle's 503 and the
  *   upgrade's — carry no `X-Umbra-Config-Hash`; once it exists (the bootstrap's wait, serving, after the stop's drain)
  *   every answer carries the same one, the listener's: a route's answers, a 404, a 405, the module API's own 400, 413
  *   and 500, and on PostgreSQL its 504.
- * - **L24** `[NEG]`: mounted `api.http`, a body over the module API's limit gets 413 `request-too-large`, as on the
+ * - `[NEG]`: mounted `api.http`, a body over the module API's limit gets 413 `request-too-large`, as on the
  *   listener; on PostgreSQL a read past `apiReadTimeoutMs` fails `query-timeout` (504), as on the listener; on PGlite a
- *   read past it completes, as on the listener (DB-15). Controls: the mounted path without the body limit, and over a
+ *   read past it completes, as on the listener. Controls: the mounted path without the body limit, and over a
  *   module API whose read is not bounded, each fail the oracle.
- * - **L68** `[NEG]`: through mounted `api.upgrade`, as on the listener: a message that is not a JSON object with a
+ * - `[NEG]`: through mounted `api.upgrade`, as on the listener: a message that is not a JSON object with a
  *   type (text that is no JSON, a list, a string, a number, null, an object without a type), a `subscribe` without a
  *   valid id or name, an unknown type, an `unsubscribe` whose id is an object whose conversion to text throws are
  *   answered `invalid-request` (the connection goes on), an unknown subscription
@@ -93,7 +92,7 @@ function upgradeHeaderProblems(where: string, head: string, hash: string | null)
 const json = (answer: Exchanged): Record<string, unknown> => JSON.parse(answer.text) as Record<string, unknown>;
 
 /**
- * The L24 oracle on `target` (the mounted origin or the listener's): the oversized body refused 413 `request-too-large`
+ * The oracle on `target` (the mounted origin or the listener's): the oversized body refused 413 `request-too-large`
  * (a small one echoed); on PostgreSQL `/sleep` and `/idle` 504 `query-timeout` within 2.5 s; on PGlite `/idle` answered
  * 200 (not bounded). None when so.
  */
@@ -135,7 +134,7 @@ interface SubscriptionSeen {
 /**
  * The protocol's malformed messages, in order: text that is no JSON, JSON that is no object (a list, a string, a
  * number, null), an object without a type, an unknown type, `subscribe`s without a valid id or name (an id that is
- * no string or is empty, a name missing or no string), an unknown subscription name. [L68]
+ * no string or is empty, a name missing or no string), an unknown subscription name.
  */
 const PROTOCOL_MESSAGES: readonly unknown[] = [
   "{not json",
@@ -167,7 +166,7 @@ const PROTOCOL_ERRORS = [
   { type: "error", error: { code: "invalid-request", message: "a message's type is subscribe or unsubscribe" } },
   ...Array.from({ length: 4 }, () => NO_ID_AND_NAME),
   { type: "error", id: "x", error: { code: "not-found", message: "no subscription is named nothing" } },
-  // An id whose conversion to text throws: answered, never thrown out of the socket's callback. [LM-4, LM-10]
+  // An id whose conversion to text throws: answered, never thrown out of the socket's callback.
   { type: "error", error: { code: "invalid-request", message: "an unsubscribe message's id is a string, not an object" } },
 ];
 
@@ -175,7 +174,7 @@ const PROTOCOL_ERRORS = [
 const POISONED_UNSUBSCRIBE = '{"type":"unsubscribe","id":{"toString":null}}';
 
 /**
- * The L68 subscription checks at `ws` (see the module comment), `hooks` the module's emits. Each client is closed
+ * The subscription checks at `ws` (see the module comment), `hooks` the module's emits. Each client is closed
  * before the next check, so the slow subscriber is `feed`'s only one.
  */
 async function subscriptionSeen(ws: string, hooks: MapiHooks): Promise<SubscriptionSeen> {
@@ -212,7 +211,7 @@ async function subscriptionSeen(ws: string, hooks: MapiHooks): Promise<Subscript
   return { errors, oversizeClose, slowDisconnected };
 }
 
-/** The L68 oracle over what the mounted path saw, against the expected answers (the listener's own). */
+/** The oracle over what the mounted path saw, against the expected answers (the listener's own). */
 function subscriptionProblems(where: string, seen: SubscriptionSeen): string[] {
   const problems: string[] = [];
   if (JSON.stringify(seen.errors) !== JSON.stringify(PROTOCOL_ERRORS)) {
@@ -223,18 +222,18 @@ function subscriptionProblems(where: string, seen: SubscriptionSeen): string[] {
   return problems;
 }
 
-describe.each(PROCESS_BACKENDS)("the module API's mounted handlers on $name (LM-4)", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("the module API's mounted handlers on $name", (backend: ProcessBackend) => {
   const postgres = backend.kind === "postgres";
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("L23: X-Umbra-Version on every answer; X-Umbra-Config-Hash absent before the hash exists, the listener's after", async () => {
+  it("X-Umbra-Version on every answer; X-Umbra-Config-Hash absent before the hash exists, the listener's after", async () => {
     const db = await backend.database();
     const hooks: MapiHooks = { emits: new Set(), startDb: gate() };
     const m = mapiModule(hooks);
     // S = 1 above the head: once on-start-db ran (and the hash was read), startup waits for the node.
     const source = new InMemoryBlockSource({ head: 0n });
-    // A read bound to 1 s, so that on PostgreSQL a read past it answers 504. [DB-15]
+    // A read bound to 1 s, so that on PostgreSQL a read past it answers 504.
     const handle = startUmbraDB({
       config: { data: libraryData(db.setting, [m], { apiReadTimeoutMs: 1_000 }) },
       modules: [m],
@@ -302,7 +301,7 @@ describe.each(PROCESS_BACKENDS)("the module API's mounted handlers on $name (LM-
     }
   }, 120_000);
 
-  it("L24: mounted api.http refuses a body over the limit with 413 and bounds reads as the listener does (DB-15)", async () => {
+  it("mounted api.http refuses a body over the limit with 413 and bounds reads as the listener does", async () => {
     const db = await backend.database();
     const hooks: MapiHooks = { emits: new Set() };
     const m = mapiModule(hooks);
@@ -324,7 +323,7 @@ describe.each(PROCESS_BACKENDS)("the module API's mounted handlers on $name (LM-
     }
   }, 120_000);
 
-  it("L24's negative controls: the mounted path without the body limit, and over a read that is not bounded, fail the oracle", async () => {
+  it("negative controls: the mounted path without the body limit, and over a read that is not bounded, fail the oracle", async () => {
     const db = await backend.database();
     const hooks: MapiHooks = { emits: new Set() };
     const m = mapiModule(hooks);
@@ -357,7 +356,7 @@ describe.each(PROCESS_BACKENDS)("the module API's mounted handlers on $name (LM-
     }
   }, 120_000);
 
-  it("L68: mounted api.upgrade answers, limits and disconnects as the listener does; its 101 names the build and the configuration", async () => {
+  it("mounted api.upgrade answers, limits and disconnects as the listener does; its 101 names the build and the configuration", async () => {
     const db = await backend.database();
     const hooks: MapiHooks = { emits: new Set() };
     const m = mapiModule(hooks);
@@ -387,7 +386,7 @@ describe.each(PROCESS_BACKENDS)("the module API's mounted handlers on $name (LM-
     }
   }, 180_000);
 
-  it("L68's negative controls: each check removed on the mounted path only fails the oracle there, the listener unchanged", async () => {
+  it("negative controls: each check removed on the mounted path only fails the oracle there, the listener unchanged", async () => {
     const controls: readonly { readonly what: string; readonly seams: NonNullable<EngineOptions["mountedApi"]>; readonly fails: string }[] = [
       { what: "no error answers", seams: { answersErrors: false }, fails: "mounted: the protocol's checks answered []" },
       { what: "no message limit", seams: { maxMessageBytes: 0 }, fails: "mounted: a message over 64 KiB left the connection open, not closed 1009" },
@@ -434,7 +433,7 @@ describe.each(PROCESS_BACKENDS)("the module API's mounted handlers on $name (LM-
     }
   }, 300_000);
 
-  it("L68: the upgrade's X-Umbra-Config-Hash neither holds nor changes with a secret of the configuration", async () => {
+  it("the upgrade's X-Umbra-Config-Hash neither holds nor changes with a secret of the configuration", async () => {
     // The run and its oracle (`./config-hash-cases.ts`): the mounted upgrade's hash, and the listener's the same.
     const seen = await hashesOfSecrets(backend);
     expect(hashProblems("mounted", seen.hashes, seen.secrets)).toEqual([]);

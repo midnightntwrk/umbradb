@@ -34,22 +34,22 @@ import { core, coreSettings, entryOf, loggingModule, settle, startProcess, testB
  * Startup is, in order:
  * - the declarations validated;
  * - the configuration loaded and validated, with the `core` entry's operational fields taken from its latest revision
- *   of the build's version [Q102];
+ *   of the build's version;
  * - the database opened and its writer started;
  * - the cursor and the history read and checked;
  * - the graph, the schema plan, the process contexts, the migrations and `on-start-db`;
  * - the seal, `on-start-api` and the module API.
  *
  * Tested through it on both backends: the operational fields from the latest `core` revision, the state and its
- * readiness, the refusals' clean-up, the logs' redaction and SIGTERM's signal. [A149, CF-3, CF-4, Q102]
+ * readiness, the refusals' clean-up, the logs' redaction and SIGTERM's signal.
  */
 
 const N1 = "ws://127.0.0.1:9/n1";
 const N2 = "ws://127.0.0.1:9/n2";
 
-// ── the core entry's operational fields from its latest revision [A149] ─────────────────────────────────────────────
+// ── the core entry's operational fields from its latest revision ─────────────────────────────────────────────
 
-/** What one startup with two `core` revisions showed. [A149] */
+/** What one startup with two `core` revisions showed. */
 interface A149Startup {
   readonly refused?: unknown;
   /** The `core` revision the block source was made from: its node. */
@@ -61,7 +61,7 @@ interface A149Startup {
   readonly processCoreStart?: number;
 }
 
-/** What the two startups showed, and the two databases afterwards. [A149] */
+/** What the two startups showed, and the two databases afterwards. */
 interface A149Observation {
   readonly runs: readonly A149Startup[];
   readonly later: { readonly setting: DatabaseParts; readonly cursor: number | null };
@@ -75,8 +75,8 @@ async function touched(db: ProcessDatabase): Promise<boolean> {
 }
 
 /**
- * The two-revision configuration: `core` from 1 on `earlier` (N1, no opt-in, `retainStates` 0), from 50 on `later` (N2,
- * opt-in, 4). [A149]
+ * The two-revision configuration: `core` from 1 on `earlier` (no opt-in, `retainStates` 0), from 50 on `later` (N2,
+ * opt-in, 4).
  */
 function a149Entries(earlier: DatabaseParts, later: DatabaseParts, devtool: ModuleDeclaration, extra: Record<string, unknown> = {}) {
   return [
@@ -87,7 +87,7 @@ function a149Entries(earlier: DatabaseParts, later: DatabaseParts, devtool: Modu
 }
 
 /**
- * The two startups (to head 5 on a new database, then to head 8 at cursor 5) with `processCore` (a control's). [A149]
+ * The two startups (to head 5 on a new database, then to head 8 at cursor 5) with `processCore` (a control's).
  */
 async function a149Run(
   earlier: ProcessDatabase,
@@ -128,7 +128,7 @@ async function a149Run(
   };
 }
 
-/** The oracle: every problem with what was observed, none when the latest revision's fields were used. [A149] */
+/** The oracle: every problem with what was observed, none when the latest revision's fields were used. */
 function a149Problems(observed: A149Observation): string[] {
   const problems: string[] = [];
   observed.runs.forEach((run, index) => {
@@ -169,13 +169,13 @@ describe.each(PROCESS_BACKENDS)("the process on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  describe("A149: the core entry's operational fields from its latest revision of the build's version (CF-4, Q102)", () => {
-    it("A149: opens the later revision's database and uses its node and opt-in for its whole run, the cursor below its start", async () => {
+  describe("the core entry's operational fields from its latest revision of the build's version", () => {
+    it("opens the later revision's database and uses its node and opt-in for its whole run, the cursor below its start", async () => {
       const observed = await a149Run(await backend.database(), await backend.database());
       expect(a149Problems(observed)).toEqual([]);
     }, 180_000);
 
-    it("A149: validates the earlier revision's operational fields, and an invalid one refuses startup, opening nothing", async () => {
+    it("validates the earlier revision's operational fields, and an invalid one refuses startup, opening nothing", async () => {
       const [earlier, later] = [await backend.database(), await backend.database()];
       const devtool = loggingModule("devtool", [], ["on-db-write"], { developmentOnly: true });
       const build = testBuild([devtool]);
@@ -196,11 +196,11 @@ describe.each(PROCESS_BACKENDS)("the process on $name", (backend) => {
       expect(await touched(later)).toBe(false);
     }, 180_000);
 
-    it("negative control: a process taking the first core revision's operational fields fails A149", async () => {
+    it("negative control: a process taking the first core revision's operational fields fails", async () => {
       const problems = a149Problems(await a149Run(await backend.database(), await backend.database(), firstCoreRevision));
       // The first revision has no opt-in, and the process takes every operational field from the one revision it runs
       // with, the history's opt-in included: the development-only module refuses startup on either backend (on PGlite
-      // its database refuses to open first). [CF-9, Q102]
+      // its database refuses to open first).
       expect(problems).toEqual([
         "startup 1 refused (development-opt-in-required)",
         "startup 2 refused (development-opt-in-required)",
@@ -210,7 +210,7 @@ describe.each(PROCESS_BACKENDS)("the process on $name", (backend) => {
   });
 
   describe("startup and its refusals", () => {
-    it("loads the configuration file (CF-1), runs, and reports its module API's address", async () => {
+    it("loads the configuration file, runs, and reports its module API's address", async () => {
       const db = await backend.database();
       const directory = mkdtempSync(join(tmpdir(), "umbradb-process-config-"));
       try {
@@ -236,9 +236,9 @@ describe.each(PROCESS_BACKENDS)("the process on $name", (backend) => {
       }
     }, 180_000);
 
-    // PostgreSQL only: PGlite has no durability probe, and enforces no read timeout. [DB-12, DB-15]
+    // PostgreSQL only: PGlite has no durability probe, and enforces no read timeout.
     if (backend.kind === "postgres") {
-      it("bounds a module API request's read by the process revision's apiReadTimeoutMs (DB-15, Q102)", async () => {
+      it("bounds a module API request's read by the process revision's apiReadTimeoutMs", async () => {
         const db = await backend.database();
         const sleepy = loggingModule("sleepy", [], [], {
           points: {
@@ -279,7 +279,7 @@ describe.each(PROCESS_BACKENDS)("the process on $name", (backend) => {
         }
       }, 180_000);
 
-      it("logs the durability probe's warnings, and runs (synchronous_commit=off, DB-12)", async () => {
+      it("logs the durability probe's warnings, and runs (synchronous_commit=off)", async () => {
         const db = await backend.database();
         const [row] = await db.query("SELECT current_database() AS name");
         await db.query(`ALTER DATABASE ${String(row?.name)} SET synchronous_commit = off`);
@@ -369,7 +369,7 @@ describe.each(PROCESS_BACKENDS)("the process on $name", (backend) => {
       expect(await cursorIn(db)).toBe(2);
     }, 180_000);
 
-    // Only the database's password is secret (a PGlite path has none, and is shown). [CF-4, Q167 A]
+    // Only the database's password is secret (a PGlite path has none, and is shown).
     it.runIf(backend.kind === "postgres")(
       "logs through the configuration's redaction: a module API error naming the database's password shows it as [redacted]",
       async () => {
@@ -409,7 +409,7 @@ describe.each(PROCESS_BACKENDS)("the process on $name", (backend) => {
     );
   });
 
-  describe("the state (CORE-ARCH §4.18, task 5.3's part)", () => {
+  describe("the state", () => {
     it("is starting, then syncing while far behind (ready only within readinessLag), following at the head, stopping after stop()", async () => {
       const db = await backend.database();
       let release!: () => void;
@@ -481,7 +481,7 @@ describe.each(PROCESS_BACKENDS)("the process on $name", (backend) => {
         signal: controller.signal,
         log: () => undefined,
       });
-      // The abort reason itself, the signal's. [LM-9]
+      // The abort reason itself, the signal's.
       await expect(early.started).rejects.toBe(controller.signal.reason);
       await expect(early.started).rejects.toMatchObject({ name: "AbortError" });
       expect(await early.ended).toEqual({ kind: "signal" });
@@ -518,7 +518,7 @@ describe.each(PROCESS_BACKENDS)("the process on $name", (backend) => {
 
 // ── without a database ─────────────────────────────────────────────────────────────────────────────────────────────
 
-describe("statusOf: the state and its readiness (CORE-ARCH §4.18)", () => {
+describe("statusOf: the state and its readiness", () => {
   const base: Readonly<Record<string, unknown>> = {
     phase: "running",
     start: 1n,
@@ -553,7 +553,7 @@ describe("statusOf: the state and its readiness (CORE-ARCH §4.18)", () => {
   });
 });
 
-describe("terminationSignal: SIGTERM stops the process (RN-13)", () => {
+describe("terminationSignal: SIGTERM stops the process", () => {
   it("aborts its signal at the target's SIGTERM, once, and no more after dispose", () => {
     const target = new EventEmitter();
     const termination = terminationSignal(target);
@@ -585,7 +585,7 @@ function checked(entries: readonly unknown[], user: readonly ModuleDeclaration[]
   return { declarations, config, check: checkHistory({ config, cursor, declarations, history: [], process: processCoreEntry(config) }) };
 }
 
-describe("upgradeBoundary: RN-12's first height of a version the build does not carry", () => {
+describe("upgradeBoundary: the first height of a version the build does not carry", () => {
   const m = declaration("m");
   const n = declaration("n");
   const settings = { pollMs: 1 };
@@ -621,7 +621,7 @@ describe("upgradeBoundary: RN-12's first height of a version the build does not 
   });
 });
 
-describe("processRevisions: each part's revisions for its process context (RN-7, CF-5, Q102)", () => {
+describe("processRevisions: each part's revisions for its process context", () => {
   it("gives a module its revisions in start order with their effective stops and settings, and none to a module without", () => {
     const m = declaration("m");
     const entries = [
@@ -668,7 +668,7 @@ describe("processRevisions: each part's revisions for its process context (RN-7,
 });
 
 describe("startProcess without a database", () => {
-  it("refuses an invalid declaration first, its block source never made, logged with its finding; the process ends (Q137 B)", async () => {
+  it("refuses an invalid declaration first, its block source never made, logged with its finding; the process ends", async () => {
     let made = false;
     const lines: string[] = [];
     const handle = startProcess({
@@ -694,7 +694,7 @@ describe("startProcess without a database", () => {
     expect(handle.status().state).toBe("refused");
   });
 
-  it("logs nothing without the log port; a relative { file } resolves against cwd, not the host's directory (CF-1, LM-2)", async () => {
+  it("logs nothing without the log port; a relative { file } resolves against cwd, not the host's directory", async () => {
     // The engine looks for no default file: `umbradb run` names `umbradb.config.ts` itself (`src/cli/run.ts`).
     const cwd = mkdtempSync(join(tmpdir(), "umbradb-engine-cwd-"));
     const written: string[] = [];
@@ -720,11 +720,11 @@ describe("startProcess without a database", () => {
       rmSync(cwd, { recursive: true, force: true });
     }
     expect(cwd).not.toBe(process.cwd());
-    // Standard error is the command's log (`umbradb run` gives it as the port), never the engine's default. [G2]
+    // Standard error is the command's log (`umbradb run` gives it as the port), never the engine's default.
     expect(written).toEqual([]);
   });
 
-  it("takes a { file } given as a file URL as its path, and refuses a URL that is no file URL (CF-1)", async () => {
+  it("takes a { file } given as a file URL as its path, and refuses a URL that is no file URL", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "umbradb-engine-url-"));
     try {
       const file = join(cwd, "absent.config.ts");
@@ -771,7 +771,7 @@ describe("startProcess without a database", () => {
       source: new InMemoryBlockSource({ head: 1n }),
       log: (line) => lines.push(line),
     });
-    // A failing on-start-db: callback-error naming its point and module, its cause the value thrown. [LM-9]
+    // A failing on-start-db: callback-error naming its point and module, its cause the value thrown.
     await expect(handle.started).rejects.toMatchObject({
       name: "UmbraError",
       code: "callback-error",
@@ -782,12 +782,12 @@ describe("startProcess without a database", () => {
     expect(lines).toEqual([
       "database: pglite in memory",
       "startup refused: callback-error: the on-start-db callback of throwing failed: on-start-db throws a string",
-      // The stop's own line (issue 00072): startup had already ended. [RN-13]
+      // The stop's own line: startup had already ended.
       "stopping (stop()): processing had already ended (refused)",
     ]);
   });
 
-  it("holds configuration data to CF-1's plain data: a function refuses with not-plain-data at its path", async () => {
+  it("holds configuration data to the plain data: a function refuses with not-plain-data at its path", async () => {
     const settings = { ...coreSettings({ kind: "pglite", memory: true }), onError: () => 0 };
     const handle = startProcess({
       declarations: testBuild([]).declarations,

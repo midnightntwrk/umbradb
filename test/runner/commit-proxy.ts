@@ -6,7 +6,6 @@ import type { PostgresParts } from "../../src/config/database-parts.js";
  * two cases deterministic: the backend is terminated after the server committed h but before the client saw the
  * result, or before the server got the `COMMIT`. The process's `database` parts name the proxy
  * ({@link CommitProxy.setting}); every connection it opens (the writer's session and the read pool's) goes through it.
- * [IN-11, A86]
  *
  * {@link CommitProxy.arm} arms it for the next `COMMIT` a client sends — the simple-protocol `Query` message
  * `Q, length 11, "COMMIT\0"`, which is how the database API ends every transaction (`src/db/postgres.ts`); reads end
@@ -22,7 +21,7 @@ import type { PostgresParts } from "../../src/config/database-parts.js";
  * sees its connection lost during the `COMMIT` (`connection-lost`). The read pool's connections are left alone. New
  * connections then wait until the arm's `then` (a test's action while the process is away: another writer's change)
  * has completed, so the process's reconnected writer cannot come before it. Listens on 127.0.0.1 at a port the system
- * gives, of at least 10000 (the repository's rule for test ports). [DB-13]
+ * gives, of at least 10000 (the repository's rule for test ports).
  */
 
 /** When the proxy terminates the writer: before forwarding the `COMMIT`, or after the server answered it. */
@@ -81,7 +80,7 @@ export class CommitProxy {
     this.#upstream = upstream;
   }
 
-  /** Starts a proxy to the PostgreSQL server of `database`, the `database` setting's parts. [CF-4, Q167 A] */
+  /** Starts a proxy to the PostgreSQL server of `database`, the `database` setting's parts. */
   static async start(database: PostgresParts): Promise<CommitProxy> {
     const upstream = { host: database.host, port: database.port };
     const server = createServer();

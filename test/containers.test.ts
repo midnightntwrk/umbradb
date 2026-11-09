@@ -15,7 +15,7 @@ import { POSTGRES_IMAGE } from "./postgres-image.js";
 /**
  * How every test starts a container (`containers.ts`): a start that Testcontainers gave up on after its fixed 10 s wait
  * for the ports is tried again, its container removed; every container carries the labels that tell whose it is; and
- * every test that starts one starts it this way. [A153]
+ * every test that starts one starts it this way.
  */
 
 const REPOSITORY = fileURLToPath(new URL("..", import.meta.url));
@@ -58,7 +58,7 @@ function containersLabelled(label: string, value: string): string[] {
   return listed.split("\n").filter(Boolean);
 }
 
-describe("startContainer (A153)", () => {
+describe("startContainer", () => {
   it("tries a start again after the ports wait gave up, up to START_ATTEMPTS starts in all", async () => {
     const twice = scripted([PORTS_NOT_BOUND, PORTS_NOT_BOUND]);
     expect(await startContainer(twice.container)).toHaveProperty("stop");
@@ -149,7 +149,7 @@ async function parentWithContainer(guarded: boolean, fixture: string) {
   return { parent, exited, id: (JSON.parse(line) as { id: string }).id };
 }
 
-describe("a container outlives no test process (A153)", () => {
+describe("a container outlives no test process", () => {
   it("is given only the labels' filters: guardContainers refuses anything else", () => {
     for (const filter of ["label=other=1", "org.umbradb.test.pid=1", "label=org.umbradb.test.pid=", "id=abc"]) {
       expect(() => guardContainers([filter]), filter).toThrow(/not a label filter/);
@@ -207,7 +207,7 @@ interface SourceFile {
 const CONSTRUCTED = /new\s+(?:PostgreSqlContainer|GenericContainer)\s*\(/g;
 /** One started directly: a construction whose chain ends in `.start()`. */
 const STARTED_DIRECTLY = /new\s+(?:PostgreSqlContainer|GenericContainer)\s*\([^)]*\)(?:\s*\.with\w+\((?:[^()]|\([^()]*\))*\))*\s*\.start\(\)/g;
-/** This file and the image-pin test plant constructions in their negative controls. [A148] */
+/** This file and the image-pin test plant constructions in their negative controls. */
 const PLANTERS = new Set(["test/containers.test.ts", "test/dependencies/postgres-image.test.ts"]);
 
 /** Every way the files start a container other than with `startContainer`. */

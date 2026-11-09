@@ -9,7 +9,7 @@ import { type DagRun, runDag, runProblems } from "./refcount-process.js";
 
 /**
  * `core-ledger-state`'s reclamation by reference counting through the real process, on PostgreSQL 18 and PGlite
- * 0.5.10. [A105 DIFF, R3 CI, LG-11, LG-14]
+ * 0.5.10.
  *
  * The input is the extended DAG fixture (`test/ledger/fixtures/sweep-fixture.ts`, `"extended"`): wide trees, a new
  * root every block, content reused after a deletion, children shared between versions, a child repeated in one child
@@ -17,16 +17,15 @@ import { type DagRun, runDag, runProblems } from "./refcount-process.js";
  * (both ways), a stored node written again unchanged, and a queued key referenced again. Its test package
  * (`sweep-test-loader.ts`) flushes, from each key whose root count rises, the nodes whose child list it does not
  * believe stored, and honours evictions. Checked, after every block and on both backends:
- * - R1's model (`./refcount-model.ts`), fed the block's batch, holds the implementation's rows (with their child
+ * - the model (`./refcount-model.ts`), fed the block's batch, holds the implementation's rows (with their child
  *   lists), counts, root counts and queue; the new and rewritten nodes it computes are those the tables show; the keys
  *   it deletes are those the worker was told to evict;
- * - R3's database check passes (`./refcount-checks.ts`);
+ * - the database check passes (`./refcount-checks.ts`);
  * - every `core_ledger_state` table is equal between the two backends;
  * - subtree 0's first version, deleted while its second version stood, is inserted again at REVERT;
  * - with `sweep: off` nothing is deleted.
- * [A105 DIFF, R3]
  *
- * The committed negative controls (R12's six faults, R3's own) are in `ledger-refcount-process.negative-control.test.ts`.
+ * The committed negative controls (the six faults, the own) are in `ledger-refcount-process.negative-control.test.ts`.
  */
 
 const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
@@ -53,11 +52,11 @@ function classificationProblems(tables: ReadonlyMap<bigint, TableSnapshot>, mode
 const tablesText = (run: DagRun): string =>
   JSON.stringify([...run.tables].map(([h, t]) => [`${h}`, [...t.rows].map(([k, c]) => `${k}:${hex(c)}`), [...t.refs], [...t.roots], [...t.queue], [...t.digests]]));
 
-describe("A105 (LG-14): reclamation by reference counting, against R1's model and R3's check, on PostgreSQL and on PGlite", () => {
+describe("reclamation by reference counting, against the model and the check, on PostgreSQL and on PGlite", () => {
   beforeAll(() => Promise.all(PROCESS_BACKENDS.map((backend) => backend.start())), 180_000);
   afterAll(() => Promise.all(PROCESS_BACKENDS.map((backend) => backend.stop())), 60_000);
 
-  it("[[ledger.refcount-cross-backend-identical]] A105: on the extended DAG fixture the new and rewritten nodes, counts, queue, deleted set and rows are R1's model's after every block, on PostgreSQL and on PGlite, the evicted keys its deleted ones, every core_ledger_state table equal between the backends, and R3's check passing after every block", async () => {
+  it("[[ledger.refcount-cross-backend-identical]] on the extended DAG fixture the new and rewritten nodes, counts, queue, deleted set and rows are the model's after every block, on PostgreSQL and on PGlite, the evicted keys its deleted ones, every core_ledger_state table equal between the backends, and the check passing after every block", async () => {
     const runs: DagRun[] = [];
     for (const backend of PROCESS_BACKENDS) {
       const db = await backend.database();
@@ -71,7 +70,7 @@ describe("A105 (LG-14): reclamation by reference counting, against R1's model an
       expect(runProblems(run, "extended"), backend.name).toEqual([]);
       expect(await heldNodeProblems(db), backend.name).toEqual([]);
 
-      // The fixture has what the test needs. [A105]
+      // The fixture has what the test needs.
       const at = (h: number): RefcountModelStep => model[h] as RefcountModelStep;
       const key = (node: { readonly key: Uint8Array }): string => hex(node.key);
       // Deletions in cascades of more than one round, every block from 2 on.
@@ -110,7 +109,7 @@ describe("A105 (LG-14): reclamation by reference counting, against R1's model an
     expect(tablesText(runs[0] as DagRun)).toBe(tablesText(runs[1] as DagRun));
   }, PATIENCE_MS * 4);
 
-  it("A105: with sweep off nothing is deleted or evicted, the counts and queue are still R1's model's, and R3's (a), (b) and R_{h−1} ⊆ S_h hold after every block", async () => {
+  it("with sweep off nothing is deleted or evicted, the counts and queue are still the model's, and the (a), (b) and R_{h−1} ⊆ S_h hold after every block", async () => {
     for (const backend of PROCESS_BACKENDS) {
       const db = await backend.database();
       const run = await runDag(db, { dag: "extended", settings: { sweep: "off" } });

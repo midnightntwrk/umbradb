@@ -49,7 +49,8 @@ import {
  * (`backupAtStop`), on SIGUSR2 (`backupOnSignal`), `umbradb backup` in this process and as a process of its own whose
  * umask a shell set — has mode `0600` from creation (its temporary file included) to after its rename, on PostgreSQL
  * 18.6, where `pg_dump`'s output fills it, and PGlite 0.5.10, where the process writes the dump itself; an earlier file
- * at the path, open to all, is replaced, not written into. [A174 CI, BK-1; design §9.1; threat model gap 7]
+ * at the path, open to all, is replaced, not written into (`docs/THREAT_MODEL.md`, known
+ * gap 7).
  *
  * Seen from outside the code that writes the files: `./file-modes.ts` (each file's mode at its creation, at each open
  * and rename, every millisecond between them, while `pg_dump` runs, and at the end). Also: a file system that refuses
@@ -117,7 +118,7 @@ function placeFor(backend: BackupBackend, name: string): Place {
 }
 
 /**
- * The file-mode oracle for the backup at `place` given what this process's observer saw (and its `pg_dump`'s). [A174 CI]
+ * The file-mode oracle for the backup at `place` given what this process's observer saw (and its `pg_dump`'s).
  */
 function problemsAt(place: Place, observations: readonly ModeObservation[]): string[] {
   const all = [...observations, ...(place.pgDump?.observations() ?? [])];
@@ -179,7 +180,7 @@ function forAnotherProcess(backend: BackupBackend, setting: DatabaseParts): Data
   return { kind: "pglite", path: copy };
 }
 
-describe("A174: the observer (a umask of 000)", () => {
+describe("the observer (a umask of 000)", () => {
   it("sees a file Node.js creates with its default mode at its creation: 0666 under this umask, which the oracle refuses", async () => {
     const dir = mkdtempSync(join(root, "plain-"));
     const file = join(dir, "plain");
@@ -199,7 +200,7 @@ describe("A174: the observer (a umask of 000)", () => {
   });
 });
 
-describe.each(BACKUP_BACKENDS)("A174 on $name: every backup file is 0600 from creation to after its rename", (backend) => {
+describe.each(BACKUP_BACKENDS)("on $name: every backup file is 0600 from creation to after its rename", (backend) => {
   it(
     "UmbraDBHandle.backup (startUmbraDB), while blocks commit; an earlier file at the path, open to all, replaced",
     async () => {
@@ -383,7 +384,7 @@ describe.each(BACKUP_BACKENDS)("A174 on $name: every backup file is 0600 from cr
   );
 });
 
-describe("A174: a file system that refuses the mode", () => {
+describe("a file system that refuses the mode", () => {
   it("fails the backup with its error, its temporary file removed and no file written", async () => {
     const dir = mkdtempSync(join(root, "refused-"));
     const out = join(dir, "refused.backup");

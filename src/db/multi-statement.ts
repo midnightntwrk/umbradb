@@ -1,19 +1,19 @@
 /**
  * SQL of several statements in one call, for migrations only. A migration is one SQL text (`{ id, sql }`) that may hold
  * many statements, function bodies and comments. It runs in one transaction together with its `core_chain.migrations`
- * row. [DB-9, MD-1; design §4]
+ * row.
  *
  * A {@link Transaction}'s `query` and `execute` run one statement per call, on PostgreSQL's extended protocol
  * (parameters as text), which rejects a second statement (`42601`). A multi-statement text needs the simple protocol
  * instead: on PostgreSQL the writer session's simple query, on PGlite the engine's `exec`, inside the transaction's
- * job. [DB-9]
+ * job.
  *
  * The backends register that path for every transaction they open ({@link allowMultiStatement}), keyed by the
  * transaction object itself; nothing else holds it. Only the migration runner (`./migrate.ts`) calls
  * {@link runMultiStatement}. A `Transaction` keeps exactly `query` and `execute`, so a handle built on one (such as the
  * write handles callbacks get, `./write-handles.ts`) offers no way to the script path, and any object that is not a
  * transaction a backend opened is rejected. Modules are trusted: this keeps the path out of the callbacks' reach by
- * construction, not against a module that imports UmbraDB's internals. [Q46]
+ * construction, not against a module that imports UmbraDB's internals.
  */
 
 import type { Transaction } from "./api.js";

@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
  * checkout -- NOT via package-name resolution, and deliberately NOT installed as an UmbraDB
  * `package.json` devDependency.
  *
- * Why: (L2) this sprint's own pin list is deliberately just `effect` +
+ * Why: this sprint's own pin list is deliberately just `effect` +
  * `@midnightntwrk/wallet-sdk-abstractions` (both real devDependencies -- the required-gate
  * adapter, `../pg-tx-history-adapter.ts`, needs their real types/schema). The packages THIS
  * loader reaches for -- `@midnightntwrk/wallet-sdk-hd`, `@midnightntwrk/wallet-sdk-unshielded-

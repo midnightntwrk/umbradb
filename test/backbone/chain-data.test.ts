@@ -5,7 +5,6 @@ import { canonicalJson } from "../../src/backbone/core-chain-events/scale-value.
 import { CORE_TX_RESULTS } from "../../src/backbone/core-tx-results/core-tx-results.js";
 import { type LedgerHost, startLedgerWorker } from "../../src/ledger/worker/host.js";
 import type { TapeRecord } from "../../tools/tape/index.js";
-import { outsideIn8 } from "../node/in8.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
 import { a91Problems, a92Problems, a93Problems, itemsSeen, itemsWatcher } from "./chain-data-checks.js";
 import {
@@ -28,21 +27,20 @@ import { committed, ingest, PATIENCE_MS } from "./ingest-harness.js";
  * Chain data through the real process, on PostgreSQL 18 and PGlite 0.5.10. The test runs `startProcess` with UmbraDB's
  * backbone over the node source (what `umbradb run` passes) and the core modules `core-chain-events`,
  * `core-block-parsed` and `core-tx-results` enabled from S. A tape node serves synthetic tapes in the node's answer
- * shapes (`./chain-data-tapes.ts`); the real recorded tapes (`test/tape/real/`) replace them. [CD-4, CD-5, CD-6]
+ * shapes (`./chain-data-tapes.ts`); the real recorded tapes (`test/tape/real/`) replace them.
  *
  * - Every event of blocks 1–6 is stored, byte for byte, with its phase, extrinsic index, pallet, name and fields. At a
  *   synthetic upgrade, U's events are decoded with the metadata of U's parent's state, and F's with the new runtime's.
  *   U's events are the old runtime's, whose `CodeUpdated` the new runtime's metadata would read differently.
- *   [CD-4, A91]
  * - A system transaction between two regular ones is stored as 0, 1, 2, in that order; block 0's transactions are in
  *   body order. Each is parsed once, in the ledger worker. The test packages' loader
  *   (`test/ledger/fixtures/ledger-test-loader.ts`), which the worker imports, counts the vendored v9 package's
- *   `Transaction.deserialize` and `SystemTransaction.deserialize` there while the process runs. [CD-5, A92]
+ *   `Transaction.deserialize` and `SystemTransaction.deserialize` there while the process runs.
  * - `TxApplied`, `TxPartialSuccess` and `ExtrinsicFailed` (and `SystemTransactionApplied`) give `success`, `partial`,
  *   `failure` (and `success`), matched to their extrinsics by phase. The `tx-results` item has the form
- *   `ApplyInput.outcomes` takes. [CD-6, A93]
+ *   `ApplyInput.outcomes` takes.
  *
- * Every call the tape node received is one of the allowed node calls. [IN-8, A83]
+ * Every call the tape node received is one of the allowed node calls.
  */
 
 const CORE = [CORE_CHAIN_EVENTS, CORE_BLOCK_PARSED, CORE_TX_RESULTS];
@@ -50,11 +48,10 @@ const CORE = [CORE_CHAIN_EVENTS, CORE_BLOCK_PARSED, CORE_TX_RESULTS];
 /** The test packages' loader, which the ledger worker imports: it counts the package's native parses. */
 const COUNTING = new URL("../ledger/fixtures/ledger-test-loader.ts", import.meta.url);
 
-/** Every call the tape node received is one of the allowed node calls, and none went unanswered. [IN-8, A83] */
-function in8Problems(calls: readonly { readonly method: unknown; readonly outcome?: unknown }[]): string[] {
-  const outside = outsideIn8(calls.map((call) => call.method as string));
+/** The calls the tape node received that went unanswered (not on the tape, or an invalid request). */
+function unansweredCalls(calls: readonly { readonly method: unknown; readonly outcome?: unknown }[]): string[] {
   const unanswered = calls.filter((call) => call.outcome === "not-on-tape" || call.outcome === "invalid-request");
-  return [...outside.map((method) => `called ${method}`), ...unanswered.map((call) => `${String(call.method)}: ${String(call.outcome)}`)];
+  return unanswered.map((call) => `${String(call.method)}: ${String(call.outcome)}`);
 }
 
 describe.each(PROCESS_BACKENDS)("chain data through the process on $name", (backend: ProcessBackend) => {
@@ -82,11 +79,11 @@ describe.each(PROCESS_BACKENDS)("chain data through the process on $name", (back
     } finally {
       await process.close();
     }
-    expect(in8Problems(process.node.calls)).toEqual([]);
+    expect(unansweredCalls(process.node.calls)).toEqual([]);
     return { db, seen, process, deserialized };
   }
 
-  it("A91: core-chain-events stores every event of a range, byte for byte, with its decoded fields", async () => {
+  it("core-chain-events stores every event of a range, byte for byte, with its decoded fields", async () => {
     const scenario = a91RangeScenario();
     const { db, seen } = await run(scenario, ["chain-events"]);
     expect(await a91Problems(db, scenario)).toEqual([]);
@@ -110,7 +107,7 @@ describe.each(PROCESS_BACKENDS)("chain data through the process on $name", (back
     expect(payout?.amount).toBe("1267650600228229401496703205376");
   }, PATIENCE_MS * 2);
 
-  it("A91: at a runtime upgrade, U's events are decoded with the old runtime's metadata, F's with the new", async () => {
+  it("at a runtime upgrade, U's events are decoded with the old runtime's metadata, F's with the new", async () => {
     const scenario = a91UpgradeScenario();
     const { db, seen } = await run(scenario, ["chain-events"]);
     expect(await a91Problems(db, scenario)).toEqual([]);
@@ -123,7 +120,7 @@ describe.each(PROCESS_BACKENDS)("chain data through the process on $name", (back
     expect(JSON.parse(f?.fields as string)).toEqual({ hash: hex(new Uint8Array(32).fill(0x77)) });
   }, PATIENCE_MS * 2);
 
-  it("A91: the events' metadata is the runtime-metadata item's, read at each runtime's first block's parent only", async () => {
+  it("the events' metadata is the runtime-metadata item's, read at each runtime's first block's parent only", async () => {
     const scenario = a91UpgradeScenario();
     const { process } = await run(scenario, ["chain-events"]);
     const reads = scenario.chain.map((block) => process.node.count("state_getMetadata", [block.hex]));
@@ -131,7 +128,7 @@ describe.each(PROCESS_BACKENDS)("chain data through the process on $name", (back
     expect(reads).toEqual([1, 0, 0, 1, 0, 0]);
   }, PATIENCE_MS * 2);
 
-  it("A92: a system transaction between two regular ones is stored 0, 1, 2 in that order, each parsed once", async () => {
+  it("a system transaction between two regular ones is stored 0, 1, 2 in that order, each parsed once", async () => {
     const scenario = a92Scenario();
     const { db, seen, deserialized } = await run(scenario);
     expect(await a92Problems(db, scenario, deserialized)).toEqual([]);
@@ -149,7 +146,7 @@ describe.each(PROCESS_BACKENDS)("chain data through the process on $name", (back
     expect(await a93Problems(db, scenario)).toEqual([]);
   }, PATIENCE_MS * 2);
 
-  it("A92: a best block queued with its transactions, then finalized with its hash, is not parsed again", async () => {
+  it("a best block queued with its transactions, then finalized with its hash, is not parsed again", async () => {
     const { regular: [r], system: [s] } = ledgerTransactions(1, 1) as { regular: [Uint8Array]; system: [Uint8Array] };
     const chain = chainOf(2n, (h) => ({ extrinsics: h === 2n ? [ledgerTransaction([...r])] : [] }));
     const block = (h: number) => chain[h] as ChainBlock;
@@ -174,7 +171,7 @@ describe.each(PROCESS_BACKENDS)("chain data through the process on $name", (back
     expect(seen.results.get(2n)).toEqual(["success", "success"]);
   }, PATIENCE_MS * 2);
 
-  it("A92: block 0's transactions are stored in body order, each parsed once", async () => {
+  it("block 0's transactions are stored in body order, each parsed once", async () => {
     const scenario = a92GenesisScenario();
     const { db, seen, deserialized } = await run(scenario);
     expect(await a92Problems(db, scenario, deserialized)).toEqual([]);
@@ -190,7 +187,7 @@ describe.each(PROCESS_BACKENDS)("chain data through the process on $name", (back
     expect(events?.n).toBe("0");
   }, PATIENCE_MS * 2);
 
-  it("A93: TxApplied, TxPartialSuccess and ExtrinsicFailed give success, partial and failure, matched by phase", async () => {
+  it("TxApplied, TxPartialSuccess and ExtrinsicFailed give success, partial and failure, matched by phase", async () => {
     const scenario = a93Scenario();
     const { db, seen, deserialized } = await run(scenario);
     expect(await a93Problems(db, scenario)).toEqual([]);

@@ -13,21 +13,21 @@ import { MESSAGE_SCHEMAS, parseMessage, messageText, type ReadResult } from "../
 import { ESCAPES } from "./read-confinement-checks.js";
 
 /**
- * The read gate (`src/private/read-gate.ts`), statement by statement. [A172, PP-4; design §8]
+ * The read gate (`src/private/read-gate.ts`), statement by statement.
  * - Every escape the confinement test sends is refused as the core names it.
  * - The reads a private process makes (its own source's and a module's) pass.
  * - The text is read as PostgreSQL 18's lexer reads it (comments, nested comments, strings of each kind, dollar quotes,
  *   quoted names, parameters, numbers), with `standard_conforming_strings` on and off. A text the gate could read
  *   otherwise than the server is refused (`unreadable`).
  * - The `refused` field of `read-result` (in the message schema, as amended) is there exactly when the error is
- *   `read-refused`. [A115]
+ *   `read-refused`.
  */
 
 const command = (name: string | null) => ({ reason: "command", name });
 const fn = (name: string) => ({ reason: "function", name });
 const UNREADABLE = { reason: "unreadable", name: null };
 
-describe("A172: the gate refuses each escape as the core names it", () => {
+describe("the gate refuses each escape as the core names it", () => {
   it.each(ESCAPES.map((escape) => [escape.name, escape] as const))("%s", (_name, escape) => {
     const statements = escape.statements.map((sql) => ({ sql }));
     expect(refusedStatement(statements)).toEqual(escape.refused);
@@ -138,7 +138,7 @@ describe("A172: the gate refuses each escape as the core names it", () => {
   });
 });
 
-describe("A172: the gate reads the text as PostgreSQL does", () => {
+describe("the gate reads the text as PostgreSQL does", () => {
   it.each([
     // The private process's own reads of public data (`public-database.ts` and the parts it reuses).
     ["SELECT to_regclass('core_chain.identity') IS NOT NULL AS present"],
@@ -229,7 +229,7 @@ describe("A172: the gate reads the text as PostgreSQL does", () => {
   });
 });
 
-describe("A115 as amended (task 14.2b): read-result's refused", () => {
+describe("as amended: read-result's refused", () => {
   const CONFIG = `0x${"ef".repeat(32)}`;
   const refused: ReadResult = {
     v: 1,

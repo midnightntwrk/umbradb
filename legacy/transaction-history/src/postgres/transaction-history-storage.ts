@@ -20,7 +20,7 @@ import { resolveTransaction } from "../../../../src/postgres/transaction-lease.j
  *  runner's class `1`, the writer-lease layer's class `2`
  *  (`src/postgres/transaction-lease.ts`), and the Sprint 1 `CREATE EXTENSION` serialization's
  *  class `3` (`src/postgres/migrations/001_temporal_kv.ts`). See {@link writeRows}'s own doc for
- *  why this lock exists in addition to the `SELECT ... FOR UPDATE` `design.md` §3 documents. */
+ *  why this lock exists in addition to the `SELECT ... FOR UPDATE`. */
 const TX_HISTORY_ADVISORY_LOCK_CLASS = 4;
 
 // ---------------------------------------------------------------------------
@@ -153,8 +153,7 @@ function decodeSections(sections: Record<string, JsonEncoded>): Record<string, E
 }
 
 /** The shape actually stored in the `entry jsonb` column -- a full snapshot of the logical entry
- *  (including `identifiers`/`lifecycle`, denormalized ALSO onto their own columns; `design.md`
- *  §1). `timestamp`/`fees` use field-specific encodings (an ISO string; a decimal string tagged
+ *  (including `identifiers`/`lifecycle`, denormalized ALSO onto their own columns). `timestamp`/`fees` use field-specific encodings (an ISO string; a decimal string tagged
  *  by omission from a bare JSON number, i.e. always textual, never a bare JSON number) rather
  *  than the generic `sections` tagging scheme, since their JS-level type is fixed by {@link
  *  TransactionHistoryEntry} itself, not caller-opaque. */
@@ -228,7 +227,7 @@ function assertStoredEntryShape(entry: unknown, txHash: string): asserts entry i
  *  "validate-on-read" defense-in-depth `PgTemporalKV.toEntry` uses, in case of out-of-band
  *  corruption of the stored JSONB. `identifiers`/`lifecycle.status` are read from their own
  *  denormalized columns (always written in the same statement as `entry`, so never out of sync
- *  with it) rather than re-parsed out of the JSONB, matching `design.md` §1's own reasoning for
+ *  with it) rather than re-parsed out of the JSONB, matching the own reasoning for
  *  why those columns exist. */
 function decodeRow(row: TxHistoryRow): TransactionHistoryEntry {
   const stored = row.entry;
@@ -279,12 +278,11 @@ function capitalize(s: string): string {
 /**
  * Postgres implementation of `TransactionHistoryStorage` (`src/interfaces/
  * transaction-history-storage.ts`) against the `transaction_history` schema in
- * `migrations/004_transaction_history.ts` (`openspec/changes/
- * sprint-7-transaction-history-storage/design.md` §1). Does not run migrations itself — call
+ * `migrations/004_transaction_history.ts`. Does not run migrations itself — call
  * `runMigrations` (`migrate.ts`) before constructing this against a fresh database.
  *
  * `walletId` and the entry-merge function are BOTH bound at construction, never a method
- * parameter (`design.md` §2/§4) — this instance never imports the Midnight wallet SDK (or any
+ * parameter — this instance never imports the Midnight wallet SDK (or any
  * wallet-SDK package) at runtime. Production injects an UmbraDB-shaped merge function that
  * mirrors the real SDK's `mergeWalletEntries` documented semantics — NOT the raw SDK function
  * itself, which operates on a different entry shape (the SDK's `WalletEntry`, not this project's
@@ -370,7 +368,7 @@ export class PgTransactionHistoryStorage implements TransactionHistoryStorage {
    *  output round-trips through `JSON.parse` + this module's own decode helpers back to data
    *  equivalent to what `getAll()` returned at that same point (`specs/
    *  transaction-history-storage/spec.md`'s serialize-round-trip scenario). Implemented as
-   *  `getAll()` + `JSON.stringify`, not a stored representation (`design.md` §1). */
+   *  `getAll()` + `JSON.stringify`, not a stored representation. */
   async serialize(opts?: { tx?: TransactionHandle; signal?: AbortSignal }): Promise<string> {
     const all = await this.getAll(opts);
     return JSON.stringify(all.map(encodeStoredEntry));
@@ -430,25 +428,25 @@ export class PgTransactionHistoryStorage implements TransactionHistoryStorage {
   }
 
   /**
-   * The row-lock atomic-merge write path (`design.md` §3). Runs inside a transaction (either the
+   * The row-lock atomic-merge write path. Runs inside a transaction (either the
    * caller's own, via `opts.tx`, or one this method opened itself) and does exactly three things,
    * per this module's own division of responsibility with the caller-supplied {@link
-   * MergeEntriesFn} (`design.md` §2): **lock**, **persist the merge result**, and **clear
+   * MergeEntriesFn}: **lock**, **persist the merge result**, and **clear
    * superseded pending entries** — the section-merge/identifier-union/lifecycle-resolution logic
    * itself lives entirely in `this.mergeFn`, never here.
    *
-   * **Beyond what `design.md` §3's pseudocode literally shows**: a bare `SELECT ... FOR UPDATE`
+   * **Beyond what the pseudocode literally shows**: a bare `SELECT ... FOR UPDATE`
    * cannot lock a row that does not exist yet, so two concurrent FIRST-EVER writes to the same
    * `(walletId, hash)` would both read "no existing row," both compute their own merge from
    * `undefined`, and then race an `INSERT ... ON CONFLICT DO UPDATE` whose application-level merge
    * decision was made without seeing each other's data — precisely the "silently loses a section"
-   * failure mode `design.md` §3 warns a bare upsert exhibits, just relocated to the phantom-row
+   * failure mode a bare upsert exhibits, just relocated to the phantom-row
    * case instead of the already-exists case. A `pg_advisory_xact_lock` keyed on `(walletId, hash)`
    * — acquired BEFORE the `SELECT`, released automatically at this transaction's commit/rollback —
    * closes that gap by serializing every writer for a given hash regardless of whether a row
    * already exists, mirroring this project's own established use of `pg_advisory_xact_lock` for
    * an identical class of problem (`migrations/001_temporal_kv.ts`'s `CREATE EXTENSION` race fix).
-   * The `SELECT ... FOR UPDATE` is kept in addition, matching `design.md` §3's own text, as
+   * The `SELECT ... FOR UPDATE` is kept in addition, matching the own text, as
    * defense-in-depth for any future code path that might touch this table without going through
    * this method.
    */
@@ -506,8 +504,7 @@ export class PgTransactionHistoryStorage implements TransactionHistoryStorage {
             lifecycle = EXCLUDED.lifecycle, updated_at = now()
       `;
 
-      // Identifier-subset pending-clear (design.md §3 / specs/transaction-history-storage/
-      // spec.md): only runs on finalize/reject, and only when BOTH sides' identifier sets are
+      // Identifier-subset pending-clear: only runs on finalize/reject, and only when BOTH sides' identifier sets are
       // non-empty -- an empty set is vacuously "a subset" of anything, which would otherwise
       // clear every unrelated pending entry the moment any hash finalizes with zero identifiers.
       if (

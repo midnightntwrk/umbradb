@@ -36,14 +36,12 @@ import { committedIn, processOn, processProblems, rowsIn, S } from "./pglite-dir
  * - `umbradb restore` into its target (commits the backup's height).
  *
  * The read-only uses, `umbradb config check --database` and `umbradb backup`, create no directory.
- * [A166 CI, CF-4, BK-1; design §7; Q163 A]
  *
  * Also, at `openConfiguredDatabase`:
- * - nothing is created without the opt-in, since PGlite refuses before anything is created; [CF-9]
- * - a restore refused before loading creates nothing; [BK-3]
+ * - nothing is created without the opt-in, since PGlite refuses before anything is created;
+ * - a restore refused before loading creates nothing;
  * - `file://` paths are created as bare ones;
  * - a path through a file is refused (`database-error`, `open-failed`, not naming the path) and creates nothing;
- *   [CF-10]
  * - PGlite in memory and the browser's file systems create nothing.
  *
  * The committed negative control (a build that never creates the parents) is
@@ -99,7 +97,7 @@ async function until(check: () => boolean, failed: () => string | null): Promise
   }
 }
 
-describe("A166: what writes a PGlite database creates its directory with any missing parent (CF-4, Q163)", () => {
+describe("what writes a PGlite database creates its directory with any missing parent", () => {
   it("startUmbraDB creates <tmp>/a/b with <tmp>/a, logs it naming it, takes the lock beside it, and commits block S", async () => {
     const directory = join(tmp, "a", "b");
     expect(existsSync(join(tmp, "a"))).toBe(false);
@@ -144,7 +142,7 @@ describe("A166: what writes a PGlite database creates its directory with any mis
       signals.emit("SIGTERM");
       const { code, stderr } = await result;
       expect(stderr).not.toMatch(/startup refused|processing halted/);
-      // The log names the directory created, as configured. [Q165 B, Q167 A]
+      // The log names the directory created, as configured.
       expect(stderr).toContain(`created a new PGlite data directory ${directory} (and 2 missing parent directories)`);
       expect(code).toBe(EXIT.ok);
     } finally {
@@ -155,7 +153,7 @@ describe("A166: what writes a PGlite database creates its directory with any mis
   }, PATIENCE_MS * 2);
 
   it(
-    "umbradb run, the command in a child process, creates CF-4's relative path data/preview with data/ in its " +
+    "umbradb run, the command in a child process, creates the relative path data/preview with data/ in its " +
       "working directory and commits block S",
     async () => {
       const tape = await chainNode();
@@ -198,7 +196,7 @@ describe("A166: what writes a PGlite database creates its directory with any mis
     async () => {
       const { file } = await backupAt(project, PGLITE, BACKUP_HEIGHT, join(tmp, "ticker.backup"));
 
-      // Refused before loading, since the file is no backup: the target, not created yet, is left as it was. [BK-3]
+      // Refused before loading, since the file is no backup: the target, not created yet, is left as it was.
       const garbage = join(tmp, "garbage.backup");
       writeFileSync(garbage, "-- not a manifest\nSELECT 1;\n");
       const refusedTarget = join(tmp, "x", "y");
@@ -259,7 +257,7 @@ describe("A166: what writes a PGlite database creates its directory with any mis
   }, 120_000);
 });
 
-describe("openConfiguredDatabase and a PGlite directory's missing parents (CF-4, CF-9, Q163)", () => {
+describe("openConfiguredDatabase and a PGlite directory's missing parents", () => {
   const declarations = validateDeclarations({ backbone: testBuild([]).declarations.backbone, core: [], user: [] });
   const noHeight: CommittedHeight = async () => null;
 
@@ -284,7 +282,7 @@ describe("openConfiguredDatabase and a PGlite directory's missing parents (CF-4,
     return expect.unreachable("expected a refusal");
   }
 
-  it("creates nothing without the development opt-in: PGlite refuses first (CF-9)", async () => {
+  it("creates nothing without the development opt-in: PGlite refuses first", async () => {
     const entry = coreRevision({ kind: "pglite", path: join(tmp, "n", "o") }, { developmentOptIn: false });
     const error = await refusal(() => openConfiguredDatabase(entry, { committedHeight: noHeight, cwd: process.cwd() }));
     expect(error.code).toBe("development-opt-in-required");

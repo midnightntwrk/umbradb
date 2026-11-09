@@ -15,7 +15,7 @@ import { libraryData } from "./library-fixtures.js";
  * (`publicSide: { channels: true }`) on an in-memory chain, and private processes whose link is a host's `connect`
  * (`privateSide: { connect }`), each started as a host starts it (`startUmbraDB`), or — for a test's seams of the
  * channel link (`EngineInput.channelLink`: a controlled clock, a negative control's check removed) — through the
- * engine with the facade's exact input and the seam, under the handle a host gets. Imports nothing of Vitest. [LM-6]
+ * engine with the facade's exact input and the seam, under the handle a host gets. Imports nothing of Vitest.
  */
 
 /** A process and the lines it logged. */
@@ -31,7 +31,7 @@ export function startWith(options: UmbraDBOptions, seams?: EngineInput["channelL
   return handleOf(startProcess({ ...input, channelLink: seams }));
 }
 
-/** The `core` settings a public process on `db` adds for its link: the reader login on PostgreSQL. [CF-4, N5] */
+/** The `core` settings a public process on `db` adds for its link: the reader login on PostgreSQL. */
 export const readerOf = (db: TestDatabase): Readonly<Record<string, unknown>> =>
   db.transportReader === undefined ? {} : { transportReader: db.transportReader };
 
@@ -70,7 +70,7 @@ export function privateData(database: DatabaseParts, extra: Readonly<Record<stri
 
 /**
  * The `publicDatabase` a private process on the channel link is given: on PGlite the core's own (which only the core
- * opens, so it is read through the link), on PostgreSQL none (read through the link too). [LM-6, L33]
+ * opens, so it is read through the link), on PostgreSQL none (read through the link too).
  */
 export const linkReadPublicDatabase = (publicDb: TestDatabase): Readonly<Record<string, unknown>> =>
   publicDb.setting.kind === "pglite" ? { publicDatabase: publicDb.setting } : {};

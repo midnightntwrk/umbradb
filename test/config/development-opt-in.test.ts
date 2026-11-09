@@ -15,18 +15,17 @@ import { build, DEVTOOL } from "./history-fixtures.js";
 
 /**
  * The development-only features refuse without the `core` entry's `developmentOptIn`, naming the feature (`[CI]`).
- * Each goes through a configuration file, loaded, validated and taken to where the refusal is made: [A34 CI, CF-9]
+ * Each goes through a configuration file, loaded, validated and taken to where the refusal is made:
  *
  * - PGlite: the `database` setting of the process's `core` revision (the latest of the build's version) opens the
  *   database (`openConfiguredDatabase`), and `openPglite` refuses without the opt-in before anything is created;
- *   [Q102 A]
  * - a development-only module: the requirement graph refuses it (`development-opt-in-required`), given the history
- *   check's opt-in; [MD-5]
+ *   check's opt-in;
  * - `sweep: "off"`: the history check refuses it. This is the configuration side only; the sweep itself is tested
  *   elsewhere.
  *
  * Backups of a private database, the fourth development-only feature, are tested elsewhere, and so is "startup
- * refuses" through the runner's refused state. [CF-9]
+ * refuses" through the runner's refused state.
  */
 
 /** The configuration's builders and the test modules, imported by absolute path as an operator's file imports them. */
@@ -77,7 +76,7 @@ async function refusal(run: () => Promise<unknown>): Promise<UmbraError> {
   return expect.unreachable("expected a refusal");
 }
 
-describe("A34: PGlite refuses without developmentOptIn, through a configuration file (CF-9)", () => {
+describe("PGlite refuses without developmentOptIn, through a configuration file", () => {
   it("refuses a PGlite path naming PGlite and the opt-in, creating nothing; opens it with the opt-in", async () => {
     const dataDir = join(directory, "pglite-data");
     const coreOf = (optIn: string) =>
@@ -101,7 +100,7 @@ describe("A34: PGlite refuses without developmentOptIn, through a configuration 
     expect(existsSync(dataDir)).toBe(true);
   });
 
-  it("refuses PGlite in memory (CF-9's scenario), and takes the opt-in of the latest core revision (Q102, option A)", async () => {
+  it("refuses PGlite in memory, and takes the opt-in of the latest core revision (option A)", async () => {
     const declarations = build([]);
     const process = async (entries: string) =>
       processCoreEntry(validateConfig({ config: await load(entries), declarations, side: "public" }));
@@ -118,7 +117,7 @@ describe("A34: PGlite refuses without developmentOptIn, through a configuration 
     await db.close();
   });
 
-  it("maps the database parts to a backend: PGlite in memory, a PGlite directory, PostgreSQL (task 2.5's note)", () => {
+  it("maps the database parts to a backend: PGlite in memory, a PGlite directory, PostgreSQL (the note)", () => {
     expect(databaseTarget({ kind: "pglite", memory: true })).toEqual({ backend: "pglite", dataDir: "memory://" });
     expect(databaseTarget({ kind: "pglite", path: "/var/lib/umbradb" })).toEqual({ backend: "pglite", dataDir: "/var/lib/umbradb" });
     expect(databaseTarget({ kind: "pglite", path: "data/db" })).toEqual({ backend: "pglite", dataDir: "data/db" });
@@ -128,7 +127,7 @@ describe("A34: PGlite refuses without developmentOptIn, through a configuration 
     expect(databaseTarget({ kind: "postgres", ...withoutPassword })).toEqual({ backend: "postgres", connection: withoutPassword });
   });
 
-  it("passes the revision's developmentOptIn to PGlite and its fullPageWritesOffAllowed to PostgreSQL (DB-12)", async () => {
+  it("passes the revision's developmentOptIn to PGlite and its fullPageWritesOffAllowed to PostgreSQL", async () => {
     const declarations = build([]);
     const process = async (config: string) =>
       processCoreEntry(validateConfig({ config: await load(`coreEntry({ start: 0, config: { ...settings, ${config} } })`), declarations, side: "public" }));
@@ -172,7 +171,7 @@ describe("A34: PGlite refuses without developmentOptIn, through a configuration 
   });
 });
 
-describe("A34: a development-only module refuses without developmentOptIn, through a configuration file (CF-9, MD-5)", () => {
+describe("a development-only module refuses without developmentOptIn, through a configuration file", () => {
   /** Loads `entries`, validates them and resolves the graph on a new database, as startup does. */
   async function resolve(entries: string) {
     const declarations = build([DEVTOOL]);
@@ -194,7 +193,7 @@ describe("A34: a development-only module refuses without developmentOptIn, throu
     expect(graph.segments.get("devtool")).toEqual([{ from: 0n, to: null }]);
   });
 
-  it("takes the opt-in of the latest core revision of the build's version (Q102, option A)", async () => {
+  it("takes the opt-in of the latest core revision of the build's version (option A)", async () => {
     const earlierOnly =
       'coreEntry({ start: 0, config: { ...settings, database: { kind: "pglite", memory: true }, developmentOptIn: true } }), ' +
       `coreEntry({ start: 10, config: { ...settings, database: { kind: "pglite", memory: true } } }), ${devtool}`;
@@ -202,7 +201,7 @@ describe("A34: a development-only module refuses without developmentOptIn, throu
   });
 });
 
-describe("CF-9: sweep: off refuses without developmentOptIn, through a configuration file", () => {
+describe("sweep: off refuses without developmentOptIn, through a configuration file", () => {
   it("refuses it naming the feature, and accepts it with the opt-in", async () => {
     const declarations = build([]);
     const check = async (optIn: string) => {

@@ -25,7 +25,6 @@ import {
  * - no indefinite length appears;
  * - every map's keys are in strictly ascending bytewise order of their encodings;
  * - the decoded value equals the input.
- * [A53, DT-1]
  *
  * Determinism: every property runs with a pinned, reported fast-check seed.
  */
@@ -96,7 +95,7 @@ function mapsOf(value: Decoded): DecodedMap[] {
   return [];
 }
 
-describe("A53 — random jsonb objects: keys in RFC 8949 §4.2.1 order, encoding independent of insertion order", () => {
+describe("random jsonb objects: keys in RFC 8949 §4.2.1 order, encoding independent of insertion order", () => {
   it(`map keys ascend by encoded bytes, every head is shortest, the value round-trips (seed=${SEED})`, () => {
     fc.assert(
       fc.property(objectArb, (object) => {
@@ -184,7 +183,7 @@ describe("A53 — random jsonb objects: keys in RFC 8949 §4.2.1 order, encoding
   });
 });
 
-describe("A53 — integers of the whole CBOR 64-bit range encode with the shortest head", () => {
+describe("integers of the whole CBOR 64-bit range encode with the shortest head", () => {
   it(`random integers round-trip with no violation (seed=${SEED})`, () => {
     fc.assert(
       fc.property(
@@ -205,7 +204,7 @@ describe("A53 — integers of the whole CBOR 64-bit range encode with the shorte
   });
 });
 
-describe("A53 — numeric values with a fraction fail; integral ones give their canonical text", () => {
+describe("numeric values with a fraction fail; integral ones give their canonical text", () => {
   it(`integral decimal text gives BigInt's decimal text (seed=${SEED})`, () => {
     fc.assert(
       fc.property(fc.bigInt({ min: -(10n ** 40n), max: 10n ** 40n }), fc.nat({ max: 3 }), (value, zeros) => {
@@ -236,7 +235,7 @@ describe("A53 — numeric values with a fraction fail; integral ones give their 
   });
 });
 
-describe("A53 — non-integer or out-of-range JSON numbers fail to encode", () => {
+describe("non-integer or out-of-range JSON numbers fail to encode", () => {
   /** Puts `bad` at a random place inside a random JSON object. */
   const withBadNumber = (bad: fc.Arbitrary<unknown>) =>
     fc.tuple(objectArb, bad, fc.nat(), fc.boolean()).map(([object, value, pick, inArray]) => {

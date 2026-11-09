@@ -2,7 +2,6 @@
  * The backbone part `core-digest`. It keeps one digest per module table, chained at every height that changes the
  * table, and a checkpoint of every table's digest at each height h with h mod 14,400 = 0. Two instances fed the same
  * chain can then compare table by table: which table differs, and in which 14,400-height window it began to.
- * [DT-4, DT-5, Q84, Q86; CORE-ARCH §4.11, §4.13; design §4 "Change capture for digests", §6]
  *
  * **The tables** and every statement are in `./sql.ts`.
  *
@@ -11,7 +10,7 @@
  *
  * **Its `on-db-write`** runs last in the block. The runner calls it through `writes.write("core-digest", …)`, which
  * runs it as the login. It reads which tables are captured once per process, and asks in one statement which of them
- * hold shadow rows. For each such table, in the fixed table order: [RN-3, DT-3]
+ * hold shadow rows. For each such table, in the fixed table order:
  * - it takes the keys the block touched, with their rows before and after ({@link takeChanges}, which also empties the
  *   shadow table);
  * - it computes the table's changes and new digest (`src/determinism/digest.ts`);
@@ -22,7 +21,7 @@
  *
  * It has no `on-start-db`. What startup must do for the digests must follow every module's migrations, which come after
  * `core-digest`'s, so the database API does it (`src/db/migrate.ts`: change capture after each part, and the shadow
- * tables emptied when startup ends). [Q95]
+ * tables emptied when startup ends).
  */
 
 import { z } from "zod";
@@ -52,7 +51,7 @@ async function capturedOf(w: BlockWriteHandle, process: object | undefined): Pro
 
 /**
  * `core-digest`'s work for the block at `height` (see the module comment), on the block's write handle, after every
- * other part's `on-db-write`. [DT-4, DT-5]
+ * other part's `on-db-write`.
  */
 export async function digestBlock(w: BlockWriteHandle, height: bigint, process?: object): Promise<void> {
   const tables = await capturedOf(w, process);
@@ -60,7 +59,7 @@ export async function digestBlock(w: BlockWriteHandle, height: bigint, process?:
   for (const row of await readDigests(w)) {
     previous.set(JSON.stringify([row.schema, row.table]), row.digest);
   }
-  // A table whose shadow table holds no row has no change to take, so its digest stays. [DT-4]
+  // A table whose shadow table holds no row has no change to take, so its digest stays.
   for (const table of await tablesWithChanges(w, tables)) {
     const touched = await takeChanges(w, table);
     const changes = tableChanges(
@@ -77,7 +76,7 @@ export async function digestBlock(w: BlockWriteHandle, height: bigint, process?:
 /**
  * `core-digest`, the backbone part. It requires `blocks` (from `core-block-commit`) and provides `digest-tables` and
  * `digest-checkpoints`, its two tables. Its version is the build's (`UMBRADB_VERSION`), like every backbone part's and
- * core module's. [CORE-ARCH §4.11]
+ * core module's.
  */
 export const CORE_DIGEST = defineModule({
   id: "core-digest",
@@ -96,7 +95,7 @@ export const CORE_DIGEST = defineModule({
       table: { schema: "core_digest", tables: ["checkpoints"], kind: "append-only" },
     },
   ],
-  // Every backbone part starts at S, which is a mid-chain start when S is above genesis. [Q96]
+  // Every backbone part starts at S, which is a mid-chain start when S is above genesis.
   startsMidChain: true,
   configSchema: z.object({}),
   migrations: CORE_DIGEST_MIGRATIONS.map(({ id, sql }) => ({ id, sql })),

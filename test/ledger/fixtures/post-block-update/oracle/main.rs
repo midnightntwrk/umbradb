@@ -1,5 +1,5 @@
 // The node's end-of-block arithmetic at the pinned ledger revisions: the expected values of
-// `test/ledger/post-block-update.test.ts` (UmbraDB task 12.1a, owner decision Q113 A, A151).
+// `test/ledger/post-block-update.test.ts`.
 //
 // Built natively against an unpatched checkout of `midnight-ledger` at the commit
 // `vendor/ledger/<version>/upstream.json` pins (`run.sh`), with the storage layout the node uses

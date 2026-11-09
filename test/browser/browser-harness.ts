@@ -12,12 +12,12 @@ import { type PageServer, servePage } from "./page-server.js";
  * (`./fixtures/configuration.ts`) served on its own port ({@link pageBench}), the page's address, and the page's own
  * calls made through Chrome (`window.umbradb`, `browser/src/page.ts`). The calls are the admin endpoints' `/status`,
  * the contents hash, a read, what each worker told the page, and the page's backup and restore as the user makes them
- * (the "Back up" button's saved file, a file picked in "Restore a backup"). [A129–A132, BR-3, BK-5]
+ * (the "Back up" button's saved file, a file picked in "Restore a backup").
  *
  * Every wait is for a condition, read again until it holds or the patience runs out (a loaded machine), never a single
  * sample. Each wait has its own deadline, below a test's budget, which also bounds each call it makes to the page: a
  * page that never answers fails the wait at its deadline, naming what it waited for, instead of holding the test to its
- * timeout. The tab's report for such a failure gives each of its reads {@link REPORT_MS}. [docs/issues/00041]
+ * timeout. The tab's report for such a failure gives each of its reads {@link REPORT_MS}.
  */
 
 /** How long the tab's report ({@link tabReport}) waits for each thing it reads from the page. */
@@ -40,7 +40,7 @@ async function byDeadline<T, L>(promise: Promise<T>, deadline: number, late: L):
 const NO_ANSWER: unique symbol = Symbol("no answer from the page");
 
 /**
- * The tests' configuration module (bundled into the page; the Node.js run of the equality check imports it too). [A132]
+ * The tests' configuration module (bundled into the page; the Node.js run of the equality check imports it too).
  */
 export const TEST_CONFIGURATION = fileURLToPath(new URL("./fixtures/configuration.ts", import.meta.url));
 
@@ -80,7 +80,7 @@ export function pageUrl(origin: string, params: Readonly<Record<string, string>>
 /** A process of the page: the core, or a private instance by its id. */
 export type ProcessName = "core" | string;
 
-/** `/status`'s body, as far as the tests read it (heights as decimal text). [AE-5] */
+/** `/status`'s body, as far as the tests read it (heights as decimal text). */
 export interface StatusBody {
   readonly state: string;
   readonly ready: boolean;
@@ -114,7 +114,7 @@ export async function call<T>(tab: ChromeTab, who: ProcessName, method: string, 
   );
 }
 
-/** `/status` of `who` through the admin endpoints' channel, or null while nothing answers. [BR-3] */
+/** `/status` of `who` through the admin endpoints' channel, or null while nothing answers. */
 export async function statusOf(tab: ChromeTab, who: ProcessName): Promise<StatusBody | null> {
   const answer = await call<{ status: number; body: StatusBody }>(tab, who, "admin", "/status").catch(() => null);
   return answer?.body ?? null;
@@ -197,7 +197,7 @@ export async function eventWhen(tab: ChromeTab, who: ProcessName, type: string, 
   }
 }
 
-/** A link channel the page made (`browser/src/page.ts`'s `LinkRecord`). [L58] */
+/** A link channel the page made (`browser/src/page.ts`'s `LinkRecord`). */
 export interface PageLink {
   readonly link: number;
   readonly instance: string;
@@ -211,7 +211,7 @@ export async function linksOf(tab: ChromeTab): Promise<PageLink[]> {
 
 /**
  * A channel of `who`'s module API subscriptions the page opened (`openApi`, the process's `api.connect`), kept in the
- * page as `name`: what the test sends on it, and every message it received, parsed. [LM-11, L58]
+ * page as `name`: what the test sends on it, and every message it received, parsed.
  */
 export interface PageApiChannel {
   send(message: unknown): Promise<void>;
@@ -243,7 +243,7 @@ export async function apiChannel(tab: ChromeTab, who: ProcessName, name: string)
   };
 }
 
-/** `who`'s contents hash now, with the height its read saw. [DT-3] */
+/** `who`'s contents hash now, with the height its read saw. */
 export async function contentsHashOf(tab: ChromeTab, who: ProcessName): Promise<{ readonly height: string | null; readonly hash: string }> {
   const answer = await call<{ height: string | null; hash: string }>(tab, who, "contents-hash");
   if (answer === null) throw new Error(`the page has no process ${who}`);
@@ -340,7 +340,7 @@ export async function restoreThrough(tab: ChromeTab, path: string, patience: num
 
 /**
  * A backup's text with one value changed in a row the contents hash covers: `probe.rows`' row of height 5 moved to 50,
- * which the restore must refuse with `contents-hash-mismatch`. [DT-3, BK-3]
+ * which the restore must refuse with `contents-hash-mismatch`.
  */
 export function tamperedBackup(text: string): string {
   const row = /^INSERT INTO probe\.rows VALUES \(5, /m;

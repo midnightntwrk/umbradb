@@ -12,7 +12,7 @@ import { runProblems } from "./refcount-process.js";
 
 /**
  * `[FAULT]` A live object holding a row that the stored child lists no longer reach, on PostgreSQL 18 and PGlite
- * 0.5.10. [R30, LG-11, LG-14, Q144 B; design §4.2]
+ * 0.5.10.
  *
  * On the extended DAG fixture (`./refcount-live-object.ts`), the test package's live state holds x
  * (`small to-embedded`) by reference while the stored child list of its parent (`rewrite to-embedded`) embeds x, and x
@@ -28,11 +28,11 @@ import { runProblems } from "./refcount-process.js";
 
 const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
 
-describe.each(PROCESS_BACKENDS)("R30 (LG-11, LG-14, Q144 B): a live object holding a deleted row, on $name", (backend) => {
+describe.each(PROCESS_BACKENDS)("a live object holding a deleted row, on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("R30: x held by reference by a live state while its stored parent embeds it, queued with no root and no stored reference, is deleted at the next block; the package refuses to forget it on both tries, the worker is replaced, the new one loads the state at h − 1 from the database and applies h again; h commits with the node's root, R3 passing and the node set of a run that never held x by reference, and the state after h loads from the database", async () => {
+  it("x held by reference by a live state while its stored parent embeds it, queued with no root and no stored reference, is deleted at the next block; the package refuses to forget it on both tries, the worker is replaced, the new one loads the state at h − 1 from the database and applies h again; h commits with the node's root, R3 passing and the node set of a run that never held x by reference, and the state after h loads from the database", async () => {
     const h = LIVE_AT;
     const x = hex(HELD.key);
     const reference = await runLiveObject(await backend.database(), { keeping: "writes-again" });
@@ -71,7 +71,7 @@ describe.each(PROCESS_BACKENDS)("R30 (LG-11, LG-14, Q144 B): a live object holdi
     expect(live.states.at(-1)).toBe(`${h} ${hex(rootOf(Number(h), "extended").slice(1))} ${hex(rootOf(Number(h), "extended"))}`);
     expect(live.states).toEqual(reference.states);
 
-    // R3's check after every block; the node set, and the rows of every table that is not content-defined, after
+    // The check after every block; the node set, and the rows of every table that is not content-defined, after
     // every block as in the run that never held x by reference.
     expect(runProblems(live.run, "extended")).toEqual([]);
     expect(tableDifferences(live.run.tables, reference.run.tables)).toEqual([]);

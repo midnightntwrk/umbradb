@@ -9,9 +9,9 @@ import { userModules } from "./declarations.js";
 // - the field is a list of `{ name, needsState, run }`, each task naming one of the module's `block` items once;
 // - a module with tasks requires `block-parsed`;
 // - a module with a task that needs the state requires `ledger-state`, so the graph refuses it where
-//   `core-ledger-state` is not active [A137];
+//   `core-ledger-state` is not active;
 // - a private module has no tasks.
-// Each refusal is `invalid-declaration`, naming the field. [LG-17, MD-1, MD-2; design §5.5]
+// Each refusal is `invalid-declaration`, naming the field.
 
 /** The refusal of validating `declaration` alone as a user module. */
 function refusal(declaration: unknown): UmbraError {
@@ -30,7 +30,7 @@ const changed = (change: (d: Record<string, unknown>) => void, from: ModuleDecla
   return d;
 };
 
-describe("ledgerTasks in a declaration (task 12.6; LG-17, MD-1)", () => {
+describe("ledgerTasks in a declaration", () => {
   it("accepts a module's tasks, with or without the state, and a module without any", () => {
     const modules = [
       callArgsModule(),

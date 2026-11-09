@@ -9,22 +9,19 @@ import {
   EXPECTED_DEFERRED_COUNT, EXPECTED_REQUIRED_COUNT, type RequiredTestsManifest,
 } from "../integration/check-required-tests.js";
 import {
-  acceptanceIds, exportProblems, floorProblems, KEPT_REQUIRED_IDS, LEAN_FILES, LEAN_ROOT, leanProblems,
-  manifestProblems, MUTATION_TARGETS, mutationProblems, PENDING_FLOORS, QUINT_PROPOSAL, quintProblems, RETIRED_DEFERRED_IDS,
-  RETIRED_EXPORTS, RETIRED_MUTATION_TARGETS, RETIRED_PATHS, RETIRED_REQUIRED_IDS, retiredFileProblems, retiredPath,
-  scriptProblems, section13, SECTION_13_TERMS, sectionProblems, TRUST_IMPORTS,
+  exportProblems, floorProblems, KEPT_REQUIRED_IDS, LEAN_FILES, LEAN_ROOT, leanProblems, MUTATION_TARGETS,
+  mutationProblems, PENDING_FLOORS, RETIRED_DEFERRED_IDS, RETIRED_EXPORTS, RETIRED_MUTATION_TARGETS, RETIRED_PATHS,
+  RETIRED_REQUIRED_IDS, retiredFileProblems, retiredPath, scriptProblems, TRUST_IMPORTS,
 } from "./retirement.js";
 
 /**
  * The required-test manifest, `stryker.conf.json` `mutate`, the coverage floors of `vitest.config.ts` and the file list
  * of `Formal/Lean` are compared with the design's retirement list, and any difference fails. Each list is read from the
  * tree as the gates read it (the manifest's JSON, Stryker's JSON, the Vitest configurations as Vitest loads them, the
- * files below `Formal/Lean`). It is compared with the retirement list's lists, transcribed in `./retirement.ts` and
- * checked against the list's own words. [A5 STATIC, LS-5; design §13]
+ * files below `Formal/Lean`). It is compared with the retirement list's lists, transcribed in `./retirement.ts`.
  *
  * The retirement list's other rows are checked the same way: no retired file is left in the tree (git's list),
- * `package.json`'s scripts, the names `src/index.ts` exports (the TypeScript checker's list, types included), the
- * Quint change's status. [design §13]
+ * `package.json`'s scripts, the names `src/index.ts` exports (the TypeScript checker's list, types included).
  *
  * The negative controls below run each check on a list holding one retired item, or lacking one kept item, and see it
  * fail with the item named; the one on the barrel compiles a module that still exports a retired name.
@@ -88,41 +85,25 @@ interface VitestConfig {
   };
 }
 
-/** A Vitest configuration's export, imported by a computed specifier as Vitest loads it. [docs/issues/00017] */
+/** A Vitest configuration's export, imported by a computed specifier as Vitest loads it. */
 async function vitestConfig(file: string): Promise<VitestConfig> {
   return ((await import(pathToFileURL(path.join(ROOT, file)).href)) as { default: VitestConfig }).default;
 }
 
 const manifest = JSON.parse(read("test/integration/required-tests.manifest.json")) as RequiredTestsManifest;
-const added = acceptanceIds(read("openspec/changes/core-arch/acceptance.md"));
-/**
- * The required-test table's ids that may still be absent from the manifest: the four the crash runs bring after 0.10.0.
- * The other 18 have been added (pinned count 4 + 18 = 22, the key-handling id withdrawn). Once
- * the crash runs empty this list, the comparison is exact (4 + 22 = 26). [Q191, A120, Q154; acceptance §17]
- */
-const PENDING_CRASH_RUNS: readonly string[] = [
-  "runner.crash-sweep.contents-hash-equal",
-  "runner.crash-sweep.negative-control-fires",
-  "runner.restart-20.contents-hash-equal",
-  "core.full-crash-sweep",
-];
 
-describe("A5: the gates match design.md §13's retirement list (LS-5)", () => {
-  it("design.md §13 still says every item retirement.ts transcribes from it", () => {
-    const section = section13(read("openspec/changes/core-arch/design.md"));
-    expect(section.length).toBeGreaterThan(1000);
-    expect(sectionProblems(section)).toEqual([]);
-  });
-
-  it("the required-test manifest: ids 1–4 kept, ids 5–25 and the deferred id retired, the count pinned to the list", () => {
-    expect(added).toHaveLength(22); // the required-test table, read (one id withdrawn) [Q154; acceptance §17]
-    for (const id of PENDING_CRASH_RUNS) expect(added).toContain(id);
-    expect(manifestProblems(manifest, added, PENDING_CRASH_RUNS, EXPECTED_REQUIRED_COUNT, EXPECTED_DEFERRED_COUNT))
-      .toEqual([]);
+describe("the gates match the retirement list", () => {
+  it("the required-test manifest: crash-harness smoke ids kept, 0.9.5 ids retired, counts pinned, each id in its file", () => {
+    const required = manifest.required.map((entry) => entry.id);
+    const deferred = (manifest.deferred ?? []).map((entry) => entry.id);
+    for (const id of KEPT_REQUIRED_IDS) expect(required).toContain(id);
+    for (const id of [...RETIRED_REQUIRED_IDS, ...RETIRED_DEFERRED_IDS]) expect([...required, ...deferred]).not.toContain(id);
+    expect(required).toHaveLength(EXPECTED_REQUIRED_COUNT);
+    expect(deferred).toHaveLength(EXPECTED_DEFERRED_COUNT);
     for (const entry of manifest.required) expect(read(entry.file!)).toContain(`[[${entry.id}]]`);
   });
 
-  it("stryker.conf.json mutates exactly §13's targets, at break 65, and the mutation run runs their tests", async () => {
+  it("stryker.conf.json mutates exactly the targets, at break 65, and the mutation run runs their tests", async () => {
     const stryker = JSON.parse(read("stryker.conf.json")) as { mutate: string[]; thresholds: { break: number } };
     const include = (await vitestConfig("vitest.mutation.config.ts")).test?.include ?? [];
     expect(mutationProblems(stryker.mutate, include, stryker.thresholds.break)).toEqual([]);
@@ -138,25 +119,24 @@ describe("A5: the gates match design.md §13's retirement list (LS-5)", () => {
     expect(srcEntries).toContain("db/");
     expect(floorProblems(coverage!.thresholds!, coverage!.exclude ?? [], srcEntries, PENDING_FLOORS)).toEqual([]);
     // No floor of the retirement list is pending: the reclamation step's 95/90 is held like the others.
-    // [Q158 A; design §13]
     expect(PENDING_FLOORS).toEqual([]);
   });
 
-  it("Formal/Lean holds exactly §13's files: TemporalKV and Checkpoint gone, the aggregators and APISmoke trimmed", () => {
+  it("Formal/Lean holds exactly the files: TemporalKV and Checkpoint gone, the aggregators and APISmoke trimmed", () => {
     const files = filesBelow(LEAN_ROOT);
     expect(files).toContain("Formal/Lean/UmbraDBFormalTest/Trust.lean");
     expect(leanProblems(files, read)).toEqual([]);
     expect(files.sort()).toEqual([...LEAN_FILES].sort());
   });
 
-  it("no file §13 retires is left in the tree", () => {
+  it("no retired file is left in the tree", () => {
     const files = treeFiles();
     expect(files.length).toBeGreaterThan(500);
     expect(files).toContain("test/library-surface/retirement.test.ts");
     expect(retiredFileProblems(files)).toEqual([]);
   });
 
-  it("package.json: no archive:sync, no test:live, and legacy's program out of the typecheck (Q112 B)", () => {
+  it("package.json: no archive:sync, no test:live, and legacy's program out of the typecheck", () => {
     const { scripts } = JSON.parse(read("package.json")) as { scripts: Record<string, string> };
     expect(scripts.typecheck).toBeDefined();
     expect(scriptProblems(scripts)).toEqual([]);
@@ -165,46 +145,9 @@ describe("A5: the gates match design.md §13's retirement list (LS-5)", () => {
   it("src/index.ts exports none of 0.9.5's retired names, values or types", () => {
     expect(exportProblems("src/index.ts", exportedNames(path.join(ROOT, "src/index.ts")))).toEqual([]);
   });
-
-  it("openspec/changes/v1.1.0-quint-model-checking is Archived, with §13's reason", () => {
-    expect(quintProblems(read(QUINT_PROPOSAL))).toEqual([]);
-  });
 });
 
-describe("A5's negative controls: a list that differs from design.md §13 fails, naming the difference", () => {
-  const manifestOf = (required: readonly string[], deferred: readonly string[] = []) => ({
-    required: required.map((id) => ({ id, file: "test/x.test.ts" })),
-    deferred: deferred.map((id) => ({ id })),
-  });
-
-  it("a manifest with a retired id, without a kept id, with a stranger, or with a wrong pinned count fails", () => {
-    const kept = [...KEPT_REQUIRED_IDS];
-    expect(manifestProblems(manifestOf(kept), added, added, 4, 0)).toEqual([]);
-    expect(manifestProblems(manifestOf([...kept, "property.p3.replay-fold-equivalence"]), added, added, 5, 0)).toEqual([
-      "the manifest still holds property.p3.replay-fold-equivalence, retired by design.md §13",
-    ]);
-    expect(manifestProblems(manifestOf(kept, RETIRED_DEFERRED_IDS), added, added, 4, 1)).toEqual([
-      "the manifest still holds crash.pg-kill-save.no-duplicate-with-idempotency-key, retired by design.md §13",
-    ]);
-    expect(manifestProblems(manifestOf(kept.slice(1)), added, added, 3, 0)).toEqual([
-      `the manifest lacks ${kept[0]}, kept by design.md §13 (ids 1–4)`,
-    ]);
-    expect(manifestProblems(manifestOf([...kept, "invented.id"]), added, added, 5, 0)).toEqual([
-      "the manifest requires invented.id, which is neither a kept id (1–4) nor an id of acceptance.md §17",
-    ]);
-    expect(manifestProblems(manifestOf(kept), added, added, 25, 1)).toEqual([
-      "EXPECTED_REQUIRED_COUNT is 25 but the manifest requires 4 ids",
-      "EXPECTED_DEFERRED_COUNT is 1 but the manifest defers 0 ids",
-    ]);
-    // With no pending id (after the crash runs), every id of the required-test table is required; with them all, the
-    // list is exact. [acceptance §17]
-    expect(manifestProblems(manifestOf(kept), added, [], 4, 0)).toHaveLength(added.length);
-    expect(manifestProblems(manifestOf([...kept, ...added]), added, [], 26, 0)).toEqual([]);
-    // The 0.9.5 manifest (ids 1–25, the deferred id) fails on every retired id.
-    const old = manifestOf([...kept, ...RETIRED_REQUIRED_IDS], RETIRED_DEFERRED_IDS);
-    expect(manifestProblems(old, added, added, 25, 1)).toHaveLength(RETIRED_REQUIRED_IDS.length + 1);
-  });
-
+describe("negative controls: a list that differs from the retirement list fails, naming the difference", () => {
   it("a mutate list with a 0.9.5 adapter, without a target, another break, or a stray test fails", () => {
     const targets = Object.keys(MUTATION_TARGETS);
     const tests = Object.values(MUTATION_TARGETS).flat();
@@ -222,7 +165,7 @@ describe("A5's negative controls: a list that differs from design.md §13 fails,
     expect(mutationProblems(RETIRED_MUTATION_TARGETS, tests, 65)).toHaveLength(5 + targets.length);
   });
 
-  it("floors: a retired key, a missing or weakened §13 floor, a src/ directory without one, the exclusion, fail", async () => {
+  it("floors: a retired key, a missing or weakened floor, a src/ directory without one, the exclusion, fail", async () => {
     const real = (await vitestConfig("vitest.config.ts")).test!.coverage!;
     const thresholds = real.thresholds!;
     const dirs = ["db/", "helpers/", "index.ts"];
@@ -243,7 +186,7 @@ describe("A5's negative controls: a list that differs from design.md §13 fails,
       "vitest.config.ts has no floor **/src/newdir/** (design.md §13's default for src/**)",
       "src/loose.ts lies under no floor of design.md §13 (only directories have one)",
     ]);
-    // A pending floor may be absent, but not weaker; once nothing is pending, its absence fails. [Q158 A]
+    // A pending floor may be absent, but not weaker; once nothing is pending, its absence fails.
     const step = "**/src/backbone/core-ledger-state/refcount.ts";
     const { [step]: _step, ...withoutStep } = thresholds;
     expect(floorProblems(withoutStep, [], dirs, [step])).toEqual([]);
@@ -321,7 +264,7 @@ describe("A5's negative controls: a list that differs from design.md §13 fails,
     ]);
   });
 
-  it("a barrel that still exports a retired name, a value or a type, fails; §12's Migration does not", () => {
+  it("a barrel that still exports a retired name, a value or a type, fails; the Migration does not", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "umbradb-a5-"));
     try {
       const barrel = path.join(dir, "index.ts");
@@ -339,22 +282,5 @@ describe("A5's negative controls: a list that differs from design.md §13 fails,
       rmSync(dir, { recursive: true, force: true });
     }
     expect(RETIRED_EXPORTS).not.toContain("Migration");
-  });
-
-  it("a Quint change still Proposed, or Archived without §13's reason, fails", () => {
-    expect(quintProblems("> **Status:** Proposed. Change id `v1.1.0-quint-model-checking`")).toEqual([
-      `${QUINT_PROPOSAL}'s status is "Proposed. Change id \`v1.1.0-quint-model-checking\`", not Archived (design.md §13)`,
-    ]);
-    expect(quintProblems("> **Status:** Archived.")).toEqual([
-      `${QUINT_PROPOSAL}'s Archived status does not give §13's reason (C2a retired)`,
-    ]);
-  });
-
-  it("a §13 that no longer says a transcribed item fails", () => {
-    const section = section13(read("openspec/changes/core-arch/design.md"));
-    const dropped = SECTION_13_TERMS[0]!;
-    expect(sectionProblems(section.replace(dropped, "something else"))).toEqual([
-      `design.md §13 no longer says ${dropped}: the transcription in retirement.ts is out of date`,
-    ]);
   });
 });

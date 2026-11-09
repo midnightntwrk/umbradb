@@ -10,7 +10,7 @@ import type { DatabaseParts, PostgresParts } from "../../src/config/database-par
 /**
  * A private process halts when the public core restarts with a data field of its configuration changed, and only
  * then. The configuration hash is on every module API answer and holds no secret. Shared by `config-hash.test.ts` and
- * its negative controls' file; imports nothing of Vitest. [A162, PP-14, RN-16, PP-4, Q147]
+ * its negative controls' file; imports nothing of Vitest.
  *
  * **The run** ({@link a162Run}): a public core with the public module `pub` (a data setting `level`, a route `GET
  * /level`), its module API on a free port and, for a private process with a transport, its `listen.privateLink` behind
@@ -25,7 +25,7 @@ import type { DatabaseParts, PostgresParts } from "../../src/config/database-par
  * and the run waits until the private process has ended or reached 16. Each restart's answers of the core's module API
  * (`GET /level` and a 404) and one of the private process's are read for `X-Umbra-Config-Hash`; the core's are read both
  * on its listener and through its mounted handler (the engine's `api.http`, in a host server of the test's), every one
- * written after the hash exists. [PP-14, LM-4]
+ * written after the hash exists.
  */
 
 /** The public module `pub` (see the module comment). */
@@ -49,7 +49,7 @@ export function pub(): ModuleDeclaration {
 
 /**
  * `pub`'s entries: `level` 0 from 1, and `level` 1 from 30 — or, with a changed configuration, `level` 2 from 30: the
- * same revisions, one data field changed above the cursor (no other change is allowed there). [CF-6]
+ * same revisions, one data field changed above the cursor (no other change is allowed there).
  */
 const pubEntries = (changed: boolean) => [
   { id: "pub", start: 1, version: "1.0.0", config: { level: 0 } },
@@ -144,7 +144,7 @@ const originOf = (api: { readonly host: string; readonly port: number } | null):
   return `http://${api.host}:${api.port}`;
 };
 
-/** Runs the configuration-hash scenario (see the module comment) on `backend`. [A162] */
+/** Runs the configuration-hash scenario (see the module comment) on `backend`. */
 export async function a162Run(backend: PrivateBackend, options: A162Options): Promise<A162Run> {
   const withPrivate = options.private ?? true;
   const postgres = backend.kind === "postgres";
@@ -189,7 +189,7 @@ export async function a162Run(backend: PrivateBackend, options: A162Options): Pr
   const reconnect = async (): Promise<void> => {
     if (!options.transport) await publicDb.terminate?.(READER_LOGIN);
   };
-  /** The core's answers on its listener and through its mounted handler, both after the hash exists. [RN-16, LM-4] */
+  /** The core's answers on its listener and through its mounted handler, both after the hash exists. */
   const reads = async (where: string, api: { readonly host: string; readonly port: number } | null, handle: Mountable) => {
     const host = await mountHandlers(handle);
     try {
@@ -282,8 +282,6 @@ const formsOf = (text: string): readonly string[] => [text, Buffer.from(text, "u
  *   another after a data field changed;
  * - the private process went on to 8 and 11 and then halted with `public-config-changed`, still at 11 — no other
  *   height processed — while the core reached 16.
- *
- * [A162]
  */
 export function a162Problems(run: A162Run): string[] {
   const problems: string[] = [];

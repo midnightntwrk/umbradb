@@ -11,7 +11,6 @@ import { type DagRun, runDag } from "./refcount-process.js";
 /**
  * The runs of a live object holding a row the stored child lists no longer reach, shared by
  * `ledger-refcount-live-object.test.ts` and its negative control. Imports nothing of Vitest.
- * [R30, LG-11, LG-14, Q144 B]
  *
  * The extended DAG fixture runs through the real process (`./refcount-process.ts`) to {@link LIVE_AT}. With
  * `holds-by-reference` its test package writes what `writes-again` writes, but its live states keep each node in the
@@ -83,7 +82,7 @@ export async function runLiveObject(db: ProcessDatabase, options: LiveObjectOpti
 
 /**
  * The state after {@link LIVE_AT} loaded from `db` by a new ledger worker (its test package told `keeping`), through a
- * read of the database API: its root, whether it was read from the database, and the states the package read. [R30]
+ * read of the database API: its root, whether it was read from the database, and the states the package read.
  */
 async function loadAfter(db: ProcessDatabase, keeping: Keeping): Promise<NonNullable<LiveObjectRun["loaded"]>> {
   const memory = countersMemory();

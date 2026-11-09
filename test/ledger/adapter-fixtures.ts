@@ -7,12 +7,12 @@ import type { ApplyInput } from "../../src/ledger/types.js";
 import { free } from "./node-format.js";
 
 // Blocks for the adapter test suite, built with the vendored packages' published API, never through the adapters
-// under test, so that no network and no node is needed. [A98]
+// under test, so that no network and no node is needed.
 //
 // - A deploy is proven with a proving provider that returns empty proofs and then bound, as a chain transaction is
 //   (`(signature, proof, pedersen-schnorr)`), so it has the ledger's own transaction hash; with proof checks off
 //   the ledger never looks at the proofs. Its one operation, `emit`, carries the verifier key in
-//   `fixtures/verifier-key/` (a deploy needs one). [LG-15]
+//   `fixtures/verifier-key/` (a deploy needs one).
 // - A contract call is proof-erased (`(signature, (), pedersen)`), as `midnight-ledger`'s own integration tests apply
 //   calls without a prover (`integration-tests/src/test/utils/log-contract.ts`): proving a call would need its circuit.
 // - The system transaction is `DistributeReserve(1000000000000000)`: for v8 the bytes 0.9.5's replay decoder test
@@ -169,7 +169,7 @@ export function cellValue(bytes: Uint8Array, length: number = bytes.length): v9.
   return { tag: "cell", content: atom(bytes, length) };
 }
 
-/** A MIP-0002 log value: `[version (4 bytes), event type (1 byte), data]`. [CC-3] */
+/** A MIP-0002 log value: `[version (4 bytes), event type (1 byte), data]`. */
 export function wrappedLog(version: number, eventType: number, data: v9.EncodedStateValue): v9.EncodedStateValue {
   return {
     tag: "array",

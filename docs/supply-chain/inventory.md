@@ -60,7 +60,7 @@ tooling only — never shipped in the runtime path.
 > **dev/optional** toolchain, **none in the runtime (`@electric-sql/pglite`, `postgres`,
 > `typescript`, `ws`, `zod`) tree**: `esbuild@0.28.2`, `protobufjs@7.6.5`, `ssh2@1.17.0`, and the optional
 > `cpu-features@0.0.10` + `fsevents@2.3.3` (darwin-only). This corrects the "zero install scripts"
-> phrasing in `openspec/changes/v1.0.0-infosec-signoff/design.md §4`: the lockfile flags five.
+> phrasing of the security-posture change's design: the lockfile flags five.
 > The planned G18 `.npmrc` `ignore-scripts=true` neutralizes all of them (and any future one)
 > regardless. On Linux CI the two optional ones are not installed at all.
 
@@ -104,7 +104,7 @@ Source: `nix/midnight-env/flake.nix`. Pre-built upstream release tarballs, conte
 
 Source: `nix/midnight-env/flake.nix` (`midnightDockerImages`) and `scripts/start-stack.sh`.
 Pinned by immutable `@sha256:` **content digest**. Digest pinning gives immutability, *not* CVE
-freedom — hence the scheduled Trivy scan (G18).
+freedom — hence the scheduled Trivy scan.
 
 | Image | Tag | Digest | Pinning | Purpose | Update-watch |
 |---|---|---|---|---|---|
@@ -112,7 +112,7 @@ freedom — hence the scheduled Trivy scan (G18).
 | `midnightntwrk/proof-server` | 8.1.0 | `sha256:801bbc0340e9e96f16735f77b523f23c7459e3359842f7c79c2c53f4e994d531` | image digest | Midnight proof server | G18 Trivy scan + Midnight releases |
 
 The PostgreSQL image of the tests, their Testcontainers helpers, the benchmarks and the pack smoke test is pinned the
-same way, once, in `test/postgres-image.ts` (owner decision Q82, `openspec/changes/core-arch` A148). The supply-chain
+same way, once, in `test/postgres-image.ts`. The supply-chain
 gate's image-pin agreement step checks it against the reviewed pin, and `test/dependencies/postgres-image.test.ts` fails
 if any file names another PostgreSQL image. It is test infrastructure, not in the Trivy scan.
 
@@ -172,10 +172,9 @@ Tools the build, test, and CI depend on that are not captured as package entries
 | `@testcontainers/postgresql` | 12.0.4 (npm, §2) | conformance tests | Disposable Postgres container | testcontainers |
 | Nix (flakes) | host | `nix/midnight-env/` dev env | Reproducible dev stack | Nix releases |
 | `lake` / `elan` (Lean) | with `v4.32.0` | `Formal/Lean/` | Build/check proofs | lean4 releases |
-| `openspec` CLI | host | change-spec workflow (`openspec/`) | Manages change proposals/specs | openspec releases |
 | GitHub Actions (pinned by SHA) | `actions/checkout@11d5960…` (v4), `actions/setup-node@49933ea…` (v4) | `.github/workflows/conformance.yml` | CI runner actions, SHA-pinned | Dependabot / action releases |
-| `gitleaks` | CI-side (G18, this change) | `supply-chain.yml` | Full-history secret scan | gitleaks releases |
-| `trivy` | CI-side (G18, this change) | `supply-chain.yml` | HIGH/CRITICAL CVE scan of the two image digests | trivy releases |
+| `gitleaks` | CI-side (this change) | `supply-chain.yml` | Full-history secret scan | gitleaks releases |
+| `trivy` | CI-side (this change) | `supply-chain.yml` | HIGH/CRITICAL CVE scan of the two image digests | trivy releases |
 
 ---
 
@@ -194,7 +193,7 @@ commits).
 | ledger v8 package (`vendor/ledger/v8/pkg/`) | `ledger-8.1.2` | exact commit `36d7442172136758e33009f75ff4aa56616cff40` + patches; output SHA-256 | github.com/midnightntwrk/midnight-ledger | Ledger v8 for blocks built by v8 runtimes | midnight-ledger releases; the v8 ledger midnight-node pins |
 | ledger v9-rc3 package (`vendor/ledger/v9-rc3/pkg/`) | `ledger-9.1.0.0-rc.3` | exact commit `4823b5351b17cc49e30f19760dbd30a73cf95e22` + patches; output SHA-256 | github.com/midnightntwrk/midnight-ledger | Ledger v9 as runtime 2.0 built it (`spec_version` 2,000,000–2,000,999; stagenet) | the v9 ledger midnight-node 2.0 pins (`crate-ledger-9.1.0.0-rc.3`) |
 | ledger v9 package (`vendor/ledger/v9/pkg/`) | `ledger-9.1.0.0-rc.5` | exact commit `67f9f97246339539af0091c4d8c6bc5ab236a191` + patches; output SHA-256 | github.com/midnightntwrk/midnight-ledger | Ledger v9, and the v8 → v9 state translation | midnight-ledger releases; the v9 ledger midnight-node pins |
-| `v8-to-v9-state-translation` (in the v9 package) | rev `da96e33d78ee9b7d3867b15c1037510d499cd909` | exact git rev in the patched `Cargo.lock` | github.com/midnightntwrk/midnight-ledger | The ledger team's v8 → v9 state translation (LG-9) | the revision midnight-node pins |
+| `v8-to-v9-state-translation` (in the v9 package) | rev `da96e33d78ee9b7d3867b15c1037510d499cd909` | exact git rev in the patched `Cargo.lock` | github.com/midnightntwrk/midnight-ledger | The ledger team's v8 → v9 state translation | the revision midnight-node pins |
 | Build image base `rust:1.98.1-slim-bookworm` | 1.98.1 | index digest `sha256:ff521445a372125ed4f76e1453a1f8098f2d05332d1601d30db1c1f62757e730` | Docker Hub (official image) | Rust toolchain for the builds | Rust releases |
 | clang 14, llvm 14, git, jq, curl (in the image) | `1:14.0.6-12`, `1:2.39.5-0+deb12u3`, `1.6-2.1+deb12u2`, `7.88.1-10+deb12u15` | exact versions from snapshot.debian.org `20260918T000000Z` | Debian bookworm | C toolchain for `blst` on wasm32; source fetch; build scripting | Debian security updates |
 | `wasm-bindgen-cli` (in the image) | 0.2.108 | exact version, `cargo install --locked` | crates.io | JavaScript bindings (the version ledger-9.1.0.0-rc.5 pins; the v8 and v9-rc3 patches move ledger-8.1.2 and ledger-9.1.0.0-rc.3 from 0.2.104, whose output varies from run to run, to it) | wasm-bindgen releases |

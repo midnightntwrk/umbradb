@@ -4,18 +4,15 @@
  * - `core-contract-logs-full`, from the full apply's `vm-logs`;
  * - the development-only `core-contract-logs-fast`, from the transcripts, without state, or else a halt.
  *
- * [CC-2, CC-3, Q19, Q20, Q21; CORE-ARCH §4.7, §4.11]
- *
  * At most one of them is active at a height. One may stop at a height and the other start at the next, with no schema
  * change; for example, a database restored from a backup taken with `-full` may be continued with `-fast`.
- * [MD-6, CC-4]
  *
  * **The item is shared.** Both providers declare it in its own schema, `contract_logs` (the item's name with `-`
  * replaced by `_`), with the same `table` declaration and the same migrations (`CONTRACT_LOGS_MIGRATIONS`, in
  * `./sql.ts`). The database API records them under the item's name and runs them once, under the item's role
  * `umbradb_i_contract_logs`; the provider active at each height writes under that role. Both providers take their
  * declaration from here ({@link contractLogsItem}), so they cannot differ (which would be
- * `shared-item-migrations-differ`). [DB-8, Q89]
+ * `shared-item-migrations-differ`).
  *
  * **The `block` item** is a frozen array of {@link ContractLog} in emission order: the order the ledger emitted the
  * logs, with `index` numbering them in the block from 0. `-full` puts it at `on-compute` and `-fast` at `on-parse`, so a
@@ -23,7 +20,7 @@
  *
  * **The table** and every statement are in `./sql.ts`.
  *
- * Ledger v8 has no MIP-0002 events, so no v8 block has a row. [Q54]
+ * Ledger v8 has no MIP-0002 events, so no v8 block has a row.
  */
 
 import type { BlockWriteHandle } from "../../db/api.js";
@@ -31,12 +28,12 @@ import type { LogEventType } from "../../ledger/types.js";
 import type { BlockContext, ItemDeclaration } from "../../modules/declaration.js";
 import { CONTRACT_LOGS_MIGRATIONS, CONTRACT_LOGS_SCHEMA, insertLogRows } from "./sql.js";
 
-/** The item both providers give. [Q20] */
+/** The item both providers give. */
 export const CONTRACT_LOGS_ITEM = "contract-logs";
 
 /** A MIP-0002 event of a block: a contract log of an applied segment, as both providers give it. */
 export interface ContractLog {
-  /** The index of its transaction in the block, in `block-parsed`'s order. [CD-5] */
+  /** The index of its transaction in the block, in `block-parsed`'s order. */
   readonly transaction: number;
   /** Its number in the block, in emission order, from 0. */
   readonly index: number;

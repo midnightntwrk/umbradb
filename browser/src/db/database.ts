@@ -3,7 +3,6 @@
  * runs PGlite only, since PostgreSQL needs a network connection a page cannot make. It runs in memory
  * (`{ kind: "pglite", memory: true }`, the default) or in the origin's private file system
  * (`{ kind: "pglite", path: <name> }`, OPFS, PGlite's `opfs-ahp://` storage), under its Web Lock (`./web-lock.ts`).
- * [BR-1, CF-4, CF-9; design §7, §9.2]
  *
  * The opening itself is the database API's own (`openPglite`, `src/db/pglite.ts`): the development opt-in is checked
  * first (`development-opt-in-required`), the lock taken, then the engine started with the pinned start parameters.

@@ -11,10 +11,10 @@ import { OTHER_REQUESTS, statusSnapshot } from "./admin-harness.js";
 /**
  * The admin route table:
  * - It mounts by path the endpoints of the backbone parts `core-health` (`/health/live`, `/health/ready`),
- *   `core-status` (`/status`) and `core-config` (`/config`). Only backbone parts may provide one. [AE-1, Q70]
+ *   `core-status` (`/status`) and `core-config` (`/config`). Only backbone parts may provide one.
  * - `GET` of one of their paths runs that endpoint's function on the snapshot (the query aside); anything else is 404
- *   `not-found`. [AE-1, AE-2]
- * - An endpoint that throws answers 500 with a fixed message. [AE-6]
+ *   `not-found`.
+ * - An endpoint that throws answers 500 with a fixed message.
  *
  * The endpoints' minimal functions here: `/health/live` from the heartbeat's age against the liveness timeout,
  * `/health/ready` from the published readiness, `/status` the published state, `/config` the published (redacted)
@@ -34,7 +34,7 @@ function snapshot(liveness = 30_000, ready = true): AdminSnapshot {
 
 const view = (beatAgeMs: number, given: AdminSnapshot = snapshot()): AdminView => ({ snapshot: given, beatAgeMs, nowNs: 0n });
 
-describe("the admin route table (AE-1, Q70)", () => {
+describe("the admin route table", () => {
   it("mounts exactly the backbone parts core-health, core-status and core-config, with the four paths", () => {
     expect(ADMIN_PARTS).toEqual([CORE_HEALTH_ENDPOINTS, CORE_STATUS_ENDPOINTS, CORE_CONFIG_ENDPOINTS]);
     expect(ADMIN_PARTS.map((part) => part.id)).toEqual(["core-health", "core-status", "core-config"]);
@@ -94,7 +94,7 @@ describe("the admin route table (AE-1, Q70)", () => {
 });
 
 describe("the backbone parts' minimal endpoints (8.2–8.4 complete them)", () => {
-  it("core-health /health/live: 200 while the last heartbeat tick is within the liveness timeout, 503 after (AE-2)", () => {
+  it("core-health /health/live: 200 while the last heartbeat tick is within the liveness timeout, 503 after", () => {
     const live = (age: number, timeout: number) => answerAdmin(ADMIN_ROUTES, "GET", "/health/live", view(age, snapshot(timeout)));
     expect(live(0, 30_000)).toEqual({ status: 200, body: { live: true, heartbeatAgeMs: 0, livenessTimeoutMs: 30_000 } });
     expect(live(30_000, 30_000)).toMatchObject({ status: 200, body: { live: true } });
@@ -107,7 +107,7 @@ describe("the backbone parts' minimal endpoints (8.2–8.4 complete them)", () =
     });
   });
 
-  it("core-health /health/ready: 200 when AE-4 finds the published state and lag ready, 503 when not (task 8.2)", () => {
+  it("core-health /health/ready: 200 when the readiness rule finds the published state and lag ready, 503 when not", () => {
     expect(answerAdmin(ADMIN_ROUTES, "GET", "/health/ready", view(0, snapshot(30_000, true)))).toMatchObject({
       status: 200,
       body: { ready: true },

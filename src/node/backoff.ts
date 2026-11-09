@@ -3,7 +3,6 @@
  * tried again after an exponential back-off: 1 s, doubling up to `backoffCeilingMs` (30 s by default), without limit.
  * The node client waits {@link backoffDelay} before each new connection attempt, counting the failed connections since
  * the node last answered on one. It also waits before each new try of a call, counting that call's failed tries.
- * [IN-10]
  */
 
 /** The first delay: 1 s. */

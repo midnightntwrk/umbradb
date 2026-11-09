@@ -9,7 +9,7 @@ import { compact, hex } from "./fetch-fixtures.js";
 /**
  * The oracles of the chain-data criteria, shared by `chain-data.test.ts` and its negative controls. Each reads the
  * database after a process ran a scenario (`./chain-data-tapes.ts`) and lists what differs from what the scenario's
- * chain holds; the list is empty when the criterion holds. Imports nothing of Vitest. [A91, A92, A93]
+ * chain holds; the list is empty when the criterion holds. Imports nothing of Vitest.
  */
 
 /** `value` as JSON with every object's keys sorted (jsonb reads keys back in its own order) and bigints marked. */
@@ -55,7 +55,7 @@ export function itemsWatcher(seen: ItemsSeen, items: readonly ("chain-events" | 
 /**
  * `core_chain_events.events` holds exactly one row per event of every processed height, in order. Each row has the
  * event's phase, extrinsic index, pallet, name, bytes and fields as the scenario's chain holds them. The rows of each
- * height give its `System::Events` value back byte for byte; a height without a value has no row. [CD-4, A91]
+ * height give its `System::Events` value back byte for byte; a height without a value has no row.
  */
 export async function a91Problems(db: ProcessDatabase, scenario: Scenario, through: bigint = scenario.head): Promise<string[]> {
   const problems: string[] = [];
@@ -135,7 +135,7 @@ async function resultRows(db: ProcessDatabase): Promise<Record<string, unknown>[
  * `core_block_parsed.transactions` holds the scenario's transactions in their order, numbered from 0 per block, with the
  * ledger's hash, kind and size. Each was parsed exactly once: `deserialized` lists the bytes of every native
  * deserialization the ledger package made while the process ran (`Transaction.deserialize`,
- * `SystemTransaction.deserialize`), counted calls. [CD-5, A92]
+ * `SystemTransaction.deserialize`), counted calls.
  */
 export async function a92Problems(db: ProcessDatabase, scenario: Scenario, deserialized: readonly Uint8Array[]): Promise<string[]> {
   const problems: string[] = [];
@@ -151,7 +151,7 @@ export async function a92Problems(db: ProcessDatabase, scenario: Scenario, deser
   return problems;
 }
 
-/** `core_tx_results.results` holds each transaction's outcome, as its chain event gives it. [CD-6, A93] */
+/** `core_tx_results.results` holds each transaction's outcome, as its chain event gives it. */
 export async function a93Problems(db: ProcessDatabase, scenario: Scenario): Promise<string[]> {
   const results = await resultRows(db);
   const want = scenario.transactions.map((t) => ({ height: t.height, tx_index: BigInt(t.index), outcome: t.outcome }));

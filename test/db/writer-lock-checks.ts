@@ -10,7 +10,7 @@ import type { PostgresTestDatabase } from "./postgres-server.js";
  * The writer lock checks, shared by the tests that must pass (`writer-lock.test.ts`, `pglite-writer-processes.test.ts`)
  * and the committed negative controls that must make them fail (`writer-lock.negative-control.test.ts`, and the
  * statement-scoped lock of the process tests). Each check runs its scenario and asserts with `expect`, so a failing
- * check throws an assertion error that names what went wrong. [A17, DB-11]
+ * check throws an assertion error that names what went wrong.
  */
 
 /**
@@ -27,7 +27,7 @@ export async function writerLockHolders(database: PostgresTestDatabase): Promise
   return (await database.admin.unsafe(WRITER_LOCK_HOLDERS_SQL)).map((row) => Number(row.pid));
 }
 
-/** How long a closed or terminated session's backend may take to end: it ends at once; this is load's margin. [A153] */
+/** How long a closed or terminated session's backend may take to end: it ends at once; this is load's margin. */
 export const BACKEND_END_MS = 30_000;
 
 /**
@@ -63,7 +63,7 @@ const pidOf = async (handle: { query(sql: string): Promise<Record<string, unknow
  * driver learns of the loss only when the server's close reaches it — through Docker's port proxy, later on a loaded
  * machine (reproduced 2026-10-26: 1 of 40 rounds at a load average of about 22) — and a transaction started before then
  * fails on its `BEGIN` with `connection-lost` (retryable, nothing written), as `postgres-faults.test.ts`'s "at most one
- * connection-lost" shows; the next one opens a new session. The retried attempt is the one the check judges. [DB-13]
+ * connection-lost" shows; the next one opens a new session. The retried attempt is the one the check judges.
  */
 export async function nextTransaction<T>(
   db: Pick<Database, "transaction">,

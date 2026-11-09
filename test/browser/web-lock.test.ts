@@ -4,7 +4,7 @@ import { acquirePgliteLock, WEB_LOCK_PREFIX } from "../../browser/src/db/web-loc
 /**
  * The browser's PGlite writer lock (`browser/src/db/web-lock.ts`) over Node.js's own Web Locks (`navigator.locks`,
  * Node.js 24), which behave as a browser's within one agent: held for the holder's life, `ifAvailable` answering at
- * once. Chrome runs the same code in `browser.test.ts` (the second-tab check). [BR-1, DB-11, A129]
+ * once. Chrome runs the same code in `browser.test.ts` (the second-tab check).
  */
 
 const scope = globalThis as { __UMBRADB_BROWSER_CONTROL__?: string };
@@ -17,7 +17,7 @@ afterEach(() => {
   delete scope.__UMBRADB_BROWSER_CONTROL__;
 });
 
-describe("the browser's writer lock (BR-1)", () => {
+describe("the browser's writer lock", () => {
   it("takes none for a database in memory", async () => {
     scope.__UMBRADB_BROWSER_CONTROL__ = "";
     expect(await acquirePgliteLock("memory://")).toBeUndefined();

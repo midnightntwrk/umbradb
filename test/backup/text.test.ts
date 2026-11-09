@@ -10,7 +10,7 @@ import { blobText, firstLineOf, linesAfterFirst } from "../../src/backup/text.js
  * A backup's text as the browser page's restore reads it (`src/backup/text.ts`): a picked file's `Blob` gives the same
  * first line and the same lines after it as the file on disk does through `node:fs` (`firstLine`, `dumpLines`), and the
  * line splitting both share keeps a carriage return, gives a last line without a feed, and joins lines and multi-byte
- * characters split across reads. [A131, BK-5]
+ * characters split across reads.
  */
 
 const dir = mkdtempSync(join(tmpdir(), "umbradb-backup-text-"));
@@ -29,7 +29,7 @@ async function* chunks(text: string, size: number): AsyncGenerator<string> {
   for (let at = 0; at < text.length; at += size) yield text.slice(at, at + size);
 }
 
-describe("a backup's text in the browser (BK-5)", () => {
+describe("a backup's text in the browser", () => {
   it("gives a Blob's first line and its lines after it as the same file on disk gives them", async () => {
     // About 300 KiB: several of the stream's reads, lines and the 2-byte and 4-byte characters split across them.
     const lines = Array.from({ length: 4_000 }, (_, i) => `INSERT INTO t VALUES (${i}, '${"é".repeat(i % 9)}${"x".repeat(40 + (i % 7))}🙂');`);

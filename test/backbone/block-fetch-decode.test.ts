@@ -21,7 +21,7 @@ import {
 
 /**
  * What `core-block-fetch` decodes a block with: BLAKE2b-256 and a header's hash, SCALE, the runtime metadata V14, the
- * extrinsics and the block's time. [CD-2, LG-4, IN-6]
+ * extrinsics and the block's time.
  *
  * The oracles are independent of the code:
  * - RFC 7693's and Python's `hashlib` vectors for BLAKE2b;
@@ -215,7 +215,7 @@ describe("the runtime metadata V14 (state_getMetadata's answer)", () => {
   });
 });
 
-describe("the extrinsics, decoded with the runtime metadata (CD-2, LG-4)", () => {
+describe("the extrinsics, decoded with the runtime metadata", () => {
   const metadata = readRuntimeMetadata(metadataOf(MAINNET_PALLETS));
   const extrinsics = MAINNET_BLOCK.block.extrinsics.map(unhex);
 

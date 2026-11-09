@@ -1,6 +1,5 @@
 /**
  * Restoring a backup into an empty database, checked before and after loading, in this order.
- * [BK-3, BK-4, Q83, Q85, Q153; design §9.1]
  *
  * **Before loading anything:**
  * 1. `restore-target-not-empty`: the target holds a schema other than PostgreSQL's own and `public`, or anything in
@@ -12,8 +11,8 @@
  * 3. `backup-history-mismatch`: the configuration's S is not the manifest's, or its history differs from the
  *    manifest's up to the manifest's height, versions included. This is the configuration history's own check
  *    (`checkHistory`) against the manifest's rows at its height, and it names that check's refusal (`missing-entry`,
- *    `changes-past`). [CF-5, CF-6]
- * 4. `backup-build-mismatch`, when the build does not carry one of these [CF-8, DB-9, DB-10]:
+ *    `changes-past`).
+ * 4. `backup-build-mismatch`, when the build does not carry one of these:
  *    - the versions of the revisions covering height + 1 (`upgrade-required` of the same check);
  *    - a version that requires a resync on heights another version covers;
  *    - every recorded migration, with the same ids, positions and checksums (`checkRecordedMigrations`).
@@ -23,12 +22,12 @@
  *    another hash than the manifest's block hash.
  *
  * **Then, in one transaction on the writer connection** (on PGlite, one job of its queue), after the writer started
- * (its lock and the durability probe) [DB-4, DB-5, DB-11, DB-12]:
+ * (its lock and the durability probe):
  * - the target is checked empty again;
  * - the file's statements run one by one;
  * - every setting the file set is reset (`RESET ALL`);
  * - the owners and grants of a database built by migrations are given (`restoreOwnership`, `src/db/roles.ts`, and
- *   `restoreGrants`, `src/db/migrate.ts`), and the module roles are created where the server lacks them [DB-6, DB-7];
+ *   `restoreGrants`, `src/db/migrate.ts`), and the module roles are created where the server lacks them;
  * - the contents hash is recomputed, with the tables declared `deterministic: false` by name only and the build's
  *   content-defined tables by their content, and compared with the manifest's (`contents-hash-mismatch`); a
  *   content-defined table its content function refuses (`ledger-refcount-invalid`) fails the restore there;
@@ -40,7 +39,6 @@
  * **A private process's backup** is restored with a private process's configuration ({@link RestoreInput}'s
  * `publicDatabase`). A private process never talks to the node, so its chain is its configured public database, and
  * the checks against the node are made against that database, as a private start makes them.
- * [PP-1, PP-2, PP-12, PP-13, Q153]
  *
  * After step 3, one read of the public database ({@link PublicSide}) replaces step 5. It reads:
  * - its chain identity: with none, the restore refuses `private-binding-mismatch` (`public-not-started`);
@@ -50,21 +48,20 @@
  *
  * These checks come before the graph, so a wrong public database is refused by its binding, not by the graph's view of
  * its items. Then step 4 runs, then step 6 against the public database's committed head and its block at the
- * manifest's height (`backup-block-not-finalized`). [PP-2, PP-13]
+ * manifest's height (`backup-block-not-finalized`).
  *
  * After loading and the contents hash, the binding that the backup's own `core_private_source.cursor` row records (the
  * public genesis hash and S it was bound to) is compared with the public database's identity
  * (`private-binding-mismatch`: `genesis`, `start`). So a backup taken against another public database rolls back. The
  * reasons are the private startup's own (`bindingRefusal`, `networkRefusal`, `publicNotStarted` of
- * `core-private-source`), in the order a private start checks them. [PP-2]
+ * `core-private-source`), in the order a private start checks them.
  *
  * **The file** is read by its path, or as the text given (`./text.ts`). The browser page restores the file the user
- * picked, a `Blob`, with this same function (`browser/src/process-worker.ts`). [BK-5, A131]
+ * picked, a `Blob`, with this same function (`browser/src/process-worker.ts`).
  *
  * A restore runs the file's SQL with the writer's rights, so the operator guide (`docs/operator-guide.md`) says to
  * restore only backups from a trusted source. The restored database keeps the backup's S and cursor. Its first startup
  * checks it like any other database (for a private one, its binding too), and resumes from the height + 1.
- * [BK-4, IN-3, CF-5, CF-6, CF-7, CF-8, DB-9, PP-2]
  */
 
 import { createReadStream } from "node:fs";
@@ -113,18 +110,18 @@ export type RestoreTarget =
 interface RestoreBase {
   /**
    * The backup file: its path, or its text (the browser page's file: `blobText` of `./text.ts`). It is read once for
-   * its manifest and twice for its statements (checked whole before anything loads, then run). [BK-5]
+   * its manifest and twice for its statements (checked whole before anything loads, then run).
    */
   readonly file: string | BackupText;
   readonly target: RestoreTarget;
   /** Opens the target database (called at most once; a PGlite directory's is created by it). */
   readonly open: () => Promise<Database>;
-  /** The validated configuration and the build's declarations (the configuration file's). [CF-1] */
+  /** The validated configuration and the build's declarations (the configuration file's). */
   readonly config: CheckedConfig;
   readonly declarations: DeclarationSet<ModuleDeclaration>;
   /**
    * The process's `core` revision (the resolver's `core`, `src/runner/resolve.ts`), whose development opt-in the
-   * history's check reads and whose network a private backup's public database is checked against. [Q102]
+   * history's check reads and whose network a private backup's public database is checked against.
    */
   readonly core: CheckedEntry;
 }
@@ -132,7 +129,7 @@ interface RestoreBase {
 /**
  * The chain a restore checks against. A public process's backup is checked against the node (`source`, its block
  * source: genesis, finalized blocks, the ledger state root). A private process's backup is checked against its
- * configured public database (`publicDatabase`), as the private process reads it. [PP-12, Q153]
+ * configured public database (`publicDatabase`), as the private process reads it.
  */
 export type RestoreChain =
   | { readonly source: BlockSource; readonly publicDatabase?: undefined }
@@ -141,18 +138,17 @@ export type RestoreChain =
 /** What {@link restoreBackup} restores, into what, and against which chain. */
 export type RestoreInput = RestoreBase & RestoreChain;
 
-/** What the tests replace: the committed negative controls, and the kill test of a restore. [A127] */
+/** What the tests replace: the committed negative controls, and the kill test of a restore. */
 export interface RestoreSeams {
-  /** Called after each statement of the file ran, with how many ran: where the kill test kills a restore. [A127] */
+  /** Called after each statement of the file ran, with how many ran: where the kill test kills a restore. */
   readonly statementRan?: (count: number) => Promise<void> | void;
   /**
    * The committed negative controls only: skip the contents hash's check, the state root's, or the comparison of a
-   * private backup's recorded binding with its public database. [A126, A164]
+   * private backup's recorded binding with its public database.
    */
   readonly skip?: { readonly contentsHash?: boolean; readonly stateRoot?: boolean; readonly binding?: boolean };
   /**
    * For the kill test's negative control only: each statement in a transaction of its own, so a kill leaves what ran.
-   * [A127]
    */
   readonly statementByStatement?: boolean;
 }
@@ -254,14 +250,14 @@ interface Checked {
   readonly plan: SchemaPlan;
   /** The chain's ledger state root at the backup's height, when `core-ledger-state` is in the history. */
   readonly nodeRoot: Uint8Array | null;
-  /** A private process's backup: the public database's identity, which the restored binding must be. [PP-2] */
+  /** A private process's backup: the public database's identity, which the restored binding must be. */
   readonly publicIdentity: PublicIdentity | null;
 }
 
 /** What a private process's backup's checks read of its public database, in one read (see the module comment). */
 export interface PublicSide {
   readonly identity: PublicIdentity;
-  /** The public core's `table` items with their heights. [PP-13] */
+  /** The public core's `table` items with their heights. */
   readonly items: readonly PublicItem[];
   /** The public cursor: its core's last committed block, or null before its first. */
   readonly head: BlockRef | null;
@@ -320,7 +316,7 @@ export function checkPublicBlock(side: PublicSide, manifest: Manifest): void {
   }
 }
 
-/** The restore's checks 2 to 6 before loading (see the module comment). [BK-3] */
+/** The restore's checks 2 to 6 before loading (see the module comment). */
 async function checkBeforeLoading(input: RestoreInput): Promise<Checked> {
   const text = textOf(input.file);
   const manifest = readManifestLine(await text.firstLine());
@@ -344,7 +340,7 @@ async function checkBeforeLoading(input: RestoreInput): Promise<Checked> {
       history: historyRows(manifest),
       process: input.core,
     });
-    // A private process's backup: its public database's binding before the graph, which counts its items. [PP-13]
+    // A private process's backup: its public database's binding before the graph, which counts its items.
     if (input.publicDatabase !== undefined) side = await checkPublicSide(input.publicDatabase, input.core, manifest);
     const graph = resolveGraph({
       ...graphInputOf(check, input.declarations),
@@ -451,7 +447,7 @@ async function load(tx: Transaction, input: RestoreInput, checked: Checked, seam
     }
   }
   if (checked.publicIdentity !== null && seams.skip?.binding !== true) {
-    // The binding the backup's own row records, now that the contents hash showed the rows are the backup's. [PP-2]
+    // The binding the backup's own row records, now that the contents hash showed the rows are the backup's.
     const refusal = bindingRefusal(await readPrivateBinding(tx), checked.publicIdentity, BigInt(manifest.start));
     if (refusal !== null) throw refusal;
   }
@@ -473,7 +469,6 @@ async function load(tx: Transaction, input: RestoreInput, checked: Checked, seam
 /**
  * Restores the backup `input.file` (see the module comment) and resolves once it committed. Rejects with the restore's
  * refusals, or the database's failures, having changed nothing: the target is empty, or as it was when not empty.
- * [BK-3]
  */
 export async function restoreBackup(input: RestoreInput, seams: RestoreSeams = {}): Promise<Restored> {
   let db: Database | undefined;

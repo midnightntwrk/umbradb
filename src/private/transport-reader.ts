@@ -2,7 +2,7 @@
  * The login of the process transport's reads on PostgreSQL. A public process whose database is PostgreSQL and which has
  * `listen.privateLink` runs the transport's reads (a private process's `read`s and the checks of its `report`s) on a
  * read pool of their own. That pool logs in as `core.transportReader` (`{ user, password }`); the host, port, name and `ssl`
- * are `database`'s. [CF-4, PP-4, Q175 A; design §8]
+ * are `database`'s.
  *
  * Startup first checks, on that pool, that the login cannot write. It refuses with `transport-reader-can-write`, naming
  * the login and what it found, when the login:
@@ -21,7 +21,7 @@
  * (`pg_toast`, the temporary schemas). The check runs once the migrations of startup made the tables, before the
  * transport listens; a table made later by a migration is checked at the next start. What the login may still do (read,
  * call functions, take advisory locks, use temporary tables) is confined on both backends by the read gate
- * (`./read-gate.ts`), which stays in front of this login. [PP-4, A172]
+ * (`./read-gate.ts`), which stays in front of this login.
  */
 
 import type { ReadHandle } from "../db/api.js";

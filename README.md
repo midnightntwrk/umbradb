@@ -582,14 +582,7 @@ coreEntry({
 
 **Status.** Pre-1.0: version `0.10.0`. Under SemVer a `0.y.z` release makes no compatibility promise.
 
-**Roadmap.** The [ROADMAP](ROADMAP.md) says where the project stands and what comes next: feature modules built on
-the core, each with its own specification. Wallet and dApp APIs compatible with the official indexer, token metadata
-(MIP-0018), unshielded and shielded token state, fast DUST and shielded sync, private wallet data, a JSON-RPC for
-Passport, an explorer, and private user secrets.
-
-**Specification.** The OpenSpec change [`core-arch`](openspec/changes/core-arch/) (`proposal.md`, `design.md`, the
-capability specs), with [`start-umbradb`](openspec/changes/start-umbradb/) for UmbraDB as a library; the
-[operator guide](docs/operator-guide.md) covers running it.
+**Operating.** The [operator guide](docs/operator-guide.md) covers running UmbraDB.
 
 **Security.** Read the [threat model](docs/THREAT_MODEL.md) and the [security policy](SECURITY.md) before deploying:
 modules and configuration files are trusted code, the node is trusted for what it says is finalized, and a restore
@@ -610,11 +603,10 @@ headless (`UMBRADB_CHROME` names another).
 
 Recorded tapes: [releases](https://github.com/midnight-experiments/umbradb-tapes/releases) ·
 [v0.10.0-rc.1](https://github.com/midnight-experiments/umbradb-tapes/releases/tag/v0.10.0-rc.1).
-Set `UMBRADB_TAPES` to the download directory; see the [fixture note](openspec/changes/core-arch/acceptance.md) for filenames.
-
-**Knowledge graph.** The code, docs and specs are graphified in `graphify-out/`, committed. `npm run graph:refresh`
-rebuilds it; commit the result with the change that prompted it. `npm run graph:check` exits 0 when it is current, 1
-when stale, 2 when missing or not written by `graph:refresh`.
+Download the tape assets into a directory and set `UMBRADB_TAPES` to it. Rename or symlink the release asset
+`devnet-0-235-v8-v9.tape.jsonl` to `devnet-v8-v9-0-235.tape.jsonl`, the name in `test/tape/real/manifest.json`; the
+bytes are identical. A test checks each tape's size and SHA-256, and is skipped with a named reason when the tape is
+absent.
 
 - [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
 - Issues: [github.com/midnightntwrk/umbradb/issues](https://github.com/midnightntwrk/umbradb/issues).

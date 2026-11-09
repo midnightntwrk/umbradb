@@ -5,10 +5,10 @@ import { startProcess } from "../runner/process-build.js";
 import { cursorReaches, libraryData, PGLITE_MEMORY, rowsModule } from "./library-fixtures.js";
 
 /**
- * A host program for L61's last clause, run by `./mounted-admin.test.ts`: it starts UmbraDB with no listener (its admin
+ * A host program for the last clause, run by `./mounted-admin.test.ts`: it starts UmbraDB with no listener (its admin
  * mounted only), lets it reach the in-memory head, writes its result file and returns without stopping it. Nothing of
  * UmbraDB's own may then keep the event loop alive: the process must end by itself. `mode: "control"` starts the same
- * through the engine with the negative control's heartbeat, whose timer keeps Node.js running. [L61, LM-5]
+ * through the engine with the negative control's heartbeat, whose timer keeps Node.js running.
  */
 
 interface Job {

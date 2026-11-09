@@ -1,7 +1,7 @@
 /**
  * The ledger worker's work: what the worker thread does for the main thread. It is kept apart from the thread's
  * messaging (`./entry.ts`), so it runs the same in a worker and in the main thread (`./host.ts`'s `inThreadLedger`, for
- * a negative control and the tests). [design §5.1, §5.3, §5.5]
+ * a negative control and the tests).
  *
  * **Adapters.** One per ledger version, loaded the first time a request names it (`load`, which is
  * `loadLedgerPackage` in the worker), and loaded again after a failed load. They are made with
@@ -12,13 +12,13 @@
  * arrays it parsed, under the block's hash, until the block is applied and released ({@link LedgerEngine.release}). The
  * adapter keeps each native object under its array (`../adapter.ts`), so the block's apply and its ledger tasks find
  * them and parse nothing again. A block parsed again (a retried height) gets the kept parse back. Only plain data
- * leaves the worker, so the parse is checked for that (`../plain-data.ts`). [LG-7, Q49]
+ * leaves the worker, so the parse is checked for that (`../plain-data.ts`).
  *
  * **Ledger tasks.** {@link LedgerEngine.tasks} runs a module's tasks, given by the worker's entry (`./run.ts`), on a
  * block's kept parse. Each task gets the native objects, `rawPackages()` and, if it declares `needsState`, the
  * committed state, which must be the state before the block. Each result is checked as plain data. A task that throws or returns
  * anything else fails the request with {@link LedgerTaskFailed}, naming the module and the task; a trap ends the
- * worker, as an apply's trap does. [LG-17]
+ * worker, as an apply's trap does.
  *
  * **The states.** The engine holds the state committed at a height (its cursor's) and at most one pending state: the
  * one after the block applied last, not yet committed ({@link LedgerEngine.commit}, called once the block's
@@ -35,34 +35,34 @@
  * pending and committed in the database since, before the engine's commit reached it), this is immediate. Otherwise
  * the state is read through the node store from its key, as after a restart, and the pending block is dropped.
  * `core-ledger-state` asks for the state at h − 1 before every apply. So a restarted process, with a fresh worker
- * that holds nothing, loads the state at the cursor once, and a process that keeps running reads nothing. [LG-11]
+ * that holds nothing, loads the state at the cursor once, and a process that keeps running reads nothing.
  *
  * **The v8 → v9 conversion.** A block of ledger v9 on a committed v8 state is the first block F built by a v9 runtime
  * after v8 blocks. The engine first converts the state with the v9 package's `convertFromV8`, the ledger team's
  * translation shipped with the vendored v9. It reads the v8 state's nodes from the node store by its key (the state at
  * U is committed, so its nodes are in the database). It then applies F to the converted state, as the node and the
  * official indexer do, even when F has no transaction. F's batch is the v9 package's: the converted state's new nodes
- * with F's, the v9 key persisted, and the released keys (the v8 state's among them) released. [LG-9]
+ * with F's, the v9 key persisted, and the released keys (the v8 state's among them) released.
  *
  * **The 2.0 → 2.1 upgrade.** A block of ledger v9 (rc.5, runtime 2.1 on) on a committed `v9-rc3` state (v9 as runtime
  * 2.0 built it) is F of that upgrade. The two packages share one storage format, so the engine loads the state at U in
  * the rc.5 package by its key from the node store, as a restart loads a stored state (U is committed, so its nodes are
  * in the database), and applies F to it. F's batch is the rc.5 package's, as at a conversion. Any other change of
  * ledger is refused: no conversion to rc.3 exists (the node that builds rc.3, `midnight-node` 2.0.0-rc.4, has none),
- * and none goes back. [LG-3, Q139 A, A159]
+ * and none goes back.
  *
  * **What a block gives** ({@link AppliedState}):
- * - the state's key and root; the main thread compares the root with the node's [LG-15];
- * - its summary [LG-16];
+ * - the state's key and root; the main thread compares the root with the node's;
+ * - its summary;
  * - the adapter's output: results, events, logs, parameters;
  * - the batch the block writes: the new state's key persisted; the keys {@link ApplyBlock.release} names released
  *   (the retention window, which the main thread computes; the state before the block when none is given); and the
  *   state and zswap-state keys of each contract {@link ApplyBlock.contracts} names, persisted and never released,
- *   flushed with the nodes they reach [LG-11, LG-12, LG-13];
- * - each such contract's keys ({@link ContractKeys}) [LG-13].
+ *   flushed with the nodes they reach;
+ * - each such contract's keys ({@link ContractKeys}).
  *
  * **A retained state** ({@link LedgerEngine.retained}) is loaded by its key beside the held states, its root read, and
- * the state dropped. The states the engine holds are left as they are. [LG-12]
+ * the state dropped. The states the engine holds are left as they are.
  *
  * **Eviction** ({@link LedgerEngine.evict}): every loaded package forgets the nodes reclamation deletes, so a node
  * needed again is flushed again. A package refuses to forget a node that a live object holds. Reclamation deletes no
@@ -73,7 +73,7 @@
  * object this thread cannot reach holds the node, or a live object holds it by reference where the stored child lists
  * embed it (the package keeps the child list it first cached for a key). The main thread then ends the thread, starts
  * a new one, and applies the block again there on the state at h − 1 loaded from the database (`./host.ts`'s
- * `restart`). [LG-14, Q144 B]
+ * `restart`).
  *
  * **The node store is installed from the first block on** (in the worker, the bridge's store). To the package, a
  * flushed node is a stored node, so its cache may drop the node's bytes while the state still uses it. When it later
@@ -89,7 +89,7 @@
  * (`includesBlockZero`: its root is the node's, {@link LedgerEngine.genesisRoot}). If it does, the transactions are
  * applied, for their results only, to an empty state with the genesis state's network id, and the genesis state is the
  * state after block 0. Otherwise they are applied to the genesis state. Block 0's parent time is its own, as in the
- * official indexer, and its first regular transaction gets no time bump. [IN-7, LG-8]
+ * official indexer, and its first regular transaction gets no time bump.
  */
 
 import type {
@@ -120,7 +120,7 @@ export const EVICTION_REFUSED = "EvictionRefused";
 
 /**
  * A package still refuses to forget a swept node after the worker freed what it can ({@link LedgerEngine.evict}). The
- * main thread then ends the worker thread and applies the block again in a new one. [LG-14, Q144 B]
+ * main thread then ends the worker thread and applies the block again in a new one.
  */
 export class EvictionRefused extends Error {
   constructor(message: string) {
@@ -132,7 +132,7 @@ export class EvictionRefused extends Error {
 /** The name of {@link LedgerTaskFailed}, which an error keeps when it crosses from the worker. */
 export const LEDGER_TASK_FAILED = "LedgerTaskFailed";
 
-/** A module's ledger task that failed a block ({@link LedgerEngine.tasks}), naming the module and the task. [LG-17] */
+/** A module's ledger task that failed a block ({@link LedgerEngine.tasks}), naming the module and the task. */
 export class LedgerTaskFailed extends Error {
   constructor(module: string, task: string, height: bigint, why: string) {
     super(`the ledger task ${task} of ${module} at block ${height} ${why}`);
@@ -151,7 +151,7 @@ export interface BlockId {
 
 /**
  * What the apply of a block after 0 takes: the block, its time and its parent's, whether its first regular transaction
- * runs at the parent's time, and its outcomes. [LG-8]
+ * runs at the parent's time, and its outcomes.
  */
 export interface ApplyBlock extends BlockId {
   readonly ledger: LedgerName;
@@ -165,21 +165,21 @@ export interface ApplyBlock extends BlockId {
   readonly outcomes?: readonly ChainOutcome[];
   /**
    * The keys of the stored states the block releases (the states leaving the retention window), each released once in
-   * the block's batch. When absent, the state before the block is released (`retainStates` 0). [LG-12]
+   * the block's batch. When absent, the state before the block is released (`retainStates` 0).
    */
   readonly release?: readonly Uint8Array[];
-  /** The contracts whose state and zswap-state keys the block persists, never to be released. [LG-13] */
+  /** The contracts whose state and zswap-state keys the block persists, never to be released. */
   readonly contracts?: readonly Uint8Array[];
 }
 
-/** A contract's keys after a block: null for a contract the state does not hold. [LG-13] */
+/** A contract's keys after a block: null for a contract the state does not hold. */
 export interface ContractKeys {
   readonly address: Uint8Array;
   readonly stateKey: Uint8Array | null;
   readonly zswapStateKey: Uint8Array | null;
 }
 
-/** A module as the ledger worker needs it: its id and its ledger tasks (a module declaration is one). [LG-17] */
+/** A module as the ledger worker needs it: its id and its ledger tasks (a module declaration is one). */
 export interface LedgerWorkerModule {
   readonly id: string;
   readonly ledgerTasks?: readonly LedgerTask[];
@@ -197,7 +197,7 @@ export function ledgerTasksOf(modules: readonly LedgerWorkerModule[]): Map<strin
   return tasks;
 }
 
-/** One module's ledger tasks for a block, as the main thread names them (`../tasks.ts`). [LG-17] */
+/** One module's ledger tasks for a block, as the main thread names them (`../tasks.ts`). */
 export interface TaskRun extends BlockId {
   readonly ledger: LedgerName;
   readonly parentHash: Uint8Array;
@@ -208,7 +208,7 @@ export interface TaskRun extends BlockId {
   readonly tasks: readonly string[];
 }
 
-/** What block 0's apply takes. [IN-7] */
+/** What block 0's apply takes. */
 export interface GenesisBlock extends BlockId {
   readonly ledger: LedgerName;
   readonly parentHash: Uint8Array;
@@ -222,8 +222,7 @@ export interface GenesisBlock extends BlockId {
 }
 
 /**
- * A stored state, by the block it is after and its key: the state a restart loads, or a retained state. [LG-11,
- * LG-12]
+ * A stored state, by the block it is after and its key: the state a restart loads, or a retained state.
  */
 export interface LoadState extends BlockId {
   readonly ledger: LedgerName;
@@ -238,7 +237,7 @@ export interface AppliedState extends BlockId {
   readonly summary: StateSummary;
   readonly output: ApplyOutput;
   readonly batch: NodeBatch;
-  /** The keys of each contract {@link ApplyBlock.contracts} named, in its order; none for block 0. [LG-13] */
+  /** The keys of each contract {@link ApplyBlock.contracts} named, in its order; none for block 0. */
   readonly contracts: readonly ContractKeys[];
 }
 
@@ -347,7 +346,7 @@ export class LedgerEngine {
     return adapter;
   }
 
-  /** Parses block `block`'s transactions once with `ledger`'s adapter and keeps them for its apply. [LG-7] */
+  /** Parses block `block`'s transactions once with `ledger`'s adapter and keeps them for its apply. */
   async parse(ledger: LedgerName, block: BlockId, transactions: readonly Uint8Array[]): Promise<readonly ParsedTransaction[]> {
     const key = hexOf(block.hash);
     const kept = this.#kept.get(key);
@@ -356,13 +355,13 @@ export class LedgerEngine {
     const adapter = await this.#adapter(ledger);
     const arrays = [...transactions];
     const parsed = Object.freeze(arrays.map((bytes, index) => adapter.parseTransaction(bytes, index)));
-    // `block-parsed` reaches the main thread as plain data, so the adapter's parse is checked for that. [LG-7, Q49]
+    // `block-parsed` reaches the main thread as plain data, so the adapter's parse is checked for that.
     this.#plain(parsed, (problem) => new TypeError(`the ${ledger} adapter parsed block ${block.height} into ${problem}, not plain data`));
     this.#kept.set(key, { height: block.height, ledger, transactions: arrays, parsed });
     return parsed;
   }
 
-  /** The root of the genesis state `bytes`; the main thread compares it with the node's root at block 0. [IN-7] */
+  /** The root of the genesis state `bytes`; the main thread compares it with the node's root at block 0. */
   async genesisRoot(ledger: LedgerName, bytes: Uint8Array): Promise<Uint8Array> {
     const adapter = await this.#adapter(ledger);
     const state = adapter.genesisState(bytes);
@@ -476,7 +475,7 @@ export class LedgerEngine {
     return this.#store;
   }
 
-  /** Applies block 0 (see the module comment). [IN-7] */
+  /** Applies block 0 (see the module comment). */
   async genesis(input: GenesisBlock): Promise<AppliedState> {
     if (this.#pending !== null && same(this.#pending, input)) return this.#pending.result;
     if (input.height !== 0n) throw new RangeError(`the genesis apply is block 0's, not block ${input.height}'s`);
@@ -519,7 +518,7 @@ export class LedgerEngine {
     return this.#pend(adapter, input, settled);
   }
 
-  /** Applies a block after 0 (see the module comment). [LG-8] */
+  /** Applies a block after 0 (see the module comment). */
   async apply(input: ApplyBlock): Promise<AppliedState> {
     if (this.#pending !== null && same(this.#pending, input)) return this.#pending.result;
     const committed = this.#committed;
@@ -563,7 +562,7 @@ export class LedgerEngine {
       // A 2.0 → 2.1 upgrade: the rc.3 state at U loaded in the rc.5 package by its key, then F applied to it.
       state = adapter.load(committed.key, this.#storeFor("carry the v9-rc3 state into v9"));
     } else {
-      // The v8 state at U is converted first, then F is applied to it (see the module comment). [LG-9]
+      // The v8 state at U is converted first, then F is applied to it (see the module comment).
       const convert = adapter.convertFromV8;
       if (convert === undefined) throw new Error("the ledger v9 adapter has no convertFromV8");
       state = convert(committed.key, this.#storeFor("convert the v8 state"));
@@ -618,7 +617,7 @@ export class LedgerEngine {
 
   /**
    * Makes the state the database stores for block `input`, by its key, the committed state (see the module comment):
-   * the state held already when it is that block's with that key, else one read through the node store. [LG-11]
+   * the state held already when it is that block's with that key, else one read through the node store.
    */
   async load(input: LoadState): Promise<LoadedState> {
     const holds = (held: Held | null): boolean =>
@@ -644,7 +643,7 @@ export class LedgerEngine {
    * Drops the nodes reclamation deletes from every loaded package's caches, so a later block that needs one again
    * flushes it again. When the package refuses (a live object still holds one), the kept parses' native objects are
    * freed and the eviction is tried once more. A second refusal rejects with {@link EvictionRefused}; the main thread
-   * answers by ending this thread and starting a new one. A trap is never retried. [LG-14, Q144 B]
+   * answers by ending this thread and starting a new one. A trap is never retried.
    */
   async evict(keys: readonly Uint8Array[]): Promise<number> {
     if (keys.length === 0) return 0;
@@ -681,7 +680,7 @@ export class LedgerEngine {
    * block's kept parse: its native objects, `rawPackages()` of its ledger and, for a task that declares `needsState`,
    * the committed state, which must be the state before the block. Each result is checked as plain data. A task that
    * throws, returns anything else, or that the worker's entry does not give fails with {@link LedgerTaskFailed}; a trap
-   * is thrown as it is (the worker ends). [LG-17]
+   * is thrown as it is (the worker ends).
    */
   async tasks(input: TaskRun): Promise<Readonly<Record<string, unknown>>> {
     const declared = this.#tasks.get(input.module);
@@ -704,7 +703,7 @@ export class LedgerEngine {
     const packages = adapter.rawPackages();
     const results: Record<string, unknown> = {};
     for (const task of named) {
-      // Block 0 has no state before it (the genesis state is made in its apply), so such a task gets none there. [IN-7]
+      // Block 0 has no state before it (the genesis state is made in its apply), so such a task gets none there.
       const stateBefore = task.needsState && input.height > 0n ? this.#stateBefore(input, task.name) : undefined;
       let result: unknown;
       try {
@@ -736,7 +735,7 @@ export class LedgerEngine {
     return results;
   }
 
-  /** The state before block `input` for its task `task`: the committed state, which must be at h − 1. [LG-17] */
+  /** The state before block `input` for its task `task`: the committed state, which must be at h − 1. */
   #stateBefore(input: TaskRun, task: string): StateHandle {
     const committed = this.#committed;
     if (committed === null || committed.height !== input.height - 1n || !sameBytes(committed.hash, input.parentHash)) {
@@ -751,7 +750,7 @@ export class LedgerEngine {
     return committed.state;
   }
 
-  /** A retained state's root: the state is loaded by its key beside the held ones, then dropped. [LG-12] */
+  /** A retained state's root: the state is loaded by its key beside the held ones, then dropped. */
   async retained(input: LoadState): Promise<{ readonly stateRoot: Uint8Array }> {
     const store = this.#storeFor("load a retained state");
     const adapter = await this.#adapter(input.ledger);

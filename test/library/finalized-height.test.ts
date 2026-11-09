@@ -6,7 +6,7 @@ import { type ChainBlock, chainOf, headRead } from "../backbone/fetch-fixtures.j
 import { freePort } from "../runner/process-harness.js";
 
 /**
- * L53: `finalizedHeight` (`src/library/finalized-height.ts`), the height a host gives as S for a new database. [LM-1]
+ * `finalizedHeight` (`src/library/finalized-height.ts`), the height a host gives as S for a new database.
  *
  * - Against a node — a tape node whose finalized head is block 7 of a synthetic chain — it answers 7n, asking exactly
  *   `chain_getFinalizedHead` and `chain_getHeader` of that hash, and leaves no connection open.
@@ -49,7 +49,7 @@ async function rejectionOf(promise: Promise<unknown>): Promise<unknown> {
   );
 }
 
-describe("L53: finalizedHeight answers against a node (LM-1)", () => {
+describe("finalizedHeight answers against a node", () => {
   let node: TapeNode;
   beforeAll(async () => {
     node = await TapeNode.start({ records: headRead(HEAD) });
@@ -66,7 +66,7 @@ describe("L53: finalizedHeight answers against a node (LM-1)", () => {
   });
 });
 
-describe("L53: finalizedHeight rejects node-unreachable after timeoutMs, and with the abort reason (LM-1)", () => {
+describe("finalizedHeight rejects node-unreachable after timeoutMs, and with the abort reason", () => {
   let silent: Awaited<ReturnType<typeof silentNode>>;
   beforeAll(async () => {
     silent = await silentNode();

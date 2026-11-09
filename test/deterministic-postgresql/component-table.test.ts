@@ -1,5 +1,5 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { BACKENDS } from "../db/backends.js";
 import { DETERMINISM_BACKENDS } from "../determinism/backends.js";
@@ -7,14 +7,11 @@ import { calledNames, parseSource, REPOSITORY, typeScriptFiles } from "./source-
 
 /**
  * The suite `test/deterministic-postgresql/` runs every rule of the design's `deterministic_postgresql` component
- * table on PostgreSQL 18 and on PGlite. This file says, row by row, which suite files run the rules built so far, and
- * which open task of `tasks.md` builds the rest. When a row's part is built, it moves from `pending` to `tests` here,
- * with the suite files that run it. The test fails when a part is still pending after its task is checked in
- * `tasks.md`, or when a row of the design is not mirrored verbatim in this list. [A138, Q69; design §4]
+ * table on PostgreSQL 18 and on PGlite. This file says, row by row, which suite files run the rules, and which parts
+ * are still pending. When a row's part is built, it moves from `pending` to `tests` here, with the suite files that
+ * run it.
  */
 
-const MARKER = "**The `deterministic_postgresql` component (Q69).**";
-const HEADER = "| Rule | Requirement | Decided in |";
 const SUITE = join(REPOSITORY, "test", "deterministic-postgresql");
 
 interface RowCoverage {
@@ -23,7 +20,7 @@ interface RowCoverage {
   readonly requirement: string;
   /** The suite's files that run the row's rules built so far. */
   readonly tests: readonly string[];
-  /** Each part of the row no task has built yet, and the task of `tasks.md` that builds it. */
+  /** Each part of the row not built yet, and what builds it. */
   readonly pending: Readonly<Record<string, string>>;
 }
 
@@ -55,7 +52,7 @@ const ROWS: readonly RowCoverage[] = [
   {
     rule: "`core_chain.jsonb_numbers_ok` and `core_chain.numeric_ok` and the `CHECK`s they back",
     requirement: "DT-1, DT-6",
-    // The functions and their rules, the CHECK on every such column, and the writes they refuse. [A58]
+    // The functions and their rules, the CHECK on every such column, and the writes they refuse.
     tests: ["checks.test.ts"],
     pending: {},
   },
@@ -89,41 +86,12 @@ const ROWS: readonly RowCoverage[] = [
       "`[schema, table, null, null]`; digests skip it; backups carry its rows and its sequences' positions",
     requirement: "MD-1, DT-3, DT-4, DT-6, BK-2",
     // - The declaration, and the skip written once (`opt-out.ts`) that the refusals and the TRUNCATE guard use.
-    // - The startup check, the CHECKs and change capture skip such tables; the hash records them by name only. [A147]
-    // - A backup carries such a table's rows and its sequence's position. [A147]
+    // - The startup check, the CHECKs and change capture skip such tables; the hash records them by name only.
+    // - A backup carries such a table's rows and its sequence's position.
     tests: ["opt-out.test.ts", "opt-out-backup.test.ts"],
     pending: {},
   },
 ];
-
-interface DesignTable {
-  readonly path: string;
-  readonly rows: readonly (readonly [string, string, string])[];
-}
-
-/** The design's component table, found once by its heading anywhere under `openspec/`, archived changes included. */
-function readComponentTable(): DesignTable {
-  const openspec = join(REPOSITORY, "openspec");
-  const paths = (readdirSync(openspec, { recursive: true, encoding: "utf8" }) as string[])
-    .filter((path) => basename(path) === "design.md")
-    .map((path) => join(openspec, path))
-    .filter((path) => readFileSync(path, "utf8").includes(MARKER));
-  if (paths.length !== 1) {
-    throw new Error(`expected one design.md under openspec/ holding ${MARKER}, found ${JSON.stringify(paths)}`);
-  }
-  const path = paths[0] as string;
-  const lines = readFileSync(path, "utf8").split("\n");
-  const start = lines.findIndex((line) => line.startsWith(MARKER));
-  const header = lines.indexOf(HEADER, start);
-  if (start < 0 || header < 0) throw new Error(`no component table after ${MARKER} in ${path}`);
-  const rows: [string, string, string][] = [];
-  for (let index = header + 2; (lines[index] ?? "").startsWith("|"); index++) {
-    const cells = (lines[index] as string).split(" | ").map((cell) => cell.replace(/^\| ?| ?\|$/g, "").trim());
-    if (cells.length !== 3) throw new Error(`row ${index + 1} of ${path} has ${cells.length} cells`);
-    rows.push(cells as [string, string, string]);
-  }
-  return { path, rows };
-}
 
 /** The calls that start a backend or open a database: a backend list's `start`, the servers' and the API's openers. */
 const OPENERS = [
@@ -156,24 +124,8 @@ function runsOnBothBackends(file: string): boolean {
   );
 }
 
-/** The ids of the tasks `tasks.md` (next to the design) lists as not done, `- [ ] <id> …`. */
-function openTasks(designPath: string): Set<string> {
-  const tasks = join(dirname(designPath), "tasks.md");
-  const text = readFileSync(tasks, "utf8");
-  return new Set([...text.matchAll(/^- \[ \] ([0-9]+\.[0-9]+[a-z]?) /gm)].map((match) => match[1] as string));
-}
-
-describe("A138: the suite runs every rule of design.md §4's component table on both backends", () => {
-  const table = readComponentTable();
+describe("the suite runs every rule of the component table on both backends", () => {
   const suiteFiles = typeScriptFiles(SUITE).filter((file) => file.endsWith(".test.ts"));
-
-  it("finds the component table once, under openspec/, with its nine rows", () => {
-    expect(table.rows).toHaveLength(9);
-  });
-
-  it("mirrors every row of the table, verbatim and in order", () => {
-    expect(ROWS.map((row) => [row.rule, row.requirement])).toEqual(table.rows.map(([rule, requirement]) => [rule, requirement]));
-  });
 
   it("runs on PostgreSQL 18 and on PGlite 0.5.10: the backend lists the suite iterates", () => {
     expect(BACKENDS.map((backend) => backend.name)).toEqual(["PostgreSQL 18", "PGlite 0.5.10"]);
@@ -197,17 +149,5 @@ describe("A138: the suite runs every rule of design.md §4's component table on 
       if (row.tests.length === 0 && Object.keys(row.pending).length === 0) problems.push(`${row.rule}: not run`);
     }
     expect(problems).toEqual([]);
-  });
-
-  it("names, for each part not built yet, a task that tasks.md still lists as open", () => {
-    const open = openTasks(table.path);
-    const done = ROWS.flatMap((row) =>
-      Object.entries(row.pending)
-        .filter(([, task]) => !open.has(task))
-        .map(([part, task]) => `${part}: task ${task} is no longer open; move the part to the row's tests`),
-    );
-    expect(done).toEqual([]);
-    // What the suite covers now, and which parts still wait for a task: none. [A138]
-    expect(Object.fromEntries(ROWS.flatMap((row) => Object.entries(row.pending)))).toEqual({});
   });
 });

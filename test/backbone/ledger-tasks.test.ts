@@ -26,14 +26,14 @@ import {
  *   state before each block, refuses to start where `core-ledger-state` is not active.
  * - No main-thread callback receives a native ledger object: each `block` item passes a structured-clone round trip.
  *
- * Committed negative controls: `ledger-tasks.negative-control.test.ts`. [A137 CI, LG-7, LG-17, CC-3]
+ * Committed negative controls: `ledger-tasks.negative-control.test.ts`.
  */
 
-describe.each(PROCESS_BACKENDS)("A137 (LG-7, LG-17): ledger tasks through the process on $name", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("ledger tasks through the process on $name", (backend: ProcessBackend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("A137: a task decodes each call's arguments in the worker and the module's on-compute receives them; with -fast's task and three readers of block-parsed, each transaction is parsed once, in the worker; every block item is plain data; a needsState task gets the state before each block", async () => {
+  it("a task decodes each call's arguments in the worker and the module's on-compute receives them; with -fast's task and three readers of block-parsed, each transaction is parsed once, in the worker; every block item is plain data; a needsState task gets the state before each block", async () => {
     const expected = await tasksScenario();
     const seen = taskSeen();
     const user = [
@@ -68,7 +68,7 @@ describe.each(PROCESS_BACKENDS)("A137 (LG-7, LG-17): ledger tasks through the pr
     }
   }, PATIENCE_MS * 4);
 
-  it("A137: a task returning a WebAssembly-backed object fails the block with callback-error naming the module and the task", async () => {
+  it("a task returning a WebAssembly-backed object fails the block with callback-error naming the module and the task", async () => {
     const expected = await tasksScenario();
     const run = await runTasks(await backend.database(), expected, { core: PARSE_CORE, user: [nativeLeakModule()], halts: true });
     expect(run.status).toMatchObject({ state: "halted", cursor: FAULT_AT - 1n, reason: { code: "callback-error", height: FAULT_AT, module: "native-leak", point: "on-parse" } });
@@ -77,7 +77,7 @@ describe.each(PROCESS_BACKENDS)("A137 (LG-7, LG-17): ledger tasks through the pr
     );
   }, PATIENCE_MS * 2);
 
-  it("A137: a task that throws fails the block with callback-error naming the module and the task", async () => {
+  it("a task that throws fails the block with callback-error naming the module and the task", async () => {
     const expected = await tasksScenario();
     const run = await runTasks(await backend.database(), expected, { core: PARSE_CORE, user: [throwingModule()], halts: true });
     expect(run.status).toMatchObject({ state: "halted", cursor: FAULT_AT - 1n, reason: { code: "callback-error", height: FAULT_AT, module: "task-throws", point: "on-parse" } });
@@ -86,10 +86,10 @@ describe.each(PROCESS_BACKENDS)("A137 (LG-7, LG-17): ledger tasks through the pr
     );
   }, PATIENCE_MS * 2);
 
-  it("A137: a task without needsState gets no state and runs mid-chain, without core-ledger-state", async () => {
+  it("a task without needsState gets no state and runs mid-chain, without core-ledger-state", async () => {
     const expected = await tasksScenario();
     const seen = taskSeen();
-    // S = 2: the tape with the header and metadata of block 1, which a start there reads (`./ledger-restart.ts`). [Q135 A]
+    // S = 2: the tape with the header and metadata of block 1, which a start there reads (`./ledger-restart.ts`).
     const records = restartAt(expected.scenario.records, 1n);
     const run = await runTasks(await backend.database(), expected, { start: 2n, core: PARSE_CORE, user: [callArgsModule(seen)], records });
     expect(run.status).toMatchObject({ cursor: expected.scenario.head, reason: null });
@@ -100,7 +100,7 @@ describe.each(PROCESS_BACKENDS)("A137 (LG-7, LG-17): ledger tasks through the pr
     expect(run.workerParses.slice().sort()).toEqual(transactionsOf(expected, 2n));
   }, PATIENCE_MS * 2);
 
-  it("A137: a module with a needsState task refuses to start where core-ledger-state is not active", async () => {
+  it("a module with a needsState task refuses to start where core-ledger-state is not active", async () => {
     const expected = await tasksScenario();
     const process = await ingest(await backend.database(), expected.scenario.records, { start: 0n, core: PARSE_CORE, user: [stateBeforeModule()] });
     try {

@@ -29,12 +29,12 @@ import { nodeSet } from "./refcount-model.js";
 /**
  * Restarts and crashes of the process at named points, for R13 and R14: a run is one or more **segments**, each a
  * process of its own (`./refcount-restart.worker.ts`, started with {@link spawnChild}) that reads back only the
- * database the segment before it left. [R13, R14, LG-11, LG-14, RN-6]
+ * database the segment before it left.
  *
  * **The named points.** A segment is told one point and height to stop at ({@link Hold}); there it reports that it was
  * reached (one JSON line on its standard output), then either holds for ever, for the test to kill it with SIGKILL (a
  * crash), or stops the process, which ends after the height (a restart). The points of `core-ledger-state`'s block are
- * put through the seams the process already has: [R14]
+ * put through the seams the process already has:
  * - `before-step`: in `on-compute`, once the ledger worker answered the block's apply, before the reclamation step;
  * - `after-eviction`: in `on-compute`, once the worker answered the step's eviction, before the block's transaction;
  * - `after-node-writes`: in `on-db-write`, after the block's node writes, before the step's first statement
@@ -43,7 +43,7 @@ import { nodeSet } from "./refcount-model.js";
  * - `before-commit`: the block transaction's body ended (every `on-db-write`, the cursor check), before its `COMMIT`
  *   (a `FinalizedLoop` whose `write` reports it);
  * - `after-commit`: the `COMMIT` returned, before `on-after-db-write` (its `commit`);
- * - `between-commits`: R14's negative control only, between its own transaction's commit and the block's.
+ * - `between-commits`: The negative control only, between its own transaction's commit and the block's.
  *
  * **What a segment records.** Its module `restart-watch` appends, after every block it commits (its `on-after-db-write`,
  * a read at h), one line to the run's observation file ({@link Observed}): every block, what can be read cheaply on
@@ -52,13 +52,13 @@ import { nodeSet } from "./refcount-model.js";
  * row and the number of them, and `core_digest.tables` (each byte-hashed table's running digest); and, after the heights
  * the job names, `core_ledger_state`'s tables as `./ledger-graph-tapes.ts` reads them and the block's batch (a line of
  * its own, written at `on-compute`), with the contents hash where the job asks it (or why the computation refused
- * it). A line is written synchronously, so a killed segment loses none. [R13, R14, R3]
+ * it). A line is written synchronously, so a killed segment loses none.
  *
- * **The negative controls' seams.** R13's ({@link SegmentJob.emptiesQueue}): a segment that empties `unreferenced`
- * before its process starts. R14's ({@link SegmentJob.control}): a build whose `ref_counts` and `unreferenced`
+ * **The negative controls' seams.** the ({@link SegmentJob.emptiesQueue}): a segment that empties `unreferenced`
+ * before its process starts. The ({@link SegmentJob.control}): a build whose `ref_counts` and `unreferenced`
  * statements run in a transaction of their own, committed before the block's (the loop computes the block's step from
  * the read at h − 1 and the block's batch, as `core-ledger-state` does, and writes those two tables), while the block's
- * transaction writes the rest. [R13, R14]
+ * transaction writes the rest.
  *
  * Imports nothing of Vitest, so that the worker process runs the same build.
  */
@@ -107,9 +107,9 @@ export interface SegmentJob {
   /** Those of them at which the segment runs R3 itself, from the stored rows (a recorded tape; none unless given). */
   readonly checked?: readonly number[];
   readonly hold?: Hold;
-  /** R14's negative control's build (see the module comment). */
+  /** The negative control's build (see the module comment). */
   readonly control?: "own-transaction";
-  /** R13's negative control: the segment empties `unreferenced` before its process starts. */
+  /** The negative control: the segment empties `unreferenced` before its process starts. */
   readonly emptiesQueue?: true;
 }
 
@@ -127,7 +127,7 @@ export type SegmentEvent =
       readonly log?: readonly string[];
     };
 
-/** What can be read after every block on a recorded tape (each field a SHA-256 of its text, or a count). [R13] */
+/** What can be read after every block on a recorded tape (each field a SHA-256 of its text, or a count). */
 export interface Light {
   readonly nodeSet: string;
   readonly nodes: number;
@@ -147,8 +147,7 @@ export interface Summary {
 /**
  * A contents hash as a segment or an inspection recorded it: the hash, as hex; or the computation's refusal, its text
  * and its code (`ledger-refcount-invalid` for tables whose counts or queue are not their rows'). The two are kept
- * apart so that two refusals are never taken for two equal hashes: only two hashes compare equal. [DT-3, LG-11, R13,
- * R14]
+ * apart so that two refusals are never taken for two equal hashes: only two hashes compare equal.
  */
 export type ContentsHash = { readonly hash: string } | { readonly refused: string; readonly code: string | null };
 
@@ -231,7 +230,7 @@ type Line =
 
 /**
  * The contents hash `read` sees ({@link ContentsHash}): its hash; or, for a database whose counts or queue do not
- * match its rows, which the computation refuses (`ledger-refcount-invalid`), the refusal. [DT-3, LG-11]
+ * match its rows, which the computation refuses (`ledger-refcount-invalid`), the refusal.
  */
 async function contentsOf(read: Pick<ReadHandle, "query">): Promise<ContentsHash> {
   return contentsHash(read).then(
@@ -245,7 +244,7 @@ async function contentsOf(read: Pick<ReadHandle, "query">): Promise<ContentsHash
 
 /**
  * Why `have` does not show the contents hash `expected` shows: a refusal on either side, however alike the two, or two
- * hashes that differ; undefined only for two equal hashes. [R13, R14]
+ * hashes that differ; undefined only for two equal hashes.
  */
 export function contentsDifference(have: ContentsHash, expected: ContentsHash): string | undefined {
   if ("refused" in expected) return `the contents hash (the run compared with refused it: ${expected.refused})`;
@@ -275,7 +274,7 @@ const SOME_NODES_SQL = "SELECT encode(node_key, 'hex') AS k, children FROM core_
 /**
  * The node set of `core_ledger_state.nodes` kept in memory: each row's key and the keys it embeds, counted, so that a
  * key embedded in two rows stays while one of them does. Built from one read of every row, then kept from the rows a
- * block wrote or deleted, read back. [R13; design §1 "node set"]
+ * block wrote or deleted, read back.
  */
 class NodeSetKeeper {
   #rows: Map<string, readonly string[]> | null = null;
@@ -391,7 +390,7 @@ function restartWatcher(
   };
 }
 
-/** `host` reporting, through `reached`, its block's apply answered and its eviction answered. [R14] */
+/** `host` reporting, through `reached`, its block's apply answered and its eviction answered. */
 function pointWorker(host: LedgerHost, reached: (point: RestartPoint, height: bigint) => Promise<void>): LedgerHost {
   let height: bigint | null = null;
   return {
@@ -433,9 +432,8 @@ function pointWorker(host: LedgerHost, reached: (point: RestartPoint, height: bi
 const deletesNodes = (sql: string): boolean => /^DELETE FROM core_ledger_state\.nodes\b/.test(sql);
 
 /**
- * A `FinalizedLoop` reporting `before-commit` and `after-commit`; with `own`, R14's negative control's, which writes the
+ * A `FinalizedLoop` reporting `before-commit` and `after-commit`; with `own`, the negative control's, which writes the
  * block's `ref_counts` and `unreferenced` in a transaction of its own before the block's and reports `between-commits`.
- * [R14, RN-6]
  */
 function pointLoop(
   reached: (point: RestartPoint, height: bigint) => Promise<void>,
@@ -459,9 +457,9 @@ function pointLoop(
 }
 
 /**
- * R14's negative control's two halves (see the module comment): the loop's own transaction, which computes the block's
+ * The negative control's two halves (see the module comment): the loop's own transaction, which computes the block's
  * step as `core-ledger-state` does and runs its `ref_counts` and `unreferenced` statements, and the handle the block's
- * step runs through, which answers those statements with the rows they affected there and runs the rest. [R14]
+ * step runs through, which answers those statements with the rows they affected there and runs the rest.
  */
 function ownTransaction(record: WorkerRecord): {
   readonly own: (db: Database, run: HeightRun) => Promise<void>;
@@ -503,7 +501,7 @@ export interface Segment {
   finished(): Promise<SegmentEvent>;
 }
 
-/** Starts segment `job` in this process (the worker's body), reporting its events through `report`. [R13, R14] */
+/** Starts segment `job` in this process (the worker's body), reporting its events through `report`. */
 export async function startSegment(job: SegmentJob, report: (event: SegmentEvent) => void): Promise<Segment> {
   const record = workerRecord();
   const among = (heights: readonly number[]): ((h: number) => boolean) => {
@@ -672,7 +670,7 @@ async function runWorker(
 /**
  * Runs segment `job` as a process of its own on `db` and waits, up to `patience` ms, for its end: a segment holding at
  * its point is killed with SIGKILL; on PostgreSQL its writer session is then ended (on PGlite the operating system
- * released the lock with the process). [R13, R14]
+ * released the lock with the process).
  */
 export async function runSegment(db: ProcessDatabase, job: SegmentJob, patience: number): Promise<SegmentOutcome> {
   const { events, killed } = await runWorker(
@@ -738,7 +736,7 @@ export function observedRun(file: string): ObservedRun {
       problems.push(`after ${line.height}: observed twice, differently`);
     }
     problems.push(...line.problems);
-    // A block delivered again after a restart is observed again; R3's result stays the one of the run that computed it.
+    // A block delivered again after a restart is observed again; the result stays the one of the run that computed it.
     after.set(line.height, earlier?.r3 !== undefined && observed.r3 === undefined ? { ...observed, r3: earlier.r3 } : observed);
   }
   return { after, batches, problems };
@@ -749,12 +747,12 @@ export function tablesOf(run: ObservedRun): Map<bigint, TableSnapshot> {
   return new Map([...run.after].flatMap(([h, o]) => (o.tables === undefined ? [] : [[BigInt(h), o.tables] as const])));
 }
 
-/** The content-defined tables, whose bytes two runs need not share (`design.md` §4.4). */
+/** The content-defined tables, whose bytes two runs need not share. */
 const CONTENT_DEFINED: ReadonlySet<string> = new Set(["nodes", "ref_counts", "unreferenced"]);
 
 /**
  * Where `got`'s summaries differ from `want`'s, at every height `want` summarized: a table of `core_ledger_state`
- * that is not content-defined, by its rows' digest, or the node set. Empty when they agree. [R13, R14; as A160]
+ * that is not content-defined, by its rows' digest, or the node set. Empty when they agree.
  */
 export function summaryDifferences(got: ObservedRun, want: ObservedRun): string[] {
   const problems: string[] = [];
@@ -775,7 +773,7 @@ export function summaryDifferences(got: ObservedRun, want: ObservedRun): string[
 
 /**
  * The fields of {@link Light} two runs must agree on, each named for a problem's text: not the number of `nodes`' rows,
- * which a content-defined table's bytes decide (`design.md` §4.4).
+ * which a content-defined table's bytes decide.
  */
 const LIGHT_NAMES: Readonly<Record<Exclude<keyof Light, "rows">, string>> = {
   nodeSet: "the node set",
@@ -790,7 +788,6 @@ const LIGHT_NAMES: Readonly<Record<Exclude<keyof Light, "rows">, string>> = {
  * Where `got` differs from `want` at heights `from` to `to`: a height either has not observed; after every height the
  * node set, `root_counts`, the `states` row and count, and `core_digest.tables` ({@link Light}); and where both recorded
  * them, the contents hash, which agrees only as two equal hashes ({@link contentsDifference}). Empty when they agree.
- * [R13, R14]
  */
 export function observedDifferences(got: ObservedRun, want: ObservedRun, from: number, to: number): string[] {
   const problems: string[] = [];
@@ -802,7 +799,7 @@ export function observedDifferences(got: ObservedRun, want: ObservedRun, from: n
       continue;
     }
     const named = (Object.keys(LIGHT_NAMES) as (keyof typeof LIGHT_NAMES)[]).filter((field) => have.light[field] !== expected.light[field]).map((field) => LIGHT_NAMES[field]);
-    // Where both recorded it, the contents hash: two hashes, equal; a refusal on either side is a difference. [R13, R14]
+    // Where both recorded it, the contents hash: two hashes, equal; a refusal on either side is a difference.
     const contents = have.contents === undefined || expected.contents === undefined ? undefined : contentsDifference(have.contents, expected.contents);
     if (contents !== undefined) named.push(contents);
     if (named.length > 0) problems.push(`after ${h}: ${named.join(", ")} differ`);
@@ -821,7 +818,7 @@ export interface DatabaseNow {
 /**
  * The worker's inspection (its body for `{ inspect }`): the database of `parts` opened as a process opens it, and its
  * cursor, tables and contents hash read in one read. Run as a process of its own, since an opened PGlite directory
- * stays locked for the opening process's life. [R14]
+ * stays locked for the opening process's life.
  */
 export async function inspectDatabase(parts: DatabaseParts): Promise<SegmentEvent> {
   const database = await openConfiguredDatabase({ settings: { database: parts, developmentOptIn: true } } as never, { committedHeight: async () => null, cwd: process.cwd() });
@@ -836,7 +833,7 @@ export async function inspectDatabase(parts: DatabaseParts): Promise<SegmentEven
   }
 }
 
-/** The database of `db` read from outside its process ({@link inspectDatabase}, in a process of its own). [R14] */
+/** The database of `db` read from outside its process ({@link inspectDatabase}, in a process of its own). */
 export async function databaseNow(db: ProcessDatabase, patience: number): Promise<DatabaseNow> {
   const { events } = await runWorker({ inspect: db.setting }, (seen) => seen.some((e) => e.event === "inspected"), () => false, patience);
   const found = events.find((e): e is Extract<SegmentEvent, { event: "inspected" }> => e.event === "inspected") as Extract<SegmentEvent, { event: "inspected" }>;
@@ -847,7 +844,7 @@ export async function databaseNow(db: ProcessDatabase, patience: number): Promis
  * R3 on a recorded tape after height `h`, from the stored rows (`before` after h − 1, `after` after h, `batch` h's):
  * its clauses (a)–(d) ({@link storedProblems}), `K_h`'s reach going through the child lists stored after h − 1 with
  * the batch's over them (`through` `"written"`), and the number of rows outside `R_{h−1} ∪ R_h`, as a line of the
- * observation file carries them. [R3, R13]
+ * observation file carries them.
  */
 export function storedRowsProblems(
   before: TableSnapshot,
@@ -882,8 +879,7 @@ export async function jobFor(
 /**
  * Where a run restarted or crashed on the DAG fixture `dag` (`restarted`) differs from an uninterrupted one, heights 0
  * to `last`: after every height, the node set, the byte-hashed tables (`core_ledger_state`'s that are not
- * content-defined, `core_digest.tables`, the contents hash) and R3's check; and the watcher's own problems. [R13, R14,
- * R3]
+ * content-defined, `core_digest.tables`, the contents hash) and the check; and the watcher's own problems.
  */
 export function restartProblems(restarted: ObservedRun, uninterrupted: ObservedRun, dag: FixtureDag, last: number): string[] {
   const tables = tablesOf(restarted);
@@ -904,7 +900,6 @@ export function restartProblems(restarted: ObservedRun, uninterrupted: ObservedR
  * run's after `cursor`: its cursor, a table of `core_ledger_state` (by its bytes: the killed run's history is the
  * uninterrupted one's), the contents hash, which agrees only as two equal hashes: a refusal on either side is a
  * problem of its own. Empty when it is that run's database after that height, nothing of another height mixed in.
- * [R14, RN-6]
  */
 export function mixProblems(now: DatabaseNow, uninterrupted: ObservedRun, cursor: number): string[] {
   if (now.cursor !== cursor) return [`the crash left the cursor at ${now.cursor}, not ${cursor}`];

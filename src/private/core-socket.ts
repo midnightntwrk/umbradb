@@ -2,7 +2,7 @@
  * The socket carrier of the core's side of the process transport: the link over WebSocket (`ws`) on an `http` or
  * `https` server at the address the network plan gives it, each connection one session of `./core-transport.ts`.
  * The carrier owns what only a socket has: the server and its handshake, binary frames, `ws`'s limit on a message
- * (`maxPayload`), the WebSocket pings, and the close handshake's deadline. [PP-4, PP-11; design §1, §8]
+ * (`maxPayload`), the WebSocket pings, and the close handshake's deadline.
  *
  * **Mutual TLS** is opt-in, through the `core` entry's `tls`: `certificate` and `key` (the core's own) and
  * `trustedRoots` (the certificate authorities whose certificates it accepts), each PEM text. With `tls` set, the server
@@ -10,10 +10,9 @@
  * `rejectUnauthorized`). A private process without such a certificate is refused in the TLS handshake, before any
  * WebSocket exists (`CERTIFICATE_REQUIRED`). Without `tls`, it is a plain `http` server and the transport is
  * unauthenticated: for trusted networks, one host, or a TEE with its own channel. TEE attestation is out of scope.
- * [PP-11, Q34; design §14]
  *
  * **Pings.** Every {@link PING_INTERVAL_MS} the carrier pings each connection; one that has not answered the previous
- * ping by then is ended (`no-pong`), so a half-open connection does not hold its instance id. [PP-4]
+ * ping by then is ended (`no-pong`), so a half-open connection does not hold its instance id.
  */
 
 import { createServer as createHttpServer, type IncomingMessage, type Server } from "node:http";
@@ -43,7 +42,7 @@ export interface CoreTransportOptions extends CoreSessionOptions {
   readonly serverTls?: (tls: TransportTls) => ServerOptions;
   /**
    * Told the address once the server listens, before the line that logs it, so that its owner shows the address from
-   * then on: a host reading where the link listens on that line finds it. [LM-3, LM-9, L21]
+   * then on: a host reading where the link listens on that line finds it.
    */
   readonly listening?: (address: { readonly host: string; readonly port: number }) => void;
 }

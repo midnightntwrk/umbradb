@@ -1,11 +1,11 @@
 # The laws of UmbraDB's storage helpers
 
-Two laws hold for the tables UmbraDB's storage helpers give a module (`openspec/changes/core-arch`, SH-1 and SH-2):
+Two laws hold for the tables UmbraDB's storage helpers give a module:
 **W1**, last write wins, for the cursor table, and **T5**, versions that neither overlap nor leave gaps, for the
 height-versioned table. Each is checked by a property test on PostgreSQL and PGlite, and the Lean code under
 `Formal/Lean` proves W1 over its model and the interval fact T5's first half rests on. The laws of 0.9.5's storage
-library, its other property tests and the documents that went with them were removed with that library (core-arch
-design §13; owner decision Q171 A); git history keeps them.
+library, its other property tests and the documents that went with them were removed with that library; git history
+keeps them.
 
 Notation: `[from, to)` is the half-open interval of heights from `from` up to, not including, `to`; a `to` of null
 means "not closed yet".
@@ -15,10 +15,10 @@ means "not closed yet".
 ## 1. Status of each law
 
 - **T5 (1), versions never overlap.** Holds by the helper's trigger, the sole writer of the history table. Checked by
-  A60's property test. Lean: `APISmoke.adjacent_Ico_disjoint`, the interval fact.
-- **T5 (2), consecutive versions meet.** Holds by the same trigger and by one change per key per block (SH-3).
-  Checked by A60's property test. Lean: none.
-- **W1, last write wins.** Holds by one upsert per write, per key. Checked by A59's property test (P9). Lean:
+  the property test. Lean: `APISmoke.adjacent_Ico_disjoint`, the interval fact.
+- **T5 (2), consecutive versions meet.** Holds by the same trigger and by one change per key per block.
+  Checked by the property test. Lean: none.
+- **W1, last write wins.** Holds by one upsert per write, per key. Checked by the property test (P9). Lean:
   `UmbraDBFormal/Watermarks/**` and `APISmoke.watermark_overwrite`.
 
 No Lean theorem relates its model to SQL, a trigger or the TypeScript helpers: the property tests, run against real
@@ -28,7 +28,7 @@ databases through the real block write handles, are what bridge the model and th
 
 ## 2. T5 — versions over heights (the height-versioned table)
 
-The height-versioned table (`src/helpers/height-versioned.ts`, SH-2) keeps, for each key `k`, versions that each
+The height-versioned table (`src/helpers/height-versioned.ts`) keeps, for each key `k`, versions that each
 cover a range `[from, to)` of block heights; the current version has `to` null. Writing `k` at height `h` closes the
 current version at `h` and opens one from `h`; deleting it at `h` closes it without opening a new one; writing the
 value `k` already has adds no version.
@@ -39,7 +39,7 @@ value `k` already has adds no version.
 2. **meet at their boundary**: `to` of one version is `from` of the next, unless the key was deleted between them.
 
 Both hold by the helper's trigger, the sole writer of the history table (a module may not `DELETE` or re-key its
-rows, SQLSTATE `0A000`), and by the rule that a block changes a key at most once (SH-3). (1) is the half-open interval
+rows, SQLSTATE `0A000`), and by the rule that a block changes a key at most once. (1) is the half-open interval
 fact: `[a, b)` and `[b, c)` are disjoint (`APISmoke.adjacent_Ico_disjoint`). (2) is not a database constraint; it
 holds only while the trigger stays the one writer of the boundaries.
 
@@ -47,7 +47,7 @@ holds only while the trigger stays the one writer of the boundaries.
 
 ## 3. W1 — last write wins (the cursor table)
 
-The cursor table (`src/helpers/cursor-table.ts`, SH-1) holds one row per key, `key text` → `value jsonb`, written
+The cursor table (`src/helpers/cursor-table.ts`) holds one row per key, `key text` → `value jsonb`, written
 only through the module's block write handle: `write(w, key, v)` in `on-db-write`, `read(handle, key)` through any
 handle.
 
@@ -77,10 +77,10 @@ a module that wants several kinds of cursor uses several tables or composite key
 
 ## 5. Property tests
 
-- **P9 (W1)**, as A59 (`test/helpers/cursor-table.property.test.ts`): for random sequences of writes over heights,
+- **P9 (W1)** (`test/helpers/cursor-table.property.test.ts`): for random sequences of writes over heights,
   some blocks rolling back, reading a key returns its last committed write, inside a block its own last write; on
   PostgreSQL and PGlite. Its negative control is a helper that keeps a key's first write.
-- **T5**, as A60 (`test/helpers/height-versioned.property.test.ts`): for random writes, same-value writes and deletes
+- **T5** (`test/helpers/height-versioned.property.test.ts`): for random writes, same-value writes and deletes
   over heights, some blocks rolling back, the table read at every height equals a reference model, and each key's
   versions never overlap and meet at their boundary unless deleted there; on PostgreSQL and PGlite. Its negative
   controls are a table that closes a version one height late (an overlap) and one that closes it one height early (a

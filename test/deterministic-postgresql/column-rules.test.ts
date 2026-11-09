@@ -1,6 +1,3 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { basename, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { CanonicalEncodingError, type ColumnType, encodeRow } from "../../src/determinism/cbor.js";
 import {
@@ -10,13 +7,11 @@ import {
   COLUMN_TYPE_RULES,
   type ColumnFacts,
   columnVerdict,
-  DEFAULT_DESIGN,
   type DefaultCatalog,
   type DefaultPart,
   type DefaultReference,
   databaseRefusals,
   defaultReferences,
-  FUNCTION_ID_FIELDS,
   keyOrder,
   notImmutableParts,
   numericScale,
@@ -30,24 +25,20 @@ import {
   SCALAR_COLUMN_TYPES,
   TABLE_RULES,
   type TableFacts,
-  type TableRule,
   type TreeNode,
   tableRefusals,
-  type TypeRule,
   valueFailureBecause,
 } from "../../src/deterministic-postgresql/index.js";
 
 /**
  * The column-type rules, and the refused non-deterministic columns and tables, without a database.
- * [DT-1, DT-2, DT-6, Q58, Q59, Q60, Q61]
  *
  * The rules take a plain, catalog-shaped description of a column (`format_type(atttypid, NULL)`, `format_type(atttypid,
  * atttypmod)`, `atttypmod`, `pg_type.typtype` of the type and of an array's element, whether the column is in the
  * primary key, `attidentity`, and what in its default is not immutable) and of a relation (`relkind`,
  * `relpersistence`), so the contents hash and the migration-time startup check read the same facts and give the same
  * verdicts. The descriptions and expression trees below are written or copied by hand from what PostgreSQL 17.11
- * reports for each declaration (checked 2026-10-23; `column-refusals.test.ts` reads them from a real catalog). The last
- * section keeps the rules in step with the design's column-type table, their single source. [design §4]
+ * reports for each declaration (checked 2026-10-23; `column-refusals.test.ts` reads them from a real catalog).
  */
 
 function column(type: string, options: Partial<ColumnFacts> = {}): ColumnFacts {
@@ -104,8 +95,8 @@ const VALUE_TYPES = [
   "jsonb",
 ] as const;
 
-describe("DT-1 values: the types a module table may store", () => {
-  it("allows exactly DT-1's types and their arrays, each encoded as itself", () => {
+describe("values: the types a module table may store", () => {
+  it("allows exactly the types and their arrays, each encoded as itself", () => {
     for (const type of VALUE_TYPES) {
       for (const name of [type, `${type}[]`]) {
         const verdict = columnVerdict(column(name));
@@ -152,13 +143,13 @@ describe("DT-1 values: the types a module table may store", () => {
     expect(verdictOf(column("real"))).toEqual(["floating-point", "non-deterministic-column"]);
     expect(verdictOf(column("double precision"))).toEqual(["floating-point", "non-deterministic-column"]);
     expect(verdictOf(column("real[]"))).toEqual(["floating-point", "non-deterministic-column"]);
-    // 0.1 + 0.2 = 0.3 holds in real; 0.1 + 0.6 does not give 0.7 there. [Q60]
+    // 0.1 + 0.2 = 0.3 holds in real; 0.1 + 0.6 does not give 0.7 there.
     expect(becauseOf(column("double precision")).reason).toContain("0.1 + 0.2");
     expect(becauseOf(column("real")).reason).toContain("0.1 + 0.6");
     expect(becauseOf(column("real")).reason).not.toContain("0.1 + 0.2");
   });
 
-  it("allows timestamptz as a value and as a key ordered by time, its arrays as values (Q74)", () => {
+  it("allows timestamptz as a value and as a key ordered by time, its arrays as values", () => {
     expect(verdictOf(column("timestamp with time zone"))).toEqual(["timestamptz", null]);
     // A precision is a type modifier: format_type(atttypid, NULL) names the type the same.
     const precise = column("timestamp with time zone", { declaredType: "timestamp(3) with time zone", typeModifier: 3 });
@@ -171,7 +162,7 @@ describe("DT-1 values: the types a module table may store", () => {
 
   it("refuses timestamp, date, time, timetz and interval, each with its own reason, and says to use timestamptz", () => {
     // Each reason names its type as the design row does, and none cites the drivers' Date any more: the mapping
-    // reads every date and time value as text. [Q59, Q74, DB-2, Q68]
+    // reads every date and time value as text.
     const cases: readonly (readonly [string, readonly string[], readonly string[]])[] = [
       [
         "timestamp without time zone",
@@ -190,11 +181,11 @@ describe("DT-1 values: the types a module table may store", () => {
       for (const text of [...absent, "JavaScript Date", "drivers", "DateStyle", "milliseconds"]) {
         expect(reason, type).not.toContain(text);
       }
-      // The alternative is "use timestamptz, written with Z"; no message cites the core's old column. [DT-6, A145, Q74]
+      // The alternative is "use timestamptz, written with Z"; no message cites the core's old column.
       expect(alternative, type).toMatch(/^use timestamptz, written with Z\b/);
       expect(`${reason} ${alternative}`, type).not.toContain("block_timestamp_ms");
     }
-    // A time of day and a length of time are no instants; bigint microseconds hold them. [Q87 B]
+    // A time of day and a length of time are no instants; bigint microseconds hold them.
     expect(becauseOf(column("time without time zone")).alternative).toContain("bigint microseconds since midnight");
     expect(becauseOf(column("time with time zone")).alternative).toContain("bigint microseconds since midnight");
     expect(becauseOf(column("interval")).alternative).toContain("for a length of time, store bigint microseconds");
@@ -244,7 +235,7 @@ describe("DT-1 values: the types a module table may store", () => {
     for (const type of ["inet", "cidr", "bit", "bit varying", "xml", "point", "tsvector", '"char"', "name", "oid"]) {
       expect(verdictOf(column(type)), type).toEqual(["other", "unsupported-column-type"]);
     }
-    // oidvector has an element type but no "[]" in format_type's name: it is not one of the allowed arrays. [DT-1]
+    // oidvector has an element type but no "[]" in format_type's name: it is not one of the allowed arrays.
     expect(verdictOf(column("oidvector"))).toEqual(["other", "unsupported-column-type"]);
     // An array described without its element's kind is not taken for an array of an allowed type.
     expect(verdictOf(column("integer[]", { elementKind: null }))).toEqual(["other", "unsupported-column-type"]);
@@ -252,7 +243,7 @@ describe("DT-1 values: the types a module table may store", () => {
   });
 });
 
-describe("DT-2 keys: the types a primary key may use, and how they are ordered", () => {
+describe("keys: the types a primary key may use, and how they are ordered", () => {
   it("orders integers numerically, boolean false first, bytea and uuid by bytes, text and varchar by bytes in C", () => {
     const orders: readonly (readonly [string, string])[] = [
       ["smallint", "numerically"],
@@ -304,7 +295,7 @@ describe("DT-2 keys: the types a primary key may use, and how they are ordered",
   });
 });
 
-describe("DT-6 tables: every refusal of a table, in a fixed order", () => {
+describe("tables: every refusal of a table, in a fixed order", () => {
   const table = (columns: ColumnFacts[]): TableFacts => ({ schema: "m", name: "t", columns });
 
   it("refuses nothing in a table of allowed types with an allowed key", () => {
@@ -358,7 +349,7 @@ describe("refusal messages: what, where, why, and what to use instead", () => {
     because: becauseOf(column("timestamp without time zone")),
   };
 
-  it("reads as one explanation for a developer who has never read DT-1", () => {
+  it("reads as one explanation for a developer who has never read the rules", () => {
     expect(refusalMessage(timestamp, { schema: "shop", table: "orders" })).toBe(
       'unsupported-column-type: table "shop"."orders", column "created_at" (timestamp(3) without time zone): ' +
         "this type cannot be stored in a module table. " +
@@ -421,7 +412,7 @@ describe("the encoder's refusals, by type name alone", () => {
     for (const type of VALUE_TYPES) expect(refusalOfTypeName("varchar").because.alternative).toContain(type);
   });
 
-  it("is what encodeRow throws for a column type outside DT-1", () => {
+  it("is what encodeRow throws for a column type outside the encoding", () => {
     for (const name of ["json", "double precision", "varchar", "money", "timestamp without time zone", "interval"]) {
       const { code, because } = refusalOfTypeName(name);
       let error: unknown;
@@ -438,7 +429,7 @@ describe("the encoder's refusals, by type name alone", () => {
   });
 });
 
-describe("why a stored number cannot be hashed (DT-1, DT-6, Q57)", () => {
+describe("why a stored number cannot be hashed", () => {
   it("explains numeric fractions and NaN, and jsonb numbers that are not 64-bit integers", () => {
     const numeric = valueFailureBecause("numeric", "numeric-fraction");
     expect(numeric?.reason).toContain("100.00");
@@ -449,7 +440,7 @@ describe("why a stored number cannot be hashed (DT-1, DT-6, Q57)", () => {
     expect(valueFailureBecause("jsonb[]", "integer-out-of-range")).toEqual(json);
   });
 
-  it("explains an infinite timestamptz, which has no microseconds since 1970 (DT-1, Q74)", () => {
+  it("explains an infinite timestamptz, which has no microseconds since 1970", () => {
     const infinite = valueFailureBecause("timestamp with time zone", "timestamptz-infinite");
     expect(infinite?.reason).toContain("microseconds since 1970-01-01T00:00:00Z");
     expect(infinite?.reason).toContain("infinity and -infinity");
@@ -467,7 +458,7 @@ describe("why a stored number cannot be hashed (DT-1, DT-6, Q57)", () => {
   });
 });
 
-// ── Defaults that are not immutable [DT-6, Q61] ─────────────────────────────────────────────────────────────────────
+// ── Defaults that are not immutable ─────────────────────────────────────────────────────────────────────
 
 /**
  * Default expression trees exactly as PostgreSQL 17.11 stores them (`pg_attrdef.adbin::text`, copied 2026-10-23 from
@@ -605,6 +596,11 @@ describe("default expression trees: what a default calls, read as PostgreSQL's o
     const [list] = tree.fields.get("w") ?? [];
     const kinds = typeof list === "object" && "list" in list ? list.list.map((node) => (node as TreeNode).kind) : [];
     expect(kinds).toEqual(["B", "C"]);
+  });
+
+  it("reads an SQL value function alone, which has no function id, by its op", () => {
+    const valueFunction = parseExpressionTree("{SQLVALUEFUNCTION :op 3 :type 1184 :typmod -1 :location -1}");
+    expect(defaultReferences(valueFunction)).toEqual([{ kind: "value-function", op: 3 }]);
   });
 
   it("reads backslash-escaped characters as part of a token, never as structure", () => {
@@ -840,7 +836,7 @@ describe("what in a default is not immutable, and why", () => {
   });
 });
 
-describe("DT-6 (Q61): identity, serial and non-immutable defaults refuse their column", () => {
+describe("identity, serial and non-immutable defaults refuse their column", () => {
   const NOW = parts(TREES.now);
   const SERIAL = parts(TREES.serial);
   const table = (columns: ColumnFacts[]): TableFacts => ({ schema: "m", name: "t", columns });
@@ -957,7 +953,7 @@ describe("DT-6 (Q61): identity, serial and non-immutable defaults refuse their c
   });
 });
 
-describe("DT-6 (Q61, Q75): sequences and unlogged tables refuse their module schema", () => {
+describe("sequences and unlogged tables refuse their module schema", () => {
   const relation = (kind: string, persistence: string, name = "r"): RelationFacts => ({
     schema: "m",
     name,
@@ -1027,270 +1023,5 @@ describe("DT-6 (Q61, Q75): sequences and unlogged tables refuse their module sch
         "table loses rows the chain still holds. Instead, make the table logged: create it without UNLOGGED, or run " +
         "ALTER TABLE ... SET LOGGED.",
     );
-  });
-});
-
-// ── The design's column-type table: the single source of every reason and alternative [design §4] ───────────────────
-
-/**
- * The table is found by its heading paragraph anywhere under `openspec/`, not by the change's folder, so it is still
- * found after `openspec archive` moves the change to `openspec/changes/archive/<date>-core-arch/`. It must be found
- * exactly once: a later change that copies or revises the table must point this test at the table it keeps.
- */
-const MARKER = "**Column types (Q58).**";
-const HEADER = "| Type | As a value | As a key | Refused because / use instead |";
-const REPOSITORY = fileURLToPath(new URL("../..", import.meta.url));
-
-interface DesignTable {
-  readonly path: string;
-  /** The paragraph that opens with the marker, its lines joined. */
-  readonly prose: string;
-  /** Each row's four cells, verbatim. */
-  readonly rows: readonly (readonly [string, string, string, string])[];
-}
-
-function readDesignTable(): DesignTable {
-  const openspec = join(REPOSITORY, "openspec");
-  const paths = readdirSync(openspec, { recursive: true, encoding: "utf8" })
-    .filter((path) => basename(path) === "design.md")
-    .map((path) => join(openspec, path))
-    .filter((path) => readFileSync(path, "utf8").includes(MARKER));
-  if (paths.length !== 1) {
-    throw new Error(`expected one design.md under openspec/ holding ${MARKER}, found ${JSON.stringify(paths)}`);
-  }
-  const path = paths[0] as string;
-  const lines = readFileSync(path, "utf8").split("\n");
-  const start = lines.findIndex((line) => line.startsWith(MARKER));
-  const blank = lines.findIndex((line, index) => index > start && line.trim() === "");
-  const header = lines.indexOf(HEADER);
-  if (header < blank) throw new Error(`no column-type table after ${MARKER} in ${path}`);
-  const rows: [string, string, string, string][] = [];
-  for (let index = header + 2; (lines[index] ?? "").startsWith("|"); index++) {
-    const cells = (lines[index] as string).split("|").slice(1, -1).map((cell) => cell.trim());
-    if (cells.length !== 4) throw new Error(`row ${index + 1} of ${path} has ${cells.length} cells`);
-    rows.push(cells as [string, string, string, string]);
-  }
-  return { path, prose: lines.slice(start, blank).join(" "), rows };
-}
-
-const KEY_CELLS: Readonly<Record<string, string>> = {
-  "yes, numerically": "numerically",
-  "yes, by bytes": "by-bytes",
-  'yes, by bytes (`COLLATE "C"`)': "by-bytes-collate-c",
-  "yes, `false` first": "false-first",
-  "yes, by time": "by-time",
-};
-
-/** Every backticked term of a cell, as the rules write it (without backticks). */
-const termsOf = (cell: string): string[] => [...cell.matchAll(/`([^`]+)`/g)].map((match) => match[1] as string);
-
-const textsOf = (rule: TypeRule): Because[] => {
-  if (rule.allowed) return typeof rule.key === "string" ? [] : [rule.key];
-  return "byType" in rule.because ? Object.values(rule.because.byType) : [rule.because];
-};
-
-/**
- * Where the rules and the design table disagree: an empty list when they agree. Each rule keeps its row's four cells
- * verbatim (`design`), so any edit to the table or to a rule's mirror shows here; its decisions (allowed or not, the
- * code, the key order) must be the ones the cells state; and its messages, adapted into sentences for a developer,
- * must keep every concrete term of the cell (types, settings, examples, the column to copy).
- */
-function designDifferences(rules: readonly TypeRule[], table: DesignTable): string[] {
-  const out: string[] = [];
-  if (rules.length !== table.rows.length) out.push(`${rules.length} rules for ${table.rows.length} rows`);
-  table.rows.forEach(([type, value, keyCell, because], index) => {
-    const rule = rules[index];
-    if (rule === undefined) return;
-    const where = `row ${index + 1} (${type}), rule ${rule.id}`;
-    const design = rule.design;
-    if (design.type !== type || design.value !== value || design.key !== keyCell || design.because !== because) {
-      out.push(`${where}: the rule's design cells differ from the table`);
-    }
-    if (rule.allowed === value.startsWith("refused")) out.push(`${where}: allowed as a value differs`);
-    if (!rule.allowed && (rule.code === "non-deterministic-column") !== value.includes("`non-deterministic-column`")) {
-      out.push(`${where}: the code differs`);
-    }
-    const order = KEY_CELLS[keyCell] ?? null;
-    const ruleOrder = rule.allowed && typeof rule.key === "string" ? rule.key : null;
-    if (order !== ruleOrder) out.push(`${where}: the key order differs (${order} vs ${ruleOrder})`);
-    if (because.startsWith("—") !== (textsOf(rule).length === 0)) out.push(`${where}: a refusal text differs`);
-    const shipped = textsOf(rule)
-      .map((text) => `${text.reason} ${text.alternative}`)
-      .join(" ");
-    for (const term of because.startsWith("—") ? [] : termsOf(because)) {
-      if (!shipped.includes(term)) out.push(`${where}: the messages lose "${term}"`);
-    }
-  });
-  return out;
-}
-
-/**
- * Where the paragraph's refusals and the table-level rules disagree. Each sentence of the paragraph that refuses
- * something ("… is refused with `code`") belongs to at least one rule, kept verbatim in its `design`; the sequence and
- * the unlogged table share one sentence, each with its own message. [Q61]
- */
-function proseDifferences(rules: Readonly<Record<string, TableRule>>, table: DesignTable): string[] {
-  const out: string[] = [];
-  const prose = table.prose.replace(/\s+/g, " ");
-  const sentences = Object.entries(rules);
-  const distinct = new Set(sentences.map(([, rule]) => rule.design)).size;
-  if ((prose.match(/ is refused with `/g) ?? []).length !== distinct) {
-    out.push(`the paragraph's refusals are not ${distinct}`);
-  }
-  for (const [name, rule] of sentences) {
-    if (!prose.includes(rule.design)) out.push(`${name}: its design sentence is not in the paragraph`);
-    if (!rule.design.includes(`refused with \`${rule.code}\``)) out.push(`${name}: the code differs`);
-    const shipped = `${rule.because.reason} ${rule.because.alternative}`;
-    for (const term of termsOf(rule.design).filter((t) => t !== rule.code)) {
-      if (!shipped.includes(term)) out.push(`${name}: the message loses "${term}"`);
-    }
-  }
-  return out;
-}
-
-/**
- * Where the paragraph's sentences on allowed defaults and on detection, and the detection itself, disagree: both
- * sentences verbatim in the paragraph, and the function-id fields the expression tree is read for exactly those the
- * detection sentence names (`:funcid`, …).
- */
-function defaultDesignDifferences(
-  design: typeof DEFAULT_DESIGN,
-  fields: readonly string[],
-  table: DesignTable,
-): string[] {
-  const out: string[] = [];
-  const prose = table.prose.replace(/\s+/g, " ");
-  if (!prose.includes(design.allowed)) out.push("the allowed-defaults sentence is not in the paragraph");
-  if (!prose.includes(design.detection)) out.push("the detection sentence is not in the paragraph");
-  const named = termsOf(design.detection)
-    .filter((term) => term.startsWith(":"))
-    .map((term) => term.slice(1));
-  if ([...named].sort().join() !== [...fields].sort().join()) {
-    out.push(`the tree is read for ${fields.join(", ")}, the design names ${named.join(", ")}`);
-  }
-  return out;
-}
-
-describe("design.md §4's column-type table and the rules agree", () => {
-  const table = readDesignTable();
-
-  it("finds the table once, under openspec/, wherever the change folder is", () => {
-    expect(table.path.startsWith(join(REPOSITORY, "openspec"))).toBe(true);
-    expect(table.rows.length).toBe(17);
-  });
-
-  it("mirrors every row: the same cells, the same decisions, and every concrete term in the messages", () => {
-    expect(designDifferences(COLUMN_TYPE_RULES, table)).toEqual([]);
-  });
-
-  it("mirrors the paragraph's refusals: no primary key, identity and serial, defaults, sequences, unlogged", () => {
-    expect(proseDifferences(TABLE_RULES, table)).toEqual([]);
-  });
-
-  it("mirrors the paragraph's allowed defaults and its detection, whose function ids the tree is read for", () => {
-    expect(defaultDesignDifferences(DEFAULT_DESIGN, FUNCTION_ID_FIELDS, table)).toEqual([]);
-    // The node the detection sentence names for SQL value functions is one the tree is read for.
-    expect(DEFAULT_DESIGN.detection).toContain("`SQLVALUEFUNCTION`");
-    const valueFunction = parseExpressionTree("{SQLVALUEFUNCTION :op 3 :type 1184 :typmod -1 :location -1}");
-    expect(defaultReferences(valueFunction)).toEqual([{ kind: "value-function", op: 3 }]);
-  });
-
-  describe("negative controls: each kind of drift is caught", () => {
-    const replaced = (index: number, rule: TypeRule): TypeRule[] =>
-      COLUMN_TYPE_RULES.map((each, at) => (at === index ? rule : each));
-    const indexOf = (id: string): number => COLUMN_TYPE_RULES.findIndex((rule) => rule.id === id);
-    const at = (id: string): TypeRule => COLUMN_TYPE_RULES[indexOf(id)] as TypeRule;
-
-    it("an allowed type taken for a refused one", () => {
-      const uuid = at("uuid");
-      const refused = { ...uuid, allowed: false, code: "unsupported-column-type", because: becauseOf(column("json")) };
-      expect(designDifferences(replaced(indexOf("uuid"), refused as TypeRule), table)).not.toEqual([]);
-    });
-
-    it("a refused type taken for an allowed one", () => {
-      const money = at("money");
-      const allowed = { ...money, allowed: true, types: ["money"], key: "by-bytes" };
-      expect(designDifferences(replaced(indexOf("money"), allowed as TypeRule), table)).not.toEqual([]);
-    });
-
-    it("a key order changed, a key refusal dropped, a code changed", () => {
-      const text = at("text");
-      expect(designDifferences(replaced(indexOf("text"), { ...text, key: "by-bytes" } as TypeRule), table)).not.toEqual(
-        [],
-      );
-      const jsonb = at("jsonb");
-      expect(
-        designDifferences(replaced(indexOf("jsonb"), { ...jsonb, key: "by-bytes" } as TypeRule), table),
-      ).not.toEqual([]);
-      const timestamptz = at("timestamptz");
-      expect(
-        designDifferences(replaced(indexOf("timestamptz"), { ...timestamptz, key: "numerically" } as TypeRule), table),
-      ).not.toEqual([]);
-      const floats = at("floating-point");
-      expect(
-        designDifferences(
-          replaced(indexOf("floating-point"), { ...floats, code: "unsupported-column-type" } as TypeRule),
-          table,
-        ),
-      ).not.toEqual([]);
-    });
-
-    it("a design cell edited on either side, a row added or removed", () => {
-      const json = at("json");
-      const edited = { ...json, design: { ...json.design, because: `${json.design.because}.` } };
-      expect(designDifferences(replaced(indexOf("json"), edited as TypeRule), table)).not.toEqual([]);
-      const editedTable = { ...table, rows: table.rows.map((row, i) => (i === 0 ? [...row.slice(0, 3), "x"] : row)) };
-      expect(designDifferences(COLUMN_TYPE_RULES, editedTable as DesignTable)).not.toEqual([]);
-      expect(designDifferences(COLUMN_TYPE_RULES.slice(1), table)).not.toEqual([]);
-    });
-
-    it("a message that loses a concrete term of its cell", () => {
-      const money = at("money");
-      if (money.allowed || "byType" in money.because) throw new Error("money has one reason");
-      const lost = { ...money, because: { ...money.because, reason: "Its text depends on a setting" } };
-      expect(designDifferences(replaced(indexOf("money"), lost as TypeRule), table)).toContainEqual(
-        expect.stringContaining('the messages lose "lc_monetary"'),
-      );
-    });
-
-    it("a table-level refusal whose sentence or code drifted", () => {
-      const noKey = TABLE_RULES.noPrimaryKey;
-      expect(
-        proseDifferences(
-          { ...TABLE_RULES, noPrimaryKey: { ...noKey, design: noKey.design.replace("primary-key order", "key order") } },
-          table,
-        ),
-      ).not.toEqual([]);
-      expect(
-        proseDifferences({ ...TABLE_RULES, noPrimaryKey: { ...noKey, code: "unsupported-key-type" } }, table),
-      ).not.toEqual([]);
-      const defaults = TABLE_RULES.nonImmutableDefault;
-      const lost = { ...defaults, because: { ...defaults.because, reason: "Each machine gets a different value" } };
-      expect(proseDifferences({ ...TABLE_RULES, nonImmutableDefault: lost }, table)).toContainEqual(
-        expect.stringContaining('loses "now()"'),
-      );
-      const identity = TABLE_RULES.identityOrSerial;
-      const noSerial = { ...identity, because: { ...identity.because, reason: "A sequence never rolls back" } };
-      expect(proseDifferences({ ...TABLE_RULES, identityOrSerial: noSerial }, table)).toContainEqual(
-        expect.stringContaining('loses "serial"'),
-      );
-    });
-
-    it("a refusal of the paragraph that no rule mirrors", () => {
-      const { sequence: _sequence, unloggedTable: _unlogged, ...withoutQ61 } = TABLE_RULES;
-      expect(proseDifferences(withoutQ61, table)).toContainEqual("the paragraph's refusals are not 3");
-      const { nonImmutableDefault: _default, ...withoutDefaults } = TABLE_RULES;
-      expect(proseDifferences(withoutDefaults, table)).toContainEqual("the paragraph's refusals are not 4");
-    });
-
-    it("an allowed-defaults or detection sentence that drifted, a function-id field dropped or added", () => {
-      const allowed = { ...DEFAULT_DESIGN, allowed: DEFAULT_DESIGN.allowed.replace("`1 + 2`", "`1 + 1`") };
-      expect(defaultDesignDifferences(allowed, FUNCTION_ID_FIELDS, table)).not.toEqual([]);
-      const detection = { ...DEFAULT_DESIGN, detection: DEFAULT_DESIGN.detection.replace("provolatile", "prokind") };
-      expect(defaultDesignDifferences(detection, FUNCTION_ID_FIELDS, table)).not.toEqual([]);
-      const withoutOpfuncid = FUNCTION_ID_FIELDS.filter((field) => field !== "opfuncid");
-      expect(defaultDesignDifferences(DEFAULT_DESIGN, withoutOpfuncid, table)).not.toEqual([]);
-      expect(defaultDesignDifferences(DEFAULT_DESIGN, [...FUNCTION_ID_FIELDS, "aggfnoid"], table)).not.toEqual([]);
-    });
   });
 });

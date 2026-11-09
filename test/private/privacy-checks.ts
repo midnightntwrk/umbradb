@@ -7,7 +7,7 @@ import { adminOrigin, launchPrivate, launchPublicCore, type PrivateProcess, type
 /**
  * What the core's `/status` shows of each private instance: only its id, whether it is connected, whether it is
  * lockstep, and its synced height. Keys are not checked here: they belong to a module, not the core. Shared by
- * `privacy.test.ts` and its negative control's file; imports nothing of Vitest. [A120, PP-9, AE-5, Q154]
+ * `privacy.test.ts` and its negative control's file; imports nothing of Vitest.
  *
  * **The run** ({@link instancesRun}): a public core — its transport and admin endpoints on free ports, the instance
  * `keeper` in `lockstepInstances` (unless the run is independent) — and two private instances connected to its
@@ -47,7 +47,7 @@ export async function originOf(lines: readonly string[], what: string): Promise<
   }
 }
 
-/** Runs the scenario (see the module comment) on `backend` and reads each process's `/status`. [A120] */
+/** Runs the scenario (see the module comment) on `backend` and reads each process's `/status`. */
 export async function instancesRun(backend: PrivateBackend, options: InstancesOptions): Promise<InstancesRun> {
   const { head, lockstep } = options;
   const publicDb = await backend.database("public");
@@ -77,7 +77,7 @@ export async function instancesRun(backend: PrivateBackend, options: InstancesOp
     const keeper = await reading("keeper");
     instances.push(keeper);
     // One start after the other: on PostgreSQL both provision the same cluster-wide module roles at startup, which two
-    // starts at one instant race for (issue 00030-concurrent-role-provisioning).
+    // starts at one instant race for.
     await keeper.handle.started;
     const other = await reading("other");
     instances.push(other);
@@ -124,7 +124,7 @@ export async function instancesRun(backend: PrivateBackend, options: InstancesOp
   }
 }
 
-/** The four fields `/status` shows of an instance on the core. [PP-9] */
+/** The four fields `/status` shows of an instance on the core. */
 const INSTANCE_FIELDS = ["connected", "height", "id", "lockstep"];
 
 /**
@@ -132,7 +132,6 @@ const INSTANCE_FIELDS = ["connected", "height", "id", "lockstep"];
  * - the core's `/status` shows each instance with exactly its id, connection, lockstep flag and synced height
  *   (`keeper` lockstep at the head, `other` connected and independent);
  * - each instance's `/status` shows its public cursor and lockstep flag, and no instances of its own.
- * [A120]
  */
 export function instancesProblems(run: InstancesRun): string[] {
   const problems: string[] = [];

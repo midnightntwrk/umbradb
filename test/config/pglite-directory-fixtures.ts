@@ -11,7 +11,6 @@ import { core, startProcess, testBuild } from "../runner/process-build.js";
  * committed negative control (`./pglite-directory.negative-control.test.ts`). It runs the runner's `startProcess`, or
  * a library host's `startUmbraDB`, on `database: { kind: "pglite", path: <directory> }` under the development opt-in,
  * with the directory's parent missing, over an in-memory chain whose head is S, and reads what it left on disk.
- * [A166, CF-4, Q163 A]
  */
 
 /** S, and the in-memory chain's head: the process commits block S and waits for the next. */
@@ -27,7 +26,7 @@ export interface ProcessObservation {
   readonly created: boolean;
   /** Whether block S is in `core_block_commit.blocks`. */
   readonly committedS: boolean;
-  /** Whether the writer lock's file is beside the directory (taken once the directory existed). [DB-11] */
+  /** Whether the writer lock's file is beside the directory (taken once the directory existed). */
   readonly lockBeside: boolean;
   /** The lines the process logged. */
   readonly lines: readonly string[];
@@ -57,7 +56,7 @@ export async function committedIn(directory: string, height: bigint): Promise<bo
 
 /**
  * How a check starts its process: the runner's `startProcess` (the engine, with the tests' build), or `startUmbraDB` (a
- * library host's, with the command's build). [A166]
+ * library host's, with the command's build).
  */
 export type StartVia = "engine" | "library";
 
@@ -98,7 +97,7 @@ export async function processOn(directory: string, via: StartVia = "engine"): Pr
   };
 }
 
-/** The first check's oracle: every problem with what a process showed, none when the check holds. [A166] */
+/** The first check's oracle: every problem with what a process showed, none when the check holds. */
 export function processProblems(observed: ProcessObservation): string[] {
   const problems: string[] = [];
   if (observed.refused !== null) problems.push(`startup refused (${observed.refused})`);
@@ -106,7 +105,7 @@ export function processProblems(observed: ProcessObservation): string[] {
   if (!observed.created) problems.push("the directory was not created");
   if (!observed.committedS) problems.push("block S was not committed");
   if (!observed.lockBeside) problems.push("no writer lock file beside the directory");
-  // The process says it created the directory, naming it as configured. [Q165 B, Q167 A]
+  // The process says it created the directory, naming it as configured.
   if (!observed.lines.some((line) => /^created a new PGlite data directory .+ \(and 1 missing parent directory\)$/.test(line))) {
     problems.push("no log line names the directory created");
   }

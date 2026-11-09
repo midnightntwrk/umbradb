@@ -12,7 +12,7 @@ import { WebSocket, WebSocketServer } from "ws";
 // over `https` that requires client certificates (`requestCert`, `rejectUnauthorized`). A client holding a certificate
 // issued by the trusted CA connects; a client without a certificate, or with one from another CA, is refused before any
 // WebSocket connection exists. The certificates are generated at test time with the `openssl` command into a temporary
-// directory that is deleted afterwards; no key is committed. [A121; design §8, §14]
+// directory that is deleted afterwards; no key is committed.
 
 let dir: string;
 let server: Server;

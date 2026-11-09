@@ -12,13 +12,11 @@ import {
 /**
  * The errors the component's rules throw: `UmbraError`, defined in the component, with its code and details.
  * - Output the mapping cannot read is `database-error` with `reason: unreadable-result` and the type it was read as.
- *   [DB-2, DB-13]
- * - A value the parameter texts cannot send is `invalid-parameter` with its index. [DB-2, DB-13]
- * - Neither is retryable. [DB-13]
+ * - A value the parameter texts cannot send is `invalid-parameter` with its index.
+ * - Neither is retryable.
  *
  * Mutation testing found that no test asserted the code of unreadable output, and that this suite did not check the
  * class's own rules (`../db/errors.test.ts` did, through `src/db/errors.ts`'s re-export); these tests close both gaps.
- * [Q79]
  */
 
 const oid = (name: string): number => (RESULT_TYPES.find((type) => type.name === name) as { oid: number }).oid;

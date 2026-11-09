@@ -2,11 +2,10 @@
 // `src/ledger/load.ts` (`startLedgerWorker({ loader, loaderData })`), so that the worker thread itself runs the
 // instrumented adapter. It loads the real adapter and, by `loaderData`:
 // - counts the package's native parses;
-// - returns a wrong state root for one height (a test package returning a wrong root) [A106];
-// - spends a long synchronous step in one height's apply (a 60 s ledger step) [A101];
+// - returns a wrong state root for one height (a test package returning a wrong root);
+// - spends a long synchronous step in one height's apply (a 60 s ledger step);
 // - fails, ends the thread, or traps as WebAssembly does;
 // - records each eviction the package is asked for and each parse whose native objects it is told to free.
-// [A92]
 // Erasable TypeScript only: the worker runs it through Node.js's type stripping.
 
 import { loadLedgerPackage } from "../../../src/ledger/load.js";
@@ -99,7 +98,7 @@ export async function loadLedger(
       hold.start = `${process.hrtime.bigint()}`;
       const end = process.hrtime.bigint() + BigInt(slow.ms) * 1_000_000n;
       while (process.hrtime.bigint() < end) {
-        // A step the main thread must not wait on. [A101]
+        // A step the main thread must not wait on.
       }
       hold.end = `${process.hrtime.bigint()}`;
     }

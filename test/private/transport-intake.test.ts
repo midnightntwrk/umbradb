@@ -10,7 +10,6 @@ import { endedWithin, rawClient } from "./raw-client.js";
 
 /**
  * Block intake over the real process transport, with the transport itself rather than the stand-in `./link.ts`.
- * [A114 FAULT, PP-3, PP-4, PP-5]
  * - A private process with `privateLink` is woken only by the core's `committed` messages and by every
  *   (re)connection, with no poll. The 1 s poll is the wake-up only without a transport.
  * - On PGlite it reads its public database through the core (`read` messages); on PostgreSQL directly
@@ -19,7 +18,6 @@ import { endedWithin, rawClient } from "./raw-client.js";
  * A proxy between the two (`TransportProxy`) drops the transport: it closes every connection and refuses every new one
  * while the public cursor advances 50 heights, so the `committed` messages of those heights go nowhere. Once it lets
  * connections through again, the private process reconnects with its back-off and processes the 50 heights in order.
- * [A114 FAULT, IN-10]
  */
 
 /** A TCP proxy to `target` that can drop every connection and refuse new ones (see the module comment). */
@@ -93,11 +91,11 @@ async function rowsIn(db: TestDatabase): Promise<[number, string][]> {
 const FROM = 5;
 const TO = FROM + 50;
 
-describe.each(PRIVATE_BACKENDS)("intake over the process transport on $name (PP-3, A114)", (backend: PrivateBackend) => {
+describe.each(PRIVATE_BACKENDS)("intake over the process transport on $name", (backend: PrivateBackend) => {
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 
-  it("A114: dropped while the public cursor advances 50 heights, the private process processes them in order after reconnecting", async () => {
+  it("dropped while the public cursor advances 50 heights, the private process processes them in order after reconnecting", async () => {
     const publicDb = await backend.database("public");
     const privateDb = await backend.database("private");
     const core = await startPublicCore({ database: publicDb.setting, head: BigInt(FROM), extra: { listen: { privateLink: "127.0.0.1:0" } } });

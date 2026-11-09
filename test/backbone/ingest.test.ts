@@ -29,32 +29,32 @@ import { a79Tape, upgradeTape } from "./ingest-tapes.js";
  * Ingest through the real process and the node source, on PostgreSQL 18 and PGlite 0.5.10. A tape node serves synthetic
  * tapes in the node's own answer shapes (`./fetch-fixtures.ts`); the recorded real tapes replace them. Each process is
  * `startProcess` with UmbraDB's backbone, the real `core-block-fetch` over `nodeSourceOf` (what `umbradb run` passes)
- * and the watching module of `./ingest-harness.ts`. [IN-4, IN-5, IN-6, IN-7, IN-8, CD-2]
+ * and the watching module of `./ingest-harness.ts`.
  *
  * - Finalized notifications 10, 13, 13, 12, a disconnect, then 20: heights 11–20 commit once each in order. A block
  *   whose parent differs from the cursor halts with `parent-mismatch`. A notification at or below the cursor with
- *   another hash halts with `finality-conflict`. [A79, IN-4]
+ *   another hash halts with `finality-conflict`.
  * - A catch-up of 1,000 heights (on PGlite; 200 on PostgreSQL) with `prefetchWindow` 64 never fetches a height more
  *   than 64 above the cursor, and commits one per height in order. The tape node received only the allowed node
- *   methods. [A80, IN-5, A83, IN-8]
+ *   methods.
  * - 101–103 queued, then 101′–104′: `on-rollback` fires once naming 101–103, and 101′ is used at finality without being
  *   fetched again. With `tipCap` 5 and finality stalled, the sixth best block is not queued and `finality-stall` shows
- *   in `status()` (what `/status` serves). [A81, IN-6]
+ *   in `status()` (what `/status` serves).
  * - At an upgrade, a module requiring `block-body` reads at U the extrinsics decoded with the metadata of U's parent's
- *   state (the old runtime's), and at F with the new one's. [A89, CD-2, LG-4]
- * - Block 0's fetch path: its runtime and metadata at its own state, and its time 0 without `Timestamp::set`. [IN-7]
+ *   state (the old runtime's), and at F with the new one's.
+ * - Block 0's fetch path: its runtime and metadata at its own state, and its time 0 without `Timestamp::set`.
  */
 
 describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend: ProcessBackend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  // ── Finalized notifications [A79] ──────────────────────────────────────────────────────────────────────────────
+  // ── Finalized notifications ──────────────────────────────────────────────────────────────────────────────
 
   const chain = chainOf(20n);
   const at = (height: number): ChainBlock => chain[height] as ChainBlock;
 
-  it("A79: with finalized notifications 10, 13, 13, 12, a disconnect, then 20, heights 11–20 commit once each in order", async () => {
+  it("with finalized notifications 10, 13, 13, 12, a disconnect, then 20, heights 11–20 commit once each in order", async () => {
     const db = await backend.database();
     const run = await ingest(db, a79Tape(chain), { start: 11n });
     try {
@@ -68,7 +68,7 @@ describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend
     expect(await a79Problems(db, run.seen, chain)).toEqual([]);
   }, PATIENCE_MS * 2);
 
-  it("A79: a block whose parent hash differs from the cursor's halts with parent-mismatch, nothing of it kept", async () => {
+  it("a block whose parent hash differs from the cursor's halts with parent-mismatch, nothing of it kept", async () => {
     const db = await backend.database();
     const good = chainOf(1n);
     const stray = chainBlock(2n, good[1] as ChainBlock, { parentHash: at(5).hash });
@@ -96,7 +96,7 @@ describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend
     expect(await db.query("SELECT height::int AS h FROM watch.rows ORDER BY height")).toEqual([{ h: 1 }]);
   }, PATIENCE_MS * 2);
 
-  it("A79: a finalized notification at or below the cursor with another hash halts with finality-conflict", async () => {
+  it("a finalized notification at or below the cursor with another hash halts with finality-conflict", async () => {
     const db = await backend.database();
     // Another block at height 1, notified once 3 has committed (the fence module's call after 3's commit lets it out).
     const other = branchOf(at(0), 1n, "b")[0] as ChainBlock;
@@ -124,13 +124,13 @@ describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend
     }
   }, PATIENCE_MS * 2);
 
-  // ── The prefetch window and the node methods [A80, A83] ────────────────────────────────────────────────────────
+  // ── The prefetch window and the node methods ────────────────────────────────────────────────────────
 
   // The catch-up of 1,000 heights runs on PGlite; on PostgreSQL it is 200 heights (more than three windows). The window
   // is the node source's alone, the same over either backend. 1,000 one-transaction heights on PostgreSQL in Docker did
-  // not commit within 960 s under the conformance gate's load (777 had, 2026-10-26). [A80]
+  // not commit within 960 s under the conformance gate's load (777 had, 2026-10-26).
   const catchUp = backend.kind === "pglite" ? 1_000 : 200;
-  it(`A80, A83: a catch-up of ${catchUp.toLocaleString("en-US")} heights with prefetchWindow 64 fetches nothing more than 64 above the cursor, commits one per height in order, and asks the node only IN-8's methods`, async () => {
+  it(`a catch-up of ${catchUp.toLocaleString("en-US")} heights with prefetchWindow 64 fetches nothing more than 64 above the cursor, commits one per height in order, and asks the node only the methods`, async () => {
     const db = await backend.database();
     const long = chainOf(BigInt(catchUp));
     const records = [
@@ -140,7 +140,6 @@ describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend
     const fetches: FetchSeen[] = [];
     let status: (() => bigint | null) | undefined;
     // The process's own node client, its block-hash calls watched: each marks the start of a height's fetch.
-    // [IN-4, IN-5]
     const watch = (client: NodeClient): NodeClient =>
       new Proxy(client, {
         get(target, property) {
@@ -163,7 +162,7 @@ describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend
     } finally {
       await run.close();
     }
-    // Height 0 is startup's genesis read, not the prefetch's. [IN-2]
+    // Height 0 is startup's genesis read, not the prefetch's.
     const prefetched = fetches.filter((fetch) => fetch.height > 0n);
     expect(prefetched).toHaveLength(catchUp);
     // Fetched ahead of the cursor up to the window, never beyond it.
@@ -184,7 +183,7 @@ describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend
     );
   }, PATIENCE_MS * 5);
 
-  // ── Best blocks [A81] ──────────────────────────────────────────────────────────────────────────────────────────
+  // ── Best blocks ──────────────────────────────────────────────────────────────────────────────────────────
 
   const head = chainOf(100n);
   const b100 = head[100] as ChainBlock;
@@ -200,7 +199,7 @@ describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend
     ...rest,
   ];
 
-  it("A81: a best-chain switch replacing queued 101–103 by 101′–104′ fires on-rollback once naming 101–103, and 101′ is not fetched again at finality", async () => {
+  it("a best-chain switch replacing queued 101–103 by 101′–104′ fires on-rollback once naming 101–103, and 101′ is not fetched again at finality", async () => {
     const db = await backend.database();
     const records = following(
       [a(101), a(102), a(103), b(101), b(102), b(103), b(104)],
@@ -224,7 +223,7 @@ describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend
     expect(run.seen.written).toEqual([100n, 101n]);
   }, PATIENCE_MS * 2);
 
-  it("A81: with tipCap 5 and finality stalled, the sixth best block is not queued and status() shows finality-stall", async () => {
+  it("with tipCap 5 and finality stalled, the sixth best block is not queued and status() shows finality-stall", async () => {
     const db = await backend.database();
     const best = [101, 102, 103, 104, 105, 106].map(a);
     const records = following(best.slice(0, 5), [newHead(best[5] as ChainBlock)]);
@@ -259,9 +258,9 @@ describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend
     }
   }, PATIENCE_MS * 2);
 
-  // ── A runtime upgrade [A89] ────────────────────────────────────────────────────────────────────────────────────
+  // ── A runtime upgrade ────────────────────────────────────────────────────────────────────────────────────
 
-  it("A89: a module requiring block-body reads at U the extrinsics decoded with the metadata of U's parent's state", async () => {
+  it("a module requiring block-body reads at U the extrinsics decoded with the metadata of U's parent's state", async () => {
     const db = await backend.database();
     const { records, upgrade, expected } = upgradeTape();
     const run = await ingest(db, records, { start: 1n });
@@ -285,12 +284,12 @@ describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend
     );
   }, PATIENCE_MS * 2);
 
-  // ── Block 0's fetch path [IN-7] ────────────────────────────────────────────────────────────────────────────────
+  // ── Block 0's fetch path ────────────────────────────────────────────────────────────────────────────────
 
   it.each([
     ["without Timestamp::set, at the time 0", null, "1970-01-01T00:00:00.000"],
     ["with Timestamp::set, at its time", 1_700_000_000_000n, "2023-11-14T22:13:20.000"],
-  ] as const)("processes block 0 %s, its runtime and metadata read at its own state (IN-7)", async (_name, time, text) => {
+  ] as const)("processes block 0 %s, its runtime and metadata read at its own state", async (_name, time, text) => {
     const db = await backend.database();
     const genesis = chainOf(2n, (h) => (h === 0n ? { timestampMs: time } : {}));
     const g = genesis[0] as ChainBlock;
@@ -315,7 +314,7 @@ describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend
       "SELECT encode(genesis_hash, 'hex') AS g, start_height::int AS s, encode(anchor_hash, 'hex') AS a FROM core_chain.identity",
     );
     expect(identity).toEqual({ g: g.hex.slice(2), s: 0, a: g.hex.slice(2) });
-    // Block 0's runtime and metadata at block 0 itself (`contentStateOf`); block 1's runtime there too. [LG-4]
+    // Block 0's runtime and metadata at block 0 itself (`contentStateOf`); block 1's runtime there too.
     expect(run.node.calls.filter((c) => c.method === "state_getMetadata").map((c) => c.params)).toEqual([[g.hex]]);
     const runtimes = run.node.calls.filter((c) => c.method === "state_getRuntimeVersion").map((c) => JSON.stringify(c.params));
     expect(runtimes.sort()).toEqual([[g.hex], [g.hex], [hex((genesis[1] as ChainBlock).hash)]].map((p) => JSON.stringify(p)).sort());

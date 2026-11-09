@@ -7,12 +7,12 @@ import type { StoredCheck } from "./refcount-checks.js";
 import { replayRefcountTape, sampledHeights } from "./refcount-tapes.js";
 
 /**
- * R3's committed negative control on a recorded tape (the devnet's, `UMBRADB_TAPES`; skipped by name without it), on
+ * The committed negative control on a recorded tape (the devnet's, `UMBRADB_TAPES`; skipped by name without it), on
  * PostgreSQL 18 and PGlite 0.5.10. At 200 a test seam (`core-ledger-state`'s `refcountWriter`) deletes, inside the
  * block's transaction, the state's newly persisted root and the rows only it reaches: the block's written nodes, which
  * that root, the one key whose root count rises there, reaches (none of them in `R_{h−1}`, as the test checks). The
- * replay stops at 200, a height R3 checks (`./refcount-tapes.ts`). R3's check, with (c)'s sets from the stored rows,
- * passes at every height before it and finds (b) and (c) failing at 200. [R3 NEG, LG-11, LG-14]
+ * replay stops at 200, a height R3 checks (`./refcount-tapes.ts`). The check, with (c)'s sets from the stored rows,
+ * passes at every height before it and finds (b) and (c) failing at 200.
  */
 
 const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
@@ -43,11 +43,11 @@ function deletingNewRoot(record: WorkerRecord): {
   return { writer, deleted };
 }
 
-describe("R3's negative control on devnet-v8-v9-0-235 (UMBRADB_TAPES)", () => {
+describe("negative control on devnet-v8-v9-0-235 (UMBRADB_TAPES)", () => {
   for (const backend of PROCESS_BACKENDS) {
     tapeTest(
       "devnet-v8-v9-0-235",
-      `R3's control on the devnet tape, ${backend.name}: deleting the newly persisted root after 200 and the rows only it reaches, in that block's transaction, fails R3 (b) and (c) at 200`,
+      `control on the devnet tape, ${backend.name}: deleting the newly persisted root after 200 and the rows only it reaches, in that block's transaction, fails R3 (b) and (c) at 200`,
       async (found) => {
         let fault: ReturnType<typeof deletingNewRoot> | undefined;
         const replay = await replayRefcountTape(found, backend, {

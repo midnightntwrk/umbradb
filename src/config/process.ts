@@ -4,12 +4,12 @@
  * Every revision has its own settings, and a callback for height h gets the settings of the revision covering h. But
  * most of the `core` entry's fields are operational: they describe the process, not a height (`database`, `node`,
  * `listen`, `tls`, the timeouts, `fullPageWritesOffAllowed`, `developmentOptIn`). Also, the database must be opened
- * with one revision's `database` before the cursor can be read. [CF-3, CF-4; CORE-ARCH §4.12; design §7]
+ * with one revision's `database` before the cursor can be read.
  *
  * So the process takes every operational field from one revision for its whole run: the latest `core` revision (by
  * start) whose version is the build's. That is the one the operator wrote last, and it is known before the database is
  * opened. An earlier revision's operational fields are validated but not used; its data fields are what the history
- * records for its heights. [Q102]
+ * records for its heights.
  *
  * Pure: the browser build uses it as it is.
  */
@@ -21,7 +21,7 @@ import type { CheckedConfig, CheckedEntry } from "./validate.js";
 
 /**
  * The `core` revision whose operational settings the process runs with: the latest by start whose version is the
- * build's, with its parsed settings (every default applied). [Q102]
+ * build's, with its parsed settings (every default applied).
  *
  * Throws `invalid-configuration` (`details { file, reason: "no-build-core-revision" }`, not retryable) when the
  * configuration has no `core` revision of the build's version, i.e. every `core` entry was written with

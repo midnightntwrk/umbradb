@@ -36,19 +36,18 @@ import { type LedgerScenario, ledgerScenario } from "./ledger-tapes.js";
  * On PostgreSQL every block costs several statements through Docker's port proxy, so this way it processes only the
  * window's last blocks and its loads at cursor 5,000, not 5,000 blocks. The configuration is the same throughout: the
  * ledger's core modules, and a retention watcher loading the planned heights at 5,001's `on-compute`.
- * [A103, LG-12, BK-2, BK-4, Q122]
  */
 
 /** The heights of the run: the head, and the backup's. */
 export const HEAD = 5_001n;
 export const BACKUP_AT = 4_990n;
 
-/** The run's settings: `retainStates` 1,000; the sweep off, since the window does not depend on it. [A103] */
+/** The run's settings: `retainStates` 1,000; the sweep off, since the window does not depend on it. */
 export const WINDOW_SETTINGS = Object.freeze({ retainStates: 1_000, sweep: "off" });
 
 /**
  * At 5,001's `on-compute` the read is at the cursor 5,000: the loads the window check asks for, and two more outside
- * the window. [A103]
+ * the window.
  */
 export const WINDOW_PLAN: ReadonlyMap<bigint, readonly bigint[]> = new Map([[HEAD, [4_000n, 3_999n, 5_000n, 5_001n, 0n]]]);
 
@@ -93,7 +92,7 @@ export async function syncAndBackUp(db: ProcessDatabase, scenario: LedgerScenari
 
 /** Continues `db` from its cursor to {@link HEAD}; the status at the head and the process's log. */
 export async function continueToHead(db: ProcessDatabase, scenario: LedgerScenario, seen: RetentionSeen) {
-  // The tape with the cursor's header and metadata, which the restarted process reads (`./ledger-restart.ts`). [Q135 A]
+  // The tape with the cursor's header and metadata, which the restarted process reads (`./ledger-restart.ts`).
   const run = await ingest(db, restartAt(scenario.records, BACKUP_AT), runOptions(seen));
   try {
     await committed(run, HEAD, PATIENCE_MS * 2);
@@ -109,7 +108,6 @@ export async function continueToHead(db: ProcessDatabase, scenario: LedgerScenar
  * - the restore checks against a tape node serving the scenario, whose finalized head is at the backup's height;
  * - the file's statements in one transaction;
  * - a comparison of the contents hash and the stored state root.
- * [BK-3]
  */
 export async function restoreOnPostgres(target: ProcessDatabase, backup: WindowBackup, scenario: LedgerScenario, seen: RetentionSeen): Promise<Restored> {
   const user: ModuleDeclaration[] = [watcher(watched()), retentionWatcher(seen, WINDOW_PLAN)];

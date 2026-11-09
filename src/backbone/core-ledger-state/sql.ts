@@ -1,21 +1,21 @@
 /**
  * The SQL of `core-ledger-state` (`./core-ledger-state.ts`, `./refcount.ts`): its tables, its migrations, the
  * statements it writes each block's batch, state, results, events and reclamation step with, and the reads of the
- * stored state and of reclamation's counts and queue. [LG-11, LG-14, LG-16; design §10]
+ * stored state and of reclamation's counts and queue.
  *
- * **The tables**, created by its one migration, `001`, under the part's role: [design §10]
+ * **The tables**, created by its one migration, `001`, under the part's role:
  * - `core_ledger_state.nodes (node_key) → data, children` and `core_ledger_state.root_counts (node_key) → count`, the
  *   stored nodes and the positive root counts (keys are 32 bytes); `core_ledger_state.states (height)`, the state after
  *   each block (its key and root, and the first free index and root of the zswap tree and of the DUST commitment and
  *   generation trees); `core_ledger_state.segment_results (height, tx_index, segment) → success` and
  *   `core_ledger_state.events (height, tx_index, event_index)`, whose `kind` is one of {@link EVENT_KINDS}. The last
- *   three are range-partitioned by height (`../height-partitions.ts`). [LG-11, LG-16]
+ *   three are range-partitioned by height (`../height-partitions.ts`).
  * - `core_ledger_state.ref_counts (node_key) → count`, the number of references to each key in the stored nodes' child
  *   lists, a row only while it is above 0, and `core_ledger_state.unreferenced (node_key)`, the stored nodes with
- *   neither a reference nor a root count: reclamation's counts and queue. [LG-11, LG-14]
+ *   neither a reference nor a root count: reclamation's counts and queue.
  *
  * A database an earlier build wrote recorded another `001` (and, before one migration per part, a `002`), so startup
- * refuses it before any migration runs (`migration-checksum-changed`). [DB-9, R16]
+ * refuses it before any migration runs (`migration-checksum-changed`).
  */
 
 import type { BlockWriteHandle, ReadHandle } from "../../db/api.js";
@@ -23,18 +23,18 @@ import type { LedgerEvent, LedgerName, NodeBatch, StateSummary } from "../../led
 import { BLOCKS_TABLE } from "../core-block-commit/sql.js";
 import { heightPartitionsSql } from "../height-partitions.js";
 
-/** Its tables. [design §10] */
+/** Its tables. */
 export const NODES_TABLE = "core_ledger_state.nodes";
 export const ROOT_COUNTS_TABLE = "core_ledger_state.root_counts";
 export const STATES_TABLE = "core_ledger_state.states";
 export const SEGMENT_RESULTS_TABLE = "core_ledger_state.segment_results";
 export const EVENTS_TABLE = "core_ledger_state.events";
 
-/** Reclamation's counts and queue. [LG-11, LG-14; design §10] */
+/** Reclamation's counts and queue. */
 export const REF_COUNTS_TABLE = "core_ledger_state.ref_counts";
 export const UNREFERENCED_TABLE = "core_ledger_state.unreferenced";
 
-/** The kinds of `core_ledger_state.events`, including `contract-deploy`, which is stored too. [LG-16; design §10] */
+/** The kinds of `core_ledger_state.events`, including `contract-deploy`, which is stored too. */
 export const EVENT_KINDS = Object.freeze([
   "zswap-input",
   "zswap-output",
@@ -49,7 +49,7 @@ const kinds = EVENT_KINDS.map((kind) => `'${kind}'`).join(", ");
 
 /**
  * `core-ledger-state`'s migrations: its one, `001`, which creates every table of the part. Applied once, recorded under
- * `core-ledger-state`, never changed; a later version adds its own after it. [DB-9, R16]
+ * `core-ledger-state`, never changed; a later version adds its own after it.
  */
 export const CORE_LEDGER_STATE_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
   {
@@ -115,19 +115,19 @@ CREATE TABLE ${UNREFERENCED_TABLE} (
 
 const PARENT_TIME_SQL =
   `SELECT (extract(epoch FROM block_time) * 1000)::bigint AS ms FROM ${BLOCKS_TABLE} WHERE height = $1`;
-/** The state stored after a block, with the block's hash and ledger. [LG-11, LG-12] */
+/** The state stored after a block, with the block's hash and ledger. */
 const STATE_AT_SQL = `SELECT s.state_key, s.state_root, b.hash, b.ledger_version FROM ${STATES_TABLE} s
   JOIN ${BLOCKS_TABLE} b ON b.height = s.height WHERE s.height = $1`;
-/** The contracts deployed below height `$1`: every contract a state there holds, which all get a row at F. [CC-1] */
+/** The contracts deployed below height `$1`: every contract a state there holds, which all get a row at F. */
 const DEPLOYED_SQL =
   `SELECT DISTINCT contract_address FROM ${EVENTS_TABLE} WHERE kind = 'contract-deploy' AND height < $1`;
-/** The keys of the states stored after the blocks `$1` to `$2` − 1, in height order: a block's releases. [LG-12] */
+/** The keys of the states stored after the blocks `$1` to `$2` − 1, in height order: a block's releases. */
 const KEYS_SQL =
   `SELECT height, state_key FROM ${STATES_TABLE} WHERE height >= $1 AND height < $2 ORDER BY height`;
 /**
  * The node write: a new key is inserted; a stored key written with another child list takes it, as the node's own
  * storage replaces a node written again; one written with its stored child list touches no row. A row's `data` never
- * changes (a key is its node's hash). It affects exactly the new and the rewritten nodes. [LG-11, R27]
+ * changes (a key is its node's hash). It affects exactly the new and the rewritten nodes.
  */
 const NODES_SQL = `INSERT INTO ${NODES_TABLE} (node_key, data, children)
   SELECT n.node_key, n.data, n.children FROM unnest($1::bytea[], $2::bytea[], $3::bytea[]) AS n (node_key, data, children)
@@ -157,13 +157,13 @@ const bytesOf = (value: unknown, what: string): Uint8Array => {
   return value;
 };
 
-/** The time of the block stored at `height`, in milliseconds since 1970, or `undefined` if none is. [LG-8] */
+/** The time of the block stored at `height`, in milliseconds since 1970, or `undefined` if none is. */
 export async function blockTimeMsAt(read: Pick<ReadHandle, "query">, height: bigint): Promise<bigint | undefined> {
   const [row] = await read.query(PARENT_TIME_SQL, [height]);
   return row === undefined ? undefined : BigInt(row.ms as bigint | number | string);
 }
 
-/** A state stored after a block, as {@link stateAt} reads it, with the block's hash and ledger. [LG-11, LG-12] */
+/** A state stored after a block, as {@link stateAt} reads it, with the block's hash and ledger. */
 export interface StoredState {
   readonly stateKey: Uint8Array;
   readonly stateRoot: Uint8Array;
@@ -202,13 +202,13 @@ export async function deployedBelow(read: Pick<ReadHandle, "query">, height: big
 /**
  * Writes `nodes` into the nodes table in one statement (see {@link NODES_SQL}): a stored key written with another child
  * list takes it, one written with its stored child list is left untouched. Resolves with the rows written: the new
- * and the rewritten nodes. [LG-11]
+ * and the rewritten nodes.
  */
 export async function insertNodes(w: Pick<BlockWriteHandle, "execute">, nodes: NodeBatch["inserts"]): Promise<number> {
   return w.execute(NODES_SQL, [nodes.map((n) => n.key), nodes.map((n) => n.data), nodes.map((n) => n.children)]);
 }
 
-/** Adds each signed change of `counts` to the stored root count, deleting a count that reaches 0. [LG-11] */
+/** Adds each signed change of `counts` to the stored root count, deleting a count that reaches 0. */
 export async function addRootCounts(
   w: Pick<BlockWriteHandle, "execute">,
   counts: NodeBatch["rootCounts"],
@@ -276,7 +276,7 @@ export async function insertEvents(
 
 /**
  * Reclamation's reads, of the tables as committed at h − 1, and its writes (`./refcount.ts`). Each is one statement
- * over a key list, which the caller sends in chunks. [LG-14]
+ * over a key list, which the caller sends in chunks.
  */
 const STORED_KEYS_SQL = `SELECT node_key FROM ${NODES_TABLE} WHERE node_key = ANY($1::bytea[])`;
 const CHILDREN_SQL = `SELECT node_key, children FROM ${NODES_TABLE} WHERE node_key = ANY($1::bytea[])`;

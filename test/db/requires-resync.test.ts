@@ -12,7 +12,7 @@ import { BACKENDS } from "./backends.js";
  * On both backends, a module version declaring `requiresResync: true` is accepted only while no committed height of
  * the database is covered by a revision of that module with another version. Otherwise startup refuses with
  * `requires-resync`, naming the module and the version, before any migration runs. It is accepted on an empty
- * database, and still accepted after that database committed blocks and restarted. [A72 DOC, DB-10]
+ * database, and still accepted after that database committed blocks and restarted.
  *
  * Which versions cover committed heights is the runner's input `committedVersions`, read from the configuration
  * history (`core_chain.config`) and the cursor, which do not exist yet (OUTDATED). So each test gives it as that
@@ -61,7 +61,7 @@ function outcome(run: Promise<unknown>): Promise<unknown> {
   );
 }
 
-describe.each(BACKENDS)("A72: a version that requires a resync, on $name (DB-10)", (backend) => {
+describe.each(BACKENDS)("a version that requires a resync, on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop());
 
@@ -125,7 +125,7 @@ describe.each(BACKENDS)("A72: a version that requires a resync, on $name (DB-10)
   });
 });
 
-describe("A72 [DOC]: the module guide", () => {
+describe("the module guide", () => {
   const guide = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "docs", "module-guide.md"), "utf8");
   // A section's text with its line breaks and indentation as single spaces, so a phrase may wrap.
   const section = (heading: string): string => {

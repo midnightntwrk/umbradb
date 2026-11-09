@@ -2,23 +2,23 @@
  * Secret redaction. A settings field of kind `secret` is never shown, logged or reported: it reads `[redacted]`.
  * Neither are credentials inside URLs, in any field. The admin endpoints (`/config`, `/status`) and the runner's logs
  * call this module. It lives here, next to the validation that classifies the fields (`./validate.ts`), and imports
- * nothing of Node.js, so the browser build uses it as it is. [CF-4, AE-6; CORE-ARCH §4.18]
+ * nothing of Node.js, so the browser build uses it as it is.
  *
  * - **Settings** ({@link Redactor.settings}, for `/config`): every field whose kind is `secret`, or whose kind is not
  *   known, reads {@link REDACTED}, whatever its value (an object, a list). So a field nobody classified is never shown
- *   (fail closed). Every string of the other fields goes through {@link Redactor.text}. [CF-4]
+ *   (fail closed). Every string of the other fields goes through {@link Redactor.text}.
  * - **Text** ({@link Redactor.text}, for logs and error texts): every form of every secret string of the configuration
  *   is replaced by {@link REDACTED}, the longest first, in one pass. Then two patterns redact credentials in any URL,
  *   including one the configuration does not hold: a URL's userinfo (`scheme://user:password@` →
  *   `scheme://[redacted]@`) and a query parameter whose name says it is a credential (`?password=…`, `&token=…`,
- *   `?apiKey=…`). [AE-6]
+ *   `?apiKey=…`).
  *
  * **Which strings are secret** ({@link secretStrings}):
  * - each string inside a secret field (or one of unknown kind), at any depth;
  * - each string of a `password` part ({@link SECRET_PART}) of an object inside an operational field, at any depth.
  *   These are the `database` setting's parts and `transportReader`: only the password of a database's parts is secret.
  *   {@link Redactor.settings} shows such a `password` part as {@link REDACTED} and the other parts as they are
- *   [CF-4, Q167 A, Q175 A];
+ *;
  * - the password of every URL with credentials in the strings of the other fields.
  *
  * **The forms of a secret** are its parts ({@link SECRET_PARTS}: the value itself; for a URL with credentials, its
@@ -39,7 +39,7 @@
 import type { FieldKinds } from "./validate.js";
 import type { PlainData, PlainObject } from "./plain-data.js";
 
-/** What a secret reads as. [CF-4] */
+/** What a secret reads as. */
 export const REDACTED = "[redacted]";
 
 /** A way a secret string yields strings to hide: a part of it, or an encoding of a part. */
@@ -117,7 +117,7 @@ export const SECRET_ENCODINGS: readonly SecretForm[] = Object.freeze([
   { name: "json", forms: (part: string) => [JSON.stringify(part).slice(1, -1)] },
 ]);
 
-/** Credentials in any text: the credentials inside URLs. [AE-6] */
+/** Credentials in any text: the credentials inside URLs. */
 export const TEXT_PATTERNS: readonly TextPattern[] = Object.freeze([
   { name: "url-userinfo", redact: (text: string) => text.replace(URL_USERINFO, `$1${REDACTED}@`) },
   { name: "credential-parameter", redact: (text: string) => text.replace(CREDENTIAL_PARAMETER, `$1${REDACTED}`) },
@@ -133,7 +133,7 @@ function stringsIn(value: PlainData): string[] {
 
 /**
  * The part of an object inside an operational field that is secret: a database's `password`, and `transportReader`'s.
- * A data field's parts are never secret: they are recorded and shown. [CF-4, Q167 A]
+ * A data field's parts are never secret: they are recorded and shown.
  */
 export const SECRET_PART = "password";
 
@@ -166,7 +166,7 @@ export function credentialsIn(text: string): string[] {
 /**
  * The secret strings of `settings`: every string inside a field whose kind is `secret` or not in `kinds`, the strings
  * of the `password` parts inside an operational field, and the passwords of the URLs in the strings of the other
- * fields. Each appears once, in order, with empty strings left out. [CF-4]
+ * fields. Each appears once, in order, with empty strings left out.
  */
 export function secretStrings(settings: PlainObject, kinds: FieldKinds): string[] {
   const found: string[] = [];
@@ -254,7 +254,7 @@ export interface RedactableConfig {
  * A `versionEntry`'s settings, whose kinds the build does not know, are the data fields recorded for it. So their
  * strings are not searched for in text, but a credential in them is. {@link Redactor.settings} shows them only with
  * their kinds (every field `data`, once the history has found them equal to their recorded row) and redacts every
- * field without kinds. [CF-3]
+ * field without kinds.
  */
 export function configRedactor(config: RedactableConfig): Redactor {
   // A revision this build validated has its settings and kinds; another has its config as written, or none (null).

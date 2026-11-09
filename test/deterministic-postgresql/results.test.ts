@@ -9,13 +9,13 @@ import { BACKENDS } from "../db/backends.js";
  * Query results map `bigint` → `bigint`, `bytea` → `Uint8Array`, `numeric` → decimal string, and `jsonb` → parsed
  * JSON without loss. The rest of the mapping (`src/deterministic-postgresql/mapping.ts`), arrays with NULL elements
  * included, and the pinned session settings are checked too, against a real server, on every backend of
- * `../db/backends.ts`. [A9, DB-2]
+ * `../db/backends.ts`.
  */
 
 const SEED = 20261023;
 
 for (const backend of BACKENDS) {
-  describe(`A9 (DB-2) — result mapping on ${backend.name}`, () => {
+  describe(`result mapping on ${backend.name}`, () => {
     let db: Database;
 
     // The database's own defaults print every value differently from the API's settings: every test below reads
@@ -79,7 +79,7 @@ for (const backend of BACKENDS) {
       expect(row.d).toEqual({ n: -9007199254740993n });
     });
 
-    it("maps the types design.md §4 refuses but a query can still return, dates and times as RFC 3339 text", async () => {
+    it("maps the types the rules refuse but a query can still return, dates and times as RFC 3339 text", async () => {
       const row = await one(`SELECT true AS yes, 1::smallint AS s, 2::integer AS i, 26::oid AS o,
                                     0.1::real AS r, 'Infinity'::double precision AS d,
                                     'abc'::text AS t, 'abc'::varchar(5) AS v, 'ab'::char(4) AS c, 'n'::name AS n,
@@ -116,11 +116,11 @@ for (const backend of BACKENDS) {
         range: "[1,3)",
         ip: "192.168.0.1",
       });
-      // Text in UTC with `Z`, the fraction only when there is one, never a JavaScript Date. [DB-2, Q68]
+      // Text in UTC with `Z`, the fraction only when there is one, never a JavaScript Date.
       expect(row.now).toMatch(/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?Z$/);
     });
 
-    it("reads date and time values as RFC 3339 text, infinity as the word, arrays element by element (A139)", async () => {
+    it("reads date and time values as RFC 3339 text, infinity as the word, arrays element by element", async () => {
       const row = await one(`SELECT '2025-05-21 14:30:00+00'::timestamptz AS a, '2025-05-21 16:30:00.123456+02'::timestamptz AS b,
                                     '2025-05-21 14:30:00'::timestamp AS c, '2025-05-21'::date AS d,
                                     'infinity'::timestamptz AS e, '-infinity'::timestamp AS f, 'infinity'::date AS g,
@@ -142,7 +142,7 @@ for (const backend of BACKENDS) {
       });
     });
 
-    it("refuses a time outside the years 0001–9999 as unreadable output, by the rule it has (Q81)", async () => {
+    it("refuses a time outside the years 0001–9999 as unreadable output, by the rule it has", async () => {
       for (const value of [
         "'10000-01-01 00:00:00+00'::timestamptz",
         "'0044-03-15 12:00:00+00 BC'::timestamptz",
@@ -184,7 +184,7 @@ for (const backend of BACKENDS) {
       for (const value of Object.values(row)) expect(value).toBeNull();
     });
 
-    it("reads a NULL array element as null, apart from false, 0, '' and the text 'NULL' (docs/issues/00006)", async () => {
+    it("reads a NULL array element as null, apart from false, 0, '' and the text 'NULL'", async () => {
       const row = await one(`SELECT ARRAY['x', NULL] AS null_element, ARRAY['x', 'NULL'] AS null_text,
                                     ARRAY[true, NULL, false] AS booleans, ARRAY[1, NULL, 0]::smallint[] AS smallints,
                                     ARRAY[1, NULL, 0] AS integers, ARRAY[9007199254740993, NULL, 0]::bigint[] AS bigints,
@@ -271,7 +271,7 @@ for (const backend of BACKENDS) {
         ints: [1, null, -3],
         texts: ['a"b', "c\\d", "NULL", "", " ", "{,}"],
         flag: true,
-        // A Date parameter is sent as its ISO text and reads back as RFC 3339 text. [DB-2, Q68]
+        // A Date parameter is sent as its ISO text and reads back as RFC 3339 text.
         at: "2026-10-23T10:00:00.123Z",
         amount: "-12.50",
         nothing: null,

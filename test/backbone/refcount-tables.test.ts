@@ -30,12 +30,12 @@ import {
 
 /**
  * The reclamation step's reads (`sqlRefcountTables`) and writes (`writeRefcount`) on `core_ledger_state`'s own tables
- * (its migration), on PostgreSQL 18 and PGlite 0.5.10, through the database API: [LG-14, R11; design §3.4, §14]
+ * (its migration), on PostgreSQL 18 and PGlite 0.5.10, through the database API:
  * - each read on small hand-built tables, and chunked by `KEYS_PER_STATEMENT` keys;
  * - a block's writes: the rows each statement reports affected equal what the step computed, chunks summed;
  * - `row-count-mismatch` for each statement, its transaction rolled back;
  * - `negative-count` and `missing-reference` through the database's reads;
- * - the property (fast-check, seed 20261105): on R1's histories, the step computed from the database at h − 1 and
+ * - the property (fast-check, seed 20261105): on the histories, the step computed from the database at h − 1 and
  *   written after the block's node writes leaves the tables equal to the reference model's after every block.
  *
  * The node writes come first, as `core-ledger-state`'s `writeBlock` makes them, with its statement (`insertNodes`: a
@@ -244,7 +244,7 @@ const h = (...keys: Uint8Array[]): string[] => keys.map(hex).sort();
 /** A key or child list as a `bytea` literal. */
 const lit = (value: Uint8Array): string => `'\\x${hex(value)}'`;
 
-describe.each(BACKENDS)("the reclamation step's reads and writes on $name (LG-14)", (backend) => {
+describe.each(BACKENDS)("the reclamation step's reads and writes on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
@@ -525,7 +525,7 @@ describe.each(BACKENDS)("the reclamation step's reads and writes on $name (LG-14
   });
 
   it(
-    `keeps the tables equal to the reference model's after every block of R1's histories (seed ${SEED}, ${RUNS} runs)`,
+    `keeps the tables equal to the reference model's after every block of the histories (seed ${SEED}, ${RUNS} runs)`,
     async () => {
       const { db } = await backend.database(SCHEMA);
       let blocks = 0;

@@ -8,7 +8,7 @@
  * - the identity check of the ledger packages and their sources;
  * - the ledger worker, the node-store bridge and the block-level replay rules (`./replay.ts`).
  *
- * The public surface takes `LedgerPackage`, `ParsedTransaction` and `LedgerTask` from here. [LG-8; design §1, §5, §12]
+ * The public surface takes `LedgerPackage`, `ParsedTransaction` and `LedgerTask` from here.
  */
 
 export * from "./adapter.js";

@@ -22,8 +22,8 @@ jobs:
     # ubuntu-latest runners -- no `services: postgres` block is needed or used. This is the
     # required merge gate; it never runs the env-gated live tier (`test:live`), which needs a real
     # preprod network, a funded seed, and a built midnight-wallet checkout none of which are
-    # available (or wanted) in CI (`design.md` §7.4). TransactionHistory's tests, the live tier among
-    # them, are kept in `legacy/transaction-history/` outside this run (core-arch task 17.1, LS-3).
+    # available (or wanted) in CI. TransactionHistory's tests, the live tier among
+    # them, are kept in `legacy/transaction-history/` outside this run.
     #
     # Timeout posture: 0.10.0's suite (345 files, about 5,600 tests, with v8 coverage) takes 10 to 16 minutes on a
     # many-core host and about 8,800 CPU-seconds in all; on the first pull request run (PR #16, 2026-10-28) a hosted
@@ -48,7 +48,7 @@ jobs:
         run: npm run typecheck
 
       - name: Chrome for the browser build's tests
-        # core-arch task 16.1 (A129–A132): `test/browser/` drives the runner image's Google Chrome headless over the
+        # `test/browser/` drives the runner image's Google Chrome headless over the
         # DevTools protocol (`test/browser/chrome.ts`; no test dependency). Its version is printed for the record.
         run: |
           google-chrome --version
@@ -59,7 +59,7 @@ jobs:
         # `vitest run --coverage` with `UMBRADB_LIVE_PREPROD` UNSET (so the crash/soak/differential
         # suites execute and do NOT self-skip), emits a Jest-compatible JSON report, then runs the
         # `check-required-tests.ts` reconciliation over that report. The gate fails if EITHER a test
-        # fails, a `vitest.config.ts` coverage threshold (§2.3/§3.6 durability floors) is missed, OR
+        # fails, a `vitest.config.ts` coverage threshold is missed, OR
         # any manifest `"required"` id did not execute-and-pass (a re-introduced `describe.skipIf`
         # turns the gate red BY ID, not by luck). The one `WHERE`-gated optional-feature id
         # (`crash.pg-kill-save.no-duplicate-with-idempotency-key`) is in the manifest's `"deferred"`
@@ -73,19 +73,19 @@ jobs:
         #
         # The gate's deadline (`UMBRADB_CONFORMANCE_DEADLINE_MS`, default 60 minutes; it catches a hung worker) is 105
         # minutes here, under the job's 120: on a hosted runner the suite (387 files, about 6,200 tests) takes about 75
-        # minutes. Splitting the suite across jobs is docs/issues/00077.
+        # minutes. The suite is not split across jobs.
         env:
           UMBRADB_CONFORMANCE_DEADLINE_MS: "6300000"
         run: npm run test:conformance
 
   mutation:
-    # The StrykerJS mutation gate (openspec/changes/core-arch design.md §13, task 17.2): a SEPARATE still-required job
+    # The StrykerJS mutation gate: a SEPARATE still-required job
     # (never optional, never live-gated) so mutation cost is off the `test` job's clock. SCOPE: the nine targets
     # `stryker.conf.json` mutates (graph, dispatch, history, cbor, digest, height-versioned, cursor-table, refcount,
     # node-source), each with its fast tests in `vitest.mutation.config.ts`; `break` is 65 on the AGGREGATE over
     # valid mutants, which `scripts/mutation-per-adapter.mjs` sums over one `stryker run --mutate <file>` per target.
     #
-    # RUNTIME / TIMEOUT (task 17.3): task 17.2 measured `npm run test:mutation:ci` at about 58 min in all (3,163 valid
+    # RUNTIME / TIMEOUT: a run on 2026-10-27 measured `npm run test:mutation:ci` at about 58 min in all (3,163 valid
     # mutants; node-source alone 1,446 s with 121 timed-out mutants, graph 1,068 s, cbor 494 s) on a loaded 24-core
     # machine with Stryker's fixed `concurrency: 3`. The 45 minutes this job had for 0.9.5's five adapters (~23 min)
     # would end the gate before its verdict, so the job has 120 minutes: about twice the measurement, for a slower

@@ -55,7 +55,7 @@ UmbraDB 0.10.0 is a new architecture: nothing of 0.9.5's API or databases is car
 **Breaking for users of `v0.10.0-rc.1`.** A program that ran UmbraDB through `startProcess` moves to `startUmbraDB`,
 whose defaults, refusals and rejections differ, and a configuration that writes `listen.transport` or `coreTransport`
 is refused. For the `umbradb` command, only those two keys break. The change is the OpenSpec change
-[`start-umbradb`](openspec/changes/start-umbradb/).
+`start-umbradb`.
 
 - **Breaking: the renamed settings.** `listen.transport` is now `listen.privateLink`, and `coreTransport` is now
   `privateLink`. A configuration that writes an old key is refused by every command and by `startUmbraDB`:
@@ -128,7 +128,7 @@ is refused. For the `umbradb` command, only those two keys break. The change is 
   they hold, not by their bytes; every core part with migrations has one, `001`; a failed check halts with
   `ledger-refcount-invalid`. A database or a backup written by an earlier build, `v0.10.0-rc.1` and `rc.2` included,
   is refused (`migration-checksum-changed`, `backup-build-mismatch`): resync into a new database. The change is the
-  OpenSpec change [`ledger-refcount`](openspec/changes/ledger-refcount/).
+  OpenSpec change `ledger-refcount`.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 

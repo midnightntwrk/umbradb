@@ -2,12 +2,12 @@
  * The page's private link between the core worker and a private worker: one `MessageChannel` per connection, which the
  * page makes when a private process asks for a channel (its `privateSide: { connect }`), handing one end to the core
  * worker (`publicSide: { channels: true }`, the core's `privateLink.accept`) and the other to the private worker. The
- * link's messages then go from worker to worker, never through the page. [LM-6, LM-11, BR-1; design §5.4, §8]
+ * link's messages then go from worker to worker, never through the page.
  *
  * Each end is the port as `messagePortChannel` adapts it, plus the page's own end of the channel ({@link DemoLink.end}):
  * the page may drop a link (`window.umbradb.dropLink`), and then tells both workers, each of which closes its port and
  * tells UmbraDB the carrier ended — as a socket's end is told, which a browser `MessagePort` may never tell by itself.
- * The private process then connects again over a new channel, with its transport's back-off. [LM-6, L58]
+ * The private process then connects again over a new channel, with its transport's back-off.
  */
 
 import { messagePortChannel, type PrivateLinkChannel } from "../../src/library/channels.js";

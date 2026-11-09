@@ -19,7 +19,7 @@ import { coreSettings } from "./process-build.js";
  * written addresses and admin's default; a host's request judged by N2–N5 (`network-address-conflict` with `both`,
  * `no-address`, `unused`; `private-link-misconfigured` with `wrong-side`, `reader-missing`). The negative control
  * plans every row without one rule: exactly that rule's refusals are gone, the plan of its rows following the same
- * reading. The engine's and `startUmbraDB`'s cases are in `test/library/network.test.ts`. [LM-3, L15–L18, L64]
+ * reading. The engine's and `startUmbraDB`'s cases are in `test/library/network.test.ts`.
  */
 
 const MEMORY = { kind: "pglite", memory: true } as const;
@@ -72,7 +72,7 @@ describe("the command's plan (\"configured\"): the written addresses and admin's
     });
   });
 
-  it("a private process connects to its privateLink; a listen.privateLink written on it is no surface of it (L64)", () => {
+  it("a private process connects to its privateLink; a listen.privateLink written on it is no surface of it", () => {
     const plan = planOf(
       planNetwork(privateInput({ privateLink: "127.0.0.1:7100", listen: { privateLink: "127.0.0.1:7101" } }), "configured"),
     );
@@ -89,7 +89,7 @@ describe("the command's plan (\"configured\"): the written addresses and admin's
   });
 });
 
-describe("a host's request: what each form plans (N1)", () => {
+describe("a host's request: what each form plans", () => {
   it("nothing asked: no listener, the handlers mounted, no link", () => {
     for (const request of [{}, { api: false, admin: false, privateLink: { publicSide: false, privateSide: false } }]) {
       expect(planOf(planNetwork(publicInput(), request))).toEqual({
@@ -158,34 +158,34 @@ interface Row {
   readonly setting: string | null;
 }
 
-/** Every refusal of N2–N5, one row per surface it can name. [L15–L18] */
+/** Every refusal of N2–N5, one row per surface it can name. */
 const ROWS: readonly Row[] = [
-  // N2, both (L15): an address written and given in code, for each surface of each side.
+  // N2, both: an address written and given in code, for each surface of each side.
   { name: "listen.api and api: { port }", rule: "both", input: () => publicInput({ listen: { api: "127.0.0.1:7001" } }), request: { api: { port: 9000 } }, code: "network-address-conflict", request_: "network.api", setting: "listen.api" },
   { name: "listen.admin and admin: { host, port }", rule: "both", input: () => publicInput({ listen: { admin: "127.0.0.1:7002" } }), request: { admin: { host: "127.0.0.1", port: 0 } }, code: "network-address-conflict", request_: "network.admin", setting: "listen.admin" },
   { name: "listen.privateLink and publicSide: { port }", rule: "both", input: () => publicInput({ listen: { privateLink: "127.0.0.1:7003" } }), request: { privateLink: { publicSide: { port: 0 } } }, code: "network-address-conflict", request_: "network.privateLink.publicSide", setting: "listen.privateLink" },
   { name: "privateLink and privateSide: { port }", rule: "both", input: () => privateInput({ privateLink: "127.0.0.1:7004" }), request: { privateLink: { privateSide: { port: 7004 } } }, code: "network-address-conflict", request_: "network.privateLink.privateSide", setting: "privateLink" },
-  // N2, no-address (L16): true with nothing written.
+  // N2, no-address: true with nothing written.
   { name: "admin: true, no listen.admin", rule: "no-address", input: () => publicInput(), request: { admin: true }, code: "network-address-conflict", request_: "network.admin", setting: "listen.admin" },
   { name: "api: true, no listen.api", rule: "no-address", input: () => publicInput(), request: { api: true }, code: "network-address-conflict", request_: "network.api", setting: "listen.api" },
   { name: "publicSide: true, no listen.privateLink", rule: "no-address", input: () => publicInput(), request: { privateLink: { publicSide: true } }, code: "network-address-conflict", request_: "network.privateLink.publicSide", setting: "listen.privateLink" },
   { name: "privateSide: true, no privateLink", rule: "no-address", input: () => privateInput(), request: { privateLink: { privateSide: true } }, code: "network-address-conflict", request_: "network.privateLink.privateSide", setting: "privateLink" },
-  // N3, unused (L17): written and not asked for, or asked for over channels.
+  // N3, unused: written and not asked for, or asked for over channels.
   { name: "listen.api, api not asked for", rule: "unused", input: () => publicInput({ listen: { api: "127.0.0.1:7001" } }), request: {}, code: "network-address-conflict", request_: "network.api", setting: "listen.api" },
   { name: "listen.admin, admin: false", rule: "unused", input: () => publicInput({ listen: { admin: "127.0.0.1:7002" } }), request: { admin: false }, code: "network-address-conflict", request_: "network.admin", setting: "listen.admin" },
   { name: "listen.privateLink, the link not asked for", rule: "unused", input: () => publicInput({ listen: { privateLink: "127.0.0.1:7003" } }), request: {}, code: "network-address-conflict", request_: "network.privateLink.publicSide", setting: "listen.privateLink" },
   { name: "listen.privateLink, publicSide: { channels: true }", rule: "unused", input: () => publicInput({ listen: { privateLink: "127.0.0.1:7003" } }), request: { privateLink: { publicSide: { channels: true } } }, code: "network-address-conflict", request_: "network.privateLink.publicSide", setting: "listen.privateLink" },
   { name: "privateLink, the link not asked for", rule: "unused", input: () => privateInput({ privateLink: "127.0.0.1:7004" }), request: {}, code: "network-address-conflict", request_: "network.privateLink.privateSide", setting: "privateLink" },
   { name: "privateLink, privateSide: { connect }", rule: "unused", input: () => privateInput({ privateLink: "127.0.0.1:7004" }), request: { privateLink: { privateSide: { connect } } }, code: "network-address-conflict", request_: "network.privateLink.privateSide", setting: "privateLink" },
-  // N4, wrong-side (L18): the other side's request of the link.
+  // N4, wrong-side: the other side's request of the link.
   { name: "privateSide on a public process", rule: "wrong-side", input: () => publicInput(), request: { privateLink: { privateSide: { port: 7004 } } }, code: "private-link-misconfigured", request_: "network.privateLink.privateSide", setting: null },
   { name: "publicSide on a private process", rule: "wrong-side", input: () => privateInput(), request: { privateLink: { publicSide: { channels: true } } }, code: "private-link-misconfigured", request_: "network.privateLink.publicSide", setting: null },
-  // N5, reader-missing (L18): a PostgreSQL public link given in the request without transportReader.
+  // N5, reader-missing: a PostgreSQL public link given in the request without transportReader.
   { name: "PostgreSQL, publicSide: { channels: true }", rule: "reader-missing", input: () => publicInput({}, POSTGRES), request: { privateLink: { publicSide: { channels: true } } }, code: "private-link-misconfigured", request_: "network.privateLink.publicSide", setting: "transportReader" },
   { name: "PostgreSQL, publicSide: { host, port }", rule: "reader-missing", input: () => publicInput({}, POSTGRES), request: { privateLink: { publicSide: { host: "127.0.0.1", port: 0 } } }, code: "private-link-misconfigured", request_: "network.privateLink.publicSide", setting: "transportReader" },
 ];
 
-describe("a host's request: the refusals of N2–N5 (L15–L18)", () => {
+describe("a host's request: the refusals of N2–N5", () => {
   it.each(ROWS)("$name: refused $code ($rule), naming the request and the setting", (row) => {
     const refusal = refusalOf(planNetwork(row.input(), row.request));
     expect(refusal).toBeInstanceOf(UmbraError);

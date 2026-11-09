@@ -16,7 +16,7 @@ const sha = (bytes: Uint8Array): string => createHash("sha256").update(bytes).di
 const copy = copyVendoredLedger();
 afterAll(() => copy.remove());
 
-describe("checkedLedgers (task 17.5b)", () => {
+describe("checkedLedgers", () => {
   it("gives each version's manifest as recorded, its .wasm files, and a listed file's bytes", async () => {
     const ledgers = await checkedLedgers(VENDORED_ROOT);
     for (const version of ["v8", "v9-rc3", "v9"]) {

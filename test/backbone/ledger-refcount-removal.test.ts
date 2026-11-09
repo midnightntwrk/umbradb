@@ -7,7 +7,7 @@ import { commandBuild } from "../../src/cli/build-modules.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 
 /**
- * The runtime mark-and-sweep removed, read from the sources and the build's declarations. [R18 STATIC, LG-11, LG-14]
+ * The runtime mark-and-sweep removed, read from the sources and the build's declarations.
  *
  * - `src/backbone/core-ledger-state/sweep.ts` does not exist, and no file under `src/` names the sweep's step, its
  *   reset, its budget, its grey picker or its three tables ({@link SWEEP_NAMES}, as whole words);
@@ -52,8 +52,8 @@ function partsOf(side: "public" | "private"): readonly ModuleDeclaration[] {
   return [...build.backbone, ...build.core] as ModuleDeclaration[];
 }
 
-describe("R18 [STATIC]: the runtime sweep removed (LG-11, LG-14)", () => {
-  it("R18: src/backbone/core-ledger-state/sweep.ts does not exist, and no file under src/ names the sweep's step, reset, budget, grey picker or tables", () => {
+describe("the runtime sweep removed", () => {
+  it("src/backbone/core-ledger-state/sweep.ts does not exist, and no file under src/ names the sweep's step, reset, budget, grey picker or tables", () => {
     // The scan finds each name in a planted line, and none in a name that only begins like one.
     expect(sweepNamesIn(SWEEP_NAMES.map((name) => `x ${name};`).join("\n"))).toEqual(SWEEP_NAMES);
     expect(sweepNamesIn("sweepSteps core_ledger_state.sweeps GreyPickers my_SWEEP_BUDGET")).toEqual([]);
@@ -67,7 +67,7 @@ describe("R18 [STATIC]: the runtime sweep removed (LG-11, LG-14)", () => {
     expect(named).toEqual([]);
   });
 
-  it("R18: the ledger-state item's tables are exactly nodes, root_counts, states, ref_counts, unreferenced", () => {
+  it("the ledger-state item's tables are exactly nodes, root_counts, states, ref_counts, unreferenced", () => {
     const item = CORE_LEDGER_STATE.provides.find((provided) => provided.name === LEDGER_STATE_ITEM);
     expect(item?.table?.schema).toBe("core_ledger_state");
     expect([...(item?.table?.tables ?? [])].sort()).toEqual(
@@ -75,7 +75,7 @@ describe("R18 [STATIC]: the runtime sweep removed (LG-11, LG-14)", () => {
     );
   });
 
-  it("R18: every part UmbraDB declares that has migrations has exactly one, 001, and the parts that have none still have none", () => {
+  it("every part UmbraDB declares that has migrations has exactly one, 001, and the parts that have none still have none", () => {
     const parts = new Map<string, readonly string[]>();
     for (const side of ["public", "private"] as const) {
       for (const part of partsOf(side)) parts.set(part.id, part.migrations.map((migration) => migration.id));

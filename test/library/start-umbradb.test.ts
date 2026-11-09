@@ -16,37 +16,36 @@ import { runQuietChild } from "./quiet-child.js";
 
 /**
  * `startUmbraDB`, the library's one entry (`src/library/start-umbradb.ts`): its handle, its options and their refusals.
- * [LM-1, LM-9, LM-10]
  *
- * - LM-1's scenario: a module test needs nothing else — `{ data }`, `modules: [m]`, an in-memory `source` on PGlite in
+ * - The scenario: a module test needs nothing else — `{ data }`, `modules: [m]`, an in-memory `source` on PGlite in
  *   memory — and the handle comes back before any startup step ran.
- * - L52: the handle has exactly design §4's members, `backup` takes one argument, `UmbraDBStarted` holds no setting, and
+ * - The handle has exactly the members, `backup` takes one argument, `UmbraDBStarted` holds no setting, and
  *   no test seam of the engine is an option.
- * - L62 `[NEG]`: each malformed option makes `started` reject with `invalid-configuration`, reason `invalid-option`,
+ * - `[NEG]`: each malformed option makes `started` reject with `invalid-configuration`, reason `invalid-option`,
  *   naming the option's path, the process ending `refused` by itself; `startUmbraDB` throws in none (the cases and the
  *   oracle are `./option-cases.ts`'s). The negative controls, `./start-umbradb.negative-control.test.ts`: the facade
  *   without its option check, and the facade reading the options as given, fail the same oracle.
- * - LM-1's "it never throws" for options that cannot be read as given: a getter or a proxy's trap that throws inside
+ * - The "it never throws" for options that cannot be read as given: a getter or a proxy's trap that throws inside
  *   `config` or `network` (at any depth), a proxy as an option or as the options, a revoked proxy, a fake URL or
  *   `AbortSignal` (made with `Object.create` of its prototype, or a proxy of a real one), an array whose elements
  *   cannot be read (refused at the element's path, `modules[1]`) or whose length reads as no array's: each refused
  *   `invalid-option` at its path through `started`; a real `AbortSignal` whose own members were replaced, and a proxy
  *   that only hides `in`, start as given.
- * - LM-1's "it never throws" for a host's list as `modules` whose own code would run if it were copied by its own
+ * - The "it never throws" for a host's list as `modules` whose own code would run if it were copied by its own
  *   methods — an `Array` subclass whose `map` getter throws, one whose `Symbol.species` getter throws, an array whose
  *   own `constructor`, `map`, `slice` and iterator throw, a proxy whose `constructor` is a species building such lists:
  *   on PostgreSQL 18 and PGlite, each is copied by its length and elements alone, its module runs, and none of the
  *   list's own code ran.
- * - L51's library half: a renamed key is refused `renamed-setting` naming the new key, nothing opened.
+ * - The library half: a renamed key is refused `renamed-setting` naming the new key, nothing opened.
  * - The handlers exist from the return on: `privateLink.accept` closes a channel this process does not accept and
  *   throws nothing; the module API's answer the lifecycle's 503 until the module API serves, admin's answer throughout
  *   (the lifecycle's criteria are `./lifecycle.test.ts`'s, the mounted rules `./mounted-api.test.ts`'s).
  */
 
-/** The members of design §4's handle, sorted. [L52] */
+/** The members of the handle, sorted. */
 const HANDLE_MEMBERS = ["admin", "api", "backup", "closed", "ended", "pause", "privateLink", "resume", "started", "status", "stop"];
 
-describe("LM-1: a module test needs nothing else", () => {
+describe("a module test needs nothing else", () => {
   it("startUmbraDB({ config: { data }, modules: [m], source }) on PGlite in memory reaches the in-memory head", async () => {
     const seen: string[] = [];
     const m = rowsModule("m", seen);
@@ -55,7 +54,7 @@ describe("LM-1: a module test needs nothing else", () => {
       modules: [m],
       source: new InMemoryBlockSource({ head: 10n }),
     });
-    // Synchronous: the handle is back before startup's first step, which runs on a later turn. [L32]
+    // Synchronous: the handle is back before startup's first step, which runs on a later turn.
     expect(handle.status()).toMatchObject({ state: "starting", cursor: null, reason: null, ended: null });
     try {
       const started = await handle.started;
@@ -70,8 +69,8 @@ describe("LM-1: a module test needs nothing else", () => {
   }, 120_000);
 });
 
-describe("L52: the handle and what it gives", () => {
-  it("has exactly design §4's members; backup takes one argument; the handlers' members", async () => {
+describe("the handle and what it gives", () => {
+  it("has exactly the members; backup takes one argument; the handlers' members", async () => {
     const handle = startUmbraDB({ config: { data: libraryData(PGLITE_MEMORY) }, source: new InMemoryBlockSource({ head: 1n }) });
     try {
       expect(Object.keys(handle).sort()).toEqual(HANDLE_MEMBERS);
@@ -121,7 +120,7 @@ describe("L52: the handle and what it gives", () => {
   }, 60_000);
 });
 
-describe("L62: a malformed option is refused invalid-option, naming its path; startUmbraDB never throws", () => {
+describe("a malformed option is refused invalid-option, naming its path; startUmbraDB never throws", () => {
   it.each(MALFORMED)("%s", async (_name, options, path) => {
     // The oracle (`./option-cases.ts`): no throw; started rejects invalid-option at the path; refused by itself.
     expect(await optionProblems(() => startUmbraDB(options as UmbraDBOptions), path)).toEqual([]);
@@ -159,7 +158,7 @@ describe("L62: a malformed option is refused invalid-option, naming its path; st
   });
 });
 
-describe("LM-1: options that cannot be read as given are refused through started, never thrown", () => {
+describe("options that cannot be read as given are refused through started, never thrown", () => {
   it.each(UNREADABLE)("%s", async (_name, options, path) => {
     expect(await optionProblems(() => startUmbraDB(options() as UmbraDBOptions), path)).toEqual([]);
   });
@@ -219,7 +218,7 @@ describe("LM-1: options that cannot be read as given are refused through started
 
 /**
  * Host lists given as `modules` whose own code would run, or throw, were they copied by their own methods: each made
- * holding `m`, its code recording in `ran` what of it ran (a member other than `length` and the elements). [LM-1]
+ * holding `m`, its code recording in `ran` what of it ran (a member other than `length` and the elements).
  */
 const HOST_LISTS: readonly (readonly [string, (m: ModuleDeclaration, ran: string[]) => unknown])[] = [
   [
@@ -277,7 +276,7 @@ const HOST_LISTS: readonly (readonly [string, (m: ModuleDeclaration, ran: string
   ],
 ];
 
-describe.each(PROCESS_BACKENDS)("LM-1: a host's list as modules is read element by element, none of its own code run, on $name", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("a host's list as modules is read element by element, none of its own code run, on $name", (backend: ProcessBackend) => {
   beforeAll(async () => {
     await backend.start();
   }, 180_000);
@@ -292,7 +291,7 @@ describe.each(PROCESS_BACKENDS)("LM-1: a host's list as modules is read element 
     const m = rowsModule("m", seen);
     const modules = make(m, ran);
     let handle: UmbraDBHandle | undefined;
-    // The call never throws, whatever the host's list does (the copy that called its `map` threw here). [LM-1]
+    // The call never throws, whatever the host's list does (the copy that called its `map` threw here).
     expect(() => {
       handle = startUmbraDB({
         config: { data: libraryData(db.setting, [m]) },
@@ -305,7 +304,7 @@ describe.each(PROCESS_BACKENDS)("LM-1: a host's list as modules is read element 
       await started.started;
       await cursorReaches(started, 2n);
       expect(seen).toEqual(["m 1", "m 2"]);
-      // Only the list's length and its elements were read: no species, constructor, map, slice or iterator. [LM-1]
+      // Only the list's length and its elements were read: no species, constructor, map, slice or iterator.
       expect(ran).toEqual([]);
     } finally {
       await started.stop();
@@ -313,13 +312,13 @@ describe.each(PROCESS_BACKENDS)("LM-1: a host's list as modules is read element 
   }, 120_000);
 });
 
-describe("L62: the options' shapes, finding by finding", () => {
+describe("the options' shapes, finding by finding", () => {
   const paths = (options: unknown): string[] => optionFindings(readOptions(options)).map((found) => found.path);
   const connect = async () => {
     throw new Error("never called here");
   };
 
-  it("accepts every form of design §4 and §5.1", () => {
+  it("accepts every form of the options", () => {
     for (const options of [
       { config: { data: {} } },
       { config: { file: "umbradb.config.ts" }, cwd: "/srv", log: () => undefined },
@@ -411,7 +410,7 @@ describe("the other options reach the process", () => {
   }, 60_000);
 });
 
-describe.each(PROCESS_BACKENDS)("L51, the library's half: a renamed key is refused by startUmbraDB on $name", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("the library's half: a renamed key is refused by startUmbraDB on $name", (backend: ProcessBackend) => {
   let tmp: string;
   beforeAll(async () => {
     await backend.start();
@@ -570,7 +569,7 @@ describe("the handlers exist from the return on", () => {
   });
 });
 
-describe("LM-1: a host whose working directory was removed (issue 00067)", () => {
+describe("a host whose working directory was removed", () => {
   /** What `./gone-cwd.child.ts` writes to its result file. */
   interface GoneCwdResult {
     readonly cwdThrows: boolean;
@@ -598,11 +597,11 @@ describe("LM-1: a host whose working directory was removed (issue 00067)", () =>
     // The fault is real in the child: its process.cwd() throws once its directory is gone.
     expect(result.cwdThrows).toBe(true);
     const [absolute, absent, relative] = result.runs;
-    // The absolute cwd is the base of the PGlite path, read without the host's working directory. [G8, D-14]
+    // The absolute cwd is the base of the PGlite path, read without the host's working directory.
     expect(absolute).toEqual({ name: "absolute", threw: null, refused: null, cursor: "3", state: "stopping" });
     expect(existsSync(join(given, "data", "db"))).toBe(true);
     // Without cwd, or with a relative one, the working directory is needed and cannot be read: refused at the
-    // configuration step, through started, at the option cwd. [LM-1, LM-10]
+    // configuration step, through started, at the option cwd.
     for (const [refused, name] of [
       [absent, "absent"],
       [relative, "relative"],

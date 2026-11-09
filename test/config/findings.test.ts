@@ -5,7 +5,7 @@ import { UmbraError } from "../../src/db/errors.js";
 /**
  * A configuration refusal's findings, moved here from `umbradb config check`. What `config check` reports and what a
  * process logs when its configuration is refused are the same: each finding's code, where it is, what is wrong, and
- * its text. [CF-1, CF-3, CF-10]
+ * its text.
  */
 
 describe("refusalFindings", () => {

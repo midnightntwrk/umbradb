@@ -13,10 +13,10 @@ import { startWithoutAdmin } from "../runner/process-build.js";
 import { libraryData } from "./library-fixtures.js";
 
 /**
- * The oracle of the network plan's refusals (L15–L18), shared by `./network.test.ts` (the criteria and the plan rules'
- * controls) and `./network.negative-control.test.ts` (L18's schema case with the schema's `transportReader` rule
- * removed): a start refused at its configuration step, ended by itself, nothing opened. And L18's command half:
- * `umbradb run` on the same configuration refused through the schema. Imports nothing of Vitest. [LM-3, LM-10, L15–L18]
+ * The oracle of the network plan's refusals, shared by `./network.test.ts` (the criteria and the plan rules'
+ * controls) and `./network.negative-control.test.ts` (the schema case with the schema's `transportReader` rule
+ * removed): a start refused at its configuration step, ended by itself, nothing opened. And the command half:
+ * `umbradb run` on the same configuration refused through the schema. Imports nothing of Vitest.
  */
 
 /** How long a refused process may take to end by itself on a loaded machine. */
@@ -109,10 +109,10 @@ export async function refusedProblems(
 const COMMAND_ENDS_MS = 15_000;
 
 /**
- * L18's command half: `umbradb run` (`runProcess`, its admin listener left out) in a directory whose
+ * The command half: `umbradb run` (`runProcess`, its admin listener left out) in a directory whose
  * `umbradb.config.ts` is a public process on `database` writing `listen.privateLink` at `written`, without
  * `transportReader`. The problems, none when it ended `refused` by itself with a finding at `finding` logged and the
- * written port never bound; a run that did not end is sent SIGTERM. [L18, CF-4, A177]
+ * written port never bound; a run that did not end is sent SIGTERM.
  */
 export async function commandRefusalProblems(database: DatabaseParts, written: number, finding: string): Promise<string[]> {
   const dir = mkdtempSync(join(tmpdir(), "umbradb-l18-command-"));

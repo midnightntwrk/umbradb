@@ -8,7 +8,6 @@ import { confinementProblems, PUB, PUB_ENTRY } from "./read-confinement-checks.j
  * The committed negative control for confined reads: the unconfined read path fails the confinement oracle. Its core
  * transport runs every statement of a `read` as sent (`reads: "unconfined"`), in the read-only transaction of
  * `Database.read` and nothing more, over a running core's public database, on PostgreSQL 18.6 and PGlite 0.5.10.
- * [A172, PP-4]
  * - A `COMMIT` ends the read and the `INSERT` after it writes `pub.rows`.
  * - A `nextval` after a `COMMIT` moves `pub.log`'s sequence.
  * - `pg_advisory_lock` leaves its lock held.
@@ -17,7 +16,7 @@ import { confinementProblems, PUB, PUB_ENTRY } from "./read-confinement-checks.j
  * The core is stopped afterwards: its public database is the control's own.
  */
 
-describe.each(PRIVATE_BACKENDS)("A172's negative control on $name: the read path before task 14.2b", (backend: PrivateBackend) => {
+describe.each(PRIVATE_BACKENDS)("negative control on $name: the read path before reads were confined", (backend: PrivateBackend) => {
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 
@@ -28,7 +27,7 @@ describe.each(PRIVATE_BACKENDS)("A172's negative control on $name: the read path
   }, START_TIMEOUT_MS);
   afterAll(() => core?.stop(), START_TIMEOUT_MS);
 
-  it("negative control (committed): a transport running every statement as sent writes the public database and fails A172", async () => {
+  it("negative control (committed): a transport running every statement as sent writes the public database and fails", async () => {
     const control = await startCoreTransport({
       address: "127.0.0.1:0",
       db: core.db(),

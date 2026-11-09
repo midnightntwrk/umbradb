@@ -43,15 +43,13 @@ import {
  * - what the process did then ({@link A169Observation}), the oracle {@link a169Problems}, and a restart against a node
  *   that answers again ({@link restartedProblems}).
  *
- * [A169, RN-13, IN-10]
- *
  * **The scenarios** ({@link LoopStopScenario}): the next height's block (`blockScenario`: a synthetic chain to 6,
  * h = 3, the node gone at `chain_getBlockHash [4]`, the node source's finalized prefetch), and `core-ledger-state`'s
  * state root (`rootScenario`: a v9 ledger chain from genesis to 5, h = 3, the node gone at `midnight_ledgerStateRoot`
  * at 4's hash, which its `on-compute` at 4 awaits). The node is cut when the process's client sends that request: the
  * frame is not sent, and the tape node closes (its connections end, its port stops listening). `prefetchWindow` is 1,
  * so the source asks for h + 1 only once h committed and the loop asks for h + 1, and `backoffCeilingMs` 1 s,
- * so a client that kept retrying would connect again every second. [IN-5]
+ * so a client that kept retrying would connect again every second.
  *
  * The process's node clients — the one it makes, through the `nodeClient` seam, and any a negative control's source
  * makes — connect through a {@link NodeWatch} that counts each attempt and those made once the test stopped the
@@ -62,7 +60,7 @@ import {
 /** How long a process may take to reach its retrying wait at h + 1 on a loaded machine. */
 export const PATIENCE_MS = 240_000;
 
-/** A scenario: the tape, S, h, the request of h + 1 the node is gone at, the build's core modules. [A169] */
+/** A scenario: the tape, S, h, the request of h + 1 the node is gone at, the build's core modules. */
 export interface LoopStopScenario {
   readonly name: string;
   /** The tape node's records: heights 0 to the head, h + 1 included (the restart's node answers it). */
@@ -179,14 +177,14 @@ export type SourceOf = (
 /**
  * The negative control's source: the node source over a client of its own that the stop does not reach. The client
  * is made from the process's options, so the process shows its `node-retrying`. Every node call of the loop ignores
- * the stop, as the loop's did before the loop honoured stops. [A169]
+ * the stop, as the loop's did before the loop honoured stops.
  */
 export const ignoringSource: SourceOf = (watch, options) => (entry) => {
   const settings = entry.settings as { readonly prefetchWindow: number; readonly tipCap: number };
   return new NodeBlockSource({ client: watch.client(options()), prefetchWindow: settings.prefetchWindow, tipCap: settings.tipCap });
 };
 
-/** What one run of a stop while the loop waits showed. [A169] */
+/** What one run of a stop while the loop waits showed. */
 export interface A169Observation {
   /** Before the stop: the state, the cursor, the attempts of `node-retrying` (null without it). */
   readonly before: { readonly state: string; readonly cursor: bigint | null; readonly retrying: number | null };
@@ -211,7 +209,7 @@ export interface A169Observation {
   readonly above: readonly string[];
 }
 
-/** The oracle for `scenario`: every problem with what was observed, none when the stop behaved as required. [A169] */
+/** The oracle for `scenario`: every problem with what was observed, none when the stop behaved as required. */
 export function a169Problems(scenario: LoopStopScenario, observed: A169Observation): string[] {
   const problems: string[] = [];
   const { before } = observed;
@@ -250,7 +248,7 @@ function entriesOf(db: ProcessDatabase, scenario: LoopStopScenario, url: string)
 /**
  * The process for `scenario` on `db` against the node at `url` (see the module comment), started `via` the engine
  * (the tests' chain build) or as a library host does (`startUmbraDB`'s input and handle: the command's build, the
- * watcher as its `modules`), `more` the run's seams. [A169, LM-1]
+ * watcher as its `modules`), `more` the run's seams.
  */
 function processFor(
   db: ProcessDatabase,
@@ -311,7 +309,6 @@ async function rowsAbove(db: ProcessDatabase, scenario: LoopStopScenario): Promi
  * process, and the run observes the state, `closed` against the bound, how processing ended, the node clients and
  * their connection attempts over {@link WATCH_MS} more, then — after closing what the process left — whether the
  * database was closed and what is stored above h. `source` replaces the process's block source (a negative control's).
- * [A169]
  */
 export async function a169Run(
   backend: ProcessBackend,
@@ -386,7 +383,7 @@ export async function a169Run(
  * The restart after the stop: a restart against a node that answers again processes h + 1. A process on `db`, stopped
  * at h + 1's wait, is started again against a tape node serving the same chain (`restartAt`: the header and metadata a
  * restart at h asks). Returns every problem; none once h + 1 committed and each of the scenario's tables holds its
- * row. [RN-13, A169]
+ * row.
  */
 export async function restartedProblems(db: ProcessDatabase, scenario: LoopStopScenario, via: StartVia = "engine"): Promise<string[]> {
   const next = scenario.height + 1n;

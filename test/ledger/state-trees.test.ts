@@ -19,11 +19,11 @@ import { STAGENET } from "./v9-rc3-checks.js";
  *
  * They are checked against the values `fixtures/state-trees/oracle/` writes for fixed states at the vendored commits.
  * The adapters' `stateSummary` gives all six, none null, as plain data, also for a state loaded from its stored nodes
- * in a fresh worker. [A158, LG-5, LG-16, Q138 A; acceptance §12]
+ * in a fresh worker.
  *
  * The stored rows (`core_ledger_state.states`, none null at every height) are tested in `test/backbone/`, over the
  * recorded tape ranges from genesis. The rebuilt packages' `SHA256SUMS` are tested in `vendored-ledger-files.test.ts`
- * and `package-identity.test.ts`. [A107, A99]
+ * and `package-identity.test.ts`.
  */
 
 const LONG = 240_000;
@@ -95,7 +95,7 @@ describe("the oracle's values: the ledger's Rust state at the vendored commits",
 });
 
 for (const ledger of LEDGERS) {
-  describe(`${ledger}: LG-16's tree values, the ledger's own (A158)`, () => {
+  describe(`${ledger}: The tree values, the ledger's own`, () => {
     const host = new AdapterWorkerHost();
     let adapter: LedgerPackage;
     beforeAll(async () => {

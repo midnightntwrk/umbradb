@@ -2,7 +2,7 @@
  * What crosses from the ledger worker to the main thread: plain data, never a ledger package's object. Plain data is
  * what `./worker/protocol.ts` lists, the values that Node.js's and the browser's structured clone carry unchanged:
  * `undefined`, `null`, booleans, numbers, `bigint`s, strings, arrays, plain objects (whose prototype is
- * `Object.prototype` or `null`) and `Uint8Array`s. [LG-7, LG-17, Q49; design §5.1, §5.5]
+ * `Object.prototype` or `null`) and `Uint8Array`s.
  *
  * A WebAssembly-backed object (a wasm-bindgen class instance: a pointer into the package's memory, `__wbg_ptr`, behind
  * a class prototype) does not fail a structured clone. The clone is a plain object holding the pointer, which means

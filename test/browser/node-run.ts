@@ -17,7 +17,6 @@ import { coreConfiguration } from "./fixtures/configuration.js";
 
 /**
  * The Node.js run of the equality check: the same tape and the same configuration as the page's, in Node.js on PGlite.
- * [A132, BR-4]
  *
  * As the page does with a new database, it first asks the node's finalized head on a connection of its own and
  * takes it as S; then it runs the process the page's core worker runs, as a library host runs it — `startUmbraDB`
@@ -25,7 +24,6 @@ import { coreConfiguration } from "./fixtures/configuration.js";
  * opt-in and its user modules, which the engine's resolver builds as the page's, the node's block source and a ledger
  * worker thread — on a PGlite database in a temporary directory, until its cursor is `to`; then stops it, opens the
  * directory and reads its contents hash, with the tables its build declares `deterministic: false` named (none here).
- * [BR-2, DT-3, LM-1, LM-11]
  */
 
 /** What a Node.js run gave: S, the height its contents hash was read at, and the hash (`0x` hex). */

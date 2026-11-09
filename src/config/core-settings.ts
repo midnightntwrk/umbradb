@@ -2,12 +2,11 @@
  * The `core` entry's settings schemas: the core settings table as two zod 4 object schemas.
  * {@link PUBLIC_CORE_SCHEMA} is for the public (core) process, whose entry has the node's URL and the lockstep list.
  * {@link PRIVATE_CORE_SCHEMA} is for a private process, whose entry has instead its instance id, the public database
- * and the core's transport. [CF-3, CF-4; CORE-ARCH §4.12; design §7]
+ * and the core's transport.
  *
  * Each field carries its kind (`data`, `operational` or `secret`) on its outermost schema, read as
  * `schema.shape[field].meta().kind` like a module's settings, and its default, applied to an absent field. The
  * validation (`./validate.ts`) parses a `core` revision of this build with the schema of the process's side.
- * [CF-4; design §7]
  *
  * The builders' types (`CoreSettings`, `./entries.ts`) are written by hand, so that a public entry declares a private
  * one's fields `never` (and the reverse) and the compiler's messages name the fields as written.
@@ -16,9 +15,9 @@
  * **`database`**: the database's parts, never a connection string ({@link databaseSetting}, also used for a private
  * process's `publicDatabase`). It is operational, with its `password` part secret. A public process's
  * `transportReader` is required with a PostgreSQL database and `listen.privateLink`, and rejected with PGlite
- * (`transportReaderRule`). [CF-4, Q167 A, Q175 A, Q182 B]
+ * (`transportReaderRule`).
  *
- * Choices the core settings table leaves open [CF-4]:
+ * Choices the core settings table leaves open:
  * - `genesisHash` is a data field, required with `network: "custom"` and rejected with the four known networks, whose
  *   genesis hashes are built in;
  * - hashes are 32 bytes;
@@ -26,12 +25,12 @@
  * - `listen.admin` defaults to `0.0.0.0:8081`, also when `listen` is given without it;
  * - addresses are `host:port`: a host name, an IPv4 address or a bracketed IPv6 address, and a port from 0 to 65535;
  * - the integers are the plain data's (0 to 2^53 − 1), and `apiReadTimeoutMs` is from 1 to
- *   {@link MAX_READ_TIMEOUT_MS}, the read option's bounds [DB-15];
+ *   {@link MAX_READ_TIMEOUT_MS}, the read option's bounds;
  * - every nested object is strict: a field it does not have is rejected, not dropped.
  *
  * **`ledgerTable`**: its default is the network's built-in table (`../ledger/networks.json`), and a configured table
  * adds to or replaces parts of it (`../ledger/version-table.ts`). Both schemas check the version table's rules on a
- * configured table, each finding with its path inside `ledgerTable` [LG-1, LG-2, LG-3]:
+ * configured table, each finding with its path inside `ledgerTable`:
  * - `spec_version`s are `u32`s;
  * - a row's bounds come smaller first, and its ledger is one this build carries;
  * - no `spec_version` is in two configured rows;
@@ -40,11 +39,11 @@
  *
  * Then they give the table in effect as the parsed `ledgerTable` (`.overwrite`, which keeps the object schema, so
  * `shape` and the kinds still read as above). So the history records the table a revision ran with, with every
- * default applied. [LG-3, CF-7]
+ * default applied.
  *
  * **Renamed settings** ({@link RENAMED_CORE_SETTINGS}): the private link's two addresses were `listen.transport` and
  * `coreTransport`; they are `listen.privateLink` and `privateLink`. The validation refuses an old key, naming the new
- * one (`renamed-setting`, `./validate.ts`). [CF-4, L51 CI]
+ * one (`renamed-setting`, `./validate.ts`).
  */
 
 import { z } from "zod";
@@ -62,23 +61,23 @@ import type { ConfiguredLedgerTable } from "../ledger/version-table.js";
 import { SEMVER } from "../modules/validation.js";
 import { instanceIdSchema } from "../private/instance-id.js";
 
-/** Which process a configuration is for: the public (core) process, or a private one. [CF-4] */
+/** Which process a configuration is for: the public (core) process, or a private one. */
 export type ProcessSide = "public" | "private";
 
-/** Byte values: `0x`, then two lowercase hex digits a byte. [CF-3] */
+/** Byte values: `0x`, then two lowercase hex digits a byte. */
 export const HEX_BYTES = /^0x(?:[0-9a-f]{2})*$/;
 
 /** A 32-byte hash, as a byte value: `0x` and 64 lowercase hex digits. */
 export const HASH_HEX = /^0x[0-9a-f]{64}$/;
 
-/** The admin listener's default address. [AE-1] */
+/** The admin listener's default address. */
 export const DEFAULT_ADMIN_ADDRESS = "0.0.0.0:8081";
 
-/** A byte value, for the `core` entry and for any module that takes bytes. [CF-3] */
+/** A byte value, for the `core` entry and for any module that takes bytes. */
 export const hexBytes = () =>
   z.string().regex(HEX_BYTES, { error: "expected bytes as 0x-prefixed lowercase hex, two digits a byte" });
 
-/** A 32-byte hash as a byte value. [CF-3] */
+/** A 32-byte hash as a byte value. */
 export const hashHex = () =>
   z.string().regex(HASH_HEX, { error: "expected a 32-byte hash as 0x-prefixed lowercase hex, 64 digits" });
 
@@ -86,7 +85,7 @@ const DATA = { kind: "data" } as const;
 const OPERATIONAL = { kind: "operational" } as const;
 const SECRET = { kind: "secret" } as const;
 
-/** A height, count, duration or size: an integer from 0, as plain data's integers are. [CF-1] */
+/** A height, count, duration or size: an integer from 0, as plain data's integers are. */
 const count = () => z.number().int().min(0);
 
 /** Text that is not empty. */
@@ -107,7 +106,7 @@ const address = () =>
 /** A port: 1 to 65535. */
 const port = () => z.number().int().min(1).max(65_535);
 
-/** PostgreSQL's parts: once parsed, `ssl` is filled with its default for the host. [CF-4, Q167 A, Q182 B] */
+/** PostgreSQL's parts: once parsed, `ssl` is filled with its default for the host. */
 const POSTGRES_PARTS = z
   .strictObject({
     kind: z.literal("postgres"),
@@ -132,7 +131,7 @@ const PGLITE_PARTS = z
     }
   });
 
-/** The rejection of a connection string: the message never repeats the value, which may hold a password. [Q167 A] */
+/** The rejection of a connection string: the message never repeats the value, which may hold a password. */
 const CONNECTION_STRING =
   'a connection string is refused: give the database\'s parts, { kind: "postgres", host, port, user, password, name, ' +
   'ssl }, { kind: "pglite", path } or { kind: "pglite", memory: true }';
@@ -141,26 +140,26 @@ const CONNECTION_STRING =
  * The `database` setting, and a private process's `publicDatabase`: the database's parts (`./database-parts.ts`),
  * never a connection string. It is typed by hand as the parts' union, so that the builders' types and these schemas'
  * input types stay equal (`test/config/core-settings.test.ts`). (zod infers PGlite's two forms as one object with both
- * parts optional; its refinement takes exactly one.) [CF-4, Q167 A]
+ * parts optional; its refinement takes exactly one.)
  */
 export const databaseSetting = (): z.ZodType<DatabaseParts, DatabasePartsInput> =>
   z.discriminatedUnion("kind", [POSTGRES_PARTS, PGLITE_PARTS], {
     error: (issue) => (typeof issue.input === "string" ? CONNECTION_STRING : undefined),
   }) as unknown as z.ZodType<DatabaseParts, DatabasePartsInput>;
 
-/** `core.transportReader`: a login; its other parts are `database`'s. [CF-4, Q175 A] */
+/** `core.transportReader`: a login; its other parts are `database`'s. */
 const transportReader = () => z.strictObject({ user: text(), password: z.string().optional() });
 
-/** The node's WebSocket URL. [CF-4] */
+/** The node's WebSocket URL. */
 const NODE = /^wss?:\/\/\S+$/;
 
-/** A ledger version: `../config/build.ts`'s `LedgerName`, including `v9-rc3`. [LG-1] */
+/** A ledger version: `../config/build.ts`'s `LedgerName`, including `v9-rc3`. */
 const LEDGER = z.enum(["v8", "v9-rc3", "v9", "v10"]);
 
-/** Where a ledger version's packages come from. [LG-5] */
+/** Where a ledger version's packages come from. */
 const SOURCE = z.enum(["vendored", "released"]).default("vendored");
 
-/** The fields every process's `core` entry has, in the core settings table's order. [CF-4] */
+/** The fields every process's `core` entry has, in the core settings table's order. */
 const BASE = {
   network: z.enum(["mainnet", "preprod", "preview", "stagenet", "custom"]).meta(DATA),
   genesisHash: hashHex().optional().meta(DATA),
@@ -177,7 +176,6 @@ const BASE = {
   sweep: z.enum(["on", "off"]).default("on").meta(DATA),
   retainStates: count().default(0).meta(DATA),
   // Operational, its `password` part secret: `./redact.ts` hides a `password` part of an operational field.
-  // [CF-4, Q167 A]
   database: databaseSetting().meta(OPERATIONAL),
   listen: z
     .strictObject({
@@ -191,7 +189,7 @@ const BASE = {
   prefetchWindow: count().default(64).meta(OPERATIONAL),
   backoffCeilingMs: count().default(30_000).meta(OPERATIONAL),
   backupAtStop: text().optional().meta(OPERATIONAL),
-  // SIGUSR2 writes a backup there at the loop's next pause. [BK-1, Q152 B]
+  // SIGUSR2 writes a backup there at the loop's next pause.
   backupOnSignal: text().optional().meta(OPERATIONAL),
   tls: z
     .strictObject({ certificate: text(), key: text(), trustedRoots: z.array(text()) })
@@ -206,7 +204,7 @@ const BASE = {
   developmentOptIn: z.boolean().default(false).meta(OPERATIONAL),
 };
 
-/** `genesisHash` is required with the network `custom`, and only then. [CF-4] */
+/** `genesisHash` is required with the network `custom`, and only then. */
 function genesisHashRule(settings: { network: string; genesisHash?: string | undefined }, context: z.RefinementCtx) {
   if (settings.network === "custom" && settings.genesisHash === undefined) {
     context.addIssue({
@@ -235,7 +233,7 @@ type TransportReaderSettings = {
 
 /**
  * `transportReader` is required where the database is PostgreSQL and `listen.privateLink` is set, since the transport's
- * reads run as that login. It is rejected on PGlite, whose database has one session, the writer's. [CF-4, Q175 A]
+ * reads run as that login. It is rejected on PGlite, whose database has one session, the writer's.
  */
 function transportReaderRule(settings: TransportReaderSettings, context: z.RefinementCtx) {
   const given = settings.transportReader !== undefined;
@@ -264,7 +262,6 @@ type LedgerTableSettings = { network: string; ledgerTable?: ConfiguredLedgerTabl
 
 /**
  * The version table's rules on a configured `ledgerTable`, for its network (`../ledger/version-table.ts`).
- * [LG-1, LG-2, LG-3]
  */
 function ledgerTableRule(settings: LedgerTableSettings, context: z.RefinementCtx) {
   for (const issue of ledgerTableIssuesOf(settings.network, settings.ledgerTable)) {
@@ -273,18 +270,18 @@ function ledgerTableRule(settings: LedgerTableSettings, context: z.RefinementCtx
 }
 
 /**
- * The settings with the table in effect as `ledgerTable`: the configured one over the network's built-in one. [LG-3]
+ * The settings with the table in effect as `ledgerTable`: the configured one over the network's built-in one.
  */
 function withLedgerTable<S extends LedgerTableSettings>(settings: S): S {
   return { ...settings, ledgerTable: ledgerTableOf(settings.network, settings.ledgerTable) };
 }
 
-/** The public (core) process's `core` entry: the node's URL and the lockstep list. [CF-4] */
+/** The public (core) process's `core` entry: the node's URL and the lockstep list. */
 export const PUBLIC_CORE_SCHEMA = z
   .strictObject({
     ...BASE,
     node: z.string().regex(NODE, { error: "expected the node's WebSocket URL, ws or wss://" }).meta(SECRET),
-    // Each one an instance id as a `hello` carries it (`../private/instance-id.ts`). [CF-4, PP-4]
+    // Each one an instance id as a `hello` carries it (`../private/instance-id.ts`).
     lockstepInstances: z.array(instanceIdSchema()).default([]).meta(OPERATIONAL),
     transportReader: transportReader().optional().meta(OPERATIONAL),
   })
@@ -293,11 +290,11 @@ export const PUBLIC_CORE_SCHEMA = z
   .superRefine(ledgerTableRule)
   .overwrite(withLedgerTable);
 
-/** A private process's `core` entry: instead of the node and the lockstep list, its own three fields. [CF-4] */
+/** A private process's `core` entry: instead of the node and the lockstep list, its own three fields. */
 export const PRIVATE_CORE_SCHEMA = z
   .strictObject({
     ...BASE,
-    // The id this process gives in its `hello` (`../private/instance-id.ts`). [CF-4, PP-4]
+    // The id this process gives in its `hello` (`../private/instance-id.ts`).
     instanceId: instanceIdSchema().meta(OPERATIONAL),
     publicDatabase: databaseSetting().optional().meta(OPERATIONAL),
     privateLink: address().optional().meta(OPERATIONAL),
@@ -318,7 +315,7 @@ export type SettingPath = readonly [string] | readonly [string, string];
 /**
  * The `core` entry's renamed settings: the private link's listen address (`listen.transport`, now `listen.privateLink`)
  * and the address a private process connects to (`coreTransport`, now `privateLink`). An old key is refused on either
- * side, naming the new one (`renamed-setting`, `./validate.ts`). [CF-4, L51 CI]
+ * side, naming the new one (`renamed-setting`, `./validate.ts`).
  */
 export const RENAMED_CORE_SETTINGS: readonly RenamedSetting[] = Object.freeze([
   Object.freeze({ from: ["listen", "transport"], to: ["listen", "privateLink"] } as const),
@@ -336,7 +333,6 @@ const SEMVER_TEXT = z.string().regex(SEMVER, { error: 'expected a semver version
 /**
  * The core version (`./build.ts`'s `CoreVersion`): the UmbraDB version and, per ledger version, its release name and
  * packages, each package's `sha256` a 32-byte hash as a byte value. A `core` entry's `version` must have this shape.
- * [CF-2]
  */
 export const CORE_VERSION_SCHEMA = z.strictObject({
   umbradb: SEMVER_TEXT,

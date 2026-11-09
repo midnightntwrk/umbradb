@@ -1,15 +1,14 @@
 import { createServer } from "node:http";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { UmbraError } from "../../src/db/errors.js";
 import { connectWebSocket, type ConnectSocket, NodeClient } from "../../src/node/index.js";
-import { closeServer, FakeNode, listenOnRandomPort, MAINNET_BLOCK, RECEIVED_BY_ANY_NODE, recorded } from "./fake-node.js";
-import { outsideIn8 } from "./in8.js";
+import { closeServer, FakeNode, listenOnRandomPort, MAINNET_BLOCK, recorded } from "./fake-node.js";
 import { ManualTimers, until } from "./manual-timers.js";
 
 /**
  * 0.9.5's `chain-archive-sync/node-rpc-client.test.ts` ("Fix 3"), refactored onto the node client of `src/node/`.
  * The 0.9.5 client made one HTTP POST per call; the node client speaks JSON-RPC over WebSocket. Each 0.9.5 test is
- * kept where its assertion still applies. [design §13]
+ * kept where its assertion still applies.
  *
  * 1. "a request that never resolves is aborted once the configured timeout elapses, instead of hanging forever" —
  *    kept, now exact: the call fails at its timeout, not a millisecond before, with a typed error (it bounded the
@@ -21,7 +20,7 @@ import { ManualTimers, until } from "./manual-timers.js";
  * 3. "an HTTP 200 response with a non-JSON body (e.g. a proxy's HTML error page) throws a typed NodeRpcParseError
  *    carrying the URL and method, not a bare SyntaxError" — over WebSocket a proxy's page answers the handshake: kept
  *    as a typed `node-error` (`handshake-refused`, status 200) naming the method; "carrying the URL" is now the
- *    opposite rule, since the node URL is a `secret` field that no error may show. [CF-4]
+ *    opposite rule, since the node URL is a `secret` field that no error may show.
  * 4. and 5. "getHeightOf throws a typed NodeRpcInvalidHeightError instead of silently returning NaN when header.number
  *    is malformed / missing entirely" — kept on the header the node client decodes (`header(hash).number`, a
  *    `bigint`): a typed `node-error` (`bad-answer`) holding the raw value, never NaN.
@@ -41,10 +40,6 @@ const clients: NodeClient[] = [];
 afterEach(async () => {
   for (const client of clients.splice(0)) await client.close();
   for (const node of nodes.splice(0)) await node.stop();
-});
-
-afterAll(() => {
-  expect(outsideIn8(RECEIVED_BY_ANY_NODE.map((request) => request.method))).toEqual([]);
 });
 
 async function setUp(timeoutMs?: number): Promise<{ node: FakeNode; client: NodeClient; timers: ManualTimers }> {

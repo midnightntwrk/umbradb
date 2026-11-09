@@ -1,16 +1,15 @@
 /**
  * The core module `core-tx-results`: each transaction's outcome as the chain recorded it (`success`, `partial` or
  * `failure`), as the `block` item `tx-results` and as one row per transaction in `core_tx_results.results`. It is off
- * by default and may start mid-chain. [CD-6; CORE-ARCH §4.11; design §10]
+ * by default and may start mid-chain.
  *
  * Which segments failed is not recorded here: the chain's event for a partial success carries only the transaction
- * hash, so segment results come from `core-ledger-state`. [Q19]
+ * hash, so segment results come from `core-ledger-state`.
  *
  * **The outcome** of a transaction ({@link outcomeOf}) is read from the chain event that placed it in `block-parsed`:
  * its `eventIndex` into `chain-events` (`src/backbone/core-block-parsed/placement.ts`), matched to its extrinsic by the
  * event's phase. It is read the way the official indexer reads it (`midnight-indexer`
  * `chain-indexer/src/infra/subxt_node/runtimes/v2_1_0.rs`, `EventExt::outcome`, `SystemTransaction::transaction`):
- * [CD-6]
  *
  * | Event | Outcome |
  * |---|---|

@@ -14,7 +14,7 @@ import {
 
 /**
  * The database API's result mapping and parameter texts, without a database: PostgreSQL's text output as it arrives
- * from either backend, mapped by the column's type OID. `results.test.ts` checks the same against PostgreSQL. [DB-2]
+ * from either backend, mapped by the column's type OID. `results.test.ts` checks the same against PostgreSQL.
  */
 
 const SEED = 20261023;
@@ -30,7 +30,7 @@ function invalidParameter(run: () => unknown): UmbraError {
   throw new Error("expected invalid-parameter");
 }
 
-describe("PostgreSQL's array output (docs/issues/00006)", () => {
+describe("PostgreSQL's array output", () => {
   it("reads an unquoted NULL as null and a quoted \"NULL\" as the text", () => {
     expect(parseArrayText("{x,NULL}", identity)).toEqual(["x", null]);
     expect(parseArrayText('{x,"NULL"}', identity)).toEqual(["x", "NULL"]);
@@ -73,8 +73,8 @@ describe("PostgreSQL's array output (docs/issues/00006)", () => {
   });
 });
 
-describe("lossless JSON (DB-2)", () => {
-  it("reads 9007199254740992 and 9007199254740993 as two different bigints, and 42 as the number 42 (A9)", () => {
+describe("lossless JSON", () => {
+  it("reads 9007199254740992 and 9007199254740993 as two different bigints, and 42 as the number 42", () => {
     const [a, b, c] = parseJsonLossless("[9007199254740992, 9007199254740993, 42]") as unknown[];
     expect(a).toBe(9007199254740992n);
     expect(b).toBe(9007199254740993n);
@@ -102,7 +102,7 @@ describe("lossless JSON (DB-2)", () => {
   // process has read the key "\\": two different documents would read back equal, and so would their contents
   // hashes. Whether it does depends on the strings the process already holds, so this test cannot make it happen on
   // demand. The seeded differential round trip (`../db/differential.test.ts`) did, on both backends, and is its
-  // reproduction. [A7]
+  // reproduction.
   it("reads an object key that is one escape sequence as its character, also after the key \"\\\\\" was read", () => {
     const keys = (text: string): string[] => Object.keys(parseJsonLossless(text) as object);
     expect(keys('{"\\\\": 1}')).toEqual(["\\"]);
@@ -197,7 +197,7 @@ describe("lossless JSON (DB-2)", () => {
   });
 });
 
-describe("the result mapping by type (DB-2; design.md §4's column-type table)", () => {
+describe("the result mapping by type (the column-type table)", () => {
   const oid = (name: string): number => {
     const type = RESULT_TYPES.find((entry) => entry.name === name);
     if (type === undefined) throw new Error(`no type ${name}`);
@@ -277,7 +277,7 @@ describe("the result mapping by type (DB-2; design.md §4's column-type table)",
     expect(() => mapValue(oid("bigint"), "x")).toThrow(/bigint/);
   });
 
-  describe("date and time as RFC 3339 text (DB-2, owner decisions Q68 and Q81)", () => {
+  describe("date and time as RFC 3339 text", () => {
     // PostgreSQL's output under the pinned settings (`DateStyle = 'ISO, MDY'`, `TimeZone = UTC`), as PostgreSQL 17.11
     // and PGlite 0.5.10 print it (checked 2026-10-24): the fraction without trailing zeros, the offset always `+00`.
     const TIMESTAMPTZ: readonly (readonly [string, string])[] = [
@@ -333,7 +333,7 @@ describe("the result mapping by type (DB-2; design.md §4's column-type table)",
 
     it("refuses what it cannot read as unreadable output: years outside 0001–9999, BC, an offset other than +00", () => {
       const unreadable: readonly (readonly [string, string])[] = [
-        // PostgreSQL's range reaches 4714 BC and 294276 AD; the mapping reads years 0001–9999 only. [Q81]
+        // PostgreSQL's range reaches 4714 BC and 294276 AD; the mapping reads years 0001–9999 only.
         ["timestamp with time zone", "10000-01-01 00:00:00+00"],
         ["timestamp with time zone", "294276-12-31 23:59:59.999999+00"],
         ["timestamp with time zone", "0044-03-15 12:00:00+00 BC"],
@@ -389,7 +389,7 @@ describe("the result mapping by type (DB-2; design.md §4's column-type table)",
   });
 });
 
-describe("rows (DB-2)", () => {
+describe("rows", () => {
   it("maps each column by its own type, the last of two equal names winning, as the drivers do", () => {
     const rows = mapRows(
       [
@@ -408,7 +408,7 @@ describe("rows (DB-2)", () => {
     ]);
   });
 
-  it("keeps the result's columns on the rows, unseen by any other reader (task 14.2's read-result names their types)", () => {
+  it("keeps the result's columns on the rows, unseen by any other reader (the read-result names their types)", () => {
     const columns = [
       { name: "a", type: 20 },
       { name: "b", type: 17 },

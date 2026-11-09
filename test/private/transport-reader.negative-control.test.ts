@@ -9,7 +9,7 @@ import { PUB, PUB_ENTRY } from "./read-confinement-checks.js";
  * (the startup check with its superuser rule removed, given through the process's test seam `transportReaderCheck`)
  * lets a core whose transport reader is a superuser start. The oracle refuses that: in `transport-reader.test.ts` such
  * a core refuses startup with `transport-reader-can-write`. The same login is refused with the check as built, in the
- * same run. [A177, CF-4, Q175 A]
+ * same run.
  */
 
 const POSTGRES = PRIVATE_BACKENDS.find((backend) => backend.kind === "postgres");
@@ -20,7 +20,7 @@ const SUPER = "a177nc_super";
 /** The check as built, except that a superuser is accepted. */
 const acceptsSuperuser = (facts: TransportReaderFacts) => (facts.superuser ? [] : canWriteFindings(facts));
 
-describe("A177's negative control: a transportReader check that accepts a superuser", () => {
+describe("negative control: a transportReader check that accepts a superuser", () => {
   const backend = POSTGRES;
   beforeAll(async () => {
     await backend.start();
@@ -29,7 +29,7 @@ describe("A177's negative control: a transportReader check that accepts a superu
   }, START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 
-  it("negative control (committed): the superuser's core starts, failing A177's refusal", async () => {
+  it("negative control (committed): the superuser's core starts, failing the refusal", async () => {
     const extra = { listen: { privateLink: "127.0.0.1:0" }, transportReader: { user: SUPER, password: SUPER } };
     const options = { head: 3n, modules: [PUB], entries: [PUB_ENTRY], extra };
     const control = launchPublicCore({

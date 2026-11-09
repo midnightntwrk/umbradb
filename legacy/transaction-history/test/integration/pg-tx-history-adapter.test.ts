@@ -43,7 +43,7 @@ function assertSchemaValidSdkEntry(entry: unknown): void {
 describe("PgWalletSdkTransactionHistoryAdapter (Pg-only, required gate)", () => {
   afterEach(truncateAll);
 
-  describe("status enum mapping (L1)", () => {
+  describe("status enum mapping", () => {
     it.each(["SUCCESS", "FAILURE", "PARTIAL_SUCCESS"] as const)(
       "SDK status %s round-trips SDK -> UmbraDB -> SDK",
       (sdkStatus) => {
@@ -116,7 +116,7 @@ describe("PgWalletSdkTransactionHistoryAdapter (Pg-only, required gate)", () => 
     });
   });
 
-  describe("lifecycle-detail round-trip (design.md §3.2 decision (i))", () => {
+  describe("lifecycle-detail round-trip", () => {
     it("a finalized entry read back through the adapter carries its finalizedBlock detail and decodes against the SDK schema", async () => {
       const adapter = makeAdapter();
       const finalizedBlock = { hash: "block-detail", height: 1_763_274, timestamp: new Date("2026-03-01T00:00:00.000Z") };
@@ -193,7 +193,7 @@ describe("PgWalletSdkTransactionHistoryAdapter (Pg-only, required gate)", () => 
     });
   });
 
-  describe("getAll returns live bigint/Date-typed common fields (task 3.3)", () => {
+  describe("getAll returns live bigint/Date-typed common fields", () => {
     it("fees and timestamp survive the adapter+Postgres round-trip as native bigint/Date, not strings", async () => {
       const adapter = makeAdapter();
       const timestamp = new Date("2026-05-01T00:00:00.000Z");
@@ -229,7 +229,7 @@ describe("PgWalletSdkTransactionHistoryAdapter (Pg-only, required gate)", () => 
     });
   });
 
-  describe("scripted got* trace -> getAll() yields schema-valid SDK entries (design.md §7.1)", () => {
+  describe("scripted got* trace -> getAll() yields schema-valid SDK entries", () => {
     it("a scripted sequence of pending/finalized/rejected entries across several hashes all decode against the SDK schema after getAll()", async () => {
       const adapter = makeAdapter("adapter-wallet-scripted");
       await adapter.gotPending({ hash: "s1", identifiers: ["a"], submittedAt: new Date("2026-06-01T00:00:00.000Z") });

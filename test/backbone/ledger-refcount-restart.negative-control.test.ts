@@ -19,10 +19,10 @@ import {
 
 /**
  * The committed negative controls of R13 and R14 (`ledger-refcount-restart.test.ts`), on PostgreSQL 18 and PGlite
- * 0.5.10, each run against an uninterrupted run of the extended DAG fixture: [R13 NEG, R14 NEG]
- * - **R13**: a restart that empties `unreferenced` (the segment's `emptiesQueue` seam) after the stop at 37 makes the
+ * 0.5.10, each run against an uninterrupted run of the extended DAG fixture:
+ * - A restart that empties `unreferenced` (the segment's `emptiesQueue` seam) after the stop at 37 makes the
  *   node sets differ after the next block, 38: the rows queued at 37 are deleted at 38 by the uninterrupted run only.
- * - **R14**: a build that writes `ref_counts` and `unreferenced` in a transaction of their own, committed before the
+ * - A build that writes `ref_counts` and `unreferenced` in a transaction of their own, committed before the
  *   block's (`./refcount-restart.ts`, `control: "own-transaction"`), crashed between the two commits at REQUEUE + 1,
  *   is detected: the database the crash left is a mix (`ref_counts` and `unreferenced` after h, the rest after
  *   h − 1, its contents hash refused with `ledger-refcount-invalid`), and after the restart the node sets differ from
@@ -32,7 +32,7 @@ import {
 /** How long one segment on the DAG fixture may take on a loaded machine. */
 const SEGMENT_MS = PATIENCE_MS * 2;
 
-describe.each(PROCESS_BACKENDS)("R13, R14 negative controls, on $name", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("negative controls, on $name", (backend: ProcessBackend) => {
   let directory: string;
   let uninterrupted: Promise<ObservedRun> | undefined;
   let runs = 0;
@@ -51,7 +51,7 @@ describe.each(PROCESS_BACKENDS)("R13, R14 negative controls, on $name", (backend
   const uninterruptedDag = (): Promise<ObservedRun> =>
     (uninterrupted ??= (async () => {
       const db = await backend.database();
-      // The contents hash where R14's control crashes.
+      // The contents hash where the control crashes.
       const plan = dagPlan([REQUEUE]);
       const outcome = await runSegment(db, await jobFor(db, plan), SEGMENT_MS);
       expect(outcome.ended).toMatchObject({ why: "last", cursor: `${LAST}`, reason: null });
@@ -61,7 +61,7 @@ describe.each(PROCESS_BACKENDS)("R13, R14 negative controls, on $name", (backend
       return run;
     })());
 
-  it("R13's negative control: a restart that empties unreferenced makes the node sets differ after the next block", async () => {
+  it("negative control: a restart that empties unreferenced makes the node sets differ after the next block", async () => {
     const expected = await uninterruptedDag();
     const db = await backend.database();
     const plan = dagPlan([]);
@@ -78,7 +78,7 @@ describe.each(PROCESS_BACKENDS)("R13, R14 negative controls, on $name", (backend
     expect(observedDifferences(run, expected, stop + 1, stop + 1)).toEqual([expect.stringMatching(new RegExp(`^after ${stop + 1}: the node set, `))]);
   }, SEGMENT_MS * 3);
 
-  it("R14's negative control: ref_counts and unreferenced written in a transaction of their own, committed before the block's, crashed between the two commits, is detected", async () => {
+  it("negative control: ref_counts and unreferenced written in a transaction of their own, committed before the block's, crashed between the two commits, is detected", async () => {
     const expected = await uninterruptedDag();
     const db = await backend.database();
     const plan = dagPlan([]);

@@ -4,7 +4,6 @@
  * process's `publicDatabase` read directly (`src/backbone/core-private-source/public-database.ts`), and a core's
  * transport reader (`src/runner/process.ts`), which needs a PostgreSQL database; in the browser a private instance
  * reads public data through the core's transport (`privateLink`), and a PostgreSQL `publicDatabase` refuses here.
- * [design §9.2]
  */
 
 import type { SslMode } from "../../../src/config/database-parts.js";

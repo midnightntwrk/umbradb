@@ -2,7 +2,6 @@
  * The module API's start, and the names of its two layers: the session logic every carrier shares
  * (`./api-session.ts`: the HTTP answering, the fetch-style handler, the subscription protocol over a WebSocket or a
  * host's channel) and the socket carrier (`./api-socket.ts`: the Node.js handlers and the listener on `listen.api`).
- * [RN-1, RN-15, RN-16, LM-4, LM-11; design §1, §8]
  *
  * {@link startModuleApi} runs startup's module API steps and gives the process every way to reach the module API: the
  * listener where the plan puts it, the Node.js handlers a library host mounts in its own server (made on their first
@@ -43,7 +42,7 @@ export {
 /**
  * The negative controls' changes of the mounted handlers only, never of the listener: their limits and error answers
  * ({@link ModuleApiLimits}), the core's headers left out, and the module API they answer through (one whose read is
- * not bounded, or whose errors carry a failure's text). A host's process takes none of them. [L24, L65, L68]
+ * not bounded, or whose errors carry a failure's text). A host's process takes none of them.
  */
 export interface MountedApiSeams extends ModuleApiLimits {
   readonly coreHeaders?: "none";
@@ -54,14 +53,14 @@ export interface MountedApiSeams extends ModuleApiLimits {
 export interface ModuleApiStart extends ApiStartup {
   /** The database each request reads (the core's, or its read-only item). */
   readonly db: ModuleApiOptions["db"];
-  /** `listen.api`: none, no listener — `on-start-api` and its checks still run. [CF-4] */
+  /** `listen.api`: none, no listener — `on-start-api` and its checks still run. */
   readonly address?: string;
-  /** `apiReadTimeoutMs`. [CF-4, DB-15] */
+  /** `apiReadTimeoutMs`. */
   readonly apiReadTimeoutMs: number;
   readonly onError?: ModuleApiOptions["onError"];
   /** The routes to register into (a negative control's); new ones by default. */
   readonly routes?: ApiRoutes;
-  /** The process's configuration hash, on every answer of the listener and the handlers; none unless given. [RN-16, Q147] */
+  /** The process's configuration hash, on every answer of the listener and the handlers; none unless given. */
   readonly configHash?: string;
   /** The negative controls' changes of the mounted handlers ({@link MountedApiSeams}); none unless given. */
   readonly mounted?: MountedApiSeams;
@@ -75,12 +74,12 @@ export interface StartedModuleApi {
   readonly server: ModuleApiServer | null;
   /**
    * The Node.js handlers a library host mounts in its own server (`moduleApiHandlers`, the core's headers set in their
-   * own answers), made on the first call. [LM-4]
+   * own answers), made on the first call.
    */
   node(): ModuleApiHandlers;
-  /** The fetch-style handler (the browser demo's `api.fetch`), with the core's headers. [LM-11] */
+  /** The fetch-style handler (the browser demo's `api.fetch`), with the core's headers. */
   readonly fetch: FetchHandler;
-  /** Serves the subscription protocol on a host's channel (the browser demo's `api.connect`); throws nothing. [LM-11] */
+  /** Serves the subscription protocol on a host's channel (the browser demo's `api.connect`); throws nothing. */
   connect(channel: PrivateLinkChannel): void;
   /** Closes the listener, the Node.js handlers' WebSocket connections and the channels it serves. */
   close(): Promise<void>;
@@ -89,7 +88,7 @@ export interface StartedModuleApi {
 /**
  * The startup's module API steps: `on-start-api` and the duplicate check (`registerModuleApis`), then the listener on
  * `listen.api`, if one is configured, so a refused startup listens nowhere, and the handlers a host mounts. Rejects with
- * the first failure of either. [RN-1, RN-15, LM-4, LM-11]
+ * the first failure of either.
  */
 export async function startModuleApi(input: ModuleApiStart): Promise<StartedModuleApi> {
   const routes = await registerModuleApis(input, input.routes);

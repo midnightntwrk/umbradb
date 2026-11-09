@@ -28,7 +28,7 @@ import { connectionOfUrl, partsOfUrl } from "../db/connection.js";
  * module role exists yet: a login without `CREATEROLE` is refused — the restore rolled back, the target empty —, and a
  * `CREATEROLE` login restores, creating the module roles and granting itself their use, as startup's `prepareSchemas`
  * would; its restored database's catalogs equal those of a database it built by migrations. The backup is one PGlite
- * wrote (`umbradb backup` needs no `pg_dump` for it). [A125, BK-3, DB-6, DB-7, Q90]
+ * wrote (`umbradb backup` needs no `pg_dump` for it).
  */
 
 const TEST_TIMEOUT_MS = 900_000;
@@ -71,9 +71,9 @@ async function databaseAs(login: string): Promise<BackupDatabase> {
   return { setting, read, query: (sql) => read((r) => r.query(sql)) };
 }
 
-describe("A125: a restore by a login that is not a superuser (Q90)", () => {
+describe("a restore by a login that is not a superuser", () => {
   it(
-    "A125: a CREATEROLE login restores, creating the module roles, with the owners and grants of a database it built " +
+    "a CREATEROLE login restores, creating the module roles, with the owners and grants of a database it built " +
       "by migrations; a login without CREATEROLE is refused, the target empty",
     async () => {
       const root = postgres(server.container.getConnectionUri(), { max: 1, onnotice: () => undefined });

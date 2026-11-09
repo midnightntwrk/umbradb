@@ -24,7 +24,6 @@ import {
  *   (1) all required tests green  -> check passes;
  *   (2) one required test skipped  -> check fails AND names the id;
  *   (3) a deferred id skipped      -> check does NOT fail.
- * [v1.0.0-recovery-testing design §1.1]
  */
 
 const MANIFEST: RequiredTestsManifest = {
@@ -250,7 +249,7 @@ describe("check-required-tests — fail-closed + count-pin + file-binding (BLOCK
       expect(typeof entry.file, `required ${entry.id} must bind a file`).toBe("string");
       expect(existsSync(join(REPO_ROOT, entry.file!)), `bound file for ${entry.id} must exist: ${entry.file}`).toBe(true);
     }
-    // The crash harness's smoke ids 1-4, which are kept, are required entries. [design §13]
+    // The crash harness's smoke ids 1-4, which are kept, are required entries.
     expect(manifest.required.map((e) => e.id)).toEqual(expect.arrayContaining([
       "crash-harness.smoke.spawn-sigkill-container-survives",
       "crash-harness.smoke.pg-terminate-backend-drops-and-recovers",

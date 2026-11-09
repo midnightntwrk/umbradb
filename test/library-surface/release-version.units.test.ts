@@ -17,7 +17,7 @@ const scan = (text: string, file = FILE) => scanDeclarations(at(text, file), str
 const rule = "not the build's UMBRADB_VERSION imported from src/config/build.ts (task 17.4)";
 const BODY = 'export const X = { id: "core-x", version: UMBRADB_VERSION, side: "public" };';
 
-describe("release-version.ts's scan, form by form (task 17.5b)", () => {
+describe("release-version.ts's scan, form by form", () => {
   it("binds only a named value import of UMBRADB_VERSION from build.ts by a relative path", () => {
     const refused = [`${FILE}:2: core-x declares version UMBRADB_VERSION, ${rule}`];
     // A bare specifier that would join to build.ts's path from the root is a package, not the file.
@@ -105,7 +105,7 @@ describe("release-version.ts's scan, form by form (task 17.5b)", () => {
   });
 });
 
-describe("changelogProblems' bounds (task 17.5b)", () => {
+describe("changelogProblems' bounds", () => {
   const LINE = "UmbraDB 0.10.0 is a new architecture: nothing of 0.9.5's API or databases is carried over.";
   const problems = (text: string) => changelogProblems(text, RELEASE_VERSION, ["PgTemporalKV"]);
 

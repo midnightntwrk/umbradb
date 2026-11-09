@@ -14,19 +14,17 @@ import { type LedgerScenario, ledgerScenario, type LedgerTx } from "./ledger-tap
  * The oracles of the ledger storage tests, shared by `ledger-storage.test.ts` and its negative controls. Each reads
  * the database after a process ran a scenario (`./ledger-tapes.ts`) and lists what differs from what the scenario's
  * chain and its reference replay hold; the list is empty when the criterion holds. Imports nothing of Vitest.
- * [A100, A102, A103, A104]
  *
  * The test module here does what a user module would do with `core-ledger-state`'s items: it loads retained states.
- * [LG-12]
  *
- * `core-contract-states` replaced this file's former stand-in for keeping contract states alive. [LG-13]
+ * `core-contract-states` replaced this file's former stand-in for keeping contract states alive.
  */
 
 const text = (value: unknown): string => JSON.stringify(value, (_key, v: unknown) => (typeof v === "bigint" ? `${v}n` : v));
 const plain = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
 const bytesOf = (value: unknown): Uint8Array => Uint8Array.from(Buffer.from(value as Uint8Array));
 
-/** The stored roots that are not the node's, and the process not at the head; `status` is read before the stop. [A99] */
+/** The stored roots that are not the node's, and the process not at the head; `status` is read before the stop. */
 async function rootProblems(db: ProcessDatabase, status: ProcessStatus, scenario: LedgerScenario): Promise<string[]> {
   const problems: string[] = [];
   if (status.reason !== null) problems.push(`the process ${status.state} with ${text(status.reason)}`);
@@ -41,7 +39,6 @@ async function rootProblems(db: ProcessDatabase, status: ProcessStatus, scenario
 /**
  * A range across the v8 → v9 upgrade, F at `f`, reached its head with every root the node's. The root at F is the
  * node's only if the state was converted before F was applied. The blocks' ledgers are v8 below F and v9 from it.
- * [A100, LG-9]
  */
 export async function a100Problems(db: ProcessDatabase, status: ProcessStatus, scenario: LedgerScenario, f: bigint): Promise<string[]> {
   const problems = await rootProblems(db, status, scenario);
@@ -57,7 +54,7 @@ const WHOLE_STATE = Buffer.from("midnight:ledger-state", "latin1").toString("hex
 /**
  * A process restarted at `cursor` loaded the state there from the database, and then reached the head with every root
  * the node's. Its first load is the state at `cursor`, read from the store (`loaded`), with the stored root, which is
- * the node's. No stored value of `core_ledger_state` is a whole serialized state. [A102, LG-11]
+ * the node's. No stored value of `core_ledger_state` is a whole serialized state.
  */
 export async function a102Problems(
   db: ProcessDatabase,
@@ -82,7 +79,7 @@ export async function a102Problems(
   return problems;
 }
 
-/** Every `bytea` value of `core_ledger_state`'s tables that holds a whole serialized ledger state (none may). [LG-11] */
+/** Every `bytea` value of `core_ledger_state`'s tables that holds a whole serialized ledger state (none may). */
 export async function wholeStateProblems(db: ProcessDatabase): Promise<string[]> {
   const columns = await db.query(
     `SELECT c.table_name AS t, c.column_name AS c FROM information_schema.columns c JOIN information_schema.tables t
@@ -99,7 +96,7 @@ export async function wholeStateProblems(db: ProcessDatabase): Promise<string[]>
   return problems;
 }
 
-/** The heights whose stored state key has a positive root count: the states held alive. [LG-12] */
+/** The heights whose stored state key has a positive root count: the states held alive. */
 export async function heldHeights(read: { query(sql: string, params?: unknown[]): Promise<Record<string, unknown>[]> }): Promise<bigint[]> {
   const rows = await read.query(
     `SELECT s.height::text AS h FROM core_ledger_state.states s JOIN core_ledger_state.root_counts r ON r.node_key = s.state_key
@@ -123,7 +120,7 @@ export function retentionSeen(): RetentionSeen {
 /**
  * A user module requiring `ledger-state`. At the `on-compute` of each height `plan` names, it loads the states at the
  * heights listed there through `core-ledger-state`'s function and records each outcome. It also records the held
- * states at every cursor in `heldAt` (all of them when it is "all"). [LG-12]
+ * states at every cursor in `heldAt` (all of them when it is "all").
  */
 export function retentionWatcher(seen: RetentionSeen, plan: ReadonlyMap<bigint, readonly bigint[]>, heldAt: ReadonlySet<bigint> | "all" = new Set()): ModuleDeclaration {
   return {
@@ -187,7 +184,6 @@ function reach(nodes: ReadonlyMap<string, { children: Uint8Array }>, key: string
  * - is held (a positive root count), though no retained ledger state holds the contract's state of `at` any more;
  * - loads from its key alone: the value rebuilt from the stored nodes (`test/ledger/stored-values.ts`) is the
  *   reference replay's contract state or zswap state at `at`, which the package deserializes.
- * [A104, LG-13]
  */
 export async function a104KeyProblems(db: ProcessDatabase, scenario: LedgerScenario, address: Uint8Array, at: bigint): Promise<string[]> {
   const problems: string[] = [];
@@ -231,7 +227,7 @@ export async function a104KeyProblems(db: ProcessDatabase, scenario: LedgerScena
 
 /**
  * Every node a held key reaches is stored, so it loads from the database whatever reclamation deleted. Empty when it
- * holds. [LG-11]
+ * holds.
  */
 export async function heldNodeProblems(db: ProcessDatabase): Promise<string[]> {
   const nodes = await storedNodes(db);
@@ -257,7 +253,6 @@ function setState(contract: { address: Uint8Array; deploy: Uint8Array }, fill: n
  *   ledger state holds it as a node of its own;
  * - its state is set at 20 to another cell;
  * - then empty blocks follow, to `last`.
- * [A104, LG-13]
  */
 export async function a104Scenario(last = 40): Promise<{ readonly scenario: LedgerScenario; readonly contract: { address: Uint8Array } }> {
   const contract = await contractFixture(RAW.v9);
@@ -272,7 +267,7 @@ export async function a104Scenario(last = 40): Promise<{ readonly scenario: Ledg
     blocks,
     contracts: [contract.address],
   });
-  // Each call applied, so C's state changed at 10 and again at 20. [A104]
+  // Each call applied, so C's state changed at 10 and again at 20.
   for (const at of [5, 10, 20]) {
     const types = scenario.heights[at]?.types;
     if (types?.[0] !== "success") throw new Error(`a104Scenario: the transaction at ${at} is a ${types?.[0]}: a fixture problem`);

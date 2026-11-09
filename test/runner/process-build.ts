@@ -27,11 +27,10 @@ import type { DatabaseParts } from "../../src/config/database-parts.js";
  * - `core-chain`, which the runner binds to its process context. Its migrations create `core_chain.config` and
  *   `core_chain.identity`. Its `on-start-db` records the configuration history (with `options.history`, a negative
  *   control's `recordedData`, when given) and the identity, and publishes its four process items. Its `on-db-write`
- *   records the anchor at S. [CF-6]
+ *   records the anchor at S.
  *
  * The build also records its start and stop notifications, and its settings at each height. These are the `core`
  * entry's: operational fields from the process's revision, data fields from the revision covering the height.
- * [RN-7, RN-9–RN-13, CF-3, CF-4, Q102]
  *
  * Imports nothing of Vitest, so that a worker process (`sigterm.worker.ts`) builds the same declarations.
  */
@@ -41,7 +40,7 @@ import type { DatabaseParts } from "../../src/config/database-parts.js";
  * and without the admin endpoints unless the test gives the admin port (`adminListener`), as the engine is. With the
  * port, `listen.admin` is `0.0.0.0:8081` unless configured, and test processes run in parallel on a shared machine, so
  * a test giving it listens on a port of its own (`127.0.0.1:0`, as `test/admin/admin-harness.ts` does). A test outside
- * `test/admin/` that takes the runner's own fails `test/admin/test-processes.test.ts`. [AE-1, CF-4, Q128 B]
+ * `test/admin/` that takes the runner's own fails `test/admin/test-processes.test.ts`.
  */
 export function startProcess(input: TestProcessInput): ProcessHandle {
   return startRunnerProcess({ ...input, cwd: input.cwd ?? process.cwd(), network: input.network ?? "configured" });
@@ -50,7 +49,7 @@ export function startProcess(input: TestProcessInput): ProcessHandle {
 /**
  * {@link startProcess} for a test of `umbradb run` (its `start` seam): the command's input without its admin port, so
  * that the process serves no admin endpoints on `listen.admin`'s default, `0.0.0.0:8081`, which processes running in
- * parallel on a shared machine would contend for. [AE-1, Q128 B, L55]
+ * parallel on a shared machine would contend for.
  */
 export function startWithoutAdmin(input: EngineInput): ProcessHandle {
   const { adminListener: _admin, ...rest } = input;
@@ -127,15 +126,15 @@ export function testBuild(user: readonly ModuleDeclaration[], options: TestBuild
 
 /**
  * The tests' network: `custom`, with the in-memory chain's block 0 as its genesis hash ({@link inMemoryBlock}), so the
- * configured genesis and the chain's agree. [IN-3, Q117, Q120]
+ * configured genesis and the chain's agree.
  *
  * It has its own ledger table:
  * - runtimes 0.22 and 1.0 on v8, as the built-in tables hold them, so such a block's ledger is what it was on
- *   `preprod` [LG-3];
+ *   `preprod`;
  * - every runtime 2.x on v9 (rc.5), the release the tests' synthetic v9 transactions are built and checked with.
  *
  * The built-in tables map runtime 2.0 to `v9-rc3` instead, whose package is tested on stagenet's own blocks
- * (`test/ledger/ledger-v9-rc3.test.ts`, and the stagenet tape in `test/backbone/ledger-state.test.ts`). [Q139 A]
+ * (`test/ledger/ledger-v9-rc3.test.ts`, and the stagenet tape in `test/backbone/ledger-state.test.ts`).
  */
 export const TEST_GENESIS = `0x${Buffer.from(inMemoryBlock(0n).hash).toString("hex")}`;
 const TEST_NETWORK = Object.freeze({

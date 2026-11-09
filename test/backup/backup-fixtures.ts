@@ -23,7 +23,7 @@ import { coreSettings, startProcess } from "../runner/process-build.js";
 import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
- * What the backups' tests share. [BK-1 to BK-4, PP-12; design §9.1]
+ * What the backups' tests share.
  *
  * **The chain and the build.** A process over an in-memory block source (`InMemoryBlockSource`, its blocks committing
  * as fast as the database takes them) with the `umbradb` command's build — UmbraDB's backbone with the real
@@ -33,7 +33,6 @@ import type { DatabaseParts } from "../../src/config/database-parts.js";
  * `ticker.log`, a table declared `deterministic: false` with a `serial` key and a `now()` time, which a backup carries
  * and the contents hash records by name only. Every table of a database at height h is then a function of h. Its
  * migration also makes a routine and an enum in its schema, whose owners and privileges a restore gives back.
- * [Q76, A125]
  *
  * **The tools.** `pg_dump` 18 is never assumed on the machine: the PostgreSQL server's container runs the pinned image
  * (`test/postgres-image.ts`), whose PostgreSQL 18.6 client the backup runs through a wrapper named by `UMBRADB_PG_DUMP`
@@ -187,7 +186,7 @@ export async function startTicker(
     declarations: commandBuild(loaded.modules),
     config: { data: loaded.data, file: loaded.file },
     source: chain ?? source,
-    // The backup at the configured stop is `umbradb run`'s port, as this process stands for the command's. [BK-1]
+    // The backup at the configured stop is `umbradb run`'s port, as this process stands for the command's.
     backupAtStop: true,
     ...(options.backupSignals === undefined ? {} : { backupSignals: options.backupSignals }),
     log: (line) => lines.push(line),
@@ -200,7 +199,7 @@ export async function startTicker(
  * export) over an in-memory chain to `head`, its log collected. No setting only the command acts on may be in the file
  * (`library-setting-refused`). The file writes `listen.admin` (a free port, for the command), so the host asks for
  * admin at it (`network: { admin: true }`): an address written for a surface the request does not use is refused
- * (`network-address-conflict`, `unused`). [LM-1, LM-3, BK-1]
+ * (`network-address-conflict`, `unused`).
  */
 export function startLibraryTicker(file: string, head: bigint): TickerProcess<UmbraDBHandle> {
   const source = new InMemoryBlockSource({ head });
@@ -455,7 +454,7 @@ const acl = (column: string) =>
  * privileges, one line each, for comparing them in the catalogs: PostgreSQL's own schemas left out; each ACL's items
  * sorted, since the order in which grants were made — migrations under default privileges, or a restore's grants after
  * it — changes no privilege. The login's name is in them (an owner, a grantor), so two databases compare on one
- * backend. [A125]
+ * backend.
  */
 export const CATALOG_SQL = `SELECT kind, schema, name, owner, acl FROM (
   SELECT 'schema' AS kind, n.nspname::text AS schema, '' AS name, pg_get_userbyid(n.nspowner)::text AS owner,

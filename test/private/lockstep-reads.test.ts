@@ -11,7 +11,7 @@ import { launchPrivate, launchPublicCore, PRIVATE_ROWS_SQL } from "./builds.js";
 /**
  * On PostgreSQL 18.6 and PGlite 0.5.10: a private module's read of public data through the core is one `read` per
  * statement, each at the public cursor when the core runs it, so a lockstep instance reads the public cursor again
- * after its block's data and halts with `lockstep-behind` if it moved past h. [Q142, PP-4, PP-6]
+ * after its block's data and halts with `lockstep-behind` if it moved past h.
  *
  * The instance reads its public database through the core on both backends (no `publicDatabase`). Its core lists it but
  * does not wait for it (a loop without the wait), so only the instance's own check keeps it at its height: its module's
@@ -55,7 +55,7 @@ function pauseGate(): Pause {
 
 /**
  * A private module `pm`, requiring the public `blocks`: its `on-fetch` reads the public block at its height, and at
- * height 1 waits on `pause` before it reads it again; its `on-db-write` stores the hash it read. [PP-13]
+ * height 1 waits on `pause` before it reads it again; its `on-db-write` stores the hash it read.
  */
 function pausing(pause: Pause): ModuleDeclaration {
   const query = "SELECT hash FROM core_block_commit.blocks WHERE height = $1";
@@ -89,7 +89,7 @@ function pausing(pause: Pause): ModuleDeclaration {
   };
 }
 
-/** What one lockstep re-read run saw. [Q142] */
+/** What one lockstep re-read run saw. */
 interface Q142Observation {
   readonly status: ProcessStatus;
   readonly rows: readonly number[];
@@ -97,7 +97,6 @@ interface Q142Observation {
 
 /**
  * The re-read oracle: every problem with what was observed, none when the instance halted at 1 with nothing committed.
- * [Q142]
  */
 function q142Problems(observed: Q142Observation): string[] {
   const problems: string[] = [];
@@ -111,11 +110,11 @@ function q142Problems(observed: Q142Observation): string[] {
   return problems;
 }
 
-/** Runs the re-read test on `backend`; `reread: false` is the negative control's instance. [Q142] */
+/** Runs the re-read test on `backend`; `reread: false` is the negative control's instance. */
 async function q142Run(backend: PrivateBackend, reread?: boolean): Promise<Q142Observation> {
   const publicDb = await backend.database("public");
   const privateDb: TestDatabase = await backend.database("private");
-  // S 1 and the head 0: the core waits for the node with its transport listening. [IN-2]
+  // S 1 and the head 0: the core waits for the node with its transport listening.
   const core = launchPublicCore({
     database: publicDb.setting,
     head: 0n,
@@ -164,12 +163,12 @@ async function q142Run(backend: PrivateBackend, reread?: boolean): Promise<Q142O
   }
 }
 
-describe.each(PRIVATE_BACKENDS)("Q142: a lockstep instance's reads through the core on $name (PP-4, PP-6)", (backend: PrivateBackend) => {
+describe.each(PRIVATE_BACKENDS)("a lockstep instance's reads through the core on $name", (backend: PrivateBackend) => {
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 
   it(
-    "Q142: a lockstep instance reads the public cursor again after its block's data and halts with lockstep-behind when it moved past h",
+    "a lockstep instance reads the public cursor again after its block's data and halts with lockstep-behind when it moved past h",
     async () => {
       expect(q142Problems(await q142Run(backend))).toEqual([]);
     },
@@ -177,7 +176,7 @@ describe.each(PRIVATE_BACKENDS)("Q142: a lockstep instance's reads through the c
   );
 
   it(
-    "Q142 negative control (committed): an instance that does not read the cursor again processes a moved cursor",
+    "negative control (committed): an instance that does not read the cursor again processes a moved cursor",
     async () => {
       const problems = q142Problems(await q142Run(backend, false));
       expect(problems).toContain("the instance committed height 1 though the public cursor moved to 2 while its on-fetch read the public data of 1");

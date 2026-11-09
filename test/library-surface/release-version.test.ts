@@ -12,7 +12,7 @@ import { RETIRED_EXPORTS } from "./retirement.js";
 
 /**
  * Version `0.10.0`, the one breaking-change line in `CHANGELOG.md`, and every backbone part and core module naming the
- * build's version (`UMBRADB_VERSION`), never a literal (`core-digest` once wrote `"0.10.0"` by hand). [A4 DOC, LS-4, Q169]
+ * build's version (`UMBRADB_VERSION`), never a literal (`core-digest` once wrote `"0.10.0"` by hand).
  *
  * The checks are `./release-version.ts`'s, on the tree as it is: the files of `src/` read and parsed (no program, no
  * type checker), the command's build imported for the versions it carries at run time, `package.json`, its lock and
@@ -50,7 +50,7 @@ const BUILD_IDS = [
 
 const pkg = JSON.parse(read("package.json")) as { version: string };
 
-describe("A4 (LS-4, amended by Q169): version 0.10.0, and one breaking line", () => {
+describe("version 0.10.0, and one breaking line", () => {
   it("package.json's version is 0.10.0, and the lock's own entry and UMBRADB_VERSION are the same", () => {
     expect(pkg.version).toBe(RELEASE_VERSION);
     type Lock = { version: string; packages: Record<string, { version: string }> };
@@ -187,7 +187,7 @@ describe("Task 17.4: every backbone part and core module declares the build's ve
       scanDeclarations(at(text, file), stringConstants([at(text, file)])).problems;
     const rule = "not the build's UMBRADB_VERSION imported from src/config/build.ts (task 17.4)";
 
-    it("core-digest's declaration as task 17.4 found it (\"0.10.0\" by hand) fails, with its line and id", () => {
+    it("core-digest's declaration with \"0.10.0\" by hand fails, with its line and id", () => {
       // The head of CORE_DIGEST's declaration at 121a5bb (src/backbone/core-digest/core-digest.ts:90-98), with the
       // imports it needs; its other fields shortened.
       const found = [

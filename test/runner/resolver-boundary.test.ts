@@ -4,11 +4,11 @@ import { describe, expect, it } from "vitest";
 import { boundaryOf, boundarySources, hostWith, REPOSITORY } from "./resolver-boundary.js";
 
 /**
- * L56 `[STATIC][NEG]`: no module outside `src/runner/resolve.ts` calls `commandBuild`, `buildDeclarations`,
+ * No module outside `src/runner/resolve.ts` calls `commandBuild`, `buildDeclarations`,
  * `inferSide`, `validateConfig` or `processCoreEntry`, and none outside the engine (`src/runner/process.ts`) calls
  * `planNetwork` — over every non-test source the repository compiles (`./resolver-boundary.ts`). The negative control
  * adds such calls to a fixture copy of `src/cli/backup.ts` (the repository's file is left as it is), in each form a
- * module could take one, and sees each reported, while a comment, a string and a type position are not. [L56, LM-1]
+ * module could take one, and sees each reported, while a comment, a string and a type position are not.
  *
  * `buildDeclarations` was removed with the resolver: a guard whose function no source declares guards nothing, and the
  * test names which guards the sources declare. `planNetwork` is declared in the resolver and called by the engine
@@ -37,7 +37,7 @@ const FORBIDDEN = [
   'export const named = "processCoreEntry";',
 ];
 
-describe("L56: the resolver's boundary over the repository's sources", () => {
+describe("the resolver's boundary over the repository's sources", () => {
   it("reads every non-test source: src/, browser/, bench/, tools/", () => {
     const relative = files.map((file) => file.slice(REPOSITORY.length));
     for (const expected of ["src/cli/backup.ts", "src/runner/resolve.ts", "browser/src/process-worker.ts", "bench/core.ts"]) {

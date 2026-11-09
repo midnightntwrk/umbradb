@@ -16,7 +16,6 @@ import {
  * - a shared item gets one schema named after it;
  * - ids and item names match the name pattern of `src/db/roles.ts`, within 40 bytes;
  * - schema names never collide with each other or with a reserved schema.
- * [A15, DB-8, MD-2]
  *
  * Refusing at startup is the runner's job: it calls {@link planSchemas} with the real declarations; here the plan is
  * given them directly. The database half (the roles and schemas created, two 40-byte ids as two roles) is in
@@ -62,7 +61,7 @@ function refusal(run: () => unknown): UmbraError {
   return expect.unreachable("expected a refusal");
 }
 
-describe("A15: schemas are named after module ids, roles after schemas (DB-8)", () => {
+describe("schemas are named after module ids, roles after schemas", () => {
   it("names a module's schema after its id with - replaced by _, and its role umbradb_m_<schema>", () => {
     expect(schemaName("core-chain-events")).toBe("core_chain_events");
     expect(moduleRoleName("core_chain_events")).toBe("umbradb_m_core_chain_events");
@@ -132,14 +131,14 @@ describe("A15: schemas are named after module ids, roles after schemas (DB-8)", 
     expect(() => plan.writeSchema("b")).toThrow("module b is not in the schema plan");
   });
 
-  it("takes the checksum of a migration as SHA-256 of its UTF-8 SQL (DB-9), which shared items compare", () => {
+  it("takes the checksum of a migration as SHA-256 of its UTF-8 SQL, which shared items compare", () => {
     expect(migrationChecksum("")).toBe("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
     // `printf '\xc3\xa9' | shasum -a 256`: the UTF-8 bytes of "é" (its Latin-1 byte would give de2e331d…).
     expect(migrationChecksum("é")).toBe("4a99557e4033c3539de2eb65472017cad5f9557f7a0625a09f1c3f6e2ba69c4c");
   });
 });
 
-describe("A15: ids and item names that do not match DB-8's pattern fail with bad-id", () => {
+describe("ids and item names that do not match the pattern fail with bad-id", () => {
   for (const id of ["core_chain", "A-b", "a--b", "-a", `${"a".repeat(40)}b`]) {
     it(`refuses the module id ${JSON.stringify(id.length > 40 ? `${id.length} bytes` : id)}`, () => {
       const error = refusal(() => planSchemas([module("ok"), { ...module("x"), id }]));
@@ -187,7 +186,7 @@ describe("A15: ids and item names that do not match DB-8's pattern fail with bad
   });
 });
 
-describe("A15: colliding schema names refuse startup, naming both (DB-8, MD-2)", () => {
+describe("colliding schema names refuse startup, naming both", () => {
   it("refuses a module and an item with the same name", () => {
     const error = refusal(() =>
       planSchemas([
@@ -234,7 +233,7 @@ describe("A15: colliding schema names refuse startup, naming both (DB-8, MD-2)",
     expect(error.details).toMatchObject({ schema: "a", first: "module a", second: "module a" });
   });
 
-  it("refuses a table item declared in a schema that is neither its module's nor its own (Q89)", () => {
+  it("refuses a table item declared in a schema that is neither its module's nor its own", () => {
     const error = refusal(() =>
       planSchemas([module("a"), module("b", { provides: [{ name: "b-rows", table: { schema: "a", tables: ["rows"] } }] })]),
     );
@@ -243,7 +242,7 @@ describe("A15: colliding schema names refuse startup, naming both (DB-8, MD-2)",
     expect(error.message).toContain("b-rows");
   });
 
-  it("refuses a module whose table items name two schemas (Q89)", () => {
+  it("refuses a module whose table items name two schemas", () => {
     const error = refusal(() =>
       planSchemas([
         module("a", {
@@ -259,8 +258,8 @@ describe("A15: colliding schema names refuse startup, naming both (DB-8, MD-2)",
   });
 });
 
-describe("A15: the providers of one shared item must declare it alike (DB-8, Q76)", () => {
-  it("accepts two providers with identical migrations and flags (a handoff, MD-6)", () => {
+describe("the providers of one shared item must declare it alike", () => {
+  it("accepts two providers with identical migrations and flags (a handoff)", () => {
     expect(() => planSchemas([provider("p1", LOGS), provider("p2", LOGS)])).not.toThrow();
     expect(() => planSchemas([provider("p1", LOGS, false), provider("p2", LOGS, false)])).not.toThrow();
   });
@@ -296,7 +295,7 @@ describe("A15: the providers of one shared item must declare it alike (DB-8, Q76
     expect(longer.details).toMatchObject({ item: "shared-x", migration: "002" });
   });
 
-  it("refuses two providers whose deterministic flags differ, naming the item (Q76, TC-08)", () => {
+  it("refuses two providers whose deterministic flags differ, naming the item", () => {
     const error = refusal(() => planSchemas([provider("p1", LOGS), provider("p2", LOGS, false)]));
     expect(error.code).toBe("shared-item-migrations-differ");
     expect(error.details).toMatchObject({ item: "shared-x", providers: ["p1", "p2"], deterministic: [true, false] });
@@ -304,7 +303,7 @@ describe("A15: the providers of one shared item must declare it alike (DB-8, Q76
     expect(error.message).toContain("deterministic");
   });
 
-  it("refuses an item that several modules provide when one declares its table in its own schema (Q89)", () => {
+  it("refuses an item that several modules provide when one declares its table in its own schema", () => {
     const error = refusal(() =>
       planSchemas([
         provider("p1", LOGS),
@@ -316,7 +315,7 @@ describe("A15: the providers of one shared item must declare it alike (DB-8, Q76
   });
 });
 
-describe("DB-8: the items of UmbraDB's own parts share the one namespace (task 3.2)", () => {
+describe("the items of UmbraDB's own parts share the one namespace", () => {
   // `core-chain` and `core-digest` are no modules of a plan (their schemas are reserved), yet their items' names are
   // names like any other: a module may not take one as its id.
   const coreChain = { id: "core-chain", provides: [{ name: "db" }, { name: "config" }] };
@@ -347,7 +346,7 @@ describe("DB-8: the items of UmbraDB's own parts share the one namespace (task 3
       first: "module config",
       second: "item config (provided by x, core-chain)",
     });
-    // Alone, the two providers collide with no schema: two providers of one item are the graph's to refuse. [MD-6]
+    // Alone, the two providers collide with no schema: two providers of one item are the graph's to refuse.
     expect(() => planSchemas([module("x", { provides: [{ name: "config" }] })], [coreChain])).not.toThrow();
   });
 

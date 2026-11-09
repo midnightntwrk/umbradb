@@ -13,13 +13,12 @@ import { askedLater, BACKENDS, settlesWithin, TEST_CURSOR, TEST_SCHEMA } from ".
 
 /**
  * Read handles and writer transactions, on every backend of `backends.ts`:
- * - a read handle sees one committed height and reports it; [DB-2]
- * - a transaction commits when its body resolves and rolls back when it throws; [DB-5]
+ * - a read handle sees one committed height and reports it;
+ * - a transaction commits when its body resolves and rolls back when it throws;
  * - a handle used after its read or transaction ended is refused (`handle-closed`) instead of reaching the database.
- *   [DB-2, DB-5]
  *
  * A commit asked for while a read is open lands between the read's statements on PostgreSQL. On PGlite it waits until
- * the read ends, which the same tests check there instead of waiting for it inside the read. [DB-4, DB-5]
+ * the read ends, which the same tests check there instead of waiting for it inside the read.
  */
 
 async function failure(run: () => Promise<unknown>): Promise<UmbraError> {
@@ -38,8 +37,8 @@ const commitHeight = (db: Database, height: bigint) =>
     await tx.execute("INSERT INTO t.rows VALUES ($1, $2)", [height, `row ${height}`]);
   });
 
-describe("the handles' types (CORE-ARCH §4.10)", () => {
-  it("are CORE-ARCH's interfaces, and the determinism code's ConsistentRead is exactly their query", () => {
+describe("the handles' types", () => {
+  it("are the database API's interfaces, and the determinism code's ConsistentRead is exactly their query", () => {
     expectTypeOf<ReadHandle["height"]>().toEqualTypeOf<bigint | null>();
     expectTypeOf<ReadHandle["query"]>().toEqualTypeOf<
       (sql: string, params?: unknown[]) => Promise<Record<string, unknown>[]>
@@ -58,7 +57,7 @@ for (const backend of BACKENDS) {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  describe(`DB-2 read handles on ${backend.name}`, () => {
+  describe(`read handles on ${backend.name}`, () => {
     it("reports a null height before any height commits", async () => {
       const { db } = await backend.database(TEST_SCHEMA, TEST_CURSOR);
       expect(await db.read(async (read) => read.height)).toBeNull();
@@ -164,7 +163,7 @@ for (const backend of BACKENDS) {
     });
   });
 
-  describe(`DB-5 writer transactions on ${backend.name}`, () => {
+  describe(`writer transactions on ${backend.name}`, () => {
     it("commits when the body resolves, and execute returns the rows affected", async () => {
       const { db } = await backend.database(TEST_SCHEMA, TEST_CURSOR);
       const counts = await db.transaction(async (tx) => [

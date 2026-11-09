@@ -2,11 +2,11 @@
 /**
  * The local preprod runs: one sync of an UmbraDB build from genesis against Midnight preprod's archive node on the
  * owner's LAN, which no CI reaches. Their results are manual evidence for the pull request: this is not a test file,
- * and nothing of it is in the required-test manifest. [R23, R24, R25; ledger-refcount design §12]
+ * and nothing of it is in the required-test manifest.
  *
  * **The node.** `UMBRADB_LOCAL_NODE` holds the node's WebSocket URL (`ws or wss://<host>:<port>`). It is checked before
  * anything else: unset, empty or not a WebSocket URL, the script exits 2 naming it, having started and written
- * nothing. [ledger-refcount design §12.1]
+ * nothing.
  *
  * **Usage.**
  *
@@ -35,7 +35,6 @@
  * a refusal, or when its container ends; the script then stops the container (SIGTERM: the height in progress
  * finishes) and removes what it created but, with `--keep`, the database, its volume and the network. A SIGINT or
  * SIGTERM to the script ends the run the same way; a second one ends the script at once, naming what is left.
- * [ledger-refcount design §12.1]
  *
  * **What it records.** Every `/status` sample that changed (`status.jsonl`: the time, the state, the cursor, the
  * last commit's wall-clock time, a halt's or refusal's reason); the run's log (`run.log`); and per 1,000-height window
@@ -44,13 +43,13 @@
  * second) — its wall time, its heights per second, and the stored row count of `core_ledger_state.nodes`, read once
  * the window ends, with the height it was read at (`windows.jsonl`, as each window ends). The first window counts
  * from the first commit seen, the last ends at the stop height; either is marked `partial` when it holds fewer than
- * 1,000 heights. [R23, R24; ledger-refcount design §12.1]
+ * 1,000 heights.
  *
  * **The probe.** Beside the run, once a second, it asks the node for `state_getRuntimeVersion` at the run's latest
  * block (the `/status` cursor's hash, from `chain_getBlockHash`) and records each answer's time (`probe.jsonl`); no
  * call is sent while one is unanswered. A window is marked slow when a call slower than 1 s overlapped the run's pass
  * through it: the performance comparison leaves such a window out of both runs'. The windows' times are the run
- * container's wall clock (`lastCommitAt`), the probe's the host's. [R23; ledger-refcount design §12.3]
+ * container's wall clock (`lastCommitAt`), the probe's the host's.
  *
  * At the end `windows.json` holds every window with its row count and its probe mark, and `summary.json` the run: its
  * build and commit, its settings, the images' digests, how it ended, the slow windows. The comparison's band ratios
@@ -72,7 +71,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { POSTGRES_IMAGE } from "../test/postgres-image.ts";
 
-/** The variable that names the node; nothing runs without it. [ledger-refcount design §12.1] */
+/** The variable that names the node; nothing runs without it. */
 const VARIABLE = "UMBRADB_LOCAL_NODE";
 
 const NODE_URL = (process.env[VARIABLE] ?? "").trim();
@@ -91,7 +90,7 @@ const DATABASE = "umbradb";
 const ADMIN_PORT = 8081;
 /** Heights per window. */
 const WINDOW = 1000;
-/** A probe answer slower than this marks the windows its call overlapped. [R23] */
+/** A probe answer slower than this marks the windows its call overlapped. */
 const SLOW_MS = 1000;
 const STATUS_EVERY_MS = 250;
 const PROBE_EVERY_MS = 1000;
@@ -99,7 +98,7 @@ const PROBE_EVERY_MS = 1000;
 const STOP_TIMEOUT_S = 300;
 const DATABASE_READY_MS = 120_000;
 const ADMIN_ANSWERS_MS = 600_000;
-/** Every core module but `core-contract-logs-fast`, from 0. [R23, R24] */
+/** Every core module but `core-contract-logs-fast`, from 0. */
 const CORE_MODULES = Object.freeze([
   "CORE_CHAIN_EVENTS", "CORE_BLOCK_PARSED", "CORE_TX_RESULTS", "CORE_LEDGER_STATE", "CORE_CONTRACT_STATES",
   "CORE_CONTRACT_LOGS_FULL",
@@ -206,7 +205,7 @@ function commitOf(build) {
   return { commit: head.stdout.trim(), dirty: status.status === 0 ? status.stdout.trim() !== "" : null };
 }
 
-/** The configuration the run loads: the `core` entry and every core module but `-fast`, from 0. [R23, R24, R25] */
+/** The configuration the run loads: the `core` entry and every core module but `-fast`, from 0. */
 function configText({ stop, sweep, host }) {
   const core = {
     network: "preprod",
@@ -297,7 +296,7 @@ function nodeRpc(url) {
 
 /**
  * The windows, from the commits `/status` shows: each commit point is a height and its commit's wall-clock time, and
- * a window's ends between two points are interpolated linearly. [R23; ledger-refcount design §12.1]
+ * a window's ends between two points are interpolated linearly.
  */
 function windowClock(closed) {
   let previous;

@@ -3,17 +3,17 @@
  * block and become the module's `block` items. A task's function cannot cross to the worker, so the worker gets it
  * from its entry (`./worker/run.ts`'s `runLedgerWorker`, which the entry calls with the modules the process runs). The
  * main thread only names the task: the module's id, the task's name, the block, its ledger and how many transactions
- * `block-parsed` holds. [LG-7, LG-17, MD-1, Q49; design §5.5]
+ * `block-parsed` holds.
  *
  * **When.** {@link withLedgerTasks} gives a module with tasks the points that run them, around its own callbacks:
  *
  * - A task without `needsState` runs at the module's `on-parse`. That is after `core-block-parsed`'s `on-parse`, whose
  *   item the module must require (declaration validation checks this for `ledgerTasks`), so the worker still holds the
  *   block's parse. It also runs for a queued best block, so its item is published before `on-compute` and kept when a
- *   height is processed again from `on-compute`. [MD-2, IN-10]
+ *   height is processed again from `on-compute`.
  * - A task with `needsState` runs at the module's `on-compute`, after `core-ledger-state`'s, whose item `ledger-state`
  *   the module requires. It runs on the state before the block, which the worker holds as committed until the block's
- *   `on-after-db-write` (after a restart, the worker loads it at `core-ledger-state`'s `on-compute`). [LG-17]
+ *   `on-after-db-write` (after a restart, the worker loads it at `core-ledger-state`'s `on-compute`).
  *
  * Each result is put as the module's `block` item named after the task, before the module's own callback at that point
  * runs; that callback sees it among its block context's items.
@@ -23,7 +23,7 @@
  * object, for example). The callback then fails, and processing halts with `callback-error` naming the module and the
  * point; a queued best block that fails is dropped instead, and met again at finality. A trap in a task ends the
  * worker, as a trap in an apply does. A module whose tasks the worker's entry does not provide fails the same way,
- * naming its entry. [RN-8]
+ * naming its entry.
  */
 
 import type { ReadHandle } from "../db/api.js";
@@ -32,10 +32,10 @@ import type { DeclarationSet } from "../modules/validation.js";
 import type { LedgerName, LedgerTask } from "./types.js";
 import type { LedgerHost } from "./worker/host.js";
 
-/** The item every ledger task's block comes from: `core-block-parsed`'s. [CD-5] */
+/** The item every ledger task's block comes from: `core-block-parsed`'s. */
 export const TASKS_BLOCK_ITEM = "block-parsed";
 
-/** The item a module with a `needsState` task requires: `core-ledger-state`'s. [LG-17] */
+/** The item a module with a `needsState` task requires: `core-ledger-state`'s. */
 export const TASKS_STATE_ITEM = "ledger-state";
 
 const BOUND = new WeakMap<ProcessContext, LedgerHost>();

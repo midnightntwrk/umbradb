@@ -17,7 +17,7 @@ import type { TestDatabase, TestServer } from "./postgres-database.js";
  * `[schema, table, null, null]` for a table recorded by name only — in the table order of every other table, and its
  * own rows are not read by bytes. The content is computed once per hash, through the hash's own read (one snapshot),
  * with its page size. A declaration of tables the database does not hold changes nothing; one whose content function
- * gives nothing for a declared table, or fails, fails the hash. [DT-3, LG-11]
+ * gives nothing for a declared table, or fails, fails the hash.
  *
  * The ledger's node tables, the content function `core-ledger-state` declares, are `../backbone/node-set.test.ts`.
  * The expected hash is computed here from CBOR written out by hand (RFC 8949), not by the code under test.
@@ -64,7 +64,7 @@ const EXPECTED_CBOR: readonly (readonly [string, string])[] = [
   ['["m", "t", ["k"], [[1]]]: by its rows', "84 61 6d 61 74 81 61 6b 81 81 01"],
 ];
 
-describe.each(DETERMINISM_BACKENDS)("content-defined tables in the contents hash, on $name (DT-3)", (backend) => {
+describe.each(DETERMINISM_BACKENDS)("content-defined tables in the contents hash, on $name", (backend) => {
   let server: TestServer;
 
   beforeAll(async () => {

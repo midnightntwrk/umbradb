@@ -1,16 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
-  BOUNDARIES, citationProblems, citations, GAP_ISSUES, GAP_TASKS, headingProblems, KNOWN_GAPS, knownGapProblems,
-  LINKING_DOCUMENTS, OWNER_AREAS, retiredPartProblems, THREAT_MODEL,
+  BOUNDARIES, citationProblems, citations, headingProblems, KNOWN_GAPS, LINKING_DOCUMENTS, OWNER_AREAS,
+  retiredPartProblems, THREAT_MODEL,
 } from "./threat-model.js";
 
 /**
  * `./threat-model.ts` on small texts — the `CITATION` pattern's ranges, a line 0, the fences around prose, the retired
- * parts written without a separator, `headingProblems`' counting by level and title, `knownGapProblems`' section end
- * and the line breaks in it.
+ * parts written without a separator, and `headingProblems`' counting by level and title.
  */
 
-/** A model whose every required heading is there once, and `extra` after it. [A178] */
+/** A model whose every required heading is there once, and `extra` after it. */
 function model(extra = ""): string {
   return [
     ...BOUNDARIES.map((boundary, index) => `### ${index + 1}. ${boundary}`),
@@ -20,7 +19,7 @@ function model(extra = ""): string {
   ].join("\n");
 }
 
-describe("threat-model.ts's checks (task 17.5b)", () => {
+describe("threat-model.ts's checks", () => {
   it("names the one document that must link the model", () => {
     expect(LINKING_DOCUMENTS).toEqual(["README.md"]);
   });
@@ -69,20 +68,5 @@ describe("threat-model.ts's checks (task 17.5b)", () => {
     expect(headingProblems(model().replace(`### 1. ${BOUNDARIES[0]}`, ""))).toEqual([
       `${THREAT_MODEL} lacks boundary 1 (heading "### 1. ${BOUNDARIES[0]}") (A178)`,
     ]);
-  });
-
-  describe("knownGapProblems' section", () => {
-    const names = [...GAP_TASKS.map((task) => `task ${task}`), ...GAP_ISSUES.map((issue) => `issue ${issue}`)];
-
-    it("runs to the end of the text, its names on lines of their own", () => {
-      expect(knownGapProblems(`## ${KNOWN_GAPS}\n${names.join("\n")}`)).toEqual([]);
-      expect(knownGapProblems(`## ${KNOWN_GAPS}\n${[...GAP_TASKS, ...GAP_ISSUES].join("\n")}`)).toEqual([]);
-    });
-
-    it("ends at the next level-1 or level-2 heading, not at a level-3 one or a heading inside a line", () => {
-      expect(knownGapProblems(`## ${KNOWN_GAPS}\n### Fixed\ntext ## more\n${names.join(" ")}`)).toEqual([]);
-      expect(knownGapProblems(`## ${KNOWN_GAPS}\n## Next\n${names.join(" ")}`)).toHaveLength(names.length);
-      expect(knownGapProblems(`## ${KNOWN_GAPS}\n#Next\n${names.join(" ")}`)).toEqual([]);
-    });
   });
 });

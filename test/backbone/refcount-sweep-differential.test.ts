@@ -16,7 +16,7 @@ import { SweepModel } from "./sweep-model.js";
  * (`./sweep-model.ts`), both fed the same batches, on generated histories of admissible batches in which every key is
  * written with one child list throughout, deletions and re-insertions included. The sweep's model keeps a node's
  * first child list and counting its last, so they are compared by node set: every key a model holds as a row or
- * embedded in a row. [LG-14, R2]
+ * embedded in a row.
  *
  * - With a budget that lets every cycle start and end in its block, the node sets are equal at every height: the sweep
  *   keeps what the roots before the block and the keys that rose in it reach, which is what counting keeps for an
@@ -103,7 +103,7 @@ function compare(
   return null;
 }
 
-describe("R2: the counting model's node set against the sweep's model's, on admissible batches in one form", () => {
+describe("the counting model's node set against the sweep's model's, on admissible batches in one form", () => {
   it(`equals it at every height when each cycle fits in one block (seed ${SEED}, ${RUNS} runs)`, () => {
     const counts = seen();
     fc.assert(

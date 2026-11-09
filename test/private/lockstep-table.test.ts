@@ -9,10 +9,10 @@ import { schemaFile, validatorOf } from "../admin/json-schema.js";
 /**
  * The core's view of its lockstep instances and its wait before each block's transaction. This is
  * `src/private/lockstep.ts`'s `Lockstep`: the core's transport tells it of each listed instance's `hello`, `report` and
- * close, and the finalized loop awaits it before `BEGIN` of h (`LoopInput.lockstep`). [PP-6, PP-7; design §8]
+ * close, and the finalized loop awaits it before `BEGIN` of h (`LoopInput.lockstep`).
  *
  * A listed instance holds h while it is:
- * - not connected, including not seen since the core started; [Q24]
+ * - not connected, including not seen since the core started;
  * - refused (`lockstep-behind`, `report-hash-mismatch`);
  * - or at a committed height below h − 1.
  *
@@ -46,7 +46,7 @@ const entry = (instance: string, rest: Partial<LockstepInstance> = {}): Lockstep
   ...rest,
 });
 
-describe("which listed instances hold a height (PP-6)", () => {
+describe("which listed instances hold a height", () => {
   it("one not seen since the core started holds every height, S included: the core cannot know where it is", () => {
     const lockstep = new Lockstep({ listed: ["a"] });
     expect(lockstep.holding(1n)).toEqual([entry("a")]);
@@ -112,7 +112,7 @@ describe("which listed instances hold a height (PP-6)", () => {
   });
 });
 
-describe("the wait before BEGIN of h (PP-6, Q24)", () => {
+describe("the wait before BEGIN of h", () => {
   it("resolves at once when nothing holds h: no condition, no log", async () => {
     const lines: string[] = [];
     const lockstep = new Lockstep({ listed: ["a"], log: (line) => lines.push(line) });
@@ -195,7 +195,7 @@ describe("the wait before BEGIN of h (PP-6, Q24)", () => {
   });
 });
 
-describe("/status shows the condition (AE-3, AE-5)", () => {
+describe("/status shows the condition", () => {
   const schema = validatorOf(schemaFile(new URL("../backbone/core-status/status.schema.json", import.meta.url)));
 
   /** `/status`'s body for a core process raising `conditions`. */

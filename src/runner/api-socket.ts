@@ -6,12 +6,11 @@
  * on the main thread, beside the runner, since every request reads the database and runs a module's handler. The admin
  * endpoints have their own listener in a worker thread of their own, which shares nothing with this one but
  * `parseAddress`. The browser build carries this module only as its stub: a page has no Node.js server, and its
- * process answers through `./api-session.ts`'s fetch-style handler and channels. [RN-15, RN-16, CF-4, AE-1, LM-4,
- * LM-11; design §2, §5.2 N6–N8, §8; CORE-ARCH §4.10, §4.20]
+ * process answers through `./api-session.ts`'s fetch-style handler and channels.
  *
  * **HTTP.** A request's body is read from the request's stream with `./api-session.ts`'s rules. A mounted handler reads
  * the body itself: a host passes the request unread (one whose body was read already is answered 400
- * `invalid-request`). [LM-4]
+ * `invalid-request`).
  *
  * **Every HTTP answer names its build** (`./api-answers.ts`). The core's headers — `X-Umbra-Version`, the build's
  * version, and, given the process's configuration hash, `X-Umbra-Config-Hash` — are set once on every answer,
@@ -25,11 +24,11 @@
  *
  * A `100 Continue` is an interim answer, before the request's own; a WebSocket message or close after the upgrade has no
  * headers. The process computes the hash once at startup (`./process.ts`), after `on-start-db`, so it changes only with
- * a restart under another configuration; a private process compares it with the core's. [RN-16, PP-14, Q131, Q147]
+ * a restart under another configuration; a private process compares it with the core's.
  *
  * **WebSocket subscriptions**, at any path: the protocol of `./api-session.ts`, each message a text frame of at most the
  * message limit (`ws`'s `maxPayload`: a larger one closes the connection 1009); a slow subscriber's socket is
- * destroyed. [RN-15]
+ * destroyed.
  *
  * **Closing** the handlers closes every WebSocket connection they opened (1001, going away; its end unsubscribes its
  * subscriptions) and takes no upgrade after. Closing the listener also stops accepting connections, ends every HTTP
@@ -70,12 +69,12 @@ import type { ApiResponse, ModuleApi } from "./module-api.js";
 
 /** What {@link moduleApiHandlers} takes besides the module API. */
 export interface ModuleApiHandlerOptions extends ModuleApiLimits {
-  /** The process's configuration hash, set as `X-Umbra-Config-Hash`; none unless given. [RN-16, Q147] */
+  /** The process's configuration hash, set as `X-Umbra-Config-Hash`; none unless given. */
   readonly configHash?: string;
   /**
    * Where the core's headers are set on the HTTP answers: in the handlers' own `writeHead` (`"answer"`, mounted in a
    * host's server: the default), by the answers' class of the listener (`"response"`), or nowhere (`"none"`, a negative
-   * control's: also not on the upgrade's answers). [RN-16, L23, L68]
+   * control's: also not on the upgrade's answers).
    */
   readonly coreHeaders?: "answer" | "response" | "none";
 }
@@ -89,7 +88,7 @@ export interface ModuleApiServerOptions {
    * default; another (Node.js's own `ServerResponse`) only for a negative control.
    */
   readonly response?: typeof ServerResponse;
-  /** The process's configuration hash, set as `X-Umbra-Config-Hash`; none unless given. [RN-16, Q147] */
+  /** The process's configuration hash, set as `X-Umbra-Config-Hash`; none unless given. */
   readonly configHash?: string;
 }
 
@@ -199,7 +198,7 @@ function socketConnection(socket: WebSocket, api: ModuleApi, rules: ConnectionRu
 
 /** The body of `request`: its text, or the answer refusing it (see the module comment). */
 function readBody(request: IncomingMessage, max: number): Promise<{ readonly text: string } | { readonly refused: ApiResponse }> {
-  // A host's server passed a request whose body was read before the handler got it: its text is no more. [LM-4]
+  // A host's server passed a request whose body was read before the handler got it: its text is no more.
   if (request.readableEnded) return Promise.resolve({ refused: BODY_READ_ALREADY });
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
@@ -261,7 +260,7 @@ async function serve(
   }
 }
 
-/** The module API's Node.js handlers (see the module comment). [LM-4, RN-15, RN-16] */
+/** The module API's Node.js handlers (see the module comment). */
 export interface ModuleApiHandlers {
   /** Answers an HTTP request. */
   readonly http: NodeHttpHandler;
@@ -273,7 +272,7 @@ export interface ModuleApiHandlers {
 
 /**
  * The module API's Node.js handlers over `api` (see the module comment): the same for UmbraDB's listener and for a
- * library host that mounts them in its own server. [LM-4, RN-15, RN-16, N6, N8]
+ * library host that mounts them in its own server.
  */
 export function moduleApiHandlers(api: ModuleApi, options: ModuleApiHandlerOptions = {}): ModuleApiHandlers {
   const maxBody = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;

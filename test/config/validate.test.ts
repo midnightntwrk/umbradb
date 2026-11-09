@@ -47,11 +47,11 @@ import {
  *   `0x`-prefixed lowercase hex;
  * - the settings of every revision whose version is this build's, against the schema in this build (the `core`
  *   entry's, or a module's own `configSchema`): no unknown field, the declared defaults applied to absent fields, and
- *   each field classified by its kind. [CF-4]
+ *   each field classified by its kind.
  *
  * A revision whose version is not the build's (written with `versionEntry`) is not validated against this build's
  * schema. Each violation refuses with `invalid-configuration`, naming the entry (its position, id and start) and the
- * field. [A28, CF-3, CF-6]
+ * field.
  *
  * The validation is a pure function of the loaded data, the validated declarations and the process's side:
  * - what needs the cursor (a scheduled `versionEntry` carrying a `config`, an earlier one without its recorded
@@ -121,7 +121,7 @@ const withEntry = (entry: unknown) => ({ entries: [CORE, entry] });
 const HASH = `0x${"ab".repeat(32)}`;
 const UPPER_HASH = `0x${"AB".repeat(32)}`;
 
-/** A custom network's own ledger table: every spec_version to v8. [LG-3] */
+/** A custom network's own ledger table: every spec_version to v8. */
 const CUSTOM_TABLE = { rows: [{ specVersionMin: 0, specVersionMax: 4_294_967_295, ledger: "v8" }] };
 
 /** An earlier core version, with one ledger package, whose hash is `sha256`. */
@@ -139,7 +139,7 @@ const earlierCore = (sha256: string): CoreVersion => ({
 const core0 = at(0, "core", 0);
 const stats1 = at(1, "stats", 0);
 
-/** A private module. [PP-1] */
+/** A private module. */
 const WALLET = defineModule({ ...declaration("wallet", { side: "private" }) });
 
 const A28: readonly Row[] = [
@@ -170,7 +170,7 @@ const A28: readonly Row[] = [
     findings: [{ path: "entries[1]", entry: at(1, null, null), field: null, says: ["is a number", "an entry"] }],
   },
   {
-    name: "an unknown property of an entry (A28)",
+    name: "an unknown property of an entry",
     rule: "entry-property",
     config: () => withEntry({ ...STATS, enabled: true }),
     findings: [
@@ -210,7 +210,7 @@ const A28: readonly Row[] = [
     ],
   },
   {
-    name: "a public module's entry in a private process's configuration (task 14.1)",
+    name: "a public module's entry in a private process's configuration",
     rule: "entry-side",
     side: "private",
     config: () => ({ entries: [...withPrivateCore(PRIVATE_SETTINGS).entries, STATS] }),
@@ -252,7 +252,7 @@ const A28: readonly Row[] = [
     ],
   },
   {
-    name: "a stop below its start (A28)",
+    name: "a stop below its start",
     rule: "entry-stop",
     config: () => withEntry(stats.entry({ start: 10, stop: 9, config: { pollMs: 1000 } })),
     findings: [
@@ -272,7 +272,7 @@ const A28: readonly Row[] = [
     findings: [{ path: "entries[1].stop", entry: stats1, field: "stop", says: ["stop is a string", "height"] }],
   },
   {
-    name: "bad hex in the core version's package hash (A28)",
+    name: "bad hex in the core version's package hash",
     rule: "entry-version",
     config: () => ({
       entries: [
@@ -506,7 +506,7 @@ const A28: readonly Row[] = [
     ],
   },
   {
-    name: "a wrong type (CF-3's scenario)",
+    name: "a wrong type",
     rule: "settings-schema",
     config: () => withCore({ ...CORE_SETTINGS, livenessTimeoutMs: "30000" }),
     findings: [
@@ -537,9 +537,9 @@ const A28: readonly Row[] = [
     findings: [{ path: "entries[0].config.network", entry: core0, field: "network", says: ['"mainnet"', '"custom"'] }],
   },
   {
-    name: "bad hex in the genesis hash (A28)",
+    name: "bad hex in the genesis hash",
     rule: "settings-schema",
-    // With its own ledger table, which a custom network sets, so that only the hash is refused. [LG-3]
+    // With its own ledger table, which a custom network sets, so that only the hash is refused.
     config: () => withCore({ ...CORE_SETTINGS, network: "custom", genesisHash: UPPER_HASH, ledgerTable: CUSTOM_TABLE }),
     findings: [
       { path: "entries[0].config.genesisHash", entry: core0, field: "genesisHash", says: ["0x-prefixed lowercase hex"] },
@@ -562,7 +562,7 @@ const A28: readonly Row[] = [
   {
     name: "a custom network without its genesis hash",
     rule: "settings-schema",
-    // With its own ledger table, which a custom network sets, so that only the genesis rule refuses it. [LG-3]
+    // With its own ledger table, which a custom network sets, so that only the genesis rule refuses it.
     config: () => withCore({ ...CORE_SETTINGS, network: "custom", ledgerTable: CUSTOM_TABLE }),
     findings: [
       { path: "entries[0].config.genesisHash", entry: core0, field: "genesisHash", says: ["a custom network needs genesisHash"] },
@@ -591,7 +591,7 @@ const A28: readonly Row[] = [
     ],
   },
   {
-    name: "a database given as a connection string (Q167 A)",
+    name: "a database given as a connection string",
     rule: "settings-schema",
     config: () => withCore({ ...CORE_SETTINGS, database: "mysql://db/umbradb" }),
     findings: [
@@ -792,7 +792,7 @@ function matches(finding: Finding, expected: Expected, rule: string): void {
   for (const words of expected.says) expect(finding.message).toContain(words);
 }
 
-describe("A28: entry-shape and schema violations each refuse, naming the entry and the field (CF-3)", () => {
+describe("entry-shape and schema violations each refuse, naming the entry and the field", () => {
   for (const row of A28) {
     it(`${row.name}: ${row.rule}`, () => {
       const error = refusal(() => validateConfig(rowInput(row)));
@@ -834,7 +834,7 @@ describe("A28: entry-shape and schema violations each refuse, naming the entry a
   });
 
   it("reports every finding of a configuration at once, top level first, then by entry, each entry's in rule order", () => {
-    // `databse` for `database`, which is then missing; and a second entry's own fault. [CF-2]
+    // `databse` for `database`, which is then missing; and a second entry's own fault.
     const config = {
       entries: [
         coreEntry({ start: 0, config: { network: "preprod", node: "ws://n:9944", databse: { kind: "pglite", memory: true } } as never }),
@@ -865,7 +865,7 @@ describe("A28: entry-shape and schema violations each refuse, naming the entry a
   });
 });
 
-describe("CF-2: an unknown setting's message suggests the setting it is likely a misspelling of", () => {
+describe("an unknown setting's message suggests the setting it is likely a misspelling of", () => {
   /** The message of the one finding for `config` in stats's revision. */
   const message = (config: Record<string, unknown>) =>
     findingsOf(refusal(() => validateConfig(input(withEntry(stats.entry({ start: 0, config: config as never }))))))[0]
@@ -898,7 +898,7 @@ describe("CF-2: an unknown setting's message suggests the setting it is likely a
   });
 });
 
-describe("CF-3, CF-7: a lone surrogate outside the settings is found beside the rule its place breaks", () => {
+describe("a lone surrogate outside the settings is found beside the rule its place breaks", () => {
   const found = (config: unknown) => configFindings(input(config)).map(({ rule, path, entry, field }) => ({ rule, path, entry, field }));
 
   it("in a property beside entries", () => {
@@ -930,7 +930,7 @@ describe("CF-3, CF-7: a lone surrogate outside the settings is found beside the 
   });
 });
 
-describe("CF-3: findings are reported top level first, then by entry", () => {
+describe("findings are reported top level first, then by entry", () => {
   it("a top-level finding of a later rule comes before an entry's finding of an earlier rule", () => {
     const findings = configFindings(input({ entries: [stats.entry({ start: 10, stop: 9, config: { pollMs: 1 } })] }));
     expect(findings.map(({ rule, path }) => [rule, path])).toEqual([
@@ -940,7 +940,7 @@ describe("CF-3: findings are reported top level first, then by entry", () => {
   });
 });
 
-describe("A28 negative control: the validation without one rule loses exactly that rule's findings", () => {
+describe("negative control: the validation without one rule loses exactly that rule's findings", () => {
   it("has rows for every rule, each row refused by its own rule only", () => {
     expect(new Set(A28.map((row) => row.rule))).toEqual(new Set(CONFIG_RULES.map((rule) => rule.name)));
     for (const row of A28) {
@@ -971,7 +971,7 @@ describe("A28 negative control: the validation without one rule loses exactly th
   });
 });
 
-describe("L51: a renamed key of the core entry is one finding, renamed-setting, naming the new key (CF-4)", () => {
+describe("a renamed key of the core entry is one finding, renamed-setting, naming the new key", () => {
   /** The rule and path of each finding of `config` for a process of `side`. */
   const found = (config: unknown, side: ProcessSide = "public") =>
     configFindings(input(config, side)).map(({ rule, path }) => [rule, path]);
@@ -1023,7 +1023,7 @@ describe("L51: a renamed key of the core entry is one finding, renamed-setting, 
   });
 });
 
-describe("A28: absent fields take their declared defaults (CF-3, CF-4)", () => {
+describe("absent fields take their declared defaults", () => {
   it("a public core entry with the required fields only", () => {
     const checked = validateConfig(input({ entries: [CORE] }));
     expect(checked.entries[0]?.settings).toEqual({
@@ -1104,7 +1104,7 @@ describe("A28: absent fields take their declared defaults (CF-3, CF-4)", () => {
   });
 });
 
-describe("CF-3, CF-4: the validated configuration", () => {
+describe("the validated configuration", () => {
   it("gives every revision of the build's version its settings, each field's kind and its data fields", () => {
     const checked = validateConfig(
       input({ entries: [CORE, stats.entry({ start: 0, stop: 99, config: { pollMs: 1000, token: "t" } })] }),
@@ -1224,9 +1224,8 @@ describe("CF-3, CF-4: the validated configuration", () => {
     });
   });
 
-  it("does not validate a revision whose version is not the build's against this build's schema (CF-3)", () => {
+  it("does not validate a revision whose version is not the build's against this build's schema", () => {
     // The scenario "An upgrade that renames a setting": m 1.0.0 recorded { foo: 1 } from 1; the build carries 1.1.0.
-    // [CF-3]
     const checked = validateConfig(
       input({
         entries: [
@@ -1285,7 +1284,7 @@ describe("CF-3, CF-4: the validated configuration", () => {
   });
 });
 
-describe("A28: what needs the cursor (CF-3)", () => {
+describe("what needs the cursor", () => {
   /** `stats` 1.0.0 from 0 to 49 (earlier), 1.2.0 from 50 (the build's), and a scheduled 1.3.0 from 100. */
   const history = (earlier: Record<string, unknown> | undefined, scheduled: Record<string, unknown> | undefined) => ({
     entries: [
@@ -1334,7 +1333,7 @@ describe("A28: what needs the cursor (CF-3)", () => {
 
   const ROWS: readonly CursorRow[] = [
     {
-      name: "a scheduled versionEntry carrying a config (A28)",
+      name: "a scheduled versionEntry carrying a config",
       rule: "scheduled-config",
       config: () => history({ limit: 3 }, { limit: 1 }),
       cursor: 20n,
@@ -1416,7 +1415,7 @@ describe("A28: what needs the cursor (CF-3)", () => {
     }
   });
 
-  it("CF-3's scenario: scheduling a newer version from the current build", () => {
+  it("scheduling a newer version from the current build", () => {
     const checked = validateConfig(
       input({ entries: [CORE, STATS, versionEntry({ id: "stats", start: 50, version: "1.3.0" })] }),
     );
@@ -1436,7 +1435,7 @@ describe("A28: what needs the cursor (CF-3)", () => {
     });
   });
 
-  it("CF-3's scenario: an upgrade that renames a setting is accepted at the cursor", () => {
+  it("an upgrade that renames a setting is accepted at the cursor", () => {
     const checked = validateConfig(
       input({
         entries: [
@@ -1455,7 +1454,7 @@ describe("A28: what needs the cursor (CF-3)", () => {
   });
 });
 
-describe("CF-4, AE-6: a refusal never carries a secret's value", () => {
+describe("a refusal never carries a secret's value", () => {
   const PASSWORD = "pw-4-2-SECRET";
   const URL = `postgres://indexer:${PASSWORD}@db:5432/umbradb`;
   const PARTS = { kind: "postgres", host: "db", user: "indexer", password: PASSWORD, name: "umbradb" };
@@ -1496,7 +1495,7 @@ describe("CF-4, AE-6: a refusal never carries a secret's value", () => {
   });
 });
 
-describe("A28 through the loader: a configuration file refused by the validation names the file", () => {
+describe("through the loader: a configuration file refused by the validation names the file", () => {
   let directory: string;
 
   beforeAll(() => {

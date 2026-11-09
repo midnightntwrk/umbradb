@@ -1,21 +1,20 @@
 /**
  * The node-backed block source: the block source of the backbone part `core-block-fetch` (`./core-block-fetch.ts`).
  * It works over the node client (`src/node/`), the process's one node connection, which `core-chain` also publishes as
- * `node-client`. [CD-2, RN-1, RN-14; CORE-ARCH §4.4; design §3]
+ * `node-client`.
  *
  * **The finalized head.** At its first use the source subscribes to the finalized heads and the new heads, then reads
  * the head (`chain_getFinalizedHead`, and `chain_getHeader` for its height). From then on the finalized notifications
  * only raise it: a notification above the head raises it, and one at or below it is checked (see below). After a
  * reconnect (the client's `restarted`) the source reads the head again, rather than trusting notifications that may
  * have been lost. A head header's hash is computed from the header (`./header.ts`), since notifications carry none.
- * [IN-4]
  *
  * **Finality conflicts.** A finalized notification can carry a hash that differs from the finalized hash the source
  * knows at its height: the head's, one read by `chain_getBlockHash`, or, at or below the loop's cursor, the database's
  * (`QueueRunner.storedHash`). That fails the source with `finality-conflict`, because a finalized block never changes.
  * The failure rejects the loop's next call, so processing halts with that code. Before the loop runs (startup), a
  * notification at or below the cursor is compared only with what the source knows, because the startup checks already
- * compare the cursor's hash with the node's. [IN-3, IN-4; design §11]
+ * compare the cursor's hash with the node's.
  *
  * **The finalized prefetch.** While the loop runs, the source prepares the finalized heights from the loop's cursor +
  * 1 up to the lower of:
@@ -26,12 +25,11 @@
  * It never fetches or holds more than `prefetchWindow` heights above the cursor, and prepares `concurrency` of them at a
  * time. For each height it reads `chain_getBlockHash` (the finalized hash), then takes the queued block of that hash if
  * there is one, or else runs `chain_getBlock`, `on-fetch` and `on-parse` through the runner (`QueueRunner.prepare`).
- * [IN-4, IN-5, A80]
  *
  * The loop takes each prepared height (`prepared`) in order, so every height is still committed in its own
  * transaction. A queued block at the height with another hash is dropped, with everything queued above it
  * (`on-rollback`), and the finalized block is fetched. The heights look into the queue in height order, so such a drop
- * is one `on-rollback`, from the lowest. [RN-6]
+ * is one `on-rollback`, from the lowest.
  *
  * **The best-block queue.** For each new-heads notification above the finalized head (and the cursor), the source
  * fires `on-best-block`, fetches the block (`chain_getBlock`) and runs `on-fetch` and `on-parse` for it. Then:
@@ -40,30 +38,27 @@
  *   queued block above that common ancestor (one `on-rollback`, naming them lowest first), and fetches and parses the
  *   blocks between it and the new one.
  *
- * [IN-6]
- *
  * These calls are made without retries. Any error on a best block (a node error or timeout, a decode, a callback)
- * drops that block, which is processed again at finality. [IN-10]
+ * drops that block, which is processed again at finality.
  *
  * The queue holds at most `tipCap` blocks. While it is full, new best blocks are not queued and the source reports the
- * condition `finality-stall`. [IN-6, A81]
+ * condition `finality-stall`.
  *
  * A best block is queued only while the loop follows the head, that is, while the head is no more than
  * `prefetchWindow` above the cursor. During a catch-up the prefetch serves those heights, and the queue would hold
- * blocks far above the window. [Q129]
+ * blocks far above the window.
  *
  * When the finalized head rises to a height where the queue holds another hash, the queued blocks from there on are
  * dropped (`on-rollback`). Every queue change, including the prefetch taking a queued block, runs one at a time.
- * [IN-4, IN-6]
  *
  * **What `/status` shows** ({@link NodeBlockSource.nodeView}): the queue's length, and the best head the node last
  * announced. That is the height of each new-heads notification, taken before anything decides whether the block is
- * queued, so it is also shown during startup, during a catch-up and while the queue is full. [AE-5]
+ * queued, so it is also shown during startup, during a catch-up and while the queue is full.
  *
  * The finalized head the process reports is the head the source holds ({@link NodeBlockSource.latestHead}): each
  * finalized notification that raises it shows at once, while the loop is still in the batch of the head it read. That
  * read makes no node call and leaves the prefetch bound by the head the loop last read, so a head's `on-finalized`
- * still comes before its heights. [AE-3, AE-5, IN-5]
+ * still comes before its heights.
  *
  * **While the loop runs only.** The source runs callbacks only between the loop's `attach` and the function it returns;
  * when a run ends (stopped, halted, retried) the queue and the prefetch are dropped, and the next run starts afresh.
@@ -73,21 +68,21 @@
  * **Block 0** goes the same path: `chain_getBlockHash(0)`, `chain_getBlock`, its metadata read at its own hash
  * (`contentStateOf`), and its runtime from its `MNSV` digest. Its time is 0 when it has no `Timestamp::set`
  * (`./extrinsics.ts`). Its ledger path (the genesis state and the root at block 0) belongs to `core-ledger-state` and
- * `core-chain-events`; its cNight registrations are not read, since no core module consumes them. [IN-7]
+ * `core-chain-events`; its cNight registrations are not read, since no core module consumes them.
  *
  * **The items** `core-block-fetch` publishes for a block ({@link NodeBlockSource.blockItems}, `./items.ts`) come from
  * the block fetched, the ledger table (`selectLedgerVersion`), and the metadata of the runtime in its parent's state
  * (`RuntimeMetadata.forBlock`: one `state_getRuntimeVersion` per block, one `state_getMetadata` per runtime), which
- * decodes its extrinsics. Every call it makes is one the system is allowed to make. [LG-1, LG-2, LG-4, IN-8]
+ * decodes its extrinsics. Every call it makes is one the system is allowed to make.
  *
  * **A block's chain events** ({@link NodeBlockSource.blockEvents}, `./events.ts`): `System::Events` read with
  * `state_getStorage` at the block's own hash, for `core-chain-events`, which decodes them. For a queued best block they
- * are read without retries, like its other calls. [CD-4, IN-10]
+ * are read without retries, like its other calls.
  *
  * **The ledger's root and genesis state** ({@link NodeBlockSource.ledgerStateRoot}, {@link NodeBlockSource.genesisState},
  * `./ledger-source.ts`): `midnight_ledgerStateRoot` at a finalized block's hash and `system_properties.genesis_state`,
  * for `core-ledger-state`. Both use the client's retries, since `core-ledger-state` asks only for finalized heights, at
- * `on-compute`. [LG-15, IN-7]
+ * `on-compute`.
  *
  * **The roots' prefetch.** Once `core-ledger-state` has asked for a root in a run, the prefetch also asks for the root of
  * each finalized height it fetches itself (never a queued best block's), in a slot of its own after the block's take.
@@ -96,7 +91,7 @@
  * until the loop passes the height, so a block applied again (the restart after a refused eviction) asks no second
  * time. A root `on-compute` asks for before any prefetch did (a run's first heights, a block taken from the queue) is
  * asked at once, outside the slots as before, and kept the same way. A run that ends aborts all its roots' calls
- * through their `signal`, as it drops the prefetch. [IN-5, IN-9, LG-14]
+ * through their `signal`, as it drops the prefetch.
  */
 
 import { UmbraError } from "../../db/errors.js";
@@ -122,7 +117,7 @@ import { type BlockEventSource, systemEventsKey } from "./events.js";
 import type { BlockItemSource, CoreBlockItems } from "./items.js";
 import { readRuntimeMetadata, type RuntimeMetadataView } from "./metadata.js";
 
-/** How many finalized heights the prefetch fetches at once, unless given: its bound on concurrency. [IN-5] */
+/** How many finalized heights the prefetch fetches at once, unless given: its bound on concurrency. */
 export const DEFAULT_PREFETCH_CONCURRENCY = 8;
 
 /** What the node source is made from. */
@@ -131,10 +126,9 @@ export interface NodeSourceOptions {
   readonly client: NodeClient;
   /**
    * The prefetch window: the most heights above the cursor fetched or held (`prefetchWindow`, 64 by default).
-   * [IN-5, CF-4]
    */
   readonly prefetchWindow: number;
-  /** The queue's bound: the most best blocks queued (`tipCap`, 600 by default). [IN-6, CF-4] */
+  /** The queue's bound: the most best blocks queued (`tipCap`, 600 by default). */
   readonly tipCap: number;
   /** How many heights the prefetch fetches at once; {@link DEFAULT_PREFETCH_CONCURRENCY} unless given. */
   readonly concurrency?: number;
@@ -198,7 +192,7 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
   readonly #early: NodeHeader[] = [];
   readonly #waits = new Set<HeadWait>();
   readonly #subscriptions: NodeSubscription[] = [];
-  /** The finalized hashes read by height (`chain_getBlockHash`) above the cursor, for the finality check. [IN-4] */
+  /** The finalized hashes read by height (`chain_getBlockHash`) above the cursor, for the finality check. */
   readonly #finalized = new Map<bigint, Uint8Array>();
   /**
    * The first failure (a finality conflict, a finalized subscription's error, the close): every later call rejects
@@ -283,7 +277,7 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
   /**
    * The head the source holds now (see the module comment): read at its first use, raised by each finalized
    * notification and by the read after a reconnect; null before its first use. No node call, and none of
-   * {@link finalizedHead}'s effects. [AE-3, AE-5, IN-4]
+   * {@link finalizedHead}'s effects.
    */
   latestHead(): BlockRef | null {
     return this.#head ?? null;
@@ -417,7 +411,7 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
 
   /**
    * `block`'s chain events as the node stores them: `System::Events` in its own state, `state_getStorage` at its hash
-   * (`./events.ts`). A best block's are read without retries. Null when the state holds no value there. [IN-10]
+   * (`./events.ts`). A best block's are read without retries. Null when the state holds no value there.
    */
   async blockEvents(block: BlockRef): Promise<Uint8Array | null> {
     const best = this.#fetched.get(hexOf(block.hash))?.best ?? false;
@@ -426,7 +420,6 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
 
   /**
    * The node's ledger state root after `block`: `midnight_ledgerStateRoot` at its hash, with the client's retries.
-   * [LG-15]
    */
   async ledgerStateRoot(block: BlockRef): Promise<Uint8Array> {
     if (!this.#rootsWanted && this.#runner !== undefined) {
@@ -446,7 +439,7 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     return root;
   }
 
-  /** The genesis ledger state: `system_properties.genesis_state`, with the client's retries. [IN-7] */
+  /** The genesis ledger state: `system_properties.genesis_state`, with the client's retries. */
   async genesisState(): Promise<Uint8Array> {
     return genesisStateOf(await this.client.systemProperties());
   }
@@ -455,24 +448,24 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
 
   /**
    * The metadata `block`'s content is decoded with: the runtime in its parent's state (`forBlock`). A best block's is
-   * read without retries. [LG-4, IN-10]
+   * read without retries.
    */
   protected metadataOf(block: MetadataBlock, best: boolean): Promise<RuntimeMetadataEntry> {
     return (best ? this.#bestMetadata : this.#metadata).forBlock(block);
   }
 
-  /** The last height the prefetch prepares with the loop's cursor at `cursor` and the head at `head`. [IN-5] */
+  /** The last height the prefetch prepares with the loop's cursor at `cursor` and the head at `head`. */
   protected windowEnd(cursor: bigint, head: bigint): bigint {
     const end = cursor + BigInt(this.#window);
     return end < head ? end : head;
   }
 
-  /** The finalized subscription was made again after a reconnect, so the head is read again. [IN-4] */
+  /** The finalized subscription was made again after a reconnect, so the head is read again. */
   protected restarted(): void {
     void this.#readHead().catch((error: unknown) => this.#fail(error));
   }
 
-  /** Whether a queued block with the finalized hash at its height goes on with its items. It does. [IN-4, IN-6] */
+  /** Whether a queued block with the finalized hash at its height goes on with its items. It does. */
   protected usesQueued(_block: BlockRef): boolean {
     return true;
   }
@@ -500,14 +493,14 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     this.#subscriptions.push(
       await this.client.subscribeNewHeads({
         header: (header) => this.#onBest(header),
-        // A best block the client could not read is not queued. [IN-10]
+        // A best block the client could not read is not queued.
         error: () => undefined,
       }),
     );
     await this.#readHead();
   }
 
-  /** Reads the node's finalized head, at start and after a reconnect, and raises the head to it. [IN-4] */
+  /** Reads the node's finalized head, at start and after a reconnect, and raises the head to it. */
   async #readHead(): Promise<void> {
     const hash = await this.client.finalizedHead();
     const header = await this.client.header(hash);
@@ -720,7 +713,7 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
 
   /**
    * The queued block at `height` if it has the finalized hash `hash`, taken from the queue; a queued block there with
-   * another hash is dropped with everything queued above it (`on-rollback`). [IN-4]
+   * another hash is dropped with everything queued above it (`on-rollback`).
    */
   async #take(runner: QueueRunner, height: bigint, hash: Uint8Array): Promise<PreparedBlock | undefined> {
     const index = this.#queue.findIndex((queued) => queued.block.height === height);
@@ -740,7 +733,7 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     const index = this.#queue.findIndex((queued) => queued.block.height === head.height);
     if (index < 0 || sameBytes((this.#queue[index] as QueuedBlock).block.hash, head.hash)) return;
     const dropped = this.#queue.splice(index);
-    // The blocks are dropped whatever a callback does: an error on queued blocks drops them. [IN-10]
+    // The blocks are dropped whatever a callback does: an error on queued blocks drops them.
     await runner.rollback(dropped.map((entry) => entry.block)).catch(() => undefined);
   }
 
@@ -755,13 +748,13 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     }).catch(() => undefined);
   }
 
-  /** A new best block (see the module comment); any error drops it. [IN-10] */
+  /** A new best block (see the module comment); any error drops it. */
   async #bestBlock(runner: QueueRunner, header: NodeHeader): Promise<void> {
     const head = this.#head;
     const cursor = this.#cursor;
     const height = header.number;
     if (head === undefined || cursor === null || height <= head.height || height <= cursor) return;
-    // Queued only while the loop follows the head, not during a catch-up. [Q129]
+    // Queued only while the loop follows the head, not during a catch-up.
     if (head.height - cursor > BigInt(this.#window)) return;
     if (this.#best === null || height > this.#best) this.#best = height;
     const hash = headerHash(header);
@@ -781,13 +774,13 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
       live();
       await this.#place(runner, { block, items: prepared.items }, live);
     } catch {
-      // An error on a queued best block drops it, without retry; it is processed again at finality. [IN-10]
+      // An error on a queued best block drops it, without retry; it is processed again at finality.
     }
   }
 
   /**
    * Puts the best block `entry` into the queue: appended, or after the walk to the common ancestor. `live` throws once
-   * the loop's run ended. [IN-6]
+   * the loop's run ended.
    *
    * A block the finalized head passed meanwhile is queued too. Every later take of its height by the prefetch runs after
    * this, so the finalized hash there decides: the block is used, or dropped with `on-rollback`.
@@ -866,7 +859,7 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
 /**
  * The node source a process runs with: the runner's `source: (core) => …`, which `umbradb run` passes. It works over the
  * process's node client, with the `core` revision's `prefetchWindow` and `tipCap`. Throws when the process has no node
- * client (its `core` revision has no `node`). [CF-4, Q102]
+ * client (its `core` revision has no `node`).
  */
 export function nodeSourceOf(
   core: { readonly settings: unknown },

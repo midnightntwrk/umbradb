@@ -12,15 +12,14 @@ import { BACKENDS } from "../db/backends.js";
  * refuse makes startup fail, with the code, the module, the table or sequence, the column and its declared type. The
  * message is the one the contents hash gives for the same table, with the module named in front (the
  * `deterministic_postgresql` component's `databaseRefusals` and `refusalMessage`).
- * [A58, A145, DT-6, Q58, Q61, Q74, Q75]
  *
  * The check runs in the migration's own transaction, after its SQL and before its record. So a refused migration rolls
  * back like a failing one: nothing of it is applied or recorded, the module's `on-start-db` does not run, and the same
  * build with the migration fixed starts. Tables of earlier startups are checked again at every startup, after the
- * module's pending migrations and before its `on-start-db`. [A58, A145]
+ * module's pending migrations and before its `on-start-db`.
  *
  * Every expected code, place and phrase is written by hand from the determinism rules; the message is also compared
- * with the contents hash's for the same table, created outside the API. [DT-6, A58; design §4]
+ * with the contents hash's for the same table, created outside the API.
  */
 
 const MODULE: SchemaModule = {
@@ -114,7 +113,7 @@ const CASES: readonly Case[] = [
     says: [SERIAL, SEQUENCE_REASON],
   },
   {
-    what: "a CURRENT_TIMESTAMP default in a bigint column (DT-6's scenario)",
+    what: "a CURRENT_TIMESTAMP default in a bigint column",
     sql: "CREATE TABLE m.t (k bigint PRIMARY KEY, at bigint DEFAULT extract(epoch from CURRENT_TIMESTAMP)::bigint)",
     code: "non-deterministic-column",
     place: { table: "t" },
@@ -203,7 +202,7 @@ function outcome(run: Promise<unknown>): Promise<unknown> {
   );
 }
 
-describe.each(BACKENDS)("A58: startup refuses what the contents hash refuses, on $name (DT-6)", (backend) => {
+describe.each(BACKENDS)("startup refuses what the contents hash refuses, on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop());
 
@@ -264,7 +263,7 @@ describe.each(BACKENDS)("A58: startup refuses what the contents hash refuses, on
       expect(error.message.startsWith(`${c.code}: module "m", ${name}${column}: `), error.message).toBe(true);
       for (const phrase of c.says) expect(error.message).toContain(phrase);
       expect(error.message).toContain(" Instead, ");
-      // The same message as the contents hash's for the same table, with the module named in front. [DT-6]
+      // The same message as the contents hash's for the same table, with the module named in front.
       const hash = await hashRefusal(c.sql);
       expect(hash.reason).toBe(c.code);
       expect(error.message).toBe(hash.message.replace(`${c.code}: `, `${c.code}: module "m", `));
@@ -285,7 +284,7 @@ describe.each(BACKENDS)("A58: startup refuses what the contents hash refuses, on
     }, 60_000);
   }
 
-  it("A58 controls: immutable defaults, a stored generated column and every allowed type start (A145's bigint and text times too)", async () => {
+  it("controls: immutable defaults, a stored generated column and every allowed type start (the bigint and text times too)", async () => {
     const { db } = await backend.database("SELECT 1");
     const sql = `CREATE TABLE m.t (
       k bigint PRIMARY KEY, a text DEFAULT 'abc', b bigint DEFAULT 1 + 2, c text DEFAULT lower('X'),
@@ -296,7 +295,7 @@ describe.each(BACKENDS)("A58: startup refuses what the contents hash refuses, on
     expect(await db.read((read) => read.query("SELECT to_regclass('m.t') IS NOT NULL AS made"))).toEqual([{ made: true }]);
   }, 60_000);
 
-  it("A145: refuses each date and time type but timestamptz with \"use timestamptz, written with Z\"", async () => {
+  it("refuses each date and time type but timestamptz with \"use timestamptz, written with Z\"", async () => {
     for (const [type, declared] of [
       ["timestamp", "timestamp without time zone"],
       ["date", "date"],

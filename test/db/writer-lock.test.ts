@@ -28,7 +28,7 @@ import { connectionOfUrl } from "./connection.js";
  * Exactly one process writes each database. This file holds the halves that run in this process (and the
  * single-writer test, which also starts PGlite processes); the PGlite signal and race halves are in
  * `pglite-writer-processes.test.ts`, the committed negative controls in `writer-lock.negative-control.test.ts` and
- * there. [A17 FAULT, DB-11]
+ * there.
  *
  * PostgreSQL: the writer holds `pg_try_advisory_lock(3, hashtext('umbradb-writer'))` on its writer session. It takes
  * the lock when the session opens (at the writer's start, or before the first transaction), and again on every new
@@ -70,14 +70,14 @@ setTimeout(() => {
 }, 50);
 `;
 
-describe("A17 — one writer per database (DB-11)", () => {
-  it("[[db.writer-lock.single-writer]] A17: a second writer refuses with writer-lock-held, on PostgreSQL and on PGlite", async () => {
+describe("one writer per database", () => {
+  it("[[db.writer-lock.single-writer]] a second writer refuses with writer-lock-held, on PostgreSQL and on PGlite", async () => {
     await expectSecondPostgresWriterRefused(await server.createDatabase());
     await expectSecondPgliteProcessRefused(join(workDirectory(), "pgdata"));
   }, 180_000);
 });
 
-describe("the PostgreSQL writer lock (DB-11)", () => {
+describe("the PostgreSQL writer lock", () => {
   it("holds the lock on the writer's session from the writer's start; the read sessions hold none", async () => {
     const database = await server.createDatabase();
     const db = database.open();
@@ -196,7 +196,7 @@ describe("the PostgreSQL writer lock (DB-11)", () => {
   });
 });
 
-describe("the PGlite operating-system lock (DB-11, owner decision Q50)", () => {
+describe("the PGlite operating-system lock", () => {
   it("takes <data directory>.lock.sqlite before PGlite opens, and refuses a second opening in this process however the directory is written", async () => {
     const work = workDirectory();
     const dataDir = join(work, "pgdata");
@@ -221,7 +221,7 @@ describe("the PGlite operating-system lock (DB-11, owner decision Q50)", () => {
     expect(pgliteLockFile(`${work}/new/.`)).toBe(expected);
     expect(pgliteLockFile(`${work}/x/../new`)).toBe(expected);
     expect(pgliteLockFile(`${work}/new/`)).toBe(expected);
-    // A relative path reaches the lock only resolved against the process's cwd first (G8): here it is refused.
+    // A relative path reaches the lock only resolved against the process's cwd first: here it is refused.
     expect(() => pgliteLockFile(relative(process.cwd(), join(work, "new")))).toThrow(
       expect.objectContaining({ code: "invalid-configuration", details: { parameter: "database", reason: "relative-path" } }),
     );
@@ -258,7 +258,7 @@ describe("the PGlite operating-system lock (DB-11, owner decision Q50)", () => {
     expect(existsSync(join(dataDir, "PG_VERSION"))).toBe(false);
   }, 60_000);
 
-  it("waits out a starter's momentary SHARED lock instead of refusing (decision record Q92)", async () => {
+  it("waits out a starter's momentary SHARED lock instead of refusing", async () => {
     // What a racing starter does inside its own `BEGIN EXCLUSIVE`: hold SHARED on the lock file for an instant. Here a
     // process holds it with a read transaction for 50 ms, below the busy timeout; with a busy timeout of 0 the lock
     // would be refused although nobody holds it.

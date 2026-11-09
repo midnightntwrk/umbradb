@@ -3,7 +3,7 @@
  * block's transactions with.
  *
  * **The table** `core_block_parsed.transactions (height, tx_index) → tx_hash, kind, size` has one row per
- * transaction. It is append-only and range-partitioned by height (`../height-partitions.ts`). [design §10]
+ * transaction. It is append-only and range-partitioned by height (`../height-partitions.ts`).
  */
 
 import type { BlockWriteHandle } from "../../db/api.js";
@@ -13,7 +13,7 @@ import { heightPartitionsSql } from "../height-partitions.js";
 /** Its table: one row per transaction. */
 export const TRANSACTIONS_TABLE = "core_block_parsed.transactions";
 
-/** `core-block-parsed`'s migrations: applied once and recorded under `core-block-parsed`; they never change. [DB-9] */
+/** `core-block-parsed`'s migrations: applied once and recorded under `core-block-parsed`; they never change. */
 export const CORE_BLOCK_PARSED_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
   {
     id: "001",

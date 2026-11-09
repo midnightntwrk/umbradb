@@ -3,7 +3,7 @@
  * and writes the digests with.
  *
  * **Its tables**, created by its migration as the writer's login (`core_digest` is a reserved schema, one of UmbraDB's
- * own parts'): [DB-8; design §10]
+ * own parts'):
  * - `core_digest.tables (schema, table) → (height, digest)`: a table's row is set in the block that changes it, and
  *   kept as it is otherwise;
  * - `core_digest.checkpoints (height, schema, table) → digest`.
@@ -18,7 +18,7 @@ import { SHADOW_SCHEMA } from "../../db/change-capture.js";
 
 /**
  * `core-digest`'s migrations: applied once, in order, and recorded under `core-digest`. They never change, since each
- * checksum is fixed by the databases that applied it. [DB-9]
+ * checksum is fixed by the databases that applied it.
  */
 export const CORE_DIGEST_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
   {

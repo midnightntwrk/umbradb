@@ -15,10 +15,9 @@ import { concatBytes, fromHex } from "./cbor-decoder.js";
  * A table's changes and its chained digest, as pure functions (`src/determinism/digest.ts`):
  * - a table's `changes at h` is the canonical CBOR array of one change per primary key the block wrote, in
  *   primary-key order: `["insert", new row]`, `["delete", old row]` or `["update", new row]`, and nothing for a key
- *   that ends as it began; [DT-4]
+ *   that ends as it began;
  * - its digest at h is `SHA-256(previous ‖ CBOR(h) ‖ changes at h)`, with 32 zero bytes before its first change;
- *   [DT-5]
- * - checkpoints fall at every height h with h mod the build's interval = 0. [DT-5]
+ * - checkpoints fall at every height h with h mod the build's interval = 0.
  *
  * Every expected byte below is written by hand from RFC 8949 (a 1-element array is `0x81`, a text of 6 bytes `0x66`, the
  * integer 7 `0x07`, 24 `0x18 0x18`, 14,400 `0x19 0x38 0x40`), and every expected digest is computed here with
@@ -33,12 +32,12 @@ const sha256 = (...parts: Uint8Array[]): Uint8Array => new Uint8Array(createHash
 const INSERT = hex("66 696e73657274");
 const DELETE = hex("66 64656c657465");
 const UPDATE = hex("66 757064617465");
-/** The row `[1, "a"]` and `[1, "b"]`, `[2, "b"]` as the canonical encoder writes them under `bigint, text`. [DT-1] */
+/** The row `[1, "a"]` and `[1, "b"]`, `[2, "b"]` as the canonical encoder writes them under `bigint, text`. */
 const ROW_1A = hex("82 01 6161");
 const ROW_1B = hex("82 01 6162");
 const ROW_2B = hex("82 02 6162");
 
-describe("DT-4: a table's changes at a height", () => {
+describe("a table's changes at a height", () => {
   it("writes an inserted, a deleted and an updated key as [kind, row], in the order given, with the array's head", () => {
     const touched: TouchedRow[] = [
       { before: null, after: [1n, "a"] },
@@ -85,14 +84,14 @@ describe("DT-4: a table's changes at a height", () => {
   });
 
   it("compares rows by their canonical encoding: equal values written differently are no change", () => {
-    // A safe integer as a number or a bigint, and jsonb keys in another order, encode the same. [DT-1]
+    // A safe integer as a number or a bigint, and jsonb keys in another order, encode the same.
     expect(tableChanges(TYPES, [{ before: [1, "a"], after: [1n, "a"] }]).count).toBe(0);
     const doc = ["bigint", "jsonb"] as const;
     expect(tableChanges(doc, [{ before: [1n, { b: 1, a: 2 }], after: [1n, { a: 2, b: 1 }] }]).count).toBe(0);
     expect(tableChanges(doc, [{ before: [1n, { a: 2 }], after: [1n, { a: 3 }] }]).count).toBe(1);
   });
 
-  it("encodes each row as DT-1's encodeRow does, so a value DT-1 refuses fails the changes too", () => {
+  it("encodes each row as encodeRow does, so a value encodeRow refuses fails the changes too", () => {
     const row = [7n, "x"];
     expect(tableChanges(TYPES, [{ before: null, after: row }]).bytes).toEqual(
       concatBytes(hex("81 82"), INSERT, encodeRow(row, TYPES)),
@@ -101,7 +100,7 @@ describe("DT-4: a table's changes at a height", () => {
   });
 });
 
-describe("DT-5: a table's digest at a height, chained", () => {
+describe("a table's digest at a height, chained", () => {
   const CHANGES = concatBytes(hex("81 82"), INSERT, ROW_1A);
 
   it("is SHA-256(32 zero bytes ‖ CBOR(h) ‖ changes at h) for a table's first change", () => {
@@ -130,7 +129,7 @@ describe("DT-5: a table's digest at a height, chained", () => {
   });
 });
 
-describe("DT-5: checkpoint heights", () => {
+describe("checkpoint heights", () => {
   it("are the heights h with h mod the interval = 0, genesis included", () => {
     const heights = [0n, 1n, 14_399n, 14_400n, 14_401n, 28_800n, 43_199n].filter((h) => isCheckpointHeight(h, 14_400n));
     expect(heights).toEqual([0n, 14_400n, 28_800n]);

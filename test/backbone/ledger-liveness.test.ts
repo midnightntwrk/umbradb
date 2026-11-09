@@ -17,18 +17,18 @@ import { ledgerScenario } from "./ledger-tapes.js";
  * test package whose apply of block 2 spends 60 s in a synchronous loop, in the worker thread
  * (`test/ledger/fixtures/ledger-test-loader.ts`). The endpoints are started with `admin` and a port of their own
  * (`127.0.0.1:0`). `/health/live` answers 200 throughout and every endpoint answers within 1 s. `livenessTimeoutMs` is
- * 5,000, so a main thread held for more than 5 s would show. [A101, LG-10, AE-2]
+ * 5,000, so a main thread held for more than 5 s would show.
  *
  * Committed negative control: the same package on the main thread (`inThreadLedger`, ledger work moved off the worker)
  * holds the heartbeat for 60 s, and `/health/live` answers 503 within the step, so the check fails. Runs on PGlite: the
- * check is about the threads, not the stored data. [A101]
+ * check is about the threads, not the stored data.
  */
 
 const STEP_MS = 60_000;
 const SLOW: TestLoaderData = { slowAt: { height: "2", ms: STEP_MS } };
 const backend = PROCESS_BACKENDS.find((candidate) => candidate.kind === "pglite") as ProcessBackend;
 
-/** The expectation of each endpoint during the step: live, and the others answering as they may. [A101] */
+/** The expectation of each endpoint during the step: live, and the others answering as they may. */
 const EXPECTED: Readonly<Record<string, readonly number[]>> = {
   "/health/live": [200],
   "/health/ready": [200, 503],
@@ -78,11 +78,11 @@ async function timed(ledger: () => LedgerHost, holdOf: () => Promise<Hold>): Pro
 
 const holdOfText = (hold: { start: string; end: string }): Hold => ({ start: BigInt(hold.start), end: BigInt(hold.end) });
 
-describe("A101: a long ledger step runs in the worker, and the admin endpoints stay live (LG-10)", () => {
+describe("a long ledger step runs in the worker, and the admin endpoints stay live", () => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("A101: during a 60 s ledger step in the worker, /health/live answers 200 and every endpoint answers within 1 s", async () => {
+  it("during a 60 s ledger step in the worker, /health/live answers 200 and every endpoint answers within 1 s", async () => {
     let worker: LedgerHost | undefined;
     const { records, hold } = await timed(
       () => (worker = startLedgerWorker({ loader: new URL("../ledger/fixtures/ledger-test-loader.ts", import.meta.url), loaderData: SLOW })),
@@ -92,7 +92,7 @@ describe("A101: a long ledger step runs in the worker, and the admin endpoints s
     expect(timingProblems(records, hold, EXPECTED)).toEqual([]);
   }, STEP_MS * 4);
 
-  it("negative control: the same step on the main thread fails A101 (/health/live answers 503 within it)", async () => {
+  it("negative control: the same step on the main thread fails (/health/live answers 503 within it)", async () => {
     const { records, hold } = await timed(
       () => inThreadLedger({ load: (ledger, options) => loadLedger(ledger, options, SLOW) }),
       async () => holdOfText(probe().hold),

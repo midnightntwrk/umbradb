@@ -28,13 +28,13 @@ import { Client } from "../library/mounted-fixtures.js";
  * database whose reads see height 7: the fetch-style handler's and the channel connection's edges that the processes'
  * tests do not reach — a body whose stream fails, an answer with no body, a carrier that throws in each of its members,
  * a `bufferedAmount` whose getter or call throws ending the connection (a carrier that cannot tell what it holds cannot
- * be held to the limit; issue 00068), one absent being no limit, a carrier without `terminate` — and the lifecycle's
- * and admin's fetch-style answers. [LM-11, RN-15, RN-16, LM-5]
+ * be held to the limit), one absent being no limit, a carrier without `terminate` — and the lifecycle's
+ * and admin's fetch-style answers.
  *
  * A client's malformed message — any JSON value where an id or a field is expected, objects whose conversion to text
  * throws among them — is answered `invalid-request` and the connection goes on, on each carrier of the protocol: a
  * host's channel (the engine's `api.connect`), the handlers mounted in a host's server (`api.upgrade`) and the listener
- * (`listen.api`); and, as a property, on the session itself. [LM-4, LM-10, RN-15]
+ * (`listen.api`); and, as a property, on the session itself.
  */
 
 const read: ReadHandle = Object.freeze({ height: 7n, query: async () => [] }) as unknown as ReadHandle;
@@ -125,7 +125,7 @@ function unreadableAmount(kind: "getter" | "method") {
   return { channel, state };
 }
 
-describe("the module API's session logic (LM-11)", () => {
+describe("the module API's session logic", () => {
   it("the fetch-style handler: a body whose stream fails is refused 400; an answer without a body has none; the core's headers replace a module's own", async () => {
     const fetch = moduleApiFetch(api(new Set()), { core: coreHeaders("0xhash") });
     const failing = new Request("http://module-api/named", {
@@ -210,7 +210,7 @@ describe("the module API's session logic (LM-11)", () => {
   });
 
   it.each(["getter", "method"] as const)(
-    "a channel whose bufferedAmount %s throws has ended: nothing thrown into the carrier's listener or out of a module's emit, nothing sent after, closed once and its subscriptions unsubscribed after the emit (issue 00068)",
+    "a channel whose bufferedAmount %s throws has ended: nothing thrown into the carrier's listener or out of a module's emit, nothing sent after, closed once and its subscriptions unsubscribed after the emit",
     async (kind) => {
       const rules = connectionRules({});
       // The answer to a client's message, inside the carrier's own message listener.
@@ -295,7 +295,7 @@ describe("the module API's session logic (LM-11)", () => {
 /** Values a client sends where an id or a field is expected whose conversion to text throws (`String(value)`). */
 const POISONED: readonly unknown[] = [{ toString: null }, { toString: {}, valueOf: {} }, [{ toString: null }]];
 
-/** The messages of a malformed client, then a valid `subscribe`, and the answers each gets, in order. [LM-4, LM-10] */
+/** The messages of a malformed client, then a valid `subscribe`, and the answers each gets, in order. */
 const MALFORMED_CLIENT: readonly { readonly sent: unknown; readonly answer: unknown }[] = [
   ...POISONED.map((id) => ({
     sent: { type: "unsubscribe", id },
@@ -318,7 +318,7 @@ const MALFORMED_CLIENT: readonly { readonly sent: unknown; readonly answer: unkn
   { sent: { type: "subscribe", id: "after", name: "feed" }, answer: { type: "subscribed", id: "after" } },
 ];
 
-describe("a subscription client's malformed message is answered invalid-request, never thrown (LM-4, LM-10)", () => {
+describe("a subscription client's malformed message is answered invalid-request, never thrown", () => {
   it("over a host's channel (api.connect): each answered, the connection goes on", async () => {
     const [mine, peer] = channelPair();
     const answers: unknown[] = [];

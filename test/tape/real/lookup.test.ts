@@ -20,7 +20,7 @@ import {
  * no such file — reported absent with the tape's name as the reason, which `tapeTest` turns into Vitest's skip
  * (`real-tapes.negative-control.test.ts` checks the skip as the reporter shows it). The committed manifest
  * (`test/tape/real/manifest.json`) names each tape's network, range, SHA-256, size, source endpoint, the node version
- * it reported and the day it was recorded. [Q130; acceptance's tape note]
+ * it reported and the day it was recorded.
  */
 
 const RECORDS: readonly TapeRecord[] = [
@@ -54,7 +54,7 @@ afterEach(() => {
   rmSync(directory, { recursive: true, force: true });
 });
 
-describe("findTape: where a test finds its recorded tape (Q130)", () => {
+describe("findTape: where a test finds its recorded tape", () => {
   it("reports the tape absent, naming it, when UMBRADB_TAPES is not set", () => {
     const tape = entry();
     for (const unset of [undefined, ""]) {

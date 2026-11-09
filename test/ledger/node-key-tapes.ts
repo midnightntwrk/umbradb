@@ -15,9 +15,8 @@ import { byReference, walkInFreshInstance } from "./package-keys.js";
  * `src/ledger/node-key.ts` on a recorded tape (`UMBRADB_TAPES`; the test skipped by name without its tape): every node
  * the ledger package writes from genesis to the tape's end, and every node embedded in those nodes, has the key the
  * package gives it. One test file per tape (`./node-key-tape-*.test.ts`), so that the three replays run side by side.
- * [R29, LG-11]
  *
- * The tape is replayed from genesis through the process on PGlite with the ledger's core modules (as the A99 replays of
+ * The tape is replayed from genesis through the process on PGlite with the ledger's core modules (as the replays of
  * `test/backbone/ledger-state.test.ts` run it), its ledger worker's every flushed batch recorded. Then:
  *
  * - **every row the process writes**, each node of each batch, has the key the package flushed it under:
@@ -201,7 +200,7 @@ export function nodeKeyTapeTest(name: NodeKeyTape): void {
   const devnet = name === "devnet-v8-v9-0-235";
   tapeTest(
     name,
-    `R29: on ${name}, every row written from genesis${devnet ? " across the v8 → v9 upgrade" : ""}, and every node embedded in one, has the key the package gives it`,
+    `on ${name}, every row written from genesis${devnet ? " across the v8 → v9 upgrade" : ""}, and every node embedded in one, has the key the package gives it`,
     (found) => checkTape(found, devnet ? devnetSettings(found) : { network: found.tape.network }, WALK_EVERY[name]),
     { timeoutMs: REPLAY_MS + 1_800_000 },
   );

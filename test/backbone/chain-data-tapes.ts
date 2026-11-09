@@ -27,7 +27,7 @@ import { type ChainBlock, chainOf, hex, ledgerTransaction, opening } from "./fet
 /**
  * The synthetic tapes of the chain-data process tests (`chain-data.test.ts`, `chain-data.negative-control.test.ts`),
  * in the node's answer shapes (`./fetch-fixtures.ts`, `./events-fixtures.ts`). Each comes with what the database must
- * then hold: every event's row, and every transaction's row and outcome. [A91, A92, A93]
+ * then hold: every event's row, and every transaction's row and outcome.
  *
  * The transactions are real ledger v9 transactions (`test/ledger/adapter-fixtures.ts`: proof-erased zswap outputs,
  * unproven deploys, `DistributeReserve` and `PayBlockRewardsToTreasury`), so the real adapter parses them. Their hash
@@ -236,7 +236,7 @@ const transaction = transactionSpec;
 
 /**
  * The events range: blocks 1–6 from S = 1. It has events under every phase, of five pallets, with topics, a `u128` and
- * a tuple sequence; an empty `Events` value (block 3), none (block 4), and 41 events in one block (block 5). [A91]
+ * a tuple sequence; an empty `Events` value (block 3), none (block 4), and 41 events in one block (block 5).
  */
 export function a91RangeScenario(): Scenario {
   const remark = [remarkExtrinsic()];
@@ -263,7 +263,7 @@ export function a91RangeScenario(): Scenario {
 
 /**
  * The runtimes of the runtime-upgrade scenario: 1_000_000 (v8 on preprod, 2.0's layout) builds 1 to U = 3; 2_000_000
- * (2.1's layout) builds from F = 4. [A91]
+ * (2.1's layout) builds from F = 4.
  */
 export const OLD_RUNTIME = eventsRuntime(1_000_000, V2_0);
 export const NEW_RUNTIME = eventsRuntime(2_000_000, V2_1);
@@ -273,7 +273,7 @@ export const U = 3n;
  * The runtime upgrade. U's events are the old runtime's: its `CodeUpdated` has no fields, where the new runtime's has a
  * hash. F's events are the new runtime's (a `CodeUpdated { hash }` under `Initialization`, as a migration might write).
  * The tape answers the parent's-state reads the module makes and, for the negative control, `state_getMetadata` at
- * each block's own hash. [A91]
+ * each block's own hash.
  */
 export function a91UpgradeScenario(): Scenario {
   const remark = [remarkExtrinsic()];
@@ -300,7 +300,7 @@ export function a91UpgradeScenario(): Scenario {
 
 /**
  * The parse scenario. Block 1 holds regular R1 (extrinsic 1), a system transaction S applied during a governance
- * extrinsic (2), and regular R2 (3); they are stored as 0 = R1, 1 = S, 2 = R2. Block 2 holds none. [A92]
+ * extrinsic (2), and regular R2 (3); they are stored as 0 = R1, 1 = S, 2 = R2. Block 2 holds none.
  */
 export function a92Scenario(): Scenario {
   const { regular: [r1, r2], system: [s] } = ledgerTransactions(2, 1) as { regular: [Uint8Array, Uint8Array]; system: [Uint8Array] };
@@ -320,7 +320,7 @@ export function a92Scenario(): Scenario {
 
 /**
  * The parse scenario's block 0: S0, R0a, a remark and R0b in its body, no events, no `Timestamp::set`. They are stored
- * as 0 = S0, 1 = R0a, 2 = R0b. [A92]
+ * as 0 = S0, 1 = R0a, 2 = R0b.
  */
 export function a92GenesisScenario(): Scenario {
   const { regular: [ra, rb], system: [s0] } = ledgerTransactions(2, 1) as { regular: [Uint8Array, Uint8Array]; system: [Uint8Array] };
@@ -338,7 +338,7 @@ export function a92GenesisScenario(): Scenario {
  * The outcomes scenario. Block 1 holds A (extrinsic 1, `TxApplied`), a failing remark (2), B (3, `TxPartialSuccess`),
  * C (4, `ExtrinsicFailed`) and a system transaction at finalization; their outcomes are success, partial, failure,
  * success. The remark's `ExtrinsicFailed` comes before B's outcome, so an outcome taken by its place among the events
- * goes wrong. [A93]
+ * goes wrong.
  */
 export function a93Scenario(): Scenario {
   const { regular: [a, b, c], system: [s] } = ledgerTransactions(3, 1) as { regular: [Uint8Array, Uint8Array, Uint8Array]; system: [Uint8Array] };

@@ -1,7 +1,6 @@
 name: Bench smoke guard (non-gating)
 
-# COARSE, ORDER-OF-MAGNITUDE benchmark regression smoke guard (G14, roadmap "coarse gate now";
-# openspec/changes/v1.0.0-perf-baseline design.md §5). This workflow is DELIBERATELY NOT a required
+# COARSE, ORDER-OF-MAGNITUDE benchmark regression smoke guard. This workflow is DELIBERATELY NOT a required
 # merge gate and is EXPLICITLY NON-RELEASE-GATING: `bench/smoke.ts` flags a >10x p99 move versus the
 # committed baseline as a WARNING and exits 0 — it never fails the build on a calibrated performance
 # number. The step is additionally marked `continue-on-error: true` as belt-and-suspenders. The

@@ -2,29 +2,28 @@
  * The runner's side of the admin endpoints: what a process (`../runner/process.ts`, the engine) runs on its main thread
  * for them. That is the heartbeat, the publication of `status()`, the fact reads, the admin listener's life, and the
  * answers of the handler a library host mounts. Every process has it; the engine's admin port adds the listener.
- * [AE-1, AE-2, AE-3, AE-6, LM-5; CORE-ARCH §4.18; design §1, §5.3]
  *
  * - **From the engine's start on:** the heartbeat ticks every second (`../runner/heartbeat.ts`), and each tick publishes
  *   the snapshot of `status()` (`./snapshot.ts`): it reads the facts that may have changed, and sends the listener the
  *   snapshot when it has changed. So does every step the runner reports: startup's end, processing's end, and the start
  *   of the stop ({@link ProcessAdmin.follow}, {@link ProcessAdmin.publish}). Without a listener the heartbeat's timer is
- *   `unref()`ed, so it never keeps a library host's event loop alive. [AE-2, LM-5, L61]
+ *   `unref()`ed, so it never keeps a library host's event loop alive.
  * - **The mounted handler** ({@link ProcessAdmin.answer}, written by `./mounted.ts`) answers from the engine's start
  *   on, on the host's thread: the snapshot built at the request from what the process holds in memory, never a database
  *   read; `/health/live` the host thread's (`core-health`'s mounted endpoint: 200, `thread: "host"`). Until the
  *   configuration is validated `/config` holds the build only and `/status`'s `instance.role` is null; after the
- *   process has closed it answers from its last snapshot. [AE-1, AE-5, LM-4, LM-5]
+ *   process has closed it answers from its last snapshot.
  * - **The configuration**, once validated ({@link ProcessAdmin.validated}): the process revision's liveness timeout,
  *   readiness lag, redaction and side. A refusal before that is shown redacted by the configuration's secrets as loaded
- *   ({@link ProcessAdmin.refusedWith}). [AE-5, AE-6]
+ *   ({@link ProcessAdmin.refusedWith}).
  * - **The listener** starts as soon as the plan gives its address. {@link ProcessAdmin.serve} runs once the
  *   process's `core` revision and its network plan are known and before the database opens. It listens where the plan
  *   says (the command's `listen.admin`, by default `0.0.0.0:8081`), with that revision's liveness timeout, readiness lag
  *   and redaction. A listener that cannot listen refuses startup (with Node.js's error, as the runner's
- *   `listen-failed`). [AE-1, AE-2, CF-4, Q102, Q115, LM-3]
+ *   `listen-failed`).
  * - **Never before that:** a startup refused earlier, by the configuration itself, has no validated address. It ends
  *   the process with no listener, and the refusal appears in its log only. An earlier design, which listened on an
- *   address read before validation, was dropped for this. [AE-1, Q127, Q137 B]
+ *   address read before validation, was dropped for this.
  * - **What `/status` shows besides `status()`**:
  *   - the process's side and `instanceId`, and its revision's `tipCap`;
  *   - its private side as the process gives it at each snapshot ({@link ProcessAdminOptions.privateSide}: the core's
@@ -36,10 +35,10 @@
  *     database with its revisions and its tables' rows of `core_digest.tables`. The main thread reads these from the
  *     process's database, at most one read at a time, at a publication after `opened` or a commit, so neither the
  *     worker nor a mounted request reads anything. A commit during a read marks the facts stale again, and the read's
- *     end publishes, so the next read starts at once. [AE-5, PP-9, DT-5, L61]
+ *     end publishes, so the next read starts at once.
  * - **At `stop()`**, after the database has closed, or when a refusal of the configuration ended the process:
  *   {@link ProcessAdmin.close} ends the heartbeat and the listener's thread. Nothing of it is left to keep Node.js
- *   alive; the mounted handler goes on answering from the snapshot taken then. [LM-5]
+ *   alive; the mounted handler goes on answering from the snapshot taken then.
  */
 
 import type { ProcessSide } from "../config/core-settings.js";
@@ -79,27 +78,27 @@ export interface ProcessAdminOptions {
   readonly start?: AdminStarter;
   /**
    * Where the listener's thread writes its standard output and standard error, given to the starter: the process's log,
-   * or `"inherit"` for `umbradb run`. [LM-2, L4, L55]
+   * or `"inherit"` for `umbradb run`.
    */
   readonly output?: WorkerOutput;
   /**
    * The process's side, the instance role `/status` shows until {@link ProcessAdmin.validated} takes it from the
-   * validated configuration: none (null) unless given. [CF-4, AE-5, LM-5]
+   * validated configuration: none (null) unless given.
    */
   readonly side?: ProcessSide;
   /**
    * The process's private side now, asked at each snapshot: on the core its private instances, on a private process
-   * whether it runs in lockstep; none unless given. [PP-9, AE-5]
+   * whether it runs in lockstep; none unless given.
    */
   readonly privateSide?: () => PrivateSideFacts;
   /**
    * The process's node besides `status()`, asked at each snapshot: the best head the node announced last, its
-   * connection's state, the best-block queue's length; the three null unless given. [AE-5]
+   * connection's state, the best-block queue's length; the three null unless given.
    */
   readonly node?: () => NodeFacts;
   /**
    * The process's network as `/config` shows it, asked at each snapshot: its plan's modes and, for a library process,
-   * its addresses as bound (`withNetwork`); none before the plan, or unless given. [LM-3, AE-5]
+   * its addresses as bound (`withNetwork`); none before the plan, or unless given.
    */
   readonly network?: () => NetworkShown | null;
   /** The negative controls' and the fact-read tests' changes ({@link AdminSeams}); none unless given. */
@@ -108,24 +107,24 @@ export interface ProcessAdminOptions {
 
 /**
  * The tests' changes of admin, none of which a host's process takes: a hold in each fact read, and the negative
- * controls' admin. [L61, L65]
+ * controls' admin.
  */
 export interface AdminSeams {
   /**
    * Awaited once a fact read's queries returned and before the read ends, so that a test lands a commit during a read
-   * (the follow-up read then reads it). [L61]
+   * (the follow-up read then reads it).
    */
   readonly factsRead?: () => Promise<void>;
-  /** The negative control's fact reads: a commit that lands during a read is forgotten when the read ends. [L61] */
+  /** The negative control's fact reads: a commit that lands during a read is forgotten when the read ends. */
   readonly forgetCommitsDuringRead?: true;
   /**
    * The negative control's publication: none without a listener, the fact reads with it — `publish()` returning before
-   * them when nothing listens, as before mounted admin. [L61]
+   * them when nothing listens, as before mounted admin.
    */
   readonly publishOnlyWithListener?: true;
-  /** The negative control's heartbeat: its timer keeps Node.js running with no listener. [L61] */
+  /** The negative control's heartbeat: its timer keeps Node.js running with no listener. */
   readonly heartbeatKeepsAlive?: true;
-  /** The negative control's mounted answers, in place of the mounted route table's. [L65] */
+  /** The negative control's mounted answers, in place of the mounted route table's. */
   readonly mountedAnswer?: (method: string, url: string, view: AdminView) => AdminAnswer;
 }
 
@@ -157,7 +156,7 @@ export interface OpenedFacts {
 
 /**
  * `core_chain.config` once `core-chain`'s `on-start-db` has recorded the history check's rows: the rows read, each one
- * that a write gives (`id`, `start`) replaced by it, and the new ones after them. [CF-7]
+ * that a write gives (`id`, `start`) replaced by it, and the new ones after them.
  */
 export function recordedHistory(read: readonly HistoryRow[], writes: readonly HistoryRow[]): readonly HistoryRow[] {
   const key = (row: HistoryRow) => `${row.id}\u0000${row.start}`;
@@ -167,16 +166,16 @@ export function recordedHistory(read: readonly HistoryRow[], writes: readonly Hi
   return Object.freeze([...kept, ...writes.filter((row) => !known.has(key(row)))]);
 }
 
-/** The digest rows: one per module table that has changed. [DT-5] */
+/** The digest rows: one per module table that has changed. */
 export const DIGESTS_SQL = 'SELECT "schema", "table", height, digest FROM core_digest.tables';
 
-/** The server's version, which `/config` shows. [AE-5] */
+/** The server's version, which `/config` shows. */
 export const VERSION_SQL = "SELECT current_setting('server_version') AS version";
 
 /**
  * Whether the process holds its writer lock, as it knows it. It does from startup's writer start on (`opened`), but not
  * while a lost database connection is retried (the writer takes the lock again on its new session), and never once it
- * was lost to another process (`writer-lock-lost`). [DB-11]
+ * was lost to another process (`writer-lock-lost`).
  */
 export function writerLockHeld(opened: boolean, status: Pick<ProcessStatus, "conditions" | "reason">): boolean {
   return (
@@ -248,7 +247,7 @@ export class ProcessAdmin {
   #published: string | undefined;
   #closed = false;
   #closing: Promise<void> | undefined;
-  /** The snapshot taken when the process closed, which the mounted handler answers from after. [LM-5] */
+  /** The snapshot taken when the process closed, which the mounted handler answers from after. */
   #final: AdminSnapshot | undefined;
 
   /** Starts the heartbeat, which publishes at each tick; its timer keeps Node.js running only once a listener listens. */
@@ -268,7 +267,7 @@ export class ProcessAdmin {
   /**
    * The configuration is validated and the process's `core` revision chosen (`core` of `checked`): takes the revision's
    * liveness timeout, its readiness lag, the configuration's redaction and its side; `/config` shows the configuration
-   * from now on. Once only. [AE-5, LM-5]
+   * from now on. Once only.
    */
   validated(checked: CheckedConfig, core: CheckedEntry): void {
     if (this.#configFacts !== undefined) return;
@@ -285,7 +284,7 @@ export class ProcessAdmin {
 
   /**
    * A refusal before the configuration was validated: `/status` shows its reason through `redaction` (the
-   * configuration's secrets as it was loaded, as the refusal's log lines are). [AE-6]
+   * configuration's secrets as it was loaded, as the refusal's log lines are).
    */
   refusedWith(redaction: Redactor): void {
     if (this.#configFacts === undefined) this.#redactor = redaction;
@@ -294,13 +293,13 @@ export class ProcessAdmin {
   /**
    * The process's `core` revision is known (`core` of `checked`) and its network planned: {@link validated} with them,
    * and the listener at `address`, the plan's (`listen.admin` or its default for `umbradb run`), or none for null;
-   * resolves once it listens, rejects when it cannot. [AE-1, LM-3]
+   * resolves once it listens, rejects when it cannot.
    */
   async serve(checked: CheckedConfig, core: CheckedEntry, address: string | null): Promise<void> {
     if (this.#closed || this.#listening !== undefined) return;
     this.validated(checked, core);
     if (address === null) return;
-    // A listener answers by the heartbeat: from now on its timer keeps the process running. [AE-2]
+    // A listener answers by the heartbeat: from now on its timer keeps the process running.
     this.#heartbeat.keepAlive();
     await this.#listen(address);
   }
@@ -369,7 +368,7 @@ export class ProcessAdmin {
       const server = version ? await attempt(async (read) => (await read.query(VERSION_SQL))[0]?.version as string) : undefined;
       const identity = anchor ? await attempt((read) => readIdentity(read)) : undefined;
       const rows = digests ? await attempt((read) => read.query(DIGESTS_SQL)) : undefined;
-      // The fact-read tests' hold: a commit lands here, after the queries and before the read ends. [L61]
+      // The fact-read tests' hold: a commit lands here, after the queries and before the read ends.
       await this.#seams.factsRead?.().catch(() => undefined);
       if (rows !== undefined) {
         this.#digests = new Map(
@@ -387,11 +386,11 @@ export class ProcessAdmin {
         });
         this.#rebuildConfig();
       }
-      // The negative control forgets a commit that landed during the read, so no follow-up read reads it. [L61]
+      // The negative control forgets a commit that landed during the read, so no follow-up read reads it.
       if (this.#seams.forgetCommitsDuringRead === true) this.#stale = false;
     })().finally(() => {
       this.#reading = false;
-      // A commit during the read marked the facts stale: this publication reads them again at once. [L61]
+      // A commit during the read marked the facts stale: this publication reads them again at once.
       this.publish();
     });
   }
@@ -446,7 +445,7 @@ export class ProcessAdmin {
     });
   }
 
-  /** Where the listener listens once it does; null before, without one, and once closed. [LM-9, L21] */
+  /** Where the listener listens once it does; null before, without one, and once closed. */
   listening(): { readonly host: string; readonly port: number } | null {
     const server = this.#server;
     return this.#closed || server === undefined ? null : Object.freeze({ host: server.host, port: server.port });
@@ -455,11 +454,11 @@ export class ProcessAdmin {
   /**
    * Publishes: reads the facts that may have changed (see the module comment), then sends the listener the snapshot of
    * `status()` when it changed since the last one it was sent. Without a listener the snapshot stays in memory, where
-   * the mounted handler builds it at each request. [AE-1, LM-5]
+   * the mounted handler builds it at each request.
    */
   publish(): void {
     if (this.#closed) return;
-    // The negative control's fault: a process without a listener publishes nothing, its facts never read. [L61]
+    // The negative control's fault: a process without a listener publishes nothing, its facts never read.
     if (this.#seams.publishOnlyWithListener === true && this.#server === undefined) return;
     this.#readFacts();
     const server = this.#server;
@@ -474,7 +473,6 @@ export class ProcessAdmin {
   /**
    * The mounted handler's answer to `method url` (see the module comment): the snapshot of the process now — after it
    * closed, the one taken then — the heartbeat's age at the request, and the mounted route table. Reads no database.
-   * [AE-1, AE-2, LM-4, LM-5]
    */
   answer(method: string, url: string): AdminAnswer {
     const snapshot = this.#final ?? this.#snapshot();
@@ -491,7 +489,7 @@ export class ProcessAdmin {
 
   /**
    * Ends the heartbeat, then the listener and its thread (waiting for one still starting); calling it again: the same.
-   * The mounted handler answers from the snapshot taken now from then on. [LM-5]
+   * The mounted handler answers from the snapshot taken now from then on.
    */
   close(): Promise<void> {
     this.#closing ??= (async () => {

@@ -37,7 +37,7 @@ import type { DatabaseParts, PostgresParts } from "../../src/config/database-par
  * stopped at that height; `backupAtStop` writes one backup for the core's stop, and none at a restart at the stop while
  * one of that height is there; without the tool the command fails with `backup-tools-missing`, naming what to install,
  * and writes no file; a private database is refused with `private-backup-refused` without the development opt-in, and
- * backed up with it. [A124 CI, A122 CI, BK-1, BK-2, PP-12, Q83, Q85; design §9.1]
+ * backed up with it.
  *
  * The chain, the build, the tools and the loading: `./backup-fixtures.ts`. The committed negative control (a dump
  * outside the manifest's snapshot) is `./backup.negative-control.test.ts`.
@@ -117,9 +117,9 @@ async function hashStoppedAt(backend: BackupBackend, height: bigint): Promise<st
   return hashOf(db);
 }
 
-describe.each(BACKUP_BACKENDS)("backups on $name (BK-1, BK-2)", (backend) => {
+describe.each(BACKUP_BACKENDS)("backups on $name", (backend) => {
   it(
-    "A124: a backup written while blocks commit holds every table at its manifest's height: loaded, its contents " +
+    "a backup written while blocks commit holds every table at its manifest's height: loaded, its contents " +
       "hash equals the manifest's and the source's at that height",
     async () => {
       const db = await backend.database();
@@ -162,7 +162,7 @@ describe.each(BACKUP_BACKENDS)("backups on $name (BK-1, BK-2)", (backend) => {
       const loaded = await backend.load(out);
       expect(await tableHeights(loaded)).toEqual(heightsAt(manifest.height));
       expect(await hashOf(loaded)).toBe(manifest.contentsHash);
-      // The table declared deterministic: false travels with its rows and its sequence's position [BK-2]. A sequence
+      // The table declared deterministic: false travels with its rows and its sequence's position. A sequence
       // is not transactional: PostgreSQL's pg_dump reads its position as it is when it reads it, not as of the
       // snapshot, so beside commits it can be ahead of the rows — never behind them, so a value is never given twice.
       // On PGlite nothing commits during the job.
@@ -178,7 +178,7 @@ describe.each(BACKUP_BACKENDS)("backups on $name (BK-1, BK-2)", (backend) => {
     TEST_TIMEOUT_MS,
   );
 
-  it("A124: with backupAtStop set, the core's stop writes one backup for that height, and a restart at it none", async () => {
+  it("with backupAtStop set, the core's stop writes one backup for that height, and a restart at it none", async () => {
     const db = await backend.database();
     const out = output(`${backend.kind}-at-stop`);
     const config = writeTickerConfig(project, { database: db.setting, stop: 12, extra: { backupAtStop: out } });
@@ -205,7 +205,7 @@ describe.each(BACKUP_BACKENDS)("backups on $name (BK-1, BK-2)", (backend) => {
     expect(statSync(out).mtimeMs).toBe(written);
     expect(second.lines).toContain(`backup at stop: ${out} holds a backup of height 12 already, so none was written`);
 
-    // Without it, the restart at the stop writes it. [CORE-ARCH §4.15]
+    // Without it, the restart at the stop writes it.
     rmSync(out);
     const third = await startTicker(config, 30n);
     try {
@@ -246,7 +246,7 @@ describe.each(BACKUP_BACKENDS)("backups on $name (BK-1, BK-2)", (backend) => {
   }, TEST_TIMEOUT_MS);
 
   it(
-    "A124: without the tool (pg_dump 18, or pglite-tools), umbradb backup fails with backup-tools-missing, naming " +
+    "without the tool (pg_dump 18, or pglite-tools), umbradb backup fails with backup-tools-missing, naming " +
       "what to install, and writes no file",
     async () => {
       const db = await backend.database();
@@ -300,7 +300,7 @@ describe.each(BACKUP_BACKENDS)("backups on $name (BK-1, BK-2)", (backend) => {
 });
 
 describe("umbradb backup beside a running process", () => {
-  it("A124: on PostgreSQL the command backs up while blocks commit, every table at its manifest's height", async () => {
+  it("on PostgreSQL the command backs up while blocks commit, every table at its manifest's height", async () => {
     const db = await POSTGRES.database();
     const config = writeTickerConfig(project, { database: db.setting });
     const ticker = await startTicker(config, 1n);
@@ -352,7 +352,7 @@ describe("umbradb backup beside a running process", () => {
   }, TEST_TIMEOUT_MS);
 });
 
-describe("pg_dump's command line and failures (BK-1)", () => {
+describe("pg_dump's command line and failures", () => {
   it("passes the database's parts to pg_dump in libpq's environment, the password in PGPASSWORD, never on its command line; a pg_dump that fails leaves no file", async () => {
     const db = await POSTGRES.database();
     const config = writeTickerConfig(project, { database: db.setting, stop: 3 });
@@ -468,9 +468,9 @@ function privateConfig(database: DatabaseParts, developmentOptIn: boolean): stri
   );
 }
 
-describe("PP-12: a private database is not backed up by UmbraDB without the development opt-in", () => {
+describe("a private database is not backed up by UmbraDB without the development opt-in", () => {
   it(
-    "A122: umbradb backup of a private database refuses with private-backup-refused without the development " +
+    "umbradb backup of a private database refuses with private-backup-refused without the development " +
       "opt-in, and writes no file",
     async () => {
       const publicDb = await POSTGRES.database();

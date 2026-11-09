@@ -12,7 +12,6 @@ import { syntheticChain } from "./synthetic-chain.js";
  * writes it and prints its SHA-256, size, request rate and the node version the node reports (`system_version`, read
  * outside the builder, so it is not on the tape); `boundaries` reads a network's genesis and runtime upgrades
  * (`./boundaries.ts`) and writes the record the built-in tables cite. Against synthetic chains on the scripted node.
- * [IN-8]
  */
 
 let directory = "";

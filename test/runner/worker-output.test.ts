@@ -16,9 +16,9 @@ import { core, entryOf, settle, startProcess } from "./process-build.js";
  * and standard error reaches the log, line by line and named by thread and stream, and nothing reaches the process's
  * own stdout and stderr. The negative control gives the engine the command's `workerOutput: "inherit"` port: the
  * threads' lines then reach the process's own streams and none reaches the log, which is also `umbradb run`'s
- * behaviour of today (L55). Each thread is started from an entry that writes one line to each stream and then runs
+ * behaviour of today. Each thread is started from an entry that writes one line to each stream and then runs
  * UmbraDB's own (`./fixtures/noisy-*-entry.ts`). On PostgreSQL 18 (Docker), a PGlite directory and PGlite in memory
- * (definition of done item 3). [L4, L55, LM-2]
+ * (definition of done item 3).
  */
 
 /** PGlite in memory, the third database of the library's guarantees. */
@@ -105,7 +105,7 @@ const noisy = (lines: readonly string[]): string[] => lines.filter((line) => lin
 
 /**
  * The oracle: every problem with what a run saw, none when each thread's lines reached the log and nothing of them the
- * process's own streams. [L4]
+ * process's own streams.
  */
 function outputProblems(seen: Seen): string[] {
   return [
@@ -118,7 +118,7 @@ function outputProblems(seen: Seen): string[] {
 describe.each([
   ...PROCESS_BACKENDS.map((backend) => [backend.name, backend] as const),
   ["PGlite in memory", null] as const,
-])("L4: the worker threads' output reaches the log and nothing else (LM-2), on %s", (_name, backend: ProcessBackend | null) => {
+])("the worker threads' output reaches the log and nothing else, on %s", (_name, backend: ProcessBackend | null) => {
   beforeAll(() => backend?.start(), 180_000);
   afterAll(() => backend?.stop(), 60_000);
   /** A database of its own for one run. */
@@ -128,7 +128,7 @@ describe.each([
     expect(outputProblems(await run(await database(), undefined, (now) => holds(now.log, LOGGED)))).toEqual([]);
   }, 120_000);
 
-  it("negative control (and L55): the command's workerOutput: \"inherit\" fails it, its lines on the process's own streams", async () => {
+  it("negative control: the command's workerOutput: \"inherit\" fails it, its lines on the process's own streams", async () => {
     const seen = await run(await database(), "inherit", (now) => holds([...now.stdout, ...now.stderr], WRITTEN));
     expect(outputProblems(seen).sort()).toEqual(
       [
@@ -142,7 +142,7 @@ describe.each([
   }, 120_000);
 });
 
-describe("drainWorkerOutput: the lines of a thread's streams (LM-2)", () => {
+describe("drainWorkerOutput: the lines of a thread's streams", () => {
   it("hands over each line, a last one without its newline at the stream's end, and survives a log that throws", async () => {
     const { PassThrough } = await import("node:stream");
     const stdout = new PassThrough();

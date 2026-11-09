@@ -18,7 +18,6 @@ import { blockWith, mnsvItem } from "./version-checks.js";
  *   `SHA256SUMS`; the CI job rebuilds it) and identified in the core version;
  * - the built-in tables map `spec_version` 2,000,000–2,000,999 to it and 2,001,000 on to rc.5;
  * - a state stored by the rc.3 package loads in the rc.5 package with the same root, so a 2.0 → 2.1 upgrade carries it.
- * [A159, LG-3, LG-5, Q139 A; acceptance §12]
  *
  * The oracle is stagenet's node (`./v9-rc3-checks.ts`): the rc.3 package replays its first blocks with the node's
  * roots, which the rc.5 package does not (the committed control, `ledger-v9-rc3.negative-control.test.ts`).
@@ -28,7 +27,7 @@ const LONG = 240_000;
 const sha256OfManifest = (): string =>
   `0x${createHash("sha256").update(readFileSync(new URL("../../vendor/ledger/v9-rc3/SHA256SUMS", import.meta.url))).digest("hex")}`;
 
-describe("A159: v9 as runtime 2.0 built it, a ledger package of its own (LG-3, LG-5)", () => {
+describe("v9 as runtime 2.0 built it, a ledger package of its own", () => {
   let rc3: LedgerPackage;
   let rc5: LedgerPackage;
   beforeAll(async () => {
@@ -57,7 +56,7 @@ describe("A159: v9 as runtime 2.0 built it, a ledger package of its own (LG-3, L
     expect(rc3.convertFromV8).toBeUndefined();
   });
 
-  it("replays stagenet from its genesis state with the node's root after blocks 0 to 3 (A99 at the adapter)", { timeout: LONG }, () => {
+  it("replays stagenet from its genesis state with the node's root after blocks 0 to 3 (at the adapter)", { timeout: LONG }, () => {
     const replay = stagenetReplay(rc3);
     rc3.dispose(replay.state);
     expect(replay.problems).toEqual([]);

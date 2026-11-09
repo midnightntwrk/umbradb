@@ -21,9 +21,9 @@ import { cursorReaches, libraryData, rowsModule } from "./library-fixtures.js";
 import { exchange, type MapiHooks, mapiModule, mountHandlers } from "./mounted-fixtures.js";
 
 /**
- * Mounted admin (`startUmbraDB`'s `admin.http`) on PostgreSQL 18 and a PGlite directory. [LM-5, LM-4, AE-1, AE-5, AE-6]
+ * Mounted admin (`startUmbraDB`'s `admin.http`) on PostgreSQL 18 and a PGlite directory.
  *
- * - **L61** `[NEG]`: with no admin listener (`network` not given; `status().listening.admin` null), mounted `/status`
+ * - `[NEG]`: with no admin listener (`network` not given; `status().listening.admin` null), mounted `/status`
  *   and `/config` reach the expected `core_digest.tables` rows, server version and identity anchor — the oracle reads
  *   them itself from the database (`db.query`, a plain connection on PostgreSQL, a plain engine on the directory once
  *   the process closed it), at the committed height the loop stays at — after startup's open with no commit yet (a
@@ -35,7 +35,7 @@ import { exchange, type MapiHooks, mapiModule, mountHandlers } from "./mounted-f
  *   request: the four endpoints answer within 1 s while PGlite's one session is held by an open block transaction, and
  *   on PostgreSQL while the tables they show are locked. The heartbeat's timer does not keep the host's event loop
  *   alive: a host that returns without stopping ends by itself (its control, a heartbeat kept referenced, does not).
- * - **L65** `[NEG]`: secrets through the mounted handlers — on PostgreSQL a password in `database` and in
+ * - `[NEG]`: secrets through the mounted handlers — on PostgreSQL a password in `database` and in
  *   `transportReader`, a TLS key and a node URL with credentials; on PGlite a TLS key and a node URL with credentials —:
  *   `/config` shows each as `[redacted]`; a callback that throws an error whose message holds them all halts the
  *   process, and `/status` shows the code, height, module and point and no secret; mounted `api.http`'s error answer
@@ -128,12 +128,12 @@ function adminOf(handle: UmbraDBHandle): string {
   return `http://${admin.host}:${admin.port}`;
 }
 
-describe.each(PROCESS_BACKENDS)("mounted admin on $name (LM-5)", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("mounted admin on $name", (backend: ProcessBackend) => {
   const postgres = backend.kind === "postgres";
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  /** How one L61 run goes (see {@link factsRun}). */
+  /** How one run goes (see {@link factsRun}). */
   interface FactsRunOptions {
     /** Admin's test seams beside the run's own hold of a fact read. */
     readonly seams?: AdminSeams;
@@ -144,12 +144,12 @@ describe.each(PROCESS_BACKENDS)("mounted admin on $name (LM-5)", (backend: Proce
   }
 
   /**
-   * One L61 run on `db`, its in-memory head first `heads[0]`, with no admin listener unless `listener` (the process's
+   * One run on `db`, its in-memory head first `heads[0]`, with no admin listener unless `listener` (the process's
    * `status().listening.admin` is checked to be null): the facts mounted admin shows at each of `heads` (each finalized
    * once the one before was shown) must be the database's own, the oracle reading them itself (on PGlite once the
    * process closed), and with `listener` the listening admin's the same. With `interleave` `[a, b]` after them, the
    * fact read of `a`'s commit is held after its queries until `b` committed, and the facts at `b` must be shown then.
-   * The problems, none when so. [L61]
+   * The problems, none when so.
    */
   async function factsRun(db: ProcessDatabase, heads: readonly bigint[], options: FactsRunOptions = {}): Promise<string[]> {
     const { seams = {}, interleave, listener = false } = options;
@@ -216,7 +216,7 @@ describe.each(PROCESS_BACKENDS)("mounted admin on $name (LM-5)", (backend: Proce
     return problems;
   }
 
-  it("L61: with no admin listener, mounted /status and /config reach the database's facts after the open, after commits and after a commit during a fact read", async () => {
+  it("with no admin listener, mounted /status and /config reach the database's facts after the open, after commits and after a commit during a fact read", async () => {
     const db = await backend.database();
     // A database with a cursor, then a restart: the first facts are the open's, before any commit.
     expect(await factsRun(db, [3n])).toEqual([]);
@@ -225,21 +225,21 @@ describe.each(PROCESS_BACKENDS)("mounted admin on $name (LM-5)", (backend: Proce
     expect(await factsRun(db, [6n], { interleave: [7n, 8n] })).toEqual([]);
   }, 300_000);
 
-  it("L61: a listening admin on the same database reaches the same values as mounted admin, after the open, after commits and after a commit during a fact read", async () => {
+  it("a listening admin on the same database reaches the same values as mounted admin, after the open, after commits and after a commit during a fact read", async () => {
     const db = await backend.database();
     expect(await factsRun(db, [3n], { listener: true })).toEqual([]);
     expect(await factsRun(db, [3n, 6n], { listener: true })).toEqual([]);
     expect(await factsRun(db, [6n], { listener: true, interleave: [7n, 8n] })).toEqual([]);
   }, 300_000);
 
-  it("L61's negative control: fact reads that forget a commit landing during them leave mounted admin stale, with no listener", async () => {
+  it("negative control: fact reads that forget a commit landing during them leave mounted admin stale, with no listener", async () => {
     const db = await backend.database();
     expect(await factsRun(db, [3n])).toEqual([]);
     const problems = await factsRun(db, [3n], { seams: { forgetCommitsDuringRead: true }, interleave: [4n, 5n] });
     expect(problems.some((problem) => problem.startsWith("mounted admin never showed the facts at 5"))).toBe(true);
   }, 300_000);
 
-  it("L61's negative control: a process that publishes only with a listener, as before mounted admin, leaves mounted admin without facts", async () => {
+  it("negative control: a process that publishes only with a listener, as before mounted admin, leaves mounted admin without facts", async () => {
     const db = await backend.database();
     // The fault: no publication, so no fact read, while nothing listens. A start, then a restart with no commit.
     for (const heads of [[3n], [3n]] as const) {
@@ -250,7 +250,7 @@ describe.each(PROCESS_BACKENDS)("mounted admin on $name (LM-5)", (backend: Proce
     expect(await factsRun(db, [3n, 6n], { listener: true, seams: { publishOnlyWithListener: true } })).toEqual([]);
   }, 300_000);
 
-  it("L61: no database read per request — the four endpoints answer within 1 s while the database is held", async () => {
+  it("no database read per request — the four endpoints answer within 1 s while the database is held", async () => {
     const db = await backend.database();
     const held = gate();
     const hooks: MapiHooks = { emits: new Set(), writes: new Map([[4n, held]]) };
@@ -308,7 +308,7 @@ describe.each(PROCESS_BACKENDS)("mounted admin on $name (LM-5)", (backend: Proce
     }
   }, 120_000);
 
-  /** The secrets of L65 on this backend, and the `core` settings that carry them. */
+  /** The secrets on this backend, and the `core` settings that carry them. */
   async function secretSettings(db: ProcessDatabase): Promise<{ readonly database: DatabaseParts; readonly extra: Record<string, unknown>; readonly others: readonly string[] }> {
     const tls = { certificate: "-----BEGIN CERTIFICATE-----\nnot-checked\n-----END CERTIFICATE-----", key: "L65-tls-key-secret", trustedRoots: [] };
     if (postgres) {
@@ -322,7 +322,7 @@ describe.each(PROCESS_BACKENDS)("mounted admin on $name (LM-5)", (backend: Proce
   }
 
   /**
-   * The L65 run: a process whose `mapi` halts at 2 with an error holding every secret, mounted; the texts of the four
+   * The run: a process whose `mapi` halts at 2 with an error holding every secret, mounted; the texts of the four
    * mounted endpoints, of mounted `api.http`'s error answer (`/fails`, which throws the same) and of the module API's
    * lifecycle answer after the stop, with the problems the search finds (none when no secret leaked).
    */
@@ -365,7 +365,7 @@ describe.each(PROCESS_BACKENDS)("mounted admin on $name (LM-5)", (backend: Proce
     }
   }
 
-  it("L65: no secret through the mounted handlers: /config redacts each, /status and api.http's error answers show none", async () => {
+  it("no secret through the mounted handlers: /config redacts each, /status and api.http's error answers show none", async () => {
     const { problems, config, status } = await secretsRun({});
     expect(problems).toEqual([]);
     const settings = (config as { core: { settings: Record<string, unknown> } }).core.settings;
@@ -376,7 +376,7 @@ describe.each(PROCESS_BACKENDS)("mounted admin on $name (LM-5)", (backend: Proce
     expect((status as { reason: unknown }).reason).toMatchObject({ code: "callback-error", height: "2", module: "mapi", point: "on-db-write" });
   }, 120_000);
 
-  it("L65's negative controls: raw settings on mounted /config, and an error answer carrying the failure's text, are found", async () => {
+  it("negative controls: raw settings on mounted /config, and an error answer carrying the failure's text, are found", async () => {
     const rawConfig: AdminSeams["mountedAnswer"] = (method, url, view) => {
       if (method !== "GET" || url !== "/config") return answerAdmin(ADMIN_ROUTES, method, url, view);
       return { status: 200, body: { ...view.snapshot.config, core: { start: 1, settings: rawSettings } } as never };
@@ -449,7 +449,7 @@ async function hostEndsByItself(mode: "library" | "control", ms: number): Promis
   }
 }
 
-describe("L61: the heartbeat's timer does not keep a library host's event loop alive", () => {
+describe("the heartbeat's timer does not keep a library host's event loop alive", () => {
   it("a host that returns without stopping UmbraDB ends by itself; the control's referenced heartbeat keeps it running", async () => {
     // PGlite's own timer of 10 s may hold the process that long after its last query; nothing of UmbraDB's may.
     expect(await hostEndsByItself("library", 30_000)).toEqual({ reached: true, ended: true, code: 0 });

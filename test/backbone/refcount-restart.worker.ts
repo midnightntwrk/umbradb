@@ -6,7 +6,7 @@ import { inspectDatabase, type SegmentEvent, type SegmentJob, startSegment } fro
  * `node --import tsx` and one JSON argument ({@link SegmentJob}). It runs the process over a tape node of its own from
  * the database's cursor, reports each event as one JSON line on its standard output, and ends once its process
  * stopped or ended; a segment holding at its point waits for the test's SIGKILL. Given `{ inspect }` instead, it reads
- * the database from outside any process of it (`inspectDatabase`), reports it, and ends. [R13, R14]
+ * the database from outside any process of it (`inspectDatabase`), reports it, and ends.
  *
  * Like `../runner/crash.worker.ts`, it exits by itself once its parent is no longer the test's (Vitest's bail, a test's
  * timeout), since a held point would otherwise keep it up for ever.

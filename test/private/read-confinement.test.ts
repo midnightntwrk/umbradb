@@ -9,14 +9,13 @@ import { confinementProblems, PUB, PUB_ENTRY, publicState, stateProblems } from 
  * Confined reads through a running core, on PostgreSQL 18.6 and PGlite 0.5.10. The core process listens on its
  * `listen.privateLink`, and a raw client sends `read`s whose statements try to leave the read: `COMMIT` then `INSERT`,
  * `ROLLBACK`, `BEGIN`, `SET TRANSACTION READ WRITE`, `SET` and `RESET` of a setting or the role, `set_config`, `DO`,
- * `nextval`, `pg_advisory_lock`, `COPY`, `LISTEN`, and two statements in one. [A172 FAULT, PP-4; design §8; threat model
- * draft, gap 1]
+ * `nextval`, `pg_advisory_lock`, `COPY`, `LISTEN`, and two statements in one
+ * (`docs/THREAT_MODEL.md`, known gap 1).
  * - Each is answered `read-result` `error: read-refused`, with `refused` naming the statement, and nothing of it runs.
  * - The next `read` on the same connection is answered.
  * - The public database's contents hash, row counts and sequences are unchanged, and no advisory lock is left held.
  * - Reads whose write the database itself refuses (the read-only transaction) are answered `database-error`.
  * - A private process's own client gets the refusal as an `UmbraError` `read-refused` naming the statement.
- * [A172 FAULT, PP-4]
  *
  * The committed negative control is `read-confinement.negative-control.test.ts`.
  */
@@ -24,7 +23,7 @@ import { confinementProblems, PUB, PUB_ENTRY, publicState, stateProblems } from 
 /** The core's `listen.privateLink`: a free port of the loopback interface. */
 const TRANSPORT = { listen: { privateLink: "127.0.0.1:0" } };
 
-describe.each(PRIVATE_BACKENDS)("A172: a transport read is confined to reads on $name", (backend: PrivateBackend) => {
+describe.each(PRIVATE_BACKENDS)("a transport read is confined to reads on $name", (backend: PrivateBackend) => {
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 

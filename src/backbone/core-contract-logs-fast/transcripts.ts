@@ -2,7 +2,6 @@
  * What `core-contract-logs-fast` reads in a transaction's transcripts: each `log` operation of each contract call, in
  * the order the ledger would run them, with the value it logs when the transcript itself fixes it, or else the reason
  * it does not. The native transaction and the package go in; plain data comes out.
- * [CC-3, Q19 D, Q21, Q49; CORE-ARCH §4.11]
  *
  * **The order** is the ledger's (`midnight-ledger` 9.1.0.0-rc.5 `ledger/src/semantics.rs`: `apply_section` and
  * `apply_fallible`):
@@ -28,7 +27,7 @@
  * The function takes what a ledger task takes: the native parsed object and `rawPackages()`. The module's ledger task
  * (`./task.ts`) runs it in the ledger worker on the block's one parse. It reads with the v9 package of the block's
  * ledger, the one `rawPackages()` holds: rc.5's, or rc.3's on runtime 2.0 blocks (`v9-rc3`, with the same API in a
- * module of its own). [LG-17; design §5.5]
+ * module of its own).
  */
 
 import type { LogItem } from "../../ledger/types.js";

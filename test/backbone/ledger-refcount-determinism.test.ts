@@ -7,8 +7,7 @@ import { fixtureProblems } from "./refcount-checks.js";
 import { dagHistory, type Facets, historyDifferences, NODE_ROWS } from "./refcount-histories.js";
 
 /**
- * `[DIFF]` Determinism across worker histories on the DAG fixture, on PostgreSQL 18 and PGlite 0.5.10. [R28, DT-3,
- * LG-11; design §4.4]
+ * `[DIFF]` Determinism across worker histories on the DAG fixture, on PostgreSQL 18 and PGlite 0.5.10.
  *
  * The extended DAG fixture's test package keeps a node's old child list when it creates the node again
  * (`keeps-old-copy`, as the ledger's back-end keeps the old copy of a node it already holds), unless its thread holds
@@ -23,7 +22,7 @@ import { dagHistory, type Facets, historyDifferences, NODE_ROWS } from "./refcou
  *
  * The recorded tapes' cases are in `ledger-refcount-determinism-preprod-{postgres,pglite}.test.ts` and
  * `ledger-refcount-determinism-devnet.test.ts`; the committed negative control (`nodes` hashed by its raw rows) in
- * `ledger-refcount-determinism.negative-control.test.ts`. [R28]
+ * `ledger-refcount-determinism.negative-control.test.ts`.
  */
 
 const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
@@ -48,11 +47,11 @@ const writtenFor = (batch: NodeBatch | undefined, node: FixtureNode): string | u
 const differingAt = (a: ReadonlyMap<bigint, Facets>, b: ReadonlyMap<bigint, Facets>, name: string): bigint[] =>
   [...a.keys()].filter((height) => a.get(height)?.get(name) !== b.get(height)?.get(name)).sort((x, y) => (x < y ? -1 : 1));
 
-describe.each(PROCESS_BACKENDS)("R28 (DT-3, LG-11): determinism across worker histories on the DAG fixture, on $name", (backend) => {
+describe.each(PROCESS_BACKENDS)("determinism across worker histories on the DAG fixture, on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("R28: a run that never restarts keeps a rewritten node's old child list and one restarted before each rewrite writes the new one; their nodes rows differ, and after every block their node sets, root_counts, rows of states, segment_results and events, core_digest.tables and contents hashes are equal", async () => {
+  it("a run that never restarts keeps a rewritten node's old child list and one restarted before each rewrite writes the new one; their nodes rows differ, and after every block their node sets, root_counts, rows of states, segment_results and events, core_digest.tables and contents hashes are equal", async () => {
     const never = await dagHistory(await backend.database(), "keeps-old-copy");
     const restarted = await dagHistory(await backend.database(), "keeps-old-copy", RESTARTS);
 
@@ -85,7 +84,7 @@ describe.each(PROCESS_BACKENDS)("R28 (DT-3, LG-11): determinism across worker hi
     expect([...never.facets.values()].every((facets) => facets.has("contents hash"))).toBe(true);
     expect(historyDifferences(restarted.facets, never.facets)).toEqual([]);
 
-    // R3's check passes on both. [R3]
+    // The check passes on both.
     expect(fixtureProblems("extended", never.tables, never.batches, LAST)).toEqual([]);
     expect(fixtureProblems("extended", restarted.tables, restarted.batches, LAST)).toEqual([]);
   }, PATIENCE_MS * 8);

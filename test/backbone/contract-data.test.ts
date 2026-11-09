@@ -37,18 +37,17 @@ import { cappedAt, LEDGER_CORE } from "./ledger-restart.js";
  * UmbraDB's backbone over the node source, against a tape node serving the synthetic scenarios of
  * `./contract-data-checks.ts`: real ledger transactions deploying fixture contracts and calling them with the
  * transcripts the scenario writes. The ledger runs in its worker thread for `core-ledger-state`. Each scenario's
- * expectations are written from its own specification. [A108, A109, A110, CC-1, CC-2, CC-3]
+ * expectations are written from its own specification.
  *
  * - Two calls of one contract in one block give one `core_contract_states` row, with the state after both. At the
  *   v8 → v9 upgrade's F every contract gets a row with its converted keys. Every key loads from the stored nodes.
- *   [A108, CC-1]
  * - `core-contract-logs-full` stores the logs of applied segments, a successful fallible segment's too, and none of a
- *   fallible segment that failed. It stores none on ledger v8. [A109, CC-2, Q54]
+ *   fallible segment that failed. It stores none on ledger v8.
  * - A range of literal logs gives identical `contract_logs.logs` with `-full` and `-fast`, on both backends. The range
  *   holds well-formed wrappers, malformed ones (stored as version-0 `Misc` logs), oversized ones (stored as none), a
  *   successful fallible segment's, and a chain-failed transaction's (none). A log of a value read from the contract's
  *   state, and any log of a partially successful transaction, make `-fast` halt with `fast-log-unsupported` at that
- *   height, naming the transaction, while `-full` stores them. [A110, CC-3]
+ *   height, naming the transaction, while `-full` stores them.
  *
  * On the recorded devnet tape (`UMBRADB_TAPES`; skipped by name without it): every contract deployed, called or
  * maintained has its row at that height, every contract deployed on v8 has its row at F (103), and `-fast` stores what
@@ -57,11 +56,11 @@ import { cappedAt, LEDGER_CORE } from "./ledger-restart.js";
 
 const describeBackends = describe.each(PROCESS_BACKENDS);
 
-describeBackends("contract data through the process on $name (CC-1, CC-2, CC-3)", (backend: ProcessBackend) => {
+describeBackends("contract data through the process on $name", (backend: ProcessBackend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("A108: two calls of one contract in one block give one core_contract_states row, with the state after both; each key loads from the stored nodes", async () => {
+  it("two calls of one contract in one block give one core_contract_states row, with the state after both; each key loads from the stored nodes", async () => {
     const [one, two] = await contractsFor("v9", 2);
     const expected = await contractScenario({
       ledger: "v9",
@@ -84,7 +83,7 @@ describeBackends("contract data through the process on $name (CC-1, CC-2, CC-3)"
     expect(await heldNodeProblems(db)).toEqual([]);
   }, PATIENCE_MS * 2);
 
-  it("A108: at the v8 → v9 upgrade's F every contract gets a row with its converted keys; v8 logs are not stored (Q54), v9 ones are, by -full and -fast alike", async () => {
+  it("at the v8 → v9 upgrade's F every contract gets a row with its converted keys; v8 logs are not stored, v9 ones are, by -full and -fast alike", async () => {
     const [one, two] = await contractsFor("v8", 2);
     const logged = [cellValue(Uint8Array.of(7)), wrapper(1, 5, cellValue(Uint8Array.of(4)))];
     // A v9 call of a contract deployed on v8 (two, at 5): the scenario holds the process to the reference replay only.
@@ -114,7 +113,7 @@ describeBackends("contract data through the process on $name (CC-1, CC-2, CC-3)"
     expect(await logProblems(fast, ran.status, expected)).toEqual([]);
   }, PATIENCE_MS * 3);
 
-  it("A109: core-contract-logs-full stores the logs of applied segments, a successful fallible segment's among them, and none of a failed fallible segment", async () => {
+  it("core-contract-logs-full stores the logs of applied segments, a successful fallible segment's among them, and none of a failed fallible segment", async () => {
     const expected = await a109Scenario();
     const db = await backend.database();
     const ran = await runRange(db, expected.scenario.records, expected.scenario.head, { core: FULL_CORE });
@@ -126,7 +125,7 @@ describeBackends("contract data through the process on $name (CC-1, CC-2, CC-3)"
     expect(await logLines(db)).toHaveLength(3);
   }, PATIENCE_MS * 2);
 
-  it("A110: a log of a value read from the contract's state makes -fast halt with fast-log-unsupported at its height, naming the transaction; -full stores it", async () => {
+  it("a log of a value read from the contract's state makes -fast halt with fast-log-unsupported at its height, naming the transaction; -full stores it", async () => {
     const expected = await a110HaltScenario();
     const db = await backend.database();
     const ran = await runRange(db, expected.scenario.records, expected.scenario.head, { core: FAST_CORE });
@@ -142,7 +141,7 @@ describeBackends("contract data through the process on $name (CC-1, CC-2, CC-3)"
     );
   }, PATIENCE_MS * 3);
 
-  it("A110: any log of a partially successful transaction makes -fast halt with fast-log-unsupported (CC-3)", async () => {
+  it("any log of a partially successful transaction makes -fast halt with fast-log-unsupported", async () => {
     const expected = await a109Scenario();
     const db = await backend.database();
     const ran = await runRange(db, expected.scenario.records, expected.scenario.head, { core: FAST_CORE });
@@ -152,8 +151,8 @@ describeBackends("contract data through the process on $name (CC-1, CC-2, CC-3)"
   }, PATIENCE_MS * 2);
 });
 
-describe("A110: -full and -fast store identical contract_logs.logs, on both backends (CC-3)", () => {
-  it("A110: a range of literal logs gives identical contract_logs.logs with core-contract-logs-full and core-contract-logs-fast, on PostgreSQL 18 and PGlite, each the range's expected rows [[contract-logs.fast-equals-full]]", async () => {
+describe("-full and -fast store identical contract_logs.logs, on both backends", () => {
+  it("a range of literal logs gives identical contract_logs.logs with core-contract-logs-full and core-contract-logs-fast, on PostgreSQL 18 and PGlite, each the range's expected rows [[contract-logs.fast-equals-full]]", async () => {
     const expected = await a110Range();
     // The range holds what the criterion names: malformed wrappers stored as version-0 Misc logs, oversized logs none.
     expect(expected.logs.filter((line) => line.split(" ").slice(6, 8).join(" ") === "0 Misc").length).toBeGreaterThanOrEqual(4);
@@ -179,7 +178,7 @@ describe("A110: -full and -fast store identical contract_logs.logs, on both back
   }, PATIENCE_MS * 6);
 });
 
-describe("contract data on task 0.3's recorded devnet (CC-1 to CC-3; skipped by name without its tape)", () => {
+describe("contract data on the recorded devnet (skipped by name without its tape)", () => {
   const backend = PROCESS_BACKENDS.find((candidate) => candidate.kind === "pglite") as ProcessBackend;
   const REPLAY_MS = 3_600_000;
   const settingsOf = (found: FoundTape): Readonly<Record<string, unknown>> => ({
@@ -206,7 +205,7 @@ describe("contract data on task 0.3's recorded devnet (CC-1 to CC-3; skipped by 
 
   tapeTest(
     "devnet-v8-v9-0-235",
-    "A108 on the devnet: every contract deployed, called or maintained has its row at that height, every contract deployed on v8 its row with converted keys at F (103), each key held and loading; -fast stores what -full stores",
+    "on the devnet: every contract deployed, called or maintained has its row at that height, every contract deployed on v8 its row with converted keys at F (103), each key held and loading; -fast stores what -full stores",
     async (found) => {
       const records: TapeRecord[] = cappedAt(found.read().records, 235n);
       await backend.start();
@@ -221,7 +220,7 @@ describe("contract data on task 0.3's recorded devnet (CC-1 to CC-3; skipped by 
         const expected = new Map<bigint, string[]>([...touched].map(([height, set]) => [height, [...set].sort()]));
         expected.set(103n, v8.sort());
         expect(new Map([...rows].map(([height, list]) => [height, list.map((row) => row.address)]))).toEqual(expected);
-        // Each key is held and every node a held key reaches is stored. [LG-13]
+        // Each key is held and every node a held key reaches is stored.
         const counts = new Map((await db.query("SELECT encode(node_key, 'hex') AS k, count FROM core_ledger_state.root_counts")).map((r) => [r.k as string, Number(r.count)]));
         for (const list of rows.values()) {
           for (const row of list) {
@@ -247,8 +246,8 @@ describe("contract data on task 0.3's recorded devnet (CC-1 to CC-3; skipped by 
 });
 
 // The three modules are core modules of the build, in their recorded order.
-describe("core-contract-states, core-contract-logs-full and core-contract-logs-fast as declared (CC-1 to CC-4)", () => {
-  it("declare CORE-ARCH §4.11's requirements, items, mid-chain starts and the development-only -fast; both log providers share contract-logs with the same table and migrations", () => {
+describe("core-contract-states, core-contract-logs-full and core-contract-logs-fast as declared", () => {
+  it("declare the requirements, items, mid-chain starts and the development-only -fast; both log providers share contract-logs with the same table and migrations", () => {
     expect([CORE_CONTRACT_STATES, CORE_CONTRACT_LOGS_FULL, CORE_CONTRACT_LOGS_FAST].map((m) => [m.id, m.requires, m.startsMidChain, m.developmentOnly === true])).toEqual([
       ["core-contract-states", ["ledger-state"], false, false],
       ["core-contract-logs-full", ["vm-logs"], false, false],
@@ -259,7 +258,7 @@ describe("core-contract-states, core-contract-logs-full and core-contract-logs-f
     ]);
     const item = { name: "contract-logs", lifetimes: ["block", "table"], table: { schema: "contract_logs", tables: ["logs"], kind: "append-only" } };
     expect(CORE_CONTRACT_LOGS_FULL.provides).toEqual([item]);
-    // -fast's ledger task gives its block item contract-log-sites ("in a ledger task"). [CC-3]
+    // -fast's ledger task gives its block item contract-log-sites ("in a ledger task").
     expect(CORE_CONTRACT_LOGS_FAST.provides).toEqual([item, { name: "contract-log-sites", lifetimes: ["block"] }]);
     expect(CORE_CONTRACT_LOGS_FAST.ledgerTasks?.map((task) => [task.name, task.needsState])).toEqual([["contract-log-sites", false]]);
     expect(CORE_CONTRACT_LOGS_FAST.migrations).toEqual(CORE_CONTRACT_LOGS_FULL.migrations);

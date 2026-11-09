@@ -22,14 +22,14 @@ import { spawnChild } from "../child-processes.js";
  * A real process killed by SIGKILL at the stated points, on PostgreSQL 18 and PGlite. The process is `crash.worker.ts`,
  * started as `umbradb run` starts one (`startProcess` with its configuration file). Module `c` (`crash-module.ts`)
  * holds for ever at the point and height the test names, so the kill always comes exactly there. The restart runs in
- * the test's own process with the same declaration and logs what `c` was given. [RN-5, RN-9, RN-11]
+ * the test's own process with the same declaration and logs what `c` was given.
  * - **Killed before h commits**: after `c`'s `on-start-height` at its start h (4), inside `c`'s `on-db-write` of h with
  *   its row written. After the restart, `on-start-height` fires for `c` at h again, before its `on-compute` at h: it
- *   fires at least once. [A44, RN-9]
+ *   fires at least once.
  * - **Killed after h commits**: after the COMMIT of h (5), inside `c`'s `on-after-db-write` of h. After the restart,
  *   `on-after-db-write` fires for h before any callback of h + 1, with h's height, hash and settings and no `block`
  *   items. No `on-after-db-write` ever receives `block` items, delivered again or not, though `c` puts one in each
- *   height's `on-parse`. [A46, RN-5, RN-11]
+ *   height's `on-parse`.
  */
 
 const WORKER = fileURLToPath(new URL("./crash.worker.ts", import.meta.url));
@@ -168,7 +168,7 @@ const A44_HOLD = { point: "on-db-write", height: 4 } as const;
 const A46_HOLD = { point: "on-after-db-write", height: 5 } as const;
 
 /** The oracle for a kill before the commit (c from 4, killed in its `on-db-write` of 4): every problem, none when it
- *  holds. [A44] */
+ *  holds. */
 function a44Problems(observed: CrashObservation): string[] {
   const problems = killAndEnd(observed, A44_HOLD, 4, 3);
   const before = calls(observed.killed);
@@ -188,7 +188,7 @@ function a44Problems(observed: CrashObservation): string[] {
 }
 
 /** The oracle for a kill after the commit (c from 1 with k = 7, killed in its `on-after-db-write` of 5): every
- *  problem, none when it holds. [A46] */
+ *  problem, none when it holds. */
 function a46Problems(observed: CrashObservation): string[] {
   const problems = killAndEnd(observed, A46_HOLD, 1, 5);
   const h = A46_HOLD.height;
@@ -223,7 +223,7 @@ function a46Problems(observed: CrashObservation): string[] {
         problems.push(`in ${name} on-after-db-write at ${call.height} received block items ${call.items?.join(",")}`);
       }
       // The items the check relies on exist: each height's on-compute sees c's note, after the four the backbone's
-      // core-block-fetch puts at on-fetch (core-block-commit reads two of them). [CD-2]
+      // core-block-fetch puts at on-fetch (core-block-commit reads two of them).
       const expected = "block-header,block-body,runtime-metadata,ledger-version,c-note";
       if (call.point === "on-compute" && call.items?.join(",") !== expected) {
         problems.push(`in ${name} on-compute at ${call.height} saw the items ${call.items?.join(",")}, not ${expected}`);
@@ -266,17 +266,17 @@ class LateRedelivery extends FinalizedLoop {
   }
 }
 
-describe("A44 and A46: delivery after a crash (RN-9, RN-11), with a real process killed by SIGKILL", () => {
+describe("delivery after a crash, with a real process killed by SIGKILL", () => {
   beforeAll(() => Promise.all(PROCESS_BACKENDS.map((backend) => backend.start())), 180_000);
   afterAll(() => Promise.all(PROCESS_BACKENDS.map((backend) => backend.stop())), 60_000);
 
-  it("[[runner.fault.start-height-at-least-once]] A44: killed after on-start-height of c at its start h and before h commits, on-start-height fires for c at h again after the restart, on PostgreSQL and on PGlite", async () => {
+  it("[[runner.fault.start-height-at-least-once]] killed after on-start-height of c at its start h and before h commits, on-start-height fires for c at h again after the restart, on PostgreSQL and on PGlite", async () => {
     for (const backend of PROCESS_BACKENDS) {
       expect(a44Problems(await crashRun(backend, A44_HOLD, 4)), backend.name).toEqual([]);
     }
   }, 600_000);
 
-  it("negative control: a restart that skips the re-delivered on-start-height fails A44", async () => {
+  it("negative control: a restart that skips the re-delivered on-start-height fails", async () => {
     for (const backend of PROCESS_BACKENDS) {
       expect(a44Problems(await crashRun(backend, A44_HOLD, 4, SkipsStartAtRestart)), backend.name).toEqual([
         "the restart did not fire on-start-height for c at 4 again",
@@ -284,13 +284,13 @@ describe("A44 and A46: delivery after a crash (RN-9, RN-11), with a real process
     }
   }, 600_000);
 
-  it("[[runner.fault.after-write-at-least-once]] A46: killed after the COMMIT of h and before its on-after-db-write completed, on-after-db-write fires for h after the restart before any callback of h + 1, with h's height, hash and settings and no block items; no on-after-db-write receives block items, on PostgreSQL and on PGlite", async () => {
+  it("[[runner.fault.after-write-at-least-once]] killed after the COMMIT of h and before its on-after-db-write completed, on-after-db-write fires for h after the restart before any callback of h + 1, with h's height, hash and settings and no block items; no on-after-db-write receives block items, on PostgreSQL and on PGlite", async () => {
     for (const backend of PROCESS_BACKENDS) {
       expect(a46Problems(await crashRun(backend, A46_HOLD, 1)), backend.name).toEqual([]);
     }
   }, 600_000);
 
-  it("negative control: a re-delivered on-after-db-write that carries block items fails A46", async () => {
+  it("negative control: a re-delivered on-after-db-write that carries block items fails", async () => {
     for (const backend of PROCESS_BACKENDS) {
       expect(a46Problems(await crashRun(backend, A46_HOLD, 1, ItemsAfterWrite)), backend.name).toEqual([
         "the re-delivered on-after-db-write at 5 received block items c-note",
@@ -301,7 +301,7 @@ describe("A44 and A46: delivery after a crash (RN-9, RN-11), with a real process
     }
   }, 600_000);
 
-  it("negative control: a re-delivered on-after-db-write that comes after a callback of h + 1 fails A46", async () => {
+  it("negative control: a re-delivered on-after-db-write that comes after a callback of h + 1 fails", async () => {
     for (const backend of PROCESS_BACKENDS) {
       expect(a46Problems(await crashRun(backend, A46_HOLD, 1, LateRedelivery)), backend.name).toEqual([
         "the re-delivered on-after-db-write at 5 came after a callback of 6",

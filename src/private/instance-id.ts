@@ -6,7 +6,6 @@
  * ASCII letters, the digits, `.`, `_`, `:` and `-`: no space, line break or control character that could end a log
  * line and forge the next one, and no length that could fill each line and the status answer. A `hello` with any
  * other id fails its schema, which closes the connection, and a configuration naming one is refused at startup.
- * [PP-4, PP-9, CF-4]
  */
 
 import { z } from "zod";

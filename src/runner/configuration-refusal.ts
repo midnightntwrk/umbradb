@@ -4,12 +4,12 @@
  * Some refusals come before the process's `core` revision is known: a fault in the build's declarations, in loading
  * the configuration or checking that it is plain data, in its validation, or in choosing its `core` revision. Such a
  * refusal ends the process (`./process.ts`). No admin listener opens, since no validated `listen.admin` exists yet,
- * and nothing else is opened either. [AE-1, AE-3, MD-2, CF-1, CF-2, CF-3, Q102, Q137 B]
+ * and nothing else is opened either.
  *
  * The log is then the only place that says why, so it says it in full, for `umbradb run` and for any program that
  * calls `startProcess`:
  * - first `startup refused: <code> (<n> finding(s)); the process ends`, where `<code>` is the refusal's code
- *   (`./failures.ts`) [design §11];
+ *   (`./failures.ts`);
  * - then one `startup refused: <finding>` per finding. A finding reads `<path>: <message> [<code>]`, as
  *   `umbradb config check` prints it (`../config/findings.ts`). A validation finding or a value that is not plain data
  *   is reported at its path; the loader's refusal or a missing `core` revision is reported at the file. A fault of the
@@ -20,13 +20,13 @@
  * file a finding is at: before the validation nothing tells a configuration's secrets apart but the validation's own
  * reading of them (`configSecrets`, `earlyRedactor`), and the URL patterns. What UmbraDB writes in its own words is
  * never redacted, whatever a secret's text: the header's code and count, each finding's code, and a finding's path
- * inside the configuration or the options. [CF-4, AE-6, L63]
+ * inside the configuration or the options.
  *
  * **The refusal a host is given** ({@link shownRefusal}): a refusal whose text holds a secret the redaction knows — a
  * module file's own error quoted in its message, a user module's value in its declaration's refusal, a path — is given
  * as a copy with that text redacted, its code, details and cause kept; any other refusal is given as it is. Its details'
  * own words ({@link OWN_WORDS}: its reason, its findings' rules and paths, …) are kept as they are, so a caller can
- * still tell one refusal from another. [CF-4, AE-6, L63, LM-9]
+ * still tell one refusal from another.
  */
 
 import { type ConfigFinding, refusalFindings } from "../config/findings.js";
@@ -54,7 +54,7 @@ export function configurationFindings(error: unknown): string[] {
 /**
  * One finding's text as `findingText` (`../config/findings.ts`) writes it, through `redact` where it may hold the
  * host's text (see the module comment): its message, and its path when it is the file the refusal names (`atFile`); its
- * code, and a path UmbraDB wrote, as they are. [CF-4, L63]
+ * code, and a path UmbraDB wrote, as they are.
  */
 function redactedFindingText(found: ConfigFinding, atFile: boolean, redact: (text: string) => string): string {
   const path = atFile ? redact(found.path) : found.path;
@@ -91,7 +91,7 @@ export function configurationRefusalLines(error: unknown, redact: (text: string)
  * paths and names it writes — inside the configuration or the options (`path`, `option`, `field`, `setting`,
  * `settings`, `request`), a surface, the options given twice, a source's hook members. A string under one of them, in a
  * list under it included, is kept as it is; every other string of the details is redacted (a file, a module's id, an
- * error's code, a message). [CF-4, L63, LM-9]
+ * error's code, a message).
  */
 export const OWN_WORDS: ReadonlySet<string> = new Set([
   "reason",
@@ -115,7 +115,7 @@ export const OWN_WORDS: ReadonlySet<string> = new Set([
 
 /**
  * `value` with every string through `redact` but those under one of {@link OWN_WORDS} (`key`, the member holding it, or
- * holding the list it is in): arrays and plain objects copied when one inside changed, else `value`. [CF-4, L63]
+ * holding the list it is in): arrays and plain objects copied when one inside changed, else `value`.
  */
 function redactedValue(value: unknown, redact: (text: string) => string, key: string | null = null): unknown {
   if (typeof value === "string") return key !== null && OWN_WORDS.has(key) ? value : redact(value);
@@ -136,7 +136,7 @@ function redactedValue(value: unknown, redact: (text: string) => string, key: st
 /**
  * The refusal `error` as a host is shown it (see the module comment): an `UmbraError` whose message or details
  * `redact` changes is copied — its code, its message and details redacted but their own words, its cause —, else
- * `error` itself. [CF-4, AE-6, L63]
+ * `error` itself.
  */
 export function shownRefusal(error: unknown, redact: (text: string) => string): unknown {
   if (!(error instanceof UmbraError)) return error;

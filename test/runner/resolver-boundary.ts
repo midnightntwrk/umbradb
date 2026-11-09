@@ -10,7 +10,6 @@ import ts from "typescript";
  * namespace import, an element access by its name — that resolves, through every import alias and re-export, to the
  * guarded declaration; a renamed import is found by what it resolves to, not by its name, and a comment or a string is
  * never one. Import and export specifiers, type positions (`typeof f`) and the declaration's own name are not calls.
- * [L56 STATIC, LM-1]
  *
  * The sources are what `tsconfig.json` compiles, the tests (`test/`) and the Vitest configurations excepted: `src/`,
  * `browser/`, `bench/` and `tools/`. The tests are left out because they test these functions themselves.
@@ -26,7 +25,7 @@ export interface Guard {
   readonly caller: string;
 }
 
-/** L56: the resolver's own steps, and the engine's network planner. [L56, LM-1] */
+/** The resolver's own steps, and the engine's network planner. */
 export const GUARDS: readonly Guard[] = Object.freeze([
   { name: "commandBuild", caller: "src/runner/resolve.ts" },
   { name: "buildDeclarations", caller: "src/runner/resolve.ts" },
@@ -123,7 +122,7 @@ export interface Boundary {
 
 /**
  * The boundary of `files` (absolute paths; see the module comment). `host` reads the sources (a fixture's copy of one
- * file for the negative control); the files on disk unless given. [L56 STATIC]
+ * file for the negative control); the files on disk unless given.
  */
 export function boundaryOf(
   files: readonly string[],

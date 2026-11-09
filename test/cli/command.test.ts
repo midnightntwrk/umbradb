@@ -21,24 +21,24 @@ import { type CommandResult, inProcess, REPOSITORY } from "./cli-fixtures.js";
  * - `umbradb sync` and `umbradb` with no argument print the usage and exit 2.
  * - `run`, `config check`, `backup` and `restore` are recognized: `config check` runs, `run` starts the process (the
  *   full coverage is in `./run.test.ts`), and `backup` and `restore` read their configuration file (the full coverage
- *   is in `test/backup/`). [A6 CI, LS-6]
+ *   is in `test/backup/`).
  *
  * Also the command's argument errors: each prints the usage and exits 2, and a `--database` value is never echoed.
  */
 
 const CWD = tmpdir();
 
-/** "Prints the usage and exits 2": the usage on stderr, nothing on stdout. [A6 CI] */
+/** "Prints the usage and exits 2": the usage on stderr, nothing on stdout. */
 function printsUsage(result: CommandResult): boolean {
   return result.code === EXIT.usage && result.stderr.includes(USAGE) && result.stdout === "";
 }
 
-/** "Recognized": neither the usage's exit code nor its text. [A6 CI] */
+/** "Recognized": neither the usage's exit code nor its text. */
 function recognized(result: CommandResult): boolean {
   return result.code !== EXIT.usage && !result.stderr.includes(USAGE) && !result.stdout.includes(USAGE);
 }
 
-describe("A6: an unknown subcommand or none prints the usage and exits 2 (LS-6)", () => {
+describe("an unknown subcommand or none prints the usage and exits 2", () => {
   it("umbradb with no argument", async () => {
     const result = await inProcess([], CWD);
     expect(printsUsage(result)).toBe(true);
@@ -86,7 +86,7 @@ describe("A6: an unknown subcommand or none prints the usage and exits 2 (LS-6)"
     expect(result.stderr).not.toContain("pw-4-4-ARG");
   });
 
-  it("the usage names each command in design §12's form, and the exit statuses", () => {
+  it("the usage names each command in the form, and the exit statuses", () => {
     expect(USAGE).toContain("Usage: umbradb <command>");
     expect(USAGE).toContain("umbradb run [--config <file>] [--update-hash=<hash>]");
     expect(USAGE).toContain("umbradb config check <file> [--database]");
@@ -104,10 +104,10 @@ describe("A6: an unknown subcommand or none prints the usage and exits 2 (LS-6)"
   });
 });
 
-describe("A6: run, config check, backup and restore are recognized (LS-6)", () => {
+describe("run, config check, backup and restore are recognized", () => {
   it("umbradb run is recognized: it starts the process of the file, which here refuses, and exits 1 once stopped", async () => {
     // A file written as plain data, refused after its validation and before its database opens (PGlite without the
-    // development opt-in), with its admin listener on a port of its own. [CF-9]
+    // development opt-in), with its admin listener on a port of its own.
     const directory = mkdtempSync(join(tmpdir(), "umbradb-run-a6-"));
     try {
       const config = {
@@ -193,7 +193,7 @@ describe("config check's arguments: a wrong one prints the usage and exits 2", (
     [["config", "check", "a.config.ts", "b.config.ts"], "config check takes one file"],
     [["config", "check", "--databse", "postgres://x/y", "a.config.ts"], "unknown option --databse"],
     [["config", "check", "a.config.ts", "-d", "postgres://x/y"], "unknown option -d"],
-    // --database takes no value; it reads the database the file configures. [Q167 A]
+    // --database takes no value; it reads the database the file configures.
     [["config", "check", "a.config.ts", "--database=postgres://x/a"], "--database takes no value"],
     [["config", "check", "a.config.ts", "--database="], "--database takes no value"],
     [["config", "check", "a.config.ts", "--database", "postgres://x/y"], "config check takes one file"],
@@ -223,14 +223,14 @@ describe("config check's arguments: a wrong one prints the usage and exits 2", (
   });
 });
 
-describe("A6's negative control", () => {
-  it("a command table that recognizes sync (and exits 0) fails A6's check, as an unknown subcommand exiting 0 would", async () => {
+describe("negative control", () => {
+  it("a command table that recognizes sync (and exits 0) fails the check, as an unknown subcommand exiting 0 would", async () => {
     const result = await inProcess(["sync"], CWD, { ...COMMANDS, sync: async () => EXIT.ok });
     expect(result.code).toBe(EXIT.ok);
     expect(printsUsage(result)).toBe(false);
   });
 
-  it("a command that prints the usage for run fails A6's recognized", async () => {
+  it("a command that prints the usage for run fails the recognized", async () => {
     const usage = async (_args: readonly string[], io: Parameters<(typeof COMMANDS)["run"]>[1]) => {
       io.stderr(USAGE);
       return EXIT.usage;
@@ -300,7 +300,7 @@ describe("the bin entry's work (runMain)", () => {
   });
 });
 
-describe("the package provides the umbradb command (LS-6, LS-1)", () => {
+describe("the package provides the umbradb command", () => {
   const read = (file: string) => JSON.parse(readFileSync(join(REPOSITORY, file), "utf8"));
 
   it("package.json's bin is the umbradb command only, the build's output of src/cli/main.ts; the lockfile agrees", () => {

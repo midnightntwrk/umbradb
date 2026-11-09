@@ -14,30 +14,30 @@ import { endedWithin, hello, rawClient, type RawClient } from "./raw-client.js";
 
 /**
  * The message protocol through a running core, on PostgreSQL 18.6 and PGlite 0.5.10. The core process listens on its
- * `listen.privateLink` (`127.0.0.1:0`) and a raw client (`./raw-client.ts`) speaks to it. [A115 CI, PP-4; design §8]
+ * `listen.privateLink` (`127.0.0.1:0`) and a raw client (`./raw-client.ts`) speaks to it.
  * - `hello` is answered with `hello-ack` (the genesis, S, the public cursor, the lockstep flag).
  * - Every commit is announced with `committed`.
  * - A `read-result` carries its request's `id`, the height read (`null` on an empty public database) and, per
  *   statement, the columns' names and types with the rows. A `bigint`, `numeric`, `bytea` and `jsonb` value each
  *   decode back to the value the core read.
  * - An unknown `v` or `type`, a message failing its schema, and the other faults close the connection. The unknown
- *   types include `api` and `api-result`, which the protocol does not have. [Q140 C]
+ *   types include `api` and `api-result`, which the protocol does not have.
  * - A second `hello` with a connected id is refused with `duplicate-instance`.
  * - Every one of the core's `hello-ack`, `committed` and `read-result` carries the same configuration hash,
- *   `configHash`. [PP-4, RN-16]
+ *   `configHash`.
  *
  * Committed negative controls, each failing its oracle: a decoder that drops a `bigint`'s precision or a `bytea`'s
  * bytes, a core that accepts a second `hello` of a connected id, and a transport that still answers `api` as the
- * earlier protocol did. [A115 CI]
+ * earlier protocol did.
  */
 
-/** A configuration hash's form: 32 bytes as `0x` and lowercase hex. [PP-4] */
+/** A configuration hash's form: 32 bytes as `0x` and lowercase hex. */
 const CONFIG_HASH = /^0x[0-9a-f]{64}$/;
 
 /** The core's `listen.privateLink`: a free port of the loopback interface. */
 const TRANSPORT = { listen: { privateLink: "127.0.0.1:0" } };
 
-/** A statement whose columns are of the four types the protocol test names, and two more. [A115 CI] */
+/** A statement whose columns are of the four types the protocol test names, and two more. */
 const TYPED_SQL =
   "SELECT 9223372036854775807::bigint AS b, 12345678901234567890.123456789::numeric AS n, '\\x00ff10'::bytea AS y, " +
   `'{"big": 123456789012345678901, "s": "x", "l": [1, null], "neg": -9007199254740993}'::jsonb AS j, ` +
@@ -53,7 +53,7 @@ function rowsOf(result: NonNullable<ReadResult["results"]>[number], decode: type
 /**
  * The oracle for a `read-result`'s values: every problem with `answer` (the core's answer to a `read` of
  * {@link TYPED_SQL}) read back with `decode`, against `direct`, what the core reads itself. None when each value
- * decodes back to what the core read. [A115 CI]
+ * decodes back to what the core read.
  */
 export function valueProblems(answer: Message, direct: readonly Record<string, unknown>[], decode: typeof decodeValue): string[] {
   if (answer.type !== "read-result" || answer.results === undefined) return [`the answer is no read-result with results: ${answer.type}`];
@@ -99,7 +99,7 @@ const lossyDecode: typeof decodeValue = (type, found) => {
 
 /**
  * An instance id of a test case's own, from its label: every character an instance id does not allow (a space, a
- * parenthesis) becomes `-`, so the id passes `hello`'s schema and the case reaches the fault it names. [PP-4, A115 CI]
+ * parenthesis) becomes `-`, so the id passes `hello`'s schema and the case reaches the fault it names.
  */
 const idOf = (label: string): string => label.replace(/[^A-Za-z0-9._:-]/g, "-");
 
@@ -114,7 +114,7 @@ async function greeted(address: string, instance: string): Promise<{ client: Raw
 /**
  * The oracle of the duplicate-instance rule against the transport at `address`: every problem. There is none when a
  * second `hello` of a connected id is refused with `duplicate-instance`, its connection closed, the first one kept, and
- * the id accepted again once the first closed. [PP-4]
+ * the id accepted again once the first closed.
  */
 export async function duplicateProblems(address: string): Promise<string[]> {
   const problems: string[] = [];
@@ -148,13 +148,13 @@ export async function duplicateProblems(address: string): Promise<string[]> {
   return problems;
 }
 
-/** An `api` message as the earlier protocol had it, before the type was removed. [Q140 C] */
+/** An `api` message as the earlier protocol had it, before the type was removed. */
 const API_TEXT = '{"v":1,"type":"api","id":"a-1","module":"stats","method":"totals","params":{"from":"1"}}';
 
 /**
  * The oracle for an `api` message, now an unknown `type`, against the transport at `address`: every problem. There
  * is none when a greeted connection that sends one is closed (1008, `unknown-type`) without an answer, and the core
- * keeps serving others. [A115 CI, Q140 C]
+ * keeps serving others.
  */
 export async function apiProblems(address: string): Promise<string[]> {
   const problems: string[] = [];
@@ -175,7 +175,7 @@ export async function apiProblems(address: string): Promise<string[]> {
   return problems;
 }
 
-describe.each(PRIVATE_BACKENDS)("A115: the core's process transport on $name", (backend: PrivateBackend) => {
+describe.each(PRIVATE_BACKENDS)("the core's process transport on $name", (backend: PrivateBackend) => {
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 
@@ -185,7 +185,7 @@ describe.each(PRIVATE_BACKENDS)("A115: the core's process transport on $name", (
   let configHash: string | undefined;
   beforeAll(async () => {
     const db = await backend.database("public");
-    // No instance listed: a core listing one waits for it before every height. [PP-6]
+    // No instance listed: a core listing one waits for it before every height.
     core = await startPublicCore({ database: db.setting, head: 3n, extra: TRANSPORT });
     address = core.transport();
   }, START_TIMEOUT_MS);
@@ -342,15 +342,15 @@ describe.each(PRIVATE_BACKENDS)("A115: the core's process transport on $name", (
     }
   }, TEST_TIMEOUT_MS);
 
-  it("an api message is an unknown type: it closes the connection unanswered (owner decision Q140 C)", async () => {
+  it("an api message is an unknown type: it closes the connection unanswered", async () => {
     expect(await apiProblems(address)).toEqual([]);
   }, TEST_TIMEOUT_MS);
 
   it.each([
     ["an unknown v", '{"v":2,"type":"hello","instance":"x","version":"v","height":"0","hash":null}', "unknown-version", true],
     ["an unknown type", '{"v":1,"type":"goodbye"}', "unknown-type", true],
-    ["an api message (no such type: Q140)", API_TEXT, "unknown-type", true],
-    ["an api-result message (no such type: Q140)", '{"v":1,"type":"api-result","id":"a-1","error":"not-found"}', "unknown-type", true],
+    ["an api message (no such type)", API_TEXT, "unknown-type", true],
+    ["an api-result message (no such type)", '{"v":1,"type":"api-result","id":"a-1","error":"not-found"}', "unknown-type", true],
     ["a message failing its schema", '{"v":1,"type":"read","id":"1","statements":[{"sql":"SELECT 1"}]}', "invalid-message", true],
     ["a mistyped field", '{"v":1,"type":"report","height":42,"hash":null}', "invalid-message", true],
     ["a text that is no JSON", "hello?", "not-json", true],
@@ -411,8 +411,8 @@ describe.each(PRIVATE_BACKENDS)("A115: the core's process transport on $name", (
   }, TEST_TIMEOUT_MS);
 });
 
-describe("A115 negative control (committed): a transport that still answers api fails the oracle", () => {
-  it("task 14.2's answer to an api message (api-result not-found, the connection kept) is seen", async () => {
+describe("negative control (committed): a transport that still answers api fails the oracle", () => {
+  it("the answer to an api message (api-result not-found, the connection kept) is seen", async () => {
     // A stand-in of the earlier protocol's core: hello answered, every api answered not-found with its id, the connection kept.
     const server = createServer();
     const wss = new WebSocketServer({ server });
@@ -442,13 +442,13 @@ describe("A115 negative control (committed): a transport that still answers api 
   });
 });
 
-describe.each(PRIVATE_BACKENDS)("A115: a read of an empty public database on $name", (backend: PrivateBackend) => {
+describe.each(PRIVATE_BACKENDS)("a read of an empty public database on $name", (backend: PrivateBackend) => {
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 
   it("before the first commit a read-result's height is null, and hello-ack's cursor null", async () => {
     const db = await backend.database("public");
-    // S is 5 and the node's head 2: the core waits for the node with nothing committed, its transport listening. [IN-2]
+    // S is 5 and the node's head 2: the core waits for the node with nothing committed, its transport listening.
     const core = launchPublicCore({ database: db.setting, head: 2n, start: 5, extra: TRANSPORT });
     try {
       const address = await core.transportWithin(START_TIMEOUT_MS);

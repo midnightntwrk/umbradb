@@ -5,7 +5,7 @@ import { type WorkEvent, workModule } from "./sigterm-module.js";
 
 /**
  * A process for the SIGTERM-in-transaction test, started by `sigterm.test.ts` with `node --import tsx` and one JSON
- * argument ({@link Job}); it reports each event as one JSON line on stdout ({@link WorkerEvent}). [A48, RN-13]
+ * argument ({@link Job}); it reports each event as one JSON line on stdout ({@link WorkerEvent}).
  *
  * `runner`: the process as `umbradb run` starts it — `startProcess` with the configuration file, its signal
  * from {@link terminationSignal} — over the test build with module `w` (`sigterm-module.ts`), whose `on-db-write` at

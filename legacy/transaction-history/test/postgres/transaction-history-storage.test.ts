@@ -162,7 +162,7 @@ describe("PgTransactionHistoryStorage", () => {
     });
   });
 
-  describe("identifier-subset pending-clear (spec: survives repeated merges)", () => {
+  describe("identifier-subset pending-clear (survives repeated merges)", () => {
     it("a pending entry survives while the finalized counterpart's identifiers have not grown to a superset, then clears once they do", async () => {
       const s = store();
       await s.gotPending(entry("pending1", ["a"]));

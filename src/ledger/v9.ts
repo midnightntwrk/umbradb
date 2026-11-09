@@ -1,17 +1,17 @@
 /**
- * The ledger v9 adapters, through the shared implementation of `./adapter.ts`: [LG-3, LG-6; design §5.1, §5.2]
+ * The ledger v9 adapters, through the shared implementation of `./adapter.ts`:
  *
  * - **`v9`**: ledger-9.1.0.0-rc.5 (runtime 2.1 on), vendored in `vendor/ledger/v9` with the ledger team's v8 → v9 state
- *   translation; `convertFromV8` runs the translation on the stored v8 state. [LG-9]
+ *   translation; `convertFromV8` runs the translation on the stored v8 state.
  * - **`v9-rc3`**: ledger-9.1.0.0-rc.3, the v9 that runtime 2.0 built (`midnight-node` 2.0.0-rc.4), vendored in
  *   `vendor/ledger/v9-rc3`. It is the same adapter over the rc.3 package, whose API matches rc.5. Only the release and
  *   the package differ, and it has no `convertFromV8`, since the node that builds it carries no translation. Its states
  *   share rc.5's storage format: a state it stored loads in the rc.5 package with the same root, which is how a
- *   2.0 → 2.1 upgrade carries it over (the ledger worker's engine). [Q139 A, A159]
+ *   2.0 → 2.1 upgrade carries it over (the ledger worker's engine).
  *
  * Both decode contract logs with the VM's own decoding (`decodeLogItem`, which the v9 patches export). `apply` reports
  * each contract log an applied segment emitted, with its value in the ledger's serialization (`serializeStateValue`,
- * the input `decodeLogItem` takes). [CC-2, CC-3]
+ * the input `decodeLogItem` takes).
  */
 
 import type * as V9Rc3Package from "../../vendor/ledger/v9-rc3/pkg/midnight_ledger_wasm_v9_fs.js";

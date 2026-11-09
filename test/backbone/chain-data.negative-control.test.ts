@@ -25,16 +25,15 @@ import { committed, halted, ingest, PATIENCE_MS } from "./ingest-harness.js";
  *
  * - `core-chain-events` decodes a block's events with the metadata of the block's own state. At U that is the new
  *   runtime's, whose `CodeUpdated` has a hash the old one's has not, so it halts at U, where the real module stores
- *   the events. [A91]
+ *   the events.
  * - `core-block-parsed` parses each transaction twice (a second parse of a copy, which the adapter cannot recognise as
  *   the same); the counted parses catch it. Another one places the regular transactions before the system ones (the
- *   body's order); the stored order catches it. [A92]
+ *   body's order); the stored order catches it.
  * - Outcomes are matched to the block's Midnight transactions by their place among the events rather than by their
  *   phase: a failed remark's `ExtrinsicFailed` becomes B's, and B's `TxPartialSuccess` becomes C's.
  *   `core-block-parsed` also checks each transaction's ledger hash against the one its placing event carries, which
  *   refuses that placement at `on-parse` (C's hash is not B's). So the control turns the check off, to show that the
  *   outcomes oracle catches the wrong outcomes; a second run with the check on shows the check halting the block.
- *   [A93]
  */
 
 /** Decodes with the block's own state's metadata (`state_getMetadata` at its hash) instead of `runtime-metadata`. */
@@ -127,7 +126,7 @@ describe.each(PROCESS_BACKENDS)("chain data's negative controls on $name", (back
     return { db, seen, process, status };
   }
 
-  it("A91's control: events decoded with the block's own state's metadata fail at U, where A91 stores them", async () => {
+  it("control: events decoded with the block's own state's metadata fail at U", async () => {
     const scenario = a91UpgradeScenario();
     const { db, status } = await run(scenario, [OWN_STATE_EVENTS], "halt");
     expect(status).toMatchObject({
@@ -141,7 +140,7 @@ describe.each(PROCESS_BACKENDS)("chain data's negative controls on $name", (back
     expect(problems.filter((problem) => /^height [12][: ]/.test(problem))).toEqual([]);
   }, PATIENCE_MS * 2);
 
-  it("A92's control: a parse counted twice fails A92", async () => {
+  it("control: a parse counted twice fails", async () => {
     const scenario = a92Scenario();
     const counter = countParses();
     let deserialized: Uint8Array[];
@@ -157,7 +156,7 @@ describe.each(PROCESS_BACKENDS)("chain data's negative controls on $name", (back
     );
   }, PATIENCE_MS * 2);
 
-  it("A92's control: regular transactions placed before the system one (body order) fail A92's order", async () => {
+  it("control: regular transactions placed before the system one (body order) fail the order", async () => {
     const scenario = a92Scenario();
     const counter = countParses();
     let deserialized: Uint8Array[];
@@ -173,7 +172,7 @@ describe.each(PROCESS_BACKENDS)("chain data's negative controls on $name", (back
     expect(problems[0]).toMatch(/^core_block_parsed\.transactions holds .*"kind":"regular".*"tx_index":"1n".*, expected/);
   }, PATIENCE_MS * 2);
 
-  it("A93's control: outcomes matched by event order instead of phase fail A93", async () => {
+  it("control: outcomes matched by event order instead of phase fail", async () => {
     const scenario = a93Scenario();
     const wrong = blockParsedWith({ place: eventOrder, chainHash: () => null });
     const { db, seen } = await run(scenario, [CORE_CHAIN_EVENTS, wrong, CORE_TX_RESULTS]);
@@ -183,7 +182,7 @@ describe.each(PROCESS_BACKENDS)("chain data's negative controls on $name", (back
     expect(problems[0]).toMatch(/"outcome":"failure","tx_index":"1n".*"outcome":"partial","tx_index":"2n".*, expected/);
   }, PATIENCE_MS * 2);
 
-  it("A93's control with the chain-hash check on (task 12.3): the same placement halts block 1 at on-parse", async () => {
+  it("control with the chain-hash check on: the same placement halts block 1 at on-parse", async () => {
     const scenario = a93Scenario();
     const { process, status } = await run(scenario, [CORE_CHAIN_EVENTS, blockParsedWith({ place: eventOrder }), CORE_TX_RESULTS], "halt");
     expect(status).toMatchObject({

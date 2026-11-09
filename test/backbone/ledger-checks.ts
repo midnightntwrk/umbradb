@@ -11,7 +11,6 @@ import type { LedgerScenario } from "./ledger-tapes.js";
  * The oracles of the `core-ledger-state` process tests, shared by `ledger-state.test.ts` and its negative controls.
  * Each reads the database after a process ran a scenario (`./ledger-tapes.ts`) and lists what differs from what the
  * scenario's chain and its replay hold; the list is empty when the criterion holds. Imports nothing of Vitest.
- * [A82, A99, A106, A107]
  */
 
 const text = (value: unknown): string => JSON.stringify(value, (_key, v: unknown) => (typeof v === "bigint" ? `${v}n` : v));
@@ -29,7 +28,7 @@ export function ledgerItemsSeen(): LedgerItemsSeen {
   return { state: new Map(), events: new Map(), segments: new Map(), logs: new Map() };
 }
 
-/** A user module requiring `core-ledger-state`'s four items and recording them at `on-compute`. [LG-16] */
+/** A user module requiring `core-ledger-state`'s four items and recording them at `on-compute`. */
 export function ledgerItemsWatcher(seen: LedgerItemsSeen): ModuleDeclaration {
   return {
     id: "ledger-watch",
@@ -51,7 +50,7 @@ export function ledgerItemsWatcher(seen: LedgerItemsSeen): ModuleDeclaration {
   };
 }
 
-/** The `states` rows `core-ledger-state` must hold for `scenario`'s heights up to `through`. [LG-16] */
+/** The `states` rows `core-ledger-state` must hold for `scenario`'s heights up to `through`. */
 function expectedStates(scenario: LedgerScenario, through: bigint): string[] {
   return scenario.heights
     .filter((h) => h.height <= through)
@@ -125,11 +124,11 @@ function rowProblems(table: string, actual: string[], expected: string[]): strin
  * `core_ledger_state.states`, `segment_results` and `events` hold, for every height of `scenario` up to `through`:
  * - the state's key and its root, which is the node's;
  * - the six stored tree values, none null. The zswap first free index is the package's published getter's; the six are
- *   the reference state's, read by the patched `stateTrees` [Q138 A];
+ *   the reference state's, read by the patched `stateTrees`;
  * - each segment's success, and each ledger event other than logs with its kind, segments, bytes and extracted fields,
  *   as the test's adapter gave them.
  *
- * The reference replay also agrees on every transaction's outcome. [A107, LG-16]
+ * The reference replay also agrees on every transaction's outcome.
  */
 export async function a107Problems(db: ProcessDatabase, scenario: LedgerScenario, through: bigint = scenario.head): Promise<string[]> {
   const heights = scenario.heights.filter((h) => h.height <= through);
@@ -157,7 +156,6 @@ export async function a107Problems(db: ProcessDatabase, scenario: LedgerScenario
 /**
  * The process reached `scenario`'s head without halting, and every height's stored root is the node's
  * (`midnight_ledgerStateRoot`, the tape's answer); `status` is the process's, read before it was stopped.
- * [A99, LG-8, LG-15]
  */
 export async function a99Problems(db: ProcessDatabase, status: ProcessStatus, scenario: LedgerScenario): Promise<string[]> {
   const problems: string[] = [];
@@ -208,7 +206,6 @@ async function reachableNodes(
  * - every stored node is reached by some stored state. Nothing but the states' nodes is written, and a released
  *   state's unused nodes are deleted by the block after its release, so this holds after each block;
  * - the root counts are the latest state's key at 1 (with `retainStates` 0, the state before it was released).
- * [LG-11, LG-14]
  */
 export async function nodeProblems(db: ProcessDatabase): Promise<string[]> {
   const problems: string[] = [];
@@ -238,7 +235,7 @@ const PER_HEIGHT = [
  * With a package whose root is wrong at `bad`, the process halted there with `root-mismatch`, in
  * `core-ledger-state`'s `on-compute`, and stored nothing of the block: no row at `bad` in any table, the cursor at
  * `bad` − 1, no node but those the states up to it reach, and the root counts as `bad` − 1 left them. `status` is the
- * process's, read before it was stopped. [A106, LG-15]
+ * process's, read before it was stopped.
  */
 export async function a106Problems(db: ProcessDatabase, status: ProcessStatus, bad: bigint): Promise<string[]> {
   const problems: string[] = [];
@@ -255,7 +252,7 @@ export async function a106Problems(db: ProcessDatabase, status: ProcessStatus, b
   return problems;
 }
 
-/** The rows of `core_block_parsed.transactions` and `core_tx_results.results` at block 0, in body order. [IN-7] */
+/** The rows of `core_block_parsed.transactions` and `core_tx_results.results` at block 0, in body order. */
 export async function blockZeroProblems(db: ProcessDatabase, scenario: LedgerScenario): Promise<string[]> {
   const rows = await db.query(
     `SELECT t.tx_index::text, t.kind, encode(t.tx_hash, 'hex') AS hash, r.outcome FROM core_block_parsed.transactions t
