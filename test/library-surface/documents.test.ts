@@ -39,7 +39,14 @@ function treeFiles(): string[] {
 }
 
 const tree = treeFiles();
-const markdown: TextFile[] = tree.filter((file) => file.endsWith(".md")).map((file) => ({ file, text: read(file) }));
+/**
+ * Verbatim copies of another repository, whose links point into it: `token-metadata`'s vendored MIP-0018 reference
+ * (byte-for-byte with its `SOURCE.md`, checked by `test/features/token-metadata/provenance.test.ts`).
+ */
+const VERBATIM_COPIES = ["src/features/token-metadata/vendor/"];
+const markdown: TextFile[] = tree
+  .filter((file) => file.endsWith(".md") && !VERBATIM_COPIES.some((dir) => file.startsWith(dir)))
+  .map((file) => ({ file, text: read(file) }));
 
 describe("0.9.5's documents removed, and nothing left pointing at them", () => {
   it("0.9.5's documents are not in the tree", () => {

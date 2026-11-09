@@ -239,8 +239,13 @@ const LOADED = new RegExp(String.raw`(?:require|import)\s*\(\s*${MODULE}\s*\)`);
  * forbidden imports in its negative controls), and the conformance gate test's stand-in for Vitest, whose grandchild
  * must be unguarded so that the test shows the gate's own kill reaching it (the test lists both pids with the guard
  * once it reads them).
+ *
+ * And the MIP-0018 reference's vector runner, a verbatim copy (`test/fixtures/mip0018/SOURCE.md`, checked byte for
+ * byte), which `token-metadata`'s vectors test runs only inside a `spawnSync` child of its own: the one process it
+ * starts, the vector adapter, reads its stdin and ends at its end, so it ends with the runner.
  */
 const UNGUARDED = new Set([
+  "test/fixtures/mip0018/vectors/tools/run.ts",
   "test/child-processes.ts",
   "test/child-processes.parent.ts",
   "test/child-processes.test.ts",
