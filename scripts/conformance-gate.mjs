@@ -161,9 +161,10 @@ if (timedOut && !vitestEnded) {
       "",
       `conformance-gate: FAILED — vitest ran past its deadline of ${deadlineMs} ms (UMBRADB_CONFORMANCE_DEADLINE_MS) and is being killed with all of its workers.`,
       "A test worker has most likely hung where no test timeout can end it: one fork at ~100 % CPU that prints nothing, with every other file reported.",
-      "Known causes: V8 stuck in its fatal-error path while freeing WebAssembly (docs/issues/00027-v8-fatal-wasm-free-hangs-test-worker.md)",
-      "and a busy loop inside PGlite (docs/issues/00054-slow-block-case-hung-in-pglite.md). Re-run the unreported file alone; if it hangs again,",
-      "take a native `sample` (macOS) or a `--cpu-prof` profile of the worker before killing it.",
+      "Two causes are known, each keeping the worker's main thread from ever returning to its event loop:",
+      "V8 stuck in its fatal-error path while freeing WebAssembly code, and a busy loop inside PGlite (its WebAssembly calling into JavaScript and back).",
+      "Re-run the unreported file alone; if it hangs again, take a native `sample` (macOS) or a `--cpu-prof` profile of the worker",
+      "before killing it.",
     ].join("\n"),
   );
   signalTree("SIGTERM");

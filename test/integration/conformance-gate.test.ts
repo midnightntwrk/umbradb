@@ -152,8 +152,9 @@ describe("conformance gate — the deadline on its Vitest run", () => {
         expect(run.code).toBe(124);
         expect(run.stderr).toContain(`ran past its deadline of ${DEADLINE_MS} ms (UMBRADB_CONFORMANCE_DEADLINE_MS)`);
         expect(run.stderr).toMatch(/test worker has most likely hung/);
-        expect(run.stderr).toContain("docs/issues/00027-v8-fatal-wasm-free-hangs-test-worker.md");
-        expect(run.stderr).toContain("docs/issues/00054-slow-block-case-hung-in-pglite.md");
+        expect(run.stderr).toContain("V8 stuck in its fatal-error path while freeing WebAssembly code");
+        expect(run.stderr).toContain("a busy loop inside PGlite (its WebAssembly calling into JavaScript and back)");
+        expect(run.stderr).not.toMatch(/docs\/issues\//);
         // No reconciliation of a report this run never wrote.
         expect(run.stdout).not.toContain("reconciling the required-tests manifest");
         expect(await survivors([pids!.child, pids!.grandchild]), "processes of the run still alive after the gate").toEqual(

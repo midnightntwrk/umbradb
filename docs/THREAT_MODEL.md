@@ -261,8 +261,7 @@ CI is configured to rebuild all three carried versions on amd64 and arm64 and co
 Runtime and browser package checks are described above.
 
 Pins, byte comparisons and package checks do not establish that upstream code is benign.
-Vendored Rust advisory coverage and release provenance remain open
-(`docs/issues/00048-vendored-crates-advisories-and-provenance.md:8`).
+Vendored Rust advisory coverage and release provenance remain open.
 Workflow definitions are evidence of configured controls, not evidence that this commit passed them.
 
 ## The Midnight node
@@ -438,7 +437,7 @@ PGlite and browser operation are development facilities, not a production privac
 (`src/db/durability-probe.ts:11`, `browser/src/process-worker.ts:6`).
 
 Resource exhaustion, node unavailability and lockstep peer failures remain availability risks
-(`docs/issues/00047-service-resource-bounds.md:8`, `src/private/lockstep.ts:144`).
+(`src/private/lockstep.ts:144`).
 The controls described here do not establish protection against a hostile host, database administrator,
 module, backup producer or browser origin.
 
@@ -488,17 +487,17 @@ What may go into this repository's git history:
 
 4. **Certificate-to-instance binding — open, issue 00045.** Mutual TLS checks roots but accepts a self-declared
    instance id and counts its initial height without checking its hash
-   (`docs/issues/00045-transport-mtls-instance-binding.md:3`, `src/private/core-transport.ts:198`,
+   (`src/private/core-transport.ts:198`,
    `src/private/core-transport.ts:311`, `src/private/core-transport.ts:318`).
 
 5. **Admin and module API access policy — open, issue 00046.** Admin defaults to all interfaces, and HTTP services
    supply no caller authentication or WebSocket Origin policy
-   (`docs/issues/00046-admin-and-api-exposure-defaults.md:3`, `src/config/core-settings.ts:60`,
+   (`src/config/core-settings.ts:60`,
    `src/admin/serve.ts:66`, `src/runner/api-socket.ts:334`, `src/runner/api-socket.ts:300`).
 
 6. **Service resource bounds — open, issue 00047.** Connections and subscriptions have no aggregate admission limit,
    transport results are materialized before the size check, PGlite read timeouts are not applied and ledger work has
-   no deadline (`docs/issues/00047-service-resource-bounds.md:3`, `src/private/core-transport.ts:456`,
+   no deadline (`src/private/core-transport.ts:456`,
    `src/private/core-transport.ts:392`, `src/private/core-transport.ts:405`,
    `src/runner/api-session.ts:207`, `src/db/pglite.ts:308`, `src/ledger/worker/host.ts:16`).
 
@@ -509,9 +508,7 @@ What may go into this repository's git history:
 
 8. **Vendored Rust advisories and release provenance — open, issue 00048.** Ledger rebuild comparisons do not provide
    an advisory scan of the patched crate graphs or release provenance
-   (`docs/issues/00048-vendored-crates-advisories-and-provenance.md:3`,
-   `docs/issues/00048-vendored-crates-advisories-and-provenance.md:8`,
-   `.github/workflows/vendored-ledger.yml:45`, `.github/workflows/supply-chain.yml:78`).
+   (`.github/workflows/vendored-ledger.yml:45`, `.github/workflows/supply-chain.yml:78`).
 
 9. **Commit policy — fixed by task 17.4b, as built.** [The commit policy](#commit-policy) above holds the
    no-secrets rule and locally generated, ignored `0600` secret-file policy, with exact historical fingerprints in
@@ -521,6 +518,6 @@ What may go into this repository's git history:
 
 Related **issue 00051 remains open**: transport instance ids accept arbitrary non-empty text, including line
 breaks, which reaches core log lines and instance status
-(`docs/issues/00051-transport-instance-id-unbounded.md:3`, `src/private/messages.ts:97`,
+(`src/private/messages.ts:97`,
 `src/private/core-transport.ts:321`, `src/private/core-transport.ts:369`, `src/private/instances.ts:40`).
 This remains true of task 14.2b's refusal log even though that log excludes the read's statement text.
