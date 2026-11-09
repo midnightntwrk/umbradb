@@ -458,6 +458,54 @@
         "servesOnItsOwn": "every criterion that replays from genesis, the v8 to v9 upgrade and conversion (A96, A100, LG-9, 0.2 second item), A91 events at U, A93 outcomes",
         "needs": "nothing"
       }
+    },
+    {
+      "name": "preview-v9-0-2000",
+      "file": "preview-v9-0-2000.tape.jsonl",
+      "network": "preview",
+      "from": 0,
+      "to": 2000,
+      "sha256": "05129f47dcac337e4a0417299dc23b55e0b5a87cc0edeb14f25fc74941951678",
+      "bytes": 32357421,
+      "records": 12018,
+      "source": {
+        "endpoint": "wss://rpc.preview.midnight.network",
+        "nodeVersion": "2.1.101-913ec011",
+        "recorded": "2026-11-09"
+      },
+      "bounds": "Preview from genesis after its restart from the same genesis hash (issue 00088), over both of its runtime upgrades: 1,000,000 to 1,000,300 at 556 and 1,000,300 to 2,001,100 (ledger v9) at 1,572. Its 21 regular transactions are all at genesis: no contract call before the v9 runtime. Replayed from 0 with the ledger core it halts at 1,572 with metadata-mismatch (issue 00089).",
+      "notes": {
+        "recordedWith": "npx tsx tools/tape/main.ts range --node wss://rpc.preview.midnight.network --from 0 --to 2000 --out preview-v9-0-2000.tape.jsonl --concurrency 4 --live-seconds 0",
+        "requests": 12016,
+        "seconds": 411.4,
+        "liveWindowSeconds": 0,
+        "runtimes": [
+          {
+            "height": 0,
+            "specVersion": 1000000
+          },
+          {
+            "height": 556,
+            "specVersion": 1000300
+          },
+          {
+            "height": 1572,
+            "specVersion": 2001100
+          }
+        ],
+        "metadataHeights": [
+          0,
+          556,
+          1572
+        ],
+        "boundaries": [],
+        "genesis": {
+          "hash": "0x3c096de209e06a1a8c52be7bda109ee8c891a42288c0a9db5495f9616dd13796",
+          "specVersion": 1000000
+        },
+        "servesOnItsOwn": "issue 00089's reproduction (the v9 upgrade block), and preview's new chain from genesis to 1,571",
+        "needs": "the fix of issue 00089 to replay past 1,571"
+      }
     }
   ]
 }
