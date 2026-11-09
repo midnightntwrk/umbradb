@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { type ContractLog, contractLogsItemOf, writeLogRows } from "../../src/backbone/contract-logs/contract-logs.js";
-import { LOG_EVENT_TYPES } from "../../src/backbone/contract-logs/sql.js";
+import { CONTRACT_LOGS_MIGRATIONS, LOG_EVENT_TYPES } from "../../src/backbone/contract-logs/sql.js";
 import type { BlockTransaction } from "../../src/backbone/core-block-parsed/core-block-parsed.js";
 import {
   CONTRACT_LOG_SITES_TASK,
@@ -13,6 +13,7 @@ import { mainThreadLogReader as inThreadLogReader } from "./main-thread-log-read
 import { literalAt, type LogSite, logSitesOf } from "../../src/backbone/core-contract-logs-fast/transcripts.js";
 import { fullLogsOf } from "../../src/backbone/core-contract-logs-full/core-contract-logs-full.js";
 import { contractStatesOf, writeStateRows } from "../../src/backbone/core-contract-states/core-contract-states.js";
+import { CONTRACT_STATES_MIGRATIONS } from "../../src/backbone/core-contract-states/sql.js";
 import { loadLedgerPackage } from "../../src/ledger/load.js";
 import type { ChainOutcome, LedgerPackage, VmLog } from "../../src/ledger/types.js";
 import type { BlockContext } from "../../src/modules/declaration.js";
@@ -385,8 +386,20 @@ describe("core-contract-states' rows", () => {
   });
 });
 
-describe("contract_logs.logs' event types", () => {
-  it("are eleven", () => {
-    expect(LOG_EVENT_TYPES).toHaveLength(11);
+describe("the contract tables", () => {
+  /** The columns the first migration's `CREATE TABLE` gives its table, in their order. */
+  const created = (sql: string): string[] =>
+    (/\(\n([\s\S]*?)\n\)/.exec(sql)?.[1] as string).split("\n").map((l) => /^\s*([a-z_]+) [a-z]/.exec(l)?.[1]).filter((c): c is string => c !== undefined && c !== "primary");
+
+  it("contract_logs.logs and core_contract_states.states have exactly their columns, and the event types are the eleven", () => {
+    expect(created(CONTRACT_LOGS_MIGRATIONS[0]!.sql)).toEqual([
+      "height", "tx_index", "log_index", "contract_address", "entry_point", "logical_segment", "log_version", "event_type", "data",
+    ]);
+    expect(created(CONTRACT_STATES_MIGRATIONS[0]!.sql)).toEqual(["contract_address", "height", "state_key", "zswap_state_key"]);
+    expect(LOG_EVENT_TYPES).toEqual([
+      "ShieldedSpend", "ShieldedReceive", "ShieldedMint", "ShieldedBurn",
+      "UnshieldedSpend", "UnshieldedReceive", "UnshieldedMint", "UnshieldedBurn",
+      "Paused", "Unpaused", "Misc",
+    ]);
   });
 });
