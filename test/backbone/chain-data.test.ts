@@ -5,6 +5,7 @@ import { canonicalJson } from "../../src/backbone/core-chain-events/scale-value.
 import { CORE_TX_RESULTS } from "../../src/backbone/core-tx-results/core-tx-results.js";
 import { type LedgerHost, startLedgerWorker } from "../../src/ledger/worker/host.js";
 import type { TapeRecord } from "../../tools/tape/index.js";
+import { outsideNodeMethods } from "../node/node-methods.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
 import { a91Problems, a92Problems, a93Problems, itemsSeen, itemsWatcher } from "./chain-data-checks.js";
 import {
@@ -48,10 +49,11 @@ const CORE = [CORE_CHAIN_EVENTS, CORE_BLOCK_PARSED, CORE_TX_RESULTS];
 /** The test packages' loader, which the ledger worker imports: it counts the package's native parses. */
 const COUNTING = new URL("../ledger/fixtures/ledger-test-loader.ts", import.meta.url);
 
-/** The calls the tape node received that went unanswered (not on the tape, or an invalid request). */
-function unansweredCalls(calls: readonly { readonly method: unknown; readonly outcome?: unknown }[]): string[] {
+/** The calls the tape node received that are not allowed node methods, or that went unanswered. */
+function callProblems(calls: readonly { readonly method: unknown; readonly outcome?: unknown }[]): string[] {
+  const outside = outsideNodeMethods(calls.map((call) => call.method as string));
   const unanswered = calls.filter((call) => call.outcome === "not-on-tape" || call.outcome === "invalid-request");
-  return unanswered.map((call) => `${String(call.method)}: ${String(call.outcome)}`);
+  return [...outside.map((method) => `called ${method}`), ...unanswered.map((call) => `${String(call.method)}: ${String(call.outcome)}`)];
 }
 
 describe.each(PROCESS_BACKENDS)("chain data through the process on $name", (backend: ProcessBackend) => {
@@ -79,7 +81,7 @@ describe.each(PROCESS_BACKENDS)("chain data through the process on $name", (back
     } finally {
       await process.close();
     }
-    expect(unansweredCalls(process.node.calls)).toEqual([]);
+    expect(callProblems(process.node.calls)).toEqual([]);
     return { db, seen, process, deserialized };
   }
 

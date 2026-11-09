@@ -1,4 +1,5 @@
 import type { TapeNode } from "../../tools/tape/index.js";
+import { outsideNodeMethods } from "../node/node-methods.js";
 import type { ProcessDatabase } from "../runner/process-backends.js";
 import { type ChainBlock, hex } from "./fetch-fixtures.js";
 import type { Watched } from "./ingest-harness.js";
@@ -89,9 +90,16 @@ export async function a80Problems(
   return [...problems, ...(await committedOnce(db, seen, chain, from, to))];
 }
 
-/** No request the tape node received was answered `not-on-tape` or refused as invalid. */
+/**
+ * Every request the tape node received is one of the allowed node methods, and none was answered `not-on-tape` or
+ * refused as invalid.
+ */
 export function a83Problems(node: TapeNode): string[] {
   const problems: string[] = [];
+  const methods = node.calls.map((call) => call.method ?? "(not a request)");
+  for (const method of outsideNodeMethods(methods)) {
+    problems.push(`the node received ${method}, which the allowed node methods do not list`);
+  }
   for (const call of node.calls) {
     if (call.outcome === "not-on-tape" || call.outcome === "invalid-request") {
       problems.push(`the node answered ${call.method} ${JSON.stringify(call.params)} ${call.outcome}`);

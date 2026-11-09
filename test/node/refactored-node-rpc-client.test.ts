@@ -1,8 +1,9 @@
 import { createServer } from "node:http";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { UmbraError } from "../../src/db/errors.js";
 import { connectWebSocket, type ConnectSocket, NodeClient } from "../../src/node/index.js";
-import { closeServer, FakeNode, listenOnRandomPort, MAINNET_BLOCK, recorded } from "./fake-node.js";
+import { closeServer, FakeNode, listenOnRandomPort, MAINNET_BLOCK, RECEIVED_BY_ANY_NODE, recorded } from "./fake-node.js";
+import { outsideNodeMethods } from "./node-methods.js";
 import { ManualTimers, until } from "./manual-timers.js";
 
 /**
@@ -40,6 +41,10 @@ const clients: NodeClient[] = [];
 afterEach(async () => {
   for (const client of clients.splice(0)) await client.close();
   for (const node of nodes.splice(0)) await node.stop();
+});
+
+afterAll(() => {
+  expect(outsideNodeMethods(RECEIVED_BY_ANY_NODE.map((request) => request.method))).toEqual([]);
 });
 
 async function setUp(timeoutMs?: number): Promise<{ node: FakeNode; client: NodeClient; timers: ManualTimers }> {
