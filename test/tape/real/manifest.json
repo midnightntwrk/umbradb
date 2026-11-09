@@ -460,8 +460,8 @@
       }
     },
     {
-      "name": "preview-v9-0-2000",
-      "file": "preview-v9-0-2000.tape.jsonl",
+      "name": "preview-0-2000-v8-v9",
+      "file": "preview-0-2000-v8-v9.tape.jsonl",
       "network": "preview",
       "from": 0,
       "to": 2000,
@@ -473,9 +473,9 @@
         "nodeVersion": "2.1.101-913ec011",
         "recorded": "2026-11-09"
       },
-      "bounds": "Preview from genesis after its restart from the same genesis hash, over both of its runtime upgrades: 1,000,000 to 1,000,300 at 556 and 1,000,300 to 2,001,100 (ledger v9) at 1,572. Its 21 regular transactions are all at genesis: no contract call before the v9 runtime. It is the first official network's delayed runtime upgrade (runtime 2.1's system_version 3) on a tape that starts at genesis.",
+      "bounds": "Preview from genesis after its restart from the same genesis hash, over both of its runtime upgrades: 1,000,000 to 1,000,300 at 556 and 1,000,300 to 2,001,100 (ledger v9) at 1,572. Its 21 regular transactions are all at genesis: no contract call before the v9 runtime. It is the first official network's delayed runtime upgrade (runtime 2.1's system_version 3) on a tape that starts at genesis. Recorded as preview-v9-0-2000.tape.jsonl and renamed to the tapes collection's naming ({network}-{start}-{end}[-{notes}]); the bytes and SHA-256 are unchanged.",
       "notes": {
-        "recordedWith": "npx tsx tools/tape/main.ts range --node wss://rpc.preview.midnight.network --from 0 --to 2000 --out preview-v9-0-2000.tape.jsonl --concurrency 4 --live-seconds 0",
+        "recordedWith": "npx tsx tools/tape/main.ts range --node wss://rpc.preview.midnight.network --from 0 --to 2000 --out preview-0-2000-v8-v9.tape.jsonl --concurrency 4 --live-seconds 0",
         "requests": 12016,
         "seconds": 411.4,
         "liveWindowSeconds": 0,
@@ -504,7 +504,8 @@
           "specVersion": 1000000
         },
         "servesOnItsOwn": "preview's new chain from genesis across an upgrade of the earlier form (556) and a delayed one (1,572): test/ledger/delayed-upgrade.test.ts",
-        "needs": "nothing; it starts at genesis"
+        "needs": "nothing; it starts at genesis",
+        "liveWindowNote": "Recorded with --live-seconds 0: the tape ends with the two subscriptions, the finalized head and two notifications, not a 60-second window."
       }
     },
     {
@@ -547,7 +548,8 @@
           "specVersion": 22000
         },
         "servesOnItsOwn": "the delayed upgrade's first block, replayed with core-contract-logs-fast's core from a block before it: test/ledger/delayed-upgrade.test.ts",
-        "needs": "the network's genesis hash and header put before its records (startup asks for them; test/ledger/fixtures/networks/)"
+        "needs": "the network's genesis hash and header put before its records (startup asks for them; test/ledger/fixtures/networks/)",
+        "liveWindowNote": "Recorded with --live-seconds 0: the tape ends with the two subscriptions, the finalized head and two notifications, not a 60-second window."
       }
     },
     {
@@ -590,7 +592,8 @@
           "specVersion": 22000
         },
         "servesOnItsOwn": "the delayed upgrade's first block, replayed with core-contract-logs-fast's core from a block before it: test/ledger/delayed-upgrade.test.ts",
-        "needs": "the network's genesis hash and header put before its records (startup asks for them; test/ledger/fixtures/networks/)"
+        "needs": "the network's genesis hash and header put before its records (startup asks for them; test/ledger/fixtures/networks/)",
+        "liveWindowNote": "Recorded with --live-seconds 0: the tape ends with the two subscriptions, the finalized head and two notifications, not a 60-second window."
       }
     }
   ]

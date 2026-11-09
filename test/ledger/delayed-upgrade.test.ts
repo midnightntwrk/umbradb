@@ -17,7 +17,7 @@ import { type FoundTape, tapeTest } from "../tape/real/real-tapes.js";
  * of the new runtime, F, is built by it and its own state holds it, while its parent's state still holds the old one
  * (`apply_authorized_upgrade` in U only staged the code).
  *
- * - `preview-v9-0-2000` from genesis with the ledger core and `core-contract-logs-full` commits every height
+ * - `preview-0-2000-v8-v9` from genesis with the ledger core and `core-contract-logs-full` commits every height
  *   (`core-ledger-state` checks each state root against the node's), across an earlier-form upgrade (556) and a
  *   delayed one (F = 1,572).
  * - `mainnet-3346039-3346239` and `preprod-3348334-3348534` with `core-contract-logs-fast`'s core, from the
@@ -38,7 +38,7 @@ interface DelayedTape {
   readonly f: number;
 }
 
-const PREVIEW: DelayedTape = { tape: "preview-v9-0-2000", network: "preview", start: 0, f: 1_572 };
+const PREVIEW: DelayedTape = { tape: "preview-0-2000-v8-v9", network: "preview", start: 0, f: 1_572 };
 const MAINNET: DelayedTape = { tape: "mainnet-3346039-3346239", network: "mainnet", start: 3_346_040, f: 3_346_139 };
 const PREPROD: DelayedTape = { tape: "preprod-3348334-3348534", network: "preprod", start: 3_348_335, f: 3_348_434 };
 
