@@ -7,7 +7,7 @@ import type { BlockContext, ModuleDeclaration, PointName } from "../../src/modul
  * `block` item `c-note` in `on-parse` and writes one row per height in `on-db-write`. At the point and height to hold
  * it reports that it holds there and waits for ever, so the test kills the process at exactly that point. Shared by the
  * worker process (`crash.worker.ts`) and the test's restart in its own process, so both run the same declaration (the
- * same migration checksum). [A44, A46, RN-5, RN-9, RN-11]
+ * same migration checksum).
  */
 
 /** The points `c` registers. */

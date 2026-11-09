@@ -11,7 +11,7 @@ import { decodeChildren, hex, refsOf } from "../ledger/node-format.js";
  * the queue. Until then the mark-and-sweep runs and leaves `ref_counts` and `unreferenced` empty, which the content's
  * checks refuse; so a database a process builds with this test build gets them written by the test after each block's
  * writes, computed here from the stored rows and `root_counts` with the independent node format of
- * `../ledger/node-format.ts` ({@link countsAndQueue}). [R29, A55, A57, A126, DT-3, LG-11]
+ * `../ledger/node-format.ts` ({@link countsAndQueue}).
  *
  * When `CORE_LEDGER_STATE` declares the tables itself, the build here declares them the same way, so a test written on
  * it runs unchanged on the build's own declaration.
@@ -56,7 +56,7 @@ export interface StoredRow {
 /**
  * The reference counts and the queue `rows` and the persisted keys `roots` give: each key referenced through the rows'
  * child lists (embedded children included) with its number of references, and the rows with neither a reference nor a
- * root count, each in byte order. [LG-14]
+ * root count, each in byte order.
  */
 export function countsAndQueue(
   rows: readonly Pick<StoredRow, "key" | "children">[],

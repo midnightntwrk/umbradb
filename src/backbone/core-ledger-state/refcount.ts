@@ -1,17 +1,17 @@
 /**
  * Reclamation of stored ledger nodes by reference counting: each block deletes the stored nodes that nothing stored
  * references and no root count persists, and every node only they referenced, while keeping, for one block, what the
- * state after h − 1 may still reach. [LG-14]
+ * state after h − 1 may still reach.
  *
  * **The tables** (`./sql.ts`): `nodes`, each stored node with the child list the ledger last wrote for it;
  * `ref_counts`, the number of references to each key in the stored child lists, a row only while it is above 0;
  * `root_counts`; and `unreferenced`, the queue: the stored nodes with neither a reference nor a root count. A
  * reference is one occurrence of a key in a child list, through embedded children (`../../ledger/node-refs.ts`): a key
- * listed twice is two references. [LG-11, LG-14]
+ * listed twice is two references.
  *
  * **One block's step** ({@link refcountStep}) is computed in `core-ledger-state`'s `on-compute`, from the tables as
  * committed at h − 1 ({@link RefcountTables}, read through on-compute's read) and the block's batch (its flushed nodes
- * and root count changes, held in memory). It keeps nothing between blocks. Its rules, for block h: [LG-14]
+ * and root count changes, held in memory). It keeps nothing between blocks. Its rules, for block h:
  * 1. The batch's nodes are classified: **new** (no row at h − 1), **rewritten** (a row with another child list, which
  *    the database compares) or written again unchanged, which changes nothing.
  * 2. Each reference in the batch's child list of a new or rewritten node adds 1 to its key's count.
@@ -34,10 +34,10 @@
  * transaction. {@link writeRefcount} writes the step in `on-db-write`, after the batch's node writes (`writeBlock`): a
  * rewritten node can be deleted, and deleting it first would store it again. Each of its statements, like each read,
  * runs over at most {@link KEYS_PER_STATEMENT} keys, and must affect the rows the step computed, else the block halts
- * (`row-count-mismatch`) and its transaction rolls back. [LG-14]
+ * (`row-count-mismatch`) and its transaction rolls back.
  *
- * {@link RefcountFault} is the seam through which a negative control puts a fault into the step [R12], and
- * {@link RefcountCheck} names the check one leaves out [R11].
+ * {@link RefcountFault} is the seam through which a negative control puts a fault into the step, and
+ * {@link RefcountCheck} names the check one leaves out.
  */
 
 import type { BlockWriteHandle, ReadHandle } from "../../db/api.js";
@@ -56,11 +56,11 @@ import {
   unreferencedKeys,
 } from "./sql.js";
 
-/** The keys (or nodes) one statement of the step reads or writes at most: a long list is sent in chunks. [LG-14] */
+/** The keys (or nodes) one statement of the step reads or writes at most: a long list is sent in chunks. */
 export const KEYS_PER_STATEMENT = 1_000;
 
 /**
- * A fault a negative control puts into the step through its tables seam; a build's tables carry none: [R12]
+ * A fault a negative control puts into the step through its tables seam; a build's tables carry none:
  * - `second-occurrence-not-decremented`: a child repeated in a child list loses only one reference when the list is
  *   subtracted (rule 3, the cascade), so it leaks;
  * - `unchanged-counted`: the references of a node written again unchanged are counted again;
@@ -83,7 +83,7 @@ export type RefcountFault =
 /**
  * The checks of the step, by the reason they halt with: rule 8's two, and the affected rows of
  * {@link writeRefcount}'s statements. A negative control leaves one out to show what it catches; a build runs every
- * one. [R11]
+ * one.
  */
 export type RefcountCheck = "negative-count" | "missing-reference" | "row-count-mismatch";
 
@@ -99,7 +99,7 @@ const NOTHING: KeyCounts = Object.freeze({ row: false, refs: 0, roots: 0 });
 
 /**
  * What the step reads of the tables as committed at h − 1. Keys come back by `0x`-less hex; child lists come back as
- * their references, in list order, so their bytes are dropped once read. [LG-14]
+ * their references, in list order, so their bytes are dropped once read.
  */
 export interface RefcountTables {
   /** Those of `keys` that `nodes` holds. */
@@ -112,7 +112,7 @@ export interface RefcountTables {
   counts(keys: readonly Uint8Array[]): Promise<ReadonlyMap<string, KeyCounts>>;
   /** For those of `keys` that `nodes` holds, their stored child lists' references; a key that is no row has none. */
   references(keys: readonly Uint8Array[]): Promise<ReadonlyMap<string, readonly Uint8Array[]>>;
-  /** The fault a negative control puts into the step; none in a build. [R12] */
+  /** The fault a negative control puts into the step; none in a build. */
   readonly fault?: RefcountFault;
 }
 
@@ -153,7 +153,7 @@ const sorted = (keys: Iterable<string>): string[] => [...keys].sort();
 /** Each key once, in its first place. */
 const once = (keys: readonly Uint8Array[]): Uint8Array[] => [...new Map(keys.map((key) => [hexOf(key), key])).values()];
 
-/** `ledger-refcount-invalid` for block `height`. [LG-14] */
+/** `ledger-refcount-invalid` for block `height`. */
 function invalid(height: bigint, reason: string, message: string, details: Record<string, unknown>): UmbraError {
   return new UmbraError("ledger-refcount-invalid", `block ${height}: ${message} (${reason})`, {
     reason,
@@ -165,7 +165,7 @@ function invalid(height: bigint, reason: string, message: string, details: Recor
 /**
  * Block `height`'s step (see the module comment): `tables` as committed at h − 1, `batch` the block's, `on` whether
  * the `core` entry's `sweep` is on at h. Throws `ledger-refcount-invalid` when a check fails; a negative control's
- * `unchecked` check is left out. [LG-14, R11]
+ * `unchecked` check is left out.
  */
 export async function refcountStep(
   tables: RefcountTables,
@@ -353,7 +353,7 @@ function* chunksOf<T>(items: readonly T[]): Generator<T[]> {
 
 /**
  * The {@link RefcountTables} of a read at h − 1 (`core-ledger-state`'s on-compute read), with no fault. Each read runs
- * in statements of {@link KEYS_PER_STATEMENT} keys, none for no key; child lists are parsed chunk by chunk. [LG-14]
+ * in statements of {@link KEYS_PER_STATEMENT} keys, none for no key; child lists are parsed chunk by chunk.
  */
 export function sqlRefcountTables(read: Pick<ReadHandle, "query">): RefcountTables {
   return {
@@ -392,7 +392,7 @@ export function sqlRefcountTables(read: Pick<ReadHandle, "query">): RefcountTabl
  * affected `written` rows: the counts' changes merged into `ref_counts`, the queue's changes, then the deleted rows.
  * Each statement must affect the rows the step computed (the node writes: its new and rewritten nodes), summed over its
  * chunks; otherwise it throws `ledger-refcount-invalid` (`row-count-mismatch`), naming the statement. A negative
- * control's `unchecked` `row-count-mismatch` leaves that check out. [LG-14, R11]
+ * control's `unchecked` `row-count-mismatch` leaves that check out.
  */
 export async function writeRefcount(
   w: Pick<BlockWriteHandle, "execute">,

@@ -12,7 +12,7 @@ import { callTransaction, cellValue, contractFixture, hex, NETWORK_ID, RAW, T0 }
 //   a node reclamation deletes (the eviction is then tried again);
 // - evicting a node of a state the engine holds is refused.
 //
-// The test package's loader records what the package was asked. [LG-14; design §5.4]
+// The test package's loader records what the package was asked.
 
 const LONG = 240_000;
 const LOADER = new URL("./fixtures/ledger-test-loader.ts", import.meta.url);
@@ -56,7 +56,7 @@ interface Probe {
 let host: LedgerHost | undefined;
 afterEach(() => host?.close());
 
-describe("the ledger worker's eviction (task 12.5; LG-14)", () => {
+describe("the ledger worker's eviction", () => {
   it("evicts deleted nodes, so a node needed again is flushed again; frees a dropped parse's natives; frees kept parses when one holds a deleted node", { timeout: LONG }, async () => {
     host = startLedgerWorker({ loader: LOADER, loaderData: { recordEvictions: true } });
     const worker = host;

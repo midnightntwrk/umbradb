@@ -16,7 +16,7 @@ import { UmbraError } from "../../src/db/errors.js";
  * What the browser build replaces of Node.js, held to Node.js's own, since the browser must give the same results:
  * SHA-256 — synchronous, incremental, fed in any pieces — and the `Buffer` operations UmbraDB's sources use, each on
  * random inputs against Node.js's (fast-check, seed recorded); and the browser's pure pieces: the database's location,
- * the Web Lock's name, the development opt-in and the page's JSON-ready values. [BR-4]
+ * the Web Lock's name, the development opt-in and the page's JSON-ready values.
  */
 
 const SEED = 20261027;
@@ -223,7 +223,7 @@ describe("the browser build's database, lock and configuration", () => {
     expect(databaseOf("a129", "p1")).toEqual({ kind: "pglite", path: "a129-p1" });
   });
 
-  it("sets the development opt-in on every core entry and nothing else (BR-1)", () => {
+  it("sets the development opt-in on every core entry and nothing else", () => {
     const data = { entries: [{ id: "core", start: 3, config: { network: "preview" } }, { id: "m", start: 3, config: {} }, { id: "core", start: 9 }] };
     expect(withDevelopmentOptIn(data)).toEqual({
       entries: [

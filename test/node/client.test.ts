@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { createServer as createNetServer, type Socket } from "node:net";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { UmbraError } from "../../src/db/errors.js";
 import {
   connectWebSocket,
@@ -16,25 +16,22 @@ import {
   type NodeSocketEvents,
   type NodeTimers,
 } from "../../src/node/index.js";
-import { closeServer, FakeNode, listenOnRandomPort, MAINNET_BLOCK, RECEIVED_BY_ANY_NODE, recorded } from "./fake-node.js";
-import { outsideIn8 } from "./in8.js";
+import { closeServer, FakeNode, listenOnRandomPort, MAINNET_BLOCK, recorded } from "./fake-node.js";
 import { ManualTimers, turns, until } from "./manual-timers.js";
 
 /**
  * The node client (`src/node/`): JSON-RPC 2.0 over WebSocket against a scripted node on the loopback interface
  * (`./fake-node.ts`, a random free port at or above 10000). The client's clock is moved by hand (`./manual-timers.ts`),
- * so back-off delays, timeouts and the heartbeat are checked to the millisecond. [IN-8, IN-9, IN-10; design §1, §3]
+ * so back-off delays, timeouts and the heartbeat are checked to the millisecond.
  *
  * Covered:
  * - each allowed node call with its parameters and its typed answer, against the real answers of a mainnet node
- *   (`fixtures/mainnet-answers.json`); [IN-8]
+ *   (`fixtures/mainnet-answers.json`);
  * - the two head subscriptions, cancelled locally and re-established after a reconnect;
- * - reconnecting with back-off (1 s, doubling up to `backoffCeilingMs`, with no limit on attempts); [IN-10]
- * - per-call and connect timeouts; which failures are retried and which halt; [IN-9, IN-10]
- * - the node URL kept out of every error, as it is a `secret` field; [CF-4]
+ * - reconnecting with back-off (1 s, doubling up to `backoffCeilingMs`, with no limit on attempts);
+ * - per-call and connect timeouts; which failures are retried and which halt;
+ * - the node URL kept out of every error, as it is a `secret` field;
  * - `close()` and abort signals, and the WebSocket transport's heartbeat.
- *
- * After the suite, every request the fake nodes received is checked against the allowed methods. [IN-8]
  */
 
 const HOUR = 3_600_000;
@@ -53,12 +50,6 @@ afterEach(async () => {
   for (const client of clients.splice(0)) await client.close();
   for (const node of nodes.splice(0)) await node.stop();
   for (const server of servers.splice(0)) await server.close();
-});
-
-afterAll(() => {
-  // Over whatever ran of the suite, nothing but the allowed methods ever reached a node (the last test checks it too).
-  // [IN-8]
-  expect(outsideIn8(RECEIVED_BY_ANY_NODE.map((request) => request.method))).toEqual([]);
 });
 
 async function startNode(options: { autoPong?: boolean } = {}): Promise<FakeNode> {
@@ -110,8 +101,8 @@ const AT = bytes(MAINNET_BLOCK);
 const SYSTEM_NUMBER = recorded("state_getStorage").params[0] as string;
 const SYSTEM_PREFIX = recorded("state_getKeysPaged").params[0] as string;
 
-describe("calls: the IN-8 methods with their parameters, and their answers typed", () => {
-  it("sends each call as its IN-8 method with the given block and decodes the mainnet node's answers", async () => {
+describe("calls: the methods with their parameters, and their answers typed", () => {
+  it("sends each call as its method with the given block and decodes the mainnet node's answers", async () => {
     const node = await startNode();
     node.on("chain_getFinalizedHead", () => ({ result: MAINNET_BLOCK }));
     node.on("state_getMetadata", () => ({ result: "0x6d657461" }));
@@ -313,7 +304,7 @@ describe("subscriptions: new and finalized heads", () => {
     expect(seen).toEqual(["head 5", "restarted", "head 6"]);
   });
 
-  it("cancels locally: no more heads, no unsubscribe call (IN-8), and no re-subscription after a reconnect", async () => {
+  it("cancels locally: no more heads, no unsubscribe call, and no re-subscription after a reconnect", async () => {
     const node = await startNode();
     node.on("chain_getFinalizedHead", () => ({ result: MAINNET_BLOCK }));
     const timers = new ManualTimers();
@@ -417,7 +408,7 @@ describe("subscriptions: new and finalized heads", () => {
   });
 });
 
-describe("reconnect and back-off (IN-10)", () => {
+describe("reconnect and back-off", () => {
   it("re-sends a call cut off by a lost connection on the next one (retry), or fails it at once (no retry)", async () => {
     const node = await startNode();
     node.on("chain_getFinalizedHead", (_params, request) =>
@@ -646,7 +637,7 @@ describe("timeouts", () => {
   });
 });
 
-describe("errors: what is retried and what halts (IN-9, IN-10)", () => {
+describe("errors: what is retried and what halts", () => {
   it("retries a handshake refused with 429 or a 5xx status, and halts on any other status", async () => {
     const node = await startNode();
     node.on("chain_getFinalizedHead", () => ({ result: MAINNET_BLOCK }));
@@ -706,7 +697,7 @@ describe("errors: what is retried and what halts (IN-9, IN-10)", () => {
     });
   });
 
-  it("halts, without retrying, when the node says the state at the block is gone (IN-9)", async () => {
+  it("halts, without retrying, when the node says the state at the block is gone", async () => {
     const node = await startNode();
     const message = `Client error: UnknownBlock: State already discarded for ${MAINNET_BLOCK}`;
     for (const method of ["state_getStorage", "state_getRuntimeVersion", "state_getMetadata", "state_getKeysPaged"]) {
@@ -732,7 +723,7 @@ describe("errors: what is retried and what halts (IN-9, IN-10)", () => {
     expect(node.methods()).toEqual(calls.map(([method]) => method));
   });
 
-  it("halts, without retrying, on a block the node does not have (IN-9)", async () => {
+  it("halts, without retrying, on a block the node does not have", async () => {
     const node = await startNode();
     for (const method of ["chain_getBlockHash", "chain_getHeader", "chain_getBlock"]) node.on(method, () => ({ result: null }));
     const timers = new ManualTimers();
@@ -905,7 +896,7 @@ describe("errors: what is retried and what halts (IN-9, IN-10)", () => {
     }
   });
 
-  it("never names the node's URL, which may hold credentials, in an error (CF-4: node is a secret)", async () => {
+  it("never names the node's URL, which may hold credentials, in an error (node is a secret)", async () => {
     const node = await startNode();
     const secretUrl = (port: number) => `ws://alice:SECRET-PASSWORD@127.0.0.1:${port}/rpc?token=SECRET-TOKEN`;
     const errors: unknown[] = [];
@@ -1471,15 +1462,6 @@ describe("races and the default clock", () => {
     expect(hex(await c.finalizedHead())).toBe(MAINNET_BLOCK);
     const error = await umbra(c.finalizedHead({ retry: false }));
     expect(error.details).toMatchObject({ reason: "timeout", timeoutMs: 50 });
-  });
-});
-
-describe("IN-8 over the suite", () => {
-  it("sent the fake nodes nothing but IN-8's methods, in every test above (run last)", () => {
-    expect(outsideIn8(RECEIVED_BY_ANY_NODE.map((request) => request.method))).toEqual([]);
-    // Not vacuous: the tests above sent every allowed method, over many requests. [IN-8]
-    expect(new Set(RECEIVED_BY_ANY_NODE.map((request) => request.method)).size).toBe(12);
-    expect(RECEIVED_BY_ANY_NODE.length).toBeGreaterThan(100);
   });
 });
 

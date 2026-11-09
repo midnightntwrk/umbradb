@@ -14,7 +14,7 @@ import type { DeclarationSet } from "../../src/modules/validation.js";
  * - `core-block-commit`;
  * - `core-digest`.
  *
- * A negative control replaces one part. [IN-2, IN-3, CD-1, CD-3, RN-3]
+ * A negative control replaces one part.
  *
  * Imports nothing of Vitest, so that a worker process (`chain-bootstrap.worker.ts`) builds the same declarations, with
  * the same migration checksums, as the test that restarts after it.

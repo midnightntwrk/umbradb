@@ -21,11 +21,11 @@ import type { DatabaseParts } from "../../src/config/database-parts.js";
  * A thrown error in each of `on-fetch`, `on-parse`, `on-start-height`, `on-compute`, the first and the last
  * `on-db-write` callback leaves no row of h, the cursor h − 1, and the state `halted` with h, the module and the point.
  * An error in `on-after-db-write` (or in `on-stop-height`, the other point after the commit) halts with h committed.
- * The process stays up: its module API keeps answering at the cursor until it is stopped. [A43, RN-8]
+ * The process stays up: its module API keeps answering at the cursor until it is stopped.
  *
  * Then the other halt codes of the design's refusals and halts, through the process: the cause's own code where the
  * design names one, `callback-error` for a misuse, `unexpected-cursor` for the loop's cursor check, `database-error`
- * for any other failure. [design §11]
+ * for any other failure.
  *
  * The build: `a-first`, `early` (1–5), `late` (from 5), `m-mid` and `z-last`, each writing one row per height in its
  * `on-db-write` and logging every point, in that order — so at `on-db-write` `core-block-commit` is the first callback
@@ -48,7 +48,7 @@ const POINTS: readonly PointName[] = [
 ];
 const TABLES = ["a_first", "early", "late", "m_mid", "z_last"] as const;
 
-/** One row of the table: the point and the module whose callback throws at H, and whether H committed first. [A43] */
+/** One row of the table: the point and the module whose callback throws at H, and whether H committed first. */
 interface A43Case {
   readonly name: string;
   readonly point: PointName;
@@ -89,12 +89,12 @@ function failingAt(
   return { ...declaration, points: points as ModuleDeclaration["points"] };
 }
 
-/** The callback-failure build's modules, logging to `log`. [A43] */
+/** The callback-failure build's modules, logging to `log`. */
 function a43Modules(log: string[]): ModuleDeclaration[] {
   const reader = loggingModule("reader", log, [], {
     points: {
       async "on-start-api"(_p, api) {
-        // The module states its height itself, with the envelope's helpers. [RN-16]
+        // The module states its height itself, with the envelope's helpers.
         api.http("GET", "/height", async (_request, read) => ({
           status: 200,
           headers: chainDataHeaders(await readChainDataView(read)),
@@ -106,7 +106,7 @@ function a43Modules(log: string[]): ModuleDeclaration[] {
   return [...["a-first", "early", "late", "m-mid", "z-last"].map((id) => loggingModule(id, log, POINTS)), reader];
 }
 
-/** The callback-failure build's configuration on `database`. [A43] */
+/** The callback-failure build's configuration on `database`. */
 function a43Entries(database: DatabaseParts, user: readonly ModuleDeclaration[]) {
   const of = (id: string) => user.find((part) => part.id === id) as ModuleDeclaration;
   return [
@@ -123,7 +123,7 @@ function a43Entries(database: DatabaseParts, user: readonly ModuleDeclaration[])
 /** How a run ended: processing's end, the source waiting at the head, or nothing within the patience. */
 type Outcome = ProcessingEnd | "waiting" | "timeout";
 
-/** What one callback-failure run showed. [A43] */
+/** What one callback-failure run showed. */
 interface A43Observation {
   readonly outcome: Outcome;
   readonly status: ProcessStatus;
@@ -204,7 +204,7 @@ const showOutcome = (outcome: Outcome): string =>
       : `nowhere within ${PATIENCE_MS} ms of the failure`
     : outcome.kind;
 
-/** The oracle for one row of the table: every problem with what was observed, none when it halted as required. [A43] */
+/** The oracle for one row of the table: every problem with what was observed, none when it halted as required. */
 function a43Problems(failing: A43Case, observed: A43Observation): string[] {
   const problems: string[] = [];
   const { status } = observed;
@@ -310,7 +310,7 @@ function shiftedSource(): BlockSource & BlockItemSource {
 /**
  * A test's `core-block-commit`: it writes the block's two rows without its parent check, so a block above a missing
  * height is not refused in its `on-db-write` and reaches the loop's cursor check before the `COMMIT`, as in the loop's
- * own test of that check (`loop.test.ts`). Every other part is the build's. [IN-4; design §11]
+ * own test of that check (`loop.test.ts`). Every other part is the build's.
  */
 function rowsWithoutParentCheck(part: ModuleDeclaration): ModuleDeclaration {
   if (part.id !== "core-block-commit") return part;
@@ -346,7 +346,7 @@ interface CursorElsewhere {
  * out another UmbraDB process, not a session that writes the tables), adds block 7's row to the blocks table while the
  * process holds height 3 in a module's `on-compute`. Block 3's parent is stored, so core-block-commit's parent check
  * passes; the block transaction's cursor read then finds block 7's row, the table's last, and the loop's check before
- * the `COMMIT` halts. Block 3 rolls back; the table keeps 1, 2 and the other writer's 7. [IN-4; design §11]
+ * the `COMMIT` halts. Block 3 rolls back; the table keeps 1, 2 and the other writer's 7.
  */
 async function anotherWriterAbove(db: ProcessDatabase): Promise<CursorElsewhere> {
   const admin = db.admin;
@@ -389,17 +389,17 @@ async function anotherWriterAbove(db: ProcessDatabase): Promise<CursorElsewhere>
  * refuses it (`parent-mismatch`), at or below the cursor the block stored there does (the blocks table's primary key,
  * or at S core-chain's anchor, which is recorded once). The check is reached through
  * {@link rowsWithoutParentCheck} instead, the source answering height 3 with block 4 ({@link shiftedSource}). Block 3's
- * transaction, which wrote block 4's row, rolls back; the table keeps 1 and 2. [IN-4; design §11]
+ * transaction, which wrote block 4's row, rolls back; the table keeps 1 and 2.
  */
 async function rowsOfAnotherHeight(db: ProcessDatabase): Promise<CursorElsewhere> {
   return { halt: await haltOf(db, [], shiftedSource(), rowsWithoutParentCheck), left: 4n, kept: [1, 2] };
 }
 
-describe("A43: a failure before COMMIT leaves nothing and halts; after it, halts with h committed (RN-8), on PostgreSQL and on PGlite", () => {
+describe("a failure before COMMIT leaves nothing and halts; after it, halts with h committed, on PostgreSQL and on PGlite", () => {
   beforeAll(() => Promise.all(PROCESS_BACKENDS.map((backend) => backend.start())), 180_000);
   afterAll(() => Promise.all(PROCESS_BACKENDS.map((backend) => backend.stop())), 60_000);
 
-  it("[[runner.fault.pre-commit-failure-leaves-nothing]] A43: each point's thrown error halts at h with its module and point, nothing of h kept before the commit, h committed after it, on PostgreSQL and on PGlite", async () => {
+  it("[[runner.fault.pre-commit-failure-leaves-nothing]] each point's thrown error halts at h with its module and point, nothing of h kept before the commit, h committed after it, on PostgreSQL and on PGlite", async () => {
     for (const backend of PROCESS_BACKENDS) {
       for (const failing of A43_CASES) {
         const label = `${backend.name}: ${failing.name}`;
@@ -413,7 +413,7 @@ describe("A43: a failure before COMMIT leaves nothing and halts; after it, halts
     }
   }, 900_000);
 
-  it("negative control: a loop that commits h despite a failure in the last on-db-write callback fails A43", async () => {
+  it("negative control: a loop that commits h despite a failure in the last on-db-write callback fails", async () => {
     const last = A43_CASES.find((failing) => failing.name === "the last on-db-write callback") as A43Case;
     for (const backend of PROCESS_BACKENDS) {
       const problems = a43Problems(last, await a43Run(await backend.database(), last, CommitsDespiteLastWrite));
@@ -440,7 +440,7 @@ describe("A43: a failure before COMMIT leaves nothing and halts; after it, halts
     }
   }, 300_000);
 
-  it("negative control: a process whose state stays syncing after a halt fails A43", async () => {
+  it("negative control: a process whose state stays syncing after a halt fails", async () => {
     const compute = A43_CASES.find((failing) => failing.point === "on-compute") as A43Case;
     for (const backend of PROCESS_BACKENDS) {
       const problems = a43Problems(compute, await a43Run(await backend.database(), compute, SilentHalt));
@@ -454,12 +454,12 @@ describe("A43: a failure before COMMIT leaves nothing and halts; after it, halts
   }, 300_000);
 });
 
-describe.each(PROCESS_BACKENDS)("halts (RN-8, design §11) on $name", (backend) => {
+describe.each(PROCESS_BACKENDS)("halts on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  describe("the halts' codes through the process (design §11)", () => {
-    it("a TRUNCATE in on-db-write halts with truncate-not-allowed, the module and the point (DB-14)", async () => {
+  describe("the halts' codes through the process", () => {
+    it("a TRUNCATE in on-db-write halts with truncate-not-allowed, the module and the point", async () => {
       const truncating = loggingModule("truncating", [], [], {
         points: {
           async "on-db-write"(_p, b, w) {
@@ -495,7 +495,7 @@ describe.each(PROCESS_BACKENDS)("halts (RN-8, design §11) on $name", (backend) 
       });
     }, 180_000);
 
-    it("a block write handle kept and used in a later block halts with callback-error naming the module that kept it (DB-3)", async () => {
+    it("a block write handle kept and used in a later block halts with callback-error naming the module that kept it", async () => {
       let kept: BlockWriteHandle | undefined;
       const keeper = loggingModule("keeper", [], [], {
         points: {
@@ -521,7 +521,7 @@ describe.each(PROCESS_BACKENDS)("halts (RN-8, design §11) on $name", (backend) 
 
     it("a block whose cursor row is not the height's halts with unexpected-cursor, naming no module or point", async () => {
       // Another writer's row above the height on PostgreSQL; on PGlite, where none can exist, a core-block-commit
-      // without its parent check. [IN-4, IN-12; design §11]
+      // without its parent check.
       const db = await backend.database();
       const staged = backend.kind === "postgres" ? await anotherWriterAbove(db) : await rowsOfAnotherHeight(db);
       const { status, ended, lines } = staged.halt;
@@ -542,9 +542,9 @@ describe.each(PROCESS_BACKENDS)("halts (RN-8, design §11) on $name", (backend) 
       expect(await blockHeights(db)).toEqual(staged.kept);
     }, 180_000);
 
-    it("a source that answers height 3 with block 4 halts with parent-mismatch in core-block-commit's on-db-write, before the loop's cursor check (IN-4)", async () => {
+    it("a source that answers height 3 with block 4 halts with parent-mismatch in core-block-commit's on-db-write, before the loop's cursor check", async () => {
       // The database holds no block at 3, block 4's parent: core-block-commit refuses it inside the block transaction,
-      // so the loop never reads the cursor row block 4 wrote. [IN-4; design §11]
+      // so the loop never reads the cursor row block 4 wrote.
       const db = await backend.database();
       const { status, ended, lines } = await haltOf(db, [], shiftedSource());
       expect(ended).toMatchObject({ kind: "failed" });
@@ -577,7 +577,7 @@ describe.each(PROCESS_BACKENDS)("halts (RN-8, design §11) on $name", (backend) 
       expect(status).toMatchObject({ state: "halted", reason: { code: "database-error", height: 6n, module: null, point: null } });
     }, 180_000);
 
-    it("a node-requirement in on-fetch halts with node-requirement, the module and the point (IN-9)", async () => {
+    it("a node-requirement in on-fetch halts with node-requirement, the module and the point", async () => {
       const fetching = loggingModule("fetching", [], [], {
         points: {
           async "on-fetch"(_p, b) {
@@ -632,8 +632,8 @@ describe.each(PROCESS_BACKENDS)("halts (RN-8, design §11) on $name", (backend) 
         ready: false,
         reason: { code: "callback-error", height: 3n, module: "late", point: "on-compute" },
       });
-      // The stop's own line first (issue 00072), naming the height it found in progress; then the halt, which ended
-      // processing: no line of an end by the stop. [RN-13]
+      // The stop's own line first, naming the height it found in progress; then the halt, which ended
+      // processing: no line of an end by the stop.
       expect(lines).toHaveLength(2);
       expect(lines[0]).toBe("stopping (stop()): height 3 is in progress; it commits or stores nothing, and no new height starts");
       expect(lines[1]).toMatch(/^processing halted \(callback-error\): /);

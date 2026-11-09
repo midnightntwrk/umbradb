@@ -4,9 +4,9 @@ import { NETWORK_ID, RAW } from "./adapter-fixtures.js";
 
 // What may leave the ledger worker: plain data that a structured clone carries unchanged. And what may not: above all
 // a ledger package's object, which a structured clone copies as a plain object holding a pointer into the package's
-// memory. [LG-7, LG-17, Q49; design §5.5]
+// memory.
 
-describe("plain data (task 12.6; LG-17)", () => {
+describe("plain data", () => {
   it("accepts the protocol's plain data, nested, shared, frozen", () => {
     const shared = { a: 1 };
     const values: unknown[] = [

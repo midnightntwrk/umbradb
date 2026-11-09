@@ -1,33 +1,32 @@
 /**
  * The options of `startUmbraDB` (`./start-umbradb.ts`) held to their shapes. A refusal of them is one of startup's
  * configuration step (class A): `startUmbraDB` never throws for it, the engine refuses with it before anything opens,
- * and `started` rejects with it. [LM-1, LM-3, LM-10; design §4, §5.1, §7.2]
+ * and `started` rejects with it.
  *
  * **The options read once** ({@link readOptions}): every option, and inside `config`, `network` and `modules` every
  * member the checks and the engine use, is read once into plain data (frozen copies of the objects, a file URL as a URL
  * of its own, the signal checked as one), each read guarded: a getter or a proxy's trap that throws, a revoked proxy,
  * is a finding at its path (`network.api.port: reading it threw`), never a throw out of `startUmbraDB`. What is checked
- * is what the engine is given; nothing of the host's objects is read again. [LM-1, L62]
+ * is what the engine is given; nothing of the host's objects is read again.
  *
  * **The options' shapes** ({@link optionFindings}): an option of a type it cannot have, an unknown option, and a
  * malformed network request are each a finding at the option's path (`config`, `network.api.port`), and together the
  * refusal `invalid-configuration` with the reason `invalid-option` ({@link optionsRefusal}). A URL is one when URL's own
  * accessor reads it, an `AbortSignal` when AbortSignal's does and it is no proxy: an object made from their prototypes,
- * or a proxy of one, is not. [L62, LM-1]
+ * or a proxy of one, is not.
  *
  * **User modules given twice** ({@link modulesGivenTwice}): `modules` with a `{ file }` configuration, whose own
  * `modules` export they are, `modules` and `modulesFrom`, or `modulesFrom` with `{ file }` (`modules-given-twice`).
- * [LM-7, L44]
  *
  * **The in-memory chain** ({@link sourceRefusal}, {@link privateSourceRefusal}): `source` is read only when it is exactly
  * an `InMemoryBlockSource` — its prototype that class's own, no proxy — carrying none of the members the engine takes
  * as hooks of a block source ({@link SOURCE_HOOKS}), so that a host cannot reach the engine's checks, its commit height
  * or its prefetch through it; and only on a public process, a private one reading its public side
- * (`source-refused`). [LM-8, L48]
+ * (`source-refused`).
  *
  * **The settings of the process's `core` revision a library process refuses** ({@link librarySettingsRefusal}):
  * `backupAtStop` and `backupOnSignal`, which write backups at the command's stop and on its SIGUSR2; a host writes its
- * backups with `UmbraDBHandle.backup` instead (`library-setting-refused`, naming the setting). [LM-2, BK-1, G3, L47]
+ * backups with `UmbraDBHandle.backup` instead (`library-setting-refused`, naming the setting).
  */
 
 import { types } from "node:util";
@@ -38,7 +37,7 @@ import { UmbraError } from "../db/errors.js";
 import { isSignal } from "../runner/host-signal.js";
 import { InMemoryBlockSource } from "../runner/in-memory-source.js";
 
-/** The options `startUmbraDB` knows (design §4). */
+/** The options `startUmbraDB` knows. */
 export const OPTION_NAMES: readonly string[] = Object.freeze([
   "config",
   "cwd",
@@ -51,7 +50,7 @@ export const OPTION_NAMES: readonly string[] = Object.freeze([
   "network",
 ]);
 
-/** A public configuration hash, as a start that stopped with `public-config-changed` names it. [PP-14, Q159] */
+/** A public configuration hash, as a start that stopped with `public-config-changed` names it. */
 const CONFIG_HASH = /^0x[0-9a-f]{64}$/;
 
 const isObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
@@ -59,7 +58,7 @@ const isObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
 
 /**
  * The value of `object[key]`, or `{ thrown }` when reading it threw (a getter, a proxy): read once, so that what is
- * checked is what is used. [LM-1]
+ * checked is what is used.
  */
 export function readOption(
   object: Readonly<Record<string, unknown>>,
@@ -75,7 +74,7 @@ export function readOption(
 /** What {@link guarded} answers for a read that threw. */
 const THREW: unique symbol = Symbol("threw");
 
-/** What `read` gives, or {@link THREW} when it throws (a getter, a proxy's trap, a revoked proxy). [LM-1] */
+/** What `read` gives, or {@link THREW} when it throws (a getter, a proxy's trap, a revoked proxy). */
 function guarded<T>(read: () => T): T | typeof THREW {
   try {
     return read();
@@ -90,17 +89,17 @@ function keysOf(object: object): readonly string[] | null {
   return keys === THREW ? null : keys;
 }
 
-/** A finding of the options at `path`: its message names the path. [L62] */
+/** A finding of the options at `path`: its message names the path. */
 const finding = (path: string, message: string): Finding =>
   Object.freeze({ rule: "invalid-option", path, entry: null, field: null, message: `${path}: ${message}` });
 
-/** The finding of a read at `path` that threw. [LM-1] */
+/** The finding of a read at `path` that threw. */
 const threw = (path: string): Finding => finding(path, "reading it threw");
 
 /**
  * The finding at `cwd` when the host's working directory, which a `cwd` absent (`given` undefined) or relative needs,
  * cannot be read — `process.cwd()` threw `error`, the directory removed under the host: the options are then refused,
- * and an absolute `cwd` is what starts. [LM-1, LM-10, G8, issue 00067]
+ * and an absolute `cwd` is what starts.
  */
 export function cwdUnreadable(given: string | undefined, error: unknown): Finding {
   const code = guarded(() => (error as { readonly code?: unknown }).code);
@@ -117,7 +116,7 @@ const MAX_ARRAY_LENGTH = 2 ** 32 - 1;
  * each index, each read guarded, and nothing else of the host's array — so no species, constructor, `map`, `slice` or
  * iterator of its own or of its prototype runs. An element whose read throws is a finding at its path
  * (`modules[1]: reading it threw`) and undefined in the copy; a length that cannot be read, or reads as no array's
- * length (a proxy's), is a finding at the array's path, and the array undefined. [LM-1, L62]
+ * length (a proxy's), is a finding at the array's path, and the array undefined.
  */
 function elementsOf(value: object, path: string, depth: number, found: Finding[]): readonly unknown[] | undefined {
   const length = guarded(() => (value as { readonly length: unknown }).length);
@@ -144,7 +143,7 @@ function elementsOf(value: object, path: string, depth: number, found: Finding[]
  * `value` read once as plain data at `path`, `depth` levels down (see the module comment): an array becomes a frozen
  * copy of its elements ({@link elementsOf}), another object (a proxy's too) a frozen object of its own enumerable keys
  * and their values, anything else is itself. Each read that throws adds its finding to `found`, and what could not be
- * read is undefined: nothing of the host's object is kept, and none of its methods is called. [LM-1, L62]
+ * read is undefined: nothing of the host's object is kept, and none of its methods is called.
  */
 function snapshot(value: unknown, path: string, depth: number, found: Finding[]): unknown {
   if (depth === 0 || typeof value !== "object" || value === null) return value;
@@ -172,14 +171,14 @@ function snapshot(value: unknown, path: string, depth: number, found: Finding[])
 /** URL's own accessor of a URL's text, as a function of its receiver: it throws for anything that is no URL. */
 const HREF = (Object.getOwnPropertyDescriptor(URL.prototype, "href") as PropertyDescriptor).get as (this: URL) => string;
 
-/** `value` as a URL of its own when it is a URL (URL's own accessor reads it), else null. [LM-1, CF-1] */
+/** `value` as a URL of its own when it is a URL (URL's own accessor reads it), else null. */
 function urlOf(value: unknown): URL | null {
   if (typeof value !== "object" || value === null || types.isProxy(value)) return null;
   const href = guarded(() => HREF.call(value as URL));
   return href === THREW ? null : new URL(href);
 }
 
-/** Whether `value` is an `AbortSignal` (AbortSignal's own accessor reads it), and no proxy of one. [LM-1, LM-9] */
+/** Whether `value` is an `AbortSignal` (AbortSignal's own accessor reads it), and no proxy of one. */
 const isAbortSignal = (value: unknown): value is AbortSignal => isSignal(value) && !types.isProxy(value);
 
 /** How deep each option holding objects is read (see {@link snapshot}): `network` to its surfaces' members. */
@@ -187,7 +186,7 @@ const DEPTHS: Readonly<Record<string, number>> = Object.freeze({ config: 1, modu
 
 /**
  * The option `key`'s value as read once (see the module comment): its objects copied, a URL as one of its own; a
- * value that is no URL where one is taken stays as given, for its check to refuse. [LM-1]
+ * value that is no URL where one is taken stays as given, for its check to refuse.
  */
 function readValue(key: string, value: unknown, found: Finding[]): unknown {
   const read = snapshot(value, key, DEPTHS[key] ?? 0, found);
@@ -240,11 +239,10 @@ export function readOptions(options: unknown): ReadOptions {
 /**
  * A host as an address names it, the rule of the configuration's addresses (`host:port`): a host name or an IPv4
  * address without spaces, `:`, `/`, brackets or `@`, or an IPv6 address (hex digits, `:` and `.`, unbracketed).
- * [LM-3, CF-4]
  */
 const isHost = (host: string): boolean => /^[^\s:/[\]@]+$/.test(host) || (host.includes(":") && /^[0-9A-Fa-f:.]+$/.test(host));
 
-/** The findings of a `{ host?, port }` address request at `path`. [LM-3, L62] */
+/** The findings of a `{ host?, port }` address request at `path`. */
 function addressFindings(value: Readonly<Record<string, unknown>>, path: string): Finding[] {
   const found: Finding[] = [];
   for (const key of Object.keys(value)) {
@@ -266,7 +264,7 @@ function addressFindings(value: Readonly<Record<string, unknown>>, path: string)
 
 /**
  * The findings of a surface's request at `path`: absent, a boolean, an address, or — for one side of the private link
- * — `{ channels: true }` (`channels`) or `{ connect }` (`connect`). [LM-3, L62; design §5.1]
+ * — `{ channels: true }` (`channels`) or `{ connect }` (`connect`).
  */
 function surfaceFindings(value: unknown, path: string, alternative?: "channels" | "connect"): Finding[] {
   if (value === undefined || typeof value === "boolean") return [];
@@ -298,7 +296,7 @@ function surfaceFindings(value: unknown, path: string, alternative?: "channels" 
   return addressFindings(value, path);
 }
 
-/** The findings of the `network` option (design §5.1): its keys and each surface's form. [LM-3, L62] */
+/** The findings of the `network` option: its keys and each surface's form. */
 export function networkFindings(network: unknown): Finding[] {
   if (network === undefined) return [];
   if (!isObject(network)) return [finding("network", "is an object of api, admin and privateLink")];
@@ -325,7 +323,7 @@ export function networkFindings(network: unknown): Finding[] {
   return found;
 }
 
-/** The findings of the `config` option: `{ file }` (a path or a URL) or `{ data }`, exactly one. [CF-1, L62] */
+/** The findings of the `config` option: `{ file }` (a path or a URL) or `{ data }`, exactly one. */
 function configFindings(config: unknown): Finding[] {
   if (config === undefined) return [finding("config", "is required: { file } or { data }")];
   if (!isObject(config)) return [finding("config", "is { file } or { data }")];
@@ -343,7 +341,7 @@ function configFindings(config: unknown): Finding[] {
   return found;
 }
 
-/** Every finding of the options as read (see the module comment). [L62] */
+/** Every finding of the options as read (see the module comment). */
 export function optionFindings(read: ReadOptions): Finding[] {
   const { values } = read;
   const found: Finding[] = [...read.findings];
@@ -382,7 +380,7 @@ export function optionFindings(read: ReadOptions): Finding[] {
 
 /**
  * The refusal of the options' `findings` (none: null): `invalid-configuration`, reason `invalid-option`, the first
- * finding's path as `option`, every finding in `findings`. [L62, LM-10]
+ * finding's path as `option`, every finding in `findings`.
  */
 export function optionsRefusal(findings: readonly Finding[]): UmbraError | null {
   const [first] = findings;
@@ -397,7 +395,7 @@ export function optionsRefusal(findings: readonly Finding[]): UmbraError | null 
 
 /**
  * The refusal of options that give the user modules twice (see the module comment), naming both sources (`given`);
- * null when they give them once or not at all. [LM-7, L44]
+ * null when they give them once or not at all.
  */
 export function modulesGivenTwice(values: Readonly<Record<string, unknown>>): UmbraError | null {
   const config = values.config as Readonly<Record<string, unknown>> | undefined;
@@ -419,7 +417,7 @@ export function modulesGivenTwice(values: Readonly<Record<string, unknown>>): Um
 /**
  * The members of a block source the engine takes as its hooks (`../runner/block-source.ts`): a private process's own
  * chain and module checks, the committed height of its reads, the node source's prefetch and its prepared blocks, and
- * its reads at a height. An in-memory chain carries none of them. [LM-8]
+ * its reads at a height. An in-memory chain carries none of them.
  */
 export const SOURCE_HOOKS: readonly string[] = Object.freeze([
   "checkChain",
@@ -430,14 +428,14 @@ export const SOURCE_HOOKS: readonly string[] = Object.freeze([
   "fetchRead",
 ]);
 
-/** A `source-refused` refusal for `reason`, with its message and `extra` details. [LM-8] */
+/** A `source-refused` refusal for `reason`, with its message and `extra` details. */
 function sourceRefused(reason: string, message: string, extra: Readonly<Record<string, unknown>> = {}): UmbraError {
   return new UmbraError("source-refused", message, { reason, ...extra });
 }
 
 /**
  * The refusal of a `source` that is not exactly an `InMemoryBlockSource` carrying no hook (see the module comment);
- * null for none given or for one the process may read. [LM-8, L48]
+ * null for none given or for one the process may read.
  */
 export function sourceRefusal(source: unknown): UmbraError | null {
   if (source === undefined) return null;
@@ -465,7 +463,7 @@ export function sourceRefusal(source: unknown): UmbraError | null {
 
 /**
  * The refusal of a `source` given to a private process, which reads the blocks of its public side, never an in-memory
- * chain; null on a public process or without one. [LM-8, L48]
+ * chain; null on a public process or without one.
  */
 export function privateSourceRefusal(side: ProcessSide, source: unknown): UmbraError | null {
   if (source === undefined || side === "public") return null;
@@ -475,12 +473,12 @@ export function privateSourceRefusal(side: ProcessSide, source: unknown): UmbraE
   );
 }
 
-/** The settings of a `core` revision a library process refuses (see the module comment). [LM-2, BK-1, L47] */
+/** The settings of a `core` revision a library process refuses (see the module comment). */
 export const LIBRARY_REFUSED_SETTINGS: readonly string[] = Object.freeze(["backupAtStop", "backupOnSignal"]);
 
 /**
  * The refusal of a library process whose `core` revision sets one of {@link LIBRARY_REFUSED_SETTINGS}, naming the first
- * (`setting`) and every one set (`settings`); null when it sets none. [LM-2, BK-1, G3, L47]
+ * (`setting`) and every one set (`settings`); null when it sets none.
  */
 export function librarySettingsRefusal(core: CheckedEntry): UmbraError | null {
   const settings = (core.settings ?? {}) as PlainObject;

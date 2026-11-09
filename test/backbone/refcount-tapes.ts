@@ -18,11 +18,10 @@ import { NO_TABLES, type StoredCheck, storedProblems } from "./refcount-checks.j
 /**
  * R3 on a recorded tape (`UMBRADB_TAPES`; the test skipped by name without its tape), on PostgreSQL 18 and PGlite
  * 0.5.10: the tape replayed from genesis through the process, with the ledger's core modules and `core-contract-states`
- * (so that the contract keys `core-ledger-state` persists are among those (b) holds to their rows), and R3's check
+ * (so that the contract keys `core-ledger-state` persists are among those (b) holds to their rows), and the check
  * (`./refcount-checks.ts`, {@link storedProblems}) after every 100th height and the last ({@link sampledHeights}): a
  * sample, not every block, so that the replays keep to the conformance gate's time. One test file per tape and backend
  * (`ledger-refcount-tape-*.test.ts`; the devnet's, short, holds both), so that the replays run side by side.
- * [R3, LG-11, LG-14]
  *
  * A watcher module requiring `ledger-state`, so that it runs after `core-ledger-state`'s `on-compute`, does the reading:
  * - at a sampled height h, it keeps the tables as committed at h − 1, read through the check's own queries
@@ -53,7 +52,7 @@ const DEVNET_CONVERSION: readonly bigint[] = [102n, 103n, 104n];
 
 /**
  * The heights R3 is checked at on tape `name` replayed to `last`: every 100th from 0 and the last; on the devnet also
- * its conversion's U, F and F + 1, the block whose cascade deletes the released v8 state's rows. [R3]
+ * its conversion's U, F and F + 1, the block whose cascade deletes the released v8 state's rows.
  */
 export function sampledHeights(name: RefcountTape, last: bigint): bigint[] {
   const heights = new Set<bigint>();
@@ -65,7 +64,7 @@ export function sampledHeights(name: RefcountTape, last: bigint): bigint[] {
 
 type Reader = Parameters<typeof sweepTables>[0];
 
-/** What the watcher keeps between the heights of a replay (see the module comment). [R3] */
+/** What the watcher keeps between the heights of a replay (see the module comment). */
 class Sampler {
   readonly checks: StoredCheck[] = [];
   /** A sampled height whose check waits for the tables after it: the tables after h − 1, and h's batch. */
@@ -110,7 +109,7 @@ class Sampler {
   }
 }
 
-/** The watcher module of a replay (see the module comment): `refcount-tape-watch`, requiring `ledger-state`. [R3] */
+/** The watcher module of a replay (see the module comment): `refcount-tape-watch`, requiring `ledger-state`. */
 function sampling(sampler: Sampler): ModuleDeclaration {
   return {
     id: "refcount-tape-watch",
@@ -133,7 +132,7 @@ function sampling(sampler: Sampler): ModuleDeclaration {
 export const tapeSettings = (found: FoundTape): Readonly<Record<string, unknown>> =>
   found.tape.name === "devnet-v8-v9-0-235" ? devnetSettings(found) : { network: found.tape.network };
 
-/** What a replay is given. [R3] */
+/** What a replay is given. */
 export interface TapeReplayOptions {
   /** The last height: the tape's end unless given. */
   readonly last?: bigint;
@@ -141,15 +140,15 @@ export interface TapeReplayOptions {
   readonly core?: (record: WorkerRecord) => CoreLedgerStateOptions;
 }
 
-/** What a replay gave. [R3] */
+/** What a replay gave. */
 export interface TapeReplay {
   readonly status: ReturnType<Awaited<ReturnType<typeof ingest>>["handle"]["status"]>;
   readonly last: bigint;
-  /** R3's check at each sampled height, in height order. */
+  /** The check at each sampled height, in height order. */
   readonly checks: readonly StoredCheck[];
 }
 
-/** Replays tape `found` from genesis to its end (or `last`) on `backend` with R3's check at its sampled heights. [R3] */
+/** Replays tape `found` from genesis to its end (or `last`) on `backend` with the check at its sampled heights. */
 export async function replayRefcountTape(found: FoundTape, backend: ProcessBackend, options: TapeReplayOptions = {}): Promise<TapeReplay> {
   const name = found.tape.name as RefcountTape;
   const last = options.last ?? BigInt(found.tape.to);
@@ -181,7 +180,7 @@ export async function replayRefcountTape(found: FoundTape, backend: ProcessBacke
   }
 }
 
-/** The rows outside `R_{h−1} ∪ R_h` at the heights checked, as the test logs them. [R3] */
+/** The rows outside `R_{h−1} ∪ R_h` at the heights checked, as the test logs them. */
 export function outsideReport(checks: readonly StoredCheck[]): string {
   const some = checks.filter((check) => check.outside > 0);
   const most = checks.reduce((top, check) => (check.outside > top.outside ? check : top), checks[0] as StoredCheck);
@@ -190,12 +189,12 @@ export function outsideReport(checks: readonly StoredCheck[]): string {
     : `rows outside R_{h−1} ∪ R_h at ${some.length} of them (${some.map((check) => `${check.outside} at ${check.height}`).join(", ")}; at most ${most.outside})`;
 }
 
-/** Registers R3's test of tape `name` on each backend of `kinds` (both unless given; see the module comment). [R3] */
+/** Registers the test of tape `name` on each backend of `kinds` (both unless given; see the module comment). */
 export function refcountTapeTests(name: RefcountTape, kinds: readonly ProcessBackend["kind"][] = ["postgres", "pglite"]): void {
   for (const backend of PROCESS_BACKENDS.filter((candidate) => kinds.includes(candidate.kind))) {
     tapeTest(
       name,
-      `R3 on ${name}, ${backend.name}: after every 100th height and the last${name === "devnet-v8-v9-0-235" ? " (and the conversion's U, F, F + 1)" : ""}, the check of the database through its own queries finds (a)–(d), with R_{h−1}, R_h and K_h from the stored rows`,
+      `on ${name}, ${backend.name}: after every 100th height and the last${name === "devnet-v8-v9-0-235" ? " (and the conversion's U, F, F + 1)" : ""}, the check of the database through its own queries finds (a)–(d), with R_{h−1}, R_h and K_h from the stored rows`,
       async (found) => {
         const replay = await replayRefcountTape(found, backend);
         expect(replay.status).toMatchObject({ cursor: replay.last, reason: null });

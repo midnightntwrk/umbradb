@@ -1,10 +1,10 @@
 /**
  * One process of the browser build in a dedicated Web Worker: the core (`./core-worker.ts`) or a private instance
  * (`./private-worker.ts`). It is started through the engine (`startProcess`, `src/runner/process.ts`), as `umbradb run`
- * and `startUmbraDB` start one, with the browser's ports. [BR-1, BR-2, BR-3, BR-4, LM-1, LM-11; design §8]
+ * and `startUmbraDB` start one, with the browser's ports.
  * - the configuration is `{ data }`: the bundled module's data for this run (`umbradb:configuration`,
  *   `./configuration.ts`), with the development opt-in set on every `core` entry. The browser build always runs under
- *   it, as it runs PGlite only. Startup requires it to be plain data and validates it [BR-1, CF-1]; the working
+ *   it, as it runs PGlite only. Startup requires it to be plain data and validates it; the working
  *   directory is `/`;
  * - the build is the resolver's for the side the configuration describes, with the configuration's user modules as
  *   objects (`src/runner/resolve.ts`);
@@ -14,7 +14,7 @@
  *   one the page hands it for a private process (`./link.ts`); a private process connects over a new `MessageChannel`
  *   the page makes at each (re)connection (`privateSide: { connect }`). The module API and admin are answered by the
  *   process's fetch-style handlers (`api.fetch`, `admin.fetch`) and its subscriptions on a channel (`api.connect`),
- *   all on this worker's message channel [BR-3, LM-3];
+ *   all on this worker's message channel;
  * - the contents hash, the page's reads and the backup read the database the process opened, while its module API is
  *   open (`ProcessHandle.opened`).
  *
@@ -22,25 +22,25 @@
  * backup); for a new database it gives none, and the worker reads the node's finalized head at that moment — its hash,
  * then its header's number — and runs with it as S, which it tells the page, so that the page starts the private
  * instances, and later runs of the same database, with it. The process then records it in the configuration history,
- * as it records any S. [BR-2]
+ * as it records any S.
  *
  * A refusal of the configuration itself ends the process: the worker reports it (`refused`, with the finding's
  * details) and the process's log has every finding; the admin endpoints keep answering from the process's last
- * snapshot. [Q137 B, LM-5]
+ * snapshot.
  *
  * **Backup and restore.** `backup` writes a backup of the process's database as `umbradb backup` does on PGlite, and
  * gives the page its text, which the page saves as a file. The backup is the manifest and `pg_dump` of
  * `@electric-sql/pglite-tools` (bundled), taken in one exclusive job of the database's queue, so commits wait
- * (`src/backup/pglite-backup.ts`). [BK-5, BR-3, A131]
+ * (`src/backup/pglite-backup.ts`).
  *
  * `restore` restores the file the user picked (a `Blob`) into the core's OPFS database before its process starts, as
  * `umbradb restore` does (`src/backup/restore.ts`, with every restore check, in its order). The configuration is the
  * bundled module's for the run with the backup's S, since a restored database keeps it. Its chain is the configured
  * node (`nodeSourceOf` on a node client of its own, closed when the restore ends). The page then starts the process
- * with that S, and it resumes from the backup's height + 1. [BK-3, BK-4]
+ * with that S, and it resumes from the backup's height + 1.
  *
  * A memory database ends with its worker, so it is not restored into. Nor is a private instance's: its checks need its
- * public database's core running, which the page starts only after the restore. [Q153]
+ * public database's core running, which the page starts only after the restore.
  */
 
 import "./shims/prelude.js";
@@ -86,16 +86,16 @@ const asked = new Map<number, (channel: PrivateLinkChannel) => void>();
 let nextAsk = 1;
 /**
  * The side of the process this worker started, which `backup` checks since a private database is not backed up without
- * the development opt-in; the core's until `start` says. [PP-12]
+ * the development opt-in; the core's until `start` says.
  */
 let side: "public" | "private" = "public";
 /** Whether a restore runs in this worker now (one at a time). */
 let restoring = false;
 
-/** The committed height of a core's database: its cursor's; a restore's target is a core's (see above). [DB-2] */
+/** The committed height of a core's database: its cursor's; a restore's target is a core's (see above). */
 const coreCommittedHeight: CommittedHeight = async (read) => (await readCursor(read))?.height ?? null;
 
-/** The negative control of the page's restore (`browser/build.ts`): the contents hash's check skipped. [A131] */
+/** The negative control of the page's restore (`browser/build.ts`): the contents hash's check skipped. */
 const RESTORE_SEAMS: RestoreSeams =
   __UMBRADB_BROWSER_CONTROL__ === "restore-skips-contents-hash" ? { skip: { contentsHash: true } } : {};
 
@@ -138,8 +138,8 @@ async function restoreInto(file: Blob, run: StartRun): Promise<unknown> {
   restoring = true;
   try {
     const text = blobText(file);
-    // The backup's S [BK-4]. A file without a readable manifest is refused by the restore itself, in the order of its
-    // checks [BK-3].
+    // The backup's S. A file without a readable manifest is refused by the restore itself, in the order of its
+    // checks.
     const start = await text.firstLine().then(
       (line) => Number(readManifestLine(line).start),
       () => run.start ?? 0,
@@ -182,7 +182,7 @@ async function restoreInto(file: Blob, run: StartRun): Promise<unknown> {
   }
 }
 
-/** The node's finalized head's height now: its hash, then its header's number. [BR-2] */
+/** The node's finalized head's height now: its hash, then its header's number. */
 async function finalizedHeight(node: string): Promise<number> {
   const client = new NodeClient({ url: node });
   try {
@@ -195,7 +195,7 @@ async function finalizedHeight(node: string): Promise<number> {
 
 /**
  * A private process's `connect`: asks the page for a new link channel and resolves with this worker's end. The page
- * always answers; an end it gives after the process stopped is closed by the process. [LM-6, LM-11]
+ * always answers; an end it gives after the process stopped is closed by the process.
  */
 function connectLink(): Promise<PrivateLinkChannel> {
   const ask = nextAsk++;
@@ -239,7 +239,7 @@ async function startWorkerProcess(message: Extract<ToProcessWorker, { type: "sta
   const { data, modules } = instance === null ? chosen.core(run) : instance.configure(run);
   const ledgerEntry = new URL("./ledger-worker.js", scope.location.href);
   // The engine's resolver takes the side from the configuration: a private instance's has instanceId and no node.
-  // Nothing listens: the link over the page's channels, the module API and admin through the handle. [LM-3, LM-11]
+  // Nothing listens: the link over the page's channels, the module API and admin through the handle.
   const network: NetworkRequest = isCore
     ? { privateLink: { publicSide: { channels: true } } }
     : { privateLink: { privateSide: { connect: connectLink } } };

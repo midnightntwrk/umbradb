@@ -25,7 +25,7 @@ import { STAGENET } from "./v9-rc3-checks.js";
 // - a retained state loaded aside.
 //
 // Run here in the test's thread over the real adapters and a store over a map that holds each committed block's nodes,
-// as the database does. [LG-9, LG-11, LG-12, LG-13; design §5.3, §5.4]
+// as the database does.
 //
 // Oracles: the reference replay and the vendored packages' own exports, the conversion run in a fresh instance of the
 // v9 package (`./fresh-instance.ts`), and the stored values rebuilt from their nodes without the packages
@@ -100,8 +100,8 @@ async function step(engine: LedgerEngine, nodes: Nodes, block: ApplyBlock, trans
   return applied;
 }
 
-describe("the ledger worker's stored states (task 12.4; LG-9, LG-11, LG-12, LG-13)", () => {
-  it("persists the new state's key and releases exactly the keys it is given (LG-12)", { timeout: LONG }, async () => {
+describe("the ledger worker's stored states", () => {
+  it("persists the new state's key and releases exactly the keys it is given", { timeout: LONG }, async () => {
     const { engine, nodes, zero } = await started("v9");
     // Nothing released: the window keeps the state at 0 (retainStates 1 and more).
     const one = await step(engine, nodes, input(1n, 0, { release: [] }));
@@ -114,7 +114,7 @@ describe("the ledger worker's stored states (task 12.4; LG-9, LG-11, LG-12, LG-1
     expect(rows(three)).toEqual([`${hex(three.stateKey)} 1`, `${hex(two.stateKey)} -1`].sort());
   });
 
-  it("loads the state at h − 1 from the store only when it does not hold it, and keeps a retried block's result (LG-11)", { timeout: LONG }, async () => {
+  it("loads the state at h − 1 from the store only when it does not hold it, and keeps a retried block's result", { timeout: LONG }, async () => {
     const { engine, nodes, zero } = await started("v9");
     // The engine holds the state at 0: nothing is read.
     const held = await engine.load({ ledger: "v9", ...at(0n), stateKey: zero.stateKey });
@@ -154,7 +154,7 @@ describe("the ledger worker's stored states (task 12.4; LG-9, LG-11, LG-12, LG-1
     await expect(new LedgerEngine({ load: loadLedgerPackage }).load({ ledger: "v9", ...at(0n), stateKey: zero.stateKey })).rejects.toThrow(/no node store/);
   });
 
-  it("converts the v8 state to v9 before it applies the first v9 block, with no transaction and with one (LG-9)", { timeout: LONG }, async () => {
+  it("converts the v8 state to v9 before it applies the first v9 block, with no transaction and with one", { timeout: LONG }, async () => {
     // One store for both runs: in this thread the packages remember what they flushed before, as a database would.
     const shared = new Nodes();
     for (const transactions of [[], [zswapOutputTransaction(RAW.v9)]]) {
@@ -195,7 +195,7 @@ describe("the ledger worker's stored states (task 12.4; LG-9, LG-11, LG-12, LG-1
     await expect(rc3.apply(input(1n, 0, { ledger: "v8" }))).rejects.toThrow(/block 1 is a v8 block on a v9-rc3 state/);
   });
 
-  it("carries a v9-rc3 state into v9 at the first rc.5 block, loading it in rc.5 by its key from the store: a 2.0 → 2.1 upgrade (A159)", {
+  it("carries a v9-rc3 state into v9 at the first rc.5 block, loading it in rc.5 by its key from the store: a 2.0 → 2.1 upgrade", {
     timeout: LONG,
   }, async () => {
     // One store for both runs: in this thread the packages remember what they flushed before, as a database would.
@@ -222,7 +222,7 @@ describe("the ledger worker's stored states (task 12.4; LG-9, LG-11, LG-12, LG-1
     }
   });
 
-  it("carries stagenet's rc.3 state into rc.5, whose rules differ on its next block: F is rc.5's (A159)", { timeout: LONG }, async () => {
+  it("carries stagenet's rc.3 state into rc.5, whose rules differ on its next block: F is rc.5's", { timeout: LONG }, async () => {
     // Stagenet's genesis state stored by the rc.3 package, as the database holds it after block 0.
     const rc3 = await loadLedgerPackage("v9-rc3", { networkId: NETWORK_ID });
     const genesis = rc3.genesisState(STAGENET.genesisState);
@@ -255,7 +255,7 @@ describe("the ledger worker's stored states (task 12.4; LG-9, LG-11, LG-12, LG-1
     expect(f.ledger).toBe("v9");
   });
 
-  it("persists the state and zswap-state keys of the contracts it is given, and never releases them (LG-13)", { timeout: LONG }, async () => {
+  it("persists the state and zswap-state keys of the contracts it is given, and never releases them", { timeout: LONG }, async () => {
     const { engine, nodes, zero } = await started("v9");
     const contract = await contractFixture(RAW.v9);
     const absent = hash(0xab);
@@ -290,7 +290,7 @@ describe("the ledger worker's stored states (task 12.4; LG-9, LG-11, LG-12, LG-1
     expect(rows(three)).toEqual([`${hex(three.stateKey)} 1`, `${hex(two.stateKey)} -1`].sort());
   });
 
-  it("loads a retained state by its key aside, leaving the states it holds as they are (LG-12)", { timeout: LONG }, async () => {
+  it("loads a retained state by its key aside, leaving the states it holds as they are", { timeout: LONG }, async () => {
     const { engine, nodes, zero } = await started("v9");
     const one = await step(engine, nodes, input(1n, 1, { release: [] }), [zswapOutputTransaction(RAW.v9)]);
     await engine.parse("v9", at(2n), [zswapOutputTransaction(RAW.v9)]);

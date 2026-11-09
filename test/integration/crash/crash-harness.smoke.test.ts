@@ -16,7 +16,6 @@ import {
  * The crash harness's smoke tests, the kept required ids 1–4 (`crash-harness.smoke.*`): the fault primitives — a
  * worker spawned and SIGKILLed with the shared container left up, `pg_terminate_backend` of a chosen backend with the
  * pool recovering — and the suite watchdog, with an override and at its default. One shared container for the file.
- * [design §13]
  *
  * Ids 5–10 of this file were retired with the 0.9.5 operations the worker ran at its pause points. The worker is to be
  * retargeted to drive the runner, keeping these four.

@@ -1,15 +1,14 @@
 /**
- * What `umbradb backup` and `umbradb restore` read from the configuration file. [BK-1, BK-3; design §9.1, §12]
+ * What `umbradb backup` and `umbradb restore` read from the configuration file.
  *
  * As `umbradb run` does, the command loads the file (`--config`, or `umbradb.config.ts` in the working directory). It
  * resolves it through the resolver every caller shares (`src/runner/resolve.ts`): the side the file describes, the
  * command's build with the user modules the file exports (`resolveDeclarations`), and the configuration validated with
  * that build, with the process's `core` revision (`resolveConfig`): its `database` is the database the command works
  * on, and its `developmentOptIn` the opt-in. A refusal of the loading or of the configuration is the configuration's
- * own, with every finding; a fault of the build's declarations is thrown as it is. [CF-1, CF-9, PP-12, Q102, Q106 B,
- * LM-1]
+ * own, with every finding; a fault of the build's declarations is thrown as it is.
  *
- * **The database** ({@link openCommandDatabase}). [DB-11, CF-4, Q163]
+ * **The database** ({@link openCommandDatabase}).
  * - PostgreSQL is opened through the database API with one read connection, which makes no connection until it is
  *   used.
  * - PGlite is opened only under the development opt-in (`openPglite` refuses without it), from a directory relative to
@@ -49,9 +48,9 @@ export interface CommandConfig {
   readonly checked: CheckedConfig;
   readonly declarations: DeclarationSet<ModuleDeclaration>;
   readonly side: ProcessSide;
-  /** The process's `core` revision. [Q102] */
+  /** The process's `core` revision. */
   readonly core: CheckedEntry;
-  /** The addresses that revision writes, before defaults (a private restore's link is its `privateLink`). [LM-3] */
+  /** The addresses that revision writes, before defaults (a private restore's link is its `privateLink`). */
   readonly surfaces: Surfaces;
   /** Its `database` setting's parts. */
   readonly database: DatabaseParts;
@@ -108,7 +107,7 @@ export async function readCommandConfig(
   });
 }
 
-/** The committed height of a public or a private process's database: its cursor's. [DB-2] */
+/** The committed height of a public or a private process's database: its cursor's. */
 export const commandCommittedHeight: CommittedHeight = async (read) => {
   const cursor = (await isPrivateDatabase(read)) ? await readPrivateCursor(read) : await readCursor(read);
   return cursor?.height ?? null;
@@ -153,10 +152,9 @@ export async function openCommandDatabase(
 /**
  * Opens the target of `umbradb restore` as {@link openCommandDatabase} does. Under the opt-in, a PGlite directory that
  * does not exist is created first, with its missing parents, and `log` is told, naming the path as configured.
- * [CF-4, Q163, Q165 B, Q167 A]
  *
  * The restore opens a target with no database only once its checks before loading have passed, so a refused restore
- * creates nothing. [BK-3]
+ * creates nothing.
  */
 export async function openRestoreTarget(
   target: CommandTarget,
@@ -170,7 +168,7 @@ export async function openRestoreTarget(
   return openCommandDatabase(target, config);
 }
 
-/** The tables the build declares `deterministic: false`: every module of `declarations`, each table once. [MD-1, Q76] */
+/** The tables the build declares `deterministic: false`: every module of `declarations`, each table once. */
 export function declaredOptOuts(declarations: DeclarationSet<ModuleDeclaration>): { schema: string; table: string }[] {
   const out = new Map<string, { schema: string; table: string }>();
   for (const declaration of [...declarations.backbone, ...declarations.core, ...declarations.user]) {

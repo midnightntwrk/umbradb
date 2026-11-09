@@ -22,13 +22,12 @@ import {
  * (and a library host's own `AbortSignal`) and the engine's `ProcessHandle.stop()`, ends the process within 5 s:
  * `stopping`, then `ended` of kind `signal`, the node client closed, no connection attempt after the stop, no second
  * signal; `umbradb run` exits 0. A library host's process is `startUmbraDB`'s — its input (the command's build) and
- * its handle — with the run's node client seam, which counts the connection attempts. [A167 CI, RN-13, IN-10, LM-9]
+ * its handle — with the run's node client seam, which counts the connection attempts.
  *
  * On PostgreSQL 18.6 and PGlite 0.5.10, each a new database that startup opened before it asked the node for block 0
  * (`core-chain`'s `checkChain`): in this process (`startup-stop-harness.ts`), and through the bundled command in a
  * child process with a real SIGTERM. Also a private process whose startup waits for its public side (a core transport
  * that never answers) ends at its stop. The committed negative control is `startup-stop.negative-control.test.ts`.
- * [IN-3]
  */
 
 /** No problem on either backend. */
@@ -37,7 +36,7 @@ const NONE = Object.fromEntries(PROCESS_BACKENDS.map((backend) => [backend.name,
 /** Each run: the startup until it retries, the bound, the watch, and the clean-up; a loaded machine. */
 const RUN_TIMEOUT_MS = 2 * PATIENCE_MS + 120_000;
 
-describe("A167: a stop during startup with the node unreachable ends the process (RN-13, task 5.3b)", () => {
+describe("a stop during startup with the node unreachable ends the process", () => {
   let project: CliProject;
   beforeAll(async () => {
     const built = cliProject({ cli: true });
@@ -55,7 +54,7 @@ describe("A167: a stop during startup with the node unreachable ends the process
     ["stop", "ProcessHandle.stop()"],
     ["sigterm", "SIGTERM (terminationSignal)"],
   ])(
-    "A167: %s — %s while startup retries an unreachable node for block 0 ends the process within 5 s: stopping, ended by the signal, the node client closed, no connection attempt after the stop, the database closed; on PostgreSQL and on PGlite",
+    "%s — %s while startup retries an unreachable node for block 0 ends the process within 5 s: stopping, ended by the signal, the node client closed, no connection attempt after the stop, the database closed; on PostgreSQL and on PGlite",
     async (by) => {
       const found: Record<string, string[]> = {};
       for (const backend of PROCESS_BACKENDS) {
@@ -72,7 +71,7 @@ describe("A167: a stop during startup with the node unreachable ends the process
     ["stop", "UmbraDBHandle.stop()"],
     ["signal", "the host's AbortSignal aborted"],
   ])(
-    "A167 through startUmbraDB: %s — %s while startup retries an unreachable node for block 0 ends the process within 5 s: stopping, ended by the signal, the node client closed, no connection attempt after the stop, the database closed; on PostgreSQL and on PGlite",
+    "through startUmbraDB: %s — %s while startup retries an unreachable node for block 0 ends the process within 5 s: stopping, ended by the signal, the node client closed, no connection attempt after the stop, the database closed; on PostgreSQL and on PGlite",
     async (by) => {
       const found: Record<string, string[]> = {};
       for (const backend of PROCESS_BACKENDS) {
@@ -86,7 +85,7 @@ describe("A167: a stop during startup with the node unreachable ends the process
   );
 
   it(
-    "RN-13 (task 5.3b): a private process whose startup waits for a core transport that never answers ends at its stop within 5 s, on PostgreSQL and on PGlite",
+    "a private process whose startup waits for a core transport that never answers ends at its stop within 5 s, on PostgreSQL and on PGlite",
     async () => {
       const found: Record<string, string[]> = {};
       for (const backend of PROCESS_BACKENDS) {
@@ -98,7 +97,7 @@ describe("A167: a stop during startup with the node unreachable ends the process
   );
 
   it(
-    "A167: umbradb run (the bundled command, a child process) — one SIGTERM while startup retries an unreachable node — exits 0 by itself within 5 s, its admin listener closed; on PostgreSQL and on PGlite",
+    "umbradb run (the bundled command, a child process) — one SIGTERM while startup retries an unreachable node — exits 0 by itself within 5 s, its admin listener closed; on PostgreSQL and on PGlite",
     async () => {
       let files = 0;
       const found: Record<string, string[]> = {};

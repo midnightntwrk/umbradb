@@ -7,7 +7,7 @@ import { type PgliteTestServer, startPgliteServer } from "./pglite-server.js";
 
 /**
  * The negative control of the no-outside-read test: a build of the PGlite backend whose reads bypass the queue must
- * make that test fail. [A11, DB-4]
+ * make that test fail.
  *
  * The build flag is `READS_BYPASS_QUEUE`, a constant of `src/db/pglite-build-flags.ts`, `false` in the source and so
  * in every build made from it. Nothing at run time can turn it on: it is a `const` export of an ES module (an importer
@@ -17,7 +17,6 @@ import { type PgliteTestServer, startPgliteServer } from "./pglite-server.js";
  * graph only, with one whose flag is `true`, so `src/db/pglite.ts` (imported through `./pglite-server.ts`) is built
  * with reads that run at once instead of waiting for their turn. Then the same instrumented run and the same
  * assertions as `pglite-no-outside-read.test.ts` must fail, for the intended reason: reads inside block windows.
- * [design §12]
  */
 
 vi.mock("../../src/db/pglite-build-flags.js", () => ({ READS_BYPASS_QUEUE: true }));
@@ -32,7 +31,7 @@ afterAll(async () => {
   await server?.stop();
 }, 60_000);
 
-describe("A11 negative control — reads that bypass the queue", () => {
+describe("negative control — reads that bypass the queue", () => {
   it("is off in the source and in every build made from it, and nothing at run time can turn it on", async () => {
     const actual = await vi.importActual<typeof BuildFlags>("../../src/db/pglite-build-flags.js");
     expect(actual.READS_BYPASS_QUEUE).toBe(false);
@@ -50,7 +49,7 @@ describe("A11 negative control — reads that bypass the queue", () => {
     expect(Object.keys(manifest.exports)).toEqual(["."]);
   });
 
-  it("[[db.pglite.no-outside-read.negative-control-fires]] makes A11's test fail: reads run inside block transactions", async () => {
+  it("[[db.pglite.no-outside-read.negative-control-fires]] makes the test fail: reads run inside block transactions", async () => {
     // This file's build: the flag is on.
     expect(READS_BYPASS_QUEUE).toBe(true);
     const outcome = await runUnderReadLoad(await server.createDatabase());

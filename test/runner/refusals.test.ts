@@ -12,16 +12,16 @@ import { core, entryOf, loggingModule, settle, startProcess, testBuild } from ".
 /**
  * The `refused` state. A startup that refuses leaves the process up (`closed` does not resolve until it is stopped) in
  * `refused`, not ready, with its reason (the refusal's code, and the module and point where there is one), its
- * database closed and its writer lock released. [IN-12, AE-4, AE-5; design §11; CORE-ARCH §4.17]
+ * database closed and its writer lock released.
  *
  * Tested on both backends:
- * - a migration checksum that changed [AE-3];
+ * - a migration checksum that changed;
  * - the three startup failures the design names no code for: a failing `on-start-db` or `on-start-api` callback
  *   (`callback-error`, with the point and the module), and a module API listener that cannot listen
- *   (`listen-failed`) [Q115].
+ *   (`listen-failed`).
  *
  * A refusal before the configuration is validated (of the configuration itself, or of the build's declarations before
- * it) ends the process instead; `test/admin/refused-configuration.test.ts` tests that. [Q137 B, A157]
+ * it) ends the process instead; `test/admin/refused-configuration.test.ts` tests that.
  */
 
 /** Starts a build of `user` on `db` with `listen`, and waits for its startup to end; the handle and its log. */
@@ -61,11 +61,11 @@ async function staysUp(handle: ProcessHandle): Promise<boolean> {
 const migrating = (sql: string): ModuleDeclaration =>
   loggingModule("m", [], ["on-db-write"], { migrations: [{ id: "001", sql }] });
 
-describe.each(PROCESS_BACKENDS)("refused startups (IN-12, AE-3) on $name", (backend) => {
+describe.each(PROCESS_BACKENDS)("refused startups on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("AE-3: a migration checksum that changed refuses startup: refused, not ready, its reason, up until stopped; the database released", async () => {
+  it("a migration checksum that changed refuses startup: refused, not ready, its reason, up until stopped; the database released", async () => {
     const db = await backend.database();
     const first = await startOn(db, [migrating("CREATE TABLE m.rows (height bigint PRIMARY KEY)")]);
     expect(await settle(first.handle, first.source, 3n)).toBe("waiting");
@@ -106,7 +106,7 @@ describe.each(PROCESS_BACKENDS)("refused startups (IN-12, AE-3) on $name", (back
       const setup = loggingModule("setup", [], [], { points: { "on-start-db": failing as never } });
       const { handle } = await startOn(await backend.database(), [setup]);
       // One code for one failure: the rejection is an UmbraError of the reason's code; the module's own error, a plain
-      // Error, is its cause, and the module's SQL error (an UmbraError of that code) is the rejection itself. [LM-9]
+      // Error, is its cause, and the module's SQL error (an UmbraError of that code) is the rejection itself.
       const rejection = await handle.started.then(() => null, (error: unknown) => error);
       expect(rejection, what).toBeInstanceOf(UmbraError);
       expect(rejection, what).toMatchObject({ code });
@@ -148,7 +148,7 @@ describe.each(PROCESS_BACKENDS)("refused startups (IN-12, AE-3) on $name", (back
     try {
       const db = await backend.database();
       const { handle, lines } = await startOn(db, [], `127.0.0.1:${port}`);
-      // The rejection is listen-failed, Node.js's error of `listen` its cause. [LM-9]
+      // The rejection is listen-failed, Node.js's error of `listen` its cause.
       await expect(handle.started).rejects.toMatchObject({ code: "listen-failed", cause: { code: "EADDRINUSE", syscall: "listen" } });
       expect(handle.status()).toMatchObject({
         state: "refused",
@@ -167,7 +167,7 @@ describe.each(PROCESS_BACKENDS)("refused startups (IN-12, AE-3) on $name", (back
 });
 
 describe("refused startups without a database", () => {
-  it("an invalid declaration: refused with its code, logged with its finding, and the process ends by itself (Q137 B)", async () => {
+  it("an invalid declaration: refused with its code, logged with its finding, and the process ends by itself", async () => {
     const lines: string[] = [];
     const handle = startProcess({
       declarations: { backbone: [], core: [], user: [{ id: "Bad" }] },
@@ -184,11 +184,11 @@ describe("refused startups without a database", () => {
       head: null,
       lag: null,
       ended: await handle.ended,
-      // The refusal's details name the module (its id as declared): an allowlisted field. [AE-6]
+      // The refusal's details name the module (its id as declared): an allowlisted field.
       reason: { code: "invalid-declaration", height: null, module: "Bad", point: null },
     });
     // Refused before the configuration was validated, as a refusal of the configuration itself: no admin address is
-    // known, so the process ends — `closed` resolves with no stop, the state stays refused. [Q137 B]
+    // known, so the process ends — `closed` resolves with no stop, the state stays refused.
     expect(await Promise.race([handle.closed.then(() => "closed"), sleep(30_000, "still up")])).toBe("closed");
     expect(lines).toEqual([
       "startup refused: invalid-declaration (1 finding); the process ends",
@@ -208,7 +208,7 @@ describe("refused startups without a database", () => {
       },
       log: (line) => createdDirectory(line) || lines.push(line),
     });
-    // The rejection is the general refusal, the thrown value its cause. [LM-9]
+    // The rejection is the general refusal, the thrown value its cause.
     await expect(handle.started).rejects.toMatchObject({ code: "database-error", cause: "the source cannot be made" });
     expect(handle.status()).toMatchObject({
       state: "refused",
@@ -230,7 +230,7 @@ describe("refused startups without a database", () => {
     });
     expect(await handle.ended).toEqual({ kind: "signal" });
     expect(handle.status()).toMatchObject({ state: "stopping", reason: null });
-    // `started` rejects with the abort reason, the signal's own. [LM-9]
+    // `started` rejects with the abort reason, the signal's own.
     await expect(handle.started).rejects.toBe(controller.signal.reason);
     await handle.closed;
   });

@@ -1,6 +1,6 @@
 /**
  * The PostgreSQL backend of the database API (`./api.ts`), refactored from 0.9.5's `src/postgres/client.ts`, over
- * `postgres` 3.4.9. [DB-2, DB-5, DB-13; design §4]
+ * `postgres` 3.4.9.
  *
  * **Connections.** Each connection is a `postgres` client of its own with at most one connection (a *session*), so
  * that each one's loss is known at once, from the driver's `onclose`, before anything else can run. Otherwise the
@@ -10,17 +10,17 @@
  * transaction opens a new one.
  * - The **writer** is one session: transactions run on it one at a time, in the order asked for. A statement runs on
  *   the extended protocol, one per call. A migration's text of several statements runs on the simple protocol, inside
- *   the transaction, through the path only the migration runner takes (`./multi-statement.ts`). [DB-5]
+ *   the transaction, through the path only the migration runner takes (`./multi-statement.ts`).
  * - **Reads** use a pool of up to `readConnections` sessions (default 10); a read waits for a free one.
  *
  * **Reads.** `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY`, then the committed height read by the process's
  * {@link CommittedHeight} as the first statement (which takes the snapshot), then the body's statements, then
- * `ROLLBACK`, which also undoes any `SET` the body ran, so no setting outlives the read. [DB-2]
+ * `ROLLBACK`, which also undoes any `SET` the body ran, so no setting outlives the read.
  *
  * **Timeouts by connection role.** Every session starts with every server-side timeout at 0 (the component's zero
  * timeouts, part of its session settings below). So the writer (migrations, setup, block transactions) and the reads
  * given to callbacks are never cut off. A read with the read option (`timeoutMs`, a module API request's
- * `apiReadTimeoutMs`) is bounded instead: {@link BoundedRead}. [DB-15, Q71]
+ * `apiReadTimeoutMs`) is bounded instead: {@link BoundedRead}.
  *
  * **Results and parameters** go through the `deterministic_postgresql` component's mapping
  * (`../deterministic-postgresql/mapping.ts`). The driver hands over every value as text (raw mode; none of its parsers
@@ -28,19 +28,19 @@
  * settings ({@link SESSION_SETTINGS}, `../deterministic-postgresql/settings.ts`: the five that decide how values print,
  * and the zero timeouts) as startup parameters, which take precedence over the server's, the database's and the role's
  * defaults. The connection is given as the `database` setting's parts, not a URL, so nothing can add a startup
- * parameter; `ssl` reaches the driver as {@link driverConnectionOptions} maps it. [CF-4, Q167 A]
+ * parameter; `ssl` reaches the driver as {@link driverConnectionOptions} maps it.
  *
  * **Errors.** A lost connection is `connection-lost` (retryable). Every other error of the driver or the server is
  * `database-error` (not retryable), with the server's SQLSTATE and the names it gives (constraint, table, schema,
- * column); never the server's `detail`, which can hold row values, nor the password. There are two exceptions: [DB-13]
- * - a `TRUNCATE` the `deterministic_postgresql` component's trigger rejected is `truncate-not-allowed` [DB-14];
- * - a bounded read one of its timeouts ended is `query-timeout` (only such a read reports it) [DB-15].
+ * column); never the server's `detail`, which can hold row values, nor the password. There are two exceptions:
+ * - a `TRUNCATE` the `deterministic_postgresql` component's trigger rejected is `truncate-not-allowed`;
+ * - a bounded read one of its timeouts ended is `query-timeout` (only such a read reports it).
  *
  * **The writer lock and the durability probe.** Every writer session takes the writer lock when it opens, before its
  * first transaction (`./writer-lock.ts`). The first one then runs the durability probe on the same session
  * (`./durability-probe.ts`): a refusal ends that session, so a refused writer holds no lock and wrote nothing. A
  * session opened after a lost one only takes the lock again; finding it taken is `writer-lock-lost`, after which the
- * writer never writes again. The read pool's sessions take no lock. [DB-11, DB-12]
+ * writer never writes again. The read pool's sessions take no lock.
  */
 
 import postgres, { type Sql } from "postgres";
@@ -56,7 +56,7 @@ import { allowWriterStart, takeWriterLock, type WriterSession } from "./writer-l
 /**
  * The database a backend connects to: the `database` setting's PostgreSQL parts, with their defaults applied
  * (`../config/database-parts.ts`). They are the host (a Unix socket directory when it starts with `/`), the port, the
- * login and its password, the database's name, and `ssl`. [CF-4, Q167 A]
+ * login and its password, the database's name, and `ssl`.
  */
 export interface PostgresConnection {
   readonly host: string;
@@ -81,7 +81,7 @@ export interface DriverConnectionOptions {
 }
 
 /**
- * The driver's options for `connection`, as `postgres` 3.4.9 reads them: [CF-4, Q182 B]
+ * The driver's options for `connection`, as `postgres` 3.4.9 reads them:
  * - `disable` is `false`: the driver takes an `ssl` option as given when it is set (`src/index.js`, `parseOptions`), and
  *   would read the text `"disable"` as a request for TLS;
  * - `require` is the driver's own `"require"`: TLS, the certificate not checked (`src/connection.js`, `secure()`, sets
@@ -89,7 +89,7 @@ export interface DriverConnectionOptions {
  * - `verify-full` is an object the driver merges into Node.js's `tls.connect` options: `rejectUnauthorized: true`, so the
  *   certificate is checked against Node.js's default roots (no other authority), and the `host`, which Node.js's
  *   `checkServerIdentity` compares with the certificate's names. The driver sets `servername` only for a host that is
- *   no IP address, so without it an IP address would be compared as `localhost`. [Q183 A]
+ *   no IP address, so without it an IP address would be compared as `localhost`.
  *
  * The host, port, login, password and name are given, so the driver's environment defaults (`PGHOST`, `PGSSLMODE`, …)
  * never apply, except `PGPASSWORD` when no password is given. The host and port are given as lists of one, which the
@@ -117,19 +117,19 @@ export function driverConnectionOptions(connection: PostgresConnection): DriverC
 
 /** Options of {@link openPostgres}. */
 export interface PostgresOptions {
-  /** The database's parts (the `database` setting). [CF-4] */
+  /** The database's parts (the `database` setting). */
   readonly connection: PostgresConnection;
-  /** How a read learns its committed height. [DB-2] */
+  /** How a read learns its committed height. */
   readonly committedHeight: CommittedHeight;
   /** The read pool's size; default 10. */
   readonly readConnections?: number;
   /** How long opening a connection may take, in seconds; default the driver's 30. */
   readonly connectTimeoutSeconds?: number;
-  /** The core entry's `fullPageWritesOffAllowed`: the durability probe's override; default false. [CF-4, DB-12] */
+  /** The core entry's `fullPageWritesOffAllowed`: the durability probe's override; default false. */
   readonly fullPageWritesOffAllowed?: boolean;
   /**
    * Called each time the read pool drops a session it lost (before a read takes another or opens a new one). A private
-   * process uses it to read its public database again at a reconnection. None unless given. [PP-14]
+   * process uses it to read its public database again at a reconnection. None unless given.
    */
   readonly onReadSessionLost?: () => void;
   /**
@@ -168,7 +168,7 @@ const LOST_DRIVER_CODES: ReadonlySet<string> = new Set([
  * (connection exception), `57P01` admin shutdown (`pg_terminate_backend`), `57P02` crash shutdown, `57P03` cannot
  * connect now (starting up or shutting down), `25P03` idle-in-transaction timeout, `57P05` idle-session timeout. A
  * refused login (`28000`, `28P01`), a dropped database (`57P04`) or too many connections (`53300`) is not a lost
- * connection, and is not retryable. [DB-13]
+ * connection, and is not retryable.
  */
 const LOST_SQLSTATES: ReadonlySet<string> = new Set([
   "08000",
@@ -199,7 +199,7 @@ interface DriverError {
  * An error the driver threw for a statement on the `connection` session, as an {@link UmbraError}. A lost connection
  * is `connection-lost` (retryable); anything else is `database-error` (not retryable), or `truncate-not-allowed` for
  * the component's `TRUNCATE` refusal. An error the server sent (it has a `severity`) is told by its SQLSTATE; any other
- * by the driver's code. [DB-13, DB-14]
+ * by the driver's code.
  */
 export function classifyDriverError(error: unknown, connection: Role): UmbraError {
   const fields: DriverError = typeof error === "object" && error !== null ? (error as DriverError) : {};
@@ -298,7 +298,6 @@ class Session {
       // (`prepares`).
       prepare: true,
       // Never recycled: the writer's connection holds the writer lock for as long as it lives (./writer-lock.ts).
-      // [DB-11]
       max_lifetime: null,
       onnotice: () => undefined,
       onclose: () => {
@@ -418,12 +417,12 @@ class Session {
   }
 }
 
-/** How every read's transaction starts. [DB-2] */
+/** How every read's transaction starts. */
 const READ_BEGIN = "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY";
 
 /**
  * Sets a bounded read's two timeouts for its transaction only (`set_config(…, true)`), the timeout in milliseconds as
- * its one bound parameter, so they end with the read's `ROLLBACK`. [DB-15]
+ * its one bound parameter, so they end with the read's `ROLLBACK`.
  */
 const READ_TIMEOUTS =
   "SELECT set_config('statement_timeout', $1, true), set_config('idle_in_transaction_session_timeout', $1, true)";
@@ -441,11 +440,10 @@ const READ_TIMEOUTS =
  * session lost, and the pool drops it). Once a timeout ended the read, every later statement — and one still running
  * with the cancelled one — and the read itself fail with that error, also when the body caught it. A statement cannot
  * stay in flight for the timeout (`statement_timeout` cancels it first), so the clock never counts one as idle time.
- * [DB-15]
  *
  * In a bounded read every `57014` is taken for its timeout (a `pg_cancel_backend` too: the server's message is the only
  * difference, and it is translated). A statement sent in the instant between the server ending an idle session and the
- * read's own clock reaching the timeout can find the session lost first: `connection-lost`. [DB-15]
+ * read's own clock reaching the timeout can find the session lost first: `connection-lost`.
  */
 class BoundedRead {
   /** When the read's last statement settled (its `BEGIN` first); undefined while a statement of it is in flight. */

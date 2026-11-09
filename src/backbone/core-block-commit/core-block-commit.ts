@@ -1,27 +1,27 @@
 /**
  * The backbone part `core-block-commit`. It owns the blocks table, `core_block_commit.blocks`, with one row per
  * committed block. The part's `on-db-write` writes it first among the parts that write in every block, inside the block's one
- * transaction. [CD-3, IN-4, RN-3, RN-6, RN-14; CORE-ARCH §4.5, §4.11; design §3]
+ * transaction.
  *
  * The table's last row is the cursor. (This is the blocks table, not the cursor-table helper in `src/helpers/`.) The
  * block sources read it through the read they are given (`readCursor`, in `./sql.ts`), and so does the database API's
- * committed height (`cursorHeight`), so a read's height and its snapshot always agree. [DB-2, SH-1]
+ * committed height (`cursorHeight`), so a read's height and its snapshot always agree.
  *
  * **The tables** and every statement are in `./sql.ts`.
  *
  * **Per block** ({@link commitBlock}), in this order:
  * 1. the block's row ({@link writeBlockRow}, so the cursor comes first), from the block context and the `block` items
  *    `block-header` (its spec version and time) and `ledger-version`, which `core-block-fetch` puts at `on-fetch`. It
- *    is refused before anything is sent when the items are missing or unreadable. [CD-2, CD-3]
+ *    is refused before anything is sent when the items are missing or unreadable.
  * 2. its hash's row ({@link writeHashRow}); a primary-key violation fails the block with `duplicate-block-hash`.
  * 3. the parent check ({@link checkParent}): a block whose parent hash is not the hash of the block stored at h − 1,
  *    or that has no block stored at h − 1, fails with `parent-mismatch`. Only the anchor, block S, has no stored parent
  *    and is not checked. The part takes S from its process context's revisions ({@link startOf}), in memory, so the
- *    check still sends one statement per block. [IN-4, CF-2]
+ *    check still sends one statement per block.
  *
  * The duplicate check comes first, so an earlier block delivered again (its hash repeated, its parent not the cursor)
  * is named for what it is. Both failures are halts: the part's `on-db-write` rejects with the `UmbraError`, the block
- * rolls back and the loop stops at h. [design §11]
+ * rolls back and the loop stops at h.
  */
 
 import { z } from "zod";
@@ -40,7 +40,7 @@ import {
 
 /**
  * The latest block time stored, in milliseconds since 1970: 9999-12-31T23:59:59.999Z. The database API reads a
- * `timestamptz` in years 0001 to 9999 only, so a later one could not be read back. [DB-2, Q81]
+ * `timestamptz` in years 0001 to 9999 only, so a later one could not be read back.
  */
 export const MAX_BLOCK_TIME_MS = 253_402_300_799_999n;
 
@@ -49,8 +49,8 @@ const MAX_SPEC_VERSION = 2_147_483_647;
 
 /**
  * What `core-block-commit` reads of the `block` item `block-header`, which `core-block-fetch` puts at `on-fetch`
- * and may give more fields: [CD-2]
- * - the spec version of the runtime that built the block (its `MNSV` digest) [CORE-ARCH §4.8];
+ * and may give more fields:
+ * - the spec version of the runtime that built the block (its `MNSV` digest);
  * - the block's own time in milliseconds since 1970 (the node's `Timestamp::set`, a `u64`).
  */
 export interface BlockHeaderItem {
@@ -113,7 +113,7 @@ export function ledgerVersionOf(b: BlockContext): string {
 /**
  * Writes the block's row of the blocks table. Its height, hash and parent hash come from the block context; its spec
  * version, ledger version and time come from the block items (see {@link blockHeaderOf} and {@link ledgerVersionOf},
- * which refuse before anything is sent). The time is converted exactly (see the module comment). [CD-3]
+ * which refuse before anything is sent). The time is converted exactly (see the module comment).
  */
 export async function writeBlockRow(w: Pick<BlockWriteHandle, "execute">, b: BlockContext): Promise<void> {
   const { specVersion, timestampMs } = blockHeaderOf(b);
@@ -131,7 +131,6 @@ export async function writeBlockRow(w: Pick<BlockWriteHandle, "execute">, b: Blo
 /**
  * Writes the block's row of the hashes table. A hash another block already has fails the block with
  * `duplicate-block-hash` (with the height and the hash), raised from the table's primary-key violation as its cause.
- * [CD-3]
  */
 export async function writeHashRow(w: Pick<BlockWriteHandle, "execute">, b: BlockContext): Promise<void> {
   try {
@@ -157,7 +156,6 @@ export async function writeHashRow(w: Pick<BlockWriteHandle, "execute">, b: Bloc
  * and whose block's hash it records as the anchor. A restored database keeps the backup's S, which restore requires
  * the configuration to have, so S is the same there. It is in memory, so the parent check sends no statement for it.
  * Throws a plain `Error` for a context without revisions, which the runner never gives a backbone part.
- * [CF-2, IN-2, BK-4, MD-7]
  */
 export function startOf(p: Pick<ProcessContext, "revisions">): bigint {
   const first = p.revisions[0];
@@ -174,11 +172,11 @@ export function startOf(p: Pick<ProcessContext, "revisions">): bigint {
  * The parent check, for a database whose start height is `start` (S). The anchor, block S, passes unchecked: its parent
  * is below S, which the database never holds. Every other block's parent hash must be the hash of the block stored at
  * h − 1 (the cursor, for the block the loop processes), or the block fails with `parent-mismatch`, with the height,
- * its parent hash and the stored hash. [IN-4]
+ * its parent hash and the stored hash.
  *
  * With no block stored at h − 1 the block fails too, its stored hash null: committed, it would leave a missing height
  * that every later block extends. That happens when the loop's cursor is not the database's (a bug), when another
- * writer deleted the rows below the block, or for a first block that is not S. [IN-4]
+ * writer deleted the rows below the block, or for a first block that is not S.
  */
 export async function checkParent(w: Pick<BlockWriteHandle, "query">, b: BlockContext, start: bigint): Promise<void> {
   if (b.height === start) return;
@@ -210,7 +208,7 @@ export async function commitBlock(
 /**
  * `core-block-commit` (see the module comment). It is a backbone part: it runs with the core from S, which is a
  * mid-chain start whenever S is above 0. It requires the `block` items `block-header` and `ledger-version` (from
- * `core-block-fetch`) and provides the `table` item `blocks`: its two tables, in its own schema. [Q96]
+ * `core-block-fetch`) and provides the `table` item `blocks`: its two tables, in its own schema.
  */
 export const CORE_BLOCK_COMMIT = defineModule({
   id: "core-block-commit",

@@ -8,7 +8,7 @@ import {
 import * as migration004 from "../../src/postgres/migrations/004_transaction_history.js";
 
 /**
- * The moved tests' database (core-arch task 17.1, LS-3): the repository's `test/postgres/setup.ts` container and
+ * The moved tests' database: the repository's `test/postgres/setup.ts` container and
  * 0.9.5's `tier1_wallet` migrations, plus TransactionHistory's own table. Migration 004 left that lineage with the
  * source (`src/postgres/migrate.ts`), so a database started for the moved tests applies it after the lineage, through
  * the same runner and its `migrations` option: the lineage's `000_schema` (already applied) and then

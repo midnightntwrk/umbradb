@@ -9,7 +9,7 @@
  * are frozen.
  *
  * Parameters are written as the node reads them and always in one form, so that a recorded tape matches the calls a
- * later run makes: hashes and keys as lowercase `0x` hex, heights as JSON numbers. [TT-2]
+ * later run makes: hashes and keys as lowercase `0x` hex, heights as JSON numbers.
  */
 
 import { badAnswer, invalidParameter } from "./errors.js";

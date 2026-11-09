@@ -15,7 +15,7 @@ import { type PrivateOptions, startPrivate, startPublicCore } from "./builds.js"
 
 /**
  * With a core and a private process running, the core's database connections reach only the public database. The
- * private process is bound to the core's public database and follows it as it commits. [A112, PP-1]
+ * private process is bound to the core's public database and follows it as it commits.
  *
  * What is looked at is every connection, not a sample. On PostgreSQL each database logs every session that logs in
  * (`backends.ts`: a login event trigger), with its login: the core's is the server's login, the private process's own
@@ -31,7 +31,7 @@ const owner = new AsyncLocalStorage<string>();
 /** Every PGlite engine opened while the spy is on: its process and its data directory. */
 const engines: { readonly owner: string; readonly dataDir: string }[] = [];
 
-/** What one run saw. [A112] */
+/** What one run saw. */
 export interface A112Observation {
   readonly kind: PrivateBackend["kind"];
   /** PostgreSQL: the core's login. */
@@ -52,7 +52,7 @@ export interface A112Observation {
 
 const HEAD = 10n;
 
-/** The oracle: every problem with what was observed, none when the core reaches only the public database. [A112] */
+/** The oracle: every problem with what was observed, none when the core reaches only the public database. */
 export function a112Problems(observed: A112Observation): string[] {
   const problems: string[] = [];
   if (observed.coreCursor !== HEAD) problems.push(`the core stopped at ${observed.coreCursor}, not ${HEAD}`);
@@ -166,7 +166,7 @@ export async function a112Run(backend: PrivateBackend, wiring: Wiring = "own"): 
   }
 }
 
-describe.each(PRIVATE_BACKENDS)("A112 the core's connections reach only the public database ($name)", (backend) => {
+describe.each(PRIVATE_BACKENDS)("the core's connections reach only the public database ($name)", (backend) => {
   beforeAll(async () => {
     await backend.start();
     const create = PGlite.create.bind(PGlite);
@@ -192,7 +192,7 @@ describe.each(PRIVATE_BACKENDS)("A112 the core's connections reach only the publ
   );
 
   it(
-    "negative control: a private process reaching its own database through the core's settings fails A112",
+    "negative control: a private process reaching its own database through the core's settings fails",
     async () => {
       const observed = await a112Run(backend, "core-settings");
       const expected =

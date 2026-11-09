@@ -8,13 +8,13 @@ import { described, keyLeftovers, leftoversIn } from "./key-handling-checks.js";
 /**
  * The key-handling check's committed negative control: a key part left in place fails the static check of
  * `./key-handling-removed.test.ts`. Each case writes, in a scratch folder laid out as the repository, the files the check
- * reads — copies of the real `src/modules/declaration.ts`, `docs/module-guide.md` and the change's design, unchanged —
+ * reads — copies of the real `src/modules/declaration.ts` and `docs/module-guide.md`, unchanged —
  * plus one leftover, and runs the same check there: the copies alone pass, and each leftover is found, named by its
  * file and line.
  */
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
-const COPIED = ["src/modules/declaration.ts", "docs/module-guide.md", "openspec/changes/core-arch/design.md"];
+const COPIED = ["src/modules/declaration.ts", "docs/module-guide.md"];
 
 const scratch: string[] = [];
 
@@ -43,7 +43,7 @@ function pointsWithOnKey(): string {
   return changed;
 }
 
-describe("task 14.4a's negative control: a key part left in place fails the static check", () => {
+describe("the negative control: a key part left in place fails the static check", () => {
   it("passes the copies of the cleaned files alone", () => {
     expect(keyLeftovers(repository()).map(described)).toEqual([]);
   });

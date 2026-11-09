@@ -49,17 +49,17 @@ import { chainDeclarations } from "./chain-build.js";
 
 /**
  * The backbone part `core-chain`. These tests cover:
- * - its declaration [CORE-ARCH §4.11];
- * - its one migration, `001`: the configuration history's table and `core_chain.identity` [design §10];
+ * - its declaration;
+ * - its one migration, `001`: the configuration history's table and `core_chain.identity`;
  * - the startup checks ({@link checkChain}, {@link waitForNode}), which ask the block source (the node, through
  *   `core-block-fetch`, or the in-memory source) for the genesis hash (block 0's), the finalized head and the
- *   finalized hash at the cursor [IN-2, IN-3; CORE-ARCH §4.4];
+ *   finalized hash at the cursor;
  * - the part's work once the runner binds it to its process context ({@link bindCoreChain}). In `on-start-db`: the
  *   history recorded; the identity's genesis hash and S recorded on a database without a cursor; and the four
  *   `process` items published (`config`, `node-client`, `db` (read-only) and `ledger-table`). In `on-db-write` of block
- *   S: the anchor hash, in S's own transaction [CD-1, MD-7].
+ *   S: the anchor hash, in S's own transaction.
  *
- * The same through the real process are in `chain-process.test.ts`. [A77, A78, A88]
+ * The same through the real process are in `chain-process.test.ts`.
  */
 
 const S = 5n;
@@ -69,7 +69,7 @@ const hex = (bytes: Uint8Array): string => `0x${Buffer.from(bytes).toString("hex
 /** A block 0 another chain has. */
 const OTHER_GENESIS: BlockRef = { height: 0n, hash: new Uint8Array(32).fill(0xee), parentHash: new Uint8Array(32) };
 
-/** The configured network whose genesis is `genesis`'s hash: a `custom` network. [Q120] */
+/** The configured network whose genesis is `genesis`'s hash: a `custom` network. */
 const configuredAs = (genesis: BlockRef): ConfiguredGenesis => ({ network: "custom", hash: genesis.hash });
 
 /** The tests' configured network: `custom`, its genesis the in-memory chain's block 0. */
@@ -85,8 +85,8 @@ async function rejectionOf(run: Promise<unknown>): Promise<unknown> {
   throw new Error("expected a rejection");
 }
 
-describe("core-chain's declaration (CD-1, design §10, task 3.2's note (e))", () => {
-  it("is a valid backbone part, first of RN-3's fixed order, defined with defineModule, starting mid-chain", () => {
+describe("core-chain's declaration", () => {
+  it("is a valid backbone part, first of the fixed order, defined with defineModule, starting mid-chain", () => {
     const set = validateDeclarations({ backbone: [CORE_CHAIN], core: [], user: [] });
     expect(set.backbone).toEqual([CORE_CHAIN]);
     expect(CORE_CHAIN.id).toBe(CORE_CHAIN_ID);
@@ -115,14 +115,14 @@ describe("core-chain's declaration (CD-1, design §10, task 3.2's note (e))", ()
     expect(Object.keys(CORE_CHAIN.points)).toEqual(["on-start-db", "on-db-write"]);
   });
 
-  it("has one migration, 001: the history's table (its provides column task 14.1a's) and the identity's", () => {
+  it("has one migration, 001: the history's table (its provides column the) and the identity's", () => {
     expect(CORE_CHAIN_MIGRATIONS).toEqual([CORE_CHAIN_MIGRATION]);
     expect(CORE_CHAIN.migrations).toEqual(CORE_CHAIN_MIGRATIONS.map(({ id, sql }) => ({ id, sql })));
     expect(CORE_CHAIN_MIGRATIONS.map(({ id }) => id)).toEqual(["001"]);
     const sha = (sql: string) => createHash("sha256").update(sql, "utf8").digest("hex");
     // 001 is the two migrations of the builds before one migration per part, the configuration history's (with the
     // column `provides` for private processes) and the identity's, in one; those builds' databases recorded another
-    // 001 and are refused. From now on a database that applied it keeps its checksum. [PP-13, R16]
+    // 001 and are refused. From now on a database that applied it keeps its checksum.
     expect(sha(CORE_CHAIN_MIGRATION.sql)).toBe(CORE_CHAIN_MIGRATION_SHA256);
     expect(CORE_CHAIN_MIGRATION.sql).toContain("  provides text[] NOT NULL,\n");
     expect([...CORE_CHAIN_MIGRATION.sql.matchAll(/CREATE TABLE (\S+) \(/g)].map((match) => match[1])).toEqual([
@@ -134,7 +134,7 @@ describe("core-chain's declaration (CD-1, design §10, task 3.2's note (e))", ()
 
   it("makes the node client's options from the process's core settings: its node and back-off ceiling, none without a node", () => {
     expect(nodeOptionsOf({ node: NODE, backoffCeilingMs: 5_000 })).toEqual({ url: NODE, backoffCeilingMs: 5_000 });
-    // A private process has no node: it publishes no node client. [CF-4]
+    // A private process has no node: it publishes no node client.
     expect(nodeOptionsOf({ instanceId: "p", backoffCeilingMs: 30_000 })).toBeNull();
   });
 });
@@ -142,7 +142,7 @@ describe("core-chain's declaration (CD-1, design §10, task 3.2's note (e))", ()
 /** The pinned SHA-256 of migration 001: `core_chain.config` (with the private processes' `provides`) and `core_chain.identity`. */
 const CORE_CHAIN_MIGRATION_SHA256 = "b8656c45d3574634d6622d017d06fc97a0aa9eeea5827ba0c31eb69e26048ef3";
 
-describe("the startup checks (IN-3) and the wait for the node (IN-2, IN-3)", () => {
+describe("the startup checks and the wait for the node", () => {
   const signal = () => new AbortController().signal;
   const identityOf = (genesis: BlockRef, start = S): { genesisHash: Uint8Array; start: bigint; anchorHash: Uint8Array | null } => ({
     genesisHash: genesis.hash,
@@ -296,7 +296,7 @@ describe("the startup checks (IN-3) and the wait for the node (IN-2, IN-3)", () 
     expect((error as Error).message).toMatch(/core_chain\.identity/);
   });
 
-  it("compares the node's genesis hash with the configured network's at every start, on a new database too (Q120)", async () => {
+  it("compares the node's genesis hash with the configured network's at every start, on a new database too", async () => {
     for (const cursor of [null, inMemoryBlock(7n)]) {
       const waits: (NodeWait | null)[] = [];
       // The head below the cursor: the configured network's genesis is compared first, before any wait.
@@ -354,7 +354,7 @@ describe("the startup checks (IN-3) and the wait for the node (IN-2, IN-3)", () 
     expect(waits).toEqual([]);
   });
 
-  it("refuses a known network whose built-in table records no genesis hash, before asking the node (Q117)", async () => {
+  it("refuses a known network whose built-in table records no genesis hash, before asking the node", async () => {
     let asked = 0;
     const source = new InMemoryBlockSource({ head: 9n });
     const counting = {
@@ -398,7 +398,7 @@ describe("the startup checks (IN-3) and the wait for the node (IN-2, IN-3)", () 
   });
 });
 
-describe("the configured network's genesis hash (IN-3; decision records Q117, Q120; task 10.2a)", () => {
+describe("the configured network's genesis hash", () => {
   const bytes = (text: string): Uint8Array => new Uint8Array(Buffer.from(text.slice(2), "hex"));
 
   it("is the core entry's genesisHash for a custom network", () => {
@@ -408,11 +408,11 @@ describe("the configured network's genesis hash (IN-3; decision records Q117, Q1
     expect(Object.isFrozen(configured)).toBe(true);
   });
 
-  it("is the built-in table's for each known network, read through task 12.2's table; every one has it in this build", () => {
+  it("is the built-in table's for each known network, read through the table; every one has it in this build", () => {
     for (const network of KNOWN_NETWORKS) {
       const recorded = builtInNetwork(network)?.genesis?.hash;
       // Every known network's genesis was recorded from its node (src/ledger/networks.json), so the refusal of a known
-      // network with no recorded genesis applies to none of them in this build. [Q117]
+      // network with no recorded genesis applies to none of them in this build.
       expect(recorded, network).toMatch(/^0x[0-9a-f]{64}$/);
       expect(configuredGenesisOf({ network }), network).toEqual({ network, hash: bytes(recorded as string) });
     }
@@ -429,7 +429,6 @@ describe("the configured network's genesis hash (IN-3; decision records Q117, Q1
     expect(configuredGenesisOf({ network: "mainnet" }, lookup).hash).toEqual(bytes(builtInNetwork("mainnet")?.genesis?.hash as string));
     expect(configuredGenesisOf({ network: "preview" }, () => null)).toEqual({ network: "preview", hash: null });
     // A known network's genesis is the build's only: never a genesisHash (which the configuration refuses there).
-    // [CF-4]
     expect(configuredGenesisOf({ network: "stagenet", genesisHash: `0x${"cd".repeat(32)}` }, lookup)).toEqual({ network: "stagenet", hash: null });
     expect(configuredGenesisOf({ network: "mainnet", genesisHash: `0x${"cd".repeat(32)}` }).hash).toEqual(
       bytes(builtInNetwork("mainnet")?.genesis?.hash as string),
@@ -448,7 +447,7 @@ interface ChainStarted {
   close(): Promise<void>;
 }
 
-/** The `core` revision's ledger table in effect that the tests give `core-chain` (the preprod table). [LG-3] */
+/** The `core` revision's ledger table in effect that the tests give `core-chain` (the preprod table). */
 const LEDGER_TABLE: LedgerTable = ledgerTableOf("preprod", undefined);
 
 /** The configuration of the chain's tests: a `core` entry from each of `starts` (S is the lowest). */
@@ -477,7 +476,7 @@ async function startChain(
   const process = processCoreEntry(config);
   const check = checkHistory({ config, cursor: cursor?.height ?? null, declarations, history, process });
   const graph = resolveGraph(graphInputOf(check, declarations));
-  // Each part's revisions as the runner gives them: every backbone part's are the core entry's, from S. [MD-7]
+  // Each part's revisions as the runner gives them: every backbone part's are the core entry's, from S.
   const contexts = new ProcessContexts({ graph, revisionsOf: processRevisions(check, process) });
   const facts: CoreChainFacts = {
     config,
@@ -572,7 +571,7 @@ describe.each(BACKENDS)("core-chain bound to a process on $name", (backend: Test
     ).toEqual([
       { module: "core-chain", migration_id: "001" },
     ]);
-    // A module role reads it (through the database API's default privileges on core_chain), never writes it. [DB-6]
+    // A module role reads it (through the database API's default privileges on core_chain), never writes it.
     const role = schemaPlan(started.graph.modules).writeRole("core-block-commit");
     const asRole = await db.transaction(async (tx) => {
       await tx.execute(`SET LOCAL ROLE ${role}`);
@@ -582,14 +581,14 @@ describe.each(BACKENDS)("core-chain bound to a process on $name", (backend: Test
     await started.close();
   }, 120_000);
 
-  it("records the genesis hash and S on a new database, the anchor still null, in its on-start-db (IN-2)", async () => {
+  it("records the genesis hash and S on a new database, the anchor still null, in its on-start-db", async () => {
     const { db } = await backend.database("SELECT 1", cursorHeight);
     const started = await startChain(db);
     const [row] = await identityRow(db);
     expect(row).toMatchObject({ id: 1, genesis_hash: inMemoryBlock(0n).hash, start_height: S, anchor_hash: null });
     expect(await db.read((read) => readIdentity(read))).toEqual({ genesisHash: inMemoryBlock(0n).hash, start: S, anchorHash: null });
     expect(Object.isFrozen(await db.read((read) => readIdentity(read)))).toBe(true);
-    // The history was recorded in the same callback: the core entry's row. [CF-6]
+    // The history was recorded in the same callback: the core entry's row.
     expect((await db.read((read) => readHistory(read))).map((h) => [h.id, h.start])).toEqual([["core", S]]);
     await started.close();
   }, 120_000);
@@ -606,14 +605,14 @@ describe.each(BACKENDS)("core-chain bound to a process on $name", (backend: Test
     const first = await startChain(db);
     await first.close();
     // Another node's genesis, and S moved down by a core revision from 3. Nothing was processed yet, so the bootstrap
-    // is repeated, not refused: the genesis hash is compared only on a database with a cursor. [IN-2, IN-3]
+    // is repeated, not refused: the genesis hash is compared only on a database with a cursor.
     const second = await startChain(db, { genesis: OTHER_GENESIS.hash, starts: [3n, S] });
     const [row] = await identityRow(db);
     expect(row).toMatchObject({ genesis_hash: OTHER_GENESIS.hash, start_height: 3n, anchor_hash: null });
     await second.close();
   }, 120_000);
 
-  it("records the anchor hash in block S's own transaction, writing nothing at any other height (IN-2, CD-1)", async () => {
+  it("records the anchor hash in block S's own transaction, writing nothing at any other height", async () => {
     const { db } = await backend.database("SELECT 1", cursorHeight);
     const started = await startChain(db);
     const source = new InMemoryBlockSource({ head: S });
@@ -653,7 +652,7 @@ describe.each(BACKENDS)("core-chain bound to a process on $name", (backend: Test
     await started.close();
   }, 120_000);
 
-  it("publishes config, node-client, db read-only and ledger-table from its on-start-db, once (MD-7, CD-1, A144)", async () => {
+  it("publishes config, node-client, db read-only and ledger-table from its on-start-db, once", async () => {
     const { db } = await backend.database("SELECT 1", cursorHeight);
     const started = await startChain(db);
     const items = started.contexts.of(CORE_CHAIN_ID).items;
@@ -673,7 +672,7 @@ describe.each(BACKENDS)("core-chain bound to a process on $name", (backend: Test
     expect(await rejectionOf((items.get("node-client") as NodeClient).finalizedHead())).toMatchObject({ code: "handle-closed" });
   }, 120_000);
 
-  it("publishes no node client for a process without a node (a private process, CF-4)", async () => {
+  it("publishes no node client for a process without a node (a private process)", async () => {
     const { db } = await backend.database("SELECT 1", cursorHeight);
     // A backbone of core-chain alone: no core-block-fetch, which would require the node client (process-item-missing).
     const started = await startChain(db, { node: false, backbone: [CORE_CHAIN] });
@@ -704,7 +703,7 @@ describe("core-chain outside a process", () => {
   });
 });
 
-describe("the table items a revision's row records (core_chain.config.provides; PP-13, task 14.1a)", () => {
+describe("the table items a revision's row records (core_chain.config.provides)", () => {
   it("records a module's table items from its declaration and the core's from the backbone, each once, by UTF-8 bytes", () => {
     const build = resolveDeclarations({ userModules: [], side: "public" });
     expect(tableItemsOf(build, "core")).toEqual(["blocks", "chain-identity", "digest-checkpoints", "digest-tables"]);
@@ -726,7 +725,7 @@ describe("the table items a revision's row records (core_chain.config.provides; 
   });
 
   it("records a private process's core from its own backbone (core-private-source, core-digest)", () => {
-    // core-private-source's accepted-config-hash beside its private-cursor. [PP-14, Q159]
+    // core-private-source's accepted-config-hash beside its private-cursor.
     expect(tableItemsOf(resolveDeclarations({ userModules: [], side: "private" }), "core")).toEqual([
       "accepted-config-hash",
       "chain-identity",
@@ -736,7 +735,7 @@ describe("the table items a revision's row records (core_chain.config.provides; 
     ]);
   });
 
-  it("throws for an id the build has no declaration of: the configuration refuses such an entry first (CF-3)", () => {
+  it("throws for an id the build has no declaration of: the configuration refuses such an entry first", () => {
     expect(() => tableItemsOf(resolveDeclarations({ userModules: [], side: "public" }), "nobody")).toThrow(/tableItemsOf: the build has no module nobody/);
   });
 });

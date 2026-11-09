@@ -17,7 +17,7 @@ import { type PrivateOptions, type PublicCore, refusalOf, startPrivate, startPub
 /**
  * `core-private-source`'s one migration, through a private process bound to a public core, on PostgreSQL 18 and PGlite
  * 0.5.10 (the private process reading its public database directly on PostgreSQL, through the core's `db` item on
- * PGlite). [R16, LG-11, DB-9]
+ * PGlite).
  *
  * - A new private database gets `core_private_source.accepted_config` (and its cursor) from `core-private-source`'s
  *   `001`, and `core_chain.identity` from `core-chain`'s: each part records one migration, `001`.
@@ -66,12 +66,12 @@ async function stateOf(db: TestDatabase): Promise<{ readonly rows: string[]; rea
 /** `part`'s recorded migrations as {@link MIGRATION_ROWS_SQL} shows them. */
 const shown = (part: FoldedPart): string[] => THIS_BUILD[part].map((row) => `${part}/${row.id}@${row.position}:${row.checksum}`);
 
-describe.each(PRIVATE_BACKENDS)("R16: core-private-source's one migration, on a private process, on $name (LG-11, DB-9)", (backend) => {
+describe.each(PRIVATE_BACKENDS)("core-private-source's one migration, on a private process, on $name", (backend) => {
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 
   it(
-    "R16: a new private database gets core_private_source.accepted_config from core-private-source's 001; an earlier " +
+    "a new private database gets core_private_source.accepted_config from core-private-source's 001; an earlier " +
       "build's recorded migrations of it refuse startup with migration-checksum-changed, naming the part, 001 and both " +
       "checksums, and no migration runs",
     async () => {

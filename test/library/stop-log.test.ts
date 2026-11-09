@@ -4,17 +4,16 @@ import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import { cursorReaches, libraryData, PGLITE_MEMORY, rowsModule } from "./library-fixtures.js";
 
 /**
- * A library process's stop is in its host's `log` as in the command's (issue 00072): the engine logs both lines, so a
+ * A library process's stop is in its host's `log` as in the command's: the engine logs both lines, so a
  * host gets them for its `stop()` and for its `signal`, which they name with the abort reason's text. PGlite in memory,
  * a host's in-memory chain at head 3; the command's own cases, on both backends, are `test/cli/run-stop-log.test.ts`.
- * [RN-13, LM-2, LM-9]
  */
 
 /** The stop's lines of a log, in order. */
 const stopLines = (lines: readonly string[]): string[] =>
   lines.filter((line) => /^(stopping|processing stopped|startup stopped) \(/.test(line));
 
-describe("issue 00072: a host's log gets the stop's lines (RN-13, LM-2)", () => {
+describe("a host's log gets the stop's lines", () => {
   it("stop() at the head: named stop(), nothing in progress, then the last height the process saw committed", async () => {
     const lines: string[] = [];
     const m = rowsModule("logged");

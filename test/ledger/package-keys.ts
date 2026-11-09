@@ -6,14 +6,14 @@ import { type Child, decodeChildren, encodeChildren, hex } from "./node-format.j
 // The key the ledger package gives a node embedded in a stored node, asked of the package itself. A package reading a
 // node from its node store hashes the node's payload and its children's keys and refuses the node (it panics, which
 // aborts the module) unless that hash is the key it asked for (`vendor/ledger/*/patches/0001-…` `get_from_node_source`,
-// the check LG-11 makes on every read). So stored nodes are given to the package with every embedded child moved out
+// the check made on every read). So stored nodes are given to the package with every embedded child moved out
 // into a node of its own, stored under the key `src/ledger/node-key.ts` gives it, and referenced by that key: the
 // package then reads each embedded node by that key and accepts it only if its own hash of the node is that key, and it
 // accepts the parent only if its hash over the parent's children's keys — that key among them — is the parent's key.
 // A node's key does not depend on how its children are kept, so the store answers every read of the value
 // (`./stored-values.ts` `nodesOfTagged` serves values the same way). The structure is read with the independent format
 // (`./node-format.ts`); only the keys come from `node-key.ts`, each embedded node's from its payload and its children
-// by reference (innermost first), so each node is hashed once per place it is embedded. [R29, LG-11]
+// by reference (innermost first), so each node is hashed once per place it is embedded.
 
 /** Stored nodes with every embedded child moved out into a node of its own (see the module comment). */
 export interface ByReference {

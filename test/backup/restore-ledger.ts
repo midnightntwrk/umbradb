@@ -30,7 +30,6 @@ import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
  * A backup with `core-ledger-state` in its history, and its restore checked against a node for `backup-root-mismatch`.
- * [BK-3, LG-15]
  *
  * The backup comes from the synthetic ledger tape of the ledger ingest tests (`../backbone/ledger-tapes.ts`: real
  * ledger transactions on the undeployed devnet's genesis state, `midnight_ledgerStateRoot` at every block) synced from
@@ -94,18 +93,18 @@ export async function ledgerBackup(
 
 /**
  * A restore's build other than the ledger's core modules from 0: the build's core modules and each one's entry (its
- * start and stop). [CC-4]
+ * start and stop).
  */
 export interface RestoreBuild {
   readonly core: readonly ModuleDeclaration[];
   readonly entry: (module: ModuleDeclaration) => Record<string, unknown>;
-  /** More user modules, after the watcher: those the backed-up process also ran, each from 0. [BK-3, R15] */
+  /** More user modules, after the watcher: those the backed-up process also ran, each from 0. */
   readonly user?: readonly ModuleDeclaration[];
 }
 
 /**
  * What a restore takes of a backup: its file, and the tape whose genesis the configuration names (a ledger scenario's,
- * or another chain's). [BK-3, R15]
+ * or another chain's).
  */
 export interface RestorableBackup {
   readonly file: string;

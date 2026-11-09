@@ -3,7 +3,6 @@
  * `jsonb` and `numeric` `CHECK`s. The rules, their detection and their messages belong to the `deterministic_postgresql`
  * component (`../deterministic-postgresql/column-rules.ts`, `catalog.ts`, `checks.ts`, `opt-out.ts`). This file runs
  * them in transactions of the database API, and the migration runner (`./migrate.ts`) decides when:
- * [DT-6, Q57, Q58, Q61, Q75, Q76; design §4]
  *
  * - **In each migration's transaction**, after its SQL and before its record, {@link refuseNonDeterministic} reads the
  *   tables and relations of the schemas the part writes and rejects with the first of their refusals. So a migration
@@ -20,7 +19,7 @@
  * one of these for some module of it, so each is checked with the part that writes it, after that part's migrations.
  * UmbraDB's own parts (`core-chain`, `core-digest`) write reserved schemas no rule covers. A table the rules skip
  * (declared `deterministic: false`, with its partitions and the sequences its columns own: `optOut`) is neither
- * rejected nor given a `CHECK`. [Q89]
+ * rejected nor given a `CHECK`.
  */
 
 import {
@@ -63,11 +62,11 @@ export async function createCheckFunctions(tx: Transaction): Promise<void> {
  * Rejects the tables and relations of `schemas` that the determinism rules reject and the plan's opt-out does not
  * cover, with the first refusal found:
  * - the code is the rule's (`no-primary-key`, `unsupported-key-type`, `unsupported-column-type`,
- *   `non-deterministic-column`, `non-deterministic-table`) [design §11];
+ *   `non-deterministic-column`, `non-deterministic-table`);
  * - the message is the one the contents hash gives for the same table, with the module `part` named first;
  * - the details say where and, inside a migration's transaction, which migration.
  *
- * Not retryable. [DT-6]
+ * Not retryable.
  */
 export async function refuseNonDeterministic(
   tx: Transaction,
@@ -101,7 +100,7 @@ export async function refuseNonDeterministic(
  * Gives every `jsonb`, `numeric`, `jsonb[]` and `numeric[]` column of the tables of `schemas` that are not opted out the
  * `CHECK` that backs the determinism rules (`integerCheckStatements`), and drops the database API's `CHECK`s from the
  * opted-out ones. Run by the writer's login, which inherits every module role and so may alter their tables. Adding a
- * `CHECK` checks the rows the table holds. [DT-6]
+ * `CHECK` checks the rows the table holds.
  */
 export async function attachIntegerChecks(tx: Transaction, plan: SchemaPlan, schemas: readonly string[]): Promise<void> {
   if (schemas.length === 0) return;

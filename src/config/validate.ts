@@ -3,7 +3,7 @@
  * (`./load.ts`, already checked to be plain data) is validated at startup: its shape, and the settings of every
  * revision whose version is this build's, against the schema in this build. The declared defaults are applied and each
  * field is classified by its kind (`data`, `operational`, `secret`). Any violation refuses with
- * `invalid-configuration`, naming the entry and the field. [CF-1, CF-3, CF-4; CORE-ARCH §4.12; design §7]
+ * `invalid-configuration`, naming the entry and the field.
  *
  * **Two steps, because the database is opened in between.**
  * - {@link validateConfig} needs only the loaded data, the build's validated declarations (`validateDeclarations`,
@@ -11,45 +11,44 @@
  *   (`database`, `developmentOptIn`, `fullPageWritesOffAllowed`).
  * - {@link entriesAtCursor} then takes the database's cursor (null on a new database) and finishes checking the
  *   revisions whose version is not the build's (`versionEntry`). One starting above the cursor is scheduled and
- *   carries no `config`; one starting at or below it carries the `config` recorded for it. [CF-3]
+ *   carries no `config`; one starting at or below it carries the `config` recorded for it.
  *
  * Comparing those with the recorded history, recording and re-recording belong to `core-chain`. `umbradb config check`
- * without a database runs the first step only. [CF-10]
+ * without a database runs the first step only.
  *
  * **The checks** are rules ({@link CONFIG_RULES}, {@link CURSOR_RULES}), each finding its own violations independently.
  * So every violation of a configuration is reported at once: top-level ones first, then by entry, each entry's in the
  * rules' order. A path is written as the plain-data check writes it (`entries[1].config.pollMs`), and an entry is named
- * by its position, id and start, which together identify it. [CF-5]
+ * by its position, id and start, which together identify it.
  *
- * The shape: [CF-3]
+ * The shape:
  * - the default export is `{ entries }` and nothing else;
  * - each entry is `{ id, start, stop?, version, config }` with no other property (the builders pass a property they do
  *   not know through, `./entries.ts`, so it is refused here);
  * - its id is `core` or a module of the build of the process's side, never a backbone part, which runs with the core. A
- *   private process runs private modules, the core public ones [PP-1];
+ *   private process runs private modules, the core public ones;
  * - its start and stop are heights, with `stop ≥ start`;
  * - its version is a semver string for a module, and a core version for `core` (`CORE_VERSION_SCHEMA`);
  * - its `config` is an object, required for a revision of the build's version;
- * - each `(id, start)` appears once [CF-5];
+ * - each `(id, start)` appears once;
  * - there is at least one `core` entry, whose earliest start is S;
  * - no string or key holds a lone UTF-16 surrogate. It has no UTF-8 form, so the history could not record or hash it;
- *   it is refused here, with its path, rather than later by the canonical encoding [CF-7].
+ *   it is refused here, with its path, rather than later by the canonical encoding.
  *
- * **The settings** of a revision of the build's version: [CF-3, CF-4]
+ * **The settings** of a revision of the build's version:
  * - No field the schema does not declare. zod 4's `z.object` strips an unknown key, so a misspelled setting would be
  *   silently dropped instead of refused. The key check against `schema.shape` covers every schema, strict or not, and
- *   a field of the other side's `core` entry is named as such. [CF-2]
+ *   a field of the other side's `core` entry is named as such.
  * - No renamed `core` setting (`RENAMED_CORE_SETTINGS`, `./core-settings.ts`), in any `core` revision: each old key is
  *   one finding, `renamed-setting`, naming the key that replaced it. The other checks read a `core` revision's settings
- *   without its old keys, so an old key is not also an unknown setting or a schema issue. [CF-4, L51 CI]
+ *   without its old keys, so an old key is not also an unknown setting or a schema issue.
  * - Then the schema's own `safeParse` on the declared fields. It is duck-typed, never `instanceof`, so a module that
  *   bundles its own copy of zod 4 works. Each issue is a finding at its path, its message passed through the redaction,
  *   since a module's custom message may repeat the value it refuses.
  * - The parsed settings must still be plain data: a schema that coerces into a bigint or a `Date` cannot be recorded.
- *   [CF-7]
  *
  * The `core` entry's schema is the core settings schema for the process's side (`./core-settings.ts`). A module's is
- * its declaration's `configSchema`, whose every field carries a kind (`field-no-kind`). [CF-4, MD-2]
+ * its declaration's `configSchema`, whose every field carries a kind (`field-no-kind`).
  *
  * No message holds a setting's value: findings name paths, fields and types, and every message built from a schema's
  * issue or error is redacted with the secrets of the configuration (`./redact.ts`).
@@ -76,7 +75,7 @@ export interface ConfigInput {
   readonly config: { readonly file?: string | undefined; readonly data: PlainData };
   /** The build's declarations, validated (`validateDeclarations`): entries name its core and user modules. */
   readonly declarations: DeclarationSet<ModuleDeclaration>;
-  /** Whether this is the public (core) process or a private one, which decides the `core` schema. [CF-4] */
+  /** Whether this is the public (core) process or a private one, which decides the `core` schema. */
   readonly side: ProcessSide;
 }
 
@@ -101,7 +100,7 @@ export interface Finding {
   readonly message: string;
 }
 
-/** Each settings field's kind. [CF-4] */
+/** Each settings field's kind. */
 export type FieldKinds = Readonly<Record<string, FieldKind>>;
 
 /** A zod 4 issue, as the validation reads it. */
@@ -168,24 +167,24 @@ export interface CheckedEntry {
   readonly index: number;
   readonly id: string;
   readonly start: number;
-  /** As written; null when absent. The effective stop is worked out by the configuration history. [CF-5] */
+  /** As written; null when absent. The effective stop is worked out by the configuration history. */
   readonly stop: number | null;
   /** A module's semver version, or for `core` the core version. */
   readonly version: string | CoreVersion;
-  /** True when the version is this build's: its settings were validated against this build's schema. [CF-3] */
+  /** True when the version is this build's: its settings were validated against this build's schema. */
   readonly buildVersion: boolean;
   /**
    * For the build's version: the parsed settings, every default applied. Otherwise the `config` as written (never
-   * validated against this build's schema), or null when it has none (a scheduled `versionEntry`). [CF-3]
+   * validated against this build's schema), or null when it has none (a scheduled `versionEntry`).
    */
   readonly settings: PlainObject | null;
   /**
    * For the build's version: every field of its schema with its kind. Otherwise null: the data recorded for the
-   * revision is the only source of its fields' kinds. [CF-3, CF-4]
+   * revision is the only source of its fields' kinds.
    */
   readonly kinds: FieldKinds | null;
   /**
-   * For the build's version: the settings of kind `data` only, which the history records. Otherwise null. [CF-4, CF-7]
+   * For the build's version: the settings of kind `data` only, which the history records. Otherwise null.
    */
   readonly data: PlainObject | null;
 }
@@ -195,7 +194,7 @@ export interface CheckedConfig {
   /** The file it was loaded from, or null. */
   readonly file: string | null;
   readonly side: ProcessSide;
-  /** S: the database's start height, the earliest start of a `core` entry. [CF-2] */
+  /** S: the database's start height, the earliest start of a `core` entry. */
   readonly start: number;
   /** Every revision, in the file's order. */
   readonly entries: readonly CheckedEntry[];
@@ -203,7 +202,7 @@ export interface CheckedConfig {
 
 /** A revision placed against the database's cursor. */
 export interface PlacedEntry extends CheckedEntry {
-  /** It starts at or below the cursor, so it is compared with its recorded row. [CF-6] */
+  /** It starts at or below the cursor, so it is compared with its recorded row. */
   readonly started: boolean;
   /** It starts above the cursor and its version is not the build's: only id, start, stop and version are recorded. */
   readonly scheduled: boolean;
@@ -215,7 +214,7 @@ export interface CursorRule {
   check(config: CheckedConfig, cursor: bigint | null): readonly Finding[];
 }
 
-/** An entry's properties. [CF-3] */
+/** An entry's properties. */
 const ENTRY_PROPERTIES = ["id", "start", "stop", "version", "config"];
 
 /** A lone UTF-16 surrogate: in a `u` expression a well-formed pair is one code point (as `src/determinism/cbor.ts`). */
@@ -249,7 +248,7 @@ function declaredKind(schema: SettingsSchema, field: string): FieldKind | undefi
 /**
  * Every field of `schema` with its kind, read as `schema.shape[field].meta().kind`. Throws an `Error` for a field
  * without one: the validation takes validated declarations only, and declaration validation already refuses such a
- * schema (`field-no-kind`). [CF-4, MD-2; design §7]
+ * schema (`field-no-kind`).
  */
 export function fieldKinds(schema: { readonly shape: Readonly<Record<string, unknown>> }): FieldKinds {
   const kinds: Record<string, FieldKind> = {};
@@ -384,13 +383,13 @@ function without(value: Plain, path: SettingPath): Plain {
   return inner === undefined ? dropped(value, outer) : { ...value, [outer]: dropped(value[outer] as Plain, inner) };
 }
 
-/** A `core` revision's settings without its renamed settings, which `renamed-setting` reports alone. [CF-4, L51 CI] */
+/** A `core` revision's settings without its renamed settings, which `renamed-setting` reports alone. */
 const withoutRenamed = (config: Plain): Plain =>
   RENAMED_CORE_SETTINGS.reduce((kept, { from }) => without(kept, from), config);
 
 /**
  * The entries whose settings are validated: their version is the build's and their `config` an object. A `core`
- * revision's settings come without its renamed settings ({@link withoutRenamed}). [CF-4, L51 CI]
+ * revision's settings come without its renamed settings ({@link withoutRenamed}).
  */
 const validated = (context: ConfigContext) =>
   objects(context).flatMap((view) =>
@@ -450,7 +449,7 @@ function editDistance(a: string, b: string): number {
   return previous[b.length] as number;
 }
 
-/** The fields of a `core` entry of the other side's process, which this side's has not. [CF-4] */
+/** The fields of a `core` entry of the other side's process, which this side's has not. */
 function otherSideOnly(side: ProcessSide): readonly string[] {
   const own = coreSettingsSchema(side).shape;
   const other = coreSettingsSchema(side === "public" ? "private" : "public").shape;
@@ -461,7 +460,7 @@ function otherSideOnly(side: ProcessSide): readonly string[] {
 const schemaOf = (view: EntryView): string =>
   view.core ? "the core entry's settings schema" : `the settings schema of ${view.ref.id} ${String(view.object?.version)}`;
 
-/** The configuration's checks, in the order their findings are reported within one entry. [CF-3, CF-5, CF-7] */
+/** The configuration's checks, in the order their findings are reported within one entry. */
 export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
   {
     name: "top-level",
@@ -565,7 +564,7 @@ export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
       }),
   },
   {
-    // A process runs the modules of its side only. [PP-1, MD-1]
+    // A process runs the modules of its side only.
     name: "entry-side",
     check: (context) =>
       objects(context).flatMap((view) => {
@@ -754,7 +753,7 @@ export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
   },
   {
     // A renamed setting of any `core` revision, as written (`RENAMED_CORE_SETTINGS`): one finding at the old key,
-    // naming the key that replaced it, and saying so when that key is the other side's. [CF-4, L51 CI]
+    // naming the key that replaced it, and saying so when that key is the other side's.
     name: "renamed-setting",
     check: (context) =>
       objects(context).flatMap((view) => {
@@ -910,7 +909,7 @@ function checkedEntry(view: EntryView): CheckedEntry {
 /**
  * Validates the configuration: see the module comment. Throws `invalid-configuration` (not retryable) with
  * `details { file, reason: "invalid-entries", findings }` when any rule finds a violation. Returns every revision,
- * frozen, with its settings, kinds and data fields when its version is the build's. [CF-3, CF-4]
+ * frozen, with its settings, kinds and data fields when its version is the build's.
  */
 export function validateConfig(input: ConfigInput): CheckedConfig {
   const context = contextOf(input);
@@ -942,7 +941,7 @@ const startedAt = (entry: CheckedEntry, cursor: bigint | null): boolean => curso
 const cursorText = (cursor: bigint | null): string =>
   cursor === null ? "the cursor (a new database, which has committed nothing)" : `the cursor ${cursor}`;
 
-/** The checks of the revisions whose version is not the build's, once the cursor is known. [CF-3] */
+/** The checks of the revisions whose version is not the build's, once the cursor is known. */
 export const CURSOR_RULES: readonly CursorRule[] = Object.freeze([
   {
     name: "scheduled-config",
@@ -992,10 +991,10 @@ export function cursorFindings(
 /**
  * Checks the `versionEntry` revisions against the database's `cursor`: the last committed height, or null on a new
  * database. Throws `invalid-configuration` (as {@link validateConfig} does) for a scheduled one that carries a `config`,
- * or an earlier one without its recorded `config`. [CF-3]
+ * or an earlier one without its recorded `config`.
  *
  * Returns every revision placed against the cursor:
- * - `started` when it starts at or below the cursor, so it is compared with its recorded row [CF-6];
+ * - `started` when it starts at or below the cursor, so it is compared with its recorded row;
  * - `scheduled` when it is not the build's version and starts above the cursor, so only its id, start, stop and version
  *   are recorded.
  */

@@ -2,12 +2,12 @@
  * A vendored ledger package's WebAssembly in the browser build. The package's Node.js entry
  * (`vendor/ledger/<version>/pkg/*_fs.js`) reads its `.wasm` beside it with `readFileSync` and instantiates it
  * synchronously. In the browser that entry is bundled with these lines instead (`browser/build.ts`'s
- * `browserLedgerEntry`). [LG-5; design §5.2, §9.2]
+ * `browserLedgerEntry`).
  *
  * The `.wasm` is copied beside the ledger worker as `ledger/<version>/<file>` and read with a synchronous request,
  * which a dedicated worker may make. Its SHA-256 is checked against the line of the package's `SHA256SUMS` that the
  * build read; otherwise it fails with `package-hash-mismatch`, just as the ledger identity check refuses a changed
- * package. It is then instantiated synchronously, as in Node.js. [A97]
+ * package. It is then instantiated synchronously, as in Node.js.
  *
  * It is synchronous so the entry keeps no top-level `await`: the package's snippets import the entry back (`#self`),
  * and a module cycle holding a top-level `await` would wait on itself once bundled. Only the ledger worker loads it,

@@ -12,7 +12,7 @@ import { runCoreSettings, statsConfig, statsModule } from "./run-fixtures.js";
  * in this process with its own `start`, which keeps what the command gives the engine: the file as its configuration
  * and its `modules` export as the user modules. The ledger worker the engine starts for that input
  * (`ledgerWorkerOf`) runs, once started, the ledger task of a user module the file exports, and UmbraDB's core
- * modules' tasks. [MD-1, LG-17, LM-7; design §5.5]
+ * modules' tasks.
  */
 
 let project: CliProject;
@@ -53,7 +53,7 @@ beforeAll(async () => {
 
 afterAll(() => project?.remove());
 
-describe("umbradb run's ledger worker (task 12.6; MD-1, LG-17)", () => {
+describe("umbradb run's ledger worker", () => {
   it("imports the configuration file in the worker: the user modules it exports have their ledger tasks there, beside UmbraDB's", { timeout: 120_000 }, async () => {
     project.write(
       "tasks.config.ts",

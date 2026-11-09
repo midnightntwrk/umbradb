@@ -6,7 +6,7 @@ import { bareExtrinsic, type ChainBlock, compact, content, hex } from "./fetch-f
  * `core-tx-results`. They hold metadata V14 in `frame-metadata`'s layout over `scale-info`'s portable registry, written
  * here independently of the code under test. The metadata holds the types, calls, events and the `System::Events`
  * storage entry of a Midnight runtime. The fixtures also give the SCALE bytes of `System::Events` values, as a node
- * gives them. [CD-4, CD-5, CD-6]
+ * gives them.
  *
  * **The runtime** follows the real Midnight node metadata files (`midnight-indexer` 2.1.0-rc.4's `.node/*`):
  * - pallet indices: `System` 0, `Timestamp` 1, `Grandpa` 3, `Midnight` 5, `MidnightSystem` 6, `CNightObservation` 13,

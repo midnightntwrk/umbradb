@@ -23,15 +23,15 @@ import {
 /**
  * `core-ledger-state`'s reclamation step (`src/backbone/core-ledger-state/refcount.ts`) against the reference model
  * (`./refcount-model.ts`), through a tables seam that answers the step's reads from the model's tables at h − 1 as the
- * database would. [LG-14, R1, R11, R12]
+ * database would.
  *
  * - The property (fast-check, seed 20261105): on the generated histories of R1, after every block the step gives the
  *   model's new, rewritten and unchanged nodes, count changes and counts, deleted set and rounds, queue and rows.
- * - Two of R12's faults have a counterpart in the model (`released-in-block`, `first-round-only`): with the fault put
+ * - Two of the faults have a counterpart in the model (`released-in-block`, `first-round-only`): with the fault put
  *   into the tables seam, the step gives the faulty model's block, halts included, at every block of the histories.
  * - The checks fire at the step's level: `negative-count` on a lowered count, `missing-reference` on a new node, a
  *   rewritten node and a rising root naming a key that is not stored after the block, each as the model halts.
- * - Each of R12's six faults, by hand, does what it names. The statements, their row counts and `row-count-mismatch`
+ * - Each of the six faults, by hand, does what it names. The statements, their row counts and `row-count-mismatch`
  *   are `./refcount-tables.test.ts`'s, on both backends.
  */
 
@@ -193,9 +193,9 @@ function modelOrHalt(
   }
 }
 
-describe("the reclamation step against the reference model (LG-14)", () => {
+describe("the reclamation step against the reference model", () => {
   it(
-    `gives the model's new and rewritten nodes, counts, queue and deleted set after every block of R1's histories ` +
+    `gives the model's new and rewritten nodes, counts, queue and deleted set after every block of the histories ` +
       `(seed ${SEED}, ${RUNS} runs)`,
     async () => {
       const shown = { blocks: 0, rewritten: 0, unchanged: 0, deleted: 0, cascades: 0, queued: 0, unqueued: 0, off: 0 };
@@ -220,7 +220,7 @@ describe("the reclamation step against the reference model (LG-14)", () => {
         { seed: SEED, numRuns: RUNS },
       );
       // Not vacuous: the histories rewrite, write again unchanged, delete in cascades, queue and unqueue, and turn
-      // `sweep` off (R1's own test shows every case of R1 on these generators).
+      // `sweep` off (the own test shows every case of R1 on these generators).
       for (const [what, blocks] of Object.entries(shown)) expect(blocks, what).toBeGreaterThan(20);
     },
     300_000,
@@ -299,7 +299,7 @@ const batchOf = (
 
 const H = 7n;
 
-describe("the reclamation step's checks fire at the step's level (LG-14)", () => {
+describe("the reclamation step's checks fire at the step's level", () => {
   it("negative-count: a stored count lowered so that a deletion takes it below 0 halts with the key", async () => {
     const c = node("c");
     const p = node("p", [c.keyBytes]);
@@ -372,7 +372,7 @@ describe("the reclamation step's checks fire at the step's level (LG-14)", () =>
   });
 });
 
-describe("the reclamation step by hand (LG-14)", () => {
+describe("the reclamation step by hand", () => {
   it("classifies the batch, counts, deletes the queue's cascade and queues what a block releases", async () => {
     const l = node("l");
     const a = node("a", [l.keyBytes]);
@@ -457,7 +457,7 @@ describe("the reclamation step by hand (LG-14)", () => {
   });
 });
 
-describe("R12's six faults, put into the step through its tables seam, by hand (LG-14)", () => {
+describe("six faults, put into the step through its tables seam, by hand", () => {
   /** The step with and without `fault` on the same tables and batch. */
   async function both(before: ModelTables, batch: RefcountBatch, fault: RefcountFault, on = true) {
     const options = { height: H, on };

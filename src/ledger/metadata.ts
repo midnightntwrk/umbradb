@@ -1,5 +1,5 @@
 /**
- * Which runtime metadata decodes a block. [LG-4; CORE-ARCH §4.8]
+ * Which runtime metadata decodes a block.
  *
  * A block's extrinsics and events were produced by the runtime that built it, its `MNSV` version, so a block's content is
  * decoded with the metadata of the runtime whose `spec_version` (`state_getRuntimeVersion` at a hash) is that version:
@@ -14,14 +14,14 @@
  *   naming both versions.
  * The official indexer compares the same versions (`chain-indexer/src/infra/subxt_node.rs`). The parent's runtime is
  * asked first: a recorded tape holds each runtime's metadata at the first height whose state reports it, U for the
- * earlier form and F for the delayed one, and this order reads it there. [LG-4; design §5, §11; v9-upgrade-metadata D1]
+ * earlier form and F for the delayed one, and this order reads it there.
  *
  * {@link RuntimeMetadata} caches the metadata by that `spec_version`: the version of the runtime read at the same hash
  * the metadata is read at, after the check, so a runtime's metadata is never stored under another version. It reads
  * each version's metadata once, also when several blocks ask for it at the same time (the finalized prefetch). A read
  * that fails leaves nothing behind, so the next block reads it again. Every block costs one `state_getRuntimeVersion`
  * (the parent's), the first block of a delayed upgrade a second (its own), and a version's first block one
- * `state_getMetadata`. [LG-4]
+ * `state_getMetadata`.
  *
  * {@link RuntimeMetadata.forState} gives the metadata of the runtime in a block's own state, which reads of that state
  * (storage, runtime calls) use. It differs from the metadata of the block's content only at the earlier form's U.
@@ -32,7 +32,7 @@
 
 import { UmbraError } from "../db/errors.js";
 
-/** The two node calls the cache makes: `state_getRuntimeVersion` and `state_getMetadata`, each at a hash. [IN-8] */
+/** The two node calls the cache makes: `state_getRuntimeVersion` and `state_getMetadata`, each at a hash. */
 export interface MetadataNode {
   runtimeVersion(at: Uint8Array): Promise<{ readonly specVersion: number }>;
   metadata(at: Uint8Array): Promise<Uint8Array>;
@@ -60,12 +60,12 @@ function hexOf(bytes: Uint8Array): string {
   return text;
 }
 
-/** The hash whose state holds the runtime that built `block`: its parent's, or its own for block 0. [LG-4] */
+/** The hash whose state holds the runtime that built `block`: its parent's, or its own for block 0. */
 export function contentStateOf(block: Pick<MetadataBlock, "height" | "hash" | "parentHash">): Uint8Array {
   return block.height === 0n ? block.hash : block.parentHash;
 }
 
-/** The runtime metadata cache: see the module comment. [LG-4] */
+/** The runtime metadata cache: see the module comment. */
 export class RuntimeMetadata {
   readonly #node: MetadataNode;
   /** Each `spec_version`'s metadata, read once (a read in flight is here too; a failed one is removed). */

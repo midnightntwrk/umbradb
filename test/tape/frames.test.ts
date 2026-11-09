@@ -11,7 +11,7 @@ import {
 /**
  * The frames the tape node writes and the recording builder checks a node's frames against (`tools/tape/frames.ts`):
  * their exact text, written here by hand, the subscription methods the builder records as subscriptions, and the
- * notification names the tape node sends. [TT-2 to TT-4]
+ * notification names the tape node sends.
  */
 
 describe("the tape's JSON-RPC frames", () => {

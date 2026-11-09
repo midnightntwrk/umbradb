@@ -18,12 +18,12 @@ import { expectGoldenRoundTrip, GOLDEN_ID, GOLDEN_PATH, GOLDEN_RECORDS } from ".
 
 /**
  * Tapes round-trip through the reader and writer byte for byte; a malformed line fails with `bad-tape-record` and its
- * line number; the tape id is the SHA-256 of the file. [A68 CI, TT-1; acceptance §9]
+ * line number; the tape id is the SHA-256 of the file.
  *
  * A tape is read only in the one form the writer writes (each record's fields in the tape format's order, JSON without
  * spaces, strings and numbers as `JSON.stringify` writes them, a newline after every record), so every tape the reader
  * accepts is written back to the same bytes, and one tape has one id. Determinism: the property runs with a pinned,
- * reported fast-check seed. [TT-1]
+ * reported fast-check seed.
  */
 
 const SEED = 20261025;
@@ -35,7 +35,7 @@ function sha256(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-/** Eleven valid lines, so that the line under test is line 12, as in the tape format's scenario. [TT-1] */
+/** Eleven valid lines, so that the line under test is line 12, as in the tape format's scenario. */
 const ELEVEN = [
   '{"method":"chain_getFinalizedHead","params":[],"result":"0xaa"}',
   '{"subscribe":"s","method":"chain_subscribeFinalizedHeads","params":[]}',
@@ -65,7 +65,7 @@ function textTape(lines: readonly string[]): Uint8Array {
   return encoder.encode(lines.map((line) => `${line}\n`).join(""));
 }
 
-describe("A68: the committed tape round-trips byte for byte, and its id is its SHA-256", () => {
+describe("the committed tape round-trips byte for byte, and its id is its SHA-256", () => {
   it("writes the committed records to the committed bytes, reads them back equal, and writes the same bytes", () => {
     expectGoldenRoundTrip();
   });
@@ -145,7 +145,7 @@ describe("A68: the committed tape round-trips byte for byte, and its id is its S
   });
 });
 
-describe(`A68: any tape the writer writes reads back and is written to the same bytes (seed=${SEED})`, () => {
+describe(`any tape the writer writes reads back and is written to the same bytes (seed=${SEED})`, () => {
   const keyArb = fc.oneof(
     fc.string({ unit: "binary", maxLength: 5 }),
     fc.constantFrom("", "a", "b", "1", "10", "01", "__proto__", "é", "\u{1f600}", "result"),
@@ -238,8 +238,8 @@ describe(`A68: any tape the writer writes reads back and is written to the same 
   });
 });
 
-describe("A68: a malformed line fails with bad-tape-record and its line number", () => {
-  it("TT-1's scenario: line 12 is {\"foo\": 1}", () => {
+describe("a malformed line fails with bad-tape-record and its line number", () => {
+  it("line 12 is {\"foo\": 1}", () => {
     const error = tapeFailure(() => readTape(textTape([...ELEVEN, '{"foo": 1}', ELEVEN[0] as string])));
     expect(error.code).toBe("bad-tape-record");
     expect(error.line).toBe(12);
@@ -292,7 +292,7 @@ describe("A68: a malformed line fails with bad-tape-record and its line number",
     ['{"fault":"error","method":"m","params":7}', "bad-params", "a fault whose params are a number"],
     ['{"notify":"nobody","result":1}', "unknown-subscription", "a notification of no subscription"],
     ['{"subscribe":"s","method":"chain_subscribeNewHeads","params":[]}', "duplicate-subscription", "an id in use"],
-    ['{"params":[],"method":"m","result":1}', "not-canonical", "fields out of TT-1's order"],
+    ['{"params":[],"method":"m","result":1}', "not-canonical", "fields out of the canonical order"],
     ['{"method": "m","params":[],"result":1}', "not-canonical", "a space after a colon"],
     [' {"disconnect":true}', "not-canonical", "a space before the record"],
     ['{"disconnect":true} ', "not-canonical", "a space after the record"],
@@ -403,7 +403,7 @@ describe("A68: a malformed line fails with bad-tape-record and its line number",
   });
 });
 
-describe("A68: the writer refuses what the reader would, naming the record's line", () => {
+describe("the writer refuses what the reader would, naming the record's line", () => {
   const cyclic: Record<string, unknown> = {};
   cyclic.self = cyclic;
   const BAD: readonly (readonly [unknown, string, string])[] = [

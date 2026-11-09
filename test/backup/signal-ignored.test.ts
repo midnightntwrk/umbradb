@@ -21,11 +21,11 @@ import { listenerProblems, pacedNode, sigusr2Ignored, writeRunConfig } from "./s
  * `umbradb run` — the bundled command, in a child process — on PGlite without `backupOnSignal`, sent SIGUSR2 from
  * outside while blocks commit (a tape node's chain answered slowly, so heights keep committing), logs one line naming
  * the signal and `backupOnSignal`, writes no file, keeps committing heights and exits 0 on SIGTERM
- * (`./signal-ignored-fixtures.ts`'s `sigusr2Ignored`). [A175 CI, BK-1, Q173 C]
+ * (`./signal-ignored-fixtures.ts`'s `sigusr2Ignored`).
  *
  * A process a host starts with `startUmbraDB` adds no SIGUSR2 listener while it starts, runs or closes
  * (`listenerProblems`), so Node.js's default or the host's own handler applies; a core revision that sets
- * `backupOnSignal` is refused there (`library-setting-refused`, L47) and adds none either. The engine without
+ * `backupOnSignal` is refused there (`library-setting-refused`) and adds none either. The engine without
  * `backupOnSignal` adds none; with it and the command's port for signals (`backupSignals: process`) it adds one while it
  * runs, which shows the count sees the process's listener. The negative controls are
  * `./signal-ignored.negative-control.test.ts`.
@@ -53,9 +53,9 @@ afterAll(async () => {
   project?.remove();
 }, 120_000);
 
-describe("A175: SIGUSR2 without backupOnSignal (BK-1, Q173 C)", () => {
+describe("SIGUSR2 without backupOnSignal", () => {
   it(
-    "A175: umbradb run on PGlite without backupOnSignal, sent SIGUSR2 while blocks commit, logs one line naming the " +
+    "umbradb run on PGlite without backupOnSignal, sent SIGUSR2 while blocks commit, logs one line naming the " +
       "signal and backupOnSignal, writes no file, keeps committing heights and exits 0 on SIGTERM",
     async () => {
       const node = await pacedNode();
@@ -75,8 +75,8 @@ describe("A175: SIGUSR2 without backupOnSignal (BK-1, Q173 C)", () => {
   );
 
   it(
-    "A175: a process started with startUmbraDB adds no SIGUSR2 listener while it starts, runs or closes; one whose " +
-      "core revision sets backupOnSignal is refused library-setting-refused (L47) and adds none either",
+    "a process started with startUmbraDB adds no SIGUSR2 listener while it starts, runs or closes; one whose " +
+      "core revision sets backupOnSignal is refused library-setting-refused and adds none either",
     async () => {
       const library = (extra: Readonly<Record<string, unknown>>) => {
         let run: TickerProcess<UmbraDBHandle> | undefined;

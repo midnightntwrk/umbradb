@@ -2,7 +2,6 @@
  * The runner's heartbeat. The main thread ticks every second, independently of the work: a callback that awaits I/O
  * leaves the ticks running, while one that blocks the main thread with computation stops them. `GET /health/live`
  * answers 200 while the last tick is within the liveness timeout (`livenessTimeoutMs`), and 503 otherwise.
- * [AE-2, CF-4; design §1; CORE-ARCH §4.18]
  *
  * **Where the tick goes:** one 64-bit slot of a `SharedArrayBuffer` ({@link Heartbeat.buffer}), the tick's time as
  * `process.hrtime.bigint()` in nanoseconds — a monotonic clock that every thread of the process reads alike, so a wall
@@ -14,10 +13,10 @@
  * {@link Heartbeat.keepAlive}): an admin listener answers by it, so while one listens the timer keeps the process up (a
  * process whose loop waits on an in-memory source, or that stays up refused or halted, has nothing else that would);
  * with only a handler mounted in a library host's server, the timer is `unref()`ed and never keeps the host's event
- * loop alive. It ticks until {@link Heartbeat.stop}. [AE-2, LM-5, L61]
+ * loop alive. It ticks until {@link Heartbeat.stop}.
  */
 
-/** How often the main thread ticks: every second. [AE-2] */
+/** How often the main thread ticks: every second. */
 export const HEARTBEAT_INTERVAL_MS = 1_000;
 
 /** The bytes of a heartbeat buffer: one 64-bit slot. */
@@ -58,7 +57,7 @@ export class Heartbeat {
     if (options.keepAlive === false) (this.#timer as unknown as TimerHandle).unref?.();
   }
 
-  /** From now on its timer keeps Node.js running (see the module comment). [AE-2] */
+  /** From now on its timer keeps Node.js running (see the module comment). */
   keepAlive(): void {
     (this.#timer as unknown as TimerHandle).ref?.();
   }

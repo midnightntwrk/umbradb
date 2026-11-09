@@ -7,7 +7,7 @@ import { decodeChildren, free, hex, refsOf, storedNodeKey, taggedRootKey } from 
 import { describeNodeStoreExports, nodesOf } from "./node-store-suite.js";
 
 // The vendored ledger v9 package (ledger-9.1.0.0-rc.5 with the patches in vendor/ledger/v9/patches), exercised on the
-// built package. [LG-9, CC-3; design §5.2]
+// built package.
 
 describeNodeStoreExports("vendored ledger v9", {
   packagePath: V9_PACKAGE_PATH,

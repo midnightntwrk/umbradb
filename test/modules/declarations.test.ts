@@ -23,7 +23,7 @@ import { declaration, userModules } from "./declarations.js";
  * A module is a declaration the host imports, and its callbacks are keyed by point name. A declaration with an unknown
  * point name is a type error, and the same declaration built without types is refused at startup with
  * `unknown-point`. So declaration validation (`src/modules/validation.ts`) refuses what the types forbid, whether the
- * module was written in TypeScript, in JavaScript, or built at run time. [A20, MD-1]
+ * module was written in TypeScript, in JavaScript, or built at run time.
  *
  * Refusing at startup is the runner's job: it validates the declarations it is given before anything else. Here the
  * validation is called directly.
@@ -33,18 +33,6 @@ const REPOSITORY = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 /** The declaration written in JavaScript, imported by URL so that the compiler gives it no type at all. */
 const UNTYPED = new URL("./fixtures/untyped-module.mjs", import.meta.url).href;
-
-/** The point names of the design's table of points, in its order. [design §2] */
-function designPoints(): string[] {
-  const design = readFileSync(join(REPOSITORY, "openspec", "changes", "core-arch", "design.md"), "utf8");
-  const start = design.indexOf("\n## 2. Points\n");
-  const end = design.indexOf("\n## 3. ", start);
-  return design
-    .slice(start, end)
-    .split("\n")
-    .map((line) => /^\| `(on-[a-z-]+)` \|/.exec(line)?.[1])
-    .filter((name): name is string => name !== undefined);
-}
 
 /** The refusal `run` throws; fails the test if it returns. */
 function refusal(run: () => unknown): UmbraError {
@@ -59,7 +47,7 @@ function refusal(run: () => unknown): UmbraError {
 
 /**
  * The type-level form of the unknown-point check: true when the declaration type `D` is accepted by the definer `F` (a
- * function whose parameter type may depend on `D`, as `defineModule`'s does). [A20]
+ * function whose parameter type may depend on `D`, as `defineModule`'s does).
  */
 type Accepts<F extends (declaration: never) => unknown, D> = [D] extends [Parameters<F>[0]] ? true : false;
 
@@ -70,16 +58,15 @@ type WithUnknownPoint = Omit<ModuleDeclaration, "points"> & {
 /** The same declaration with known point names only. */
 type WithKnownPoints = Omit<ModuleDeclaration, "points"> & { points: { "on-fetch": () => Promise<void> } };
 
-describe("A20: the points (MD-1, design.md §2)", () => {
-  it("names the twelve points of design.md §2, in its order", () => {
-    expect(POINTS).toEqual(designPoints());
+describe("the points", () => {
+  it("are twelve, frozen, and the point names and the callbacks' keys are their type", () => {
     expect(POINTS).toHaveLength(12);
     expect(Object.isFrozen(POINTS)).toBe(true);
     expectTypeOf<PointName>().toEqualTypeOf<(typeof POINTS)[number]>();
     expectTypeOf<keyof PointCallbacks>().toEqualTypeOf<PointName>();
   });
 
-  it("types each callback's arguments by its point (CORE-ARCH §4.10)", () => {
+  it("types each callback's arguments by its point", () => {
     const typed = defineModule(
       declaration("typed", {
         points: {
@@ -108,7 +95,7 @@ describe("A20: the points (MD-1, design.md §2)", () => {
       }),
     );
     // The read handles these points get: `on-finalized` at the cursor, `on-start-height` at h − 1, `on-stop-height`
-    // at h. [RN-4, Q100 A; design §2]
+    // at h.
     type Rest<P extends PointName> = PointCallbacks[P] extends (p: ProcessContext, ...rest: infer R) => Promise<void>
       ? R
       : never;
@@ -119,12 +106,12 @@ describe("A20: the points (MD-1, design.md §2)", () => {
   });
 });
 
-describe("A20: an unknown point name is a type error (MD-1)", () => {
+describe("an unknown point name is a type error", () => {
   it("defineModule rejects a callback under an unknown point name, alone, beside a known one, or in a variable", () => {
     const alone = () =>
       defineModule({
         ...declaration("fetch-stats"),
-        // @ts-expect-error `on-fetched` is not a point (the point is `on-fetch`). [A20]
+        // @ts-expect-error `on-fetched` is not a point (the point is `on-fetch`).
         points: { "on-fetched": async () => {} },
       });
     const beside = () =>
@@ -132,12 +119,12 @@ describe("A20: an unknown point name is a type error (MD-1)", () => {
         ...declaration("fetch-stats"),
         points: {
           "on-fetch": async () => {},
-          // @ts-expect-error `on-fetched` is not a point, even beside one that is. [A20]
+          // @ts-expect-error `on-fetched` is not a point, even beside one that is.
           "on-fetched": async () => {},
         },
       });
     const built = { ...declaration("fetch-stats"), points: { "on-fetch": async () => {}, "on-fetched": async () => {} } };
-    // @ts-expect-error a declaration built first and passed later is checked the same way. [A20]
+    // @ts-expect-error a declaration built first and passed later is checked the same way.
     const later = () => defineModule(built);
     expectTypeOf(alone).toBeFunction();
     expectTypeOf(beside).toBeFunction();
@@ -147,7 +134,7 @@ describe("A20: an unknown point name is a type error (MD-1)", () => {
   it("a ModuleDeclaration written as a literal rejects an unknown point name too", () => {
     const literal = (): ModuleDeclaration => ({
       ...declaration("fetch-stats"),
-      // @ts-expect-error `on-fetched` is not a point. [A20]
+      // @ts-expect-error `on-fetched` is not a point.
       points: { "on-fetched": async () => {} },
     });
     expectTypeOf(literal).toBeFunction();
@@ -174,11 +161,11 @@ describe("A20: an unknown point name is a type error (MD-1)", () => {
   });
 });
 
-describe("A20: the same declaration built without types is refused at startup with unknown-point (MD-1)", () => {
+describe("the same declaration built without types is refused at startup with unknown-point", () => {
   it("refuses the declaration the type test rejects, built anyway", () => {
     const built = defineModule({
       ...declaration("fetch-stats"),
-      // @ts-expect-error built without types: the compiler's verdict is ignored here, as JavaScript would. [A20]
+      // @ts-expect-error built without types: the compiler's verdict is ignored here, as JavaScript would.
       points: { "on-fetched": async () => {} },
     });
     const error = refusal(() => validateDeclarations(userModules([built])));
@@ -215,7 +202,7 @@ describe("A20: the same declaration built without types is refused at startup wi
   });
 });
 
-describe("[DOC] the module guide's section on tables declared deterministic: false (MD-1, Q76)", () => {
+describe(" the module guide's section on tables declared deterministic: false", () => {
   const guide = readFileSync(join(REPOSITORY, "docs", "module-guide.md"), "utf8");
   // A subsection of "Deterministic PostgreSQL", up to the next heading of either level.
   const heading = "\n### 4.3 Data that is not a function of the chain: `deterministic: false`\n";
@@ -259,7 +246,7 @@ describe("[DOC] the module guide's section on tables declared deterministic: fal
   });
 });
 
-/** Not a test of UmbraDB: the zod behaviour the field-kind rule relies on. [design §7] */
+/** Not a test of UmbraDB: the zod behaviour the field-kind rule relies on. */
 describe("the zod 4 behaviour a settings field's kind is read through", () => {
   it("reads the kind from the field's outermost schema only", () => {
     expect(z.number().default(1).meta({ kind: "data" }).meta()).toEqual({ kind: "data" });

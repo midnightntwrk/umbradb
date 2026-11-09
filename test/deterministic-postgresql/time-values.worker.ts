@@ -19,7 +19,7 @@ import { connectionOfUrl } from "../db/connection.js";
  * - `timeZone` and `offsetMinutes`: what this process's clock is set to (`Intl` and the offset of 2025-05-21 14:30
  *   local time), so the parent knows the time zone took effect.
  *
- * The job is the first argument, as JSON: `{ backend, url?, setup?, sql, textColumns }`. [A139]
+ * The job is the first argument, as JSON: `{ backend, url?, setup?, sql, textColumns }`.
  */
 
 export const MARKER = "TIME-VALUES-RESULT ";

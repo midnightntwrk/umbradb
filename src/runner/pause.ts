@@ -1,7 +1,6 @@
 /**
  * The pause of the finalized loop between heights. `ProcessHandle.pause()` and `resume()`, and the backup a running
  * process writes on SIGUSR2 (`backupOnSignal`), hold the loop still while they need it (`./process.ts`).
- * [BK-1, CF-4, Q152 B; design §9.1]
  *
  * **Holds.** Anyone who needs the loop paused takes a hold ({@link LoopPauses.hold}) and releases it when done. The
  * loop pauses at its next point between heights while at least one hold is kept, and goes on once the last one is
@@ -13,11 +12,11 @@
  * its wait for the head through {@link LoopPauses.idle}, which counts as between heights: a hold asked for while the
  * loop waits is reached at once, and when the wait ends, the loop's next step is a point between heights, where it
  * stays. A pause ends when the loop's signal aborts, since a stop while paused ends the process; the loop then ends
- * with its signal, whatever holds are kept. [RN-13]
+ * with its signal, whatever holds are kept.
  *
  * **What `/status` shows.** While the loop is paused (a hold is kept and the loop is between heights),
  * {@link LoopPauses.pausedAt} gives the time it paused and who holds it; the process lists this as the condition
- * `paused` (`./process.ts`). [AE-3, Q174 B]
+ * `paused` (`./process.ts`).
  * - The time is the moment the loop paused, and it is kept while a hold is kept: the loop's step from its wait for the
  *   head to its next point between heights does not end the pause.
  * - `by` is `pause` while a hold of `ProcessHandle.pause()` is kept (only `resume()` lifts it), and `signal` otherwise

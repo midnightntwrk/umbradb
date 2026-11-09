@@ -25,8 +25,6 @@ import { freePort } from "./process-harness.js";
  * - the stop there, by `ProcessHandle.stop()` or by SIGTERM (`terminationSignal` on an emitter of the test's);
  * - what the process did then ({@link A167Observation}), and the oracle {@link a167Problems}.
  *
- * [A167, RN-13, IN-10]
- *
  * The process is the tests' build (`process-build.ts`) with the node source on the `core` entry's `node`
  * (`nodeSourceOf`, as `umbradb run` makes it) and `backoffCeilingMs` 1 s, so a client that kept retrying would connect
  * again every second. Its node clients — the one it makes, through the `nodeClient` seam, and any a negative control's
@@ -35,10 +33,10 @@ import { freePort } from "./process-harness.js";
  * left open, so that a process that did not stop (the defect, a negative control) still ends and closes its database.
  *
  * Also a private process, which never talks to the node (its view of the chain is its public side): one whose
- * startup waits for a core transport that accepts the connection and never answers ({@link privateRun}). [PP-1]
+ * startup waits for a core transport that accepts the connection and never answers ({@link privateRun}).
  */
 
-/** The bound: the process ends within 5 s of its stop. [A167] */
+/** The bound: the process ends within 5 s of its stop. */
 export const STOP_LIMIT_MS = 5_000;
 
 /** How long the tests watch for a connection attempt once the process closed or the bound passed: two retries. */
@@ -114,14 +112,14 @@ export type StopBy = "stop" | "sigterm" | "signal";
 /**
  * How a run starts its process: the engine with the tests' build (`startProcess`), or as a library host does —
  * `startUmbraDB`'s input for the same configuration (`engineInputOf`, the command's build) and the handle it gives
- * (`handleOf`), with the run's node client seam added. [A167, LM-1]
+ * (`handleOf`), with the run's node client seam added.
  */
 export type StartVia = "engine" | "library";
 
 /** What a run reads of its process: the engine's handle or a library host's. */
 export type StopHandle = Pick<ProcessHandle, "status" | "closed" | "ended" | "stop">;
 
-/** What one run of a stop during startup showed. [A167] */
+/** What one run of a stop during startup showed. */
 export interface A167Observation {
   /** Before the stop: the state, and the attempts of its `node-retrying` condition (null without one). */
   readonly before: { readonly state: string; readonly retrying: number | null };
@@ -143,7 +141,7 @@ export interface A167Observation {
   readonly unclean: string | null;
 }
 
-/** The oracle: every problem with what was observed, none when the stop during startup behaved as required. [A167] */
+/** The oracle: every problem with what was observed, none when the stop during startup behaved as required. */
 export function a167Problems(observed: A167Observation): string[] {
   const problems: string[] = [];
   const { before } = observed;
@@ -228,7 +226,7 @@ export type CheckOf = (watch: NodeWatch, options: () => NodeClientOptions) => No
  * One run on `db` (see the module comment): the process's startup retries the node, `by` stops it, and the run
  * observes the state, `closed` against the bound, how processing ended, the node clients and their connection attempts
  * over {@link WATCH_MS} more, then — after closing what the process left — whether the database was closed. `check`
- * replaces startup's checks against the node (a negative control's). [A167]
+ * replaces startup's checks against the node (a negative control's).
  */
 export async function a167Run(
   backend: ProcessBackend,
@@ -305,7 +303,7 @@ export function stopBy(by: StopBy, handle: Pick<ProcessHandle, "stop">, signals:
 
 /**
  * A library host's process for `options` (see {@link StartVia}): the engine given `startUmbraDB`'s input plus `seams`,
- * under the handle `startUmbraDB` gives. [A167, LM-1]
+ * under the handle `startUmbraDB` gives.
  */
 export function libraryProcess(options: UmbraDBOptions, seams: Partial<EngineOptions>): UmbraDBHandle {
   const { input } = engineInputOf(options);
@@ -316,7 +314,7 @@ export function libraryProcess(options: UmbraDBOptions, seams: Partial<EngineOpt
  * The negative control's startup: `core-chain`'s checks against the node as they are, asked through a node source
  * over a client of its own that the stop does not reach. The client is made from the process's options, so the process
  * shows its `node-retrying`. Its wait for block 0 ignores the stop, as every startup's did before startup honoured
- * stops. [A167]
+ * stops.
  */
 export const ignoringWait: CheckOf =
   (watch, options) =>
@@ -400,7 +398,7 @@ export async function privateRun(backend: ProcessBackend, db: ProcessDatabase): 
     privateLink: silent.address,
   });
   delete settings.node;
-  // The engine's own private build and source: the resolver takes the side from the configuration. [LM-1]
+  // The engine's own private build and source: the resolver takes the side from the configuration.
   const handle = startProcess({
     userModules: { modules: [] },
     config: { data: { entries: [coreEntry({ start: 1, config: settings as never })] } },

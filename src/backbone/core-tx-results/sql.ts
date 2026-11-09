@@ -4,7 +4,7 @@
  *
  * **The table** `core_tx_results.results (height, tx_index) → outcome` has one row per transaction, its outcome one
  * of `success`, `partial` and `failure` (a `CHECK`). It is append-only and range-partitioned by height
- * (`../height-partitions.ts`). [CD-6; design §10]
+ * (`../height-partitions.ts`).
  */
 
 import type { BlockWriteHandle } from "../../db/api.js";
@@ -14,7 +14,7 @@ import { heightPartitionsSql } from "../height-partitions.js";
 /** Its table: one row per transaction. */
 export const RESULTS_TABLE = "core_tx_results.results";
 
-/** `core-tx-results`' migrations: applied once, recorded under `core-tx-results`, never changed. [DB-9] */
+/** `core-tx-results`' migrations: applied once, recorded under `core-tx-results`, never changed. */
 export const CORE_TX_RESULTS_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
   {
     id: "001",

@@ -27,22 +27,22 @@ import { connectionOfUrl } from "./connection.js";
 
 /**
  * The durability probe at its new path, `src/db/durability-probe.ts`. It moved from 0.9.5's
- * `src/postgres/durability-probe.ts` with its behaviour unchanged. [design §4, §13]
+ * `src/postgres/durability-probe.ts` with its behaviour unchanged.
  *
  * On PostgreSQL 18, startup refuses with `fsync=off`, with a detected transaction pooler, and with
  * `full_page_writes=off` unless `fullPageWritesOffAllowed` is set. On PGlite, startup refuses without the development
- * opt-in. [A18 CI, DB-12, CF-9]
+ * opt-in.
  *
  * 0.9.5's cases are all here, against the database API:
- * - the pure classifiers, exhaustively, with no server (B1–B3, B6);
+ * - the pure classifiers, exhaustively, with no server;
  * - the live servers, one per setting, started with `-c`, through the writer's start. The writer's start takes the
  *   writer lock and then runs the probe on the writer's session before any write (B1–B5, the concurrent sentinel
  *   holder).
  *
  * What changed from 0.9.5:
  * - each refusal is an `UmbraError` with its own error code (`durability-fsync-off`, `durability-full-page-writes-off`,
- *   `durability-pooler`) instead of 0.9.5's two classes; [design §11]
- * - the override is `fullPageWritesOffAllowed`; [CF-4]
+ *   `durability-pooler`) instead of 0.9.5's two classes;
+ * - the override is `fullPageWritesOffAllowed`;
  * - the probe runs at the writer's start instead of inside 0.9.5's `runMigrations`.
  *
  * "Startup refuses" (the refused state) belongs to the runner; here the writer's start, its transactions and
@@ -61,13 +61,13 @@ function server(settings: string[]): PostgreSqlContainer {
   return args.length > 0 ? container.withCommand(["postgres", ...args]) : container;
 }
 
-describe("the durability probe — classifiers, no server (DB-12)", () => {
-  it("classifyFsync: off is a violation with its code, on is clean (B1)", () => {
+describe("the durability probe — classifiers, no server", () => {
+  it("classifyFsync: off is a violation with its code, on is clean", () => {
     expect(classifyFsync("off")).toMatchObject({ code: "durability-fsync-off", setting: "fsync", value: "off" });
     expect(classifyFsync("on")).toBeNull();
   });
 
-  it("classifyFullPageWrites: off is refused unless allowed, on is clean (B3)", () => {
+  it("classifyFullPageWrites: off is refused unless allowed, on is clean", () => {
     expect(classifyFullPageWrites("off", false)).toMatchObject({
       code: "durability-full-page-writes-off",
       setting: "full_page_writes",
@@ -78,7 +78,7 @@ describe("the durability probe — classifiers, no server (DB-12)", () => {
     expect(classifyFullPageWrites("on", false)).toBeNull();
   });
 
-  it("classifySynchronousCommit: off is a lost-tail warning, never a violation (B2); local, remote_write, remote_apply and on are durable (B2b)", () => {
+  it("classifySynchronousCommit: off is a lost-tail warning, never a violation; local, remote_write, remote_apply and on are durable", () => {
     expect(classifySynchronousCommit("off")).toMatchObject({ kind: "lost-tail", setting: "synchronous_commit", value: "off" });
     for (const durable of ["local", "remote_write", "remote_apply", "on"]) expect(classifySynchronousCommit(durable)).toBeNull();
   });
@@ -100,7 +100,7 @@ describe("the durability probe — classifiers, no server (DB-12)", () => {
     expect(await probeAdvisoryLockVisibility(session)).toEqual({ acquired: true, visibleCount: 1 });
   });
 
-  it("assertNoTransactionPooler: only a lock taken but not seen is a pooler (durability-pooler); not taken fails open (B6)", () => {
+  it("assertNoTransactionPooler: only a lock taken but not seen is a pooler (durability-pooler); not taken fails open", () => {
     expect(() => assertNoTransactionPooler(true, 1)).not.toThrow();
     let thrown: unknown;
     try {
@@ -115,7 +115,7 @@ describe("the durability probe — classifiers, no server (DB-12)", () => {
   });
 });
 
-describe("A18 — the durability probe on PostgreSQL 18 (DB-12)", () => {
+describe("the durability probe on PostgreSQL 18", () => {
   let healthy: StartedPostgreSqlContainer;
   let fsyncOff: StartedPostgreSqlContainer;
   let fullPageWritesOff: StartedPostgreSqlContainer;
@@ -166,11 +166,11 @@ describe("A18 — the durability probe on PostgreSQL 18 (DB-12)", () => {
     }
   }
 
-  it("A18 (B4): a healthy server — the writer starts with no warning and startup proceeds", async () => {
+  it("a healthy server — the writer starts with no warning and startup proceeds", async () => {
     expect(await startsAndMigrates(healthy)).toEqual([]);
   }, 60_000);
 
-  it("A18 (B1): fsync=off refuses with durability-fsync-off before any write or migration, and the refused writer holds no lock", async () => {
+  it("fsync=off refuses with durability-fsync-off before any write or migration, and the refused writer holds no lock", async () => {
     const refused = await expectRefusedBeforeAnyWrite(fsyncOff.getConnectionUri(), "durability-fsync-off");
     expect(refused.details).toMatchObject({ setting: "fsync", value: "off" });
     expect(refused.message).toMatch(/fsync=off/);
@@ -193,7 +193,7 @@ describe("A18 — the durability probe on PostgreSQL 18 (DB-12)", () => {
     await released(fsyncOff);
   }, 60_000);
 
-  it("A18 (B3): full_page_writes=off refuses with durability-full-page-writes-off unless fullPageWritesOffAllowed is set", async () => {
+  it("full_page_writes=off refuses with durability-full-page-writes-off unless fullPageWritesOffAllowed is set", async () => {
     const refused = await expectRefusedBeforeAnyWrite(fullPageWritesOff.getConnectionUri(), "durability-full-page-writes-off");
     expect(refused.details).toMatchObject({ setting: "full_page_writes", value: "off" });
     expect(refused.message).toContain("fullPageWritesOffAllowed");
@@ -216,13 +216,13 @@ describe("A18 — the durability probe on PostgreSQL 18 (DB-12)", () => {
     expect(allowed.details.violations).toEqual([{ code: "durability-fsync-off", setting: "fsync", value: "off" }]);
   }, 60_000);
 
-  it("(B2) synchronous_commit=off is a lost-tail warning, not a refusal: the writer starts and reports it", async () => {
+  it(" synchronous_commit=off is a lost-tail warning, not a refusal: the writer starts and reports it", async () => {
     const warnings = await startsAndMigrates(syncOff);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toMatchObject({ kind: "lost-tail", setting: "synchronous_commit", value: "off" });
   }, 60_000);
 
-  it("(B2b) synchronous_commit=local is durable: no warning", async () => {
+  it(" synchronous_commit=local is durable: no warning", async () => {
     expect(await startsAndMigrates(syncLocal)).toEqual([]);
   }, 60_000);
 
@@ -245,7 +245,7 @@ describe("A18 — the durability probe on PostgreSQL 18 (DB-12)", () => {
     };
   }
 
-  it("A18: a transaction pooler — statements of one session reaching different backends — is refused with durability-pooler", async () => {
+  it("a transaction pooler — statements of one session reaching different backends — is refused with durability-pooler", async () => {
     // A pooler in transaction mode hands each statement outside a transaction to any free backend: here, two.
     const [one, two] = [directSession(healthy.getConnectionUri()), directSession(healthy.getConnectionUri())];
     let next = 0;
@@ -262,7 +262,7 @@ describe("A18 — the durability probe on PostgreSQL 18 (DB-12)", () => {
     }
   }, 60_000);
 
-  it("(B5) probeAdvisoryLockVisibility observes its own session advisory lock on a direct session, and releases it", async () => {
+  it(" probeAdvisoryLockVisibility observes its own session advisory lock on a direct session, and releases it", async () => {
     const session = directSession(healthy.getConnectionUri());
     try {
       const seen = await probeAdvisoryLockVisibility(session);
@@ -289,12 +289,12 @@ describe("A18 — the durability probe on PostgreSQL 18 (DB-12)", () => {
   }, 60_000);
 });
 
-describe("A18 — PGlite only under the development opt-in (DB-12, CF-9)", () => {
+describe("PGlite only under the development opt-in", () => {
   afterEach(async () => {
     await cleanUp();
   });
 
-  it("A18: refuses PGlite without the development opt-in, naming PGlite and the opt-in, before anything is created", async () => {
+  it("refuses PGlite without the development opt-in, naming PGlite and the opt-in, before anything is created", async () => {
     const dataDir = join(workDirectory(), "pgdata");
     for (const target of ["memory://", dataDir]) {
       const refused = await rejection(() => openPglite({ dataDir: target, committedHeight: noHeight, developmentOptIn: false }));

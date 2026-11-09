@@ -1,5 +1,5 @@
 /**
- * The tape reader and writer. [TT-1, A68]
+ * The tape reader and writer.
  *
  * **The file.** JSON lines: one record per line in recorded order (`./records.ts`), each line ended by a newline (`\n`,
  * the last one too), in UTF-8; an empty file is a tape with no records. **A tape is identified by the SHA-256 of its
@@ -11,10 +11,10 @@
  * through the reader and writer byte for byte, and one tape has one id: the same records written with other spaces or
  * key orders are not a second spelling of the tape under another id. Tapes are made by the writer (the recording
  * builder, the variant transforms and the tests all write records through it), so the form costs a hand-edited tape no
- * more than the fix the error message gives. [TT-1]
+ * more than the fix the error message gives.
  *
  * **Errors.** A line that is not one of the tape format's records fails with `bad-tape-record` and its line number
- * ({@link TapeError}), at the first such line; so do records given to the writer. [TT-1]
+ * ({@link TapeError}), at the first such line; so do records given to the writer.
  */
 
 import { createHash } from "node:crypto";
@@ -99,7 +99,6 @@ export function readTapeFile(path: string): Tape {
 
 /**
  * The text of the tape holding `records`; throws `bad-tape-record` at the first record that is not a tape record.
- * [TT-1]
  */
 export function tapeText(records: readonly TapeRecord[]): string {
   const check = sessionCheck();

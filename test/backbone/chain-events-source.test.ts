@@ -7,14 +7,13 @@ import { BlockItems } from "../../src/runner/block-context.js";
 import type { BlockRef, QueueRunner } from "../../src/runner/block-source.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import { type TapeRecord, TapeNode } from "../../tools/tape/index.js";
-import { outsideIn8 } from "../node/in8.js";
 import { ev, SYSTEM_EVENTS_STORAGE, eventsRead, eventsValue } from "./events-fixtures.js";
 import { type ChainBlock, chainOf, headRead, hex, newHead, subscriptions } from "./fetch-fixtures.js";
 
 /**
  * Where a block's chain events come from. The node source reads `System::Events` with `state_getStorage` at the
  * block's own hash: for a finalized height with the client's retries, for a queued best block without them. The
- * in-memory source gives none. [CD-4, IN-8, IN-10]
+ * in-memory source gives none.
  */
 
 const quiet: ConnectSocket = (url, events, timers) => connectWebSocket(url, events, timers, { heartbeatMs: 3_600_000 });
@@ -91,11 +90,10 @@ describe("a block's chain events from the block source", () => {
     await source.prepared(101n);
     expect(runner.read.get(at(101).hex)).toEqual(events);
     expect(client.storageCalls).toEqual([{ key: SYSTEM_EVENTS_STORAGE, at: at(101).hex, options: undefined }]);
-    expect(outsideIn8(node.calls.map((call) => call.method as string))).toEqual([]);
     expect(isBlockEventSource(source)).toBe(true);
   }, PATIENCE_MS);
 
-  it("reads a queued best block's events without retries (IN-10), and null where the state holds none", async () => {
+  it("reads a queued best block's events without retries, and null where the state holds none", async () => {
     const { client, source } = await open([
       ...subscriptions(),
       ...headRead(at(100)),

@@ -6,20 +6,19 @@
  *
  * What is compared and recorded is decided by `checkHistory` (`src/config/history.ts`). The backbone part `core-chain`
  * itself (`./core-chain.ts`) declares the migration that creates the table (`CORE_CHAIN_MIGRATION`) and calls
- * {@link recordHistory} in its `on-start-db`. [CF-5, CF-6, CF-7, CF-8; CORE-ARCH §4.12; design §7]
+ * {@link recordHistory} in its `on-start-db`.
  *
  * **The tables** and every statement are in `./sql.ts`.
  *
- * **Order at startup**: [CF-6, CF-8]
+ * **Order at startup**:
  * 1. The runner reads the rows (`readHistory`, in `./sql.ts`; there are none before the table exists) and checks the
  *    configuration against them before any migration runs.
  * 2. `startDatabase` then runs `core-chain` first: its migration `001` on a new database, then its `on-start-db`.
  * 3. That `on-start-db` compares again with the rows its own transaction reads. In that same transaction it deletes the
  *    omitted rows above the cursor and records the check's writes ({@link recordHistory}), each with its `provides`.
- *    [CF-5, Q103 B]
  * 4. It then gives every other revision above the cursor this build's `provides` where its row's differ (for example,
  *    a scheduled revision recorded by an earlier build). A revision at or below the cursor keeps its row as recorded,
- *    `provides` included. [CF-6]
+ *    `provides` included.
  */
 
 import {
@@ -39,12 +38,12 @@ import { deleteConfigRow, readConfigRows, readHistory, updateProvides, writeConf
 
 /**
  * What `core_chain.config.provides` records for a revision of `id` in a build of `declarations`: the names of the
- * `table` items (items whose lifetimes include `table`), each once, sorted by their UTF-8 bytes. [PP-13]
+ * `table` items (items whose lifetimes include `table`), each once, sorted by their UTF-8 bytes.
  * - For `core`, they are the items of the build's backbone parts, which run with the core entry.
  * - Otherwise, they are the items of the build's declaration of the module `id`. For a scheduled revision, whose
  *   version the build does not carry, that is the declaration the build has, as the graph judges that revision.
  *
- * Throws for a module the build does not have (the configuration refuses its entry first). [CF-3]
+ * Throws for a module the build does not have (the configuration refuses its entry first).
  */
 export function tableItemsOf(declarations: DeclarationSet<ModuleDeclaration>, id: string): string[] {
   const parts =
@@ -63,17 +62,17 @@ export function tableItemsOf(declarations: DeclarationSet<ModuleDeclaration>, id
 /**
  * The configuration hash of the database that `read` reads: `configHashOf` of its `core_chain.config` rows (none before
  * the table exists). A process reads its own once, at startup, after `core-chain`'s `on-start-db` has recorded its
- * configuration, and keeps it in memory for the run (`src/runner/process.ts`). [RN-16, PP-14, Q147]
+ * configuration, and keeps it in memory for the run (`src/runner/process.ts`).
  */
 export async function readConfigHash(read: Pick<ReadHandle, "query">): Promise<string> {
   return configHashOf((await readConfigRows(read)) ?? []);
 }
 
 /**
- * `core-chain`'s work in its `on-start-db`. In `tx` (its schema write handle, or any transaction) it: [CF-6]
+ * `core-chain`'s work in its `on-start-db`. In `tx` (its schema write handle, or any transaction) it:
  * - reads the rows and checks the configuration against them (`checkHistory`, which refuses as it does, so the
  *   transaction rolls back with nothing recorded);
- * - deletes the rows the check deletes: the omitted rows above the cursor [CF-5, Q103 B];
+ * - deletes the rows the check deletes: the omitted rows above the cursor;
  * - records the check's writes, each inserted or replacing the row of its `(id, start)`.
  *
  * A failure anywhere rolls back both the deletes and the writes. Resolves with the check. `options` are passed to
@@ -93,7 +92,7 @@ export async function recordHistory(
     await writeConfigRow(tx, { ...row, data, provides });
     written.add(`${row.id}\u0000${row.start}`);
   }
-  // The other revisions above the cursor take this build's items too; those at or below it keep theirs. [CF-6]
+  // The other revisions above the cursor take this build's items too; those at or below it keep theirs.
   for (const entry of check.entries) {
     const start = BigInt(entry.start);
     if (entry.started || written.has(`${entry.id}\u0000${start}`)) continue;

@@ -23,7 +23,7 @@ import { EVENTS_STORAGE as EVENTS, MAPPING_PREFIX, MAPPINGS_PREFIX, syntheticCha
  * `system_properties` and cNight registrations, and then, for a live window, the finalized head and both head
  * subscriptions; in chunks of heights, each one connection (one session) recorded again after a back-off when it fails,
  * so the tape is one session that any client making any subset of those calls replays. Every node here is a synthetic
- * chain on the scripted node (`./synthetic-chain.ts`); no Midnight node. [Q123, IN-7, IN-8]
+ * chain on the scripted node (`./synthetic-chain.ts`); no Midnight node.
  */
 
 const quietConnect: ConnectSocket = (url, events, timers) =>
@@ -53,7 +53,7 @@ const calls = (records: readonly TapeRecord[], method: string) =>
     result: unknown;
   }[];
 
-describe("recordRange: every IN-8 call of every height, through the builder (Q123)", () => {
+describe("recordRange: every call of every height, through the builder", () => {
   it("records each height's calls, metadata where the runtime changes, block 0's calls and the live window, in one session", async () => {
     const chain = syntheticChain({
       length: 40,
@@ -191,7 +191,7 @@ describe("recordRange: every IN-8 call of every height, through the builder (Q12
     }
   });
 
-  it("names IN-8's storage keys by their twox128 prefixes", () => {
+  it("names the storage keys by their twox128 prefixes", () => {
     expect(EVENTS_KEY).toBe(EVENTS);
     expect(REGISTRATION_PREFIXES).toEqual([MAPPINGS_PREFIX, MAPPING_PREFIX]);
     expect(KEYS_PAGE).toBe(1000);

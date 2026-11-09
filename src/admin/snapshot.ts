@@ -4,20 +4,20 @@
  * runner knows for `/status`:
  * - heights as decimal text, since JSON has no `bigint`;
  * - the conditions as the runner raised them;
- * - the reason as a sanitized error (`./errors.ts`), never `ended`, which holds the raw error [AE-6];
- * - the wall-clock time of the last commit as RFC 3339 UTC text ({@link utcText}) [Q68];
+ * - the reason as a sanitized error (`./errors.ts`), never `ended`, which holds the raw error;
+ * - the wall-clock time of the last commit as RFC 3339 UTC text ({@link utcText});
  * - the node as the core sees it: its best head, connection state and queue depth, as the process reports them
  *   ({@link NodeFacts});
- * - every part of the database, with its tables' digest rows [DT-5];
+ * - every part of the database, with its tables' digest rows;
  * - on the core, its private instances, each with its id, connection, lockstep flag and synced height only; on a
- *   private process, whether it runs in lockstep [PP-9].
+ *   private process, whether it runs in lockstep.
  *
  * A field that nothing reports a value for yet is null. The configuration's part is already redacted
- * (`./redaction.ts`). [AE-3, AE-5]
+ * (`./redaction.ts`).
  *
  * The result is plain, frozen, structured-clone data: it crosses to the worker as one message, and the worker answers
  * each request from one snapshot. The uptime is not in it: `/status` computes it at each request from
- * {@link AdminSnapshot.startedNs}. [AE-1; CORE-ARCH §4.18; design §1]
+ * {@link AdminSnapshot.startedNs}.
  */
 
 import type { PlainData, PlainObject } from "../config/plain-data.js";
@@ -29,11 +29,11 @@ import { sanitizedError } from "./errors.js";
 import type { AdminSnapshot, ConfigSnapshot, ModuleStatus, NodeStatus, PrivateInstanceStatus, StatusSnapshot } from "./types.js";
 
 /**
- * The default liveness timeout (30 s), read from the `core` schema: the snapshot's before the configuration's. [CF-4]
+ * The default liveness timeout (30 s), read from the `core` schema: the snapshot's before the configuration's.
  */
 export const DEFAULT_LIVENESS_TIMEOUT_MS: number = PUBLIC_CORE_SCHEMA.shape.livenessTimeoutMs.parse(undefined);
 
-/** The default `tipCap` (600), read from the `core` schema: the snapshot's before the configuration's. [CF-4] */
+/** The default `tipCap` (600), read from the `core` schema: the snapshot's before the configuration's. */
 export const DEFAULT_TIP_CAP: number = PUBLIC_CORE_SCHEMA.shape.tipCap.parse(undefined);
 
 /** `value` for JSON: every `bigint` as decimal text, at any depth; `undefined` as null; frozen. */
@@ -50,7 +50,7 @@ export function jsonReady(value: unknown): PlainData {
 /**
  * A wall-clock time (milliseconds since the epoch) as RFC 3339 UTC text, the form UmbraDB writes every time it
  * represents: `2025-05-21T14:30:00Z`, with the fraction only when it has one and without its trailing zeros
- * (`…:00.12Z`), as a `timestamptz` reads back. [Q68, DB-2]
+ * (`…:00.12Z`), as a `timestamptz` reads back.
  */
 export function utcText(ms: number): string {
   return new Date(ms).toISOString().replace(/\.?0*Z$/, "Z");
@@ -64,7 +64,7 @@ const hex = (bytes: Uint8Array): string => `0x${Array.from(bytes, (byte) => byte
 
 /**
  * One table of a part, by schema and name. It is named apart from the `deterministic_postgresql` component's
- * `TableName`, since no name of the component is declared elsewhere in `src/`. [A138]
+ * `TableName`, since no name of the component is declared elsewhere in `src/`.
  */
 export interface PartTable {
   readonly schema: string;
@@ -82,7 +82,7 @@ export interface ModuleFacts {
   readonly tables: readonly PartTable[];
 }
 
-/** One row of `core_digest.tables`. [DT-5] */
+/** One row of `core_digest.tables`. */
 export interface DigestRow extends PartTable {
   readonly height: bigint;
   readonly digest: Uint8Array;
@@ -91,7 +91,7 @@ export interface DigestRow extends PartTable {
 /** The key of a table in a digest map. */
 export const tableKey = ({ schema, table }: PartTable): string => JSON.stringify([schema, table]);
 
-/** One private instance as the core knows it (`src/private/instances.ts`): the four fields `/status` shows. [PP-9] */
+/** One private instance as the core knows it (`src/private/instances.ts`): the four fields `/status` shows. */
 export interface PrivateInstanceFacts {
   readonly id: string;
   readonly connected: boolean;
@@ -102,7 +102,7 @@ export interface PrivateInstanceFacts {
 /**
  * What the process knows of its node besides `status()`: the best head the node announced last and the best-block
  * queue's length, as its block source reports them (`BlockSource.nodeView`), and its node client's connection state.
- * Each is null when the process cannot tell (no node source, no client yet). [AE-5]
+ * Each is null when the process cannot tell (no node source, no client yet).
  */
 export interface NodeFacts {
   readonly bestHead: bigint | null;
@@ -122,7 +122,7 @@ export interface SnapshotFacts {
   readonly config: ConfigSnapshot;
   /** When the process started: `process.hrtime.bigint()`. */
   readonly startedNs: bigint;
-  /** The process's side: the core (`public`) or a private process; null until the configuration says which. [AE-5] */
+  /** The process's side: the core (`public`) or a private process; null until the configuration says which. */
   readonly side: ProcessSide | null;
   /** A private process's `instanceId`; null on the core, or before the configuration gives it. */
   readonly instanceId: string | null;
@@ -134,7 +134,7 @@ export interface SnapshotFacts {
   readonly modules: readonly ModuleFacts[] | null;
   /** `core_digest.tables` as last read, by {@link tableKey}. */
   readonly digests: ReadonlyMap<string, DigestRow>;
-  /** On the core, its private instances now; none unless given. [PP-9] */
+  /** On the core, its private instances now; none unless given. */
   readonly privateInstances?: readonly PrivateInstanceFacts[];
   /** On a private process, whether it runs in lockstep, null while unknown; null unless given. */
   readonly publicLockstep?: boolean | null;
@@ -142,7 +142,7 @@ export interface SnapshotFacts {
   readonly node?: NodeFacts;
 }
 
-/** The private instances as `/status` shows them: the four fields of each, its height as text, nothing else. [PP-9] */
+/** The private instances as `/status` shows them: the four fields of each, its height as text, nothing else. */
 function instancesOf(instances: readonly PrivateInstanceFacts[]): readonly PrivateInstanceStatus[] {
   return Object.freeze(
     instances.map((instance) =>
@@ -202,7 +202,7 @@ function modulesOf(modules: readonly ModuleFacts[], digests: ReadonlyMap<string,
 export function snapshotOf(status: ProcessStatus, facts: SnapshotFacts): AdminSnapshot {
   const { ended, reason } = status;
   const error = ended !== null && (ended.kind === "refused" || ended.kind === "failed") ? ended.error : undefined;
-  // Until the side is known, nothing of either side is shown: no role, no node, no instances. [AE-5, LM-5]
+  // Until the side is known, nothing of either side is shown: no role, no node, no instances.
   const core = facts.side === "public";
   const role = facts.side === null ? null : core ? "core" : "private";
   const shown: StatusSnapshot = {

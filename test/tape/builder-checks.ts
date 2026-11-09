@@ -11,7 +11,7 @@ import { type Script, ScriptedNode, type Step } from "./scripted-node.js";
  * wrong builders and `builder.test.ts` against the real one: a client session against the scripted JSON-RPC server
  * (`scripted-node.ts`), recorded by the builder, then the same session against the tape node serving that tape; the
  * client must receive byte-identical answers and notifications in the same order, connection by connection, and each
- * connection must end the same way. [A71, TT-4; acceptance §9]
+ * connection must end the same way.
  *
  * **The session** ({@link runA71Session}) covers what a recording meets: a request without `params` (recorded as `[]`),
  * numeric and string ids, an integer beyond 2^53 in an answer, one method and params answered differently twice, an
@@ -67,7 +67,7 @@ function droppedConnection(url: string): Promise<ConnectionFrames> {
 
 /**
  * The check's client session against `url`. After each answer, `check(connection, texts)` sees what the connection has
- * received so far (the replay compares it with the recording, so a wrong tape fails at its first wrong frame). [A71]
+ * received so far (the replay compares it with the recording, so a wrong tape fails at its first wrong frame).
  */
 export async function runA71Session(
   url: string,
@@ -114,7 +114,7 @@ export async function runA71Session(
   return sessions;
 }
 
-/** The scripted node's answers to the check's session: by method and params, and by how often each was asked. [A71] */
+/** The scripted node's answers to the check's session: by method and params, and by how often each was asked. */
 export function a71Script(): Script {
   const asked = new Map<string, number>();
   return (request) => {
@@ -165,7 +165,7 @@ export function a71Script(): Script {
 const BIG_PROPERTIES = '{"ss58Format":42,"existentialDeposit":18446744073709551616}';
 
 /**
- * The check's session recorded through a builder in front of the scripted node, whose third handshake is refused. [A71]
+ * The check's session recorded through a builder in front of the scripted node, whose third handshake is refused.
  */
 export interface Recorded {
   readonly records: readonly TapeRecord[];
@@ -191,7 +191,7 @@ export async function recordA71(): Promise<Recorded> {
 }
 
 /**
- * The check's session against the tape node serving `records`, each frame compared with `recorded` as it arrives. [A71]
+ * The check's session against the tape node serving `records`, each frame compared with `recorded` as it arrives.
  */
 export function replayA71(
   records: readonly TapeRecord[],
@@ -206,7 +206,7 @@ export function replayA71(
 
 /**
  * The CI check: the session recorded by the builder and replayed by the tape node gives byte-identical answers
- * and notifications, in the same order, and the same ends of connections. Returns the recording. [A71]
+ * and notifications, in the same order, and the same ends of connections. Returns the recording.
  */
 export async function expectRecordReplayIdentical(): Promise<Recorded> {
   const recorded = await recordA71();

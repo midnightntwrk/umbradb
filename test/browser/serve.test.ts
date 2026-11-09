@@ -11,7 +11,7 @@ import { isolationProblems, REPOSITORY, type Served, serveCommand } from "./serv
  * failing on a server without them.
  */
 
-describe("node browser/serve.ts (npm run web, task 17.3a)", () => {
+describe("node browser/serve.ts (npm run web)", () => {
   let dir: string;
   let served: Served;
 
@@ -53,7 +53,7 @@ describe("node browser/serve.ts (npm run web, task 17.3a)", () => {
   });
 });
 
-describe("package.json's web script (task 17.3a)", () => {
+describe("package.json's web script", () => {
   it("builds the page, then serves it", async () => {
     const { readFileSync } = await import("node:fs");
     const scripts = (JSON.parse(readFileSync(join(REPOSITORY, "package.json"), "utf8")) as { scripts: Record<string, string> })

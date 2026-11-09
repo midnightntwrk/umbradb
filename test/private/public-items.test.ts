@@ -11,7 +11,7 @@ import { launchPrivate, type PrivateOptions, type PublicCore, startPublicCore } 
 /**
  * A private module may require the public core's `table` items. On PostgreSQL 18.6 and PGlite 0.5.10, a private module
  * `reader` requires `pub-rows` (the `table` item of the public core's module `pub`) and `blocks` (the public backbone's,
- * `core-block-commit`). [A155, PP-13, Q126 B]
+ * `core-block-commit`).
  * - It starts when the public core provides both at every height it runs, and reads `pub.rows` at each of them through
  *   its read of public data.
  * - It is refused with `item-no-provider` naming `pub-rows` against a public core that does not enable `pub`.
@@ -19,11 +19,10 @@ import { launchPrivate, type PrivateOptions, type PublicCore, startPublicCore } 
  *   runs.
  * - A private module requiring a public `block` item (`block-header`) is refused (`item-no-provider`): only `table`
  *   items are recorded.
- * [A155, PP-13]
  *
  * The public core records each revision's `table` items in `core_chain.config.provides`, which the private process
  * reads at startup. The committed negative controls replace the intake's view of the public items: with none, the
- * provided case is refused; with every one provided at every height, the not-available cases start. [design §8, §10]
+ * provided case is refused; with every one provided at every height, the not-available cases start.
  */
 
 /** The public core's module `pub`: its `table` item `pub-rows`, `pub.rows` holding every height it ran. */
@@ -83,7 +82,7 @@ function umbraIn(error: unknown): UmbraError | undefined {
   return undefined;
 }
 
-/** What one run saw. [A155] */
+/** What one run saw. */
 interface A155Observation {
   /** `pub` from 1 (S): `reader` from 1. */
   readonly provided: Outcome;
@@ -98,7 +97,7 @@ interface A155Observation {
   readonly stopped: Outcome;
 }
 
-/** The oracle: every problem with what was observed, none when all the cases above hold. [A155] */
+/** The oracle: every problem with what was observed, none when all the cases above hold. */
 function a155Problems(observed: A155Observation): string[] {
   const problems: string[] = [];
   const started = (outcome: Outcome, what: string) => {
@@ -191,7 +190,7 @@ async function withCore<T>(
   }
 }
 
-/** Runs the starts above on `backend`; `intake` is a negative control's. [A155] */
+/** Runs the starts above on `backend`; `intake` is a negative control's. */
 async function a155Run(
   backend: PrivateBackend,
   intake: Omit<PrivateIntakeOptions, "publicDatabase" | "wakes"> = {},
@@ -218,7 +217,7 @@ async function a155Run(
   return { provided, blockItem, unprovided, late, lateFromItsStart, stopped };
 }
 
-describe.each(PRIVATE_BACKENDS)("A155 a private module requiring public table items ($name)", (backend) => {
+describe.each(PRIVATE_BACKENDS)("a private module requiring public table items ($name)", (backend) => {
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 
@@ -234,7 +233,7 @@ describe.each(PRIVATE_BACKENDS)("A155 a private module requiring public table it
   );
 
   it(
-    "negative control: a graph that ignores the public items refuses A155's provided case",
+    "negative control: a graph that ignores the public items refuses the provided case",
     async () => {
       const problems = a155Problems(await a155Run(backend, { publicItems: () => [] }));
       expect(problems.some((problem) => problem.startsWith("pub provided from S: refused (item-no-provider)"))).toBe(true);
@@ -243,7 +242,7 @@ describe.each(PRIVATE_BACKENDS)("A155 a private module requiring public table it
   );
 
   it(
-    "negative control: a graph that ignores the public items' heights starts A155's item-not-available cases",
+    "negative control: a graph that ignores the public items' heights starts the item-not-available cases",
     async () => {
       const everywhere = (items: readonly PublicItem[]) => items.map((item) => ({ ...item, start: 0n, stop: null }));
       const problems = a155Problems(await a155Run(backend, { publicItems: everywhere }));

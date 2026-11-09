@@ -5,7 +5,6 @@
  * `src/` that name `Buffer` (an import added as each is bundled), never to a dependency: PGlite tests for a global
  * `Buffer` to choose Node.js's paths. Anything else of Node.js's `Buffer` is absent, so a new use fails at once rather
  * than differing quietly. `test/browser/shims.test.ts` holds each operation equal to Node.js's on random inputs.
- * [design §9.2]
  */
 
 /** The encodings this `Buffer` reads and writes (Node.js's names). */

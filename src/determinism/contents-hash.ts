@@ -1,7 +1,7 @@
 /**
  * The contents hash: SHA-256 of one canonical CBOR array. For each module schema, and then each table, in name order
  * (byte order), it holds the array `[schema, table, [column names], [rows in primary-key order]]`, each row in its
- * canonical encoding (`encodeRow`). [DT-1, DT-3]
+ * canonical encoding (`encodeRow`).
  *
  * Which tables count, how the catalog is read and why one handle reads one snapshot: `./module-tables.ts`. The array
  * is never built in memory: each table's row count is read first (the same snapshot), so the head of its row array
@@ -12,7 +12,6 @@
  * place its name gives it among the others. The function reads, through the hash's own handle, whatever it needs of
  * the snapshot, and can fail the computation; it is called once per hash for all the tables it gives. Such a table
  * still follows the determinism rules, which `./module-tables.ts` applies to every table that is not opted out.
- * [DT-3, LG-11]
  */
 
 import { createHash, type Hash } from "node:crypto";
@@ -30,7 +29,7 @@ import {
   rowsInKeyOrder,
 } from "./module-tables.js";
 
-/** A content-defined table's part of the contents hash: its columns, then its rows in the order given. [DT-3] */
+/** A content-defined table's part of the contents hash: its columns, then its rows in the order given. */
 export interface TableContent {
   /** The columns, by the names the hash records and the column types the canonical encoding takes for them. */
   readonly columns: readonly { readonly name: string; readonly type: ColumnType }[];
@@ -41,14 +40,14 @@ export interface TableContent {
 /**
  * Gives the content of a group of content-defined tables, read through `read` alone (the hash's snapshot): for each
  * table, its {@link TableContent}, or null for a table recorded by name only, `[schema, table, null, null]`. It may
- * throw, which fails the computation; `options.pageSize` is the hash's. [DT-3]
+ * throw, which fails the computation; `options.pageSize` is the hash's.
  */
 export type ContentFunction = (
   read: ConsistentRead,
   options: PageOptions,
 ) => Promise<ReadonlyMap<string, TableContent | null>>;
 
-/** Tables of one schema that take part in the contents hash by their content, and the function that gives it. [DT-3] */
+/** Tables of one schema that take part in the contents hash by their content, and the function that gives it. */
 export interface ContentDefinedTables {
   readonly schema: string;
   readonly tables: readonly string[];
@@ -59,21 +58,21 @@ export interface ContentDefinedTables {
 export interface ContentOptions {
   /**
    * The content-defined tables (the schema plan's `contentDefined`); a table no group names is read by its rows, and a
-   * group whose tables the database does not hold changes nothing. [DT-3, LG-11]
+   * group whose tables the database does not hold changes nothing.
    */
   readonly contentDefined?: readonly ContentDefinedTables[];
 }
 
 /**
- * The contents hash (32 bytes) of the database `read` sees. [DT-3]
+ * The contents hash (32 bytes) of the database `read` sees.
  *
  * The tables that `options.optedOut` names (those declared `deterministic: false`, the schema plan's `optedOut`) are
  * recorded by name only, as `[schema, table, null, null]`. So two databases that differ only in such a table's rows
  * hash equal, and one without the table hashes differently. Without the list, every table is read, and the rules refuse
- * such a table as any other. [MD-1, Q76]
+ * such a table as any other.
  *
  * The tables that `options.contentDefined` names appear as their content functions give them (see the module
- * comment); a table also opted out is recorded by name only. [DT-3, LG-11]
+ * comment); a table also opted out is recorded by name only.
  */
 export async function contentsHash(
   read: ConsistentRead,
@@ -131,7 +130,7 @@ export async function contentsHash(
   return new Uint8Array(hash.digest());
 }
 
-/** Hashes a content-defined table as its group's content gives it (see the module comment). [DT-3] */
+/** Hashes a content-defined table as its group's content gives it (see the module comment). */
 function hashContent(
   hash: Hash,
   group: ContentDefinedTables,
@@ -158,7 +157,7 @@ function hashContent(
  * A row's canonical encoding. A value that cannot be encoded fails naming the table, the column and its declared type,
  * the row by its primary key, and what is wrong. For a number a stored value can hold (a `numeric` fraction or `NaN`,
  * a `jsonb` number outside the 64-bit integers), it also says why, and what to store instead (the
- * `deterministic_postgresql` component's `valueFailureBecause`). [DT-1]
+ * `deterministic_postgresql` component's `valueFailureBecause`).
  */
 function encodeTableRow(table: ModuleTable, types: readonly ColumnType[], row: unknown[]): Uint8Array {
   try {

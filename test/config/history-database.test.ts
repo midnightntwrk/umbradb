@@ -29,16 +29,16 @@ import { historyInput, historyRows, migrationRows, rejection, startup, storedRow
  * runner's (`./history-startup.ts`). The history is read and checked before any migration. Then `startDatabase` runs
  * with `core-chain` first: its migration `001` creates the table, and its `on-start-db` compares again and records, in
  * one transaction. The pure rules are tested in `./history.test.ts`; this file tests the rows, the transactions and
- * what the database holds after each startup. [CF-5, CF-6, CF-7, CF-8, A28, A30, A31, A33]
+ * what the database holds after each startup.
  *
  * Tested elsewhere: "startup refuses" through the runner's refused state, "processing continues" after the core's stop
- * is raised, and the cursor read from the `blocks` table. Here the cursor is given. [A72]
+ * is raised, and the cursor read from the `blocks` table. Here the cursor is given.
  *
  * The committed negative controls:
  * - the version check run after the migrations instead of before: the refusal still comes, but a
- *   `core_chain.migrations` row was added, which must not happen; [A33]
+ *   `core_chain.migrations` row was added, which must not happen;
  * - the delete of an omitted row above the cursor committed outside the transaction that records: a failure between
- *   the delete and the insert then leaves a history no configuration was accepted with. [A30, Q103 B]
+ *   the delete and the insert then leaves a history no configuration was accepted with.
  */
 
 /** `m` 1.0.0's revision from `start`. */
@@ -51,7 +51,7 @@ const M_DEFAULTS = { limit: 10, mode: "full" } as const;
 /** `m`'s table item for a build whose `m` 1.0.0 names its table item otherwise (for the test of `provides`). */
 const M_ALL = { name: "m-all", lifetimes: ["table" as const], table: { schema: "m", tables: ["rows"], kind: "append-only" as const } };
 
-/** Each row's `provides`, as `<id>@<start> <items…>`, in key order. [PP-13] */
+/** Each row's `provides`, as `<id>@<start> <items…>`, in key order. */
 async function providesRows(db: Database): Promise<string[]> {
   const rows = await db.read((read) =>
     read.query(`SELECT entry_id, start, provides FROM core_chain.config ORDER BY entry_id COLLATE "C", start`),
@@ -101,8 +101,8 @@ describe.each(BACKENDS)("the configuration history in core_chain.config, on $nam
 
   const fresh = async (): Promise<Database> => (await backend.database("SELECT 1")).db;
 
-  describe("CF-7: the table and its rows", () => {
-    it("is created by core-chain's migration 001, as the login, with design §10's columns, key and checks", async () => {
+  describe("the table and its rows", () => {
+    it("is created by core-chain's migration 001, as the login, with the columns, key and checks", async () => {
       const db = await fresh();
       const started = await startup(db, { entries: [CORE, m(0)], user: [M_1_0], cursor: null });
       expect(started.applied).toEqual([
@@ -143,7 +143,7 @@ describe.each(BACKENDS)("the configuration history in core_chain.config, on $nam
         read.query("SELECT pg_get_userbyid(relowner) = current_user AS login FROM pg_class WHERE oid = 'core_chain.config'::regclass"),
       );
       expect(owner).toEqual({ login: true });
-      // Every module role reads it (through the default privileges on core_chain); none writes it. [DB-6]
+      // Every module role reads it (through the default privileges on core_chain); none writes it.
       for (const { role } of schemaPlan(started.graph.modules).schemas) {
         const [privileges] = await db.read((read) =>
           read.query(
@@ -194,7 +194,7 @@ describe.each(BACKENDS)("the configuration history in core_chain.config, on $nam
       expect(new Set(stored.map((row) => row.xmin)).size).toBe(1);
     });
 
-    it("records each revision's table items in provides: the backbone's under core, a module's, a scheduled one's this build's (PP-13)", async () => {
+    it("records each revision's table items in provides: the backbone's under core, a module's, a scheduled one's this build's", async () => {
       const db = await fresh();
       const entries = [CORE, m(0), m(50, {}, 70), versionEntry({ id: "m", start: 90, version: "1.1.0" })];
       await startup(db, { entries, user: [M_1_0], cursor: null, backbone: [CORE_BLOCK_COMMIT] });
@@ -202,7 +202,7 @@ describe.each(BACKENDS)("the configuration history in core_chain.config, on $nam
       // One transaction wrote them all, with the rest of each row: core-chain's on-start-db.
       expect(new Set((await storedRows(db)).map((row) => row.xmin)).size).toBe(1);
       // A build whose m 1.0.0 declares another table item: the revisions above the cursor (40) take it, and those at
-      // or below it keep theirs, the core's from 0 too. An unchanged restart then writes nothing. [CF-6]
+      // or below it keep theirs, the core's from 0 too. An unchanged restart then writes nothing.
       const other = moduleM("1.0.0", { provides: [M_ALL] });
       const restart = { entries, user: [other], cursor: 40n, backbone: [CORE_BLOCK_COMMIT] } as const;
       await startup(db, restart);
@@ -212,7 +212,7 @@ describe.each(BACKENDS)("the configuration history in core_chain.config, on $nam
       expect(await storedRows(db)).toEqual(before);
     });
 
-    it("keeps a core row's stop null: the table refuses one with a stop (A31)", async () => {
+    it("keeps a core row's stop null: the table refuses one with a stop", async () => {
       const db = await fresh();
       await startup(db, { entries: [core(0, {}, 10)], user: [], cursor: null });
       expect((await historyRows(db))[0]?.stop).toBeNull();
@@ -224,7 +224,7 @@ describe.each(BACKENDS)("the configuration history in core_chain.config, on $nam
     });
   });
 
-  describe("A31: configuration changes only the future (CF-6)", () => {
+  describe("configuration changes only the future", () => {
     /** A database that recorded `m` from 10 (and the core from 0) at its first startup, then committed up to 20. */
     async function recorded(entries: readonly unknown[] = [CORE, m(10)]): Promise<Database> {
       const db = await fresh();
@@ -305,7 +305,7 @@ describe.each(BACKENDS)("the configuration history in core_chain.config, on $nam
       expect(await storedRows(db)).toEqual(before);
     });
 
-    it("gives the configuration hash of the recorded rows: the same after only operational or secret fields changed, another after a data field (RN-16, PP-14)", async () => {
+    it("gives the configuration hash of the recorded rows: the same after only operational or secret fields changed, another after a data field", async () => {
       const db = await recorded([core(0, { tipCap: 5 }), m(10, { pollMs: 5 }), m(30, { limit: 4 })]);
       const first = await db.read((read) => readConfigHash(read));
       expect(first).toMatch(/^0x[0-9a-f]{64}$/);
@@ -316,7 +316,7 @@ describe.each(BACKENDS)("the configuration history in core_chain.config, on $nam
         "m@10 1.0.0",
         "m@30 1.0.0",
       ]);
-      // A private process reads the same hash from the public database (its check without a transport). [PP-14]
+      // A private process reads the same hash from the public database (its check without a transport).
       expect((await db.read((read) => readPublicConfiguration(read))).configHash).toBe(first);
       await startup(db, {
         entries: [core(0, { tipCap: 6, node: "wss://u:other-secret@node" }), m(10, { pollMs: 6, token: "secret-4-3" }), m(30, { limit: 4 })],
@@ -347,7 +347,7 @@ describe.each(BACKENDS)("the configuration history in core_chain.config, on $nam
     });
   });
 
-  describe("A30: revisions by (id, start) (CF-5)", () => {
+  describe("revisions by (id, start)", () => {
     it("refuses a configuration omitting a recorded entry at or below the cursor with missing-entry, changing nothing", async () => {
       const db = await fresh();
       await startup(db, { entries: [CORE, m(1), m(50)], user: [M_1_0], cursor: null });
@@ -358,7 +358,7 @@ describe.each(BACKENDS)("the configuration history in core_chain.config, on $nam
       expect(await storedRows(db)).toEqual(before);
     });
 
-    it("draws Q103's line exactly: an entry starting at the cursor must stay, one at cursor + 1 is deleted when omitted", async () => {
+    it("draws the line exactly: an entry starting at the cursor must stay, one at cursor + 1 is deleted when omitted", async () => {
       const db = await fresh();
       await startup(db, { entries: [CORE, m(0), m(20), m(21)], user: [M_1_0], cursor: null });
       const before = await storedRows(db);
@@ -383,7 +383,7 @@ describe.each(BACKENDS)("the configuration history in core_chain.config, on $nam
       expect(await storedRows(db)).toEqual([before[0], before[1], before[3]]);
     });
 
-    it("accepts CF-5's scenario 'A scheduled entry is moved': (m, 50) deleted and (m, 100) recorded by core-chain", async () => {
+    it("accepts the scenario 'A scheduled entry is moved': (m, 50) deleted and (m, 100) recorded by core-chain", async () => {
       const db = await fresh();
       const scheduled = (start: number) => versionEntry({ id: "m", start, version: "1.1.0" });
       await startup(db, { entries: [CORE, core(30, { retainStates: 1 }), m(0), scheduled(50)], user: [M_1_0], cursor: null });
@@ -475,7 +475,7 @@ describe.each(BACKENDS)("the configuration history in core_chain.config, on $nam
     });
   });
 
-  describe("A28's history half: versionEntry revisions against their recorded rows (CF-3, CF-6)", () => {
+  describe("history half: versionEntry revisions against their recorded rows", () => {
     it("upgrades a module whose new schema renames a setting: the old revision as a versionEntry equal to its row", async () => {
       const db = await fresh();
       await startup(db, {
@@ -502,7 +502,7 @@ describe.each(BACKENDS)("the configuration history in core_chain.config, on $nam
       );
       expect((scheduled as UmbraError).code).toBe("invalid-configuration");
       expect(await storedRows(db)).toEqual(before);
-      // The 1.0.0 build stopped at 49; the 1.1.0 build starts with 1.0.0's revision written as recorded. [RN-12]
+      // The 1.0.0 build stopped at 49; the 1.1.0 build starts with 1.0.0's revision written as recorded.
       const old = versionEntry({ id: "m", start: 1, version: "1.0.0", config: { foo: 1 } });
       const started = await startup(db, { entries: [CORE, old, M_BAR.entry({ start: 50, stop: 80, config: { bar: 1 } })], user: [M_BAR], cursor: 49n });
       expect(started.applied).toEqual([{ module: "m", migration: "002", position: 2 }]);
@@ -532,7 +532,7 @@ describe.each(BACKENDS)("the configuration history in core_chain.config, on $nam
     });
   });
 
-  describe("A33: one version per build (CF-8)", () => {
+  describe("one version per build", () => {
     const asRecorded = versionEntry({ id: "m", start: 0, version: "1.0.0", config: M_DEFAULTS });
 
     /** A database built by `m` 1.0.0 from 0, committed up to 20: its tables, records and history. */
@@ -590,7 +590,7 @@ describe.each(BACKENDS)("the configuration history in core_chain.config, on $nam
       expect(present).toEqual({ schema: false });
     });
 
-    it("negative control (committed): the version check after the migrations still refuses, but adds the rows A33 forbids", async () => {
+    it("negative control (committed): the version check after the migrations still refuses, but adds the rows it must not", async () => {
       const db = await builtWith100();
       const before = await state(db);
       const entries = [CORE, asRecorded, M_1_1.entry({ start: 50, config: {} })];
@@ -609,7 +609,7 @@ describe.each(BACKENDS)("the configuration history in core_chain.config, on $nam
     });
   });
 
-  describe("DB-10's input from the history: the versions that cover committed heights", () => {
+  describe("input from the history: the versions that cover committed heights", () => {
     it("refuses a version requiring a resync where another version's revision covers committed heights", async () => {
       const db = await fresh();
       await startup(db, { entries: [CORE, m(0)], user: [M_1_0], cursor: null });

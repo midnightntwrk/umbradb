@@ -1,13 +1,13 @@
 /**
  * `finalizedHeight`: the height of a node's finalized head, which a host program gives as S — the start of a new
- * database — when it starts UmbraDB at the chain's head. [LM-1, D-8; design §4]
+ * database — when it starts UmbraDB at the chain's head.
  *
  * It asks the node at `node` (a `ws or wss://` URL) for its finalized head and that block's header
  * (`chain_getFinalizedHead`, `chain_getHeader`), over one connection of its own (`../node/client.ts`), closed before it
  * settles. The node client retries an unreachable node with its back-off; `finalizedHeight` bounds the whole answer by
  * `timeoutMs` (30 s unless given) and then rejects with `node-unreachable` (`reason: timeout`). Aborting `signal` ends
  * it at once with the signal's reason, as `fetch` does. Neither its errors nor its messages name the node's URL, which
- * is a `secret` setting. [LM-1, IN-10, CF-4]
+ * is a `secret` setting.
  */
 
 import { UmbraError } from "../db/errors.js";
@@ -19,7 +19,7 @@ export const FINALIZED_HEIGHT_TIMEOUT_MS = 30_000;
 /** The longest timer Node.js and the browsers keep: 2^31 − 1 ms. */
 const MAX_TIMEOUT_MS = 2_147_483_647;
 
-/** What {@link finalizedHeight} takes besides the node. [LM-1] */
+/** What {@link finalizedHeight} takes besides the node. */
 export interface FinalizedHeightOptions {
   /** Ends the request at once, rejecting with its reason. */
   readonly signal?: AbortSignal;
@@ -35,7 +35,7 @@ function invalidOption(option: "options" | "signal" | "timeoutMs", message: stri
   });
 }
 
-/** The rejection once `timeoutMs` passed without the node's answer. [IN-10] */
+/** The rejection once `timeoutMs` passed without the node's answer. */
 function timedOut(timeoutMs: number): UmbraError {
   return new UmbraError("node-unreachable", `finalizedHeight: the node did not answer within ${timeoutMs} ms`, {
     reason: "timeout",
@@ -47,7 +47,7 @@ function timedOut(timeoutMs: number): UmbraError {
  * The height of the finalized head of the node at `node` (see the module comment). Rejects with `node-unreachable`
  * after `timeoutMs`, with the signal's reason when `signal` aborts, with `invalid-configuration` for a `node` that is no
  * WebSocket URL (`reason: not-a-url`, `not-a-websocket-url`) or a malformed option (`reason: invalid-option`), and with
- * the node's own failure when it answers with an error. [LM-1, L53]
+ * the node's own failure when it answers with an error.
  */
 export async function finalizedHeight(node: string, options: FinalizedHeightOptions = {}): Promise<bigint> {
   if (typeof options !== "object" || options === null) throw invalidOption("options", "is an object of signal and timeoutMs");

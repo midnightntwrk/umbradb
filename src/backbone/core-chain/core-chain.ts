@@ -1,7 +1,7 @@
 /**
  * The backbone part `core-chain`. It holds the chain's identity, the configuration history (`./history.ts`), the
  * startup checks against the node, and the `process` items every module may require: `config`, `node-client`, `db`
- * (read-only) and `ledger-table`. [CD-1, IN-2, IN-3, MD-7, Q73; CORE-ARCH §4.4, §4.11; design §11]
+ * (read-only) and `ledger-table`.
  *
  * **The tables** and every statement are in `./sql.ts`.
  *
@@ -13,21 +13,21 @@
  *    `custom`. It refuses a known network whose built-in table records no genesis hash. Then, on a database with a
  *    cursor, it compares the hash with the stored one (`genesis-mismatch`), waits while the node's finalized head is
  *    below the cursor (the condition `waiting-for-node`), and compares the node's finalized hash at the cursor's height
- *    with the cursor's (`cursor-hash-mismatch`). [IN-3, Q117, Q120]
+ *    with the cursor's (`cursor-hash-mismatch`).
  * 2. The runner binds the part to its process context ({@link bindCoreChain}) with what it checked and opened, and runs
  *    the migrations. The part's `on-start-db` ({@link coreChainStartDb}) then:
- *    - records the configuration history [CF-6];
+ *    - records the configuration history;
  *    - on a database without a cursor, records the genesis hash and S. It does so again at every start until block S
- *      commits, so an interrupted bootstrap is repeated [IN-2];
+ *      commits, so an interrupted bootstrap is repeated;
  *    - publishes its `process` items. `node-client` is the process's one node client, the one its block source
  *      (`core-block-fetch`'s node source) reads the chain through; `ledger-table` is the `core` revision's ledger
- *      table in effect (`ledgerTable`). [MD-7, LG-3]
+ *      table in effect (`ledgerTable`).
  * 3. On a database without a cursor, once the module API listens, {@link waitForNode} waits (state `starting`,
- *    condition `waiting-for-node`) while S is above the node's finalized head. [IN-2]
+ *    condition `waiting-for-node`) while S is above the node's finalized head.
  *
  * **Per block**, its `on-db-write` ({@link coreChainDbWrite}) records the anchor hash in block S's own transaction and
  * writes nothing at any other height. The fixed backbone order runs it first, before `core-block-commit`'s, although
- * the chain-data requirement says the latter runs first. [IN-2, RN-3, CD-3, Q118]
+ * the chain-data requirement says the latter runs first.
  *
  * The declaration ({@link CORE_CHAIN}) is a constant, as `CORE_DIGEST` is. Its callbacks find their process's facts
  * through the process context the runner bound (a `WeakMap`), so one build's declarations serve every process
@@ -51,7 +51,7 @@ import type { BlockRef, BlockSource } from "../../runner/block-source.js";
 import { recordHistory } from "./history.js";
 import { type ChainIdentity, CORE_CHAIN_MIGRATIONS, IDENTITY_TABLE, recordAnchor, recordIdentity } from "./sql.js";
 
-/** The part's id: the first in the fixed backbone order (`BACKBONE_ORDER`). [RN-3] */
+/** The part's id: the first in the fixed backbone order (`BACKBONE_ORDER`). */
 export const CORE_CHAIN_ID = "core-chain";
 
 /** A hash as `0x`-prefixed lowercase hex, as the process transport writes hashes. */
@@ -80,7 +80,7 @@ export type ChainSource = Pick<BlockSource, "finalizedHead" | "block" | "waitFor
  * Waits while the source's finalized head is below `height` (the condition `waiting-for-node`). It does not wait when
  * the head is at or above `height`. Otherwise it tells `onWaiting` the wait, waits for the head to reach `height`, and
  * tells `onWaiting` that the wait ended (null). It does so also when `signal` stops the wait, and then rejects with the
- * signal's reason. [IN-2, IN-3]
+ * signal's reason.
  */
 export async function waitForNode(
   source: ChainSource,
@@ -100,15 +100,13 @@ export async function waitForNode(
 
 /**
  * The genesis hash the configuration names: the configured network's, which the node's must equal at every start.
- * [IN-3, Q117, Q120]
  */
 export interface ConfiguredGenesis {
-  /** The `core` entry's `network`. [CF-4] */
+  /** The `core` entry's `network`. */
   readonly network: string;
   /**
    * Its genesis hash: the built-in table's for a known network (`src/ledger/networks.json`), or the entry's
    * `genesisHash` for `custom`. It is null for a known network whose built-in table records none, which is refused.
-   * [LG-3, Q117]
    */
   readonly hash: Uint8Array | null;
 }
@@ -122,7 +120,7 @@ function bytesOf(text: string): Uint8Array {
 
 /**
  * The configured network's genesis hash ({@link ConfiguredGenesis}), frozen, from a `core` revision's settings: the
- * process's, whose `network` and `genesisHash` data fields the validation has checked. [CF-4]
+ * process's, whose `network` and `genesisHash` data fields the validation has checked.
  * - For `custom`, it is `genesisHash`.
  * - Otherwise it is the built-in network table's, read through `lookup` (`builtInNetwork`; never a constant), or null
  *   when the table has no entry for the network or records no genesis hash for it.
@@ -158,17 +156,17 @@ export interface ChainCheck {
   /**
    * Set only by a private process's source (`PrivateBlockSource.checkChain`): the public core's `table` items with
    * their heights, read from its public database's configuration history, which the runner gives the graph
-   * (`GraphInput.publicItems`). Absent from `core-chain`'s own check, since a public process has none. [PP-13]
+   * (`GraphInput.publicItems`). Absent from `core-chain`'s own check, since a public process has none.
    */
   readonly publicItems?: readonly PublicItem[];
 }
 
 /**
- * The startup checks against the node, run before any migration (see the module comment), in this order: [IN-3]
+ * The startup checks against the node, run before any migration (see the module comment), in this order:
  * 1. A known network whose built-in table records no genesis hash is refused before the node is asked, since the build
- *    has nothing to check the node against (`genesis-mismatch`, `details { network, configured: null }`). [Q117]
+ *    has nothing to check the node against (`genesis-mismatch`, `details { network, configured: null }`).
  * 2. The node's genesis hash (its block 0's) is compared with the configured network's at every start, on a database
- *    without a cursor too (`genesis-mismatch`, `details { network, configured, node }`). [Q120]
+ *    without a cursor too (`genesis-mismatch`, `details { network, configured, node }`).
  * 3. On a database with a cursor, the stored genesis hash is compared with the node's (`genesis-mismatch`,
  *    `details { stored, node }`: a database written for another chain).
  * 4. It waits while the node's finalized head is below the cursor ({@link waitForNode}).
@@ -177,7 +175,7 @@ export interface ChainCheck {
  *    reached the cursor.
  *
  * A database without a cursor compares nothing more: its bootstrap is repeated. Throws a plain `Error` for a cursor
- * without an identity. [IN-2]
+ * without an identity.
  */
 export async function checkChain(input: ChainCheckInput): Promise<ChainCheck> {
   const { source, identity, cursor, configured } = input;
@@ -231,7 +229,7 @@ export async function checkChain(input: ChainCheckInput): Promise<ChainCheck> {
 /**
  * The node client's options from the process's `core` settings: its `node` and `backoffCeilingMs`. Null for a process
  * without a node (a private process, whose `core` entry has none). The process makes its one node client from them
- * (`src/runner/process.ts`). [CF-4, Q102]
+ * (`src/runner/process.ts`).
  */
 export function nodeOptionsOf(settings: Readonly<Record<string, unknown>>): NodeClientOptions | null {
   if (typeof settings.node !== "string") return null;
@@ -240,15 +238,15 @@ export function nodeOptionsOf(settings: Readonly<Record<string, unknown>>): Node
 
 /** What a process gives `core-chain` (see {@link bindCoreChain}). */
 export interface CoreChainFacts {
-  /** The validated configuration: its history is recorded, and it is published as the `config` item. [CF-6] */
+  /** The validated configuration: its history is recorded, and it is published as the `config` item. */
   readonly config: CheckedConfig;
-  /** The process's `core` revision, whose development opt-in the history's check reads. [Q102] */
+  /** The process's `core` revision, whose development opt-in the history's check reads. */
   readonly process: CheckedEntry;
   /** The build's validated declarations, which the history's check reads. */
   readonly declarations: DeclarationSet<ModuleDeclaration>;
   /** The cursor's height at startup, null on a new database. */
   readonly cursor: bigint | null;
-  /** The database, opened and with its writer started: published read-only as the `db` item. [Q73] */
+  /** The database, opened and with its writer started: published read-only as the `db` item. */
   readonly db: Database;
   /** S. */
   readonly start: bigint;
@@ -259,7 +257,7 @@ export interface CoreChainFacts {
    * process closes. Null for none, and then no `node-client` item is published.
    */
   readonly nodeClient: NodeClient | null;
-  /** The `core` revision's ledger table in effect (`ledgerTable`), published as `ledger-table`. [LG-3] */
+  /** The `core` revision's ledger table in effect (`ledgerTable`), published as `ledger-table`. */
   readonly ledgerTable: LedgerTable;
 }
 
@@ -303,10 +301,10 @@ function boundTo(p: ProcessContext, point: "on-start-db" | "on-db-write"): Bound
 /**
  * `core-chain`'s `on-start-db` (see the module comment). It:
  * - records the history in the callback's transaction (`recordHistory`, with `options.history`, which a negative
- *   control sets) [CF-6];
- * - on a database without a cursor, records the identity's genesis hash and S [IN-2];
+ *   control sets);
+ * - on a database without a cursor, records the identity's genesis hash and S;
  * - publishes the `process` items `config`, `node-client` (when the process has a node), `db` and `ledger-table`
- *   [MD-7].
+ *.
  */
 export async function coreChainStartDb(
   p: ProcessContext,
@@ -326,7 +324,7 @@ export async function coreChainStartDb(
 /**
  * `core-chain`'s `on-db-write` (see the module comment). At block S it records the anchor hash (the block's hash) in
  * the block's transaction, and fails the block when the identity has no row or already holds an anchor. At every other
- * height it does nothing. [IN-2, CD-1]
+ * height it does nothing.
  */
 export async function coreChainDbWrite(p: ProcessContext, b: BlockContext, w: BlockWriteHandle): Promise<void> {
   const { facts } = boundTo(p, "on-db-write");
@@ -343,7 +341,7 @@ export async function coreChainDbWrite(p: ProcessContext, b: BlockContext, w: Bl
 /**
  * `core-chain` (see the module comment): a backbone part that requires nothing. It provides the `process` items
  * `config`, `node-client`, `db` and `ledger-table`, and the `table` item `chain-identity`. Like every backbone part it
- * starts at S, which is a mid-chain start when S is above 0. [Q96]
+ * starts at S, which is a mid-chain start when S is above 0.
  */
 export const CORE_CHAIN = defineModule({
   id: CORE_CHAIN_ID,

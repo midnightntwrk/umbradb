@@ -6,14 +6,13 @@ import { declaration } from "./declarations.js";
 /**
  * Declarations and inputs for the requirement graph's tests:
  * - a test backbone shaped like the real one (`core-chain`, `core-block-fetch`, `core-block-commit`, `core-digest`),
- *   each part able to start mid-chain, since the backbone runs from whatever S a database has [CORE-ARCH §4.11];
+ *   each part able to start mid-chain, since the backbone runs from whatever S a database has;
  * - modules that provide or require named items;
  * - the input `resolveGraph` takes, with S = 1 and a new database (cursor null) unless a test says otherwise.
- * [MD-3, MD-4, MD-5, MD-6, RN-3]
  *
  * Since S = 1 is above 0 (genesis), every part starting at S here starts mid-chain. So the test backbone and the
  * modules of `declaration` declare `startsMidChain: true`, and a test of a module that cannot start mid-chain sets
- * S = 0 or a cursor at or above its start. [MD-4, Q96]
+ * S = 0 or a cursor at or above its start.
  */
 
 /** S in these tests: the first `core` entry's start. */
@@ -91,7 +90,7 @@ export const CORE_DIGEST = declaration("core-digest", {
   ],
 });
 
-/** The test backbone, in the backbone's fixed order. [RN-3] */
+/** The test backbone, in the backbone's fixed order. */
 export const BACKBONE: readonly ModuleDeclaration[] = [CORE_CHAIN, CORE_BLOCK_FETCH, CORE_BLOCK_COMMIT, CORE_DIGEST];
 
 /** A module that provides the `block` items `items` and requires `block-header` (unless `rest` says otherwise). */
@@ -140,7 +139,7 @@ export function graphInput(
 
 /**
  * The test backbone with `id`'s part declaring `startsMidChain: false`; the mid-chain start check applies to backbone
- * parts too. [MD-4, Q96]
+ * parts too.
  */
 export function backboneWithout(id: string): ModuleDeclaration[] {
   return BACKBONE.map((part) => (part.id === id ? { ...part, startsMidChain: false } : part));

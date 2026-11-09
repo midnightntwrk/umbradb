@@ -30,16 +30,16 @@ import {
 /**
  * The committed negative controls of the version selection, runtime metadata and package identity checks: wrong
  * implementations, each of which must make the check the tests run (`version-checks.ts`) fail. The real ones pass the
- * same checks in this file's build. [A94, A96, A97]
+ * same checks in this file's build.
  *
  * - **A selector that ignores pins** (the digest and the rows only) passes a block contradicting a pin, and fails the
- *   pin check, while passing the other two selection checks, which do not depend on pins. [A94]
+ *   pin check, while passing the other two selection checks, which do not depend on pins.
  * - **A metadata cache keyed by the block's own `spec_version` and read at the block's own state** (instead of the
  *   parent's runtime, read at the parent's state) decodes U with the new metadata and stores it under the old
  *   `spec_version`. It fails the synthetic metadata case, and the same check on the recorded devnet upgrade tape
- *   (skipped by name without the tape). [A96]
+ *   (skipped by name without the tape).
  * - **An identity check that skips one package file** (the last line of each manifest) accepts that file changed by one
- *   byte, and fails the package identity check. [A97]
+ *   byte, and fails the package identity check.
  */
 
 /** The assertion error a check fails with; fails the test if the check passes or fails otherwise. */
@@ -53,20 +53,20 @@ async function assertionFailure(check: () => unknown): Promise<Error> {
   throw new Error("the check passed against a wrong implementation");
 }
 
-describe("A94's negative control: a selector that ignores pins", () => {
+describe("negative control: a selector that ignores pins", () => {
   const ignoringPins: Select = (table, block) => {
     const specVersion = mnsvSpecVersion(block);
     return Object.freeze({ specVersion, ledger: ledgerOfSpecVersion(table.rows, block, specVersion) });
   };
 
-  it("passes a block contradicting a pin, and fails A94's pin clause", async () => {
+  it("passes a block contradicting a pin, and fails the pin clause", async () => {
     const block = { height: 1_000n, hash: hashOf(5), digest: [mnsvItem(1_000_000)] };
     expect(ignoringPins(SYNTHETIC_TABLE, block)).toEqual({ specVersion: 1_000_000, ledger: "v8" });
     const failure = await assertionFailure(() => expectPinsChecked(ignoringPins));
     expect(failure.message).toMatch(/expected a halt/);
   });
 
-  it("passes A94's other clauses, which the pins do not decide", () => {
+  it("passes the other clauses, which the pins do not decide", () => {
     expectUnknownRuntimeHalts(ignoringPins);
     expectBadVersionDigestHalts(ignoringPins);
   });
@@ -78,7 +78,7 @@ describe("A94's negative control: a selector that ignores pins", () => {
   });
 });
 
-describe("A96's negative control: a cache keyed by the block's own spec_version, read at its own state", () => {
+describe("negative control: a cache keyed by the block's own spec_version, read at its own state", () => {
   /** The synthetic devnet's node, at each block's state. */
   const node = (): MetadataNode =>
     new CountingNode(
@@ -118,7 +118,7 @@ describe("A96's negative control: a cache keyed by the block's own spec_version,
     return decoded;
   };
 
-  it("decodes U with the new metadata from a cold cache, stores it under the old spec_version, and fails A96", async () => {
+  it("decodes U with the new metadata from a cold cache, stores it under the old spec_version, and fails", async () => {
     const wrong = new OwnStateMetadata(node());
     const decoded = await walk(UPGRADE.u, wrong);
     expect(decoded.get(UPGRADE.u)).toEqual({ specVersion: UPGRADE.old, metadata: METADATA.new });
@@ -127,13 +127,13 @@ describe("A96's negative control: a cache keyed by the block's own spec_version,
     expect(failure.message).toMatch(/block 3 from 3/);
   });
 
-  it("the real cache passes A96's check over the same node in this file's build", async () => {
+  it("the real cache passes the check over the same node in this file's build", async () => {
     await expectUpgradeDecoding(walk, () => new RuntimeMetadata(node()));
   });
 
   tapeTest(
     "devnet-v8-v9-0-235",
-    "on task 0.3's devnet upgrade tape, it decodes U (102) with the new metadata from a cold cache and fails A96 there too; the real cache passes",
+    "on the devnet upgrade tape, it decodes U (102) with the new metadata from a cold cache and fails there too; the real cache passes",
     async (found) => {
       const answers = new TapeAnswers(found.read().records);
       const boundary = (found.tape.notes as { readonly boundaries: readonly Parameters<typeof devnetUpgradeOf>[1][] }).boundaries[0]!;
@@ -164,7 +164,7 @@ describe("A96's negative control: a cache keyed by the block's own spec_version,
   );
 });
 
-describe("A97's negative control: an identity check that skips one package file", () => {
+describe("negative control: an identity check that skips one package file", () => {
   let copy: ReturnType<typeof copyVendoredLedger>;
   beforeAll(() => {
     copy = copyVendoredLedger();
@@ -179,12 +179,12 @@ describe("A97's negative control: an identity check that skips one package file"
     }
   };
 
-  it("accepts the skipped file changed by one byte, and fails A97", { timeout: 120_000 }, async () => {
+  it("accepts the skipped file changed by one byte, and fails", { timeout: 120_000 }, async () => {
     const failure = await assertionFailure(() => expectEveryPackageFileChecked(copy.root, skippingOne));
     expect(failure.message).toMatch(/v8\/pkg\/snippets\/midnight-ledger-wasm-f9e2692d6bfdfbba\/inline9\.js changed by one byte/);
   });
 
-  it("the real check passes A97 in this file's build", { timeout: 120_000 }, () => {
+  it("the real check passes in this file's build", { timeout: 120_000 }, () => {
     expectEveryPackageFileChecked(copy.root, (root) => verifyLedgerPackages({ root }));
   });
 });

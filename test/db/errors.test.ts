@@ -9,7 +9,6 @@ import { TRUNCATE_NOT_ALLOWED_SQLSTATE } from "../../src/deterministic-postgresq
 /**
  * `UmbraError { code, retryable, details }`, keeping 0.9.5's split between retryable and not-retryable errors. A lost
  * connection is the one retryable database error, and an unreachable node the one retryable node error.
- * [DB-13, IN-10; design §4, §12]
  */
 
 describe("UmbraError", () => {
@@ -25,7 +24,7 @@ describe("UmbraError", () => {
     expect(error.cause).toBe(cause);
   });
 
-  it("is retryable for a lost database connection (DB-13) and an unreachable node (IN-10) only", () => {
+  it("is retryable for a lost database connection and an unreachable node only", () => {
     for (const code of ERROR_CODES) {
       expect(new UmbraError(code, "m").retryable, code).toBe(code === "connection-lost" || code === "node-unreachable");
     }
@@ -51,7 +50,7 @@ describe("UmbraError", () => {
   });
 });
 
-describe("the determinism errors are UmbraErrors (design.md §12 exports UmbraError, not their classes)", () => {
+describe("the determinism errors are UmbraErrors (the package exports UmbraError, not their classes)", () => {
   it("gives an encoding failure its reason as its code, not retryable, with where it is", () => {
     let error: unknown;
     try {
@@ -91,7 +90,7 @@ describe("the determinism errors are UmbraErrors (design.md §12 exports UmbraEr
   });
 });
 
-describe("a TRUNCATE the deterministic_postgresql component's trigger refused (DB-14, A73)", () => {
+describe("a TRUNCATE the deterministic_postgresql component's trigger refused", () => {
   // The fields each driver gives a server error: `postgres` 3.4.9 (`schema_name`, `table_name`) and PGlite 0.5.10
   // (`schema`, `table`), with the SQLSTATE the component's trigger raises.
   const message = "TRUNCATE of a.t is refused";

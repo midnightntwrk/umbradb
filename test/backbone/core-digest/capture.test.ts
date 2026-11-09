@@ -21,7 +21,6 @@ import { type Chain, digestRows, runBlock, startChain, testModule } from "./chai
  * - the digests follow the tables as their migrations change them: a column added, a column dropped, a table renamed,
  *   a partition added, a table declared `deterministic: false` later, a trigger disabled by hand, a shared item's
  *   table.
- * [DT-4]
  *
  * Expected digests are computed here with `node:crypto` from CBOR written out by hand (RFC 8949).
  */
@@ -70,7 +69,7 @@ function moduleM(options: {
   });
 }
 
-describe.each(BACKENDS)("change capture across startups, on $name (DT-4)", (backend) => {
+describe.each(BACKENDS)("change capture across startups, on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop());
 
@@ -211,7 +210,7 @@ describe.each(BACKENDS)("change capture across startups, on $name (DT-4)", (back
     const chain = await startChain(db, [module]);
     await runBlock(chain);
     const d1 = (await digestRows(db))["m.t"];
-    // Writes outside any block (so no block's changes) leave shadow rows of their own transaction behind. [DT-4]
+    // Writes outside any block (so no block's changes) leave shadow rows of their own transaction behind.
     await db.transaction(async (tx) => {
       await tx.execute("SET LOCAL ROLE umbradb_m_m");
       await tx.execute("UPDATE m.t SET v = 'b' WHERE k = 1");
@@ -323,7 +322,7 @@ describe.each(BACKENDS)("change capture across startups, on $name (DT-4)", (back
     });
     const chain = await startChain(db, [module]);
     await runBlock(chain);
-    // Ordered by the bytes of the key, column by column: "B" < "a" < "b", and in the second column "B" < "y". [DT-2]
+    // Ordered by the bytes of the key, column by column: "B" < "a" < "b", and in the second column "B" < "y".
     const changes = concatBytes(
       hex("84"),
       ...[
@@ -364,7 +363,7 @@ describe.each(BACKENDS)("change capture across startups, on $name (DT-4)", (back
     60_000,
   );
 
-  it("refuses to capture a table without a primary key: DT-6's check, which refuses it first, runs before", async () => {
+  it("refuses to capture a table without a primary key: the check, which refuses it first, runs before", async () => {
     const { db } = await backend.database("SELECT 1");
     const chain = await startChain(db, [moduleM({ tables: ["t"], migrations: ["CREATE TABLE m.t (k bigint PRIMARY KEY)"] })]);
     await db.transaction(async (tx) => {

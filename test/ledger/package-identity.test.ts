@@ -21,23 +21,22 @@ import { copyVendoredLedger, expectEveryPackageFileChecked, VENDORED_LEDGERS, VE
  * That SHA-256 is the hash of the package's `SHA256SUMS` manifest, which lists every file of the package with its own
  * SHA-256, as `npm run vendor:ledger` records it. Startup refuses with `package-hash-mismatch` when a package's files
  * are not the recorded ones: a file changed by one byte, a file missing, or the manifest itself changed.
- * [A97, LG-5, CF-2; acceptance §12]
  *
  * CI also rebuilds every vendored package from its pinned source and patches and checks it gets the recorded SHA-256:
  * that is `.github/workflows/vendored-ledger.yml` (`npm run vendor:ledger`, which compares each rebuilt file with
- * `SHA256SUMS`). Here, the manifest's SHA-256 is held equal to the recorded identity. [A97]
+ * `SHA256SUMS`). Here, the manifest's SHA-256 is held equal to the recorded identity.
  */
 
 const sha256 = (bytes: Uint8Array): string => `0x${createHash("sha256").update(bytes).digest("hex")}`;
 
-describe("the core version's ledgers (CF-2, LG-5)", () => {
+describe("the core version's ledgers", () => {
   it("lists each ledger version the build carries, in release order: its release, and each package's name, version and SHA-256", () => {
     const upstream = (ledger: string) =>
       JSON.parse(readFileSync(join(VENDORED_ROOT, ledger, "upstream.json"), "utf8")) as {
         versionName: string;
         package: { name: string; version: string };
       };
-    // v9 as runtime 2.0 built it (rc.3) is a package of its own, between v8 and v9 (rc.5). [A159]
+    // v9 as runtime 2.0 built it (rc.3) is a package of its own, between v8 and v9 (rc.5).
     expect(VENDORED_LEDGERS).toEqual(["v8", "v9-rc3", "v9"]);
     const ledgers = VENDORED_LEDGERS.map((ledger) => ({
       ledger,
@@ -77,7 +76,7 @@ describe("the core version's ledgers (CF-2, LG-5)", () => {
   });
 });
 
-describe("A97: startup refuses a vendored package whose files are not the recorded ones (LG-5)", () => {
+describe("startup refuses a vendored package whose files are not the recorded ones", () => {
   let copy: ReturnType<typeof copyVendoredLedger>;
   beforeAll(() => {
     copy = copyVendoredLedger();
@@ -226,7 +225,7 @@ describe("the manifest (`SHA256SUMS`: `<sha256>  pkg/<file>` per line, sorted)",
   });
 });
 
-describe("ledgerSources (LG-5; question Q116)", () => {
+describe("ledgerSources", () => {
   it("refuses startup for a released package: this build carries vendored ones only", () => {
     for (const ledger of VENDORED_LEDGERS) {
       let refusal: unknown;

@@ -26,10 +26,9 @@ import {
  * - The four endpoints answer on the admin listener: a worker thread of its own, answering from the snapshot the runner
  *   publishes, never reading the database.
  * - Every other method and path answers 404, a module's own route among them (it answers on the module API listener
- *   only). [Q70]
+ *   only).
  * - While a callback runs a 10 s synchronous loop on the main thread, and while a block transaction holds the database
  *   for 5 s (on PGlite, its one queue), each endpoint answers within 1 s.
- * [A62, AE-1]
  *
  * **How the time is measured, so that load cannot fake a pass or a failure:** the prober (`prober.mjs`) is a worker
  * thread of the test's own, so neither hold delays it; it requests the four endpoints in turn every 150 ms and times
@@ -47,7 +46,7 @@ import {
  * module's path fails the 404 case.
  */
 
-/** The statuses each endpoint may answer during the holds: live and ready, the process up and processing. [A62] */
+/** The statuses each endpoint may answer during the holds: live and ready, the process up and processing. */
 const DURING: Readonly<Record<string, readonly number[]>> = {
   "/health/live": [200],
   "/health/ready": [200, 503],
@@ -77,7 +76,7 @@ function busy(hold: Hold, ms: number): ModuleDeclaration {
         hold.start = process.hrtime.bigint();
         const until = hold.start + BigInt(ms) * 1_000_000n;
         while (process.hrtime.bigint() < until) {
-          // A callback that blocks the main thread: nothing else of this thread runs meanwhile. [AE-2]
+          // A callback that blocks the main thread: nothing else of this thread runs meanwhile.
         }
         hold.end = process.hrtime.bigint();
       },
@@ -117,11 +116,11 @@ async function probedThroughHold(run: AdminRun) {
   return prober.stop();
 }
 
-describe.each(PROCESS_BACKENDS)("A62: the admin endpoints on $name", (backend) => {
+describe.each(PROCESS_BACKENDS)("the admin endpoints on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("A62: the four endpoints answer on the admin listener; every other method and path, a module's route among them, answers 404", async () => {
+  it("the four endpoints answer on the admin listener; every other method and path, a module's route among them, answers 404", async () => {
     const run = startWithAdmin({
       database: (await backend.database()).setting,
       user: [withRoute([])],
@@ -150,7 +149,7 @@ describe.each(PROCESS_BACKENDS)("A62: the admin endpoints on $name", (backend) =
     await run.handle.stop();
   }, 120_000);
 
-  it("A62: while a callback runs a 10 s synchronous loop on the main thread, each endpoint answers within 1 s", async () => {
+  it("while a callback runs a 10 s synchronous loop on the main thread, each endpoint answers within 1 s", async () => {
     const hold = newHold();
     const run = startWithAdmin({ database: (await backend.database()).setting, user: [busy(hold, 10_000)], head: 1n });
     const records = await probedThroughHold(run);
@@ -159,7 +158,7 @@ describe.each(PROCESS_BACKENDS)("A62: the admin endpoints on $name", (backend) =
     await run.handle.stop();
   }, 120_000);
 
-  it("A62: while a block transaction holds the database for 5 s (on PGlite its one queue), each endpoint answers within 1 s", async () => {
+  it("while a block transaction holds the database for 5 s (on PGlite its one queue), each endpoint answers within 1 s", async () => {
     const hold = newHold();
     const db = await backend.database();
     let reached!: () => void;
@@ -194,7 +193,7 @@ describe.each(PROCESS_BACKENDS)("A62: the admin endpoints on $name", (backend) =
     await run.handle.stop();
   }, 120_000);
 
-  it("negative control: an admin server on the main thread fails A62's synchronous-loop case", async () => {
+  it("negative control: an admin server on the main thread fails the synchronous-loop case", async () => {
     const hold = newHold();
     const run = startWithAdmin({
       database: (await backend.database()).setting,
@@ -210,7 +209,7 @@ describe.each(PROCESS_BACKENDS)("A62: the admin endpoints on $name", (backend) =
   }, 120_000);
 
   it.runIf(backend.kind === "pglite")(
-    "negative control: an admin server that reads the database fails A62's held-queue case",
+    "negative control: an admin server that reads the database fails the held-queue case",
     async () => {
       const hold = newHold();
       const db = await backend.database();
@@ -233,12 +232,12 @@ describe.each(PROCESS_BACKENDS)("A62: the admin endpoints on $name", (backend) =
     120_000,
   );
 
-  it("negative control: a route table that serves a module's path fails A62's 404 case", async () => {
+  it("negative control: a route table that serves a module's path fails the 404 case", async () => {
     const leaking: AdminPart = {
       id: "m",
       endpoints: [{ path: "/m/rows", answer: () => ({ status: 200, body: { height: null } }) }],
     };
-    // The guard refuses it: only backbone parts provide admin endpoints. [Q70]
+    // The guard refuses it: only backbone parts provide admin endpoints.
     expect(() => adminRoutes([...ADMIN_PARTS, leaking])).toThrow(/m is not a backbone part/);
     // A route table built past the guard serves it, and the oracle sees it.
     const routes = new Map([...adminRoutes(ADMIN_PARTS), ["/m/rows", leaking.endpoints[0] as AdminPart["endpoints"][number]]]);

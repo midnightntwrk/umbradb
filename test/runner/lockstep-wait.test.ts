@@ -21,7 +21,7 @@ import {
  * block transaction, before its `BEGIN`. Every read has ended, so no transaction is open
  * (`pg_stat_activity`; PGlite's one engine) and a read of the database is served meanwhile (PGlite's one queue is
  * free). The loop commits h when the wait resolves true, and ends with its signal, h not committed, when it resolves
- * false (a stop while it waits). [PP-6, RN-6, RN-13, A117; design §2, §8]
+ * false (a stop while it waits).
  *
  * Committed negative control: a loop that opens its block transaction before it waits fails the oracle.
  */
@@ -75,7 +75,7 @@ interface AtGate {
 }
 
 /** The oracle of the wait at the gate: every problem, none when it waits after on-compute, before BEGIN, holding
- *  nothing. [A117] */
+ *  nothing. */
 export function gateProblems(at: AtGate): string[] {
   const problems: string[] = [];
   const h = at.height;
@@ -103,7 +103,7 @@ class WaitsInTransaction extends FinalizedLoop {
   }
 }
 
-describe.each(RUNNER_BACKENDS)("the loop's lockstep wait on $name (PP-6, A117)", (backend) => {
+describe.each(RUNNER_BACKENDS)("the loop's lockstep wait on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
@@ -137,13 +137,13 @@ describe.each(RUNNER_BACKENDS)("the loop's lockstep wait on $name (PP-6, A117)",
     return { at, heights: await heightsIn(opened.db, "probe.rows"), end };
   }
 
-  it("A117: waits for lockstep after on-compute and before BEGIN, holding no transaction and no queue, then commits", async () => {
+  it("waits for lockstep after on-compute and before BEGIN, holding no transaction and no queue, then commits", async () => {
     const { at, heights } = await throughGate();
     expect(at.flatMap(gateProblems)).toEqual([]);
     expect(heights).toEqual([1n, 2n, 3n]);
   }, 120_000);
 
-  it("A117 negative control (committed): a loop that opens its transaction before waiting fails the oracle", async () => {
+  it("negative control (committed): a loop that opens its transaction before waiting fails the oracle", async () => {
     const { at } = await throughGate(WaitsInTransaction);
     const problems = at.flatMap(gateProblems);
     expect(problems).toContain("1 transaction(s) open while the loop waited for lockstep at 1");
@@ -151,7 +151,7 @@ describe.each(RUNNER_BACKENDS)("the loop's lockstep wait on $name (PP-6, A117)",
     if (backend.name.startsWith("PGlite")) expect(problems).toContain("a read of the database waited while the loop waited for lockstep at 1");
   }, 120_000);
 
-  it("a stop while it waits ends the loop with its signal, the height not committed (RN-13: no transaction was open)", async () => {
+  it("a stop while it waits ends the loop with its signal, the height not committed (no transaction was open)", async () => {
     const opened = await backend.database();
     const seen: string[] = [];
     const started = await startWith(opened.db, [probe(seen)], [entry("probe", 1)]);

@@ -1,12 +1,11 @@
 /**
- * The identity of the ledger packages this build carries, checked before any of them is imported. [LG-5, A97, A173;
- * design §5.2]
+ * The identity of the ledger packages this build carries, checked before any of them is imported.
  *
  * The core version (`../config/build.ts`) identifies a package by its name, its version and its SHA-256. The SHA-256
  * is that of the package's manifest, `vendor/ledger/<version>/SHA256SUMS`: one line `<sha256>  pkg/<file>` per file
  * of the package, sorted, as `npm run vendor:ledger` writes it (`vendor/ledger/lib.sh`). So it commits to every file's
  * name and content, and a rebuild that matches the manifest has the recorded identity. The recorded values are
- * `./releases.ts`' constants, which the browser build reads too. [CF-2]
+ * `./releases.ts`' constants, which the browser build reads too.
  *
  * {@link verifyLedgerPackages} fails with `package-hash-mismatch` (not retryable) when, for a version the build
  * carries:
@@ -18,10 +17,10 @@
  * So a package file changed by one byte stops startup, naming the version and the file. Files the manifest does not
  * list are not part of the package and are not read. Each version's manifest drives the check: a package rebuilt with
  * other patches is recorded by rewriting its manifest and the one constant in `./releases.ts` that a test keeps equal
- * to the manifest's SHA-256. [LG-5, Q113; design §11]
+ * to the manifest's SHA-256.
  *
  * `ledgerSources` chooses each version's source. This build carries vendored packages only, so a version whose source
- * is `released` stops startup with `invalid-configuration`, naming the setting (`./sources.ts`). [CF-4, Q116]
+ * is `released` stops startup with `invalid-configuration`, naming the setting (`./sources.ts`).
  *
  * **Where it runs.** A thread checks a version's package before it imports it, and hashes a version's files once:
  * {@link checkLedgerPackages} and {@link checkLedgerPackage} remember, per thread, each directory and version whose
@@ -35,7 +34,7 @@
  * In a process whose graph loads ledger packages, a file is therefore hashed by the main thread once, at startup, and
  * by the worker once, before the first block of its version (again by a worker started anew), never per block or
  * request. The three packages are 35 MB: 15 to 20 ms of the main thread's startup on an idle Apple M4 Max (up to 40 ms
- * on a loaded one), and 4 to 7 ms of the worker's first block of a version. [A173, LG-14]
+ * on a loaded one), and 4 to 7 ms of the worker's first block of a version.
  *
  * Node.js only (`node:fs`, `node:crypto`). The browser build bundles `browser/src/ledger/identity.ts` in this module's
  * place, which rejects the same `ledgerSources` and reads no file: `browser/build.ts` checks every package file it

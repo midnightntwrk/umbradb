@@ -2,12 +2,11 @@
  * The durability probe, moved from 0.9.5's `src/postgres/durability-probe.ts` with its behaviour unchanged. On
  * PostgreSQL, startup is refused for `fsync=off`, for a transaction pooler, and for `full_page_writes=off` unless the
  * operator set `fullPageWritesOffAllowed`. `synchronous_commit=off` is a warning, not a refusal.
- * [DB-12, CF-4; design §4]
  *
  * What changed from 0.9.5:
  * - each refusal is an {@link UmbraError} with its own code (`durability-fsync-off`, `durability-full-page-writes-off`,
- *   `durability-pooler`) instead of 0.9.5's two error classes [design §11];
- * - the override is the configuration's `fullPageWritesOffAllowed` [CF-4];
+ *   `durability-pooler`) instead of 0.9.5's two error classes;
+ * - the override is the configuration's `fullPageWritesOffAllowed`;
  * - the probe runs on the writer's session when the writer starts, right after the writer lock (`./writer-lock.ts`,
  *   `./postgres.ts`) and before the first write, instead of inside 0.9.5's `runMigrations` (whose file is gone).
  *
@@ -28,11 +27,11 @@ export interface ProbeSession {
   query(sql: string, params?: unknown[]): Promise<Row[]>;
 }
 
-/** What the probe needs of the configuration. [CF-4] */
+/** What the probe needs of the configuration. */
 export interface DurabilityProbeOptions {
   /**
    * Permit `full_page_writes=off` (the configuration's `fullPageWritesOffAllowed`, default false). Only when the
-   * storage guarantees atomic 8 kB page writes, so that no page can be torn by a crash. [CF-4]
+   * storage guarantees atomic 8 kB page writes, so that no page can be torn by a crash.
    */
   readonly fullPageWritesOffAllowed: boolean;
 }
@@ -188,7 +187,7 @@ export async function probeDurability(session: ProbeSession, options: Durability
 
 /**
  * The refusal of PGlite without the development opt-in: PGlite runs without fsync, so it is a development backend.
- * Names PGlite and the opt-in, never the data directory, because the `database` setting is secret. [DB-12, CF-9, CF-4]
+ * Names PGlite and the opt-in, never the data directory, because the `database` setting is secret.
  */
 export function pgliteNeedsDevelopmentOptIn(): UmbraError {
   return new UmbraError(

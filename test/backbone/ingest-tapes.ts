@@ -29,7 +29,7 @@ import type { Decoded } from "./ingest-checks.js";
  * - then 20.
  *
  * The notification of 20 goes out only once 14–16 were asked, so a source that does not read the head again never gets
- * it. [A79]
+ * it.
  */
 export function a79Tape(chain: readonly ChainBlock[]): TapeRecord[] {
   const at = (height: number): ChainBlock => chain[height] as ChainBlock;
@@ -63,7 +63,7 @@ export function a79Tape(chain: readonly ChainBlock[]): TapeRecord[] {
  * (pallet 1) reads as the timestamp only with the old metadata.
  *
  * The tape answers the parent's-state reads the source makes, and also the own-state reads a wrong source would make,
- * so that a control fails exactly at U. [A89]
+ * so that a control fails exactly at U.
  */
 export function upgradeTape(): { records: TapeRecord[]; upgrade: ChainBlock[]; expected: Decoded[] } {
   const OLD: Runtime = { specVersion: 1_000_000, metadata: metadataOf(MAINNET_PALLETS) };

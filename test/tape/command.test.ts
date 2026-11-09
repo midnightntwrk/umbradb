@@ -1,6 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   type RecordAndReplayResult,
@@ -9,18 +10,19 @@ import {
   type TapeCommandIo,
   tapeId,
 } from "../../tools/tape/index.js";
-import { REPOSITORY } from "../node/in8.js";
 import { until } from "../node/manual-timers.js";
 import { RawClient } from "./raw-client.js";
 import { type Script, ScriptedNode } from "./scripted-node.js";
 import { spawnChild } from "../child-processes.js";
+
+const REPOSITORY = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 /**
  * The tape tools' command (`tools/tape/main.ts`, its logic in `tools/tape/command.ts`):
  * - `record` starts the recording builder in front of a node until it is told to stop (Ctrl-C), then writes the tape
  *   and prints its SHA-256. This is how the owner records the real tapes.
  * - `check` is the manual half of the record-and-replay check: the node client's tour of every node call, recorded
- *   through the builder and replayed through the tape node, every frame compared [A71, IN-8].
+ *   through the builder and replayed through the tape node, every frame compared.
  *
  * Run here against the scripted node, in this process and once as a process of its own (Ctrl-C as SIGINT).
  */

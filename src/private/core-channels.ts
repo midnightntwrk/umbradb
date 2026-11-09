@@ -2,7 +2,7 @@
  * The channel carrier of the core's side of the process transport: the link over the channels a library host hands
  * the public process (`UmbraDBHandle.privateLink.accept`), each one a session of `./core-transport.ts` once the link
  * has started, over UmbraDB's end of the channel (`ChannelEndpoint`, `src/library/channels.ts`: the envelope, the
- * pings, the size of a message). [LM-6, PP-4; design §5.4]
+ * pings, the size of a message).
  *
  * **Before the link starts** (it starts after the migrations and the read of the configuration hash, as a socket link
  * does), each channel accepted waits in a queue of at most {@link CHANNEL_QUEUE_MAX}; one beyond is closed 1013
@@ -12,16 +12,16 @@
  * `hello` closes it 1008 `hello-first`, an invalid `hello` closes it as on a socket (its fault: the instance id rule, a
  * message's schema, its `v` and `type`), and a second message closes it 1008 `hello-pending`; the valid `hello` is held.
  * When the link starts, each queued channel, in the order it was accepted, becomes a session, its held `hello` its
- * first message. [LM-6, L38]
+ * first message.
  *
  * **Once the link has started**, a channel accepted is a session at once, with the link's {@link MAX_MESSAGE_BYTES}.
  *
  * **Not accepting.** Once the link stops accepting — at a refusal of startup, at `stop()`, and once it closed — every
  * queued channel is closed `private-link-not-accepting`, and so is every channel accepted after; a line is logged, and
- * nothing is thrown. Its close ends every open session as a socket link's does (1001). [LM-6, N9, L38, L39]
+ * nothing is thrown. Its close ends every open session as a socket link's does (1001).
  *
  * A session the channel's end ends (its peer's `close`, the carrier's end, UmbraDB's own close or terminate) frees its
- * instance id at once, whatever the carrier does after. [LM-6, L42]
+ * instance id at once, whatever the carrier does after.
  */
 
 import {
@@ -46,31 +46,31 @@ import {
 } from "./core-transport.js";
 import type { Hello } from "./messages.js";
 
-/** The most channels that wait for the link to start. [LM-6, L38] */
+/** The most channels that wait for the link to start. */
 export const CHANNEL_QUEUE_MAX = 64;
 
-/** The largest message of a queued channel, its `hello`, in UTF-8 bytes. [LM-6, L38] */
+/** The largest message of a queued channel, its `hello`, in UTF-8 bytes. */
 export const MAX_HELLO_BYTES = 64 * 1024;
 
 /** The close code of a channel beyond the queue: try again later. */
 export const CLOSE_TRY_AGAIN = 1013;
 
-/** The close reason of a channel the link does not accept. [N9] */
+/** The close reason of a channel the link does not accept. */
 export const NOT_ACCEPTING = "private-link-not-accepting";
 
 /** The negative controls' and the tests' changes of the channel link only; none unless given. */
 export interface CoreChannelSeams {
-  /** The endpoints' clock (the liveness tests' controlled one). [L34, L38] */
+  /** The endpoints' clock (the liveness tests' controlled one). */
   readonly timers?: LinkTimers;
-  /** How a message envelope's value is read (a control without the link's schemas). [L66] */
+  /** How a message envelope's value is read (a control without the link's schemas). */
   readonly message?: (value: unknown) => Received;
-  /** The sessions' handling of a second `hello` of a connected id (a control's `"accept"`). [L66] */
+  /** The sessions' handling of a second `hello` of a connected id (a control's `"accept"`). */
   readonly duplicates?: CoreSessionOptions["duplicates"];
-  /** The sessions' read path (a control's `"unconfined"`). [L66] */
+  /** The sessions' read path (a control's `"unconfined"`). */
   readonly reads?: CoreSessionOptions["reads"];
   /** The link's limits (the largest message, the ping's interval). */
   readonly limits?: Partial<TransportLimits>;
-  /** The most channels that wait for the link to start; {@link CHANNEL_QUEUE_MAX} unless given (a control's). [L38] */
+  /** The most channels that wait for the link to start; {@link CHANNEL_QUEUE_MAX} unless given (a control's). */
   readonly queueMax?: number;
 }
 
@@ -92,7 +92,6 @@ interface Queued {
 
 /**
  * Closes `channel`, which the process does not accept (`private-link-not-accepting`), and logs why; never throws.
- * [N9, L39]
  */
 export function refuseChannel(channel: PrivateLinkChannel, log: (line: string) => void, why: string): void {
   // The endpoint catches whatever the carrier throws: a carrier that throws is ended as far as this process goes.
@@ -100,7 +99,7 @@ export function refuseChannel(channel: PrivateLinkChannel, log: (line: string) =
   log(`private link: a channel was closed (${NOT_ACCEPTING}): ${why}`);
 }
 
-/** The core's link over channels (see the module comment). [LM-6] */
+/** The core's link over channels (see the module comment). */
 export class CoreChannels implements CoreLink {
   readonly #options: CoreChannelsOptions;
   readonly #limits: TransportLimits;
@@ -116,7 +115,7 @@ export class CoreChannels implements CoreLink {
     this.#limits = { ...TRANSPORT_LIMITS, ...options.limits };
   }
 
-  /** Takes `channel` (see the module comment); never throws. [LM-6, N9] */
+  /** Takes `channel` (see the module comment); never throws. */
   accept(channel: PrivateLinkChannel): void {
     if (this.#state === "closed") {
       refuseChannel(channel, this.#options.log, this.#why);
@@ -139,7 +138,7 @@ export class CoreChannels implements CoreLink {
     this.#queue.push(queued);
   }
 
-  /** Starts the link with the sessions' `options`: every queued channel becomes a session, in order. [LM-6, L38] */
+  /** Starts the link with the sessions' `options`: every queued channel becomes a session, in order. */
   start(options: Omit<CoreSessionOptions, "duplicates" | "reads" | "limits">): void {
     if (this.#state !== "queueing") return;
     const seams = this.#options;
@@ -156,7 +155,7 @@ export class CoreChannels implements CoreLink {
     }
   }
 
-  /** Accepts no more channels (`why`, in the line logged for each): the queued ones are closed. [LM-6, L38, L39] */
+  /** Accepts no more channels (`why`, in the line logged for each): the queued ones are closed. */
   stopAccepting(why: string): void {
     if (this.#state === "closed") return;
     this.#state = "closed";
@@ -209,7 +208,7 @@ export class CoreChannels implements CoreLink {
         else queued.hello = received.message;
       },
       oversized: close,
-      // A queued channel sends only the envelope's pings and pongs: one too slow for them is closed so. [LM-6, L35]
+      // A queued channel sends only the envelope's pings and pongs: one too slow for them is closed so.
       backlogged: close,
       unanswered: () => {
         this.#options.log("private link: closed a queued channel: no-pong");

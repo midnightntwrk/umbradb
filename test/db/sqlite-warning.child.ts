@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { acquirePgliteLock, PGLITE_LOCK_SUFFIX, quietImport, SQLITE_WARNING_HOOK } from "../../src/db/pglite-lock.js";
 
 /**
- * A fresh process for L3's real import of `node:sqlite` (its warning is emitted once per process, at the first import),
+ * A fresh process for the real import of `node:sqlite` (its warning is emitted once per process, at the first import),
  * run by `./sqlite-warning.test.ts` through `../library/quiet-child.ts`. Its job names a mode:
  * - `"locks-ab"`, `"locks-ba"`: two PGlite directories' locks acquired at once — their shared import of `node:sqlite`
  *   — awaited in that order;
@@ -18,7 +18,7 @@ import { acquirePgliteLock, PGLITE_LOCK_SUFFIX, quietImport, SQLITE_WARNING_HOOK
  *
  * It writes to its result file the warnings a `warning` listener saw, whether `process.emitWarning` is the one it
  * had before (or, `"replaced"`, the host's replacement), and each acquisition's outcome in the order they finished; the
- * parent reads the child's stderr whole. [L3, G2]
+ * parent reads the child's stderr whole.
  */
 
 const job = JSON.parse(process.argv[2] as string) as { readonly mode: string; readonly resultFile: string };

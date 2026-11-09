@@ -2,12 +2,10 @@
  * The private link's channels: a carrier a host program gives UmbraDB for one connection of the private link, in
  * place of a socket — a `MessagePort`, a TEE's own transport. A host hands a public process each channel a private
  * process opened (`UmbraDBHandle.privateLink.accept`); a private process asks its host for one on each connection.
- * [LM-6; design §5.4]
  *
  * **The host's obligations.** A channel delivers whole messages in order, without loss or duplication, until it ends;
  * messages sent before UmbraDB registers its listener are kept by the carrier for it (UmbraDB registers in the same
  * turn it is given the channel); a carrier without {@link PrivateLinkChannel.bufferedAmount} bounds its own queue.
- * [LM-6]
  *
  * **The envelope.** Over a channel, every message of the link (`src/private/messages.ts`) travels in an envelope, a
  * JSON object of its own, beside the envelope's control messages, so that what a WebSocket says in its frames survives
@@ -25,7 +23,7 @@
  * is no JSON is `not-json`; a message that fails its own schema is the message's fault, as on a socket. The close codes
  * are the WebSocket ones the link uses: 1008 for a fault of the protocol (`report-hash-mismatch`, which halts a lockstep
  * instance, `too-slow`, `hello-first`, …), 1009 `too-large`, 1011 `report-unchecked` (connect again), 1013 `try-again`,
- * 1001 at a stop. [LM-6, PP-4, PP-6]
+ * 1001 at a stop.
  *
  * **An endpoint** ({@link ChannelEndpoint}) is UmbraDB's end of one channel, on either side of the link:
  * - it registers its listeners when it is made, and disposes of them when the channel ends;
@@ -42,7 +40,7 @@
  *   included), `close`, `terminate`, the disposers — is read inside its own guard: one that throws has ended the
  *   carrier (1006, nothing more sent), never an exception out of a send, the interval or a listener;
  * - its own close or terminate sends the peer a `close` envelope and ends the channel at once — its listeners disposed,
- *   its owner told —, whatever the carrier's own close does. [LM-6, L42]
+ *   its owner told —, whatever the carrier's own close does.
  */
 
 import { CLOSE_PROTOCOL, MAX_BUFFERED_BYTES, MAX_MESSAGE_BYTES, PING_INTERVAL_MS, type Received } from "../private/core-transport.js";
@@ -50,7 +48,7 @@ import { messageOfValue } from "../private/messages.js";
 import { parseJsonLossless } from "../deterministic-postgresql/index.js";
 import { unrefTimer } from "../private/timers.js";
 
-/** One channel of the private link (see the module comment). [LM-6] */
+/** One channel of the private link (see the module comment). */
 export interface PrivateLinkChannel {
   /** Sends one message, in order, with no loss and no duplication until the channel ends. */
   send(message: string): void;
@@ -67,7 +65,7 @@ export interface PrivateLinkChannel {
 }
 
 /**
- * A `MessagePort` as {@link messagePortChannel} uses it: a browser's, or a Node.js `worker_threads` one. [LM-6]
+ * A `MessagePort` as {@link messagePortChannel} uses it: a browser's, or a Node.js `worker_threads` one.
  */
 export interface MessagePortLike {
   postMessage(message: string): void;
@@ -85,7 +83,7 @@ export interface MessagePortLike {
  * `onClose` its `close` event, which a Node.js port fires on both ends and a browser's may never. The port's queue
  * keeps what arrives before the listener: the port starts once a message listener is registered. It has no
  * `bufferedAmount`: a port tells none. An event whose data cannot be read (a getter or a proxy's trap that throws) is
- * a message that is no text, never an exception thrown into the port's dispatch. [LM-6, LM-2]
+ * a message that is no text, never an exception thrown into the port's dispatch.
  */
 export function messagePortChannel(port: MessagePortLike): PrivateLinkChannel {
   return Object.freeze({
@@ -129,7 +127,7 @@ const MESSAGE_PREFIX = `{"link":${ENVELOPE_VERSION},"kind":"message","message":`
 /** The bytes a message's envelope adds to its text: a limit on a message is checked with them added. */
 export const ENVELOPE_BYTES = MESSAGE_PREFIX.length + 1;
 
-/** The WebSocket close code of a message too large for its limit. [LM-6] */
+/** The WebSocket close code of a message too large for its limit. */
 export const CLOSE_TOO_LARGE = 1009;
 
 /** The envelope of a message of the link, whose text is `text` (`messageText`). */
@@ -195,7 +193,7 @@ export function readEnvelope(text: string, message: (value: unknown) => Received
 
 /**
  * Whether `text` is more than `limit` bytes in UTF-8, counted without encoding it: a UTF-16 code unit is 1 to 3 bytes,
- * a surrogate pair 4, a lone surrogate 3 (its replacement character). [LM-6]
+ * a surrogate pair 4, a lone surrogate 3 (its replacement character).
  */
 export function exceedsUtf8(text: string, limit: number): boolean {
   if (text.length > limit) return true;
@@ -217,7 +215,7 @@ export function exceedsUtf8(text: string, limit: number): boolean {
   return false;
 }
 
-/** How an endpoint keeps its interval: every `ms`, `tick`, until the returned function is called. [LM-6] */
+/** How an endpoint keeps its interval: every `ms`, `tick`, until the returned function is called. */
 export interface LinkTimers {
   every(ms: number, tick: () => void): () => void;
 }
@@ -239,7 +237,7 @@ export interface EndpointEvents {
   oversized(code: number, reason: string): void;
   /**
    * More than the limit waits undelivered at a send: the endpoint ends the channel with `code` (1008) and `reason`
-   * (`too-slow`) once the owner was told, whatever the owner does. [LM-6, L35]
+   * (`too-slow`) once the owner was told, whatever the owner does.
    */
   backlogged(code: number, reason: string): void;
   /** The peer did not answer the last ping by the next interval: the owner ends the channel (`no-pong`). */
@@ -265,7 +263,7 @@ export interface EndpointOptions {
 /** The close code of a carrier that ended without UmbraDB's or its peer's `close` (a WebSocket's abnormal closure). */
 export const CLOSE_ABNORMAL = 1006;
 
-/** UmbraDB's end of one channel (see the module comment). [LM-6] */
+/** UmbraDB's end of one channel (see the module comment). */
 export class ChannelEndpoint {
   readonly #channel: PrivateLinkChannel;
   #events: EndpointEvents;
@@ -291,7 +289,7 @@ export class ChannelEndpoint {
     this.#maxBufferedBytes = options.maxBufferedBytes ?? MAX_BUFFERED_BYTES;
     this.#message = options.message ?? messageOfValue;
     // Registered at once: the carrier keeps what arrived before for this listener. A carrier whose registration
-    // throws has ended; its owner is told once it holds the endpoint. [LM-6]
+    // throws has ended; its owner is told once it holds the endpoint.
     try {
       this.#dispose.push(channel.onMessage((message) => this.#incoming(message)));
       this.#dispose.push(channel.onClose(() => this.#end(CLOSE_ABNORMAL, "")));
@@ -332,7 +330,7 @@ export class ChannelEndpoint {
   /**
    * The bytes the channel has not delivered, when it tells them; null otherwise. Reading them is the carrier's, getter
    * and call alike: one that throws has ended the carrier, as a `send` that throws — the channel ends (1006, its
-   * listeners and interval disposed, its owner told) and null is answered. [LM-6, L35, LM-10]
+   * listeners and interval disposed, its owner told) and null is answered.
    */
   bufferedAmount(): number | null {
     let found: unknown;
@@ -347,14 +345,14 @@ export class ChannelEndpoint {
     return typeof found === "number" && Number.isFinite(found) ? found : null;
   }
 
-  /** Ends the channel with `code` and `reason`: the peer is told, then the carrier closed. [LM-6, L42] */
+  /** Ends the channel with `code` and `reason`: the peer is told, then the carrier closed. */
   close(code: number, reason: string): void {
     if (this.#ended) return;
     this.#post(controlEnvelope({ kind: "close", code, reason }), "unchecked");
     this.#end(code, reason, () => this.#channel.close());
   }
 
-  /** Ends the channel at once with `code` and `reason`: the peer is told, then the carrier ended. [LM-6, L42] */
+  /** Ends the channel at once with `code` and `reason`: the peer is told, then the carrier ended. */
   terminate(code: number, reason: string): void {
     if (this.#ended) return;
     this.#post(controlEnvelope({ kind: "close", code, reason }), "unchecked");
@@ -407,14 +405,14 @@ export class ChannelEndpoint {
   /**
    * Posts `text` on the channel; a carrier whose `send` throws has ended. Every send but the `close` that ends the
    * channel (`unchecked`) is checked first: with more than the limit waiting the owner is told, and the channel ended
-   * `too-slow` (see the module comment). [LM-6, L35]
+   * `too-slow` (see the module comment).
    */
   #post(text: string, check: "checked" | "unchecked" = "checked"): void {
     if (this.#ended) return;
     if (check === "checked") {
       if (this.#backlogged) return;
       const held = this.bufferedAmount();
-      // A carrier whose amount could not be read has ended: nothing is sent on it. [LM-6]
+      // A carrier whose amount could not be read has ended: nothing is sent on it.
       if (this.#ended) return;
       if (held !== null && held > this.#maxBufferedBytes) {
         this.#backlogged = true;
@@ -430,7 +428,7 @@ export class ChannelEndpoint {
     }
   }
 
-  /** Ends the channel once: its listeners and its interval disposed, `end` run, the owner told. [LM-6, L42] */
+  /** Ends the channel once: its listeners and its interval disposed, `end` run, the owner told. */
   #end(code: number, reason: string, end?: () => void): void {
     if (this.#ended) return;
     this.#ended = true;

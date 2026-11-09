@@ -12,7 +12,6 @@ import { describe, expect, it } from "vitest";
  * (`src/postgres/*`, `src/interfaces/*` (OUTDATED)) must never import or reference the Midnight
  * wallet SDK at runtime -- the adapter (`test/integration/pg-tx-history-adapter.ts` (OUTDATED)) is
  * the one place SDK types appear, and it lives outside `src/` entirely.
- * [sprint-8-wallet-envelope-live-sync design §2, §3.3]
  *
  * **Why the whole file.** The OLD guard filtered the source down to lines matching `/^\s*import\b/`
  * before checking each one for `@midnightntwrk` -- a per-LINE, keyword-anchored filter that only
@@ -25,7 +24,7 @@ import { describe, expect, it } from "vitest";
  * substring -- this catches `import`, `export ... from`, dynamic `import(...)`, and any other
  * specifier form alike, with no keyword-anchored blind spot.
  */
-describe("no wallet-SDK runtime import anywhere under src/ (design.md §2/§3.3)", () => {
+describe("no wallet-SDK runtime import anywhere under src/", () => {
   it("no .ts file under src/ references @midnightntwrk/* anywhere in its source (whole-file check, not just import-prefixed lines)", () => {
     const srcDir = fileURLToPath(new URL("../../src", import.meta.url));
     const relPaths = readdirSync(srcDir, { recursive: true }) as string[];

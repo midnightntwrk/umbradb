@@ -7,17 +7,17 @@
  * (`id = 1`):
  * - the private cursor: the public block the private process last committed (`height`, `hash` and `parent_hash`), null
  *   before its first block. The runner's cursor needs the parent hash, and so does delivering the block at the cursor
- *   again after a restart. [RN-11, Q124]
+ *   again after a restart.
  * - the binding: the public database's genesis hash and S (`public_genesis_hash`, `public_start_height`).
  * It is a module table of the private plan like any other: the determinism check covers it, its `CHECK`s and change
- * capture are added, `core-digest` digests it and the contents hash reads it. [DT-6, Q75; design §10]
+ * capture are added, `core-digest` digests it and the contents hash reads it.
  *
  * `core_private_source.accepted_config` (one row, `id = 1`: `config_hash`, 32 bytes) holds the public configuration
  * hash the private process last accepted, left out of change capture, the digests and the contents hash (see
- * `./core-private-source.ts`). [PP-14, Q159]
+ * `./core-private-source.ts`).
  *
  * Earlier builds created the two tables with two migrations, `001` and `002`: a database they wrote recorded another
- * `001`, so startup refuses it before any migration runs (`migration-checksum-changed`). [DB-9, R16]
+ * `001`, so startup refuses it before any migration runs (`migration-checksum-changed`).
  */
 
 import { publicItemRanges } from "../../config/history.js";
@@ -29,7 +29,7 @@ import type { PublicIdentity } from "./public-database.js";
 
 /**
  * `core-private-source`'s migrations: its one, `001`, which creates the private cursor's table and the accepted hash's.
- * Applied once and never changed; a later version adds its own after it. [DB-9, PP-14, R16]
+ * Applied once and never changed; a later version adds its own after it.
  */
 export const CORE_PRIVATE_SOURCE_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
   {
@@ -63,7 +63,7 @@ const ACCEPT_SQL =
   "INSERT INTO core_private_source.accepted_config (id, config_hash) VALUES (1, $1) " +
   "ON CONFLICT (id) DO UPDATE SET config_hash = EXCLUDED.config_hash";
 
-// The public database's tables, which a private process only reads (`./public-database.ts`). [PP-1, PP-13]
+// The public database's tables, which a private process only reads (`./public-database.ts`).
 const CONFIG_PRESENT_SQL = "SELECT to_regclass('core_chain.config') IS NOT NULL AS present";
 const ITEMS_SQL = "SELECT entry_id, start, stop, provides FROM core_chain.config";
 const BLOCKS_PRESENT_SQL = `SELECT to_regclass('${BLOCKS_TABLE}') IS NOT NULL AS present`;
@@ -105,19 +105,19 @@ export async function readPrivateRow(
 /**
  * The binding a private database records: its public database's genesis hash and S, read through `read`. Null before
  * its first start recorded them, and before the table exists. A restore of a private process's backup compares it with
- * its public database's identity before the commit. [PP-2, BK-3, Q153]
+ * its public database's identity before the commit.
  */
 export async function readPrivateBinding(read: Pick<ReadHandle, "query">): Promise<PublicIdentity | null> {
   return (await readPrivateRow(read)).binding;
 }
 
-/** A private database's committed height: the private cursor's height. [DB-2] */
+/** A private database's committed height: the private cursor's height. */
 export const privateCursorHeight = async (read: Pick<ReadHandle, "query">): Promise<bigint | null> =>
   (await readPrivateCursor(read))?.height ?? null;
 
 /**
  * The public configuration hash a private database accepted, as `0x` hex, read through `read`. Null before its first
- * start recorded one, and before its table exists (before the part's migration ran). [PP-14, Q159]
+ * start recorded one, and before its table exists (before the part's migration ran).
  */
 export async function readAcceptedConfigHash(read: Pick<ReadHandle, "query">): Promise<string | null> {
   const [table] = await read.query(ACCEPTED_PRESENT_SQL);
@@ -160,7 +160,7 @@ async function present(read: Pick<ReadHandle, "query">, sql: string): Promise<bo
 /**
  * The public core's `table` items with their heights. Every row of its `core_chain.config` is a revision of one of its
  * entries, with the `table` items it provides (`provides`); `publicItemRanges` turns them into items, each from its
- * revision's start to the revision's last height. Empty before the table exists. [PP-13, CF-5; design §8]
+ * revision's start to the revision's last height. Empty before the table exists.
  */
 export async function readPublicItems(read: Pick<ReadHandle, "query">): Promise<PublicItem[]> {
   if (!(await present(read, CONFIG_PRESENT_SQL))) return [];

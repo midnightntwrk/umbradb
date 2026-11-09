@@ -6,9 +6,9 @@ import { type PostgresTestServer, startPostgresServer } from "./postgres-server.
 
 /**
  * The PostgreSQL backend has one writer connection for transactions, and a pool of read-only connections that see
- * committed data only. [DB-5]
+ * committed data only.
  *
- * A reader polling while a block transaction is open never sees a row of that block before its COMMIT. [A12]
+ * A reader polling while a block transaction is open never sees a row of that block before its COMMIT.
  */
 
 let server: PostgresTestServer;
@@ -29,7 +29,7 @@ const apiBackends = async (admin: Sql): Promise<number[]> =>
     )
   ).map((row) => row.pid as number);
 
-describe("A12 (DB-5) — a reader never sees a block's rows before its COMMIT", () => {
+describe("a reader never sees a block's rows before its COMMIT", () => {
   it("sees none of block h's rows, and the height h − 1, while the transaction for h is open", async () => {
     const database = await server.createDatabase();
     await database.exec(`${TEST_SCHEMA} CREATE TABLE t.items (height bigint, n integer, PRIMARY KEY (height, n));`);
@@ -133,7 +133,7 @@ describe("A12 (DB-5) — a reader never sees a block's rows before its COMMIT", 
   }, 60_000);
 });
 
-describe("the database's parts (CF-4's `database`, owner decision Q167 A)", () => {
+describe("the database's parts (the `database`)", () => {
   // The parts carry no URL, so no URL query parameter can override a session setting: only the backend's own
   // `connection` option sets a startup parameter.
   it("refuses a read pool size that is not a positive integer", () => {

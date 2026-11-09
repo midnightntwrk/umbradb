@@ -15,7 +15,7 @@ import { isBackbonePart, type PointArguments, type PointRun } from "../../src/ru
  * What the runner's dispatch tests share: a recorder of callbacks starting and ending (its event list is the logical
  * clock, an event's index its time), callbacks that record themselves, one process context per module, and stand-in
  * arguments for every point. So a test runs the dispatch with no database and no block source; the real handles,
- * block context and item sink are tested with the loop. [RN-3; design §2]
+ * block context and item sink are tested with the loop.
  */
 
 /** A callback of `module` at `point` starting or ending. */
@@ -104,7 +104,7 @@ export const WRITE: BlockWriteHandle = Object.freeze({ height: 0n, query: async 
 const HEADER: BlockHeader = Object.freeze({ height: 2n, hash: HASH, parentHash: HASH });
 const API: ApiRegistry = Object.freeze({ http: () => undefined, subscription: () => undefined });
 
-/** Stand-in arguments of every point, after the process context (`PointCallbacks`). [CORE-ARCH §4.10] */
+/** Stand-in arguments of every point, after the process context (`PointCallbacks`). */
 export const ARGUMENTS: { readonly [P in PointName]: PointArguments<P> } = Object.freeze({
   "on-start-db": [WRITE],
   "on-start-api": [API],
@@ -124,7 +124,7 @@ export const ARGUMENTS: { readonly [P in PointName]: PointArguments<P> } = Objec
  * One process context per module, made on first use and the same object afterwards. A backbone part's context has one
  * revision, the `core` entry's from `start` (S: 1, the loop harness's default start, unless given), as the runner gives
  * every backbone part the `core` entry's revisions; `core-block-commit`'s parent check reads S there. A module's has
- * none. [MD-7, IN-4]
+ * none.
  */
 export class Contexts {
   readonly #byId = new Map<string, ProcessContext>();

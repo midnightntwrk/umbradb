@@ -15,7 +15,7 @@ import { launchPublicCore } from "./builds.js";
 import { endedWithin, hello, rawClient } from "./raw-client.js";
 
 /**
- * The process transport's faults and limits. [PP-4, PP-5, PP-6, PP-7, IN-10]
+ * The process transport's faults and limits.
  *
  * On the core's side:
  * - what closes a connection: too many reads at once, a reader too slow, a peer that does not answer pings, a frame
@@ -38,7 +38,7 @@ import { endedWithin, hello, rawClient } from "./raw-client.js";
 
 const quiet = () => undefined;
 
-/** The stand-in cores' configuration hash, and another, as a core restarted with a changed one. [RN-16, PP-4] */
+/** The stand-in cores' configuration hash, and another, as a core restarted with a changed one. */
 const CONFIG = `0x${"c1".repeat(32)}`;
 const CHANGED = `0x${"c2".repeat(32)}`;
 
@@ -103,7 +103,7 @@ async function greeted(url: string, instance: string, options: Parameters<typeof
 }
 
 describe("the core's side: limits and faults", () => {
-  it("its hello-ack, committed and read-result carry the core's configuration hash, configHash (PP-4, RN-16, Q147)", async () => {
+  it("its hello-ack, committed and read-result carry the core's configuration hash, configHash", async () => {
     const { transport, url } = await core(blocksDb(9n));
     opened.push(transport);
     const client = rawClient(url);
@@ -173,7 +173,7 @@ describe("the core's side: limits and faults", () => {
     client.close();
   });
 
-  it("a read with a statement that is not one read is refused before any runs, each reason logged (A172)", async () => {
+  it("a read with a statement that is not one read is refused before any runs, each reason logged", async () => {
     const ran: string[] = [];
     const { transport, url, lines } = await core(
       fakeDb(async (sql) => {
@@ -213,7 +213,7 @@ describe("the core's side: limits and faults", () => {
     client.close();
   });
 
-  it("each read is bounded by the process's apiReadTimeoutMs, as a module API request's is (DB-15)", async () => {
+  it("each read is bounded by the process's apiReadTimeoutMs, as a module API request's is", async () => {
     const seen: unknown[] = [];
     const db = {
       read: async <T>(body: (read: ReadHandle) => Promise<T>, options?: unknown) => {
@@ -240,7 +240,7 @@ describe("the core's side: limits and faults", () => {
     await until(() => transport.instances().length === 0, "the first id freed with its connection");
   });
 
-  it("a reader that leaves more than the limit waiting in its socket is dropped (too-slow, PP-5)", async () => {
+  it("a reader that leaves more than the limit waiting in its socket is dropped (too-slow)", async () => {
     const columns = [{ name: "t", type: 25 }];
     const { transport, url, lines } = await core(fakeDb(async () => rowsOf(columns, [{ t: "y".repeat(4 * 1024 * 1024) }])), {
       limits: { maxBufferedBytes: 1_024 },
@@ -327,7 +327,7 @@ describe("the core's side: limits and faults", () => {
  * The oracle of the report check against the transport at `url` whose bookkeeping is `lockstep` (listing `good`, `bad`
  * and `ahead`, each saying `hello` at 8; the public cursor 9, blocks 1–9): every problem. There is none when a report
  * with the public block's hash counts, and one with another hash, or at a height with no public block, closes its
- * connection (1008, `report-hash-mismatch`) and leaves the instance held, refused, at its earlier height. [PP-6]
+ * connection (1008, `report-hash-mismatch`) and leaves the instance held, refused, at its earlier height.
  */
 export async function reportProblems(url: string, lockstep: Lockstep): Promise<string[]> {
   const problems: string[] = [];
@@ -361,8 +361,8 @@ export async function reportProblems(url: string, lockstep: Lockstep): Promise<s
   return problems;
 }
 
-describe("the core's side: lockstep (task 14.3; PP-6, PP-7)", () => {
-  it("a listed instance whose hello is below the public cursor − 1 is refused lockstep-behind, kept connected and held (PP-7)", async () => {
+describe("the core's side: lockstep", () => {
+  it("a listed instance whose hello is below the public cursor − 1 is refused lockstep-behind, kept connected and held", async () => {
     const lockstep = new Lockstep({ listed: ["late", "ontime"] });
     const { transport, url, lines } = await core(blocksDb(9n), { lockstepInstances: ["late", "ontime"], lockstep });
     opened.push(transport);
@@ -388,7 +388,7 @@ describe("the core's side: lockstep (task 14.3; PP-6, PP-7)", () => {
       { instance: "late", connected: true, height: 7n, refused: "lockstep-behind" },
       { instance: "ontime", connected: true, height: 8n, refused: null },
     ]);
-    // The transport's own view keeps the refused instance at its hello too. [PP-9]
+    // The transport's own view keeps the refused instance at its hello too.
     expect(transport.instances().find((one) => one.instance === "late")).toEqual({ instance: "late", lockstep: true, height: 7n, hash: null });
     expect(lines).toContain("transport: instance late connected at 7; refused lockstep-behind: below the public cursor 9 − 1");
     for (const client of [late.client, ontime.client, free.client]) client.close();
@@ -406,7 +406,7 @@ describe("the core's side: lockstep (task 14.3; PP-6, PP-7)", () => {
     client.close();
   });
 
-  it("a report with the public block's hash counts; another hash, or no public block there, closes report-hash-mismatch (PP-6)", async () => {
+  it("a report with the public block's hash counts; another hash, or no public block there, closes report-hash-mismatch", async () => {
     const lockstep = new Lockstep({ listed: ["good", "bad", "ahead"] });
     const { transport, url, lines } = await core(blocksDb(9n), { lockstepInstances: lockstep.listed, lockstep });
     opened.push(transport);
@@ -589,12 +589,12 @@ describe("a private process's side against a stand-in core", () => {
     ["a text that is no JSON", (socket: WebSocket) => socket.send("nope"), "not-json"],
     ["a message only a private process sends", (socket: WebSocket) => socket.send(messageText(hello("x"))), "wrong-direction hello"],
     [
-      "an api message (no such type: Q140)",
+      "an api message (no such type)",
       (socket: WebSocket) => socket.send('{"v":1,"type":"api","id":"q","module":"m","method":"x","params":null}'),
       "unknown-type",
     ],
     [
-      "an api-result message (no such type: Q140)",
+      "an api-result message (no such type)",
       (socket: WebSocket) => socket.send('{"v":1,"type":"api-result","id":"z","result":null}'),
       "unknown-type",
     ],
@@ -754,7 +754,7 @@ describe("a private process's side against a stand-in core", () => {
     try {
       expect(transport.lockstep).toBe(false);
       expect(await transport.connection()).toMatchObject({ lockstep: true, refused: "lockstep-behind" });
-      // Refused lockstep-behind, it stays connected: the core keeps waiting for it, and it halts by its own check. [PP-7]
+      // Refused lockstep-behind, it stays connected: the core keeps waiting for it, and it halts by its own check.
       expect([transport.state, transport.lockstep, core.connections()]).toEqual(["connected", true, 1]);
       expect(lines).toContain(`transport: connected to the core at ${core.address}; refused lockstep-behind: this instance is behind the public cursor`);
       // The same ack while connected.
@@ -835,7 +835,7 @@ describe("a private process's side against a stand-in core", () => {
     ["a read-result", "read-result"],
     ["the hello-ack of a connection made again (the core restarted)", "hello-ack"],
   ] as const)(
-    "%s with another configHash than the first hello-ack's refuses it for good with public-config-changed (PP-14, Q147)",
+    "%s with another configHash than the first hello-ack's refuses it for good with public-config-changed",
     async (_name, carrier) => {
       const core = await standIn((socket, message, connection) => {
         if (message.type === "hello") {
@@ -916,7 +916,7 @@ describe("a private process's side against a stand-in core", () => {
     }
   });
 
-  it("negative control: a transport that ignores configHash keeps going after the core's hash changed (fails PP-14)", async () => {
+  it("negative control: a transport that ignores configHash keeps going after the core's hash changed (fails)", async () => {
     const core = await standIn((socket, message, connection) => {
       if (message.type === "hello") socket.send(messageText({ ...ACK, configHash: connection === 1 ? CONFIG : CHANGED } as Message));
     });

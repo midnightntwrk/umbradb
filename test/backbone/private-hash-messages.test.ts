@@ -7,13 +7,13 @@ import { publicConfigChanged } from "../../src/private/private-transport.js";
  * - `startHashDecision`'s two forms: with and without a given hash that is not the one found, and with and without
  *   one recorded;
  * - its reasons;
- * - `publicConfigChanged`'s two ways of learning the new hash, with and without one. [PP-14, Q159]
+ * - `publicConfigChanged`'s two ways of learning the new hash, with and without one.
  */
 
 const h = (byte: string): string => `0x${byte.repeat(32)}`;
 const [A, B, C] = [h("aa"), h("bb"), h("cc")];
 
-describe("PP-14's stop messages (task 17.5b)", () => {
+describe("stop messages", () => {
   it("names both hashes found that differ, the hash to accept, the one it replaces and a hash given otherwise", () => {
     const moved = startHashDecision({ recorded: A, history: B, core: C, given: B });
     expect(moved.reason).toBe("refused");

@@ -13,28 +13,28 @@ import { PrivateTransport } from "../../src/private/private-transport.js";
 
 /**
  * The private link over channels between library processes `[CI]`, on PostgreSQL 18 (Docker) and PGlite 0.5.10
- * [LM-6, PP-4, PP-6, CF-4]:
- * - **L33**: a public process with `publicSide: { channels: true }` and a private one with `privateSide: { connect }`,
+ *:
+ * - A public process with `publicSide: { channels: true }` and a private one with `privateSide: { connect }`,
  *   over real `MessageChannel`s (`node:worker_threads`, through `messagePortChannel`): the private process follows with
  *   a PGlite public database (the core's own, read through the link) or none (PostgreSQL: read through the link), in
  *   lockstep when listed (the core waits at S, cursor null, until the instance connects).
- * - **L20** (PostgreSQL): the link's reads over channels run on the reader login — `current_user` in a read is
+ * - (PostgreSQL): the link's reads over channels run on the reader login — `current_user` in a read is
  *   `core.transportReader`'s.
- * - **L34** `[FAULT][NEG]`: on a controlled clock, a peer that stops answering pings is ended `no-pong` at the second
+ * - `[FAULT][NEG]`: on a controlled clock, a peer that stops answering pings is ended `no-pong` at the second
  *   interval, not before its first ping is outstanding; its instance id is free: a reconnect with it is answered
  *   `hello-ack` with `refused: null`. The committed negative control is the same run with the endpoints' interval never
  *   falling due (no liveness): the dead peer stays connected, its id held (the reconnect refused `duplicate-instance`),
  *   and the oracle fails.
- * - **L35** `[NEG]`: a channel whose `bufferedAmount` is above `MAX_BUFFERED_BYTES` is closed 1008 `too-slow` at the
+ * - `[NEG]`: a channel whose `bufferedAmount` is above `MAX_BUFFERED_BYTES` is closed 1008 `too-slow` at the
  *   core's next send; at the limit it is not. Negative control: the check's limit raised beyond any amount (the link's
  *   limit seam, channels only): the oracle fails.
- * - **L36** `[NEG]`: a message above `MAX_MESSAGE_BYTES` (UTF-8 bytes, beside the envelope's own) closes the channel
+ * - `[NEG]`: a message above `MAX_MESSAGE_BYTES` (UTF-8 bytes, beside the envelope's own) closes the channel
  *   1009 `too-large`. Negative control: the channel link's limit doubled: the message is read, and the oracle fails.
- * - **L37**: `report-hash-mismatch` over a channel (a test-owned relay rewrites the instance's report) halts the private
+ * - `report-hash-mismatch` over a channel (a test-owned relay rewrites the instance's report) halts the private
  *   process; `report-unchecked` (PostgreSQL: the reader login loses its read of the public tables) makes it connect
  *   again over a new channel, which `connect()` opens; the same at the link itself, on any backend (the core's link
  *   over channels and a private transport over `connect`, the core's read of the report failing).
- * - **L42**: UmbraDB's own close of a channel frees its instance id at once, when the carrier never tells a close.
+ * - UmbraDB's own close of a channel frees its instance id at once, when the carrier never tells a close.
  */
 
 /** How long a process may take to follow on a loaded machine. */
@@ -59,11 +59,11 @@ async function greeted(core: Logged, instance: string, options: TestEndOptions =
   return peer;
 }
 
-describe.each(PRIVATE_BACKENDS)("the private link over channels between library processes on $name (LM-6)", (backend: PrivateBackend) => {
+describe.each(PRIVATE_BACKENDS)("the private link over channels between library processes on $name", (backend: PrivateBackend) => {
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 
-  it("L33: publicSide { channels } and privateSide { connect } over MessageChannels: the private process follows in lockstep, reading through the core", async () => {
+  it("publicSide { channels } and privateSide { connect } over MessageChannels: the private process follows in lockstep, reading through the core", async () => {
     const publicDb = await backend.database("public");
     const privateDb = await backend.database("private");
     const core = channelCore(publicDb, { head: 4n, extra: { lockstepInstances: ["ch-lockstep"] } });
@@ -93,7 +93,7 @@ describe.each(PRIVATE_BACKENDS)("the private link over channels between library 
     }
   }, FOLLOWS_MS * 2);
 
-  it("L37: report-hash-mismatch over a channel halts the private process; the core logs the mismatch and holds the instance", async () => {
+  it("report-hash-mismatch over a channel halts the private process; the core logs the mismatch and holds the instance", async () => {
     const publicDb = await backend.database("public");
     const privateDb = await backend.database("private");
     const core = channelCore(publicDb, { head: 3n, extra: { lockstepInstances: ["ch-mismatch"] } });
@@ -119,7 +119,7 @@ describe.each(PRIVATE_BACKENDS)("the private link over channels between library 
     }
   }, FOLLOWS_MS * 2);
 
-  it("L42: UmbraDB's own close frees the instance id at once, on a carrier that never tells a close", async () => {
+  it("UmbraDB's own close frees the instance id at once, on a carrier that never tells a close", async () => {
     const publicDb = await backend.database("public");
     const core = channelCore(publicDb, { head: 2n });
     try {
@@ -139,7 +139,7 @@ describe.each(PRIVATE_BACKENDS)("the private link over channels between library 
   }, 120_000);
 });
 
-/** One L34 run on `db`: a peer that stops answering pings, on the endpoints' clock `clock`. */
+/** One run on `db`: a peer that stops answering pings, on the endpoints' clock `clock`. */
 async function livenessRun(db: TestDatabase, clock: { readonly timers: LinkTimers; advance(ms: number): void }) {
   const core = channelCore(db, { head: 2n, seams: { timers: clock.timers } });
   try {
@@ -158,7 +158,7 @@ async function livenessRun(db: TestDatabase, clock: { readonly timers: LinkTimer
     await tick(PING_INTERVAL_MS);
     const atSecond = { pings: peer.pings, end: peer.end };
     // A reconnect with the same id: its hello-ack, whose `refused` is null only when the id was freed (a connected id
-    // is refused duplicate-instance, L66).
+    // is refused duplicate-instance).
     const [coreEnd, peerEnd] = channelPair();
     core.handle.privateLink.accept(coreEnd);
     const second = rawPeer(peerEnd);
@@ -172,7 +172,7 @@ async function livenessRun(db: TestDatabase, clock: { readonly timers: LinkTimer
   }
 }
 
-/** The L34 oracle: every problem of `run`, none when it holds. */
+/** The oracle: every problem of `run`, none when it holds. */
 function livenessProblems(run: Awaited<ReturnType<typeof livenessRun>>): string[] {
   const problems: string[] = [];
   if (run.beforeFirst.pings !== 0 || run.beforeFirst.end !== null) problems.push(`before the first interval: ${JSON.stringify(run.beforeFirst)}`);
@@ -190,15 +190,15 @@ function livenessProblems(run: Awaited<ReturnType<typeof livenessRun>>): string[
 /** A clock whose intervals never fall due: the endpoints never ping (the negative control's fault). */
 const STOPPED_CLOCK = { timers: { every: () => () => undefined } satisfies LinkTimers, advance: () => undefined };
 
-describe.each(PRIVATE_BACKENDS)("the channel link's own rules on $name (LM-6)", (backend: PrivateBackend) => {
+describe.each(PRIVATE_BACKENDS)("the channel link's own rules on $name", (backend: PrivateBackend) => {
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 
-  it("L34: on a controlled clock, a peer that stops answering pings is ended no-pong at the second interval; its id is free; a reconnect is answered", async () => {
+  it("on a controlled clock, a peer that stops answering pings is ended no-pong at the second interval; its id is free; a reconnect is answered", async () => {
     expect(livenessProblems(await livenessRun(await backend.database("public"), controlledTimers()))).toEqual([]);
   }, 120_000);
 
-  it("L34 negative control (committed): with no interval falling due (no liveness), the dead peer stays, and the oracle fails", async () => {
+  it("negative control (committed): with no interval falling due (no liveness), the dead peer stays, and the oracle fails", async () => {
     const problems = livenessProblems(await livenessRun(await backend.database("public"), STOPPED_CLOCK));
     expect(problems.some((problem) => problem.startsWith("at the first interval it was not pinged"))).toBe(true);
     expect(problems.some((problem) => problem.startsWith("at the second interval it was not ended no-pong"))).toBe(true);
@@ -206,7 +206,7 @@ describe.each(PRIVATE_BACKENDS)("the channel link's own rules on $name (LM-6)", 
     expect(problems).toContain("a reconnect with its id was refused duplicate-instance");
   }, 120_000);
 
-  it("L35: a bufferedAmount above MAX_BUFFERED_BYTES closes the channel too-slow at the core's next send; at the limit it does not", async () => {
+  it("a bufferedAmount above MAX_BUFFERED_BYTES closes the channel too-slow at the core's next send; at the limit it does not", async () => {
     const core = channelCore(await backend.database("public"), { head: 2n });
     try {
       await core.handle.started;
@@ -228,7 +228,7 @@ describe.each(PRIVATE_BACKENDS)("the channel link's own rules on $name (LM-6)", 
     }
   }, 120_000);
 
-  it("L35 negative control (committed): the channel link's too-slow limit raised beyond any amount: the slow channel stays, and the oracle fails", async () => {
+  it("negative control (committed): the channel link's too-slow limit raised beyond any amount: the slow channel stays, and the oracle fails", async () => {
     const core = channelCore(await backend.database("public"), { head: 2n, seams: { limits: { maxBufferedBytes: Number.MAX_SAFE_INTEGER } } });
     try {
       await core.handle.started;
@@ -265,7 +265,7 @@ describe.each(PRIVATE_BACKENDS)("the channel link's own rules on $name (LM-6)", 
       core.handle.privateLink.accept(unreadable);
       const peer = rawPeer(peerEnd);
       peer.send(peerHello("unreadable-amount"));
-      // The carrier failed at the core's first send, its hello-ack: no close envelope, the carrier closed. [LM-6, LM-10]
+      // The carrier failed at the core's first send, its hello-ack: no close envelope, the carrier closed.
       expect(await peer.ended).toEqual({ carrier: true });
       expect([peer.received, coreEnd.closes, coreEnd.listeners]).toEqual([[], 1, { message: 0, close: 0 }]);
       // Its instance id is free: a reconnect with it is answered, refused by nothing.
@@ -281,7 +281,7 @@ describe.each(PRIVATE_BACKENDS)("the channel link's own rules on $name (LM-6)", 
     }
   }, 120_000);
 
-  it("L36: a message above MAX_MESSAGE_BYTES in UTF-8 bytes closes the channel too-large (1009)", async () => {
+  it("a message above MAX_MESSAGE_BYTES in UTF-8 bytes closes the channel too-large (1009)", async () => {
     const core = channelCore(await backend.database("public"), { head: 2n });
     try {
       await core.handle.started;
@@ -298,7 +298,7 @@ describe.each(PRIVATE_BACKENDS)("the channel link's own rules on $name (LM-6)", 
     }
   }, 120_000);
 
-  it("L36 negative control (committed): the channel link's limit doubled: the message is read, and the oracle fails", async () => {
+  it("negative control (committed): the channel link's limit doubled: the message is read, and the oracle fails", async () => {
     const core = channelCore(await backend.database("public"), { head: 2n, seams: { limits: { maxMessageBytes: 2 * MAX_MESSAGE_BYTES } } });
     try {
       await core.handle.started;
@@ -321,12 +321,12 @@ describe.each(PRIVATE_BACKENDS)("the channel link's own rules on $name (LM-6)", 
 const POSTGRES = PRIVATE_BACKENDS.find((backend) => backend.kind === "postgres");
 if (POSTGRES === undefined) throw new Error("no PostgreSQL backend");
 
-describe("the channel link's reads on the reader login, on PostgreSQL 18 (LM-3, LM-6, CF-4)", () => {
+describe("the channel link's reads on the reader login, on PostgreSQL 18", () => {
   const backend = POSTGRES;
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 
-  it("L20: over channels with transportReader, the link's reads run on the reader login: current_user in a read is it", async () => {
+  it("over channels with transportReader, the link's reads run on the reader login: current_user in a read is it", async () => {
     const db = await backend.database("public");
     const core = channelCore(db, { head: 3n });
     try {
@@ -344,7 +344,7 @@ describe("the channel link's reads on the reader login, on PostgreSQL 18 (LM-3, 
     }
   }, 120_000);
 
-  it("L37: report-unchecked (the reader login cannot read the public blocks) makes the private process connect again over a new channel", async () => {
+  it("report-unchecked (the reader login cannot read the public blocks) makes the private process connect again over a new channel", async () => {
     const publicDb = await backend.database("public");
     const privateDb = await backend.database("private");
     const core = channelCore(publicDb, { head: 3n, extra: { lockstepInstances: ["ch-unchecked"] } });
@@ -377,7 +377,7 @@ describe("the channel link's reads on the reader login, on PostgreSQL 18 (LM-3, 
   }, FOLLOWS_MS * 2);
 });
 
-describe("L37 at the link: report-unchecked over a channel makes the private transport connect again (LM-6, PP-6)", () => {
+describe("at the link: report-unchecked over a channel makes the private transport connect again", () => {
   it("the core's check of a report fails: the channel closes 1011 report-unchecked, and connect() opens a new channel", async () => {
     const lines: string[] = [];
     const core = new CoreChannels({ log: (line) => lines.push(line) });

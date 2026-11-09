@@ -8,17 +8,17 @@ import { channelCore } from "./channel-processes.js";
 import { libraryData } from "./library-fixtures.js";
 
 /**
- * L39's run and oracle, shared by `./channel-queue.test.ts` (the criterion) and
+ * The run and oracle, shared by `./channel-queue.test.ts` (the criterion) and
  * `./channel-queue.negative-control.test.ts` (its control, the not-accepting paths keeping the channel): `accept()` on
  * a process not accepting channels — one with no channel request, and a channel core after `stop()` — closes the
  * channel 1008 `private-link-not-accepting`, logs a line naming why, and throws nothing, a carrier that throws at every
- * call included. Imports nothing of Vitest. [L39, LM-6, N9]
+ * call included. Imports nothing of Vitest.
  */
 
 /** How long a refused channel may take to be told its close. */
 const REFUSED_WITHIN_MS = 2_000;
 
-/** The close L39 names. */
+/** The close the check expects. */
 const NOT_ACCEPTING = { code: 1008, reason: "private-link-not-accepting" };
 
 /** A carrier that throws at every call. */
@@ -38,8 +38,8 @@ const THROWING: PrivateLinkChannel = {
 };
 
 /**
- * L39's oracle over `accept` on a process not accepting channels, whose log is `lines` and which must name `why`: the
- * problems of one channel given to it and of a carrier that throws, none when it held. [L39]
+ * The oracle over `accept` on a process not accepting channels, whose log is `lines` and which must name `why`: the
+ * problems of one channel given to it and of a carrier that throws, none when it held.
  */
 export async function refusedChannelProblems(
   accept: (channel: PrivateLinkChannel) => void,
@@ -71,9 +71,9 @@ export async function refusedChannelProblems(
 }
 
 /**
- * L39's run on `backend`: the oracle on a process with no channel request (startUmbraDB as a host starts it, running),
+ * The run on `backend`: the oracle on a process with no channel request (startUmbraDB as a host starts it, running),
  * then on a channel core after its `stop()` (its open session closed 1001 by the stop, as a socket link's). The
- * problems, each prefixed with its case; none when L39 holds.
+ * problems, each prefixed with its case; none when the rule holds.
  */
 export async function l39Problems(backend: PrivateBackend): Promise<string[]> {
   const problems: string[] = [];

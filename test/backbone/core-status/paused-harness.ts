@@ -19,9 +19,9 @@ import type { DatabaseParts } from "../../../src/config/database-parts.js";
 /**
  * `/status`, read over HTTP from a running process's admin endpoints, lists the condition `paused` while the finalized
  * loop is paused, and none once it runs again. The condition carries `since`, the time the loop paused as RFC 3339 UTC
- * text, and `by`. [A176, AE-3, Q174 B, Q68]
+ * text, and `by`.
  *
- * `/health/ready` answers as an unpaused process with the same lag would. [AE-4]
+ * `/health/ready` answers as an unpaused process with the same lag would.
  *
  * Shared by `paused.test.ts` and its negative control's file; imports nothing of Vitest.
  *
@@ -29,7 +29,6 @@ import type { DatabaseParts } from "../../../src/config/database-parts.js";
  * modules `ticker` and `recorder`, whose hooks act from inside a height), plus a module `keeper` that keeps the core's
  * `db` item. It runs on the in-memory chain with every block known at once, its admin endpoints on `127.0.0.1:0`
  * through a starter a negative control may wrap, with `readinessLag` 5 and `followingThreshold` 3 (the default).
- * [A163, CF-4]
  *
  * **The run of `pause()`** ({@link pauseRun}, PostgreSQL 18.6 and PGlite 0.5.10), each phase entered once the process
  * itself shows its precondition, then `/status` read until it shows the phase's body or the patience ran out:
@@ -50,7 +49,7 @@ import type { DatabaseParts } from "../../../src/config/database-parts.js";
  * no condition, and none when the loop ran on to 15.
  *
  * Every `/status` body read is checked against `./status.schema.json`. The problems found are returned as text, one
- * per phase and check; a passing run has none. [A66]
+ * per phase and check; a passing run has none.
  */
 
 const STATUS_SCHEMA = validatorOf(schemaFile(new URL("./status.schema.json", import.meta.url)));
@@ -291,7 +290,7 @@ class Reader {
   }
 }
 
-/** Readiness of a running process: ready unless the lag exceeds the readiness lag. [AE-4] */
+/** Readiness of a running process: ready unless the lag exceeds the readiness lag. */
 function readinessProblems({ body, readyStatus }: Read): string[] {
   const expected = body.lag !== null && BigInt(body.lag) <= READINESS_LAG;
   const problems: string[] = [];
@@ -302,7 +301,7 @@ function readinessProblems({ body, readyStatus }: Read): string[] {
   return problems;
 }
 
-/** The checks of a body that shows a pause. [A176] */
+/** The checks of a body that shows a pause. */
 function pausedProblems(expectation: PausedExpectation): (read: Read) => string[] {
   return (read) => {
     const { body } = read;
@@ -322,7 +321,7 @@ function pausedProblems(expectation: PausedExpectation): (read: Read) => string[
   };
 }
 
-/** The checks of a body of a running loop: no condition, `state`, and readiness by the lag. [A176, AE-4] */
+/** The checks of a body of a running loop: no condition, `state`, and readiness by the lag. */
 function runningProblems(state: string): (read: Read) => string[] {
   return (read) => {
     const problems: string[] = [];

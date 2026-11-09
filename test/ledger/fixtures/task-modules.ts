@@ -1,7 +1,7 @@
 // The test modules of the ledger task tests. Their ledger tasks run in the ledger worker, which imports this file as
 // the host program's entry does (`modules`, the configuration file's export, or `./task-worker-entry.ts`), and their
 // callbacks on the main thread record what they get in the `seen` a test gives. Each declaration is made by a function
-// so both threads hold the very same tasks. [A137, LG-7, LG-17]
+// so both threads hold the very same tasks.
 // Erasable TypeScript only: the worker runs it through Node.js's type stripping.
 
 import { z } from "zod";
@@ -190,7 +190,7 @@ export function trappingModule(): ModuleDeclaration {
   return { ...base("task-traps", ["block-parsed"], ["trapped-result"], true), ledgerTasks: [TRAPPING_TASK], points: {} };
 }
 
-/** A user module reading `block-parsed` at `on-compute`: what three modules besides the task's read. [A137] */
+/** A user module reading `block-parsed` at `on-compute`: what three modules besides the task's read. */
 export function readerModule(id: string, seen?: TaskSeen): ModuleDeclaration {
   return {
     ...base(id, ["block-parsed"], [], true),

@@ -9,9 +9,9 @@ import { type CliProject, cliProject, inProcess } from "./cli-fixtures.js";
 import { chainNode, HEAD, runCoreSettings, statsConfig, statsModule } from "./run-fixtures.js";
 
 /**
- * A stop of `umbradb run` by SIGTERM or SIGINT is in its log (issue 00072), on PostgreSQL 18 and PGlite 0.5.10: the
+ * A stop of `umbradb run` by SIGTERM or SIGINT is in its log, on PostgreSQL 18 and PGlite 0.5.10: the
  * command in this process (`runProcessCommand`) with the test's own signal source, the real admin worker, a tape node
- * serving the synthetic chain of `./run-fixtures.ts` (S = 1, head 5). [RN-13, LM-2]
+ * serving the synthetic chain of `./run-fixtures.ts` (S = 1, head 5).
  *
  * Two lines, the engine's, so a host's `log` gets them as the command's standard error does:
  * - when the stop begins, what asked for it (the signal, by its name) and what was in progress: a height, which then
@@ -21,7 +21,7 @@ import { chainNode, HEAD, runCoreSettings, statsConfig, statsModule } from "./ru
  *   lost can leave it one height above what the process saw).
  *
  * The cases: SIGTERM at the head; SIGINT while height 3 waits in a module's `on-db-write`; SIGTERM during startup,
- * while it retries an unreachable node. [RN-13]
+ * while it retries an unreachable node.
  */
 
 /** How long a process may take to reach the head, and to end after its signal, on a loaded machine. */
@@ -98,7 +98,7 @@ async function statsRows(db: ProcessDatabase): Promise<string[]> {
   return rows.map((row) => `${row.h} ${row.label}`);
 }
 
-describe.each(PROCESS_BACKENDS)("issue 00072: umbradb run logs its stop by a signal (RN-13), on $name", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("umbradb run logs its stop by a signal, on $name", (backend: ProcessBackend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 

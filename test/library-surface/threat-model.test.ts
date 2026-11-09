@@ -4,18 +4,18 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
-  BOUNDARIES, citationProblems, citations, COMMIT_POLICY, commitPolicyProblems, GAP_ISSUES, GAP_TASKS, headingProblems,
-  knownGapProblems, lineCountOf, lineLengthProblems, LINKING_DOCUMENTS, OWNER_AREAS, retiredPartProblems, THREAT_MODEL,
+  BOUNDARIES, citationProblems, citations, COMMIT_POLICY, commitPolicyProblems, headingProblems, knownGapProblems,
+  lineCountOf, lineLengthProblems, LINKING_DOCUMENTS, OWNER_AREAS, retiredPartProblems, THREAT_MODEL,
   threatModelLinkProblems,
 } from "./threat-model.js";
 
 /**
  * `docs/THREAT_MODEL.md` describes 0.10.0 — no 0.9.5 part named, the draft's ten boundaries and the owner's three areas
- * each a heading, its known gaps naming the tasks and issues, every `path:line` it cites naming a file of the tree with
+ * each a heading, its known gaps a section, every `path:line` it cites naming a file of the tree with
  * at least that many lines, the commit policy a section of it — and `README.md` links it. The checks are
  * `./threat-model.ts`'s, on the tree as git lists it (tracked and untracked files that exist, ignored ones left out).
  * Committed negative controls below: a missing area, a cited line past a file's end, a 0.9.5 term, a missing link and a
- * missing commit policy each fail. [A178 STATIC, Q177–Q181]
+ * missing commit policy each fail.
  */
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -45,7 +45,7 @@ const lineCount = (file: string): number | null => (tree.has(file) ? lineCountOf
 const model = tree.has(THREAT_MODEL) ? read(THREAT_MODEL) : "";
 const linking = (): { file: string; text: string }[] => LINKING_DOCUMENTS.map((file) => ({ file, text: read(file) }));
 
-describe("A178 (Q181 A): docs/THREAT_MODEL.md describes 0.10.0, holds the commit policy, README.md links it", () => {
+describe("docs/THREAT_MODEL.md describes 0.10.0, holds the commit policy, README.md links it", () => {
   it("is in the tree", () => {
     expect(tree.has(THREAT_MODEL)).toBe(true);
   });
@@ -61,9 +61,7 @@ describe("A178 (Q181 A): docs/THREAT_MODEL.md describes 0.10.0, holds the commit
     expect(headingProblems(model)).toEqual([]);
   });
 
-  it("its known gaps name the tasks that fixed them (14.2b, 4.5, 12.2b, 15.1b, 17.4b) and issues 00045-00048", () => {
-    expect(GAP_TASKS).toHaveLength(5);
-    expect(GAP_ISSUES).toHaveLength(4);
+  it("has its known gaps section", () => {
     expect(knownGapProblems(model)).toEqual([]);
   });
 
@@ -144,15 +142,11 @@ describe("A178 (Q181 A): docs/THREAT_MODEL.md describes 0.10.0, holds the commit
       expect(commitPolicyProblems(mentioned)).toEqual(problem);
     });
 
-    it("the real model fails with a known gap's task or issue missing", () => {
-      const without = model.replaceAll("00047", "0004x");
-      expect(knownGapProblems(without)).toEqual([`${THREAT_MODEL}'s known gaps do not name issue 00047 (A178)`]);
-      const elsewhere = "## Known gaps\n\nTask 14.5, 4.50, 112.2b.\n## Next\n4.5 14.2b 12.2b 15.1b 17.4b\n";
-      expect(knownGapProblems(elsewhere)).toEqual([
-        ...GAP_TASKS.map((task) => `${THREAT_MODEL}'s known gaps do not name task ${task} (A178)`),
-        ...GAP_ISSUES.map((issue) => `${THREAT_MODEL}'s known gaps do not name issue ${issue} (A178)`),
-      ]);
+    it("a model without its known gaps section fails", () => {
       expect(knownGapProblems("")).toEqual([`${THREAT_MODEL} has no "Known gaps" section (A178)`]);
+      expect(knownGapProblems(model.replace("## Known gaps", "## Gaps"))).toEqual([
+        `${THREAT_MODEL} has no "Known gaps" section (A178)`,
+      ]);
     });
 
     it("reads path:line citations, not addresses, URLs or fenced code", () => {

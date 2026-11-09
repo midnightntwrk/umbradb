@@ -1,6 +1,6 @@
 // Holds a fixture's evaluation waits on, by name: a test opens a hold, sees the fixture's import reach it, acts (a stop,
 // an abort), then releases it. The registry is on `globalThis`, so the test and the fixture imported by the engine share
-// it whatever module instance each has. [L32]
+// it whatever module instance each has.
 
 /** A promise and its resolve. */
 interface Signal {

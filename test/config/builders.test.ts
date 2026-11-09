@@ -21,7 +21,7 @@ import { declaration, userModules } from "../modules/declarations.js";
 import { CORE_SETTINGS, prices, REPOSITORY, stats } from "./config-fixtures.js";
 
 /**
- * The builders fill each entry's identity and version from the build, and return plain data: [CF-2]
+ * The builders fill each entry's identity and version from the build, and return plain data:
  * - `coreEntry` sets the id `core` and the core version (the UmbraDB version and the ledger packages the build
  *   carries);
  * - a module's `entry` sets its id and version from the imported declaration (`defineModule` gives every declaration
@@ -32,7 +32,7 @@ import { CORE_SETTINGS, prices, REPOSITORY, stats } from "./config-fixtures.js";
  * module's settings are type errors. They are shown by `// @ts-expect-error` lines, which `tsc --noEmit`
  * (`npm run typecheck`) fails as unused if the error is gone, like the module declaration's type checks. The committed
  * negative control is a builder typed loosely, which accepts each of them. `./typed-config.test.ts` compiles a
- * configuration file with the TypeScript compiler and checks each error's position and words. [A27 STATIC, A20]
+ * configuration file with the TypeScript compiler and checks each error's position and words.
  */
 
 /** The `config` an entry builder takes. */
@@ -51,7 +51,7 @@ type CoreSettingsGiven = typeof CORE_SETTINGS;
 type StatsSettings = z.input<typeof stats.configSchema>;
 type PricesSettings = z.input<typeof prices.configSchema>;
 
-describe("A27: a misspelled core field is a type error (CF-2)", () => {
+describe("a misspelled core field is a type error", () => {
   it("rejects an unknown field written for a known one, required or optional", () => {
     const required = () =>
       coreEntry({
@@ -59,7 +59,7 @@ describe("A27: a misspelled core field is a type error (CF-2)", () => {
         config: {
           network: "preprod",
           node: "ws://127.0.0.1:9944",
-          // @ts-expect-error `databse` is not a field of the core entry (the field is `database`). [A27 STATIC, CF-2]
+          // @ts-expect-error `databse` is not a field of the core entry (the field is `database`).
           databse: "postgres://indexer@db/umbradb",
         },
       });
@@ -68,7 +68,7 @@ describe("A27: a misspelled core field is a type error (CF-2)", () => {
         start: 0,
         config: {
           ...CORE_SETTINGS,
-          // @ts-expect-error `retainState` is not a field of the core entry (the field is `retainStates`). [A27 STATIC]
+          // @ts-expect-error `retainState` is not a field of the core entry (the field is `retainStates`).
           retainState: 1000,
         },
       });
@@ -89,14 +89,14 @@ describe("A27: a misspelled core field is a type error (CF-2)", () => {
   });
 });
 
-describe("A27: a wrong field type is a type error (CF-2, CF-3's scenario)", () => {
+describe("a wrong field type is a type error", () => {
   it("rejects a string where the core entry has an integer, and where it has a boolean", () => {
     const integer = () =>
       coreEntry({
         start: 0,
         config: {
           ...CORE_SETTINGS,
-          // @ts-expect-error `livenessTimeoutMs` is an integer, not the string "30000". [A27 STATIC]
+          // @ts-expect-error `livenessTimeoutMs` is an integer, not the string "30000".
           livenessTimeoutMs: "30000",
         },
       });
@@ -105,7 +105,7 @@ describe("A27: a wrong field type is a type error (CF-2, CF-3's scenario)", () =
         start: 0,
         config: {
           ...CORE_SETTINGS,
-          // @ts-expect-error `developmentOptIn` is a boolean. [A27 STATIC]
+          // @ts-expect-error `developmentOptIn` is a boolean.
           developmentOptIn: "true",
         },
       });
@@ -114,7 +114,7 @@ describe("A27: a wrong field type is a type error (CF-2, CF-3's scenario)", () =
         start: 0,
         config: {
           ...CORE_SETTINGS,
-          // @ts-expect-error `network` is one of the five networks. [A27 STATIC]
+          // @ts-expect-error `network` is one of the five networks.
           network: "mainnet-beta",
         },
       });
@@ -130,7 +130,7 @@ describe("A27: a wrong field type is a type error (CF-2, CF-3's scenario)", () =
       stats.entry({
         start: 0,
         config: {
-          // @ts-expect-error `pollMs` is a number in stats's schema. [A27 STATIC]
+          // @ts-expect-error `pollMs` is a number in stats's schema.
           pollMs: "1000",
         },
       });
@@ -138,19 +138,19 @@ describe("A27: a wrong field type is a type error (CF-2, CF-3's scenario)", () =
   });
 });
 
-describe("A27: a module entry given another module's settings is a type error (CF-2)", () => {
+describe("a module entry given another module's settings is a type error", () => {
   it("rejects prices's settings in stats's entry, written there or built first", () => {
     const written = () =>
       stats.entry({
         start: 0,
         config: {
           pollMs: 1000,
-          // @ts-expect-error `feedUrl` is prices's setting, not stats's. [A27 STATIC]
+          // @ts-expect-error `feedUrl` is prices's setting, not stats's.
           feedUrl: "https://feed.example",
         },
       });
     const settings: PricesSettings = { feedUrl: "https://feed.example" };
-    // @ts-expect-error prices's settings lack stats's `pollMs`. [A27 STATIC]
+    // @ts-expect-error prices's settings lack stats's `pollMs`.
     const built = () => stats.entry({ start: 0, config: settings });
     expectTypeOf(written).toBeFunction();
     expectTypeOf(built).toBeFunction();
@@ -170,7 +170,7 @@ describe("A27: a module entry given another module's settings is a type error (C
   });
 });
 
-describe("A27 negative control: a builder typed loosely accepts every one of these", () => {
+describe("negative control: a builder typed loosely accepts every one of these", () => {
   it("accepts the misspelled field, the wrong type and the other module's settings", () => {
     const misspelled = loose({ start: 0, config: { network: "preprod", node: "ws://n", databse: "postgres://db" } });
     const wrongType = loose({ start: 0, config: { ...CORE_SETTINGS, livenessTimeoutMs: "30000" } });
@@ -184,18 +184,18 @@ describe("A27 negative control: a builder typed loosely accepts every one of the
   });
 });
 
-describe("CF-2, CF-4: the core entry's settings are typed as CF-4 lists them", () => {
+describe("the core entry's settings are typed as the settings table lists them", () => {
   it("rejects a private process's field in a public process's core entry, and the reverse", () => {
     const mixedPublic = () =>
       coreEntry({
         start: 0,
-        // @ts-expect-error `instanceId` is a private process's field, and this entry has the public one's `node`. [CF-4]
+        // @ts-expect-error `instanceId` is a private process's field, and this entry has the public one's `node`.
         config: { ...CORE_SETTINGS, instanceId: "wallet-1" },
       });
     const mixedPrivate = () =>
       coreEntry({
         start: 0,
-        // @ts-expect-error `lockstepInstances` is the public core's, and this entry has a private `instanceId`. [CF-4]
+        // @ts-expect-error `lockstepInstances` is the public core's, and this entry has a private `instanceId`.
         config: { network: "preprod", database: { kind: "pglite", memory: true }, instanceId: "wallet-1", lockstepInstances: [] },
       });
     expectTypeOf(mixedPublic).toBeFunction();
@@ -216,14 +216,14 @@ describe("CF-2, CF-4: the core entry's settings are typed as CF-4 lists them", (
     expectTypeOf<Accepts<typeof coreEntry, Private & { node: string }>>().toEqualTypeOf<false>();
     expectTypeOf<Accepts<typeof coreEntry, Private & { lockstepInstances: string[] }>>().toEqualTypeOf<false>();
     expectTypeOf<Accepts<typeof coreEntry, Private & { transportReader: { user: string } }>>().toEqualTypeOf<false>();
-    // A connection string is no database setting. [Q167 A]
+    // A connection string is no database setting.
     expectTypeOf<Accepts<typeof coreEntry, { network: "preprod"; database: string; node: string }>>().toEqualTypeOf<false>();
     // The negative control: the loose builder accepts each of them.
     expectTypeOf<Accepts<typeof loose, Minimal>>().toEqualTypeOf<true>();
     expectTypeOf<Accepts<typeof loose, Public & { instanceId: string }>>().toEqualTypeOf<true>();
   });
 
-  it("accepts every field of CF-4's table, for a public and a private process", () => {
+  it("accepts every field of the table, for a public and a private process", () => {
     const publicCore = coreEntry({
       start: 0,
       stop: 99,
@@ -272,7 +272,7 @@ describe("CF-2, CF-4: the core entry's settings are typed as CF-4 lists them", (
   });
 });
 
-describe("CF-2: coreEntry fills the id core and the build's core version", () => {
+describe("coreEntry fills the id core and the build's core version", () => {
   const config: CoreSettings = { ...CORE_SETTINGS };
 
   it("returns { id, start, version, config }, with the version from the build", () => {
@@ -309,7 +309,7 @@ describe("CF-2: coreEntry fills the id core and the build's core version", () =>
   });
 });
 
-describe("CF-2: the build's core version", () => {
+describe("the build's core version", () => {
   const manifest = JSON.parse(readFileSync(join(REPOSITORY, "package.json"), "utf8")) as { version: string };
 
   it("is { umbradb: the package's version, ledgers: one item per ledger version the build carries }", () => {
@@ -333,7 +333,7 @@ describe("CF-2: the build's core version", () => {
   });
 });
 
-describe("CF-2: versionEntry takes a version this build does not carry", () => {
+describe("versionEntry takes a version this build does not carry", () => {
   it("an earlier revision, with its recorded config", () => {
     const entry = versionEntry({ id: "stats", start: 1, version: "1.0.0", config: { foo: 1 } });
     expect(entry).toEqual({ id: "stats", start: 1, version: "1.0.0", config: { foo: 1 } });
@@ -358,19 +358,19 @@ describe("CF-2: versionEntry takes a version this build does not carry", () => {
     const entry = versionEntry({ id: "core", start: 0, version, config: { network: "preprod" } });
     expect(entry).toEqual({ id: "core", start: 0, version, config: { network: "preprod" } });
     expectTypeOf(entry.version).toEqualTypeOf<CoreVersion>();
-    // @ts-expect-error the core's version is a core version, { umbradb, ledgers }, not a semver string. [CF-2]
+    // @ts-expect-error the core's version is a core version, { umbradb, ledgers }, not a semver string.
     const semver = () => versionEntry({ id: "core", start: 0, version: "0.9.4" });
     expectTypeOf(semver).toBeFunction();
   });
 
   it("types its config as plain data, loosely: any field, but no function", () => {
-    // @ts-expect-error a function is not plain data. [CF-1]
+    // @ts-expect-error a function is not plain data.
     const fn = () => versionEntry({ id: "stats", start: 1, version: "1.0.0", config: { onError: () => 0 } });
     expectTypeOf(fn).toBeFunction();
   });
 });
 
-describe("CF-2: a module's entry builder fills its id and version from the declaration", () => {
+describe("a module's entry builder fills its id and version from the declaration", () => {
   it("returns { id, start, version, config }, with stop when given", () => {
     expect(stats.entry({ start: 0, config: { pollMs: 1000 } })).toEqual({
       id: "stats",
@@ -416,7 +416,7 @@ describe("CF-2: a module's entry builder fills its id and version from the decla
   });
 });
 
-describe("CF-1, CF-2: defineConfig", () => {
+describe("defineConfig", () => {
   it("returns the configuration it is given", () => {
     const config: UmbraConfig = { entries: [coreEntry({ start: 0, config: { ...CORE_SETTINGS } })] };
     expect(defineConfig(config)).toBe(config);
@@ -436,7 +436,7 @@ describe("CF-1, CF-2: defineConfig", () => {
   });
 
   it("rejects an unknown property beside entries", () => {
-    // @ts-expect-error a configuration is { entries }. [CF-1]
+    // @ts-expect-error a configuration is { entries }.
     const extra = () => defineConfig({ entries: [], modules: [] });
     expectTypeOf(extra).toBeFunction();
   });

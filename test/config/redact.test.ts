@@ -18,7 +18,7 @@ import { input, leaky } from "./validate-fixtures.js";
 
 /**
  * The redaction helper. A `secret` field is never shown, logged or reported: it reads `[redacted]`. Neither are
- * credentials inside URLs. [A29, CF-4, AE-6]
+ * credentials inside URLs.
  *
  * `/config`, `/status` and the logs are not tested here. This file tests the redaction they call, on what they give
  * it: a validated configuration's settings for `/config`, and texts built from the setting (an error message, a log
@@ -35,7 +35,7 @@ const PASSWORD = 'pa ss/w@rd"%';
 /** The password as the URL writes it (`encodeURIComponent`). */
 const WRITTEN = "pa%20ss%2Fw%40rd%22%25";
 
-/** The database's parts: only its password is secret. [Q167 A] */
+/** The database's parts: only its password is secret. */
 const PARTS = { kind: "postgres", host: "db", port: 5432, user: "indexer", password: PASSWORD, name: "umbradb" } as const;
 
 /** The same database as a URL, as a log line or an error may write it. */
@@ -100,7 +100,7 @@ function texts(url: string): Record<string, string> {
   };
 }
 
-describe("A29 (helper): the password of the database URL appears nowhere", () => {
+describe("(helper): the password of the database URL appears nowhere", () => {
   it("the texts hold the password in every form before redaction (the checks below can fail)", () => {
     const all = Object.values(texts(DATABASE)).join("\n");
     expect(leaked(all)).toEqual([...FORMS]);
@@ -138,7 +138,7 @@ describe("A29 (helper): the password of the database URL appears nowhere", () =>
     expect(redact.text(`could not connect to ${DATABASE}: connect ECONNREFUSED`)).toBe(
       "could not connect to postgres://[redacted]@db:5432/umbradb: connect ECONNREFUSED",
     );
-    // The other parts are not secret: a log line naming the database shows them. [Q167 A]
+    // The other parts are not secret: a log line naming the database shows them.
     expect(redact.text("opened postgres indexer@db:5432/umbradb (ssl require)")).toBe(
       "opened postgres indexer@db:5432/umbradb (ssl require)",
     );
@@ -152,7 +152,7 @@ describe("A29 (helper): the password of the database URL appears nowhere", () =>
   });
 });
 
-describe("AE-6: credentials inside URLs read [redacted], in any field and any text", () => {
+describe("credentials inside URLs read [redacted], in any field and any text", () => {
   it("a module's operational URL shows its host, path and parameters, its userinfo and token redacted", () => {
     const config = checked();
     const entry = config.entries[1];
@@ -164,7 +164,7 @@ describe("AE-6: credentials inside URLs read [redacted], in any field and any te
     const redact = configRedactor(checked());
     expect(redact.text("feed refused feed-pass")).toBe("feed refused [redacted]");
     expect(redact.text("mirror refused old-pass")).toBe("mirror refused [redacted]");
-    // An earlier revision's data is recorded and shown: only the credential in it is a secret. [CF-3]
+    // An earlier revision's data is recorded and shown: only the credential in it is a secret.
     expect(redact.text("mirror https://old:old-pass@mirror.example")).toBe("mirror https://[redacted]@mirror.example");
   });
 
@@ -200,7 +200,7 @@ describe("AE-6: credentials inside URLs read [redacted], in any field and any te
   });
 });
 
-describe("CF-4: the redactor of a validated configuration", () => {
+describe("the redactor of a validated configuration", () => {
   it("takes no secret from a scheduled revision, which has no settings", () => {
     const config = validateConfig(
       input({
@@ -234,7 +234,7 @@ describe("CF-4: the redactor of a validated configuration", () => {
   });
 });
 
-describe("CF-4: which strings are secret", () => {
+describe("which strings are secret", () => {
   it("every string inside a secret field, and the password of every URL with one in the other fields", () => {
     expect(
       secretStrings(
@@ -250,7 +250,7 @@ describe("CF-4: which strings are secret", () => {
     ).toEqual(["C", "K", "R1", "R2", "feed", "0x01", "pw"]);
   });
 
-  it("a password part inside an operational field is secret, at any depth; a data field's is not (Q167 A)", () => {
+  it("a password part inside an operational field is secret, at any depth; a data field's is not", () => {
     const settings = {
       database: { kind: "postgres", host: "db", user: "u", password: "db-pw", name: "n" },
       transportReader: { user: "r", password: "reader-pw" },
@@ -368,7 +368,7 @@ const NEEDS: readonly Needs[] = [
   },
 ];
 
-describe("A29 negative control: a redaction without one form leaks exactly the texts that need it", () => {
+describe("negative control: a redaction without one form leaks exactly the texts that need it", () => {
   const names = [...SECRET_PARTS, ...SECRET_ENCODINGS, ...TEXT_PATTERNS].map((form) => form.name);
 
   it("has a text for every part, encoding and pattern, and each is hidden by the full redaction", () => {

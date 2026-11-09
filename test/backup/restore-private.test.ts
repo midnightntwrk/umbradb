@@ -33,7 +33,7 @@ import {
  * reads it, on PostgreSQL directly and on PGlite through the core's transport —, and the process continues from its
  * height + 1 as one that never stopped; one taken against another public database is refused with
  * `private-binding-mismatch` and the binding's `details.reason`, the target left empty; and every other check against
- * the public database refuses before anything is loaded. [A164 CI, BK-3, BK-4, PP-2, PP-12, Q153; design §9.1]
+ * the public database refuses before anything is loaded.
  *
  * The setup: `./restore-private.ts`. The committed negative control (the restore without the binding's check) is
  * `./restore-private.negative-control.test.ts`.
@@ -70,7 +70,7 @@ afterAll(async () => {
   project?.remove();
 }, 120_000);
 
-describe.each(BACKUP_BACKENDS)("A164: a private process's backup on $name", (backend) => {
+describe.each(BACKUP_BACKENDS)("a private process's backup on $name", (backend) => {
   let backup: PrivateBackup | undefined;
 
   beforeAll(async () => {
@@ -98,7 +98,7 @@ describe.each(BACKUP_BACKENDS)("A164: a private process's backup on $name", (bac
   }
 
   it(
-    "A164: a private process's backup restores into an empty private database with BK-3's checks made against its " +
+    "a private process's backup restores into an empty private database with the checks made against its " +
       "public database and continues from its height + 1; one taken against another public database is refused with " +
       "private-binding-mismatch and the binding's details.reason, the target left empty",
     async () => {
@@ -180,7 +180,7 @@ describe.each(BACKUP_BACKENDS)("A164: a private process's backup on $name", (bac
   );
 
   it(
-    "A164: the other checks against the public database refuse before anything is loaded — its core never started, " +
+    "the other checks against the public database refuse before anything is loaded — its core never started, " +
       "another network, its S above the backup's, its head below the backup's height, another block there — the " +
       "target left empty",
     async () => {

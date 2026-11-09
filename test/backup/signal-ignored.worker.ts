@@ -9,7 +9,7 @@ import type { IgnoredJob } from "./signal-ignored-fixtures.js";
  * and 0 otherwise, as `umbradb run` does. With `signals: "command"` SIGUSR2 reaches the process as the command's own
  * (this process's signals); with `"unconnected"` the process is given an emitter of its own that nothing emits on, and
  * the command none — so SIGUSR2 reaches no listener, as in the earlier command without `backupOnSignal`. It exits on
- * its own once its parent is no longer the test's. [A175, BK-1, Q173 C]
+ * its own once its parent is no longer the test's.
  */
 
 const job = JSON.parse(process.argv[2] as string) as IgnoredJob;

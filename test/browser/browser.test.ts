@@ -55,11 +55,11 @@ import {
  * browser tapes (`./tapes.ts`); everything is read through the page's own calls (`window.umbradb`: the admin endpoints'
  * `/status`, the contents hash, reads of the workers' databases; the page's backup and restore as the user makes them).
  * A machine without Chrome fails these tests, naming `UMBRADB_CHROME`; none is skipped. The committed negative controls
- * are `./browser.negative-control.test.ts`. [BR-1 to BR-4, BK-5, A129–A132]
+ * are `./browser.negative-control.test.ts`.
  *
  * The page runs each process on the engine (`browser/src/process-worker.ts`): nothing listens; the private link runs
  * over a `MessageChannel` the page makes for each (re)connection, the module API and admin through the process's
- * fetch-style handlers, the subscriptions on a channel of their own. [LM-11, L58]
+ * fetch-style handlers, the subscriptions on a channel of their own.
  */
 
 const chain = browserChain();
@@ -93,7 +93,6 @@ beforeAll(async () => {
 afterAll(async () => {
   // Each Chrome is closed with bounded waits, then killed (`./chrome.ts`); one that fails to end does not keep the
   // others, the nodes or the page's server open: its failure is reported once everything else is closed.
-  // [docs/issues/00041]
   const failures: unknown[] = [];
   for (const browser of browsers.splice(0)) await browser.close().catch((error: unknown) => failures.push(error));
   for (const node of nodes.splice(0)) await node.close();
@@ -102,10 +101,10 @@ afterAll(async () => {
   if (failures.length > 0) throw new AggregateError(failures, `${failures.length} Chrome process(es) did not end`);
 }, BROWSER_TEST_TIMEOUT_MS);
 
-describe("the browser build in headless Chrome (task 16.1)", () => {
+describe("the browser build in headless Chrome", () => {
   it(
-    "A129 [CI] in memory: the core, the ledger worker and a lockstep private instance run in workers on PGlite under " +
-      "the development opt-in; A131 [CI]: the page's requests go to its own files and the node only",
+    "in memory: the core, the ledger worker and a lockstep private instance run in workers on PGlite under " +
+      "the development opt-in; the page's requests go to its own files and the node only",
     async () => {
       const node = await tapeNode([...headSession(chain, 3n), ...syncSession(chain, 3n, 9n)]);
       const browser = await chrome();
@@ -114,9 +113,9 @@ describe("the browser build in headless Chrome (task 16.1)", () => {
       const p1 = await statusWhen(tab, "p1", (s) => s.cursor === "9" && s.state === "following", "following at 9");
       expect([...syncedProblems("the core", core, 9n), ...syncedProblems("p1", p1, 9n)]).toEqual([]);
 
-      // Three workers besides the page: the core's, the private instance's and the ledger worker. [BR-1]
+      // Three workers besides the page: the core's, the private instance's and the ledger worker.
       expect(tab.workers.map((url) => new URL(url).pathname).sort()).toEqual(["/core-worker.js", "/ledger-worker.js", "/private-worker.js"]);
-      // The ledger worker parsed every transaction of the blocks it was given (heights 4 and 6). [CD-5, LG-7]
+      // The ledger worker parsed every transaction of the blocks it was given (heights 4 and 6).
       const parsed = await readOf(tab, "core", "SELECT height, count(*)::int AS n FROM core_block_parsed.transactions GROUP BY height ORDER BY height");
       expect(parsed.rows).toEqual([
         { height: "4", n: 2 },
@@ -124,7 +123,7 @@ describe("the browser build in headless Chrome (task 16.1)", () => {
       ]);
       const results = await readOf(tab, "core", "SELECT count(*)::int AS n FROM core_tx_results.results WHERE outcome = 'success'");
       expect(results.rows).toEqual([{ n: 5 }]);
-      // The admin endpoints, as calls on each worker's channel: live while the worker's heartbeat ticks, ready. [BR-3]
+      // The admin endpoints, as calls on each worker's channel: live while the worker's heartbeat ticks, ready.
       for (const who of ["core", "p1"]) {
         const live = await call<{ status: number; body: { live: boolean; heartbeatAgeMs: number } }>(tab, who, "admin", "/health/live");
         expect(live).toMatchObject({ status: 200, body: { live: true, livenessTimeoutMs: 30_000 } });
@@ -134,24 +133,24 @@ describe("the browser build in headless Chrome (task 16.1)", () => {
         expect(await call(tab, who, "admin", "/health/ready")).toMatchObject({ status: 200, body: { ready: true } });
         expect(await call(tab, who, "admin", "/metrics")).toMatchObject({ status: 404 });
       }
-      // PGlite under the development opt-in, which the browser build sets (the configuration does not). [BR-1, CF-9]
+      // PGlite under the development opt-in, which the browser build sets (the configuration does not).
       for (const who of ["core", "p1"]) {
         const config = (await tab.evaluate<{ body: { core: { settings: Record<string, unknown> } } }>(
           `window.umbradb.${who === "core" ? "core" : "instances.p1"}.call("admin", "/config")`,
         )).body;
         expect(config.core.settings.developmentOptIn).toBe(true);
-        // The database setting's parts are shown; PGlite in memory has no password. [CF-4, Q167 A]
+        // The database setting's parts are shown; PGlite in memory has no password.
         expect(config.core.settings.database).toEqual({ kind: "pglite", memory: true });
         const version = await readOf(tab, who, "SELECT version() AS v");
         expect(String(version.rows[0]?.v)).toMatch(/^PostgreSQL 18\.\d+ .*emscripten/i);
       }
-      // The lockstep instance read each public block through the core's link and stored its hash. [PP-4, PP-6]
+      // The lockstep instance read each public block through the core's link and stored its hash.
       expect(p1.public).toMatchObject({ cursor: "9", lockstep: true });
       const shadow = await readOf(tab, "p1", "SELECT height, public_hash FROM shadow.rows ORDER BY height");
       expect(shadow.rows).toEqual(chain.blocks.slice(3, 10).map((block) => ({ height: `${block.height}`, public_hash: block.hex })));
 
       // Nothing listens: the link over the page's channels (one, made when p1 connected), the module API and admin
-      // through the handlers. [LM-3, LM-11]
+      // through the handlers.
       for (const [who, link] of [["core", "channels"], ["p1", "connect"]] as const) {
         const config = (await call<{ body: { network: unknown } }>(tab, who, "admin", "/config"))?.body;
         expect(config?.network, who).toEqual({ api: "mounted", admin: "mounted", privateLink: link });
@@ -159,7 +158,7 @@ describe("the browser build in headless Chrome (task 16.1)", () => {
       expect(await logOf(tab, "core")).toContain("private link: accepting channels");
       expect(await linksOf(tab)).toEqual([{ link: 1, instance: "p1", dropped: false }]);
       // The module API's fetch-style handler: the handler's answer written as the module API writes JSON (a bigint as
-      // its decimal text), the jsonb integers beyond 2^53 kept exactly, with the core's headers. [RN-16]
+      // its decimal text), the jsonb integers beyond 2^53 kept exactly, with the core's headers.
       const answer = await call<{ status: number; headers: Record<string, string>; body: string }>(tab, "core", "api", { method: "GET", path: "/probe/5" });
       expect(answer?.status).toBe(200);
       expect(answer?.body).toContain(`"big":"${9_007_199_254_740_993n + 5_000n}"`);
@@ -174,14 +173,14 @@ describe("the browser build in headless Chrome (task 16.1)", () => {
         { type: "error", id: "s1", error: { code: "not-found", message: "no subscription is named nothing" } },
       ]);
 
-      // The page reached nothing but its own files and the node. [A131 CI, BR-3]
+      // The page reached nothing but its own files and the node.
       expect(networkProblems(tab.requests, { origin: bench.server.origin, node: node.url, files: bench.build.files })).toEqual([]);
     },
     BROWSER_TEST_TIMEOUT_MS,
   );
 
   it(
-    "A129 [CI] with OPFS: one Web Lock per database; a second tab on the same database refuses with writer-lock-held; " +
+    "with OPFS: one Web Lock per database; a second tab on the same database refuses with writer-lock-held; " +
       "a reload resumes from the cursor with the same contents hash",
     async () => {
       const node = await tapeNode([...headSession(chain, 3n), ...syncSession(chain, 3n, 6n), ...KEPT_OPEN, ...resumeSession(chain, 6n)]);
@@ -227,11 +226,11 @@ describe("the browser build in headless Chrome (task 16.1)", () => {
   );
 
   it(
-    "issue 00074: the core's /status reports the head its node source holds while the loop is in an older batch: " +
+    "the core's /status reports the head its node source holds while the loop is in an older batch: " +
       "head, node.finalizedHead, the lag and the state from it",
     async () => {
       // The loop reads head 6 and processes 4 to 6; once 4 and 5 are fetched the node finalizes 9, and the core is held
-      // before 6 (its first node call of 6 unanswered until the hold is released). [AE-3, AE-5]
+      // before 6 (its first node call of 6 unanswered until the hold is released).
       const hold = heldClock();
       const node = await tapeNode([...headSession(chain, 3n), ...heldBefore(raisedHeadSession(chain, 3n, 6n, 9n), 6n)], hold.clock);
       const browser = await chrome();
@@ -249,12 +248,12 @@ describe("the browser build in headless Chrome (task 16.1)", () => {
   );
 
   it(
-    "L58 [CI][DIFF] the demo on the engine: the lockstep private worker connects again over a new MessageChannel and " +
+    "the demo on the engine: the lockstep private worker connects again over a new MessageChannel and " +
       "goes on in lockstep; the module API's subscriptions run through api.connect; the page reaches its files and the node only",
     async () => {
       // The core is held before height 6 (its first node call of 6 unanswered until the hold is released): with p1
       // listed as lockstep, both wait at 5 while the page drops p1's link and p1 connects again; then 6 to 9 go over
-      // the new channel. [LM-11, PP-6]
+      // the new channel.
       const hold = heldClock();
       const node = await tapeNode([...headSession(chain, 3n), ...heldBefore(syncSession(chain, 3n, 9n), 6n)], hold.clock);
       const browser = await chrome();
@@ -300,7 +299,7 @@ describe("the browser build in headless Chrome (task 16.1)", () => {
       expect(values.slice(1)).toEqual(
         chain.blocks.slice(6, 10).map((block) => ({ type: "next", id: "h", value: { height: `${block.height}`, hash: block.hex } })),
       );
-      // The same contents hash as Node.js on the same tape and configuration. [A132]
+      // The same contents hash as Node.js on the same tape and configuration.
       const chosen = await eventWhen(tab, "core", "chosen");
       const inChrome = await contentsHashOf(tab, "core");
       const inNode = await nodeRun([...headSession(chain, 3n), ...syncSession(chain, 3n, 9n)], params({}), 9n);
@@ -311,7 +310,7 @@ describe("the browser build in headless Chrome (task 16.1)", () => {
   );
 
   it(
-    "A130 [CI] an empty profile records S as the node's finalized head at creation",
+    "an empty profile records S as the node's finalized head at creation",
     async () => {
       const node = await tapeNode([...headSession(chain, 5n), ...syncSession(chain, 5n, 7n)]);
       const browser = await chrome();
@@ -336,7 +335,7 @@ describe("the browser build in headless Chrome (task 16.1)", () => {
   );
 
   it(
-    "A130 [CI] enabling core-ledger-state without a restored backup refuses startup, naming it (S above 0, BR-2)",
+    "enabling core-ledger-state without a restored backup refuses startup, naming it (S above 0)",
     async () => {
       const node = await tapeNode([...headSession(chain, 5n), ...syncSession(chain, 5n, 7n)]);
       const browser = await chrome();
@@ -350,8 +349,8 @@ describe("the browser build in headless Chrome (task 16.1)", () => {
   );
 
   it(
-    "A131 [CI] backing up the page's database and restoring the file in a fresh profile runs every BK-3 check and " +
-      "continues from its height + 1 (BK-5); the page reaches its files and the node only",
+    "backing up the page's database and restoring the file in a fresh profile runs every check and " +
+      "continues from its height + 1; the page reaches its files and the node only",
     async () => {
       // The tape's sessions, one per connection, in order: the first profile's head question and sync from S 3 to 6;
       // then the fresh profile's restores that reach the node — another chain's genesis, a head below the backup, the
@@ -435,7 +434,7 @@ describe("the browser build in headless Chrome (task 16.1)", () => {
   );
 
   it(
-    "A132 [DIFF] the same tape and configuration in Chrome and in Node.js on PGlite give equal contents hashes",
+    "the same tape and configuration in Chrome and in Node.js on PGlite give equal contents hashes",
     async () => {
       const records = [...headSession(chain, 3n), ...syncSession(chain, 3n, 9n)];
       const node = await tapeNode(records);

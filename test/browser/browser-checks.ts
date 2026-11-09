@@ -4,10 +4,10 @@ import type { PageBackup, PageEvent, PageRestore, StatusBody } from "./browser-h
 /**
  * The oracles of the browser build's criteria, each a list of problems (empty when it holds). They are shared by the
  * tests and their committed negative controls (`browser.negative-control.test.ts`), which run the same oracle over a
- * build that differs in one way and see it fail. [A129–A132]
+ * build that differs in one way and see it fail.
  */
 
-/** What a page may reach: its own origin's files, and the node. [A131, BR-3] */
+/** What a page may reach: its own origin's files, and the node. */
 export interface Reachable {
   /** The page's origin, `http://127.0.0.1:<port>`. */
   readonly origin: string;
@@ -26,7 +26,7 @@ const plain = (url: string): string => {
 /**
  * The network check: every request the page and its workers made goes to the page's origin, for the page itself or
  * a file of its build, or is a WebSocket to the node; and the node was reached. `data:` and `blob:` URLs are no network
- * request. [A131]
+ * request.
  */
 export function networkProblems(requests: readonly PageRequest[], reachable: Reachable): string[] {
   const problems: string[] = [];
@@ -61,7 +61,7 @@ export function syncedProblems(name: string, status: StatusBody | null, height: 
 }
 
 /**
- * The reload check: the process resumed at the cursor it had, following, with the contents hash it had there. [A129]
+ * The reload check: the process resumed at the cursor it had, following, with the contents hash it had there.
  */
 export function resumeProblems(
   name: string,
@@ -79,7 +79,7 @@ export function resumeProblems(
 /**
  * The second-tab check: its core refused with `writer-lock-held`, having opened nothing, while the first tab's core
  * kept its database — still following at least at the cursor it had, with the contents hash it had there when nothing
- * more was finalized (`unchanged`). [A129]
+ * more was finalized (`unchanged`).
  */
 export function secondTabProblems(
   second: { readonly status: StatusBody | null; readonly refused: PageEvent | undefined },
@@ -98,7 +98,7 @@ export function secondTabProblems(
   return problems;
 }
 
-/** The S check: the core chose the node's finalized head at creation as S, and its database records it. [A130] */
+/** The S check: the core chose the node's finalized head at creation as S, and its database records it. */
 export function startProblems(
   head: bigint,
   facts: {
@@ -116,7 +116,7 @@ export function startProblems(
   return problems;
 }
 
-/** The mid-chain refusal: startup refused with `cannot-start-mid-chain`, naming the module. [A130] */
+/** The mid-chain refusal: startup refused with `cannot-start-mid-chain`, naming the module. */
 export function midChainProblems(module: string, status: StatusBody | null, refused: PageEvent | undefined): string[] {
   const problems: string[] = [];
   if (status?.state !== "refused") problems.push(`the core is ${status?.state ?? "silent"}, not refused`);
@@ -131,7 +131,7 @@ export function midChainProblems(module: string, status: StatusBody | null, refu
 
 /**
  * The Chrome run reached the height the Node.js run did, following, from the same S, with an equal contents hash
- * there. [A132]
+ * there.
  */
 export function sameHashProblems(
   chrome: { readonly start: number | undefined; readonly status: StatusBody | null; readonly height: string | null; readonly hash: string | null },
@@ -151,7 +151,7 @@ export function sameHashProblems(
 
 /**
  * One restore the page made of a picked file, and what the restore checks expect of it: a refusal's code, or
- * `restored`. [BK-3]
+ * `restored`.
  */
 export interface RestoreAttempt {
   /** What the file and its setting are, for the problem's text. */
@@ -163,7 +163,7 @@ export interface RestoreAttempt {
 /**
  * The restore check: each restore the page made of a picked file did what the restore checks expect, refused with the
  * expected code, or restored. A restore refused with another code, or one that committed where it should be refused,
- * is a problem. [A131, BK-3, BK-5]
+ * is a problem.
  */
 export function restoreProblems(attempts: readonly RestoreAttempt[]): string[] {
   const problems: string[] = [];
@@ -179,7 +179,6 @@ export function restoreProblems(attempts: readonly RestoreAttempt[]): string[] {
  * at `backup.height` (its contents hash the first profile's then); the page kept the backup's S and started the core
  * with it; the core went on from the backup's height + 1 to `status`'s height, every block once from S; and its
  * contents hash there equals an uninterrupted run's (`uninterrupted`, Node.js on the same tape and configuration).
- * [A131, BK-4, BK-5]
  */
 export function continuedProblems(
   backup: { readonly saved: PageBackup; readonly hashThen: { readonly height: string | null; readonly hash: string } },

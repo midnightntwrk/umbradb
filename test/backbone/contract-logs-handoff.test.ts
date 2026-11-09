@@ -8,13 +8,13 @@ import { PATIENCE_MS } from "./ingest-harness.js";
 /**
  * `[CI]`, on PostgreSQL 18 and PGlite 0.5.10: `core-contract-logs-full` stops at h, a backup is taken at h, and the
  * restored database continues with `core-contract-logs-fast` from h + 1. The restore and startup accept it, and
- * `contract_logs.logs` continues without a gap or a repeat. [A111 CI, CC-4, BK-1, BK-3, MD-6]
+ * `contract_logs.logs` continues without a gap or a repeat.
  *
  * The run, the backup, the restore and the continuation are in `./contract-logs-handoff.ts`. Its negative controls (a
  * switch that skips h + 1, one that repeats it) are in `contract-data.negative-control.test.ts`.
  */
 
-describe.each(BACKUP_BACKENDS)("the contract-logs handoff from -full to -fast through a backup on $name (CC-4)", (backend: BackupBackend) => {
+describe.each(BACKUP_BACKENDS)("the contract-logs handoff from -full to -fast through a backup on $name", (backend: BackupBackend) => {
   beforeAll(async () => {
     await backend.start();
     // The process's backup finds pg_dump as the command does: the pinned image's (`../backup/backup-fixtures.ts`).
@@ -26,7 +26,7 @@ describe.each(BACKUP_BACKENDS)("the contract-logs handoff from -full to -fast th
   }, 120_000);
 
   it(
-    "A111: -full stopping at h, a backup at h, and the restored database continuing with -fast from h + 1 give a continuous contract_logs.logs",
+    "-full stopping at h, a backup at h, and the restored database continuing with -fast from h + 1 give a continuous contract_logs.logs",
     async () => {
       const expected = await handoffScenario();
       const result = await handoff(backend, expected, { h: 3n, fastFrom: 4n });

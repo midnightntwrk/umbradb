@@ -26,11 +26,10 @@ import {
 // Checks of the node's end-of-block update. The expected values are the node's arithmetic, computed in Rust at the
 // pinned ledger revisions by `fixtures/post-block-update/oracle/` (its `main.rs` and `run.sh`) and recorded in
 // `fixtures/post-block-update/expected.json`, never by the packages or the adapters under test.
-// [A151, LG-8, LG-15, Q113 A]
 //
 // The committed negative controls (`post-block-update.negative-control.test.ts`) run these checks against a wrong path
 // or a wrong adapter, and `post-block-update.test.ts` runs them against the real ones; each fails with an assertion
-// error. [A151]
+// error.
 
 type Decimal = string;
 
@@ -164,18 +163,18 @@ export function publishedUpdate(raw: RawPackage, cost: SyntheticCost): ReturnTyp
   return blank.postBlockUpdate(T0_DATE, normalized, overall);
 }
 
-/** A block's fullness is the node's `FixedPoint` fullness. [A151] */
+/** A block's fullness is the node's `FixedPoint` fullness. */
 export function expectNodeFullness(found: Fullness, expected: OracleCase, ledger: Ledger): void {
   expect(found, `${ledger}, ${expected.name}: the FixedPoint fullness`).toEqual(fullnessOf(expected.exact.fullness));
 }
 
-/** Parameters after a block (serialized) have the node's fee prices, and are the node's parameters. [A151] */
+/** Parameters after a block (serialized) have the node's fee prices, and are the node's parameters. */
 export function expectNodeParameters(parameters: Uint8Array, expected: OracleAfter, what: string): void {
   expect(hex(parameters), `${what}: the fee prices after the block`).toContain(expected.feePricesBytes);
   expect(sha256Hex(parameters), `${what}: the parameters after the block`).toBe(expected.parametersSha256);
 }
 
-/** A state after a block's post-block update has the node's parameters (its fee prices) and state root. [A151] */
+/** A state after a block's post-block update has the node's parameters (its fee prices) and state root. */
 export function expectNodeState(
   raw: RawPackage,
   state: ReturnType<RawPackage["LedgerState"]["blank"]>,
@@ -251,7 +250,7 @@ function expectBlockParameters(adapter: LedgerPackage, ledger: Ledger, name: str
 /**
  * Through the adapter, the parameters after a block of the fixtures' transactions are the node's: the fee prices the
  * node's post-block update gives for its fullness. The blocks are a deploy (block usage 2,635 of 200,000 in v8); a
- * deploy and a call; and twenty deploys, whose bytes written exceed the block limit (clamped, not refused). [A151]
+ * deploy and a call; and twenty deploys, whose bytes written exceed the block limit (clamped, not refused).
  */
 export async function expectAdapterUpdates(adapter: LedgerPackage, ledger: Ledger): Promise<void> {
   const { deploy, call } = await fixtureTransactions(ledger);
@@ -266,7 +265,7 @@ export async function expectAdapterUpdates(adapter: LedgerPackage, ledger: Ledge
  * The adapter adds each system transaction's cost to the block's fullness. A block of one system transaction on a
  * blank state has the node's state root and parameters. The fixtures' system transaction, a deploy and a call give the
  * node's fee prices, which differ from those of the deploy and the call alone. (Below 1 % of a limit the fee price
- * update is flat, so the system transaction's small cost shows where the call's costs are above it.) [A151]
+ * update is flat, so the system transaction's small cost shows where the call's costs are above it.)
  */
 export async function expectSystemTransactionCosts(adapter: LedgerPackage, ledger: Ledger): Promise<void> {
   for (const system of ORACLE[ledger].systemTransactions) {
@@ -289,7 +288,6 @@ export async function expectSystemTransactionCosts(adapter: LedgerPackage, ledge
  * An extrinsic the chain reports failed is skipped, as the official indexer skips it: the ledger is not asked, its
  * result is a failure of every segment, its cost does not count, and it is not taken as the block's first regular
  * transaction (the one the parent-time rule looks for). The reference replay with the same outcomes agrees.
- * [A151, LG-8]
  */
 export async function expectChainFailureSkipped(adapter: LedgerPackage, ledger: Ledger): Promise<void> {
   const raw = RAW[ledger];

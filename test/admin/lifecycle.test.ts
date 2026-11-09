@@ -38,10 +38,9 @@ import type { DatabaseParts } from "../../src/config/database-parts.js";
  * - `startProcess({ admin: true })` serves them on the configuration's `listen.admin` from the moment its `core`
  *   revision is known until `stop()` has closed the database. That is before the database opens, so every later
  *   refusal answers there. It then ends its worker thread and its heartbeat, so nothing of it keeps Node.js alive.
- *   [AE-1, AE-3, IN-12, RN-13]
  * - A listener that cannot listen refuses startup (`listen-failed`), before the database opens.
  * - A startup refused by its configuration itself opens no admin listener and ends the process. Here that is a real
- *   process that ends by itself; `./refused-configuration.test.ts` tests the rest. [Q137 B, A157]
+ *   process that ends by itself; `./refused-configuration.test.ts` tests the rest.
  * - `ProcessAdmin` itself: what it publishes and when, its log lines, and closing at every step.
  */
 
@@ -87,7 +86,7 @@ describe.each(PROCESS_BACKENDS)("the admin endpoints' life with the process on $
         settings: { network: "custom", genesisHash: ADMIN_GENESIS, database: shownDatabase(db.setting), node: "[redacted]" },
       },
     });
-    // The parts are shown, the password never. [CF-4, Q167 A]
+    // The parts are shown, the password never.
     const { password } = db.setting as { password?: string };
     if (password !== undefined) expect(config.text).not.toContain(`"${password}"`);
     await handle.stop();
@@ -323,7 +322,7 @@ describe("the worker thread ends with the process (no orphan, nothing left keepi
     }
   }, 180_000);
 
-  it("a real process whose configuration is refused (refuse) ends by itself, unsignalled: no admin listener, nothing left keeping Node.js alive (Q137 B)", async () => {
+  it("a real process whose configuration is refused (refuse) ends by itself, unsignalled: no admin listener, nothing left keeping Node.js alive", async () => {
     const directory = mkdtempSync(join(tmpdir(), "umbradb-admin-exit-"));
     const child = startChild({ kind: "pglite", path: join(directory, "db") }, "refuse");
     try {

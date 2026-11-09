@@ -1,7 +1,7 @@
 /**
  * The recording builder: a WebSocket proxy on the loopback interface, at a random free port of at least 10000, that a
  * client connects to in place of a Midnight node. It forwards each connection to the node and records the session as a
- * tape, which the tape node (`./node.ts`) then replays to the same client, byte for byte. [TT-4, A71]
+ * tape, which the tape node (`./node.ts`) then replays to the same client, byte for byte.
  *
  * **Use.** `const builder = await TapeBuilder.start({ node: "wss://…" })`; point the client at `builder.url`; run it;
  * `const records = await builder.stop()`; `writeTapeFile(path, records)` (`./tape.ts`) writes the tape and returns its

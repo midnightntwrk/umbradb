@@ -1,5 +1,5 @@
 /**
- * Skip-enforcement reconciliation. [v1.0.0-recovery-testing design §1.1]
+ * Skip-enforcement reconciliation.
  *
  * `vitest run` does NOT fail on a skipped / `skipIf` / `todo` test by default, so "the required
  * crash/soak suite does not self-skip" cannot be left to convention — this is the NAMED enforcement
@@ -98,14 +98,14 @@ export function statusesFromReport(report: JsonReport): Map<string, string[]> {
  *  length drifts from this constant. Bump it deliberately when a required test is genuinely
  *  added/removed. It is 22: the crash harness's smoke ids 1-4 (`crash-harness.smoke.*`; ids 5-25 were
  *  retired) and the 18 acceptance-criteria ids whose tests exist. The crash runs after 0.10.0 bring the
- *  other four (26). [Q191 A; design §13; acceptance §17] */
+ *  other four (26). */
 export const EXPECTED_REQUIRED_COUNT = 22;
 
 /** The pinned count of `deferred` (WHERE-gated optional-feature) tests. Structurally PINS
  *  the deferred exemption set so deleting the sole deferred entry (a green "0 deferred" gate) fails the
  *  gate: {@link loadManifest} rejects a manifest whose `deferred` length drifts from this constant.
  *  Bump it deliberately when a deferred scenario is genuinely added/removed. It is 0: the one
- *  deferred id was retired with the 0.9.5 save it was deferred for. [design §13] */
+ *  deferred id was retired with the 0.9.5 save it was deferred for. */
 export const EXPECTED_DEFERRED_COUNT = 0;
 
 /** Normalises a file path (backslashes -> forward slashes) for cross-platform comparison. */

@@ -1,6 +1,6 @@
 /**
  * Which Midnight transactions a block holds, and in what order the ledger applied them, found before any is parsed:
- * from the block's body (`block-body`) and its chain events (`chain-events`). [CD-5, CD-2, CD-4]
+ * from the block's body (`block-body`) and its chain events (`chain-events`).
  *
  * **The pinned node** (`midnight-node` 2.1.0-rc.4):
  * - A regular transaction is the argument `midnight_tx: Vec<u8>` of an unsigned extrinsic calling
@@ -19,7 +19,7 @@
  *
  * **The order** is the order of the transactions' chain events, as the official indexer reads it (`midnight-indexer`
  * `chain-indexer/src/infra/subxt_node/runtimes.rs`, `transactions`). Each event is matched to its extrinsic by its
- * phase, never by its place among the events: [CD-5]
+ * phase, never by its place among the events:
  * - `MidnightSystem::SystemTransactionApplied` is a system transaction, with the event's phase as the chain stamped it;
  * - `Midnight::TxApplied`, `Midnight::TxPartialSuccess` or `System::ExtrinsicFailed` under `ApplyExtrinsic(i)` is the
  *   regular transaction of extrinsic `i`, if `i` carries one. An `ExtrinsicFailed` of any other extrinsic belongs to no
@@ -27,7 +27,7 @@
  *   (Root only, so in an executed block it failed);
  * - **Block 0** has no events (Substrate emits none at genesis). Every `Midnight` and `MidnightSystem` extrinsic of its
  *   body is a transaction, regular or system, in body order, under `ApplyExtrinsic(i)`, as in the official indexer's
- *   `genesis_transactions`. [IN-7]
+ *   `genesis_transactions`.
  *
  * **Anything else refuses the block** (it throws), where the official indexer logs a divergence and goes on:
  * - a regular transaction with no outcome event, or with two;
@@ -36,7 +36,7 @@
  *   `src/backbone/core-block-fetch/extrinsics.ts`);
  * - a call or event whose fields are not the bytes these rules read.
  *
- * A block is placed exactly or not at all. The module is pure: it has no Node.js import. [Q132]
+ * A block is placed exactly or not at all. The module is pure: it has no Node.js import.
  */
 
 import type { BlockBody } from "../core-block-fetch/items.js";
@@ -62,7 +62,7 @@ export const SYSTEM = Object.freeze({ pallet: "System", failed: "ExtrinsicFailed
 
 /** A transaction of a block, placed (see the module comment); not yet parsed. */
 export interface ChainTransaction {
-  /** Its place in the order the ledger applied the block's transactions, from 0. [CD-5] */
+  /** Its place in the order the ledger applied the block's transactions, from 0. */
   readonly index: number;
   readonly kind: "regular" | "system";
   /** The transaction as the chain carries it: the ledger's tagged serialization. */

@@ -7,7 +7,7 @@ import { closeServer, listenOnRandomPort } from "../node/fake-node.js";
  * a random free port of at least 10000, that stands in for a Midnight node behind the recording builder. Each request
  * is answered by the test's script with steps sent in order, in the same turn: an answer, notifications, a raw frame,
  * or dropping the connection (once the frames before it are written out, without a close frame, as a node going away).
- * A request no step answers stays unanswered. [A71, TT-4]
+ * A request no step answers stays unanswered.
  *
  * **Its frames are written by `JSON.stringify`**, not by the tape tools: `{"jsonrpc":"2.0","id":…,"result":…}` (or
  * `"error"`) and `{"jsonrpc":"2.0","method":…,"params":{"subscription":…,"result":…}}` — the spelling a Substrate node

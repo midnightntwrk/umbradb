@@ -7,7 +7,7 @@ import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
  * an in-memory one, which holds for ever once `killAt` statements of the file ran — inside the restore's one
  * transaction, or, for the negative control, after that many statements each committed on its own — and says so with
  * one line on stdout (`loading <n>`); the test then kills it with SIGKILL. It exits by itself once its parent is no
- * longer the test's, since it would otherwise hold for ever. [A127, BK-3]
+ * longer the test's, since it would otherwise hold for ever.
  */
 
 export interface RestoreJob {

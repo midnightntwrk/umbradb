@@ -8,7 +8,7 @@
  * - the extrinsic index under `apply-extrinsic` only (enforced by a `CHECK`);
  * - the record's SCALE bytes, and its fields as canonical JSON (`./scale-value.ts`).
  *
- * The table is append-only and range-partitioned by height (`../height-partitions.ts`). [design §10]
+ * The table is append-only and range-partitioned by height (`../height-partitions.ts`).
  */
 
 import type { BlockWriteHandle } from "../../db/api.js";
@@ -19,7 +19,7 @@ import { canonicalJson } from "./scale-value.js";
 /** Its table: one row per chain event. */
 export const EVENTS_TABLE = "core_chain_events.events";
 
-/** `core-chain-events`' migrations: applied once, recorded under `core-chain-events`, never changed. [DB-9] */
+/** `core-chain-events`' migrations: applied once, recorded under `core-chain-events`, never changed. */
 export const CORE_CHAIN_EVENTS_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
   {
     id: "001",

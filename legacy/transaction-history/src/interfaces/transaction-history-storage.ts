@@ -5,8 +5,7 @@ import type { TransactionHandle } from "../../../../src/interfaces/transaction-l
 /**
  * Transaction History Storage — a Postgres-backed implementation of the Midnight wallet SDK's
  * `TransactionHistoryStorage` interface (`packages/abstractions/src/TransactionHistoryStorage.ts`
- * in `midnight-wallet`), structurally mirrored here (NOT imported — `openspec/changes/
- * sprint-7-transaction-history-storage/design.md` §2: this project never depends on wallet-SDK
+ * in `midnight-wallet`), structurally mirrored here (NOT imported: this project never depends on wallet-SDK
  * runtime code). One instance is bound to exactly one `walletId` at construction; none of the six
  * methods below accept a wallet identifier (mirrors the real interface, which has no such
  * parameter either — `TransactionHistoryStorage.ts:163-195`).
@@ -83,8 +82,7 @@ const SafeObjectKeySchema = z.string()
 /** A recursive, JSON-shaped value that ALSO admits `bigint`/`Date` leaves anywhere in the tree —
  *  the opaque per-caller payload each wallet section (shielded/unshielded/dust) carries. Callers
  *  agree on shape per section name; `PgTransactionHistoryStorage` never inspects it beyond
- *  validating this shape and (de)serializing it losslessly through Postgres JSONB (`design.md`
- *  §2 — the section-merge logic itself lives entirely in the caller-supplied {@link
+ *  validating this shape and (de)serializing it losslessly through Postgres JSONB (the section-merge logic itself lives entirely in the caller-supplied {@link
  *  MergeEntriesFn}, never in this storage layer). **Object keys anywhere in this tree must not
  *  start with {@link THS_RESERVED_KEY_PREFIX}** — that namespace is reserved for this storage
  *  layer's own internal bigint/Date JSONB tagging scheme; a caller's key colliding with it is
@@ -123,8 +121,8 @@ export const EntryContentSchema: z.ZodType<EntryContent> = z.lazy(() => z.union(
  *  certainly sending malformed/hostile data, not a legitimate wallet section. */
 export const MAX_ENTRY_CONTENT_DEPTH = MAX_JSON_DEPTH;
 
-// `exceedsMaxDepth` and the depth constant are hoisted to `temporal-kv.ts` and shared (G8,
-// design.md §4.2); imported above. `MAX_ENTRY_CONTENT_DEPTH` stays this module's name for the
+// `exceedsMaxDepth` and the depth constant are hoisted to `temporal-kv.ts` and shared;
+// imported above. `MAX_ENTRY_CONTENT_DEPTH` stays this module's name for the
 // same 64-level bound so its `sections` message and existing tests are unchanged.
 
 /** `sections`'s actual schema: the plain `z.record(SafeObjectKeySchema, EntryContentSchema)`
@@ -241,9 +239,9 @@ export const TransactionHistoryEntrySchema = z.object({
  * the SDK's `WalletEntry` shape (top-level `shielded`/`unshielded`/`dust`) — the two are distinct
  * types, so the raw SDK function could not be injected here even if the undefined-first-write
  * problem did not exist. This storage layer has no compile-time or run-time dependency on either
- * symbol either way (`design.md` §2).
+ * symbol either way.
  *
- * Applied entirely in-process, synchronously, while a row lock is held (`design.md` §3) — the
+ * Applied entirely in-process, synchronously, while a row lock is held — the
  * function itself must not perform I/O.
  *
  * Contract (`specs/transaction-history-storage/spec.md`): shared scalar facts are

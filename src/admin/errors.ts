@@ -3,7 +3,6 @@
  * from its error code and allowlisted fields only, never from a raw exception message, so no response carries a
  * credential or key bytes that an exception's message held. The backbone parts' endpoints share these helpers, which
  * run on the main thread before the snapshot crosses to the admin worker (`./snapshot.ts`).
- * [AE-5, AE-6; CORE-ARCH §4.18]
  *
  * {@link sanitizedError} gives the runner's reason (`ProcessReason`, `../runner/failures.ts`: the error code, the
  * height, the module and the point) with {@link errorMessage}, a text made of those fields alone. It adds the
@@ -11,7 +10,6 @@
  * cause chain whose code is the reason's. Each field is shown only in the form its rule accepts (a token, an id,
  * invalid-configuration's findings as path and message), each text goes through the configuration's redaction, and
  * the rest is dropped. Without a redaction (when nothing yet knows the configuration's secrets) no detail is shown.
- * [AE-6; design §11]
  */
 
 import type { PlainData, PlainObject } from "../config/plain-data.js";
@@ -51,7 +49,7 @@ function findings(value: unknown, redact: (text: string) => string): PlainData |
 
 /**
  * The allowlisted details `/status` may show: a refusal's or halt's `reason` (a token), a migration's id, and
- * invalid-configuration's findings. [AE-6]
+ * invalid-configuration's findings.
  */
 export const ALLOWED_DETAILS: readonly AllowedDetail[] = Object.freeze([
   Object.freeze({ name: "reason", show: matching(TOKEN) }),

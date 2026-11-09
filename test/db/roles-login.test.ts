@@ -12,11 +12,11 @@ import { migrationPart } from "../../src/modules/adapters.js";
 import { type PostgresTestDatabase, type PostgresTestServer, startPostgresServer } from "./postgres-server.js";
 
 /**
- * What the writer's login must hold on PostgreSQL 18. [Q90; design §4 "Roles"]
+ * What the writer's login must hold on PostgreSQL 18.
  *
  * - A login that is not a superuser but has `CREATEROLE` and `CREATE` on the database creates the module roles and
  *   schemas, and grants itself each role `WITH INHERIT TRUE, SET TRUE` (PostgreSQL 16 and later give its creator
- *   `ADMIN` only). The roles then guard as they do under a superuser. [A13, A73]
+ *   `ADMIN` only). The roles then guard as they do under a superuser.
  * - A login lacking a privilege, or facing a role another login created, is refused with `invalid-configuration`
  *   (`reason: writer-privileges`) before anything is created.
  *
@@ -73,7 +73,7 @@ async function setUp(db: Database, plan: SchemaPlan, ids: readonly string[]): Pr
   await db.transaction((tx) => guardTables(tx, plan));
 }
 
-describe("a CREATEROLE login on PostgreSQL 18 (Q90)", () => {
+describe("a CREATEROLE login on PostgreSQL 18", () => {
   it("creates the roles, grants itself each WITH INHERIT TRUE, SET TRUE, and the roles guard as under a superuser", async () => {
     const database = await server.createDatabase();
     const db = await loginOn(database, "writer_one", "CREATEROLE", true);
@@ -97,7 +97,7 @@ describe("a CREATEROLE login on PostgreSQL 18 (Q90)", () => {
       { role: "umbradb_m_login_b", grantor: "writer_one", admin: false, inherit: true, set: true },
     ]);
 
-    // Under this login, a's write into b's table is rejected and the transaction rolls back. [A13]
+    // Under this login, a's write into b's table is rejected and the transaction rolls back.
     const cross = (await outcome(
       db.transaction(async (tx) => {
         await setModuleRole(tx, plan, "login-a");
@@ -111,7 +111,7 @@ describe("a CREATEROLE login on PostgreSQL 18 (Q90)", () => {
     expect(await db.read((read) => read.query("SELECT (SELECT count(*) FROM login_a.t)::int AS a, (SELECT count(*) FROM login_b.t)::int AS b"))).toEqual([
       { a: 0, b: 0 },
     ]);
-    // Under this login, the TRUNCATE trigger was attached, and refuses in a block. [A73]
+    // Under this login, the TRUNCATE trigger was attached, and refuses in a block.
     const truncate = (await outcome(
       db.transaction(async (tx) => {
         await setModuleRole(tx, plan, "login-b");
@@ -124,7 +124,7 @@ describe("a CREATEROLE login on PostgreSQL 18 (Q90)", () => {
     await db.transaction((tx) => prepareSchemas(tx, plan));
   });
 
-  it("migrates under it: core_chain.migrations is the login's, each module's tables its role's, readable by the other roles (task 2.4)", async () => {
+  it("migrates under it: core_chain.migrations is the login's, each module's tables its role's, readable by the other roles", async () => {
     const database = await server.createDatabase();
     const db = await loginOn(database, "writer_migrate", "CREATEROLE", true);
     const parts = ["mig-a", "mig-b"].map((id) => {
@@ -234,7 +234,7 @@ describe("a CREATEROLE login on PostgreSQL 18 (Q90)", () => {
     expect([...owner]).toEqual([{ owner: "umbradb_m_shared_name" }]);
   });
 
-  it("checks, adds the CHECKs and captures changes under it, and core-digest digests (task 7.1)", async () => {
+  it("checks, adds the CHECKs and captures changes under it, and core-digest digests", async () => {
     const database = await server.createDatabase();
     const db = await loginOn(database, "writer_digest", "CREATEROLE", true);
     const module = { ...tableModule("dig-a"), version: "1.0.0" };

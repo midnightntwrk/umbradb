@@ -3,15 +3,15 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // Characterization tests of the pinned `@electric-sql/pglite` 0.5.10. They turn the stage-1 probe into tests of the
 // database features the PGlite backend relies on:
-// - per-module roles under `SET LOCAL ROLE` [DB-6];
-// - provider functions [DB-7];
-// - PL/pgSQL row triggers [DT-4];
-// - the `TRUNCATE` refusal [DB-14];
-// - the `jsonb` number check [DT-6];
-// - the advisory-lock functions [DB-11].
+// - per-module roles under `SET LOCAL ROLE`;
+// - provider functions;
+// - PL/pgSQL row triggers;
+// - the `TRUNCATE` refusal;
+// - the `jsonb` number check;
+// - the advisory-lock functions.
 //
 // They test PGlite itself, not UmbraDB code: a failure here means the pinned dependency no longer behaves as the
-// design assumes. [design §4, §14]
+// design assumes.
 
 const INSUFFICIENT_PRIVILEGE = "42501";
 const CHECK_VIOLATION = "23514";
@@ -47,7 +47,7 @@ beforeAll(async () => {
   db = await PGlite.create();
   // Two module roles and an unrelated third, each owning (or not) a schema, with the design's grants: `USAGE` on the
   // other module schemas, `SELECT` on their tables through default privileges, and `EXECUTE` on functions revoked
-  // from `PUBLIC` as a default privilege of each module role. [design §4]
+  // from `PUBLIC` as a default privilege of each module role.
   await db.exec(`
     CREATE ROLE umbradb_m_a NOLOGIN;
     CREATE ROLE umbradb_m_b NOLOGIN;
@@ -67,7 +67,7 @@ afterAll(async () => {
   await db?.close();
 });
 
-describe("@electric-sql/pglite 0.5.10 — roles and SET LOCAL ROLE (DB-6)", () => {
+describe("@electric-sql/pglite 0.5.10 — roles and SET LOCAL ROLE", () => {
   it("creates NOLOGIN module roles that own their schemas", async () => {
     const roles = await db.query<{ rolname: string; rolcanlogin: boolean; rolsuper: boolean }>(
       "SELECT rolname, rolcanlogin, rolsuper FROM pg_roles WHERE rolname LIKE 'umbradb\\_m\\_%' ORDER BY rolname",
@@ -138,7 +138,7 @@ describe("@electric-sql/pglite 0.5.10 — roles and SET LOCAL ROLE (DB-6)", () =
   });
 });
 
-describe("@electric-sql/pglite 0.5.10 — provider functions (DB-7)", () => {
+describe("@electric-sql/pglite 0.5.10 — provider functions", () => {
   beforeAll(async () => {
     await asRole("umbradb_m_a", (tx) =>
       tx.exec(`
@@ -225,7 +225,7 @@ describe("@electric-sql/pglite 0.5.10 — provider functions (DB-7)", () => {
   });
 });
 
-describe("@electric-sql/pglite 0.5.10 — triggers (DT-4, DB-14)", () => {
+describe("@electric-sql/pglite 0.5.10 — triggers", () => {
   beforeAll(async () => {
     await asRole("umbradb_m_a", (tx) =>
       tx.exec(`
@@ -292,7 +292,7 @@ describe("@electric-sql/pglite 0.5.10 — triggers (DT-4, DB-14)", () => {
   });
 });
 
-describe("@electric-sql/pglite 0.5.10 — jsonpath number check (DT-6)", () => {
+describe("@electric-sql/pglite 0.5.10 — jsonpath number check", () => {
   beforeAll(async () => {
     await asRole("umbradb_m_a", (tx) =>
       tx.exec(`
@@ -344,7 +344,7 @@ describe("@electric-sql/pglite 0.5.10 — jsonpath number check (DT-6)", () => {
   });
 });
 
-describe("@electric-sql/pglite 0.5.10 — advisory-lock functions (DB-11)", () => {
+describe("@electric-sql/pglite 0.5.10 — advisory-lock functions", () => {
   it("takes, reports and releases a two-key session advisory lock", async () => {
     const taken = await db.query<{ got: boolean }>(
       "SELECT pg_try_advisory_lock(3, hashtext('umbradb-writer')) AS got",

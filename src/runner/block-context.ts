@@ -1,22 +1,22 @@
 /**
- * One height's block items, and the settings a block context carries. [RN-5, RN-7; design §2; CORE-ARCH §4.3, §4.10]
+ * One height's block items, and the settings a block context carries.
  *
  * **Block items.** {@link BlockItems} holds the `block` items published for one height. A callback that may put items
  * (`on-fetch`, `on-parse`, `on-compute`) gets a sink of its own through {@link BlockItems.collect}. Its puts are
- * buffered and published, in put order, when the callback completes, and dropped when it fails. [RN-5]
+ * buffered and published, in put order, when the callback completes, and dropped when it fails.
  *
  * The buffer matters because a wave of parallel callbacks starts them one after another without waiting, and a
  * callback may put before its first `await`. A shared map would therefore show an item to a sibling that started before
  * its putter completed. With the buffer, a callback sees only the items of callbacks that completed before it started
- * ({@link BlockItems.visible}, a copy the runner takes as the callback starts). [RN-5]
+ * ({@link BlockItems.visible}, a copy the runner takes as the callback starts).
  *
  * Only the module that declares an item with the `block` lifetime may put it, and at most once per block: a second put
  * in one callback, or a put after an earlier callback published it, is refused. A refused put throws at the put and
  * fails the callback even when the module catches it, so it counts as a callback error. A put from a sink kept past its
- * callback throws too, and is reported to the runner, since no callback is left to fail. [RN-5, RN-8]
+ * callback throws too, and is reported to the runner, since no callback is left to fail.
  *
  * **Settings.** A block context's settings are those of the calling module's revision covering the height
- * ({@link revisionAt}). [RN-7]
+ * ({@link revisionAt}).
  */
 
 import type { ItemSink, ModuleDeclaration, PointName, Revision } from "../modules/declaration.js";
@@ -43,7 +43,7 @@ export class BlockItems {
 
   /**
    * Makes the items published exactly `kept` (what {@link visible} gave earlier), dropping those published since. A
-   * height processed again from `on-compute` keeps only the items of `on-fetch` and `on-parse` (`./loop.ts`). [IN-10]
+   * height processed again from `on-compute` keeps only the items of `on-fetch` and `on-parse` (`./loop.ts`).
    */
   restore(kept: ReadonlyMap<string, unknown>): void {
     this.published.clear();
@@ -109,7 +109,7 @@ export class BlockItems {
 /**
  * The revision of `revisions` (one module's, in start order) covering `height`: the last whose start is at or before it
  * and whose stop, if it has one, is at or after it. A revision without a stop runs until the next one starts.
- * Undefined when none does. [CF-5]
+ * Undefined when none does.
  */
 export function revisionAt(revisions: readonly Revision[], height: bigint): Revision | undefined {
   let covering: Revision | undefined;

@@ -20,7 +20,7 @@ import type { DatabaseParts } from "../../src/config/database-parts.js";
 /**
  * The parts of the backup that need no running process (`src/backup/`, `src/cli/backup.ts`): the manifest's line and
  * its reading, `pg_dump`'s version, the command's arguments and its refusals before a database is read, a backup of a
- * database with nothing committed, and the backup at stop's refusal to overwrite a file that is no backup. [BK-1, BK-2]
+ * database with nothing committed, and the backup at stop's refusal to overwrite a file that is no backup.
  */
 
 const HASH = `0x${"ab".repeat(32)}`;
@@ -64,7 +64,7 @@ afterAll(() => {
   project?.remove();
 });
 
-describe("the manifest's line (BK-2)", () => {
+describe("the manifest's line", () => {
   it("is one SQL comment line of JSON, read back as written, an integer beyond 2^53 exactly", () => {
     const line = manifestLine(MANIFEST);
     expect(line.startsWith(MANIFEST_PREFIX)).toBe(true);
@@ -133,7 +133,7 @@ describe("the manifest's line (BK-2)", () => {
   });
 });
 
-describe("the tools (BK-1, Q85)", () => {
+describe("the tools", () => {
   it("reads pg_dump's version from what --version prints", () => {
     expect(pgDumpVersion("pg_dump (PostgreSQL) 18.6\n")).toEqual({ major: 18, version: "18.6" });
     expect(pgDumpVersion("pg_dump (PostgreSQL) 18.6 (Debian 18.6-1.pgdg120+1)")).toEqual({ major: 18, version: "18.6" });
@@ -164,7 +164,7 @@ describe("the tools (BK-1, Q85)", () => {
   });
 });
 
-describe("umbradb backup's arguments and its refusals before a database is read (BK-1)", () => {
+describe("umbradb backup's arguments and its refusals before a database is read", () => {
   it.each([
     [["x"], "backup takes no file of its own"],
     [["--out"], "--out takes a value: the backup file to write"],
@@ -275,7 +275,7 @@ describe("a backup with nothing to back up, and the backup at stop's file", () =
   });
 });
 
-describe("the manifest's facts of a database (BK-2)", () => {
+describe("the manifest's facts of a database", () => {
   it("reads the cursor, the identity, the history with its stops and empty data, and the stored state root", async () => {
     const db = await openPglite({ dataDir: "memory://", committedHeight: async () => null, developmentOptIn: true });
     const hash = (byte: number) => `'\\x${byte.toString(16).padStart(2, "0").repeat(32)}'::bytea`;
@@ -372,7 +372,7 @@ describe("pglite-tools' pg_dump of another major version", () => {
   });
 });
 
-describe("a restore's empty target and its refusals before reading the file (BK-3)", () => {
+describe("a restore's empty target and its refusals before reading the file", () => {
   it("counts a database as empty only with no schema of its own, and nothing in public", async () => {
     const db = await openPglite({ dataDir: "memory://", committedHeight: async () => null, developmentOptIn: true });
     try {
@@ -405,7 +405,7 @@ describe("a restore's empty target and its refusals before reading the file (BK-
       ].join("\n"),
     );
     const outcome = await runRestore({ file: join(dir, "none.backup"), config: file, cwd: project.dir });
-    // Neither a PostgreSQL publicDatabase nor privateLink (the earlier interim refusal is gone). [Q153]
+    // Neither a PostgreSQL publicDatabase nor privateLink (the earlier interim refusal is gone).
     expect(outcome).toMatchObject({
       restored: false,
       error: { code: "invalid-configuration", details: { reason: "public-database-transport" } },
@@ -413,7 +413,7 @@ describe("a restore's empty target and its refusals before reading the file (BK-
   });
 });
 
-describe("a restore's lines of the dump (BK-3; task 13.1)", () => {
+describe("a restore's lines of the dump", () => {
   it("are the text between line feeds after the manifest's line — a carriage return kept, a last line without a feed given, lines across reads joined — read to the end by a slow reader", async () => {
     const dir = mkdtempSync(join(tmpdir(), "umbradb-dump-lines-"));
     try {

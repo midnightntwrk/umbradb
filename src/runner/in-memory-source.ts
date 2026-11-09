@@ -1,6 +1,5 @@
 /**
  * The in-memory block source: the block-source interface over blocks held in memory, for tests and module authors.
- * [RN-14; design §3, §12]
  * - Its finalized head only rises ({@link InMemoryBlockSource.finalize}), as a node's does.
  * - The block at each height up to the head is the one it was given, or else {@link inMemoryBlock}'s, a chain whose
  *   hashes link.
@@ -10,14 +9,14 @@
  *
  * It holds no queue and no best blocks. `on-best-block` and `on-rollback` belong to the node-backed source, and so does
  * the finality check; the parent check is `core-block-commit`'s, for every source. The loop runs `on-fetch` and
- * `on-parse` itself (no `prepared`). [IN-4, IN-6]
+ * `on-parse` itself (no `prepared`).
  *
  * **Its block items** ({@link InMemoryBlockSource.blockItems}). The real `core-block-fetch` publishes, at `on-fetch`,
  * the items its block source gives (`src/backbone/core-block-fetch/`), so a module author's build with UmbraDB's
  * backbone runs on this source too. Unless the options give a block's own (`items`), its blocks have the runtime
  * {@link IN_MEMORY_SPEC_VERSION}, the ledger {@link IN_MEMORY_LEDGER}, the time {@link IN_MEMORY_START_MS} + height ×
  * 6,000 ms (6-second blocks), no extrinsics and empty metadata. It decodes nothing: the `ledger-table` is not read. Its
- * blocks have no chain events ({@link InMemoryBlockSource.blockEvents} gives none to `core-chain-events`). [CD-2, CD-4]
+ * blocks have no chain events ({@link InMemoryBlockSource.blockEvents} gives none to `core-chain-events`).
  */
 
 import { createHash } from "node:crypto";
@@ -29,11 +28,10 @@ import type { BlockRef, BlockSource } from "./block-source.js";
 /**
  * The `spec_version` of every in-memory block unless given: runtime 2.1's, which every known network's built-in ledger
  * table maps to v9 ({@link IN_MEMORY_LEDGER}); those tables map runtime 2.0 (2,000,000–2,000,999) to `v9-rc3`.
- * [CORE-ARCH §4.8, LG-3]
  */
 export const IN_MEMORY_SPEC_VERSION = 2_001_000;
 
-/** The ledger version of every in-memory block unless given: the one the tables pair with its runtime. [LG-3] */
+/** The ledger version of every in-memory block unless given: the one the tables pair with its runtime. */
 export const IN_MEMORY_LEDGER = "v9";
 
 /** The time of the in-memory block at height 0 unless given, in milliseconds since 1970: 2025-06-15T15:06:40Z. */
@@ -129,7 +127,7 @@ export class InMemoryBlockSource implements BlockSource {
     return this.#blockAt(this.#head);
   }
 
-  /** The block at the finalized head now: what {@link finalize} raised it to, at once. Changes nothing. [AE-3, AE-5] */
+  /** The block at the finalized head now: what {@link finalize} raised it to, at once. Changes nothing. */
   latestHead(): BlockRef {
     return this.#blockAt(this.#head);
   }
@@ -194,7 +192,7 @@ export class InMemoryBlockSource implements BlockSource {
     });
   }
 
-  /** A block's chain events for `core-chain-events`: none, as its blocks have no extrinsics. [CD-4] */
+  /** A block's chain events for `core-chain-events`: none, as its blocks have no extrinsics. */
   async blockEvents(_block: BlockRef): Promise<Uint8Array | null> {
     return null;
   }

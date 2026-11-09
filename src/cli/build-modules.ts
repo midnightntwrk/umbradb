@@ -2,11 +2,11 @@
  * The modules the `umbradb` command's build carries: UmbraDB's own (its backbone parts and core modules), and the user
  * modules the configuration file exports (`export const modules = [stats]`, `src/config/load.ts`'s
  * `LoadedConfig.modules`). For the command, the configuration file is the host program: it imports the modules it
- * ships, and nothing is loaded by name at run time. [MD-1, CF-1, LS-6, Q106 B; CORE-ARCH §4.10]
+ * ships, and nothing is loaded by name at run time.
  *
  * **How the file's modules join the build** ({@link commandBuild}). They are the build's user modules, in the order
  * the file lists them, after UmbraDB's own backbone parts and core modules. They are validated with them, as every
- * host's user modules are (`validateDeclarations`), so a fault names the user module by its position: [MD-2]
+ * host's user modules are (`validateDeclarations`), so a fault names the user module by its position:
  * - a list element that is no declaration (`invalid-declaration`);
  * - a module listed twice, or with the id of another (`duplicate-id`);
  * - a user module with an id of UmbraDB's own (`core`, `core-…`: `reserved-prefix`, which user modules are refused).
@@ -21,7 +21,7 @@
  *   `core-contract-logs-full` and the development-only `core-contract-logs-fast`.
  * - A private process's backbone: `core-chain`, then the private backbone of one private start
  *   (`src/backbone/private.ts`: `core-private-source` from its intake, `core-digest`), then the admin parts. It has no
- *   core module, since those are public. [PP-1]
+ *   core module, since those are public.
  */
 
 import { CORE_BLOCK_COMMIT } from "../backbone/core-block-commit/core-block-commit.js";
@@ -44,7 +44,7 @@ import type { ProcessSide } from "../config/core-settings.js";
 import type { ModuleDeclaration } from "../modules/declaration.js";
 import type { DeclarationSet } from "../modules/validation.js";
 
-/** The admin endpoints' parts, on either side. [AE-1] */
+/** The admin endpoints' parts, on either side. */
 const ADMIN_PARTS: readonly ModuleDeclaration[] = Object.freeze([CORE_HEALTH, CORE_STATUS, CORE_CONFIG]);
 
 /** A public (core) process's backbone parts (see the module comment). */
@@ -78,7 +78,7 @@ export interface CommandBuildOptions {
 /**
  * The command's build for a process of `options.side`, with `user` — the configuration file's `modules` — as its user
  * modules, not validated: the resolver validates it (`resolveDeclarations`, `src/runner/resolve.ts`), the only caller
- * outside the tests; see the module comment. [MD-2, LM-1]
+ * outside the tests; see the module comment.
  */
 export function commandBuild(user: readonly unknown[] = [], options: CommandBuildOptions = {}): DeclarationSet {
   if (options.side === "private") {

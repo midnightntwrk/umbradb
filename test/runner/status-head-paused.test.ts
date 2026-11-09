@@ -25,8 +25,7 @@ import { TestLink } from "../private/link.js";
  * The finalized head a paused private process reports — `status().head`, hence `/status`'s `head`, the lag, the state
  * and readiness — on PostgreSQL 18 and PGlite 0.5.10. A private process's head is the highest public cursor its block
  * source has read (`latestHead`, which reads nothing). A paused loop processes nothing and reads no head; a wait for
- * the public cursor that was already running when the loop paused still reads it, and so can raise the head. [AE-3,
- * AE-4, AE-5, PP-3, BK-1]
+ * the public cursor that was already running when the loop paused still reads it, and so can raise the head.
  * - Paused while it waits for the public cursor: when the public cursor rises from 3 to 6 and the wait is woken, the
  *   private cursor stays 3, and the head becomes 6 — lag 3, `syncing`, not ready with `readinessLag` 2 (503) —, the
  *   condition `paused` kept. The wait then ends at the pause between heights: a rise to 9 during the same pause reads
@@ -150,7 +149,7 @@ function publicReads(
   return { publicDatabase: publicDb.readerSetting };
 }
 
-describe.each(PRIVATE_BACKENDS)("a paused private process's head, on $name (AE-3, AE-4, BK-1)", (backend: PrivateBackend) => {
+describe.each(PRIVATE_BACKENDS)("a paused private process's head, on $name", (backend: PrivateBackend) => {
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), 60_000);
 

@@ -18,17 +18,15 @@ import { type PostgresTestDatabase, type PostgresTestServer, startPostgresServer
  * - a configuration history recorded by a startup standing in for the runner's (`../config/history-startup.ts`, with
  *   `core-block-commit`, whose `core_block_commit.blocks` holds the cursor);
  * - committed blocks up to a cursor, as a process leaves its database.
- * [A35, CF-10]
  *
  * A {@link Snapshot} is what the tests compare before and after a check: every table's row count, and the rows of
  * `core_chain.migrations` and `core_chain.config` with the transaction that wrote each (`xmin`), each list sorted.
- * [A35]
  *
  * Everything here reads and writes outside the command. The PGlite databases are opened through `openPgliteOn`, which
  * takes no operating-system lock, so the command (in this process or another) takes it as it would on a real database.
  */
 
-/** "Unchanged": every table and its row count, and the rows of the two `core_chain` tables with their `xmin`. [A35] */
+/** "Unchanged": every table and its row count, and the rows of the two `core_chain` tables with their `xmin`. */
 export interface Snapshot {
   /** Whether a database exists there at all (a PGlite directory may not). */
   readonly exists: boolean;
@@ -39,7 +37,7 @@ export interface Snapshot {
 
 /** A database the command checks. */
 export interface CheckTarget {
-  /** The database's parts, as a configuration file's `database` names it (`--database` takes no value). [Q167 A] */
+  /** The database's parts, as a configuration file's `database` names it (`--database` takes no value). */
   readonly database: DatabaseParts;
   /** Records the history of `entries` on a new database (cursor null), then commits blocks 0 to `cursor` (none: null). */
   setup(entries: readonly unknown[], cursor: bigint | null): Promise<void>;

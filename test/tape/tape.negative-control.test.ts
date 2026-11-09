@@ -10,16 +10,16 @@ import {
 
 /**
  * The committed negative controls of the tape checks: wrong tape tools, each of which must make the checks
- * `format.test.ts` and `node.test.ts` run (`checks.ts`) fail. [A68, A69, A70]
+ * `format.test.ts` and `node.test.ts` run (`checks.ts`) fail.
  *
  * - **A writer that orders a record's fields otherwise** (alphabetically): the committed tape is not what it writes,
- *   so the byte-for-byte round trip fails [A68].
+ *   so the byte-for-byte round trip fails.
  * - **A tape node that answers by first match** instead of by occurrence: four calls get A, A, A, A, not A, B, C, C
- *   [A69].
+ *.
  * - **A tape node that ignores `delayMs`**, and **one that delays the next record too** (a delay carried on to the
- *   answers after it, as a node answering from one queue would): the delay check fails either way [A69].
+ *   answers after it, as a node answering from one queue would): the delay check fails either way.
  * - **A tape node that delivers a notification before the calls recorded ahead of it** have been answered (it lets
- *   its walk through the session pass call records not yet answered): the notification order check fails [A70].
+ *   its walk through the session pass call records not yet answered): the notification order check fails.
  *
  * `vi.mock` replaces the rule functions of `tools/tape/rules.ts` and the line writer of `tools/tape/records.ts`
  * (`recordLine`, which the reader and writer of `tools/tape/tape.ts` call) in this file's module graph only; with
@@ -65,16 +65,16 @@ beforeEach(() => {
 });
 
 describe("the tape checks pass in this file's build with the real tools", { timeout: 60_000 }, () => {
-  it("A68's round trip", () => {
+  it("round trip", () => {
     expectGoldenRoundTrip();
   });
 
-  it("A69's occurrence and delay checks", async () => {
+  it("occurrence and delay checks", async () => {
     await expectAnswersByOccurrence();
     await expectDelayHonoured();
   });
 
-  it("A70's notification check", async () => {
+  it("notification check", async () => {
     await expectNotificationsAfterCalls();
   });
 });
@@ -99,14 +99,14 @@ async function assertionFailure(check: () => unknown): Promise<Failure> {
 }
 
 describe("negative controls: each wrong tool fails its check", { timeout: 60_000 }, () => {
-  it("a writer that orders the fields otherwise breaks A68's byte round trip", async () => {
+  it("a writer that orders the fields otherwise breaks the byte round trip", async () => {
     variant.current = "reordering-writer";
     const failure = await assertionFailure(expectGoldenRoundTrip);
     expect(String(failure.actual)).toContain('{"delayMs":2000,"method":"chain_getFinalizedHead","params":[],"result"');
     expect(String(failure.expected)).toContain('{"method":"chain_getFinalizedHead","params":[],"result"');
   });
 
-  it("a tape node answering by first match fails A69's occurrence check", async () => {
+  it("a tape node answering by first match fails the occurrence check", async () => {
     variant.current = "first-match";
     const failure = await assertionFailure(expectAnswersByOccurrence);
     expect([failure.actual, failure.expected]).toEqual([
@@ -115,19 +115,19 @@ describe("negative controls: each wrong tool fails its check", { timeout: 60_000
     ]);
   });
 
-  it("a tape node ignoring delayMs fails A69's delay check: the delayed answer came at once", async () => {
+  it("a tape node ignoring delayMs fails the delay check: the delayed answer came at once", async () => {
     variant.current = "no-delay";
     const failure = await assertionFailure(expectDelayHonoured);
     expect([failure.actual, failure.expected]).toEqual([true, false]);
   });
 
-  it("a tape node delaying the next record too fails A69's delay check: the next answer was late", async () => {
+  it("a tape node delaying the next record too fails the delay check: the next answer was late", async () => {
     variant.current = "delay-carried";
     const failure = await assertionFailure(expectDelayHonoured);
     expect([failure.actual, failure.expected]).toEqual([false, true]);
   });
 
-  it("a tape node delivering a notification before the calls ahead of it fails A70's check", async () => {
+  it("a tape node delivering a notification before the calls ahead of it fails the check", async () => {
     variant.current = "notify-early";
     const failure = await assertionFailure(expectNotificationsAfterCalls);
     expect(failure.expected).toEqual([]);

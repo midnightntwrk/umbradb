@@ -7,7 +7,7 @@ import { UmbraError } from "../../src/db/errors.js";
 /**
  * The restore's block check against a private process's public database (`checkPublicBlock`): the public head must be
  * at or above the backup's height and its block there the backup's — refused `backup-block-not-finalized` with no head,
- * a head below, no block there or another one, each message and its details. [BK-3, PP-12]
+ * a head below, no block there or another one, each message and its details.
  */
 
 const hash = (byte: number): Uint8Array => new Uint8Array(32).fill(byte);
@@ -26,7 +26,7 @@ function refusal(run: () => void): UmbraError {
   throw new Error("not refused");
 }
 
-describe("checkPublicBlock (task 17.5b)", () => {
+describe("checkPublicBlock", () => {
   it("passes with the head at or above the backup's height and the backup's block there", () => {
     expect(() => checkPublicBlock(side(block(10n, 10), block(10n, 10)), manifest)).not.toThrow();
     expect(() => checkPublicBlock(side(block(12n, 12), block(10n, 10)), manifest)).not.toThrow();

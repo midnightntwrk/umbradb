@@ -26,23 +26,22 @@ import {
  * the node's head commits a row of `stats` with its setting. This runs on PostgreSQL 18.6 and PGlite 0.5.10, both in
  * this process (`runProcessCommand` with the test's own signal source) and through the command itself in a child
  * process (the bundled `src/cli/main.ts`: Node.js's own type stripping, a real SIGTERM, the exit code).
- * [A152 CI, CF-1, LS-6, MD-1, Q106 B]
  *
  * The process is what the command builds: UmbraDB's backbone, the node source (`nodeSourceOf`) on the `core` entry's
  * `node` (a tape node serving a synthetic chain, `./run-fixtures.ts`), and the admin endpoints, served by default and
- * here on `127.0.0.1:0`. [Q128 B]
+ * here on `127.0.0.1:0`.
  *
  * Also covered:
  * - a file listing a module that it does not export and UmbraDB does not ship is refused, naming the module. This is
  *   a refusal of the configuration itself: the process logs it finding by finding and ends, and the command exits 1
- *   with no signal (the admin side is `test/admin/refused-configuration.test.ts`) [Q137 B, A157];
+ *   with no signal (the admin side is `test/admin/refused-configuration.test.ts`);
  * - a halted process stays up until signalled and exits 1;
  * - SIGINT stops it as SIGTERM does;
  * - `run`'s arguments;
  * - the committed negative control, a run that ignores the file's modules.
  */
 
-/** What `run` says of an `--update-hash` that is not a configuration hash. [PP-14] */
+/** What `run` says of an `--update-hash` that is not a configuration hash. */
 const UPDATE_HASH_FORM =
   "--update-hash takes the public configuration hash to accept, 0x and 64 lowercase hex digits, as a start that " +
   "stopped with public-config-changed names it";
@@ -125,7 +124,7 @@ function runHere(args: readonly string[], seams: Parameters<typeof runProcessCom
   };
 }
 
-describe.each(PROCESS_BACKENDS)("A152: umbradb run runs the user module the file exports, on $name", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("umbradb run runs the user module the file exports, on $name", (backend: ProcessBackend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
@@ -188,7 +187,7 @@ describe("umbradb run: a refusal, SIGINT, its arguments (PGlite 0.5.10)", () => 
     const file = write({ core: runCoreSettings(db.setting, "ws://127.0.0.1:9/node"), modules: null });
     const run = runInChild(project, ["--config", file]);
     try {
-      // A refusal of the configuration itself ends the process: no signal is sent, no admin listener opened. [Q137 B]
+      // A refusal of the configuration itself ends the process: no signal is sent, no admin listener opened.
       expect(await exitWithin(run, PATIENCE_MS)).toBe(EXIT.failed);
       expect(run.stderr()).toMatch(/^startup refused: invalid-configuration \(1 finding\); the process ends$/m);
       expect(run.stderr()).toMatch(
@@ -225,7 +224,7 @@ describe("umbradb run: a refusal, SIGINT, its arguments (PGlite 0.5.10)", () => 
 
   it("a file that cannot be loaded is refused by startup as itself, which logs why and ends: exit 1 unsignalled", async () => {
     // The tests' startProcess, which serves no admin endpoints (none opens here anyway: the refusal ends the process
-    // before any listener, which test/admin/refused-configuration.test.ts checks with the runner's own). [A157]
+    // before any listener, which test/admin/refused-configuration.test.ts checks with the runner's own).
     const run = runHere(["--config", "no-such.config.ts"], { start: startWithoutAdmin });
     const result = await endedByItself(run);
     expect(result?.code).toBe(EXIT.failed);
@@ -248,7 +247,7 @@ describe("umbradb run: a refusal, SIGINT, its arguments (PGlite 0.5.10)", () => 
       },
     });
     const result = inProcess(["run"], `${project.dir}/types`, { run });
-    // Refused as a file that cannot be loaded, the process ends by itself: no signal is sent. [Q137 B]
+    // Refused as a file that cannot be loaded, the process ends by itself: no signal is sent.
     const ended = await Promise.race([result, sleep(PATIENCE_MS, null)]);
     if (ended === null) signals.emit("SIGTERM");
     expect(ended).not.toBeNull();
@@ -333,7 +332,7 @@ describe("umbradb run: a refusal, SIGINT, its arguments (PGlite 0.5.10)", () => 
     [["--config", "a.config.ts", "--config", "b.config.ts"], "run takes --config once"],
     [["--confg", "a.config.ts"], "unknown option --confg of run"],
     [["--database", "postgres://u:pw-4-4a-RUN@h/db"], "unknown option --database of run"],
-    // --update-hash: the hash to accept, in the form a stop names it, given once. [PP-14, Q159]
+    // --update-hash: the hash to accept, in the form a stop names it, given once.
     [["--update-hash"], UPDATE_HASH_FORM],
     [["--update-hash="], UPDATE_HASH_FORM],
     [["--update-hash=0x12"], UPDATE_HASH_FORM],
@@ -352,7 +351,7 @@ describe("umbradb run: a refusal, SIGINT, its arguments (PGlite 0.5.10)", () => 
     expect(result.stderr).not.toContain("pw-4-4a-RUN");
   });
 
-  it("--update-hash=<hash> (or --update-hash <hash>) reaches the engine as its acceptPublicConfigHash, exactly as given (PP-14, Q159)", async () => {
+  it("--update-hash=<hash> (or --update-hash <hash>) reaches the engine as its acceptPublicConfigHash, exactly as given", async () => {
     const hash = `0x${"5a".repeat(32)}`;
     for (const args of [[`--update-hash=${hash}`], ["--update-hash", hash], ["--config", "absent.config.ts", `--update-hash=${hash}`]]) {
       const inputs: EngineInput[] = [];
@@ -379,7 +378,7 @@ describe("umbradb run: a refusal, SIGINT, its arguments (PGlite 0.5.10)", () => 
     expect(inputs.map((input) => "acceptPublicConfigHash" in input)).toEqual([false]);
   });
 
-  it("L55: umbradb run gives the engine the command's ports: admin, the log, the threads' streams, the backups' signals and stop", async () => {
+  it("umbradb run gives the engine the command's ports: admin, the log, the threads' streams, the backups' signals and stop", async () => {
     const inputs: EngineInput[] = [];
     const result = await inProcess(["run", "--config", "absent.config.ts"], project.dir, {
       run: runProcessCommand({
@@ -394,7 +393,7 @@ describe("umbradb run: a refusal, SIGINT, its arguments (PGlite 0.5.10)", () => 
     expect(input).toMatchObject({ adminListener: startAdminServer, workerOutput: "inherit", backupAtStop: true });
     expect(typeof input?.log).toBe("function");
     expect(typeof input?.backupSignals?.on).toBe("function");
-    // The engine's own ledger worker entry: the command's thread is Node.js's. [LG-10]
+    // The engine's own ledger worker entry: the command's thread is Node.js's.
     expect(input?.ledgerWorkerEntry).toBeUndefined();
   });
 

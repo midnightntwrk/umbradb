@@ -7,17 +7,17 @@ import { startPostgres, type TestDatabase, type TestServer } from "./postgres-da
 /**
  * The cross-backend comparison of the contents hash. The same rows, written by the same SQL into a PostgreSQL 18
  * database and a PGlite 0.5.10 database (PostgreSQL 18.6 inside), give the same contents hash. The two hashes are
- * compared with each other, not only each with an expectation. [A55, DT-3, DB-1]
+ * compared with each other, not only each with an expectation.
  *
  * Also compared directly: the row orders and the refusal messages. The per-backend suites (`module-tables.test.ts`,
- * `column-refusals.test.ts`) check those against hand-written expectations on each backend. [A54, DT-2, A58, DT-6]
+ * `column-refusals.test.ts`) check those against hand-written expectations on each backend.
  *
  * The database holds every column type the encoder handles (and its array, with NULL elements), every primary-key type,
  * a composite key, a text key whose column collation (`und-x-icu`) orders differently from bytes, a partitioned table,
  * a dropped column, an empty table, schema and table names whose byte order differs from creation and locale order,
  * objects that are not module tables, and enough rows that every table larger than a page spans several. It also
  * holds `timestamptz` values, arrays and a `timestamptz` key column, with fractions, times before 1970 and values
- * beyond 2^53 microseconds. [DT-1, DT-2, Q74]
+ * beyond 2^53 microseconds.
  */
 
 const DATABASE = `
@@ -90,13 +90,13 @@ const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
 const hashOf = async (db: TestDatabase, pageSize?: number) =>
   hex(await db.read((read) => contentsHash(read, pageSize === undefined ? {} : { pageSize })));
 
-describe("A55 (DT-3) — the same rows give the same contents hash on PostgreSQL 18 and PGlite 0.5.10", () => {
+describe("the same rows give the same contents hash on PostgreSQL 18 and PGlite 0.5.10", () => {
   it("[[determinism.contents-hash.cross-backend]] gives equal hashes on both backends, at several page sizes", async () => {
     const [tablesOnPostgres, tablesOnPglite] = await Promise.all([
       onPostgres.read((read) => moduleTables(read)),
       onPglite.read((read) => moduleTables(read)),
     ]);
-    // Not vacuous: the fixture's five module tables, in the contents hash's table order, the same on both. [DT-3]
+    // Not vacuous: the fixture's five module tables, in the contents hash's table order, the same on both.
     expect(tablesOnPglite).toEqual(tablesOnPostgres);
     expect(tablesOnPostgres.map((t) => `${t.schema}.${t.name}`)).toEqual([
       "M.ü",
@@ -125,7 +125,7 @@ describe("A55 (DT-3) — the same rows give the same contents hash on PostgreSQL
   }, 120_000);
 });
 
-describe("A54 (DT-2) — the same rows in the same order on both backends", () => {
+describe("the same rows in the same order on both backends", () => {
   it("lists every module table's rows in the same primary-key order and with the same values", async () => {
     const listAll = (db: TestDatabase) =>
       db.read(async (read) => {
@@ -155,7 +155,7 @@ describe("A54 (DT-2) — the same rows in the same order on both backends", () =
   }, 120_000);
 });
 
-describe("A58 (DT-6) — the same refusal, with the same message, on both backends", () => {
+describe("the same refusal, with the same message, on both backends", () => {
   const CASES: readonly (readonly [string, string])[] = [
     ["no primary key", "CREATE TABLE r.t (a integer)"],
     ["a now() default", "CREATE TABLE r.t (k integer PRIMARY KEY, at bigint DEFAULT extract(epoch from now()))"],

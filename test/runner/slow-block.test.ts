@@ -10,17 +10,17 @@ import { a142Problems, HOLD_MS, holding, observe, quietProblems, type Seen, SLOW
  * - the height commits once, with no retry;
  * - the condition is gone after the commit.
  *
- * With `slowBlockMs` 5000 it never appears. [A142, RN-17, AE-3, AE-5, Q71]
+ * With `slowBlockMs` 5000 it never appears.
  *
  * The oracles are `./slow-block-harness.ts`'s. The cases the requirement leaves to the design are
- * `./slow-block-cases.test.ts`, the committed negative controls `./slow-block.negative-control.test.ts`. [RN-17]
+ * `./slow-block-cases.test.ts`, the committed negative controls `./slow-block.negative-control.test.ts`.
  *
  * Each test waits on purpose (the callback's 3 s, then 1.5 s after the commit): its budget is that plus Vitest's 60 s.
  */
 
 const BUDGET_MS = HOLD_MS + 60_000;
 
-describe.each(PROCESS_BACKENDS)("A142: slow-block on $name", (backend) => {
+describe.each(PROCESS_BACKENDS)("slow-block on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 

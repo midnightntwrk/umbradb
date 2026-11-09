@@ -19,10 +19,10 @@ import { LOOP_BACKBONE } from "../../runner/loop-harness.js";
 /**
  * The backbone part `core-health`. These tests cover:
  * - its declaration: a backbone part with no points that requires and provides no item, placed after `core-digest`
- *   in the fixed backbone order and included in the command's build [AE-1, RN-3; CORE-ARCH §4.11];
- * - its two endpoints' answers, as functions of the published snapshot [AE-2, AE-4, Q70; CORE-ARCH §4.18];
+ *   in the fixed backbone order and included in the command's build;
+ * - its two endpoints' answers, as functions of the published snapshot;
  * - where the endpoints live: they are `core-health`'s, from its own folder under `src/backbone/`, with its tests
- *   beside it here, and the admin route table mounts them as the part gives them [A140].
+ *   beside it here, and the admin route table mounts them as the part gives them.
  */
 
 /** A snapshot of a process in `state` at lag `lag`, its readiness lag `readinessLag`, liveness timeout `liveness`. */
@@ -44,7 +44,7 @@ function snapshot(
 const view = (given: AdminSnapshot, beatAgeMs = 0): AdminView => ({ snapshot: given, beatAgeMs, nowNs: 0n });
 const get = (path: string, given: AdminView) => answerAdmin(ADMIN_ROUTES, "GET", path, given);
 
-describe("core-health's declaration (CORE-ARCH §4.11: no points, requires nothing, provides the endpoints)", () => {
+describe("core-health's declaration (no points, requires nothing, provides the endpoints)", () => {
   it("is a backbone part with no points, no items and no migrations, starting where the core starts", () => {
     expect(CORE_HEALTH).toMatchObject({
       id: "core-health",
@@ -64,7 +64,7 @@ describe("core-health's declaration (CORE-ARCH §4.11: no points, requires nothi
     expect(set.backbone.at(-1)).toBe(CORE_HEALTH);
   });
 
-  it("runs in RN-3's fixed order after core-digest, and is in the command's build after it", () => {
+  it("runs in the fixed order after core-digest, and is in the command's build after it", () => {
     // The test backbone (`core-block-fetch`'s stand-in among them), given in another order.
     const declarations = validateDeclarations({ backbone: [CORE_HEALTH, ...[...LOOP_BACKBONE].reverse()], core: [], user: [] });
     const graph = resolveGraph({ declarations, start: 1n, entries: [], developmentOptIn: false, cursor: null });
@@ -77,7 +77,7 @@ describe("core-health's declaration (CORE-ARCH §4.11: no points, requires nothi
   });
 });
 
-describe("/health/live (AE-2): the heartbeat's age against the liveness timeout, in every state", () => {
+describe("/health/live: the heartbeat's age against the liveness timeout, in every state", () => {
   it("answers 200 while the last tick is within the timeout and 503 once it is older, with the age and the timeout", () => {
     const following = snapshot("following", "0", null, 5_000);
     expect(get("/health/live", view(following, 0))).toEqual({
@@ -107,7 +107,7 @@ describe("/health/live (AE-2): the heartbeat's age against the liveness timeout,
   });
 });
 
-describe("/health/ready (AE-4): the part's decision from the published state, lag and readiness lag", () => {
+describe("/health/ready: the part's decision from the published state, lag and readiness lag", () => {
   it("answers 200 or 503 with the state, the lag and the readiness lag it decided from", () => {
     expect(get("/health/ready", view(snapshot("syncing", "500", 10)))).toEqual({
       status: 503,
@@ -139,7 +139,7 @@ describe("/health/ready (AE-4): the part's decision from the published state, la
   });
 });
 
-describe("A140 for /health/live and /health/ready: core-health's, from its own folder, its tests beside it", () => {
+describe("for /health/live and /health/ready: core-health's, from its own folder, its tests beside it", () => {
   it("the admin route table mounts core-health's two endpoints, as the part gives them, and nothing else of it", () => {
     const part = ADMIN_PARTS.find((each) => each.id === "core-health");
     expect(part).toBe(CORE_HEALTH_ENDPOINTS);
@@ -151,7 +151,7 @@ describe("A140 for /health/live and /health/ready: core-health's, from its own f
 
   it("a refused process answers both: live 200 while it ticks, ready 503 with the state refused", async () => {
     // Refused after the configuration is validated (PGlite without the development opt-in), so no database is opened.
-    // A refusal of the configuration itself would end the process instead, serving nothing. [CF-9]
+    // A refusal of the configuration itself would end the process instead, serving nothing.
     const run = startWithAdmin({ database: { kind: "pglite", memory: true }, extra: { developmentOptIn: false } });
     await expect(run.handle.started).rejects.toMatchObject({ code: "development-opt-in-required" });
     const origin = await run.origin();

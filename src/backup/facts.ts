@@ -1,6 +1,6 @@
 /**
  * What a backup's manifest records of its database. It is read through one read handle, the snapshot the dump is
- * taken in. [BK-1, BK-2; design §9.1]
+ * taken in.
  *
  * The facts:
  * - the committed height and its block's hash, from the cursor: `core-block-commit`'s, or a private process's own
@@ -9,10 +9,10 @@
  * - every `core_chain.config` and `core_chain.migrations` row;
  * - the ledger state root stored for that height, when `core_ledger_state.states` exists;
  * - the server's version;
- * - whether the database is a private process's, which is the case when it holds `core_private_source.cursor` [PP-12];
- * - the contents hash, which records the tables declared `deterministic: false` by name only [DT-3, Q76], and the
+ * - whether the database is a private process's, which is the case when it holds `core_private_source.cursor`;
+ * - the contents hash, which records the tables declared `deterministic: false` by name only, and the
  *   content-defined tables by their content: a database whose content-defined tables its content function refuses
- *   (`ledger-refcount-invalid`) gives no facts, so no backup is written [DT-3, LG-11].
+ *   (`ledger-refcount-invalid`) gives no facts, so no backup is written.
  */
 
 import { readCursor } from "../backbone/core-block-commit/sql.js";
@@ -48,12 +48,12 @@ async function present(read: Pick<ReadHandle, "query">, name: string): Promise<b
 
 /** What {@link readBackupFacts} reads: the manifest's fields of the database, and whether it is private. */
 export interface BackupFacts {
-  /** True for a private process's database. [PP-12] */
+  /** True for a private process's database. */
   readonly private: boolean;
   readonly manifest: Omit<Manifest, "format" | "umbradb" | "tool">;
 }
 
-/** Whether the database `read` sees is a private process's: one that holds `core_private_source.cursor`. [PP-12] */
+/** Whether the database `read` sees is a private process's: one that holds `core_private_source.cursor`. */
 export async function isPrivateDatabase(read: Pick<ReadHandle, "query">): Promise<boolean> {
   const [row] = await read.query(PRIVATE_SQL);
   return row?.private === true;

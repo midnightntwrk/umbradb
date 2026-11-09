@@ -5,14 +5,13 @@ import { it } from "vitest";
 import { readTape, type Tape, tapeId } from "../../../tools/tape/index.js";
 
 /**
- * The recorded tapes and how a test finds one. [Q123, Q130; acceptance's tape note]
+ * The recorded tapes and how a test finds one.
  *
  * **The manifest** (`./manifest.json`, committed): one entry per tape — its name, its file name (`<name>.tape.jsonl`),
  * the network and the range of heights it holds, its SHA-256 (its `tapeId`) and size in bytes, its records, the
  * endpoint it was recorded from with the node version that node reported and the day, and why its bounds are what
  * they are. The tapes themselves are published outside this repository:
  * https://github.com/midnight-experiments/umbradb-tapes/releases/tag/v0.10.0-rc.1
- * [TT-1, Q130; acceptance's tape note for the devnet filename mapping]
  *
  * **The lookup** ({@link findTape}): a tape is looked for in the directory named by `UMBRADB_TAPES`, under its file
  * name. Absent — the variable unset or empty, or no such file — it is reported absent with a reason naming the tape,
@@ -42,7 +41,7 @@ export interface RealTape {
   readonly file: string;
   /** `mainnet`, `preprod`, `preview`, `stagenet` or `custom` (the undeployed devnet). */
   readonly network: string;
-  /** The heights whose every allowed node call the tape holds, inclusive. [IN-8] */
+  /** The heights whose every allowed node call the tape holds, inclusive. */
   readonly from: number;
   readonly to: number;
   readonly sha256: string;
@@ -165,7 +164,7 @@ export function readManifest(path: string = MANIFEST_PATH): RealTapeManifest {
 /** The committed manifest. */
 export const MANIFEST: RealTapeManifest = readManifest();
 
-/** A tape found and checked: its file's path and bytes; `read()` parses them. [TT-1] */
+/** A tape found and checked: its file's path and bytes; `read()` parses them. */
 export interface FoundTape {
   readonly found: true;
   readonly tape: RealTape;

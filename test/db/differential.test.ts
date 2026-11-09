@@ -11,11 +11,11 @@ import { BACKENDS, TEST_CURSOR, TEST_SCHEMA, type TestBackend, type TestDatabase
  * results (every row and every value, its JavaScript type included) are compared with each other, not only with an
  * expectation. So are the rows a write affects and the errors a statement fails with (code, retryability, details,
  * message). The suites that iterate `BACKENDS` (`results.test.ts`, `handles.test.ts`, `read-height.property.test.ts`)
- * show that each backend passes on its own; this file shows the two agree. [A7 DIFF, DB-1]
+ * show that each backend passes on its own; this file shows the two agree.
  *
  * Date and time values are compared as the values the mapping makes of them, like every other value: RFC 3339 text,
  * `infinity` as the word, arrays element by element. Their case also checks them against values written out by hand.
- * `now()`, `version()` and other values that differ between two servers by nature are not in the corpus. [DB-2, Q68]
+ * `now()`, `version()` and other values that differ between two servers by nature are not in the corpus.
  */
 
 const SEED = 20261023;
@@ -78,7 +78,7 @@ const READS: readonly Case[] = [
                  '{"k":  1, "k": 18446744073709551615}'::json AS i, '"text"'::json AS j`,
   },
   {
-    name: "date and time values as values: RFC 3339 text, infinity as the word (Q68)",
+    name: "date and time values as values: RFC 3339 text, infinity as the word",
     sql: `SELECT '2026-10-23'::date AS d, '2026-10-23 10:00:00.123456'::timestamp AS ts,
                  '2026-10-23 10:00:00.123456+02'::timestamptz AS tz, '10:00:00.5'::time AS tm,
                  '10:00:00+02'::timetz AS ttz, '1 day 2 hours 3 minutes'::interval AS iv,
@@ -104,7 +104,7 @@ const READS: readonly Case[] = [
                  '[-2:-1][3:3]={{a},{b}}'::text[] AS shifted2, '{}'::text[] AS empty, ARRAY[ARRAY[ARRAY['x']]] AS deep`,
   },
   {
-    name: "types the mapping does not name come back as their text, arrays of them too (Q66)",
+    name: "types the mapping does not name come back as their text, arrays of them too",
     sql: `SELECT 'ok'::t.mood AS mood, ARRAY['ok', NULL]::t.mood[] AS moods, 5::t.positive AS dom,
                  ROW(1, 'x y')::t.pair AS pair, ROW(1, NULL) AS rec, '[1,3)'::int4range AS range,
                  '192.168.0.1/24'::inet AS ip, ARRAY['10.0.0.1'::inet] AS ips, B'1010' AS bits, '(1,2)'::point AS pt,
@@ -192,7 +192,7 @@ async function outcome(run: () => Promise<unknown>): Promise<unknown> {
   }
 }
 
-describe("A7 (DB-1) — identical results on PostgreSQL 18 and PGlite 0.5.10", () => {
+describe("identical results on PostgreSQL 18 and PGlite 0.5.10", () => {
   const [postgres, pglite] = BACKENDS as readonly [TestBackend, TestBackend];
   let pg: TestDatabase;
   let lite: TestDatabase;
@@ -253,7 +253,7 @@ describe("A7 (DB-1) — identical results on PostgreSQL 18 and PGlite 0.5.10", (
     });
   }
 
-  it("gives the date and time values written out by hand, on both backends (DB-2, Q68)", async () => {
+  it("gives the date and time values written out by hand, on both backends", async () => {
     const dates = READS.find((c) => c.name.startsWith("date and time values as values")) as Case;
     const [onPostgres, onPglite] = await both((db) => db.read((read) => read.query(dates.sql)));
     expect(onPglite).toEqual(onPostgres);

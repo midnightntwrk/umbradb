@@ -28,17 +28,16 @@ import { type LedgerScenario, ledgerScenario, type LedgerTx, RUNTIME_2_1 } from 
 /**
  * The committed negative controls of the ledger storage tests. Each is the real `core-ledger-state` with one rule
  * replaced (`coreLedgerState`'s options), run through the process on the same scenario as its criterion and held to
- * the same oracle (`./ledger-storage-checks.ts`), which must fail. [A100, A102, A103]
+ * the same oracle (`./ledger-storage-checks.ts`), which must fail.
  *
  * - A restart that does not have the worker load the stored state at the cursor halts at the next block, since the
- *   worker holds no state, so the next root is never the node's. [A102]
+ *   worker holds no state, so the next root is never the node's.
  * - Skipping the conversion, so F is applied with the state's own ledger (v8), gives another root at F than the
- *   node's: `root-mismatch` at F. [A100]
+ *   node's: `root-mismatch` at F.
  * - A window that releases one state too early has the state at 4,000 released at cursor 5,000, so its load fails.
- *   [A103]
- * - The contract run of A104 without persisting the contract's keys (no `core-contract-states`): the nodes of its state
+ * - The contract run without persisting the contract's keys (no `core-contract-states`): the nodes of its state
  *   of 10 that only those keys held, stored while the states held them, are deleted once those states are released, and
- *   its keys do not load. [A104]
+ *   its keys do not load.
  */
 
 const plain = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
@@ -72,11 +71,11 @@ async function runUntil(db: ProcessDatabase, records: readonly TapeRecord[], hea
   return { ...process, status };
 }
 
-describe.each(PROCESS_BACKENDS)("task 12.4's negative controls on $name", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("the negative controls on $name", (backend: ProcessBackend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("A102's control: a restart that does not load the state at the cursor never reaches the node's next root", async () => {
+  it("control: a restart that does not load the state at the cursor never reaches the node's next root", async () => {
     const scenario = await upgradeScenario();
     const db = await backend.database();
     await runUntil(db, cappedAt(scenario.records, 3n), 3n);
@@ -91,7 +90,7 @@ describe.each(PROCESS_BACKENDS)("task 12.4's negative controls on $name", (backe
     expect(problems).toContain("the restarted process loaded no state");
   }, PATIENCE_MS * 4);
 
-  it("A100's control: F applied without the conversion halts at F with root-mismatch", async () => {
+  it("control: F applied without the conversion halts at F with root-mismatch", async () => {
     const scenario = await upgradeScenario();
     const db = await backend.database();
     const process = await runUntil(db, scenario.records, scenario.head, { core: coreWith({ ledgerOf: (_b, parent) => parent }) });
@@ -101,7 +100,7 @@ describe.each(PROCESS_BACKENDS)("task 12.4's negative controls on $name", (backe
     expect(problems).toContain("the cursor is 3, not 7");
   }, PATIENCE_MS * 4);
 
-  it("A104's control: without the contract's keys persisted, the nodes of its state of 10 that only they held are deleted", async () => {
+  it("control: without the contract's keys persisted, the nodes of its state of 10 that only they held are deleted", async () => {
     const { scenario, contract } = await a104Scenario();
     const db = await backend.database();
     const seen = seenTables();
@@ -117,7 +116,7 @@ describe.each(PROCESS_BACKENDS)("task 12.4's negative controls on $name", (backe
     // Those nodes were stored while the ledger states held the contract's state of 10 …
     const stored15 = seen.tables.get(15n)?.rows ?? new Map<string, Uint8Array>();
     expect(only.filter((key) => stored15.has(key)).length).toBeGreaterThan(0);
-    // … and none of them is stored now: the oracle fails. [A104]
+    // … and none of them is stored now: the oracle fails.
     expect(only.filter((key) => end.has(key))).toEqual([]);
     // The contract's state of 10 no longer loads from its key: its value cannot be rebuilt from the stored nodes.
     const value = scenario.heights[10]?.contracts.get(`0x${plain(contract.address)}`)?.state as Uint8Array;
@@ -126,12 +125,12 @@ describe.each(PROCESS_BACKENDS)("task 12.4's negative controls on $name", (backe
   }, PATIENCE_MS * 3);
 });
 
-describe("A103's control (PGlite: 5,000 blocks once)", () => {
+describe("control (PGlite: 5,000 blocks once)", () => {
   const backend = PROCESS_BACKENDS.find((candidate) => candidate.kind === "pglite") as ProcessBackend;
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("a window that releases one state too early fails A103's load of 4,000 at cursor 5,000", async () => {
+  it("a window that releases one state too early fails the load of 4,000 at cursor 5,000", async () => {
     const scenario = await ledgerScenario({
       ledger: "v9",
       genesis: RAW.v9.LedgerState.blank(NETWORK_ID).serialize(),
@@ -143,14 +142,13 @@ describe("A103's control (PGlite: 5,000 blocks once)", () => {
     const seen = retentionSeen();
     const process = await runUntil(db, scenario.records, scenario.head, {
       // As in the window test's own run: the sweep off (it does not change the window, and makes 5,000 blocks several
-      // times slower). [A103]
+      // times slower).
       settings: { retainStates: 1_000, sweep: "off" },
       core: coreWith({ retainedFrom: (revisions, height) => retainedFrom(revisions, height) + 1n }),
       user: [retentionWatcher(seen, new Map([[5_001n, [4_000n, 4_001n]]]))],
     });
     expect(process.status).toMatchObject({ cursor: 5_001n, reason: null });
     // The window test requires the load of 4,000 to succeed: here it fails, and 4,001 is the oldest retained state.
-    // [A103]
     expect(seen.loads.get(5_001n)).toEqual(["4000 state-not-retained", loaded(scenario, 4_001n)]);
     expect(seen.loads.get(5_001n)?.[0]).not.toBe(loaded(scenario, 4_000n));
   }, PATIENCE_MS * 12);

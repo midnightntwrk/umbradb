@@ -4,7 +4,7 @@ import { free, hex } from "./node-format.js";
 import { describeNodeStoreExports } from "./node-store-suite.js";
 
 // The vendored ledger v8 package (ledger-8.1.2 with the patches in vendor/ledger/v8/patches), exercised on the built
-// package. [design §5.2]
+// package.
 
 describeNodeStoreExports("vendored ledger v8", {
   packagePath: V8_PACKAGE_PATH,

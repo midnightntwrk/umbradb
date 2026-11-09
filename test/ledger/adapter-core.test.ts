@@ -29,7 +29,6 @@ import { block, contractFixture, hex, NETWORK_ID, RAW } from "./adapter-fixtures
 //   strictness, the times, the fullness the post-block update gets, the parameters a system transaction's cost is taken
 //   with, and what a transaction the chain reports failed is spared;
 // - a cost the package cannot compute.
-// [LG-8, LG-15, LG-16, CC-2]
 
 const SOURCE = { logicalSegment: 1, physicalSegment: 2 };
 const SERIALIZED = Uint8Array.of(0x6d, 0x69);
@@ -57,7 +56,7 @@ describe("fieldBytes: a field element as the ledger serializes it", () => {
   });
 });
 
-describe("eventKindOf: an event's kind (LG-16)", () => {
+describe("eventKindOf: an event's kind", () => {
   it("reads the kinds the packages describe from their tag", () => {
     const tags = {
       zswapInput: "zswap-input",
@@ -93,7 +92,7 @@ describe("eventKindOf: an event's kind (LG-16)", () => {
   });
 });
 
-describe("ledgerEventOf: LG-16's extracted fields", () => {
+describe("ledgerEventOf: the extracted fields", () => {
   it("takes a zswap input's nullifier and contract", () => {
     expect(ledgerEventOf(event({ tag: "zswapInput", nullifier: A, contract: C }), "zswap-input", 4)).toEqual({
       transaction: 4,
@@ -141,7 +140,7 @@ describe("ledgerEventOf: LG-16's extracted fields", () => {
   });
 });
 
-describe("vmLogOf: a contract log (CC-2)", () => {
+describe("vmLogOf: a contract log", () => {
   const log = (eventType: string, entryPoint: Uint8Array | string): RawEvent =>
     event({ tag: "contractLog", address: A, entryPoint, loggedItem: { version: 2, eventType, data: "the value" } });
   const serialize = (data: unknown): Uint8Array => Uint8Array.from(Buffer.from(String(data)));
@@ -165,7 +164,7 @@ describe("vmLogOf: a contract log (CC-2)", () => {
   });
 });
 
-describe("apply: a transaction whose cost the package cannot compute (LG-8)", () => {
+describe("apply: a transaction whose cost the package cannot compute", () => {
   it("is a failure that leaves the state as it was, as the node's failed extrinsic does", {
     timeout: 120_000,
   }, async () => {
@@ -364,7 +363,7 @@ const cost = (n: bigint): SyntheticCost => ({
   bytesChurned: 5n * n,
 });
 
-describe("apply, on a package that records what it is handed (LG-8, LG-15)", () => {
+describe("apply, on a package that records what it is handed", () => {
   it("gives the ledger the block's context, the current state, a strictness without proof checks or balancing", () => {
     const { adapter, recorded } = fakePackage([{}, {}]);
     adapter.apply(adapter.emptyState(), input([regular(0), regular(1)]));
@@ -412,7 +411,7 @@ describe("apply, on a package that records what it is handed (LG-8, LG-15)", () 
     expect((state as unknown as { name: string }).name).toBe("after the block");
   });
 
-  it("adds a system transaction's cost, taken with the parameters of the state before it (task 12.1a)", () => {
+  it("adds a system transaction's cost, taken with the parameters of the state before it", () => {
     const { adapter, recorded } = fakePackage([{ cost: cost(1n) }, { cost: cost(10n) }], cost(1_000n));
     adapter.apply(adapter.emptyState(), input([regular(0), system(), regular(1)]));
     expect(recorded.systemCosts).toEqual(["after tx 0 (0)"]);
@@ -420,7 +419,7 @@ describe("apply, on a package that records what it is handed (LG-8, LG-15)", () 
     expect(recorded.post).toEqual({ state: "after tx 1 (2)", time: T, fullness: cost(1_011n) });
   });
 
-  it("adds the costs as the ledger does, each dimension saturating at 2^64 - 1 (task 12.1a)", () => {
+  it("adds the costs as the ledger does, each dimension saturating at 2^64 - 1", () => {
     // `u64::MAX`, written out: the largest cost the package's `SyntheticCost` takes.
     const U64_MAX = 18_446_744_073_709_551_615n;
     expect(COST_MAX).toBe(U64_MAX);
@@ -440,7 +439,7 @@ describe("apply, on a package that records what it is handed (LG-8, LG-15)", () 
     expect(recorded.post).toEqual({ state: `blank ${NETWORK_ID}`, time: T, fullness: ZERO });
   });
 
-  it("does not ask the ledger about a transaction the chain reports failed, nor count its cost (task 12.1a)", () => {
+  it("does not ask the ledger about a transaction the chain reports failed, nor count its cost", () => {
     const { adapter, recorded } = fakePackage(
       [{ cost: cost(1n), intents: [1, 2] }, { cost: cost(10n) }, { cost: cost(100n) }],
       cost(1_000n),
@@ -464,7 +463,7 @@ describe("apply, on a package that records what it is handed (LG-8, LG-15)", () 
     expect(recorded.post).toEqual({ state: "after tx 2 (1)", time: T, fullness: cost(110n) });
   });
 
-  it("keeps the parent's time for the first regular transaction after one the chain reports failed (task 12.1a)", () => {
+  it("keeps the parent's time for the first regular transaction after one the chain reports failed", () => {
     const { adapter, recorded } = fakePackage([{}, { malformedAt: [T] }]);
     const skewed = input([regular(0), regular(1)], { firstRegularAtParentTime: true, outcomes: ["failure", "success"] });
     const { output } = adapter.apply(adapter.emptyState(), skewed);
@@ -472,7 +471,7 @@ describe("apply, on a package that records what it is handed (LG-8, LG-15)", () 
     expect(output.results.map((r) => r.outcome)).toEqual(["failure", "success"]);
   });
 
-  it("refuses chain outcomes that are not one per transaction (task 12.1a)", () => {
+  it("refuses chain outcomes that are not one per transaction", () => {
     const { adapter, recorded } = fakePackage([{}]);
     expect(() => adapter.apply(adapter.emptyState(), input([regular(0)], { outcomes: [] }))).toThrow(
       new RangeError("block 9: 0 chain outcomes for 1 transactions"),
@@ -525,7 +524,7 @@ describe("apply, on a package that records what it is handed (LG-8, LG-15)", () 
   });
 });
 
-describe("networkIdOf and the state's summary (task 12.3; IN-7, LG-16)", () => {
+describe("networkIdOf and the state's summary", () => {
   it("reads a state's network id from its rendering, escapes included, and refuses a rendering without one", () => {
     expect(networkIdOf({ toString: () => 'LedgerState { network_id: "mainnet", parameters: … }' })).toBe("mainnet");
     expect(networkIdOf({ toString: () => 'LedgerState { network_id: "a\\"b\\\\c", parameters: … }' })).toBe('a"b\\c');
@@ -533,7 +532,7 @@ describe("networkIdOf and the state's summary (task 12.3; IN-7, LG-16)", () => {
     expect(() => networkIdOf({ toString: () => 'ZswapState { network_id: "x" }' })).toThrow(/names no network id/);
   });
 
-  it("gives the real states' network ids, an empty state of another network, LG-16's tree values, and frees", async () => {
+  it("gives the real states' network ids, an empty state of another network, the tree values, and frees", async () => {
     const adapter = await loadLedgerPackage("v9", { networkId: NETWORK_ID });
     const preview = adapter.emptyState("preview");
     expect(adapter.networkIdOf(preview)).toBe("preview");

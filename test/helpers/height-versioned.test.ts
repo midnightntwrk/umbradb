@@ -33,20 +33,20 @@ import {
  * The height-versioned-table helper, refactored from 0.9.5's TemporalKV with block heights in place of its wall-clock
  * times. It is a library function a module calls to get its tables' migration, and the read, write and delete
  * functions over the handles its callbacks are given. It is never a module of its own, and never has a connection or a
- * transaction of its own. [SH-2, SH-3, Q27, Q30; CORE-ARCH §4.11a; design §1, §10, §12]
+ * transaction of its own.
  *
- * Its property is in `height-versioned.property.test.ts`. [A60]
+ * Its property is in `height-versioned.property.test.ts`.
  *
  * The one-change-per-block check is here, with its committed negative control: the `lenient` table of
  * `height-versioned-harness.ts`, which lets a second change of a key in one block through. That the cursor table does
- * not share this rule is checked, unchanged, by the test "does not share SH-3" in `cursor-table.test.ts`. [A61, SH-3]
+ * not share this rule is checked, unchanged, by the test "does not take one change per key per block" in `cursor-table.test.ts`.
  *
  * The cases of 0.9.5's `test/postgres/temporal-kv.test.ts` that still apply are here, retargeted. That file stays, on
  * `PgTemporalKV`, until the class is retired with it (OUTDATED). The cases:
  * - a value read as of a version's start and within it, and nothing before the key existed (`getAt`);
- * - a second write of a key in one transaction refused at the trigger (now one block); [SH-3]
+ * - a second write of a key in one transaction refused at the trigger (now one block);
  * - writes of a rolled-back block gone (`opts.tx`);
- * - history versions that neither overlap nor gap (0.9.5's property P5, now the height-versioned property). [A60]
+ * - history versions that neither overlap nor gap (0.9.5's property P5, now the height-versioned property).
  *
  * That file's CAS (`expectedVersion`), version-number addressing, `listKeys`, transaction handles, schema threading,
  * abort signals and validation cases test the 0.9.5 API, which the helper does not have.
@@ -155,13 +155,13 @@ const version = (from: number, to: number | null, value: VersionedValue): Stored
 
 class BlockFails extends Error {}
 
-describe("the height-versioned-table helper itself (SH-2; design §12's heightVersionedTable)", () => {
+describe("the height-versioned-table helper itself (the heightVersionedTable)", () => {
   it("gives the migration that creates its two tables and the trigger, with the module's id; its SQL is fixed", () => {
     const sql = expectedSql("token_metadata", "metadata");
     expect(METADATA.migration("001")).toEqual({ id: "001", sql });
     expect(METADATA.migration("014")).toEqual({ id: "014", sql });
     // The SQL is part of the checksum of the module's migration: another text in a later build would make every
-    // database that applied it refuse to start (`migration-checksum-changed`). This pins the bytes. [DB-9]
+    // database that applied it refuse to start (`migration-checksum-changed`). This pins the bytes.
     expect(migrationChecksum(sql)).toBe("5288b37b8d2f15758ab36123ff19160f114aba2dfb93083896fcbe688cce6106");
     // Names are quoted, so a reserved word is a name like any other.
     expect(heightVersionedTable({ schema: "order", table: "select" }).migration("001").sql).toBe(
@@ -270,7 +270,7 @@ async function stateOf(database: HelperDatabase, key: string): Promise<{ version
  * The one-change-per-block check: what it found wrong with `table`, empty when a second change of `key` in one block
  * failed that write and the block. Block 1 writes `key` = 1. Block 2 writes 2, then 3: the second write must be
  * refused with SQLSTATE 23505 and the block must fail. Afterwards `key` must still be 1 from block 1, with no version
- * of block 2, and the committed height must not have moved. [A61, SH-3]
+ * of block 2, and the committed height must not have moved.
  */
 async function secondChangeProblems(
   database: HelperDatabase,
@@ -312,7 +312,7 @@ async function secondChangeProblems(
 
 // Each test runs a few blocks on a database migrated with four parts: seconds under the parallel conformance run's
 // load, so each test has two minutes.
-describe.each(BACKENDS)("the height-versioned table on $name (SH-2, SH-3)", { timeout: 120_000 }, (backend) => {
+describe.each(BACKENDS)("the height-versioned table on $name", { timeout: 120_000 }, (backend) => {
   let database: HelperDatabase;
 
   beforeAll(async () => {
@@ -380,7 +380,6 @@ describe.each(BACKENDS)("the height-versioned table on $name (SH-2, SH-3)", { ti
     expect(shape.current.table).toEqual(table(["fillfactor=90"]));
     expect(shape.history.table).toEqual(table(null));
     // No collation of their own: the byte order of rows is applied by the component where rows are read in key order.
-    // [DT-2]
     const column = (name: string, type: string, collation: string | null = null) => ({
       name,
       type,
@@ -451,7 +450,7 @@ describe.each(BACKENDS)("the height-versioned table on $name (SH-2, SH-3)", { ti
     ]);
   });
 
-  it("SH-2's scenario through the runner: A at 10, B at 20, deleted at 30; read at every height", async () => {
+  it("through the runner: A at 10, B at 20, deleted at 30; read at every height", async () => {
     const { db } = await freshDatabase(backend);
     const seen: [bigint, bigint | null, VersionedValue | undefined, VersionedValue | undefined][] = [];
     const module = tokenMetadata({
@@ -508,7 +507,7 @@ describe.each(BACKENDS)("the height-versioned table on $name (SH-2, SH-3)", { ti
     expect(above).toEqual([database.committed, "new"]);
   });
 
-  it("adds no version for the value the key has: the same members in another order, 1 as 1n (SH-2)", async () => {
+  it("adds no version for the value the key has: the same members in another order, 1 as 1n", async () => {
     const digest = () =>
       database.db.read((r) =>
         r.query(
@@ -534,7 +533,7 @@ describe.each(BACKENDS)("the height-versioned table on $name (SH-2, SH-3)", { ti
       version(Number(from), null, { a: 1, b: [2, "x"], c: null }),
     ]);
     expect(await writer()).toEqual(before);
-    // Nothing changed, so no table of the module has a new digest at this height. [DT-4]
+    // Nothing changed, so no table of the module has a new digest at this height.
     expect(await digest()).toEqual(digests);
     // A different value closes the version: an array's order counts.
     await database.block(async (w, b) => {
@@ -578,7 +577,7 @@ describe.each(BACKENDS)("the height-versioned table on $name (SH-2, SH-3)", { ti
     expect((await stateOf(database, "null/k")).versions).toEqual([version(Number(written), Number(deleted), null)]);
   });
 
-  it("keeps canonical JSON losslessly in both tables: integers beyond 2^53 exactly (DB-2)", async () => {
+  it("keeps canonical JSON losslessly in both tables: integers beyond 2^53 exactly", async () => {
     const values: VersionedValue[] = [
       9_007_199_254_740_993n,
       2n ** 63n - 1n,
@@ -600,7 +599,7 @@ describe.each(BACKENDS)("the height-versioned table on $name (SH-2, SH-3)", { ti
     expect(read).toEqual(values);
   });
 
-  it("refuses non-canonical JSON (DT-1, Q57): a fraction or an integer beyond 64 bits fails the block", async () => {
+  it("refuses non-canonical JSON: a fraction or an integer beyond 64 bits fails the block", async () => {
     await database.block(async (w, b) => {
       await METADATA.write(w, b, "canonical/k", 1);
     });
@@ -635,7 +634,7 @@ describe.each(BACKENDS)("the height-versioned table on $name (SH-2, SH-3)", { ti
     expect((await stateOf(database, "json/k")).now).toBe("kept");
   });
 
-  describe("A61: a second change of a key in one block fails the block (SH-3)", () => {
+  describe("a second change of a key in one block fails the block", () => {
     it("refuses the second write with 23505, rolls the block back and leaves the key as it was", async () => {
       expect(await secondChangeProblems(database, METADATA, "a61/k")).toEqual([]);
     });
@@ -749,7 +748,7 @@ describe.each(BACKENDS)("the height-versioned table on $name (SH-2, SH-3)", { ti
       expect((await stateOf(database, "caught/k")).versions).toEqual([]);
     });
 
-    it("halts the finalized loop at that height, a callback error of the module in on-db-write (RN-8)", async () => {
+    it("halts the finalized loop at that height, a callback error of the module in on-db-write", async () => {
       const { db } = await freshDatabase(backend);
       const module = tokenMetadata({
         async "on-db-write"(_p, b, w) {
@@ -779,7 +778,7 @@ describe.each(BACKENDS)("the height-versioned table on $name (SH-2, SH-3)", { ti
       ]);
     });
 
-    it("does not refuse what changes nothing (Q110): the value a key has, a delete of a key with none", async () => {
+    it("does not refuse what changes nothing: the value a key has, a delete of a key with none", async () => {
       await database.block(async (w, b) => {
         await METADATA.write(w, b, "nothing/same-first", "v");
         await METADATA.write(w, b, "nothing/same-after", "v");
@@ -888,7 +887,7 @@ describe.each(BACKENDS)("the height-versioned table on $name (SH-2, SH-3)", { ti
     expect((await stateOf(database, "owned/k")).versions).toEqual([version(Number(at), null, "token-metadata")]);
   });
 
-  it("keeps no handle: a use of a handle kept past its callback fails with handle-closed (DB-3, A10)", async () => {
+  it("keeps no handle: a use of a handle kept past its callback fails with handle-closed", async () => {
     let kept: [BlockWriteHandle, BlockContext] | undefined;
     const closedUses: UmbraError[] = [];
     await database.block(
@@ -946,7 +945,7 @@ describe.each(BACKENDS)("the height-versioned table on $name (SH-2, SH-3)", { ti
     expect(third.get("metadata")?.[1]).not.toEqual(first.get("metadata")?.[1]);
   });
 
-  it("keeps keys as text compared by bytes, read in DT-2's key order and encoded as DT-1 says (DT-3)", async () => {
+  it("keeps keys as text compared by bytes, read in the key order and encoded by encodeRow", async () => {
     const fresh = await versionedDatabase(backend);
     // A precomposed and a decomposed "é" are two keys; a no-break space sorts after the letters.
     const keys = ["b", "B", "a", "é", "é", "", "a "];

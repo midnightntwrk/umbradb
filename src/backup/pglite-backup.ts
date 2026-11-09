@@ -1,16 +1,15 @@
 /**
  * A PGlite database's backup as text: its manifest (`./manifest.ts`) and the dump that the `pg_dump` of
  * `@electric-sql/pglite-tools` writes. Both are taken in one exclusive job of the database's queue (`exclusiveJob`), so
- * commits wait and both see one committed height. [BK-1, BK-2, DB-4; design §9.1, §9.2]
+ * commits wait and both see one committed height.
  *
  * `writeBackup` (`./backup.ts`) writes them to a file; the browser page's core worker hands them to the page, which
  * saves them. This module imports nothing of Node.js, so the browser build bundles it as it is. The caller brings the
  * `pg_dump` function: `./tools.ts`'s `loadPgliteDump` in Node.js, the page's bundled `pglite-tools` in the browser.
- * [BK-5]
  *
  * **In this order:**
  * - A private process's backup is refused without the development opt-in (`private-backup-refused`): by its side,
- *   before anything is read, and by its database (`core_private_source.cursor`) inside the job. [PP-12]
+ *   before anything is read, and by its database (`core_private_source.cursor`) inside the job.
  * - The facts (`./facts.ts`) are read in the job.
  * - The engine is dumped. The tool adds `--inserts`, and `--no-owner` and `--no-privileges` are given. Its
  *   `DEALLOCATE ALL`, and everything it set on the one session, end with the job.
@@ -28,7 +27,7 @@ import type { TableName } from "../deterministic-postgresql/index.js";
 import { type BackupFacts, isPrivateDatabase, readBackupFacts } from "./facts.js";
 import { BACKUP_FORMAT, type Manifest, type ManifestTool } from "./manifest.js";
 
-/** The PostgreSQL major version both backends run, and so the one `pg_dump` must have. [Q82] */
+/** The PostgreSQL major version both backends run, and so the one `pg_dump` must have. */
 export const PG_DUMP_MAJOR = 18;
 
 /** The version `pg_dump --version` printed (`pg_dump (PostgreSQL) 18.6 …`), or null when it printed none. */
@@ -45,16 +44,16 @@ export type PgliteDump = (options: { readonly pg: PGlite; readonly args?: string
 export interface DumpInput {
   /** The database, opened through the database API. */
   readonly db: Database;
-  /** The tables declared `deterministic: false`: the contents hash records them by name only. [MD-1, Q76] */
+  /** The tables declared `deterministic: false`: the contents hash records them by name only. */
   readonly optedOut: readonly TableName[];
   /**
    * The build's content-defined tables: the contents hash takes them by their content, and a content function's
-   * refusal writes no backup. None unless given. [DT-3, LG-11]
+   * refusal writes no backup. None unless given.
    */
   readonly contentDefined?: readonly ContentDefinedTables[];
-  /** The process's side: a private process's backup needs the development opt-in. [PP-12] */
+  /** The process's side: a private process's backup needs the development opt-in. */
   readonly side?: ProcessSide;
-  /** The development opt-in of the process's `core` revision. [CF-4, Q102] */
+  /** The development opt-in of the process's `core` revision. */
   readonly developmentOptIn: boolean;
 }
 
@@ -63,12 +62,12 @@ export interface SnapshotSeams {
   /**
    * For the negative control of the consistent-snapshot test only: the dump is taken outside the manifest's snapshot.
    * The facts are read and their read ended, then `between` is awaited (while blocks commit), then the dump is taken
-   * in a snapshot of its own. [A124]
+   * in a snapshot of its own.
    */
   readonly outsideSnapshot?: { between(): Promise<void> };
 }
 
-/** `private-backup-refused`. [PP-12] */
+/** `private-backup-refused`. */
 export function privateRefused(): UmbraError {
   return new UmbraError(
     "private-backup-refused",
@@ -84,7 +83,7 @@ export function manifestOf(facts: BackupFacts, tool: ManifestTool): Manifest {
   return Object.freeze({ format: BACKUP_FORMAT, ...facts.manifest, umbradb: UMBRADB_VERSION, tool });
 }
 
-/** The facts of the database `read` sees, a private database refused without the opt-in. [PP-12] */
+/** The facts of the database `read` sees, a private database refused without the opt-in. */
 export async function factsOf(read: Parameters<typeof readBackupFacts>[0], input: DumpInput): Promise<BackupFacts> {
   if (!input.developmentOptIn && (await isPrivateDatabase(read))) throw privateRefused();
   return readBackupFacts(read, { optedOut: input.optedOut, contentDefined: input.contentDefined ?? [] });

@@ -1,23 +1,23 @@
 /**
  * The core's lockstep bookkeeping: what the core knows of each private instance its `core` entry lists in
  * `lockstepInstances`, and the wait the finalized loop makes before `BEGIN` of each height until those instances let it
- * go on. [PP-6, PP-7, PP-9, Q5; design §8]
+ * go on.
  *
  * **What it learns.** The core learns each instance's height only from the instance's `hello` and `report` messages, so
  * a restart of the core cannot deadlock. The core's transport (`./core-transport.ts`) tells it:
  * - each listed instance's {@link Lockstep.hello}: its committed height then (its start − 1 before its first commit),
- *   and whether the core refused it with `lockstep-behind` [PP-7];
+ *   and whether the core refused it with `lockstep-behind`;
  * - each {@link Lockstep.reported} height whose hash the core found to be the public block's;
  * - a report whose hash was not the public block's ({@link Lockstep.mismatched}: `report-hash-mismatch`, and the
  *   instance's connection is closed);
  * - the close of the connection that held the instance's id ({@link Lockstep.disconnected}).
  *
  * A `hello` sets the height it gives, even below the one known (the instance's database was replaced); a report only
- * raises it. [PP-6]
+ * raises it.
  *
  * **Who holds height h** ({@link Lockstep.holding}):
  * - a listed instance that is not connected, including one not seen since the core started, whose height the core
- *   cannot know (the core waits for a lockstep instance that is down) [Q24];
+ *   cannot know (the core waits for a lockstep instance that is down);
  * - one the core refused;
  * - one whose committed height is below h − 1.
  *
@@ -26,13 +26,12 @@
  * ({@link Lockstep.condition}: the height and every instance holding it, as `/status` shows it). It logs the instances
  * that hold the height because they are down or refused, once each time that set changes, and logs when the height
  * resumes. An instance that is still processing h − 1 is not logged: every height waits for that in lockstep.
- * [PP-6, AE-3]
  */
 
-/** Why the core does not count a listed instance. [PP-6, PP-7] */
+/** Why the core does not count a listed instance. */
 export type LockstepRefusal = "lockstep-behind" | "report-hash-mismatch";
 
-/** A listed instance as the core sees it: its id, its connection, its synced height. [PP-9] */
+/** A listed instance as the core sees it: its id, its connection, its synced height. */
 export interface LockstepInstance {
   readonly instance: string;
   /** Whether a connection past its `hello` holds its id now. */
@@ -43,7 +42,7 @@ export interface LockstepInstance {
   readonly refused: LockstepRefusal | null;
 }
 
-/** The condition `waiting-for-lockstep`: the core waits before `BEGIN` of `height` for `instances`. [PP-6, AE-3] */
+/** The condition `waiting-for-lockstep`: the core waits before `BEGIN` of `height` for `instances`. */
 export interface LockstepCondition {
   readonly code: "waiting-for-lockstep";
   readonly height: bigint;
@@ -101,7 +100,7 @@ export class Lockstep {
     return this.#entries.has(instance);
   }
 
-  /** A connection holds `instance`'s id from its `hello` at `height` on, refused `lockstep-behind` or not. [PP-7] */
+  /** A connection holds `instance`'s id from its `hello` at `height` on, refused `lockstep-behind` or not. */
   hello(instance: string, height: bigint, refused: "lockstep-behind" | null): void {
     this.#change(instance, (entry) => {
       entry.connected = true;
@@ -117,7 +116,7 @@ export class Lockstep {
     });
   }
 
-  /** `instance` reported a hash that is not the public block's: refused until its next `hello`. [PP-6] */
+  /** `instance` reported a hash that is not the public block's: refused until its next `hello`. */
   mismatched(instance: string): void {
     this.#change(instance, (entry) => {
       entry.refused = "report-hash-mismatch";

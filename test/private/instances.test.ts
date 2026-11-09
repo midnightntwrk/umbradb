@@ -7,13 +7,13 @@ import type { InstanceView } from "../../src/private/core-transport.js";
  * The core's view of its private instances for `/status`, built from its lockstep bookkeeping (every listed instance,
  * connected or not, its height as the core learned it) and its transport (every connected instance). Each instance
  * appears once — listed ones in the list's order, then the others by id — with exactly its id, connection, lockstep
- * flag and synced height, nothing else of what the transport knows (the hash of its last block). [PP-9, AE-5]
+ * flag and synced height, nothing else of what the transport knows (the hash of its last block).
  */
 
 const view = (instance: string, height: bigint, lockstep = false): InstanceView =>
   Object.freeze({ instance, lockstep, height, hash: `0x${"ab".repeat(32)}` });
 
-describe("privateInstancesOf (PP-9)", () => {
+describe("privateInstancesOf", () => {
   it("shows every listed instance from the bookkeeping, connected or not, and every other connected one", () => {
     const lockstep = new Lockstep({ listed: ["b-listed", "a-listed"] });
     lockstep.hello("a-listed", 7n, null);

@@ -2,21 +2,20 @@
  * The channel carrier of a private process's side of the process transport: each connection a new channel its host
  * opens (`privateSide: { connect }`), over UmbraDB's end of it (`ChannelEndpoint`, `src/library/channels.ts`: the
  * envelope, the pings, the size of a message). The session logic is `./private-transport.ts`'s, as over a socket.
- * [LM-6, PP-4; design §5.4]
  *
  * **Each (re)connection** calls `connect(signal)` and takes the channel it resolves with; the endpoint registers on it
  * in the same turn, and the transport sends its `hello`. A `connect()` that rejects (or resolves with no channel, or
  * throws) is a lost connection: the transport connects again after its back-off, as after a socket that did not open.
  * What the host gives is read inside a guard, never thrown out of the handlers of its promise (no rejection is left
  * unhandled): a value whose members cannot be read — a getter or a proxy's trap that throws — is no channel, and a
- * rejection whose error cannot be read is logged by its type. [LM-6, LM-2]
+ * rejection whose error cannot be read is logged by its type.
  *
  * **At the stop** the transport's signal aborts: `connect()` is not waited for, a channel it resolves later is closed at
- * once, a later rejection is consumed, and no retry starts. A channel open at the stop is closed (1001). [LM-6, L41]
+ * once, a later rejection is consumed, and no retry starts. A channel open at the stop is closed (1001).
  *
  * The endpoint gives up on a core that does not answer its ping by the next interval ("the core did not answer a
  * ping", `no-pong`), as the socket carrier does, and closes a channel that holds more than the link's
- * `MAX_BUFFERED_BYTES` undelivered at a send (`too-slow`); the transport then connects again. [LM-6, L35]
+ * `MAX_BUFFERED_BYTES` undelivered at a send (`too-slow`); the transport then connects again.
  */
 
 import {
@@ -28,20 +27,20 @@ import { UmbraError } from "../db/errors.js";
 import { CLOSE_PROTOCOL, type Received, TRANSPORT_LIMITS, type TransportLimits } from "./core-transport.js";
 import type { CarrierConnection, CarrierEvents, PrivateCarrier } from "./private-transport.js";
 
-/** How a private process's host opens one channel of the link: a new one on each call. [LM-6] */
+/** How a private process's host opens one channel of the link: a new one on each call. */
 export type ConnectChannel = (signal: AbortSignal) => Promise<PrivateLinkChannel>;
 
 /** The tests' changes of the channel carrier: the endpoints' clock, the link's limits, a control's message reading. */
 export interface ChannelCarrierSeams {
   readonly timers?: LinkTimers;
   readonly limits?: Partial<Pick<TransportLimits, "maxMessageBytes" | "maxBufferedBytes" | "pingIntervalMs">>;
-  /** How a message envelope's value is read: the link's schemas unless given (a negative control's). [L66] */
+  /** How a message envelope's value is read: the link's schemas unless given (a negative control's). */
   readonly message?: (value: unknown) => Received;
 }
 
 /**
  * Whether `found` has a channel's members (see `PrivateLinkChannel`). Each is read inside the guard: a value whose
- * member cannot be read — a getter or a proxy's trap that throws — is no channel. [LM-6, LM-2]
+ * member cannot be read — a getter or a proxy's trap that throws — is no channel.
  */
 function isChannel(found: unknown): found is PrivateLinkChannel {
   if (typeof found !== "object" || found === null) return false;
@@ -55,7 +54,7 @@ function isChannel(found: unknown): found is PrivateLinkChannel {
 
 /**
  * A rejection of the host's `connect()`, in a log line: its code or its kind, never its message; its type when neither
- * can be read as text (a getter or a proxy's trap that throws, a name that is no string). [LM-6, LM-2]
+ * can be read as text (a getter or a proxy's trap that throws, a name that is no string).
  */
 function rejection(error: unknown): string {
   let found: unknown;
@@ -70,7 +69,7 @@ function rejection(error: unknown): string {
 
 /**
  * Closes a channel the transport no longer wants; a value that is no channel, one whose members cannot be read
- * included, is left alone, and a carrier whose close throws is ended as far as it goes. [LM-6, L41]
+ * included, is left alone, and a carrier whose close throws is ended as far as it goes.
  */
 function discard(channel: unknown): void {
   if (!isChannel(channel)) return;
@@ -81,7 +80,7 @@ function discard(channel: unknown): void {
   }
 }
 
-/** The channel carrier over the host's `connect` (see the module comment). [LM-6] */
+/** The channel carrier over the host's `connect` (see the module comment). */
 export function channelCarrier(connect: ConnectChannel, seams: ChannelCarrierSeams = {}): PrivateCarrier {
   const { maxMessageBytes, maxBufferedBytes, pingIntervalMs } = { ...TRANSPORT_LIMITS, ...seams.limits };
   return Object.freeze({
@@ -100,7 +99,6 @@ export function channelCarrier(connect: ConnectChannel, seams: ChannelCarrierSea
               endpoint?.close(code, reason);
             },
             // A core that reads so slowly that the channel holds more than the limit: closed so, and connected again.
-            // [LM-6, L35]
             backlogged: (_code, reason) => events.failed(reason),
             unanswered: () => {
               events.failed("the core did not answer a ping");
@@ -139,7 +137,7 @@ export function channelCarrier(connect: ConnectChannel, seams: ChannelCarrierSea
             opened(channel);
           },
           (error: unknown) => {
-            // After the stop a rejection is consumed: no retry starts. [L41]
+            // After the stop a rejection is consumed: no retry starts.
             if (done || signal.aborted) return;
             done = true;
             events.failed(`the host's connect() rejected (${rejection(error)})`);

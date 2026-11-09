@@ -6,7 +6,6 @@ import { settlesWithin } from "../db/backends.js";
 
 /**
  * The in-memory block source: the block-source interface over blocks held in memory, for tests and module authors.
- * [RN-14; design §3]
  *
  * - A finalized head that only rises.
  * - The finalized block at each height up to it (given, or a default chain whose hashes link).
@@ -43,7 +42,7 @@ describe("inMemoryBlock: the default chain", () => {
   });
 });
 
-describe("InMemoryBlockSource: the block source over blocks in memory (RN-14)", () => {
+describe("InMemoryBlockSource: the block source over blocks in memory", () => {
   it("is a BlockSource", () => {
     const source: BlockSource = new InMemoryBlockSource({ head: 0n });
     expect(typeof source.cursor).toBe("function");
@@ -55,7 +54,7 @@ describe("InMemoryBlockSource: the block source over blocks in memory (RN-14)", 
     expect(await source.finalizedHead()).toEqual(inMemoryBlock(4n));
   });
 
-  it("its latest head is the block at the head now, raised by finalize at once; reading it changes nothing (issue 00074)", async () => {
+  it("its latest head is the block at the head now, raised by finalize at once; reading it changes nothing", async () => {
     const custom = { height: 6n, hash: new Uint8Array(32).fill(6), parentHash: new Uint8Array(32).fill(5) };
     const source = new InMemoryBlockSource({ head: 4n, blocks: [custom] });
     expect(source.latestHead()).toEqual(inMemoryBlock(4n));

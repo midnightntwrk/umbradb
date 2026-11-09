@@ -3,35 +3,35 @@
  * engine (`./process.ts`, which `umbradb run` and the browser demo start through), `umbradb config check`, `umbradb
  * backup` and `umbradb restore` — so that what they accept cannot drift apart. Pure: it reads no file, opens nothing
  * and reads no global `process`, so the browser bundle imports it as it is. Importing a configuration file, or a
- * module list, is the caller's, before it resolves. [LM-1, L56]
+ * module list, is the caller's, before it resolves.
  *
  * **The stages**, each usable on its own:
- * - {@link resolveSide}: the process's side, given or taken from the data ({@link inferSide}). [CF-4]
+ * - {@link resolveSide}: the process's side, given or taken from the data ({@link inferSide}).
  * - {@link resolveDeclarations}: the command's build for that side (`commandBuild`: UmbraDB's backbone parts and core
  *   modules, then the user modules in their order; a private process's backbone with its private intake), validated
- *   (`validateDeclarations`). A fault names the user module by its position. [MD-1, MD-2, Q106 B]
+ *   (`validateDeclarations`). A fault names the user module by its position.
  * - {@link resolveConfig}: the data held to the plain-data rules (`plainData`), validated with that build
  *   (`validateConfig`), and the process's `core` revision taken (`processCoreEntry`), with the addresses that revision
- *   writes ({@link Surfaces}). [CF-1, CF-2, CF-3, Q102]
+ *   writes ({@link Surfaces}).
  * - {@link resolve}: the declarations, then the configuration, and how the engine reads the chain: the node, or a
  *   private process's public side through its intake.
  *
  * **The network planner** ({@link planNetwork}), which only the engine calls: the network request and the addresses
  * the process's `core` revision writes, combined into the one plan of what listens, what connects and how the private
- * link runs. [LM-3, L56]
+ * link runs.
  *
  * **The failure contract.** Each stage throws the refusal of the step that failed unchanged: the same `UmbraError`,
  * with its code, message and findings. {@link resolve} stops at the first stage that throws. A refusal of
  * {@link resolveConfig} carries the secrets of the configuration as the validation reads them (`configSecrets`), which
  * {@link refusalSecrets} gives, so that the caller redacts what it shows of the refusal: none for data that is not
- * plain data, and none for a refusal of the declarations, which comes before the configuration is read. [AE-6, CF-4]
+ * plain data, and none for a refusal of the declarations, which comes before the configuration is read.
  *
  * **The secrets known before the validation** ({@link knownSecrets}): for what a caller shows of a refusal that comes
  * before the configuration is validated — a module file that cannot be imported, the user modules' own refusal —
  * the secrets of the data as far as they can be told: each entry's by the kinds its module declares, read as the
  * validation reads them; while the user modules are not known (a module file not imported yet), or cannot be read as
  * declarations, every string of an entry whose module the build does not hold (fail closed). Data that is not plain
- * data tells the secrets of what is plain in it. [CF-4, AE-6]
+ * data tells the secrets of what is plain in it.
  */
 
 import { type PrivateIntake, privateIntake } from "../backbone/core-private-source/index.js";
@@ -66,7 +66,7 @@ function carrying(error: unknown, secrets: readonly string[]): unknown {
 
 /**
  * The secrets a refusal of the resolver carries (see the module comment), to redact what is shown of it; none for any
- * other value. [AE-6, CF-4]
+ * other value.
  */
 export function refusalSecrets(error: unknown): readonly string[] {
   return (typeof error === "object" && error !== null ? SECRETS.get(error) : undefined) ?? [];
@@ -85,7 +85,7 @@ const isElement = (key: string, length: number): boolean => String(Number(key)) 
  * What the plain-data rules keep of `value` (`../config/plain-data.ts`), read as they read it — own properties'
  * descriptors, never a getter — with every value they refuse left out: an object's member dropped, an array's element
  * dropped and the others kept in order; {@link REFUSED} for a value refused itself. So data refused at one place still
- * tells the secrets of the rest. Throws what a proxy's trap throws. [CF-4, AE-6]
+ * tells the secrets of the rest. Throws what a proxy's trap throws.
  */
 function plainPart(value: unknown, open: Set<object>): PlainData | typeof REFUSED {
   if (value === null || typeof value === "string" || typeof value === "boolean") return value;
@@ -116,7 +116,6 @@ function plainPart(value: unknown, open: Set<object>): PlainData | typeof REFUSE
  * `userModules` as given, or null while they are not known. Data that is not plain data tells the secrets of what is
  * plain in it ({@link plainPart}): its refusal, which comes later, may follow a refusal that quotes one of them (a
  * module file's import error). Never throws: none for data that cannot be read at all (a proxy's trap that throws).
- * [CF-4, AE-6]
  */
 export function knownSecrets(data: unknown, userModules: readonly unknown[] | null): readonly string[] {
   let plain: PlainData;
@@ -156,7 +155,7 @@ export function knownSecrets(data: unknown, userModules: readonly unknown[] | nu
 /**
  * The process's side, from the configuration's data: private when a `core` entry's `config` has `instanceId` and none
  * has `node` (a public process's `core` entry requires `node`, a private one's `instanceId`), and public otherwise. The
- * validation then names a private process's field in a public one's entry as such. [CF-4]
+ * validation then names a private process's field in a public one's entry as such.
  */
 export function inferSide(data: unknown): ProcessSide {
   const entries = isObject(data) && Array.isArray(data.entries) ? (data.entries as readonly unknown[]) : [];
@@ -167,7 +166,7 @@ export function inferSide(data: unknown): ProcessSide {
   return has("instanceId") && !has("node") ? "private" : "public";
 }
 
-/** The process's side: `side` when given, else the one `data` describes ({@link inferSide}). [CF-4] */
+/** The process's side: `side` when given, else the one `data` describes ({@link inferSide}). */
 export function resolveSide(data: unknown, side?: ProcessSide): ProcessSide {
   return side ?? inferSide(data);
 }
@@ -188,7 +187,7 @@ export interface DeclarationsInput {
 
 /**
  * The build's declarations for `input.side`, validated (see the module comment). Throws `validateDeclarations`' first
- * fault, an `UmbraError` naming the module. [MD-1, MD-2, Q106 B]
+ * fault, an `UmbraError` naming the module.
  */
 export function resolveDeclarations(input: DeclarationsInput): DeclarationSet<ModuleDeclaration> {
   const build =
@@ -203,7 +202,7 @@ export function resolveDeclarations(input: DeclarationsInput): DeclarationSet<Mo
 /**
  * The addresses the process's `core` revision writes for the surfaces of its side, as written: before the schema's
  * defaults (the settings' `listen.admin` is `0.0.0.0:8081` when none is written; here it is null). Null where nothing
- * is written. [LM-3, CF-4]
+ * is written.
  */
 export interface Surfaces {
   /** `listen.api`: the module API. */
@@ -228,16 +227,16 @@ export interface ConfigStageInput {
   readonly declarations: DeclarationSet<ModuleDeclaration>;
   /** The process's side; the one the data describes unless given ({@link resolveSide}). */
   readonly side?: ProcessSide;
-  /** The negative controls' choice of the process's `core` revision; `processCoreEntry` unless given. [Q102] */
+  /** The negative controls' choice of the process's `core` revision; `processCoreEntry` unless given. */
   readonly processCore?: (config: CheckedConfig) => CheckedEntry;
 }
 
 /** What {@link resolveConfig} gives. */
 export interface ResolvedConfig {
-  /** The validated configuration. [CF-3] */
+  /** The validated configuration. */
   readonly checked: CheckedConfig;
   readonly side: ProcessSide;
-  /** The process's `core` revision, whose operational and secret fields it runs with (`index`: its place). [Q102] */
+  /** The process's `core` revision, whose operational and secret fields it runs with (`index`: its place). */
   readonly core: CheckedEntry;
   /** The addresses that revision writes, before defaults. */
   readonly surfaces: Surfaces;
@@ -245,7 +244,7 @@ export interface ResolvedConfig {
 
 /**
  * An address a host gives a surface in code: `host` (`127.0.0.1` unless given) and `port` (0 for a free one; the bound
- * address is then the one the system gave). [LM-3]
+ * address is then the one the system gave).
  */
 export interface AddressRequest {
   readonly host?: string;
@@ -253,10 +252,10 @@ export interface AddressRequest {
 }
 
 /**
- * A host's network request (design §5.1): for each surface, absent or `false` (no listener: its handlers on the
+ * A host's network request: for each surface, absent or `false` (no listener: its handlers on the
  * handle; no link), `true` (the address the process's `core` revision writes), an {@link AddressRequest}, or — for the
  * private link — the public side's `{ channels: true }` (the host hands it each channel) and the private side's
- * `{ connect }` (the host opens each channel). [LM-3, LM-6]
+ * `{ connect }` (the host opens each channel).
  */
 export interface NetworkRequest {
   readonly api?: boolean | AddressRequest;
@@ -290,7 +289,7 @@ function surfacesOf(data: unknown, core: CheckedEntry, side: ProcessSide): Surfa
  * The configuration resolved with `input.declarations` (see the module comment). Throws `plainData`'s `not-plain-data`
  * (carrying no secrets: the data is not read as a configuration), `validateConfig`'s `invalid-configuration` with its
  * findings, and the `core` revision's choice's refusal (`no-build-core-revision`), each unchanged and carrying the
- * configuration's secrets ({@link refusalSecrets}). [CF-1, CF-3, Q102, AE-6]
+ * configuration's secrets ({@link refusalSecrets}).
  */
 export function resolveConfig(input: ConfigStageInput): ResolvedConfig {
   const side = resolveSide(input.data, input.side);
@@ -342,7 +341,7 @@ export interface Resolved extends ResolvedConfig {
 
 /**
  * The build and the configuration of a process (see the module comment): {@link resolveDeclarations} for the side the
- * data describes (or the side given), then {@link resolveConfig}; throws the first stage's refusal unchanged. [LM-1]
+ * data describes (or the side given), then {@link resolveConfig}; throws the first stage's refusal unchanged.
  */
 export function resolve(input: ResolveInput): Resolved {
   const side = resolveSide(input.data, input.side);
@@ -368,14 +367,14 @@ export function resolve(input: ResolveInput): Resolved {
   });
 }
 
-/** A surface of a process: the module API, admin, or the process's side of the private link. [LM-3] */
+/** A surface of a process: the module API, admin, or the process's side of the private link. */
 export type Surface = "api" | "admin" | "privateLink";
 
 /**
  * How a surface runs, as `/config`'s `network` names it: `listening` at an address; `connecting` to one (a private
  * process's side of the link); `mounted`, no listener, its handlers the host's to mount; `channels`, the public side of
  * the link over channels the host hands the process; `connect`, the private side over channels the host opens; `none`,
- * no link (and, for the command, which mounts nothing, no listener). [LM-3, AE-5]
+ * no link (and, for the command, which mounts nothing, no listener).
  */
 export type SurfaceMode = "listening" | "connecting" | "mounted" | "channels" | "connect" | "none";
 
@@ -400,7 +399,7 @@ export type LinkPlan =
   | { readonly mode: "connect"; readonly connect: (signal: AbortSignal) => Promise<PrivateLinkChannel> }
   | { readonly mode: "none" };
 
-/** The network plan: what listens, what connects, and how the private link runs (see {@link planNetwork}). [LM-3] */
+/** The network plan: what listens, what connects, and how the private link runs (see {@link planNetwork}). */
 export interface NetworkPlan {
   /**
    * Whether it is the command's, made from the addresses the configuration writes (`/config` then shows them as
@@ -413,10 +412,10 @@ export interface NetworkPlan {
   readonly privateLink: LinkPlan;
 }
 
-/** A rule of the network plan, by the reason its refusal gives (see {@link NETWORK_RULES}). [LM-3] */
+/** A rule of the network plan, by the reason its refusal gives (see {@link NETWORK_RULES}). */
 export type NetworkRuleName = "both" | "no-address" | "unused" | "wrong-side" | "reader-missing";
 
-/** What a rule found wrong with the request. [LM-3] */
+/** What a rule found wrong with the request. */
 export interface NetworkProblem {
   readonly code: "network-address-conflict" | "private-link-misconfigured";
   readonly reason: NetworkRuleName;
@@ -436,7 +435,7 @@ type Asked =
   | { readonly kind: "channels" }
   | { readonly kind: "connect"; readonly connect: (signal: AbortSignal) => Promise<PrivateLinkChannel> };
 
-/** The host an address given in code listens at unless it names one. [LM-3] */
+/** The host an address given in code listens at unless it names one. */
 export const DEFAULT_REQUEST_HOST = "127.0.0.1";
 
 /**
@@ -454,7 +453,7 @@ function askedOf(value: unknown): Asked {
   return { kind: "address", host: (request.host as string | undefined) ?? DEFAULT_REQUEST_HOST, port: request.port as number };
 }
 
-/** `host:port`, an IPv6 host in brackets: an address as the configuration writes it. [CF-4] */
+/** `host:port`, an IPv6 host in brackets: an address as the configuration writes it. */
 export function addressText(host: string, port: number): string {
   return `${host.includes(":") ? `[${host}]` : host}:${port}`;
 }
@@ -497,7 +496,7 @@ export interface NetworkContext {
   readonly reader: boolean;
 }
 
-/** A rule of the network plan: the problems it finds in a request. [LM-3] */
+/** A rule of the network plan: the problems it finds in a request. */
 export interface NetworkRule {
   readonly name: NetworkRuleName;
   check(context: NetworkContext): readonly NetworkProblem[];
@@ -519,13 +518,13 @@ const notUsedAs = (asked: Asked): string =>
       : "does not ask for it";
 
 /**
- * The rules of the network plan, in the order their problems are listed [LM-3, L15–L18]:
- * - `both` (N2): an address both written in the process's `core` revision and given in code (`network-address-conflict`);
- * - `no-address` (N2): `true`, the written address, with none written;
- * - `unused` (N3): an address written for a surface of the process's side that the request does not use as an address —
+ * The rules of the network plan, in the order their problems are listed:
+ * - `both`: an address both written in the process's `core` revision and given in code (`network-address-conflict`);
+ * - `no-address`: `true`, the written address, with none written;
+ * - `unused`: an address written for a surface of the process's side that the request does not use as an address —
  *   not asked for, or asked for over channels;
- * - `wrong-side` (N4): a request of the other side's link (`private-link-misconfigured`);
- * - `reader-missing` (N5): on PostgreSQL, the public side of the link given in the request (`{ channels: true }`, or an
+ * - `wrong-side`: a request of the other side's link (`private-link-misconfigured`);
+ * - `reader-missing`: on PostgreSQL, the public side of the link given in the request (`{ channels: true }`, or an
  *   address in code) with no `transportReader`, the login that may only read which the link's reads run as; with a
  *   written `listen.privateLink` the schema requires it.
  *
@@ -638,7 +637,7 @@ export type NetworkInput = Pick<ResolvedConfig, "side" | "core" | "surfaces">;
 /**
  * The command's plan (`"configured"`): each surface of the side listens or connects at its address when one is written,
  * and admin listens at its default, `0.0.0.0:8081`, when none is. A `listen.privateLink` written on a private process
- * is no surface of it. No rule can refuse it. [LM-3, AE-1, CF-4]
+ * is no surface of it. No rule can refuse it.
  */
 function configuredPlan({ side, surfaces }: NetworkInput): NetworkPlan {
   const link = surfaces.privateLink;
@@ -661,13 +660,12 @@ function addressAsked(one: SurfaceRequest): PlannedAddress | null {
 }
 
 /**
- * The network plan of a process (design §5.2): its network request combined with the addresses its `core` revision
+ * The network plan of a process: its network request combined with the addresses its `core` revision
  * writes (`resolve().surfaces`, before the schema's defaults). The engine opens what the plan says, and every decision
  * of the link keys on it: the public side's reader login, the private side's link, lockstep on both sides.
- * [LM-3, N1–N5, L15–L18]
  *
  * - `"configured"`, the command's request, is the written addresses plus admin's default ({@link configuredPlan}).
- * - A host's request: each surface off unless asked — the module API and admin then `mounted`, the link `none` (N1);
+ * - A host's request: each surface off unless asked — the module API and admin then `mounted`, the link `none`;
  *   `true` at the written address; `{ host?, port }` there, `host` {@link DEFAULT_REQUEST_HOST} unless given; the link
  *   `{ channels: true }` or `{ connect }`. Its {@link NETWORK_RULES} (`rules`: all unless a negative control removes
  *   one) refuse what it gets wrong, with every problem in the refusal's `details.problems` and the first one's code,

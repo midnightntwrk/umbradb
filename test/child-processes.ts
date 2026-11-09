@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
  * whether or not the child can act: a child that is stopped (`SIGSTOP`, as the writer-lock test pauses one), whose
  * event loop is blocked (PGlite's hung engine, `db/pglite-timeouts.test.ts`) or that waits for a signal
  * (`tools/tape/main.ts record`) is ended the same way. A test still stops its children itself; the guard is for when it
- * cannot. [A153, A17; docs/issues/00015, docs/issues/00022]
+ * cannot.
  *
  * **How.** The first child a test process starts also starts that process's watcher (`orphan-watcher.mjs`, plain
  * Node.js), whose standard input is a pipe from the test process. The test process writes each child's pid to it when

@@ -1,11 +1,11 @@
 /**
  * The record-and-replay check through the node client. A session of `src/node/`'s `NodeClient` is run through the
  * recording builder against a node. The tape it recorded is replayed by the tape node to a new client running the same
- * session, and every frame each connection sent and received is compared byte for byte. [A71, TT-4]
+ * session, and every frame each connection sent and received is compared byte for byte.
  *
  * Its default session, {@link in8Tour}, is what the check's manual half runs against a real Midnight node
  * (`tsx tools/tape/main.ts check --node <url> --out <file>`, `./command.ts`). The CI runs it against a scripted node
- * (`test/tape/record-and-replay.test.ts`). [A71]
+ * (`test/tape/record-and-replay.test.ts`).
  */
 
 import {
@@ -64,7 +64,7 @@ export const DEFAULT_HEADER_TIMEOUT_MS = 120_000;
  * `chain_getFinalizedHead`, `chain_getHeader`, `chain_getBlock`, `state_getRuntimeVersion`, `state_getMetadata`,
  * `state_getStorage` (`System.Number`), `state_getKeysPaged` (three `System` keys), `midnight_ledgerStateRoot`,
  * `system_properties`), each without retries (a node that fails fails the tour). Then both head subscriptions, until
- * one new head and two finalized heads have come (within `headerTimeoutMs`). [IN-8]
+ * one new head and two finalized heads have come (within `headerTimeoutMs`).
  */
 export async function in8Tour(
   client: NodeClient,

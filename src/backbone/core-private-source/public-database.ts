@@ -5,12 +5,11 @@
  * - the public cursor, and each public block it processes;
  * - the public data its modules' `on-fetch` callbacks read at a height.
  * It is also woken whenever the public cursor may have moved.
- * [PP-1, PP-2, PP-3, PP-4, PP-5, Q100; CORE-ARCH §4.14; design §8]
  *
  * **Every read of public tables is in this file, or with its statement in `./sql.ts`:**
  * - {@link readPublicIdentity}: `core_chain.identity`'s genesis hash and S, through `core-chain`'s own `readIdentity`.
  * - `readPublicItems` (`./sql.ts`): the public core's `table` items with their heights, from `core_chain.config`'s
- *   `provides`. [PP-13]
+ *   `provides`.
  * - `readPublicBlock` (`./sql.ts`): the height, hash and parent hash in `core_block_commit.blocks`, which its other
  *   columns, its partitions and the `hashes` table do not affect.
  * - The public cursor: `core-block-commit`'s own `readCursor`, the last row of the blocks table, read the way the core
@@ -19,17 +18,15 @@
  * **Where the public data comes from** ({@link PublicDatabase}):
  * - On PostgreSQL, directly: `publicDatabase` holds the parts of a login that may only read. {@link openPublicDatabase}
  *   opens it for reads only, each read one `REPEATABLE READ READ ONLY` transaction at the public cursor's height.
- *   [DB-2]
  * - Otherwise, through the core's transport (`read` messages, `src/private/private-transport.ts`), at the `core`
  *   entry's `privateLink`. This covers a PGlite public database, which only the core can open, and a missing
- *   `publicDatabase`. [DB-4, PP-4]
+ *   `publicDatabase`.
  * - A private process with neither is refused.
  *
  * **What wakes the private process** ({@link PublicWakes}): with `privateLink`, only the core's `committed` messages
  * and every connection or reconnection of the transport. These only wake it; it then reads the public cursor itself. A
  * private process without a transport (its public database is PostgreSQL, read directly) reads the public cursor every
  * {@link PUBLIC_POLL_MS} instead ({@link pollingWakes}). {@link openPublicSide} builds both from the `core` revision.
- * [PP-3]
  */
 
 import type { PostgresParts } from "../../config/database-parts.js";
@@ -54,7 +51,7 @@ import type { BlockRef } from "../../runner/block-source.js";
 export interface PublicDatabase {
   /**
    * Runs `body` with one consistent read of the public database at its committed height (the public cursor), as
-   * `Database.read` does. Rejects with `body`'s error or the database's; `connection-lost` is retried. [DB-2]
+   * `Database.read` does. Rejects with `body`'s error or the database's; `connection-lost` is retried.
    */
   read<T>(body: (read: ReadHandle) => Promise<T>): Promise<T>;
   /** Closes what reading it opened. */
@@ -62,7 +59,7 @@ export interface PublicDatabase {
   /**
    * How many connections to it have been lost so far: for a PostgreSQL public database read directly, its read pool's
    * lost sessions. Each loss is followed by a reconnection, after which a private process without a transport reads the
-   * public configuration history again. Absent for a database that does not count them. [PP-14]
+   * public configuration history again. Absent for a database that does not count them.
    */
   reconnections?(): number;
 }
@@ -76,7 +73,7 @@ export interface PublicWakes {
   next(signal: AbortSignal): Promise<void>;
 }
 
-/** The public database's chain identity: its genesis hash and S. [CORE-ARCH §4.11] */
+/** The public database's chain identity: its genesis hash and S. */
 export interface PublicIdentity {
   readonly genesisHash: Uint8Array;
   readonly start: bigint;
@@ -97,14 +94,14 @@ export async function readPublicIdentity(read: Pick<ReadHandle, "query">): Promi
 /** The public configuration as a private process reads it at startup: its `table` items and its configuration hash. */
 export interface PublicConfiguration {
   readonly items: PublicItem[];
-  /** `configHashOf` the rows of the public `core_chain.config`; null before the table exists. [RN-16, PP-14] */
+  /** `configHashOf` the rows of the public `core_chain.config`; null before the table exists. */
   readonly configHash: string | null;
 }
 
 /**
  * The public core's `table` items with their heights (as `readPublicItems`, in `./sql.ts`, returns them) and its
  * configuration hash, both from one statement of `read`. The hash is the same one the core computes
- * (`readConfigHash`), from the same rows with the same function. [PP-13, PP-14, RN-16]
+ * (`readConfigHash`), from the same rows with the same function.
  */
 export async function readPublicConfiguration(read: Pick<ReadHandle, "query">): Promise<PublicConfiguration> {
   const rows = await readConfigRows(read);
@@ -129,11 +126,10 @@ const readsDirectly = (setting: unknown): setting is PostgresParts =>
  * The public database of `core`, a private process's `core` revision: its `publicDatabase` (PostgreSQL's parts),
  * opened for reads only. There is no writer and no lock, and no connection is made before the first read. It counts the
  * read sessions it lost ({@link PublicDatabase.reconnections}).
- * [Q102, PP-14]
  *
  * Throws `invalid-configuration` (`details.reason` `public-database-transport`, not retried) when there is no
  * `publicDatabase`, or when it is PGlite: that one is read through the core's transport instead
- * ({@link openPublicSide}). [PP-4]
+ * ({@link openPublicSide}).
  */
 export function openPublicDatabase(core: CheckedEntry): PublicDatabase {
   const setting = (core.settings as PlainObject).publicDatabase;
@@ -169,7 +165,6 @@ export function openPublicDatabase(core: CheckedEntry): PublicDatabase {
  * The private link a private process's public side connects over: the core's address, `host:port`, and the `tls`
  * setting, mutual TLS when given. A process takes it from its network plan (the `core` revision's `privateLink` for
  * `umbradb run`, or the address its host's request gives); a restore from the revision's `privateLink`.
- * [PP-4, PP-11, LM-3]
  */
 export interface PrivateLinkAddress {
   readonly address: string;
@@ -178,26 +173,26 @@ export interface PrivateLinkAddress {
 
 /**
  * The private link over channels a private process's host opens (`privateSide: { connect }`): a new channel on each
- * (re)connection; `seams` are the tests' (the endpoints' clock, the link's limits). [LM-6]
+ * (re)connection; `seams` are the tests' (the endpoints' clock, the link's limits).
  */
 export interface PrivateLinkConnect {
   readonly connect: ConnectChannel;
   readonly seams?: ChannelCarrierSeams;
 }
 
-/** A private process's link to the core: an address, or the host's channels. [PP-4, LM-3, LM-6] */
+/** A private process's link to the core: an address, or the host's channels. */
 export type PrivateLink = PrivateLinkAddress | PrivateLinkConnect;
 
 /** What {@link openPublicSide} needs besides the `core` revision: the private process's position, S and its log. */
 export interface PublicSideOptions {
-  /** The link to the core, or null for none: the process then reads a PostgreSQL `publicDatabase` and polls. [LM-3] */
+  /** The link to the core, or null for none: the process then reads a PostgreSQL `publicDatabase` and polls. */
   readonly link: PrivateLink | null;
   /** Its position now, for each `hello` of its transport. */
   readonly position: () => TransportPosition;
   /** Where its transport's log lines go. */
   readonly log: (line: string) => void;
   /**
-   * Whether its transport checks the core's `configHash`: `check` by default, `ignore` in a negative control. [PP-14]
+   * Whether its transport checks the core's `configHash`: `check` by default, `ignore` in a negative control.
    */
   readonly configHash?: "check" | "ignore";
 }
@@ -220,7 +215,7 @@ export interface PublicSide {
  *
  * Throws `invalid-configuration` (`public-database-transport`) for a revision with no PostgreSQL `publicDatabase` and
  * no link, since it then has no way to read public data. `given` replaces the public database or the wake-ups (tests
- * use it for direct reads and links). [PP-4, LM-3]
+ * use it for direct reads and links).
  */
 export function openPublicSide(
   core: CheckedEntry,
@@ -232,7 +227,7 @@ export function openPublicSide(
   const transport =
     link !== null
       ? new PrivateTransport({
-          // Over WebSocket to the link's address, or over the host's channels. [PP-4, LM-6]
+          // Over WebSocket to the link's address, or over the host's channels.
           carrier: "connect" in link ? channelCarrier(link.connect, link.seams) : socketCarrier(link.address, link.tls),
           instance: settings.instanceId as string,
           version: UMBRADB_VERSION,

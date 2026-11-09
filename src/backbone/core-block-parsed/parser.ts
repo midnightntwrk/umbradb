@@ -3,13 +3,13 @@
  * transactions in application order and the block's ledger version, and gives each one's plain data
  * (`ParsedTransaction`, `src/ledger/types.ts`). Each transaction is parsed once: the adapter keeps the native object it
  * made under the very array it parsed (`src/ledger/adapter.ts`), so a later step given the same array (the apply of
- * `core-ledger-state`, or a ledger task) parses nothing again. [CD-5, LG-7, Q4, Q49]
+ * `core-ledger-state`, or a ledger task) parses nothing again.
  *
  * **In the ledger worker.** {@link workerParser} has the process's ledger worker (`src/ledger/worker/`) parse each
  * block's transactions once and post the plain data back. The worker keeps the very arrays it parsed, and so the native
  * objects the adapter made, under the block's hash, for the block's apply (`core-ledger-state`) and ledger tasks. It
  * is the parser of `core-block-parsed`'s declaration, which the runner binds to the process's worker
- * (`bindLedgerParser`). [CD-5; design §5.3, §5.5]
+ * (`bindLedgerParser`).
  *
  * {@link inThreadParser} parses in the calling thread instead, with the adapter of the block's ledger version loaded
  * there once (`loadLedgerPackage`). It is for a test's or a negative control's build (`coreBlockParsedOnParse` with

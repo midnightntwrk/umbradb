@@ -3,61 +3,61 @@ import * as umbra from "../../src/index.js";
 
 // TransactionHistory moved to `legacy/transaction-history/` and is not exported. Its twelve types are erased at run
 // time, so the type check covers them: each import below must fail (the module has no such member), and an
-// `@ts-expect-error` with no error under it is itself an error (TS2578) in `npm run typecheck`. [LS-3]
-// @ts-expect-error not exported [LS-3]
+// `@ts-expect-error` with no error under it is itself an error (TS2578) in `npm run typecheck`.
+// @ts-expect-error not exported
 import type { TransactionHistoryStorage } from "../../src/index.js";
-// @ts-expect-error not exported [LS-3]
+// @ts-expect-error not exported
 import type { TransactionHistoryReader } from "../../src/index.js";
-// @ts-expect-error not exported [LS-3]
+// @ts-expect-error not exported
 import type { TransactionHistoryWriter } from "../../src/index.js";
-// @ts-expect-error not exported [LS-3]
+// @ts-expect-error not exported
 import type { TransactionHistoryEntry } from "../../src/index.js";
-// @ts-expect-error not exported [LS-3]
+// @ts-expect-error not exported
 import type { TransactionHistoryStatus } from "../../src/index.js";
-// @ts-expect-error not exported [LS-3]
+// @ts-expect-error not exported
 import type { EntryContent } from "../../src/index.js";
-// @ts-expect-error not exported [LS-3]
+// @ts-expect-error not exported
 import type { EntryLifecycle } from "../../src/index.js";
-// @ts-expect-error not exported [LS-3]
+// @ts-expect-error not exported
 import type { EntryLifecycleStatus } from "../../src/index.js";
-// @ts-expect-error not exported [LS-3]
+// @ts-expect-error not exported
 import type { PendingLifecycle } from "../../src/index.js";
-// @ts-expect-error not exported [LS-3]
+// @ts-expect-error not exported
 import type { FinalizedLifecycle } from "../../src/index.js";
-// @ts-expect-error not exported [LS-3]
+// @ts-expect-error not exported
 import type { RejectedLifecycle } from "../../src/index.js";
-// @ts-expect-error not exported [LS-3]
+// @ts-expect-error not exported
 import type { MergeEntriesFn } from "../../src/index.js";
 // 0.9.5's storage parts are retired and not exported. Importing any of them fails to type-check, as the pack smoke
-// shows for the installed package. [LS-2, A2]
-// @ts-expect-error not exported [LS-2]
+// shows for the installed package.
+// @ts-expect-error not exported
 import type { PgTemporalKV } from "../../src/index.js";
-// @ts-expect-error not exported [LS-2]
+// @ts-expect-error not exported
 import type { PgCheckpointStore } from "../../src/index.js";
-// @ts-expect-error not exported [LS-2]
+// @ts-expect-error not exported
 import type { PgWatermarks } from "../../src/index.js";
-// @ts-expect-error not exported [LS-2]
+// @ts-expect-error not exported
 import type { PgTransactionLeaseLayer } from "../../src/index.js";
-// @ts-expect-error not exported [LS-2]
+// @ts-expect-error not exported
 import type { PgWalletStateEnvelopeStore } from "../../src/index.js";
-// @ts-expect-error not exported [LS-2]
+// @ts-expect-error not exported
 import type { saveAndAdvance } from "../../src/index.js";
 
 /**
  * Internal symbols and the six chain-archive error classes are NOT re-exported by the barrel (src/index.ts, compiled
  * to dist/index.js). A named import of any of them fails at link time. At run time the name is simply absent from the
- * package namespace, which is what this checks. [G1, A2; G3, C7]
+ * package namespace, which is what this checks.
  */
-describe("frozen barrel: excluded symbols are not exported (A2, C7)", () => {
+describe("frozen barrel: excluded symbols are not exported", () => {
   const barrel = umbra as unknown as Record<string, unknown>;
 
-  it("TransactionHistory is not exported: it is kept in legacy/transaction-history/, outside the package (LS-3)", () => {
+  it("TransactionHistory is not exported: it is kept in legacy/transaction-history/, outside the package", () => {
     for (const name of ["PgTransactionHistoryStorage", "InMemoryTransactionHistoryStorage", "referenceMergeEntries"]) {
       expect(name in barrel, `${name} must NOT be exported from the barrel (LS-3)`).toBe(false);
     }
   });
 
-  it("0.9.5's storage parts are not exported (LS-2, A2)", () => {
+  it("0.9.5's storage parts are not exported", () => {
     for (const name of [
       "PgTemporalKV", "PgCheckpointStore", "PgWatermarks", "PgTransactionLeaseLayer", "PgWalletStateEnvelopeStore",
       "saveAndAdvance",
@@ -66,7 +66,7 @@ describe("frozen barrel: excluded symbols are not exported (A2, C7)", () => {
     }
   });
 
-  it("none of the six chain-archive error classes is exported (C7)", () => {
+  it("none of the six chain-archive error classes is exported", () => {
     for (const name of [
       "ChainArchiveError", "ChainArchiveInvariantError", "ChainArchiveCheckViolationError",
       "BlobIntegrityError", "BlobMissingError", "BlockNotFoundError",
@@ -75,7 +75,7 @@ describe("frozen barrel: excluded symbols are not exported (A2, C7)", () => {
     }
   });
 
-  it("adapter plumbing, translate/abort helpers, and schema validators are not exported (A2)", () => {
+  it("adapter plumbing, translate/abort helpers, and schema validators are not exported", () => {
     for (const name of [
       "translatePostgresError", "isConnectionFailure", "isStatementTimeout", "isLockTimeout",
       "resolveTransaction", "assertValidSchemaName", "assertValidCheckpointIds",
@@ -86,7 +86,7 @@ describe("frozen barrel: excluded symbols are not exported (A2, C7)", () => {
     }
   });
 
-  it("the internal Zod schema objects are not exported (A2)", () => {
+  it("the internal Zod schema objects are not exported", () => {
     for (const name of [
       "JsonValueSchema", "NamespaceSchema", "ScopeSchema", "KeySchema", "StoredVersionSchema",
       "ExpectedVersionSchema", "VersionedEntrySchema", "WatermarkValueSchema",

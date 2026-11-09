@@ -8,13 +8,12 @@ import { AdapterWorkerHost } from "./adapter-worker-host.js";
 /**
  * The committed negative controls of the adapter checks: wrong adapters, each of which must make the check the
  * adapter test suite runs (`adapter-checks.ts`) fail; the real adapters pass the same checks in this file's build.
- * [A98]
  *
  * - **A v8 adapter whose `decodeLogItem` returns a value** fails the check that v8 reports no contract logs (its
- *   fast-check property finds an input); so does **a v8 adapter whose `apply` reports a log**. [Q54]
+ *   fast-check property finds an input); so does **a v8 adapter whose `apply` reports a log**.
  * - **A `stateKey` derived from `stateRoot`** (the 32 bytes after `stateRoot`'s first byte, which is a key only for a
  *   state above the embedding limit) fails the reload of a state under the limit: the fresh instance has no node
- *   under that key. [Q55]
+ *   under that key.
  * - **An adapter reporting another package's identity** (the v8 adapter with the v9 package's `rawPackages()`, and with
  *   its `versionName` too) fails the check that `versionName` and `rawPackages()` are the recorded ones.
  */
@@ -42,7 +41,7 @@ const FAKE_LOG: VmLog = {
   physicalSegment: 1,
 };
 
-describe("A98's negative controls", () => {
+describe("negative controls", () => {
   const host = new AdapterWorkerHost();
   const store = new Map<string, StoredNode>();
   let v8: LedgerPackage;
@@ -65,13 +64,13 @@ describe("A98's negative controls", () => {
     await expectSmallStateReloadsByKey(v9, host, new Map());
   });
 
-  it("a v8 adapter whose decodeLogItem returns a value fails Q54's clause", { timeout: 120_000 }, async () => {
+  it("a v8 adapter whose decodeLogItem returns a value fails the clause", { timeout: 120_000 }, async () => {
     const wrong: LedgerPackage = { ...v8, decodeLogItem: (value) => ({ version: 0, eventType: "Misc", data: value }) };
     const failure = await assertionFailure(() => expectNoV8Logs(wrong));
     expect(failure.message).toMatch(/decodeLogItem returned a log/);
   });
 
-  it("a v8 adapter whose apply reports a log fails Q54's clause", { timeout: 120_000 }, async () => {
+  it("a v8 adapter whose apply reports a log fails the clause", { timeout: 120_000 }, async () => {
     const wrong: LedgerPackage = {
       ...v8,
       apply: (state, input) => {
@@ -82,7 +81,7 @@ describe("A98's negative controls", () => {
     await assertionFailure(() => expectNoV8Logs(wrong));
   });
 
-  it("a stateKey derived from stateRoot fails Q55's reload of a state under the embedding limit", { timeout: 240_000 }, async () => {
+  it("a stateKey derived from stateRoot fails the reload of a state under the embedding limit", { timeout: 240_000 }, async () => {
     for (const adapter of [v8, v9]) {
       const wrong: LedgerPackage = { ...adapter, stateKey: (state) => adapter.stateRoot(state).subarray(1, 33) };
       await assertionFailure(() => expectSmallStateReloadsByKey(wrong, host, new Map()));

@@ -7,7 +7,7 @@ import { build } from "esbuild";
 import type { ApplyInput, ApplyOutput, ParsedTransaction, StateSummary, StoredNode } from "../../src/ledger/types.js";
 import type { Ledger } from "./adapter-fixtures.js";
 
-// Runs `fixtures/adapter-worker.ts` in a worker thread of its own. [A98; LG-7, Q49]
+// Runs `fixtures/adapter-worker.ts` in a worker thread of its own.
 //
 // The entry is bundled with esbuild (a plain worker cannot load the TypeScript sources), leaving the vendored ledger
 // packages out of the bundle as imports of their own files: their Node.js entries read the `.wasm` beside them. This is

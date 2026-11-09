@@ -6,7 +6,7 @@
 // - when asked (`bodies`), the answer's body as text.
 //
 // It runs off the main thread, so a callback that blocks the main thread (such as a synchronous loop) delays none of
-// its requests or measurements: each time is the answer's time, measured from the request. [A62]
+// its requests or measurements: each time is the answer's time, measured from the request.
 //
 // Plain JavaScript, so that a worker thread loads it as it is.
 

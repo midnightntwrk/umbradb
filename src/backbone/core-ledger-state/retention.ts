@@ -1,26 +1,26 @@
 /**
  * The `core` entry's revisions as `core-ledger-state` reads them, and the retention window over them. Pure: no
- * database, no ledger package. [LG-12, LG-14, Q41]
+ * database, no ledger package.
  *
  * **The window.** The system keeps the latest state alive, plus the `retainStates` states before it. When block h
  * commits, the state of h − R(h) − 1 is released, R(h) being the setting of the revision covering h. A revision that
  * raises R fills the window from its start (a state released before it stays released); one that lowers R releases the
- * states leaving the window in its first block. [LG-12]
+ * states leaving the window in its first block.
  *
  * So the states alive after block h are the heights L(h) to h, where L(h) = max(L(h − 1), h − R(h)): a released state
  * is never alive again, and the lowest alive height never moves down. Over the revisions this is
  * L(h) = max(S, max over the revisions starting at or below h of min(their last height, h) − their R), where S is the
  * first revision's start ({@link retainedFrom}). Block h releases the heights L(h − 1) to L(h) − 1 ({@link releasedBy}).
  * At the cursor c the window is L(c) to c ({@link retentionWindow}); `core-ledger-state`'s load of a retained state
- * accepts only heights inside it (`state-not-retained` outside). [LG-12]
+ * accepts only heights inside it (`state-not-retained` outside).
  *
  * Every machine computes the same window from the same configuration history, which is recorded and checked, so no row
- * records the window. [CF-6]
+ * records the window.
  */
 
 import type { CheckedConfig } from "../../config/validate.js";
 
-/** One `core` revision as `core-ledger-state` reads it: its range, `retainStates` and `sweep`. [LG-12, LG-14] */
+/** One `core` revision as `core-ledger-state` reads it: its range, `retainStates` and `sweep`. */
 export interface CoreRevision {
   readonly start: bigint;
   /** Its last height: the next revision's start − 1, or null for the latest. */
@@ -29,7 +29,7 @@ export interface CoreRevision {
   readonly sweep: "on" | "off";
 }
 
-/** The revisions of the `core` entry in `config`, in start order, each lasting until the next one's start. [CF-5] */
+/** The revisions of the `core` entry in `config`, in start order, each lasting until the next one's start. */
 export function coreRevisionsOf(config: Pick<CheckedConfig, "entries">): CoreRevision[] {
   const cores = config.entries.filter((entry) => entry.id === "core").sort((a, b) => a.start - b.start);
   return cores.map((entry, index) => {

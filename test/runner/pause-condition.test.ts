@@ -4,7 +4,7 @@ import { LoopPauses, type LoopPaused } from "../../src/runner/pause.js";
 /**
  * What the pause tells `/status` (`src/runner/pause.ts`). While the loop is paused (a hold kept and the loop between
  * heights), {@link LoopPauses.pausedAt} gives the time it paused and who holds it (`pause` for `ProcessHandle.pause()`,
- * `signal` for a backup on SIGUSR2), else null. [AE-3, Q174 B]
+ * `signal` for a backup on SIGUSR2), else null.
  * - The time is the moment the loop paused, kept while any hold is kept, including the loop's step from its wait for
  *   the head to the pause between heights.
  * - `pause` is shown while a `pause` hold is kept, since only `resume()` lifts it.
@@ -30,7 +30,7 @@ function watched(time = clock()): { pauses: LoopPauses; told: (LoopPaused | null
   return { pauses, told, time };
 }
 
-describe("LoopPauses.pausedAt: the paused condition's facts (AE-3, Q174 B)", () => {
+describe("LoopPauses.pausedAt: the paused condition's facts", () => {
   it("is null while no hold is kept, the loop between heights or waiting for the head", async () => {
     const { pauses, told } = watched();
     expect(pauses.pausedAt).toBeNull();

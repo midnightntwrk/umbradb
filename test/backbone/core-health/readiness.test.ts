@@ -30,12 +30,12 @@ import { ae4, caseText, READINESS_CASES, readinessProblems, WRONG_DECISIONS } fr
  * - 200 while `stopped`, whatever the lag;
  * - otherwise 200 when no readiness lag is set or the lag is at or below it.
  * The decision is `readinessOf`, which the runner's `status()` uses too, so `/status`'s `ready` and `/health/ready`
- * never disagree. [AE-4, A140]
+ * never disagree.
  *
  * The decision is tested against the readiness cases (`./readiness-cases.ts`), each built so that applying another
  * rule first gets it wrong. The committed negative controls are those wrong orders, each failing the cases of the rule
  * it moves. Through a process, the control is the order an earlier version had (`following` ready before the lag is
- * looked at), which fails the third process case below. [AE-4, A65]
+ * looked at), which fails the third process case below.
  *
  * Then, through the process on PostgreSQL 18 and PGlite:
  * - a readiness lag of 10 with lag 500: 503, then 200 once the lag is 10, every answer of the catch-up checked
@@ -44,7 +44,6 @@ import { ae4, caseText, READINESS_CASES, readinessProblems, WRONG_DECISIONS } fr
  * - a following one with threshold 20 and lag 15: 503;
  * - rule 1 before rule 3: a halted or stopping process within its readiness lag answers 503;
  * - conditions that change nothing.
- * [A65, AE-4]
  */
 
 /** A module whose `on-compute` awaits the gate of each height that has one. */
@@ -69,7 +68,7 @@ async function ready(origin: string) {
 
 /**
  * The readiness oracle over observed answers: each `/health/ready` answer is 200 exactly when the readiness rule says
- * so for the state, lag and readiness lag it shows, and its body's `ready` agrees with its status. [AE-4]
+ * so for the state, lag and readiness lag it shows, and its body's `ready` agrees with its status.
  */
 function observedProblems(answers: readonly Awaited<ReturnType<typeof ready>>[], readinessLag: number | null): string[] {
   return answers.flatMap(({ status, body }) => {
@@ -91,8 +90,8 @@ async function readyWhen(origin: string, wanted: Parameters<typeof statusWhen>[1
   return answer;
 }
 
-describe("readinessOf: AE-4's order", () => {
-  it("decides every case of AE-4 by its rule", () => {
+describe("readinessOf: the order", () => {
+  it("decides every readiness case by its rule", () => {
     expect(readinessProblems(readinessOf)).toEqual([]);
   });
 
@@ -145,7 +144,7 @@ describe("readinessOf: AE-4's order", () => {
     }
   });
 
-  it("negative controls: each rule applied out of AE-4's order, or a rule AE-4 lacks, fails the cases of the rule it moves", () => {
+  it("negative controls: each rule applied out of the order, or an extra rule, fails the cases of the rule it moves", () => {
     const failed = Object.fromEntries(
       Object.entries(WRONG_DECISIONS).map(([name, decide]) => [name, readinessProblems(decide)]),
     );
@@ -188,14 +187,14 @@ function unreachableAt(height: bigint, healed: () => boolean): BlockSource & Blo
   };
 }
 
-describe.each(PROCESS_BACKENDS)("A65: /health/ready through the process on $name", (backend) => {
+describe.each(PROCESS_BACKENDS)("/health/ready through the process on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
   // The catch-up commits 490 blocks: 7 s on PGlite, 152 s on PostgreSQL at a load average of 20–50 (each block's
   // statements through Docker's port proxy). What it checks is the decision on the published lag, which does not depend
-  // on the backend, so it runs on PGlite; the other process cases, and rule 1's, run on both. [A65]
-  it.runIf(backend.kind === "pglite")("A65: readiness lag 10 and lag 500 answers 503, then 200 once the lag is 10 or less; every answer as AE-4 says", async () => {
+  // on the backend, so it runs on PGlite; the other process cases, and rule 1's, run on both.
+  it.runIf(backend.kind === "pglite")("readiness lag 10 and lag 500 answers 503, then 200 once the lag is 10 or less; every answer as the readiness rules say", async () => {
     const gates = new Map([2n, 491n, 492n].map((height) => [height, gate()]));
     const run = startWithAdmin({
       database: (await backend.database()).setting,
@@ -210,7 +209,7 @@ describe.each(PROCESS_BACKENDS)("A65: /health/ready through the process on $name
       body: { ready: false, state: "syncing", lag: "500", readinessLag: 10 },
     });
     gates.get(2n)?.open();
-    // The catch-up: every answer is what the readiness rule gives for what it shows. [AE-4]
+    // The catch-up: every answer is what the readiness rule gives for what it shows.
     const answers: Awaited<ReturnType<typeof ready>>[] = [];
     let reached = false;
     void gates.get(491n)?.reached.then(() => {
@@ -241,7 +240,7 @@ describe.each(PROCESS_BACKENDS)("A65: /health/ready through the process on $name
     await run.handle.stop();
   }, 180_000);
 
-  it("A65: stopped answers 200 even with lag 100 and readiness lag 10 (rule 2 before rule 3)", async () => {
+  it("stopped answers 200 even with lag 100 and readiness lag 10 (rule 2 before rule 3)", async () => {
     const run = startWithAdmin({ database: (await backend.database()).setting, head: 103n, stop: 3, extra: { readinessLag: 10 } });
     expect(await readyWhen(await run.origin(), (body) => body.state === "stopped")).toEqual({
       status: 200,
@@ -250,7 +249,7 @@ describe.each(PROCESS_BACKENDS)("A65: /health/ready through the process on $name
     await run.handle.stop();
   }, 120_000);
 
-  it("A65: following with following threshold 20, readiness lag 10 and lag 15 answers 503; at the head, 200", async () => {
+  it("following with following threshold 20, readiness lag 10 and lag 15 answers 503; at the head, 200", async () => {
     const gates = new Map([[2n, gate()]]);
     const run = startWithAdmin({
       database: (await backend.database()).setting,
@@ -316,7 +315,7 @@ describe.each(PROCESS_BACKENDS)("A65: /health/ready through the process on $name
     await run.handle.stop();
   }, 120_000);
 
-  it("negative control: /health/ready with following ready before the lag (task 5.3's first rule) fails A65's third case", async () => {
+  it("negative control: /health/ready with following ready before the lag (the first rule) fails the third case", async () => {
     const wrong = WRONG_DECISIONS["following before rule 3"] as NonNullable<(typeof WRONG_DECISIONS)[string]>;
     const gates = new Map([[2n, gate()]]);
     const run: AdminRun = startWithAdmin({

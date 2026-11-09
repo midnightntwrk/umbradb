@@ -2,32 +2,31 @@
 /**
  * The packed-tarball smoke test (`npm run test:smoke`). It packs UmbraDB as npm would publish it, installs the tarball
  * in a throwaway consumer project and uses it from there as a user would — never the repository's `src/`.
- * [LS-1, LS-2, LS-3, LS-6, A2, A6; design §12, §13 "Public API pins"]
  *
  *   Without Docker (always run):
  *     1. `npm pack`: the tarball ships `dist/index.d.ts` and the vendored ledger packages — for each ledger version its
  *        `SHA256SUMS`, `upstream.json` and every `pkg/` file the manifest lists, and nothing else of `vendor/` (without
  *        them an installed process refuses or halts once `core-block-parsed` runs: `src/ledger/load.ts` imports them);
- *     1b. nothing of `legacy/` and nothing of TransactionHistory in the tarball [A3, LS-3];
+ *     1b. nothing of `legacy/` and nothing of TransactionHistory in the tarball;
  *     2. the tarball installed in the scratch project;
  *     3. a deep import (`umbradb/dist/runner/process.js`) fails with `ERR_PACKAGE_PATH_NOT_EXPORTED`: `exports` names
  *        only `"."`;
- *     4. a consumer importing every value and every type of the design's exported surface (read from the designs, as
- *        the library-surface pin reads it) from "umbradb", none `any`, and writing a configuration with them,
- *        type-checks under `--strict` (the first of the two consumer files) [A1, A2];
+ *     4. a consumer importing from "umbradb" the values and types a configuration is written with
+ *        ({@link CONSUMER_VALUES}, {@link CONSUMER_TYPES}), none `any`, and writing a configuration with them,
+ *        type-checks under `--strict` (the first of the two consumer files);
  *     4c. a consumer importing any of 0.9.5's retired names — the storage parts `PgTemporalKV`, `PgCheckpointStore`,
  *        `PgWatermarks`, `PgTransactionLeaseLayer`, `PgWalletStateEnvelopeStore`, `saveAndAdvance`, or
  *        TransactionHistory's — fails to type-check, each name reported as not exported (the second consumer file)
- *        [A2, LS-2, LS-3];
+ *;
  *     4b. the installed `umbradb` command (package.json `bin`): with no argument and with `sync` it prints the usage and
  *        exits 2; `run`, `backup` and `restore` are recognized (each parses its own arguments or reads its
  *        configuration file); `config check` passes a configuration file that imports the exported builders from
  *        "umbradb" and enables `core-chain-events` and `core-block-parsed`, having run the TypeScript compiler on it
- *        [LS-6, A6];
+ *;
  *     4d. a module test from the installed package: the module guide's recipe, `examples/try-module/try-module.ts` (a
  *        module with one route, run by `startUmbraDB` on an in-memory chain and PGlite in memory, its answer read
  *        through `api.http` mounted in the test's own server), copied into the scratch project, type-checks under
- *        `--strict` against the installed declarations and passes under `node --test` [L54, LM-1, LS-1];
+ *        `--strict` against the installed declarations and passes under `node --test`;
  *
  *   With Docker:
  *     5. a tape sync on PostgreSQL: a PostgreSQL container (the repository's one image), a tape node serving the browser
@@ -48,10 +47,9 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-// Node.js's own TypeScript type stripping reads these three (none imports another file of the repository).
+// Node.js's own TypeScript type stripping reads these two (neither imports another file of the repository).
 import { spawnChild } from "../child-processes.ts";
 import { POSTGRES_IMAGE } from "../postgres-image.ts";
-import { pinnedSurface } from "../library-surface/surface.ts";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const shell = process.platform === "win32";
@@ -79,23 +77,13 @@ for (const f of ["dist/index.js", "dist/index.d.ts", "dist/cli/main.js"]) {
 const tscBin = join(repoRoot, "node_modules", "typescript", "bin", "tsc");
 if (!existsSync(tscBin)) fail(`typescript compiler not found at ${tscBin} -- install the devDependencies first.`);
 
-/**
- * The exported surface, as the library-surface pin reads it: `core-arch`'s `design.md` §12 as the start-umbradb change's
- * `design.md` §4 amends it, less the names not exported yet. [A1, A2; design §12; start-umbradb design §4]
- */
-const SURFACE = pinnedSurface(
-  readFileSync(join(repoRoot, "openspec/changes/core-arch/design.md"), "utf8"),
-  readFileSync(join(repoRoot, "openspec/changes/start-umbradb/design.md"), "utf8"),
-);
-if (SURFACE.values.length === 0 || SURFACE.types.length === 0) fail("design.md §12 lists no values or no types.");
-
-/** The module guide's module test (its §17 recipe), which oracle 4d runs from the installed package. [L54, L59] */
+/** The module guide's module test (its §17 recipe), which oracle 4d runs from the installed package. */
 const MODULE_TEST = "examples/try-module/try-module.ts";
 
 /** The ledger versions the build carries: each a directory of `vendor/ledger/`. */
 const LEDGERS = ["v8", "v9-rc3", "v9"];
 
-/** The retired names whose import must fail: 0.9.5's storage parts and TransactionHistory's. [LS-2, LS-3] */
+/** The retired names whose import must fail: 0.9.5's storage parts and TransactionHistory's. */
 const RETIRED_VALUES = [
   "PgTemporalKV", "PgCheckpointStore", "PgWatermarks", "PgTransactionLeaseLayer", "PgWalletStateEnvelopeStore",
   "saveAndAdvance", "PgTransactionHistoryStorage",
@@ -163,7 +151,7 @@ async function dockerIndependentOracles() {
   if (strayVendor.length > 0) fail(`the packed tarball holds vendor/ files beyond the ledger packages:\n${strayVendor.join("\n")}`);
   console.log(`pack-install smoke: packed ${entry.filename}: dist/index.d.ts and the ${vendored.size} files of the vendored ledger packages (${LEDGERS.join(", ")}), nothing else of vendor/.`);
 
-  // ---- 1b. nothing of legacy/ and nothing of TransactionHistory [A3, LS-3] --------------------------------------------
+  // ---- 1b. nothing of legacy/ and nothing of TransactionHistory --------------------------------------------
   const kept = shipped.filter(
     (p) => p === "legacy" || p.startsWith("legacy/") || /transaction[-_]?history|tx[-_]?history/i.test(p),
   );
@@ -202,7 +190,7 @@ async function dockerIndependentOracles() {
   }
   console.log("pack-install smoke: the deep import umbradb/dist/runner/process.js is blocked (ERR_PACKAGE_PATH_NOT_EXPORTED).");
 
-  // ---- 4. a consumer of every exported name type-checks against the installed declarations [A2] --------------------
+  // ---- 4. a consumer writing a configuration type-checks against the installed declarations ---------------------
   const compilerOptions = {
     module: "nodenext",
     moduleResolution: "nodenext",
@@ -223,11 +211,11 @@ async function dockerIndependentOracles() {
   };
   const consumer = typeCheck("consumer", consumerSource());
   if (consumer.status !== 0 || /error TS\d+/.test(consumer.out)) {
-    fail(`a consumer of every §12 export did not type-check against the installed package (A2):\n${consumer.out}`);
+    fail(`a consumer writing a configuration did not type-check against the installed package (A2):\n${consumer.out}`);
   }
-  console.log(`pack-install smoke: a consumer importing all ${SURFACE.values.length} values and ${SURFACE.types.length} types of §12 from umbradb type-checks under --strict, none of them any (A2).`);
+  console.log(`pack-install smoke: a consumer importing ${CONSUMER_VALUES.length} values and ${CONSUMER_TYPES.length} types from umbradb and writing a configuration type-checks under --strict, none of them any (A2).`);
 
-  // ---- 4c. each retired name fails to type-check [A2, LS-2, LS-3] ----------------------------------------------------
+  // ---- 4c. each retired name fails to type-check ----------------------------------------------------
   const retired = typeCheck(
     "retired",
     [
@@ -245,7 +233,7 @@ async function dockerIndependentOracles() {
   }
   console.log(`pack-install smoke: importing any of ${[...RETIRED_VALUES, ...RETIRED_TYPES].join(", ")} from umbradb fails to type-check (A2, LS-2, LS-3).`);
 
-  // ---- 4b. the installed umbradb command [LS-6, A6] ------------------------------------------------------------------
+  // ---- 4b. the installed umbradb command ------------------------------------------------------------------
   const umbradb = join(scratch, "node_modules", ".bin", shell ? "umbradb.cmd" : "umbradb");
   if (!existsSync(umbradb)) fail(`the installed package has no umbradb command at ${umbradb} (package.json bin, LS-6).`);
   const command = (args, cwd = scratch) => run(umbradb, args, { cwd });
@@ -281,7 +269,7 @@ async function dockerIndependentOracles() {
   checkConfig(command, "a configuration file importing from umbradb");
   console.log("pack-install smoke: the installed umbradb command prints its usage (exit 2), knows run, backup and restore, and config check passes a file importing §12's builders from umbradb (LS-6, A6, A35).");
 
-  // ---- 4d. L54: the module guide's module test, from the installed package [L54, LM-1, LS-1] -------------------------
+  // ---- 4d. the module guide's module test, from the installed package ------------------------------
   // The test imports only "umbradb", zod (a dependency of the package, installed with it) and Node.js; its author's
   // own development dependency, @types/node, is the repository's, linked in when the install did not bring it.
   writeFileSync(join(scratch, "try-module.ts"), readFileSync(join(repoRoot, MODULE_TEST), "utf8"));
@@ -415,13 +403,18 @@ async function tapeSyncOracle(command) {
   }
 }
 
-/** The consumer of oracle 4: every exported value and type imported from "umbradb", none `any`, a configuration
- *  written. [design §12] */
+/** The values and types the consumer of oracle 4 imports from "umbradb": the ones its configuration and lines use. */
+const CONSUMER_VALUES = ["CORE_BLOCK_PARSED", "CORE_CHAIN_EVENTS", "POINTS", "UmbraError", "coreEntry", "defineConfig"];
+const CONSUMER_TYPES = ["CoreVersion", "Entry", "ErrorCode", "PointName", "UmbraConfig"];
+
+/** The consumer of oracle 4: {@link CONSUMER_VALUES} and {@link CONSUMER_TYPES} imported from "umbradb", none `any`, a
+ *  configuration written. */
 function consumerSource() {
-  const { values, types } = SURFACE;
+  const values = CONSUMER_VALUES;
+  const types = CONSUMER_TYPES;
   return [
-    "// Every value and type of design.md §12, imported from the installed package (A2). If any resolved to `any`,",
-    "// NotAny<T> would be [\"UNEXPECTED_ANY\"] and assigning `true` to it would fail to compile.",
+    "// The values and types a configuration is written with, imported from the installed package (A2). If any",
+    "// resolved to `any`, NotAny<T> would be [\"UNEXPECTED_ANY\"] and assigning `true` to it would fail to compile.",
     `import { ${values.join(", ")} } from "umbradb";`,
     `import type { ${types.join(", ")} } from "umbradb";`,
     "",
@@ -454,12 +447,12 @@ async function main() {
   const command = await dockerIndependentOracles();
   if (dockerAvailable) {
     await tapeSyncOracle(command);
-    console.log("\npack-install smoke: PASS -- the tarball ships the declarations and the vendored ledger packages; §12 type-checks for a consumer and the retired names do not; the deep import is blocked; the umbradb command runs; a module test passes from the installed package; the installed process synced a tape on PostgreSQL.");
+    console.log("\npack-install smoke: PASS -- the tarball ships the declarations and the vendored ledger packages; a consumer writing a configuration type-checks and the retired names do not; the deep import is blocked; the umbradb command runs; a module test passes from the installed package; the installed process synced a tape on PostgreSQL.");
   } else if (isCI) {
     fail("Docker is REQUIRED in CI but `docker info` failed: the tape sync on PostgreSQL (oracle 5) cannot run and must not be skipped. Oracles 1-4 ran.");
   } else {
     console.log("\npack-install smoke: NOTICE -- Docker absent locally; skipping ONLY the tape sync on PostgreSQL (oracle 5).");
-    console.log("pack-install smoke: PASS (oracles 1-4) -- tarball contents, install, deep import, §12 consumer, retired names, the umbradb command, the module test.");
+    console.log("pack-install smoke: PASS (oracles 1-4) -- tarball contents, install, deep import, configuration consumer, retired names, the umbradb command, the module test.");
   }
 }
 

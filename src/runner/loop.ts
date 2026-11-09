@@ -1,37 +1,35 @@
 /**
  * The finalized loop: the runner's processing of finalized heights. It runs from the cursor + 1 (S on a new database)
  * up to the block source's finalized head, in order and without skipping one, then waits for the head to rise.
- * [RN-1, RN-4, RN-14; design §2, §3; CORE-ARCH §4.2, §4.5]
  *
  * **Per new head** the loop calls `on-finalized` once, before the head's heights, each callback with its own read handle
  * at the cursor. **Per height h**, it runs these steps through the point dispatch (`./dispatch.ts`), in the order of the
  * range of the resolved graph holding h:
  * 1. `on-fetch` and `on-parse`: the block context and an item sink, no database handle. On a private process each
- *    `on-fetch` callback also gets its own read of public data (the block source's `fetchRead`). [PP-3, Q100]
+ *    `on-fetch` callback also gets its own read of public data (the block source's `fetchRead`).
  * 2. `on-compute`: the block context, a read handle at h − 1 and an item sink. Each callback runs inside its own read
  *    (`Database.read`), so on PGlite a `db.read` from inside it fails with `nested-call` rather than waiting, and a
- *    callback's failing statement aborts no other callback's read. [DB-4, Q73]
+ *    callback's failing statement aborts no other callback's read.
  * 3. The block transaction: one `BEGIN … COMMIT` holding every `on-db-write` callback of h, each with its block write
  *    handle (`src/db/write-handles.ts`), in the point's fixed callback order. `core-block-commit` runs first and writes
  *    the cursor row (on a private process, `core-private-source` does). Before the `COMMIT`, the loop checks that the
- *    block source's cursor is h with the block's hash. Nothing else of the loop writes. [RN-2, RN-3, RN-6, CD-3]
+ *    block source's cursor is h with the block's hash. Nothing else of the loop writes.
  * 4. `on-after-db-write`: the block context without `block` items and a read handle at h, each callback in its own
  *    read.
  *
  * Between `on-parse` and `on-compute`, `on-start-height` runs for the entries starting at h: the core's parts when h is
  * S, then the modules one of whose segments of the graph (`ResolvedGraph.segments`) starts at h. Revisions that continue
  * each other are one segment, so a revision boundary starts nothing. Each callback gets a read at h − 1.
- * [RN-9, CF-5, A42]
  *
  * After `on-after-db-write`, `on-stop-height` runs for the entries stopping at h: the modules one of whose segments ends
- * at h, in reverse order, then the core's parts when h is the core's stop. Each gets a read at h. [RN-10]
+ * at h, in reverse order, then the core's parts when h is the core's stop. Each gets a read at h.
  *
  * **The lockstep wait.** Given {@link LoopInput.lockstep} (the core's bookkeeping of the private instances its `core`
  * entry lists in `lockstepInstances`, `src/private/lockstep.ts`), the loop awaits it for each height h after h's
  * `on-compute` and before h's block transaction, once every read of h has ended. Nothing is open while it waits, so a
  * private instance's reads through the core (on PGlite, its one queue) are served meanwhile. It resolves true once every
  * listed instance has committed h − 1, and the loop goes on to `BEGIN`. It resolves false when the loop's signal stopped
- * it first; h's transaction never began, and the loop ends with its signal, h not committed. [PP-6, RN-13]
+ * it first; h's transaction never began, and the loop ends with its signal, h not committed.
  *
  * **The pause between heights.** Given {@link LoopInput.pause}, the loop stops at each point between two heights while
  * a hold is kept (`./pause.ts`). These points are:
@@ -41,54 +39,53 @@
  * No transaction is open there and every read of the previous height has ended. The wait for the head counts as between
  * heights: a hold asked for meanwhile is reached at once, and when the head rises the loop stops at its next step.
  * Paused, the loop reads no head, runs no point and has no slow-height window open. Its signal ends the pause, and the
- * loop then ends with it. [BK-1, Q152 B, RN-11, RN-13, RN-17]
+ * loop then ends with it.
  *
  * **At a restart**, with the cursor c, the loop first runs `on-after-db-write` for c and `on-stop-height` for the
  * entries stopping at c (the core's when c is at or above its stop), before c + 1, because a crash may have come before
  * they completed. They run in the order of the range holding c, with the block context of c and no `block` items. Both
  * points run in series, so the range ending at the cursor, which startup checks for a cycle only, gives them their
- * order. [RN-11]
+ * order.
  *
  * **Where it ends.** The loop ends after the core's stop ({@link LoopInput.coreStop}); with the cursor already at or
  * above it, it processes nothing. It also ends after the height before an upgrade boundary ({@link LoopInput.boundary}),
  * the first height of a revision whose version this build does not carry. In both cases it commits that height,
- * completes its `on-after-db-write` and `on-stop-height`, and resolves with a {@link LoopEnd} saying which. [RN-10, RN-12]
+ * completes its `on-after-db-write` and `on-stop-height`, and resolves with a {@link LoopEnd} saying which.
  *
  * Its signal stops it before the next height, or while it waits; the height in progress finishes. While a height's
  * block transaction is open (from its request until it has committed or rolled back),
  * {@link FinalizedLoop.blockTransaction} gives it: the process's stop closes the node client at once when none is open,
- * else once it settled (`./process.ts`). [RN-13]
+ * else once it settled (`./process.ts`).
  *
  * **The block context** of each callback holds the block's height, hash and parent hash, the `block` items published
  * before the callback started (`./block-context.ts`: a callback's puts are published when it completes), the calling
  * module's settings for the revision covering h, and whether a module's entry is active at h. At `on-after-db-write` it
- * holds no items. [RN-5]
+ * holds no items.
  *
- * **Nothing is open while the loop waits** for the head: every read and the block transaction have ended. [RN-6, RN-14]
+ * **Nothing is open while the loop waits** for the head: every read and the block transaction have ended.
  *
  * **Failures** stop the loop: {@link FinalizedLoop.run} rejects with a {@link HeightFailure} naming the height, whether
  * it committed and, for a callback's failure, the point and the module (the dispatch's `CallbackFailure`, with the error
- * itself as its cause). [RN-8]
+ * itself as its cause).
  *
  * A use of a closed write handle, or a put from a kept item sink, is a callback error even when no callback rejects with
  * it (a timer, a module that catches it). The loop keeps the first, names its module and point, and fails the height in
  * progress before its `COMMIT`, or stops once the height's last point ended, or before the next height. The same holds
  * for a `publish` the process contexts refuse (`./process-context.ts`): they report it to the loop
  * ({@link LoopInput.misuses}), named by its module and the point the loop was dispatching, none while it waits.
- * [DB-3, MD-7]
  *
  * The halt (the state `halted` with its reason, the process staying up) and the retries of a lost connection or an
- * unreachable node, which run the loop again, belong to the process (`./process.ts`, `./failures.ts`). [RN-8, IN-10]
+ * unreachable node, which run the loop again, belong to the process (`./process.ts`, `./failures.ts`).
  *
  * **A height held for a retry.** A retryable failure (`UmbraError.retryable`: `connection-lost`, `node-unreachable`,
  * directly or as a callback's) may stop h after its `on-parse` and before it committed. Then the loop keeps h
  * ({@link HeldHeight}): its block, its range, the cursor before it, its `block` items as `on-fetch` and `on-parse` left
  * them, the point it resumes at, and whether the failure came from the `COMMIT`. The process runs the same loop again
- * after its back-off, and that next run starts with h instead of the cursor's re-delivery: [IN-10, IN-11]
+ * after its back-off, and that next run starts with h instead of the cursor's re-delivery:
  * 1. It reads the cursor inside a transaction, on the writer. After a lost connection that is a new session, which
  *    takes the writer lock again before anything else (`writer-lock-lost` when another process took it), so nothing can
- *    move the cursor after it is read. A failure of that read keeps h held for the run after. [DB-11]
- * 2. {@link FinalizedLoop.commitOutcome} reads the cursor: [IN-11]
+ *    move the cursor after it is read. A failure of that read keeps h held for the run after.
+ * 2. {@link FinalizedLoop.commitOutcome} reads the cursor:
  *    - h with the block's hash, after a failed `COMMIT`: h committed. The loop tells its observer, runs h's
  *      `on-after-db-write` and `on-stop-height`, and goes on from h + 1.
  *    - the cursor before h: h did not commit. h is processed again from `on-compute` with its kept items (those its
@@ -99,18 +96,17 @@
  * Nothing is fetched or parsed again, and the cursor's `on-after-db-write`, which ran before h began, is not delivered
  * again. A retryable failure on the way to h (the head's read, its `on-finalized`) keeps h held for the run after. A
  * failure before `on-parse` ended holds nothing: the next run starts from the cursor, re-delivers its callbacks, and
- * fetches h again. [IN-10, RN-11]
+ * fetches h again.
  *
  * **A source that fetches ahead** (`core-block-fetch`'s node source) is given, for each run, the runner's dispatch
  * interface for its queue ({@link QueueRunner}: `on-fetch` and `on-parse` of a block it fetched ahead, `on-best-block`,
  * `on-rollback`, and the hash stored at a height), taken back when the run ends. The loop takes each height from it
  * prepared (`BlockSource.prepared`), with `on-fetch` and `on-parse` already run and their items in the height's, and
  * goes on to `on-start-height` and `on-compute` with them. The queue's callbacks run outside the loop's points, each
- * with its block context as the loop builds it. [IN-4, IN-5, IN-6]
+ * with its block context as the loop builds it.
  *
  * **A slow height** is reported, never cut off: nothing here cancels, times out or retries a height for its time. Each
  * run of a height has a window, from its first callback after `on-finalized` to its `COMMIT`. Where the window starts:
- * [RN-17, Q71]
  * - normally, at its `on-fetch`;
  * - for a height the source prepares ahead: when the loop asks for it, if its `on-fetch` or `on-parse` runs in the
  *   queue by then, else when one starts there. The queue's earlier work for it, beside the heights before it, is not
@@ -123,15 +119,15 @@
  * timer of the main thread, so not while a callback blocks it), {@link FinalizedLoop.slowBlock} gives the height, its
  * point and the first module running in the point's order, and the observer is told ({@link LoopObserver.slow}). The
  * window closes when the height commits, or when its run fails or stops (a halt, a retry, whose run opens a window of
- * its own, or a stop at the lockstep wait), and the observer is told again. [RN-17]
+ * its own, or a stop at the lockstep wait), and the observer is told again.
  *
  * **The callbacks the loop awaits outside a height's processing** are timed alike, each in a window of its own
  * ({@link SlowWindow}): opened when the loop starts them, timed against `slowBlockMs`, closed when they end or fail.
- * These are: [RN-17, Q145 B]
+ * These are:
  * - a height's `on-after-db-write` and `on-stop-height` after its commit: one window, from the commit to the end of
  *   `on-stop-height` (after a `COMMIT` that landed though its connection was lost, from the retry's start of them);
  * - each `on-finalized`, named by the height of the head it announces;
- * - the re-delivery at a run's start, named by the cursor's height. [RN-11]
+ * - the re-delivery at a run's start, named by the cursor's height.
  *
  * One window is open at a time: the loop awaits them in series.
  */
@@ -175,39 +171,39 @@ export interface LoopInput {
   readonly plan: SchemaPlan;
   /** The runner's view of the chain. */
   readonly source: BlockSource;
-  /** Each module's process context: one per module, the same object at every point. [MD-7] */
+  /** Each module's process context: one per module, the same object at every point. */
   readonly contextOf: (id: string) => ProcessContext;
   /**
    * Where the process contexts report a refused `publish`: a callback error of its module even when the module caught
-   * it, or when a timer made it (`ProcessContexts`, `./process-context.ts`). [MD-7]
+   * it, or when a timer made it (`ProcessContexts`, `./process-context.ts`).
    */
   readonly misuses?: MisuseReports;
   /** Stops the loop: before the next height, or while it waits for the head. */
   readonly signal?: AbortSignal;
   /**
    * The core entry's stop: the last height the loop processes, after whose `on-stop-height` (the core's among them) it
-   * ends. With the cursor at or above it, it processes nothing. Absent or null: no stop. [CF-4, RN-10]
+   * ends. With the cursor at or above it, it processes nothing. Absent or null: no stop.
    */
   readonly coreStop?: bigint | null;
   /**
    * The upgrade boundary: the first height above the cursor that starts a revision of a version this build does not
-   * carry. The loop ends after the height before it. Absent or null: none. [RN-12, Q43]
+   * carry. The loop ends after the height before it. Absent or null: none.
    */
   readonly boundary?: bigint | null;
   /** Told of the finalized heads the loop reads and the heights it commits (the process's state). */
   readonly observer?: LoopObserver;
   /**
    * The slow-window threshold (the configuration's `slowBlockMs`): a window open longer is slow, whether a height's
-   * processing or a callback the loop awaits outside it (see the module comment). Absent or null: none is. [RN-17, CF-4]
+   * processing or a callback the loop awaits outside it (see the module comment). Absent or null: none is.
    */
   readonly slowBlockMs?: number | null;
-  /** The lockstep wait before each block's transaction (see the module comment); none unless given. [PP-6] */
+  /** The lockstep wait before each block's transaction (see the module comment); none unless given. */
   readonly lockstep?: LockstepWait;
-  /** The pause between heights (see the module comment); none unless given. [BK-1, Q152 B] */
+  /** The pause between heights (see the module comment); none unless given. */
   readonly pause?: LoopPause;
 }
 
-/** The lockstep wait (`src/private/lockstep.ts`'s `Lockstep`): before `BEGIN` of `height`. [PP-6] */
+/** The lockstep wait (`src/private/lockstep.ts`'s `Lockstep`): before `BEGIN` of `height`. */
 export interface LockstepWait {
   /** Resolves true once the loop may open `height`'s block transaction, false when `signal` aborted first. */
   wait(height: bigint, signal: AbortSignal): Promise<boolean>;
@@ -219,22 +215,22 @@ export interface LoopObserver {
   head?(head: BlockRef): void;
   /** A height that committed: its block, the new cursor. */
   committed?(block: BlockRef): void;
-  /** A window became slow, or a slow window closed (see the module comment). [RN-17] */
+  /** A window became slow, or a slow window closed (see the module comment). */
   slow?(event: SlowBlockEvent): void;
 }
 
 /**
- * The windows the loop times for slowness (see the module comment): [RN-17, Q145 B]
+ * The windows the loop times for slowness (see the module comment):
  * - `height`: a height's processing, from its first callback after `on-finalized` to its `COMMIT`;
  * - `after-commit`: its `on-after-db-write` and `on-stop-height` after the `COMMIT`;
  * - `finalized`: one `on-finalized`;
- * - `redelivery`: the re-delivery of the cursor's callbacks at a run's start. [RN-11]
+ * - `redelivery`: the re-delivery of the cursor's callbacks at a run's start.
  */
 export type SlowWindow = "height" | "after-commit" | "finalized" | "redelivery";
 
 /**
  * What the loop does in an open window: which window, its height (for `finalized` the head announced), the point it is
- * in, the first module running there, and since when. [RN-17]
+ * in, the first module running there, and since when.
  */
 export interface HeightActivity {
   readonly window: SlowWindow;
@@ -264,7 +260,7 @@ export type SlowBlockEvent =
 
 /**
  * Where a height's processing is: the last of its points that began, and the modules whose callbacks run, in the order
- * they started (at a point in waves, the point's order). [RN-17]
+ * they started (at a point in waves, the point's order).
  */
 class Activity {
   point: PointName;
@@ -290,7 +286,7 @@ class Activity {
   }
 }
 
-/** An open slow-height window (see the module comment): a height's processing, or callbacks awaited outside it. [RN-17] */
+/** An open slow-height window (see the module comment): a height's processing, or callbacks awaited outside it. */
 interface Watch {
   readonly window: SlowWindow;
   readonly height: bigint;
@@ -302,7 +298,7 @@ interface Watch {
   raised: boolean;
 }
 
-/** How the loop ended. [RN-10, RN-12, RN-13] */
+/** How the loop ended. */
 export type LoopEnd =
   /** Its signal stopped it, before a height or while it waited. */
   | { readonly kind: "signal" }
@@ -326,7 +322,7 @@ export interface HeightRun {
   readonly items: BlockItems;
   /**
    * The cursor before the height: null before the first block, and at a re-delivery after a restart, which writes
-   * nothing. [RN-11]
+   * nothing.
    */
   readonly previous: BlockRef | null;
   /** True when the source prepared the height (`BlockSource.prepared`): its `on-fetch` and `on-parse` ran already. */
@@ -343,7 +339,7 @@ export type ResumePoint = "on-start-height" | "on-compute";
 
 /**
  * A height a retryable failure stopped before it committed, after its `on-parse` (see the module comment): what the
- * loop's next run processes it again with. [IN-10, IN-11]
+ * loop's next run processes it again with.
  */
 export interface HeldHeight {
   /** The height's run: its block, its range, the cursor before it, its items. */
@@ -354,7 +350,7 @@ export interface HeldHeight {
   readonly from: ResumePoint;
   /**
    * True when the failure came after the block transaction's body ended, so from its `COMMIT`, which the server may
-   * have committed or not. False when the transaction failed before, and certainly did not commit. [IN-11]
+   * have committed or not. False when the transaction failed before, and certainly did not commit.
    */
   readonly uncertain: boolean;
 }
@@ -362,7 +358,6 @@ export interface HeldHeight {
 /**
  * What the cursor read after a held height's failure says ({@link FinalizedLoop.commitOutcome}): the height
  * `committed`, `not-committed` (the cursor is the one before it), or `unexpected` (anything else: `unexpected-cursor`).
- * [IN-11]
  */
 export type CommitOutcome = "committed" | "not-committed" | "unexpected";
 
@@ -372,7 +367,7 @@ export type ReadOpener = <T>(body: (read: ReadHandle) => Promise<T>) => Promise<
 /**
  * The halt `unexpected-cursor`. It is raised when the loop's check before the `COMMIT`, that the block transaction left
  * the cursor at the height with the block's hash, failed; or when the cursor read after a held height's failure was
- * neither the height nor the one before it. [IN-11; design §11]
+ * neither the height nor the one before it.
  */
 export class UnexpectedCursor extends Error {
   constructor(message: string) {
@@ -381,7 +376,7 @@ export class UnexpectedCursor extends Error {
   }
 }
 
-/** Why the loop stopped: the height, and the point and module when a callback failed. [RN-8] */
+/** Why the loop stopped: the height, and the point and module when a callback failed. */
 export class HeightFailure extends Error {
   readonly height: bigint;
   readonly point: PointName | undefined;
@@ -423,7 +418,7 @@ type Invoke<P extends PointName> = (
   call: (...args: PointArguments<P>) => Promise<void>,
 ) => Promise<void>;
 
-/** `invoke`, each callback recorded as running in `activity` when there is one. [RN-17] */
+/** `invoke`, each callback recorded as running in `activity` when there is one. */
 function tracked<P extends PointName>(activity: Activity | undefined, invoke: Invoke<P>): Invoke<P> {
   return activity === undefined ? invoke : (part, call) => activity.during(part.id, () => invoke(part, call));
 }
@@ -442,7 +437,7 @@ function isBlock(ref: BlockRef | null, block: BlockRef | null): boolean {
 /** A cursor as text, for a message. */
 const cursorText = (cursor: BlockRef | null): string => (cursor === null ? "none" : `height ${cursor.height}`);
 
-/** Whether the process retries `failure`: a retryable `UmbraError`, itself or a callback's. [IN-10] */
+/** Whether the process retries `failure`: a retryable `UmbraError`, itself or a callback's. */
 function isRetryable(failure: HeightFailure): boolean {
   const cause = failure.cause instanceof CallbackFailure ? failure.cause.cause : failure.cause;
   return cause instanceof UmbraError && cause.retryable;
@@ -465,7 +460,7 @@ export class FinalizedLoop {
   #point: PointName | undefined;
   /** How far each height's run got, by run. */
   readonly #progress = new WeakMap<HeightRun, Progress>();
-  /** The runs whose block transaction's body ended: a failure after that is the `COMMIT`'s. [IN-11] */
+  /** The runs whose block transaction's body ended: a failure after that is the `COMMIT`'s. */
   readonly #bodiesEnded = new WeakSet<HeightRun>();
   /** The height the last run held for the next (see the module comment). */
   #held: HeldHeight | undefined;
@@ -473,7 +468,7 @@ export class FinalizedLoop {
   #resume: HeldHeight | undefined;
   /**
    * The window open: the height the loop is on, from the start of its processing to its commit or its failure, or the
-   * callbacks it awaits outside a height's processing while they run. [RN-17]
+   * callbacks it awaits outside a height's processing while they run.
    */
   #watch: Watch | undefined;
   /** What the source's queue runs for each height it prepares (`on-fetch`, `on-parse`), while it does. */
@@ -489,7 +484,7 @@ export class FinalizedLoop {
   /**
    * The open window once it has been open longer than `slowBlockMs` (see the module comment): which, its height, the
    * point it is in and the first module running there now, and its time. Null otherwise: none open, none slow yet, or no
-   * `slowBlockMs`. [RN-17]
+   * `slowBlockMs`.
    */
   slowBlock(): HeightActivity | null {
     const watch = this.#watch;
@@ -499,7 +494,7 @@ export class FinalizedLoop {
   /**
    * The height whose processing is open — from the loop's start on it to its `COMMIT`, or to its failure or stop —, or
    * null outside one: waiting for the head, in `on-finalized`, after a commit, or at a run's re-delivery. The process's
-   * stop names it in its log line. [RN-13]
+   * stop names it in its log line.
    */
   heightInProgress(): bigint | null {
     const watch = this.#watch;
@@ -509,7 +504,7 @@ export class FinalizedLoop {
   /**
    * The height's block transaction while it is open, from its request (its `BEGIN` waits for the writer) until it has
    * committed or rolled back: a promise that settles then and never rejects. Null while none is open. The process's
-   * stop closes the node client at once when none is open, else once it settles (`./process.ts`). [RN-6, RN-13]
+   * stop closes the node client at once when none is open, else once it settles (`./process.ts`).
    */
   blockTransaction(): Promise<void> | null {
     return this.#transaction ?? null;
@@ -517,7 +512,7 @@ export class FinalizedLoop {
 
   /**
    * The slow-window threshold for a window of the kind `_window`: the input's `slowBlockMs`, null for none (a negative
-   * control's seam). [RN-17]
+   * control's seam).
    */
   protected slowBlockMs(_window: SlowWindow): number | null {
     return this.input.slowBlockMs ?? null;
@@ -527,7 +522,7 @@ export class FinalizedLoop {
    * Re-delivers the cursor's callbacks or, after a run that held a height, settles that height first (see the module
    * comment). Then processes every finalized height above it, waiting for the head to rise, up to its last height
    * ({@link lastHeight}), and resolves with how it ended, or with `signal` when its signal stopped it. Rejects with a
-   * {@link HeightFailure} when processing fails. [RN-11]
+   * {@link HeightFailure} when processing fails.
    */
   async run(): Promise<LoopEnd> {
     const unwatch = this.input.misuses?.watch((error, module) => this.#misused({ error, module, point: this.#point }));
@@ -566,7 +561,7 @@ export class FinalizedLoop {
     if (cursor !== null && last !== null && cursor.height >= last) return this.#stopped(cursor.height);
     for (;;) {
       if (this.#signal.aborted) return SIGNALLED;
-      // Between heights a pause holds the loop here, before it reads the head. [BK-1, Q152 B]
+      // Between heights a pause holds the loop here, before it reads the head.
       await this.pauseBetween();
       if (this.#signal.aborted) return SIGNALLED;
       const next = cursor === null ? graph.start : cursor.height + 1n;
@@ -581,7 +576,7 @@ export class FinalizedLoop {
         await this.#finalized(head, next);
       } catch (error) {
         const failure = this.#failure(next, error, false);
-        // A held height not reached yet stays held for the next run, its items kept. [IN-10]
+        // A held height not reached yet stays held for the next run, its items kept.
         if (this.#resume !== undefined && isRetryable(failure)) this.#held = this.#resume;
         throw failure;
       }
@@ -613,7 +608,7 @@ export class FinalizedLoop {
   /**
    * The re-delivery at the cursor `cursor` after a restart, before its next height: `on-after-db-write` and
    * `on-stop-height` of its height ({@link after}), with its block context and no `block` items. A failure stops the
-   * loop with the height committed. [RN-11]
+   * loop with the height committed.
    */
   protected async redeliver(cursor: BlockRef): Promise<void> {
     const { height } = cursor;
@@ -640,7 +635,6 @@ export class FinalizedLoop {
   /**
    * A point between two heights (see the module comment): resolves at once unless a pause holds the loop
    * ({@link LoopInput.pause}), else once it is lifted or the loop's signal aborts. A negative control's seam.
-   * [BK-1, Q152 B]
    */
   protected pauseBetween(): Promise<void> {
     return this.input.pause?.between(this.#signal) ?? Promise.resolve();
@@ -693,7 +687,7 @@ export class FinalizedLoop {
 
   /**
    * `on-start-height`: the entries starting at the height ({@link startingAt}), the core's parts first, then the modules
-   * in the range's order. Each callback gets its entry and its own read at h − 1. [RN-9]
+   * in the range's order. Each callback gets its entry and its own read at h − 1.
    */
   protected async startHeight(run: HeightRun): Promise<void> {
     const schedule = startHeightSchedule(run.range, this.startingAt(run));
@@ -702,7 +696,7 @@ export class FinalizedLoop {
 
   /**
    * `on-stop-height`: the entries stopping at the height ({@link stoppingAt}), in {@link stopSchedule}'s order, each
-   * callback with its entry and its own read at h. [RN-10]
+   * callback with its entry and its own read at h.
    */
   protected async stopHeight(run: HeightRun): Promise<void> {
     const schedule = this.stopSchedule(run.range, this.stoppingAt(run));
@@ -717,7 +711,7 @@ export class FinalizedLoop {
 
   /**
    * The entries stopping at the height of `run`: the core's at and above its stop (above it only at a restart), and the
-   * modules a segment of which ends there. [RN-10]
+   * modules a segment of which ends there.
    */
   protected stoppingAt(run: HeightRun): EntryBoundary {
     const { coreStop = null } = this.input;
@@ -725,7 +719,7 @@ export class FinalizedLoop {
     return { core: coreStop !== null && run.height >= coreStop, modules };
   }
 
-  /** `on-stop-height`'s order: the stopping modules in reverse order, then the core's parts. [RN-10] */
+  /** `on-stop-height`'s order: the stopping modules in reverse order, then the core's parts. */
   protected stopSchedule(range: ResolvedRange, stopping: EntryBoundary): PointSchedule<"on-stop-height"> {
     return stopHeightSchedule(range, stopping);
   }
@@ -759,7 +753,7 @@ export class FinalizedLoop {
 
   /**
    * The block transaction: one `BEGIN … COMMIT` holding the height's {@link write}. Once its body ended, a failure is
-   * the `COMMIT`'s, which may have committed. [IN-11]
+   * the `COMMIT`'s, which may have committed.
    */
   protected async commit(run: HeightRun): Promise<void> {
     await this.input.db.transaction(async (tx) => {
@@ -814,7 +808,7 @@ export class FinalizedLoop {
 
   /**
    * The `block` items of an `on-after-db-write` callback's context at the height of `run`: none, a map of its own, so
-   * the same context can be rebuilt after a restart. A negative control's seam. [RN-5, RN-11]
+   * the same context can be rebuilt after a restart. A negative control's seam.
    */
   protected afterWriteItems(_run: HeightRun): ReadonlyMap<string, unknown> {
     return new Map();
@@ -826,7 +820,7 @@ export class FinalizedLoop {
   }
 
   /**
-   * What `cursor`, read after `held`'s failure, says: [IN-11]
+   * What `cursor`, read after `held`'s failure, says:
    * - after a failed `COMMIT` (`uncertain`), the height with the block's hash: it committed;
    * - the cursor before the height (none before S): it did not;
    * - anything else is unexpected, as is the height itself after a transaction that failed before its `COMMIT`.
@@ -856,7 +850,7 @@ export class FinalizedLoop {
         return null;
       }
       // For slow-height reports the block transaction is on-db-write's: its BEGIN, its callbacks, the cursor check, the
-      // COMMIT. [RN-17]
+      // COMMIT.
       this.#enter("on-db-write");
       await this.#transacting(this.commit(run));
       committed = true;
@@ -903,7 +897,7 @@ export class FinalizedLoop {
 
   /**
    * The loop is on `height` (see the module comment): its window opens at once when the source's queue runs its
-   * `on-fetch` or `on-parse` now, else with the first callback of it that starts. [RN-17]
+   * `on-fetch` or `on-parse` now, else with the first callback of it that starts.
    */
   #watchHeight(height: bigint): Watch {
     const watch: Watch = {
@@ -922,7 +916,7 @@ export class FinalizedLoop {
 
   /**
    * Runs `body`, callbacks the loop awaits outside a height's processing, in a window of its own, `window` at `height`,
-   * open from now in `point`, closed when `body` ends or fails. [RN-17, Q145 B]
+   * open from now in `point`, closed when `body` ends or fails.
    */
   async #timed(
     window: Exclude<SlowWindow, "height">,
@@ -1068,7 +1062,7 @@ export class FinalizedLoop {
 
   /**
    * `on-finalized` for `head`, before its heights from `next` on: each callback with a read at the cursor, in a window
-   * of its own, named by the head's height. [RN-17, Q145 B]
+   * of its own, named by the head's height.
    */
   async #finalized(head: BlockRef, next: bigint): Promise<void> {
     const announced = Object.freeze({ height: head.height, hash: head.hash });
@@ -1148,7 +1142,7 @@ export class FinalizedLoop {
 
   /**
    * Runs `schedule`, each callback through `invoke`, after checking no misuse is pending; for the height in progress,
-   * recording the point and its running callbacks. [RN-17]
+   * recording the point and its running callbacks.
    */
   async #schedule<P extends PointName>(schedule: PointSchedule<P>, invoke: Invoke<P>): Promise<void> {
     this.#check();
@@ -1207,7 +1201,7 @@ export class FinalizedLoop {
     return range;
   }
 
-  /** A write handle used after its callback ended: its error names the module and the point. [DB-3] */
+  /** A write handle used after its callback ended: its error names the module and the point. */
   #closedUse(error: UmbraError): void {
     this.#misused({ error, module: error.details.module as string, point: error.details.point as PointName });
   }

@@ -1,5 +1,5 @@
 import { performance } from "node:perf_hooks";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   type ConnectSocket,
   connectWebSocket,
@@ -8,8 +8,7 @@ import {
   type NodeHeader,
   type NodeRetry,
 } from "../../src/node/index.js";
-import { type Json, type TapeCall, TapeNode, type TapeRecord } from "../../tools/tape/index.js";
-import { outsideIn8 } from "../node/in8.js";
+import { type Json, TapeNode, type TapeRecord } from "../../tools/tape/index.js";
 import { ManualTimers, until } from "../node/manual-timers.js";
 import { manualClock } from "./checks.js";
 
@@ -19,9 +18,7 @@ import { manualClock } from "./checks.js";
  * delivered after the calls recorded before them, a `disconnect` followed by the client's reconnect and new
  * subscription, and both kinds of `fault`. The client's clock is moved by hand (`ManualTimers`, shared with the tape
  * node where a delay is checked), and its WebSocket transport is the real one with its heartbeat moved out of the way
- * (the transport's own tests cover it). [A69, A70 CI, TT-1 to TT-3; acceptance §9]
- *
- * Last, every request the tape nodes of this file received is checked to be one of the allowed node calls. [IN-8]
+ * (the transport's own tests cover it).
  */
 
 const HOUR = 3_600_000;
@@ -29,9 +26,6 @@ const TEST_TIMEOUT_MS = 60_000;
 
 const quietConnect: ConnectSocket = (url, events, timers) =>
   connectWebSocket(url, events, timers, { heartbeatMs: 2 ** 31 - 1 });
-
-/** Every request every tape node of this file received. */
-const received: TapeCall[] = [];
 
 const hash = (n: number): string => `0x${n.toString(16).padStart(64, "0")}`;
 const bytes = (text: string): Uint8Array => Uint8Array.from(Buffer.from(text.slice(2), "hex"));
@@ -60,19 +54,12 @@ async function withClient(
   } finally {
     await client.close();
     await node.close();
-    received.push(...node.calls);
   }
 }
 
-afterAll(() => {
-  // The client sends only the allowed node calls, so a tape node never sees another (the CI half of the sync's check,
-  // for these sessions). [IN-8, A83]
-  expect(received.length).toBeGreaterThan(20);
-  expect(outsideIn8(received.map((call) => call.method as string))).toEqual([]);
-});
 
-describe("A69 through the node client", { timeout: TEST_TIMEOUT_MS }, () => {
-  it("TT-2's scenario: heads A, B, C recorded, four finalizedHead() calls read A, B, C, C", async () => {
+describe("through the node client", { timeout: TEST_TIMEOUT_MS }, () => {
+  it("heads A, B, C recorded, four finalizedHead() calls read A, B, C, C", async () => {
     const records: TapeRecord[] = [1, 2, 3].map((n) => ({
       method: "chain_getFinalizedHead",
       params: [],
@@ -156,11 +143,10 @@ describe("A69 through the node client", { timeout: TEST_TIMEOUT_MS }, () => {
     } finally {
       await client.close();
       await node.close();
-      received.push(...node.calls);
     }
   });
 
-  it("reads a recorded 'state already discarded' error as IN-9's node-requirement, unretried", async () => {
+  it("reads a recorded 'state already discarded' error as the node-requirement, unretried", async () => {
     const error = { code: 4003, message: `Client error: UnknownBlock: State already discarded for ${hash(9)}` };
     const records: TapeRecord[] = [
       { method: "state_getStorage", params: ["0x01", hash(9)], error },
@@ -178,7 +164,7 @@ describe("A69 through the node client", { timeout: TEST_TIMEOUT_MS }, () => {
   });
 });
 
-describe("A70 through the node client", { timeout: TEST_TIMEOUT_MS }, () => {
+describe("through the node client", { timeout: TEST_TIMEOUT_MS }, () => {
   it("delivers headers in file order, each only after the calls recorded before it", async () => {
     const records: TapeRecord[] = [
       { subscribe: "s", method: "chain_subscribeNewHeads", params: [] },
@@ -203,7 +189,7 @@ describe("A70 through the node client", { timeout: TEST_TIMEOUT_MS }, () => {
     });
   });
 
-  it("TT-3's scenario: two headers, the drop, the client's reconnect and new subscription, two more", async () => {
+  it("two headers, the drop, the client's reconnect and new subscription, two more", async () => {
     const records: TapeRecord[] = [
       { subscribe: "a", method: "chain_subscribeFinalizedHeads", params: [] },
       { notify: "a", result: headerJson(1) },

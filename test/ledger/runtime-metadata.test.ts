@@ -29,18 +29,18 @@ import {
 
 /**
  * Runtime metadata across an upgrade, on a synthetic devnet upgrade tape: runtime 1.0 (spec_version 1_000_000) runs
- * until block U = 3 enacts 2.0 (2_000_000); F = 4. [A96 CI, LG-4; acceptance §12]
+ * until block U = 3 enacts 2.0 (2_000_000); F = 4.
  *
  * Each block's content is decoded with the metadata of the runtime in its parent's state: `state_getMetadata` at the
  * parent hash (block 0: at block 0). That runtime's `spec_version` (`state_getRuntimeVersion` there) must be the
  * block's `MNSV` version, or processing halts with `metadata-mismatch`. Metadata is cached by that `spec_version`. So U
  * is decoded with the old metadata and F with the new, and the cache never holds the new metadata under the old
  * `spec_version`. The tape node serves the tape, and the node client of `src/node/` reads it unchanged, as
- * `core-block-fetch` does. [A96 CI, LG-4]
+ * `core-block-fetch` does.
  *
  * The same checks run on the recorded devnet upgrade tape (`devnet-v8-v9-0-235`: runtime 1_000_000 until U = 102
  * enacts 2_001_000; F = 103), skipped by name when the tape is absent. There, U's and F's events are also decoded, and
- * U's do not decode with the new runtime's metadata. [A96 CI]
+ * U's do not decode with the new runtime's metadata.
  */
 
 const TIMEOUT_MS = 60_000;
@@ -60,7 +60,7 @@ async function withNode<T>(records: readonly TapeRecord[], body: (client: NodeCl
 
 /**
  * The walk `core-block-fetch` makes per height: the block's hash and header, its ledger version from the table, then
- * the metadata its content is decoded with. [LG-1, LG-4]
+ * the metadata its content is decoded with.
  */
 function walkOver(client: NodeClient, table: LedgerTable = SYNTHETIC_TABLE, last: number = UPGRADE.last): Walk {
   return async (from, metadata) => {
@@ -75,7 +75,7 @@ function walkOver(client: NodeClient, table: LedgerTable = SYNTHETIC_TABLE, last
   };
 }
 
-describe("A96 on the synthetic devnet upgrade tape (LG-4)", { timeout: TIMEOUT_MS }, () => {
+describe("on the synthetic devnet upgrade tape", { timeout: TIMEOUT_MS }, () => {
   it("decodes U with the old metadata and F with the new, from genesis and from a cold cache at U", async () => {
     await withNode(upgradeTape(), async (client, node) => {
       await expectUpgradeDecoding(walkOver(client), () => new RuntimeMetadata(client));
@@ -134,7 +134,7 @@ describe("A96 on the synthetic devnet upgrade tape (LG-4)", { timeout: TIMEOUT_M
   });
 });
 
-describe("a delayed runtime upgrade on the synthetic tape (runtime 2.1's system_version 3; LG-4, issue 00089)", { timeout: TIMEOUT_MS }, () => {
+describe("a delayed runtime upgrade on the synthetic tape (runtime 2.1's system_version 3)", { timeout: TIMEOUT_MS }, () => {
   /** U only stages the new code (its state still runs the old runtime); F is built by the new one, as its state shows. */
   const delayedTape = () => upgradeTape(mnsvOf, delayedRuntimeAt);
 
@@ -144,7 +144,7 @@ describe("a delayed runtime upgrade on the synthetic tape (runtime 2.1's system_
       // The metadata read once per runtime: from genesis at block 0 and at F; from U at U − 1 and at F.
       const metadataReads = node.calls.filter((call) => call.method === "state_getMetadata").map((call) => call.params);
       expect(metadataReads).toEqual([[toHex(hashOf(0))], [toHex(hashOf(UPGRADE.f))], [toHex(hashOf(UPGRADE.u - 1))], [toHex(hashOf(UPGRADE.f))]]);
-      // The runtime read at every block's parent (block 0: its own), and at F's own hash after its parent's (V5).
+      // The runtime read at every block's parent (block 0: its own), and at F's own hash after its parent's.
       const runtimeReads = node.calls.filter((call) => call.method === "state_getRuntimeVersion").map((call) => call.params);
       expect(runtimeReads).toEqual([
         ...[0, 0, 1, 2, 3, 4, 4].map((h) => [toHex(hashOf(h))]),
@@ -153,8 +153,8 @@ describe("a delayed runtime upgrade on the synthetic tape (runtime 2.1's system_
     });
   });
 
-  it("[NEG] core-arch's parent-only selection halts at F there", async () => {
-    // The rule this change amends, as core-arch LG-4 states it: the runtime in the parent's state, or a halt.
+  it("[NEG] the parent-only selection halts at F there", async () => {
+    // The rule before delayed upgrades: the runtime in the parent's state, or a halt.
     const parentOnly = (node: NodeClient) => ({
       async forBlock(block: { height: bigint; hash: Uint8Array; parentHash: Uint8Array; specVersion: number }): Promise<RuntimeMetadataEntry> {
         const at = contentStateOf(block);
@@ -169,7 +169,7 @@ describe("a delayed runtime upgrade on the synthetic tape (runtime 2.1's system_
   });
 });
 
-describe("A96 on task 0.3's devnet upgrade tape (LG-4; skipped by name without the tape)", () => {
+describe("on the devnet upgrade tape (skipped by name without the tape)", () => {
   const TAPE = "devnet-v8-v9-0-235";
   /** A whole walk of the tape's 236 blocks through the tape node, on a loaded machine. */
   const WALK_MS = 300_000;
@@ -204,7 +204,7 @@ describe("A96 on task 0.3's devnet upgrade tape (LG-4; skipped by name without t
       const { boundary, answers, upgrade } = devnetOf(found);
       expect(upgrade.last).toBe(235);
       // A walk from U is a process restarted at cursor U − 1: the tape gains that cursor's header and the metadata at
-      // its hash, copied from its runtime's record (test/backbone/ledger-restart.ts). [Q135 A]
+      // its hash, copied from its runtime's record (test/backbone/ledger-restart.ts).
       const records = restartAt(found.read().records, BigInt(upgrade.u - 1));
       await withNode(records, async (client, node) => {
         await expectUpgradeDecoding(walkOver(client, devnetTable(boundary), upgrade.last), () => new RuntimeMetadata(client), upgrade);
@@ -296,7 +296,7 @@ describe("A96 on task 0.3's devnet upgrade tape (LG-4; skipped by name without t
   );
 });
 
-describe("the metadata cache (LG-4)", () => {
+describe("the metadata cache", () => {
   const blockAt = (h: number) => ({ height: BigInt(h), hash: hashOf(h), parentHash: h === 0 ? new Uint8Array(32) : hashOf(h - 1), specVersion: mnsvOf(h) });
   const node = () =>
     new CountingNode(

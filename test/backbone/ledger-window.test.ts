@@ -8,11 +8,11 @@ import { BACKUP_AT, continueToHead, HEAD, restoreOnPostgres, syncAndBackUp, type
 /**
  * With `retainStates` 1,000 at cursor 5,000, loading the state at 4,000 succeeds and 3,999 fails with
  * `state-not-retained`. Checked on PGlite 0.5.10 and PostgreSQL 18, through the real process, sized to fit a loaded
- * machine. [A103 CI, LG-12, Q122]
+ * machine.
  *
  * The 5,000 blocks run once, on PGlite, to 4,990, where the process backs up. PGlite then continues to 5,001.
  * PostgreSQL continues from that backup, restored: a backup restores on the other backend, and the restored database
- * continues like one that never stopped. [BK-2, BK-4]
+ * continues like one that never stopped.
  *
  * So PostgreSQL processes only the window's last 11 blocks and the loads. It runs several statements per block through
  * Docker's port proxy: about 4 blocks a second at load averages near 40, against PGlite's 30, and 1.3 in a loaded
@@ -22,14 +22,13 @@ import { BACKUP_AT, continueToHead, HEAD, restoreOnPostgres, syncAndBackUp, type
  * (`src/backbone/core-ledger-state/retention.ts`). What does depend on it is checked here on both: the released states'
  * root counts, and a retained state's load through the node-store bridge. The window's revisions test
  * (`ledger-storage.test.ts`) checks the same on both from genesis. The committed negative control (a window one state
- * short) is in `ledger-storage.negative-control.test.ts`. [A103 CI]
+ * short) is in `ledger-storage.negative-control.test.ts`.
  */
 
 const backends = new Map(PROCESS_BACKENDS.map((backend) => [backend.kind, backend])) as Map<"postgres" | "pglite", ProcessBackend>;
 
 /**
  * The window checks on `db` after the run reached 5,001 (the loads its watcher made at 5,001's `on-compute`).
- * [A103 CI]
  */
 async function a103(db: ProcessDatabase, scenario: LedgerScenario, status: { cursor: bigint | null; reason: unknown }, loads: readonly string[] | undefined): Promise<void> {
   expect(status).toMatchObject({ cursor: HEAD, reason: null });
@@ -43,7 +42,7 @@ async function a103(db: ProcessDatabase, scenario: LedgerScenario, status: { cur
   expect((await db.query("SELECT count(*)::text AS n FROM core_ledger_state.states"))[0]?.n).toBe(`${HEAD + 1n}`);
 }
 
-describe("A103 (LG-12): retainStates 1,000 at cursor 5,000, on PGlite and on PostgreSQL", () => {
+describe("retainStates 1,000 at cursor 5,000, on PGlite and on PostgreSQL", () => {
   let scenario: LedgerScenario;
   let backup: WindowBackup | undefined;
   let pglite: ProcessDatabase;
@@ -57,7 +56,7 @@ describe("A103 (LG-12): retainStates 1,000 at cursor 5,000, on PGlite and on Pos
     await Promise.all(PROCESS_BACKENDS.map((backend) => backend.stop()));
   }, 60_000);
 
-  it("A103 on PGlite: synced from genesis (backed up at 4,990 and continued), the state at 4,000 loads at cursor 5,000 and 3,999 fails with state-not-retained", async () => {
+  it("on PGlite: synced from genesis (backed up at 4,990 and continued), the state at 4,000 loads at cursor 5,000 and 3,999 fails with state-not-retained", async () => {
     pglite = await (backends.get("pglite") as ProcessBackend).database();
     const before = retentionSeen();
     backup = await syncAndBackUp(pglite, scenario, before);
@@ -68,7 +67,7 @@ describe("A103 (LG-12): retainStates 1,000 at cursor 5,000, on PGlite and on Pos
     await a103(pglite, scenario, status, seen.loads.get(HEAD));
   }, PATIENCE_MS * 6);
 
-  it("A103 on PostgreSQL: from the PGlite backup at 4,990 restored (BK-2, BK-4), the state at 4,000 loads at cursor 5,000 and 3,999 fails with state-not-retained", async () => {
+  it("on PostgreSQL: from the PGlite backup at 4,990 restored, the state at 4,000 loads at cursor 5,000 and 3,999 fails with state-not-retained", async () => {
     expect(backup, "the PGlite run's backup (the test before)").toBeDefined();
     const postgres = await (backends.get("postgres") as ProcessBackend).database();
     const seen = retentionSeen();

@@ -7,7 +7,7 @@ import { type Child, decodeChildren, encodeChildren, free, hex, LENGTH_BOUNDARIE
 
 // The main thread reads a stored node's referenced keys from its serialized child list, without the ledger package,
 // which it never loads; a miss prefetches those keys. The oracle is the independent node format
-// (`./node-format.ts`) and the vendored package's own `childRefs` over the nodes a real state flushes. [design §5.3]
+// (`./node-format.ts`) and the vendored package's own `childRefs` over the nodes a real state flushes.
 
 /** The fast-check seed of the property below. */
 const SEED = 20261026;
@@ -23,7 +23,7 @@ const child: fc.Arbitrary<Child> = fc.letrec<{ child: Child }>((tie) => ({
   ),
 })).child;
 
-describe("childRefKeys: a stored node's referenced keys, read on the main thread (design §5.3)", () => {
+describe("childRefKeys: a stored node's referenced keys, read on the main thread", () => {
   it(`gives the by-reference keys of any child list, through embedded children, in order (seed ${SEED})`, () => {
     fc.assert(
       fc.property(fc.array(child, { maxLength: 6 }), (children) => {
@@ -68,7 +68,7 @@ describe("childRefKeys: a stored node's referenced keys, read on the main thread
     expect(childRefKeys(Uint8Array.of(0))).toEqual([]);
   });
 
-  it("reads a length in the fewest bytes that spell it and refuses it in more, as the ledger does, for the number of children and an embedded payload's length: 0, 1, 63/64, 16383/16384 in each width (LG-11, R29)", () => {
+  it("reads a length in the fewest bytes that spell it and refuses it in more, as the ledger does, for the number of children and an embedded payload's length: 0, 1, 63/64, 16383/16384 in each width", () => {
     for (const value of LENGTH_BOUNDARIES) {
       const refs = Array.from({ length: value }, (_, i) => new Uint8Array(32).fill(i & 0xff));
       const listed = Buffer.concat(refs.flatMap((ref) => [Uint8Array.of(0), ref]));

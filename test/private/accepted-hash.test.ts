@@ -15,7 +15,7 @@ import { a165Problems, a165Run } from "./accepted-hash-checks.js";
  *   history is read through the core), stops it too.
  *
  * The run and the oracle are `./accepted-hash-checks.ts`'s; the committed negative controls are
- * `./accepted-hash.negative-control.test.ts`'s. [A165 CI, PP-14, Q159]
+ * `./accepted-hash.negative-control.test.ts`'s.
  */
 
 /** The cases: each backend with a transport, and PostgreSQL without one. */
@@ -26,12 +26,12 @@ const CASES: readonly { readonly name: string; readonly backend: PrivateBackend;
   ],
 );
 
-describe.each(CASES)("A165: a private process keeps the public configuration hash it accepted, on $name (PP-14)", ({ backend, transport }) => {
+describe.each(CASES)("a private process keeps the public configuration hash it accepted, on $name", ({ backend, transport }) => {
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 
   it(
-    "A165: a first start records the hash; after a changed configuration a start stops with public-config-changed " +
+    "a first start records the hash; after a changed configuration a start stops with public-config-changed " +
       "naming the new hash and --update-hash; updateHash set to it runs the full checks, records it and continues; " +
       "another value stops; a core changed during the start stops it",
     async () => {

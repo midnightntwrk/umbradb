@@ -8,7 +8,6 @@ import { checkpointRows, digestRows, runBlocks, startChain, testModule } from ".
 /**
  * Digest checkpoints over several intervals, on both backends. The interval is shortened from 14,400 to 4 by a build
  * flag that no exported surface reaches, the same way the block read queue's negative control works.
- * [A57, DT-5, Q86, A11]
  *
  * The flag is `CHECKPOINT_INTERVAL`, a constant of `src/backbone/core-digest/build-flags.ts`: 14,400 in the source, and
  * so in every build made from it. Nothing at run time can change it:
@@ -55,7 +54,7 @@ describe("the checkpoint interval is a build flag", () => {
   });
 });
 
-describe.each(BACKENDS)("A57's checkpoints with the interval shortened to 4, on $name", (backend) => {
+describe.each(BACKENDS)("checkpoints with the interval shortened to 4, on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop());
 

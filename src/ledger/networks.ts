@@ -1,6 +1,6 @@
 /**
  * The built-in ledger version tables: `./networks.json`, a versioned data file of this build (part of the UmbraDB
- * version), with one entry per known network, keyed by its genesis hash. [LG-3, A95; CORE-ARCH §4.8, §4.13]
+ * version), with one entry per known network, keyed by its genesis hash.
  *
  * **The format** (`umbradb-ledger-networks`, version 1) is checked by {@link networksFileProblems} when this module
  * loads, reporting every problem at once with its path, so a build with a broken file cannot start:
@@ -11,7 +11,7 @@
  *   (null until read), as read from the network's node; or null while nothing was read. Two networks never share a
  *   genesis hash, and a network with boundaries has its genesis.
  * - `rows`: the ledger version table's rows, at least one. Each `spec_version` is a `u32`, the bounds come the smaller
- *   first, the ledger is one this build carries, and the rows are in ascending order without overlap. [LG-1]
+ *   first, the ledger is one this build carries, and the rows are in ascending order without overlap.
  * - `boundaries`: each runtime upgrade read from the node, with `u` the block that enacts it, `f` = U + 1 the first
  *   block of the new runtime (each `{ height, hash, specVersion }` with its `MNSV` version), and the `source`. They
  *   are in ascending order (a boundary's U is at or above the previous boundary's F, with the same hash at the same
@@ -22,7 +22,7 @@
  *
  * A network's table is its rows plus one pin per boundary, at F. A pin names a first block; a boundary not read from a
  * node is not listed, so it gives no pin. {@link ledgerTableOf} gives the table in effect for a `core` entry: its
- * configured `ledgerTable` laid over its network's built-in table (`./version-table.ts`). [LG-3, A95]
+ * configured `ledgerTable` laid over its network's built-in table (`./version-table.ts`).
  *
  * Pure: the file is imported as JSON, so the browser build bundles it.
  */
@@ -40,10 +40,10 @@ import {
   U32_MAX,
 } from "./version-table.js";
 
-/** The networks a `core` entry may name besides `custom`, each with a built-in table. [CF-4] */
+/** The networks a `core` entry may name besides `custom`, each with a built-in table. */
 export const KNOWN_NETWORKS = Object.freeze(["mainnet", "preprod", "preview", "stagenet"] as const);
 
-/** A known network. [CF-4] */
+/** A known network. */
 export type KnownNetwork = (typeof KNOWN_NETWORKS)[number];
 
 /** The file's format name. */
@@ -63,7 +63,7 @@ export interface BoundaryBlock {
   readonly specVersion: number;
 }
 
-/** A runtime upgrade: block U enacts it, and F = U + 1 is the first block of the new runtime. [LG-1] */
+/** A runtime upgrade: block U enacts it, and F = U + 1 is the first block of the new runtime. */
 export interface Boundary {
   readonly u: BoundaryBlock;
   readonly f: BoundaryBlock;
@@ -298,13 +298,13 @@ export function builtInLedgerTable(network: string): LedgerTable | null {
   return builtInNetwork(network)?.table ?? null;
 }
 
-/** The table in effect for a `core` entry of `network` with the configured `ledgerTable`. [LG-3] */
+/** The table in effect for a `core` entry of `network` with the configured `ledgerTable`. */
 export function ledgerTableOf(network: string, configured: ConfiguredLedgerTable | undefined): LedgerTable {
   return effectiveLedgerTable(builtInLedgerTable(network), configured);
 }
 
 /**
- * The rules on a `core` entry's configured `ledgerTable`, for its `network` (`./version-table.ts`). [LG-1, LG-2, LG-3]
+ * The rules on a `core` entry's configured `ledgerTable`, for its `network` (`./version-table.ts`).
  */
 export function ledgerTableIssuesOf(network: string, configured: ConfiguredLedgerTable | undefined): LedgerTableIssue[] {
   return ledgerTableIssues(builtInLedgerTable(network), configured);

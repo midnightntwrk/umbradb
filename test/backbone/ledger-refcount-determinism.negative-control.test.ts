@@ -9,14 +9,14 @@ import { dagHistory, historyDifferences, RAW_HASH } from "./refcount-histories.j
  * of `ledger-refcount-determinism.test.ts` (the extended DAG fixture, `keeps-old-copy`, one run that never restarts and
  * one restarted before each rewrite), with `nodes` hashed by its raw rows (the contents hash's rule before nodes were
  * content-defined; `ref_counts` and `unreferenced` still checked): their contents hashes differ, from the first block
- * that wrote a stored node again in its other form. [R28, DT-3]
+ * that wrote a stored node again in its other form.
  */
 
-describe.each(PROCESS_BACKENDS)("R28's negative control on $name", (backend) => {
+describe.each(PROCESS_BACKENDS)("negative control on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("R28 control: with nodes hashed by its raw rows, the never-restarted and the restarted runs of the DAG fixture's case have different contents hashes, from TO_REF on", async () => {
+  it("control: with nodes hashed by its raw rows, the never-restarted and the restarted runs of the DAG fixture's case have different contents hashes, from TO_REF on", async () => {
     const never = await dagHistory(await backend.database(), "keeps-old-copy");
     const restarted = await dagHistory(await backend.database(), "keeps-old-copy", [TO_REF - 1, TO_EMBEDDED - 1, REQUEUE - 1]);
     const differing = historyDifferences(restarted.facets, never.facets, [RAW_HASH]);

@@ -11,8 +11,8 @@ import { type CliProject, cliProject, inProcess } from "./cli-fixtures.js";
 import { chainNode, runCoreSettings, statsConfig, statsModule } from "./run-fixtures.js";
 
 /**
- * L31: the command's lifecycle is unchanged by the library's (PGlite 0.5.10, `umbradb run` in this process with the
- * real admin worker on the file's `listen.admin`, its signals the test's). [L31 CI, AE-3, RN-13]
+ * The command's lifecycle is unchanged by the library's (PGlite 0.5.10, `umbradb run` in this process with the
+ * real admin worker on the file's `listen.admin`, its signals the test's).
  *
  * - A refusal of the configuration logs its findings and exits 1 by itself, with no admin listener opened.
  * - After a later refusal (its admin bound: PGlite without the development opt-in, `development-opt-in-required`)
@@ -74,7 +74,7 @@ function runHere(file: string) {
   return { signals, result, handle: () => handle };
 }
 
-describe("L31: umbradb run's lifecycle, unchanged (PGlite 0.5.10)", () => {
+describe("umbradb run's lifecycle, unchanged (PGlite 0.5.10)", () => {
   it("a refusal of the configuration logs its findings and exits 1 by itself, no admin listener opened", async () => {
     const port = await freePort();
     const file = write(

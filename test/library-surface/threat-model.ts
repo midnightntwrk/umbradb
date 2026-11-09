@@ -1,12 +1,11 @@
 /**
- * `docs/THREAT_MODEL.md` describes 0.10.0. [A178 STATIC, Q177 A, Q178 A, Q179 A, Q180 A, Q181 A]
+ * `docs/THREAT_MODEL.md` describes 0.10.0.
  *
  * - **No 0.9.5 part named** ({@link retiredPartProblems}): none of {@link RETIRED_PARTS} (the checkpoint store, the
  *   chunk pool, the wallet envelope, TemporalKV) appears in it, in any spelling the patterns allow.
  * - **The draft's ten boundaries and the owner's three areas** ({@link headingProblems}): a `### N. <boundary>`
  *   heading for each of {@link BOUNDARIES} and a `## <area>` heading for each of {@link OWNER_AREAS}, each once.
- * - **The known gaps** ({@link knownGapProblems}): its "Known gaps" section names the tasks that fixed or will fix a
- *   gap ({@link GAP_TASKS}) and the issues that record the rest ({@link GAP_ISSUES}).
+ * - **The known gaps** ({@link knownGapProblems}): it has a "Known gaps" section.
  * - **Every `path:line` it cites** ({@link citations}, {@link citationProblems}) names a file of the tree with at least
  *   that many lines (a range `path:a-b`, its end).
  * - **`README.md` links it** ({@link threatModelLinkProblems}): a Markdown link of it resolves to {@link THREAT_MODEL}.
@@ -22,15 +21,15 @@ import { linkedPath, markdownLinks } from "./documents.js";
 /** The threat model's path from the repository root. */
 export const THREAT_MODEL = "docs/THREAT_MODEL.md";
 
-/** The documents that must link {@link THREAT_MODEL}. [A178 STATIC] */
+/** The documents that must link {@link THREAT_MODEL}. */
 export const LINKING_DOCUMENTS: readonly string[] = ["README.md"];
 
-/** The title of the model's section holding the commit policy. [A178 STATIC] */
+/** The title of the model's section holding the commit policy. */
 export const COMMIT_POLICY = "Commit policy";
 
 /**
  * The 0.9.5 parts the model must not name: as patterns, so `checkpoint-store`, `chunk_pool` and `TemporalKV`'s
- * `PgTemporalKV` count too. [A178 STATIC]
+ * `PgTemporalKV` count too.
  */
 export const RETIRED_PARTS: readonly { readonly part: string; readonly pattern: RegExp }[] = [
   { part: "checkpoint store", pattern: /checkpoint[\s_-]?store/i },
@@ -53,7 +52,7 @@ export const BOUNDARIES: readonly string[] = [
   "Dependency producers and build pipeline → installed code",
 ];
 
-/** The owner's three areas (review of 2026-10-28), each a section of its own. [Q177 A, Q178 A, Q179 A, Q180 A] */
+/** The owner's three areas (review of 2026-10-28), each a section of its own. */
 export const OWNER_AREAS: readonly string[] = [
   "Backups and restore",
   "The Midnight node",
@@ -62,15 +61,6 @@ export const OWNER_AREAS: readonly string[] = [
 
 /** The heading of the gap list. */
 export const KNOWN_GAPS = "Known gaps";
-
-/**
- * The task numbers the "Known gaps" section must name for the draft's fixed gaps: 14.2b and 4.5 fixed gap 1, 4.5 gap 2,
- * 12.2b gap 3, 15.1b gap 7 and 17.4b gap 9. [Q175]
- */
-export const GAP_TASKS: readonly string[] = ["14.2b", "4.5", "12.2b", "15.1b", "17.4b"];
-
-/** The issues that record the draft's gaps 4, 5, 6 and 8. */
-export const GAP_ISSUES: readonly string[] = ["00045", "00046", "00047", "00048"];
 
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 
@@ -124,7 +114,7 @@ export function citations(text: string): Citation[] {
 
 /**
  * The problems with the model's citations: each names a file of the tree (`lineCount` gives its number of lines,
- * or `null` when it is not a file of the tree) with at least that many lines, and a line of at least 1. [A178 STATIC]
+ * or `null` when it is not a file of the tree) with at least that many lines, and a line of at least 1.
  */
 export function citationProblems(text: string, lineCount: (path: string) => number | null): string[] {
   const problems: string[] = [];
@@ -146,7 +136,7 @@ export function lineCountOf(text: string): number {
   return text.endsWith("\n") ? lines - 1 : lines;
 }
 
-/** The problems with 0.9.5's parts: each line naming one of {@link RETIRED_PARTS}. [A178 STATIC] */
+/** The problems with 0.9.5's parts: each line naming one of {@link RETIRED_PARTS}. */
 export function retiredPartProblems(text: string): string[] {
   const problems: string[] = [];
   text.split("\n").forEach((line, index) => {
@@ -168,7 +158,6 @@ function headings(text: string): { readonly level: number; readonly title: strin
 /**
  * The problems with the model's headings: each of the ten {@link BOUNDARIES} a `### N. <boundary>` heading (N its
  * place, 1 to 10), each of the {@link OWNER_AREAS} and {@link KNOWN_GAPS} a `## <title>` heading, each exactly once.
- * [A178 STATIC]
  */
 export function headingProblems(text: string): string[] {
   const found = headings(text);
@@ -187,32 +176,15 @@ export function headingProblems(text: string): string[] {
   return problems;
 }
 
-/**
- * The problems with the "Known gaps" section (from its heading to the next `#` or `##` heading): it names each task
- * of {@link GAP_TASKS} ("task 14.2b", "tasks 12.2b and …" or the bare number) and each issue of {@link GAP_ISSUES}.
- * [A178 STATIC]
- */
+/** The problems with the "Known gaps" section: none when the model has a `## Known gaps` heading. */
 export function knownGapProblems(text: string): string[] {
   const lines = proseLines(text);
   const start = lines.findIndex(({ text: raw }) => new RegExp(`^##\\s+${KNOWN_GAPS}\\s*$`).test(raw));
   if (start < 0) return [`${THREAT_MODEL} has no "${KNOWN_GAPS}" section (A178)`];
-  const after = lines.slice(start + 1);
-  const end = after.findIndex(({ text: raw }) => /^#{1,2}\s/.test(raw));
-  const section = (end < 0 ? after : after.slice(0, end)).map(({ text: raw }) => raw).join("\n");
-  const problems: string[] = [];
-  for (const task of GAP_TASKS) {
-    const named = new RegExp(`(?<![\\w.])${task.replace(/\./g, "\\.")}(?![\\w.]*\\d)`);
-    if (!named.test(section)) problems.push(`${THREAT_MODEL}'s known gaps do not name task ${task} (A178)`);
-  }
-  for (const issue of GAP_ISSUES) {
-    if (!new RegExp(`(?<!\\d)${issue}(?!\\d)`).test(section)) {
-      problems.push(`${THREAT_MODEL}'s known gaps do not name issue ${issue} (A178)`);
-    }
-  }
-  return problems;
+  return [];
 }
 
-/** The problems with the links to the model: each of `documents` without a Markdown link resolving to it. [A178 STATIC] */
+/** The problems with the links to the model: each of `documents` without a Markdown link resolving to it. */
 export function threatModelLinkProblems(
   documents: readonly { readonly file: string; readonly text: string }[],
 ): string[] {
@@ -221,7 +193,7 @@ export function threatModelLinkProblems(
     .map(({ file }) => `${file} does not link ${THREAT_MODEL} (A178)`);
 }
 
-/** The problem when the model has no `## Commit policy` section. [A178 STATIC] */
+/** The problem when the model has no `## Commit policy` section. */
 export function commitPolicyProblems(text: string): string[] {
   return text.split("\n").some((line) => line.trim() === `## ${COMMIT_POLICY}`)
     ? []

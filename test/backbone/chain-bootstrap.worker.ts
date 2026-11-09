@@ -4,7 +4,7 @@ import { type WorkEvent, workModule } from "../runner/sigterm-module.js";
 import { chainDeclarations } from "./chain-build.js";
 
 /**
- * A process for the check that a bootstrap killed before S commits is repeated on the next start. [IN-2, A77]
+ * A process for the check that a bootstrap killed before S commits is repeated on the next start.
  *
  * `chain-process.test.ts` starts it with `node --import tsx` and one JSON argument ({@link Job}). It reports each event
  * as one JSON line on stdout ({@link WorkerEvent}), and the test kills it with SIGKILL. The modes:

@@ -2,16 +2,16 @@
  * The `jsonb` and `numeric` `CHECK`s: stored numbers are integers, so two databases whose contents hashes are equal
  * also answer queries alike. The value encoding writes a `numeric` as its integer text and fails on a fraction, and
  * writes `jsonb` parsed, where `1.0` and `1` are the same number. These `CHECK`s refuse, when the row is written, what
- * the encoding would fail on or would hide. [DT-1, DT-6, Q57, Q58; design §4]
+ * the encoding would fail on or would hide.
  *
  * - **`core_chain.jsonb_numbers_ok(jsonb)`** is false when the document holds, at any depth, a JSON number that is
  *   either outside the signed 64-bit range the encoding supports ({@link INTEGER_RULES}), or whose text (`jsonpath`
  *   `.string()`) is not `-?[0-9]+`: a fraction, an exponent PostgreSQL did not resolve into an integer, or a zero
- *   fraction such as `1.0`, whose text keeps its scale. PostgreSQL stores `1e2` as `100`, which passes. [DT-1, Q57]
+ *   fraction such as `1.0`, whose text keeps its scale. PostgreSQL stores `1e2` as `100`, which passes.
  * - **`core_chain.numeric_ok(numeric)`** is `c IS NULL OR coalesce(scale(c) = 0, false)`. A value with a fraction
  *   (`100.00` included) is refused, and so are `NaN`, `Infinity` and `-Infinity`, whose `scale()` is NULL: a `CHECK`
  *   passes on NULL, so that NULL must become false. A NULL value stays allowed (checked on PGlite 0.5.10 and
- *   PostgreSQL 18.6). [design §4]
+ *   PostgreSQL 18.6).
  * - **Their array forms**, `jsonb_numbers_ok(jsonb[])` and `numeric_ok(numeric[])`, apply the same rule to every
  *   element, in any number of dimensions; a NULL element is allowed, as a NULL value is.
  *
@@ -51,7 +51,6 @@ export interface IntegerRules {
 
 /**
  * The signed 64-bit range of the integers a `jsonb` document may hold (`src/determinism/cbor.ts` encodes no wider one).
- * [DT-1]
  */
 const INT64_MIN = "-9223372036854775808";
 const INT64_MAX = "9223372036854775807";
@@ -59,7 +58,7 @@ const INT64_MAX = "9223372036854775807";
 /**
  * The rules, in the order the functions apply them. `jsonb`: a JSON number is refused when any condition holds.
  * `numeric`: `null-allowed` makes `c IS NULL OR …`, `not-a-number` the `coalesce(…, false)` that refuses `NaN` and the
- * infinities, `no-fraction` the `scale(c) = 0`: together `c IS NULL OR coalesce(scale(c) = 0, false)`. [design §4]
+ * infinities, `no-fraction` the `scale(c) = 0`: together `c IS NULL OR coalesce(scale(c) = 0, false)`.
  */
 export const INTEGER_RULES: IntegerRules = {
   jsonb: [
@@ -181,7 +180,7 @@ export interface IntegerCheckRow {
  * The statements that give exactly the listed tables that are not opted out one `CHECK` per column of a type of
  * {@link CHECKED_TYPES}, added where it is missing, and that drop the database API's `CHECK`s from the tables declared
  * `deterministic: false`. `tables` are module tables as `catalogTables` describes them (partitioned tables whole, so
- * their partitions inherit the `CHECK`); `existing` are the `CHECK`s {@link INTEGER_CHECKS_SQL} lists. [DT-6, Q76]
+ * their partitions inherit the `CHECK`); `existing` are the `CHECK`s {@link INTEGER_CHECKS_SQL} lists.
  */
 export function integerCheckStatements(
   tables: readonly CatalogTable[],

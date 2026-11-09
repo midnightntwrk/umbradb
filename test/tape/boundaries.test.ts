@@ -12,7 +12,7 @@ import { syntheticChain } from "./synthetic-chain.js";
  * enactment block U (the first block whose state has the new runtime; F = U + 1), each U and F checked against their
  * headers' `MNSV` digests. It returns the record the built-in tables cite — the node's answers `chain_getBlockHash`,
  * `chain_getHeader` and `state_getRuntimeVersion` for block 0, and for each boundary U − 1, U and F — in
- * `test/node/fixtures/mainnet-answers.json`'s form. [LG-3]
+ * `test/node/fixtures/mainnet-answers.json`'s form.
  */
 
 const quietConnect: ConnectSocket = (url, events, timers) =>

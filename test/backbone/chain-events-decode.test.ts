@@ -30,9 +30,9 @@ import { compact } from "./fetch-fixtures.js";
 /**
  * The decoding of chain events. The tests cover the metadata's storage entries, the values read with a type registry
  * and their canonical JSON, and a block's chain events: every phase, topics, the records' bytes, an upgrade block's
- * events against the old and the new runtime, and every refusal. [CD-4]
+ * events against the old and the new runtime, and every refusal.
  *
- * The process-level criteria are tested in `chain-data.test.ts`. [A91, A92, A93]
+ * The process-level criteria are tested in `chain-data.test.ts`.
  */
 
 const bytesOf = (...values: number[]): Uint8Array => Uint8Array.from(values);
@@ -314,7 +314,7 @@ describe("canonical JSON", () => {
   });
 });
 
-describe("a block's chain events (CD-4)", () => {
+describe("a block's chain events", () => {
   const metadata = (shape = V2_0): RuntimeMetadataView => readRuntimeMetadata(midnightMetadata(shape));
   const A = fill(0xaa);
   const B = fill(0xbb);

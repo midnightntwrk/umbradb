@@ -1,20 +1,20 @@
 /**
- * What the page and a process worker of the browser build say to each other. [BR-1, BR-3, LM-11; design §8]
+ * What the page and a process worker of the browser build say to each other.
  *
  * The page starts the process (`start`), then calls it (`call`) for:
  * - its state (`status`);
  * - the admin endpoints (`admin`: `GET` of `/health/live`, `/health/ready`, `/status`, `/config`), answered by the
- *   process's own fetch-style admin handler (`admin.fetch`) [BR-3];
- * - its database's contents hash [DT-3];
- * - a read of its database, one `REPEATABLE READ READ ONLY` read [DB-2];
+ *   process's own fetch-style admin handler (`admin.fetch`);
+ * - its database's contents hash;
+ * - a read of its database, one `REPEATABLE READ READ ONLY` read;
  * - its module API (`api`: one request, answered by the module API's fetch-style handler, `api.fetch`; `connect-api`:
  *   a `MessagePort` the page made, on which the process serves the module API's subscriptions, `api.connect`);
- * - a backup of its database and, before the core's process starts, a restore into it (`backup`, `restore`) [BK-5];
- * - its stop [RN-13].
+ * - a backup of its database and, before the core's process starts, a restore into it (`backup`, `restore`);
+ * - its stop.
  *
  * **The private link** runs over `MessageChannel`s the page makes (`./link.ts`): a private worker asks for one at each
  * (re)connection (`link-connect`); the page gives one end to the core worker (`link-accept`) and the other to the
- * private worker (`link-channel`); a link the page drops is told to both (`link-drop`). [LM-6, LM-11]
+ * private worker (`link-channel`); a link the page drops is told to both (`link-drop`).
  *
  * The worker sends its log lines, S once chosen, its startup's outcome and how processing ended. Every value crosses as
  * JSON-ready data ({@link jsonSafe}): heights and other integers beyond 2^53 as decimal text, bytes as `0x` hex.
@@ -25,7 +25,7 @@ import type { BrowserRun } from "./configuration.js";
 /** A call the page makes of a process worker. */
 export type CallMethod = "status" | "admin" | "contents-hash" | "read" | "api" | "connect-api" | "backup" | "restore" | "stop";
 
-/** The run the page starts a process with: S is null for a new database of the core, chosen by the worker. [BR-2] */
+/** The run the page starts a process with: S is null for a new database of the core, chosen by the worker. */
 export type StartRun = Omit<BrowserRun, "start"> & { readonly start: number | null };
 
 /** From the page to a process worker. */

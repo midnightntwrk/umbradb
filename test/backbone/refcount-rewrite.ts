@@ -6,8 +6,8 @@ import type { TableSnapshot } from "./ledger-graph-tapes.js";
 import type { DagRun } from "./refcount-process.js";
 
 /**
- * What R27's tests read of a rewrite on the DAG fixture, shared by `ledger-refcount-rewrite.test.ts` and its negative
- * controls. Imports nothing of Vitest. [R27, LG-11, LG-14]
+ * What the tests read of a rewrite on the DAG fixture, shared by `ledger-refcount-rewrite.test.ts` and its negative
+ * controls. Imports nothing of Vitest.
  * - {@link rowProblems}, the row check: after the block, the row of a node written again holds the child list written;
  * - {@link readingLoads}: a ledger worker whose loads record every row the node-store bridge reads for them, so a test
  *   sees the child list a restarted worker loaded;
@@ -16,7 +16,7 @@ import type { DagRun } from "./refcount-process.js";
 
 const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
 
-/** The row check: the row of `node`'s key in `after` holds `node`'s child list; `before` names the list it kept. [R27] */
+/** The row check: the row of `node`'s key in `after` holds `node`'s child list; `before` names the list it kept. */
 export function rowProblems(after: TableSnapshot, node: FixtureNode, before?: FixtureNode): string[] {
   const key = hex(node.key);
   const stored = after.rows.get(key);
@@ -26,7 +26,7 @@ export function rowProblems(after: TableSnapshot, node: FixtureNode, before?: Fi
   return [`the row of ${key} holds ${kept ? "the child list written before" : `another child list (${hex(stored)})`}, not ${hex(node.children)}`];
 }
 
-/** `host`, every row the node-store bridge reads for its loads recorded in `rows` by hex key (the last read kept). [R27] */
+/** `host`, every row the node-store bridge reads for its loads recorded in `rows` by hex key (the last read kept). */
 export function readingLoads(host: LedgerHost, rows: Map<string, Uint8Array>): LedgerHost {
   return new Proxy(host, {
     get(target, property) {
@@ -52,7 +52,7 @@ export function readingLoads(host: LedgerHost, rows: Map<string, Uint8Array>): L
   });
 }
 
-/** The tables and batches of `runs` on one database, each started again where the one before stopped. [R27] */
+/** The tables and batches of `runs` on one database, each started again where the one before stopped. */
 export function joined(runs: readonly DagRun[]): { readonly tables: Map<bigint, TableSnapshot>; readonly batches: Map<bigint, NodeBatch> } {
   const tables = new Map<bigint, TableSnapshot>();
   const batches = new Map<bigint, NodeBatch>();

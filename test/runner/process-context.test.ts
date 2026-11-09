@@ -38,10 +38,10 @@ import {
  *   `process` lifetime; any other call fails the callback, even when the module catches the refusal;
  * - the items visible in `items` to the modules requiring them (and to their providers) from `on-start-api` on;
  * - `process-item-missing` when every `on-start-db` has run and an item a module of the process requires was not
- *   published. [MD-7; CORE-ARCH §4.10]
+ *   published.
  *
  * The acceptance case runs through the runner's startup and loop on both backends; the rules themselves are also
- * tested without a database. [A74]
+ * tested without a database.
  */
 
 const CLIENT: ItemDeclaration = { name: "client", lifetimes: ["process"] };
@@ -106,7 +106,7 @@ function thrown(body: () => unknown): unknown {
   throw new Error("expected a throw");
 }
 
-describe("process contexts (MD-7), without a database", () => {
+describe("process contexts, without a database", () => {
   it("gives each module one context, the same object every time, with its revisions in start order, frozen", () => {
     const revisions: Revision[] = [
       { start: 1n, stop: 9n, version: "1.0.0", settings: { k: 1 } },
@@ -368,7 +368,7 @@ describe("process contexts (MD-7), without a database", () => {
     });
   });
 
-  it("counts a module stopping at the cursor, which runs again there (RN-11)", async () => {
+  it("counts a module stopping at the cursor, which runs again there", async () => {
     const atCursor = graphOf([provider({}), consumer({})], [entry("provider", 1), entry("consumer", 1, 9)], 9n);
     const contexts = new ProcessContexts({ graph: atCursor });
     await setUp(contexts, atCursor);
@@ -456,7 +456,7 @@ describe("process contexts (MD-7), without a database", () => {
   });
 });
 
-// ── process items through the runner's startup and loop, on both backends [A74] ───────────────────────────────────
+// ── process items through the runner's startup and loop, on both backends ───────────────────────────────────
 
 /** A recorder of what `consumer` sees of `client`, by point, and the contexts it was given. */
 function watching(): { readonly seen: [string, unknown][]; readonly contexts: Set<ProcessContext>; readonly module: ModuleDeclaration } {
@@ -513,7 +513,7 @@ function latePublisher(point: "on-compute" | "on-after-db-write" | "on-start-api
 
 /**
  * The process items' oracle, through the runner's startup and loop on `backend`, for contexts of class `Contexts`: the
- * problems found, none for the real contexts. [A74, MD-7]
+ * problems found, none for the real contexts.
  */
 async function a74Problems(
   database: () => Promise<{ readonly db: Database }>,
@@ -609,27 +609,27 @@ class AllowsOutside extends ProcessContexts {
   }
 }
 
-describe.each(RUNNER_BACKENDS)("A74: process items through the runner on $name (MD-7)", (backend) => {
+describe.each(RUNNER_BACKENDS)("process items through the runner on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("passes A74's checks with the real process contexts", async () => {
+  it("passes the checks with the real process contexts", async () => {
     expect(await a74Problems(() => backend.database())).toEqual([]);
   }, 120_000);
 
-  it("negative control: contexts that allow a second publish fail A74 (twice)", async () => {
+  it("negative control: contexts that allow a second publish fail (twice)", async () => {
     const problems = await a74Problems(() => backend.database(), AllowsTwice);
     expect(problems).toHaveLength(1);
     expect(problems[0]).toMatch(/^twice: started$/);
   }, 120_000);
 
-  it("negative control: contexts that allow a publish outside on-start-db fail A74 (from on-compute)", async () => {
+  it("negative control: contexts that allow a publish outside on-start-db fail (from on-compute)", async () => {
     const problems = await a74Problems(() => backend.database(), AllowsOutside);
     expect(problems).toHaveLength(1);
     expect(problems[0]).toMatch(/^from on-compute: ran$/);
   }, 120_000);
 
-  it("gives the requiring module the core's process items, db the read-only database (CD-1, A144)", async () => {
+  it("gives the requiring module the core's process items, db the read-only database", async () => {
     const { db } = await backend.database();
     const { backbone, item } = publishingBackbone(db);
     const got: unknown[] = [];

@@ -1,7 +1,7 @@
 /**
  * The messages between the main thread and the ledger worker. They hold plain data only, the values Node.js's
  * structured clone carries (objects, arrays, strings, numbers, booleans, `bigint`s, `null`, `Uint8Array`s), and never
- * an object of a ledger package. Types only. [Q49; design §5.3]
+ * an object of a ledger package. Types only.
  */
 
 import type { LedgerName } from "../types.js";

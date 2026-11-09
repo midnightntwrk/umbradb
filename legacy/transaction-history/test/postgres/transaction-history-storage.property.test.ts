@@ -144,7 +144,7 @@ function normalize(entries: readonly TransactionHistoryEntry[]): unknown {
     }));
 }
 
-describe("Transaction history storage properties (openspec/changes/sprint-7-transaction-history-storage)", () => {
+describe("Transaction history storage properties", () => {
   it("sequential-equivalence oracle: an identical scripted command trace produces equivalent getAll() output on PgTransactionHistoryStorage and InMemoryTransactionHistoryStorage", async () => {
     await fc.assert(
       fc.asyncProperty(
@@ -199,14 +199,14 @@ describe("Transaction history storage properties (openspec/changes/sprint-7-tran
   });
 
   /**
-   * Concurrency invariant (`design.md` §3, `specs/transaction-history-storage/spec.md`'s
+   * Concurrency invariant (the storage spec's
    * "shielded-only and dust-only concurrent write" scenario): two `gotFinalized` calls racing on
    * the SAME `(walletId, hash)` — one supplying only a `shielded` section, the other only a
    * `dust` section — must not lose either section. Checked directly against Postgres state, NOT
    * against `InMemoryTransactionHistoryStorage` (whose own doc explicitly disclaims this: its
    * atomicity relies on JS being single-threaded, so it cannot exhibit -- let alone correctly
    * resolve -- this race at all). A bare `INSERT ... ON CONFLICT DO UPDATE` without the row lock
-   * (`design.md` §3's documented negative control) would let the second writer's read land
+   * (the documented negative control) would let the second writer's read land
    * between the first writer's read and write, silently overwriting one section — this test is
    * the positive proof `PgTransactionHistoryStorage`'s actual row-lock write path does not do
    * that.

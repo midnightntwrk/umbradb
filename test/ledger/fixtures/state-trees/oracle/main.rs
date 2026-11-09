@@ -1,5 +1,5 @@
-// LG-16's tree values of fixed ledger states at the pinned ledger revisions: the expected values of
-// `test/ledger/state-trees.test.ts` (UmbraDB task 12.1b, owner decision Q138 A, A158).
+// The tree values of fixed ledger states at the pinned ledger revisions: the expected values of
+// `test/ledger/state-trees.test.ts`.
 //
 // Built natively against an unpatched checkout of `midnight-ledger` at the commit
 // `vendor/ledger/<version>/upstream.json` pins (`run.sh`), with the storage layout the node uses

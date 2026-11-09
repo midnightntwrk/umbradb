@@ -3,22 +3,19 @@ import { join, relative, sep } from "node:path";
 
 /**
  * The static check that key handling has left the core: keys, and private items in general, are a module's, not the
- * core's. Nothing of the removed key handling is left in the repository's code, its module guide or the change's
- * design:
+ * core's. Nothing of the removed key handling is left in the repository's code or its module guide:
  * - the private backbone part `core-key-registry` (its folder, its table `core_key_registry.keys`, its item
  *   `admitted-keys`);
  * - the point `on-key` (`POINTS`, `PointCallbacks`, `PendingKey`, the loop's `keys` and `keyPoint`);
  * - the private `core` entry's `testKeys` and the configuration rule `test-keys`;
  * - a declaration's `keyKinds` and `validateKey`, and the code `test-key-conflict`;
  * - the removed key tests, and the key half of the `/status` test with the required id `private.no-key-bytes-public`.
- *   [A119, A120, A123]
  *
- * Imports nothing of Vitest. [Q154 A2]
+ * Imports nothing of Vitest.
  *
  * **What is read** ({@link SCANNED}): every file under `src/`, `browser/` and `test/` — but this check's own files,
- * which name what they look for —, `docs/module-guide.md` and `openspec/changes/core-arch/design.md`. Comments count:
- * a comment describing the removed parts is as stale as the code. The decision record, `tasks.md` (whose done notes
- * are history), the specs and `docs/issues/` are not read.
+ * which name what they look for —, and `docs/module-guide.md`. Comments count: a comment describing the removed parts
+ * is as stale as the code.
  *
  * **What is looked for**: the files that must not exist ({@link REMOVED_PATHS}), and every name of {@link REMOVED_NAMES}
  * in a file's path or text, but for {@link UNRELATED}: a name a file outside the change uses for something else.
@@ -54,11 +51,11 @@ export const REMOVED_NAMES: readonly RemovedName[] = Object.freeze([
   { name: "admitted-keys", pattern: /\badmitted[-_]keys\b/gi },
   { name: "AdmittedKey", pattern: /\bAdmittedKeys?\b/g },
   { name: "arrived_height", pattern: /\barrived_?height\b/gi },
-  // The required id of the `/status` test's key half. [A120]
+  // The required id of the `/status` test's key half.
   { name: "private.no-key-bytes-public", pattern: /no-key-bytes-public/g },
 ]);
 
-/** The files and folders that must not exist: the part's folder and the removed key tests. [A119, A120, A123] */
+/** The files and folders that must not exist: the part's folder and the removed key tests. */
 export const REMOVED_PATHS: readonly string[] = Object.freeze([
   "src/backbone/core-key-registry",
   "test/backbone/core-key-registry.test.ts",
@@ -80,7 +77,7 @@ export const UNRELATED: readonly { readonly file: string; readonly name: string 
 /** The folders read whole, and the single files read (see the module comment). */
 export const SCANNED = Object.freeze({
   folders: Object.freeze(["src", "browser", "test"]),
-  files: Object.freeze(["docs/module-guide.md", "openspec/changes/core-arch/design.md"]),
+  files: Object.freeze(["docs/module-guide.md"]),
 });
 
 /** This check's own files, which name what they look for. */

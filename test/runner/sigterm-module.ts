@@ -6,7 +6,7 @@ import type { ModuleDeclaration } from "../../src/modules/declaration.js";
  * The module of the SIGTERM tests (`sigterm.test.ts`): `w` writes `rows` rows per height in its `on-db-write`, one
  * statement at a time; at height `at` it reports that its block's transaction is open after the first row, then waits
  * for `hold` — the SIGTERM — before it writes the others. Shared by the worker process (`sigterm.worker.ts`) and the
- * test's restart in its own process, so both run the same declaration (the same migration checksums). [A48, RN-13]
+ * test's restart in its own process, so both run the same declaration (the same migration checksums).
  */
 
 /** What `w` reports. */

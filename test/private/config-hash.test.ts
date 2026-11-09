@@ -15,15 +15,15 @@ import { a162Problems, a162Run } from "./config-hash-checks.js";
  *   transport, so there is no such process on PGlite).
  *
  * The run and the oracle are `./config-hash-checks.ts`'s; the committed negative controls are
- * `./config-hash.negative-control.test.ts`'s. [A162 CI, PP-14, RN-16, PP-4, Q147]
+ * `./config-hash.negative-control.test.ts`'s.
  */
 
-describe.each(PRIVATE_BACKENDS)("A162: a changed public configuration halts a private process on $name (PP-14, RN-16)", (backend) => {
+describe.each(PRIVATE_BACKENDS)("a changed public configuration halts a private process on $name", (backend) => {
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 
   it(
-    "A162: with a transport, a core restarted with a data field changed halts the private process with public-config-changed " +
+    "with a transport, a core restarted with a data field changed halts the private process with public-config-changed " +
       "before another height; the same configuration, or only secrets changed, changes nothing; X-Umbra-Config-Hash holds no secret",
     async () => {
       const run = await a162Run(backend, { transport: true });
@@ -34,7 +34,7 @@ describe.each(PRIVATE_BACKENDS)("A162: a changed public configuration halts a pr
   );
 
   it.runIf(backend.kind === "postgres")(
-    "A162: without a transport, the public configuration history read again at a reconnection to the public database " +
+    "without a transport, the public configuration history read again at a reconnection to the public database " +
       "halts it alike with public-config-changed",
     async () => {
       const run = await a162Run(backend, { transport: false });

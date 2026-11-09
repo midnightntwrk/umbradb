@@ -9,11 +9,10 @@ import { connectionFailure, rpcFailure } from "../../src/node/errors.js";
  * - the back-off: from 1 s, doubling up to `backoffCeilingMs`, with no limit on attempts;
  * - which node failure is retried and which halts. `node-unreachable` is retried: a connection error, a timeout, a
  *   handshake refused with HTTP 429 or a 5xx status, the node's own rate limit. `node-requirement` (the node's state
- *   is unavailable) halts, and so does `node-error`, everything else. [IN-9]
- * [IN-10]
+ *   is unavailable) halts, and so does `node-error`, everything else.
  */
 
-describe("backoffDelay (IN-10)", () => {
+describe("backoffDelay", () => {
   it("is 1 s for the first retry, doubling each time, never above the ceiling, and has no last attempt", () => {
     expect(BACKOFF_BASE_MS).toBe(1_000);
     const ceiling = 30_000;

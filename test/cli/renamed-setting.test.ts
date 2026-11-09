@@ -19,7 +19,7 @@ import { inProcess } from "./cli-fixtures.js";
  * naming the new key, by each command and by the engine they start through: `umbradb config check`, `umbradb backup`
  * and `umbradb restore` on a file, `umbradb run` on a file, and the engine on a file and on data. A public file writes
  * `listen.transport`, a private file `coreTransport`. Each refuses before it opens its database: the PGlite directory
- * the file names is never created. On PostgreSQL 18.6 and PGlite 0.5.10. [L51 CI, CF-4]
+ * the file names is never created. On PostgreSQL 18.6 and PGlite 0.5.10.
  *
  * The negative control is the validation's (`test/config/validate.test.ts`): without the rule, an old key is no
  * longer refused, and every refusal here comes from that one rule of the validation that each command and the engine
@@ -83,7 +83,7 @@ const FINDING = (renamed: Renamed) =>
       `${escaped(renamed.now)}: .*\\[invalid-configuration renamed-setting\\]`,
   );
 
-describe.each(PROCESS_BACKENDS)("L51: a renamed key is refused with renamed-setting naming the new key, on $name (CF-4)", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("a renamed key is refused with renamed-setting naming the new key, on $name", (backend: ProcessBackend) => {
   let directory: string;
   beforeAll(async () => {
     await backend.start();
@@ -160,7 +160,7 @@ describe.each(PROCESS_BACKENDS)("L51: a renamed key is refused with renamed-sett
       const ended = await Promise.race([running.then(() => true), sleep(ENDS_WITHIN_MS, false)]);
       if (!ended) signals.emit("SIGTERM");
       const result = await running;
-      // A refusal of the configuration ends the process by itself: no signal was needed. [Q137 B]
+      // A refusal of the configuration ends the process by itself: no signal was needed.
       expect(ended).toBe(true);
       expect(result.code).toBe(EXIT.failed);
       expect(result.stderr).toMatch(/^startup refused: invalid-configuration \(1 finding\); the process ends$/m);
@@ -182,7 +182,7 @@ describe.each(PROCESS_BACKENDS)("L51: a renamed key is refused with renamed-sett
           () => null,
           (error: unknown) => error,
         );
-        // A refusal of the configuration ends the process: `closed` resolves with no stop. [Q137 B]
+        // A refusal of the configuration ends the process: `closed` resolves with no stop.
         const closed = await Promise.race([handle.closed.then(() => true), sleep(ENDS_WITHIN_MS, false)]);
         await handle.stop();
         expect(closed).toBe(true);

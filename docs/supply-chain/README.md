@@ -35,7 +35,7 @@ Every entry is grounded in a real manifest in this repo. The authoritative sourc
 | Nix dev environment | `nix/midnight-env/flake.nix`, `nix/midnight-env/flake.lock` |
 | Lean proofs | `Formal/Lean/lean-toolchain`, `Formal/Lean/lake-manifest.json` |
 | Vendored ledger WASM | `vendor/ledger/*/upstream.json`, `vendor/ledger/*/patches/`, `vendor/ledger/Dockerfile`, `vendor/ledger/*/SHA256SUMS` |
-| CI trust gate | `.github/workflows/conformance.yml` (and the planned `supply-chain.yml`, G18) |
+| CI trust gate | `.github/workflows/conformance.yml` (and the planned `supply-chain.yml`) |
 
 ## Update process — how and when to bump each ecosystem
 
@@ -59,16 +59,16 @@ The governing rule differs by ecosystem, because the *security value* of each pi
   component commits and the release-binary sha256s are the exact revisions the environment was
   built and verified against, so a re-lock that silently rolls them forward would break
   reproducibility. Bumping a pin means editing the rev/sha256/digest, re-verifying the stack, and
-  committing — reviewed as its own change (see the G18 flake-lock change-control gate below).
+  committing — reviewed as its own change (see the flake-lock change-control gate below).
 - **Pinned release binaries (cardano-node, cardano-db-sync, midnight-node)** — bump the version +
   `fetchurl` URL + `sha256` in `flake.nix` together; a mismatched sha256 hard-fails the build.
   Watch upstream releases: IntersectMBO/cardano-node, IntersectMBO/cardano-db-sync,
   midnightntwrk/midnight-node.
 - **Docker images (indexer-standalone, proof-server)** — pinned by `@sha256:` digest. Digest
   pinning gives immutability, **not** freedom from CVEs, so the images are watched by a scheduled
-  Trivy scan (G18) rather than by version bumps alone. Bump = replace the digest, re-verify.
+  Trivy scan rather than by version bumps alone. Bump = replace the digest, re-verify.
 - **PostgreSQL test image (`postgres:18-alpine`)** — pinned by `@sha256:` digest, once, in
-  `test/postgres-image.ts` (owner decision Q82); the image-pin agreement step of the supply-chain
+  `test/postgres-image.ts`; the image-pin agreement step of the supply-chain
   gate and a conformance test keep every container on it. Bump = replace the digest there, in
   `supply-chain.yml` (`EXP_POSTGRES`) and in `test/dependencies/postgres-image.test.ts`, with a
   build at least 7 days old.
@@ -87,8 +87,8 @@ The governing rule differs by ecosystem, because the *security value* of each pi
 
 Today the one merge gate is **`.github/workflows/conformance.yml`**: it already installs with
 `npm ci` (enforcing the lockfile + integrity hashes) and pins every GitHub Action by commit SHA,
-but it runs *tests only*. The **G18 supply-chain gate** (`.github/workflows/supply-chain.yml`,
-from `openspec/changes/v1.0.0-infosec-signoff/`) — **landed in this change** — adds six
+but it runs *tests only*. The **G18 supply-chain gate** (`.github/workflows/supply-chain.yml`)
+— **landed in this change** — adds six
 blocking/scheduled sub-gates:
 
 1. **`npm ci` everywhere** (never `npm install`) — a tampered tarball fails the integrity check.
@@ -104,7 +104,7 @@ blocking/scheduled sub-gates:
 6. **`flake.lock` change-control** — fail any PR that changes `flake.lock` unless it carries an
    explicit `flake-lock-update` label, so an unreviewed `nix flake update` cannot land.
 
-> Note: the G18 config files (`.npmrc`, `.gitleaks.toml`, `SECURITY.md`, `supply-chain.yml`) are
+> Note: the config files (`.npmrc`, `.gitleaks.toml`, `SECURITY.md`, `supply-chain.yml`) are
 > **committed as part of this change** (`v1.0.0-infosec-signoff`) and are **pending merge to `main`**.
 > This directory documents the posture and the current state honestly; see `slsa.md` for the gap mapping.
 

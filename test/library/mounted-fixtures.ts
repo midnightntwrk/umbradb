@@ -13,7 +13,6 @@ import type { Gate } from "../admin/admin-harness.js";
  * What the tests of the mounted handlers share: a host's own `node:http` servers that mount a handle's handlers (the
  * module API on one, admin on another), the user module `mapi` whose routes and subscription exercise the
  * module API's rules, a WebSocket client that keeps what it receives, and plain HTTP requests that read every header.
- * [LM-4, LM-5]
  */
 
 /** The handlers a handle carries (`UmbraDBHandle`'s, or the engine's). */
@@ -60,7 +59,7 @@ async function hostServer(
 
 /**
  * A host's own servers mounting `handle`'s handlers, as a host program would: one server's `request` event to the
- * module API's handler and its `upgrade` event to the module API's, another's `request` event to admin's. [LM-4]
+ * module API's handler and its `upgrade` event to the module API's, another's `request` event to admin's.
  */
 export async function mountHandlers(handle: Mountable): Promise<Mounted> {
   const api = await hostServer((request, response) => handle.api.http(request, response), handle.api.upgrade);

@@ -23,7 +23,7 @@ import { type DagRun, runDag } from "./refcount-process.js";
 
 /**
  * Runs of one chain with different worker histories, and what they hold after every block, for the determinism tests
- * across worker histories. Imports nothing of Vitest. [R28, DT-3, LG-11; design §4.4]
+ * across worker histories. Imports nothing of Vitest.
  *
  * - A run is one or more segments, each a new UmbraDB process with a new ledger worker thread, the first from genesis
  *   and each later one from the cursor the one before stopped at, so a restarted segment reads back only the database:
@@ -51,7 +51,7 @@ export const RAW_HASH = "contents hash, nodes by their raw rows";
 /** The facet of the rows of `nodes` with their child lists: allowed to differ between worker histories. */
 export const NODE_ROWS = "nodes";
 
-/** The contents hash with `nodes` taken by its raw rows, `ref_counts` and `unreferenced` still checked (DT-3 before). */
+/** The contents hash with `nodes` taken by its raw rows, `ref_counts` and `unreferenced` still checked, as before. */
 const rawHash = contentsHashOf([
   contentDefinedLedgerState({ contentDefined: { tables: ["ref_counts", "unreferenced"], content: LEDGER_NODE_TABLES.content } }),
 ]);
@@ -123,7 +123,7 @@ async function nodeSetOf(read: Pick<ReadHandle, "query">, cache: NodeSetCache): 
  * embedded nodes), the rows of `nodes` with their child lists ({@link NODE_ROWS}), `root_counts`, the rows `height`
  * wrote in `states`, `segment_results` and `events`, and `core_digest.tables` (each captured table's digest, chained
  * over every block, so equal digests mean equal changes at every block); with `options`, the contents hashes and every
- * row of the three tables. Rows are parsed through `cache`, one per run. [R28, DT-3, DT-5]
+ * row of the three tables. Rows are parsed through `cache`, one per run.
  */
 export async function historyFacets(
   read: Pick<ReadHandle, "query">,
@@ -150,7 +150,7 @@ export async function historyFacets(
 
 /**
  * A user module requiring `ledger-state` that records, at each height h's `on-compute`, what the database holds after
- * h − 1 ({@link historyFacets} with `options(h − 1)`, its rows parsed through `cache`), in `seen`. [R28]
+ * h − 1 ({@link historyFacets} with `options(h − 1)`, its rows parsed through `cache`), in `seen`.
  */
 export function historyWatcher(
   seen: Map<bigint, Facets>,
@@ -176,7 +176,6 @@ export function historyWatcher(
 
 /**
  * Runs `body` on a read of `db` through the database API, once no process holds it (PGlite's directory included).
- * [R28, R30]
  */
 export async function readStopped<T>(db: ProcessDatabase, body: (read: ReadHandle) => Promise<T>): Promise<T> {
   const setting = db.setting;
@@ -197,7 +196,7 @@ export async function readStopped<T>(db: ProcessDatabase, body: (read: ReadHandl
 
 /**
  * The heights at which `got` differs from `want` in `names` (every facet but the rows of `nodes` and the raw contents
- * hash unless given), each with what differs; a height one of them lacks is a difference too. [R28]
+ * hash unless given), each with what differs; a height one of them lacks is a difference too.
  */
 export function historyDifferences(got: ReadonlyMap<bigint, Facets>, want: ReadonlyMap<bigint, Facets>, names?: readonly string[]): string[] {
   const problems: string[] = [];
@@ -217,7 +216,7 @@ export function historyDifferences(got: ReadonlyMap<bigint, Facets>, want: Reado
 
 /**
  * `count` distinct heights from `from` to `to`, drawn uniformly with fast-check from `seed` (without its bias towards
- * the bounds), in order. [R28]
+ * the bounds), in order.
  */
 export function seededHeights(seed: number, count: number, from: number, to: number): bigint[] {
   const heights = fc.uniqueArray(fc.noBias(fc.integer({ min: from, max: to })), { minLength: count, maxLength: count });
@@ -247,7 +246,7 @@ const DAG_FACETS: FacetOptions = { hash: true, raw: true, whole: true };
 /**
  * Runs the extended DAG fixture on `db` with its test package keeping nodes as `keeping` says, from genesis to its
  * last height, a new process (and worker thread) started at each cursor of `restarts`: each segment stops once it
- * committed its cursor, and the next starts there. [R28, A105]
+ * committed its cursor, and the next starts there.
  */
 export async function dagHistory(db: ProcessDatabase, keeping: Keeping, restarts: readonly number[] = []): Promise<DagHistory> {
   const memory = countersMemory();
@@ -310,7 +309,7 @@ export interface TapeHistory {
  * Runs `records` (a recorded tape, its finalized head capped at `options.to`) on `db` from genesis with the ledger's
  * core modules and the real packages, a new process (and worker thread) started at each cursor of `options.restarts`:
  * each segment's records cap the finalized head at its stop, and a later segment's also answer the restart's startup
- * calls at its cursor (`./ledger-restart.ts`). [R28, LG-11]
+ * calls at its cursor (`./ledger-restart.ts`).
  */
 export async function tapeHistory(db: ProcessDatabase, records: readonly TapeRecord[], options: TapeHistoryOptions): Promise<TapeHistory> {
   const facets = new Map<bigint, Facets>();
@@ -366,10 +365,10 @@ export interface TapeDeterminism {
 }
 
 /**
- * R28's two runs of a recorded tape on two new databases of `database`: one that never restarts and one restarted at
+ * The two runs of a recorded tape on two new databases of `database`: one that never restarts and one restarted at
  * 20 heights drawn from `options.seed`, side by side (each process with its own tape node, database and worker
  * thread). The second starts once the first has committed a block: two first startups at once on one PostgreSQL server
- * race on creating its module roles, which belong to the server. Both settle before either's failure is thrown. [R28]
+ * race on creating its module roles, which belong to the server. Both settle before either's failure is thrown.
  */
 export async function tapeDeterminism(
   database: () => Promise<ProcessDatabase>,
@@ -395,7 +394,7 @@ export async function tapeDeterminism(
 /**
  * What is wrong with one run of a recorded tape, none when it ran as asked: a segment that did not stop at its cursor
  * or halted; a load from the database other than one at each restart's cursor; a height from 0 to `options.to` with
- * nothing recorded; the contents hash taken at another height than those `options.whole` names. [R28]
+ * nothing recorded; the contents hash taken at another height than those `options.whole` names.
  */
 export function tapeRunProblems(run: TapeHistory, options: Pick<TapeHistoryOptions, "to" | "restarts" | "whole">): string[] {
   const problems: string[] = [];

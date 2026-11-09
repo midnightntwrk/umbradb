@@ -18,14 +18,14 @@ import { spawnChild } from "../child-processes.js";
  * A real process and a real signal: SIGTERM during `on-db-write` of h ends with h fully present or fully absent, and a
  * restart resumes from the cursor. The process is `sigterm.worker.ts`, started as `umbradb run` starts one
  * (`startProcess` with its configuration file and `terminationSignal`). Module `w` holds its block's transaction open
- * until the SIGTERM has arrived, so the signal always comes during `on-db-write` of h. [A48, RN-13]
+ * until the SIGTERM has arrived, so the signal always comes during `on-db-write` of h.
  *
  * That an open block transaction commits or rolls back before the process exits is checked from the database's side
  * too: on PostgreSQL no session of the process was abandoned (`pg_stat_database.sessions_abandoned`: a client that
  * exits without ending its session, its transaction rolled back by the server), on PGlite the data directory was shut
  * down (`global/pg_control`'s state 1, `DB_SHUTDOWNED`; 6, in production, after an exit without closing). A process
  * that exits at once on SIGTERM leaves the database atomic as well — the server or PGlite's recovery drops the open
- * transaction — but abandoned, which is what its negative control shows. [RN-13]
+ * transaction — but abandoned, which is what its negative control shows.
  */
 
 const WORKER = fileURLToPath(new URL("./sigterm.worker.ts", import.meta.url));
@@ -93,7 +93,7 @@ async function abandoned(db: ProcessDatabase): Promise<number> {
 /** PGlite's `pg_control` state: 1 when shut down, 6 in production (`DBState`, at byte 16). */
 const controlState = (directory: string): number => readFileSync(join(directory, "global", "pg_control")).readUInt32LE(16);
 
-/** What one run showed. [A48] */
+/** What one run showed. */
 interface A48Observation {
   readonly events: Worker["events"];
   readonly exit: { readonly code: number | null; readonly signal: NodeJS.Signals | null; readonly timedOut: boolean };
@@ -157,7 +157,7 @@ async function a48Run(backend: ProcessBackend, mode: Job["mode"]): Promise<A48Ob
   }
 }
 
-/** The oracle: every problem with what was observed, none when the SIGTERM ends the height atomically. [A48] */
+/** The oracle: every problem with what was observed, none when the SIGTERM ends the height atomically. */
 function a48Problems(observed: A48Observation): string[] {
   const problems: string[] = [];
   const { exit, events } = observed;
@@ -194,11 +194,11 @@ function a48Problems(observed: A48Observation): string[] {
   return problems;
 }
 
-describe("A48: SIGTERM stops cleanly (RN-13), with a real process and signal", () => {
+describe("SIGTERM stops cleanly, with a real process and signal", () => {
   beforeAll(() => Promise.all(PROCESS_BACKENDS.map((backend) => backend.start())), 180_000);
   afterAll(() => Promise.all(PROCESS_BACKENDS.map((backend) => backend.stop())), 60_000);
 
-  it("[[runner.fault.sigterm-in-transaction]] A48: SIGTERM during on-db-write of h leaves h fully present or fully absent, and a restart resumes from the cursor, on PostgreSQL and on PGlite", async () => {
+  it("[[runner.fault.sigterm-in-transaction]] SIGTERM during on-db-write of h leaves h fully present or fully absent, and a restart resumes from the cursor, on PostgreSQL and on PGlite", async () => {
     for (const backend of PROCESS_BACKENDS) {
       const observed = await a48Run(backend, "runner");
       expect(a48Problems(observed), backend.name).toEqual([]);
@@ -215,7 +215,7 @@ describe("A48: SIGTERM stops cleanly (RN-13), with a real process and signal", (
     }
   }, 600_000);
 
-  it("negative control: a process that exits on SIGTERM without awaiting the block fails A48", async () => {
+  it("negative control: a process that exits on SIGTERM without awaiting the block fails", async () => {
     for (const backend of PROCESS_BACKENDS) {
       const observed = await a48Run(backend, "exit-at-once");
       const unclean =

@@ -25,7 +25,7 @@ import type { BlockContext, ProcessContext } from "../../src/modules/declaration
 
 // `core-ledger-state`'s parts on their own, over a fake ledger worker and block source: the binding, the checks before
 // a block's apply, the root check's error, and the writes of a block's batch and rows. The process tests
-// (`ledger-state.test.ts`) run the real ones. [LG-11, LG-15, LG-16; design §10]
+// (`ledger-state.test.ts`) run the real ones.
 
 const hash = (byte: number): Uint8Array => new Uint8Array(32).fill(byte);
 /** A `config` item whose `core` revisions have the `retainStates` of each `[start, retainStates]`. */
@@ -145,7 +145,7 @@ function reading(
       }
       // Reclamation's tables: no row, no count, the queue empty.
       if (/FROM core_ledger_state\.(nodes|ref_counts|root_counts|unreferenced)/.test(sql)) return [];
-      // The contracts deployed below a block, which are read at F (the first v9 block after v8 blocks). [CC-1]
+      // The contracts deployed below a block, which are read at F (the first v9 block after v8 blocks).
       if (sql.includes("kind = 'contract-deploy'")) return (rest.deployed ?? []).map((address) => ({ contract_address: address }));
       if (sql.includes("height >= $1")) {
         const [from, to] = params as [bigint, bigint];
@@ -157,7 +157,7 @@ function reading(
   };
 }
 
-describe("core-ledger-state's parts (LG-11, LG-15, LG-16)", () => {
+describe("core-ledger-state's parts", () => {
   it("is bound once per process context, and refuses to run unbound", async () => {
     const { p } = bound(applied(1n).stateRoot);
     expect(() => bindCoreLedgerState(p, boundLedger(p))).toThrow(/bound once/);
@@ -165,7 +165,7 @@ describe("core-ledger-state's parts (LG-11, LG-15, LG-16)", () => {
     await expect(applyBlock(context(), block(1n), reading([]))).rejects.toThrow(/did not bind/);
   });
 
-  it("applies a block with LG-8's rule for its runtime and its parent's time read at h − 1", async () => {
+  it("applies a block with the rule for its runtime and its parent's time read at h − 1", async () => {
     const { p, asked } = bound(applied(1n).stateRoot);
     await applyBlock(p, block(1n), reading([{ ms: 1_750_000_000_000n }]));
     expect(asked[1]).toMatchObject({
@@ -189,7 +189,7 @@ describe("core-ledger-state's parts (LG-11, LG-15, LG-16)", () => {
     expect(asked[1]).not.toHaveProperty("apply.outcomes");
   });
 
-  it("halts with root-mismatch, naming both roots, when the state's root is not the node's (LG-15)", async () => {
+  it("halts with root-mismatch, naming both roots, when the state's root is not the node's", async () => {
     const { p } = bound(Uint8Array.of(0, 1, 2));
     const error = await applyBlock(p, block(1n), reading([{ ms: 1n }])).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(UmbraError);
@@ -212,7 +212,7 @@ describe("core-ledger-state's parts (LG-11, LG-15, LG-16)", () => {
     expect(asked[0]).not.toHaveProperty("genesis.outcomes");
   });
 
-  it("takes block 0's genesis state from the source and decides IN-7's case by the roots", async () => {
+  it("takes block 0's genesis state from the source and decides the case by the roots", async () => {
     const { p, asked } = bound(applied(0n).stateRoot, applied(0n));
     await applyBlock(p, block(0n), reading([]));
     expect(asked[0]).toMatchObject({ genesis: { height: 0n, genesisState: Uint8Array.of(7), includesBlockZero: false, timestampMs: 1_750_000_006_000n } });
@@ -292,7 +292,7 @@ describe("core-ledger-state's parts (LG-11, LG-15, LG-16)", () => {
     await points["on-after-db-write"]?.(context(), block(1n), {} as never);
   });
 
-  it("has the worker hold the state stored at h − 1 before the apply, and fails when its root is not the stored one (LG-11)", async () => {
+  it("has the worker hold the state stored at h − 1 before the apply, and fails when its root is not the stored one", async () => {
     const { p, asked } = bound(applied(3n).stateRoot, applied(3n));
     const read = reading([{ ms: 1n }]);
     await applyBlock(p, block(3n), read);
@@ -311,7 +311,7 @@ describe("core-ledger-state's parts (LG-11, LG-15, LG-16)", () => {
     expect(none.some((call) => "load" in (call as object))).toBe(false);
   });
 
-  it("gives the apply the block's ledger and the keys of the states leaving LG-12's window, refusing a missing one", async () => {
+  it("gives the apply the block's ledger and the keys of the states leaving the window, refusing a missing one", async () => {
     // retainStates 2 until 9, then 0 from 10: block 10 releases the states of 7 to 9 (L(9) = 7, L(10) = 10).
     const p = context(config([0, 2], [10, 0]));
     const { asked } = bound(applied(10n).stateRoot, applied(10n), p);
@@ -334,7 +334,7 @@ describe("core-ledger-state's parts (LG-11, LG-15, LG-16)", () => {
     expect(v8[1]).toMatchObject({ apply: { ledger: "v8" } });
   });
 
-  it("persists the keys of the contracts the block calls or deploys, each once in byte order, while core-contract-states is active (LG-13)", async () => {
+  it("persists the keys of the contracts the block calls or deploys, each once in byte order, while core-contract-states is active", async () => {
     const parsed = {
       ledger: "v9",
       transactions: [
@@ -354,7 +354,7 @@ describe("core-ledger-state's parts (LG-11, LG-15, LG-16)", () => {
     expect(itemsOf(applied(3n, { contracts: keys })).state.contracts).toEqual(keys);
   });
 
-  it("persists the keys of the contracts the block's chain events name maintained, and at F of every contract deployed below it (task 13.1; CC-1, LG-13)", async () => {
+  it("persists the keys of the contracts the block's chain events name maintained, and at F of every contract deployed below it", async () => {
     const tagged = (address: Uint8Array) => Uint8Array.from([...Buffer.from("midnight:contract-address[v2]:", "latin1"), ...address]);
     const maintain = (address: Uint8Array) => ({ pallet: "Midnight", name: "ContractMaintain", fields: { tx_hash: hash(0x77), contract_address: tagged(address) } });
     const parsed = { ledger: "v9", transactions: [{ index: 0, segments: [{ segment: 1, calls: [{ address: hash(9), entryPoint: Uint8Array.of(1) }], deploys: [] }] }] };
@@ -391,7 +391,7 @@ describe("core-ledger-state's parts (LG-11, LG-15, LG-16)", () => {
     expect(() => taggedAddress(Uint8Array.from([...Buffer.from("midnight:coin-public-key[v1]:", "latin1"), ...hash(5)]))).toThrow(/tagged serialization/);
   });
 
-  it("publishes its retained states at on-start-db: the window at a cursor, a load inside it, state-not-retained outside (LG-12)", async () => {
+  it("publishes its retained states at on-start-db: the window at a cursor, a load inside it, state-not-retained outside", async () => {
     const p = context(config([0, 3]));
     const { asked } = bound(applied(1n).stateRoot, applied(1n), p);
     let published: [string, unknown] | undefined;
@@ -430,7 +430,7 @@ describe("core-ledger-state's parts (LG-11, LG-15, LG-16)", () => {
     expect(created).toEqual(declared);
   });
 
-  it("stores LG-16's six tree values in states columns that are all NOT NULL (A158; task 12.1b, owner decision Q138 A)", () => {
+  it("stores the six tree values in states columns that are all NOT NULL", () => {
     const states = /CREATE TABLE core_ledger_state\.states \(([\s\S]*?)\n\)/.exec(CORE_LEDGER_STATE_MIGRATIONS[0]!.sql)?.[1] ?? "";
     const columns = new Map(states.split("\n").map((line) => [/^\s*([a-z_]+) /.exec(line)?.[1], line] as const));
     for (const column of [
@@ -445,7 +445,7 @@ describe("core-ledger-state's parts (LG-11, LG-15, LG-16)", () => {
     }
   });
 
-  it("writes each of the six to its own column on a database, which refuses a null in any of them (A158; task 12.1b)", async () => {
+  it("writes each of the six to its own column on a database, which refuses a null in any of them", async () => {
     const statements: { sql: string; params: unknown[] }[] = [];
     await writeBlock({ execute: async (sql: string, params: unknown[] = []) => (statements.push({ sql, params }), 1) }, applied(5n));
     const [states] = statements;
@@ -479,7 +479,7 @@ describe("core-ledger-state's parts (LG-11, LG-15, LG-16)", () => {
   });
 });
 
-describe("core-block-parsed in the ledger worker (CD-5, LG-7)", () => {
+describe("core-block-parsed in the ledger worker", () => {
   it("parses through the worker bound to its process context, and releases its parses", async () => {
     const { host, asked } = bound(Uint8Array.of(1));
     const p = context();
@@ -501,7 +501,7 @@ describe("core-block-parsed in the ledger worker (CD-5, LG-7)", () => {
   });
 });
 
-describe("a refused eviction (task 12.5a; LG-14, owner decision Q144 B)", () => {
+describe("a refused eviction", () => {
   /**
    * A read at h − 1 whose queue holds one stored node, 0x77…, with no reference, no root count and an empty child list,
    * which the block's step deletes.

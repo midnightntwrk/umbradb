@@ -12,7 +12,6 @@ import { spawnChild } from "../child-processes.js";
 // EXCLUSIVE`, never committing. SQLite's file locks are operating-system locks: a second process is refused at once
 // while the holder lives — also while it is stopped with SIGSTOP — and a new process takes the lock at once after the
 // holder is killed with SIGKILL. These tests exercise Node.js and SQLite, not UmbraDB code.
-// [Q50; design §4 "Writer lock", §14]
 
 /**
  * The lock-taking process. It prints one JSON line: `{ locked: true }` once `BEGIN EXCLUSIVE` succeeded, or
@@ -79,7 +78,7 @@ afterEach(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe("node:sqlite — BEGIN EXCLUSIVE as an operating-system writer lock (DB-11)", () => {
+describe("node:sqlite — BEGIN EXCLUSIVE as an operating-system writer lock", () => {
   it("refuses a second process at once while the holder runs", async () => {
     const holder = await startLockProcess("hold");
     expect(holder.result.locked).toBe(true);

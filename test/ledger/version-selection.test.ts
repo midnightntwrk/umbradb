@@ -28,14 +28,14 @@ import {
  * - a block contradicting a pin, with `pin-mismatch`.
  *
  * Synthetic tables and headers are used here, and the real mainnet header of block 3,174,332 as the node returned it
- * (`test/node/fixtures/mainnet-answers.json`). [A94 CI, LG-1, LG-2; acceptance §12; design §11]
+ * (`test/node/fixtures/mainnet-answers.json`).
  *
  * That the mainnet header of block 1,774,492 passes the built-in pin needs the pin and the recorded header:
- * `networks.test.ts` runs every built-in pin against the header its boundary's source records. [A94 CI]
+ * `networks.test.ts` runs every built-in pin against the header its boundary's source records.
  */
 
-describe("A94: the version digest, the rows and the pins (LG-1, LG-2)", () => {
-  it("halts a block whose spec_version no row covers with unknown-runtime (LG-1's scenario)", () => {
+describe("the version digest, the rows and the pins", () => {
+  it("halts a block whose spec_version no row covers with unknown-runtime", () => {
     expectUnknownRuntimeHalts(selectLedgerVersion);
   });
 
@@ -93,7 +93,7 @@ describe("A94: the version digest, the rows and the pins (LG-1, LG-2)", () => {
   });
 });
 
-describe("the MNSV digest item (LG-1; midnight-node pallets/version: DigestItem::Consensus(*b\"MNSV\", spec_version))", () => {
+describe("the MNSV digest item (midnight-node pallets/version: DigestItem::Consensus(*b\"MNSV\", spec_version))", () => {
   it("reads the u32 little-endian spec_version of the one Consensus MNSV item, among others in any order", () => {
     for (const specVersion of [0, 22_000, 1_000_300, 2_000_000, U32_MAX]) {
       expect(mnsvSpecVersion(blockWith(1, [mnsvItem(specVersion)]))).toBe(specVersion);

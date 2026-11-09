@@ -18,7 +18,7 @@ import type { CrashEvent, CrashJob } from "./ingest-crash.worker.js";
 import { FENCE, fenceAt, genesisOf, ingest, PATIENCE_MS, until, watched, watcher } from "./ingest-harness.js";
 
 /**
- * A fault test: the database holds finalized blocks only. [A76 FAULT, IN-1]
+ * A fault test: the database holds finalized blocks only.
  *
  * A real process (`ingest-crash.worker.ts`) is started as `umbradb run` starts one, over the node source and a tape
  * node in this test. It:
@@ -30,7 +30,6 @@ import { FENCE, fenceAt, genesisOf, ingest, PATIENCE_MS, until, watched, watcher
  *
  * The acceptance criterion names PostgreSQL; the test runs PGlite too, in the same test, because the required id tags
  * exactly one test. The committed negative control is a source that writes each best block into a module's table.
- * [A76 FAULT]
  */
 
 const WORKER = fileURLToPath(new URL("./ingest-crash.worker.ts", import.meta.url));
@@ -47,7 +46,7 @@ const bestRecords = (): TapeRecord[] => best.flatMap((block, index) => [newHead(
 
 /**
  * The killed process's tape: a new database synced to F, then the 20 best blocks. The blocks are sent once F has
- * committed: the fence module's call after F's commit lets them out. [TT-3]
+ * committed: the fence module's call after F's commit lets them out.
  */
 const firstTape = (): TapeRecord[] => [
   ...opening(genesis, head),
@@ -58,7 +57,7 @@ const firstTape = (): TapeRecord[] => [
 
 /**
  * The restart's tape: startup's checks on a database with the cursor F, then the 20 best blocks again once the loop
- * runs. The fence module's `on-after-db-write` of F, delivered again after the restart, lets them out. [RN-11]
+ * runs. The fence module's `on-after-db-write` of F, delivered again after the restart, lets them out.
  */
 const restartTape = (): TapeRecord[] => [
   ...blockRef(genesis),
@@ -116,7 +115,7 @@ async function heightsIn(db: ProcessDatabase): Promise<number[]> {
   return (await db.query("SELECT height::int AS h FROM core_block_commit.blocks ORDER BY height")).map((row) => Number(row.h));
 }
 
-describe("A76 (IN-1): the database holds finalized blocks only", () => {
+describe("the database holds finalized blocks only", () => {
   beforeAll(() => Promise.all(PROCESS_BACKENDS.map((backend) => backend.start())), 180_000);
   afterAll(() => Promise.all(PROCESS_BACKENDS.map((backend) => backend.stop())), 60_000);
 
@@ -143,7 +142,7 @@ describe("A76 (IN-1): the database holds finalized blocks only", () => {
     }
   }, PATIENCE_MS * 4);
 
-  it("a source that writes a best block to the database fails A76 (its committed negative control, PostgreSQL)", async () => {
+  it("a source that writes a best block to the database fails (its committed negative control, PostgreSQL)", async () => {
     const backend = PROCESS_BACKENDS.find((candidate) => candidate.kind === "postgres") as ProcessBackend;
     const db = await backend.database();
     // The control's own driver connection takes a URL: the database's parts written as one.

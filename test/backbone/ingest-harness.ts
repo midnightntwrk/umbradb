@@ -45,7 +45,7 @@ export function watched(): Watched {
 
 const short = (hash: Uint8Array): string => hex(hash).slice(0, 10);
 
-/** The watching module `watch` (see the module comment): requires `block-body` and `runtime-metadata`. [CD-2] */
+/** The watching module `watch` (see the module comment): requires `block-body` and `runtime-metadata`. */
 export function watcher(seen: Watched): ModuleDeclaration {
   return {
     id: "watch",
@@ -85,7 +85,7 @@ export function watcher(seen: Watched): ModuleDeclaration {
   };
 }
 
-/** A call record a test module makes after a commit (`fenceAt`): the notifications after it wait for it. [TT-3] */
+/** A call record a test module makes after a commit (`fenceAt`): the notifications after it wait for it. */
 export const FENCE: TapeRecord = { method: "chain_getBlockHash", params: [999_999], result: hex(new Uint8Array(32).fill(9)) };
 
 /** A module whose `on-after-db-write` at `height` makes the {@link FENCE} call through the `node-client` item. */
@@ -139,11 +139,11 @@ export interface IngestOptions {
   readonly start: bigint;
   /** More `core` settings (`prefetchWindow`, `tipCap`, …). */
   readonly settings?: Readonly<Record<string, unknown>>;
-  /** The core's stop: the last height processed (for example a recorded tape's range end). [CF-4] */
+  /** The core's stop: the last height processed (for example a recorded tape's range end). */
   readonly stop?: bigint;
   /**
    * Later revisions of the `core` entry (for example `retainStates` and `sweep` changes): each from its `start`, with
-   * the first revision's settings and its own on top. [CF-5]
+   * the first revision's settings and its own on top.
    */
   readonly revisions?: readonly { readonly start: bigint; readonly settings: Readonly<Record<string, unknown>> }[];
   /** The node source's class (a negative control's), or a factory wrapping the process's client (an instrument). */
@@ -157,7 +157,7 @@ export interface IngestOptions {
   readonly core?: readonly ModuleDeclaration[];
   /** The start of each core module's entry (for example to test the mid-chain refusal); S unless given. */
   readonly startOf?: (id: string) => number;
-  /** The stop of each core module's entry (for example the handoff of `contract-logs`); none unless given. [CC-4] */
+  /** The stop of each core module's entry (for example the handoff of `contract-logs`); none unless given. */
   readonly stopOf?: (id: string) => number | undefined;
   /** The process's ledger worker (a test package's, a negative control's); `startLedgerWorker` unless given. */
   readonly ledgerWorker?: () => LedgerHost;
@@ -179,7 +179,7 @@ export interface Ingest {
 
 /**
  * The genesis hash `records` answer, as `0x` hex; undefined when the tape has none. It is the result of
- * `chain_getBlockHash [0]`, which `core-chain`'s startup check asks. [IN-2, IN-3]
+ * `chain_getBlockHash [0]`, which `core-chain`'s startup check asks.
  */
 export function genesisOf(records: readonly TapeRecord[]): string | undefined {
   const record = records.find(

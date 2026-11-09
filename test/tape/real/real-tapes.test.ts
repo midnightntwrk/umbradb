@@ -5,14 +5,14 @@ import { MANIFEST, tapeTest } from "./real-tapes.js";
 
 /**
  * The real-tape checks over every recorded tape of the manifest, each test skipped with the tape's name when
- * `UMBRADB_TAPES` does not hold the tape (`./real-tapes.ts`): [Q123, Q130]
+ * `UMBRADB_TAPES` does not hold the tape (`./real-tapes.ts`):
  *
  * - **its SHA-256 matches** the manifest's (the lookup refuses it otherwise), and it holds the manifest's count of
- *   records, every line a tape record [TT-1];
+ *   records, every line a tape record;
  * - **it replays against the tape node:** the node client sends every recorded call as recorded and receives each
  *   recorded answer, then both head subscriptions receive every recorded notification, and the tape node answered every
  *   request from its record (`tools/tape/replay-tape.ts`);
- * - **every allowed node call of every height of its range is on it** (`tools/tape/completeness.ts`) [IN-8].
+ * - **every allowed node call of every height of its range is on it** (`tools/tape/completeness.ts`).
  */
 
 const quietConnect: ConnectSocket = (url, events, timers) =>
@@ -42,7 +42,7 @@ describe.runIf(MANIFEST.tapes.length > 0)("the recorded tapes (UMBRADB_TAPES)", 
     );
     tapeTest(
       tape.name,
-      `${tape.name}: every IN-8 call of every height ${tape.from}–${tape.to} is on it`,
+      `${tape.name}: every call of every height ${tape.from}–${tape.to} is on it`,
       (found) => {
         expect(completenessProblems(found.read().records, tape)).toEqual([]);
       },

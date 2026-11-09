@@ -9,20 +9,20 @@ import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backend
  * - `/config` shows its host, port, user, name and `ssl` (PostgreSQL) or its `path` (PGlite), and the password only as
  *   `[redacted]`;
  * - the log names the database the same way (`database: postgres <user>@<host>:<port>/<name> (ssl disable)`,
- *   `database: pglite <path>`) and never the password. [A170, CF-4, Q167 A]
+ *   `database: pglite <path>`) and never the password.
  *
  * On PostgreSQL the process logs in as its own login with a distinctive password, so a password anywhere in
  * `/config`'s body or the log is found.
  *
  * The schema half (a connection string refused with its path, the parts' defaults) is in `./database-parts.test.ts`.
- * `config check --database` reading the configured database is in `../cli/config-check-database.test.ts`. [A35]
+ * `config check --database` reading the configured database is in `../cli/config-check-database.test.ts`.
  */
 
-/** The PostgreSQL login of the process: a superuser (the writer's privileges) with a distinctive password. [Q90] */
+/** The PostgreSQL login of the process: a superuser (the writer's privileges) with a distinctive password. */
 const LOGIN = "a170_writer";
 const PASSWORD = "pw-a170-process";
 
-describe.each(PROCESS_BACKENDS)("A170: a process on the database's parts, on $name", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("a process on the database's parts, on $name", (backend: ProcessBackend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 180_000);
 

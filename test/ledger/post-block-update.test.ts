@@ -22,7 +22,7 @@ import {
 // The node's end-of-block update, in the vendored ledger packages (`postBlockUpdateExact`, `blockFullness`,
 // `systemTransactionCost`, from `vendor/ledger/v8/patches/0004-…` and `v9/patches/0006-…`) and in the adapters'
 // `apply`, against the node's arithmetic at the pinned revisions (`fixtures/post-block-update/`). Also the chain
-// outcomes `apply` takes. [A151, LG-5, LG-8, LG-15, Q113 A]
+// outcomes `apply` takes.
 
 const LONG = 120_000;
 const UPSTREAM = (ledger: Ledger): { commit: string; versionName: string } =>
@@ -53,7 +53,7 @@ describe("the oracle's values: the node's arithmetic at the vendored ledger revi
 for (const ledger of ["v8", "v9"] as const) {
   const raw = RAW[ledger];
 
-  describe(`${ledger} package: the node's post-block update, with no JavaScript number in between (A151)`, () => {
+  describe(`${ledger} package: the node's post-block update, with no JavaScript number in between`, () => {
     for (const entry of ORACLE[ledger].cases) {
       it(`${entry.name}: the node's FixedPoint fullness, fee prices and state root`, () => {
         const blank = raw.LedgerState.blank(NETWORK_ID);
@@ -113,7 +113,7 @@ for (const ledger of ["v8", "v9"] as const) {
     });
   });
 
-  describe(`${ledger} adapter: the post-block update and the chain outcomes in apply (A151)`, () => {
+  describe(`${ledger} adapter: the post-block update and the chain outcomes in apply`, () => {
     let adapter: LedgerPackage;
     beforeAll(async () => {
       adapter = await loadLedgerPackage(ledger, { networkId: NETWORK_ID });

@@ -1,12 +1,11 @@
 /**
  * What `core-ledger-state` asks the node, through the block source the runner binds it to:
  * - the ledger state root after a finalized block (`midnight_ledgerStateRoot` at its hash), which every state root it
- *   computes is compared with [LG-15];
- * - the genesis state (`system_properties.genesis_state`), which is block 0's ledger state [IN-7].
+ *   computes is compared with;
+ * - the genesis state (`system_properties.genesis_state`), which is block 0's ledger state.
  *
  * Both are among the node calls the system is allowed to make. The node source gives them (`./node-source.ts`). The
  * in-memory source has no node, so it does not, and `core-ledger-state` is not bound to it. Pure: no Node.js import.
- * [IN-8]
  */
 
 import type { BlockRef } from "../../runner/block-source.js";

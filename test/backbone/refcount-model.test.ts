@@ -16,7 +16,7 @@ import {
 } from "./refcount-model.js";
 
 /**
- * The reference model of LG-14's reference counting (`./refcount-model.ts`) against its reachability oracle. [R1]
+ * The reference model of the reference counting (`./refcount-model.ts`) against its reachability oracle.
  *
  * - Hand-made blocks: the two rewrites of a queued node, a released state deleted the block after its release with
  *   its own rows (and what each fault does to that), and the checks that halt a block.
@@ -76,7 +76,7 @@ function tables(
   };
 }
 
-describe("R1: the reference model of LG-14 by hand", () => {
+describe("the reference model of reference counting by hand", () => {
   it("a queued unrooted node rewritten to reference a node the batch writes new, no root rising: kept and queued", () => {
     const g = node("g");
     const c = node("c", [g.keyBytes]);
@@ -187,8 +187,8 @@ function problemsOf(script: Parameters<typeof driveHistory>[0], seen: Map<R1Case
   return [];
 }
 
-describe("R1: the reference model of LG-14 against the reachability oracle", () => {
-  it(`I1–I5 after every block, I6 after every admissible one, on generated histories (seed ${SEED}, ${RUNS} runs)`, () => {
+describe("the reference model of reference counting against the reachability oracle", () => {
+  it(`after every block, I6 after every admissible one, on generated histories (seed ${SEED}, ${RUNS} runs)`, () => {
     const seen = new Map<R1Case, number>();
     fc.assert(
       fc.property(historyScripts({ oneForm: false }), (script) => {

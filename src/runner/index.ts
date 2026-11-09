@@ -1,5 +1,5 @@
 /**
- * The runner, and the parts it is made of. [design §1–§3]
+ * The runner, and the parts it is made of.
  *
  * - the point dispatch and the order within points (`./dispatch.ts`);
  * - the block-source interface (`./block-source.ts`) and the in-memory source (`./in-memory-source.ts`);
@@ -8,10 +8,10 @@
  * - the process items and module APIs: the process contexts (`./process-context.ts`), the module API's routes, requests
  *   and subscriptions (`./module-api.ts`) and its listener on `listen.api` (`./api-server.ts`);
  * - the resolver (`./resolve.ts`): the side, the build's declarations and the configuration every caller assembles
- *   through it [LM-1];
+ *   through it;
  * - the process (`./process.ts`), the engine: its startup from the configuration it loads and the build the resolver
  *   gives, the loop's start and stop heights, the delivery of the callbacks again after a restart, the upgrade
- *   boundary, its state and SIGTERM [RN-11, LM-1];
+ *   boundary, its state and SIGTERM;
  * - the failures: the `refused` and `halted` states with their reasons, and the retries of a lost connection or an
  *   unreachable node (`./process.ts`, `./failures.ts`);
  * - the slow-block watchdog: the loop's window of each height and of the callbacks it awaits outside a height's

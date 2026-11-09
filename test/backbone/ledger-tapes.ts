@@ -15,15 +15,14 @@ import { type ChainBlock, chainOf, compact, hex, ledgerTransaction, opening } fr
  * The synthetic tapes for the ledger process tests (`ledger-state.test.ts` and its negative controls). Each tape
  * starts at genesis and uses the node's answer shapes (`./fetch-fixtures.ts`, `./events-fixtures.ts`). It holds:
  * - each block's real ledger transactions (`test/ledger/adapter-fixtures.ts`), with the chain events that place them
- *   and give their outcomes [CD-5, CD-6];
- * - `system_properties` with the genesis state [IN-7];
+ *   and give their outcomes;
+ * - `system_properties` with the genesis state;
  * - `midnight_ledgerStateRoot` at every block. This is the root the reference replay reaches (through the packages'
  *   own API, never the adapters), or, for the real recorded genesis states, the node's own recorded root.
- * [A82, A99, A106, A107; IN-7, LG-8, LG-15, LG-16]
  *
  * Each height also carries two accounts of the block:
  * - what the test's own adapter (in this thread) gives for it. The rows `core-ledger-state` stores are the adapter's
- *   output, so `core_ledger_state` is held to it [LG-16];
+ *   output, so `core_ledger_state` is held to it;
  * - the reference replay's result types and event names, an independent account of the same block.
  *
  * **An upgrade.** With `upgrade`, the blocks from its F on are built by its v9 runtime. They carry its `MNSV` digest
@@ -32,7 +31,6 @@ import { type ChainBlock, chainOf, compact, hex, ledgerTransaction, opening } fr
  * - the v8 state's nodes are taken from its own serialization, without the packages (`test/ledger/stored-values.ts`);
  * - they are converted by `convertFromV8` in a fresh instance of the v9 package (`test/ledger/fresh-instance.ts`);
  * - F is then applied to the result.
- * [LG-9, A100]
  */
 
 /** The packages' classes, through v9's declarations (`test/ledger/adapter-fixtures.ts`'s `RawPackage`). */
@@ -52,15 +50,15 @@ export interface LedgerScenarioOptions {
   readonly runtime?: EventsRuntime;
   /** `system_properties.genesis_state`. */
   readonly genesis: Uint8Array;
-  /** The genesis state already holds block 0's transactions (the node's root at 0 is the genesis state's). [IN-7] */
+  /** The genesis state already holds block 0's transactions (the node's root at 0 is the genesis state's). */
   readonly includesBlockZero: boolean;
   /** Each block's transactions, from block 0, in their application order. */
   readonly blocks: readonly (readonly LedgerTx[])[];
   /** The v8 → v9 upgrade: F, the first block its v9 runtime builds; `ledger` must be v8. */
   readonly upgrade?: { readonly at: number; readonly runtime: EventsRuntime };
-  /** Leave out the test's adapter's outputs (for long ranges that compare roots only): an empty output. [A103] */
+  /** Leave out the test's adapter's outputs (for long ranges that compare roots only): an empty output. */
   readonly rootsOnly?: boolean;
-  /** Contracts whose state and zswap state the reference replay serializes after every block. [A104] */
+  /** Contracts whose state and zswap state the reference replay serializes after every block. */
   readonly contracts?: readonly Uint8Array[];
 }
 
@@ -74,9 +72,9 @@ export interface LedgerHeight {
   readonly stateKey: Uint8Array;
   /** The zswap tree's first free index, from the package's published getter. */
   readonly zswapFirstFree: bigint;
-  /** The six tree values `core-ledger-state` stores, of the reference state, by the patched export `stateTrees`. [LG-16] */
+  /** The six tree values `core-ledger-state` stores, of the reference state, by the patched export `stateTrees`. */
   readonly trees: StateSummary;
-  /** The test's adapter's output for the block (block 0: applied to the state the block-0 rule selects). [IN-7] */
+  /** The test's adapter's output for the block (block 0: applied to the state the block-0 rule selects). */
   readonly output: ApplyOutput;
   /** The reference replay's result type of each transaction (`success`, `partialSuccess`, `system`, `malformed`, …). */
   readonly types: readonly string[];
@@ -106,7 +104,7 @@ export const RUNTIME_1_0 = eventsRuntime(1_000_000, V2_0);
 
 /**
  * The v9 runtime an upgrade's F is built by: 2_001_000 (v9; runtime 2.1, so no parent-time allowance for the first
- * regular transaction), 2.0's event layout. [LG-8]
+ * regular transaction), 2.0's event layout.
  */
 export const RUNTIME_2_1 = eventsRuntime(2_001_000, V2_0);
 
@@ -128,7 +126,7 @@ export function distributeReserve(ledger: "v8" | "v9", amount: bigint): Uint8Arr
 
 /**
  * The runtimes whose first regular transaction may be checked at the parent block's time, written out (the official
- * indexer's ranges), for the reference replay's input. [LG-8]
+ * indexer's ranges), for the reference replay's input.
  */
 const skews = (specVersion: number): boolean =>
   (specVersion >= 22_000 && specVersion < 23_000) ||

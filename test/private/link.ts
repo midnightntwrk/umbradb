@@ -6,7 +6,7 @@ import type { PublicWakes } from "../../src/backbone/core-private-source/index.j
  * private source's wait for the public cursor; while dropped, every message is lost; and connecting again wakes it,
  * since the source must check again after every reconnect. It is the private source's only wake-up in the
  * dropped-transport test, so whatever the private process does after a drop it does because of the reconnect, not a
- * timer. [PP-3, PP-4, A114]
+ * timer.
  */
 export class TestLink implements PublicWakes {
   #connected = true;
@@ -56,7 +56,7 @@ export class TestLink implements PublicWakes {
     this.#connected = false;
   }
 
-  /** The transport connects again, which wakes the private source. [PP-3] */
+  /** The transport connects again, which wakes the private source. */
   connect(): void {
     this.#connected = true;
     this.#wake();

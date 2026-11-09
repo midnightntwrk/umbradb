@@ -8,7 +8,7 @@ import type { AdminAnswer } from "../../src/admin/types.js";
  * Admin's handler mounted in a host's own server (`src/admin/mounted.ts`), without a process: it writes an answer as the
  * admin listener writes it — JSON, `Content-Length`, `Cache-Control: no-store`, no `X-Umbra-*` header, a `HEAD` without
  * its body —, the admin route table's fixed 500 when the answer cannot be built, and nothing on a response the host
- * answered already. [AE-1, AE-6, LM-4]
+ * answered already.
  */
 
 /** `method path` against a host server mounting `answer`: its status, headers and body. */
@@ -32,7 +32,7 @@ async function exchange(answer: (method: string, url: string) => AdminAnswer, me
   }
 }
 
-describe("the mounted admin handler (AE-1, LM-4)", () => {
+describe("the mounted admin handler", () => {
   it("writes the answer as JSON with the admin listener's headers, and gets the request's method and URL", async () => {
     const asked: string[] = [];
     const answered = await exchange((method, url) => {

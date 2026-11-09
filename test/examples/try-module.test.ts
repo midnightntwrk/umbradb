@@ -4,10 +4,10 @@ import { describe, expect, it } from "vitest";
 import { type CodeBlock, codeBlocks, importsOf, REPOSITORY, section, typeCheck } from "./example-checks.js";
 
 /**
- * The module guide's "trying a module" recipe (§17) is `examples/try-module/try-module.ts` itself, the module test that
- * the pack smoke runs from the installed package (`test/smoke/pack-install.mjs`, L54): the guide's code block is the
+ * The module guide's "trying a module" recipe is `examples/try-module/try-module.ts` itself, the module test that
+ * the pack smoke runs from the installed package (`test/smoke/pack-install.mjs`): the guide's code block is the
  * file, line for line, and it starts UmbraDB with `startUmbraDB`. The file type-checks against `src/index.ts` (as
- * `npm run typecheck` checks it too). [L59 DOC, L54, LS-1]
+ * `npm run typecheck` checks it too).
  */
 
 const FIXTURE = join(REPOSITORY, "examples", "try-module", "try-module.ts");
@@ -24,7 +24,7 @@ function recipeProblems(guide: string, fixture: string): string[] {
   return fromPackage.includes("startUmbraDB") ? [] : ["the §17 recipe does not import startUmbraDB from umbradb (L59)"];
 }
 
-describe("L59: the module guide's recipe is L54's module test", () => {
+describe("the module guide's recipe is the module test", () => {
   it("examples/try-module type-checks against src/index.ts", async () => {
     const result = await typeCheck(join(REPOSITORY, "examples", "try-module", "tsconfig.json"));
     expect(result.output).toBe("");

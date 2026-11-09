@@ -1,23 +1,21 @@
 /**
  * The node client's errors: each an `UmbraError` whose code says whether the failure is retried or halts the process.
- * [IN-9, IN-10]
  *
  * - **`node-unreachable`, retryable** (retried with back-off): the connection could not be made
  *   (`reason: connect-failed`, `cause`: the system's code), was refused with HTTP 429 or a 5xx status (`http-status`,
  *   `status`), or was lost (`connection-closed`, `closeCode`); a call or a connection attempt got no answer within its
  *   timeout (`timeout`, `connect-timeout`, `timeoutMs`); or the node applied its own rate limit (`rate-limited`).
- *   [IN-10]
  * - **`node-requirement`, not retryable** (the process halts, since the node cannot serve what the indexer needs): the
  *   node has no block it must serve (a `null` block hash, header or block: `block-unavailable`, with `height` or
- *   `block`), or says the state at a block is gone, as a pruned node does (`state-unavailable`). [IN-9]
+ *   `block`), or says the state at a block is gone, as a pruned node does (`state-unavailable`).
  * - **`node-error`, not retryable** (a halt at a finalized height): any other JSON-RPC error answer (`rpc-error`); a
  *   handshake refused with another status (`handshake-refused`, `status`); an answer, an error or a frame of the wrong
  *   shape (`bad-answer`, with `path`, what it `found`, and a short `value`); or a method outside the allowed node calls
- *   (`method-not-allowed`). [RN-8, IN-8]
+ *   (`method-not-allowed`).
  *
  * Every error also names the node `method` it failed in (`null` for a connection attempt no call is waiting on), and a
  * JSON-RPC error's `rpcCode` and `rpcMessage`. None names the node's URL, its host or its port: the URL is a `secret`
- * field, and a system error's text may hold the host, so only its code is kept. [IN-8, CF-4]
+ * field, and a system error's text may hold the host, so only its code is kept.
  *
  * Over WebSocket an HTTP status exists only for the handshake, so a rate limit ("HTTP 429") is read there, and in the
  * open connection as the node's own rate-limit answer: Substrate's RPC server answers a call over its rate limit with
@@ -108,7 +106,7 @@ export function rpcFailure(method: NodeMethod, error: unknown): UmbraError {
   });
 }
 
-/** A block the node must serve but does not have. [IN-9] */
+/** A block the node must serve but does not have. */
 export function blockUnavailable(method: NodeMethod, where: { height: bigint } | { block: string }): UmbraError {
   const which = "height" in where ? `at height ${where.height}` : where.block;
   return new UmbraError(
@@ -171,7 +169,7 @@ export function connectionFailure(
 
 /**
  * A call to a method outside the allowed node calls (or a subscription method through `call`), refused before it is
- * sent. [IN-8]
+ * sent.
  */
 export function methodNotAllowed(method: unknown): UmbraError {
   return new UmbraError(

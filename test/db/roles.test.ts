@@ -7,16 +7,16 @@ import { openBlockWrites } from "../../src/db/write-handles.js";
 import { BACKENDS, type TestDatabase } from "./backends.js";
 
 /**
- * The per-module roles, on both backends. [DB-6, DB-7]
- * - A module's write into another module's table is rejected by the database, with its negative control. [A13]
- * - A provider's `SECURITY DEFINER` function has `EXECUTE` granted only to the modules that require its item. [A14]
- * - The database half of the schema names: the roles and the shared item's schema. [A15]
+ * The per-module roles, on both backends.
+ * - A module's write into another module's table is rejected by the database, with its negative control.
+ * - A provider's `SECURITY DEFINER` function has `EXECUTE` granted only to the modules that require its item.
+ * - The database half of the schema names: the roles and the shared item's schema.
  *
  * A callback is played here by one module's `on-db-write` in a block transaction of the database API, with the block
  * write handle it would get (`src/db/write-handles.ts`), under its module's role. A migration is played by a
  * transaction that sets the role with {@link setModuleRole} and runs DDL, as the migration runner (`src/db/migrate.ts`,
  * `migrate.test.ts`) does with its record and mark. Halting processing after a rejected write is the runner's job: a
- * callback's error is the `callback-error` halt. [A13, RN-8]
+ * callback's error is the `callback-error` halt.
  *
  * Every database here is set up by a login that is a superuser (the test server's, PGlite's `postgres`);
  * `roles-login.test.ts` runs the same with a `CREATEROLE` login on PostgreSQL.
@@ -60,7 +60,7 @@ async function count(db: Database, table: string): Promise<number> {
   return rows[0]?.n as number;
 }
 
-describe.each(BACKENDS)("roles and grants on $name (DB-6, DB-7, DB-8)", (backend) => {
+describe.each(BACKENDS)("roles and grants on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop());
 
@@ -76,7 +76,7 @@ describe.each(BACKENDS)("roles and grants on $name (DB-6, DB-7, DB-8)", (backend
 
   /**
    * The check: module `a` writes its own table, then `b`'s, in one transaction under its role. The database rejects
-   * the second write with a permission error, and the transaction (the block) rolls back: neither table changed. [A13]
+   * the second write with a permission error, and the transaction (the block) rolls back: neither table changed.
    */
   async function expectCrossSchemaWriteRejected(db: Database, plan: SchemaPlan): Promise<void> {
     const before = [await count(db, "a.t"), await count(db, "b.t")];
@@ -97,12 +97,12 @@ describe.each(BACKENDS)("roles and grants on $name (DB-6, DB-7, DB-8)", (backend
 
   // The required id names one test (the gate refuses an id two tests carry): the PostgreSQL 18 copy.
   const requiredId = backend.name.startsWith("PostgreSQL") ? "[[db.roles.cross-schema-write-rejected]] " : "";
-  it(`${requiredId}A13: a module's write into another module's table is rejected by the database and the block rolls back`, async () => {
+  it(`${requiredId}a module's write into another module's table is rejected by the database and the block rolls back`, async () => {
     const { db, plan } = await twoModules();
     await expectCrossSchemaWriteRejected(db, plan);
   });
 
-  it("A13: a module writes its own table under its role, and reads but never changes another's", async () => {
+  it("a module writes its own table under its role, and reads but never changes another's", async () => {
     const { db, plan } = await twoModules();
     await asModule(db, plan, "a", async (tx) => {
       expect(await tx.query("SELECT current_user AS role")).toEqual([{ role: "umbradb_m_a" }]);
@@ -119,7 +119,7 @@ describe.each(BACKENDS)("roles and grants on $name (DB-6, DB-7, DB-8)", (backend
     expect(await asModule(db, plan, "b", (tx) => tx.query("SELECT k, v FROM b.t"))).toEqual([{ k: 7n, v: "b" }]);
   });
 
-  it("A13 negative control: granting a's role INSERT on b's table makes A13's check fail", async () => {
+  it("negative control: granting a's role INSERT on b's table makes the check fail", async () => {
     const { db, plan, exec } = await twoModules();
     await exec("GRANT INSERT ON b.t TO umbradb_m_a");
     await expect(expectCrossSchemaWriteRejected(db, plan)).rejects.toThrow(/expected 'resolved' to be an instance of UmbraError/);
@@ -214,7 +214,7 @@ describe.each(BACKENDS)("roles and grants on $name (DB-6, DB-7, DB-8)", (backend
     expect(roles).toEqual([]);
   });
 
-  describe("A14: provider functions (DB-7)", () => {
+  describe("provider functions", () => {
     /** Provider `p` (item `store-x`), consumer `c` (requires it) and `u` (requires `other-x` of `o` only). */
     async function providerAndConsumers(): Promise<TestDatabase & { readonly plan: SchemaPlan }> {
       const database = await backend.database("SELECT 1");
@@ -315,7 +315,7 @@ describe.each(BACKENDS)("roles and grants on $name (DB-6, DB-7, DB-8)", (backend
     });
   });
 
-  describe("A15: roles and schemas in the database (DB-8)", () => {
+  describe("roles and schemas in the database", () => {
     it("creates two distinct roles, each owning its schema, for two 40-byte ids differing only in their last character", async () => {
       const first = `${"a".repeat(39)}b`;
       const second = `${"a".repeat(39)}c`;

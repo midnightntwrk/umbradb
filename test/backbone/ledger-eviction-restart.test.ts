@@ -8,30 +8,29 @@ import { heldNodeProblems } from "./ledger-storage-checks.js";
 import { fixtureProblems } from "./refcount-checks.js";
 
 /**
- * `[FAULT]` A refused eviction restarts the ledger worker, on PostgreSQL 18 and PGlite 0.5.10. [A160 FAULT, LG-14, Q144 B]
+ * `[FAULT]` A refused eviction restarts the ledger worker, on PostgreSQL 18 and PGlite 0.5.10.
  * - A test package refuses one eviction at block h, on every try, so also after the worker freed what it can. The
  *   worker thread ends and a new one starts, which loads the state at h − 1 from the database and applies h again,
  *   the reclamation step computed again. The process does not halt, and its stored rows of the tables that are not
- *   content-defined, its node set, R3's checks and its state roots equal an uninterrupted run's.
+ *   content-defined, its node set, the checks and its state roots equal an uninterrupted run's.
  * - A package that refuses again on that retry fails the block with `callback-error`.
  *
  * The runs use the DAG fixture through the real process (`./eviction-restart.ts`); h is its first block whose
  * reclamation step deletes nodes. The committed negative controls (a halt without a restart; a retry without the state
- * at h − 1) are in `ledger-eviction-restart.negative-control.test.ts`. [A160 FAULT]
+ * at h − 1) are in `ledger-eviction-restart.negative-control.test.ts`.
  */
 
-describe.each(PROCESS_BACKENDS)("A160 (LG-14, Q144 B): a refused eviction restarts the ledger worker, on $name", (backend) => {
+describe.each(PROCESS_BACKENDS)("a refused eviction restarts the ledger worker, on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("A160: refused at h by the first thread, a new thread loads the state at h − 1 from the database and applies h again with the reclamation step computed again; no halt, and the rows of the tables that are not content-defined, the node set, R3's checks and the roots are an uninterrupted run's", async () => {
+  it("refused at h by the first thread, a new thread loads the state at h − 1 from the database and applies h again with the reclamation step computed again; no halt, and the rows of the tables that are not content-defined, the node set, the checks and the roots are an uninterrupted run's", async () => {
     const h = refusalHeight();
     const uninterrupted = await runFixture(await backend.database());
     expect(uninterrupted.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
     expect(uninterrupted.counters).toMatchObject({ threads: 1, refusals: 0, storeLoads: 0 });
     expect(uninterrupted.restarts).toBe(0);
-    // The uninterrupted run matches R1's model: its tables after every block are the model's, and R3's check passes.
-    // [A105, R3]
+    // The uninterrupted run matches the model: its tables after every block are the model's, and the check passes.
     expect(modelProblems(uninterrupted.tables, modelOfFixture())).toEqual([]);
     expect(fixtureProblems("original", uninterrupted.tables, uninterrupted.batches, LAST)).toEqual([]);
 
@@ -52,7 +51,7 @@ describe.each(PROCESS_BACKENDS)("A160 (LG-14, Q144 B): a refused eviction restar
     expect(uninterrupted.evicted.get(h)).toEqual(deleted);
     expect(restarted.evicted.get(h)).toEqual(deleted);
     // Its rows of the tables that are not content-defined and its node set are the uninterrupted run's after every
-    // block, R3's check passes after every block, and every `states` row (key and root) is the uninterrupted run's.
+    // block, the check passes after every block, and every `states` row (key and root) is the uninterrupted run's.
     expect(tableDifferences(restarted.tables, uninterrupted.tables)).toEqual([]);
     expect(fixtureProblems("original", restarted.tables, restarted.batches, LAST)).toEqual([]);
     expect(restarted.states).toEqual(uninterrupted.states);
@@ -60,7 +59,7 @@ describe.each(PROCESS_BACKENDS)("A160 (LG-14, Q144 B): a refused eviction restar
     expect(await heldNodeProblems(db)).toEqual([]);
   }, PATIENCE_MS * 6);
 
-  it("A160: a package that refuses again on the retry fails block h with callback-error in core-ledger-state's on-compute; nothing of h is stored", async () => {
+  it("a package that refuses again on the retry fails block h with callback-error in core-ledger-state's on-compute; nothing of h is stored", async () => {
     const h = refusalHeight();
     const db = await backend.database();
     const run = await runFixture(db, { refuse: { at: h, threads: 2 }, halts: true });

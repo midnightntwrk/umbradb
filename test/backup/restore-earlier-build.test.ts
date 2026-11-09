@@ -14,8 +14,8 @@ import { PRIVATE_START, pmModule, privateBackup, restorePrivate, writePrivateCon
  * A backup written by an earlier build is refused by the restore with `backup-build-mismatch`, on PostgreSQL 18.6 and
  * PGlite 0.5.10: its recorded migrations of `core-chain`, `core-ledger-state` or `core-private-source` are that build's
  * `001` and `002` (`../backbone/earlier-build.ts`), and this build declares one migration, `001`, with another
- * checksum. The refusal is the build check before loading (BK-3, the restore's `checkRecordedMigrations`): it names
- * the part, `001` and both checksums, and the target stays empty. [R16, BK-3, DB-9]
+ * checksum. The refusal is the build check before loading (the restore's `checkRecordedMigrations`): it names
+ * the part, `001` and both checksums, and the target stays empty.
  *
  * The backups are this build's own, rewritten as an earlier build would have written them (the manifest's rows and the
  * dump's): a ledger process's (`./restore-ledger.ts`: `core-chain` and `core-ledger-state`), restored by the restore
@@ -59,9 +59,9 @@ function earlierFile(file: string, part: FoldedPart): string {
   return path;
 }
 
-describe.each(BACKUP_BACKENDS)("R16: a backup written by an earlier build, on $name (BK-3, DB-9)", (backend) => {
+describe.each(BACKUP_BACKENDS)("a backup written by an earlier build, on $name", (backend) => {
   it(
-    "R16: a ledger backup carrying an earlier build's migrations of core-chain or core-ledger-state is refused with " +
+    "a ledger backup carrying an earlier build's migrations of core-chain or core-ledger-state is refused with " +
       "backup-build-mismatch, naming the part, 001 and both checksums, the target empty; this build's own restores",
     async () => {
       const scenario = await ledgerChain();
@@ -84,7 +84,7 @@ describe.each(BACKUP_BACKENDS)("R16: a backup written by an earlier build, on $n
   );
 
   it(
-    "R16: a private process's backup carrying an earlier build's migrations of core-private-source is refused by " +
+    "a private process's backup carrying an earlier build's migrations of core-private-source is refused by " +
       "umbradb restore with backup-build-mismatch, naming the part, 001 and both checksums, the target empty",
     async () => {
       const { bound, file } = await privateBackup(project, backend, join(dir, `${backend.kind}-private.backup`));

@@ -20,12 +20,12 @@ import { startPostgres, type TestDatabase, type TestServer } from "../determinis
  * one fixture on each backend, through the database API's read handles, and the two are compared:
  * - the catalog facts the rules read;
  * - every refusal with its message: one case for every refused row of the design's column-type table, and for every
- *   refusal in the paragraph under it; [design §4]
- * - the byte order of text keys; [DT-2]
+ *   refusal in the paragraph under it;
+ * - the byte order of text keys;
  * - the pinned session settings, with the texts they make PostgreSQL print.
  *
  * Each case's own message is checked against the design's words in `column-rules.test.ts` and
- * `column-refusals.test.ts`; here the two backends must agree byte for byte. [A138, Q69]
+ * `column-refusals.test.ts`; here the two backends must agree byte for byte.
  */
 
 const FIXTURE = `
@@ -98,7 +98,7 @@ async function onBoth<T>(body: (read: ConsistentRead) => Promise<T>): Promise<[T
   return results as [T, T];
 }
 
-describe("A138: the component's rules give the same results on PostgreSQL 18 and PGlite 0.5.10", () => {
+describe("the component's rules give the same results on PostgreSQL 18 and PGlite 0.5.10", () => {
   it("reads the same catalog facts on both", async () => {
     const [postgres, pglite] = await onBoth(async (read) => ({
       tables: await catalogTables(read),
@@ -203,7 +203,7 @@ describe("A138: the component's rules give the same results on PostgreSQL 18 and
   it("orders timestamptz keys by time with the key's ORDER BY term on both: the order of their encoded integers", async () => {
     const sql = `SELECT k FROM m.time_keys ORDER BY ${keyOrderTerm("k", "timestamp with time zone")}`;
     const [postgres, pglite] = await onBoth((read) => read.query(sql));
-    // By time: before 1970 first, a fraction after its whole second, 16:30:00.5+02 as 14:30:00.5Z. [Q74]
+    // By time: before 1970 first, a fraction after its whole second, 16:30:00.5+02 as 14:30:00.5Z.
     expect(postgres.map((row) => row.k)).toEqual([
       "0001-01-01T00:00:00Z",
       "1969-12-31T23:59:59.5Z",
@@ -214,7 +214,7 @@ describe("A138: the component's rules give the same results on PostgreSQL 18 and
       "9999-12-31T23:59:59.999999Z",
     ]);
     expect(pglite).toEqual(postgres);
-    // The integer encodings of the same values, read back from their CBOR heads, increase in that order. [DT-1]
+    // The integer encodings of the same values, read back from their CBOR heads, increase in that order.
     const integers = postgres.map((row) => {
       const bytes = encodeRow([row.k], ["timestamp with time zone"]).subarray(1);
       const head = bytes[0] as number;

@@ -33,14 +33,14 @@ function adminPortOf(admin: boolean | AdminStarter | undefined): { readonly admi
 
 /**
  * Builds and processes for the private processes' tests: a public core — the core process on the public database —
- * and private processes, each on its own private database, bound to it. [PP-1–PP-5, DT-3, DT-6, Q75]
+ * and private processes, each on its own private database, bound to it.
  *
  * **The public core** is the process over an in-memory block source with the real backbone of the backbone tests
  * (`test/backbone/chain-build.ts`: `core-chain`, the stand-in `core-block-fetch`, `core-block-commit`, `core-digest`).
  * Its network is `custom`, with its own ledger table and its genesis hash the in-memory chain's block 0 (given as
  * {@link genesisBlock}, so the configured and the source's genesis hashes agree): `core-chain` records it with S in
  * `core_chain.identity`, which a private process binds to. A user module `public-reads` keeps the core's `db` item
- * (`readOnlyDatabase` of its database): what a direct read of public data reads. [PP-2]
+ * (`readOnlyDatabase` of its database): what a direct read of public data reads.
  *
  * **A private process** is the same process with `side: "private"`: the real `core-chain` — its history, its
  * identity (the public genesis hash, the private S, the anchor at S) and the process items `config`, `db` and
@@ -50,7 +50,7 @@ function adminPortOf(admin: boolean | AdminStarter | undefined): { readonly admi
  * parts of a login that may only read (the production path, `openPublicDatabase`); on PGlite, whose public database the
  * core alone opens, through direct reads of the core's `db` item — the direct calls allowed in tests —, or, given
  * `privateLink`, through the core's process transport (`read` messages, and its wake-ups in place of the tests'
- * poll), which a core started with `listen.privateLink` serves. [PP-4]
+ * poll), which a core started with `listen.privateLink` serves.
  *
  * Imports nothing of Vitest.
  */
@@ -71,7 +71,7 @@ export function genesisBlock(genesis: string) {
 
 /**
  * A custom network's ledger table (a `custom` network sets its own rows): every `spec_version` the stand-in
- * `core-block-fetch` gives is ledger v9's. [LG-3]
+ * `core-block-fetch` gives is ledger v9's.
  */
 export const TEST_LEDGER_TABLE = Object.freeze({
   rows: Object.freeze([Object.freeze({ specVersionMin: 0, specVersionMax: 4_294_967_295, ledger: "v9" as const })]),
@@ -122,11 +122,11 @@ export interface PublicCoreOptions {
    * {@link extra} (`127.0.0.1:0` for a free port), or through a negative control's starter; none unless given.
    */
   readonly admin?: boolean | AdminStarter;
-  /** A negative control's configuration hash (`EngineInput.configHash`); the process's own unless given. [RN-16] */
+  /** A negative control's configuration hash (`EngineInput.configHash`); the process's own unless given. */
   readonly configHash?: EngineInput["configHash"];
-  /** The transport-reader test's seam: the transport's read path (`EngineInput.transportReads`). [A177] */
+  /** The transport-reader test's seam: the transport's read path (`EngineInput.transportReads`). */
   readonly transportReads?: EngineInput["transportReads"];
-  /** The transport-reader negative control's judgement of the reader (`EngineInput.transportReaderCheck`). [A177] */
+  /** The transport-reader negative control's judgement of the reader (`EngineInput.transportReaderCheck`). */
   readonly transportReaderCheck?: EngineInput["transportReaderCheck"];
 }
 
@@ -151,13 +151,13 @@ function publicReads(keep: (db: ReadOnlyDatabase) => void): ModuleDeclaration {
 
 /**
  * The login every PostgreSQL test database's core reads its transport with (`./backends.ts`'s `umbradb_transport`,
- * which holds `pg_read_all_data` only): a core on PostgreSQL with `listen.privateLink` requires one. [CF-4, Q175 A]
+ * which holds `pg_read_all_data` only): a core on PostgreSQL with `listen.privateLink` requires one.
  */
 const TRANSPORT_READER = Object.freeze({ user: TRANSPORT_LOGIN, password: TRANSPORT_LOGIN });
 
 /**
  * The public core's `core` entry. On PostgreSQL with `listen.privateLink`, `transportReader` is the tests' reader login
- * unless `extra` names it — `transportReader: undefined` for none (the start refused for a missing reader). [A177]
+ * unless `extra` names it — `transportReader: undefined` for none (the start refused for a missing reader).
  */
 export function publicCoreEntry(
   database: DatabaseParts,
@@ -267,7 +267,7 @@ export function launchPublicCore(options: PublicCoreOptions): PublicCore {
 
 /**
  * Public data read directly through the core's `db` item: the direct calls allowed in tests (in place of `read`
- * messages). [PP-4]
+ * messages).
  */
 export function directPublic(db: () => ReadOnlyDatabase): PublicDatabase {
   return Object.freeze({
@@ -297,7 +297,7 @@ export const PRIVATE_ROWS_SQL = (schema: string): string =>
  * `on-fetch` reads the public block's hash at the block's height through its read of public data and puts it as its
  * `block` item; its `on-compute` notes the height of its read of the private database; its `on-db-write` stores the
  * hash with its data setting `salt`; its `on-after-db-write` notes the height of its read. Its calls go to `seen`.
- * `rest` replaces parts of the declaration (a test's migration). [PP-1, PP-3, PP-13]
+ * `rest` replaces parts of the declaration (a test's migration).
  */
 export function privateModule(id: string, seen: PrivateSeen[], rest: Partial<ModuleDeclaration> = {}): ModuleDeclaration {
   const schema = id.replaceAll("-", "_");
@@ -361,7 +361,7 @@ export interface PrivateOptions {
   readonly wakes?: PublicWakes;
   /** The core's transport address (`privateLink`): the private process's wake-ups, and on PGlite its public reads. */
   readonly privateLink?: string;
-  /** The `tls` setting. [PP-11] */
+  /** The `tls` setting. */
   readonly tls?: { readonly certificate: string; readonly key: string; readonly trustedRoots: readonly string[] };
   /** Where the process's log lines go; nowhere unless given. */
   readonly lines?: string[];
@@ -379,7 +379,7 @@ export interface PrivateOptions {
   readonly genesisHash?: string;
   /**
    * The `core` entry's network: `custom` (with {@link genesisHash} and the tests' ledger table) unless given; a known
-   * network has its genesis hash and ledger table built in, so neither is given. [CF-4]
+   * network has its genesis hash and ledger table built in, so neither is given.
    */
   readonly network?: string;
   /** Where `pm` reports its calls. */
@@ -388,7 +388,7 @@ export interface PrivateOptions {
   readonly intake?: Omit<PrivateIntakeOptions, "publicDatabase" | "wakes">;
   /** A negative control's loop. */
   readonly loop?: new (input: LoopInput) => FinalizedLoop;
-  /** Starts the process in this function's context, so the connections it opens are attributed to it. [A112] */
+  /** Starts the process in this function's context, so the connections it opens are attributed to it. */
   readonly within?: <T>(start: () => T) => T;
   /** More settings of the `core` entry (`backoffCeilingMs`). */
   readonly extra?: Readonly<Record<string, unknown>>;
@@ -396,7 +396,7 @@ export interface PrivateOptions {
   readonly admin?: boolean | AdminStarter;
   /**
    * The public configuration hash the operator accepts for this start (`startProcess`'s `updateHash`, `umbradb run
-   * --update-hash`): none unless given. [PP-14, Q159]
+   * --update-hash`): none unless given.
    */
   readonly updateHash?: string;
 }

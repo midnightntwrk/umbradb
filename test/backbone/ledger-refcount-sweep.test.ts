@@ -7,7 +7,7 @@ import { sweepComparisonOf, WHOLE_CYCLE } from "./sweep-tapes.js";
 
 /**
  * The counting run against the sweep's reference model on the DAG fixture, through the real process on PostgreSQL 18
- * and PGlite 0.5.10. [R4 DIFF, LG-14]
+ * and PGlite 0.5.10.
  *
  * The input is the DAG fixture without its rewrite cases (`test/ledger/fixtures/sweep-fixture.ts`, `"one-form"`): wide
  * trees, a new root every block, content reused after a deletion (subtree 0 at REVERT), children shared between
@@ -19,7 +19,7 @@ import { sweepComparisonOf, WHOLE_CYCLE } from "./sweep-tapes.js";
  *   equal at every height;
  * - with a budget of 50, which no state's marking fits, the counted node set is a subset of the swept one at every
  *   height, and the sweep holds more at some.
- * The run is also held to R3's check after every block. [R4]
+ * The run is also held to the check after every block.
  *
  * The recorded tapes' half is in `ledger-refcount-sweep-tape-*.test.ts`; the committed negative control (the cascade
  * stopped after its first round) in `ledger-refcount-sweep.negative-control.test.ts`.
@@ -27,11 +27,11 @@ import { sweepComparisonOf, WHOLE_CYCLE } from "./sweep-tapes.js";
 
 const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
 
-describe.each(PROCESS_BACKENDS)("R4 (LG-14) on $name: the counting run's batches fed to the sweep's reference model, on the DAG fixture without its rewrite cases", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("on $name: the counting run's batches fed to the sweep's reference model, on the DAG fixture without its rewrite cases", (backend: ProcessBackend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("R4: the node sets are equal at every height with a budget that fits each cycle in one block, and the counted one is a subset of the swept one at every height with a budget of 50", async () => {
+  it("the node sets are equal at every height with a budget that fits each cycle in one block, and the counted one is a subset of the swept one at every height with a budget of 50", async () => {
     const run = await runDag(await backend.database(), { dag: "one-form" });
     expect(run.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
     expect(run.errors).toEqual([]);

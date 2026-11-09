@@ -1,17 +1,16 @@
 /**
  * Range partitioning by height for per-block tables, which are append-only. It is kept from 0.9.5's `chain_archive`
  * store (`src/postgres/migrations/chain_archive/partition-config.ts`, since removed).
- * [CORE-ARCH §4.11; design §1, §10]
  *
  * There are {@link PRECREATED_HEIGHT_PARTITIONS} partitions of {@link HEIGHT_PARTITION_SIZE} heights each, starting at
  * height 0, plus a `DEFAULT` partition for every height above them, so no height is ever without a partition. The
  * sizes are build-time constants, not settings: they become part of a migration's text, and that text never changes
  * once a database has applied it. A later release adds partitions, by a new migration, before the chain passes height
- * 5,000,000; until then the default partition is correct, only unpartitioned. [DB-9, Q119]
+ * 5,000,000; until then the default partition is correct, only unpartitioned.
  *
  * A partitioned table's primary key must include its partition key, so a key that must be unique across partitions on
  * any other column needs a table of its own (`core-block-commit`'s `hashes`). The determinism rules, the contents hash,
- * the digests' change capture and the `TRUNCATE` guard treat a partitioned table as one table, through its root. [CD-3]
+ * the digests' change capture and the `TRUNCATE` guard treat a partitioned table as one table, through its root.
  */
 
 /** Heights per partition: 1,000,000, as 0.9.5's `CHAIN_ARCHIVE_HEIGHT_PARTITION_SIZE`. */

@@ -1,20 +1,19 @@
 /**
  * The backbone part `core-block-fetch`: the node-backed block source (`./node-source.ts`), and for each block, at
  * `on-fetch`, the `block` items `block-header`, `block-body`, `runtime-metadata` and `ledger-version` (`./items.ts`).
- * [CD-2, RN-14; CORE-ARCH §4.11; design §3]
  *
  * **Its `on-fetch`** asks the block source that the runner bound to its process context ({@link bindCoreBlockFetch})
- * for the block's items, and puts them, so every later callback of the block sees them. [RN-5]
+ * for the block's items, and puts them, so every later callback of the block sees them.
  * - The node source reads them from the node. It decodes them with the metadata of the runtime in the parent block's
- *   state, and takes the ledger version from the `ledger-table` item. [LG-1, LG-4]
+ *   state, and takes the ledger version from the `ledger-table` item.
  * - The in-memory source builds them from its own blocks (`src/runner/in-memory-source.ts`, for tests and module
  *   authors).
  *
  * A failure there is the part's callback error. At a finalized height it halts, with the code of a ledger-selection
- * or metadata halt when it is one; in the best-block queue it drops the block. [RN-8, IN-10; design §11]
+ * or metadata halt when it is one; in the best-block queue it drops the block.
  *
  * With the node source each block is fetched once, ahead of time, by the prefetch or the queue; its `on-fetch` and
- * every module's callbacks then run on that one fetch. [IN-5, IN-6]
+ * every module's callbacks then run on that one fetch.
  *
  * The declaration ({@link CORE_BLOCK_FETCH}) is a constant, as `CORE_CHAIN` is: the source is found through the process
  * context (a `WeakMap`), so one build's declarations serve every process.
@@ -26,7 +25,7 @@ import type { LedgerTable } from "../../ledger/version-table.js";
 import { type BlockContext, defineModule, type ItemSink, type ProcessContext } from "../../modules/declaration.js";
 import { type BlockItemSource, CORE_BLOCK_ITEMS } from "./items.js";
 
-/** The part's id: second in the fixed backbone order (`BACKBONE_ORDER`). [RN-3] */
+/** The part's id: second in the fixed backbone order (`BACKBONE_ORDER`). */
 export const CORE_BLOCK_FETCH_ID = "core-block-fetch";
 
 const BOUND = new WeakMap<ProcessContext, BlockItemSource>();
@@ -62,7 +61,7 @@ export async function coreBlockFetchOnFetch(p: ProcessContext, b: BlockContext, 
 /**
  * `core-block-fetch` (see the module comment): a backbone part that requires the `process` items `node-client` and
  * `ledger-table` (both from `core-chain`) and provides the four `block` items. Every backbone part starts at the start
- * height S, which is a mid-chain start when S is above 0. [Q96]
+ * height S, which is a mid-chain start when S is above 0.
  */
 export const CORE_BLOCK_FETCH = defineModule({
   id: CORE_BLOCK_FETCH_ID,

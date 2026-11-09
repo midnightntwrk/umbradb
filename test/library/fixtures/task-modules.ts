@@ -1,7 +1,7 @@
 // The user modules of the library's `modulesFrom` tests, as a host's module file lists them: the main thread and the
 // ledger worker both import this file (`modulesFrom`), so the ledger task below runs in the worker and its item reaches
 // the module's callbacks on the main thread, which note it in `SEEN`. Erasable TypeScript only: the worker runs it
-// through Node.js's type stripping. [LM-7, L46]
+// through Node.js's type stripping.
 
 import { isMainThread } from "node:worker_threads";
 import { z } from "zod";

@@ -2,17 +2,17 @@
  * The PGlite writer lock in Node.js. PGlite does not guard its data directory itself (two processes can open one
  * directory), so the process takes an operating-system lock before PGlite opens a directory, and holds it until the
  * process ends. It opens `<data directory>.lock.sqlite` with the built-in `node:sqlite` (`DatabaseSync`), sets a busy
- * timeout, and runs `BEGIN EXCLUSIVE`, never committing. The design is fail stop. [DB-11, Q50; design §4]
+ * timeout, and runs `BEGIN EXCLUSIVE`, never committing. The design is fail stop.
  *
  * SQLite's file locks are operating-system locks. A second process fails to take the lock (`database is locked`) and
  * stops with `writer-lock-held`. The operating system releases the lock only when the holder ends: a paused or sleeping
- * holder keeps it, and a crashed holder's restart takes it at once. There is no unlock command. [DB-11]
+ * holder keeps it, and a crashed holder's restart takes it at once. There is no unlock command.
  *
  * - **Busy timeout 100 ms, not 0.** With 0, processes started at one instant can all fail: `BEGIN EXCLUSIVE` takes
  *   SHARED, RESERVED, then EXCLUSIVE, which needs every other SHARED lock gone, and a racing starter holds one for an
  *   instant (probe: 4 of 30 rounds of ten processes ended with no holder). With a busy timeout, SQLite's busy handler
  *   drops the starter's SHARED lock before it waits, and exactly one takes the lock (50 of 50 rounds at 10–100 ms). A
- *   second process facing a live holder stops after the timeout, about 0.1 s. [Q92]
+ *   second process facing a live holder stops after the timeout, about 0.1 s.
  * - **One lock file per directory, however the directory is written.** The path is resolved and its symbolic links
  *   followed (for a directory not yet created: its parent's real path and its name), so `pgdata`, `pgdata/`,
  *   `./pgdata`, `file://…/pgdata` and a link to it share one lock file. Nothing else in the process may open that file:
@@ -24,18 +24,18 @@
  * - **`memory://`** (and an empty data directory, which PGlite also keeps in memory) takes no lock: each in-memory
  *   database is its own, and no other process can open it. The browser's file systems (`idb://`, `opfs-ahp://`) are
  *   rejected in Node.js; the browser build takes a Web Locks lock instead.
- * - The data directory must be on a local file system, whose locks the operating system keeps. [DB-11]
+ * - The data directory must be on a local file system, whose locks the operating system keeps.
  * - **A missing directory and its missing parents** are created with {@link createPgliteDirectory} by what writes the
  *   database (a process, or a restore into its target), before the lock is taken. The lock's file sits beside the
  *   directory, so its parent must exist. The lock itself creates nothing, and rejects a directory whose parent is
- *   missing (`open-failed`); so do the read-only uses, which never call it. [CF-4, Q163]
+ *   missing (`open-failed`); so do the read-only uses, which never call it.
  *
  * **`node:sqlite`, loaded quietly.** It is loaded only when a directory is locked, through one import the whole process
  * shares ({@link quietImport}): the first lock starts it, and every later or overlapping one awaits the same. Node.js 24
  * prints an `ExperimentalWarning` when it is first loaded, through `process.emitWarning`; while the import runs,
  * `process.emitWarning` is wrapped to drop that warning alone ({@link isSqliteWarning}) and pass every other on, and
  * once it settled the original is put back — unless the host program replaced it meanwhile, whose own is then kept. So
- * a host program sees no output of its own from it, and its warning listeners get every other warning. [LM-2, G2, L3]
+ * a host program sees no output of its own from it, and its warning listeners get every other warning.
  */
 
 import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
@@ -46,7 +46,7 @@ import { UmbraError } from "./errors.js";
 /** The lock file's name: the data directory's, followed by this. */
 export const PGLITE_LOCK_SUFFIX = ".lock.sqlite";
 
-/** How long `BEGIN EXCLUSIVE` may wait for a racing starter's SHARED lock. [Q92] */
+/** How long `BEGIN EXCLUSIVE` may wait for a racing starter's SHARED lock. */
 export const PGLITE_LOCK_BUSY_TIMEOUT_MS = 100;
 
 /** SQLite's result codes for a lock another connection holds (`SQLITE_BUSY`, `SQLITE_LOCKED`). */
@@ -96,7 +96,7 @@ function lockHeld(holder: "this process" | "another process"): UmbraError {
  * `memory://` and an empty text are in memory), or undefined for one kept in memory. The path is absolute: what opens
  * a configured database resolves its `path` against the process's `cwd` first (`../config/database.ts`), so that
  * nothing here reads the working directory. Throws `invalid-configuration` for the browser's file systems and for a
- * relative path. [LM-2, G8]
+ * relative path.
  */
 function directoryPath(dataDir: string): string | undefined {
   if (dataDir === "" || dataDir.startsWith("memory://")) return undefined;
@@ -128,7 +128,7 @@ export interface CreatedDirectory {
 
 /**
  * The log line for a newly created PGlite data directory. It shows `path` as configured, so that a mistyped path is
- * seen as written. [Q165 B, Q167 A]
+ * seen as written.
  */
 export function createdDirectoryLine(path: string, created: CreatedDirectory): string {
   const { missingParents: n } = created;
@@ -140,13 +140,13 @@ export function createdDirectoryLine(path: string, created: CreatedDirectory): s
  * Creates the data directory `dataDir` (read as {@link pgliteLockFile} reads it) when it does not exist, with every
  * missing parent directory, so that its lock's file can sit beside it. What writes the database calls it before the
  * lock is taken (a process opening its configured database, a restore opening its target); what only reads it never
- * does. [CF-4, Q163]
+ * does.
  *
  * Does nothing for a database kept in memory or a path that exists (a file there is rejected by the lock as "not a
  * directory"). Throws `invalid-configuration` for the browser's file systems, and `database-error`
  * (`reason: open-failed`) when a directory cannot be created (a file on the path, no permission). The message names no
  * path, because the caller logs the path as configured. Returns what it created (how many missing parent directories
- * came with it) so the caller can say so; null when it created nothing. [Q165 B, Q167 A]
+ * came with it) so the caller can say so; null when it created nothing.
  */
 export function createPgliteDirectory(dataDir: string): CreatedDirectory | null {
   const path = directoryPath(dataDir);
@@ -247,13 +247,13 @@ export interface WarningHook {
   set(emit: EmitWarning): void;
 }
 
-/** The warning `node:sqlite` emits when first loaded (Node.js 24.9.0). [G2] */
+/** The warning `node:sqlite` emits when first loaded (Node.js 24.9.0). */
 const SQLITE_WARNING = "SQLite is an experimental feature and might change at any time";
 
 /**
  * Whether a call of `process.emitWarning` with `args` is `node:sqlite`'s experimental warning: its message, with the
  * type `ExperimentalWarning` given as the second argument, as its `type` option, or as the name of a warning given as
- * an `Error`. [G2, L3]
+ * an `Error`.
  */
 export function isSqliteWarning(args: WarningArguments): boolean {
   const [warning, second] = args;
@@ -272,7 +272,7 @@ export function isSqliteWarning(args: WarningArguments): boolean {
  * settles, or after it resolved, gets the same module. While it runs, `hook`'s emitter is replaced by one that drops
  * each warning `drop` takes and passes every other to the emitter it replaced; when it settles that emitter is put
  * back, unless `hook` holds another than the wrapper by then (the host program's), which is kept. A load that rejects
- * rejects its callers, and the next call loads again. [LM-2, G2, L3]
+ * rejects its callers, and the next call loads again.
  */
 export function quietImport<T>(load: () => Promise<T>, hook: WarningHook, drop: (args: WarningArguments) => boolean): () => Promise<T> {
   let shared: Promise<T> | undefined;
@@ -307,7 +307,7 @@ export function quietImport<T>(load: () => Promise<T>, hook: WarningHook, drop: 
   };
 }
 
-/** Node.js's `process.emitWarning`, the one global this module reads and sets. [G10] */
+/** Node.js's `process.emitWarning`, the one global this module reads and sets. */
 export const SQLITE_WARNING_HOOK: WarningHook = Object.freeze({
   get: () => process.emitWarning as EmitWarning,
   set: (emit: EmitWarning) => {
@@ -315,5 +315,5 @@ export const SQLITE_WARNING_HOOK: WarningHook = Object.freeze({
   },
 });
 
-/** `node:sqlite`, imported once for the process, its experimental warning dropped (see the module comment). [G2] */
+/** `node:sqlite`, imported once for the process, its experimental warning dropped (see the module comment). */
 const sqliteModule = quietImport(() => import("node:sqlite"), SQLITE_WARNING_HOOK, isSqliteWarning);

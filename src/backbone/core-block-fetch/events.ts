@@ -2,11 +2,11 @@
  * A block's chain events as the node stores them: the `System::Events` storage value in the block's own state. They
  * are read with `state_getStorage` at the block's hash, where the runtime that executed the block left them.
  * `core-chain-events` decodes them with the metadata of the runtime in the parent block's state (`runtime-metadata`),
- * which is the runtime that executed the block. [CD-4, IN-8, LG-4]
+ * which is the runtime that executed the block.
  *
  * The block source gives the bytes ({@link BlockEventSource}). The node source reads them from the node; for a queued
  * best block it reads them without retries, like its other calls for such a block. The in-memory source gives none,
- * since its blocks have no events. [IN-10]
+ * since its blocks have no events.
  *
  * The bytes are the SCALE encoding of `Vec<EventRecord<RuntimeEvent, Hash>>` (`frame_system`'s `Events`,
  * `EventRecord { phase, event, topics }`). They are `null` when the state holds no value under the key: at block 0,

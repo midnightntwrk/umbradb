@@ -4,11 +4,11 @@
  * and runs the subscription protocol over any carrier of whole text messages — a WebSocket of the listener or of a
  * host's server (`./api-socket.ts`), or a host's channel (`api.connect`, {@link connectChannel}). It imports nothing
  * of Node.js at run time, so the engine, which the browser build bundles, answers through it while the browser carries
- * the socket carrier only as its build's stub. [RN-15, RN-16, LM-4, LM-11; design §5.2 N6–N8, §8]
+ * the socket carrier only as its build's stub.
  *
  * **HTTP.** A request's body is read up to {@link ModuleApiLimits.maxBodyBytes} (413 `request-too-large` past it) as
  * UTF-8 (400 `invalid-request` otherwise) and passed with the URL's path and query to `ModuleApi.answer`. A body read
- * before the module API got the request is refused 400 `invalid-request`. [LM-4]
+ * before the module API got the request is refused 400 `invalid-request`.
  *
  * **Subscriptions.** Each message is a JSON text of at most {@link ModuleApiLimits.maxMessageBytes}: `{ "type":
  * "subscribe", "id", "name", "args"? }` — `id` a string of 1 to 128 characters the client chooses, unique among its
@@ -16,19 +16,19 @@
  * "value" }` for each value the module emits; `{ "type": "unsubscribe", "id" }` is answered `{ "type": "complete",
  * "id" }`; what cannot be done is `{ "type": "error", "id"?, "error": { "code", "message" } }` (the module API's codes).
  * Values are written as the module API writes JSON (`encodeJson`): a value it cannot write throws at the module's
- * `emit`. A connection's end unsubscribes its subscriptions. [RN-15]
+ * `emit`. A connection's end unsubscribes its subscriptions.
  *
  * **Slow subscribers never hold the loop.** Subscription values are emitted from `on-after-db-write`, so `emit` hands the
  * text to the carrier and returns. A subscriber whose carrier still holds more than {@link MAX_BUFFERED_BYTES} unsent
  * when a value comes is disconnected and its subscriptions unsubscribed, after the module's `emit` returned. Values for
- * a closed subscriber are dropped. A carrier that does not tell what it holds bounds its own queue. [RN-15]
+ * a closed subscriber are dropped. A carrier that does not tell what it holds bounds its own queue.
  *
  * **Over a channel** (`api.connect`): the module API's own rules, not the private link's — no envelope, no ping (the
  * host owns the channel's lifetime). A message that is no text is answered as a WebSocket's binary frame is; one over
  * the message limit, and a slow subscriber, end the connection as a WebSocket's 1009 and disconnect do: the channel is
  * closed (it carries no close code). A channel whose `bufferedAmount` cannot be read (its getter or the call throws)
  * has ended too, as one whose `send` throws: it is closed, and nothing is sent on it. The module API's close closes
- * every channel it serves, at once. [LM-11, RN-15; design §8]
+ * every channel it serves, at once.
  */
 
 import { parseJsonLossless } from "../deterministic-postgresql/index.js";
@@ -49,22 +49,22 @@ export const MAX_BUFFERED_BYTES = 1_048_576;
 export interface ModuleApiLimits {
   readonly maxBodyBytes?: number;
   readonly maxMessageBytes?: number;
-  /** How much a subscriber may hold unsent: {@link MAX_BUFFERED_BYTES} unless given (a negative control's). [RN-15] */
+  /** How much a subscriber may hold unsent: {@link MAX_BUFFERED_BYTES} unless given (a negative control's). */
   readonly maxBufferedBytes?: number;
   /**
    * Whether a subscription message the handlers cannot act on is answered with an error: always, but for a negative
-   * control (`false`), whose connection answers none. [RN-15, L68]
+   * control (`false`), whose connection answers none.
    */
   readonly answersErrors?: boolean;
 }
 
 /**
  * `host:port`, as the configuration writes addresses: a host name or IPv4 address, or a bracketed IPv6 address; the
- * port. [CF-4]
+ * port.
  */
 const ADDRESS = /^(?:\[([0-9A-Fa-f:.]+)\]|([^\s:/[\]@]+)):(\d{1,5})$/;
 
-/** `address` (`host:port`) as a host and a port; throws a `TypeError` for anything else. [CF-4] */
+/** `address` (`host:port`) as a host and a port; throws a `TypeError` for anything else. */
 export function parseAddress(address: string): { readonly host: string; readonly port: number } {
   const match = typeof address === "string" ? ADDRESS.exec(address) : null;
   const port = Number(match?.[3]);
@@ -76,7 +76,7 @@ export function parseAddress(address: string): { readonly host: string; readonly
 
 const INVALID = "invalid-request";
 
-/** The answer to a request whose body a host's server read before the module API got it. [LM-4] */
+/** The answer to a request whose body a host's server read before the module API got it. */
 export const BODY_READ_ALREADY: ApiResponse = apiErrorResponse(INVALID, "the request body was read before the module API got the request");
 
 /** The answer to a body over `max` bytes. */
@@ -111,7 +111,7 @@ const NO_BODY: ReadonlySet<number> = new Set([204, 205, 304]);
 
 /**
  * `answer` as a fetch `Response`, with the core's headers `core` set; null leaves the headers as the answer has them (a
- * negative control's, as the Node.js handlers' `coreHeaders: "none"`). [RN-16]
+ * negative control's, as the Node.js handlers' `coreHeaders: "none"`).
  */
 export function responseOf(answer: ApiResponse, core: CoreHeaders | null): Response {
   // An object of text values in, an object of text values out: `withCoreHeaders` keeps the form it is given.
@@ -157,7 +157,7 @@ export type FetchHandler = (request: Request) => Promise<Response>;
 
 /**
  * The module API's fetch-style handler over `api` (see the module comment): the same rules as its Node.js handlers —
- * the body limit, the read timeout of `api`, the core's headers `core` on every answer. [LM-11, RN-16, N6, N8]
+ * the body limit, the read timeout of `api`, the core's headers `core` on every answer.
  */
 export function moduleApiFetch(api: ModuleApi, options: { readonly maxBodyBytes?: number; readonly core: CoreHeaders | null }): FetchHandler {
   const max = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
@@ -257,7 +257,7 @@ export class SubscriptionConnection {
       const unsubscribe = typeof id === "string" ? this.#subscriptions.get(id) : undefined;
       if (typeof id === "object" && id !== null) {
         // An object or a list is never converted to text: its conversion may throw (`{ "toString": null }`), and the
-        // connection's fault must stay the connection's. [LM-4, LM-10]
+        // connection's fault must stay the connection's.
         this.#refuse(errorMessage(INVALID, `an unsubscribe message's id is a string, not ${Array.isArray(id) ? "a list" : "an object"}`));
       } else if (unsubscribe === undefined) {
         this.#refuse(errorMessage(INVALID, `no subscription ${String(id)} is open`, typeof id === "string" ? id : undefined));
@@ -327,7 +327,7 @@ export interface ChannelConnectOptions {
  * listeners are registered now, in the caller's turn, as the host's carrier needs. Throws nothing: a channel that throws
  * while it is set up is closed, as far as UmbraDB goes; every member of the channel it reads or calls later — `send`,
  * `bufferedAmount` (a getter of it included), `close`, `terminate`, the disposers — is read inside its own guard, so
- * nothing is thrown into the carrier's message listener or out of a module's `emit`. [LM-11, RN-15, LM-2]
+ * nothing is thrown into the carrier's message listener or out of a module's `emit`.
  */
 export function connectChannel(channel: PrivateLinkChannel, api: ModuleApi, options: ChannelConnectOptions): ServedConnection {
   const max = options.maxMessageBytes ?? DEFAULT_MAX_MESSAGE_BYTES;
@@ -373,7 +373,7 @@ export function connectChannel(channel: PrivateLinkChannel, api: ModuleApi, opti
       } catch {
         // Reading it is the carrier's, getter and call alike: a carrier that cannot tell what it holds cannot be held
         // to the limit, so it has ended — nothing sent on it, closed, and its end after the module's emit returned, so
-        // an unsubscribe never runs inside it. [LM-11, RN-15, LM-2]
+        // an unsubscribe never runs inside it.
         live = false;
         queueMicrotask(() => {
           if (!open) return;

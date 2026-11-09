@@ -36,7 +36,7 @@ import {
  * expected output — the delay transform setting `delayMs` on exactly the selected calls —, each is a pure function from
  * records to records whose output is a tape (`checkTape`), and each refuses what it cannot do with `bad-transform` and
  * a reason. The base of every committed output is the recorded tape (24 lines, four sessions: lines 1–16, 17–22, 23,
- * 24). [A71 CI, TT-4; acceptance §9]
+ * 24).
  */
 
 /** What a transform throws, checked to be a `TransformError` with `reason`. */
@@ -63,7 +63,7 @@ function changedLines(before: readonly TapeRecord[], after: readonly TapeRecord[
 
 const base = baseRecords();
 
-describe("A71: each variant transform produces its committed expected output", () => {
+describe("each variant transform produces its committed expected output", () => {
   for (const variant of VARIANTS) {
     it(`${variant.name}: the committed fixtures/transforms/${variant.name}.tape.jsonl, byte for byte`, () => {
       expectVariantOutput(variant.name);
@@ -73,7 +73,7 @@ describe("A71: each variant transform produces its committed expected output", (
     });
   }
 
-  it("their input is A71's recorded tape, which no transform changes", () => {
+  it("their input is the recorded tape, which no transform changes", () => {
     expect(tapeText(base)).toBe(a71TapeText());
     for (const variant of VARIANTS) variant.apply(base);
     expect(tapeText(base)).toBe(a71TapeText());

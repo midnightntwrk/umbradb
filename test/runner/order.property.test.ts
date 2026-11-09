@@ -32,8 +32,6 @@ import { Contexts, Recorder, recording, runOf } from "./fixtures.js";
  * - at the parallel points, no callback starts before every registered callback of a module it requires has
  *   completed, whether required directly or through modules that do not register the point.
  *
- * [A38 PROP, RN-3; design §2]
- *
  * The oracle is this file's own: the graph's requirements as generated, Kahn's algorithm with `Buffer.compare` on
  * UTF-8 bytes, and the backbone's fixed order written out. None of it comes from `resolveGraph`.
  *
@@ -56,11 +54,11 @@ const POOL = [
   "h1", "i", "m1", "m10", "m2", "m9", "x", "x-y", "y", "z", "z-a", "zz",
 ] as const;
 
-/** The points this property is about: the three parallel ones and `on-db-write`. [A38 PROP] */
+/** The points this property is about: the three parallel ones and `on-db-write`. */
 const TESTED = ["on-fetch", "on-parse", "on-compute", "on-db-write"] as const;
 type Tested = (typeof TESTED)[number];
 
-/** The test backbone's ids in the fixed backbone order (`graph-fixtures.ts`), written out. [RN-3] */
+/** The test backbone's ids in the fixed backbone order (`graph-fixtures.ts`), written out. */
 const BACKBONE_IDS = ["core-chain", "core-block-fetch", "core-block-commit", "core-digest"] as const;
 
 /** What each test backbone part requires an item of (`graph-fixtures.ts`). */
@@ -105,7 +103,7 @@ const waits = fc
  * Random acyclic graphs of 1 to 12 modules: a random rank orders the modules (independently of the order they are given
  * in), and each requires an item of a lower-ranked module with probability 1/3, and up to two backbone items. A module
  * left with no requirement requires `block-header`, since a declaration without one is refused. Each module and
- * backbone part registers a random subset of the points; `core-digest` always registers `on-db-write`. [MD-2]
+ * backbone part registers a random subset of the points; `core-digest` always registers `on-db-write`.
  */
 const graphs: fc.Arbitrary<GraphSpec> = fc
   .uniqueArray(fc.constantFrom(...POOL), { minLength: 1, maxLength: 12 })
@@ -181,7 +179,7 @@ function upstream(spec: GraphSpec, id: string): Set<string> {
 
 const byBytes = (a: string, b: string): number => Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
 
-/** The modules' order: Kahn's algorithm over their requirements, the ready one with the smallest id first. [RN-3] */
+/** The modules' order: Kahn's algorithm over their requirements, the ready one with the smallest id first. */
 function kahnOrder(spec: GraphSpec): string[] {
   const left = new Set(spec.modules.map((m) => m.id));
   const order: string[] = [];
@@ -197,7 +195,7 @@ function kahnOrder(spec: GraphSpec): string[] {
 /**
  * The waves of a parallel point: the backbone parts registered there, one at a time in their fixed order, then Kahn's
  * waves of the registered modules. A module goes one wave after the latest registered module on a requirement path
- * from it. Each wave is in the modules' fixed order. [RN-3; design §2]
+ * from it. Each wave is in the modules' fixed order.
  */
 function expectedWaves(spec: GraphSpec, point: Tested): string[][] {
   const backbone = BACKBONE_IDS.filter((id) => registers(spec, id, point)).map((id) => [id]);
@@ -246,7 +244,7 @@ function declarationsOf(spec: GraphSpec, recorder: Recorder) {
 }
 
 /**
- * Resolves `spec` with every module from S and dispatches the tested points at S, in the main program's order. [RN-1]
+ * Resolves `spec` with every module from S and dispatches the tested points at S, in the main program's order.
  */
 async function observe(spec: GraphSpec, pipeline: Pipeline): Promise<Recorder> {
   const recorder = new Recorder();
@@ -260,7 +258,7 @@ async function observe(spec: GraphSpec, pipeline: Pipeline): Promise<Recorder> {
 
 // ── the property's checks ───────────────────────────────────────────────────────────────────────────────────────────
 
-/** `on-db-write` runs the backbone parts present in their fixed order, then the modules in Kahn order. [A38 PROP] */
+/** `on-db-write` runs the backbone parts present in their fixed order, then the modules in Kahn order. */
 function checkWriteOrder(spec: GraphSpec, recorder: Recorder): void {
   const observed = recorder.starts("on-db-write").filter((id) => id !== "core-digest");
   const expected = [
@@ -270,7 +268,7 @@ function checkWriteOrder(spec: GraphSpec, recorder: Recorder): void {
   expect(observed).toEqual(expected);
 }
 
-/** `core-digest` runs at `on-db-write` once, last. [A38 PROP] */
+/** `core-digest` runs at `on-db-write` once, last. */
 function checkDigestLast(_spec: GraphSpec, recorder: Recorder): void {
   const observed = recorder.starts("on-db-write");
   expect(observed.filter((id) => id === "core-digest")).toHaveLength(1);
@@ -280,7 +278,7 @@ function checkDigestLast(_spec: GraphSpec, recorder: Recorder): void {
 let waitsChecked = 0;
 let waitsThroughOthers = 0;
 
-/** At a parallel point, no callback starts before every registered callback of a module it requires has ended. [A38 PROP] */
+/** At a parallel point, no callback starts before every registered callback of a module it requires has ended. */
 function checkParallelWaits(spec: GraphSpec, recorder: Recorder): void {
   for (const point of PARALLEL_POINTS) {
     const parts = [...BACKBONE_IDS, ...spec.modules.map((m) => m.id)].filter((id) => registers(spec, id, point));
@@ -308,7 +306,7 @@ function checkEachOnce(spec: GraphSpec, recorder: Recorder): void {
   }
 }
 
-/** `on-db-write` runs in series: each callback ends before the next starts. [RN-3] */
+/** `on-db-write` runs in series: each callback ends before the next starts. */
 function checkInSeries(recorder: Recorder): void {
   const events = recorder.events.filter((e) => e.point === "on-db-write");
   events.forEach((event, index) => {
@@ -319,7 +317,7 @@ function checkInSeries(recorder: Recorder): void {
 
 let concurrentWaves = 0;
 
-/** The parallel points run as Kahn's waves, each wave's callbacks all started before any ends. [design §2] */
+/** The parallel points run as Kahn's waves, each wave's callbacks all started before any ends. */
 function checkWaves(spec: GraphSpec, recorder: Recorder): void {
   for (const point of PARALLEL_POINTS) {
     const seen = recorder.waves(point);
@@ -328,7 +326,7 @@ function checkWaves(spec: GraphSpec, recorder: Recorder): void {
   }
 }
 
-describe("A38: on-db-write's order and the parallel points' waits for random acyclic graphs (RN-3)", () => {
+describe("on-db-write's order and the parallel points' waits for random acyclic graphs", () => {
   it(`holds for random acyclic graphs of up to 12 modules (property, seed ${SEED})`, async () => {
     waitsChecked = 0;
     waitsThroughOthers = 0;

@@ -5,11 +5,10 @@ import { childRefKeys } from "../../src/ledger/node-refs.js";
  * written from the requirement's text and the design. The implementation's tables are compared against it after every
  * block. It uses plain sets of hex keys and sorted arrays, no database, and nothing of `src/` but the child-list reader
  * (`childRefKeys`, which other tests check against an independent reading of the node format).
- * [LG-14, A105; design §5.4]
  *
  * Each block's batch is applied first: its nodes are inserted (an existing key is left as it is), and its root counts
  * change by their signed deltas (a count reaching 0 is gone). Then, unless `sweep` is off at the block, the step runs,
- * in this order: [LG-14]
+ * in this order:
  * 1. When no cycle runs (`idle`): the cycle number rises, every key with a positive root count *before the block's
  *    batch* becomes grey, and the phase becomes `mark`.
  * 2. Every key whose root count rose in the block and is neither marked nor grey becomes grey.

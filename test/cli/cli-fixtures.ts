@@ -19,7 +19,7 @@ export { REPOSITORY };
  * sources by the TypeScript compiler, so that the command's type check reads `.d.ts` files only, as it does for an
  * installed package (the sources themselves use parameter properties, which the type check's `erasableSyntaxOnly`
  * refuses in a configuration). Configuration files import the builders by absolute path, because neither Vitest's
- * resolver nor the compiler reads a `file:` URL. [CF-10, LS-6]
+ * resolver nor the compiler reads a `file:` URL.
  *
  * With `cli`, also `umbradb-cli.mjs`: the command (`src/cli/main.ts`) bundled the same way, which a test runs with
  * Node.js itself in a child process — Node.js's own type stripping, real exit codes and streams —, and next to it

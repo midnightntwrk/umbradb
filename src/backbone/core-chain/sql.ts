@@ -3,24 +3,24 @@
  * the identity and the configuration history, and the reads of both.
  *
  * **Its tables** live in its reserved schema `core_chain`. Its one migration, `001` ({@link CORE_CHAIN_MIGRATION}),
- * creates them as the writer's login, and every module role can read them: [DB-6, DB-8; design §10]
+ * creates them as the writer's login, and every module role can read them:
  * - the history's `core_chain.config`;
  * - `core_chain.identity`, one row holding the genesis hash, S, and the anchor hash, which is null until block S
- *   commits. [CD-1]
+ *   commits.
  *
- * **The history table's columns**: [design §10]
+ * **The history table's columns**:
  * - `(entry_id, start)`: the key;
- * - `stop`: null when absent, and always null for `core`, enforced by a `CHECK` (its stop is operational) [CF-4];
+ * - `stop`: null when absent, and always null for `core`, enforced by a `CHECK` (its stop is operational);
  * - `version`: text, a module's semver or the core version's canonical JSON;
  * - `data` and `data_hash`: the data fields as `jsonb` (written as their canonical JSON) and their SHA-256. Both are
  *   null for a scheduled revision, which records only id, start, stop and version, and otherwise both are present (a
- *   `CHECK`) [CF-3];
+ *   `CHECK`);
  * - `provides`: the names of the `table` items the revision provides (`tableItemsOf`, `./history.ts`): a module's from
  *   the build's declaration of it, and `core`'s from the build's backbone parts. A private process's graph counts them
- *   as provided at the revision's heights. [PP-13, Q126 B; design §8]
+ *   as provided at the revision's heights.
  *
  * Every module role reads the history table (through the database API's default privileges on `core_chain`); none
- * writes it. [DB-6]
+ * writes it.
  */
 
 import type { ConfigHashRow, HistoryRow } from "../../config/history.js";
@@ -36,7 +36,7 @@ export const IDENTITY_TABLE = "core_chain.identity";
  * recorded under `core-chain`, and it never changes once a database has applied it, since its checksum is fixed by the
  * databases that applied it; a later version adds its migrations after it. Earlier builds created the two tables with
  * two migrations, `001` and `002`: a database they wrote recorded another `001`, so startup refuses it before any
- * migration runs (`migration-checksum-changed`). [DB-9, R16]
+ * migration runs (`migration-checksum-changed`).
  */
 export const CORE_CHAIN_MIGRATION: { readonly id: string; readonly sql: string } = Object.freeze({
   id: "001",
@@ -60,12 +60,12 @@ CREATE TABLE ${IDENTITY_TABLE} (
 );`,
 });
 
-/** `core-chain`'s migrations: its one, `001`, which creates the history's table and the identity's. [DB-9, R16] */
+/** `core-chain`'s migrations: its one, `001`, which creates the history's table and the identity's. */
 export const CORE_CHAIN_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
   CORE_CHAIN_MIGRATION,
 ]);
 
-/** The chain's identity as `core_chain.identity` holds it. [CD-1] */
+/** The chain's identity as `core_chain.identity` holds it. */
 export interface ChainIdentity {
   readonly genesisHash: Uint8Array;
   /** S. */
@@ -84,14 +84,14 @@ const PRESENT_SQL = "SELECT to_regclass('core_chain.config') IS NOT NULL AS pres
 
 /**
  * In primary-key order (the component's `keyOrderTerm`: ids by their bytes), so refusals list rows the same way
- * everywhere. [DT-2]
+ * everywhere.
  */
 const ROWS_SQL = `SELECT entry_id, start, stop, version, data, data_hash FROM core_chain.config
   ORDER BY ${keyOrderTerm("entry_id", "text")}, ${keyOrderTerm("start", "bigint")}`;
 
 const DELETE_SQL = "DELETE FROM core_chain.config WHERE entry_id = $1 AND start = $2";
 
-/** The columns the configuration hash reads, from every row, with the data read by its hash only. [RN-16, PP-14] */
+/** The columns the configuration hash reads, from every row, with the data read by its hash only. */
 const CONFIG_HASH_SQL = "SELECT entry_id, start, stop, version, data_hash, provides FROM core_chain.config";
 
 const RECORD_SQL = `INSERT INTO core_chain.config (entry_id, start, stop, version, data, data_hash, provides)
@@ -156,7 +156,7 @@ export async function readHistory(read: Pick<ReadHandle, "query">): Promise<Hist
 
 /**
  * The rows of `core_chain.config` as the configuration hash reads them, in no order (`configHashOf` orders them); null
- * while the table does not exist. Takes any handle that reads. [RN-16, PP-14; design §8]
+ * while the table does not exist. Takes any handle that reads.
  */
 export async function readConfigRows(read: Pick<ReadHandle, "query">): Promise<ConfigHashRow[] | null> {
   const [{ present }] = (await read.query(PRESENT_SQL)) as [{ present: boolean }];
@@ -185,7 +185,7 @@ export interface ConfigRow {
   readonly start: bigint;
   readonly stop: bigint | null;
   readonly version: string;
-  /** The data fields' canonical JSON, or null for a scheduled revision. [CF-3] */
+  /** The data fields' canonical JSON, or null for a scheduled revision. */
   readonly data: string | null;
   readonly dataHash: Uint8Array | null;
   readonly provides: readonly string[];

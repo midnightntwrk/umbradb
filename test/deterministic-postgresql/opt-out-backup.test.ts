@@ -13,7 +13,7 @@ import { backupAt, chain, restoreRun, restoreTarget } from "../backup/restore-fi
  * (`../backup/backup-fixtures.ts`: `pg_dump` from the pinned image, `pglite-tools`). A table declared
  * `deterministic: false`, with a `serial` key and a `now()` time (`ticker.log`), travels in a backup with its rows and
  * its sequence's position. Once restored and continued, its rows are the backup's, and the next `serial` values follow
- * the restored ones. [A147, MD-1, BK-2, Q76; design §4]
+ * the restored ones.
  */
 
 const TEST_TIMEOUT_MS = 900_000;
@@ -40,9 +40,9 @@ afterAll(async () => {
 
 const LOG_SQL = "SELECT id::text, height::text, at::text FROM ticker.log ORDER BY id";
 
-describe.each(BACKENDS)("A147: a table declared deterministic: false through a backup, on $name (backup part)", (backend) => {
+describe.each(BACKENDS)("a table declared deterministic: false through a backup, on $name (backup part)", (backend) => {
   it(
-    "A147: a backup carries its rows and its sequence's position, so after a restore the next serial value follows " +
+    "a backup carries its rows and its sequence's position, so after a restore the next serial value follows " +
       "the restored ones",
     async () => {
       const { file, source } = await backupAt(project, backend, H, join(dir, `${backend.kind}.backup`));

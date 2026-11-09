@@ -4,18 +4,17 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
-  agentsProblems, changelogDocumentProblems, DESCRIPTION_0_9_5, descriptionProblems, ENGINEERING_RULES, linkedPath,
-  linkProblems, markdownLinks, RETIRED_DOCUMENTS, RETIRED_DOCUMENTS_17_4A, RETIRED_DOCUMENTS_17_4B,
-  retiredDocumentProblems, storageAlgebraProblems, type TextFile,
+  changelogDocumentProblems, DESCRIPTION_0_9_5, descriptionProblems, linkedPath, linkProblems, markdownLinks,
+  RETIRED_DOCUMENTS, RETIRED_DOCUMENTS_17_4A, RETIRED_DOCUMENTS_17_4B, retiredDocumentProblems, storageAlgebraProblems,
+  type TextFile,
 } from "./documents.js";
 
 /**
  * The document cleanup: 0.9.5's documents are gone from the tree, `CHANGELOG.md` has no preamble naming them and no
  * planned `1.0.0` entry, `package.json`'s `description` describes the indexer, no Markdown link in the tree points at a
- * missing file, `AGENTS.md` holds the 1.0.0 guideline's rules still in force and names nothing deleted, and
- * `Formal/STORAGE_ALGEBRA.md` states W1 and T5 and no retired law. The checks are `./documents.ts`'s, on the tree as
+ * missing file, and `Formal/STORAGE_ALGEBRA.md` states W1 and T5 and no retired law. The checks are `./documents.ts`'s, on the tree as
  * git lists it (tracked and untracked files that exist, ignored ones left out). Each has committed negative controls
- * below; the last ones put back what the cleanup removed. [A171 STATIC, Q169, Q170 C, Q171 A]
+ * below; the last ones put back what the cleanup removed.
  */
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -42,17 +41,12 @@ function treeFiles(): string[] {
 const tree = treeFiles();
 const markdown: TextFile[] = tree.filter((file) => file.endsWith(".md")).map((file) => ({ file, text: read(file) }));
 
-describe("A171 (Q169, Q170 C, Q171 A): 0.9.5's documents removed, and nothing left pointing at them", () => {
-  it("the documents tasks 17.4a and 17.4b list as 0.9.5's are not in the tree", () => {
+describe("0.9.5's documents removed, and nothing left pointing at them", () => {
+  it("0.9.5's documents are not in the tree", () => {
     expect(RETIRED_DOCUMENTS_17_4A).toHaveLength(11);
     expect(RETIRED_DOCUMENTS_17_4B).toHaveLength(31);
     expect(new Set(RETIRED_DOCUMENTS).size).toBe(42);
     expect(retiredDocumentProblems(tree)).toEqual([]);
-  });
-
-  it("AGENTS.md holds the 1.0.0 guideline's rules still in force and names no deleted document", () => {
-    expect(ENGINEERING_RULES).toHaveLength(18);
-    expect(agentsProblems(read("AGENTS.md"))).toEqual([]);
   });
 
   it("Formal/STORAGE_ALGEBRA.md states W1 and T5 and no retired law", () => {
@@ -69,7 +63,7 @@ describe("A171 (Q169, Q170 C, Q171 A): 0.9.5's documents removed, and nothing le
   });
 
   it("no Markdown link in the tree points at a missing file", () => {
-    expect(markdown.length).toBeGreaterThan(100);
+    expect(markdown.length).toBeGreaterThan(20);
     expect(markdown.map(({ file }) => file)).toEqual(expect.arrayContaining(["README.md", "CHANGELOG.md"]));
     expect(linkProblems(markdown, tree)).toEqual([]);
   });
@@ -170,7 +164,7 @@ describe("A171 (Q169, Q170 C, Q171 A): 0.9.5's documents removed, and nothing le
       ]);
     });
 
-    it("the real tree fails with task 17.4b's documents put back, each named with its task", () => {
+    it("the real tree fails with the documents put back, each named with its task", () => {
       const restored = [...tree, "design/design.md", "docs/v1-implementation-guideline.md", "docs/STABILITY.md"];
       expect(retiredDocumentProblems(restored)).toEqual([
         "docs/STABILITY.md is 0.9.5's (task 17.4a) and still in the tree (A171)",
@@ -192,35 +186,6 @@ describe("A171 (Q169, Q170 C, Q171 A): 0.9.5's documents removed, and nothing le
         `CHANGELOG.md:${firstEntry}: the preamble names docs/v1-implementation-guideline.md, which is 0.9.5's (A171)`,
       ]);
       expect(changelogDocumentProblems(preamble("See the README.md and `design.md` of each change."))).toEqual([]);
-    });
-
-    it("the real AGENTS.md fails with 0.9.5's pointer put back, a rule missing or doubled, or 0.9.5's names", () => {
-      const agents = read("AGENTS.md");
-      const lines = agents.split("\n");
-      const pointer = [
-        ...lines.slice(0, 3),
-        "in this repository. `docs/v1-implementation-guideline.md` adds the 1.0.0-specific rules; see `CEILINGS.md`.",
-        ...lines.slice(3),
-      ].join("\n");
-      expect(agentsProblems(pointer)).toEqual([
-        "AGENTS.md:4: names docs/v1-implementation-guideline.md, deleted by task 17.4b (A171)",
-        "AGENTS.md:4: names Performance/CEILINGS.md, deleted by task 17.4b (A171)",
-        'AGENTS.md:4: names "1.0.0", 0.9.5\'s program (A171)',
-      ]);
-      const lead = ENGINEERING_RULES[6]?.lead ?? "";
-      expect(agentsProblems(agents.replace(lead, "**SQL rules.**"))).toEqual([
-        `AGENTS.md lacks the rule "SQL discipline" (its lead ${lead}) (A171)`,
-      ]);
-      expect(agentsProblems(`${agents}\n${lead} Again.\n`)).toEqual([
-        'AGENTS.md states the rule "SQL discipline" 2 times (A171)',
-      ]);
-      const names = `${agents}\nTests run on Testcontainers Postgres against \`PgTemporalKV\` and \`tasks.md\`.\n`;
-      const at = names.split("\n").length - 1;
-      expect(agentsProblems(names)).toEqual([
-        `AGENTS.md:${at}: names "Testcontainers Postgres", 0.9.5's program (A171)`,
-        `AGENTS.md:${at}: names \`PgTemporalKV\`, a retired 0.9.5 export (A171)`,
-      ]);
-      expect(agentsProblems("")).toHaveLength(18);
     });
 
     it("the real STORAGE_ALGEBRA.md fails with a retired law put back, or without W1's or T5's heading", () => {

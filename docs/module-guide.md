@@ -942,5 +942,3 @@ command ignores it. `/config` shows the addresses as bound and, in `network`, ea
   `internal-error`, 503 `no-committed-height`, 504 `query-timeout`. WebSocket, on the API address, any path:
   `subscribe` (`id`, `name`, `args`) is answered `subscribed`, then `next` with each `value`; `unsubscribe` (`id`) is
   answered `complete`; what cannot be done, `error`. A message has at most 64 KiB.
-
-The specification is the OpenSpec change [`core-arch`](../openspec/changes/core-arch/).

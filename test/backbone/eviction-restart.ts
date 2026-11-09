@@ -8,7 +8,7 @@ import { runDag } from "./refcount-process.js";
 
 /**
  * The eviction-restart runs, shared by `ledger-eviction-restart.test.ts` and its negative controls. Imports nothing of
- * Vitest. [A160, LG-14, Q144 B]
+ * Vitest.
  * - The original DAG fixture runs through the real process (`./refcount-process.ts`: a new root every block, the rows
  *   of a released state deleted from the block after its release, {@link refusalHeight} the first).
  * - Its test package (`test/ledger/fixtures/sweep-test-loader.ts`) refuses every eviction after applying block h in
@@ -16,7 +16,7 @@ import { runDag } from "./refcount-process.js";
  * - The threads' counters are read from memory they share with this thread.
  */
 
-/** The first block whose reclamation step deletes nodes, by R1's model of the fixture: where the test package refuses. */
+/** The first block whose reclamation step deletes nodes, by the model of the fixture: where the test package refuses. */
 export function refusalHeight(): bigint {
   const at = modelOfFixture().findIndex((step) => step.deleted.length > 0);
   if (at <= 0) throw new Error("the DAG fixture deletes no node");
@@ -83,7 +83,7 @@ const BYTE_TABLES = (snapshot: TableSnapshot): string[] =>
 
 /**
  * The heights at which two runs differ in the rows of a table that is not content-defined or in their node sets, each
- * with what differs; empty when they agree throughout. [A160]
+ * with what differs; empty when they agree throughout.
  */
 export function tableDifferences(got: ReadonlyMap<bigint, TableSnapshot>, expected: ReadonlyMap<bigint, TableSnapshot>): string[] {
   const problems: string[] = [];
@@ -102,7 +102,7 @@ export function tableDifferences(got: ReadonlyMap<bigint, TableSnapshot>, expect
   return problems;
 }
 
-/** The expected halt reason: `callback-error` at `height`, in `core-ledger-state`'s `on-compute`. [A160] */
+/** The expected halt reason: `callback-error` at `height`, in `core-ledger-state`'s `on-compute`. */
 export const refusalHalt = (height: bigint) => ({
   state: "halted",
   cursor: height - 1n,

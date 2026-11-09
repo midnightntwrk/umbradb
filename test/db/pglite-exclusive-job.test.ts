@@ -8,13 +8,13 @@ import { connectionOfUrl } from "./connection.js";
 /**
  * The PGlite backend's exclusive job (`exclusiveJob`, `src/db/pglite.ts`): one job of the database's queue whose body
  * reads committed data and uses the engine itself. A PGlite backup's manifest and its `pg_dump` of
- * `@electric-sql/pglite-tools` run in it, so that nothing commits between them. [DB-4, BK-1]
+ * `@electric-sql/pglite-tools` run in it, so that nothing commits between them.
  *
  * The tests check that:
  * - a transaction asked for while the job runs waits until it ends;
  * - what the body leaves on the one session (a setting, an open transaction) never reaches a later job;
  * - a call of the database's own `read` from inside the job is refused by the guard against calls from inside a
- *   running job; [Q73]
+ *   running job;
  * - a database that is not a PGlite one has no exclusive job.
  *
  * Each database is the backend's own, opened with `openPglite` on `memory://` (the job is registered on the database
@@ -45,7 +45,7 @@ afterAll(async () => {
 const settingOf = async (name: string): Promise<string> =>
   db.transaction(async (tx) => (await tx.query(`SELECT current_setting('${name}') AS v`))[0]?.v as string);
 
-describe("the PGlite exclusive job (DB-4, BK-1)", () => {
+describe("the PGlite exclusive job", () => {
   it("runs as one job: a transaction asked for meanwhile commits only after it, and its reads see one height", async () => {
     await db.transaction((tx) => tx.execute("INSERT INTO t (k) VALUES (1)"));
     const order: string[] = [];

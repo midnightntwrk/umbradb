@@ -17,11 +17,11 @@ import {
  * (`test/backbone/fetch-fixtures.ts`, `events-fixtures.ts`): blocks 0 to {@link BrowserChain.last} of runtime 2.0, the
  * blocks {@link LEDGER_HEIGHTS} with real ledger v9 transactions (`test/ledger/adapter-fixtures.ts`: regular ones and a
  * system one, each with its `TxApplied` or `SystemTransactionApplied` event), so that `core-block-parsed` parses them
- * in the ledger worker and `core-tx-results` records their outcomes. [A129–A132]
+ * in the ledger worker and `core-tx-results` records their outcomes.
  *
- * **Sessions** (the tape node serves its k-th connection the k-th session) [TT-2]:
+ * **Sessions** (the tape node serves its k-th connection the k-th session):
  * - {@link headSession}: a page with a new database asks the node's finalized head (S is the head at creation) on a
- *   connection of its own (`chain_getFinalizedHead`, then the head's header), which then ends [BR-2];
+ *   connection of its own (`chain_getFinalizedHead`, then the head's header), which then ends;
  * - {@link syncSession}: the process on a new database from S, the head S at first, then each height to `to` finalized
  *   in turn (a finalized-head notification once the height before was fetched), so the process commits S to `to`;
  * - {@link raisedHeadSession}: the same from S, but the heights after S in two notifications: `batch` once S was
@@ -30,16 +30,16 @@ import {
  *   the node's head is the cursor, so it resumes there and waits; {@link continueSession}: the same, then each height
  *   to `to` finalized in turn;
  * - {@link restoreSession}: a restore's checks against the node: block 0, the finalized head (the source's
- *   subscriptions first), the block at the backup's height when the head is not below it [BK-3, BK-5];
+ *   subscriptions first), the block at the backup's height when the head is not below it;
  *   {@link otherGenesisSession}: a node whose block 0 is another chain's.
  *
  * A session the page keeps open while a later one waits for the next connection (a reload's) ends with {@link
  * KEPT_OPEN}: a call record nothing asks, then the `disconnect` that separates the sessions — which, coming after a
- * record never answered, is never reached, so the connection is not dropped. [TT-3]
+ * record never answered, is never reached, so the connection is not dropped.
  *
  * **A hold** ({@link heldBefore}, {@link heldClock}): a session whose height `h` is not answered until the test lets it
  * — the first call of `h` delayed on a clock that stands still until released —, so the core waits before `h` while the
- * test does what it claims comes first. [L58]
+ * test does what it claims comes first.
  */
 
 /** The end of a session the page keeps open (see the module comment): a call no process makes, then the separator. */
@@ -105,7 +105,7 @@ function height(chain: BrowserChain, h: bigint, metadata: boolean): TapeRecord[]
   return finalizedWithEvents(at(chain, h), RUNTIME_2_0, value, metadata);
 }
 
-/** A page's question for the node's finalized head, `head` (see the module comment). [BR-2] */
+/** A page's question for the node's finalized head, `head` (see the module comment). */
 export function headSession(chain: BrowserChain, head: bigint): TapeRecord[] {
   return [...headRead(at(chain, head)), { disconnect: true }];
 }
@@ -121,7 +121,7 @@ export function syncSession(chain: BrowserChain, start: bigint, to: bigint): Tap
  * The process on a new database from S = `start`, the head raised in two notifications: `batch` once S was fetched,
  * then `to` once the heights below `batch` were (see the module comment). The loop reads `batch` and processes up to
  * it; the node source holds `to` meanwhile, and the loop reads it after `batch`. With {@link heldBefore} at `batch`, the
- * process waits at `batch` − 1 with the two heads apart. [AE-5]
+ * process waits at `batch` − 1 with the two heads apart.
  */
 export function raisedHeadSession(chain: BrowserChain, start: bigint, batch: bigint, to: bigint): TapeRecord[] {
   const records: TapeRecord[] = [...opening(at(chain, 0n), at(chain, start)), ...height(chain, start, true)];

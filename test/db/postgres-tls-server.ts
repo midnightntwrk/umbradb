@@ -9,7 +9,7 @@ import { startContainer } from "../containers.js";
 import { POSTGRES_IMAGE } from "../postgres-image.js";
 
 /**
- * A PostgreSQL 18.6 server that serves TLS only, for the tests of the `ssl` setting. [CF-4, Q182 B, Q183 A]
+ * A PostgreSQL 18.6 server that serves TLS only, for the tests of the `ssl` setting.
  *
  * - It runs the repository's one image through Testcontainers (its `withSSL`, which hands the key to the server's
  *   user).

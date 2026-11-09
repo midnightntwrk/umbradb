@@ -6,13 +6,13 @@ import { ALLOWED, checked, processAccesses } from "./process-access.js";
 import { boundarySources, hostWith, REPOSITORY } from "./resolver-boundary.js";
 
 /**
- * L13 `[STATIC][NEG]`: under `src/`, outside `src/cli/` and `src/library/start-umbradb.ts`, no module reads the global
- * `process` but as G10 lets it (`./process-access.ts`'s allowed reads), and none calls `path.resolve` with one argument
+ * Under `src/`, outside `src/cli/` and `src/library/start-umbradb.ts`, no module reads the global
+ * `process` but as `./process-access.ts`'s allowed reads let it, and none calls `path.resolve` with one argument
  * (which reads the working directory); `loadConfig` takes its `cwd` with no default. The negative control appends to a
  * fixture copy of `src/runner/loop.ts` (the file on disk is untouched) each forbidden form — the global `process`,
  * `globalThis.process`, `global.process`, `globalThis["process"]`, `(globalThis as T).process`, a one-argument
  * `path.resolve` under two names — and sees each reported, while a local binding named `process`, a comment, a string,
- * a type position and an allowed read in its own file are not. [L13, LM-2, G8, G10]
+ * a type position and an allowed read in its own file are not.
  */
 
 // Building the program over every source takes a few seconds; on a loaded machine, more.
@@ -44,7 +44,7 @@ const ALLOWED_FORMS = [
   'export const based = (base: string) => absolute(base, "data");',
 ];
 
-describe("L13: the process-access check over src/", () => {
+describe("the process-access check over src/", () => {
   it("reads src/ outside src/cli/ and the Node entry", () => {
     expect(checked("src/runner/process.ts")).toBe(true);
     expect(checked("src/library/options.ts")).toBe(true);

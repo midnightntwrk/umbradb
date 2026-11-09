@@ -2,7 +2,7 @@
  * Loads the ledger adapters in Node.js. Each version's vendored package is imported from its Node.js entry
  * (`vendor/ledger/<version>/pkg/*_fs.js`, which reads the `.wasm` beside it and instantiates it synchronously). A
  * package is imported only when its version is asked for, so a thread pays only for the packages it uses: the ledger
- * worker loads them, never the main thread. [design §5.2, §5.3]
+ * worker loads them, never the main thread.
  *
  * The specifiers are relative to this file and resolve the same from `src/ledger/` and from a build's `dist/ledger/`.
  * A browser build maps them to the packages' browser entries and calls `createV8Adapter` / `createV9Rc3Adapter` /
@@ -11,7 +11,7 @@
  * Before importing a version's package, it checks the package's files against their recorded SHA-256
  * (`checkLedgerPackage`, `./identity.ts`, once per thread), so a thread never imports a changed package: the load
  * rejects with `package-hash-mismatch`, naming the version and the file. `./identity.ts` reads the packages beside this
- * file (`../../vendor/ledger/`), the directory these specifiers import from. [LG-5, A173]
+ * file (`../../vendor/ledger/`), the directory these specifiers import from.
  */
 
 import { checkLedgerPackage } from "./identity.js";

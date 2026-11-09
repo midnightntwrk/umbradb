@@ -21,7 +21,6 @@ import { type CliProject, cliProject, configText, coreSettings, inProcess, lineO
  *   in the configuration;
  * - exits 0 only if every check it ran passed;
  * - opens no database and says the history checks were not run.
- * [A35 CI, CF-1, CF-3, CF-10]
  *
  * `./config-check-database.test.ts` covers the `--database` half, and `./umbradb.test.ts` the command in a child
  * process (Node.js's own type stripping, real exit codes).
@@ -69,7 +68,7 @@ function coreOnly(settings: string, before: readonly string[] = []): string {
   ]);
 }
 
-/** "Prints both with their paths": the type error at `file:line:column`, the schema error at its path. [A35 CI] */
+/** "Prints both with their paths": the type error at `file:line:column`, the schema error at its path. */
 function printsBoth(text: string, file: string, typeLine: number): boolean {
   return (
     text.includes(`  ${file}:${typeLine}:7: Type 'string' is not assignable to type 'number'. [TS2322]`) &&
@@ -86,7 +85,7 @@ const check = (file: string, extra: readonly string[] = []) => inProcess(["confi
 const codesOf = (report: ConfigCheckReport, step: string) =>
   (report.steps.find((s) => s.name === step)?.findings ?? []).map((f) => `${f.code} ${f.path}`);
 
-describe("A35: a valid file", () => {
+describe("a valid file", () => {
   it("exits 0, every check passed, and says the history checks were not run, opening no database", async () => {
     const file = project.write("valid.config.ts", coreOnly(coreSettings(unanswered)));
     const result = await check(file);
@@ -119,7 +118,7 @@ describe("A35: a valid file", () => {
   });
 });
 
-describe("A35: one type error and one schema error", () => {
+describe("one type error and one schema error", () => {
   it("prints both with their paths and exits non-zero, opening no database, the history checks not run", async () => {
     const text = coreOnly(coreSettings(unanswered, { apiReadTimeoutMs: 0 }), ['const label: number = "core";', "void label;"]);
     const file = project.write("two-errors.config.ts", text);
@@ -138,7 +137,7 @@ describe("A35: one type error and one schema error", () => {
     ]);
   });
 
-  it("CF-10's scenario — one unknown property and one wrong type — is found by both checks, each finding with its path", async () => {
+  it("one unknown property and one wrong type — is found by both checks, each finding with its path", async () => {
     const text = configText(project.builders, [
       "export default defineConfig({",
       "  entries: [",
@@ -180,7 +179,7 @@ describe("A35: one type error and one schema error", () => {
   });
 });
 
-describe("CF-1's refusals are configuration findings", () => {
+describe("refusals are configuration findings", () => {
   it("no file: one finding, nothing else run", async () => {
     const file = join(project.dir, "missing.config.ts");
     const report = await configCheck({ file, cwd: project.dir });
@@ -251,7 +250,7 @@ describe("CF-1's refusals are configuration findings", () => {
     expect(report.text).toContain("the operator's own failure");
   });
 
-  it("every core entry another version's: the process has no core revision of its own (Q102), a finding", async () => {
+  it("every core entry another version's: the process has no core revision of its own, a finding", async () => {
     const text = configText(project.builders, [
       "export default defineConfig({",
       "  entries: [",
@@ -418,7 +417,7 @@ describe("modules: the build's, or a host program's", () => {
   });
 
   it("the command checks against UmbraDB's own modules and the file's: a user module it does not export is refused", async () => {
-    // The file declares stats but does not export it in modules (./modules.test.ts has the export). [Q106 B]
+    // The file declares stats but does not export it in modules (./modules.test.ts has the export).
     const file = project.write("stats.config.ts", withStats());
     const result = await check(file);
     expect(result.code).toBe(EXIT.failed);
@@ -583,7 +582,7 @@ describe("the type check's view of the file's surroundings", () => {
   });
 });
 
-describe("no secret is printed (CF-4, AE-6)", () => {
+describe("no secret is printed", () => {
   it("a secret setting's value quoted by the compiler is redacted", async () => {
     const node = "ws://127.0.0.1:9944/node-secret-4-4";
     const text = configText(project.builders, [
@@ -644,8 +643,8 @@ describe("no secret is printed (CF-4, AE-6)", () => {
   });
 });
 
-describe("A35's negative control: a check that stops at its first finding", () => {
-  it("fails A35's 'prints both' on the file with a type error and a schema error", async () => {
+describe("negative control: a check that stops at its first finding", () => {
+  it("fails the 'prints both' on the file with a type error and a schema error", async () => {
     const text = coreOnly(coreSettings(unanswered, { apiReadTimeoutMs: 0 }), ['const label: number = "core";', "void label;"]);
     const file = project.write("two-errors-control.config.ts", text);
     const typeLine = lineOf(text, "const label");

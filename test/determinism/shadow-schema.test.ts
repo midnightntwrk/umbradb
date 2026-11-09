@@ -12,14 +12,13 @@ import { BACKENDS, type TestDatabase } from "../db/backends.js";
  * On PostgreSQL 18 and on PGlite 0.5.10, the contents hash leaves out `core_digest_shadow`, change capture's scratch
  * schema, as it leaves out PostgreSQL's own schemas and `public`. This holds whatever the schema holds (columns,
  * tables, rows, and what the rules would refuse elsewhere), while the same change in a module schema changes the hash.
- * [A150, DT-3, Q101]
  *
  * `core_chain` and `core_digest` stay hashed, because a damaged digest table must not hash as a sound one; so does an
- * operator's schema whose name merely starts with the scratch schema's. [Q101]
+ * operator's schema whose name merely starts with the scratch schema's.
  *
  * Shown on a database built by hand, and on chains whose shadow tables the real change capture made
  * (`src/db/change-capture.ts`, `test/backbone/core-digest/chain.ts`): a release whose capture adds a column to every
- * shadow table hashes the same as the release before it. [Q101]
+ * shadow table hashes the same as the release before it.
  *
  * The expected hash of the database built by hand is not computed by the code under test: its CBOR bytes are written
  * out by hand (RFC 8949: heads per §3, shortest form) and only SHA-256 is computed here. The negative controls run the
@@ -52,7 +51,7 @@ function relisting(replacement: string): { wrap(read: ConsistentRead): Consisten
 
 /** The shadow schema back in the list (a name already left out stands in for it). */
 const SHADOW_BACK_IN = "'information_schema'";
-/** `core_digest` left out too: the rejected alternative that also leaves out the digest schema. [Q101] */
+/** `core_digest` left out too: the rejected alternative that also leaves out the digest schema. */
 const CORE_DIGEST_OUT_TOO = `${LEFT_OUT}, 'core_digest'`;
 
 async function refusal(run: () => Promise<unknown>): Promise<ModuleContentsError> {
@@ -69,7 +68,7 @@ async function refusal(run: () => Promise<unknown>): Promise<ModuleContentsError
  * The reserved schemas UmbraDB creates, filled by hand: `core_chain` and `core_digest` with one table each, the scratch
  * schema with what the hash must not see — a shadow table holding a row, a table without a primary key and with a
  * float, one with a `timestamp` defaulting to `now()`, an unlogged table and a sequence (each refused in a module
- * schema) —, an operator's schema `core_digest_shadow_x`, and a module schema `m`. [DT-6]
+ * schema) —, an operator's schema `core_digest_shadow_x`, and a module schema `m`.
  */
 const FIXED_DATABASE = `
   CREATE SCHEMA m;
@@ -100,7 +99,7 @@ const FIXED_DATABASE = `
 /**
  * The contents hash's array for {@link FIXED_DATABASE}, item by item. Schemas by bytes: "core_chain" (…5f 63) before
  * "core_digest" (…5f 64), "core_digest" before "core_digest_shadow_x" (a prefix first), both before "m";
- * `core_digest_shadow` is not there. [DT-3]
+ * `core_digest_shadow` is not there.
  */
 const EXPECTED_CBOR: readonly (readonly [string, string])[] = [
   ["array(4): four tables, none of the scratch schema", "84"],
@@ -211,7 +210,7 @@ const MODULE_M = testModule("m", {
   },
 });
 
-describe.each(BACKENDS)("A150: the contents hash leaves out core_digest_shadow, on $name (DT-3, Q101)", (backend) => {
+describe.each(BACKENDS)("the contents hash leaves out core_digest_shadow, on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop());
 
@@ -236,7 +235,7 @@ describe.each(BACKENDS)("A150: the contents hash leaves out core_digest_shadow, 
       }
     }
 
-    it("equals SHA-256 of DT-3's array written by hand: no scratch schema in it, whatever it holds", async () => {
+    it("equals SHA-256 of the array written by hand: no scratch schema in it, whatever it holds", async () => {
       expect(await hashOf()).toBe(EXPECTED_HASH);
       // At every page size as well.
       expect(hex(await fixed.db.read((r) => contentsHash(r, { pageSize: 1 })))).toBe(EXPECTED_HASH);
@@ -264,7 +263,7 @@ describe.each(BACKENDS)("A150: the contents hash leaves out core_digest_shadow, 
       expect(await hashOf()).toBe(base);
     }, 60_000);
 
-    it("leaves the scratch schema out of catalog reads given schemas too (DT-6 at startup, the CHECKs)", async () => {
+    it("leaves the scratch schema out of catalog reads given schemas too (the startup check, the CHECKs)", async () => {
       const schemas = [SHADOW_SCHEMA, "m"];
       const tables = await fixed.db.read((r) => catalogTables(r, { schemas }));
       expect(tables.map((t) => [t.schema, t.name])).toEqual([["m", "t"]]);
@@ -279,13 +278,13 @@ describe.each(BACKENDS)("A150: the contents hash leaves out core_digest_shadow, 
     it("negative control: with the scratch schema back in the list, the hash reads it and refuses it", async () => {
       const back = relisting(SHADOW_BACK_IN);
       const error = await refusal(() => hashOf(back.wrap));
-      // The first refusal in the hash's table order: the scratch schema's table without a primary key. [DT-3]
+      // The first refusal in the hash's table order: the scratch schema's table without a primary key.
       expect([error.reason, error.schema, error.table]).toEqual(["no-primary-key", SHADOW_SCHEMA, "t_nokey"]);
       // The tables', the columns' and the relations' statements all named it.
       expect(back.changed()).toBe(3);
     }, 60_000);
 
-    it("negative control: with core_digest left out too (Q101's option C), the hash is not DT-3's", async () => {
+    it("negative control: with core_digest left out too (the option C), the hash is not the", async () => {
       const withoutDigests = relisting(CORE_DIGEST_OUT_TOO);
       const without = await hashOf(withoutDigests.wrap);
       expect(withoutDigests.changed()).toBe(3);

@@ -4,9 +4,9 @@ import { describe, expect, it } from "vitest";
 
 /**
  * The published package.json is publishable, with a strict exports map and no deep-import escape hatch. Parses the
- * real package.json and checks its shape. [G1, A3]
+ * real package.json and checks its shape.
  */
-describe("package.json is publishable with a strict exports map (A3)", () => {
+describe("package.json is publishable with a strict exports map", () => {
   const pkg = JSON.parse(
     readFileSync(fileURLToPath(new URL("../../package.json", import.meta.url)), "utf8"),
   ) as Record<string, unknown>;

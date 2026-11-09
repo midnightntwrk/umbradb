@@ -15,17 +15,17 @@ import { type FoundTape, tapeTest } from "../tape/real/real-tapes.js";
 /**
  * Runtime 2.1's delayed upgrades (`system_version` 3) on the networks' own tapes, recorded 2026-11-09: the first block
  * of the new runtime, F, is built by it and its own state holds it, while its parent's state still holds the old one
- * (`apply_authorized_upgrade` in U only staged the code). [v9-upgrade-metadata V1, V2, V5; LG-4; issue 00089]
+ * (`apply_authorized_upgrade` in U only staged the code).
  *
- * - **V1**: `preview-v9-0-2000` from genesis with the ledger core and `core-contract-logs-full` commits every height
+ * - `preview-v9-0-2000` from genesis with the ledger core and `core-contract-logs-full` commits every height
  *   (`core-ledger-state` checks each state root against the node's), across an earlier-form upgrade (556) and a
  *   delayed one (F = 1,572).
- * - **V2**: `mainnet-3346039-3346239` and `preprod-3348334-3348534` with `core-contract-logs-fast`'s core, from the
+ * - `mainnet-3346039-3346239` and `preprod-3348334-3348534` with `core-contract-logs-fast`'s core, from the
  *   tape's first block + 1, commit every height across their delayed upgrade (F = 3,346,139 and 3,348,434), and F's
  *   chain events decode with the new runtime's metadata. Startup asks for the genesis hash and header, which a
  *   mid-chain tape does not hold: they come from `test/ledger/fixtures/networks/<network>.json`, the node's own answers.
- * - **V5**: the runtime versions the process asked for are each processed block's parent's, and F's own once.
- * - **Negative controls**: `core-arch`'s parent-only selection halts at F on each tape.
+ * - The runtime versions the process asked for are each processed block's parent's, and F's own once.
+ * - **Negative controls**: the parent-only selection (the rule before delayed upgrades) halts at F on each tape.
  */
 
 const WALK_MS = 600_000;
@@ -74,7 +74,7 @@ function hashAt(records: readonly TapeRecord[], height: number): string {
 const lastOf = (found: FoundTape) => found.tape.to;
 
 /**
- * Walks the tape's heights from `from` to F with `core-arch`'s parent-only selection (LG-4 before this change): the
+ * Walks the tape's heights from `from` to F with the parent-only selection (the rule before delayed upgrades): the
  * runtime in the parent's state, or a halt. Rejects with its `metadata-mismatch` where it halts.
  */
 async function parentOnlyWalk(records: readonly TapeRecord[], delayed: DelayedTape, from: number): Promise<void> {
@@ -104,7 +104,7 @@ const runtimeReads = (run: Ingest): string[] =>
     .map((call) => (call.params as string[])[0]!)
     .sort();
 
-/** Replays `delayed` on `backend` with `core` to the tape's last height, then checks V5 and F's events. */
+/** Replays `delayed` on `backend` with `core` to the tape's last height, then checks the runtime reads and F's events. */
 async function replay(backend: ProcessBackend, found: FoundTape, delayed: DelayedTape, core: typeof FAST_CORE): Promise<void> {
   const records = recordsOf(found, delayed);
   const last = lastOf(found);
@@ -112,7 +112,7 @@ async function replay(backend: ProcessBackend, found: FoundTape, delayed: Delaye
   const run = await ingest(db, records, { start: BigInt(delayed.start), stop: BigInt(last), core, settings: { network: delayed.network } });
   try {
     await committed(run, BigInt(last), WALK_MS);
-    // V5: each processed block's parent's runtime (block 0: its own), and F's own once.
+    // Each processed block's parent's runtime (block 0: its own), and F's own once.
     const parents = Array.from({ length: last - delayed.start + 1 }, (_, i) => delayed.start + i).map((h) => hashAt(records, Math.max(0, h - 1)));
     expect(runtimeReads(run)).toEqual([...parents, hashAt(records, delayed.f)].sort());
   } finally {
@@ -125,10 +125,10 @@ async function replay(backend: ProcessBackend, found: FoundTape, delayed: Delaye
   expect(blocks).toEqual({ n: last - delayed.start + 1, lo: String(delayed.start), hi: String(last) });
 }
 
-describe.each(PROCESS_BACKENDS)("delayed runtime upgrades on the networks' tapes, on $name (issue 00089)", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("delayed runtime upgrades on the networks' tapes, on $name", (backend: ProcessBackend) => {
   tapeTest(
     PREVIEW.tape,
-    "V1: preview from genesis with the ledger core commits every height, across 556 and the delayed upgrade's first block 1,572",
+    "preview from genesis with the ledger core commits every height, across 556 and the delayed upgrade's first block 1,572",
     async (found) => {
       await backend.start();
       try {
@@ -143,7 +143,7 @@ describe.each(PROCESS_BACKENDS)("delayed runtime upgrades on the networks' tapes
   for (const delayed of [MAINNET, PREPROD]) {
     tapeTest(
       delayed.tape,
-      `V2: ${delayed.network} with core-contract-logs-fast's core commits every height across its delayed upgrade's first block ${delayed.f}`,
+      `${delayed.network} with core-contract-logs-fast's core commits every height across its delayed upgrade's first block ${delayed.f}`,
       async (found) => {
         await backend.start();
         try {
@@ -157,7 +157,7 @@ describe.each(PROCESS_BACKENDS)("delayed runtime upgrades on the networks' tapes
   }
 });
 
-describe("[NEG] core-arch's parent-only selection halts at each delayed upgrade's first block", () => {
+describe("[NEG] the parent-only selection halts at each delayed upgrade's first block", () => {
   for (const delayed of [PREVIEW, MAINNET, PREPROD]) {
     tapeTest(
       delayed.tape,

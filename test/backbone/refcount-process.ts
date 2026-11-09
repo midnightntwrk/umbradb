@@ -21,11 +21,10 @@ import { restartAt } from "./ledger-restart.js";
 import { fixtureProblems } from "./refcount-checks.js";
 
 /**
- * A run of the DAG fixture through the real process, shared by the reclamation tests on it (A105 and R12's controls,
- * R3, R11, A160): the tape of `./ledger-graph-tapes.ts`, its test package told what `FixtureData` asks,
+ * A run of the DAG fixture through the real process, shared by the reclamation tests on it (the reclamation
+ * checks and their controls): the tape of `./ledger-graph-tapes.ts`, its test package told what `FixtureData` asks,
  * `core-ledger-state` with a negative control's rules, the watcher recording the tables at every cursor and every
  * block's batch, and every error `core-ledger-state`'s callbacks threw. Imports nothing of Vitest.
- * [A105, R3, R11, LG-14]
  */
 
 /** What a run is given. */
@@ -45,9 +44,9 @@ export interface DagRunOptions {
   readonly halts?: boolean;
   /** The cursor the database already holds, for a run that restarts there: the tape answers the startup's checks. */
   readonly resume?: bigint;
-  /** More user modules, after the watcher (another reading of the tables at each cursor). [R5, R17, R28] */
+  /** More user modules, after the watcher (another reading of the tables at each cursor). */
   readonly user?: readonly ModuleDeclaration[];
-  /** Called with the running process once it reached the last height or halted, before it stops (a backup). [R15] */
+  /** Called with the running process once it reached the last height or halted, before it stops (a backup). */
   readonly atLast?: (process: Ingest) => Promise<void>;
   /** The ledger worker as the process gets it: the recording one, wrapped by an instrument of the test's. */
   readonly worker?: (host: LedgerHost) => LedgerHost;
@@ -136,7 +135,7 @@ export async function runDag(db: ProcessDatabase, options: DagRunOptions = {}): 
   return { status, lines: process.lines, tables, watched: seen.tables, batches, evicted: record.evicted, errors, restarts, failure, cursor };
 }
 
-/** R3's problems on `run` after every height it committed (see `./refcount-checks.ts`). */
+/** The problems on `run` after every height it committed (see `./refcount-checks.ts`). */
 export function runProblems(run: DagRun, dag: FixtureDag = "original", on: (h: number) => boolean = () => true): string[] {
   return fixtureProblems(dag, run.tables, run.batches, Number(run.cursor), { on });
 }

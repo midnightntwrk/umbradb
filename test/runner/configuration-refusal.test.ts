@@ -20,10 +20,10 @@ import { coreSettings } from "./process-build.js";
  * How a process logs a refusal of its configuration itself: one line with the refusal's code, how many findings it has
  * and that the process ends, then one line per finding (its path and message with its code, as `umbradb config check`
  * prints it), every line through the redaction it is given. Also the cases the command's own lines covered (its earlier
- * `refusalLines`, which these replace). [AE-3, CF-1–CF-3, Q137 B]
+ * `refusalLines`, which these replace).
  *
  * And the refusal a host is given (`shownRefusal`): a copy redacted when its message or details hold a secret — code,
- * details and cause kept —, the refusal itself otherwise. [CF-4, AE-6]
+ * details and cause kept —, the refusal itself otherwise.
  */
 
 const PASSWORD = "pw-8-1b-LINES";
@@ -100,7 +100,7 @@ describe("configurationRefusalLines", () => {
     ]);
   });
 
-  it("a loader's refusal quoting the file's own error shows no URL's credentials (AE-6)", async () => {
+  it("a loader's refusal quoting the file's own error shows no URL's credentials", async () => {
     const file = join(directory, "throws.config.ts");
     writeFileSync(file, `throw new Error("cannot reach postgres://indexer:${PASSWORD}@db.example/x");\nexport default {};\n`);
     const error = await loadConfig({ file, cwd: process.cwd() }).catch((caught: unknown) => caught);
@@ -202,7 +202,7 @@ describe("configurationRefusalLines", () => {
     ]);
   });
 
-  it("a secret whose text is a refusal's code, reason or path leaves them as they are; the message is redacted (L63)", () => {
+  it("a secret whose text is a refusal's code, reason or path leaves them as they are; the message is redacted", () => {
     const loader = new UmbraError("invalid-configuration", "the module file m.ts could not be loaded: the store refused load-failed", {
       file: "m.ts",
       reason: "load-failed",
@@ -233,7 +233,7 @@ describe("configurationRefusalLines", () => {
   });
 });
 
-describe("shownRefusal: the refusal a host is given (CF-4, AE-6)", () => {
+describe("shownRefusal: the refusal a host is given", () => {
   const redact = redactor([PASSWORD]).text;
 
   it("a refusal whose message or details hold a secret is a copy: redacted, its code, its other details and its cause kept", () => {
@@ -262,7 +262,7 @@ describe("shownRefusal: the refusal a host is given (CF-4, AE-6)", () => {
     expect([inDetails.message, inDetails.details.module, inDetails.cause]).toEqual(["a module is refused", REDACTED, undefined]);
   });
 
-  it("its own words are kept whatever a secret's text — the reason, the findings' rules and paths, the names it writes — and every other string redacted (L63)", () => {
+  it("its own words are kept whatever a secret's text — the reason, the findings' rules and paths, the names it writes — and every other string redacted", () => {
     const own = redactor(["load-failed", "settings-schema", "entries[0].config.x", "backupAtStop", "wrong-side", "m"]).text;
     const refusal = new UmbraError("invalid-configuration", "the store refused load-failed", {
       reason: "load-failed",

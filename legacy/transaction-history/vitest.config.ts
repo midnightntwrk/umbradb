@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 /**
- * TransactionHistory's own test run (core-arch task 17.1, LS-3): never the conformance run, which excludes `legacy/`
+ * TransactionHistory's own test run: never the conformance run, which excludes `legacy/`
  * (`vitest.config.ts`). Run by hand, from the repository's root:
  *
  *   npx vitest run --config legacy/transaction-history/vitest.config.ts

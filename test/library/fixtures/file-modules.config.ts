@@ -1,5 +1,5 @@
 // A configuration file of a library host: its default export the configuration, its `modules` export the user
-// module it runs, whose callbacks note each height in `SEEN`. [LM-7, CF-1]
+// module it runs, whose callbacks note each height in `SEEN`.
 
 import { libraryData, PGLITE_MEMORY, rowsModule } from "../library-fixtures.js";
 

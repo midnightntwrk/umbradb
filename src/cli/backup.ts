@@ -1,21 +1,19 @@
 /**
  * `umbradb backup --out <file> [--config <file>]`: writes a backup of the database the configuration file names
  * (`./configured.ts`) to the file `--out` names, through `src/backup/` (`writeBackup`).
- * [BK-1, BK-2, PP-12, Q83, Q85; design §9.1, §12]
  *
  * - **Which database, and its build.** The configuration file (`--config`, or `umbradb.config.ts` in the working
  *   directory, as for `umbradb run`) gives the database (from its process's `core` revision), the development opt-in
  *   and the side. The command's build with the file's user modules gives the tables declared `deterministic: false`,
  *   which the contents hash records by name only, and the content-defined tables, which it takes by their content.
- *   [CF-1, Q102, Q76, DT-3]
  * - **While the process runs.** On PostgreSQL the command reads through a connection of its own, in one read's
  *   snapshot, beside a process writing the same database. A PGlite directory can be opened by one process at a time:
  *   while a process holds it, the command refuses with `writer-lock-held`, and the process itself backs it up (its
- *   `backup`, or `backupAtStop`). [DB-11]
+ *   `backup`, or `backupAtStop`).
  * - **Refusals** (exit 1, no file written):
  *   - the configuration's own;
  *   - `private-backup-refused` for a private process's database without the development opt-in (known from the file's
- *     side, or the database's own private cursor); it comes before anything is opened when the file says so [PP-12];
+ *     side, or the database's own private cursor); it comes before anything is opened when the file says so;
  *   - `backup-tools-missing`, naming what to install;
  *   - `no-committed-height`; a PGlite directory with no database in it is refused without being opened, since opening
  *     it would create one;
@@ -85,7 +83,7 @@ export type BackupOutcome =
   | { readonly written: true; readonly line: string }
   | { readonly written: false; readonly error: unknown; readonly line: string };
 
-/** `private-backup-refused` before anything is opened: the file describes a private process. [PP-12] */
+/** `private-backup-refused` before anything is opened: the file describes a private process. */
 function privateBySide(config: CommandConfig): void {
   if (config.side === "private" && !config.developmentOptIn) {
     throw new UmbraError(
