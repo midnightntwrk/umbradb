@@ -506,6 +506,92 @@
         "servesOnItsOwn": "issue 00089's reproduction (the v9 upgrade block), and preview's new chain from genesis to 1,571",
         "needs": "the fix of issue 00089 to replay past 1,571"
       }
+    },
+    {
+      "name": "mainnet-3346039-3346239",
+      "file": "mainnet-3346039-3346239.tape.jsonl",
+      "network": "mainnet",
+      "from": 3346039,
+      "to": 3346239,
+      "sha256": "2209a7068c4c39de930003f4f6f74d7cfd354eaa2c50179204846aa707d7a3a2",
+      "bytes": 14274990,
+      "records": 1214,
+      "source": {
+        "endpoint": "wss://rpc.mainnet.midnight.network",
+        "nodeVersion": "2.1.101-913ec011",
+        "recorded": "2026-11-09"
+      },
+      "bounds": "Mainnet's delayed runtime upgrade to 2,001,100 (ledger v9, runtime 2.1's system_version 3), 100 blocks either side: block 3346138 (0x0dd469de…) carries the staged upgrade and still holds runtime 1,000,300 in its state; block 3346139 (0x952f999b…) is the first the new runtime built, its MNSV digest and own state 2,001,100, its parent's state 1,000,300. Replayed across it, a build whose LG-4 decodes a block with its parent's runtime halts there with metadata-mismatch (issue 00089).",
+      "notes": {
+        "recordedWith": "npx tsx tools/tape/main.ts range --node wss://rpc.mainnet.midnight.network --from 3346039 --to 3346239 --out mainnet-3346039-3346239.tape.jsonl --concurrency 4 --live-seconds 0",
+        "requests": 1212,
+        "seconds": 44.2,
+        "liveWindowSeconds": 0,
+        "runtimes": [
+          {
+            "height": 3346039,
+            "specVersion": 1000300
+          },
+          {
+            "height": 3346139,
+            "specVersion": 2001100
+          }
+        ],
+        "metadataHeights": [
+          3346039,
+          3346139
+        ],
+        "boundaries": [],
+        "genesis": {
+          "hash": "0x1941ca8e2bb88146c14dea084d3be7eb6e96ca7135429c543848b628124f2854",
+          "specVersion": 22000
+        },
+        "servesOnItsOwn": "v9-upgrade-metadata's V2: the delayed upgrade's first block, replayed with core-contract-logs-fast's core from a block before it",
+        "needs": "the network's genesis hash and header put before its records (startup asks for them), and the fix of issue 00089 to replay past the upgrade"
+      }
+    },
+    {
+      "name": "preprod-3348334-3348534",
+      "file": "preprod-3348334-3348534.tape.jsonl",
+      "network": "preprod",
+      "from": 3348334,
+      "to": 3348534,
+      "sha256": "c734fc0538a7ec4fada817b0f0cf520dbff5307ae09f058426aeb5fc2e45b267",
+      "bytes": 2652543,
+      "records": 1214,
+      "source": {
+        "endpoint": "wss://rpc.preprod.midnight.network",
+        "nodeVersion": "2.1.101-913ec011",
+        "recorded": "2026-11-09"
+      },
+      "bounds": "Preprod's delayed runtime upgrade to 2,001,100 (ledger v9, runtime 2.1's system_version 3), 100 blocks either side: block 3348433 (0x39c4a2f0…) carries the staged upgrade and still holds runtime 1,000,300 in its state; block 3348434 (0x125e3ce0…) is the first the new runtime built, its MNSV digest and own state 2,001,100, its parent's state 1,000,300. Replayed across it, a build whose LG-4 decodes a block with its parent's runtime halts there with metadata-mismatch (issue 00089).",
+      "notes": {
+        "recordedWith": "npx tsx tools/tape/main.ts range --node wss://rpc.preprod.midnight.network --from 3348334 --to 3348534 --out preprod-3348334-3348534.tape.jsonl --concurrency 4 --live-seconds 0",
+        "requests": 1212,
+        "seconds": 41.6,
+        "liveWindowSeconds": 0,
+        "runtimes": [
+          {
+            "height": 3348334,
+            "specVersion": 1000300
+          },
+          {
+            "height": 3348434,
+            "specVersion": 2001100
+          }
+        ],
+        "metadataHeights": [
+          3348334,
+          3348434
+        ],
+        "boundaries": [],
+        "genesis": {
+          "hash": "0xdf831b09a8baa92badf47762ce5ac439b7e47e3ed3d39600cfdd44fad552361b",
+          "specVersion": 22000
+        },
+        "servesOnItsOwn": "v9-upgrade-metadata's V2: the delayed upgrade's first block, replayed with core-contract-logs-fast's core from a block before it",
+        "needs": "the network's genesis hash and header put before its records (startup asks for them), and the fix of issue 00089 to replay past the upgrade"
+      }
     }
   ]
 }

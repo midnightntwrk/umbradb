@@ -13,10 +13,10 @@ and the tests it touched green, and the task checked here.
 
 ## 1. Fixtures (before the gate: they are the evidence)
 
-- [ ] 1.1 Add `docs/issues/00089` (as on the `token-metadata` branch) and `preview-v9-0-2000`'s entry to
+- [x] 1.1 Add `docs/issues/00089` (as on the `token-metadata` branch) and `preview-v9-0-2000`'s entry to
       `test/tape/real/manifest.json` (the same entry as that branch's).
       **Acceptance:** `npx vitest run --maxWorkers=8 test/tape/real` passes with the tape present.
-- [ ] 1.2 Record tapes over the delayed upgrade on mainnet and preprod with `tools/tape/main.ts range` (from a few blocks
+- [x] 1.2 Record tapes over the delayed upgrade on mainnet and preprod with `tools/tape/main.ts range` (from a few blocks
       before the first block of runtime 2,001,100 to a few after), and add them to the manifest.
       **Acceptance:** the manifest entries check; `test/tape/real` passes.
 

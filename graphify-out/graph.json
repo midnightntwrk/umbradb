@@ -1,5 +1,5 @@
 {
-"corpus_fingerprint":{"algorithm":"sha256","configs":[".graphifyignore"],"digest":"1b542b219666129f6dd22b15b2c2c858fac62db4d07a8e87bd033ca1e071c7e8","files":1299,"graphify":"0.9.89","postprocess":2,"python":"3.12","scope":"tracked"},
+"corpus_fingerprint":{"algorithm":"sha256","configs":[".graphifyignore"],"digest":"a4c0a5aa58830884654ac4edc35d92d7f9f11f1f2939cab4296240fbe0de3ecc","files":1299,"graphify":"0.9.89","postprocess":2,"python":"3.12","scope":"tracked"},
 "directed":false,
 "graph":{"graphify_version":"0.9.89","schema_version":1},
 "hyperedges":[],
