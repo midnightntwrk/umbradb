@@ -4,8 +4,7 @@ This covers UmbraDB's standalone Midnight indexer, its Node.js and browser proce
 services, ledger packages and backups. Its `path:line` references were checked by reading the code on 2026-10-28,
 against the tree of the commit that adds this file (task 17.4c, on `69dba1f`); A178's test
 (`test/library-surface/threat-model.test.ts`) keeps every cited file in the tree and at least as long as the cited
-line. References are relative to the repository root; requirement ids refer to
-`openspec/changes/core-arch/specs/<capability>/spec.md`. Current controls are distinguished from work still planned.
+line. References are relative to the repository root. Current controls are distinguished from work still planned.
 
 ## Assets and actors
 
@@ -21,8 +20,7 @@ line. References are relative to the repository root; requirement ids refer to
 The operator controls configuration, modules, deployment, credentials, transport trust roots and backups.
 The host, database administrator and storage are trusted. Module authors supply trusted executable code,
 including SQL; modules within a process are not mutually isolated. Database roles protect against mistakes,
-not malicious modules (`src/db/roles.ts:27`;
-`openspec/changes/core-arch/proposal.md:87`).
+not malicious modules (`src/db/roles.ts:27`).
 
 Network peers and readers of exposed services can be hostile. Admin callers should be restricted to operators,
 but the server does not authenticate them (`src/admin/serve.ts:66`). A private process trusts its public
@@ -31,8 +29,8 @@ database for inputs; lockstep operation trusts peers to report progress honestly
 The backup producer and browser hosting origin must also be trusted. Dependency producers, local patches and
 build tools supply executable code within these trust domains.
 
-The core does not manage private keys or provide TEE attestation; private modules own their key handling
-(`openspec/changes/core-arch/proposal.md:84`). The configured Midnight node is trusted for finality and block
+The core does not manage private keys or provide TEE attestation; private modules own their key handling.
+The configured Midnight node is trusted for finality and block
 contents, subject to the consistency checks described below.
 
 ## Boundaries, threats and controls
@@ -267,7 +265,7 @@ Workflow definitions are evidence of configured controls, not evidence that this
 ## The Midnight node
 
 The owner's resolution, Q179 A on 2026-10-28, adds no new check: the core trusts its one configured Midnight node
-for finality and block contents (`openspec/changes/core-arch/tasks.md:4047`).
+for finality and block contents.
 The process constructs its node connection from that configured URL
 (`src/backbone/core-chain/core-chain.ts:284`).
 
@@ -292,8 +290,7 @@ An authenticated channel protects the connection to that node; it does not remov
 
 ## Private reads of public data
 
-The owner's resolution, Q180 A on 2026-10-28, documents disclosure through reads of public data
-(`openspec/changes/core-arch/tasks.md:4049`).
+The owner's resolution, Q180 A on 2026-10-28, documents disclosure through reads of public data.
 A private process's SQL text and parameters reach the public database. Through transport they also reach the
 core, which decodes parameters and executes the supplied SQL
 (`src/private/private-transport.ts:313`, `src/private/private-transport.ts:368`,
@@ -320,8 +317,7 @@ filter them inside the private process.
 
 ## Backups and restore
 
-The owner's resolution, Q177 A on 2026-10-28, leaves restore unchanged: restore only backups you wrote
-(`openspec/changes/core-arch/tasks.md:4045`).
+The owner's resolution, Q177 A on 2026-10-28, leaves restore unchanged: restore only backups you wrote.
 Restore runs the file's SQL with the database login's, or writer's, rights. The load loop executes statements
 before restoring ownership and checking the loaded contents hash and ledger root
 (`src/backup/restore.ts:410`, `src/backup/restore.ts:415`, `src/backup/restore.ts:419`,
@@ -342,8 +338,7 @@ authority. The enclosing transaction is not a security boundary for hostile SQL
 The operator guide therefore says to restore only backups from a trusted source, your own
 (`docs/operator-guide.md:259`).
 
-Q178 A assigns backup origin and confidentiality to the operator
-(`openspec/changes/core-arch/tasks.md:4046`).
+Q178 A assigns backup origin and confidentiality to the operator.
 UmbraDB neither signs nor encrypts backups: it writes a manifest and plain dump output
 (`src/backup/manifest.ts:54`, `src/backup/manifest.ts:73`, `src/backup/backup.ts:176`,
 `src/backup/backup.ts:252`).
@@ -423,8 +418,7 @@ module code to compute deterministically.
 The operator must protect database access, host files, executable configuration, backups and TLS keys.
 Module trust and database administration remain outside the protection supplied by module roles
 (`src/db/roles.ts:27`). Private modules must define their own key custody, API authorization and retention;
-core key handling and TEE attestation are outside scope
-(`openspec/changes/core-arch/proposal.md:84`).
+core key handling and TEE attestation are outside scope.
 
 Private database separation does not conceal queries sent to public infrastructure, authenticate transport
 instance ids or authorize module API callers
@@ -504,7 +498,7 @@ What may go into this repository's git history:
 7. **Backup file mode — fixed by task 15.1b, as built.** Files are created owner-only and set to `0600` before writing,
    with backup failure if `chmod` is refused; encryption and origin remain the operator's responsibilities
    (`src/backup/backup.ts:68`, `src/backup/backup.ts:98`, `src/backup/backup.ts:100`,
-   `src/backup/backup.ts:99`, `openspec/changes/core-arch/tasks.md:4046`).
+   `src/backup/backup.ts:99`).
 
 8. **Vendored Rust advisories and release provenance — open, issue 00048.** Ledger rebuild comparisons do not provide
    an advisory scan of the patched crate graphs or release provenance

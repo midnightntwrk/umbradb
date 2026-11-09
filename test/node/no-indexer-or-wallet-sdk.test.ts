@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { afterAll, describe, expect, it } from "vitest";
-import { REPOSITORY } from "./in8.js";
 
 /**
  * No source file imports the official indexer's client or a wallet SDK, and nothing the package installs at run time
@@ -33,6 +33,7 @@ import { REPOSITORY } from "./in8.js";
  * fixture files holding each form and see it caught.
  */
 
+const REPOSITORY = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const ROOTS = ["src", "chain-archive-sync", "vendor", "browser", "tools"];
 const SOURCE_FILE = /\.(?:[cm]?[jt]s|[jt]sx)$/;
 /** A forbidden package, at the start of a module specifier (a deep import included). */

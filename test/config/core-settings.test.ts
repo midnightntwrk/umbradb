@@ -10,6 +10,7 @@ import {
   hexBytes,
   PRIVATE_CORE_SCHEMA,
   PUBLIC_CORE_SCHEMA,
+  RENAMED_CORE_SETTINGS,
 } from "../../src/config/core-settings.js";
 import { buildCoreVersion } from "../../src/config/build.js";
 import type { PrivateCoreSettings, PublicCoreSettings } from "../../src/config/entries.js";
@@ -317,5 +318,14 @@ describe("CF-2, CF-4: the builders' types and the schemas say the same", () => {
     type PrivateKeys = keyof z.input<typeof PRIVATE_CORE_SCHEMA>;
     expectTypeOf<Exclude<PrivateKeys, PublicKeys>>().toEqualTypeOf<PrivateOnly>();
     expectTypeOf<Exclude<PublicKeys, PrivateKeys>>().toEqualTypeOf<PublicOnly>();
+  });
+});
+
+describe("the core entry's renamed settings", () => {
+  it("are the private link's two keys: listen.transport, now listen.privateLink, and coreTransport, now privateLink", () => {
+    expect(RENAMED_CORE_SETTINGS.map(({ from, to }) => ({ from: from.join("."), to: to.join(".") }))).toEqual([
+      { from: "listen.transport", to: "listen.privateLink" },
+      { from: "coreTransport", to: "privateLink" },
+    ]);
   });
 });

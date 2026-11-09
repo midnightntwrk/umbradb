@@ -3,8 +3,7 @@ import { join, relative, sep } from "node:path";
 
 /**
  * The static check that key handling has left the core: keys, and private items in general, are a module's, not the
- * core's. Nothing of the removed key handling is left in the repository's code, its module guide or the change's
- * design:
+ * core's. Nothing of the removed key handling is left in the repository's code or its module guide:
  * - the private backbone part `core-key-registry` (its folder, its table `core_key_registry.keys`, its item
  *   `admitted-keys`);
  * - the point `on-key` (`POINTS`, `PointCallbacks`, `PendingKey`, the loop's `keys` and `keyPoint`);
@@ -16,9 +15,8 @@ import { join, relative, sep } from "node:path";
  * Imports nothing of Vitest. [Q154 A2]
  *
  * **What is read** ({@link SCANNED}): every file under `src/`, `browser/` and `test/` — but this check's own files,
- * which name what they look for —, `docs/module-guide.md` and `openspec/changes/core-arch/design.md`. Comments count:
- * a comment describing the removed parts is as stale as the code. The decision record, `tasks.md` (whose done notes
- * are history), the specs and `docs/issues/` are not read.
+ * which name what they look for —, and `docs/module-guide.md`. Comments count: a comment describing the removed parts
+ * is as stale as the code.
  *
  * **What is looked for**: the files that must not exist ({@link REMOVED_PATHS}), and every name of {@link REMOVED_NAMES}
  * in a file's path or text, but for {@link UNRELATED}: a name a file outside the change uses for something else.
@@ -80,7 +78,7 @@ export const UNRELATED: readonly { readonly file: string; readonly name: string 
 /** The folders read whole, and the single files read (see the module comment). */
 export const SCANNED = Object.freeze({
   folders: Object.freeze(["src", "browser", "test"]),
-  files: Object.freeze(["docs/module-guide.md", "openspec/changes/core-arch/design.md"]),
+  files: Object.freeze(["docs/module-guide.md"]),
 });
 
 /** This check's own files, which name what they look for. */

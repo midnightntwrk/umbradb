@@ -2,12 +2,10 @@
  * The design's retirement list ("Quality gates: what moves and what is retired"), transcribed, and the checks that
  * compare the tree with it. The four main lists are the required-test manifest, `stryker.conf.json` `mutate`, the
  * coverage floors of `vitest.config.ts` and the file list of `Formal/Lean`. The list's other rows are the retired
- * files, the scripts, the barrel's names and the Quint change. [A5 STATIC, LS-5; design §13]
+ * files, the scripts and the barrel's names. [A5 STATIC, LS-5; design §13]
  *
  * Every check takes plain data and returns one sentence per problem, empty when there is none, so
- * `./retirement.test.ts` runs the same checks on the real tree and on its negative controls. {@link SECTION_13_TERMS}
- * holds the retirement list's own words for each list below; the test checks that the design still says them, so the
- * transcription cannot drift from the document unseen.
+ * `./retirement.test.ts` runs the same checks on the real tree and on its negative controls.
  */
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -161,68 +159,6 @@ export const RETIRED_REQUIRED_IDS: readonly string[] = [
 
 /** The deferred id, retired with the 0.9.5 save it was deferred for. */
 export const RETIRED_DEFERRED_IDS: readonly string[] = ["crash.pg-kill-save.no-duplicate-with-idempotency-key"];
-
-/**
- * The ids of the required-test table ("Required test ids added to the manifest"), read from `acceptance.md`.
- * [acceptance §17]
- */
-export function acceptanceIds(acceptance: string): string[] {
-  const start = acceptance.indexOf("## 17. Required test ids added to the manifest");
-  if (start < 0) return [];
-  const next = acceptance.indexOf("\n## ", start + 1);
-  const section = acceptance.slice(start, next < 0 ? undefined : next);
-  return [...section.matchAll(/^\| `([^`]+)` \|/gm)].map((match) => match[1]!);
-}
-
-export interface ManifestShape {
-  readonly required: readonly { readonly id: string; readonly file?: string }[];
-  readonly deferred?: readonly { readonly id: string }[];
-}
-
-/**
- * The manifest against the retirement list: ids 1–4 kept, ids 5–25 and the deferred id gone, nothing else but the
- * required-test table's ids (`added`), and the pinned count equal to the list. `pending` names the added ids that may
- * still be absent; once none is pending, the comparison is exact. [design §13; acceptance §17]
- */
-export function manifestProblems(
-  manifest: ManifestShape,
-  added: readonly string[],
-  pending: readonly string[],
-  pinnedCount: number,
-  pinnedDeferred: number,
-): string[] {
-  const problems: string[] = [];
-  const required = manifest.required.map((entry) => entry.id);
-  const deferred = (manifest.deferred ?? []).map((entry) => entry.id);
-  const allowed = new Set([...KEPT_REQUIRED_IDS, ...added]);
-  const retired = new Set([...RETIRED_REQUIRED_IDS, ...RETIRED_DEFERRED_IDS]);
-  for (const id of [...required, ...deferred]) {
-    if (retired.has(id)) problems.push(`the manifest still holds ${id}, retired by design.md §13`);
-  }
-  for (const id of required) {
-    if (!allowed.has(id) && !retired.has(id)) {
-      problems.push(`the manifest requires ${id}, which is neither a kept id (1–4) nor an id of acceptance.md §17`);
-    }
-  }
-  for (const id of KEPT_REQUIRED_IDS) {
-    if (!required.includes(id)) problems.push(`the manifest lacks ${id}, kept by design.md §13 (ids 1–4)`);
-  }
-  for (const id of added) {
-    if (!required.includes(id) && !pending.includes(id)) {
-      problems.push(`the manifest lacks ${id}, an id of acceptance.md §17`);
-    }
-  }
-  for (const id of deferred) {
-    if (!retired.has(id)) problems.push(`the manifest defers ${id}; design.md §13 leaves no deferred id`);
-  }
-  if (pinnedCount !== required.length) {
-    problems.push(`EXPECTED_REQUIRED_COUNT is ${pinnedCount} but the manifest requires ${required.length} ids`);
-  }
-  if (pinnedDeferred !== deferred.length) {
-    problems.push(`EXPECTED_DEFERRED_COUNT is ${pinnedDeferred} but the manifest defers ${deferred.length} ids`);
-  }
-  return problems;
-}
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Mutation (`stryker.conf.json` `mutate`, break 65; `vitest.mutation.config.ts`)
@@ -529,66 +465,4 @@ export function exportProblems(where: string, names: readonly string[]): string[
   return names
     .filter((name) => RETIRED_EXPORTS.includes(name))
     .map((name) => `${where} still exports ${name}, a 0.9.5 name retired with its part (design.md §13, LS-2)`);
-}
-
-/**
- * The Quint change's proposal: the retirement list sets its status to Archived, its laws being retired. [design §13]
- */
-export const QUINT_PROPOSAL = "openspec/changes/v1.1.0-quint-model-checking/proposal.md";
-
-export function quintProblems(proposal: string): string[] {
-  // The status line and its continuation lines, up to the next bold item of the block quote or the quote's end.
-  const status = (/^> \*\*Status:\*\* ((?:.*)(?:\n> (?!\*\*).*)*)/m.exec(proposal)?.[1] ?? "").replace(/\n> /g, " ");
-  if (!status.startsWith("Archived")) return [`${QUINT_PROPOSAL}'s status is "${status}", not Archived (design.md §13)`];
-  for (const law of ["C2a", "C2b", "L1", "T1"]) {
-    if (!status.includes(law)) return [`${QUINT_PROPOSAL}'s Archived status does not give §13's reason (${law} retired)`];
-  }
-  return [];
-}
-
-// ---------------------------------------------------------------------------------------------------------------------
-// The retirement list's own words [design §13]
-// ---------------------------------------------------------------------------------------------------------------------
-
-/** The text of the retirement list: `design.md`'s section "13. Quality gates". */
-export function section13(design: string): string {
-  const start = design.indexOf("## 13. Quality gates");
-  const end = design.indexOf("\n## 14.", start);
-  return start < 0 ? "" : design.slice(start, end < 0 ? undefined : end);
-}
-
-/** The words the retirement list uses for each list above: the transcription is checked against them. */
-export const SECTION_13_TERMS: readonly string[] = [
-  "`UmbraDBFormal/TemporalKV/**`",
-  "`UmbraDBFormal/Checkpoint/**`",
-  "`UmbraDBFormalTest` counterparts",
-  "`Formal/Lean/UmbraDBFormal/Checkpoint.lean`",
-  "`UmbraDBFormal/TemporalKV/Retention.lean`",
-  "`checkpoint_union_comm/assoc/idem`",
-  "`APISmoke.watermark_overwrite`",
-  "`APISmoke.adjacent_Ico_disjoint`",
-  "`UmbraDBFormal/Watermarks/**`",
-  "Ids 1–4 (`crash-harness.smoke.*`)",
-  "Ids 5–25 and the deferred `crash.pg-kill-save.no-duplicate-with-idempotency-key`",
-  "`checkpoint-store`, `save-and-advance`, `watermarks`, `temporal-kv`, `transaction-lease`",
-  "`durability-probe` 97/92, `migrate` 90/85, `errors` 95/91 (moved paths)",
-  "`src/**` 90/85 by default",
-  "`src/determinism/**`, `src/deterministic-postgresql/**`, `src/helpers/**`",
-  "`tools/tape/**` 90/85",
-  "the `chain-archive` coverage exclusion",
-  "The five 0.9.5 adapters",
-  "Break threshold 65",
-  ...Object.keys(MUTATION_TARGETS).map((file) => `\`${file}\``),
-  "`src/backbone/core-ledger-state/refcount.ts` 95/90",
-  "`archive:sync`",
-  "Status set to Archived: its laws (C2a, C2b, L1, T1 cross-writer) are retired",
-  "TemporalKV, Watermarks, CheckpointStore, Lease and TransactionHistory workloads and their baseline",
-  "The 36-symbol pins, the error-catalog and retryability tables of 0.9.5",
-];
-
-/** One problem for each term the retirement list no longer says. */
-export function sectionProblems(section: string): string[] {
-  return SECTION_13_TERMS.filter((term) => !section.includes(term)).map(
-    (term) => `design.md §13 no longer says ${term}: the transcription in retirement.ts is out of date`,
-  );
 }

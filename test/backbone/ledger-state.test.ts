@@ -22,7 +22,6 @@ import {
   wrappedLog,
   zswapOutputTransaction,
 } from "../ledger/adapter-fixtures.js";
-import { outsideIn8 } from "../node/in8.js";
 import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../runner/process-backends.js";
 import { a92Problems, a93Problems } from "./chain-data-checks.js";
 import { hex } from "./fetch-fixtures.js";
@@ -73,12 +72,11 @@ const LOADER = new URL("../ledger/fixtures/ledger-test-loader.ts", import.meta.u
 
 const LEDGER_CORE: readonly ModuleDeclaration[] = [CORE_CHAIN_EVENTS, CORE_BLOCK_PARSED, CORE_TX_RESULTS, CORE_LEDGER_STATE];
 
-/** Every call the tape node received is one the ingest may make, and none went unanswered. [IN-8, A83] */
-function in8Problems(run: Ingest): string[] {
+/** The calls the tape node received that went unanswered (not on the tape, or an invalid request). [A83] */
+function unansweredCalls(run: Ingest): string[] {
   const calls = run.node.calls as readonly { readonly method: unknown; readonly outcome?: unknown }[];
-  const outside = outsideIn8(calls.map((call) => call.method as string));
   const unanswered = calls.filter((call) => call.outcome === "not-on-tape" || call.outcome === "invalid-request");
-  return [...outside.map((m) => `called ${m}`), ...unanswered.map((c) => `${String(c.method)}: ${String(c.outcome)}`)];
+  return unanswered.map((c) => `${String(c.method)}: ${String(c.outcome)}`);
 }
 
 /** Runs `scenario` from genesis with the ledger's core modules (and `user`), to its head unless it is to halt. */
@@ -101,7 +99,7 @@ async function run(
   } finally {
     await process.close();
   }
-  expect(in8Problems(process)).toEqual([]);
+  expect(unansweredCalls(process)).toEqual([]);
   return { ...process, status };
 }
 

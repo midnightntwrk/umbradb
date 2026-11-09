@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ERROR_CODES, type ErrorCode, UmbraError } from "../../src/db/errors.js";
 import { CallbackFailure } from "../../src/runner/dispatch.js";
@@ -10,27 +8,8 @@ import { statusOf, type StatusFacts } from "../../src/runner/process.js";
 /**
  * Why a process is refused or halted, and which failures it retries. `reasonOf` gives each failure a code from the
  * design's "Refusals and halts" section, with the height, module and point it happened at, never a message.
- * `retryOf` says which failures are retried instead of halting. The codes the reasons keep are bound here to that
- * section's own text, so the two lists cannot drift apart. [RN-8, IN-10, IN-12, AE-3, AE-5, AE-6; design §11]
+ * `retryOf` says which failures are retried instead of halting. [RN-8, IN-10, IN-12, AE-3, AE-5, AE-6; design §11]
  */
-
-const DESIGN = fileURLToPath(new URL("../../openspec/changes/core-arch/design.md", import.meta.url));
-
-/** The backticked codes of the paragraph of the design's "Refusals and halts" section that starts with `opening`, up
- *  to the next paragraph's. [design §11] */
-function section11Codes(opening: string, closing: string): Set<string> {
-  const text = readFileSync(DESIGN, "utf8");
-  const section = text.slice(text.indexOf("## 11. Refusals and halts"), text.indexOf("## 12. "));
-  const start = section.indexOf(opening);
-  const end = section.indexOf(closing);
-  // A reworded heading in that section must fail here, not widen the paragraph to the end of the section.
-  if (start < 0 || end < start) throw new Error(`design §11 no longer has "${opening}" before "${closing}"`);
-  const paragraph = section.slice(start, end);
-  return new Set([...paragraph.matchAll(/`([a-z][a-z0-9-]*)`/g)].map((match) => match[1] as string));
-}
-
-const known = (codes: Set<string>): string[] =>
-  [...codes].filter((code) => (ERROR_CODES as readonly string[]).includes(code)).sort();
 
 const reason = (code: ProcessReason["code"], rest: Partial<ProcessReason> = {}): ProcessReason => ({
   code,
@@ -45,23 +24,13 @@ function listenError(code: string): Error {
   return Object.assign(new Error(`listen ${code}: address already in use 127.0.0.1:10999`), { code, syscall: "listen" });
 }
 
-describe("the codes reasons keep: design §11's", () => {
-  it("REFUSAL_CODES are exactly §11's startup refusals that are UmbraError codes, and HALT_CODES its halts", () => {
-    const refusals = section11Codes("**Startup refuses**", "**Backup and restore refuse**");
-    const halts = section11Codes("**Processing halts**", "**The test tape's errors");
-    expect(refusals.size).toBeGreaterThan(40);
-    expect(halts.has("callback-error")).toBe(true);
-    expect([...REFUSAL_CODES].sort()).toEqual(known(refusals));
-    expect([...HALT_CODES].sort()).toEqual(known(halts));
-    // A callback's failure and a listener that cannot bind are UmbraError codes, so a startup's rejection carries them;
-    // the one halt code no UmbraError carries is the loop's own cursor check. [LM-9, design §11]
+describe("the codes reasons keep", () => {
+  it("REFUSAL_CODES and HALT_CODES are frozen; callback-error refuses and halts, listen-failed only refuses", () => {
+    // A callback's failure and a listener that cannot bind are UmbraError codes, so a startup's rejection carries them.
     expect(ERROR_CODES).toEqual(expect.arrayContaining(["callback-error", "listen-failed"]));
     expect(REFUSAL_CODES).toEqual(expect.arrayContaining(["callback-error", "listen-failed"]));
     expect(HALT_CODES).toContain("callback-error");
     expect(HALT_CODES).not.toContain("listen-failed");
-    const notErrorCodes = [...halts].filter((code) => !(ERROR_CODES as readonly string[]).includes(code));
-    expect(notErrorCodes).toContain("unexpected-cursor");
-    expect(notErrorCodes).not.toContain("callback-error");
     expect(Object.isFrozen(REFUSAL_CODES)).toBe(true);
     expect(Object.isFrozen(HALT_CODES)).toBe(true);
   });

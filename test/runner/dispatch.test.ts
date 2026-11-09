@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { type ModuleDeclaration, POINTS, type PointName } from "../../src/modules/declaration.js";
 import { type ResolvedRange, resolveGraph } from "../../src/modules/graph.js";
@@ -86,30 +84,11 @@ async function rejection(promise: Promise<unknown>): Promise<unknown> {
   return expect.unreachable("expected the dispatch to reject");
 }
 
-describe("design.md §2: which points run in series and which in parallel where the graph allows", () => {
-  /** The `| point | When | Handle | Runs |` rows of the design's points table. [design §2] */
-  function designRuns(): Map<string, string> {
-    const path = fileURLToPath(new URL("../../openspec/changes/core-arch/design.md", import.meta.url));
-    const text = readFileSync(path, "utf8");
-    const section = text.slice(text.indexOf("## 2. Points"), text.indexOf("## 3. Block source"));
-    const runs = new Map<string, string>();
-    for (const line of section.split("\n")) {
-      const match = /^\| `(on-[a-z-]+)` \|[^|]*\|[^|]*\| ([^|]+) \|$/.exec(line);
-      if (match !== null) runs.set(match[1] as string, (match[2] as string).trim());
-    }
-    return runs;
-  }
-
-  it("marks exactly the points the table runs 'Parallel where the graph allows', and lists every point", () => {
-    const runs = designRuns();
-    expect([...runs.keys()].sort()).toEqual([...POINTS].sort());
-    const parallel = [...runs].filter(([, how]) => how === "Parallel where the graph allows").map(([point]) => point);
-    expect([...PARALLEL_POINTS].sort()).toEqual(parallel.sort());
-    expect(parallel.sort()).toEqual(["on-compute", "on-fetch", "on-parse"]);
-    for (const [point, how] of runs) {
-      expect(isParallelPoint(point as PointName)).toBe(how === "Parallel where the graph allows");
-      if (!isParallelPoint(point as PointName)) expect(how.startsWith("In series")).toBe(true);
-    }
+describe("which points run in series and which in parallel where the graph allows", () => {
+  it("runs on-compute, on-fetch and on-parse in parallel where the graph allows, and every other point in series", () => {
+    const parallel = ["on-compute", "on-fetch", "on-parse"];
+    expect([...PARALLEL_POINTS].sort()).toEqual(parallel);
+    for (const point of POINTS) expect(isParallelPoint(point)).toBe(parallel.includes(point));
   });
 });
 

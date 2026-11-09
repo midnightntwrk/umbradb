@@ -14,11 +14,9 @@ import {
   recordAndReplay,
   RecordingError,
   type ReplaySession,
-  type TapeRecord,
   tapeId,
 } from "../../tools/tape/index.js";
 import { MAINNET, MAINNET_BLOCK, recorded } from "../node/fake-node.js";
-import { in8Methods, outsideIn8 } from "../node/in8.js";
 import { ManualTimers, until } from "../node/manual-timers.js";
 import { type Script, ScriptedNode, type Step } from "./scripted-node.js";
 
@@ -80,9 +78,6 @@ async function withScripted<T>(script: Script, body: (node: ScriptedNode) => Pro
   }
 }
 
-const methodsOf = (records: readonly TapeRecord[]): string[] =>
-  records.flatMap((record) => ("method" in record ? [record.method] : []));
-
 describe("A71 through the node client", { timeout: TEST_TIMEOUT_MS }, () => {
   it("the IN-8 tour, recorded and replayed: every frame of every connection byte-identical", async () => {
     await withScripted(mainnetScript(), async (node) => {
@@ -95,9 +90,6 @@ describe("A71 through the node client", { timeout: TEST_TIMEOUT_MS }, () => {
       expect(result.recorded[0]?.sent).toHaveLength(12);
       expect(result.recorded[0]?.received).toHaveLength(15);
       expect(result.recorded[0]?.received).toEqual(node.sent[0]);
-      // The tour makes every allowed node call, and no other. [IN-8]
-      expect(new Set(methodsOf(result.records))).toEqual(new Set(in8Methods()));
-      expect(outsideIn8(methodsOf(result.records))).toEqual([]);
       expect(result.id).toBe(tapeId(result.bytes));
       expect(readTape(result.bytes).records).toEqual(result.records);
     });

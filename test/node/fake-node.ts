@@ -12,9 +12,6 @@ import { WebSocket, WebSocketServer } from "ws";
  * - runs Substrate-style head subscriptions (`chain_newHead`, `chain_finalizedHead` notifications);
  * - can refuse the WebSocket handshake with an HTTP status, stay silent, drop every connection, send frames that are
  *   not JSON-RPC, and stop answering pings.
- *
- * Every request any fake node received in this process is also kept in {@link RECEIVED_BY_ANY_NODE}, for the suites'
- * check that the client used only the allowed node methods. [IN-8]
  */
 
 /** One request a fake node received. */
@@ -40,9 +37,6 @@ export const NOTIFICATIONS = {
   chain_subscribeNewHeads: "chain_newHead",
   chain_subscribeFinalizedHeads: "chain_finalizedHead",
 } as const;
-
-/** Every request every fake node of this process received, in order. */
-export const RECEIVED_BY_ANY_NODE: Received[] = [];
 
 interface Recorded {
   readonly method: string;
@@ -224,7 +218,6 @@ export class FakeNode {
     const message = JSON.parse(text) as { id: unknown; method: string; params: unknown };
     const request: Received = { method: message.method, params: message.params, id: message.id, connection };
     this.received.push(request);
-    RECEIVED_BY_ANY_NODE.push(request);
     const params = Array.isArray(message.params) ? (message.params as unknown[]) : [];
     const answer = this.#answer(socket, params, request);
     if ("silent" in answer) return;

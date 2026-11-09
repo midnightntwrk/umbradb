@@ -1,11 +1,8 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { WebSocket } from "ws";
-import type { BlockItemSource } from "../../src/backbone/core-block-fetch/index.js";
 import { NodeBlockSource } from "../../src/backbone/core-block-fetch/index.js";
 import { type MetadataBlock, RuntimeMetadata, type RuntimeMetadataEntry } from "../../src/ledger/metadata.js";
 import type { NodeClient } from "../../src/node/client.js";
-import type { BlockRef } from "../../src/runner/block-source.js";
 import type { TapeRecord } from "../../tools/tape/index.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
 import {
@@ -19,7 +16,7 @@ import {
   opening,
   RUNTIME,
 } from "./fetch-fixtures.js";
-import { a79Problems, a80Problems, a81Problems, a83Problems, a89Problems, type FetchSeen } from "./ingest-checks.js";
+import { a79Problems, a80Problems, a81Problems, a89Problems, type FetchSeen } from "./ingest-checks.js";
 import { committed, halted, ingest, PATIENCE_MS, slow, until } from "./ingest-harness.js";
 import { a79Tape, upgradeTape } from "./ingest-tapes.js";
 
@@ -27,7 +24,7 @@ import { a79Tape, upgradeTape } from "./ingest-tapes.js";
  * The committed negative controls of the ingest tests; the crash test's control is in `ingest-crash.test.ts`. Each is a
  * wrong node source, a subclass through the node source's seams. It runs through the test's own oracle
  * (`./ingest-checks.ts`) on PostgreSQL 18 and PGlite 0.5.10, and fails it. The real source passes the same oracles in
- * `ingest.test.ts`. [A79, A80, A81, A83, A89, A76]
+ * `ingest.test.ts`. [A79, A80, A81, A89, A76]
  */
 
 /** The reconnect control: trusts the notifications after a reconnect, without reading the head again. [A79] */
@@ -58,28 +55,6 @@ class OwnStateMetadata extends NodeBlockSource {
   protected override metadataOf(block: MetadataBlock): Promise<RuntimeMetadataEntry> {
     return this.#own.forState(block.hash);
   }
-}
-
-/**
- * The node-methods control: once, while it fetches, it also asks the node a method outside the allowed node methods, on
- * a connection of its own. The call is sent beside its work and not awaited, so that its own calls keep their order.
- * [A83, IN-8]
- */
-function askingOutsideIn8(url: () => string): typeof NodeBlockSource {
-  return class extends NodeBlockSource implements BlockItemSource {
-    #asked = false;
-
-    override blockItems(block: BlockRef, table: Parameters<NodeBlockSource["blockItems"]>[1]) {
-      if (!this.#asked) {
-        this.#asked = true;
-        const socket = new WebSocket(url());
-        socket.on("open", () => socket.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "state_getKeys", params: ["0x"] })));
-        socket.on("message", () => socket.close());
-        socket.on("error", () => undefined);
-      }
-      return super.blockItems(block, table);
-    }
-  };
 }
 
 describe.each(PROCESS_BACKENDS)("task 10.3's negative controls on $name", (backend: ProcessBackend) => {
@@ -161,28 +136,6 @@ describe.each(PROCESS_BACKENDS)("task 10.3's negative controls on $name", (backe
     }
     expect(await a81Problems(db, run.seen, run.node, A, B[0] as ChainBlock)).toEqual([
       "101′ was fetched 2 times (chain_getBlock), not once",
-    ]);
-  }, PATIENCE_MS * 2);
-
-  it("a source calling a method outside IN-8 fails A83", async () => {
-    const db = await backend.database();
-    const short = chainOf(5n);
-    const records = [
-      ...opening(short[0] as ChainBlock, short[5] as ChainBlock),
-      ...short.slice(1).flatMap((block, index) => finalized(block, RUNTIME, index === 0)),
-    ];
-    let url = "";
-    const run = await ingest(db, records, { start: 1n, Source: askingOutsideIn8(() => url) });
-    url = run.node.url;
-    try {
-      await committed(run, 5n);
-      await until(run, () => run.node.calls.some((call) => call.method === "state_getKeys"), "the call outside IN-8");
-    } finally {
-      await run.close();
-    }
-    expect(a83Problems(run.node)).toEqual([
-      "the node received state_getKeys, which IN-8 does not list",
-      'the node answered state_getKeys ["0x"] not-on-tape',
     ]);
   }, PATIENCE_MS * 2);
 

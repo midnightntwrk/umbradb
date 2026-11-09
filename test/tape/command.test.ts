@@ -1,6 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   type RecordAndReplayResult,
@@ -9,11 +10,12 @@ import {
   type TapeCommandIo,
   tapeId,
 } from "../../tools/tape/index.js";
-import { REPOSITORY } from "../node/in8.js";
 import { until } from "../node/manual-timers.js";
 import { RawClient } from "./raw-client.js";
 import { type Script, ScriptedNode } from "./scripted-node.js";
 import { spawnChild } from "../child-processes.js";
+
+const REPOSITORY = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 /**
  * The tape tools' command (`tools/tape/main.ts`, its logic in `tools/tape/command.ts`):

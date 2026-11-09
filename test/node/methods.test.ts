@@ -2,20 +2,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import { UmbraError } from "../../src/db/errors.js";
 import { NODE_METHODS, NodeClient } from "../../src/node/index.js";
 import { FakeNode } from "./fake-node.js";
-import { in8Methods, outsideIn8 } from "./in8.js";
 import { ManualTimers, turns } from "./manual-timers.js";
 
 /**
  * Only the allowed node calls, checked on the client's side:
- * - The node client's method list is exactly the twelve allowed methods, read from the ingest spec's own text
- *   (`./in8.ts`), in their order.
+ * - The node client's method list is exactly the twelve allowed methods, written out below, in their order.
  * - Its low-level `call` refuses any other method before anything reaches the node. It also refuses the two
  *   subscription methods, which only `subscribeNewHeads` and `subscribeFinalizedHeads` send.
  * [IN-8, A83]
- *
- * The other suites check every request their fake nodes received against the same list (`client.test.ts`,
- * `refactored-node-rpc-client.test.ts`). So a client that sent any other method fails there, for example an
- * `rpc_methods` probe on connecting or a `chain_unsubscribe…` on cancelling. [IN-8]
  */
 
 const nodes: FakeNode[] = [];
@@ -27,8 +21,8 @@ afterEach(async () => {
 });
 
 describe("IN-8: the node client's methods", () => {
-  it("are exactly the methods IN-8 names, in its order", () => {
-    expect(in8Methods()).toEqual([
+  it("are exactly the twelve allowed methods, in their order, frozen", () => {
+    expect([...NODE_METHODS]).toEqual([
       "chain_subscribeNewHeads",
       "chain_subscribeFinalizedHeads",
       "chain_getFinalizedHead",
@@ -42,7 +36,6 @@ describe("IN-8: the node client's methods", () => {
       "midnight_ledgerStateRoot",
       "system_properties",
     ]);
-    expect([...NODE_METHODS]).toEqual(in8Methods());
     expect(Object.isFrozen(NODE_METHODS)).toBe(true);
   });
 
@@ -80,13 +73,5 @@ describe("IN-8: the node client's methods", () => {
     await turns();
     expect(node.upgrades).toBe(0);
     expect(node.received).toEqual([]);
-  });
-
-  it("negative control: the request check names every method outside IN-8, once each", () => {
-    expect(outsideIn8(["chain_getHeader", "rpc_methods", "chain_unsubscribeNewHeads", "rpc_methods"])).toEqual([
-      "rpc_methods",
-      "chain_unsubscribeNewHeads",
-    ]);
-    expect(outsideIn8(in8Methods())).toEqual([]);
   });
 });

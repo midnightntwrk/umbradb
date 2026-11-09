@@ -276,23 +276,7 @@ describe.each(PROCESS_BACKENDS)("core-ledger-state's stored state through the pr
   }, PATIENCE_MS * 4);
 });
 
-describe("A102 [STATIC]: core-ledger-state's tables are the node layout of design §10, and no table stores a whole serialized state", () => {
-  const DESIGN = fileURLToPath(new URL("../../openspec/changes/core-arch/design.md", import.meta.url));
-
-  /** The columns the table rows of `DESIGN` give each `core_ledger_state` table (the key's, then the others'). [design §10] */
-  function designColumns(): Map<string, string[]> {
-    const tables = new Map<string, string[]>();
-    for (const line of readFileSync(DESIGN, "utf8").split("\n")) {
-      const cells = line.split("|").map((cell) => cell.trim());
-      if (cells[1] !== "`core-ledger-state`") continue;
-      const names = [...(cells[2] as string).matchAll(/`core_ledger_state\.([a-z_]+)`/g)].map((m) => m[1] as string);
-      const key = (cells[3] as string).replace(/[()]/g, "").replace(/ = 1$/, "").split(",").map((c) => c.trim()).filter((c) => /^[a-z_]+$/.test(c));
-      const others = (cells[4] as string) === "—" ? [] : (cells[4] as string).split(" — ")[0]!.split(/,(?![^(]*\))/).map((c) => /^\s*([a-z_]+)/.exec(c)?.[1]).filter((c): c is string => c !== undefined);
-      for (const name of names) tables.set(name, [...key, ...others]);
-    }
-    return tables;
-  }
-
+describe("A102 [STATIC]: core-ledger-state's tables hold a node layout, and no table stores a whole serialized state", () => {
   /** The columns `core-ledger-state`'s migrations create in each table. */
   function migrationColumns(): Map<string, string[]> {
     const tables = new Map<string, string[]>();
@@ -305,11 +289,8 @@ describe("A102 [STATIC]: core-ledger-state's tables are the node layout of desig
     return tables;
   }
 
-  it("creates every table of design §10 with exactly its columns; a node is its key, data and children, and a state its key and root", () => {
-    const design = designColumns();
+  it("a node is its key, data and children, and a state its key and root", () => {
     const migrations = migrationColumns();
-    expect([...migrations.keys()].sort()).toEqual([...design.keys()].sort());
-    for (const [table, columns] of migrations) expect(new Set(columns), table).toEqual(new Set(design.get(table)));
     expect(migrations.get("nodes")).toEqual(["node_key", "data", "children"]);
     expect(migrations.get("states")?.filter((c) => c.startsWith("state"))).toEqual(["state_key", "state_root"]);
   });

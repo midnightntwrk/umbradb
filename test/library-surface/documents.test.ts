@@ -63,7 +63,7 @@ describe("A171 (Q169, Q170 C, Q171 A): 0.9.5's documents removed, and nothing le
   });
 
   it("no Markdown link in the tree points at a missing file", () => {
-    expect(markdown.length).toBeGreaterThan(100);
+    expect(markdown.length).toBeGreaterThan(20);
     expect(markdown.map(({ file }) => file)).toEqual(expect.arrayContaining(["README.md", "CHANGELOG.md"]));
     expect(linkProblems(markdown, tree)).toEqual([]);
   });

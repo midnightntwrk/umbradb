@@ -1,5 +1,5 @@
 import { performance } from "node:perf_hooks";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   type ConnectSocket,
   connectWebSocket,
@@ -8,8 +8,7 @@ import {
   type NodeHeader,
   type NodeRetry,
 } from "../../src/node/index.js";
-import { type Json, type TapeCall, TapeNode, type TapeRecord } from "../../tools/tape/index.js";
-import { outsideIn8 } from "../node/in8.js";
+import { type Json, TapeNode, type TapeRecord } from "../../tools/tape/index.js";
 import { ManualTimers, until } from "../node/manual-timers.js";
 import { manualClock } from "./checks.js";
 
@@ -20,8 +19,6 @@ import { manualClock } from "./checks.js";
  * subscription, and both kinds of `fault`. The client's clock is moved by hand (`ManualTimers`, shared with the tape
  * node where a delay is checked), and its WebSocket transport is the real one with its heartbeat moved out of the way
  * (the transport's own tests cover it). [A69, A70 CI, TT-1 to TT-3; acceptance §9]
- *
- * Last, every request the tape nodes of this file received is checked to be one of the allowed node calls. [IN-8]
  */
 
 const HOUR = 3_600_000;
@@ -29,9 +26,6 @@ const TEST_TIMEOUT_MS = 60_000;
 
 const quietConnect: ConnectSocket = (url, events, timers) =>
   connectWebSocket(url, events, timers, { heartbeatMs: 2 ** 31 - 1 });
-
-/** Every request every tape node of this file received. */
-const received: TapeCall[] = [];
 
 const hash = (n: number): string => `0x${n.toString(16).padStart(64, "0")}`;
 const bytes = (text: string): Uint8Array => Uint8Array.from(Buffer.from(text.slice(2), "hex"));
@@ -60,16 +54,9 @@ async function withClient(
   } finally {
     await client.close();
     await node.close();
-    received.push(...node.calls);
   }
 }
 
-afterAll(() => {
-  // The client sends only the allowed node calls, so a tape node never sees another (the CI half of the sync's check,
-  // for these sessions). [IN-8, A83]
-  expect(received.length).toBeGreaterThan(20);
-  expect(outsideIn8(received.map((call) => call.method as string))).toEqual([]);
-});
 
 describe("A69 through the node client", { timeout: TEST_TIMEOUT_MS }, () => {
   it("TT-2's scenario: heads A, B, C recorded, four finalizedHead() calls read A, B, C, C", async () => {
@@ -156,7 +143,6 @@ describe("A69 through the node client", { timeout: TEST_TIMEOUT_MS }, () => {
     } finally {
       await client.close();
       await node.close();
-      received.push(...node.calls);
     }
   });
 

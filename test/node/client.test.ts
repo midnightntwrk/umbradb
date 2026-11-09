@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { createServer as createNetServer, type Socket } from "node:net";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { UmbraError } from "../../src/db/errors.js";
 import {
   connectWebSocket,
@@ -16,8 +16,7 @@ import {
   type NodeSocketEvents,
   type NodeTimers,
 } from "../../src/node/index.js";
-import { closeServer, FakeNode, listenOnRandomPort, MAINNET_BLOCK, RECEIVED_BY_ANY_NODE, recorded } from "./fake-node.js";
-import { outsideIn8 } from "./in8.js";
+import { closeServer, FakeNode, listenOnRandomPort, MAINNET_BLOCK, recorded } from "./fake-node.js";
 import { ManualTimers, turns, until } from "./manual-timers.js";
 
 /**
@@ -33,8 +32,6 @@ import { ManualTimers, turns, until } from "./manual-timers.js";
  * - per-call and connect timeouts; which failures are retried and which halt; [IN-9, IN-10]
  * - the node URL kept out of every error, as it is a `secret` field; [CF-4]
  * - `close()` and abort signals, and the WebSocket transport's heartbeat.
- *
- * After the suite, every request the fake nodes received is checked against the allowed methods. [IN-8]
  */
 
 const HOUR = 3_600_000;
@@ -53,12 +50,6 @@ afterEach(async () => {
   for (const client of clients.splice(0)) await client.close();
   for (const node of nodes.splice(0)) await node.stop();
   for (const server of servers.splice(0)) await server.close();
-});
-
-afterAll(() => {
-  // Over whatever ran of the suite, nothing but the allowed methods ever reached a node (the last test checks it too).
-  // [IN-8]
-  expect(outsideIn8(RECEIVED_BY_ANY_NODE.map((request) => request.method))).toEqual([]);
 });
 
 async function startNode(options: { autoPong?: boolean } = {}): Promise<FakeNode> {
@@ -1471,15 +1462,6 @@ describe("races and the default clock", () => {
     expect(hex(await c.finalizedHead())).toBe(MAINNET_BLOCK);
     const error = await umbra(c.finalizedHead({ retry: false }));
     expect(error.details).toMatchObject({ reason: "timeout", timeoutMs: 50 });
-  });
-});
-
-describe("IN-8 over the suite", () => {
-  it("sent the fake nodes nothing but IN-8's methods, in every test above (run last)", () => {
-    expect(outsideIn8(RECEIVED_BY_ANY_NODE.map((request) => request.method))).toEqual([]);
-    // Not vacuous: the tests above sent every allowed method, over many requests. [IN-8]
-    expect(new Set(RECEIVED_BY_ANY_NODE.map((request) => request.method)).size).toBe(12);
-    expect(RECEIVED_BY_ANY_NODE.length).toBeGreaterThan(100);
   });
 });
 

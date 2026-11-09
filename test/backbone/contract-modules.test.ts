@@ -1,7 +1,6 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { type ContractLog, contractLogsItemOf, writeLogRows } from "../../src/backbone/contract-logs/contract-logs.js";
-import { CONTRACT_LOGS_MIGRATIONS, LOG_EVENT_TYPES } from "../../src/backbone/contract-logs/sql.js";
+import { LOG_EVENT_TYPES } from "../../src/backbone/contract-logs/sql.js";
 import type { BlockTransaction } from "../../src/backbone/core-block-parsed/core-block-parsed.js";
 import {
   CONTRACT_LOG_SITES_TASK,
@@ -14,7 +13,6 @@ import { mainThreadLogReader as inThreadLogReader } from "./main-thread-log-read
 import { literalAt, type LogSite, logSitesOf } from "../../src/backbone/core-contract-logs-fast/transcripts.js";
 import { fullLogsOf } from "../../src/backbone/core-contract-logs-full/core-contract-logs-full.js";
 import { contractStatesOf, writeStateRows } from "../../src/backbone/core-contract-states/core-contract-states.js";
-import { CONTRACT_STATES_MIGRATIONS } from "../../src/backbone/core-contract-states/sql.js";
 import { loadLedgerPackage } from "../../src/ledger/load.js";
 import type { ChainOutcome, LedgerPackage, VmLog } from "../../src/ledger/types.js";
 import type { BlockContext } from "../../src/modules/declaration.js";
@@ -387,24 +385,8 @@ describe("core-contract-states' rows (CC-1)", () => {
   });
 });
 
-describe("the tables of design §10 (CC-1, CC-2)", () => {
-  /** The columns the design gives `table`'s row (the key's, then the others'). [design §10] */
-  function designColumns(table: string): string[] {
-    const design = readFileSync(new URL("../../openspec/changes/core-arch/design.md", import.meta.url), "utf8");
-    const line = design.split("\n").find((l) => l.includes(`| \`${table}\` |`)) as string;
-    const cells = line.split("|").map((cell) => cell.trim());
-    const key = (cells[3] as string).replace(/[()]/g, "").split(",").map((c) => c.trim());
-    const others = (cells[4] as string).split(" — ")[0]!.split(/,(?![^(]*\))/).map((c) => /^\s*([a-z_]+)/.exec(c)?.[1] as string);
-    return [...key, ...others];
-  }
-  const created = (sql: string): string[] =>
-    (/\(\n([\s\S]*?)\n\)/.exec(sql)?.[1] as string).split("\n").map((l) => /^\s*([a-z_]+) [a-z]/.exec(l)?.[1]).filter((c): c is string => c !== undefined && c !== "primary");
-
-  it("contract_logs.logs and core_contract_states.states have exactly design §10's columns, the event types the spec's", () => {
-    expect(new Set(created(CONTRACT_LOGS_MIGRATIONS[0]!.sql))).toEqual(new Set(designColumns("contract_logs.logs")));
-    expect(new Set(created(CONTRACT_STATES_MIGRATIONS[0]!.sql))).toEqual(new Set(designColumns("core_contract_states.states")));
-    const spec = readFileSync(new URL("../../openspec/changes/core-arch/specs/contract-data/spec.md", import.meta.url), "utf8");
-    for (const type of LOG_EVENT_TYPES) expect(spec).toContain(`\`${type}\``);
+describe("contract_logs.logs' event types", () => {
+  it("are eleven", () => {
     expect(LOG_EVENT_TYPES).toHaveLength(11);
   });
 });
