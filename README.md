@@ -602,7 +602,8 @@ The PostgreSQL suites run PostgreSQL 18 in Docker (Testcontainers); the browser 
 headless (`UMBRADB_CHROME` names another).
 
 Recorded tapes: [releases](https://github.com/midnight-experiments/umbradb-tapes/releases) ·
-[v0.10.0-rc.1](https://github.com/midnight-experiments/umbradb-tapes/releases/tag/v0.10.0-rc.1).
+[v0.10.0-rc.1](https://github.com/midnight-experiments/umbradb-tapes/releases/tag/v0.10.0-rc.1) ·
+[v0.10.0-tapes-2026-11-09](https://github.com/midnight-experiments/umbradb-tapes/releases/tag/v0.10.0-tapes-2026-11-09) (the runtime 2.1 delayed upgrades).
 Download the tape assets into a directory and set `UMBRADB_TAPES` to it. Rename or symlink the release asset
 `devnet-0-235-v8-v9.tape.jsonl` to `devnet-v8-v9-0-235.tape.jsonl`, the name in `test/tape/real/manifest.json`; the
 bytes are identical. A test checks each tape's size and SHA-256, and is skipped with a named reason when the tape is
