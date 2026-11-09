@@ -71,9 +71,10 @@
  * `core-chain-events`; its cNight registrations are not read, since no core module consumes them.
  *
  * **The items** `core-block-fetch` publishes for a block ({@link NodeBlockSource.blockItems}, `./items.ts`) come from
- * the block fetched, the ledger table (`selectLedgerVersion`), and the metadata of the runtime in its parent's state
- * (`RuntimeMetadata.forBlock`: one `state_getRuntimeVersion` per block, one `state_getMetadata` per runtime), which
- * decodes its extrinsics. Every call it makes is one the system is allowed to make.
+ * the block fetched, the ledger table (`selectLedgerVersion`), and the metadata of the runtime that built it, its
+ * parent's state's or, at a delayed upgrade's first block, its own (`RuntimeMetadata.forBlock`: one
+ * `state_getRuntimeVersion` per block, two at that block, one `state_getMetadata` per runtime), which decodes its
+ * extrinsics. Every call it makes is one the system is allowed to make.
  *
  * **A block's chain events** ({@link NodeBlockSource.blockEvents}, `./events.ts`): `System::Events` read with
  * `state_getStorage` at the block's own hash, for `core-chain-events`, which decodes them. For a queued best block they
@@ -447,7 +448,7 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
   // ── seams (a negative control's) ────────────────────────────────────────────────────────────────────────────────
 
   /**
-   * The metadata `block`'s content is decoded with: the runtime in its parent's state (`forBlock`). A best block's is
+   * The metadata `block`'s content is decoded with: the runtime that built it (`forBlock`). A best block's is
    * read without retries.
    */
   protected metadataOf(block: MetadataBlock, best: boolean): Promise<RuntimeMetadataEntry> {

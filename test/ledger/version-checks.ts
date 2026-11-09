@@ -158,15 +158,21 @@ export const runtimeAt = (h: number): number => (h < UPGRADE.u ? UPGRADE.old : U
 const parentOf = (h: number): Uint8Array => (h === 0 ? new Uint8Array(32) : hashOf(h - 1));
 
 /**
- * The synthetic devnet's tape: per height, the block hash, the header (its digest the `MNSV` item of {@link mnsvOf},
- * or `digestOf`'s), and the runtime version and metadata at its state (the tape file's call records, answered by the
- * tape node).
+ * The runtime in the state after block `h` under a delayed upgrade (runtime 2.1's `system_version` 3): U only stages the
+ * new code, so U's state still holds the old runtime; F is built by the new one and its state holds it.
  */
-export function upgradeTape(digestOf: (h: number) => number = mnsvOf): TapeRecord[] {
+export const delayedRuntimeAt = (h: number): number => (h <= UPGRADE.u ? UPGRADE.old : UPGRADE.new);
+
+/**
+ * The synthetic devnet's tape: per height, the block hash, the header (its digest the `MNSV` item of {@link mnsvOf},
+ * or `digestOf`'s), and the runtime version and metadata at its state (`runtimeOf`'s: {@link runtimeAt}, the earlier
+ * form, unless given; the tape file's call records, answered by the tape node).
+ */
+export function upgradeTape(digestOf: (h: number) => number = mnsvOf, runtimeOf: (h: number) => number = runtimeAt): TapeRecord[] {
   const records: TapeRecord[] = [];
   for (let h = 0; h <= UPGRADE.last; h++) {
     const hash = toHex(hashOf(h));
-    const runtime = runtimeAt(h);
+    const runtime = runtimeOf(h);
     records.push(
       { method: "chain_getBlockHash", params: [h], result: hash },
       {
