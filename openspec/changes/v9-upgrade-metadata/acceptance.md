@@ -20,17 +20,18 @@ tape-based case is skipped by name when its tape is absent). The requirement eac
   parent-first selection of `core-arch` LG-4 halts at 1,572 with `metadata-mismatch`. (LG-4)
 - **V2** `[CI][NEG]` Tapes over the delayed upgrade on mainnet (around 3,346,139) and preprod (around 3,348,434),
   replayed with `core-contract-logs-fast`'s core from a few blocks before the upgrade, commit every height; the first
-  block of the new runtime is decoded with that runtime's metadata, its transactions equal the node's block body's.
+  block of the new runtime is decoded with that runtime's metadata: its chain events decode and are stored.
   **Negative control:** the parent-first selection halts at that block. (LG-4)
 - **V3** `[CI]` The replays over earlier-form upgrades pass unchanged: `devnet-v8-v9-0-235`,
   `mainnet-1774000-1780000` and `preview-1073620-1075620` (their existing tests). (LG-4)
-- **V4** `[CI][NEG]` Over a fake node, the selection decodes a block with its own state's runtime when that one's
-  version is the `MNSV` version, with its parent's when only that one's is (the earlier form's U), and halts
-  `metadata-mismatch` when neither is, naming the block's height and hash, its `MNSV` version and both versions read;
-  a runtime's metadata is cached only under the version read at the hash it was read at. **Negative control:** a
-  selection that caches the metadata under the `MNSV` version stores a runtime's metadata under another runtime's
-  version in the earlier form's U. (LG-4)
-- **V5** `[CI]` Per block, the tape node's call log shows `state_getRuntimeVersion` at the block's own hash, and at its
-  parent's hash only at an earlier-form enactment block. (LG-4, IN-8)
+- **V4** `[CI][NEG]` Over a fake node, the selection decodes a block with its parent's runtime when that one's version
+  is the `MNSV` version (every block of the earlier form, its U included), with its own state's when only that one's is
+  (a delayed upgrade's first block), and halts `metadata-mismatch` when neither is, naming the block's height and hash,
+  its `MNSV` version and both versions read, and reading no metadata; a runtime's metadata is cached only under the
+  version read at the hash it was read at. **Negative control:** `core-arch`'s parent-only selection halts at the delayed
+  upgrade's first block of the fake node. (LG-4)
+- **V5** `[CI]` Per block, the tape node's call log shows the content's `state_getRuntimeVersion` at the block's parent's
+  hash (block 0: its own), and at its own hash only at a delayed upgrade's first block; `state_getMetadata` is read only
+  at hashes the tapes hold (no `not-on-tape`). (LG-4, IN-8)
 - **V6** `[DOC]` `core-arch` design §5 ("Metadata") and `src/ledger/metadata.ts`'s comment state the rule with both
   forms; `docs/issues/00089` is CLOSED with the fix's reason.
