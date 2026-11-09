@@ -1,6 +1,7 @@
 # Tasks — V9-UPGRADE-METADATA
 
-No implementation code before the stage-1 gate (the cold adversarial review of this change and the owner's approval).
+The stage-1 gate: the owner approved the spec on 2026-11-09 and skipped its cold adversarial review (an owner
+decision under AGENTS.md's bounded review; the review lanes of 5.1 still run on the built change).
 Then one task per change set, test first: write the tests for the task's criteria, watch them fail for the intended
 reason, implement until they pass; a `[NEG]` criterion's negative control is committed and seen failing for its own
 reason with the fault put back. A task's criteria are `acceptance.md`'s, verbatim. After each task: `npm run typecheck`
@@ -22,15 +23,15 @@ and the tests it touched green, and the task checked here.
 
 ## 2. The selection (D1, D2)
 
-- [ ] 2.1 `RuntimeMetadata.forBlock`: own state first, then the parent's, else `metadata-mismatch` naming both
+- [x] 2.1 `RuntimeMetadata.forBlock`: own state first, then the parent's, else `metadata-mismatch` naming both
       versions; the call order of D2.
       **Acceptance:** V4, V5.
-- [ ] 2.2 The replays across both forms.
+- [x] 2.2 The replays across both forms.
       **Acceptance:** V1, V2, V3.
 
 ## 3. Documents
 
-- [ ] 3.1 `core-arch` design §5 ("Metadata"), `src/ledger/metadata.ts`'s comment, `node-source.ts`'s; issue 00089
+- [x] 3.1 `core-arch` design §5 ("Metadata"), `src/ledger/metadata.ts`'s comment, `node-source.ts`'s; issue 00089
       closed.
       **Acceptance:** V6.
 

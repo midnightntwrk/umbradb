@@ -893,10 +893,12 @@ As built (task 12.2, `src/ledger/version-table.ts`, `networks.ts`, `networks.jso
   configured table (u32 versions, bounds in order, a ledger this build carries, no version in two configured rows, one
   pin a height, each pin's version covered) and give the table in effect as the parsed `ledgerTable` (`.overwrite`), so
   the history records the table a revision ran with.
-- **Metadata** (`RuntimeMetadata`): `forBlock(block)` reads the runtime version at the parent hash (block 0: its own),
-  halts with `metadata-mismatch` unless its `spec_version` is the block's `MNSV` version, and returns that version's
-  metadata, read once at that hash and cached under it (concurrent first reads share one call; a failed read is not
-  kept); `forState(hash)` gives the runtime of a block's own state, which differs from its content's only at U.
+- **Metadata** (`RuntimeMetadata`): `forBlock(block)` reads the runtime version at the parent hash (block 0: its own)
+  and, when its `spec_version` is not the block's `MNSV` version, at the block's own hash (the first block of a delayed
+  upgrade, runtime 2.1's `system_version` 3: `v9-upgrade-metadata`); it halts with `metadata-mismatch` when neither
+  is, naming both, and returns the matching version's metadata, read once at that hash and cached under it (concurrent
+  first reads share one call; a failed read is not kept); `forState(hash)` gives the runtime of a block's own state,
+  which differs from its content's only at the earlier form's U.
 
 ### 5.3 The ledger worker and the node-store bridge (LG-10, LG-11)
 

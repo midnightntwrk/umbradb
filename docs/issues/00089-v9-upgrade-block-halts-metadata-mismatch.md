@@ -1,6 +1,8 @@
 # 00089 — The first block of the v9 runtime halts with `metadata-mismatch` on every network
 
-- **Status:** OPEN
+- **Status:** CLOSED — fixed by the change `v9-upgrade-metadata` (branch `00089-v9-upgrade-metadata`, PR #24): a
+  block's content is decoded with its parent's runtime when that one's version is the `MNSV` version, else with its
+  own state's, else it halts naming both; `test/ledger/delayed-upgrade.test.ts` replays the three networks' upgrades.
 - **Area:** ledger (runtime metadata selection, LG-4)
 - **Severity:** high — a process that follows mainnet, preprod or preview across its upgrade to runtime 2,001,100
   halts at the first block of that runtime and cannot go on; only a database whose S is above that block runs.
