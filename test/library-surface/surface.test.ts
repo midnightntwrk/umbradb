@@ -24,6 +24,12 @@ describe("what src/index.ts exports", () => {
     for (const name of ["MessagePortLike", "PrivateLinkChannel"]) expect(found.types).toContain(name);
   });
 
+  it("exports the token-metadata module's declaration, with its id and entry builder, and its start-after-database error", () => {
+    expect(umbra.TOKEN_METADATA.id).toBe("token-metadata");
+    expect(umbra.TOKEN_METADATA.entry({ start: 0, config: {} }).id).toBe("token-metadata");
+    expect(typeof umbra.TokenMetadataStartAfterDatabase).toBe("function");
+  });
+
   it("each core module's declaration has its module's id and an entry builder a configuration writes", () => {
     expect(coreModuleProblems(umbra as unknown as Record<string, unknown>)).toEqual([]);
   });

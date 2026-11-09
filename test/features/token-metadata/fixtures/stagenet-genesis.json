@@ -1,0 +1,29 @@
+{
+ "about": "The two calls about stagenet's genesis block that startup makes (its hash, chain_getBlockHash [0], and its header), copied verbatim from records 2 and 19 of the tape stagenet-0-10000 (test/tape/real/manifest.json, SHA-256 a21d1ca8e0665c53e1545c3ce3683ea471cbdfb81f75821e66df6ff5a24d80ee). The tapes stagenet-714485-715183 and stagenet-715402-715433 start mid-chain and do not hold them; stagenet.test.ts puts them before those tapes' records.",
+ "records": [
+  {
+   "method": "chain_getBlockHash",
+   "params": [
+    0
+   ],
+   "result": "0x2f76825abc239fecf6107c9df99016de57037b451ae57a4394b76c8cf53a9491"
+  },
+  {
+   "method": "chain_getHeader",
+   "params": [
+    "0x2f76825abc239fecf6107c9df99016de57037b451ae57a4394b76c8cf53a9491"
+   ],
+   "result": {
+    "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "number": "0x0",
+    "stateRoot": "0x654b4d4206dbcb2a8f5464e56ad82f06b56ad299771c147a0fb5b75d6d6cc3ef",
+    "extrinsicsRoot": "0x174ddb1b787b194bc46720b6a686b803397fb28fe3d0695f4c3ec9d4ffdcfabc",
+    "digest": {
+     "logs": [
+      "0x044d4e53561080841e00"
+     ]
+    }
+   }
+  }
+ ]
+}
