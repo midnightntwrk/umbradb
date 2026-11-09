@@ -19,11 +19,11 @@ import { CORE_SETTINGS, REPOSITORY } from "./config-fixtures.js";
 /**
  * The configuration file is evaluated to plain data: objects, arrays, strings, booleans, `null` and integers from 0
  * to 2^53 − 1. Anything else in it refuses startup with `not-plain-data`, naming its path inside the configuration
- * (`entries[1].config.onError`). [A26, CF-1]
+ * (`entries[1].config.onError`).
  *
- * The `A26` table holds the seven specified values: a function, a class instance, `undefined`, a bigint, 1.5, −1 and
+ * The `A26` table holds seven values: a function, a class instance, `undefined`, a bigint, 1.5, −1 and
  * 2^53. Each sits in a configuration file written as an operator writes one, and is loaded by the loader startup calls
- * (`loadConfig`); the runner's refused state is tested elsewhere. [A26]
+ * (`loadConfig`); the runner's refused state is tested elsewhere.
  *
  * The plain-data check also refuses the other values that are not data (a symbol, an array's hole, a getter, …), each
  * by a rule of its own. The committed negative control shows that a check without one rule fails exactly that rule's
@@ -82,7 +82,7 @@ interface Row {
 
 const A26: readonly Row[] = [
   {
-    name: "a function (CF-1's scenario)",
+    name: "a function",
     rule: "function",
     path: "entries[1].config.onError",
     found: "a function",
@@ -346,7 +346,7 @@ async function failures(rules: readonly PlainDataRule[]): Promise<string[]> {
   return out;
 }
 
-describe("A26: each value that is not plain data refuses startup with not-plain-data and its path (CF-1)", () => {
+describe("each value that is not plain data refuses startup with not-plain-data and its path", () => {
   for (const row of A26) {
     it(row.name, async () => {
       const file = files.get(row.name) as string;
@@ -362,7 +362,7 @@ describe("A26: each value that is not plain data refuses startup with not-plain-
     });
   }
 
-  it("covers A26's seven values, each refused by a rule of its own", () => {
+  it("covers the seven values, each refused by a rule of its own", () => {
     expect(A26.map((row) => row.rule)).toEqual([
       "function",
       "class-instance",
@@ -387,7 +387,7 @@ describe("A26: each value that is not plain data refuses startup with not-plain-
   });
 });
 
-describe("CF-1: the plain-data check refuses everything else that is not data, each by its rule", () => {
+describe("the plain-data check refuses everything else that is not data, each by its rule", () => {
   for (const row of OTHERS) {
     it(row.name, async () => {
       const value = await valueOf(row);
@@ -472,7 +472,7 @@ describe("CF-1: the plain-data check refuses everything else that is not data, e
   });
 });
 
-describe("CF-1: plain data is accepted, and the check returns a frozen copy of it", () => {
+describe("plain data is accepted, and the check returns a frozen copy of it", () => {
   it("accepts objects, arrays, strings, booleans, null and integers from 0 to 2^53 − 1", () => {
     const value = {
       a: 0,
@@ -535,7 +535,7 @@ describe("CF-1: plain data is accepted, and the check returns a frozen copy of i
   });
 });
 
-describe("CF-3: plain data equal field for field (task 4.2)", () => {
+describe("plain data equal field for field", () => {
   it("is equal whatever the order of an object's keys, at any depth", () => {
     expect(samePlainData({ a: 1, b: [{ c: "x", d: null }] }, { b: [{ d: null, c: "x" }], a: 1 })).toBe(true);
     expect(samePlainData([], [])).toBe(true);

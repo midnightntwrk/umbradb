@@ -14,12 +14,12 @@ import { CORE_SETTINGS, REPOSITORY } from "./config-fixtures.js";
  * The configuration loader. It imports one TypeScript file: `umbradb.config.ts` in the working directory, or the path
  * given with `--config`. On Node.js 24 the import goes through the built-in type stripping. The loader takes the
  * default export, checks it is plain data and returns a frozen copy. What is validated, compared, recorded and shown
- * is the evaluated data, never the source text. [CF-1; design §7]
+ * is the evaluated data, never the source text.
  *
  * Refusals:
  * - a file that cannot be read or evaluated, or has no default export, refuses startup with `invalid-configuration`,
  *   naming the file and the reason;
- * - a value that is not plain data refuses with `not-plain-data` (`./plain-data.test.ts`). [A26]
+ * - a value that is not plain data refuses with `not-plain-data` (`./plain-data.test.ts`).
  *
  * The runner is what refuses startup: it calls the loader first. Here the loader is called directly.
  *
@@ -77,7 +77,7 @@ async function refusal(run: () => Promise<unknown>): Promise<UmbraError> {
   return expect.unreachable("expected a refusal");
 }
 
-describe("CF-1: the loader takes the file's default export as plain data", () => {
+describe("the loader takes the file's default export as plain data", () => {
   it("loads umbradb.config.ts from the working directory by default", async () => {
     const cwd = join(directory, "project");
     mkdirSync(cwd);
@@ -89,7 +89,7 @@ describe("CF-1: the loader takes the file's default export as plain data", () =>
     expect(Object.isFrozen(loaded)).toBe(true);
   });
 
-  it("resolves a relative file against the working directory given, never the process's own (LM-2)", async () => {
+  it("resolves a relative file against the working directory given, never the process's own", async () => {
     // The repository has no umbradb.config.ts: a default path under the process's directory would be named here.
     const cwd = join(directory, "elsewhere");
     mkdirSync(cwd);
@@ -143,7 +143,7 @@ describe("CF-1: the loader takes the file's default export as plain data", () =>
   });
 });
 
-describe("CF-1: a file that cannot be loaded refuses startup with invalid-configuration, naming the file", () => {
+describe("a file that cannot be loaded refuses startup with invalid-configuration, naming the file", () => {
   it("no file at the path", async () => {
     const file = join(directory, "missing.config.ts");
     const error = await refusal(() => loadConfig({ file, cwd: directory }));
@@ -200,7 +200,7 @@ describe("CF-1: a file that cannot be loaded refuses startup with invalid-config
     expect(error.details).toEqual({ file, path: "entries[0].config.onError", found: "a function" });
   });
 
-  it("tells evaluated the file's exports before it checks them: with no default export and with data not plain too; not when the import threw (CF-4)", async () => {
+  it("tells evaluated the file's exports before it checks them: with no default export and with data not plain too; not when the import threw", async () => {
     const told: unknown[] = [];
     const evaluated = (exports: Readonly<Record<string, unknown>>) => told.push({ ...exports });
     const plain = write("told.config.ts", 'export default { entries: [] };\nexport const modules = [];\n');
@@ -219,7 +219,7 @@ describe("CF-1: a file that cannot be loaded refuses startup with invalid-config
   });
 });
 
-describe("CF-1: in a plain Node.js process, the file is loaded by Node.js's own type stripping", () => {
+describe("in a plain Node.js process, the file is loaded by Node.js's own type stripping", () => {
   /** Runs `loadConfig` from the esbuild bundle in a Node.js process of its own and returns what it printed. */
   function loadInNode(bundle: string, file: string): Record<string, unknown> {
     const script = [

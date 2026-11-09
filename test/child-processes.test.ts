@@ -14,7 +14,7 @@ import type { ParentJob } from "./child-processes.parent.js";
  * ignores SIGTERM, as the SIGTERM-during-write test's worker does until its block ends), is stopped, has its event loop
  * blocked, or the signal reached the parent's whole process group. The committed negative control starts the same
  * children with plain `spawn`: each is still running once the same time has passed. And no test starts a child process
- * without the guard. [A153, A48; docs/issues/00015, docs/issues/00022]
+ * without the guard.
  */
 
 const PARENT = fileURLToPath(new URL("./child-processes.parent.ts", import.meta.url));
@@ -136,12 +136,12 @@ async function assertionFailure(check: Promise<unknown>): Promise<Error> {
 /** The scenarios: what the child does, whether it is stopped, and how its parent dies. */
 const SCENARIOS: readonly { readonly name: string; readonly child: ParentJob["child"]; readonly stop: boolean; readonly kill: Kill }[] = [
   { name: "a running child that ignores SIGTERM, its parent killed with SIGKILL", child: "running", stop: false, kill: "SIGKILL" },
-  { name: "a stopped child (SIGSTOP, as A17's pause), its parent killed with SIGKILL", child: "running", stop: true, kill: "SIGKILL" },
+  { name: "a stopped child (SIGSTOP), its parent killed with SIGKILL", child: "running", stop: true, kill: "SIGKILL" },
   { name: "a child whose event loop is blocked (as PGlite's hung engine), its parent killed with SIGKILL", child: "blocked", stop: false, kill: "SIGKILL" },
   { name: "a running child that ignores SIGTERM, SIGTERM sent to its parent's whole process group", child: "running", stop: false, kill: "SIGTERM to its process group" },
 ];
 
-describe("the orphan guard: a test's child processes end when the test process ends (A153)", () => {
+describe("the orphan guard: a test's child processes end when the test process ends", () => {
   it.each(SCENARIOS)("ends $name, and the watcher with it", async ({ child, stop, kill }) => {
     const orphaned = await orphan({ guarded: true, child }, kill, stop);
     expect(orphaned.watchers).toHaveLength(1);
@@ -238,7 +238,7 @@ const LOADED = new RegExp(String.raw`(?:require|import)\s*\(\s*${MODULE}\s*\)`);
  * The files that may start children otherwise: the guard itself, the negative control's parent, this file (it plants the
  * forbidden imports in its negative controls), and the conformance gate test's stand-in for Vitest, whose grandchild
  * must be unguarded so that the test shows the gate's own kill reaching it (the test lists both pids with the guard
- * once it reads them). [docs/issues/00027, docs/issues/00054]
+ * once it reads them).
  */
 const UNGUARDED = new Set([
   "test/child-processes.ts",

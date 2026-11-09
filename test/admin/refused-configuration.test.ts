@@ -40,23 +40,22 @@ import type { DatabaseParts } from "../../src/config/database-parts.js";
  * A configuration that cannot be loaded, one that is not plain data and one that fails its schemas each end the
  * process: `startUmbraDB` and `startProcess` end `refused` and their `closed` resolves by itself, and `umbradb run`
  * exits with a non-zero code by itself. The process logs every finding with its path (each once, no secret) and opens
- * no admin listener at any time. A build whose module declarations fail MD-2 ends `startUmbraDB` alike. A library host
+ * no admin listener at any time. A build whose module declarations fail validation ends `startUmbraDB` alike. A library host
  * asks for admin at the configuration's `listen.admin` (`network: { admin: true }`), which the test probes.
- * [A157 CI, AE-1, CF-1–CF-3, Q137 B, LM-10]
  *
  * To check this, every process here is given a port of the test's own as its admin address (the configuration's
  * `listen.admin`, and the address any admin starter it is given listens on). That port is probed from the process's
  * start until it ended, and the admin starter records every listener asked for.
  *
  * A refusal after the configuration is validated, such as a changed migration checksum, still answers the four
- * endpoints and stays up until stopped; through `startUmbraDB` it stays up `refused` until stopped. [A157 CI, AE-3]
+ * endpoints and stays up until stopped; through `startUmbraDB` it stays up `refused` until stopped.
  *
  * Run on PostgreSQL 18.6 and PGlite 0.5.10 for `startProcess` (the database never opened either: no session on
  * PostgreSQL, no data directory on PGlite), and through the command in this process and in a child process.
  *
  * Committed negative controls, each through its criterion's own oracle:
  * - a process that opens its admin listener at a refusal of its configuration, on its `listen.admin` as loaded (the
- *   earlier rule), fails "no admin listener opened"; [Q127 A]
+ *   earlier rule), fails "no admin listener opened";
  * - one that ends on every refusal (the changed migration checksum too) fails the stay-up half;
  * - one that logs only the refusal's code (the earlier log line) fails "every finding with its path", in the process
  *   and through the command.
@@ -81,7 +80,7 @@ beforeAll(() => {
 
 afterAll(() => rmSync(directory, { recursive: true, force: true }));
 
-/** One refused configuration of the test. [A157 CI] */
+/** One refused configuration of the test. */
 interface Refusal {
   readonly what: string;
   readonly code: "invalid-configuration" | "not-plain-data";
@@ -101,7 +100,7 @@ function throwingFile(): string {
   return file;
 }
 
-/** A node URL holding the secret: a `secret` setting. [CF-4] */
+/** A node URL holding the secret: a `secret` setting. */
 const SECRET_NODE = `ws://indexer:${SECRET}@127.0.0.1:9/node`;
 
 const REFUSALS: readonly Refusal[] = [
@@ -133,7 +132,7 @@ const REFUSALS: readonly Refusal[] = [
     paths: () => ["entries[0].config.onError"],
   },
   {
-    what: "settings failing their schemas (AE-3's livenessTimeoutMs: \"30s\", and apiReadTimeoutMs: 0)",
+    what: "settings failing their schemas (livenessTimeoutMs: \"30s\", and apiReadTimeoutMs: 0)",
     code: "invalid-configuration",
     config: (database, address) => ({
       data: {
@@ -150,7 +149,7 @@ const REFUSALS: readonly Refusal[] = [
 
 /**
  * The boundary case: a configuration that validates but has no `core` revision of the build's version, so there is no
- * `listen.admin` the process could take. Refused before the `core` revision is known, it ends the process too. [Q102]
+ * `listen.admin` the process could take. Refused before the `core` revision is known, it ends the process too.
  */
 const NO_CORE_REVISION: Refusal = {
   what: "no core revision of the build's version (its one core entry a versionEntry of another version)",
@@ -162,7 +161,7 @@ const NO_CORE_REVISION: Refusal = {
   paths: () => [join(directory, "versions.config.ts")],
 };
 
-/** The schema failure: the configuration whose `listen.admin` the earlier rule listened on. [Q127 A] */
+/** The schema failure: the configuration whose `listen.admin` the earlier rule listened on. */
 const SCHEMA_FAILURE = REFUSALS[3] as Refusal;
 
 /** Probes `127.0.0.1:port` every 25 ms until stopped: every answer it got (an HTTP status), and when the first came. */
@@ -208,7 +207,7 @@ function recordingStarter(address: string): { readonly start: AdminStarter; read
   return { start, asked, first };
 }
 
-/** The findings `error` carries, each with its path and message: what must be logged. [A157 CI] */
+/** The findings `error` carries, each with its path and message: what must be logged. */
 function findingsOf(error: unknown): { readonly path: string; readonly message: string }[] {
   if (!(error instanceof UmbraError)) return [];
   const details = error.details as {
@@ -222,9 +221,9 @@ function findingsOf(error: unknown): { readonly path: string; readonly message: 
 }
 
 /**
- * Checks "log every finding with its path" over `lines`. None when so: [A157 CI]
+ * Checks "log every finding with its path" over `lines`. None when so:
  * - each finding of `error` is in exactly one line, with its path and its message, the message with any URL's
- *   credentials hidden; [CF-4, AE-6]
+ *   credentials hidden;
  * - each of `paths` is among them;
  * - `SECRET` is in no line.
  */
@@ -270,7 +269,7 @@ function declarationsOf(user: readonly ModuleDeclaration[] = []): DeclarationSet
  * - log every finding with its path ({@link findingProblems});
  * - leave its database unopened.
  *
- * None when so. [A157 CI]
+ * None when so.
  */
 async function endedProblems(start: Start, backend: ProcessBackend, refusal: Refusal, real = false): Promise<string[]> {
   const problems: string[] = [];
@@ -356,7 +355,7 @@ function started(
  * by `start`, with a changed `001` and the real admin worker on a free port. It must refuse with
  * `migration-checksum-changed` after its configuration was validated, and answer the four endpoints: live 200, ready
  * 503, `/status` `refused` with the reason, `/config` 200 (the endpoint-state oracle). It must still be up, answering
- * them, 1.5 s later. None when so. [A157 CI, A64]
+ * them, 1.5 s later. None when so.
  */
 async function stayUpProblems(start: Start, backend: ProcessBackend): Promise<string[]> {
   const problems: string[] = [];
@@ -421,7 +420,7 @@ function stoppedWith(handle: ProcessHandle, also: () => Promise<void>): ProcessH
 /**
  * A negative control: a process that opens its admin listener at a refusal of its configuration, as the earlier rule
  * did, through the admin starter it was given, and stays up until stopped. It listens on the `listen.admin` of the
- * configuration as loaded when it has one, else on the default. [Q127 A, CF-4]
+ * configuration as loaded when it has one, else on the default.
  */
 const earlyListener =
   (start: Start): Start =>
@@ -467,11 +466,11 @@ const loggingOnlyTheCode =
   (input) =>
     start({ ...input, log: codeOnly(input.log ?? (() => undefined)) });
 
-describe.each(PROCESS_BACKENDS)("A157: a refused configuration ends startProcess on $name", (backend) => {
+describe.each(PROCESS_BACKENDS)("a refused configuration ends startProcess on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("A157: a file that cannot be loaded, data not plain and settings failing their schemas each end the process refused, every finding logged with its path, no admin listener opened", async () => {
+  it("a file that cannot be loaded, data not plain and settings failing their schemas each end the process refused, every finding logged with its path, no admin listener opened", async () => {
     for (const refusal of REFUSALS) expect(await endedProblems(startProcess, backend, refusal), refusal.what).toEqual([]);
   }, 300_000);
 
@@ -479,11 +478,11 @@ describe.each(PROCESS_BACKENDS)("A157: a refused configuration ends startProcess
     expect(await endedProblems(startProcess, backend, NO_CORE_REVISION)).toEqual([]);
   }, 120_000);
 
-  it("A157 with the real admin worker: a schema failure opens no admin listener on the listen.admin it names", async () => {
+  it("with the real admin worker: a schema failure opens no admin listener on the listen.admin it names", async () => {
     expect(await endedProblems(startProcess, backend, SCHEMA_FAILURE, true)).toEqual([]);
   }, 120_000);
 
-  it("A157: a refusal after the configuration is validated (a changed migration checksum) answers the four endpoints, up until stopped", async () => {
+  it("a refusal after the configuration is validated (a changed migration checksum) answers the four endpoints, up until stopped", async () => {
     expect(await stayUpProblems(startProcess, backend)).toEqual([]);
   }, 180_000);
 
@@ -495,7 +494,7 @@ describe.each(PROCESS_BACKENDS)("A157: a refused configuration ends startProcess
     expect(problems).toContain("the process did not end by itself");
   }, 120_000);
 
-  it("negative control: a process ending on every refusal fails A157's stay-up half", async () => {
+  it("negative control: a process ending on every refusal fails the stay-up half", async () => {
     expect(await stayUpProblems(endsOnEveryRefusal(startProcess), backend)).toContain("the process ended by itself");
   }, 180_000);
 
@@ -508,11 +507,11 @@ describe.each(PROCESS_BACKENDS)("A157: a refused configuration ends startProcess
 });
 
 /**
- * The ending half for `startUmbraDB` over `refusal` on `backend` (A157 as start-umbradb rewrites it): the library host's
+ * The ending half for `startUmbraDB` over `refusal` on `backend`: the library host's
  * process, asking for its admin listener at the configuration's `listen.admin` (`network: { admin: true }`, the test's
  * probed port), must refuse with the refusal's code and end by itself, `refused` with `closed` resolved; no admin
  * listener may answer at any time; its log gets every finding with its path ({@link findingProblems}); its database
- * stays unopened. None when so. [A157 CI, LM-10, AE-3]
+ * stays unopened. None when so.
  */
 async function libraryEndedProblems(backend: ProcessBackend, refusal: Refusal): Promise<string[]> {
   const problems: string[] = [];
@@ -560,15 +559,15 @@ async function libraryEndedProblems(backend: ProcessBackend, refusal: Refusal): 
   return problems;
 }
 
-describe.each(PROCESS_BACKENDS)("A157: a refused configuration ends startUmbraDB on $name", (backend) => {
+describe.each(PROCESS_BACKENDS)("a refused configuration ends startUmbraDB on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("A157: a file that cannot be loaded, data not plain and settings failing their schemas each end startUmbraDB refused with closed resolved, every finding logged with its path, no admin listener opened", async () => {
+  it("a file that cannot be loaded, data not plain and settings failing their schemas each end startUmbraDB refused with closed resolved, every finding logged with its path, no admin listener opened", async () => {
     for (const refusal of REFUSALS) expect(await libraryEndedProblems(backend, refusal), refusal.what).toEqual([]);
   }, 300_000);
 
-  it("A157: a build whose module declarations fail MD-2 ends startUmbraDB refused with closed resolved, the finding logged, nothing opened", async () => {
+  it("a build whose module declarations fail validation ends startUmbraDB refused with closed resolved, the finding logged, nothing opened", async () => {
     const db = await backend.database();
     const lines: string[] = [];
     const handle = startUmbraDB({
@@ -589,7 +588,7 @@ describe.each(PROCESS_BACKENDS)("A157: a refused configuration ends startUmbraDB
     if (db.directory !== undefined) expect(existsSync(db.directory)).toBe(false);
   }, 120_000);
 
-  it("A157: a refusal after the configuration is validated (a changed migration checksum) keeps startUmbraDB up, refused, its listening admin answering the four endpoints, until stopped", async () => {
+  it("a refusal after the configuration is validated (a changed migration checksum) keeps startUmbraDB up, refused, its listening admin answering the four endpoints, until stopped", async () => {
     const db = await backend.database();
     const config = (sql: string) => ({
       data: { entries: [adminCore(db.setting, 1), entryOf(migrating(sql), 1)] },
@@ -607,7 +606,7 @@ describe.each(PROCESS_BACKENDS)("A157: a refused configuration ends startUmbraDB
       config: config(changed),
       modules: [migrating(changed)],
       source: adminSource(3n),
-      // A listening admin, at a free port: it keeps answering through the refusal (class B). [AE-3, LM-10]
+      // A listening admin, at a free port: it keeps answering through the refusal (class B).
       network: { admin: { port: 0 } },
     });
     try {
@@ -625,7 +624,7 @@ describe.each(PROCESS_BACKENDS)("A157: a refused configuration ends startUmbraDB
       expect(status.json).toMatchObject({ state: "refused", reason: { code: "migration-checksum-changed", module: "m" } });
       expect((await ask(origin, "/config")).status).toBe(200);
       // Mounted in a host's server, as behind an orchestrator: the same four answers, and the module API's 503 names
-      // the same reason. [LM-5]
+      // the same reason.
       const host = await mountHandlers(second);
       try {
         expect(stateProblems(await observe(host.admin), { state: "refused", ready: false, reason: { code: "migration-checksum-changed", module: "m" } })).toEqual([]);
@@ -648,7 +647,7 @@ describe.each(PROCESS_BACKENDS)("A157: a refused configuration ends startUmbraDB
   }, 180_000);
 });
 
-describe("A157: umbradb run on a refused configuration logs every finding and exits 1 by itself", () => {
+describe("umbradb run on a refused configuration logs every finding and exits 1 by itself", () => {
   let project: CliProject;
   let count = 0;
 
@@ -704,7 +703,7 @@ describe("A157: umbradb run on a refused configuration logs every finding and ex
    * The `umbradb run` half of the test in this process over `file`. The command, its process started by `start` with
    * the recording admin starter, must end by itself (no signal sent) within {@link ENDS_WITHIN_MS} with exit 1. Its
    * stderr must log every finding with its path, each once (the command adds no line of its own: no `umbradb run:`).
-   * No admin listener may be asked for, answer or listen. None when so. [A157 CI]
+   * No admin listener may be asked for, answer or listen. None when so.
    */
   async function commandProblems(start: Start, file: (address: string) => string, paths: () => readonly string[]): Promise<string[]> {
     const problems: string[] = [];
@@ -745,11 +744,11 @@ describe("A157: umbradb run on a refused configuration logs every finding and ex
 
   /**
    * The stay-up half of the test through the command. The file is refused once its configuration is validated, before
-   * the database opens: PGlite without the development opt-in (`development-opt-in-required`). [CF-9]
+   * the database opens: PGlite without the development opt-in (`development-opt-in-required`).
    *
    * `umbradb run`, its process started by `start` with the real admin worker on the file's `listen.admin`, must keep
    * running and answering the four endpoints (the endpoint-state oracle) 1.5 s on, until SIGTERM. It then exits 1. None
-   * when so. [A157 CI, A64]
+   * when so.
    */
   async function commandStayUpProblems(start: Start): Promise<string[]> {
     const problems: string[] = [];
@@ -772,7 +771,7 @@ describe("A157: umbradb run on a refused configuration logs every finding and ex
     return problems;
   }
 
-  it("A157's stay-up half through the command: a refusal after the configuration is validated keeps umbradb run up, answering, until SIGTERM (exit 1)", async () => {
+  it("stay-up half through the command: a refusal after the configuration is validated keeps umbradb run up, answering, until SIGTERM (exit 1)", async () => {
     expect(await commandStayUpProblems(startProcess)).toEqual([]);
   }, 120_000);
 
@@ -780,11 +779,11 @@ describe("A157: umbradb run on a refused configuration logs every finding and ex
     expect(await commandStayUpProblems(endsOnEveryRefusal(startProcess))).toContain("the command ended by itself");
   }, 120_000);
 
-  it("A157 in this process: each refused file — not loadable, not plain data, failing its schemas — exits 1 by itself, every finding logged once, no admin listener", async () => {
+  it("in this process: each refused file — not loadable, not plain data, failing its schemas — exits 1 by itself, every finding logged once, no admin listener", async () => {
     for (const refused of files) expect(await commandProblems(startProcess, refused.file, refused.paths), refused.what).toEqual([]);
   }, 300_000);
 
-  it("A157 through the command in a child process: settings failing their schemas exit 1 by itself, every finding logged, nothing on the listen.admin they name", async () => {
+  it("through the command in a child process: settings failing their schemas exit 1 by itself, every finding logged, nothing on the listen.admin they name", async () => {
     const port = await freePort();
     const watch = probe(port);
     const file = coreFile(settings(`127.0.0.1:${port}`, { livenessTimeoutMs: "30s", apiReadTimeoutMs: 0 }));

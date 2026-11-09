@@ -17,11 +17,11 @@ import { BACKENDS } from "../db/backends.js";
  * The chain-data envelope of module API responses. A response states the view it answers from (`finalized`), and the
  * height and hash of the read's committed height: as the headers `X-Umbra-View`, `X-Umbra-Height` and `X-Umbra-Hash`
  * over HTTP, and in a GraphQL response's `extensions`, its `data` unchanged. A read before any height commits is
- * refused with `no-committed-height`, HTTP 503. [RN-16; CORE-ARCH §4.20]
+ * refused with `no-committed-height`, HTTP 503.
  *
  * Heights are written as decimal strings and hashes as `0x`-prefixed lowercase hex, as the process transport writes
  * them. Mounting the handlers on `listen.api`, and the envelope through a registered handler, are tested in
- * `api-server.test.ts`. [A75; CORE-ARCH §4.14]
+ * `api-server.test.ts`.
  */
 
 const HASH = Uint8Array.from({ length: 32 }, (_, i) => i * 8);
@@ -40,7 +40,7 @@ function readAt(height: bigint | null, rows: ReadonlyMap<bigint, Uint8Array>, as
   };
 }
 
-describe("the chain-data envelope (RN-16)", () => {
+describe("the chain-data envelope", () => {
   it("names its three headers", () => {
     expect(CHAIN_DATA_HEADERS).toEqual({ view: "X-Umbra-View", height: "X-Umbra-Height", hash: "X-Umbra-Hash" });
     expect(Object.isFrozen(CHAIN_DATA_HEADERS)).toBe(true);

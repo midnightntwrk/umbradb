@@ -1,6 +1,6 @@
 /**
  * The document cleanup: 0.9.5's documents are deleted, not marked ("It will still be available in the git history"),
- * and nothing left points at them. [A171 STATIC, Q169, Q170 C, Q171 A]
+ * and nothing left points at them.
  *
  * - **The documents listed as 0.9.5's** ({@link RETIRED_DOCUMENTS}) are not in the tree
  *   ({@link retiredDocumentProblems}).
@@ -12,7 +12,7 @@
  *   link reference definition of every `.md` file whose target is a path (not a URL or an anchor) names a file or a
  *   directory of the tree, resolved from the linking file's directory (`/…` from the root), its `#fragment` and
  *   `?query` left out. Fenced code blocks and code spans hold no links.
- * - **`Formal/STORAGE_ALGEBRA.md`** states W1 and T5 and no retired law ({@link storageAlgebraProblems}) [Q171 A].
+ * - **`Formal/STORAGE_ALGEBRA.md`** states W1 and T5 and no retired law ({@link storageAlgebraProblems}).
  *
  * Pure functions over repository-relative paths and file texts; `./documents.test.ts` gives them the tree (git's
  * tracked and untracked files, ignored ones left out).
@@ -23,7 +23,7 @@ import path from "node:path";
 /**
  * The first group of documents classified as 0.9.5's and deleted: they described a removed 0.9.5 part, its contracts or
  * the 1.0.0 release planned on the 0.9.5 surface as current. The classification of every other document is recorded
- * with the cleanup. [Q169]
+ * with the cleanup.
  */
 export const RETIRED_DOCUMENTS_17_4A: readonly string[] = [
   "docs/STABILITY.md",
@@ -40,12 +40,11 @@ export const RETIRED_DOCUMENTS_17_4A: readonly string[] = [
 ];
 
 /**
- * The second group of deleted documents: the 1.0.0 program's guideline and lessons log (the guideline's rules still in
- * force moved into `AGENTS.md` first) [Q170 C], and 0.9.5's design, formal, performance and research records [Q171 A]:
+ * The second group of deleted documents: the 1.0.0 program's guideline and lessons log, and 0.9.5's design, formal, performance and research records:
  * every file of `design/`, `Formal/*.md` but `Formal/STORAGE_ALGEBRA.md`, `Performance/`, `docs/research/` but
  * `indexer-parallelism-roadmap.md` and `midnight-node-peer-flapping.md`, and `docs/superpowers/`.
  *
- * `docs/THREAT_MODEL.md` was deleted too but is not listed: 0.10.0's threat model is written at the same path. [Q172 A]
+ * `docs/THREAT_MODEL.md` was deleted too but is not listed: 0.10.0's threat model is written at the same path.
  */
 export const RETIRED_DOCUMENTS_17_4B: readonly string[] = [
   "docs/v1-implementation-guideline.md",
@@ -170,7 +169,7 @@ function treePaths(tree: readonly string[]): Set<string> {
 
 /**
  * The broken links: each link of `files` (the tree's Markdown files) whose target is a path naming no file or
- * directory of `tree`, as `file:line: …`. [A171 STATIC]
+ * directory of `tree`, as `file:line: …`.
  */
 export function linkProblems(files: readonly TextFile[], tree: readonly string[]): string[] {
   const paths = treePaths(tree);
@@ -198,7 +197,7 @@ export function retiredDocumentProblems(tree: readonly string[]): string[] {
  * The problems with `CHANGELOG.md`: a preamble (the text before the first `## ` heading) naming a retired document, and
  * a planned `1.0.0` entry: a `## [1.0.0]` heading, or a link reference defined for `1.0.0` or naming `v1.0.0`. A
  * document is matched by its path, or for the first group ({@link RETIRED_DOCUMENTS_17_4A}) by its file name too; the
- * second group includes names as common as `README.md`. [A171 STATIC]
+ * second group includes names as common as `README.md`.
  */
 export function changelogDocumentProblems(changelog: string): string[] {
   const lines = changelog.split("\n");
@@ -223,7 +222,7 @@ export function changelogDocumentProblems(changelog: string): string[] {
 }
 
 /**
- * The problems with `package.json`'s `description`: one sentence about the indexer, nothing of 0.9.5's store. [A171 STATIC]
+ * The problems with `package.json`'s `description`: one sentence about the indexer, nothing of 0.9.5's store.
  */
 export function descriptionProblems(description: unknown): string[] {
   if (typeof description !== "string" || description.trim() === "") {
@@ -241,14 +240,14 @@ export function descriptionProblems(description: unknown): string[] {
 }
 
 /**
- * The laws and property tests of `Formal/STORAGE_ALGEBRA.md` retired with 0.9.5's parts: T1–T4, C1, C2 (C2a, C2b),
- * L1, and P1–P8, P10, P11. W1 and its property test P9, and T5, stay. [Q171 A; design §13]
+ * The laws and property tests of `Formal/STORAGE_ALGEBRA.md` retired with 0.9.5's parts: T1–T4, C1, C2,
+ * L1, and P1–P8, P10, P11. W1 and its property test P9, and T5, stay.
  */
 const RETIRED_LAW = /\b(T[1-4]|C1|C2[ab]?|L1|P(?:[1-8]|1[01]))\b/g;
 
 /**
  * The problems with `Formal/STORAGE_ALGEBRA.md`: no heading naming W1 or none naming T5, and every line naming a
- * retired law or property test. [A171 STATIC, Q171 A]
+ * retired law or property test.
  */
 export function storageAlgebraProblems(text: string): string[] {
   const problems: string[] = [];

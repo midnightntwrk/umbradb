@@ -12,14 +12,13 @@ import { fenceAt, watched, watcher } from "./ingest-harness.js";
  * - the process as `umbradb run` starts it: `startProcess` with the configuration file and the node source
  *   (`nodeSourceOf`) over the tape node the test serves;
  * - the chain's build with the watching module, as the test's restart builds it.
- * [A76, IN-1]
  *
  * It reports `queued` (one JSON line on stdout) once the finalized head is committed and its queue is full. The test
- * sets `tipCap` to 20, so `finality-stall` means 20 best blocks are queued. The test then kills it with SIGKILL. [IN-6]
+ * sets `tipCap` to 20, so `finality-stall` means 20 best blocks are queued. The test then kills it with SIGKILL.
  *
  * With `tipsTo`, it runs a negative control's node source instead. That source writes each best block it fetches into
  * the watching module's table, on a connection of its own to that PostgreSQL database. This is tip writing, which the
- * core forbids. [IN-1]
+ * core forbids.
  *
  * It exits by itself once its parent is no longer the test's (Vitest's bail, a test's timeout).
  */

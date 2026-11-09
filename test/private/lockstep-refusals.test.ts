@@ -22,16 +22,14 @@ import { ReportRelay } from "./relays.js";
 
 /**
  * Lockstep's refusals and halts, through a core and private processes on PostgreSQL 18.6 and PGlite 0.5.10:
- * [PP-6, PP-7, Q24; design §11]
  * - An instance that ran independently to 3 while the core went on to 10, then listed in `lockstepInstances`, says
  *   `hello` at 3 and is refused `lockstep-behind` (below the public cursor − 1). It halts with `lockstep-behind` at its
  *   first height, 4, by its own check (the public cursor 10 is past it), and the core keeps waiting before 11,
- *   `waiting-for-lockstep` naming it — connected, then not once it stops. [A118 CI]
+ *   `waiting-for-lockstep` naming it — connected, then not once it stops.
  * - A `report` whose hash is not the public block's (a relay rewrites it) closes the instance's connection with
  *   `report-hash-mismatch`; the instance halts with that code and the core keeps waiting for it. A module declaring
  *   `needsLockstep` refuses to start with `needs-lockstep-not-listed` on an instance the core's `hello-ack` says is not
  *   lockstep, and on one with no `privateLink`, before any migration — and runs on a listed one.
- *   [A117 FAULT, last two sentences]
  *
  * The report check's negative control is `./transport-faults.test.ts`'s (a core comparing nothing).
  */
@@ -78,11 +76,11 @@ function names(condition: LockstepCondition | null, height: bigint, wanted: Lock
   return condition?.height === height && condition.instances.some((one) => json(one) === json(wanted));
 }
 
-// ── A late instance listed for lockstep [A118 CI] ──────────────────────────────────────────────────────────────────
+// ── A late instance listed for lockstep ──────────────────────────────────────────────────────────────────
 
 const LATE = "late-1";
 
-/** What one late-instance run saw. [A118 CI] */
+/** What one late-instance run saw. */
 interface A118Observation {
   readonly coreLines: readonly string[];
   readonly lines: readonly string[];
@@ -94,7 +92,7 @@ interface A118Observation {
   readonly afterStop: LockstepCondition | null;
 }
 
-/** The late-instance oracle: every problem with what was observed, none when the test holds. [A118 CI] */
+/** The late-instance oracle: every problem with what was observed, none when the test holds. */
 function a118Problems(observed: A118Observation): string[] {
   const problems: string[] = [];
   if (!observed.coreLines.includes(`transport: instance ${LATE} connected at 3; refused lockstep-behind: below the public cursor 10 − 1`)) {
@@ -119,7 +117,7 @@ function a118Problems(observed: A118Observation): string[] {
   return problems;
 }
 
-/** Runs the late-instance test on `backend` (see the module comment). [A118 CI] */
+/** Runs the late-instance test on `backend` (see the module comment). */
 async function a118Run(backend: PrivateBackend): Promise<A118Observation> {
   const publicDb = await backend.database("public");
   const privateDb = await backend.database("private");
@@ -195,7 +193,7 @@ interface MismatchObservation {
   readonly rows: readonly number[];
 }
 
-/** The oracle of the report hash check through the process: every problem, none when it holds. [A117 FAULT] */
+/** The oracle of the report hash check through the process: every problem, none when it holds. */
 function mismatchProblems(observed: MismatchObservation): string[] {
   const problems: string[] = [];
   const { halted } = observed;
@@ -280,12 +278,12 @@ async function hasSchema(db: TestDatabase, schema: string): Promise<boolean> {
   return row?.present === true;
 }
 
-describe.each(PRIVATE_BACKENDS)("lockstep's refusals and halts on $name (PP-6, PP-7)", (backend: PrivateBackend) => {
+describe.each(PRIVATE_BACKENDS)("lockstep's refusals and halts on $name", (backend: PrivateBackend) => {
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 
   it(
-    "A118: an instance listed after the public cursor passed it is refused with lockstep-behind, halts, and the core waits and names it",
+    "an instance listed after the public cursor passed it is refused with lockstep-behind, halts, and the core waits and names it",
     async () => {
       expect(a118Problems(await a118Run(backend))).toEqual([]);
     },
@@ -293,7 +291,7 @@ describe.each(PRIVATE_BACKENDS)("lockstep's refusals and halts on $name (PP-6, P
   );
 
   it(
-    "A117: a report hash mismatch halts that instance with report-hash-mismatch, and the core keeps waiting for it",
+    "a report hash mismatch halts that instance with report-hash-mismatch, and the core keeps waiting for it",
     async () => {
       expect(mismatchProblems(await mismatchRun(backend))).toEqual([]);
     },
@@ -301,7 +299,7 @@ describe.each(PRIVATE_BACKENDS)("lockstep's refusals and halts on $name (PP-6, P
   );
 
   it(
-    "A117: a needsLockstep module refuses to run when hello-ack says lockstep: false (needs-lockstep-not-listed), or with no " +
+    "a needsLockstep module refuses to run when hello-ack says lockstep: false (needs-lockstep-not-listed), or with no " +
       "privateLink, before any migration; on a listed instance it runs",
     async () => {
       const publicDb = await backend.database("public");

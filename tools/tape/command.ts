@@ -8,13 +8,13 @@
  * - **`check`** is the manual half of the record-and-replay check: a tour of every node call the client makes,
  *   recorded through the builder against the node and replayed through the tape node (`./replay-check.ts`). It writes
  *   the tape to `--out`, prints its SHA-256 (for the pull request) and exits 0 when every frame of every connection
- *   was byte-identical, 1 otherwise [A71, IN-8].
+ *   was byte-identical, 1 otherwise.
  * - **`range`** records every allowed node call of every height `--from`–`--to` and a live window of the head
  *   subscriptions (`./range.ts`). It checks the tape complete (`./completeness.ts`), writing nothing when it is not,
  *   then writes it to `--out` and prints its SHA-256, size, request rate and runtimes. First it prints the version the
  *   node reports (`system_version`, asked on a connection of its own outside the builder, so it is not on the tape: it
  *   is not one of the allowed node calls). Options: `--concurrency` (requests in flight, 8), `--chunk` (heights a
- *   connection records, 500), `--live-seconds` (60) [IN-8, Q123].
+ *   connection records, 500), `--live-seconds` (60).
  * - **`boundaries`** reads the network's genesis and runtime upgrades (`./boundaries.ts`) and writes the record the
  *   built-in ledger tables cite to `--out` (JSON: the node's answers, with the genesis, the head and each boundary);
  *   `--step` (blocks between samples of the runtime, 1,000), `--concurrency` (8).
@@ -185,7 +185,7 @@ async function check(node: string, out: string, io: TapeCommandIo): Promise<numb
 
 /**
  * The version the node reports (`system_version`), asked on a connection of its own, outside any builder: it is not
- * one of the allowed node calls and is not on the tape. Never throws: a node that does not say gives the reason. [IN-8]
+ * one of the allowed node calls and is not on the tape. Never throws: a node that does not say gives the reason.
  */
 export async function reportedVersion(node: string, timeoutMs = 30_000): Promise<{ version: string } | { reason: string }> {
   return new Promise((resolve) => {

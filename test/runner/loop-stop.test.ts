@@ -21,13 +21,13 @@ import { NodeWatch, type StartVia, type StopBy } from "./startup-stop-harness.js
  * 5 s while the running loop waits
  * for h + 1's block, and, with `core-ledger-state`, while its `on-compute` at h + 1 awaits the state root. It ends with
  * `ended` of kind `signal`, no connection attempt after the stop, and nothing of h + 1 stored; a restart against a node
- * that answers again processes h + 1. [A169 CI, RN-13]
+ * that answers again processes h + 1.
  *
  * On PostgreSQL 18.6 and PGlite 0.5.10, each run on a new database (`loop-stop-harness.ts`: what is observed, and the
  * oracle `a169Problems`). The committed negative control is `loop-stop.negative-control.test.ts`.
  *
  * Also, with the SIGTERM-in-transaction case unchanged: a stop while a block transaction is open closes the node client
- * only once it has committed, since an open block transaction is let commit or roll back first. [A48, RN-13]
+ * only once it has committed, since an open block transaction is let commit or roll back first.
  */
 
 /** No problem on either backend. */
@@ -93,7 +93,7 @@ async function openTransactionProblems(backend: ProcessBackend): Promise<string[
 
 /**
  * The case on both backends for `scenario`, stopped `by`, the process started `via` the engine or as a library host:
- * each run's problems, its restart's included. [A169 CI]
+ * each run's problems, its restart's included.
  */
 async function a169(scenario: LoopStopScenario, by: StopBy, via: StartVia = "engine"): Promise<Record<string, string[]>> {
   const found: Record<string, string[]> = {};
@@ -108,7 +108,7 @@ async function a169(scenario: LoopStopScenario, by: StopBy, via: StartVia = "eng
   return found;
 }
 
-describe("A169: a stop while the running loop waits on an unreachable node ends the process (RN-13, task 5.3c)", () => {
+describe("a stop while the running loop waits on an unreachable node ends the process", () => {
   let root: LoopStopScenario;
   beforeAll(async () => {
     await Promise.all(PROCESS_BACKENDS.map((backend) => backend.start()));
@@ -120,7 +120,7 @@ describe("A169: a stop while the running loop waits on an unreachable node ends 
     ["stop", "ProcessHandle.stop()"],
     ["sigterm", "SIGTERM (terminationSignal)"],
   ])(
-    "A169: %s — %s while the loop waits for h + 1's block (the node source's prefetch, the node refusing connections) ends the process within 5 s: ended by the signal, the node client closed, no connection attempt after the stop, nothing of h + 1 stored, the database closed; a restart processes h + 1; on PostgreSQL and on PGlite",
+    "%s — %s while the loop waits for h + 1's block (the node source's prefetch, the node refusing connections) ends the process within 5 s: ended by the signal, the node client closed, no connection attempt after the stop, nothing of h + 1 stored, the database closed; a restart processes h + 1; on PostgreSQL and on PGlite",
     async (by) => {
       expect(await a169(blockScenario(), by)).toEqual(NONE);
     },
@@ -131,7 +131,7 @@ describe("A169: a stop while the running loop waits on an unreachable node ends 
     ["stop", "ProcessHandle.stop()"],
     ["sigterm", "SIGTERM (terminationSignal)"],
   ])(
-    "A169: %s — %s while core-ledger-state's on-compute at h + 1 awaits the node's state root (the node refusing connections) ends the process within 5 s: ended by the signal, the node client closed, no connection attempt after the stop, nothing of h + 1 stored, the database closed; a restart processes h + 1; on PostgreSQL and on PGlite",
+    "%s — %s while core-ledger-state's on-compute at h + 1 awaits the node's state root (the node refusing connections) ends the process within 5 s: ended by the signal, the node client closed, no connection attempt after the stop, nothing of h + 1 stored, the database closed; a restart processes h + 1; on PostgreSQL and on PGlite",
     async (by) => {
       expect(await a169(root, by)).toEqual(NONE);
     },
@@ -142,7 +142,7 @@ describe("A169: a stop while the running loop waits on an unreachable node ends 
     ["stop", "UmbraDBHandle.stop()"],
     ["signal", "the host's AbortSignal aborted"],
   ])(
-    "A169 through startUmbraDB: %s — %s while the loop waits for h + 1's block, and while core-ledger-state's on-compute at h + 1 awaits the state root, ends the process within 5 s: ended by the signal, the node client closed, no connection attempt after the stop, nothing of h + 1 stored, the database closed; a restart processes h + 1; on PostgreSQL and on PGlite",
+    "through startUmbraDB: %s — %s while the loop waits for h + 1's block, and while core-ledger-state's on-compute at h + 1 awaits the state root, ends the process within 5 s: ended by the signal, the node client closed, no connection attempt after the stop, nothing of h + 1 stored, the database closed; a restart processes h + 1; on PostgreSQL and on PGlite",
     async (by) => {
       expect(await a169(blockScenario(), by, "library")).toEqual(NONE);
       expect(await a169(root, by, "library")).toEqual(NONE);
@@ -151,7 +151,7 @@ describe("A169: a stop while the running loop waits on an unreachable node ends 
   );
 
   it(
-    "A48 unchanged (RN-13): a stop while a block transaction is open closes the node client only once it has committed — the height committed, ended by the signal; on PostgreSQL and on PGlite",
+    "unchanged: a stop while a block transaction is open closes the node client only once it has committed — the height committed, ended by the signal; on PostgreSQL and on PGlite",
     async () => {
       const found: Record<string, string[]> = {};
       for (const backend of PROCESS_BACKENDS) found[backend.name] = await openTransactionProblems(backend);

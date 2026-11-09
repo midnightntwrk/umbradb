@@ -7,14 +7,14 @@ import { Heartbeat, HEARTBEAT_INTERVAL_MS, lastTick, tickAgeMs } from "../../src
  * monotonic clock every thread of the process shares) into one 64-bit slot of a `SharedArrayBuffer` with one atomic
  * store. The admin worker reads it with one atomic load (no torn read), so it can tell how long ago the main thread
  * last ran its event loop without asking it. A callback that awaits leaves the ticks running; one that blocks the main
- * thread stops them. [AE-2, A62, A63; CORE-ARCH §4.18]
+ * thread stops them.
  */
 
 afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("the heartbeat (AE-2)", () => {
+describe("the heartbeat", () => {
   it("ticks at once, then every second, telling its listener each time; stops when stopped", () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     let ticks = 0;

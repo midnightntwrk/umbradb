@@ -1,40 +1,40 @@
 /**
  * The page of the browser build: a static page that runs the core and its modules in the browser, for showing the
- * product and testing modules. It is a development setup. [BR-1, BR-2, BR-3, BR-4, BK-5; design §9.2]
+ * product and testing modules. It is a development setup.
  *
  * **What it starts.** The core worker (`core-worker.js`), then, once the core has chosen S, one private worker
  * (`private-worker.js`) for each private instance the bundled configuration has. Each worker owns its database,
- * through its Web Lock. [BR-1]
+ * through its Web Lock.
  *
  * **The private link.** When a private worker's process connects to the core (at its start, and again after a lost
  * connection), it asks the page for a channel: the page makes a new `MessageChannel`, gives one end to the core worker
  * and the other to the private worker, and records it (`links`); the link's messages then go from worker to worker.
  * `dropLink(instance)` drops an instance's channel, as a lost connection would end it: both workers are told, and the
- * private process connects again over a new channel (`./link.ts`). [LM-6, LM-11, L58]
+ * private process connects again over a new channel (`./link.ts`).
  *
  * **Its address's parameters.**
- * - `node`: the node's WebSocket URL, which must allow the page's origin [BR-3].
+ * - `node`: the node's WebSocket URL, which must allow the page's origin.
  * - `storage`: `memory` (the default: a new database at each load), or a name: the database's, in the origin's private
  *   file system (OPFS), which survives a reload.
  * - Any other parameter is the configuration's to read (`./configuration.ts`).
  *
  * **S.** For an OPFS database the page keeps the S it was created with in the origin's `localStorage`
  * (`umbradb-start:<name>`), so a reload, or a second tab, runs it with the same configuration. A database it has no S
- * for is new, and the core worker chooses S as the node's finalized head at that moment. [BR-2]
+ * for is new, and the core worker chooses S as the node's finalized head at that moment.
  *
  * **What it reaches:** its own origin, for its files; the node, through the core worker's WebSocket; and a backup file
  * the user picks. The admin endpoints and the module API are calls on the workers' channels, and the module API's
- * subscriptions run on a `MessageChannel` of their own (`openApi`). [BR-3, LM-11]
+ * subscriptions run on a `MessageChannel` of their own (`openApi`).
  *
  * **Backup and restore.** "Back up" asks the core worker for a backup of its database and saves it as a file
  * (`umbradb-<storage>-<height>.backup`). The backup is the one `umbradb backup` takes on PGlite: the manifest and
- * `pglite-tools`' dump, taken while commits wait. [BK-5]
+ * `pglite-tools`' dump, taken while commits wait.
  *
  * A backup is restored into a new OPFS database. With the `restore` parameter the page does not start the core. The
  * core worker restores the file the user then picks with every check `umbradb restore` makes (the configured node's
  * genesis and blocks); a refused file leaves the database empty and the page waiting for another file. Once one is
  * restored, the page keeps the backup's S for the database and starts the core, which resumes from the backup's
- * height + 1. [BK-3, BK-4, BK-5]
+ * height + 1.
  *
  * **`window.umbradb`** is the page's state and its calls, for whoever drives it (the tests, a console): `ready`
  * (resolves once every worker is started), `start` (S), `core` and `instances` (each with `call`, `openApi`, its `log`
@@ -44,7 +44,7 @@
 
 import type { CallMethod, CrossedError, FromProcessWorker, StartRun, ToProcessWorker } from "./protocol.js";
 
-/** A channel of the module API's subscriptions (`openApi`): the page's end, every message kept parsed. [LM-11] */
+/** A channel of the module API's subscriptions (`openApi`): the page's end, every message kept parsed. */
 export interface ApiChannel {
   /** Sends `message` as JSON text (a text as it is). */
   send(message: unknown): void;
@@ -67,7 +67,7 @@ export interface ProcessView {
   readonly name: string;
   /** Calls the process (`./protocol.ts`); rejects with the worker's error (its name, message, code and details). */
   call(method: CallMethod, ...args: unknown[]): Promise<unknown>;
-  /** Opens a channel on which the process serves the module API's subscriptions (`api.connect`). [LM-11] */
+  /** Opens a channel on which the process serves the module API's subscriptions (`api.connect`). */
   openApi(): Promise<ApiChannel>;
   /** Its log lines, in order. */
   readonly log: string[];
@@ -86,7 +86,7 @@ export interface SavedBackup {
   readonly bytes: number;
 }
 
-/** What a restore of a picked file did: restored, or refused with the restore's code, message and details. [BK-3] */
+/** What a restore of a picked file did: restored, or refused with the restore's code, message and details. */
 export type RestoreRecord =
   | {
       readonly file: string;
@@ -116,7 +116,7 @@ export interface PageState {
   restore(file: Blob, name?: string): Promise<RestoreRecord>;
   readonly backups: SavedBackup[];
   readonly restores: RestoreRecord[];
-  /** Every link channel the page made, in order. [L58] */
+  /** Every link channel the page made, in order. */
   readonly links: LinkRecord[];
   /** Drops `instance`'s link channel now open, as a lost connection (see the module comment); its id, or null. */
   dropLink(instance: string): number | null;
@@ -215,7 +215,7 @@ function makeWorker(file: string, name: string): WorkerView {
 
 /**
  * A new link channel for private instance `instance` (its worker `from`), the answer to its request `ask`: one end to
- * the core worker, the other to it (see the module comment). [LM-6, LM-11]
+ * the core worker, the other to it (see the module comment).
  */
 function makeLink(instance: string, from: Worker, ask: number): void {
   const link = nextLink++;
@@ -225,7 +225,7 @@ function makeLink(instance: string, from: Worker, ask: number): void {
   from.postMessage({ type: "link-channel", ask, link, port: channel.port2 } satisfies ToProcessWorker, [channel.port2]);
 }
 
-/** Drops `instance`'s link channel now open (see the module comment). [L58] */
+/** Drops `instance`'s link channel now open (see the module comment). */
 function dropLink(instance: string): number | null {
   const open = links.findLast((record) => record.instance === instance && !record.dropped);
   const view = instances[instance] as WorkerView | undefined;
@@ -342,7 +342,7 @@ state.ready.catch((error: unknown) => errors.push(String(error)));
 if (!restoreMode) beginCore(run);
 
 if (__UMBRADB_BROWSER_CONTROL__ === "foreign-request" && params.foreign !== undefined) {
-  // The negative control for what the page reaches: a page that reaches something beside the node. [A131]
+  // The negative control for what the page reaches: a page that reaches something beside the node.
   void fetch(params.foreign, { mode: "no-cors" }).catch(() => undefined);
 }
 
@@ -396,7 +396,7 @@ setInterval(() => void render(), 1_000);
 const where = element("where");
 if (where !== null) where.textContent = `storage ${storage}`;
 
-// ── Backup and restore [BK-5] ────────────────────────────────────────────────────────────────────────────────────────
+// ── Backup and restore ────────────────────────────────────────────────────────────────────────────────────────
 
 const backupButton = element("backup") as HTMLButtonElement | null;
 const restoreInput = element("restore-file") as HTMLInputElement | null;

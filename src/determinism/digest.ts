@@ -1,7 +1,6 @@
 /**
  * The per-block changes and digests of every module table, as functions of the rows that change capture reads
  * (`src/db/change-capture.ts`). `core-digest` writes what they compute (`src/backbone/core-digest/`).
- * [DT-4, DT-5, Q84, Q86; design §4, §10]
  *
  * **Changes.** For every primary key a block wrote, its row at the end of h − 1 and at the end of h give one change:
  * - `["insert", new row]` when there was none before;
@@ -11,15 +10,15 @@
  *
  * Rows are compared by their canonical encoding, so what is equal is exactly what the contents hash cannot tell apart.
  * A table's `changes at h` is the canonical CBOR array of its changes, in primary-key order. Each change is a
- * two-element array: its kind as a text string, and the row in its canonical encoding. [DT-1, DT-2, DT-4]
+ * two-element array: its kind as a text string, and the row in its canonical encoding.
  *
  * **Digests.** A table's digest at h is `SHA-256(previous ‖ CBOR(h) ‖ changes at h)`. `previous` is its digest before
  * h, or 32 zero bytes before its first change, and `CBOR(h)` is the height as a CBOR integer. A table without changes
- * at h keeps its digest and the height of its last change. [DT-5]
+ * at h keeps its digest and the height of its last change.
  *
  * **Checkpoints.** At every height h with h mod the build's interval = 0, whatever the database's S, every table's
  * digest is copied into the checkpoints. The interval is 14,400, about 24 hours at one block per 6 s
- * (`src/backbone/core-digest/build-flags.ts`); {@link isCheckpointHeight} says which heights. [DT-5]
+ * (`src/backbone/core-digest/build-flags.ts`); {@link isCheckpointHeight} says which heights.
  */
 
 import { createHash } from "node:crypto";
@@ -32,7 +31,7 @@ export const DIGEST_BYTES = 32;
 /** The digest before a table's first change: 32 zero bytes ({@link nextDigest} uses its own copy, whatever a caller does to this one). */
 export const ZERO_DIGEST: Uint8Array = new Uint8Array(DIGEST_BYTES);
 
-/** The kinds of change a block can make to a row. [DT-4] */
+/** The kinds of change a block can make to a row. */
 export type ChangeKind = "insert" | "delete" | "update";
 
 /**
@@ -53,7 +52,6 @@ export interface TableChanges {
 /**
  * The changes of one table at one height, from the keys the block wrote, given in primary-key order. Each row is
  * encoded canonically by the table's `types`. A value that cannot be encoded fails, as it fails the contents hash.
- * [DT-1, DT-4]
  */
 export function tableChanges(types: readonly ColumnType[], touched: Iterable<TouchedRow>): TableChanges {
   const parts: Uint8Array[] = [];
@@ -68,7 +66,6 @@ export function tableChanges(types: readonly ColumnType[], touched: Iterable<Tou
 
 /**
  * A table's digest at `height`: SHA-256 of `previous` (32 zero bytes when null), `CBOR(height)` and `changes`.
- * [DT-5]
  */
 export function nextDigest(previous: Uint8Array | null, height: bigint, changes: Uint8Array): Uint8Array {
   if (previous !== null && previous.length !== DIGEST_BYTES) {
@@ -82,7 +79,7 @@ export function nextDigest(previous: Uint8Array | null, height: bigint, changes:
   return new Uint8Array(hash.digest());
 }
 
-/** True at the checkpoint heights: those with `height` mod `interval` = 0, genesis included. [DT-5] */
+/** True at the checkpoint heights: those with `height` mod `interval` = 0, genesis included. */
 export function isCheckpointHeight(height: bigint, interval: bigint): boolean {
   if (interval <= 0n) throw new RangeError(`a checkpoint interval is a positive integer, got ${interval}`);
   if (height < 0n) throw new RangeError(`a height is not negative, got ${height}`);
@@ -91,7 +88,7 @@ export function isCheckpointHeight(height: bigint, interval: bigint): boolean {
 
 // ── internals ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** One key's change, or null for none. [DT-4] */
+/** One key's change, or null for none. */
 function changeOf(
   types: readonly ColumnType[],
   before: readonly unknown[] | null,

@@ -10,7 +10,6 @@ import { spawnChild } from "../child-processes.js";
  * job, whose standard output and standard error the parent reads whole — every byte the process wrote, its worker
  * threads' and PGlite's included, which no stub of `process.stdout` in the test's own process could see. The child
  * writes what it observed to a result file (never to its streams), which the parent reads after it exited.
- * [L1, L2, L3, L8]
  */
 
 const REPOSITORY = fileURLToPath(new URL("../..", import.meta.url));

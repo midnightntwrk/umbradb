@@ -7,7 +7,6 @@
  * - a private process's client (`./private-transport.ts`) and its socket carrier (`./private-socket.ts`).
  *
  * Node.js only (`ws`, `node:http`, `node:https`): in the browser the transport is `postMessage` between workers.
- * [PP-3, PP-4, PP-6, PP-7, PP-11; design §1, §8]
  */
 
 export * from "./core-socket.js";

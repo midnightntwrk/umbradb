@@ -12,7 +12,7 @@ import { PATIENCE_MS } from "./ingest-harness.js";
 /**
  * The process's ledger worker. The runner starts one when its graph has `core-block-parsed` or `core-ledger-state`.
  * It starts only once, even when a retryable failure runs startup again. It closes the worker with the process, so no
- * thread of it outlives `stop()`. A graph with neither module starts none. [LG-10, IN-10; design §5.3]
+ * thread of it outlives `stop()`. A graph with neither module starts none.
  *
  * The test runs on PGlite only: it is about the runner's threads, not stored data.
  */
@@ -60,7 +60,7 @@ function counted() {
   return { made, factory };
 }
 
-describe("the process's ledger worker (LG-10)", () => {
+describe("the process's ledger worker", () => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 

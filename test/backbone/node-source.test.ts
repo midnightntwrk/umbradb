@@ -25,12 +25,12 @@ import {
 /**
  * The node source of `core-block-fetch` on its own, against a tape node, with a recording queue runner in place of the
  * finalized loop's (`QueueRunner`). It covers:
- * - the head and its notifications, and the finality conflicts [IN-4];
- * - the prefetch's window and concurrency [IN-5];
- * - the best-block queue (appends, switches, the walk, `tipCap`, errors) [IN-6, IN-10];
+ * - the head and its notifications, and the finality conflicts;
+ * - the prefetch's window and concurrency;
+ * - the best-block queue (appends, switches, the walk, `tipCap`, errors);
  * - its runs, and its items.
  *
- * The process-level criteria are tested in `test/backbone/ingest.test.ts`. [A79–A81, A83, A89]
+ * The process-level criteria are tested in `test/backbone/ingest.test.ts`.
  */
 
 const quiet: ConnectSocket = (url, events, timers) => connectWebSocket(url, events, timers, { heartbeatMs: 3_600_000 });
@@ -158,7 +158,7 @@ const sameHash = (a: Uint8Array, b: Uint8Array): boolean => hex(a) === hex(b);
 
 /**
  * A call record the test itself makes, through the client, to let the notifications after it go out (a notification
- * waits for every record before it), so the test sees the source before them. [TT-3]
+ * waits for every record before it), so the test sees the source before them.
  */
 const FENCE: TapeRecord = { method: "chain_getBlockHash", params: [999_999], result: hex(new Uint8Array(32).fill(9)) };
 const passFence = (client: NodeClient) => client.blockHash(999_999n);
@@ -171,7 +171,7 @@ const hashAndBlock = (block: ChainBlock): TapeRecord[] => [
   { method: "chain_getBlock", params: [block.hex], result: block.block },
 ];
 
-describe("the finalized head (IN-4)", () => {
+describe("the finalized head", () => {
   it("reads the head at start, after subscribing, and lets notifications only raise it", async () => {
     const records: TapeRecord[] = [
       ...subscriptions(),
@@ -307,7 +307,7 @@ describe("the finalized head (IN-4)", () => {
   }, PATIENCE_MS);
 });
 
-describe("finality conflicts (IN-4)", () => {
+describe("finality conflicts", () => {
   const other = branchOf(at(11), 14n, "b");
   const b = (height: number): ChainBlock => other[height - 12] as ChainBlock;
 
@@ -377,7 +377,7 @@ describe("finality conflicts (IN-4)", () => {
   }, PATIENCE_MS);
 });
 
-describe("the finalized prefetch (IN-5)", () => {
+describe("the finalized prefetch", () => {
   /**
    * The tape of a catch-up from S = 1 to `head`: per height `chain_getBlockHash` and `chain_getBlock`, in height order
    * (the recording runner reads no item, so no metadata is asked).
@@ -471,7 +471,7 @@ describe("the finalized prefetch (IN-5)", () => {
     expect(node.count("chain_getBlockHash", [11])).toBe(1);
   }, PATIENCE_MS);
 
-  it("reports its latest head with no node call, the prefetch still bound by the head the loop read (issue 00074)", async () => {
+  it("reports its latest head with no node call, the prefetch still bound by the head the loop read", async () => {
     // As above: the notification of 12 goes out once heights 1–5 are answered, while the loop's head is 10.
     const records: TapeRecord[] = [
       ...subscriptions(),
@@ -632,7 +632,7 @@ describe("the finalized prefetch (IN-5)", () => {
   });
 });
 
-describe("the best-block queue (IN-6)", () => {
+describe("the best-block queue", () => {
   const head = at(100);
   const a = branchOf(head, 106n, "a2");
   const b = branchOf(head, 106n, "b");
@@ -729,7 +729,7 @@ describe("the best-block queue (IN-6)", () => {
   }, PATIENCE_MS);
 
   it("queues a best block the finalized head reached while it was prepared, and uses it at finality, unfetched", async () => {
-    // Each transaction is parsed once: the head's notification of 101 comes while 101's prepare runs. [A92]
+    // Each transaction is parsed once: the head's notification of 101 comes while 101's prepare runs.
     const records: TapeRecord[] = [
       newHead(A(101)),
       fetched(A(101)),
@@ -824,7 +824,7 @@ describe("the best-block queue (IN-6)", () => {
     await until(() => runner.calls.length === 2, "one best block");
     await source.idle();
     expect(runner.calls).toEqual(["best 101A", "prepare 101A"]);
-    // A catch-up: the cursor 0, the head 100, more than the window above it. [Q129]
+    // A catch-up: the cursor 0, the head 100, more than the window above it.
     const behind = await open([...subscriptions(), ...headRead(head), newHead(A(101))], { prefetchWindow: 64 });
     const quiet = new Recorder();
     await behind.source.cursor(cursorRead(at(0)));
@@ -1159,7 +1159,7 @@ describe("the best-block queue (IN-6)", () => {
   }, PATIENCE_MS);
 });
 
-describe("core-block-fetch's items from the node (CD-2, LG-1, LG-4)", () => {
+describe("core-block-fetch's items from the node", () => {
   const table = ledgerTableOf("preprod", undefined);
   const block = (h: number): BlockRef => ({ height: BigInt(h), hash: at(h).hash, parentHash: at(h).parentHash });
 
@@ -1176,7 +1176,7 @@ describe("core-block-fetch's items from the node (CD-2, LG-1, LG-4)", () => {
     expect(items["block-body"].specVersion).toBe(2_000_000);
     expect(items["block-body"].extrinsics.map((e) => `${e.call?.pallet}.${e.call?.call}`)).toEqual(["Timestamp.set"]);
     expect(items["runtime-metadata"]).toEqual({ specVersion: 2_000_000, metadata: RUNTIME.metadata });
-    // Preprod's built-in table: runtime 2.0's ledger is v9 as it built it, the rc.3 package. [Q139 A]
+    // Preprod's built-in table: runtime 2.0's ledger is v9 as it built it, the rc.3 package.
     expect(items["ledger-version"]).toBe("v9-rc3");
     expect(Object.isFrozen(items)).toBe(true);
     // The runtime read at the parent's state; its metadata once for the runtime.
@@ -1189,7 +1189,7 @@ describe("core-block-fetch's items from the node (CD-2, LG-1, LG-4)", () => {
     expect(node.count("state_getMetadata")).toBe(1);
   }, PATIENCE_MS);
 
-  it("reads block 0's runtime and metadata at block 0 itself, its time 0 without Timestamp::set (IN-7)", async () => {
+  it("reads block 0's runtime and metadata at block 0 itself, its time 0 without Timestamp::set", async () => {
     const genesis = chainOf(0n, () => ({ timestampMs: null }))[0] as ChainBlock;
     const { source, node } = await open(content(genesis, RUNTIME, true));
     const items = await source.blockItems({ height: 0n, hash: genesis.hash, parentHash: new Uint8Array(32) }, table);
@@ -1210,7 +1210,7 @@ describe("core-block-fetch's items from the node (CD-2, LG-1, LG-4)", () => {
   }, PATIENCE_MS);
 });
 
-describe("the ledger roots' prefetch (00033 F1; LG-15, IN-5, IN-9, IN-10)", () => {
+describe("the ledger roots' prefetch (00033 F1)", () => {
   const rootBytes = (block: ChainBlock): number[] => Array.from({ length: 32 }, () => Number(block.height % 250n) + 1);
   const root = (block: ChainBlock): string => hex(rootBytes(block));
   const rootRecord = (block: ChainBlock, extra: Partial<{ delayMs: number }> = {}): TapeRecord => ({
@@ -1251,7 +1251,7 @@ describe("the ledger roots' prefetch (00033 F1; LG-15, IN-5, IN-9, IN-10)", () =
     for (let height = 1; height <= 40; height++) expect(rootCalls(node, at(height))).toBe(1);
   }, PATIENCE_MS);
 
-  it("asks no second time when the block is applied again in the run (LG-14's restart after a refused eviction)", async () => {
+  it("asks no second time when the block is applied again in the run (the restart after a refused eviction)", async () => {
     const { source, node } = await open(catchUpWithRoots(10), { prefetchWindow: 4 });
     source.attach(new Recorder());
     await source.finalizedHead();
@@ -1287,7 +1287,7 @@ describe("the ledger roots' prefetch (00033 F1; LG-15, IN-5, IN-9, IN-10)", () =
     expect(rootCalls(node, at(100))).toBe(0);
   }, PATIENCE_MS);
 
-  it("gives a prefetched root's node error as it is, asking no second time (IN-9: a halt stays a halt)", async () => {
+  it("gives a prefetched root's node error as it is, asking no second time (a halt stays a halt)", async () => {
     const failing = at(3);
     const records: TapeRecord[] = [
       ...subscriptions(),

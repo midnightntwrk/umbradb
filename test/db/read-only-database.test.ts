@@ -13,19 +13,19 @@ import { askedLater, BACKENDS, settlesWithin, TEST_CURSOR, TEST_SCHEMA } from ".
 import { readOnlyProblems } from "./read-only-checks.js";
 
 /**
- * The read-only database of the `db` item. [A144 DOC, DB-2, DB-4, DB-15, Q73]
+ * The read-only database of the `db` item.
  *
  * `core-chain` provides the `process` item `db`. A module that requires it reads through it for work outside the
- * points. It offers `read` and nothing that writes, opens a transaction or closes the database. [CD-1]
+ * points. It offers `read` and nothing that writes, opens a transaction or closes the database.
  *
- * Inside a callback a module uses the handle it was given. [RN-4]
+ * Inside a callback a module uses the handle it was given.
  * - On PGlite, a `db.read` from inside the module's own `on-db-write` (which runs in the block's job of the one
- *   queue) fails at once with `nested-call`: the queue's guard against nested calls is kept for this item. [Q73]
+ *   queue) fails at once with `nested-call`: the queue's guard against nested calls is kept for this item.
  * - On PostgreSQL it runs on a pooled read connection, outside the block's transaction, and returns the data committed
  *   before the block.
  *
  * Modules are trusted: what is checked here is what a module finds by ordinary use, not a defence against one that
- * goes around it. [Q46]
+ * goes around it.
  *
  * Built here on the database API: {@link readOnlyDatabase} makes the item from a `Database`. A module that requires
  * `db` gets it through `ProcessContext.items` once `core-chain` publishes it and the runner hands process items to
@@ -33,7 +33,7 @@ import { readOnlyProblems } from "./read-only-checks.js";
  * transaction of the database API, as the tests of the block write handles do.
  */
 
-/** The type-level form of the check: true when `T` offers `read` and nothing else. [A144 DOC] */
+/** The type-level form of the check: true when `T` offers `read` and nothing else. */
 type OffersReadOnly<T> = [keyof T] extends ["read"] ? (["read"] extends [keyof T] ? true : false) : false;
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -57,7 +57,7 @@ function outcome(run: Promise<unknown>): Promise<unknown> {
   );
 }
 
-/** The refusal of a nested `db.read` on PGlite: `database-error`, `nested-call`, not retryable. [Q73] */
+/** The refusal of a nested `db.read` on PGlite: `database-error`, `nested-call`, not retryable. */
 function expectNestedCall(error: unknown): void {
   expect(error).toBeInstanceOf(UmbraError);
   const refused = error as UmbraError;
@@ -96,7 +96,7 @@ async function snapshot(read: ReadHandle): Promise<Record<string, unknown>> {
 /**
  * Runs `body` as the block at `height`: one transaction of the database API whose first statement writes the cursor's
  * row (as `core-block-commit` does first in every block), then the parts' `on-db-write` calls, opened as the
- * runner opens them (`openBlockWrites`, with the cursor before the block as the handles' height). [CD-3]
+ * runner opens them (`openBlockWrites`, with the cursor before the block as the handles' height).
  */
 function block<T>(db: Database, plan: SchemaPlan, height: bigint, body: (writes: BlockWrites) => Promise<T>): Promise<T> {
   return db.transaction(async (tx) => {
@@ -108,7 +108,7 @@ function block<T>(db: Database, plan: SchemaPlan, height: bigint, body: (writes:
 // ---------------------------------------------------------------------------------------------------------------------
 // The type
 
-describe("the db item's type (CD-1, Q73, A144)", () => {
+describe("the db item's type", () => {
   it("offers read only — the database API's read, with the read option — and nothing that writes, opens a transaction or closes", () => {
     expectTypeOf<keyof ReadOnlyDatabase>().toEqualTypeOf<"read">();
     expectTypeOf<OffersReadOnly<ReadOnlyDatabase>>().toEqualTypeOf<true>();
@@ -117,13 +117,13 @@ describe("the db item's type (CD-1, Q73, A144)", () => {
     expectTypeOf(readOnlyDatabase).parameters.toEqualTypeOf<[Database]>();
     expectTypeOf(readOnlyDatabase).returns.toEqualTypeOf<ReadOnlyDatabase>();
     const misuse = (db: ReadOnlyDatabase) => [
-      // @ts-expect-error the db item opens no transaction. [A144 DOC]
+      // @ts-expect-error the db item opens no transaction.
       db.transaction,
-      // @ts-expect-error the db item does not close the database. [A144 DOC]
+      // @ts-expect-error the db item does not close the database.
       db.close,
-      // @ts-expect-error the db item does not write. [A144 DOC]
+      // @ts-expect-error the db item does not write.
       db.execute,
-      // @ts-expect-error statements run through a read's handle, not the item. [A144 DOC]
+      // @ts-expect-error statements run through a read's handle, not the item.
       db.query,
     ];
     expectTypeOf(misuse).toBeFunction();
@@ -141,7 +141,7 @@ describe("the db item's type (CD-1, Q73, A144)", () => {
 // ---------------------------------------------------------------------------------------------------------------------
 // Without a backend: what the item passes to the database's read
 
-describe("readOnlyDatabase over any Database (CD-1, DB-15)", () => {
+describe("readOnlyDatabase over any Database", () => {
   /** A database whose read records its arguments; it has nothing else a test may call. */
   function recording(answer: (args: unknown[]) => Promise<unknown>): { db: Database; calls: unknown[][] } {
     const calls: unknown[][] = [];
@@ -197,7 +197,7 @@ describe("readOnlyDatabase over any Database (CD-1, DB-15)", () => {
     expect(readOnlyProblems(ro, db)).toEqual([]);
   });
 
-  it("negative control: A144's runtime check finds the database itself, a transaction beside read, a prototype path and a held database", () => {
+  it("negative control: the runtime check finds the database itself, a transaction beside read, a prototype path and a held database", () => {
     const { db } = recording(async () => undefined);
     const read = readOnlyDatabase(db).read;
     expect(readOnlyProblems(readOnlyDatabase(db), db)).toEqual([]);
@@ -229,7 +229,7 @@ describe("readOnlyDatabase over any Database (CD-1, DB-15)", () => {
 // The suites over BACKENDS get PGlite databases through the test server's wrapper (`pglite-server.ts`), whose `read`
 // is a closure; the backend's own object is a class instance whose `read` uses `this`. `core-chain` will make the item
 // from that object, so the item must work over it too — also with its `read` taken off the item.
-describe("the db item over the PGlite backend's own Database, as openPglite returns it (A144)", () => {
+describe("the db item over the PGlite backend's own Database, as openPglite returns it", () => {
   it("reads and reports its height, offers nothing else of the database, and refuses a read from inside a job with nested-call", async () => {
     const db = await openPglite({ dataDir: "memory://", committedHeight: TEST_CURSOR, developmentOptIn: true });
     try {
@@ -256,9 +256,8 @@ describe("the db item over the PGlite backend's own Database, as openPglite retu
 });
 
 // ---------------------------------------------------------------------------------------------------------------------
-// [DOC]
 
-describe("A144 [DOC]: the module guide", () => {
+describe("the module guide", () => {
   const guide = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "docs", "module-guide.md"), "utf8");
   // The guide's "Reading and writing tables" section: the handles, then `db.read`.
   const heading = "\n## 5. Reading and writing tables\n";
@@ -300,7 +299,7 @@ describe("A144 [DOC]: the module guide", () => {
 
 // Each test opens a fresh database and migrates two parts before its blocks: a few seconds on PostgreSQL under the full
 // conformance run's parallel load (the block write handles' suite saw 5 s), so each test gets 30 s.
-describe.each(BACKENDS)("the read-only db item on $name (A144)", { timeout: 30_000 }, (backend) => {
+describe.each(BACKENDS)("the read-only db item on $name", { timeout: 30_000 }, (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
@@ -347,7 +346,7 @@ describe.each(BACKENDS)("the read-only db item on $name (A144)", { timeout: 30_0
     const seen = await ro.read(async (read) => {
       const first = await snapshot(read);
       commit.gate();
-      // On PGlite the block waits in the one queue until the read ends; on PostgreSQL it commits now. [DB-4, DB-5]
+      // On PGlite the block waits in the one queue until the read ends; on PostgreSQL it commits now.
       if (backend.singleQueue) expect(await settlesWithin(commit.result, 50)).toBe(false);
       else await commit.result;
       return { first, second: await snapshot(read) };
@@ -358,7 +357,7 @@ describe.each(BACKENDS)("the read-only db item on $name (A144)", { timeout: 30_0
     expect(await ro.read(snapshot)).toEqual({ height: 2n, cursor: 2n, a: [1n, 2n], b: [] });
   });
 
-  it("A144: a db.read from inside the module's own on-db-write fails at once with nested-call on PGlite, and on PostgreSQL returns the data committed before the block", async () => {
+  it("a db.read from inside the module's own on-db-write fails at once with nested-call on PGlite, and on PostgreSQL returns the data committed before the block", async () => {
     const { db, plan, ro } = await setUp();
     await block(db, plan, 1n, (writes) => writes.write("a", (w) => w.execute(INSERT_A, [1])));
     let seen: unknown;
@@ -421,7 +420,7 @@ describe.each(BACKENDS)("the read-only db item on $name (A144)", { timeout: 30_0
     else expect(seen).toBe(1n);
   });
 
-  it("passes the read option through: refused alike on both backends, applied on PostgreSQL only (DB-15)", async () => {
+  it("passes the read option through: refused alike on both backends, applied on PostgreSQL only", async () => {
     const { ro } = await setUp();
     const invalid = await failure(() => ro.read(async () => 1, { timeoutMs: 0 }));
     expect(invalid.code).toBe("invalid-configuration");

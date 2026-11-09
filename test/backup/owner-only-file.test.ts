@@ -15,7 +15,7 @@ import { openPglite } from "../../src/db/pglite.js";
 const root = mkdtempSync(join(tmpdir(), "umbradb-owner-only-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
-describe("ownerOnlyFile through writeBackup (task 17.5b)", () => {
+describe("ownerOnlyFile through writeBackup", () => {
   it("fails on a refused chmod with its error, the temporary file removed and nothing written", { timeout: 120_000 }, async () => {
     const dir = mkdtempSync(join(root, "refused-"));
     const out = join(dir, "refused.backup");

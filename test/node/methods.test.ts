@@ -9,7 +9,6 @@ import { ManualTimers, turns } from "./manual-timers.js";
  * - The node client's method list is exactly the twelve allowed methods, written out below, in their order.
  * - Its low-level `call` refuses any other method before anything reaches the node. It also refuses the two
  *   subscription methods, which only `subscribeNewHeads` and `subscribeFinalizedHeads` send.
- * [IN-8, A83]
  */
 
 const nodes: FakeNode[] = [];
@@ -20,7 +19,7 @@ afterEach(async () => {
   for (const node of nodes.splice(0)) await node.stop();
 });
 
-describe("IN-8: the node client's methods", () => {
+describe("the node client's methods", () => {
   it("are exactly the twelve allowed methods, in their order, frozen", () => {
     expect([...NODE_METHODS]).toEqual([
       "chain_subscribeNewHeads",
@@ -39,7 +38,7 @@ describe("IN-8: the node client's methods", () => {
     expect(Object.isFrozen(NODE_METHODS)).toBe(true);
   });
 
-  it("refuses through call() every method outside IN-8 and the subscription methods, sending nothing", async () => {
+  it("refuses through call() every method outside the allowed ones and the subscription methods, sending nothing", async () => {
     const node = await FakeNode.start();
     nodes.push(node);
     const client = new NodeClient({ url: node.url(), timers: new ManualTimers() });

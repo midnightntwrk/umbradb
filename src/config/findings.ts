@@ -1,18 +1,18 @@
 /**
  * A configuration refusal's findings. `umbradb config check` reports them, and a process logs them when it refuses its
  * configuration. There is one finding per thing found, each with its code, where it is and what is wrong, so the
- * command's report and the process's log name a finding the same way. [CF-10, AE-3, Q137 B]
+ * command's report and the process's log name a finding the same way.
  *
  * - **Validation** (`./validate.ts`): every finding of its refusal (`details.findings`), at its path inside the
  *   configuration (`entries[0].config.pollMs`). Its code is the refusal's code plus the rule
- *   (`invalid-configuration settings-schema`). [CF-3]
+ *   (`invalid-configuration settings-schema`).
  * - **Not plain data** (`./plain-data.ts`): one finding, at the path of the refused value
- *   (`entries[1].config.onError`). [CF-1]
+ *   (`entries[1].config.onError`).
  * - **The loader and the process revision** (`./load.ts`, `./process.ts`): one finding, at the file. Its code is the
  *   refusal's code plus its reason (`invalid-configuration file-not-found`).
  *
  * Pure. The texts are the errors' own and never a setting's value, since the validation's messages name no value. A
- * caller redacts them (`./redact.ts`). [CF-4]
+ * caller redacts them (`./redact.ts`).
  */
 
 import { UmbraError } from "../db/errors.js";

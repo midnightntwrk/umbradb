@@ -26,14 +26,13 @@ import { FILE } from "./history-fixtures.js";
  * 2. the configuration is validated;
  * 3. (the database is opened, with its writer lock and durability probe; the database tests open it themselves);
  * 4. the history is read and checked with the cursor, including the version check, all before any migration;
- *    [CF-5, CF-6, CF-8]
  * 5. the graph is resolved with the check's entries, S, opt-in and cursor, then the schema plan is made;
  * 6. `startDatabase` runs with the check's committed versions. Its first part is `core-chain`: its migration `001`
  *    creates `core_chain.config`, and its `on-start-db` compares the history again and records it, in one
- *    transaction. [CF-6]
+ *    transaction.
  *
  * The cursor is given, because the `blocks` table that holds it belongs to the real `core-block-commit` part. A test
- * commits "blocks" by passing a higher cursor to the next startup. [A72]
+ * commits "blocks" by passing a higher cursor to the next startup.
  */
 
 /**
@@ -98,7 +97,7 @@ export interface StartupOptions {
   readonly rules?: readonly HistoryRule[];
   /**
    * A negative control: the version check (`build-version`) is left out of the checks before `startDatabase` and of
-   * `core-chain`'s, and run only after `startDatabase`, that is after the migrations. [A33]
+   * `core-chain`'s, and run only after `startDatabase`, that is after the migrations.
    */
   readonly versionCheckAfterMigrations?: boolean;
   /** More backbone parts, after the stand-ins (some tests add `core-block-commit`, whose table holds the cursor). */

@@ -5,10 +5,10 @@ import { followSignal, isSignal } from "../../src/runner/host-signal.js";
 /**
  * A host's `AbortSignal` as the engine reads it (`src/runner/host-signal.ts`): the check that a value is one, by
  * `AbortSignal`'s own accessor, and the engine's listener through `EventTarget`'s own members — a signal's replaced own
- * members neither throw nor are used, and the listener is removed by the function returned. [LM-1, LM-9, RN-13]
+ * members neither throw nor are used, and the listener is removed by the function returned.
  */
 
-describe("a host's AbortSignal (LM-1, LM-9)", () => {
+describe("a host's AbortSignal", () => {
   it("isSignal: a signal is one; an object made from its prototype, a plain object, a primitive, null are none", () => {
     expect(isSignal(new AbortController().signal)).toBe(true);
     expect(isSignal(AbortSignal.abort())).toBe(true);

@@ -27,5 +27,5 @@ tests/
 # by design (src/config/core-settings.ts, NODE), so every mention in prose is a false positive.
 # Code stays scanned: comments and messages there write the schemes as "ws or wss://", which the
 # rule does not match. A `nosemgrep: <rule-id>` marker does NOT stop a GitHub alert (the SARIF
-# keeps marked findings, and GitHub ignores the suppression); see docs/issues/00086.
+# keeps marked findings, and GitHub ignores the suppression).
 *.md

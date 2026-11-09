@@ -11,7 +11,7 @@ import {
 /**
  * The retention window: the states alive after block h are the latest and the `retainStates` before it. A revision
  * that raises the setting fills the window from its start; one that lowers it releases the states leaving the window
- * in its first block. [LG-12, A103]
+ * in its first block.
  *
  * The oracle is the rule run one block at a time: a set of alive heights, where each block adds its own and releases
  * every one below h − R(h). The implementation's closed form is checked against it by hand-computed cases, and by
@@ -43,13 +43,13 @@ function aliveByBlock(revisions: readonly CoreRevision[], to: number): Map<numbe
   return after;
 }
 
-describe("LG-12's retention window (task 12.4)", () => {
+describe("retention window", () => {
   it("keeps the latest state and the retainStates before it; 0 keeps the latest only", () => {
     expect(retainedFrom(history([0, 0]), 0n)).toBe(0n);
     expect(retainedFrom(history([0, 0]), 7n)).toBe(7n);
     expect(retainedFrom(history([0, 1_000]), 999n)).toBe(0n);
     expect(retainedFrom(history([0, 1_000]), 5_000n)).toBe(4_000n);
-    // retainStates 1,000 at cursor 5,000: 4,000 is the oldest state loadable, 3,999 is not. [A103]
+    // retainStates 1,000 at cursor 5,000: 4,000 is the oldest state loadable, 3,999 is not.
     expect(retentionWindow(history([0, 1_000]), 5_000n)).toEqual({ from: 4_000n, to: 5_000n });
     expect(retentionWindow(history([0, 1_000]), null)).toBeNull();
   });

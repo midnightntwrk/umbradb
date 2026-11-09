@@ -6,7 +6,7 @@ import type { PgliteTestDatabase } from "./pglite-server.js";
 
 /**
  * The instrumented run of the no-outside-read test: on PGlite, under a constant read load, blocks commit one after
- * another through the database API while every statement that reaches the engine is traced. [A11, DB-4]
+ * another through the database API while every statement that reaches the engine is traced.
  *
  * **The trace.** The engine's `query` and `exec` are wrapped, so every statement the database API sends is recorded
  * in the order it was sent, with *who asked for it*: the test runs each read and each block transaction inside an
@@ -28,7 +28,7 @@ import type { PgliteTestDatabase } from "./pglite-server.js";
  * if one was assigned (a read-only transaction has none; a block's transaction has one from its first write).
  */
 
-/** How many blocks the run commits ("over 200 blocks"). [A11] */
+/** How many blocks the run commits ("over 200 blocks"). */
 export const A11_BLOCKS = 200;
 
 /** How many loops keep a read asked for at all times. */
@@ -200,7 +200,7 @@ export function outsideReads(trace: readonly Traced[]): OutsideRead[] {
  * The no-outside-read assertions: every block committed; no statement of a read ran inside a block's window; and the
  * run was not vacuous — reads were waiting in the middle of every block, every statement after opening is attributed
  * to a read or a block, every completed read's own statements are traced, and the evidence from inside the database
- * agrees (no read saw a half-written block or ran in a transaction that had written). [A11]
+ * agrees (no read saw a half-written block or ran in a transaction that had written).
  */
 export function expectNoOutsideReads(outcome: LoadOutcome): void {
   expect(outcome.failedBlocks).toEqual([]);

@@ -3,7 +3,7 @@
 // packages do — a flush takes every node reachable from a key whose root count rose that it has not stored yet and
 // counts it stored; `evict` forgets that it stored a node, so a node needed again after the sweep deleted it is flushed
 // again. Without `evict` a node the database lost would never be written again: the oracle then finds a held key
-// reaching a node that is not stored. Blocks carry no transactions; roots are the fixture's (`rootOf`). [A105, LG-14]
+// reaching a node that is not stored. Blocks carry no transactions; roots are the fixture's (`rootOf`).
 //
 // Across a worker restart:
 // - a state the thread did not make itself (a new worker thread's, after the main thread restarted it) is loaded from
@@ -13,7 +13,7 @@
 //   after applying one height, as a package does whose live object still holds a swept node after the worker freed
 //   what it can.
 // What every thread did is counted in memory the threads share ({@link COUNTERS}), so the test reads it across a
-// restart. [A160, LG-14, Q144 B]
+// restart.
 //
 // The extended DAG (`loaderData` {@link FixtureData}: `dag: "extended"`; without it, the original DAG as above) is
 // served by a package that keeps, per thread, the node it holds for each key, the child list it believes stored for
@@ -29,17 +29,16 @@
 // - `keeps-old-copy`: building a node the thread already holds keeps the node it holds, as the ledger's back-end keeps
 //   the old copy of a node it creates again; so a thread that never restarted keeps a rewritten node's old child list
 //   and writes nothing for it, while a thread that loaded the state before from the node store holds no copy and
-//   writes the new one [R28];
+//   writes the new one;
 // - `holds-by-reference`: it writes what `writes-again` writes, but its live objects keep each node in the form the
 //   thread first built it; so after `rewrite to-embedded` is written embedding its small child, a live state still
 //   holds that child by reference, and the package refuses to forget a node a live state holds by reference, as the
-//   v9 package does; a new thread, whose state is loaded from the node store, holds the stored form [R30, Q144 B].
+//   v9 package does; a new thread, whose state is loaded from the node store, holds the stored form.
 // By `withhold` and `persistUnknown` ({@link FixtureData}) it also makes the batches the reclamation checks refuse: a
 // flush that leaves out one node a node of its batch references (a new node's child, or the child a rewritten node now
-// references), and one that persists a key no node has [R11]. By `persist`, a flush also persists a node it holds and
-// never releases it: a queued key that a later block persists [R27].
-// [A105, R11, R27, R28, R30; LG-11, LG-14]
-// The one-form DAG (`dag: "one-form"`, the extended DAG without its rewrite cases) is served by the same package. [R4]
+// references), and one that persists a key no node has. By `persist`, a flush also persists a node it holds and
+// never releases it: a queued key that a later block persists.
+// The one-form DAG (`dag: "one-form"`, the extended DAG without its rewrite cases) is served by the same package.
 // Erasable TypeScript only: the worker runs it through Node.js's type stripping.
 
 import { createHash } from "node:crypto";
@@ -86,19 +85,19 @@ export interface FixtureData extends RefusalData {
   readonly keeping?: Keeping;
   /**
    * The extended DAG only: the flush after the height `at` (decimal text) leaves out the node `key` (hex), which it then
-   * believes stored. [R11]
+   * believes stored.
    */
   readonly withhold?: { readonly at: string; readonly key: string };
-  /** The extended DAG only: the flush after this height (decimal text) also persists {@link UNKNOWN_KEY}. [R11] */
+  /** The extended DAG only: the flush after this height (decimal text) also persists {@link UNKNOWN_KEY}. */
   readonly persistUnknown?: string;
   /**
    * The extended DAG only: the flush after the height `at` (decimal text) also persists the node `key` (hex), which no
-   * later flush releases. [R27]
+   * later flush releases.
    */
   readonly persist?: { readonly at: string; readonly key: string };
 }
 
-/** A key no node of the fixture has: what `persistUnknown` persists. [R11] */
+/** A key no node of the fixture has: what `persistUnknown` persists. */
 export const UNKNOWN_KEY: Uint8Array = Uint8Array.from(createHash("sha256").update("a key no node of the fixture has").digest());
 
 /** A state of this package: the height whose fixture state it is. */
@@ -149,7 +148,7 @@ export async function loadLedger(ledger: LedgerName, _options: LedgerPackageOpti
     load(key, store) {
       const height = roots.get(hex(key));
       if (height !== undefined) return state(height);
-      // A state this thread did not make: read from the node store, every node of it, each the fixture's. [A160]
+      // A state this thread did not make: read from the node store, every node of it, each the fixture's.
       const root = store.get(key);
       const named = root === null ? null : /^state (\d+)$/.exec(Buffer.from(root.data).toString("utf8"));
       if (named === null || named === undefined) throw new Error(`the sweep test package finds no state ${hex(key)} in the node store`);
@@ -173,7 +172,7 @@ export async function loadLedger(ledger: LedgerName, _options: LedgerPackageOpti
       };
     },
     stateRoot: (handle) => rootOf(heightOf(handle)),
-    // The six state tree values, none null: this package's states hold no trees, so empty ones' values. [LG-16]
+    // The six state tree values, none null: this package's states hold no trees, so empty ones' values.
     stateSummary: () => ({
       zswapFirstFree: 0n,
       zswapRoot: Uint8Array.of(0),
@@ -231,7 +230,7 @@ interface ExtendedState {
   readonly holds: ReadonlySet<string>;
 }
 
-/** The package of the extended DAG or the one-form DAG (see the module comment). [A105, R4, R27, R28, R30; LG-14] */
+/** The package of the extended DAG or the one-form DAG (see the module comment). */
 function extendedPackage(ledger: LedgerName, data: FixtureData): LedgerPackage {
   const dag: FixtureDag = data.dag ?? "extended";
   const keeping = data.keeping ?? "writes-again";
@@ -275,7 +274,7 @@ function extendedPackage(ledger: LedgerName, data: FixtureData): LedgerPackage {
   /** The state after `height`, built from the fixture's nodes as `keeping` says. */
   const build = (height: number): StateHandle => {
     if (height === AGAIN && !dropped) {
-      // Its memory drops `again`: building the state creates it anew, and the flush writes it again. [A105, R12 (b)]
+      // Its memory drops `again`: building the state creates it anew, and the flush writes it again.
       dropped = true;
       held.delete(again);
       stored.delete(again);
@@ -291,7 +290,7 @@ function extendedPackage(ledger: LedgerName, data: FixtureData): LedgerPackage {
   };
   /**
    * The state whose root is `key`, read lazily from `store`: each row it reaches read and its key checked against its
-   * content, each child list counted stored, the keys reached checked against the fixture's node set. [A160, R27, R30]
+   * content, each child list counted stored, the keys reached checked against the fixture's node set.
    */
   const read = (key: Uint8Array, store: NodeStore): StateHandle => {
     const root = store.get(key);
@@ -356,7 +355,7 @@ function extendedPackage(ledger: LedgerName, data: FixtureData): LedgerPackage {
       };
     },
     stateRoot: (handle) => rootOf(heightOf(handle), dag),
-    // The six state tree values, none null: this package's states hold no trees, so empty ones' values. [LG-16]
+    // The six state tree values, none null: this package's states hold no trees, so empty ones' values.
     stateSummary: () => ({
       zswapFirstFree: 0n,
       zswapRoot: Uint8Array.of(0),
@@ -382,7 +381,7 @@ function extendedPackage(ledger: LedgerName, data: FixtureData): LedgerPackage {
         for (const ref of node.refs) frontier.push(hex(ref));
       }
       for (const [key, node] of taken) stored.set(key, hex(node.children));
-      // A node left out of the batch, though the package now believes it stored. [R11]
+      // A node left out of the batch, though the package now believes it stored.
       if (data.withhold !== undefined && `${applied}` === data.withhold.at) taken.delete(data.withhold.key);
       const rootCounts = [...deltas.values()].filter((d) => d.delta !== 0).sort((a, b) => (hex(a.key) < hex(b.key) ? -1 : 1));
       deltas = new Map();
@@ -399,7 +398,7 @@ function extendedPackage(ledger: LedgerName, data: FixtureData): LedgerPackage {
         throw new Error(`the sweep test package refuses to forget ${keys.length} node(s) after ${applied}: still held by a live object (A160)`);
       }
       if (keeping === "holds-by-reference") {
-        // A live state holding one by reference: refused, as the v9 package refuses. [R30, Q144 B]
+        // A live state holding one by reference: refused, as the v9 package refuses.
         const holding = keys.map(hex).filter((key) => [...states].some((state) => state.holds.has(key)));
         if (holding.length > 0) {
           Atomics.add(counters, COUNTERS.refusals, 1);

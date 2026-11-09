@@ -8,7 +8,7 @@ import { type PlainData, type PlainObject, samePlainData } from "../../src/confi
  * Property tests (`[PROP]`) of `data_hash`, the SHA-256 of the canonical encoding. The inputs are random data-field
  * objects: plain data, as a configuration's data fields are (objects, arrays, strings, booleans, `null`, integers from
  * 0 to 2^53 − 1, nested). The hash does not depend on property order at any depth, and it changes when any value
- * changes, at any depth. Uses fast-check, with the seed recorded. [A32 PROP, CF-7, CF-1, DT-1]
+ * changes, at any depth. Uses fast-check, with the seed recorded.
  *
  * The committed negative controls show each property can catch a hash that breaks it:
  * - a hash over the properties in their written order (`JSON.stringify`, unsorted) fails the first property;
@@ -107,7 +107,7 @@ const keysOnly: Hash = (data) => {
   return new Uint8Array(createHash("sha256").update(JSON.stringify(keys(data))).digest());
 };
 
-describe("A32: data_hash over random data-field objects (CF-7)", () => {
+describe("data_hash over random data-field objects", () => {
   it(`is independent of property order at every depth (property, seed ${SEED})`, () => {
     fc.assert(orderIndependent(dataHash), { seed: SEED, numRuns: RUNS });
   });
@@ -127,7 +127,7 @@ describe("A32: data_hash over random data-field objects (CF-7)", () => {
   });
 });
 
-describe("A32's negative controls (committed): each property tells a hash that breaks it", () => {
+describe("negative controls (committed): each property tells a hash that breaks it", () => {
   it("a hash over the properties in their written order fails the order property", () => {
     const result = fc.check(orderIndependent(unsorted), { seed: SEED, numRuns: RUNS });
     expect(result.failed).toBe(true);

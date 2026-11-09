@@ -19,7 +19,7 @@ import { type LedgerScenario, ledgerScenario } from "./ledger-tapes.js";
 
 /**
  * One migration per part, through the real process with the ledger's core modules from genesis, on PostgreSQL 18 and
- * PGlite 0.5.10. [R16, LG-11, DB-9]
+ * PGlite 0.5.10.
  *
  * - A new database gets `core_ledger_state.ref_counts` and `core_ledger_state.unreferenced` from `core-ledger-state`'s
  *   `001`, and none of `sweep`, `grey`, `marks`, and `core_chain.identity` from `core-chain`'s `001`: each part records
@@ -69,20 +69,20 @@ async function startOn(db: ProcessDatabase, records: readonly TapeRecord[], head
   }
 }
 
-describe("R16: the parts that had two migrations (LG-11, DB-9)", () => {
-  it("R16: core-chain, core-ledger-state and core-private-source each declare one migration, 001", () => {
+describe("the parts that had two migrations", () => {
+  it("core-chain, core-ledger-state and core-private-source each declare one migration, 001", () => {
     for (const part of ["core-chain", "core-ledger-state", "core-private-source"] as const) {
       expect(THIS_BUILD[part].map((row) => row.id), part).toEqual(["001"]);
     }
   });
 });
 
-describe.each(PROCESS_BACKENDS)("R16: one migration per part, through the process, on $name (LG-11, DB-9)", (backend) => {
+describe.each(PROCESS_BACKENDS)("one migration per part, through the process, on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
   it(
-    "R16: a new database gets ref_counts and unreferenced from core-ledger-state's 001, and none of sweep, grey, marks, " +
+    "a new database gets ref_counts and unreferenced from core-ledger-state's 001, and none of sweep, grey, marks, " +
       "and core_chain.identity from core-chain's 001",
     async () => {
       const ledger = await scenario();
@@ -105,7 +105,7 @@ describe.each(PROCESS_BACKENDS)("R16: one migration per part, through the proces
           "WHERE n.nspname = 'core_ledger_state' AND c.relname IN ('sweep', 'grey', 'marks') ORDER BY c.relname",
       );
       expect(swept.map((row) => row.name)).toEqual([]);
-      // As design §2.1 gives them: a 32-byte key; a count above 0. [LG-11]
+      // A 32-byte key; a count above 0.
       const columns = await db.query(
         "SELECT table_name || '.' || column_name || ' ' || data_type || ' ' || is_nullable AS c FROM information_schema.columns " +
           "WHERE table_schema = 'core_ledger_state' AND table_name IN ('ref_counts', 'unreferenced') ORDER BY table_name, ordinal_position",
@@ -129,7 +129,7 @@ describe.each(PROCESS_BACKENDS)("R16: one migration per part, through the proces
   );
 
   it(
-    "R16: a database holding an earlier build's recorded migrations refuses startup with migration-checksum-changed, " +
+    "a database holding an earlier build's recorded migrations refuses startup with migration-checksum-changed, " +
       "naming the part, 001 and both checksums, and runs no migration",
     async () => {
       const ledger = await scenario();

@@ -3,7 +3,7 @@
  * through a Web Locks lock named after it, taken before PGlite opens it and held for the worker's life. The browser
  * releases it when the worker ends (a reload, a closed tab, a crash), never while it lives, as the operating system
  * does for the Node.js lock (`node:sqlite`'s exclusive transaction). A second tab, or a second worker, on the same
- * database refuses with `writer-lock-held` and never opens it. [BR-1, DB-11, Q50; design §4, §9.2]
+ * database refuses with `writer-lock-held` and never opens it.
  *
  * - `memory://` (and an empty location) is kept in memory, per worker: no lock.
  * - `opfs-ahp://<name>` is a database in the origin's private file system (OPFS): the lock `umbradb-database:<name>`,
@@ -14,7 +14,7 @@
  * the first is open is `writer-lock-held` (`holder: "this process"`).
  *
  * **The negative control:** a build made with the control `ignore-web-lock` (`browser/build.ts`) takes no lock at all,
- * so a second tab opens a second writer. [A129]
+ * so a second tab opens a second writer.
  */
 
 import { UmbraError } from "../../../src/db/errors.js";

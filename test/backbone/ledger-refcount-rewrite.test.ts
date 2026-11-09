@@ -9,9 +9,9 @@ import { runDag, runProblems } from "./refcount-process.js";
 import { joined, readingLoads, rowProblems } from "./refcount-rewrite.js";
 
 /**
- * R27: a stored node written again in its other form, through the real process on PostgreSQL 18 and PGlite 0.5.10, on
+ * A stored node written again in its other form, through the real process on PostgreSQL 18 and PGlite 0.5.10, on
  * the extended DAG fixture (`test/ledger/fixtures/sweep-fixture.ts`) and its test package (`sweep-test-loader.ts`,
- * which writes each node with the child list the fixture has at the height). [R27, LG-11, LG-14]
+ * which writes each node with the child list the fixture has at the height).
  *
  * The fixture's two cases: `rewrite to-ref` embeds `small to-ref` before TO_REF and references it from there on;
  * `rewrite to-embedded` references `small to-embedded` before TO_EMBEDDED and embeds it from there on, so that key is
@@ -37,11 +37,11 @@ const toRef = extendedCases(TO_REF).toRef;
 const toEmbeddedBefore = extendedCases(TO_EMBEDDED - 1).toEmbedded;
 const toEmbedded = extendedCases(TO_EMBEDDED).toEmbedded;
 
-describe.each(PROCESS_BACKENDS)("R27 (LG-11, LG-14): a stored node written again in its other form, on $name", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("a stored node written again in its other form, on $name", (backend: ProcessBackend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("R27: each rewrite's row holds the new child list after its block; its counts follow it (R3 (a)); the key only the old list referenced is queued at that block and deleted at the next, or kept when a new node references it by then", async () => {
+  it("each rewrite's row holds the new child list after its block; its counts follow it (R3 (a)); the key only the old list referenced is queued at that block and deleted at the next, or kept when a new node references it by then", async () => {
     // One node, two forms: the same key, two child lists.
     expect(hex(toRef.node.key)).toBe(hex(toRefBefore.node.key));
     expect(hex(toRef.node.children)).not.toBe(hex(toRefBefore.node.children));
@@ -93,7 +93,7 @@ describe.each(PROCESS_BACKENDS)("R27 (LG-11, LG-14): a stored node written again
     expect(run.evicted.get(BigInt(REQUEUE + 1)) ?? []).not.toContain(requeued);
   }, PATIENCE_MS * 2);
 
-  it("R27: the key only the old list referenced, persisted by the next block, is kept there and leaves the queue", async () => {
+  it("the key only the old list referenced, persisted by the next block, is kept there and leaves the queue", async () => {
     const smallEmbedded = hex(toEmbedded.small.key);
     const last = TO_EMBEDDED + 2;
     const run = await runDag(await backend.database(), {
@@ -116,7 +116,7 @@ describe.each(PROCESS_BACKENDS)("R27 (LG-11, LG-14): a stored node written again
     expect([...run.evicted.values()].flat()).not.toContain(smallEmbedded);
   }, PATIENCE_MS * 2);
 
-  it("R27: a worker restarted after each rewrite loads the new child list from the database, and its next state root is the node's", async () => {
+  it("a worker restarted after each rewrite loads the new child list from the database, and its next state root is the node's", async () => {
     const db = await backend.database();
     const counters = countersMemory();
     const shared = new Int32Array(counters);

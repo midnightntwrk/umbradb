@@ -1,10 +1,10 @@
 import { startPglite } from "./pglite-database.js";
 import { startPostgres, type TestServer } from "./postgres-database.js";
 
-/** A backend the determinism suites run on, read through the database API's read handles. [A54, A55, A58] */
+/** A backend the determinism suites run on, read through the database API's read handles. */
 export interface DeterminismBackend {
   readonly name: string;
-  /** True when every read is a job of one queue, as on PGlite: nothing commits while a read runs. [DB-4] */
+  /** True when every read is a job of one queue, as on PGlite: nothing commits while a read runs. */
   readonly singleQueue: boolean;
   start(): Promise<TestServer>;
 }

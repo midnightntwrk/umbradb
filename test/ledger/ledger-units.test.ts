@@ -38,7 +38,7 @@ function turns(...values: unknown[]): { readonly k: unknown } {
 
 const kept = (where: string) => `a value its structured clone does not keep, at ${where}`;
 
-describe("plainDataProblem's clone comparison (task 17.5b)", () => {
+describe("plainDataProblem's clone comparison", () => {
   it("finds a value its clone does not keep: a primitive, null, bytes, an array, an object", () => {
     const u = (...bytes: number[]) => Uint8Array.from(bytes);
     const cases: [unknown[], string | null][] = [
@@ -91,7 +91,7 @@ const run = (height: bigint, module: string, tasks: readonly string[], parentHas
   tasks,
 });
 
-describe("LedgerEngine on the main thread (task 17.5b)", () => {
+describe("LedgerEngine on the main thread", () => {
   it("takes modules that are objects with an id, a module without tasks as none", () => {
     for (const module of [null, 1, "m", { id: 1 }, {}]) {
       expect(() => ledgerTasksOf([module as never]), String(module)).toThrow(
@@ -146,7 +146,7 @@ describe("LedgerEngine on the main thread (task 17.5b)", () => {
   });
 });
 
-describe("withLedgerTasks' points (task 17.5b)", () => {
+describe("withLedgerTasks' points", () => {
   const block = (height: bigint): BlockContext => ({
     height,
     hash: hash(1),
@@ -212,7 +212,7 @@ describe("withLedgerTasks' points (task 17.5b)", () => {
   });
 });
 
-describe("loadLedgerPackage and checkLedgerSources (task 17.5b)", () => {
+describe("loadLedgerPackage and checkLedgerSources", () => {
   const adapters: LedgerPackage[] = [];
   afterAll(() => adapters.splice(0));
 
@@ -235,7 +235,7 @@ describe("loadLedgerPackage and checkLedgerSources (task 17.5b)", () => {
   });
 });
 
-describe("the vendored packages' manifest and files (task 17.5b, the pass task 12.2b deferred)", () => {
+describe("the vendored packages' manifest and files (the deferred pass)", () => {
   const root = mkdtempSync(join(tmpdir(), "umbradb-17.5b-identity-"));
   afterAll(() => rmSync(root, { recursive: true, force: true }));
   const HASH = "a".repeat(64);
@@ -280,7 +280,7 @@ describe("the vendored packages' manifest and files (task 17.5b, the pass task 1
   });
 });
 
-describe("ledger tasks' declarations (task 17.5b)", () => {
+describe("ledger tasks' declarations", () => {
   it("lets a private module declare an empty list of ledger tasks, and core-contract-logs-fast's task needs no state", () => {
     const empty = { ...callArgsModule(), side: "private", ledgerTasks: [] } as unknown as ModuleDeclaration;
     expect(() => validateDeclarations(userModules([empty]))).not.toThrow();

@@ -19,12 +19,12 @@ import { modeProblems, watchFileModes } from "./file-modes.js";
  * The file-mode check's committed negative control: with a umask of `000`, on PGlite 0.5.10, a process's backups
  * (`ProcessHandle.backup`) whose temporary file is created another way (the seam `BackupSeams.createTemporary`) fail
  * the file-mode oracle (`./file-modes.ts`), while the same process's own backup passes it.
- * [A174, BK-1; threat model gap 7]
  * - created with the umask's mode, as `src/backup/backup.ts` once created it (`open(path, "wx")`): `0666` from its
  *   creation to after its rename;
  * - created open to all (`0666`) and narrowed to `0600` at once, before its first byte: `0600` at the end, but not from
  *   creation — another process could have opened it meanwhile and kept reading;
  * - and a backup written while nothing watched is not taken as checked: its creation was not seen.
+ * (`docs/THREAT_MODEL.md`, known gap 7.)
  */
 
 const TEST_TIMEOUT_MS = 900_000;
@@ -64,7 +64,7 @@ async function watchedBackup(ticker: TickerProcess, name: string, seams: BackupS
   return modeProblems(out, watch.observations());
 }
 
-describe("A174's negative control: temporary files created otherwise fail the oracle (PGlite, umask 000)", () => {
+describe("negative control: temporary files created otherwise fail the oracle (PGlite, umask 000)", () => {
   it(
     "created with the umask's mode, or open to all and narrowed at once, fails; unwatched is not checked; the real " +
       "backup passes",

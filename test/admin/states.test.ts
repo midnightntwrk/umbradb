@@ -26,24 +26,23 @@ import {
  * The process states through the admin endpoints, on both backends. Each state the runner has (`starting`, `refused`,
  * `syncing`, `following`, `stopped`, `halted`, `stopping`) is reached in a test and read on the admin listener:
  * - `/health/live` is 200 in every one: a refused or halted process stays up and live;
- * - `/health/ready` is 200 or 503, as `status()` decides; [AE-4]
+ * - `/health/ready` is 200 or 503, as `status()` decides;
  * - `/status` gives the state with its reason.
  *
  * A refused start, for example on a migration checksum that changed, keeps the process up with live 200 and ready 503.
- * [A64, AE-3, IN-12, RN-8]
  *
  * The conditions the runner raises are reached too:
- * - `waiting-for-node`, with the start height S above the node's head; [IN-2]
- * - `upgrade-required`; [RN-12]
- * - `node-retrying` and `database-retrying`. [IN-10]
+ * - `waiting-for-node`, with the start height S above the node's head;
+ * - `upgrade-required`;
+ * - `node-retrying` and `database-retrying`.
  *
  * The other conditions (`finality-stall`, `waiting-for-lockstep`, `slow-block`) are tested with the parts that raise
- * them. [AE-3]
+ * them.
  *
  * The runner publishes the snapshot at each heartbeat tick (every second) and at once when startup ends, processing
  * ends or the process starts stopping, so each test asks `/status` until the state it reached shows.
  *
- * Committed negative control: a refused start that stops the process fails the live-200 check. [A64]
+ * Committed negative control: a refused start that stops the process fails the live-200 check.
  */
 
 /** A module whose migration `001` is `sql`. */
@@ -104,11 +103,11 @@ function failingSource(
 /** Whether `run` stays up: not closed after a while. */
 const staysUp = async (run: AdminRun) => !(await within(run.handle.closed, 1_500));
 
-describe.each(PROCESS_BACKENDS)("A64: AE-3's states on the admin listener on $name", (backend) => {
+describe.each(PROCESS_BACKENDS)("the states on the admin listener on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("A64: starting — live 200, ready 503, no cursor — while a module's on-start-db runs", async () => {
+  it("starting — live 200, ready 503, no cursor — while a module's on-start-db runs", async () => {
     const setup = gate();
     const run = startWithAdmin({ database: (await backend.database()).setting, user: [waiting("m", "on-start-db", setup.wait)] });
     await setup.reached;
@@ -120,7 +119,7 @@ describe.each(PROCESS_BACKENDS)("A64: AE-3's states on the admin listener on $na
     await run.handle.stop();
   }, 120_000);
 
-  it("A64: starting with waiting-for-node while S is above the node's head — live 200, ready 503 —, then following", async () => {
+  it("starting with waiting-for-node while S is above the node's head — live 200, ready 503 —, then following", async () => {
     const db = await backend.database();
     const run = startWithAdmin({
       database: db.setting,
@@ -138,7 +137,7 @@ describe.each(PROCESS_BACKENDS)("A64: AE-3's states on the admin listener on $na
     await run.handle.stop();
   }, 120_000);
 
-  it("A64: syncing while far behind, then following at the head — both ready without a readiness lag (AE-4)", async () => {
+  it("syncing while far behind, then following at the head — both ready without a readiness lag", async () => {
     const held = gate();
     const run = startWithAdmin({
       database: (await backend.database()).setting,
@@ -157,7 +156,7 @@ describe.each(PROCESS_BACKENDS)("A64: AE-3's states on the admin listener on $na
     await run.handle.stop();
   }, 120_000);
 
-  it("A64: stopped at the core's stop — ready whatever the lag (AE-4); and at an upgrade boundary with upgrade-required", async () => {
+  it("stopped at the core's stop — ready whatever the lag; and at an upgrade boundary with upgrade-required", async () => {
     const atStop = startWithAdmin({ database: (await backend.database()).setting, head: 6n, stop: 3 });
     const stopped = await seenIn(atStop, "stopped");
     expect(stateProblems(stopped, { state: "stopped", ready: true, reason: null })).toEqual([]);
@@ -185,7 +184,7 @@ describe.each(PROCESS_BACKENDS)("A64: AE-3's states on the admin listener on $na
     await atBoundary.handle.stop();
   }, 120_000);
 
-  it("A64: halted — live 200, ready 503, the reason's code, height, module and point; the thrown message shown nowhere", async () => {
+  it("halted — live 200, ready 503, the reason's code, height, module and point; the thrown message shown nowhere", async () => {
     const message = "on-compute failed with hunter2-A64-SECRET in its message";
     const failing = loggingModule("f", [], ["on-db-write"], {
       points: {
@@ -206,7 +205,7 @@ describe.each(PROCESS_BACKENDS)("A64: AE-3's states on the admin listener on $na
     await run.handle.stop();
   }, 120_000);
 
-  it("A64: refused (AE-3's scenario, a migration checksum that changed) — up, live 200, ready 503, the reason", async () => {
+  it("refused (a migration checksum that changed) — up, live 200, ready 503, the reason", async () => {
     const db = await backend.database();
     const first = startWithAdmin({ database: db.setting, user: [migrating("CREATE TABLE m.rows (height bigint PRIMARY KEY)")] });
     await seenIn(first, "following", (body) => body.cursor === "3");
@@ -223,7 +222,7 @@ describe.each(PROCESS_BACKENDS)("A64: AE-3's states on the admin listener on $na
     await run.handle.stop();
   }, 180_000);
 
-  it("A64: stopping — live 200, ready 503 — while the height in progress finishes; then the admin listener closes", async () => {
+  it("stopping — live 200, ready 503 — while the height in progress finishes; then the admin listener closes", async () => {
     const held = gate();
     const run = startWithAdmin({ database: (await backend.database()).setting, user: [waiting("m", "on-db-write", held.wait)] });
     await held.reached;
@@ -238,7 +237,7 @@ describe.each(PROCESS_BACKENDS)("A64: AE-3's states on the admin listener on $na
     expect((await run.server).threadId).toBe(-1);
   }, 120_000);
 
-  it("A64's conditions: node-retrying and database-retrying while the failure is retried, cleared once it works", async () => {
+  it("conditions: node-retrying and database-retrying while the failure is retried, cleared once it works", async () => {
     for (const [code, condition, fails] of [
       ["node-unreachable", "node-retrying", { block: 2n }],
       ["connection-lost", "database-retrying", { cursor: true }],
@@ -262,7 +261,7 @@ describe.each(PROCESS_BACKENDS)("A64: AE-3's states on the admin listener on $na
     }
   }, 120_000);
 
-  it("negative control: a refused start that stops the process fails A64's live-200 check", async () => {
+  it("negative control: a refused start that stops the process fails the live-200 check", async () => {
     const db: ProcessDatabase = await backend.database();
     const first = startWithAdmin({ database: db.setting, user: [migrating("CREATE TABLE m.rows (height bigint PRIMARY KEY)")] });
     expect(await settle(first.handle, first.memory as InMemoryBlockSource, 3n)).toBe("waiting");

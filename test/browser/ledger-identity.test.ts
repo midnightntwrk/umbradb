@@ -10,10 +10,10 @@ import { SUBSTITUTES } from "../../browser/build.js";
  * of `src/ledger/identity.ts` (which reads files), so the process and the ledger worker call the same functions as in
  * Node.js. It refuses `ledgerSources: released` as Node.js's check does, naming the setting; it reads no file — the
  * build checked every package file it bundles (`browser/build.ts`), and the ledger worker checks the WebAssembly it
- * fetches (`browser/src/ledger/instantiate.ts`). [LG-5, A173; design §5.2, §9.2]
+ * fetches (`browser/src/ledger/instantiate.ts`).
  */
 
-describe("the browser's startup check of the ledger packages (task 12.2b)", () => {
+describe("the browser's startup check of the ledger packages", () => {
   it("is the build's replacement of src/ledger/identity.ts", () => {
     expect(SUBSTITUTES["src/ledger/identity.ts"]).toBe("browser/src/ledger/identity.ts");
   });

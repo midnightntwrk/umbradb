@@ -1,22 +1,22 @@
 /**
  * The core module `core-chain-events`: every chain event of every block, as the `block` item `chain-events` and as one
  * row per event in `core_chain_events.events`. It is off by default and runs where the configuration enables it. It
- * may start mid-chain, since it needs nothing from earlier blocks. [CD-4; CORE-ARCH §4.11; design §10]
+ * may start mid-chain, since it needs nothing from earlier blocks.
  *
  * **At `on-fetch`** it asks the block source that the runner bound to its process context ({@link bindCoreChainEvents})
  * for the block's `System::Events` bytes. The node source reads them with `state_getStorage` at the block's hash, and
- * for a queued best block without retries (`src/backbone/core-block-fetch/events.ts`). [IN-8, IN-10]
+ * for a queued best block without retries (`src/backbone/core-block-fetch/events.ts`).
  *
  * It decodes them with the `runtime-metadata` item: the metadata of the runtime in the parent block's state. At the
  * block U that enacts a runtime upgrade, that is the old runtime's, which executed U and wrote its events
- * (`./events.ts`). [LG-4]
+ * (`./events.ts`).
  *
  * It puts the decoded events as `chain-events` ({@link ChainEvent}, in their order), so `core-block-parsed` and
  * `core-tx-results` can read them at `on-parse`. A block without an `Events` value (block 0) has none, and its metadata
- * is not read. [RN-5]
+ * is not read.
  *
  * **At `on-db-write`** it writes one row per event, in one statement per block. **The table** and every statement are
- * in `./sql.ts`. [design §10]
+ * in `./sql.ts`.
  *
  * The declaration ({@link CORE_CHAIN_EVENTS}) is a constant, as `core-block-fetch`'s: the source is found through the
  * process context (a `WeakMap`), so one build's declarations serve every process.
@@ -94,7 +94,7 @@ export function runtimeMetadataOf(b: BlockContext, module: string): RuntimeMetad
   return metadata as RuntimeMetadataEntry;
 }
 
-/** Block `b`'s chain events: its `System::Events` from `source`, decoded with its `runtime-metadata`. [CD-4] */
+/** Block `b`'s chain events: its `System::Events` from `source`, decoded with its `runtime-metadata`. */
 export async function chainEventsOf(source: BlockEventSource, b: BlockContext): Promise<readonly ChainEvent[]> {
   const bytes = await source.blockEvents({ height: b.height, hash: b.hash, parentHash: b.parentHash });
   if (bytes === null) return Object.freeze([]);

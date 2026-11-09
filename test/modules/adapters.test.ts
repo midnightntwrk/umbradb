@@ -19,7 +19,7 @@ import { declaration, userModules } from "./declarations.js";
  *   `on-start-db` callback, called with the module's process context and the schema write handle.
  *
  * Each is checked against the real function it feeds, on both backends. Resolving the graph and the order, and the
- * runner's own startup, are not exercised here: the parts are given in the order written. [MD-1, DB-6, DB-8, DB-9, DB-10]
+ * runner's own startup, are not exercised here: the parts are given in the order written.
  */
 
 /** A process context for one module, as the runner builds it. */
@@ -33,7 +33,7 @@ function context(revisions: ProcessContext["revisions"] = []): ProcessContext & 
   };
 }
 
-/** Two providers of the shared table item `contract-logs` and a consumer. [CORE-ARCH §4.11] */
+/** Two providers of the shared table item `contract-logs` and a consumer. */
 function contractLogs(id: string): ModuleDeclaration {
   return declaration(id, {
     requires: ["vm-logs"],
@@ -60,7 +60,7 @@ const KEYS = declaration("keys", {
   ],
 });
 
-describe("schemaModule: what planSchemas reads of a declaration (DB-8, MD-1)", () => {
+describe("schemaModule: what planSchemas reads of a declaration", () => {
   it("gives the id, the requirements, each item's name and table with its deterministic flag, and the migrations", () => {
     expect(schemaModule(KEYS)).toEqual({
       id: "keys",
@@ -92,7 +92,7 @@ describe("schemaModule: what planSchemas reads of a declaration (DB-8, MD-1)", (
     expect(plan.writeRole("keys")).toBe("umbradb_m_keys");
   });
 
-  it("feeds planSchemas the deterministic flag that two providers of a shared item must agree on (DB-8, Q76)", () => {
+  it("feeds planSchemas the deterministic flag that two providers of a shared item must agree on", () => {
     const fast = contractLogs("logs-fast");
     const optedOut: ModuleDeclaration = {
       ...fast,
@@ -125,14 +125,14 @@ describe("schemaModule: what planSchemas reads of a declaration (DB-8, MD-1)", (
       "core-chain-events",
       "keys",
     ]);
-    // Given to the plan, an own part would be refused: its schema is reserved. [DB-8]
+    // Given to the plan, an own part would be refused: its schema is reserved.
     expect(() => planSchemas([schemaModule(backbone[0] as ModuleDeclaration)])).toThrowError(
       /reserved schema core_chain/,
     );
   });
 });
 
-describe("migrationPart: what startDatabase runs of a declaration (DB-9, DB-10)", () => {
+describe("migrationPart: what startDatabase runs of a declaration", () => {
   it("gives the id, the version, requiresResync as declared, the migrations, and on-start-db only when declared", () => {
     const part = migrationPart(declaration("stats"), context());
     expect(part).toEqual({
@@ -175,7 +175,7 @@ describe("migrationPart: what startDatabase runs of a declaration (DB-9, DB-10)"
   });
 });
 
-describe.each(BACKENDS)("the adapters through startDatabase on $name (DB-6, DB-8, DB-9, DB-10)", (backend) => {
+describe.each(BACKENDS)("the adapters through startDatabase on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop());
 

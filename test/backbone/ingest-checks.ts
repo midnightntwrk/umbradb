@@ -6,7 +6,7 @@ import type { Watched } from "./ingest-harness.js";
 /**
  * The oracles of the ingest tests (`ingest.test.ts`, `ingest-crash.test.ts`), shared with their committed negative
  * controls (`ingest.negative-control.test.ts`). Each returns the problems it finds, so a control shows the very check
- * failing. [A76, A79, A80, A81, A83, A89]
+ * failing.
  */
 
 /** The blocks table's heights and transaction ids, in height order. */
@@ -22,7 +22,6 @@ async function blockRows(db: ProcessDatabase): Promise<{ readonly height: bigint
  * - the blocks table holds exactly them, with the chain's hashes;
  * - their transaction ids are distinct and ascending;
  * - the watching module wrote each once, in order.
- * [RN-6, IN-4, IN-5]
  */
 export async function committedOnce(
   db: ProcessDatabase,
@@ -53,7 +52,7 @@ export async function committedOnce(
   return problems;
 }
 
-/** 11–20 committed once each, in order, over the jumping, repeating, reconnecting subscription. [A79] */
+/** 11–20 committed once each, in order, over the jumping, repeating, reconnecting subscription. */
 export function a79Problems(db: ProcessDatabase, seen: Watched, chain: readonly ChainBlock[]): Promise<string[]> {
   return committedOnce(db, seen, chain, 11n, 20n);
 }
@@ -66,7 +65,7 @@ export interface FetchSeen {
 
 /**
  * No height fetched more than `window` above the cursor at its fetch, so none was fetched or held above that; and one
- * commit per height, in order, from `from` to `to`. [A80]
+ * commit per height, in order, from `from` to `to`.
  */
 export async function a80Problems(
   db: ProcessDatabase,
@@ -90,7 +89,7 @@ export async function a80Problems(
   return [...problems, ...(await committedOnce(db, seen, chain, from, to))];
 }
 
-/** No request the tape node received was answered `not-on-tape` or refused as invalid. [A83] */
+/** No request the tape node received was answered `not-on-tape` or refused as invalid. */
 export function a83Problems(node: TapeNode): string[] {
   const problems: string[] = [];
   for (const call of node.calls) {
@@ -106,7 +105,6 @@ export function a83Problems(node: TapeNode): string[] {
  * - `on-rollback` fired once, naming `dropped` (101–103) lowest first;
  * - 101′ (`used`) fetched once (`chain_getBlock`), so it was used at finality without being fetched again;
  * - 101′ committed.
- * [A81]
  */
 export async function a81Problems(
   db: ProcessDatabase,
@@ -128,7 +126,7 @@ export async function a81Problems(
   return problems;
 }
 
-/** What the module is expected to read at a height: the metadata's spec version and the body's calls. [A89] */
+/** What the module is expected to read at a height: the metadata's spec version and the body's calls. */
 export interface Decoded {
   readonly height: bigint;
   readonly specVersion: number;
@@ -137,7 +135,7 @@ export interface Decoded {
 
 /**
  * At each height, the module requiring `block-body` read the extrinsics fetched for it once, decoded with the metadata
- * of its parent's state (the spec version and the calls `expected` gives). [A89]
+ * of its parent's state (the spec version and the calls `expected` gives).
  */
 export function a89Problems(seen: Watched, chain: readonly ChainBlock[], expected: readonly Decoded[]): string[] {
   const problems: string[] = [];
@@ -162,7 +160,7 @@ export function a89Problems(seen: Watched, chain: readonly ChainBlock[], expecte
 
 /**
  * No row of a block above the finalized head `finalized` in the blocks and hashes tables, the watching module's table,
- * or a digest; the identity's anchor is the anchor's (OUTDATED). [A76]
+ * or a digest; the identity's anchor is the anchor's (OUTDATED).
  */
 export async function a76Problems(db: ProcessDatabase, finalized: bigint): Promise<string[]> {
   const problems: string[] = [];

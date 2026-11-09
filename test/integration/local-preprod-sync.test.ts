@@ -10,7 +10,7 @@ import { afterAll, describe, expect, it } from "vitest";
  * whose WebSocket URL `UMBRADB_LOCAL_NODE` holds. Without it — unset, empty, or not a `ws://` or `wss://` URL — the
  * script exits non-zero naming the variable before it does anything else: given valid arguments and no `docker` on its
  * `PATH`, it still names the variable rather than the missing command, and it creates no output directory. No test
- * runs it against a node. [ledger-refcount design §12.1]
+ * runs it against a node.
  */
 
 const SCRIPT = fileURLToPath(new URL("../../scripts/local-preprod-sync.mjs", import.meta.url));

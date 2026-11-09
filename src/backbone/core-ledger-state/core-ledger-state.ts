@@ -1,14 +1,13 @@
 /**
  * The core module `core-ledger-state`: the ledger state after every block. It is applied in the ledger worker
  * (`src/ledger/worker/`) from genesis, its root is checked against the node's at every height, and what applying it
- * produced is stored and published. [LG-7, LG-8, LG-10, LG-11, LG-15, LG-16, Q31, Q36, Q49, Q113; CORE-ARCH §4.8;
- * design §5, §10]
+ * produced is stored and published.
  *
  * It is off by default and cannot start mid-chain: it needs the state of the block before, from genesis or from a
- * backup. So the requirement graph rejects it above height 0 with `cannot-start-mid-chain`. [LG-16, BK-3, MD-4]
+ * backup. So the requirement graph rejects it above height 0 with `cannot-start-mid-chain`.
  *
  * **At `on-compute`** of height h, given the read at h − 1, it asks the ledger worker that the runner bound to its
- * process context ({@link bindCoreLedgerState}) to apply the block. The worker gets: [LG-7, LG-8]
+ * process context ({@link bindCoreLedgerState}) to apply the block. The worker gets:
  * - the transactions that `core-block-parsed` had the same worker parse at `on-parse`, which it reuses;
  * - their chain outcomes, from `tx-results`;
  * - the block's time, and its parent's (read from `core_block_commit.blocks` at h − 1; for block 0, which has no
@@ -18,23 +17,23 @@
  *
  * Meanwhile it asks the node, through the block source bound with the worker, for its root after h
  * (`midnight_ledgerStateRoot`). Stored nodes the worker needs are read through the callback's read (the node-store
- * bridge). [IN-8]
+ * bridge).
  *
  * **Block 0.** The genesis state is the node's `system_properties.genesis_state`. If its root is the node's root at
  * block 0, block 0's transactions run on an empty state for their results only, and the genesis state is the state
- * after block 0. Otherwise they are applied to the genesis state. [IN-7]
+ * after block 0. Otherwise they are applied to the genesis state.
  *
  * **The root check.** The state's root after h must be the node's, or the callback throws `root-mismatch`
  * (`UmbraError`, with the height, the block's hash and both roots as `0x` hex in its details). That halts at h before
- * the block's transaction begins, so nothing of h is stored. [LG-15, RN-8]
+ * the block's transaction begins, so nothing of h is stored.
  *
- * Then it puts the `block` items: [LG-16, Q54]
+ * Then it puts the `block` items:
  * - `ledger-state` ({@link LedgerStateItem}): the state's key, root, summary and parameters, as plain data;
  * - `ledger-events`: every ledger event except contract logs;
  * - `segment-results`: each transaction's outcome and segments;
  * - `vm-logs`: the contract logs of applied segments, numbered in the block in emission order (none on ledger v8).
  *
- * **At `on-db-write`** it writes, in the block's transaction: [LG-11, LG-16, Q53, Q138 A]
+ * **At `on-db-write`** it writes, in the block's transaction:
  * - the batch the worker flushed: the nodes created since the previous block that the new state reaches
  *   (`core_ledger_state.nodes`; a stored key written with another child list takes it, as the node's own storage does,
  *   and one written with its stored child list is left untouched), and each changed root count as a signed change
@@ -47,7 +46,7 @@
  *
  * **The tables** and every statement are in `./sql.ts`. The `ledger-state` item declares `nodes`, `ref_counts` and
  * `unreferenced` content-defined (`./node-set.ts`): the contents hash takes `nodes` by its node set and checks the counts
- * and the queue against the rows, and no block captures or digests them. [LG-11, DT-3, DT-4]
+ * and the queue against the rows, and no block captures or digests them.
  *
  * **At `on-after-db-write`** it tells the worker the block committed, so the state after h becomes the one h + 1 is
  * applied on. It does not wait for the answer, since that callback holds a read (see the callback).
@@ -57,18 +56,17 @@
  * (`LedgerHost.load`). A state the worker already holds is kept. Otherwise (a restarted process, a fresh worker) it is
  * read from its key through the node-store bridge, and the package checks each node against its key. A node that does
  * not match aborts the load: the worker fails and processing halts with `callback-error`. The root the worker returns
- * must be the stored one, which is the node's at h − 1. [LG-11]
+ * must be the stored one, which is the node's at h − 1.
  *
  * **The ledger conversion.** The first ledger v9 block on a v8 state is the conversion block F: the worker converts
- * the state first and applies F to it (`../../ledger/worker/engine.ts`). [LG-9]
+ * the state first and applies F to it (`../../ledger/worker/engine.ts`).
  *
  * **Releases and contract keys.** The block's batch releases the states that leave the retention window. The window is
  * set by the `core` entry's `retainStates` at each height, read from the `config` item (`./retention.ts`): block h
- * releases the heights L(h − 1) to L(h) − 1, their keys read from `states`. [LG-12]
+ * releases the heights L(h − 1) to L(h) − 1, their keys read from `states`.
  *
  * While `core-contract-states` is active at h, the batch also persists, and never releases, the state and zswap-state
  * keys of every contract the block touched. The `ledger-state` item carries them, for that module to store. They are:
- * [LG-13, CC-1]
  * - the contracts its transactions call or deploy (`block-parsed`);
  * - the contracts its chain events name as maintained (`Midnight::ContractMaintain`), since a maintenance update
  *   changes the contract's state too;
@@ -77,18 +75,18 @@
  *
  * **Retained states.** The `ledger-state` item is also a `process` item ({@link RetainedStates}, published at
  * `on-start-db`). A module that requires it loads the state after a height inside the window at its read's cursor, in
- * the worker, and gets it as plain data. Outside the window the load fails with `state-not-retained`. [LG-12]
+ * the worker, and gets it as plain data. Outside the window the load fails with `state-not-retained`.
  *
  * **Reclamation** (`./refcount.ts`). After the root check, `on-compute` computes the block's reference-counting step
  * from `nodes`, `ref_counts`, `root_counts` and `unreferenced` as committed at h − 1 and the block's batch. It has the
  * worker evict the nodes the step deletes (`LedgerHost.evict`) before the block's transaction; `on-db-write` writes
  * the step after the batch's node writes, since a rewritten node can be deleted. A failed check halts the block with
  * `ledger-refcount-invalid` before anything of it is stored. With the `core` entry's `sweep` off at h the step deletes
- * nothing and evicts nothing, and still counts and queues; no reset is written when it turns off or on. [LG-14]
+ * nothing and evicts nothing, and still counts and queues; no reset is written when it turns off or on.
  *
  * If the package still refuses an eviction after the worker freed what it can, the worker thread is ended. A new one
  * loads the state at h − 1 from the database, applies h again and computes its step again; only a second refusal
- * fails the block ({@link computeBlock}). [LG-14, Q144 B]
+ * fails the block ({@link computeBlock}).
  *
  * The declaration ({@link CORE_LEDGER_STATE}) is a constant built over its rules. A negative control's build composes
  * its own with {@link coreLedgerState}, with one rule replaced.
@@ -136,10 +134,10 @@ import {
 /** The module's id. */
 export const CORE_LEDGER_STATE_ID = "core-ledger-state";
 
-/** The module whose contracts' keys `core-ledger-state` persists while it is active. [LG-13] */
+/** The module whose contracts' keys `core-ledger-state` persists while it is active. */
 export const CORE_CONTRACT_STATES_ID = "core-contract-states";
 
-/** The `block` and `table` items it provides. [LG-16] */
+/** The `block` and `table` items it provides. */
 export const LEDGER_STATE_ITEM = "ledger-state";
 export const LEDGER_EVENTS_ITEM = "ledger-events";
 export const SEGMENT_RESULTS_ITEM = "segment-results";
@@ -149,25 +147,25 @@ export const VM_LOGS_ITEM = "vm-logs";
 /** The nodes written per statement: a block's batch is chunked so no statement's parameters grow without bound. */
 export const NODES_PER_STATEMENT = 1_000;
 
-/** The `ledger-state` item: the state after the block as plain data; the state itself stays in the worker. [LG-16] */
+/** The `ledger-state` item: the state after the block as plain data; the state itself stays in the worker. */
 export interface LedgerStateItem extends StateSummary {
   readonly ledger: LedgerName;
   readonly height: bigint;
   readonly hash: Uint8Array;
-  /** Its root node's key, which `core_ledger_state.states.state_key` holds. [Q55] */
+  /** Its root node's key, which `core_ledger_state.states.state_key` holds. */
   readonly stateKey: Uint8Array;
-  /** Its root, which equals the node's. [LG-15] */
+  /** Its root, which equals the node's. */
   readonly stateRoot: Uint8Array;
   /** The ledger parameters after the block, in the ledger's tagged serialization. */
   readonly parameters: Uint8Array;
   /**
    * The keys persisted for each contract the block's transactions call or deploy, in byte order, while
-   * `core-contract-states` is active (that module stores them); none otherwise. [LG-13]
+   * `core-contract-states` is active (that module stores them); none otherwise.
    */
   readonly contracts: readonly ContractKeys[];
 }
 
-/** A retained state, loaded in the ledger worker, as plain data; the state itself stays in the worker. [LG-12] */
+/** A retained state, loaded in the ledger worker, as plain data; the state itself stays in the worker. */
 export interface RetainedState {
   readonly ledger: LedgerName;
   readonly height: bigint;
@@ -176,7 +174,7 @@ export interface RetainedState {
   readonly stateRoot: Uint8Array;
 }
 
-/** What a module requiring `ledger-state` gets as its `process` item (see the module comment). [LG-12] */
+/** What a module requiring `ledger-state` gets as its `process` item (see the module comment). */
 export interface RetainedStates {
   /** The heights whose states are retained at cursor `cursor`, `from` to `to`; null before anything committed. */
   window(cursor: bigint | null): { readonly from: bigint; readonly to: bigint } | null;
@@ -218,37 +216,37 @@ export function boundLedger(p: ProcessContext): LedgerBinding {
 
 /** The rules a negative control may replace (see the module comment). */
 export interface CoreLedgerStateOptions {
-  /** Whether block 0's genesis state already includes its transactions: when its root is the node's at 0. [IN-7] */
+  /** Whether block 0's genesis state already includes its transactions: when its root is the node's at 0. */
   readonly includesBlockZero?: (genesisRoot: Uint8Array, nodeRoot: Uint8Array) => boolean;
-  /** Whether a computed root passes the check: when it equals the node's. [LG-15] */
+  /** Whether a computed root passes the check: when it equals the node's. */
   readonly rootMatches?: (computed: Uint8Array, node: Uint8Array) => boolean;
   /** The chain outcomes the apply is given: the block's `tx-results`. */
   readonly outcomes?: (b: BlockContext) => readonly ChainOutcome[] | undefined;
-  /** Whether the worker is asked to hold the stored state at h − 1 before the apply; true by default. [LG-11] */
+  /** Whether the worker is asked to hold the stored state at h − 1 before the apply; true by default. */
   readonly loadParent?: boolean;
-  /** The ledger the block is applied with, given the state's at h − 1: the block's own (`ledger-version`). [LG-9] */
+  /** The ledger the block is applied with, given the state's at h − 1: the block's own (`ledger-version`). */
   readonly ledgerOf?: (b: BlockContext, parent: LedgerName) => LedgerName;
-  /** L(h), the lowest height retained after block h: `./retention.ts`'s {@link retainedFrom}. [LG-12] */
+  /** L(h), the lowest height retained after block h: `./retention.ts`'s {@link retainedFrom}. */
   readonly retainedFrom?: (revisions: readonly CoreRevision[], height: bigint) => bigint;
-  /** Whether the block's contracts' keys are persisted: while `core-contract-states` is active. [LG-13] */
+  /** Whether the block's contracts' keys are persisted: while `core-contract-states` is active. */
   readonly persistsContracts?: (b: BlockContext) => boolean;
-  /** A fault put into the reclamation step through its tables (`./refcount.ts`); none in a build. [R12] */
+  /** A fault put into the reclamation step through its tables (`./refcount.ts`); none in a build. */
   readonly refcountFault?: RefcountFault;
-  /** A check of the reclamation step left out; every check runs in a build. [R11] */
+  /** A check of the reclamation step left out; every check runs in a build. */
   readonly refcountUnchecked?: RefcountCheck;
   /**
    * The handle the block's reclamation statements run through, given the block's own and its height: that handle. A
-   * negative control's changes what a statement affects. [R3, R11]
+   * negative control's changes what a statement affects.
    */
   readonly refcountWriter?: (w: Pick<BlockWriteHandle, "execute">, height: bigint) => Pick<BlockWriteHandle, "execute">;
   /**
    * The handle the block's node writes run through, given the block's own and its height: that handle. A negative
-   * control's changes how a stored node is written again. [R27]
+   * control's changes how a stored node is written again.
    */
   readonly nodeWriter?: (w: Pick<BlockWriteHandle, "execute">, height: bigint) => Pick<BlockWriteHandle, "execute">;
   /**
    * Whether an eviction the package still refuses after the worker freed what it can ends the worker thread and
-   * applies the block again in a new one; true by default. False halts at the first refusal. [LG-14, Q144 B]
+   * applies the block again in a new one; true by default. False halts at the first refusal.
    */
   readonly restartOnRefusedEviction?: boolean;
 }
@@ -261,7 +259,7 @@ export function chainOutcomesOf(b: BlockContext): readonly ChainOutcome[] {
   return txResultsItemOf(b);
 }
 
-/** Block `b`'s parent time in milliseconds, read at h − 1 (block 0 has none), with the replay rules applied. [LG-8] */
+/** Block `b`'s parent time in milliseconds, read at h − 1 (block 0 has none), with the replay rules applied. */
 export async function parentTimeOf(read: Pick<ReadHandle, "query">, b: BlockContext, ownMs: bigint): Promise<bigint> {
   if (b.height === 0n) return parentTimestampMs(null, ownMs);
   const ms = await blockTimeMsAt(read, b.height - 1n);
@@ -295,7 +293,7 @@ export function revisionsOf(p: ProcessContext): readonly CoreRevision[] {
   return revisions;
 }
 
-/** The keys of the states that block `b` releases from the retention window (see the module comment). [LG-12] */
+/** The keys of the states that block `b` releases from the retention window (see the module comment). */
 async function releasesOf(
   p: ProcessContext,
   b: BlockContext,
@@ -316,7 +314,7 @@ async function releasesOf(
 
 /**
  * The contracts the block's transactions call or deploy, and the `others` (maintained, and at F every contract), each
- * once, in byte order. [LG-13]
+ * once, in byte order.
  */
 function contractsOf(
   transactions: readonly { readonly segments: readonly { readonly calls: readonly { readonly address: Uint8Array }[]; readonly deploys: readonly { readonly address: Uint8Array }[] }[] }[],
@@ -332,7 +330,7 @@ function contractsOf(
   return [...byHex.keys()].sort().map((key) => byHex.get(key) as Uint8Array);
 }
 
-/** The chain event of a maintenance update of a contract (`pallet-midnight`'s `ContractMaintain`). [CD-4] */
+/** The chain event of a maintenance update of a contract (`pallet-midnight`'s `ContractMaintain`). */
 export const CONTRACT_MAINTAIN = Object.freeze({ pallet: "Midnight", name: "ContractMaintain" } as const);
 
 /** The prefix of a contract address's tagged serialization (`coin-structure` `ContractAddress`, `contract-address[v2]`). */
@@ -341,7 +339,7 @@ const ADDRESS_TAG = /^midnight:contract-address\[v[0-9]+\]:$/;
 /**
  * The 32 bytes of a contract address as `pallet-midnight`'s contract events carry it: the ledger's tagged serialization
  * of the address (`midnight-node` `ledger/src/ledger_9/mod.rs`, `tagged_serialize(&address)`). Throws for anything
- * else. [CD-4]
+ * else.
  */
 export function taggedAddress(bytes: Uint8Array): Uint8Array {
   const at = bytes.length - 32;
@@ -399,7 +397,7 @@ export async function applyBlock(
       read,
     );
   } else {
-    // The worker holds the stored state at h − 1, read from the database after a restart, with its root. [LG-11]
+    // The worker holds the stored state at h − 1, read from the database after a restart, with its root.
     const parent = await stateAt(read, b.height - 1n);
     if (options.loadParent !== false) {
       const held = await host.load({ ledger: parent.ledger, height: b.height - 1n, hash: b.parentHash, stateKey: parent.stateKey }, read);
@@ -413,7 +411,6 @@ export async function applyBlock(
     const persists = (options.persistsContracts ?? ((c: BlockContext) => c.active(CORE_CONTRACT_STATES_ID)))(b);
     const applyWith = (options.ledgerOf ?? (() => ledger))(b, parent.ledger);
     // At the conversion block F the worker converts the v8 state first, so every contract it holds gets new keys.
-    // [LG-9, CC-1]
     const others = persists ? [maintainedOf(b), parent.ledger === "v8" && applyWith === "v9" ? await deployedBelow(read, b.height) : []] : [];
     applied = await host.apply(
       {
@@ -470,7 +467,7 @@ export function itemsOf(applied: AppliedState): {
 
 /**
  * Writes the block `applied` describes, in its transaction (see the module comment). Resolves with the nodes it wrote,
- * summed over its statements: the batch's new nodes and those it rewrote with another child list. [LG-11]
+ * summed over its statements: the batch's new nodes and those it rewrote with another child list.
  */
 export async function writeBlock(w: Pick<BlockWriteHandle, "execute">, applied: AppliedState): Promise<number> {
   const { batch, output, summary, height, stateKey, stateRoot } = applied;
@@ -509,7 +506,7 @@ function pendingOf(p: ProcessContext, b: BlockContext): ComputedBlock {
 /**
  * Block `b`'s reclamation step (`./refcount.ts`), from the tables as `read` holds them at h − 1 and the block's batch,
  * the `core` entry's `sweep` at h saying whether it deletes. The nodes it deletes are evicted from the worker before the
- * block's transaction. [LG-14]
+ * block's transaction.
  */
 export async function refcountOf(
   p: ProcessContext,
@@ -536,7 +533,7 @@ export async function refcountOf(
  * When the package still refuses that eviction after the worker freed what it can (`EvictionRefused`), the worker
  * thread is ended and a new one started. The new one loads the state at h − 1 from the database (the apply's usual
  * load) and applies the block again, and the step is computed again from the same read at h − 1 and the new thread's
- * batch, and evicted; a refusal then fails the block. [LG-14, Q144 B]
+ * batch, and evicted; a refusal then fails the block.
  *
  * The stored node set and roots do not depend on the restart: the new thread applies the same block to the same stored
  * state; a node it writes again with its stored child list touches no row and changes no count, and one it writes with
@@ -589,7 +586,7 @@ export function retainedStates(p: ProcessContext, options: CoreLedgerStateOption
   });
 }
 
-/** What a module requiring `ledger-state` loads retained states with: its `process` item. [LG-12] */
+/** What a module requiring `ledger-state` loads retained states with: its `process` item. */
 export function retainedStatesOf(p: ProcessContext): RetainedStates {
   const item = p.items.get(LEDGER_STATE_ITEM) as RetainedStates | undefined;
   if (item === undefined) throw new Error("retainedStatesOf: the module does not require ledger-state, whose process item it is");
@@ -616,7 +613,7 @@ export function coreLedgerState(options: CoreLedgerStateOptions = {}): DefinedMo
           tables: ["nodes", "root_counts", "states", "ref_counts", "unreferenced"],
           kind: "mutable",
           // The node tables take part in the contents hash by the nodes they hold, and no block captures them; the
-          // counts and the queue are checked against the rows. [LG-11, DT-3, DT-4]
+          // counts and the queue are checked against the rows.
           contentDefined: LEDGER_NODE_TABLES,
         },
       },
@@ -650,7 +647,7 @@ export function coreLedgerState(options: CoreLedgerStateOptions = {}): DefinedMo
       },
       async "on-db-write"(p, b, w) {
         const { applied, step } = pendingOf(p, b);
-        // The node writes first: a rewritten node can be among those the step deletes. [LG-14]
+        // The node writes first: a rewritten node can be among those the step deletes.
         const written = await writeBlock(options.nodeWriter?.(w, b.height) ?? w, applied);
         await writeRefcount(
           options.refcountWriter?.(w, b.height) ?? w,

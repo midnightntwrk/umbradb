@@ -7,15 +7,15 @@ import { a167Problems, a167Run, ignoringWait, PATIENCE_MS, STOP_LIMIT_MS } from 
  * node ignores the stop fails the oracle: the process does not close within 5 s, processing has not ended, a node
  * client stays open, and it keeps connecting after the stop. Its `core-chain` checks against the node are asked through
  * a node client of the startup's own, which the stop does not reach (`ignoringWait`), as every startup's wait did
- * before startup honoured stops. [A167, RN-13]
+ * before startup honoured stops.
  */
 
-describe("negative control (A167): a startup whose wait for the node ignores the stop", () => {
+describe("negative control: a startup whose wait for the node ignores the stop", () => {
   beforeAll(() => Promise.all(PROCESS_BACKENDS.map((backend) => backend.start())), 180_000);
   afterAll(() => Promise.all(PROCESS_BACKENDS.map((backend) => backend.stop())), 60_000);
 
   it(
-    "fails A167 on PostgreSQL and on PGlite: no close within 5 s, no end, a client open, connection attempts after the stop",
+    "fails on PostgreSQL and on PGlite: no close within 5 s, no end, a client open, connection attempts after the stop",
     async () => {
       const found: Record<string, string[]> = {};
       for (const backend of PROCESS_BACKENDS) {
@@ -34,7 +34,7 @@ describe("negative control (A167): a startup whose wait for the node ignores the
   );
 
   it(
-    "fails A167 through startUmbraDB too: UmbraDBHandle.stop() on a startup whose wait ignores it, on PostgreSQL and on PGlite",
+    "fails through startUmbraDB too: UmbraDBHandle.stop() on a startup whose wait ignores it, on PostgreSQL and on PGlite",
     async () => {
       const found: Record<string, string[]> = {};
       for (const backend of PROCESS_BACKENDS) {

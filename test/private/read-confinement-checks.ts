@@ -11,7 +11,7 @@ import { endedWithin, hello, rawClient, type RawClient } from "./raw-client.js";
  * - changes nothing in the public database (its contents hash, its row counts and its sequences);
  * - is answered with an error naming the refused statement;
  * - leaves the transport up for the next `read`.
- * [A172 FAULT, PP-4; threat model draft, gap 1]
+ * (`docs/THREAT_MODEL.md`, known gap 1.)
  *
  * Shared by `read-confinement.test.ts` (through a running core, on PostgreSQL 18.6 and PGlite 0.5.10) and its committed
  * negative control (`read-confinement.negative-control.test.ts`: the unconfined read path, every statement run as
@@ -21,7 +21,6 @@ import { endedWithin, hello, rawClient, type RawClient } from "./raw-client.js";
  * `deterministic: false`, whose `serial` key is the sequence `pub.log_id_seq` — the row counts and the sequence a write
  * that escaped would change. {@link publicState} reads what is compared, through the core's `db` item: the contents
  * hash, every table's row count, every sequence's last value, and the advisory locks held besides the writer's.
- * [A172 FAULT, DT-3]
  *
  * **The escapes** ({@link ESCAPES}): one `read` each, through a raw client of the core's transport, with the statement
  * the core must refuse and how it names it (`read-result.refused`). Each is followed, on the same connection, by a
@@ -67,9 +66,9 @@ export const PUB_ENTRY = Object.freeze({ id: "pub", start: 1, version: "1.0.0", 
 /** The tables `pub` declares `deterministic: false` (the contents hash names them only). */
 export const PUB_OPTED_OUT = Object.freeze([Object.freeze({ schema: "pub", table: "log" })]);
 
-/** What is compared before and after the escapes. [A172 FAULT] */
+/** What is compared before and after the escapes. */
 export interface PublicState {
-  /** The contents hash, as `0x` hex. [DT-3] */
+  /** The contents hash, as `0x` hex. */
   readonly hash: string;
   /** Each table's row count, by `schema.table` (the test backend's own `public.session_log` left out). */
   readonly rows: Readonly<Record<string, string>>;
@@ -94,7 +93,7 @@ const ADVISORY_SQL =
   "WHERE locktype = 'advisory' AND database = (SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database()) " +
   "AND NOT (classid = 3 AND objsubid = 2 AND objid = (hashtext('umbradb-writer'))::oid) ORDER BY 1";
 
-/** The public database's state that is compared, in one read through the core's `db` item. [A172 FAULT] */
+/** The public database's state that is compared, in one read through the core's `db` item. */
 export async function publicState(db: ReadOnlyDatabase): Promise<PublicState> {
   return db.read(async (read) => {
     const hash = hexOf(await contentsHash(read, { optedOut: PUB_OPTED_OUT }));
@@ -129,7 +128,7 @@ const insert = (offset: number): string => `INSERT INTO pub.rows (height) VALUES
 const command = (statement: number, name: string): Refused => ({ statement, reason: "command", name });
 const fn = (statement: number, name: string): Refused => ({ statement, reason: "function", name });
 
-/** The escapes, in order (see the module comment). [A172 FAULT] */
+/** The escapes, in order (see the module comment). */
 export const ESCAPES: readonly Escape[] = [
   { name: "COMMIT, then an INSERT", statements: ["COMMIT", insert(0)], refused: command(0, "COMMIT") },
   {
@@ -244,7 +243,6 @@ export function stateProblems(before: PublicState, after: PublicState): string[]
  * - a plain read on the same connection is answered after each;
  * - the connection stays open;
  * - the public database's state is unchanged.
- * [A172 FAULT]
  */
 export async function confinementProblems(address: string, db: ReadOnlyDatabase): Promise<string[]> {
   const problems: string[] = [];

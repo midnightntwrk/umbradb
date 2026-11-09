@@ -20,7 +20,7 @@ import { ask, ENDPOINTS, newHold, startProber, statusSnapshot, timingProblems } 
  * Covered: the messages between them (the snapshot in, `listening`, `listen-failed` and `closed` out), the headers, a
  * stale heartbeat, closing (the worker exits: no thread left), a listener that cannot listen (an error the runner's
  * reason calls `listen-failed`), the worker's entry from the sources and from a build, and a worker that fails after
- * it listened. [AE-1, AE-2]
+ * it listened.
  */
 
 /** A snapshot of a process in `state`, ready or not. */

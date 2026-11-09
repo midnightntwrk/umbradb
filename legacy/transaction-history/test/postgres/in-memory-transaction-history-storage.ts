@@ -20,7 +20,7 @@ function capitalize(s: string): string {
 /**
  * A Map-based, single-threaded reference implementation of `TransactionHistoryStorage`
  * (`src/interfaces/transaction-history-storage.ts`), built fresh in-repo (this project never
- * imports wallet-SDK runtime code, `design.md` §2) — mirroring the shape the recommendation doc
+ * imports wallet-SDK runtime code) — mirroring the shape the recommendation doc
  * describes for the real `InMemoryTransactionHistoryStorage.ts` (Map + pluggable merge + JSON
  * serialize/restore).
  *
@@ -28,7 +28,7 @@ function capitalize(s: string): string {
  * (`transaction-history-storage.property.test.ts`): its own atomicity relies on JS being
  * single-threaded (no external semaphore, no row lock), so it is NOT a valid oracle for the
  * concurrent-write scenario — only `PgTransactionHistoryStorage`'s row lock can exhibit that
- * correctly (`openspec/changes/sprint-7-transaction-history-storage/design.md` §3). `opts.tx` is
+ * correctly. `opts.tx` is
  * not supported (there is no notion of a Postgres transaction here); `opts.signal` is honored as
  * a pre-check-only abort, matching every other module's `withAbort` convention.
  */
@@ -109,7 +109,7 @@ export class InMemoryTransactionHistoryStorage implements TransactionHistoryStor
     }
   }
 
-  /** Mirrors the upstream reference's own `#clearPendingByIdentifiers` (recommendation doc §1 /
+  /** Mirrors the upstream reference's own `#clearPendingByIdentifiers` (the
    *  wallet-SDK reconciliation point 5): any OTHER entry still `pending`, with a non-empty
    *  identifier set that is a SUBSET of the just-merged entry's, is superseded and removed. */
   private clearPendingByIdentifiers(exceptHash: string, identifiers: readonly string[]): void {

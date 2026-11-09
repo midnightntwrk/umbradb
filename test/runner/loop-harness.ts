@@ -19,7 +19,6 @@ import { Contexts } from "./fixtures.js";
  * What the finalized loop's tests share: a database on each backend opened with the cursor table's committed height,
  * the test backbone with the real cursor table, a startup as the runner's (validated declarations, the graph from the
  * cursor, the schema plan, `startDatabase`), and a run of the loop until it waits for the in-memory source's head.
- * [RN-1, RN-2, RN-4–RN-6, RN-14; design §2, §3]
  */
 
 /** A database for the loop, opened through the API with `cursorHeight` (the cursor table's last height). */
@@ -95,7 +94,7 @@ export const RUNNER_BACKENDS: readonly RunnerBackend[] = [postgresRunner(), pgli
  * The test backbone (`test/modules/graph-fixtures.ts`) with the real blocks table, `core-block-commit`
  * (`src/backbone/core-block-commit/`): `core-chain` (its items, no points), the stand-in `core-block-fetch` of
  * `test/backbone/block-fetch-stand-in.ts` (it puts the `block-header` and `ledger-version` items the blocks table's
- * row needs), the blocks table and `core-digest` (its schema, no points), in the backbone's fixed order. [RN-3]
+ * row needs), the blocks table and `core-digest` (its schema, no points), in the backbone's fixed order.
  */
 export const LOOP_BACKBONE: readonly ModuleDeclaration[] = [CORE_CHAIN, blockFetchStandIn(), CORE_BLOCK_COMMIT, CORE_DIGEST];
 

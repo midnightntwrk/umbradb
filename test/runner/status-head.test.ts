@@ -8,9 +8,9 @@ import { core, entryOf, loggingModule, settle, startProcess, testBuild } from ".
 /**
  * The finalized head a process reports — `status().head`, hence `/status`'s `head` and `node.finalizedHead`, the lag,
  * the state and readiness — is the latest one its block source holds (`BlockSource.latestHead`, read without asking
- * the chain), not only the head the loop read when its batch began (issue 00074). Processing is unchanged: the loop
+ * the chain), not only the head the loop read when its batch began. Processing is unchanged: the loop
  * still reads the head once per batch, so a head's `on-finalized` comes after the batch it was found in, before the
- * heights it adds. [AE-3, AE-4, AE-5, RN-1]
+ * heights it adds.
  *
  * On PostgreSQL 18 and PGlite 0.5.10: an in-memory chain at head 400, S = 1, `followingThreshold` 3 and `readinessLag`
  * 5, a module held in its `on-compute` at heights 10 and 398; the source finalizes 600 while the loop is held at 10, in
@@ -54,7 +54,7 @@ async function admin(handle: ProcessHandle): Promise<{ readonly status: Record<s
 const each = (id: string, point: string, from: number, to: number): string[] =>
   Array.from({ length: to - from + 1 }, (_, i) => `${id} ${point}@${from + i}`);
 
-describe.each(PROCESS_BACKENDS)("issue 00074: the reported head follows the source's latest finalized head, on $name", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("the reported head follows the source's latest finalized head, on $name", (backend: ProcessBackend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 

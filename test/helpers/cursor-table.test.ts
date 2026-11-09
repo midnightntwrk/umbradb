@@ -26,7 +26,7 @@ import {
  * The cursor-table helper, refactored from 0.9.5's Watermarks. It is a library function a module calls to get its
  * table's migration, and the read and write functions over the handles its callbacks are given. It is never a module
  * of its own, and never has a connection or a transaction of its own. Its property (0.9.5's P9, moved onto the helper)
- * is in `cursor-table.property.test.ts`. [SH-1, A59, Q27, Q30; CORE-ARCH §4.11a; design §1, §10, §12]
+ * is in `cursor-table.property.test.ts`.
  *
  * The cases of 0.9.5's `test/postgres/watermarks.test.ts` that still apply are here, retargeted. That file stays, on
  * `PgWatermarks`, until the class is retired (OUTDATED). The cases: the table as its migration makes it (fillfactor
@@ -49,12 +49,12 @@ function outcome(run: Promise<unknown>): Promise<unknown> {
 
 class BlockFails extends Error {}
 
-describe("the cursor-table helper itself (SH-1; design §12's cursorTable)", () => {
+describe("the cursor-table helper itself (the cursorTable)", () => {
   it("gives the migration that creates its table, with the id the module gives it; its SQL is fixed", () => {
     expect(CURSORS.migration("001")).toEqual({ id: "001", sql: CREATE_SQL });
     expect(CURSORS.migration("014")).toEqual({ id: "014", sql: CREATE_SQL });
     // The SQL is part of the checksum of the module's migration: another text in a later build would make every
-    // database that applied it refuse to start (`migration-checksum-changed`). This pins the bytes. [DB-9]
+    // database that applied it refuse to start (`migration-checksum-changed`). This pins the bytes.
     expect(migrationChecksum(CREATE_SQL)).toBe("07497a4875b7ef5a9145d3bc9a367678332d355fa71269b4c89ce0c6fa6a5d53");
     // Names are quoted, so a reserved word is a name like any other.
     expect(cursorTable({ schema: "order", table: "select" }).migration("001").sql).toBe(
@@ -95,7 +95,7 @@ describe("the cursor-table helper itself (SH-1; design §12's cursorTable)", () 
     expect(() => cursorTable(undefined as unknown as { schema: string; table: string })).toThrow(TypeError);
   });
 
-  it("writes through the block write handle and reads through any handle's query (CORE-ARCH §4.10)", () => {
+  it("writes through the block write handle and reads through any handle's query", () => {
     expectTypeOf<CursorTable["write"]>().parameters.toEqualTypeOf<[BlockWriteHandle, string, CursorValue]>();
     expectTypeOf<CursorTable["write"]>().returns.toEqualTypeOf<Promise<void>>();
     expectTypeOf<CursorTable["read"]>().parameters.toEqualTypeOf<[Pick<ReadHandle, "query">, string]>();
@@ -121,7 +121,7 @@ describe("the cursor-table helper itself (SH-1; design §12's cursorTable)", () 
 
 // Each test runs a few blocks on a database migrated with four parts: seconds under the parallel conformance run's
 // load, so each test has two minutes.
-describe.each(BACKENDS)("the cursor table on $name (SH-1)", { timeout: 120_000 }, (backend) => {
+describe.each(BACKENDS)("the cursor table on $name", { timeout: 120_000 }, (backend) => {
   let database: CursorDatabase;
 
   beforeAll(async () => {
@@ -131,7 +131,7 @@ describe.each(BACKENDS)("the cursor table on $name (SH-1)", { timeout: 120_000 }
 
   afterAll(() => backend.stop(), 60_000);
 
-  it("is a table of the module's schema, owned by its role, as its migration made it, with DT-6's CHECK", async () => {
+  it("is a table of the module's schema, owned by its role, as its migration made it, with the CHECK", async () => {
     const shape = await database.db.read(async (read) => ({
       table: await read.query(
         "SELECT pg_catalog.pg_get_userbyid(c.relowner)::text AS owner, c.reloptions AS options, " +
@@ -162,7 +162,6 @@ describe.each(BACKENDS)("the cursor table on $name (SH-1)", { timeout: 120_000 }
     expect(shape.table).toEqual([{ owner: WALLET_SCAN_ROLE, options: ["fillfactor=90"], kind: "r", persistence: "p" }]);
     expect(shape.columns).toEqual([
       // No collation of its own: the byte order of rows is applied by the component where rows are read in key order.
-      // [DT-2]
       { name: "key", type: "text", not_null: true, collation: "default", has_default: false },
       { name: "value", type: "jsonb", not_null: true, collation: null, has_default: false },
     ]);
@@ -215,7 +214,7 @@ describe.each(BACKENDS)("the cursor table on $name (SH-1)", { timeout: 120_000 }
     expect(await database.db.read((r) => CURSORS.read(r, "null/none"))).toBeUndefined();
   });
 
-  it("stores canonical JSON losslessly: scalars, arrays, objects, integers beyond 2^53 exactly (DB-2)", async () => {
+  it("stores canonical JSON losslessly: scalars, arrays, objects, integers beyond 2^53 exactly", async () => {
     const values: [string, CursorValue, CursorValue][] = [
       ["string", "'quotes', \"doubles\", \u00e9", "'quotes', \"doubles\", \u00e9"],
       ["number", 42, 42],
@@ -247,7 +246,7 @@ describe.each(BACKENDS)("the cursor table on $name (SH-1)", { timeout: 120_000 }
     expect(read).toEqual(values.map(([key, , back]) => [key, back]));
   });
 
-  it("refuses non-canonical JSON (DT-1, Q57): a fraction or an integer beyond 64 bits fails the block", async () => {
+  it("refuses non-canonical JSON: a fraction or an integer beyond 64 bits fails the block", async () => {
     await database.block(async (w) => {
       await CURSORS.write(w, "canonical/k", 1);
     });
@@ -290,7 +289,7 @@ describe.each(BACKENDS)("the cursor table on $name (SH-1)", { timeout: 120_000 }
     expect(await database.db.read((r) => CURSORS.read(r, "json/k"))).toBe("kept");
   });
 
-  it("does not share SH-3: a second write of a key in one block wins, and the block commits", async () => {
+  it("does not take one change per key per block: a second write of a key in one block wins, and the block commits", async () => {
     const seen: (CursorValue | undefined)[] = [];
     await database.block(async (w) => {
       await CURSORS.write(w, "twice/k", 1);
@@ -312,7 +311,7 @@ describe.each(BACKENDS)("the cursor table on $name (SH-1)", { timeout: 120_000 }
       : "negative control: a helper writing on a connection of its own fails that check",
     async () => {
       if (backend.singleQueue) {
-        // PGlite has one connection; a transaction asked for inside the block's job is refused at once. [DB-4, Q73]
+        // PGlite has one connection; a transaction asked for inside the block's job is refused at once.
         const problems = await problemsOf(database, ownTransaction(database), "oracle/own-transaction");
         expect(problems).toHaveLength(1);
         expect(problems[0]).toMatch(/^the block failed: db\.transaction\(\) was called inside a running read/);
@@ -326,7 +325,7 @@ describe.each(BACKENDS)("the cursor table on $name (SH-1)", { timeout: 120_000 }
     },
   );
 
-  it("writes only its module's schema: another module's write is refused (42501, A13), its read works", async () => {
+  it("writes only its module's schema: another module's write is refused (42501), its read works", async () => {
     await database.block(async (w) => {
       await CURSORS.write(w, "own/k", "wallet");
     });
@@ -348,7 +347,7 @@ describe.each(BACKENDS)("the cursor table on $name (SH-1)", { timeout: 120_000 }
     expect(await database.db.read((r) => CURSORS.read(r, "own/k"))).toBe("wallet");
   });
 
-  it("keeps no handle: a use of a handle kept past its callback fails with handle-closed (DB-3, A10)", async () => {
+  it("keeps no handle: a use of a handle kept past its callback fails with handle-closed", async () => {
     let kept: BlockWriteHandle | undefined;
     const closedUses: UmbraError[] = [];
     await database.block(
@@ -370,7 +369,7 @@ describe.each(BACKENDS)("the cursor table on $name (SH-1)", { timeout: 120_000 }
     expect(await database.db.read((r) => CURSORS.read(r, "kept/k"))).toBe(1);
   });
 
-  it("is digested per block like any module table, a write of the same value being no change (DT-4)", async () => {
+  it("is digested per block like any module table, a write of the same value being no change", async () => {
     const digestOf = () =>
       database.db.read(async (r) => {
         const [row] = await r.query(
@@ -395,7 +394,7 @@ describe.each(BACKENDS)("the cursor table on $name (SH-1)", { timeout: 120_000 }
     expect(third?.digest).not.toEqual(first?.digest);
   });
 
-  it("keeps keys as text compared by bytes, read in DT-2's key order and encoded as DT-1 says (DT-3)", async () => {
+  it("keeps keys as text compared by bytes, read in the key order and encoded by encodeRow", async () => {
     const fresh = await cursorDatabase(backend);
     // A precomposed and a decomposed "é" are two keys; a no-break space sorts after the letters.
     const keys = ["b", "B", "a", "\u00e9", "e\u0301", "", "a\u00a0"];
@@ -418,12 +417,12 @@ describe.each(BACKENDS)("the cursor table on $name (SH-1)", { timeout: 120_000 }
     expect(byBytes).toEqual(["", "B", "a", "a\u00a0", "b", "e\u0301", "\u00e9"]);
     expect(rows).toEqual(byBytes.map((key) => [key, { index: keys.indexOf(key) }]));
     // Each row is encodable by the canonical encoder; the contents hash encoded every row of the database, this
-    // table's too. [DT-1]
+    // table's too.
     for (const row of rows) expect(encodeRow(row, ["text", "jsonb"]).length).toBeGreaterThan(0);
     expect(hash).toHaveLength(32);
   });
 
-  it("SH-1's scenario through the runner: k = 1 at height 5, k = 2 at 6; read at 6 or later, k is 2", async () => {
+  it("through the runner: k = 1 at height 5, k = 2 at 6; read at 6 or later, k is 2", async () => {
     const { db } = await freshDatabase(backend);
     const seen: [bigint, bigint | null, CursorValue | undefined][] = [];
     const module = walletScan({
@@ -461,7 +460,6 @@ const SELECT_VALUE = "SELECT value FROM wallet_scan.cursors WHERE key = $1";
  * `key` in the block's own transaction under the module's role. A block writes `key`; through the
  * same handle, the row must be there, and the audit trigger (`cursor-harness.ts`) must have recorded the module's role
  * and the block's transaction. A second block writes `key` again and then fails: afterwards the first value must stand.
- * [SH-1, DB-3, DB-6]
  */
 async function problemsOf(database: CursorDatabase, writes: Writes, key: string): Promise<string[]> {
   const problems: string[] = [];

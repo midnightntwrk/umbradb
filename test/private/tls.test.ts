@@ -10,12 +10,12 @@ import { endedWithin, hello, rawClient } from "./raw-client.js";
 /**
  * Mutual TLS on the core's process transport, which is opt-in. With the `core` entry's `tls` set, the transport
  * requires mutual TLS: a private process without a certificate is refused by the core, and one with a certificate a
- * trusted root issued is accepted. [A121 CI, PP-11, Q34]
+ * trusted root issued is accepted.
  *
  * The certificates are made by the test (`./certificates.ts`, the `openssl` command, a temporary directory), never
  * committed. Tested through raw clients (the TLS handshake itself) and through private processes on PostgreSQL 18.6 and
  * PGlite 0.5.10. Committed negative control: a core that accepts a client without a certificate under `tls` fails the
- * oracle. [A121 CI]
+ * oracle.
  */
 
 let certs: TestCertificates;
@@ -33,7 +33,7 @@ const privateTls = () => ({ certificate: certs.client.certificate, key: certs.cl
 /**
  * The TLS oracle against the transport at `address` (see the module comment): every problem. There is none when a
  * client without a certificate, one with a stranger's and a plain WebSocket are refused before any WebSocket exists,
- * and one with a trusted certificate is answered. [A121 CI]
+ * and one with a trusted certificate is answered.
  */
 export async function tlsProblems(address: string): Promise<string[]> {
   const problems: string[] = [];
@@ -62,7 +62,7 @@ export async function tlsProblems(address: string): Promise<string[]> {
   return problems;
 }
 
-describe("A121: with tls set, the core's transport requires mutual TLS (raw clients)", () => {
+describe("with tls set, the core's transport requires mutual TLS (raw clients)", () => {
   const backend = PRIVATE_BACKENDS.find((one) => one.kind === "pglite") as PrivateBackend;
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
@@ -105,7 +105,7 @@ describe("A121: with tls set, the core's transport requires mutual TLS (raw clie
   }, TEST_TIMEOUT_MS);
 });
 
-describe.each(PRIVATE_BACKENDS)("A121: private processes and a core with tls on $name", (backend: PrivateBackend) => {
+describe.each(PRIVATE_BACKENDS)("private processes and a core with tls on $name", (backend: PrivateBackend) => {
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 

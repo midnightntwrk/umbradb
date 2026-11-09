@@ -6,7 +6,7 @@ import { a161Problems, AFTER_COMMIT_MS, HOLD_MS, holding, observe, type OutsideP
 /**
  * The committed negative controls for slow activity outside a height's processing: wrong watchdogs, each a loop of the
  * process (`EngineInput.loop`). Each fails that case's own oracle (`./slow-block-harness.ts`, `a161Problems`) through
- * the process on PostgreSQL 18 and PGlite 0.5.10. [A161, RN-17, Q145 B]
+ * the process on PostgreSQL 18 and PGlite 0.5.10.
  * - One that never times the points after a commit (the earlier watchdog) fails "shown" for `on-after-db-write`.
  * - One that never times `on-finalized` fails "shown" for it.
  * - One that does not clear the condition when the point ends (it keeps the last slow activity outside a height's
@@ -30,7 +30,7 @@ function untimed(skipped: SlowWindow): new (input: LoopInput) => FinalizedLoop {
 /**
  * A watchdog that does not clear the windows outside a height's processing: it keeps giving the last slow activity it
  * gave there. A height's own window, which a loaded machine can make slow, it gives only while open, as the real one
- * does. If it were kept, it would replace the outside activity in what the control shows. [A161]
+ * does. If it were kept, it would replace the outside activity in what the control shows.
  */
 class NeverClears extends FinalizedLoop {
   #last: HeightActivity | null = null;
@@ -42,11 +42,11 @@ class NeverClears extends FinalizedLoop {
   }
 }
 
-describe.each(PROCESS_BACKENDS)("A161's negative controls on $name", (backend) => {
+describe.each(PROCESS_BACKENDS)("negative controls on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  /** The outside-activity case for `point` run with `loop`: its problems. [A161] */
+  /** The outside-activity case for `point` run with `loop`: its problems. */
   async function problemsOf(loop: new (input: LoopInput) => FinalizedLoop, point: OutsidePoint): Promise<string[]> {
     const seen: Seen = { calls: [] };
     const run = startSlow(await backend.database(), { slowBlockMs: 1_000, user: [holding("slow", seen, { point })], loop });

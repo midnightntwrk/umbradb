@@ -16,25 +16,25 @@ import { cursorReaches } from "./library-fixtures.js";
 
 /**
  * The link's own checks over channels, exactly as over a socket `[CI][NEG]`, on PostgreSQL 18 (Docker) and PGlite
- * 0.5.10 [LM-6, PP-4, CF-4]:
- * - **L66**: over a public process's channel link, a `read` whose statement is not one read is answered `read-refused`
- *   naming it and runs nothing (A172's escapes; the reads the database refuses `database-error`; a plain read answered
+ * 0.5.10:
+ * - Over a public process's channel link, a `read` whose statement is not one read is answered `read-refused`
+ *   naming it and runs nothing (the escapes; the reads the database refuses `database-error`; a plain read answered
  *   after each; the channel kept; the public database unchanged); a message failing its schema, or with an unknown `v`
  *   or `type`, closes the channel with that fault; a second `hello` with a connected id is refused
  *   `duplicate-instance`, the first kept; an instance id outside the id rule closes the channel. On a private process's
  *   channel (`privateSide: { connect }`'s carrier), a message from the core failing its schema closes the channel too.
  *   Each negative control removes the check on the channel path only (the channel link's seams: `reads: "unconfined"`,
  *   a message read without the link's schemas, `duplicates: "accept"`) and fails the same oracle.
- * - **L67** (PostgreSQL): with `publicSide: { channels: true }`, a `transportReader` login that is a superuser, holds
+ * - (PostgreSQL): with `publicSide: { channels: true }`, a `transportReader` login that is a superuser, holds
  *   `CREATEROLE`, is a member of the writer's login, or holds `INSERT` on a public table refuses startup
- *   `transport-reader-can-write`, as A177 does on the socket link. Negative control: the check skipped for channels
+ *   `transport-reader-can-write`, as it does on the socket link. Negative control: the check skipped for channels
  *   (`readerCheck: "skip"`): the process starts, and the oracle fails.
  */
 
-/** A message read as it is, without the link's schemas: the negative control's channel path. [L66] */
+/** A message read as it is, without the link's schemas: the negative control's channel path. */
 const UNCHECKED = (value: unknown): Received => ({ ok: true, message: value as Message });
 
-/** The core's `db` item, kept by a user module for the state compared before and after (a direct read, as A172's). */
+/** The core's `db` item, kept by a user module for the state compared before and after (a direct read). */
 function publicReads(keep: (db: ReadOnlyDatabase) => void): ModuleDeclaration {
   return {
     id: "public-reads",
@@ -73,7 +73,7 @@ async function greeted(core: Logged, instance: string): Promise<RawPeer> {
   return peer;
 }
 
-/** A172's oracle over a channel: every problem, none when the reads are confined (see the module comment). [A172] */
+/** The oracle over a channel: every problem, none when the reads are confined (see the module comment). */
 async function confinementProblems(core: Logged, db: ReadOnlyDatabase): Promise<string[]> {
   const problems: string[] = [];
   const before = await publicState(db);
@@ -110,7 +110,7 @@ async function confinementProblems(core: Logged, db: ReadOnlyDatabase): Promise<
   return problems;
 }
 
-/** The faults that close a core's channel, each with the close it must get. [L66] */
+/** The faults that close a core's channel, each with the close it must get. */
 const CLOSING_FAULTS: readonly { readonly name: string; readonly message: Readonly<Record<string, unknown>>; readonly reason: string }[] = [
   { name: "a read failing its schema (an extra field)", message: { v: 1, type: "read", id: "1", statements: [], extra: 1 }, reason: "invalid-message" },
   { name: "an unknown v", message: { v: 2, type: "read", id: "1", statements: [] }, reason: "unknown-version" },
@@ -155,11 +155,11 @@ async function duplicateProblems(core: Logged): Promise<string[]> {
   return problems;
 }
 
-describe.each(PRIVATE_BACKENDS)("L66: the link's checks over channels on $name (LM-6, PP-4)", (backend: PrivateBackend) => {
+describe.each(PRIVATE_BACKENDS)("the link's checks over channels on $name", (backend: PrivateBackend) => {
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 
-  it("L66: a read that is not one read is refused naming it, runs nothing, and the channel stays (A172's escapes)", async () => {
+  it("a read that is not one read is refused naming it, runs nothing, and the channel stays (the escapes)", async () => {
     const { core, db } = await confinedCore(await backend.database("public"));
     try {
       expect(await confinementProblems(core, db)).toEqual([]);
@@ -168,7 +168,7 @@ describe.each(PRIVATE_BACKENDS)("L66: the link's checks over channels on $name (
     }
   }, 300_000);
 
-  it("L66 negative control (committed): the read gate off on the channel path only fails the oracle", async () => {
+  it("negative control (committed): the read gate off on the channel path only fails the oracle", async () => {
     const { core, db } = await confinedCore(await backend.database("public"), { reads: "unconfined" });
     try {
       const problems = await confinementProblems(core, db);
@@ -178,7 +178,7 @@ describe.each(PRIVATE_BACKENDS)("L66: the link's checks over channels on $name (
     }
   }, 300_000);
 
-  it("L66: a message failing its schema, an unknown v or type, an instance id outside the rule close the channel", async () => {
+  it("a message failing its schema, an unknown v or type, an instance id outside the rule close the channel", async () => {
     const core = channelCore(await backend.database("public"), { head: 2n });
     try {
       await core.handle.started;
@@ -188,7 +188,7 @@ describe.each(PRIVATE_BACKENDS)("L66: the link's checks over channels on $name (
     }
   }, 120_000);
 
-  it("L66 negative control (committed): the link's schemas off on the channel path only fail the oracle", async () => {
+  it("negative control (committed): the link's schemas off on the channel path only fail the oracle", async () => {
     const core = channelCore(await backend.database("public"), { head: 2n, seams: { message: UNCHECKED } });
     try {
       await core.handle.started;
@@ -200,7 +200,7 @@ describe.each(PRIVATE_BACKENDS)("L66: the link's checks over channels on $name (
     }
   }, 120_000);
 
-  it("L66: a second hello with a connected instance id is refused duplicate-instance, the first channel kept", async () => {
+  it("a second hello with a connected instance id is refused duplicate-instance, the first channel kept", async () => {
     const core = channelCore(await backend.database("public"), { head: 2n });
     try {
       await core.handle.started;
@@ -210,7 +210,7 @@ describe.each(PRIVATE_BACKENDS)("L66: the link's checks over channels on $name (
     }
   }, 120_000);
 
-  it("L66 negative control (committed): duplicates accepted on the channel path only fail the oracle", async () => {
+  it("negative control (committed): duplicates accepted on the channel path only fail the oracle", async () => {
     const core = channelCore(await backend.database("public"), { head: 2n, seams: { duplicates: "accept" } });
     try {
       await core.handle.started;
@@ -256,7 +256,7 @@ async function privateSideProblems(message?: (value: unknown) => Received): Prom
   return problems;
 }
 
-describe("L66 on a private process's channel (LM-6, PP-4)", () => {
+describe("on a private process's channel", () => {
   it("a core message failing its schema closes the channel, and the private process connects again", async () => {
     expect(await privateSideProblems()).toEqual([]);
   }, 30_000);
@@ -295,7 +295,7 @@ async function startupOf(db: TestDatabase, login: string, seams?: EngineInput["c
   }
 }
 
-describe("L67: with publicSide { channels: true } on PostgreSQL 18, a transportReader that could write refuses startup (LM-3, LM-6, CF-4)", () => {
+describe("with publicSide { channels: true } on PostgreSQL 18, a transportReader that could write refuses startup", () => {
   const backend = POSTGRES;
   beforeAll(async () => {
     await backend.start();

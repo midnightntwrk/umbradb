@@ -12,12 +12,11 @@ import { toHex } from "./cbor-decoder.js";
 
 /**
  * The canonical encoder against RFC 8949 Appendix A, plus the encoder's boundaries and its column-type mappings.
- * [A52, DT-1]
  *
  * Every expected byte string here is written by hand: the Appendix A ones copied from RFC 8949 Table 6
  * (https://www.rfc-editor.org/rfc/rfc8949.txt, read 2026-10-23), the others derived from the head rules of RFC 8949 §3
  * and §4.2.1 (arguments 0–23 in the initial byte; then 1, 2, 4 or 8 following bytes, the shortest that fits). None is
- * produced by the encoder under test. [A52]
+ * produced by the encoder under test.
  */
 
 const hexOf = (value: CanonicalValue): string => toHex(encodeCanonical(value));
@@ -41,9 +40,9 @@ function expectFailure(run: () => unknown, reason: CanonicalEncodingFailure, pat
 
 const range = (from: number, to: number): number[] => Array.from({ length: to - from + 1 }, (_, i) => from + i);
 
-describe("A52 — RFC 8949 Appendix A examples inside DT-1's subset give the RFC's bytes", () => {
+describe("RFC 8949 Appendix A examples inside the subset give the RFC's bytes", () => {
   // Table 6 rows whose value the encoder can hold: integers within 64 bits, simple values false/true/null, byte
-  // strings, text strings, arrays, and maps with text keys (a jsonb object's keys are always text). [DT-1]
+  // strings, text strings, arrays, and maps with text keys (a jsonb object's keys are always text).
   const RFC_TABLE_6: readonly (readonly [string, CanonicalValue, string])[] = [
     ["0", 0, "00"],
     ["1", 1, "01"],
@@ -126,12 +125,11 @@ describe("A52 — RFC 8949 Appendix A examples inside DT-1's subset give the RFC
 
   it("the integer-keyed map {1: 2, 3: 4} is outside the subset: JavaScript keys are text, encoded as text", () => {
     // RFC: {1: 2, 3: 4} → a201020304 (integer keys). The encoder's maps come from jsonb objects, whose keys are text.
-    // [DT-1]
     expect(hexOf({ 1: 2, 3: 4 })).toBe("a2613102613304");
   });
 });
 
-describe("DT-1 map key order (RFC 8949 §4.2.1: bytewise order of the encoded keys)", () => {
+describe("map key order (RFC 8949 §4.2.1: bytewise order of the encoded keys)", () => {
   it('the spec scenario: {"b": 1, "a": 2, "aa": 3} emits a, b, aa', () => {
     expect(hexOf({ b: 1, a: 2, aa: 3 })).toBe("a361610261620162616103");
     expect(rowHex([{ b: 1, a: 2, aa: 3 }], ["jsonb"])).toBe("81a361610261620162616103");
@@ -166,7 +164,7 @@ describe("DT-1 map key order (RFC 8949 §4.2.1: bytewise order of the encoded ke
   });
 });
 
-describe("DT-1 integer boundaries (shortest argument, RFC 8949 §4.2.1)", () => {
+describe("integer boundaries (shortest argument, RFC 8949 §4.2.1)", () => {
   const BOUNDARIES: readonly (readonly [bigint, string])[] = [
     [0n, "00"],
     [23n, "17"],
@@ -205,7 +203,7 @@ describe("DT-1 integer boundaries (shortest argument, RFC 8949 §4.2.1)", () => 
   });
 });
 
-describe("DT-1 length boundaries (text, byte strings, arrays, maps)", () => {
+describe("length boundaries (text, byte strings, arrays, maps)", () => {
   const LENGTHS: readonly (readonly [number, string])[] = [
     [0, "0"],
     [23, "17"],
@@ -260,7 +258,7 @@ describe("DT-1 length boundaries (text, byte strings, arrays, maps)", () => {
   });
 });
 
-describe("DT-1 values outside the subset, nesting and cycles", () => {
+describe("values outside the subset, nesting and cycles", () => {
   it("rejects values the subset has no encoding for, naming the path", () => {
     const bad: readonly unknown[] = [
       undefined,
@@ -349,7 +347,7 @@ describe("encodeArrayHead — the head of a definite-length array, for streaming
   });
 });
 
-describe("encodeRow — DT-1 column mappings", () => {
+describe("encodeRow — column mappings", () => {
   it("encodes a row as an array of its column values in column order", () => {
     const types: ColumnType[] = [
       "bigint",
@@ -404,11 +402,11 @@ describe("encodeRow — DT-1 column mappings", () => {
     expectFailure(() => encodeRow([[[1]]], ["integer[][]" as ColumnType]), "unsupported-column-type", "$[0]");
     expectFailure(() => encodeRow(["{}"], ["json" as ColumnType]), "unsupported-column-type", "$[0]");
     // A refused type gets the code the column-type table gives it, the same code the contents hash and startup give.
-    // Floating-point types get `non-deterministic-column`. [DT-6, Q58; design §4]
+    // Floating-point types get `non-deterministic-column`.
     expectFailure(() => encodeRow([1.5], ["double precision" as ColumnType]), "non-deterministic-column", "$[0]");
   });
 
-  describe("varchar and uuid (task 1.3, owner decision Q58; A52)", () => {
+  describe("varchar and uuid", () => {
     const UUID = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11";
     const UUID_BYTES = "a0eebc999c0b4ef8bb6d6bb9bd380a11";
 
@@ -471,11 +469,11 @@ describe("encodeRow — DT-1 column mappings", () => {
     });
   });
 
-  describe("timestamptz: the integer microseconds since 1970-01-01T00:00:00Z (task 2.2b, owner decision Q74; A145)", () => {
+  describe("timestamptz: the integer microseconds since 1970-01-01T00:00:00Z", () => {
     const TZ = "timestamp with time zone" as ColumnType;
     // Each value as the database API reads it (RFC 3339 text), and its encoding. The microseconds were worked out from
     // the calendar by hand (days since 1970, leap years, then hours, minutes, seconds and the fraction), not by the
-    // encoder, and written as CBOR heads by RFC 8949 §3's rules. [DB-2]
+    // encoder, and written as CBOR heads by RFC 8949 §3's rules.
     const VALUES: readonly (readonly [string, string])[] = [
       // In time order, as written here.
       ["0001-01-01T00:00:00Z", "3b00dcbffeff2bbfff"],
@@ -499,7 +497,7 @@ describe("encodeRow — DT-1 column mappings", () => {
       ["9999-12-31T23:59:59.999999Z", "1b0384440ccc735fff"],
     ];
 
-    it("A145: 2025-05-21 14:30:00.123456+00 is the integer 1747837800123456", () => {
+    it("2025-05-21 14:30:00.123456+00 is the integer 1747837800123456", () => {
       expect(rowHex(["2025-05-21T14:30:00.123456Z"], [TZ])).toBe("81" + "1b000635a633338c40");
       expect(BigInt("0x000635a633338c40")).toBe(1747837800123456n);
     });
@@ -510,7 +508,7 @@ describe("encodeRow — DT-1 column mappings", () => {
       expect(Number(253402300799999999n)).toBe(253402300800000000); // why `number` arithmetic cannot do
     });
 
-    it("gives later times larger integers: DT-2's order by time is the order of the encoded integers", () => {
+    it("gives later times larger integers: the order by time is the order of the encoded integers", () => {
       const decoded = (hex: string): bigint => {
         const head = Number.parseInt(hex.slice(0, 2), 16);
         const argument = (head & 0x1f) < 24 ? BigInt(head & 0x1f) : BigInt(`0x${hex.slice(2)}`);
@@ -521,7 +519,7 @@ describe("encodeRow — DT-1 column mappings", () => {
         expect((integers[i] as bigint) > (integers[i - 1] as bigint), VALUES[i]?.[0]).toBe(true);
       }
       // Control: as text, a fraction sorts before its whole second ("." is 2e, "Z" 5a), so text order is not the
-      // row order. [DT-2]
+      // row order.
       expect([...VALUES.map(([text]) => text)].sort()).not.toEqual(VALUES.map(([text]) => text));
     });
 
@@ -640,7 +638,7 @@ describe("encodeRow — DT-1 column mappings", () => {
       expect(rowHex([value], ["numeric"])).toBe("81" + expected);
     });
 
-    it("a value with a fraction fails, including a zero fraction (Q57 options A and C)", () => {
+    it("a value with a fraction fails, including a zero fraction", () => {
       for (const value of ["1.5", "-0.5", "0.1", "1.0", "100.00", "-0.0"]) {
         expectFailure(() => encodeRow([value], ["numeric"]), "numeric-fraction", "$[0]");
       }

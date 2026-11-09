@@ -12,7 +12,7 @@ import { core, settle, startProcess, testBuild } from "./process-build.js";
  * A module's revisions continue each other: the settings switch at the later revision's start, and the module does not
  * start again there. Tested through the process, from its configuration: `m.entry({ start: 1, config: { k: 1 } })` and
  * `m.entry({ start: 5, config: { k: 2 } })`, with the configuration history checked and recorded, each revision's
- * settings in the module's process context, and the graph's segments deciding who starts at a height. [A42, RN-7]
+ * settings in the module's process context, and the graph's segments deciding who starts at a height.
  */
 
 /** One call `m` saw: the point, the height, and `k` from its block context (none for `on-start-height`). */
@@ -53,7 +53,7 @@ function moduleM(seen: Seen[]) {
   });
 }
 
-/** What one run observed: every call of `m`, and `m.rows` (height, k). [A42] */
+/** What one run observed: every call of `m`, and `m.rows` (height, k). */
 interface A42Observation {
   readonly seen: readonly Seen[];
   readonly rows: readonly [number, unknown][];
@@ -61,7 +61,7 @@ interface A42Observation {
 
 const HEAD = 8;
 
-/** The oracle: every problem with what was observed, none when the revisions continue each other. [A42] */
+/** The oracle: every problem with what was observed, none when the revisions continue each other. */
 function a42Problems(observed: A42Observation): string[] {
   const problems: string[] = [];
   const expected = (height: bigint): number => (height < 5n ? 1 : 2);
@@ -87,7 +87,7 @@ function a42Problems(observed: A42Observation): string[] {
   return problems;
 }
 
-/** A negative control's loop: it starts a module at every revision's start, continuing or not. [CF-5] */
+/** A negative control's loop: it starts a module at every revision's start, continuing or not. */
 class StartsAtEveryRevision extends FinalizedLoop {
   protected override startingAt(run: HeightRun): EntryBoundary {
     const base = super.startingAt(run);
@@ -99,7 +99,7 @@ class StartsAtEveryRevision extends FinalizedLoop {
   }
 }
 
-/** Runs the two processes on `db` — to head 3, then restarted to head 8 — with `loop`, and observes them. [A42] */
+/** Runs the two processes on `db` — to head 3, then restarted to head 8 — with `loop`, and observes them. */
 async function a42Run(db: ProcessDatabase, loop?: new (input: LoopInput) => FinalizedLoop): Promise<A42Observation> {
   const seen: Seen[] = [];
   const m = moduleM(seen);
@@ -123,19 +123,19 @@ async function a42Run(db: ProcessDatabase, loop?: new (input: LoopInput) => Fina
   return { seen, rows: await pairs(db, "SELECT height::int AS h, k AS v FROM m.rows ORDER BY height") };
 }
 
-describe.each(PROCESS_BACKENDS)("A42: revisions continue each other (RN-7), on $name", (backend) => {
+describe.each(PROCESS_BACKENDS)("revisions continue each other, on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("A42: revisions at 1 (k = 1) and 5 (k = 2) give k = 1 at 1–4 and k = 2 from 5, without on-start-height at 5", async () => {
+  it("revisions at 1 (k = 1) and 5 (k = 2) give k = 1 at 1–4 and k = 2 from 5, without on-start-height at 5", async () => {
     const observed = await a42Run(await backend.database());
     expect(a42Problems(observed)).toEqual([]);
-    // The restart at cursor 3 delivered on-after-db-write for 3 again, with 3's settings, then went on at 4. [RN-11]
+    // The restart at cursor 3 delivered on-after-db-write for 3 again, with 3's settings, then went on at 4.
     const afterWrites = observed.seen.filter((call) => call.point === "on-after-db-write").map((call) => call.height);
     expect(afterWrites).toEqual([1n, 2n, 3n, 3n, 4n, 5n, 6n, 7n, 8n]);
   }, 180_000);
 
-  it("negative control: a loop that fires on-start-height where a revision continues the one before fails A42", async () => {
+  it("negative control: a loop that fires on-start-height where a revision continues the one before fails", async () => {
     const observed = await a42Run(await backend.database(), StartsAtEveryRevision);
     expect(a42Problems(observed)).toEqual(["on-start-height fired for m at 1,5, not at 1 only"]);
   }, 180_000);

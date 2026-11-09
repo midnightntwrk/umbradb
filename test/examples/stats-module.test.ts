@@ -19,12 +19,12 @@ import {
  * The module guide's example, `examples/stats-module/`, type-checks against `src/index.ts`, and `umbradb config check`
  * passes on its configuration file. The guide's and the README's code import only the package's surface, and the
  * guide's walk-through (its section 2) is the example's code. `./stats-module.negative-control.test.ts` shows each
- * check failing on a changed copy. [Q160 A, Q161 A]
+ * check failing on a changed copy.
  */
 
 const read = (file: string): string => readFileSync(join(REPOSITORY, file), "utf8");
 
-describe("examples/stats-module (task 17.3a)", () => {
+describe("examples/stats-module", () => {
   let project: InstalledProject;
 
   beforeAll(async () => {
@@ -47,7 +47,7 @@ describe("examples/stats-module (task 17.3a)", () => {
   }, 120_000);
 });
 
-describe("the documents' code (task 17.3a, Q161 A)", () => {
+describe("the documents' code", () => {
   const documents = ["docs/module-guide.md", "README.md"].map((file) => ({ file, text: read(file) }));
 
   it("imports only from umbradb, zod, Node.js and the example's module, and only names src/index.ts exports", () => {

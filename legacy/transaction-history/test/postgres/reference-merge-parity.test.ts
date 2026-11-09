@@ -4,7 +4,7 @@ import { facadeMergeAvailable, loadFacadeMerge } from "../integration/live-fixtu
 import { referenceMergeEntries } from "./reference-merge.js";
 
 /**
- * F1(c) parity test (`openspec/changes/sprint-8-wallet-envelope-live-sync/design.md`'s F1
+ * F1(c) parity test (the F1
  * correction, cross-vendor audit BLOCK finding): proves `referenceMergeEntries`
  * (`test/postgres/reference-merge.ts`) mirrors the real wallet SDK's `mergeWalletEntries`
  * (`~/repos/midnight-wallet/packages/facade/src/index.ts:128-151`) documented merge semantics --
@@ -49,7 +49,7 @@ import { referenceMergeEntries } from "./reference-merge.js";
  * - The real SDK's full `lifecycle` carries per-status detail (`submittedAt`/`finalizedBlock`/
  *   `rejectedAt`+`reason`); UmbraDB's Sprint-7 `EntryLifecycle` is a bare `{status}`. This test
  *   compares only the `status` discriminant (the "incoming wins" rule itself) -- the DETAIL
- *   round-trip is a separate, already-covered concern (F2/design.md §3.2,
+ *   round-trip is a separate, already-covered concern (F2,
  *   `test/integration/pg-tx-history-adapter.test.ts`'s lifecycle-detail-round-trip block).
  */
 describe("F1(c) parity: referenceMergeEntries mirrors mergeWalletEntries' documented merge semantics", () => {

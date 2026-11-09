@@ -15,14 +15,11 @@ import { type LedgerScenario, ledgerScenario, recordedGenesis } from "./ledger-t
  * The committed negative controls of `core-ledger-state`. Each builds a `core-ledger-state` from the module's own parts
  * with one rule broken, and runs it through the process on PostgreSQL 18 and PGlite 0.5.10 on its criterion's
  * scenario. Each fails that criterion's oracle, while the real module passes it on the same scenario.
- * [A82, A99, A106; LG-15, IN-7]
  * - A root check that compares nothing lets the package with a wrong root through, so the root-mismatch oracle fails.
- *   [A106]
  * - A module that ignores the chain's outcomes replays a transaction the chain failed, so a range with one halts with
- *   `root-mismatch` and the every-root-checked oracle fails. [A99]
+ *   `root-mismatch` and the every-root-checked oracle fails.
  * - Block 0 taken in the wrong case gives another root than the node's: applied to a genesis state that already holds
  *   it, or a genesis state taken as it is when it does not. That is a halt at 0, and the block-0 root check fails.
- *   [A82, IN-7]
  */
 
 const LOADER = new URL("../ledger/fixtures/ledger-test-loader.ts", import.meta.url);
@@ -45,7 +42,7 @@ async function run(db: ProcessDatabase, scenario: LedgerScenario, ledger: Module
   return { process, status };
 }
 
-describe.each(PROCESS_BACKENDS)("task 12.3's negative controls on $name", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("the negative controls on $name", (backend: ProcessBackend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
@@ -56,7 +53,7 @@ describe.each(PROCESS_BACKENDS)("task 12.3's negative controls on $name", (backe
     [{ bytes: zswapOutputTransaction(RAW.v9), kind: "regular" as const }],
   ];
 
-  it("A106's control: a root check that compares nothing lets a wrong root through, and A106's oracle fails", async () => {
+  it("control: a root check that compares nothing lets a wrong root through, and the oracle fails", async () => {
     const scenario = await ledgerScenario({ ledger: "v9", genesis: RAW.v9.LedgerState.blank(NETWORK_ID).serialize(), includesBlockZero: false, blocks: blocks() });
     const wrong = () => startLedgerWorker({ loader: LOADER, loaderData: { wrongRootAt: "2" } });
     const realDb = await backend.database();
@@ -92,7 +89,7 @@ describe.each(PROCESS_BACKENDS)("task 12.3's negative controls on $name", (backe
     expect(problems).toContain("the cursor is 1, not 3");
   }, PATIENCE_MS * 3);
 
-  it("A82's control: block 0 in the wrong case of IN-7 gives another root than the node's, a halt at 0", async () => {
+  it("control: block 0 in the wrong genesis case gives another root than the node's, a halt at 0", async () => {
     const devnet = recordedGenesis("genesis_state_undeployed.mn");
     const transactions = () => [
       [

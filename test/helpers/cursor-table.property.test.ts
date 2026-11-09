@@ -7,7 +7,7 @@ import { CURSORS, type CursorDatabase, cursorDatabase } from "./cursor-harness.j
 /**
  * For random sequences of writes over heights, reading a cursor-table key returns its last write, on PostgreSQL 18 and
  * PGlite 0.5.10. This is 0.9.5's property P9, moved onto the helper.
- * [A59 PROP, SH-1; `Formal/STORAGE_ALGEBRA.md` §3, Law W1]
+ * [`Formal/STORAGE_ALGEBRA.md` §3, Law W1]
  *
  * A sequence is a list of blocks at consecutive heights, each a list of writes (a key from a small set, so that keys
  * are written again within a block and across blocks, and a canonical JSON value) through the module's block write
@@ -15,12 +15,12 @@ import { CURSORS, type CursorDatabase, cursorDatabase } from "./cursor-harness.j
  * again by the next block, as the runner retries a height. The model is a map holding each key's last write of the
  * committed blocks. The property:
  * - inside a block, reading a key through the block's handle returns the write just made, since the handle reads the
- *   block's own writes; [DB-3]
+ *   block's own writes;
  * - after each block, a read at the committed height reports that height and returns, for every key, the model's
  *   value (the last committed write), or nothing for a key never written.
  *
  * 0.9.5's P9 (`test/postgres/watermarks.property.test.ts`, on `PgWatermarks`) stays as it is while that class does
- * (OUTDATED); this is its retargeting onto the helper. [design §13]
+ * (OUTDATED); this is its retargeting onto the helper.
  *
  * The committed negative control: a helper that keeps a key's first write instead of its last fails the property.
  */
@@ -32,7 +32,7 @@ const KEYS = ["a", "b", "B", "é", ""] as const;
 
 const text = fc.string({ unit: "grapheme", maxLength: 6 }).filter((s) => !s.includes("\u0000"));
 
-/** A canonical JSON value: integers only, within the signed 64-bit range. [DT-1, Q57] */
+/** A canonical JSON value: integers only, within the signed 64-bit range. */
 const { value } = fc.letrec<{ value: CursorValue }>((tie) => ({
   value: fc.oneof(
     { depthSize: "small", maxDepth: 3 },
@@ -66,7 +66,7 @@ const sequences = fc.array(block, { minLength: 1, maxLength: 10 });
 
 /**
  * A value as a read gives it back: the database API's lossless reader gives an integer within ±(2^53 − 1) as a
- * `number` and one beyond as a `bigint`; objects come back as plain objects. [DB-2]
+ * `number` and one beyond as a `bigint`; objects come back as plain objects.
  */
 function readBack(written: CursorValue): CursorValue {
   if (typeof written === "bigint") {
@@ -201,7 +201,7 @@ const keepsFirst: Access = {
 // The suite starts a database and runs about 40 sequences of up to 10 blocks. The property's run took 9 s on a quiet
 // machine and 307 s at a load average of about 77 (2026-10-26), half of the 10 minutes it had; each test has
 // 20 minutes, as the height-versioned table's property (`height-versioned.property.test.ts`).
-const TITLE = "A59: the cursor table returns each key's last write, on $name (SH-1, P9)";
+const TITLE = "the cursor table returns each key's last write, on $name (P9)";
 
 describe.each(BACKENDS)(TITLE, { timeout: 1_200_000 }, (backend) => {
   let database: CursorDatabase;

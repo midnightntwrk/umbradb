@@ -24,11 +24,11 @@ import { type Script, ScriptedNode, type Step } from "./scripted-node.js";
  * The record-and-replay check through the node client of `src/node/`, unchanged: `recordAndReplay`
  * (`tools/tape/replay-check.ts`) runs a `NodeClient` session through the recording builder against a scripted node,
  * replays the tape it recorded through the tape node with a new client, and compares every frame each connection sent
- * and received. [A71 CI, TT-4; acceptance §9]
+ * and received.
  *
  * Its default session, the node-call tour, is what the check's manual half runs against a real Midnight node
  * (`tools/tape/main.ts check`). Here the scripted node answers it with the recorded mainnet answers
- * (`test/node/fixtures/mainnet-answers.json`). [A71 CI, IN-8]
+ * (`test/node/fixtures/mainnet-answers.json`).
  */
 
 const TEST_TIMEOUT_MS = 60_000;
@@ -78,8 +78,8 @@ async function withScripted<T>(script: Script, body: (node: ScriptedNode) => Pro
   }
 }
 
-describe("A71 through the node client", { timeout: TEST_TIMEOUT_MS }, () => {
-  it("the IN-8 tour, recorded and replayed: every frame of every connection byte-identical", async () => {
+describe("through the node client", { timeout: TEST_TIMEOUT_MS }, () => {
+  it("the tour, recorded and replayed: every frame of every connection byte-identical", async () => {
     await withScripted(mainnetScript(), async (node) => {
       const result = await recordAndReplay({ node: node.url, client: { connect: quietConnect } });
       expect(result.difference).toBeUndefined();

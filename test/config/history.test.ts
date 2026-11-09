@@ -71,28 +71,28 @@ const BUILD_CORE_VERSION_TEXT =
  * records what starts above the cursor, so a configuration change only affects the future. Here the history is
  * checked without a database: each startup's writes are applied to the rows the next one reads (`Simulation`,
  * `./history-fixtures.ts`). `./history-database.test.ts` runs the same through `core_chain.config` on both backends,
- * and `./history.property.test.ts` holds the hash properties. [CF-5, CF-6, CF-7, CF-8, CF-9; design §7, §10]
+ * and `./history.property.test.ts` holds the hash properties.
  *
  * - A revision's row: its stop (null for `core`, whose stop is operational), its version (a module's semver, or the
  *   core version's canonical JSON), its data fields (canonical JSON) and `data_hash`, the SHA-256 of their canonical
- *   encoding. [CF-7, DT-1]
+ *   encoding.
  * - Revisions are identified by `(id, start)`. A later one supersedes an earlier one from its start (the earlier one's
  *   effective stop is the next start − 1, or its own lower stop). A recorded entry starting at or below the cursor
  *   that the configuration omits refuses with `missing-entry`; one starting above it may be omitted or moved, and its
- *   row is deleted. [CF-5, A30, Q103 B]
+ *   row is deleted.
  * - An entry starting at or below the cursor c refuses `changes-past` when it differs in a data field or its version
  *   (or is not recorded), except for a module's stop that is above c in both values. Operational fields are not
- *   recorded and may change. Entries above c are recorded, or re-recorded. [CF-6, A31]
+ *   recorded and may change. Entries above c are recorded, or re-recorded.
  * - The revision covering c + 1 (S on a new database) must name the build's version, or startup refuses
- *   `upgrade-required`, naming each entry, the version needed and the build's. [CF-8, A33]
+ *   `upgrade-required`, naming each entry, the version needed and the build's.
  * - `sweep: "off"` needs the development opt-in, taken from the latest `core` revision of the build's version
- *   (`processCoreEntry`). [CF-9, Q102 A]
- * - What startup passes on: the graph's input (`resolveGraph`) and the committed versions. [DB-10]
+ *   (`processCoreEntry`).
+ * - What startup passes on: the graph's input (`resolveGraph`) and the committed versions.
  *
  * The committed negative controls each refuse exactly their cases:
  * - each rule of `HISTORY_RULES` left out loses exactly its cases;
- * - the two allowances for past entries replaced: a stop compared strictly, and operational fields recorded; [CF-6]
- * - an omission above the cursor refused, as the rule was before omissions were allowed. [CF-5, Q103 B]
+ * - the two allowances for past entries replaced: a stop compared strictly, and operational fields recorded;
+ * - an omission above the cursor refused, as the rule was before omissions were allowed.
  */
 
 /** `m` 1.0.0's revision from `start` with `config` (defaults for the rest), stopping at `stop` when given. */
@@ -129,7 +129,7 @@ function sha256(bytes: readonly number[]): Uint8Array {
   return new Uint8Array(createHash("sha256").update(Uint8Array.from(bytes)).digest());
 }
 
-describe("CF-7: the history row of a revision, its canonical JSON and its data_hash", () => {
+describe("the history row of a revision, its canonical JSON and its data_hash", () => {
   it("writes canonical JSON: keys sorted by UTF-16 code units at every depth, no whitespace (RFC 8785 on plain data)", () => {
     expect(canonicalJson({ b: 1, a: [true, null, 'x"y\\'], c: { z: 0, y: "é" } })).toBe(
       '{"a":[true,null,"x\\"y\\\\"],"b":1,"c":{"y":"é","z":0}}',
@@ -181,13 +181,13 @@ describe("CF-7: the history row of a revision, its canonical JSON and its data_h
       dataHash: dataHash({ limit: 3, mode: "full" }),
     });
     expect(second).toEqual({ id: "m", start: 41n, stop: null, version: "1.0.0", data: M_DEFAULTS, dataHash: dataHash(M_DEFAULTS) });
-    // Operational and secret settings are never recorded. [CF-4]
+    // Operational and secret settings are never recorded.
     expect(JSON.stringify(first, (_key, value: unknown) => (typeof value === "bigint" ? String(value) : value))).not.toContain(
       "s3cret",
     );
   });
 
-  it("records a core revision with a null stop, whatever stop it is written with (its stop is operational, CF-4)", () => {
+  it("records a core revision with a null stop, whatever stop it is written with (its stop is operational)", () => {
     const config = checked([core(0, { retainStates: 4, tipCap: 9 }, 10)], build([]));
     expect(rowOf(config.entries[0]!)).toEqual({
       id: "core",
@@ -215,7 +215,7 @@ describe("CF-7: the history row of a revision, its canonical JSON and its data_h
   });
 });
 
-describe("CF-5, A30: revisions by (id, start); a later one supersedes the earlier from its start", () => {
+describe("revisions by (id, start); a later one supersedes the earlier from its start", () => {
   it("gives each module revision its effective stop: the next revision's start − 1, or its own stop when lower", () => {
     const config = checked(
       [CORE, m(0), m(50, {}, 60), m(100, {}, 200), m(150), n(3, {}, 30), n(40), n(45, {}, 44 + 100)],
@@ -223,9 +223,9 @@ describe("CF-5, A30: revisions by (id, start); a later one supersedes the earlie
     );
     expect(graphEntries(config.entries)).toEqual([
       { id: "m", start: 0n, stop: 49n },
-      // Its own stop below the next start − 1 is kept: a gap, then a new start (the requirement graph checks it). [MD-4]
+      // Its own stop below the next start − 1 is kept: a gap, then a new start (the requirement graph checks it).
       { id: "m", start: 50n, stop: 60n },
-      // Its own stop at or above the next start is superseded: the later revision covers it from its start. [CF-5]
+      // Its own stop at or above the next start is superseded: the later revision covers it from its start.
       { id: "m", start: 100n, stop: 149n },
       { id: "m", start: 150n, stop: null },
       { id: "n", start: 3n, stop: 30n },
@@ -255,7 +255,7 @@ describe("CF-5, A30: revisions by (id, start); a later one supersedes the earlie
     expect(revisionAt(cores.entries, "nobody", 30n)).toBeUndefined();
   });
 
-  it("lets a module that cannot start mid-chain continue at a later revision's start (no mid-chain start, CF-5)", () => {
+  it("lets a module that cannot start mid-chain continue at a later revision's start (no mid-chain start)", () => {
     const declarations = build([HISTORIC]);
     const accepted = (entries: readonly unknown[]) => {
       const check = checkHistory(withProcess({ config: checked(entries, declarations), cursor: null, declarations, history: [] }));
@@ -276,8 +276,8 @@ describe("CF-5, A30: revisions by (id, start); a later one supersedes the earlie
   });
 });
 
-describe("A30: a configuration omitting a recorded entry that starts at or below the cursor refuses with missing-entry", () => {
-  it("refuses CF-5's scenario: the history holds (m, 1) and (m, 50), the cursor is at or above 50, the file lists only (m, 1)", () => {
+describe("a configuration omitting a recorded entry that starts at or below the cursor refuses with missing-entry", () => {
+  it("refuses the scenario: the history holds (m, 1) and (m, 50), the cursor is at or above 50, the file lists only (m, 1)", () => {
     for (const cursor of [50n, 60n]) {
       const db = new Simulation();
       db.start({ entries: [CORE, m(1), m(50)], cursor: null });
@@ -303,7 +303,7 @@ describe("A30: a configuration omitting a recorded entry that starts at or below
     });
     const error = db.refusal({ entries: [CORE, m(1)], user: [M_1_0], cursor: 60n });
     expect(error.code).toBe("missing-entry");
-    // (n, 70) starts above the cursor: it may be omitted, so it is not named. [Q103 B]
+    // (n, 70) starts above the cursor: it may be omitted, so it is not named.
     expect(error.details.missing).toEqual([
       { id: "core", start: 10 },
       { id: "m", start: 60 },
@@ -367,7 +367,7 @@ describe("A30: a configuration omitting a recorded entry that starts at or below
   it("refuses before any other check, and accepts the same configuration with every entry listed", () => {
     const db = new Simulation();
     db.start({ entries: [CORE, m(1), m(50)], cursor: null });
-    // Also a changed past (limit) and an omitted entry: the omission is named first. [CF-5, CF-6]
+    // Also a changed past (limit) and an omitted entry: the omission is named first.
     expect(db.refusal({ entries: [CORE, m(1, { limit: 2 })], cursor: 60n }).code).toBe("missing-entry");
     expect(db.start({ entries: [CORE, m(1), m(50)], cursor: 60n }).writes).toEqual([]);
   });
@@ -376,7 +376,7 @@ describe("A30: a configuration omitting a recorded entry that starts at or below
 /** A row's `(id, start)`, the start as a number. */
 const keyOf = (row: HistoryRow): [string, number] => [row.id, Number(row.start)];
 
-describe("A30, Q103 B: a recorded entry that starts above the cursor may be omitted or moved (CF-5)", () => {
+describe("a recorded entry that starts above the cursor may be omitted or moved", () => {
   it("accepts omitting one: its row is deleted, nothing else written, and the earlier revision runs on", () => {
     const db = new Simulation();
     db.start({ entries: [CORE, m(1), m(50)], cursor: null });
@@ -398,7 +398,7 @@ describe("A30, Q103 B: a recorded entry that starts above the cursor may be omit
     expect(db.start({ entries: [CORE, m(1)], cursor: C }).deletes).toEqual([]);
   });
 
-  it("accepts CF-5's scenario 'A scheduled entry is moved': (m, 50) deleted and (m, 100) recorded, superseding from 100", () => {
+  it("accepts the scenario 'A scheduled entry is moved': (m, 50) deleted and (m, 100) recorded, superseding from 100", () => {
     const moves = [
       ["a revision of the build's version", m(50, { limit: 2 }), m(100, { limit: 2 })],
       [
@@ -417,18 +417,18 @@ describe("A30, Q103 B: a recorded entry that starts above the cursor may be omit
         ["m", 0],
         ["m", 100],
       ]);
-      // The revision from 0 now ends at 99, the moved one's start − 1. [CF-5]
+      // The revision from 0 now ends at 99, the moved one's start − 1.
       expect(revisionAt(check.entries, "m", 99n)?.start, label).toBe(0);
       expect(revisionAt(check.entries, "m", 100n)?.start, label).toBe(100);
     }
   });
 
-  it("lets the old build run on when a scheduled upgrade slips (Q103's use case): moved to 100, or dropped", () => {
+  it("lets the old build run on when a scheduled upgrade slips (the use case): moved to 100, or dropped", () => {
     const scheduled = (start: number) => versionEntry({ id: "m", start, version: "1.1.0" });
     for (const later of [[scheduled(100)], []]) {
       const db = new Simulation();
       db.start({ entries: [CORE, m(0), scheduled(50)], cursor: null });
-      // At cursor 49 the 1.0.0 build is refused: the revision covering 50 names 1.1.0. [RN-12, CF-8]
+      // At cursor 49 the 1.0.0 build is refused: the revision covering 50 names 1.1.0.
       expect(db.refusal({ entries: [CORE, m(0), scheduled(50)], cursor: 49n }).code).toBe("upgrade-required");
       const check = db.start({ entries: [CORE, m(0), ...later], cursor: 49n });
       expect(check.deletes.map(keyOf)).toEqual([["m", 50]]);
@@ -496,7 +496,7 @@ describe("A30, Q103 B: a recorded entry that starts above the cursor may be omit
   });
 });
 
-/** A case of a past entry: the startup that records the history, then the one checked at the cursor. [CF-6] */
+/** A case of a past entry: the startup that records the history, then the one checked at the cursor. */
 interface Case {
   readonly name: string;
   readonly first: Start;
@@ -507,7 +507,6 @@ const C = 20n;
 
 /**
  * The refusals of a changed past entry (`changes-past`), each by one rule; `path` and `field` are the finding's.
- * [CF-6]
  */
 const CHANGES: readonly (Case & { readonly rule: string; readonly path: string; readonly field: string | null })[] = [
   {
@@ -519,7 +518,7 @@ const CHANGES: readonly (Case & { readonly rule: string; readonly path: string; 
     field: "limit",
   },
   {
-    name: "a data field of a revision starting at the cursor (CF-6: at or below c)",
+    name: "a data field of a revision starting at the cursor (at or below c)",
     first: { entries: [CORE, m(20)], cursor: null },
     then: { entries: [CORE, m(20, { mode: "fast" })], cursor: C },
     rule: "data",
@@ -543,7 +542,7 @@ const CHANGES: readonly (Case & { readonly rule: string; readonly path: string; 
     field: "ledgerSources",
   },
   {
-    name: "a versionEntry whose config differs from its recorded data (A28)",
+    name: "a versionEntry whose config differs from its recorded data",
     first: { entries: [CORE, m(10)], cursor: null },
     then: {
       entries: [CORE, versionEntry({ id: "m", start: 10, version: "1.0.0", config: { limit: 10, mode: "fast" } }), M_1_1.entry({ start: 21, config: {} })],
@@ -650,7 +649,7 @@ const CHANGES: readonly (Case & { readonly rule: string; readonly path: string; 
 
 /**
  * The accepted changes, including omissions above the cursor: what may change at the cursor, what is (re-)recorded
- * then and what is deleted. [CF-6, CF-5, Q103 B]
+ * then and what is deleted.
  */
 const ACCEPTED: readonly (Case & {
   readonly writes: readonly [string, number][];
@@ -705,7 +704,7 @@ const ACCEPTED: readonly (Case & {
     writes: [],
   },
   {
-    name: "a revision above the cursor changed between restarts (re-recorded, A28)",
+    name: "a revision above the cursor changed between restarts (re-recorded)",
     first: { entries: [CORE, m(0), m(50, { limit: 1 })], cursor: null },
     then: { entries: [CORE, m(0), m(50, { limit: 2 }, 70)], cursor: C },
     writes: [["m", 50]],
@@ -744,7 +743,7 @@ const ACCEPTED: readonly (Case & {
     writes: [],
   },
   {
-    name: "a recorded revision above the cursor omitted (its row deleted, Q103)",
+    name: "a recorded revision above the cursor omitted (its row deleted)",
     first: { entries: [CORE, m(0), m(50)], cursor: null },
     then: { entries: [CORE, m(0)], cursor: C },
     writes: [],
@@ -752,7 +751,7 @@ const ACCEPTED: readonly (Case & {
     allowance: "omission",
   },
   {
-    name: "a recorded revision above the cursor moved (CF-5's scenario 'A scheduled entry is moved')",
+    name: "a recorded revision above the cursor moved (a scheduled entry is moved)",
     first: { entries: [CORE, m(0), versionEntry({ id: "m", start: 50, version: "1.1.0" })], cursor: null },
     then: { entries: [CORE, m(0), versionEntry({ id: "m", start: 100, version: "1.1.0" })], cursor: C },
     writes: [["m", 100]],
@@ -791,7 +790,7 @@ function outcome(test: Case, options?: HistoryOptions) {
   }
 }
 
-describe("A31: configuration changes only the future (CF-6)", () => {
+describe("configuration changes only the future", () => {
   it.each(CHANGES)("refuses changes-past for $name, naming the entry and the field", (test) => {
     expect(outcome(test)).toEqual({ code: "changes-past", findings: [[test.rule, test.path, test.field]] });
   });
@@ -858,7 +857,7 @@ describe("A31: configuration changes only the future (CF-6)", () => {
     expect(found(error)).toEqual([["data", "entries[1].config", null]]);
   });
 
-  it("treats no stop as above every cursor (CF-6's allowance)", () => {
+  it("treats no stop as above every cursor (the allowance)", () => {
     expect(stopChangeAllowed(30n, null, C)).toBe(true);
     expect(stopChangeAllowed(null, 21n, C)).toBe(true);
     expect(stopChangeAllowed(null, 20n, C)).toBe(false);
@@ -888,7 +887,7 @@ describe("A31: configuration changes only the future (CF-6)", () => {
   });
 });
 
-describe("A28's history half: versionEntry revisions against their recorded rows (CF-3, CF-6)", () => {
+describe("history half: versionEntry revisions against their recorded rows", () => {
   it("starts an upgrade that renames a setting with the old revision written as a versionEntry equal to its row", () => {
     const db = new Simulation();
     db.start({
@@ -896,7 +895,7 @@ describe("A28's history half: versionEntry revisions against their recorded rows
       user: [M_FOO],
       cursor: null,
     });
-    // The 1.0.0 build stopped at 49; the 1.1.0 build's file writes 1.0.0's revision as recorded. [RN-12]
+    // The 1.0.0 build stopped at 49; the 1.1.0 build's file writes 1.0.0's revision as recorded.
     const upgrade = db.start({
       entries: [CORE, versionEntry({ id: "m", start: 1, version: "1.0.0", config: { foo: 1 } }), M_BAR.entry({ start: 50, config: { bar: 1 } })],
       user: [M_BAR],
@@ -914,7 +913,7 @@ describe("A28's history half: versionEntry revisions against their recorded rows
     expect([error.code, found(error)]).toEqual(["changes-past", [["data", "entries[1].config.foo", "foo"]]]);
   });
 
-  it("refuses a scheduled versionEntry that carries a config before comparing anything (CF-3, task 4.2's rule)", () => {
+  it("refuses a scheduled versionEntry that carries a config before comparing anything", () => {
     const db = new Simulation();
     db.start({ entries: [CORE, m(0)], cursor: null });
     const error = db.refusal({
@@ -955,7 +954,7 @@ function versionOutcome(entries: readonly unknown[], user: Start["user"], cursor
   }
 }
 
-describe("A33: one version per build — the revision covering cursor + 1 names the build's version (CF-8)", () => {
+describe("one version per build — the revision covering cursor + 1 names the build's version", () => {
   const recordedM = [coreRow(0, UMBRADB_VERSION), mRow(0, "1.0.0")];
   const asRecorded = versionEntry({ id: "m", start: 0, version: "1.0.0", config: M_DEFAULTS });
 
@@ -1039,7 +1038,7 @@ describe("A33: one version per build — the revision covering cursor + 1 names 
   });
 });
 
-describe("DB-10's input: the versions of each module's revisions that cover committed heights", () => {
+describe("input: the versions of each module's revisions that cover committed heights", () => {
   const rows = [coreRow(0, UMBRADB_VERSION), mRow(0, "1.0.0"), mRow(50, "1.1.0"), { ...mRow(90, "2.0.0"), data: null, dataHash: null }, { ...mRow(3, "0.1.0", 6), id: "n" }];
 
   it("is empty on a new database", () => {
@@ -1066,7 +1065,7 @@ describe("DB-10's input: the versions of each module's revisions that cover comm
     expect(committedVersions([mRow(0, "1.0.0"), mRow(5, "1.0.0")], 0n, 9n).get("m")).toEqual(["1.0.0"]);
   });
 
-  it("leaves out a revision superseded before S: its range ends at the next start − 1 (CF-5)", () => {
+  it("leaves out a revision superseded before S: its range ends at the next start − 1", () => {
     expect(committedVersions([mRow(0, "1.0.0"), mRow(5, "1.1.0")], 10n, 20n)).toEqual(new Map([["m", ["1.1.0"]]]));
   });
 
@@ -1082,7 +1081,7 @@ describe("DB-10's input: the versions of each module's revisions that cover comm
   });
 });
 
-describe("Q102 (option A): the process's operational settings are the latest core revision's of the build's version", () => {
+describe("(option A): the process's operational settings are the latest core revision's of the build's version", () => {
   it("takes the latest by start, whatever the file's order, and its development opt-in", () => {
     const config = checked([core(30, { tipCap: 3 }), core(0, { developmentOptIn: true }), core(10, { tipCap: 1 })], build([]));
     expect(processCoreEntry(config)).toMatchObject({ start: 30, settings: { tipCap: 3, developmentOptIn: false } });
@@ -1104,7 +1103,7 @@ describe("Q102 (option A): the process's operational settings are the latest cor
   });
 });
 
-describe("CF-9: sweep: off needs the development opt-in", () => {
+describe("sweep: off needs the development opt-in", () => {
   it("refuses a core revision with sweep: off that runs above the cursor, naming the feature and the entry", () => {
     const db = new Simulation();
     const error = db.refusal({ entries: [core(0, { sweep: "off" })], cursor: null });
@@ -1185,7 +1184,6 @@ describe("the graph's input and the caller's errors", () => {
 
 /**
  * Each rule's cases: a refusal of `CHANGES` (by its rule), an omitted entry, a newer build and sweep off.
- * [A30, A33, CF-9]
  */
 function ruleCases(): { readonly rule: string; readonly test: Case }[] {
   const base = { entries: [CORE, m(1), m(50)], cursor: null };
@@ -1254,7 +1252,7 @@ describe("negative controls (committed)", () => {
     }
   });
 
-  it("with every omission refused (CF-5 before Q103, the old rule), exactly the omission allowance's cases refuse", () => {
+  it("with every omission refused (the old rule), exactly the omission allowance's cases refuse", () => {
     const options: HistoryOptions = { omissionAllowed: () => false };
     for (const test of ACCEPTED) {
       const result = outcome(test, options);
@@ -1292,7 +1290,7 @@ describe("negative controls (committed)", () => {
   });
 });
 
-describe("PP-13: the public table items a private process reads from the history (publicItemRanges, task 14.1a)", () => {
+describe("the public table items a private process reads from the history (publicItemRanges)", () => {
   /** A row as a private process reads it from the public `core_chain.config`: its heights and its `provides`. */
   const row = (id: string, start: number, stop: number | null, provides: readonly string[]) => ({
     id,
@@ -1307,7 +1305,7 @@ describe("PP-13: the public table items a private process reads from the history
     stop: stop === null ? null : BigInt(stop),
   });
 
-  it("gives each item of a row the row's heights, to its last height by CF-5: its own stop or the next revision's start − 1", () => {
+  it("gives each item of a row the row's heights, to its last height: its own stop or the next revision's start − 1", () => {
     const rows = [
       row("m", 30, 90, ["m-rows"]),
       row("m", 0, 50, ["m-rows", "m-sums"]),
@@ -1320,7 +1318,7 @@ describe("PP-13: the public table items a private process reads from the history
       range("blocks", "core", 0, 99),
       range("chain-identity", "core", 0, 99),
       range("blocks", "core", 100, null),
-      // m from 0 stops at 50 by its own stop… but m from 30 supersedes it from 30. [CF-5]
+      // m from 0 stops at 50 by its own stop… but m from 30 supersedes it from 30.
       range("m-rows", "m", 0, 29),
       range("m-sums", "m", 0, 29),
       range("m-rows", "m", 30, 90),
@@ -1340,7 +1338,7 @@ describe("PP-13: the public table items a private process reads from the history
   });
 });
 
-describe("RN-16, PP-14: the configuration hash of the history's rows (configHashOf, task 14.1b, owner decision Q147)", () => {
+describe("the configuration hash of the history's rows (configHashOf)", () => {
   const H = (byte: number) => new Uint8Array(32).fill(byte);
   const ROWS: readonly ConfigHashRow[] = [
     { id: "core", start: 1n, stop: null, version: '{"umbradb":"0.9.5"}', dataHash: H(1), provides: ["blocks", "chain-identity"] },
@@ -1390,7 +1388,7 @@ describe("RN-16, PP-14: the configuration hash of the history's rows (configHash
     expect(configHashOf([])).toMatch(/^0x[0-9a-f]{64}$/);
   });
 
-  it("is equal for equal rows, the data's hash standing for the data (CF-7: a data field's change changes data_hash)", () => {
+  it("is equal for equal rows, the data's hash standing for the data (a data field's change changes data_hash)", () => {
     const copy = ROWS.map((row) => ({ ...row, dataHash: row.dataHash === null ? null : new Uint8Array(row.dataHash), provides: [...row.provides] }));
     expect(configHashOf(copy)).toBe(configHashOf(ROWS));
     const data = (level: number) => dataHash({ level });

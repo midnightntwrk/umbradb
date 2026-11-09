@@ -1,11 +1,11 @@
 /**
  * What a browser build's configuration module gives. The page bundles its configuration, just as `umbradb run` takes
  * the configuration file and the file's `modules` export as its user modules. But some of it is known only when the
- * page runs: the node it was pointed at, where its database lives, and S. [BR-1, BR-2, Q106 B; design §9.2]
+ * page runs: the node it was pointed at, where its database lives, and S.
  *
  * So the module's default export makes each process's configuration data from the run ({@link BrowserRun}), together
  * with the user modules its build carries. The process worker hands the data to the runner, which requires it to be
- * plain data and validates it as it would a file. [CF-1]
+ * plain data and validates it as it would a file.
  */
 
 import type { PgliteMemoryParts, PglitePathParts } from "../../src/config/database-parts.js";
@@ -18,7 +18,7 @@ export interface BrowserRun {
   readonly storage: string;
   /**
    * S: the node's finalized head when this database was created, kept by the page for an OPFS database, or the
-   * restored backup's S. [BR-2, BK-4]
+   * restored backup's S.
    */
   readonly start: number;
   /** Every parameter of the page's address, as text (a configuration may read its own). */
@@ -41,13 +41,13 @@ export interface PrivateInstance {
 export interface BrowserConfiguration {
   /** The core (public) process's. */
   core(run: BrowserRun): ProcessConfiguration;
-  /** The private instances of `run`, each run in a worker of its own beside the core; none unless given. [BR-1] */
+  /** The private instances of `run`, each run in a worker of its own beside the core; none unless given. */
   instances?(run: BrowserRun): readonly PrivateInstance[];
 }
 
 /**
  * The `database` setting of `storage` for the process `name` (`core`, or an instance's id), as parts: PGlite in memory,
- * or a `path` that names a database in the origin's private file system. [CF-4, Q167 A]
+ * or a `path` that names a database in the origin's private file system.
  */
 export function databaseOf(storage: string, name: string): PgliteMemoryParts | PglitePathParts {
   return storage === "memory"
@@ -55,7 +55,7 @@ export function databaseOf(storage: string, name: string): PgliteMemoryParts | P
     : { kind: "pglite", path: `${storage}${name === "core" ? "" : `-${name}`}` };
 }
 
-/** `data` with the development opt-in set on every `core` entry, since the browser build always sets it. [BR-1] */
+/** `data` with the development opt-in set on every `core` entry, since the browser build always sets it. */
 export function withDevelopmentOptIn(data: unknown): unknown {
   if (data === null || typeof data !== "object" || !Array.isArray((data as { entries?: unknown }).entries)) return data;
   const entries = (data as { entries: unknown[] }).entries.map((entry) => {

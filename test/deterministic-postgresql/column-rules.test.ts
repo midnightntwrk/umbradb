@@ -32,7 +32,6 @@ import {
 
 /**
  * The column-type rules, and the refused non-deterministic columns and tables, without a database.
- * [DT-1, DT-2, DT-6, Q58, Q59, Q60, Q61]
  *
  * The rules take a plain, catalog-shaped description of a column (`format_type(atttypid, NULL)`, `format_type(atttypid,
  * atttypmod)`, `atttypmod`, `pg_type.typtype` of the type and of an array's element, whether the column is in the
@@ -96,8 +95,8 @@ const VALUE_TYPES = [
   "jsonb",
 ] as const;
 
-describe("DT-1 values: the types a module table may store", () => {
-  it("allows exactly DT-1's types and their arrays, each encoded as itself", () => {
+describe("values: the types a module table may store", () => {
+  it("allows exactly the types and their arrays, each encoded as itself", () => {
     for (const type of VALUE_TYPES) {
       for (const name of [type, `${type}[]`]) {
         const verdict = columnVerdict(column(name));
@@ -144,13 +143,13 @@ describe("DT-1 values: the types a module table may store", () => {
     expect(verdictOf(column("real"))).toEqual(["floating-point", "non-deterministic-column"]);
     expect(verdictOf(column("double precision"))).toEqual(["floating-point", "non-deterministic-column"]);
     expect(verdictOf(column("real[]"))).toEqual(["floating-point", "non-deterministic-column"]);
-    // 0.1 + 0.2 = 0.3 holds in real; 0.1 + 0.6 does not give 0.7 there. [Q60]
+    // 0.1 + 0.2 = 0.3 holds in real; 0.1 + 0.6 does not give 0.7 there.
     expect(becauseOf(column("double precision")).reason).toContain("0.1 + 0.2");
     expect(becauseOf(column("real")).reason).toContain("0.1 + 0.6");
     expect(becauseOf(column("real")).reason).not.toContain("0.1 + 0.2");
   });
 
-  it("allows timestamptz as a value and as a key ordered by time, its arrays as values (Q74)", () => {
+  it("allows timestamptz as a value and as a key ordered by time, its arrays as values", () => {
     expect(verdictOf(column("timestamp with time zone"))).toEqual(["timestamptz", null]);
     // A precision is a type modifier: format_type(atttypid, NULL) names the type the same.
     const precise = column("timestamp with time zone", { declaredType: "timestamp(3) with time zone", typeModifier: 3 });
@@ -163,7 +162,7 @@ describe("DT-1 values: the types a module table may store", () => {
 
   it("refuses timestamp, date, time, timetz and interval, each with its own reason, and says to use timestamptz", () => {
     // Each reason names its type as the design row does, and none cites the drivers' Date any more: the mapping
-    // reads every date and time value as text. [Q59, Q74, DB-2, Q68]
+    // reads every date and time value as text.
     const cases: readonly (readonly [string, readonly string[], readonly string[]])[] = [
       [
         "timestamp without time zone",
@@ -182,11 +181,11 @@ describe("DT-1 values: the types a module table may store", () => {
       for (const text of [...absent, "JavaScript Date", "drivers", "DateStyle", "milliseconds"]) {
         expect(reason, type).not.toContain(text);
       }
-      // The alternative is "use timestamptz, written with Z"; no message cites the core's old column. [DT-6, A145, Q74]
+      // The alternative is "use timestamptz, written with Z"; no message cites the core's old column.
       expect(alternative, type).toMatch(/^use timestamptz, written with Z\b/);
       expect(`${reason} ${alternative}`, type).not.toContain("block_timestamp_ms");
     }
-    // A time of day and a length of time are no instants; bigint microseconds hold them. [Q87 B]
+    // A time of day and a length of time are no instants; bigint microseconds hold them.
     expect(becauseOf(column("time without time zone")).alternative).toContain("bigint microseconds since midnight");
     expect(becauseOf(column("time with time zone")).alternative).toContain("bigint microseconds since midnight");
     expect(becauseOf(column("interval")).alternative).toContain("for a length of time, store bigint microseconds");
@@ -236,7 +235,7 @@ describe("DT-1 values: the types a module table may store", () => {
     for (const type of ["inet", "cidr", "bit", "bit varying", "xml", "point", "tsvector", '"char"', "name", "oid"]) {
       expect(verdictOf(column(type)), type).toEqual(["other", "unsupported-column-type"]);
     }
-    // oidvector has an element type but no "[]" in format_type's name: it is not one of the allowed arrays. [DT-1]
+    // oidvector has an element type but no "[]" in format_type's name: it is not one of the allowed arrays.
     expect(verdictOf(column("oidvector"))).toEqual(["other", "unsupported-column-type"]);
     // An array described without its element's kind is not taken for an array of an allowed type.
     expect(verdictOf(column("integer[]", { elementKind: null }))).toEqual(["other", "unsupported-column-type"]);
@@ -244,7 +243,7 @@ describe("DT-1 values: the types a module table may store", () => {
   });
 });
 
-describe("DT-2 keys: the types a primary key may use, and how they are ordered", () => {
+describe("keys: the types a primary key may use, and how they are ordered", () => {
   it("orders integers numerically, boolean false first, bytea and uuid by bytes, text and varchar by bytes in C", () => {
     const orders: readonly (readonly [string, string])[] = [
       ["smallint", "numerically"],
@@ -296,7 +295,7 @@ describe("DT-2 keys: the types a primary key may use, and how they are ordered",
   });
 });
 
-describe("DT-6 tables: every refusal of a table, in a fixed order", () => {
+describe("tables: every refusal of a table, in a fixed order", () => {
   const table = (columns: ColumnFacts[]): TableFacts => ({ schema: "m", name: "t", columns });
 
   it("refuses nothing in a table of allowed types with an allowed key", () => {
@@ -350,7 +349,7 @@ describe("refusal messages: what, where, why, and what to use instead", () => {
     because: becauseOf(column("timestamp without time zone")),
   };
 
-  it("reads as one explanation for a developer who has never read DT-1", () => {
+  it("reads as one explanation for a developer who has never read the rules", () => {
     expect(refusalMessage(timestamp, { schema: "shop", table: "orders" })).toBe(
       'unsupported-column-type: table "shop"."orders", column "created_at" (timestamp(3) without time zone): ' +
         "this type cannot be stored in a module table. " +
@@ -413,7 +412,7 @@ describe("the encoder's refusals, by type name alone", () => {
     for (const type of VALUE_TYPES) expect(refusalOfTypeName("varchar").because.alternative).toContain(type);
   });
 
-  it("is what encodeRow throws for a column type outside DT-1", () => {
+  it("is what encodeRow throws for a column type outside the encoding", () => {
     for (const name of ["json", "double precision", "varchar", "money", "timestamp without time zone", "interval"]) {
       const { code, because } = refusalOfTypeName(name);
       let error: unknown;
@@ -430,7 +429,7 @@ describe("the encoder's refusals, by type name alone", () => {
   });
 });
 
-describe("why a stored number cannot be hashed (DT-1, DT-6, Q57)", () => {
+describe("why a stored number cannot be hashed", () => {
   it("explains numeric fractions and NaN, and jsonb numbers that are not 64-bit integers", () => {
     const numeric = valueFailureBecause("numeric", "numeric-fraction");
     expect(numeric?.reason).toContain("100.00");
@@ -441,7 +440,7 @@ describe("why a stored number cannot be hashed (DT-1, DT-6, Q57)", () => {
     expect(valueFailureBecause("jsonb[]", "integer-out-of-range")).toEqual(json);
   });
 
-  it("explains an infinite timestamptz, which has no microseconds since 1970 (DT-1, Q74)", () => {
+  it("explains an infinite timestamptz, which has no microseconds since 1970", () => {
     const infinite = valueFailureBecause("timestamp with time zone", "timestamptz-infinite");
     expect(infinite?.reason).toContain("microseconds since 1970-01-01T00:00:00Z");
     expect(infinite?.reason).toContain("infinity and -infinity");
@@ -459,7 +458,7 @@ describe("why a stored number cannot be hashed (DT-1, DT-6, Q57)", () => {
   });
 });
 
-// ── Defaults that are not immutable [DT-6, Q61] ─────────────────────────────────────────────────────────────────────
+// ── Defaults that are not immutable ─────────────────────────────────────────────────────────────────────
 
 /**
  * Default expression trees exactly as PostgreSQL 17.11 stores them (`pg_attrdef.adbin::text`, copied 2026-10-23 from
@@ -837,7 +836,7 @@ describe("what in a default is not immutable, and why", () => {
   });
 });
 
-describe("DT-6 (Q61): identity, serial and non-immutable defaults refuse their column", () => {
+describe("identity, serial and non-immutable defaults refuse their column", () => {
   const NOW = parts(TREES.now);
   const SERIAL = parts(TREES.serial);
   const table = (columns: ColumnFacts[]): TableFacts => ({ schema: "m", name: "t", columns });
@@ -954,7 +953,7 @@ describe("DT-6 (Q61): identity, serial and non-immutable defaults refuse their c
   });
 });
 
-describe("DT-6 (Q61, Q75): sequences and unlogged tables refuse their module schema", () => {
+describe("sequences and unlogged tables refuse their module schema", () => {
   const relation = (kind: string, persistence: string, name = "r"): RelationFacts => ({
     schema: "m",
     name,

@@ -3,20 +3,20 @@
  * `core_contract_states.states`, keyed by `(contract_address, height)`, with two keys: the key of the contract's state
  * after the block, and the key of its zswap state (its filtered view of the shielded commitment tree). Both are
  * persisted and never released, so each loads from the stored nodes long after the ledger states that held it were
- * released and swept. [CC-1, LG-13, Q23, Q37; CORE-ARCH §4.11; design §5.4, §10]
+ * released and swept.
  *
- * It is off by default, and it cannot start mid-chain, because the ledger state it reads cannot. [LG-16]
+ * It is off by default, and it cannot start mid-chain, because the ledger state it reads cannot.
  *
  * **Which contracts, and their keys,** come from `core-ledger-state`. While this module is active at h,
  * `core-ledger-state`'s `on-compute` has the ledger worker persist, in the block's own batch, the keys of every contract
- * the block touched: [CC-1, Q143 A]
+ * the block touched:
  * - those its transactions call or deploy;
  * - those its chain events name as maintained;
  * - at the v8 → v9 conversion block F, every contract the converted state holds.
  *
  * Each contract appears once, in byte order, with its keys taken from the state after the block. So all actions on one
  * contract in one block share one row, holding the state after all of them. The `ledger-state` item carries them
- * (`contracts`). A contract the state does not hold (a deploy that did not apply) has no keys and no row. [CC-1]
+ * (`contracts`). A contract the state does not hold (a deploy that did not apply) has no keys and no row.
  *
  * **At `on-compute`** it puts the `block` item `contract-states` (the rows, frozen); **at `on-db-write`** it writes them
  * in one statement. **The table** and every statement are in `./sql.ts`.
@@ -75,7 +75,7 @@ export async function writeStateRows(w: Pick<BlockWriteHandle, "execute">, heigh
 
 /** The rule a negative control may replace (see the module comment). */
 export interface CoreContractStatesOptions {
-  /** The block's rows: {@link contractStatesOf}, one per contract the block touched. [CC-1] */
+  /** The block's rows: {@link contractStatesOf}, one per contract the block touched. */
   readonly rowsOf?: (b: BlockContext) => readonly ContractStateRow[];
 }
 

@@ -6,8 +6,6 @@
  * - the block's own time, from its `Timestamp::set` inherent, read as the official indexer reads it
  *   (`chain-indexer/src/infra/subxt_node/runtimes.rs`, `CallExt::timestamp`).
  *
- * [CD-2, LG-4]
- *
  * **The format** (`sp_runtime::generic::UncheckedExtrinsic`): a compact length, then the version byte — `0x04` an
  * unsigned extrinsic of version 4, `0x84` a signed one, `0x05` a bare extrinsic of version 5, `0x45` a general one
  * (transaction extensions) — then, for the unsigned and bare kinds, the call: the pallet's index, the call's index
@@ -21,7 +19,7 @@
  * `Timestamp::set` call, a `Compact<u64>` of milliseconds. Every block but block 0 has exactly one, because Substrate's
  * timestamp pallet fails a block without it. Block 0 is built from the chain's genesis and may have none; it is then
  * given 0, as the official indexer does (`timestamp.unwrap_or(0)`, `chain-indexer/src/infra/subxt_node.rs`). Anything
- * else throws: a block is decoded exactly or not at all. Pure: no Node.js import. [Q74]
+ * else throws: a block is decoded exactly or not at all. Pure: no Node.js import.
  */
 
 import type { MetadataPallet, MetadataVariant, RuntimeMetadataView, TypeDef } from "./metadata.js";

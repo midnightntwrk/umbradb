@@ -23,8 +23,7 @@ import {
 import { type DagRun, runDag } from "./refcount-process.js";
 
 /**
- * R15: a backup of a database this build wrote, restored and run on, on PostgreSQL 18.6 and PGlite 0.5.10.
- * [R15, BK-3, DT-3, LG-11]
+ * A backup of a database this build wrote, restored and run on, on PostgreSQL 18.6 and PGlite 0.5.10.
  *
  * The database: the extended DAG fixture (`test/ledger/fixtures/sweep-fixture.ts`) synced from genesis by the real
  * process with the build's `core-ledger-state` (`./refcount-process.ts`), and backed up by the process
@@ -35,7 +34,7 @@ import { type DagRun, runDag } from "./refcount-process.js";
  * restored database to h + 50, its worker loading the state at h from it, and it is compared with a run that never
  * stopped, on a database of its own:
  * - the restored database at h is the backed-up one, every table of `core_ledger_state` as it was;
- * - R3 passes after every block, the run before the backup and the run after the restore taken together
+ * - passes after every block, the run before the backup and the run after the restore taken together
  *   (`./refcount-checks.ts`: the queue the restored database holds at h is deleted at h + 1);
  * - after every block from h to h + 50 the node set and every `core_ledger_state` table that is not content-defined
  *   equal the uninterrupted run's; at h + 50, every table the contents hash takes by its bytes, and the contents hash.
@@ -44,7 +43,7 @@ import { type DagRun, runDag } from "./refcount-process.js";
  * rows; without one row of `nodes` — one a stored child list references, the root persisted at h, the queued leaf —
  * whose reference, root count or queue entry names it. Each is refused with `ledger-refcount-invalid`, reason
  * `tables-inconsistent`, and the restore rolls back, leaving the target empty. One byte of a `nodes` row's payload
- * changed is refused the same way (`details.check` `node-key`) by `../backup/restore-content-defined.test.ts` (A126),
+ * changed is refused the same way (`details.check` `node-key`) by `../backup/restore-content-defined.test.ts`,
  * on the ledger chain's backup.
  */
 
@@ -103,7 +102,7 @@ const snapshotText = (tables: TableSnapshot | undefined): string =>
     value instanceof Uint8Array ? hex(value) : value instanceof Map || value instanceof Set ? [...value] : typeof value === "bigint" ? `${value}` : value,
   );
 
-describe.each(BACKUP_BACKENDS)("R15 (BK-3, DT-3): a backup of the counting build's database restores and runs on, on $name", (backend: BackupBackend) => {
+describe.each(BACKUP_BACKENDS)("a backup of the counting build's database restores and runs on, on $name", (backend: BackupBackend) => {
   let dir: string;
   /** The run to h that was backed up, its backup's file and manifest, and the database. */
   let before: DagRun;
@@ -160,7 +159,7 @@ describe.each(BACKUP_BACKENDS)("R15 (BK-3, DT-3): a backup of the counting build
   };
 
   it(
-    "R15: the backup taken at h restores (its contents-hash step passes: the node set compared, ref_counts and " +
+    "the backup taken at h restores (its contents-hash step passes: the node set compared, ref_counts and " +
       "unreferenced checked against the rows), and the restored database continues to h + 50 with R3 passing and its " +
       "node set, byte-hashed tables and contents hash equal to an uninterrupted run's",
     async () => {
@@ -216,7 +215,7 @@ describe.each(BACKUP_BACKENDS)("R15 (BK-3, DT-3): a backup of the counting build
   );
 
   it(
-    "R15 negative control: a backup whose file lacks the ref_counts rows is refused by the restore (its contents-hash " +
+    "negative control: a backup whose file lacks the ref_counts rows is refused by the restore (its contents-hash " +
       "step fails with ledger-refcount-invalid, reason tables-inconsistent) and the restore rolls back",
     async () => {
       const text = readFileSync(file, "utf8");
@@ -252,7 +251,7 @@ describe.each(BACKUP_BACKENDS)("R15 (BK-3, DT-3): a backup of the counting build
   ];
 
   it.each(MISSING)(
-    "R15 negative control: a backup whose file lacks one row of nodes, %s, is refused the same way, the entry naming " +
+    "negative control: a backup whose file lacks one row of nodes, %s, is refused the same way, the entry naming " +
       "the missing node (%s): ledger-refcount-invalid, reason tables-inconsistent, the restore rolled back",
     async (what, check, choose) => {
       const text = readFileSync(file, "utf8");

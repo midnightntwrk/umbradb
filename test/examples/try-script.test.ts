@@ -6,8 +6,8 @@ import { EXAMPLE } from "./example-checks.js";
 
 /**
  * `examples/stats-module/try.sh subscribe` prints the subscription's messages until three rows arrived, and no more
- * (issue 00073): run as a user runs it (`bash`, its own `node` client with the repository's `ws`), with `STATS_API` at
- * a local `ws` server that answers the subscription and sends 12 rows at once, as a syncing process does. [Q160 A]
+ *: run as a user runs it (`bash`, its own `node` client with the repository's `ws`), with `STATS_API` at
+ * a local `ws` server that answers the subscription and sends 12 rows at once, as a syncing process does.
  */
 
 /** Rows the server sends, all at once after the acknowledgement. */
@@ -64,7 +64,7 @@ function subscribe(port: number): Promise<{ readonly code: number | null; readon
   });
 }
 
-describe("examples/stats-module/try.sh subscribe (issue 00073)", () => {
+describe("examples/stats-module/try.sh subscribe", () => {
   it(`prints the acknowledgement and the first three of ${SENT} rows sent at once, then nothing`, async () => {
     const port = await rowsServer();
     const { code, stdout, stderr } = await subscribe(port);

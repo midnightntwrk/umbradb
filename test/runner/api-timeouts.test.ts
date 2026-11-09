@@ -20,9 +20,9 @@ import { InMemoryBlockSource, type Process, runLoop, startProcess } from "./proc
  *   new connection.
  *
  * On PGlite an API read sets neither timeout. The database API's half (the read option itself) is
- * `test/db/read-timeouts.test.ts`. [A141, DB-15, RN-15, Q71]
+ * `test/db/read-timeouts.test.ts`.
  *
- * Every test has a timeout far above its work; "within 2 s" is asserted as the acceptance criterion states it. [A141]
+ * Every test has a timeout far above its work; "within 2 s" is asserted as the acceptance criterion states it.
  */
 
 const TIMEOUT_MS = 1_000;
@@ -78,7 +78,7 @@ function slowApi(seen: Seen): ModuleDeclaration {
   });
 }
 
-/** The error a handler's read failed with is the expected one: `query-timeout`, not retryable. [A141] */
+/** The error a handler's read failed with is the expected one: `query-timeout`, not retryable. */
 function isQueryTimeout(error: unknown): boolean {
   return error instanceof UmbraError && error.code === "query-timeout" && error.retryable === false;
 }
@@ -86,7 +86,7 @@ function isQueryTimeout(error: unknown): boolean {
 /**
  * The request-half oracle on PostgreSQL over a process serving `slow-api` with `apiReadTimeoutMs` 1000 and one read
  * connection: the problems found, none when the handler's read is bounded by the timeout. `cancel` ends a statement a
- * read without the bound would leave running, so the check ends either way. [A141, DB-15]
+ * read without the bound would leave running, so the check ends either way.
  */
 async function a141Problems(url: string, seen: Seen, cancel: (pid: number) => Promise<void>): Promise<string[]> {
   const problems: string[] = [];
@@ -130,7 +130,7 @@ async function a141Problems(url: string, seen: Seen, cancel: (pid: number) => Pr
   return problems;
 }
 
-describe("A141's request half on PostgreSQL 18: a handler's read is bounded by apiReadTimeoutMs (DB-15)", () => {
+describe("request half on PostgreSQL 18: a handler's read is bounded by apiReadTimeoutMs", () => {
   let server: PostgresTestServer;
   const processes: Process[] = [];
   beforeAll(async () => {
@@ -158,12 +158,12 @@ describe("A141's request half on PostgreSQL 18: a handler's read is bounded by a
     return { process, seen, cancel };
   }
 
-  it("passes A141's request half through a registered handler", async () => {
+  it("passes the request half through a registered handler", async () => {
     const { process, seen, cancel } = await serving();
     expect(await a141Problems(process.url, seen, cancel)).toEqual([]);
   }, TEST_TIMEOUT);
 
-  it("negative control: a handler's read that ignores apiReadTimeoutMs fails A141's request half", async () => {
+  it("negative control: a handler's read that ignores apiReadTimeoutMs fails the request half", async () => {
     const { process, seen, cancel } = await serving((db) => ({ read: (body) => db.read(body) }));
     const problems = await a141Problems(process.url, seen, cancel);
     expect(problems).toContain('the handler\'s read runs with {"statement":"0","idle":"0"}');
@@ -173,7 +173,7 @@ describe("A141's request half on PostgreSQL 18: a handler's read is bounded by a
   }, TEST_TIMEOUT);
 });
 
-describe("A141's request half on PGlite 0.5.10: an API read sets neither timeout (DB-15)", () => {
+describe("request half on PGlite 0.5.10: an API read sets neither timeout", () => {
   let server: PgliteTestServer;
   const processes: Process[] = [];
   beforeAll(async () => {

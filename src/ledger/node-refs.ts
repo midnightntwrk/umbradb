@@ -1,6 +1,6 @@
 /**
  * A stored ledger node's referenced keys, read without the ledger package. The node-store bridge prefetches them on the
- * main thread, which never loads a ledger package, so it reads the child list itself. [LG-11, Q36, Q49; design §5.3]
+ * main thread, which never loads a ledger package, so it reads the child list itself.
  *
  * A node's `children` is the ledger's serialization of its child list (`midnight-ledger` `storage-core/src/arena.rs`
  * `ArenaKey`, under the node's `layout-v2`). It is a `Vec` of children, its length a SCALE compact integer in the
@@ -54,7 +54,7 @@ class ChildReader {
    * A SCALE compact integer used as a length: at most the bytes left, so no length can make the reader loop. It must
    * be in the fewest bytes that spell it, as the ledger reads it (`midnight-ledger` `serialize/src/util.rs`
    * `ScaleBigInt::deserialize` refuses the others as "non-canonical scale encoding"): a list spelled otherwise gives
-   * the same children, so the same key, yet the ledger cannot read its row. [LG-11, R29]
+   * the same children, so the same key, yet the ledger cannot read its row.
    */
   length(): number {
     const first = this.byte();

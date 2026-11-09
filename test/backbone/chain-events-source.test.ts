@@ -13,7 +13,7 @@ import { type ChainBlock, chainOf, headRead, hex, newHead, subscriptions } from 
 /**
  * Where a block's chain events come from. The node source reads `System::Events` with `state_getStorage` at the
  * block's own hash: for a finalized height with the client's retries, for a queued best block without them. The
- * in-memory source gives none. [CD-4, IN-8, IN-10]
+ * in-memory source gives none.
  */
 
 const quiet: ConnectSocket = (url, events, timers) => connectWebSocket(url, events, timers, { heartbeatMs: 3_600_000 });
@@ -93,7 +93,7 @@ describe("a block's chain events from the block source", () => {
     expect(isBlockEventSource(source)).toBe(true);
   }, PATIENCE_MS);
 
-  it("reads a queued best block's events without retries (IN-10), and null where the state holds none", async () => {
+  it("reads a queued best block's events without retries, and null where the state holds none", async () => {
     const { client, source } = await open([
       ...subscriptions(),
       ...headRead(at(100)),

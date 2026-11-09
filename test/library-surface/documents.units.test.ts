@@ -12,7 +12,7 @@ import {
 
 const targets = (text: string) => markdownLinks(text).map(({ line, target }) => `${line} ${target}`);
 
-describe("markdownLinks and linkedPath (task 17.5b)", () => {
+describe("markdownLinks and linkedPath", () => {
   it("opens a fence only at a line's start, and closes it only with the same character, as long, alone on its line", () => {
     expect(targets("text ```\n[a](a.md)")).toEqual(["2 a.md"]);
     expect(targets("```\n[a](a.md)\n```   \n[b](b.md)")).toEqual(["4 b.md"]);
@@ -53,7 +53,7 @@ describe("markdownLinks and linkedPath (task 17.5b)", () => {
   });
 });
 
-describe("changelogDocumentProblems (task 17.5b)", () => {
+describe("changelogDocumentProblems", () => {
   const [a, b] = [RETIRED_DOCUMENTS_17_4A[0] as string, RETIRED_DOCUMENTS_17_4B[0] as string];
   const name = a.split("/").at(-1) as string;
 
@@ -86,7 +86,7 @@ describe("changelogDocumentProblems (task 17.5b)", () => {
   });
 });
 
-describe("descriptionProblems and storageAlgebraProblems (task 17.5b)", () => {
+describe("descriptionProblems and storageAlgebraProblems", () => {
   it("takes a blank description as none, and two sentences however many spaces part them", () => {
     expect(descriptionProblems("   ")).toEqual(["package.json has no description (A171)"]);
     expect(descriptionProblems("An indexer.  It runs.")).toEqual(["package.json's description is not one sentence (A171)"]);

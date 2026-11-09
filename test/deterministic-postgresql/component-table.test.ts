@@ -7,9 +7,9 @@ import { calledNames, parseSource, REPOSITORY, typeScriptFiles } from "./source-
 
 /**
  * The suite `test/deterministic-postgresql/` runs every rule of the design's `deterministic_postgresql` component
- * table on PostgreSQL 18 and on PGlite. This file says, row by row, which suite files run the rules built so far, and
- * which open task of `tasks.md` builds the rest. When a row's part is built, it moves from `pending` to `tests` here,
- * with the suite files that run it. [A138, Q69; design §4]
+ * table on PostgreSQL 18 and on PGlite. This file says, row by row, which suite files run the rules, and which parts
+ * are still pending. When a row's part is built, it moves from `pending` to `tests` here, with the suite files that
+ * run it.
  */
 
 const SUITE = join(REPOSITORY, "test", "deterministic-postgresql");
@@ -20,7 +20,7 @@ interface RowCoverage {
   readonly requirement: string;
   /** The suite's files that run the row's rules built so far. */
   readonly tests: readonly string[];
-  /** Each part of the row no task has built yet, and the task of `tasks.md` that builds it. */
+  /** Each part of the row not built yet, and what builds it. */
   readonly pending: Readonly<Record<string, string>>;
 }
 
@@ -52,7 +52,7 @@ const ROWS: readonly RowCoverage[] = [
   {
     rule: "`core_chain.jsonb_numbers_ok` and `core_chain.numeric_ok` and the `CHECK`s they back",
     requirement: "DT-1, DT-6",
-    // The functions and their rules, the CHECK on every such column, and the writes they refuse. [A58]
+    // The functions and their rules, the CHECK on every such column, and the writes they refuse.
     tests: ["checks.test.ts"],
     pending: {},
   },
@@ -86,8 +86,8 @@ const ROWS: readonly RowCoverage[] = [
       "`[schema, table, null, null]`; digests skip it; backups carry its rows and its sequences' positions",
     requirement: "MD-1, DT-3, DT-4, DT-6, BK-2",
     // - The declaration, and the skip written once (`opt-out.ts`) that the refusals and the TRUNCATE guard use.
-    // - The startup check, the CHECKs and change capture skip such tables; the hash records them by name only. [A147]
-    // - A backup carries such a table's rows and its sequence's position. [A147]
+    // - The startup check, the CHECKs and change capture skip such tables; the hash records them by name only.
+    // - A backup carries such a table's rows and its sequence's position.
     tests: ["opt-out.test.ts", "opt-out-backup.test.ts"],
     pending: {},
   },
@@ -124,7 +124,7 @@ function runsOnBothBackends(file: string): boolean {
   );
 }
 
-describe("A138: the suite runs every rule of design.md §4's component table on both backends", () => {
+describe("the suite runs every rule of the component table on both backends", () => {
   const suiteFiles = typeScriptFiles(SUITE).filter((file) => file.endsWith(".test.ts"));
 
   it("runs on PostgreSQL 18 and on PGlite 0.5.10: the backend lists the suite iterates", () => {

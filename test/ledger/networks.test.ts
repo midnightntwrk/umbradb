@@ -17,16 +17,16 @@ import { haltOf, TapeAnswers } from "./version-checks.js";
 
 /**
  * The built-in ledger version tables (`src/ledger/networks.json`): one per known network, keyed by its genesis hash,
- * with the runtime-to-ledger rows, and a pin for each runtime upgrade boundary read from the network's node. [LG-3, A95 STATIC]
+ * with the runtime-to-ledger rows, and a pin for each runtime upgrade boundary read from the network's node.
  *
  * - **Every pin has a recorded source:** every pin of the built-in tables has a height, a hash and a `spec_version`,
  *   with a recorded source (the node it was read from, when, the file in this repository holding the node's answers)
  *   and the U and F hashes; the format makes a pin of nothing else (a pin is a boundary's F). Each source's record exists and holds the
- *   hashes it vouches for. [A95 STATIC]
+ *   hashes it vouches for.
  * - **Each pin passes its boundary's header:** each built-in pin passes the header its boundary's record holds, through
  *   the node client's decoder. These are the boundaries read from the nodes (`test/ledger/fixtures/networks/*.json`),
  *   the mainnet pin at 1,774,492 among them; block 1,774,492's header as the recorded mainnet tape holds it passes the
- *   pin too. [A94]
+ *   pin too.
  * - **The tables against the recorded tapes** (each skipped by name without its tape): every block of every
  *   public tape selects a ledger through its network's built-in table, built by the runtime in its parent's state;
  *   every pin in a tape's range passes; every runtime change on a tape is a built-in boundary with its U's and F's
@@ -36,7 +36,7 @@ import { haltOf, TapeAnswers } from "./version-checks.js";
 
 /**
  * The built-in rows: runtimes 0.22 and 1.0.x to v8; runtime 2.0 to v9 as it built it (`ledger-9.1.0.0-rc.3`, a package
- * of its own); 2.1 on to v9 (`ledger-9.1.0.0-rc.5`). [LG-3, Q139 A, A159]
+ * of its own); 2.1 on to v9 (`ledger-9.1.0.0-rc.5`).
  */
 const LG3_ROWS = [
   { specVersionMin: 22_000, specVersionMax: 22_999, ledger: "v8" },
@@ -47,8 +47,8 @@ const LG3_ROWS = [
 
 const repository = (path: string) => new URL(`../../${path}`, import.meta.url);
 
-describe("the committed file (LG-3)", () => {
-  it("passes the format, and gives every known network its table with LG-3's rows", () => {
+describe("the committed file", () => {
+  it("passes the format, and gives every known network its table with the rows", () => {
     expect(networksFileProblems(networksFile)).toEqual([]);
     expect(networksFile.format).toBe(NETWORKS_FORMAT);
     expect(KNOWN_NETWORKS).toEqual(["mainnet", "preprod", "preview", "stagenet"]);
@@ -65,7 +65,7 @@ describe("the committed file (LG-3)", () => {
     expect(builtInLedgerTable("constructor")).toBeNull();
   });
 
-  it("keys each network by the genesis hash and runtime its node reported (task 0.3's records)", () => {
+  it("keys each network by the genesis hash and runtime its node reported (the records)", () => {
     // Read on 2026-10-26 from each network's node with tools/tape/main.ts boundaries; the record holds the
     // node's answers. Stagenet, a temporary network with no midnight.network node, from the third-party
     // rpc.stagenet.shielded.tools.
@@ -96,7 +96,7 @@ describe("the committed file (LG-3)", () => {
     }
   });
 
-  it("pins every boundary each node reported, the mainnet 1.0 pin at F = 1,774,492 among them (LG-2, LG-3)", () => {
+  it("pins every boundary each node reported, the mainnet 1.0 pin at F = 1,774,492 among them", () => {
     const pins = (network: string) => builtInLedgerTable(network)?.pins.map((pin) => [pin.height, pin.specVersion]);
     expect(pins("mainnet")).toEqual([
       [1_774_492, 1_000_000],
@@ -122,7 +122,7 @@ describe("the committed file (LG-3)", () => {
   });
 });
 
-describe("A95 [STATIC]: every built-in pin has a height, a hash and a spec_version with a recorded source", () => {
+describe("every built-in pin has a height, a hash and a spec_version with a recorded source", () => {
   const recordText = (record: string): string => {
     expect(existsSync(repository(record)), record).toBe(true);
     return readFileSync(repository(record), "utf8").toLowerCase();
@@ -152,7 +152,7 @@ describe("A95 [STATIC]: every built-in pin has a height, a hash and a spec_versi
   });
 });
 
-describe("A94's last clause: every built-in pin passes the header its boundary's record holds", () => {
+describe("last clause: every built-in pin passes the header its boundary's record holds", () => {
   type Answers = { calls: { method: string; params: unknown[]; result: unknown }[] };
 
   it("selects each boundary's U and F with its network's table, the node client decoding the recorded headers", () => {
@@ -177,7 +177,7 @@ describe("A94's last clause: every built-in pin passes the header its boundary's
   });
 });
 
-describe("the built-in tables against task 0.3's recorded tapes (each skipped by name without its tape)", () => {
+describe("the built-in tables against the recorded tapes (each skipped by name without its tape)", () => {
   /** Reading, checking and walking a 60,000-record tape on a loaded machine. */
   const WALK_MS = 600_000;
 
@@ -191,7 +191,7 @@ describe("the built-in tables against task 0.3's recorded tapes (each skipped by
 
   tapeTest(
     "mainnet-1774000-1780000",
-    "A94's last clause: block 1,774,492's header as the mainnet node answered it passes the built-in pin; under U's hash, or with U's MNSV, it does not",
+    "last clause: block 1,774,492's header as the mainnet node answered it passes the built-in pin; under U's hash, or with U's MNSV, it does not",
     (found) => {
       const answers = new TapeAnswers(found.read().records);
       const table = builtInLedgerTable("mainnet") as LedgerTable;
@@ -240,7 +240,7 @@ describe("the built-in tables against task 0.3's recorded tapes (each skipped by
       runtimes.set(h, answers.runtimeAt(text));
       if (parent !== null) {
         expect(toHex(header.parentHash), `block ${h}'s parent`).toBe(parent);
-        // A block is built by the runtime in its parent's state, which its MNSV names. [LG-4]
+        // A block is built by the runtime in its parent's state, which its MNSV names.
         if (selection.specVersion !== runtimes.get(h - 1)) notFromParent.push(`${h}: MNSV ${selection.specVersion}, parent's ${runtimes.get(h - 1)}`);
         // The state's runtime changes at U, whose own state holds the runtime it enacts.
         if (runtimes.get(h) !== runtimes.get(h - 1)) changes.push(h);
@@ -541,7 +541,7 @@ function withBoundary(file: File, index: number, change: (b: File["networks"][0]
   return { ...file, networks: [{ ...network, boundaries }, file.networks[1]] };
 }
 
-describe("the networks file's format (LG-3)", () => {
+describe("the networks file's format", () => {
   it("accepts the valid synthetic file, and makes each boundary's F a pin", () => {
     const file = validFile();
     expect(networksFileProblems(file)).toEqual([]);

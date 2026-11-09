@@ -4,7 +4,7 @@ import { PATIENCE_MS } from "../ingest-harness.js";
 import { a168Problems, a168Run, withoutNodeFields } from "./node-fields-harness.js";
 
 /**
- * The committed negative control for the node fields, on PostgreSQL 18.6 and PGlite 0.5.10. [A168]
+ * The committed negative control for the node fields, on PostgreSQL 18.6 and PGlite 0.5.10.
  *
  * It is the same run as `./node-fields.test.ts`'s, but every snapshot the runner publishes carries the node's best
  * head, connection and queue depth as null (`withoutNodeFields`), as `/status` showed them before the process reported
@@ -18,11 +18,11 @@ import { a168Problems, a168Run, withoutNodeFields } from "./node-fields-harness.
 /** How long a phase reads `/status` here: each one runs out of it. */
 const PHASE_PATIENCE_MS = 8_000;
 
-describe.each(PROCESS_BACKENDS)("A168's negative control on $name", (backend) => {
+describe.each(PROCESS_BACKENDS)("negative control on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("a process that publishes none of the node's three fields fails A168 in exactly those", async () => {
+  it("a process that publishes none of the node's three fields fails in exactly those", async () => {
     const observed = await a168Run(await backend.database(), { patienceMs: PHASE_PATIENCE_MS, wrap: withoutNodeFields });
     expect(a168Problems(observed)).toEqual([
       'before the first connection: node.connection is null, not "connecting"',

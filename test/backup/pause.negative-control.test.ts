@@ -28,7 +28,6 @@ import {
 /**
  * The pause tests' committed negative controls, on PGlite 0.5.10, each a loop (`EngineInput.loop`) that pauses
  * wrongly, run through `./pause.test.ts`'s scenario and oracles (`./pause-fixtures.ts`), each oracle seen failing:
- * [A163, BK-1, RN-13, Q152 B]
  * - **inside the height:** a loop that pauses in a height's block transaction, before its `on-db-write`, instead of
  *   between heights — "paused between heights" fails (the last point is the height's `on-compute`, a transaction open);
  * - **not held:** a loop that tells the pause it arrived but goes on — "starts nothing while paused" fails, and so does
@@ -36,9 +35,9 @@ import {
  *   meanwhile);
  * - **stays paused:** a loop that never goes on once paused — "resumed, it goes on" fails;
  * - **ignores the stop:** a loop whose pause a stop does not end — "a stop while paused ends the process" fails
- *   [RN-13];
+ *;
  * - **ends the run:** a loop that pauses by ending its run, which the process runs again (as after a lost connection) —
- *   "loses and repeats no height" fails: the run again re-delivers the cursor's `on-after-db-write` [RN-11].
+ *   "loses and repeats no height" fails: the run again re-delivers the cursor's `on-after-db-write`.
  */
 
 const TEST_TIMEOUT_MS = 900_000;
@@ -145,7 +144,7 @@ async function end(run: Pausable): Promise<void> {
   await run.handle.stop();
 }
 
-describe("A163's negative controls: loops that pause wrongly fail its oracles (BK-1, RN-13, Q152 B)", () => {
+describe("negative controls: loops that pause wrongly fail its oracles", () => {
   it("a loop that pauses inside the height (in its block transaction) fails \"paused between heights\"", async () => {
     const { run, paused } = await pausedAt10(PausesInsideTheHeight);
     try {
@@ -204,7 +203,7 @@ describe("A163's negative controls: loops that pause wrongly fail its oracles (B
     }
   }, TEST_TIMEOUT_MS);
 
-  it("a loop whose pause the stop does not end fails RN-13's \"a stop while paused ends the process\"", async () => {
+  it("a loop whose pause the stop does not end fails the \"a stop while paused ends the process\"", async () => {
     const { run, paused } = await pausedAt10(IgnoresTheStop);
     try {
       await expect(stopEndsWhilePaused(run, paused(), SHORT_MS)).rejects.toThrow(/a stop while paused did not end the process/);

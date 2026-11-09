@@ -52,7 +52,7 @@ async function runOnce(started: Started, source: InMemoryBlockSource, above: big
   return { outcome: await running, loop };
 }
 
-describe("a height's own slow-block window at the loop level on PGlite (task 17.5b)", () => {
+describe("a height's own slow-block window at the loop level on PGlite", () => {
   beforeAll(() => PGLITE.start(), 180_000);
   afterAll(() => PGLITE.stop(), 60_000);
 
@@ -103,7 +103,7 @@ describe("a height's own slow-block window at the loop level on PGlite (task 17.
   }, 120_000);
 });
 
-describe("LoopPauses.idle (task 17.5b)", () => {
+describe("LoopPauses.idle", () => {
   it("leaves the loop not between heights once its wait ends: a hold asked for after it is not reached at once", async () => {
     const pauses = new LoopPauses();
     expect(await pauses.idle(async () => 1)).toBe(1);

@@ -20,17 +20,17 @@ import { declaration } from "../modules/declarations.js";
 import { BACKBONE, CORE_BLOCK_FETCH, CORE_CHAIN, entry, graphInput } from "../modules/graph-fixtures.js";
 
 /**
- * The module API without a listener, and its `ApiRegistry`. [RN-15, RN-16, DB-15; CORE-ARCH §4.10]
+ * The module API without a listener, and its `ApiRegistry`.
  * - The routes and subscription names modules register in `on-start-api` (`ApiRoutes`, `registerModuleApis`), refused
  *   when registered twice (`duplicate-api-route`).
  * - Each request answered through one read bounded by `apiReadTimeoutMs`, with the handler's answer as the handler
- *   wrote it: no envelope header or `extensions` added, no GraphQL response told apart. [RN-16, Q104, Q105]
+ *   wrote it: no envelope header or `extensions` added, no GraphQL response told apart.
  * - The envelope's helpers as a handler calls them (`ModuleApi.answer`).
  * - The wire format of bodies and errors.
  * - Subscriptions (`ModuleApi.subscribe`).
  *
  * Over a database and on `listen.api` it is `api-server.test.ts`; the API read timeouts' request half is
- * `api-timeouts.test.ts`. [A141]
+ * `api-timeouts.test.ts`.
  */
 
 const HASH = Uint8Array.from({ length: 32 }, (_, i) => i);
@@ -94,7 +94,7 @@ function thrown(body: () => unknown): unknown {
 
 const ok = async () => ({ status: 200, body: { ok: true } });
 
-describe("ApiRoutes: what modules register in on-start-api (RN-15)", () => {
+describe("ApiRoutes: what modules register in on-start-api", () => {
   it("collects each module's HTTP routes and subscriptions in registration order", () => {
     const routes = new ApiRoutes();
     const a = routes.open("a");
@@ -224,7 +224,7 @@ describe("ApiRoutes: what modules register in on-start-api (RN-15)", () => {
   });
 });
 
-describe("ModuleApi.answer: one request, one bounded read, the module's answer (RN-15, RN-16, DB-15)", () => {
+describe("ModuleApi.answer: one request, one bounded read, the module's answer", () => {
   it("answers a route with a read bounded by apiReadTimeoutMs and the handler's answer, adding no header", async () => {
     const { db, options, read } = fakeDb();
     const seen: unknown[] = [];
@@ -604,7 +604,7 @@ describe("ModuleApi.answer: one request, one bounded read, the module's answer (
   });
 });
 
-describe("ModuleApi.subscribe: subscriptions notified through emit (RN-15)", () => {
+describe("ModuleApi.subscribe: subscriptions notified through emit", () => {
   it("calls the module's handler with the arguments, sends what it emits, and unsubscribes once", () => {
     const emits: ((value: unknown) => void)[] = [];
     let unsubscribed = 0;
@@ -717,7 +717,7 @@ async function sealed(
   return { graph, contexts };
 }
 
-describe("registerModuleApis: on-start-api once, at startup (RN-1, RN-15)", () => {
+describe("registerModuleApis: on-start-api once, at startup", () => {
   it("runs on-start-api for this process's parts in startup order, each with its context and its own registry", async () => {
     const calls: [string, unknown, unknown][] = [];
     const registering = (id: string, rest: Partial<ModuleDeclaration> = {}) =>

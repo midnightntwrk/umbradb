@@ -27,16 +27,15 @@ import { entryOf, loggingModule } from "../../runner/process-build.js";
 /**
  * Every `/status` body validates against the JSON schema committed here, `./status.schema.json` (draft 2020-12, checked
  * by Ajv 8.18.0 in strict mode: `test/admin/json-schema.ts`), and its `cursor` is `null` before block S commits.
- * [A66, AE-5]
  *
  * The bodies are read through the process on PostgreSQL 18 and PGlite, in every state the runner has and with the
  * conditions it raises. The parts' digest rows shown are the database's own `core_digest.tables`. The last commit's
- * time is RFC 3339 UTC text from the wall clock. The uptime grows. [DT-5, Q68]
+ * time is RFC 3339 UTC text from the wall clock. The uptime grows.
  *
  * Committed negative controls: a body fails the schema when it lacks any one of its required fields, has a field the
  * schema does not have, or has a value of the wrong form. Wrong forms tested: a height as a number, another state, a
  * time in PostgreSQL's own text, an upper-case digest, a condition the runner never raises, an unknown detail, a node
- * connection state outside the four allowed ones, a negative queue depth. [AE-5]
+ * connection state outside the four allowed ones, a negative queue depth.
  */
 
 const STATUS_SCHEMA = validatorOf(schemaFile(new URL("./status.schema.json", import.meta.url)));
@@ -72,19 +71,19 @@ function body(): Record<string, unknown> {
   return JSON.parse(JSON.stringify(answer.body)) as Record<string, unknown>;
 }
 
-describe("A66: /status's JSON schema", () => {
+describe("/status's JSON schema", () => {
   it("is a draft 2020-12 schema, and a full body validates", () => {
     expect(STATUS_SCHEMA.problems(body())).toEqual([]);
     expect(body()).toMatchObject({ lastCommitAt: "2026-10-26T12:00:00.25Z", uptimeMs: 1_500 });
   });
 
-  it("holds instance.role null while the process's side is not known (start-umbradb, A66's schema additions; AE-5)", () => {
+  it("holds instance.role null while the process's side is not known (the schema additions)", () => {
     const starting = body() as Record<string, any>;
     expect(STATUS_SCHEMA.problems({ ...starting, instance: { role: null, id: null } })).toEqual([]);
     expect(STATUS_SCHEMA.problems({ ...starting, instance: { role: "host", id: null } }).length).toBeGreaterThan(0);
   });
 
-  it("holds the private instances and the lockstep flag (task 14.4; PP-9, AE-5)", () => {
+  it("holds the private instances and the lockstep flag", () => {
     const instances = [
       { id: "keeper", connected: true, lockstep: true, height: "100" },
       { id: "other", connected: false, lockstep: false, height: null },
@@ -95,7 +94,7 @@ describe("A66: /status's JSON schema", () => {
     expect(STATUS_SCHEMA.problems({ ...body(), public: { cursor: null, lockstep: null } })).toEqual([]);
   });
 
-  it("holds the node's best head, connection state and queue depth (task 8.3a; AE-5, A168), or null for each", () => {
+  it("holds the node's best head, connection state and queue depth, or null for each", () => {
     const node = (body() as { node: Record<string, unknown> }).node;
     for (const connection of ["connecting", "connected", "retrying", "closed"]) {
       const shown = { ...body(), node: { ...node, bestHead: "103", connection, queueDepth: 2 } };
@@ -103,17 +102,17 @@ describe("A66: /status's JSON schema", () => {
     }
     expect(STATUS_SCHEMA.problems({ ...body(), node: { ...node, bestHead: null, connection: null, queueDepth: null } })).toEqual([]);
     expect(STATUS_SCHEMA.problems({ ...body(), node: { ...node, bestHead: "0", connection: "connecting", queueDepth: 0 } })).toEqual([]);
-    // A private process has no node: the three node fields are null with it. [A168]
+    // A private process has no node: the three node fields are null with it.
     expect(STATUS_SCHEMA.problems({ ...body(), node: null })).toEqual([]);
   });
 
-  it("holds slow-block (task 5.5, RN-17): the height, the point, the module or null while none runs", () => {
+  it("holds slow-block: the height, the point, the module or null while none runs", () => {
     const slow = { code: "slow-block", height: "4", point: "on-compute", module: "m" };
     expect(STATUS_SCHEMA.problems({ ...body(), conditions: [slow] })).toEqual([]);
     expect(STATUS_SCHEMA.problems({ ...body(), conditions: [{ ...slow, point: "on-db-write", module: null }] })).toEqual([]);
   });
 
-  it("holds paused (task 8.3b, Q174 B): the time the loop paused as RFC 3339 UTC text and who paused it", () => {
+  it("holds paused: the time the loop paused as RFC 3339 UTC text and who paused it", () => {
     for (const by of ["pause", "signal"]) {
       const paused = { code: "paused", since: "2026-10-28T09:15:02.5Z", by };
       expect(STATUS_SCHEMA.problems({ ...body(), conditions: [paused] }), by).toEqual([]);
@@ -129,7 +128,7 @@ describe("A66: /status's JSON schema", () => {
     expect(codes).toContain("paused");
   });
 
-  it("names the points of MD-1 and every field the endpoint answers, each one required", () => {
+  it("names the module points and every field the endpoint answers, each one required", () => {
     const schema = schemaFile(new URL("./status.schema.json", import.meta.url)) as {
       required: string[];
       properties: Record<string, unknown>;
@@ -240,11 +239,11 @@ async function valid(run: AdminRun, wanted: (body: StatusBody) => boolean): Prom
   return shown;
 }
 
-describe.each(PROCESS_BACKENDS)("A66: /status through the process validates in every state on $name", (backend) => {
+describe.each(PROCESS_BACKENDS)("/status through the process validates in every state on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("A66: cursor null before block S commits — while migrating, and while S is above the node's head", async () => {
+  it("cursor null before block S commits — while migrating, and while S is above the node's head", async () => {
     const setup = gate();
     const migrating = startWithAdmin({ database: (await backend.database()).setting, user: [writing("m", { startDb: setup.wait })] });
     await setup.reached;
@@ -266,9 +265,9 @@ describe.each(PROCESS_BACKENDS)("A66: /status through the process validates in e
     await waiting.handle.stop();
   }, 180_000);
 
-  it("A66: following — the parts with the database's own digest rows, the last commit's time, the uptime growing", async () => {
+  it("following — the parts with the database's own digest rows, the last commit's time, the uptime growing", async () => {
     const before = Date.now();
-    // The build's own core-digest (the test backbone's is a stand-in without the `core_digest.tables` table). [DT-5]
+    // The build's own core-digest (the test backbone's is a stand-in without the `core_digest.tables` table).
     const run = startWithAdmin({
       database: (await backend.database()).setting,
       user: [writing("m")],
@@ -285,7 +284,7 @@ describe.each(PROCESS_BACKENDS)("A66: /status through the process validates in e
     // A core with no transport and no lockstep list: no private instance.
     expect(shown).toMatchObject({ state: "following", instance: { role: "core", id: null }, public: null, ledger: null, privateInstances: [] });
     // The in-memory source keeps no best-block queue and hears no best head. The process's node client, which it never
-    // uses, has not connected: it shows `connecting`, as before the first connection. [A168]
+    // uses, has not connected: it shows `connecting`, as before the first connection.
     expect(shown.node).toEqual({ finalizedHead: "4", bestHead: null, connection: "connecting", retries: 0, queueDepth: null, tipCap: 600, finalityStall: false });
     const committed = Date.parse(shown.lastCommitAt);
     expect(committed).toBeGreaterThanOrEqual(before);
@@ -321,7 +320,7 @@ describe.each(PROCESS_BACKENDS)("A66: /status through the process validates in e
     await run.handle.stop();
   }, 120_000);
 
-  it("A66: syncing while a node failure is retried, stopped at an upgrade boundary, stopping", async () => {
+  it("syncing while a node failure is retried, stopped at an upgrade boundary, stopping", async () => {
     let healed = false;
     const retrying = startWithAdmin({ database: (await backend.database()).setting, source: unreachable(() => healed), extra: { backoffCeilingMs: 200 } });
     const shown = await valid(retrying, (b) => b.conditions.some((condition) => condition.code === "node-retrying"));
@@ -364,7 +363,7 @@ describe.each(PROCESS_BACKENDS)("A66: /status through the process validates in e
     await closing;
   }, 180_000);
 
-  it("A66: halted with its reason; refused before the database opens and after it, with their details", async () => {
+  it("halted with its reason; refused before the database opens and after it, with their details", async () => {
     const failing = loggingModule("f", [], ["on-db-write"], {
       points: {
         ...loggingModule("f", [], ["on-db-write"]).points,
@@ -386,7 +385,7 @@ describe.each(PROCESS_BACKENDS)("A66: /status through the process validates in e
     await halted.handle.stop();
 
     // Refused once the configuration is validated, before the database opens (PGlite without the development opt-in).
-    // A refusal of the configuration itself ends the process and serves no /status. [CF-9, Q137 B]
+    // A refusal of the configuration itself ends the process and serves no /status.
     const unopened = startWithAdmin({ database: { kind: "pglite", memory: true }, extra: { developmentOptIn: false } });
     const early = await valid(unopened, (b) => b.state === "refused");
     expect(early.reason).toMatchObject({ code: "development-opt-in-required", height: null, module: null, point: null });

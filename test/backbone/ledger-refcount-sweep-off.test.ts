@@ -12,12 +12,12 @@ import { runDag, runProblems } from "./refcount-process.js";
 /**
  * `sweep: off` from {@link OFF} to {@link ON} − 1 and on again from {@link ON}, through the real process under the
  * development opt-in, on PostgreSQL 18 and PGlite 0.5.10, on the extended DAG fixture (`retainStates` 0; the off
- * stretch holds both rewrites and the queued key referenced again): [R10, LG-14, CF-9]
+ * stretch holds both rewrites and the queued key referenced again):
  * - it is switched off while the queue holds the state released at OFF − 1 (the state after OFF − 2);
- * - while it is off no row is deleted or evicted, that state's rows included, R3's (a) and (b) pass after every block,
+ * - while it is off no row is deleted or evicted, that state's rows included, the (a) and (b) pass after every block,
  *   and the queue holds every row that no stored child list references and no root count persists;
- * - the first block with it on again deletes the whole queue and its cascade, and R3's (c) and (d) pass from there on;
- * - no reset is written at either switch: the tables after every block, the two switches included, are R1's model's
+ * - the first block with it on again deletes the whole queue and its cascade, and the (c) and (d) pass from there on;
+ * - no reset is written at either switch: the tables after every block, the two switches included, are the model's
  *   (whose rules have none), and no other table of `core_ledger_state` changes at a switch;
  * - without the development opt-in the same configuration is refused at startup (`development-opt-in-required`) before
  *   anything is written.
@@ -60,11 +60,11 @@ async function touched(db: ProcessDatabase): Promise<boolean> {
   return (await db.query("SELECT 1 FROM pg_namespace WHERE nspname = 'core_chain'")).length > 0;
 }
 
-describe.each(PROCESS_BACKENDS)("R10 (LG-14, CF-9): sweep off and on again through the process on $name", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("sweep off and on again through the process on $name", (backend: ProcessBackend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("R10: switched off while the queue holds the state released at OFF − 1, no row is deleted, R3's (a) and (b) pass and the queue holds every row with no reference and no root count; the first block with it on again deletes the queue and its cascade, after which R3's (c) passes; no reset at either switch", async () => {
+  it("switched off while the queue holds the state released at OFF − 1, no row is deleted, the (a) and (b) pass and the queue holds every row with no reference and no root count; the first block with it on again deletes the queue and its cascade, after which the (c) passes; no reset at either switch", async () => {
     const run = await runDag(await backend.database(), { dag: "extended", revisions: REVISIONS, last: LAST_RUN });
     expect(run.status).toMatchObject({ cursor: BigInt(LAST_RUN), reason: null });
     const after = (h: number): TableSnapshot => {
@@ -107,7 +107,7 @@ describe.each(PROCESS_BACKENDS)("R10 (LG-14, CF-9): sweep off and on again throu
     expect(outside).toContain(rootKey(OFF - 2));
     for (const key of outside) expect(gone, key).toContain(key);
 
-    // No reset at either switch: R1's model (off from OFF to ON − 1) holds the tables after every block, and no table
+    // No reset at either switch: The model (off from OFF to ON − 1) holds the tables after every block, and no table
     // but those the rules write changes at a switch.
     const model = modelOfBatches(run.batches, LAST_RUN, (h) => !on(h));
     expect(modelProblems(run.tables, model)).toEqual([]);
@@ -117,11 +117,11 @@ describe.each(PROCESS_BACKENDS)("R10 (LG-14, CF-9): sweep off and on again throu
       for (const table of others) expect(after(h).digests.get(table), `${table} at ${h}`).toBe(after(h - 1).digests.get(table));
     }
 
-    // R3: (a), (b) and R_{h−1} ⊆ S_h after every block; S_h = K_h and (d) where it is on.
+    // (a), (b) and R_{h−1} ⊆ S_h after every block; S_h = K_h and (d) where it is on.
     expect(runProblems(run, "extended", on)).toEqual([]);
   }, PATIENCE_MS * 3);
 
-  it("R10: without the development opt-in the configuration turning sweep off is refused at startup (development-opt-in-required), before anything is written", async () => {
+  it("without the development opt-in the configuration turning sweep off is refused at startup (development-opt-in-required), before anything is written", async () => {
     const db = await backend.database();
     const process = await ingest(db, sweepTape(LAST_RUN, "extended").records, {
       start: 0n,

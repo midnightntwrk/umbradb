@@ -24,13 +24,12 @@ import { BACKENDS } from "../db/backends.js";
  *   its `jsonpath` `.string()` is `"1.0"`);
  * - a `numeric` must have no fraction and be neither `NaN` nor an infinity;
  * - NULL stays allowed.
- * [A58, DT-6, Q57; design §4]
  *
  * A module writing a refused value in `on-db-write` fails the block, which rolls back. The block is played by module
  * `m`'s `on-db-write` through the real block write handle (`src/db/write-handles.ts`); halting is the runner's job.
  *
  * Every case and its verdict is written by hand from the rules; the committed negative controls build the two
- * functions without one rule each and show that exactly that rule's cases change verdict. [DT-6, A58, Q57]
+ * functions without one rule each and show that exactly that rule's cases change verdict.
  */
 
 const MODULE: SchemaModule = {
@@ -51,7 +50,7 @@ const TABLES = `
   CREATE TABLE m.p_low PARTITION OF m.p FOR VALUES FROM (0) TO (1000);
   CREATE TABLE m.free (k bigint PRIMARY KEY, j jsonb, n numeric);`;
 
-/** A value written to one column, and whether the determinism rules let it be stored. [DT-6] */
+/** A value written to one column, and whether the determinism rules let it be stored. */
 interface Case {
   readonly column: "j" | "aj" | "n" | "an" | "n0";
   /** The value as SQL text, cast to the column's type. */
@@ -64,7 +63,7 @@ interface Case {
 }
 
 const CASES: readonly Case[] = [
-  // jsonb: integers within 64 bits, written without a fraction. [Q57]
+  // jsonb: integers within 64 bits, written without a fraction.
   { column: "j", value: '{"x": 1.5}', stored: false, rule: "integer-text" },
   { column: "j", value: '{"x": 1.0}', stored: false, rule: "integer-text" },
   { column: "j", value: '{"x": 100.00}', stored: false, rule: "integer-text" },
@@ -101,7 +100,7 @@ const CASES: readonly Case[] = [
   { column: "an", value: "{1,2}", stored: true },
   { column: "an", value: "{{1,2},{3,4}}", stored: true },
   { column: "an", value: "{1,NULL}", stored: true, rule: "null-allowed" },
-  // numeric(38,0): PostgreSQL rounds on write, so what is stored is an integer; the declared scale 0 is allowed. [DT-6]
+  // numeric(38,0): PostgreSQL rounds on write, so what is stored is an integer; the declared scale 0 is allowed.
   { column: "n0", value: "1.5", stored: true, readsBack: "2" },
 ];
 
@@ -121,7 +120,7 @@ function outcome(run: Promise<unknown>): Promise<unknown> {
 }
 
 describe("the CHECKs' predicates, as text", () => {
-  it("finds, at any depth, a JSON number some rule refuses; none with no rule; numeric_ok as design.md §4 writes it", () => {
+  it("finds, at any depth, a JSON number some rule refuses; none with no rule; numeric_ok as the rules write it", () => {
     expect(refusedNumbersPath()).toBe(
       'strict $.** ? (@.type() == "number" && ((!(@.string() like_regex "^-?[0-9]+$")) || ' +
         "(@ < -9223372036854775808) || (@ > 9223372036854775807)))",
@@ -131,7 +130,7 @@ describe("the CHECKs' predicates, as text", () => {
   });
 });
 
-describe.each(BACKENDS)("A58: the jsonb and numeric CHECKs, on $name (DT-6, Q57)", (backend) => {
+describe.each(BACKENDS)("the jsonb and numeric CHECKs, on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop());
 
@@ -160,7 +159,7 @@ describe.each(BACKENDS)("A58: the jsonb and numeric CHECKs, on $name (DT-6, Q57)
     );
   }
 
-  it("re-checks Q57's fact: jsonpath .string() keeps a JSON number's scale, and PostgreSQL stores 1e2 as 100", async () => {
+  it("re-checks the fact: jsonpath .string() keeps a JSON number's scale, and PostgreSQL stores 1e2 as 100", async () => {
     const { db } = await started();
     const [row] = await db.read((read) =>
       read.query(`SELECT jsonb_path_query('{"x": 1.0}', '$.x.string()') AS a, jsonb_path_query('{"x": 100.00}', '$.x.string()') AS b,
@@ -215,7 +214,7 @@ describe.each(BACKENDS)("A58: the jsonb and numeric CHECKs, on $name (DT-6, Q57)
     expect(Buffer.byteLength(integerCheckName(long))).toBeLessThanOrEqual(63);
   });
 
-  it("drops its CHECKs from a table a later build declares deterministic: false (Q76), and keeps the others'", async () => {
+  it("drops its CHECKs from a table a later build declares deterministic: false, and keeps the others'", async () => {
     const { db } = await started();
     const later = planSchemas([
       {
@@ -247,7 +246,7 @@ describe.each(BACKENDS)("A58: the jsonb and numeric CHECKs, on $name (DT-6, Q57)
 
   for (const [index, c] of CASES.entries()) {
     const label = `${c.value === null ? "NULL" : c.value} in a ${TYPE_OF[c.column]} column (${c.column})`;
-    it(`A58: ${c.stored ? "stores" : "fails the block for"} ${label}`, async () => {
+    it(`${c.stored ? "stores" : "fails the block for"} ${label}`, async () => {
       const { db, plan } = await started();
       const k = BigInt(index + 1);
       const result = await write(db, plan, k, c);
@@ -268,7 +267,7 @@ describe.each(BACKENDS)("A58: the jsonb and numeric CHECKs, on $name (DT-6, Q57)
     });
   }
 
-  it("A58: checks a row written to a partition directly, and a table a later startup's migration added, before its on-start-db", async () => {
+  it("checks a row written to a partition directly, and a table a later startup's migration added, before its on-start-db", async () => {
     const { db, plan } = await started();
     const direct = await outcome(
       db.transaction((tx) =>

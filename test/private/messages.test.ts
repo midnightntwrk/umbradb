@@ -15,20 +15,19 @@ import {
 
 /**
  * The message schemas. Every message type round-trips through the zod schemas: written as the transport writes it and
- * read back equal. Each type fails on a missing or a mistyped field, for every field. [A115 CI, PP-4; design §8]
+ * read back equal. Each type fails on a missing or a mistyped field, for every field.
  *
  * These are told apart from a message failing its schema, and each closes the connection (`./transport.test.ts`):
- * - an unknown `v` or `type`, including `api` and `api-result`, which were removed from the protocol; [Q140 C]
+ * - an unknown `v` or `type`, including `api` and `api-result`, which were removed from the protocol;
  * - a text that is not JSON.
- * [A115 CI, PP-4]
  *
  * Also tested: the values' encoding, by type, and its inverse, on values as the database API gives them. The round trip
- * through a real core's read is tested in `./transport.test.ts`. [A115 CI]
+ * through a real core's read is tested in `./transport.test.ts`.
  */
 
 const HASH = `0x${"ab".repeat(32)}`;
 const OTHER = `0x${"cd".repeat(32)}`;
-/** A core's configuration hash. [RN-16, PP-4] */
+/** A core's configuration hash. */
 const CONFIG = `0x${"ef".repeat(32)}`;
 
 /** One valid message of each type, every optional field given where the schema has one. */
@@ -109,12 +108,12 @@ function mistyped(value: unknown): unknown {
   return "an object";
 }
 
-describe("A115: every message type round-trips through design §8's schemas", () => {
-  it("the types are design §8's six (no api or api-result: owner decision Q140 C)", () => {
+describe("every message type round-trips through the schemas", () => {
+  it("the types are the six (no api or api-result)", () => {
     expect(MESSAGE_TYPES).toEqual(["hello", "hello-ack", "committed", "report", "read", "read-result"]);
   });
 
-  it("the core's three messages carry its configuration hash, configHash; a private process's three do not (PP-4, Q147)", () => {
+  it("the core's three messages carry its configuration hash, configHash; a private process's three do not", () => {
     const carrying = MESSAGE_TYPES.filter((type) => "configHash" in MESSAGE_SCHEMAS[type].shape);
     expect(carrying).toEqual(["hello-ack", "committed", "read-result"]);
   });
@@ -131,7 +130,7 @@ describe("A115: every message type round-trips through design §8's schemas", ()
   );
 });
 
-describe("A115: a missing or mistyped field fails the schema", () => {
+describe("a missing or mistyped field fails the schema", () => {
   const cases = MESSAGE_TYPES.flatMap((type) =>
     Object.keys(SAMPLES[type])
       .filter((field) => field !== "v" && field !== "type")
@@ -196,7 +195,7 @@ describe("A115: a missing or mistyped field fails the schema", () => {
   });
 });
 
-describe("A115: an unknown v or type, or a text that is no JSON object, is told apart", () => {
+describe("an unknown v or type, or a text that is no JSON object, is told apart", () => {
   it.each([
     ['{"v":2,"type":"committed","height":"1","hash":"0x"}', "unknown-version"],
     ['{"type":"committed","height":"1"}', "unknown-version"],
@@ -205,7 +204,7 @@ describe("A115: an unknown v or type, or a text that is no JSON object, is told 
     ['{"v":1}', "unknown-type"],
     ['{"v":1,"type":"toString"}', "unknown-type"],
     ['{"v":1,"type":"__proto__"}', "unknown-type"],
-    // No call is made across the transport, so these are no message types. [Q140 C]
+    // No call is made across the transport, so these are no message types.
     ['{"v":1,"type":"api","id":"8","module":"stats","method":"totals","params":{"from":"1"}}', "unknown-type"],
     ['{"v":1,"type":"api-result","id":"8","error":"not-found"}', "unknown-type"],
     ['{"v":1,"type":"api-result","id":"8","result":{"total":"12"}}', "unknown-type"],
@@ -234,7 +233,7 @@ describe("A115: an unknown v or type, or a text that is no JSON object, is told 
   });
 });
 
-describe("the values' encoding (design §8), and reading them back", () => {
+describe("the values' encoding, and reading them back", () => {
   const bytes = new Uint8Array([0, 1, 0xfe, 0xff]);
   it.each([
     ["bigint", 9007199254740993n, "9007199254740993"],
@@ -283,7 +282,7 @@ describe("the values' encoding (design §8), and reading them back", () => {
   });
 });
 
-describe("a peer's malformed message is a fault, never a throw (PP-4, LM-10)", () => {
+describe("a peer's malformed message is a fault, never a throw", () => {
   it("each field of each message type replaced by any JSON value or a poisoned object (fast-check, seed 2850, 500 runs)", () => {
     // Values whose conversion to text throws (`String(value)`), among any JSON value.
     const poisoned = fc.constantFrom<unknown>({ toString: null }, { toString: {}, valueOf: {} }, [{ toString: null }]);

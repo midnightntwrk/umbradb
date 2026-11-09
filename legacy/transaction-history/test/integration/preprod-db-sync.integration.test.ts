@@ -13,16 +13,14 @@ import { deriveUnshieldedSeed, loadMidnightWalletSdk } from "./live-fixtures/mid
 import { PgWalletSdkTransactionHistoryAdapter } from "./pg-tx-history-adapter.js";
 
 /**
- * Live preprod DB-sync verification (`openspec/changes/sprint-8-wallet-envelope-live-sync/
- * design.md` §4) -- nightly/labeled, gated behind `UMBRADB_LIVE_PREPROD=1` (set by
+ * Live preprod DB-sync verification -- nightly/labeled, gated behind `UMBRADB_LIVE_PREPROD=1` (set by
  * `npm run test:live`), NEVER a required merge gate: real network, real sync, a funded seed that
- * must not be in CI (`design.md` §4's final constraint). This is also, per this sprint's own
+ * must not be in CI (the final constraint). This is also, per this sprint's own
  * charge, THE FINAL MERGE GATE the orchestrator runs manually before merging Sprint 7+8 together.
  *
  * Reuses the PROVEN wiring verbatim
  * (`~/repos/midnight-wallet/packages/wallet-integration-tests/test/
- * preprodUnshieldedSync.manual.integration.test.ts`), changing exactly the one thing `design.md`
- * §4 specifies: `config.txHistoryStorage` becomes the UmbraDB-backed adapter instead of
+ * preprodUnshieldedSync.manual.integration.test.ts`), changing exactly one thing: `config.txHistoryStorage` becomes the UmbraDB-backed adapter instead of
  * `InMemoryTransactionHistoryStorage`. Everything else -- the seed, the derivation, the
  * `availableCoins.length > 0` THEN `waitForSyncedState()` ordering, the expected address/balance
  * -- is identical and already known-good.
@@ -34,7 +32,7 @@ import { PgWalletSdkTransactionHistoryAdapter } from "./pg-tx-history-adapter.js
  * real preprod-synced transaction: the returned entry must decode against the SDK's own
  * `TransactionHistoryEntryCommonSchema` with `finalizedBlock.height` intact.
  */
-describe.skipIf(!LIVE_PREPROD_ENABLED)("Live preprod DB-sync (nightly/labeled, design.md §4)", () => {
+describe.skipIf(!LIVE_PREPROD_ENABLED)("Live preprod DB-sync (nightly/labeled)", () => {
   vi.setConfig({ testTimeout: 10 * 60_000, hookTimeout: 10 * 60_000 });
 
   it("syncs the funded preprod wallet against public preprod with the adapter injected as txHistoryStorage, and the faucet tx materializes as a UmbraDB Postgres row via getAll()", async () => {
@@ -80,7 +78,7 @@ describe.skipIf(!LIVE_PREPROD_ENABLED)("Live preprod DB-sync (nightly/labeled, d
       expect(balances[nativeTokenType]).toBe(EXPECTED_NIGHT_VALUE);
 
       // F3 fix: the new assertion this sprint adds over the proven wiring -- the DB row is the
-      // "verify the DB actually syncs" proof (design.md §4) -- now reads through the ADAPTER's own
+      // "verify the DB actually syncs" proof -- now reads through the ADAPTER's own
       // getAll(), proving the adapter's reconstruction path (not just the raw Pg row) works
       // end-to-end: the returned entry must decode against the real SDK schema, with
       // finalizedBlock.height intact.
@@ -95,7 +93,7 @@ describe.skipIf(!LIVE_PREPROD_ENABLED)("Live preprod DB-sync (nightly/labeled, d
 
       // F3: prove the adapter's reconstruction decodes against the REAL SDK schema, and that the
       // finalizedBlock.height carried through is a genuine, positive block height (the exact pinned
-      // value 1,763,274 is recorded in AUTONOMOUS_RUN_LOG.md/proposal.md, but this assertion uses
+      // value 1,763,274 was recorded by the sprint, but this assertion uses
       // the more robust ">0" form so this test still passes if the chain state is re-synced from a
       // different funding run).
       Schema.validateSync(sdk.abstractions.TransactionHistoryStorage.TransactionHistoryEntryCommonSchema)(faucetRow);

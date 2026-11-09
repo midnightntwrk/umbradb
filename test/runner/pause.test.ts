@@ -9,7 +9,7 @@ import { cursorOf, InMemoryBlockSource, loopInput, RUNNER_BACKENDS, startWith } 
 
 /**
  * The pause of the finalized loop between heights (`src/runner/pause.ts`, `src/runner/loop.ts`): the holds of
- * {@link LoopPauses} on their own, then the loop itself on PostgreSQL 18.6 and PGlite 0.5.10. [BK-1, Q152 B]
+ * {@link LoopPauses} on their own, then the loop itself on PostgreSQL 18.6 and PGlite 0.5.10.
  * - A hold asked for anywhere in a height (at `on-fetch`, at `on-compute`, inside the block transaction) is reached only
  *   once that height committed and its points after the commit ended, with no transaction open on the database.
  * - One asked for while the loop waits for the head is reached at once, and the loop then starts nothing though the
@@ -18,7 +18,7 @@ import { cursorOf, InMemoryBlockSource, loopInput, RUNNER_BACKENDS, startWith } 
  * - A stop while paused ends the run.
  *
  * The process-level half (a running process, `ProcessHandle.pause()`/`resume()`, the backup on SIGUSR2) is
- * `test/backup/pause.test.ts`. [A163]
+ * `test/backup/pause.test.ts`.
  */
 
 /** A few turns of the event loop, for a promise that would settle to settle. */
@@ -41,7 +41,7 @@ async function settled(promise: Promise<unknown>): Promise<boolean> {
   return done;
 }
 
-describe("LoopPauses: the holds of the pause between heights (BK-1, Q152 B)", () => {
+describe("LoopPauses: the holds of the pause between heights", () => {
   it("lets the loop through at once while no hold is kept", async () => {
     const pauses = new LoopPauses();
     expect(pauses.held).toBe(false);
@@ -106,7 +106,7 @@ describe("LoopPauses: the holds of the pause between heights (BK-1, Q152 B)", ()
     expect(await settled(pauses.between(new AbortController().signal))).toBe(true);
   });
 
-  it("ends the pause when the loop's signal aborts (a stop while paused, RN-13), the hold still kept", async () => {
+  it("ends the pause when the loop's signal aborts (a stop while paused), the hold still kept", async () => {
     const pauses = new LoopPauses();
     const hold = pauses.hold();
     const stop = new AbortController();
@@ -184,7 +184,7 @@ function eachHeightOnce(from: bigint, to: bigint): string[] {
   return calls;
 }
 
-describe.each(RUNNER_BACKENDS)("the loop pauses between heights on $name (BK-1, Q152 B)", (backend) => {
+describe.each(RUNNER_BACKENDS)("the loop pauses between heights on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
@@ -246,7 +246,7 @@ describe.each(RUNNER_BACKENDS)("the loop pauses between heights on $name (BK-1, 
     120_000,
   );
 
-  it("a hold asked for before the run is reached at the run's first pause; a stop while paused ends the run (RN-13)", async () => {
+  it("a hold asked for before the run is reached at the run's first pause; a stop while paused ends the run", async () => {
     const { db, openTransactions } = await backend.database();
     const seen: Seen = [];
     const pauses = new LoopPauses();

@@ -1,25 +1,25 @@
 /**
  * `umbradb run [--config <file>] [--update-hash=<hash>]`: starts a core or private process from its configuration
  * file, with the user modules the file exports, and runs it until it is signalled, or until a refusal of the
- * configuration itself ends it. [LS-6; design §12]
+ * configuration itself ends it.
  *
  * **What it starts** ({@link runProcess}). The process is the engine's (`startProcess`, `src/runner/process.ts`),
- * given: [CF-1, LM-1]
+ * given:
  * - the configuration file (`--config`, or `umbradb.config.ts` in the working directory: the command's default, which
- *   the engine never looks for itself), which the engine loads once, holding its data to the plain-data rule [CF-1];
+ *   the engine never looks for itself), which the engine loads once, holding its data to the plain-data rule;
  * - as its user modules, the ones the file exports in `modules`. The engine's resolver joins them to UmbraDB's own
  *   backbone parts and core modules for the side the file describes (private when a `core` entry has `instanceId` and
  *   none has `node`), validates them and refuses a fault, naming the module. A public process reads the chain from the
  *   `core` entry's `node`, a private one from its public database through its private intake; a public process's
- *   ledger worker imports the file for its user modules' ledger tasks, as the main thread does [MD-1, MD-2, LG-17,
- *   Q106 B];
- * - its ports, the program-level behaviour that only the command has [LM-2, L55]: the admin listener on `listen.admin`
- *   (`0.0.0.0:8081` unless configured, the admin worker's `startAdminServer`) [AE-1, Q128 B]; its log on standard
- *   error, redacted by the process [CF-4, AE-6]; the worker threads' output on the command's own standard output and
+ *   ledger worker imports the file for its user modules' ledger tasks, as the main thread does
+ * ;
+ * - its ports, the program-level behaviour that only the command has: the admin listener on `listen.admin`
+ *   (`0.0.0.0:8081` unless configured, the admin worker's `startAdminServer`); its log on standard
+ *   error, redacted by the process; the worker threads' output on the command's own standard output and
  *   standard error (`workerOutput: "inherit"`); the backup at the configured stop (`backupAtStop`) and SIGUSR2's
- *   relay (below) [BK-1];
+ *   relay (below);
  * - `--update-hash`, when given, as its `acceptPublicConfigHash`: the public configuration hash a private process
- *   accepts at this start, which a public process's block source ignores [PP-14, Q159].
+ *   accepts at this start, which a public process's block source ignores.
  *
  * A file that cannot be loaded is refused by the engine as itself, with UmbraDB's own modules only.
  *
@@ -27,20 +27,20 @@
  * configuration itself (the loader's, a fault of the build's declarations with the file's modules, or every finding of
  * the validation) is logged finding by finding, each with its path, redacted (`startup refused: <path>: <message>
  * [<code>]`, the runner's `./configuration-refusal.ts`). Any later refusal is logged with its code and message. The
- * command adds no line of its own, so no finding is printed twice. [CF-1, CF-3, MD-2]
+ * command adds no line of its own, so no finding is printed twice.
  *
  * **How it ends.** A refusal of the configuration itself ends the process: it served no admin endpoint, and the
- * command exits 1 at once, with no signal. [Q137 B]
+ * command exits 1 at once, with no signal.
  *
  * Any other refused or halted process stays up until it is stopped, with the admin endpoints saying why. So the command
  * then runs until SIGTERM or SIGINT (Ctrl-C), which stop the process cleanly: the height in progress finishes, nothing
  * else starts, and the module API, the node client, the database and the admin listener close. A second signal is not
- * listened for: Node.js's default ends the command at once. [IN-12, AE-3, RN-13]
+ * listened for: Node.js's default ends the command at once.
  *
  * The process logs the stop, naming the signal: when it begins, with the height in progress
  * (`stopping (signal: SIGTERM): height 412 is in progress; …`), and once processing has ended, with the last height it
  * saw committed (`processing stopped (signal: SIGTERM): the last height this process saw committed is 412; …`); a
- * restart resumes after the cursor the database stored. [RN-13]
+ * restart resumes after the cursor the database stored.
  *
  * The command then resolves with how processing ended. `refused` or `failed` (a halt) is a failure (exit 1); anything
  * else (the stop itself, the core's stop height, an upgrade boundary) is not (exit 0).
@@ -49,8 +49,7 @@
  * a shell never ends the indexer. With `backupOnSignal` set, the process writes a backup at the loop's next pause and
  * goes on. Without it, the signal is logged as ignored, in one line naming `backupOnSignal` (`SIGUSR2 ignored:
  * backupOnSignal is not set, so no backup is written`), and nothing else happens. A host program's own process
- * (`startUmbraDB`) adds no SIGUSR2 listener, so Node.js's default or the host's handler applies there. [BK-1, Q152 B,
- * Q173 C]
+ * (`startUmbraDB`) adds no SIGUSR2 listener, so Node.js's default or the host's handler applies there.
  */
 
 import { startAdminServer } from "../admin/server.js";
@@ -64,7 +63,7 @@ import {
   type UserModulesSource,
 } from "../runner/process.js";
 
-/** The signals that stop the process. [RN-13] */
+/** The signals that stop the process. */
 export const STOP_SIGNALS = Object.freeze(["SIGTERM", "SIGINT"] as const);
 
 /** A signal that stops the process. */
@@ -79,7 +78,7 @@ export interface SignalSource {
 /**
  * An abort signal that the first SIGTERM or SIGINT of `source` aborts, and `dispose`, which stops listening; after the
  * first, neither is listened for (Node.js's default then ends the process at a second one). Its abort reason is an
- * `AbortError` whose message is the signal's name, which the process's log lines of the stop name. [RN-13]
+ * `AbortError` whose message is the signal's name, which the process's log lines of the stop name.
  */
 export function stopSignal(source: SignalSource): { readonly signal: AbortSignal; dispose(): void } {
   const controller = new AbortController();
@@ -100,7 +99,7 @@ export function stopSignal(source: SignalSource): { readonly signal: AbortSignal
 /**
  * `umbradb run`'s SIGUSR2. The command listens for it from its start to its end, so that a SIGUSR2 sent from a shell
  * never ends the indexer. It hands the process a source of its own (`EngineOptions.backupSignals`), on which the
- * process listens only when its `core` revision sets `backupOnSignal`. [BK-1, Q173 C]
+ * process listens only when its `core` revision sets `backupOnSignal`.
  *
  * A signal goes to the process's listener when it has one. Otherwise it is logged as ignored, in one line naming
  * `backupOnSignal`:
@@ -163,9 +162,9 @@ export function backupSignalRelay(source: BackupSignals, log: (line: string) => 
 
 /** What {@link runProcess} runs. */
 export interface RunOptions {
-  /** `--config`: the configuration file, relative to `cwd`; `umbradb.config.ts` when absent. [CF-1] */
+  /** `--config`: the configuration file, relative to `cwd`; `umbradb.config.ts` when absent. */
   readonly file?: string | undefined;
-  /** `--update-hash`: the public configuration hash a private process accepts at this start. [PP-14, Q159] */
+  /** `--update-hash`: the public configuration hash a private process accepts at this start. */
   readonly updateHash?: string | undefined;
   /** The working directory. */
   readonly cwd: string;
@@ -181,7 +180,7 @@ export interface RunSeams {
   readonly backupSignals?: BackupSignals;
   /** Told the process's handle once it is started (a test's view of it). */
   readonly started?: (handle: ProcessHandle) => void;
-  /** The build's user modules; the file's `modules` export unless given (a negative control's list). [Q106 B] */
+  /** The build's user modules; the file's `modules` export unless given (a negative control's list). */
   readonly userModules?: UserModulesSource;
   /**
    * How the process is started; the engine's `startProcess` unless given (a test's: one that serves no admin endpoints,
@@ -196,12 +195,12 @@ export interface RunSeams {
  */
 export async function runProcess(options: RunOptions, seams: RunSeams = {}): Promise<ProcessingEnd | null> {
   const stop = stopSignal(seams.signals ?? process);
-  // From here to the end, SIGUSR2 is the command's: relayed to the process, or logged as ignored. [Q173 C]
+  // From here to the end, SIGUSR2 is the command's: relayed to the process, or logged as ignored.
   const usr2 = backupSignalRelay(seams.backupSignals ?? process, options.log);
   try {
     const handle = (seams.start ?? startProcess)({
       config: { file: options.file ?? DEFAULT_CONFIG_FILE },
-      // Every surface whose address the file writes, admin at its default when none is. [LM-3]
+      // Every surface whose address the file writes, admin at its default when none is.
       network: "configured",
       cwd: options.cwd,
       userModules: seams.userModules ?? { from: "config" },

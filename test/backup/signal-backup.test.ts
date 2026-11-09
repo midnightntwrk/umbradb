@@ -30,7 +30,7 @@ import type { SignalEvent, SignalJob } from "./signal-backup.worker.js";
  * The pause backup with a real signal: a process of its own on PGlite (`./signal-backup.worker.ts`, started as `umbradb
  * run` starts one, its chain finalizing a block every 20 ms) receives SIGUSR2 from the test while blocks commit, writes
  * a backup at its next pause, goes on from the next height, and ends on SIGTERM; the file restores with `umbradb
- * restore` like any other, every restore check passing. [A163 CI, BK-1, BK-3, CF-4, RN-13, Q152 B]
+ * restore` like any other, every restore check passing.
  *
  * Then the command itself: `umbradb run` (the bundled command, a tape node's chain) on PGlite given SIGUSR2 from
  * outside writes the backup, keeps running, and exits 0 on SIGTERM — the way to back up a running PGlite indexer from a
@@ -109,10 +109,10 @@ function startWorker(job: SignalJob): Worker {
   };
 }
 
-describe("A163: a real SIGUSR2 to a running PGlite process (BK-1, Q152 B)", () => {
+describe("a real SIGUSR2 to a running PGlite process", () => {
   it(
-    "A163: SIGUSR2 while blocks commit writes a backup at the next pause; the process goes on, ends on SIGTERM, and " +
-      "the file restores like any other, every check of BK-3 passing",
+    "SIGUSR2 while blocks commit writes a backup at the next pause; the process goes on, ends on SIGTERM, and " +
+      "the file restores like any other, every restore check passing",
     async () => {
       const db = await PGLITE.database();
       const out = join(dir, "real.backup");

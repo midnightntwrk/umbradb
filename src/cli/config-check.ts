@@ -1,6 +1,6 @@
 /**
  * `umbradb config check <file> [--database]`: checks a configuration file without starting a process, and reports
- * every finding of every check it ran, each with its path. [CF-10; design §7, §12; CORE-ARCH §4.12]
+ * every finding of every check it ran, each with its path.
  *
  * The checks, in order ({@link CHECK_STEPS}):
  * 1. **type check**: the TypeScript compiler on the file, `noEmit` (`./type-check.ts`), each diagnostic at
@@ -9,37 +9,36 @@
  *    path). It is then resolved in the resolver's two stages, as every caller resolves it (`src/runner/resolve.ts`):
  *    the build's declarations (`resolveDeclarations`), then the configuration (`resolveConfig`), validated — the shape,
  *    and the schema checks of every revision of the build's version, every violation at once — with the process's
- *    `core` revision taken; a file whose every `core` entry is a `versionEntry` has none. [CF-1, CF-3, Q44, Q102,
- *    LM-1]
+ *    `core` revision taken; a file whose every `core` entry is a `versionEntry` has none.
  * 3. **history**, with `--database` only: the database the file's `core` revision configures (the flag takes no value)
  *    is read read-only (`./database.ts`). The history's checks then run on the validated configuration at its cursor:
  *    first the checks of the `versionEntry` revisions (`entriesAtCursor`), then the checks of revisions by
  *    `(id, start)`, of changes only to the future, of one version per build, and of `sweep: off` (`historyFindings`,
  *    `src/config/history.ts`), every finding of every code. Without `--database` no database is opened, and the report
- *    says the history checks were not run ({@link HISTORY_NOT_RUN}). [CF-3, CF-5, CF-6, CF-8, CF-9, Q167 A]
+ *    says the history checks were not run ({@link HISTORY_NOT_RUN}).
  *
  * The type check and the configuration run whatever the other finds: a type error does not stop the evaluation, which
  * Node.js's type stripping does without types. The history needs the configuration validated. The check passes (the
- * command exits 0) only if every check that ran found nothing. [CF-10]
+ * command exits 0) only if every check that ran found nothing.
  *
  * Startup's own checks are not run here: the requirement graph's checks, and, without `--database`, the half of the
- * development opt-in check that opens a PGlite database. [MD-3, MD-4, MD-5, MD-6, CF-9]
+ * development opt-in check that opens a PGlite database.
  *
  * **The process's side** (`public` or `private`, which decides the `core` schema that applies) is taken from the file
- * (`resolveSide`, `src/runner/resolve.ts`) unless given. [CF-4]
+ * (`resolveSide`, `src/runner/resolve.ts`) unless given.
  *
  * **The build's modules** are the command's (`resolveDeclarations`): UmbraDB's own backbone parts and core modules, and
  * as its user modules the ones the file exports in `modules`. So the entries of a user module the file ships are
  * checked against its schema as UmbraDB's own are. A fault of those declarations (a list element that is no
  * declaration, a module listed twice, a user module with an id of UmbraDB's own) is the configuration check's finding
  * at `modules[<index>]`, and the entries are then not validated. A host program that ships its modules itself gives its
- * declarations instead, and the file's `modules` are not used. [CF-1, CF-10, MD-2, Q106 B]
+ * declarations instead, and the file's `modules` are not used.
  *
  * **No secret is printed.** Every text of the report (findings, notes, the summary) passes through the redaction of
  * `src/config/redact.ts`, built from the file's secrets as the validation reads them (`configSecrets`: `secret`
  * settings and settings of no known kind, the `password` parts of the database settings, URL passwords elsewhere). The
  * redaction's patterns also hide any URL's credentials. When the file cannot be evaluated, nothing tells its secrets
- * apart, so an error it throws is shown through the patterns only. [CF-4, AE-6]
+ * apart, so an error it throws is shown through the patterns only.
  */
 
 import { resolve } from "node:path";
@@ -64,13 +63,13 @@ export interface ConfigCheckOptions {
   /** The working directory. */
   readonly cwd: string;
   /**
-   * `--database`: check against the history of the database the file's `core` revision configures, read-only. [Q167 A]
+   * `--database`: check against the history of the database the file's `core` revision configures, read-only.
    * Without it no database is opened.
    */
   readonly database?: boolean | undefined;
   /**
    * The build's declarations, validated; unless given, the command's own with the file's `modules` as its user modules
-   * (`resolveDeclarations`). [Q106 B]
+   * (`resolveDeclarations`).
    */
   readonly declarations?: DeclarationSet<ModuleDeclaration>;
   /** The process's side; taken from the file (`resolveSide`) unless given. */
@@ -83,7 +82,7 @@ export interface ConfigCheckSeams {
   readonly steps?: readonly CheckStep[];
   /** The redaction of the report's texts; `redactor` of `src/config/redact.ts` unless given. */
   readonly redactor?: (secrets: Iterable<string>) => Redactor;
-  /** The build's user modules from the loaded file; its `modules` export unless given. [Q106 B] */
+  /** The build's user modules from the loaded file; its `modules` export unless given. */
   readonly userModules?: (loaded: LoadedConfig) => readonly unknown[];
 }
 
@@ -130,7 +129,7 @@ export interface CheckState {
   loaded: LoadedConfig | null;
   /** The validated configuration, once it passed. */
   checked: CheckedConfig | null;
-  /** The process's `core` revision, once taken. [Q102] */
+  /** The process's `core` revision, once taken. */
   process: CheckedEntry | null;
   /** The secrets to redact from the report. */
   readonly secrets: string[];
@@ -166,7 +165,7 @@ const DATABASE_PATH = "--database";
 
 const NO_DATABASE = "no --database given, so no database was opened and the history checks were not run";
 
-/** The history check's line without `--database`, which reports that the history checks were not run. [CF-10] */
+/** The history check's line without `--database`, which reports that the history checks were not run. */
 export const HISTORY_NOT_RUN = `${HISTORY_TITLE}: not run — ${NO_DATABASE}`;
 
 /** An error's code: an `UmbraError`'s own, `error` for any other. */
@@ -200,7 +199,7 @@ const ruleFinding = (code: string, found: Finding): CheckFinding => ({
   message: found.message,
 });
 
-/** Where a declaration refusal of `user` points: `modules[<index>]`, with its field when it names one. [MD-2] */
+/** Where a declaration refusal of `user` points: `modules[<index>]`, with its field when it names one. */
 function declarationPath(error: UmbraError, user: readonly unknown[]): string {
   const details = error.details as {
     readonly origin?: unknown;
@@ -219,7 +218,7 @@ function declarationPath(error: UmbraError, user: readonly unknown[]): string {
   return index < 0 ? MODULES_EXPORT : at(index);
 }
 
-/** The finding of a refusal of the build's declarations with the file's `user` modules. [MD-2] */
+/** The finding of a refusal of the build's declarations with the file's `user` modules. */
 export function declarationFinding(error: unknown, user: readonly unknown[]): CheckFinding {
   if (!(error instanceof UmbraError)) throw error;
   return { code: error.code, path: declarationPath(error, user), message: error.message };
@@ -284,7 +283,7 @@ function readNote(state: DatabaseState): string {
 /**
  * A failure to open or read the configuration's database, as a finding. The refusals of the backends
  * (`development-opt-in-required`, `writer-lock-held`) are reported as they are. Any other error (the backends'
- * `connection-lost` and `database-error`) is reported as the database not read. [CF-9]
+ * `connection-lost` and `database-error`) is reported as the database not read.
  */
 function databaseFinding(error: unknown): CheckFinding {
   const code = errorCode(error);

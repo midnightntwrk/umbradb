@@ -1,11 +1,11 @@
 /**
  * The tools a backup runs. Neither is a dependency of UmbraDB: each is looked for only when a backup runs, and the
- * backup fails if it is not installed. [BK-1, Q85; design §9.1]
+ * backup fails if it is not installed.
  *
  * - **PostgreSQL:** the PostgreSQL 18 client's `pg_dump`: the file `UMBRADB_PG_DUMP` names, else the first `pg_dump`
  *   on `PATH`. It is asked for its version (`pg_dump --version`). A tool that is missing, cannot be run, or is of
  *   another major version than 18 fails with `backup-tools-missing`, saying what to install. A newer one is refused
- *   too, since it may write what 18 cannot restore. [NF-04]
+ *   too, since it may write what 18 cannot restore.
  * - **PGlite:** the `pg_dump` of `@electric-sql/pglite-tools`, an optional peer dependency imported only now. Without
  *   it, the backup fails with `backup-tools-missing` and the command that installs the version made for this build's
  *   PGlite. The version of its `pg_dump` is checked on the dump it writes (`./pglite-backup.ts`).

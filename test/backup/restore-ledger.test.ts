@@ -11,12 +11,12 @@ import { disagreeingNode, ledgerBackup, ledgerChain, restoreLedger } from "./res
  * The restore's `backup-root-mismatch` refusal, on PostgreSQL 18.6 and PGlite 0.5.10: a backup with `core-ledger-state`
  * in its history restores against a node whose ledger state root at the backup's height is the one it stores, and is
  * refused — after loading, its transaction rolled back, the target empty — against a node whose root there is another.
- * The chain and the restore: `./restore-ledger.ts`. [A126, BK-3, LG-15]
+ * The chain and the restore: `./restore-ledger.ts`.
  */
 
 const TEST_TIMEOUT_MS = 900_000;
 
-describe.each(BACKUP_BACKENDS)("the ledger state root's check on $name (BK-3)", (backend: BackupBackend) => {
+describe.each(BACKUP_BACKENDS)("the ledger state root's check on $name", (backend: BackupBackend) => {
   beforeAll(async () => {
     await backend.start();
     // The process's backup finds pg_dump as the command does: the pinned image's (`./backup-fixtures.ts`).
@@ -28,7 +28,7 @@ describe.each(BACKUP_BACKENDS)("the ledger state root's check on $name (BK-3)", 
   }, 120_000);
 
   it(
-    "A126: with core-ledger-state in the history, a stored state root at the backup's height that is not the node's " +
+    "with core-ledger-state in the history, a stored state root at the backup's height that is not the node's " +
       "refuses with backup-root-mismatch after loading, the target empty; the node's own restores",
     async () => {
       const scenario = await ledgerChain();

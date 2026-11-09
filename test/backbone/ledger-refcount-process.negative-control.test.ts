@@ -8,22 +8,21 @@ import { PATIENCE_MS } from "./ingest-harness.js";
 import { type DagRun, runDag, runProblems } from "./refcount-process.js";
 
 /**
- * The committed negative controls of A105 and R3, on PostgreSQL 18 and PGlite 0.5.10: each runs the extended DAG
- * fixture through the process with one fault, and the check it controls must fail for that fault's own reason. [A105
- * NEG, R3 NEG, R12]
+ * The committed negative controls of the reclamation check and its model check, on PostgreSQL 18 and PGlite 0.5.10: each runs the extended DAG
+ * fixture through the process with one fault, and the check it controls must fail for that fault's own reason.
  *
- * R12's six faults, each put into the reclamation step through its tables seam (`core-ledger-state`'s `refcountFault`):
+ * The six faults, each put into the reclamation step through its tables seam (`core-ledger-state`'s `refcountFault`):
  * - (a) the second occurrence of a repeated child not decremented: `repeat leaf 0`, which `repeat 0` lists twice, keeps
  *   a count when `repeat 0` is deleted (at 6), and is not deleted with `repeat 1` (at 16): R3 (a) and (d);
  * - (b) the references of a node written again unchanged counted: `again`'s leaves at AGAIN: R3 (a);
  * - (c) a repeated child counted once per parent on increment, per occurrence on decrement: `repeat leaf 0` reaches 0
  *   at 6 while `repeat 1` still lists it, and is deleted: R3 (b) and (c);
  * - (d) a released state's rows deleted in the block that releases it: the state after 0's own rows at 1: R3 (c);
- * - (e) a queued key that a new node references deleted in that block: `requeued` at REQUEUE + 1: R11's
+ * - (e) a queued key that a new node references deleted in that block: `requeued` at REQUEUE + 1: The
  *   `missing-reference` halt;
  * - (f) the cascade stopped after its first round: the rows only the state after 0 reached are left at 2: R3 (d).
  *
- * R3's own: a test seam that, at one block, deletes the state's newly persisted root and the rows only it reaches,
+ * The own: a test seam that, at one block, deletes the state's newly persisted root and the rows only it reaches,
  * inside the block's transaction, makes (b) and (c) fail at that block.
  */
 
@@ -33,7 +32,7 @@ const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
 const faulty = (backend: ProcessBackend, fault: RefcountFault, last: number, halts = false): Promise<DagRun> =>
   backend.database().then((db) => runDag(db, { dag: "extended", core: { refcountFault: fault }, last, halts }));
 
-/** R3's problems of `run` at `height` alone, by clause: `"(a)"`, `"(b)"`, `"(c)"`, `"(d)"`. */
+/** The problems of `run` at `height` alone, by clause: `"(a)"`, `"(b)"`, `"(c)"`, `"(d)"`. */
 function clausesAt(run: DagRun, height: number): Map<string, string[]> {
   const clauses = new Map<string, string[]>();
   for (const problem of runProblems(run, "extended")) {
@@ -50,13 +49,13 @@ function firstProblem(run: DagRun): number | null {
   return first === undefined ? null : Number(/^after (\d+):/.exec(first)?.[1]);
 }
 
-describe.each(PROCESS_BACKENDS)("A105's and R3's negative controls on $name", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("negative controls on $name", (backend: ProcessBackend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
   const leaf0 = hex(extendedCases(0).repeated.leaf.key);
 
-  it("R12 (a): skipping the decrement of a repeated child's second occurrence leaks it: R3 (a) at 6, R3 (d) at 16", async () => {
+  it("skipping the decrement of a repeated child's second occurrence leaks it: R3 (a) at 6, R3 (d) at 16", async () => {
     const run = await faulty(backend, "second-occurrence-not-decremented", 17);
     expect(run.status).toMatchObject({ cursor: 17n, reason: null });
     expect(firstProblem(run)).toBe(6);
@@ -64,7 +63,7 @@ describe.each(PROCESS_BACKENDS)("A105's and R3's negative controls on $name", (b
     expect(clausesAt(run, 16).get("(d)")).toContain(`I5: ${leaf0}, whose referencing rows at h − 1 were all deleted, is still stored`);
   }, PATIENCE_MS * 2);
 
-  it("R12 (b): counting the references of a node written again unchanged fails R3 (a) at that block", async () => {
+  it("counting the references of a node written again unchanged fails R3 (a) at that block", async () => {
     const run = await faulty(backend, "unchanged-counted", AGAIN);
     expect(run.status).toMatchObject({ cursor: BigInt(AGAIN), reason: null });
     expect(firstProblem(run)).toBe(AGAIN);
@@ -73,7 +72,7 @@ describe.each(PROCESS_BACKENDS)("A105's and R3's negative controls on $name", (b
     for (const leaf of leaves) expect(found).toContain(`I2: ${leaf} is counted 2, and the stored child lists reference it 1 times`);
   }, PATIENCE_MS * 2);
 
-  it("R12 (c): a repeated child counted once per parent on increment and per occurrence on decrement is deleted while live: R3 (b) and (c) at 6", async () => {
+  it("a repeated child counted once per parent on increment and per occurrence on decrement is deleted while live: R3 (b) and (c) at 6", async () => {
     const run = await faulty(backend, "increment-once-per-parent", 6);
     expect(run.status).toMatchObject({ cursor: 6n, reason: null });
     // Its counts are short from block 0 (R3 (a)); no live row is gone before 6.
@@ -83,14 +82,14 @@ describe.each(PROCESS_BACKENDS)("A105's and R3's negative controls on $name", (b
     expect(found.get("(c)")).toContain(`${leaf0} of R_{h−1} is not stored`);
   }, PATIENCE_MS * 2);
 
-  it("R12 (d): a released state's rows deleted in the block that releases it fail R3 (c)'s R_{h−1} ⊆ S_h at 1", async () => {
+  it("a released state's rows deleted in the block that releases it fail R3 (c)'s R_{h−1} ⊆ S_h at 1", async () => {
     const run = await faulty(backend, "released-in-block", 2);
     expect(firstProblem(run)).toBe(1);
     const root0 = hex(stateNodes(0, "extended")[0]?.key as Uint8Array);
     expect(clausesAt(run, 1).get("(c)")).toContain(`${root0} of R_{h−1} is not stored`);
   }, PATIENCE_MS * 2);
 
-  it("R12 (e): deleting a queued key that a new node references in the same block halts with ledger-refcount-invalid (missing-reference)", async () => {
+  it("deleting a queued key that a new node references in the same block halts with ledger-refcount-invalid (missing-reference)", async () => {
     const run = await faulty(backend, "referenced-queued-deleted", REQUEUE + 1, true);
     const requeued = `0x${hex(extendedCases(REQUEUE).requeue.requeued.key)}`;
     expect(run.status).toMatchObject({
@@ -103,7 +102,7 @@ describe.each(PROCESS_BACKENDS)("A105's and R3's negative controls on $name", (b
     expect((error as UmbraError).details).toMatchObject({ reason: "missing-reference", height: BigInt(REQUEUE + 1), key: requeued });
   }, PATIENCE_MS * 2);
 
-  it("R12 (f): a cascade stopped after its first round leaves the rows only the deleted ones referenced: R3 (d) at 2", async () => {
+  it("a cascade stopped after its first round leaves the rows only the deleted ones referenced: R3 (d) at 2", async () => {
     const run = await faulty(backend, "first-round-only", 2);
     expect(run.status).toMatchObject({ cursor: 2n, reason: null });
     expect(firstProblem(run)).toBe(2);
@@ -112,7 +111,7 @@ describe.each(PROCESS_BACKENDS)("A105's and R3's negative controls on $name", (b
     expect(found.every((problem) => problem.endsWith("whose referencing rows at h − 1 were all deleted, is still stored"))).toBe(true);
   }, PATIENCE_MS * 2);
 
-  it("R3's control: deleting the newly persisted root of the state after 20 and the rows only it reaches, in that block's transaction, fails R3 (b) and (c) at 20", async () => {
+  it("control: deleting the newly persisted root of the state after 20 and the rows only it reaches, in that block's transaction, fails R3 (b) and (c) at 20", async () => {
     const at = 20;
     const reach = (h: number): Set<string> => {
       const nodes = new Map(stateNodes(h, "extended").map((node) => [hex(node.key), node]));

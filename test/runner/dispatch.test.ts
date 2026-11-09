@@ -35,12 +35,12 @@ import { ARGUMENTS, Contexts, Recorder, recording, runOf, yields } from "./fixtu
  * - in series, each awaited before the next;
  * - or, at `on-fetch`, `on-parse` and `on-compute`, the backbone parts in series and then the other modules in Kahn
  *   waves restricted to the modules registered at the point. A module waits for every registered module on a
- *   requirement path from it (through modules that do not register the point too). [RN-3, RN-9, RN-10; design §2]
+ *   requirement path from it (through modules that do not register the point too).
  *
  * Each callback is called as a method of its declaration's `points`, with its module's process context first. A
  * failing callback ends the point: in a wave the others are awaited, nothing of the next wave starts, and the first
  * failure in the point's order is thrown as a `CallbackFailure` naming the point and the module. The order's property
- * test is `order.property.test.ts`. [A38]
+ * test is `order.property.test.ts`.
  */
 
 const ids = (parts: readonly ModuleDeclaration[]): string[] => parts.map((part) => part.id);
@@ -181,7 +181,7 @@ describe("this and the arguments: each callback is a method of its declaration's
   });
 });
 
-describe("RN-3 in series: the registered parts in the range's order, each awaited before the next", () => {
+describe("in series: the registered parts in the range's order, each awaited before the next", () => {
   const SERIES: readonly PointName[] = POINTS.filter(
     (point) => !isParallelPoint(point) && !["on-start-db", "on-start-height", "on-stop-height"].includes(point),
   );
@@ -202,7 +202,7 @@ describe("RN-3 in series: the registered parts in the range's order, each awaite
     return rangeOf(user, backbone);
   }
 
-  it("RN-3's scenario: unrelated modules write in id order, after the backbone parts and before core-digest", async () => {
+  it("unrelated modules write in id order, after the backbone parts and before core-digest", async () => {
     const recorder = new Recorder();
     const range = world(recorder);
     await dispatch(range, "on-db-write", runOf("on-db-write"));
@@ -283,8 +283,8 @@ describe("RN-3 in series: the registered parts in the range's order, each awaite
   });
 });
 
-describe("RN-3 parallel where the graph allows: the Kahn waves of the modules registered at the point (design.md §2)", () => {
-  it("RN-3's scenario: a provider finishes before its consumer starts at on-compute", async () => {
+describe("parallel where the graph allows: the Kahn waves of the modules registered at the point", () => {
+  it("a provider finishes before its consumer starts at on-compute", async () => {
     const recorder = new Recorder();
     const p = registering(provider("provider", ["x"]), recorder, ["on-compute"], { "on-compute": 6 });
     const c = registering(consumer("consumer", ["x"]), recorder, ["on-compute"]);
@@ -294,7 +294,7 @@ describe("RN-3 parallel where the graph allows: the Kahn waves of the modules re
     expect(waveIds(scheduleAt(range, "on-compute"))).toEqual([["provider"], ["consumer"]]);
   });
 
-  it("starts the modules of one wave together, in RN-3's order, before any of them ends", async () => {
+  it("starts the modules of one wave together, in the order, before any of them ends", async () => {
     for (const point of PARALLEL_POINTS) {
       const recorder = new Recorder();
       const unrelated = ["d-mod", "ch-mod", "m9", "m10", "b-mod", "a-mod"].map((id, index) =>
@@ -404,7 +404,7 @@ describe("RN-3 parallel where the graph allows: the Kahn waves of the modules re
     expect(waveIds(scheduleAt(graph.rangeAt(100n) as ResolvedRange, "on-compute"))).toEqual([["p2", "u"], ["c"]]);
   });
 
-  it("refuses to schedule a module whose required item has no single provider in the range (the cursor's, Q97)", () => {
+  it("refuses to schedule a module whose required item has no single provider in the range (the cursor's)", () => {
     const recorder = new Recorder();
     const at = (d: ModuleDeclaration) => registering(d, recorder, ["on-compute", "on-after-db-write"]);
     const user = [at(provider("p1", ["x"])), at(provider("p2", ["x"])), at(provider("p3", ["x"])), at(consumer("c", ["x"]))];
@@ -416,13 +416,13 @@ describe("RN-3 parallel where the graph allows: the Kahn waves of the modules re
     expect(() => scheduleAt(atCursor, "on-compute")).toThrow(
       /c requires the item x, which no single part provides at heights 10–20/,
     );
-    // The callbacks delivered again there after a restart run in series and need no provider. [RN-11]
+    // The callbacks delivered again there after a restart run in series and need no provider.
     expect(waveIds(scheduleAt(atCursor, "on-after-db-write"))).toEqual([["p1"], ["p2"], ["c"]]);
     expect(waveIds(scheduleAt(graph.rangeAt(21n) as ResolvedRange, "on-compute"))).toEqual([["p3"], ["c"]]);
     expect(recorder.events).toEqual([]);
   });
 
-  it("waits for no part on a private process's public item, which the public core committed (PP-13, task 14.1a)", () => {
+  it("waits for no part on a private process's public item, which the public core committed", () => {
     const recorder = new Recorder();
     const at = (d: ModuleDeclaration) => registering(d, recorder, ["on-fetch"]);
     const user = [at(provider("p", ["x"])), at(consumer("c", ["x", "pub-rows"])), at(consumer("r", ["pub-rows"]))];
@@ -438,7 +438,7 @@ describe("RN-3 parallel where the graph allows: the Kahn waves of the modules re
   });
 });
 
-describe("a callback that fails: what the dispatch gives back for RN-8's halt (task 5.4)", () => {
+describe("a callback that fails: what the dispatch gives back for the halt", () => {
   it("in series: throws a CallbackFailure naming the point and the module, the error unchanged; later parts are not called", async () => {
     const recorder = new Recorder();
     const error = new Error("disk on fire");
@@ -556,7 +556,7 @@ describe("a callback that fails: what the dispatch gives back for RN-8's halt (t
     expect([failure.module, failure.cause]).toEqual(["a", late]);
   });
 
-  it("in a wave: does not settle while another callback of the wave has not settled, never cancelling it (RN-17)", async () => {
+  it("in a wave: does not settle while another callback of the wave has not settled, never cancelling it", async () => {
     let release: () => void = () => undefined;
     const held = new Promise<void>((resolve) => {
       release = resolve;
@@ -616,7 +616,7 @@ describe("a callback that fails: what the dispatch gives back for RN-8's halt (t
   });
 });
 
-describe("on-start-height and on-stop-height (RN-9, RN-10): the core's parts and the modules whose entries start or stop", () => {
+describe("on-start-height and on-stop-height: the core's parts and the modules whose entries start or stop", () => {
   function world(recorder: Recorder) {
     const both: PointName[] = ["on-start-height", "on-stop-height"];
     const backbone = [

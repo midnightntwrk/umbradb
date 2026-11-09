@@ -28,14 +28,14 @@ import {
 /**
  * Restarts and crashes of the process at named points, on PostgreSQL 18 and PGlite 0.5.10: each run is one or more
  * processes of their own, the next reading back only the database the one before it left
- * (`./refcount-restart.ts`). [R13 FAULT, R14 FAULT, LG-11, LG-14, RN-6]
+ * (`./refcount-restart.ts`).
  *
- * - **R13** on the extended DAG fixture (`test/ledger/fixtures/sweep-fixture.ts`): stopped after the `COMMIT` of every
+ * - on the extended DAG fixture (`test/ledger/fixtures/sweep-fixture.ts`): stopped after the `COMMIT` of every
  *   37th height (37, 74) and restarted, each stop reported where it was reached, the run has after every block the
  *   node set, `root_counts`, `states`, the other byte-hashed tables and the contents hash of an uninterrupted run, and
- *   R3's check passes after every block. The bytes of the content-defined tables are not compared (`design.md` §4.4).
+ *   the check passes after every block. The bytes of the content-defined tables are not compared.
  *   R13 on the recorded preprod tape is in `ledger-refcount-restart-preprod-{postgres,pglite}.test.ts`.
- * - **R14**: the extended DAG fixture crashed (SIGKILL) at each named point of a block — in `on-compute` before the
+ * - the extended DAG fixture crashed (SIGKILL) at each named point of a block — in `on-compute` before the
  *   step; after the eviction and before the block's transaction; in `on-db-write` after the node writes and before the
  *   step's other writes; between the step's writes; just before and just after the `COMMIT` — each reported reached at
  *   its height. The database is then the uninterrupted run's after h − 1 (before the `COMMIT`) or after h (after it):
@@ -50,10 +50,10 @@ import {
  * `unreferenced` in a transaction of their own) are in `ledger-refcount-restart.negative-control.test.ts`.
  */
 
-/** R13's stops on the DAG fixture: after the `COMMIT` of every 37th height. */
+/** The stops on the DAG fixture: after the `COMMIT` of every 37th height. */
 const DAG_STOPS = Array.from({ length: Math.floor(LAST / 37) }, (_, i) => 37 * (i + 1));
 
-/** R14's points, each at a height of its own (every block from 2 on deletes rows, so each point is passed). */
+/** The points, each at a height of its own (every block from 2 on deletes rows, so each point is passed). */
 const CRASHES: readonly { readonly point: RestartPoint; readonly height: number }[] = [
   // A stored node rewritten, its small child becoming a row of its own.
   { point: "before-step", height: TO_REF },
@@ -75,7 +75,7 @@ const SEGMENT_MS = PATIENCE_MS * 2;
 /** Where a segment stops: at `point` of block `height`, held there for the kill or its process stopped. */
 const holdAt = (point: RestartPoint, height: number, then: Hold["then"]): Hold => ({ point, height, then });
 
-describe.each(PROCESS_BACKENDS)("R13, R14 (LG-11, LG-14, RN-6): restarts and crashes at named points, on $name", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("restarts and crashes at named points, on $name", (backend: ProcessBackend) => {
   let directory: string;
   let uninterrupted: Promise<ObservedRun> | undefined;
   let runs = 0;
@@ -115,7 +115,7 @@ describe.each(PROCESS_BACKENDS)("R13, R14 (LG-11, LG-14, RN-6): restarts and cra
       return run;
     })());
 
-  it(`R13 [FAULT]: the extended DAG fixture stopped after the COMMIT of every 37th height (${DAG_STOPS.join(", ")}) and restarted, each stop reported, has after every block the node set, root_counts, states and the contents hash of an uninterrupted run, and R3 passes`, async () => {
+  it(`the extended DAG fixture stopped after the COMMIT of every 37th height (${DAG_STOPS.join(", ")}) and restarted, each stop reported, has after every block the node set, root_counts, states and the contents hash of an uninterrupted run, and R3 passes`, async () => {
     const expected = await uninterruptedDag();
     const db = await backend.database();
     const plan = dagPlan();
@@ -131,7 +131,7 @@ describe.each(PROCESS_BACKENDS)("R13, R14 (LG-11, LG-14, RN-6): restarts and cra
   }, SEGMENT_MS * 4);
 
   for (const { point, height } of CRASHES) {
-    it(`R14 [FAULT]: killed at ${point} of block ${height} (reported reached there), the database is the uninterrupted run's after ${point === "after-commit" ? "h" : "h − 1"}, never a mix, and the restarted run's node set and byte-hashed tables after every block and contents hash after h − 1, h, h + 1 and the last are the uninterrupted run's, with R3 passing after every block`, async () => {
+    it(`killed at ${point} of block ${height} (reported reached there), the database is the uninterrupted run's after ${point === "after-commit" ? "h" : "h − 1"}, never a mix, and the restarted run's node set and byte-hashed tables after every block and contents hash after h − 1, h, h + 1 and the last are the uninterrupted run's, with R3 passing after every block`, async () => {
       const expected = await uninterruptedDag();
       const db = await backend.database();
       // The contents hash where the crash left the database and the restart went on, and at the end.
@@ -147,7 +147,7 @@ describe.each(PROCESS_BACKENDS)("R13, R14 (LG-11, LG-14, RN-6): restarts and cra
   }
 });
 
-describe("R13, R14: a contents hash compares equal only to another hash", () => {
+describe("a contents hash compares equal only to another hash", () => {
   const light: Light = { nodeSet: "n", nodes: 1, rows: 1, roots: "r", state: "s", states: 1, digests: "d" };
   const tables: TableSnapshot = { rows: new Map(), refs: new Map(), roots: new Map(), queue: new Set(), states: new Map(), contracts: [], digests: new Map() };
   /** A run observed after height 0 only, with the contents hash `contents`. */

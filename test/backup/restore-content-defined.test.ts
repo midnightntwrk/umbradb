@@ -27,18 +27,17 @@ import { type LedgerBackup, ledgerBackup, ledgerChain, type RestoreBuild, restor
  * `core-ledger-state`'s content-defined node tables in a backup and a restore, on PostgreSQL 18.6 and PGlite 0.5.10,
  * with the build's own ledger core, whose `core-ledger-state` declares them content-defined and writes the counts and
  * the queue each block's reclamation step gives: the ledger chain of `./restore-ledger.ts`, synced from genesis by the
- * process and backed up by it (`ProcessHandle.backup`), then restored with `restoreBackup` and that build. [R29, A126,
- * BK-3, DT-3, LG-11]
+ * process and backed up by it (`ProcessHandle.backup`), then restored with `restoreBackup` and that build.
  *
  * - The process's backup takes the node tables by their content: its manifest's contents hash is the build's, not the
  *   bytes'.
- * - A126: a changed byte in a `core_ledger_state.nodes` row of the file (its payload, its child list), or its child
- *   list's length in more bytes than it needs (the ledger refuses it: LG-11), refuses with
+ * - A changed byte in a `core_ledger_state.nodes` row of the file (its payload, its child list), or its child
+ *   list's length in more bytes than it needs (the ledger refuses it), refuses with
  *   `ledger-refcount-invalid`; a node respelled with consistent counts and queue (a small child its stored child list
  *   embeds, referenced and stored as its own row instead) passes the contents-hash step, and the restore goes on to
  *   its state root's check and commits; a changed value in a row the hash covers byte by byte (`root_counts`) still
  *   gives `contents-hash-mismatch`; after every refusal the target is empty.
- * - R29: `ref_counts` or `unreferenced` that differ from what the rows give fail with `ledger-refcount-invalid`
+ * - `ref_counts` or `unreferenced` that differ from what the rows give fail with `ledger-refcount-invalid`
  *   (reason `tables-inconsistent`) in a restore (rolled back, the target empty), in a backup (`writeBackup` as
  *   `umbradb backup` calls it, and the process's own: nothing written) and through the exported `contentsHash`'s code,
  *   as does a changed byte of a `nodes` row.
@@ -120,7 +119,7 @@ function respelled(text: string): { readonly text: string; readonly parent: stri
   throw new Error("no stored row embeds a child that is no row of its own");
 }
 
-describe.each(BACKUP_BACKENDS)("content-defined node tables in a backup and a restore on $name (R29, A126, BK-3)", (backend: BackupBackend) => {
+describe.each(BACKUP_BACKENDS)("content-defined node tables in a backup and a restore on $name", (backend: BackupBackend) => {
   let dir: string;
 
   beforeAll(async () => {
@@ -205,7 +204,7 @@ describe.each(BACKUP_BACKENDS)("content-defined node tables in a backup and a re
     expect.objectContaining({ code: "ledger-refcount-invalid", details: { reason: "tables-inconsistent", check, key: `0x${key}` } });
 
   it(
-    "A126 and R29: the process's backup takes the node tables by content; a changed byte in a nodes row refuses with " +
+    "the process's backup takes the node tables by content; a changed byte in a nodes row refuses with " +
       "ledger-refcount-invalid, counts or a queue its rows do not give too; a node respelled with consistent counts " +
       "and queue passes the contents-hash step; after every refusal the target is empty, and a backup is not written",
     async () => {
@@ -227,7 +226,7 @@ describe.each(BACKUP_BACKENDS)("content-defined node tables in a backup and a re
       const unchanged = await restoreInto(backup);
       expect(unchanged.outcome).toMatchObject({ manifest: { contentsHash: byContent } });
 
-      // A126: a node respelled with consistent counts and queue passes the contents-hash step; the restore goes on to
+      // A node respelled with consistent counts and queue passes the contents-hash step; the restore goes on to
       // the state root's check and commits, holding the new spelling.
       const respelling = respelled(text);
       const same = await restoreInto(variant(backup, respelling.text));
@@ -239,7 +238,7 @@ describe.each(BACKUP_BACKENDS)("content-defined node tables in a backup and a re
       const [originalChild] = await db.query(`SELECT count(*)::int AS n FROM core_ledger_state.nodes WHERE node_key = '\\x${respelling.child}'`);
       expect(originalChild?.n).toBe(0);
 
-      // A126: a changed byte in a nodes row, its payload or its child list: ledger-refcount-invalid, the target empty.
+      // A changed byte in a nodes row, its payload or its child list: ledger-refcount-invalid, the target empty.
       const parent = rows.find((row) => row.data.length > 0 && row.children.length > 2) as FileRow;
       const payload = variant(backup, text.replace(parent.line, nodeLine(parent.key, oneByteChanged(parent.data, 0), parent.children)));
       const list = variant(backup, text.replace(parent.line, nodeLine(parent.key, parent.data, oneByteChanged(parent.children, parent.children.length - 1))));
@@ -252,7 +251,7 @@ describe.each(BACKUP_BACKENDS)("content-defined node tables in a backup and a re
         expect(await empty(refused.target), what).toBe(true);
       }
 
-      // A126 (LG-11): a row's child list with its number of children in more bytes than it needs, which the ledger
+      // A row's child list with its number of children in more bytes than it needs, which the ledger
       // refuses ("non-canonical scale encoding"), its key, payload, counts and queue unchanged: the same children, so
       // the same key and node set, yet ledger-refcount-invalid, the target empty.
       // The row: a leaf (its list `00`, as `01 00` and `02 00 00 00`), else the first whose number is in one byte.
@@ -270,7 +269,7 @@ describe.each(BACKUP_BACKENDS)("content-defined node tables in a backup and a re
         expect(await empty(refused.target), what).toBe(true);
       }
 
-      // R29: counts or a queue the rows do not give, in a restore: rolled back, the target empty.
+      // Counts or a queue the rows do not give, in a restore: rolled back, the target empty.
       const [countLine, countKey, count] = [...text.matchAll(REF_COUNTS_INSERT)][0] as unknown as [string, string, string];
       const counted = variant(backup, text.replace(countLine, `INSERT INTO core_ledger_state.ref_counts VALUES ('\\x${countKey}', ${Number(count) + 1});`));
       const queued = variant(backup, text.replace(countLine, `${countLine}\nINSERT INTO core_ledger_state.unreferenced VALUES ('\\x${countKey}');`));
@@ -283,14 +282,14 @@ describe.each(BACKUP_BACKENDS)("content-defined node tables in a backup and a re
         expect(await empty(refused.target), what).toBe(true);
       }
 
-      // A126: a changed value in a row the hash covers byte by byte still gives contents-hash-mismatch.
+      // A changed value in a row the hash covers byte by byte still gives contents-hash-mismatch.
       const [rootLine, rootKey, rootCount] = [...text.matchAll(ROOT_COUNTS_INSERT)][0] as unknown as [string, string, string];
       const rooted = variant(backup, text.replace(rootLine, `INSERT INTO core_ledger_state.root_counts VALUES ('\\x${rootKey}', ${Number(rootCount) + 1});`));
       const mismatch = await restoreInto(rooted);
       expect(mismatch.outcome).toMatchObject({ code: "contents-hash-mismatch" });
       expect(await empty(mismatch.target)).toBe(true);
 
-      // R29: in a backup (nothing written) and through the exported contentsHash's code, on the database itself.
+      // In a backup (nothing written) and through the exported contentsHash's code, on the database itself.
       const written = await backupOf(db);
       expect(written.outcome).toMatchObject({ manifest: { contentsHash: byContent } });
       expect(written.written).toBe(true);
@@ -327,7 +326,7 @@ describe.each(BACKUP_BACKENDS)("content-defined node tables in a backup and a re
       }
       expect((await backupOf(db)).outcome).toMatchObject({ manifest: { contentsHash: byContent } });
 
-      // R29: the process's own backup refuses too, writing nothing: the process restarted on the database with one
+      // The process's own backup refuses too, writing nothing: the process restarted on the database with one
       // count changed (its state loads; only the contents hash reads the counts).
       const [, tamper, untamper] = tampers[0] as readonly [string, string, string, string, string];
       await change(db, tamper);

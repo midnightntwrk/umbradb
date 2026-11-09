@@ -2,9 +2,9 @@
  * The `deterministic_postgresql` component: every rule UmbraDB imposes on PostgreSQL, so that two databases fed the
  * same chain hold, hash and read back the same values. It imports nothing else from `src/`, so it is tested on its own
  * (`test/deterministic-postgresql/`, on PostgreSQL 18 and on PGlite). `src/db/` and `src/determinism/` take every rule
- * from this entry and repeat none. [A138, Q69; design §1, §4]
+ * from this entry and repeat none.
  *
- * Where each rule lives: [design §4]
+ * Where each rule lives:
  *
  * | Rule | Here |
  * |---|---|
@@ -19,7 +19,7 @@
  * | The result mapping and parameter texts, date and time as RFC 3339 text | `mapping.ts` |
  * | The opt-out (`deterministic: false`) | `opt-out.ts` (`optOut`: which tables and relations the declared tables cover), used by `column-rules.ts` (`databaseRefusals`' `optedOut`, with `catalog.ts`'s `belongsTo`), `block-transactions.ts` and `checks.ts`, and outside the component by change capture (`src/db/change-capture.ts`) and the contents hash (`src/determinism/module-tables.ts`); the declaration is in `src/modules/` |
  *
- * `errors.ts` holds `UmbraError` and its codes, which the mapping throws and `src/db/errors.ts` re-exports. [Q79]
+ * `errors.ts` holds `UmbraError` and its codes, which the mapping throws and `src/db/errors.ts` re-exports.
  */
 
 export * from "./block-transactions.js";

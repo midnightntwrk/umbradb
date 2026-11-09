@@ -8,15 +8,15 @@ import { STOP_LIMIT_MS } from "./startup-stop-harness.js";
  * ignore the stop fails the oracle while it waits for h + 1's block: the process does not close within 5 s, processing
  * has not ended, a node client stays open, and it keeps connecting after the stop. Its block source, the node source,
  * runs on a node client of its own that the stop does not reach (`ignoringSource`), as every node call of the loop did
- * before the loop honoured stops. [A169, RN-13]
+ * before the loop honoured stops.
  */
 
-describe("negative control (A169): a loop whose node calls ignore the stop", () => {
+describe("negative control: a loop whose node calls ignore the stop", () => {
   beforeAll(() => Promise.all(PROCESS_BACKENDS.map((backend) => backend.start())), 180_000);
   afterAll(() => Promise.all(PROCESS_BACKENDS.map((backend) => backend.stop())), 60_000);
 
   it(
-    "fails A169 on PostgreSQL and on PGlite: no close within 5 s, no end, a client open, connection attempts after the stop",
+    "fails on PostgreSQL and on PGlite: no close within 5 s, no end, a client open, connection attempts after the stop",
     async () => {
       const scenario = blockScenario();
       const found: Record<string, string[]> = {};
@@ -38,7 +38,7 @@ describe("negative control (A169): a loop whose node calls ignore the stop", () 
   );
 
   it(
-    "fails A169 through startUmbraDB too: UmbraDBHandle.stop() on a loop whose node calls ignore it, on PostgreSQL and on PGlite",
+    "fails through startUmbraDB too: UmbraDBHandle.stop() on a loop whose node calls ignore it, on PostgreSQL and on PGlite",
     async () => {
       const scenario = blockScenario();
       const found: Record<string, string[]> = {};

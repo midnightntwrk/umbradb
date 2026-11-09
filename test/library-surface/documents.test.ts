@@ -14,7 +14,7 @@ import {
  * planned `1.0.0` entry, `package.json`'s `description` describes the indexer, no Markdown link in the tree points at a
  * missing file, and `Formal/STORAGE_ALGEBRA.md` states W1 and T5 and no retired law. The checks are `./documents.ts`'s, on the tree as
  * git lists it (tracked and untracked files that exist, ignored ones left out). Each has committed negative controls
- * below; the last ones put back what the cleanup removed. [A171 STATIC, Q169, Q170 C, Q171 A]
+ * below; the last ones put back what the cleanup removed.
  */
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -41,8 +41,8 @@ function treeFiles(): string[] {
 const tree = treeFiles();
 const markdown: TextFile[] = tree.filter((file) => file.endsWith(".md")).map((file) => ({ file, text: read(file) }));
 
-describe("A171 (Q169, Q170 C, Q171 A): 0.9.5's documents removed, and nothing left pointing at them", () => {
-  it("the documents tasks 17.4a and 17.4b list as 0.9.5's are not in the tree", () => {
+describe("0.9.5's documents removed, and nothing left pointing at them", () => {
+  it("0.9.5's documents are not in the tree", () => {
     expect(RETIRED_DOCUMENTS_17_4A).toHaveLength(11);
     expect(RETIRED_DOCUMENTS_17_4B).toHaveLength(31);
     expect(new Set(RETIRED_DOCUMENTS).size).toBe(42);
@@ -164,7 +164,7 @@ describe("A171 (Q169, Q170 C, Q171 A): 0.9.5's documents removed, and nothing le
       ]);
     });
 
-    it("the real tree fails with task 17.4b's documents put back, each named with its task", () => {
+    it("the real tree fails with the documents put back, each named with its task", () => {
       const restored = [...tree, "design/design.md", "docs/v1-implementation-guideline.md", "docs/STABILITY.md"];
       expect(retiredDocumentProblems(restored)).toEqual([
         "docs/STABILITY.md is 0.9.5's (task 17.4a) and still in the tree (A171)",

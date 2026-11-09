@@ -43,7 +43,7 @@ function pointsWithOnKey(): string {
   return changed;
 }
 
-describe("task 14.4a's negative control: a key part left in place fails the static check", () => {
+describe("the negative control: a key part left in place fails the static check", () => {
   it("passes the copies of the cleaned files alone", () => {
     expect(keyLeftovers(repository()).map(described)).toEqual([]);
   });

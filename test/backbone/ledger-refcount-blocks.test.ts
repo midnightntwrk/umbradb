@@ -12,8 +12,7 @@ import { type DagRun, runDag, runProblems } from "./refcount-process.js";
 
 /**
  * The reclamation step's rules seen block by block through the real process, on PostgreSQL 18 and PGlite 0.5.10, on
- * the extended DAG fixture (`test/ledger/fixtures/sweep-fixture.ts`) and its test package: [R5, R6, R7, R8, R9; LG-11,
- * LG-12, LG-14]
+ * the extended DAG fixture (`test/ledger/fixtures/sweep-fixture.ts`) and its test package:
  * - a row written again with its stored child list, by the package (`again` at AGAIN) and by a restarted worker's first
  *   block (`requeued` at REQUEUE + 1: the new worker loads the state after REQUEUE, which embeds `requeued`, so it does
  *   not know that row stored): no count changes, the row keeps its transaction id (`xmin`: no write touched it, so no
@@ -23,7 +22,7 @@ import { type DagRun, runDag, runProblems } from "./refcount-process.js";
  *   package does) and 2;
  * - a row deleted and needed again (subtree 0's first version, back at REVERT), and a fresh worker loading that state;
  * - a revision lowering `retainStates` from 5 to 0 at REQUEUE, with `requeued` held again by the state after it.
- * Each run is also checked against R3's database check and R1's model.
+ * Each run is also checked against the database check and the model.
  */
 
 const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
@@ -37,7 +36,7 @@ interface Touches {
 /**
  * A user module recording, at each height's `on-compute`, the transaction id (`xmin`) of every row of `nodes` and of
  * the `states` row as committed at the cursor h − 1. A row the block's transaction inserted or replaced carries that
- * block's id, the one its `states` row carries; a row it left as it was keeps its own. [R5]
+ * block's id, the one its `states` row carries; a row it left as it was keeps its own.
  */
 function touchWatcher(seen: Map<bigint, Touches>): ModuleDeclaration {
   return {
@@ -92,7 +91,7 @@ function classify(before: TableSnapshot, batch: NodeBatch): { readonly fresh: st
 /**
  * What differs from R5 for `key` at block `h`: the batch writes it with the child list stored after h − 1; the counts
  * of the keys it references are those after h − 1; its row keeps its transaction id; and the rows block h's transaction
- * wrote are the batch's new and rewritten nodes that are rows after h, without it. Empty when R5 holds. [R5]
+ * wrote are the batch's new and rewritten nodes that are rows after h, without it. Empty when R5 holds.
  */
 function writtenAgainProblems(
   tables: ReadonlyMap<bigint, TableSnapshot>,
@@ -149,11 +148,11 @@ function rowsOfStateAt(lists: ReadonlyMap<number, ReadonlyMap<string, Uint8Array
 /** The test package's counter `name` in `memory`. */
 const counter = (memory: SharedArrayBuffer, name: keyof typeof COUNTERS): number => Atomics.load(new Int32Array(memory), COUNTERS[name]);
 
-describe.each(PROCESS_BACKENDS)("R5–R9 (LG-14): the reclamation step's rules through the process on $name", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("the reclamation step's rules through the process on $name", (backend: ProcessBackend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("R5: a row written again with its stored child list — `again` by the test package at AGAIN, `requeued` in a restarted worker's first block at REQUEUE + 1 — changes no count, its row is untouched (same xmin, no change captured), and the node write's affected rows exclude it", async () => {
+  it("a row written again with its stored child list — `again` by the test package at AGAIN, `requeued` in a restarted worker's first block at REQUEUE + 1 — changes no count, its row is untouched (same xmin, no change captured), and the node write's affected rows exclude it", async () => {
     // The package's memory drops `again` before AGAIN, so it writes `again` again unchanged there.
     const db = await backend.database();
     const touches = new Map<bigint, Touches>();
@@ -195,7 +194,7 @@ describe.each(PROCESS_BACKENDS)("R5–R9 (LG-14): the reclamation step's rules t
     expect(fixtureProblems("extended", tables, batches, REQUEUE + 2)).toEqual([]);
   }, PATIENCE_MS * 4);
 
-  it("R6: `requeued`, queued at REQUEUE and referenced once by one new node of REQUEUE + 1 (`requeue holder`), is not deleted there, leaves the queue, is counted 1, and its children's counts do not change", async () => {
+  it("`requeued`, queued at REQUEUE and referenced once by one new node of REQUEUE + 1 (`requeue holder`), is not deleted there, leaves the queue, is counted 1, and its children's counts do not change", async () => {
     const run = await runDag(await backend.database(), { dag: "extended", last: REQUEUE + 1 });
     expect(run.status).toMatchObject({ cursor: BigInt(REQUEUE + 1), reason: null });
     const h = REQUEUE + 1;
@@ -220,7 +219,7 @@ describe.each(PROCESS_BACKENDS)("R5–R9 (LG-14): the reclamation step's rules t
     expect(runProblems(run, "extended")).toEqual([]);
   }, PATIENCE_MS * 2);
 
-  it("R7 with retainStates 0: the state released by block h has its root queued at h, none of its rows deleted at h, every row of it outside K_{h+1} deleted at h + 1, and the worker's eviction at h + 1 not refused (the package refusing to forget a node a live state holds), every h from 1 to TO_EMBEDDED − 1", async () => {
+  it("with retainStates 0: the state released by block h has its root queued at h, none of its rows deleted at h, every row of it outside K_{h+1} deleted at h + 1, and the worker's eviction at h + 1 not refused (the package refusing to forget a node a live state holds), every h from 1 to TO_EMBEDDED − 1", async () => {
     // The package holding by reference refuses an eviction naming a node a live state reaches; it diverges from the
     // other packages only after TO_EMBEDDED, where the run stops.
     const memory = countersMemory();
@@ -251,7 +250,7 @@ describe.each(PROCESS_BACKENDS)("R5–R9 (LG-14): the reclamation step's rules t
     expect(runProblems(run, "extended")).toEqual([]);
   }, PATIENCE_MS * 2);
 
-  it("R7 with retainStates 2: the state after h − 1 is released at h + 2, none of its rows deleted before h + 3, and at h + 3 every row of it outside K_{h+3} deleted, every h from 1 to LAST − 3", async () => {
+  it("with retainStates 2: the state after h − 1 is released at h + 2, none of its rows deleted before h + 3, and at h + 3 every row of it outside K_{h+3} deleted, every h from 1 to LAST − 3", async () => {
     const run = await runDag(await backend.database(), { dag: "extended", settings: { retainStates: 2 } });
     expect(run.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
     const reach = fixtureReach("extended", run.batches, LAST, { retainStates: 2 });
@@ -278,7 +277,7 @@ describe.each(PROCESS_BACKENDS)("R5–R9 (LG-14): the reclamation step's rules t
     expect(fixtureProblems("extended", run.tables, run.batches, LAST, { retainStates: 2 })).toEqual([]);
   }, PATIENCE_MS * 2);
 
-  it("R8: subtree 0's first version, deleted at h1 after CHANGE and needed again at REVERT, is inserted again at REVERT with its references counted again, and a fresh worker loads the state after REVERT from the database", async () => {
+  it("subtree 0's first version, deleted at h1 after CHANGE and needed again at REVERT, is inserted again at REVERT with its references counted again, and a fresh worker loads the state after REVERT from the database", async () => {
     const db = await backend.database();
     const first = await runDag(db, { dag: "extended", last: REVERT });
     expect(first.status).toMatchObject({ cursor: BigInt(REVERT), reason: null });
@@ -311,7 +310,7 @@ describe.each(PROCESS_BACKENDS)("R5–R9 (LG-14): the reclamation step's rules t
     expect([counter(memory, "threads"), counter(memory, "storeLoads"), counter(memory, "storeLoadHeight")]).toEqual([1, 1, REVERT]);
   }, PATIENCE_MS * 3);
 
-  it("R9: with the window full, a revision lowering retainStates from 5 to 0 at REQUEUE releases the six states after REQUEUE − 6 … REQUEUE − 1 there; at REQUEUE + 1, in that one block, every row of theirs outside K is deleted, and `requeued`, which the state after REQUEUE + 1 holds again, stays", async () => {
+  it("with the window full, a revision lowering retainStates from 5 to 0 at REQUEUE releases the six states after REQUEUE − 6 … REQUEUE − 1 there; at REQUEUE + 1, in that one block, every row of theirs outside K is deleted, and `requeued`, which the state after REQUEUE + 1 holds again, stays", async () => {
     const h = REQUEUE;
     const last = h + 2;
     const run = await runDag(await backend.database(), {

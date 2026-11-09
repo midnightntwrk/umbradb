@@ -1,7 +1,6 @@
 name: Vendored ledger builds
 
-# openspec/changes/core-arch task 0.2 (design.md §5.2, requirement LG-5, acceptance A97): rebuild every vendored ledger
-# package (vendor/ledger/) from its pinned upstream commit and patches, in the pinned build image
+# Rebuild every vendored ledger package (vendor/ledger/) from its pinned upstream commit and patches, in the pinned build image
 # (vendor/ledger/Dockerfile), and fail if any built file differs from the SHA-256 recorded in that version's
 # SHA256SUMS, or if the committed pkg/ does. Each runner builds with the image's native toolchain (the Rust image is
 # pinned by its multi-architecture index digest); both architectures must give the recorded bytes, which is what makes
@@ -18,7 +17,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # Pull requests by number, pushes by ref (as graph.yml).
+  # Pull requests by number, pushes by ref.
   group: vendored-ledger-${{ github.workflow }}-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || github.ref }}
   cancel-in-progress: true
 

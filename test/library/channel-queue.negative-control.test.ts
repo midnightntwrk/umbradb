@@ -4,12 +4,12 @@ import { PRIVATE_BACKENDS, type PrivateBackend, START_TIMEOUT_MS } from "../priv
 import { l39Problems } from "./refused-channels.js";
 
 /**
- * L39's committed negative control, through the criterion's own run and oracle (`./refused-channels.ts`), with the
+ * The committed negative control, through the criterion's own run and oracle (`./refused-channels.ts`), with the
  * fault put back on the not-accepting paths themselves — `../../src/private/core-channels.ts` replaced here: a process
  * with no channel request keeps the channel it is given (`refuseChannel`, which the engine calls for it, closes and logs
  * nothing), and a channel core that stopped accepting keeps it too (`CoreChannels.accept` after `stopAccepting`). The
  * oracle sees, in both cases, the channel still open and no line logged; with the real module it passes. On PostgreSQL
- * 18 (Docker) and PGlite. [L39, LM-6, N9]
+ * 18 (Docker) and PGlite.
  */
 
 const control = vi.hoisted(() => ({ keeps: false }));
@@ -37,7 +37,7 @@ vi.mock("../../src/private/core-channels.js", async (importOriginal) => {
   };
 });
 
-describe.each(PRIVATE_BACKENDS)("L39's negative control on $name (LM-6)", (backend: PrivateBackend) => {
+describe.each(PRIVATE_BACKENDS)("negative control on $name", (backend: PrivateBackend) => {
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 

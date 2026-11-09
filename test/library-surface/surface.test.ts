@@ -8,7 +8,7 @@ import { coreModuleProblems, surfaceOf } from "./surface.js";
  * What `"."` (`src/index.ts`) exports: the private link's channel and its types, as the compiler resolves them, and
  * the core modules' declarations, which are what a configuration writes entries of: each has its module's id and an
  * entry builder. The negative control below drops an entry builder, swaps an id and drops an export, and each fails
- * naming it. [A1 STATIC, LS-1; design §12]
+ * naming it.
  */
 
 // The barrel check starts the TypeScript compiler on the barrel and every file it reaches: a few seconds alone, more
@@ -17,7 +17,7 @@ vi.setConfig({ testTimeout: 120_000 });
 
 const INDEX = path.join(fileURLToPath(new URL("../../", import.meta.url)), "src/index.ts");
 
-describe("A1: what src/index.ts exports (LS-1)", () => {
+describe("what src/index.ts exports", () => {
   it("exports messagePortChannel as a value, and MessagePortLike and PrivateLinkChannel as types", () => {
     const found = surfaceOf(INDEX);
     for (const name of ["messagePortChannel"]) expect(found.values).toContain(name);
@@ -29,7 +29,7 @@ describe("A1: what src/index.ts exports (LS-1)", () => {
   });
 });
 
-describe("A1's negative controls: a core module declaration that differs fails, naming it", () => {
+describe("negative controls: a core module declaration that differs fails, naming it", () => {
   it("a core module declaration without its entry builder or with another id fails", () => {
     const real = umbra as unknown as Record<string, unknown>;
     const plain = { ...(real.CORE_TX_RESULTS as object) }; // a spread drops the non-enumerable entry builder

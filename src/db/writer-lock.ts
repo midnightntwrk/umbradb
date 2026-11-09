@@ -1,17 +1,17 @@
 /**
  * The writer lock: exactly one process writes each database, and the database API fails stop rather than risk a second
- * writer. [DB-11, Q50; design §4, §11]
+ * writer.
  *
  * **PostgreSQL.** This is refactored from 0.9.5's `src/postgres/transaction-lease.ts`. That file held its lease as a
  * session advisory lock on a connection pinned for it (`sql.reserve()`), took it without waiting with
- * `pg_try_advisory_lock`, and knew that losing the connection loses the lock. [DB-11]
+ * `pg_try_advisory_lock`, and knew that losing the connection loses the lock.
  *
  * The writer holds `pg_try_advisory_lock(3, hashtext('umbradb-writer'))` on its writer session (classes 1 and 2 were
  * 0.9.5's). That session is never recycled (`./postgres.ts`: one connection of its own, `max_lifetime` off). The writer
  * takes the lock whenever it opens a session, before that session's first statement of any transaction: the first time
  * when the writer starts ({@link startWriter}) or, failing that, before its first transaction (so before any
  * migration), and again on every new session after a lost one, before the next write. A session advisory lock lives as
- * long as its session, so a closed or lost writer session releases it; PostgreSQL scopes it to the database. [DB-11]
+ * long as its session, so a closed or lost writer session releases it; PostgreSQL scopes it to the database.
  * - The first time, another session holding it is `writer-lock-held` (a startup refusal, not retryable). Nothing was
  *   written, and a later attempt starts afresh.
  * - On a new session after a lost one, another session holding it is `writer-lock-lost`, and processing halts. Another

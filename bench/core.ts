@@ -10,13 +10,12 @@ import type { Backend, LatencyStats } from "./types.js";
 /**
  * The core's benchmark, `runner.commitEmptyBlock` per backend: the time from a new finalized head to the runner having
  * committed that block and waiting for the next. It is measured for an empty block (an in-memory block: no extrinsic,
- * no chain event), on PGlite and on PostgreSQL. [design §13]
+ * no chain event), on PGlite and on PostgreSQL.
  *
  * The process is the `umbradb` command's build (the resolver's: the public backbone, its core modules off, no user
  * module) over an `InMemoryBlockSource`, started through the exported `startUmbraDB` and `coreEntry` on a `custom`
  * network whose genesis is the in-memory chain's, with no listener and no node client (a library process's default).
  * Each sample is one block: the source's head raised by one, then the wait until the loop waits past it (`waiting`).
- * [design §12, LM-1]
  */
 
 /** The workload name of a backend, as the baseline records it. */

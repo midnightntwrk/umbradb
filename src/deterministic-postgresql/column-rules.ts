@@ -2,17 +2,16 @@
  * The column-type rules of the `deterministic_postgresql` component. For each column of a module table, in every
  * database (the core's or a private process's), they decide whether its type may be stored (as a value) and whether it
  * may be part of the primary key (as a key); and when it may not, why, and what to use instead.
- * [DT-1, DT-2, DT-6, Q58, Q69, Q75; design §4]
  *
  * They also refuse non-deterministic columns and tables: identity and `serial` columns, defaults that are not
- * immutable, and module schemas holding a sequence or an unlogged table. [DT-6, Q61]
+ * immutable, and module schemas holding a sequence or an unlogged table.
  *
  * **One source.** Every reason and alternative here comes from the design's column-type table and the paragraph above
  * it, rewritten as sentences for a module developer who has never read the determinism spec. Each rule keeps its row's
- * four cells, or its sentence, verbatim (`design`), and `test/deterministic-postgresql/column-rules.test.ts` fails when
+ * four cells, or its sentence, verbatim, and `test/deterministic-postgresql/column-rules.test.ts` fails when
  * the design and the rules part ways. The contents hash refuses with these rules in every schema it hashes. The
  * migration-time check calls the same {@link tableRefusals}, {@link relationRefusals} (or {@link databaseRefusals})
- * and {@link refusalMessage}, adding the module's id, so a refusal reads the same in both. [DT-3, DT-6; design §4]
+ * and {@link refusalMessage}, adding the module's id, so a refusal reads the same in both.
  *
  * **The input** is what PostgreSQL's catalog says about a column ({@link ColumnFacts}), nothing more:
  *
@@ -27,13 +26,13 @@
  *
  * For a relation ({@link RelationFacts}) it is `relkind`, `relpersistence` and the table it belongs to. The tables a
  * module declared `deterministic: false` are given to {@link databaseRefusals}, which skips them along with what
- * belongs to them (`./opt-out.ts`). [MD-1, Q76]
+ * belongs to them (`./opt-out.ts`).
  *
  * Two rows of the design's table give one reason to several types although it is not true of each of them: the refused
  * date and time types and the floating-point types. Here each of those types gets only the clauses that are true of
  * it, checked on PostgreSQL 17.11 and 18.6 and PGlite 0.5.10 (`test/deterministic-postgresql/column-refusals.test.ts`
  * checks them again through the database API). `timestamptz` is allowed, as a value and a key, and the other date and
- * time types are refused with "use `timestamptz`, written with `Z`". [Q59, Q60, Q74]
+ * time types are refused with "use `timestamptz`, written with `Z`".
  */
 
 import { optOut, type TableName } from "./opt-out.js";
@@ -43,7 +42,7 @@ import { optOut, type TableName } from "./opt-out.js";
 /**
  * The column types the rules below allow in a module table (with their arrays), which are also the types the canonical
  * encoder (`src/determinism/cbor.ts`) takes. They are named as PostgreSQL's `format_type(type, NULL)` names them:
- * `character varying` for `varchar(n)`, `timestamp with time zone` for `timestamptz`. [DT-1, Q58, Q74]
+ * `character varying` for `varchar(n)`, `timestamp with time zone` for `timestamptz`.
  */
 export const SCALAR_COLUMN_TYPES = [
   "smallint",
@@ -59,10 +58,10 @@ export const SCALAR_COLUMN_TYPES = [
   "jsonb",
 ] as const;
 
-/** A scalar column type the canonical encoder takes. [DT-1] */
+/** A scalar column type the canonical encoder takes. */
 export type ScalarColumnType = (typeof SCALAR_COLUMN_TYPES)[number];
 
-/** A column type the canonical encoder takes: a scalar type, or an array of one (any number of dimensions). [DT-1] */
+/** A column type the canonical encoder takes: a scalar type, or an array of one (any number of dimensions). */
 export type ColumnType = ScalarColumnType | `${ScalarColumnType}[]`;
 
 // ── input: what the catalog says about a column ─────────────────────────────────────────────────────────────────────
@@ -127,7 +126,7 @@ export interface RelationFacts {
 
 // ── the rules ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** The codes of the startup refusals that the rules decide. [DT-6; design §11] */
+/** The codes of the startup refusals that the rules decide. */
 export type RefusalCode =
   | "no-primary-key"
   | "unsupported-key-type"
@@ -137,7 +136,7 @@ export type RefusalCode =
 
 /**
  * How rows are ordered by a key column: integers numerically, `boolean` with `false` first, `timestamptz` by time (the
- * order of the integers it is encoded as), the others by their bytes. [DT-1, DT-2]
+ * order of the integers it is encoded as), the others by their bytes.
  */
 export type KeyOrder = "numerically" | "false-first" | "by-time" | "by-bytes" | "by-bytes-collate-c";
 
@@ -147,7 +146,7 @@ export interface Because {
   readonly alternative: string;
 }
 
-/** A row of the design's column-type table, cell by cell, verbatim. [design §4] */
+/** A row of the design's column-type table, cell by cell, verbatim. */
 export interface DesignRow {
   readonly type: string;
   readonly value: string;
@@ -165,7 +164,7 @@ export interface AllowedRule extends RuleBase {
   readonly allowed: true;
   /** The scalar types it covers, as `format_type(atttypid, NULL)` names them (none for the arrays row). */
   readonly types: readonly ScalarColumnType[];
-  /** As a key: the row order it gives, or why such a key is refused (`unsupported-key-type`). [DT-2] */
+  /** As a key: the row order it gives, or why such a key is refused (`unsupported-key-type`). */
   readonly key: KeyOrder | Because;
 }
 
@@ -186,13 +185,13 @@ export interface TableRule {
   readonly code: RefusalCode;
   /** What is refused, as the start of a message. */
   readonly what: string;
-  /** Its sentence in the design, verbatim. [design §4] */
+  /** Its sentence in the design, verbatim. */
   readonly design: string;
   readonly because: Because;
 }
 
 // Integers. Their encoding is their value (CBOR major types 0 and 1), and PostgreSQL compares them by value, which is
-// the key order rows are sorted in. [DT-2]
+// the key order rows are sorted in.
 const INTEGERS: AllowedRule = {
   id: "integer",
   design: { type: "`smallint`, `integer`, `bigint`", value: "integer", key: "yes, numerically", because: "—" },
@@ -203,10 +202,10 @@ const INTEGERS: AllowedRule = {
 
 // `numeric` without a declared scale above 0 (`numeric`, `numeric(p)`, `numeric(p,0)`, and `numeric(p,s)` with s < 0,
 // which rounds to tens, hundreds, …): stored as its canonical integer text, and the integer `CHECK` refuses a fraction
-// or `NaN` on write. [DT-1, Q57]
+// or `NaN` on write.
 //
 // Not a key: keys are ordered by value or by bytes, and a text's bytes do not follow its value. Ordering numeric keys
-// numerically was considered and not chosen. [DT-2, Q58]
+// numerically was considered and not chosen.
 const NUMERIC: AllowedRule = {
   id: "numeric",
   design: {
@@ -230,7 +229,7 @@ const NUMERIC: AllowedRule = {
 
 // `numeric(p,s)` with s > 0: every value prints with s decimals, and a zero fraction counts as a fraction, so none of
 // its values could be encoded. The column is refused at migration time instead of failing at hash time. Its scale is
-// read from the type modifier, because `format_type(atttypid, NULL)` names it plain `numeric`. [Q57, Q58]
+// read from the type modifier, because `format_type(atttypid, NULL)` names it plain `numeric`.
 const NUMERIC_SCALED: RefusedRule = {
   id: "numeric-scaled",
   design: {
@@ -287,7 +286,6 @@ const UUID: AllowedRule = {
 };
 
 // `boolean`: PostgreSQL orders `false` first, and CBOR encodes `false` (f4) before `true` (f5), so the orders agree.
-// [Q58]
 const BOOLEAN: AllowedRule = {
   id: "boolean",
   design: { type: "`boolean`", value: "`false` / `true`", key: "yes, `false` first", because: "—" },
@@ -300,7 +298,7 @@ const BOOLEAN: AllowedRule = {
 // was written with, and the database API reads it as RFC 3339 UTC text in every process, so its value is one instant.
 // The encoder writes it as the integer microseconds since 1970-01-01T00:00:00Z (`src/determinism/cbor.ts`); `infinity`
 // and `-infinity` have none and fail to encode. As a key it is ordered by time, which is both PostgreSQL's order for it
-// and the order of those integers (`keyOrderTerm` adds no collation). [DB-2, DT-1, Q68, Q74]
+// and the order of those integers (`keyOrderTerm` adds no collation).
 //
 // It is the preferred time type. A literal without an offset is read in the session's `TimeZone`, which the API pins
 // to UTC, so a module writes every time with an offset, `Z` (the module guide).
@@ -318,7 +316,7 @@ const TIMESTAMPTZ: AllowedRule = {
 };
 
 // `jsonb`: PostgreSQL normalizes it on write; the encoding sorts map keys (RFC 8949 §4.2.1) and the integer `CHECK`
-// keeps its numbers integral. Not a key: PostgreSQL's jsonb order is not the order of the encoded bytes. [Q57]
+// keeps its numbers integral. Not a key: PostgreSQL's jsonb order is not the order of the encoded bytes.
 const JSONB: AllowedRule = {
   id: "jsonb",
   design: {
@@ -371,7 +369,6 @@ const VALUE_TYPES = ALLOWED.flatMap((rule) =>
 
 // `real` and `double precision`: floating-point columns are refused with `non-deterministic-column`. 0.1 + 0.2
 // against 0.3 differs in double precision only; in real, 0.1 + 0.2 equals 0.3, so real has its own example.
-// [DT-6, Q60]
 const FLOATING_POINT: RefusedRule = {
   id: "floating-point",
   design: {
@@ -408,13 +405,13 @@ const USE_TIMESTAMPTZ = "use timestamptz, written with Z";
 const TIME_OF_DAY: Because = {
   reason: "A time of day (time, timetz) is not an instant, and UmbraDB defines no canonical encoding for it",
   // The date and time alternative is "use timestamptz, written with Z"; a time of day is no instant, so the message
-  // also says what holds one. [Q74, Q87]
+  // also says what holds one.
   alternative: `${USE_TIMESTAMPTZ}, for an instant; for a time of day, store bigint microseconds since midnight`,
 };
 
 // The other date and time types are refused (only `timestamptz` is allowed), each with the reason true of it and "use
 // timestamptz, written with Z". None cites the drivers' `Date` any more: the database API reads every date and time
-// value as text. [DB-2, Q58, Q59, Q68, Q74]
+// value as text.
 //
 // Checked on PostgreSQL 17.11 and 18.6 and PGlite 0.5.10 (2026-10-24): a `timestamp` or a `date` turned into an
 // instant gives a different one in each `TimeZone` (`2025-05-21 14:30:00` is 1747837800 seconds since 1970 in UTC,
@@ -465,7 +462,7 @@ const DATE_TIME: RefusedRule = {
 };
 
 // `json`: PostgreSQL keeps the input text, the drivers parse it, so a hash of what they return would call two
-// different stored texts equal. `jsonb` normalizes on write, which is why the encoder takes it. [DT-1]
+// different stored texts equal. `jsonb` normalizes on write, which is why the encoder takes it.
 const JSON_TYPE: RefusedRule = {
   id: "json",
   design: {
@@ -553,7 +550,7 @@ const USER_DEFINED: RefusedRule = {
 };
 
 // Every other type (network, bit-string, XML, geometric, range and multirange, full-text, …): the encoder's list of
-// types is closed, so a type outside it never gets an accidental encoding. [DT-1]
+// types is closed, so a type outside it never gets an accidental encoding.
 const OTHER: RefusedRule = {
   id: "other",
   design: {
@@ -571,7 +568,7 @@ const OTHER: RefusedRule = {
   },
 };
 
-/** The rules, one per row of the design's column-type table, in its order. [design §4] */
+/** The rules, one per row of the design's column-type table, in its order. */
 export const COLUMN_TYPE_RULES: readonly TypeRule[] = [
   INTEGERS,
   NUMERIC,
@@ -593,7 +590,7 @@ export const COLUMN_TYPE_RULES: readonly TypeRule[] = [
 ];
 
 // The design's sentences for the sequence and unlogged-table refusals, verbatim, each with its reason and
-// alternative. [DT-6, Q61, Q64]
+// alternative.
 const SEQUENCE_DESIGN =
   "A module schema holding a sequence is refused with `non-deterministic-table` (Q61): module code can draw from a " +
   "sequence at any time, and its values depend on retries; derive values from the block (height, transaction index), " +
@@ -604,7 +601,7 @@ const UNLOGGED_DESIGN =
   "create it without `UNLOGGED`, or run `ALTER TABLE ... SET LOGGED` (Q64).";
 
 /**
- * The refusals of the paragraph above the column-type table, each with its sentence verbatim (`design`). A refusal of
+ * The refusals of the paragraph above the column-type table, each with its sentence verbatim. A refusal of
  * an identity, `serial` or default column says, after `what`, what in the column draws from a sequence or is not
  * immutable ({@link tableRefusals}).
  */
@@ -615,7 +612,7 @@ export const TABLE_RULES: {
   readonly sequence: TableRule;
   readonly unloggedTable: TableRule;
 } = {
-  // Rows are ordered by their primary key; the contents hash and the digests depend on that order. [DT-2]
+  // Rows are ordered by their primary key; the contents hash and the digests depend on that order.
   noPrimaryKey: {
     code: "no-primary-key",
     what: "the table has no primary key",
@@ -664,7 +661,7 @@ export const TABLE_RULES: {
     },
   },
   // Module code may call nextval() on any sequence of its schema, in any block. The alternative is the same as for
-  // identity and serial columns, for values as for keys. [Q64]
+  // identity and serial columns, for values as for keys.
   sequence: {
     code: "non-deterministic-table",
     what: "a module schema cannot hold a sequence",
@@ -677,7 +674,7 @@ export const TABLE_RULES: {
     },
   },
   // An unlogged table is not written to the write-ahead log; crash recovery truncates it, while the blocks whose rows
-  // it held stay committed in the cursor. The alternative is to make the table logged. [Q64]
+  // it held stay committed in the cursor. The alternative is to make the table logged.
   unloggedTable: {
     code: "non-deterministic-table",
     what: "a module schema cannot hold an unlogged table",
@@ -696,7 +693,6 @@ export const TABLE_RULES: {
  * function id the sentence names ({@link FUNCTION_ID_FIELDS}) and every node it names, as PostgreSQL's own check
  * (`contain_mutable_functions`) reads them: conversions through input and output functions, row comparisons,
  * `SQLVALUEFUNCTION`, `NEXTVALUEEXPR`, and SQL/JSON nodes, which it refuses outright ({@link defaultReferences}).
- * [Q62, Q63]
  */
 export const DEFAULT_DESIGN = {
   allowed:
@@ -725,7 +721,7 @@ export type ColumnVerdict =
       readonly rule: AllowedRule;
       /** The column type the encoder takes for it: its `type`. */
       readonly encoding: ColumnType;
-      /** For a primary-key column, the row order it gives; `null` for any other column. [DT-2] */
+      /** For a primary-key column, the row order it gives; `null` for any other column. */
       readonly keyOrder: KeyOrder | null;
     }
   | {
@@ -738,7 +734,7 @@ export type ColumnVerdict =
 /**
  * The verdict on one column. A column whose type may not be stored is refused for that, with its row's code, even in
  * the primary key: no key can make it storable, and its alternative is a valid key type. Only a storable type that has
- * no key order is refused as a key (`unsupported-key-type`). [DT-2]
+ * no key order is refused as a key (`unsupported-key-type`).
  */
 export function columnVerdict(column: ColumnFacts): ColumnVerdict {
   const { rule, scalar } = ruleOf(column);
@@ -804,7 +800,7 @@ export function tableRefusals(table: TableFacts): Refusal[] {
 
 /**
  * The refusal of a relation of a module schema: every sequence (an identity or `serial` column's own included), and
- * every unlogged table, partitioned table or partition; nothing for a logged table. [DT-6, Q61]
+ * every unlogged table, partitioned table or partition; nothing for a logged table.
  */
 export function relationRefusals(relation: RelationFacts): Refusal[] {
   const isTable = relation.kind === "r" || relation.kind === "p";
@@ -836,7 +832,7 @@ export interface RefusalOptions {
   /**
    * The tables declared `deterministic: false` (the schema plan's `optedOut`). Each is skipped with its partitions and
    * the sequences its columns own, and so is such a table when unlogged (`./opt-out.ts`). Every other table and
-   * relation is refused as without it. [MD-1, DT-6, Q76]
+   * relation is refused as without it.
    */
   readonly optedOut?: readonly TableName[];
 }
@@ -847,7 +843,7 @@ export interface RefusalOptions {
  * order given (`catalogTables` and `catalogRelations` of `./catalog.ts` sort by schema, then name, as bytes). Tables
  * come first because a column is what a developer wrote: an identity or `serial` column's sequence is refused too, but
  * it is dropped with its column, so the column's refusal is the one to read first. Tables and relations the opt-out
- * covers ({@link RefusalOptions.optedOut}) have none. [DT-3]
+ * covers ({@link RefusalOptions.optedOut}) have none.
  */
 export function databaseRefusals(
   tables: readonly TableFacts[],
@@ -875,7 +871,7 @@ export function databaseRefusals(
 /**
  * The message of a refusal, for a developer who has never read the determinism spec: the code, where (module, table
  * or sequence, column and its declared type), what is refused, why, and what to use instead. The contents hash and
- * startup give it alike. [DT-1, DT-6]
+ * startup give it alike.
  */
 export function refusalMessage(refusal: Refusal, place: RefusalPlace): string {
   return `${refusal.code}: ${describeLocation(place, refusal.column)}: ${explainRefusal(refusal)}`;
@@ -910,7 +906,7 @@ export function numericScale(typeModifier: number): number | null {
   return (((typeModifier - 4) & 0x7ff) ^ 1024) - 1024;
 }
 
-/** The row order a key column of `type` gives, or null when such a column cannot be a key. [DT-2] */
+/** The row order a key column of `type` gives, or null when such a column cannot be a key. */
 export function keyOrder(type: string): KeyOrder | null {
   const rule = ALLOWED_BY_NAME.get(type);
   return rule !== undefined && typeof rule.key === "string" ? rule.key : null;
@@ -921,7 +917,7 @@ export function keyOrder(type: string): KeyOrder | null {
  * for the key types ordered by the bytes of their text (`text`, `character varying`), whose own collation may put "a"
  * before "B". Every other key type is ordered as PostgreSQL orders it, which is already the key order: integers by
  * value, `boolean` with `false` first, `bytea` and `uuid` by their bytes, `timestamptz` by time (the order of its
- * encoded integers, its microseconds since 1970, whatever offset each value was written with). [DT-2]
+ * encoded integers, its microseconds since 1970, whatever offset each value was written with).
  */
 export function keyOrderTerm(name: string, type: string): string {
   const collate = keyOrder(type) === "by-bytes-collate-c" ? ' COLLATE "C"' : "";
@@ -946,7 +942,7 @@ export function refusalOfTypeName(type: string): { readonly code: RefusedRule["c
  * canonical encoder's reason (`CanonicalEncodingFailure` of `src/determinism/cbor.ts`):
  * `numeric-fraction` and `numeric-invalid` for a `numeric`, `not-integer` and `integer-out-of-range` for a `jsonb`,
  * `timestamptz-infinite` for a `timestamptz`. Null for failures only a broken read handle can cause (a value of the
- * wrong JavaScript type, a lossy JSON parser, a malformed time text, …). [DT-1, DT-6, Q57, Q74]
+ * wrong JavaScript type, a lossy JSON parser, a malformed time text, …).
  */
 export function valueFailureBecause(type: string, failure: string): Because | null {
   const scalar = type.endsWith("[]") ? type.slice(0, -2) : type;
@@ -975,7 +971,7 @@ export function quoteIdentifier(name: string): string {
 // which refuses some that PostgreSQL would call immutable. Everything is read as stored, without PostgreSQL's constant
 // folding, so `CASE WHEN true THEN 1 ELSE random() END` is refused although it never calls random(). Aggregates, window
 // functions and subqueries cannot be in a default (PostgreSQL refuses them there). Checked on PostgreSQL 17.11 and
-// 18.6 and PGlite 0.5.10 (PostgreSQL 18.6), whose trees agree. [DT-6, Q61, Q63]
+// 18.6 and PGlite 0.5.10 (PostgreSQL 18.6), whose trees agree.
 
 /** A node of PostgreSQL's expression-tree text: its kind (`FUNCEXPR`, `CONST`, …) and its fields, in order. */
 export interface TreeNode {
@@ -1042,7 +1038,7 @@ export function parseExpressionTree(text: string): TreeNode {
   return root;
 }
 
-/** The function-id fields of a tree's nodes, read wherever they occur. [design §4] */
+/** The function-id fields of a tree's nodes, read wherever they occur. */
 export const FUNCTION_ID_FIELDS = ["funcid", "opfuncid", "hashfuncid", "negfuncid"] as const;
 
 /** Something a default does that the catalog decides is immutable or not, or that is not immutable in itself. */
@@ -1227,14 +1223,14 @@ const REFUSED_AS_VALUE = "this type cannot be stored in a module table";
 const REFUSED_AS_KEY = "this type cannot be part of a primary key";
 
 // The value rows of the table (`numeric`: "the CHECK refuses a fraction or NaN"; `jsonb`: "the CHECK on numbers"), with
-// the reason and alternative of the `numeric(p,s)` row. [DT-6, Q57]
+// the reason and alternative of the `numeric(p,s)` row.
 const NUMERIC_VALUES: Because = {
   reason:
     "A stored number must be an integer, so that equal contents hashes mean equal query results: a numeric with a " +
     "fraction, even a zero one such as 100.00, or NaN has no canonical encoding",
   alternative: "store integer smallest units in numeric(p) or bigint",
 };
-// The `timestamptz` row's value cell ("`infinity` and `-infinity` fail"): the encoding has no infinity. [DT-1, Q74]
+// The `timestamptz` row's value cell ("`infinity` and `-infinity` fail"): the encoding has no infinity.
 const INFINITE_TIMES: Because = {
   reason:
     "A timestamptz is hashed as its microseconds since 1970-01-01T00:00:00Z, and infinity and -infinity have no such " +

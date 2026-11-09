@@ -4,12 +4,12 @@
  * `vendor/ledger/<version>/upstream.json`, the package's own `package.json` and its manifest `SHA256SUMS` record
  * (`test/ledger/adapter-checks.ts` and `test/ledger/package-identity.test.ts` keep them equal). They are constants, not
  * read from those files, because the adapters and the core version (`../config/build.ts`) also run where no file can be
- * read (the browser build). [LG-5, LG-6, CF-2; design §5.2]
+ * read (the browser build).
  *
  * A package's `sha256` is the SHA-256 of its manifest, which lists every file of the package with its own SHA-256;
  * `./identity.ts` checks the files against it at startup (`package-hash-mismatch`). When
  * `npm run vendor:ledger -- --record` rewrites a manifest, its constant here changes with it, and so does the core
- * version, which the configuration history records for every `core` revision. [CF-7, CF-8]
+ * version, which the configuration history records for every `core` revision.
  */
 
 /** A WASM package of a ledger release, identified by its manifest's SHA-256 (`0x`-prefixed lowercase hex). */
@@ -38,7 +38,6 @@ export const LEDGER_RELEASES = Object.freeze({
     ] as const),
   }),
   // Ledger v9 as runtime 2.0 built it (`midnight-node` 2.0.0-rc.4: `crate-ledger-9.1.0.0-rc.3`), a package of its own.
-  // [Q139 A]
   "v9-rc3": Object.freeze({
     versionName: "ledger-9.1.0.0-rc.3",
     packages: Object.freeze([

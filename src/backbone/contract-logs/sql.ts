@@ -5,7 +5,7 @@
  * **The table** `contract_logs.logs` has one row per log, keyed by `(height, tx_index, log_index)`, where `log_index`
  * is the log's number in the block. Each row holds the contract's address, the entry point, the logical segment, the
  * log's version and event type, and its data in the ledger's tagged serialization. The table is append-only and
- * range-partitioned by height. [design §10]
+ * range-partitioned by height.
  */
 
 import type { BlockWriteHandle } from "../../db/api.js";
@@ -13,13 +13,13 @@ import type { LogEventType } from "../../ledger/types.js";
 import { heightPartitionsSql } from "../height-partitions.js";
 import type { ContractLog } from "./contract-logs.js";
 
-/** Its schema: the item's name with `-` replaced by `_`, as for every shared item. [DB-8, Q89] */
+/** Its schema: the item's name with `-` replaced by `_`, as for every shared item. */
 export const CONTRACT_LOGS_SCHEMA = "contract_logs";
 
 /** Its table: one row per log. */
 export const LOGS_TABLE = "contract_logs.logs";
 
-/** The event types of a MIP-0002 log, as the ledger names them. [CC-2] */
+/** The event types of a MIP-0002 log, as the ledger names them. */
 export const LOG_EVENT_TYPES: readonly LogEventType[] = Object.freeze([
   "ShieldedSpend",
   "ShieldedReceive",
@@ -38,7 +38,7 @@ const types = LOG_EVENT_TYPES.map((type) => `'${type}'`).join(", ");
 
 /**
  * The item's migrations, the same for both providers. They are recorded under the item's name, applied once and never
- * changed. [DB-8, DB-9]
+ * changed.
  */
 export const CONTRACT_LOGS_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
   {

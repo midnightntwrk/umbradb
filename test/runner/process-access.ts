@@ -4,9 +4,9 @@ import { REPOSITORY } from "./resolver-boundary.js";
 
 /**
  * The `process`-access check, as the TypeScript checker sees the sources under `src/`: a library process reads the
- * global `process` only where design §7.1's G10 lets it, so that a host program's own process is left as it is. It
+ * global `process` only where the lets it, so that a host program's own process is left as it is. It
  * reports, outside `src/cli/` (the command's, which owns the program) and `src/library/start-umbradb.ts` (the Node
- * entry, which reads `process.cwd()` for the `cwd` default) [LM-2, G10, L13 STATIC]:
+ * entry, which reads `process.cwd()` for the `cwd` default):
  * - an identifier `process` that resolves to the global `process` — a local binding of that name (a parameter, a
  *   variable) is not it — unless it is the object of an allowed property read ({@link ALLOWED});
  * - `globalThis.process`, `global.process`, `globalThis["process"]`, and the same through parentheses, `as`, `!` or a
@@ -17,7 +17,7 @@ import { REPOSITORY } from "./resolver-boundary.js";
  * Comments and strings are never one; a type position (`typeof process`) is not a read.
  */
 
-/** A property of the global `process` a file may read (G10): the heartbeat's and admin's clock, the backup's. */
+/** A property of the global `process` a file may read: the heartbeat's and admin's clock, the backup's. */
 export interface AllowedRead {
   /** The file, relative to the repository. */
   readonly file: string;
@@ -25,16 +25,16 @@ export interface AllowedRead {
   readonly property: string;
 }
 
-/** G10's reads, besides the Node entry's `cwd()` (whose file is not checked). [LM-2, G10] */
+/** The reads, besides the Node entry's `cwd()` (whose file is not checked). */
 export const ALLOWED: readonly AllowedRead[] = Object.freeze([
-  // The heartbeat's monotonic clock, on the main thread and in the admin worker. [AE-2]
+  // The heartbeat's monotonic clock, on the main thread and in the admin worker.
   { file: "src/runner/heartbeat.ts", property: "hrtime" },
   { file: "src/admin/process-admin.ts", property: "hrtime" },
   { file: "src/admin/serve.ts", property: "hrtime" },
-  // A backup's temporary file name and `pg_dump`'s environment, inside `backup()`. [BK-1]
+  // A backup's temporary file name and `pg_dump`'s environment, inside `backup()`.
   { file: "src/backup/backup.ts", property: "pid" },
   { file: "src/backup/backup.ts", property: "env" },
-  // The `node:sqlite` import's wrapper, which drops its ExperimentalWarning. [G2]
+  // The `node:sqlite` import's wrapper, which drops its ExperimentalWarning.
   { file: "src/db/pglite-lock.ts", property: "emitWarning" },
 ]);
 
@@ -108,7 +108,7 @@ export type Access = string;
 
 /**
  * Every access of `files` the check reports (see the module comment), in file and line order. `host` reads the sources
- * (a fixture's copy of one file for the negative control); the files on disk unless given. [L13 STATIC]
+ * (a fixture's copy of one file for the negative control); the files on disk unless given.
  */
 export function processAccesses(
   files: readonly string[],

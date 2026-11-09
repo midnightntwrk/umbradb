@@ -30,7 +30,6 @@ import { BARRIER_METHOD, RawClient } from "./raw-client.js";
  * its `delayMs` and no other; delivers notifications in file order once the calls before them are answered; drops the
  * connection at a `disconnect` and serves the next session to the next connection; and times out or fails the next
  * matching call at a `fault`. `node-client.test.ts` runs the same rules through the node client of `src/node/`.
- * [A69, A70 CI, TT-1 to TT-3; acceptance §9]
  *
  * No test waits for a length of time to see that something did not happen: a barrier (`raw-client.ts`) or the clock
  * moved by hand (`ManualTimers`, which the tape node takes as its clock) shows it. One test checks the delay on the
@@ -46,8 +45,8 @@ function dropped(url: string): Promise<number> {
   return new Promise((resolve) => socket.on("close", resolve));
 }
 
-describe("A69: calls are answered by occurrence, the last answer repeated", { timeout: TEST_TIMEOUT_MS }, () => {
-  it("TT-2's scenario: heads A, B, C, four calls get A, B, C, C; each method and params counts alone", async () => {
+describe("calls are answered by occurrence, the last answer repeated", { timeout: TEST_TIMEOUT_MS }, () => {
+  it("heads A, B, C, four calls get A, B, C, C; each method and params counts alone", async () => {
     await expectAnswersByOccurrence();
   });
 
@@ -142,7 +141,7 @@ describe("A69: calls are answered by occurrence, the last answer repeated", { ti
   });
 });
 
-describe("A69: an unrecorded call gets not-on-tape", { timeout: TEST_TIMEOUT_MS }, () => {
+describe("an unrecorded call gets not-on-tape", { timeout: TEST_TIMEOUT_MS }, () => {
   it("answers a JSON-RPC error naming the method, with the params and session", async () => {
     await withNode([{ method: "chain_getBlockHash", params: [1], result: "0x01" }], async (node) => {
       const client = await RawClient.open(node.url);
@@ -195,8 +194,8 @@ describe("A69: an unrecorded call gets not-on-tape", { timeout: TEST_TIMEOUT_MS 
   });
 });
 
-describe("A69: delayMs delays that answer only", { timeout: TEST_TIMEOUT_MS }, () => {
-  it("TT-2's scenario on a clock moved by hand: answered at 2000 ms, not 1999, the next record at once", async () => {
+describe("delayMs delays that answer only", { timeout: TEST_TIMEOUT_MS }, () => {
+  it("on a clock moved by hand: answered at 2000 ms, not 1999, the next record at once", async () => {
     await expectDelayHonoured();
   });
 
@@ -315,7 +314,7 @@ describe("A69: delayMs delays that answer only", { timeout: TEST_TIMEOUT_MS }, (
   });
 });
 
-describe("A70: notifications, disconnects and faults", { timeout: TEST_TIMEOUT_MS }, () => {
+describe("notifications, disconnects and faults", { timeout: TEST_TIMEOUT_MS }, () => {
   it("delivers a subscription's notifications in file order, each after the calls recorded before it", async () => {
     await expectNotificationsAfterCalls();
   });
@@ -377,7 +376,7 @@ describe("A70: notifications, disconnects and faults", { timeout: TEST_TIMEOUT_M
     );
   });
 
-  it("TT-3's scenario: two notifications, a disconnect, the next session subscribes and gets two more", async () => {
+  it("two notifications, a disconnect, the next session subscribes and gets two more", async () => {
     const records: TapeRecord[] = [
       { subscribe: "a", method: "chain_subscribeFinalizedHeads", params: [] },
       { notify: "a", result: 1 },

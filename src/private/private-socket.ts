@@ -3,10 +3,10 @@
  * link's address, `ws or wss://<address>/`, the latter with the `core` entry's `tls` — its certificate and key
  * presented to the core, the core's certificate checked against `trustedRoots`. The carrier owns what only a socket has: `ws`'s limit
  * on a message (`maxPayload`), binary frames, the WebSocket pings, and the close handshake's deadline at the stop.
- * The session logic is `./private-transport.ts`'s. [PP-4, PP-11; design §1, §8]
+ * The session logic is `./private-transport.ts`'s.
  *
  * **Pings.** Once open, the carrier pings the core every `PING_INTERVAL_MS`; a core that has not answered the previous
- * ping by then is left (the connection ended), and the transport connects again. [PP-4]
+ * ping by then is left (the connection ended), and the transport connects again.
  */
 
 import { WebSocket } from "ws";

@@ -23,7 +23,7 @@ import { LEDGER_CORE } from "./ledger-restart.js";
  *   package's deserializations there;
  * - this thread's v9 package, counting its own deserializations while the process runs.
  *
- * Imports nothing of Vitest. [A137, LG-7, LG-17]
+ * Imports nothing of Vitest.
  */
 
 /** The test modules' file, which the worker imports for their tasks (its `modules` export). */
@@ -99,7 +99,7 @@ export function roundTripProblem(value: unknown): string | null {
 /**
  * A user module running after every other at `on-compute` (it requires the items of the last ones), recording every
  * block item it sees that does not come back the same from a structured clone: no main-thread callback may receive a
- * native ledger object. [A137]
+ * native ledger object.
  */
 export function plainWatchModule(seen: TaskSeen, requires: readonly string[]): ModuleDeclaration {
   return {

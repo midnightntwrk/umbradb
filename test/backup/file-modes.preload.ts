@@ -4,7 +4,7 @@ import { watchFileModes } from "./file-modes.js";
 /**
  * The file-mode observer in a process of its own (`./file-modes.ts`): loaded with `node --import tsx --import <this
  * file>` before the `umbradb` command, it watches the directory `UMBRADB_TEST_MODES_DIR` names and, when the process
- * exits, appends what it saw as one JSON line to the file `UMBRADB_TEST_MODES_LOG` names. [A174]
+ * exits, appends what it saw as one JSON line to the file `UMBRADB_TEST_MODES_LOG` names.
  */
 
 const dir = process.env.UMBRADB_TEST_MODES_DIR;

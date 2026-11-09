@@ -4,7 +4,7 @@
  * **Failures.** A handshake the server answers with an HTTP status instead of 101 is reported with that status (`ws`'s
  * `unexpected-response`), so the client can retry 429 and 5xx and halt on the rest. A connection that could not be
  * made is reported with the system's error code only (`ECONNREFUSED`, `ENOTFOUND`, …), never with `ws`'s message,
- * which may name the host, since the node's URL is a `secret` field. [IN-10, CF-4]
+ * which may name the host, since the node's URL is a `secret` field.
  *
  * **Heartbeat.** A connection the node stops answering on (a cut cable, a NAT that forgot it) can stay open for a long
  * time without an error, and a subscription on it then just goes quiet. So every `heartbeatMs` (30 s by default) the
@@ -14,7 +14,7 @@
  *
  * `heartbeatMs` is a whole number from 1 to {@link MAX_HEARTBEAT_MS}, or the transport refuses it with
  * `invalid-configuration` before connecting: Node.js runs a timer whose delay is above 2^31 − 1 ms after 1 ms instead,
- * which would ping, find no pong 1 ms later and end every connection as soon as it opens. [IN-10]
+ * which would ping, find no pong 1 ms later and end every connection as soon as it opens.
  */
 
 import { WebSocket } from "ws";

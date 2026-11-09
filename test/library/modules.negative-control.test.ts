@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { L63_CASES, moduleListProblems, type ModuleListRule } from "./module-list-cases.js";
 
 /**
- * L63's committed negative controls, through the criterion's own cases and oracle (`./module-list-cases.ts`), with
+ * The committed negative controls, through the criterion's own cases and oracle (`./module-list-cases.ts`), with
  * each of `loadModuleList`'s rules (`../../src/config/load.ts`) removed in turn, the others kept — the module replaced
  * here:
  * - **`load-failed` removed**: a module file whose import throws, or that does not exist, reads as one listing no
@@ -12,7 +12,7 @@ import { L63_CASES, moduleListProblems, type ModuleListRule } from "./module-lis
  * - **"not an array" removed**: a `modules` export that is no array reads as no modules.
  *
  * The process then starts with no user modules, and the oracle fails on exactly the cases of the removed rule; with
- * every rule kept it passes on all of them. [L63, LM-7]
+ * every rule kept it passes on all of them.
  */
 
 const control = vi.hoisted(() => ({ removed: null as string | null }));
@@ -43,7 +43,7 @@ vi.mock("../../src/config/load.js", async (importOriginal) => {
   };
 });
 
-describe("L63's negative controls: each of loadModuleList's rules removed fails the oracle on its own cases (LM-7)", () => {
+describe("negative controls: each of loadModuleList's rules removed fails the oracle on its own cases", () => {
   it.each(["load-failed", "required-export", "not-a-list"] as const)("without %s", async (removed: ModuleListRule) => {
     control.removed = removed;
     const found: Record<string, string[]> = {};

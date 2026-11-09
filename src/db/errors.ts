@@ -1,7 +1,7 @@
 /**
  * The database API's errors. `UmbraError`, `ERROR_CODES`, `ErrorCode` and `ErrorDetails` are defined in the
  * `deterministic_postgresql` component (`../deterministic-postgresql/errors.ts`, whose result mapping throws them) and
- * re-exported here unchanged. This file also builds the errors that both backends give alike. [Q79; design §4, §12]
+ * re-exported here unchanged. This file also builds the errors that both backends give alike.
  */
 
 import { TRUNCATE_NOT_ALLOWED_SQLSTATE, UmbraError } from "../deterministic-postgresql/index.js";
@@ -10,7 +10,7 @@ export { ERROR_CODES, type ErrorCode, type ErrorDetails, UmbraError } from "../d
 
 /**
  * `handle-closed`: a read handle or transaction used after it ended, or a database used after it was closed — the
- * same error, with the same message, from both backends. [DB-1]
+ * same error, with the same message, from both backends.
  */
 export function handleClosed(handle: "read" | "transaction" | "database"): UmbraError {
   const what = {
@@ -24,7 +24,7 @@ export function handleClosed(handle: "read" | "transaction" | "database"): Umbra
 /**
  * `handle-closed` for a write handle used after its callback returned or threw (`./write-handles.ts`). It has the same
  * code as {@link handleClosed} and names the handle, the part whose callback it was given to, and the point. The runner
- * treats it as that part's callback error. [DB-3, A10, RN-8]
+ * treats it as that part's callback error.
  */
 export function writeHandleClosed(handle: "block-write" | "schema-write", part: string): UmbraError {
   const [kind, point] = handle === "block-write" ? ["block", "on-db-write"] : ["schema", "on-start-db"];
@@ -36,14 +36,14 @@ export function writeHandleClosed(handle: "block-write" | "schema-write", part: 
   );
 }
 
-/** The read timeout that ended a bounded read. [DB-15] */
+/** The read timeout that ended a bounded read. */
 export type ReadTimeoutSetting = "statement_timeout" | "idle_in_transaction_session_timeout";
 
 /**
  * `query-timeout`: a read bounded by the read option (`ReadOptions.timeoutMs`, a module API request's
  * `apiReadTimeoutMs`) that `setting` ended. Either a statement ran for `timeoutMs` (`statement_timeout`), or the read
  * stayed idle in its transaction that long (`idle_in_transaction_session_timeout`). Not retryable: the same read would
- * run as long again. [DB-15]
+ * run as long again.
  */
 export function queryTimeout(timeoutMs: number, setting: ReadTimeoutSetting, cause?: unknown): UmbraError {
   const what = setting === "statement_timeout" ? "a statement ran" : "the read stayed idle in its transaction";
@@ -70,7 +70,7 @@ export function commitRolledBack(): UmbraError {
 /**
  * A statement the server refused, as both backends report it: `truncate-not-allowed` when the
  * `deterministic_postgresql` component's `TRUNCATE` trigger raised it (its SQLSTATE is in `details.sqlstate`), and
- * `database-error` otherwise. Neither is retryable. [DB-13, DB-14]
+ * `database-error` otherwise. Neither is retryable.
  */
 export function statementRefused(message: string, details: Record<string, unknown>, cause: unknown): UmbraError {
   const code = details.sqlstate === TRUNCATE_NOT_ALLOWED_SQLSTATE ? "truncate-not-allowed" : "database-error";

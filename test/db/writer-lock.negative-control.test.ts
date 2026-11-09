@@ -15,7 +15,7 @@ import {
 
 /**
  * The committed negative controls of the writer lock on PostgreSQL: two wrong writer locks, each of which must make
- * the writer lock checks (`writer-lock-checks.ts`, run by `writer-lock.test.ts`) fail. [A17, DB-11]
+ * the writer lock checks (`writer-lock-checks.ts`, run by `writer-lock.test.ts`) fail.
  *
  * - **A lock released when its statement ends instead of with the session:** `pg_try_advisory_xact_lock`, taken in
  *   autocommit on the writer's session, is released as soon as its statement's own transaction ends, so the writer
@@ -69,8 +69,8 @@ async function assertionFailure(check: Promise<unknown>): Promise<Error> {
   throw new Error("the check passed, but the negative control must make it fail");
 }
 
-describe("A17's negative controls on PostgreSQL (DB-11)", () => {
-  it("passes A17's checks in this file's build with the real lock", async () => {
+describe("negative controls on PostgreSQL", () => {
+  it("passes the checks in this file's build with the real lock", async () => {
     await expectSecondPostgresWriterRefused(await server.createDatabase());
     await expectLockRetakenAfterTermination(await server.createDatabase());
     await expectLockLostWhenTakenMeanwhile(await server.createDatabase());
@@ -127,7 +127,7 @@ function scripted(failures: readonly ("lost-before" | "lost-after" | "held")[]):
   };
 }
 
-describe("the checks' allowance for a loss the driver had not seen yet (nextTransaction, A153)", () => {
+describe("the checks' allowance for a loss the driver had not seen yet (nextTransaction)", () => {
   it("runs the transaction once more after one connection-lost before its body", async () => {
     const writer = scripted(["lost-before"]);
     expect(await nextTransaction(writer.db, async () => "ran")).toBe("ran");

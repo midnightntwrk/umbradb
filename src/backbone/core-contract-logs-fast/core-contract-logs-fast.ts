@@ -3,12 +3,11 @@
  * ledger state, as the shared item `contract-logs` (`../contract-logs/`) and its table `contract_logs.logs`. It stores
  * exactly the rows `core-contract-logs-full` would store, or else halts. It runs only when development modules are
  * explicitly enabled, and it may start mid-chain, since nothing it reads depends on an earlier block.
- * [CC-3, CC-4, MD-5, Q19 D, Q20; CORE-ARCH §4.11; design §10]
  *
  * **Its ledger task** (`./task.ts`) runs in the ledger worker on the block's one parse. It reads each transaction's
  * `log` sites, in the ledger's emission order (`./transcripts.ts`); there are none on ledger v8. The result is the
  * module's `block` item `contract-log-sites`, put before the module's own `on-parse` callback runs
- * (`src/ledger/tasks.ts`). [LG-17, Q54]
+ * (`src/ledger/tasks.ts`).
  *
  * **At `on-parse`** (after `core-block-parsed`'s, whose item it requires) it takes those sites, and each transaction's
  * chain outcome from the event that placed it (`chain-events`, read as `core-tx-results` reads it: `outcomeOf`). Then,
@@ -18,12 +17,12 @@
  *   in the order the ledger emits them, and a halt on any other log (`not-a-literal`, `conditional`);
  * - a partial success with any log: a halt (`partial-transaction`). The chain's `TxPartialSuccess` does not say which
  *   fallible segments failed, so neither which logs the ledger kept nor how the block's later logs are numbered is
- *   known. [Q19 D]
+ *   known.
  *
  * The halt is `fast-log-unsupported`: an `UmbraError` naming the height, the transaction (its index and hash), the
  * segment, the call, the op and the reason ({@link unsureLogError}). The runner halts processing at that height with
  * the code, `on-parse` and this module, before the block's transaction. For a queued best block, the failure drops the
- * block, and it is met again at finality. [CC-3, RN-8, Q21 A; design §11]
+ * block, and it is met again at finality.
  *
  * The logical segment of every contract log is 0 in the ledger ({@link LOGICAL_SEGMENT}).
  *
@@ -169,7 +168,7 @@ export function fastLogsFrom(
 export interface CoreContractLogsFastOptions {
   /** Where the transcripts are read: the module's ledger task (its `contract-log-sites` item) unless given. */
   readonly reader?: FastLogReader;
-  /** What happens to a log it cannot read exactly: by default the halt (`fast-log-unsupported`). [CC-3] */
+  /** What happens to a log it cannot read exactly: by default the halt (`fast-log-unsupported`). */
   readonly onUnsure?: (unsure: UnsureLog) => void;
 }
 

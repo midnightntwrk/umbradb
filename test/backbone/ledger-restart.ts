@@ -10,18 +10,17 @@ import type { FoundTape } from "../tape/real/real-tapes.js";
 /**
  * A ledger process stopped and started again on a tape: the core modules of the ledger, the devnet tape's `core`
  * settings, the records a restart at a cursor needs, and a ledger worker that reports its loads. Imports nothing of
- * Vitest, so that a worker process (`ledger-restart.worker.ts`) builds the same. [LG-11, A102]
+ * Vitest, so that a worker process (`ledger-restart.worker.ts`) builds the same.
  *
- * A tape replays to a client what was recorded, answering calls by method and params. [TT-2]
+ * A tape replays to a client what was recorded, answering calls by method and params.
  *
  * A process that syncs from a tape's first block asks what the recording asked. One restarted at cursor c also asks:
- * - the header of c, for startup's cursor-hash check [IN-3];
+ * - the header of c, for startup's cursor-hash check;
  * - the runtime metadata at c's hash, the parent of the first block it decodes. A tape holds it once per runtime
- *   only. [LG-4, Q135 A]
+ *   only.
  *
  * {@link restartAt} adds both, for the recorded tapes as for the synthetic ones. The metadata record is copied from the
  * one of the runtime that c's state has, since a runtime's metadata is the same bytes at every one of its blocks.
- * [Q135 A]
  */
 
 /** The ledger's core modules as the build enables them (`core-ledger-state` and what it requires). */
@@ -74,7 +73,7 @@ export function cappedAt(records: readonly TapeRecord[], height: bigint): TapeRe
 
 /**
  * The `state_getMetadata` record for `hash`, copied from the tape's record of the runtime the state at `hash` has
- * (see the module comment): the runtime is `state_getRuntimeVersion`'s at `hash`. [Q135 A]
+ * (see the module comment): the runtime is `state_getRuntimeVersion`'s at `hash`.
  */
 export function metadataRecordAt(records: readonly TapeRecord[], hash: string): TapeRecord {
   const calls = records.filter(isCall);

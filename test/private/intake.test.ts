@@ -19,12 +19,12 @@ import { TestLink } from "./link.js";
 /**
  * Block intake of a private process: `core-private-source` reads the public cursor when the process starts and
  * whenever its transport wakes it, and processes every height from its own cursor + 1 up to the public cursor, in
- * order, reading public data at each height; the core's `committed` messages only wake it. [PP-3, PP-5]
+ * order, reading public data at each height; the core's `committed` messages only wake it.
  *
  * - The transport (`link.ts`, the stand-in for the core's transport) drops while the public cursor advances 50 heights,
  *   and every `committed` message of those heights is lost; after reconnecting, the private process processes the 50
- *   heights in order. [A114 FAULT]
- * - An independent instance stopped for 100 blocks never pauses the core, and catches up from public data. [A116]
+ *   heights in order.
+ * - An independent instance stopped for 100 blocks never pauses the core, and catches up from public data.
  */
 
 /** The heights of a private module's `on-db-write` calls, in order, from `from` on in `seen`. */
@@ -84,12 +84,12 @@ function against(backend: PrivateBackend, db: TestDatabase, core: PublicCore, re
     : { ...rest, direct: () => core.db() };
 }
 
-// ── Dropped transport [A114 FAULT] ────────────────────────────────────────────────────────────────────────────────────
+// ── Dropped transport ────────────────────────────────────────────────────────────────────────────────────
 
 const A114_FROM = 5;
 const A114_TO = A114_FROM + 50;
 
-/** What one dropped-transport run saw. [A114 FAULT] */
+/** What one dropped-transport run saw. */
 interface A114Observation {
   readonly seen: readonly PrivateSeen[];
   /** Where in `seen` the reconnect came. */
@@ -101,7 +101,7 @@ interface A114Observation {
   readonly rows: readonly [number, string][];
 }
 
-/** The dropped-transport oracle: every problem with what was observed, none when the test holds. [A114 FAULT] */
+/** The dropped-transport oracle: every problem with what was observed, none when the test holds. */
 function a114Problems(observed: A114Observation): string[] {
   const problems: string[] = [];
   if (observed.lost !== 50) problems.push(`${observed.lost} committed messages were lost, not 50`);
@@ -147,7 +147,7 @@ class SkipsAfterReconnect extends FinalizedLoop {
   }
 }
 
-/** Runs the dropped-transport test on `backend` with the private process's `loop`. [A114 FAULT] */
+/** Runs the dropped-transport test on `backend` with the private process's `loop`. */
 async function a114Run(backend: PrivateBackend, loop?: new (input: LoopInput) => FinalizedLoop): Promise<A114Observation> {
   const publicDb = await backend.database("public");
   const privateDb = await backend.database("private");
@@ -181,14 +181,14 @@ async function a114Run(backend: PrivateBackend, loop?: new (input: LoopInput) =>
   }
 }
 
-// ── Independent instance catching up [A116] ─────────────────────────────────────────────────────────────────────
+// ── Independent instance catching up ─────────────────────────────────────────────────────────────────────
 
 const A116_FROM = 10;
 const A116_TO = A116_FROM + 100;
 /** How long the core may go without committing a height it has before it counts as paused. */
 const STALL_MS = 15_000;
 
-/** What one catch-up run saw. [A116] */
+/** What one catch-up run saw. */
 interface A116Observation {
   /** The core's cursor once it reached the head, or where it stalled, while the instance was stopped. */
   readonly coreCursor: bigint | null;
@@ -199,7 +199,7 @@ interface A116Observation {
   readonly rows: readonly [number, string][];
 }
 
-/** The catch-up oracle: every problem with what was observed, none when the test holds. [A116] */
+/** The catch-up oracle: every problem with what was observed, none when the test holds. */
 function a116Problems(observed: A116Observation): string[] {
   const problems: string[] = [];
   if (observed.paused) {
@@ -219,7 +219,7 @@ function a116Problems(observed: A116Observation): string[] {
 
 /**
  * A negative control's core: before each block's transaction it waits until the instance has committed the height
- * before (lockstep's wait, for an instance that is not listed). [PP-6]
+ * before (lockstep's wait, for an instance that is not listed).
  */
 function waitingFor(instance: () => bigint): new (input: LoopInput) => FinalizedLoop {
   return class WaitsForInstance extends FinalizedLoop {
@@ -250,7 +250,7 @@ async function follow(core: PublicCore, head: bigint): Promise<{ readonly cursor
   }
 }
 
-/** Runs the catch-up test on `backend`; `waits` makes the core the negative control's. [A116] */
+/** Runs the catch-up test on `backend`; `waits` makes the core the negative control's. */
 async function a116Run(backend: PrivateBackend, waits = false): Promise<A116Observation> {
   const publicDb = await backend.database("public");
   const privateDb = await backend.database("private");
@@ -293,7 +293,7 @@ describe.each(PRIVATE_BACKENDS)("private block intake ($name)", (backend) => {
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 
   it(
-    "A114: dropping the transport while the public cursor advances 50 heights, the private process processes the 50 " +
+    "dropping the transport while the public cursor advances 50 heights, the private process processes the 50 " +
       "heights in order after reconnecting",
     async () => {
       expect(a114Problems(await a114Run(backend))).toEqual([]);
@@ -302,7 +302,7 @@ describe.each(PRIVATE_BACKENDS)("private block intake ($name)", (backend) => {
   );
 
   it(
-    "A114 negative control: an intake that skips a height after a reconnect fails it",
+    "negative control: an intake that skips a height after a reconnect fails it",
     async () => {
       const problems = a114Problems(await a114Run(backend, SkipsAfterReconnect));
       expect(problems).toContain(
@@ -313,7 +313,7 @@ describe.each(PRIVATE_BACKENDS)("private block intake ($name)", (backend) => {
   );
 
   it(
-    "A116: an independent instance stopped for 100 blocks never pauses the core and catches up from public data",
+    "an independent instance stopped for 100 blocks never pauses the core and catches up from public data",
     async () => {
       expect(a116Problems(await a116Run(backend))).toEqual([]);
     },
@@ -321,7 +321,7 @@ describe.each(PRIVATE_BACKENDS)("private block intake ($name)", (backend) => {
   );
 
   it(
-    "A116 negative control: a core that waits for an independent instance fails it",
+    "negative control: a core that waits for an independent instance fails it",
     async () => {
       const problems = a116Problems(await a116Run(backend, true));
       expect(problems).toContain(`the core paused at ${A116_FROM + 1} while the independent instance was stopped`);

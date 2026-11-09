@@ -28,14 +28,13 @@ const SPEC_ID = /\b(?:[A-Z]{2,5}-\d+|Q\d+)\b/;
  * - an item without a lifetime;
  * - a `table` item without a kind;
  * - a settings field without a kind.
- * [A21, MD-2]
  *
  * The validation rules' other causes are checked by the same validation (`bad-id`, below) or by the schema plan it
- * feeds (`schema-collision` and `shared-item-migrations-differ`, in `planSchemas`). [MD-2, A15]
+ * feeds (`schema-collision` and `shared-item-migrations-differ`, in `planSchemas`).
  *
  * Everything else the declaration's type forbids is refused as well (`invalid-declaration`), so a module built without
  * types is held to the same declaration. Refusing at startup is the runner's job; here the validation is called
- * directly. [A20]
+ * directly.
  */
 
 /** The refusal `run` throws, or undefined when it returns. */
@@ -68,7 +67,7 @@ function firstItem(d: Record<string, unknown>): Record<string, unknown> {
   return item;
 }
 
-/** One validation cause triggered alone: the declarations, and the refusal's code, names and words. [MD-2] */
+/** One validation cause triggered alone: the declarations, and the refusal's code, names and words. */
 interface Case {
   readonly name: string;
   readonly set: DeclarationSet;
@@ -112,7 +111,7 @@ const A21: readonly Case[] = [
     says: ['user module on-chain-stats has an id starting with "on-"', "point names", "choose an id"],
   },
   {
-    name: "the id core, the core entry's (docs/issues/00012)",
+    name: "the id core, the core entry's",
     set: userModules([declaration("core")]),
     code: "reserved-prefix",
     details: { module: "core" },
@@ -197,14 +196,14 @@ const A21: readonly Case[] = [
   },
 ];
 
-/** The rule each case of the startup validation is about, by its code. [A21] */
+/** The rule each case of the startup validation is about, by its code. */
 function ruleOf(c: Case): DeclarationRule {
   const rule = DECLARATION_RULES.find((candidate) => candidate.code === c.code);
   if (rule === undefined) throw new Error(`no rule refuses with ${c.code}`);
   return rule;
 }
 
-/** The validation cases that `rules` do not refuse as the case says: each with what went wrong. [A21] */
+/** The validation cases that `rules` do not refuse as the case says: each with what went wrong. */
 function failures(rules: readonly DeclarationRule[]): string[] {
   const out: string[] = [];
   for (const c of A21) {
@@ -216,7 +215,7 @@ function failures(rules: readonly DeclarationRule[]): string[] {
   return out;
 }
 
-describe("A21: each refusal of MD-2, with its code and names", () => {
+describe("each refusal of declaration validation, with its code and names", () => {
   for (const c of A21) {
     it(c.name, () => {
       const error = refusal(() => validateDeclarations(c.set));
@@ -229,7 +228,7 @@ describe("A21: each refusal of MD-2, with its code and names", () => {
     });
   }
 
-  it("covers every cause A21 names, and each rule of MD-2 is triggered", () => {
+  it("covers every cause, and each validation rule is triggered", () => {
     expect([...new Set(A21.map((c) => c.code))].sort()).toEqual([
       "duplicate-id",
       "field-no-kind",
@@ -251,7 +250,7 @@ describe("A21: each refusal of MD-2, with its code and names", () => {
     expect(failures(DECLARATION_RULES)).toEqual([]);
   });
 
-  it("negative control: a validation that skips one rule of MD-2 fails exactly that rule's cases", () => {
+  it("negative control: a validation that skips one rule fails exactly that rule's cases", () => {
     for (const rule of DECLARATION_RULES) {
       const without = DECLARATION_RULES.filter((other) => other !== rule);
       const expected = A21.filter((c) => ruleOf(c) === rule).map((c) => c.name);
@@ -278,7 +277,7 @@ describe("A21: each refusal of MD-2, with its code and names", () => {
     expect(validated.user[3]).toBe(set.user[3]);
   });
 
-  it("refuses a duplicate id as such, where the schema plan would call it a schema collision (DB-8)", () => {
+  it("refuses a duplicate id as such, where the schema plan would call it a schema collision", () => {
     const twice = [declaration("stats"), declaration("stats")];
     expect(refusal(() => planSchemas(schemaModules(twice))).code).toBe("schema-collision");
     expect(refusal(() => validateDeclarations(userModules(twice))).code).toBe("duplicate-id");
@@ -290,7 +289,7 @@ describe("A21: each refusal of MD-2, with its code and names", () => {
   });
 });
 
-describe("MD-2: ids and item names match DB-8's pattern (bad-id, the schema plan's check)", () => {
+describe("ids and item names match the pattern (bad-id, the schema plan's check)", () => {
   const cases: readonly (readonly [string, ModuleDeclaration, Record<string, unknown>])[] = [
     ["an id with a capital", declaration("Stats"), { id: "Stats", of: "module" }],
     ["an id with an underscore", declaration("core_chain"), { id: "core_chain", of: "module" }],
@@ -470,7 +469,7 @@ const SHAPES: readonly ShapeCase[] = [
   },
   { name: "no startsMidChain", build: () => loose("stats", (d) => void delete d.startsMidChain), field: "startsMidChain" },
   { name: "needsLockstep not a boolean", build: () => loose("stats", (d) => void (d.needsLockstep = "yes")), field: "needsLockstep" },
-  // A private module's own field on a public module. [PP-6]
+  // A private module's own field on a public module.
   {
     name: "needsLockstep on a public module",
     build: () => loose("stats", (d) => Object.assign(d, { needsLockstep: false })),
@@ -530,7 +529,7 @@ const SHAPES: readonly ShapeCase[] = [
   },
 ];
 
-describe("MD-1: a declaration of a shape its type forbids is refused (invalid-declaration)", () => {
+describe("a declaration of a shape its type forbids is refused (invalid-declaration)", () => {
   for (const c of SHAPES) {
     it(c.name, () => {
       const error = refusal(() => validateDeclarations(userModules([c.build()])));
@@ -609,7 +608,7 @@ function contentDeclared(id: string, contentDefined: unknown, table: Record<stri
   });
 }
 
-describe("a table item's content-defined tables: UmbraDB's own parts only, refused for user modules (DT-3, MD-1)", () => {
+describe("a table item's content-defined tables: UmbraDB's own parts only, refused for user modules", () => {
   it("a user module declaring a content-defined table is refused with invalid-declaration, naming the field", () => {
     for (const declared of [{ tables: ["rows"], content: CONTENT }, "rows", null]) {
       const error = refusal(() => validateDeclarations(userModules([contentDeclared("stats", declared)])));

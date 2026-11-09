@@ -20,12 +20,12 @@ import { TEST_CONFIGURATION } from "./browser-harness.js";
  * workers bundle UmbraDB's own modules and only the replacements `browser/build.ts` names, that every replacement
  * gives what `src/` imports from the module it replaces, that a built-in module of Node.js no replacement covers fails
  * the build by name, the rewrite of the vendored ledger packages' Node.js entries, and the check of every vendored
- * package file the build bundles against its recorded SHA-256. [design §9.2]
+ * package file the build bundles against its recorded SHA-256.
  *
  * The socket carriers (the private link's server and client, the module API's Node.js handlers and listener) are in
  * the bundles only as their stubs, the private link's and the module API's session logic bundled whole; `node:http`,
  * `node:https` and `ws` have no browser replacement, so a build that carried a carrier itself would fail, naming it
- * (the negative control below). [LM-11, L58; design §8]
+ * (the negative control below).
  */
 
 const directories: string[] = [];
@@ -102,7 +102,7 @@ function importedFrom(target: string, bundled: readonly string[]): Map<string, s
   return found;
 }
 
-describe("the browser build (task 16.1)", () => {
+describe("the browser build", () => {
   it("writes the page, the core, private and ledger workers, PGlite's and pglite-tools' files and the ledger packages' WebAssembly", () => {
     for (const build of [defaultBuild, testBuild]) {
       for (const file of [
@@ -139,7 +139,7 @@ describe("the browser build (task 16.1)", () => {
       "src/ledger/load.ts",
       "src/private/core-transport.ts",
       "src/private/private-transport.ts",
-      // The private link over channels and the module API's session logic: the demo's carriers. [LM-11]
+      // The private link over channels and the module API's session logic: the demo's carriers.
       "src/private/core-channels.ts",
       "src/private/private-channels.ts",
       "src/library/channels.ts",
@@ -149,7 +149,7 @@ describe("the browser build (task 16.1)", () => {
       "browser/src/link.ts",
       "src/admin/process-admin.ts",
       "src/cli/build-modules.ts",
-      // The page's backup and restore: the same backup text and restore as the commands', and pglite-tools. [BK-5]
+      // The page's backup and restore: the same backup text and restore as the commands', and pglite-tools.
       "src/backup/pglite-backup.ts",
       "src/backup/restore.ts",
       "src/backup/text.ts",
@@ -166,7 +166,7 @@ describe("the browser build (task 16.1)", () => {
     for (const left of ["src/admin/serve.ts", "src/admin/worker.ts", "src/config/load.ts", "src/library/start-umbradb.ts"]) {
       expect(testBuild.inputs, left).not.toContain(left);
     }
-    // The socket carriers are their stubs only; no shim of a socket is left. [LM-11, L58]
+    // The socket carriers are their stubs only; no shim of a socket is left.
     for (const carrier of ["src/private/core-socket.ts", "src/private/private-socket.ts", "src/runner/api-socket.ts"]) {
       expect(testBuild.inputs, carrier).not.toContain(carrier);
       expect(testBuild.inputs, carrier).toContain(`umbradb-unavailable:${join(REPOSITORY, carrier)}`);
@@ -248,7 +248,7 @@ describe("the browser build (task 16.1)", () => {
     );
   });
 
-  it("checks every vendored package file it bundles against its recorded SHA-256 when it builds: a changed one fails the build naming it (task 12.2b)", async () => {
+  it("checks every vendored package file it bundles against its recorded SHA-256 when it builds: a changed one fails the build naming it", async () => {
     const copy = copyVendoredLedger();
     /** Flips one byte of `file` (under the copy) and returns what restores it. */
     const change = (file: string): (() => void) => {

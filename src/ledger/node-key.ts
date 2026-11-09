@@ -7,7 +7,7 @@
  *
  * {@link nodeKeys} gives a stored node's key and the keys of the nodes its child list embeds, which are nodes the
  * database holds as much as its rows are; {@link nodeKey} gives the key alone. A child list that is not one refuses as
- * `./node-refs.ts` refuses it. [LG-11, DT-3, R29]
+ * `./node-refs.ts` refuses it.
  */
 
 import { createHash } from "node:crypto";
@@ -29,7 +29,7 @@ export interface NodeKeys {
   readonly embedded: readonly Uint8Array[];
 }
 
-/** The key of the node with payload `data` and serialized child list `children`, and of each node it embeds. [R29] */
+/** The key of the node with payload `data` and serialized child list `children`, and of each node it embeds. */
 export function nodeKeys(data: Uint8Array, children: Uint8Array): NodeKeys {
   const embedded: Uint8Array[] = [];
   const childKeys = readChildList(children, {
@@ -43,7 +43,7 @@ export function nodeKeys(data: Uint8Array, children: Uint8Array): NodeKeys {
   return { key: hashNode(data, childKeys), embedded };
 }
 
-/** The key of the node with payload `data` and serialized child list `children`. [R29] */
+/** The key of the node with payload `data` and serialized child list `children`. */
 export function nodeKey(data: Uint8Array, children: Uint8Array): Uint8Array {
   return nodeKeys(data, children).key;
 }

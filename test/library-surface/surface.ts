@@ -3,7 +3,7 @@ import ts from "typescript";
 /**
  * The package's entry point (`src/index.ts`): its exports as the compiler resolves them ({@link surfaceOf}), and the
  * core modules' declarations it exports, each of which declares its module's id and has the `entry` builder a
- * configuration file writes its entry with. [A1 STATIC, LS-1; design §12]
+ * configuration file writes its entry with.
  *
  * The declarations' check takes plain data and returns one sentence per problem, naming the export, empty when there is
  * none, so `./surface.test.ts` runs it on the real barrel and on its negative controls.
@@ -52,7 +52,7 @@ export function surfaceOf(file: string): Surface {
 
 /**
  * The core modules' declarations the surface exports (their names are the declarations' own constants), with the id
- * each declares: a configuration file writes their entries with `<name>.entry({ start, config: {} })`. [design §12]
+ * each declares: a configuration file writes their entries with `<name>.entry({ start, config: {} })`.
  */
 export const CORE_MODULE_EXPORTS: Readonly<Record<string, string>> = Object.freeze({
   CORE_CHAIN_EVENTS: "core-chain-events",

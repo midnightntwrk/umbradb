@@ -1,12 +1,12 @@
 /**
  * A test-only CBOR decoder and RFC 8949 §4.2.1 checker, written independently of `src/determinism/cbor.ts`, so the
- * encoder's property tests have an oracle that shares no code with the encoder under test. [A53]
+ * encoder's property tests have an oracle that shares no code with the encoder under test.
  *
  * It decodes the subset the canonical encoder allows (unsigned and negative integers, byte strings, text strings,
  * arrays, maps, `false`, `true`, `null`) and reports every departure from core deterministic encoding it can see: an
  * argument not in its shortest form, an indefinite length, map keys not in strictly ascending bytewise order of their
  * encodings, a tag, a float or other simple value, invalid UTF-8, and trailing bytes. It recurses, so it is meant for
- * the moderately nested values the property tests generate, not for the deep-nesting tests. [DT-1]
+ * the moderately nested values the property tests generate, not for the deep-nesting tests.
  */
 
 /** A decoded map entry, with the raw bytes of its key and of the whole entry (key then value). */

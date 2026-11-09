@@ -6,22 +6,22 @@ import { instancesProblems, instancesRun, originOf } from "./privacy-checks.js";
 
 /**
  * What the core's `/status` shows of a private instance, on PostgreSQL 18.6 and PGlite 0.5.10. Keys are not checked
- * here: they belong to a module, not the core. [A120 CI, PP-9, AE-5, Q154]
+ * here: they belong to a module, not the core.
  * - The core shows each private instance with only its id, connection, lockstep flag and synced height: a lockstep
- *   instance at the head, an independent one connected. [A120 CI, PP-9]
- * - Each instance shows its public cursor and its lockstep flag. [A120 CI]
- * - A listed instance the core never saw shows as not connected, lockstep, with no height. [PP-9, Q24]
+ *   instance at the head, an independent one connected.
+ * - Each instance shows its public cursor and its lockstep flag.
+ * - A listed instance the core never saw shows as not connected, lockstep, with no height.
  *
  * The committed negative control, a core whose `/status` shows more of an instance, is in
  * `./privacy.negative-control.test.ts`.
  */
 
-describe.each(PRIVATE_BACKENDS)("A120: what the core's /status shows of a private instance on $name (PP-9)", (backend) => {
+describe.each(PRIVATE_BACKENDS)("what the core's /status shows of a private instance on $name", (backend) => {
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 
   it(
-    "A120: the core's /status shows only each instance's id, connection, lockstep flag and synced height",
+    "the core's /status shows only each instance's id, connection, lockstep flag and synced height",
     async () => {
       const run = await instancesRun(backend, { head: 20n, lockstep: true });
       expect(instancesProblems(run)).toEqual([]);
@@ -36,7 +36,7 @@ describe.each(PRIVATE_BACKENDS)("A120: what the core's /status shows of a privat
   );
 
   it(
-    "the core's /status shows a listed instance it never saw: not connected, lockstep, no height (PP-9, Q24)",
+    "the core's /status shows a listed instance it never saw: not connected, lockstep, no height",
     async () => {
       const publicDb = await backend.database("public");
       const core = launchPublicCore({

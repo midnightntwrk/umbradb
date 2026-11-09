@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # The undeployed devnet: a local Midnight chain that starts on a ledger-8 runtime, carries our own transactions, enacts
 # the governance upgrade to the ledger-9 runtime, carries our own transactions again, and is then recorded as a tape
-# (tools/tape/main.ts range) with its genesis and its upgrade boundary (tools/tape/main.ts boundaries). [Q130]
+# (tools/tape/main.ts range) with its genesis and its upgrade boundary (tools/tape/main.ts boundaries).
 #
 # No public network runs ledger v9 from a ledger-8 history, so this is where the v8 -> v9 upgrade and every event and
-# outcome kind the core stores are recorded. [A96, A100, LG-9]
+# outcome kind the core stores are recorded.
 #
 # It follows the official indexer's rehearsal (midnight-indexer docs/hardfork-devnet-rehearsal-8to9.md,
 # qa/scripts/test-hardfork-8to9.sh) and its test-data scripts (generate_node_data.sh): a ledger-8 dev chain-spec from
@@ -27,7 +27,7 @@
 #     a governance system transaction: update-ledger-parameters with the node's own parameters
 #       (MidnightSystem.SystemTransactionApplied);
 #   ledger 9 only - first, register-dust-address for the three wallets that pay fees: the v8 -> v9 state conversion
-#     resets DUST [LG-9], so they have none until registered; the node's own system transactions after the upgrade
+#     resets DUST, so they have none until registered; the node's own system transactions after the upgrade
 #     (the DUST reapply, MidnightSystem.SystemTransactionApplied at F and F + 1) come without any send.
 #   with ATTEMPT_BLOCK_LIMIT=1 (default) - a failed Midnight transaction: the ledger's block_usage limit lowered by
 #     governance to 6,000 bytes, then two ~3.8 kB transfers sent together; validation dry-runs one transaction alone,
@@ -39,7 +39,7 @@
 #   manual record-and-replay check's tape (a71-devnet.tape.jsonl). TAPES, when set, receives the tape
 #   devnet-v8-v9-0-<to>.tape.jsonl. Containers and the network are named umbradb-0.3-devnet-* and removed at the end
 #   unless KEEP=1; the node's RPC listens on 127.0.0.1:PORT (a random free port from 20000 when unset). Needs docker,
-#   python3, node. [A71]
+#   python3, node.
 set -euo pipefail
 
 WORK=${WORK:?WORK must name a directory for the files of the devnet}
@@ -232,7 +232,7 @@ for seed in $SEED_1 $SEED_2 $SEED_3; do
 done
 traffic "$TOOLKIT_V9" $RNG_9 v9
 
-# 7. A few more blocks, then the records: the boundaries, the manual record-and-replay check [A71], and the tape of
+# 7. A few more blocks, then the records: the boundaries, the manual record-and-replay check, and the tape of
 #    every height.
 HEAD=$(( $(finalized) + 5 ))
 wait_finalized "$HEAD"

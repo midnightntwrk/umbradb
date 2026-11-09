@@ -16,23 +16,23 @@ import {
  * For random sequences of writes, same-value writes and deletes over heights, reading the height-versioned table at
  * every height equals a reference model. Versions of a key never overlap, and consecutive versions meet at their
  * boundary (`to` of one = `from` of the next, unless deleted between). Runs on PostgreSQL 18 and PGlite 0.5.10, through
- * the real block write handles. [A60 PROP, SH-2]
+ * the real block write handles.
  *
  * A sequence is a list of blocks at consecutive heights. Each block changes a few keys of a small set, each key once,
  * since a key may change only once per block (a second change is tested in `height-versioned.test.ts`). A change is a
  * write of a new value, a write of the value the key has (or, for a key with none, of a new one), or a delete. Some
  * blocks have no write at all, so that a key's versions span several heights. Some blocks fail after their writes and
- * roll back, and their height is written again by the next block, as the runner retries a height. [SH-3, A61]
+ * roll back, and their height is written again by the next block, as the runner retries a height.
  *
  * The model holds each key's versions, `[from, to)` with `to` null for the current one, built from the committed
- * blocks only by the helper's versioning rules, and the heights at which a delete closed one. [SH-2]
+ * blocks only by the helper's versioning rules, and the heights at which a delete closed one.
  *
  * Checked inside each block, after each write, through the block's write handle: the key's current value, and its value
  * as of the block's height and the height before (the block's writes are at its height). After each block, through a
  * read at the committed height (which the read reports): each key's stored versions — the history table's and the
  * current one — never overlap, are not empty, meet at their boundary unless the key was deleted there, and equal the
  * model's; and the key read at every height from the sequence's first to one past the last, and its current value,
- * equal the model's. Everything a block finds wrong is reported together, as an `Error` starting with `A60`.
+ * equal the model's. Everything a block finds wrong is reported together, as one `Error`.
  *
  * The committed negative controls (`height-versioned-harness.ts`): a table whose versions overlap (a version closed one
  * height late) and one that leaves a gap where nothing was deleted (closed one height early) fail the property, with
@@ -47,7 +47,7 @@ type Key = (typeof KEYS)[number];
 
 const text = fc.string({ unit: "grapheme", maxLength: 6 }).filter((s) => !s.includes("\u0000"));
 
-/** A canonical JSON value: integers only, within the signed 64-bit range. [DT-1, Q57] */
+/** A canonical JSON value: integers only, within the signed 64-bit range. */
 const { value } = fc.letrec<{ value: VersionedValue }>((tie) => ({
   value: fc.oneof(
     { depthSize: "small", maxDepth: 3 },
@@ -65,7 +65,7 @@ const { value } = fc.letrec<{ value: VersionedValue }>((tie) => ({
 /** One change a block makes to a key. */
 type Op =
   | { readonly kind: "write"; readonly value: VersionedValue }
-  /** The value the key has, which makes no new version; for a key with none, `fallback`. [SH-2] */
+  /** The value the key has, which makes no new version; for a key with none, `fallback`. */
   | { readonly kind: "same"; readonly fallback: VersionedValue }
   | { readonly kind: "delete" };
 
@@ -76,7 +76,7 @@ const op: fc.Arbitrary<Op> = fc.oneof(
 );
 
 interface Block {
-  /** At most one change per key. [SH-3] */
+  /** At most one change per key. */
   readonly ops: readonly (readonly [Key, Op])[];
   /** The block fails after its writes, and rolls back. */
   readonly fails: boolean;
@@ -91,7 +91,7 @@ const sequences = fc.array(block, { minLength: 1, maxLength: 10 });
 
 /**
  * A value as a read gives it back: the database API's lossless reader gives an integer within ±(2^53 − 1) as a
- * `number` and one beyond as a `bigint`; objects come back as plain objects. [DB-2]
+ * `number` and one beyond as a `bigint`; objects come back as plain objects.
  */
 function readBack(written: VersionedValue): VersionedValue {
   if (typeof written === "bigint") {
@@ -132,7 +132,7 @@ const same = (a: VersionedValue | undefined, b: VersionedValue | undefined): boo
 /** What a change did to the model. */
 type Effect = "new" | "closed-and-new" | "same" | "deleted" | "delete-of-none";
 
-/** The versions of each key, as the helper's versioning rules build them from committed changes only. [SH-2] */
+/** The versions of each key, as the helper's versioning rules build them from committed changes only. */
 class Model {
   constructor(
     private readonly versions: Map<string, StoredVersion[]> = new Map(),
@@ -163,7 +163,7 @@ class Model {
     return this.of(key).find((v) => v.from <= height && (v.to === null || height < v.to))?.value;
   }
 
-  /** Applies `op` to `key` at `height`, giving the value written (for a write) and what it did. [SH-2] */
+  /** Applies `op` to `key` at `height`, giving the value written (for a write) and what it did. */
   apply(key: string, change: Op, height: bigint): { readonly written?: VersionedValue; readonly effect: Effect } {
     const list = [...this.of(key)];
     const last = list.at(-1);
@@ -207,7 +207,7 @@ interface Counts {
 /**
  * What is wrong with `stored`, the versions of one key as the tables hold them, by the versioning rules alone: an empty
  * or reversed version, a current version (`to` null) that is not the last, two versions that overlap, two consecutive
- * versions that do not meet although the key was not deleted where the first ends. [SH-2]
+ * versions that do not meet although the key was not deleted where the first ends.
  */
 function structureProblems(
   name: string,
@@ -338,7 +338,7 @@ const noCounts = (): Counts => ({
 // height. The property's run on PostgreSQL took 47 s on a quiet machine, 221–398 s at a load average of about 61 and
 // 554 s at up to 85, and passed 600 s at a median of 77 (2026-10-26), where the timed-out run went on against
 // the shared database and failed the next test; so each test has 20 minutes, twice the slowest run that completed.
-const TITLE = "A60: the height-versioned table reads as its model at every height, on $name (SH-2)";
+const TITLE = "the height-versioned table reads as its model at every height, on $name";
 
 describe.each(BACKENDS)(TITLE, { timeout: 1_200_000 }, (backend) => {
   let database: HelperDatabase;

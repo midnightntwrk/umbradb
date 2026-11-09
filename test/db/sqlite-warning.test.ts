@@ -5,7 +5,7 @@ import { runQuietChild } from "../library/quiet-child.js";
 
 /**
  * L3 `[CI][NEG]`: the `node:sqlite` `ExperimentalWarning` is dropped through one shared import (`quietImport` in
- * `src/db/pglite-lock.ts`), and nothing else is touched [LM-2, G2]:
+ * `src/db/pglite-lock.ts`), and nothing else is touched:
  * - another `ExperimentalWarning` emitted while the wrapper is installed reaches the host's listeners;
  * - a host that replaced `process.emitWarning` meanwhile keeps its replacement;
  * - two overlapping PGlite directory acquisitions, finishing in either order, share one import and leave the original
@@ -49,7 +49,7 @@ function testHook() {
 
 const SQLITE = ["SQLite is an experimental feature and might change at any time", "ExperimentalWarning", undefined, undefined];
 
-/** Whether the running Node.js prints a warning when `node:sqlite` loads, read in a process of its own. [L3] */
+/** Whether the running Node.js prints a warning when `node:sqlite` loads, read in a process of its own. */
 const NODE_WARNS_ON_SQLITE = spawnSync(process.execPath, ["-e", "require('node:sqlite')"], { encoding: "utf8" })
   .stderr.includes("SQLite is an experimental feature");
 
@@ -60,7 +60,7 @@ interface ChildResult {
   readonly finished: readonly string[];
 }
 
-describe("L3: the node:sqlite warning is dropped through one shared import (G2)", () => {
+describe("the node:sqlite warning is dropped through one shared import", () => {
   it("knows node:sqlite's warning, in each form Node.js may emit it, and no other", () => {
     expect(isSqliteWarning(SQLITE)).toBe(true);
     expect(isSqliteWarning([SQLITE[0], { type: "ExperimentalWarning" }])).toBe(true);

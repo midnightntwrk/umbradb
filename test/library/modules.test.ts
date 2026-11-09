@@ -19,29 +19,29 @@ import { exchange, mountHandlers } from "./mounted-fixtures.js";
 import { L63_CASES, moduleListProblems } from "./module-list-cases.js";
 
 /**
- * A library process's user modules (LM-7): `modules` objects, or `modulesFrom`, a module URL both threads import; a
- * `{ file }`'s own `modules` export. [LM-7, MD-1, LG-17]
+ * A library process's user modules: `modules` objects, or `modulesFrom`, a module URL both threads import; a
+ * `{ file }`'s own `modules` export.
  *
- * - L43: `{ data, modules: [m] }` (no ledger tasks) with `core-block-parsed` starts and processes; a `{ file }`'s
+ * - `{ data, modules: [m] }` (no ledger tasks) with `core-block-parsed` starts and processes; a `{ file }`'s
  *   own `modules` export is its user modules.
- * - L44 `[NEG]`: `modules-given-twice` for `modules` with `{ file }`, `modules` with `modulesFrom`, `modulesFrom` with
+ * - `[NEG]`: `modules-given-twice` for `modules` with `{ file }`, `modules` with `modulesFrom`, `modulesFrom` with
  *   `{ file }`; the control is the engine, which takes `{ file }` with `{ modules }` (the given list wins).
- * - L45 `[NEG]`: `modules` objects declaring ledger tasks are refused `ledger-tasks-need-modules-from`; the control runs
+ * - `[NEG]`: `modules` objects declaring ledger tasks are refused `ledger-tasks-need-modules-from`; the control runs
  *   the same build through the engine's own build seam, past the rule: its worker has no such task, and processing
  *   halts at the first height.
- * - L46: `modulesFrom` with a ledger task: the task runs in the ledger worker (its item names the thread).
- * - L63 `[NEG]`: a `modulesFrom` that fails to import is refused `load-failed`, one whose `modules` export is missing or
+ * - `modulesFrom` with a ledger task: the task runs in the ledger worker (its item names the thread).
+ * - `[NEG]`: a `modulesFrom` that fails to import is refused `load-failed`, one whose `modules` export is missing or
  *   not an array `modules-not-a-list`, each naming the URL (the cases and oracle are `./module-list-cases.ts`'s); a
  *   configuration file's export, unlike it, is optional. The negative controls, `./modules.negative-control.test.ts`:
  *   each of `loadModuleList`'s three rules removed fails the oracle on its own cases.
- * - CF-4 `[NEG]` on the refusals that come before the configuration is validated — a `modulesFrom` that cannot be
+ * - `[NEG]` on the refusals that come before the configuration is validated — a `modulesFrom` that cannot be
  *   imported (with data that is plain, or not plain data: the secrets of what is plain in it), a user module's own
  *   refusal, a `{ file }` whose `modules` export is no list or whose default export is not plain data: a credential the
  *   configuration holds (`database.password`, the node URL's) that the refusal's text would show is shown nowhere — not
  *   on the host's log, in `started`'s error (its message, stack and details), `status()`, nor mounted `/status` and
  *   `/config` — while the refusal keeps its code, reason and URL. The committed control runs the oracle over the same
  *   refusal shown without the configuration's redaction (as before the fix): it finds the credential.
- * - CF-4 with L63: a secret whose text is one of a refusal's own words (`load-failed`, `settings-schema`, `wrong-side`)
+ * - A secret whose text is one of a refusal's own words (`load-failed`, `settings-schema`, `wrong-side`)
  *   leaves those words as they are — the oracle is the same refusal with a password that is none of them.
  */
 
@@ -71,7 +71,7 @@ async function closedByItself(handle: UmbraDBHandle): Promise<void> {
   }
 }
 
-describe.each(PROCESS_BACKENDS)("L43: { data, modules } with core-block-parsed, on $name", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("{ data, modules } with core-block-parsed, on $name", (backend: ProcessBackend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
@@ -93,7 +93,7 @@ describe.each(PROCESS_BACKENDS)("L43: { data, modules } with core-block-parsed, 
   }, 120_000);
 });
 
-describe("LM-7: a { file } configuration's own modules export is its user modules", () => {
+describe("a { file } configuration's own modules export is its user modules", () => {
   it("the module the file exports runs, with no modules option", async () => {
     const file = new URL("file-modules.config.ts", FIXTURES);
     const handle = startUmbraDB({ config: { file }, source: new InMemoryBlockSource({ head: 2n }) });
@@ -108,7 +108,7 @@ describe("LM-7: a { file } configuration's own modules export is its user module
   }, 60_000);
 });
 
-describe("L44: user modules given twice are refused modules-given-twice (LM-7)", () => {
+describe("user modules given twice are refused modules-given-twice", () => {
   let dir: string;
   let file: string;
   beforeAll(() => {
@@ -146,7 +146,7 @@ describe("L44: user modules given twice are refused modules-given-twice (LM-7)",
   }, 60_000);
 });
 
-describe("L45: modules objects declaring ledger tasks are refused ledger-tasks-need-modules-from (LM-7)", () => {
+describe("modules objects declaring ledger tasks are refused ledger-tasks-need-modules-from", () => {
   it("refused before anything opens, naming the module", async () => {
     const handle = startUmbraDB({
       config: { data: parsingData(PGLITE_MEMORY, [TASK_ROWS]) },
@@ -176,7 +176,7 @@ describe("L45: modules objects declaring ledger tasks are refused ledger-tasks-n
   }, 120_000);
 });
 
-describe.each(PROCESS_BACKENDS)("L46: modulesFrom with a ledger task, on $name", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("modulesFrom with a ledger task, on $name", (backend: ProcessBackend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
@@ -199,7 +199,7 @@ describe.each(PROCESS_BACKENDS)("L46: modulesFrom with a ledger task, on $name",
   }, 120_000);
 });
 
-describe("L63: a modulesFrom that cannot give its list is refused, naming the URL (LM-7)", () => {
+describe("a modulesFrom that cannot give its list is refused, naming the URL", () => {
   it.each(L63_CASES)("%s: invalid-configuration, %s", async (name, reason) => {
     // The oracle (`./module-list-cases.ts`): refused with the reason, naming the URL, ended by itself.
     expect(await moduleListProblems(name, reason)).toEqual([]);
@@ -217,7 +217,7 @@ describe("L63: a modulesFrom that cannot give its list is refused, naming the UR
   });
 });
 
-/** A credential the tests' configurations hold, and the text that would show it. [CF-4] */
+/** A credential the tests' configurations hold, and the text that would show it. */
 const CREDENTIAL = "s3cr3t-cf2-credential";
 
 /** A PostgreSQL database's parts holding {@link CREDENTIAL} as its password: never contacted (refused before). */
@@ -283,7 +283,7 @@ const leaks = (shown: Pick<Shown, "places">): string[] =>
     .filter(([, text]) => text.includes(CREDENTIAL) || text.includes(encodeURIComponent(CREDENTIAL)))
     .map(([place]) => place);
 
-describe("CF-4: a refusal before the configuration is validated shows no credential the configuration holds (AE-6)", () => {
+describe("a refusal before the configuration is validated shows no credential the configuration holds", () => {
   it("a modulesFrom whose import throws an error naming it: load-failed, naming the URL, the credential nowhere", async () => {
     const url = new URL("modules-throws-secret.ts", FIXTURES);
     const shown = await shownBy({ config: { data: secretData() }, modulesFrom: url });
@@ -362,7 +362,7 @@ describe("CF-4: a refusal before the configuration is validated shows no credent
 /**
  * What a refused start shows in UmbraDB's own words, never a value of the host's: the code, the reason, the findings'
  * rules and paths, the network problems' fields, the log's header and each finding line's code, and the reason mounted
- * `/status` shows. [CF-4, L63, LM-9]
+ * `/status` shows.
  */
 interface OwnWords {
   readonly code: unknown;
@@ -413,7 +413,7 @@ async function ownWordsOf(options: Omit<UmbraDBOptions, "log">): Promise<{ reado
 const dataWith = (password: string, extra: Readonly<Record<string, unknown>> = {}) =>
   libraryData({ ...SECRET_DATABASE, password } as unknown as DatabaseParts, [], extra);
 
-describe("CF-4: a secret whose text is one of a refusal's own words leaves those words as they are (L63, LM-9)", () => {
+describe("a secret whose text is one of a refusal's own words leaves those words as they are", () => {
   let dir: string;
   beforeAll(() => {
     dir = mkdtempSync(join(tmpdir(), "umbradb-library-own-words-"));
@@ -429,7 +429,7 @@ describe("CF-4: a secret whose text is one of a refusal's own words leaves those
 
   /** Each refusal, the password equal to one of its own words, and the options that make it. */
   const CASES: readonly (readonly [string, string, (password: string) => Omit<UmbraDBOptions, "log">])[] = [
-    ["a modulesFrom that cannot be imported (L63)", "load-failed", (password) => ({ config: { data: dataWith(password) }, modulesFrom: throwing(password) })],
+    ["a modulesFrom that cannot be imported", "load-failed", (password) => ({ config: { data: dataWith(password) }, modulesFrom: throwing(password) })],
     [
       "the validation's finding",
       "settings-schema",

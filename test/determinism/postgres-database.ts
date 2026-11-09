@@ -5,7 +5,7 @@ import { startPostgresServer } from "../db/postgres-server.js";
  * The PostgreSQL 18 databases of the determinism suites, read through the database API's own PostgreSQL backend
  * (`src/db/postgres.ts`). Each read is the API's read handle: one `REPEATABLE READ READ ONLY` transaction, with results
  * mapped the way the database API maps them, arrays included. This file used to be a test-only adapter over the
- * `postgres` driver, with its own transaction and JSON parser; that part is retired. [DB-2]
+ * `postgres` driver, with its own transaction and JSON parser; that part is retired.
  *
  * What stays here is what the API deliberately does not offer: setup SQL of several statements outside any read (the
  * API runs one statement per call; only the migration runner, `src/db/migrate.ts`, runs several), and the negative
@@ -19,11 +19,11 @@ import { startPostgresServer } from "../db/postgres-server.js";
 export interface TestDatabase {
   /** Runs setup SQL (several statements allowed) outside any read, committed when it returns. */
   exec(sql: string): Promise<void>;
-  /** Runs `body` with the database API's read handle. [DB-2] */
+  /** Runs `body` with the database API's read handle. */
   read<T>(body: (read: ConsistentRead) => Promise<T>): Promise<T>;
   /**
    * Runs `body` with a handle whose statements each run in a read of their own, so they may see different commits.
-   * The database API forbids such a handle; it is used only as the negative control of the snapshot test. [DB-2]
+   * The database API forbids such a handle; it is used only as the negative control of the snapshot test.
    */
   readWithoutSnapshot<T>(body: (read: ConsistentRead) => Promise<T>): Promise<T>;
 }

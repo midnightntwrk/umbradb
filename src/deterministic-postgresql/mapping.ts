@@ -2,10 +2,10 @@
  * The database API's result mapping and parameter texts, a rule of the `deterministic_postgresql` component that is the
  * same on every backend. Each backend hands over PostgreSQL's text output of a value with the column's type OID, and
  * this module maps it. No driver parser is involved: `postgres` 3.4.9's array parser reads an unquoted `NULL` element
- * as the text "NULL", and the two backends' drivers differ in other details. [DB-2; design §4]
+ * as the text "NULL", and the two backends' drivers differ in other details.
  *
  * Results, by type (the column types the determinism rules know, plus `oid`, `name` and `"char"` for catalog
- * queries). Every type the table below does not name, and an array of one, is returned as its text: [design §4]
+ * queries). Every type the table below does not name, and an array of one, is returned as its text:
  *
  * | Type | Value |
  * |---|---|
@@ -31,12 +31,12 @@
  * without a time zone in the process's time zone (`2025-05-21 14:30:00` is 14:30Z under `TZ=UTC`, 18:30Z in New York)
  * and keeps milliseconds only. Instead, PostgreSQL's ISO text `2025-05-21 14:30:00.123456+00` becomes
  * `2025-05-21T14:30:00.123456Z` by moving its characters, so the result is the same in every process. The fraction is
- * kept as PostgreSQL prints it, without trailing zeros (`.12`). [DB-2, Q68, Q81]
+ * kept as PostgreSQL prints it, without trailing zeros (`.12`).
  *
  * The mapping reads exactly the form PostgreSQL prints under the pinned settings: a four-digit year and the offset
  * `+00`. Anything else is output it cannot read, refused like any other, with no special rule: a year above 9999
  * (`10000-01-01 00:00:00+00`), a BC date (`0044-03-15 12:00:00+00 BC`), or another offset after a session changed
- * `TimeZone`. [Q81]
+ * `TimeZone`.
  *
  * Parameters are sent as text with no type, so PostgreSQL types each from the statement as it types an untyped
  * literal (write `$1::bigint` where the statement does not say); {@link parameterText} gives each JavaScript value's
@@ -136,7 +136,7 @@ function parseDateText(text: string): string {
 }
 
 /**
- * JSON parsed without loss, by a reader of RFC 8259's grammar written here, not `JSON.parse`: [DB-2]
+ * JSON parsed without loss, by a reader of RFC 8259's grammar written here, not `JSON.parse`:
  * - an integer written as digits outside ±(2^53 − 1) becomes a `bigint`; every other number is what `JSON.parse`
  *   makes of it (the `Number` of its text: `-0`, fractions, exponents, `1e400` as `Infinity`);
  * - strings, objects and arrays as `JSON.parse` builds them: every escape, each `\uXXXX` one UTF-16 code unit; a key
@@ -147,7 +147,7 @@ function parseDateText(text: string): string {
  * Not `JSON.parse`, because Node.js 24.9.0's (V8 13.6.233.10) can read an object key that is one escape sequence
  * (`"\t"`, `"\n"`, `"\u00e9"`, …) as a backslash once an earlier `JSON.parse` in the process has read the key `"\\"`
  * (whether it does depends on the strings the process already holds). Two different documents would then read back
- * equal, and so would their contents hashes; a differential round-trip test found this. [Q78]
+ * equal, and so would their contents hashes; a differential round-trip test found this.
  *
  * It is a V8 bug in Node.js 24 (reproduced on 24.9.0, not on 24.2.0; reported upstream on 24.13.1–24.21.0) and Node.js
  * 26 (reported on 26.3.0–26.10.0): https://github.com/nodejs/node/issues/63785, fixed in V8 by

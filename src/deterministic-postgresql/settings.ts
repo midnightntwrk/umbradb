@@ -1,6 +1,6 @@
 /**
  * The session settings of the `deterministic_postgresql` component: what every session of the database API starts
- * with, whatever the defaults of the server, the database or the role. [DB-2, DB-15, Q65, Q71; design §4]
+ * with, whatever the defaults of the server, the database or the role.
  *
  * Each backend applies them in its own way and takes them from here, as {@link SESSION_SETTINGS}:
  *
@@ -13,7 +13,7 @@
 /**
  * The settings every session of the database API starts with (each PostgreSQL connection, and PGlite's single
  * session). They fix how PostgreSQL prints values, so every mapped value and every text the server prints is the same
- * on both backends, on every server and in every database, whatever their defaults. [Q65]
+ * on both backends, on every server and in every database, whatever their defaults.
  *
  * - `bytea_output`: the `bytea` mapping reads hex;
  * - `DateStyle`: the date and time mapping reads ISO;
@@ -31,7 +31,7 @@ export const PINNED_SETTINGS: readonly (readonly [string, string])[] = [
 
 /**
  * The zero timeouts: every session also starts with each server-side timeout at 0. Work the runner must finish (the
- * writer, migrations, setup, and the read handles given to callbacks) is then never cut off. [DB-15, Q71]
+ * writer, migrations, setup, and the read handles given to callbacks) is then never cut off.
  *
  * What each one would otherwise cut off:
  *
@@ -39,16 +39,15 @@ export const PINNED_SETTINGS: readonly (readonly [string, string])[] = [
  * - `lock_timeout`: a migration waiting for reads to release a table.
  * - `idle_in_transaction_session_timeout`: a block transaction idle while a callback awaits the ledger worker; this
  *   timeout would also end the session.
- * - `transaction_timeout` (PostgreSQL 17 and later): a slow block, which is reported but never cut off. [RN-17]
+ * - `transaction_timeout` (PostgreSQL 17 and later): a slow block, which is reported but never cut off.
  * - `idle_session_timeout` (PostgreSQL 14 and later): a default would end the writer's session while it waits between
- *   blocks, and the writer lock with it, and would end idle pooled read connections. [DB-11, Q93]
+ *   blocks, and the writer lock with it, and would end idle pooled read connections.
  *
  * A read for a module API request sets two of them for that read only (`set_config(…, true)`, `src/db/postgres.ts`).
  *
  * PGlite enforces none of them, but one that fires hangs it, synchronously, with the whole process: a nonzero
  * `idle_in_transaction_session_timeout`, `transaction_timeout` or `idle_session_timeout` does so once its time passes
  * (checked on PGlite 0.5.10, 2026-10-25). Its configuration file can set them, so the zeros are pinned there too.
- * [design §14]
  */
 export const ZERO_TIMEOUTS: readonly (readonly [string, string])[] = [
   ["statement_timeout", "0"],

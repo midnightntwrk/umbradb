@@ -8,7 +8,7 @@ import { BACKENDS } from "../db/backends.js";
 
 /**
  * `core-ledger-state`'s node write on PostgreSQL 18 and PGlite 0.5.10, through the database API's transactions on the
- * part's own tables (its migration): [LG-11; ledger-refcount design §2.2, §14]
+ * part's own tables (its migration):
  * - a node written again with its stored child list leaves its row untouched (the same row version) and is not
  *   counted;
  * - a node written with another child list replaces the stored one and is counted;
@@ -67,7 +67,7 @@ function applied(height: bigint, inserts: readonly StoredNode[]): AppliedState {
   };
 }
 
-describe.each(BACKENDS)("the node write replaces a changed child list, on $name (LG-11)", (backend) => {
+describe.each(BACKENDS)("the node write replaces a changed child list, on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
@@ -88,7 +88,7 @@ describe.each(BACKENDS)("the node write replaces a changed child list, on $name 
         const after = await rowsOf(db);
         expect([...after.keys()]).toEqual([key(1), key(2), key(3)].map(hex));
         const [k1, k2, k3] = [key(1), key(2), key(3)].map(hex) as [string, string, string];
-        // Untouched: the same row version, so nothing was written to it (no change capture sees it). [DT-4]
+        // Untouched: the same row version, so nothing was written to it (no change capture sees it).
         expect(after.get(k1)).toEqual(before.get(k1));
         expect(after.get(k2)).toMatchObject({ data: before.get(k2)?.data, children: "15" });
         expect(after.get(k2)?.version).not.toBe(before.get(k2)?.version);

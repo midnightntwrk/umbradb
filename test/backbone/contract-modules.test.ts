@@ -35,7 +35,7 @@ import {
 import { LOG_STATE, wrapper } from "./contract-data-checks.js";
 
 /**
- * The contract-data modules, tested in parts. [CC-1, CC-2, CC-3; design §10]
+ * The contract-data modules, tested in parts.
  * - `core-contract-logs-fast`: its literal rule over a transcript's ops; its reading of a transaction's transcripts in
  *   the ledger's emission order, held to the vendored v9 package's own apply on a transaction of two intents; its rows
  *   and halts per outcome; its ledger task, on ledger v8, v9 and v9-rc3.
@@ -49,7 +49,7 @@ import { LOG_STATE, wrapper } from "./contract-data-checks.js";
 const op = (name: string, args?: Record<string, unknown>): unknown => (args === undefined ? name : { [name]: args });
 const push = (byte: number): unknown => ({ push: { storage: false, value: cellValue(Uint8Array.of(byte)) } });
 
-describe("core-contract-logs-fast's literal rule (CC-3: a literal pushed by the transcript on an unconditional path)", () => {
+describe("core-contract-logs-fast's literal rule (a literal pushed by the transcript on an unconditional path)", () => {
   it("takes the value of a push right before the log, and only when no branch or jump before them can skip either", () => {
     const cases: [string, unknown[], number, "literal" | "not-a-literal" | "conditional"][] = [
       ["push, log", [push(1), "log"], 1, "literal"],
@@ -139,7 +139,7 @@ function parsedOf(adapter: LedgerPackage, bytes: Uint8Array, index: number, even
 const asRows = (logs: readonly VmLog[]): ContractLog[] =>
   logs.map(({ physicalSegment: _physical, ...log }) => ({ ...log }));
 
-describe("core-contract-logs-fast's reading of a transaction's transcripts (CC-3)", () => {
+describe("core-contract-logs-fast's reading of a transaction's transcripts", () => {
   it("reads every call's transcripts in the ledger's emission order — the guaranteed ones of each intent by segment, then the fallible ones — and its rows are the v9 package's own logs", async () => {
     const adapter = await loadLedgerPackage("v9", { networkId: NETWORK_ID });
     const [first, second] = [await contractFixture(RAW.v9), await contractFixture(RAW.v9)];
@@ -213,7 +213,7 @@ describe("core-contract-logs-fast's reading of a transaction's transcripts (CC-3
     expect(sitesOfNamed?.[0]?.entryPoint).toEqual(Uint8Array.of(0xff, 0xfe));
   });
 
-  it("in its ledger task (task 12.6), reads no ledger v8 transaction (Q54: v8 logs are no MIP-0002 events), a transaction without calls as none, and a runtime 2.0 block's with the rc.3 package, its rows that package's own logs as on v9", async () => {
+  it("in its ledger task, reads no ledger v8 transaction (v8 logs are no MIP-0002 events), a transaction without calls as none, and a runtime 2.0 block's with the rc.3 package, its rows that package's own logs as on v9", async () => {
     // v8: nothing read, not even the packages.
     const v8 = await CONTRACT_LOG_SITES_TASK.run({ height: 1n, hash: new Uint8Array(32), ledger: "v8", transactions: [{}, {}], packages: {} });
     expect(v8).toEqual([[], []]);
@@ -271,7 +271,7 @@ const unsureThrows = (unsure: UnsureLog): never => {
   throw new Error(`unsure ${unsure.reason}`);
 };
 
-describe("core-contract-logs-fast's rows and halts per outcome (CC-3)", () => {
+describe("core-contract-logs-fast's rows and halts per outcome", () => {
   it("stores a successful transaction's literal logs numbered in the block, skips oversized ones, and nothing of a failed transaction", () => {
     const sites = [
       [site({}, { literal: item(1) }), site({ op: 3 }, { literal: null }), site({ fallible: true, segment: 2 }, { literal: item(2) })],
@@ -312,7 +312,7 @@ describe("core-contract-logs-fast's rows and halts per outcome (CC-3)", () => {
   });
 });
 
-describe("core-contract-logs-fast's reading of a block (CC-3)", () => {
+describe("core-contract-logs-fast's reading of a block", () => {
   it("asks its reader for the transactions that call a contract only, and gives each its own sites; the outcomes are the chain events'", async () => {
     const calls = (n: number) => [{ segment: 1, calls: Array.from({ length: n }, () => ({ address: ADDRESS, entryPoint: utf8("emit") })), deploys: [] }];
     const parsed = (index: number, n: number): BlockTransaction => ({ ...tx(index), segments: n === 0 ? [] : calls(n) });
@@ -345,7 +345,7 @@ describe("core-contract-logs-fast's reading of a block (CC-3)", () => {
   });
 });
 
-describe("core-contract-logs-full's rows (CC-2)", () => {
+describe("core-contract-logs-full's rows", () => {
   it("are the block's vm-logs as the ledger gave them, without the physical segment; a block without the item fails", () => {
     const log: VmLog = { transaction: 1, index: 0, address: ADDRESS, entryPoint: utf8("emit"), logicalSegment: 0, physicalSegment: 2, ...item(9) };
     const b = { height: 3n, items: new Map([["vm-logs", [log]]]) } as unknown as BlockContext;
@@ -355,7 +355,7 @@ describe("core-contract-logs-full's rows (CC-2)", () => {
   });
 });
 
-describe("core-contract-states' rows (CC-1)", () => {
+describe("core-contract-states' rows", () => {
   it("are the ledger-state item's keys, one per contract, a contract the state does not hold left out; keys of one kind only fail", () => {
     const keys = (address: number, state: number | null, zswap: number | null) => ({
       address: new Uint8Array(32).fill(address),

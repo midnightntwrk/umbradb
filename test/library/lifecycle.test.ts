@@ -19,26 +19,26 @@ import { Client, eventually, exchange, headerValues, type MapiHooks, mapiModule,
 import { portFree } from "./network-refusals.js";
 
 /**
- * The standard service lifecycle of a library process (design §5.3), through its mounted handlers and, where the
- * criterion names it, its listeners. [LM-5, LM-9, LM-10, AE-2, AE-3, AE-4, AE-5]
+ * The standard service lifecycle of a library process, through its mounted handlers and, where the
+ * criterion names it, its listeners.
  *
- * - **L25** starting: mounted `/health/live` 200 `{ live: true, heartbeatAgeMs, livenessTimeoutMs, thread: "host" }`,
+ * - starting: mounted `/health/live` 200 `{ live: true, heartbeatAgeMs, livenessTimeoutMs, thread: "host" }`,
  *   `/health/ready` 503, `/status` 200 with `instance.role` null until the side is known, `/config` 200 with every
  *   field but `build` null before the configuration is validated; the module API 503 with the lifecycle's body
  *   (`starting`, no reason).
- * - **L26** serving: `syncing`, then `following`; with a readiness lag, mounted and listening `/health/ready` 503 while
+ * - serving: `syncing`, then `following`; with a readiness lag, mounted and listening `/health/ready` 503 while
  *   the lag exceeds it, 200 after; the module API answers, subscriptions work through `api.upgrade`; a module's own 503
  *   and the module API's `no-committed-height` 503 keep their bodies.
- * - **L27** `stopped` at an upgrade boundary: ready, reads at the cursor; after `stop()` the mounted module API answers
+ * - `stopped` at an upgrade boundary: ready, reads at the cursor; after `stop()` the mounted module API answers
  *   the lifecycle's 503 (`stopping`) and closes its subscriptions, the listening module API closes; `/status` 200
  *   `stopping`; mounted admin answers after `closed`.
- * - **L28** `halted`: live 200, ready 503, `/status` with the reason; reads at the cursor until `stop()`.
- * - **L29** a class-A refusal (`library-setting-refused`): mounted live 200, ready 503, `/status` 200 `refused` with the
+ * - `halted`: live 200, ready 503, `/status` with the reason; reads at the cursor until `stop()`.
+ * - a class-A refusal (`library-setting-refused`): mounted live 200, ready 503, `/status` 200 `refused` with the
  *   reason; the module API's 503 carries the same reason; `started` rejects with that code; `closed` resolves; nothing
  *   opened though the module API, admin and the link were each asked to listen at a port of their own — no `listen()`
  *   at any time (the `net.server.listen` tracing channel), no thread, each port still free, no database; no rejection
  *   unhandled though no handler was attached to `started`.
- * - **L30** `[NEG]` class-B refusals: a failing `on-start-db` (`callback-error`, the module and point, `cause` the
+ * - `[NEG]` class-B refusals: a failing `on-start-db` (`callback-error`, the module and point, `cause` the
  *   thrown value), the module API's port and the link's port in use (`listen-failed`); a listening admin answers
  *   (`/health/live` 200, `/status` 200 `refused`) until `stop()`, and `closed` waits for it. The committed control is a
  *   process that ends at every refusal, which fails the oracle.
@@ -83,7 +83,7 @@ async function heldPort(): Promise<{ readonly port: number; release(): Promise<v
   return { port, release: () => new Promise<void>((resolve) => server.close(() => resolve())) };
 }
 
-describe("L25: starting, before the configuration is loaded (a held { file } import)", () => {
+describe("starting, before the configuration is loaded (a held { file } import)", () => {
   it("mounted live 200 on the host's thread, ready 503, /status role null, /config the build only; the module API 503 starting", async () => {
     const hold = openHold("held-start");
     const handle = startUmbraDB({
@@ -115,7 +115,7 @@ describe("L25: starting, before the configuration is loaded (a held { file } imp
         network: null,
       });
       expect(await apiLifecycle(host)).toEqual({ status: 503, code: "not-serving", state: "starting", reason: null, version: [UMBRADB_VERSION] });
-      // Admin answers carry no X-Umbra-* header, mounted as on the listener. [N8]
+      // Admin answers carry no X-Umbra-* header, mounted as on the listener.
       const raw = await exchange(host.admin, "GET", "/status");
       expect(raw.headers.filter(([name]) => name.startsWith("x-umbra-"))).toEqual([]);
       hold.release();
@@ -132,11 +132,11 @@ describe("L25: starting, before the configuration is loaded (a held { file } imp
   }, 60_000);
 });
 
-describe.each(PROCESS_BACKENDS)("the library's service lifecycle on $name (LM-5)", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("the library's service lifecycle on $name", (backend: ProcessBackend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("L25: starting, its configuration validated (on-start-db held): /status names the core, /config shows it; ready 503; the module API 503", async () => {
+  it("starting, its configuration validated (on-start-db held): /status names the core, /config shows it; ready 503; the module API 503", async () => {
     const db = await backend.database();
     const hooks: MapiHooks = { emits: new Set(), startDb: gate() };
     const m = mapiModule(hooks);
@@ -160,7 +160,7 @@ describe.each(PROCESS_BACKENDS)("the library's service lifecycle on $name (LM-5)
     }
   }, 60_000);
 
-  it("L26: syncing, then following; ready 503 while the lag exceeds readinessLag, mounted and listening; the module API serves", async () => {
+  it("syncing, then following; ready 503 while the lag exceeds readinessLag, mounted and listening; the module API serves", async () => {
     const db = await backend.database();
     const first = gate();
     const tenth = gate();
@@ -212,7 +212,7 @@ describe.each(PROCESS_BACKENDS)("the library's service lifecycle on $name (LM-5)
     }
   }, 120_000);
 
-  it("L27: stopped at an upgrade boundary serves reads; stop() turns the mounted module API to 503 stopping, closes its subscriptions and the listener", async () => {
+  it("stopped at an upgrade boundary serves reads; stop() turns the mounted module API to 503 stopping, closes its subscriptions and the listener", async () => {
     const db = await backend.database();
     const hooks: MapiHooks = { emits: new Set() };
     const m = mapiModule(hooks);
@@ -258,7 +258,7 @@ describe.each(PROCESS_BACKENDS)("the library's service lifecycle on $name (LM-5)
     }
   }, 120_000);
 
-  it("L28: halted: live 200, ready 503, /status with the reason; reads answer at the cursor until stop()", async () => {
+  it("halted: live 200, ready 503, /status with the reason; reads answer at the cursor until stop()", async () => {
     const db = await backend.database();
     const hooks: MapiHooks = { emits: new Set(), haltAt: 4n, failure: "mapi breaks at 4" };
     const m = mapiModule(hooks);
@@ -284,14 +284,14 @@ describe.each(PROCESS_BACKENDS)("the library's service lifecycle on $name (LM-5)
     }
   }, 120_000);
 
-  it("L29: a class-A refusal: mounted admin answers it, the module API's 503 carries its reason, started rejects with it, closed resolves, nothing opened, nothing unhandled", async () => {
+  it("a class-A refusal: mounted admin answers it, the module API's 503 carries its reason, started rejects with it, closed resolves, nothing opened, nothing unhandled", async () => {
     const db = await backend.database();
     const unhandled: unknown[] = [];
     const onUnhandled = (reason: unknown) => unhandled.push(reason);
     process.on("unhandledRejection", onUnhandled);
     const m = mapiModule({ emits: new Set() });
     // Every surface asked to listen, at ports of its own, so that "nothing opened" can fail: none may bind. On
-    // PostgreSQL the link's reader login is written (never contacted), so the plan takes the request. [LM-3, LM-10]
+    // PostgreSQL the link's reader login is written (never contacted), so the plan takes the request.
     const ports = { api: await freePort(), admin: await freePort(), privateLink: await freePort() };
     const reader = backend.kind === "postgres" ? { transportReader: { user: "l29_reader", password: "never-used" } } : {};
     const network = {
@@ -354,7 +354,7 @@ describe.each(PROCESS_BACKENDS)("the library's service lifecycle on $name (LM-5)
   }, 60_000);
 
   /**
-   * The L30 oracle for one class-B refusal of a process started by `start` with `options` (a listening admin asked):
+   * The oracle for one class-B refusal of a process started by `start` with `options` (a listening admin asked):
    * `started` rejects with an `UmbraError` of `code`, which `check` accepts; `status().reason.code` is it; the listening
    * admin answers `/health/live` 200 and `/status` 200 `refused`, also 1.5 s on, while `closed` waits; after `stop()`
    * `closed` resolves. None when so.
@@ -396,7 +396,7 @@ describe.each(PROCESS_BACKENDS)("the library's service lifecycle on $name (LM-5)
     return problems;
   }
 
-  /** The cases of L30 on this backend: a failing on-start-db, the module API's port in use, the link's port in use. */
+  /** The cases on this backend: a failing on-start-db, the module API's port in use, the link's port in use. */
   async function classBCases(): Promise<readonly { readonly what: string; readonly options: UmbraDBOptions; readonly code: string; readonly check?: (error: UmbraError) => string[]; release?(): Promise<void> }[]> {
     const thrown = new Error("x");
     const failing = mapiModule({ emits: new Set(), startDbFailure: thrown });
@@ -446,7 +446,7 @@ describe.each(PROCESS_BACKENDS)("the library's service lifecycle on $name (LM-5)
     ];
   }
 
-  it("L30: class-B refusals keep the process up, refused, its listening admin answering, until stop(); started rejects with the reason's code", async () => {
+  it("class-B refusals keep the process up, refused, its listening admin answering, until stop(); started rejects with the reason's code", async () => {
     for (const each of await classBCases()) {
       try {
         expect(await classBProblems(startUmbraDB, each.options, each.code, each.check), each.what).toEqual([]);
@@ -456,7 +456,7 @@ describe.each(PROCESS_BACKENDS)("the library's service lifecycle on $name (LM-5)
     }
   }, 180_000);
 
-  it("L30's negative control: a process that ends at every refusal fails 'closed waits for stop()' and the admin's answers", async () => {
+  it("negative control: a process that ends at every refusal fails 'closed waits for stop()' and the admin's answers", async () => {
     // The facade's exact engine input, the engine stopping itself once startup refused, as a class-A refusal ends.
     const endsOnEveryRefusal = (options: UmbraDBOptions): UmbraDBHandle => {
       const { input } = engineInputOf(options);

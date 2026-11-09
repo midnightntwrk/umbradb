@@ -15,29 +15,28 @@ import { core, entryOf, loggingModule, settle, startProcess, testBuild } from ".
  * What the process retries instead of halting: a lost database connection (`connection-lost`) and an unreachable node
  * (`node-unreachable`), the two retryable codes. They are retried wherever they come from: a callback's statement, the
  * block transaction, the loop's cursor read, startup's steps after the database opened. Any other error halts.
- * [IN-10, RN-8, DB-11, DB-13; CORE-ARCH §4.6]
  *
  * The process raises the condition `database-retrying` or `node-retrying` (with the attempts and the height), waits
  * the back-off (1 s, doubling up to the process revision's `backoffCeilingMs`) and runs again:
  * - a height whose transaction was lost after its `on-compute` began is processed again from `on-compute`, keeping its
- *   items from before it (`recovery.test.ts`) [IN-10];
- * - any other failure runs the loop again from the cursor, whose callbacks it delivers again [RN-11].
+ *   items from before it (`recovery.test.ts`);
+ * - any other failure runs the loop again from the cursor, whose callbacks it delivers again.
  *
  * The condition clears once a height commits or the loop finds nothing to process. A stop ends the wait at once. A
  * writer that finds its lock taken when it reconnects halts for good (`writer-lock-lost`). The terminated connections
- * are PostgreSQL's; PGlite has none to lose. [DB-11]
+ * are PostgreSQL's; PGlite has none to lose.
  */
 
 const HEAD = 5n;
 /**
- * The stop's two lines (issue 00072) of a `stop()` while the loop waits at the head, which every case below that
- * reaches the head logs last. [RN-13]
+ * The stop's two lines of a `stop()` while the loop waits at the head, which every case below that
+ * reaches the head logs last.
  */
 const STOPPED_AT_HEAD = [
   "stopping (stop()): no height in progress, and no new height starts",
   `processing stopped (stop()): the last height this process saw committed is ${HEAD}; a restart resumes after the stored cursor`,
 ];
-/** The back-off ceiling the retries run with here: 20 ms, so no test waits the back-off's seconds. [IN-10] */
+/** The back-off ceiling the retries run with here: 20 ms, so no test waits the back-off's seconds. */
 const CEILING = 20;
 
 /** A block source over `source` whose methods may fail first (`fail` decides per call, by method and height). */
@@ -110,7 +109,7 @@ function signal(): { readonly promise: Promise<void>; readonly resolve: () => vo
 const retryLine = (where: "processing" | "startup", code: string, attempt: number) =>
   new RegExp(`^${where} retries in ${CEILING} ms \\(${code}, attempt ${attempt}\\): `);
 
-describe.each(PROCESS_BACKENDS)("retries (IN-10) on $name", (backend) => {
+describe.each(PROCESS_BACKENDS)("retries on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
@@ -153,7 +152,7 @@ describe.each(PROCESS_BACKENDS)("retries (IN-10) on $name", (backend) => {
     expect(started.lines[3]).toMatch(retryLine("processing", "node-retrying", 2));
     expect(started.lines[0]).toContain("the node did not answer for block 3");
     expect(started.lines[2]).toContain("the node did not answer for block 5");
-    // Each height written once; the cursor's on-after-db-write delivered again at each retry. [RN-11]
+    // Each height written once; the cursor's on-after-db-write delivered again at each retry.
     expect(log).toEqual([
       "w on-db-write@1",
       "w on-after-db-write@1",
@@ -173,7 +172,7 @@ describe.each(PROCESS_BACKENDS)("retries (IN-10) on $name", (backend) => {
     expect(await cursorIn(db)).toBe(5);
   }, 180_000);
 
-  it("a node unreachable in on-compute of h is retried with node-retrying; h is processed again from on-compute, not fetched or parsed again (task 10.4)", async () => {
+  it("a node unreachable in on-compute of h is retried with node-retrying; h is processed again from on-compute, not fetched or parsed again", async () => {
     const db = await backend.database();
     const log: string[] = [];
     const seen: ProcessStatus[] = [];
@@ -211,7 +210,7 @@ describe.each(PROCESS_BACKENDS)("retries (IN-10) on $name", (backend) => {
     expect(await cursorIn(db)).toBe(5);
   }, 180_000);
 
-  it("the node client's own retries show node-retrying — its most attempts, at the height processed or waited for, none during startup — are logged, clear when it stops, and give way to the process's own node-retrying (task 10.4)", async () => {
+  it("the node client's own retries show node-retrying — its most attempts, at the height processed or waited for, none during startup — are logged, clear when it stops, and give way to the process's own node-retrying", async () => {
     const db = await backend.database();
     // The process's real client, never connected (the in-memory source asks the node nothing); the test plays its
     // retry reports through the options the process gave it.
@@ -343,7 +342,7 @@ describe.each(PROCESS_BACKENDS)("retries (IN-10) on $name", (backend) => {
     await stopping;
     expect(await started.handle.ended).toEqual({ kind: "signal" });
     expect(started.handle.status()).toMatchObject({ state: "stopping", conditions: [], reason: null });
-    // No retry line: only the stop's own, which names the height it found in progress and ended. [RN-13]
+    // No retry line: only the stop's own, which names the height it found in progress and ended.
     expect(started.lines).toEqual([
       "stopping (stop()): height 2 is in progress; it commits or stores nothing, and no new height starts",
       "processing stopped (stop()): the last height this process saw committed is 1; a restart resumes after the stored cursor",
@@ -413,7 +412,7 @@ describe.each(PROCESS_BACKENDS)("retries (IN-10) on $name", (backend) => {
   if (backend.kind === "postgres") {
     it("the writer's connection terminated during on-db-write of h: retried with database-retrying, h committed once, complete", async () => {
       // The retry processes h again from on-compute: the cursor's on-after-db-write, which ran before h began, is not
-      // delivered again. [IN-10]
+      // delivered again.
       const db = await backend.database();
       const log: string[] = [];
       const reached = signal();
@@ -516,7 +515,7 @@ describe.each(PROCESS_BACKENDS)("retries (IN-10) on $name", (backend) => {
       expect(await db.query("SELECT height FROM setup.rows")).toEqual([]);
     }, 180_000);
 
-    it("a writer that finds its lock taken when it reconnects halts with writer-lock-lost, for good (DB-11)", async () => {
+    it("a writer that finds its lock taken when it reconnects halts with writer-lock-lost, for good", async () => {
       const db = await backend.database();
       const reached = signal();
       const release = signal();

@@ -17,7 +17,6 @@ import { CALL_ARGS_TASK, type CallArgsItem, callArgsModule, FAULT_AT, NATIVE_LEA
 // - in a worker thread started from UmbraDB's entry (the host's modules named by `modules`) or from a host's own
 //   (`runLedgerWorker`);
 // - on the main thread (`withLedgerTasks`: the points that run them and put their results as the module's items).
-// [LG-7, LG-17, Q49; design §5.5]
 
 const LONG = 240_000;
 const LOADER = new URL("./fixtures/ledger-test-loader.ts", import.meta.url);
@@ -96,7 +95,7 @@ async function calling() {
   return { transactions, expected };
 }
 
-describe("ledger tasks in the engine (task 12.6; LG-17)", () => {
+describe("ledger tasks in the engine", () => {
   it("runs a module's tasks on the block's one parse — its native objects, rawPackages(), the state before the block when declared — and gives plain data", { timeout: LONG }, async () => {
     const engine = new LedgerEngine({ load: loadLedgerPackage, tasks: ledgerTasksOf(TEST_MODULES) });
     const zero = await engine.genesis(genesisInput());
@@ -160,7 +159,7 @@ describe("ledger tasks in the engine (task 12.6; LG-17)", () => {
     leak.state.free();
   });
 
-  it("checks a block's parse as plain data before it leaves (LG-7)", async () => {
+  it("checks a block's parse as plain data before it leaves", async () => {
     const native = new LedgerEngine({
       load: async () => ({ ledger: "v9", parseTransaction: () => ({ index: 0, hash: new Uint8Array(32), kind: "regular", size: 1, bytes: Uint8Array.of(1), segments: [{ segment: 1, calls: [{ address: new Date(0) }], deploys: [] }] }) }) as unknown as LedgerPackage,
     });
@@ -170,7 +169,7 @@ describe("ledger tasks in the engine (task 12.6; LG-17)", () => {
   });
 });
 
-describe("ledger tasks in a worker thread (task 12.6; LG-17, MD-1)", () => {
+describe("ledger tasks in a worker thread", () => {
   it("runs the tasks of the modules UmbraDB's entry imports from `modules`, its core modules' too, with each transaction parsed once in the thread", { timeout: LONG }, async () => {
     const host = startLedgerWorker({ loader: LOADER, loaderData: { count: true } satisfies TestLoaderData, modules: TASK_MODULES });
     hosts.push(host);
@@ -189,7 +188,7 @@ describe("ledger tasks in a worker thread (task 12.6; LG-17, MD-1)", () => {
     expect(deserialized.map(hex).sort()).toEqual(transactions.map(hex).sort());
   });
 
-  it("runs a task's request in flight at a restart (Q144 B) again on the new thread, on the parse sent again; one that needs the state fails there", { timeout: LONG }, async () => {
+  it("runs a task's request in flight at a restart again on the new thread, on the parse sent again; one that needs the state fails there", { timeout: LONG }, async () => {
     const host = startLedgerWorker({ loader: LOADER, loaderData: { count: true } satisfies TestLoaderData, modules: TASK_MODULES });
     hosts.push(host);
     const { transactions, expected } = await calling();
@@ -250,7 +249,7 @@ describe("ledger tasks in a worker thread (task 12.6; LG-17, MD-1)", () => {
   });
 });
 
-describe("ledger tasks on the main thread (task 12.6; LG-17)", () => {
+describe("ledger tasks on the main thread", () => {
   const block = (height: bigint, items: Record<string, unknown> = {}): BlockContext => ({
     height,
     hash: hash(Number(height) + 1),

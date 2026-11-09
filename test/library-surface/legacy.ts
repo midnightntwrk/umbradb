@@ -2,14 +2,14 @@ import { posix } from "node:path";
 
 /**
  * What moved to `legacy/transaction-history/`, and the checks that keep it out of the TypeScript build, the package,
- * the conformance run and the exports. [A3 STATIC, LS-3]
+ * the conformance run and the exports.
  *
  * Every function here takes repository-relative POSIX paths and returns one sentence per problem, empty when there is
  * none, so `./legacy-excluded.test.ts` runs the same checks on the real lists (`npm pack --dry-run --json`, the
  * TypeScript programs, `vitest list`, the coverage and mutation configurations) and on the negative controls' lists.
  */
 
-/** Where TransactionHistory lives until the private wallet-data feature refactors it. [LS-3; FEATURES F9] */
+/** Where TransactionHistory lives until the private wallet-data feature refactors it. */
 export const LEGACY_ROOT = "legacy/transaction-history";
 
 /**
@@ -41,7 +41,7 @@ export const MOVED_TESTS: readonly string[] = [
 
 /**
  * Its benchmark workload, first moved to `legacy/transaction-history/bench/workloads/`, then retired with the baseline
- * (the retirement list's Benchmarks row): no longer in the folder, so not in {@link MOVED}. [design §13]
+ * (the retirement list's Benchmarks row): no longer in the folder, so not in {@link MOVED}.
  */
 export const RETIRED_BENCHMARKS: readonly string[] = [
   "bench/workloads/transaction-history.ts",
@@ -54,7 +54,7 @@ export const MOVED: readonly string[] = [...MOVED_SOURCE, ...MOVED_TESTS];
  * What the move added: a note on what the folder is, its own TypeScript program and Vitest configuration, and the test
  * setup that adds migration 004 to the database the moved tests start. Nothing runs the program or the configuration
  * any more (`npm run typecheck` checks the repository's program only, and `test:live` is gone). The README names the
- * last commit where the folder compiled and its tests passed; the files are kept. [Q112 B]
+ * last commit where the folder compiled and its tests passed; the files are kept.
  */
 export const ADDED: readonly string[] = ["README.md", "tsconfig.json", "vitest.config.ts", "test/postgres/setup.ts"]
   .map((path) => legacyPath(path));
@@ -155,7 +155,7 @@ export function inventoryProblems(files: Iterable<string>): string[] {
   return problems;
 }
 
-/** `legacy/transaction-history/` holds the source and its tests, and nothing is left behind. [A3 STATIC] */
+/** `legacy/transaction-history/` holds the source and its tests, and nothing is left behind. */
 export function holdsProblems(exists: (path: string) => boolean): string[] {
   const problems: string[] = [];
   for (const path of MOVED) {

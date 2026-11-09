@@ -39,7 +39,6 @@ import { genesisOf, ingest } from "./ingest-harness.js";
 /**
  * The known networks whose built-in genesis hash a test hides. Every network's genesis hash is recorded, so a build
  * without one is planted here, through the built-in network table as `core-chain` reads it (`builtInNetwork`).
- * [A78, Q117]
  */
 const unrecorded = vi.hoisted(() => new Set<string>());
 vi.mock("../../src/ledger/networks.js", async (importOriginal) => {
@@ -62,7 +61,7 @@ vi.mock("../../src/ledger/networks.js", async (importOriginal) => {
  * - With S above the source's finalized head, the process stays `starting` with `waiting-for-node`, its bootstrap
  *   done. It commits S once the head reaches it, and records the anchor in S's transaction. A bootstrap killed before
  *   S commits is repeated by the next start without error: a real process killed with SIGKILL while it waits, or
- *   inside block S's transaction. [IN-2, A77]
+ *   inside block S's transaction.
  * - Startup refuses, before any migration:
  *   - with `genesis-mismatch`, for a node whose genesis hash is not the configured network's (on an empty database
  *     too) or not the stored one;
@@ -71,15 +70,13 @@ vi.mock("../../src/ledger/networks.js", async (importOriginal) => {
  *
  *   A node whose head is below the cursor makes the process wait with `waiting-for-node`. With the recorded preprod
  *   tape, the real node's genesis is checked against a mainnet and a preprod configuration (skipped without
- *   `UMBRADB_TAPES`). [IN-3, Q117, Q120, A78]
+ *   `UMBRADB_TAPES`).
  * - After block S commits on an empty database, `core_chain.identity` holds the genesis hash, S and the anchor hash.
- *   [CD-1, A88]
  * - There is one `blocks` and one `hashes` row per height, and the cursor is the last `blocks` row. Take a block in
  *   another height partition whose parent links to the cursor but whose hash repeats an earlier block's: it fails with
  *   `duplicate-block-hash`, not `parent-mismatch`, and processing halts. The same block with a fresh hash commits.
- *   [CD-3, A90]
- * - The node's milliseconds are stored in `block_time` exactly (the block-time part of the criterion). [A145]
- * - A module that requires `db` gets the read-only item `core-chain` publishes. [A144]
+ * - The node's milliseconds are stored in `block_time` exactly (the block-time part of the criterion).
+ * - A module that requires `db` gets the read-only item `core-chain` publishes.
  *
  * The node is the block source here (the in-memory one). Its block 0 is the genesis block. The startup checks
  * (`checkChain`) ask for its finalized head and for the finalized block at a height; the node source answers them from
@@ -200,9 +197,9 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  // ── the bootstrap and the chain's identity [A77, A88] ────────────────────────────────────────────────────────────
+  // ── the bootstrap and the chain's identity ────────────────────────────────────────────────────────────
 
-  /** What the bootstrap test observed: the state while waiting, then the identity after S committed. [A77] */
+  /** What the bootstrap test observed: the state while waiting, then the identity after S committed. */
   interface A77Observation {
     readonly waiting: { readonly state: string; readonly ready: boolean; readonly condition: unknown; readonly cursor: unknown };
     readonly bootstrapped: { readonly migrations: number; readonly identity: unknown };
@@ -242,7 +239,7 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
     return { waiting, bootstrapped, after: await identityOf(db, start), cursor, conditionsAfter };
   }
 
-  /** The bootstrap's oracle: the problems found, none when the bootstrap behaved as required. [IN-2, CD-1, A77, A88] */
+  /** The bootstrap's oracle: the problems found, none when the bootstrap behaved as required. */
   function a77Problems(observed: A77Observation): string[] {
     const problems: string[] = [];
     const { waiting } = observed;
@@ -268,11 +265,11 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
     return problems;
   }
 
-  it("A77: waits starting with waiting-for-node while S is above the head, then commits S with the anchor in its transaction", async () => {
+  it("waits starting with waiting-for-node while S is above the head, then commits S with the anchor in its transaction", async () => {
     expect(a77Problems(await a77Run())).toEqual([]);
   }, PATIENCE_MS * 2);
 
-  it("A77 negative control: a core-chain that records the anchor in the next block's transaction fails A77", async () => {
+  it("negative control: a core-chain that records the anchor in the next block's transaction fails", async () => {
     const late: ModuleDeclaration = {
       ...CORE_CHAIN,
       points: {
@@ -286,7 +283,7 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
     expect(a77Problems(await a77Run(late))).toEqual(["the anchor was not recorded in block S's transaction"]);
   }, PATIENCE_MS * 2);
 
-  it("A88: after block S commits on an empty database, core_chain.identity holds the genesis hash, S and the anchor hash", async () => {
+  it("after block S commits on an empty database, core_chain.identity holds the genesis hash, S and the anchor hash", async () => {
     for (const start of [0n, 12n]) {
       const db = await backend.database();
       const genesis: BlockRef = { height: 0n, hash: new Uint8Array(32).fill(0x5a), parentHash: new Uint8Array(32) };
@@ -308,7 +305,7 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
     }
   }, PATIENCE_MS * 2);
 
-  it("A77: a bootstrap stopped while it waits is repeated by the next start without error", async () => {
+  it("a bootstrap stopped while it waits is repeated by the next start without error", async () => {
     const db = await backend.database();
     const first = chainProcess(db, 5n, new InMemoryBlockSource({ head: 2n }));
     await waitingFor(first);
@@ -342,12 +339,12 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
       user: [recorder({ blocks: new Map() })],
       settings: { listen: { api: `127.0.0.1:${port}` } },
     });
-    // The rejection is the general refusal, the source's failure its cause. [LM-9]
+    // The rejection is the general refusal, the source's failure its cause.
     const rejection = await refusalOf(handle);
     expect(rejection).toMatchObject({ code: "database-error", cause: gone });
     expect(await handle.ended).toEqual({ kind: "refused", error: rejection });
     // The refused state: refused with the general refusal code (a source's failure has no code of its own among the
-    // refusal codes), not ready. [design §11]
+    // refusal codes), not ready.
     expect(handle.status()).toMatchObject({
       state: "refused",
       ready: false,
@@ -382,7 +379,7 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
     const handle = chainProcess(db, 5n, source);
     try {
       // The first wait fails: startup is retried after the node back-off and waits again, still starting. The retry's
-      // condition stays raised until startup completes. [IN-10]
+      // condition stays raised until startup completes.
       await source.waiting(4n);
       const { state, conditions } = handle.status();
       expect(state).toBe("starting");
@@ -398,7 +395,7 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
   }, PATIENCE_MS * 2);
 
   for (const mode of ["wait", "hold"] as const) {
-    it(`A77: a bootstrap killed with SIGKILL ${mode === "wait" ? "while it waits for the node" : "inside block S's transaction"} is repeated by the next start without error`, async () => {
+    it(`a bootstrap killed with SIGKILL ${mode === "wait" ? "while it waits for the node" : "inside block S's transaction"} is repeated by the next start without error`, async () => {
       const db = await backend.database();
       const directory = mkdtempSync(join(tmpdir(), "umbradb-chain-"));
       try {
@@ -451,7 +448,7 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
     }, PATIENCE_MS * 3);
   }
 
-  // ── the startup checks [A78] ─────────────────────────────────────────────────────────────────────────────────────
+  // ── the startup checks ─────────────────────────────────────────────────────────────────────────────────────
 
   /** A module whose second build adds a migration: a refusal before any migration leaves it unapplied. */
   const growing = (migrations: number): ModuleDeclaration => ({
@@ -481,7 +478,6 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
 
   /**
    * How a start expected to refuse went: what `started` rejected with, the state, and whether it changed anything.
-   * [A78]
    */
   interface A78Refusal {
     /** `{ code, details }` of the refusal, or "accepted". */
@@ -492,13 +488,13 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
     readonly asked: number;
   }
 
-  /** What the startup checks observed for each case: the refusal's code and details, or how the start waited. [A78] */
+  /** What the startup checks observed for each case: the refusal's code and details, or how the start waited. */
   interface A78Observation {
-    /** On an empty database, the tests' custom network, a node of another genesis. [Q120] */
+    /** On an empty database, the tests' custom network, a node of another genesis. */
     readonly emptyCustom: A78Refusal;
-    /** On an empty database, a mainnet configuration, a preprod node (the required scenario, built-in hashes). [IN-3] */
+    /** On an empty database, a mainnet configuration, a preprod node (the required scenario, built-in hashes). */
     readonly emptyKnown: A78Refusal;
-    /** On an empty database, a known network whose built-in table records no genesis hash (planted). [Q117] */
+    /** On an empty database, a known network whose built-in table records no genesis hash (planted). */
     readonly notRecorded: A78Refusal;
     /** On a database with a cursor, a node of another genesis than the configured network's. */
     readonly configured: A78Refusal;
@@ -611,7 +607,7 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
     return { emptyCustom, emptyKnown, notRecorded, configured, stored, cursorHash, below };
   }
 
-  /** The startup checks' oracle: the problems found, none when startup behaved as required. [IN-3, Q117, Q120, A78] */
+  /** The startup checks' oracle: the problems found, none when startup behaved as required. */
   function a78Problems(observed: A78Observation): string[] {
     const problems: string[] = [];
     const text = (value: unknown) => JSON.stringify(value, (_k, v) => (typeof v === "bigint" ? `${v}` : v));
@@ -664,7 +660,7 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
       if (text(seen.status) !== refusedWith(expected.code)) problems.push(`${what}: left ${text(seen.status)}`);
     }
     // The refusal of a known network with no recorded genesis hash needs no node: the build has nothing to compare
-    // the node's genesis with. [Q117]
+    // the node's genesis with.
     if (observed.notRecorded.refused !== "accepted" && observed.notRecorded.asked !== 0) {
       problems.push(`a known network whose built-in table records no genesis hash: the node was asked ${observed.notRecorded.asked} times`);
     }
@@ -677,11 +673,11 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
     return problems;
   }
 
-  it("A78: a node of another network than the configured one, also on an empty database, or than the stored one refuses with genesis-mismatch, a known network without a recorded genesis refuses, another hash at the cursor refuses with cursor-hash-mismatch, a head below the cursor waits", async () => {
+  it("a node of another network than the configured one, also on an empty database, or than the stored one refuses with genesis-mismatch, a known network without a recorded genesis refuses, another hash at the cursor refuses with cursor-hash-mismatch, a head below the cursor waits", async () => {
     expect(a78Problems(await a78Run())).toEqual([]);
   }, PATIENCE_MS * 4);
 
-  it("A78 negative controls: a startup check that skips the configured network's genesis on an empty database, the stored genesis or the cursor's hash fails A78 in exactly its own cases", async () => {
+  it("negative controls: a startup check that skips the configured network's genesis on an empty database, the stored genesis or the cursor's hash fails in exactly its own cases", async () => {
     const skipConfiguredOnEmpty = async (input: ChainCheckInput) => {
       if (input.cursor !== null) return checkChain(input);
       const node = (await input.source.block(0n)).hash;
@@ -708,7 +704,7 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
     expect(a78Problems(await a78Run(skipCursorHash))).toEqual(['a node with another hash at the cursor: "accepted"']);
   }, PATIENCE_MS * 12);
 
-  it("a custom network without its genesisHash refuses at validation, before the database opens or the node is asked (CF-4)", async () => {
+  it("a custom network without its genesisHash refuses at validation, before the database opens or the node is asked", async () => {
     const db = await backend.database();
     const source = new InMemoryBlockSource({ head: 5n });
     let asked = 0;
@@ -754,7 +750,7 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
 
   tapeTest(
     "preprod-0-10000",
-    "A78 against a real preprod node's genesis (task 0.3's tape): a mainnet configuration refuses with genesis-mismatch naming both, a preprod one starts",
+    "against a real preprod node's genesis (the tape): a mainnet configuration refuses with genesis-mismatch naming both, a preprod one starts",
     async (found) => {
       const { records } = found.read();
       const answered = genesisOf(records) as string;
@@ -783,14 +779,13 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
     { timeoutMs: PATIENCE_MS * 2 },
   );
 
-  // ── the blocks table [A90] ───────────────────────────────────────────────────────────────────────────────────────
+  // ── the blocks table ───────────────────────────────────────────────────────────────────────────────────────
 
   /** S just below the first partition boundary, so heights S…1,000,002 span the partitions p0 and p1. */
   const S90 = 999_998n;
 
   /**
    * What the blocks table test observed: the halt, the rows before it, and the rows after the restart with a fresh hash.
-   * [A90]
    */
   interface A90Observation {
     /** The halt as `status()` gives it once processing failed: the state and the reason (`reasonOf`). */
@@ -889,15 +884,15 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
   /** At 1,000,001: block 999,999 delivered again — its hash and its parent are 999,999's. */
   const again = (): BlockRef => ({ ...inMemoryBlock(999_999n), height: 1_000_001n });
 
-  it("A90: one blocks and one hashes row per height; a linking block repeating a hash in another partition halts with duplicate-block-hash; a fresh hash commits", async () => {
+  it("one blocks and one hashes row per height; a linking block repeating a hash in another partition halts with duplicate-block-hash; a fresh hash commits", async () => {
     expect(a90Problems(await a90Run(linking()), 1_000_001n)).toEqual([]);
   }, PATIENCE_MS * 2);
 
-  it("A90: an earlier block delivered again — repeated hash, wrong parent — halts with duplicate-block-hash, not parent-mismatch", async () => {
+  it("an earlier block delivered again — repeated hash, wrong parent — halts with duplicate-block-hash, not parent-mismatch", async () => {
     expect(a90Problems(await a90Run(again()), 1_000_001n)).toEqual([]);
   }, PATIENCE_MS * 2);
 
-  it("A90 negative controls: no hashes row lets the repeat commit and the next block halt with parent-mismatch; the parent check first names parent-mismatch", async () => {
+  it("negative controls: no hashes row lets the repeat commit and the next block halt with parent-mismatch; the parent check first names parent-mismatch", async () => {
     const variant = (write: (w: never, b: never, start: bigint) => Promise<void>): ModuleDeclaration => ({
       ...CORE_BLOCK_COMMIT,
       points: { "on-db-write": async (p, b, w) => write(w as never, b as never, startOf(p)) },
@@ -923,9 +918,9 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
     ]);
   }, PATIENCE_MS * 4);
 
-  // ── block time, and the db item through the real part [A145, A144] ──────────────────────────────────────────────
+  // ── block time, and the db item through the real part ──────────────────────────────────────────────
 
-  it("A145: the node's block time in milliseconds is stored in core_block_commit.blocks.block_time exactly; A144: a module requiring db gets read only", async () => {
+  it("the node's block time in milliseconds is stored in core_block_commit.blocks.block_time exactly; a module requiring db gets read only", async () => {
     const db = await backend.database();
     const times = [0n, 1n, 1_747_837_800_123n, 99_999_999_999_999n, 253_402_300_799_999n];
     const texts = [

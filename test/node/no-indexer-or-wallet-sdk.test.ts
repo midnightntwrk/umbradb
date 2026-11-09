@@ -7,7 +7,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 /**
  * No source file imports the official indexer's client or a wallet SDK, and nothing the package installs at run time
- * is one. [A83 STATIC, IN-8; CORE-ARCH FR-005]
+ * is one.
  *
  * **What is forbidden:**
  * - **A wallet SDK:** any package of the Midnight scopes (`@midnightntwrk/`, `@midnight-ntwrk/`) whose name holds
@@ -18,7 +18,7 @@ import { afterAll, describe, expect, it } from "vitest";
  *   — and 0.9.5's own GraphQL client of the indexer, the module `indexer-client` (now deleted), by its file name or
  *   by its class name `IndexerClient` (a copy under another name).
  * The ledger packages of those scopes (`@midnight-ntwrk/ledger-v8`, …) are the ledger, not a wallet SDK or an
- * indexer client, and stay allowed. [LG-5, LG-6]
+ * indexer client, and stay allowed.
  *
  * **Where:** every JavaScript and TypeScript file of the code that runs in the indexer — `src/` (the package), what is
  * left of 0.9.5's `chain-archive-sync/` until it is removed (OUTDATED), the vendored ledger builds (`vendor/`), and the
@@ -137,7 +137,7 @@ function installedAtRunTime(lock: { packages?: Record<string, { dev?: boolean }>
     .filter((name) => FORBIDDEN_PACKAGE.test(name) || INDEXER_CLIENT_MODULE.test(name));
 }
 
-describe("A83 [STATIC]: no source file imports the official indexer's client or a wallet SDK (IN-8)", () => {
+describe("no source file imports the official indexer's client or a wallet SDK", () => {
   it("finds none in the code that runs in the indexer, and the scan reads that code", () => {
     expect(scanRoots(REPOSITORY, ROOTS)).toEqual([]);
     // Not vacuous: the scan reads the package's sources, the node client among them, and the vendored ledger builds.

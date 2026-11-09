@@ -13,20 +13,20 @@ import { nodeSet } from "./refcount-model.js";
 import { SweepModel } from "./sweep-model.js";
 
 /**
- * R4's oracle: a counting run's batches fed, block by block, to the sweep's reference model (`./sweep-model.ts`), its
+ * The oracle: a counting run's batches fed, block by block, to the sweep's reference model (`./sweep-model.ts`), its
  * node set compared with the counting run's, on the DAG fixture ({@link sweepComparisonOf}) and on the recorded tapes
- * ({@link sweepTapeComparison}). It stays, with the sweep's model, until R2's and R4's tests are retired; the DAG
- * fixture's process plumbing is `./ledger-graph-tapes.ts`. [R4, LG-14]
+ * ({@link sweepTapeComparison}). It stays, with the sweep's model, until the and the tests are retired; the DAG
+ * fixture's process plumbing is `./ledger-graph-tapes.ts`.
  *
  * Imports nothing of Vitest.
  */
 
 const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
 
-/** A budget no run's cycle reaches: each cycle of the sweep's model starts and ends in its block. [R4] */
+/** A budget no run's cycle reaches: each cycle of the sweep's model starts and ends in its block. */
 export const WHOLE_CYCLE = 1_000_000;
 
-/** What a {@link SweepComparison} saw over the heights it compared. [R4] */
+/** What a {@link SweepComparison} saw over the heights it compared. */
 export interface SweepComparisonSeen {
   /** The heights compared, and the first and last of them. */
   heights: number;
@@ -50,7 +50,7 @@ export interface SweepComparisonSeen {
  * model keeps a node's first child list and counting its last, so they are compared by node set: every key held as a
  * row or embedded in a row ({@link nodeSet}). The comparison holds only while every key is written in one form; a key
  * written with another child list than before is reported, and so is, for `equal`, a cycle that does not end in its
- * block (the budget then does not fit). [R4, LG-14]
+ * block (the budget then does not fit).
  */
 export class SweepComparison {
   readonly #model: SweepModel;
@@ -134,7 +134,6 @@ export class SweepComparison {
 /**
  * R4 on a run of the DAG fixture: its batches (`batches`, heights 0 to `last`) fed to the sweep's model of `budget`,
  * the node sets compared after every block with the run's rows (`tables`). Every problem, and what the comparison saw.
- * [R4]
  */
 export function sweepComparisonOf(
   batches: ReadonlyMap<bigint, NodeBatch>,
@@ -174,12 +173,12 @@ function rowsDigest(rows: ReadonlyMap<string, Uint8Array>): string {
   return `${rows.size} ${createHash("md5").update(text).digest("hex")}`;
 }
 
-/** What R4's comparison on a recorded tape gave. [R4] */
+/** What the comparison on a recorded tape gave. */
 export interface TapeComparison {
   /** The last height the run committed. */
   readonly cursor: bigint;
   readonly status: unknown;
-  /** Every problem: a height whose stored rows are not the ones the batches and evictions give, or R4's. */
+  /** Every problem: a height whose stored rows are not the ones the batches and evictions give, or the. */
   readonly problems: readonly string[];
   readonly seen: SweepComparisonSeen;
   /** The rows the counting run stored after its last height, and the rows it deleted over the run. */
@@ -199,7 +198,7 @@ export function tapeSettings(found: FoundTape): Readonly<Record<string, unknown>
  * each block are the rows after the block before with the block's batch written and its evictions deleted; a watcher
  * module holds them to the database's after every block ({@link ROWS_DIGEST_SQL} at the next block's `on-compute`, and
  * once the process stopped for the last). Each block is compared once the next block's `on-compute` shows it
- * committed, so the comparison holds only committed blocks; nothing of the tables is kept between blocks. [R4, LG-14]
+ * committed, so the comparison holds only committed blocks; nothing of the tables is kept between blocks.
  */
 export async function sweepTapeComparison(db: ProcessDatabase, found: FoundTape, patienceMs: number): Promise<TapeComparison> {
   const to = BigInt(found.tape.to);
@@ -209,7 +208,7 @@ export async function sweepTapeComparison(db: ProcessDatabase, found: FoundTape,
   const problems: string[] = [];
   let next = 0n;
   let deleted = 0;
-  /** Block `h`'s batch and evictions applied to the rows, which must then read `stored`; then R4's comparison at h. */
+  /** Block `h`'s batch and evictions applied to the rows, which must then read `stored`; then the comparison at h. */
   const compare = (h: bigint, stored: string): void => {
     const batch = record.batches.get(h);
     if (batch === undefined) {

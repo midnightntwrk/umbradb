@@ -19,7 +19,6 @@ import { type SyntheticChain, syntheticChain } from "./synthetic-chain.js";
  * state's runtime changes; for block 0, `system_properties` and every page of both registration prefixes with each
  * key's value; and the live window: the finalized head with its header, and both head subscriptions with a notification
  * each. Each problem is named — the height, the call and its params — so a test failing on one says what is missing.
- * [Q123, IN-8]
  */
 
 const quietConnect: ConnectSocket = (url, events, timers) =>
@@ -177,7 +176,7 @@ describe("completenessProblems", () => {
     expect(() => completenessProblems(records, { from: 0, to: 1, keysPage: 0 })).toThrow("keysPage must be an integer from 1 to 1000");
   });
 
-  it("names a call of a method outside IN-8, and a page of keys that is no list", () => {
+  it("names a call of a method outside the allowed ones, and a page of keys that is no list", () => {
     const [mappings] = REGISTRATION_PREFIXES;
     const h0 = chain.hashes[0];
     const extra: TapeRecord[] = [{ method: "system_version", params: [], result: "x" }, ...records];

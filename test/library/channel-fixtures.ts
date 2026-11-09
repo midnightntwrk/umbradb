@@ -6,7 +6,7 @@ import { parseJsonLossless } from "../../src/deterministic-postgresql/index.js";
  * `PrivateLinkChannel` contract (whole messages in order, kept until a listener registers, delivered on a later turn
  * as a `MessagePort` does), and a raw peer that speaks the channel envelope itself — written here from the envelope's
  * documented shape, never with the code under test — so a test can be the other end of a process's link. Imports
- * nothing of Vitest. [LM-6]
+ * nothing of Vitest.
  */
 
 /** A controlled clock: an endpoint's interval falls due only when the test moves the clock. */

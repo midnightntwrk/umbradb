@@ -1,4 +1,4 @@
-# Build image for the vendored ledger packages (openspec/changes/core-arch/design.md §5.2).
+# Build image for the vendored ledger packages.
 #
 # Everything that goes into a vendored build is pinned here, so that two builds from the same
 # upstream commit and patches give the same bytes:

@@ -1,3 +1,3 @@
-// A module file with no `modules` export, for `modulesFrom`'s refusal. [L63]
+// A module file with no `modules` export, for `modulesFrom`'s refusal.
 
 export const others = [];

@@ -4,7 +4,7 @@ import { expectRecordReplayIdentical } from "./builder-checks.js";
 
 /**
  * The committed negative controls of the record-and-replay check: wrong recording builders, each of which must make the
- * check `builder.test.ts` runs (`builder-checks.ts`, `expectRecordReplayIdentical`) fail. [A71]
+ * check `builder.test.ts` runs (`builder-checks.ts`, `expectRecordReplayIdentical`) fail.
  *
  * - **A builder that drops a notification** (the first one it sees is forwarded to the client but not recorded): the
  *   replayed session misses that frame, so the byte-identical comparison fails.
@@ -61,13 +61,13 @@ async function assertionFailure(check: () => unknown): Promise<Failure> {
   throw new Error("the check passed with a wrong builder");
 }
 
-describe("A71's check passes in this file's build with the real builder", { timeout: 60_000 }, () => {
+describe("passes in this file's build with the real builder", { timeout: 60_000 }, () => {
   it("record and replay give byte-identical frames", async () => {
     await expectRecordReplayIdentical();
   });
 });
 
-describe("negative controls: each wrong builder fails A71's record-and-replay check", { timeout: 60_000 }, () => {
+describe("negative controls: each wrong builder fails the record-and-replay check", { timeout: 60_000 }, () => {
   it("a builder that drops a notification: the replay misses the frame the recording forwarded", async () => {
     variant.current = "drop-notification";
     const failure = await assertionFailure(expectRecordReplayIdentical);

@@ -9,16 +9,14 @@ import { type PostgresTestDatabase, type PostgresTestServer, startPostgresServer
 /**
  * The database's read timeout option. A read for a module API request is bounded by `apiReadTimeoutMs`, which the API
  * layer passes as `db.read(body, { timeoutMs })` when it registers the handlers. This file tests the database's half.
- * [DB-15, A141, CF-4]
  *
  * - On PostgreSQL that one read runs with `statement_timeout` and `idle_in_transaction_session_timeout` set to it
  *   (`set_config(…, true)`, so they end with the read). A read that either one ends fails with `query-timeout`, not retryable.
  *   `statement_timeout` cancels the statement and leaves the connection usable; `idle_in_transaction_session_timeout`
  *   ends the session, and the pool replaces it.
  * - PGlite enforces neither and hangs on the second, so on PGlite an API read sets neither and is not bounded.
- *   [design §14]
  *
- * The "within 2 s" bound is asserted as stated; every test has a timeout far above its work. [A141]
+ * The "within 2 s" bound is asserted as stated; every test has a timeout far above its work.
  */
 
 const TEST_TIMEOUT = 60_000;
@@ -35,7 +33,6 @@ function outcome(run: Promise<unknown>): Promise<unknown> {
 
 /**
  * The expected error: `query-timeout`, not retryable, naming the read's timeout and the setting that ended it.
- * [A141]
  */
 function expectQueryTimeout(
   error: unknown,
@@ -58,7 +55,7 @@ const bounded = (shown: string): Record<string, string> => ({
   idle_in_transaction_session_timeout: shown,
 });
 
-describe("A141 on PostgreSQL 18: a read for an API request is bounded by its timeout (DB-15)", () => {
+describe("on PostgreSQL 18: a read for an API request is bounded by its timeout", () => {
   let server: PostgresTestServer;
   beforeAll(async () => {
     server = await startPostgresServer();
@@ -240,7 +237,7 @@ describe("A141 on PostgreSQL 18: a read for an API request is bounded by its tim
       );
       expect(error).toBeInstanceOf(UmbraError);
       expect(error).toMatchObject({ code: "database-error", retryable: false, details: { sqlstate: "57014" } });
-      // Negative control of the check: a read whose 57014 is reported as anything but query-timeout fails it. [A141]
+      // Negative control of the check: a read whose 57014 is reported as anything but query-timeout fails it.
       expect(() => expectQueryTimeout(error, "statement_timeout")).toThrow();
     }, TEST_TIMEOUT);
 
@@ -261,7 +258,7 @@ describe("A141 on PostgreSQL 18: a read for an API request is bounded by its tim
   });
 });
 
-describe("A141 on PGlite 0.5.10: an API read sets neither timeout and is not bounded (DB-15)", () => {
+describe("on PGlite 0.5.10: an API read sets neither timeout and is not bounded", () => {
   let db: Database;
   beforeAll(async () => {
     db = await openPglite({ dataDir: "memory://", committedHeight: async () => null, developmentOptIn: true });
@@ -281,7 +278,7 @@ describe("A141 on PGlite 0.5.10: an API read sets neither timeout and is not bou
   }, TEST_TIMEOUT);
 });
 
-describe("the read option is checked alike on both backends (DB-1)", () => {
+describe("the read option is checked alike on both backends", () => {
   let server: PostgresTestServer;
   let both: readonly (readonly [string, Database])[];
   beforeAll(async () => {

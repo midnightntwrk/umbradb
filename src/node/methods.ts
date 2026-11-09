@@ -2,10 +2,10 @@
  * The node methods the indexer may call. The node client sends these and nothing else: no `rpc_methods` probe, no
  * `system_chain`, and no `chain_unsubscribe…` call. A subscription is cancelled on the client's side, and closing the
  * connection ends every subscription on the node (`./client.ts`). `test/node/methods.test.ts` binds this list to the
- * spec's list of node calls. [IN-8]
+ * spec's list of node calls.
  */
 
-/** The allowed node methods, in the order the spec names them. [IN-8] */
+/** The allowed node methods, in the order the spec names them. */
 export const NODE_METHODS = Object.freeze([
   "chain_subscribeNewHeads",
   "chain_subscribeFinalizedHeads",
@@ -21,7 +21,7 @@ export const NODE_METHODS = Object.freeze([
   "system_properties",
 ] as const);
 
-/** An allowed node method. [IN-8] */
+/** An allowed node method. */
 export type NodeMethod = (typeof NODE_METHODS)[number];
 
 /** The two head subscriptions, which only the client's `subscribe…` methods send. */

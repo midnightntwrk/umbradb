@@ -22,7 +22,6 @@ import {
 // The ledger worker's logic, run here in the test's thread over the real v9 adapter (the worker thread runs the same
 // engine, `worker-host.test.ts`). Oracles: the reference replay (`./adapter-fixtures.ts`, which uses the packages' own
 // API, never the adapters) and the vendored package's own exports.
-// [LG-7, LG-8, LG-11, LG-15, LG-16, IN-7; design §5.1, §5.3, §5.5]
 
 const LONG = 240_000;
 const hash = (byte: number): Uint8Array => new Uint8Array(32).fill(byte);
@@ -90,8 +89,8 @@ async function atGenesis(engine = new LedgerEngine({ load: loadLedgerPackage }))
   return { engine, zero };
 }
 
-describe("the ledger worker's engine (design §5.3, §5.5; LG-7, LG-8, LG-11, LG-16)", () => {
-  it("parses each transaction once and keeps the parse for the block's apply (LG-7)", { timeout: LONG }, async () => {
+describe("the ledger worker's engine", () => {
+  it("parses each transaction once and keeps the parse for the block's apply", { timeout: LONG }, async () => {
     const { engine } = await atGenesis();
     const contract = await contractFixture(RAW.v9);
     const transactions = [systemTransaction("v9"), contract.deploy, zswapOutputTransaction(RAW.v9)];
@@ -111,7 +110,7 @@ describe("the ledger worker's engine (design §5.3, §5.5; LG-7, LG-8, LG-11, LG
     expect(engine.holds().parsed).toEqual([hex(at(1n).hash)]);
   });
 
-  it("applies a block as the reference replay does, with plain data out and the batch of LG-11", { timeout: LONG }, async () => {
+  it("applies a block as the reference replay does, with plain data out and its batch of nodes", { timeout: LONG }, async () => {
     const { engine, zero } = await atGenesis();
     const contract = await contractFixture(RAW.v9);
     const transactions = [
@@ -136,7 +135,7 @@ describe("the ledger worker's engine (design §5.3, §5.5; LG-7, LG-8, LG-11, LG
     expect(hex(applied.stateRoot)).toBe(hex(RAW.v9.stateRoot(reference.state)));
     expect(hex(applied.stateKey)).toBe(hex(RAW.v9.stateKey(reference.state)));
     expect(applied.summary.zswapFirstFree).toBe(reference.state.zswap.firstFree);
-    // The six tree values of the reference state, by the package's `stateTrees`. [LG-16]
+    // The six tree values of the reference state, by the package's `stateTrees`.
     expect(applied.summary).toEqual(RAW.v9.stateTrees(reference.state));
     expect(applied.output.results.map((r) => r.outcome)).toEqual(["success", "success", "success", "partial", "success"]);
     // The call's log and the partial success's guaranteed segment's.
@@ -147,7 +146,7 @@ describe("the ledger worker's engine (design §5.3, §5.5; LG-7, LG-8, LG-11, LG
     expect([applied.ledger, applied.height, hex(applied.hash)]).toEqual(["v9", 1n, hex(at(1n).hash)]);
     expect(plainProblems(applied)).toEqual([]);
     expect(structuredClone(applied)).toEqual(applied);
-    // The state after the block persisted, the one before released, in one batch with the new nodes. [LG-11]
+    // The state after the block persisted, the one before released, in one batch with the new nodes.
     expect(applied.batch.rootCounts.map((c) => [hex(c.key), c.delta]).sort()).toEqual(
       [
         [hex(applied.stateKey), 1],
@@ -157,7 +156,7 @@ describe("the ledger worker's engine (design §5.3, §5.5; LG-7, LG-8, LG-11, LG
     expect(applied.batch.inserts.map((node) => hex(node.key))).toContain(hex(applied.stateKey));
   });
 
-  it("skips a transaction the chain failed, as the outcomes say (task 12.1a), and checks their number", { timeout: LONG }, async () => {
+  it("skips a transaction the chain failed, as the outcomes say, and checks their number", { timeout: LONG }, async () => {
     const run = async (outcomes: readonly ChainOutcome[] | undefined) => {
       const { engine } = await atGenesis();
       const transactions = [zswapOutputTransaction(RAW.v9), zswapOutputTransaction(RAW.v9)];
@@ -178,7 +177,7 @@ describe("the ledger worker's engine (design §5.3, §5.5; LG-7, LG-8, LG-11, LG
     await expect(engine.apply(applyBlock(1n, 1, { outcomes: ["success", "success"] }))).rejects.toThrow(RangeError);
   });
 
-  it("gives block 0 both cases of IN-7: a genesis state that includes its transactions, and one that does not", { timeout: LONG }, async () => {
+  it("gives block 0 both genesis cases: a genesis state that includes its transactions, and one that does not", { timeout: LONG }, async () => {
     const transactions = [systemTransaction("v9"), zswapOutputTransaction(RAW.v9)];
     const block0 = { ...fixtureBlock(transactions), height: 0n, hash: at(0n).hash, parentHash: new Uint8Array(32), parentTimestampMs: BigInt(T0) };
     const blank = RAW.v9.LedgerState.blank(NETWORK_ID);
@@ -271,7 +270,7 @@ describe("the ledger worker's engine (design §5.3, §5.5; LG-7, LG-8, LG-11, LG
       engine.genesis({ ledger: "v9", ...at(0n), parentHash: new Uint8Array(32), timestampMs: 0n, transactions: 0, genesisState: blankGenesis(), includesBlockZero: true }),
     ).rejects.toThrow(/block 0/);
     // Committed blocks move on; a commit of a block not pending changes nothing, as when the callbacks are delivered
-    // again after a restart. [RN-11]
+    // again after a restart.
     expect(engine.commit(at(5n))).toBe(false);
     const one = await engine.apply(applyBlock(1n, 0));
     expect(engine.holds()).toMatchObject({ committed: at(0n), pending: at(1n) });
@@ -327,7 +326,7 @@ describe("the ledger worker's engine (design §5.3, §5.5; LG-7, LG-8, LG-11, LG
     expect(engine.holds().parsed).toEqual([]);
   });
 
-  it("hands the adapter each block's times, LG-8's rule and outcomes as given; block 0 its own time as its parent's", { timeout: LONG }, async () => {
+  it("hands the adapter each block's times, the rule and outcomes as given; block 0 its own time as its parent's", { timeout: LONG }, async () => {
     const inputs: ApplyInput[] = [];
     const engine = new LedgerEngine({
       load: async (ledger, options) => {
@@ -391,7 +390,7 @@ describe("the ledger worker's engine (design §5.3, §5.5; LG-7, LG-8, LG-11, LG
     expect(loads).toEqual(["v9 undeployed", "v9 undeployed"]);
   });
 
-  it("loads a state by its key from the store it is given (the node-store bridge's side, LG-11)", { timeout: LONG }, async () => {
+  it("loads a state by its key from the store it is given (the node-store bridge's side)", { timeout: LONG }, async () => {
     const { engine, zero } = await atGenesis();
     const stored = new Map(zero.batch.inserts.map((node) => [hex(node.key), node]));
     const asked: string[] = [];

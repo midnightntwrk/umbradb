@@ -1,7 +1,7 @@
 /**
  * A block header's hash. The Midnight node's head notifications (`chain_newHead`, `chain_finalizedHead`) carry the
  * header without its hash. The hash is still needed: for `on-best-block`'s header, for the parent links of the
- * best-block queue, and for checking that each finalized block follows the one before it. [IN-4, IN-6]
+ * best-block queue, and for checking that each finalized block follows the one before it.
  *
  * A Substrate block's hash is the BLAKE2b-256 of its header's SCALE encoding: `parentHash ‖ Compact(number) ‖
  * stateRoot ‖ extrinsicsRoot ‖ Compact(digest length) ‖ digest items`. Each digest item is the SCALE bytes the node

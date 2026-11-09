@@ -1,10 +1,10 @@
 /**
  * Writing a backup: a `pg_dump` file of a database at one committed height, with its manifest (`./manifest.ts`) as the
  * first line. Used by `umbradb backup` (`src/cli/backup.ts`), by a process's `backup` and by the backup at stop
- * (`src/runner/process.ts`). [BK-1, BK-2, PP-12, Q83, Q85; design §9.1]
+ * (`src/runner/process.ts`).
  *
  * **In this order:**
- * - A private process's backup is refused without the development opt-in (`private-backup-refused`). [PP-12]
+ * - A private process's backup is refused without the development opt-in (`private-backup-refused`).
  * - The dump tool is found (`./tools.ts`), or the backup fails with `backup-tools-missing`.
  * - One snapshot serves both the manifest and the dump, as described below.
  *
@@ -14,14 +14,14 @@
  *   the contents hash), refuses a private database without the opt-in, and exports its snapshot
  *   (`pg_export_snapshot()`). While the transaction stays open, it runs `pg_dump --snapshot=<id> --inserts --no-owner
  *   --no-privileges`, whose output follows the manifest line in the file. The database URL's password reaches
- *   `pg_dump` in its environment (`PGPASSWORD`), never on its command line. [DB-2]
+ *   `pg_dump` in its environment (`PGPASSWORD`), never on its command line.
  * - **PGlite:** one exclusive job of the database's queue (`exclusiveJob`), so commits wait. Inside the job, a read
  *   gets the facts, then the `pg_dump` of `@electric-sql/pglite-tools` runs on the engine. It adds `--inserts`; its
  *   `DEALLOCATE ALL`, and everything its `pg_dump` set on the one session, end with the job. The dump's own header
  *   must name a `pg_dump` of major version 18, else `backup-tools-missing`. This is `./pglite-backup.ts`, which the
- *   browser page's backup runs too. [DB-4, BK-5]
+ *   browser page's backup runs too.
  *
- * Any committed height is a block boundary, so the dump holds whole blocks. [RN-6]
+ * Any committed height is a block boundary, so the dump holds whole blocks.
  *
  * **The file** is written next to its path under a temporary name, flushed to disk, and renamed over the path only
  * once complete. So a failed or interrupted backup leaves no file at the path, never half a file; the temporary file
@@ -35,7 +35,7 @@
  * - The manifest line and the dump go through that one handle: PGlite's text, or `pg_dump`'s output piped in
  *   (`pg_dump` never opens the file). The handle is flushed to disk and closed before the rename, so the file is
  *   never opened again by name.
- * - The rename keeps the mode. An earlier file at the path is replaced, and its mode is not carried over. [A174]
+ * - The rename keeps the mode. An earlier file at the path is replaced, and its mode is not carried over.
  */
 
 import { spawn } from "node:child_process";
@@ -72,17 +72,16 @@ export interface BackupInput extends DumpInput {
   readonly env?: Environment;
 }
 
-/** The mode of every backup file written, and of its temporary file from its creation: its owner's only. [A174] */
+/** The mode of every backup file written, and of its temporary file from its creation: its owner's only. */
 export const BACKUP_FILE_MODE = 0o600;
 
 /** What the tests replace (the dump outside the manifest's snapshot: `SnapshotSeams`). */
 export interface BackupSeams extends SnapshotSeams {
-  /** The `pglite-tools` module to import (a missing one gives `backup-tools-missing` on PGlite). [A124] */
+  /** The `pglite-tools` module to import (a missing one gives `backup-tools-missing` on PGlite). */
   readonly pgliteTools?: string;
   /**
    * Creates the temporary file at `path` (a new name) and opens it for writing. The negative control of the owner-only
    * mode test creates it other ways. The backup writes through the handle, closes it and removes the file on failure.
-   * [A174]
    */
   readonly createTemporary?: (path: string) => Promise<FileHandle>;
 }
@@ -138,7 +137,7 @@ async function abandonStream(stream: WriteStream): Promise<void> {
  * libpq's environment for `connection`: its parts as `PGHOST`, `PGPORT`, `PGUSER`, `PGDATABASE`, the password as
  * `PGPASSWORD` (never on the command line), and `ssl` as `PGSSLMODE`. That is `disable`, `require`, or `verify-full`
  * with `PGSSLROOTCERT=system`, libpq's name for the system's trust roots; no other authority can be set. A libpq
- * variable that the caller's environment sets for these is replaced. [CF-4, Q183 A]
+ * variable that the caller's environment sets for these is replaced.
  */
 export function pgDumpEnvironment(connection: PostgresConnection): Record<string, string> {
   return {
@@ -294,7 +293,7 @@ export async function firstLine(path: string): Promise<string> {
  * The backup at stop. Writes the backup of the committed height `height` to `input.out`, unless the file there is
  * already a backup of that height, which is kept. Resolves with what it did. A backup of another height there is
  * replaced once the new one is complete. A file there that is not a backup is left as it is, and the backup is refused
- * (`backup-format-unknown`). [BK-1; CORE-ARCH §4.15]
+ * (`backup-format-unknown`).
  */
 export async function backupAtStop(
   input: BackupInput,

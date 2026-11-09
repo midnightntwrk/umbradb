@@ -14,7 +14,6 @@ import { startTlsPostgres, type TlsPostgres } from "./postgres-tls-server.js";
  * - `verify-full` as Node.js's TLS options that check the certificate against the default roots and the host name:
  *   `rejectUnauthorized: true` and the host, which Node.js's `checkServerIdentity` compares with the certificate's
  *   names (for an IP address the driver gives no `servername`).
- * [CF-4, Q182 B, Q183 A]
  *
  * Against a PostgreSQL 18.6 server that serves TLS only (`./postgres-tls-server.ts`):
  * - `require` connects over TLS (`pg_stat_ssl`);

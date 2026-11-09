@@ -10,10 +10,10 @@ import { coreSettings } from "../runner/process-build.js";
  * What the library's tests share: a user module of the command's build, the configuration data of a process on a
  * database, and waits on a handle. The configuration is the tests' network (`coreSettings`: a `custom` network whose
  * genesis is the in-memory chain's block 0, its ledger table, the development opt-in, a node that is never contacted
- * with an in-memory `source`). [LM-1]
+ * with an in-memory `source`).
  */
 
-/** PGlite in memory, the third database of the library's guarantees (L1–L12, L14). */
+/** PGlite in memory, the third database of the library's guarantees. */
 export const PGLITE_MEMORY: DatabaseParts = Object.freeze({ kind: "pglite", memory: true }) as DatabaseParts;
 
 /**

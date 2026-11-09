@@ -2,10 +2,9 @@
  * The type check of `umbradb config check`. The configuration file and every local TypeScript file it imports are
  * checked by the TypeScript compiler with `noEmit`, and each diagnostic is a finding at `file:line:column`. The
  * compiler is the one the package depends on (`typescript`, a runtime dependency, loaded only when a file is checked).
- * [CF-10, Q44; design §7]
  *
  * **The compiler options** ({@link configCompilerOptions}) are fixed, not the operator's `tsconfig.json`, and match
- * how the process loads the file: Node.js ≥ 24 imports it as an ES module through its type stripping. [CF-1]
+ * how the process loads the file: Node.js ≥ 24 imports it as an ES module through its type stripping.
  * - `module` and `moduleResolution` `NodeNext`, and `allowImportingTsExtensions`: the options of a Node.js module, as
  *   Node.js runs `import "./x.ts"`.
  * - `erasableSyntaxOnly`: the compiler refuses an `enum`, a `namespace` or a parameter property, which type stripping
@@ -101,7 +100,7 @@ function packageType(directory: string, cache: Map<string, string | null>): stri
 /**
  * Whether Node.js loads `fileName` as an ES module where the compiler reads it as CommonJS (see the module comment).
  * Files under `node_modules` are no exception: Node.js strips no types there, so whatever the compiler reads them as,
- * the loader refuses such a file with `load-failed`. [CF-1]
+ * the loader refuses such a file with `load-failed`.
  */
 function detectedAsModule(fileName: string, cache: Map<string, string | null>): boolean {
   if (!fileName.endsWith(".ts") || fileName.endsWith(".d.ts")) return false;

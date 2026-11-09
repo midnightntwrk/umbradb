@@ -3,7 +3,6 @@
  * zod schemas on both ends: the core's server (`./core-transport.ts`) and a private process's client
  * (`./private-transport.ts`). There are no other messages. A private process uses this connection for its reads of
  * public data, and nothing calls a module across it, so an `api` or `api-result` message is an unknown `type`.
- * [PP-4, Q140 C; design §8; CORE-ARCH §4.14]
  *
  * | Type | Direction | Fields (`H` a height as decimal text, `X` `0x`-prefixed lowercase hex) |
  * |---|---|---|
@@ -21,16 +20,16 @@
  * - `reason`: `command`, `function`, `statements` or `unreadable`;
  * - `name`: its first word (`COMMIT`) or the function (`pg_advisory_lock`), or null when there is none.
  *
- * `refused` is present exactly when the error is `read-refused`. [PP-4, A172]
+ * `refused` is present exactly when the error is `read-refused`.
  *
  * **`configHash`**: the core's configuration hash, 32 bytes, on each of the core's three messages. A private process
- * compares it with the one its first `hello-ack` gave (`./private-transport.ts`). [PP-4, PP-14, RN-16, Q147]
+ * compares it with the one its first `hello-ack` gave (`./private-transport.ts`).
  *
  * **Strict.** Every object is a strict object — a field it does not have fails its schema as a missing or mistyped one
  * does — and a message is `v: 1` with one of these `type`s; {@link parseMessage} tells the three failures apart
  * (`unknown-version`, `unknown-type`, `invalid-message`, besides `not-json`), and the transport closes the connection on
  * any of them. Hashes (`hello`'s, `hello-ack`'s `genesis`, `committed`'s, `report`'s, each `configHash`) are 32 bytes;
- * ids are text of 1 to 128 characters, unique per connection for its requests. [PP-4]
+ * ids are text of 1 to 128 characters, unique per connection for its requests.
  *
  * **Values** ({@link encodeValue}, {@link decodeValue}). A value in a row or a parameter is `null`, a boolean, a string
  * or JSON: `bigint` and `numeric` as decimal text, `bytea` as `X`, `json` and `jsonb` as their JSON value, the other
@@ -42,13 +41,13 @@
  * JSON value — an integer outside ±(2^53 − 1) inside it a `bigint`, as the database API gives it —, a float's text as
  * its number, and every other value as written; so a value decodes back to the value the core read. The wire's JSON
  * keeps every integer exactly: it is written with `bigint`s as JSON numbers ({@link messageText}) and read with the
- * component's lossless reader (`parseJsonLossless`). [DB-2]
+ * component's lossless reader (`parseJsonLossless`).
  *
  * **Parameters** carry no types (the schema's `params: Value[]`), and the database API sends every parameter as untyped
  * text, which PostgreSQL types from the statement. So the core reads a parameter that is a string of `0x` and
  * lowercase hex pairs as bytes ({@link decodeParameter}) — a `bytea` parameter written as `X` —, every other string as
  * text, numbers, booleans and null as themselves, a JSON array as an array (its elements read the same way) and a JSON
- * object as JSON. A text parameter that is itself such hex is therefore sent as bytes. [DB-2, Q141]
+ * object as JSON. A text parameter that is itself such hex is therefore sent as bytes.
  */
 
 import { z } from "zod";
@@ -92,7 +91,7 @@ const value = json;
 
 const base = <T extends string>(type: T) => ({ v: z.literal(PROTOCOL_VERSION), type: z.literal(type) });
 
-/** `hello` (private → core). Its `instance` follows `./instance-id.ts`, as the core logs and shows it. [PP-4] */
+/** `hello` (private → core). Its `instance` follows `./instance-id.ts`, as the core logs and shows it. */
 export const HELLO = z.strictObject({
   ...base("hello"),
   instance: instanceIdSchema(),
@@ -177,7 +176,7 @@ export const MESSAGE_SCHEMAS = Object.freeze({
 /** A message type. */
 export type MessageType = keyof typeof MESSAGE_SCHEMAS;
 
-/** The message types, in the order of the module comment's table. [design §8] */
+/** The message types, in the order of the module comment's table. */
 export const MESSAGE_TYPES = Object.freeze(Object.keys(MESSAGE_SCHEMAS) as MessageType[]);
 
 export type Hello = z.infer<typeof HELLO>;
@@ -221,7 +220,7 @@ export function parseMessage(text: string): Parsed {
 
 /**
  * Reads one message's JSON value, as {@link parseMessage} reads it once its text is parsed (a channel's envelope
- * carries the value, `src/library/channels.ts`): the message, or why it is none. [PP-4, LM-6]
+ * carries the value, `src/library/channels.ts`): the message, or why it is none.
  */
 export function messageOfValue(parsed: unknown): Parsed {
   if (!isObject(parsed)) return { ok: false, fault: "invalid-message", detail: "the message is not a JSON object" };

@@ -11,7 +11,7 @@ environment property: a command elaborator can add a declaration without spellin
 forbidden keyword. This module therefore audits the elaborated environment on every default build.
 
 The TemporalKV (T1–T5, retention) and Checkpoint (C1) modules were retired with the 0.9.5 parts they
-model (core-arch task 17.2, `openspec/changes/core-arch/design.md` §13); the Watermarks laws (W1, the
+model; the Watermarks laws (W1, the
 cursor table's law) and `APISmoke` remain, and every module of both libraries is imported here.
 -/
 

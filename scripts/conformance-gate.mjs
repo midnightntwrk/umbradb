@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * The required conformance gate. [v1.0.0-recovery-testing design §0, §1.1]
+ * The required conformance gate.
  *
  * One command, two guarantees:
  *   1. `vitest run` with the coverage gate (thresholds in `vitest.config.ts`) — the crash, soak
@@ -23,7 +23,6 @@
  * without reconciling, since the run wrote no report. vitest runs in a process group of its own so that the kill
  * reaches its forked workers too; a kill of vitest alone would leave a hung fork orphaned, still running. A SIGINT,
  * SIGTERM or SIGHUP to the gate is passed on to that group, since a Ctrl-C reaches only the terminal's foreground group.
- * [docs/issues/00027, docs/issues/00054]
  */
 import { spawn, spawnSync } from "node:child_process";
 import { constants } from "node:os";
@@ -48,7 +47,6 @@ const vitestCli = resolve(repoRoot, "node_modules/vitest/vitest.mjs");
 /**
  * The milliseconds `name` sets, or `fallback` when it is unset: a positive integer that `setTimeout` keeps as given
  * (larger values it fires at once). Anything else ends the gate with exit code 2 before vitest starts.
- * [docs/issues/00027, docs/issues/00054]
  */
 function millisecondsFromEnv(name, fallback) {
   const raw = process.env[name];
@@ -72,7 +70,7 @@ const killGraceMs = millisecondsFromEnv("UMBRADB_CONFORMANCE_KILL_GRACE_MS", 10_
 const TIMED_OUT_EXIT = 124;
 
 // On Windows a detached child gets a console of its own and process groups do not exist; there the tree is ended with
-// `taskkill /T` instead. [docs/issues/00027, docs/issues/00054]
+// `taskkill /T` instead.
 const windows = process.platform === "win32";
 
 const vitest = spawn(
@@ -92,7 +90,7 @@ const vitest = spawn(
 /**
  * Sends `signal` to vitest's whole process tree: its process group, which its forked workers share, or on Windows the
  * tree `taskkill` walks (forcibly, whatever the signal). A group already gone is not an error; any other failure is
- * reported and the gate carries on, since it runs from signal handlers too. [docs/issues/00027, docs/issues/00054]
+ * reported and the gate carries on, since it runs from signal handlers too.
  */
 function signalTree(signal) {
   if (vitest.pid === undefined) return;

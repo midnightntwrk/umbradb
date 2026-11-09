@@ -8,7 +8,7 @@ import { spawnChild } from "../child-processes.js";
 /**
  * The checks of the module guide's example, `examples/stats-module/`: type-checked against `src/index.ts`, its
  * configuration file checked by `umbradb config check` as an installed project runs it, and the documents' code blocks
- * held to the package's surface and to the example's files. [Q160 A, Q161 A]
+ * held to the package's surface and to the example's files.
  */
 
 export { REPOSITORY };

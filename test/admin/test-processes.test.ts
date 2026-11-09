@@ -10,7 +10,7 @@ import { startProcess, testBuild } from "../runner/process-build.js";
 /**
  * The tests' processes and the admin endpoints' default. The runner's `startProcess` serves the admin endpoints unless
  * its caller passes `admin: false`. It serves them on `listen.admin`, which is `0.0.0.0:8081` unless configured, so a
- * test process that leaves them on collides with every other test process on a shared machine. [Q128 B, CF-4]
+ * test process that leaves them on collides with every other test process on a shared machine.
  *
  * Outside `test/admin/`, whose tests are about the endpoints and say how each of their processes serves them, a test
  * starts a process through `test/runner/process-build.ts`'s `startProcess`, which opts out unless the test asks for
@@ -80,7 +80,7 @@ function sources(directory: string): string[] {
   });
 }
 
-describe("the tests' processes opt out of the admin endpoints unless they ask (task 8.1a, Q128 B)", () => {
+describe("the tests' processes opt out of the admin endpoints unless they ask", () => {
   it("no test outside test/admin/ takes the runner's startProcess: each goes through test/runner/process-build.ts's", () => {
     const takers = sources(TESTS).filter(
       (file) => runnerStarts(file, readFileSync(join(REPOSITORY, file), "utf8")).length > 0,

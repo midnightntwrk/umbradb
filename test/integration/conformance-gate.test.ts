@@ -13,12 +13,12 @@ import { guardPid, spawnChild } from "../child-processes.js";
  * a named failure once the deadline passes, and the kill reaches Vitest's whole process tree, its forked workers too.
  * The gate is copied into a scratch repository root whose `node_modules/vitest/vitest.mjs` is a stand-in
  * (`conformance-gate.vitest-stand-in.mjs`), so the gate under test is the committed file, unchanged, with nothing in it
- * that only a test uses. [docs/issues/00027, docs/issues/00054]
+ * that only a test uses.
  *
  * The hung stand-in holds at a named point: it writes its pid and its grandchild's once both ignore SIGTERM and its
  * event loop is about to block for good. The negative controls: a run that ends on its own passes its exit code through
  * untouched by the deadline, and killing the stand-in alone leaves its grandchild running, so the test's check that no
- * process survives the gate can fail. [docs/issues/00027, docs/issues/00054]
+ * process survives the gate can fail.
  */
 
 const REPOSITORY = fileURLToPath(new URL("../..", import.meta.url));

@@ -19,31 +19,30 @@ import { cursorReaches, libraryData, PGLITE_MEMORY, rowsModule } from "./library
 import { runQuietChild } from "./quiet-child.js";
 
 /**
- * The library's guarantees (design §7.1, G1–G10): what `startUmbraDB` does not do to its host program. [LM-1, LM-2,
- * LM-9]
+ * The library's guarantees: what `startUmbraDB` does not do to its host program.
  *
- * - L1, L2, L8 `[CI][NEG]` in a host process of their own (`./quiet-host.child.ts`): start → blocks → `backup()` →
+ * - `[CI][NEG]` in a host process of their own (`./quiet-host.child.ts`): start → blocks → `backup()` →
  *   `stop()`, a start refused at its configuration and one refused after its database opened, a failed SQL statement
  *   and a halt — on PGlite in memory, on a PGlite directory (its `node:sqlite` import) and on PostgreSQL — add no
  *   `process` listener for any event, write nothing to stdout or stderr, and leave `process.exitCode` as it was; each
  *   negative control gives the engine one of the command's ports and fails its criterion.
- * - L5: no child process starts without `backup()`; `backup()` on PostgreSQL spawns exactly `pg_dump --version` and
+ * - No child process starts without `backup()`; `backup()` on PostgreSQL spawns exactly `pg_dump --version` and
  *   `pg_dump` (Node.js's `child_process` diagnostics channel), and on PGlite none.
- * - L6 `[NEG]`: no listening socket exists without a request: no server of the process begins to listen at any time
+ * - `[NEG]`: no listening socket exists without a request: no server of the process begins to listen at any time
  *   while it starts, runs and stops (the `net.server.listen` tracing channel), no `TCPServerWrap` among its resources at
  *   each step, no thread that could listen; the control is the command's network with `listen.api` written.
- * - L7 `[NEG]`: a `umbradb.config.ts` in `cwd` is not read; the control is `umbradb run`, which reads it.
- * - L9 `[FAULT][NEG]`: a close step that fails is logged, the later ones run, `closed` resolves, no rejection is
+ * - `[NEG]`: a `umbradb.config.ts` in `cwd` is not read; the control is `umbradb run`, which reads it.
+ * - `[FAULT][NEG]`: a close step that fails is logged, the later ones run, `closed` resolves, no rejection is
  *   unhandled — in `stop()`'s close, startup's refusal cleanup and a configuration refusal's end; the control's
  *   closer stops at the first failure.
- * - L10, L11: relative paths resolve against `cwd`, or `process.cwd()` without it.
- * - L12: no ledger worker without the ledger, no admin thread without a listening admin (the `worker_threads`
+ * - Relative paths resolve against `cwd`, or `process.cwd()` without it.
+ * - No ledger worker without the ledger, no admin thread without a listening admin (the `worker_threads`
  *   diagnostics channel, which sees the ledger worker and the admin worker when they start).
- * - L14: aborting `signal` stops like `stop()`, during startup and while processing.
+ * - Aborting `signal` stops like `stop()`, during startup and while processing.
  * - A handle's listener on the host's `signal` is removed once `closed` resolves, whichever way the process ended — a
  *   stop, a class-A refusal, a stop during startup, a class-B refusal then a stop — so that repeated starts under one
  *   long-lived signal leave its listener count where it started, on PostgreSQL, a PGlite directory and in memory.
- * - L47 `[NEG]`: `library-setting-refused` for `backupAtStop` and `backupOnSignal`; the control is the engine without
+ * - `[NEG]`: `library-setting-refused` for `backupAtStop` and `backupOnSignal`; the control is the engine without
  *   the library's check, which starts.
  */
 
@@ -61,7 +60,7 @@ interface QuietResult {
 /**
  * The quiet host's oracle: every problem with a child's run, none when it wrote nothing, no listener was added to
  * `process` at any time during the runs, every event's listener count stayed as it was before (while the first run ran
- * and after all), and `process.exitCode` did too. [L1, L2, L8]
+ * and after all), and `process.exitCode` did too.
  */
 function quietProblems(run: { stdout: string; stderr: string; code: number | null; result: QuietResult | null }): string[] {
   const problems: string[] = [];
@@ -98,7 +97,7 @@ const QUIET_OUTCOMES = [
   { state: "stopping", code: "callback-error", note: "" },
 ];
 
-describe("L1, L2, L8: a quiet host (LM-2)", () => {
+describe("a quiet host", () => {
   let tmp: string;
   const postgres = BACKUP_BACKENDS[0] as BackupBackend;
   beforeAll(async () => {
@@ -150,7 +149,7 @@ describe("L1, L2, L8: a quiet host (LM-2)", () => {
     expect(run.result?.outcomes).toEqual(QUIET_OUTCOMES);
   }, 300_000);
 
-  it("negative control (L1): the command's SIGUSR2 port with backupOnSignal fails it, a listener while it runs", async () => {
+  it("negative control: the command's SIGUSR2 port with backupOnSignal fails it, a listener while it runs", async () => {
     const run = await runQuietChild<QuietResult>("./quiet-host.child.ts", {
       mode: "control-listener",
       databases: [PGLITE_MEMORY],
@@ -159,7 +158,7 @@ describe("L1, L2, L8: a quiet host (LM-2)", () => {
     expect(quietProblems(run)).toEqual(["while it runs: 1 SIGUSR2 listener(s) added", "a SIGUSR2 listener was added"]);
   }, 300_000);
 
-  it("negative control (L2): the command's log on stderr fails it", async () => {
+  it("negative control: the command's log on stderr fails it", async () => {
     const run = await runQuietChild<QuietResult>("./quiet-host.child.ts", {
       mode: "control-output",
       databases: [PGLITE_MEMORY],
@@ -168,7 +167,7 @@ describe("L1, L2, L8: a quiet host (LM-2)", () => {
     expect(quietProblems(run)).toEqual(["stderr: database: pglite in memory"]);
   }, 300_000);
 
-  it("negative control (L8): a stop that sets process.exitCode fails it", async () => {
+  it("negative control: a stop that sets process.exitCode fails it", async () => {
     const run = await runQuietChild<QuietResult>("./quiet-host.child.ts", {
       mode: "control-exit-code",
       databases: [PGLITE_MEMORY],
@@ -214,7 +213,7 @@ async function threadsDuring(body: () => Promise<void>): Promise<number> {
 describe.each([
   ...BACKUP_BACKENDS.map((backend) => [backend.name, backend] as const),
   ["PGlite in memory", null] as const,
-])("L5: no child process without backup(); a backup's own, on %s", (_name, backend) => {
+])("no child process without backup(); a backup's own, on %s", (_name, backend) => {
   let tmp: string;
   beforeAll(async () => {
     await backend?.start();
@@ -261,7 +260,7 @@ const listeningSockets = (): number => process.getActiveResourcesInfo().filter((
 /**
  * How many times a server of this thread began to listen while `body` runs (Node.js's `net.server.listen` tracing
  * channel, whose `asyncStart` each `listen()` publishes — `node:net`'s and `node:http`'s servers alike): a listener
- * opened and closed again between two samples is counted too. [L6]
+ * opened and closed again between two samples is counted too.
  */
 async function listensDuring(body: () => Promise<void>): Promise<number> {
   let listens = 0;
@@ -280,7 +279,7 @@ async function listensDuring(body: () => Promise<void>): Promise<number> {
 describe.each([
   ...PROCESS_BACKENDS.map((backend) => [backend.name, backend] as const),
   ["PGlite in memory", null] as const,
-])("L6, L12: no listening socket, no thread but the ledger's when it needs one, on %s", (_name, backend) => {
+])("no listening socket, no thread but the ledger's when it needs one, on %s", (_name, backend) => {
   beforeAll(() => backend?.start(), 180_000);
   afterAll(() => backend?.stop(), 60_000);
   const database = async (): Promise<DatabaseParts> => (backend === null ? PGLITE_MEMORY : (await backend.database()).setting);
@@ -343,7 +342,7 @@ describe.each([
   }, 120_000);
 });
 
-describe("L7: no configuration file is looked for or read but config.file (CF-1)", () => {
+describe("no configuration file is looked for or read but config.file", () => {
   let cwd: string;
   beforeAll(() => {
     cwd = mkdtempSync(join(tmpdir(), "umbradb-library-l7-"));
@@ -382,7 +381,7 @@ describe("L7: no configuration file is looked for or read but config.file (CF-1)
   }, 60_000);
 });
 
-/** A closer that stops at the first step that fails, logging it: the negative control's. [L9] */
+/** A closer that stops at the first step that fails, logging it: the negative control's. */
 const stopsAtFirstFailure: CloseHelper = async (steps, log) => {
   for (const [name, work] of steps) {
     try {
@@ -452,7 +451,7 @@ async function faultedClose(
 describe.each([
   ...PROCESS_BACKENDS.map((backend) => [backend.name, backend] as const),
   ["PGlite in memory", null] as const,
-])("L9: every close step runs, a failure logged, closed resolved, nothing unhandled (G7), on %s", (_name, backend) => {
+])("every close step runs, a failure logged, closed resolved, nothing unhandled, on %s", (_name, backend) => {
   beforeAll(() => backend?.start(), 180_000);
   afterAll(() => backend?.stop(), 60_000);
   /** A database of its own for one close. */
@@ -540,7 +539,7 @@ describe.each([
 describe.each([
   ...BACKUP_BACKENDS.map((backend) => [backend.name, backend] as const),
   ["PGlite in memory", null] as const,
-])("L10, L11: relative paths resolve against cwd, or process.cwd() without it, on %s", (_name, backend) => {
+])("relative paths resolve against cwd, or process.cwd() without it, on %s", (_name, backend) => {
   let base: string;
   beforeAll(async () => {
     await backend?.start();
@@ -555,7 +554,7 @@ describe.each([
   const database = async (relative: string): Promise<DatabaseParts> =>
     backend === null ? PGLITE_MEMORY : backend.kind === "pglite" ? { kind: "pglite", path: relative } : (await backend.database()).setting;
 
-  it("L10: with cwd ≠ process.cwd(), a { file }, a { data } PGlite path and a backup's target resolve against cwd", async () => {
+  it("with cwd ≠ process.cwd(), a { file }, a { data } PGlite path and a backup's target resolve against cwd", async () => {
     const cwd = join(base, "given");
     mkdirSync(join(cwd, "conf"), { recursive: true });
     const setting = await database("data/db");
@@ -579,7 +578,7 @@ describe.each([
     expect(existsSync(join(process.cwd(), "data", "db"))).toBe(false);
   }, 120_000);
 
-  it("L11: without cwd, they resolve against process.cwd()", async () => {
+  it("without cwd, they resolve against process.cwd()", async () => {
     const here = join(base, "here");
     mkdirSync(here);
     const setting = await database("data/db");
@@ -602,7 +601,7 @@ describe.each([
 describe.each([
   ...PROCESS_BACKENDS.map((backend) => [backend.name, backend] as const),
   ["PGlite in memory", null] as const,
-])("L14: aborting signal stops like stop() (LM-9, RN-13), on %s", (_name, backend) => {
+])("aborting signal stops like stop(), on %s", (_name, backend) => {
   const unhandled: unknown[] = [];
   const record = (reason: unknown): void => {
     unhandled.push(reason);
@@ -651,7 +650,7 @@ const abortListeners = (signal: AbortSignal): number => getEventListeners(signal
 describe.each([
   ...PROCESS_BACKENDS.map((backend) => [backend.name, backend] as const),
   ["PGlite in memory", null] as const,
-])("a closed handle leaves no listener on the host's signal, on %s (LM-9, RN-13)", (_name, backend) => {
+])("a closed handle leaves no listener on the host's signal, on %s", (_name, backend) => {
   beforeAll(() => backend?.start(), 180_000);
   afterAll(() => backend?.stop(), 60_000);
   const database = async (): Promise<DatabaseParts> => (backend === null ? PGLITE_MEMORY : (await backend.database()).setting);
@@ -708,7 +707,7 @@ describe.each([
   }, 180_000);
 });
 
-describe.each(PROCESS_BACKENDS)("L47: library-setting-refused (LM-2, BK-1) on $name", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("library-setting-refused on $name", (backend: ProcessBackend) => {
   let tmp: string;
   beforeAll(async () => {
     await backend.start();

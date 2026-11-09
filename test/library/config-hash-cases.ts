@@ -7,10 +7,10 @@ import { cursorReaches, libraryData } from "./library-fixtures.js";
 import { mapiModule, mountHandlers, rawHeaderValues, upgradeHead } from "./mounted-fixtures.js";
 
 /**
- * L68's configuration-hash run and oracle, shared by `./mounted-api.test.ts` (the criterion) and
+ * The configuration-hash run and oracle, shared by `./mounted-api.test.ts` (the criterion) and
  * `./mounted-api.negative-control.test.ts` (its control, a hash over a secret on the mounted path only): two processes
  * whose configurations differ only in their secrets, and the `X-Umbra-Config-Hash` of the mounted upgrade's 101, beside
- * the module API listener's on the same process. Imports nothing of Vitest. [L68, RN-16]
+ * the module API listener's on the same process. Imports nothing of Vitest.
  */
 
 /** A configuration hash's form. */
@@ -78,7 +78,7 @@ export async function hashesOfSecrets(backend: ProcessBackend, before?: (variant
 /** `text`'s forms a header could show it in: as written, and its UTF-8 bytes as hex. */
 const formsOf = (text: string): readonly string[] => [text, Buffer.from(text, "utf8").toString("hex")];
 
-/** The L68 hash oracle over `hashes` (`where` names them): one hash for both, of the hash's form, holding no secret. */
+/** The hash oracle over `hashes` (`where` names them): one hash for both, of the hash's form, holding no secret. */
 export function hashProblems(where: string, hashes: readonly (string | null)[], secrets: readonly string[]): string[] {
   const problems: string[] = [];
   if (new Set(hashes).size !== 1) problems.push(`${where}: the hash changed with only secrets changed: ${JSON.stringify(hashes)}`);

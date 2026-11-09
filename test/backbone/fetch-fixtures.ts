@@ -8,7 +8,7 @@ import type { Json, TapeRecord } from "../../tools/tape/index.js";
  * - blocks, metadata and node answers in the shapes a Midnight node gives them: the header and block JSON of
  *   `chain_getHeader` and `chain_getBlock` (`test/node/fixtures/mainnet-answers.json`), the runtime version of
  *   `state_getRuntimeVersion`, and metadata V14 as `state_getMetadata` answers it;
- * - the tape records a tape node serves them with (`tools/tape/`) [TT-1].
+ * - the tape records a tape node serves them with (`tools/tape/`).
  *
  * No real node is involved: the recorded real tapes replace these.
  *

@@ -7,10 +7,9 @@ import { RawClient } from "./raw-client.js";
 /**
  * The tape checks that the committed negative controls (`tape.negative-control.test.ts`) run against wrong tape tools,
  * and that `format.test.ts` and `node.test.ts` run against the real ones: each fails when the rule it names is broken.
- * [A68, A69, A70, TT-1 to TT-3; acceptance §9]
  */
 
-/** The committed tape holding every record kind, written by hand in the writer's form (not by the writer). [TT-1] */
+/** The committed tape holding every record kind, written by hand in the writer's form (not by the writer). */
 export const GOLDEN_PATH = new URL("./fixtures/every-kind.tape.jsonl", import.meta.url);
 
 /** Its SHA-256, computed by `shasum -a 256` when the file was written (2026-10-25). */
@@ -67,7 +66,7 @@ export const GOLDEN_RECORDS: readonly TapeRecord[] = [
 ];
 
 /**
- * The round trip of the committed tape: its records read back as written, then written back to its very bytes. [A68]
+ * The round trip of the committed tape: its records read back as written, then written back to its very bytes.
  */
 export function expectGoldenRoundTrip(): void {
   const bytes = readFileSync(GOLDEN_PATH);
@@ -100,7 +99,7 @@ export async function withNode<T>(
 }
 
 /**
- * Answers by occurrence: heads A, B, C recorded, four calls get A, B, C, C — and a pair's count is its own. [A69, TT-2]
+ * Answers by occurrence: heads A, B, C recorded, four calls get A, B, C, C — and a pair's count is its own.
  */
 export async function expectAnswersByOccurrence(): Promise<void> {
   const records: TapeRecord[] = [
@@ -125,7 +124,7 @@ export async function expectAnswersByOccurrence(): Promise<void> {
 /**
  * The delay (on a clock moved by hand): a call record with `delayMs: 2000` is answered when the
  * clock reaches 2000 ms after the call and not before; the next record is answered at once, both while the delayed
- * answer waits and after it. [A69, TT-2]
+ * answer waits and after it.
  */
 export async function expectDelayHonoured(): Promise<void> {
   const timers = new ManualTimers();
@@ -161,7 +160,7 @@ export async function expectDelayHonoured(): Promise<void> {
 
 /**
  * A subscription's notifications come in file order, each only once every call recorded before it has been answered,
- * and right after the answer that let it through. [A70, TT-3]
+ * and right after the answer that let it through.
  */
 export async function expectNotificationsAfterCalls(): Promise<void> {
   const records: TapeRecord[] = [

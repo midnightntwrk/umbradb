@@ -1,12 +1,12 @@
 /**
  * The benchmarks' statistic block (`./stats.ts`). The 0.9.5 baseline's schema that lived here (its harness version,
  * workload set, GC curve, HOT ratio, bloat and environment blocks) was retired with the workloads and the baseline.
- * The core's baseline is {@link Baseline}. [design §13]
+ * The core's baseline is {@link Baseline}.
  */
 
 /** Per-workload latency distribution. `cv` (coefficient of variation = sd/mean) is what a future
  *  CV-aware regression gate keys off: a benchmark at CV≈2.66% gives ~45% false positives against a
- *  naive 2% gate, so the calibrated gate is deferred past 1.0.0. [perf-baseline design §5] */
+ *  naive 2% gate, so the calibrated gate is deferred past 1.0.0. */
 export interface LatencyStats {
   unit: "ms";
   samples: number;

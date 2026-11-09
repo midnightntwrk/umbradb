@@ -21,7 +21,7 @@ import { cursorOf, heightsIn, InMemoryBlockSource, loopInput, RUNNER_BACKENDS, t
 /**
  * A height held for a retry of its loop (`src/runner/loop.ts`), on PostgreSQL 18 and PGlite 0.5.10. The loop fails at
  * h with a retryable failure (`connection-lost`, `node-unreachable`), and the process runs it again on the same
- * `FinalizedLoop`; here the test does, after the first run rejected. [IN-10, IN-11]
+ * `FinalizedLoop`; here the test does, after the first run rejected.
  *
  * - A failure once `on-compute` began, in the block transaction too: h is processed again from `on-compute`, the
  *   `block` items of `on-fetch` and `on-parse` kept, those of the failed `on-compute` dropped; nothing is fetched or
@@ -31,7 +31,7 @@ import { cursorOf, heightsIn, InMemoryBlockSource, loopInput, RUNNER_BACKENDS, t
  *   transaction rolled back — both backends, where a real connection cannot be lost on PGlite): the next run reads the
  *   cursor first, inside a transaction on the writer (whose new session takes the writer lock again first). At h with
  *   the block's hash, `on-after-db-write` fires for h and the loop goes on; at h − 1, h runs again from `on-compute`;
- *   anything else halts with `unexpected-cursor` at h. A failure of that read keeps the height held. [DB-11, IN-11]
+ *   anything else halts with `unexpected-cursor` at h. A failure of that read keeps the height held.
  * - `commitOutcome`'s table over every cursor.
  * A failure before `on-parse` ended holds nothing: the loop runs again from the cursor (`retries.test.ts`).
  */
@@ -127,7 +127,7 @@ function modules(seen: Seen, faults: Faults, arm: () => void = () => undefined):
 /** Why a commit was lost: after it landed, or with the transaction rolled back. */
 type LostCommit = "landed" | "lost";
 
-/** The error a lost `COMMIT` gives. [DB-13] */
+/** The error a lost `COMMIT` gives. */
 const lostCommit = (): UmbraError =>
   new UmbraError("connection-lost", "the connection was lost during the COMMIT (the test's database)");
 
@@ -195,7 +195,7 @@ function expectRetryable(failure: unknown): void {
   expect((failure as HeightFailure).committed).toBe(false);
 }
 
-describe.each(RUNNER_BACKENDS)("a height held for a retry (IN-10, IN-11) on $name", (backend) => {
+describe.each(RUNNER_BACKENDS)("a height held for a retry on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
@@ -207,7 +207,7 @@ describe.each(RUNNER_BACKENDS)("a height held for a retry (IN-10, IN-11) on $nam
   }
 
   /** "Processed again from on-compute": every height once, H's points before on-compute once, its later ones twice.
-   *  [IN-10] */
+   * */
   function fromComputeProblems(seen: Seen): string[] {
     const problems: string[] = [];
     const times = (call: string, expected: number) => {
@@ -450,7 +450,7 @@ class Outcomes extends FinalizedLoop {
   }
 }
 
-describe("commitOutcome: what the cursor says after a lost block transaction (IN-10, IN-11)", () => {
+describe("commitOutcome: what the cursor says after a lost block transaction", () => {
   const loop = new Outcomes({} as LoopInput);
   const block = (height: bigint): BlockRef => inMemoryBlock(height);
   const other = (height: bigint): BlockRef => ({ ...inMemoryBlock(height), hash: new Uint8Array(32).fill(7) });

@@ -10,9 +10,8 @@ import { join, relative, sep } from "node:path";
  * - the private `core` entry's `testKeys` and the configuration rule `test-keys`;
  * - a declaration's `keyKinds` and `validateKey`, and the code `test-key-conflict`;
  * - the removed key tests, and the key half of the `/status` test with the required id `private.no-key-bytes-public`.
- *   [A119, A120, A123]
  *
- * Imports nothing of Vitest. [Q154 A2]
+ * Imports nothing of Vitest.
  *
  * **What is read** ({@link SCANNED}): every file under `src/`, `browser/` and `test/` — but this check's own files,
  * which name what they look for —, and `docs/module-guide.md`. Comments count: a comment describing the removed parts
@@ -52,11 +51,11 @@ export const REMOVED_NAMES: readonly RemovedName[] = Object.freeze([
   { name: "admitted-keys", pattern: /\badmitted[-_]keys\b/gi },
   { name: "AdmittedKey", pattern: /\bAdmittedKeys?\b/g },
   { name: "arrived_height", pattern: /\barrived_?height\b/gi },
-  // The required id of the `/status` test's key half. [A120]
+  // The required id of the `/status` test's key half.
   { name: "private.no-key-bytes-public", pattern: /no-key-bytes-public/g },
 ]);
 
-/** The files and folders that must not exist: the part's folder and the removed key tests. [A119, A120, A123] */
+/** The files and folders that must not exist: the part's folder and the removed key tests. */
 export const REMOVED_PATHS: readonly string[] = Object.freeze([
   "src/backbone/core-key-registry",
   "test/backbone/core-key-registry.test.ts",

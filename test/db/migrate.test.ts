@@ -13,7 +13,7 @@ import { type PostgresTestServer, startPostgresServer } from "./postgres-server.
 import { connectionOfUrl } from "./connection.js";
 
 /**
- * Migrations, `core_chain.migrations` and setup after migrations, on both backends. [DB-9]
+ * Migrations, `core_chain.migrations` and setup after migrations, on both backends.
  *
  * Startup refuses before any migration runs, naming the module, the migration id and the checksums, when:
  * - an applied migration's checksum changed;
@@ -21,26 +21,25 @@ import { connectionOfUrl } from "./connection.js";
  * With `001` and `002` pending and `002` failing halfway, `001` is applied and recorded (in one transaction with its
  * changes), nothing of `002` is visible or recorded, the module's `on-start-db` did not run, and startup refuses. The
  * committed negative control is a runner that records each row in a transaction of its own (before or after the
- * migration's); it fails the same checks. [A16]
+ * migration's); it fails the same checks.
  *
  * Also:
  * - one migration's multi-statement SQL on the script path, which nothing but the runner reaches;
  * - each part's SQL under its write role: a shared item's under the item's role, UmbraDB's own parts as the login;
- *   [Q89]
- * - a shared item's migrations recorded once, under the item's name; [DB-8]
- * - a pending migration declared before an applied one is refused; [Q91]
+ * - a shared item's migrations recorded once, under the item's name;
+ * - a pending migration declared before an applied one is refused;
  * - `on-start-db` after each part's migrations, in a transaction of its own, unmarked.
  *
  * Refactored from 0.9.5's `test/postgres/migrate.test.ts`. These of its cases are here, against `src/db/migrate.ts`:
  * its idempotent second run, its "nothing left on the connection" (now: no role, migration mark or setting on the
- * writer's session) and its connection failure (now `connection-lost`, retryable). [design §13]
+ * writer's session) and its connection failure (now `connection-lost`, retryable).
  *
  * The rest moved or went away:
- * - its concurrent runs are covered by the writer lock's tests; [A17]
- * - its schema-name length is checked in `schema-names.test.ts`; [DB-8]
+ * - its concurrent runs are covered by the writer lock's tests;
+ * - its schema-name length is checked in `schema-names.test.ts`;
  * - its `btree_gist` race, hostile `kv_history` and exclusion violation tested 0.9.5 parts that are removed, and go
  *   with them;
- * - 0.9.5's `migration-lock-timeout.test.ts` is retired with the migration advisory lock. [design §4, §13]
+ * - 0.9.5's `migration-lock-timeout.test.ts` is retired with the migration advisory lock.
  */
 
 /** A backbone part or module as the runner and the schema plan take it. */
@@ -75,7 +74,7 @@ function startup(db: Database, parts: readonly TestPart[], committed: ReadonlyMa
   return startDatabase(db, { plan: plan(parts), parts, committedVersions: committed, handles: { height: null } });
 }
 
-/** SHA-256 of the UTF-8 SQL, in hex, computed here independently of the runner. [DB-9] */
+/** SHA-256 of the UTF-8 SQL, in hex, computed here independently of the runner. */
 function sha256(sql: string): string {
   return createHash("sha256").update(Buffer.from(sql, "utf8")).digest("hex");
 }
@@ -145,7 +144,7 @@ const B_001 = "CREATE TABLE b.t (k bigint PRIMARY KEY); INSERT INTO b.t VALUES (
 
 /**
  * The checks after `001` and a failing `002` of module `a` ran (`b` follows `a`): every property the half-failed
- * migration must leave, as the list of those it does not. Empty for a correct runner. [A16]
+ * migration must leave, as the list of those it does not. Empty for a correct runner.
  */
 async function halfFailedViolations(db: Database, aOnly = false): Promise<string[]> {
   const violations: string[] = [];
@@ -157,7 +156,7 @@ async function halfFailedViolations(db: Database, aOnly = false): Promise<string
     violations.push("001 not applied");
   } else {
     // Each migration runs in its own transaction together with its migrations row: 001's row and the row 001 inserted
-    // have one writer, the same transaction id. [DB-9]
+    // have one writer, the same transaction id.
     const [same] = await db.read((read) =>
       read.query(
         `SELECT (SELECT xmin::text FROM core_chain.migrations WHERE module = 'a' AND migration_id = '001')
@@ -173,7 +172,7 @@ async function halfFailedViolations(db: Database, aOnly = false): Promise<string
   return violations;
 }
 
-describe.each(BACKENDS)("migrations and setup on $name (DB-9, A16)", (backend) => {
+describe.each(BACKENDS)("migrations and setup on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop());
 
@@ -266,7 +265,7 @@ describe.each(BACKENDS)("migrations and setup on $name (DB-9, A16)", (backend) =
     expect(await migrationRows(db)).toEqual([{ module: "a", migration_id: "001", checksum: sha256(sql), position: 1 }]);
   });
 
-  it("runs each module's migrations under its role, so its tables are its role's (DB-6)", async () => {
+  it("runs each module's migrations under its role, so its tables are its role's", async () => {
     const db = await fresh();
     await startup(db, [part("a", [{ id: "001", sql: A_001 }]), part("b", [{ id: "001", sql: B_001 }])]);
     expect(await owner(db, "a.t")).toBe("umbradb_m_a");
@@ -377,7 +376,7 @@ describe.each(BACKENDS)("migrations and setup on $name (DB-9, A16)", (backend) =
     expect(error.details.sqlstate).toBe("42501");
   });
 
-  it("A16: a changed checksum of an applied migration refuses startup with the module, the id and both checksums, before any migration runs", async () => {
+  it("a changed checksum of an applied migration refuses startup with the module, the id and both checksums, before any migration runs", async () => {
     const db = await fresh();
     await startup(db, [part("b", [{ id: "001", sql: B_001 }]), part("a", [{ id: "001", sql: A_001 }])]);
     const edited = A_001.replace("'one'", "'One'");
@@ -399,7 +398,7 @@ describe.each(BACKENDS)("migrations and setup on $name (DB-9, A16)", (backend) =
     expect(calls).toEqual([]);
   });
 
-  it("A16: a migration recorded as applied but missing from the build refuses startup with the module, the id and its checksum, before any migration runs", async () => {
+  it("a migration recorded as applied but missing from the build refuses startup with the module, the id and its checksum, before any migration runs", async () => {
     const db = await fresh();
     await startup(db, [part("a", [{ id: "001", sql: A_001 }, { id: "002", sql: A_002 }])]);
     const { calls, onStartDb } = recorder();
@@ -419,7 +418,7 @@ describe.each(BACKENDS)("migrations and setup on $name (DB-9, A16)", (backend) =
     expect(calls).toEqual([]);
   });
 
-  it("A16: refuses migrations recorded for a module the build does not have at all (DB-9's words)", async () => {
+  it("refuses migrations recorded for a module the build does not have at all (the words)", async () => {
     const db = await fresh();
     await startup(db, [part("a", [{ id: "001", sql: A_001 }]), part("b", [{ id: "001", sql: B_001 }])]);
     const result = await outcome(startup(db, [part("a", [{ id: "001", sql: A_001 }])]));
@@ -427,7 +426,7 @@ describe.each(BACKENDS)("migrations and setup on $name (DB-9, A16)", (backend) =
     expect(error.details).toEqual({ module: "b", migration: "001", position: 1, applied: sha256(B_001), build: null });
   });
 
-  it("A16: with 001 and 002 pending and 002 failing halfway, 001 is applied and recorded, nothing of 002 is, on-start-db did not run, and startup refuses", async () => {
+  it("with 001 and 002 pending and 002 failing halfway, 001 is applied and recorded, nothing of 002 is, on-start-db did not run, and startup refuses", async () => {
     const db = await fresh();
     const { calls, onStartDb } = recorder();
     const result = await outcome(
@@ -452,7 +451,7 @@ describe.each(BACKENDS)("migrations and setup on $name (DB-9, A16)", (backend) =
     expect(calls.map((call) => call.part)).toEqual(["a", "b"]);
   });
 
-  it("A16 negative control: a runner that records each row in a transaction of its own fails the half-failed checks", async () => {
+  it("negative control: a runner that records each row in a transaction of its own fails the half-failed checks", async () => {
     // Built from the runner's own pieces (the bootstrap, the mark, the role, the script path), with one difference: the
     // row is written in another transaction than the migration — first, or last.
     for (const order of ["row first", "row last"] as const) {
@@ -521,7 +520,7 @@ describe.each(BACKENDS)("migrations and setup on $name (DB-9, A16)", (backend) =
     expect(await db.read((read) => read.query("SELECT count(*)::int AS n FROM a.t"))).toEqual([{ n: 1 }]);
   });
 
-  it("Q91: refuses a pending migration declared before an applied one, before any migration runs", async () => {
+  it("refuses a pending migration declared before an applied one, before any migration runs", async () => {
     const db = await fresh();
     await startup(db, [part("a", [{ id: "001", sql: A_001 }, { id: "002", sql: A_002 }])]);
     const inserted = "CREATE INDEX t_v ON a.t (v)";
@@ -553,7 +552,7 @@ describe.each(BACKENDS)("migrations and setup on $name (DB-9, A16)", (backend) =
     expect(await migrationRows(db)).toEqual([]);
   });
 
-  it("records a shared item's migrations once, under the item's name, as the item's role (DB-8, Q89)", async () => {
+  it("records a shared item's migrations once, under the item's name, as the item's role", async () => {
     const db = await fresh();
     const { calls, onStartDb } = recorder();
     const shared = { name: "shared-x", table: { schema: "shared_x", tables: ["logs"] } };
@@ -641,7 +640,7 @@ describe.each(BACKENDS)("migrations and setup on $name (DB-9, A16)", (backend) =
   });
 });
 
-describe("a connection lost during a migration (DB-13), on PostgreSQL 18", () => {
+describe("a connection lost during a migration, on PostgreSQL 18", () => {
   let server: PostgresTestServer;
   beforeAll(async () => {
     server = await startPostgresServer();
@@ -675,7 +674,7 @@ describe("a connection lost during a migration (DB-13), on PostgreSQL 18", () =>
   }, 60_000);
 });
 
-describe("a lost connection during startup (DB-13)", () => {
+describe("a lost connection during startup", () => {
   it("is connection-lost and retryable, not a migration failure (0.9.5's connection failure)", async () => {
     const db = openPostgres({
       connection: connectionOfUrl("postgres://nouser:nopass@127.0.0.1:1/nonexistent"),

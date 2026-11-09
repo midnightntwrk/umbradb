@@ -14,7 +14,7 @@ import {
 
 /**
  * The packed tarball contains no file under `legacy/`; the TypeScript build and the conformance run include no file
- * from `legacy/`; `legacy/transaction-history/` holds the source and its tests. [A3 STATIC, LS-3]
+ * from `legacy/`; `legacy/transaction-history/` holds the source and its tests.
  *
  * Each list is the real one: the tarball's from `npm pack --dry-run --json` (npm's own rules over `package.json`
  * `files`), the build's from the TypeScript program of `tsconfig.build.json` (every file the compiler reads, the
@@ -22,7 +22,7 @@ import {
  * test:conformance` runs), and the coverage and mutation configurations as they are written.
  *
  * Legacy's own TypeScript program and Vitest configuration are kept but no longer run; the controls below still read
- * them, as lists of what a build or a run of the folder would include. [Q112 B]
+ * them, as lists of what a build or a run of the folder would include.
  *
  * The tarball check here is about `legacy/`; whether a TransactionHistory file is in a tarball built from the tree is
  * the build program's check here (a clean build emits nothing of a source it does not read) and the pack smoke test's
@@ -109,7 +109,7 @@ async function vitestConfig(file: string): Promise<VitestConfig> {
   return ((await import(pathToFileURL(path.join(ROOT, file)).href)) as { default: VitestConfig }).default;
 }
 
-describe("A3: TransactionHistory is kept outside the build, the package and the run (LS-3)", () => {
+describe("TransactionHistory is kept outside the build, the package and the run", () => {
   it("legacy/transaction-history/ holds the source and its tests, and nothing is left at the 0.9.5 paths", () => {
     expect(holdsProblems(exists)).toEqual([]);
     const found = filesBelow(LEGACY_ROOT);
@@ -155,7 +155,7 @@ describe("A3: TransactionHistory is kept outside the build, the package and the 
   });
 });
 
-describe("A3's negative controls: each list that holds legacy/ or TransactionHistory fails", () => {
+describe("negative controls: each list that holds legacy/ or TransactionHistory fails", () => {
   it("a tarball listing with a file under legacy/, or with a TransactionHistory source's build output, fails", () => {
     const source = legacyPath("src/postgres/transaction-history-storage.ts");
     expect(legacyProblems("the tarball", ["package.json", "dist/index.js", source])).toEqual([
@@ -174,7 +174,7 @@ describe("A3's negative controls: each list that holds legacy/ or TransactionHis
     ]);
   });
 
-  it("npm packs legacy/ once `files` names it, which fails A3; with the repository's `files` it packs none", () => {
+  it("npm packs legacy/ once `files` names it, which fails; with the repository's `files` it packs none", () => {
     const { files } = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as { files: string[] };
     const dir = mkdtempSync(path.join(tmpdir(), "umbradb-a3-"));
     try {
@@ -236,7 +236,7 @@ describe("A3's negative controls: each list that holds legacy/ or TransactionHis
     ]);
   });
 
-  it("a program whose file imports one of legacy/ reads it, which fails A3: the programs follow imports", () => {
+  it("a program whose file imports one of legacy/ reads it, which fails: the programs follow imports", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "umbradb-a3-"));
     try {
       const target = path.join(ROOT, legacyPath("src/postgres/transaction-history-storage.js"));

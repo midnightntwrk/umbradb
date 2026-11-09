@@ -1,22 +1,21 @@
 /**
- * Module roles and schemas. [DB-6, DB-7, DB-8, MD-2, Q46, Q89, Q90; design §4]
+ * Module roles and schemas.
  *
  * **Names.** Module ids and item names match {@link ID_PATTERN} within {@link ID_MAX_BYTES} bytes. So a module's
  * schema (its id with `-` → `_`) is one-to-one, and its role `umbradb_m_<schema>` (an item's `umbradb_i_<schema>`)
  * stays within PostgreSQL's 63-byte names. Module schemas and item names, the items of UmbraDB's own parts
  * ({@link OwnPart}) included, share one namespace. It excludes the schemas UmbraDB itself creates
- * ({@link RESERVED_SCHEMAS}) and every name starting with `pg_`. [DB-8]
+ * ({@link RESERVED_SCHEMAS}) and every name starting with `pg_`.
  *
  * A `table` item declares its schema: its module's own, or the item's name (`-` → `_`). The second makes the item a
  * *shared* item with one schema, owned by its own role, whoever provides it. A provider of a shared `table` item writes
  * under the item's role (its callbacks, `on-start-db` and migrations), so the item's tables belong to that role and
  * every provider of the item can write them; the provider's own role and schema still exist, empty.
- * [Q89; CORE-ARCH §4.10]
  *
  * The providers of one item must declare it alike: the same schema, the same `deterministic` flag and the same
  * migrations (ids and SHA-256 checksums). {@link planSchemas} checks all of this before anything reaches a database,
  * and throws the refusal (`bad-id`, `schema-collision`, `shared-item-migrations-differ`); stopping startup is the
- * runner's job. [DB-8, Q76; design §11]
+ * runner's job.
  *
  * **Roles and grants.** At every startup and before any migration, {@link prepareSchemas} creates what is missing:
  * the schema `core_chain` (the first step of the bootstrap, which `./migrate.ts` completes), each role (`NOLOGIN`), and
@@ -29,7 +28,7 @@
  *
  * Then it returns to the login's role. A callback, the schema write handle and a migration run after
  * {@link setModuleRole}, whose role writes its own schema and reads the others; the database rejects anything else
- * (`42501`). Modules are trusted: the roles stop mistakes, nothing more. [DB-6, DB-7, DB-9, Q46]
+ * (`42501`). Modules are trusted: the roles stop mistakes, nothing more.
  *
  * **The login.** The writer's login is a superuser, or holds `CREATEROLE` (to create a missing role) and `CREATE` on
  * the database (to create a missing schema). PostgreSQL 16 and later give the creator of a role only `ADMIN` on it, no
@@ -38,12 +37,12 @@
  * - `INHERIT` so that its read pool reads every module table and it can attach the `TRUNCATE` triggers
  *   (`./truncate-guard.ts`).
  *
- * `SET LOCAL ROLE` still gives a callback exactly its role's privileges. [Q90]
+ * `SET LOCAL ROLE` still gives a callback exactly its role's privileges.
  *
  * Roles belong to the PostgreSQL server, not to one database, so every UmbraDB database on a server shares them. A
  * login that can neither use nor grant itself a role (another login created it) is rejected, as is a login lacking a
  * privilege it needs. The error is `invalid-configuration`, `reason: writer-privileges`, raised before anything is
- * created, naming each lack and what an administrator can run. PGlite runs as its superuser, `postgres`. [Q90]
+ * created, naming each lack and what an administrator can run. PGlite runs as its superuser, `postgres`.
  */
 
 import { createHash } from "node:crypto";
@@ -52,18 +51,18 @@ import type { ContentDefinedTables, ContentFunction } from "../determinism/conte
 import type { Transaction } from "./api.js";
 import { UmbraError } from "./errors.js";
 
-/** Module ids and item names: lowercase words of letters and digits, joined by single hyphens. [DB-8, MD-1] */
+/** Module ids and item names: lowercase words of letters and digits, joined by single hyphens. */
 export const ID_PATTERN = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 
-/** The longest id or item name, in bytes: `umbradb_m_` and `umbradb_i_` add 10, within PostgreSQL's 63. [DB-8] */
+/** The longest id or item name, in bytes: `umbradb_m_` and `umbradb_i_` add 10, within PostgreSQL's 63. */
 export const ID_MAX_BYTES = 40;
 
 /**
  * The schemas UmbraDB itself creates, and PostgreSQL's own. No module or item may take one of them, nor any name
  * starting with `pg_`. The backbone parts whose ids map to them (`core-chain`, `core-digest`) are not module schemas of
- * a plan. [DB-8]
- * - `core_chain`: the database API's bootstrap [DB-9];
- * - `core_digest` and `core_digest_shadow`: the digests [DT-4, DT-5].
+ * a plan.
+ * - `core_chain`: the database API's bootstrap;
+ * - `core_digest` and `core_digest_shadow`: the digests.
  */
 export const RESERVED_SCHEMAS: readonly string[] = [
   "core_chain",
@@ -80,7 +79,7 @@ export const RESERVED_SCHEMAS: readonly string[] = [
  */
 export const OWN_PARTS: readonly string[] = ["core-chain", "core-digest"];
 
-/** A module's or item's schema name: its id with `-` replaced by `_`. [DB-8] */
+/** A module's or item's schema name: its id with `-` replaced by `_`. */
 export function schemaName(id: string): string {
   return id.replace(/-/g, "_");
 }
@@ -95,20 +94,20 @@ export function itemRoleName(schema: string): string {
   return `umbradb_i_${schema}`;
 }
 
-/** A migration's checksum: SHA-256 of its UTF-8 SQL, in hex. [DB-9] */
+/** A migration's checksum: SHA-256 of its UTF-8 SQL, in hex. */
 export function migrationChecksum(sql: string): string {
   return createHash("sha256").update(sql, "utf8").digest("hex");
 }
 
-/** A `table` item's tables. [CORE-ARCH §4.10] */
+/** A `table` item's tables. */
 export interface SchemaTable {
   readonly schema: string;
   readonly tables: readonly string[];
-  /** `false` opts the tables out of the determinism rules; they keep no `TRUNCATE` trigger. [MD-1, Q76, DB-14] */
+  /** `false` opts the tables out of the determinism rules; they keep no `TRUNCATE` trigger. */
   readonly deterministic?: false;
   /**
    * Those of the tables that take part in the contents hash by their content, and its function: not captured per
-   * block, and still under the determinism rules and the `TRUNCATE` guard. [DT-3, DT-4, LG-11]
+   * block, and still under the determinism rules and the `TRUNCATE` guard.
    */
   readonly contentDefined?: { readonly tables: readonly string[]; readonly content: ContentFunction };
 }
@@ -128,7 +127,7 @@ export interface SchemaMigration {
 /**
  * What the roles and schemas need of a module's declaration. `schemaModule` (`src/modules/adapters.ts`) takes it from a
  * validated `ModuleDeclaration`. The requirement graph (`src/modules/graph.ts`) decides which declarations a plan
- * holds: every module of the database. [MD-1]
+ * holds: every module of the database.
  */
 export interface SchemaModule {
   readonly id: string;
@@ -150,15 +149,15 @@ export interface QualifiedTable {
   readonly table: string;
 }
 
-/** The schemas and roles of one database's modules, checked. [DB-8] */
+/** The schemas and roles of one database's modules, checked. */
 export interface SchemaPlan {
   /** Every module's schema, in the modules' order, then every shared item's. */
   readonly schemas: readonly PlannedSchema[];
   /** The tables declared `deterministic: false`. */
   readonly optedOut: readonly QualifiedTable[];
-  /** The content-defined tables, each item's once, with their schema and content function. [DT-3, DT-4] */
+  /** The content-defined tables, each item's once, with their schema and content function. */
   readonly contentDefined: readonly ContentDefinedTables[];
-  /** The role a module's callbacks, `on-start-db` and migrations run under: its own, or its shared item's. [Q89] */
+  /** The role a module's callbacks, `on-start-db` and migrations run under: its own, or its shared item's. */
   writeRole(moduleId: string): string;
   /** The schema that role owns. */
   writeSchema(moduleId: string): string;
@@ -196,7 +195,7 @@ function collision(schema: string, first: string, second: string): UmbraError {
  * Rejects with `bad-id` the first id or item name of `module` that the name pattern and length do not allow: its id,
  * then each item it provides, then each item it requires. {@link planSchemas} checks every module of a plan with it,
  * and declaration validation (`src/modules/validation.ts`) every declaration of a build, before anything else reads
- * their names. [DB-8, MD-2]
+ * their names.
  */
 export function checkNames(module: Pick<SchemaModule, "id" | "provides" | "requires">): void {
   checkId(module.id, "module", undefined);
@@ -244,7 +243,7 @@ function provisionDifference(first: Provision, other: Provision): Difference | u
 /**
  * One of UmbraDB's own parts whose schemas are reserved ({@link OWN_PARTS}). It is no module of a plan, but the names
  * of the items it provides belong to the plan's one namespace like any other item's, so that no module takes one as its
- * id: a user module named `db` or `config` would otherwise share a name with `core-chain`'s items. [DB-8]
+ * id: a user module named `db` or `config` would otherwise share a name with `core-chain`'s items.
  */
 export interface OwnPart {
   readonly id: string;
@@ -255,13 +254,13 @@ export interface OwnPart {
  * Checks the names of one database's modules and plans their schemas and roles. `ownParts` are UmbraDB's own parts of
  * the same database, whose items' names join the namespace and nothing else (`src/modules/adapters.ts`'s `schemaPlan`
  * gives them). Throws `bad-id`, `schema-collision` or `shared-item-migrations-differ` (not retryable), naming what
- * collides or differs. [DB-8, MD-2]
+ * collides or differs.
  */
 export function planSchemas(modules: readonly SchemaModule[], ownParts: readonly OwnPart[] = []): SchemaPlan {
   for (const module of modules) checkNames(module);
   for (const part of ownParts) checkNames({ id: part.id, provides: part.provides, requires: [] });
 
-  // Each module writes one schema: its own, or a shared item's. [Q89]
+  // Each module writes one schema: its own, or a shared item's.
   const writeSchemas = new Map<string, string>();
   for (const module of modules) {
     const own = schemaName(module.id);
@@ -318,7 +317,7 @@ export function planSchemas(modules: readonly SchemaModule[], ownParts: readonly
     seen.set(schema, label);
   }
 
-  // The providers of one table item declare it alike. [DB-8, Q76]
+  // The providers of one table item declare it alike.
   for (const [name, provisions] of providers) {
     if (!provisions.some((provision) => provision.item.table !== undefined)) continue;
     const first = provisions[0] as Provision;
@@ -396,7 +395,7 @@ export function planSchemas(modules: readonly SchemaModule[], ownParts: readonly
   return { schemas, optedOut, contentDefined, writeRole, writeSchema, functionUsers };
 }
 
-/** Runs `SET LOCAL ROLE` to the module's write role, for the rest of the transaction. [DB-6] */
+/** Runs `SET LOCAL ROLE` to the module's write role, for the rest of the transaction. */
 export async function setModuleRole(tx: Transaction, plan: SchemaPlan, moduleId: string): Promise<void> {
   await tx.execute(`SET LOCAL ROLE ${quoteIdentifier(plan.writeRole(moduleId))}`);
 }
@@ -547,7 +546,7 @@ const ALTER_BY_KIND: Readonly<Record<string, string>> = {
 
 /**
  * Sets ownership after a restore ran a backup's SQL as the writer's login. The dump was written with `--no-owner`, so
- * the login owns everything it created. This: [BK-3]
+ * the login owns everything it created. This:
  * 1. creates the roles of the plan the server lacks, as {@link prepareSchemas} would create them, and lets a login
  *    that is not a superuser use them;
  * 2. gives each schema of the plan to the schema's role, together with every table, partition, view, sequence no

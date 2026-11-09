@@ -4,7 +4,7 @@
  * The worker's store ({@link bridgeStore}) writes the node's key into memory both threads share, sends the main thread
  * a message naming the request it serves, and blocks with `Atomics.wait`. The main thread ({@link BridgeServer}), which
  * never blocks on the worker, reads the node through the read handle that request was given, writes it back and wakes
- * the worker. [LG-10, LG-11; design §5.3]
+ * the worker.
  *
  * **Batched.** A miss also brings along the nodes the missed node references. The main thread reads their keys from
  * its child list (`../node-refs.ts`, without a ledger package) and reads them in one more statement. The worker serves
@@ -54,7 +54,7 @@ export const BRIDGE_INITIAL_BYTES = 1 << 20;
 /** The largest the shared memory grows to: 256 MiB. */
 export const BRIDGE_MAX_BYTES = 256 << 20;
 
-/** The statement reading stored nodes by key from `core_ledger_state.nodes`. [design §10] */
+/** The statement reading stored nodes by key from `core_ledger_state.nodes`. */
 export const NODES_SQL = "SELECT node_key, data, children FROM core_ledger_state.nodes WHERE node_key = ANY($1::bytea[])";
 
 /** What the main thread reads nodes through: a read handle's `query`. */

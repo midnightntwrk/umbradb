@@ -9,7 +9,7 @@ import { chainOf, hex } from "./fetch-fixtures.js";
 /**
  * What `core-ledger-state` asks the node, through the block source it is bound to: the ledger state root after a block
  * (`midnight_ledgerStateRoot` at its hash) and the genesis state (`system_properties.genesis_state`, hex as the node
- * writes it). The in-memory source gives neither. [IN-7, IN-8, LG-15]
+ * writes it). The in-memory source gives neither.
  */
 
 const quiet: ConnectSocket = (url, events, timers) => connectWebSocket(url, events, timers, { heartbeatMs: 3_600_000 });
@@ -26,7 +26,7 @@ async function open(records: readonly TapeRecord[]) {
   return { node, source };
 }
 
-describe("the block source's ledger calls (IN-7, IN-8, LG-15)", () => {
+describe("the block source's ledger calls", () => {
   const [, block] = chainOf(1n);
   const root = [0, ...new Array<number>(32).fill(0x5a)];
 

@@ -15,13 +15,13 @@ import { type ChainBlock, chainOf, opening } from "./fetch-fixtures.js";
 import { type RefcountBatch, RefcountModel, type RefcountModelStep, type RefcountTables } from "./refcount-model.js";
 
 /**
- * The DAG fixture's process plumbing, with `retainStates` 0: [A105, A160, R3, LG-14]
+ * The DAG fixture's process plumbing, with `retainStates` 0:
  * - a tape whose ledger is the test package of `test/ledger/fixtures/sweep-test-loader.ts`: the DAG of
  *   `sweep-fixture.ts` at each height (the original or the extended one), with its roots on the tape as the node's;
  * - the ledger's core modules;
  * - a module recording `core_ledger_state`'s tables at every cursor, with each block's batch, which the worker's answers
  *   give ({@link recordingWorker});
- * - the reference model's account of the same blocks (R1's, `./refcount-model.ts`): fed the batches a run recorded, or,
+ * - the reference model's account of the same blocks (`./refcount-model.ts`): fed the batches a run recorded, or,
  *   on the original DAG, those of a package storing exactly the model's rows.
  *
  * Imports nothing of Vitest.
@@ -57,7 +57,7 @@ export function sweepCore(options: CoreLedgerStateOptions = {}): readonly Module
 /**
  * `core_ledger_state`'s tables after a block, read through the check's own queries: `nodes` (each row's child list),
  * `ref_counts`, `root_counts` and `unreferenced` by hex key, with the keys `states` and `core_contract_states.states`
- * store, and a digest of every table of the schema. [R3, A105, A160, LG-11, LG-14]
+ * store, and a digest of every table of the schema.
  */
 export interface TableSnapshot extends RefcountTables {
   /** `states`: the state key stored after each height. */
@@ -74,7 +74,7 @@ const bytesOf = (value: unknown): Uint8Array => Uint8Array.from(value as Uint8Ar
 
 /**
  * The tables read through `read` (see {@link TableSnapshot}); without their digests (an empty map) when `digests` is
- * false, for a check that reads the tables at many heights of a long run. [R3]
+ * false, for a check that reads the tables at many heights of a long run.
  */
 export async function sweepTables(read: Reader, options: { readonly digests?: boolean } = {}): Promise<TableSnapshot> {
   const counts = async (table: string): Promise<Map<string, number>> =>
@@ -110,7 +110,6 @@ export async function sweepTables(read: Reader, options: { readonly digests?: bo
 /**
  * What a run's ledger worker answered, in the main thread: each height's flushed batch (the last apply of the height:
  * a worker restarted at h applies h again) and the keys each height had evicted (an eviction refused records none).
- * [A105, A160, R3]
  */
 export interface WorkerRecord {
   readonly batches: Map<bigint, NodeBatch>;
@@ -175,7 +174,7 @@ export const seenTables = (): Seen => ({ tables: new Map(), batches: new Map() }
 /**
  * A user module requiring `ledger-state`, so that it runs after `core-ledger-state`'s `on-compute`. At each height's
  * `on-compute` it records the tables as committed at the cursor h − 1 (`seen.tables.get(h − 1)`) and, from `record`
- * when given, the batch the worker flushed for h (`seen.batches.get(h)`). [A105, R3]
+ * when given, the batch the worker flushed for h (`seen.batches.get(h)`).
  */
 export function sweepWatcher(seen: Seen, record?: WorkerRecord): ModuleDeclaration {
   return {
@@ -213,7 +212,7 @@ export function modelBatch(batch: NodeBatch): RefcountBatch {
 }
 
 /**
- * R1's model fed `batches`, heights 0 to `last` (`sweep` on unless `off` says so at a height): its step at every
+ * The model fed `batches`, heights 0 to `last` (`sweep` on unless `off` says so at a height): its step at every
  * height. Throws when a height has no batch.
  */
 export function modelOfBatches(batches: ReadonlyMap<bigint, NodeBatch>, last: number, off: (h: number) => boolean = () => false): RefcountModelStep[] {
@@ -228,7 +227,7 @@ export function modelOfBatches(batches: ReadonlyMap<bigint, NodeBatch>, last: nu
 }
 
 /**
- * R1's model's account of the original DAG, heights 0 to `last` (`sweep` on unless `off` says so at a height): each
+ * The model's account of the original DAG, heights 0 to `last` (`sweep` on unless `off` says so at a height): each
  * batch is what a package storing exactly the model's rows flushes — the state's nodes the model does not hold, the new
  * root persisted and the one before released.
  */

@@ -11,11 +11,10 @@ import { CORE_CHAIN, CORE_DIGEST, consumer, entry, graphInput, range } from "./g
  * - a private module requiring one that no public module provides is refused with `item-no-provider`;
  * - one provided only at other heights is refused with `item-not-available`;
  * - a public item named like an item of the private backbone is the private backbone's;
- * - a private module providing a public item's name at a common height is refused with `providers-overlap` [Q146].
- * [PP-13, Q126 B, MD-3, MD-6]
+ * - a private module providing a public item's name at a common height is refused with `providers-overlap`.
  *
  * Public providers take no part in the order, the cycle checks or the mid-chain start check. The process-level
- * acceptance test is `test/private/public-items.test.ts`. [MD-4, A155]
+ * acceptance test is `test/private/public-items.test.ts`.
  */
 
 /** A `table` item `name` of a part, in a schema named after it. */
@@ -72,7 +71,7 @@ function refusalOf(input: GraphInput): UmbraError {
   throw new Error("expected a refusal, and the graph resolved");
 }
 
-describe("PP-13: a private module may require the public core's table items", () => {
+describe("a private module may require the public core's table items", () => {
   it("starts a wallet module on ledger-events when the public core enables core-ledger-state from S; without it, item-no-provider", () => {
     expect(() => resolveGraph(privateInput([wallet()], [entry("wallet", 1)], [...PUBLIC_BACKBONE, ...ledger(1)]))).not.toThrow();
     const refused = refusalOf(privateInput([wallet()], [entry("wallet", 1)], PUBLIC_BACKBONE));
@@ -100,7 +99,7 @@ describe("PP-13: a private module may require the public core's table items", ()
     });
     expect(late.message).toContain("at heights 1–4, where no module provides it");
     expect(late.message).toContain("core-ledger-state of the public core");
-    // A public module that stops: its stop (the revision's last height) bounds the item. [CF-5]
+    // A public module that stops: its stop (the revision's last height) bounds the item.
     const stopped = refusalOf(privateInput([wallet()], [entry("wallet", 1)], ledger(1, 7)));
     expect(stopped.details).toMatchObject({ item: "ledger-events", range: range(8, null) });
     // Within the public provider's heights, it starts.
@@ -112,7 +111,7 @@ describe("PP-13: a private module may require the public core's table items", ()
     );
   });
 
-  it("takes a handoff between two public providers as one item, and names a gap between them (MD-6)", () => {
+  it("takes a handoff between two public providers as one item, and names a gap between them", () => {
     const handoff = [item("ledger-events", "p1", 1, 9), item("ledger-events", "p2", 10)];
     expect(() => resolveGraph(privateInput([wallet()], [entry("wallet", 1)], handoff))).not.toThrow();
     const gap = refusalOf(privateInput([wallet()], [entry("wallet", 1)], [item("ledger-events", "p1", 1, 8), item("ledger-events", "p2", 10)]));
@@ -141,7 +140,7 @@ describe("PP-13: a private module may require the public core's table items", ()
     expect(graph.rangeAt(1n)?.providerOf.get("digest-tables")).toBe("core-digest");
   });
 
-  it("refuses a private module providing an item a public module provides at a common height (MD-6, Q146)", () => {
+  it("refuses a private module providing an item a public module provides at a common height", () => {
     const mine = declaration("mine", {
       side: "private",
       requires: ["private-cursor"],
@@ -174,7 +173,7 @@ describe("PP-13: a private module may require the public core's table items", ()
     expect(twice.details).toEqual({ item: "ledger-events", modules: [], publicModules: ["p", "q"], range: range(3, null) });
   });
 
-  it("resolves the private parts only: public providers take no part in the order, segments, providers, cycles or MD-4", () => {
+  it("resolves the private parts only: public providers take no part in the order, segments, providers, cycles or mid-chain starts", () => {
     const graph = resolveGraph(privateInput([wallet()], [entry("wallet", 1, 10)], [...PUBLIC_BACKBONE, ...ledger(1, 20)]));
     expect(graph.modules.map((part) => part.id)).toEqual([
       "core-chain",
@@ -197,7 +196,7 @@ describe("PP-13: a private module may require the public core's table items", ()
       ["blocks"],
     ]);
     // In the range that ends at the cursor (providers are not checked there) an item a part provides is the part's,
-    // never a public item, though the public core provides it too. [Q97]
+    // never a public item, though the public core provides it too.
     const mine = declaration("mine", { side: "private", requires: ["private-cursor"], provides: [tableItem("ledger-events", "mine")] });
     const atCursor = resolveGraph(privateInput([mine, wallet()], [entry("mine", 1, 4), entry("wallet", 1)], ledger(1), { cursor: 4n }));
     expect(atCursor.rangeAt(4n)?.providerOf.get("ledger-events")).toBe("mine");
@@ -206,11 +205,11 @@ describe("PP-13: a private module may require the public core's table items", ()
     // A public process's ranges have none.
     expect(resolveGraph(graphInput([], [])).ranges[0]?.publicItems).toBeUndefined();
     // Mid-chain start: a public provider starting with the module is the public core's to judge; its startsMidChain is
-    // not known. [MD-4]
+    // not known.
     expect(() => resolveGraph(privateInput([wallet()], [entry("wallet", 5)], ledger(5)))).not.toThrow();
   });
 
-  it("checks only the ranges above the private cursor: a public gap at or below it was judged when those heights ran (Q97)", () => {
+  it("checks only the ranges above the private cursor: a public gap at or below it was judged when those heights ran", () => {
     expect(() => resolveGraph(privateInput([wallet()], [entry("wallet", 1)], ledger(5), { cursor: 10n }))).not.toThrow();
     expect(() => resolveGraph(privateInput([wallet()], [entry("wallet", 1)], ledger(5), { cursor: 4n }))).not.toThrow();
     expect(refusalOf(privateInput([wallet()], [entry("wallet", 1)], ledger(5), { cursor: 3n })).details).toMatchObject({

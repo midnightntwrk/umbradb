@@ -1,8 +1,7 @@
 import type { ISql } from "postgres";
 
 /**
- * `transaction_history` DDL (`openspec/changes/sprint-7-transaction-history-storage/design.md`
- * §1). Every identifier is schema-qualified via `sql(schema)`, matching every prior migration's
+ * `transaction_history` DDL. Every identifier is schema-qualified via `sql(schema)`, matching every prior migration's
  * established pattern.
  *
  * `identifiers`/`lifecycle` are denormalized OUT of `entry` (rather than only living inside the

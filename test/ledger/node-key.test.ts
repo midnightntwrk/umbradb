@@ -23,7 +23,7 @@ import { byReference, oneWrongKey, walkInFreshInstance } from "./package-keys.js
 // child list: the key of each node a child list embeds, and the node's own. The oracles are the independent node format
 // (`./node-format.ts`, written from the upstream sources), a key written out by hand, and the vendored packages' own
 // keys: the keys they flush nodes under, and the keys they accept embedded nodes under when reading them from a store
-// (`./package-keys.ts`). The recorded tapes' nodes are checked in `./node-key-tapes.ts`. [R29, LG-11]
+// (`./package-keys.ts`). The recorded tapes' nodes are checked in `./node-key-tapes.ts`.
 
 /** The fast-check seed of the properties below. */
 const SEED = 20261103;
@@ -47,7 +47,7 @@ const embeddedOf = (children: readonly Child[]): string[] =>
 /** `children` with every embedded child replaced by a reference to its key. */
 const referenced = (children: readonly Child[]): Child[] => children.map((c) => ("ref" in c ? c : { ref: childKey(c) }));
 
-describe("nodeKey and nodeKeys: a ledger node's key and its embedded nodes' keys, read on the main thread (R29)", () => {
+describe("nodeKey and nodeKeys: a ledger node's key and its embedded nodes' keys, read on the main thread", () => {
   it(`give the independent format's key and embedded keys for any node (seed ${SEED})`, () => {
     fc.assert(
       fc.property(node, ({ data, children }) => {
@@ -126,7 +126,7 @@ describe("nodeKey and nodeKeys: a ledger node's key and its embedded nodes' keys
     expect(() => nodeKey(data, Uint8Array.of(0xfd, 0x03))).toThrow(/a length of 255 at byte 2 of 2/);
   });
 
-  it("read a length in the fewest bytes that spell it and refuse it in more, as the ledger does, for the number of children and an embedded payload's length: 0, 1, 63/64, 16383/16384 in each width (LG-11, R29)", () => {
+  it("read a length in the fewest bytes that spell it and refuse it in more, as the ledger does, for the number of children and an embedded payload's length: 0, 1, 63/64, 16383/16384 in each width", () => {
     const data = Uint8Array.of(1);
     for (const value of LENGTH_BOUNDARIES) {
       const refs = Array.from({ length: value }, (_, i) => new Uint8Array(32).fill(i & 0xff));
@@ -187,7 +187,7 @@ function genesisNodes(ledger: Ledger, file: string): GenesisNodes {
   return nodes;
 }
 
-describe("nodeKey against the vendored packages, on the nodes of real genesis states (R29)", () => {
+describe("nodeKey against the vendored packages, on the nodes of real genesis states", () => {
   for (const { ledger, file, packagePath } of GENESIS) {
     it(`${ledger}: every flushed node's key is the key the package flushed it under`, () => {
       const { inserts } = genesisNodes(ledger, file);
@@ -235,7 +235,7 @@ describe("nodeKey against the vendored packages, on the nodes of real genesis st
       expect(parents).toContain(refused.requested.at(-1));
     });
 
-    it(`${ledger}'s control: the package refuses a stored node whose child list's length is in more bytes than it needs, under the node's key, as nodeKey refuses it (LG-11, R29)`, async () => {
+    it(`${ledger}'s control: the package refuses a stored node whose child list's length is in more bytes than it needs, under the node's key, as nodeKey refuses it`, async () => {
       const { stateKey, inserts } = genesisNodes(ledger, file);
       const moved = byReference(inserts);
       // A leaf the load reads from the store (an embedded node, now a row of its own), its empty list respelled.

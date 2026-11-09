@@ -18,15 +18,15 @@ import {
 } from "./loop-harness.js";
 
 /**
- * One transaction per finalized height, and none while the loop waits. [RN-6, RN-14]
+ * One transaction per finalized height, and none while the loop waits.
  * - A catch-up of 100 heights commits each in its own `BEGIN … COMMIT` with the cursor inside, in ascending order. The
  *   transaction ids PostgreSQL recorded on each height's rows (`xmin`) are one per height, the same for the cursor row
- *   and the module's row of that height, and ascending. [A41]
+ *   and the module's row of that height, and ascending.
  * - With the source's head at the cursor no transaction is open (PostgreSQL's `pg_stat_activity`; PGlite's one
- *   engine), and processing resumes when the head rises. [A49]
+ *   engine), and processing resumes when the head rises.
  *
  * Both acceptance criteria name PostgreSQL; both run on PGlite too. Each has its committed negative control: a loop
- * that commits two heights in one transaction, and one that waits inside a read. [A41, A49]
+ * that commits two heights in one transaction, and one that waits inside a read.
  */
 
 /** A module writing one row per height (`tx_probe.rows`). */
@@ -51,7 +51,7 @@ async function transactionIds(db: Database): Promise<{ height: bigint; cursor: b
 }
 
 /** The one-transaction-per-height oracle: the problems found (none when each height committed alone, in ascending
- *  order). [A41] */
+ *  order). */
 function oneTransactionPerHeight(ids: readonly { height: bigint; cursor: bigint; probe: bigint }[], heights: number): string[] {
   const problems: string[] = [];
   if (ids.length !== heights) problems.push(`${ids.length} heights committed, not ${heights}`);
@@ -111,7 +111,7 @@ describe.each(RUNNER_BACKENDS)("one transaction per height, none while waiting, 
     return { db: opened.db, transactions: counted.count() - before, finalized };
   }
 
-  it("A41: a catch-up of 100 heights commits 100 transactions, one height each, in ascending order", async () => {
+  it("a catch-up of 100 heights commits 100 transactions, one height each, in ascending order", async () => {
     const { db, transactions, finalized } = await catchUp();
     const ids = await transactionIds(db);
     expect(oneTransactionPerHeight(ids, 100)).toEqual([]);
@@ -122,7 +122,7 @@ describe.each(RUNNER_BACKENDS)("one transaction per height, none while waiting, 
     expect(await cursorOf(db)).toBe(100n);
   }, 120_000);
 
-  it("negative control: a loop that commits two heights in one transaction fails A41", async () => {
+  it("negative control: a loop that commits two heights in one transaction fails", async () => {
     const { db, transactions } = await catchUp(Batching);
     const problems = oneTransactionPerHeight(await transactionIds(db), 100);
     expect(problems).toHaveLength(50);
@@ -130,7 +130,7 @@ describe.each(RUNNER_BACKENDS)("one transaction per height, none while waiting, 
     expect(transactions).toBe(50);
   }, 120_000);
 
-  /** The oracle at a wait: the problems found (none when no transaction is open and the queue is free). [A49] */
+  /** The oracle at a wait: the problems found (none when no transaction is open and the queue is free). */
   async function openWhileWaiting(opened: RunnerDatabase): Promise<string[]> {
     const problems: string[] = [];
     const open = await opened.openTransactions();
@@ -161,13 +161,13 @@ describe.each(RUNNER_BACKENDS)("one transaction per height, none while waiting, 
     return { problems, heights: await heightsIn(opened.db, "tx_probe.rows") };
   }
 
-  it("A49: with the head at the cursor no transaction is open, and processing resumes when the head rises", async () => {
+  it("with the head at the cursor no transaction is open, and processing resumes when the head rises", async () => {
     const { problems, heights } = await waitAndResume(FinalizedLoop);
     expect(problems).toEqual([]);
     expect(heights).toEqual([1n, 2n, 3n, 4n, 5n, 6n, 7n, 8n]);
   }, 60_000);
 
-  it("negative control: a loop that waits inside a read fails A49", async () => {
+  it("negative control: a loop that waits inside a read fails", async () => {
     const { problems } = await waitAndResume(WaitingInRead);
     expect(problems.length).toBeGreaterThan(0);
     expect(problems[0]).toBe("1 transactions are open while the loop waits");

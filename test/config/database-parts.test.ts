@@ -13,15 +13,13 @@ import { input, PRIVATE_SETTINGS } from "./validate-fixtures.js";
  * The schema half of the database-as-parts tests, and the `ssl` defaults:
  * - the `database` setting and a private process's `publicDatabase` are parts: PostgreSQL's `{ kind, host, port, user,
  *   password, name, ssl }`, or PGlite's `{ kind, path }` or `{ kind, memory: true }`;
- * - a connection string in either is refused by its schema, with its path; [A170, CF-4, Q167 A]
+ * - a connection string in either is refused by its schema, with its path;
  * - `ssl` defaults to `disable` for a loopback host or a socket directory, and to `require` for another host;
- *   [A177, Q182 B]
- * - only `password` is secret; the other parts are shown; [Q167 A]
+ * - only `password` is secret; the other parts are shown;
  * - `core.transportReader` is required on PostgreSQL with `listen.privateLink`, and refused on PGlite.
- *   [A177, CF-10, Q175 A]
  *
  * The committed negative control is the last `describe`: a `database` schema that also takes a URL (as the setting
- * did before it was split into parts) fails {@link connectionStringProblems}. [A170]
+ * did before it was split into parts) fails {@link connectionStringProblems}.
  */
 
 /** The connection strings the setting took before it was split into parts, and others a hand may write. */
@@ -36,7 +34,7 @@ const CONNECTION_STRINGS = [
 /**
  * What is wrong with `schema` (a `database` setting's schema), for a setting given only as parts: each connection string
  * it accepts, and each refusal whose path is not the field's own or whose message does not say a connection string is
- * refused. [A170]
+ * refused.
  */
 function connectionStringProblems(schema: z.ZodType): string[] {
   const problems: string[] = [];
@@ -78,7 +76,7 @@ function findings(settings: Record<string, unknown>, side: "public" | "private" 
   }
 }
 
-describe("A170: database and publicDatabase are parts, never a connection string (CF-4, Q167)", () => {
+describe("database and publicDatabase are parts, never a connection string", () => {
   it("the public and the private schemas accept each kind of parts, defaults applied", () => {
     const parse = (database: unknown) => PUBLIC_CORE_SCHEMA.parse({ ...CORE_SETTINGS, database }).database;
     expect(parse(postgresOn("db.internal"))).toEqual({ ...postgresOn("db.internal"), port: 5432, ssl: "require" });
@@ -146,7 +144,7 @@ describe("A170: database and publicDatabase are parts, never a connection string
   });
 });
 
-describe("A177: ssl defaults to disable on a loopback host or socket, require on another (CF-4, Q182 B)", () => {
+describe("ssl defaults to disable on a loopback host or socket, require on another", () => {
   it("each host's default, and an ssl given is kept", () => {
     const ssl = (host: string, given?: string) =>
       (PUBLIC_CORE_SCHEMA.parse({ ...CORE_SETTINGS, database: postgresOn(host, given === undefined ? {} : { ssl: given }) })
@@ -169,7 +167,7 @@ describe("A177: ssl defaults to disable on a loopback host or socket, require on
   });
 });
 
-describe("A177: core.transportReader is required on PostgreSQL with listen.privateLink, refused on PGlite (Q175 A)", () => {
+describe("core.transportReader is required on PostgreSQL with listen.privateLink, refused on PGlite", () => {
   const transport = { listen: { privateLink: "0.0.0.0:7000" } };
   const reader = { transportReader: { user: "umbradb_transport", password: "p" } };
 
@@ -213,7 +211,7 @@ describe("A177: core.transportReader is required on PostgreSQL with listen.priva
   });
 });
 
-describe("A170's negative control (committed): a database schema that also takes a URL", () => {
+describe("negative control (committed): a database schema that also takes a URL", () => {
   it("fails the oracle: the URLs are accepted", () => {
     const before = z.union([z.string().regex(/^(?:postgres(?:ql)?:\/\/\S+|pglite:\S.*)$/), databaseSetting()]);
     const problems = connectionStringProblems(before);

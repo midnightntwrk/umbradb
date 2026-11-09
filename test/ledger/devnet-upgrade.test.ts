@@ -32,7 +32,7 @@ import { TapeAnswers } from "./version-checks.js";
  *   `spec_version` → v8" selects v8 for every block of the devnet, and the process parses and applies every block its
  *   v8 runtime built (0 to U) with v8, each root the node's. At F, the first block runtime 2.1 built on ledger v9, the
  *   v8 parse of its v9 transactions fails and the process halts there (`callback-error` at `core-block-parsed`'s
- *   `on-parse`): the configured table, not the chain, decides the ledger of every block. [A95 CI, LG-3]
+ *   `on-parse`): the configured table, not the chain, decides the ledger of every block.
  */
 
 const TAPE = "devnet-v8-v9-0-235";
@@ -141,7 +141,7 @@ async function storedRoots(db: ProcessDatabase): Promise<Map<number, string>> {
   return new Map(rows.map((row) => [row.h as number, row.root as string]));
 }
 
-describe("task 0.3's devnet upgrade tape through the process (task 0.2's conversion, A95; skipped by name without the tape)", () => {
+describe("the devnet upgrade tape through the process (the conversion; skipped by name without the tape)", () => {
   tapeTest(
     TAPE,
     "0.2: the vendored v9 package's conversion of the v8 state at U (102), with F (103) applied to it, gives the node's root at F; the v8 state at U has the node's root",
@@ -163,7 +163,7 @@ describe("task 0.3's devnet upgrade tape through the process (task 0.2's convers
               { specVersionMin: 2_000_000, specVersionMax: 2_999_999, ledger: "v9" },
             ],
           },
-          // The state at U stays in the window at cursor F, so the sweep keeps its nodes. [LG-12]
+          // The state at U stays in the window at cursor F, so the sweep keeps its nodes.
           retainStates: 1,
         },
         asked,
@@ -242,13 +242,12 @@ describe("task 0.3's devnet upgrade tape through the process (task 0.2's convers
 
   tapeTest(
     TAPE,
-    'A95 [CI]: a configured table "every spec_version → v8" parses and applies every block of the devnet\'s v8 runtime (0–102) with v8, each root the node\'s, and halts at F (103), whose v9 transactions v8 cannot parse',
+    'a configured table "every spec_version → v8" parses and applies every block of the devnet\'s v8 runtime (0–102) with v8, each root the node\'s, and halts at F (103), whose v9 transactions v8 cannot parse',
     async (found) => {
       const { u, f } = boundaryOf(found);
       const answers = new TapeAnswers(found.read().records);
       const everyV8 = { specVersionMin: 0, specVersionMax: 4_294_967_295, ledger: "v8" as const };
       // The selection: v8 for every block of the devnet, runtime 1.0's and 2.1's alike, since the rows alone choose.
-      // [LG-2]
       const table: LedgerTable = { rows: [everyV8], pins: [] };
       const versions = new Map<number, number>();
       for (let h = 0; h <= found.tape.to; h++) {

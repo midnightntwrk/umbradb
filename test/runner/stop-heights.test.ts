@@ -15,7 +15,6 @@ import type { DatabaseParts } from "../../src/config/database-parts.js";
  * and a raised core stop. With the core's stop at 10 and the head at 20, the cursor ends at 10, the stopping modules
  * and then the core get `on-stop-height`, and the state is `stopped` and ready. A restart at cursor 10 processes
  * nothing and fires the core's `on-stop-height` again. Also tested: the orders, handles and failures of the two points.
- * [RN-9, RN-10, RN-11, CF-6, A45]
  */
 
 const POINTS: readonly PointName[] = [
@@ -28,12 +27,12 @@ const POINTS: readonly PointName[] = [
   "on-stop-height",
 ];
 
-/** The modules: `a` and `b` stop with the core at 10, `c` runs on, `d` stops at 6, `e` starts at 4. [A45] */
+/** The modules: `a` and `b` stop with the core at 10, `c` runs on, `d` stops at 6, `e` starts at 4. */
 function modules(log: string[]): ModuleDeclaration[] {
   const reader = loggingModule("reader", log, [], {
     points: {
       async "on-start-api"(_p, api) {
-        // The module states its height itself, with the envelope's helpers. [RN-16]
+        // The module states its height itself, with the envelope's helpers.
         api.http("GET", "/height", async (_request, read) => ({
           status: 200,
           headers: chainDataHeaders(await readChainDataView(read)),
@@ -45,7 +44,7 @@ function modules(log: string[]): ModuleDeclaration[] {
   return [...["a", "b", "c", "d", "e"].map((id) => loggingModule(id, log, POINTS)), reader];
 }
 
-/** The configuration on `database`, with the core's stop. [A45] */
+/** The configuration on `database`, with the core's stop. */
 function entries(database: DatabaseParts, user: readonly ModuleDeclaration[], stop: number | undefined) {
   const of = (id: string) => user.find((part) => part.id === id) as ModuleDeclaration;
   return [
@@ -110,7 +109,7 @@ const anyAbove = (log: readonly string[], height: number): boolean =>
   log.some((line) => Number(/@(\d+)/.exec(line)?.[1]) > height);
 
 /** The oracle over the first run (stop 10, head 20) and the restart at cursor 10: every problem, none when it holds.
- *  [A45] */
+ * */
 function a45Problems(first: RunObservation, restart: RunObservation): string[] {
   const problems: string[] = [];
   const stops = ["b on-stop-height@10", "a on-stop-height@10", "core-chain on-stop-height@10 core"];
@@ -149,17 +148,17 @@ class CoreStopsFirst extends FinalizedLoop {
   }
 }
 
-/** A negative control's loop: a restart delivers nothing again at the cursor. [RN-11] */
+/** A negative control's loop: a restart delivers nothing again at the cursor. */
 class NoRedelivery extends FinalizedLoop {
   protected override async redeliver(): Promise<void> {}
 }
 
-describe.each(PROCESS_BACKENDS)("start and stop heights (RN-9, RN-10, RN-11) on $name", (backend) => {
+describe.each(PROCESS_BACKENDS)("start and stop heights on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  describe("A45: the core's stop (RN-10)", () => {
-    it("A45: the cursor ends at 10, stopping modules then the core get on-stop-height, stopped and ready; a restart processes nothing and fires the core's on-stop-height again", async () => {
+  describe("the core's stop", () => {
+    it("the cursor ends at 10, stopping modules then the core get on-stop-height, stopped and ready; a restart processes nothing and fires the core's on-stop-height again", async () => {
       const db = await backend.database();
       const first = await run(db, 10);
       const restart = await run(db, 10);
@@ -170,7 +169,6 @@ describe.each(PROCESS_BACKENDS)("start and stop heights (RN-9, RN-10, RN-11) on 
       expect(first.status.ended).toEqual(first.ended);
       expect(first.lines).toEqual(["processing stopped at 10: the core's stop"]);
       // The restart delivered on-after-db-write for 10 again to the modules active there, in order, before the stops.
-      // [RN-11]
       expect(restart.log).toEqual([
         "a on-after-db-write@10",
         "b on-after-db-write@10",
@@ -182,7 +180,7 @@ describe.each(PROCESS_BACKENDS)("start and stop heights (RN-9, RN-10, RN-11) on 
       ]);
     }, 180_000);
 
-    it("negative control: a loop whose core gets on-stop-height before the stopping modules fails A45", async () => {
+    it("negative control: a loop whose core gets on-stop-height before the stopping modules fails", async () => {
       const db = await backend.database();
       const first = await run(db, 10, CoreStopsFirst);
       const restart = await run(db, 10, CoreStopsFirst);
@@ -192,7 +190,7 @@ describe.each(PROCESS_BACKENDS)("start and stop heights (RN-9, RN-10, RN-11) on 
       ]);
     }, 180_000);
 
-    it("negative control: a loop that does not fire the core's on-stop-height again after a restart at the stop fails A45", async () => {
+    it("negative control: a loop that does not fire the core's on-stop-height again after a restart at the stop fails", async () => {
       const db = await backend.database();
       const first = await run(db, 10, NoRedelivery);
       const restart = await run(db, 10, NoRedelivery);
@@ -202,7 +200,7 @@ describe.each(PROCESS_BACKENDS)("start and stop heights (RN-9, RN-10, RN-11) on 
       ]);
     }, 180_000);
 
-    it("raising the core's stop after it stopped goes on to the new stop; the modules stopping at 10 are re-delivered, the core is not (CF-6, RN-11)", async () => {
+    it("raising the core's stop after it stopped goes on to the new stop; the modules stopping at 10 are re-delivered, the core is not", async () => {
       const db = await backend.database();
       await run(db, 10);
       const raised = await run(db, 20);
@@ -219,7 +217,7 @@ describe.each(PROCESS_BACKENDS)("start and stop heights (RN-9, RN-10, RN-11) on 
       expect(at(unbounded.log, "on-stop-height", 20)).toEqual([]);
     }, 180_000);
 
-    it("a stop during the core's last height ends processing at the core's stop, the process stopping (RN-10, RN-13)", async () => {
+    it("a stop during the core's last height ends processing at the core's stop, the process stopping", async () => {
       const db = await backend.database();
       let stopping: Promise<void> | undefined;
       const handles: { current?: ReturnType<typeof startProcess> } = {};
@@ -244,7 +242,7 @@ describe.each(PROCESS_BACKENDS)("start and stop heights (RN-9, RN-10, RN-11) on 
       expect(await cursorIn(db)).toBe(3);
     }, 180_000);
 
-    it("a core stop below the cursor processes nothing and fires the core's on-stop-height at the cursor (Q109)", async () => {
+    it("a core stop below the cursor processes nothing and fires the core's on-stop-height at the cursor", async () => {
       const db = await backend.database();
       await run(db, 10);
       const lowered = await run(db, 5);
@@ -259,7 +257,7 @@ describe.each(PROCESS_BACKENDS)("start and stop heights (RN-9, RN-10, RN-11) on 
     }, 180_000);
   });
 
-  describe("RN-9 and RN-10's orders and handles", () => {
+  describe("orders and handles", () => {
     it("fires on-start-height before on-compute at an entry's start, the core's first, then graph order; a stopped module runs no more", async () => {
       const db = await backend.database();
       const first = await run(db, 10);
@@ -280,7 +278,7 @@ describe.each(PROCESS_BACKENDS)("start and stop heights (RN-9, RN-10, RN-11) on 
         "d on-start-height@1",
       ]);
       // Then on-compute: its callbacks run in parallel, each in a read of its own, so whichever read the database gives
-      // first logs first; every one comes after every on-start-height. [RN-3, RN-9]
+      // first logs first; every one comes after every on-start-height.
       expect(one.slice(13, 17).sort()).toEqual(["a on-compute@1", "b on-compute@1", "c on-compute@1", "d on-compute@1"]);
       expect(at(first.log, "on-start-height", 4)).toEqual(["e on-start-height@4"]);
       expect(first.log.indexOf("e on-start-height@4")).toBeLessThan(first.log.indexOf("e on-compute@4"));
@@ -291,7 +289,7 @@ describe.each(PROCESS_BACKENDS)("start and stop heights (RN-9, RN-10, RN-11) on 
       expect(first.log.some((line) => line.startsWith("d ") && /@(7|8|9|10)$/.test(line))).toBe(false);
     }, 180_000);
 
-    it("gives on-start-height a read at h − 1 and on-stop-height a read at h, each with its entry (RN-4, Q100)", async () => {
+    it("gives on-start-height a read at h − 1 and on-stop-height a read at h, each with its entry", async () => {
       const db = await backend.database();
       const seen: string[] = [];
       const probe = loggingModule("probe", [], [], {
@@ -324,7 +322,7 @@ describe.each(PROCESS_BACKENDS)("start and stop heights (RN-9, RN-10, RN-11) on 
       expect(seen).toEqual(["start probe@4: read 3, 3 blocks", "stop probe@6: read 6, 6 blocks"]);
     }, 180_000);
 
-    it("a failing re-delivered callback stops the restart with the cursor's height committed, processing nothing more (RN-11)", async () => {
+    it("a failing re-delivered callback stops the restart with the cursor's height committed, processing nothing more", async () => {
       const db = await backend.database();
       let fail = false;
       const flaky = loggingModule("flaky", [], [], {
@@ -362,7 +360,7 @@ describe.each(PROCESS_BACKENDS)("start and stop heights (RN-9, RN-10, RN-11) on 
       expect(await cursorIn(db)).toBe(3);
     }, 180_000);
 
-    it("a publish the module catches in a re-delivered on-stop-height stops the restart at the cursor (RN-11, MD-7)", async () => {
+    it("a publish the module catches in a re-delivered on-stop-height stops the restart at the cursor", async () => {
       const db = await backend.database();
       let restarted = false;
       const sneaky = loggingModule("sneaky", [], [], {
@@ -380,7 +378,7 @@ describe.each(PROCESS_BACKENDS)("start and stop heights (RN-9, RN-10, RN-11) on 
             try {
               p.publish("sneaky-client", 3);
             } catch {
-              // Caught: still a callback error. [MD-7]
+              // Caught: still a callback error.
             }
           },
         },
@@ -440,7 +438,7 @@ describe.each(PROCESS_BACKENDS)("start and stop heights (RN-9, RN-10, RN-11) on 
         const failure = (ended as { error: unknown }).error;
         expect(failure).toBeInstanceOf(HeightFailure);
         expect(failure).toMatchObject({ height, point, module: "failing", committed });
-        // The halt, then the stop's own line (issue 00072): processing had already ended. [RN-13]
+        // The halt, then the stop's own line: processing had already ended.
         expect(lines).toEqual([
           `processing halted (callback-error): ${(failure as Error).message}`,
           "stopping (stop()): processing had already ended (halted)",

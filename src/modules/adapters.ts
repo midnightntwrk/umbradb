@@ -2,7 +2,7 @@
  * Turns validated declarations (`./validation.ts`) into the database API's inputs: the modules of the schema plan
  * (`planSchemas`, `src/db/roles.ts`) and the parts the migration runner runs (`startDatabase`, `src/db/migrate.ts`).
  * Which declarations go in, and in which order, comes from the requirement graph's `modules` (`./graph.ts`); the
- * runner runs them. [MD-1, DB-6, DB-8, DB-9, DB-10; design §4, §6]
+ * runner runs them.
  */
 
 import type { SchemaWriteHandle } from "../db/api.js";
@@ -32,7 +32,6 @@ function schemaItem(item: ItemDeclaration): SchemaItem {
 /**
  * The content-defined tables `declarations` declare, each item's once, with their schema and content function: what a
  * contents hash computed outside a process's schema plan is given (`umbradb backup`, the exported `contentsHash`).
- * [DT-3, LG-11]
  */
 export function declaredContentDefined(declarations: readonly ModuleDeclaration[]): ContentDefinedTables[] {
   const out = new Map<string, ContentDefinedTables>();
@@ -46,7 +45,7 @@ export function declaredContentDefined(declarations: readonly ModuleDeclaration[
   return [...out.values()];
 }
 
-/** What the schema plan reads of a declaration: id, requirements, items with their tables, migrations. [DB-6, DB-8] */
+/** What the schema plan reads of a declaration: id, requirements, items with their tables, migrations. */
 export function schemaModule(declaration: ModuleDeclaration): SchemaModule {
   return {
     id: declaration.id,
@@ -68,7 +67,7 @@ export function schemaModules(declarations: readonly ModuleDeclaration[]): Schem
  * The schema plan for one database's parts. Runs `planSchemas` on its modules ({@link schemaModules}) and also puts the
  * item names of the own parts (`core-chain`, `core-digest`) in the plan's single namespace, so no module can use one of
  * them (`db`, `config`, …) as its id; such a module is a `schema-collision`. `declarations` are the requirement graph's
- * `modules` (`./graph.ts`): every part of the database, in startup order. [DB-6, DB-8]
+ * `modules` (`./graph.ts`): every part of the database, in startup order.
  */
 export function schemaPlan(declarations: readonly ModuleDeclaration[]): SchemaPlan {
   const own = declarations
@@ -81,7 +80,6 @@ export function schemaPlan(declarations: readonly ModuleDeclaration[]): SchemaPl
  * The part of a declaration the migration runner runs: its id, version, `requiresResync` as declared, its migrations,
  * and its `on-start-db` callback. The callback is called as a method of `points`, with `context` (the module's process
  * context) and the schema write handle the runner opens (`src/db/write-handles.ts`); its errors pass through unchanged.
- * [DB-9, DB-10]
  */
 export function migrationPart(declaration: ModuleDeclaration, context: ProcessContext): MigrationPart {
   const { points } = declaration;

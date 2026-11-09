@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 // An independent implementation of the ledger's node format, written from the upstream sources rather than from the
-// vendored packages, so that the tests of the vendored packages have an oracle of their own. [design §5.1-§5.3]
+// vendored packages, so that the tests of the vendored packages have an oracle of their own.
 //
 // The format:
 // - a node's key is SHA-256 over the payload length as a 4-byte little-endian integer, the payload, and each child's

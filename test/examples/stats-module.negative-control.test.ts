@@ -15,7 +15,7 @@ import {
  * document, changed in the one way it guards against — so a passing check means the example still matches the code.
  */
 
-describe("the example's checks fail on a changed copy (task 17.3a)", () => {
+describe("the example's checks fail on a changed copy", () => {
   let project: InstalledProject;
 
   beforeAll(async () => {

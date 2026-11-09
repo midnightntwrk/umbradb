@@ -18,19 +18,19 @@ import { contentDefinedLedgerState, countsAndQueue, type StoredRow } from "./con
  * The contents hash of `core-ledger-state`'s node tables, content-defined (`src/backbone/core-ledger-state/node-set.ts`),
  * on PostgreSQL 18 and PGlite 0.5.10, with the build's own declaration (`CORE_LEDGER_STATE`'s `ledger-state` item), on
  * databases built for it: the part's own migration, rows of real node format (`../ledger/node-format.ts`, independent
- * of `src/`), and the counts and queue its rows give. [R29, A55, DT-3, LG-11]
+ * of `src/`), and the counts and queue its rows give.
  *
- * - R29: two databases holding the same nodes, one with a small node embedded in its parent and the other with it
+ * - Two databases holding the same nodes, one with a small node embedded in its parent and the other with it
  *   referenced and stored as its own row, hash equal; one more queued node (its row and its `unreferenced` entry) makes
  *   the hash differ; one byte of a row's payload or child list changed fails the computation with
  *   `ledger-refcount-invalid` (`details.check` `node-key`), as does a child list with a length in more bytes than it
- *   needs (the ledger refuses it, LG-11), and counts or a queue its rows do not give fail it with
+ *   needs (the ledger refuses it), and counts or a queue its rows do not give fail it with
  *   reason `tables-inconsistent` (`closure`, `roots`, `counts`, `queue`) — here through the exported `contentsHash`
  *   itself; the backup and the restore are `../backup/restore-content-defined.test.ts`. Its three negative controls,
  *   each a test build (`./content-defined-build.ts`) declaring the tables otherwise: `nodes` hashed by its raw rows, a
  *   constant in place of the node set, the key check skipped. The clause of `src/ledger/node-key.ts` on the tapes is
  *   `../ledger/node-key-tape-*.test.ts`.
- * - A55: the same rows give the same hash on both backends; one byte of a table that is not content-defined changes
+ * - The same rows give the same hash on both backends; one byte of a table that is not content-defined changes
  *   it; one byte of a `nodes` row fails the computation.
  */
 
@@ -130,7 +130,7 @@ const hexOf = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
 
 /**
  * `bytes` with the SCALE length at `at`, in one byte, spelled in `width` bytes instead: the same number in more bytes
- * than it needs, which the ledger refuses ("non-canonical scale encoding"). [LG-11]
+ * than it needs, which the ledger refuses ("non-canonical scale encoding").
  */
 function widened(bytes: Uint8Array, at: number, width: 2 | 4): Uint8Array {
   const first = bytes[at] as number;
@@ -167,7 +167,7 @@ describe("the two spellings of the fixture", () => {
   });
 });
 
-describe.each(DETERMINISM_BACKENDS)("core-ledger-state's node tables in the contents hash, on $name (R29, A55, DT-3)", (backend) => {
+describe.each(DETERMINISM_BACKENDS)("core-ledger-state's node tables in the contents hash, on $name", (backend) => {
   let server: TestServer;
 
   beforeAll(async () => {
@@ -207,7 +207,7 @@ describe.each(DETERMINISM_BACKENDS)("core-ledger-state's node tables in the cont
   }, 120_000);
 
   it(
-    "R29: two databases holding the same ledger nodes, one with a small node embedded in its parent and the other with " +
+    "two databases holding the same ledger nodes, one with a small node embedded in its parent and the other with " +
       "it referenced and stored as its own row, each with the counts and queue its rows give, have equal contents hashes",
     async () => {
       const embedded = await database({ rows: EMBEDDED_ROWS });
@@ -221,7 +221,7 @@ describe.each(DETERMINISM_BACKENDS)("core-ledger-state's node tables in the cont
   );
 
   it(
-    "R29: with every other table held fixed, one that also holds one more queued node (its row and its unreferenced " +
+    "with every other table held fixed, one that also holds one more queued node (its row and its unreferenced " +
       "entry, no reference, no root count) has a different hash",
     async () => {
       const base = await database({ rows: EMBEDDED_ROWS });
@@ -234,7 +234,7 @@ describe.each(DETERMINISM_BACKENDS)("core-ledger-state's node tables in the cont
   );
 
   it(
-    "R29: one byte of a nodes row's payload or child list changed makes the computation fail with " +
+    "one byte of a nodes row's payload or child list changed makes the computation fail with " +
       "ledger-refcount-invalid (details.check node-key), naming the row's key",
     async () => {
       const cases: readonly (readonly [string, (row: StoredRow) => StoredRow])[] = [
@@ -255,7 +255,7 @@ describe.each(DETERMINISM_BACKENDS)("core-ledger-state's node tables in the cont
   );
 
   it(
-    "R29 (LG-11): a nodes row whose child list has a length in more bytes than it needs, which the ledger refuses, its " +
+    "a nodes row whose child list has a length in more bytes than it needs, which the ledger refuses, its " +
       "key, payload, counts and queue unchanged, makes the computation fail with ledger-refcount-invalid " +
       "(details.check node-key), naming the row's key",
     async () => {
@@ -280,7 +280,7 @@ describe.each(DETERMINISM_BACKENDS)("core-ledger-state's node tables in the cont
   );
 
   it(
-    "R29: ref_counts or unreferenced that differ from what the rows give make the computation fail with " +
+    "ref_counts or unreferenced that differ from what the rows give make the computation fail with " +
       "ledger-refcount-invalid (reason tables-inconsistent), naming the check and the key",
     async () => {
       const roots = new Set([PARENT]);
@@ -308,7 +308,7 @@ describe.each(DETERMINISM_BACKENDS)("core-ledger-state's node tables in the cont
   );
 
   it(
-    "A55: changing one byte of one row of a table that is not content-defined changes the hash; changing one byte of a " +
+    "changing one byte of one row of a table that is not content-defined changes the hash; changing one byte of a " +
       "core_ledger_state.nodes row makes the computation fail with ledger-refcount-invalid",
     async () => {
       const base = await database({ rows: EMBEDDED_ROWS });
@@ -333,7 +333,7 @@ describe.each(DETERMINISM_BACKENDS)("core-ledger-state's node tables in the cont
     ]);
   }, 120_000);
 
-  describe("R29's negative controls", () => {
+  describe("negative controls", () => {
     it("nodes hashed by its raw rows (today's rule; ref_counts and unreferenced still checked) makes the two spellings' hashes differ", async () => {
       const raw = contentsHashOf([
         contentDefinedLedgerState({ contentDefined: { tables: ["ref_counts", "unreferenced"], content: LEDGER_NODE_TABLES.content } }),
@@ -364,7 +364,7 @@ describe.each(DETERMINISM_BACKENDS)("core-ledger-state's node tables in the cont
   });
 });
 
-describe("A55 (DT-3) — the node tables' rows give the same contents hash on PostgreSQL 18 and PGlite 0.5.10", () => {
+describe("the node tables' rows give the same contents hash on PostgreSQL 18 and PGlite 0.5.10", () => {
   let postgres: TestServer;
   let pglite: TestServer;
 

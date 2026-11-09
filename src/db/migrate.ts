@@ -1,47 +1,46 @@
 /**
  * Migrations and setup at startup, refactored from 0.9.5's `src/postgres/migrate.ts`. Each migration runs once, in its
  * module's order, in a transaction of its own together with its record. A run stops at the first failure and keeps the
- * migrations before it. [DB-9, DB-10; CORE-ARCH §4.7, §4.12; design §4, §10, §11]
+ * migrations before it.
  *
  * What changed from 0.9.5:
  * - the record is `core_chain.migrations`, with a SHA-256 checksum and a position, checked before anything runs;
  * - the SQL runs under the module's role;
  * - there is no migration advisory lock: the writer lock is taken before any migration, so one process migrates a
- *   database at a time. [DB-11]
+ *   database at a time.
  *
  * **The input.** {@link startDatabase} takes:
  * - the schema plan of the database's modules (`./roles.ts`, `planSchemas`);
  * - the backbone parts and modules in the fixed callback order ({@link MigrationPart}: what the declarations give)
- *   [RN-3];
+ *;
  * - the versions of each part whose revisions cover a committed height, read from the configuration history and the
- *   cursor [DB-10].
+ *   cursor.
  *
  * The plan and the parts come from the same declarations.
  *
  * **Who runs a part's SQL.** A module of the plan runs its migrations and its `on-start-db` under its write role (a
  * shared item's provider under the item's role). UmbraDB's own parts whose schemas are reserved ({@link OWN_PARTS}:
  * `core_chain`, `core_digest`) run as the writer's login, which owns those schemas. No `search_path` is set: module SQL
- * names its schema. [DB-6, Q89]
+ * names its schema.
  *
- * **Order.** [DB-9]
+ * **Order.**
  * 1. One bootstrap transaction. It runs `prepareSchemas` (`core_chain`, the roles, the schemas, their grants), creates
  *    the table `core_chain.migrations`, grants `USAGE` and `SELECT` on `core_chain` to every role of the plan, and sets
  *    up the `TRUNCATE` guard (`./truncate-guard.ts`). It also creates (or replaces) the functions of the `jsonb` and
  *    `numeric` `CHECK`s in `core_chain` (`./module-rules.ts`). Then every check runs, for every part, before any
  *    migration runs: `requires-resync`, `migration-checksum-changed`, and `migration-missing` (also for a pending
  *    migration declared before an applied one, `reason: out-of-order`). A refusal rolls the whole bootstrap back.
- *    [DB-10, DT-6, Q91]
  * 2. For each part, in order:
  *    - Each pending migration, in its own transaction: the migration mark first (`markMigration`, which lets
  *      `TRUNCATE` through in this transaction only), the part's role, the SQL through the multi-statement path
  *      (`./multi-statement.ts`), a check that the SQL did not end the transaction, the login's role again, the
  *      determinism check of the part's tables, and the record last. A migration that leaves a table the determinism
- *      rules reject rolls back, and startup fails with the rule's code (`./module-rules.ts`). [A73, DT-6]
+ *      rules reject rolls back, and startup fails with the rule's code (`./module-rules.ts`).
  *    - If the part applied any migration, the `TRUNCATE` guard again, so its new tables are guarded.
  *    - At every startup, in a transaction of its own: the determinism check of the part's tables again (for a table of
  *      an earlier startup, or one an opt-out no longer covers), their `CHECK`s, and their change capture for the
  *      digests (`./change-capture.ts`). Capture starts once `core-digest`'s migrations have created its schemas (the
- *      parts before it are captured then), together with `SELECT` on `core_digest` for every role of the plan. [DT-6]
+ *      parts before it are captured then), together with `SELECT` on `core_digest` for every role of the plan.
  *    - Its `on-start-db`, in a further transaction under its role, unmarked, with a schema write handle that closes when
  *      it returns (`./write-handles.ts`).
  * 3. When every part has run, in a last transaction: the shadow tables of change capture are emptied of what the
@@ -50,7 +49,7 @@
  * A migration that fails rolls back with its record. The ones before it stay applied, its part's `on-start-db` and
  * every later part do not run, and startup fails with `migration-failed`, or with the determinism rule's code when the
  * migration left a table the rules reject. A lost connection is passed on as it is (`connection-lost`, retryable): a
- * migration and its record commit together, so a retried startup finds either both or neither. [DB-9, DT-6]
+ * migration and its record commit together, so a retried startup finds either both or neither.
  */
 
 import { quoteIdentifier } from "../deterministic-postgresql/index.js";
@@ -74,19 +73,19 @@ import { runOnStartDb, type WriteHandleOptions } from "./write-handles.js";
 /** UmbraDB's own parts, which run as the writer's login (`./roles.ts`); re-exported for the runner. */
 export { OWN_PARTS };
 
-/** What the runner needs of one backbone part or module. [MD-1, DB-9, DB-10] */
+/** What the runner needs of one backbone part or module. */
 export interface MigrationPart {
   readonly id: string;
   /** The version this build carries (semver). */
   readonly version: string;
-  /** True when this version may run only on a database no other version of the part wrote. [DB-10] */
+  /** True when this version may run only on a database no other version of the part wrote. */
   readonly requiresResync?: boolean;
-  /** Cumulative: every migration of the versions before, then this version's. [CORE-ARCH §4.12] */
+  /** Cumulative: every migration of the versions before, then this version's. */
   readonly migrations: readonly SchemaMigration[];
   /**
    * `on-start-db`: idempotent setup after the part's migrations, at every startup, in a transaction of its own under
    * the part's role, with a schema write handle that closes when it returns (`./write-handles.ts`). Its error is passed
-   * on as it is. [DB-3, DB-9, RN-4]
+   * on as it is.
    */
   readonly onStartDb?: (w: SchemaWriteHandle) => Promise<void>;
 }
@@ -95,11 +94,11 @@ export interface MigrationPart {
 export interface StartupInput {
   /** The schemas and roles of the database's modules (`planSchemas`). */
   readonly plan: SchemaPlan;
-  /** Every backbone part and module, in the fixed callback order. [RN-3] */
+  /** Every backbone part and module, in the fixed callback order. */
   readonly parts: readonly MigrationPart[];
   /**
    * For each part's id, the versions of its revisions that cover at least one committed height. A part not in the map
-   * has none, as on an empty database. [DB-10]
+   * has none, as on an empty database.
    */
   readonly committedVersions: ReadonlyMap<string, readonly string[]>;
   /**
@@ -111,7 +110,7 @@ export interface StartupInput {
 
 /** A migration applied by this startup, under the name it is recorded with. */
 export interface AppliedMigration {
-  /** The module's id, or a shared item's name for its providers' migrations. [DB-8] */
+  /** The module's id, or a shared item's name for its providers' migrations. */
   readonly module: string;
   readonly migration: string;
   /** Its place in the part's list, from 1. */
@@ -173,7 +172,6 @@ function runnable(part: MigrationPart, plan: SchemaPlan): Runnable {
 
 /**
  * Rejects a part that requires a resync, on a database whose committed heights another of its versions covers.
- * [DB-10]
  */
 function checkResync(part: MigrationPart, committed: readonly string[]): void {
   if (part.requiresResync !== true) return;
@@ -190,7 +188,6 @@ function checkResync(part: MigrationPart, committed: readonly string[]): void {
 
 /**
  * A migration recorded as applied under `name` that the build does not declare (`label` names it in the message).
- * [DB-9]
  */
 function missing(label: string, name: string, row: AppliedRow): UmbraError {
   return new UmbraError(
@@ -204,7 +201,7 @@ function missing(label: string, name: string, row: AppliedRow): UmbraError {
 
 /**
  * Checks that the rows recorded under a name are exactly the first migrations of the build's list, at their positions
- * and with their checksums. [DB-9, Q91]
+ * and with their checksums.
  */
 function checkApplied(runner: Runnable, rows: readonly AppliedRow[]): void {
   const declared = runner.part.migrations;
@@ -238,7 +235,7 @@ function checkApplied(runner: Runnable, rows: readonly AppliedRow[]): void {
 
 /**
  * Grants every role of the plan `USAGE` on one of UmbraDB's own schemas (`core_chain`, or `core_digest` once
- * `core-digest`'s migrations created it), and `SELECT` on its tables, now and later. [DB-6]
+ * `core-digest`'s migrations created it), and `SELECT` on its tables, now and later.
  */
 async function grantReads(tx: Transaction, plan: SchemaPlan, schema: "core_chain" | "core_digest"): Promise<void> {
   if (plan.schemas.length === 0) return;
@@ -250,7 +247,7 @@ async function grantReads(tx: Transaction, plan: SchemaPlan, schema: "core_chain
 
 /** What the steps after each part's migrations carry from one part to the next within one startup. */
 interface Settling {
-  /** The schemas of the parts settled before the shadow schema existed: captured once it does. [Q95] */
+  /** The schemas of the parts settled before the shadow schema existed: captured once it does. */
   deferred: string[];
   /** Whether this startup granted the reading of `core_digest` already. */
   digestsGranted: boolean;
@@ -260,7 +257,7 @@ interface Settling {
  * The steps after a part's migrations, before its `on-start-db`, in one transaction (see the module comment): the
  * determinism check of its tables, and their `CHECK`s. Once `core-digest`'s migrations have created the shadow schema,
  * also the change capture of its tables and of every part settled before that, with the reading of `core_digest` for
- * the plan's roles. [DT-6]
+ * the plan's roles.
  */
 async function settle(tx: Transaction, input: StartupInput, part: MigrationPart, settling: Settling): Promise<void> {
   const schemas = partSchemas(input.plan, part.id);
@@ -278,7 +275,7 @@ async function settle(tx: Transaction, input: StartupInput, part: MigrationPart,
   }
 }
 
-/** Runs one migration and writes its record, in one transaction. [DB-9] */
+/** Runs one migration and writes its record, in one transaction. */
 async function apply(
   db: Database,
   input: StartupInput,
@@ -304,7 +301,7 @@ async function apply(
       if (runner.underRole) {
         await tx.execute("RESET ROLE");
         // The determinism check at migration time: a migration that leaves a table the rules reject rolls back, and is
-        // not recorded. [DT-6]
+        // not recorded.
         const schemas = partSchemas(input.plan, runner.part.id);
         await refuseNonDeterministic(tx, input.plan, runner.part.id, schemas, { id: migration.id, position });
       }
@@ -328,7 +325,7 @@ async function apply(
 /**
  * The bootstrap's checks of the recorded migrations: for every part, `requires-resync`, then its rows as
  * {@link checkApplied} checks them; then a name recorded that no part of the build has (`migration-missing`). Resolves
- * with how many migrations each name has applied. [DB-9, DB-10, Q91]
+ * with how many migrations each name has applied.
  */
 function checkRecorded(
   runners: readonly Runnable[],
@@ -342,7 +339,7 @@ function checkRecorded(
     checkResync(runner.part, committedVersions.get(runner.part.id) ?? []);
     if (byName.get(runner.name) === runner) checkApplied(runner, recorded.get(runner.name) ?? []);
   }
-  // Recorded under a name no part of the build has: a module (or shared item) the build dropped. [DB-9]
+  // Recorded under a name no part of the build has: a module (or shared item) the build dropped.
   for (const [name, list] of recorded) {
     if (!byName.has(name)) throw missing(`the module or shared item ${name}`, name, list[0] as AppliedRow);
   }
@@ -360,7 +357,7 @@ function runnersOf(parts: readonly MigrationPart[], plan: SchemaPlan): { runners
 /**
  * A restore's check of a backup's recorded migrations against the build. It runs the bootstrap's own checks
  * ({@link startDatabase}) on `rows`, the backup's `core_chain.migrations` (each name's rows in position order), without
- * a database: `requires-resync`, `migration-checksum-changed`, `migration-missing`, as startup would raise them. [BK-3]
+ * a database: `requires-resync`, `migration-checksum-changed`, `migration-missing`, as startup would raise them.
  */
 export function checkRecordedMigrations(
   plan: SchemaPlan,
@@ -375,7 +372,6 @@ export function checkRecordedMigrations(
 /**
  * The grants of a restored database, in the restore's transaction, once its objects belong to their schemas' roles
  * (`restoreOwnership`). `pg_dump --no-privileges` writes no grant, so this makes again what startup's bootstrap grants:
- * [BK-3, DB-6, DB-7]
  * 1. as each schema's owner, `USAGE`, `SELECT`, `EXECUTE` and their default privileges (`prepareSchemas`), which also
  *    creates, empty, the schema of a module the configuration starts above the backup's height, so the backup holds
  *    none;
@@ -402,7 +398,7 @@ export async function restoreGrants(tx: Transaction, plan: SchemaPlan): Promise<
  * with the error of an `on-start-db` as it is, or with `connection-lost`.
  */
 export async function startDatabase(db: Database, input: StartupInput): Promise<readonly AppliedMigration[]> {
-  // The build's list for each record name: its first part's (a shared item's providers declare the same). [DB-8]
+  // The build's list for each record name: its first part's (a shared item's providers declare the same).
   const { runners, byName } = runnersOf(input.parts, input.plan);
   const ids = new Set<string>();
   for (const { part } of runners) {

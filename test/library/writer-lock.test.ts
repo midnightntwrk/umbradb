@@ -8,12 +8,11 @@ import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import { cursorReaches, libraryData, rowsModule } from "./library-fixtures.js";
 
 /**
- * L60: one host, one PGlite directory, two handles. The directory's writer lock is the process's own operating-system
+ * One host, one PGlite directory, two handles. The directory's writer lock is the process's own operating-system
  * lock (`src/db/pglite-lock.ts`): a second `startUmbraDB` on the directory while a first handle has it open is refused
  * `writer-lock-held` — `started` rejects with that code and the second process stays `refused` until its `stop()`, as
  * every refusal after the configuration step does —, the first handle keeps committing heights, and once the first
  * handle's `closed` resolved a new handle in the same host opens the directory and continues from its cursor.
- * [LM-2, DB-11, L60 CI]
  */
 
 /** A handle's process and what it saw: the in-memory chain it follows, the heights its user module wrote. */
@@ -33,7 +32,7 @@ function open(dir: string, head: bigint): Opened {
   return { handle, source, seen };
 }
 
-describe("L60: one host, one PGlite directory (LM-2)", () => {
+describe("one host, one PGlite directory", () => {
   let tmp: string;
   const handles: UmbraDBHandle[] = [];
 

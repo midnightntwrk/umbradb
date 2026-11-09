@@ -25,24 +25,23 @@ import { committed, halted, type Ingest, ingest, PATIENCE_MS } from "./ingest-ha
 
 /**
  * The node's errors through the real process and the node source, on PostgreSQL 18 and PGlite 0.5.10, against a tape
- * node serving synthetic tapes in the node's answer shapes. [IN-9, IN-10, A84, A85]
+ * node serving synthetic tapes in the node's answer shapes.
  *
- * - A "state unavailable" answer for a finalized height (Substrate's `State already discarded`, from a pruned node)
+ * - a "state unavailable" answer for a finalized height (Substrate's `State already discarded`, from a pruned node)
  *   halts processing with `node-requirement` and that height. The call is asked once (per the tape node's call log).
  *   This holds for:
  *   - the height's events (`state_getStorage` of `System::Events`, `core-chain-events`);
  *   - the state its runtime is read at (`state_getRuntimeVersion` at the parent, `core-block-fetch`);
  *   - a block the node does not have (`chain_getBlockHash` answering `null`).
  *
- *   The committed negative control is a client that asks again. [A84, IN-9]
+ *   The committed negative control is a client that asks again.
  * - The node's connection is dropped for 2 minutes: the tape's sessions are dropped one after another as they open.
  *   The process retries with the node client's back-off, reaching `backoffCeilingMs` (30 s, the default). It reports
  *   `node-retrying` (the client's retries, which the process logs and shows), then goes on with no height skipped or
  *   repeated. The two minutes are on the client's clock, which runs 100 times faster here ({@link FAST}), so the test
  *   waits about 1.2 s. The committed negative control is a process whose client does not report its retries.
- *   [A85, IN-10]
- * - During startup the same retries show `node-retrying` at no height. [A85, IN-10]
- * - An error on a queued best block drops it without a retry; the block is fetched again at finality. [IN-10]
+ * - During startup the same retries show `node-retrying` at no height.
+ * - An error on a queued best block drops it without a retry; the block is fetched again at finality.
  */
 
 /** Substrate's answer for a state the node pruned (`substrate/client/db/src/lib.rs`, the node client's `rpcFailure`). */
@@ -59,7 +58,7 @@ interface A84Observation {
 
 /**
  * The state-unavailable oracle: halted with `node-requirement` at `height` (`module`, `point`), the request asked once,
- * nothing of it kept. [A84]
+ * nothing of it kept.
  */
 function a84Problems(
   observed: A84Observation,
@@ -78,7 +77,7 @@ function a84Problems(
   return problems;
 }
 
-/** A client over `client` that asks again once when the node answers `node-requirement` (a negative control). [A84] */
+/** A client over `client` that asks again once when the node answers `node-requirement` (a negative control). */
 function askingAgain(client: NodeClient): NodeClient {
   const again =
     <A extends unknown[], R>(call: (...args: A) => Promise<R>) =>
@@ -163,7 +162,7 @@ describe.each(PROCESS_BACKENDS)("the node's errors through the process on $name"
   }
 
   it(
-    "A84: a 'state unavailable' answer for a finalized height's events halts with node-requirement and that height, " +
+    "a 'state unavailable' answer for a finalized height's events halts with node-requirement and that height, " +
       "asked once",
     async () => {
       const observed = await a84Run("events");
@@ -174,18 +173,18 @@ describe.each(PROCESS_BACKENDS)("the node's errors through the process on $name"
     PATIENCE_MS * 2,
   );
 
-  it("A84: so does one for the state the height's runtime is read at, and a block the node does not have", async () => {
+  it("so does one for the state the height's runtime is read at, and a block the node does not have", async () => {
     expect(a84Problems(await a84Run("runtime"), { height: 3n, module: "core-block-fetch", point: "on-fetch" })).toEqual([]);
     expect(a84Problems(await a84Run("block"), { height: 3n, module: null, point: null })).toEqual([]);
   }, PATIENCE_MS * 3);
 
-  it("A84 negative control: a client that asks the node again after a 'state unavailable' answer fails A84", async () => {
+  it("negative control: a client that asks the node again after a 'state unavailable' answer fails", async () => {
     expect(a84Problems(await a84Run("events", askingAgain), { height: 3n, module: "core-chain-events", point: "on-fetch" })).toEqual([
       "the node was asked 2 times for the unavailable state",
     ]);
   }, PATIENCE_MS * 2);
 
-  it("A85: an error on a queued best block drops it without a retry; the block is fetched again at finality and commits once", async () => {
+  it("an error on a queued best block drops it without a retry; the block is fetched again at finality and commits once", async () => {
     const db = await backend.database();
     // The node's rate limit: retryable on the finalized path, which would ask again; a best block's call is not retried.
     const limited = { code: -32999, message: "RPC rate limit exceeded" };
@@ -224,7 +223,6 @@ describe.each(PROCESS_BACKENDS)("the node's errors through the process on $name"
  * The node client's clock in the outage tests: SPEED times the real one, so the two minutes of back-off take about
  * 1.2 s. Only the client's own timers run on it: its back-off, its reconnects and each try's timeout. The timeout is
  * multiplied by SPEED, so that a try still waits 30 real seconds. The transport's heartbeat keeps the real clock.
- * [A85, IN-10]
  */
 const SPEED = 100;
 const FAST: NodeTimers = Object.freeze({
@@ -258,12 +256,12 @@ function retriesIn(lines: readonly string[]): LoggedRetry[] {
 /** The connections refused after the first drop: with it, eight failures, so the back-off reaches its 30 s ceiling. */
 const REFUSED_SESSIONS = 7;
 
-/** The client's back-off for those eight failures, with the default `backoffCeilingMs` (30 s): 121 s in all. [IN-10] */
+/** The client's back-off for those eight failures, with the default `backoffCeilingMs` (30 s): 121 s in all. */
 const OUTAGE_BACKOFF = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000, 30_000];
 
 /**
  * The 2-minute outage tape over `chain` (0–20): 1–10, a drop, {@link REFUSED_SESSIONS} sessions dropped at once,
- * 11–20. [A85]
+ * 11–20.
  */
 function outageTape(chain: readonly ChainBlock[]): TapeRecord[] {
   const at = (height: number): ChainBlock => chain[height] as ChainBlock;
@@ -306,7 +304,7 @@ function sampledClient(samples: RetrySample[], status: { current?: () => Process
     });
 }
 
-/** What the outage run observed. [A85] */
+/** What the outage run observed. */
 interface OutageObservation {
   /** The status after each of the client's retries. */
   readonly samples: readonly RetrySample[];
@@ -318,7 +316,7 @@ interface OutageObservation {
   readonly blocks: readonly number[];
 }
 
-/** The oracle for the outage, the scenario of a flapping node. [A85, IN-10] */
+/** The oracle for the outage, the scenario of a flapping node. */
 function outageProblems(observed: OutageObservation): string[] {
   const problems: string[] = [];
   const text = (value: unknown) => JSON.stringify(value, (_k, v) => (typeof v === "bigint" ? `${v}` : v));
@@ -377,7 +375,7 @@ async function outageRun(db: ProcessDatabase): Promise<OutageObservation> {
   };
 }
 
-describe.each(PROCESS_BACKENDS)("A85: a node away for 2 minutes (IN-10, the scenario 'A flapping node') on $name", (backend) => {
+describe.each(PROCESS_BACKENDS)("a node away for 2 minutes on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
@@ -385,7 +383,7 @@ describe.each(PROCESS_BACKENDS)("A85: a node away for 2 minutes (IN-10, the scen
     expect(outageProblems(await outageRun(await backend.database()))).toEqual([]);
   }, PATIENCE_MS * 2);
 
-  it("A85 negative control: a process whose node client does not report its retries fails A85", async () => {
+  it("negative control: a process whose node client does not report its retries fails", async () => {
     // The process's own report dropped: the client still retries, but nothing shows it.
     const silent = (options: NodeClientOptions): NodeClient => {
       const { onRetry: _onRetry, onRetryingChange: _onRetryingChange, ...rest } = options;

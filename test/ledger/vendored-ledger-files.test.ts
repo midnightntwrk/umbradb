@@ -6,9 +6,9 @@ import { describe, expect, it } from "vitest";
 
 // What the repository records for each vendored ledger build (the pinned upstream source, the patches, the build pins),
 // and that the committed package is exactly the one SHA256SUMS records. (`npm run vendor:ledger` rebuilds the packages
-// and compares them with SHA256SUMS; this test checks the committed files without rebuilding.) [LG-5; design §5.2]
+// and compares them with SHA256SUMS; this test checks the committed files without rebuilding.)
 //
-// There is a third build besides v8 and v9: v9 as runtime 2.0 built it, `ledger-9.1.0.0-rc.3`. [A159, Q139 A]
+// There is a third build besides v8 and v9: v9 as runtime 2.0 built it, `ledger-9.1.0.0-rc.3`.
 
 const ledgerDir = fileURLToPath(new URL("../../vendor/ledger/", import.meta.url));
 
@@ -60,7 +60,7 @@ describe("vendored ledger builds: the recorded sources and pins", () => {
     });
   });
 
-  it("pins v9-rc3 to ledger-9.1.0.0-rc.3, the v9 ledger midnight-node 2.0.0-rc.4 (runtime 2.0) builds, as a package of its own (A159)", () => {
+  it("pins v9-rc3 to ledger-9.1.0.0-rc.3, the v9 ledger midnight-node 2.0.0-rc.4 (runtime 2.0) builds, as a package of its own", () => {
     expect(readUpstream("v9-rc3")).toEqual({
       repository: "https://github.com/midnightntwrk/midnight-ledger",
       // The workspace tag; the node's per-crate tag crate-ledger-9.1.0.0-rc.3 is an isolate commit of it.
@@ -123,7 +123,7 @@ describe("vendored ledger builds: the recorded sources and pins", () => {
     expect(dockerfile).toContain("wasm-bindgen-cli --version 0.2.108");
   });
 
-  it("gives every version the same export of LG-16's tree values, last (task 12.1b, A158)", () => {
+  it("gives every version the same export of the tree values, last", () => {
     const added = (version: string): string[] => {
       const name = patchesOf(version).at(-1) as string;
       expect(name, version).toMatch(/-ledger-wasm-state-trees\.patch$/);

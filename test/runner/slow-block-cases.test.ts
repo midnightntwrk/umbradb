@@ -32,7 +32,7 @@ import {
 
 /**
  * The slow-block details the requirement leaves to the design, tested here through the process on PostgreSQL 18 and
- * PGlite 0.5.10. The slow height's own acceptance test is `./slow-block.test.ts`. [RN-17, A142]
+ * PGlite 0.5.10. The slow height's own acceptance test is `./slow-block.test.ts`.
  *
  * The details:
  * - **the module** at a point in waves is the first whose callback runs, in the point's order; once it ended, the next;
@@ -41,7 +41,7 @@ import {
  * - **a height that commits in time** is never reported: its timer ends with its window;
  * - **a halt** clears the condition, and logs that the slow height stopped without committing;
  * - **a held height's retry** is a run of its own: its window opens where it resumes, so neither the earlier attempt
- *   nor the back-off counts [IN-10];
+ *   nor the back-off counts;
  * - **a height the source prepares ahead** (its `on-fetch` and `on-parse` in the source's queue, as the node source
  *   runs them): its window opens when the loop asks for it if its `on-parse` runs then — the point and module the
  *   queue's —, and the queue's work for it while the heights before it ran is not its time;

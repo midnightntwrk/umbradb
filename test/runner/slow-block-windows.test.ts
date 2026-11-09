@@ -21,16 +21,16 @@ import { InMemoryBlockSource, loopInput, RUNNER_BACKENDS, type Started, startWit
 /**
  * The windows of the slow-block watchdog outside a height's processing (`src/runner/loop.ts`), at the loop level on
  * PostgreSQL 18 and PGlite 0.5.10. These are the details that the through-the-process test
- * (`./slow-block-outside.test.ts`) leaves to the design: [RN-17, Q145 B, A161]
+ * (`./slow-block-outside.test.ts`) leaves to the design:
  * - **after a commit, one window** from the commit to the end of `on-stop-height`: `on-after-db-write` and
  *   `on-stop-height` together past `slowBlockMs` are slow, each alone not; the point is the last that began;
  * - **each `on-finalized` its own window**, named by the height of the head it announces: two in a row, each within
  *   `slowBlockMs`, are never slow, however long the loop waited between them;
- * - **the callbacks delivered again** at a run's start, at the cursor's height [RN-11];
+ * - **the callbacks delivered again** at a run's start, at the cursor's height;
  * - **a `COMMIT` that landed though its connection was lost**: the retry's points after it are the window after the
- *   commit [IN-11];
+ *   commit;
  * - **a failure closes the window** it happened in (the event says it did not complete); **a height stopped at the
- *   lockstep wait** closes its window too, so nothing is raised once the loop ended [PP-6].
+ *   lockstep wait** closes its window too, so nothing is raised once the loop ended.
  *
  * The observer's events and `slowBlock()` are read directly (`window` names which window), and only those of the
  * windows a case holds open are compared. A window no case holds (a height's own processing, on PostgreSQL its
@@ -162,7 +162,7 @@ function holder(
   });
 }
 
-/** `db`, whose next block transaction, once `state.armed`, loses its `COMMIT` after it landed. [IN-11, DB-13] */
+/** `db`, whose next block transaction, once `state.armed`, loses its `COMMIT` after it landed. */
 function landingCommits(db: Database): { readonly db: Database; readonly state: { armed: boolean } } {
   const state = { armed: false };
   const wrapped: Database = {
@@ -183,7 +183,7 @@ function landingCommits(db: Database): { readonly db: Database; readonly state: 
   return { db: wrapped, state };
 }
 
-describe.each(RUNNER_BACKENDS)("slow-block's windows outside a height's processing on $name (Q145 B)", (backend) => {
+describe.each(RUNNER_BACKENDS)("slow-block's windows outside a height's processing on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
@@ -255,7 +255,7 @@ describe.each(RUNNER_BACKENDS)("slow-block's windows outside a height's processi
   );
 
   it(
-    "RN-11's re-delivery at a run's start is a window of its own, at the cursor's height",
+    "re-delivery at a run's start is a window of its own, at the cursor's height",
     async () => {
       const { db } = await backend.database();
       const times: Times = new Map();

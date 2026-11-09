@@ -23,11 +23,10 @@ import { LOOP_BACKBONE } from "./loop-harness.js";
  * the cursor read, the graph resolved from it, the schema plan, one process context per module (`ProcessContexts`),
  * `startDatabase` with each part's `on-start-db` in its publishing window, the contexts sealed
  * (`process-item-missing`), `on-start-api` and the module API on `listen.api` (`startModuleApi`).
- * [MD-7, RN-1, RN-15, RN-16, DB-15]
  *
  * The test backbone is `loop-harness.ts`'s with a `core-chain` that publishes its four process items in its
  * `on-start-db`, as the real part does: `config`, `node-client` and `ledger-table` as stand-ins, and `db` as the
- * read-only database over the database. [CD-1, Q73]
+ * read-only database over the database.
  */
 
 /** The stand-ins `core-chain` publishes for `config`, `node-client` and `ledger-table`. */
@@ -93,7 +92,7 @@ export interface SealedStart {
   readonly contexts: ProcessContexts;
 }
 
-/** Validation, the cursor, the graph, the plan, the contexts, `startDatabase` and the seal. [MD-7] */
+/** Validation, the cursor, the graph, the plan, the contexts, `startDatabase` and the seal. */
 export async function startThroughSeal(
   db: Database,
   user: readonly ModuleDeclaration[],
@@ -113,7 +112,7 @@ export async function startThroughSeal(
   const plan = schemaPlan(graph.modules);
   const Contexts = options.contexts ?? ProcessContexts;
   // Unless given, each backbone part gets the `core` entry's one revision from S, as the runner's `processRevisions`
-  // gives it: `core-block-commit`'s parent check reads S there. A module gets none. [MD-7, IN-4]
+  // gives it: `core-block-commit`'s parent check reads S there. A module gets none.
   const core: readonly Revision[] = Object.freeze([Object.freeze({ start, stop: null, version: "core", settings: Object.freeze({}) })]);
   const revisionsOf = options.revisionsOf ?? ((id: string) => (isBackbonePart({ id }) ? core : []));
   const contexts = new Contexts({ graph, revisionsOf });

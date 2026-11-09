@@ -10,7 +10,7 @@ import { jobFor, type ObservedRun, observedDifferences, observedRun, type RunPla
 
 /**
  * R13 on the recorded preprod 0–10,000 tape, one backend per test file (`ledger-refcount-restart-preprod-*.test.ts`), so
- * that the longest file is one backend's runs. [R13 FAULT, R3, LG-11]
+ * that the longest file is one backend's runs.
  *
  * Two runs on the backend, side by side (the second started once the first committed a block), each through
  * `./refcount-restart.ts`: one uninterrupted, and one stopped after the `COMMIT` of 20 seeded heights and restarted
@@ -22,7 +22,7 @@ import { jobFor, type ObservedRun, observedDifferences, observedRun, type RunPla
  * the segment from the stored rows, with the rows outside `R_{h−1} ∪ R_h` reported. The contents hash reads every row
  * of the database, so after every one of 10,001 blocks it would cost hours a run; the node set and the running
  * digests stand for it between the hashed heights. The bytes of the content-defined tables are not compared
- * (`design.md` §4.4). [R13]
+ *.
  */
 
 /** The seed of the 20 stops. */
@@ -35,17 +35,17 @@ const LAST = 10_000;
 export const PREPROD_STOPS: readonly number[] = (
   fc.sample(fc.noBias(fc.uniqueArray(fc.integer({ min: 1, max: LAST - 1 }), { minLength: 20, maxLength: 20 })), { seed: PREPROD_SEED, numRuns: 1 })[0] as number[]
 ).sort((a, b) => a - b);
-/** R3's heights: every 100th, 10,000 the last. */
+/** The heights: every 100th, 10,000 the last. */
 const CHECKED = Array.from({ length: LAST / 100 }, (_, i) => 100 * (i + 1));
-/** The heights whose tables the runs read: R3's, each stop and the block after it. */
+/** The heights whose tables the runs read: The, each stop and the block after it. */
 const FULL = [...new Set([...CHECKED, ...PREPROD_STOPS.flatMap((h) => [h, h + 1])])].sort((a, b) => a - b);
 /** Two whole replays side by side, one with 20 restarts, on a loaded machine. */
 const TAPE_MS = 6 * 3_600_000;
 
-/** Registers R13's preprod test on the backend of `kind` (see the module comment). */
+/** Registers the preprod test on the backend of `kind` (see the module comment). */
 export function preprodRestartTest(kind: ProcessBackend["kind"]): void {
   const backend = PROCESS_BACKENDS.find((candidate) => candidate.kind === kind) as ProcessBackend;
-  describe(`R13 (LG-11) on the recorded preprod 0–10,000 tape, on ${backend.name}`, () => {
+  describe(`on the recorded preprod 0–10,000 tape, on ${backend.name}`, () => {
     let directory: string;
     beforeAll(async () => {
       directory = mkdtempSync(join(tmpdir(), "umbradb-refcount-restart-preprod-"));
@@ -58,7 +58,7 @@ export function preprodRestartTest(kind: ProcessBackend["kind"]): void {
 
     tapeTest(
       "preprod-0-10000",
-      `R13 [FAULT]: stopped after the COMMIT of 20 heights (seed ${PREPROD_SEED}: ${PREPROD_STOPS.join(", ")}) and restarted, each stop reported, the run has after every block an uninterrupted run's node set, root_counts, states and byte-hashed tables' running digests, its contents hash and tables at every 100th height and around each stop, and R3 passing at every 100th height`,
+      `stopped after the COMMIT of 20 heights (seed ${PREPROD_SEED}: ${PREPROD_STOPS.join(", ")}) and restarted, each stop reported, the run has after every block an uninterrupted run's node set, root_counts, states and byte-hashed tables' running digests, its contents hash and tables at every 100th height and around each stop, and R3 passing at every 100th height`,
       async (found) => {
         const run = async (name: string, stops: readonly number[]): Promise<ObservedRun> => {
           const db = await backend.database();
@@ -90,7 +90,7 @@ export function preprodRestartTest(kind: ProcessBackend["kind"]): void {
         }
         const [expected, restarted] = await Promise.all([first, run("restarted", PREPROD_STOPS)]);
         const r3 = CHECKED.flatMap((h) => restarted.after.get(h)?.r3?.problems ?? [`after ${h}: R3 did not run`]);
-        // R3 (c) on the tapes reports the rows outside R_{h−1} ∪ R_h. [R3]
+        // R3 (c) on the tapes reports the rows outside R_{h−1} ∪ R_h.
         const outside = CHECKED.map((h) => `${h}: ${restarted.after.get(h)?.r3?.outside ?? "-"}`).join(", ");
         console.info(`R13 on ${found.tape.name} (${backend.name}): rows outside R_{h−1} ∪ R_h at ${outside}`);
         expect([

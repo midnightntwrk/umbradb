@@ -2,7 +2,7 @@
  * The core module `core-block-parsed`. It parses every block's Midnight transactions once, with the ledger package of
  * the block's ledger version, and provides them as the `block` item `block-parsed` and as one row per transaction in
  * `core_block_parsed.transactions`. It is off by default, and it may start mid-chain, since each block's transactions
- * are its own. [CD-5, Q4, Q49; CORE-ARCH §4.11; design §10]
+ * are its own.
  *
  * **At `on-parse`** ({@link coreBlockParsedOnParse}) it:
  * - places the block's transactions in the order the ledger applied them (`./placement.ts`, from `block-body`,
@@ -16,12 +16,12 @@
  *   ledger hash other than the chain's refuses the block;
  * - puts `block-parsed` ({@link BlockParsed}), frozen: the ledger version and, per transaction, the ledger's plain data
  *   (`ParsedTransaction`: its index, hash, kind, size, bytes and segments) with where the chain put it (its phase,
- *   extrinsic index and event index). [Q49]
+ *   extrinsic index and event index).
  *
  * A block without a transaction loads no ledger package.
  *
  * **At `on-db-write`** it writes one row per transaction in one statement. **The table** and every statement are in
- * `./sql.ts`. [design §10]
+ * `./sql.ts`.
  *
  * **The worker's parses** are released once their block has committed (`on-after-db-write`), and when a queued best
  * block is dropped (`on-rollback`), so the worker keeps no block it will not apply.
@@ -65,7 +65,7 @@ export interface BlockTransaction extends ParsedTransaction {
 export interface BlockParsed {
   /** The ledger version that parsed them (`ledger-version`). */
   readonly ledger: string;
-  /** In application order: `transactions[i].index` is `i`. [CD-5] */
+  /** In application order: `transactions[i].index` is `i`. */
   readonly transactions: readonly BlockTransaction[];
 }
 

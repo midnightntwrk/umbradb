@@ -24,20 +24,19 @@ import {
  * - `on-after-db-write` and `on-stop-height` after each commit (one window, from the commit to the end of
  *   `on-stop-height`);
  * - each `on-finalized`;
- * - the callbacks delivered again at a run's start [RN-11].
+ * - the callbacks delivered again at a run's start.
  *
  * Each raises the same `slow-block` with the height (which may have committed), the point and the module, cleared when
- * its window ends; nothing is cancelled or retried. [A161, RN-17, Q145 B, AE-3, AE-5]
+ * its window ends; nothing is cancelled or retried.
  *
  * With `slowBlockMs` 1000, module `slow`'s `on-after-db-write` at height 2 awaits 3 s, and likewise its `on-finalized`
  * announcing height 2 as the head. `/status` (and `status()`) show `slow-block` with height 2, that point and `slow`
  * within 2 s, and the condition is gone once that callback ends (the oracle `a161Problems`, `./slow-block-harness.ts`).
  * Also tested here, through the process: the callbacks delivered again at a restart, and a failure in a window after
- * the commit (a halt clears it). [A161, RN-11]
+ * the commit (a halt clears it).
  *
  * The slow height's own test is unchanged (`./slow-block.test.ts`). The windows' settled cases at the loop level are
  * `./slow-block-windows.test.ts`, the committed negative controls `./slow-block-outside.negative-control.test.ts`.
- * [A142]
  *
  * Each test waits on purpose (the callback's 3 s, then 1.5 s after it): its budget is that plus Vitest's 60 s.
  */
@@ -51,7 +50,7 @@ const shownOf = (observed: Observed) =>
     return slow === undefined ? [] : [{ at, ...slow }];
   });
 
-describe.each(PROCESS_BACKENDS)("A161: slow-block outside a height's processing on $name", (backend) => {
+describe.each(PROCESS_BACKENDS)("slow-block outside a height's processing on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
@@ -74,12 +73,11 @@ describe.each(PROCESS_BACKENDS)("A161: slow-block outside a height's processing 
   }
 
   it(
-    "RN-11's re-delivery at a restart is a window of its own: slow-block at the cursor's height in on-after-db-write",
+    "re-delivery at a restart is a window of its own: slow-block at the cursor's height in on-after-db-write",
     async () => {
       const db = await backend.database();
       // The first process commits heights 1 and 2, its on-after-db-write at 2 fast; the second, on the same database,
       // delivers height 2's on-after-db-write again, which awaits 3 s, and processes nothing else (the head is 2).
-      // [RN-11]
       const quick: Seen = { calls: [] };
       const first = startSlow(db, { slowBlockMs: 1_000, user: [holding("slow", quick, { point: "on-after-db-write", ms: 0 })] });
       try {

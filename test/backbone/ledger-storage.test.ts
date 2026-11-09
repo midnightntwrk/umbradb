@@ -42,23 +42,21 @@ import { closureProblems, reachIn, retainedProblems } from "./refcount-checks.js
  * - the ledger's core modules from genesis, with the ledger in its worker thread;
  * - a tape node serving the synthetic tapes of `./ledger-tapes.ts`. They hold real ledger transactions, and the node's
  *   roots are the reference replay's, which converts at an upgrade as the node does.
- * [A100, A102, A103, A104; LG-9, LG-11, LG-12, LG-13]
  *
  * What is checked:
  * - A v8 range whose runtime upgrade's F has no transaction, and one whose F has one: the state is converted before F
- *   is applied, and every root is the node's. [A100, LG-9]
+ *   is applied, and every root is the node's.
  * - A process killed with SIGKILL at the upgrade's U and restarted loads the state at U from the database (the node's
  *   root), converts it at F and goes on with every root the node's. A stored node changed under its key fails the
  *   restart's read. `[STATIC]` The tables follow the node layout, and no stored value is a whole state.
- *   [A102, LG-11; design §10]
  * - A revision raising `retainStates` fills the window from its start; one lowering it releases the states leaving the
  *   window in its first block. The case of `retainStates` 1,000 at cursor 5,000 (the state at 4,000 loads, 3,999 fails
  *   with `state-not-retained`) is in `ledger-window.test.ts`: 5,000 blocks once on PGlite, and PostgreSQL from its
- *   backup. [A103, LG-12, Q122]
+ *   backup.
  * - With `retainStates` 0, a contract's state and zswap-state keys persisted at 10 stay held and load from their keys
  *   alone. This holds after the contract changed at 20, every state holding them was released, and the blocks after
  *   their releases deleted their unused rows. The run without persisting them is in
- *   `ledger-storage.negative-control.test.ts`. [A104, LG-13]
+ *   `ledger-storage.negative-control.test.ts`.
  */
 
 const WORKER = fileURLToPath(new URL("./ledger-restart.worker.ts", import.meta.url));
@@ -144,7 +142,7 @@ describe.each(PROCESS_BACKENDS)("core-ledger-state's stored state through the pr
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("A100: the state is converted before F is applied, and F's root is the node's, when F has no transactions", async () => {
+  it("the state is converted before F is applied, and F's root is the node's, when F has no transactions", async () => {
     const scenario = await upgradeScenario();
     const db = await backend.database();
     const process = await runTo(db, scenario.records, scenario.head);
@@ -153,7 +151,7 @@ describe.each(PROCESS_BACKENDS)("core-ledger-state's stored state through the pr
     expect(await heldNodeProblems(db)).toEqual([]);
   }, PATIENCE_MS * 4);
 
-  it("A100: … and when F has a transaction (v9, applied to the converted state)", async () => {
+  it("… and when F has a transaction (v9, applied to the converted state)", async () => {
     const scenario = await upgradeScenario([{ bytes: zswapOutputTransaction(RAW.v9), kind: "regular" }]);
     const db = await backend.database();
     const process = await runTo(db, scenario.records, scenario.head);
@@ -161,7 +159,7 @@ describe.each(PROCESS_BACKENDS)("core-ledger-state's stored state through the pr
     expect(await a107Problems(db, scenario)).toEqual([]);
   }, PATIENCE_MS * 4);
 
-  it("A102 [FAULT]: killed with SIGKILL at U and restarted, the process loads the state at U from the database and every later root is the node's", async () => {
+  it("killed with SIGKILL at U and restarted, the process loads the state at U from the database and every later root is the node's", async () => {
     const scenario = await upgradeScenario();
     const db = await backend.database();
     expect(await killedAt(db, scenario.records, 3n)).toBe("SIGKILL");
@@ -175,7 +173,7 @@ describe.each(PROCESS_BACKENDS)("core-ledger-state's stored state through the pr
     expect(await heldNodeProblems(db)).toEqual([]);
   }, PATIENCE_MS * 6);
 
-  it("A102: a stored node whose bytes no longer match its key fails the restart's read: callback-error in core-ledger-state, nothing of the block stored", async () => {
+  it("a stored node whose bytes no longer match its key fails the restart's read: callback-error in core-ledger-state, nothing of the block stored", async () => {
     const scenario = await upgradeScenario();
     const db = await backend.database();
     await runTo(db, cappedAt(scenario.records, 5n), 5n);
@@ -198,7 +196,7 @@ describe.each(PROCESS_BACKENDS)("core-ledger-state's stored state through the pr
     expect((await db.query("SELECT count(*)::text AS n FROM core_ledger_state.states WHERE height > 5"))[0]?.n).toBe("0");
   }, PATIENCE_MS * 4);
 
-  it("A103: a revision raising retainStates fills the window from its start; one lowering it releases the leaving states in its first block", async () => {
+  it("a revision raising retainStates fills the window from its start; one lowering it releases the leaving states in its first block", async () => {
     const scenario = await ledgerScenario({
       ledger: "v9",
       genesis: RAW.v9.LedgerState.blank(NETWORK_ID).serialize(),
@@ -232,14 +230,14 @@ describe.each(PROCESS_BACKENDS)("core-ledger-state's stored state through the pr
     expect(seen.held.get(19n)).toEqual(range(14, 19));
     expect(seen.held.get(20n)).toEqual(range(19, 20));
     expect(seen.held.get(29n)).toEqual(range(28, 29));
-    // Reclamation ran meanwhile (on by default) and deleted nothing a retained state reaches: R3's (a) and (b) hold.
+    // Reclamation ran meanwhile (on by default) and deleted nothing a retained state reaches: The (a) and (b) hold.
     const end = await sweepTables(db);
     expect(closureProblems(end)).toEqual([]);
     expect(retainedProblems(end, 29n)).toEqual([]);
     expect(await heldNodeProblems(db)).toEqual([]);
   }, PATIENCE_MS * 4);
 
-  it("A104: with retainStates 0, a contract's state and zswap-state keys stored at 10 still load from their keys after it changed at 20, its states were released and the blocks after their releases deleted their unused rows", async () => {
+  it("with retainStates 0, a contract's state and zswap-state keys stored at 10 still load from their keys after it changed at 20, its states were released and the blocks after their releases deleted their unused rows", async () => {
     const { scenario, contract } = await a104Scenario();
     const db = await backend.database();
     const seen = seenTables();
@@ -251,7 +249,7 @@ describe.each(PROCESS_BACKENDS)("core-ledger-state's stored state through the pr
     expect(await a104KeyProblems(db, scenario, contract.address, 5n)).toEqual([]);
     // The ledger states holding C's state of 10, those after 10 to 19, were released by the blocks 11 to 20; the block
     // after each release deleted the rows of the released state that neither the persisted keys before it nor those
-    // after it reach. [A104, LG-14]
+    // after it reach.
     const tables = new Map(seen.tables);
     tables.set(40n, await sweepTables(db));
     const unused: string[] = [];
@@ -276,7 +274,7 @@ describe.each(PROCESS_BACKENDS)("core-ledger-state's stored state through the pr
   }, PATIENCE_MS * 4);
 });
 
-describe("A102 [STATIC]: core-ledger-state's tables hold a node layout, and no table stores a whole serialized state", () => {
+describe("core-ledger-state's tables hold a node layout, and no table stores a whole serialized state", () => {
   /** The columns `core-ledger-state`'s migrations create in each table. */
   function migrationColumns(): Map<string, string[]> {
     const tables = new Map<string, string[]>();
@@ -306,7 +304,7 @@ describe("A102 [STATIC]: core-ledger-state's tables hold a node layout, and no t
     expect([...adapter.matchAll(/(\w+)\.serialize\(\)/g)].map((m) => m[1]).sort()).toEqual(["afterParameters", "event"]);
   });
 
-  it("no stored value of a run is a whole serialized state (checked on the database A102's run leaves)", { timeout: PATIENCE_MS * 2 }, async () => {
+  it("no stored value of a run is a whole serialized state (checked on the database the run leaves)", { timeout: PATIENCE_MS * 2 }, async () => {
     const backend = PROCESS_BACKENDS.find((candidate) => candidate.kind === "pglite") as ProcessBackend;
     await backend.start();
     try {

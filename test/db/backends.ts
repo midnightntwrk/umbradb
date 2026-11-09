@@ -4,14 +4,14 @@ import { type PostgresTestServer, startPostgresServer } from "./postgres-server.
 
 /**
  * The backends the database API's backend-neutral tests run on: PostgreSQL 18 and PGlite 0.5.10. Every suite that
- * iterates {@link BACKENDS} runs on both. [DB-1, A7]
+ * iterates {@link BACKENDS} runs on both.
  */
 export interface TestBackend {
   readonly name: string;
   /**
    * True on PGlite, where every read and transaction is a job of one queue: a commit asked for while a read is open
    * waits until the read ends, so a test must not wait for it inside the read. False on PostgreSQL, where the writer
-   * commits while reads are open. [DB-4, DB-5]
+   * commits while reads are open.
    */
   readonly singleQueue: boolean;
   start(): Promise<void>;
@@ -21,7 +21,7 @@ export interface TestBackend {
    * database's own defaults set each `[name, value]` before the API opens it — on PostgreSQL `ALTER DATABASE … SET` and
    * `ALTER ROLE <the login> IN DATABASE … SET`, on PGlite the data directory's configuration file (`ALTER SYSTEM`,
    * `postgresql.auto.conf`), PGlite's single-user mode applying neither of the others — so that a test can show the
-   * API's own session settings win over them. [DB-2, DB-15]
+   * API's own session settings win over them.
    */
   database(setup: string, committedHeight?: CommittedHeight, defaults?: Settings): Promise<TestDatabase>;
 }
@@ -33,7 +33,7 @@ export interface TestDatabase {
   readonly db: Database;
   /**
    * PostgreSQL only: the database's URL, so that another process (such as a child with another time zone) can open the
-   * same database through the API. A PGlite database lives in this process's memory and has none. [A139]
+   * same database through the API. A PGlite database lives in this process's memory and has none.
    */
   readonly url?: string;
   /** Runs SQL (several statements allowed) outside the API, committed when it returns; never while a read is open. */
@@ -130,7 +130,7 @@ export async function settlesWithin(promise: Promise<unknown>, ms: number): Prom
 /**
  * Asks for `run` once `gate()` is called — from outside whatever job calls the gate: the callback is registered here,
  * so it runs in the caller's context, as a writer or a request elsewhere would (a call from inside a PGlite job is
- * refused). [Q73]
+ * refused).
  */
 export function askedLater<T>(run: () => Promise<T>): { readonly gate: () => void; readonly result: Promise<T> } {
   let gate!: () => void;

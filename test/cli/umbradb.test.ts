@@ -13,7 +13,7 @@ import type { DatabaseParts } from "../../src/config/database-parts.js";
  * — Node.js's own type stripping evaluates the file (its refusal of an `enum` included, which Vitest's transform
  * accepts), and the database is opened by another process than the tests' (a PGlite directory's operating-system lock
  * then belongs to the command). The full coverage of both is in `./command.test.ts`, `./config-check.test.ts` and
- * `./config-check-database.test.ts`, in this process. [A6, A35 CI, LS-6, CF-10]
+ * `./config-check-database.test.ts`, in this process.
  */
 
 // Each test runs the TypeScript compiler on a file (about a second alone) and many open a database or start a process;
@@ -41,7 +41,7 @@ function coreOnly(database: DatabaseParts, extra: Readonly<Record<string, unknow
   ]);
 }
 
-describe("A6: the command's usage and its commands (LS-6)", () => {
+describe("the command's usage and its commands", () => {
   it("umbradb with no argument prints the usage and exits 2", async () => {
     expect(await inChild(project, [])).toEqual({
       code: EXIT.usage,
@@ -83,7 +83,7 @@ describe("A6: the command's usage and its commands (LS-6)", () => {
   });
 });
 
-describe("A35: umbradb config check without --database", () => {
+describe("umbradb config check without --database", () => {
   it("exits 0 on a valid file and says the history checks were not run", async () => {
     const file = project.write("valid.config.ts", coreOnly(UNREACHED));
     const result = await inChild(project, ["config", "check", file]);
@@ -135,14 +135,14 @@ describe("A35: umbradb config check without --database", () => {
   });
 });
 
-describe.each(CLI_BACKENDS.map((make) => make()))("A35: umbradb config check --database on $name", (backend) => {
+describe.each(CLI_BACKENDS.map((make) => make()))("umbradb config check --database on $name", (backend) => {
   const pglite = backend.password === null;
   const history = [coreEntry({ start: 0, config: { network: "preprod", node: "ws://n", database: { kind: "pglite", memory: true } } })];
 
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  /** The file: core from 0 on `target`'s database with `retainStates`, the opt-in on PGlite (its own database). [Q167 A] */
+  /** The file: core from 0 on `target`'s database with `retainStates`, the opt-in on PGlite (its own database). */
   const fileWith = (name: string, target: CheckTarget, retainStates: number) =>
     project.write(
       name,

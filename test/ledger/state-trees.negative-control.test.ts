@@ -8,14 +8,14 @@ import { stateTreesProblems } from "./state-trees-checks.js";
  * The committed negative control of the state-trees check: an export that reads a tree's root from the wrong tree
  * (the DUST commitment tree's root taken from the zswap commitment tree) fails the check of `./state-trees-checks.ts`
  * against the ledger's own values, on every vendored version. The real adapter passes the same check here. (The DUST
- * generation tree's root taken from the DUST commitment tree fails it too.) [A158, LG-16, Q138 A]
+ * generation tree's root taken from the DUST commitment tree fails it too.)
  */
 
 const LONG = 240_000;
 const LEDGERS = ["v8", "v9-rc3", "v9"] as const satisfies readonly Ledger[];
 
 for (const ledger of LEDGERS) {
-  describe(`${ledger}: A158's check fails on a root read from the wrong tree`, () => {
+  describe(`${ledger}: The check fails on a root read from the wrong tree`, () => {
     let adapter: LedgerPackage;
     beforeAll(async () => {
       adapter = await loadLedgerPackage(ledger, { networkId: NETWORK_ID });

@@ -7,8 +7,7 @@
  * - the runner's side of it (`./process-admin.ts`), and the handler a library host mounts (`./mounted.ts`);
  * - the redaction and the sanitized errors the endpoints share (`./redaction.ts`, `./errors.ts`).
  *
- * Internal: not part of the package's public surface. [AE-1, AE-2, AE-3, AE-4, AE-5, AE-6, Q70; CORE-ARCH §4.18;
- * design §1, §12]
+ * Internal: not part of the package's public surface.
  */
 
 export * from "./errors.js";

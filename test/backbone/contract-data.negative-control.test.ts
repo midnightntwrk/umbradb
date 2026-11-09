@@ -34,21 +34,21 @@ import { cellValue } from "../ledger/adapter-fixtures.js";
 /**
  * The committed negative controls of the contract-data criteria. Each runs the real modules with one rule replaced,
  * through the criterion's own scenario and oracle (`./contract-data-checks.ts`, `./contract-logs-handoff.ts`), and
- * shows the oracle failing. [A108–A111]
+ * shows the oracle failing.
  *
  * - A `core-contract-states` writing one row per call, not per contract and block, fails "one row with the state
- *   after both": the second call's row is refused by the table's key, and processing halts. [A108]
+ *   after both": the second call's row is refused by the table's key, and processing halts.
  * - A `core-contract-logs-full` taking every literal the transcripts log, a failed fallible segment's too, stores a
- *   log the ledger did not emit. [A109]
+ *   log the ledger did not emit.
  * - A `core-contract-logs-fast` that guesses (no log) instead of halting on a value read from state does not halt,
- *   and stores other rows than `-full`. [A110]
+ *   and stores other rows than `-full`.
  * - A handoff that skips h + 1 leaves a gap. One that repeats it is refused (`providers-overlap`), and so is one that
- *   starts `-fast` at h, the backup's cursor (`changes-past`). [A111]
+ *   starts `-fast` at h, the backup's cursor (`changes-past`).
  */
 
 /**
  * The `core-contract-states` control: one row per call or deploy of the block (`block-parsed`), with the keys the ledger
- * state gave its contract. [A108]
+ * state gave its contract.
  */
 function perCall(b: BlockContext): ContractStateRow[] {
   const keys = new Map(contractStatesOf(b).map((row) => [Buffer.from(row.address).toString("hex"), row]));
@@ -64,7 +64,7 @@ function perCall(b: BlockContext): ContractStateRow[] {
 
 /**
  * The `core-contract-logs-full` control: every literal each transaction not failed on chain logs, whatever its segments'
- * results. [A109]
+ * results.
  */
 async function everyLiteral(b: BlockContext): Promise<ContractLog[]> {
   const { ledger, transactions } = blockParsedItemOf(b, "core-contract-logs-full");
@@ -81,11 +81,11 @@ async function everyLiteral(b: BlockContext): Promise<ContractLog[]> {
   return logs;
 }
 
-describe.each(PROCESS_BACKENDS)("task 13.1's negative controls on $name", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("the negative controls on $name", (backend: ProcessBackend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("A108's control: a states module writing one row per call fails its oracle — the second call's row is refused and processing halts", async () => {
+  it("control: a states module writing one row per call fails its oracle — the second call's row is refused and processing halts", async () => {
     const [contract] = await contractsFor("v9", 1);
     const expected: ContractScenario = await contractScenario({
       ledger: "v9",
@@ -98,7 +98,7 @@ describe.each(PROCESS_BACKENDS)("task 13.1's negative controls on $name", (backe
     expect(problems.some((problem) => /at 2 the rows are of no contract/.test(problem))).toBe(true);
   }, PATIENCE_MS * 2);
 
-  it("A109's control: a -full storing every literal of the transcripts stores the failed fallible segment's log, which its oracle names", async () => {
+  it("control: a -full storing every literal of the transcripts stores the failed fallible segment's log, which its oracle names", async () => {
     const expected = await a109Scenario();
     const db = await backend.database();
     const core = [...LEDGER_CORE, coreContractLogsFull({ logsOf: everyLiteral })];
@@ -109,7 +109,7 @@ describe.each(PROCESS_BACKENDS)("task 13.1's negative controls on $name", (backe
     expect((await logLines(db)).map((line) => line.split(" ")[8])).toContain(dataOf(cellValue(Uint8Array.of(8))));
   }, PATIENCE_MS * 2);
 
-  it("A110's control: a -fast that guesses no log instead of halting on a value read from state does not halt, and stores other rows than -full", async () => {
+  it("control: a -fast that guesses no log instead of halting on a value read from state does not halt, and stores other rows than -full", async () => {
     const expected = await a110HaltScenario();
     const db = await backend.database();
     const guessing = coreContractLogsFast({ onUnsure: () => undefined });
@@ -123,7 +123,7 @@ describe.each(PROCESS_BACKENDS)("task 13.1's negative controls on $name", (backe
   }, PATIENCE_MS * 2);
 });
 
-describe.each(BACKUP_BACKENDS)("A111's negative controls on $name", (backend: BackupBackend) => {
+describe.each(BACKUP_BACKENDS)("negative controls on $name", (backend: BackupBackend) => {
   beforeAll(async () => {
     await backend.start();
     if (backend.kind === "postgres") process.env.UMBRADB_PG_DUMP = backend.env().UMBRADB_PG_DUMP;
@@ -133,7 +133,7 @@ describe.each(BACKUP_BACKENDS)("A111's negative controls on $name", (backend: Ba
     await backend.stop();
   }, 120_000);
 
-  it("A111's control: a switch that skips h + 1 (-fast from h + 2) leaves h + 1's logs out, which its oracle names", async () => {
+  it("control: a switch that skips h + 1 (-fast from h + 2) leaves h + 1's logs out, which its oracle names", async () => {
     const expected = await handoffScenario();
     const result = await handoff(backend, expected, { h: 3n, fastFrom: 5n });
     const problems = await handoffProblems(result, expected);
@@ -141,7 +141,7 @@ describe.each(BACKUP_BACKENDS)("A111's negative controls on $name", (backend: Ba
     expect(problems.every((problem) => problem.startsWith("missing log row 4 "))).toBe(true);
   }, PATIENCE_MS * 4);
 
-  it("A111's control: a switch that repeats h + 1 (-full to h + 1, -fast from h + 1) is refused at startup with providers-overlap, which its oracle names", async () => {
+  it("control: a switch that repeats h + 1 (-full to h + 1, -fast from h + 1) is refused at startup with providers-overlap, which its oracle names", async () => {
     const expected = await handoffScenario();
     const result = await handoff(backend, expected, { h: 3n, fullTo: 4n, fastFrom: 4n });
     const problems = await handoffProblems(result, expected);
@@ -149,7 +149,7 @@ describe.each(BACKUP_BACKENDS)("A111's negative controls on $name", (backend: Ba
     expect(problems.some((problem) => problem.startsWith("missing log row 4 "))).toBe(true);
   }, PATIENCE_MS * 4);
 
-  it("A111's control: -fast from h itself, at the backup's cursor, is refused (changes-past: the past cannot change)", async () => {
+  it("control: -fast from h itself, at the backup's cursor, is refused (changes-past: the past cannot change)", async () => {
     const expected = await handoffScenario();
     const result = await handoff(backend, expected, { h: 3n, fastFrom: 3n });
     expect((await handoffProblems(result, expected)).join(" | ")).toMatch(/the process refused with \{"code":"changes-past"/);

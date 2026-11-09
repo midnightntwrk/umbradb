@@ -3,14 +3,14 @@
  * arrays, strings, booleans, `null` and integers from 0 to 2^53 − 1. Otherwise startup stops with `not-plain-data`,
  * naming the path of the first value that is not (`entries[1].config.onError`). Only that data is validated, compared
  * with the history, recorded and shown, so the check returns a deeply frozen copy of it: nothing the file's code does
- * afterwards reaches what startup uses. [CF-1; CORE-ARCH §4.12; design §7]
+ * afterwards reaches what startup uses.
  *
  * **Why these values.** The data is recorded as canonical JSON and hashed by its canonical encoding, so it must be
- * exactly what JSON holds [CF-7]:
+ * exactly what JSON holds:
  * - a function, a class instance (a `Date`, a `Uint8Array`, a `Map`, a boxed string, an object of the file's own
  *   class) or a symbol is not data;
  * - `undefined` has no JSON form (an unset environment variable reads as `undefined`);
- * - a bigint has none either, so heights are numbers in the file and become bigints only once read [CF-1];
+ * - a bigint has none either, so heights are numbers in the file and become bigints only once read;
  * - numbers are the integers from 0 to 2^53 − 1. Every height, count, duration and size of the configuration is one.
  *   An integer above 2^53 − 1 is not exact in JavaScript (2^53 + 1 reads as 2^53), so it could not be recorded as
  *   written. A fraction (1.5, `NaN`, `Infinity`) or a negative integer (−1) is rejected. −0 is the integer 0 and is
@@ -36,7 +36,7 @@
 
 import { UmbraError } from "../db/errors.js";
 
-/** Plain data: what a configuration evaluates to. [CF-1] */
+/** Plain data: what a configuration evaluates to. */
 export type PlainData = null | boolean | number | string | PlainArray | PlainObject;
 
 /** An array of plain data. */
@@ -94,7 +94,7 @@ function instanceOf(value: object): string {
 
 const integer = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value);
 
-/** The definition of plain data, as rules, in the order they are checked at each place. [CF-1] */
+/** The definition of plain data, as rules, in the order they are checked at each place. */
 export const PLAIN_DATA_RULES: readonly PlainDataRule[] = Object.freeze([
   {
     name: "hole",
@@ -285,7 +285,7 @@ function refusal(rule: PlainDataRule, path: string, found: string, file: string 
 
 /**
  * Checks `value` with `rules`. Returns a deeply frozen copy of it, or throws `not-plain-data` (not retryable) naming
- * the path of the first value a rule rejects, what it is (`details.found`) and, when given, the `file`. [CF-1]
+ * the path of the first value a rule rejects, what it is (`details.found`) and, when given, the `file`.
  */
 export function plainDataWith(value: unknown, rules: readonly PlainDataRule[], file?: string): PlainData {
   const open = new Set<object>();
@@ -301,14 +301,14 @@ export function plainDataWith(value: unknown, rules: readonly PlainDataRule[], f
   return walk(root, "", { rules, file, open }) as PlainData;
 }
 
-/** Checks that `value` is plain data with {@link PLAIN_DATA_RULES}: see the module comment. [CF-1] */
+/** Checks that `value` is plain data with {@link PLAIN_DATA_RULES}: see the module comment. */
 export function plainData(value: unknown, file?: string): PlainData {
   return plainDataWith(value, PLAIN_DATA_RULES, file);
 }
 
 /**
  * True when `a` and `b` are the same plain data, whatever the order of their objects' keys: equal field for field. It
- * compares a core version with the build's, and a `versionEntry`'s `config` with its recorded row. [CF-3]
+ * compares a core version with the build's, and a `versionEntry`'s `config` with its recorded row.
  */
 export function samePlainData(a: PlainData, b: PlainData): boolean {
   if (a === b) return true;

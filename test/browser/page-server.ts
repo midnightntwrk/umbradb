@@ -8,7 +8,7 @@ import { listenOnRandomPort } from "../../tools/tape/port.js";
  * headers that make the page cross-origin isolated (`Cross-Origin-Opener-Policy: same-origin`,
  * `Cross-Origin-Embedder-Policy: require-corp`), which the node-store bridge's `SharedArrayBuffer` needs, and
  * `Cross-Origin-Resource-Policy: same-origin`. A path outside the directory, or no file, is 404. Every request is
- * recorded ({@link PageServer.requests}). [LG-10]
+ * recorded ({@link PageServer.requests}).
  */
 
 export interface PageServer {

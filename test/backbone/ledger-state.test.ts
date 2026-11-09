@@ -52,19 +52,17 @@ import { cappedAt, devnetSettings, hashAt, recordingLoads, restartAt, type SeenL
  *   genesis, with the ledger in its worker thread;
  * - a tape node serving the synthetic tapes of `./ledger-tapes.ts` (real ledger transactions, and the real recorded
  *   genesis states with their nodes' roots).
- * [A82, A99, A106, A107; IN-7, LG-8, LG-10, LG-11, LG-15, LG-16]
  *
  * What is checked:
  * - Block 0 in both cases. A genesis state whose root is the node's at block 0: its transactions run on an empty state
  *   for their results only, and the genesis state becomes the state. One whose root is not: they apply to it. In both,
  *   the transactions are numbered in body order and the root after block 0 is the node's. The real genesis states of
- *   mainnet, preview and an undeployed devnet are checked against their recorded roots. [A82, IN-7]
+ *   mainnet, preview and an undeployed devnet are checked against their recorded roots.
  * - Every height's root is checked against the node's on a range from genesis. Here the range is synthetic; the
- *   recorded ranges from genesis are below, skipped by name while their tapes are absent. [A99, LG-8, LG-15, Q133 C]
+ *   recorded ranges from genesis are below, skipped by name while their tapes are absent.
  * - A package whose root is wrong at one height halts there with `root-mismatch`, and nothing of that block is stored.
- *   [A106, LG-15]
  * - The rows of `states`, `segment_results` and `events`; a start above S without a backup fails with
- *   `cannot-start-mid-chain`. [A107, LG-16]
+ *   `cannot-start-mid-chain`.
  */
 
 /** The test packages' loader (`test/ledger/fixtures/ledger-test-loader.ts`), which the worker imports. */
@@ -72,7 +70,7 @@ const LOADER = new URL("../ledger/fixtures/ledger-test-loader.ts", import.meta.u
 
 const LEDGER_CORE: readonly ModuleDeclaration[] = [CORE_CHAIN_EVENTS, CORE_BLOCK_PARSED, CORE_TX_RESULTS, CORE_LEDGER_STATE];
 
-/** The calls the tape node received that went unanswered (not on the tape, or an invalid request). [A83] */
+/** The calls the tape node received that went unanswered (not on the tape, or an invalid request). */
 function unansweredCalls(run: Ingest): string[] {
   const calls = run.node.calls as readonly { readonly method: unknown; readonly outcome?: unknown }[];
   const unanswered = calls.filter((call) => call.outcome === "not-on-tape" || call.outcome === "invalid-request");
@@ -136,7 +134,7 @@ describe.each(PROCESS_BACKENDS)("core-ledger-state through the process on $name"
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("A82: block 0 whose genesis state includes its transactions: their results from an empty state, the genesis state after it, in body order", async () => {
+  it("block 0 whose genesis state includes its transactions: their results from an empty state, the genesis state after it, in body order", async () => {
     const devnet = recordedGenesis("genesis_state_undeployed.mn");
     const scenario = await ledgerScenario({
       ledger: "v9",
@@ -164,7 +162,7 @@ describe.each(PROCESS_BACKENDS)("core-ledger-state through the process on $name"
     expect(seen.segments.get(0n)).toEqual(scenario.heights[0]?.output.results);
   }, PATIENCE_MS * 2);
 
-  it("A82: the real genesis states of mainnet and preview (v8): the state after block 0 has the node's root", async () => {
+  it("the real genesis states of mainnet and preview (v8): the state after block 0 has the node's root", async () => {
     for (const file of ["genesis_state_mainnet.mn", "genesis_state_preview.mn"]) {
       const genesis = recordedGenesis(file);
       const scenario = await ledgerScenario({
@@ -182,7 +180,7 @@ describe.each(PROCESS_BACKENDS)("core-ledger-state through the process on $name"
     }
   }, PATIENCE_MS * 3);
 
-  it("A82: block 0 whose genesis state does not include its transactions: they are applied to it", async () => {
+  it("block 0 whose genesis state does not include its transactions: they are applied to it", async () => {
     const devnet = recordedGenesis("genesis_state_undeployed.mn");
     const scenario = await ledgerScenario({
       ledger: "v9",
@@ -204,7 +202,7 @@ describe.each(PROCESS_BACKENDS)("core-ledger-state through the process on $name"
     expect(await nodeProblems(db)).toEqual([]);
   }, PATIENCE_MS * 2);
 
-  it("A99 and A107: a range from genesis, every root the node's; states, segment results and events as LG-16 says", async () => {
+  it("a range from genesis, every root the node's; states, segment results and events checked", async () => {
     const scenario = await ledgerScenario({
       ledger: "v9",
       genesis: RAW.v9.LedgerState.blank(NETWORK_ID).serialize(),
@@ -213,7 +211,7 @@ describe.each(PROCESS_BACKENDS)("core-ledger-state through the process on $name"
     });
     const db = await backend.database();
     const seen = ledgerItemsSeen();
-    // The worker counts its package's native parses: the parse of core-block-parsed and the apply share them. [LG-7]
+    // The worker counts its package's native parses: the parse of core-block-parsed and the apply share them.
     let worker: LedgerHost | undefined;
     let deserialized: Uint8Array[] = [];
     const process = await run(db, scenario, {
@@ -228,7 +226,7 @@ describe.each(PROCESS_BACKENDS)("core-ledger-state through the process on $name"
     expect(await nodeProblems(db)).toEqual([]);
     expect(await a92Problems(db, scenario as never, deserialized)).toEqual([]);
     expect(await a93Problems(db, scenario as never)).toEqual([]);
-    // The block items: the partial success's segments, the logs of applied segments numbered in the block. [LG-16]
+    // The block items: the partial success's segments, the logs of applied segments numbered in the block.
     expect(seen.segments.get(2n)?.[1]).toEqual({ outcome: "partial", segments: [{ segment: 0, success: true }, { segment: 1, success: false }] });
     expect(seen.logs.get(2n)?.map((log) => [log.transaction, log.index, log.eventType])).toEqual(
       scenario.heights[2]?.output.logs.map((log) => [log.transaction, log.index, log.eventType]),
@@ -242,7 +240,7 @@ describe.each(PROCESS_BACKENDS)("core-ledger-state through the process on $name"
     expect(seen.segments.get(3n)).toEqual([]);
   }, PATIENCE_MS * 2);
 
-  it("A107: core-ledger-state enabled above S, with no backup restored, refuses with cannot-start-mid-chain", async () => {
+  it("core-ledger-state enabled above S, with no backup restored, refuses with cannot-start-mid-chain", async () => {
     const scenario = await ledgerScenario({
       ledger: "v9",
       genesis: RAW.v9.LedgerState.blank(NETWORK_ID).serialize(),
@@ -264,7 +262,7 @@ describe.each(PROCESS_BACKENDS)("core-ledger-state through the process on $name"
     }
   }, PATIENCE_MS);
 
-  it("LG-11: the state at the cursor loads from the database alone, in a fresh worker, through the node-store bridge", async () => {
+  it("the state at the cursor loads from the database alone, in a fresh worker, through the node-store bridge", async () => {
     const scenario = await ledgerScenario({
       ledger: "v9",
       genesis: RAW.v9.LedgerState.blank(NETWORK_ID).serialize(),
@@ -291,11 +289,11 @@ describe.each(PROCESS_BACKENDS)("core-ledger-state through the process on $name"
   }, PATIENCE_MS);
 });
 
-describe("A106: the root check (LG-15)", () => {
+describe("the root check", () => {
   beforeAll(() => Promise.all(PROCESS_BACKENDS.map((backend) => backend.start())), 180_000);
   afterAll(() => Promise.all(PROCESS_BACKENDS.map((backend) => backend.stop())), 60_000);
 
-  it("[[ledger.root-check-halts]] A106: a test package returning a wrong root for one block halts with root-mismatch and stores nothing of that block, on PostgreSQL and on PGlite", async () => {
+  it("[[ledger.root-check-halts]] a test package returning a wrong root for one block halts with root-mismatch and stores nothing of that block, on PostgreSQL and on PGlite", async () => {
     const scenario = await ledgerScenario({
       ledger: "v9",
       genesis: RAW.v9.LedgerState.blank(NETWORK_ID).serialize(),
@@ -324,7 +322,7 @@ describe("A106: the root check (LG-15)", () => {
   }, PATIENCE_MS * 3);
 });
 
-describe("A99 on task 0.3's recorded ranges from genesis (owner decision Q133 C; each skipped by name without its tape)", () => {
+describe("on the recorded ranges from genesis (each skipped by name without its tape)", () => {
   const backend = PROCESS_BACKENDS.find((candidate) => candidate.kind === "pglite") as ProcessBackend;
   /** Six hours of replay: 10,000 heights on a loaded machine. */
   const REPLAY_MS = 6 * 3_600_000;
@@ -391,7 +389,7 @@ describe("A99 on task 0.3's recorded ranges from genesis (owner decision Q133 C;
       expect(stored).toHaveLength(Number(to) + 1);
       const differing = stored.filter((row) => roots.get(hashAt.get(row.h as string) as string) !== row.root);
       expect(differing.map((row) => row.h)).toEqual([]);
-      // The six tree values `core-ledger-state` stores, at every stored height, none null. [A158, LG-16]
+      // The six tree values `core-ledger-state` stores, at every stored height, none null.
       const [trees] = await db.query(
         `SELECT count(*)::int AS n FROM core_ledger_state.states WHERE zswap_first_free IS NULL OR zswap_root IS NULL
            OR dust_commitment_first_free IS NULL OR dust_commitment_root IS NULL OR dust_generation_first_free IS NULL
@@ -407,7 +405,6 @@ describe("A99 on task 0.3's recorded ranges from genesis (owner decision Q133 C;
   /**
    * The state stored at `height` (by the rc.3 package) loads in the rc.5 package with the stored root, the node's. A
    * fresh ledger worker reads it from the database through the node-store bridge, as F of a 2.0 → 2.1 upgrade does.
-   * [A159]
    */
   async function expectLoadsInRc5(db: ProcessDatabase, hashAt: ReadonlyMap<string, string>, height: bigint): Promise<void> {
     const [row] = await db.query(
@@ -435,7 +432,7 @@ describe("A99 on task 0.3's recorded ranges from genesis (owner decision Q133 C;
   for (const name of ["preview-0-10000", "preprod-0-10000"]) {
     tapeTest(
       name,
-      `A99: every state root of ${name}, from genesis, is the node's`,
+      `every state root of ${name}, from genesis, is the node's`,
       async (found) => replayRange(found, BigInt(found.tape.to), { network: found.tape.network }),
       { timeoutMs: REPLAY_MS + 600_000 },
     );
@@ -443,10 +440,10 @@ describe("A99 on task 0.3's recorded ranges from genesis (owner decision Q133 C;
 
   // Stagenet runs runtime 2.0, whose node (2.0.0) builds ledger v9 from `crate-ledger-9.1.0.0-rc.3`. The built-in table
   // maps runtime 2.0 to that ledger's own package, `v9-rc3`, and every root is the node's. The state stored at the
-  // range's end loads in the rc.5 package with the node's root, since a 2.0 → 2.1 upgrade carries it. [Q139 A, A159]
+  // range's end loads in the rc.5 package with the node's root, since a 2.0 → 2.1 upgrade carries it.
   tapeTest(
     "stagenet-0-10000",
-    "A99 and A159: every state root of stagenet (runtime 2.0, its rc.3 package), from genesis, is the node's, and the state at its end loads in rc.5 with that root",
+    "every state root of stagenet (runtime 2.0, its rc.3 package), from genesis, is the node's, and the state at its end loads in rc.5 with that root",
     async (found) =>
       replayRange(found, BigInt(found.tape.to), { network: found.tape.network }, undefined, (db, hashAt) =>
         expectLoadsInRc5(db, hashAt, BigInt(found.tape.to)),
@@ -455,10 +452,10 @@ describe("A99 on task 0.3's recorded ranges from genesis (owner decision Q133 C;
   );
   // The committed control: the old table, which mapped runtime 2.0 to rc.5, set here as a configured row. It halts at
   // block 1 with root-mismatch, and nothing of block 1 is stored. Block 1's one system transaction is a
-  // `CNightGeneratesDustUpdate`, a DUST generation, whose rules changed between rc.3 and rc.5. [A99]
+  // `CNightGeneratesDustUpdate`, a DUST generation, whose rules changed between rc.3 and rc.5.
   tapeTest(
     "stagenet-0-10000",
-    "A99's control: with the old table (runtime 2.0 → rc.5) stagenet's replay halts at block 1 with root-mismatch",
+    "control: with the old table (runtime 2.0 → rc.5) stagenet's replay halts at block 1 with root-mismatch",
     async (found) =>
       replayRange(
         found,
@@ -472,25 +469,25 @@ describe("A99 on task 0.3's recorded ranges from genesis (owner decision Q133 C;
   // The undeployed devnet from genesis up to its upgrade's enactment block U = 102 (v8 throughout).
   tapeTest(
     "devnet-v8-v9-0-235",
-    "A99: every state root of the undeployed devnet from genesis to its upgrade's U (102), v8, is the node's",
+    "every state root of the undeployed devnet from genesis to its upgrade's U (102), v8, is the node's",
     async (found) => replayRange(found, 102n, devnetSettings(found)),
     { timeoutMs: REPLAY_MS },
   );
   // From genesis to 235 across the upgrade: the v8 state at U (102) is converted to v9 before F (103) is applied. F
-  // holds the node's three DUST reapply system transactions and no transaction of ours. [LG-9, A100]
+  // holds the node's three DUST reapply system transactions and no transaction of ours.
   tapeTest(
     "devnet-v8-v9-0-235",
-    "A99 and A100: every state root of the undeployed devnet from genesis to 235, across its v8 → v9 upgrade (F 103 converted), is the node's",
+    "every state root of the undeployed devnet from genesis to 235, across its v8 → v9 upgrade (F 103 converted), is the node's",
     async (found) => replayRange(found, 235n, devnetSettings(found)),
     { timeoutMs: REPLAY_MS },
   );
 
   // A restart on the recorded devnet. The process stops at 150, after the conversion, and starts again with the tape's
   // records for the restart (`./ledger-restart.ts`: the header and the metadata at 150). It loads the state at 150
-  // from the database once, and every root to 235 is the node's. [A102, LG-11, Q135 A]
+  // from the database once, and every root to 235 is the node's.
   tapeTest(
     "devnet-v8-v9-0-235",
-    "A102: the undeployed devnet stopped at 150 and restarted loads the state at 150 from the database, and every root to 235 is the node's",
+    "the undeployed devnet stopped at 150 and restarted loads the state at 150 from the database, and every root to 235 is the node's",
     async (found) => {
       const records = capTo(found.read().records, 235n);
       await backend.start();

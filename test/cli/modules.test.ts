@@ -14,7 +14,6 @@ import { runCoreSettings, statsConfig, statsModule } from "./run-fixtures.js";
  * command in this process. A configuration file that imports the user module `stats`, exports `modules = [stats]` and
  * lists `stats.entry({ … })` is checked against `stats`'s schema, and a wrong setting is reported with its path. A file
  * listing a module that it does not export and UmbraDB does not ship is refused, naming the module.
- * [A152 CI, CF-1, CF-10, MD-1, Q106 B]
  *
  * Also covered:
  * - how the file's modules join the build: after UmbraDB's own, in the file's order; a module listed twice, one with
@@ -64,7 +63,7 @@ function codesOf(report: ConfigCheckReport, step: string): string[] {
 
 const check = (file: string) => inProcess(["config", "check", file], project.dir);
 
-describe("A152: umbradb config check takes the user modules the file exports (CF-1, CF-10, Q106 B)", () => {
+describe("umbradb config check takes the user modules the file exports", () => {
   it("a file that exports modules = [stats] and lists stats.entry passes: the entry is checked against stats's schema", async () => {
     const file = write();
     const result = await check(file);
@@ -118,7 +117,7 @@ describe("A152: umbradb config check takes the user modules the file exports (CF
     expect(report.steps[1]?.findings[0]?.message).toContain("prices");
   });
 
-  it("a module the file exports but lists no entry of is part of the build, off (MD-3: enabled by an entry)", async () => {
+  it("a module the file exports but lists no entry of is part of the build, off (enabled by an entry)", async () => {
     const report = await configCheck({
       file: write({ modules: "[stats, prices]", before: ['import { prices } from "./prices.ts";'] }),
       cwd: project.dir,
@@ -135,7 +134,7 @@ describe("A152: umbradb config check takes the user modules the file exports (CF
   });
 });
 
-describe("how the file's modules join the build (Q106 B)", () => {
+describe("how the file's modules join the build", () => {
   it("they are the build's user modules, in the file's order, after UmbraDB's own backbone parts and core modules", async () => {
     const loaded = await loadConfig({
       file: write({ modules: "[prices, stats]", before: ['import { prices } from "./prices.ts";'] }),
@@ -233,7 +232,7 @@ describe("how the file's modules join the build (Q106 B)", () => {
 });
 
 describe("negative control (committed): a check that ignores the file's modules", () => {
-  it("refuses stats's entry as naming no module of the build, where the check of A152 passes it", async () => {
+  it("refuses stats's entry as naming no module of the build, where the real check passes it", async () => {
     const file = write();
     const ignoring = await configCheck({ file, cwd: project.dir }, { userModules: () => [] });
     expect(ignoring.passed).toBe(false);

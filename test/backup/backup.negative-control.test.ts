@@ -20,7 +20,7 @@ import {
  * `outsideSnapshot`: the manifest's facts read and their read ended, ten more blocks committed, then the dump in a
  * snapshot of its own). Loaded into a new database, its tables are at another height than its manifest, and its
  * contents hash is not the manifest's. That is what the consistent-backup test would see if the backup did not take
- * both in one snapshot (PostgreSQL) or one job (PGlite). [A124, BK-1]
+ * both in one snapshot (PostgreSQL) or one job (PGlite).
  */
 
 const TEST_TIMEOUT_MS = 900_000;
@@ -44,7 +44,7 @@ afterAll(async () => {
   project?.remove();
 }, 120_000);
 
-describe.each(BACKUP_BACKENDS)("A124's negative control on $name", (backend) => {
+describe.each(BACKUP_BACKENDS)("negative control on $name", (backend) => {
   it(
     "a backup whose dump is taken outside the manifest's snapshot, while blocks commit, holds its tables at another " +
       "height than its manifest",

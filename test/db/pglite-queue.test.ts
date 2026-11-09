@@ -12,11 +12,11 @@ import { type PgliteTestDatabase, type PgliteTestServer, startPgliteServer } fro
 
 /**
  * The PGlite backend's own behaviour, beyond what the backend-neutral suites check on both backends:
- * - every read and every transaction is one job of one queue, run one at a time in the order asked for; [DB-4]
- * - a call from inside a running job is refused instead of waiting forever; [Q73]
+ * - every read and every transaction is one job of one queue, run one at a time in the order asked for;
+ * - a call from inside a running job is refused instead of waiting forever;
  * - closing lets nothing more reach the engine;
- * - a failure of the engine itself is reported and stops all later work; [DB-13]
- * - the engine must run with the pinned session settings, which win over a hostile configuration. [DB-2, Q65]
+ * - a failure of the engine itself is reported and stops all later work;
+ * - the engine must run with the pinned session settings, which win over a hostile configuration.
  */
 
 let server: PgliteTestServer;
@@ -53,7 +53,7 @@ const commitHeight = (db: Database, height: bigint) =>
 
 const nextTurn = () => new Promise<void>((resolve) => setImmediate(resolve));
 
-describe("DB-4 — every read and transaction is a job of one queue", () => {
+describe("every read and transaction is a job of one queue", () => {
   it("lets a transaction asked for during a read wait until the read ends; the read never sees it", async () => {
     const { db } = await fresh();
     await commitHeight(db, 1n);
@@ -141,7 +141,7 @@ describe("DB-4 — every read and transaction is a job of one queue", () => {
   });
 });
 
-describe("Q73 — a call from inside a running job is refused, not left waiting for that job", () => {
+describe("a call from inside a running job is refused, not left waiting for that job", () => {
   it("refuses db.read and db.transaction called inside a read's body", async () => {
     const { db } = await fresh();
     const errors = await db.read(async () => [
@@ -274,7 +274,7 @@ describe("closing", () => {
   });
 });
 
-describe("errors (DB-13): PGlite has no connection to lose", () => {
+describe("errors: PGlite has no connection to lose", () => {
   it("reports a statement's error as database-error with the server's names and no row values, not retryable", async () => {
     const { db } = await fresh();
     await commitHeight(db, 1n);
@@ -357,7 +357,7 @@ describe("errors (DB-13): PGlite has no connection to lose", () => {
   });
 });
 
-describe("opening (DB-1, Q65)", () => {
+describe("opening", () => {
   const settings = `SELECT current_setting('bytea_output') AS bytea_output, current_setting('DateStyle') AS date_style,
                            current_setting('IntervalStyle') AS interval_style, current_setting('TimeZone') AS time_zone,
                            current_setting('extra_float_digits') AS extra_float_digits`;
@@ -377,7 +377,7 @@ describe("opening (DB-1, Q65)", () => {
   ];
   // Every data directory inside one temporary root, removed with it: the PGlite lock keeps its file beside the data
   // directory (`<directory>.lock.sqlite`, src/db/pglite-lock.ts), which removing the directory alone would leave in the
-  // system's temporary folder (docs/issues/00021).
+  // system's temporary folder.
   let root: string | undefined;
   let made = 0;
   const directory = () => {
@@ -472,7 +472,7 @@ describe("opening (DB-1, Q65)", () => {
     await engine.close();
   }, 60_000);
 
-  it("refuses an engine started without the zero timeouts, naming the first that differs (DB-15)", async () => {
+  it("refuses an engine started without the zero timeouts, naming the first that differs", async () => {
     // PGlite does not hang on a `lock_timeout` above 0 (an earlier probe showed this), so the engine stays usable to
     // close.
     const engine = await PGlite.create("memory://", {

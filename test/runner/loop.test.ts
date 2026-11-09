@@ -38,13 +38,12 @@ import {
 /**
  * The finalized loop through an in-memory block source and the real cursor table, on both backends. It covers the
  * loop's typed failure and:
- * - the points delivered per height [A36, RN-1];
- * - every row in a module's or a backbone part's schema, written through a handle [A37];
- * - each point's handle [A39];
- * - the item sink [A40].
+ * - the points delivered per height;
+ * - every row in a module's or a backbone part's schema, written through a handle;
+ * - each point's handle;
+ * - the item sink.
  *
- * One transaction per height, and none while waiting, are tested in `catch-up.test.ts` [A41, A49].
- * [RN-1, RN-2, RN-4, RN-5, RN-8, RN-14; design §2, §3]
+ * One transaction per height, and none while waiting, are tested in `catch-up.test.ts`.
  */
 
 /** A module requiring `requires` whose `points` are given; one table `<schema>.rows (height)` unless `rest` says not. */
@@ -77,7 +76,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  describe("A36: RN-1's points for every height (RN-1)", () => {
+  describe("the points for every height", () => {
     it("a recording module observes on-finalized once per new head, then each height's points in order", async () => {
       const { db } = await backend.database();
       const seen: SeenCall[] = [];
@@ -88,12 +87,12 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
         ["on-fetch", "on-parse", "on-compute", "on-db-write", "on-after-db-write"].map((p) => `${p}@${h}`);
       const calls = () => seen.map((c) => (c.height === undefined ? c.point : `${c.point}@${c.height}`));
       // on-start-db ran at startup (startDatabase). The scenario: head 3 on an empty database, S = 1. The recorder's
-      // entry starts at 1: on-start-height between on-parse and on-compute there. [RN-1, RN-9]
+      // entry starts at 1: on-start-height between on-parse and on-compute there.
       const [fetch1, parse1, ...rest1] = height(1);
       expect(calls()).toEqual(["on-start-db", "on-finalized@3", fetch1, parse1, "on-start-height@1", ...rest1, ...height(2), ...height(3)]);
 
       // The head rises: a loop run again delivers the cursor's on-after-db-write a second time, then one
-      // on-finalized for the new head, before its heights, from the cursor on. [RN-11]
+      // on-finalized for the new head, before its heights, from the cursor on.
       source.finalize(5n);
       await runUntilWaiting(started, source, 5n);
       expect(calls().slice(18)).toEqual(["on-after-db-write@3", "on-finalized@5", ...height(4), ...height(5)]);
@@ -146,7 +145,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
       expect(await heightsIn(db, "recorder.rows")).toEqual([1n, 2n, 3n, 4n]);
     }, 60_000);
 
-    it("runs RN-3's two scenarios through the loop: id order at on-db-write, a provider before its consumer", async () => {
+    it("runs the two scenarios through the loop: id order at on-db-write, a provider before its consumer", async () => {
       const { db } = await backend.database();
       const log: string[] = [];
       const logged = (id: string): ModuleDeclaration["points"] => ({
@@ -210,7 +209,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
     }, 60_000);
   });
 
-  describe("A39: each point's handle (RN-4, design.md §2)", () => {
+  describe("each point's handle", () => {
     /** What one callback was given. */
     interface Given {
       readonly point: PointName;
@@ -284,7 +283,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
       }
     }
 
-    /** The oracle for on-compute: its read reports h − 1 (null before the first commit) and holds no row of h. [A39] */
+    /** The oracle for on-compute: its read reports h − 1 (null before the first commit) and holds no row of h. */
     function computeProblems(given: readonly Given[]): string[] {
       const computes = given.filter((g) => g.point === "on-compute");
       if (computes.length !== 3) return [`on-compute ran ${computes.length} times, not 3`];
@@ -297,7 +296,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
       });
     }
 
-    it("gives each point the handle of design.md §2, at its height", async () => {
+    it("gives each point its handle, at its height", async () => {
       const { given, failure } = await observe();
       expect(failure).toBeUndefined();
       const at = (point: PointName) => given.filter((g) => g.point === point);
@@ -392,7 +391,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
       expect(await cursorOf(db)).toBe(1n);
     }, 60_000);
 
-    it("negative control: on-compute given a read at h (inside the block, after on-db-write) fails A39", async () => {
+    it("negative control: on-compute given a read at h (inside the block, after on-db-write) fails", async () => {
       /** A loop that runs on-compute inside the block transaction, after on-db-write, with a read of it at h. */
       class ComputeAtH extends FinalizedLoop {
         protected override async prepare(run: HeightRun): Promise<void> {
@@ -418,7 +417,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
     }, 60_000);
   });
 
-  describe("A40: the block items (RN-5)", () => {
+  describe("the block items", () => {
     /** What the consumers saw: the value of `x` per point and height, and whether a sibling saw it. */
     interface Seen {
       readonly compute: (string | undefined)[];
@@ -548,7 +547,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
       expect(seen).toEqual(EXPECTED);
     }, 60_000);
 
-    it("negative control: a sink that publishes a put at once, before its callback completes, fails A40", async () => {
+    it("negative control: a sink that publishes a put at once, before its callback completes, fails", async () => {
       /** Items published the moment they are put. */
       class EagerItems extends BlockItems {
         override collect(part: ModuleDeclaration, point: PointName, body: (sink: ItemSink) => Promise<void>) {
@@ -574,7 +573,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
       expect(seen.sibling).toEqual([true, false, true, false]);
     }, 60_000);
 
-    it("negative control: items kept for h + 1 fail A40", async () => {
+    it("negative control: items kept for h + 1 fail", async () => {
       /** Each height's items start with the previous height's. */
       class KeptItems extends BlockItems {
         constructor(height: bigint, previous: BlockItems | undefined) {
@@ -691,7 +690,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
     }, 60_000);
   });
 
-  describe("A37: every row is in a module's or a backbone part's schema, written through a handle (RN-2)", () => {
+  describe("every row is in a module's or a backbone part's schema, written through a handle", () => {
     /** Rows of every table outside PostgreSQL's own schemas, by `schema.table`. */
     async function rowCounts(started: Started): Promise<Map<string, number>> {
       return started.db.read(async (read) => {
@@ -755,7 +754,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
       return { started, written, source };
     }
 
-    /** The oracle: the problems found, none when each row is where it may be and was written through a handle. [A37] */
+    /** The oracle: the problems found, none when each row is where it may be and was written through a handle. */
     async function problems(started: Started, written: { rows: number }): Promise<string[]> {
       const found: string[] = [];
       const counts = await rowCounts(started);
@@ -800,7 +799,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
       ]);
     }, 120_000);
 
-    it("negative control: a loop that writes a row itself, outside every handle, fails A37", async () => {
+    it("negative control: a loop that writes a row itself, outside every handle, fails", async () => {
       class WritingLoop extends FinalizedLoop {
         protected override async write(tx: Transaction, run: HeightRun): Promise<void> {
           await super.write(tx, run);
@@ -817,7 +816,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
     }, 120_000);
   });
 
-  describe("failures stop the loop with the height, point and module (RN-8's halt is task 5.4's)", () => {
+  describe("failures stop the loop with the height, point and module (the halt is the)", () => {
     for (const point of ["on-fetch", "on-parse", "on-compute", "on-db-write"] as const) {
       it(`a callback failing in ${point} stops it at that height with nothing of the height kept`, async () => {
         const { db } = await backend.database();
@@ -937,7 +936,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
           return inMemoryBlock(height === 2n ? 7n : height);
         }
       }
-      // The real core-block-commit refuses block 7 first, in its on-db-write: the database holds no block at 6. [IN-4]
+      // The real core-block-commit refuses block 7 first, in its on-db-write: the database holds no block at 6.
       const refused = await failureOf(
         await startWith((await backend.database()).db, [mod("m", {})], [entry("m", 1)]),
         new Shifted({ head: 3n }),
@@ -1020,7 +1019,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
       }, 60_000);
     }
 
-    it("a block write handle used from a timer after its block halts once the height's last point ends (A10)", async () => {
+    it("a block write handle used from a timer after its block halts once the height's last point ends", async () => {
       const { db } = await backend.database();
       let kept: BlockWriteHandle | undefined;
       let used: unknown;
@@ -1252,7 +1251,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
     }, 60_000);
   });
 
-  describe("A144 through the loop: the db item from inside a callback (DB-4, Q73)", () => {
+  describe("through the loop: the db item from inside a callback", () => {
     /** m's process context holds the `db` item as core-chain will publish it: the database, read-only. */
     class WithDb extends Contexts {
       constructor(readonly item: ReadOnlyDatabase) {
@@ -1290,7 +1289,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
     }
   });
 
-  describe("the block context (RN-5, RN-7)", () => {
+  describe("the block context", () => {
     it("holds the block's height, hash and parent hash, the module's settings at h and the active entries", async () => {
       const { db } = await backend.database();
       const seen: { height: bigint; hash: Uint8Array; parent: Uint8Array; k: unknown; active: boolean[] }[] = [];

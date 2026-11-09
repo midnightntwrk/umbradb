@@ -1,12 +1,12 @@
 import type { UmbraDBHandle } from "../../src/library/start-umbradb.js";
 
 /**
- * L62's cases and its oracle, shared by `./start-umbradb.test.ts` (the criterion, and LM-1's options that cannot be
+ * The cases and its oracle, shared by `./start-umbradb.test.ts` (the criterion, and the options that cannot be
  * read) and `./start-umbradb.negative-control.test.ts` (the facade without its option check, or reading the options as
- * given, fails the same oracle). [L62, LM-1, LM-10]
+ * given, fails the same oracle).
  */
 
-/** L62's malformed options, each with the path its refusal names. */
+/** The malformed options, each with the path its refusal names. */
 export const MALFORMED: readonly (readonly [string, unknown, string])[] = [
   ["config with neither file nor data", { config: {} }, "config"],
   ["config with both", { config: { file: "a.ts", data: {} } }, "config"],
@@ -51,7 +51,7 @@ const hostile = (target: object = {}): object =>
     getPrototypeOf: throwing,
   });
 
-/** Options that cannot be read as given, each with the path its refusal names. [LM-1, L62] */
+/** Options that cannot be read as given, each with the path its refusal names. */
 export const UNREADABLE: readonly (readonly [string, () => unknown, string])[] = [
   ["config.file's getter", () => ({ config: { get file() { return throwing(); } } }), "config.file"],
   ["config.data's getter", () => ({ config: { get data() { return throwing(); } } }), "config.data"],
@@ -115,9 +115,9 @@ export async function closedByItself(handle: UmbraDBHandle): Promise<void> {
 }
 
 /**
- * L62's oracle over one start (`start`, the facade's call): the problems, none when the call did not throw, `started`
+ * The oracle over one start (`start`, the facade's call): the problems, none when the call did not throw, `started`
  * rejected with `invalid-configuration`, reason `invalid-option`, naming `path`, and the process ended `refused` by
- * itself. A process that did not end so is stopped. [L62, LM-1, LM-10]
+ * itself. A process that did not end so is stopped.
  */
 export async function optionProblems(start: () => UmbraDBHandle, path: string): Promise<string[]> {
   let handle: UmbraDBHandle;

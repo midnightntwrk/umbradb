@@ -2,7 +2,7 @@
  * The content of `core-ledger-state`'s node tables, which take part in the contents hash by what they hold rather than
  * by their bytes: the ledger can store one node in two forms (a small child embedded in its parent, or referenced and
  * stored as its own row), so two indexers holding the same nodes can differ in these tables' bytes, and in the counts
- * and the queue the rows give. [LG-11, DT-3]
+ * and the queue the rows give.
  *
  * {@link nodeTablesContent} reads, through the contents hash's one snapshot:
  * - `nodes`, every row in key order, a page at a time. Each row is authenticated: its key must be the hash of its
@@ -19,10 +19,10 @@
  *
  * A check that fails, or a row whose key is not its content's, fails the computation with `ledger-refcount-invalid`,
  * reason `tables-inconsistent`, naming the check and the first such key in byte order: a backup is not written, a
- * restore rolls back, the exported `contentsHash` rejects. [LG-11, LG-14, DT-3, BK-3]
+ * restore rolls back, the exported `contentsHash` rejects.
  *
  * {@link LEDGER_NODE_TABLES} is the declaration a `ledger-state` table item carries for them. {@link NodeSetFault} is
- * the seam through which a negative control puts a fault into the content. [R29]
+ * the seam through which a negative control puts a fault into the content.
  */
 
 import { UmbraError } from "../../db/errors.js";
@@ -33,11 +33,11 @@ import { childRefKeys } from "../../ledger/node-refs.js";
 import type { ContentDefinition } from "../../modules/declaration.js";
 import { NODES_TABLE, REF_COUNTS_TABLE, ROOT_COUNTS_TABLE, UNREFERENCED_TABLE } from "./sql.js";
 
-/** A check of the node tables, as `details.check` names it. [DT-3] */
+/** A check of the node tables, as `details.check` names it. */
 export type NodeTableCheck = "node-key" | "closure" | "roots" | "counts" | "queue";
 
 /**
- * A fault a negative control puts into the content; the build's content carries none: [R29]
+ * A fault a negative control puts into the content; the build's content carries none:
  * - `constant-node-set`: `nodes` contributes no key, whatever it holds;
  * - `no-key-check`: a row's key is not compared with its content's.
  */
@@ -45,7 +45,7 @@ export type NodeSetFault = "constant-node-set" | "no-key-check";
 
 /** What the content of the node tables is computed with. */
 export interface NodeSetOptions {
-  /** The fault a negative control puts into the content; none in a build. [R29] */
+  /** The fault a negative control puts into the content; none in a build. */
   readonly fault?: NodeSetFault;
 }
 
@@ -54,7 +54,7 @@ const DEFAULT_PAGE_SIZE = 1_000;
 
 const hexOf = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
 
-/** `ledger-refcount-invalid` (`tables-inconsistent`) for `check` and the key `key` (hex). [DT-3] */
+/** `ledger-refcount-invalid` (`tables-inconsistent`) for `check` and the key `key` (hex). */
 function inconsistent(check: NodeTableCheck, key: string, message: string): UmbraError {
   return new UmbraError(
     "ledger-refcount-invalid",
@@ -72,7 +72,7 @@ function first(keys: Iterable<string>): string | undefined {
 
 /**
  * Every row of `table` in key order, `columns` first among them its key `node_key`, a page at a time. The page size,
- * as the last key read, is a bound parameter: no value is spliced into the statement. [DT-3]
+ * as the last key read, is a bound parameter: no value is spliced into the statement.
  */
 async function* keyOrdered(
   read: ConsistentRead,
@@ -94,7 +94,6 @@ async function* keyOrdered(
 
 /**
  * The content function of `nodes`, `ref_counts` and `unreferenced` (see the module comment), with `options`' fault.
- * [LG-11, DT-3, R29]
  */
 export function nodeTablesContent(options: NodeSetOptions = {}): ContentFunction {
   return async (read, page) => {
@@ -185,7 +184,7 @@ export function nodeTablesContent(options: NodeSetOptions = {}): ContentFunction
 
 /**
  * `core-ledger-state`'s content-defined tables, `nodes`, `ref_counts` and `unreferenced`, with their content function:
- * what its `ledger-state` table item declares. [LG-11, DT-3, DT-4]
+ * what its `ledger-state` table item declares.
  */
 export const LEDGER_NODE_TABLES: ContentDefinition = Object.freeze({
   tables: ["nodes", "ref_counts", "unreferenced"],

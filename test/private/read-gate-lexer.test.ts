@@ -12,7 +12,7 @@ import { readRefusal, REFUSED_FUNCTIONS } from "../../src/private/read-gate.js";
 const fn = (name: string) => ({ reason: "function", name });
 const UNREADABLE = { reason: "unreadable", name: null };
 
-describe("the read gate's lexer, construct by construct (task 17.5b)", () => {
+describe("the read gate's lexer, construct by construct", () => {
   it("lists exactly the refused functions", () => {
     expect([...REFUSED_FUNCTIONS].sort()).toEqual(
       [

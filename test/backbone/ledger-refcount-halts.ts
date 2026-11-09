@@ -13,9 +13,9 @@ import type { DagRun, DagRunOptions } from "./refcount-process.js";
 import { runDag, runProblems } from "./refcount-process.js";
 
 /**
- * R11's faults on the extended DAG fixture, shared by `ledger-refcount-halts.test.ts` and its negative controls. Each
+ * The faults on the extended DAG fixture, shared by `ledger-refcount-halts.test.ts` and its negative controls. Each
  * makes one block's step fail one of its checks; the controls run the same fault with that check left out
- * (`core-ledger-state`'s `refcountUnchecked`). Imports nothing of Vitest. [R11, LG-14]
+ * (`core-ledger-state`'s `refcountUnchecked`). Imports nothing of Vitest.
  * - `negative-count`: a database is built to 5 and copied ({@link copyDatabase}), and the copy has the count of
  *   `repeat leaf 0` lowered from 4 to 1; at 6 the deletion of `repeat 0`, which lists it twice, takes it to −1.
  * - `missing-reference`, three test packages: at 10 the flush leaves out `shared leaf 2`, which the new `shared 1`
@@ -55,7 +55,7 @@ export function oneRowFewer(height: bigint): (w: Pick<BlockWriteHandle, "execute
         };
 }
 
-/** R11's three package faults of `missing-reference`. */
+/** The three package faults of `missing-reference`. */
 export const MISSING: readonly Fault[] = Object.freeze([
   {
     name: "a new node referencing a key not stored",
@@ -83,7 +83,7 @@ export const MISSING: readonly Fault[] = Object.freeze([
   },
 ]);
 
-/** R11's `row-count-mismatch` fault. */
+/** The `row-count-mismatch` fault. */
 export const ONE_ROW_FEWER: Fault = Object.freeze({
   name: "the queue's insert affecting one row fewer",
   height: 3,
@@ -93,7 +93,7 @@ export const ONE_ROW_FEWER: Fault = Object.freeze({
   options: { core: { refcountWriter: oneRowFewer(3n) } },
 });
 
-/** R11's `negative-count` fault. */
+/** The `negative-count` fault. */
 export const NEGATIVE: Fault = Object.freeze({
   name: "a stored count lowered so that a deletion takes it below 0",
   height: LOWERED.at + 1,
@@ -185,10 +185,10 @@ export async function runFault(db: ProcessDatabase, fault: Fault, unchecked = fa
 }
 
 /**
- * What differs from R11's halt for `fault` in `run`: halted at its block with `ledger-refcount-invalid`, the reason,
+ * What differs from the halt for `fault` in `run`: halted at its block with `ledger-refcount-invalid`, the reason,
  * height and key or statement in the error's `details`, the log naming them, and nothing of the block stored — the
  * database at h − 1: the tables `lowered` held before the run, else those the watcher read at h − 1 before the block,
- * else R1's model fed the blocks before it, and the `states` and blocks of h − 1 the last. Empty when it holds. [R11]
+ * else the model fed the blocks before it, and the `states` and blocks of h − 1 the last. Empty when it holds.
  */
 export async function haltProblems(db: ProcessDatabase, run: DagRun, fault: Fault, lowered: TableSnapshot | null): Promise<string[]> {
   const problems: string[] = [];
@@ -222,7 +222,7 @@ export async function haltProblems(db: ProcessDatabase, run: DagRun, fault: Faul
   return problems;
 }
 
-/** R3's problems of `run` at its last height: what a block that committed with the check left out did. [R11] */
+/** The problems of `run` at its last height: what a block that committed with the check left out did. */
 export function damageAt(run: DagRun, height: number): string[] {
   return runProblems(run, "extended").filter((problem) => problem.startsWith(`after ${height}: `));
 }

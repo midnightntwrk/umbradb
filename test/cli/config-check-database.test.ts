@@ -17,17 +17,17 @@ import { type CheckTarget, CLI_BACKENDS } from "./database-fixtures.js";
 
 /**
  * `umbradb config check` with `--database` `[CI]`, through `runCommand` and `configCheck` in this process, on
- * PostgreSQL 18 and PGlite 0.5.10 (`./umbradb.test.ts` runs the command itself in a child process). [A35 CI, CF-10, Q167 A]
+ * PostgreSQL 18 and PGlite 0.5.10 (`./umbradb.test.ts` runs the command itself in a child process).
  *
  * `umbradb config check <file> --database` takes no value. It reads the database that the file's `core` revision
  * configures: the cursor and `core_chain.config`, read-only, with no migration and no write. It then runs the history
  * checks too (for `versionEntry` revisions as well). A file that changes a recorded entry's data field reports
  * `changes-past` and exits non-zero, and the database is unchanged (every table's row count, and the rows of
- * `core_chain.migrations` and `core_chain.config` with their `xmin`, before and after). [CF-3, CF-5, CF-6, CF-8]
+ * `core_chain.migrations` and `core_chain.config` with their `xmin`, before and after).
  *
  * PGlite opens only under the development opt-in, which comes from the file. Its directory's lock is taken (a PGlite
  * database another process holds cannot be read). A PostgreSQL database is read beside a running writer. The same
- * tests show that the history is read from the configured database. [Q102, A170]
+ * tests show that the history is read from the configured database.
  */
 
 // Each test runs the TypeScript compiler on a file (about a second alone) and many open a database or start a process;
@@ -76,7 +76,7 @@ function core(start: number, extra: Readonly<Record<string, unknown>>, optIn: bo
   return `coreEntry({ start: ${start}, config: ${coreSettings(database, { ...extra, ...(optIn ? { developmentOptIn: true } : {}) })} })`;
 }
 
-describe.each(CLI_BACKENDS.map((make) => make()))("A35 with --database on $name", (backend) => {
+describe.each(CLI_BACKENDS.map((make) => make()))("with --database on $name", (backend) => {
   const pglite = backend.password === null;
   const outputs: string[] = [];
   /** Runs `umbradb config check <file> --database` in this process, keeping its output for the password check. */
@@ -135,7 +135,7 @@ describe.each(CLI_BACKENDS.map((make) => make()))("A35 with --database on $name"
 
   it("prints every finding of every history check at once: missing-entry, changes-past, upgrade-required", async () => {
     const before = await target.snapshot();
-    // core from 0 (at or below the cursor) and from 100 (above it, where it may be omitted) are both left out. [Q103]
+    // core from 0 (at or below the cursor) and from 100 (above it, where it may be omitted) are both left out.
     const file = fileOf("everything.config.ts", [
       core(5, { retainStates: 5 }, pglite),
       'versionEntry({ id: "core", start: 21, version: { umbradb: "0.9.6", ledgers: [] } })',
@@ -153,7 +153,7 @@ describe.each(CLI_BACKENDS.map((make) => make()))("A35 with --database on $name"
     expect(await target.snapshot()).toEqual(before);
   });
 
-  it("CF-3 for versionEntry revisions: a scheduled one carrying a config is refused, the other history checks not run", async () => {
+  it("for versionEntry revisions: a scheduled one carrying a config is refused, the other history checks not run", async () => {
     const file = fileOf("scheduled-config.config.ts", [
       core(0, {}, pglite),
       core(100, { retainStates: 2 }, pglite),
@@ -244,7 +244,7 @@ describe.each(CLI_BACKENDS.map((make) => make()))("A35 with --database on $name"
   });
 
   if (pglite) {
-    it("PGlite opens only under the development opt-in of the file's core revision (Q102, CF-9)", async () => {
+    it("PGlite opens only under the development opt-in of the file's core revision", async () => {
       const before = await target.snapshot();
       const file = fileOf("no-opt-in.config.ts", [core(0, {}, false), core(100, { retainStates: 2 }, false)]);
       const result = await check(file);

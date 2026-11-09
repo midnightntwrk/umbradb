@@ -8,7 +8,6 @@ import { POSTGRES_IMAGE } from "../postgres-image.js";
 // Every PostgreSQL image the repository pins is one `postgres:18-alpine` pin — the tests, the Testcontainers helpers,
 // the benchmarks, the pack smoke test and the supply-chain gate's image-pin agreement check. The pin lives in
 // `test/postgres-image.ts`; this file holds the same value, so moving it is a reviewed change of three files.
-// [Q82, A148 STATIC]
 
 /** The pin: PostgreSQL 18.6 on Alpine 3.24.2, the `18-alpine` index of 2026-09-21 (see `test/postgres-image.ts`). */
 const PINNED = "postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873";
@@ -33,7 +32,6 @@ const HASH_COMMENTED = new Set([".yml", ".yaml", ".sh", ".nix", ".toml"]);
 /**
  * Files that may name a PostgreSQL image without pinning one, as a record of a run. None since the 0.9.5 benchmark
  * baseline (measured on PostgreSQL 17.10, before the PostgreSQL 18 pin) was retired with its workloads.
- * [Q82; design §13]
  */
 const RECORDS = new Set<string>();
 
@@ -69,7 +67,7 @@ function canPin(path: string): boolean {
 
 /**
  * Every way the files fail the image pin: an image other than the pin, or a container started from anything but the
- * constant. [A148 STATIC]
+ * constant.
  */
 function pinViolations(files: readonly RepositoryFile[], pin: string): string[] {
   const violations: string[] = [];
@@ -114,7 +112,7 @@ function repositoryFiles(): RepositoryFile[] {
 
 const files = repositoryFiles();
 
-describe("A148 — one PostgreSQL image, postgres:18-alpine pinned by digest (Q82)", () => {
+describe("one PostgreSQL image, postgres:18-alpine pinned by digest", () => {
   it("pins postgres:18-alpine by the digest of its index, in test/postgres-image.ts", () => {
     expect(POSTGRES_IMAGE).toBe(PINNED);
     expect(POSTGRES_IMAGE).toMatch(/^postgres:18-alpine@sha256:[0-9a-f]{64}$/);

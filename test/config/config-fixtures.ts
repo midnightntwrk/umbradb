@@ -10,7 +10,7 @@ import { defineModule } from "../../src/modules/declaration.js";
  * - a `core` entry's settings that every check accepts.
  *
  * The configuration files the tests write import this file by its absolute path, as an operator's file imports a
- * module package. [CF-1, CF-2]
+ * module package.
  */
 
 /** The repository's root directory. */

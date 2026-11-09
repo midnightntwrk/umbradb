@@ -15,7 +15,6 @@ import {
 /**
  * One set of determinism rules for every module table. Imports nothing of Vitest, so that the negative control's file
  * (`determinism.negative-control.test.ts`, which replaces the schema plan) runs the same checks.
- * [A146, DT-3, DT-6, PP-1, Q75]
  *
  * - A private module table with a `serial` column, a `now()` default or a `double precision` column refuses the private
  *   process's startup with the same code and message as the same table in a module of the core.
@@ -23,7 +22,7 @@ import {
  *   at the same height; a third whose module's data setting differs has another.
  */
 
-/** The three non-deterministic tables, by what makes them non-deterministic. [A146] */
+/** The three non-deterministic tables, by what makes them non-deterministic. */
 export const A146_TABLES: readonly { readonly name: string; readonly sql: string }[] = [
   { name: "a serial column", sql: "CREATE TABLE m.t (height bigint PRIMARY KEY, n serial)" },
   { name: "a now() default", sql: "CREATE TABLE m.t (height bigint PRIMARY KEY, at timestamptz NOT NULL DEFAULT now())" },
@@ -117,7 +116,7 @@ export async function a146Refusals(backend: PrivateBackend): Promise<TableRefusa
   return found;
 }
 
-/** The startup-refusal half of the determinism check: every problem with what was observed, none if it holds. [A146] */
+/** The startup-refusal half of the determinism check: every problem with what was observed, none if it holds. */
 export function a146RefusalProblems(found: readonly TableRefusals[]): string[] {
   const problems: string[] = [];
   for (const { table, core, private: refused } of found) {
@@ -174,7 +173,7 @@ export async function a146Hashes(backend: PrivateBackend): Promise<InstanceHashe
   }
 }
 
-/** The contents-hash half of the determinism check: every problem with what was observed, none when it holds. [A146] */
+/** The contents-hash half of the determinism check: every problem with what was observed, none when it holds. */
 export function a146HashProblems(observed: InstanceHashes): string[] {
   const problems: string[] = [];
   if (observed.cursors.some((cursor) => cursor !== HEAD)) {
@@ -186,7 +185,7 @@ export function a146HashProblems(observed: InstanceHashes): string[] {
   return problems;
 }
 
-// ── A table declared `deterministic: false`, on a private process [A147, MD-1, DT-3, DT-4, DT-6, Q76] ─────────────
+// ── A table declared `deterministic: false`, on a private process ─────────────
 
 /**
  * A private module `po` whose `table` item `po-log` is declared `deterministic: false` (unless `flag` says otherwise):
@@ -224,7 +223,7 @@ export function optedOutModule(flag: { readonly deterministic?: false } = { dete
   };
 }
 
-/** What the opted-out table check on a private process saw. [A147] */
+/** What the opted-out table check on a private process saw. */
 export interface OptedOutObservation {
   readonly hashes: readonly string[];
   /** Each instance's rows of `po.log`'s notes, and whether `core_digest.tables` has a row for `po.log`. */
@@ -277,7 +276,7 @@ export async function optedOutRun(backend: PrivateBackend): Promise<OptedOutObse
   }
 }
 
-/** The opted-out table check on a private process: every problem with what was observed, none when it holds. [A147] */
+/** The opted-out table check on a private process: every problem with what was observed, none when it holds. */
 export function optedOutProblems(observed: OptedOutObservation): string[] {
   const problems: string[] = [];
   const [one, two] = observed.notes;

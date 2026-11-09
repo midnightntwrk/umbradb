@@ -39,15 +39,15 @@ import {
 
 /**
  * On PostgreSQL 18.6 and PGlite 0.5.10, through `umbradb restore` in this process (its chain an in-memory one standing
- * in for the node, `RestoreCommandSeams.source`): [BK-3, BK-4, Q83, Q85; design §9.1]
+ * in for the node, `RestoreCommandSeams.source`):
  * - a backup written on one backend restores on the other with every restore check passing, and the restored
- *   database's owners and grants are a database built by migrations' (compared in the catalogs) [A125 DIFF];
- * - each restore refusal in its order, the target as it was after it [A126 CI];
- * - a backup restored on either backend and continued to h + 100 equals an instance that never stopped [A128 DIFF];
- * - the restored `deterministic: false` table's serial values go on from the restored ones [A147].
+ *   database's owners and grants are a database built by migrations' (compared in the catalogs);
+ * - each restore refusal in its order, the target as it was after it;
+ * - a backup restored on either backend and continued to h + 100 equals an instance that never stopped;
+ * - the restored `deterministic: false` table's serial values go on from the restored ones.
  *
  * The ledger state root's check is `./restore-ledger.test.ts`; a restore killed while loading is
- * `./restore-kill.test.ts`; the committed negative controls are `./restore.negative-control.test.ts`. [A127]
+ * `./restore-kill.test.ts`; the committed negative controls are `./restore.negative-control.test.ts`.
  */
 
 /** Each test waits on purpose for processes to reach heights: its own budget, for a loaded machine. */
@@ -92,7 +92,7 @@ const restoreRun = (file: string, config: string, seams: RestoreCommandSeams = c
 /** A new, empty target on `backend` and its configuration file. */
 const target = (backend: BackupBackend, options: Parameters<typeof restoreTarget>[2] = {}) => restoreTarget(project, backend, options);
 
-/** The contents hash and every per-table digest and checkpoint of `db`, which a restore keeps the same. [BK-4] */
+/** The contents hash and every per-table digest and checkpoint of `db`, which a restore keeps the same. */
 async function stateOf(db: BackupDatabase): Promise<{ hash: string; digests: string[] }> {
   const rows = await db.query(
     `SELECT 'tables' AS t, "schema", "table", height::text, encode(digest, 'hex') AS d FROM core_digest.tables
@@ -104,7 +104,7 @@ async function stateOf(db: BackupDatabase): Promise<{ hash: string; digests: str
 
 /**
  * How processing ended, for an assertion's message: its kind; for a refusal or a failure, the error's name, code and
- * message, and each cause's; then the process's log lines. [docs/issues/00041]
+ * message, and each cause's; then the process's log lines.
  */
 function endedText(ended: ProcessingEnd, lines: readonly string[]): string {
   const parts = [`processing ended ${ended.kind}`];
@@ -137,10 +137,10 @@ const [POSTGRES, PGLITE] = BACKUP_BACKENDS as [BackupBackend, BackupBackend];
 /** The ledger table of the tape's custom network (`../cli/run-fixtures.ts`): every `spec_version` is v9's. */
 const LEDGER_TABLE = { rows: [{ specVersionMin: 0, specVersionMax: 4_294_967_295, ledger: "v9" }] };
 
-describe("A125: a backup written on one backend restores on the other (BK-2, BK-3)", () => {
+describe("a backup written on one backend restores on the other", () => {
   it(
-    "A125: a backup written on PostgreSQL 18 restores on PGlite and one written on PGlite on PostgreSQL 18, every " +
-      "check of BK-3 passing, the owners and grants those of a database built by migrations",
+    "a backup written on PostgreSQL 18 restores on PGlite and one written on PGlite on PostgreSQL 18, every " +
+      "restore check passing, the owners and grants those of a database built by migrations",
     async () => {
       for (const [from, to] of [
         [POSTGRES, PGLITE],
@@ -152,7 +152,7 @@ describe("A125: a backup written on one backend restores on the other (BK-2, BK-
         const result = await restoreRun(file, config);
         expect(result.stderr, `${from.kind} → ${to.kind}`).toBe("");
         expect(result.code).toBe(EXIT.ok);
-        // A PGlite target not created yet is created, which the command says, naming it. [Q165 B, Q167 A]
+        // A PGlite target not created yet is created, which the command says, naming it.
         const created = to.kind === "pglite" ? `umbradb restore: created a new PGlite data directory ${pathOf(db.setting)}\n` : "";
         expect(result.stdout).toBe(
           `${created}umbradb restore: restored ${file}: height ${H}, contents hash ${manifest.contentsHash}; the database ` +
@@ -178,7 +178,7 @@ describe("A125: a backup written on one backend restores on the other (BK-2, BK-
 /**
  * The module `late`, as a module package's file declares it: a table and a routine in its schema `late`, written at
  * every height, that may start above S. A configuration that lists it from above a backup's height names a schema no
- * backup at that height holds. [BK-3, MD-6]
+ * backup at that height holds.
  */
 const LATE_MODULE = [
   'import { z } from "zod";',
@@ -205,7 +205,7 @@ const LATE_MODULE = [
   "",
 ].join("\n");
 
-describe.each(BACKUP_BACKENDS)("a configuration with a module from above the backup's height on $name (BK-3)", (backend) => {
+describe.each(BACKUP_BACKENDS)("a configuration with a module from above the backup's height on $name", (backend) => {
   it(
     "restores a backup at h with a configuration that adds a module from h + 1, whose schema the backup does not hold, " +
       "and the restored database continues with that configuration, the module's routine not executable by PUBLIC",
@@ -259,9 +259,9 @@ describe.each(BACKUP_BACKENDS)("a configuration with a module from above the bac
   );
 });
 
-describe.each(BACKUP_BACKENDS)("A126: each refusal of BK-3 on $name, in its order", (backend) => {
+describe.each(BACKUP_BACKENDS)("each restore refusal on $name, in its order", (backend) => {
   it(
-    "A126: each restore refusal of BK-3 is triggered and checked before or after loading, as BK-3 orders them; after " +
+    "each restore refusal is triggered and checked before or after loading, in its order; after " +
       "every refusal the target is as it was",
     async () => {
       const { file, source } = await backupAt(backend, H);
@@ -275,7 +275,7 @@ describe.each(BACKUP_BACKENDS)("A126: each refusal of BK-3 on $name, in its orde
       const refused = async (path: string, config: string, code: string, seams?: RestoreCommandSeams) => {
         const result = await restoreRun(path, config, seams);
         expect(result.code, `${code}: ${result.stderr}`).toBe(EXIT.failed);
-        // The first refusal after loading on PGlite created the target's directory, which the command says. [Q165 B]
+        // The first refusal after loading on PGlite created the target's directory, which the command says.
         expect(result.stdout.replace(/^umbradb restore: created a new PGlite data directory \S+\n/, "")).toBe("");
         expect(codeIn(result.stderr)).toBe(code);
         return result.stderr;
@@ -307,7 +307,7 @@ describe.each(BACKUP_BACKENDS)("A126: each refusal of BK-3 on $name, in its orde
       const otherChain = { height: 0n, hash: new Uint8Array(32).fill(6), parentHash: new Uint8Array(32) };
       await refused(variant("cut-b", cut), config, "backup-format-unknown", chain(HEAD, [otherChain]));
 
-      // 3. backup-history-mismatch: another S; a recorded entry left out — before a bad format? No: after it. [CF-5]
+      // 3. backup-history-mismatch: another S; a recorded entry left out — before a bad format? No: after it.
       const otherStart = writeTickerConfig(project, { database: db.setting, start: 2 });
       expect(await refused(file, otherStart, "backup-history-mismatch")).toContain("a restored database keeps its S");
       const omitted = writeTickerConfig(project, { database: db.setting, entry: null });
@@ -315,8 +315,8 @@ describe.each(BACKUP_BACKENDS)("A126: each refusal of BK-3 on $name, in its orde
       await refused(variant("format-2b", format2), omitted, "backup-format-unknown");
       await empty();
 
-      // 4. backup-build-mismatch: the revision covering h + 1 is 1.0.0 and the build carries 1.1.0 [CF-8]; the build's
-      // migration 001 changed [DB-9].
+      // 4. backup-build-mismatch: the revision covering h + 1 is 1.0.0 and the build carries 1.1.0; the build's
+      // migration 001 changed.
       const older = writeTickerConfig(project, {
         database: db.setting,
         module: "./ticker-1.1.ts",
@@ -337,7 +337,7 @@ describe.each(BACKUP_BACKENDS)("A126: each refusal of BK-3 on $name, in its orde
       await empty();
 
       // After loading: contents-hash-mismatch for a changed value in a row the contents hash covers — and before it, a
-      // check before loading wins (the genesis here). [DT-3]
+      // check before loading wins (the genesis here).
       const total = (H * (H + 1n)) / 2n;
       const tallied = `INSERT INTO ticker.tally VALUES (1, ${H}, ${total});`;
       expect(text).toContain(tallied);
@@ -506,9 +506,9 @@ describe("a refusal of the configuration's history that is no backup's", () => {
   }, TEST_TIMEOUT_MS);
 });
 
-describe("A128: a restored database continues like one that never stopped (BK-4)", () => {
+describe("a restored database continues like one that never stopped", () => {
   it(
-    "A128: a backup written on PostgreSQL 18 at h, restored on PGlite and on PostgreSQL 18 (and one written on PGlite, " +
+    "a backup written on PostgreSQL 18 at h, restored on PGlite and on PostgreSQL 18 (and one written on PGlite, " +
       "on PostgreSQL 18), continued to h + 100, gives the contents hash and the per-table digests of an instance that " +
       "never stopped [[backup.restore-equals-uninterrupted]]",
     async () => {
@@ -533,7 +533,7 @@ describe("A128: a restored database continues like one that never stopped (BK-4)
         // It kept the backup's S and resumed from h + 1: every height once, from 1.
         const [blocks] = await db.query("SELECT min(height)::text AS lo, max(height)::text AS hi, count(*)::text AS n FROM core_block_commit.blocks");
         expect(blocks, name).toEqual({ lo: "1", hi: String(end), n: String(end) });
-        // The next serial value of the table declared deterministic: false follows the restored ones. [A147]
+        // The next serial value of the table declared deterministic: false follows the restored ones.
         const [log] = await db.query("SELECT count(*)::text AS n, count(DISTINCT id)::text AS ids, min(id)::text AS lo, max(id)::text AS hi FROM ticker.log");
         expect(log, name).toEqual({ n: String(end), ids: String(end), lo: "1", hi: String(end) });
       }

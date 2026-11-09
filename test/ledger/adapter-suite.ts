@@ -37,9 +37,9 @@ import { AdapterWorkerHost, type LoadedState, type Replayed } from "./adapter-wo
 import { decodeChildren, refsOf, storedNodeKey } from "./node-format.js";
 
 // The one adapter test suite, run against the v8 adapter (`adapter-v8.test.ts`) and the v9 adapter
-// (`adapter-v9.test.ts`). [A98; LG-6, LG-7, LG-8, CC-2, Q49, Q55]
+// (`adapter-v9.test.ts`).
 //
-// Version-specific clauses are parameters: `logs` is "none" for v8 and "decoded" for v9. [Q54]
+// Version-specific clauses are parameters: `logs` is "none" for v8 and "decoded" for v9.
 //
 // Expected values come from the recorded vendor files, the node's own state roots (`fixtures/genesis/node-roots.json`),
 // the independent node format (`node-format.ts`), the packages' own functions, and a reference replay with the
@@ -48,7 +48,7 @@ import { decodeChildren, refsOf, storedNodeKey } from "./node-format.js";
 export interface AdapterSubject {
   ledger: Ledger;
   load(): Promise<LedgerPackage>;
-  /** Whether `apply` reports contract logs. [Q54] */
+  /** Whether `apply` reports contract logs. */
   logs: "none" | "decoded";
 }
 
@@ -100,13 +100,13 @@ export function describeLedgerPackage(subject: AdapterSubject): void {
   }, WORKER);
   afterAll(() => host.stop());
 
-  describe(`${subject.ledger} adapter: the recorded release and packages (A98)`, () => {
+  describe(`${subject.ledger} adapter: the recorded release and packages`, () => {
     it("versionName and rawPackages() are the release and the package vendor/ledger records", () => {
       expectRecordedRelease(adapter, subject.ledger, raw);
     });
   });
 
-  describe(`${subject.ledger} adapter: states (LG-6, Q55)`, () => {
+  describe(`${subject.ledger} adapter: states`, () => {
     for (const fixture of NODE_ROOTS.filter((root) => root.ledger === subject.ledger)) {
       it(`stateRoot of the ${fixture.network} genesis state is the node's block-0 root, also reloaded by its stateKey`, {
         timeout: WORKER,
@@ -138,7 +138,7 @@ export function describeLedgerPackage(subject: AdapterSubject): void {
       });
     }
 
-    it("a state under the 1,024-byte embedding limit reloads by its stateKey (Q55)", { timeout: WORKER }, async () => {
+    it("a state under the 1,024-byte embedding limit reloads by its stateKey", { timeout: WORKER }, async () => {
       flushInto();
       await expectSmallStateReloadsByKey(adapter, host, store);
     });
@@ -175,7 +175,7 @@ export function describeLedgerPackage(subject: AdapterSubject): void {
     });
   });
 
-  describe(`${subject.ledger} adapter: parsing (LG-7)`, () => {
+  describe(`${subject.ledger} adapter: parsing`, () => {
     it("parses a proven deploy into its plain data, with the ledger's own transaction hash", {
       timeout: LONG,
     }, async () => {
@@ -304,7 +304,7 @@ export function describeLedgerPackage(subject: AdapterSubject): void {
     }, LONG);
   });
 
-  describe(`${subject.ledger} adapter: applying a block (LG-8, LG-16)`, () => {
+  describe(`${subject.ledger} adapter: applying a block`, () => {
     it("applies a block of a system transaction, a deploy, two calls and a zswap output as the reference replay does", {
       timeout: LONG,
     }, async () => {
@@ -436,7 +436,7 @@ export function describeLedgerPackage(subject: AdapterSubject): void {
       expect(() => adapter.apply(adapter.emptyState(), failing)).toThrow(/system transaction 1 of block 1 failed/);
       // 20 deploys write more than the block limit of 50,000 bytes: the node clamps the fullness to the limits, and
       // so does the adapter (an earlier adapter threw here). `post-block-update.test.ts` holds the fee prices against
-      // the node's arithmetic. [Q113 A]
+      // the node's arithmetic.
       const deploys = await Promise.all(
         Array.from({ length: 20 }, () => contractFixture(raw).then((fixture) => fixture.deploy)),
       );
@@ -448,7 +448,7 @@ export function describeLedgerPackage(subject: AdapterSubject): void {
     });
   });
 
-  describe(`${subject.ledger} adapter: the replay rules (LG-8)`, () => {
+  describe(`${subject.ledger} adapter: the replay rules`, () => {
     // An intent whose TTL is 3 s beyond the block time + `global_ttl` is malformed at the block time and well formed at
     // the parent block's timestamp + 12 s (6 s after the block time here). The ledger's own replay protection then
     // fails it at the block time (`IntentTtlTooFarInFuture`), so its outcome is a failure either way; which times it
@@ -498,9 +498,9 @@ export function describeLedgerPackage(subject: AdapterSubject): void {
     });
   });
 
-  describe(`${subject.ledger} adapter: contract logs (CC-2, CC-3, Q54)`, () => {
+  describe(`${subject.ledger} adapter: contract logs`, () => {
     if (subject.logs === "none") {
-      it("decodeLogItem returns null for every input and apply returns no logs (Q54)", { timeout: LONG }, async () => {
+      it("decodeLogItem returns null for every input and apply returns no logs", { timeout: LONG }, async () => {
         await expectNoV8Logs(adapter);
       });
     } else {
@@ -512,7 +512,7 @@ export function describeLedgerPackage(subject: AdapterSubject): void {
     }
   });
 
-  describe(`${subject.ledger} adapter: in a worker thread (LG-7, Q49)`, () => {
+  describe(`${subject.ledger} adapter: in a worker thread`, () => {
     it("gives in a fresh worker the same plain data as here, and it crosses threads by structured clone unchanged", {
       timeout: WORKER,
     }, async () => {
@@ -547,7 +547,7 @@ export function describeLedgerPackage(subject: AdapterSubject): void {
   });
 
   describe(`${subject.ledger} adapter: what the interface gives each version`, () => {
-    it(subject.ledger === "v9" ? "has convertFromV8 (LG-9)" : "has no convertFromV8 (v9 only)", () => {
+    it(subject.ledger === "v9" ? "has convertFromV8" : "has no convertFromV8 (v9 only)", () => {
       expect(typeof adapter.convertFromV8).toBe(subject.ledger === "v9" ? "function" : "undefined");
     });
 

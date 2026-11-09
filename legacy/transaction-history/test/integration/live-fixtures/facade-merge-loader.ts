@@ -8,7 +8,7 @@ import { midnightWalletRepoRoot } from "./midnight-wallet-sdk-loader.js";
  * `mergeUnshieldedSections` (`packages/unshielded-wallet/src/v1/TransactionHistory.ts`), used ONLY
  * by `test/postgres/reference-merge-parity.test.ts`'s F1(c) parity test -- the preferred "real
  * runtime diff" proving `referenceMergeEntries` mirrors `mergeWalletEntries`' documented semantics
- * (`openspec/changes/sprint-8-wallet-envelope-live-sync/design.md` §2/§3.3's F1 correction).
+ * (the F1 correction).
  *
  * Mirrors `midnight-wallet-sdk-loader.ts`'s own pattern exactly: resolves by ABSOLUTE PATH into an
  * already-built `midnight-wallet` checkout's OWN `dist/` output, via a COMPUTED (non-literal)
@@ -26,7 +26,7 @@ import { midnightWalletRepoRoot } from "./midnight-wallet-sdk-loader.js";
  * there). `reference-merge-parity.test.ts` uses this to `describe.skipIf` its real-runtime-diff
  * block, falling back to its unconditional, dependency-free source-faithful rule assertions when
  * the dist is not present (a fresh clone, or CI, where `~/repos/midnight-wallet` is not cloned at
- * all) -- exactly the two-tier design `design.md`'s F1(c) note documents.
+ * all) -- exactly the two-tier design of the F1(c) note.
  */
 
 function facadeDistIndexPath(): string {

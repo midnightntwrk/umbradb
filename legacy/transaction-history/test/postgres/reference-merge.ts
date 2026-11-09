@@ -6,7 +6,7 @@ function isPlainObject(v: EntryContent): v is Record<string, EntryContent> {
 
 /** Object-valued `sections` keys stand in for the real SDK's per-wallet-type sections
  *  (shielded/unshielded/dust) and are merged shallowly, incoming-wins-per-leaf -- a stand-in for
- *  "each wallet section uses its own section-specific merge function" (`design.md` §3): this is
+ *  "each wallet section uses its own section-specific merge function": this is
  *  enough to prove the concurrency invariant (disjoint section KEYS from two racing writers both
  *  survive) without needing the real, SDK-owned per-section merge logic. Scalar-valued keys stand
  *  in for "shared scalar facts" and are first-writer-wins. */
@@ -26,7 +26,7 @@ function mergeSections(
 }
 
 /**
- * Test-only stand-in for the wallet SDK's `mergeWalletEntries` (`design.md` §2's caller-injected
+ * Test-only stand-in for the wallet SDK's `mergeWalletEntries` (the caller-injected
  * merge function) — never imported from any `@midnightntwrk/*` package. Implements exactly the
  * four merge rules `specs/transaction-history-storage/spec.md` requires:
  * - `identifiers` unioned across merges.

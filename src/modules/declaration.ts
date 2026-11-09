@@ -1,16 +1,16 @@
 /**
  * The module declaration. A module is a TypeScript package that exports a {@link ModuleDeclaration}; the host program
  * imports it, and nothing loads a module by name at run time. Module ids and item names follow the name pattern of
- * `src/db/roles.ts`. [MD-1, DB-8; CORE-ARCH §4.10; design §6, §12]
+ * `src/db/roles.ts`.
  *
  * {@link defineModule} is the module author's entry point. It returns the declaration it is given, adds a typed `entry`
  * builder for the module's configuration as a hidden property, and its type rejects a callback under a name that is
  * not a point, even when the declaration is built first and passed in later (`Partial<PointCallbacks>` alone would
  * accept it). Startup checks every declaration again without relying on types (`./validation.ts`), so a module written
- * in JavaScript or built at run time is held to the same rules. [CF-2, A20]
+ * in JavaScript or built at run time is held to the same rules.
  *
  * Each callback's arguments depend on its point. The database handles come from the database API (`src/db/api.ts`);
- * the contexts, the item sink and the API registry are declared here and built by the runner. [RN-4; design §2]
+ * the contexts, the item sink and the API registry are declared here and built by the runner.
  */
 
 import type { LedgerTask } from "../ledger/types.js";
@@ -19,7 +19,7 @@ import { type EntryBuilder, moduleEntryBuilder } from "../config/entries.js";
 import type { BlockWriteHandle, ReadHandle, SchemaWriteHandle } from "../db/api.js";
 import type { ContentFunction } from "../determinism/contents-hash.js";
 
-/** The points: the runner's steps where module callbacks attach, in the order the runner reaches them. [RN-1] */
+/** The points: the runner's steps where module callbacks attach, in the order the runner reaches them. */
 export const POINTS = Object.freeze([
   "on-start-db",
   "on-start-api",
@@ -38,16 +38,16 @@ export const POINTS = Object.freeze([
 /** A point's name. */
 export type PointName = (typeof POINTS)[number];
 
-/** How long an item lives: set once per process, valid while one block is processed, or stored in tables. [MD-1] */
+/** How long an item lives: set once per process, valid while one block is processed, or stored in tables. */
 export const LIFETIMES = Object.freeze(["process", "block", "table"] as const);
 
 /** One lifetime of an item. */
 export type Lifetime = (typeof LIFETIMES)[number];
 
-/** A `table` item's kind: rows are only appended, or may also be changed. [MD-1] */
+/** A `table` item's kind: rows are only appended, or may also be changed. */
 export const TABLE_KINDS = Object.freeze(["append-only", "mutable"] as const);
 
-/** A settings field's kind: recorded in the configuration history, not recorded, or secret and never shown. [CF-4] */
+/** A settings field's kind: recorded in the configuration history, not recorded, or secret and never shown. */
 export const FIELD_KINDS = Object.freeze(["data", "operational", "secret"] as const);
 
 /** One settings field's kind. */
@@ -56,11 +56,11 @@ export type FieldKind = (typeof FIELD_KINDS)[number];
 /**
  * A module's settings schema: a zod 4 object schema in which every field carries `kind: FieldKind` in its metadata.
  * Put `.meta({ kind })` on the field's outermost schema, after `.default()` or `.optional()`. Heights are integers;
- * byte values are hex strings. [CORE-ARCH §4.10, §4.12; design §7; Q44, Q45]
+ * byte values are hex strings.
  */
 export type FieldSchema = z.ZodObject;
 
-/** A migration. Its checksum is the SHA-256 of its `sql` as UTF-8, and it runs in its own transaction. [DB-9] */
+/** A migration. Its checksum is the SHA-256 of its `sql` as UTF-8, and it runs in its own transaction. */
 export interface Migration {
   id: string;
   sql: string;
@@ -71,7 +71,7 @@ export interface Migration {
  * function that gives it (`src/determinism/contents-hash.ts`). They are not captured or digested per block; they stay
  * deterministic, so the column rules and the `TRUNCATE` guard apply to them. Only UmbraDB's own backbone parts and
  * core modules declare them: a user module that does is refused (`invalid-declaration`), since its tables are hashed
- * by their rows. [DT-3, DT-4, LG-11]
+ * by their rows.
  */
 export interface ContentDefinition {
   /** Some of the item's tables, at least one. */
@@ -80,24 +80,24 @@ export interface ContentDefinition {
   content: ContentFunction;
 }
 
-/** Where a `table` item's data lives: its schema, its tables and their kind. [MD-1, DB-8, Q76, Q89] */
+/** Where a `table` item's data lives: its schema, its tables and their kind. */
 export interface TableDeclaration {
-  /** The module's id with `-` replaced by `_`; for a shared item, the item's name with `-` replaced by `_`. [Q89] */
+  /** The module's id with `-` replaced by `_`; for a shared item, the item's name with `-` replaced by `_`. */
   schema: string;
   tables: string[];
   kind: (typeof TABLE_KINDS)[number];
   /**
    * `false` exempts the item's tables from the determinism rules, for data that does not follow from the chain alone.
-   * Tables are deterministic by default, so `false` is the only value allowed here. [MD-1, DT-3, DT-4, DT-6, Q76]
+   * Tables are deterministic by default, so `false` is the only value allowed here.
    */
   deterministic?: false;
-  /** The item's content-defined tables ({@link ContentDefinition}): UmbraDB's own parts only. [DT-3, DT-4, LG-11] */
+  /** The item's content-defined tables ({@link ContentDefinition}): UmbraDB's own parts only. */
   contentDefined?: ContentDefinition;
 }
 
-/** An item a module provides. [MD-1] */
+/** An item a module provides. */
 export interface ItemDeclaration {
-  /** A plain noun such as "chain-events", matching the name pattern of `src/db/roles.ts`. [DB-8] */
+  /** A plain noun such as "chain-events", matching the name pattern of `src/db/roles.ts`. */
   name: string;
   /** One or more. */
   lifetimes: Lifetime[];
@@ -105,41 +105,40 @@ export interface ItemDeclaration {
   table?: TableDeclaration;
 }
 
-/** A module: what it requires and provides, its settings, migrations and callbacks. [MD-1, DB-10; CORE-ARCH §4.10] */
+/** A module: what it requires and provides, its settings, migrations and callbacks. */
 export interface ModuleDeclaration {
   /**
    * Unique, and matching the name pattern of `src/db/roles.ts`. A user module's id may not start with "core-" or "on-".
-   * [MD-2, DB-8]
    */
   id: string;
-  /** A semver version, recorded in the configuration history. [CORE-ARCH §4.12] */
+  /** A semver version, recorded in the configuration history. */
   version: string;
   side: "public" | "private";
   /** The names of the items it needs: at least one, except for backbone parts, which may need none. */
   requires: string[];
   provides: ItemDeclaration[];
-  /** Whether the module can start at a height after genesis, without the blocks before it. [MD-4; CORE-ARCH §4.10] */
+  /** Whether the module can start at a height after genesis, without the blocks before it. */
   startsMidChain: boolean;
-  /** Set by a private module that reads mutable public tables, so it runs in step with the public side. [PP-6] */
+  /** Set by a private module that reads mutable public tables, so it runs in step with the public side. */
   needsLockstep?: boolean;
-  /** The module runs only when development modules are explicitly enabled. [MD-5] */
+  /** The module runs only when development modules are explicitly enabled. */
   developmentOnly?: boolean;
-  /** The module's settings; every field is marked data, operational or secret. [CF-4] */
+  /** The module's settings; every field is marked data, operational or secret. */
   configSchema: FieldSchema;
-  /** Applied in order and never undone; each is checksummed, and a new version keeps all earlier ones. [DB-9] */
+  /** Applied in order and never undone; each is checksummed, and a new version keeps all earlier ones. */
   migrations: Migration[];
-  /** True when this version may only run on a database that no other version of the module has written. [DB-10] */
+  /** True when this version may only run on a database that no other version of the module has written. */
   requiresResync?: boolean;
   /**
    * Functions the ledger worker runs on each block's native parsed objects. Each result becomes a `block` item of the
    * module, named after the task. A module with ledger tasks requires `block-parsed`, and also `ledger-state` if any
-   * task declares `needsState`. [LG-17; design §5.5]
+   * task declares `needsState`.
    */
   ledgerTasks?: readonly LedgerTask[];
   points: Partial<PointCallbacks>;
 }
 
-/** One revision of the calling module's configuration entry: its heights, version and settings. [CORE-ARCH §4.12] */
+/** One revision of the calling module's configuration entry: its heights, version and settings. */
 export interface Revision {
   start: bigint;
   stop: bigint | null;
@@ -147,24 +146,24 @@ export interface Revision {
   settings: Readonly<Record<string, unknown>>;
 }
 
-/** What every callback of a module receives. [MD-7; CORE-ARCH §4.10] */
+/** What every callback of a module receives. */
 export interface ProcessContext {
-  /** The `process` items: `config`, `node-client` (core modules only), `db` (read-only) and `ledger-table`. [Q73] */
+  /** The `process` items: `config`, `node-client` (core modules only), `db` (read-only) and `ledger-table`. */
   items: ReadonlyMap<string, unknown>;
   /** The calling module's revisions, in start order. */
   revisions: readonly Revision[];
-  /** Publishes a `process` item the module provides. Call it once, from `on-start-db`. [MD-7] */
+  /** Publishes a `process` item the module provides. Call it once, from `on-start-db`. */
   publish(item: string, value: unknown): void;
 }
 
-/** A block header from the block source: either announced as the best block, or dropped in a rollback. [IN-6] */
+/** A block header from the block source: either announced as the best block, or dropped in a rollback. */
 export interface BlockHeader {
   height: bigint;
   hash: Uint8Array;
   parentHash: Uint8Array;
 }
 
-/** What a callback receives for the block at one height. [RN-5; CORE-ARCH §4.10] */
+/** What a callback receives for the block at one height. */
 export interface BlockContext {
   height: bigint;
   hash: Uint8Array;
@@ -177,12 +176,12 @@ export interface BlockContext {
   active: (moduleId: string) => boolean;
 }
 
-/** Where a module puts each `block` item it provides, once per block. [RN-5] */
+/** Where a module puts each `block` item it provides, once per block. */
 export interface ItemSink {
   put(item: string, value: unknown): void;
 }
 
-/** Where `on-start-api` registers the module's HTTP routes and subscriptions. [RN-15, RN-16; CORE-ARCH §4.10] */
+/** Where `on-start-api` registers the module's HTTP routes and subscriptions. */
 export interface ApiRegistry {
   http(
     method: "GET" | "POST",
@@ -201,7 +200,6 @@ export interface ApiRegistry {
  * `on-finalized` at the cursor, `on-start-height` at h − 1, and `on-stop-height` at h. In a private process,
  * `on-fetch` gets a read of the public database at its committed height (the public cursor, which is at least h), so
  * the module must select the public rows it needs by height. In the core, `on-fetch` gets no read handle.
- * [RN-4, PP-3, PP-5, Q100 A; CORE-ARCH §4.10; design §2]
  */
 export interface PointCallbacks {
   "on-start-db"(p: ProcessContext, w: SchemaWriteHandle): Promise<void>;
@@ -228,12 +226,12 @@ export type KnownPointsOnly<D extends ModuleDeclaration> = {
   };
 };
 
-/** What `defineModule` returns: the same declaration, with its `entry` builder added. [CF-2] */
+/** What `defineModule` returns: the same declaration, with its `entry` builder added. */
 export type DefinedModule<D extends ModuleDeclaration> = D & {
   /**
    * Builds the module's configuration entry for one revision: `{ id, start, stop?, version, config }`. The id and
    * version come from the declaration, and `config` is typed by the module's settings schema. A module package exports
-   * this builder. [CF-2]
+   * this builder.
    */
   readonly entry: EntryBuilder<D>;
 };
@@ -241,11 +239,10 @@ export type DefinedModule<D extends ModuleDeclaration> = D & {
 /**
  * Declares a module. Returns `declaration` itself, with its `entry` builder added as a non-enumerable, read-only
  * property, so `Object.keys`, spreads, JSON and the validation in `./validation.ts` see the declaration unchanged.
- * [MD-1, CF-2]
  *
  * The parameter type checks the declaration and rejects a callback under a name that is not a point, even when the
  * declaration was built first and passed in later (`ModuleDeclaration` alone would accept it). Startup checks the
- * declaration again at run time. [A20]
+ * declaration again at run time.
  *
  * Throws a `TypeError` if the declaration cannot take a new property (frozen, sealed or not extensible); freeze it
  * after calling `defineModule`, not before.

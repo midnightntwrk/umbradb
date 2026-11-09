@@ -8,7 +8,7 @@ import { statusOf, type StatusFacts } from "../../src/runner/process.js";
 /**
  * Why a process is refused or halted, and which failures it retries. `reasonOf` gives each failure a code from the
  * design's "Refusals and halts" section, with the height, module and point it happened at, never a message.
- * `retryOf` says which failures are retried instead of halting. [RN-8, IN-10, IN-12, AE-3, AE-5, AE-6; design §11]
+ * `retryOf` says which failures are retried instead of halting.
  */
 
 const reason = (code: ProcessReason["code"], rest: Partial<ProcessReason> = {}): ProcessReason => ({
@@ -36,7 +36,7 @@ describe("the codes reasons keep", () => {
   });
 });
 
-describe("reasonOf: a failure's code, height, module and point (RN-8, AE-5, AE-6)", () => {
+describe("reasonOf: a failure's code, height, module and point", () => {
   const thrown = new Error("the callback's own error, which may hold a password");
 
   it("a callback's failure in the loop: callback-error with the height, point and module, never the message", () => {
@@ -53,7 +53,7 @@ describe("reasonOf: a failure's code, height, module and point (RN-8, AE-5, AE-6
     );
   });
 
-  it("keeps the cause's own code where §11 names it, with the point and module it happened at", () => {
+  it("keeps the cause's own code where it is a reason code, with the point and module it happened at", () => {
     for (const code of ["truncate-not-allowed", "node-requirement", "database-error"] as const) {
       const cause = new UmbraError(code, `${code} at 7`);
       const failure = new HeightFailure(7n, new CallbackFailure("on-db-write", "m", cause), {
@@ -65,9 +65,9 @@ describe("reasonOf: a failure's code, height, module and point (RN-8, AE-5, AE-6
     }
   });
 
-  it("a reclamation check's ledger-refcount-invalid halts with that code, in on-compute and on-db-write, never callback-error (LG-14)", () => {
+  it("a reclamation check's ledger-refcount-invalid halts with that code, in on-compute and on-db-write, never callback-error", () => {
     // The step's checks in on-compute, before eviction; the written row counts in on-db-write. The reason keeps the
-    // code, the height, the module and the point, and nothing of the details (a key, a statement's counts). [R19]
+    // code, the height, the module and the point, and nothing of the details (a key, a statement's counts).
     const checks = [
       ["on-compute", new UmbraError("ledger-refcount-invalid", "negative count", { reason: "negative-count", height: 9n, key: `0x${"ab".repeat(32)}` })],
       ["on-db-write", new UmbraError("ledger-refcount-invalid", "row counts", { reason: "row-count-mismatch", height: 9n, statement: "nodes", expected: 3, actual: 2 })],
@@ -94,14 +94,14 @@ describe("reasonOf: a failure's code, height, module and point (RN-8, AE-5, AE-6
     expect(reasonOf(failure)).toEqual(reason("callback-error", { height: 4n, module: "keeper", point: "on-db-write" }));
   });
 
-  it("a failure no callback made: the cause's §11 code, unexpected-cursor for the loop's cursor check, else database-error", () => {
+  it("a failure no callback made: the cause's own code, unexpected-cursor for the loop's cursor check, else database-error", () => {
     const at = (cause: unknown) => reasonOf(new HeightFailure(3n, cause, { committed: false }));
     expect(at(new UmbraError("writer-lock-lost", "taken"))).toEqual(reason("writer-lock-lost", { height: 3n }));
     expect(at(new UmbraError("database-error", "BEGIN failed"))).toEqual(reason("database-error", { height: 3n }));
     expect(at(new UnexpectedCursor("left at 2"))).toEqual(reason("unexpected-cursor", { height: 3n }));
     expect(new UnexpectedCursor("left at 2")).toMatchObject({ name: "UnexpectedCursor", message: "left at 2" });
     // Neither a database error nor a code the design names: the general halt. A code registry may give them codes of
-    // their own. [design §11]
+    // their own.
     expect(at(new UmbraError("node-error", "the node answered an error"))).toEqual(reason("database-error", { height: 3n }));
     expect(at(new Error("the source has no block at 3"))).toEqual(reason("database-error", { height: 3n }));
     expect(at("a string")).toEqual(reason("database-error", { height: 3n }));
@@ -138,7 +138,7 @@ describe("reasonOf: a failure's code, height, module and point (RN-8, AE-5, AE-6
   });
 });
 
-describe("startupRejection: what started rejects with, one code for one failure (LM-9)", () => {
+describe("startupRejection: what started rejects with, one code for one failure", () => {
   const secret = "s3cr3t-in-a-message";
 
   it("the failure itself when it is an UmbraError of the reason's code, unwrapped from the runner's wrappers", () => {
@@ -166,7 +166,7 @@ describe("startupRejection: what started rejects with, one code for one failure 
     expect(general).toMatchObject({ code: "database-error", cause: plain });
     expect(general.message).not.toContain(secret);
     expect(startupRejection("a string")).toMatchObject({ code: "database-error", cause: "a string" });
-    // An UmbraError whose code §11 does not list is the general refusal's cause.
+    // An UmbraError whose code is no reason code is the general refusal's cause.
     const other = new UmbraError("node-error", "the node answered an error");
     expect(startupRejection(other)).toMatchObject({ code: "database-error", cause: other });
     // A misuse in a callback: callback-error, the misuse its cause.
@@ -197,7 +197,7 @@ describe("startupRejection: what started rejects with, one code for one failure 
   });
 });
 
-describe("retryOf: what IN-10 retries instead of halting", () => {
+describe("retryOf: what is retried instead of halting", () => {
   const lost = new UmbraError("connection-lost", "the writer connection to PostgreSQL was lost");
   const unreachable = new UmbraError("node-unreachable", "the node did not answer");
 
@@ -228,7 +228,7 @@ describe("retryOf: what IN-10 retries instead of halting", () => {
   });
 });
 
-describe("statusOf: refused and halted (AE-3, AE-4)", () => {
+describe("statusOf: refused and halted", () => {
   const base: StatusFacts = {
     phase: "running",
     start: 1n,
@@ -250,7 +250,7 @@ describe("statusOf: refused and halted (AE-3, AE-4)", () => {
       ready: false,
       reason: refusal,
     });
-    // Ready even far behind without a readiness lag, unlike a halted one at the same lag. [AE-4]
+    // Ready even far behind without a readiness lag, unlike a halted one at the same lag.
     expect(statusOf(base)).toMatchObject({ state: "syncing", ready: true, reason: null });
     expect(statusOf({ ...base, phase: "halted", reason: halt, head: 4n })).toMatchObject({ state: "halted", ready: false, lag: 0n });
   });

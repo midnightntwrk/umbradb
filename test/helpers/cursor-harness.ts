@@ -16,18 +16,18 @@ import { declaration } from "../modules/declarations.js";
 import { Contexts } from "../runner/fixtures.js";
 
 /**
- * What the cursor-table helper's tests share. [SH-1, A59]
+ * What the cursor-table helper's tests share.
  *
  * A database on each backend, opened with the committed height of the cursor (`core-block-commit`'s `blocks`,
- * `cursorHeight`). The migration runner starts it with these four parts, in the fixed backbone order: [RN-3]
+ * `cursorHeight`). The migration runner starts it with these four parts, in the fixed backbone order:
  * - `core-block-commit`;
  * - the test module `wallet-scan`, whose migrations are the helper's table and an audit of its writes;
  * - the test module `token-scan`, which writes nothing of its own;
- * - the real `core-digest`, so that change capture runs on the helper's table as on any module table. [DT-4]
+ * - the real `core-digest`, so that change capture runs on the helper's table as on any module table.
  *
  * A block, as the runner writes one: one transaction of the database API, with its `on-db-write` callbacks run through
  * the real block write handles (`openBlockWrites`). `core-block-commit`'s row comes first, then one module's callback,
- * then `core-digest`'s. [DB-3, CD-3]
+ * then `core-digest`'s.
  *
  * The height-versioned table's tests (`height-versioned-harness.ts`) start the same way with their own modules,
  * through {@link helperDatabase}.
@@ -39,7 +39,7 @@ export const CURSORS: CursorTable = cursorTable({ schema: "wallet_scan", table: 
 /**
  * The oracle of "through the module's handle": every insert or update of `wallet_scan.cursors` records, per key, the
  * role it ran under (`current_user` in a trigger is the role of the statement that fired it) and its transaction. A
- * transaction id does not follow from the chain, so the audit's item is declared `deterministic: false`. [MD-1, Q76]
+ * transaction id does not follow from the chain, so the audit's item is declared `deterministic: false`.
  */
 export const AUDIT_MIGRATION: Migration = {
   id: "002",
@@ -56,7 +56,7 @@ CREATE TRIGGER audit_write AFTER INSERT OR UPDATE ON wallet_scan.cursors
 };
 
 /**
- * `wallet-scan`: a module keeping per-key cursors in the helper's table, as in the spec's example. [CORE-ARCH §4.11a]
+ * `wallet-scan`: a module keeping per-key cursors in the helper's table, as in the spec's example.
  */
 export function walletScan(points: ModuleDeclaration["points"] = {}): ModuleDeclaration {
   return declaration("wallet-scan", {
@@ -77,17 +77,17 @@ export function walletScan(points: ModuleDeclaration["points"] = {}): ModuleDecl
   });
 }
 
-/** `token-scan`: another module, with nothing of its own to write; it reads `wallet-scan`'s tables. [DB-6] */
+/** `token-scan`: another module, with nothing of its own to write; it reads `wallet-scan`'s tables. */
 export const TOKEN_SCAN: ModuleDeclaration = declaration("token-scan", { provides: [], migrations: [] });
 
-/** The role `wallet-scan` writes under. [DB-6] */
+/** The role `wallet-scan` writes under. */
 export const WALLET_SCAN_ROLE = "umbradb_m_wallet_scan";
 
 /** Options of one block. */
 export interface BlockOptions {
   /** The part whose `on-db-write` runs `body` (default: the database's main module, `wallet-scan` for a cursor one). */
   readonly part?: string;
-  /** Receives the error reported when a write handle is used after its callback ended. [DB-3] */
+  /** Receives the error reported when a write handle is used after its callback ended. */
   readonly onClosedUse?: (error: UmbraError) => void;
 }
 
@@ -127,7 +127,7 @@ export async function cursorDatabase(backend: TestBackend): Promise<CursorDataba
 
 /**
  * A database on `backend` started, as the runner starts one, with the parts `core-block-commit`, `modules` and the real
- * `core-digest`, in the fixed backbone order; its blocks run the first of `modules` unless told otherwise. [RN-3]
+ * `core-digest`, in the fixed backbone order; its blocks run the first of `modules` unless told otherwise.
  */
 export async function helperDatabase(
   backend: TestBackend,

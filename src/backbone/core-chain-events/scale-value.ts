@@ -1,7 +1,7 @@
 /**
  * SCALE values read with a runtime's type registry (`scale-info`'s portable registry, `src/backbone/core-block-fetch/
  * metadata.ts`). `core-chain-events` decodes a block's chain events with them, and `core-block-parsed` a ledger
- * transaction's call arguments. [CD-4, CD-5]
+ * transaction's call arguments.
  *
  * Every type the registry can define is read (composites, variants, sequences, arrays, tuples, primitives, compacts and
  * bit sequences) exactly as `parity-scale-codec` encodes it, and the value is plain data:
@@ -26,10 +26,8 @@
  * {@link canonicalJson} writes a value as JSON for a `jsonb` column (`core_chain_events.events.fields`):
  * - keys sorted, with no spaces;
  * - a `bigint` as its decimal text, in a JSON string, because integers of 64 bits and wider may fall outside the signed
- *   64-bit range that the determinism `CHECK` allows for a JSON number [Q57];
+ *   64-bit range that the determinism `CHECK` allows for a JSON number;
  * - bytes as `0x` lowercase hex.
- *
- * [design §10]
  *
  * A value is read exactly or not at all: bytes that end too soon, a variant index the type does not have, a `bool`
  * other than 0 or 1, a `char` that is no Unicode scalar value, a string that is not UTF-8, a compact larger than its

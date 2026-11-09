@@ -10,16 +10,16 @@ import { HELD, LIVE_AT, runLiveObject } from "./refcount-live-object.js";
  * `ledger-refcount-live-object.test.ts` with the worker restart disabled (`restartOnRefusedEviction: false`). The
  * package's refusal to forget x fails block h with `callback-error` in `core-ledger-state`'s `on-compute`, and nothing
  * of h is stored: the database is at h − 1, every table of `core_ledger_state` as a run that commits h (its package
- * writing the same batches) held it after h − 1, and x still a row. [R30, LG-14, Q144 B]
+ * writing the same batches) held it after h − 1, and x still a row.
  */
 
 const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
 
-describe.each(PROCESS_BACKENDS)("R30's negative control on $name", (backend) => {
+describe.each(PROCESS_BACKENDS)("negative control on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("R30 control: with the worker restart disabled, the refused eviction of x fails block h with callback-error and nothing of h is stored", async () => {
+  it("control: with the worker restart disabled, the refused eviction of x fails block h with callback-error and nothing of h is stored", async () => {
     const h = LIVE_AT;
     const x = hex(HELD.key);
     // The tables after h − 1 of a run that commits h (its package writes the same batches), read before h was applied.

@@ -6,7 +6,7 @@ import { type Message, type MessageType, messageText, parseMessage } from "../..
 /**
  * A raw client of the core's process transport for the transport tests. It sends whatever text a test gives it (a
  * message, or text that is not one) and records what the core answers and how the connection ends. Imports nothing of
- * Vitest. [PP-4, PP-11]
+ * Vitest.
  */
 
 /** How a connection ended, or why it never opened. */

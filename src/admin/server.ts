@@ -4,7 +4,6 @@
  * listens. The address is parsed by the module API listener's `parseAddress`, the one thing the two listeners share.
  * {@link AdminServer.publish} sends the thread each new snapshot. {@link AdminServer.close} ends its listener, then
  * its thread, so nothing of it outlives the process's `stop()` (a thread cannot outlive its process in any case).
- * [AE-1; CORE-ARCH §4.18; design §1]
  *
  * **The thread's entry** ({@link workerEntry}): beside a build, the compiled `worker.js`; from the TypeScript sources
  * (development, the tests), `worker.ts` through Node.js's type stripping, with a resolve hook that maps the sources'
@@ -23,7 +22,7 @@ export const ADMIN_CLOSE_TIMEOUT_MS = 2_000;
 
 /** What starting an admin listener takes. */
 export interface AdminStartOptions {
-  /** `listen.admin`: `host:port`. [CF-4] */
+  /** `listen.admin`: `host:port`. */
   readonly address: string;
   /** The heartbeat's shared memory (`../runner/heartbeat.ts`). */
   readonly beat: SharedArrayBuffer;
@@ -33,7 +32,7 @@ export interface AdminStartOptions {
   readonly onFailure?: (error: Error) => void;
   /**
    * Where the thread's standard output and standard error go (`../runner/worker-output.ts`): inherited from the process
-   * unless given; the engine gives its log, or `"inherit"` for `umbradb run`. [LM-2, L4, L55]
+   * unless given; the engine gives its log, or `"inherit"` for `umbradb run`.
    */
   readonly output?: WorkerOutput;
 }

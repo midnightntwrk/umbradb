@@ -2,7 +2,7 @@
  * A backup file's text as a restore reads it: its first line (the manifest), then the lines after it (the dump) as a
  * stream, read as often as the restore needs. A file on disk is read through `node:fs` (`./restore.ts`). The browser
  * page's file, a `Blob` the user picked, is read through {@link blobText} with the web's streams only, so this module
- * runs in Node.js and in a browser worker alike. [BK-3, BK-5, BR-3; design §9.1, §9.2]
+ * runs in Node.js and in a browser worker alike.
  *
  * **Lines** are the text between line feeds: a carriage return is kept (a dumped string may hold one, which a reader
  * that also ends a line there would split), and a last line without a feed is given.

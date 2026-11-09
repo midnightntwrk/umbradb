@@ -25,20 +25,19 @@ import { RetargetProxy } from "./relays.js";
  * - no transaction is open (PostgreSQL's `pg_stat_activity`: no session's transaction is open across two looks 200 ms
  *   apart; on PGlite, its one queue is free, so a read of the core's database is answered meanwhile);
  * - the condition `waiting-for-lockstep` names the instance.
- * [A117 FAULT, PP-6; required test id `private.lockstep-waits-no-transaction`]
  *
- * This holds both while the instance was never seen since the core started and once it is stopped. [Q24]
+ * This holds both while the instance was never seen since the core started and once it is stopped.
  *
  * The core resumes when the instance is back and reports, and each on-fetch read of the instance is at its block's
  * height exactly. A core restarted while the instance is at the public cursor does not deadlock: it learns the
- * instance's height from its `hello`. [A117 FAULT, PP-6]
+ * instance's height from its `hello`.
  *
  * Committed negative controls: a core that opens its block transaction before it waits, and one that skips an instance
- * not seen since its start, each fail the oracle. [A117 FAULT]
+ * not seen since its start, each fail the oracle.
  *
  * Tested elsewhere: the report's hash check, the behind-instance refusal and `needsLockstep` in
  * `./lockstep-refusals.test.ts`; the reread of public data in `./lockstep-reads.test.ts`; the loop's own wait in
- * `test/runner/lockstep-wait.test.ts`. [Q142]
+ * `test/runner/lockstep-wait.test.ts`.
  */
 
 const LISTED = "lockstep-1";
@@ -125,7 +124,7 @@ const shown = (instances: readonly LockstepInstance[]): string =>
  * A core that waits inside its block transaction holds it through every look of the wait (the negative control's is in
  * all five). A look may also land on a short read of the same login that has nothing to do with the wait — admin's fact
  * reads, which follow `opened()` and each commit — and that read has ended by the next look, 200 ms later: the core's
- * own wait holds no transaction then. [A117 FAULT, PP-6]
+ * own wait holds no transaction then.
  */
 export function heldTransactions(samples: readonly WaitSample[]): OpenTransaction[] {
   const held = new Map<string, OpenTransaction>();
@@ -138,7 +137,7 @@ export function heldTransactions(samples: readonly WaitSample[]): OpenTransactio
   return [...held.values()];
 }
 
-/** The oracle for one wait (see the module comment): every problem, none when it holds. [A117 FAULT] */
+/** The oracle for one wait (see the module comment): every problem, none when it holds. */
 export function waitProblems(samples: readonly WaitSample[], expected: ExpectedWait): string[] {
   const problems: string[] = [];
   if (samples.length === 0) problems.push("no look at the core while it waited");
@@ -207,7 +206,7 @@ async function firstWait(backend: PrivateBackend, loop?: new (input: LoopInput) 
 /** The wait expected of a core at S = 1 listing {@link LISTED}, never seen. */
 const UNSEEN: ExpectedWait = { cursor: null, height: 1n, instance: LISTED, connected: false, heights: [null] };
 
-/** The wait scenario run on `backend` (see the module comment): every problem found. [A117 FAULT] */
+/** The wait scenario run on `backend` (see the module comment): every problem found. */
 async function a117Problems(backend: PrivateBackend): Promise<string[]> {
   const publicDb = await backend.database("public");
   const privateDb = await backend.database("private");
@@ -229,7 +228,7 @@ async function a117Problems(backend: PrivateBackend): Promise<string[]> {
   try {
     proxy.retarget(await core.transportWithin(START_TIMEOUT_MS));
     await core.handle.started;
-    // Not seen since the core started: it waits at S. [Q24]
+    // Not seen since the core started: it waits at S.
     problems.push(...waitProblems(await sampleWait(core, publicDb, backend, 3n), UNSEEN));
     // In lockstep: each height commits once the instance committed the one before (its hello, then its reports).
     instance = launch();
@@ -261,14 +260,14 @@ async function a117Problems(backend: PrivateBackend): Promise<string[]> {
   const rows = await rowsIn(privateDb);
   const wanted = Array.from({ length: 8 }, (_, i) => [i + 1, Buffer.from(inMemoryBlock(BigInt(i + 1)).hash).toString("hex")]);
   if (JSON.stringify(rows) !== JSON.stringify(wanted)) problems.push(`the instance's rows are ${JSON.stringify(rows)}, not 1–8 with the public hashes`);
-  // Lockstep: each on-fetch read of public data at its block's height exactly, never above. [PP-6]
+  // Lockstep: each on-fetch read of public data at its block's height exactly, never above.
   for (const call of seen.filter((one) => one.point === "on-fetch")) {
     if (call.readHeight !== call.height) problems.push(`on-fetch at ${call.height} read public data at ${call.readHeight}`);
   }
   return problems;
 }
 
-describe("A117's oracle for an open transaction (PostgreSQL's looks, no database)", () => {
+describe("for an open transaction (PostgreSQL's looks, no database)", () => {
   /** Five looks at a core waiting at S = 1, never seen, with `open` the sessions each look saw. */
   const waiting: LockstepCondition = { code: "waiting-for-lockstep", height: 1n, instances: [{ instance: LISTED, connected: false, height: null, refused: null }] };
   const looks = (...open: (readonly OpenTransaction[])[]): WaitSample[] =>
@@ -295,14 +294,14 @@ describe("A117's oracle for an open transaction (PostgreSQL's looks, no database
   });
 });
 
-describe.each(PRIVATE_BACKENDS)("A117: the core waits for a lockstep instance on $name (PP-6)", (backend: PrivateBackend) => {
+describe.each(PRIVATE_BACKENDS)("the core waits for a lockstep instance on $name", (backend: PrivateBackend) => {
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 
   // The required id names one test (the gate refuses an id two tests carry): the PostgreSQL 18 copy.
   const requiredId = backend.kind === "postgres" ? "[[private.lockstep-waits-no-transaction]] " : "";
   it(
-    `${requiredId}A117: a stopped lockstep instance makes the core wait before BEGIN with no ` +
+    `${requiredId}a stopped lockstep instance makes the core wait before BEGIN with no ` +
       "transaction open and waiting-for-lockstep, and resume when it reports; restarting the core while the instance " +
       "is at the public cursor does not deadlock",
     async () => {
@@ -312,7 +311,7 @@ describe.each(PRIVATE_BACKENDS)("A117: the core waits for a lockstep instance on
   );
 
   it(
-    "A117: a core listing an instance but without listen.privateLink waits for it all the same (Q24: no instance can connect)",
+    "a core listing an instance but without listen.privateLink waits for it all the same (no instance can connect)",
     async () => {
       const publicDb = await backend.database("public");
       const core = launchPublicCore({ database: publicDb.setting, head: 3n, extra: { lockstepInstances: [LISTED] } });
@@ -328,7 +327,7 @@ describe.each(PRIVATE_BACKENDS)("A117: the core waits for a lockstep instance on
   );
 
   it(
-    "A117 negative control (committed): a core that opens its block transaction before it waits fails the oracle",
+    "negative control (committed): a core that opens its block transaction before it waits fails the oracle",
     async () => {
       const problems = waitProblems(await firstWait(backend, WaitsInTransaction), UNSEEN);
       expect(problems).toContain(
@@ -341,7 +340,7 @@ describe.each(PRIVATE_BACKENDS)("A117: the core waits for a lockstep instance on
   );
 
   it(
-    "A117 negative control (committed): a core that skips an instance not seen since its start proceeds without it",
+    "negative control (committed): a core that skips an instance not seen since its start proceeds without it",
     async () => {
       const problems = waitProblems(await firstWait(backend, SkipsUnseen), UNSEEN);
       expect(problems).toContain(`the core moved to 3 while ${LISTED} was down (it was to wait at 1)`);

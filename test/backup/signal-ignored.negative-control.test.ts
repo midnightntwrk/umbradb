@@ -17,7 +17,7 @@ import {
 
 /**
  * The ignored-signal tests' negative controls, each failing an oracle of `./signal-ignored-fixtures.ts` that
- * `./signal-ignored.test.ts` passes: [A175, BK-1, Q173 C]
+ * `./signal-ignored.test.ts` passes:
  *
  * - **A command that does not listen** — `runProcess` (`./signal-ignored.worker.ts`, the command's stand-in) whose
  *   SIGUSR2 reaches no listener, as the command once shipped without `backupOnSignal` — fails `sigusr2Ignored`:
@@ -25,7 +25,7 @@ import {
  *   the missing listener, not the stand-in.
  * - **A host program's process that listens anyway** — `startProcess` given the command's relay of SIGUSR2 (the
  *   rejected option where every process listens) — fails `listenerProblems`: one SIGUSR2 listener more while it runs
- *   [Q173 C].
+ *.
  */
 
 const TEST_TIMEOUT_MS = 900_000;
@@ -49,7 +49,7 @@ afterAll(async () => {
   project?.remove();
 }, 120_000);
 
-/** The command oracle applied to the command's stand-in with `signals`. [A175] */
+/** The command oracle applied to the command's stand-in with `signals`. */
 async function standIn(signals: WorkerSignals): Promise<void> {
   const node = await pacedNode();
   const cwd = join(dir, signals);
@@ -62,9 +62,9 @@ async function standIn(signals: WorkerSignals): Promise<void> {
   }
 }
 
-describe("A175 negative controls (BK-1, Q173 C)", () => {
+describe("negative controls", () => {
   it(
-    "the command's stand-in with its own signals passes A175's oracle",
+    "the command's stand-in with its own signals passes the oracle",
     async () => {
       await standIn("command");
     },
@@ -72,7 +72,7 @@ describe("A175 negative controls (BK-1, Q173 C)", () => {
   );
 
   it(
-    "a command whose SIGUSR2 reaches no listener fails A175's oracle: the signal ends it",
+    "a command whose SIGUSR2 reaches no listener fails the oracle: the signal ends it",
     async () => {
       await expect(standIn("unconnected")).rejects.toThrow(/the command ended on SIGUSR2 \(exit null, signal SIGUSR2\)/);
     },
@@ -80,7 +80,7 @@ describe("A175 negative controls (BK-1, Q173 C)", () => {
   );
 
   it(
-    "startProcess that listens for SIGUSR2 without backupOnSignal fails A175's listener count",
+    "startProcess that listens for SIGUSR2 without backupOnSignal fails the listener count",
     async () => {
       let run: Pausable | undefined;
       let relay: ReturnType<typeof backupSignalRelay> | undefined;

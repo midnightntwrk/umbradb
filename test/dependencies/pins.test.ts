@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 // The versions the characterization tests in this folder were run against are pinned exactly, in `package.json` and
 // in the lockfile that `npm ci` installs from. `typescript` is a runtime dependency (for `umbradb config check`) and
-// `zod` stays on major version 4. [Q45; proposal "New runtime dependencies"; design §7, §14]
+// `zod` stays on major version 4.
 
 type Manifest = {
   dependencies: Record<string, string>;
@@ -37,7 +37,7 @@ describe("dependency pins", () => {
     expect(locked("esbuild")).toMatchObject({ version: "0.28.2", dev: true });
   });
 
-  it("pins ajv 8.18.0 exactly as a development dependency (task 8.3: the admin endpoints' JSON schemas, A66)", () => {
+  it("pins ajv 8.18.0 exactly as a development dependency (the admin endpoints' JSON schemas)", () => {
     expect(manifest.devDependencies["ajv"]).toBe("8.18.0");
     expect(manifest.dependencies["ajv"]).toBeUndefined();
     expect(locked("ajv")).toMatchObject({ version: "8.18.0", dev: true });
@@ -45,7 +45,7 @@ describe("dependency pins", () => {
 
   it(
     "pins @electric-sql/pglite-tools 0.4.10 (PGlite 0.5.10's) as an optional peer and a development dependency only " +
-      "(task 15.1: the backup's pg_dump on PGlite, imported when a backup runs; owner decision Q85)",
+      "(the backup's pg_dump on PGlite, imported when a backup runs)",
     () => {
       expect(manifest.devDependencies["@electric-sql/pglite-tools"]).toBe("0.4.10");
       expect(manifest.dependencies["@electric-sql/pglite-tools"]).toBeUndefined();

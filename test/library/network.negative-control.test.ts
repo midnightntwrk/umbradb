@@ -7,12 +7,12 @@ import { libraryData } from "./library-fixtures.js";
 import { commandRefusalProblems, type Expected, listeningSockets, refusedProblems } from "./network-refusals.js";
 
 /**
- * L18's schema case's committed negative control, through the criterion's own oracle (`./network-refusals.ts`), with
+ * The schema case's committed negative control, through the criterion's own oracle (`./network-refusals.ts`), with
  * the fault put back in the schema itself — `../../src/config/core-settings.ts` replaced here: the public `core`
  * schema without its `transportReader` rule (a PostgreSQL database with `listen.privateLink` written needs a reader
  * login), its issue dropped and the settings otherwise validated as given. `startUmbraDB` with `publicSide: true` and
  * `umbradb run` on the same configuration are then not refused through the schema, and the oracle fails for both; with
- * the real schema, in the same file, it passes. On PostgreSQL 18 (Docker). [L18, CF-4, A177]
+ * the real schema, in the same file, it passes. On PostgreSQL 18 (Docker).
  */
 
 const control = vi.hoisted(() => ({ withoutRule: false }));
@@ -42,7 +42,7 @@ vi.mock("../../src/config/core-settings.js", async (importOriginal) => {
   };
 });
 
-describe("L18's schema case: its negative control on PostgreSQL 18 (CF-4)", () => {
+describe("schema case: its negative control on PostgreSQL 18", () => {
   const backend = PROCESS_BACKENDS.find((one) => one.kind === "postgres") as ProcessBackend;
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);

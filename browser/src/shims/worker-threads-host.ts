@@ -3,7 +3,7 @@
  * build: its `Worker` over a dedicated Web Worker (a module worker), so that the ledger worker's host
  * (`src/ledger/worker/host.ts`) runs unchanged in the browser. The worker's `workerData` goes as the first message,
  * which `./worker-threads-worker.ts` reads before the entry runs. Its `SharedArrayBuffer` (the node-store bridge) stays
- * shared, as the page is cross-origin isolated. [LG-10; design §5.3, §9.2]
+ * shared, as the page is cross-origin isolated.
  *
  * Node.js's events become: `message` each message; `error` an uncaught error of the worker, or a message that could not
  * be read, after which the worker is ended — as an uncaught error ends a Node.js worker thread —; `exit` once, when the

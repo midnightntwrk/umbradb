@@ -9,7 +9,6 @@ import { instancesProblems, instancesRun } from "./privacy-checks.js";
  * It uses the same run and oracle (`./privacy-checks.ts`) over 5 blocks, with `keeper` independent. The core's admin
  * endpoints are served from snapshots that show one field more of each private instance than the four allowed: the
  * hash of its last `hello` or report, which the core's transport knows. The oracle finds it in the core's `/status`.
- * [A120, PP-9]
  */
 
 /** An admin starter whose snapshots add `hash` to each private instance the core's `/status` shows. */
@@ -32,12 +31,12 @@ function showingMore(): AdminStarter {
   };
 }
 
-describe.each(PRIVATE_BACKENDS)("A120's negative control on $name", (backend) => {
+describe.each(PRIVATE_BACKENDS)("negative control on $name", (backend) => {
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 
   it(
-    "a core whose /status shows more of an instance than its id, connection, lockstep flag and height fails A120's oracle",
+    "a core whose /status shows more of an instance than its id, connection, lockstep flag and height fails the oracle",
     async () => {
       const run = await instancesRun(backend, { head: 5n, lockstep: false, coreAdmin: showingMore() });
       const problems = instancesProblems(run);

@@ -10,7 +10,7 @@ import { processOn, processProblems } from "./pglite-directory-fixtures.js";
  * first check: `startProcess`, and `startUmbraDB`, on the PGlite path `<tmp>/a/b` with `<tmp>/a` missing refuse with
  * `database-error` (`open-failed`: the lock's file cannot sit beside a directory whose parent is missing), create no
  * directory and commit nothing. The same build with the real `createPgliteDirectory` passes. The oracle is in
- * `./pglite-directory-fixtures.ts`. [A166, CF-4, Q163 A]
+ * `./pglite-directory-fixtures.ts`.
  */
 
 const control = vi.hoisted(() => ({ createsNothing: true }));
@@ -33,7 +33,7 @@ afterAll(() => {
   if (tmp !== "") rmSync(tmp, { recursive: true, force: true });
 });
 
-describe("negative control: a build that never creates a PGlite directory's missing parents fails A166", () => {
+describe("negative control: a build that never creates a PGlite directory's missing parents fails", () => {
   it("startProcess on <tmp>/a/b is refused open-failed, creating nothing; the real creation passes", async () => {
     control.createsNothing = true;
     const refused = processProblems(await processOn(join(tmp, "a", "b")));

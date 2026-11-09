@@ -17,15 +17,15 @@ import { blockWith, hashOf, mnsvItem, OTHER_ITEMS } from "./version-checks.js";
  * a configured table adds to or replaces parts of it:
  * - a configured row maps the spec_versions it covers, the built-in rows the rest;
  * - a configured pin replaces the built-in pin at its height and adds one elsewhere.
- * A network not in the file (`custom`) sets its own rows. [CF-4, LG-1, LG-2, LG-3]
+ * A network not in the file (`custom`) sets its own rows.
  *
  * The configuration's validation, through the `core` schema, refuses the tables the ledger table rules forbid, each
  * with its path. It gives the table in effect as the revision's setting, so the history records it as a data field
- * with every default applied. [LG-1, LG-2, CF-7]
+ * with every default applied.
  *
  * The synthetic half of the configured-table check: a configuration table "every `spec_version` → v8" selects v8 for
  * every block of a synthetic devnet, whose transactions the v8 adapter it selects parses. The real half, every block of
- * the recorded devnet tape, waits for that tape (OUTDATED). [A95 CI]
+ * the recorded devnet tape, waits for that tape (OUTDATED).
  */
 
 const BUILT_IN_MAINNET = builtInLedgerTable("mainnet") as LedgerTable;
@@ -52,7 +52,7 @@ function findingsOf(config: unknown): readonly Finding[] {
 /** The settings the validation gives the `core` revision of `config`. */
 const coreSettingsOf = (config: unknown) => validateConfig(input(config)).entries[0]!;
 
-describe("the default: the network's built-in table (CF-4, LG-3)", () => {
+describe("the default: the network's built-in table", () => {
   it("gives a known network's revision the built-in table, as a data field the history records", () => {
     for (const network of ["mainnet", "preprod", "preview", "stagenet"]) {
       const entry = coreSettingsOf(withCore({ network }));
@@ -79,7 +79,7 @@ describe("the default: the network's built-in table (CF-4, LG-3)", () => {
     expect(PUBLIC_CORE_SCHEMA.parse({ ...CORE_SETTINGS }).ledgerTable).toEqual(BUILT_IN_PREPROD);
   });
 
-  it("refuses a custom network without its own rows: no file has its table (LG-3)", () => {
+  it("refuses a custom network without its own rows: no file has its table", () => {
     const genesis = { network: "custom", genesisHash: H(1) };
     for (const [settings, path] of [
       [genesis, "entries[0].config.ledgerTable"],
@@ -93,14 +93,14 @@ describe("the default: the network's built-in table (CF-4, LG-3)", () => {
     }
   });
 
-  it("A95's table: a custom network's 'every spec_version → v8' is its table in effect", () => {
+  it("a custom network's 'every spec_version → v8' is its table in effect", () => {
     const rows = [{ specVersionMin: 0, specVersionMax: U32_MAX, ledger: "v8" }];
     const entry = coreSettingsOf(withCore({ network: "custom", genesisHash: H(1), ledgerTable: { rows } }));
     expect(entry.settings?.ledgerTable).toEqual({ rows, pins: [] });
   });
 });
 
-describe("adding and replacing rows and pins (LG-3)", () => {
+describe("adding and replacing rows and pins", () => {
   it("maps the spec_versions a configured row covers by it, and the rest by the built-in rows", () => {
     const table = ledgerTableOf("mainnet", { rows: [{ specVersionMin: 1_500_000, specVersionMax: 2_499_999, ledger: "v9" }] });
     expect(table.rows).toEqual([
@@ -218,7 +218,7 @@ describe("adding and replacing rows and pins (LG-3)", () => {
   });
 });
 
-describe("LG-1 and LG-2's rules on a configured table, each finding with its path", () => {
+describe("on a configured table, each finding with its path", () => {
   const rows = (...given: unknown[]) => withCore({ ledgerTable: { rows: given } });
   const pins = (...given: unknown[]) => withCore({ ledgerTable: { pins: given } });
   const CASES: readonly { name: string; config: unknown; paths: string[]; says: string[] }[] = [
@@ -332,7 +332,7 @@ describe("LG-1 and LG-2's rules on a configured table, each finding with its pat
     });
   });
 
-  it("checks no rule on a revision of another version (CF-3: compared with its recorded row instead)", () => {
+  it("checks no rule on a revision of another version (compared with its recorded row instead)", () => {
     const earlier = { umbradb: "0.9.4", ledgers: [] };
     const config = {
       entries: [
@@ -344,7 +344,7 @@ describe("LG-1 and LG-2's rules on a configured table, each finding with its pat
   });
 });
 
-describe("A95 [CI], synthetic: a custom devnet's 'every spec_version → v8' parses every block with v8", () => {
+describe("synthetic: a custom devnet's 'every spec_version → v8' parses every block with v8", () => {
   it("selects v8 for blocks of runtimes 0.22, 1.0, 2.0 and an unknown one, and v8's adapter parses them", { timeout: 120_000 }, async () => {
     const config = withCore({
       network: "custom",

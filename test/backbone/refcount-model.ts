@@ -3,10 +3,10 @@ import { childRefKeys } from "../../src/ledger/node-refs.js";
 import { type Child, childKey, decodeChildren, encodeChildren, hex, nodeKey, refsOf } from "../ledger/node-format.js";
 
 /**
- * The reference model of LG-14's reference counting, its reachability oracle, and the generators of the histories they
+ * The reference model of the reference counting, its reachability oracle, and the generators of the histories they
  * are checked on. Everything here is test code: the model uses hex keys, maps and sets, no database, and nothing of
  * `src/` but the child-list reader (`childRefKeys`, which `test/ledger/node-refs.test.ts` checks against the ledger
- * package's own `childRefs`). [LG-14, R1]
+ * package's own `childRefs`).
  *
  * - {@link refcountModelStep} computes one block from the tables at h − 1 and the block's batch, rule by rule, in the
  *   order of the rules: (1) the batch's nodes classified as new, rewritten or written again unchanged; (2) each
@@ -35,7 +35,7 @@ import { type Child, childKey, decodeChildren, encodeChildren, hex, nodeKey, ref
 
 // ── The model ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** The tables of `core-ledger-state` that reclamation reads and writes, as the model holds them (hex keys). [LG-14] */
+/** The tables of `core-ledger-state` that reclamation reads and writes, as the model holds them (hex keys). */
 export interface RefcountTables {
   /** `nodes`: each row's key and the child list stored for it (`S_h`). */
   readonly rows: ReadonlyMap<string, Uint8Array>;
@@ -55,7 +55,7 @@ export const EMPTY_TABLES: RefcountTables = Object.freeze({
   queue: new Set<string>(),
 });
 
-/** What the ledger worker flushed for a block (`NodeBatch`, hex keys): each key once, root changes netted. [LG-11] */
+/** What the ledger worker flushed for a block (`NodeBatch`, hex keys): each key once, root changes netted. */
 export interface RefcountBatch {
   readonly inserts: readonly { readonly key: string; readonly children: Uint8Array }[];
   readonly rootCounts: readonly { readonly key: string; readonly delta: number }[];
@@ -69,14 +69,13 @@ export interface RefcountBatch {
  *   block, so a released state's rows are deleted in the block that releases it. (With the root conditions those keys
  *   are protected, so starting from them would change nothing.)
  * - `first-round-only`: the cascade stops after its first round.
- * [R1, R2]
  */
 export type RefcountFault = "no-root-conditions" | "released-in-block" | "first-round-only";
 
-/** The reasons of `ledger-refcount-invalid` the step can find before eviction. [LG-14] */
+/** The reasons of `ledger-refcount-invalid` the step can find before eviction. */
 export type RefcountHaltReason = "negative-count" | "missing-reference";
 
-/** A check of rule 8 failed: the block halts with nothing of it stored. [LG-14] */
+/** A check of rule 8 failed: the block halts with nothing of it stored. */
 export class RefcountModelHalt extends Error {
   readonly reason: RefcountHaltReason;
   readonly key: string;
@@ -88,7 +87,7 @@ export class RefcountModelHalt extends Error {
   }
 }
 
-/** One block's step, as the model computes it. Every list is sorted. [LG-14] */
+/** One block's step, as the model computes it. Every list is sorted. */
 export interface RefcountModelStep {
   /** `N`: the batch's nodes whose key was not a row. */
   readonly newNodes: readonly string[];
@@ -110,8 +109,8 @@ const sorted = (keys: Iterable<string>): string[] => [...keys].sort();
 const refKeysOf = (children: Uint8Array): string[] => childRefKeys(children).map(hex);
 
 /**
- * Block h of LG-14's reference counting (see the module comment): `tables` are the tables at h − 1, `batch` the block's
- * batch, `on` whether `sweep` is on at h. Throws {@link RefcountModelHalt} when a check fails. [LG-14, R1]
+ * Block h of the reference counting (see the module comment): `tables` are the tables at h − 1, `batch` the block's
+ * batch, `on` whether `sweep` is on at h. Throws {@link RefcountModelHalt} when a check fails.
  */
 export function refcountModelStep(
   tables: RefcountTables,
@@ -245,7 +244,7 @@ export function refcountModelStep(
   };
 }
 
-/** The model across blocks: the tables after the last block, and the next block's step. [LG-14, R1] */
+/** The model across blocks: the tables after the last block, and the next block's step. */
 export class RefcountModel {
   readonly #fault: RefcountFault | undefined;
   #tables: RefcountTables = EMPTY_TABLES;
@@ -270,7 +269,7 @@ export class RefcountModel {
 
 /**
  * The node set of `rows`: every row's key and the key of every node embedded in a row's child list, at any depth, each
- * computed from its payload and its children's keys. Two forms of one node hold the same node set. [design §1, R2]
+ * computed from its payload and its children's keys. Two forms of one node hold the same node set.
  */
 export function nodeSet(rows: Iterable<readonly [string, Uint8Array]>): Set<string> {
   const keys = new Set<string>();
@@ -327,7 +326,7 @@ export interface HistoryScript {
 
 /**
  * Generated histories. With `oneForm`, no node is rewritten, none is written again in another form after its
- * deletion, and every batch is admissible: no new node that a rising key does not reach, no rewrite. [R1, R2]
+ * deletion, and every batch is admissible: no new node that a rising key does not reach, no rewrite.
  */
 export function historyScripts(options: {
   readonly oneForm: boolean;
@@ -365,7 +364,7 @@ export function historyScripts(options: {
   });
 }
 
-/** The ledger state a height was generated with: what the oracle recomputes everything from. [R1] */
+/** The ledger state a height was generated with: what the oracle recomputes everything from. */
 export interface GeneratedState {
   readonly height: number;
   readonly retainStates: number;
@@ -383,7 +382,7 @@ export interface GeneratedState {
   readonly stored: ReadonlySet<string>;
 }
 
-/** A generated block: its batch's nodes (child lists as trees and as bytes), its root-count changes, `sweep`. [R1] */
+/** A generated block: its batch's nodes (child lists as trees and as bytes), its root-count changes, `sweep`. */
 export interface GeneratedBlock {
   readonly height: number;
   readonly on: boolean;
@@ -437,7 +436,7 @@ const treeRefs = (tree: readonly Child[]): string[] => refsOf([...tree]).map(hex
  * previous state's root shares, new ones, queued or older nodes), releases the states outside the window, and flushes,
  * as `flushNodes` does, every node reached from a key whose root count rises down to the nodes the package holds as
  * stored; then the block's script adds rewrites, nodes written again, new nodes nothing reaches and the rewrites of a
- * queued node. The package learns of deletions by their eviction ({@link GraphWorld.commit}). [R1]
+ * queued node. The package learns of deletions by their eviction ({@link GraphWorld.commit}).
  */
 export class GraphWorld {
   readonly #oneForm: boolean;
@@ -740,7 +739,7 @@ export class GraphWorld {
   }
 }
 
-/** One block of a driven history: the step's input, the model's step, and the generated state on both sides. [R1] */
+/** One block of a driven history: the step's input, the model's step, and the generated state on both sides. */
 export interface DrivenBlock {
   readonly height: number;
   readonly script: BlockScript;
@@ -757,7 +756,7 @@ export interface DrivenBlock {
 
 /**
  * Runs `script` through `model`, block by block, the package told of each block's deletions. A failed check throws
- * {@link RefcountModelHalt} from the block that fails. [R1]
+ * {@link RefcountModelHalt} from the block that fails.
  */
 export function* driveHistory(
   script: HistoryScript,
@@ -792,7 +791,7 @@ export function reach(starts: Iterable<string>, listOf: (key: string) => readonl
   return seen;
 }
 
-/** The cases of R1 a block can show; the property's runs must show each. [R1] */
+/** The cases of R1 a block can show; the property's runs must show each. */
 export const R1_CASES = [
   "admissible",
   "non-admissible",
@@ -850,8 +849,7 @@ const embedsReference = (tree: readonly Child[]): boolean =>
 /**
  * Checks the model's step at one block against reachability recomputed from the generated state: `S_{h−1}` is what the
  * package held as stored, the child lists stored at h − 1 and after h are the ones last written, and the persisted keys
- * are the generated roots. The step's rows, counts, roots, queue and deletions are what is checked. [R1; design §2.3,
- * §4.2, §4.3]
+ * are the generated roots. The step's rows, counts, roots, queue and deletions are what is checked.
  */
 export function oracle(block: DrivenBlock): OracleReport {
   const { before, after, generated, step } = block;

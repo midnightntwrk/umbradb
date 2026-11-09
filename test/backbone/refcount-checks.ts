@@ -4,10 +4,10 @@ import { decodeChildren, hex, refsOf } from "../ledger/node-format.js";
 import type { TableSnapshot } from "./ledger-graph-tapes.js";
 
 /**
- * R3's database check: what the database holds after a block, read through the check's own queries (the snapshots of
+ * The database check: what the database holds after a block, read through the check's own queries (the snapshots of
  * `./ledger-graph-tapes.ts`, `sweepTables`) and its child lists parsed by `test/ledger/node-format.ts`, never through
  * the step's code (`src/backbone/core-ledger-state/refcount.ts`). Each clause lists what it finds broken, none when it
- * holds: [R3, LG-11, LG-14; design §2.3]
+ * holds:
  * - (a) I1, I2 and I3, each count recomputed from every stored child list with repeats counted
  *   ({@link closureProblems});
  * - (b) I4, and every state key of `states` inside the retention window and every key `core_contract_states.states`
@@ -31,7 +31,7 @@ function referenceCounts(rows: ReadonlyMap<string, Uint8Array>): Map<string, num
   return counts;
 }
 
-/** (a): I1, I2 and I3 on the tables after a block. [R3; design §2.3] */
+/** (a): I1, I2 and I3 on the tables after a block. */
 export function closureProblems(after: TableSnapshot): string[] {
   const problems: string[] = [];
   for (const [key, children] of after.rows) {
@@ -67,7 +67,7 @@ export function reachIn(rows: ReadonlyMap<string, Uint8Array>, starts: Iterable<
 
 /**
  * (b): I4, and every state key of `states` from height `windowFrom` on (the retention window after the block) and every
- * key `core_contract_states.states` stores is a row whose whole reachable set is stored. [R3; design §2.3]
+ * key `core_contract_states.states` stores is a row whose whole reachable set is stored.
  */
 export function retainedProblems(after: TableSnapshot, windowFrom: bigint): string[] {
   const problems: string[] = [];
@@ -83,14 +83,14 @@ export function retainedProblems(after: TableSnapshot, windowFrom: bigint): stri
   return problems;
 }
 
-/** What block h keeps, by the oracle's account: `R_{h−1}`, `R_h` and `K_h`. [design §1] */
+/** What block h keeps, by the oracle's account: `R_{h−1}`, `R_h` and `K_h`. */
 export interface Reach {
   readonly before: ReadonlySet<string>;
   readonly reached: ReadonlySet<string>;
   readonly kept: ReadonlySet<string>;
 }
 
-/** (c): `R_{h−1} ⊆ S_h`, and with `sweep` on `S_h = K_h`. [R3; design §2.3 I6] */
+/** (c): `R_{h−1} ⊆ S_h`, and with `sweep` on `S_h = K_h`. */
 export function reachProblems(after: TableSnapshot, reach: Reach, on: boolean): string[] {
   const problems: string[] = [];
   for (const key of [...reach.before].sort()) if (!after.rows.has(key)) problems.push(`${key} of R_{h−1} is not stored`);
@@ -109,7 +109,7 @@ const writtenOf = (batch: NodeBatch): Map<string, Uint8Array> => new Map(batch.i
 /**
  * (d): with `sweep` on at h, I5 against the queue read at h − 1: every row queued at h − 1 that is not protected in h
  * and gains no reference in h is gone after h; and every row whose referencing rows at h − 1 were all deleted in h,
- * that gains no reference in h from a node the batch writes and is not protected in h, is gone too. [R3; design §2.3]
+ * that gains no reference in h from a node the batch writes and is not protected in h, is gone too.
  */
 export function leakProblems(before: TableSnapshot, after: TableSnapshot, batch: NodeBatch, on: boolean): string[] {
   if (!on) return [];
@@ -142,7 +142,7 @@ export function leakProblems(before: TableSnapshot, after: TableSnapshot, batch:
  * A run's configuration as the oracle takes it: `retainStates` (0 unless given), or `retainedFrom`, the lowest height
  * whose state is alive after block h, for a window a revision changes (`retainStates` R gives `max(0, h − R)`);
  * whether `sweep` is on at a height (on unless `on` says otherwise); and the keys a test package persists itself after
- * a height (`persisted`). [R3, R27, LG-12]
+ * a height (`persisted`).
  */
 export interface FixtureConfig {
   readonly retainStates?: number;
@@ -160,7 +160,7 @@ const lowestAlive = (options: FixtureConfig, h: number): number => options.retai
  * `h − retainStates` to h unless `retainedFrom` says otherwise, and the keys `persisted` adds, a test package's own)
  * and the nodes `batches` wrote (each key's child list the one last written for it), never from the database. The
  * stored set it carries from block to block is `K_h` where `on` says `sweep` is on, else the set before with the new
- * nodes. [R3; design §1, §4.3]
+ * nodes.
  */
 export function fixtureReach(
   dag: FixtureDag,
@@ -213,9 +213,9 @@ export function fixtureReach(
 }
 
 /**
- * R3's clauses (a)–(d) after every height of a run on the DAG fixture `dag`, heights 0 to `last`: `tables` after every
+ * The clauses (a)–(d) after every height of a run on the DAG fixture `dag`, heights 0 to `last`: `tables` after every
  * height, `batches` every block's, `options` the run's window and whether `sweep` is on at a height. Each problem names
- * its height. [R3]
+ * its height.
  */
 export function fixtureProblems(
   dag: FixtureDag,
@@ -245,7 +245,7 @@ export function fixtureProblems(
   return problems;
 }
 
-/** The keys persisted after a block: those with a root count. [design §1] */
+/** The keys persisted after a block: those with a root count. */
 const persistedIn = (tables: TableSnapshot): string[] => [...tables.roots].filter(([, count]) => count > 0).map(([key]) => key);
 
 /** The tables before block 0. */
@@ -264,11 +264,10 @@ export const NO_TABLES: TableSnapshot = Object.freeze({
  * keys (those with a root count) after h − 1 and after h through the child lists stored then, and `K_h` from those, the
  * nodes of `batch` that are new or rewritten, and the stored child lists their rewrites replaced; `before` is
  * {@link NO_TABLES} at block 0. A key reached that is no row is reached all the same, so (c) also names it.
- * [R3, R13; design §1]
  *
  * `K_h`'s reach from the persisted keys after h and the new and rewritten nodes goes through the child lists stored
- * after h, as design §1 defines it; with `through` `"written"`, through those stored after h − 1 with the batch's over
- * them (R13's runs, `./refcount-restart.ts`). The two give the same `K_h` while every key that reach meets is stored
+ * after h; with `through` `"written"`, through those stored after h − 1 with the batch's over
+ * them (the runs, `./refcount-restart.ts`). The two give the same `K_h` while every key that reach meets is stored
  * after h and holds the child list h − 1 or the batch gave it; where one is not stored, (c) fails either way, the
  * second naming more keys; where the rows after h hold a row or a child list neither gave, the second follows what the
  * block was given, the first what was stored.
@@ -288,7 +287,7 @@ export function storedReach(before: TableSnapshot, after: TableSnapshot, batch: 
   return { before: prior, reached, kept };
 }
 
-/** R3's check at one height of a recorded tape: the problems found, and the rows outside `R_{h−1} ∪ R_h`. [R3] */
+/** The check at one height of a recorded tape: the problems found, and the rows outside `R_{h−1} ∪ R_h`. */
 export interface StoredCheck {
   readonly height: bigint;
   /** `S_h`'s size. */
@@ -299,10 +298,10 @@ export interface StoredCheck {
 }
 
 /**
- * R3's clauses (a)–(d) after block `height` of a recorded tape: `before` the tables after h − 1 ({@link NO_TABLES}
+ * The clauses (a)–(d) after block `height` of a recorded tape: `before` the tables after h − 1 ({@link NO_TABLES}
  * before block 0), `after` those after h, `batch` the block's, `on` whether `sweep` is on at h, the retention window
  * after h from `height − retainStates`, `through` the child lists `K_h`'s reach goes through ({@link storedReach}).
- * Each problem names its height and clause. [R3, R13, R22]
+ * Each problem names its height and clause.
  */
 export function storedProblems(
   height: bigint,

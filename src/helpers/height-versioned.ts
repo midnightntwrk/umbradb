@@ -1,22 +1,22 @@
 /**
  * The height-versioned-table helper, refactored from 0.9.5's TemporalKV (`src/postgres/temporal-kv.ts`), with block
  * heights where TemporalKV had wall-clock times. It gives a key's value as of any height: for example, a token's
- * metadata as of block h. [SH-2, SH-3, Q27; CORE-ARCH §4.11a; design §1, §10, §12]
+ * metadata as of block h.
  *
  * **A library, not a module,** in the cursor table's shape (`./cursor-table.ts`). {@link heightVersionedTable} names a
  * table in the calling module's own schema. It gives the tables' migration, which the module puts in its own
  * `migrations` list, and the functions that read and write the tables through the handles its callbacks are given:
  * - `write` and `delete` go through the block write handle of the module's `on-db-write`, so they run inside the
- *   block's one transaction, under the module's role [DB-3, DB-6, RN-4];
+ *   block's one transaction, under the module's role;
  * - `read` goes through any handle's `query`.
  *
  * It registers nothing, takes no point, and opens no connection or transaction of its own: this file imports types
  * only. The tables are the module's, so stopping, digests (change capture), backups and dropping treat them as any
  * other table of the module. Other modules may read them, and the role refuses their writes. Writing only from
  * `on-db-write` is the module's obligation, since modules are trusted code; the block it passes is the one that
- * callback was given. [Q30, DT-4, Q46]
+ * callback was given.
  *
- * **Two tables and a trigger.** [SH-2]
+ * **Two tables and a trigger.**
  * - The current table `<table> (key text PRIMARY KEY, value jsonb NOT NULL, from_height bigint NOT NULL)` holds each
  *   key's current version, which covers the heights from `from_height` on (its `to` is null).
  * - The history table `<table>_history (key, from_height, to_height, value)`, keyed by `(key, from_height)`, holds the
@@ -32,34 +32,34 @@
  * `umbradb_capture_changes`, which fires on both tables as on any module table. A `DELETE` cannot hand a trigger a
  * value, so `delete` is one statement that first sets the transaction-local setting `umbradb.delete_height` to h, for
  * the trigger to read. (The migration runner's mark is a transaction-local setting in the same way.) The setting ends
- * with the block's transaction. [SH-2; design §4]
+ * with the block's transaction.
  *
  * **One change of a key per block.** The trigger refuses a write or delete of a key that already changed at this
  * height: one whose current version starts at h, or whose last closed version ends at h (it was deleted at h). It
  * refuses with SQLSTATE `23505` (`unique_violation`: a key changes at most once per height) and a message naming the
- * table, the key and the height. [SH-3]
+ * table, the key and the height.
  *
  * That fails the statement, so the write rejects with the database API's `database-error` (`details:
  * { sqlstate: "23505", schema, table }`), a callback error that halts with `callback-error`. Since the failed statement
  * aborted the block's transaction, the block cannot commit even if the module catches the error: the block's next
- * statement fails with `25P02`, and a `COMMIT` would be answered with `ROLLBACK`. [SH-3, RN-8]
+ * statement fails with `25P02`, and a `COMMIT` would be answered with `ROLLBACK`.
  *
  * Writes that change nothing (a write of the value the key has, a delete of a key with no current version) are neither
- * refused nor counted. The cursor table does not share the rule: there, the last write wins. [SH-3, Q110, SH-1]
+ * refused nor counted. The cursor table does not share the rule: there, the last write wins.
  *
- * **Misuse the trigger refuses,** so that the tables always hold well-formed versions: [SH-2]
+ * **Misuse the trigger refuses,** so that the tables always hold well-formed versions:
  * - a height below a version the key already has, which means a block other than the one being written (SQLSTATE
  *   `23P01`, `exclusion_violation`, the code that 0.9.5's exclusion constraint `kv_history_no_overlap` gave
  *   overlapping versions);
  * - two writes that no helper makes (SQLSTATE `0A000`, `feature_not_supported`): a `DELETE` without the height (not
  *   through `delete`), and an `UPDATE` that changes a key.
  *
- * **Deterministic,** as the cursor table is. [DT-1, DT-2, DT-6]
+ * **Deterministic,** as the cursor table is.
  * - Keys are `text`, unique by bytes. The byte order is the `deterministic_postgresql` component's to apply, so the
- *   tables name no collation. [DT-2, A138]
+ *   tables name no collation.
  * - Values are `jsonb`, under the `CHECK` `umbradb_integers_value`, which the module rules add to both tables: a
- *   fraction or an integer beyond 64 bits fails the block (`23514`). [DT-1, Q57]
- * - Heights are `bigint`. There is no time, no sequence and no default. [DT-6]
+ *   fraction or an integer beyond 64 bits fails the block (`23514`).
+ * - Heights are `bigint`. There is no time, no sequence and no default.
  * - Gone from 0.9.5: `ns`/`scope` (there is one key here; a module wanting more uses several tables or composite
  *   keys), the `version` counter, the `updated_at`/`valid_from`/`valid_to` times, `updated_xact` (a transaction id,
  *   which is no function of the chain), the `bigserial` id, and the `tstzrange` column with its gist exclusion
@@ -70,11 +70,10 @@
  * **Values,** as the cursor table's: any JSON value, sent as JSON text by the database API's parameter mapping
  * (`invalid-parameter`, with nothing sent, for what JSON cannot hold) and read back by its lossless reader (an integer
  * beyond ±(2^53 − 1) as an exact `bigint`). JSON `null` is a value, never SQL NULL. Only a key with no version at the
- * height read reads as `undefined`. [DB-2]
+ * height read reads as `undefined`.
  *
  * **The migration's SQL is fixed:** it is in each module's migration checksum, so `test/helpers/
  * height-versioned.test.ts` pins its bytes. A change to the tables or the trigger is a later migration of the module.
- * [DB-9]
  */
 
 import type { BlockWriteHandle, ReadHandle } from "../db/api.js";
@@ -83,11 +82,11 @@ import type { CursorValue } from "./cursor-table.js";
 
 /**
  * A JSON value a version holds, the same as the cursor table's: its numbers must be integers within the signed 64-bit
- * range. [DT-1]
+ * range.
  */
 export type VersionedValue = CursorValue;
 
-/** Where the tables are: the calling module's schema (the module's id with `-` → `_`) and the current table. [DB-8] */
+/** Where the tables are: the calling module's schema (the module's id with `-` → `_`) and the current table. */
 export interface HeightVersionedTableOptions {
   readonly schema: string;
   readonly table: string;
@@ -115,7 +114,7 @@ export interface HeightVersionedTable {
    * there; the value it has already adds no version. Rejects with the database API's errors: `database-error` with
    * SQLSTATE `23505` when the key already changed in this block, `23514` for a number that is not a 64-bit
    * integer, `23P01` for a height below the key's versions, `42501` for another module's table; `invalid-parameter`
-   * for a value JSON cannot hold (nothing sent); `handle-closed` after the callback ended. [SH-3]
+   * for a value JSON cannot hold (nothing sent); `handle-closed` after the callback ended.
    */
   write(
     handle: BlockWriteHandle,
@@ -221,7 +220,7 @@ CREATE TRIGGER versions BEFORE INSERT OR UPDATE OR DELETE ON ${current}
 /**
  * The height-versioned table `options.table` (with its history table `<table>_history`) in the calling module's schema
  * `options.schema` (see the module comment). Throws a `TypeError` for a schema that is not a lowercase identifier of at
- * most 63 bytes, or a table of at most 54. [SH-2, SH-3]
+ * most 63 bytes, or a table of at most 54.
  */
 export function heightVersionedTable(options: HeightVersionedTableOptions): HeightVersionedTable {
   const schema = checkName("schema", options.schema, SCHEMA_MAX_BYTES);

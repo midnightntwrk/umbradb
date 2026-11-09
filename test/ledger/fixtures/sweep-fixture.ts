@@ -5,7 +5,7 @@
 // {@link WIDTH} subtrees (wide), each a node over {@link LEAVES} leaves; the subtrees change version at interleaved
 // heights, so every block brings a new root and new subtrees (interleaved new roots). Subtree 0 goes back at
 // {@link REVERT} to the version it had before {@link CHANGE}: its nodes, deleted by the sweep in between, are needed
-// again (content reused after a deletion). [A105, LG-14]
+// again (content reused after a deletion).
 // Shared by the test package the ledger worker loads (`sweep-test-loader.ts`) and the tests' reference model
 // (`test/backbone/sweep-model.ts`). Erasable TypeScript only: the worker runs it through Node.js's type stripping.
 //
@@ -33,12 +33,11 @@
 //     list (`sweep-test-loader.ts`).
 //   {@link stateKeys} gives a state's node set (its rows and the nodes they embed), the same whichever way a child is
 //   listed; {@link contentOf} reads a stored node back (its key from its content, its references, its embedded keys).
-//   The tape of the extended DAG carries `rootOf(h, "extended")` as the node's roots. [A105, R27, R28, R30; LG-11,
-//   LG-14]
+//   The tape of the extended DAG carries `rootOf(h, "extended")` as the node's roots.
 // - `"one-form"`: the extended DAG without its rewrite cases (`rewrite to-ref`, `rewrite to-embedded`, and `requeue`
 //   with `requeued`, its leaf and `requeue holder`); every other case as there. Each key is written with one child list
 //   throughout, deletions and re-insertions included, which the comparison with the sweep's model needs (the sweep
-//   keeps a node's first child list). [R4]
+//   keeps a node's first child list).
 
 import { createHash } from "node:crypto";
 
@@ -267,7 +266,7 @@ function extendedStateNodes(h: number, dag: Exclude<FixtureDag, "original">): Fi
   return [...nodes];
 }
 
-/** {@link extendedStateNodes}, built: the one-form DAG leaves the rewrite cases out of the root. [R4] */
+/** {@link extendedStateNodes}, built: the one-form DAG leaves the rewrite cases out of the root. */
 function buildExtendedState(h: number, dag: Exclude<FixtureDag, "original">): FixtureNode[] {
   const parts = Array.from({ length: WIDTH }, (_, i) => subtree(i, versionOf(i, h)));
   const c = extendedCases(h);

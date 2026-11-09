@@ -17,7 +17,7 @@ import { type LedgerScenario, ledgerScenario, type LedgerTx, RUNTIME_2_1 } from 
 
 /**
  * The contract-data scenarios and oracles, shared by `contract-data.test.ts`, `contract-logs-handoff.test.ts` and their
- * negative controls. Imports nothing of Vitest. [A108–A111, CC-1 to CC-4]
+ * negative controls. Imports nothing of Vitest.
  *
  * **A scenario** ({@link contractScenario}) is a synthetic ledger tape (`./ledger-tapes.ts`). The tape holds real ledger
  * transactions built with the vendored packages' own API, the chain events that place them and give their outcomes,
@@ -41,7 +41,7 @@ import { type LedgerScenario, ledgerScenario, type LedgerTx, RUNTIME_2_1 } from 
  * - The contract-state rows expected are those of every contract a block's transactions deploy, call or maintain (a
  *   deploy that did not apply leaves none), and, at the v8 → v9 upgrade's F, of every contract deployed before it.
  *   Their keys must rebuild, from the stored nodes alone, into the reference replay's contract state and zswap state
- *   after the block. [CC-1]
+ *   after the block.
  */
 
 /** A transcript program, as the package takes it. */
@@ -210,7 +210,7 @@ export async function contractScenario(options: ContractScenarioOptions): Promis
       if (type !== expectedType) throw new Error(`contractScenario: transaction ${t} at ${height} is a ${type}, not ${expectedType}: a fixture problem`);
       const guaranteed = [...(tx.logs ?? []), ...(tx.tailLogs ?? [])];
       const values = outcome === "failure" ? [] : [...guaranteed, ...(outcome === "partial" ? [] : (tx.fallibleLogs ?? []))];
-      // Ledger v8 has no MIP-0002 events: its logs are not counted, and the reference's ContractLog events are raw. [Q54]
+      // Ledger v8 has no MIP-0002 events: its logs are not counted, and the reference's ContractLog events are raw.
       const decoded = ledger === "v9" ? values.map(decodedLog).filter((item) => item !== null) : [];
       const counted = (reference.events[t] ?? []).filter((name) => name === "ContractLog").length;
       const literalCount = ledger === "v9" ? decoded.length : counted;
@@ -265,7 +265,7 @@ export function reachedProblems(status: ProcessStatus, head: bigint): string[] {
 
 /**
  * The logs oracle: the process reached the head, and `contract_logs.logs` holds exactly the scenario's expected rows.
- * So none of a fallible segment that failed, none of a v8 block, and none twice. [CC-2, CC-3, A109, A110]
+ * So none of a fallible segment that failed, none of a v8 block, and none twice.
  */
 export async function logProblems(db: ProcessDatabase, status: ProcessStatus, expected: ContractScenario): Promise<string[]> {
   return [...reachedProblems(status, expected.scenario.head), ...lineProblems(await logLines(db), expected.logs)];
@@ -274,7 +274,6 @@ export async function logProblems(db: ProcessDatabase, status: ProcessStatus, ex
 /**
  * The `-fast` halt oracle: processing halted at `height` with `fast-log-unsupported`, naming `core-contract-logs-fast`,
  * `on-parse` and the transaction. The rows below it are the expected ones, and there are none at or above it.
- * [CC-3, A110]
  */
 export async function haltProblems(
   db: ProcessDatabase,
@@ -316,7 +315,7 @@ export async function stateRows(db: Pick<ProcessDatabase, "query">): Promise<Map
  * The contract-states oracle: the process reached the head, and `core_contract_states.states` holds exactly one row
  * per contract and height the scenario expects. So one for two calls of one contract in one block, and one for every
  * contract at F. Each key is held (a positive root count) and rebuilds, from the stored nodes alone, into the
- * reference replay's contract state and zswap state after that block. [CC-1, A108, LG-13]
+ * reference replay's contract state and zswap state after that block.
  */
 export async function stateProblems(db: ProcessDatabase, status: ProcessStatus, expected: ContractScenario): Promise<string[]> {
   const problems = reachedProblems(status, expected.scenario.head);
@@ -394,7 +393,7 @@ export async function runRange(
   return { status, lines: run.lines, halt: run.lines.find((line) => line.includes("processing halted") || line.includes("refused")) };
 }
 
-// ── the criteria's scenarios [A108–A110] ──────────────────────────────────────────────────────────────────────────
+// ── the criteria's scenarios ──────────────────────────────────────────────────────────────────────────
 
 /** A log value's data as `contract_logs.logs` stores it (the VM's decoding), as hex. */
 export function dataOf(value: Parameters<typeof decodedLog>[0]): string {
@@ -404,7 +403,7 @@ export function dataOf(value: Parameters<typeof decodedLog>[0]): string {
 /**
  * The `-full` scenario: a contract deployed at 1; at 2 a call whose guaranteed transcript logs a wrapper and whose
  * fallible one logs a cell and then fails (a partial success); at 3 a call logging a cell and, in a fallible transcript
- * that succeeds, a wrapper. [A109]
+ * that succeeds, a wrapper.
  */
 export async function a109Scenario(): Promise<ContractScenario> {
   const [contract] = await contractsFor("v9", 1);
@@ -420,7 +419,6 @@ export async function a109Scenario(): Promise<ContractScenario> {
 
 /**
  * The `-fast` halt scenario: literal logs at 2 and 4, and at 3 a literal log then a log of the contract's state.
- * [A110]
  */
 export async function a110HaltScenario(): Promise<ContractScenario> {
   const [contract] = await contractsFor("v9", 1);
@@ -437,7 +435,7 @@ export async function a110HaltScenario(): Promise<ContractScenario> {
 }
 
 /**
- * The range of literal logs [A110]:
+ * The range of literal logs:
  * - two contracts;
  * - well-formed wrappers of several versions and event types;
  * - malformed ones (a cell, a wrapper whose event type is no event type, a two-element array), each a version-0 `Misc`

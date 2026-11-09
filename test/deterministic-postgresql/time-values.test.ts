@@ -13,7 +13,6 @@ import { spawnChild } from "../child-processes.js";
  * - a `date` as `2025-05-21`;
  * - `infinity` and `-infinity` as those words;
  * - arrays of them element by element, with `NULL` as `null`.
- * [A139 DIFF, DB-2, Q68, Q81]
  *
  * Each process is a child started with `node --import tsx` and its own `TZ` (`time-values.worker.ts`). On PostgreSQL
  * it opens the test database of this file through the API; on PGlite it creates its engine itself, in its own time
@@ -48,7 +47,7 @@ const SETUP = `
 
 const QUERY = "SELECT *, tz::text AS tz_text, ts::text AS ts_text FROM m.times ORDER BY k";
 
-/** What every process must read, written out by hand from the time-value rules. [DB-2, A139 DIFF] */
+/** What every process must read, written out by hand from the time-value rules. */
 const EXPECTED = [
   {
     k: 1,
@@ -143,7 +142,7 @@ function inTimeZone(zone: string, job: Record<string, unknown>): Promise<Report>
 }
 
 for (const backend of BACKENDS) {
-  describe(`A139 (DB-2, Q68) — date and time values read the same in every time zone, on ${backend.name}`, () => {
+  describe(`date and time values read the same in every time zone, on ${backend.name}`, () => {
     let db: Database;
     let url: string | undefined;
     const reports = new Map<string, Report>();
@@ -183,7 +182,7 @@ for (const backend of BACKENDS) {
       expect(TIME_ZONES.map((zone) => reports.get(zone)?.offsetMinutes)).toEqual([0, 240, -540]);
     });
 
-    it("control: the Date-based mapping task 2.1 shipped differs between the processes and drops microseconds", () => {
+    it("control: the earlier Date-based mapping differs between the processes and drops microseconds", () => {
       const timestamp = TIME_ZONES.map((zone) => reports.get(zone)?.dateMapping[0]?.ts_text);
       // `2025-05-21 14:30:00` without a zone is read in the process's own: three different instants.
       expect(timestamp).toEqual(["2025-05-21T14:30:00.000Z", "2025-05-21T18:30:00.000Z", "2025-05-21T05:30:00.000Z"]);

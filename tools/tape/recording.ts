@@ -1,7 +1,7 @@
 /**
  * What the recording builder records for one connection: the session's records, from the frames the client and the node
  * exchanged on it, placed so that the tape node (`./node.ts`) replays them. There are no sockets here; `./builder.ts`
- * carries the frames. [TT-4, A71]
+ * carries the frames.
  *
  * **Records** (in the tape's record forms): a **call** `{ method, params, result | error }` with the params the client
  * sent (absent: `[]`, as the tape node reads them); a **subscription** `{ subscribe: <the id the node answered>,
@@ -16,7 +16,7 @@
  * occurrence needs: the answers to the requests of one method and params are written in the order of those requests. An
  * answer that comes before an earlier request of its pair is answered waits, and is written right after that earlier
  * one's record (or its fault). A notification of a subscription whose answer waits so cannot be placed
- * (`out-of-order`). [TT-2, TT-3]
+ * (`out-of-order`).
  *
  * **Byte for byte.** Each answer and notification from the node must be the very text the tape node will write for its
  * record (`./frames.ts`: the tape's JSON form, the fields in `jsonrpsee`'s order); any other spelling is refused

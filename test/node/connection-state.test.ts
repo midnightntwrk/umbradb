@@ -10,7 +10,7 @@ import { ManualTimers, turns } from "./manual-timers.js";
  * - `closed` once the client is closed.
  *
  * `onConnectionChange` is told each change once, in order, and nothing else. The sockets are driven by hand and the
- * back-off runs on a clock moved by hand (`./manual-timers.ts`): no network. [AE-5, A168]
+ * back-off runs on a clock moved by hand (`./manual-timers.ts`): no network.
  */
 
 /** One socket the client asked for, driven by the test. */
@@ -71,7 +71,7 @@ function handClient(options: Partial<NodeClientOptions> = {}) {
 /** Settles `promise` to its rejection (attached at once, so no rejection goes unhandled meanwhile). */
 const settled = (promise: Promise<unknown>): Promise<unknown> => promise.then(() => undefined, (error: unknown) => error);
 
-describe("the node connection's state (AE-5; task 8.3a)", () => {
+describe("the node connection's state", () => {
   it("is connecting before the first connection opened, connected once it did, and closed once closed", async () => {
     const { client, sockets, changes } = handClient();
     // Not used yet: the first connection is still to come.

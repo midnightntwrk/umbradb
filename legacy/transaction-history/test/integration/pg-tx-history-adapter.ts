@@ -11,7 +11,7 @@ import type { UmbraDBSql } from "../../../../src/postgres/client.js";
 import { PgTransactionHistoryStorage } from "../../src/postgres/transaction-history-storage.js";
 
 /**
- * The adapter -- the seam (`openspec/changes/sprint-8-wallet-envelope-live-sync/design.md` §3):
+ * The adapter -- the seam:
  * implements the real Midnight wallet SDK's `TransactionHistoryStorage<T>` surface
  * (`TransactionHistoryStorage.ts:163-216`) and forwards every call to a
  * `PgTransactionHistoryStorage` instance (Sprint 7), constructed with a caller-supplied merge
@@ -20,11 +20,11 @@ import { PgTransactionHistoryStorage } from "../../src/postgres/transaction-hist
  * (`preprodUnshieldedSync.manual.integration.test.ts:94`).
  *
  * Lives under `test/` (integration tier), NOT `src/` -- this is the ONLY Sprint 8 component that
- * imports a wallet-SDK package at runtime (`design.md` §2/§3.3); `PgTransactionHistoryStorage` and
+ * imports a wallet-SDK package at runtime; `PgTransactionHistoryStorage` and
  * the WalletState envelope modules have no such import (enforced by
  * `test/postgres/no-sdk-import-guard.test.ts`).
  *
- * **Field mapping (write path, `design.md` §3.1).** The SDK writer input is the entry MINUS its
+ * **Field mapping (write path).** The SDK writer input is the entry MINUS its
  * `lifecycle`, plus a per-status detail field (`submittedAt` / `finalizedBlock` /
  * `rejectedAt`+`reason`). The common fields (`hash`, `identifiers`, `protocolVersion`, `status`,
  * `timestamp`, `fees`) map onto UmbraDB's `TransactionHistoryEntry` one-to-one -- except `status`,
@@ -35,7 +35,7 @@ import { PgTransactionHistoryStorage } from "../../src/postgres/transaction-hist
  * "sections" -- `shielded`/`unshielded`/`dust`, produced by `extendEntrySchema`) is forwarded
  * opaquely into UmbraDB's own `sections: Record<string, EntryContent>`.
  *
- * **Lifecycle-detail round-trip (`design.md` §3.2, decision (i)).** The SDK's lifecycle carries
+ * **Lifecycle-detail round-trip.** The SDK's lifecycle carries
  * per-status detail (`submittedAt` / `finalizedBlock` / `rejectedAt`+`reason`) that UmbraDB's own
  * entry does not model (`lifecycle` there is a bare `{status}`). This adapter stashes that detail
  * under the reserved `sections` key {@link UMBRADB_ADAPTER_LIFECYCLE_DETAIL_KEY} (safe: does not
@@ -95,7 +95,7 @@ export const UMBRADB_ADAPTER_LIFECYCLE_DETAIL_KEY = `${UMBRADB_ADAPTER_RESERVED_
  *  (`TransactionHistoryStorage.ts:75-85`). Anything else on a caller-supplied SDK-shaped entry is
  *  a wallet-specific "section" (e.g. `shielded`/`unshielded`/`dust`) and is forwarded opaquely
  *  into UmbraDB's own `sections` record, exactly as UmbraDB's core storage never interprets it
- *  either (`design.md` §3.1). */
+ *  either. */
 const COMMON_FIELD_NAMES: ReadonlySet<string> = new Set([
   "hash", "identifiers", "protocolVersion", "status", "timestamp", "fees",
 ]);
@@ -125,7 +125,7 @@ function describeStatusValue(v: unknown): string {
   return String(v as number | boolean | undefined);
 }
 
-/** (L1, F6) Maps the SDK's execution-status enum onto UmbraDB's own. Exported so
+/** (F6) Maps the SDK's execution-status enum onto UmbraDB's own. Exported so
  *  `pg-tx-history-adapter.test.ts` can exercise the mapping directly as a round-trip, without
  *  needing a whole entry.
  *
@@ -383,7 +383,7 @@ function reconstructSdkEntry<T extends Sdk.TransactionHistoryEntryCommon>(entry:
  * `dust`), not this adapter's UmbraDB-shaped `TransactionHistoryEntry` (a `sections` container),
  * and its first line (`[...existing.identifiers]`) throws a `TypeError` if ever called with
  * `existing===undefined` (the first write of a hash) -- see `MergeEntriesFn`'s own doc (F1
- * finding) and `openspec/changes/sprint-8-wallet-envelope-live-sync/design.md` §3 for the full
+ * finding) for the full
  * account of why production injects an UmbraDB-shaped merge function mirroring the SDK's
  * documented semantics, never the raw SDK function itself.
  */
@@ -412,7 +412,7 @@ export class PgWalletSdkTransactionHistoryAdapter<
    *  entries (its own documented bigint/Date tagging scheme), NOT re-encoded into SDK shape. The
    *  SDK's `serialize(): Promise<string>` contract is satisfied structurally; no Sprint 8
    *  requirement asserts on this method's specific content (only `getAll`/`get` are asserted
-   *  against the SDK's own schema, `design.md` §3.2/§7.1). */
+   *  against the SDK's own schema). */
   async serialize(): Promise<Sdk.SerializedTransactionHistory> {
     return this.pg.serialize();
   }

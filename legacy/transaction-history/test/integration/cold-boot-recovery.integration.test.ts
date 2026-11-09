@@ -20,7 +20,7 @@ import { PgWalletSdkTransactionHistoryAdapter } from "./pg-tx-history-adapter.js
 const NETWORK_ID = "PreProd";
 
 /**
- * Cold-boot recovery (`openspec/changes/sprint-8-wallet-envelope-live-sync/design.md` §5) --
+ * Cold-boot recovery --
  * nightly/labeled, gated behind `UMBRADB_LIVE_PREPROD=1`: sync -> serialize the exercised
  * sub-wallet -> envelope -> `PgWalletStateEnvelopeStore.save` -> destroy the wallet -> "fresh
  * process" -> `load` -> restore -> `PgTransactionHistoryStorage.getAll()` for tx-history -> assert
@@ -34,12 +34,12 @@ const NETWORK_ID = "PreProd";
  * and reconstructing everything from Postgres alone -- rather than literally forking a second OS
  * process. A literal fork would need a process-spawning mechanism for this project's un-compiled
  * TypeScript sources (e.g. `tsx`/`ts-node`), which is deliberately NOT part of this sprint's pin
- * list (L2's pin list is exactly `effect` + `@midnightntwrk/wallet-sdk-abstractions`). Phase B
+ * list (the pin list is exactly `effect` + `@midnightntwrk/wallet-sdk-abstractions`). Phase B
  * below is a plain function with its own local scope that receives only `sql` (a real Postgres
  * connection a genuine fresh process would equally have to open) and `walletId` (the recovery
  * key) -- it never closes over phase A's `wallet`/`config`/`adapter` variables.
  */
-describe.skipIf(!LIVE_PREPROD_ENABLED)("Cold-boot recovery (nightly/labeled, design.md §5)", () => {
+describe.skipIf(!LIVE_PREPROD_ENABLED)("Cold-boot recovery (nightly/labeled)", () => {
   vi.setConfig({ testTimeout: 10 * 60_000, hookTimeout: 10 * 60_000 });
 
   it("resumes from its envelope's snapshot cursor without a full resync, and tx-history is continuous off the Pg store", async () => {
@@ -81,13 +81,13 @@ async function phaseA_syncAndPersistEnvelope(sql: UmbraDBSql, sdk: any, walletId
     const nativeTokenType = sdk.ledger.nativeToken().raw;
     expect((state.balances as Record<string, bigint>)[nativeTokenType]).toBe(EXPECTED_NIGHT_VALUE);
 
-    // Sprint 8 §5 step 2: serialize the exercised sub-wallet (unshielded only, for this preprod
-    // wallet -- shielded/dust are never exercised here, `design.md` §1.1's "Sync cost").
+    // Step 2: serialize the exercised sub-wallet (unshielded only, for this preprod
+    // wallet -- shielded/dust are never exercised here, the "Sync cost").
     const serializedUnshielded: string = await wallet.serializeState();
     expect(typeof serializedUnshielded).toBe("string");
     expect(serializedUnshielded.length).toBeGreaterThan(0);
 
-    // §5 step 3: build the envelope, one CheckpointStore.save via PgWalletStateEnvelopeStore.
+    // Step 3: build the envelope, one CheckpointStore.save via PgWalletStateEnvelopeStore.
     const envelope: WalletStateEnvelope = {
       envelopeVersion: ENVELOPE_VERSION,
       walletId,
@@ -101,7 +101,7 @@ async function phaseA_syncAndPersistEnvelope(sql: UmbraDBSql, sdk: any, walletId
     console.log("[cold-boot] phase A: synced + envelope saved for walletId", walletId);
     return serializedUnshielded;
   } finally {
-    // §5 step 4: destroy the wallet instance (see the class doc for why this test does not also
+    // Step 4: destroy the wallet instance (see the class doc for why this test does not also
     // fork a literal second OS process).
     await wallet.stop();
   }
@@ -118,7 +118,7 @@ async function phaseB_freshProcessRestoreAndVerify(
   walletId: string,
   originalSerializedUnshielded: string,
 ): Promise<void> {
-  // §5 step 5: PgWalletStateEnvelopeStore.load -> decode + version-check (throws
+  // Step 5: PgWalletStateEnvelopeStore.load -> decode + version-check (throws
   // EnvelopeVersionUnsupportedError/EnvelopeCorruptError/CheckpointNotFoundError otherwise; a
   // clean resolve here already proves decode succeeded and the version was recognized).
   const envelopeStore = new PgWalletStateEnvelopeStore(new PgCheckpointStore(sql, new PgTransactionLeaseLayer(sql)));
@@ -143,7 +143,7 @@ async function phaseB_freshProcessRestoreAndVerify(
   const faucetRowBeforeRestore = txHistoryBeforeRestore.find((e) => e.hash.startsWith(FAUCET_TX_HASH_PREFIX));
   expect(faucetRowBeforeRestore).toBeDefined();
 
-  // §5 step 5 (continued): restore the present sub-wallet only (unshielded); shielded/dust are
+  // Step 5 (continued): restore the present sub-wallet only (unshielded); shielded/dust are
   // null and are correctly never touched here (WHERE-optional: "skip that sub-wallet... SHALL NOT
   // fail for the absent one").
   const adapterAfterRestart = new PgWalletSdkTransactionHistoryAdapter(sql, walletId, referenceMergeEntries);
@@ -156,7 +156,7 @@ async function phaseB_freshProcessRestoreAndVerify(
     // `appliedId: snapshot.appliedId ?? 0n`), not yet touched by any new sync activity. A FRESH
     // (non-restored) wallet's CoreWallet.init always starts this at exactly 0n -- so a strictly
     // positive value here is direct, mechanical proof the restore resumed from the snapshot's own
-    // cursor rather than rescanning from genesis (design.md §5 (a): "resume without a full
+    // cursor rather than rescanning from genesis ("resume without a full
     // resync").
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const initialState = await firstStateWhere<any>(restoredWallet.state, () => true);
@@ -164,13 +164,13 @@ async function phaseB_freshProcessRestoreAndVerify(
     console.log("[cold-boot] phase B: restored wallet's initial progress:", initialState.progress);
     expect(initialState.progress.appliedId).toBeGreaterThan(0n);
 
-    // §5 step 5: `.start()` resumes the sync subscription from that cursor.
+    // Step 5: `.start()` resumes the sync subscription from that cursor.
     await restoredWallet.start();
     const resumedState = await restoredWallet.waitForSyncedState();
     const nativeTokenType = sdk.ledger.nativeToken().raw;
     expect((resumedState.balances as Record<string, bigint>)[nativeTokenType]).toBe(EXPECTED_NIGHT_VALUE);
 
-    // §5 step 6/7(b): tx-history continuity holds AFTER resume too, still off the Pg store, not
+    // Steps 6 and 7(b): tx-history continuity holds AFTER resume too, still off the Pg store, not
     // the restored blob's own embedded copy. F3 fix: this continuity read now goes through the
     // ADAPTER's own getAll() (not the raw PgTransactionHistoryStorage instance used for the
     // pre-restore check above) -- proving the adapter's reconstruction path itself survives a

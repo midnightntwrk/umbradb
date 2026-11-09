@@ -2,7 +2,6 @@
  * The configuration loader in the browser build, in place of `src/config/load.ts`. A page reads no file: it bundles its
  * configuration (`browser/src/config.ts`, or a test's) and hands it to the process as data. Startup requires that data
  * to be plain, as it does a file's export (`plainData`). So `loadConfig` is never called there, and refuses.
- * [CF-1; design §7, §9.2]
  */
 
 import { UmbraError } from "../../../src/db/errors.js";

@@ -10,10 +10,10 @@
  * - the secret redaction (`./redact.ts`);
  * - the configuration history with the version check (`./history.ts`; its table belongs to `core-chain`,
  *   `src/backbone/core-chain/`);
- * - the process's `core` revision (`./process.ts`) [Q102];
+ * - the process's `core` revision (`./process.ts`);
  * - opening the database it names (`./database.ts`).
  *
- * `umbradb config check` builds on these. [design §1, §7]
+ * `umbradb config check` builds on these.
  */
 
 export * from "./build.js";

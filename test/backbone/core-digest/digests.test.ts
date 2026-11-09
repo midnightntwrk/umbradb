@@ -21,7 +21,6 @@ import { BLOCK_COMMIT, type Chain, checkpointRows, digestRows, runBlocks, startC
  * - digests every module table with no flag set, and not a table declared `deterministic: false`, nor a
  *   content-defined one (`core-ledger-state`'s node tables, as the build's own `ledger-state` item declares them),
  *   whose `TRUNCATE` guard and column rules stay.
- * [A57, DT-4, DT-5, DT-6, DB-14, Q84, Q86]
  *
  * The chains run through `schemaPlan`, `startDatabase` and the block write handles, with a block loop standing in for
  * the runner's (`./chain.ts`). The interval shortened by a build flag is tested in `checkpoints.build-flag.test.ts`.
@@ -90,7 +89,7 @@ const key32 = (byte: number): Uint8Array => new Uint8Array(32).fill(byte);
  * `core-ledger-state`'s tables as the build's own `ledger-state` item declares them (`nodes`, `ref_counts` and
  * `unreferenced` content-defined), made by the part's own migration and written by a stand-in that inserts,
  * rewrites and deletes nodes, and changes the counts, the queue and `root_counts`, at heights 1 to 3; at
- * `truncateAt`, it truncates `table` instead. [A57, R17, DT-4, DB-14]
+ * `truncateAt`, it truncates `table` instead.
  */
 function ledgerTables(options: { readonly truncateAt?: bigint; readonly table?: string } = {}): ModuleDeclaration {
   const item = CORE_LEDGER_STATE.provides.find((candidate) => candidate.name === "ledger-state");
@@ -125,7 +124,7 @@ function ledgerTables(options: { readonly truncateAt?: bigint; readonly table?: 
   });
 }
 
-describe.each(BACKENDS)("A57: core-digest's per-table digests and checkpoints, on $name (DT-4, DT-5)", (backend) => {
+describe.each(BACKENDS)("core-digest's per-table digests and checkpoints, on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop());
 
@@ -140,7 +139,7 @@ describe.each(BACKENDS)("A57: core-digest's per-table digests and checkpoints, o
     return { chain, after };
   }
 
-  it("declares core-digest as task 3.2's backbone expects: its id in BACKBONE_ORDER, valid as a backbone part", () => {
+  it("declares core-digest as the backbone expects: its id in BACKBONE_ORDER, valid as a backbone part", () => {
     expect(BACKBONE_ORDER).toContain("core-digest");
     const set = validateDeclarations({ backbone: [BLOCK_COMMIT, CORE_DIGEST], core: [], user: [] });
     expect(set.backbone[1]).toBe(CORE_DIGEST);
@@ -153,7 +152,7 @@ describe.each(BACKENDS)("A57: core-digest's per-table digests and checkpoints, o
     expect(CORE_DIGEST.migrations).toEqual([...CORE_DIGEST_MIGRATIONS]);
   });
 
-  it("A57: two chains differing at height 7 in table t: other tables equal, t equal up to 6 and different from 7", async () => {
+  it("two chains differing at height 7 in table t: other tables equal, t equal up to 6 and different from 7", async () => {
     const a = await chainTo10("x");
     const b = await chainTo10("y");
     for (let h = 1n; h <= 10n; h++) {
@@ -169,11 +168,11 @@ describe.each(BACKENDS)("A57: core-digest's per-table digests and checkpoints, o
         }
       }
     }
-    // Every deterministic module table has its row; the opted-out one has none at any height. [A57]
+    // Every deterministic module table has its row; the opted-out one has none at any height.
     expect(Object.keys(a.after.get(10n) ?? {}).sort()).toEqual(["core_block_commit.blocks", "m.t", "m.u"]);
   }, 120_000);
 
-  it("A57: a table without changes at a height keeps its row; a table's row is set at each height that changes it", async () => {
+  it("a table without changes at a height keeps its row; a table's row is set at each height that changes it", async () => {
     const { after } = await chainTo10("x");
     const heightOf = (table: string, h: bigint) => after.get(h)?.[table]?.height;
     // m.t changes at 1, 2, 3, 6, 7, 8 (5 rewrites a row as it was); m.u at 1, 4, 10; blocks at every height.
@@ -190,7 +189,7 @@ describe.each(BACKENDS)("A57: core-digest's per-table digests and checkpoints, o
     expect(after.get(3n)?.["m.u"]).toEqual(after.get(1n)?.["m.u"]);
   }, 120_000);
 
-  it("A57: a table's first digest is SHA-256(32 zero bytes ‖ CBOR(h) ‖ changes at h), and the next one chains on it", async () => {
+  it("a table's first digest is SHA-256(32 zero bytes ‖ CBOR(h) ‖ changes at h), and the next one chains on it", async () => {
     const { after } = await chainTo10("x");
     // m.t at height 1: [["insert", [1, "a"]]]; at height 2: [["update", [1, "b"]]].
     const t1 = sha256(new Uint8Array(32), hex("01"), hex("81 82"), text("insert"), hex("82 01"), text("a"));
@@ -209,26 +208,26 @@ describe.each(BACKENDS)("A57: core-digest's per-table digests and checkpoints, o
     expect(after.get(1n)?.["m.u"]).toEqual({ height: 1n, digest: u1 });
   }, 120_000);
 
-  it("A57: digests every module table with no flag set, and leaves the table declared deterministic: false alone", async () => {
+  it("digests every module table with no flag set, and leaves the table declared deterministic: false alone", async () => {
     const { chain } = await chainTo10("x");
     expect(await undigested(chain.db, "m", "cache")).toBe(true);
     expect(await undigested(chain.db, "m", "t")).toBe(false);
   }, 120_000);
 
-  it("negative control: change capture that skips the opt-out digests the opted-out table, which A57's last clause catches", async () => {
+  it("negative control: change capture that skips the opt-out digests the opted-out table, which the last clause catches", async () => {
     const { db } = await backend.database("SELECT 1");
     const chain = await startChain(db, [moduleM("x")], { plan: (plan) => ({ ...plan, optedOut: [] }) });
     await runBlocks(chain, 3n);
     expect(await undigested(db, "m", "cache")).toBe(false);
   }, 120_000);
 
-  it("A57: nor a content-defined one: core_ledger_state's nodes, ref_counts and unreferenced are not digested, its root_counts are", async () => {
+  it("nor a content-defined one: core_ledger_state's nodes, ref_counts and unreferenced are not digested, its root_counts are", async () => {
     const { db } = await backend.database("SELECT 1");
     const chain = await startChain(db, [moduleM("x")], { core: [ledgerTables()] });
     expect(chain.plan.contentDefined.map(({ schema, tables }) => ({ schema, tables }))).toEqual([
       { schema: "core_ledger_state", tables: ["nodes", "ref_counts", "unreferenced"] },
     ]);
-    // Content-defined tables are deterministic: no opt-out. [DT-6]
+    // Content-defined tables are deterministic: no opt-out.
     expect(chain.plan.optedOut).toEqual([{ schema: "m", table: "cache" }]);
     const after = new Map<bigint, Awaited<ReturnType<typeof digestRows>>>();
     await runBlocks(chain, 3n, async (h) => {
@@ -245,14 +244,14 @@ describe.each(BACKENDS)("A57: core-digest's per-table digests and checkpoints, o
     expect(stored?.n).toBe(2);
   }, 120_000);
 
-  it("negative control: change capture that does not skip the content-defined tables digests them, which A57's clause catches", async () => {
+  it("negative control: change capture that does not skip the content-defined tables digests them, which the clause catches", async () => {
     const { db } = await backend.database("SELECT 1");
     const chain = await startChain(db, [moduleM("x")], { core: [ledgerTables()], plan: (plan) => ({ ...plan, contentDefined: [] }) });
     await runBlocks(chain, 3n);
     expect(await undigested(db, "core_ledger_state", "nodes")).toBe(false);
   }, 120_000);
 
-  it("keeps DT-6's rules and the TRUNCATE guard on content-defined tables", async () => {
+  it("keeps the rules and the TRUNCATE guard on content-defined tables", async () => {
     for (const table of ["nodes", "ref_counts", "unreferenced"]) {
       const { db } = await backend.database("SELECT 1");
       const chain = await startChain(db, [], { core: [ledgerTables({ truncateAt: 2n, table })] });
@@ -273,7 +272,7 @@ describe.each(BACKENDS)("A57: core-digest's per-table digests and checkpoints, o
     await expect(startChain(db, [], { core: [floats] })).rejects.toMatchObject({ code: "non-deterministic-column" });
   }, 120_000);
 
-  it("A57: checkpoints exist exactly at the heights h >= S with h mod 14,400 = 0, equal to the tables' rows there", async () => {
+  it("checkpoints exist exactly at the heights h >= S with h mod 14,400 = 0, equal to the tables' rows there", async () => {
     const { db } = await backend.database("SELECT 1");
     const chain = await startChain(db, [moduleM("x")], { start: 14_398n });
     let at14400: Awaited<ReturnType<typeof digestRows>> | undefined;
@@ -288,7 +287,7 @@ describe.each(BACKENDS)("A57: core-digest's per-table digests and checkpoints, o
     expect(Object.keys(checkpoints["14400"] ?? {}).sort()).toEqual(["core_block_commit.blocks"]);
   }, 120_000);
 
-  it("A57: a chain starting at genesis checkpoints at height 0 (0 mod 14,400 = 0), and at no other height below 14,400", async () => {
+  it("a chain starting at genesis checkpoints at height 0 (0 mod 14,400 = 0), and at no other height below 14,400", async () => {
     const { db } = await backend.database("SELECT 1");
     const chain = await startChain(db, [moduleM("x")], { start: 0n });
     await runBlocks(chain, 3n);

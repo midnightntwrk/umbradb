@@ -26,7 +26,6 @@ import { loggingModule } from "../../runner/process-build.js";
  *   still answers within 1 s (the admin worker reads the last tick from shared memory and needs nothing from the
  *   blocked main thread);
  * - once the loop has ended, it answers 200 again.
- * [A63, AE-2]
  *
  * **How it is timed** (as in `test/admin/admin-server.test.ts`). The prober is the test's own worker thread. It
  * requests the four endpoints in turn every 150 ms and times each answer from its request on `process.hrtime.bigint()`.
@@ -34,15 +33,15 @@ import { loggingModule } from "../../runner/process-build.js";
  * ticks with. The last tick before the loop is at most as old as the loop, so from 5 s into it the tick is older than
  * 5 s. So `/health/live` must answer 503 to every request sent from then until 1 s before the loop ends (a later one
  * may be answered after it), at least 4 of them; and 200 to every request sent from 1 s after the loop on, at least 4
- * of them. [A62, A63]
+ * of them.
  *
  * Committed negative control: an admin server on the main thread (liveness read there, not on the admin worker) fails
- * the check that every endpoint keeps answering within 1 s. [A63]
+ * the check that every endpoint keeps answering within 1 s.
  */
 
-/** The liveness timeout this test sets. [A63] */
+/** The liveness timeout this test sets. */
 const TIMEOUT_MS = 5_000;
-/** How long the test's callbacks hold. [A63] */
+/** How long the test's callbacks hold. */
 const HOLD_MS = 15_000;
 const NS = 1_000_000n;
 
@@ -59,7 +58,7 @@ function holding(hold: Hold, ms: number, mode: "block" | "await"): ModuleDeclara
         const until = hold.start + BigInt(ms) * NS;
         if (mode === "block") {
           while (process.hrtime.bigint() < until) {
-            // Computation on the main thread: nothing else on this thread runs meanwhile. [AE-2]
+            // Computation on the main thread: nothing else on this thread runs meanwhile.
           }
         } else {
           // An awaited operation, at least `ms` by the clock the prober reads.
@@ -94,7 +93,6 @@ const liveBetween = (records: readonly ProbeRecord[], from: bigint, to: bigint) 
  * - 503 to every request sent from {@link TIMEOUT_MS} into it to 1 s before its end, at least
  *   {@link PROBES_DURING_HOLD} of them;
  * - 200 to every request sent from 1 s after it on, at least as many.
- * [A63]
  */
 function stuckProblems(records: readonly ProbeRecord[], hold: Hold): string[] {
   const problems: string[] = [];
@@ -118,7 +116,7 @@ function stuckProblems(records: readonly ProbeRecord[], hold: Hold): string[] {
   return problems;
 }
 
-/** The statuses each endpoint may answer during the synchronous loop. [A63] */
+/** The statuses each endpoint may answer during the synchronous loop. */
 const DURING_LOOP: Readonly<Record<string, readonly number[]>> = {
   "/health/live": [200, 503],
   "/health/ready": [200, 503],
@@ -126,7 +124,7 @@ const DURING_LOOP: Readonly<Record<string, readonly number[]>> = {
   "/config": [200],
 };
 
-describe.each(PROCESS_BACKENDS)("A63: /health/live through the heartbeat on $name", (backend) => {
+describe.each(PROCESS_BACKENDS)("/health/live through the heartbeat on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
@@ -140,7 +138,7 @@ describe.each(PROCESS_BACKENDS)("A63: /health/live through the heartbeat on $nam
       ...(onMainThread ? { starter: mainThreadAdmin() } : {}),
     });
 
-  it("A63: during an on-compute callback that awaits a 15 s operation, /health/live answers 200 throughout", async () => {
+  it("during an on-compute callback that awaits a 15 s operation, /health/live answers 200 throughout", async () => {
     const hold = newHold();
     const run = await start(hold, "await");
     const records = await probedThrough(run, hold);
@@ -153,7 +151,7 @@ describe.each(PROCESS_BACKENDS)("A63: /health/live through the heartbeat on $nam
     await run.handle.stop();
   }, 120_000);
 
-  it("A63: during a 15 s synchronous loop it answers 503 after 5 s, every endpoint within 1 s; 200 again once it ends", async () => {
+  it("during a 15 s synchronous loop it answers 503 after 5 s, every endpoint within 1 s; 200 again once it ends", async () => {
     const hold = newHold();
     const run = await start(hold, "block");
     const records = await probedThrough(run, hold);
@@ -163,7 +161,7 @@ describe.each(PROCESS_BACKENDS)("A63: /health/live through the heartbeat on $nam
     await run.handle.stop();
   }, 120_000);
 
-  it("negative control: liveness read on the main thread (an admin server there) fails A63's 'every endpoint within 1 s'", async () => {
+  it("negative control: liveness read on the main thread (an admin server there) fails the 'every endpoint within 1 s'", async () => {
     const hold = newHold();
     const run = await start(hold, "block", true);
     const records = await probedThrough(run, hold);

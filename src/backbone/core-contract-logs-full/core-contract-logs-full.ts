@@ -2,16 +2,16 @@
  * The core module `core-contract-logs-full`: the MIP-0002 events of every block, exactly as the ledger emitted them
  * while applying it, as the shared item `contract-logs` (`../contract-logs/`) and its table `contract_logs.logs`. They
  * come from `core-ledger-state`'s `vm-logs`: the contract logs of the applied segments only, so none from a fallible
- * segment that failed. [CC-2, CC-4, Q19 A, Q20; CORE-ARCH §4.11]
+ * segment that failed.
  *
- * It is off by default. It cannot start mid-chain, because the ledger state it needs cannot. [LG-16]
+ * It is off by default. It cannot start mid-chain, because the ledger state it needs cannot.
  *
- * Ledger v8's adapter reports no logs, so no v8 block has a row. [Q54]
+ * Ledger v8's adapter reports no logs, so no v8 block has a row.
  *
  * **At `on-compute`** (after `core-ledger-state`'s, whose `vm-logs` it requires) it puts `contract-logs`: each `VmLog`
  * of the block as a {@link ContractLog}, with its transaction, its number in the block, the contract, the entry point,
  * the logical segment, the version, the event type and the data, as the ledger gave them. The physical segment is not
- * part of the item or its table. [design §10]
+ * part of the item or its table.
  *
  * **At `on-db-write`** it writes them, one row each, in one statement.
  *
@@ -37,7 +37,7 @@ import { VM_LOGS_ITEM } from "../core-ledger-state/core-ledger-state.js";
 /** The module's id. */
 export const CORE_CONTRACT_LOGS_FULL_ID = "core-contract-logs-full";
 
-/** The `vm-logs` item of `b` (from `core-ledger-state`); throws a `TypeError` when it has none. [LG-16] */
+/** The `vm-logs` item of `b` (from `core-ledger-state`); throws a `TypeError` when it has none. */
 export function vmLogsItemOf(b: BlockContext): readonly VmLog[] {
   const logs = b.items.get(VM_LOGS_ITEM);
   if (!Array.isArray(logs)) {
@@ -65,7 +65,7 @@ export function fullLogsOf(b: BlockContext): readonly ContractLog[] {
 
 /** The rule a negative control may replace (see the module comment). */
 export interface CoreContractLogsFullOptions {
-  /** The block's logs: by default {@link fullLogsOf}, the ledger's `vm-logs`. [CC-2] */
+  /** The block's logs: by default {@link fullLogsOf}, the ledger's `vm-logs`. */
   readonly logsOf?: (b: BlockContext) => readonly ContractLog[] | Promise<readonly ContractLog[]>;
 }
 

@@ -10,13 +10,12 @@ import { declaration } from "../modules/declarations.js";
 import { type HelperDatabase, helperDatabase, TOKEN_SCAN } from "./cursor-harness.js";
 
 /**
- * What the height-versioned table's tests share. [SH-2, SH-3, A60, A61]
+ * What the height-versioned table's tests share.
  *
  * A database on each backend, started as the cursor table's is (`cursor-harness.ts`' {@link helperDatabase}:
  * `core-block-commit`, the modules, the real `core-digest`, blocks through the real block write handles). Its test
  * modules are:
  * - `token-metadata`, which keeps a token's metadata as of a height in the helper's tables, as in the spec's example;
- *   [CORE-ARCH §4.11a; FEATURES F4]
  * - `token-scan`, another module, which writes nothing of its own.
  *
  * `token-metadata` also holds three negative controls, each the helper's tables with one change to the migration's SQL,
@@ -25,16 +24,15 @@ import { type HelperDatabase, helperDatabase, TOKEN_SCAN } from "./cursor-harnes
  * - `gaps` closes it one height early (its `CHECK` relaxed so that the early end is stored), leaving heights where the
  *   key was not deleted yet reads nothing;
  * - `lenient` lets a second change of a key in one block through, overwriting the block's first one: the
- *   one-change-per-block rule left out. [SH-3]
+ *   one-change-per-block rule left out.
  *
  * The height-versioned property must fail on the first two, and the one-change-per-block check on the third.
- * [A60, A61]
  */
 
 /** The height-versioned table of `token-metadata`, in its own schema. */
 export const METADATA: HeightVersionedTable = heightVersionedTable({ schema: "token_metadata", table: "metadata" });
 
-/** The role `token-metadata` writes under. [DB-6] */
+/** The role `token-metadata` writes under. */
 export const TOKEN_METADATA_ROLE = "umbradb_m_token_metadata";
 
 /** A negative control: the helper's functions over a table whose migration's SQL had `edits` applied. */
@@ -59,14 +57,14 @@ function control(table: string, edits: readonly (readonly [string | RegExp, stri
 /** Where the trigger closes a version: at the height of the change. */
 const CLOSES_AT_HEIGHT = "VALUES (k, OLD.from_height, height, OLD.value)";
 
-/** Negative control for the property: a version closes one height after the change, so it overlaps the next. [A60] */
+/** Negative control for the property: a version closes one height after the change, so it overlaps the next. */
 export const OVERLAPS: Control = control("overlaps", [
   [CLOSES_AT_HEIGHT, "VALUES (k, OLD.from_height, height + 1, OLD.value)"],
 ]);
 
 /**
  * Negative control for the property: a version closes one height before the change, so the key reads nothing in
- * between. [A60]
+ * between.
  */
 export const GAPS: Control = control("gaps", [
   [CLOSES_AT_HEIGHT, "VALUES (k, OLD.from_height, height - 1, OLD.value)"],
@@ -75,7 +73,7 @@ export const GAPS: Control = control("gaps", [
 
 /**
  * Negative control for the one-change-per-block check: a second change of a key in one block overwrites the first,
- * because the refusal is left out. [A61, SH-3]
+ * because the refusal is left out.
  */
 export const LENIENT: Control = control("lenient", [
   [

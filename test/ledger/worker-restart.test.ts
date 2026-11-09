@@ -13,7 +13,7 @@ import type { TestLoaderData } from "./fixtures/ledger-test-loader.js";
 // - fails any other request that was in flight.
 //
 // The main thread's engine (`inThreadLedger`) restarts the same way. Runs in real threads over the real v9 package,
-// with the test loader recording what each thread parsed. [LG-14, Q144 B; design §5.3, §5.4]
+// with the test loader recording what each thread parsed.
 
 const LONG = 240_000;
 const LOADER = new URL("./fixtures/ledger-test-loader.ts", import.meta.url);
@@ -65,7 +65,7 @@ function reader(stored: ReadonlyMap<string, StoredNode>) {
 
 const parsedIn = async (host: LedgerHost): Promise<string[]> => ((await host.probe()) as { deserialized: Uint8Array[] }).deserialized.map(hex);
 
-describe("the ledger worker's restart (task 12.5a; LG-14, Q144 B)", () => {
+describe("the ledger worker's restart", () => {
   it("starts a new thread holding no state, sends it the kept parses again, answers a parse in flight there and fails any other request in flight; the state at h − 1 loads through the bridge and h applies as without the restart", { timeout: LONG }, async () => {
     const heartbeat = new SharedArrayBuffer(4 * 8);
     const beats = new Int32Array(heartbeat);

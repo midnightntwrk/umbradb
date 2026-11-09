@@ -24,16 +24,16 @@ import { declaration } from "../modules/declarations.js";
  * The table of `core` settings. The `core` entry's settings are zod schemas: one for a public (core) process, one for
  * a private process. Each field has its kind on its outermost schema (`schema.shape[field].meta().kind`, as in a
  * module's settings) and its default. The table below is the specified table written out; the schemas must say the
- * same. [CF-4; design §7]
+ * same.
  *
  * The types the builders take (`CoreSettings`, `src/config/entries.ts`) are held equal to the schemas' input types,
- * so the two cannot drift apart. [CF-2]
+ * so the two cannot drift apart.
  */
 
 /** What a field is when the configuration leaves it out: its default, required, or absent. */
 type Absent = { readonly default: unknown } | "required" | "absent";
 
-/** The specified table: each field's kind and what it is when left out. [CF-4] */
+/** The specified table: each field's kind and what it is when left out. */
 const BASE: Readonly<Record<string, readonly [string, Absent]>> = {
   network: ["data", "required"],
   genesisHash: ["data", "absent"],
@@ -42,14 +42,14 @@ const BASE: Readonly<Record<string, readonly [string, Absent]>> = {
   ledgerSources: ["data", { default: { v8: "vendored", "v9-rc3": "vendored", v9: "vendored", v10: "vendored" } }],
   sweep: ["data", { default: "on" }],
   retainStates: ["data", { default: 0 }],
-  // Operational, with its `password` part secret (`src/config/redact.ts`). [Q167 A]
+  // Operational, with its `password` part secret (`src/config/redact.ts`).
   database: ["operational", "required"],
   listen: ["operational", { default: { admin: "0.0.0.0:8081" } }],
   tipCap: ["operational", { default: 600 }],
   prefetchWindow: ["operational", { default: 64 }],
   backoffCeilingMs: ["operational", { default: 30_000 }],
   backupAtStop: ["operational", "absent"],
-  // SIGUSR2 writes a backup there. [BK-1, Q152 B]
+  // SIGUSR2 writes a backup there.
   backupOnSignal: ["operational", "absent"],
   tls: ["secret", "absent"],
   livenessTimeoutMs: ["operational", { default: 30_000 }],
@@ -65,7 +65,7 @@ const PUBLIC: Readonly<Record<string, readonly [string, Absent]>> = {
   ...BASE,
   node: ["secret", "required"],
   lockstepInstances: ["operational", { default: [] }],
-  // Its `password` part is secret; required with a PostgreSQL database and listen.privateLink. [Q175 A]
+  // Its `password` part is secret; required with a PostgreSQL database and listen.privateLink.
   transportReader: ["operational", "absent"],
 };
 
@@ -80,12 +80,12 @@ const PRIVATE: Readonly<Record<string, readonly [string, Absent]>> = {
 const REQUIRED_PUBLIC = { network: "preprod", database: { kind: "pglite", memory: true }, node: "ws://127.0.0.1:9944" };
 const REQUIRED_PRIVATE = { network: "preprod", database: { kind: "pglite", memory: true }, instanceId: "wallet-1" };
 
-describe("CF-4: the core entry's fields, kinds and defaults", () => {
+describe("the core entry's fields, kinds and defaults", () => {
   for (const [side, schema, table, required] of [
     ["public", PUBLIC_CORE_SCHEMA, PUBLIC, REQUIRED_PUBLIC],
     ["private", PRIVATE_CORE_SCHEMA, PRIVATE, REQUIRED_PRIVATE],
   ] as const) {
-    it(`a ${side} process: every field of CF-4's table with its kind`, () => {
+    it(`a ${side} process: every field of the table with its kind`, () => {
       expect(fieldKinds(schema)).toEqual(Object.fromEntries(Object.entries(table).map(([f, [kind]]) => [f, kind])));
       expect(coreSettingsSchema(side)).toBe(schema);
     });
@@ -116,14 +116,14 @@ describe("CF-4: the core entry's fields, kinds and defaults", () => {
     expect(DEFAULT_ADMIN_ADDRESS).toBe("0.0.0.0:8081");
   });
 
-  it("apiReadTimeoutMs is a whole number from 1 to 2,147,483,647, the read option's bounds (DB-15)", () => {
+  it("apiReadTimeoutMs is a whole number from 1 to 2,147,483,647, the read option's bounds", () => {
     expect(MAX_READ_TIMEOUT_MS).toBe(2_147_483_647);
     const read = (value: unknown) => PUBLIC_CORE_SCHEMA.safeParse({ ...REQUIRED_PUBLIC, apiReadTimeoutMs: value }).success;
     expect([1, 30_000, MAX_READ_TIMEOUT_MS].map(read)).toEqual([true, true, true]);
     expect([0, MAX_READ_TIMEOUT_MS + 1, 1.5, "1000"].map(read)).toEqual([false, false, false, false]);
   });
 
-  it("accepts every field of CF-4's table, given, for a public and a private process", () => {
+  it("accepts every field of the table, given, for a public and a private process", () => {
     expect(
       PUBLIC_CORE_SCHEMA.safeParse({
         network: "custom",
@@ -165,7 +165,7 @@ describe("CF-4: the core entry's fields, kinds and defaults", () => {
     ).toBeUndefined();
   });
 
-  it("takes the database as parts, never a connection string (Q167 A), and the node as ws:// or wss://", () => {
+  it("takes the database as parts, never a connection string, and the node as ws:// or wss://", () => {
     const database = (value: unknown) => PUBLIC_CORE_SCHEMA.safeParse({ ...REQUIRED_PUBLIC, database: value }).success;
     const postgres = { kind: "postgres", host: "h", user: "u", name: "db" };
     expect(
@@ -238,7 +238,7 @@ describe("CF-4: the core entry's fields, kinds and defaults", () => {
       [PUBLIC_CORE_SCHEMA, REQUIRED_PUBLIC],
       [PRIVATE_CORE_SCHEMA, REQUIRED_PRIVATE],
     ] as const) {
-      // A custom network also sets its own ledger table: given here, so only the genesis rule reports. [LG-3]
+      // A custom network also sets its own ledger table: given here, so only the genesis rule reports.
       const ledgerTable = { rows: [{ specVersionMin: 0, specVersionMax: 4_294_967_295, ledger: "v8" }] };
       const paths = (settings: Record<string, unknown>) =>
         (schema.safeParse({ ...required, ...settings }).error?.issues ?? []).map((issue) => issue.path);
@@ -256,7 +256,7 @@ describe("CF-4: the core entry's fields, kinds and defaults", () => {
   });
 });
 
-describe("CF-3: byte values are 0x-prefixed lowercase hex strings", () => {
+describe("byte values are 0x-prefixed lowercase hex strings", () => {
   it("bytes: an even number of lowercase digits after 0x", () => {
     const bytes = hexBytes();
     expect(["0x", "0x00", "0xab01"].map((v) => bytes.safeParse(v).success)).toEqual([true, true, true]);
@@ -300,7 +300,7 @@ type DeepReadonly<T> = T extends readonly (infer E)[]
 type PrivateOnly = "instanceId" | "publicDatabase" | "privateLink";
 type PublicOnly = "node" | "lockstepInstances" | "transportReader";
 
-describe("CF-2, CF-4: the builders' types and the schemas say the same", () => {
+describe("the builders' types and the schemas say the same", () => {
   it("a public process's CoreSettings is the public schema's input", () => {
     expectTypeOf<DeepReadonly<z.input<typeof PUBLIC_CORE_SCHEMA>>>().toEqualTypeOf<
       DeepReadonly<Omit<PublicCoreSettings, PrivateOnly>>

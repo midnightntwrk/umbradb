@@ -27,10 +27,9 @@ import type { DatabaseParts } from "../../src/config/database-parts.js";
  * - a process started with its admin endpoints on `listen.admin` (`127.0.0.1:0`, a port the system gives, checked to
  *   be ≥ 10000), and requests to them;
  * - the prober that times their answers off the main thread;
- * - the oracle for answer times and routes; [A62]
- * - the oracle for the endpoints in each process state; [A64]
+ * - the oracle for answer times and routes;
+ * - the oracle for the endpoints in each process state;
  * - the admin servers of the negative controls.
- * [AE-1–AE-3, AE-6]
  */
 
 /**
@@ -50,7 +49,7 @@ export function adminCoreSettings(database: DatabaseParts, extra: Readonly<Recor
 }
 
 /**
- * How `/config` shows the `database` setting `database`: its parts, the password as `[redacted]`. [CF-4, Q167 A]
+ * How `/config` shows the `database` setting `database`: its parts, the password as `[redacted]`.
  */
 export function shownDatabase(database: DatabaseParts): Record<string, unknown> {
   return "password" in database && database.password !== undefined ? { ...database, password: "[redacted]" } : { ...database };
@@ -58,7 +57,7 @@ export function shownDatabase(database: DatabaseParts): Record<string, unknown> 
 
 /**
  * The admin address of `config`'s first entry as validated (`listen.admin`, or its default): what the engine's network
- * plan gives `ProcessAdmin.serve` for `umbradb run`'s request. [AE-1, LM-3]
+ * plan gives `ProcessAdmin.serve` for `umbradb run`'s request.
  */
 export function writtenAdmin(config: { readonly entries: readonly { readonly settings?: unknown }[] }): string {
   const settings = config.entries[0]?.settings as { readonly listen: { readonly admin: string } };
@@ -109,7 +108,7 @@ export const ADMIN_BACKBONE = [CORE_HEALTH, CORE_STATUS, CORE_CONFIG] as const;
 
 /**
  * A published status for the endpoints' unit tests: a public process `following` at 3, ready, `given` over it. What
- * nothing has reported yet is null. [AE-5]
+ * nothing has reported yet is null.
  */
 export function statusSnapshot(given: Partial<StatusSnapshot> = {}): StatusSnapshot {
   return {
@@ -131,12 +130,12 @@ export function statusSnapshot(given: Partial<StatusSnapshot> = {}): StatusSnaps
   };
 }
 
-/** A whole snapshot for the endpoints' unit tests: {@link statusSnapshot}'s, the default settings, `given` over it. [CF-4] */
+/** A whole snapshot for the endpoints' unit tests: {@link statusSnapshot}'s, the default settings, `given` over it. */
 export function adminSnapshot(given: Partial<AdminSnapshot> = {}): AdminSnapshot {
   return { livenessTimeoutMs: 30_000, readinessLag: null, startedNs: "0", status: statusSnapshot(), config: UNVALIDATED_CONFIG, ...given };
 }
 
-/** The four endpoints. [AE-1] */
+/** The four endpoints. */
 export const ENDPOINTS = ["/health/live", "/health/ready", "/status", "/config"] as const;
 
 /** One answer of the admin listener (or the module API's). */
@@ -363,7 +362,7 @@ export function gate(): Gate {
   };
 }
 
-// ── Answer timing: the prober [A62] ──────────────────────────────────────────────────────────────────────────────
+// ── Answer timing: the prober ──────────────────────────────────────────────────────────────────────────────
 
 /** One request the prober made. */
 export interface ProbeRecord {
@@ -429,15 +428,15 @@ export interface Hold {
 /** A new hold, not yet started. */
 export const newHold = (): Hold => ({ start: 0n, end: 0n });
 
-/** How many requests of each path a hold must see, so that "each answers within 1 s" is not vacuous. [A62] */
+/** How many requests of each path a hold must see, so that "each answers within 1 s" is not vacuous. */
 export const PROBES_DURING_HOLD = 4;
-/** The bound on an answer's time. [A62] */
+/** The bound on an answer's time. */
 export const ANSWER_MS = 1_000;
 
 /**
  * The timing oracle. For each of `paths`, it counts the requests sent during `hold`, from its start to 1 s before its
  * end (so that a request sent near its end could not be answered after it ended anyway). There must be at least
- * {@link PROBES_DURING_HOLD}, and each must be answered, with a status of `expected`, within {@link ANSWER_MS}. [A62]
+ * {@link PROBES_DURING_HOLD}, and each must be answered, with a status of `expected`, within {@link ANSWER_MS}.
  */
 export function timingProblems(
   records: readonly ProbeRecord[],
@@ -461,9 +460,9 @@ export function timingProblems(
   return problems;
 }
 
-// ── Routes [A62] ─────────────────────────────────────────────────────────────────────────────────────────────────
+// ── Routes ─────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** Requests that are none of the four endpoints; any other method or path answers 404. [AE-1] */
+/** Requests that are none of the four endpoints; any other method or path answers 404. */
 export const OTHER_REQUESTS: readonly (readonly [method: string, path: string])[] = [
   ["GET", "/"],
   ["GET", "/health"],
@@ -496,7 +495,6 @@ export const OTHER_REQUESTS: readonly (readonly [method: string, path: string])[
  *   `/status` and `/config` 200;
  * - every other request in `others` (the module's own paths among them) answered 404, `not-found`, with JSON unless it
  *   is a `HEAD`.
- * [A62]
  */
 export function routeProblems(endpoints: readonly Answered[], others: readonly Answered[]): string[] {
   const problems: string[] = [];
@@ -520,9 +518,9 @@ export function routeProblems(endpoints: readonly Answered[], others: readonly A
   return problems;
 }
 
-// ── Endpoints in each state [A64] ────────────────────────────────────────────────────────────────────────────────
+// ── Endpoints in each state ────────────────────────────────────────────────────────────────────────────────
 
-/** What the four endpoints must answer in a state. [A64] */
+/** What the four endpoints must answer in a state. */
 export interface Expected {
   readonly state: string;
   readonly ready: boolean;
@@ -532,11 +530,10 @@ export interface Expected {
 
 /**
  * The endpoint-state oracle. In the state `expected`:
- * - `/health/live` answers 200, as a refused or halted process stays up and live; [AE-3]
+ * - `/health/live` answers 200, as a refused or halted process stays up and live;
  * - `/health/ready` answers 200 when ready and 503 otherwise;
  * - `/status` answers 200 with the state and readiness, and its reason with the fields expected (or none);
  * - `/config` answers 200.
- * [A64]
  */
 export function stateProblems(seen: Observation, expected: Expected): string[] {
   const problems: string[] = [];
@@ -570,7 +567,6 @@ export type Answerer = (method: string, url: string, view: AdminView) => AdminAn
 /**
  * An admin server on the **main thread**, the first negative control of the answer-time test: the very `serveAdmin` the
  * worker runs, over a message channel in this thread, answering with `answer` (the real route table's by default).
- * [A62]
  */
 export function mainThreadAdmin(answer?: Answerer): AdminStarter {
   return async ({ address, beat, snapshot }) => {
@@ -610,7 +606,7 @@ export function mainThreadAdmin(answer?: Answerer): AdminStarter {
 /**
  * An admin server that **reads the database**, the second negative control of the answer-time test. It runs on the main
  * thread, as it must to hold a database. Its `/status` reads the cursor through `database()` before it answers; it
- * answers every other request as the real route table does. [A62]
+ * answers every other request as the real route table does.
  */
 export function databaseReadingAdmin(database: () => Promise<ReadOnlyDatabase>): AdminStarter {
   return mainThreadAdmin(async (method, url, view) => {

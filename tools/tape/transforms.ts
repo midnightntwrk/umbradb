@@ -4,7 +4,7 @@
  * pruned state, a best-chain switch. Each checks its input as a tape (`checkTape`: `bad-tape-record` at the first bad
  * record), refuses what it cannot do with {@link TransformError} (`bad-transform` and a reason), changes no record it
  * was given (records it leaves alone are the same values in the output), and returns a frozen list checked as a tape
- * again. They compose: the output of one is the input of the next. [TT-4, A71]
+ * again. They compose: the output of one is the input of the next.
  *
  * Lines count from 1 and sessions from 1, as the tape node serves them; a subscription is named by its session and its
  * id, compared as a JSON value (`./select.ts`); a subscription's notifications are counted from 1 in its session.
@@ -21,7 +21,7 @@
  * - {@link replaceWithError}: the selected calls answered with `error` instead.
  * - {@link stateUnavailable}: the selected calls answered as Substrate answers for a state it discarded,
  *   `{ code: 4003, message: "Client error: UnknownBlock: State already discarded for <block>" }`, which the node client
- *   reads as a `node-requirement` error; the block is the call's last parameter, or `block` [IN-9].
+ *   reads as a `node-requirement` error; the block is the call's last parameter, or `block`.
  * - {@link spliceNotifications}: a best-chain switch — a range of a subscription's notifications replaced by a range of
  *   another tape's (a fork recorded on a devnet), one for one under the target's id; the source's surplus follows the
  *   last replaced one, the target's surplus is removed. The calls the client makes for the new branch's blocks are not

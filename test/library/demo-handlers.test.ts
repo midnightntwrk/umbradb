@@ -15,11 +15,11 @@ import { eventually, exchange, type Exchanged, headerValues, type MapiHooks, map
 /**
  * The browser demo's handlers on the engine (`ProcessHandle.api.fetch`, `api.connect`, `admin.fetch`): internal members
  * that `startUmbraDB` does not give a host, built for a page, which has no Node.js server. Each is held to the mounted
- * Node.js handler it stands for, on PostgreSQL 18 and PGlite. [LM-11, LM-4, LM-5, RN-15, RN-16; design §8]
+ * Node.js handler it stands for, on PostgreSQL 18 and PGlite.
  *
  * - `api.fetch` answers every request as mounted `api.http` does — the same status, body, content type and core headers
  *   for the module's answers and the module API's own errors, 413 past the body limit, 400 for a body that is no UTF-8
- *   or was read already, on PostgreSQL 504 past `apiReadTimeoutMs` (DB-15) — and the lifecycle's 503 while the module
+ *   or was read already, on PostgreSQL 504 past `apiReadTimeoutMs` — and the lifecycle's 503 while the module
  *   API does not serve, `X-Umbra-Config-Hash` absent before the hash exists.
  * - `admin.fetch` answers the four endpoints as mounted `admin.http` does, in every state and after `closed`.
  * - `api.connect(channel)` runs the module API's subscription protocol on a host's channel — a Node.js `MessageChannel`
@@ -92,7 +92,7 @@ const OVERSIZE = JSON.stringify("x".repeat(1_048_575));
 /** Bytes that are no UTF-8. */
 const NOT_UTF8 = new Uint8Array([0x7b, 0xff, 0xfe, 0x7d]);
 
-/** The answers the protocol's checks give (as the listener gives them, `mounted-api.test.ts`'s L68). */
+/** The answers the protocol's checks give (as the listener gives them, as in `mounted-api.test.ts`). */
 const PROTOCOL_ERRORS = [
   { type: "error", error: { code: "invalid-request", message: "a message is a JSON object with a type" } },
   { type: "error", error: { code: "invalid-request", message: "a message's type is subscribe or unsubscribe" } },
@@ -103,7 +103,7 @@ const PROTOCOL_ERRORS = [
   { type: "error", id: "x", error: { code: "not-found", message: "no subscription is named nothing" } },
   // A message that is no text, as a WebSocket's binary frame.
   { type: "error", error: { code: "invalid-request", message: "a message is a JSON object with a type" } },
-  // An id whose conversion to text throws: answered, never thrown out of the channel's callback. [LM-4, LM-10]
+  // An id whose conversion to text throws: answered, never thrown out of the channel's callback.
   { type: "error", error: { code: "invalid-request", message: "an unsubscribe message's id is a string, not an object" } },
 ];
 
@@ -284,7 +284,7 @@ async function fetchRuleProblems(engine: ProcessHandle): Promise<string[]> {
   return problems;
 }
 
-describe.each(PROCESS_BACKENDS)("the browser demo's handlers on the engine, on $name (LM-11)", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("the browser demo's handlers on the engine, on $name", (backend: ProcessBackend) => {
   const postgres = backend.kind === "postgres";
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
@@ -316,7 +316,7 @@ describe.each(PROCESS_BACKENDS)("the browser demo's handlers on the engine, on $
         400,
         { error: { code: "invalid-request", message: "the request body was read before the module API got the request" } },
       ]);
-      // The handle a host gets has none of the demo's members. [L52]
+      // The handle a host gets has none of the demo's members.
       const facade = startUmbraDB({ config: { data: libraryData((await backend.database()).setting) }, source: new InMemoryBlockSource({ head: 1n }) });
       expect(Object.keys(facade.api).sort()).toEqual(["http", "upgrade"]);
       expect(Object.keys(facade.admin)).toEqual(["http"]);

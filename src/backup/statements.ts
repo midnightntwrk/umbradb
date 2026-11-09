@@ -1,7 +1,7 @@
 /**
  * The statements of a backup's dump. A restore runs the file's SQL itself, statement by statement, in one transaction,
  * without `psql`. So it splits the plain SQL that `pg_dump` wrote as PostgreSQL's lexer reads it, and handles what the
- * tool writes for `psql` alone as `psql` would. [BK-3; design §9.1]
+ * tool writes for `psql` alone as `psql` would.
  *
  * **Statements** end at a `;` outside a string, an identifier, a dollar-quoted body and a comment: `'…'` (a doubled
  * quote inside), `E'…'` (with backslash escapes), `"…"` (a doubled quote inside), `$tag$…$tag$`, `-- …` to the end of
@@ -248,7 +248,7 @@ export async function* statementsOf(
 
 /**
  * Reads every piece of `lines` without running any (the restore's check before loading); resolves with the statement
- * count. [BK-3]
+ * count.
  */
 export async function checkStatements(lines: AsyncIterable<string>, firstLine = 2): Promise<number> {
   let count = 0;

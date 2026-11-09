@@ -8,7 +8,7 @@ import { isolationProblems } from "./serve-checks.js";
  * ledger worker: `SharedArrayBuffer is not defined`).
  */
 
-describe("the isolation check on a server without COOP and COEP (task 17.3a)", () => {
+describe("the isolation check on a server without COOP and COEP", () => {
   it("names both headers", async () => {
     const server = createServer((_request, response) => {
       response.writeHead(200, { "Content-Type": "text/html" });

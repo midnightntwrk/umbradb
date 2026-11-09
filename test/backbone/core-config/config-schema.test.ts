@@ -24,7 +24,6 @@ import { entryOf, loggingModule } from "../../runner/process-build.js";
  *   declarations, the chain's identity with its anchor once block S committed, and the database's backend, version and
  *   writer lock;
  * - a recorded `versionEntry`, shown as data.
- * [A66, AE-5]
  *
  * Committed negative controls: a body without any one of its required fields, with a field the schema does not have, or
  * with a value of the wrong form fails the schema.
@@ -40,7 +39,7 @@ function moded(version = "1.0.0"): ModuleDeclaration {
   });
 }
 
-/** A library process's network as `/config` shows it: its plan's modes, its addresses as bound. [LM-3, L22] */
+/** A library process's network as `/config` shows it: its plan's modes, its addresses as bound. */
 const LIBRARY_NETWORK: NetworkShown = {
   modes: { api: "mounted", admin: "listening", privateLink: "channels" },
   addresses: { listen: { admin: "127.0.0.1:41234" }, privateLink: null },
@@ -74,13 +73,13 @@ function body(network: NetworkShown | null = null): Record<string, unknown> {
   return JSON.parse(JSON.stringify(withNetwork(shown, network))) as Record<string, unknown>;
 }
 
-describe("A66: /config's JSON schema", () => {
+describe("/config's JSON schema", () => {
   it("is a draft 2020-12 schema; a full body validates, and so does one before the validation", () => {
     expect(CONFIG_SCHEMA.problems(body())).toEqual([]);
     expect(CONFIG_SCHEMA.problems(JSON.parse(JSON.stringify(UNVALIDATED_CONFIG)))).toEqual([]);
   });
 
-  it("a body with the network shown validates: each surface's mode, and a library process's addresses as bound (L22)", () => {
+  it("a body with the network shown validates: each surface's mode, and a library process's addresses as bound", () => {
     expect(CONFIG_SCHEMA.problems(body(LIBRARY_NETWORK))).toEqual([]);
     const command: NetworkShown = { modes: { api: "none", admin: "listening", privateLink: "listening" }, addresses: null };
     expect(CONFIG_SCHEMA.problems(body(command))).toEqual([]);
@@ -89,7 +88,7 @@ describe("A66: /config's JSON schema", () => {
     expect(shown.core.settings.listen).toEqual({ admin: "127.0.0.1:41234" });
   });
 
-  it("names MD-1's points, lifetimes, table kinds and setting kinds, and every field the endpoint answers, each required", () => {
+  it("names the points, lifetimes, table kinds and setting kinds, and every field the endpoint answers, each required", () => {
     const schema = schemaFile(new URL("./config.schema.json", import.meta.url)) as any;
     expect(schema.$defs.point.enum).toEqual([...POINTS]);
     expect(schema.$defs.item.properties.lifetimes.items.enum).toEqual([...LIFETIMES]);
@@ -158,13 +157,13 @@ async function configWhen(run: AdminRun, wanted: (config: Record<string, any>) =
   }
 }
 
-describe.each(PROCESS_BACKENDS)("A66: /config through the process validates on $name", (backend) => {
+describe.each(PROCESS_BACKENDS)("/config through the process validates on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("A66: refused before the database opens, refused after it, and running with everything the process knows", async () => {
+  it("refused before the database opens, refused after it, and running with everything the process knows", async () => {
     // Refused once the configuration is validated, before the database opens (PGlite without the development opt-in).
-    // A refusal of the configuration itself ends the process and serves no /config. [CF-9, Q137 B]
+    // A refusal of the configuration itself ends the process and serves no /config.
     const early = startWithAdmin({ database: { kind: "pglite", memory: true }, extra: { developmentOptIn: false } });
     expect(await valid(early, (b) => b.state === "refused")).toMatchObject({
       core: { settings: { database: { kind: "pglite", memory: true } } },
@@ -212,7 +211,7 @@ describe.each(PROCESS_BACKENDS)("A66: /config through the process validates on $
     await running.handle.stop();
   }, 180_000);
 
-  it("A66: a recorded versionEntry, shown as data once the history found it equal to its row", async () => {
+  it("a recorded versionEntry, shown as data once the history found it equal to its row", async () => {
     const db = await backend.database();
     const old = moded("0.9.0");
     const before = startWithAdmin({ database: db.setting, user: [old], head: 3n, entries: [adminCore(db.setting, 1, { extra: { listen: { admin: "127.0.0.1:0" } } }), entryOf(old, 1, { mode: "x" })] });
