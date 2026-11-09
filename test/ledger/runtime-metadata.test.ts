@@ -12,6 +12,7 @@ import { restartAt } from "../backbone/ledger-restart.js";
 import { type FoundTape, tapeTest } from "../tape/real/real-tapes.js";
 import {
   CountingNode,
+  delayedRuntimeAt,
   devnetUpgradeOf,
   expectUpgradeDecoding,
   hashOf,
@@ -101,9 +102,9 @@ describe("A96 on the synthetic devnet upgrade tape (LG-4)", { timeout: TIMEOUT_M
     });
   });
 
-  it("halts with metadata-mismatch where the parent's runtime is not the block's MNSV version", async () => {
-    // A chain whose U already says it was built by the new runtime: its parent's state still runs the old one.
-    const forged = upgradeTape((h) => (h < UPGRADE.u ? UPGRADE.old : UPGRADE.new));
+  it("halts with metadata-mismatch where neither the parent's nor the block's own runtime is its MNSV version", async () => {
+    // A chain whose U names a third runtime: its parent's state runs the old one, its own the new one.
+    const forged = upgradeTape((h) => (h === UPGRADE.u ? 2_500_000 : mnsvOf(h)));
     await withNode(forged, async (client) => {
       const metadata = new RuntimeMetadata(client);
       let halt: unknown;
@@ -119,13 +120,51 @@ describe("A96 on the synthetic devnet upgrade tape (LG-4)", { timeout: TIMEOUT_M
         height: BigInt(UPGRADE.u),
         hash: toHex(hashOf(UPGRADE.u)),
         at: toHex(hashOf(UPGRADE.u - 1)),
-        specVersion: UPGRADE.new,
+        specVersion: 2_500_000,
         runtimeSpecVersion: UPGRADE.old,
+        stateSpecVersion: UPGRADE.new,
       });
-      expect((halt as UmbraError).message).toContain("2000000");
+      expect((halt as UmbraError).message).toContain("2500000");
+      expect((halt as UmbraError).message).toContain(String(UPGRADE.old));
+      expect((halt as UmbraError).message).toContain(String(UPGRADE.new));
       // Nothing was cached for the block that halted: the new runtime's metadata was never read.
       expect(metadata.cached(UPGRADE.new)).toBeUndefined();
       expect(metadata.specVersions()).toEqual([UPGRADE.old]);
+    });
+  });
+});
+
+describe("a delayed runtime upgrade on the synthetic tape (runtime 2.1's system_version 3; LG-4, issue 00089)", { timeout: TIMEOUT_MS }, () => {
+  /** U only stages the new code (its state still runs the old runtime); F is built by the new one, as its state shows. */
+  const delayedTape = () => upgradeTape(mnsvOf, delayedRuntimeAt);
+
+  it("decodes U with the old metadata and F, whose parent's state still runs the old runtime, with the new one read at F", async () => {
+    await withNode(delayedTape(), async (client, node) => {
+      await expectUpgradeDecoding(walkOver(client), () => new RuntimeMetadata(client));
+      // The metadata read once per runtime: from genesis at block 0 and at F; from U at U − 1 and at F.
+      const metadataReads = node.calls.filter((call) => call.method === "state_getMetadata").map((call) => call.params);
+      expect(metadataReads).toEqual([[toHex(hashOf(0))], [toHex(hashOf(UPGRADE.f))], [toHex(hashOf(UPGRADE.u - 1))], [toHex(hashOf(UPGRADE.f))]]);
+      // The runtime read at every block's parent (block 0: its own), and at F's own hash after its parent's (V5).
+      const runtimeReads = node.calls.filter((call) => call.method === "state_getRuntimeVersion").map((call) => call.params);
+      expect(runtimeReads).toEqual([
+        ...[0, 0, 1, 2, 3, 4, 4].map((h) => [toHex(hashOf(h))]),
+        ...[2, 3, 4, 4].map((h) => [toHex(hashOf(h))]),
+      ]);
+    });
+  });
+
+  it("[NEG] core-arch's parent-only selection halts at F there", async () => {
+    // The rule this change amends, as core-arch LG-4 states it: the runtime in the parent's state, or a halt.
+    const parentOnly = (node: NodeClient) => ({
+      async forBlock(block: { height: bigint; hash: Uint8Array; parentHash: Uint8Array; specVersion: number }): Promise<RuntimeMetadataEntry> {
+        const at = contentStateOf(block);
+        const { specVersion } = await node.runtimeVersion(at);
+        if (specVersion !== block.specVersion) throw new UmbraError("metadata-mismatch", `block ${block.height}`, {});
+        return { specVersion, metadata: await node.metadata(at) };
+      },
+    });
+    await withNode(delayedTape(), async (client) => {
+      await expect(walkOver(client)(0, parentOnly(client) as unknown as RuntimeMetadata)).rejects.toMatchObject({ code: "metadata-mismatch", message: `block ${UPGRADE.f}` });
     });
   });
 });
@@ -218,7 +257,7 @@ describe("A96 on task 0.3's devnet upgrade tape (LG-4; skipped by name without t
 
   tapeTest(
     TAPE,
-    "halts with metadata-mismatch at U when U's header names the new runtime, whose parent's state runs the old one",
+    "halts with metadata-mismatch at U when U's header names a runtime neither its parent's state nor its own runs",
     async (found) => {
       const { boundary, answers, upgrade } = devnetOf(found);
       const hashOfU = answers.hashAt(upgrade.u);
@@ -226,7 +265,7 @@ describe("A96 on task 0.3's devnet upgrade tape (LG-4; skipped by name without t
       const records = found.read().records.map((record): TapeRecord => {
         if (!("method" in record) || record.method !== "chain_getHeader" || (record.params as unknown[])[0] !== hashOfU) return record;
         const header = (record as unknown as { readonly result: { readonly digest: { readonly logs: readonly string[] } } }).result;
-        const logs = header.digest.logs.map((item) => (item === toHex(mnsvItem(upgrade.old)) ? toHex(mnsvItem(upgrade.new)) : item));
+        const logs = header.digest.logs.map((item) => (item === toHex(mnsvItem(upgrade.old)) ? toHex(mnsvItem(2_500_000)) : item));
         forged += logs.filter((item, index) => item !== header.digest.logs[index]).length;
         return { ...record, result: { ...header, digest: { ...header.digest, logs } } } as TapeRecord;
       });
@@ -245,8 +284,9 @@ describe("A96 on task 0.3's devnet upgrade tape (LG-4; skipped by name without t
           height: BigInt(upgrade.u),
           hash: hashOfU,
           at: answers.hashAt(upgrade.u - 1),
-          specVersion: upgrade.new,
+          specVersion: 2_500_000,
           runtimeSpecVersion: upgrade.old,
+          stateSpecVersion: upgrade.new,
         });
         expect(metadata.cached(upgrade.new)).toBeUndefined();
         expect(metadata.specVersions()).toEqual([upgrade.old]);
@@ -302,7 +342,8 @@ describe("the metadata cache (LG-4)", () => {
     const counting = node();
     const metadata = new RuntimeMetadata(counting);
     await expect(metadata.forBlock({ ...blockAt(1), specVersion: UPGRADE.new })).rejects.toMatchObject({ code: "metadata-mismatch" });
-    expect(counting.calls).toEqual([`runtimeVersion ${toHex(hashOf(0))}`]);
+    // The parent's runtime, then the block's own: neither is the block's MNSV version.
+    expect(counting.calls).toEqual([`runtimeVersion ${toHex(hashOf(0))}`, `runtimeVersion ${toHex(hashOf(1))}`]);
   });
 
   it("gives frozen entries", async () => {

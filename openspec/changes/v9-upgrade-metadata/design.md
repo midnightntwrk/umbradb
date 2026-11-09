@@ -28,27 +28,32 @@ has still halts by name; the node calls stay those the tapes hold.
 
 ## Decisions
 
-### D1. The runtime named by the `MNSV` digest, own state first
+### D1. The runtime named by the `MNSV` digest, the parent's first
 
 For block B with `MNSV` version v (amends `core-arch` design §5, "Metadata"; LG-4):
 
-1. Read the runtime version at B's own hash (block 0: the same). If it is v, decode B's content with that runtime's
-   metadata (read at B). Every block of both forms but the earlier form's enactment block takes this path, the first
-   block of a delayed upgrade included.
-2. Else read the runtime version at B's parent hash. If it is v, decode with that runtime's metadata (read at the
-   parent): the earlier form's enactment block U.
+1. Read the runtime version at B's parent hash (block 0: its own). If it is v, decode B's content with that runtime's
+   metadata (read at the parent): every block but a delayed upgrade's first, the earlier form's enactment block U
+   included — today's path, unchanged.
+2. Else read the runtime version at B's own hash. If it is v, decode with that runtime's metadata (read at B): the first
+   block of a delayed upgrade.
 3. Else halt `metadata-mismatch` (`core-arch` design §11), naming B's height and hash, v, and the two versions read.
 
-*Alternative:* keep the parent-first order and fall back to the block's own state — rejected: it makes every block of
-the now normal form pay the fallback's second read at each upgrade's first block only, but keeps the parent read on
-every block, where the own-state read is the one `forState` (the block's own reads) needs anyway. *Alternative:*
-detect the form from the `0x08` digest item of the parent — rejected: the version comparison is what the official
-indexer does and needs no knowledge of how an upgrade was applied.
+On a block where both runtimes are v (every block away from an upgrade) the order gives the same metadata; at an
+upgrade exactly one of them is v. The order is chosen for the recorded tapes: a tape holds `state_getMetadata` at the
+first height whose state reports each runtime — U for the earlier form (`devnet-v8-v9-0-235` at 102,
+`mainnet-1774000-1780000` at 1,774,491, `preview-v9-0-2000` at 556), F for the delayed one (`preview-v9-0-2000` at
+1,572, `mainnet-3346039-3346239` at 3,346,139, `preprod-3348334-3348534` at 3,348,434). Parent first reads each
+runtime's metadata where the tapes hold it; own state first would read the new runtime's at F on an earlier-form tape,
+which no tape holds (found while writing the tests; the spec's first draft had the other order).
+*Alternative:* own state first, as the official indexer compares — rejected for the tapes above, with the same result
+on every block. *Alternative:* detect the form from the parent's `0x08` digest item — rejected: the version comparison
+needs no knowledge of how an upgrade was applied.
 
 ### D2. Calls and cache
 
-Each block reads `state_getRuntimeVersion` at its own hash (as `forState` already does for the block's own reads, so
-the two share one call per block), and at its parent's hash only at an earlier-form enactment block. Metadata stays
+Each block reads `state_getRuntimeVersion` at its parent's hash, as today, and at its own hash only at a delayed
+upgrade's first block (a block's own reads, `forState`, read it there anyway). Metadata stays
 cached by `spec_version`, read once per runtime at a hash whose runtime version was just read, so a runtime's metadata
 is never cached under another version (`core-arch` design §5).
 

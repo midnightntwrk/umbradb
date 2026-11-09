@@ -10,9 +10,9 @@ parent's differ (`design.md` D1).
 ### Requirement: LG-4 Block content is decoded with the runtime that built it
 
 THE system SHALL decode a block's extrinsics and events with the metadata of the runtime whose `spec_version` is the
-block's `MNSV` version: the runtime in the block's own state WHEN its `spec_version` (`state_getRuntimeVersion` at the
-block's hash) is the `MNSV` version; else the runtime in its parent's state WHEN that one's is (block 0: its own); and
-IF neither is THEN processing SHALL halt with `metadata-mismatch`, naming the block, its `MNSV` version and both
+block's `MNSV` version: the runtime in its parent's state (block 0: its own) WHEN its `spec_version`
+(`state_getRuntimeVersion` at the parent's hash) is the `MNSV` version; else the runtime in the block's own state WHEN
+that one's is; and IF neither is THEN processing SHALL halt with `metadata-mismatch`, naming the block, its `MNSV` version and both
 runtimes' versions. Metadata SHALL be cached by `spec_version`, never stored under another runtime's version. Reads of a
 block's own state SHALL use the runtime in that state.
 

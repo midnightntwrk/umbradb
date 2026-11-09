@@ -1,6 +1,7 @@
 # Proposal — V9-UPGRADE-METADATA: decode a block with the runtime that built it, across node 2.1's runtime upgrades (`v9-upgrade-metadata`)
 
-> **Status:** Proposed (2026-11-09; the owner chose a separate change for issue 00089). No code yet.
+> **Status:** In progress (2026-11-09: approved by the owner, who skipped the stage-1 cold adversarial review and
+> asked for the implementation; the owner chose a separate change for issue 00089).
 
 ## Why
 
@@ -38,12 +39,12 @@ and with the parent's runtime when they differ (an enactment block of the earlie
 ## What Changes
 
 1. **LG-4 amended** (`specs/ledger/spec.md`): a block's content is decoded with the metadata of the runtime whose
-   `spec_version` is the block's `MNSV` version — the runtime in the block's own state when its version is the `MNSV`
-   version, else the runtime in its parent's state when that one's is, else processing halts with `metadata-mismatch`
-   naming both versions. Reads of a block's own state keep using the runtime in that state; the cache by
+   `spec_version` is the block's `MNSV` version — the runtime in its parent's state when its version is the `MNSV`
+   version (today's rule), else the runtime in the block's own state when that one's is (a delayed upgrade's first
+   block), else processing halts with `metadata-mismatch` naming both versions. Reads of a block's own state keep using the runtime in that state; the cache by
    `spec_version` is unchanged.
-2. **The selection in `src/ledger/metadata.ts`** (`RuntimeMetadata.forBlock`): reads the block's own runtime version
-   first, which its own-state reads need anyway, and the parent's only when the two differ.
+2. **The selection in `src/ledger/metadata.ts`** (`RuntimeMetadata.forBlock`): reads the parent's runtime version as
+   today, and the block's own only when the parent's is not the `MNSV` version.
 3. **Tapes of each network's v9 upgrade** in `test/tape/real/manifest.json`: `preview-v9-0-2000` (recorded
    2026-11-09, preview from genesis over both of its upgrades), and short tapes around mainnet 3,346,139 and preprod
    3,348,434, each replayed across its upgrade.
@@ -72,9 +73,6 @@ None.
 ## Impact
 
 - `src/ledger/metadata.ts` (`forBlock`), its callers in `src/backbone/core-block-fetch/` only through its result.
-- Node calls: each block reads `state_getRuntimeVersion` at its own hash (today at its parent's), and at its parent's
-  hash too only where the two differ (the earlier form's enactment blocks). The recorded tapes hold the runtime version
-  at every recorded height's own hash (checked on `stagenet-715402-715433` and `preview-v9-0-2000`), and a parent's
-  hash is the previous height's own, so replays stay on tape; a call a tape does not hold answers `not-on-tape`, which
-  the existing tape tests would show.
+- Node calls: unchanged on every block but a delayed upgrade's first, which also reads `state_getRuntimeVersion` and
+  `state_getMetadata` at its own hash; the tapes hold both there (`design.md` D1), so replays stay on tape.
 - `core-arch`'s LG-4 scenario and its acceptance criterion (`acceptance.md:486`) are restated by this change.

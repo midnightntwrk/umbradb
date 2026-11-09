@@ -548,7 +548,7 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
   "halt:metadata-mismatch": [
     {
       file: "test/ledger/runtime-metadata.test.ts",
-      test: "halts with metadata-mismatch where the parent's runtime is not the block's MNSV version",
+      test: "halts with metadata-mismatch where neither the parent's nor the block's own runtime is its MNSV version",
     },
   ],
   "halt:unexpected-cursor": [
