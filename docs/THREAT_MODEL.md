@@ -516,7 +516,7 @@ What may go into this repository's git history:
 9. **Commit policy — fixed by task 17.4b, as built.** [The commit policy](#commit-policy) above holds the
    no-secrets rule and locally generated, ignored `0600` secret-file policy, with exact historical fingerprints in
    `.gitleaksignore` and full-history gitleaks configured in CI
-   (`nix/midnight-env/test-wallets/generate-test-wallet.sh:170`, `.gitignore:42`, `.gitleaksignore:17`,
+   (`nix/midnight-env/test-wallets/generate-test-wallet.sh:170`, `.gitignore:24`, `.gitleaksignore:17`,
    `.github/workflows/supply-chain.yml:109`).
 
 Related **issue 00051 remains open**: transport instance ids accept arbitrary non-empty text, including line

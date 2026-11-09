@@ -1,14 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
-  agentsProblems, changelogDocumentProblems, descriptionProblems, ENGINEERING_RULES, linkedPath, linkProblems,
-  markdownLinks, RETIRED_DOCUMENTS_17_4A, RETIRED_DOCUMENTS_17_4B, storageAlgebraProblems,
+  changelogDocumentProblems, descriptionProblems, linkedPath, linkProblems, markdownLinks, RETIRED_DOCUMENTS_17_4A,
+  RETIRED_DOCUMENTS_17_4B, storageAlgebraProblems,
 } from "./documents.js";
 
 /**
  * `./documents.ts` on small texts — the fence and code span rules of `markdownLinks`, reference definitions, angle
  * brackets, `linkedPath`'s URL and anchor tests and the root, `changelogDocumentProblems`' preamble bounds and names,
- * `descriptionProblems`' sentence rule, `agentsProblems`' rule names and common file names, `storageAlgebraProblems`'
- * headings.
+ * `descriptionProblems`' sentence rule, `storageAlgebraProblems`' headings.
  */
 
 const targets = (text: string) => markdownLinks(text).map(({ line, target }) => `${line} ${target}`);
@@ -87,33 +86,11 @@ describe("changelogDocumentProblems (task 17.5b)", () => {
   });
 });
 
-describe("descriptionProblems, agentsProblems and storageAlgebraProblems (task 17.5b)", () => {
+describe("descriptionProblems and storageAlgebraProblems (task 17.5b)", () => {
   it("takes a blank description as none, and two sentences however many spaces part them", () => {
     expect(descriptionProblems("   ")).toEqual(["package.json has no description (A171)"]);
     expect(descriptionProblems("An indexer.  It runs.")).toEqual(["package.json's description is not one sentence (A171)"]);
     expect(descriptionProblems("An indexer for Midnight.")).toEqual([]);
-  });
-
-  it("names each of the 18 rules by the owner's name", () => {
-    expect(ENGINEERING_RULES.map(({ rule }) => rule)).toEqual([
-      "acceptance criteria are the contract", "verify external claims", "test first on real databases", "traceability",
-      "deterministic tests", "no placeholders", "SQL discipline", "typed errors", "stop and escalate",
-      "review evidence and negative controls", "test honesty", "floors only go up, except with the owner's approval",
-      "the flaky-test policy", "the Lean gate", "the supply-chain gates", "secrets", "per-change security checks",
-      "no AI attribution",
-    ]);
-    expect(agentsProblems("")[0]).toBe(
-      'AGENTS.md lacks the rule "acceptance criteria are the contract" (its lead **Acceptance criteria are the contract.**) (A171)',
-    );
-  });
-
-  it("does not take a common file name for a retired document, and does take a rare one", () => {
-    const leads = ENGINEERING_RULES.map(({ lead }) => lead).join("\n");
-    expect(agentsProblems(`${leads}\nSee README.md, CHANGELOG.md, DESIGN.md, design.md, proposal.md and tasks.md.`))
-      .toEqual([]);
-    expect(agentsProblems(`${leads}\nSee v1-lessons-learned.md.`)).toEqual([
-      `AGENTS.md:${ENGINEERING_RULES.length + 1}: names docs/v1-lessons-learned.md, deleted by task 17.4b (A171)`,
-    ]);
   });
 
   it("reads a heading only at a line's start, and C2 as a retired law on its own", () => {

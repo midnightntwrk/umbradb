@@ -29,4 +29,3 @@ tests/
 # rule does not match. A `nosemgrep: <rule-id>` marker does NOT stop a GitHub alert (the SARIF
 # keeps marked findings, and GitHub ignores the suppression); see docs/issues/00086.
 *.md
-graphify-out/

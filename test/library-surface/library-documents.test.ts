@@ -29,12 +29,12 @@ const INPUT: EntryInput = {
 };
 
 /**
- * The documents a user reads: the README, the roadmap, the contributing and security notes, `docs/*.md` and
+ * The documents a user reads: the README, the contributing and security notes, `docs/*.md` and
  * `docs/supply-chain/`, and the examples' text files. Left out: `CHANGELOG.md` (it names what was removed), and the
  * records of their own time — `docs/issues/`, `docs/releases/`, `docs/recovery/`, `docs/research/` — and the specs.
  */
 function userDocuments(): Document[] {
-  const files = ["README.md", "ROADMAP.md", "CONTRIBUTING.md", "SECURITY.md"];
+  const files = ["README.md", "CONTRIBUTING.md", "SECURITY.md"];
   for (const dir of ["docs", "docs/supply-chain"]) {
     files.push(...readdirSync(path.join(ROOT, dir)).filter((name) => name.endsWith(".md")).map((name) => `${dir}/${name}`));
   }

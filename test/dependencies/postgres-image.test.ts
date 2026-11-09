@@ -93,7 +93,7 @@ const SELF = "test/dependencies/postgres-image.test.ts";
 
 /**
  * Every file in the working tree that git tracks or would track (untracked files included, ignored ones not) and that
- * can pin an image, but this one and the knowledge graph's generated output.
+ * can pin an image, but this one.
  */
 function repositoryFiles(): RepositoryFile[] {
   const listed = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], {
@@ -102,7 +102,7 @@ function repositoryFiles(): RepositoryFile[] {
   });
   return listed
     .split("\0")
-    .filter((path) => path !== "" && path !== SELF && !path.startsWith("graphify-out/") && canPin(path))
+    .filter((path) => path !== "" && path !== SELF && canPin(path))
     .flatMap((path) => {
       try {
         return [{ path, text: readFileSync(join(ROOT, path), "utf8") }];

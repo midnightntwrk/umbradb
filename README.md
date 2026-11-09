@@ -582,11 +582,6 @@ coreEntry({
 
 **Status.** Pre-1.0: version `0.10.0`. Under SemVer a `0.y.z` release makes no compatibility promise.
 
-**Roadmap.** The [ROADMAP](ROADMAP.md) says where the project stands and what comes next: feature modules built on
-the core, each with its own specification. Wallet and dApp APIs compatible with the official indexer, token metadata
-(MIP-0018), unshielded and shielded token state, fast DUST and shielded sync, private wallet data, a JSON-RPC for
-Passport, an explorer, and private user secrets.
-
 **Specification.** The OpenSpec change [`core-arch`](openspec/changes/core-arch/) (`proposal.md`, `design.md`, the
 capability specs), with [`start-umbradb`](openspec/changes/start-umbradb/) for UmbraDB as a library; the
 [operator guide](docs/operator-guide.md) covers running it.
@@ -611,10 +606,6 @@ headless (`UMBRADB_CHROME` names another).
 Recorded tapes: [releases](https://github.com/midnight-experiments/umbradb-tapes/releases) ·
 [v0.10.0-rc.1](https://github.com/midnight-experiments/umbradb-tapes/releases/tag/v0.10.0-rc.1).
 Set `UMBRADB_TAPES` to the download directory; see the [fixture note](openspec/changes/core-arch/acceptance.md) for filenames.
-
-**Knowledge graph.** The code, docs and specs are graphified in `graphify-out/`, committed. `npm run graph:refresh`
-rebuilds it; commit the result with the change that prompted it. `npm run graph:check` exits 0 when it is current, 1
-when stale, 2 when missing or not written by `graph:refresh`.
 
 - [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
 - Issues: [github.com/midnightntwrk/umbradb/issues](https://github.com/midnightntwrk/umbradb/issues).

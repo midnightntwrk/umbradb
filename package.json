@@ -53,9 +53,7 @@
     "test:smoke": "npm run build && node test/smoke/pack-install.mjs",
     "bench": "tsx bench/harness.ts",
     "bench:smoke": "tsx bench/smoke.ts",
-    "vendor:ledger": "bash vendor/ledger/vendor-ledger.sh",
-    "graph:refresh": "bash scripts/graphify/run.sh refresh",
-    "graph:check": "bash scripts/graphify/run.sh check"
+    "vendor:ledger": "bash vendor/ledger/vendor-ledger.sh"
   },
   "dependencies": {
     "@electric-sql/pglite": "0.5.10",

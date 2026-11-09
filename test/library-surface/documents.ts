@@ -12,8 +12,6 @@
  *   link reference definition of every `.md` file whose target is a path (not a URL or an anchor) names a file or a
  *   directory of the tree, resolved from the linking file's directory (`/…` from the root), its `#fragment` and
  *   `?query` left out. Fenced code blocks and code spans hold no links.
- * - **`AGENTS.md`** holds the rules of the 1.0.0 guideline still in force ({@link ENGINEERING_RULES}), names no deleted
- *   document and nothing of 0.9.5's program ({@link agentsProblems}) [Q170 C].
  * - **`Formal/STORAGE_ALGEBRA.md`** states W1 and T5 and no retired law ({@link storageAlgebraProblems}) [Q171 A].
  *
  * Pure functions over repository-relative paths and file texts; `./documents.test.ts` gives them the tree (git's
@@ -21,7 +19,6 @@
  */
 
 import path from "node:path";
-import { RETIRED_EXPORTS } from "./retirement.js";
 
 /**
  * The first group of documents classified as 0.9.5's and deleted: they described a removed 0.9.5 part, its contracts or
@@ -240,89 +237,6 @@ export function descriptionProblems(description: unknown): string[] {
   if (!description.endsWith(".") || /[.!?]\s+\S/.test(description)) {
     problems.push("package.json's description is not one sentence (A171)");
   }
-  return problems;
-}
-
-/** A rule of the 1.0.0 guideline still in force: the owner's name for it, and its lead in `AGENTS.md`. [Q170 C] */
-export interface EngineeringRule {
-  readonly rule: string;
-  readonly lead: string;
-}
-
-/**
- * The 18 rules of `docs/v1-implementation-guideline.md` the owner confirmed as still in force (2026-10-28), in the
- * owner's order, each with the bold lead its restatement for 0.10.0 opens with in `AGENTS.md` — in the stage or
- * section that already carried part of it, or under "Engineering rules". [Q170 C]
- */
-export const ENGINEERING_RULES: readonly EngineeringRule[] = [
-  { rule: "acceptance criteria are the contract", lead: "**Acceptance criteria are the contract.**" },
-  { rule: "verify external claims", lead: "**Verify external claims.**" },
-  { rule: "test first on real databases", lead: "**Test first, on real databases.**" },
-  { rule: "traceability", lead: "**Traceability.**" },
-  { rule: "deterministic tests", lead: "**Deterministic tests.**" },
-  { rule: "no placeholders", lead: "**No placeholders.**" },
-  { rule: "SQL discipline", lead: "**SQL discipline.**" },
-  { rule: "typed errors", lead: "**Typed errors.**" },
-  { rule: "stop and escalate", lead: "**Stop and escalate.**" },
-  { rule: "review evidence and negative controls", lead: "**Review evidence and negative controls.**" },
-  { rule: "test honesty", lead: "**Test honesty.**" },
-  { rule: "floors only go up, except with the owner's approval", lead: "**Floors only go up.**" },
-  { rule: "the flaky-test policy", lead: "**Flaky tests.**" },
-  { rule: "the Lean gate", lead: "**The Lean gate.**" },
-  { rule: "the supply-chain gates", lead: "**Supply-chain gates.**" },
-  { rule: "secrets", lead: "**Secrets.**" },
-  { rule: "per-change security checks", lead: "**Per-change security checks.**" },
-  { rule: "no AI attribution", lead: "**No AI attribution.**" },
-];
-
-/**
- * What marks a sentence as 0.9.5's program rather than 0.10.0's: the versions it was written for, its source and test
- * paths, its test database's name and its gate's live variable. `AGENTS.md` names none of them, nor in backticks a name
- * of 0.9.5's retired exports ({@link RETIRED_EXPORTS}). [A5]
- */
-export const AGENTS_0_9_5_MARKERS: readonly string[] = [
-  "0.9.5",
-  "1.0.0",
-  "src/postgres/",
-  "src/interfaces/",
-  "test/api-surface/barrel-resolves",
-  "error-catalog-drift",
-  "Testcontainers Postgres",
-  "UMBRADB_LIVE_PREPROD",
-];
-
-/** File names too common to tell a retired document by (`design/tasks.md` against an OpenSpec change's `tasks.md`). */
-const COMMON_NAMES = new Set(["README.md", "CHANGELOG.md", "DESIGN.md", "design.md", "proposal.md", "tasks.md"]);
-
-/**
- * The problems with `AGENTS.md`: a rule of {@link ENGINEERING_RULES} whose lead is missing or appears more
- * than once; a line naming a retired document, by its path or by its file name unless that is a common one; a line
- * naming a marker of {@link AGENTS_0_9_5_MARKERS} or, in backticks, a retired export. [A171 STATIC, Q170 C]
- */
-export function agentsProblems(agents: string): string[] {
-  const problems: string[] = [];
-  for (const { rule, lead } of ENGINEERING_RULES) {
-    const count = agents.split(lead).length - 1;
-    if (count === 0) problems.push(`AGENTS.md lacks the rule "${rule}" (its lead ${lead}) (A171)`);
-    if (count > 1) problems.push(`AGENTS.md states the rule "${rule}" ${count} times (A171)`);
-  }
-  const retired = new Set(RETIRED_EXPORTS);
-  agents.split("\n").forEach((line, index) => {
-    const at = `AGENTS.md:${index + 1}`;
-    for (const document of RETIRED_DOCUMENTS) {
-      const name = path.posix.basename(document);
-      if (line.includes(document) || (!COMMON_NAMES.has(name) && line.includes(name))) {
-        problems.push(`${at}: names ${document}, deleted by task ${retiredBy(document)} (A171)`);
-      }
-    }
-    for (const marker of AGENTS_0_9_5_MARKERS) {
-      if (line.includes(marker)) problems.push(`${at}: names "${marker}", 0.9.5's program (A171)`);
-    }
-    for (const match of line.matchAll(/`([A-Za-z_$][\w$]*)`/g)) {
-      const name = match[1] as string;
-      if (retired.has(name)) problems.push(`${at}: names \`${name}\`, a retired 0.9.5 export (A171)`);
-    }
-  });
   return problems;
 }
 
