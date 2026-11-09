@@ -509,8 +509,10 @@ What may go into this repository's git history:
    (`nix/midnight-env/test-wallets/generate-test-wallet.sh:170`, `.gitignore:24`, `.gitleaksignore:17`,
    `.github/workflows/supply-chain.yml:109`).
 
-Related **issue 00051 remains open**: transport instance ids accept arbitrary non-empty text, including line
-breaks, which reaches core log lines and instance status
-(`src/private/messages.ts:96`,
-`src/private/core-transport.ts:320`, `src/private/core-transport.ts:368`, `src/private/instances.ts:40`).
-This remains true of the refusal log even though that log excludes the read's statement text.
+Transport instance ids are bounded. One rule, 1 to 128 of `[A-Za-z0-9._:-]` (`src/private/instance-id.ts:17`),
+checks a `hello`'s `instance` (`src/private/messages.ts:97`), a private process's `instanceId` and the core's
+`lockstepInstances` (`src/config/core-settings.ts:298`, `src/config/core-settings.ts:285`). A `hello` with another id
+fails its schema and the core closes the connection (`src/private/core-transport.ts:431`); a configuration naming one
+is refused at startup with `settings-schema` (`src/config/validate.ts:809`). So no space, line break or control
+character in an id reaches the core's log lines or the instances `/status` shows
+(`src/private/core-transport.ts:319`, `src/private/instances.ts:40`).
