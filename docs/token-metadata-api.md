@@ -163,7 +163,9 @@ UmbraDB knows its genesis hash (its built-in networks, such as `mainnet`, `prepr
 }
 ```
 
-`startHeight` is the database's S; `indexedHeight` and `archiveHeight` the committed height of the answer.
+`startHeight` is the database's S; `indexedHeight` and `archiveHeight` the committed height of the answer. `unresolvedEvents`
+is the number of `unresolved` events (log sites `core-contract-logs-fast` cannot read), kept by the indexer as it
+writes them.
 
 ### `GET /v1/tokens?limit=&cursor=`
 

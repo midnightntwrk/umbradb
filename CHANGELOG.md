@@ -11,8 +11,10 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 - MIP-0018 token metadata as two public modules: `token-metadata` (`TOKEN_METADATA`) creates, fills and guards its
   tables, and refuses a start above its database's first height with `TokenMetadataStartAfterDatabase` as the cause;
-  `token-metadata-api` (`TOKEN_METADATA_API`) serves the `/v1` API of `docs/token-metadata-api.md` over them. The
-  exported surface is 69 names, 31 values and 38 types.
+  `token-metadata-api` (`TOKEN_METADATA_API`) serves the `/v1` API of `docs/token-metadata-api.md` over them.
+  `TokenMetadataRevisionGap` is the cause of a refused gap between its revisions.
+- `contractLogsItemOf` and `unresolvedLogSitesOf`, with the types `ContractLog` and `UnresolvedLogSite`: a module's
+  reads of the `contract-logs` item. The exported surface is 74 names, 34 values and 40 types.
 - A module declaration's optional `latestStarts` (`{ [network]: height }`): a new database whose start would be above
   an enabled module's height on its network starts there, with the entries starting with it; the process logs the
   move and `umbradb config check` notes it. `token-metadata` declares each official network's first block with

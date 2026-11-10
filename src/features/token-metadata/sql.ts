@@ -13,6 +13,8 @@
  *   symbols are cut when served, never when stored). `uint_value` is a `UInt` value as a number; `usable` is the
  *   common-field rule's answer for a common key, else null; `defined` says whether the key is served (MIP "Keys").
  * - `withdrawals`, mutable: per identity, the position of the record after which it last had no defined field.
+ * - `counts`, mutable: one row (from the first unresolved site on) holding how many `unresolved` events `events` has,
+ *   so `/v1/status` reads one row instead of counting them.
  *
  * Text columns hold only UmbraDB's own vocabulary (CHECKs keep them ASCII); chain bytes are `bytea`.
  */
@@ -76,6 +78,10 @@ CREATE TABLE ${SCHEMA}.withdrawals (
   event_index integer NOT NULL CHECK (event_index >= 0),
   record_index integer NOT NULL CHECK (record_index >= 0),
   PRIMARY KEY (contract_address, domain_sep, kind)
+);
+CREATE TABLE ${SCHEMA}.counts (
+  id smallint PRIMARY KEY CHECK (id = 1),
+  unresolved bigint NOT NULL CHECK (unresolved >= 0)
 );`;
 
 /** The module's migrations, in order. */
@@ -182,6 +188,16 @@ export async function recordWithdrawal(w: Write, id: IdentityKey, at: Position, 
      ON CONFLICT (contract_address, domain_sep, kind) DO UPDATE SET height = EXCLUDED.height,
       tx_index = EXCLUDED.tx_index, event_index = EXCLUDED.event_index, record_index = EXCLUDED.record_index`,
     [...identityParams(id), at.height, at.tx, at.event, record],
+  );
+}
+
+/** Adds `n` unresolved events to the `counts` row (made on the first). */
+export async function addUnresolved(w: Write, n: number): Promise<void> {
+  if (n === 0) return;
+  await w.execute(
+    `INSERT INTO ${SCHEMA}.counts (id, unresolved) VALUES (1, $1)
+     ON CONFLICT (id) DO UPDATE SET unresolved = ${SCHEMA}.counts.unresolved + EXCLUDED.unresolved`,
+    [n],
   );
 }
 

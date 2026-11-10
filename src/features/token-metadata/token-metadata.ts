@@ -109,7 +109,7 @@ export function tokenMetadataWith(reader: LogReader, latestStarts: Readonly<Reco
       {
         name: STATE_ITEM,
         lifetimes: ["table"],
-        table: { schema: SCHEMA, tables: ["fields", "withdrawals"], kind: "mutable" },
+        table: { schema: SCHEMA, tables: ["fields", "withdrawals", "counts"], kind: "mutable" },
       },
     ],
     startsMidChain: true,

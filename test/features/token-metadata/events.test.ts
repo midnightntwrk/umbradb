@@ -154,6 +154,8 @@ describe.each(PROCESS_BACKENDS)("token-metadata's event rows on $name", (backend
       { tx_index: 1, event_index: 1, classification: "accept", reason: null },
     ]);
     expect(await db.query("SELECT DISTINCT encode(domain_sep, 'hex') AS d FROM token_metadata.fields ORDER BY d")).toEqual([{ d: hex(D) }, { d: hex(D2) }]);
+    // The status's count is the counter the write path keeps, one row: the two unresolved sites.
+    expect(await db.query("SELECT id, unresolved::int AS n FROM token_metadata.counts")).toEqual([{ id: 1, n: 2 }]);
     expect(identity.json.mark).toMatchObject({
       mark: "unresolved",
       reasons: ["unresolved-log"],

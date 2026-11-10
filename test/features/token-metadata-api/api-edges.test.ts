@@ -61,6 +61,7 @@ describe.each(PROCESS_BACKENDS)("the API's edges on $name", (backend: ProcessBac
       `INSERT INTO token_metadata.events (height, tx_index, event_index, tx_hash, contract_address, entry_point, classification, reason)
        VALUES (${S + 1}, 7, 0, '\\x${"77".repeat(32)}'::bytea, '\\x${hex(A)}'::bytea, '\\x'::bytea, 'unresolved', 'not-a-literal')`,
     );
+    await db.query("INSERT INTO token_metadata.counts (id, unresolved) VALUES (1, 1)");
     await db.query(
       `INSERT INTO token_metadata.fields (contract_address, domain_sep, kind, key, val_type, value, uint_value, usable, defined,
          set_height, set_tx, set_event, set_record)

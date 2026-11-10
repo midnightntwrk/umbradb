@@ -527,8 +527,10 @@ configSchema: z.object({
   `op_index` (where the `log` op is in the transaction). `log_index` numbers the block's logs and unresolved sites
   together in emission order, so a block without unresolved sites has the same rows with either provider, and in a
   block with some, each `-fast` log keeps the number its site gives it. The `block` item, read from `on-compute` on, is
-  `{ logs, unresolved }`: `logs`, each `{ transaction, index, address, entryPoint, logicalSegment, version, eventType,
-  data }`, and `unresolved`, each `{ transaction, index, address, entryPoint, reason, segment, fallible, call, op }`;
+  `{ logs, unresolved }`, read with `contractLogsItemOf(block, id)` and `unresolvedLogSitesOf(block, id)` (exported, with
+  the types `ContractLog` and `UnresolvedLogSite`): `logs`, each `{ transaction, index, address, entryPoint,
+  logicalSegment, version, eventType, data }`, and `unresolved`, each `{ transaction, index, address, entryPoint,
+  reason, segment, fallible, call, op }`;
   `-full`'s has none. A module
   that derives state from logs should treat a contract with unresolved sites as not fully known. With the vendored v9
   ledger, `logical_segment` is 0 for every log, whichever segment emitted it: the ledger labels a fallible segment's
@@ -967,8 +969,9 @@ export default defineConfig({
   cause a `TokenMetadataStartAfterDatabase` with the code `token-metadata-start-after-database`). Add it to a new
   database. A gap between its revisions (§11) is refused the same way, with `token-metadata-revision-gap`.
 - **Its tables** (schema `token_metadata`): `events` (append-only: each MIP-0018 event's position, transaction hash,
-  contract, classification and reason; other logs are not stored), `fields` and `withdrawals` (mutable: each identity's
-  current fields, whole, and its last withdrawal). They are deterministic module tables (§4): names and symbols are
+  contract, classification and reason; other logs are not stored), `fields`, `withdrawals` and `counts` (mutable: each
+  identity's current fields, whole, its last withdrawal, and the number of unresolved events, which `/v1/status`
+  reads). They are deterministic module tables (§4): names and symbols are
   stored whole and cut to 64 and 12 characters only when served, since the cut depends on the platform's Unicode data.
 - **The API holds no state.** Startup refuses it without the indexer (`item-no-provider`); added to a database whose
   indexer already ran, from a height above the cursor like any added entry, it answers as if it had run from S. Every

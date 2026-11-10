@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fileURLToPath } from "node:url";
 import { buildBrowser } from "../../../browser/build.js";
 import { TOKEN_METADATA_API } from "../../../src/features/token-metadata-api/token-metadata-api.js";
-import { TOKEN_METADATA } from "../../../src/features/token-metadata/token-metadata.js";
+import { FIRST_CONTRACT_LOG_HEIGHTS, TOKEN_METADATA } from "../../../src/features/token-metadata/token-metadata.js";
 import type { ModuleDeclaration } from "../../../src/modules/declaration.js";
 import { TapeNode, type TapeRecord } from "../../../tools/tape/index.js";
 import { FAST_CORE } from "../../backbone/contract-data-checks.js";
@@ -19,16 +19,21 @@ import { findTape } from "../../tape/real/real-tapes.js";
 
 /**
  * The browser build in headless Chrome, served the preprod tape `preprod-3348334-3348534` by a tape node, with a
- * configuration listing `core-contract-logs-fast`, `token-metadata` and `token-metadata-api` (`./fixtures/browser-configuration.ts`), starts
- * at the tape's first height + 1 and answers `/v1/status` and `/v1/tokens` as the server does: the same status, body and
- * view headers as a Node.js process on the same tape, configuration and S. The page is given S through the start it
- * keeps for its database (`umbradb-start:<storage>`), set before it loads. Startup asks for the genesis hash and header,
- * which a mid-chain tape does not hold: they come from `test/ledger/fixtures/networks/preprod.json`, the node's own
- * answers, put before the tape's records.
+ * configuration listing `core-contract-logs-fast`, `token-metadata` and `token-metadata-api`
+ * (`./fixtures/browser-configuration.ts`). The page asks to start above preprod's first block with contract logs (as a
+ * page starting at the node's finalized head would), so the database starts at that block, the indexer's latest start,
+ * and backfills from it; it then answers `/v1/status` (whose start is that block) and `/v1/tokens` as the server does:
+ * the same status, body and view headers as a Node.js process on the same tape and configuration. The page is given its
+ * start through the start it keeps for its database (`umbradb-start:<storage>`), set before it loads. Startup asks for
+ * the genesis hash and header, which a mid-chain tape does not hold: they come from
+ * `test/ledger/fixtures/networks/preprod.json`, the node's own answers, put before the tape's records.
  */
 
 const TAPE = "preprod-3348334-3348534";
-const S = 3_348_335;
+/** The start the page asks for: above preprod's first contract-log block, as a page starting at the tip would. */
+const ASKED = 3_348_500;
+/** Where the database starts: `token-metadata`'s latest start on preprod, the first block with contract logs. */
+const S = FIRST_CONTRACT_LOG_HEIGHTS.preprod!;
 const STOP = 3_348_534;
 const STORAGE = "token-metadata";
 const CONFIGURATION = fileURLToPath(new URL("./fixtures/browser-configuration.ts", import.meta.url));
@@ -61,14 +66,14 @@ const PRESENT = findTape(TAPE).found;
   }, BROWSER_TEST_TIMEOUT_MS);
 
   it(
-    "starts at the tape's first height + 1 and answers /v1/status and /v1/tokens as the server does",
+    "asked to start above the first contract-log block, starts there, backfills, and answers /v1/status and /v1/tokens as the server does",
     async () => {
       // The page keeps S for a stored database: set it on the page's origin before the page loads.
       const tab = await browser.open(`${server.origin}/not-the-page`);
-      await tab.evaluate(`localStorage.setItem(${JSON.stringify(`umbradb-start:${STORAGE}`)}, "${S}")`);
+      await tab.evaluate(`localStorage.setItem(${JSON.stringify(`umbradb-start:${STORAGE}`)}, "${ASKED}")`);
       await tab.navigate(pageUrl(server.origin, { node: node.url, storage: STORAGE, stop: String(STOP) }));
       const chosen = await eventWhen(tab, "core", "chosen");
-      expect(chosen.start).toBe(S);
+      expect(chosen.start).toBe(ASKED);
       await statusWhen(tab, "core", (s) => s.cursor === String(STOP), `the cursor at ${STOP}`, 600_000).catch(async (error: unknown) => {
         throw new Error(`${String(error)}\n${await tabReport(tab)}`);
       });
@@ -80,7 +85,7 @@ const PRESENT = findTape(TAPE).found;
       await backend.start();
       try {
         const run = await ingest(await backend.database(), records, {
-          start: BigInt(S),
+          start: BigInt(ASKED),
           stop: BigInt(STOP),
           core: FAST_CORE,
           user: [TOKEN_METADATA as ModuleDeclaration, TOKEN_METADATA_API as ModuleDeclaration],

@@ -880,7 +880,7 @@ async function eventsPage(ctx: Ctx, filter: EventFilter, limit: number, cursor: 
 /** `GET /v1/status` (from the process's S and committed height). */
 async function status(ctx: Ctx, genesisHash: string | null) {
   const height = ctx.read.height === null ? null : Number(ctx.read.height);
-  const [u] = await ctx.read.query(`SELECT count(*)::int AS n FROM ${SCHEMA}.events WHERE classification = 'unresolved'`);
+  const [u] = await ctx.read.query(`SELECT unresolved::text AS n FROM ${SCHEMA}.counts WHERE id = 1`);
   return {
     network: ctx.network,
     genesisHash,
