@@ -9,9 +9,9 @@
  */
 
 import type { ReadHandle } from "../../db/api.js";
-import { SCHEMA } from "./sql.js";
-import { type Field, type IdentityState, lengthLimited, type SymbolGroup, symbolGroups } from "./state.js";
-import { toHex } from "./codec/index.js";
+import { SCHEMA } from "../token-metadata/schema.js";
+import { type Field, type IdentityState, lengthLimited, type SymbolGroup, symbolGroups } from "../token-metadata/state.js";
+import { toHex } from "../token-metadata/codec/index.js";
 
 /** Every existing identity of the database (at least one defined field), with its served fields, in identity order. */
 export async function servedIdentities(read: Pick<ReadHandle, "query">, network: string): Promise<IdentityState[]> {

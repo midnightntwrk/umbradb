@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TOKEN_METADATA } from "../../../src/features/token-metadata/token-metadata.js";
+import type { ModuleDeclaration } from "../../../src/modules/declaration.js";
 import { commonRecords } from "../../../src/features/token-metadata/codec/index.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../../runner/process-backends.js";
 import { blockLogs, contract, domain, eventData, runTo, startRun } from "./harness.js";
@@ -41,7 +42,7 @@ describe.each(PROCESS_BACKENDS)("token-metadata's start on $name", (backend: Pro
   it("refuses an entry above the database's S with token-metadata-start-after-database (S = 0, cursor 5, added from 6)", async () => {
     const db = await backend.database();
     await runTo(db, { start: 0, head: 5, modules: [] });
-    const handle = startRun(db, { start: 0, head: 8, moduleStart: (id) => (id === TOKEN_METADATA.id ? 6 : 0) });
+    const handle = startRun(db, { start: 0, head: 8, modules: [TOKEN_METADATA as ModuleDeclaration], moduleStart: (id) => (id === TOKEN_METADATA.id ? 6 : 0) });
     const refusal = await handle.started.then(
       () => null,
       (error: unknown) => error,

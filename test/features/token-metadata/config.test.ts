@@ -11,9 +11,9 @@ import { type InstalledProject, installedProject, runNode } from "../../examples
  * refused at startup.)
  */
 
-const config = (listed: boolean) => `import { CORE_BLOCK_PARSED, CORE_CHAIN_EVENTS, CORE_CONTRACT_LOGS_FAST, coreEntry, defineConfig, TOKEN_METADATA } from "umbradb";
+const config = (listed: boolean) => `import { CORE_BLOCK_PARSED, CORE_CHAIN_EVENTS, CORE_CONTRACT_LOGS_FAST, coreEntry, defineConfig, TOKEN_METADATA, TOKEN_METADATA_API } from "umbradb";
 
-export const modules = [${listed ? "TOKEN_METADATA" : ""}];
+export const modules = [${listed ? "TOKEN_METADATA, TOKEN_METADATA_API" : ""}];
 
 const start = 1_000_000;
 
@@ -32,6 +32,7 @@ export default defineConfig({
     CORE_BLOCK_PARSED.entry({ start, config: {} }),
     CORE_CONTRACT_LOGS_FAST.entry({ start, config: {} }),
     TOKEN_METADATA.entry({ start, config: {} }),
+    TOKEN_METADATA_API.entry({ start, config: {} }),
   ],
 });
 `;

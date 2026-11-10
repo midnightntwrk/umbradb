@@ -1,6 +1,6 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { hasColor, tokenColor } from "../../../src/features/token-metadata/color.js";
+import { hasColor, tokenColor } from "../../../src/features/token-metadata-api/color.js";
 import * as v8 from "../../../vendor/ledger/v8/pkg/midnight_ledger_wasm_fs.js";
 import * as v9 from "../../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js";
 import * as v9rc3 from "../../../vendor/ledger/v9-rc3/pkg/midnight_ledger_wasm_v9_fs.js";

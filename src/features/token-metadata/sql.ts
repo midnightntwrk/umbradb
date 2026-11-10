@@ -18,17 +18,10 @@
  */
 
 import type { BlockWriteHandle, SchemaWriteHandle } from "../../db/api.js";
+import { COLOR_SQL, SCHEMA } from "./schema.js";
 
-/** The module's schema: its id with `-` replaced by `_`. */
-export const SCHEMA = "token_metadata";
+export { COLOR_SQL, SCHEMA };
 
-/**
- * A row's color (`./color.ts`, MIP "Lookup") in SQL: `sha256(pad(32, "midnight:derive_token") ‖ domain_sep ‖
- * contract_address)`. The API finds an identity by its color through the expression index `fields_color_idx`, so no
- * color is stored and the write path computes none.
- */
-export const COLOR_SQL =
-  "sha256('\\x6d69646e696768743a6465726976655f746f6b656e0000000000000000000000'::bytea || domain_sep || contract_address)";
 
 /** Migration `001`: the three tables and their indexes. Never edited once released; a change is a new migration. */
 export const MIGRATION_001 = `CREATE TABLE ${SCHEMA}.events (

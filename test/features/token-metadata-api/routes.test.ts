@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { tokenColor } from "../../../src/features/token-metadata/color.js";
+import { tokenColor } from "../../../src/features/token-metadata-api/color.js";
 import { commonRecords, record, toHex, withdrawRecords } from "../../../src/features/token-metadata/codec/index.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../../runner/process-backends.js";
-import { blockLogs, contract, domain, eventData, get, serve } from "./harness.js";
+import { blockLogs, contract, domain, eventData, get, serve } from "../token-metadata/harness.js";
 
 /**
  * The withdrawal, usability and truncation scenarios read through the routes, on PostgreSQL 18 and PGlite.

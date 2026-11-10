@@ -1,6 +1,7 @@
 /**
- * The `token-metadata` module: MIP-0018 token metadata from the `contract-logs` item. A public module, not one of the
- * core's: a configuration enables it with `TOKEN_METADATA.entry(...)`.
+ * The `token-metadata` module: MIP-0018 token metadata from the `contract-logs` item, kept in its tables. A public
+ * module, not one of the core's: a configuration enables it with `TOKEN_METADATA.entry(...)`. It creates, fills and
+ * guards the tables; `token-metadata-api` (`../token-metadata-api/`) serves them.
  *
  * - **Requires** `contract-logs` and `block-parsed` (each event's transaction hash, for `/v1/events`), so it runs with
  *   either logs provider (`core-contract-logs-full`, or the
@@ -11,8 +12,8 @@
  *   `on-start-db` an entry starting above S. The process refuses with `callback-error` at `on-start-db` of
  *   `token-metadata`; the error itself is a {@link TokenMetadataStartAfterDatabase}, whose code is
  *   `token-metadata-start-after-database`.
- * - **Its API** (`./api.ts`) is the `/v1` routes of `docs/token-metadata-api.md` on the module API, registered in
- *   `on-start-api`.
+ * - **Provides** its tables as two `table` items (`./schema.ts`): `token-metadata-events` (append-only) and
+ *   `token-metadata-state` (mutable), which `token-metadata-api` and any other module may require to read them.
  * - **Per block** it writes in `on-db-write` (`./apply.ts`): the block's candidates and their effect on the fields, in
  *   chain order, reading its own rows inside the block transaction. A v8 block has no contract logs, so nothing.
  */
@@ -22,9 +23,9 @@ import { UMBRADB_VERSION } from "../../config/build.js";
 import { CONTRACT_LOGS_ITEM, contractLogsItemOf } from "../../backbone/contract-logs/contract-logs.js";
 import type { BlockParsed } from "../../backbone/core-block-parsed/core-block-parsed.js";
 import { defineModule } from "../../modules/declaration.js";
-import { registerMetadataApi } from "./api.js";
 import { type LogReader, writeBlock } from "./apply.js";
 import { miscAtom } from "./log-reader.js";
+import { EVENTS_ITEM, STATE_ITEM } from "./schema.js";
 import { databaseStart, MIGRATIONS, SCHEMA } from "./sql.js";
 
 /** `core-block-parsed`'s item (named here so the module loads none of that module's code). */
@@ -60,9 +61,9 @@ export function tokenMetadataWith(reader: LogReader) {
     side: "public",
     requires: [CONTRACT_LOGS_ITEM, BLOCK_PARSED_ITEM],
     provides: [
-      { name: "token-metadata-events", lifetimes: ["table"], table: { schema: SCHEMA, tables: ["events"], kind: "append-only" } },
+      { name: EVENTS_ITEM, lifetimes: ["table"], table: { schema: SCHEMA, tables: ["events"], kind: "append-only" } },
       {
-        name: "token-metadata-state",
+        name: STATE_ITEM,
         lifetimes: ["table"],
         table: { schema: SCHEMA, tables: ["fields", "withdrawals"], kind: "mutable" },
       },
@@ -77,9 +78,6 @@ export function tokenMetadataWith(reader: LogReader) {
         const first = p.revisions[0];
         if (start === null || first === undefined) return;
         if (first.start > start) throw new TokenMetadataStartAfterDatabase(first.start, start);
-      },
-      async "on-start-api"(_p, api) {
-        registerMetadataApi(api);
       },
       async "on-db-write"(_p, b, w) {
         const parsed = b.items.get(BLOCK_PARSED_ITEM) as BlockParsed | undefined;

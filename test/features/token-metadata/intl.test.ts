@@ -1,7 +1,8 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { sep } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { writeBlock } from "../../../src/features/token-metadata/apply.js";
-import { servedIdentities } from "../../../src/features/token-metadata/read.js";
+import { servedIdentities } from "../../../src/features/token-metadata-api/read.js";
 import { commonRecords, toHex } from "../../../src/features/token-metadata/codec/index.js";
 import { blockLogs, contract, domain, eventData } from "./harness.js";
 
@@ -14,14 +15,15 @@ import { blockLogs, contract, domain, eventData } from "./harness.js";
  *   does (the control that the spy sees the segmenter).
  */
 
-const WRITE_PATH = [
-  "src/features/token-metadata/token-metadata.ts",
-  "src/features/token-metadata/apply.ts",
-  "src/features/token-metadata/sql.ts",
-  "src/features/token-metadata/log-reader.ts",
-  "src/features/token-metadata/classify.ts",
-  "src/features/token-metadata/color.ts",
-];
+/**
+ * The write path: every file of the indexer (`src/features/token-metadata/`, its codec included) but `state.ts`, which
+ * holds the rules of both sides and is checked by what the write path imports from it.
+ */
+const INDEXER = "src/features/token-metadata";
+const WRITE_PATH = readdirSync(INDEXER, { recursive: true, encoding: "utf8" })
+  .filter((file) => file.endsWith(".ts") && file !== "state.ts")
+  .map((file) => `${INDEXER}/${file.split(sep).join("/")}`)
+  .sort();
 
 /** `text` without its comments (block and line comments; the files hold no `//` inside strings). */
 const code = (text: string): string => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
@@ -34,6 +36,12 @@ describe("Intl only where the module serves", () => {
       const text = code(readFileSync(file, "utf8"));
       expect(text, file).not.toMatch(/\bIntl\b|toLocale|localeCompare|\.normalize\(|lengthLimited|firstCharacters|recordEffects/);
     }
+  });
+
+  it("the write path is the indexer's files, and none of them imports the API module", () => {
+    expect(WRITE_PATH).toEqual(expect.arrayContaining([`${INDEXER}/apply.ts`, `${INDEXER}/token-metadata.ts`, `${INDEXER}/codec/decode.ts`]));
+    expect(WRITE_PATH).not.toContain(`${INDEXER}/state.ts`);
+    for (const file of WRITE_PATH) expect(code(readFileSync(file, "utf8")), file).not.toMatch(/token-metadata-api/);
   });
 
   it("the write path takes from state.ts only rules that read bytes", () => {

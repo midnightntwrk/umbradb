@@ -2,18 +2,19 @@ import { CORE_BLOCK_PARSED } from "../../../../src/backbone/core-block-parsed/co
 import { CORE_CHAIN_EVENTS } from "../../../../src/backbone/core-chain-events/core-chain-events.js";
 import { CORE_CONTRACT_LOGS_FAST } from "../../../../src/backbone/core-contract-logs-fast/core-contract-logs-fast.js";
 import { coreEntry, defineConfig } from "../../../../src/config/entries.js";
+import { TOKEN_METADATA_API } from "../../../../src/features/token-metadata-api/token-metadata-api.js";
 import { TOKEN_METADATA } from "../../../../src/features/token-metadata/token-metadata.js";
 import type { ModuleDeclaration } from "../../../../src/modules/declaration.js";
 import { type BrowserConfiguration, type BrowserRun, databaseOf } from "../../../../browser/src/configuration.js";
 
 /**
  * The browser page's configuration for `token-metadata`: the core on preprod from the page's S, with
- * `core-chain-events`, `core-block-parsed`, `core-contract-logs-fast` and `token-metadata` from S, stopping at the page's
+ * `core-chain-events`, `core-block-parsed`, `core-contract-logs-fast`, `token-metadata` and `token-metadata-api` from S, stopping at the page's
  * `stop` parameter when given.
  */
 function core(run: BrowserRun) {
   const stop = run.params.stop;
-  const modules = [CORE_CHAIN_EVENTS, CORE_BLOCK_PARSED, CORE_CONTRACT_LOGS_FAST, TOKEN_METADATA as ModuleDeclaration];
+  const modules = [CORE_CHAIN_EVENTS, CORE_BLOCK_PARSED, CORE_CONTRACT_LOGS_FAST, TOKEN_METADATA as ModuleDeclaration, TOKEN_METADATA_API as ModuleDeclaration];
   return {
     data: defineConfig({
       entries: [
@@ -25,7 +26,7 @@ function core(run: BrowserRun) {
         ...modules.map((module) => ({ id: module.id, version: module.version, start: run.start, config: {} })),
       ] as never,
     }),
-    modules: [TOKEN_METADATA as ModuleDeclaration],
+    modules: [TOKEN_METADATA as ModuleDeclaration, TOKEN_METADATA_API as ModuleDeclaration],
   };
 }
 

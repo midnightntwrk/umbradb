@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fileURLToPath } from "node:url";
 import { buildBrowser } from "../../../browser/build.js";
+import { TOKEN_METADATA_API } from "../../../src/features/token-metadata-api/token-metadata-api.js";
 import { TOKEN_METADATA } from "../../../src/features/token-metadata/token-metadata.js";
 import type { ModuleDeclaration } from "../../../src/modules/declaration.js";
 import { TapeNode, type TapeRecord } from "../../../tools/tape/index.js";
@@ -17,7 +18,7 @@ import { findTape } from "../../tape/real/real-tapes.js";
 
 /**
  * The browser build in headless Chrome, served the preprod tape `preprod-3348334-3348534` by a tape node, with a
- * configuration listing `core-contract-logs-fast` and `token-metadata` (`./fixtures/browser-configuration.ts`), starts
+ * configuration listing `core-contract-logs-fast`, `token-metadata` and `token-metadata-api` (`./fixtures/browser-configuration.ts`), starts
  * at the tape's first height + 1 and answers `/v1/status` and `/v1/tokens` as the server does: the same status, body and
  * view headers as a Node.js process on the same tape, configuration and S. The page is given S through the start it
  * keeps for its database (`umbradb-start:<storage>`), set before it loads. Startup asks for the genesis hash and header,
@@ -95,7 +96,7 @@ const PRESENT = findTape(TAPE).found;
           start: BigInt(S),
           stop: BigInt(STOP),
           core: FAST_CORE,
-          user: [TOKEN_METADATA as ModuleDeclaration],
+          user: [TOKEN_METADATA as ModuleDeclaration, TOKEN_METADATA_API as ModuleDeclaration],
           settings: { network: "preprod", listen: { api: "127.0.0.1:0" } },
         });
         try {

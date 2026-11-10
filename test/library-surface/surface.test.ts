@@ -30,6 +30,12 @@ describe("what src/index.ts exports", () => {
     expect(typeof umbra.TokenMetadataStartAfterDatabase).toBe("function");
   });
 
+  it("exports the token-metadata-api module's declaration, with its id and entry builder, requiring the indexer's tables", () => {
+    expect(umbra.TOKEN_METADATA_API.id).toBe("token-metadata-api");
+    expect(umbra.TOKEN_METADATA_API.entry({ start: 0, config: {} }).id).toBe("token-metadata-api");
+    expect(umbra.TOKEN_METADATA_API.requires).toEqual(["token-metadata-events", "token-metadata-state"]);
+  });
+
   it("each core module's declaration has its module's id and an entry builder a configuration writes", () => {
     expect(coreModuleProblems(umbra as unknown as Record<string, unknown>)).toEqual([]);
   });

@@ -21,6 +21,7 @@ import {
   encodePayload,
   type MetadataRecord,
 } from "../../../src/features/token-metadata/codec/index.js";
+import { TOKEN_METADATA_API } from "../../../src/features/token-metadata-api/token-metadata-api.js";
 import { TOKEN_METADATA } from "../../../src/features/token-metadata/token-metadata.js";
 import * as v9 from "../../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js";
 import { cursorReaches, libraryData } from "../../library/library-fixtures.js";
@@ -176,7 +177,7 @@ function runData(db: ProcessDatabase, modules: readonly ModuleDeclaration[], opt
 
 /** Starts a process on `db` with the provider and `options.modules`; resolves with its handle once `started` settles. */
 export function startRun(db: ProcessDatabase, options: RunOptions, serve = false): UmbraDBHandle {
-  const modules = [...(options.fast === true ? [] : [logsProvider(options.logs ?? new Map())]), ...(options.modules ?? [TOKEN_METADATA as ModuleDeclaration])];
+  const modules = [...(options.fast === true ? [] : [logsProvider(options.logs ?? new Map())]), ...(options.modules ?? [TOKEN_METADATA as ModuleDeclaration, TOKEN_METADATA_API as ModuleDeclaration])];
   const source = new InMemoryBlockSource({
     head: BigInt(options.head),
     ...(options.items === undefined ? {} : { items: (block) => options.items!(block.height) }),

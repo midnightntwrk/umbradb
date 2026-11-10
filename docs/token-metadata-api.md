@@ -1,13 +1,13 @@
 # `token-metadata`'s `/v1` API
 
-The read-only JSON API of the `token-metadata` module (MIP-0018 token metadata): its paths, parameters, JSON shapes,
+The read-only JSON API of the `token-metadata-api` module over `token-metadata`'s tables (MIP-0018 token metadata): its paths, parameters, JSON shapes,
 errors, pagination and limits. A few fields and routes are not served yet ([Not served yet](#not-served-yet)).
 
 Authority: [MIP-0018](https://github.com/midnightntwrk/midnight-improvement-proposals/blob/eb94bc182221cd937a84ed66a5f903b060f165ab/mips/mip-0018-on-chain-token-metadata.md)
 at `eb94bc182221cd937a84ed66a5f903b060f165ab`, as merged from [PR #372](https://github.com/midnightntwrk/midnight-improvement-proposals/pull/372).
 
-- Served on the module API (`listen.api`, or the page's worker in the browser build), registered by the module's
-  `on-start-api`. Implementation: `src/features/token-metadata/api.ts`.
+- Served on the module API (`listen.api`, or the page's worker in the browser build), registered by `token-metadata-api`'s
+  `on-start-api`. Implementation: `src/features/token-metadata-api/api.ts`.
 - Each answer is one read of the database at its latest committed height, so all its parts come from one state; the
   answer carries the core's `X-Umbra-View`, `X-Umbra-Height` and `X-Umbra-Hash`. Before block S commits, every route
   answers 503 `no-committed-height`.

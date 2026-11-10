@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { registerMetadataApi } from "../../../src/features/token-metadata/api.js";
+import { registerMetadataApi } from "../../../src/features/token-metadata-api/api.js";
 import { commonRecords } from "../../../src/features/token-metadata/codec/index.js";
 import type { ReadHandle } from "../../../src/db/api.js";
 import type { ApiRegistry } from "../../../src/modules/declaration.js";
 import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../../runner/process-backends.js";
-import { blockLogs, contract, domain, eventData, readStopped, runTo } from "./harness.js";
+import { blockLogs, contract, domain, eventData, readStopped, runTo } from "../token-metadata/harness.js";
 
 /**
  * Bounded cost of the API, on PostgreSQL 18 and PGlite.

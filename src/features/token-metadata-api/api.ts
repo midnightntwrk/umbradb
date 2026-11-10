@@ -28,7 +28,7 @@ import type { ApiRegistry } from "../../modules/declaration.js";
 import { BUILT_IN_NETWORKS } from "../../ledger/networks.js";
 import { answerChainData } from "../../runner/envelope.js";
 import { hasColor, tokenColor } from "./color.js";
-import { COLOR_SQL, SCHEMA } from "./sql.js";
+import { COLOR_SQL, SCHEMA } from "../token-metadata/schema.js";
 import {
   COMMON_KEY_HEX,
   type Field,
@@ -39,8 +39,8 @@ import {
   parseStandards,
   symbolGroups,
   tokenMark,
-} from "./state.js";
-import { fromHex, toHex } from "./codec/index.js";
+} from "../token-metadata/state.js";
+import { fromHex, toHex } from "../token-metadata/codec/index.js";
 
 export const MAX_LIMIT = 500;
 export const DEFAULT_LIMIT = 100;

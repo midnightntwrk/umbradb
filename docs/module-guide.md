@@ -902,21 +902,29 @@ command ignores it. `/config` shows the addresses as bound and, in `network`, ea
   to 64 MiB, the reads confined, one channel per instance id. `messagePortChannel(port)` adapts a browser or
   `worker_threads` `MessagePort`.
 
-## 19. A module UmbraDB ships: `token-metadata`
+## 19. Modules UmbraDB ships: `token-metadata` and `token-metadata-api`
 
-UmbraDB's package carries one public module that is not a core module: `token-metadata`, the token metadata of
-[MIP-0018](https://github.com/midnightntwrk/midnight-improvement-proposals/blob/eb94bc182221cd937a84ed66a5f903b060f165ab/mips/mip-0018-on-chain-token-metadata.md).
-It reads the `contract-logs` item (§9), keeps each token's current metadata fields, and serves the `/v1` API of
-[docs/token-metadata-api.md](token-metadata-api.md). Its code is `src/features/token-metadata/`, a module written as
-this guide describes; read it as a larger example.
+UmbraDB's package carries two public modules that are not core modules, for the token metadata of
+[MIP-0018](https://github.com/midnightntwrk/midnight-improvement-proposals/blob/eb94bc182221cd937a84ed66a5f903b060f165ab/mips/mip-0018-on-chain-token-metadata.md):
 
-- **What it requires:** `contract-logs` (either provider) and `block-parsed` (each event's transaction hash). A
-  configuration enables it with its entry, and lists it in `modules` as any user module:
+- `token-metadata` reads the `contract-logs` item (§9) and keeps each token's current metadata fields in its tables,
+  which it provides as two `table` items (§13), `token-metadata-events` and `token-metadata-state`
+  (`src/features/token-metadata/`).
+- `token-metadata-api` requires those two items and serves the `/v1` API of
+  [docs/token-metadata-api.md](token-metadata-api.md) over them (`src/features/token-metadata-api/`). It holds no state:
+  no tables, no migrations, only `on-start-api`.
+
+Both are modules written as this guide describes; read them as a larger example, and the pair as a pattern: one module
+owns and fills the tables, another reads them. Any module can require the two items to read the tables its own way.
+
+- **What they require:** the indexer `contract-logs` (either provider) and `block-parsed` (each event's transaction
+  hash); the API the indexer's two items. A configuration enables them with their entries, and lists them in `modules`
+  as any user module:
 
 ```ts
-import { CORE_BLOCK_PARSED, CORE_CHAIN_EVENTS, CORE_CONTRACT_LOGS_FAST, coreEntry, defineConfig, TOKEN_METADATA } from "umbradb";
+import { CORE_BLOCK_PARSED, CORE_CHAIN_EVENTS, CORE_CONTRACT_LOGS_FAST, coreEntry, defineConfig, TOKEN_METADATA, TOKEN_METADATA_API } from "umbradb";
 
-export const modules = [TOKEN_METADATA];
+export const modules = [TOKEN_METADATA, TOKEN_METADATA_API];
 
 const start = 1_000_000;
 
@@ -927,11 +935,12 @@ export default defineConfig({
     CORE_BLOCK_PARSED.entry({ start, config: {} }),
     CORE_CONTRACT_LOGS_FAST.entry({ start, config: {} }),
     TOKEN_METADATA.entry({ start, config: {} }),
+    TOKEN_METADATA_API.entry({ start, config: {} }),
   ],
 });
 ```
 
-- **It starts with its database.** Its rows are materialized state — each token's current fields — so they depend on
+- **The indexer starts with its database.** Its rows are materialized state — each token's current fields — so they depend on
   where it started. It may start at any S (`startsMidChain: true`), but its first entry may not start above S: a
   database that has run without it refuses it at startup (`callback-error` at `on-start-db` of `token-metadata`, its
   cause a `TokenMetadataStartAfterDatabase` with the code `token-metadata-start-after-database`). Add it to a new
@@ -940,6 +949,9 @@ export default defineConfig({
   contract, classification and reason; other logs are not stored), `fields` and `withdrawals` (mutable: each identity's
   current fields, whole, and its last withdrawal). They are deterministic module tables (§4): names and symbols are
   stored whole and cut to 64 and 12 characters only when served, since the cut depends on the platform's Unicode data.
+- **The API holds no state.** Startup refuses it without the indexer (`item-no-provider`); added to a database whose
+  indexer already ran, from a height above the cursor like any added entry, it answers as if it had run from S. Every
+  index its reads use is the indexer's: a module creates nothing in another module's schema.
 - **Its values are untrusted.** Everything it serves is what a contract published: show text as text, never follow a
   URI without your own checks. The module itself never fetches anything.
 

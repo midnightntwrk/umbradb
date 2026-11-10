@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DEFAULT_MAX_CONCURRENT_REQUESTS, encodeCursor, markJson, registerMetadataApi } from "../../../src/features/token-metadata/api.js";
-import { tokenColor } from "../../../src/features/token-metadata/color.js";
+import { DEFAULT_MAX_CONCURRENT_REQUESTS, encodeCursor, markJson, registerMetadataApi } from "../../../src/features/token-metadata-api/api.js";
+import { tokenColor } from "../../../src/features/token-metadata-api/color.js";
 import {
   commonRecords,
   EVENT_NAME,
@@ -13,7 +13,7 @@ import type { ApiRegistry } from "../../../src/modules/declaration.js";
 import type { UmbraDBHandle } from "../../../src/library/start-umbradb.js";
 import { cursorReaches } from "../../library/library-fixtures.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../../runner/process-backends.js";
-import { blockLogs, contract, domain, eventData, get, type Got, miscData, startRun, txHashOf } from "./harness.js";
+import { blockLogs, contract, domain, eventData, get, type Got, miscData, startRun, txHashOf } from "../token-metadata/harness.js";
 
 /**
  * `token-metadata`'s `/v1` API on the module API listener, on PostgreSQL 18 and PGlite, over one chain with an

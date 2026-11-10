@@ -1,11 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { encodeCursor, registerMetadataApi } from "../../../src/features/token-metadata/api.js";
-import { servedIdentities } from "../../../src/features/token-metadata/read.js";
+import { encodeCursor, registerMetadataApi } from "../../../src/features/token-metadata-api/api.js";
+import { servedIdentities } from "../../../src/features/token-metadata-api/read.js";
 import { commonRecords } from "../../../src/features/token-metadata/codec/index.js";
 import type { ReadHandle } from "../../../src/db/api.js";
 import type { ApiRegistry } from "../../../src/modules/declaration.js";
 import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../../runner/process-backends.js";
-import { blockLogs, contract, domain, eventData, readStopped, runTo } from "./harness.js";
+import { blockLogs, contract, domain, eventData, readStopped, runTo } from "../token-metadata/harness.js";
 
 /**
  * The API's edges no chain of the harness reaches, on PostgreSQL 18 and PGlite: rows written straight into a stopped

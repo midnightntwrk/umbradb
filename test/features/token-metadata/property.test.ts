@@ -1,7 +1,7 @@
 import fc from "fast-check";
 import { z } from "zod";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { servedGroups, servedIdentities } from "../../../src/features/token-metadata/read.js";
+import { servedGroups, servedIdentities } from "../../../src/features/token-metadata-api/read.js";
 import { MetadataState, type ObservedEvent } from "../../../src/features/token-metadata/state.js";
 import { TOKEN_METADATA } from "../../../src/features/token-metadata/token-metadata.js";
 import { defineModule, type ModuleDeclaration } from "../../../src/modules/declaration.js";

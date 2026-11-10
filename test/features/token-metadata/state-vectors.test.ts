@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ContractLog } from "../../../src/backbone/contract-logs/contract-logs.js";
 import type { LogEventType } from "../../../src/ledger/types.js";
-import { servedGroups, servedIdentities } from "../../../src/features/token-metadata/read.js";
+import { servedGroups, servedIdentities } from "../../../src/features/token-metadata-api/read.js";
 import { displayAmount, MetadataState } from "../../../src/features/token-metadata/state.js";
 import { fromHex } from "../../../src/features/token-metadata/codec/index.js";
 import { PGlite } from "@electric-sql/pglite";
