@@ -12,6 +12,7 @@ import { readTape, type Tape, tapeId } from "../../../tools/tape/index.js";
  * endpoint it was recorded from with the node version that node reported and the day, and why its bounds are what
  * they are. The tapes themselves are published outside this repository:
  * https://github.com/midnight-experiments/umbradb-tapes/releases/tag/v0.10.0-rc.1
+ * and, for the runtime 2.1 delayed upgrades, https://github.com/midnight-experiments/umbradb-tapes/releases/tag/v0.10.0-tapes-2026-11-09
  *
  * **The lookup** ({@link findTape}): a tape is looked for in the directory named by `UMBRADB_TAPES`, under its file
  * name. Absent — the variable unset or empty, or no such file — it is reported absent with a reason naming the tape,
