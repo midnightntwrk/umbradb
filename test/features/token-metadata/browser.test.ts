@@ -16,27 +16,34 @@ import { PROCESS_BACKENDS } from "../../runner/process-backends.js";
 import { findTape } from "../../tape/real/real-tapes.js";
 
 /**
- * The browser build in headless Chrome, served the stagenet tape `stagenet-714485-715183` by a tape node, with a
+ * The browser build in headless Chrome, served the preprod tape `preprod-3348334-3348534` by a tape node, with a
  * configuration listing `core-contract-logs-fast` and `token-metadata` (`./fixtures/browser-configuration.ts`), starts
- * at the tape's first height and answers `/v1/identities` for case C01's identity as the server does: the same status,
- * body and view headers as a Node.js process on the same tape and configuration. The page is given S through the
- * start it keeps for its database (`umbradb-start:<storage>`), set before it loads; as in `./stagenet.test.ts`, S is
- * the tape's first height + 1 and the genesis records are put before the tape's.
+ * at the tape's first height + 1 and answers `/v1/status` and `/v1/tokens` as the server does: the same status, body and
+ * view headers as a Node.js process on the same tape, configuration and S. The page is given S through the start it
+ * keeps for its database (`umbradb-start:<storage>`), set before it loads. Startup asks for the genesis hash and header,
+ * which a mid-chain tape does not hold: they come from `test/ledger/fixtures/networks/preprod.json`, the node's own
+ * answers, put before the tape's records.
  */
 
-const TAPE = "stagenet-714485-715183";
-const S = 714_486;
-const STOP = 715_183;
+const TAPE = "preprod-3348334-3348534";
+const S = 3_348_335;
+const STOP = 3_348_534;
 const STORAGE = "token-metadata";
 const CONFIGURATION = fileURLToPath(new URL("./fixtures/browser-configuration.ts", import.meta.url));
-const GENESIS = (JSON.parse(readFileSync(new URL("./fixtures/stagenet-genesis.json", import.meta.url), "utf8")) as { records: TapeRecord[] }).records;
-const CASES = JSON.parse(readFileSync(new URL("../../fixtures/mip0018/case-index.json", import.meta.url), "utf8")) as {
-  cases: Record<string, { contract: string }>;
-};
-const C01 = JSON.parse(readFileSync(new URL("../../fixtures/mip0018/cases/C01/expected.json", import.meta.url), "utf8")) as {
-  identities: { domainSep: string; kind: number }[];
-};
-const PATH = `/v1/identities/${CASES.cases.C01!.contract}/${C01.identities[0]!.domainSep.slice(2)}/${C01.identities[0]!.kind}`;
+const PATHS = ["/v1/status", "/v1/tokens?limit=10"];
+
+/** The genesis hash's and header's records of preprod, as its node answered them. */
+function genesisRecords(): TapeRecord[] {
+  const fixture = JSON.parse(readFileSync(new URL("../../ledger/fixtures/networks/preprod.json", import.meta.url), "utf8")) as {
+    genesis: { hash: string };
+    calls: TapeRecord[];
+  };
+  const wanted = (record: TapeRecord) =>
+    "method" in record &&
+    ((record.method === "chain_getBlockHash" && JSON.stringify(record.params) === "[0]") ||
+      (record.method === "chain_getHeader" && JSON.stringify(record.params) === JSON.stringify([fixture.genesis.hash])));
+  return fixture.calls.filter(wanted);
+}
 const PRESENT = findTape(TAPE).found;
 
 (PRESENT ? describe : describe.skip)("token-metadata in the browser build", () => {
@@ -49,7 +56,9 @@ const PRESENT = findTape(TAPE).found;
     expect(chromeVersion()).toMatch(/Chrom/);
     const found = findTape(TAPE);
     if (!found.found) throw new Error(found.reason);
-    records = [...GENESIS, ...found.read().records];
+    const genesis = genesisRecords();
+    expect(genesis).toHaveLength(2);
+    records = [...genesis, ...found.read().records];
     const outdir = mkdtempSync(join(tmpdir(), "umbradb-browser-token-metadata-"));
     await buildBrowser({ outdir, configuration: CONFIGURATION });
     server = await servePage(outdir);
@@ -64,7 +73,7 @@ const PRESENT = findTape(TAPE).found;
   }, BROWSER_TEST_TIMEOUT_MS);
 
   it(
-    "starts at the tape's first height and answers /v1/identities for C01's identity as the server does",
+    "starts at the tape's first height + 1 and answers /v1/status and /v1/tokens as the server does",
     async () => {
       // The page keeps S for a stored database: set it on the page's origin before the page loads.
       const tab = await browser.open(`${server.origin}/not-the-page`);
@@ -75,7 +84,8 @@ const PRESENT = findTape(TAPE).found;
       await statusWhen(tab, "core", (s) => s.cursor === String(STOP), `the cursor at ${STOP}`, 600_000).catch(async (error: unknown) => {
         throw new Error(`${String(error)}\n${await tabReport(tab)}`);
       });
-      const inChrome = await call<{ status: number; headers: Record<string, string>; body: string }>(tab, "core", "api", { method: "GET", path: PATH });
+      const inChrome: { status: number; headers: Record<string, string>; body: string }[] = [];
+      for (const path of PATHS) inChrome.push((await call<{ status: number; headers: Record<string, string>; body: string }>(tab, "core", "api", { method: "GET", path }))!);
 
       // The server: a Node.js process on the same tape, configuration and S.
       const backend = PROCESS_BACKENDS.find((b) => b.kind === "pglite")!;
@@ -86,18 +96,21 @@ const PRESENT = findTape(TAPE).found;
           stop: BigInt(STOP),
           core: FAST_CORE,
           user: [TOKEN_METADATA as ModuleDeclaration],
-          settings: { network: "stagenet", listen: { api: "127.0.0.1:0" } },
+          settings: { network: "preprod", listen: { api: "127.0.0.1:0" } },
         });
         try {
           await committed(run, BigInt(STOP), 600_000);
           const api = run.handle.listening().api!;
-          const response = await fetch(`http://${api.host.includes(":") ? `[${api.host}]` : api.host}:${api.port}${PATH}`);
-          const body = await response.text();
-          expect(inChrome!.status).toBe(200);
-          expect(JSON.parse(inChrome!.body).common).toMatchObject({ name: "Acme Gold", symbol: "AGLD", decimals: "6" });
-          expect([inChrome!.status, inChrome!.body]).toEqual([response.status, body]);
-          for (const name of ["x-umbra-view", "x-umbra-height", "x-umbra-hash", "content-type"]) {
-            expect([name, inChrome!.headers[name]]).toEqual([name, response.headers.get(name)]);
+          const origin = `http://${api.host.includes(":") ? `[${api.host}]` : api.host}:${api.port}`;
+          expect(JSON.parse(inChrome[0]!.body)).toMatchObject({ network: "preprod", startHeight: S, indexedHeight: STOP });
+          for (const [i, path] of PATHS.entries()) {
+            const response = await fetch(`${origin}${path}`);
+            const body = await response.text();
+            expect([path, inChrome[i]!.status, inChrome[i]!.body]).toEqual([path, response.status, body]);
+            expect(response.status).toBe(200);
+            for (const name of ["x-umbra-view", "x-umbra-height", "x-umbra-hash", "content-type"]) {
+              expect([path, name, inChrome[i]!.headers[name]]).toEqual([path, name, response.headers.get(name)]);
+            }
           }
         } finally {
           await run.close();

@@ -3,7 +3,7 @@ import { miscAtom, STATE_VALUE_TAG, UnknownLogSerialization } from "../../../src
 import { cellData } from "./harness.js";
 
 /**
- * The log reader on the encodings a cell can take that the stagenet logs and the ledger packages' normal output do
+ * The log reader on the encodings a cell can take that the ledger packages' normal output does
  * not show: SCALE compact integers in their two- and four-byte forms (and the big-integer form, which no length here
  * can take), the ledger's flagged ints in their three-byte form, and the malformed variants of each, which give no
  * candidate rather than a throw; and a tag cut short of its `:`. Each test builds the data with {@link encode}, whose

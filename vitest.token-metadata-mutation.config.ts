@@ -3,7 +3,7 @@ import { defineConfig } from "vitest/config";
 /**
  * The mutation run of `token-metadata`: `stryker.token-metadata.conf.json` mutates the module's files and its codec,
  * and reruns these tests, on PGlite only (`UMBRADB_PROCESS_BACKENDS=pglite`, set by
- * that configuration's command). The stagenet, browser, backend-comparison, property and bounded-cost suites are left
+ * that configuration's command). The browser, backend-comparison, property and bounded-cost suites are left
  * out: each takes tens of seconds per rerun, and the tests here cover the same code.
  */
 export default defineConfig({

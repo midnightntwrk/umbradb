@@ -1,20 +1,13 @@
-import { readFileSync } from "node:fs";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import * as v9 from "../../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js";
 import * as v9rc3 from "../../../vendor/ledger/v9-rc3/pkg/midnight_ledger_wasm_v9_fs.js";
 import { miscAtom, UnknownLogSerialization } from "../../../src/features/token-metadata/log-reader.js";
-import {
-  classifyEvent,
-  EVENT_NAME,
-  splitMiscData,
-} from "../../../src/features/token-metadata/codec/index.js";
 
 /**
  * The log reader: a `Misc` log's data, the ledger's tagged serialization of the logged value, is a candidate's bytes
  * only when it is a cell holding one atom of at most 288 bytes; any other value under the known tag is not; an unknown
- * tag is an error. Checked on the real stagenet logs `core-contract-logs-fast` stored, and differentially against both
- * v9 ledger packages' own serialization.
+ * tag is an error. Checked differentially against both v9 ledger packages' own serialization.
  */
 
 type Package = typeof v9;
@@ -24,7 +17,6 @@ const PACKAGES: readonly (readonly [string, Package])[] = [
 ];
 
 const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
-const fromHex = (text: string): Uint8Array => Uint8Array.from(Buffer.from(text, "hex"));
 
 /** A cell of one byte atom, declared `Bytes<declared>` as Compact declares a field; `bytes` is in normal form. */
 function cell(api: Package, bytes: Uint8Array, declared: number): v9.StateValue {
@@ -37,42 +29,6 @@ function normal(bytes: Uint8Array): Uint8Array {
   while (end > 0 && bytes[end - 1] === 0) end--;
   return bytes.slice(0, end);
 }
-
-const FIXTURE = JSON.parse(readFileSync("test/features/token-metadata/fixtures/stagenet-misc-logs.json", "utf8")) as {
-  logs: { height: number; txIndex: number; logIndex: number; contract: string; version: number; data: string }[];
-};
-
-describe("the log reader on stagenet's stored Misc logs", () => {
-  it("reads every stored Misc log as one atom of at most 288 bytes", () => {
-    expect(FIXTURE.logs.length).toBe(49);
-    for (const log of FIXTURE.logs) {
-      const atom = miscAtom(fromHex(log.data));
-      expect(atom, `${log.height}/${log.txIndex}/${log.logIndex}`).not.toBeNull();
-      expect(atom!.length).toBeLessThanOrEqual(288);
-    }
-  });
-
-  it("gives case C01's event at 714501: the v1 name, and an accepted payload naming Acme Gold", () => {
-    const log = FIXTURE.logs.find((l) => l.height === 714501)!;
-    expect(log.contract).toBe("98a90519419e2ebb514b7c6ce87ee7f6f4f9753d9ee6f533c5d1c25b9d437dcf");
-    const split = splitMiscData(miscAtom(fromHex(log.data))!)!;
-    expect(hex(split.name)).toBe(hex(EVENT_NAME));
-    const classified = classifyEvent({ type: "Misc", name: split.name, payload: split.payload });
-    expect(classified.result).toBe("accept");
-    if (classified.result !== "accept") return;
-    const name = classified.records.find((r) => Buffer.from(r.key).toString("utf8") === "name");
-    expect(Buffer.from(name!.value).toString("utf8")).toBe("Acme Gold");
-  });
-
-  it("leaves other Misc names to the classifier, which ignores them", () => {
-    const other = FIXTURE.logs.filter((l) => !l.data.includes(hex(EVENT_NAME).slice(0, 54)));
-    expect(other.length).toBeGreaterThan(0);
-    for (const log of other) {
-      const split = splitMiscData(miscAtom(fromHex(log.data))!)!;
-      expect(classifyEvent({ type: "Misc", name: split.name, payload: split.payload }).result).toBe("ignore");
-    }
-  });
-});
 
 for (const [label, api] of PACKAGES) {
   describe(`the log reader against ${label}'s own serialization`, () => {

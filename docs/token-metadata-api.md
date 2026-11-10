@@ -1,9 +1,7 @@
 # `token-metadata`'s `/v1` API
 
 The read-only JSON API of the `token-metadata` module (MIP-0018 token metadata): its paths, parameters, JSON shapes,
-errors, pagination and limits. A few fields and routes are not served yet ([Not served yet](#not-served-yet)). The
-recorded answers on stagenet (`test/fixtures/mip0018-answers/`) are compared with the module's byte for byte, with those
-fields masked (`test/features/token-metadata/stagenet.test.ts`).
+errors, pagination and limits. A few fields and routes are not served yet ([Not served yet](#not-served-yet)).
 
 Authority: [MIP-0018](https://github.com/midnightntwrk/midnight-improvement-proposals/blob/eb94bc182221cd937a84ed66a5f903b060f165ab/mips/mip-0018-on-chain-token-metadata.md)
 at `eb94bc182221cd937a84ed66a5f903b060f165ab`, as merged from [PR #372](https://github.com/midnightntwrk/midnight-improvement-proposals/pull/372).
@@ -129,7 +127,7 @@ else `null`. `url` is plain text, never a link to follow.
 
 ```json
 {
-  "network": "stagenet",
+  "network": "preview",
   "contractAddress": "86acf80f…570f", "domainSep": "6d69702d…0000",
   "kind": 1, "kindName": "shielded-utxo",
   "color": "04239924…bc16",
@@ -147,7 +145,7 @@ else `null`. `url` is plain text, never a link to follow.
 `fields` is one keyset page of the current defined fields in key byte order (default 100, `limit` up to 500);
 `fieldCount` counts them all; `fieldsNextCursor` reads the next page (`null` on the last). `commonFields` are the
 current rows of the common-field keys present, in the order they were last set. `network` is the network's name when
-UmbraDB knows its genesis hash (`mainnet`, `preprod`, `preview`, `stagenet`), else the genesis hash.
+UmbraDB knows its genesis hash (its built-in networks, such as `mainnet`, `preprod` and `preview`), else the genesis hash.
 
 ## Endpoints
 
@@ -155,9 +153,9 @@ UmbraDB knows its genesis hash (`mainnet`, `preprod`, `preview`, `stagenet`), el
 
 ```json
 {
-  "network": "stagenet",
-  "genesisHash": "0x2f76825abc239fecf6107c9df99016de57037b451ae57a4394b76c8cf53a9491",
-  "startHeight": 714486, "indexedHeight": 715183, "archiveHeight": 715183,
+  "network": "preview",
+  "genesisHash": "0x3c096de209e06a1a8c52be7bda109ee8c891a42288c0a9db5495f9616dd13796",
+  "startHeight": 1000, "indexedHeight": 2000, "archiveHeight": 2000,
   "mip": { "id": "MIP-0018", "repository": "midnightntwrk/midnight-improvement-proposals", "commit": "eb94bc18…", "path": "…", "sha256": "…", "url": "…", "pr": "…" },
   "reference": { "repository": "https://github.com/midnight-experiments/mip-0018", "commit": "e8295792d9363be37ff2f7f716c740fcdf3f195e" },
   "scanner": "following",

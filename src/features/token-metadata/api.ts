@@ -65,10 +65,7 @@ export const MIP_PIN = {
 } as const;
 /** The MIP-0018 reference implementation whose codec rules and test vectors the module matches. */
 export const MIP_REFERENCE = { repository: "https://github.com/midnight-experiments/mip-0018", commit: "e8295792d9363be37ff2f7f716c740fcdf3f195e" } as const;
-/**
- * The networks known by their genesis hash: UmbraDB's built-in networks (`src/ledger/networks.json`), where the proof of
- * concept's `KNOWN_GENESIS` knew stagenet only.
- */
+/** The networks known by their genesis hash: UmbraDB's built-in networks (`src/ledger/networks.json`). */
 export const KNOWN_GENESIS: Readonly<Record<string, string>> = Object.freeze(
   Object.fromEntries(BUILT_IN_NETWORKS.flatMap((entry) => (entry.genesis === null ? [] : [[entry.network, entry.genesis.hash]]))),
 );

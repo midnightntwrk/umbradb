@@ -7,7 +7,7 @@ import type { ModuleDeclaration } from "../../../../src/modules/declaration.js";
 import { type BrowserConfiguration, type BrowserRun, databaseOf } from "../../../../browser/src/configuration.js";
 
 /**
- * The browser page's configuration for `token-metadata`: the core on stagenet from the page's S, with
+ * The browser page's configuration for `token-metadata`: the core on preprod from the page's S, with
  * `core-chain-events`, `core-block-parsed`, `core-contract-logs-fast` and `token-metadata` from S, stopping at the page's
  * `stop` parameter when given.
  */
@@ -20,7 +20,7 @@ function core(run: BrowserRun) {
         coreEntry({
           start: run.start,
           ...(stop === undefined ? {} : { stop: Number(stop) }),
-          config: { network: "stagenet", node: run.node, database: databaseOf(run.storage, "core"), developmentOptIn: true },
+          config: { network: "preprod", node: run.node, database: databaseOf(run.storage, "core"), developmentOptIn: true },
         }),
         ...modules.map((module) => ({ id: module.id, version: module.version, start: run.start, config: {} })),
       ] as never,
