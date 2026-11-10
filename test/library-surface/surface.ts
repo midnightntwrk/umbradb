@@ -1,12 +1,12 @@
 import ts from "typescript";
 
 /**
- * The package's entry point (`src/index.ts`): its exports as the compiler resolves them ({@link surfaceOf}), and the
- * core modules' declarations it exports, each of which declares its module's id and has the `entry` builder a
- * configuration file writes its entry with.
+ * The package's entry point (`src/index.ts`): its exports as the compiler resolves them ({@link surfaceOf}), pinned to
+ * {@link EXPORTED_SURFACE}, and the core modules' declarations it exports, each of which declares its module's id and
+ * has the `entry` builder a configuration file writes its entry with.
  *
- * The declarations' check takes plain data and returns one sentence per problem, naming the export, empty when there is
- * none, so `./surface.test.ts` runs it on the real barrel and on its negative controls.
+ * The checks take plain data and return one sentence per problem, naming the export, empty when there is none, so
+ * `./surface.test.ts` runs them on the real barrel and on its negative controls.
  */
 
 /** An entry point's exports, sorted: the names with a value at run time, and the names that are types only. */
@@ -14,6 +14,29 @@ export interface Surface {
   readonly values: readonly string[];
   readonly types: readonly string[];
 }
+
+/**
+ * The public API of `"."` (`src/index.ts`): every value and every type it exports, sorted. Adding, removing or changing
+ * the kind of an export is a change to the package's public API: update this list in the same change, on purpose.
+ * `test/smoke/pack-install.mjs` imports every name of it from the installed tarball.
+ */
+export const EXPORTED_SURFACE: Surface = Object.freeze({
+  values: Object.freeze([
+    "CORE_BLOCK_PARSED", "CORE_CHAIN_EVENTS", "CORE_CONTRACT_LOGS_FAST", "CORE_CONTRACT_LOGS_FULL",
+    "CORE_CONTRACT_STATES", "CORE_LEDGER_STATE", "CORE_TX_RESULTS", "InMemoryBlockSource", "POINTS", "UmbraError",
+    "answerChainData", "chainDataHeaders", "contentsHash", "coreEntry", "cursorTable", "defineConfig", "defineModule",
+    "encodeCanonical", "encodeRow", "finalizedHeight", "heightVersionedTable", "hexBytes", "messagePortChannel",
+    "readChainDataView", "retainedStatesOf", "startUmbraDB", "versionEntry", "withViewExtensions",
+  ]),
+  types: Object.freeze([
+    "Address", "ApiRegistry", "BlockContext", "BlockRef", "BlockWriteHandle", "CoreVersion", "Entry", "ErrorCode",
+    "FieldKind", "FieldSchema", "ItemDeclaration", "ItemSink", "LedgerPackage", "LedgerTask", "Lifetime",
+    "MessagePortLike", "Migration", "ModuleDeclaration", "NodeHttpHandler", "NodeUpgradeHandler", "ParsedTransaction",
+    "PointCallbacks", "PointName", "PrivateLinkChannel", "ProcessContext", "ReadHandle", "Revision", "SchemaWriteHandle",
+    "UmbraConfig", "UmbraDBBackup", "UmbraDBCondition", "UmbraDBEnd", "UmbraDBHandle", "UmbraDBNetwork",
+    "UmbraDBOptions", "UmbraDBReason", "UmbraDBStarted", "UmbraDBStatus",
+  ]),
+});
 
 /** Whether an export is a value at run time: its target has a value meaning and it is not exported as a type only. */
 function isValueExport(checker: ts.TypeChecker, exported: ts.Symbol): boolean {
@@ -48,6 +71,44 @@ export function surfaceOf(file: string): Surface {
     (isValueExport(checker, exported) ? values : types).push(exported.getName());
   }
   return { values: values.sort(), types: types.sort() };
+}
+
+/**
+ * Every difference between the exports `found` of `where` and the `expected` surface, one sentence each naming the
+ * export: a name not in the surface, a name of the surface that is missing, and a name exported as the other kind.
+ */
+export function surfaceProblems(where: string, found: Surface, expected: Surface): string[] {
+  const problems: string[] = [];
+  const all = (s: Surface) => new Set([...s.values, ...s.types]);
+  const foundAll = all(found);
+  const expectedAll = all(expected);
+  for (const [kind, other, names, expectedNames, otherExpected] of [
+    ["value", "type", found.values, expected.values, expected.types],
+    ["type", "value", found.types, expected.types, expected.values],
+  ] as const) {
+    for (const name of names) {
+      if (expectedNames.includes(name)) continue;
+      problems.push(
+        otherExpected.includes(name)
+          ? `${where} exports ${name} as a ${kind}; the pinned surface lists it as a ${other}`
+          : `${where} exports the ${kind} ${name}, which the pinned surface does not list`,
+      );
+    }
+    for (const name of expectedNames) {
+      if (!foundAll.has(name)) problems.push(`${where} does not export the ${kind} ${name}, which the pinned surface lists`);
+    }
+  }
+  for (const name of expectedAll) {
+    if (expected.values.includes(name) && expected.types.includes(name)) {
+      problems.push(`the pinned surface lists ${name} both as a value and as a type`);
+    }
+  }
+  return problems;
+}
+
+/** The names a module's namespace object holds at run time, sorted. */
+export function runtimeValues(namespace: object): string[] {
+  return Object.keys(namespace).sort();
 }
 
 /**
