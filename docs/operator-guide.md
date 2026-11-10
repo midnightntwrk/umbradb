@@ -192,7 +192,9 @@ TOKEN_METADATA_API.entry({ start, config: {} }),
 - **The indexer starts with its database.** Give it the same start as the core entry, in a new database. A database that has
   already run from a lower height refuses it: startup ends with `callback-error` at `on-start-db` of
   `token-metadata`, and the log names the cause, `token-metadata-start-after-database`, with both heights. Its state is
-  built from the database's first block, so to add it later, start a new database with it.
+  built from the database's first block, so to add it later, start a new database with it. For the same reason a configuration
+  that stops it and starts it again later (a revision's `stop` below the next one's start minus one) is refused:
+  `callback-error` at `on-start-db`, caused by `token-metadata-revision-gap`, naming the stop and the next start.
 - **Which logs provider.** `core-contract-logs-full` gives every log from the ledger but starts only at 0 (it needs
   `core-ledger-state`). `core-contract-logs-fast` starts anywhere but is development only (the core entry's
   `developmentOptIn`); a log it cannot read from the transcripts (a value from the contract's state, a log behind a

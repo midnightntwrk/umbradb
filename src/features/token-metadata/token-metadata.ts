@@ -11,7 +11,8 @@
  *   started: it declares `startsMidChain: true`, so a database started at any S accepts it, and refuses in
  *   `on-start-db` an entry starting above S. The process refuses with `callback-error` at `on-start-db` of
  *   `token-metadata`; the error itself is a {@link TokenMetadataStartAfterDatabase}, whose code is
- *   `token-metadata-start-after-database`.
+ *   `token-metadata-start-after-database`. For the same reason it refuses revisions with a gap between them (a stop
+ *   below the next start minus one): `token-metadata-revision-gap`, a {@link TokenMetadataRevisionGap}.
  * - **Provides** its tables as two `table` items (`./schema.ts`): `token-metadata-events` (append-only) and
  *   `token-metadata-state` (mutable), which `token-metadata-api` and any other module may require to read them.
  * - **Per block** it writes in `on-db-write` (`./apply.ts`): the block's candidates, its unresolved log sites (from
@@ -51,6 +52,31 @@ export class TokenMetadataStartAfterDatabase extends Error {
   }
 }
 
+/** The module refused a configuration that stops it and starts it again later: its state would miss the gap. */
+export class TokenMetadataRevisionGap extends Error {
+  override readonly name = "TokenMetadataRevisionGap";
+  readonly code = "token-metadata-revision-gap";
+  constructor(
+    readonly stop: bigint,
+    readonly nextStart: bigint,
+  ) {
+    super(
+      `token-metadata-revision-gap: token-metadata stops at ${stop} and starts again at ${nextStart}; its state is ` +
+        `built from every block, so the heights between would be missing for good: end the stop at ${nextStart - 1n} ` +
+        `or later, or start a new database`,
+    );
+  }
+}
+
+/** The first gap between `revisions` (in start order): a stop below the next start minus one, or `undefined`. */
+export function revisionGap(revisions: readonly { readonly start: bigint; readonly stop: bigint | null }[]): TokenMetadataRevisionGap | undefined {
+  for (let i = 1; i < revisions.length; i++) {
+    const stop = revisions[i - 1]!.stop;
+    if (stop !== null && stop + 1n < revisions[i]!.start) return new TokenMetadataRevisionGap(stop, revisions[i]!.start);
+  }
+  return undefined;
+}
+
 /**
  * The module's declaration with `reader` reading each `Misc` log's value: {@link TOKEN_METADATA} is the one with the log
  * reader; a negative control gives another reader.
@@ -77,6 +103,8 @@ export function tokenMetadataWith(reader: LogReader) {
         // The first revision is where the module started; a later one (a new version, new settings) continues it.
         const start = await databaseStart(w);
         const first = p.revisions[0];
+        const gap = revisionGap(p.revisions);
+        if (gap !== undefined) throw gap;
         if (start === null || first === undefined) return;
         if (first.start > start) throw new TokenMetadataStartAfterDatabase(first.start, start);
       },

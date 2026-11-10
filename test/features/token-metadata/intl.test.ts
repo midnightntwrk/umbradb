@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { sep } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { writeBlock } from "../../../src/features/token-metadata/apply.js";
-import { servedIdentities } from "../../../src/features/token-metadata-api/read.js";
+import { servedIdentities } from "./served-state.js";
 import { commonRecords, toHex } from "../../../src/features/token-metadata/codec/index.js";
 import { blockLogs, contract, domain, eventData } from "./harness.js";
 

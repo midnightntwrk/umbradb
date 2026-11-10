@@ -63,7 +63,7 @@ describe("token-metadata's on-start-db", () => {
     query: async () => (s === null ? [] : [{ start_height: s }]),
     execute: async () => 0,
   });
-  const revision = (start: bigint, version = "0.1.0") => ({ start, stop: null, version, settings: {} });
+  const revision = (start: bigint, version = "0.1.0") => ({ start, stop: null as bigint | null, version, settings: {} });
   const context = (...revisions: ReturnType<typeof revision>[]) => ({ items: new Map(), revisions, publish: () => undefined });
 
   it("accepts a first revision at or below S, whatever later revisions start at; refuses one above S", async () => {
@@ -74,6 +74,23 @@ describe("token-metadata's on-start-db", () => {
       code: "token-metadata-start-after-database",
       entryStart: 11n,
       databaseStart: 10n,
+    });
+  });
+
+  it("refuses revisions with a gap between them, and accepts ones that follow each other or overlap", async () => {
+    const stopped = (start: bigint, stop: bigint) => ({ start, stop, version: "0.1.0", settings: {} });
+    await expect(startDb(context(stopped(10n, 19n), revision(20n)), handle(10n))).resolves.toBeUndefined();
+    await expect(startDb(context(stopped(10n, 30n), revision(20n)), handle(10n))).resolves.toBeUndefined();
+    await expect(startDb(context(revision(10n), revision(20n)), handle(10n))).resolves.toBeUndefined();
+    await expect(startDb(context(stopped(10n, 18n), revision(20n)), handle(10n))).rejects.toMatchObject({
+      code: "token-metadata-revision-gap",
+      stop: 18n,
+      nextStart: 20n,
+    });
+    await expect(startDb(context(revision(10n), stopped(20n, 25n), revision(40n)), handle(null))).rejects.toMatchObject({
+      code: "token-metadata-revision-gap",
+      stop: 25n,
+      nextStart: 40n,
     });
   });
 

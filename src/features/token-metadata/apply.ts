@@ -11,8 +11,9 @@
  *   wins), a Null record deletes it (nothing for a key without a row); a key is `defined` when it is a common-field key
  *   or a key of a declared standard (`isDefinedKey`); a record after which the identity has no defined row records its
  *   withdrawal. Values are stored whole: nothing here cuts a name or symbol, so nothing here uses `Intl`.
- * - **Positions.** `event_index` is the log's position among its transaction's logs (`eventIndex` in
- *   the API): `contract-logs` numbers a block's logs in emission order, transaction by transaction.
+ * - **Positions.** `event_index` is the log's position among its transaction's log sites, unresolved ones included
+ *   (`eventIndex` in the API): `contract-logs` numbers a block's logs and unresolved sites by one count in emission
+ *   order, transaction by transaction.
  *
  * The registry of standard-defined keys is empty (no MIP defines any): with keys in it, a `standards` change would
  * re-flag the identity's rows, which this path does not do, so it refuses to load with a non-empty registry.

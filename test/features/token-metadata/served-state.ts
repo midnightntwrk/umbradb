@@ -1,17 +1,14 @@
 /**
- * The serving side's reads of `token-metadata`'s state: the identities with their served fields, and the symbol groups,
- * as the pure `MetadataState` (`state.ts`) gives them. A name or symbol is cut to its first 64 or 12 characters
- * here, where it is served, never where it is stored, so this file — the serving code — is where `Intl`
- * may run (through `state.ts`'s `lengthLimited`).
- *
- * These reads are whole-table: the API's bounded, paged reads replace them in task 4.x. They serve the module's tests
- * and the comparison with the reference model.
+ * The tests' whole-table reads of `token-metadata`'s state: every identity with its served fields (each row through
+ * the API's own `fieldOf`, so cut where it is served), and the symbol groups, as the pure `MetadataState` (`state.ts`)
+ * gives them, for the comparisons with the reference model and the vectors. The API's own reads are bounded and paged.
  */
 
-import type { ReadHandle } from "../../db/api.js";
-import { SCHEMA } from "../token-metadata/schema.js";
-import { type Field, type IdentityState, lengthLimited, type SymbolGroup, symbolGroups } from "../token-metadata/state.js";
-import { toHex } from "../token-metadata/codec/index.js";
+import type { ReadHandle } from "../../../src/db/api.js";
+import { SCHEMA } from "../../../src/features/token-metadata/schema.js";
+import { type Field, type IdentityState, type SymbolGroup, symbolGroups } from "../../../src/features/token-metadata/state.js";
+import { toHex } from "../../../src/features/token-metadata/codec/index.js";
+import { fieldOf } from "../../../src/features/token-metadata-api/api.js";
 
 /** Every existing identity of the database (at least one defined field), with its served fields, in identity order. */
 export async function servedIdentities(read: Pick<ReadHandle, "query">, network: string): Promise<IdentityState[]> {
@@ -31,18 +28,7 @@ export async function servedIdentities(read: Pick<ReadHandle, "query">, network:
       identity = { contractAddress, domainSep, kind, fields: new Map() };
       byIdentity.set(id, identity);
     }
-    const key = row.key as Uint8Array;
-    const keyHex = toHex(key);
-    const valType = Number(row.val_type);
-    const field: Field = {
-      key,
-      valType,
-      value: lengthLimited(keyHex, valType, row.value as Uint8Array),
-      position: { block: Number(row.set_height), tx: Number(row.set_tx), event: Number(row.set_event), record: Number(row.set_record) },
-    };
-    if (row.uint_value !== null) field.integer = BigInt(row.uint_value as string);
-    if (row.usable !== null) field.usable = row.usable === true;
-    identity.fields.set(keyHex, field);
+    identity.fields.set(toHex(row.key as Uint8Array), fieldOf(row));
   }
   return [...byIdentity.values()].map((identity) => ({ network, ...identity }));
 }

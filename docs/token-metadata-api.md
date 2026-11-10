@@ -91,7 +91,7 @@ first 100 positions; `missing` names the unusable or absent common keys.
 
 `key.utf8` is `null` when the key is not valid UTF-8. `valTypeName`: 0 `bytes`, 1 `utf8`, 2 `uint`, 3 `json`, 4 `uri`
 (never fetched). `usable` is `true`/`false` for the six common-field keys and `null` for any other key.
-`updatedAt.eventIndex` is the log's position among its transaction's logs.
+`updatedAt.eventIndex` is the log's position among its transaction's log sites (with `core-contract-logs-fast`, its unresolved sites count too).
 
 **Group** — `{ "symbol": { "hex": "414344", "utf8": "ACD" }, "memberCount": 3, "members": [ { "domainSep": "6d69…", "kind": 1 }, … ] }`:
 the first 100 members by `(domainSep, kind)`; `memberCount` counts them all.

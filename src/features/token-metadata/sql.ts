@@ -2,7 +2,7 @@
  * The SQL of `token-metadata`: its schema, migration `001` and the statements of its write path.
  *
  * **The tables** (schema `token_metadata`). There is no `network` column (a database holds one chain), no raw
- * `name`/`payload` (nothing is recomputed: UmbraDB follows finalized blocks only, RN-14), and no activity listing (a
+ * `name`/`payload` (nothing is recomputed: UmbraDB follows finalized blocks only), and no activity listing (a
  * later change):
  *
  * - `events`, append-only: one row per MIP-0018 candidate at its chain position — height, the transaction's index in

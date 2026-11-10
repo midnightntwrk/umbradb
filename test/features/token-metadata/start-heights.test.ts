@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { UnresolvedLogSite } from "../../../src/backbone/contract-logs/contract-logs.js";
-import { servedGroups, servedIdentities } from "../../../src/features/token-metadata-api/read.js";
+import { servedGroups, servedIdentities } from "./served-state.js";
 import { TOKEN_METADATA_API } from "../../../src/features/token-metadata-api/token-metadata-api.js";
 import { record } from "../../../src/features/token-metadata/codec/index.js";
 import { MetadataState, type ObservedEvent } from "../../../src/features/token-metadata/state.js";
@@ -27,9 +27,11 @@ import { stateResponse } from "./vector-adapter.js";
  *   reports S. **Negative control:** for a start that cuts an event (the contract token's block), the model applied to
  *   every event differs from what the module serves, so the comparison sees a start height.
  * - **The networks' own tapes started mid-chain** with `core-contract-logs-fast`: preprod's and mainnet's delayed
- *   upgrade tapes, from the tape's first usable block, the block before the upgrade's first block F, F itself, the block
- *   after F and near the tape's end. Each commits every height to the tape's last, and `/v1/status` reports its start,
- *   the last height and the network.
+ *   upgrade tapes, from the tape's first usable block (on the old runtime), the upgrade's first block F, and the block
+ *   after F (on the new one). Each commits every height to the tape's last, and `/v1/status` reports its start, the
+ *   last height and the network. A recorded tape answers `state_getMetadata` only at the heights its recording asked
+ *   (its first block, and each runtime's first), and a start needs its parent's metadata, so these are the starts a
+ *   tape can serve; the synthetic chain above covers every other start height.
  */
 
 // ── The synthetic chain ──────────────────────────────────────────────────────────────────────────────────────────
@@ -158,14 +160,14 @@ interface TapeStarts {
 }
 
 const TAPES: readonly TapeStarts[] = [
-  { tape: "preprod-3348334-3348534", network: "preprod", last: 3_348_534, f: 3_348_434, starts: [3_348_335, 3_348_433, 3_348_434, 3_348_435, 3_348_530] },
+  { tape: "preprod-3348334-3348534", network: "preprod", last: 3_348_534, f: 3_348_434, starts: [3_348_335, 3_348_434, 3_348_435] },
   { tape: "mainnet-3346039-3346239", network: "mainnet", last: 3_346_239, f: 3_346_139, starts: [3_346_040, 3_346_139, 3_346_140] },
 ];
 
 describe.each(PROCESS_BACKENDS)("token-metadata on the networks' tapes from varying start heights, on $name", (backend: ProcessBackend) => {
   for (const tape of TAPES) {
     for (const start of tape.starts) {
-      const where = start === tape.f ? "the upgrade's first block" : start === tape.f - 1 ? "the block before it" : `${start}`;
+      const where = start === tape.f ? "the upgrade's first block" : start === tape.f + 1 ? "the block after it" : "the tape's first usable block";
       tapeTest(
         tape.tape,
         `${tape.network} from ${where} (${start}) commits every height to ${tape.last} and reports its start`,

@@ -954,7 +954,7 @@ export default defineConfig({
   where it started. It may start at any S (`startsMidChain: true`), but its first entry may not start above S: a
   database that has run without it refuses it at startup (`callback-error` at `on-start-db` of `token-metadata`, its
   cause a `TokenMetadataStartAfterDatabase` with the code `token-metadata-start-after-database`). Add it to a new
-  database.
+  database. A gap between its revisions (§11) is refused the same way, with `token-metadata-revision-gap`.
 - **Its tables** (schema `token_metadata`): `events` (append-only: each MIP-0018 event's position, transaction hash,
   contract, classification and reason; other logs are not stored), `fields` and `withdrawals` (mutable: each identity's
   current fields, whole, and its last withdrawal). They are deterministic module tables (§4): names and symbols are
