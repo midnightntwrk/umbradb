@@ -7,7 +7,19 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Added
+
+- MIP-0018 token metadata as two public modules: `token-metadata` (`TOKEN_METADATA`) creates, fills and guards its
+  tables, and refuses a start above its database's first height with `TokenMetadataStartAfterDatabase` as the cause;
+  `token-metadata-api` (`TOKEN_METADATA_API`) serves the `/v1` API of `docs/token-metadata-api.md` over them. The
+  exported surface is 69 names, 31 values and 38 types.
+
+### Changed
+
+- `core-contract-logs-fast` records a log site it cannot read from the transcripts (`not-a-literal`, `conditional`,
+  `partial-transaction`) as an unresolved site, in the new table `contract_logs.unresolved` (the shared item's
+  migration `002`) and in the `contract-logs` block item, instead of halting with `fast-log-unsupported`, which is
+  removed.
 
 ## [0.10.0] - 2026-10-27
 
