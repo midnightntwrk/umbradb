@@ -14,13 +14,14 @@
  *   `token-metadata-start-after-database`.
  * - **Provides** its tables as two `table` items (`./schema.ts`): `token-metadata-events` (append-only) and
  *   `token-metadata-state` (mutable), which `token-metadata-api` and any other module may require to read them.
- * - **Per block** it writes in `on-db-write` (`./apply.ts`): the block's candidates and their effect on the fields, in
+ * - **Per block** it writes in `on-db-write` (`./apply.ts`): the block's candidates, its unresolved log sites (from
+ *   `core-contract-logs-fast`, as `unresolved` events, never applied) and the candidates' effect on the fields, in
  *   chain order, reading its own rows inside the block transaction. A v8 block has no contract logs, so nothing.
  */
 
 import { z } from "zod";
 import { UMBRADB_VERSION } from "../../config/build.js";
-import { CONTRACT_LOGS_ITEM, contractLogsItemOf } from "../../backbone/contract-logs/contract-logs.js";
+import { CONTRACT_LOGS_ITEM, contractLogsItemOf, unresolvedLogSitesOf } from "../../backbone/contract-logs/contract-logs.js";
 import type { BlockParsed } from "../../backbone/core-block-parsed/core-block-parsed.js";
 import { defineModule } from "../../modules/declaration.js";
 import { type LogReader, writeBlock } from "./apply.js";
@@ -82,7 +83,7 @@ export function tokenMetadataWith(reader: LogReader) {
       async "on-db-write"(_p, b, w) {
         const parsed = b.items.get(BLOCK_PARSED_ITEM) as BlockParsed | undefined;
         const hashes = new Map((parsed?.transactions ?? []).map((t) => [t.index, t.hash]));
-        await writeBlock(w, b.height, contractLogsItemOf(b, TOKEN_METADATA_ID), (tx) => hashes.get(tx), reader);
+        await writeBlock(w, b.height, contractLogsItemOf(b, TOKEN_METADATA_ID), (tx) => hashes.get(tx), reader, unresolvedLogSitesOf(b, TOKEN_METADATA_ID));
       },
     },
   });

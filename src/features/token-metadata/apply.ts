@@ -18,7 +18,7 @@
  * re-flag the identity's rows, which this path does not do, so it refuses to load with a non-empty registry.
  */
 
-import type { ContractLog } from "../../backbone/contract-logs/contract-logs.js";
+import type { ContractLog, UnresolvedLogSite } from "../../backbone/contract-logs/contract-logs.js";
 import type { BlockWriteHandle } from "../../db/api.js";
 import { classifyMip0018Event } from "./classify.js";
 import { miscAtom, UnknownLogSerialization } from "./log-reader.js";
@@ -71,18 +71,33 @@ export interface Candidate {
 export type LogReader = (data: Uint8Array) => Uint8Array | null;
 
 /**
- * The MIP-0018 candidates of block `height`'s logs, classified, in chain order; logs of other types, other values and
- * other names give none.
+ * The MIP-0018 candidates of block `height`'s logs and its unresolved log sites, classified, in chain order: logs of
+ * other types, other values and other names give none; every unresolved site gives an `unresolved` event with the
+ * provider's reason (its value is unknown, so it may be a MIP-0018 event; it is never applied). A site's `event_index`
+ * is its position among its transaction's log sites, unresolved ones included, as `contract-logs` numbers them.
  */
-export function candidatesOf(height: bigint, logs: readonly ContractLog[], reader: LogReader = miscAtom): Candidate[] {
-  const out: Candidate[] = [];
-  let transaction = -1;
-  let first = 0;
+export function candidatesOf(
+  height: bigint,
+  logs: readonly ContractLog[],
+  reader: LogReader = miscAtom,
+  unresolved: readonly UnresolvedLogSite[] = [],
+): Candidate[] {
+  const first = new Map<number, number>();
+  for (const site of [...logs, ...unresolved]) first.set(site.transaction, Math.min(first.get(site.transaction) ?? site.index, site.index));
+  const positionOf = (transaction: number, index: number) => ({ height, tx: transaction, event: index - first.get(transaction)! });
+  const out: Candidate[] = unresolved.map((site) => ({
+    row: {
+      ...positionOf(site.transaction, site.index),
+      contract: site.address,
+      entryPoint: site.entryPoint.slice(0, ENTRY_POINT_KEPT),
+      classification: "unresolved",
+      reason: site.reason,
+      domainSep: null,
+      kind: null,
+    },
+    records: [],
+  }));
   for (const log of logs) {
-    if (log.transaction !== transaction) {
-      transaction = log.transaction;
-      first = log.index;
-    }
     if (log.eventType !== "Misc") continue;
     let atom: Uint8Array | null;
     try {
@@ -98,7 +113,7 @@ export function candidatesOf(height: bigint, logs: readonly ContractLog[], reade
     if (split === undefined) continue;
     const classified = classifyMip0018Event({ type: "Misc", name: split.name, payload: split.payload });
     if (classified.result === "ignore") continue;
-    const at = { height, tx: log.transaction, event: log.index - first };
+    const at = positionOf(log.transaction, log.index);
     const common = { ...at, contract: log.address, entryPoint: log.entryPoint.slice(0, ENTRY_POINT_KEPT) };
     out.push(
       classified.result === "accept"
@@ -109,7 +124,7 @@ export function candidatesOf(height: bigint, logs: readonly ContractLog[], reade
         : { row: { ...common, classification: "reject", reason: classified.reason, domainSep: null, kind: null }, records: [] },
     );
   }
-  return out;
+  return out.sort((x, y) => x.row.tx - y.row.tx || x.row.event - y.row.event);
 }
 
 /** Applies an accepted event's records to its identity's rows, in record order. */
@@ -145,7 +160,7 @@ export type TransactionHashes = (transaction: number) => Uint8Array | undefined;
 
 /**
  * Writes block `height`'s candidates, each with its transaction's hash from `hashes`, and applies the accepted ones, in
- * chain order. A candidate of a transaction `hashes` does not know throws: the providers of `contract-logs` and
+ * chain order. A candidate (or unresolved site) of a transaction `hashes` does not know throws: the providers of `contract-logs` and
  * `block-parsed` disagree on the block.
  */
 export async function writeBlock(
@@ -154,8 +169,9 @@ export async function writeBlock(
   logs: readonly ContractLog[],
   hashes: TransactionHashes,
   reader: LogReader = miscAtom,
+  unresolved: readonly UnresolvedLogSite[] = [],
 ): Promise<number> {
-  const candidates = candidatesOf(height, logs, reader);
+  const candidates = candidatesOf(height, logs, reader, unresolved);
   for (const { row: candidate, records } of candidates) {
     const txHash = hashes(candidate.tx);
     if (txHash === undefined) {

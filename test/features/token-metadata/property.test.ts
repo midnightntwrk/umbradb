@@ -15,8 +15,8 @@ import { stateResponse } from "./vector-adapter.js";
  * field, tombstones and withdrawals — the module's served state after every block equals the pure
  * `state.ts` applied to the same events as a reference model. A probe module reads the served state inside each
  * block's transaction, after `token-metadata` wrote it. **Negative control:** the model applying each block's events
- * in reverse log order differs from the module on the generated chains. Unresolved sites join with
- * `fast-logs-unresolved`.
+ * in reverse log order differs from the module on the generated chains. Unresolved sites are
+ * `events.test.ts`'s.
  */
 
 /**

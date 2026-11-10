@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { TokenMetadataLogError } from "../../../src/features/token-metadata/apply.js";
+import type { UnresolvedLogSite } from "../../../src/backbone/contract-logs/contract-logs.js";
+import { candidatesOf, TokenMetadataLogError } from "../../../src/features/token-metadata/apply.js";
 import { miscAtom, UnknownLogSerialization } from "../../../src/features/token-metadata/log-reader.js";
 import { tokenMetadataWith } from "../../../src/features/token-metadata/token-metadata.js";
 import {
@@ -12,7 +13,7 @@ import {
 import type { ModuleDeclaration } from "../../../src/modules/declaration.js";
 import * as v9 from "../../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../../runner/process-backends.js";
-import { blockLogs, causes, contract, domain, eventData, miscData, runTo, runToHalt } from "./harness.js";
+import { blockLogs, causes, contract, domain, eventData, get, log, miscData, runTo, runToHalt, serve } from "./harness.js";
 
 /**
  * The module's event rows through the real process on PostgreSQL 18 and PGlite:
@@ -20,8 +21,11 @@ import { blockLogs, causes, contract, domain, eventData, miscData, runTo, runToH
  *   other MIP-0002 type store no row.
  * - A `Misc` log with an unknown tag halts the block with `callback-error` naming height, transaction, log
  *   and tag; the negative control, a reader that skips unknown tags, lets the block commit.
- * - S7 (an unresolved site's half waits for `fast-logs-unresolved`): two candidates in one transaction, one
- *   malformed, stores one `reject` with its reason and applies the other.
+ * - S7: two candidates in one transaction, one malformed, stores one `reject` with its reason and applies the other;
+ *   and an unresolved log site (as `core-contract-logs-fast` gives one) is stored `unresolved` with the provider's
+ *   reason at its own position in its transaction, never applied, and marks its contract's tokens `unresolved`.
+ *   **Negative control:** numbering a transaction's events from its first log alone, as before unresolved sites, moves
+ *   the valid event onto the site's position.
  */
 
 const S = 10;
@@ -53,6 +57,23 @@ const tooLong = (() => {
     v9.StateValue.newCell({ value: [bytes], alignment: [{ tag: "atom", value: { tag: "bytes", length: 289 } }] }),
   );
 })();
+
+const D2 = domain(0x22);
+const otherValid = eventData(D2, 1, commonRecords({ name: "Beta", symbol: "BETA" }));
+const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
+
+/** An unresolved log site of contract `A`, as `core-contract-logs-fast` gives one. */
+const site = (transaction: number, index: number, reason: UnresolvedLogSite["reason"]): UnresolvedLogSite => ({
+  transaction,
+  index,
+  address: A,
+  entryPoint: new TextEncoder().encode("setMetadata"),
+  reason,
+  segment: 1,
+  fallible: reason === "partial-transaction",
+  call: 0,
+  op: 4,
+});
 
 const OTHER_TYPES = [
   "ShieldedSpend",
@@ -119,6 +140,27 @@ describe.each(PROCESS_BACKENDS)("token-metadata's event rows on $name", (backend
     }
   }, 240_000);
 
+  it("an unresolved site is stored unresolved at its position, never applied, and marks the contract's tokens", async () => {
+    const db = await backend.database();
+    const unresolved = new Map([[BigInt(S + 1), [site(0, 0, "not-a-literal"), site(1, 2, "partial-transaction")]]]);
+    const logs = new Map([[BigInt(S + 1), [log(0, 1, A, valid), log(1, 3, A, otherValid)]]]);
+    const identity = await serve(db, { start: S, head: S + 2, logs, unresolved }, (origin) =>
+      get(origin, `/v1/identities/${hex(A)}/${hex(D)}/1`),
+    );
+    expect(await db.query("SELECT tx_index, event_index, classification, reason FROM token_metadata.events ORDER BY tx_index, event_index")).toEqual([
+      { tx_index: 0, event_index: 0, classification: "unresolved", reason: "not-a-literal" },
+      { tx_index: 0, event_index: 1, classification: "accept", reason: null },
+      { tx_index: 1, event_index: 0, classification: "unresolved", reason: "partial-transaction" },
+      { tx_index: 1, event_index: 1, classification: "accept", reason: null },
+    ]);
+    expect(await db.query("SELECT DISTINCT encode(domain_sep, 'hex') AS d FROM token_metadata.fields ORDER BY d")).toEqual([{ d: hex(D) }, { d: hex(D2) }]);
+    expect(identity.json.mark).toMatchObject({
+      mark: "unresolved",
+      reasons: ["unresolved-log"],
+      unresolved: { count: 2, positions: [{ height: S + 1, txIndex: 0, eventIndex: 0 }, { height: S + 1, txIndex: 1, eventIndex: 0 }] },
+    });
+  }, 240_000);
+
   it("a Misc log with an unknown tag halts its block with callback-error naming height, transaction, log and tag", async () => {
     const db = await backend.database();
     const logs = new Map([[BigInt(S + 2), blockLogs([0, A, valid], [1, A, valid], [1, A, retagged(valid)])]]);
@@ -155,4 +197,26 @@ describe.each(PROCESS_BACKENDS)("token-metadata's event rows on $name", (backend
     const error = causes(halt.error).find((e) => e instanceof TokenMetadataLogError) as TokenMetadataLogError;
     expect(error).toMatchObject({ height: BigInt(S + 1), transaction: 0, log: 0, tag: null });
   }, 240_000);
+});
+
+describe("an event's position among its transaction's log sites", () => {
+  const logs = [log(0, 1, A, valid), log(1, 3, A, otherValid)];
+  const sites = [site(0, 0, "not-a-literal"), site(1, 2, "partial-transaction")];
+  const positions = (candidates: ReturnType<typeof candidatesOf>) => candidates.map((c) => [c.row.tx, c.row.event, c.row.classification]);
+
+  it("counts from the transaction's first site, unresolved ones included", () => {
+    expect(positions(candidatesOf(BigInt(S + 1), logs, miscAtom, sites))).toEqual([
+      [0, 0, "unresolved"],
+      [0, 1, "accept"],
+      [1, 0, "unresolved"],
+      [1, 1, "accept"],
+    ]);
+  });
+
+  it("negative control: counted from the first log alone, each valid event takes its site's position", () => {
+    expect(positions(candidatesOf(BigInt(S + 1), logs, miscAtom))).toEqual([
+      [0, 0, "accept"],
+      [1, 0, "accept"],
+    ]);
+  });
 });

@@ -7,8 +7,8 @@
  *
  * - `events`, append-only: one row per MIP-0018 candidate at its chain position — height, the transaction's index in
  *   the block and its hash (from `block-parsed`, indexed for `/v1/events?tx=`), and `event_index`, the log's position among its transaction's logs (`eventIndex`
- *   in the API). Its classification is `accept`, `reject` or `unresolved` (an unresolved site of
- *   `fast-logs-unresolved`; an `ignore`d log is not stored); `reason` is null iff `accept`; an accepted event's identity is its `domain_sep` and `kind`. `entry_point` keeps the first 128 bytes.
+ *   in the API). Its classification is `accept`, `reject` or `unresolved` (an unresolved log site of
+ *   `core-contract-logs-fast`; an `ignore`d log is not stored); `reason` is null iff `accept`; an accepted event's identity is its `domain_sep` and `kind`. `entry_point` keeps the first 128 bytes.
  * - `fields`, mutable: one row per field of an identity, holding only its current value, whole (names and
  *   symbols are cut when served, never when stored). `uint_value` is a `UInt` value as a number; `usable` is the
  *   common-field rule's answer for a common key, else null; `defined` says whether the key is served (MIP "Keys").

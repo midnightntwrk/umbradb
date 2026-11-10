@@ -195,7 +195,9 @@ TOKEN_METADATA_API.entry({ start, config: {} }),
   built from the database's first block, so to add it later, start a new database with it.
 - **Which logs provider.** `core-contract-logs-full` gives every log from the ledger but starts only at 0 (it needs
   `core-ledger-state`). `core-contract-logs-fast` starts anywhere but is development only (the core entry's
-  `developmentOptIn`), and halts at a log it cannot read from the transcripts.
+  `developmentOptIn`); a log it cannot read from the transcripts (a value from the contract's state, a log behind a
+  branch, a log in a partly successful transaction's fallible part) it records as an unresolved site, which the
+  module stores as an `unresolved` event and shows in the contract's tokens' marks.
 - **The API holds no state.** It requires the indexer's tables (startup refuses it without `token-metadata`), and can be
   added to a database whose indexer already ran, from a height above the cursor like any added entry.
 - **What it stores and serves** is what contracts published: untrusted text and URIs. It fetches nothing.

@@ -9,7 +9,7 @@ import { blockLogs, contract, domain, eventData, readStopped, runTo } from "../t
 
 /**
  * The API's edges no chain of the harness reaches, on PostgreSQL 18 and PGlite: rows written straight into a stopped
- * database — an `unresolved` event (as `fast-logs-unresolved` will store one), a type-4 value that is not UTF-8 (which
+ * database — an `unresolved` event (as the module stores an unresolved log site), a type-4 value that is not UTF-8 (which
  * the codec never accepts; it shows the text view following the bytes), two
  * symbol groups on one contract — answered through the handlers; cursors of the right endpoint but the wrong shape or
  * filter, and one that is no JSON; a read that fails (not the handlers' own error) passed on to the module API; and
@@ -59,7 +59,7 @@ describe.each(PROCESS_BACKENDS)("the API's edges on $name", (backend: ProcessBac
     await runTo(db, { start: S, head: S + 2, logs });
     await db.query(
       `INSERT INTO token_metadata.events (height, tx_index, event_index, tx_hash, contract_address, entry_point, classification, reason)
-       VALUES (${S + 1}, 7, 0, '\\x${"77".repeat(32)}'::bytea, '\\x${hex(A)}'::bytea, '\\x'::bytea, 'unresolved', 'log-operand-not-pushed')`,
+       VALUES (${S + 1}, 7, 0, '\\x${"77".repeat(32)}'::bytea, '\\x${hex(A)}'::bytea, '\\x'::bytea, 'unresolved', 'not-a-literal')`,
     );
     await db.query(
       `INSERT INTO token_metadata.fields (contract_address, domain_sep, kind, key, val_type, value, uint_value, usable, defined,
@@ -82,7 +82,7 @@ describe.each(PROCESS_BACKENDS)("the API's edges on $name", (backend: ProcessBac
     });
     expect((await answer(db, "/v1/status", "/v1/status")).json.unresolvedEvents).toBe(1);
     const events = await answer(db, "/v1/events", `/v1/events?contract=${hex(A)}&limit=500`);
-    expect(events.json.items.at(-1)).toMatchObject({ classification: "unresolved", reason: "log-operand-not-pushed", txHash: "77".repeat(32) });
+    expect(events.json.items.at(-1)).toMatchObject({ classification: "unresolved", reason: "not-a-literal", txHash: "77".repeat(32) });
   }, 60_000);
 
   it("a type-4 value that is not UTF-8 is served as hex only, with no text view", async () => {

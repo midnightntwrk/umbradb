@@ -20,7 +20,7 @@ import { blockLogs, contract, domain, eventData, get, type Got, miscData, startR
  * identity per mark, a symbol group, hostile text, an image and a withdrawn identity.
  *
  * - **Marks**: `ok`, `partial` and `incorrect` through the routes; `none` and `unresolved` through `markJson` (an
- *   unresolved site needs `fast-logs-unresolved`).
+ *   unresolved site through the process: `events.test.ts`).
  * - **General rules** (the module's part): 400 `BAD_REQUEST` for each bad input, 404 `NOT_FOUND` for what is not there, cursors bound
  *   to their endpoint, limits 1–500, ASCII JSON with hostile text, the response headers and the core's `X-Umbra-*`;
  *   503 `BUSY` beyond eight requests at once. The module API's own 404 and 405 are checked as they are.

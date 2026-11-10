@@ -1,10 +1,13 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { z } from "zod";
+import type { TapeRecord } from "../../../tools/tape/index.js";
 import {
   type ContractLog,
+  contractLogsBlock,
   contractLogsItem,
   contractLogsMigrations,
-  frozenLogs,
+  type UnresolvedLogSite,
   writeLogRows,
 } from "../../../src/backbone/contract-logs/contract-logs.js";
 import { cursorHeight } from "../../../src/backbone/core-block-commit/sql.js";
@@ -43,16 +46,22 @@ export function txHashOf(height: bigint | number, transaction: number): Uint8Arr
 }
 
 /** The test provider's `block-parsed` of a block whose logs are `logs`: transactions 0 … the last log's, hashes only. */
-function blockParsedOf(height: bigint, logs: readonly ContractLog[]) {
-  const last = Math.max(-1, ...logs.map((l) => l.transaction));
+function blockParsedOf(height: bigint, logs: readonly ContractLog[], unresolved: readonly UnresolvedLogSite[]) {
+  const last = Math.max(-1, ...logs.map((l) => l.transaction), ...unresolved.map((site) => site.transaction));
   const transactions = Array.from({ length: last + 1 }, (_, index) =>
     Object.freeze({ index, hash: txHashOf(height, index), kind: "regular", size: 1, bytes: new Uint8Array(), segments: [] }),
   );
   return Object.freeze({ ledger: "test", transactions: Object.freeze(transactions) });
 }
 
-/** A provider of `contract-logs` giving `logs`' logs at each height (none elsewhere), and of `block-parsed`'s hashes. */
-export function logsProvider(logs: ReadonlyMap<bigint, readonly ContractLog[]>): ModuleDeclaration {
+/**
+ * A provider of `contract-logs` giving `logs`' logs and `unresolved`'s unresolved log sites at each height (none
+ * elsewhere), and of `block-parsed`'s hashes.
+ */
+export function logsProvider(
+  logs: ReadonlyMap<bigint, readonly ContractLog[]>,
+  unresolved: ReadonlyMap<bigint, readonly UnresolvedLogSite[]> = new Map(),
+): ModuleDeclaration {
   return defineModule({
     id: TEST_LOGS_ID,
     version: "1.0.0",
@@ -64,8 +73,9 @@ export function logsProvider(logs: ReadonlyMap<bigint, readonly ContractLog[]>):
     migrations: contractLogsMigrations(),
     points: {
       async "on-parse"(_p, b, out) {
-        out.put("contract-logs", frozenLogs(logs.get(b.height) ?? []));
-        out.put("block-parsed", blockParsedOf(b.height, logs.get(b.height) ?? []));
+        const sites = unresolved.get(b.height) ?? [];
+        out.put("contract-logs", contractLogsBlock(logs.get(b.height) ?? [], sites));
+        out.put("block-parsed", blockParsedOf(b.height, logs.get(b.height) ?? [], sites));
       },
       async "on-db-write"(_p, b, w) {
         await writeLogRows(w, b.height, logs.get(b.height) ?? []);
@@ -149,7 +159,9 @@ export interface RunOptions {
   /** The in-memory chain's finalized head: the run processes up to it, then stops. */
   readonly head: number;
   readonly logs?: ReadonlyMap<bigint, readonly ContractLog[]>;
-  /** The modules besides the provider (default: `token-metadata`). */
+  /** The test provider's unresolved log sites per height (as `core-contract-logs-fast` gives them). */
+  readonly unresolved?: ReadonlyMap<bigint, readonly UnresolvedLogSite[]>;
+  /** The modules besides the provider (default: `token-metadata` and `token-metadata-api`). */
   readonly modules?: readonly ModuleDeclaration[];
   /** Each module's entry start (default: `start`). */
   readonly moduleStart?: (id: string) => number;
@@ -177,7 +189,7 @@ function runData(db: ProcessDatabase, modules: readonly ModuleDeclaration[], opt
 
 /** Starts a process on `db` with the provider and `options.modules`; resolves with its handle once `started` settles. */
 export function startRun(db: ProcessDatabase, options: RunOptions, serve = false): UmbraDBHandle {
-  const modules = [...(options.fast === true ? [] : [logsProvider(options.logs ?? new Map())]), ...(options.modules ?? [TOKEN_METADATA as ModuleDeclaration, TOKEN_METADATA_API as ModuleDeclaration])];
+  const modules = [...(options.fast === true ? [] : [logsProvider(options.logs ?? new Map(), options.unresolved)]), ...(options.modules ?? [TOKEN_METADATA as ModuleDeclaration, TOKEN_METADATA_API as ModuleDeclaration])];
   const source = new InMemoryBlockSource({
     head: BigInt(options.head),
     ...(options.items === undefined ? {} : { items: (block) => options.items!(block.height) }),
@@ -289,4 +301,22 @@ export async function readStopped<T>(db: ProcessDatabase, body: (read: ReadHandl
   } finally {
     await opened.close();
   }
+}
+
+/**
+ * The genesis hash's and header's records of `network`, as its node answered them (`test/ledger/fixtures/networks/`):
+ * startup asks for them, and a mid-chain tape does not hold them, so they go before its records.
+ */
+export function genesisRecords(network: "mainnet" | "preprod" | "preview"): TapeRecord[] {
+  const fixture = JSON.parse(readFileSync(new URL(`../../ledger/fixtures/networks/${network}.json`, import.meta.url), "utf8")) as {
+    genesis: { hash: string };
+    calls: TapeRecord[];
+  };
+  const wanted = (record: TapeRecord) =>
+    "method" in record &&
+    ((record.method === "chain_getBlockHash" && JSON.stringify(record.params) === "[0]") ||
+      (record.method === "chain_getHeader" && JSON.stringify(record.params) === JSON.stringify([fixture.genesis.hash])));
+  const records = fixture.calls.filter(wanted);
+  if (records.length !== 2) throw new Error(`${network}'s fixture holds ${records.length} genesis records, not 2`);
+  return records;
 }
