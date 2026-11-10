@@ -9,6 +9,8 @@ import { statusOf, type StatusFacts } from "../../src/runner/process.js";
  * Why a process is refused or halted, and which failures it retries. `reasonOf` gives each failure a code from the
  * design's "Refusals and halts" section, with the height, module and point it happened at, never a message.
  * `retryOf` says which failures are retried instead of halting.
+ *
+ * The codes the reasons keep are written out below, so a code added to or dropped from either list fails here.
  */
 
 const reason = (code: ProcessReason["code"], rest: Partial<ProcessReason> = {}): ProcessReason => ({
@@ -25,6 +27,32 @@ function listenError(code: string): Error {
 }
 
 describe("the codes reasons keep", () => {
+  it("REFUSAL_CODES are exactly the startup refusals that are UmbraError codes, and HALT_CODES the halts", () => {
+    expect([...REFUSAL_CODES].sort()).toEqual([
+      "bad-id", "callback-error", "cannot-start-mid-chain", "changes-past", "cursor-hash-mismatch",
+      "development-opt-in-required", "duplicate-api-route", "duplicate-id", "durability-fsync-off",
+      "durability-full-page-writes-off", "durability-pooler", "field-no-kind", "genesis-mismatch", "graph-cycle",
+      "invalid-configuration", "invalid-declaration", "item-no-lifetime", "item-no-provider", "item-not-available",
+      "ledger-tasks-need-modules-from", "library-setting-refused", "listen-failed", "migration-checksum-changed",
+      "migration-failed", "migration-missing", "missing-entry", "modules-given-twice", "needs-lockstep-not-listed",
+      "network-address-conflict", "no-primary-key", "no-requirement", "non-deterministic-column",
+      "non-deterministic-table", "not-plain-data", "package-hash-mismatch", "private-binding-mismatch",
+      "private-link-misconfigured", "process-item-missing", "providers-overlap", "public-config-changed",
+      "requires-resync", "reserved-prefix", "schema-collision", "shared-item-migrations-differ", "source-refused",
+      "table-item-no-kind", "transport-reader-can-write", "unknown-point", "unsupported-column-type",
+      "unsupported-key-type", "upgrade-required", "writer-lock-held",
+    ]);
+    expect([...HALT_CODES].sort()).toEqual([
+      "bad-version-digest", "callback-error", "database-error", "duplicate-block-hash", "fast-log-unsupported",
+      "finality-conflict", "ledger-refcount-invalid", "lockstep-behind", "metadata-mismatch", "node-requirement",
+      "parent-mismatch", "pin-mismatch", "public-config-changed", "report-hash-mismatch", "root-mismatch",
+      "truncate-not-allowed", "unknown-runtime", "writer-lock-lost",
+    ]);
+    // Each is an UmbraError code; the one halt no UmbraError carries, the loop's own cursor check, is not listed.
+    for (const code of [...REFUSAL_CODES, ...HALT_CODES]) expect(ERROR_CODES).toContain(code);
+    expect(HALT_CODES).not.toContain("unexpected-cursor");
+  });
+
   it("REFUSAL_CODES and HALT_CODES are frozen; callback-error refuses and halts, listen-failed only refuses", () => {
     // A callback's failure and a listener that cannot bind are UmbraError codes, so a startup's rejection carries them.
     expect(ERROR_CODES).toEqual(expect.arrayContaining(["callback-error", "listen-failed"]));

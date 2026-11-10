@@ -3,12 +3,17 @@ import { UmbraError } from "../../src/db/errors.js";
 import { NODE_METHODS, NodeClient } from "../../src/node/index.js";
 import { FakeNode } from "./fake-node.js";
 import { ManualTimers, turns } from "./manual-timers.js";
+import { outsideNodeMethods } from "./node-methods.js";
 
 /**
  * Only the allowed node calls, checked on the client's side:
  * - The node client's method list is exactly the twelve allowed methods, written out below, in their order.
  * - Its low-level `call` refuses any other method before anything reaches the node. It also refuses the two
  *   subscription methods, which only `subscribeNewHeads` and `subscribeFinalizedHeads` send.
+ *
+ * The other suites check every request their fake or tape nodes received against the same list (`./node-methods.ts`).
+ * So a client that sent any other method fails there, for example an `rpc_methods` probe on connecting or a
+ * `chain_unsubscribe…` on cancelling.
  */
 
 const nodes: FakeNode[] = [];
@@ -72,5 +77,13 @@ describe("the node client's methods", () => {
     await turns();
     expect(node.upgrades).toBe(0);
     expect(node.received).toEqual([]);
+  });
+
+  it("negative control: the request check names every method outside the allowed ones, once each", () => {
+    expect(outsideNodeMethods(["chain_getHeader", "rpc_methods", "chain_unsubscribeNewHeads", "rpc_methods"])).toEqual([
+      "rpc_methods",
+      "chain_unsubscribeNewHeads",
+    ]);
+    expect(outsideNodeMethods(NODE_METHODS)).toEqual([]);
   });
 });

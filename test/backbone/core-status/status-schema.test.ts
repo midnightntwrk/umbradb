@@ -120,12 +120,21 @@ describe("/status's JSON schema", () => {
     }
   });
 
-  it("registers paused among its conditions", () => {
+  it("registers exactly the conditions the runner raises, paused among them", () => {
     const schema = schemaFile(new URL("./status.schema.json", import.meta.url)) as {
       $defs: { condition: { oneOf: { properties: { code: { const?: string; enum?: string[] } } }[] } };
     };
     const codes = schema.$defs.condition.oneOf.flatMap(({ properties: { code } }) => code.enum ?? [code.const as string]);
-    expect(codes).toContain("paused");
+    expect([...codes].sort()).toEqual([
+      "database-retrying",
+      "finality-stall",
+      "node-retrying",
+      "paused",
+      "slow-block",
+      "upgrade-required",
+      "waiting-for-lockstep",
+      "waiting-for-node",
+    ]);
   });
 
   it("names the module points and every field the endpoint answers, each one required", () => {

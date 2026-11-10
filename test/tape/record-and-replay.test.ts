@@ -4,6 +4,7 @@ import {
   connectWebSocket,
   NodeClient,
   type NodeClientOptions,
+  NODE_METHODS,
   type NodeRetry,
 } from "../../src/node/index.js";
 import {
@@ -14,10 +15,12 @@ import {
   recordAndReplay,
   RecordingError,
   type ReplaySession,
+  type TapeRecord,
   tapeId,
 } from "../../tools/tape/index.js";
 import { MAINNET, MAINNET_BLOCK, recorded } from "../node/fake-node.js";
 import { ManualTimers, until } from "../node/manual-timers.js";
+import { outsideNodeMethods } from "../node/node-methods.js";
 import { type Script, ScriptedNode, type Step } from "./scripted-node.js";
 
 /**
@@ -78,6 +81,9 @@ async function withScripted<T>(script: Script, body: (node: ScriptedNode) => Pro
   }
 }
 
+const methodsOf = (records: readonly TapeRecord[]): string[] =>
+  records.flatMap((record) => ("method" in record ? [record.method] : []));
+
 describe("through the node client", { timeout: TEST_TIMEOUT_MS }, () => {
   it("the tour, recorded and replayed: every frame of every connection byte-identical", async () => {
     await withScripted(mainnetScript(), async (node) => {
@@ -90,6 +96,9 @@ describe("through the node client", { timeout: TEST_TIMEOUT_MS }, () => {
       expect(result.recorded[0]?.sent).toHaveLength(12);
       expect(result.recorded[0]?.received).toHaveLength(15);
       expect(result.recorded[0]?.received).toEqual(node.sent[0]);
+      // The tour makes every allowed node call, and no other.
+      expect(new Set(methodsOf(result.records))).toEqual(new Set(NODE_METHODS));
+      expect(outsideNodeMethods(methodsOf(result.records))).toEqual([]);
       expect(result.id).toBe(tapeId(result.bytes));
       expect(readTape(result.bytes).records).toEqual(result.records);
     });

@@ -38,6 +38,12 @@ export const NOTIFICATIONS = {
   chain_subscribeFinalizedHeads: "chain_finalizedHead",
 } as const;
 
+/**
+ * Every request every fake node of this process received, in order: the suites check it holds only the allowed node
+ * methods (`./node-methods.ts`).
+ */
+export const RECEIVED_BY_ANY_NODE: Received[] = [];
+
 interface Recorded {
   readonly method: string;
   readonly params: readonly unknown[];
@@ -218,6 +224,7 @@ export class FakeNode {
     const message = JSON.parse(text) as { id: unknown; method: string; params: unknown };
     const request: Received = { method: message.method, params: message.params, id: message.id, connection };
     this.received.push(request);
+    RECEIVED_BY_ANY_NODE.push(request);
     const params = Array.isArray(message.params) ? (message.params as unknown[]) : [];
     const answer = this.#answer(socket, params, request);
     if ("silent" in answer) return;
