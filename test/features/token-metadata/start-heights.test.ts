@@ -5,7 +5,8 @@ import { servedGroups, servedIdentities } from "./served-state.js";
 import { TOKEN_METADATA_API } from "../../../src/features/token-metadata-api/token-metadata-api.js";
 import { record } from "../../../src/features/token-metadata/codec/index.js";
 import { MetadataState, type ObservedEvent } from "../../../src/features/token-metadata/state.js";
-import { TOKEN_METADATA } from "../../../src/features/token-metadata/token-metadata.js";
+import { FIRST_CONTRACT_LOG_HEIGHTS, TOKEN_METADATA, tokenMetadataWith } from "../../../src/features/token-metadata/token-metadata.js";
+import { miscAtom } from "../../../src/features/token-metadata/log-reader.js";
 import { defineModule, type ModuleDeclaration } from "../../../src/modules/declaration.js";
 import { FAST_CORE } from "../../backbone/contract-data-checks.js";
 import { committed, ingest } from "../../backbone/ingest-harness.js";
@@ -27,9 +28,12 @@ import { stateResponse } from "./vector-adapter.js";
  *   reports S. **Negative control:** for a start that cuts an event (the contract token's block), the model applied to
  *   every event differs from what the module serves, so the comparison sees a start height.
  * - **The networks' own tapes started mid-chain** with `core-contract-logs-fast`: preprod's and mainnet's delayed
- *   upgrade tapes, from the tape's first usable block (on the old runtime), the upgrade's first block F, and the block
- *   after F (on the new one). Each commits every height to the tape's last, and `/v1/status` reports its start, the
- *   last height and the network. A recorded tape answers `state_getMetadata` only at the heights its recording asked
+ *   upgrade tapes, configured from the tape's first usable block (on the old runtime), from the upgrade's first block F
+ *   (the network's first block with contract logs) and from above F, which starts at F (the indexer's latest start).
+ *   Each commits every height from its start to the tape's last, and `/v1/status` reports that start, the last height
+ *   and the network.
+ * - **Latest starts on the synthetic chain:** databases configured at four heights above the indexer's latest start
+ *   all start there and hold the same rows; the negative control, the indexer without one, keeps its start. A recorded tape answers `state_getMetadata` only at the heights its recording asked
  *   (its first block, and each runtime's first), and a start needs its parent's metadata, so these are the starts a
  *   tape can serve; the synthetic chain above covers every other start height.
  */
@@ -149,6 +153,48 @@ describe.each(PROCESS_BACKENDS)("token-metadata from varying start heights on $n
   }, 240_000);
 });
 
+// ── Latest starts: a new database configured above the module's latest start starts there ──────────────────────
+
+/** The indexer with a latest start on the tests' (custom) network at the chain's first event block. */
+const BACKFILLING = tokenMetadataWith(miscAtom, { custom: FIRST }) as ModuleDeclaration;
+
+describe.each(PROCESS_BACKENDS)("a new database configured above the module's latest start, on $name", (backend: ProcessBackend) => {
+  beforeAll(() => backend.start(), 180_000);
+  afterAll(() => backend.stop(), 60_000);
+
+  it("starts at the latest start whatever height it is configured at, and every such database holds the same rows", async () => {
+    const rowsOf = async (configured: number) => {
+      const db = await backend.database();
+      const seen = new Map<bigint, string>();
+      const status = await serve(db, { start: configured, head: HEAD, logs, unresolved, modules: [BACKFILLING, TOKEN_METADATA_API as ModuleDeclaration, probe(seen)] }, (origin) =>
+        get(origin, "/v1/status"),
+      );
+      const [identity] = await db.query("SELECT start_height::int AS s FROM core_chain.identity");
+      const events = await db.query("SELECT height::int AS h, tx_index, event_index, classification, reason FROM token_metadata.events ORDER BY 1, 2, 3");
+      const fields = await db.query("SELECT encode(contract_address, 'hex') AS c, encode(domain_sep, 'hex') AS d, kind, encode(key, 'hex') AS k, encode(value, 'hex') AS v FROM token_metadata.fields ORDER BY 1, 2, 3, 4");
+      return { start: identity?.s, status: status.json.startHeight, served: seen.get(BigInt(HEAD)), events, fields };
+    };
+    const configured = [FIRST + 2, FIRST + 4, LAST, HEAD - 1];
+    const runs = [];
+    for (const height of configured) runs.push(await rowsOf(height));
+    for (const [i, run] of runs.entries()) {
+      expect([configured[i], run.start, run.status]).toEqual([configured[i], FIRST, FIRST]);
+      expect(run.served).toBe(modelFrom(FIRST));
+      expect(run.events).toEqual(runs[0]!.events);
+      expect(run.fields).toEqual(runs[0]!.fields);
+    }
+    expect(runs[0]!.events).toHaveLength(expectedRows(FIRST));
+  }, 600_000);
+
+  it("negative control: the indexer without a latest start keeps the configured start, and holds fewer events", async () => {
+    const db = await backend.database();
+    await serve(db, { start: FIRST + 4, head: HEAD, logs, unresolved, modules: MODULES }, async () => undefined);
+    expect(await db.query("SELECT start_height::int AS s FROM core_chain.identity")).toEqual([{ s: FIRST + 4 }]);
+    expect(await db.query("SELECT count(*)::int AS n FROM token_metadata.events")).toEqual([{ n: expectedRows(FIRST + 4) }]);
+    expect(expectedRows(FIRST + 4)).toBeLessThan(expectedRows(FIRST));
+  }, 240_000);
+});
+
 // ── The networks' tapes, from several heights ────────────────────────────────────────────────────────────────
 
 interface TapeStarts {
@@ -160,17 +206,19 @@ interface TapeStarts {
 }
 
 const TAPES: readonly TapeStarts[] = [
-  { tape: "preprod-3348334-3348534", network: "preprod", last: 3_348_534, f: 3_348_434, starts: [3_348_335, 3_348_434, 3_348_435] },
+  { tape: "preprod-3348334-3348534", network: "preprod", last: 3_348_534, f: 3_348_434, starts: [3_348_335, 3_348_434, 3_348_435, 3_348_530] },
   { tape: "mainnet-3346039-3346239", network: "mainnet", last: 3_346_239, f: 3_346_139, starts: [3_346_040, 3_346_139, 3_346_140] },
 ];
 
 describe.each(PROCESS_BACKENDS)("token-metadata on the networks' tapes from varying start heights, on $name", (backend: ProcessBackend) => {
   for (const tape of TAPES) {
     for (const start of tape.starts) {
-      const where = start === tape.f ? "the upgrade's first block" : start === tape.f + 1 ? "the block after it" : "the tape's first usable block";
+      // A start above the network's first contract-log block (the upgrade's first block) starts there instead.
+      const actual = Math.min(start, FIRST_CONTRACT_LOG_HEIGHTS[tape.network]!);
+      const where = start === tape.f ? "the upgrade's first block" : start > tape.f ? `${start}, which starts at the upgrade's first block` : "the tape's first usable block";
       tapeTest(
         tape.tape,
-        `${tape.network} from ${where} (${start}) commits every height to ${tape.last} and reports its start`,
+        `${tape.network} configured from ${where} commits every height from ${actual} to ${tape.last} and reports ${actual}`,
         async (found) => {
           await backend.start();
           try {
@@ -188,12 +236,12 @@ describe.each(PROCESS_BACKENDS)("token-metadata on the networks' tapes from vary
               const api = run.handle.listening().api!;
               const status = await get(`http://${api.host.includes(":") ? `[${api.host}]` : api.host}:${api.port}`, "/v1/status");
               expect(status.status).toBe(200);
-              expect(status.json).toMatchObject({ network: tape.network, startHeight: start, indexedHeight: tape.last });
+              expect(status.json).toMatchObject({ network: tape.network, startHeight: actual, indexedHeight: tape.last });
             } finally {
               await run.close();
             }
             const [blocks] = await db.query("SELECT count(*)::int AS n, min(height)::int AS lo, max(height)::int AS hi FROM core_block_commit.blocks");
-            expect(blocks).toEqual({ n: tape.last - start + 1, lo: start, hi: tape.last });
+            expect(blocks).toEqual({ n: tape.last - actual + 1, lo: actual, hi: tape.last });
           } finally {
             await backend.stop();
           }

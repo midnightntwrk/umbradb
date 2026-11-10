@@ -7,6 +7,10 @@
  *   either logs provider (`core-contract-logs-full`, or the
  *   development-only `core-contract-logs-fast` from any height). It has no ledger task, so it loads in the browser
  *   build like any user module.
+ * - **Starts every new database early enough** to hold every MIP-0018 event: its `latestStarts` are
+ *   {@link FIRST_CONTRACT_LOG_HEIGHTS}, so a new database on mainnet, preprod or preview configured above that height
+ *   starts there (the core's resolver moves S and the entries starting with it) and backfills from the public chain;
+ *   any start at or below it gives the same rows. A custom network is not moved.
  * - **Starts with its database**. Its rows are materialized state, so they depend on where it
  *   started: it declares `startsMidChain: true`, so a database started at any S accepts it, and refuses in
  *   `on-start-db` an entry starting above S. The process refuses with `callback-error` at `on-start-db` of
@@ -78,10 +82,23 @@ export function revisionGap(revisions: readonly { readonly start: bigint; readon
 }
 
 /**
- * The module's declaration with `reader` reading each `Misc` log's value: {@link TOKEN_METADATA} is the one with the log
- * reader; a negative control gives another reader.
+ * The first block with contract logs on each official network: the first block of ledger v9 (runtime 2,001,100), the
+ * delayed upgrade's first block (mainnet 3,346,139, preprod 3,348,434; preview 1,572 after its restart from genesis).
+ * No MIP-0018 event exists before it, so a database started at or before it holds every one, and every such database
+ * the same rows: the module's latest start on each network.
  */
-export function tokenMetadataWith(reader: LogReader) {
+export const FIRST_CONTRACT_LOG_HEIGHTS: Readonly<Record<string, number>> = Object.freeze({
+  mainnet: 3_346_139,
+  preprod: 3_348_434,
+  preview: 1_572,
+});
+
+/**
+ * The module's declaration with `reader` reading each `Misc` log's value and `latestStarts` as its latest starts:
+ * {@link TOKEN_METADATA} is the one with the log reader and {@link FIRST_CONTRACT_LOG_HEIGHTS}; a negative control
+ * gives another reader, a test other heights.
+ */
+export function tokenMetadataWith(reader: LogReader, latestStarts: Readonly<Record<string, number>> = FIRST_CONTRACT_LOG_HEIGHTS) {
   return defineModule({
     id: TOKEN_METADATA_ID,
     version: UMBRADB_VERSION,
@@ -96,6 +113,7 @@ export function tokenMetadataWith(reader: LogReader) {
       },
     ],
     startsMidChain: true,
+    latestStarts,
     configSchema: z.object({}),
     migrations: MIGRATIONS.map(({ id, sql }) => ({ id, sql })),
     points: {

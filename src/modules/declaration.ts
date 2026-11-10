@@ -119,6 +119,13 @@ export interface ModuleDeclaration {
   provides: ItemDeclaration[];
   /** Whether the module can start at a height after genesis, without the blocks before it. */
   startsMidChain: boolean;
+  /**
+   * The latest height a new database with this module starts at, per network: a module whose rows must cover the
+   * chain from some height (for example from the network's first block with contract logs) names it here, and a
+   * configuration whose database would start above it starts there instead (the entries starting with the database
+   * move with it). Networks it does not name are unaffected.
+   */
+  latestStarts?: Readonly<Record<string, number>>;
   /** Set by a private module that reads mutable public tables, so it runs in step with the public side. */
   needsLockstep?: boolean;
   /** The module runs only when development modules are explicitly enabled. */

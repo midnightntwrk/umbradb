@@ -570,6 +570,12 @@ const then = await metadata.read(read, "token-1", block.height - 10n);  // as of
 - **Starting mid-chain.** A module may start above height 0 only if it declares `startsMidChain: true`, promising that,
   started at any height h, it writes from h the rows a run from 0 would write; otherwise startup refuses with
   `cannot-start-mid-chain`. Only starts above the cursor are checked, so a restored backup continues as it was.
+- **Latest starts.** A module whose rows must cover the chain from some height declares `latestStarts: { [network]:
+  height }`. A configuration whose database would start above that height on that network starts there instead: S and
+  every entry that starts at S move down to it (entries starting above S keep their start), the process logs the
+  move, and `umbradb config check` notes it. The move is a function of the configuration alone, so a restart with the
+  same file resolves to the same start; a database already built from a higher S is refused by its history: build a
+  new one.
 - **`on-start-height` and `on-stop-height`.** The first fires at a run's first height, before `on-compute`, with
   `{ entryId, height }`, and again after a restart if that height had not committed. The second fires once the run's
   last height has committed; your callbacks are not called after it. Make both idempotent.
@@ -950,6 +956,11 @@ export default defineConfig({
 });
 ```
 
+- **Every new database holds every event.** No MIP-0018 event exists before a network's first block with contract logs
+  (the first block of ledger v9: mainnet 3,346,139, preprod 3,348,434, preview 1,572), so the indexer declares those
+  heights as its `latestStarts` (§11): a new database configured above one starts there and backfills from the chain,
+  and every database started at or below it, on any machine, holds the same rows (`FIRST_CONTRACT_LOG_HEIGHTS`). The
+  node must serve those blocks and the state at their parents (an archive node, or one that kept that state).
 - **The indexer starts with its database.** Its rows are materialized state — each token's current fields — so they depend on
   where it started. It may start at any S (`startsMidChain: true`), but its first entry may not start above S: a
   database that has run without it refuses it at startup (`callback-error` at `on-start-db` of `token-metadata`, its
@@ -969,7 +980,7 @@ export default defineConfig({
 
 - **A.1 The declaration's fields.** Required: `id`, `version`, `side`, `requires` (at least one item), `provides`,
   `startsMidChain`, `configSchema`, `migrations`, `points`. Optional: `needsLockstep` (§14), `developmentOnly` (needs
-  the core entry's `developmentOptIn`), `requiresResync` (§16). Ids and item names are lowercase words joined by
+  the core entry's `developmentOptIn`), `requiresResync` (§16), `latestStarts` (§11). Ids and item names are lowercase words joined by
   hyphens, at most 40 bytes; a user module's id may not be `core` or start with `core-` or `on-`.
 - **A.2 Codes a module author meets.**
   - Startup, the declaration: `invalid-declaration`, `unknown-point`, `field-no-kind`, `reserved-prefix`,

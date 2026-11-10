@@ -1884,6 +1884,13 @@ class Process implements ProcessHandle {
       const resolved = this.#resolve(loaded);
       // `/status` and `/config` show the validated configuration from now on, a refusal of this step's included.
       this.#admin.validated(resolved.checked, resolved.core);
+      if (resolved.lowered !== null) {
+        const { from, to, module, network } = resolved.lowered;
+        this.#log(
+          `the database starts at ${to}, not ${from}: ${module} starts a new database on ${network} no later than ${to} ` +
+            "(its latestStarts), so the entries starting with the database start there",
+        );
+      }
       this.#refuseObjectTasks(resolved);
       // The network plan: a request at odds with the written addresses refuses here, before anything opens.
       const planned = planNetwork(resolved, input.network, input.networkRules);

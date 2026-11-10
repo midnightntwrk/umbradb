@@ -13,6 +13,10 @@ adheres to [Semantic Versioning](https://semver.org/).
   tables, and refuses a start above its database's first height with `TokenMetadataStartAfterDatabase` as the cause;
   `token-metadata-api` (`TOKEN_METADATA_API`) serves the `/v1` API of `docs/token-metadata-api.md` over them. The
   exported surface is 69 names, 31 values and 38 types.
+- A module declaration's optional `latestStarts` (`{ [network]: height }`): a new database whose start would be above
+  an enabled module's height on its network starts there, with the entries starting with it; the process logs the
+  move and `umbradb config check` notes it. `token-metadata` declares each official network's first block with
+  contract logs, so every new database holds every MIP-0018 event.
 
 ### Changed
 
