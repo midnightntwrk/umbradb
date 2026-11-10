@@ -6,21 +6,13 @@
  * The codec checks UTF-8 only for values; its own rejections are returned unchanged.
  *
  * Every UmbraDB path classifies through this function — the scan, the apply path and its recompute, the pure state
- * module and both vector adapters — never through the codec's `classifyEvent` directly
- * ( checks the call sites).
+ * module and both vector adapters — never through the codec's `classifyEvent` directly.
  */
-import { type Classification, classifyEvent, type ObservedMisc } from "./codec/index.js";
-
-const strictUtf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+import { type Classification, classifyEvent, decodeUtf8, type ObservedMisc } from "./codec/index.js";
 
 /** Whether `bytes` is well-formed UTF-8 (no overlong forms, surrogates, code points above U+10FFFF or truncation). */
 export function isUtf8(bytes: Uint8Array): boolean {
-  try {
-    strictUtf8.decode(bytes);
-    return true;
-  } catch {
-    return false;
-  }
+  return decodeUtf8(bytes) !== undefined;
 }
 
 /** Classifies one observed event: the codec's result, with an accepted event rejected when a key is not UTF-8. */

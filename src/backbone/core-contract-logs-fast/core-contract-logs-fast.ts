@@ -109,9 +109,9 @@ export function fastLogsFrom(
       const position = { segment: site.segment, fallible: site.fallible, call: site.call, op: site.op };
       if (outcome === "partial" && site.fallible) {
         unresolved.push({ ...where, reason: "partial-transaction", ...position });
-      } else if (literal === undefined) {
-        unresolved.push({ ...where, reason: (site.read as { readonly unsure: UnresolvedLogSite["reason"] }).unsure, ...position });
-      } else {
+      } else if ("unsure" in site.read) {
+        unresolved.push({ ...where, reason: site.read.unsure, ...position });
+      } else if (literal !== undefined) {
         logs.push({ ...where, logicalSegment: LOGICAL_SEGMENT, version: literal.version, eventType: literal.eventType, data: literal.data });
       }
     }

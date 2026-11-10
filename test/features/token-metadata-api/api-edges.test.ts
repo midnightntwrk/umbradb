@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { encodeCursor, registerMetadataApi } from "../../../src/features/token-metadata-api/api.js";
-import { servedIdentities } from "../../../src/features/token-metadata-api/read.js";
+import { servedIdentities } from "../token-metadata/served-state.js";
 import { commonRecords } from "../../../src/features/token-metadata/codec/index.js";
 import type { ReadHandle } from "../../../src/db/api.js";
 import type { ApiRegistry } from "../../../src/modules/declaration.js";
@@ -13,7 +13,7 @@ import { blockLogs, contract, domain, eventData, readStopped, runTo } from "../t
  * the codec never accepts; it shows the text view following the bytes), two
  * symbol groups on one contract — answered through the handlers; cursors of the right endpoint but the wrong shape or
  * filter, and one that is no JSON; a read that fails (not the handlers' own error) passed on to the module API; and
- * `read.ts`'s field without a `usable` answer.
+ * the served field (`fieldOf`) without a `usable` answer.
  */
 
 const S = 5_000;
@@ -113,6 +113,9 @@ describe.each(PROCESS_BACKENDS)("the API's edges on $name", (backend: ProcessBac
       `/v1/events?tx=${"77".repeat(32)}&cursor=${first.json.nextCursor}`,
       `/v1/events?contract=${hex(A)}&cursor=${encodeCursor({ e: "events", f: [hex(A), null], k: [1, 2] })}`,
       `/v1/events?contract=${hex(A)}&cursor=abc`,
+      // A transaction or event index above the integer columns is no position, so no cursor (not a 500).
+      `/v1/events?contract=${hex(A)}&cursor=${encodeCursor({ e: "events", f: [hex(A), null], k: [1, 2 ** 31, 0] })}`,
+      `/v1/events?contract=${hex(A)}&cursor=${encodeCursor({ e: "events", f: [hex(A), null], k: [1, 0, 2 ** 31] })}`,
     ];
     for (const path of refused) expect([path, (await answer(db, "/v1/events", path)).status]).toEqual([path, 400]);
     const tokens = `/v1/contracts/${hex(A)}/tokens?cursor=${encodeCursor({ e: "contract-tokens", c: hex(A), k: ["zz", 1] })}`;
@@ -131,7 +134,7 @@ describe.each(PROCESS_BACKENDS)("the API's edges on $name", (backend: ProcessBac
   });
 });
 
-describe("read.ts's served fields", () => {
+describe("the served fields (fieldOf)", () => {
   it("serve a field with no usable answer without one, and a type-2 value with its integer", async () => {
     const row = (key: string, valType: number, usable: boolean | null, uint: string | null) => ({
       contract_address: new Uint8Array(32),

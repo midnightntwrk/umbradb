@@ -9,7 +9,7 @@
  * each bounded (the common keys, the first 100 reasons, positions and members, one
  * keyset page of fields).
  *
- * **What the module API adds.** Each answer is one read at one committed height (DB-2), and carries the core's `X-Umbra-View`, `X-Umbra-Height` and `X-Umbra-Hash` (`answerChainData`).
+ * **What the module API adds.** Each answer is one read at one committed height, and carries the core's `X-Umbra-View`, `X-Umbra-Height` and `X-Umbra-Hash` (`answerChainData`).
  * The module API answers what no route of the module reaches: an unknown path (404 `not-found`), a method other than
  * GET (405 `method-not-allowed`), HEAD included, and a failure (500 `internal-error`).
  *
@@ -40,7 +40,7 @@ import {
   symbolGroups,
   tokenMark,
 } from "../token-metadata/state.js";
-import { fromHex, toHex } from "../token-metadata/codec/index.js";
+import { decodeUtf8, fromHex, toHex } from "../token-metadata/codec/index.js";
 
 export const MAX_LIMIT = 500;
 export const DEFAULT_LIMIT = 100;
@@ -183,6 +183,8 @@ function queryParams(params: Record<string, string>, path: readonly string[], al
 
 const isHex32 = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f]{64}$/.test(v);
 const isUint = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+/** An unsigned value of an `integer` column (`tx_index`, `event_index`): one above it is no position, so no cursor. */
+const isUint4 = (v: unknown): v is number => isUint(v) && v <= 0x7fffffff;
 const isKind = (v: unknown): v is number => v === 1 || v === 2 || v === 3;
 
 type TokensCursor = { e: "tokens"; s: 0; k: [string] } | { e: "tokens"; s: 1; k: [string, string, number] };
@@ -223,7 +225,7 @@ function parseEventsCursor(v: unknown, filter: EventFilter): EventsCursor | unde
   const c = v as { e?: unknown; f?: unknown; k?: unknown };
   if (c.e !== "events" || !Array.isArray(c.f) || !Array.isArray(c.k) || Object.keys(c).length !== 3) return undefined;
   if (c.f.length !== 2 || c.f[0] !== (filter.contract ?? null) || c.f[1] !== (filter.tx ?? null)) return undefined;
-  return c.k.length === 3 && c.k.every(isUint) ? (c as EventsCursor) : undefined;
+  return c.k.length === 3 && isUint(c.k[0]) && isUint4(c.k[1]) && isUint4(c.k[2]) ? (c as EventsCursor) : undefined;
 }
 
 // ── JSON shapes ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -293,15 +295,10 @@ export interface Page<T> { items: T[]; nextCursor: string | null }
 
 const VAL_TYPE_NAMES = ["bytes", "utf8", "uint", "json", "uri"] as const;
 const KIND_NAMES: Record<number, KindName> = { 1: "shielded-utxo", 2: "unshielded-utxo", 3: "contract-token" };
-const strictUtf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
 /** Strict UTF-8 text of `bytes`, or `null` when they are not valid UTF-8 (then only the hex is served). */
 export function utf8OrNull(bytes: Uint8Array): string | null {
-  try {
-    return strictUtf8.decode(bytes);
-  } catch {
-    return null;
-  }
+  return decodeUtf8(bytes) ?? null;
 }
 
 const bytesJson = (b: Uint8Array): BytesJson => ({ hex: toHex(b), utf8: utf8OrNull(b) });
@@ -375,7 +372,7 @@ const FIELD_COLUMNS = `f.contract_address, f.domain_sep, f.kind::int AS kind, f.
   f.set_event::int AS set_event, f.set_record::int AS set_record`;
 
 /** A field row as served: its value cut to its served length. */
-function fieldOf(r: Record<string, unknown>): Field {
+export function fieldOf(r: Record<string, unknown>): Field {
   const key = r.key as Uint8Array;
   const valType = num(r.val_type);
   const f: Field = {
@@ -426,38 +423,56 @@ async function identityCommons(read: ReadHandle, keys: readonly IdKey[]): Promis
   return out;
 }
 
-/** A contract's mark inputs: rejected events (count, first reasons) and unresolved sites (count, first positions). */
-async function markSummary(read: ReadHandle, contract: string): Promise<MarkSummary> {
-  const address = bytes(contract);
-  const [counts] = await read.query(
-    `SELECT count(*) FILTER (WHERE classification = 'reject')::int AS rejected,
-            count(*) FILTER (WHERE classification = 'unresolved')::int AS unresolved
-     FROM ${SCHEMA}.events WHERE contract_address = $1 AND classification IN ('reject', 'unresolved')`,
-    [address],
+/**
+ * The mark inputs of each of `contracts`: rejected events (count, first reasons) and unresolved sites (count, first
+ * positions). At most three statements, however many contracts: the counts, then the first reasons and the first
+ * positions of the contracts that have any, each contract's through a `LATERAL` keyset read.
+ */
+async function markSummaries(read: ReadHandle, contracts: readonly string[]): Promise<Map<string, MarkSummary>> {
+  const unique = [...new Set(contracts)];
+  const out = new Map<string, { count: number; reasons: string[]; unresolved: { count: number; positions: EventPositionJson[] } }>(
+    unique.map((c) => [c, { count: 0, reasons: [], unresolved: { count: 0, positions: [] } }]),
   );
-  const rejected = num(counts?.rejected ?? 0);
-  const unresolved = num(counts?.unresolved ?? 0);
-  const reasons =
-    rejected === 0
-      ? []
-      : await read.query(
-          `SELECT reason FROM ${SCHEMA}.events WHERE contract_address = $1 AND classification = 'reject'
-           ORDER BY height, tx_index, event_index LIMIT $2`,
-          [address, MAX_MARK_REASONS],
-        );
-  const positions =
-    unresolved === 0
-      ? []
-      : await read.query(
-          `SELECT height::text AS height, tx_index::int AS tx_index, event_index::int AS event_index FROM ${SCHEMA}.events
-           WHERE contract_address = $1 AND classification = 'unresolved' ORDER BY height, tx_index, event_index LIMIT $2`,
-          [address, MAX_MARK_UNRESOLVED],
-        );
-  return {
-    count: rejected,
-    reasons: reasons.map((r) => r.reason as string),
-    unresolved: { count: unresolved, positions: positions.map((r) => ({ height: num(r.height), txIndex: num(r.tx_index), eventIndex: num(r.event_index) })) },
-  };
+  if (unique.length === 0) return out;
+  const counts = await read.query(
+    `SELECT c.address,
+       (SELECT count(*) FROM ${SCHEMA}.events e WHERE e.contract_address = c.address AND e.classification = 'reject')::int AS rejected,
+       (SELECT count(*) FROM ${SCHEMA}.events e WHERE e.contract_address = c.address AND e.classification = 'unresolved')::int AS unresolved
+     FROM unnest($1::bytea[]) AS c(address)`,
+    [unique.map(bytes)],
+  );
+  const rejecting: Uint8Array[] = [];
+  const unresolving: Uint8Array[] = [];
+  for (const r of counts) {
+    const summary = out.get(toHex(r.address as Uint8Array))!;
+    summary.count = num(r.rejected);
+    summary.unresolved.count = num(r.unresolved);
+    if (summary.count > 0) rejecting.push(r.address as Uint8Array);
+    if (summary.unresolved.count > 0) unresolving.push(r.address as Uint8Array);
+  }
+  const firstOf = (classification: "reject" | "unresolved", columns: string) =>
+    `SELECT c.address, ${columns} FROM unnest($1::bytea[]) AS c(address) CROSS JOIN LATERAL (
+       SELECT reason, height, tx_index, event_index FROM ${SCHEMA}.events e
+       WHERE e.contract_address = c.address AND e.classification = '${classification}'
+       ORDER BY height, tx_index, event_index LIMIT $2) e
+     ORDER BY c.address, e.height, e.tx_index, e.event_index`;
+  if (rejecting.length > 0) {
+    for (const r of await read.query(firstOf("reject", "e.reason"), [rejecting, MAX_MARK_REASONS])) {
+      out.get(toHex(r.address as Uint8Array))!.reasons.push(r.reason as string);
+    }
+  }
+  if (unresolving.length > 0) {
+    const columns = "e.height::text AS height, e.tx_index::int AS tx_index, e.event_index::int AS event_index";
+    for (const r of await read.query(firstOf("unresolved", columns), [unresolving, MAX_MARK_UNRESOLVED])) {
+      out.get(toHex(r.address as Uint8Array))!.unresolved.positions.push({ height: num(r.height), txIndex: num(r.tx_index), eventIndex: num(r.event_index) });
+    }
+  }
+  return out;
+}
+
+/** One contract's mark inputs ({@link markSummaries}). */
+async function markSummary(read: ReadHandle, contract: string): Promise<MarkSummary> {
+  return (await markSummaries(read, [contract])).get(contract)!;
 }
 
 /** The mark of an identity from its common fields and its contract's mark inputs (`state.ts` `tokenMark`). */
@@ -609,10 +624,10 @@ async function chain(read: ReadHandle): Promise<{ network: string; genesisHash: 
 
 interface Ctx { read: ReadHandle; network: string; start: number | null }
 
-async function identitySummaries(ctx: Ctx, keys: readonly IdKey[]): Promise<TokenSummaryJson[]> {
-  const commons = await identityCommons(ctx.read, keys);
-  const marks = new Map<string, MarkSummary>();
-  for (const c of new Set(keys.map((k) => k.contractAddress))) marks.set(c, await markSummary(ctx.read, c));
+/** The summaries of `keys`; `commons` are their {@link identityCommons} when the caller has read them already. */
+async function identitySummaries(ctx: Ctx, keys: readonly IdKey[], read?: Map<string, IdentityCommon>): Promise<TokenSummaryJson[]> {
+  const commons = read ?? (await identityCommons(ctx.read, keys));
+  const marks = await markSummaries(ctx.read, keys.map((k) => k.contractAddress));
   return keys.map((k) => {
     const identity = commons.get(keyOf(k))!;
     const common = commonJson(identity.fields);
@@ -778,7 +793,7 @@ async function contractTokens(ctx: Ctx, contract: string, limit: number, cursor:
   return {
     contractAddress: contract,
     groups: [...groups.values()].sort((a, b) => (a.symbol.hex < b.symbol.hex ? -1 : a.symbol.hex > b.symbol.hex ? 1 : 0)),
-    items: await identitySummaries(ctx, page),
+    items: await identitySummaries(ctx, page, commons),
     nextCursor:
       keys.length > limit && last !== undefined
         ? encodeCursor({ e: "contract-tokens", c: contract, k: [last.domainSep, last.kind] } satisfies ContractTokensCursor)

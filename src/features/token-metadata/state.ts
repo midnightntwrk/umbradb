@@ -1,7 +1,7 @@
 /**
  * UmbraDB's MIP-0018 metadata state rules — one pure module (no database, no I/O), used by the pure vector adapter
- * and, through `recordEffects` (with `fieldUsable`), `symbolGroups`, `displayAmount` and `tokenMark`, by the database
- * write path (`apply.ts`) and its reads (`read.ts`) — so both paths share every rule.
+ * and, through `fieldUsable` and `isDefinedKey`, by the database write path (`apply.ts`), and through `lengthLimited`,
+ * `symbolGroups` and `tokenMark` by its reads (`../token-metadata-api/`) — so both paths share every rule.
  *
  * Authority: MIP-0018 as merged from PR #372 (per-key tombstones), sections "Keys", "Applying records", "Common fields" and
  * "Symbol grouping": only the latest value per key, no history; groups of two or more members; a Null record deletes
@@ -20,7 +20,8 @@
  * - Reorganization (S4): every classified event is retained per network; `rollbackTo` drops the events above a block
  *   and recomputes that network's state from the retained events (UmbraDB itself follows finalized blocks only).
  * - Lengths: a `name` keeps its first 64 and a `symbol` its first 12 characters (grapheme clusters, UAX #29, Node's
- *   `Intl.Segmenter`), cut before storing; an over-length value stays usable.
+ *   `Intl.Segmenter`); an over-length value stays usable. `MetadataState` cuts before it keeps a value; the database
+ *   path stores the value whole and cuts it where it is served, so both serve the same value.
  * - Common fields: `name`/`symbol` usable when a non-empty UTF-8 string, `decimals` when an unsigned integer,
  *   `standards` when a well-formed list, `image` when a URI (type 4), `image_sha256` when exactly 32 bytes (type 0); an
  *   unusable field shows no value and never falls back; no defaults; the image keys never affect a mark.
@@ -30,6 +31,7 @@
 import {
   type Classification,
   type DecodedRecord,
+  decodeUtf8,
   fromHex,
   type Header,
   toHex,
@@ -40,7 +42,6 @@ import { classifyMip0018Event } from "./classify.js";
 // ── Common fields ────────────────────────────────────────────────────────────────────────────────────────────────
 
 const enc = new TextEncoder();
-const strictUtf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
 /** The common keys a token list row and a mark read (`name`, `symbol`, `decimals`, `standards`), as hex. */
 export const COMMON_KEY_HEX = {
@@ -114,7 +115,7 @@ export function parseStandards(value: Uint8Array): string[] | undefined {
     const b = i < value.length ? (value[i] as number) : 0x20;
     if (b === 0x20) {
       if (i === start) return undefined; // an empty identifier: leading, trailing or double space
-      const id = decodeText(value.subarray(start, i));
+      const id = decodeUtf8(value.subarray(start, i));
       if (id === undefined) return undefined;
       ids.push(id);
       start = i + 1;
@@ -123,14 +124,6 @@ export function parseStandards(value: Uint8Array): string[] | undefined {
     }
   }
   return ids;
-}
-
-function decodeText(bytes: Uint8Array): string | undefined {
-  try {
-    return strictUtf8.decode(bytes);
-  } catch {
-    return undefined;
-  }
 }
 
 /**
@@ -216,7 +209,7 @@ export function firstCharacters(text: string, max: number): string {
 export function lengthLimited(keyHex: string, valType: number, value: Uint8Array): Uint8Array {
   const max = MAX_CHARACTERS[keyHex];
   if (max === undefined || valType !== ValType.Utf8) return value;
-  const text = decodeText(value);
+  const text = decodeUtf8(value);
   if (text === undefined) return value; // not reached for an accepted event: type-1 values are valid UTF-8
   const kept = firstCharacters(text, max);
   return kept.length === text.length ? value : enc.encode(kept);
@@ -313,7 +306,7 @@ const byString = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
  * In-memory MIP-0018 metadata state over any number of networks. Pure: no database, no clock, no I/O. The Postgres
- * apply path keeps the same rules by applying `recordEffects` to rows, and is tested against this class.
+ * apply path (`apply.ts`) keeps the same rules on rows, and is tested against this class.
  */
 export class MetadataState {
   /** Every stored field per identity — defined and undefined keys alike (an identity is kept while it stores any). */
