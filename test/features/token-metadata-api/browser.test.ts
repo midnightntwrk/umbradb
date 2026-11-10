@@ -9,6 +9,7 @@ import { TOKEN_METADATA } from "../../../src/features/token-metadata/token-metad
 import type { ModuleDeclaration } from "../../../src/modules/declaration.js";
 import { TapeNode, type TapeRecord } from "../../../tools/tape/index.js";
 import { FAST_CORE } from "../../backbone/contract-data-checks.js";
+import { genesisRecords } from "../token-metadata/harness.js";
 import { committed, ingest } from "../../backbone/ingest-harness.js";
 import { BROWSER_TEST_TIMEOUT_MS, call, eventWhen, pageUrl, statusWhen, tabReport } from "../../browser/browser-harness.js";
 import { type ChromeBrowser, chromeVersion, launchChrome } from "../../browser/chrome.js";
@@ -33,18 +34,6 @@ const STORAGE = "token-metadata";
 const CONFIGURATION = fileURLToPath(new URL("./fixtures/browser-configuration.ts", import.meta.url));
 const PATHS = ["/v1/status", "/v1/tokens?limit=10"];
 
-/** The genesis hash's and header's records of preprod, as its node answered them. */
-function genesisRecords(): TapeRecord[] {
-  const fixture = JSON.parse(readFileSync(new URL("../../ledger/fixtures/networks/preprod.json", import.meta.url), "utf8")) as {
-    genesis: { hash: string };
-    calls: TapeRecord[];
-  };
-  const wanted = (record: TapeRecord) =>
-    "method" in record &&
-    ((record.method === "chain_getBlockHash" && JSON.stringify(record.params) === "[0]") ||
-      (record.method === "chain_getHeader" && JSON.stringify(record.params) === JSON.stringify([fixture.genesis.hash])));
-  return fixture.calls.filter(wanted);
-}
 const PRESENT = findTape(TAPE).found;
 
 (PRESENT ? describe : describe.skip)("token-metadata in the browser build", () => {
@@ -57,9 +46,7 @@ const PRESENT = findTape(TAPE).found;
     expect(chromeVersion()).toMatch(/Chrom/);
     const found = findTape(TAPE);
     if (!found.found) throw new Error(found.reason);
-    const genesis = genesisRecords();
-    expect(genesis).toHaveLength(2);
-    records = [...genesis, ...found.read().records];
+    records = [...genesisRecords("preprod"), ...found.read().records];
     const outdir = mkdtempSync(join(tmpdir(), "umbradb-browser-token-metadata-"));
     await buildBrowser({ outdir, configuration: CONFIGURATION });
     server = await servePage(outdir);
