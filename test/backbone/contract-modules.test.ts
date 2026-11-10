@@ -1,13 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
-import { type ContractLog, contractLogsItemOf, writeLogRows } from "../../src/backbone/contract-logs/contract-logs.js";
-import { CONTRACT_LOGS_MIGRATIONS, LOG_EVENT_TYPES } from "../../src/backbone/contract-logs/sql.js";
+import {
+  type ContractLog,
+  contractLogsBlock,
+  contractLogsItemOf,
+  unresolvedLogSitesOf,
+  writeLogRows,
+  writeUnresolvedRows,
+} from "../../src/backbone/contract-logs/contract-logs.js";
+import { CONTRACT_LOGS_MIGRATIONS, LOG_EVENT_TYPES, UNRESOLVED_REASONS } from "../../src/backbone/contract-logs/sql.js";
 import type { BlockTransaction } from "../../src/backbone/core-block-parsed/core-block-parsed.js";
 import {
   CONTRACT_LOG_SITES_TASK,
   CORE_CONTRACT_LOGS_FAST_ID,
   fastLogsFrom,
   fastLogsOf,
-  type UnsureLog,
 } from "../../src/backbone/core-contract-logs-fast/core-contract-logs-fast.js";
 import { mainThreadLogReader as inThreadLogReader } from "./main-thread-log-reader.js";
 import { literalAt, type LogSite, logSitesOf } from "../../src/backbone/core-contract-logs-fast/transcripts.js";
@@ -169,8 +175,8 @@ describe("core-contract-logs-fast's reading of a transaction's transcripts", () 
       [2, true, 0, 4],
     ]);
     expect(sites[2]).toEqual([]);
-    const rows = fastLogsFrom(2n, transactions, ["success", "success", "success"], sites, unsureThrows);
-    expect(rows).toEqual(asRows(output.logs));
+    const rows = fastLogsFrom(2n, transactions, ["success", "success", "success"], sites);
+    expect(rows).toEqual({ logs: asRows(output.logs), unresolved: [] });
     for (const site of sites.flat()) expect(structuredClone(site)).toEqual(site);
   });
 
@@ -240,7 +246,7 @@ describe("core-contract-logs-fast's reading of a transaction's transcripts", () 
       expect(sites[1], ledger).toEqual([]);
       const { output } = adapter.apply(deployed, input);
       expect(output.logs, ledger).toHaveLength(2);
-      expect(fastLogsFrom(2n, transactions, ["success", "success"], sites, unsureThrows), ledger).toEqual(asRows(output.logs));
+      expect(fastLogsFrom(2n, transactions, ["success", "success"], sites), ledger).toEqual({ logs: asRows(output.logs), unresolved: [] });
     }
   });
 });
@@ -268,11 +274,13 @@ const tx = (index: number): BlockTransaction => ({
   extrinsicIndex: index + 1,
   eventIndex: index,
 });
-const unsureThrows = (unsure: UnsureLog): never => {
-  throw new Error(`unsure ${unsure.reason}`);
-};
+/** A `block` item's logs and unresolved sites as `[transaction, index, data byte]` and `[transaction, index, reason, op]`. */
+const shapeOf = ({ logs, unresolved }: ReturnType<typeof fastLogsFrom>) => ({
+  logs: logs.map((row) => [row.transaction, row.index, row.data[0]]),
+  unresolved: unresolved.map((u) => [u.transaction, u.index, u.reason, u.op]),
+});
 
-describe("core-contract-logs-fast's rows and halts per outcome", () => {
+describe("core-contract-logs-fast's rows and unresolved sites per outcome", () => {
   it("stores a successful transaction's literal logs numbered in the block, skips oversized ones, and nothing of a failed transaction", () => {
     const sites = [
       [site({}, { literal: item(1) }), site({ op: 3 }, { literal: null }), site({ fallible: true, segment: 2 }, { literal: item(2) })],
@@ -280,36 +288,87 @@ describe("core-contract-logs-fast's rows and halts per outcome", () => {
       [site({}, { literal: item(4) })],
     ];
     const outcomes: ChainOutcome[] = ["success", "failure", "success"];
-    const rows = fastLogsFrom(5n, [tx(0), tx(1), tx(2)], outcomes, sites, unsureThrows);
+    const { logs: rows, unresolved } = fastLogsFrom(5n, [tx(0), tx(1), tx(2)], outcomes, sites);
     expect(rows.map((row) => [row.transaction, row.index, row.logicalSegment, row.data[0]])).toEqual([
       [0, 0, 0, 1],
       [0, 1, 0, 2],
       [2, 2, 0, 4],
     ]);
     expect(rows[0]).toEqual({ transaction: 0, index: 0, address: ADDRESS, entryPoint: utf8("emit"), logicalSegment: 0, ...item(1) });
+    // The failed transaction's unsure site is no unresolved site: the ledger never ran it.
+    expect(unresolved).toEqual([]);
   });
 
-  it("halts on a log it cannot read exactly: one not a literal, one behind a branch, and any log of a partial success; a partial success with no log halts nothing", () => {
-    const seen: UnsureLog[] = [];
-    const record = (unsure: UnsureLog): void => {
-      seen.push(unsure);
-    };
-    const rows = fastLogsFrom(
+  it("records a site it cannot read exactly as unresolved, with its reason and place, and numbers it with the logs: one not a literal, one behind a branch", () => {
+    const { logs, unresolved } = fastLogsFrom(
       7n,
-      [tx(0), tx(1), tx(2), tx(3)],
-      ["success", "success", "partial", "partial"],
-      [[site({}, { unsure: "not-a-literal" })], [site({ op: 4 }, { unsure: "conditional" })], [site({}, { literal: item(1) })], []],
-      record,
+      [tx(0), tx(1), tx(2)],
+      ["success", "success", "success"],
+      [
+        [site({}, { literal: item(1) }), site({ op: 3, call: 2 }, { unsure: "not-a-literal" }), site({ op: 5 }, { literal: item(2) })],
+        [site({ op: 4, segment: 3, fallible: true }, { unsure: "conditional" })],
+        [site({}, { literal: item(3) })],
+      ],
     );
-    expect(rows).toEqual([]);
-    expect(seen.map((u) => [u.height, u.transaction.index, u.reason, u.site.op])).toEqual([
-      [7n, 0, "not-a-literal", 1],
-      [7n, 1, "conditional", 4],
-      [7n, 2, "partial-transaction", 1],
-    ]);
-    expect(() => fastLogsFrom(7n, [tx(0)], ["partial"], [[site({}, { literal: item(1) })]], unsureThrows)).toThrow(/unsure partial-transaction/);
-    expect(() => fastLogsFrom(7n, [tx(0)], ["success"], [], unsureThrows)).toThrow(/1 transactions and 0 readings/);
-    expect(() => fastLogsFrom(7n, [tx(0)], [], [[]], unsureThrows)).toThrow(/0 outcomes for 1 transactions/);
+    expect(shapeOf({ logs, unresolved })).toEqual({
+      logs: [
+        [0, 0, 1],
+        [0, 2, 2],
+        [2, 4, 3],
+      ],
+      unresolved: [
+        [0, 1, "not-a-literal", 3],
+        [1, 3, "conditional", 4],
+      ],
+    });
+    expect(unresolved[0]).toEqual({
+      transaction: 0, index: 1, address: ADDRESS, entryPoint: utf8("emit"), reason: "not-a-literal", segment: 1, fallible: false, call: 2, op: 3,
+    });
+    expect(unresolved[1]).toMatchObject({ segment: 3, fallible: true, call: 0 });
+  });
+
+  it("reads a partial success's guaranteed sites as a success's and records its fallible ones unresolved (partial-transaction); an oversized literal takes no number", () => {
+    const { logs, unresolved } = fastLogsFrom(
+      8n,
+      [tx(0), tx(1)],
+      ["partial", "success"],
+      [
+        [
+          site({ op: 1 }, { literal: item(1) }),
+          site({ op: 3 }, { unsure: "not-a-literal" }),
+          site({ fallible: true, op: 2 }, { literal: item(2) }),
+          site({ fallible: true, op: 4 }, { unsure: "conditional" }),
+          site({ fallible: true, op: 6 }, { literal: null }),
+        ],
+        [site({}, { literal: item(3) })],
+      ],
+    );
+    expect(shapeOf({ logs, unresolved })).toEqual({
+      logs: [
+        [0, 0, 1],
+        [1, 4, 3],
+      ],
+      unresolved: [
+        [0, 1, "not-a-literal", 3],
+        [0, 2, "partial-transaction", 2],
+        [0, 3, "partial-transaction", 4],
+      ],
+    });
+    // A partial success without a log gives nothing.
+    expect(fastLogsFrom(8n, [tx(0)], ["partial"], [[]])).toEqual({ logs: [], unresolved: [] });
+  });
+
+  it("refuses readings or outcomes that are not one per transaction", () => {
+    expect(() => fastLogsFrom(7n, [tx(0)], ["success"], [])).toThrow(/1 transactions and 0 readings/);
+    expect(() => fastLogsFrom(7n, [tx(0)], [], [[]])).toThrow(/0 outcomes for 1 transactions/);
+  });
+
+  it("negative control: numbering the logs alone, as before unresolved sites, moves a later log's index, which the numbering check names", () => {
+    const sites = [[site({}, { unsure: "not-a-literal" }), site({ op: 3 }, { literal: item(1) })]];
+    const real = fastLogsFrom(9n, [tx(0)], ["success"], sites);
+    const logsAlone = { ...real, logs: real.logs.map((log, k) => ({ ...log, index: k })) };
+    expect(real.logs.map((log) => log.index)).toEqual([1]);
+    expect(logsAlone.logs.map((log) => log.index)).not.toEqual(real.logs.map((log) => log.index));
   });
 });
 
@@ -332,7 +391,7 @@ describe("core-contract-logs-fast's reading of a block", () => {
         return transactions.map((bytes) => [site({}, { literal: item(bytes[0]! + 10) })]);
       },
     };
-    const rows = await fastLogsOf(b, { reader });
+    const { logs: rows } = await fastLogsOf(b, { reader });
     expect(asked).toEqual([[Uint8Array.of(1), Uint8Array.of(3)]]);
     expect(rows.map((row) => [row.transaction, row.index, row.data[0]])).toEqual([
       [1, 0, 11],
@@ -340,7 +399,12 @@ describe("core-contract-logs-fast's reading of a block", () => {
     ]);
     // A failed transaction's sites give no row: its outcome is the event's.
     const failed = { ...b, items: new Map(b.items).set("chain-events", [event(0, "TxApplied"), { index: 1, pallet: "System", name: "ExtrinsicFailed", fields: {} }, event(2, "TxApplied"), event(3, "TxApplied")]) } as BlockContext;
-    expect((await fastLogsOf(failed, { reader })).map((row) => row.transaction)).toEqual([3]);
+    expect((await fastLogsOf(failed, { reader })).logs.map((row) => row.transaction)).toEqual([3]);
+    // The rule a negative control replaces is the one called, with the block's height, transactions, outcomes and sites.
+    const seen: unknown[] = [];
+    const rule = (...args: Parameters<typeof fastLogsFrom>) => (seen.push([args[0], args[1].length, args[2], args[3].length]), { logs: [], unresolved: [] });
+    expect(await fastLogsOf(b, { reader, rule })).toEqual({ logs: [], unresolved: [] });
+    expect(seen).toEqual([[9n, 4, ["success", "success", "success", "success"], 4]]);
     const short = { async read() { return []; } };
     await expect(fastLogsOf(b, { reader: short })).rejects.toThrow(/read 0 of 2 transactions/);
   });
@@ -383,6 +447,34 @@ describe("core-contract-states' rows", () => {
     expect(statements).toHaveLength(2);
     expect(statements[0]![1]).toEqual([4n, [ADDRESS], [ADDRESS], [ADDRESS]]);
     expect(statements[1]![1]).toEqual([4n, [2n], [0n], [ADDRESS], [utf8("emit")], [0], [1n], ["Misc"], [Uint8Array.of(1)]]);
+    await writeUnresolvedRows(w, 4n, []);
+    expect(statements).toHaveLength(2);
+    await writeUnresolvedRows(w, 4n, [
+      { transaction: 3, index: 1, address: ADDRESS, entryPoint: utf8("emit"), reason: "conditional", segment: 2, fallible: true, call: 1, op: 4 },
+    ]);
+    expect(statements).toHaveLength(3);
+    expect(statements[2]![0]).toMatch(/^INSERT INTO contract_logs\.unresolved /);
+    expect(statements[2]![1]).toEqual([4n, [3n], [1n], [ADDRESS], [utf8("emit")], ["conditional"], [2], [true], [1n], [4n]]);
+  });
+});
+
+describe("the contract-logs block item", () => {
+  const at = (item: unknown) => ({ height: 3n, items: new Map([["contract-logs", item]]) }) as unknown as BlockContext;
+  const log: ContractLog = { transaction: 0, index: 1, address: ADDRESS, entryPoint: utf8("emit"), logicalSegment: 0, ...item(5) };
+  const unresolvedSite = { transaction: 0, index: 0, address: ADDRESS, entryPoint: utf8("emit"), reason: "not-a-literal" as const, segment: 1, fallible: false, call: 0, op: 3 };
+
+  it("holds a block's logs and its unresolved sites, frozen through; -full's has no unresolved sites", () => {
+    const item = contractLogsBlock([log], [unresolvedSite]);
+    expect(contractLogsItemOf(at(item), "reader")).toEqual([log]);
+    expect(unresolvedLogSitesOf(at(item), "reader")).toEqual([unresolvedSite]);
+    expect(Object.isFrozen(item) && Object.isFrozen(item.logs) && Object.isFrozen(item.logs[0]) && Object.isFrozen(item.unresolved[0])).toBe(true);
+    expect(contractLogsBlock([log]).unresolved).toEqual([]);
+  });
+
+  it("a block without the item, or with a bare array of logs (the item before unresolved sites), fails naming the module", () => {
+    expect(() => contractLogsItemOf(at(undefined), "reader")).toThrow(/no contract-logs item reader can read/);
+    expect(() => unresolvedLogSitesOf(at(Object.freeze([log])), "reader")).toThrow(/no contract-logs item reader can read/);
+    expect(() => contractLogsItemOf(at({ logs: [log] }), "reader")).toThrow(/no contract-logs item/);
   });
 });
 
@@ -391,10 +483,15 @@ describe("the contract tables", () => {
   const created = (sql: string): string[] =>
     (/\(\n([\s\S]*?)\n\)/.exec(sql)?.[1] as string).split("\n").map((l) => /^\s*([a-z_]+) [a-z]/.exec(l)?.[1]).filter((c): c is string => c !== undefined && c !== "primary");
 
-  it("contract_logs.logs and core_contract_states.states have exactly their columns, and the event types are the eleven", () => {
+  it("contract_logs.logs, contract_logs.unresolved and core_contract_states.states have exactly their columns; the event types are the eleven, the reasons the three", () => {
+    expect(CONTRACT_LOGS_MIGRATIONS.map((migration) => migration.id)).toEqual(["001", "002"]);
     expect(created(CONTRACT_LOGS_MIGRATIONS[0]!.sql)).toEqual([
       "height", "tx_index", "log_index", "contract_address", "entry_point", "logical_segment", "log_version", "event_type", "data",
     ]);
+    expect(created(CONTRACT_LOGS_MIGRATIONS[1]!.sql)).toEqual([
+      "height", "tx_index", "log_index", "contract_address", "entry_point", "reason", "segment", "fallible", "call_index", "op_index",
+    ]);
+    expect(UNRESOLVED_REASONS).toEqual(["not-a-literal", "conditional", "partial-transaction"]);
     expect(created(CONTRACT_STATES_MIGRATIONS[0]!.sql)).toEqual(["contract_address", "height", "state_key", "zswap_state_key"]);
     expect(LOG_EVENT_TYPES).toEqual([
       "ShieldedSpend", "ShieldedReceive", "ShieldedMint", "ShieldedBurn",

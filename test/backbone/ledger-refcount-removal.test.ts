@@ -12,8 +12,9 @@ import type { ModuleDeclaration } from "../../src/modules/declaration.js";
  * - `src/backbone/core-ledger-state/sweep.ts` does not exist, and no file under `src/` names the sweep's step, its
  *   reset, its budget, its grey picker or its three tables ({@link SWEEP_NAMES}, as whole words);
  * - the `ledger-state` item's tables are exactly `nodes`, `root_counts`, `states`, `ref_counts`, `unreferenced`;
- * - every part UmbraDB declares, on either side, that has migrations has exactly one, `001`, and the parts that have
- *   none ({@link WITHOUT_MIGRATIONS}) still have none.
+ * - every part UmbraDB declares, on either side, that has migrations has exactly one, `001` — but the providers of the
+ *   shared item `contract-logs`, whose `002` adds the unresolved log sites' table ({@link LATER_MIGRATIONS}) — and the
+ *   parts that have none ({@link WITHOUT_MIGRATIONS}) still have none.
  */
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -31,6 +32,12 @@ const SWEEP_NAMES: readonly string[] = [
 
 /** The parts with no migration, on either side: the block source and the three admin parts. */
 const WITHOUT_MIGRATIONS: readonly string[] = ["core-block-fetch", "core-config", "core-health", "core-status"];
+
+/** The parts with migrations after `001`, and theirs: `contract-logs`' `002`, the unresolved log sites' table. */
+const LATER_MIGRATIONS: Readonly<Record<string, readonly string[]>> = {
+  "core-contract-logs-full": ["001", "002"],
+  "core-contract-logs-fast": ["001", "002"],
+};
 
 /** The files under `src/`, relative to the repository, with `/` separators. */
 function sourceFiles(): string[] {
@@ -86,7 +93,10 @@ describe("the runtime sweep removed", () => {
     }
     const without = [...parts].filter(([, ids]) => ids.length === 0).map(([id]) => id).sort();
     expect(without).toEqual(WITHOUT_MIGRATIONS);
-    const others = [...parts].filter(([, ids]) => ids.length > 0 && (ids.length !== 1 || ids[0] !== "001"));
+    const later = [...parts].filter(([id]) => id in LATER_MIGRATIONS);
+    expect(later.map(([id, ids]) => [id, ids])).toEqual(later.map(([id]) => [id, LATER_MIGRATIONS[id]]));
+    expect(later.length).toBeGreaterThan(0);
+    const others = [...parts].filter(([id, ids]) => !(id in LATER_MIGRATIONS) && ids.length > 0 && (ids.length !== 1 || ids[0] !== "001"));
     expect(others.map(([id, ids]) => `${id}: ${ids.join(", ")}`)).toEqual([]);
   });
 });

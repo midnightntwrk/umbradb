@@ -8,7 +8,6 @@ import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backend
 import { type FoundTape, tapeTest } from "../tape/real/real-tapes.js";
 import {
   a109Scenario,
-  a110HaltScenario,
   a110Range,
   bigCell,
   contractScenario,
@@ -16,16 +15,19 @@ import {
   dataOf,
   decodedLog,
   FAST_CORE,
+  fastProblems,
   FULL_CORE,
-  haltProblems,
   linesBetween,
   LOG_STATE,
   logLines,
   logProblems,
+  numberingScenario,
   runRange,
   setState,
+  stateLogScenario,
   stateProblems,
   stateRows,
+  unresolvedLines,
   wrapper,
 } from "./contract-data-checks.js";
 import { PATIENCE_MS } from "./ingest-harness.js";
@@ -45,9 +47,13 @@ import { cappedAt, LEDGER_CORE } from "./ledger-restart.js";
  *   fallible segment that failed. It stores none on ledger v8.
  * - A range of literal logs gives identical `contract_logs.logs` with `-full` and `-fast`, on both backends. The range
  *   holds well-formed wrappers, malformed ones (stored as version-0 `Misc` logs), oversized ones (stored as none), a
- *   successful fallible segment's, and a chain-failed transaction's (none). A log of a value read from the contract's
- *   state, and any log of a partially successful transaction, make `-fast` halt with `fast-log-unsupported` at that
- *   height, naming the transaction, while `-full` stores them.
+ *   successful fallible segment's, and a chain-failed transaction's (none); `-fast` records no unresolved site there.
+ * - `-fast` does not halt on a log site it cannot read exactly: a log of a value read from the contract's state is an
+ *   unresolved site `not-a-literal`, and a log of a partial success's fallible transcript one `partial-transaction`,
+ *   each with its place, while the block commits and `-full` stores what the ledger emitted. A partial success's
+ *   guaranteed logs are `-full`'s rows. Logs and unresolved sites share one numbering, so in a block where an
+ *   unresolved site emitted nothing, `-fast`'s later logs keep their sites' numbers; every other block's rows are
+ *   `-full`'s.
  *
  * On the recorded devnet tape (`UMBRADB_TAPES`; skipped by name without it): every contract deployed, called or
  * maintained has its row at that height, every contract deployed on v8 has its row at F (103), and `-fast` stores what
@@ -125,13 +131,16 @@ describeBackends("contract data through the process on $name", (backend: Process
     expect(await logLines(db)).toHaveLength(3);
   }, PATIENCE_MS * 2);
 
-  it("a log of a value read from the contract's state makes -fast halt with fast-log-unsupported at its height, naming the transaction; -full stores it", async () => {
-    const expected = await a110HaltScenario();
+  it("a log of a value read from the contract's state is an unresolved site of -fast (not-a-literal) with its place, and the block commits; -full stores it", async () => {
+    const expected = await stateLogScenario();
+    // At 3 the state's log is transaction 1's log op 3 (after its literal's push and log, the state's dup), number 2.
+    const [contract] = expected.contracts;
+    expect(expected.unresolved).toEqual([`3 1 2 ${Buffer.from(contract!.address).toString("hex")} ${Buffer.from("emit").toString("hex")} not-a-literal 1 false 0 3`]);
     const db = await backend.database();
     const ran = await runRange(db, expected.scenario.records, expected.scenario.head, { core: FAST_CORE });
-    expect(ran.status.reason?.code).toBe("fast-log-unsupported");
-    expect(ran.halt).toMatch(/value read from the contract's state|not a literal/);
-    expect(await haltProblems(db, ran.status, expected, 3n, 1, ran.halt)).toEqual([]);
+    expect(await fastProblems(db, ran.status, expected)).toEqual([]);
+    // Every log but the state's is -full's row.
+    expect(expected.logs.filter((line) => !expected.fastLogs.includes(line)).map((line) => line.split(" ").slice(0, 3).join(" "))).toEqual(["3 1 2"]);
     // -full stores the state's log at 3 (a version-0 Misc log of the state, an empty array) and the rows after it.
     const full = await backend.database();
     const stored = await runRange(full, expected.scenario.records, expected.scenario.head, { core: FULL_CORE });
@@ -139,16 +148,35 @@ describeBackends("contract data through the process on $name", (backend: Process
     expect(linesBetween(await logLines(full), 3n, 3n).map((line) => line.split(" ").slice(6, 9).join(" "))).toContain(
       `0 Misc ${dataOf({ tag: "array", content: [] })}`,
     );
+    expect(await unresolvedLines(full)).toEqual([]);
   }, PATIENCE_MS * 3);
 
-  it("any log of a partially successful transaction makes -fast halt with fast-log-unsupported", async () => {
+  it("a partially successful transaction's fallible logs are unresolved sites of -fast (partial-transaction); its guaranteed logs are -full's rows", async () => {
     const expected = await a109Scenario();
+    expect(expected.unresolved.map((line) => line.split(" ").filter((_, k) => k !== 3 && k !== 4).join(" "))).toEqual(["2 0 1 partial-transaction 1 true 0 2"]);
+    expect(expected.fastLogs).toEqual(expected.logs);
     const db = await backend.database();
     const ran = await runRange(db, expected.scenario.records, expected.scenario.head, { core: FAST_CORE });
-    expect(ran.status.reason?.code).toBe("fast-log-unsupported");
-    expect(ran.halt).toMatch(/partially successful/);
-    expect(await haltProblems(db, ran.status, expected, 2n, 0, ran.halt)).toEqual([]);
+    expect(await fastProblems(db, ran.status, expected)).toEqual([]);
   }, PATIENCE_MS * 2);
+
+  it("in a block where an unresolved site emitted nothing, -fast's later logs keep their sites' numbers; every other block's logs are -full's rows", async () => {
+    const expected = await numberingScenario();
+    const numbers = (lines: readonly string[], height: string) =>
+      lines.filter((line) => line.startsWith(`${height} `)).map((line) => line.split(" ").slice(1, 3).join(":"));
+    expect(numbers(expected.logs, "2")).toEqual(["0:0", "1:1"]);
+    expect(numbers(expected.fastLogs, "2")).toEqual(["0:0", "1:2"]);
+    expect(numbers(expected.unresolved, "2")).toEqual(["0:1"]);
+    expect(linesBetween(expected.fastLogs, 3n, 4n)).toEqual(linesBetween(expected.logs, 3n, 4n).filter((line) => !line.startsWith("3 0 1 ")));
+    expect(numbers(expected.unresolved, "3")).toEqual(["0:1"]);
+    const fast = await backend.database();
+    const ran = await runRange(fast, expected.scenario.records, expected.scenario.head, { core: FAST_CORE });
+    expect(await fastProblems(fast, ran.status, expected)).toEqual([]);
+    const full = await backend.database();
+    const stored = await runRange(full, expected.scenario.records, expected.scenario.head, { core: FULL_CORE });
+    expect(await logProblems(full, stored.status, expected)).toEqual([]);
+    expect(linesBetween(await logLines(fast), 4n, 4n)).toEqual(linesBetween(await logLines(full), 4n, 4n));
+  }, PATIENCE_MS * 4);
 });
 
 describe("-full and -fast store identical contract_logs.logs, on both backends", () => {
@@ -166,6 +194,7 @@ describe("-full and -fast store identical contract_logs.logs, on both backends",
           const db = await backend.database();
           const ran = await runRange(db, expected.scenario.records, expected.scenario.head, { core });
           expect(await logProblems(db, ran.status, expected), `${backend.name}, ${core.at(-1)?.id}`).toEqual([]);
+          expect(await unresolvedLines(db), `${backend.name}, ${core.at(-1)?.id}`).toEqual([]);
           tables.push(await logLines(db));
         }
       } finally {
@@ -256,8 +285,10 @@ describe("core-contract-states, core-contract-logs-full and core-contract-logs-f
     expect(CORE_CONTRACT_STATES.provides).toEqual([
       { name: "contract-states", lifetimes: ["block", "table"], table: { schema: "core_contract_states", tables: ["states"], kind: "append-only" } },
     ]);
-    const item = { name: "contract-logs", lifetimes: ["block", "table"], table: { schema: "contract_logs", tables: ["logs"], kind: "append-only" } };
+    // Both declare the unresolved sites' table, which only -fast writes.
+    const item = { name: "contract-logs", lifetimes: ["block", "table"], table: { schema: "contract_logs", tables: ["logs", "unresolved"], kind: "append-only" } };
     expect(CORE_CONTRACT_LOGS_FULL.provides).toEqual([item]);
+    expect(CORE_CONTRACT_LOGS_FULL.migrations.map((migration) => migration.id)).toEqual(["001", "002"]);
     // -fast's ledger task gives its block item contract-log-sites ("in a ledger task").
     expect(CORE_CONTRACT_LOGS_FAST.provides).toEqual([item, { name: "contract-log-sites", lifetimes: ["block"] }]);
     expect(CORE_CONTRACT_LOGS_FAST.ledgerTasks?.map((task) => [task.name, task.needsState])).toEqual([["contract-log-sites", false]]);

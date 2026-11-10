@@ -230,13 +230,6 @@ export const ERROR_CODES = [
    * a configuration value. Not retryable.
    */
   "ledger-refcount-invalid",
-  /**
-   * `core-contract-logs-fast` cannot read a block's MIP-0002 log exactly from the transcripts: a value that is not a
-   * literal (read from the contract's state, or computed), one behind a `branch`, or any log of a partially successful
-   * transaction (`src/backbone/core-contract-logs-fast/`). Processing halts at that height, with nothing of the block
-   * stored.
-   */
-  "fast-log-unsupported",
   // Lockstep (`src/backbone/core-private-source/`, `src/private/`). A private process's startup refusal of a module
   // declaring `needsLockstep` on an instance the core does not list; and a private instance's two halts: the public
   // cursor is past the height it processes (the core listed it late, or does not wait for it), and the core refused a
