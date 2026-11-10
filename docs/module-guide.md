@@ -517,12 +517,22 @@ configSchema: z.object({
 - **Contract logs.** Require `contract-logs`, not a provider: the operator picks one, and one may hand over to the
   other at a height. `core-contract-logs-full` (needs `vm-logs`; from 0 or a restored backup) stores the logs the ledger
   emitted while applying the block. `core-contract-logs-fast` (development only; any start height) reads them from the
-  transcripts and halts with `fast-log-unsupported` at a log it cannot read that way. Both fill `contract_logs.logs`:
-  `height`, `tx_index`, `log_index` (its number in the block), `contract_address`, `entry_point`, `logical_segment`,
-  `log_version`, `event_type`, `data`. The `block` item, read from `on-compute` on, is an array of `{ transaction,
-  index, address, entryPoint, logicalSegment, version, eventType, data }`. With the vendored v9 ledger,
-  `logical_segment` is 0 for every log, whichever segment emitted it: the ledger labels a fallible segment's contract
-  events with the guaranteed segment, so the column cannot tell a guaranteed log from a fallible one.
+  transcripts. A log site it cannot read that way is an **unresolved site**, never a log: a `log` of a value the
+  transcript does not push right before it (`not-a-literal`: read from the contract's state, or computed), one a
+  `branch` or `jmp` may skip (`conditional`), and one in a fallible segment of a partially successful transaction,
+  since the chain does not say which fallible segments failed (`partial-transaction`; the guaranteed section's logs are
+  read as usual). Both fill `contract_logs.logs`: `height`, `tx_index`, `log_index`, `contract_address`, `entry_point`,
+  `logical_segment`, `log_version`, `event_type`, `data`. Only `-fast` writes `contract_logs.unresolved`: `height`,
+  `tx_index`, `log_index`, `contract_address`, `entry_point`, `reason`, `segment`, `fallible`, `call_index`,
+  `op_index` (where the `log` op is in the transaction). `log_index` numbers the block's logs and unresolved sites
+  together in emission order, so a block without unresolved sites has the same rows with either provider, and in a
+  block with some, each `-fast` log keeps the number its site gives it. The `block` item, read from `on-compute` on, is
+  `{ logs, unresolved }`: `logs`, each `{ transaction, index, address, entryPoint, logicalSegment, version, eventType,
+  data }`, and `unresolved`, each `{ transaction, index, address, entryPoint, reason, segment, fallible, call, op }`;
+  `-full`'s has none. A module
+  that derives state from logs should treat a contract with unresolved sites as not fully known. With the vendored v9
+  ledger, `logical_segment` is 0 for every log, whichever segment emitted it: the ledger labels a fallible segment's
+  contract events with the guaranteed segment, so the column cannot tell a guaranteed log from a fallible one.
 
 Their entries are written as for the others: `CORE_LEDGER_STATE.entry({ start: 0, config: {} })`,
 `CORE_CONTRACT_STATES`, `CORE_CONTRACT_LOGS_FULL`, `CORE_CONTRACT_LOGS_FAST`.
@@ -971,7 +981,7 @@ export default defineConfig({
     `requires-resync`, `no-primary-key`, `unsupported-column-type`, `unsupported-key-type`,
     `non-deterministic-column`, `non-deterministic-table`, `shared-item-migrations-differ`.
   - Processing halts: `callback-error`, `handle-closed`, `truncate-not-allowed`, `database-error`, `root-mismatch`,
-    `ledger-refcount-invalid`, `fast-log-unsupported`, `lockstep-behind`, `public-config-changed`.
+    `ledger-refcount-invalid`, `lockstep-behind`, `public-config-changed`.
   - A call your code may catch: `query-timeout`, `no-committed-height`, `state-not-retained`, `read-refused`.
   - A host's start (§18): `invalid-configuration` (`invalid-option`, `renamed-setting`), `modules-given-twice`,
     `ledger-tasks-need-modules-from`, `source-refused`, `library-setting-refused`, `network-address-conflict`,
