@@ -78,6 +78,23 @@ jobs:
           UMBRADB_CONFORMANCE_DEADLINE_MS: "6300000"
         run: npm run test:conformance
 
+      - name: Why a run failed (out-of-memory kills, memory, containers)
+        # Runs only when an earlier step failed, and never fails the job itself. A test worker that dies prints
+        # nothing ("Worker exited unexpectedly"), nor does a PostgreSQL container that stops mid-run: the kernel's
+        # out-of-memory kills, the runner's memory and the containers' exit states tell a memory kill from a crash.
+        if: failure()
+        continue-on-error: true
+        run: |
+          echo "::group::Kernel out-of-memory kills"
+          sudo dmesg --ctime | grep -iE "out of memory|oom-kill|killed process" || echo "none in the kernel log"
+          echo "::endgroup::"
+          echo "::group::Memory"
+          free -m
+          echo "::endgroup::"
+          echo "::group::Containers"
+          docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Status}}'
+          echo "::endgroup::"
+
   mutation:
     # The StrykerJS mutation gate: a SEPARATE still-required job
     # (never optional, never live-gated) so mutation cost is off the `test` job's clock. SCOPE: the nine targets
@@ -106,3 +123,20 @@ jobs:
 
       - name: Run StrykerJS mutation gate (nine targets, one run each; aggregate break:65)
         run: npm run test:mutation:ci
+
+      - name: Why a run failed (out-of-memory kills, memory, containers)
+        # Runs only when an earlier step failed, and never fails the job itself. A test worker that dies prints
+        # nothing ("Worker exited unexpectedly"), nor does a PostgreSQL container that stops mid-run: the kernel's
+        # out-of-memory kills, the runner's memory and the containers' exit states tell a memory kill from a crash.
+        if: failure()
+        continue-on-error: true
+        run: |
+          echo "::group::Kernel out-of-memory kills"
+          sudo dmesg --ctime | grep -iE "out of memory|oom-kill|killed process" || echo "none in the kernel log"
+          echo "::endgroup::"
+          echo "::group::Memory"
+          free -m
+          echo "::endgroup::"
+          echo "::group::Containers"
+          docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Status}}'
+          echo "::endgroup::"
