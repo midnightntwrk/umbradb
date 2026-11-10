@@ -1,26 +1,12 @@
-# The MIP-0018 proof of concept's recorded API answers
+# The recorded MIP-0018 API answers on stagenet
 
-The proof of concept's own answers to a fixed list of requests, recorded to compare `token-metadata`'s API with (`test/features/token-metadata/stagenet.test.ts`). They are
-not copies of files of the proof of concept: they are what its API answered when run at
-[acedward/umbradb PR #26](https://github.com/acedward/umbradb/pull/26) `760d3e9c8a060577257ca3b2c42dd09a680e70f8` on its
-own recorded stagenet fixtures. `test/features/token-metadata/answers.test.ts` recomputes every SHA-256 below and fails
-on a modified, missing or unlisted file.
+The expected answers of `token-metadata`'s `/v1` API to a fixed list of requests on two stagenet ranges, compared with
+the module's own answers by `test/features/token-metadata/stagenet.test.ts`. `test/features/token-metadata/answers.test.ts`
+recomputes every SHA-256 below and fails on a modified, missing or unlisted file.
 
-## How they were recorded
+## What they hold
 
-`record-answers.test.ts.txt` is the recorder (kept as `.txt`: it imports the proof of concept's code and runs only in
-its tree). In a checkout of PR #26 at `760d3e9`, with Docker running:
-
-```sh
-cp record-answers.test.ts.txt <checkout>/token-indexer/test/record-answers.test.ts
-cd <checkout>
-npm ci --ignore-scripts
-RECORD_OUT=<directory> npx vitest run token-indexer/test/record-answers.test.ts
-```
-
-For each of the proof of concept's two stagenet ranges it does what the proof of concept's `mip0018-api.test.ts` does:
-its chain-archive sync over the range's tape (served by its fake chain), its scanner to the range's end, and its API on
-127.0.0.1. It then requests, in this order:
+For each range, the answers to these requests, in this order:
 
 1. `/v1/status`;
 2. `/v1/tokens?limit=500`, then the list in pages of 2 (`?limit=2`, following `nextCursor`);
@@ -31,17 +17,16 @@ its chain-archive sync over the range's tape (served by its fake chain), its sca
 5. for each transaction those events name (sorted), `/v1/events?tx={hash}`.
 
 Each answer is `{ path, status, headers, body }`: the body as the text the server sent, and the five response headers
-the API contract names. Recorded on 2026-11-06 with Docker's `postgres:17-alpine`; a second run wrote the same bytes.
+the API contract names. Recorded on 2026-11-06.
 
 | File | Range | Requests | SHA-256 |
 |---|---|---|---|
-| `idx.json` | `idx`, 714,485–715,183 (cases C01–C10) | 97 | `ad9f8f0729bacf3e29b1b00ae7dd71bfa4063be9113e2fd9aeba70c1dbb66e2a` |
-| `u1.json` | `u1`, 715,402–715,433 (case U1) | 14 | `710eaaee3c93171dac5ed468690dc5288e774ec70758a0b0b78274cb528fa41c` |
-| `record-answers.test.ts.txt` | — | — | `436f064bb3728664dc1af705e3b3b577f4e8372f4e4f2267efb1941c819556f5` |
+| `idx.json` | `idx`, 714,485–715,183 (cases C01–C10) | 97 | `cf9df390b9edaf78cd4f53410bc73f141ef7883ad1ec21fc6d196c44ddd31cf4` |
+| `u1.json` | `u1`, 715,402–715,433 (case U1) | 14 | `d328716963ae2bcec970826a28d902c458f1018b3c0480a8e92ca00fab43babf` |
 
 ## What the comparison does
 
 `stagenet.test.ts` sends the same paths to `token-metadata` after replaying the same blocks from UmbraDB's stagenet tapes
 (`stagenet-714485-715183`, `stagenet-715402-715433` in `test/tape/real/manifest.json`), and compares bodies byte for byte
-with the fields this port serves differently masked (`docs/token-metadata-api.md`, "What this port serves differently"): `minted`, `firstSeen`, `evidence`, the `seen` rows, `color`, `image`, `segment`, `phase`, the
-status's `scanner`.
+with the fields the module does not serve yet masked (`docs/token-metadata-api.md`, "Not served yet"): `minted`,
+`firstSeen`, `evidence`, the `seen` rows, `color`, `image`, `segment`, `phase`, the status's `scanner`.

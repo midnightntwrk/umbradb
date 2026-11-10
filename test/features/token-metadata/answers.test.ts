@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 /**
- * The recorded API answers of the proof of concept (`test/fixtures/mip0018-answers/`): every file is listed in
+ * The recorded API answers on the stagenet ranges (`test/fixtures/mip0018-answers/`): every file is listed in
  * its README with the SHA-256 it has, and each answers file is the shape `stagenet.test.ts` reads.
  */
 
@@ -38,7 +38,7 @@ const table = listed(readFileSync(new URL("README.md", DIR), "utf8"));
 
 describe("the recorded answers", () => {
   it("every file is listed in the README with its SHA-256", () => {
-    expect(table.size).toBe(3);
+    expect(table.size).toBe(2);
     expect(problems(files, table)).toEqual([]);
   });
 

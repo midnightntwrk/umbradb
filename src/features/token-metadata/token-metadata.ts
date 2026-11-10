@@ -11,7 +11,8 @@
  *   `on-start-db` an entry starting above S. The process refuses with `callback-error` at `on-start-db` of
  *   `token-metadata`; the error itself is a {@link TokenMetadataStartAfterDatabase}, whose code is
  *   `token-metadata-start-after-database`.
- * - **Its API** (`./api.ts`) is the proof of concept's `/v1` routes on the module API, registered in `on-start-api`.
+ * - **Its API** (`./api.ts`) is the `/v1` routes of `docs/token-metadata-api.md` on the module API, registered in
+ *   `on-start-api`.
  * - **Per block** it writes in `on-db-write` (`./apply.ts`): the block's candidates and their effect on the fields, in
  *   chain order, reading its own rows inside the block transaction. A v8 block has no contract logs, so nothing.
  */
@@ -21,10 +22,10 @@ import { UMBRADB_VERSION } from "../../config/build.js";
 import { CONTRACT_LOGS_ITEM, contractLogsItemOf } from "../../backbone/contract-logs/contract-logs.js";
 import type { BlockParsed } from "../../backbone/core-block-parsed/core-block-parsed.js";
 import { defineModule } from "../../modules/declaration.js";
-import { registerMetadataApi } from "./api.ts";
-import { type LogReader, writeBlock } from "./apply.ts";
-import { miscAtom } from "./log-reader.ts";
-import { databaseStart, MIGRATIONS, SCHEMA } from "./sql.ts";
+import { registerMetadataApi } from "./api.js";
+import { type LogReader, writeBlock } from "./apply.js";
+import { miscAtom } from "./log-reader.js";
+import { databaseStart, MIGRATIONS, SCHEMA } from "./sql.js";
 
 /** `core-block-parsed`'s item (named here so the module loads none of that module's code). */
 const BLOCK_PARSED_ITEM = "block-parsed";

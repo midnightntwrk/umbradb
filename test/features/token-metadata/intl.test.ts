@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { writeBlock } from "../../../src/features/token-metadata/apply.ts";
-import { servedIdentities } from "../../../src/features/token-metadata/read.ts";
-import { commonRecords, toHex } from "../../../src/features/token-metadata/vendor/mip0018/codec/src/index.ts";
+import { writeBlock } from "../../../src/features/token-metadata/apply.js";
+import { servedIdentities } from "../../../src/features/token-metadata/read.js";
+import { commonRecords, toHex } from "../../../src/features/token-metadata/codec/index.js";
 import { blockLogs, contract, domain, eventData } from "./harness.js";
 
 /**
@@ -38,7 +38,7 @@ describe("Intl only where the module serves", () => {
 
   it("the write path takes from state.ts only rules that read bytes", () => {
     const imports = WRITE_PATH.flatMap((file) =>
-      [...code(readFileSync(file, "utf8")).matchAll(/import\s*{([^}]*)}\s*from\s*"\.\/state\.ts"/g)].flatMap((m) => m[1]!.split(",").map((n) => n.trim()).filter(Boolean)),
+      [...code(readFileSync(file, "utf8")).matchAll(/import\s*{([^}]*)}\s*from\s*"\.\/state\.js"/g)].flatMap((m) => m[1]!.split(",").map((n) => n.trim()).filter(Boolean)),
     );
     expect(imports.sort()).toEqual(["STANDARD_KEYS", "fieldUsable", "isDefinedKey"]);
   });

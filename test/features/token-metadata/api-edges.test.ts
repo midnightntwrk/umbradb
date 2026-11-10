@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { encodeCursor, registerMetadataApi } from "../../../src/features/token-metadata/api.ts";
-import { servedIdentities } from "../../../src/features/token-metadata/read.ts";
-import { commonRecords } from "../../../src/features/token-metadata/vendor/mip0018/codec/src/index.ts";
+import { encodeCursor, registerMetadataApi } from "../../../src/features/token-metadata/api.js";
+import { servedIdentities } from "../../../src/features/token-metadata/read.js";
+import { commonRecords } from "../../../src/features/token-metadata/codec/index.js";
 import type { ReadHandle } from "../../../src/db/api.js";
 import type { ApiRegistry } from "../../../src/modules/declaration.js";
 import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../../runner/process-backends.js";
@@ -88,7 +88,7 @@ describe.each(PROCESS_BACKENDS)("the API's edges on $name", (backend: ProcessBac
   it("a type-4 value that is not UTF-8 is served as hex only, with no text view", async () => {
     // The codec rejects a type-4 value that is not an RFC 3986 URI, so no chain stores this row; written here, it shows
     // the field's text view following the bytes. Its `image` follows the type (an accepted type-4 value is a URI), its
-    // URL as the bytes' Latin-1 text, as the proof of concept serves it.
+    // URL as the bytes' Latin-1 text.
     const id = await answer(db, "/v1/identities/:contract/:domainSep/:kind", `/v1/identities/${hex(A)}/${hex(domain(1))}/1`);
     const image = id.json.fields.find((f: Json) => f.key.utf8 === "image");
     expect(image).toMatchObject({ valType: 4, valTypeName: "uri", value: { hex: "ff00ff" }, usable: false });

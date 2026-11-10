@@ -18,7 +18,7 @@
  * hide every event behind it. Every length is checked before the bytes it covers are read.
  */
 
-/** The tag of the ledger's serialization of a state value, as both vendored v9 packages write it. */
+/** The tag of the ledger's serialization of a state value, as both v9 ledger packages write it. */
 export const STATE_VALUE_TAG = "impact-state-value[v2]";
 
 /** The most bytes a `Misc` event's name and payload take together. */

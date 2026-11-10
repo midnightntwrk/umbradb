@@ -1,14 +1,14 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { classifyMip0018Event } from "../../../src/features/token-metadata/classify.ts";
-import { decodePayloadWith } from "../../../src/features/token-metadata/vendor/mip0018/codec/src/decode.ts";
+import { classifyMip0018Event } from "../../../src/features/token-metadata/classify.js";
+import { decodePayloadWith } from "../../../src/features/token-metadata/codec/decode.js";
 import {
   decodePayload,
   encodePayload,
   EVENT_NAME,
   type MetadataRecord,
-} from "../../../src/features/token-metadata/vendor/mip0018/codec/src/index.ts";
-import { ALL_CODEC_RULES } from "../../../src/features/token-metadata/vendor/mip0018/codec/src/rules.ts";
+} from "../../../src/features/token-metadata/codec/index.js";
+import { ALL_CODEC_RULES } from "../../../src/features/token-metadata/codec/rules.js";
 
 /**
  * For 200,000 generated payloads the classifier never throws and reads only inside the 256 bytes.

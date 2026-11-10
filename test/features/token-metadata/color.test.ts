@@ -1,12 +1,12 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { hasColor, tokenColor } from "../../../src/features/token-metadata/color.ts";
+import { hasColor, tokenColor } from "../../../src/features/token-metadata/color.js";
 import * as v8 from "../../../vendor/ledger/v8/pkg/midnight_ledger_wasm_fs.js";
 import * as v9 from "../../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js";
 import * as v9rc3 from "../../../vendor/ledger/v9-rc3/pkg/midnight_ledger_wasm_v9_fs.js";
 
 /**
- * A token's color, computed without the ledger, equals `rawTokenType` of each vendored ledger
+ * A token's color, computed without the ledger, equals `rawTokenType` of each ledger
  * package (v8, v9-rc3, v9) for generated domain separators and contracts; only kinds 1 and 2 have one.
  */
 

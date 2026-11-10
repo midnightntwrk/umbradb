@@ -1,6 +1,6 @@
 /**
  * The serving side's reads of `token-metadata`'s state: the identities with their served fields, and the symbol groups,
- * as the proof of concept's pure `MetadataState` gives them. A name or symbol is cut to its first 64 or 12 characters
+ * as the pure `MetadataState` (`state.ts`) gives them. A name or symbol is cut to its first 64 or 12 characters
  * here, where it is served, never where it is stored, so this file — the serving code — is where `Intl`
  * may run (through `state.ts`'s `lengthLimited`).
  *
@@ -9,9 +9,9 @@
  */
 
 import type { ReadHandle } from "../../db/api.js";
-import { SCHEMA } from "./sql.ts";
-import { type Field, type IdentityState, lengthLimited, type SymbolGroup, symbolGroups } from "./state.ts";
-import { toHex } from "./vendor/mip0018/codec/src/index.ts";
+import { SCHEMA } from "./sql.js";
+import { type Field, type IdentityState, lengthLimited, type SymbolGroup, symbolGroups } from "./state.js";
+import { toHex } from "./codec/index.js";
 
 /** Every existing identity of the database (at least one defined field), with its served fields, in identity order. */
 export async function servedIdentities(read: Pick<ReadHandle, "query">, network: string): Promise<IdentityState[]> {

@@ -610,7 +610,7 @@
         "nodeVersion": "2.0.0-d9729c13",
         "recorded": "2026-11-05"
       },
-      "bounds": "The first of the two stagenet ranges the MIP-0018 proof of concept (acedward/umbradb PR #26 at 760d3e9) recorded its cases from: its cases C01 to C10. 699 blocks of runtime 2_000_000 (ledger v9); core-contract-logs-fast gives 49 Misc logs over 43 heights from 714,486 to 715,183 (test/features/token-metadata/fixtures/stagenet-misc-logs.json).",
+      "bounds": "The first of the two stagenet ranges the MIP-0018 stagenet cases were recorded from (test/fixtures/mip0018/cases/): C01 to C10. 699 blocks of runtime 2_000_000 (ledger v9); core-contract-logs-fast gives 49 Misc logs over 43 heights from 714,486 to 715,183 (test/features/token-metadata/fixtures/stagenet-misc-logs.json).",
       "notes": {
         "recordedWith": "npx tsx tools/tape/main.ts range --node wss://rpc.stagenet.shielded.tools --from 714485 --to 715183 --out stagenet-714485-715183.tape.jsonl --concurrency 4 --live-seconds 0",
         "requests": 4199,

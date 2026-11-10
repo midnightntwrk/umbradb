@@ -1,7 +1,7 @@
 import fc from "fast-check";
 import { z } from "zod";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { TOKEN_METADATA } from "../../../src/features/token-metadata/token-metadata.ts";
+import { TOKEN_METADATA } from "../../../src/features/token-metadata/token-metadata.js";
 import { contentsHash } from "../../../src/library/contents-hash.js";
 import { defineModule, type ModuleDeclaration } from "../../../src/modules/declaration.js";
 import { PROCESS_BACKENDS } from "../../runner/process-backends.js";

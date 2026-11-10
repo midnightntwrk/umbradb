@@ -1,21 +1,19 @@
 /**
- * `token-metadata`'s `/v1` API: the proof of concept's handlers (`api.ts`, `api-views.ts`, `metadata.ts`, `tokens.ts`
- * at `760d3e9`) on UmbraDB's module API, with the differences from the proof of concept.
+ * `token-metadata`'s `/v1` API on UmbraDB's module API (`docs/token-metadata-api.md`).
  *
- * **What is kept.** The paths, parameters, JSON shapes, the strict input (32-byte hex path values, kinds 1–3, no
+ * **The contract.** The paths, parameters, JSON shapes, the strict input (32-byte hex path values, kinds 1–3, no
  * unknown or empty query parameter, `limit` 1–500, cursors only as issued and bound to their endpoint and filter), the
- * error envelope `{ "error": { "code", "message" } }` with the proof of concept's codes for what the handlers refuse
+ * error envelope `{ "error": { "code", "message" } }` with the module's codes for what the handlers refuse
  * (400 `BAD_REQUEST`, 404 `NOT_FOUND`, 503 `BUSY` beyond {@link DEFAULT_MAX_CONCURRENT_REQUESTS} requests at once), the
  * ASCII-escaped JSON and the response headers. Marks come from `state.ts`'s `tokenMark`, groups from `symbolGroups`,
- * each bounded as the proof of concept bounds them (the common keys, the first 100 reasons, positions and members, one
+ * each bounded (the common keys, the first 100 reasons, positions and members, one
  * keyset page of fields).
  *
- * **What the module API changes.** Each answer is one read at one committed height (DB-2) in place of a `REPEATABLE
- * READ` transaction, and carries the core's `X-Umbra-View`, `X-Umbra-Height` and `X-Umbra-Hash` (`answerChainData`).
+ * **What the module API adds.** Each answer is one read at one committed height (DB-2), and carries the core's `X-Umbra-View`, `X-Umbra-Height` and `X-Umbra-Hash` (`answerChainData`).
  * The module API answers what no route of the module reaches: an unknown path (404 `not-found`), a method other than
  * GET (405 `method-not-allowed`), HEAD included, and a failure (500 `internal-error`).
  *
- * **Differences from the proof of concept.** No mint table yet: `minted` and `firstSeen` are null, `evidence` is `[]`, there are no `seen` rows; NIGHT
+ * **Not served yet** (until the activity and image changes). No mint table yet: `minted` and `firstSeen` are null, `evidence` is `[]`, there are no `seen` rows; NIGHT
  * and DUST are fixed rows; a kind 1 or 2 identity's `color` is its computed color (`fields_color_idx`), and
  * `/v1/tokens/{color}` and `/v1/lookup` resolve a color to the described identities with that color; `image` is
  * `{ url, status: "pending", imageUrl: null }`; `/v1/events` has `segment` and `phase` null; `/v1/status` reports the
@@ -29,8 +27,8 @@ import type { ReadHandle } from "../../db/api.js";
 import type { ApiRegistry } from "../../modules/declaration.js";
 import { BUILT_IN_NETWORKS } from "../../ledger/networks.js";
 import { answerChainData } from "../../runner/envelope.js";
-import { hasColor, tokenColor } from "./color.ts";
-import { COLOR_SQL, SCHEMA } from "./sql.ts";
+import { hasColor, tokenColor } from "./color.js";
+import { COLOR_SQL, SCHEMA } from "./sql.js";
 import {
   COMMON_KEY_HEX,
   type Field,
@@ -41,8 +39,8 @@ import {
   parseStandards,
   symbolGroups,
   tokenMark,
-} from "./state.ts";
-import { fromHex, toHex } from "./vendor/mip0018/codec/src/index.ts";
+} from "./state.js";
+import { fromHex, toHex } from "./codec/index.js";
 
 export const MAX_LIMIT = 500;
 export const DEFAULT_LIMIT = 100;
@@ -55,7 +53,7 @@ export const MAX_MARK_UNRESOLVED = 100;
 /** At most this many members are listed in a symbol group (all are counted in `memberCount`). */
 export const MAX_GROUP_MEMBERS = 100;
 
-/** The MIP-0018 text the proof of concept implements (its `MIP_PIN`). */
+/** The MIP-0018 text the module implements. */
 export const MIP_PIN = {
   id: "MIP-0018",
   repository: "midnightntwrk/midnight-improvement-proposals",
@@ -65,8 +63,8 @@ export const MIP_PIN = {
   url: "https://github.com/midnightntwrk/midnight-improvement-proposals/blob/eb94bc182221cd937a84ed66a5f903b060f165ab/mips/mip-0018-on-chain-token-metadata.md",
   pr: "https://github.com/midnightntwrk/midnight-improvement-proposals/pull/372",
 } as const;
-/** The reference commit the codec, vectors and runner are vendored from. */
-export const VENDORED_REFERENCE = { repository: "https://github.com/midnight-experiments/mip-0018", commit: "e8295792d9363be37ff2f7f716c740fcdf3f195e" } as const;
+/** The MIP-0018 reference implementation whose codec rules and test vectors the module matches. */
+export const MIP_REFERENCE = { repository: "https://github.com/midnight-experiments/mip-0018", commit: "e8295792d9363be37ff2f7f716c740fcdf3f195e" } as const;
 /**
  * The networks known by their genesis hash: UmbraDB's built-in networks (`src/ledger/networks.json`), where the proof of
  * concept's `KNOWN_GENESIS` knew stagenet only.
@@ -101,7 +99,7 @@ export function toAsciiJson(value: unknown): string {
   return JSON.stringify(value).replace(/[\u007f-￿<>&]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
 }
 
-/** The proof of concept's response headers. */
+/** The response headers of every answer. */
 export const JSON_HEADERS = Object.freeze({
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store",
@@ -513,8 +511,8 @@ const SYMBOL_CHARACTERS = 12;
 
 /**
  * The symbol group of an identity whose served `symbol` is `symbol` (cut): its member count and first `limit`
- * members by (domainSep, kind), or `undefined` with fewer than two members. The proof of concept stored the cut symbol
- * and grouped by it; the module stores the whole one. A served symbol of fewer than 12 characters is whole, and only a
+ * members by (domainSep, kind), or `undefined` with fewer than two members. The module stores the whole symbol and
+ * groups by its cut. A served symbol of fewer than 12 characters is whole, and only a
  * whole symbol equal to it serves it, so the group is the rows with exactly that value: an index-only count and the
  * first `limit` members from `fields_symbol_idx`. A served symbol of 12 characters may be the cut of longer ones, so
  * the rows read are those whose whole symbol starts with it (a range of the same index), kept when their own cut equals
@@ -878,7 +876,7 @@ async function status(ctx: Ctx, genesisHash: string | null) {
     indexedHeight: height,
     archiveHeight: height,
     mip: { ...MIP_PIN },
-    vendored: { ...VENDORED_REFERENCE },
+    reference: { ...MIP_REFERENCE },
     scanner: "following",
     unresolvedEvents: num(u?.n ?? 0),
   };

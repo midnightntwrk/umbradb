@@ -1,7 +1,7 @@
 // Value-type rules (MIP "Value types"). A value that breaks its type's rule rejects the whole event.
-import { type RejectReason, UINT_MAX_BYTES, UINT_MIN_BYTES, ValType } from './constants.ts';
-import { ALL_CODEC_RULES, type CodecRules } from './rules.ts';
-import { isRfc3986Uri } from './uri.ts';
+import { type RejectReason, UINT_MAX_BYTES, UINT_MIN_BYTES, ValType } from './constants.js';
+import { ALL_CODEC_RULES, type CodecRules } from './rules.js';
+import { isRfc3986Uri } from './uri.js';
 
 // Strict UTF-8 (RFC 3629): fatal on any ill-formed sequence (overlong forms, surrogates, > U+10FFFF, truncation).
 // ignoreBOM: true keeps a leading U+FEFF as a character instead of silently dropping it, so the decoded text always

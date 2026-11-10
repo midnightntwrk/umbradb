@@ -8,13 +8,13 @@ import {
   classifyEvent,
   EVENT_NAME,
   splitMiscData,
-} from "../../../src/features/token-metadata/vendor/mip0018/codec/src/index.ts";
+} from "../../../src/features/token-metadata/codec/index.js";
 
 /**
  * The log reader: a `Misc` log's data, the ledger's tagged serialization of the logged value, is a candidate's bytes
  * only when it is a cell holding one atom of at most 288 bytes; any other value under the known tag is not; an unknown
  * tag is an error. Checked on the real stagenet logs `core-contract-logs-fast` stored, and differentially against both
- * vendored v9 packages' own serialization.
+ * v9 ledger packages' own serialization.
  */
 
 type Package = typeof v9;
@@ -76,7 +76,7 @@ describe("the log reader on stagenet's stored Misc logs", () => {
 
 for (const [label, api] of PACKAGES) {
   describe(`the log reader against ${label}'s own serialization`, () => {
-    it("reads back every atom of 0 to 288 bytes, declared as itself or as Bytes<288> [[token-metadata.log-reader.atoms]]", () => {
+    it("reads back every atom of 0 to 288 bytes, declared as itself or as Bytes<288>", () => {
       fc.assert(
         fc.property(fc.uint8Array({ minLength: 0, maxLength: 288 }), fc.boolean(), (raw, compactShape) => {
           const bytes = normal(raw);

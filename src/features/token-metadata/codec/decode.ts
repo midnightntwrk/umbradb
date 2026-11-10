@@ -3,10 +3,10 @@
 // Hardening: every length is bounds-checked before any byte is read or sliced; every byte read goes through
 // `byteAt`, which throws on an out-of-bounds index — an invariant the fuzz tests assert is never violated. Returned
 // keys/values are copies, so callers never alias the input buffer.
-import { DOMAIN_SEP_SIZE, KIND_OFFSET, PAYLOAD_SIZE, RECORDS_OFFSET, type RejectReason, ValType } from './constants.ts';
-import { zeroExtend } from './hex.ts';
-import { ALL_CODEC_RULES, type CodecRules } from './rules.ts';
-import { checkValue, decodeUintWith } from './values.ts';
+import { DOMAIN_SEP_SIZE, KIND_OFFSET, PAYLOAD_SIZE, RECORDS_OFFSET, type RejectReason, ValType } from './constants.js';
+import { zeroExtend } from './hex.js';
+import { ALL_CODEC_RULES, type CodecRules } from './rules.js';
+import { checkValue, decodeUintWith } from './values.js';
 
 export interface Header {
   /** 32 bytes identifying the token within its contract. */

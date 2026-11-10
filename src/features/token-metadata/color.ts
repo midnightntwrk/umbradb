@@ -3,11 +3,8 @@
  * library's `persistentCommit([domainSep, contractAddress], pad(32, "midnight:derive_token"))`, which is the SHA-256 of
  * `pad(32, "midnight:derive_token") ‖ domainSep ‖ contractAddress`. One color serves a token's shielded (kind 1) and
  * unshielded (kind 2) forms; a contract token (kind 3) has none. Computed here without the ledger, so it runs on the
- * main thread and in the browser build; the tests hold it to `rawTokenType` of the vendored v8, v9-rc3 and v9
+ * main thread and in the browser build; the tests hold it to `rawTokenType` of the v8, v9-rc3 and v9 ledger
  * packages.
- *
- * After the proof of concept's `color.ts` (`tokenColorSha256`), itself a port of the reference implementation's
- * `packages/midnight/src/color.ts` (Apache-2.0).
  */
 
 import { createHash } from "node:crypto";

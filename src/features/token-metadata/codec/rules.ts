@@ -1,6 +1,6 @@
 // The decoder's MIP rules as switches. Every switch is ON in the public API; they exist only so the rule-mutation
-// test can disable one rule at a time and show that at least one normative vector then fails.
-// Not part of the public API (exported from `@mip0018/codec/internal`).
+// test (`test/features/token-metadata/codec.test.ts`) can disable one rule at a time and show that at least one normative vector then fails.
+// Not part of the codec's public API (`./index.ts`): exported from `./internal.ts`.
 
 export interface CodecRules {
   /** Consuming — a `name` shorter than 32 bytes and a `payload` shorter than 256 bytes are zero-extended first. */
@@ -52,7 +52,3 @@ export const ALL_CODEC_RULES: Readonly<CodecRules> = Object.freeze({
   littleEndian: true,
   wholeEvent: true,
 });
-
-export function withCodecRules(partial: Partial<CodecRules> | undefined): CodecRules {
-  return { ...ALL_CODEC_RULES, ...(partial ?? {}) };
-}

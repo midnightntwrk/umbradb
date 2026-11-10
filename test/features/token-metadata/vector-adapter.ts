@@ -1,18 +1,12 @@
-#!/usr/bin/env node
 /**
- * UmbraDB's pure MIP-0018 vector adapter: the runner contract of the vendored vectors
- * (`token-indexer/vendor/mip0018/vectors/README.md`, "Runner contract") over the vendored codec and UmbraDB's own
- * state module (`./state.ts`). No database — the Postgres adapter answers the same requests through the real store.
- *
- *   node token-indexer/vendor/mip0018/vectors/tools/run.ts --consumer "node token-indexer/mip0018/vector-adapter.ts"
- *
- * One JSON request per stdin line, exactly one JSON response per stdout line, in order.
+ * The MIP-0018 vector adapter: answers the vectors' `decode` and `state` requests with the module's codec, its
+ * classification (`classify.ts`, with the UTF-8 key rule) and its pure state model (`state.ts`), with no database.
+ * `vectors.test.ts` runs every payload and state vector through it, and `state-vectors.test.ts` and `property.test.ts`
+ * use its request parsing and response shapes.
  */
-import { createInterface } from "node:readline";
-import { fileURLToPath } from "node:url";
-import type { Classification } from "../../../src/features/token-metadata/vendor/mip0018/codec/src/index.ts";
-import { classifyMip0018Event } from "../../../src/features/token-metadata/classify.ts";
-import { fromHex, type IdentityRef, type IdentityState, MetadataState, type ObservedEvent, type SymbolGroup, toHex } from "../../../src/features/token-metadata/state.ts";
+import type { Classification } from "../../../src/features/token-metadata/codec/index.js";
+import { classifyMip0018Event } from "../../../src/features/token-metadata/classify.js";
+import { fromHex, type IdentityRef, type IdentityState, MetadataState, type ObservedEvent, type SymbolGroup, toHex } from "../../../src/features/token-metadata/state.js";
 
 export type Json = Record<string, unknown>;
 
@@ -25,7 +19,7 @@ function int(v: unknown, what: string): number {
   return v;
 }
 
-// ── Request parsing and response shapes, shared with the Postgres adapter (`vector-adapter-pg.ts`) ────────────────
+// ── Request parsing and response shapes ────────────────
 
 /** A `decode` request's event. */
 export function decodeInput(req: Json): { type: string; name: Uint8Array; payload: Uint8Array } {
@@ -147,20 +141,3 @@ export function handleRequest(req: unknown): Json {
     return { id: id ?? null, error: (e as Error).message };
   }
 }
-
-/** Reads one JSON request per line from stdin and writes one JSON response per line to stdout. */
-export function main(): void {
-  const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
-  rl.on("line", (line) => {
-    let req: unknown;
-    try {
-      req = JSON.parse(line);
-    } catch (e) {
-      process.stdout.write(`${JSON.stringify({ id: null, error: `invalid JSON: ${(e as Error).message}` })}\n`);
-      return;
-    }
-    process.stdout.write(`${JSON.stringify(handleRequest(req))}\n`);
-  });
-}
-
-if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) main();

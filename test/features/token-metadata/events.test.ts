@@ -1,14 +1,14 @@
 import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { TokenMetadataLogError } from "../../../src/features/token-metadata/apply.ts";
-import { miscAtom, UnknownLogSerialization } from "../../../src/features/token-metadata/log-reader.ts";
-import { tokenMetadataWith } from "../../../src/features/token-metadata/token-metadata.ts";
+import { TokenMetadataLogError } from "../../../src/features/token-metadata/apply.js";
+import { miscAtom, UnknownLogSerialization } from "../../../src/features/token-metadata/log-reader.js";
+import { tokenMetadataWith } from "../../../src/features/token-metadata/token-metadata.js";
 import {
   commonRecords,
   encodePayload,
   EVENT_NAME,
   fromHex,
-} from "../../../src/features/token-metadata/vendor/mip0018/codec/src/index.ts";
+} from "../../../src/features/token-metadata/codec/index.js";
 import type { ModuleDeclaration } from "../../../src/modules/declaration.js";
 import * as v9 from "../../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../../runner/process-backends.js";

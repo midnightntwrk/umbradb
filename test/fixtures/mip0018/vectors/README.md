@@ -1,7 +1,8 @@
 # MIP-0018 test vectors
 
 Language-neutral fixtures for every normative test of **MIP-0018 On-Chain Token Metadata Emission**, plus informative
-extras, a JSON Schema for each format, an independent generator and a runner any consumer can implement.
+extras, and a JSON Schema for each format. `token-metadata` runs them with `test/features/token-metadata/vector-tools/`
+(`vectors.test.ts`, `state-vectors.test.ts`).
 
 | | |
 |---|---|
@@ -24,9 +25,6 @@ labelled informative.
 | `informative/zero-extension/` | The MIP's Consuming rule: a `name` or `payload` with its trailing zero bytes dropped, as some sources return it, gives exactly the full form's result; a 257-byte payload is rejected and a 33-byte name is another name |
 | `schema/` | JSON Schemas (2020-12): `payload.schema.json`, `state.schema.json`, `runner.schema.json` (protocol), `manifest.schema.json` |
 | `manifest.json` | MIP pin, event name, counts, and every vector with its MIP test id and normative flag |
-| `tools/generate.ts` | The generator (`--check` mode for CI) |
-| `tools/run.ts` | The runner (`--consumer "<cmd>"`) |
-| `tools/validate.ts` | Schema validation of every file |
 
 ## Test id → vectors
 
@@ -144,30 +142,9 @@ A consumer in any language is tested by a small adapter program:
    integrity (`SHA256SUMS`) or harness errors. Informative failures are reported but do not change the exit status.
    The JSON report (`--json`) lists the not-applicable checks under `notApplicable`.
 
-Run it (Node ≥ 24; from the repository root):
-
-```sh
-node vectors/tools/run.ts --consumer "node packages/consumer/bin/vector-adapter.js"
-node vectors/tools/run.ts --consumer "./my-wallet-adapter" --normative-only --notes --json report.json
-node vectors/tools/run.ts --consumer "…" --only S3,S4a   # by MIP test id or vector id
-```
-
-The reference adapter is `packages/consumer/bin/vector-adapter.js`; it is about 100 lines and a template for other
-languages.
-
-## Generating and checking
-
-`tools/generate.ts` writes every fixture, `manifest.json` and `SHA256SUMS`; `--check` regenerates in memory and fails
-on any difference or stale file (run in CI). It is an **independent oracle**: payloads are built by explicit byte
-arithmetic and every expected result is written by hand — no decoder, no reducer, nothing imported from
-`packages/codec` or `packages/consumer`. It also checks A1 against a literal transcription of the MIP's Appendix A,
-the MIP's stated offsets (A1: 33/50/63/75/95; S1: 33/41/48) and the URI verdicts against the two independent grammars
-of the investigation.
-
-```sh
-node vectors/tools/generate.ts --check
-node vectors/tools/validate.ts
-```
+In this repository the runner is `test/features/token-metadata/vector-tools/runner-core.ts`, called in process
+(`runVectors`) with `test/features/token-metadata/vector-adapter.ts` as the consumer; `SHA256SUMS` is checked first
+(`vector-tools/common.ts`, `verifySums`).
 
 ## Informative vectors and repository conventions
 

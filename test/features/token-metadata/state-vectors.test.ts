@@ -1,19 +1,19 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ContractLog } from "../../../src/backbone/contract-logs/contract-logs.js";
 import type { LogEventType } from "../../../src/ledger/types.js";
-import { servedGroups, servedIdentities } from "../../../src/features/token-metadata/read.ts";
-import { displayAmount, MetadataState } from "../../../src/features/token-metadata/state.ts";
-import { fromHex } from "../../../src/features/token-metadata/vendor/mip0018/codec/src/index.ts";
+import { servedGroups, servedIdentities } from "../../../src/features/token-metadata/read.js";
+import { displayAmount, MetadataState } from "../../../src/features/token-metadata/state.js";
+import { fromHex } from "../../../src/features/token-metadata/codec/index.js";
 import { PGlite } from "@electric-sql/pglite";
 import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../../runner/process-backends.js";
 import { cellData, log, runTo } from "./harness.js";
-import { type Json, stateInput, stateResponse } from "./vector-adapter.ts";
-import { compareState } from "../../fixtures/mip0018/vectors/tools/compare.ts";
-import { loadVectors, requestFor } from "../../fixtures/mip0018/vectors/tools/runner-core.ts";
+import { type Json, stateInput, stateResponse } from "./vector-adapter.js";
+import { compareState } from "./vector-tools/compare.js";
+import { loadVectors, requestFor } from "./vector-tools/runner-core.js";
 
 /**
- * Every vendored state vector (normative and informative), through `token-metadata` in the real process on
- * PostgreSQL 18 and PGlite, gives its expected state; and it equals the proof of concept's pure `MetadataState` on the
+ * Every MIP-0018 reference state vector (normative and informative), through `token-metadata` in the real process on
+ * PostgreSQL 18 and PGlite, gives its expected state; and it equals the pure `MetadataState` on the
  * same steps.
  *
  * **How a vector becomes a chain.** Each network of a vector is a database of its own (a database holds one chain).
@@ -33,7 +33,7 @@ interface Vector {
   readonly expect: Json;
 }
 
-/** Every state vector of the vendored manifest, normative and informative (no state vector has an UmbraDB version). */
+/** Every state vector of the reference manifest, normative and informative (no state vector has an UmbraDB version). */
 const vectors: Vector[] = loadVectors({ informative: true })
   .filter((v) => v.entry.kind === "state")
   .map((v) => ({ id: v.entry.id, normative: v.entry.normative, request: requestFor(v), expect: v.data.expect as Json }));
@@ -120,7 +120,7 @@ function comparable(response: Json): Json {
 }
 
 describe("the vectors at hand", () => {
-  it("are every state vector of the vendored manifest (S1–S9 and the informative ones)", () => {
+  it("are every state vector of the reference manifest (S1–S9 and the informative ones)", () => {
     expect(vectors.length).toBe(36);
     expect(vectors.filter((v) => v.normative).length).toBe(27);
     expect(vectors.map((v) => v.id)).toEqual(expect.arrayContaining(["S1a", "S3d", "S4a", "S4b", "S6a", "S7a", "S8", "S9d", "INF-ZEXT-S1"]));

@@ -1,13 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { registerMetadataApi } from "../../../src/features/token-metadata/api.ts";
-import { commonRecords } from "../../../src/features/token-metadata/vendor/mip0018/codec/src/index.ts";
+import { registerMetadataApi } from "../../../src/features/token-metadata/api.js";
+import { commonRecords } from "../../../src/features/token-metadata/codec/index.js";
 import type { ReadHandle } from "../../../src/db/api.js";
 import type { ApiRegistry } from "../../../src/modules/declaration.js";
 import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../../runner/process-backends.js";
 import { blockLogs, contract, domain, eventData, readStopped, runTo } from "./harness.js";
 
 /**
- * Bounded cost, the proof of concept's `[[mip0018.api.bounded-cost]]` ported, on PostgreSQL 18 and PGlite.
+ * Bounded cost of the API, on PostgreSQL 18 and PGlite.
  * Chain-controlled cardinalities are written straight into the module's tables of a stopped database — an identity with
  * 10,000 keys, 10,000 rejected events of its contract, and 1,000 identities of that contract sharing its symbol — then
  * the API's handlers answer through a read handle that counts the rows each answer reads back. Every answer is small

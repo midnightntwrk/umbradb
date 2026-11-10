@@ -1,5 +1,5 @@
 {
- "about": "The MIP-0018 proof of concept's API answers (acedward/umbradb PR #26 at 760d3e9), range idx (714485–715183), recorded by record-answers.test.ts",
+ "about": "The expected token-metadata API answers on the stagenet range idx (714485–715183)",
  "range": {
   "name": "idx",
   "from": 714485,
@@ -16,7 +16,7 @@
     "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
     "referrer-policy": "no-referrer"
    },
-   "body": "{\"network\":\"stagenet\",\"genesisHash\":\"0x2f76825abc239fecf6107c9df99016de57037b451ae57a4394b76c8cf53a9491\",\"startHeight\":714485,\"indexedHeight\":715183,\"archiveHeight\":715183,\"mip\":{\"id\":\"MIP-0018\",\"repository\":\"midnightntwrk/midnight-improvement-proposals\",\"commit\":\"eb94bc182221cd937a84ed66a5f903b060f165ab\",\"path\":\"mips/mip-0018-on-chain-token-metadata.md\",\"sha256\":\"8d4204e7aa24428faa44740ba99612f5556f628347c50e38903e4bea83f17245\",\"url\":\"https://github.com/midnightntwrk/midnight-improvement-proposals/blob/eb94bc182221cd937a84ed66a5f903b060f165ab/mips/mip-0018-on-chain-token-metadata.md\",\"pr\":\"https://github.com/midnightntwrk/midnight-improvement-proposals/pull/372\"},\"vendored\":{\"repository\":\"https://github.com/midnight-experiments/mip-0018\",\"commit\":\"e8295792d9363be37ff2f7f716c740fcdf3f195e\"},\"scanner\":\"off\",\"unresolvedEvents\":0}"
+   "body": "{\"network\":\"stagenet\",\"genesisHash\":\"0x2f76825abc239fecf6107c9df99016de57037b451ae57a4394b76c8cf53a9491\",\"startHeight\":714485,\"indexedHeight\":715183,\"archiveHeight\":715183,\"mip\":{\"id\":\"MIP-0018\",\"repository\":\"midnightntwrk/midnight-improvement-proposals\",\"commit\":\"eb94bc182221cd937a84ed66a5f903b060f165ab\",\"path\":\"mips/mip-0018-on-chain-token-metadata.md\",\"sha256\":\"8d4204e7aa24428faa44740ba99612f5556f628347c50e38903e4bea83f17245\",\"url\":\"https://github.com/midnightntwrk/midnight-improvement-proposals/blob/eb94bc182221cd937a84ed66a5f903b060f165ab/mips/mip-0018-on-chain-token-metadata.md\",\"pr\":\"https://github.com/midnightntwrk/midnight-improvement-proposals/pull/372\"},\"reference\":{\"repository\":\"https://github.com/midnight-experiments/mip-0018\",\"commit\":\"e8295792d9363be37ff2f7f716c740fcdf3f195e\"},\"scanner\":\"off\",\"unresolvedEvents\":0}"
   },
   {
    "path": "/v1/tokens?limit=500",

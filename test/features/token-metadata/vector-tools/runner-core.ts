@@ -3,8 +3,8 @@
 // in-process tests (the reference consumer, rule mutations).
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { MANIFEST_FILE, VECTORS_DIR } from './common.ts';
-import { compareDecode, compareState, type Comparison } from './compare.ts';
+import { MANIFEST_FILE, VECTORS_DIR } from './common.js';
+import { compareDecode, compareState, type Comparison } from './compare.js';
 
 export type Json = Record<string, unknown>;
 

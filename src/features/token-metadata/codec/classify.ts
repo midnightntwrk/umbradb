@@ -1,9 +1,9 @@
 // Event classification (MIP "Event"): ignore anything that is not a `Misc` event with the exact v1 name; otherwise
 // decode the payload and accept or reject the whole event.
-import { EVENT_NAME, type IgnoreReason, MISC_EVENT_TYPE, NAME_SIZE, PAYLOAD_SIZE, type RejectReason } from './constants.ts';
-import { decodePayloadWith, type DecodedRecord, type Header } from './decode.ts';
-import { bytesEqual, zeroExtend } from './hex.ts';
-import { ALL_CODEC_RULES, type CodecRules } from './rules.ts';
+import { EVENT_NAME, type IgnoreReason, MISC_EVENT_TYPE, NAME_SIZE, PAYLOAD_SIZE, type RejectReason } from './constants.js';
+import { decodePayloadWith, type DecodedRecord, type Header } from './decode.js';
+import { bytesEqual, zeroExtend } from './hex.js';
+import { ALL_CODEC_RULES, type CodecRules } from './rules.js';
 
 export interface ObservedMisc {
   /** MIP-0002 `LogEventType` name, e.g. `Misc`. */

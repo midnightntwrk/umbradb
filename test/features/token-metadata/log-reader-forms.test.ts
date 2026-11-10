@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { miscAtom, STATE_VALUE_TAG, UnknownLogSerialization } from "../../../src/features/token-metadata/log-reader.ts";
+import { miscAtom, STATE_VALUE_TAG, UnknownLogSerialization } from "../../../src/features/token-metadata/log-reader.js";
 import { cellData } from "./harness.js";
 
 /**
- * The log reader on the encodings a cell can take that the stagenet logs and the vendored packages' normal output do
+ * The log reader on the encodings a cell can take that the stagenet logs and the ledger packages' normal output do
  * not show: SCALE compact integers in their two- and four-byte forms (and the big-integer form, which no length here
  * can take), the ledger's flagged ints in their three-byte form, and the malformed variants of each, which give no
  * candidate rather than a throw; and a tag cut short of its `:`. Each test builds the data with {@link encode}, whose
- * one-byte forms give exactly what the vendored v9 package writes.
+ * one-byte forms give exactly what the v9 ledger package writes.
  */
 
 const PREFIX = new TextEncoder().encode(`midnight:${STATE_VALUE_TAG}:`);
@@ -47,9 +47,9 @@ function encode(node: readonly number[], form: 1 | 2 | 4 | "big" = node.length <
 const atom = (n: number) => Array.from({ length: n }, (_, i) => 0x41 + (i % 26));
 
 describe("the log reader on every form of its integers", () => {
-  it("reads the one-byte forms as the vendored package writes them (the encoder's baseline)", () => {
+  it("reads the one-byte forms as the ledger package writes them (the encoder's baseline)", () => {
     expect(miscAtom(encode(valueNode(atom(5))))).toEqual(Uint8Array.from(atom(5)));
-    // A real cell of the same atom, as the vendored v9 package serializes it, reads the same.
+    // A real cell of the same atom, as the v9 ledger package serializes it, reads the same.
     expect(miscAtom(cellData(Uint8Array.from(atom(5))))).toEqual(Uint8Array.from(atom(5)));
   });
 

@@ -1,6 +1,6 @@
 import net from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { commonRecords, record } from "../../../src/features/token-metadata/vendor/mip0018/codec/src/index.ts";
+import { commonRecords, record } from "../../../src/features/token-metadata/codec/index.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../../runner/process-backends.js";
 import { blockLogs, contract, domain, eventData, get, serve } from "./harness.js";
 

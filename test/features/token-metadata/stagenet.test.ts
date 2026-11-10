@@ -1,11 +1,11 @@
 import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { candidatesOf } from "../../../src/features/token-metadata/apply.ts";
-import { markJson, toAsciiJson } from "../../../src/features/token-metadata/api.ts";
-import { servedGroups, servedIdentities } from "../../../src/features/token-metadata/read.ts";
-import { COMMON_KEY_HEX, type IdentityState, isCommonKey, parseStandards } from "../../../src/features/token-metadata/state.ts";
-import { TOKEN_METADATA } from "../../../src/features/token-metadata/token-metadata.ts";
+import { candidatesOf } from "../../../src/features/token-metadata/apply.js";
+import { markJson, toAsciiJson } from "../../../src/features/token-metadata/api.js";
+import { servedGroups, servedIdentities } from "../../../src/features/token-metadata/read.js";
+import { COMMON_KEY_HEX, type IdentityState, isCommonKey, parseStandards } from "../../../src/features/token-metadata/state.js";
+import { TOKEN_METADATA } from "../../../src/features/token-metadata/token-metadata.js";
 import { defineModule, type ModuleDeclaration } from "../../../src/modules/declaration.js";
 import { FAST_CORE } from "../../backbone/contract-data-checks.js";
 import { committed, type Ingest, ingest } from "../../backbone/ingest-harness.js";
@@ -16,8 +16,7 @@ import type { TapeRecord } from "../../../tools/tape/index.js";
 /**
  * The stagenet tapes through `token-metadata` with `core-contract-logs-fast`, on PostgreSQL 18 and PGlite.
  *
- * **The cases** — every case of the proof of concept's fixtures as its `mip0018-cases.test.ts` compares it, with
- * `cases-umbradb/`'s amendments: each case at its own last block equals its expectation while every later case is
+ * **The cases** — every stagenet case of `test/fixtures/mip0018/cases/`, with `cases-umbradb/`'s amendments: each case at its own last block equals its expectation while every later case is
  * still absent (C09 equals C01; U1 at its last block); C06 after each step; the v1-named events of IDX and U1 equal
  * the reference index's (`index-summary.json`, with its differences); IDX's identity entries; the mark of every case
  * identity equals the mark rule applied to the expectations and the reference's rejections; no unresolved site.
@@ -25,9 +24,9 @@ import type { TapeRecord } from "../../../tools/tape/index.js";
  * `ignored` counts are those of the contract's other `Misc` logs, which the module does not store, read from
  * `contract_logs.logs`.
  *
- * **The recorded answers** — the proof of concept's recorded answers (`test/fixtures/mip0018-answers/`) requested at the end of each
- * range: each body equals the recorded one byte for byte (both written by the same ASCII JSON writer) once this port's
- * differences are applied to the recorded one (see {@link expectedOf}).
+ * **The recorded answers** — the expected API answers on the same ranges (`test/fixtures/mip0018-answers/`), requested
+ * at the end of each range: each body equals the recorded one byte for byte (both written by the same ASCII JSON
+ * writer) once what the module does not serve yet is applied to the recorded one (see {@link expectedOf}).
  *
  * **S.** The tapes start mid-chain, at 714,485 and 715,402. Startup asks for the genesis block's hash and header, which
  * a mid-chain tape does not hold, so they are put before its records (`fixtures/stagenet-genesis.json`, from the
@@ -94,7 +93,7 @@ function expectation<T>(path: string): T {
   }
 }
 
-/** A reference index summary with UmbraDB's differences applied (the proof of concept's `readIndexSummary`). */
+/** A reference index summary with UmbraDB's differences applied. */
 function indexSummary(range: "IDX" | "U1"): IndexSummary {
   const summary = json<IndexSummary>(new URL(`cases/${range}/index-summary.json`, FIXTURES));
   let diff: { events: { contractAddress: string; height: number; txIndex: number; eventIndex: number; result: string; reason: string }[] };
@@ -161,7 +160,7 @@ async function replay(backend: ProcessBackend, tape: string, from: number, to: n
   return { run, db, origin: `http://${api.host.includes(":") ? `[${api.host}]` : api.host}:${api.port}`, states };
 }
 
-// ── The proof of concept's comparison of a case (`caseDifferences`) ─────────────────────────────────────────────
+// ── The comparison of a case (`caseDifferences`) ───────────────────────────────────────────────────────────────
 
 /** Usable common values in the expected-state shape. */
 function commonOf(id: IdentityState): Record<string, unknown> {
@@ -238,10 +237,10 @@ async function caseDifferences(r: Replay, height: number, contract: string, expe
   return d;
 }
 
-// ── the differences from the proof of concept applied to a recorded answer ──────────────────────────────────────────────────────
+// ── What the module does not serve yet, applied to a recorded answer ─────────────────────────────────────────────
 
 const MASKED = "<differs>";
-/** Fields this port serves differently everywhere they appear. */
+/** Fields the module does not serve yet (or serves otherwise), everywhere they appear. */
 const MASKED_KEYS = new Set(["minted", "firstSeen", "evidence", "color", "image", "segment", "phase", "seen"]);
 
 function mask(value: unknown): unknown {
@@ -255,7 +254,7 @@ const notFound = (message: string) => ({ status: 404, body: { error: { code: "NO
 const described = (item: Json): boolean => item.source !== "seen" && !(item.source === "identity" && item.described === false);
 
 /**
- * The answer this port gives for a recorded one: identities known only from a mint (never described) and `seen` rows are
+ * The answer the module gives for a recorded one: identities known only from a mint (never described) and `seen` rows are
  * not served, so a list drops them, an identity or a color only they give is 404, and a lookup that resolved to one is
  * `not-minted-in-indexed-range`; a contract the module saw no MIP-0018 event or field of is 404; the status's
  * `scanner` and the start height (see the module comment) are masked.
@@ -298,10 +297,10 @@ function oursOf(path: string, status: number, body: Json): { status: number; bod
 // ── The tests ───────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * The recorded answers this port's differences change beyond masking, all from the module having no mint table: the routes of the one
+ * The recorded answers that what the module does not serve yet changes beyond masking, all from the module having no mint table: the routes of the one
  * token minted in the range and never described (contract `7771c9e5…`, color `e5afe273…`, minted at 714,802; no
- * case's), and the lookups of a color held as a kind that was minted but never described, which the proof of concept
- * answers with that undescribed identity and this port with `not-minted-in-indexed-range`.
+ * case's), and the lookups of a color held as a kind that was minted but never described, which the recorded answer
+ * gives as that undescribed identity and the module as `not-minted-in-indexed-range`.
  */
 const EXPECTED_CHANGES: string[] = [
   "idx /v1/contracts/7771c9e5/tokens 200->404",
@@ -471,14 +470,14 @@ const TAPES_PRESENT = findTape("stagenet-714485-715183").found && findTape("stag
     expect(seen).toEqual(["publish:ok", "rename:ok", "withdraw:partial(name)", "withdraw-again:partial(name)", "revive:ok"]);
   });
 
-  it("the recorded answers, with the differences from the proof of concept, equal the module's byte for byte", async () => {
+  it("the recorded answers, with what the module does not serve yet applied, equal the module's byte for byte", async () => {
     const differences: string[] = [];
     const changed: string[] = [];
     let compared = 0;
     for (const [file, r] of [["idx", replays.idx], ["u1", replays.u1]] as const) {
       const answers = json<{ answers: Answer[] }>(new URL(`${file}.json`, ANSWERS)).answers;
       const events = new Map(answers.filter((a) => a.path.startsWith("/v1/events?contract=")).map((a) => [a.path.slice(20, 84), JSON.parse(a.body) as Json]));
-      // The token list in pages of 2: page boundaries move with the rows this port drops, so the pages are compared joined.
+      // The token list in pages of 2: page boundaries move with the rows the module does not serve, so the pages are compared joined.
       const recordedPages = answers.filter((a) => a.path.startsWith("/v1/tokens?limit=2"));
       const ourPages: Json[] = [];
       let cursor: string | null = null;
@@ -507,7 +506,7 @@ const TAPES_PRESENT = findTape("stagenet-714485-715183").found && findTape("stag
     }
     expect(differences).toEqual([]);
     expect(compared).toBe(89 + 12);
-    // What this port's differences changed in the recorded answers: the minted-only identity's own routes and its color's.
+    // What the module's unserved fields changed in the recorded answers: the minted-only identity's own routes and its color's.
     expect(changed.sort()).toEqual(EXPECTED_CHANGES);
     // [NEG] A recorded answer with one changed byte of a name is not ours.
     const answer = json<{ answers: Answer[] }>(new URL("idx.json", ANSWERS)).answers.find((a) => a.path.startsWith("/v1/identities/"))!;

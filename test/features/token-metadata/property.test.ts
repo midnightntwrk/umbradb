@@ -1,18 +1,18 @@
 import fc from "fast-check";
 import { z } from "zod";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { servedGroups, servedIdentities } from "../../../src/features/token-metadata/read.ts";
-import { MetadataState, type ObservedEvent } from "../../../src/features/token-metadata/state.ts";
-import { TOKEN_METADATA } from "../../../src/features/token-metadata/token-metadata.ts";
+import { servedGroups, servedIdentities } from "../../../src/features/token-metadata/read.js";
+import { MetadataState, type ObservedEvent } from "../../../src/features/token-metadata/state.js";
+import { TOKEN_METADATA } from "../../../src/features/token-metadata/token-metadata.js";
 import { defineModule, type ModuleDeclaration } from "../../../src/modules/declaration.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../../runner/process-backends.js";
 import { build, chainArb, NETWORK, S } from "./chains.js";
 import { runTo } from "./harness.js";
-import { stateResponse } from "./vector-adapter.ts";
+import { stateResponse } from "./vector-adapter.js";
 
 /**
  * For generated chains — valid, invalid and foreign-named candidates, several per block and per
- * field, tombstones and withdrawals — the module's served state after every block equals the proof of concept's
+ * field, tombstones and withdrawals — the module's served state after every block equals the pure
  * `state.ts` applied to the same events as a reference model. A probe module reads the served state inside each
  * block's transaction, after `token-metadata` wrote it. **Negative control:** the model applying each block's events
  * in reverse log order differs from the module on the generated chains. Unresolved sites join with

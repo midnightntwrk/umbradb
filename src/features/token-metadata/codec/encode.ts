@@ -1,8 +1,8 @@
 // Payload encoding: header ‖ records ‖ zero padding (MIP "Payload"). The encoder only produces payloads a conforming
 // consumer accepts: it validates the header, every record and the total size before writing anything.
-import { DOMAIN_SEP_SIZE, KIND_OFFSET, PAYLOAD_SIZE, RECORDS_OFFSET, ValType } from './constants.ts';
-import type { Header, MetadataRecord } from './decode.ts';
-import { checkValue, encodeUint, minimalUintWidth } from './values.ts';
+import { DOMAIN_SEP_SIZE, KIND_OFFSET, PAYLOAD_SIZE, RECORDS_OFFSET, ValType } from './constants.js';
+import type { Header, MetadataRecord } from './decode.js';
+import { checkValue, encodeUint, minimalUintWidth } from './values.js';
 
 /** The records do not fit in 256 bytes. */
 export class PayloadTooLarge extends Error {

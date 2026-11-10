@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { tokenColor } from "../../../src/features/token-metadata/color.ts";
-import { commonRecords, record, toHex, withdrawRecords } from "../../../src/features/token-metadata/vendor/mip0018/codec/src/index.ts";
+import { tokenColor } from "../../../src/features/token-metadata/color.js";
+import { commonRecords, record, toHex, withdrawRecords } from "../../../src/features/token-metadata/codec/index.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../../runner/process-backends.js";
 import { blockLogs, contract, domain, eventData, get, serve } from "./harness.js";
 
@@ -11,7 +11,7 @@ import { blockLogs, contract, domain, eventData, get, serve } from "./harness.js
  *   with `name` only (read here: only `name`).
  * - **S5, S12**: unusable values after usable ones: each served unusable, `common` null, no earlier value.
  * - **S11**: a 70-character `name` and a 15-character `symbol` served as 64 and 12, stored whole; two symbols that
- *   share their first 12 characters group together, as in the proof of concept.
+ *   share their first 12 characters group together.
  * - **Only undefined keys**: an identity whose only field is `foo` is referenced nowhere; its event is accepted.
  */
 
@@ -91,7 +91,7 @@ describe.each(PROCESS_BACKENDS)("the withdrawal, usability and truncation scenar
         const z = (await at(path(Z, 1))).json;
         expect(z.common).toMatchObject({ name: "N".repeat(64), symbol: "ABCDEFGHIJKL" });
         expect(z.fields.find((f: { key: { utf8: string } }) => f.key.utf8 === "name").value.text).toHaveLength(64);
-        // Grouped by the served (cut) symbol, as the proof of concept, which stored it cut, groups.
+        // Grouped by the served (cut) symbol.
         expect(z.group).toEqual({
           symbol: { hex: hex(text("ABCDEFGHIJKL")), utf8: "ABCDEFGHIJKL" },
           memberCount: 2,

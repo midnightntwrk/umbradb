@@ -1,22 +1,22 @@
 /**
- * UmbraDB's classification wrapper (`mip0018/classify.ts`): MIP-0018 "Keys MUST be valid UTF-8" (Testing R5: invalid
- * UTF-8 in a key rejects the whole event) on top of the vendored codec, which checks UTF-8 for values only.
+ * UmbraDB's classification (`src/features/token-metadata/classify.ts`): MIP-0018 "Keys MUST be valid UTF-8" (Testing R5: invalid
+ * UTF-8 in a key rejects the whole event) on top of the codec, which checks UTF-8 for values only.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { classifyMip0018Event, isUtf8 } from "../../../src/features/token-metadata/classify.ts";
-import { MetadataState } from "../../../src/features/token-metadata/state.ts";
-import { classifyEvent, EVENT_NAME, encodePayload, type MetadataRecord, record } from "../../../src/features/token-metadata/vendor/mip0018/codec/src/index.ts";
+import { classifyMip0018Event, isUtf8 } from "../../../src/features/token-metadata/classify.js";
+import { MetadataState } from "../../../src/features/token-metadata/state.js";
+import { classifyEvent, EVENT_NAME, encodePayload, type MetadataRecord, record } from "../../../src/features/token-metadata/codec/index.js";
 
 const DS = new Uint8Array(32).fill(0x11);
 const misc = (records: MetadataRecord[]) => ({ type: "Misc", name: EVENT_NAME, payload: encodePayload({ domainSep: DS, kind: 3 }, records) });
 const hex = (h: string): Uint8Array => Uint8Array.from(Buffer.from(h, "hex"));
 
 describe("MIP-0018 classification: keys MUST be valid UTF-8", () => {
-  it("[[mip0018.classify.utf8-keys]] a non-UTF-8 key rejects the whole event (invalid-utf8 at that record) where the vendored codec alone accepts it; NUL and multi-byte keys stay accepted; the codec's own rejections pass through unchanged; every UmbraDB path classifies through the wrapper", () => {
-    // The vendored codec accepts a non-UTF-8 key (it checks values only): the negative control the wrapper exists for.
+  it("a non-UTF-8 key rejects the whole event (invalid-utf8 at that record) where the codec alone accepts it; NUL and multi-byte keys stay accepted; the codec's own rejections pass through unchanged; every UmbraDB path classifies through the wrapper", () => {
+    // The codec alone accepts a non-UTF-8 key (it checks values only): the negative control the wrapper exists for.
     // A codec that enforces the rule itself fails this line; the wrapper's own check is then redundant.
     const one = misc([record.utf8(hex("ff6b6579"), "ok")]);
     expect(classifyEvent(one).result).toBe("accept");

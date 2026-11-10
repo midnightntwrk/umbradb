@@ -1,13 +1,13 @@
 /**
  * The SQL of `token-metadata`: its schema, migration `001` and the statements of its write path.
  *
- * **The tables** (schema `token_metadata`), after the proof of concept's `001_mip0018_core` without its `network`
- * column (a database holds one chain), its raw `name`/`payload` (it recomputed after a rollback; UmbraDB follows
- * finalized blocks only, RN-14), and its activity listing (a later change):
+ * **The tables** (schema `token_metadata`). There is no `network` column (a database holds one chain), no raw
+ * `name`/`payload` (nothing is recomputed: UmbraDB follows finalized blocks only, RN-14), and no activity listing (a
+ * later change):
  *
  * - `events`, append-only: one row per MIP-0018 candidate at its chain position — height, the transaction's index in
- *   the block and its hash (from `block-parsed`, indexed for `/v1/events?tx=`), and `event_index`, the log's position among its transaction's logs (the proof of concept's
- *   `eventIndex`). Its classification is `accept`, `reject` or `unresolved` (an unresolved site of
+ *   the block and its hash (from `block-parsed`, indexed for `/v1/events?tx=`), and `event_index`, the log's position among its transaction's logs (`eventIndex`
+ *   in the API). Its classification is `accept`, `reject` or `unresolved` (an unresolved site of
  *   `fast-logs-unresolved`; an `ignore`d log is not stored); `reason` is null iff `accept`; an accepted event's identity is its `domain_sep` and `kind`. `entry_point` keeps the first 128 bytes.
  * - `fields`, mutable: one row per field of an identity, holding only its current value, whole (names and
  *   symbols are cut when served, never when stored). `uint_value` is a `UInt` value as a number; `usable` is the

@@ -1,14 +1,13 @@
 /**
  * UmbraDB's MIP-0018 metadata state rules — one pure module (no database, no I/O), used by the pure vector adapter
- * and, through `recordEffects` (with `fieldUsable`), `symbolGroups`, `displayAmount` and `tokenMark`, by the Postgres
- * apply path (`fields.ts`) and its read helpers (`metadata.ts`) — so both paths share every rule.
+ * and, through `recordEffects` (with `fieldUsable`), `symbolGroups`, `displayAmount` and `tokenMark`, by the database
+ * write path (`apply.ts`) and its reads (`read.ts`) — so both paths share every rule.
  *
  * Authority: MIP-0018 as merged from PR #372 (per-key tombstones), sections "Keys", "Applying records", "Common fields" and
  * "Symbol grouping": only the latest value per key, no history; groups of two or more members; a Null record deletes
  * its key's row; only defined keys are served and make an identity exist; an identity without a defined key is not
- * referenced anywhere; plus UmbraDB's ✓/⚠ marks. Classification is `classify.ts` (the vendored reference codec,
- * verbatim in `token-indexer/vendor/mip0018/codec`, plus the UTF-8 key rule); everything below is UmbraDB's own code —
- * the reference consumer is not used.
+ * referenced anywhere; plus UmbraDB's ✓/⚠ marks. Classification is `classify.ts` (the codec, `./codec/`, plus the
+ * UTF-8 key rule).
  *
  * - Applying records: accepted events in chain order (block, transaction, event, then record). A non-Null record
  *   sets its field's current value (latest wins; the replaced value is dropped, never a fallback). A Null record
@@ -35,8 +34,8 @@ import {
   type Header,
   toHex,
   ValType,
-} from "./vendor/mip0018/codec/src/index.ts";
-import { classifyMip0018Event } from "./classify.ts";
+} from "./codec/index.js";
+import { classifyMip0018Event } from "./classify.js";
 
 // ── Common fields ────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -329,7 +328,7 @@ export class MetadataState {
     this.standardKeys = standardKeys;
   }
 
-  /** Classifies an event with the vendored codec and, when accepted, applies its records. */
+  /** Classifies an event with the codec and, when accepted, applies its records. */
   apply(event: ObservedEvent): Classification {
     const previous = this.last.get(event.network);
     if (previous !== undefined && comparePosition(event.position, previous) <= 0)

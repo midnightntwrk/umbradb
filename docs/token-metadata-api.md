@@ -1,11 +1,9 @@
 # `token-metadata`'s `/v1` API
 
-The read-only JSON API of the `token-metadata` module (MIP-0018 token metadata). It is the API of the MIP-0018 proof of
-concept, [acedward/umbradb PR #26](https://github.com/acedward/umbradb/pull/26) at
-`760d3e9c8a060577257ca3b2c42dd09a680e70f8` (its `token-indexer/API.md`), ported onto UmbraDB's module API: the same
-paths, parameters, JSON shapes, errors, pagination and limits, except where [What this port serves
-differently](#what-this-port-serves-differently) says. The proof of concept's recorded answers on stagenet are compared
-with this module's byte for byte, with those differences applied (`test/features/token-metadata/stagenet.test.ts`).
+The read-only JSON API of the `token-metadata` module (MIP-0018 token metadata): its paths, parameters, JSON shapes,
+errors, pagination and limits. A few fields and routes are not served yet ([Not served yet](#not-served-yet)). The
+recorded answers on stagenet (`test/fixtures/mip0018-answers/`) are compared with the module's byte for byte, with those
+fields masked (`test/features/token-metadata/stagenet.test.ts`).
 
 Authority: [MIP-0018](https://github.com/midnightntwrk/midnight-improvement-proposals/blob/eb94bc182221cd937a84ed66a5f903b060f165ab/mips/mip-0018-on-chain-token-metadata.md)
 at `eb94bc182221cd937a84ed66a5f903b060f165ab`, as merged from [PR #372](https://github.com/midnightntwrk/midnight-improvement-proposals/pull/372).
@@ -161,7 +159,7 @@ UmbraDB knows its genesis hash (`mainnet`, `preprod`, `preview`, `stagenet`), el
   "genesisHash": "0x2f76825abc239fecf6107c9df99016de57037b451ae57a4394b76c8cf53a9491",
   "startHeight": 714486, "indexedHeight": 715183, "archiveHeight": 715183,
   "mip": { "id": "MIP-0018", "repository": "midnightntwrk/midnight-improvement-proposals", "commit": "eb94bc18…", "path": "…", "sha256": "…", "url": "…", "pr": "…" },
-  "vendored": { "repository": "https://github.com/midnight-experiments/mip-0018", "commit": "e8295792d9363be37ff2f7f716c740fcdf3f195e" },
+  "reference": { "repository": "https://github.com/midnight-experiments/mip-0018", "commit": "e8295792d9363be37ff2f7f716c740fcdf3f195e" },
   "scanner": "following",
   "unresolvedEvents": 0
 }
@@ -216,20 +214,17 @@ least), in chain order:
 
 `reason` is `null` for an accepted event. `txHash` is the transaction's hash (from `block-parsed`).
 
-## What this port serves differently
+## Not served yet
 
-From the proof of concept's contract, until the changes that add them:
+Until the changes that add them:
 
-| Field or route | This port | The proof of concept | Comes with |
+| Field or route | Served now | Served later | Comes with |
 |---|---|---|---|
 | `minted`, `firstSeen`, `evidence` | `null`, `null`, `[]` | a token's mints and sightings | the activity change |
 | `seen` rows, `/v1/tokens/{color}` of a minted, undescribed color | none, 404 | listed, answered | the activity change |
 | An identity minted but never described | not listed; its routes 404 | listed with `described: false` | the activity change |
-| `color` | the computed color of a described kind 1 or 2 identity | its first mint's color, else `null` | — |
 | `/v1/lookup` | the held kind's described identity of that color, else `not-minted-in-indexed-range` | through the mint table | the activity change |
 | `image` | `{ url, status: "pending", imageUrl: null }`; no `/v1/images/{id}` | a background fetcher's result | the image change |
 | `/v1/tokens/{color}/activity`, `/v1/contracts/{address}/activity` | not served | served | the activity change |
-| `/v1/events` `segment`, `phase` | `null` | the log's segment and phase | — |
-| `/v1/status` | `startHeight` S, both heights the committed height, `scanner` `following` | the scan's and the archive's heights | — |
-| `/v1/contracts/{address}/tokens` of a contract | 404 without a MIP-0018 event or field | known from any applied call | — |
-| Errors outside the routes, `HEAD` | the module API's codes; no `HEAD` | `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `INTERNAL`, `UNAVAILABLE`; `HEAD` | — |
+| `/v1/events` `segment`, `phase` | `null` | the log's segment and phase | a core change (a log's segment of origin) |
+| `/v1/contracts/{address}/tokens` of a contract | 404 without a MIP-0018 event or field | known from any applied call | the activity change |

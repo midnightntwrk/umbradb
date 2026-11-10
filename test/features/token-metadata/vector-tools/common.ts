@@ -5,7 +5,7 @@ import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /** Absolute path of the `vectors/` folder. */
-export const VECTORS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..');
+export const VECTORS_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/mip0018/vectors');
 
 /** The pinned MIP text every vector implements (the proposal PR, the pinned commit and its SHA-256). */
 export const MIP = {

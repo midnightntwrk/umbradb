@@ -20,8 +20,8 @@ import {
   EVENT_NAME,
   encodePayload,
   type MetadataRecord,
-} from "../../../src/features/token-metadata/vendor/mip0018/codec/src/index.ts";
-import { TOKEN_METADATA } from "../../../src/features/token-metadata/token-metadata.ts";
+} from "../../../src/features/token-metadata/codec/index.js";
+import { TOKEN_METADATA } from "../../../src/features/token-metadata/token-metadata.js";
 import * as v9 from "../../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js";
 import { cursorReaches, libraryData } from "../../library/library-fixtures.js";
 import type { ProcessDatabase } from "../../runner/process-backends.js";

@@ -1,6 +1,6 @@
 import fc from "fast-check";
 import type { ContractLog } from "../../../src/backbone/contract-logs/contract-logs.js";
-import type { ObservedEvent } from "../../../src/features/token-metadata/state.ts";
+import type { ObservedEvent } from "../../../src/features/token-metadata/state.js";
 import {
   encodePayload,
   EVENT_NAME,
@@ -9,7 +9,7 @@ import {
   recordsSize,
   splitMiscData,
   toHex,
-} from "../../../src/features/token-metadata/vendor/mip0018/codec/src/index.ts";
+} from "../../../src/features/token-metadata/codec/index.js";
 import { cellData, log } from "./harness.js";
 
 /**

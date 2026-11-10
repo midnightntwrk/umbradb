@@ -1,12 +1,13 @@
 {
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
-  "_comment": "Mutation run of token-metadata: the module's own files, the vendored codec excluded, with vitest.token-metadata-mutation.config.ts's tests on PGlite only. Run with UMBRADB_PROCESS_BACKENDS=pglite npx stryker run stryker.token-metadata.conf.json. break 65, as the core's gate. disableTypeChecks is off: the vendored ledger packages are checked byte for byte against their SHA256SUMS, and Stryker's @ts-nocheck header would change their .d.ts files in the sandbox. MEASURED 2026-11-06 (35 min, PGlite, 1987 mutants): AGGREGATE 68.70% (1349 killed, 16 timeout, 494 survived, 128 no coverage): api 62.87%, apply 66.67%, classify 90.91%, color 90.00%, log-reader 61.79%, read 56.00%, sql 72.73%, state 83.75%.",
+  "_comment": "Mutation run of token-metadata: the module's files and its codec, with vitest.token-metadata-mutation.config.ts's tests on PGlite only. Run with UMBRADB_PROCESS_BACKENDS=pglite npx stryker run stryker.token-metadata.conf.json. break 65, as the core's gate. disableTypeChecks is off: the ledger packages under vendor/ledger are checked byte for byte against their SHA256SUMS, and Stryker's @ts-nocheck header would change their .d.ts files in the sandbox. MEASURED 2026-11-06, before the codec was included (35 min, PGlite, 1987 mutants): AGGREGATE 68.70% (1349 killed, 16 timeout, 494 survived, 128 no coverage): api 62.87%, apply 66.67%, classify 90.91%, color 90.00%, log-reader 61.79%, read 56.00%, sql 72.73%, state 83.75%.",
   "testRunner": "vitest",
   "vitest": {
     "configFile": "vitest.token-metadata-mutation.config.ts"
   },
   "mutate": [
-    "src/features/token-metadata/*.ts"
+    "src/features/token-metadata/*.ts",
+    "src/features/token-metadata/codec/*.ts"
   ],
   "coverageAnalysis": "perTest",
   "reporters": [

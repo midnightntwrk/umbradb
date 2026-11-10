@@ -7,7 +7,7 @@
   },
   "normative": true,
   "description": "Keys MUST be valid UTF-8: an event whose only record has the non-UTF-8 key ff 6b 65 79 is rejected whole (MIP Testing R5: invalid UTF-8 in a key).",
-  "basis": "UmbraDB's own version of the vendored vector A3c: the same event; the expectation follows MIP-0018 as merged from PR #372 (\"Keys MUST be valid UTF-8\"), where the vendored file accepts the key.",
+  "basis": "UmbraDB's own version of the reference vector A3c: the same event; the expectation follows MIP-0018 as merged from PR #372 (\"Keys MUST be valid UTF-8\"), where the reference file accepts the key.",
   "event": {
     "type": "Misc",
     "name_hex": "6d69702d303031383a746f6b656e2d6d657461646174615b76315d0000000000",

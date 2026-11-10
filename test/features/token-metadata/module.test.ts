@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { TOKEN_METADATA } from "../../../src/features/token-metadata/token-metadata.ts";
-import { commonRecords } from "../../../src/features/token-metadata/vendor/mip0018/codec/src/index.ts";
+import { TOKEN_METADATA } from "../../../src/features/token-metadata/token-metadata.js";
+import { commonRecords } from "../../../src/features/token-metadata/codec/index.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../../runner/process-backends.js";
 import { blockLogs, contract, domain, eventData, runTo, startRun } from "./harness.js";
 

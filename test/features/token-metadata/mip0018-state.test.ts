@@ -3,7 +3,7 @@
  * level, "not referenced at all", chain order, rollback, common fields, display and the mark.
  */
 import { describe, expect, it } from "vitest";
-import { EVENT_NAME, encodePayload, type MetadataRecord, record } from "../../../src/features/token-metadata/vendor/mip0018/codec/src/index.ts";
+import { EVENT_NAME, encodePayload, type MetadataRecord, record } from "../../../src/features/token-metadata/codec/index.js";
 import {
   ChainOrderError,
   COMMON_KEY_HEX,
@@ -20,7 +20,7 @@ import {
   toHex,
   type IdentityRef,
   UNRESOLVED_LOG_REASON,
-} from "../../../src/features/token-metadata/state.ts";
+} from "../../../src/features/token-metadata/state.js";
 
 const NET = "testnet-a";
 const A = "aa".repeat(32);
@@ -49,7 +49,7 @@ const keys = (s: MetadataState, r: IdentityRef): string[] =>
   [...(s.identity(r)?.fields.keys() ?? [])].map((k) => Buffer.from(k, "hex").toString("utf8"));
 
 describe("per-key tombstones (MIP Applying records)", () => {
-  it("[[mip0018.state.per-key-tombstone]] a Null deletes only its key; a Null for a missing key is a no-op; deleting every key withdraws the identity everywhere; a later record revives only that field", () => {
+  it("a Null deletes only its key; a Null for a missing key is a no-op; deleting every key withdraws the identity everywhere; a later record revives only that field", () => {
     const s = new MetadataState();
     const emit = emitter(s);
     emit(1, [record.utf8("name", "Gold"), record.utf8("symbol", "ACME"), record.uint("decimals", 6), record.utf8("standards", "mip-0011")]);
@@ -130,7 +130,7 @@ describe("per-key tombstones (MIP Applying records)", () => {
 });
 
 describe("defined keys (MIP Keys)", () => {
-  it("[[mip0018.state.defined-keys]] only defined keys are served and prove existence: `foo = \"x\"` is stored, never served, and makes no identity exist; deleting the last defined key withdraws the identity although undefined keys remain; a standard's key is served only while the identity declares that standard", () => {
+  it("only defined keys are served and prove existence: `foo = \"x\"` is stored, never served, and makes no identity exist; deleting the last defined key withdraws the identity although undefined keys remain; a standard's key is served only while the identity declares that standard", () => {
     const S = "test-std";
     const kHex = toHex(enc("k"));
     const s = new MetadataState(new Map([[S, new Set([kHex])]]));
@@ -205,7 +205,7 @@ describe("common fields (MIP Common fields)", () => {
     expect(parseStandards(enc("x y x\u0085y"))).toEqual(["x y", "x\u0085y"]);
   });
 
-  it("[[mip0018.state.image-keys]] image keys (MIP Common fields, S12): `image` is usable only as a URI (type 4), `image_sha256` only as exactly 32 bytes (type 0); a 31-byte hash or a text image is unusable; neither changes a mark", () => {
+  it("image keys (MIP Common fields, S12): `image` is usable only as a URI (type 4), `image_sha256` only as exactly 32 bytes (type 0); a 31-byte hash or a text image is unusable; neither changes a mark", () => {
     expect(fieldUsable(IMAGE_KEY_HEX.image, 4, enc("https://example.org/acme.png"))).toBe(true);
     expect(fieldUsable(IMAGE_KEY_HEX.image, 1, enc("https://example.org/acme.png"))).toBe(false);
     expect(fieldUsable(IMAGE_KEY_HEX.image, 0, enc("https://example.org/acme.png"))).toBe(false);
@@ -231,7 +231,7 @@ describe("common fields (MIP Common fields)", () => {
     expect(tokenMark({ fields: s.identity(ref(1, DS2))!.fields, contractRejections: [] }).mark).toBe("partial");
   });
 
-  it("[[mip0018.state.lengths]] name keeps its first 64 and symbol its first 12 characters (grapheme clusters, UAX #29), cut before storing: a 70-character name and a 15-character symbol (S11) stay usable as 64 / 12; emoji ZWJ sequences, flags and combining marks are never split; two symbols that share their first 12 characters form one group", () => {
+  it("name keeps its first 64 and symbol its first 12 characters (grapheme clusters, UAX #29), cut before storing: a 70-character name and a 15-character symbol (S11) stay usable as 64 / 12; emoji ZWJ sequences, flags and combining marks are never split; two symbols that share their first 12 characters form one group", () => {
     const text = (s0: MetadataState, r: IdentityRef, key: "name" | "symbol") => Buffer.from(s0.identity(r)!.fields.get(COMMON_KEY_HEX[key])!.value).toString("utf8");
     const s = new MetadataState();
     const emit = emitter(s);
@@ -293,7 +293,7 @@ describe("common fields (MIP Common fields)", () => {
 describe("marks (one function)", () => {
   const fieldsOf = (s: MetadataState, r: IdentityRef) => s.identity(r)?.fields;
 
-  it("[[mip0018.state.marks]] ✓ complete, ⚠ partial, ⚠ incorrect (contract rejection, reasons shown), ⚠ unresolved (the contract has unresolved logs: reason unresolved-log, never a clean ✓), no mark without events or after withdrawal; usable standards as tags", () => {
+  it("✓ complete, ⚠ partial, ⚠ incorrect (contract rejection, reasons shown), ⚠ unresolved (the contract has unresolved logs: reason unresolved-log, never a clean ✓), no mark without events or after withdrawal; usable standards as tags", () => {
     const s = new MetadataState();
     const emit = emitter(s);
     emit(3, [record.utf8("name", "Acme"), record.utf8("symbol", "ACME"), record.uint("decimals", 6), record.utf8("standards", "mip-0004 mip-0004 x")]);
@@ -337,7 +337,7 @@ describe("marks (one function)", () => {
       .toEqual({ mark: "incorrect", reasons: ["no-records", "unresolved-log"], missing: [], tags: [] });
   });
 
-  it("[[mip0018.state.marks-current-state]] a withdrawn identity is marked exactly like one never described (current state only): ⚠ incorrect from its contract's rejections, otherwise none; an empty field map is the same as none", () => {
+  it("a withdrawn identity is marked exactly like one never described (current state only): ⚠ incorrect from its contract's rejections, otherwise none; an empty field map is the same as none", () => {
     const s = new MetadataState();
     const emit = emitter(s);
     emit(3, [record.utf8("name", "Gone"), record.utf8("symbol", "GONE"), record.uint("decimals", 2), record.utf8("standards", "mip-0004")]);

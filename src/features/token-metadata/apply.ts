@@ -5,14 +5,14 @@
  * - **Candidates.** Only a `Misc` log whose value the log reader gives as one atom of at most 288 bytes;
  *   its name and payload are the atom zero-extended to 288 bytes, split 32 + 256 (`splitMiscData`). An unknown
  *   serialization halts the block with an error naming the height, transaction, log and tag.
- * - **Classification.** `classifyMip0018Event` (the vendored codec plus the UTF-8 key rule); `ignore` (another
+ * - **Classification.** `classifyMip0018Event` (the codec plus the UTF-8 key rule); `ignore` (another
  *   name) stores nothing, `accept` and `reject` store an event row.
- * - **Records.** As the proof of concept's `fields.ts`: a non-Null record sets its key's row (latest
+ * - **Records.** A non-Null record sets its key's row (latest
  *   wins), a Null record deletes it (nothing for a key without a row); a key is `defined` when it is a common-field key
  *   or a key of a declared standard (`isDefinedKey`); a record after which the identity has no defined row records its
  *   withdrawal. Values are stored whole: nothing here cuts a name or symbol, so nothing here uses `Intl`.
- * - **Positions.** `event_index` is the log's position among its transaction's logs (the proof of concept's
- *   `eventIndex`): `contract-logs` numbers a block's logs in emission order, transaction by transaction.
+ * - **Positions.** `event_index` is the log's position among its transaction's logs (`eventIndex` in
+ *   the API): `contract-logs` numbers a block's logs in emission order, transaction by transaction.
  *
  * The registry of standard-defined keys is empty (no MIP defines any): with keys in it, a `standards` change would
  * re-flag the identity's rows, which this path does not do, so it refuses to load with a non-empty registry.
@@ -20,8 +20,8 @@
 
 import type { ContractLog } from "../../backbone/contract-logs/contract-logs.js";
 import type { BlockWriteHandle } from "../../db/api.js";
-import { classifyMip0018Event } from "./classify.ts";
-import { miscAtom, UnknownLogSerialization } from "./log-reader.ts";
+import { classifyMip0018Event } from "./classify.js";
+import { miscAtom, UnknownLogSerialization } from "./log-reader.js";
 import {
   deleteField,
   type EventRow,
@@ -31,9 +31,9 @@ import {
   type Position,
   recordWithdrawal,
   setField,
-} from "./sql.ts";
-import { fieldUsable, isDefinedKey, STANDARD_KEYS } from "./state.ts";
-import { type DecodedRecord, splitMiscData, toHex, ValType } from "./vendor/mip0018/codec/src/index.ts";
+} from "./sql.js";
+import { fieldUsable, isDefinedKey, STANDARD_KEYS } from "./state.js";
+import { type DecodedRecord, splitMiscData, toHex, ValType } from "./codec/index.js";
 
 if (STANDARD_KEYS.size !== 0) {
   throw new Error("token-metadata's write path does not re-flag keys on a standards change; the registry must be empty");

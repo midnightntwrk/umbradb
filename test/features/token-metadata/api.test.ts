@@ -1,14 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DEFAULT_MAX_CONCURRENT_REQUESTS, encodeCursor, markJson, registerMetadataApi } from "../../../src/features/token-metadata/api.ts";
-import { tokenColor } from "../../../src/features/token-metadata/color.ts";
+import { DEFAULT_MAX_CONCURRENT_REQUESTS, encodeCursor, markJson, registerMetadataApi } from "../../../src/features/token-metadata/api.js";
+import { tokenColor } from "../../../src/features/token-metadata/color.js";
 import {
   commonRecords,
   EVENT_NAME,
   record,
   toHex,
   withdrawRecords,
-} from "../../../src/features/token-metadata/vendor/mip0018/codec/src/index.ts";
-import type { Field } from "../../../src/features/token-metadata/state.ts";
+} from "../../../src/features/token-metadata/codec/index.js";
+import type { Field } from "../../../src/features/token-metadata/state.js";
 import type { ApiRegistry } from "../../../src/modules/declaration.js";
 import type { UmbraDBHandle } from "../../../src/library/start-umbradb.js";
 import { cursorReaches } from "../../library/library-fixtures.js";

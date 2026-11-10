@@ -1,5 +1,5 @@
 {
- "about": "Every Misc log core-contract-logs-fast stored replaying the stagenet tape stagenet-714485-715183.tape.jsonl (SHA-256 4bda69bf8d65a041c30828d9a0908f6f564464966ac6d18c813133734fe21a84, recorded 2026-11-05 from wss://rpc.stagenet.shielded.tools with tools/tape/main.ts range) from height 714486 to 715183: each log's height, transaction and log index, contract address, log version and data (the ledger's tagged serialization), as contract_logs.logs holds them. The range holds the proof of concept's stagenet cases C01 to C10 (acedward/umbradb PR #26).",
+ "about": "Every Misc log core-contract-logs-fast stored replaying the stagenet tape stagenet-714485-715183.tape.jsonl (SHA-256 4bda69bf8d65a041c30828d9a0908f6f564464966ac6d18c813133734fe21a84, recorded 2026-11-05 from wss://rpc.stagenet.shielded.tools with tools/tape/main.ts range) from height 714486 to 715183: each log's height, transaction and log index, contract address, log version and data (the ledger's tagged serialization), as contract_logs.logs holds them. The range holds the stagenet cases C01 to C10 (test/fixtures/mip0018/cases/).",
  "logs": [
   {
    "height": 714501,
