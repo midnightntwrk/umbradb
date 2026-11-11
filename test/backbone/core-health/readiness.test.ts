@@ -60,9 +60,9 @@ function holding(gates: ReadonlyMap<bigint, Gate>): ModuleDeclaration {
   };
 }
 
-/** `/health/ready`'s answer: its status and body. */
-async function ready(origin: string) {
-  const answer = await ask(origin, "/health/ready");
+/** `/health/ready`'s answer: its status and body; no answer within `timeoutMs` gives status null. */
+async function ready(origin: string, timeoutMs?: number) {
+  const answer = await ask(origin, "/health/ready", "GET", timeoutMs);
   return { status: answer.status, body: answer.json as { ready: boolean; state: string; lag: string | null; readinessLag: number | null } };
 }
 
@@ -216,7 +216,10 @@ describe.each(PROCESS_BACKENDS)("/health/ready through the process on $name", (b
       reached = true;
     });
     while (!reached) {
-      answers.push(await ready(origin));
+      // The listener answers at once from its own thread, but this end reads the answer on the main thread, which the
+      // catch-up holds on PGlite: 5 s here and 16 s on one loaded CPU, past `ask`'s 10 s, which gave no answer. The
+      // test's own timeout bounds the wait instead.
+      answers.push(await ready(origin, 120_000));
       // The test's requests share the process's main thread: leave it to the blocks.
       await sleep(20);
     }
