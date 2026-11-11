@@ -1,5 +1,5 @@
 import { performance } from "node:perf_hooks";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import {
   type ConnectSocket,
   connectWebSocket,
@@ -8,8 +8,9 @@ import {
   type NodeHeader,
   type NodeRetry,
 } from "../../src/node/index.js";
-import { type Json, TapeNode, type TapeRecord } from "../../tools/tape/index.js";
+import { type Json, type TapeCall, TapeNode, type TapeRecord } from "../../tools/tape/index.js";
 import { ManualTimers, until } from "../node/manual-timers.js";
+import { outsideNodeMethods } from "../node/node-methods.js";
 import { manualClock } from "./checks.js";
 
 /**
@@ -26,6 +27,9 @@ const TEST_TIMEOUT_MS = 60_000;
 
 const quietConnect: ConnectSocket = (url, events, timers) =>
   connectWebSocket(url, events, timers, { heartbeatMs: 2 ** 31 - 1 });
+
+/** Every request every tape node of this file received. */
+const received: TapeCall[] = [];
 
 const hash = (n: number): string => `0x${n.toString(16).padStart(64, "0")}`;
 const bytes = (text: string): Uint8Array => Uint8Array.from(Buffer.from(text.slice(2), "hex"));
@@ -54,9 +58,16 @@ async function withClient(
   } finally {
     await client.close();
     await node.close();
+    received.push(...node.calls);
   }
 }
 
+afterAll(() => {
+  // The client sends only the allowed node calls, so a tape node never sees another (the CI half of the sync's check,
+  // for these sessions).
+  expect(received.length).toBeGreaterThan(20);
+  expect(outsideNodeMethods(received.map((call) => call.method as string))).toEqual([]);
+});
 
 describe("through the node client", { timeout: TEST_TIMEOUT_MS }, () => {
   it("heads A, B, C recorded, four finalizedHead() calls read A, B, C, C", async () => {
@@ -143,6 +154,7 @@ describe("through the node client", { timeout: TEST_TIMEOUT_MS }, () => {
     } finally {
       await client.close();
       await node.close();
+      received.push(...node.calls);
     }
   });
 

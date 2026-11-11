@@ -59,7 +59,21 @@ type WithUnknownPoint = Omit<ModuleDeclaration, "points"> & {
 type WithKnownPoints = Omit<ModuleDeclaration, "points"> & { points: { "on-fetch": () => Promise<void> } };
 
 describe("the points", () => {
-  it("are twelve, frozen, and the point names and the callbacks' keys are their type", () => {
+  it("are the twelve points in their order, frozen, and the point names and the callbacks' keys are their type", () => {
+    expect(POINTS).toEqual([
+      "on-start-db",
+      "on-start-api",
+      "on-best-block",
+      "on-fetch",
+      "on-parse",
+      "on-rollback",
+      "on-finalized",
+      "on-start-height",
+      "on-compute",
+      "on-db-write",
+      "on-after-db-write",
+      "on-stop-height",
+    ]);
     expect(POINTS).toHaveLength(12);
     expect(Object.isFrozen(POINTS)).toBe(true);
     expectTypeOf<PointName>().toEqualTypeOf<(typeof POINTS)[number]>();

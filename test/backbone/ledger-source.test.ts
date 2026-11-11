@@ -4,6 +4,7 @@ import { NodeBlockSource } from "../../src/backbone/core-block-fetch/node-source
 import { type ConnectSocket, connectWebSocket, NodeClient } from "../../src/node/index.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import { type Json, type TapeRecord, TapeNode } from "../../tools/tape/index.js";
+import { outsideNodeMethods } from "../node/node-methods.js";
 import { chainOf, hex } from "./fetch-fixtures.js";
 
 /**
@@ -38,6 +39,7 @@ describe("the block source's ledger calls", () => {
     expect(isBlockLedgerSource(source)).toBe(true);
     expect([...(await source.ledgerStateRoot(block!))]).toEqual(root);
     expect(hex(await source.genesisState())).toBe("0x6d69646e69676874");
+    expect(outsideNodeMethods(node.calls.map((call) => call.method as string))).toEqual([]);
   });
 
   it("takes the genesis state with a 0x prefix too, and refuses an answer without one", async () => {

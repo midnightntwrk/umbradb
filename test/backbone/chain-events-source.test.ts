@@ -7,6 +7,7 @@ import { BlockItems } from "../../src/runner/block-context.js";
 import type { BlockRef, QueueRunner } from "../../src/runner/block-source.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import { type TapeRecord, TapeNode } from "../../tools/tape/index.js";
+import { outsideNodeMethods } from "../node/node-methods.js";
 import { ev, SYSTEM_EVENTS_STORAGE, eventsRead, eventsValue } from "./events-fixtures.js";
 import { type ChainBlock, chainOf, headRead, hex, newHead, subscriptions } from "./fetch-fixtures.js";
 
@@ -90,6 +91,7 @@ describe("a block's chain events from the block source", () => {
     await source.prepared(101n);
     expect(runner.read.get(at(101).hex)).toEqual(events);
     expect(client.storageCalls).toEqual([{ key: SYSTEM_EVENTS_STORAGE, at: at(101).hex, options: undefined }]);
+    expect(outsideNodeMethods(node.calls.map((call) => call.method as string))).toEqual([]);
     expect(isBlockEventSource(source)).toBe(true);
   }, PATIENCE_MS);
 

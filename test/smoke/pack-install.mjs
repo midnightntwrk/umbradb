@@ -11,9 +11,9 @@
  *     2. the tarball installed in the scratch project;
  *     3. a deep import (`umbradb/dist/runner/process.js`) fails with `ERR_PACKAGE_PATH_NOT_EXPORTED`: `exports` names
  *        only `"."`;
- *     4. a consumer importing from "umbradb" the values and types a configuration is written with
- *        ({@link CONSUMER_VALUES}, {@link CONSUMER_TYPES}), none `any`, and writing a configuration with them,
- *        type-checks under `--strict` (the first of the two consumer files);
+ *     4. a consumer importing every value and every type of the pinned public surface (`EXPORTED_SURFACE`, which the
+ *        library-surface test pins `src/index.ts` to) from "umbradb", none `any`, and writing a configuration with
+ *        them, type-checks under `--strict` (the first of the two consumer files);
  *     4c. a consumer importing any of 0.9.5's retired names — the storage parts `PgTemporalKV`, `PgCheckpointStore`,
  *        `PgWatermarks`, `PgTransactionLeaseLayer`, `PgWalletStateEnvelopeStore`, `saveAndAdvance`, or
  *        TransactionHistory's — fails to type-check, each name reported as not exported (the second consumer file)
@@ -47,9 +47,10 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-// Node.js's own TypeScript type stripping reads these two (neither imports another file of the repository).
+// Node.js's own TypeScript type stripping reads these three (none imports another file of the repository).
 import { spawnChild } from "../child-processes.ts";
 import { POSTGRES_IMAGE } from "../postgres-image.ts";
+import { EXPORTED_SURFACE } from "../library-surface/surface.ts";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const shell = process.platform === "win32";
@@ -213,7 +214,7 @@ async function dockerIndependentOracles() {
   if (consumer.status !== 0 || /error TS\d+/.test(consumer.out)) {
     fail(`a consumer writing a configuration did not type-check against the installed package (A2):\n${consumer.out}`);
   }
-  console.log(`pack-install smoke: a consumer importing ${CONSUMER_VALUES.length} values and ${CONSUMER_TYPES.length} types from umbradb and writing a configuration type-checks under --strict, none of them any (A2).`);
+  console.log(`pack-install smoke: a consumer importing all ${CONSUMER_VALUES.length} values and ${CONSUMER_TYPES.length} types of the public surface from umbradb and writing a configuration type-checks under --strict, none of them any (A2).`);
 
   // ---- 4c. each retired name fails to type-check ----------------------------------------------------
   const retired = typeCheck(
@@ -403,9 +404,9 @@ async function tapeSyncOracle(command) {
   }
 }
 
-/** The values and types the consumer of oracle 4 imports from "umbradb": the ones its configuration and lines use. */
-const CONSUMER_VALUES = ["CORE_BLOCK_PARSED", "CORE_CHAIN_EVENTS", "POINTS", "UmbraError", "coreEntry", "defineConfig"];
-const CONSUMER_TYPES = ["CoreVersion", "Entry", "ErrorCode", "PointName", "UmbraConfig"];
+/** The values and types the consumer of oracle 4 imports from "umbradb": the whole pinned public surface. */
+const CONSUMER_VALUES = EXPORTED_SURFACE.values;
+const CONSUMER_TYPES = EXPORTED_SURFACE.types;
 
 /** The consumer of oracle 4: {@link CONSUMER_VALUES} and {@link CONSUMER_TYPES} imported from "umbradb", none `any`, a
  *  configuration written. */

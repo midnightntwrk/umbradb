@@ -258,6 +258,18 @@ describe.each([
 const listeningSockets = (): number => process.getActiveResourcesInfo().filter((resource) => resource === "TCPServerWrap").length;
 
 /**
+ * {@link listeningSockets} once the listeners closed before now have left it: the count a test starts from. Node.js
+ * lists a closed server until the event loop next runs its close callbacks, which it does before any timer set now.
+ * `stop()` can return within the turn of the loop that closed its listener — the end of its admin thread, its only step
+ * that waits for a later turn, fits in one when the threads share a CPU — so the test after one that listened would
+ * count that listener, and see it gone at its first sample.
+ */
+async function settledListeningSockets(): Promise<number> {
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  return listeningSockets();
+}
+
+/**
  * How many times a server of this thread began to listen while `body` runs (Node.js's `net.server.listen` tracing
  * channel, whose `asyncStart` each `listen()` publishes — `node:net`'s and `node:http`'s servers alike): a listener
  * opened and closed again between two samples is counted too.
@@ -286,7 +298,7 @@ describe.each([
 
   it("without a request: no listener and no thread while it starts, runs and stops; with the ledger, its worker only", async () => {
     const m = rowsModule("m");
-    const sockets = listeningSockets();
+    const sockets = await settledListeningSockets();
     // The sockets sampled at each step — started, following, stopped — beside every listen() the run makes at all.
     const sampled: number[] = [];
     let listens = -1;
@@ -321,7 +333,7 @@ describe.each([
   }, 300_000);
 
   it("negative control: the command's network with listen.api written listens, and its admin port starts its thread", async () => {
-    const sockets = listeningSockets();
+    const sockets = await settledListeningSockets();
     let during = -1;
     let listens = -1;
     const threads = await threadsDuring(async () => {

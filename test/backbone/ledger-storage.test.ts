@@ -287,8 +287,23 @@ describe("core-ledger-state's tables hold a node layout, and no table stores a w
     return tables;
   }
 
-  it("a node is its key, data and children, and a state its key and root", () => {
+  it("creates exactly its tables with exactly their columns; a node is its key, data and children, and a state its key and root", () => {
     const migrations = migrationColumns();
+    expect(Object.fromEntries(migrations)).toEqual({
+      nodes: ["node_key", "data", "children"],
+      root_counts: ["node_key", "count"],
+      states: [
+        "height", "state_key", "state_root", "zswap_first_free", "zswap_root", "dust_commitment_first_free",
+        "dust_commitment_root", "dust_generation_first_free", "dust_generation_root",
+      ],
+      segment_results: ["height", "tx_index", "segment", "success"],
+      events: [
+        "height", "tx_index", "event_index", "kind", "logical_segment", "physical_segment", "bytes", "nullifier",
+        "commitment", "tree_index", "contract_address",
+      ],
+      ref_counts: ["node_key", "count"],
+      unreferenced: ["node_key"],
+    });
     expect(migrations.get("nodes")).toEqual(["node_key", "data", "children"]);
     expect(migrations.get("states")?.filter((c) => c.startsWith("state"))).toEqual(["state_key", "state_root"]);
   });
