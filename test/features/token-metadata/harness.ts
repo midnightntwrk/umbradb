@@ -13,6 +13,7 @@ import { cursorHeight } from "../../../src/backbone/core-block-commit/sql.js";
 import { UMBRADB_VERSION } from "../../../src/config/build.js";
 import type { PostgresParts } from "../../../src/config/database-parts.js";
 import type { ReadHandle } from "../../../src/db/api.js";
+import type { BlockRef } from "../../../src/runner/block-source.js";
 import { openPglite } from "../../../src/db/pglite.js";
 import { openPostgres } from "../../../src/db/postgres.js";
 import { startUmbraDB, type UmbraDBHandle } from "../../../src/library/start-umbradb.js";
@@ -156,11 +157,15 @@ export interface RunOptions {
   readonly fast?: boolean;
   /** Each in-memory block's own items (its ledger, its runtime). */
   readonly items?: (height: bigint) => InMemoryItems;
+  /** The `core` entry's network in place of the tests' `custom` one: `undeployed`, the local network. */
+  readonly network?: "undeployed";
+  /** In-memory blocks in place of the default ones at their heights (e.g. another chain's block 0). */
+  readonly blocks?: readonly BlockRef[];
 }
 
 /** The configuration data of a run: the `core` entry from S, the provider and the modules from their starts. */
 function runData(db: ProcessDatabase, modules: readonly ModuleDeclaration[], options: RunOptions) {
-  const data = libraryData(db.setting, [], {}, options.start);
+  const data = libraryData(db.setting, [], options.network === undefined ? {} : { network: options.network }, options.start);
   const core = options.fast === true ? FAST_CORE.map((id) => ({ id, start: options.start, version: UMBRADB_VERSION, config: {} })) : [];
   return {
     entries: [
@@ -176,6 +181,7 @@ export function startRun(db: ProcessDatabase, options: RunOptions, serve = false
   const modules = [...(options.fast === true ? [] : [logsProvider(options.logs ?? new Map(), options.unresolved)]), ...(options.modules ?? [TOKEN_METADATA as ModuleDeclaration, TOKEN_METADATA_API as ModuleDeclaration])];
   const source = new InMemoryBlockSource({
     head: BigInt(options.head),
+    ...(options.blocks === undefined ? {} : { blocks: options.blocks }),
     ...(options.items === undefined ? {} : { items: (block) => options.items!(block.height) }),
   });
   return startUmbraDB({

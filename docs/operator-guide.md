@@ -189,12 +189,12 @@ TOKEN_METADATA_API.entry({ start, config: {} }),
 
 `umbradb config check` checks the file; a missing provider is refused when the process starts.
 
-- **A new database starts early enough to hold every event.** On mainnet, preprod and preview, a new database with
-  `token-metadata` configured above the network's first block with contract logs (mainnet 3,346,139, preprod 3,348,434,
-  preview 1,572) starts there instead and backfills from the chain: the log says so (`the database starts at …`), and
-  `config check` notes it. Every database started at or below that block holds the same token metadata, on any
-  machine. The node must serve those blocks and the state at their parents: an archive node, or one that kept that
-  state. A `custom` network is not moved.
+- **A new database starts early enough to hold every event.** On mainnet, preprod, preview and undeployed, a new
+  database with `token-metadata` configured above the network's first block with contract logs (mainnet 3,346,139,
+  preprod 3,348,434, preview 1,572, undeployed 0) starts there instead and backfills from the chain: the log says so
+  (`the database starts at …`), and `config check` notes it. Every database started at or below that block holds the
+  same token metadata, on any machine. The node must serve those blocks and the state at their parents: an archive
+  node, or one that kept that state. A `custom` network is not moved.
 - **The indexer starts with its database.** Give it the same start as the core entry, in a new database. A database that has
   already run from a lower height refuses it: startup ends with `callback-error` at `on-start-db` of
   `token-metadata`, and the log names the cause, `token-metadata-start-after-database`, with both heights. Its state is

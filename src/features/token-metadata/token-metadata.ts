@@ -7,9 +7,9 @@
  *   development-only `core-contract-logs-fast` from any height). It has no ledger task, so it loads in the browser
  *   build like any user module.
  * - **Starts every new database early enough** to hold every MIP-0018 event: its `latestStarts` are
- *   {@link FIRST_CONTRACT_LOG_HEIGHTS}, so a new database on mainnet, preprod or preview configured above that height
- *   starts there (the core's resolver moves S and the entries starting with it) and backfills from the public chain;
- *   any start at or below it gives the same rows. A custom network is not moved.
+ *   {@link FIRST_CONTRACT_LOG_HEIGHTS}, so a new database on mainnet, preprod, preview or undeployed configured above
+ *   that height starts there (the core's resolver moves S and the entries starting with it) and backfills from the
+ *   chain; any start at or below it gives the same rows. A custom network is not moved.
  * - **Starts with its database**. Its rows are materialized state, so they depend on where it
  *   started: it declares `startsMidChain: true`, so a database started at any S accepts it, and refuses in
  *   `on-start-db` an entry starting above S. The process refuses with `callback-error` at `on-start-db` of
@@ -79,14 +79,16 @@ export function revisionGap(revisions: readonly { readonly start: bigint; readon
 
 /**
  * The first block with contract logs on each official network: the first block of ledger v9 (runtime 2,001,100), the
- * delayed upgrade's first block (mainnet 3,346,139, preprod 3,348,434; preview 1,572 after its restart from genesis).
- * No MIP-0018 event exists before it, so a database started at or before it holds every one, and every such database
- * the same rows: the module's latest start on each network.
+ * delayed upgrade's first block (mainnet 3,346,139, preprod 3,348,434; preview 1,572 after its restart from genesis);
+ * and 0 on `undeployed`, the local standalone network, whose chains each start anew. No MIP-0018 event exists before
+ * it, so a database started at or before it holds every one, and every such database the same rows: the module's
+ * latest start on each network.
  */
 export const FIRST_CONTRACT_LOG_HEIGHTS: Readonly<Record<string, number>> = Object.freeze({
   mainnet: 3_346_139,
   preprod: 3_348_434,
   preview: 1_572,
+  undeployed: 0,
 });
 
 /**

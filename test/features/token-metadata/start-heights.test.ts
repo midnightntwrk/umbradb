@@ -8,12 +8,15 @@ import { MetadataState, type ObservedEvent } from "../../../src/features/token-m
 import { FIRST_CONTRACT_LOG_HEIGHTS, TOKEN_METADATA, tokenMetadataWith } from "../../../src/features/token-metadata/token-metadata.js";
 import { miscAtom } from "../../../src/features/token-metadata/log-reader.js";
 import { defineModule, type ModuleDeclaration } from "../../../src/modules/declaration.js";
+import type { BlockRef } from "../../../src/runner/block-source.js";
+import { inMemoryBlock } from "../../../src/runner/in-memory-source.js";
+import { UmbraError } from "../../../src/db/errors.js";
 import { FAST_CORE } from "../../backbone/contract-data-checks.js";
 import { committed, ingest } from "../../backbone/ingest-harness.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../../runner/process-backends.js";
 import { tapeTest } from "../../tape/real/real-tapes.js";
 import { build, type Generated, NETWORK } from "./chains.js";
-import { genesisRecords, post, serve, TOKENS_PATH } from "./harness.js";
+import { causes, genesisRecords, post, runTo, serve, startRun, TOKENS_PATH } from "./harness.js";
 import { stateResponse } from "./vector-adapter.js";
 
 /**
@@ -29,6 +32,9 @@ import { stateResponse } from "./vector-adapter.js";
  *   model applied to every event differs from what the module serves, so the comparison sees a start height.
  * - **Latest starts on the synthetic chain:** databases configured at four heights above the indexer's latest start
  *   all start there and hold the same rows; the negative control, the indexer without one, keeps its start.
+ * - **undeployed, the local network:** a new database configured above 0 starts at 0 (the indexer's latest start
+ *   there), records the in-memory node's genesis, and serves every event; a restart against another chain's node (a
+ *   new local genesis) refuses with `genesis-mismatch` and leaves the database as it was.
  * - **The networks' own tapes started mid-chain** with `core-contract-logs-fast`: preprod's and mainnet's delayed
  *   upgrade tapes, configured from the tape's first usable block (on the old runtime), from the upgrade's first block F
  *   (the network's first block with contract logs) and from above F, which starts at F (the indexer's latest start).
@@ -193,6 +199,54 @@ describe.each(PROCESS_BACKENDS)("a new database configured above the module's la
     expect(await db.query("SELECT start_height::int AS s FROM core_chain.identity")).toEqual([{ s: FIRST + 4 }]);
     expect(await db.query("SELECT count(*)::int AS n FROM token_metadata.token_events")).toEqual([{ n: expectedRows(FIRST + 4) }]);
     expect(expectedRows(FIRST + 4)).toBeLessThan(expectedRows(FIRST));
+  }, 240_000);
+});
+
+// ── undeployed, the local network ───────────────────────────────────────────────────────────────────────────────
+
+/** Another local chain's block 0: the node restarted from a new genesis. */
+const OTHER_GENESIS: BlockRef = { height: 0n, hash: new Uint8Array(32).fill(0xee), parentHash: new Uint8Array(32) };
+const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
+
+describe.each(PROCESS_BACKENDS)("a new database on undeployed, the local network, on $name", (backend: ProcessBackend) => {
+  beforeAll(() => backend.start(), 180_000);
+  afterAll(() => backend.stop(), 60_000);
+
+  it("starts at block 0 whatever height it is configured at, records the local node's genesis, and serves every event", async () => {
+    expect(FIRST_CONTRACT_LOG_HEIGHTS.undeployed).toBe(0);
+    const db = await backend.database();
+    const seen = new Map<bigint, string>();
+    const modules = [TOKEN_METADATA as ModuleDeclaration, TOKEN_METADATA_API as ModuleDeclaration, probe(seen)];
+    const answer = await serve(db, { start: HEAD - 1, head: HEAD, logs, unresolved, modules, network: "undeployed" }, (origin) =>
+      post(origin, TOKENS_PATH, { contract: "01".repeat(32) }),
+    );
+    expect(await db.query("SELECT start_height::int AS s, encode(genesis_hash, 'hex') AS g FROM core_chain.identity")).toEqual([
+      { s: 0, g: hex(inMemoryBlock(0n).hash) },
+    ]);
+    expect([answer.status, answer.headers["x-umbra-height"]]).toEqual([200, String(HEAD)]);
+    expect(seen.get(BigInt(HEAD))).toBe(modelFrom(0));
+    expect(await db.query("SELECT count(*)::int AS n FROM token_metadata.token_events")).toEqual([{ n: expectedRows(0) }]);
+  }, 240_000);
+
+  it("refuses a restart against a local node of another chain (a new genesis) with genesis-mismatch, and changes nothing", async () => {
+    const db = await backend.database();
+    await runTo(db, { start: 0, head: 3, network: "undeployed", modules: [TOKEN_METADATA as ModuleDeclaration] });
+    const state = "SELECT (SELECT encode(genesis_hash, 'hex') || start_height FROM core_chain.identity) AS identity, (SELECT max(height)::int FROM core_block_commit.blocks) AS cursor";
+    const before = await db.query(state);
+    const handle = startRun(db, { start: 0, head: 5, network: "undeployed", blocks: [OTHER_GENESIS], modules: [TOKEN_METADATA as ModuleDeclaration] });
+    let refused: unknown;
+    try {
+      await handle.started.then(
+        () => expect.fail("expected the startup to refuse"),
+        (error: unknown) => {
+          refused = causes(error).find((e) => e instanceof UmbraError);
+        },
+      );
+    } finally {
+      await handle.stop();
+    }
+    expect(refused).toMatchObject({ code: "genesis-mismatch", details: { stored: `0x${hex(inMemoryBlock(0n).hash)}`, node: `0x${hex(OTHER_GENESIS.hash)}` } });
+    expect(await db.query(state)).toEqual(before);
   }, 240_000);
 });
 

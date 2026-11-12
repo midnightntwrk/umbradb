@@ -121,7 +121,8 @@ chain from genesis or a restored backup. The page reaches only its own origin an
 - `node`: the node's WebSocket URL (required); the node must accept the page's origin.
 - `storage`: `memory` (the default: a new database at each load), or a name: a database in OPFS, kept across reloads.
   A second tab on the same name refuses with `writer-lock-held`.
-- `network`: `preview` (the default), `preprod`, `mainnet`, `stagenet`, or `custom` with `genesis=<hash>`.
+- `network`: `preview` (the default), `preprod`, `mainnet`, `stagenet`, `undeployed` (a local standalone node), or
+  `custom` with `genesis=<hash>`.
 - `restore`: with a `storage` name, the page waits for a backup file to restore into that new database before it
   starts the core, then resumes from the backup's height + 1.
 

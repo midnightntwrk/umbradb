@@ -41,7 +41,7 @@ import type { CheckedConfig, CheckedEntry } from "../../config/validate.js";
 import type { BlockWriteHandle, Database, SchemaWriteHandle } from "../../db/api.js";
 import { UmbraError } from "../../db/errors.js";
 import { readOnlyDatabase } from "../../db/read-only.js";
-import { type BuiltInNetwork, builtInNetwork } from "../../ledger/networks.js";
+import { type BuiltInNetwork, builtInNetwork, isLocalNetwork } from "../../ledger/networks.js";
 import type { LedgerTable } from "../../ledger/version-table.js";
 import { type BlockContext, defineModule, type ModuleDeclaration, type ProcessContext } from "../../modules/declaration.js";
 import type { PublicItem } from "../../modules/graph.js";
@@ -106,9 +106,15 @@ export interface ConfiguredGenesis {
   readonly network: string;
   /**
    * Its genesis hash: the built-in table's for a known network (`src/ledger/networks.json`), or the entry's
-   * `genesisHash` for `custom`. It is null for a known network whose built-in table records none, which is refused.
+   * `genesisHash` for `custom`. It is null for a local network, and for a known network whose built-in table records
+   * none, which is refused.
    */
   readonly hash: Uint8Array | null;
+  /**
+   * Whether the network is local (`undeployed`, `LOCAL_NETWORKS`): each of its chains has its own block 0, so the
+   * genesis is the node's at a new database's first start, recorded in the identity and checked at every later start.
+   */
+  readonly local: boolean;
 }
 
 /** `text`, `0x`-prefixed hex as the configuration and the built-in tables write hashes (both checked so), as bytes. */
@@ -122,6 +128,7 @@ function bytesOf(text: string): Uint8Array {
  * The configured network's genesis hash ({@link ConfiguredGenesis}), frozen, from a `core` revision's settings: the
  * process's, whose `network` and `genesisHash` data fields the validation has checked.
  * - For `custom`, it is `genesisHash`.
+ * - For a local network (`undeployed`), it is null, and `local` is set: the node's is taken.
  * - Otherwise it is the built-in network table's, read through `lookup` (`builtInNetwork`; never a constant), or null
  *   when the table has no entry for the network or records no genesis hash for it.
  */
@@ -130,8 +137,9 @@ export function configuredGenesisOf(
   lookup: (network: string) => BuiltInNetwork | null = builtInNetwork,
 ): ConfiguredGenesis {
   const network = settings.network as string;
+  const local = isLocalNetwork(network);
   const text = network === "custom" ? (settings.genesisHash as string) : (lookup(network)?.genesis?.hash ?? null);
-  return Object.freeze({ network, hash: text === null ? null : bytesOf(text) });
+  return Object.freeze({ network, hash: text === null || local ? null : bytesOf(text), local });
 }
 
 /** What {@link checkChain} takes. */
@@ -164,9 +172,11 @@ export interface ChainCheck {
 /**
  * The startup checks against the node, run before any migration (see the module comment), in this order:
  * 1. A known network whose built-in table records no genesis hash is refused before the node is asked, since the build
- *    has nothing to check the node against (`genesis-mismatch`, `details { network, configured: null }`).
+ *    has nothing to check the node against (`genesis-mismatch`, `details { network, configured: null }`). A local
+ *    network (`undeployed`) is not: it has no built-in genesis hash by design.
  * 2. The node's genesis hash (its block 0's) is compared with the configured network's at every start, on a database
- *    without a cursor too (`genesis-mismatch`, `details { network, configured, node }`).
+ *    without a cursor too (`genesis-mismatch`, `details { network, configured, node }`). A local network skips this:
+ *    the node's genesis is its chain's, and step 3 holds every later start to it.
  * 3. On a database with a cursor, the stored genesis hash is compared with the node's (`genesis-mismatch`,
  *    `details { stored, node }`: a database written for another chain).
  * 4. It waits while the node's finalized head is below the cursor ({@link waitForNode}).
@@ -179,7 +189,7 @@ export interface ChainCheck {
  */
 export async function checkChain(input: ChainCheckInput): Promise<ChainCheck> {
   const { source, identity, cursor, configured } = input;
-  if (configured.hash === null) {
+  if (configured.hash === null && !configured.local) {
     throw new UmbraError(
       "genesis-mismatch",
       `this build records no genesis hash for the network ${configured.network}, so the node's genesis hash cannot be ` +
@@ -188,7 +198,7 @@ export async function checkChain(input: ChainCheckInput): Promise<ChainCheck> {
     );
   }
   const genesisHash = (await source.block(0n)).hash;
-  if (!sameBytes(configured.hash, genesisHash)) {
+  if (configured.hash !== null && !sameBytes(configured.hash, genesisHash)) {
     throw new UmbraError(
       "genesis-mismatch",
       `the node's genesis hash is ${hex(genesisHash)}, but the configured network ${configured.network} has the genesis ` +

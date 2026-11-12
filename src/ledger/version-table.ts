@@ -300,8 +300,9 @@ export function ledgerTableIssues(builtIn: LedgerTable | null, configured: Confi
     issues.push({
       path: configured === undefined ? [] : ["rows"],
       message:
-        "a custom network sets its own ledger table: the built-in tables cover mainnet, preprod, preview and stagenet " +
-        "only; give ledgerTable.rows, at least one row mapping its runtimes' spec_versions to ledger versions",
+        "a custom network sets its own ledger table: the built-in tables cover mainnet, preprod, preview, stagenet " +
+        "and undeployed only; give ledgerTable.rows, at least one row mapping its runtimes' spec_versions to ledger " +
+        "versions",
     });
   }
   return issues;

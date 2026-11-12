@@ -21,6 +21,11 @@ adheres to [Semantic Versioning](https://semver.org/).
   an enabled module's height on its network starts there, with the entries starting with it; the process logs the
   move and `umbradb config check` notes it. `token-metadata` declares each official network's first block with
   contract logs, so every new database holds every MIP-0018 event.
+- The network `undeployed`, Midnight's local standalone node, beside `mainnet`, `preprod`, `preview` and `stagenet`.
+  Each local chain has its own block 0, so the build records no genesis hash for it: a new database takes its node's
+  and records it, and every later start is held to the recorded one (`genesis-mismatch` for a node restarted from a
+  new genesis). Its ledger table is the official networks'. A private process of `undeployed` takes its public
+  database's genesis. `token-metadata`'s latest start on it is 0.
 
 ### Changed
 

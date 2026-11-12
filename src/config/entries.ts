@@ -32,7 +32,7 @@ import type { PlainObject } from "./plain-data.js";
 export const CORE_ENTRY_ID = "core";
 
 /** A network the core knows, or `custom` (then `genesisHash` is required, `./core-settings.ts`). */
-export type Network = "mainnet" | "preprod" | "preview" | "stagenet" | "custom";
+export type Network = "mainnet" | "preprod" | "preview" | "stagenet" | "undeployed" | "custom";
 
 /** A row of the ledger version table: `spec_version` from `specVersionMin` to `specVersionMax` → `ledger`. */
 export type LedgerTableRow = {

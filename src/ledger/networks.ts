@@ -6,7 +6,8 @@
  * loads, reporting every problem at once with its path, so a build with a broken file cannot start:
  *
  * - `networks[]`: each `{ network, genesis, rows, boundaries }`. A network appears at most once and is one of
- *   {@link KNOWN_NETWORKS} (`custom` has no built-in table: its configuration sets its own).
+ *   {@link KNOWN_NETWORKS} (`custom` has no built-in table: its configuration sets its own). A local network
+ *   ({@link LOCAL_NETWORKS}) records no genesis and no boundaries: each of its chains has its own block 0.
  * - `genesis`: `{ hash, specVersion, source }`, the hash of block 0 and the `spec_version` of the runtime at genesis
  *   (null until read), as read from the network's node; or null while nothing was read. Two networks never share a
  *   genesis hash, and a network with boundaries has its genesis.
@@ -41,10 +42,22 @@ import {
 } from "./version-table.js";
 
 /** The networks a `core` entry may name besides `custom`, each with a built-in table. */
-export const KNOWN_NETWORKS = Object.freeze(["mainnet", "preprod", "preview", "stagenet"] as const);
+export const KNOWN_NETWORKS = Object.freeze(["mainnet", "preprod", "preview", "stagenet", "undeployed"] as const);
 
 /** A known network. */
 export type KnownNetwork = (typeof KNOWN_NETWORKS)[number];
+
+/**
+ * The known networks that are local: `undeployed`, Midnight's standalone node. Each local chain has its own block 0,
+ * so the build records no genesis hash for it: the core takes the node's at a new database's first start, and checks
+ * it at every later start (`src/backbone/core-chain/core-chain.ts`).
+ */
+export const LOCAL_NETWORKS = Object.freeze(["undeployed"] as const);
+
+/** Whether `network` is a local network ({@link LOCAL_NETWORKS}). */
+export function isLocalNetwork(network: string): boolean {
+  return (LOCAL_NETWORKS as readonly string[]).includes(network);
+}
 
 /** The file's format name. */
 export const NETWORKS_FORMAT = "umbradb-ledger-networks";
@@ -143,6 +156,12 @@ function networkIssues(entry: z.output<typeof NETWORK_SHAPE>): Issue[] {
   });
   const covered = (specVersion: number) =>
     entry.rows.some((row) => row.specVersionMin <= specVersion && specVersion <= row.specVersionMax);
+  if (isLocalNetwork(entry.network) && entry.genesis !== null) {
+    issues.push({
+      path: ["genesis"],
+      message: `${entry.network} is a local network: each of its chains has its own block 0, so it records no genesis`,
+    });
+  }
   if (entry.boundaries.length > 0 && entry.genesis === null) {
     issues.push({
       path: ["genesis"],
