@@ -12,7 +12,7 @@ import type { ReadHandle } from "../../db/api.js";
 import { COMMON_KEY_HEX, type Field as StateField, fieldUsable, IMAGE_KEY_HEX, parseStandards, tokenMark } from "../token-metadata/state.js";
 import { decodeUtf8, fromHex, toHex } from "../token-metadata/codec/index.js";
 import { hasColor, tokenColor } from "./color.js";
-import { commonFields, keyOf, markInputs, type MarkInputs, symbolGroup, type TokenKey, tokenFields, tokensOfColors, tokensOfContract, tokensOfDomain } from "./queries.js";
+import { commonFields, keyOf, markInputs, type MarkInputs, symbolGroup, type TokenKey, tokenFields, tokensOfColors, tokensOfContract, tokensOfDomain } from "./sql.js";
 import { badRequest } from "./router.js";
 import {
   type Common,

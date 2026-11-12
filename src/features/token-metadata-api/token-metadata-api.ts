@@ -8,7 +8,7 @@
  *   their TypeBox schemas (`./router.ts`); the documentation is `docs/token-metadata-api.md`.
  * - **Requires** `token-metadata`'s two `table` items (`../token-metadata/schema.ts`), so startup refuses it in a
  *   configuration without `token-metadata` at its heights, and it reads those tables at each answer's committed
- *   height (`./queries.ts`).
+ *   height (`./sql.ts`).
  * - **Holds no state**: no tables, no migrations, nothing per block, only `on-start-api`. Added to a database whose
  *   indexer already ran (from a height above the cursor, as any added entry), it answers as if it had run from S.
  */

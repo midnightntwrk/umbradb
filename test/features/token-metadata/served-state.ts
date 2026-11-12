@@ -8,7 +8,7 @@ import type { ReadHandle } from "../../../src/db/api.js";
 import { SCHEMA } from "../../../src/features/token-metadata/schema.js";
 import { type Field, type IdentityState, type SymbolGroup, symbolGroups } from "../../../src/features/token-metadata/state.js";
 import { toHex } from "../../../src/features/token-metadata/codec/index.js";
-import { fieldOf } from "../../../src/features/token-metadata-api/queries.js";
+import { fieldOf } from "../../../src/features/token-metadata-api/sql.js";
 
 /** Every existing identity of the database (at least one defined field), with its served fields, in identity order. */
 export async function servedIdentities(read: Pick<ReadHandle, "query">, network: string): Promise<IdentityState[]> {
