@@ -58,6 +58,7 @@
   "dependencies": {
     "@electric-sql/pglite": "0.5.10",
     "postgres": "^3.4.9",
+    "typebox": "1.4.3",
     "typescript": "^5.9.0",
     "ws": "8.22.0",
     "zod": "^4.6.7"
