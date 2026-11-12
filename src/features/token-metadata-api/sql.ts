@@ -86,8 +86,6 @@ export const STATEMENTS = Object.freeze({
   /** The tokens of contract `$1` whose usable symbol starts with `$2` (below `$3`), unordered: `symbolGroups` orders them. */
   groupPrefix: `SELECT domain_sep, kind::int AS kind, symbol FROM ${SCHEMA}.tokens
      WHERE contract_address = $1 AND symbol >= $2 AND symbol < $3`,
-  /** The same with no upper bound (a prefix of 0xff bytes only). */
-  groupPrefixOpen: `SELECT domain_sep, kind::int AS kind, symbol FROM ${SCHEMA}.tokens WHERE contract_address = $1 AND symbol >= $2`,
 });
 
 /** A field row as served: its value cut to its served length (`lengthLimited`), never where it is stored. */
@@ -189,16 +187,16 @@ export async function markInputs(read: ReadHandle, contracts: readonly string[],
 
 // ── Symbol groups ────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** The smallest byte string above every string starting with `prefix`, or null when there is none (all `0xff`). */
-function prefixEnd(prefix: Uint8Array): Uint8Array | null {
+/**
+ * The smallest byte string above every string starting with `prefix`: `prefix` with its last byte plus one. `prefix` is
+ * a usable symbol, so non-empty UTF-8, whose bytes are all below 0xff; anything else throws a `RangeError`.
+ */
+export function prefixEnd(prefix: Uint8Array): Uint8Array {
+  const last = prefix.at(-1);
+  if (last === undefined || last === 0xff) throw new RangeError("a symbol prefix is non-empty UTF-8, which has no 0xff byte");
   const end = prefix.slice();
-  for (let i = end.length - 1; i >= 0; i--) {
-    if (end[i]! < 0xff) {
-      end[i]! += 1;
-      return end.slice(0, i + 1);
-    }
-  }
-  return null;
+  end[end.length - 1] = last + 1;
+  return end;
 }
 
 /** The served length of a symbol, in characters. */
@@ -227,11 +225,7 @@ export async function symbolGroup(
     const rows = await read.query(STATEMENTS.groupMembers, [address, symbol, limit]);
     return { memberCount, members: rows.map((r) => ({ domainSep: toHex(r.domain_sep as Uint8Array), kind: num(r.kind) })) };
   }
-  const end = prefixEnd(symbol);
-  const rows =
-    end === null
-      ? await read.query(STATEMENTS.groupPrefixOpen, [address, symbol])
-      : await read.query(STATEMENTS.groupPrefix, [address, symbol, end]);
+  const rows = await read.query(STATEMENTS.groupPrefix, [address, symbol, prefixEnd(symbol)]);
   const [group] = symbolGroups(
     rows
       .map((r) => ({ domainSep: toHex(r.domain_sep as Uint8Array), kind: num(r.kind), value: lengthLimited(COMMON_KEY_HEX.symbol, 1, r.symbol as Uint8Array) }))
