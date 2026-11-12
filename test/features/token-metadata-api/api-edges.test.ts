@@ -61,11 +61,11 @@ describe.each(PROCESS_BACKENDS)("the API's edges on $name", (backend: ProcessBac
     ]);
     await runTo(db, { start: S, head: S + 2, logs });
     await db.query(
-      `INSERT INTO token_metadata.token_events (height, tx_index, event_index, contract_address, classification, reason)
+      `INSERT INTO token_metadata.events (height, tx_index, event_index, contract_address, classification, reason)
        VALUES (${S + 1}, 7, 0, '\\x${hex(A)}'::bytea, 'unresolved', 'not-a-literal')`,
     );
     await db.query(
-      `INSERT INTO token_metadata.token_fields (token_id, kind, key, val_type, value, uint_value, usable, set_height, set_tx, set_event, set_record)
+      `INSERT INTO token_metadata.fields (token_id, kind, key, val_type, value, uint_value, usable, set_height, set_tx, set_event, set_record)
        VALUES ('\\x${hex(tokenColor(domain(1), A))}'::bytea, 1, convert_to('image', 'UTF8'), 4, '\\xff00ff'::bytea, NULL, false, ${S + 1}, 0, 0, 9)`,
     );
   }, 240_000);

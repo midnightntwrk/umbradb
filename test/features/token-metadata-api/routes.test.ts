@@ -99,13 +99,13 @@ describe.each(PROCESS_BACKENDS)("the withdrawal, usability and truncation scenar
         expect((await at(one(U, 1))).items).toEqual([]);
         expect((await at({ contract: hex(U) })).items).toEqual([]);
         // Its event is accepted (no rejection row) and stores nothing: an undefined key is not kept.
-        expect(await db.query(`SELECT count(*)::int AS n FROM token_metadata.token_events WHERE contract_address = '\\x${hex(U)}'::bytea`)).toEqual([{ n: 0 }]);
+        expect(await db.query(`SELECT count(*)::int AS n FROM token_metadata.events WHERE contract_address = '\\x${hex(U)}'::bytea`)).toEqual([{ n: 0 }]);
         expect(await db.query(`SELECT count(*)::int AS n FROM token_metadata.tokens WHERE contract_address = '\\x${hex(U)}'::bytea`)).toEqual([{ n: 0 }]);
         return (await at(one(X, 3))).items;
       });
       expect(
         await db.query(
-          `SELECT octet_length(f.value) AS n FROM token_metadata.tokens t JOIN token_metadata.token_fields f ON f.token_id = t.id AND f.kind = t.kind
+          `SELECT octet_length(f.value) AS n FROM token_metadata.tokens t JOIN token_metadata.fields f ON f.token_id = t.id AND f.kind = t.kind
            WHERE t.contract_address = '\\x${hex(Z)}'::bytea ORDER BY t.domain_sep, f.key`,
         ),
       ).toEqual([

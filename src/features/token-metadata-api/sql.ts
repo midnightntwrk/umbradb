@@ -1,6 +1,6 @@
 /**
  * Every statement `token-metadata-api` sends to `token-metadata`'s tables (`../token-metadata/sql.ts`: `tokens`,
- * `token_fields`, `token_events`), by name ({@link STATEMENTS}): the catalog
+ * `fields`, `events`), by name ({@link STATEMENTS}): the catalog
  * `test/features/token-metadata/sql-plans.test.ts` plans on both backends (no scan of a `token_metadata` table, every
  * index used). Each is static: a variant is its own statement. The functions below only bind and map, and each answer
  * reads in a fixed number of statements, except the group of a served 12-character symbol (see {@link symbolGroup}).
@@ -37,7 +37,7 @@ const FIELD_COLUMNS = `f.token_id AS id, f.kind::int AS kind, f.key, f.val_type:
 const BY_IDS = "unnest($1::bytea[], $2::int[]) AS i(id, k)";
 const firstOfContract = (classification: "reject" | "unresolved", columns: string) =>
   `SELECT c.address, ${columns} FROM unnest($1::bytea[]) AS c(address) CROSS JOIN LATERAL (
-     SELECT reason, height, tx_index, event_index FROM ${SCHEMA}.token_events e
+     SELECT reason, height, tx_index, event_index FROM ${SCHEMA}.events e
      WHERE e.contract_address = c.address AND e.classification = '${classification}'
      ORDER BY height, tx_index, event_index LIMIT $2) e
    ORDER BY c.address, e.height, e.tx_index, e.event_index`;
@@ -59,20 +59,20 @@ export const STATEMENTS = Object.freeze({
      WHERE t.contract_address = $1 AND t.domain_sep = $2 AND t.kind = ANY($3::smallint[]) ORDER BY t.kind`,
   /** The first `$3` fields of each token, in key byte order. */
   tokenFields: `SELECT ${FIELD_COLUMNS} FROM ${BY_IDS} CROSS JOIN LATERAL (
-       SELECT * FROM ${SCHEMA}.token_fields WHERE token_id = i.id AND kind = i.k ORDER BY key LIMIT $3) f
+       SELECT * FROM ${SCHEMA}.fields WHERE token_id = i.id AND kind = i.k ORDER BY key LIMIT $3) f
      ORDER BY f.token_id, f.kind, f.key`,
   /** How many fields each token has. */
   tokenFieldCounts: `SELECT i.id, i.k AS kind,
-       (SELECT count(*) FROM ${SCHEMA}.token_fields WHERE token_id = i.id AND kind = i.k)::int AS n
+       (SELECT count(*) FROM ${SCHEMA}.fields WHERE token_id = i.id AND kind = i.k)::int AS n
      FROM ${BY_IDS}`,
   /** The common fields (keys `$3`) of each token, in the order they were last set. */
   commonFields: `SELECT ${FIELD_COLUMNS} FROM ${BY_IDS}
-     JOIN ${SCHEMA}.token_fields f ON f.token_id = i.id AND f.kind = i.k AND f.key = ANY($3::bytea[])
+     JOIN ${SCHEMA}.fields f ON f.token_id = i.id AND f.kind = i.k AND f.key = ANY($3::bytea[])
      ORDER BY f.token_id, f.kind, f.set_height, f.set_tx, f.set_event, f.set_record`,
   /** Each contract's rejected and unresolved event counts. */
   markCounts: `SELECT c.address,
-       (SELECT count(*) FROM ${SCHEMA}.token_events e WHERE e.contract_address = c.address AND e.classification = 'reject')::int AS rejected,
-       (SELECT count(*) FROM ${SCHEMA}.token_events e WHERE e.contract_address = c.address AND e.classification = 'unresolved')::int AS unresolved
+       (SELECT count(*) FROM ${SCHEMA}.events e WHERE e.contract_address = c.address AND e.classification = 'reject')::int AS rejected,
+       (SELECT count(*) FROM ${SCHEMA}.events e WHERE e.contract_address = c.address AND e.classification = 'unresolved')::int AS unresolved
      FROM unnest($1::bytea[]) AS c(address)`,
   /** Each contract's first `$2` rejection reasons. */
   markReasons: firstOfContract("reject", "e.reason"),

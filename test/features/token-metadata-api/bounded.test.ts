@@ -42,11 +42,11 @@ async function seed(db: ProcessDatabase, symbol: string): Promise<void> {
   const x = `'\\x${hex(X)}'::bytea`;
   const id = `'\\x${hex(tokenColor(DA, X))}'::bytea`;
   await db.query(
-    `INSERT INTO token_metadata.token_fields (token_id, kind, key, val_type, value, uint_value, usable, set_height, set_tx, set_event, set_record)
+    `INSERT INTO token_metadata.fields (token_id, kind, key, val_type, value, uint_value, usable, set_height, set_tx, set_event, set_record)
      SELECT ${id}, 3, convert_to('k' || lpad(i::text, 6, '0'), 'UTF8'), 1, '\\x76'::bytea, NULL, NULL, ${S + 1}, 0, 0, i
      FROM generate_series(1, ${N}) AS i`,
   );
-  await db.query(`UPDATE token_metadata.token_fields SET value = convert_to('${symbol}', 'UTF8') WHERE token_id = ${id} AND key = convert_to('symbol', 'UTF8')`);
+  await db.query(`UPDATE token_metadata.fields SET value = convert_to('${symbol}', 'UTF8') WHERE token_id = ${id} AND key = convert_to('symbol', 'UTF8')`);
   await db.query(`UPDATE token_metadata.tokens SET symbol = convert_to('${symbol}', 'UTF8') WHERE id = ${id}`);
   await db.query(
     `INSERT INTO token_metadata.tokens (id, kind, contract_address, domain_sep, symbol)
@@ -54,16 +54,16 @@ async function seed(db: ProcessDatabase, symbol: string): Promise<void> {
      FROM (SELECT decode('ee' || lpad(to_hex(i), 62, '0'), 'hex') AS d FROM generate_series(1, ${MEMBERS - 1}) AS i) AS m`,
   );
   await db.query(
-    `INSERT INTO token_metadata.token_fields (token_id, kind, key, val_type, value, uint_value, usable, set_height, set_tx, set_event, set_record)
+    `INSERT INTO token_metadata.fields (token_id, kind, key, val_type, value, uint_value, usable, set_height, set_tx, set_event, set_record)
      SELECT id, 3, convert_to('symbol', 'UTF8'), 1, symbol, NULL, true, ${S + 1}, 0, 1, 0 FROM token_metadata.tokens WHERE id <> ${id}`,
   );
   await db.query(
-    `INSERT INTO token_metadata.token_events (height, tx_index, event_index, contract_address, classification, reason)
+    `INSERT INTO token_metadata.events (height, tx_index, event_index, contract_address, classification, reason)
      SELECT ${S + 1}, 100 + i, 0, ${x}, 'reject', 'no-records' FROM generate_series(1, ${N}) AS i`,
   );
   await db.query("ANALYZE token_metadata.tokens");
-  await db.query("ANALYZE token_metadata.token_fields");
-  await db.query("ANALYZE token_metadata.token_events");
+  await db.query("ANALYZE token_metadata.fields");
+  await db.query("ANALYZE token_metadata.events");
 }
 
 describe.each(PROCESS_BACKENDS)("bounded cost on $name", (backend: ProcessBackend) => {

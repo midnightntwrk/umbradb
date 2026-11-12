@@ -113,7 +113,7 @@ describe.each(PROCESS_BACKENDS)("token-metadata's event rows on $name", (backend
     ]);
     await runTo(db, { start: S, head: S + 2, logs });
     // The valid event alone describes a token; nothing else stores anything, and an accepted event leaves no event row.
-    expect(await db.query("SELECT count(*)::int AS n FROM token_metadata.token_events")).toEqual([{ n: 0 }]);
+    expect(await db.query("SELECT count(*)::int AS n FROM token_metadata.events")).toEqual([{ n: 0 }]);
     expect(await db.query("SELECT encode(contract_address, 'hex') AS c, encode(domain_sep, 'hex') AS d, kind FROM token_metadata.tokens")).toEqual([
       { c: hex(A), d: hex(D), kind: 1 },
     ]);
@@ -129,11 +129,11 @@ describe.each(PROCESS_BACKENDS)("token-metadata's event rows on $name", (backend
       const address = fromHex(vector.steps[0]!.contractAddress);
       await runTo(db, { start: S, head: S + 2, logs: new Map([[BigInt(S + 1), blockLogs([0, address, data[0]!], [0, address, data[1]!])]]) });
       const bad = id === "S7a" ? 0 : 1;
-      expect(await db.query("SELECT event_index, classification, reason FROM token_metadata.token_events"), id).toEqual([
+      expect(await db.query("SELECT event_index, classification, reason FROM token_metadata.events"), id).toEqual([
         { event_index: bad, classification: "reject", reason: "reserved-valtype" },
       ]);
       expect(await db.query("SELECT kind FROM token_metadata.tokens"), id).toEqual([{ kind: 3 }]);
-      expect(await db.query("SELECT convert_from(key, 'UTF8') AS key, convert_from(value, 'UTF8') AS value FROM token_metadata.token_fields"), id).toEqual([
+      expect(await db.query("SELECT convert_from(key, 'UTF8') AS key, convert_from(value, 'UTF8') AS value FROM token_metadata.fields"), id).toEqual([
         { key: "name", value: "Good" },
       ]);
     }
@@ -146,7 +146,7 @@ describe.each(PROCESS_BACKENDS)("token-metadata's event rows on $name", (backend
     const identity = await serve(db, { start: S, head: S + 2, logs, unresolved }, async (origin) =>
       (await post(origin, TOKENS_PATH, { contract: hex(A), domainSep: hex(D), kind: 1 })).json.items[0],
     );
-    expect(await db.query("SELECT tx_index, event_index, classification, reason FROM token_metadata.token_events ORDER BY tx_index, event_index")).toEqual([
+    expect(await db.query("SELECT tx_index, event_index, classification, reason FROM token_metadata.events ORDER BY tx_index, event_index")).toEqual([
       { tx_index: 0, event_index: 0, classification: "unresolved", reason: "not-a-literal" },
       { tx_index: 1, event_index: 0, classification: "unresolved", reason: "partial-transaction" },
     ]);

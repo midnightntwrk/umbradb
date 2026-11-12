@@ -1,6 +1,6 @@
 /**
- * The write path of `token-metadata`: a block's `contract-logs` become changes to `tokens` and `token_fields`, applied
- * in chain order, and the rejected events and unresolved log sites become `token_events` rows (`./sql.ts`).
+ * The write path of `token-metadata`: a block's `contract-logs` become changes to `tokens` and `fields`, applied
+ * in chain order, and the rejected events and unresolved log sites become `events` rows (`./sql.ts`).
  *
  * - **Candidates.** Only a `Misc` log whose value the log reader gives as one atom of at most 288 bytes;
  *   its name and payload are the atom zero-extended to 288 bytes, split 32 + 256 (`splitMiscData`). An unknown
@@ -63,7 +63,7 @@ export class TokenMetadataLogError extends Error {
 }
 
 /**
- * One candidate of a block, classified: an accepted event (its token and records) or a row of `token_events` (a
+ * One candidate of a block, classified: an accepted event (its token and records) or a row of `events` (a
  * rejected event or an unresolved log site).
  */
 export type Candidate =

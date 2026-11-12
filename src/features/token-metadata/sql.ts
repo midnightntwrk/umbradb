@@ -21,14 +21,14 @@ export interface Position {
   readonly event: number;
 }
 
-/** One `token_events` row: a rejected event or an unresolved log site of a contract. */
+/** One `events` row: a rejected event or an unresolved log site of a contract. */
 export interface EventRow extends Position {
   readonly contract: Uint8Array;
   readonly classification: "reject" | "unresolved";
   readonly reason: string;
 }
 
-/** One `token_fields` row's value and where it was set. */
+/** One `fields` row's value and where it was set. */
 export interface FieldRow {
   readonly key: Uint8Array;
   readonly valType: number;
@@ -46,7 +46,7 @@ type Write = Pick<BlockWriteHandle, "execute" | "query">;
  */
 export const STATEMENTS = Object.freeze({
   /** One rejected event or unresolved log site. */
-  insertEvent: `INSERT INTO ${SCHEMA}.token_events (height, tx_index, event_index, contract_address, classification, reason)
+  insertEvent: `INSERT INTO ${SCHEMA}.events (height, tx_index, event_index, contract_address, classification, reason)
      VALUES ($1, $2, $3, $4, $5, $6)`,
   /** A token's row, if it has none. */
   insertToken: `INSERT INTO ${SCHEMA}.tokens (id, kind, contract_address, domain_sep) VALUES ($1, $2, $3, $4)
@@ -56,15 +56,15 @@ export const STATEMENTS = Object.freeze({
   /** Deletes a token (its fields are gone already). */
   deleteToken: `DELETE FROM ${SCHEMA}.tokens WHERE id = $1 AND kind = $2`,
   /** Whether a token has a field. */
-  tokenHasFields: `SELECT 1 AS one FROM ${SCHEMA}.token_fields WHERE token_id = $1 AND kind = $2 LIMIT 1`,
+  tokenHasFields: `SELECT 1 AS one FROM ${SCHEMA}.fields WHERE token_id = $1 AND kind = $2 LIMIT 1`,
   /** Sets one field's current value, inserting or replacing its row. */
-  setField: `INSERT INTO ${SCHEMA}.token_fields (token_id, kind, key, val_type, value, uint_value, usable, set_height, set_tx,
+  setField: `INSERT INTO ${SCHEMA}.fields (token_id, kind, key, val_type, value, uint_value, usable, set_height, set_tx,
       set_event, set_record) VALUES ($1, $2, $3, $4, $5, $6::numeric, $7, $8, $9, $10, $11)
      ON CONFLICT (token_id, kind, key) DO UPDATE SET val_type = EXCLUDED.val_type, value = EXCLUDED.value,
       uint_value = EXCLUDED.uint_value, usable = EXCLUDED.usable, set_height = EXCLUDED.set_height,
       set_tx = EXCLUDED.set_tx, set_event = EXCLUDED.set_event, set_record = EXCLUDED.set_record`,
   /** Deletes one field. */
-  deleteField: `DELETE FROM ${SCHEMA}.token_fields WHERE token_id = $1 AND kind = $2 AND key = $3`,
+  deleteField: `DELETE FROM ${SCHEMA}.fields WHERE token_id = $1 AND kind = $2 AND key = $3`,
   /** S, the database's first height (the core's one-row table). */
   databaseStart: "SELECT start_height FROM core_chain.identity WHERE id = 1",
 });

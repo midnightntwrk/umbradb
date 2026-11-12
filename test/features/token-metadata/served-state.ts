@@ -16,7 +16,7 @@ export async function servedIdentities(read: Pick<ReadHandle, "query">, network:
   const rows = await read.query(
     `SELECT t.contract_address, t.domain_sep, t.kind, f.key, f.val_type, f.value, f.uint_value::text AS uint_value, f.usable,
        f.set_height, f.set_tx, f.set_event, f.set_record
-     FROM ${SCHEMA}.tokens t JOIN ${SCHEMA}.token_fields f ON f.token_id = t.id AND f.kind = t.kind
+     FROM ${SCHEMA}.tokens t JOIN ${SCHEMA}.fields f ON f.token_id = t.id AND f.kind = t.kind
      ORDER BY t.contract_address, t.domain_sep, t.kind, f.key`,
   );
   const byIdentity = new Map<string, { contractAddress: string; domainSep: string; kind: number; fields: Map<string, Field> }>();

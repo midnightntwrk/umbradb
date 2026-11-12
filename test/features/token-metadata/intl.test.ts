@@ -60,7 +60,7 @@ describe("Intl only where the module serves", () => {
       height: null,
       async execute(sql: string, params: unknown[] = []) {
         statements.push({ sql, params });
-        if (sql.includes("INSERT INTO token_metadata.token_fields")) {
+        if (sql.includes("INSERT INTO token_metadata.fields")) {
           const [, kind, key, val_type, value, uint_value, usable, set_height, set_tx, set_event, set_record] = params;
           const row = { contract_address: new Uint8Array(32).fill(1), domain_sep: new Uint8Array(32).fill(1), kind, key, val_type, value, uint_value, usable };
           fields.set(toHex(key as Uint8Array), { ...row, set_height, set_tx, set_event, set_record });
@@ -68,12 +68,12 @@ describe("Intl only where the module serves", () => {
         return 1;
       },
       async query(sql: string) {
-        return sql.includes("JOIN token_metadata.token_fields") ? [...fields.values()] : [];
+        return sql.includes("JOIN token_metadata.fields") ? [...fields.values()] : [];
       },
     };
     const long = "x".repeat(70);
     await writeBlock(w, 5n, blockLogs([0, contract(1), eventData(domain(1), 1, commonRecords({ name: long, symbol: long }))]));
-    expect(statements.some((s) => s.sql.includes("INSERT INTO token_metadata.token_fields"))).toBe(true);
+    expect(statements.some((s) => s.sql.includes("INSERT INTO token_metadata.fields"))).toBe(true);
     expect(segment).not.toHaveBeenCalled();
     const [identity] = await servedIdentities(w, "n");
     expect(segment).toHaveBeenCalled();

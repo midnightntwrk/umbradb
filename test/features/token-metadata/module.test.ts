@@ -22,12 +22,12 @@ describe.each(PROCESS_BACKENDS)("token-metadata's start on $name", (backend: Pro
     const logs = new Map([[1_000_002n, blockLogs([0, contract(1), eventData(domain(7), 1, commonRecords({ name: "Acme Gold", symbol: "AG", decimals: 6 }))])]]);
     await runTo(db, { start: 1_000_000, head: 1_000_003, logs });
     // An accepted event leaves no event row: its effect is the token's row and fields.
-    expect(await db.query("SELECT count(*)::int AS n FROM token_metadata.token_events")).toEqual([{ n: 0 }]);
+    expect(await db.query("SELECT count(*)::int AS n FROM token_metadata.events")).toEqual([{ n: 0 }]);
     expect(await db.query("SELECT encode(id, 'hex') AS id, kind, encode(symbol, 'hex') AS symbol FROM token_metadata.tokens")).toEqual([
       { id: hex(tokenColor(domain(7), contract(1))), kind: 1, symbol: hex(new TextEncoder().encode("AG")) },
     ]);
     const fields = await db.query(
-      "SELECT convert_from(key, 'UTF8') AS key, val_type, encode(value, 'hex') AS value, uint_value::text AS uint, usable, set_height::text AS at FROM token_metadata.token_fields ORDER BY key",
+      "SELECT convert_from(key, 'UTF8') AS key, val_type, encode(value, 'hex') AS value, uint_value::text AS uint, usable, set_height::text AS at FROM token_metadata.fields ORDER BY key",
     );
     expect(fields).toEqual([
       { key: "decimals", val_type: 2, value: "06", uint: "6", usable: true, at: "1000002" },

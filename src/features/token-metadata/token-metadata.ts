@@ -19,8 +19,8 @@
  * - **Provides** its tables as two `table` items (`./schema.ts`): `token-metadata-events` (append-only) and
  *   `token-metadata-state` (mutable), which `token-metadata-api` and any other module may require to read them.
  * - **Per block** it writes in `on-db-write` (`./apply.ts`): its accepted events' effect on `tokens` and
- *   `token_fields`, and its rejected events and unresolved log sites (from `core-contract-logs-fast`, never applied) as
- *   `token_events` rows, in chain order, reading its own rows inside the block transaction. A v8 block has no contract
+ *   `fields`, and its rejected events and unresolved log sites (from `core-contract-logs-fast`, never applied) as
+ *   `events` rows, in chain order, reading its own rows inside the block transaction. A v8 block has no contract
  *   logs, so nothing.
  * - **Files by role**: `./schema.ts` the tables (migration `001`) and items, `./sql.ts` every statement the write path
  *   sends, `./apply.ts` the write path, `./log-reader.ts` a log's bytes, `./codec/` the MIP-0018 event codec,
@@ -108,11 +108,11 @@ export function tokenMetadataWith(reader: LogReader, latestStarts: Readonly<Reco
     side: "public",
     requires: [CONTRACT_LOGS_ITEM],
     provides: [
-      { name: EVENTS_ITEM, lifetimes: ["table"], table: { schema: SCHEMA, tables: ["token_events"], kind: "append-only" } },
+      { name: EVENTS_ITEM, lifetimes: ["table"], table: { schema: SCHEMA, tables: ["events"], kind: "append-only" } },
       {
         name: STATE_ITEM,
         lifetimes: ["table"],
-        table: { schema: SCHEMA, tables: ["tokens", "token_fields"], kind: "mutable" },
+        table: { schema: SCHEMA, tables: ["tokens", "fields"], kind: "mutable" },
       },
     ],
     startsMidChain: true,

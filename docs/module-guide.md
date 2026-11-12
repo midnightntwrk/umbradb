@@ -969,8 +969,8 @@ export default defineConfig({
   database. A gap between its revisions (§11) is refused the same way, with `token-metadata-revision-gap`.
 - **Its tables** (schema `token_metadata`), related by keys: `tokens` (mutable: one row per described token, keyed
   by its id, the hash of domain separator and contract, which is its color for kinds 1 and 2, and its kind; the row
-  is deleted with the token's last field), `token_fields` (mutable: each token's current defined fields, whole; keys
-  MIP-0018 does not define are not stored) and `token_events` (append-only: each rejected event and unresolved log
+  is deleted with the token's last field), `fields` (mutable: each token's current defined fields, whole; keys
+  MIP-0018 does not define are not stored) and `events` (append-only: each rejected event and unresolved log
   site, with its position, contract and reason, for marks). They are deterministic module tables (§4): names and symbols are
   stored whole and cut to 64 and 12 characters only when served, since the cut depends on the platform's Unicode data.
 - **The API holds no state.** Startup refuses it without the indexer (`item-no-provider`); added to a database whose

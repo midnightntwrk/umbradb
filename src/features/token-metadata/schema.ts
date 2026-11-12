@@ -9,11 +9,11 @@
  *   `sha256(pad(32, "midnight:derive_token") ‖ domain_sep ‖ contract_address)` (`./color.ts`): its color for kinds 1
  *   and 2, the same hash for kind 3. `symbol` is the token's current usable `symbol`, whole, or null: what symbol
  *   groups read. A row exists exactly while the token has a field; its last field's deletion deletes it (a withdrawal).
- * - `token_fields`, mutable: one row per defined field of a token (MIP "Keys": keys MIP-0018 does not define are not
+ * - `fields`, mutable: one row per defined field of a token (MIP "Keys": keys MIP-0018 does not define are not
  *   stored), holding only its current value, whole (names and symbols are cut when served, never when stored), and
  *   where it was set. `uint_value` is a `UInt` value as a number; `usable` is the common-field rule's answer for a
  *   common key, else null. Its rows belong to their token (`ON DELETE CASCADE`).
- * - `token_events`, append-only: what a token's mark reads of its contract — each rejected MIP-0018 event and each
+ * - `events`, append-only: what a token's mark reads of its contract — each rejected MIP-0018 event and each
  *   unresolved log site, at its chain position (`event_index`: its position among its transaction's log sites), with
  *   its reason. Accepted events leave no row: their effect is the fields.
  *
@@ -25,10 +25,10 @@
 /** The indexer's schema: its id with `-` replaced by `_`. */
 export const SCHEMA = "token_metadata";
 
-/** The `table` item of `token_events` (append-only): rejected events and unresolved log sites, per contract. */
+/** The `table` item of `events` (append-only): rejected events and unresolved log sites, per contract. */
 export const EVENTS_ITEM = "token-metadata-events";
 
-/** The `table` item of `tokens` and `token_fields` (mutable): the described tokens and their current fields. */
+/** The `table` item of `tokens` and `fields` (mutable): the described tokens and their current fields. */
 export const STATE_ITEM = "token-metadata-state";
 
 /** Migration `001`: the three tables and their indexes. Never edited once released; a change is a new migration. */
@@ -42,7 +42,7 @@ export const MIGRATION_001 = `CREATE TABLE ${SCHEMA}.tokens (
 );
 CREATE UNIQUE INDEX tokens_contract_idx ON ${SCHEMA}.tokens (contract_address, domain_sep, kind);
 CREATE INDEX tokens_symbol_idx ON ${SCHEMA}.tokens (contract_address, symbol, domain_sep, kind) WHERE symbol IS NOT NULL;
-CREATE TABLE ${SCHEMA}.token_fields (
+CREATE TABLE ${SCHEMA}.fields (
   token_id bytea NOT NULL,
   kind smallint NOT NULL,
   key bytea NOT NULL CHECK (octet_length(key) BETWEEN 1 AND 255),
@@ -58,7 +58,7 @@ CREATE TABLE ${SCHEMA}.token_fields (
   PRIMARY KEY (token_id, kind, key),
   FOREIGN KEY (token_id, kind) REFERENCES ${SCHEMA}.tokens (id, kind) ON DELETE CASCADE
 );
-CREATE TABLE ${SCHEMA}.token_events (
+CREATE TABLE ${SCHEMA}.events (
   height bigint NOT NULL CHECK (height >= 0),
   tx_index integer NOT NULL CHECK (tx_index >= 0),
   event_index integer NOT NULL CHECK (event_index >= 0),
@@ -67,9 +67,9 @@ CREATE TABLE ${SCHEMA}.token_events (
   reason text NOT NULL CHECK (reason ~ '^[a-z0-9-]{1,64}$'),
   PRIMARY KEY (height, tx_index, event_index)
 );
-CREATE INDEX token_events_reject_idx ON ${SCHEMA}.token_events (contract_address, height, tx_index, event_index) INCLUDE (reason)
+CREATE INDEX events_reject_idx ON ${SCHEMA}.events (contract_address, height, tx_index, event_index) INCLUDE (reason)
   WHERE classification = 'reject';
-CREATE INDEX token_events_unresolved_idx ON ${SCHEMA}.token_events (contract_address, height, tx_index, event_index)
+CREATE INDEX events_unresolved_idx ON ${SCHEMA}.events (contract_address, height, tx_index, event_index)
   WHERE classification = 'unresolved';`;
 
 /** The module's migrations, in order. */
