@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ContractLog } from "../../../src/backbone/contract-logs/contract-logs.js";
 import type { LogEventType } from "../../../src/ledger/types.js";
 import { servedGroups, servedIdentities } from "./served-state.js";
-import { displayAmount, MetadataState } from "../../../src/features/token-metadata/state.js";
+import { displayAmount, MetadataState } from "./model.js";
 import { fromHex } from "../../../src/features/token-metadata/codec/index.js";
 import { PGlite } from "@electric-sql/pglite";
 import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../../runner/process-backends.js";

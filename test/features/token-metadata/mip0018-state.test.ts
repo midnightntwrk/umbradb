@@ -4,23 +4,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { EVENT_NAME, encodePayload, type MetadataRecord, record } from "../../../src/features/token-metadata/codec/index.js";
-import {
-  ChainOrderError,
-  COMMON_KEY_HEX,
-  fieldUsable,
-  firstCharacters,
-  IMAGE_KEY_HEX,
-  lengthLimited,
-  formatAmount,
-  MetadataState,
-  parseStandards,
-  recordEffects,
-  symbolGroups,
-  tokenMark,
-  toHex,
-  type IdentityRef,
-  UNRESOLVED_LOG_REASON,
-} from "../../../src/features/token-metadata/state.js";
+import { COMMON_KEY_HEX, fieldUsable, firstCharacters, IMAGE_KEY_HEX, lengthLimited, parseStandards, tokenMark, UNRESOLVED_LOG_REASON } from "../../../src/features/token-metadata/rules.js";
+import { ChainOrderError, formatAmount, MetadataState, recordEffects, symbolGroups, toHex, type IdentityRef } from "./model.js";
 
 const NET = "testnet-a";
 const A = "aa".repeat(32);

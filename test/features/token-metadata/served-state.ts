@@ -1,12 +1,13 @@
 /**
  * The tests' whole-table reads of `token-metadata`'s state: every identity with its served fields (each row through
- * the API's own `fieldOf`, so cut where it is served), and the symbol groups, as the pure `MetadataState` (`state.ts`)
+ * the API's own `fieldOf`, so cut where it is served), and the symbol groups, as the reference model (`./model.ts`)
  * gives them, for the comparisons with the reference model and the vectors. The API's own reads are bounded and paged.
  */
 
 import type { ReadHandle } from "../../../src/db/api.js";
 import { SCHEMA } from "../../../src/features/token-metadata/schema.js";
-import { type Field, type IdentityState, type SymbolGroup, symbolGroups } from "../../../src/features/token-metadata/state.js";
+import { type Field } from "../../../src/features/token-metadata/rules.js";
+import { type IdentityState, type SymbolGroup, symbolGroups } from "./model.js";
 import { toHex } from "../../../src/features/token-metadata/codec/index.js";
 import { fieldOf } from "../../../src/features/token-metadata-api/sql.js";
 

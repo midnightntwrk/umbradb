@@ -8,14 +8,16 @@
  * group takes one or two per distinct (contract, symbol). Nothing here fetches anything.
  */
 
+import Value from "typebox/value";
 import type { ReadHandle } from "../../db/api.js";
-import { COMMON_KEY_HEX, type Field as StateField, fieldUsable, IMAGE_KEY_HEX, parseStandards, tokenMark } from "../token-metadata/state.js";
+import { COMMON_KEY_HEX, type Field as StateField, fieldUsable, IMAGE_KEY_HEX, parseStandards, tokenMark } from "../token-metadata/rules.js";
 import { decodeUtf8, fromHex, toHex } from "../token-metadata/codec/index.js";
 import { hasColor } from "../token-metadata/color.js";
 import { commonFields, keyOf, markInputs, type MarkInputs, symbolGroup, type TokenKey, tokenFields, tokensOfColors, tokensOfContract, tokensOfDomain } from "./sql.js";
 import { badRequest } from "./router.js";
 import {
   type Common,
+  ContractCursor,
   DEFAULT_LIMIT,
   type Field,
   type Group,
@@ -82,7 +84,7 @@ function imageJson(fields: ReadonlyMap<string, StateField>): Image | null {
   return { url: String.fromCharCode(...image.value), status: "pending", imageUrl: null };
 }
 
-/** The mark of a described token from its common fields and its contract's mark inputs (`state.ts` `tokenMark`). */
+/** The mark of a described token from its common fields and its contract's mark inputs (`tokenMark`, `../token-metadata/rules.ts`). */
 export function markJson(common: ReadonlyMap<string, StateField>, inputs: MarkInputs): Mark {
   const m = tokenMark({ fields: common, described: true, contractRejections: inputs.reasons, contractUnresolvedLogs: inputs.unresolved.count });
   return {
@@ -147,12 +149,6 @@ const base64url = {
   decode: (raw: string): string => new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(atob(raw.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0))),
 };
 
-/** A contract page's cursor: the contract it pages and the last (domainSep, kind) it gave. */
-interface ContractCursor {
-  c: string;
-  k: [string, number];
-}
-
 export const encodeCursor = (cursor: ContractCursor): string => base64url.encode(JSON.stringify(cursor));
 
 /** The cursor `raw`, if this API issued it for `contract`; else a 400 (a cursor binds its contract). */
@@ -163,19 +159,10 @@ export function decodeCursor(raw: string, contract: string): ContractCursor {
   } catch {
     throw badRequest("cursor: not a cursor this API issued");
   }
-  const c = value as Partial<ContractCursor>;
-  const ok =
-    typeof value === "object" &&
-    value !== null &&
-    Object.keys(value).length === 2 &&
-    c.c === contract &&
-    Array.isArray(c.k) &&
-    c.k.length === 2 &&
-    typeof c.k[0] === "string" &&
-    /^[0-9a-f]{64}$/.test(c.k[0]) &&
-    (c.k[1] === 1 || c.k[1] === 2 || c.k[1] === 3);
-  if (!ok) throw badRequest("cursor: not a cursor this API issued for this contract");
-  return c as ContractCursor;
+  if (!Value.Check(ContractCursor, value) || value.c !== contract) {
+    throw badRequest("cursor: not a cursor this API issued for this contract");
+  }
+  return value;
 }
 
 /** The handler of `POST /token-metadata-api/v1/tokens`. */
@@ -192,6 +179,6 @@ export async function selectTokens(body: TokensRequest, read: ReadHandle): Promi
   const last = page.at(-1);
   return {
     items: await tokensOf(read, page),
-    nextCursor: keys.length > limit && last !== undefined ? encodeCursor({ c: body.contract, k: [last.domainSep, last.kind] }) : null,
+    nextCursor: keys.length > limit && last !== undefined ? encodeCursor({ c: body.contract, k: [last.domainSep, last.kind as ContractCursor["k"][1]] }) : null,
   };
 }

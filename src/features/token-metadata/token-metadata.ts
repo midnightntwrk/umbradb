@@ -20,7 +20,12 @@
  *   `token-metadata-state` (mutable), which `token-metadata-api` and any other module may require to read them.
  * - **Per block** it writes in `on-db-write` (`./apply.ts`): its accepted events' effect on `tokens` and
  *   `token_fields`, and its rejected events and unresolved log sites (from `core-contract-logs-fast`, never applied) as
- *   `token_events` rows, in chain order, reading its own rows inside the block transaction. A v8 block has no contract logs, so nothing.
+ *   `token_events` rows, in chain order, reading its own rows inside the block transaction. A v8 block has no contract
+ *   logs, so nothing.
+ * - **Files by role**: `./schema.ts` the tables (migration `001`) and items, `./sql.ts` every statement the write path
+ *   sends, `./apply.ts` the write path, `./log-reader.ts` a log's bytes, `./codec/` the MIP-0018 event codec,
+ *   `./classify.ts` its classification with the UTF-8 key rule, `./rules.ts` the rules the indexer and the API share,
+ *   and `./color.ts` a token's color.
  */
 
 import { z } from "zod";
@@ -29,8 +34,8 @@ import { CONTRACT_LOGS_ITEM, contractLogsItemOf, unresolvedLogSitesOf } from "..
 import { defineModule } from "../../modules/declaration.js";
 import { type LogReader, writeBlock } from "./apply.js";
 import { miscAtom } from "./log-reader.js";
-import { EVENTS_ITEM, STATE_ITEM } from "./schema.js";
-import { databaseStart, MIGRATIONS, SCHEMA } from "./sql.js";
+import { EVENTS_ITEM, MIGRATIONS, SCHEMA, STATE_ITEM } from "./schema.js";
+import { databaseStart } from "./sql.js";
 
 
 /** The module's id. */

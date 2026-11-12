@@ -1,6 +1,6 @@
 import fc from "fast-check";
 import type { ContractLog } from "../../../src/backbone/contract-logs/contract-logs.js";
-import type { ObservedEvent } from "../../../src/features/token-metadata/state.js";
+import type { ObservedEvent } from "./model.js";
 import {
   encodePayload,
   EVENT_NAME,

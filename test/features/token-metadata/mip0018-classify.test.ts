@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { classifyMip0018Event, isUtf8 } from "../../../src/features/token-metadata/classify.js";
-import { MetadataState } from "../../../src/features/token-metadata/state.js";
+import { MetadataState } from "./model.js";
 import { classifyEvent, EVENT_NAME, encodePayload, type MetadataRecord, record } from "../../../src/features/token-metadata/codec/index.js";
 
 const DS = new Uint8Array(32).fill(0x11);
@@ -56,7 +56,7 @@ describe("MIP-0018 classification: keys MUST be valid UTF-8", () => {
     const callers = readdirSync(dir).filter((f) => f.endsWith(".ts") && f !== "classify.ts")
       .filter((f) => /\bclassifyEvent\b/.test(readFileSync(join(dir, f), "utf8")));
     expect(callers).toEqual([]);
-    for (const f of ["apply.ts", "state.ts"])
-      expect(readFileSync(join(dir, f), "utf8"), f).toContain("classifyMip0018Event(");
+    expect(readFileSync(join(dir, "apply.ts"), "utf8")).toContain("classifyMip0018Event(");
+    expect(readFileSync(new URL("./model.ts", import.meta.url), "utf8")).toContain("classifyMip0018Event(");
   });
 });

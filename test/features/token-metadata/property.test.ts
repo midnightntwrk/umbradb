@@ -2,7 +2,7 @@ import fc from "fast-check";
 import { z } from "zod";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { servedGroups, servedIdentities } from "./served-state.js";
-import { MetadataState, type ObservedEvent } from "../../../src/features/token-metadata/state.js";
+import { MetadataState, type ObservedEvent } from "./model.js";
 import { TOKEN_METADATA } from "../../../src/features/token-metadata/token-metadata.js";
 import { defineModule, type ModuleDeclaration } from "../../../src/modules/declaration.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../../runner/process-backends.js";
@@ -13,7 +13,7 @@ import { stateResponse } from "./vector-adapter.js";
 /**
  * For generated chains — valid, invalid and foreign-named candidates, several per block and per
  * field, tombstones and withdrawals — the module's served state after every block equals the pure
- * `state.ts` applied to the same events as a reference model. A probe module reads the served state inside each
+ * the reference model (`./model.ts`) applied to the same events as a reference model. A probe module reads the served state inside each
  * block's transaction, after `token-metadata` wrote it. **Negative control:** the model applying each block's events
  * in reverse log order differs from the module on the generated chains. Unresolved sites are
  * `events.test.ts`'s.
@@ -63,7 +63,7 @@ describe.each(PROCESS_BACKENDS)("token-metadata against the reference model on $
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("after every block of every generated chain, the served state equals state.ts's; the reverse-order model differs somewhere", async () => {
+  it("after every block of every generated chain, the served state equals the model's; the reverse-order model differs somewhere", async () => {
     let reverseDiffers = 0;
     await fc.assert(
       fc.asyncProperty(chainArb, async (chain) => {

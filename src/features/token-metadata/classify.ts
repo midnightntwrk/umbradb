@@ -1,6 +1,6 @@
 /**
  * UmbraDB's classification of an observed event under MIP-0018: the codec's `classifyEvent` (`./codec/`),
- * plus the rule that every key is valid UTF-8 (MIP "Keys": keys MUST be valid UTF-8; Testing R5). An event the codec
+ * plus the rule that every key is valid UTF-8 (MIP "Keys": keys MUST be valid UTF-8). An event the codec
  * accepts but whose records include a key that is not valid UTF-8 (RFC 3629, strict) is rejected whole — reason
  * `invalid-utf8`, `offset` = that record's `keyLen` byte (the first such record) — so none of its records applies.
  * The codec checks UTF-8 only for values; its own rejections are returned unchanged.

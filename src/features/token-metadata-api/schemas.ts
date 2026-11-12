@@ -28,6 +28,13 @@ export const Kind = Type.Union([Type.Literal(1), Type.Literal(2), Type.Literal(3
 const strict = { additionalProperties: false } as const;
 
 /**
+ * A contract page's cursor, as JSON inside the opaque base64url text the answer's `nextCursor` gives: the contract it
+ * pages (`c`) and the last (domainSep, kind) it gave (`k`).
+ */
+export const ContractCursor = Type.Object({ c: Hex32, k: Type.Tuple([Hex32, Kind]) }, strict);
+export type ContractCursor = Type.Static<typeof ContractCursor>;
+
+/**
  * The request body: exactly one of four selectors.
  * - `{ colors }`: the described kind 1 and 2 tokens of each color (a color covers both kinds), up to {@link MAX_COLORS}.
  * - `{ contract, limit?, cursor? }`: a contract's described tokens, a page at a time.

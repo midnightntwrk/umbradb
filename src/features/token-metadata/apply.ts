@@ -37,7 +37,7 @@ import {
   type TokenRef,
   tokenHasFields,
 } from "./sql.js";
-import { COMMON_KEY_HEX, fieldUsable, isDefinedKey, STANDARD_KEYS } from "./state.js";
+import { COMMON_KEY_HEX, fieldUsable, isDefinedKey, STANDARD_KEYS } from "./rules.js";
 import { type DecodedRecord, splitMiscData, toHex, ValType } from "./codec/index.js";
 
 if (STANDARD_KEYS.size !== 0) {

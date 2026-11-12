@@ -4,7 +4,7 @@ import type { UnresolvedLogSite } from "../../../src/backbone/contract-logs/cont
 import { servedGroups, servedIdentities } from "./served-state.js";
 import { TOKEN_METADATA_API } from "../../../src/features/token-metadata-api/token-metadata-api.js";
 import { record } from "../../../src/features/token-metadata/codec/index.js";
-import { MetadataState, type ObservedEvent } from "../../../src/features/token-metadata/state.js";
+import { MetadataState, type ObservedEvent } from "./model.js";
 import { FIRST_CONTRACT_LOG_HEIGHTS, TOKEN_METADATA, tokenMetadataWith } from "../../../src/features/token-metadata/token-metadata.js";
 import { miscAtom } from "../../../src/features/token-metadata/log-reader.js";
 import { defineModule, type ModuleDeclaration } from "../../../src/modules/declaration.js";
@@ -26,7 +26,7 @@ import { stateResponse } from "./vector-adapter.js";
  *   rejected event, a contract token, an empty block, a withdrawal, a revival, a foreign-named log, an unresolved log
  *   site and a symbol group. A database is started at genesis, at the block before the first event, at each block
  *   holding one, and past the last. For each start S, the served state after the last block equals the reference
- *   model (`state.ts`) applied to the events at or above S, and nothing else: the module keeps no state from before
+ *   model (`./model.ts`) applied to the events at or above S, and nothing else: the module keeps no state from before
  *   its database. Its `token_events` rows are exactly the rejected events and unresolved sites at or above S, and the database
  *   records S as its start. **Negative control:** for a start that cuts an event (the contract token's block), the
  *   model applied to every event differs from what the module serves, so the comparison sees a start height.

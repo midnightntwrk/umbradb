@@ -8,7 +8,7 @@
 
 import type { ReadHandle } from "../../db/api.js";
 import { SCHEMA } from "../token-metadata/schema.js";
-import { COMMON_KEY_HEX, type Field, firstCharacters, IMAGE_KEY_HEX, lengthLimited, symbolGroups } from "../token-metadata/state.js";
+import { COMMON_KEY_HEX, type Field, firstCharacters, IMAGE_KEY_HEX, lengthLimited, symbolGroups } from "../token-metadata/rules.js";
 import { decodeUtf8, fromHex, toHex } from "../token-metadata/codec/index.js";
 
 /** A token: its id (the hash of domain separator and contract), kind, contract and domain separator (hex, lowercase). */
@@ -237,7 +237,6 @@ export async function symbolGroup(
       .map((r) => ({ domainSep: toHex(r.domain_sep as Uint8Array), kind: num(r.kind), value: lengthLimited(COMMON_KEY_HEX.symbol, 1, r.symbol as Uint8Array) }))
       .filter((r) => toHex(r.value) === toHex(symbol))
       .map((r) => ({
-        network: "",
         contractAddress: contract,
         domainSep: r.domainSep,
         kind: r.kind,

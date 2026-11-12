@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TOKEN_METADATA_API } from "../../../src/features/token-metadata-api/token-metadata-api.js";
-import { encodeCursor } from "../../../src/features/token-metadata-api/tokens.js";
+import { encodeCursor } from "../../../src/features/token-metadata-api/handlers.js";
 import { tokenColor } from "../../../src/features/token-metadata/color.js";
 import { servedIdentities } from "../token-metadata/served-state.js";
 import { commonRecords } from "../../../src/features/token-metadata/codec/index.js";
@@ -112,7 +112,7 @@ describe.each(PROCESS_BACKENDS)("the API's edges on $name", (backend: ProcessBac
     expect(second.json.nextCursor).toBeNull();
     const refused = [
       encodeCursor({ c: hex(contract(0xb0)), k: [hex(domain(1)), 1] }),
-      encodeCursor({ c: hex(A), k: [hex(domain(1)), 4] }),
+      Buffer.from(JSON.stringify({ c: hex(A), k: [hex(domain(1)), 4] })).toString("base64url"),
       encodeCursor({ c: hex(A), k: ["zz", 1] }),
       Buffer.from(JSON.stringify({ c: hex(A), k: [hex(domain(1)), 1], extra: 1 })).toString("base64url"),
       Buffer.from("not json").toString("base64url"),

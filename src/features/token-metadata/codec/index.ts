@@ -1,6 +1,5 @@
-// The MIP-0018 TokenMetadata codec of `token-metadata`, without dependencies: the event name, payload decoding and
-// encoding, and the value rules, as MIP-0018 at 274a84f221bcfc17e4b73e2c8b32fd8c028ea092 (PR #340) states them; the
-// UTF-8 key rule of the text as merged from PR #372 is `../classify.ts`'s.
+// The MIP-0018 TokenMetadata codec of `token-metadata`: the event name, payload decoding and encoding, and the value
+// rules (MIP-0018 "Event", "Payload", "Value types"). The rule that keys are valid UTF-8 is `../classify.ts`'s.
 export {
   DOMAIN_SEP_SIZE,
   EVENT_NAME,
@@ -38,5 +37,5 @@ export {
 } from './encode.js';
 export { classifyEvent, isMip0018Name, splitMiscData, type Classification, type ObservedMisc } from './classify.js';
 export { checkValue, decodeUint, decodeUtf8, encodeUint, minimalUintWidth } from './values.js';
-export { isRfc3986Uri, RFC3986_URI } from './uri.js';
+export { isRfc3986Uri } from './uri.js';
 export { bytesEqual, fromHex, toHex, zeroExtend } from './hex.js';

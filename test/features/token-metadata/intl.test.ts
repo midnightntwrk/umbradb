@@ -9,19 +9,19 @@ import { blockLogs, contract, domain, eventData } from "./harness.js";
 /**
  * `Intl` is used only in the module's serving code, so what the module stores does not depend on the
  * Node.js build's ICU data. Two checks:
- * - the write path's files never name `Intl`, a locale-dependent method, or the cutting functions of `state.ts`, and
- *   take from `state.ts` only the rules that read bytes;
+ * - the write path's files never name `Intl`, a locale-dependent method, or the cutting functions of `rules.ts`, and
+ *   take from `rules.ts` only the rules that read bytes;
  * - the write path, given 70-character names and symbols, never runs the grapheme segmenter, while the serving read
  *   does (the control that the spy sees the segmenter).
  */
 
 /**
- * The write path: every file of the indexer (`src/features/token-metadata/`, its codec included) but `state.ts`, which
+ * The write path: every file of the indexer (`src/features/token-metadata/`, its codec included) but `rules.ts`, which
  * holds the rules of both sides and is checked by what the write path imports from it.
  */
 const INDEXER = "src/features/token-metadata";
 const WRITE_PATH = readdirSync(INDEXER, { recursive: true, encoding: "utf8" })
-  .filter((file) => file.endsWith(".ts") && file !== "state.ts")
+  .filter((file) => file.endsWith(".ts") && file !== "rules.ts")
   .map((file) => `${INDEXER}/${file.split(sep).join("/")}`)
   .sort();
 
@@ -34,19 +34,19 @@ describe("Intl only where the module serves", () => {
   it("the write path's files name no Intl, no locale method and no cutting function", () => {
     for (const file of WRITE_PATH) {
       const text = code(readFileSync(file, "utf8"));
-      expect(text, file).not.toMatch(/\bIntl\b|toLocale|localeCompare|\.normalize\(|lengthLimited|firstCharacters|recordEffects/);
+      expect(text, file).not.toMatch(/\bIntl\b|toLocale|localeCompare|\.normalize\(|lengthLimited|firstCharacters/);
     }
   });
 
   it("the write path is the indexer's files, and none of them imports the API module", () => {
     expect(WRITE_PATH).toEqual(expect.arrayContaining([`${INDEXER}/apply.ts`, `${INDEXER}/token-metadata.ts`, `${INDEXER}/codec/decode.ts`]));
-    expect(WRITE_PATH).not.toContain(`${INDEXER}/state.ts`);
+    expect(WRITE_PATH).not.toContain(`${INDEXER}/rules.ts`);
     for (const file of WRITE_PATH) expect(code(readFileSync(file, "utf8")), file).not.toMatch(/token-metadata-api/);
   });
 
-  it("the write path takes from state.ts only rules that read bytes", () => {
+  it("the write path takes from rules.ts only rules that read bytes", () => {
     const imports = WRITE_PATH.flatMap((file) =>
-      [...code(readFileSync(file, "utf8")).matchAll(/import\s*{([^}]*)}\s*from\s*"\.\/state\.js"/g)].flatMap((m) => m[1]!.split(",").map((n) => n.trim()).filter(Boolean)),
+      [...code(readFileSync(file, "utf8")).matchAll(/import\s*{([^}]*)}\s*from\s*"\.\/rules\.js"/g)].flatMap((m) => m[1]!.split(",").map((n) => n.trim()).filter(Boolean)),
     );
     expect(imports.sort()).toEqual(["COMMON_KEY_HEX", "STANDARD_KEYS", "fieldUsable", "isDefinedKey"]);
   });
