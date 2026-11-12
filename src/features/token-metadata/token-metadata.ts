@@ -3,8 +3,7 @@
  * module, not one of the core's: a configuration enables it with `TOKEN_METADATA.entry(...)`. It creates, fills and
  * guards the tables; `token-metadata-api` (`../token-metadata-api/`) serves them.
  *
- * - **Requires** `contract-logs` and `block-parsed` (each event's transaction hash, for `/v1/events`), so it runs with
- *   either logs provider (`core-contract-logs-full`, or the
+ * - **Requires** `contract-logs` only, so it runs with either logs provider (`core-contract-logs-full`, or the
  *   development-only `core-contract-logs-fast` from any height). It has no ledger task, so it loads in the browser
  *   build like any user module.
  * - **Starts every new database early enough** to hold every MIP-0018 event: its `latestStarts` are
@@ -19,23 +18,20 @@
  *   below the next start minus one): `token-metadata-revision-gap`, a {@link TokenMetadataRevisionGap}.
  * - **Provides** its tables as two `table` items (`./schema.ts`): `token-metadata-events` (append-only) and
  *   `token-metadata-state` (mutable), which `token-metadata-api` and any other module may require to read them.
- * - **Per block** it writes in `on-db-write` (`./apply.ts`): the block's candidates, its unresolved log sites (from
- *   `core-contract-logs-fast`, as `unresolved` events, never applied) and the candidates' effect on the fields, in
- *   chain order, reading its own rows inside the block transaction. A v8 block has no contract logs, so nothing.
+ * - **Per block** it writes in `on-db-write` (`./apply.ts`): its accepted events' effect on `tokens` and
+ *   `token_fields`, and its rejected events and unresolved log sites (from `core-contract-logs-fast`, never applied) as
+ *   `token_events` rows, in chain order, reading its own rows inside the block transaction. A v8 block has no contract logs, so nothing.
  */
 
 import { z } from "zod";
 import { UMBRADB_VERSION } from "../../config/build.js";
 import { CONTRACT_LOGS_ITEM, contractLogsItemOf, unresolvedLogSitesOf } from "../../backbone/contract-logs/contract-logs.js";
-import type { BlockParsed } from "../../backbone/core-block-parsed/core-block-parsed.js";
 import { defineModule } from "../../modules/declaration.js";
 import { type LogReader, writeBlock } from "./apply.js";
 import { miscAtom } from "./log-reader.js";
 import { EVENTS_ITEM, STATE_ITEM } from "./schema.js";
 import { databaseStart, MIGRATIONS, SCHEMA } from "./sql.js";
 
-/** `core-block-parsed`'s item (named here so the module loads none of that module's code). */
-const BLOCK_PARSED_ITEM = "block-parsed";
 
 /** The module's id. */
 export const TOKEN_METADATA_ID = "token-metadata";
@@ -103,13 +99,13 @@ export function tokenMetadataWith(reader: LogReader, latestStarts: Readonly<Reco
     id: TOKEN_METADATA_ID,
     version: UMBRADB_VERSION,
     side: "public",
-    requires: [CONTRACT_LOGS_ITEM, BLOCK_PARSED_ITEM],
+    requires: [CONTRACT_LOGS_ITEM],
     provides: [
-      { name: EVENTS_ITEM, lifetimes: ["table"], table: { schema: SCHEMA, tables: ["events"], kind: "append-only" } },
+      { name: EVENTS_ITEM, lifetimes: ["table"], table: { schema: SCHEMA, tables: ["token_events"], kind: "append-only" } },
       {
         name: STATE_ITEM,
         lifetimes: ["table"],
-        table: { schema: SCHEMA, tables: ["fields", "withdrawals"], kind: "mutable" },
+        table: { schema: SCHEMA, tables: ["tokens", "token_fields"], kind: "mutable" },
       },
     ],
     startsMidChain: true,
@@ -127,9 +123,7 @@ export function tokenMetadataWith(reader: LogReader, latestStarts: Readonly<Reco
         if (first.start > start) throw new TokenMetadataStartAfterDatabase(first.start, start);
       },
       async "on-db-write"(_p, b, w) {
-        const parsed = b.items.get(BLOCK_PARSED_ITEM) as BlockParsed | undefined;
-        const hashes = new Map((parsed?.transactions ?? []).map((t) => [t.index, t.hash]));
-        await writeBlock(w, b.height, contractLogsItemOf(b, TOKEN_METADATA_ID), (tx) => hashes.get(tx), reader, unresolvedLogSitesOf(b, TOKEN_METADATA_ID));
+        await writeBlock(w, b.height, contractLogsItemOf(b, TOKEN_METADATA_ID), reader, unresolvedLogSitesOf(b, TOKEN_METADATA_ID));
       },
     },
   });

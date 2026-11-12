@@ -17,8 +17,8 @@ import { readStopped, runTo } from "./harness.js";
  *   statements need.
  * - A read of a whole index (an index scan with no condition), or one that filters the rows its index gave, counts
  *   as a scan of its table: the index does not serve the statement.
- * - **Negative control:** with `fields_color_idx` dropped, `tokensOfColors` scans `token_metadata.fields`, and the check
- *   sees it.
+ * - **Negative control:** with `tokens_contract_idx` dropped, `tokensOfContract` scans `token_metadata.tokens`, and the
+ *   check sees it.
  */
 
 const SCHEMA = "token_metadata";
@@ -105,11 +105,11 @@ describe.each(PROCESS_BACKENDS)("the plans of the token-metadata statements on $
     expect(indexes.length).toBeGreaterThan(0);
   }, 120_000);
 
-  it("[NEG] without fields_color_idx, tokensOfColors scans token_metadata.fields, and the check sees it", async () => {
+  it("[NEG] without tokens_contract_idx, tokensOfContract scans token_metadata.tokens, and the check sees it", async () => {
     const other = await backend.database();
     await runTo(other, { start: 0, head: 2 });
-    await other.query(`DROP INDEX ${SCHEMA}.fields_color_idx`);
-    const scans = await readStopped(other, async (read) => (await plan(read, API.tokensOfColors)).scans);
-    expect(scans).toEqual([`${SCHEMA}.fields`]);
+    await other.query(`DROP INDEX ${SCHEMA}.tokens_contract_idx`);
+    const scans = await readStopped(other, async (read) => (await plan(read, API.tokensOfContract)).scans);
+    expect(scans).toEqual([`${SCHEMA}.tokens`]);
   }, 120_000);
 });

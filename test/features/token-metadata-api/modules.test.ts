@@ -49,8 +49,8 @@ describe.each(PROCESS_BACKENDS)("token-metadata and token-metadata-api on $name"
     const answer = await serve(db, { start: S, head: HEAD, logs, modules: [INDEXER] }, (origin) => post(origin, TOKENS_PATH, { contract: hex(A) }));
     expect(answer.status).toBe(404);
     expect(answer.json).toMatchObject({ error: { code: "not-found" } });
-    expect(await db.query("SELECT count(*)::int AS n FROM token_metadata.events")).toEqual([{ n: 1 }]);
-    expect(await db.query("SELECT count(*)::int AS n FROM token_metadata.fields WHERE defined")).toEqual([{ n: 3 }]);
+    expect(await db.query("SELECT count(*)::int AS n FROM token_metadata.tokens")).toEqual([{ n: 1 }]);
+    expect(await db.query("SELECT count(*)::int AS n FROM token_metadata.token_fields")).toEqual([{ n: 3 }]);
   }, 240_000);
 
   it("answers the same when the API is added, above the cursor, to a database whose indexer already ran", async () => {

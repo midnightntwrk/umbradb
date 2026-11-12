@@ -11,7 +11,7 @@
 import type { ReadHandle } from "../../db/api.js";
 import { COMMON_KEY_HEX, type Field as StateField, fieldUsable, IMAGE_KEY_HEX, parseStandards, tokenMark } from "../token-metadata/state.js";
 import { decodeUtf8, fromHex, toHex } from "../token-metadata/codec/index.js";
-import { hasColor, tokenColor } from "./color.js";
+import { hasColor } from "../token-metadata/color.js";
 import { commonFields, keyOf, markInputs, type MarkInputs, symbolGroup, type TokenKey, tokenFields, tokensOfColors, tokensOfContract, tokensOfDomain } from "./sql.js";
 import { badRequest } from "./router.js";
 import {
@@ -127,7 +127,7 @@ async function tokensOf(read: ReadHandle, keys: readonly TokenKey[]): Promise<To
       domainSep: k.domainSep,
       kind: k.kind as 1 | 2 | 3,
       kindName: KIND_NAMES[k.kind]!,
-      color: hasColor(k.kind) ? toHex(tokenColor(fromHex(k.domainSep), fromHex(k.contractAddress))) : null,
+      color: hasColor(k.kind) ? k.id : null,
       common: commonJson(common),
       fields: own.fields.map(fieldJson),
       fieldCount: own.count,

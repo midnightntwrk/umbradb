@@ -24,7 +24,7 @@ import { stateResponse } from "./vector-adapter.js";
  *   site and a symbol group. A database is started at genesis, at the block before the first event, at each block
  *   holding one, and past the last. For each start S, the served state after the last block equals the reference
  *   model (`state.ts`) applied to the events at or above S, and nothing else: the module keeps no state from before
- *   its database. Its `events` rows are exactly the candidates and unresolved sites at or above S, and the database
+ *   its database. Its `token_events` rows are exactly the rejected events and unresolved sites at or above S, and the database
  *   records S as its start. **Negative control:** for a start that cuts an event (the contract token's block), the
  *   model applied to every event differs from what the module serves, so the comparison sees a start height.
  * - **Latest starts on the synthetic chain:** databases configured at four heights above the indexer's latest start
@@ -71,18 +71,18 @@ const unresolved = new Map<bigint, UnresolvedLogSite[]>([
   ],
 ]);
 
-/** The candidates (accepted or rejected events, not foreign-named logs) and unresolved sites at or above `start`. */
+/** The `token_events` rows at or above `start`: the rejected events and unresolved sites (accepted events leave none). */
 function expectedRows(start: number): number {
   let n = 0;
   CHAIN.forEach((block, i) => {
-    if (FIRST + i >= start) n += block.flat().filter((g) => g.kind !== "foreign").length;
+    if (FIRST + i >= start) n += block.flat().filter((g) => g.kind === "invalid").length;
   });
   return n + (Number(UNRESOLVED_AT) >= start ? 1 : 0);
 }
 
-/** The lowest height at or above `start` holding a candidate or an unresolved site, or null. */
+/** The lowest height at or above `start` holding a rejected event or an unresolved site, or null. */
 function expectedLowest(start: number): number | null {
-  const heights = CHAIN.flatMap((block, i) => (block.flat().some((g) => g.kind !== "foreign") ? [FIRST + i] : []));
+  const heights = CHAIN.flatMap((block, i) => (block.flat().some((g) => g.kind === "invalid") ? [FIRST + i] : []));
   return [...heights, Number(UNRESOLVED_AT)].filter((h) => h >= start).sort((x, y) => x - y)[0] ?? null;
 }
 
@@ -145,7 +145,7 @@ describe.each(PROCESS_BACKENDS)("token-metadata from varying start heights on $n
     const seen = new Map<bigint, string>();
     const answer = await serve(db, { start, head: HEAD, logs, unresolved, modules: [...MODULES, probe(seen)] }, (origin) => post(origin, TOKENS_PATH, { contract: "01".repeat(32) }));
     expect(seen.get(BigInt(HEAD)), `served state from ${start}`).toBe(modelFrom(start));
-    expect(await db.query("SELECT count(*)::int AS n, min(height)::int AS lo FROM token_metadata.events")).toEqual([
+    expect(await db.query("SELECT count(*)::int AS n, min(height)::int AS lo FROM token_metadata.token_events")).toEqual([
       { n: expectedRows(start), lo: expectedLowest(start) },
     ]);
     expect(await db.query("SELECT start_height::int AS s FROM core_chain.identity")).toEqual([{ s: start }]);
@@ -171,8 +171,8 @@ describe.each(PROCESS_BACKENDS)("a new database configured above the module's la
         post(origin, TOKENS_PATH, { contract: "01".repeat(32) }),
       );
       const [identity] = await db.query("SELECT start_height::int AS s FROM core_chain.identity");
-      const events = await db.query("SELECT height::int AS h, tx_index, event_index, classification, reason FROM token_metadata.events ORDER BY 1, 2, 3");
-      const fields = await db.query("SELECT encode(contract_address, 'hex') AS c, encode(domain_sep, 'hex') AS d, kind, encode(key, 'hex') AS k, encode(value, 'hex') AS v FROM token_metadata.fields ORDER BY 1, 2, 3, 4");
+      const events = await db.query("SELECT height::int AS h, tx_index, event_index, classification, reason FROM token_metadata.token_events ORDER BY 1, 2, 3");
+      const fields = await db.query("SELECT encode(t.contract_address, 'hex') AS c, encode(t.domain_sep, 'hex') AS d, t.kind, encode(f.key, 'hex') AS k, encode(f.value, 'hex') AS v FROM token_metadata.tokens t JOIN token_metadata.token_fields f ON f.token_id = t.id AND f.kind = t.kind ORDER BY 1, 2, 3, 4");
       return { start: identity?.s, height: answer.headers["x-umbra-height"], served: seen.get(BigInt(HEAD)), events, fields };
     };
     const configured = [FIRST + 2, FIRST + 4, LAST, HEAD - 1];
@@ -191,7 +191,7 @@ describe.each(PROCESS_BACKENDS)("a new database configured above the module's la
     const db = await backend.database();
     await serve(db, { start: FIRST + 4, head: HEAD, logs, unresolved, modules: MODULES }, async () => undefined);
     expect(await db.query("SELECT start_height::int AS s FROM core_chain.identity")).toEqual([{ s: FIRST + 4 }]);
-    expect(await db.query("SELECT count(*)::int AS n FROM token_metadata.events")).toEqual([{ n: expectedRows(FIRST + 4) }]);
+    expect(await db.query("SELECT count(*)::int AS n FROM token_metadata.token_events")).toEqual([{ n: expectedRows(FIRST + 4) }]);
     expect(expectedRows(FIRST + 4)).toBeLessThan(expectedRows(FIRST));
   }, 240_000);
 });

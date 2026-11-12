@@ -10,12 +10,13 @@ import { type Field, type IdentityState, type SymbolGroup, symbolGroups } from "
 import { toHex } from "../../../src/features/token-metadata/codec/index.js";
 import { fieldOf } from "../../../src/features/token-metadata-api/sql.js";
 
-/** Every existing identity of the database (at least one defined field), with its served fields, in identity order. */
+/** Every token of the database (a row of `tokens`, which has a field), with its served fields, in identity order. */
 export async function servedIdentities(read: Pick<ReadHandle, "query">, network: string): Promise<IdentityState[]> {
   const rows = await read.query(
-    `SELECT contract_address, domain_sep, kind, key, val_type, value, uint_value::text AS uint_value, usable,
-       set_height, set_tx, set_event, set_record
-     FROM ${SCHEMA}.fields WHERE defined ORDER BY contract_address, domain_sep, kind, key`,
+    `SELECT t.contract_address, t.domain_sep, t.kind, f.key, f.val_type, f.value, f.uint_value::text AS uint_value, f.usable,
+       f.set_height, f.set_tx, f.set_event, f.set_record
+     FROM ${SCHEMA}.tokens t JOIN ${SCHEMA}.token_fields f ON f.token_id = t.id AND f.kind = t.kind
+     ORDER BY t.contract_address, t.domain_sep, t.kind, f.key`,
   );
   const byIdentity = new Map<string, { contractAddress: string; domainSep: string; kind: number; fields: Map<string, Field> }>();
   for (const row of rows) {

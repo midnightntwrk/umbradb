@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { tokenColor } from "../../../src/features/token-metadata/color.js";
 import { TOKEN_METADATA } from "../../../src/features/token-metadata/token-metadata.js";
 import type { ModuleDeclaration } from "../../../src/modules/declaration.js";
 import { commonRecords } from "../../../src/features/token-metadata/codec/index.js";
@@ -20,22 +21,25 @@ describe.each(PROCESS_BACKENDS)("token-metadata's start on $name", (backend: Pro
     const db = await backend.database();
     const logs = new Map([[1_000_002n, blockLogs([0, contract(1), eventData(domain(7), 1, commonRecords({ name: "Acme Gold", symbol: "AG", decimals: 6 }))])]]);
     await runTo(db, { start: 1_000_000, head: 1_000_003, logs });
-    const events = await db.query("SELECT height::text AS height, tx_index, event_index, classification, reason, kind FROM token_metadata.events");
-    expect(events).toEqual([{ height: "1000002", tx_index: 0, event_index: 0, classification: "accept", reason: null, kind: 1 }]);
+    // An accepted event leaves no event row: its effect is the token's row and fields.
+    expect(await db.query("SELECT count(*)::int AS n FROM token_metadata.token_events")).toEqual([{ n: 0 }]);
+    expect(await db.query("SELECT encode(id, 'hex') AS id, kind, encode(symbol, 'hex') AS symbol FROM token_metadata.tokens")).toEqual([
+      { id: hex(tokenColor(domain(7), contract(1))), kind: 1, symbol: hex(new TextEncoder().encode("AG")) },
+    ]);
     const fields = await db.query(
-      "SELECT convert_from(key, 'UTF8') AS key, val_type, encode(value, 'hex') AS value, uint_value::text AS uint, usable, defined, set_height::text AS at FROM token_metadata.fields ORDER BY key",
+      "SELECT convert_from(key, 'UTF8') AS key, val_type, encode(value, 'hex') AS value, uint_value::text AS uint, usable, set_height::text AS at FROM token_metadata.token_fields ORDER BY key",
     );
     expect(fields).toEqual([
-      { key: "decimals", val_type: 2, value: "06", uint: "6", usable: true, defined: true, at: "1000002" },
-      { key: "name", val_type: 1, value: hex(new TextEncoder().encode("Acme Gold")), uint: null, usable: true, defined: true, at: "1000002" },
-      { key: "symbol", val_type: 1, value: hex(new TextEncoder().encode("AG")), uint: null, usable: true, defined: true, at: "1000002" },
+      { key: "decimals", val_type: 2, value: "06", uint: "6", usable: true, at: "1000002" },
+      { key: "name", val_type: 1, value: hex(new TextEncoder().encode("Acme Gold")), uint: null, usable: true, at: "1000002" },
+      { key: "symbol", val_type: 1, value: hex(new TextEncoder().encode("AG")), uint: null, usable: true, at: "1000002" },
     ]);
   }, 240_000);
 
   it("a new database at S = 1,000,000 with core-contract-logs-fast and the module from S starts (a new database at the tip)", async () => {
     const db = await backend.database();
     await runTo(db, { start: 1_000_000, head: 1_000_002, fast: true });
-    expect(await db.query("SELECT count(*)::int AS n FROM token_metadata.events")).toEqual([{ n: 0 }]);
+    expect(await db.query("SELECT count(*)::int AS n FROM token_metadata.tokens")).toEqual([{ n: 0 }]);
     expect(await db.query("SELECT max(height)::int AS h FROM core_block_commit.blocks")).toEqual([{ h: 1_000_002 }]);
   }, 240_000);
 

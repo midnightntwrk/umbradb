@@ -48,7 +48,7 @@ describe("Intl only where the module serves", () => {
     const imports = WRITE_PATH.flatMap((file) =>
       [...code(readFileSync(file, "utf8")).matchAll(/import\s*{([^}]*)}\s*from\s*"\.\/state\.js"/g)].flatMap((m) => m[1]!.split(",").map((n) => n.trim()).filter(Boolean)),
     );
-    expect(imports.sort()).toEqual(["STANDARD_KEYS", "fieldUsable", "isDefinedKey"]);
+    expect(imports.sort()).toEqual(["COMMON_KEY_HEX", "STANDARD_KEYS", "fieldUsable", "isDefinedKey"]);
   });
 
   it("writing 70-character names and symbols never runs the segmenter; serving them does", async () => {
@@ -60,19 +60,20 @@ describe("Intl only where the module serves", () => {
       height: null,
       async execute(sql: string, params: unknown[] = []) {
         statements.push({ sql, params });
-        if (sql.includes("INSERT INTO token_metadata.fields")) {
-          const [contract_address, domain_sep, kind, key, val_type, value, uint_value, usable, defined, set_height, set_tx, set_event, set_record] = params;
-          fields.set(toHex(key as Uint8Array), { contract_address, domain_sep, kind, key, val_type, value, uint_value, usable, defined, set_height, set_tx, set_event, set_record });
+        if (sql.includes("INSERT INTO token_metadata.token_fields")) {
+          const [, kind, key, val_type, value, uint_value, usable, set_height, set_tx, set_event, set_record] = params;
+          const row = { contract_address: new Uint8Array(32).fill(1), domain_sep: new Uint8Array(32).fill(1), kind, key, val_type, value, uint_value, usable };
+          fields.set(toHex(key as Uint8Array), { ...row, set_height, set_tx, set_event, set_record });
         }
         return 1;
       },
       async query(sql: string) {
-        return sql.includes("FROM token_metadata.fields WHERE defined ORDER BY") ? [...fields.values()] : [];
+        return sql.includes("JOIN token_metadata.token_fields") ? [...fields.values()] : [];
       },
     };
     const long = "x".repeat(70);
-    await writeBlock(w, 5n, blockLogs([0, contract(1), eventData(domain(1), 1, commonRecords({ name: long, symbol: long }))]), () => new Uint8Array(32));
-    expect(statements.some((s) => s.sql.includes("INSERT INTO token_metadata.fields"))).toBe(true);
+    await writeBlock(w, 5n, blockLogs([0, contract(1), eventData(domain(1), 1, commonRecords({ name: long, symbol: long }))]));
+    expect(statements.some((s) => s.sql.includes("INSERT INTO token_metadata.token_fields"))).toBe(true);
     expect(segment).not.toHaveBeenCalled();
     const [identity] = await servedIdentities(w, "n");
     expect(segment).toHaveBeenCalled();

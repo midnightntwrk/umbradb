@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { z } from "zod";
 import type { TapeRecord } from "../../../tools/tape/index.js";
@@ -40,23 +39,9 @@ import type { ProcessDatabase } from "../../runner/process-backends.js";
 /** The test provider's id. */
 export const TEST_LOGS_ID = "test-contract-logs";
 
-/** The hash the test provider gives transaction `transaction` of block `height`: SHA-256 of `tx:height:transaction`. */
-export function txHashOf(height: bigint | number, transaction: number): Uint8Array {
-  return new Uint8Array(createHash("sha256").update(`tx:${height}:${transaction}`).digest());
-}
-
-/** The test provider's `block-parsed` of a block whose logs are `logs`: transactions 0 … the last log's, hashes only. */
-function blockParsedOf(height: bigint, logs: readonly ContractLog[], unresolved: readonly UnresolvedLogSite[]) {
-  const last = Math.max(-1, ...logs.map((l) => l.transaction), ...unresolved.map((site) => site.transaction));
-  const transactions = Array.from({ length: last + 1 }, (_, index) =>
-    Object.freeze({ index, hash: txHashOf(height, index), kind: "regular", size: 1, bytes: new Uint8Array(), segments: [] }),
-  );
-  return Object.freeze({ ledger: "test", transactions: Object.freeze(transactions) });
-}
-
 /**
  * A provider of `contract-logs` giving `logs`' logs and `unresolved`'s unresolved log sites at each height (none
- * elsewhere), and of `block-parsed`'s hashes.
+ * elsewhere).
  */
 export function logsProvider(
   logs: ReadonlyMap<bigint, readonly ContractLog[]>,
@@ -67,7 +52,7 @@ export function logsProvider(
     version: "1.0.0",
     side: "public",
     requires: ["block-header"],
-    provides: [contractLogsItem(), { name: "block-parsed", lifetimes: ["block"] }],
+    provides: [contractLogsItem()],
     startsMidChain: true,
     configSchema: z.object({}),
     migrations: contractLogsMigrations(),
@@ -75,7 +60,6 @@ export function logsProvider(
       async "on-parse"(_p, b, out) {
         const sites = unresolved.get(b.height) ?? [];
         out.put("contract-logs", contractLogsBlock(logs.get(b.height) ?? [], sites));
-        out.put("block-parsed", blockParsedOf(b.height, logs.get(b.height) ?? [], sites));
       },
       async "on-db-write"(_p, b, w) {
         await writeLogRows(w, b.height, logs.get(b.height) ?? []);

@@ -2,91 +2,82 @@
  * The SQL of `token-metadata`: its schema, migration `001`, and every statement of its write path, by name
  * ({@link STATEMENTS}).
  *
- * **The tables** (schema `token_metadata`). There is no `network` column (a database holds one chain), no raw
- * `name`/`payload` (nothing is recomputed: UmbraDB follows finalized blocks only), and no activity listing (a
- * later change):
+ * **The tables** (schema `token_metadata`), related by keys and holding only what is read:
  *
- * - `events`, append-only: one row per MIP-0018 candidate at its chain position — height, the transaction's index in
- *   the block and its hash (from `block-parsed`), and `event_index`, the log's position among its transaction's logs (`eventIndex`
- *   in the API). Its classification is `accept`, `reject` or `unresolved` (an unresolved log site of
- *   `core-contract-logs-fast`; an `ignore`d log is not stored); `reason` is null iff `accept`; an accepted event's identity is its `domain_sep` and `kind`. `entry_point` keeps the first 128 bytes.
- * - `fields`, mutable: one row per field of an identity, holding only its current value, whole (names and
- *   symbols are cut when served, never when stored). `uint_value` is a `UInt` value as a number; `usable` is the
- *   common-field rule's answer for a common key, else null; `defined` says whether the key is served (MIP "Keys").
- * - `withdrawals`, mutable: per identity, the position of the record after which it last had no defined field.
+ * - `tokens`, mutable: one row per described token, keyed by `(id, kind)`, where `id` is the token's hash
+ *   `sha256(pad(32, "midnight:derive_token") ‖ domain_sep ‖ contract_address)` (`./color.ts`): its color for kinds 1
+ *   and 2, the same hash for kind 3. `symbol` is the token's current usable `symbol`, whole, or null: what symbol
+ *   groups read. A row exists exactly while the token has a field; its last field's deletion deletes it (a withdrawal).
+ * - `token_fields`, mutable: one row per defined field of a token (MIP "Keys": keys MIP-0018 does not define are not
+ *   stored), holding only its current value, whole (names and symbols are cut when served, never when stored), and
+ *   where it was set. `uint_value` is a `UInt` value as a number; `usable` is the common-field rule's answer for a
+ *   common key, else null. Its rows belong to their token (`ON DELETE CASCADE`).
+ * - `token_events`, append-only: what a token's mark reads of its contract — each rejected MIP-0018 event and each
+ *   unresolved log site, at its chain position (`event_index`: its position among its transaction's log sites), with
+ *   its reason. Accepted events leave no row: their effect is the fields.
  *
- * Text columns hold only UmbraDB's own vocabulary (CHECKs keep them ASCII); chain bytes are `bytea`.
+ * There is no `network` column (a database holds one chain) and no raw payload (nothing is recomputed: UmbraDB follows
+ * finalized blocks only). Text columns hold only UmbraDB's own vocabulary (CHECKs keep them ASCII); chain bytes are
+ * `bytea`.
  */
 
 import type { BlockWriteHandle, SchemaWriteHandle } from "../../db/api.js";
-import { COLOR_SQL, SCHEMA } from "./schema.js";
+import { SCHEMA } from "./schema.js";
 
-export { COLOR_SQL, SCHEMA };
-
+export { SCHEMA };
 
 /** Migration `001`: the three tables and their indexes. Never edited once released; a change is a new migration. */
-export const MIGRATION_001 = `CREATE TABLE ${SCHEMA}.events (
-  height bigint NOT NULL CHECK (height >= 0),
-  tx_index integer NOT NULL CHECK (tx_index >= 0),
-  event_index integer NOT NULL CHECK (event_index >= 0),
-  tx_hash bytea NOT NULL CHECK (octet_length(tx_hash) = 32),
-  contract_address bytea NOT NULL CHECK (octet_length(contract_address) = 32),
-  entry_point bytea NOT NULL CHECK (octet_length(entry_point) <= 128),
-  classification text NOT NULL CHECK (classification IN ('accept', 'reject', 'unresolved')),
-  reason text CHECK (reason IS NULL OR reason ~ '^[a-z0-9-]{1,64}$'),
-  domain_sep bytea CHECK (domain_sep IS NULL OR octet_length(domain_sep) = 32),
-  kind smallint CHECK (kind IS NULL OR kind IN (1, 2, 3)),
-  CHECK ((classification = 'accept') = (reason IS NULL)),
-  CHECK ((classification = 'accept') = (domain_sep IS NOT NULL AND kind IS NOT NULL)),
-  PRIMARY KEY (height, tx_index, event_index)
-);
-CREATE INDEX events_reject_idx ON ${SCHEMA}.events (contract_address, height, tx_index, event_index) INCLUDE (reason)
-  WHERE classification = 'reject';
-CREATE INDEX events_unresolved_idx ON ${SCHEMA}.events (contract_address, height, tx_index, event_index)
-  WHERE classification = 'unresolved';
-CREATE TABLE ${SCHEMA}.fields (
+export const MIGRATION_001 = `CREATE TABLE ${SCHEMA}.tokens (
+  id bytea NOT NULL CHECK (octet_length(id) = 32),
+  kind smallint NOT NULL CHECK (kind IN (1, 2, 3)),
   contract_address bytea NOT NULL CHECK (octet_length(contract_address) = 32),
   domain_sep bytea NOT NULL CHECK (octet_length(domain_sep) = 32),
-  kind smallint NOT NULL CHECK (kind IN (1, 2, 3)),
+  symbol bytea CHECK (symbol IS NULL OR octet_length(symbol) <= 255),
+  PRIMARY KEY (id, kind)
+);
+CREATE UNIQUE INDEX tokens_contract_idx ON ${SCHEMA}.tokens (contract_address, domain_sep, kind);
+CREATE INDEX tokens_symbol_idx ON ${SCHEMA}.tokens (contract_address, symbol, domain_sep, kind) WHERE symbol IS NOT NULL;
+CREATE TABLE ${SCHEMA}.token_fields (
+  token_id bytea NOT NULL,
+  kind smallint NOT NULL,
   key bytea NOT NULL CHECK (octet_length(key) BETWEEN 1 AND 255),
   val_type smallint NOT NULL CHECK (val_type BETWEEN 0 AND 4),
   value bytea NOT NULL CHECK (octet_length(value) <= 255),
   uint_value numeric(80, 0) CHECK (uint_value IS NULL OR uint_value >= 0),
   usable boolean,
-  defined boolean NOT NULL,
   set_height bigint NOT NULL CHECK (set_height >= 0),
   set_tx integer NOT NULL CHECK (set_tx >= 0),
   set_event integer NOT NULL CHECK (set_event >= 0),
   set_record integer NOT NULL CHECK (set_record >= 0),
   CHECK ((val_type = 2) = (uint_value IS NOT NULL)),
-  PRIMARY KEY (contract_address, domain_sep, kind, key)
+  PRIMARY KEY (token_id, kind, key),
+  FOREIGN KEY (token_id, kind) REFERENCES ${SCHEMA}.tokens (id, kind) ON DELETE CASCADE
 );
-CREATE INDEX fields_defined_idx ON ${SCHEMA}.fields (contract_address, domain_sep, kind, key) WHERE defined;
-CREATE INDEX fields_symbol_idx ON ${SCHEMA}.fields (contract_address, value, domain_sep, kind)
-  WHERE key = '\\x73796d626f6c'::bytea AND usable AND defined;
-CREATE INDEX fields_color_idx ON ${SCHEMA}.fields (${COLOR_SQL}, kind)
-  WHERE defined AND kind IN (1, 2);
-CREATE TABLE ${SCHEMA}.withdrawals (
-  contract_address bytea NOT NULL CHECK (octet_length(contract_address) = 32),
-  domain_sep bytea NOT NULL CHECK (octet_length(domain_sep) = 32),
-  kind smallint NOT NULL CHECK (kind IN (1, 2, 3)),
+CREATE TABLE ${SCHEMA}.token_events (
   height bigint NOT NULL CHECK (height >= 0),
   tx_index integer NOT NULL CHECK (tx_index >= 0),
   event_index integer NOT NULL CHECK (event_index >= 0),
-  record_index integer NOT NULL CHECK (record_index >= 0),
-  PRIMARY KEY (contract_address, domain_sep, kind)
-);`;
+  contract_address bytea NOT NULL CHECK (octet_length(contract_address) = 32),
+  classification text NOT NULL CHECK (classification IN ('reject', 'unresolved')),
+  reason text NOT NULL CHECK (reason ~ '^[a-z0-9-]{1,64}$'),
+  PRIMARY KEY (height, tx_index, event_index)
+);
+CREATE INDEX token_events_reject_idx ON ${SCHEMA}.token_events (contract_address, height, tx_index, event_index) INCLUDE (reason)
+  WHERE classification = 'reject';
+CREATE INDEX token_events_unresolved_idx ON ${SCHEMA}.token_events (contract_address, height, tx_index, event_index)
+  WHERE classification = 'unresolved';`;
 
 /** The module's migrations, in order. */
 export const MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
   Object.freeze({ id: "001", sql: MIGRATION_001 }),
 ]);
 
-/** An identity: the contract, its domain separator and kind. */
-export interface IdentityKey {
+/** A token: its id (the hash of domain separator and contract), kind, contract and domain separator. */
+export interface TokenRef {
+  readonly id: Uint8Array;
+  readonly kind: number;
   readonly contract: Uint8Array;
   readonly domainSep: Uint8Array;
-  readonly kind: number;
 }
 
 /** A position on the chain: height, transaction, event within the transaction. */
@@ -96,105 +87,90 @@ export interface Position {
   readonly event: number;
 }
 
-/** One `events` row. */
+/** One `token_events` row: a rejected event or an unresolved log site of a contract. */
 export interface EventRow extends Position {
-  /** The transaction's hash, from `block-parsed`. */
-  readonly txHash: Uint8Array;
   readonly contract: Uint8Array;
-  readonly entryPoint: Uint8Array;
-  readonly classification: "accept" | "reject" | "unresolved";
-  readonly reason: string | null;
-  readonly domainSep: Uint8Array | null;
-  readonly kind: number | null;
+  readonly classification: "reject" | "unresolved";
+  readonly reason: string;
 }
 
-/** One `fields` row's value and where it was set. */
+/** One `token_fields` row's value and where it was set. */
 export interface FieldRow {
   readonly key: Uint8Array;
   readonly valType: number;
   readonly value: Uint8Array;
   readonly uint: bigint | null;
   readonly usable: boolean | null;
-  readonly defined: boolean;
   readonly record: number;
 }
 
 type Write = Pick<BlockWriteHandle, "execute" | "query">;
-
-const IDENTITY = "contract_address = $1 AND domain_sep = $2 AND kind = $3";
 
 /**
  * Every statement the indexer sends, by name: the catalog `test/features/token-metadata/sql-plans.test.ts` plans on
  * both backends (no scan of a `token_metadata` table, every index used). The functions below only bind and map.
  */
 export const STATEMENTS = Object.freeze({
-  /** One event row. */
-  insertEvent: `INSERT INTO ${SCHEMA}.events (height, tx_index, event_index, tx_hash, contract_address, entry_point, classification,
-      reason, domain_sep, kind) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-  /** Whether an identity has a defined field. */
-  hasDefinedField: `SELECT 1 AS one FROM ${SCHEMA}.fields WHERE ${IDENTITY} AND defined LIMIT 1`,
-  /** Whether a field is there, and defined. */
-  fieldDefined: `SELECT defined FROM ${SCHEMA}.fields WHERE ${IDENTITY} AND key = $4`,
-  /** Deletes one field. */
-  deleteField: `DELETE FROM ${SCHEMA}.fields WHERE ${IDENTITY} AND key = $4`,
+  /** One rejected event or unresolved log site. */
+  insertEvent: `INSERT INTO ${SCHEMA}.token_events (height, tx_index, event_index, contract_address, classification, reason)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+  /** A token's row, if it has none. */
+  insertToken: `INSERT INTO ${SCHEMA}.tokens (id, kind, contract_address, domain_sep) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (id, kind) DO NOTHING`,
+  /** A token's current usable symbol, or null. */
+  setTokenSymbol: `UPDATE ${SCHEMA}.tokens SET symbol = $3 WHERE id = $1 AND kind = $2`,
+  /** Deletes a token (its fields are gone already). */
+  deleteToken: `DELETE FROM ${SCHEMA}.tokens WHERE id = $1 AND kind = $2`,
+  /** Whether a token has a field. */
+  tokenHasFields: `SELECT 1 AS one FROM ${SCHEMA}.token_fields WHERE token_id = $1 AND kind = $2 LIMIT 1`,
   /** Sets one field's current value, inserting or replacing its row. */
-  setField: `INSERT INTO ${SCHEMA}.fields (contract_address, domain_sep, kind, key, val_type, value, uint_value, usable, defined,
-      set_height, set_tx, set_event, set_record) VALUES ($1, $2, $3, $4, $5, $6, $7::numeric, $8, $9, $10, $11, $12, $13)
-     ON CONFLICT (contract_address, domain_sep, kind, key) DO UPDATE SET val_type = EXCLUDED.val_type,
-      value = EXCLUDED.value, uint_value = EXCLUDED.uint_value, usable = EXCLUDED.usable, defined = EXCLUDED.defined,
-      set_height = EXCLUDED.set_height, set_tx = EXCLUDED.set_tx, set_event = EXCLUDED.set_event,
-      set_record = EXCLUDED.set_record`,
-  /** Records an identity's last withdrawal. */
-  recordWithdrawal: `INSERT INTO ${SCHEMA}.withdrawals (contract_address, domain_sep, kind, height, tx_index, event_index, record_index)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
-     ON CONFLICT (contract_address, domain_sep, kind) DO UPDATE SET height = EXCLUDED.height,
-      tx_index = EXCLUDED.tx_index, event_index = EXCLUDED.event_index, record_index = EXCLUDED.record_index`,
+  setField: `INSERT INTO ${SCHEMA}.token_fields (token_id, kind, key, val_type, value, uint_value, usable, set_height, set_tx,
+      set_event, set_record) VALUES ($1, $2, $3, $4, $5, $6::numeric, $7, $8, $9, $10, $11)
+     ON CONFLICT (token_id, kind, key) DO UPDATE SET val_type = EXCLUDED.val_type, value = EXCLUDED.value,
+      uint_value = EXCLUDED.uint_value, usable = EXCLUDED.usable, set_height = EXCLUDED.set_height,
+      set_tx = EXCLUDED.set_tx, set_event = EXCLUDED.set_event, set_record = EXCLUDED.set_record`,
+  /** Deletes one field. */
+  deleteField: `DELETE FROM ${SCHEMA}.token_fields WHERE token_id = $1 AND kind = $2 AND key = $3`,
   /** S, the database's first height (the core's one-row table). */
   databaseStart: "SELECT start_height FROM core_chain.identity WHERE id = 1",
 });
 
-const identityParams = (id: IdentityKey): unknown[] => [id.contract, id.domainSep, id.kind];
+const tokenParams = (t: TokenRef): unknown[] => [t.id, t.kind];
 
-/** Writes one event row. */
+/** Writes one rejected event or unresolved log site. */
 export async function insertEvent(w: Write, row: EventRow): Promise<void> {
-  await w.execute(STATEMENTS.insertEvent, [
-    row.height,
-    row.tx,
-    row.event,
-    row.txHash,
-    row.contract,
-    row.entryPoint,
-    row.classification,
-    row.reason,
-    row.domainSep,
-    row.kind,
-  ]);
+  await w.execute(STATEMENTS.insertEvent, [row.height, row.tx, row.event, row.contract, row.classification, row.reason]);
 }
 
-/** Whether the identity has a defined field (it exists, MIP "Keys"). */
-export async function hasDefinedField(w: Write, id: IdentityKey): Promise<boolean> {
-  return (await w.query(STATEMENTS.hasDefinedField, identityParams(id))).length > 0;
+/** Creates the token's row unless it has one. */
+export async function insertToken(w: Write, t: TokenRef): Promise<void> {
+  await w.execute(STATEMENTS.insertToken, [t.id, t.kind, t.contract, t.domainSep]);
 }
 
-/** Deletes one field; resolves with whether it was there and was defined, or null when it was not there. */
-export async function deleteField(w: Write, id: IdentityKey, key: Uint8Array): Promise<{ defined: boolean } | null> {
-  const params = [...identityParams(id), key];
-  const [row] = await w.query(STATEMENTS.fieldDefined, params);
-  if (row === undefined) return null;
-  await w.execute(STATEMENTS.deleteField, params);
-  return { defined: row.defined === true };
+/** Sets the token's current usable symbol (whole), or null. */
+export async function setTokenSymbol(w: Write, t: TokenRef, symbol: Uint8Array | null): Promise<void> {
+  await w.execute(STATEMENTS.setTokenSymbol, [...tokenParams(t), symbol]);
+}
+
+/** Deletes the token's row. */
+export async function deleteToken(w: Write, t: TokenRef): Promise<void> {
+  await w.execute(STATEMENTS.deleteToken, tokenParams(t));
+}
+
+/** Whether the token has a field. */
+export async function tokenHasFields(w: Write, t: TokenRef): Promise<boolean> {
+  return (await w.query(STATEMENTS.tokenHasFields, tokenParams(t))).length > 0;
 }
 
 /** Sets one field's current value (inserting or replacing its row). */
-export async function setField(w: Write, id: IdentityKey, at: Position, field: FieldRow): Promise<void> {
+export async function setField(w: Write, t: TokenRef, at: Position, field: FieldRow): Promise<void> {
   await w.execute(STATEMENTS.setField, [
-    ...identityParams(id),
+    ...tokenParams(t),
     field.key,
     field.valType,
     field.value,
     field.uint === null ? null : field.uint.toString(),
     field.usable,
-    field.defined,
     at.height,
     at.tx,
     at.event,
@@ -202,9 +178,9 @@ export async function setField(w: Write, id: IdentityKey, at: Position, field: F
   ]);
 }
 
-/** Records the identity's last withdrawal: the record after which it had no defined field. */
-export async function recordWithdrawal(w: Write, id: IdentityKey, at: Position, record: number): Promise<void> {
-  await w.execute(STATEMENTS.recordWithdrawal, [...identityParams(id), at.height, at.tx, at.event, record]);
+/** Deletes one field; resolves with whether it was there. */
+export async function deleteField(w: Write, t: TokenRef, key: Uint8Array): Promise<boolean> {
+  return (await w.execute(STATEMENTS.deleteField, [...tokenParams(t), key])) > 0;
 }
 
 /** S, the database's first height, from `core_chain.identity`; null before it is recorded. */

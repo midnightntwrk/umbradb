@@ -935,8 +935,7 @@ UmbraDB's package carries two public modules that are not core modules, for the 
 Both are modules written as this guide describes; read them as a larger example, and the pair as a pattern: one module
 owns and fills the tables, another reads them. Any module can require the two items to read the tables its own way.
 
-- **What they require:** the indexer `contract-logs` (either provider) and `block-parsed` (each event's transaction
-  hash); the API the indexer's two items. A configuration enables them with their entries, and lists them in `modules`
+- **What they require:** the indexer `contract-logs` (either provider); the API the indexer's two items. A configuration enables them with their entries, and lists them in `modules`
   as any user module:
 
 ```ts
@@ -968,9 +967,11 @@ export default defineConfig({
   database that has run without it refuses it at startup (`callback-error` at `on-start-db` of `token-metadata`, its
   cause a `TokenMetadataStartAfterDatabase` with the code `token-metadata-start-after-database`). Add it to a new
   database. A gap between its revisions (§11) is refused the same way, with `token-metadata-revision-gap`.
-- **Its tables** (schema `token_metadata`): `events` (append-only: each MIP-0018 event's position, transaction hash,
-  contract, classification and reason; other logs are not stored), `fields` and `withdrawals` (mutable: each identity's
-  current fields, whole, and its last withdrawal). They are deterministic module tables (§4): names and symbols are
+- **Its tables** (schema `token_metadata`), related by keys: `tokens` (mutable: one row per described token, keyed
+  by its id, the hash of domain separator and contract, which is its color for kinds 1 and 2, and its kind; the row
+  is deleted with the token's last field), `token_fields` (mutable: each token's current defined fields, whole; keys
+  MIP-0018 does not define are not stored) and `token_events` (append-only: each rejected event and unresolved log
+  site, with its position, contract and reason, for marks). They are deterministic module tables (§4): names and symbols are
   stored whole and cut to 64 and 12 characters only when served, since the cut depends on the platform's Unicode data.
 - **The API holds no state.** Startup refuses it without the indexer (`item-no-provider`); added to a database whose
   indexer already ran, from a height above the cursor like any added entry, it answers as if it had run from S. Every

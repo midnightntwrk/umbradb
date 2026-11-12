@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TOKEN_METADATA_API } from "../../../src/features/token-metadata-api/token-metadata-api.js";
 import { encodeCursor } from "../../../src/features/token-metadata-api/tokens.js";
+import { tokenColor } from "../../../src/features/token-metadata/color.js";
 import { servedIdentities } from "../token-metadata/served-state.js";
 import { commonRecords } from "../../../src/features/token-metadata/codec/index.js";
 import type { ReadHandle } from "../../../src/db/api.js";
@@ -60,14 +61,12 @@ describe.each(PROCESS_BACKENDS)("the API's edges on $name", (backend: ProcessBac
     ]);
     await runTo(db, { start: S, head: S + 2, logs });
     await db.query(
-      `INSERT INTO token_metadata.events (height, tx_index, event_index, tx_hash, contract_address, entry_point, classification, reason)
-       VALUES (${S + 1}, 7, 0, '\\x${"77".repeat(32)}'::bytea, '\\x${hex(A)}'::bytea, '\\x'::bytea, 'unresolved', 'not-a-literal')`,
+      `INSERT INTO token_metadata.token_events (height, tx_index, event_index, contract_address, classification, reason)
+       VALUES (${S + 1}, 7, 0, '\\x${hex(A)}'::bytea, 'unresolved', 'not-a-literal')`,
     );
     await db.query(
-      `INSERT INTO token_metadata.fields (contract_address, domain_sep, kind, key, val_type, value, uint_value, usable, defined,
-         set_height, set_tx, set_event, set_record)
-       VALUES ('\\x${hex(A)}'::bytea, '\\x${hex(domain(1))}'::bytea, 1, convert_to('image', 'UTF8'), 4, '\\xff00ff'::bytea, NULL, false, true,
-         ${S + 1}, 0, 0, 9)`,
+      `INSERT INTO token_metadata.token_fields (token_id, kind, key, val_type, value, uint_value, usable, set_height, set_tx, set_event, set_record)
+       VALUES ('\\x${hex(tokenColor(domain(1), A))}'::bytea, 1, convert_to('image', 'UTF8'), 4, '\\xff00ff'::bytea, NULL, false, ${S + 1}, 0, 0, 9)`,
     );
   }, 240_000);
   afterAll(() => backend.stop(), 60_000);

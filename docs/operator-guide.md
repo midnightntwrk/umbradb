@@ -175,7 +175,7 @@ tables (schema `token_metadata`), and `token-metadata-api` serves them on the mo
 `POST /token-metadata-api/v1/tokens`, is in [token-metadata-api.md](token-metadata-api.md)). Run the indexer alone to keep the tables for your own reads, or
 both to serve the tokens route. The configuration file imports `TOKEN_METADATA` (and `TOKEN_METADATA_API`) from `umbradb`, lists
 them in its `modules` export, and adds their entries with the core modules the indexer needs: a `contract-logs`
-provider and `core-block-parsed` (`core-contract-logs-fast` also needs `core-chain-events`):
+provider (`core-contract-logs-fast` needs `core-chain-events` and `core-block-parsed`):
 
 ```ts
 export const modules = [TOKEN_METADATA, TOKEN_METADATA_API];

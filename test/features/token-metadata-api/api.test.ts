@@ -1,6 +1,6 @@
 import Value from "typebox/value";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { tokenColor } from "../../../src/features/token-metadata-api/color.js";
+import { tokenColor } from "../../../src/features/token-metadata/color.js";
 import { DEFAULT_MAX_CONCURRENT_REQUESTS, registerRoutes, route } from "../../../src/features/token-metadata-api/router.js";
 import { TokensRequest, TokensResponse } from "../../../src/features/token-metadata-api/schemas.js";
 import { encodeCursor, markJson } from "../../../src/features/token-metadata-api/tokens.js";

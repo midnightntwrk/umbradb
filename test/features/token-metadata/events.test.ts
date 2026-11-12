@@ -112,8 +112,10 @@ describe.each(PROCESS_BACKENDS)("token-metadata's event rows on $name", (backend
       ],
     ]);
     await runTo(db, { start: S, head: S + 2, logs });
-    expect(await db.query("SELECT height::int AS h, tx_index, event_index, classification FROM token_metadata.events")).toEqual([
-      { h: S + 1, tx_index: 1, event_index: 0, classification: "accept" },
+    // The valid event alone describes a token; nothing else stores anything, and an accepted event leaves no event row.
+    expect(await db.query("SELECT count(*)::int AS n FROM token_metadata.token_events")).toEqual([{ n: 0 }]);
+    expect(await db.query("SELECT encode(contract_address, 'hex') AS c, encode(domain_sep, 'hex') AS d, kind FROM token_metadata.tokens")).toEqual([
+      { c: hex(A), d: hex(D), kind: 1 },
     ]);
   }, 240_000);
 
@@ -127,14 +129,11 @@ describe.each(PROCESS_BACKENDS)("token-metadata's event rows on $name", (backend
       const address = fromHex(vector.steps[0]!.contractAddress);
       await runTo(db, { start: S, head: S + 2, logs: new Map([[BigInt(S + 1), blockLogs([0, address, data[0]!], [0, address, data[1]!])]]) });
       const bad = id === "S7a" ? 0 : 1;
-      expect(await db.query("SELECT event_index, classification, reason, kind FROM token_metadata.events ORDER BY event_index"), id).toEqual(
-        [0, 1].map((event_index) =>
-          event_index === bad
-            ? { event_index, classification: "reject", reason: "reserved-valtype", kind: null }
-            : { event_index, classification: "accept", reason: null, kind: 3 },
-        ),
-      );
-      expect(await db.query("SELECT convert_from(key, 'UTF8') AS key, convert_from(value, 'UTF8') AS value FROM token_metadata.fields"), id).toEqual([
+      expect(await db.query("SELECT event_index, classification, reason FROM token_metadata.token_events"), id).toEqual([
+        { event_index: bad, classification: "reject", reason: "reserved-valtype" },
+      ]);
+      expect(await db.query("SELECT kind FROM token_metadata.tokens"), id).toEqual([{ kind: 3 }]);
+      expect(await db.query("SELECT convert_from(key, 'UTF8') AS key, convert_from(value, 'UTF8') AS value FROM token_metadata.token_fields"), id).toEqual([
         { key: "name", value: "Good" },
       ]);
     }
@@ -147,13 +146,12 @@ describe.each(PROCESS_BACKENDS)("token-metadata's event rows on $name", (backend
     const identity = await serve(db, { start: S, head: S + 2, logs, unresolved }, async (origin) =>
       (await post(origin, TOKENS_PATH, { contract: hex(A), domainSep: hex(D), kind: 1 })).json.items[0],
     );
-    expect(await db.query("SELECT tx_index, event_index, classification, reason FROM token_metadata.events ORDER BY tx_index, event_index")).toEqual([
+    expect(await db.query("SELECT tx_index, event_index, classification, reason FROM token_metadata.token_events ORDER BY tx_index, event_index")).toEqual([
       { tx_index: 0, event_index: 0, classification: "unresolved", reason: "not-a-literal" },
-      { tx_index: 0, event_index: 1, classification: "accept", reason: null },
       { tx_index: 1, event_index: 0, classification: "unresolved", reason: "partial-transaction" },
-      { tx_index: 1, event_index: 1, classification: "accept", reason: null },
     ]);
-    expect(await db.query("SELECT DISTINCT encode(domain_sep, 'hex') AS d FROM token_metadata.fields ORDER BY d")).toEqual([{ d: hex(D) }, { d: hex(D2) }]);
+    // The valid events beside them (event_index 1 of each transaction) are applied: two tokens.
+    expect(await db.query("SELECT encode(domain_sep, 'hex') AS d FROM token_metadata.tokens ORDER BY d")).toEqual([{ d: hex(D) }, { d: hex(D2) }]);
     expect(identity.mark).toMatchObject({
       mark: "unresolved",
       reasons: ["unresolved-log"],
@@ -172,7 +170,7 @@ describe.each(PROCESS_BACKENDS)("token-metadata's event rows on $name", (backend
       `token-metadata cannot read the Misc log 2 of transaction 1 at height ${S + 2}: its data has the unknown tag impact-state-value[v3]`,
     );
     expect(error.cause).toBeInstanceOf(UnknownLogSerialization);
-    expect(await db.query("SELECT count(*)::int AS n FROM token_metadata.events")).toEqual([{ n: 0 }]);
+    expect(await db.query("SELECT count(*)::int AS n FROM token_metadata.tokens")).toEqual([{ n: 0 }]);
   }, 240_000);
 
   it("negative control: a reader that skips unknown tags lets the block commit", async () => {
@@ -187,7 +185,7 @@ describe.each(PROCESS_BACKENDS)("token-metadata's event rows on $name", (backend
     };
     const logs = new Map([[BigInt(S + 2), blockLogs([0, A, valid], [1, A, valid], [1, A, retagged(valid)])]]);
     await runTo(db, { start: S, head: S + 3, logs, modules: [tokenMetadataWith(skipping) as ModuleDeclaration] });
-    expect(await db.query("SELECT count(*)::int AS n FROM token_metadata.events")).toEqual([{ n: 2 }]);
+    expect(await db.query("SELECT count(*)::int AS n FROM token_metadata.tokens")).toEqual([{ n: 1 }]);
   }, 240_000);
 
   it("a value that is not a tagged serialization at all halts too, naming no tag", async () => {
@@ -202,7 +200,7 @@ describe.each(PROCESS_BACKENDS)("token-metadata's event rows on $name", (backend
 describe("an event's position among its transaction's log sites", () => {
   const logs = [log(0, 1, A, valid), log(1, 3, A, otherValid)];
   const sites = [site(0, 0, "not-a-literal"), site(1, 2, "partial-transaction")];
-  const positions = (candidates: ReturnType<typeof candidatesOf>) => candidates.map((c) => [c.row.tx, c.row.event, c.row.classification]);
+  const positions = (candidates: ReturnType<typeof candidatesOf>) => candidates.map((c) => [c.at.tx, c.at.event, c.classification]);
 
   it("counts from the transaction's first site, unresolved ones included", () => {
     expect(positions(candidatesOf(BigInt(S + 1), logs, miscAtom, sites))).toEqual([

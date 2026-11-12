@@ -2,14 +2,15 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TOKEN_METADATA_API } from "../../../src/features/token-metadata-api/token-metadata-api.js";
 import { MAX_TOKEN_FIELDS } from "../../../src/features/token-metadata-api/schemas.js";
 import { commonRecords } from "../../../src/features/token-metadata/codec/index.js";
+import { tokenColor } from "../../../src/features/token-metadata/color.js";
 import type { ReadHandle } from "../../../src/db/api.js";
 import type { ApiRegistry } from "../../../src/modules/declaration.js";
 import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../../runner/process-backends.js";
 import { blockLogs, contract, domain, eventData, readStopped, runTo, TOKENS_PATH } from "../token-metadata/harness.js";
 
 /**
- * Bounded cost of the API, on PostgreSQL 18 and PGlite. Chain-controlled cardinalities are written straight into the
- * indexer's tables of a stopped database — a token with 10,000 keys, 10,000 rejected events of its contract, and 1,000
+ * Bounded cost of the API, on PostgreSQL 18 and PGlite. Large cardinalities are written straight into the
+ * indexer's tables of a stopped database — a token with 10,000 fields, 10,000 rejected events of its contract, and 1,000
  * tokens of that contract sharing its symbol — then the route's handler answers through a read handle that counts the
  * rows each answer reads back. Every answer is small: the first {@link MAX_TOKEN_FIELDS} fields with `fieldCount` and
  * `fieldsTruncated`, the first 100 reasons and the first 100 members with their counts, a contract a page at a time, a
@@ -28,29 +29,41 @@ const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
 type Json = any;
 type Handler = Parameters<ApiRegistry["http"]>[2];
 
-/** Seeds the hostile cardinalities, the group's members with `symbol`. */
+/** A token's id in SQL: `sha256(pad(32, "midnight:derive_token") ‖ domain_sep ‖ contract_address)`. */
+const ID_SQL = (domainSep: string, contract: string) =>
+  `sha256('\\x6d69646e696768743a6465726976655f746f6b656e0000000000000000000000'::bytea || ${domainSep} || ${contract})`;
+
+/**
+ * Seeds the hostile cardinalities, the group's members with `symbol`: 10,000 fields on one token (only the six keys
+ * MIP-0018 defines are ever stored, so this many stand for what a later standard's keys could bring), 999 more tokens
+ * of the contract with the symbol, and 10,000 rejected events of the contract.
+ */
 async function seed(db: ProcessDatabase, symbol: string): Promise<void> {
   const x = `'\\x${hex(X)}'::bytea`;
+  const id = `'\\x${hex(tokenColor(DA, X))}'::bytea`;
   await db.query(
-    `INSERT INTO token_metadata.fields (contract_address, domain_sep, kind, key, val_type, value, uint_value, usable, defined,
-       set_height, set_tx, set_event, set_record)
-     SELECT ${x}, '\\x${hex(DA)}'::bytea, 3, convert_to('k' || lpad(i::text, 6, '0'), 'UTF8'), 1, '\\x76'::bytea, NULL, NULL, true, ${S + 1}, 0, 0, i
+    `INSERT INTO token_metadata.token_fields (token_id, kind, key, val_type, value, uint_value, usable, set_height, set_tx, set_event, set_record)
+     SELECT ${id}, 3, convert_to('k' || lpad(i::text, 6, '0'), 'UTF8'), 1, '\\x76'::bytea, NULL, NULL, ${S + 1}, 0, 0, i
      FROM generate_series(1, ${N}) AS i`,
   );
-  await db.query(`UPDATE token_metadata.fields SET value = convert_to('${symbol}', 'UTF8') WHERE contract_address = ${x} AND key = convert_to('symbol', 'UTF8')`);
+  await db.query(`UPDATE token_metadata.token_fields SET value = convert_to('${symbol}', 'UTF8') WHERE token_id = ${id} AND key = convert_to('symbol', 'UTF8')`);
+  await db.query(`UPDATE token_metadata.tokens SET symbol = convert_to('${symbol}', 'UTF8') WHERE id = ${id}`);
   await db.query(
-    `INSERT INTO token_metadata.fields (contract_address, domain_sep, kind, key, val_type, value, uint_value, usable, defined,
-       set_height, set_tx, set_event, set_record)
-     SELECT ${x}, decode('ee' || lpad(to_hex(i), 62, '0'), 'hex'), 3, convert_to('symbol', 'UTF8'), 1, convert_to('${symbol}', 'UTF8'), NULL, true, true,
-       ${S + 1}, 0, 1, i
-     FROM generate_series(1, ${MEMBERS - 1}) AS i`,
+    `INSERT INTO token_metadata.tokens (id, kind, contract_address, domain_sep, symbol)
+     SELECT ${ID_SQL("d", x)}, 3, ${x}, d, convert_to('${symbol}', 'UTF8')
+     FROM (SELECT decode('ee' || lpad(to_hex(i), 62, '0'), 'hex') AS d FROM generate_series(1, ${MEMBERS - 1}) AS i) AS m`,
   );
   await db.query(
-    `INSERT INTO token_metadata.events (height, tx_index, event_index, tx_hash, contract_address, entry_point, classification, reason)
-     SELECT ${S + 1}, 100 + i, 0, sha256(int4send(i)), ${x}, '\\x'::bytea, 'reject', 'no-records' FROM generate_series(1, ${N}) AS i`,
+    `INSERT INTO token_metadata.token_fields (token_id, kind, key, val_type, value, uint_value, usable, set_height, set_tx, set_event, set_record)
+     SELECT id, 3, convert_to('symbol', 'UTF8'), 1, symbol, NULL, true, ${S + 1}, 0, 1, 0 FROM token_metadata.tokens WHERE id <> ${id}`,
   );
-  await db.query("ANALYZE token_metadata.fields");
-  await db.query("ANALYZE token_metadata.events");
+  await db.query(
+    `INSERT INTO token_metadata.token_events (height, tx_index, event_index, contract_address, classification, reason)
+     SELECT ${S + 1}, 100 + i, 0, ${x}, 'reject', 'no-records' FROM generate_series(1, ${N}) AS i`,
+  );
+  await db.query("ANALYZE token_metadata.tokens");
+  await db.query("ANALYZE token_metadata.token_fields");
+  await db.query("ANALYZE token_metadata.token_events");
 }
 
 describe.each(PROCESS_BACKENDS)("bounded cost on $name", (backend: ProcessBackend) => {
