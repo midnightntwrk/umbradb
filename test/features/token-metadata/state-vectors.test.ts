@@ -8,8 +8,8 @@ import { PGlite } from "@electric-sql/pglite";
 import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../../runner/process-backends.js";
 import { cellData, log, runTo } from "./harness.js";
 import { type Json, stateInput, stateResponse } from "./vector-adapter.js";
-import { compareState } from "./vector-tools/compare.js";
-import { loadVectors, requestFor } from "./vector-tools/runner-core.js";
+import { compareState } from "./vector-runner/compare.js";
+import { loadVectors, requestFor } from "./vector-runner/runner-core.js";
 
 /**
  * Every MIP-0018 reference state vector (normative and informative), through `token-metadata` in the real process on

@@ -16,7 +16,7 @@ import {
 import { ALL_CODEC_RULES, type CodecRules, checkValue, classifyEventWith, decodeUintWith } from "../../../src/features/token-metadata/codec/internal.js";
 import { decodeInput, decodeResponse, type Json } from "./vector-adapter.js";
 import { REFERENCE_VECTORS_DIR } from "./vector-sets.js";
-import { loadVectors, runVectors } from "./vector-tools/runner-core.js";
+import { loadVectors, runVectors } from "./vector-runner/runner-core.js";
 
 /**
  * The codec on its own (`src/features/token-metadata/codec/`).

@@ -1,11 +1,11 @@
 /**
  * MIP-0018 vector conformance through UmbraDB's pure adapter (`vector-adapter.ts`): the vector runner
- * (`vector-tools/`) over the MIP's reference vectors minus the ids UmbraDB keeps its own versions of, then over those
+ * (`vector-runner/`) over the MIP's reference vectors minus the ids UmbraDB keeps its own versions of, then over those
  * own versions (`mip0018/vectors-umbradb/`: the vectors whose expectation differs under the pinned MIP-0018 text).
  */
 import { describe, expect, it } from "vitest";
-import { verifySums } from "./vector-tools/common.js";
-import { loadVectors, runVectors, type Json } from "./vector-tools/runner-core.js";
+import { verifySums } from "./vector-runner/common.js";
+import { loadVectors, runVectors, type Json } from "./vector-runner/runner-core.js";
 import { handleRequest } from "./vector-adapter.js";
 import { REFERENCE_VECTORS_DIR, UMBRADB_VECTORS_DIR, vectorSets } from "./vector-sets.js";
 

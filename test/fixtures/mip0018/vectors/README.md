@@ -1,7 +1,7 @@
 # MIP-0018 test vectors
 
 Language-neutral fixtures for every normative test of **MIP-0018 On-Chain Token Metadata Emission**, plus informative
-extras, and a JSON Schema for each format. `token-metadata` runs them with `test/features/token-metadata/vector-tools/`
+extras, and a JSON Schema for each format. `token-metadata` runs them with `test/features/token-metadata/vector-runner/`
 (`vectors.test.ts`, `state-vectors.test.ts`).
 
 | | |
@@ -142,9 +142,9 @@ A consumer in any language is tested by a small adapter program:
    integrity (`SHA256SUMS`) or harness errors. Informative failures are reported but do not change the exit status.
    The JSON report (`--json`) lists the not-applicable checks under `notApplicable`.
 
-In this repository the runner is `test/features/token-metadata/vector-tools/runner-core.ts`, called in process
+In this repository the runner is `test/features/token-metadata/vector-runner/runner-core.ts`, called in process
 (`runVectors`) with `test/features/token-metadata/vector-adapter.ts` as the consumer; `SHA256SUMS` is checked first
-(`vector-tools/common.ts`, `verifySums`).
+(`vector-runner/common.ts`, `verifySums`).
 
 ## Informative vectors and repository conventions
 
