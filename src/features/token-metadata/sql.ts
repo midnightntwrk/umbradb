@@ -1,5 +1,6 @@
 /**
- * The SQL of `token-metadata`: its schema, migration `001` and the statements of its write path.
+ * The SQL of `token-metadata`: its schema, migration `001`, and every statement of its write path, by name
+ * ({@link STATEMENTS}).
  *
  * **The tables** (schema `token_metadata`). There is no `network` column (a database holds one chain), no raw
  * `name`/`payload` (nothing is recomputed: UmbraDB follows finalized blocks only), and no activity listing (a
@@ -39,7 +40,6 @@ export const MIGRATION_001 = `CREATE TABLE ${SCHEMA}.events (
   CHECK ((classification = 'accept') = (domain_sep IS NOT NULL AND kind IS NOT NULL)),
   PRIMARY KEY (height, tx_index, event_index)
 );
-CREATE INDEX events_contract_idx ON ${SCHEMA}.events (contract_address, height, tx_index, event_index);
 CREATE INDEX events_reject_idx ON ${SCHEMA}.events (contract_address, height, tx_index, event_index) INCLUDE (reason)
   WHERE classification = 'reject';
 CREATE INDEX events_unresolved_idx ON ${SCHEMA}.events (contract_address, height, tx_index, event_index)
@@ -62,8 +62,8 @@ CREATE TABLE ${SCHEMA}.fields (
   PRIMARY KEY (contract_address, domain_sep, kind, key)
 );
 CREATE INDEX fields_defined_idx ON ${SCHEMA}.fields (contract_address, domain_sep, kind, key) WHERE defined;
-CREATE INDEX fields_symbol_idx ON ${SCHEMA}.fields (contract_address, value)
-  WHERE key = '\\x73796d626f6c'::bytea AND usable;
+CREATE INDEX fields_symbol_idx ON ${SCHEMA}.fields (contract_address, value, domain_sep, kind)
+  WHERE key = '\\x73796d626f6c'::bytea AND usable AND defined;
 CREATE INDEX fields_color_idx ON ${SCHEMA}.fields (${COLOR_SQL}, kind)
   WHERE defined AND kind IN (1, 2);
 CREATE TABLE ${SCHEMA}.withdrawals (
@@ -122,70 +122,93 @@ export interface FieldRow {
 type Write = Pick<BlockWriteHandle, "execute" | "query">;
 
 const IDENTITY = "contract_address = $1 AND domain_sep = $2 AND kind = $3";
-const identityParams = (id: IdentityKey): unknown[] => [id.contract, id.domainSep, id.kind];
 
-/** Writes one event row. */
-export async function insertEvent(w: Write, row: EventRow): Promise<void> {
-  await w.execute(
-    `INSERT INTO ${SCHEMA}.events (height, tx_index, event_index, tx_hash, contract_address, entry_point, classification,
+/**
+ * Every statement the indexer sends, by name: the catalog `test/features/token-metadata/sql-plans.test.ts` plans on
+ * both backends (no scan of a `token_metadata` table, every index used). The functions below only bind and map.
+ */
+export const STATEMENTS = Object.freeze({
+  /** One event row. */
+  insertEvent: `INSERT INTO ${SCHEMA}.events (height, tx_index, event_index, tx_hash, contract_address, entry_point, classification,
       reason, domain_sep, kind) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-    [row.height, row.tx, row.event, row.txHash, row.contract, row.entryPoint, row.classification, row.reason, row.domainSep, row.kind],
-  );
-}
-
-/** Whether the identity has a defined field (it exists, MIP "Keys"). */
-export async function hasDefinedField(w: Write, id: IdentityKey): Promise<boolean> {
-  const rows = await w.query(`SELECT 1 AS one FROM ${SCHEMA}.fields WHERE ${IDENTITY} AND defined LIMIT 1`, identityParams(id));
-  return rows.length > 0;
-}
-
-/** Deletes one field; resolves with whether it was there and was defined, or null when it was not there. */
-export async function deleteField(w: Write, id: IdentityKey, key: Uint8Array): Promise<{ defined: boolean } | null> {
-  const params = [...identityParams(id), key];
-  const [row] = await w.query(`SELECT defined FROM ${SCHEMA}.fields WHERE ${IDENTITY} AND key = $4`, params);
-  if (row === undefined) return null;
-  await w.execute(`DELETE FROM ${SCHEMA}.fields WHERE ${IDENTITY} AND key = $4`, params);
-  return { defined: row.defined === true };
-}
-
-/** Sets one field's current value (inserting or replacing its row). */
-export async function setField(w: Write, id: IdentityKey, at: Position, field: FieldRow): Promise<void> {
-  await w.execute(
-    `INSERT INTO ${SCHEMA}.fields (contract_address, domain_sep, kind, key, val_type, value, uint_value, usable, defined,
+  /** Whether an identity has a defined field. */
+  hasDefinedField: `SELECT 1 AS one FROM ${SCHEMA}.fields WHERE ${IDENTITY} AND defined LIMIT 1`,
+  /** Whether a field is there, and defined. */
+  fieldDefined: `SELECT defined FROM ${SCHEMA}.fields WHERE ${IDENTITY} AND key = $4`,
+  /** Deletes one field. */
+  deleteField: `DELETE FROM ${SCHEMA}.fields WHERE ${IDENTITY} AND key = $4`,
+  /** Sets one field's current value, inserting or replacing its row. */
+  setField: `INSERT INTO ${SCHEMA}.fields (contract_address, domain_sep, kind, key, val_type, value, uint_value, usable, defined,
       set_height, set_tx, set_event, set_record) VALUES ($1, $2, $3, $4, $5, $6, $7::numeric, $8, $9, $10, $11, $12, $13)
      ON CONFLICT (contract_address, domain_sep, kind, key) DO UPDATE SET val_type = EXCLUDED.val_type,
       value = EXCLUDED.value, uint_value = EXCLUDED.uint_value, usable = EXCLUDED.usable, defined = EXCLUDED.defined,
       set_height = EXCLUDED.set_height, set_tx = EXCLUDED.set_tx, set_event = EXCLUDED.set_event,
       set_record = EXCLUDED.set_record`,
-    [
-      ...identityParams(id),
-      field.key,
-      field.valType,
-      field.value,
-      field.uint === null ? null : field.uint.toString(),
-      field.usable,
-      field.defined,
-      at.height,
-      at.tx,
-      at.event,
-      field.record,
-    ],
-  );
+  /** Records an identity's last withdrawal. */
+  recordWithdrawal: `INSERT INTO ${SCHEMA}.withdrawals (contract_address, domain_sep, kind, height, tx_index, event_index, record_index)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (contract_address, domain_sep, kind) DO UPDATE SET height = EXCLUDED.height,
+      tx_index = EXCLUDED.tx_index, event_index = EXCLUDED.event_index, record_index = EXCLUDED.record_index`,
+  /** S, the database's first height (the core's one-row table). */
+  databaseStart: "SELECT start_height FROM core_chain.identity WHERE id = 1",
+});
+
+const identityParams = (id: IdentityKey): unknown[] => [id.contract, id.domainSep, id.kind];
+
+/** Writes one event row. */
+export async function insertEvent(w: Write, row: EventRow): Promise<void> {
+  await w.execute(STATEMENTS.insertEvent, [
+    row.height,
+    row.tx,
+    row.event,
+    row.txHash,
+    row.contract,
+    row.entryPoint,
+    row.classification,
+    row.reason,
+    row.domainSep,
+    row.kind,
+  ]);
+}
+
+/** Whether the identity has a defined field (it exists, MIP "Keys"). */
+export async function hasDefinedField(w: Write, id: IdentityKey): Promise<boolean> {
+  return (await w.query(STATEMENTS.hasDefinedField, identityParams(id))).length > 0;
+}
+
+/** Deletes one field; resolves with whether it was there and was defined, or null when it was not there. */
+export async function deleteField(w: Write, id: IdentityKey, key: Uint8Array): Promise<{ defined: boolean } | null> {
+  const params = [...identityParams(id), key];
+  const [row] = await w.query(STATEMENTS.fieldDefined, params);
+  if (row === undefined) return null;
+  await w.execute(STATEMENTS.deleteField, params);
+  return { defined: row.defined === true };
+}
+
+/** Sets one field's current value (inserting or replacing its row). */
+export async function setField(w: Write, id: IdentityKey, at: Position, field: FieldRow): Promise<void> {
+  await w.execute(STATEMENTS.setField, [
+    ...identityParams(id),
+    field.key,
+    field.valType,
+    field.value,
+    field.uint === null ? null : field.uint.toString(),
+    field.usable,
+    field.defined,
+    at.height,
+    at.tx,
+    at.event,
+    field.record,
+  ]);
 }
 
 /** Records the identity's last withdrawal: the record after which it had no defined field. */
 export async function recordWithdrawal(w: Write, id: IdentityKey, at: Position, record: number): Promise<void> {
-  await w.execute(
-    `INSERT INTO ${SCHEMA}.withdrawals (contract_address, domain_sep, kind, height, tx_index, event_index, record_index)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
-     ON CONFLICT (contract_address, domain_sep, kind) DO UPDATE SET height = EXCLUDED.height,
-      tx_index = EXCLUDED.tx_index, event_index = EXCLUDED.event_index, record_index = EXCLUDED.record_index`,
-    [...identityParams(id), at.height, at.tx, at.event, record],
-  );
+  await w.execute(STATEMENTS.recordWithdrawal, [...identityParams(id), at.height, at.tx, at.event, record]);
 }
 
 /** S, the database's first height, from `core_chain.identity`; null before it is recorded. */
 export async function databaseStart(read: Pick<SchemaWriteHandle, "query">): Promise<bigint | null> {
-  const [row] = await read.query("SELECT start_height FROM core_chain.identity WHERE id = 1");
+  const [row] = await read.query(STATEMENTS.databaseStart);
   return row === undefined ? null : (row.start_height as bigint);
 }
