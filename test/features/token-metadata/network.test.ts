@@ -2,7 +2,7 @@ import net from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { commonRecords, record } from "../../../src/features/token-metadata/codec/index.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../../runner/process-backends.js";
-import { blockLogs, contract, domain, eventData, get, serve } from "./harness.js";
+import { blockLogs, contract, domain, eventData, post, serve, TOKENS_PATH } from "./harness.js";
 
 /**
  * No network request. While the module runs and serves, every outbound connection of this process —
@@ -86,8 +86,8 @@ describe.each(PROCESS_BACKENDS)("no network request, on $name", (backend: Proces
         ],
       ]);
       const answers = await serve(db, { start: S, head: S + 2, logs }, async (origin) => ({
-        identity: (await get(origin, `/v1/identities/${Buffer.from(A).toString("hex")}/${Buffer.from(D).toString("hex")}/1`)).json,
-        list: (await get(origin, "/v1/tokens")).json,
+        identity: (await post(origin, TOKENS_PATH, { contract: Buffer.from(A).toString("hex"), domainSep: Buffer.from(D).toString("hex"), kind: 1 })).json.items[0],
+        list: (await post(origin, TOKENS_PATH, { contract: Buffer.from(A).toString("hex") })).json,
       }));
       expect(answers.identity.image).toEqual({ url: IMAGE, status: "pending", imageUrl: null });
       expect(answers.list.items.at(-1).image).toEqual({ url: IMAGE, status: "pending", imageUrl: null });

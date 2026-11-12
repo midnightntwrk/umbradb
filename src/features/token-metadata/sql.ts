@@ -6,15 +6,13 @@
  * later change):
  *
  * - `events`, append-only: one row per MIP-0018 candidate at its chain position — height, the transaction's index in
- *   the block and its hash (from `block-parsed`, indexed for `/v1/events?tx=`), and `event_index`, the log's position among its transaction's logs (`eventIndex`
+ *   the block and its hash (from `block-parsed`), and `event_index`, the log's position among its transaction's logs (`eventIndex`
  *   in the API). Its classification is `accept`, `reject` or `unresolved` (an unresolved log site of
  *   `core-contract-logs-fast`; an `ignore`d log is not stored); `reason` is null iff `accept`; an accepted event's identity is its `domain_sep` and `kind`. `entry_point` keeps the first 128 bytes.
  * - `fields`, mutable: one row per field of an identity, holding only its current value, whole (names and
  *   symbols are cut when served, never when stored). `uint_value` is a `UInt` value as a number; `usable` is the
  *   common-field rule's answer for a common key, else null; `defined` says whether the key is served (MIP "Keys").
  * - `withdrawals`, mutable: per identity, the position of the record after which it last had no defined field.
- * - `counts`, mutable: one row (from the first unresolved site on) holding how many `unresolved` events `events` has,
- *   so `/v1/status` reads one row instead of counting them.
  *
  * Text columns hold only UmbraDB's own vocabulary (CHECKs keep them ASCII); chain bytes are `bytea`.
  */
@@ -41,7 +39,6 @@ export const MIGRATION_001 = `CREATE TABLE ${SCHEMA}.events (
   CHECK ((classification = 'accept') = (domain_sep IS NOT NULL AND kind IS NOT NULL)),
   PRIMARY KEY (height, tx_index, event_index)
 );
-CREATE INDEX events_tx_idx ON ${SCHEMA}.events (tx_hash, height, tx_index, event_index);
 CREATE INDEX events_contract_idx ON ${SCHEMA}.events (contract_address, height, tx_index, event_index);
 CREATE INDEX events_reject_idx ON ${SCHEMA}.events (contract_address, height, tx_index, event_index) INCLUDE (reason)
   WHERE classification = 'reject';
@@ -78,10 +75,6 @@ CREATE TABLE ${SCHEMA}.withdrawals (
   event_index integer NOT NULL CHECK (event_index >= 0),
   record_index integer NOT NULL CHECK (record_index >= 0),
   PRIMARY KEY (contract_address, domain_sep, kind)
-);
-CREATE TABLE ${SCHEMA}.counts (
-  id smallint PRIMARY KEY CHECK (id = 1),
-  unresolved bigint NOT NULL CHECK (unresolved >= 0)
 );`;
 
 /** The module's migrations, in order. */
@@ -188,16 +181,6 @@ export async function recordWithdrawal(w: Write, id: IdentityKey, at: Position, 
      ON CONFLICT (contract_address, domain_sep, kind) DO UPDATE SET height = EXCLUDED.height,
       tx_index = EXCLUDED.tx_index, event_index = EXCLUDED.event_index, record_index = EXCLUDED.record_index`,
     [...identityParams(id), at.height, at.tx, at.event, record],
-  );
-}
-
-/** Adds `n` unresolved events to the `counts` row (made on the first). */
-export async function addUnresolved(w: Write, n: number): Promise<void> {
-  if (n === 0) return;
-  await w.execute(
-    `INSERT INTO ${SCHEMA}.counts (id, unresolved) VALUES (1, $1)
-     ON CONFLICT (id) DO UPDATE SET unresolved = ${SCHEMA}.counts.unresolved + EXCLUDED.unresolved`,
-    [n],
   );
 }
 

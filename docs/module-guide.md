@@ -928,8 +928,8 @@ UmbraDB's package carries two public modules that are not core modules, for the 
 - `token-metadata` reads the `contract-logs` item (§9) and keeps each token's current metadata fields in its tables,
   which it provides as two `table` items (§13), `token-metadata-events` and `token-metadata-state`
   (`src/features/token-metadata/`).
-- `token-metadata-api` requires those two items and serves the `/v1` API of
-  [docs/token-metadata-api.md](token-metadata-api.md) over them (`src/features/token-metadata-api/`). It holds no state:
+- `token-metadata-api` requires those two items and serves them on one route, `POST /token-metadata-api/v1/tokens`
+  ([docs/token-metadata-api.md](token-metadata-api.md)), its body and answer checked against TypeBox schemas (`src/features/token-metadata-api/`). It holds no state:
   no tables, no migrations, only `on-start-api`.
 
 Both are modules written as this guide describes; read them as a larger example, and the pair as a pattern: one module
@@ -969,9 +969,8 @@ export default defineConfig({
   cause a `TokenMetadataStartAfterDatabase` with the code `token-metadata-start-after-database`). Add it to a new
   database. A gap between its revisions (§11) is refused the same way, with `token-metadata-revision-gap`.
 - **Its tables** (schema `token_metadata`): `events` (append-only: each MIP-0018 event's position, transaction hash,
-  contract, classification and reason; other logs are not stored), `fields`, `withdrawals` and `counts` (mutable: each
-  identity's current fields, whole, its last withdrawal, and the number of unresolved events, which `/v1/status`
-  reads). They are deterministic module tables (§4): names and symbols are
+  contract, classification and reason; other logs are not stored), `fields` and `withdrawals` (mutable: each identity's
+  current fields, whole, and its last withdrawal). They are deterministic module tables (§4): names and symbols are
   stored whole and cut to 64 and 12 characters only when served, since the cut depends on the platform's Unicode data.
 - **The API holds no state.** Startup refuses it without the indexer (`item-no-provider`); added to a database whose
   indexer already ran, from a height above the cursor like any added entry, it answers as if it had run from S. Every

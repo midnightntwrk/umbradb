@@ -235,6 +235,22 @@ export async function get(origin: string, path: string, method = "GET"): Promise
   return { status: response.status, headers: Object.fromEntries(response.headers), text, json };
 }
 
+/** POSTs `body` as JSON to `path` of a listener at `origin`. */
+export async function post(origin: string, path: string, body: unknown): Promise<Got> {
+  const response = await fetch(`${origin}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const text = await response.text();
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    json = undefined;
+  }
+  return { status: response.status, headers: Object.fromEntries(response.headers), text, json };
+}
+
+/** The tokens route of `token-metadata-api`. */
+export const TOKENS_PATH = "/token-metadata-api/v1/tokens";
+
 /**
  * Runs the process on `db` up to the head with the module API listening on a free port, then runs `body` with its
  * origin while it still serves, then stops it.

@@ -24,7 +24,6 @@ import type { BlockWriteHandle } from "../../db/api.js";
 import { classifyMip0018Event } from "./classify.js";
 import { miscAtom, UnknownLogSerialization } from "./log-reader.js";
 import {
-  addUnresolved,
   deleteField,
   type EventRow,
   hasDefinedField,
@@ -188,6 +187,5 @@ export async function writeBlock(
       await applyRecords(w, { contract: row.contract, domainSep: row.domainSep!, kind: row.kind! }, row, records);
     }
   }
-  await addUnresolved(w, candidates.filter((c) => c.row.classification === "unresolved").length);
   return candidates.length;
 }

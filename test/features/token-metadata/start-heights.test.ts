@@ -13,7 +13,7 @@ import { committed, ingest } from "../../backbone/ingest-harness.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../../runner/process-backends.js";
 import { tapeTest } from "../../tape/real/real-tapes.js";
 import { build, type Generated, NETWORK } from "./chains.js";
-import { genesisRecords, get, serve } from "./harness.js";
+import { genesisRecords, post, serve, TOKENS_PATH } from "./harness.js";
 import { stateResponse } from "./vector-adapter.js";
 
 /**
@@ -24,18 +24,18 @@ import { stateResponse } from "./vector-adapter.js";
  *   site and a symbol group. A database is started at genesis, at the block before the first event, at each block
  *   holding one, and past the last. For each start S, the served state after the last block equals the reference
  *   model (`state.ts`) applied to the events at or above S, and nothing else: the module keeps no state from before
- *   its database. Its `events` rows are exactly the candidates and unresolved sites at or above S, and `/v1/status`
- *   reports S. **Negative control:** for a start that cuts an event (the contract token's block), the model applied to
- *   every event differs from what the module serves, so the comparison sees a start height.
+ *   its database. Its `events` rows are exactly the candidates and unresolved sites at or above S, and the database
+ *   records S as its start. **Negative control:** for a start that cuts an event (the contract token's block), the
+ *   model applied to every event differs from what the module serves, so the comparison sees a start height.
+ * - **Latest starts on the synthetic chain:** databases configured at four heights above the indexer's latest start
+ *   all start there and hold the same rows; the negative control, the indexer without one, keeps its start.
  * - **The networks' own tapes started mid-chain** with `core-contract-logs-fast`: preprod's and mainnet's delayed
  *   upgrade tapes, configured from the tape's first usable block (on the old runtime), from the upgrade's first block F
  *   (the network's first block with contract logs) and from above F, which starts at F (the indexer's latest start).
- *   Each commits every height from its start to the tape's last, and `/v1/status` reports that start, the last height
- *   and the network.
- * - **Latest starts on the synthetic chain:** databases configured at four heights above the indexer's latest start
- *   all start there and hold the same rows; the negative control, the indexer without one, keeps its start. A recorded tape answers `state_getMetadata` only at the heights its recording asked
- *   (its first block, and each runtime's first), and a start needs its parent's metadata, so these are the starts a
- *   tape can serve; the synthetic chain above covers every other start height.
+ *   Each commits every height from its start to the tape's last, the database records that start, and the tokens
+ *   route answers at the last height. A recorded tape answers `state_getMetadata` only at the heights its recording
+ *   asked (its first block, and each runtime's first), and a start needs its parent's metadata, so these are the starts
+ *   a tape can serve; the synthetic chain covers every other start height.
  */
 
 // ── The synthetic chain ──────────────────────────────────────────────────────────────────────────────────────────
@@ -143,12 +143,13 @@ describe.each(PROCESS_BACKENDS)("token-metadata from varying start heights on $n
   it.each(STARTS)("from S = %i serves the model of the events at or above S, stores their rows, and reports S", async (start) => {
     const db = await backend.database();
     const seen = new Map<bigint, string>();
-    const status = await serve(db, { start, head: HEAD, logs, unresolved, modules: [...MODULES, probe(seen)] }, (origin) => get(origin, "/v1/status"));
+    const answer = await serve(db, { start, head: HEAD, logs, unresolved, modules: [...MODULES, probe(seen)] }, (origin) => post(origin, TOKENS_PATH, { contract: "01".repeat(32) }));
     expect(seen.get(BigInt(HEAD)), `served state from ${start}`).toBe(modelFrom(start));
     expect(await db.query("SELECT count(*)::int AS n, min(height)::int AS lo FROM token_metadata.events")).toEqual([
       { n: expectedRows(start), lo: expectedLowest(start) },
     ]);
-    expect(status.json).toMatchObject({ startHeight: start, indexedHeight: HEAD });
+    expect(await db.query("SELECT start_height::int AS s FROM core_chain.identity")).toEqual([{ s: start }]);
+    expect([answer.status, answer.headers["x-umbra-height"]]).toEqual([200, String(HEAD)]);
     if (start === FIRST + 2) expect(seen.get(BigInt(HEAD))).not.toBe(modelOf(events));
   }, 240_000);
 });
@@ -166,19 +167,19 @@ describe.each(PROCESS_BACKENDS)("a new database configured above the module's la
     const rowsOf = async (configured: number) => {
       const db = await backend.database();
       const seen = new Map<bigint, string>();
-      const status = await serve(db, { start: configured, head: HEAD, logs, unresolved, modules: [BACKFILLING, TOKEN_METADATA_API as ModuleDeclaration, probe(seen)] }, (origin) =>
-        get(origin, "/v1/status"),
+      const answer = await serve(db, { start: configured, head: HEAD, logs, unresolved, modules: [BACKFILLING, TOKEN_METADATA_API as ModuleDeclaration, probe(seen)] }, (origin) =>
+        post(origin, TOKENS_PATH, { contract: "01".repeat(32) }),
       );
       const [identity] = await db.query("SELECT start_height::int AS s FROM core_chain.identity");
       const events = await db.query("SELECT height::int AS h, tx_index, event_index, classification, reason FROM token_metadata.events ORDER BY 1, 2, 3");
       const fields = await db.query("SELECT encode(contract_address, 'hex') AS c, encode(domain_sep, 'hex') AS d, kind, encode(key, 'hex') AS k, encode(value, 'hex') AS v FROM token_metadata.fields ORDER BY 1, 2, 3, 4");
-      return { start: identity?.s, status: status.json.startHeight, served: seen.get(BigInt(HEAD)), events, fields };
+      return { start: identity?.s, height: answer.headers["x-umbra-height"], served: seen.get(BigInt(HEAD)), events, fields };
     };
     const configured = [FIRST + 2, FIRST + 4, LAST, HEAD - 1];
     const runs = [];
     for (const height of configured) runs.push(await rowsOf(height));
     for (const [i, run] of runs.entries()) {
-      expect([configured[i], run.start, run.status]).toEqual([configured[i], FIRST, FIRST]);
+      expect([configured[i], run.start, run.height]).toEqual([configured[i], FIRST, String(HEAD)]);
       expect(run.served).toBe(modelFrom(FIRST));
       expect(run.events).toEqual(runs[0]!.events);
       expect(run.fields).toEqual(runs[0]!.fields);
@@ -234,9 +235,8 @@ describe.each(PROCESS_BACKENDS)("token-metadata on the networks' tapes from vary
             try {
               await committed(run, BigInt(tape.last), 600_000);
               const api = run.handle.listening().api!;
-              const status = await get(`http://${api.host.includes(":") ? `[${api.host}]` : api.host}:${api.port}`, "/v1/status");
-              expect(status.status).toBe(200);
-              expect(status.json).toMatchObject({ network: tape.network, startHeight: actual, indexedHeight: tape.last });
+              const answer = await post(`http://${api.host.includes(":") ? `[${api.host}]` : api.host}:${api.port}`, TOKENS_PATH, { contract: "00".repeat(32) });
+              expect([answer.status, answer.headers["x-umbra-height"], answer.json.items]).toEqual([200, String(tape.last), []]);
             } finally {
               await run.close();
             }

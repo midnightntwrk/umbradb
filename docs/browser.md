@@ -97,7 +97,7 @@ export default configuration;
   `core-block-parsed`'s and `core-contract-logs-fast`'s to `data.entries`, each from `run.start`. The indexer starts with
   its database, and a new database starts no later than the network's first block with contract logs: the page's S is
   the node's finalized head, but with `token-metadata` the page starts at that block and backfills every block since
-  (the log says so), so it serves every MIP-0018 event; a database that ran without it refuses it. The API's `/v1` routes ([token-metadata-api.md](token-metadata-api.md)) answer through the
+  (the log says so), so it serves every MIP-0018 event; a database that ran without it refuses it. The API's tokens route ([token-metadata-api.md](token-metadata-api.md)) answers through the
   page's `api` calls. `test/features/token-metadata-api/fixtures/browser-configuration.ts` is a complete configuration.
 - **Private instances:** `instances(run)` returns `{ id, configure(run) }` for each; each runs in a worker of its own
   beside the core. The private link needs no address: whenever a private instance connects to the core (at its start,

@@ -4,14 +4,14 @@ import { commonRecords } from "../../../src/features/token-metadata/codec/index.
 import { TOKEN_METADATA } from "../../../src/features/token-metadata/token-metadata.js";
 import type { ModuleDeclaration } from "../../../src/modules/declaration.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../../runner/process-backends.js";
-import { blockLogs, contract, domain, eventData, get, runTo, serve, startRun } from "../token-metadata/harness.js";
+import { blockLogs, contract, domain, eventData, post, runTo, serve, startRun, TOKENS_PATH } from "../token-metadata/harness.js";
 
 /**
  * The two modules, through the real process on PostgreSQL 18 and PGlite: `token-metadata` creates and fills the
  * tables, `token-metadata-api` serves them.
  *
  * - The API without the indexer is refused at startup: it requires the indexer's table items.
- * - The indexer alone fills its tables and serves no `/v1` route (the module API's own 404).
+ * - The indexer alone fills its tables and serves no tokens route (the module API's own 404).
  * - The API holds no state: added to a database whose indexer already ran (from a height above the cursor, as every
  *   added entry), it answers exactly as the API of a database that ran both modules from S.
  */
@@ -24,7 +24,7 @@ const A = contract(1);
 const DS = domain(3);
 const logs = new Map([[BigInt(S + 2), blockLogs([0, A, eventData(DS, 1, commonRecords({ name: "Acme Gold", symbol: "AG", decimals: 6 }))])]]);
 const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
-const PATHS = ["/v1/tokens", `/v1/identities/${hex(A)}/${hex(DS)}/1`, `/v1/contracts/${hex(A)}/tokens`, `/v1/events?contract=${hex(A)}`];
+const BODIES = [{ contract: hex(A) }, { contract: hex(A), domainSep: hex(DS) }, { contract: hex(A), domainSep: hex(DS), kind: 1 }];
 
 describe.each(PROCESS_BACKENDS)("token-metadata and token-metadata-api on $name", (backend: ProcessBackend) => {
   beforeAll(() => backend.start(), 180_000);
@@ -44,9 +44,9 @@ describe.each(PROCESS_BACKENDS)("token-metadata and token-metadata-api on $name"
     expect((refusal as Error).message).toMatch(/token-metadata-(events|state)/);
   }, 240_000);
 
-  it("fills the tables with the indexer alone, which serves no /v1 route", async () => {
+  it("fills the tables with the indexer alone, which serves no tokens route", async () => {
     const db = await backend.database();
-    const answer = await serve(db, { start: S, head: HEAD, logs, modules: [INDEXER] }, (origin) => get(origin, "/v1/tokens"));
+    const answer = await serve(db, { start: S, head: HEAD, logs, modules: [INDEXER] }, (origin) => post(origin, TOKENS_PATH, { contract: hex(A) }));
     expect(answer.status).toBe(404);
     expect(answer.json).toMatchObject({ error: { code: "not-found" } });
     expect(await db.query("SELECT count(*)::int AS n FROM token_metadata.events")).toEqual([{ n: 1 }]);
@@ -54,7 +54,7 @@ describe.each(PROCESS_BACKENDS)("token-metadata and token-metadata-api on $name"
   }, 240_000);
 
   it("answers the same when the API is added, above the cursor, to a database whose indexer already ran", async () => {
-    const answersOf = (origin: string) => Promise.all(PATHS.map((path) => get(origin, path)));
+    const answersOf = (origin: string) => Promise.all(BODIES.map((body) => post(origin, TOKENS_PATH, body)));
     const both = await backend.database();
     const fromS = await serve(both, { start: S, head: HEAD + 2, logs, modules: [INDEXER, API] }, answersOf);
     const later = await backend.database();
@@ -62,11 +62,12 @@ describe.each(PROCESS_BACKENDS)("token-metadata and token-metadata-api on $name"
     // Every entry, the API's too, starts above the cursor when added (the past cannot change): the API from HEAD + 1.
     const moduleStart = (id: string) => (id === API.id ? HEAD + 1 : S);
     const added = await serve(later, { start: S, head: HEAD + 2, logs, moduleStart, modules: [INDEXER, API] }, answersOf);
-    for (const [i, path] of PATHS.entries()) {
-      expect([path, added[i]!.status], path).toEqual([path, 200]);
-      expect([path, added[i]!.text]).toEqual([path, fromS[i]!.text]);
-      expect([path, added[i]!.headers["x-umbra-height"]]).toEqual([path, fromS[i]!.headers["x-umbra-height"]]);
+    for (const [i, body] of BODIES.entries()) {
+      const at = JSON.stringify(body);
+      expect([at, added[i]!.status]).toEqual([at, 200]);
+      expect([at, added[i]!.text]).toEqual([at, fromS[i]!.text]);
+      expect([at, added[i]!.headers["x-umbra-height"]]).toEqual([at, fromS[i]!.headers["x-umbra-height"]]);
     }
-    expect(added[1]!.json.common).toMatchObject({ name: "Acme Gold", symbol: "AG", decimals: "6" });
+    expect(added[2]!.json.items[0].common).toMatchObject({ name: "Acme Gold", symbol: "AG", decimals: "6" });
   }, 240_000);
 });

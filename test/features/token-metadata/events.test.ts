@@ -13,7 +13,7 @@ import {
 import type { ModuleDeclaration } from "../../../src/modules/declaration.js";
 import * as v9 from "../../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../../runner/process-backends.js";
-import { blockLogs, causes, contract, domain, eventData, get, log, miscData, runTo, runToHalt, serve } from "./harness.js";
+import { blockLogs, causes, contract, domain, eventData, log, miscData, post, runTo, runToHalt, serve, TOKENS_PATH } from "./harness.js";
 
 /**
  * The module's event rows through the real process on PostgreSQL 18 and PGlite:
@@ -144,8 +144,8 @@ describe.each(PROCESS_BACKENDS)("token-metadata's event rows on $name", (backend
     const db = await backend.database();
     const unresolved = new Map([[BigInt(S + 1), [site(0, 0, "not-a-literal"), site(1, 2, "partial-transaction")]]]);
     const logs = new Map([[BigInt(S + 1), [log(0, 1, A, valid), log(1, 3, A, otherValid)]]]);
-    const identity = await serve(db, { start: S, head: S + 2, logs, unresolved }, (origin) =>
-      get(origin, `/v1/identities/${hex(A)}/${hex(D)}/1`),
+    const identity = await serve(db, { start: S, head: S + 2, logs, unresolved }, async (origin) =>
+      (await post(origin, TOKENS_PATH, { contract: hex(A), domainSep: hex(D), kind: 1 })).json.items[0],
     );
     expect(await db.query("SELECT tx_index, event_index, classification, reason FROM token_metadata.events ORDER BY tx_index, event_index")).toEqual([
       { tx_index: 0, event_index: 0, classification: "unresolved", reason: "not-a-literal" },
@@ -154,9 +154,7 @@ describe.each(PROCESS_BACKENDS)("token-metadata's event rows on $name", (backend
       { tx_index: 1, event_index: 1, classification: "accept", reason: null },
     ]);
     expect(await db.query("SELECT DISTINCT encode(domain_sep, 'hex') AS d FROM token_metadata.fields ORDER BY d")).toEqual([{ d: hex(D) }, { d: hex(D2) }]);
-    // The status's count is the counter the write path keeps, one row: the two unresolved sites.
-    expect(await db.query("SELECT id, unresolved::int AS n FROM token_metadata.counts")).toEqual([{ id: 1, n: 2 }]);
-    expect(identity.json.mark).toMatchObject({
+    expect(identity.mark).toMatchObject({
       mark: "unresolved",
       reasons: ["unresolved-log"],
       unresolved: { count: 2, positions: [{ height: S + 1, txIndex: 0, eventIndex: 0 }, { height: S + 1, txIndex: 1, eventIndex: 0 }] },

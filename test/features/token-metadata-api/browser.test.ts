@@ -9,7 +9,7 @@ import { FIRST_CONTRACT_LOG_HEIGHTS, TOKEN_METADATA } from "../../../src/feature
 import type { ModuleDeclaration } from "../../../src/modules/declaration.js";
 import { TapeNode, type TapeRecord } from "../../../tools/tape/index.js";
 import { FAST_CORE } from "../../backbone/contract-data-checks.js";
-import { genesisRecords } from "../token-metadata/harness.js";
+import { genesisRecords, TOKENS_PATH } from "../token-metadata/harness.js";
 import { committed, ingest } from "../../backbone/ingest-harness.js";
 import { BROWSER_TEST_TIMEOUT_MS, call, eventWhen, pageUrl, statusWhen, tabReport } from "../../browser/browser-harness.js";
 import { type ChromeBrowser, chromeVersion, launchChrome } from "../../browser/chrome.js";
@@ -22,7 +22,7 @@ import { findTape } from "../../tape/real/real-tapes.js";
  * configuration listing `core-contract-logs-fast`, `token-metadata` and `token-metadata-api`
  * (`./fixtures/browser-configuration.ts`). The page asks to start above preprod's first block with contract logs (as a
  * page starting at the node's finalized head would), so the database starts at that block, the indexer's latest start,
- * and backfills from it; it then answers `/v1/status` (whose start is that block) and `/v1/tokens` as the server does:
+ * and backfills from it (its database records that block as its start); it then answers the tokens route as the server does:
  * the same status, body and view headers as a Node.js process on the same tape and configuration. The page is given its
  * start through the start it keeps for its database (`umbradb-start:<storage>`), set before it loads. Startup asks for
  * the genesis hash and header, which a mid-chain tape does not hold: they come from
@@ -37,7 +37,8 @@ const S = FIRST_CONTRACT_LOG_HEIGHTS.preprod!;
 const STOP = 3_348_534;
 const STORAGE = "token-metadata";
 const CONFIGURATION = fileURLToPath(new URL("./fixtures/browser-configuration.ts", import.meta.url));
-const PATHS = ["/v1/status", "/v1/tokens?limit=10"];
+/** What the page and the server are asked: one contract's tokens (preprod has no MIP-0018 event), and many colors. */
+const BODIES = [{ contract: "00".repeat(32) }, { colors: ["00".repeat(32), "11".repeat(32)] }];
 
 const PRESENT = findTape(TAPE).found;
 
@@ -66,7 +67,7 @@ const PRESENT = findTape(TAPE).found;
   }, BROWSER_TEST_TIMEOUT_MS);
 
   it(
-    "asked to start above the first contract-log block, starts there, backfills, and answers /v1/status and /v1/tokens as the server does",
+    "asked to start above the first contract-log block, starts there, backfills, and answers the tokens route as the server does",
     async () => {
       // The page keeps S for a stored database: set it on the page's origin before the page loads.
       const tab = await browser.open(`${server.origin}/not-the-page`);
@@ -78,13 +79,19 @@ const PRESENT = findTape(TAPE).found;
         throw new Error(`${String(error)}\n${await tabReport(tab)}`);
       });
       const inChrome: { status: number; headers: Record<string, string>; body: string }[] = [];
-      for (const path of PATHS) inChrome.push((await call<{ status: number; headers: Record<string, string>; body: string }>(tab, "core", "api", { method: "GET", path }))!);
+      for (const body of BODIES) {
+        inChrome.push((await call<{ status: number; headers: Record<string, string>; body: string }>(tab, "core", "api", { method: "POST", path: TOKENS_PATH, body: JSON.stringify(body) }))!);
+      }
+      // The page's database starts at the first contract-log block, not the start it asked for.
+      const pageStart = await call<{ rows: { s: number }[] }>(tab, "core", "read", "SELECT start_height::int AS s FROM core_chain.identity");
+      expect(pageStart!.rows).toEqual([{ s: S }]);
 
       // The server: a Node.js process on the same tape, configuration and S.
       const backend = PROCESS_BACKENDS.find((b) => b.kind === "pglite")!;
       await backend.start();
       try {
-        const run = await ingest(await backend.database(), records, {
+        const db = await backend.database();
+        const run = await ingest(db, records, {
           start: BigInt(ASKED),
           stop: BigInt(STOP),
           core: FAST_CORE,
@@ -95,15 +102,17 @@ const PRESENT = findTape(TAPE).found;
           await committed(run, BigInt(STOP), 600_000);
           const api = run.handle.listening().api!;
           const origin = `http://${api.host.includes(":") ? `[${api.host}]` : api.host}:${api.port}`;
-          expect(JSON.parse(inChrome[0]!.body)).toMatchObject({ network: "preprod", startHeight: S, indexedHeight: STOP });
-          for (const [i, path] of PATHS.entries()) {
-            const response = await fetch(`${origin}${path}`);
+          expect(await db.query("SELECT start_height::int AS s FROM core_chain.identity")).toEqual([{ s: S }]);
+          for (const [i, request] of BODIES.entries()) {
+            const at = JSON.stringify(request);
+            const response = await fetch(`${origin}${TOKENS_PATH}`, { method: "POST", headers: { "content-type": "application/json" }, body: at });
             const body = await response.text();
-            expect([path, inChrome[i]!.status, inChrome[i]!.body]).toEqual([path, response.status, body]);
-            expect(response.status).toBe(200);
+            expect([at, inChrome[i]!.status, inChrome[i]!.body]).toEqual([at, response.status, body]);
+            expect([at, response.status, JSON.parse(body).items]).toEqual([at, 200, []]);
             for (const name of ["x-umbra-view", "x-umbra-height", "x-umbra-hash", "content-type"]) {
-              expect([path, name, inChrome[i]!.headers[name]]).toEqual([path, name, response.headers.get(name)]);
+              expect([at, name, inChrome[i]!.headers[name]]).toEqual([at, name, response.headers.get(name)]);
             }
+            expect(response.headers.get("x-umbra-height")).toBe(String(STOP));
           }
         } finally {
           await run.close();

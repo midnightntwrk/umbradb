@@ -10,7 +10,7 @@ export const SCHEMA = "token_metadata";
 /** The `table` item of `events` (append-only). */
 export const EVENTS_ITEM = "token-metadata-events";
 
-/** The `table` item of `fields`, `withdrawals` and `counts` (mutable). */
+/** The `table` item of `fields` and `withdrawals` (mutable). */
 export const STATE_ITEM = "token-metadata-state";
 
 /**
