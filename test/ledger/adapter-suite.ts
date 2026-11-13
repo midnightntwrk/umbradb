@@ -363,9 +363,8 @@ export function describeLedgerPackage(subject: AdapterSubject): void {
         expect(reference.events[2]).toEqual(["ContractLog", "ContractLog"]);
         expect(output.logs).toEqual([]);
       } else {
-        const v9 = RAW.v9;
         const decoded = (encoded: (typeof logged)[number]): LogItem =>
-          v9.decodeLogItem(v9.serializeStateValue(v9.StateValue.decode(encoded)))!;
+          raw.decodeLogItem(raw.serializeStateValue(raw.StateValue.decode(encoded)))!;
         const origin = { address: contract.address, entryPoint: utf8("emit"), logicalSegment: 0, physicalSegment: 1 };
         expect(output.logs).toEqual([
           { ...decoded(logged[0]!), transaction: 2, index: 0, ...origin },
@@ -505,8 +504,9 @@ export function describeLedgerPackage(subject: AdapterSubject): void {
       });
     } else {
       it("decodeLogItem is the VM's own decoding", () => {
-        for (const value of logValueInputs()) expect(adapter.decodeLogItem(value)).toEqual(RAW.v9.decodeLogItem(value));
-        expect(adapter.decodeLogItem(logValueInputs()[0]!)!.eventType).toBe("UnshieldedReceive");
+        // Each package's own tagged serialization: since ledger-9.1.0.0-rc.6 a state value's tag names its value kind.
+        for (const value of logValueInputs(raw)) expect(adapter.decodeLogItem(value)).toEqual(raw.decodeLogItem(value));
+        expect(adapter.decodeLogItem(logValueInputs(raw)[0]!)!.eventType).toBe("UnshieldedReceive");
         expect(() => adapter.decodeLogItem(Uint8Array.of(1, 2, 3))).toThrow();
       });
     }
@@ -547,8 +547,9 @@ export function describeLedgerPackage(subject: AdapterSubject): void {
   });
 
   describe(`${subject.ledger} adapter: what the interface gives each version`, () => {
-    it(subject.ledger === "v9" ? "has convertFromV8" : "has no convertFromV8 (v9 only)", () => {
-      expect(typeof adapter.convertFromV8).toBe(subject.ledger === "v9" ? "function" : "undefined");
+    const converts = subject.ledger === "v9" || subject.ledger === "v9-rc5";
+    it(converts ? "has convertFromV8" : "has no convertFromV8 (v9 and v9-rc5 only)", () => {
+      expect(typeof adapter.convertFromV8).toBe(converts ? "function" : "undefined");
     });
 
     it("parses with the markers a transaction's own tag names", { timeout: LONG }, async () => {

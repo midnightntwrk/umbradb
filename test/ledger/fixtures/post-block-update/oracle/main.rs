@@ -6,8 +6,8 @@
 // (`layout-v2`, `gc-v1`). Nothing here comes from UmbraDB or from the vendored packages.
 //
 // - `clamp_and_normalize` and `compute_overall_fullness` are `midnight-node` 2.1.0-rc.4's
-//   (`ledger/helpers/src/ledger_8/mod.rs` and `ledger_9/mod.rs`, identical in both), copied here
-//   without their log line.
+//   (`ledger/helpers/src/ledger_8/mod.rs` and `ledger_9/mod.rs`, identical in both, and unchanged
+//   in 2.1.101), copied here without their log line.
 // - The post-block update is the node's `apply_post_block_update` (`ledger/src/ledger_8/
 //   post_block_update.rs`, `ledger_9/post_block_update.rs`), which `pallet-midnight`'s
 //   `on_finalize` runs: ledger v8's `post_block_update`, ledger v9's `apply_post_block_update`.
@@ -44,7 +44,12 @@ const SYSTEM_TAG: &str = "midnight:system-transaction[v9]:";
 const DEPLOY: [u64; 5] = [1_785_000_000, 1_975_817_471, 2_635, 2_893, 6_144];
 #[cfg(feature = "v9")]
 const DEPLOY: [u64; 5] = [1_785_000_000, 1_975_817_471, 2_637, 2_895, 6_144];
+#[cfg(not(feature = "v9"))]
 const CALL: [u64; 5] = [2_805_000_000, 14_734_818_644, 5_126, 96, 72_256];
+// Ledger 9.1.0.1 no longer nets a transcript's declared deletions against its writes, so the v9 fixtures' call
+// declares 4,096 bytes written and none deleted (`test/ledger/adapter-fixtures.ts` `fixtureGas`).
+#[cfg(feature = "v9")]
+const CALL: [u64; 5] = [2_805_000_000, 14_734_818_644, 5_121, 4_192, 6_720];
 
 /// `midnight-node` `ledger/helpers/src/ledger_8/mod.rs` `compute_overall_fullness`.
 fn compute_overall_fullness(normalized: &NormalizedCost) -> FixedPoint {

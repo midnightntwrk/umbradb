@@ -19,7 +19,7 @@ describe("the browser's startup check of the ledger packages", () => {
   });
 
   it("refuses ledgerSources released for a version the build carries, naming the setting; v10 is not read", () => {
-    for (const ledger of ["v8", "v9-rc3", "v9"] as const) {
+    for (const ledger of ["v8", "v9-rc3", "v9-rc5", "v9"] as const) {
       let refusal: unknown;
       try {
         checkLedgerPackages({ sources: { [ledger]: "released" } });
@@ -32,14 +32,14 @@ describe("the browser's startup check of the ledger packages", () => {
       });
       expect((refusal as Error).message).toContain(`ledgerSources.${ledger} is released`);
     }
-    expect(() => checkLedgerPackages({ sources: { v8: "vendored", "v9-rc3": "vendored", v9: "vendored", v10: "released" } })).not.toThrow();
+    expect(() => checkLedgerPackages({ sources: { v8: "vendored", "v9-rc3": "vendored", "v9-rc5": "vendored", v9: "vendored", v10: "released" } })).not.toThrow();
   });
 
   it("reads no file: a directory without packages passes", () => {
     const empty = mkdtempSync(join(tmpdir(), "umbradb-12.2b-browser-"));
     try {
       expect(() => checkLedgerPackages({ root: empty })).not.toThrow();
-      for (const ledger of ["v8", "v9-rc3", "v9"] as const) expect(() => checkLedgerPackage(ledger, { root: empty })).not.toThrow();
+      for (const ledger of ["v8", "v9-rc3", "v9-rc5", "v9"] as const) expect(() => checkLedgerPackage(ledger, { root: empty })).not.toThrow();
     } finally {
       rmSync(empty, { recursive: true, force: true });
     }

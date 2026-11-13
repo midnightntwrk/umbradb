@@ -13,6 +13,7 @@ import {
   logProgram,
   NETWORK_ID,
   RAW,
+  type RawPackage,
   referenceReplay,
   type Ledger,
   wrappedLog,
@@ -100,9 +101,11 @@ export async function expectSmallStateReloadsByKey(
   expect(hex(loaded.result!.stateKey)).toBe(hex(key));
 }
 
-/** Serialized state values a `log` operation could take: what a v9 `decodeLogItem` decodes, and more. */
-export function logValueInputs(): Uint8Array[] {
-  const v9 = RAW.v9;
+/**
+ * Serialized state values a `log` operation could take, in `v9`'s tagged serialization (the v9 package's by default):
+ * what a v9 `decodeLogItem` decodes, and more.
+ */
+export function logValueInputs(v9: RawPackage = RAW.v9): Uint8Array[] {
   const data = cellValue(Uint8Array.of(1, 2, 3));
   return [
     wrappedLog(1, 5, data),

@@ -6,7 +6,7 @@
  *
  * The specifiers are relative to this file and resolve the same from `src/ledger/` and from a build's `dist/ledger/`.
  * A browser build maps them to the packages' browser entries and calls `createV8Adapter` / `createV9Rc3Adapter` /
- * `createV9Adapter` itself.
+ * `createV9Rc5Adapter` / `createV9Adapter` itself.
  *
  * Before importing a version's package, it checks the package's files against their recorded SHA-256
  * (`checkLedgerPackage`, `./identity.ts`, once per thread), so a thread never imports a changed package: the load
@@ -17,7 +17,7 @@
 import { checkLedgerPackage } from "./identity.js";
 import type { LedgerName, LedgerPackage, LedgerPackageOptions } from "./types.js";
 import { createV8Adapter } from "./v8.js";
-import { createV9Adapter, createV9Rc3Adapter } from "./v9.js";
+import { createV9Adapter, createV9Rc3Adapter, createV9Rc5Adapter } from "./v9.js";
 
 /**
  * The adapter of `ledger`, with its package checked and loaded (once per thread: a module is evaluated once). Rejects
@@ -31,6 +31,9 @@ export async function loadLedgerPackage(ledger: LedgerName, options: LedgerPacka
     case "v9-rc3":
       checkLedgerPackage("v9-rc3");
       return createV9Rc3Adapter(await import("../../vendor/ledger/v9-rc3/pkg/midnight_ledger_wasm_v9_fs.js"), options);
+    case "v9-rc5":
+      checkLedgerPackage("v9-rc5");
+      return createV9Rc5Adapter(await import("../../vendor/ledger/v9-rc5/pkg/midnight_ledger_wasm_v9_fs.js"), options);
     case "v9":
       checkLedgerPackage("v9");
       return createV9Adapter(await import("../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js"), options);
