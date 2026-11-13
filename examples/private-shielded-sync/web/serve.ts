@@ -11,8 +11,11 @@
  *   server's database directly and are no part of the private protocol):
  *   `/debug/info`, `/debug/state?height=H` (first_free and root), `/debug/output?position=P` (the stored output),
  *   `/debug/spends?n=K&maxHeight=H` (stored spends, at random);
- * - with `--admin-secret-file`, `POST /debug/snapshot` builds a snapshot at the module's indexed height and
- *   `GET /debug/snapshot` reports on it (the admin routes, with the secret added here; the page never holds it).
+ * - with `--admin-secret-file`, the module's admin snapshot route with the secret added here (the page never holds
+ *   it): `POST /debug/reload-snapshot` with `{}` (the module's indexed height) or `{"height": h}` builds a snapshot,
+ *   waits for it and answers with the new snapshot (identifier, height, first_free) and the previous one;
+ *   `POST /debug/snapshot` only starts a build and `GET /debug/snapshot` reports on builds. A height below the served
+ *   snapshot's is refused by the module.
  */
 
 import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
@@ -72,16 +75,63 @@ const rootHex = (stored: unknown): string | null => {
   return b.length === 33 && b[0] === 0x73 ? b.subarray(1).toString("hex") : null;
 };
 
+/** `{}` → undefined (the module's indexed height), `{"height": h}` → h, anything else → null. */
+function requestedHeight(body: Buffer): number | undefined | null {
+  if (body.length === 0) return undefined;
+  try {
+    const parsed = JSON.parse(body.toString("utf8")) as { height?: unknown };
+    if (parsed.height === undefined || parsed.height === null || parsed.height === "") return undefined;
+    const h = Number(parsed.height);
+    return Number.isSafeInteger(h) && h >= 0 ? h : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The module's admin snapshot route, with the secret added here. */
+async function admin(method: "GET" | "POST", height?: number): Promise<{ status: number; body: Record<string, unknown> }> {
+  const r = await fetch(new URL("/pss/v1/admin/snapshot", upstream), {
+    method,
+    headers: { Authorization: `Bearer ${adminSecret}`, ...(method === "POST" ? { "Content-Type": "application/json" } : {}) },
+    ...(method === "POST" ? { body: JSON.stringify(height === undefined ? {} : { height }) } : {}),
+  });
+  return { status: r.status, body: (await r.json()) as Record<string, unknown> };
+}
+
+/**
+ * Builds a snapshot (at `height`, or the module's indexed height) and waits for it: the new snapshot's identifier,
+ * height, first_free and build time, or why it did not build. The server then serves it, and keeps the previous one.
+ */
+async function reloadSnapshot(height?: number): Promise<[number, Record<string, unknown>]> {
+  const started = performance.now();
+  const before = (await admin("GET")).body.current as Record<string, unknown> | null;
+  const start = await admin("POST", height);
+  if (start.status !== 202) return [start.status, { error: start.body.error ?? start.body, current: before }];
+  const building = start.body.building as { height: number };
+  for (let waited = 0; waited < 600_000; waited += 300) {
+    await new Promise((r) => setTimeout(r, 300));
+    const s = (await admin("GET")).body;
+    if (s.building !== null) continue;
+    const last = s.last as { height?: number; ok?: boolean } | null;
+    const current = s.current as { id: string; height: number; firstFree: number } | null;
+    if (last?.height !== building.height || !last.ok || current === null) return [500, { error: "the build failed", last, current }];
+    return [200, { snapshot: current, previous: before, last, ms: Math.round(performance.now() - started) }];
+  }
+  return [504, { error: `the build at ${building.height} did not finish in 10 minutes` }];
+}
+
 async function debug(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
   const route = url.pathname.slice("/debug/".length);
-  if (route === "snapshot") {
+  if (route === "snapshot" || route === "reload-snapshot") {
     if (adminSecret === null) return json(res, 404, { error: "start serve.ts with --admin-secret-file" });
-    const r = await fetch(new URL("/pss/v1/admin/snapshot", upstream), {
-      method: req.method,
-      headers: { Authorization: `Bearer ${adminSecret}`, ...(req.method === "POST" ? { "Content-Type": "application/json" } : {}) },
-      ...(req.method === "POST" ? { body: "{}" } : {}),
-    });
-    return json(res, r.status, await r.json());
+    const height = req.method === "POST" ? requestedHeight(await readBody(req)) : undefined;
+    if (height === null) return json(res, 400, { error: 'the body is {} or {"height": <integer>}' });
+    if (route === "snapshot") {
+      const r = await admin(req.method === "POST" ? "POST" : "GET", height);
+      return json(res, r.status, r.body);
+    }
+    if (req.method !== "POST") return json(res, 405, { error: "POST /debug/reload-snapshot" });
+    return json(res, ...(await reloadSnapshot(height)));
   }
   if (route === "info") return json(res, 200, { database: sql !== null, snapshotBuilds: adminSecret !== null, cursor: sql === null ? null : (await sql.unsafe("SELECT max(height) AS h FROM core_block_commit.blocks"))[0]?.h });
   if (sql === null) return json(res, 404, { error: "start serve.ts with --db-url and --db-password-file" });

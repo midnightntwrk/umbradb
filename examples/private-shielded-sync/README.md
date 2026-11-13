@@ -170,8 +170,12 @@ all" up to 4 MB; any size can be downloaded). The keys stay in the page's worker
 Two options turn on debug routes that are no part of the private protocol:
 - **`--db-url`** reads the server's database directly, so the page can compare what PIR returned with what UmbraDB
   stored, and can fill real nullifiers.
-- **`--admin-secret-file`** adds a button that builds a snapshot at the synced height. The page never holds the
-  secret.
+- **`--admin-secret-file`** adds `POST /debug/reload-snapshot` and a "Reload the snapshot" control in step 2. The route
+  builds a new snapshot, waits for it, and answers with the new and previous snapshots. Its body is `{}` for the synced
+  height or `{"height": h}`; the module refuses a height below the served snapshot's. The control then gets the new
+  snapshot's files and clears the later steps. The page never holds the secret. For example:
+
+      curl -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:10490/debug/reload-snapshot
 
 The worker runs the client's files bundled by esbuild:
 - `web/shims/` replaces the Node.js modules they import: SHA-256 from `@noble/hashes`, AES-128-CTR in plain

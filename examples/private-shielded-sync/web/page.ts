@@ -199,7 +199,15 @@ const VIEWS: Record<string, (r: Json) => string> = {
   },
 };
 VIEWS.generate = VIEWS.keys!;
-VIEWS.snapshot = (r) => facts([["answer", JSON.stringify(r).slice(0, 400)]]);
+VIEWS.reload = (r) => {
+  const now = r.snapshot as Json;
+  const before = r.previous as Json | null;
+  return facts([
+    ["new snapshot", `${short(String(now.id), 24)} at height ${now.height}, ${now.firstFree} outputs`],
+    ["previous", before === null ? "none" : `${short(String(before.id), 24)} at height ${before.height}, ${before.firstFree} outputs`],
+    ["build and wait", `${r.ms} ms`],
+  ]);
+};
 
 // ── wiring ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -224,7 +232,6 @@ const ARGS: Record<string, () => Json> = {
   nullifiers: () => ({ nullifiers: $<HTMLTextAreaElement>("#nullifiers").value.split(/\s+/).filter(Boolean) }),
 };
 const STEP_OF: Record<string, string> = { generate: "keys" };
-let snapshotHeight: number | null = null;
 let firstFree = 0;
 
 async function run(button: HTMLButtonElement): Promise<void> {
@@ -245,8 +252,8 @@ async function run(button: HTMLButtonElement): Promise<void> {
   out.innerHTML = `<div class="progress"></div>`;
   const progress = (t: string) => ($(".progress", out).textContent = t);
   let answer: Answer;
-  if (name === "snapshot") answer = await buildSnapshot(progress);
-  else answer = await call(STEP_OF[name] ?? name, args, progress);
+  if (name === "reload") return reload(card, status);
+  answer = await call(STEP_OF[name] ?? name, args, progress);
   card.querySelectorAll("button").forEach((b) => (b.disabled = false));
   if (answer.ok) {
     status.className = "status ok";
@@ -254,10 +261,9 @@ async function run(button: HTMLButtonElement): Promise<void> {
     out.innerHTML = (VIEWS[name]?.(answer.result!) ?? "") + `<details><summary>debug: the step's whole answer</summary><pre>${esc(abbreviated(answer.result))}</pre></details>`;
     if (name === "load") {
       const d = (answer.result!.debugEndpoints ?? null) as Json | null;
-      if (d?.snapshotBuilds) $<HTMLButtonElement>('[data-run="snapshot"]').hidden = false;
+      if (d?.snapshotBuilds) $("#reload-row").hidden = false;
     }
     if (name === "files") {
-      snapshotHeight = Number((answer.result!.manifest as Json).height);
       firstFree = Number((answer.result!.manifest as Json).firstFree);
     }
   } else {
@@ -267,23 +273,48 @@ async function run(button: HTMLButtonElement): Promise<void> {
   }
 }
 
-/** Debug: a snapshot at the module's indexed height through the page's server (which holds the admin secret). */
-async function buildSnapshot(progress: (t: string) => void): Promise<Answer> {
-  const t = performance.now();
-  const started = await fetch("/debug/snapshot", { method: "POST" });
-  const body = (await started.json()) as Json;
-  if (started.status !== 202) return { id: 0, ok: false, error: `${started.status}: ${JSON.stringify(body)}` };
-  const height = Number((body.building as Json).height);
-  for (;;) {
-    await new Promise((r) => setTimeout(r, 500));
-    const s = (await (await fetch("/debug/snapshot")).json()) as Json;
-    progress(`building a snapshot at ${height}…`);
-    if (s.building !== null) continue;
-    const last = s.last as Json | null;
-    const ms = Math.round(performance.now() - t);
-    if (last?.height !== height || !last.ok) return { id: 0, ok: false, error: `the build failed: ${JSON.stringify(last)}`, ms };
-    return { id: 0, ok: true, result: { built: `a snapshot at height ${height}`, previousSnapshot: snapshotHeight, next: "press Get files to use it", last }, ms };
+/**
+ * Debug: builds a new snapshot on the server (`POST /debug/reload-snapshot`, through the page's server, which holds
+ * the admin secret), then gets its files. The later steps' answers belonged to the old snapshot, so they are cleared.
+ */
+async function reload(card: HTMLElement, status: HTMLElement): Promise<void> {
+  const out = $(".reload-out", card);
+  const text = $<HTMLInputElement>("#snapshot-height").value.trim();
+  if (text !== "" && !/^\d+$/.test(text)) {
+    out.innerHTML = `<div class="error">the height is a whole number</div>`;
+    return;
   }
+  card.querySelectorAll("button").forEach((b) => (b.disabled = true));
+  status.className = "status run";
+  status.textContent = "building a snapshot…";
+  out.innerHTML = `<div class="progress">building a snapshot at ${text === "" ? "the synced height" : text} and waiting for it…</div>`;
+  let r: Response;
+  let body: Json;
+  try {
+    r = await fetch("/debug/reload-snapshot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(text === "" ? {} : { height: Number(text) }) });
+    body = (await r.json()) as Json;
+  } catch (error) {
+    r = new Response(null, { status: 502 });
+    body = { error: String(error) };
+  }
+  card.querySelectorAll("button").forEach((b) => (b.disabled = false));
+  if (!r.ok) {
+    status.className = "status bad";
+    status.textContent = "reload failed";
+    const e = body.error;
+    const message = typeof e === "string" ? e : typeof (e as Json | undefined)?.message === "string" ? String((e as Json).message) : JSON.stringify(e ?? body);
+    out.innerHTML = `<div class="error">${esc(message)}</div>`;
+    return;
+  }
+  out.innerHTML = VIEWS.reload!(body) + `<details><summary>debug: the server's answer</summary><pre>${esc(abbreviated(body))}</pre></details>`;
+  for (const id of ["#step-scan", "#step-read", "#step-nullifiers", "#step-tail", "#step-summary"]) {
+    const section = $(id);
+    $(".out", section).innerHTML = `<div class="note">The snapshot changed: run this step again.</div>`;
+    const s = $(".status", section);
+    s.className = "status";
+    s.textContent = "";
+  }
+  await run($<HTMLButtonElement>('[data-run="files"]'));
 }
 
 async function fill(button: HTMLButtonElement): Promise<void> {

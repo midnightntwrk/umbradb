@@ -87,7 +87,13 @@
     <section class="card" id="step-files">
       <h2><span class="num">2</span>Get the files<span class="status"></span></h2>
       <p class="desc">The manifest, then the four files every wallet downloads alike: the scan file (36 bytes per output), the block roots, and the setup data of both PIR tables. Each is checked against the manifest's SHA-256.</p>
-      <div class="row"><button data-run="files">Get files</button><button class="secondary" data-run="snapshot" hidden>Build a snapshot at the synced height (debug)</button></div>
+      <div class="row"><button data-run="files">Get files</button></div>
+      <div class="row" id="reload-row" hidden>
+        <input type="text" id="snapshot-height" placeholder="height (default: the synced height)" autocomplete="off" style="width: 260px">
+        <button class="secondary" data-run="reload">Reload the snapshot (debug)</button>
+        <span class="desc" style="margin: 0">builds a new snapshot on the server, then gets its files</span>
+      </div>
+      <div class="reload-out"></div>
       <div class="out"></div>
     </section>
 
