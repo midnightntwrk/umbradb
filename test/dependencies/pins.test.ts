@@ -31,6 +31,13 @@ describe("dependency pins", () => {
     expect(locked("ws")?.dev).toBeUndefined();
   });
 
+  it("pins typebox 1.4.3 exactly as a runtime dependency (token-metadata-api's request and answer schemas)", () => {
+    expect(manifest.dependencies["typebox"]).toBe("1.4.3");
+    expect(manifest.devDependencies["typebox"]).toBeUndefined();
+    expect(locked("typebox")).toMatchObject({ version: "1.4.3" });
+    expect(locked("typebox")?.dev).toBeUndefined();
+  });
+
   it("pins esbuild 0.28.2 exactly as a development dependency", () => {
     expect(manifest.devDependencies["esbuild"]).toBe("0.28.2");
     expect(manifest.dependencies["esbuild"]).toBeUndefined();

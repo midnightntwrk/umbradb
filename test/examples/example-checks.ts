@@ -172,9 +172,12 @@ export function importsOf(text: string): BlockImport[] {
 /** The example's own files a document's code may import. */
 const EXAMPLE_IMPORTS = new Set(["./stats-module.ts", "./sql.ts"]);
 
-/** The modules a document's code may import from: the package, zod, Node.js's own, and the example's local files. */
+/**
+ * The modules a document's code may import from: the package, the two schema libraries a module uses directly (zod for
+ * settings, typebox for typed routes), Node.js's own, and the example's local files.
+ */
 export function allowedSource(from: string): boolean {
-  return from === "umbradb" || from === "zod" || from.startsWith("node:") || EXAMPLE_IMPORTS.has(from);
+  return from === "umbradb" || from === "zod" || from === "typebox" || from.startsWith("node:") || EXAMPLE_IMPORTS.has(from);
 }
 
 /** The names `src/index.ts` exports (values and types), read with the TypeScript compiler. */
