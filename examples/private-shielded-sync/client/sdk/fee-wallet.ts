@@ -143,6 +143,16 @@ export interface Submitted {
   readonly timings: { readonly balanceMs: number; readonly signMs: number; readonly proveMs: number; readonly validateMs: number; readonly toInBlockMs: number; readonly toFinalizedMs: number };
 }
 
+/** An SDK error as text: its message, or its tag and fields (the SDK's tagged errors may carry no message). */
+function describe(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  try {
+    return JSON.stringify(error, (_k, v: unknown) => (typeof v === "bigint" ? v.toString() : v instanceof Uint8Array ? `<${v.length} bytes>` : v)) ?? String(error);
+  } catch {
+    return String(error);
+  }
+}
+
 /** Balances the unproven transaction for Dust, proves, validates, submits and waits for finality. */
 export async function payProveSubmit(
   wallet: FeeWallet,
@@ -167,7 +177,11 @@ export async function payProveSubmit(
   const bytes = finalized.serialize();
   const tx = ledger.Transaction.deserialize("signature", "proof", "binding", bytes);
   t = performance.now();
-  await facade.validateTransaction(finalized, { flags: { enforceBalancing: true, verifySignatures: true, enforceLimits: true } });
+  try {
+    await facade.validateTransaction(finalized, { flags: { enforceBalancing: true, verifySignatures: true, enforceLimits: true } });
+  } catch (error) {
+    throw new Error(`the transaction failed validation: ${describe(error)}`, { cause: error });
+  }
   const validateMs = performance.now() - t;
   log(`validated in ${Math.round(validateMs)} ms`);
   if (options.submit === false) {
