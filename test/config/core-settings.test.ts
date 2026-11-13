@@ -245,6 +245,9 @@ describe("the core entry's fields, kinds and defaults", () => {
       expect(paths({ network: "custom", ledgerTable })).toEqual([["genesisHash"]]);
       expect(paths({ network: "preprod", genesisHash: hash })).toEqual([["genesisHash"]]);
       expect(paths({ network: "custom", genesisHash: hash, ledgerTable })).toEqual([]);
+      // undeployed, the local network: its genesis is its node's, and its table is built in.
+      expect(paths({ network: "undeployed" })).toEqual([]);
+      expect(paths({ network: "undeployed", genesisHash: hash })).toEqual([["genesisHash"]]);
     }
   });
 

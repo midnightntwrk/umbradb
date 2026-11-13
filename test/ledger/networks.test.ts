@@ -51,7 +51,7 @@ describe("the committed file", () => {
   it("passes the format, and gives every known network its table with the rows", () => {
     expect(networksFileProblems(networksFile)).toEqual([]);
     expect(networksFile.format).toBe(NETWORKS_FORMAT);
-    expect(KNOWN_NETWORKS).toEqual(["mainnet", "preprod", "preview", "stagenet"]);
+    expect(KNOWN_NETWORKS).toEqual(["mainnet", "preprod", "preview", "stagenet", "undeployed"]);
     expect(BUILT_IN_NETWORKS.map((entry) => entry.network)).toEqual(KNOWN_NETWORKS);
     for (const network of KNOWN_NETWORKS) {
       expect(builtInNetwork(network)?.rows, network).toEqual(LG3_ROWS);
@@ -86,7 +86,7 @@ describe("the committed file", () => {
         network === "stagenet" ? "wss://rpc.stagenet.shielded.tools" : `wss://rpc.${network}.midnight.network`,
       );
     }
-    expect(BUILT_IN_NETWORKS.map((entry) => entry.genesis?.specVersion ?? null)).toEqual([22_000, 22_000, 1_000_000, 2_000_000]);
+    expect(BUILT_IN_NETWORKS.map((entry) => entry.genesis?.specVersion ?? null)).toEqual([22_000, 22_000, 1_000_000, 2_000_000, null]);
     // The hashes read on 2026-10-23 for mainnet and preview (node-roots.json) are the same blocks.
     const roots = JSON.parse(readFileSync(repository("test/ledger/fixtures/genesis/node-roots.json"), "utf8")) as {
       states: { network: string; node: string; block0: string }[];
@@ -526,6 +526,12 @@ const ROWS: readonly FormatRow[] = [
     change: (f) => ({ ...f, networks: [{ ...f.networks[0], genesis: null }] }),
     path: "networks[0].genesis",
     says: ["genesis", "boundaries"],
+  },
+  {
+    name: "a local network (undeployed) that records a genesis",
+    change: (f) => ({ ...f, networks: [{ ...f.networks[0], network: "undeployed", boundaries: [] }, f.networks[1]] }),
+    path: "networks[0].genesis",
+    says: ["undeployed", "local", "own block 0"],
   },
   {
     name: "an unknown key of a boundary",

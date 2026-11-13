@@ -92,6 +92,13 @@ export default configuration;
   file does. A module's own settings can read the page's parameters through `run.params`. A module that declares
   ledger tasks is refused (`ledger-tasks-need-modules-from`): the page's ledger worker has no way to import user
   modules yet.
+- **`token-metadata` and `token-metadata-api`:** the MIP-0018 modules the package ships run in the page like user
+  modules: add `TOKEN_METADATA` and `TOKEN_METADATA_API` to `modules`, and their entries, `core-chain-events`',
+  `core-block-parsed`'s and `core-contract-logs-fast`'s to `data.entries`, each from `run.start`. The indexer starts with
+  its database, and a new database starts no later than the network's first block with contract logs: the page's S is
+  the node's finalized head, but with `token-metadata` the page starts at that block and backfills every block since
+  (the log says so), so it serves every MIP-0018 event; a database that ran without it refuses it. The API's tokens route ([token-metadata-api.md](token-metadata-api.md)) answers through the
+  page's `api` calls. `test/features/token-metadata-api/fixtures/browser-configuration.ts` is a complete configuration.
 - **Private instances:** `instances(run)` returns `{ id, configure(run) }` for each; each runs in a worker of its own
   beside the core. The private link needs no address: whenever a private instance connects to the core (at its start,
   and again after a lost connection), the page makes a new `MessageChannel` and hands one end to the core worker and
@@ -114,7 +121,8 @@ chain from genesis or a restored backup. The page reaches only its own origin an
 - `node`: the node's WebSocket URL (required); the node must accept the page's origin.
 - `storage`: `memory` (the default: a new database at each load), or a name: a database in OPFS, kept across reloads.
   A second tab on the same name refuses with `writer-lock-held`.
-- `network`: `preview` (the default), `preprod`, `mainnet`, `stagenet`, or `custom` with `genesis=<hash>`.
+- `network`: `preview` (the default), `preprod`, `mainnet`, `stagenet`, `undeployed` (a local standalone node), or
+  `custom` with `genesis=<hash>`.
 - `restore`: with a `storage` name, the page waits for a backup file to restore into that new database before it
   starts the core, then resumes from the backup's height + 1.
 

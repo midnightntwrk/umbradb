@@ -554,12 +554,24 @@ configSchema: z.object({
 - **Contract logs.** Require `contract-logs`, not a provider: the operator picks one, and one may hand over to the
   other at a height. `core-contract-logs-full` (needs `vm-logs`; from 0 or a restored backup) stores the logs the ledger
   emitted while applying the block. `core-contract-logs-fast` (development only; any start height) reads them from the
-  transcripts and halts with `fast-log-unsupported` at a log it cannot read that way. Both fill `contract_logs.logs`:
-  `height`, `tx_index`, `log_index` (its number in the block), `contract_address`, `entry_point`, `logical_segment`,
-  `log_version`, `event_type`, `data`. The `block` item, read from `on-compute` on, is an array of `{ transaction,
-  index, address, entryPoint, logicalSegment, version, eventType, data }`. With the vendored v9 ledger,
-  `logical_segment` is 0 for every log, whichever segment emitted it: the ledger labels a fallible segment's contract
-  events with the guaranteed segment, so the column cannot tell a guaranteed log from a fallible one.
+  transcripts. A log site it cannot read that way is an **unresolved site**, never a log: a `log` of a value the
+  transcript does not push right before it (`not-a-literal`: read from the contract's state, or computed), one a
+  `branch` or `jmp` may skip (`conditional`), and one in a fallible segment of a partially successful transaction,
+  since the chain does not say which fallible segments failed (`partial-transaction`; the guaranteed section's logs are
+  read as usual). Both fill `contract_logs.logs`: `height`, `tx_index`, `log_index`, `contract_address`, `entry_point`,
+  `logical_segment`, `log_version`, `event_type`, `data`. Only `-fast` writes `contract_logs.unresolved`: `height`,
+  `tx_index`, `log_index`, `contract_address`, `entry_point`, `reason`, `segment`, `fallible`, `call_index`,
+  `op_index` (where the `log` op is in the transaction). `log_index` numbers the block's logs and unresolved sites
+  together in emission order, so a block without unresolved sites has the same rows with either provider, and in a
+  block with some, each `-fast` log keeps the number its site gives it. The `block` item, read from `on-compute` on, is
+  `{ logs, unresolved }`, read with `contractLogsItemOf(block, id)` and `unresolvedLogSitesOf(block, id)` (exported, with
+  the types `ContractLog` and `UnresolvedLogSite`): `logs`, each `{ transaction, index, address, entryPoint,
+  logicalSegment, version, eventType, data }`, and `unresolved`, each `{ transaction, index, address, entryPoint,
+  reason, segment, fallible, call, op }`;
+  `-full`'s has none. A module
+  that derives state from logs should treat a contract with unresolved sites as not fully known. With the vendored v9
+  ledger, `logical_segment` is 0 for every log, whichever segment emitted it: the ledger labels a fallible segment's
+  contract events with the guaranteed segment, so the column cannot tell a guaranteed log from a fallible one.
 
 Their entries are written as for the others: `CORE_LEDGER_STATE.entry({ start: 0, config: {} })`,
 `CORE_CONTRACT_STATES`, `CORE_CONTRACT_LOGS_FULL`, `CORE_CONTRACT_LOGS_FAST`.
@@ -597,6 +609,12 @@ const then = await metadata.read(read, "token-1", block.height - 10n);  // as of
 - **Starting mid-chain.** A module may start above height 0 only if it declares `startsMidChain: true`, promising that,
   started at any height h, it writes from h the rows a run from 0 would write; otherwise startup refuses with
   `cannot-start-mid-chain`. Only starts above the cursor are checked, so a restored backup continues as it was.
+- **Latest starts.** A module whose rows must cover the chain from some height declares `latestStarts: { [network]:
+  height }`. A configuration whose database would start above that height on that network starts there instead: S and
+  every entry that starts at S move down to it (entries starting above S keep their start), the process logs the
+  move, and `umbradb config check` notes it. The move is a function of the configuration alone, so a restart with the
+  same file resolves to the same start; a database already built from a higher S is refused by its history: build a
+  new one.
 - **`on-start-height` and `on-stop-height`.** The first fires at a run's first height, before `on-compute`, with
   `{ entryId, height }`, and again after a restart if that height had not committed. The second fires once the run's
   last height has committed; your callbacks are not called after it. Make both idempotent.
@@ -939,11 +957,70 @@ command ignores it. `/config` shows the addresses as bound and, in `network`, ea
   to 64 MiB, the reads confined, one channel per instance id. `messagePortChannel(port)` adapts a browser or
   `worker_threads` `MessagePort`.
 
+## 19. Modules UmbraDB ships: `token-metadata` and `token-metadata-api`
+
+UmbraDB's package carries two public modules that are not core modules, for the token metadata of
+[MIP-0018](https://github.com/midnightntwrk/midnight-improvement-proposals/blob/eb94bc182221cd937a84ed66a5f903b060f165ab/mips/mip-0018-on-chain-token-metadata.md):
+
+- `token-metadata` reads the `contract-logs` item (§9) and keeps each token's current metadata fields in its tables,
+  which it provides as two `table` items (§13), `token-metadata-events` and `token-metadata-state`
+  (`src/features/token-metadata/`).
+- `token-metadata-api` requires those two items and serves them on one route, `POST /token-metadata-api/v1/tokens`
+  ([docs/token-metadata-api.md](token-metadata-api.md)), its body and answer checked against TypeBox schemas (`src/features/token-metadata-api/`). It holds no state:
+  no tables, no migrations, only `on-start-api`.
+
+Both are modules written as this guide describes; read them as a larger example, and the pair as a pattern: one module
+owns and fills the tables, another reads them. Any module can require the two items to read the tables its own way.
+
+- **What they require:** the indexer `contract-logs` (either provider); the API the indexer's two items. A configuration enables them with their entries, and lists them in `modules`
+  as any user module:
+
+```ts
+import { CORE_BLOCK_PARSED, CORE_CHAIN_EVENTS, CORE_CONTRACT_LOGS_FAST, coreEntry, defineConfig, TOKEN_METADATA, TOKEN_METADATA_API } from "umbradb";
+
+export const modules = [TOKEN_METADATA, TOKEN_METADATA_API];
+
+const start = 1_000_000;
+
+export default defineConfig({
+  entries: [
+    coreEntry({ start, config: { network: "preview", node: "wss://rpc.preview.midnight.network", database: { kind: "pglite", path: "data/preview" }, developmentOptIn: true } }),
+    CORE_CHAIN_EVENTS.entry({ start, config: {} }),
+    CORE_BLOCK_PARSED.entry({ start, config: {} }),
+    CORE_CONTRACT_LOGS_FAST.entry({ start, config: {} }),
+    TOKEN_METADATA.entry({ start, config: {} }),
+    TOKEN_METADATA_API.entry({ start, config: {} }),
+  ],
+});
+```
+
+- **Every new database holds every event.** No MIP-0018 event exists before a network's first block with contract logs
+  (the first block of ledger v9: mainnet 3,346,139, preprod 3,348,434, preview 1,572), so the indexer declares those
+  heights as its `latestStarts` (§11): a new database configured above one starts there and backfills from the chain,
+  and every database started at or below it, on any machine, holds the same rows (`FIRST_CONTRACT_LOG_HEIGHTS`). The
+  node must serve those blocks and the state at their parents (an archive node, or one that kept that state).
+- **The indexer starts with its database.** Its rows are materialized state — each token's current fields — so they depend on
+  where it started. It may start at any S (`startsMidChain: true`), but its first entry may not start above S: a
+  database that has run without it refuses it at startup (`callback-error` at `on-start-db` of `token-metadata`, its
+  cause a `TokenMetadataStartAfterDatabase` with the code `token-metadata-start-after-database`). Add it to a new
+  database. A gap between its revisions (§11) is refused the same way, with `token-metadata-revision-gap`.
+- **Its tables** (schema `token_metadata`), related by keys: `tokens` (mutable: one row per described token, keyed
+  by its id, the hash of domain separator and contract, which is its color for kinds 1 and 2, and its kind; the row
+  is deleted with the token's last field), `fields` (mutable: each token's current defined fields, whole; keys
+  MIP-0018 does not define are not stored) and `events` (append-only: each rejected event and unresolved log
+  site, with its position, contract and reason, for marks). They are deterministic module tables (§4): names and symbols are
+  stored whole and cut to 64 and 12 characters only when served, since the cut depends on the platform's Unicode data.
+- **The API holds no state.** Startup refuses it without the indexer (`item-no-provider`); added to a database whose
+  indexer already ran, from a height above the cursor like any added entry, it answers as if it had run from S. Every
+  index its reads use is the indexer's: a module creates nothing in another module's schema.
+- **Its values are untrusted.** Everything it serves is what a contract published: show text as text, never follow a
+  URI without your own checks. The module itself never fetches anything.
+
 ## Appendix A. Reference
 
 - **A.1 The declaration's fields.** Required: `id`, `version`, `side`, `requires` (at least one item), `provides`,
   `startsMidChain`, `configSchema`, `migrations`, `points`. Optional: `needsLockstep` (§14), `developmentOnly` (needs
-  the core entry's `developmentOptIn`), `requiresResync` (§16). Ids and item names are lowercase words joined by
+  the core entry's `developmentOptIn`), `requiresResync` (§16), `latestStarts` (§11). Ids and item names are lowercase words joined by
   hyphens, at most 40 bytes; a user module's id may not be `core` or start with `core-` or `on-`.
 - **A.2 Codes a module author meets.**
   - Startup, the declaration: `invalid-declaration`, `unknown-point`, `field-no-kind`, `reserved-prefix`,
@@ -955,7 +1032,7 @@ command ignores it. `/config` shows the addresses as bound and, in `network`, ea
     `requires-resync`, `no-primary-key`, `unsupported-column-type`, `unsupported-key-type`,
     `non-deterministic-column`, `non-deterministic-table`, `shared-item-migrations-differ`.
   - Processing halts: `callback-error`, `handle-closed`, `truncate-not-allowed`, `database-error`, `root-mismatch`,
-    `ledger-refcount-invalid`, `fast-log-unsupported`, `lockstep-behind`, `public-config-changed`.
+    `ledger-refcount-invalid`, `lockstep-behind`, `public-config-changed`.
   - A call your code may catch: `query-timeout`, `no-committed-height`, `state-not-retained`, `read-refused`.
   - A host's start (§18): `invalid-configuration` (`invalid-option`, `renamed-setting`), `modules-given-twice`,
     `ledger-tasks-need-modules-from`, `source-refused`, `library-setting-refused`, `network-address-conflict`,

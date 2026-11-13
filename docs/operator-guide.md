@@ -168,6 +168,48 @@ raises a private process's `head` during a pause: one paused while it was not wa
 keeps its `head` and `lag` until the loop runs again. Watch for `paused` with an old `since` if a host program pauses
 the loop for long.
 
+## Token metadata (MIP-0018): `token-metadata` and `token-metadata-api`
+
+The package ships two public modules for MIP-0018 token metadata: `token-metadata` creates, fills and guards its
+tables (schema `token_metadata`), and `token-metadata-api` serves them on the module API (`listen.api`; its one route,
+`POST /token-metadata-api/v1/tokens`, is in [token-metadata-api.md](token-metadata-api.md)). Run the indexer alone to keep the tables for your own reads, or
+both to serve the tokens route. The configuration file imports `TOKEN_METADATA` (and `TOKEN_METADATA_API`) from `umbradb`, lists
+them in its `modules` export, and adds their entries with the core modules the indexer needs: a `contract-logs`
+provider (`core-contract-logs-fast` needs `core-chain-events` and `core-block-parsed`):
+
+```ts
+export const modules = [TOKEN_METADATA, TOKEN_METADATA_API];
+// in `entries`, each from the same start:
+CORE_CHAIN_EVENTS.entry({ start, config: {} }),
+CORE_BLOCK_PARSED.entry({ start, config: {} }),
+CORE_CONTRACT_LOGS_FAST.entry({ start, config: {} }), // or CORE_CONTRACT_LOGS_FULL from 0
+TOKEN_METADATA.entry({ start, config: {} }),
+TOKEN_METADATA_API.entry({ start, config: {} }),
+```
+
+`umbradb config check` checks the file; a missing provider is refused when the process starts.
+
+- **A new database starts early enough to hold every event.** On mainnet, preprod, preview and undeployed, a new
+  database with `token-metadata` configured above the network's first block with contract logs (mainnet 3,346,139,
+  preprod 3,348,434, preview 1,572, undeployed 0) starts there instead and backfills from the chain: the log says so
+  (`the database starts at …`), and `config check` notes it. Every database started at or below that block holds the
+  same token metadata, on any machine. The node must serve those blocks and the state at their parents: an archive
+  node, or one that kept that state. A `custom` network is not moved.
+- **The indexer starts with its database.** Give it the same start as the core entry, in a new database. A database that has
+  already run from a lower height refuses it: startup ends with `callback-error` at `on-start-db` of
+  `token-metadata`, and the log names the cause, `token-metadata-start-after-database`, with both heights. Its state is
+  built from the database's first block, so to add it later, start a new database with it. For the same reason a configuration
+  that stops it and starts it again later (a revision's `stop` below the next one's start minus one) is refused:
+  `callback-error` at `on-start-db`, caused by `token-metadata-revision-gap`, naming the stop and the next start.
+- **Which logs provider.** `core-contract-logs-full` gives every log from the ledger but starts only at 0 (it needs
+  `core-ledger-state`). `core-contract-logs-fast` starts anywhere but is development only (the core entry's
+  `developmentOptIn`); a log it cannot read from the transcripts (a value from the contract's state, a log behind a
+  branch, a log in a partly successful transaction's fallible part) it records as an unresolved site, which the
+  module stores as an `unresolved` event and shows in the contract's tokens' marks.
+- **The API holds no state.** It requires the indexer's tables (startup refuses it without `token-metadata`), and can be
+  added to a database whose indexer already ran, from a height above the cursor like any added entry.
+- **What it stores and serves** is what contracts published: untrusted text and URIs. It fetches nothing.
+
 ## Backups
 
 A backup is a `pg_dump` file of the indexer's database at one committed height, with UmbraDB's manifest as its first

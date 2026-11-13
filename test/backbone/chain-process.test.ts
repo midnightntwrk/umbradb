@@ -681,7 +681,7 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
     const skipConfiguredOnEmpty = async (input: ChainCheckInput) => {
       if (input.cursor !== null) return checkChain(input);
       const node = (await input.source.block(0n)).hash;
-      return checkChain({ ...input, configured: { network: input.configured.network, hash: node } });
+      return checkChain({ ...input, configured: { network: input.configured.network, hash: node, local: false } });
     };
     const skipStored = async (input: ChainCheckInput) => {
       if (input.identity === null) return checkChain(input);

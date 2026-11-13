@@ -79,7 +79,7 @@ const PUBLIC_ITEMS = [
 ];
 
 /** What the runner gives a source's chain check of the configured network (`configuredGenesisOf`'s value). */
-const configuredAs = (network: string, hash: Uint8Array | null) => ({ configured: Object.freeze({ network, hash }) });
+const configuredAs = (network: string, hash: Uint8Array | null) => ({ configured: Object.freeze({ network, hash, local: network === "undeployed" }) });
 
 /** The `UmbraError` `pending` rejects with; fails the test when it resolves. */
 async function refusalOf(pending: Promise<unknown>): Promise<UmbraError> {
@@ -206,6 +206,12 @@ describe("the private block source", () => {
     expect(refusal.message).toContain("this build records no genesis hash for the network stagenet");
   });
 
+  it("takes the public database's genesis for a local network (undeployed): each local chain has its own", async () => {
+    const source = new PrivateBlockSource(fakePublic(publicAnswers({ head: 9n })).db, pollingWakes());
+    expect(await source.checkChain(configuredAs("undeployed", null))).toMatchObject({ genesisHash: bytes(0xa1) });
+    expect(networkRefusal({ network: "undeployed", hash: null, local: true }, { genesisHash: bytes(0xb2), start: 0n })).toBeNull();
+  });
+
   it("refuses a public database whose core never started before comparing the configured network", async () => {
     const empty = new PrivateBlockSource(fakePublic(publicAnswers({ identity: false })).db, pollingWakes());
     await expect(empty.checkChain(configuredAs("custom", bytes(0xb2)))).rejects.toMatchObject({
@@ -215,8 +221,8 @@ describe("the private block source", () => {
 
   it("compares with networkRefusal, which the negative controls' intake replaces", async () => {
     const identity = { genesisHash: bytes(0xa1), start: 3n };
-    expect(networkRefusal({ network: "custom", hash: bytes(0xa1) }, identity)).toBeNull();
-    expect(networkRefusal({ network: "custom", hash: bytes(0xb2) }, identity)?.details.reason).toBe("network");
+    expect(networkRefusal({ network: "custom", hash: bytes(0xa1), local: false }, identity)).toBeNull();
+    expect(networkRefusal({ network: "custom", hash: bytes(0xb2), local: false }, identity)?.details.reason).toBe("network");
     const core = { id: "core", start: 3, settings: {} } as unknown as CheckedEntry;
     const publicDb = () => fakePublic(publicAnswers({ head: 9n })).db;
     const skipping = privateIntake({ publicDatabase: publicDb, wakes: () => manualWakes().wakes, network: () => null });

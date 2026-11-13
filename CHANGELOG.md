@@ -15,7 +15,31 @@ adheres to [Semantic Versioning](https://semver.org/).
   runs (400 `invalid-request`, naming paths and rules, never values), and the answer before it is sent (a wrong one is
   the module API's 500). A handler refuses with `RouteError`; each answer is read at one committed height with the
   chain-data headers, and answers are ASCII-escaped JSON. `pageCursor(schema)` gives keyset pages' opaque cursors.
-  `typebox` 1.4.3 is a new runtime dependency. The exported surface is 73 names, 33 values and 40 types.
+  `typebox` 1.4.3 is a new runtime dependency.
+- MIP-0018 token metadata as two public modules: `token-metadata` (`TOKEN_METADATA`) creates, fills and guards its
+  tables, and refuses a start above its database's first height with `TokenMetadataStartAfterDatabase` as the cause;
+  `token-metadata-api` (`TOKEN_METADATA_API`) serves them on one route, `POST /token-metadata-api/v1/tokens`
+  (`docs/token-metadata-api.md`), whose TypeBox-checked body selects tokens by colors, contract, domain separator
+  and kind, through the core's typed routes.
+  `TokenMetadataRevisionGap` is the cause of a refused gap between its revisions.
+- `contractLogsItemOf` and `unresolvedLogSitesOf`, with the types `ContractLog` and `UnresolvedLogSite`: a module's
+  reads of the `contract-logs` item. The exported surface is 81 names, 39 values and 42 types.
+- A module declaration's optional `latestStarts` (`{ [network]: height }`): a new database whose start would be above
+  an enabled module's height on its network starts there, with the entries starting with it; the process logs the
+  move and `umbradb config check` notes it. `token-metadata` declares each official network's first block with
+  contract logs, so every new database holds every MIP-0018 event.
+- The network `undeployed`, Midnight's local standalone node, beside `mainnet`, `preprod`, `preview` and `stagenet`.
+  Each local chain has its own block 0, so the build records no genesis hash for it: a new database takes its node's
+  and records it, and every later start is held to the recorded one (`genesis-mismatch` for a node restarted from a
+  new genesis). Its ledger table is the official networks'. A private process of `undeployed` takes its public
+  database's genesis. `token-metadata`'s latest start on it is 0.
+
+### Changed
+
+- `core-contract-logs-fast` records a log site it cannot read from the transcripts (`not-a-literal`, `conditional`,
+  `partial-transaction`) as an unresolved site, in the new table `contract_logs.unresolved` (the shared item's
+  migration `002`) and in the `contract-logs` block item, instead of halting with `fast-log-unsupported`, which is
+  removed.
 
 ## [0.10.0] - 2026-10-27
 

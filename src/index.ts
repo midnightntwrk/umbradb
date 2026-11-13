@@ -10,6 +10,11 @@
  *   height-versioned-table helpers, the canonical encodings and the contents hash (with the content-defined tables of
  *   UmbraDB's own declarations), the module API's envelope helpers, typed routes and page cursors for a module's HTTP
  *   API, `hexBytes` for a settings schema, and `retainedStatesOf`.
+ * - **Public modules**: {@link TOKEN_METADATA}, MIP-0018 token metadata in its tables, and the errors its refused
+ *   starts carry ({@link TokenMetadataStartAfterDatabase}, {@link TokenMetadataRevisionGap}); {@link TOKEN_METADATA_API},
+ *   the `/v1` API over them.
+ * - **Contract logs**: {@link contractLogsItemOf} and {@link unresolvedLogSitesOf}, a module's reads of the
+ *   `contract-logs` item (its logs and its unresolved log sites), with their types.
  * - **A host program**: {@link startUmbraDB}, UmbraDB run in the host's own process, with its options, its handle and
  *   their types (the network request, the mounted handlers, the private link's channel); {@link finalizedHeight}, a
  *   node's finalized height for a new database's start; {@link InMemoryBlockSource} and `BlockRef`, an in-memory chain;
@@ -19,6 +24,12 @@
  * @packageDocumentation
  */
 
+export {
+  type ContractLog,
+  contractLogsItemOf,
+  type UnresolvedLogSite,
+  unresolvedLogSitesOf,
+} from "./backbone/contract-logs/contract-logs.js";
 export { CORE_BLOCK_PARSED } from "./backbone/core-block-parsed/core-block-parsed.js";
 export { CORE_CHAIN_EVENTS } from "./backbone/core-chain-events/core-chain-events.js";
 export { CORE_CONTRACT_LOGS_FAST } from "./backbone/core-contract-logs-fast/core-contract-logs-fast.js";
@@ -27,6 +38,8 @@ export { CORE_CONTRACT_STATES } from "./backbone/core-contract-states/core-contr
 export { CORE_LEDGER_STATE, retainedStatesOf } from "./backbone/core-ledger-state/core-ledger-state.js";
 export { CORE_TX_RESULTS } from "./backbone/core-tx-results/core-tx-results.js";
 export type { CoreVersion } from "./config/build.js";
+export { TOKEN_METADATA, TokenMetadataRevisionGap, TokenMetadataStartAfterDatabase } from "./features/token-metadata/token-metadata.js";
+export { TOKEN_METADATA_API } from "./features/token-metadata-api/token-metadata-api.js";
 export { hexBytes } from "./config/core-settings.js";
 export { coreEntry, defineConfig, type Entry, type UmbraConfig, versionEntry } from "./config/entries.js";
 export type { BlockWriteHandle, ReadHandle, SchemaWriteHandle } from "./db/api.js";

@@ -468,6 +468,14 @@ const SHAPES: readonly ShapeCase[] = [
     says: ["stats.rows", "stats-rows and stats-times", "one item"],
   },
   { name: "no startsMidChain", build: () => loose("stats", (d) => void delete d.startsMidChain), field: "startsMidChain" },
+  { name: "latestStarts an array", build: () => loose("stats", (d) => void (d.latestStarts = [1])), field: "latestStarts" },
+  { name: "latestStarts null", build: () => loose("stats", (d) => void (d.latestStarts = null)), field: "latestStarts" },
+  {
+    name: "a latest start that is no non-negative integer",
+    build: () => loose("stats", (d) => void (d.latestStarts = { preview: 10, mainnet: -1 })),
+    field: "latestStarts.mainnet",
+  },
+  { name: "a latest start as text", build: () => loose("stats", (d) => void (d.latestStarts = { preview: "10" })), field: "latestStarts.preview" },
   { name: "needsLockstep not a boolean", build: () => loose("stats", (d) => void (d.needsLockstep = "yes")), field: "needsLockstep" },
   // A private module's own field on a public module.
   {

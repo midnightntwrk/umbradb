@@ -11,7 +11,8 @@
  * **At `on-compute`** (after `core-ledger-state`'s, whose `vm-logs` it requires) it puts `contract-logs`: each `VmLog`
  * of the block as a {@link ContractLog}, with its transaction, its number in the block, the contract, the entry point,
  * the logical segment, the version, the event type and the data, as the ledger gave them. The physical segment is not
- * part of the item or its table.
+ * part of the item or its table. The ledger gives every log, so the item has no unresolved sites, and the module never
+ * writes `contract_logs.unresolved`; it declares the table, with the item's migrations, as `-fast` does.
  *
  * **At `on-db-write`** it writes them, one row each, in one statement.
  *
@@ -29,7 +30,7 @@ import {
   contractLogsItemOf,
   contractLogsMigrations,
   CONTRACT_LOGS_ITEM,
-  frozenLogs,
+  contractLogsBlock,
   writeLogRows,
 } from "../contract-logs/contract-logs.js";
 import { VM_LOGS_ITEM } from "../core-ledger-state/core-ledger-state.js";
@@ -85,7 +86,7 @@ export function coreContractLogsFull(options: CoreContractLogsFullOptions = {}):
     migrations: contractLogsMigrations(),
     points: {
       async "on-compute"(_p, b, _read, out) {
-        out.put(CONTRACT_LOGS_ITEM, frozenLogs(await (options.logsOf ?? fullLogsOf)(b)));
+        out.put(CONTRACT_LOGS_ITEM, contractLogsBlock(await (options.logsOf ?? fullLogsOf)(b)));
       },
       async "on-db-write"(_p, b, w) {
         await writeLogRows(w, b.height, contractLogsItemOf(b, CORE_CONTRACT_LOGS_FULL_ID));

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ContractLog } from "../../src/backbone/contract-logs/contract-logs.js";
 import { blockParsedItemOf } from "../../src/backbone/core-block-parsed/core-block-parsed.js";
-import { coreContractLogsFast } from "../../src/backbone/core-contract-logs-fast/core-contract-logs-fast.js";
+import { coreContractLogsFast, fastLogsFrom } from "../../src/backbone/core-contract-logs-fast/core-contract-logs-fast.js";
 import { mainThreadLogReader as inThreadLogReader } from "./main-thread-log-reader.js";
 import { coreContractLogsFull } from "../../src/backbone/core-contract-logs-full/core-contract-logs-full.js";
 import { contractStatesOf, coreContractStates } from "../../src/backbone/core-contract-states/core-contract-states.js";
@@ -12,18 +12,18 @@ import { BACKUP_BACKENDS, type BackupBackend } from "../backup/backup-fixtures.j
 import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
 import {
   a109Scenario,
-  a110HaltScenario,
   type ContractScenario,
   contractScenario,
   contractsFor,
   dataOf,
   FAST_CORE,
-  FULL_CORE,
-  haltProblems,
+  fastProblems,
   logLines,
   logProblems,
+  numberingScenario,
   runRange,
   setState,
+  stateLogScenario,
   stateProblems,
 } from "./contract-data-checks.js";
 import { handoff, handoffProblems, handoffScenario } from "./contract-logs-handoff.js";
@@ -40,8 +40,12 @@ import { cellValue } from "../ledger/adapter-fixtures.js";
  *   after both": the second call's row is refused by the table's key, and processing halts.
  * - A `core-contract-logs-full` taking every literal the transcripts log, a failed fallible segment's too, stores a
  *   log the ledger did not emit.
- * - A `core-contract-logs-fast` that guesses (no log) instead of halting on a value read from state does not halt,
- *   and stores other rows than `-full`.
+ * - A `core-contract-logs-fast` that drops its unresolved sites stores no row for a value read from state, which the
+ *   `-fast` oracle names as a missing unresolved row.
+ * - One that numbers its logs alone, as before unresolved sites, stores a later log of the numbering scenario's block
+ *   at another number than its site's.
+ * - One that records every site of a partial success unresolved, its guaranteed ones too, leaves out the guaranteed
+ *   log `-full` stores.
  * - A handoff that skips h + 1 leaves a gap. One that repeats it is refused (`providers-overlap`), and so is one that
  *   starts `-fast` at h, the backup's cursor (`changes-past`).
  */
@@ -109,17 +113,38 @@ describe.each(PROCESS_BACKENDS)("the negative controls on $name", (backend: Proc
     expect((await logLines(db)).map((line) => line.split(" ")[8])).toContain(dataOf(cellValue(Uint8Array.of(8))));
   }, PATIENCE_MS * 2);
 
-  it("control: a -fast that guesses no log instead of halting on a value read from state does not halt, and stores other rows than -full", async () => {
-    const expected = await a110HaltScenario();
+  it("control: a -fast that drops its unresolved sites stores no row for the state's log, which the -fast oracle names", async () => {
+    const expected = await stateLogScenario();
     const db = await backend.database();
-    const guessing = coreContractLogsFast({ onUnsure: () => undefined });
-    const ran = await runRange(db, expected.scenario.records, expected.scenario.head, { core: [...FAST_CORE.slice(0, -1), guessing] });
-    expect(await haltProblems(db, ran.status, expected, 3n, 1, ran.halt)).toEqual(
-      expect.arrayContaining([`the process is ${ran.status.state}, not halted`, "the cursor is 4, not 2"]),
-    );
-    expect((await logProblems(db, ran.status, expected)).some((problem) => problem.startsWith("missing log row 3 1"))).toBe(true);
-    // The rule as shipped halts on the same chain (the criterion's test); FULL_CORE stores the state's log there.
-    expect(FULL_CORE.at(-1)?.id).toBe("core-contract-logs-full");
+    const dropping = coreContractLogsFast({ rule: (...args) => ({ ...fastLogsFrom(...args), unresolved: [] }) });
+    const ran = await runRange(db, expected.scenario.records, expected.scenario.head, { core: [...FAST_CORE.slice(0, -1), dropping] });
+    expect(await fastProblems(db, ran.status, expected)).toEqual([expect.stringMatching(/^missing unresolved row 3 1 2 /)]);
+  }, PATIENCE_MS * 2);
+
+  it("control: a -fast numbering its logs alone stores the numbering scenario's later log at 2 at another number, which the -fast oracle names", async () => {
+    const expected = await numberingScenario();
+    const db = await backend.database();
+    const logsAlone = coreContractLogsFast({
+      rule: (...args) => {
+        const { logs, unresolved } = fastLogsFrom(...args);
+        return { logs: logs.map((log, k) => ({ ...log, index: k })), unresolved };
+      },
+    });
+    const ran = await runRange(db, expected.scenario.records, expected.scenario.head, { core: [...FAST_CORE.slice(0, -1), logsAlone] });
+    const problems = await fastProblems(db, ran.status, expected);
+    expect(problems).toEqual(expect.arrayContaining([expect.stringMatching(/^missing log row 2 1 2 /), expect.stringMatching(/^extra log row 2 1 1 /)]));
+  }, PATIENCE_MS * 2);
+
+  it("control: a -fast recording every site of a partial success unresolved leaves out its guaranteed log, which the -fast oracle names", async () => {
+    const expected = await a109Scenario();
+    const db = await backend.database();
+    const wholeTransaction = coreContractLogsFast({
+      rule: (height, transactions, outcomes, sites) =>
+        fastLogsFrom(height, transactions, outcomes, sites.map((list, i) => (outcomes[i] === "partial" ? list.map((site) => ({ ...site, fallible: true })) : list))),
+    });
+    const ran = await runRange(db, expected.scenario.records, expected.scenario.head, { core: [...FAST_CORE.slice(0, -1), wholeTransaction] });
+    const problems = await fastProblems(db, ran.status, expected);
+    expect(problems).toEqual(expect.arrayContaining([expect.stringMatching(/^missing log row 2 0 0 /), expect.stringMatching(/^extra unresolved row 2 0 0 /)]));
   }, PATIENCE_MS * 2);
 });
 

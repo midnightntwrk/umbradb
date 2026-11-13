@@ -1,8 +1,10 @@
 /**
  * The core module `core-contract-logs-fast`: the MIP-0002 events of every block, read from its transcripts without the
- * ledger state, as the shared item `contract-logs` (`../contract-logs/`) and its table `contract_logs.logs`. It stores
- * exactly the rows `core-contract-logs-full` would store, or else halts. It runs only when development modules are
- * explicitly enabled, and it may start mid-chain, since nothing it reads depends on an earlier block.
+ * ledger state, as the shared item `contract-logs` (`../contract-logs/`) and its tables `contract_logs.logs` and
+ * `contract_logs.unresolved`. A log site it cannot read exactly is an unresolved site: it is recorded, with its reason,
+ * and never turned into a log. On a block without unresolved sites it stores exactly the rows `core-contract-logs-full`
+ * would store. It runs only when development modules are explicitly enabled, and it may start mid-chain, since nothing
+ * it reads depends on an earlier block.
  *
  * **Its ledger task** (`./task.ts`) runs in the ledger worker on the block's one parse. It reads each transaction's
  * `log` sites, in the ledger's emission order (`./transcripts.ts`); there are none on ledger v8. The result is the
@@ -11,22 +13,22 @@
  *
  * **At `on-parse`** (after `core-block-parsed`'s, whose item it requires) it takes those sites, and each transaction's
  * chain outcome from the event that placed it (`chain-events`, read as `core-tx-results` reads it: `outcomeOf`). Then,
- * for each transaction ({@link fastLogsFrom}):
- * - a chain failure: no log, since the ledger never ran it and `-full` has none;
- * - a full success: each literal's log (from `decodeLogItem`; an oversized one gives none), numbered in the block from 0
- *   in the order the ledger emits them, and a halt on any other log (`not-a-literal`, `conditional`);
- * - a partial success with any log: a halt (`partial-transaction`). The chain's `TxPartialSuccess` does not say which
- *   fallible segments failed, so neither which logs the ledger kept nor how the block's later logs are numbered is
- *   known.
+ * for each transaction, in the block's order ({@link fastLogsFrom}):
+ * - a chain failure: nothing, since the ledger never ran it and `-full` has no log of it;
+ * - a full success: each site in emission order. A literal gives its log (from `decodeLogItem`); an oversized literal
+ *   gives none; any other site is unresolved (`not-a-literal`, `conditional`);
+ * - a partial success: its guaranteed section ran, so its guaranteed sites are read as a full success's. Its fallible
+ *   sites are unresolved (`partial-transaction`): the chain's `TxPartialSuccess` does not say which fallible segments
+ *   failed, so not which of their logs the ledger kept. An oversized literal there gives nothing either way.
  *
- * The halt is `fast-log-unsupported`: an `UmbraError` naming the height, the transaction (its index and hash), the
- * segment, the call, the op and the reason ({@link unsureLogError}). The runner halts processing at that height with
- * the code, `on-parse` and this module, before the block's transaction. For a queued best block, the failure drops the
- * block, and it is met again at finality.
+ * Logs and unresolved sites are numbered by one count in the block from 0, in emission order (`../contract-logs/`):
+ * every site that gives a log or is unresolved takes the next number. So a block without unresolved sites has
+ * `-full`'s numbers, and in a block with some, each log keeps the place its site gives it, whatever the unresolved sites
+ * emitted.
  *
  * The logical segment of every contract log is 0 in the ledger ({@link LOGICAL_SEGMENT}).
  *
- * **At `on-db-write`** it writes the item's logs, one row each, in one statement.
+ * **At `on-db-write`** it writes the item's logs and its unresolved sites, one statement each (none for none).
  *
  * The declaration ({@link CORE_CONTRACT_LOGS_FAST}) is a constant over its reader and rule; a negative control's build
  * composes its own with {@link coreContractLogsFast}.
@@ -34,23 +36,26 @@
 
 import { z } from "zod";
 import { UMBRADB_VERSION } from "../../config/build.js";
-import { UmbraError } from "../../db/errors.js";
 import type { ChainOutcome } from "../../ledger/types.js";
 import { type BlockContext, type DefinedModule, defineModule, type ModuleDeclaration } from "../../modules/declaration.js";
 import {
   type ContractLog,
+  contractLogsBlock,
+  type ContractLogsBlock,
   contractLogsItem,
   contractLogsItemOf,
   contractLogsMigrations,
   CONTRACT_LOGS_ITEM,
-  frozenLogs,
+  type UnresolvedLogSite,
+  unresolvedLogSitesOf,
   writeLogRows,
+  writeUnresolvedRows,
 } from "../contract-logs/contract-logs.js";
 import { type BlockTransaction, blockParsedItemOf } from "../core-block-parsed/core-block-parsed.js";
 import { chainEventsItemOf } from "../core-chain-events/core-chain-events.js";
 import { outcomeOf } from "../core-tx-results/core-tx-results.js";
 import { CONTRACT_LOG_SITES_ITEM, CONTRACT_LOG_SITES_TASK, CORE_CONTRACT_LOGS_FAST_ID } from "./task.js";
-import type { LogSite, UnsureReason } from "./transcripts.js";
+import type { LogSite } from "./transcripts.js";
 
 export { CONTRACT_LOG_SITES_ITEM, CONTRACT_LOG_SITES_TASK, CORE_CONTRACT_LOGS_FAST_ID, LEDGERS_WITHOUT_LOGS } from "./task.js";
 
@@ -70,106 +75,56 @@ export interface FastLogReader {
  */
 export const LOGICAL_SEGMENT = 0;
 
-/** A log `-fast` cannot read exactly, and why (see the module comment). */
-export interface UnsureLog {
-  readonly height: bigint;
-  readonly transaction: BlockTransaction;
-  readonly reason: "partial-transaction" | UnsureReason;
-  /** The log site: the unsure one, or a partial success's first. */
-  readonly site: LogSite;
-}
-
-const WHY: Readonly<Record<UnsureLog["reason"], string>> = {
-  "partial-transaction":
-    "its transaction is partially successful, and the chain does not say which fallible segments failed, so neither " +
-    "which of its logs the ledger kept nor how the block's later logs are numbered",
-  "not-a-literal":
-    "the value it logs is not a literal the transcript pushes right before it: a value read from the contract's state, " +
-    "or computed",
-  conditional: "a branch or jump before it may skip it or its push: whether it runs, and what it logs, depends on a value at run time",
-};
-
-const hex = (bytes: Uint8Array): string => `0x${Buffer.from(bytes).toString("hex")}`;
-
-/** The halt of an {@link UnsureLog} (`fast-log-unsupported`; see the module comment). */
-export function unsureLogError(unsure: UnsureLog): UmbraError {
-  const { height, transaction, reason, site } = unsure;
-  return new UmbraError(
-    "fast-log-unsupported",
-    `core-contract-logs-fast cannot read log op ${site.op} of call ${site.call} (contract ${hex(site.address)}) in the ` +
-      `${site.fallible ? "fallible" : "guaranteed"} transcript of segment ${site.segment} of transaction ` +
-      `${transaction.index} (${hex(transaction.hash)}) at height ${height} exactly: ${WHY[reason]}. ` +
-      "core-contract-logs-full, from the full apply, stores every log",
-    {
-      height,
-      transaction: transaction.index,
-      hash: hex(transaction.hash),
-      reason,
-      segment: site.segment,
-      fallible: site.fallible,
-      call: site.call,
-      op: site.op,
-      address: hex(site.address),
-    },
-  );
-}
-
-/** {@link unsureLogError}, thrown: the rule as shipped. */
-function halt(unsure: UnsureLog): never {
-  throw unsureLogError(unsure);
-}
+/** The rule from a block's transactions, outcomes and sites to its item, as {@link fastLogsFrom} has it. */
+export type FastLogsRule = (
+  height: bigint,
+  transactions: readonly BlockTransaction[],
+  outcomes: readonly ChainOutcome[],
+  sites: readonly (readonly LogSite[])[],
+) => ContractLogsBlock;
 
 /**
- * Block `height`'s logs from its `transactions` (`block-parsed`'s), their chain `outcomes` and each one's log `sites`
- * (see the module comment); `onUnsure` is told of each log it cannot read exactly — the rule halts —, which then gives
- * no row.
+ * Block `height`'s logs and unresolved log sites from its `transactions` (`block-parsed`'s), their chain `outcomes` and
+ * each one's log `sites` (see the module comment). Throws when the three do not have one entry per transaction.
  */
 export function fastLogsFrom(
   height: bigint,
   transactions: readonly BlockTransaction[],
   outcomes: readonly ChainOutcome[],
   sites: readonly (readonly LogSite[])[],
-  onUnsure: (unsure: UnsureLog) => void,
-): ContractLog[] {
+): ContractLogsBlock {
   if (outcomes.length !== transactions.length) throw new Error(`block ${height}: ${outcomes.length} outcomes for ${transactions.length} transactions`);
   if (sites.length !== transactions.length) throw new Error(`block ${height}: ${transactions.length} transactions and ${sites.length} readings`);
   const logs: ContractLog[] = [];
+  const unresolved: UnresolvedLogSite[] = [];
+  let index = 0;
   transactions.forEach((transaction, i) => {
-    const list = sites[i] as readonly LogSite[];
     const outcome = outcomes[i];
-    if (outcome === "failure" || list.length === 0) return;
-    if (outcome === "partial") {
-      onUnsure({ height, transaction, reason: "partial-transaction", site: list[0] as LogSite });
-      return;
-    }
-    for (const site of list) {
-      if ("unsure" in site.read) {
-        onUnsure({ height, transaction, reason: site.read.unsure, site });
-        continue;
-      }
-      const literal = site.read.literal;
+    if (outcome === "failure") return;
+    for (const site of sites[i] as readonly LogSite[]) {
+      const literal = "literal" in site.read ? site.read.literal : undefined;
+      // An oversized literal gives no log, whether or not its segment ran.
       if (literal === null) continue;
-      logs.push({
-        transaction: transaction.index,
-        index: logs.length,
-        address: site.address,
-        entryPoint: site.entryPoint,
-        logicalSegment: LOGICAL_SEGMENT,
-        version: literal.version,
-        eventType: literal.eventType,
-        data: literal.data,
-      });
+      const where = { transaction: transaction.index, index: index++, address: site.address, entryPoint: site.entryPoint };
+      const position = { segment: site.segment, fallible: site.fallible, call: site.call, op: site.op };
+      if (outcome === "partial" && site.fallible) {
+        unresolved.push({ ...where, reason: "partial-transaction", ...position });
+      } else if ("unsure" in site.read) {
+        unresolved.push({ ...where, reason: site.read.unsure, ...position });
+      } else if (literal !== undefined) {
+        logs.push({ ...where, logicalSegment: LOGICAL_SEGMENT, version: literal.version, eventType: literal.eventType, data: literal.data });
+      }
     }
   });
-  return logs;
+  return { logs, unresolved };
 }
 
 /** What {@link coreContractLogsFast} reads with, and its rule a negative control may replace. */
 export interface CoreContractLogsFastOptions {
   /** Where the transcripts are read: the module's ledger task (its `contract-log-sites` item) unless given. */
   readonly reader?: FastLogReader;
-  /** What happens to a log it cannot read exactly: by default the halt (`fast-log-unsupported`). */
-  readonly onUnsure?: (unsure: UnsureLog) => void;
+  /** The rule from the sites to the item: {@link fastLogsFrom} unless given. */
+  readonly rule?: FastLogsRule;
 }
 
 /** Block `b`'s `log` sites: its `contract-log-sites` item (the ledger task's), or `reader`'s; one list per transaction. */
@@ -186,13 +141,13 @@ async function sitesOf(b: BlockContext, transactions: readonly BlockTransaction[
   return transactions.map((transaction) => byIndex.get(transaction.index) ?? []);
 }
 
-/** Block `b`'s logs (see the module comment). */
-export async function fastLogsOf(b: BlockContext, options: CoreContractLogsFastOptions = {}): Promise<ContractLog[]> {
+/** Block `b`'s logs and unresolved log sites (see the module comment). */
+export async function fastLogsOf(b: BlockContext, options: CoreContractLogsFastOptions = {}): Promise<ContractLogsBlock> {
   const { ledger, transactions } = blockParsedItemOf(b, CORE_CONTRACT_LOGS_FAST_ID);
   const events = chainEventsItemOf(b, CORE_CONTRACT_LOGS_FAST_ID);
   const outcomes = transactions.map((transaction) => outcomeOf(b.height, transaction, events));
   const sites = await sitesOf(b, transactions, ledger, options.reader);
-  return fastLogsFrom(b.height, transactions, outcomes, sites, options.onUnsure ?? halt);
+  return (options.rule ?? fastLogsFrom)(b.height, transactions, outcomes, sites);
 }
 
 /**
@@ -214,10 +169,12 @@ export function coreContractLogsFast(options: CoreContractLogsFastOptions = {}):
     ledgerTasks: [CONTRACT_LOG_SITES_TASK],
     points: {
       async "on-parse"(_p, b, out) {
-        out.put(CONTRACT_LOGS_ITEM, frozenLogs(await fastLogsOf(b, options)));
+        const { logs, unresolved } = await fastLogsOf(b, options);
+        out.put(CONTRACT_LOGS_ITEM, contractLogsBlock(logs, unresolved));
       },
       async "on-db-write"(_p, b, w) {
         await writeLogRows(w, b.height, contractLogsItemOf(b, CORE_CONTRACT_LOGS_FAST_ID));
+        await writeUnresolvedRows(w, b.height, unresolvedLogSitesOf(b, CORE_CONTRACT_LOGS_FAST_ID));
       },
     },
   });

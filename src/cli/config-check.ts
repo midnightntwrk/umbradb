@@ -260,6 +260,11 @@ const CONFIGURATION: CheckStep = {
       const resolved = resolveConfig({ data: state.loaded.data, file: state.loaded.file, declarations, side });
       state.checked = resolved.checked;
       state.process = resolved.core;
+      if (resolved.lowered !== null) {
+        const { from, to, module, network } = resolved.lowered;
+        const note = `the database starts at ${to}, not ${from} (${module}'s latest start on ${network})`;
+        return stepReport("configuration", CONFIGURATION_TITLE, [], note);
+      }
     } catch (error) {
       return stepReport("configuration", CONFIGURATION_TITLE, refusalFindings(error, state.file));
     }

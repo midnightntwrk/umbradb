@@ -161,7 +161,7 @@ const SOURCE = z.enum(["vendored", "released"]).default("vendored");
 
 /** The fields every process's `core` entry has, in the core settings table's order. */
 const BASE = {
-  network: z.enum(["mainnet", "preprod", "preview", "stagenet", "custom"]).meta(DATA),
+  network: z.enum(["mainnet", "preprod", "preview", "stagenet", "undeployed", "custom"]).meta(DATA),
   genesisHash: hashHex().optional().meta(DATA),
   ledgerTable: z
     .strictObject({
@@ -219,7 +219,7 @@ function genesisHashRule(settings: { network: string; genesisHash?: string | und
       path: ["genesisHash"],
       message:
         "genesisHash is given only with network custom: the genesis hashes of mainnet, preprod, preview and stagenet " +
-        "are built in",
+        "are built in, and undeployed takes its local node's",
     });
   }
 }
