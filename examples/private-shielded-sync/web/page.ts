@@ -11,7 +11,7 @@ interface Answer {
   error?: string;
   progress?: string;
   ms?: number;
-  requests?: { method: string; path: string; bodyBytes: number; status: number; answerBytes: number; ms: number }[];
+  requests?: { id: number; method: string; path: string; bodyBytes: number; status: number; answerBytes: number; ms: number }[];
 }
 
 const worker = new Worker("worker.js", { type: "module" });
@@ -66,6 +66,8 @@ function addRequests(list: NonNullable<Answer["requests"]>): void {
     totals.up += r.bodyBytes;
     totals.down += r.answerBytes;
     const tr = document.createElement("tr");
+    tr.dataset.exchange = String(r.id);
+    tr.title = "show the whole request and answer";
     const path = r.path.replace("/pss/v1", "").replace(/\/blob\/([0-9a-f]{12})[0-9a-f]+/, "/blob/$1…");
     tr.innerHTML = `<td class="mono">${esc(`${r.method} ${path}`)}${r.status >= 400 ? ` <span class="badtxt">${r.status}</span>` : ""}</td><td>${kb(r.bodyBytes)}</td><td>${kb(r.answerBytes)}</td><td>${r.ms.toFixed(1)}</td>`;
     body.appendChild(tr);
@@ -305,8 +307,76 @@ async function fill(button: HTMLButtonElement): Promise<void> {
   }
 }
 
+// ── one request, whole ──────────────────────────────────────────────────────────────────────────────────────────
+
+const SHOW_ALL_LIMIT = 4 * 1024 * 1024;
+
+function bodyHtml(id: number, side: "request" | "response", b: Json): string {
+  const bytes = Number(b.bytes);
+  if (bytes === 0) return `<div class="note">No body.</div>`;
+  const shown = Number(b.shown);
+  const parts = [
+    facts([
+      ["size", `${kb(bytes)} (${bytes} bytes)`],
+      ["content type", String(b.contentType || "—")],
+      ["SHA-256", String(b.sha256)],
+    ]),
+  ];
+  if (b.decoded) parts.push(`<h4>Decoded</h4><pre>${esc(JSON.stringify(b.decoded, null, 2))}</pre>`);
+  parts.push(`<h4>${b.text !== undefined ? "Body" : "Body (hex: offset, 16 bytes, ASCII)"}</h4><pre class="dump">${esc(String(b.text ?? b.hex))}</pre>`);
+  const buttons = [`<button class="secondary" data-download="${id}:${side}">Download all ${kb(bytes)}</button>`];
+  if (shown < bytes) {
+    parts.push(`<div class="note">Showing the first ${kb(shown)} of ${kb(bytes)}.</div>`);
+    if (bytes <= SHOW_ALL_LIMIT) buttons.unshift(`<button class="secondary" data-showall="${id}">Show all</button>`);
+  }
+  parts.push(`<div class="row">${buttons.join("")}</div>`);
+  return parts.join("");
+}
+
+const headersHtml = (h: Record<string, string>): string =>
+  Object.keys(h).length === 0 ? `<div class="note">None set by the client.</div>` : facts(Object.entries(h).map(([k, v]) => [k, v] as [string, unknown]));
+
+async function openExchange(id: number, all = false): Promise<void> {
+  const dialog = $<HTMLDialogElement>("#exchange");
+  $(".head h3", dialog).textContent = `request ${id}: loading…`;
+  $(".body", dialog).innerHTML = "";
+  if (!dialog.open) dialog.showModal();
+  const a = await call("exchange", { id, all }, () => {});
+  if (!a.ok) {
+    $(".body", dialog).innerHTML = `<div class="error">${esc(a.error ?? "failed")}</div>`;
+    return;
+  }
+  const r = a.result!;
+  $(".head h3", dialog).textContent = `#${r.id}  ${r.method} ${r.path}  →  ${r.status}  (${r.ms} ms, ${String(r.at).replace("T", " ").slice(0, 23)})`;
+  $(".body", dialog).innerHTML =
+    `<h4>Out: the request</h4>${headersHtml(r.requestHeaders as Record<string, string>)}${bodyHtml(id, "request", r.request as Json)}` +
+    `<h4 style="margin-top: 22px">In: the answer</h4><div class="note">Headers as the page received them through its server (serve.ts adds cache-control and the two cross-origin headers; connection, date and transfer-encoding are the transport's). The body is the module's, byte for byte.</div>${headersHtml(r.responseHeaders as Record<string, string>)}${bodyHtml(id, "response", r.response as Json)}`;
+}
+
+async function download(spec: string): Promise<void> {
+  const [id, side] = spec.split(":");
+  const a = await call("exchangeBytes", { id: Number(id), side }, () => {});
+  if (!a.ok) return;
+  const url = URL.createObjectURL(new Blob([a.result!.bytes as ArrayBuffer], { type: "application/octet-stream" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = String(a.result!.name);
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
 document.addEventListener("click", (event) => {
-  const target = (event.target as HTMLElement).closest("button");
+  const el = event.target as HTMLElement;
+  const row = el.closest<HTMLElement>("tr[data-exchange]");
+  if (row !== null) return void openExchange(Number(row.dataset.exchange));
+  const dialogButton = el.closest<HTMLButtonElement>("dialog button");
+  if (dialogButton !== null) {
+    if (dialogButton.dataset.close !== undefined) $<HTMLDialogElement>("#exchange").close();
+    else if (dialogButton.dataset.showall) void openExchange(Number(dialogButton.dataset.showall), true);
+    else if (dialogButton.dataset.download) void download(dialogButton.dataset.download);
+    return;
+  }
+  const target = el.closest("button");
   if (target === null) return;
   if (target.dataset.run) void run(target);
   else if (target.dataset.fill) void fill(target);

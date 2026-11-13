@@ -12,7 +12,7 @@ import { generateMnemonic, mnemonicToSeedSync, validateMnemonic } from "@scure/b
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { WalletSeeds } from "@midnightntwrk/wallet-sdk-hd";
 import { formatShieldedAddress } from "../client/address.ts";
-import { PssHttp, type RequestRecord } from "../client/http.ts";
+import { PssHttp } from "../client/http.ts";
 import { keysFromZswapSeed, type WalletKeys } from "../client/keys.ts";
 import type { Ledger } from "../client/ledger.ts";
 import { emptyCallStats, lookupNullifiers, paddedCalls, readPositions } from "../client/pir-calls.ts";
@@ -25,6 +25,7 @@ import {
   type ArtifactRef,
   decodeManifest,
   decodeReadRecord,
+  decodeTailHeader,
   decodeTailOutput,
   type Manifest,
   ROUTES,
@@ -32,6 +33,7 @@ import {
   TAIL_OUTPUT_BYTES,
 } from "../shared/index.ts";
 import { initLedger } from "./ledger-v9.ts";
+import { sha256 as sha256Noble } from "@noble/hashes/sha2.js";
 
 declare const KERNEL_DIGEST: string;
 
@@ -45,6 +47,7 @@ const fromHexStrict = (s: string, len: number): Uint8Array => {
 const equal = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && a.every((x, i) => x === b[i]);
 const now = (): number => performance.now();
 const round = (x: number): number => Math.round(x * 100) / 100;
+const sha256Sync = (b: Uint8Array): Uint8Array => sha256Noble(b);
 const sha256 = async (b: Uint8Array): Promise<string> => hex(new Uint8Array(await crypto.subtle.digest("SHA-256", b as Uint8Array<ArrayBuffer>)));
 
 // ── state ───────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -55,9 +58,57 @@ let hash: Hash2 = () => {
 };
 let gpu: { scan(entries: Uint8Array, secret: Uint8Array): Promise<number[]> } | null = null;
 let keys: WalletKeys | null = null;
-const http = new PssHttp(self.location.origin);
-const blobRecords: RequestRecord[] = [];
-let recordsSeen = 0;
+
+// ── every request, kept whole ───────────────────────────────────────────────────────────────────────────────────
+
+/** One request to the module's API and its answer, bodies included (the page shows them on demand). */
+interface Exchange {
+  readonly id: number;
+  readonly at: string;
+  readonly method: string;
+  readonly path: string;
+  readonly requestHeaders: Record<string, string>;
+  readonly requestBody: Uint8Array | null;
+  readonly status: number;
+  readonly responseHeaders: Record<string, string>;
+  readonly responseBody: Uint8Array;
+  readonly ms: number;
+}
+const exchanges = new Map<number, Exchange>();
+let nextExchange = 1;
+let reported = 0;
+const KEEP_EXCHANGES = 300;
+
+/** `fetch`, keeping the request's and the answer's bodies and headers; the answer is handed on unchanged. */
+async function capturingFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const started = now();
+  const at = new Date().toISOString();
+  const raw: unknown = init.body;
+  const requestBody: Uint8Array | null = raw instanceof Uint8Array ? new Uint8Array(raw) : null;
+  const requestHeaders: Record<string, string> = {};
+  new Headers(init.headers).forEach((v, k) => (requestHeaders[k] = v));
+  const response = await fetch(url, init);
+  const responseBody = new Uint8Array(await response.arrayBuffer());
+  const responseHeaders: Record<string, string> = {};
+  response.headers.forEach((v, k) => (responseHeaders[k] = v));
+  const id = nextExchange++;
+  exchanges.set(id, {
+    id,
+    at,
+    method: init.method ?? "GET",
+    path: new URL(url, self.location.origin).pathname,
+    requestHeaders,
+    requestBody,
+    status: response.status,
+    responseHeaders,
+    responseBody,
+    ms: now() - started,
+  });
+  for (const old of exchanges.keys()) if (exchanges.size > KEEP_EXCHANGES) exchanges.delete(old);
+  return new Response(responseBody as Uint8Array<ArrayBuffer>, { status: response.status, statusText: response.statusText, headers: response.headers });
+}
+
+const http = new PssHttp(self.location.origin, { fetch: capturingFetch });
 let manifest: Manifest | null = null;
 let manifestId: Uint8Array | null = null;
 const files = new Map<string, Uint8Array>();
@@ -83,11 +134,144 @@ const need = <T>(value: T | null, what: string): T => {
   return value;
 };
 
-/** The requests made since the last step (the module's API and blob downloads), for the page's request log. */
-function newRequests(): RequestRecord[] {
-  const out = [...http.records.slice(recordsSeen), ...blobRecords.splice(0)];
-  recordsSeen = http.records.length;
+/** The requests made since the last step, for the page's request log; their bodies stay here (`exchange`). */
+function newRequests(): Json[] {
+  const out: Json[] = [];
+  for (const e of exchanges.values()) {
+    if (e.id <= reported) continue;
+    out.push({ id: e.id, method: e.method, path: e.path, bodyBytes: e.requestBody?.length ?? 0, status: e.status, answerBytes: e.responseBody.length, ms: e.ms });
+  }
+  reported = nextExchange - 1;
   return out;
+}
+
+const ascii4 = (b: Uint8Array): string => String.fromCharCode(...b.subarray(0, 4));
+const u32s = (b: Uint8Array, at: number, n: number): number[] => {
+  const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const out: number[] = [];
+  for (let i = 0; i < n && at + 4 * i + 4 <= b.length; i++) out.push(v.getUint32(at + 4 * i, true));
+  return out;
+};
+
+/** What a body is, field by field, where its format is known (`../shared/wire.ts`, the manifest, the artifacts). */
+function decodeBody(e: Exchange, side: "request" | "response"): Json | null {
+  const b = side === "request" ? e.requestBody : e.responseBody;
+  if (b === null || b.length === 0) return null;
+  const route = e.path.replace("/pss/v1", "");
+  if (e.status >= 400 && side === "response") return null;
+  if (route === "/manifest") return { format: "manifest (canonical JSON); its SHA-256 is the snapshot identifier" };
+  if (route.startsWith("/query/")) {
+    const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+    const count = v.getUint16(38, true);
+    const perVector = (b.length - 40) / 4 / Math.max(1, count);
+    return {
+      format: side === "request" ? "query body: 40-byte header, then the query vectors (u32, little-endian)" : "answer body: 40-byte header, then the answer vectors (u32, little-endian)",
+      magic: ascii4(b),
+      formatVersion: v.getUint16(4, true),
+      snapshotId: hex(b.subarray(6, 38)),
+      vectors: count,
+      valuesPerVector: perVector,
+      meaning:
+        side === "request"
+          ? `each vector is A·s + e + Δ·u over the table's ${perVector} columns: one is the wanted column (or a random padding column), the server cannot tell which`
+          : `each vector is the table (${perVector} rows) times one query vector; only the client can remove A·s and read its column`,
+      firstValuesOfVector0: u32s(b, 40, 8),
+    };
+  }
+  if (route === "/tail") {
+    const h = decodeTailHeader(b);
+    return {
+      format: "tail: 132-byte header, then commitments, outputs, nullifiers, block roots",
+      magic: ascii4(b),
+      snapshotId: hex(h.snapshotId),
+      height: h.height,
+      blockHash: hex(h.blockHash),
+      firstFree: h.firstFree,
+      root: hex(h.root),
+      sectionBytes: h.sections,
+    };
+  }
+  if (route.startsWith("/blob/")) {
+    const digest = route.slice("/blob/".length);
+    const a = manifest?.artifacts;
+    const name = a === undefined ? "artifact" : a.scan.digest === digest ? "scan file" : a.blockRoots.digest === digest ? "block roots" : a.readSetup.digest === digest ? "read table setup" : a.nullifierSetup.digest === digest ? "nullifier table setup" : "artifact";
+    const out: Json = { format: `${name}, addressed by its SHA-256`, digest };
+    if (name === "scan file") {
+      out.entries = b.length / 36;
+      out.first = Array.from({ length: Math.min(4, b.length / 36) }, (_, i) => ({ position: i, point: hex(b.subarray(36 * i, 36 * i + 32)), element0Prefix: hex(b.subarray(36 * i + 32, 36 * i + 36)) }));
+    } else if (name === "block roots") {
+      out.roots = Array.from({ length: Math.min(16, b.length / 32) }, (_, i) => hex(b.subarray(32 * i, 32 * i + 32)));
+    } else if (name.endsWith("setup")) {
+      out.layout = `rows × 1024 u32 (H = table × A), ${b.length / 4 / 1024} rows`;
+      out.firstValues = u32s(b, 0, 8);
+    }
+    return out;
+  }
+  return null;
+}
+
+const HEX_LIMIT = 64 * 1024;
+const TEXT_LIMIT = 1024 * 1024;
+
+/** A hex dump: offset, 16 bytes, ASCII. */
+function hexDump(b: Uint8Array, limit: number): string {
+  const lines: string[] = [];
+  for (let off = 0; off < Math.min(b.length, limit); off += 16) {
+    const row = b.subarray(off, Math.min(off + 16, b.length));
+    const hx = Array.from(row, (x) => x.toString(16).padStart(2, "0")).join(" ");
+    const txt = Array.from(row, (x) => (x >= 32 && x < 127 ? String.fromCharCode(x) : ".")).join("");
+    lines.push(`${off.toString(16).padStart(8, "0")}  ${hx.padEnd(47)}  ${txt}`);
+  }
+  return lines.join("\n");
+}
+
+function describeBody(e: Exchange, side: "request" | "response", all: boolean): Json {
+  const b = side === "request" ? e.requestBody : e.responseBody;
+  if (b === null || b.length === 0) return { bytes: 0 };
+  const type = (side === "request" ? e.requestHeaders["content-type"] : e.responseHeaders["content-type"]) ?? "";
+  const textual = type.includes("json") || type.startsWith("text/");
+  const limit = all ? Number.POSITIVE_INFINITY : textual ? TEXT_LIMIT : HEX_LIMIT;
+  let text: string | undefined;
+  if (textual) {
+    text = new TextDecoder().decode(b.subarray(0, Math.min(b.length, limit)));
+    try {
+      if (b.length <= limit) text = JSON.stringify(JSON.parse(text), null, 2);
+    } catch {
+      // not JSON
+    }
+  }
+  return {
+    bytes: b.length,
+    contentType: type,
+    sha256: hex(sha256Sync(b)),
+    decoded: decodeBody(e, side),
+    ...(text === undefined ? { hex: hexDump(b, limit) } : { text }),
+    shown: Math.min(b.length, limit),
+  };
+}
+
+function exchange(args: { id: number; all?: boolean }): Json {
+  const e = exchanges.get(args.id);
+  if (e === undefined) throw new Error(`request ${args.id} is no longer kept (the last ${KEEP_EXCHANGES} are)`);
+  return {
+    id: e.id,
+    at: e.at,
+    method: e.method,
+    path: e.path,
+    status: e.status,
+    ms: round(e.ms),
+    requestHeaders: e.requestHeaders,
+    request: describeBody(e, "request", args.all ?? false),
+    responseHeaders: e.responseHeaders,
+    response: describeBody(e, "response", args.all ?? false),
+  };
+}
+
+function exchangeBytes(args: { id: number; side: "request" | "response" }): Json {
+  const e = exchanges.get(args.id);
+  if (e === undefined) throw new Error(`request ${args.id} is no longer kept`);
+  const b = args.side === "request" ? e.requestBody : e.responseBody;
+  return { bytes: (b ?? new Uint8Array(0)).slice().buffer, name: `${e.id}-${e.method}-${e.path.replace(/[^a-z0-9]+/gi, "_").slice(0, 60)}-${args.side}.bin` };
 }
 
 async function debugJson(path: string): Promise<Json | null> {
@@ -163,11 +347,10 @@ async function deriveKeys(args: { mnemonic?: string; seedHex?: string; generate?
 async function fetchBlob(ref: ArtifactRef, name: string): Promise<Json> {
   const path = `${ROUTES.blob}${ref.digest}`;
   const t = now();
-  const response = await fetch(path);
+  const response = await capturingFetch(`${self.location.origin}${path}`);
   if (!response.ok) throw new Error(`GET ${path}: ${response.status}`);
   const bytes = new Uint8Array(await response.arrayBuffer());
   const ms = now() - t;
-  blobRecords.push({ method: "GET", path, bodyBytes: 0, status: response.status, answerBytes: bytes.length, ms });
   const digest = await sha256(bytes);
   if (digest !== ref.digest || bytes.length !== ref.size) throw new Error(`${name}: got ${bytes.length} bytes with SHA-256 ${digest}, expected ${ref.size} bytes with ${ref.digest}`);
   files.set(ref.digest, bytes);
@@ -494,6 +677,8 @@ const STEPS: Record<string, (args: never, progress: (text: string) => void) => P
   tail,
   summary,
   sampleSpends,
+  exchange,
+  exchangeBytes,
 };
 
 self.onmessage = async (event: MessageEvent<{ id: number; step: string; args: Json }>) => {

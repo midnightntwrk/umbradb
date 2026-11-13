@@ -151,7 +151,10 @@ A page that runs the client's own code in the browser, one step per button, and 
 6. get the tail, scan its outputs, and check each fetched position's full 32-hash path against the tail's root;
 7. show the coins and the balance.
 
-A side panel lists every request the server saw, with its size and time. The keys stay in the page's worker.
+A side panel lists every request the server saw, with its size and time. Clicking one shows it whole: the request's
+headers and body and the answer's, each with its size and SHA-256, decoded where the format is known (manifest, query
+and answer bodies, tail header, scan file, block roots, setup data), as text or a hex dump (the first 64 KB; "Show
+all" up to 4 MB; any size can be downloaded). The keys stay in the page's worker.
 
     npm ci --ignore-scripts --prefix examples/private-shielded-sync/client      # once
     node examples/private-shielded-sync/web/build.ts                            # writes web/dist/
