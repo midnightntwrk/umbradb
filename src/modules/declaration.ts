@@ -181,16 +181,54 @@ export interface ItemSink {
   put(item: string, value: unknown): void;
 }
 
+/** What a route's handler gets of the request. */
+export interface HttpRequest<Body = unknown> {
+  /** The query's parameters (the first value of each) and the path's, which win a name both have. */
+  params: Record<string, string>;
+  /** The request's headers: names in lower case, the first value of a repeated header. */
+  headers: Record<string, string>;
+  /**
+   * A JSON route's body parsed (integers beyond 2^53 as `bigint`; undefined when empty), a binary route's bytes (empty
+   * when there are none). A GET's body is ignored.
+   */
+  body: Body;
+}
+
+/** An answer with a body: written as JSON, unless the headers give a `Content-Type` and the body is text or bytes. */
+export interface HttpAnswer {
+  status: number;
+  headers?: Record<string, string>;
+  body: unknown;
+}
+
+/**
+ * An answer with a file on disk, which UmbraDB streams after the request's read is released: `path` is absolute, and
+ * `contentType` is `application/octet-stream` unless given. It answers a GET's single `Range` with 206 (416 when
+ * nothing of the file is in it) and sets `Content-Type`, `Content-Length` and `Accept-Ranges` itself.
+ */
+export interface HttpFileAnswer {
+  status: 200;
+  headers?: Record<string, string>;
+  file: { path: string; contentType?: string };
+}
+
+/** A route's handler: the request, and a read of the latest committed height. */
+export type HttpHandler<Body = unknown> = (req: HttpRequest<Body>, read: ReadHandle) => Promise<HttpAnswer | HttpFileAnswer>;
+
+/** How a route takes its body. */
+export interface HttpRouteOptions {
+  /** `json` (the default): the body parsed as JSON. `binary`: the body's bytes, neither decoded nor parsed. */
+  body?: "json" | "binary";
+  /** The route's body limit in bytes, in place of the module API's 1 MiB: above or below it. */
+  maxBodyBytes?: number;
+}
+
 /** Where `on-start-api` registers the module's HTTP routes and subscriptions. */
 export interface ApiRegistry {
-  http(
-    method: "GET" | "POST",
-    path: string,
-    handler: (
-      req: { params: Record<string, string>; body: unknown },
-      read: ReadHandle,
-    ) => Promise<{ status: number; headers?: Record<string, string>; body: unknown }>,
-  ): void;
+  /** A route whose body is JSON (the default). */
+  http(method: "GET" | "POST", path: string, handler: HttpHandler, options?: HttpRouteOptions & { body?: "json" }): void;
+  /** A route whose body is bytes. */
+  http(method: "GET" | "POST", path: string, handler: HttpHandler<Uint8Array>, options: HttpRouteOptions & { body: "binary" }): void;
   /** `handler` returns its unsubscribe. */
   subscription(name: string, handler: (args: unknown, emit: (value: unknown) => void) => () => void): void;
 }

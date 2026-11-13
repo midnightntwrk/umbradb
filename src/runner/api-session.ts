@@ -6,9 +6,13 @@
  * of Node.js at run time, so the engine, which the browser build bundles, answers through it while the browser carries
  * the socket carrier only as its build's stub.
  *
- * **HTTP.** A request's body is read up to {@link ModuleApiLimits.maxBodyBytes} (413 `request-too-large` past it) as
- * UTF-8 (400 `invalid-request` otherwise) and passed with the URL's path and query to `ModuleApi.answer`. A body read
- * before the module API got the request is refused 400 `invalid-request`.
+ * **HTTP.** The route that answers a request is looked up before its body is read (`ModuleApi.bodyRule`): the body is
+ * read up to the route's own limit, else {@link ModuleApiLimits.maxBodyBytes} (413 `request-too-large` past it), as
+ * bytes for a binary route, else as UTF-8 (400 `invalid-request` otherwise), and passed with the URL's path and query
+ * and the request's headers to `ModuleApi.answer`. A body read before the module API got the request is refused 400
+ * `invalid-request`. The fetch-style handler has no file system: it answers a handler's file answer 500
+ * `internal-error`, telling `onError`; and the Fetch API joins a repeated header's values, so its handlers get them
+ * joined.
  *
  * **Subscriptions.** Each message is a JSON text of at most {@link ModuleApiLimits.maxMessageBytes}: `{ "type":
  * "subscribe", "id", "name", "args"? }` — `id` a string of 1 to 128 characters the client chooses, unique among its
@@ -34,7 +38,15 @@
 import { parseJsonLossless } from "../deterministic-postgresql/index.js";
 import { exceedsUtf8, type PrivateLinkChannel } from "../library/channels.js";
 import { type CoreHeaders, withCoreHeaders } from "./api-answers.js";
-import { type ApiError, apiErrorResponse, type ApiResponse, encodeJson, type ModuleApi } from "./module-api.js";
+import {
+  type ApiError,
+  apiErrorResponse,
+  type ApiResponse,
+  encodeJson,
+  internalErrorResponse,
+  type ModuleApi,
+  utf8Text,
+} from "./module-api.js";
 
 /** A request body's limit, by default: 1 MiB. */
 export const DEFAULT_MAX_BODY_BYTES = 1_048_576;
@@ -88,22 +100,20 @@ export const BODY_NOT_UTF8: ApiResponse = apiErrorResponse(INVALID, "the request
 /** The answer to a request whose body could not be read (its stream failed). */
 export const BODY_UNREADABLE: ApiResponse = apiErrorResponse(INVALID, "the request could not be read");
 
-/** `bytes` as UTF-8 text, or null when they are none. */
-export function utf8Text(bytes: Uint8Array): string | null {
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    return null;
-  }
-}
-
 /**
- * The module API's answer to a request whose body was read (`text`): `url` its URL, undefined when it cannot be read.
- * The module API reads a POST's body only. Never rejects (`ModuleApi.answer` does not).
+ * The module API's answer to a request whose body was read (`body`: text, or a binary route's bytes) with `headers`:
+ * `url` its URL, undefined when it cannot be read. The module API reads a POST's body only. Never rejects
+ * (`ModuleApi.answer` does not).
  */
-export function answerRequest(api: ModuleApi, method: string, url: URL | undefined, text: string): Promise<ApiResponse> {
+export function answerRequest(
+  api: ModuleApi,
+  method: string,
+  url: URL | undefined,
+  body: string | Uint8Array,
+  headers?: Iterable<readonly [string, string]>,
+): Promise<ApiResponse> {
   if (url === undefined) return Promise.resolve(apiErrorResponse(INVALID, "the request URL cannot be read"));
-  return api.answer({ method, path: url.pathname, query: url.searchParams, body: text });
+  return api.answer({ method, path: url.pathname, query: url.searchParams, ...(headers === undefined ? {} : { headers }), body });
 }
 
 /** The statuses whose answer has no body (a `Response` refuses one). */
@@ -120,10 +130,17 @@ export function responseOf(answer: ApiResponse, core: CoreHeaders | null): Respo
   return new Response(body as BodyInit | null, { status: answer.status, headers });
 }
 
-/** The body of a fetch `request`: its text, or the answer refusing it (see the module comment). */
-async function fetchBody(request: Request, max: number): Promise<{ readonly text: string } | { readonly refused: ApiResponse }> {
+/**
+ * The body of a fetch `request`, read up to `max` bytes: its bytes when `binary`, else its text; or the answer refusing
+ * it (see the module comment).
+ */
+async function fetchBody(
+  request: Request,
+  max: number,
+  binary: boolean,
+): Promise<{ readonly body: string | Uint8Array } | { readonly refused: ApiResponse }> {
   if (request.bodyUsed) return { refused: BODY_READ_ALREADY };
-  if (request.body === null) return { text: "" };
+  if (request.body === null) return { body: binary ? new Uint8Array(0) : "" };
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -148,22 +165,33 @@ async function fetchBody(request: Request, max: number): Promise<{ readonly text
     bytes.set(chunk, at);
     at += chunk.byteLength;
   }
+  if (binary) return { body: bytes };
   const text = utf8Text(bytes);
-  return text === null ? { refused: BODY_NOT_UTF8 } : { text };
+  return text === null ? { refused: BODY_NOT_UTF8 } : { body: text };
 }
 
 /** A fetch-style handler: a `Request` in, its `Response` out; it never rejects. */
 export type FetchHandler = (request: Request) => Promise<Response>;
 
+/** Why the fetch-style handler does not serve a file answer: it has no file system (the browser's has none). */
+const NO_FILES = "a file answer is served by the module API's Node.js handlers only, not by its fetch-style handler";
+
 /**
  * The module API's fetch-style handler over `api` (see the module comment): the same rules as its Node.js handlers —
- * the body limit, the read timeout of `api`, the core's headers `core` on every answer.
+ * the route's body kind and limit, else the body limit, the read timeout of `api`, the core's headers `core` on every
+ * answer — but for a file answer, which it answers 500.
  */
 export function moduleApiFetch(api: ModuleApi, options: { readonly maxBodyBytes?: number; readonly core: CoreHeaders | null }): FetchHandler {
   const max = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
   return async (request) => {
-    const body = await fetchBody(request, max);
-    const answer = "refused" in body ? body.refused : await answerRequest(api, request.method, new URL(request.url), body.text);
+    const url = new URL(request.url);
+    const rule = api.bodyRule(request.method, url.pathname);
+    const body = await fetchBody(request, rule.maxBodyBytes ?? max, rule.binary);
+    let answer = "refused" in body ? body.refused : await answerRequest(api, request.method, url, body.body, request.headers);
+    if (answer.file !== undefined) {
+      answer.file.failed(new Error(NO_FILES));
+      answer = internalErrorResponse();
+    }
     return responseOf(answer, options.core);
   };
 }

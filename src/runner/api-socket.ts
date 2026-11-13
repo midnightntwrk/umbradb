@@ -8,9 +8,15 @@
  * `parseAddress`. The browser build carries this module only as its stub: a page has no Node.js server, and its
  * process answers through `./api-session.ts`'s fetch-style handler and channels.
  *
- * **HTTP.** A request's body is read from the request's stream with `./api-session.ts`'s rules. A mounted handler reads
- * the body itself: a host passes the request unread (one whose body was read already is answered 400
- * `invalid-request`).
+ * **HTTP.** A request's body is read from the request's stream with `./api-session.ts`'s rules: the route that answers
+ * it is looked up first, for its body's kind and limit. A mounted handler reads the body itself: a host passes the
+ * request unread (one whose body was read already is answered 400 `invalid-request`).
+ *
+ * **Files.** A file answer (`./module-api.ts`) is streamed from disk once the request's read is released, in chunks, as
+ * the client takes them, so a file of any size never sits in memory whole. Its path must be absolute and name a regular
+ * file; one that does not, or that cannot be opened, is answered 500 `internal-error` and told to `onError`. A GET's
+ * `Range` is answered as `./api-range.ts` says (200, 206 or 416); a POST always gets the whole file. A file that fails
+ * while it is sent, or a client that goes away, ends the connection.
  *
  * **Every HTTP answer names its build** (`./api-answers.ts`). The core's headers — `X-Umbra-Version`, the build's
  * version, and, given the process's configuration hash, `X-Umbra-Config-Hash` — are set once on every answer,
@@ -36,9 +42,12 @@
  * `apiReadTimeoutMs` on PostgreSQL); on the listener its answer goes nowhere.
  */
 
+import { type FileHandle, open } from "node:fs/promises";
 import { createServer, type IncomingMessage, ServerResponse, STATUS_CODES } from "node:http";
 import type { AddressInfo } from "node:net";
+import { isAbsolute } from "node:path";
 import type { Duplex } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { type RawData, type WebSocket, WebSocketServer } from "ws";
 import {
   type CoreHeaders,
@@ -63,9 +72,9 @@ import {
   parseAddress,
   type ServedConnection,
   SubscriptionConnection,
-  utf8Text,
 } from "./api-session.js";
-import type { ApiResponse, ModuleApi } from "./module-api.js";
+import { filePart, rangeNotSatisfiable } from "./api-range.js";
+import { type ApiFile, type ApiResponse, internalErrorResponse, type ModuleApi, utf8Text } from "./module-api.js";
 
 /** What {@link moduleApiHandlers} takes besides the module API. */
 export interface ModuleApiHandlerOptions extends ModuleApiLimits {
@@ -196,15 +205,21 @@ function socketConnection(socket: WebSocket, api: ModuleApi, rules: ConnectionRu
   };
 }
 
-/** The body of `request`: its text, or the answer refusing it (see the module comment). */
-function readBody(request: IncomingMessage, max: number): Promise<{ readonly text: string } | { readonly refused: ApiResponse }> {
+/** A request's body as read: text (a JSON route's), bytes (a binary route's), or the answer refusing it. */
+type ReadBody = { readonly body: string | Uint8Array } | { readonly refused: ApiResponse };
+
+/**
+ * The body of `request`, read up to `max` bytes: its bytes when `binary`, else its UTF-8 text; or the answer refusing it
+ * (see the module comment).
+ */
+function readBody(request: IncomingMessage, max: number, binary: boolean): Promise<ReadBody> {
   // A host's server passed a request whose body was read before the handler got it: its text is no more.
   if (request.readableEnded) return Promise.resolve({ refused: BODY_READ_ALREADY });
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
     let size = 0;
     let done = false;
-    const finish = (outcome: { readonly text: string } | { readonly refused: ApiResponse }) => {
+    const finish = (outcome: ReadBody) => {
       if (done) return;
       done = true;
       resolve(outcome);
@@ -216,11 +231,110 @@ function readBody(request: IncomingMessage, max: number): Promise<{ readonly tex
       else chunks.push(chunk);
     });
     request.on("end", () => {
+      if (binary) {
+        // A buffer of its own, at offset 0, so that a module can view it as wider integers.
+        const bytes = new Uint8Array(size);
+        let at = 0;
+        for (const chunk of chunks) {
+          bytes.set(chunk, at);
+          at += chunk.length;
+        }
+        finish({ body: bytes });
+        return;
+      }
       const text = utf8Text(Buffer.concat(chunks));
-      finish(text === null ? { refused: BODY_NOT_UTF8 } : { text });
+      finish(text === null ? { refused: BODY_NOT_UTF8 } : { body: text });
     });
     request.on("error", () => finish({ refused: BODY_UNREADABLE }));
   });
+}
+
+/** The headers of `request` as name and value, in the order they came (`rawHeaders`, names as sent). */
+function headerPairs(request: IncomingMessage): [string, string][] {
+  const raw = request.rawHeaders;
+  const pairs: [string, string][] = [];
+  for (let index = 0; index + 1 < raw.length; index += 2) pairs.push([raw[index] as string, raw[index + 1] as string]);
+  return pairs;
+}
+
+/** Ignores a failure: a file that can no longer be closed or sent is the client's or the system's, not an answer. */
+const ignore = (): void => undefined;
+
+/** The headers a file answer sets itself, replacing a handler's header of their names in any letter case. */
+const FILE_HEADERS: ReadonlySet<string> = new Set(["content-type", "content-length", "content-range", "accept-ranges"]);
+
+/** Writes `answer` whole, its headers given `headersOf`; nothing when the response can no longer be written. */
+function writeAnswer(
+  response: ServerResponse,
+  answer: ApiResponse,
+  headersOf: (headers: Readonly<Record<string, string>>) => HeadersArgument,
+): void {
+  try {
+    response.writeHead(answer.status, headersOf(answer.headers));
+    response.end(answer.body);
+  } catch {
+    // The response cannot be written any more: there is nothing to answer.
+  }
+}
+
+/**
+ * Serves `file`, the file of `answer`, to `request` (see **Files** in the module comment): opened and measured, then
+ * streamed whole or in the part the request's `Range` asks for. Never rejects.
+ */
+async function sendFile(
+  request: IncomingMessage,
+  response: ServerResponse,
+  answer: ApiResponse,
+  file: ApiFile,
+  headersOf: (headers: Readonly<Record<string, string>>) => HeadersArgument,
+): Promise<void> {
+  let handle: FileHandle | undefined;
+  let size: number;
+  try {
+    if (!isAbsolute(file.path)) throw new Error(`the file answer's path ${JSON.stringify(file.path)} is not absolute`);
+    handle = await open(file.path, "r");
+    const stat = await handle.stat();
+    if (!stat.isFile()) throw new Error(`the file answer's path ${JSON.stringify(file.path)} is not a regular file`);
+    size = stat.size;
+  } catch (error) {
+    await handle?.close().catch(ignore);
+    file.failed(error);
+    writeAnswer(response, internalErrorResponse(), headersOf);
+    return;
+  }
+  const own = Object.entries(answer.headers).filter(([name]) => !FILE_HEADERS.has(name.toLowerCase()));
+  const etag = own.find(([name]) => name.toLowerCase() === "etag")?.[1];
+  // Node.js joins a repeated `Range` or `If-Range` into one value, which is then no single range.
+  const { range, "if-range": ifRange } = request.headers as { range?: string; "if-range"?: string };
+  const part = request.method === "GET" ? filePart(size, range, ifRange, etag) : ({ kind: "whole" } as const);
+  if (part.kind === "unsatisfiable") {
+    await handle.close().catch(ignore);
+    writeAnswer(response, rangeNotSatisfiable(size), headersOf);
+    return;
+  }
+  const [start, end] = part.kind === "part" ? [part.start, part.end] : [0, size - 1];
+  const headers: Record<string, string> = {
+    ...Object.fromEntries(own),
+    "Content-Type": file.contentType,
+    "Content-Length": String(end - start + 1),
+    "Accept-Ranges": "bytes",
+    ...(part.kind === "part" ? { "Content-Range": `bytes ${start}-${end}/${size}` } : {}),
+  };
+  try {
+    response.writeHead(part.kind === "part" ? 206 : 200, headersOf(headers));
+  } catch {
+    // The response cannot be written any more: there is nothing to send.
+    await handle.close().catch(ignore);
+    return;
+  }
+  if (end < start) {
+    // An empty file: nothing to stream.
+    await handle.close().catch(ignore);
+    response.end();
+    return;
+  }
+  // The stream closes the file when it ends or is destroyed; the pipeline destroys both when either fails.
+  await pipeline(handle.createReadStream({ start, end }), response).catch(ignore);
 }
 
 /**
@@ -235,29 +349,31 @@ async function serve(
   maxBody: number,
   headersOf: (headers: Readonly<Record<string, string>>) => HeadersArgument,
 ): Promise<void> {
-  const body = await readBody(request, maxBody);
-  let answer: ApiResponse;
-  if ("refused" in body) {
-    answer = body.refused;
-  } else {
-    // A server's request always has its URL and method; an absolute-form URL may not parse.
-    let url: URL | undefined;
-    try {
-      url = new URL(request.url as string, "http://module-api");
-    } catch {
-      url = undefined;
-    }
-    answer = await answerRequest(api, request.method as string, url, body.text);
-  }
+  // A server's request always has its URL and method; an absolute-form URL may not parse.
+  let url: URL | undefined;
   try {
-    // A refused body was not read whole: the connection ends after the answer.
-    if ("refused" in body) response.setHeader("Connection", "close");
-    // `ModuleApi.answer` never rejects, and its statuses and headers are ones HTTP carries.
-    response.writeHead(answer.status, headersOf(answer.headers));
-    response.end(answer.body);
+    url = new URL(request.url as string, "http://module-api");
   } catch {
-    // The response cannot be written any more: there is nothing to answer.
+    url = undefined;
   }
+  const method = request.method as string;
+  // The route's body kind and limit, before its body is read; an unreadable URL's body is read as a JSON route's.
+  const rule = url === undefined ? undefined : api.bodyRule(method, url.pathname);
+  const body = await readBody(request, rule?.maxBodyBytes ?? maxBody, rule?.binary ?? false);
+  if ("refused" in body) {
+    // A refused body was not read whole: the connection ends after the answer.
+    try {
+      response.setHeader("Connection", "close");
+    } catch {
+      // The response cannot be written any more: there is nothing to answer.
+    }
+    writeAnswer(response, body.refused, headersOf);
+    return;
+  }
+  // `ModuleApi.answer` never rejects, and its statuses and headers are ones HTTP carries.
+  const answer = await answerRequest(api, method, url, body.body, headerPairs(request));
+  if (answer.file === undefined) writeAnswer(response, answer, headersOf);
+  else await sendFile(request, response, answer, answer.file, headersOf);
 }
 
 /** The module API's Node.js handlers (see the module comment). */

@@ -114,13 +114,17 @@ Ledger work has no execution deadline; expensive or stalled work remains an avai
 
 Optional HTTP routes and WebSocket subscriptions carry requests, parameters and module responses.
 HTTP handlers read a committed snapshot with the configured PostgreSQL read timeout
-(`src/runner/module-api.ts:365`).
+(`src/runner/module-api.ts:489`).
 Default limits are 1 MiB for HTTP bodies, 64 KiB for WebSocket messages and 1 MiB buffered output before a slow
-subscriber is disconnected (`src/runner/api-session.ts:39`, `src/runner/api-session.ts:43`,
-`src/runner/api-session.ts:45`, `src/runner/api-session.ts:220`).
+subscriber is disconnected (`src/runner/api-session.ts:52`, `src/runner/api-session.ts:56`,
+`src/runner/api-session.ts:58`, `src/runner/api-session.ts:250`).
+A route may set a larger body limit of its own; the body is held in memory whole before its handler runs, so each such
+route raises what one request can make the process hold (`src/runner/api-socket.ts:215`).
+A handler may answer with a file on disk, which the core streams by the path the handler gives; which files a route can
+name is the module's responsibility (`src/runner/api-socket.ts:284`).
 
 The listener supplies no authentication, authorization, TLS or WebSocket Origin policy
-(`src/runner/api-socket.ts:333`, `src/runner/api-socket.ts:299`).
+(`src/runner/api-socket.ts:449`, `src/runner/api-socket.ts:415`).
 A handler serving private data can therefore disclose it to anyone reaching the listener.
 Aggregate connection and subscription admission limits are also absent
 (`src/runner/api-socket.ts:286`, `src/runner/api-session.ts:207`; gaps 5 and 6).
