@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How private shielded sync works</title>
+<style>
+  :root { --bg: #f6f7f9; --card: #fff; --ink: #1b1f24; --muted: #5b6573; --line: #d5dae0; --wallet: #2457d6; --server: #8a3ffc; --wire: #0f7b6c; --chip: #eef2ff;
+    --mine: #fff1c2; --mine-line: #d39b00; --sel: #d9f2ec; --pad: #eceff3; --gpu: #e8590c; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #0f1216; --card: #171b21; --ink: #e6e9ee; --muted: #9aa4b2; --line: #2a3039; --wallet: #7aa2ff; --server: #b48cff; --wire: #3cc4ae; --chip: #1f2a44;
+    --mine: #4a3b10; --mine-line: #e0b02e; --sel: #12372f; --pad: #262c35; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  a { color: var(--wallet); }
+  header { max-width: 1360px; margin: 0 auto; padding: 20px 24px 8px; }
+  h1 { margin: 0 0 6px; font-size: 20px; }
+  .muted { color: var(--muted); }
+  .example { max-width: 1360px; margin: 8px auto 0; padding: 0 24px; }
+  .example .box { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  .example h3 { margin: 0 0 4px; font-size: 13px; }
+  .legend span { display: inline-block; margin: 2px 6px 2px 0; }
+  .lanes { max-width: 1360px; margin: 14px auto 60px; padding: 0 24px; position: relative; }
+  .lane-head { position: sticky; top: 0; z-index: 3; display: grid; grid-template-columns: 190px 1fr 1.1fr 1fr; background: var(--bg); padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .lane-head div { font-weight: 600; text-align: center; }
+  .lane-head .g { text-align: left; padding-left: 34px; color: var(--muted); font-weight: 500; }
+  .lane-head .w { color: var(--wallet); } .lane-head .c { color: var(--wire); } .lane-head .s { color: var(--server); }
+  .time { position: absolute; left: 35px; top: 46px; bottom: 0; width: 2px; background: var(--line); }
+  .time::after { content: "time"; position: absolute; bottom: -22px; left: -12px; color: var(--muted); font-size: 11px; }
+  .time::before { content: ""; position: absolute; bottom: -6px; left: -5px; border: 6px solid transparent; border-top-color: var(--line); }
+  .step, .detail { position: relative; display: grid; grid-template-columns: 190px 1fr 1.1fr 1fr; padding: 14px 0; border-bottom: 1px dashed var(--line); }
+  .detail { padding-top: 0; border-bottom: 1px dashed var(--line); }
+  .step .num { position: absolute; left: 0; top: 14px; width: 24px; height: 24px; border-radius: 50%; background: var(--chip); display: grid; place-items: center; font-size: 12px; font-weight: 600; z-index: 1; }
+  .step h2 { grid-column: 1; margin: 0; padding: 3px 14px 0 34px; font-size: 14px; line-height: 1.3; }
+  .step h2 small, .detail h2 small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .detail h2 { grid-column: 1; margin: 0; padding: 0 14px 0 34px; font-size: 13px; color: var(--muted); }
+  .side { padding: 0 10px; min-width: 0; }
+  .card { position: relative; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
+  .card.w { border-left: 3px solid var(--wallet); } .card.s { border-left: 3px solid var(--server); }
+  .card .t { font-weight: 600; font-size: 12px; margin-bottom: 3px; }
+  .card .d { font-size: 12px; color: var(--muted); }
+  .card .d b { color: var(--ink); }
+  .card.gpu { overflow: clip; padding-right: 34px; }
+  .gpu-tag { position: absolute; top: 7px; right: -24px; width: 84px; transform: rotate(45deg); text-align: center; background: var(--gpu); color: #fff; font: 600 10px/16px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .06em; cursor: help; }
+  .wire { padding: 0 6px; min-width: 0; }
+  .msg { position: relative; margin: 6px 0 12px; min-height: 34px; padding-bottom: 10px; }
+  .msg .label { font-size: 12px; text-align: center; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .msg .size { font-size: 11px; color: var(--muted); text-align: center; }
+  .msg .line { position: absolute; left: 0; right: 0; bottom: 4px; height: 2px; background: var(--wire); }
+  .msg.right .line::after { content: ""; position: absolute; right: -2px; top: -5px; border: 6px solid transparent; border-left-color: var(--wire); }
+  .msg.left .line::before { content: ""; position: absolute; left: -2px; top: -5px; border: 6px solid transparent; border-right-color: var(--wire); }
+  .none { text-align: center; color: var(--muted); font-size: 12px; padding-top: 18px; }
+  .sees { font-size: 11px; color: var(--muted); border-top: 1px dotted var(--line); margin-top: 6px; padding-top: 4px; }
+  .sees b { color: var(--server); font-weight: 600; }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .sz { border-bottom: 1px dashed currentColor; cursor: help; }
+
+  /* diagrams */
+  .diag { margin-top: 6px; font-size: 11px; }
+  .grid { display: inline-grid; gap: 3px; }
+  .cell { border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; text-align: center; background: var(--card); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; min-width: 30px; }
+  .cell.mine { background: var(--mine); border-color: var(--mine-line); font-weight: 600; }
+  .cell.sel { background: var(--sel); }
+  .cell.pad { background: var(--pad); }
+  .cell.dim { opacity: .45; }
+  .colhead { text-align: center; color: var(--muted); font-size: 10px; }
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+  .flow .cell { min-width: 0; }
+  .arrow { color: var(--muted); }
+  .buckets { display: flex; gap: 6px; flex-wrap: wrap; }
+  .bucket { border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; min-width: 64px; }
+  .bucket .h { font-size: 10px; color: var(--muted); margin-bottom: 3px; }
+  .bucket .cell { margin: 2px 0; }
+  .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+  .tile { border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; }
+  .tile.mine { background: var(--mine); border-color: var(--mine-line); }
+  .tile .p { font-weight: 600; }
+  .tile .ok { color: var(--ok, #137a3a); font-weight: 600; }
+  .tree { display: grid; gap: 4px; justify-items: center; }
+  .tree .row { display: flex; gap: 4px; justify-content: center; flex-wrap: wrap; }
+  .tree .blk { border: 1px dashed var(--line); border-radius: 6px; padding: 3px; display: flex; gap: 3px; }
+  .tree .cell { min-width: 24px; padding: 2px 4px; }
+
+  /* the worked numbers */
+  .math { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; }
+  .math table { border-collapse: collapse; display: inline-table; vertical-align: middle; }
+  .math td { padding: 1px 6px; text-align: right; }
+  .math .m { border-left: 2px solid var(--muted); border-right: 2px solid var(--muted); border-radius: 4px; display: inline-block; vertical-align: middle; margin: 2px 2px; }
+  .math .eq { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0; }
+  .math .lbl { color: var(--muted); font-family: system-ui, sans-serif; font-size: 11px; }
+  .math td.hit { background: var(--mine); font-weight: 700; }
+  .math td.selrow { background: var(--sel); }
+  .note { background: var(--chip); border-radius: 6px; padding: 6px 8px; font-size: 11.5px; margin-top: 6px; }
+
+  .tooltip { position: fixed; z-index: 10; max-width: 470px; background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.18); padding: 10px 12px; font-size: 12px; pointer-events: none; }
+  .tooltip b { display: block; margin-bottom: 6px; }
+  .tooltip table { border-collapse: collapse; width: 100%; }
+  .tooltip th, .tooltip td { text-align: left; padding: 2px 8px 2px 0; white-space: nowrap; }
+  .tooltip th { color: var(--muted); font-weight: 500; }
+  .tooltip .n { color: var(--muted); margin-top: 6px; white-space: normal; }
+</style>
+</head>
+<body>
+<header>
+  <h1>How private shielded sync works</h1>
+  <div class="muted">One toy chain, every step: what the wallet computes (left), what crosses the wire (center), what the server does (right). Time goes down. Run it for real on the <a href="index.html">step-by-step page</a>.</div>
+</header>
+
+<section class="example">
+  <div class="box">
+    <div><h3>The toy chain</h3><div class="muted">9 shielded outputs at positions 0–8, each a commitment <span class="mono">c0…c8</span> and a ciphertext only the recipient can open. 5 spends so far, each published as a nullifier <span class="mono">n1…n5</span>.</div></div>
+    <div><h3>The wallet</h3><div class="muted">Owns output <b>2</b> (1,000 pssUSD) and output <b>6</b> (250 pssUSD). It already spent output 2: that spend published n3. It does not know any of this yet.</div></div>
+    <div><h3>The server's snapshot</h3><div class="muted">Taken after output 8. Read table: 9 records in a 3 × 3 grid. Nullifier table: 4 buckets. Merkle tree cut into blocks of 4 leaves. Output 9 arrives after the snapshot.</div></div>
+    <div class="legend"><h3>Reading the page</h3>
+      <span><span class="cell mine">2</span> the wallet's</span>
+      <span><span class="cell sel">c0</span> asked for</span>
+      <span><span class="cell pad">c1</span> padding</span><br>
+      <span><span class="gpu-tag" style="position: static; transform: none; display: inline-block; width: auto; padding: 0 6px">gpu</span> GPU-accelerated: hover for 1M and 10M entries</span><br>
+      <span><span class="sz">324 B</span> hover a size for 1M and 10M entries</span>
+    </div>
+  </div>
+</section>
+
+<div class="lanes">
+  <div class="lane-head"><div class="g">Step</div><div class="w">Wallet (your device)</div><div class="c">On the wire</div><div class="s">Server (UmbraDB module)</div></div>
+  <div class="time"></div>
+
+  <!-- 0 ─────────────────────────────────────────────────────────────── -->
+  <div class="step"><span class="num">0</span>
+    <h2>The server builds a snapshot<small>Once per snapshot, for every wallet alike.</small></h2>
+    <div class="side"></div>
+    <div class="wire"><div class="none">nothing sent</div></div>
+    <div class="side">
+      <div class="card s"><div class="t">Reads the chain from UmbraDB's tables</div>
+        <div class="d">9 outputs (commitment + ciphertext), 5 nullifiers, the tree's root.</div>
+      </div>
+      <div class="card s gpu"><span class="gpu-tag" data-tip="setup">gpu</span><div class="t">Read table: one record per output, 3 per column</div>
+        <div class="d">A record holds the commitment, ciphertext elements 1–5 and the lower Merkle path. Setup data <b>H = table × A</b> lets a client decode answers.</div>
+        <div class="diag"><div class="grid" style="grid-template-columns: repeat(3, auto)">
+          <div class="colhead">col 0</div><div class="colhead">col 1</div><div class="colhead">col 2</div>
+          <div class="cell">r0</div><div class="cell">r3</div><div class="cell">r6</div>
+          <div class="cell">r1</div><div class="cell">r4</div><div class="cell">r7</div>
+          <div class="cell">r2</div><div class="cell">r5</div><div class="cell">r8</div>
+        </div></div>
+      </div>
+      <div class="card s"><div class="t">Nullifier table: buckets by the nullifier's first 2 bits</div>
+        <div class="diag buckets">
+          <div class="bucket"><div class="h">bucket 0</div><div class="cell">n1</div><div class="cell">n3</div></div>
+          <div class="bucket"><div class="h">bucket 1</div><div class="cell">n2</div></div>
+          <div class="bucket"><div class="h">bucket 2</div><div class="cell">n4</div></div>
+          <div class="bucket"><div class="h">bucket 3</div><div class="cell">n5</div></div>
+        </div>
+      </div>
+      <div class="card s"><div class="t">Merkle tree in blocks of 4 leaves</div>
+        <div class="d">Each full block's root is published; a record carries its leaf's path up to the block root.</div>
+        <div class="diag tree">
+          <div class="row"><div class="cell">root</div></div>
+          <div class="row"><div class="cell">R0</div><div class="cell">R1</div><div class="cell">R2</div></div>
+          <div class="row">
+            <div class="blk"><div class="cell">c0</div><div class="cell">c1</div><div class="cell">c2</div><div class="cell">c3</div></div>
+            <div class="blk"><div class="cell">c4</div><div class="cell">c5</div><div class="cell">c6</div><div class="cell">c7</div></div>
+            <div class="blk"><div class="cell">c8</div><div class="cell dim">·</div><div class="cell dim">·</div><div class="cell dim">·</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1 ─────────────────────────────────────────────────────────────── -->
+  <div class="step"><span class="num">1</span>
+    <h2>Wallet keys<small>On the device only.</small></h2>
+    <div class="side">
+      <div class="card w"><div class="t">Mnemonic → keys</div>
+        <div class="diag flow">
+          <span class="cell">24 words</span><span class="arrow">→</span><span class="cell">BIP-39 seed</span><span class="arrow">→</span><span class="cell">HD m/44'/2400'/0'/3/0</span><span class="arrow">→</span><span class="cell">Zswap seed</span>
+        </div>
+        <div class="diag flow" style="margin-top: 6px">
+          <span class="arrow">→</span><span class="cell mine">scan secret</span><span class="cell">coin secret key</span><span class="arrow">→</span><span class="cell">shielded address</span>
+        </div>
+        <div class="d" style="margin-top: 6px">The <b>scan secret</b> (encryption secret key) tests outputs; the <b>coin secret key</b> derives nullifiers.</div>
+      </div>
+    </div>
+    <div class="wire"><div class="none">nothing sent</div></div>
+    <div class="side"></div>
+  </div>
+
+  <!-- 2 ─────────────────────────────────────────────────────────────── -->
+  <div class="step"><span class="num">2</span>
+    <h2>Get the files<small>The same download for every wallet.</small></h2>
+    <div class="side">
+      <div class="card w"><div class="t">Checks everything it got</div>
+        <div class="d">Each file's SHA-256 equals the manifest's. The block roots hash up to the manifest's root: <span class="mono">h(h(R0,R1), h(R2,0)) = root</span>.</div>
+      </div>
+      <div class="card w"><div class="t">Keeps the setup data</div>
+        <div class="d">Toy read setup <b>H</b> (3 rows × n = 2):</div>
+        <div class="math" id="h-matrix"></div>
+      </div>
+    </div>
+    <div class="wire">
+      <div class="msg right"><div class="label">GET /manifest</div><div class="line"></div></div>
+      <div class="msg left"><div class="label">manifest</div><div class="size"><span class="sz" data-tip="manifest">1.4 KB</span>: height, root, digests, the seed of A</div><div class="line"></div></div>
+      <div class="msg left"><div class="label">scan file</div><div class="size"><span class="sz" data-tip="scanfile">9 × 36 B = 324 B</span></div><div class="line"></div></div>
+      <div class="msg left"><div class="label">block roots</div><div class="size"><span class="sz" data-tip="blockroots">3 × 32 B = 96 B</span></div><div class="line"></div></div>
+      <div class="msg left"><div class="label">read setup · nullifier setup</div><div class="size"><span class="sz" data-tip="setup-size">rows × 1,024 × 4 B each</span></div><div class="line"></div></div>
+    </div>
+    <div class="side">
+      <div class="card s"><div class="t">Serves files by their SHA-256</div>
+        <div class="sees"><b>Sees:</b> someone downloaded this snapshot. Every wallet does the same.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3 ─────────────────────────────────────────────────────────────── -->
+  <div class="step"><span class="num">3</span>
+    <h2>Find my outputs (scan)<small>All 9 entries, tested locally.</small></h2>
+    <div class="side">
+      <div class="card w gpu"><span class="gpu-tag" data-tip="scan">gpu</span><div class="t">Tests every scan entry</div>
+        <div class="d">Entry = ciphertext point ‖ first 4 bytes of element 0. The wallet computes <span class="mono">Poseidon(point × scan secret)</span> and compares its first 4 bytes. Equal means the output is the wallet's (a false match is about 1 in 4 billion).</div>
+        <div class="diag tiles" id="scan-tiles"></div>
+        <div class="d" style="margin-top: 4px">Bytes are illustrative.</div>
+      </div>
+    </div>
+    <div class="wire"><div class="none">nothing sent</div></div>
+    <div class="side"><div class="card s"><div class="sees" style="border: 0; margin: 0; padding: 0"><b>Sees:</b> nothing.</div></div></div>
+  </div>
+
+  <!-- 4 ─────────────────────────────────────────────────────────────── -->
+  <div class="step"><span class="num">4</span>
+    <h2>Fetch my records by PIR<small>Commitments, ciphertexts and paths of outputs 2 and 6, without saying which.</small></h2>
+    <div class="side">
+      <div class="card w"><div class="t">Picks columns</div>
+        <div class="d">Output 2 is in column 0 and output 6 in column 2. The call always carries the same number of vectors: here 3, so column 1 is added as padding. The real client sends 32.</div>
+        <div class="diag"><div class="grid" style="grid-template-columns: repeat(3, auto)">
+          <div class="colhead">col 0</div><div class="colhead">col 1</div><div class="colhead">col 2</div>
+          <div class="cell sel">r0</div><div class="cell pad">r3</div><div class="cell sel mine">r6</div>
+          <div class="cell sel">r1</div><div class="cell pad">r4</div><div class="cell sel">r7</div>
+          <div class="cell sel mine">r2</div><div class="cell pad">r5</div><div class="cell sel">r8</div>
+        </div></div>
+      </div>
+      <div class="card w"><div class="t">Builds one encrypted vector per column</div>
+        <div class="d"><span class="mono">q = A·s + e + Δ·u</span>: <span class="mono">u</span> marks the column, <span class="mono">s</span> is a fresh secret, <span class="mono">e</span> small noise. To the server <span class="mono">q</span> is indistinguishable from random.</div>
+      </div>
+    </div>
+    <div class="wire">
+      <div class="msg right"><div class="label">POST /query/read</div><div class="size"><span class="sz" data-tip="readup">3 vectors × 3 numbers</span></div><div class="line"></div></div>
+      <div class="msg left"><div class="label">answer</div><div class="size"><span class="sz" data-tip="readdown">3 vectors × 3 numbers</span></div><div class="line"></div></div>
+    </div>
+    <div class="side">
+      <div class="card s gpu"><span class="gpu-tag" data-tip="readcall">gpu</span><div class="t">Multiplies the table by each vector</div>
+        <div class="d">Answer = table × q. It does the same work for every vector and every wallet.</div>
+        <div class="sees"><b>Sees:</b> 3 vectors that look random. Not which columns, so not which outputs.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="detail">
+    <h2>The numbers, for the vector of column 0<small>Toy SimplePIR: modulus 65,536, Δ = 4,096 (numbers 0–15), n = 2. Each record is one number here; a real one is 627 numbers of 9 bits.</small></h2>
+    <div class="side"><div class="card w"><div class="t">Query</div><div class="math" id="query-math"></div></div></div>
+    <div class="wire"><div class="card"><div class="t">On the wire</div><div class="math" id="wire-math"></div></div></div>
+    <div class="side"><div class="card s"><div class="t">Answer = table × q</div><div class="math" id="answer-math"></div></div></div>
+  </div>
+  <div class="detail">
+    <h2>Decoding<small>Only the holder of s can remove A·s.</small></h2>
+    <div class="side" style="grid-column: 2 / 4"><div class="card w"><div class="t">answer − H·s, then ÷ Δ, round, mod 16</div><div class="math" id="decode-math"></div></div></div>
+    <div class="side"><div class="card w"><div class="t">The other two vectors</div><div class="math" id="others-math"></div></div></div>
+  </div>
+  <div class="step" style="padding-top: 6px">
+    <h2 style="padding-top: 0"></h2>
+    <div class="side">
+      <div class="card w"><div class="t">Opens its records</div>
+        <div class="d">Record 2 → ciphertext decrypts → <b>1,000 pssUSD</b>; record 6 → <b>250 pssUSD</b>. Each coin's commitment, recomputed, equals the record's, so the coins are real. The lower path comes with the record.</div>
+      </div>
+    </div>
+    <div class="wire"></div>
+    <div class="side"></div>
+  </div>
+
+  <!-- 5 ─────────────────────────────────────────────────────────────── -->
+  <div class="step"><span class="num">5</span>
+    <h2>Check my nullifiers by PIR<small>Are coins 2 and 6 spent?</small></h2>
+    <div class="side">
+      <div class="card w"><div class="t">Computes each coin's nullifier</div>
+        <div class="d"><span class="mono">nf(coin 2) = n3</span> → bucket 0. <span class="mono">nf(coin 6) = n6</span> → bucket 2. Bucket 1 is padding.</div>
+      </div>
+      <div class="card w"><div class="t">Reads its buckets</div>
+        <div class="diag buckets">
+          <div class="bucket"><div class="h">bucket 0</div><div class="cell sel">n1</div><div class="cell sel mine">n3</div></div>
+          <div class="bucket"><div class="h">bucket 2</div><div class="cell sel">n4</div></div>
+        </div>
+        <div class="d" style="margin-top: 6px"><b>n3</b> is there: coin 2 is <b>spent</b>. <b>n6</b> is not: coin 6 is <b>unspent</b> at the snapshot.</div>
+      </div>
+    </div>
+    <div class="wire">
+      <div class="msg right"><div class="label">POST /query/nullifier</div><div class="size"><span class="sz" data-tip="nfup">3 vectors × 4 numbers</span> (buckets 0, 2 + padding)</div><div class="line"></div></div>
+      <div class="msg left"><div class="label">answer</div><div class="size"><span class="sz" data-tip="nfdown">3 vectors × 2 numbers</span></div><div class="line"></div></div>
+    </div>
+    <div class="side">
+      <div class="card s gpu"><span class="gpu-tag" data-tip="nfcall">gpu</span><div class="t">Multiplies the nullifier table by each vector</div>
+        <div class="diag buckets">
+          <div class="bucket"><div class="h">bucket 0</div><div class="cell">n1</div><div class="cell">n3</div></div>
+          <div class="bucket"><div class="h">bucket 1</div><div class="cell">n2</div></div>
+          <div class="bucket"><div class="h">bucket 2</div><div class="cell">n4</div></div>
+          <div class="bucket"><div class="h">bucket 3</div><div class="cell">n5</div></div>
+        </div>
+        <div class="sees"><b>Sees:</b> 3 vectors that look random. Not which buckets, so not which coins, and not whether they are spent.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6 ─────────────────────────────────────────────────────────────── -->
+  <div class="step"><span class="num">6</span>
+    <h2>Get the tail<small>Everything since the snapshot, in full.</small></h2>
+    <div class="side">
+      <div class="card w"><div class="t">Scans the new output</div>
+        <div class="d">Output 9 is tested like any scan entry: not the wallet's. No new spend touches coin 6.</div>
+      </div>
+      <div class="card w"><div class="t">Builds each coin's full path and checks it</div>
+        <div class="diag tree">
+          <div class="row"><div class="cell sel">root′</div></div>
+          <div class="row"><div class="cell" id="t-r0">R0</div><div class="cell" id="t-r1">R1</div><div class="cell sel">R2′</div></div>
+          <div class="row">
+            <div class="blk"><div class="cell sel">h(c0,c1)</div><div class="cell mine">c2</div><div class="cell sel">c3</div></div>
+            <div class="blk"><div class="cell sel">h(c4,c5)</div><div class="cell mine">c6</div><div class="cell sel">c7</div></div>
+            <div class="blk"><div class="cell">c8</div><div class="cell">c9</div></div>
+          </div>
+        </div>
+        <div class="d" style="margin-top: 6px">Coin 2: <span class="mono">c3, h(c0,c1)</span> from its record, then <span class="mono">R1, h(R2′, 0)</span>. Coin 6: <span class="mono">c7, h(c4,c5)</span>, then <span class="mono">R0, h(R2′, 0)</span>. Both give the tail's root <span class="mono">root′</span>, which a spend proves against.</div>
+      </div>
+    </div>
+    <div class="wire">
+      <div class="msg right"><div class="label">GET /tail</div><div class="line"></div></div>
+      <div class="msg left"><div class="label">tail</div><div class="size"><span class="sz" data-tip="tail">c8, output 9, 0 spends, R2′</span></div><div class="line"></div></div>
+    </div>
+    <div class="side">
+      <div class="card s"><div class="t">Sends everything after the snapshot</div>
+        <div class="d">The unfinished block's commitments (c8), each new output with its ciphertext (9), each new spend (none), the new block roots (R2′).</div>
+        <div class="sees"><b>Sees:</b> a tail download, the same bytes for every wallet.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 7 ─────────────────────────────────────────────────────────────── -->
+  <div class="step"><span class="num">7</span>
+    <h2>Result</h2>
+    <div class="side">
+      <div class="card w"><div class="t">Balance: 250 pssUSD</div>
+        <div class="d">Coin 6 (250 pssUSD) unspent, with a full Merkle path: ready to spend. Coin 2 (1,000 pssUSD) spent.</div>
+      </div>
+    </div>
+    <div class="wire"><div class="none">nothing more sent</div></div>
+    <div class="side">
+      <div class="card s"><div class="t">What the server learned</div>
+        <div class="d">One file download, one read call of 3 vectors, one nullifier call of 3 vectors, one tail. The same shape for every wallet, whatever it owns.</div>
+        <div class="sees"><b>Never sees:</b> the keys, which outputs matched, which columns or buckets were read, which coins are spent.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ── 1M / 10M figures for the gpu tags and the sizes ─────────────────────────────────────────────────────────────
+  const TIPS = {
+    setup: { title: "Building the setup data (table × A, 1,024 vectors)", head: ["entries", "GPU", "CPU, 8 threads"],
+      rows: [["1,000,000 outputs (read setup)", "≈ 1.4 s", "≈ 31 s"], ["10,000,000 outputs (read setup)", "≈ 14 s", "≈ 5 min"],
+        ["1,000,000 nullifiers (nullifier setup)", "≈ 0.1 s", "≈ 2 s"], ["10,000,000 nullifiers (nullifier setup)", "≈ 1 s", "≈ 20 s"]],
+      note: "Scaled from the Preprod-size check on an Apple M4 Max (69k outputs: GPU 100 ms, CPU 2.15 s). Kernel: gpu/multiply.ts, byte-equal to the CPU; the Node server module runs the CPU one." },
+    scan: { title: "Scanning for the wallet's outputs", head: ["entries", "GPU (WebGPU)", "CPU, 8 threads", "CPU, 1 thread"],
+      rows: [["1,000,000", "≈ 5 s", "≈ 70 s", "≈ 7.3 min"], ["10,000,000", "≈ 50 s", "≈ 12 min", "≈ 73 min"]],
+      note: "Measured per entry on an Apple M4 Max: WebGPU in Chromium 4.8–5.4 µs, WebAssembly 70 µs on 8 threads, 437 µs on one browser thread. Kernel: gpu/scan.ts (the step page's 'Use WebGPU')." },
+    readcall: { title: "One read call on the server: table × 32 query vectors", head: ["outputs", "GPU", "CPU, 8 threads"],
+      rows: [["1,000,000", "≈ 50 ms", "≈ 0.65 s"], ["10,000,000", "≈ 0.5 s", "≈ 6.5 s"]],
+      note: "1M measured in Chromium's WebGPU (704-byte records, 32 vectors); 10M and the CPU column scaled from the Preprod-size check (69k outputs: CPU 45 ms). Kernel: gpu/multiply.ts." },
+    nfcall: { title: "One nullifier call on the server: table × 32 query vectors", head: ["nullifiers", "GPU", "CPU, 8 threads"],
+      rows: [["1,000,000", "≈ 5 ms", "≈ 60 ms"], ["10,000,000", "≈ 40 ms", "≈ 0.6 s"]],
+      note: "Scaled from the Preprod-size check (58k nullifiers: CPU 3.4 ms, GPU 0.4 ms of execution) and Chromium's WebGPU rate. Small calls are bound by the GPU's per-call overhead." },
+    manifest: { title: "The manifest", head: ["entries", "size"], rows: [["1,000,000 outputs", "≈ 1.4 KB"], ["10,000,000 outputs", "≈ 1.4 KB"]],
+      note: "It does not grow with the chain: height, root, PIR parameters, the seed of A, four file digests." },
+    scanfile: { title: "The scan file (36 bytes per output)", head: ["entries", "size"], rows: [["1,000,000 outputs", "36 MB"], ["10,000,000 outputs", "360 MB"]],
+      note: "Every wallet downloads the whole file: the price of finding outputs without telling the server which." },
+    blockroots: { title: "The block roots (32 bytes per block of 65,536 outputs)", head: ["entries", "size"], rows: [["1,000,000 outputs", "16 blocks: 512 B"], ["10,000,000 outputs", "153 blocks: 4.9 KB"]],
+      note: "The toy uses blocks of 4 outputs; the real server uses 2^16." },
+    "setup-size": { title: "The setup data of both PIR tables", head: ["entries", "read setup", "nullifier setup"], rows: [["1,000,000", "≈ 103 MB", "≈ 25 MB"], ["10,000,000", "≈ 326 MB", "≈ 105 MB"]],
+      note: "Grows with the square root of the table: rows ≈ 627 cells × √(outputs / 627) for the read table. Estimated with the server's sizing rule; Preprod today: 27 MB and 6.6 MB." },
+    readup: { title: "One read call, up (32 vectors × columns × 4 B)", head: ["entries", "size"], rows: [["1,000,000 outputs", "≈ 3.2 MB"], ["10,000,000 outputs", "≈ 10 MB"]],
+      note: "The real client sends 32 vectors per call; the toy shows 3. Preprod today: 806 KB." },
+    readdown: { title: "One read call, down (32 vectors × rows × 4 B)", head: ["entries", "size"], rows: [["1,000,000 outputs", "≈ 3.2 MB"], ["10,000,000 outputs", "≈ 10.2 MB"]], note: "Preprod today: 883 KB." },
+    nfup: { title: "One nullifier call, up (32 vectors × buckets × 4 B)", head: ["entries", "size"], rows: [["1,000,000 nullifiers", "≈ 1 MB"], ["10,000,000 nullifiers", "≈ 2 MB"]],
+      note: "Estimated with the server's bucket sizing (8,192 and 16,384 buckets). Preprod today: 262 KB." },
+    nfdown: { title: "One nullifier call, down (32 vectors × rows × 4 B)", head: ["entries", "size"], rows: [["1,000,000 nullifiers", "≈ 0.77 MB"], ["10,000,000 nullifiers", "≈ 3.3 MB"]], note: "Preprod today: 207 KB." },
+    tail: { title: "The tail", head: ["part", "size"], rows: [["commitments of the snapshot's unfinished block", "up to 65,536 × 32 B = 2 MB"], ["each new output", "257 B"], ["each new spend", "40 B"], ["block roots", "32 B per block"]],
+      note: "It does not grow with the chain's size, only with what happened since the snapshot." },
+  };
+
+  const tip = document.createElement("div");
+  tip.className = "tooltip";
+  tip.hidden = true;
+  document.body.appendChild(tip);
+  const esc = (t) => String(t).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+  document.addEventListener("mouseover", (e) => {
+    const el = e.target.closest("[data-tip]");
+    if (!el || !TIPS[el.dataset.tip]) return;
+    const d = TIPS[el.dataset.tip];
+    tip.innerHTML = `<b>${esc(d.title)}</b><table><tr>${d.head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr>${d.rows
+      .map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</table>${d.note ? `<div class="n">${esc(d.note)}</div>` : ""}`;
+    tip.hidden = false;
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (tip.hidden) return;
+    const w = tip.offsetWidth, h = tip.offsetHeight;
+    tip.style.left = `${Math.max(8, Math.min(e.clientX + 14, innerWidth - w - 8))}px`;
+    tip.style.top = `${e.clientY + 16 + h > innerHeight ? e.clientY - h - 12 : e.clientY + 16}px`;
+  });
+  document.addEventListener("mouseout", (e) => {
+    if (e.target.closest("[data-tip]") && !e.relatedTarget?.closest?.("[data-tip]")) tip.hidden = true;
+  });
+
+  // ── the toy SimplePIR, computed here so every number is exact ───────────────────────────────────────────────────
+  const Q = 65536, DELTA = 4096, N = 2; // plaintext modulus p = Q / Δ = 16
+  const mod = (x) => ((x % Q) + Q) % Q;
+  let seed = 20261113;
+  const rand = () => ((seed = (Math.imul(seed ^ (seed >>> 15), 2246822507) + 0x9e3779b9) >>> 0) / 4294967296);
+  const randMod = () => Math.floor(rand() * Q);
+  const noise = () => Math.floor(rand() * 5) - 2; // −2 … 2
+
+  // Each record is one number 0…15 here (a real record is 627 numbers). Column c holds records 3c, 3c+1, 3c+2.
+  const RECORD = [7, 12, 3, 9, 14, 5, 11, 2, 8];
+  const D = [0, 1, 2].map((r) => [0, 1, 2].map((c) => RECORD[3 * c + r])); // rows × columns
+  const A = [0, 1, 2].map(() => Array.from({ length: N }, randMod)); // columns × n, public (expanded from a seed)
+  const H = D.map((row) => Array.from({ length: N }, (_, k) => mod(row.reduce((acc, d, c) => acc + d * A[c][k], 0))));
+
+  function query(column) {
+    const s = Array.from({ length: N }, randMod);
+    const e = [0, 1, 2].map(noise);
+    const u = [0, 1, 2].map((c) => (c === column ? 1 : 0));
+    const As = A.map((row) => mod(row.reduce((acc, a, k) => acc + a * s[k], 0)));
+    const q = As.map((v, c) => mod(v + e[c] + DELTA * u[c]));
+    const ans = D.map((row) => mod(row.reduce((acc, d, c) => acc + d * q[c], 0)));
+    const Hs = H.map((row) => mod(row.reduce((acc, h, k) => acc + h * s[k], 0)));
+    const diff = ans.map((v, r) => mod(v - Hs[r]));
+    // Round to the nearest multiple of Δ, then read the plaintext mod p = 16 (Δ·p = Q).
+    const rounded = diff.map((v) => Math.round(v / DELTA));
+    const out = rounded.map((x) => ((x % 16) + 16) % 16);
+    const noiseLeft = diff.map((v, r) => v - DELTA * rounded[r]);
+    return { column, s, e, u, As, q, ans, Hs, diff, out, noiseLeft };
+  }
+  const v0 = query(0), v2 = query(2), v1 = query(1);
+
+  const vec = (xs, cls = () => "") => `<span class="m"><table>${xs.map((x, i) => `<tr><td class="${cls(i)}">${x}</td></tr>`).join("")}</table></span>`;
+  const mat = (rows, cls = () => "") => `<span class="m"><table>${rows.map((r, i) => `<tr>${r.map((x, j) => `<td class="${cls(i, j)}">${x}</td>`).join("")}</tr>`).join("")}</table></span>`;
+  const eq = (...parts) => `<div class="eq">${parts.join("")}</div>`;
+  const lbl = (t) => `<span class="lbl">${t}</span>`;
+
+  document.getElementById("h-matrix").innerHTML = eq(lbl("H ="), mat(H)) + `<div class="lbl">= table × A, mod 65,536. Same for every wallet.</div>`;
+  document.getElementById("query-math").innerHTML =
+    eq(lbl("A (public) ="), mat(A), lbl("s (secret) ="), vec(v0.s)) +
+    eq(lbl("A·s ="), vec(v0.As), lbl("+ e ="), vec(v0.e), lbl("+ Δ·u ="), vec(v0.u.map((x) => x * DELTA), (i) => (v0.u[i] ? "selrow" : ""))) +
+    eq(lbl("q ="), vec(v0.q)) + `<div class="lbl">u = 1 at column 0: the wanted column.</div>`;
+  document.getElementById("wire-math").innerHTML =
+    eq(lbl("→ q ="), vec(v0.q)) + `<div class="lbl">Three numbers that look random: A·s hides which one carries Δ.</div>` +
+    eq(lbl("← answer ="), vec(v0.ans)) + `<div class="lbl">Three more numbers, one per row of the table.</div>`;
+  document.getElementById("answer-math").innerHTML =
+    eq(lbl("table ="), mat(D), lbl("×"), vec(v0.q), lbl("="), vec(v0.ans)) + `<div class="lbl">mod 65,536. The server cannot undo A·s: it does not know s.</div>`;
+  document.getElementById("decode-math").innerHTML =
+    eq(lbl("answer"), vec(v0.ans), lbl("− H·s"), vec(v0.Hs), lbl("="), vec(v0.diff), lbl("≈ Δ ×"), vec(v0.out, (i) => (i === 2 ? "hit" : "")),
+      lbl("+ noise"), vec(v0.noiseLeft)) +
+    `<div class="lbl">answer − H·s = Δ·(column 0) + table·e. The noise stays far below Δ/2 = 2,048, so rounding gives column 0 exactly: records 0, 1, 2 = ${v0.out.join(", ")}. Record 2 (${v0.out[2]}) is the wallet's.</div>`;
+  document.getElementById("others-math").innerHTML =
+    eq(lbl("column 2 →"), vec(v2.out, (i) => (i === 0 ? "hit" : ""))) + `<div class="lbl">records 6, 7, 8; record 6 (${v2.out[0]}) is the wallet's.</div>` +
+    eq(lbl("column 1 →"), vec(v1.out)) + `<div class="lbl">padding: decoded and dropped.</div>`;
+
+  // ── the scan tiles (illustrative bytes) ─────────────────────────────────────────────────────────────────────────
+  const hx = (n) => Array.from({ length: n }, () => Math.floor(rand() * 256).toString(16).padStart(2, "0")).join("");
+  document.getElementById("scan-tiles").innerHTML = Array.from({ length: 9 }, (_, i) => {
+    const mine = i === 2 || i === 6;
+    const prefix = hx(4);
+    const pad = mine ? prefix : hx(4);
+    return `<div class="tile${mine ? " mine" : ""}"><span class="p">${i}</span> ${hx(3)}…‖${prefix}<br>pad ${pad} ${mine ? '<span class="ok">✓ mine</span>' : "✗"}</div>`;
+  }).join("");
+</script>
+</body>
+</html>

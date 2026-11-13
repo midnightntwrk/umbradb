@@ -18,6 +18,7 @@
   header { padding: 20px 24px 8px; max-width: 1280px; margin: 0 auto; }
   header h1 { margin: 0 0 4px; font-size: 20px; }
   header p { margin: 0; color: var(--muted); }
+  header a { color: var(--accent); }
   main { max-width: 1280px; margin: 0 auto; padding: 8px 24px 40px; display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; }
   @media (max-width: 1000px) { main { grid-template-columns: minmax(0, 1fr); } }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
@@ -64,7 +65,7 @@
 <body>
 <header>
   <h1>Private shielded sync, step by step</h1>
-  <p>The client's own code runs in this page's worker. The keys never leave it: only the requests listed on the right reach the server. Each step shows what it did and its debug output.</p>
+  <p>The client's own code runs in this page's worker. The keys never leave it: only the requests listed on the right reach the server. Each step shows what it did and its debug output. <a href="explain.html">How each step works →</a></p>
 </header>
 <main>
   <div id="steps">

@@ -151,6 +151,12 @@ A page that runs the client's own code in the browser, one step per button, and 
 6. get the tail, scan its outputs, and check each fetched position's full 32-hash path against the tail's root;
 7. show the coins and the balance.
 
+`explain.html`, linked from the page, explains each step on a toy chain of 9 outputs and 5 spends, in three lanes:
+the wallet, the wire and the server, with time going down. It covers:
+- the read table, the nullifier buckets and the tree;
+- a worked SimplePIR example with small numbers, computed in the page;
+- a `gpu` tag on the steps the GPU kernels speed up, and a hover on every size, showing values at 1M and 10M entries.
+
 A side panel lists every request the server saw, with its size and time. Clicking one shows it whole: the request's
 headers and body and the answer's, each with its size and SHA-256, decoded where the format is known (manifest, query
 and answer bodies, tail header, scan file, block roots, setup data), as text or a hex dump (the first 64 KB; "Show

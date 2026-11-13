@@ -7,7 +7,7 @@
  * - `page.js` (`./page.ts`) and `worker.js` (`./worker.ts`, the client), bundled by the repository's esbuild for the
  *   browser, with `node:crypto` and the other Node.js modules the client's files import replaced by `./shims/`, and
  *   Node.js's `Buffer` injected (`buffer`);
- * - `index.html` (`./page.html`);
+ * - `index.html` (`./page.html`) and `explain.html` (`./explain.html`, how each step works);
  * - `pss-kernel.wasm` (the scan kernel; the worker checks its SHA-256 against the committed one, built in) and
  *   `ledger-v9.wasm` (from the client's install of `@midnightntwrk/ledger-v9`).
  *
@@ -90,6 +90,7 @@ const common = {
 await build({ ...common, entryPoints: { worker: join(HERE, "worker.ts") }, outdir: out, plugins: [ledgerPlugin()] });
 await build({ ...common, entryPoints: { page: join(HERE, "page.ts") }, outdir: out });
 copyFileSync(join(HERE, "page.html"), join(out, "index.html"));
+copyFileSync(join(HERE, "explain.html"), join(out, "explain.html"));
 copyFileSync(join(EXAMPLE, "kernel", "pss-kernel.wasm"), join(out, "pss-kernel.wasm"));
 copyFileSync(join(LEDGER, "midnight_ledger_wasm_v9_bg.wasm"), join(out, "ledger-v9.wasm"));
 process.stdout.write(`built ${out}\n`);
