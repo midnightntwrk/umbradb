@@ -151,13 +151,16 @@
         <div class="math" id="a-matrix-0"></div>
         <div class="d">The <b>setup data H = read table × A</b> (3 rows × n) is what lets a wallet decode an answer (step 4). It is computed once per snapshot and downloaded by every wallet.</div>
       </div>
-      <div class="card s"><div class="t">Nullifier table: buckets by the nullifier's first 2 bits, and its setup data</div>
+      <div class="card s gpu"><span class="gpu-tag" data-tip="setup">gpu</span><div class="t">Nullifier table: buckets by the nullifier's first 2 bits, and its setup data</div>
+        <div class="d">One column per bucket, room for 2 nullifiers per bucket (an empty slot is 0). Each nullifier is one number here: n1 = 5, n2 = 9, n3 = 13, n4 = 6, n5 = 11. A real slot is 36 numbers: the nullifier, its height and its transaction.</div>
         <div class="diag buckets">
-          <div class="bucket"><div class="h">bucket 0</div><div class="cell">n1</div><div class="cell">n3</div></div>
-          <div class="bucket"><div class="h">bucket 1</div><div class="cell">n2</div></div>
-          <div class="bucket"><div class="h">bucket 2</div><div class="cell">n4</div></div>
-          <div class="bucket"><div class="h">bucket 3</div><div class="cell">n5</div></div>
+          <div class="bucket"><div class="h">bucket 0</div><div class="cell">n1 = 5</div><div class="cell">n3 = 13</div></div>
+          <div class="bucket"><div class="h">bucket 1</div><div class="cell">n2 = 9</div><div class="cell dim">0</div></div>
+          <div class="bucket"><div class="h">bucket 2</div><div class="cell">n4 = 6</div><div class="cell dim">0</div></div>
+          <div class="bucket"><div class="h">bucket 3</div><div class="cell">n5 = 11</div><div class="cell dim">0</div></div>
         </div>
+        <div class="d" style="margin-top: 6px">It has its own public matrix <b>A′</b> (one row per bucket, from its own seed in the manifest) and setup data <b>H′ = nullifier table × A′</b>:</div>
+        <div class="math" id="nf-setup-0"></div>
       </div>
       <div class="card s"><div class="t">Merkle tree in blocks of 4 leaves</div>
         <div class="d">Each full block's root is published; a record carries its leaf's path up to the block root.</div>
@@ -216,6 +219,8 @@
       <div class="card w"><div class="t">Rebuilds A, keeps H</div>
         <div class="d">It rebuilds the public matrix <b>A</b> from the manifest's seed (the same numbers the server drew in step 0) and keeps the downloaded setup data <b>H</b>:</div>
         <div class="math" id="h-matrix"></div>
+        <div class="d">The same for the nullifier table: <b>A′</b> from its seed, <b>H′</b> downloaded.</div>
+        <div class="math" id="hn-matrix"></div>
       </div>
     </div>
     <div class="wire">
@@ -302,14 +307,10 @@
     <h2>Check my nullifiers by PIR<small>Are coins 2 and 6 spent?</small></h2>
     <div class="side">
       <div class="card w"><div class="t">Computes each coin's nullifier</div>
-        <div class="d"><span class="mono">nf(coin 2) = n3</span> → bucket 0. <span class="mono">nf(coin 6) = n6</span> → bucket 2. Bucket 1 is padding.</div>
+        <div class="d">From the decrypted coin and the coin secret key, locally: <span class="mono">nf(coin 2) = 13</span> → bucket 0; <span class="mono">nf(coin 6) = 3</span> → bucket 2. The nullifiers are never sent.</div>
       </div>
-      <div class="card w"><div class="t">Reads its buckets</div>
-        <div class="diag buckets">
-          <div class="bucket"><div class="h">bucket 0</div><div class="cell sel">n1</div><div class="cell sel mine">n3</div></div>
-          <div class="bucket"><div class="h">bucket 2</div><div class="cell sel">n4</div></div>
-        </div>
-        <div class="d" style="margin-top: 6px"><b>n3</b> is there: coin 2 is <b>spent</b>. <b>n6</b> is not: coin 6 is <b>unspent</b> at the snapshot.</div>
+      <div class="card w"><div class="t">Asks for whole buckets</div>
+        <div class="d">One vector per bucket: 0 and 2, and bucket 1 as padding. The answer is a whole bucket; the wallet looks for its nullifier in it.</div>
       </div>
     </div>
     <div class="wire">
@@ -327,6 +328,32 @@
         <div class="sees"><b>Sees:</b> 3 vectors that look random. Not which buckets, so not which coins, and not whether they are spent.</div>
       </div>
     </div>
+  </div>
+
+  <div class="detail">
+    <h2>The numbers, for the vector of bucket 0<small>The same SimplePIR as step 4, on the nullifier table: 4 columns (buckets), 2 rows (slots).</small></h2>
+    <div class="side"><div class="card w"><div class="t">Query</div><div class="math" id="nf-query-math"></div></div></div>
+    <div class="wire"><div class="card"><div class="t">On the wire</div><div class="math" id="nf-wire-math"></div></div></div>
+    <div class="side"><div class="card s"><div class="t">Answer = nullifier table × q</div><div class="math" id="nf-answer-math"></div></div></div>
+  </div>
+  <div class="detail">
+    <h2>Decoding<small>Only the holder of s can remove A′·s.</small></h2>
+    <div class="side" style="grid-column: 2 / 4"><div class="card w"><div class="t">answer − H′·s, then ÷ Δ, round, mod 16</div><div class="math" id="nf-decode-math"></div></div></div>
+    <div class="side"><div class="card w"><div class="t">The other two vectors</div><div class="math" id="nf-others-math"></div></div></div>
+  </div>
+  <div class="step" style="padding-top: 6px">
+    <h2 style="padding-top: 0"></h2>
+    <div class="side">
+      <div class="card w"><div class="t">Looks for its nullifiers</div>
+        <div class="diag buckets">
+          <div class="bucket"><div class="h">bucket 0</div><div class="cell sel">5</div><div class="cell sel mine">13</div></div>
+          <div class="bucket"><div class="h">bucket 2</div><div class="cell sel">6</div><div class="cell sel">0</div></div>
+        </div>
+        <div class="d" style="margin-top: 6px"><b>13</b> is in bucket 0: coin 2 is <b>spent</b> (the real slot also gives the height and transaction). <b>3</b> is not in bucket 2: coin 6 is <b>unspent</b> at the snapshot.</div>
+      </div>
+    </div>
+    <div class="wire"></div>
+    <div class="side"></div>
   </div>
 
   <!-- 6 ─────────────────────────────────────────────────────────────── -->
@@ -450,14 +477,16 @@
   const A = [0, 1, 2].map(() => Array.from({ length: N }, randMod)); // columns × n, public (expanded from a seed)
   const H = D.map((row) => Array.from({ length: N }, (_, k) => mod(row.reduce((acc, d, c) => acc + d * A[c][k], 0))));
 
-  function query(column) {
+  /** One SimplePIR vector for `column` of `table` (rows × columns), with its public matrix and setup data. */
+  function pir(table, pub, setup, column) {
+    const cols = pub.length;
     const s = Array.from({ length: N }, randMod);
-    const e = [0, 1, 2].map(noise);
-    const u = [0, 1, 2].map((c) => (c === column ? 1 : 0));
-    const As = A.map((row) => mod(row.reduce((acc, a, k) => acc + a * s[k], 0)));
+    const e = Array.from({ length: cols }, noise);
+    const u = Array.from({ length: cols }, (_, c) => (c === column ? 1 : 0));
+    const As = pub.map((row) => mod(row.reduce((acc, a, k) => acc + a * s[k], 0)));
     const q = As.map((v, c) => mod(v + e[c] + DELTA * u[c]));
-    const ans = D.map((row) => mod(row.reduce((acc, d, c) => acc + d * q[c], 0)));
-    const Hs = H.map((row) => mod(row.reduce((acc, h, k) => acc + h * s[k], 0)));
+    const ans = table.map((row) => mod(row.reduce((acc, d, c) => acc + d * q[c], 0)));
+    const Hs = setup.map((row) => mod(row.reduce((acc, h, k) => acc + h * s[k], 0)));
     const diff = ans.map((v, r) => mod(v - Hs[r]));
     // Round to the nearest multiple of Δ, then read the plaintext mod p = 16 (Δ·p = Q).
     const rounded = diff.map((v) => Math.round(v / DELTA));
@@ -465,7 +494,14 @@
     const noiseLeft = diff.map((v, r) => v - DELTA * rounded[r]);
     return { column, s, e, u, As, q, ans, Hs, diff, out, noiseLeft };
   }
+  const query = (column) => pir(D, A, H, column);
   const v0 = query(0), v2 = query(2), v1 = query(1);
+
+  // The nullifier table: 4 buckets (columns) × 2 slots (rows); its own public matrix A′ and setup H′.
+  const DN = [[5, 9, 6, 11], [13, 0, 0, 0]];
+  const AN = [0, 1, 2, 3].map(() => Array.from({ length: N }, randMod));
+  const HN = DN.map((row) => Array.from({ length: N }, (_, k) => mod(row.reduce((acc, d, c) => acc + d * AN[c][k], 0))));
+  const w0 = pir(DN, AN, HN, 0), w2 = pir(DN, AN, HN, 2), w1 = pir(DN, AN, HN, 1);
 
   const vec = (xs, cls = () => "") => `<span class="m"><table>${xs.map((x, i) => `<tr><td class="${cls(i)}">${x}</td></tr>`).join("")}</table></span>`;
   const mat = (rows, cls = () => "") => `<span class="m"><table>${rows.map((r, i) => `<tr>${r.map((x, j) => `<td class="${cls(i, j)}">${x}</td>`).join("")}</tr>`).join("")}</table></span>`;
@@ -493,6 +529,26 @@
   document.getElementById("others-math").innerHTML =
     eq(lbl("column 2 →"), vec(v2.out, (i) => (i === 0 ? "hit" : ""))) + `<div class="lbl">records 6, 7, 8; record 6 (${v2.out[0]}) is the wallet's.</div>` +
     eq(lbl("column 1 →"), vec(v1.out)) + `<div class="lbl">padding: decoded and dropped.</div>`;
+
+  document.getElementById("nf-setup-0").innerHTML = eq(lbl("A′ ="), mat(AN), lbl("H′ ="), mat(HN)) +
+    `<div class="lbl">A′: 4 buckets × n = 2. H′: 2 slots × n = 2. Mod 65,536.</div>`;
+  document.getElementById("hn-matrix").innerHTML = eq(lbl("A′ ="), mat(AN), lbl("rebuilt"), lbl("&nbsp; H′ ="), mat(HN), lbl("downloaded"));
+  document.getElementById("nf-query-math").innerHTML =
+    eq(lbl("A′ (public) ="), mat(AN), lbl("s (secret) ="), vec(w0.s)) +
+    eq(lbl("A′·s ="), vec(w0.As), lbl("+ e ="), vec(w0.e), lbl("+ Δ·u ="), vec(w0.u.map((x) => x * DELTA), (i) => (w0.u[i] ? "selrow" : ""))) +
+    eq(lbl("q ="), vec(w0.q)) + `<div class="lbl">u = 1 at bucket 0, where nf(coin 2) would be. A fresh s for every vector.</div>`;
+  document.getElementById("nf-wire-math").innerHTML =
+    eq(lbl("→ q ="), vec(w0.q)) + `<div class="lbl">Four numbers that look random: one per bucket. Nothing in them names a bucket or a nullifier.</div>` +
+    eq(lbl("← answer ="), vec(w0.ans)) + `<div class="lbl">Two numbers, one per slot.</div>`;
+  document.getElementById("nf-answer-math").innerHTML =
+    eq(lbl("table ="), mat(DN), lbl("×"), vec(w0.q), lbl("="), vec(w0.ans)) + `<div class="lbl">mod 65,536. The same multiplication for every vector, whichever bucket it asks for.</div>`;
+  document.getElementById("nf-decode-math").innerHTML =
+    eq(lbl("answer"), vec(w0.ans), lbl("− H′·s"), vec(w0.Hs), lbl("="), vec(w0.diff), lbl("≈ Δ ×"), vec(w0.out, (i) => (w0.out[i] === 13 ? "hit" : "")),
+      lbl("+ noise"), vec(w0.noiseLeft)) +
+    `<div class="lbl">Rounding gives bucket 0 exactly: slots = ${w0.out.join(", ")}. The wallet's nf(coin 2) = 13 is there.</div>`;
+  document.getElementById("nf-others-math").innerHTML =
+    eq(lbl("bucket 2 →"), vec(w2.out)) + `<div class="lbl">slots ${w2.out.join(", ")}: nf(coin 6) = 3 is not there.</div>` +
+    eq(lbl("bucket 1 →"), vec(w1.out)) + `<div class="lbl">padding: decoded and dropped.</div>`;
 
   // ── the scan tiles (illustrative bytes) ─────────────────────────────────────────────────────────────────────────
   const hx = (n) => Array.from({ length: n }, () => Math.floor(rand() * 256).toString(16).padStart(2, "0")).join("");
