@@ -30,7 +30,7 @@ const decode = (raw: string): string =>
   new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(atob(raw.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0)));
 
 /** A page cursor of values of `schema`. */
-export interface PageCursor<S extends TSchema> {
+export interface PageCursor<S extends TSchema = TSchema> {
   /** The cursor text of `value`. */
   encode(value: Static<S>): string;
   /** The value of a cursor `encode` gave; anything else throws a 400 `invalid-request` `RouteError`. */
