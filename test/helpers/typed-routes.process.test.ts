@@ -15,8 +15,6 @@ import { TEST_API_ID, testApi } from "./test-api.js";
  * - a handler's `RouteError` in the module API's envelope; an answer its schema refuses as the module API's 500
  *   `internal-error`, whose body holds nothing of the answer, and a line of the process log;
  * - paging with `pageCursor`, a forged cursor refused;
- * - the concurrency limit: 503 `busy` while the slots are taken, answered again once they are free (on PostgreSQL;
- *   PGlite runs one read, so one request, at a time);
  * - the module API's own answers for what no typed route reaches (404 `not-found`, 405 `method-not-allowed`).
  */
 
@@ -54,7 +52,7 @@ describe.each(PROCESS_BACKENDS)("typed routes through the process on $name", (ba
   beforeAll(async () => {
     await backend.start();
     const db = await backend.database();
-    const module = testApi(2);
+    const module = testApi();
     lines = [];
     const data = { entries: [...libraryData(db.setting).entries, { id: TEST_API_ID, start: 1, version: module.version, config: {} }] };
     handle = startUmbraDB({
@@ -135,19 +133,6 @@ describe.each(PROCESS_BACKENDS)("typed routes through the process on $name", (ba
     expect([forged.status, forged.json?.error]).toEqual([400, { code: "invalid-request", message: "cursor: not a cursor this route issued" }]);
   });
 
-  it("answers 503 busy above the concurrency limit on PostgreSQL, and serves again once the slots are free; PGlite runs one request at a time", async () => {
-    const slow = [ask(origin, "POST", "/test-api/v1/echo", { text: "slow:800" }), ask(origin, "POST", "/test-api/v1/echo", { text: "slow:800" })];
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    const third = await ask(origin, "POST", "/test-api/v1/echo", { text: "a" });
-    if (backend.kind === "postgres") {
-      expect([third.status, third.json?.error?.code, third.headers["retry-after"]]).toEqual([503, "busy", "1"]);
-    } else {
-      // A handler runs inside its read, and PGlite runs one read at a time: the third waits its turn instead.
-      expect(third.status).toBe(200);
-    }
-    expect((await Promise.all(slow)).map((g) => g.status)).toEqual([200, 200]);
-    expect((await ask(origin, "POST", "/test-api/v1/echo", { text: "a" })).status).toBe(200);
-  });
 
   it("leaves what no typed route reaches to the module API: 404 not-found, 405 method-not-allowed", async () => {
     expect((await ask(origin, "GET", "/test-api/v1/nothing")).json?.error?.code).toBe("not-found");

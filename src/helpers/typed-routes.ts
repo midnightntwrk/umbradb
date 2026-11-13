@@ -18,9 +18,6 @@
  * - **One height.** Each answer is read at the latest committed height and carries the chain-data headers
  *   (`X-Umbra-View`, `X-Umbra-Height`, `X-Umbra-Hash`; `../runner/envelope.ts`). Before block S commits, a route
  *   answers 503 `no-committed-height` without running its handler.
- * - **Bounded.** At most `maxConcurrent` requests of one registration run at once; more are answered 503 `busy` with
- *   `Retry-After: 1`. A handler runs inside its read, so on PGlite, which runs one read at a time, requests wait their
- *   turn instead and the limit is not reached.
  * - **Untrusted text out.** An answer is JSON with every non-ASCII character and `<`, `>`, `&` escaped
  *   ({@link toAsciiJson}), and fixed headers that keep a browser from running it ({@link JSON_HEADERS}).
  *
@@ -33,9 +30,6 @@ import Value from "typebox/value";
 import type { ReadHandle } from "../db/api.js";
 import type { ApiRegistry } from "../modules/declaration.js";
 import { answerChainData } from "../runner/envelope.js";
-
-/** Requests of one registration answered at once, unless it says otherwise; more are refused with 503 `busy`. */
-export const DEFAULT_MAX_CONCURRENT_REQUESTS = 8;
 
 /** The most schema errors one 400 answer lists. */
 const MAX_ERRORS = 3;
@@ -85,9 +79,9 @@ export const JSON_HEADERS: Readonly<Record<string, string>> = Object.freeze({
 
 type Answer = { status: number; headers: Record<string, string>; body: string };
 
-const answer = (status: number, body: unknown, extra: Readonly<Record<string, string>> = {}): Answer => ({
+const answer = (status: number, body: unknown): Answer => ({
   status,
-  headers: { ...JSON_HEADERS, ...extra },
+  headers: { ...JSON_HEADERS },
   body: toAsciiJson(body),
 });
 
@@ -106,48 +100,37 @@ export function schemaErrors(schema: TSchema, value: unknown, where = "input"): 
 const NAMESPACE = /^[a-z][a-z0-9-]*$/;
 
 /**
- * Registers `routes` under `/<namespace>` on `api` (see the module comment). `namespace` is the module's id; at most
- * `maxConcurrent` requests run at once across these routes. Throws a `RangeError` for a malformed namespace or path.
+ * Registers `routes` under `/<namespace>` on `api` (see the module comment). `namespace` is the module's id. Throws a
+ * `RangeError` for a malformed namespace or path.
  */
 export function registerTypedRoutes(
   api: ApiRegistry,
   namespace: string,
   // biome-ignore lint/suspicious/noExplicitAny: a list of routes of different schemas
   routes: readonly TypedRoute<any, any>[],
-  options: { readonly maxConcurrent?: number } = {},
 ): void {
   if (!NAMESPACE.test(namespace)) throw new RangeError(`a namespace is a module id (lowercase letters, digits and -): ${JSON.stringify(namespace)}`);
-  const maxConcurrent = options.maxConcurrent ?? DEFAULT_MAX_CONCURRENT_REQUESTS;
-  let inFlight = 0;
   for (const route of routes) {
     if (!route.path.startsWith("/")) throw new RangeError(`a route's path starts with /: ${JSON.stringify(route.path)}`);
     const full = `/${namespace}${route.path}`;
-    api.http(route.method, full, async (request, read) => {
-      if (inFlight >= maxConcurrent) {
-        return answer(503, { error: { code: "busy", message: "too many requests in progress; retry shortly" } }, { "retry-after": "1" });
-      }
-      inFlight++;
-      try {
-        return await answerChainData(read, async () => {
-          try {
-            const input = route.method === "GET" ? { ...request.params } : request.body;
-            if (!Value.Check(route.input, input)) {
-              const errors = input === undefined ? ["input: a JSON body is required"] : schemaErrors(route.input, input);
-              throw invalidRequest(errors.join("; "));
-            }
-            const result = await route.handle(input, read);
-            if (!Value.Check(route.response, result)) {
-              throw new Error(`${route.method} ${full} built an answer its schema refuses: ${schemaErrors(route.response, result, "answer").join("; ")}`);
-            }
-            return answer(200, result);
-          } catch (error) {
-            if (error instanceof RouteError) return answer(error.status, { error: { code: error.code, message: error.message } });
-            throw error;
+    api.http(route.method, full, (request, read) =>
+      answerChainData(read, async () => {
+        try {
+          const input = route.method === "GET" ? { ...request.params } : request.body;
+          if (!Value.Check(route.input, input)) {
+            const errors = input === undefined ? ["input: a JSON body is required"] : schemaErrors(route.input, input);
+            throw invalidRequest(errors.join("; "));
           }
-        });
-      } finally {
-        inFlight--;
-      }
-    });
+          const result = await route.handle(input, read);
+          if (!Value.Check(route.response, result)) {
+            throw new Error(`${route.method} ${full} built an answer its schema refuses: ${schemaErrors(route.response, result, "answer").join("; ")}`);
+          }
+          return answer(200, result);
+        } catch (error) {
+          if (error instanceof RouteError) return answer(error.status, { error: { code: error.code, message: error.message } });
+          throw error;
+        }
+      }),
+    );
   }
 }
