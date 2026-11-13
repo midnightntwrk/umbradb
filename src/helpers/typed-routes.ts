@@ -56,7 +56,7 @@ export class RouteError extends Error {
 export const invalidRequest = (message: string): RouteError => new RouteError(400, "invalid-request", message);
 
 /** A typed route: its method, its path under the namespace, its input and answer schemas, and the handler between them. */
-export interface TypedRoute<I extends TSchema, R extends TSchema> {
+export interface TypedRoute<I extends TSchema = TSchema, R extends TSchema = TSchema> {
   readonly method: "GET" | "POST";
   /** Under the namespace: `/v1/tokens`, `/v1/blocks/:height`. */
   readonly path: string;
