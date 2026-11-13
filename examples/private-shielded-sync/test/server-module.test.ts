@@ -7,7 +7,7 @@
  */
 
 import { randomInt } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -301,6 +301,8 @@ describe("the module on a chain it follows from genesis (PostgreSQL 18)", () => 
     ]);
     expect(manifest.root).toBe(toHex(rootFromStored(chain.scenario.heights[4]!.trees.zswapRoot)));
     expect(s.current.id).toBe(id);
+    // Every height came from its block's items; none had to be read back from the database.
+    expect(s.index).toMatchObject({ height: 7, outputs: 15, nullifiers: 3, error: null, fromItems: 8, fromDatabase: 0 });
     // The build statistics beside the snapshot: every step with its duration, size and peak memory.
     const stats = JSON.parse(readFileSync(join(dataDir, "snapshots", id, STATS_FILE), "utf8")) as Record<string, any>;
     expect(Object.keys(stats.steps)).toEqual(["scan", "tree", "readTable", "readSetup", "nullifierTable", "nullifierSetup", "manifest"]);
@@ -542,7 +544,7 @@ describe("the module joining a database already synced (startsMidChain, FR-002)"
         await stoppedAt(r, 7);
         const s = r.server().status() as Record<string, any>;
         expect(s.indexLoad).toMatchObject({ height: 4, rows: 10 });
-        expect(s.index).toMatchObject({ height: 7, outputs: 15, nullifiers: 3, error: null });
+        expect(s.index).toMatchObject({ height: 7, outputs: 15, nullifiers: 3, error: null, fromItems: 3, fromDatabase: 0 });
         expect((await requestBuild(r)).status).toBe(202);
         await built(r, 7);
         const { manifest } = await manifestOf(r);
@@ -554,6 +556,30 @@ describe("the module joining a database already synced (startsMidChain, FR-002)"
       }
     } finally {
       rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("a module that cannot start (Q37)", () => {
+  it("a data directory that is a file: the core runs on, the module logs why, and its routes and builds give the reason", { timeout: LONG }, async () => {
+    const db = await backend.database();
+    const root = mkdtempSync(join(tmpdir(), "pss-broken-"));
+    const file = join(root, "not-a-directory");
+    writeFileSync(file, "x");
+    try {
+      const r = await run(db, { stop: 3, pss: { start: 0, config: { dataDir: file, pathSplit: 2, queriesPerCall: 4, adminSecret: SECRET, threads: 1 } } });
+      try {
+        await stoppedAt(r, 3);
+        expect(r.logs.map((line) => JSON.parse(line) as Record<string, unknown>).find((line) => line.event === "start-failed")).toBeDefined();
+        expect((await fetch(`${r.origin}${ROUTES.manifest}`)).status).toBe(503);
+        const refused = await requestBuild(r);
+        expect(refused.status).toBe(500);
+        expect(await refused.json()).toMatchObject({ error: { code: "index-broken" } });
+      } finally {
+        await r.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });

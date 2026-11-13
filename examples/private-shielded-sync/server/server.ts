@@ -197,6 +197,9 @@ export class PssServer {
   #last: LastBuild | null = null;
   #indexLoad: IndexLoad | null = null;
   #multiplier: Multiplier | null = null;
+  /** Heights added from the block's items, and heights read from the database (items missed). */
+  #fromItems = 0;
+  #fromDatabase = 0;
 
   constructor(settings: Settings, options: PssOptions) {
     this.settings = settings;
@@ -214,8 +217,21 @@ export class PssServer {
 
   // ── start ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
-  /** `on-start-db`: the index from the stored rows, the snapshots on disk, the tail. */
+  /**
+   * `on-start-db`: the index from the stored rows, the snapshots on disk, the tail. A failure here is logged and marks
+   * the index broken (every build and tail answer then gives the reason); it does not refuse the process's startup.
+   */
   async start(w: SchemaWriteHandle): Promise<void> {
+    try {
+      await this.#start(w);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      this.index.markBroken(`the module could not start: ${message}`);
+      this.#log({ event: "start-failed", message });
+    }
+  }
+
+  async #start(w: SchemaWriteHandle): Promise<void> {
     this.#genesis = await genesisHashOf(w);
     const load = await measured(async () => {
       const cursor = await cursorOf(w);
@@ -341,7 +357,9 @@ export class PssServer {
       if (pending !== undefined && height === this.index.height + 1) {
         this.index.appendHeight(height, pending.outputs, pending.nullifiers);
         this.#tip = pending.tip;
+        this.#fromItems++;
       } else {
+        this.#fromDatabase++;
         for (const group of await zswapEvents(read, this.index.height, height)) {
           this.index.appendHeight(group.height, group.outputs, group.nullifiers);
         }
@@ -391,14 +409,26 @@ export class PssServer {
     }
     if (this.index.error !== null) return error(500, "index-broken", this.index.error);
     if (this.#genesis === null) return error(500, "no-genesis", "the database records no genesis hash");
-    const prepared = await measured(async () => {
-      const state = await stateAt(read, height);
-      const outputs = this.index.outputsAt(height);
-      const nullifiers = this.index.nullifiersAt(height);
-      return { state, outputs, nullifiers, slice: this.index.slice(outputs, nullifiers) };
-    });
+    // Taken before the read below, so a second request arriving meanwhile is refused (one build at a time).
+    const building: Building = { height, trigger, startedAt: new Date().toISOString() };
+    this.#building = building;
+    let prepared;
+    try {
+      prepared = await measured(async () => {
+        const state = await stateAt(read, height);
+        const outputs = this.index.outputsAt(height);
+        const nullifiers = this.index.nullifiersAt(height);
+        return { state, outputs, nullifiers, slice: this.index.slice(outputs, nullifiers) };
+      });
+    } catch (cause) {
+      this.#building = null;
+      throw cause;
+    }
     const { state, outputs, nullifiers, slice } = prepared.value;
-    if (state === null) return error(409, "no-state", `the core stores no ledger state at ${height}`);
+    if (state === null) {
+      this.#building = null;
+      return error(409, "no-state", `the core stores no ledger state at ${height}`);
+    }
     const job: BuildJob = {
       height,
       blockHash: state.hash,
@@ -412,8 +442,6 @@ export class PssServer {
       dataDir: this.dataDir,
       slice,
     };
-    const building: Building = { height, trigger, startedAt: new Date().toISOString() };
-    this.#building = building;
     const started = performance.now();
     const readEvents = {
       ms: prepared.ms,
@@ -658,7 +686,14 @@ export class PssServer {
     const tip = this.#tip;
     return {
       network: this.#network,
-      index: { height: this.index.height, outputs: this.index.outputs, nullifiers: this.index.nullifiers, error: this.index.error },
+      index: {
+        height: this.index.height,
+        outputs: this.index.outputs,
+        nullifiers: this.index.nullifiers,
+        error: this.index.error,
+        fromItems: this.#fromItems,
+        fromDatabase: this.#fromDatabase,
+      },
       indexLoad: this.#indexLoad,
       tip: tip === null ? null : { height: tip.height, firstFree: tip.firstFree, root: toHex(tip.root) },
       head: this.#head,

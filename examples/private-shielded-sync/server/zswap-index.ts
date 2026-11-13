@@ -178,6 +178,11 @@ export class ZswapIndex {
     this.#height = height;
   }
 
+  /** Marks the index unusable for snapshots, with the reason (the first one given stays). */
+  markBroken(reason: string): void {
+    this.#error ??= reason;
+  }
+
   /** Marks the index as at `height` without events (heights with none, or a range read as one). */
   advanceTo(height: number): void {
     if (height < this.#height) throw new Error(`index heights must not decrease: ${height} after ${this.#height}`);
