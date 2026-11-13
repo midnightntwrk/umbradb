@@ -7,6 +7,7 @@
  *     PSS_NODE_WS=<ws-url> node examples/private-shielded-sync/run/sync.mjs up --label <name> --out <dir>
  *       --build <checkout> [--api-port <p>] [--admin-port <p>]
  *       [--module <file.ts>#<export> --module-config <file.json> [--module-start <height>]]
+ *       [--sweep-off-from next|<height>]
  *     node examples/private-shielded-sync/run/sync.mjs down|record|destroy --label <name> --out <dir>
  *     PSS_NODE_WS=<ws-url> node examples/private-shielded-sync/run/sync.mjs config --label <name> --out <dir>
  *       --build <checkout> [--module <file.ts>#<export> --module-config <file.json> [--module-start <height>]]
@@ -16,6 +17,11 @@
  *   detached, with the build mounted read only and `--out` read-write at their own paths. The core entry has no stop.
  *   With `--module`, the module's entry starts at `--module-start` (default: the stored cursor + 1, so a module that
  *   owns no tables and declares `startsMidChain` can join a synced database).
+ * - `--sweep-off-from` adds a `core` revision from that height (`next`: the stored cursor + 1) with `sweep: "off"` and
+ *   `developmentOptIn: true` (the core refuses the sweep off without the opt-in): from there on the ledger-state
+ *   module deletes no stored node, which saves the reclamation cascade's round trips on every block and lets the
+ *   tables grow. The revision is kept in `<out>/core-revisions.json` and written into every later configuration, since
+ *   a revision that started at or below the cursor must stay as recorded. It must start above the cursor.
  * - `config` writes the configuration file and the `umbradb` link into `--out`, as `up` does, and starts nothing (the
  *   module's start is `--module-start`, 0 unless given): for `umbradb config check` before an `up`.
  * - `down` stops the run container (SIGTERM; the height in progress finishes) and removes it; the database stays.
@@ -54,6 +60,7 @@ const { values } = parseArgs({
     module: { type: "string" },
     "module-config": { type: "string" },
     "module-start": { type: "string" },
+    "sweep-off-from": { type: "string" },
   },
 });
 const fail = (message) => {
@@ -93,6 +100,23 @@ function cursorOf(secretEnv) {
   return result.status === 0 ? BigInt(result.stdout.trim() || "-1") : -1n;
 }
 
+/** The `core` revisions after the first, as `{ start, settings }` (settings merged over the first revision's). */
+function coreRevisions() {
+  const file = join(out, "core-revisions.json");
+  return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : [];
+}
+
+/** Records a `sweep: "off"` revision from `start` (above `cursor`) in `<out>/core-revisions.json`. */
+function addSweepOff(start, cursor) {
+  if (start <= cursor) fail(`--sweep-off-from ${start} is not above the stored cursor ${cursor}`);
+  const revisions = coreRevisions();
+  const last = revisions.at(-1);
+  if (last !== undefined && BigInt(last.start) >= start) fail(`a core revision already starts at ${last.start}`);
+  if (last?.settings.sweep === "off") fail(`the sweep is already off from ${last.start}`);
+  revisions.push({ start: String(start), settings: { sweep: "off", developmentOptIn: true } });
+  writeFileSync(join(out, "core-revisions.json"), `${JSON.stringify(revisions, null, 2)}\n`);
+}
+
 function configText({ moduleSpec, moduleConfig, moduleStart }) {
   const node = process.env.PSS_NODE_WS ?? fail("PSS_NODE_WS is required (the node's WebSocket URL)");
   const core = {
@@ -117,6 +141,7 @@ function configText({ moduleSpec, moduleConfig, moduleStart }) {
     "export default defineConfig({",
     "  entries: [",
     `    coreEntry({ start: 0, config: ${JSON.stringify(core)} }),`,
+    ...coreRevisions().map(({ start, settings }) => `    coreEntry({ start: ${start}, config: ${JSON.stringify({ ...core, ...settings })} }),`),
     ...CORE_MODULES.map((name) => `    ${name}.entry({ start: 0, config: {} }),`),
     ...(moduleEntry === "" ? [] : [moduleEntry]),
     "  ],",
@@ -170,7 +195,10 @@ async function up() {
     await sleep(1000);
   }
   const moduleSpec = values.module;
-  const moduleStart = moduleSpec === undefined ? "0" : (values["module-start"] ?? String(cursorOf(secretEnv) + 1n));
+  const cursor = cursorOf(secretEnv);
+  const sweepOff = values["sweep-off-from"];
+  if (sweepOff !== undefined) addSweepOff(sweepOff === "next" ? cursor + 1n : BigInt(sweepOff), cursor);
+  const moduleStart = moduleSpec === undefined ? "0" : (values["module-start"] ?? String(cursor + 1n));
   const configFile = writeConfig(build, moduleStart);
   const apiPort = values["api-port"] ?? "";
   const adminPort = values["admin-port"] ?? "";
@@ -179,7 +207,7 @@ async function up() {
     "-p", `127.0.0.1:${adminPort}:${ADMIN_PORT}`, "-p", `127.0.0.1:${apiPort}:${API_PORT}`,
     NODE_IMAGE, "node", join(build, "dist", "cli", "main.js"), "run", "--config", configFile], secretEnv);
   const port = (p) => docker(["port", names.run, `${p}/tcp`]).split("\n")[0];
-  const info = { label, out, build, admin: port(ADMIN_PORT), api: port(API_PORT), database: docker(["port", names.database, "5432/tcp"]).split("\n")[0], moduleStart: moduleSpec === undefined ? null : moduleStart, startedAt: new Date().toISOString() };
+  const info = { label, out, build, admin: port(ADMIN_PORT), api: port(API_PORT), database: docker(["port", names.database, "5432/tcp"]).split("\n")[0], moduleStart: moduleSpec === undefined ? null : moduleStart, coreRevisions: coreRevisions(), startedAt: new Date().toISOString() };
   appendFileSync(join(out, "runs.jsonl"), `${JSON.stringify(info)}\n`);
   process.stdout.write(`${JSON.stringify(info)}\n`);
 }
