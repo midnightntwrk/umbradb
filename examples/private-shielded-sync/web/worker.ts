@@ -56,7 +56,31 @@ let kernel: Kernel | null = null;
 let hash: Hash2 = () => {
   throw new Error("the kernel is not loaded");
 };
-let gpu: { scan(entries: Uint8Array, secret: Uint8Array): Promise<number[]> } | null = null;
+type GpuScan = { scan(entries: Uint8Array, secret: Uint8Array): Promise<number[]> };
+let gpu: Promise<GpuScan> | null = null;
+
+/**
+ * The GPU scanner, made once: opens the device, compiles the shader, and scans a few made-up entries so the pipelines
+ * and buffers have been used. `load` starts it, so a scan does not wait for any of that.
+ */
+function startGpu(): Promise<GpuScan> {
+  gpu ??= (async () => {
+    // The GPU modules are type-checked by `deno check` (gpu/deno.json), so they are imported untyped here.
+    const { openGpu } = await import("../gpu/device.ts" as string);
+    const { GpuScanner } = await import("../gpu/scan.ts" as string);
+    const poseidon = (await import("../test/fixtures/poseidon-constants.json")).default;
+    const device = await openGpu();
+    if (device === null) throw new Error("no WebGPU device in this browser");
+    const scanner = (await GpuScanner.create(device.device, poseidon)) as GpuScan;
+    const entries = new Uint8Array(36 * 64);
+    for (let i = 0; i < entries.length; i++) entries[i] = (i * 151 + 7) & 255;
+    const one = new Uint8Array(32);
+    one[0] = 1;
+    await scanner.scan(entries, one);
+    return scanner;
+  })();
+  return gpu;
+}
 let keys: WalletKeys | null = null;
 
 // ── every request, kept whole ───────────────────────────────────────────────────────────────────────────────────
@@ -295,6 +319,8 @@ async function load(): Promise<Json> {
   ledger = ledgerInfo.ledger as unknown as Ledger;
   const ledgerMs = now() - t2;
   const debug = await debugJson("/debug/info");
+  // Not awaited: a failure is reported by the scan that asks for the GPU.
+  if ("gpu" in navigator) startGpu().catch(() => undefined);
   return {
     kernel: { bytes: kernelBytes.length, sha256: kernelDigest, ms: round(kernelMs) },
     ledger: { package: "@midnightntwrk/ledger-v9 1.0.1 (ledger-9.1.0.1)", bytes: ledgerInfo.bytes, ms: round(ledgerMs) },
@@ -421,16 +447,7 @@ async function scan(args: { gpu?: boolean; chunk?: number }, progress: (text: st
   let found: number[] = [];
   let engine: string;
   if (args.gpu) {
-    if (gpu === null) {
-      // The GPU modules are type-checked by `deno check` (gpu/deno.json), so they are imported untyped here.
-      const { openGpu } = await import("../gpu/device.ts" as string);
-      const { GpuScanner } = await import("../gpu/scan.ts" as string);
-      const poseidon = (await import("../test/fixtures/poseidon-constants.json")).default;
-      const device = await openGpu();
-      if (device === null) throw new Error("no WebGPU device in this browser");
-      gpu = (await GpuScanner.create(device.device, poseidon)) as NonNullable<typeof gpu>;
-    }
-    found = await gpu.scan(file, w.scanSecret);
+    found = await (await startGpu()).scan(file, w.scanSecret);
     engine = "WebGPU (gpu/scan.ts)";
   } else {
     const chunk = args.chunk ?? 2000;

@@ -507,8 +507,8 @@ on real-sized inputs and writes the timings to `gpu/results/`:
 
     deno task --config examples/private-shielded-sync/gpu/deno.json check
 
-On an Apple M4 Max the GPU scan takes about 5.4 µs per output against about 69 µs on 8 CPU threads, and a 32-vector
-read call's multiply about 15 ms against about 45 ms. [`gpu/README.md`](gpu/README.md) has the interfaces, the check
+On an Apple M4 Max the GPU scan takes about 2.8 µs per output against about 68 µs on 8 CPU threads, and a 32-vector
+read call's multiply about 14 ms against about 44 ms. [`gpu/README.md`](gpu/README.md) has the interfaces, the check
 and the measurements.
 
 ## Tests

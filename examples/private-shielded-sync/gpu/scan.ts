@@ -15,22 +15,20 @@
  */
 
 import { compileShader, TimestampSpan, writeView } from "./device.ts";
-import { constantTable, JUBJUB_R, type PoseidonConstants, words } from "./field.ts";
-import { ENTRY_WORDS, OUT_WORDS, PARAMS_BYTES, scanWgsl, STATE_WORDS } from "./scan-wgsl.ts";
+import { constantTable, JUBJUB_R, type PoseidonConstants } from "./field.ts";
+import { DIGITS, ENTRY_WORDS, OUT_WORDS, PARAMS_BYTES, scanWgsl, STATE_WORDS } from "./scan-wgsl.ts";
 import type { Scanner } from "./scanner.ts";
 
 /** Bytes of one scan entry. */
 export const ENTRY_BYTES = 36;
-/** Bits of a scalar below 2^252 (the secret, and the subgroup order r). */
-const SCALAR_BITS = 252;
 const WORKGROUP = 64;
 /** The largest dispatch along one dimension (WebGPU's default `maxComputeWorkgroupsPerDimension`). */
 const MAX_GROUPS = 65535;
 
 export interface GpuScanOptions {
-  /** Entries per GPU batch (working state is 564 bytes per entry): by default 65,536 (37 MB of state). */
+  /** Entries per GPU batch (working state is 1,524 bytes per entry): by default 32,768 (50 MB of state). */
   readonly batch?: number;
-  /** Ladder steps per dispatch: by default 36 (seven dispatches for 252 bits). */
+  /** Ladder digits per dispatch: by default 37 (seven dispatches for 253 digits). */
   readonly bitsPerPass?: number;
   /** Measure the GPU's execution time of each call (`lastGpuMs`), if the device has `timestamp-query`. */
   readonly timestamps?: boolean;
@@ -68,12 +66,31 @@ function checkEntries(entries: Uint8Array): number {
   return count;
 }
 
-/** The secret's scalar as eight words; throws as the kernel does for a wrong length or a non-canonical scalar. */
-function secretWords(secret: Uint8Array, what: string): number[] {
+/**
+ * A scalar below 2^252 in width-4 non-adjacent form: digit i (0 or ±1, ±3, ±5, ±7) counts 2^i, and of any four
+ * digits in a row at most one is not zero. 256 values (the uniform's size), of which at most `DIGITS` are used.
+ */
+export function signedDigits(scalar: bigint): Int32Array {
+  const digits = new Int32Array(256);
+  let k = scalar;
+  for (let i = 0; k > 0n; i++) {
+    if (i >= DIGITS) throw new Error("the scalar is not below 2^252");
+    if (k & 1n) {
+      const d = Number(k & 15n);
+      digits[i] = d >= 8 ? d - 16 : d;
+      k -= BigInt(digits[i]!);
+    }
+    k >>= 1n;
+  }
+  return digits;
+}
+
+/** The secret's scalar as digits; throws as the kernel does for a wrong length or a non-canonical scalar. */
+function secretDigits(secret: Uint8Array, what: string): Int32Array {
   if (secret.length !== 32) throw new Error(`secret must be 32 bytes, got ${secret.length}`);
   const s = scalarOf(secret);
   if (s >= JUBJUB_R) throw new Error(`${what}: the secret is not a canonical scalar`);
-  return words(s);
+  return signedDigits(s);
 }
 
 export class GpuScanner implements Scanner {
@@ -112,19 +129,19 @@ export class GpuScanner implements Scanner {
     this.#consts = consts;
     this.#batch = batch;
     const passes: { top: number; nbits: number }[] = [];
-    for (let top = SCALAR_BITS - 1; top >= 0; top -= bitsPerPass) passes.push({ top, nbits: Math.min(bitsPerPass, top + 1) });
+    for (let top = DIGITS - 1; top >= 0; top -= bitsPerPass) passes.push({ top, nbits: Math.min(bitsPerPass, top + 1) });
     this.#passes = passes;
   }
 
   /** Compiles the shader and uploads the constants (Poseidon's, from `test/fixtures/poseidon-constants.json`). */
   static async create(device: GPUDevice, poseidon: PoseidonConstants, options: GpuScanOptions = {}): Promise<GpuScanner> {
-    const batch = options.batch ?? 65536;
-    const bitsPerPass = options.bitsPerPass ?? 36;
+    const batch = options.batch ?? 32768;
+    const bitsPerPass = options.bitsPerPass ?? 37;
     if (!Number.isInteger(batch) || batch < 1 || Math.ceil(batch / WORKGROUP) > MAX_GROUPS) {
       throw new Error(`batch must be 1 … ${MAX_GROUPS * WORKGROUP}: ${batch}`);
     }
-    if (!Number.isInteger(bitsPerPass) || bitsPerPass < 1 || bitsPerPass > SCALAR_BITS) {
-      throw new Error(`bitsPerPass must be 1 … ${SCALAR_BITS}: ${bitsPerPass}`);
+    if (!Number.isInteger(bitsPerPass) || bitsPerPass < 1 || bitsPerPass > DIGITS) {
+      throw new Error(`bitsPerPass must be 1 … ${DIGITS}: ${bitsPerPass}`);
     }
     const module = await compileShader(device, scanWgsl(), "ownership test");
     const C = GPUShaderStage.COMPUTE;
@@ -185,11 +202,15 @@ export class GpuScanner implements Scanner {
     for (const x of [b.entries, b.state, b.out, b.staging, ...p.uniforms]) x.destroy();
   }
 
-  /** Writes the scalar, the pass's bit range and the entry count into each pass's uniform. */
-  #params(set: PassSet, scalar: readonly number[], n: number): void {
+  /** Writes the scalar's digits, the pass's digit range and the entry count into each pass's uniform. */
+  #params(set: PassSet, digits: Int32Array, n: number): void {
+    const params = new Int32Array(PARAMS_BYTES / 4);
+    params.set(digits);
     this.#passes.forEach(({ top, nbits }, i) => {
-      this.#device.queue.writeBuffer(set.uniforms[i]!, 0, new Uint32Array([...scalar, top, nbits, n, 0]));
+      params.set([top, nbits, n, 0], 256);
+      this.#device.queue.writeBuffer(set.uniforms[i]!, 0, params);
     });
+    params.fill(0);
   }
 
   #wipe(set: PassSet): void {
@@ -250,7 +271,7 @@ export class GpuScanner implements Scanner {
    * Values and candidate flags of every entry, batch by batch. `onBatch` gets each batch's first entry index and its
    * outputs (OUT_WORDS words per entry).
    */
-  async #values(entries: Uint8Array, scalar: readonly number[], onBatch: (first: number, out: Uint32Array) => void): Promise<void> {
+  async #values(entries: Uint8Array, scalar: Int32Array, onBatch: (first: number, out: Uint32Array) => void): Promise<void> {
     const count = entries.length / ENTRY_BYTES;
     const batches = Math.ceil(count / this.#batch);
     const size = Math.ceil(count / batches);
@@ -280,7 +301,7 @@ export class GpuScanner implements Scanner {
       const picked = new Uint8Array(n * ENTRY_BYTES);
       indices.forEach((i, k) => picked.set(entries.subarray(i * ENTRY_BYTES, (i + 1) * ENTRY_BYTES), k * ENTRY_BYTES));
       writeView(this.#device, buffers.entries, 0, picked);
-      this.#params(set, words(JUBJUB_R), n);
+      this.#params(set, signedDigits(JUBJUB_R), n);
       const out = await this.#run(buffers, set, n, this.#pipe.torsion);
       return indices.map((_, k) => out[k * OUT_WORDS + 8] === 1);
     } finally {
@@ -295,7 +316,7 @@ export class GpuScanner implements Scanner {
       this.#gpuMs = 0;
       this.lastGpuMs = null;
       const count = checkEntries(entries);
-      const scalar = secretWords(secret, "scan");
+      const scalar = secretDigits(secret, "scan");
       if (count === 0) return [];
       const candidates: number[] = [];
       await this.#values(entries, scalar, (first, out) => {
@@ -315,7 +336,7 @@ export class GpuScanner implements Scanner {
       this.#gpuMs = 0;
       this.lastGpuMs = null;
       const count = checkEntries(entries);
-      const scalar = secretWords(secret, "scan_values");
+      const scalar = secretDigits(secret, "scan_values");
       const result = new Uint8Array(count * 32);
       if (count === 0) return result;
       const view = new Uint32Array(result.buffer);

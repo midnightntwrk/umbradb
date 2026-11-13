@@ -66,28 +66,33 @@ and the CPU's outputs), `--quick`.
 ## Results
 
 [results/check-2026-11-13.json](results/check-2026-11-13.json): Apple M4 Max, Deno 2.7.5, Node 24.9.0, 8 CPU threads;
-the machine was shared with a Preprod sync (load average 7.6 at the start, 15.6 at the end). All 24 checks passed.
+the machine was shared with a Preprod sync (load average 5.5 at the start, 6.4 at the end). All 24 checks passed.
 
 Scan, per entry (GPU wall time is the best of three calls; GPU execution from timestamp queries):
 
 | Set | GPU wall | GPU execution | CPU, 8 threads (`ScanPool`) | CPU, one thread | GPU over 8 threads |
 |---|---|---|---|---|---|
-| 16,384 test vectors | 5.3 µs (87 ms) | 4.6 µs | 70.5 µs (1.16 s) | 529 µs | 13× |
-| 70,000, Preprod's size | 5.4 µs (380 ms) | 5.6 µs | 69.2 µs (4.85 s) | 544 µs | 13× |
+| 16,384 test vectors | 3.1 µs (51 ms) | 2.3 µs | 66.4 µs (1.09 s) | 525 µs | 21× |
+| 70,000, Preprod's size | 2.8 µs (199 ms) | 2.2 µs | 68.3 µs (4.78 s) | 510 µs | 24× |
+
+In a browser (Chromium, the same GPU), one scan with no match, median of the calls: 6,861 entries take 22 ms back to
+back and 39 ms after a second of idle GPU; 16,384 entries take 38 ms and 62 ms. A scan covers up to a few thousand
+entries in about 16 ms (one entry's chain of products on one GPU thread) and costs about 2 µs per entry beyond that.
+The shader compiles in about 0.5 s the first time a browser sees it and in about 30 ms from the browser's cache after.
 
 Multiply (GPU: the table pinned, best call; CPU: `WorkerMultiplier` after three warm-up calls, best / median of the
 runs, and one thread, median):
 
 | Call | GPU wall | GPU execution | GPU, 16 calls together, per call | CPU, 8 threads | CPU, one thread |
 |---|---|---|---|---|---|
-| Read table answer, 6,897 × 6,296 × 32 vectors | 14.9 ms | 1.7 ms | 3.6 ms | 45 / 51 ms | 362 ms |
-| Read table setup, 6,897 × 6,296 × 1,024 | 100 ms | 82 ms | — | 2.15 / 2.24 s | not timed |
-| Nullifier table answer, 1,656 × 2,048 × 32 | 13.7 ms | 0.4 ms | 2.4 ms | 3.4 / 3.7 ms | 25.5 ms |
-| Nullifier table setup, 1,656 × 2,048 × 1,024 | 20.9 ms | 5.7 ms | — | 116 / 117 ms | 811 ms |
-| Client H·s, 6,897 × 1,024 (32-bit) × 32 | 16.0 ms | — | — | 7.3 / 8.2 ms | 62.8 ms |
-| Client A·s, 4,096 × 1,024 (32-bit) × 32 | 15.1 ms | 0.6 ms | — | 7.1 / 20.7 ms | 32.4 ms |
+| Read table answer, 6,897 × 6,296 × 32 vectors | 13.8 ms | 1.4 ms | 3.7 ms | 44 / 195 ms | 326 ms |
+| Read table setup, 6,897 × 6,296 × 1,024 | 102 ms | 81 ms | — | 1.44 / 1.46 s | not timed |
+| Nullifier table answer, 1,656 × 2,048 × 32 | 12.4 ms | — | 2.2 ms | 3.5 / 3.8 ms | 25.6 ms |
+| Nullifier table setup, 1,656 × 2,048 × 1,024 | 22.0 ms | 5.7 ms | — | 116 / 118 ms | 815 ms |
+| Client H·s, 6,897 × 1,024 (32-bit) × 32 | 16.8 ms | 0.4 ms | — | 8.4 / 8.9 ms | 55.5 ms |
+| Client A·s, 4,096 × 1,024 (32-bit) × 32 | 15.3 ms | — | — | 4.7 / 18.5 ms | 32.9 ms |
 
-Without pinning, the read table's answer call takes about 27 ms (its 87 MB of cells copied each time). Under Deno every
+Without pinning, the read table's answer call takes about 29 ms (its 87 MB of cells copied each time). Under Deno every
 call pays a floor of about 12 ms (below), which dominates the short calls; "—" is a time the run did not measure.
 
 ## How the GPU matches the CPU
@@ -95,10 +100,23 @@ call pays a floor of about 12 ms (below), which dominates the short calls; "—"
 The scan ([scan-wgsl.ts](scan-wgsl.ts), [scan.ts](scan.ts)) follows `kernel/src/lib.rs` entry by entry: an entry of 36
 zero bytes has the value zero and never matches; a point is decoded as `JubjubAffine::from_bytes` decodes it (v below
 p, u² a square, u = 0 with the sign bit refused), and a point that does not decode has the value zero; otherwise
-k* = point × secret (complete twisted Edwards formulas, extended coordinates), k = Poseidon(k*.u, k*.v), value =
+k* = point × secret (complete twisted Edwards formulas), k = Poseidon(k*.u, k*.v), value =
 Poseidon(k, 0). An entry whose 4 bytes equal the value's is a candidate; a second pass over the candidates only runs the
 ledger's check (r·point = identity, point not the identity; FR-103). The field ([field.ts](field.ts)) is 20 limbs of 13
 bits in Montgomery form; its additions and products are generated as straight-line WGSL.
+
+The values are the CPU's; the way to them is shaped for the GPU, where one entry is a chain of field products on one
+GPU thread (about 4,500 now, about 6,000 at first):
+
+- **Products without carries between limbs.** A limb is a 32-bit sum of up to 40 products of 26 bits, and carries are
+  propagated once, at the end of a product. A square forms each pair of limbs once.
+- **One recoding of the scalar for all entries.** The host turns the scalar into signed digits (width-4 non-adjacent
+  form); every entry doubles once per digit and adds a point of its own four-point table for about one digit in
+  five, instead of once per 1 bit.
+- **The square root of a quotient without the division** (decoding a point), and fixed exponents (inversion, the
+  square root's) by a table of odd powers.
+- **Poseidon's partial rounds in sparse form**: five products a round instead of nine. The constant table is derived
+  from the ledger's constants, and building it checks the sparse form against the plain permutation.
 
 The multiply ([multiply-wgsl.ts](multiply-wgsl.ts), [multiply.ts](multiply.ts)) computes in `u32`, which wraps
 modulo 2^32 as the CPU's `Math.imul` and `| 0` do; a 16-bit cell is sign-extended first. Two cells share a 32-bit word
@@ -139,6 +157,6 @@ Measured with Deno 2.7.5 on an Apple M4 Max:
 - Timestamp queries leave the end of a short pass (about a millisecond or less) unwritten; such calls report no GPU
   execution time.
 - `queue.writeBuffer` refuses a bare `ArrayBuffer` with offsets; views (also of a `SharedArrayBuffer`) work.
-- The field arithmetic written with loops ran at about 42 µs per scan entry, against about 5 µs as straight-line code.
+- The field arithmetic written with loops ran about six times slower than as straight-line code.
 - `node:worker_threads` under Deno runs the CPU multiply's workers about 20 times slower than Node does, which is why the
   CPU side of the check runs under Node.
