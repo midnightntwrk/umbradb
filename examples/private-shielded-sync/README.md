@@ -151,7 +151,7 @@ A page that runs the client's own code in the browser, one step per button, and 
 6. get the tail, scan its outputs, and check each fetched position's full 32-hash path against the tail's root;
 7. show the coins and the balance.
 
-`explain.html`, linked from the page, explains each step on a toy chain of 9 outputs and 5 spends, in three lanes:
+`explain.html`, linked from the page, explains each step on a small example chain of 9 outputs and 5 spends, in three lanes:
 the wallet, the wire and the server, with time going down. It covers:
 - the read table, the nullifier buckets and the tree;
 - a worked SimplePIR example with small numbers, computed in the page;

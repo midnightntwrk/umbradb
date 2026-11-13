@@ -106,12 +106,12 @@
 <body>
 <header>
   <h1>How private shielded sync works</h1>
-  <div class="muted">One toy chain, every step: what the wallet computes (left), what crosses the wire (center), what the server does (right). Time goes down. Run it for real on the <a href="index.html">step-by-step page</a>.</div>
+  <div class="muted">One small example chain, every step: what the wallet computes (left), what crosses the wire (center), what the server does (right). Time goes down. Run it for real on the <a href="index.html">step-by-step page</a>.</div>
 </header>
 
 <section class="example">
   <div class="box">
-    <div><h3>The toy chain</h3><div class="muted">9 shielded outputs at positions 0–8, each a commitment <span class="mono">c0…c8</span> and a ciphertext only the recipient can open. 5 spends so far, each published as a nullifier <span class="mono">n1…n5</span>.</div></div>
+    <div><h3>The example chain</h3><div class="muted">9 shielded outputs at positions 0–8, each a commitment <span class="mono">c0…c8</span> and a ciphertext only the recipient can open. 5 spends so far, each published as a nullifier <span class="mono">n1…n5</span>.</div></div>
     <div><h3>The wallet</h3><div class="muted">Owns output <b>2</b> (1,000 pssUSD) and output <b>6</b> (250 pssUSD). It already spent output 2: that spend published n3. It does not know any of this yet.</div></div>
     <div><h3>The server's snapshot</h3><div class="muted">Taken after output 8. Read table: 9 records in a 3 × 3 grid. Nullifier table: 4 buckets. Merkle tree cut into blocks of 4 leaves. Output 9 arrives after the snapshot.</div></div>
     <div class="legend"><h3>Reading the page</h3>
@@ -209,7 +209,7 @@
         <div class="d">Each file's SHA-256 equals the manifest's. The block roots hash up to the manifest's root: <span class="mono">h(h(R0,R1), h(R2,0)) = root</span>.</div>
       </div>
       <div class="card w"><div class="t">Keeps the setup data</div>
-        <div class="d">Toy read setup <b>H</b> (3 rows × n = 2):</div>
+        <div class="d">The read setup <b>H</b> of this example (3 rows × n = 2):</div>
         <div class="math" id="h-matrix"></div>
       </div>
     </div>
@@ -271,7 +271,7 @@
   </div>
 
   <div class="detail">
-    <h2>The numbers, for the vector of column 0<small>Toy SimplePIR: modulus 65,536, Δ = 4,096 (numbers 0–15), n = 2. Each record is one number here; a real one is 627 numbers of 9 bits.</small></h2>
+    <h2>The numbers, for the vector of column 0<small>SimplePIR with small parameters: modulus 65,536, Δ = 4,096 (numbers 0–15), n = 2. Each record is one number here; a real one is 627 numbers of 9 bits.</small></h2>
     <div class="side"><div class="card w"><div class="t">Query</div><div class="math" id="query-math"></div></div></div>
     <div class="wire"><div class="card"><div class="t">On the wire</div><div class="math" id="wire-math"></div></div></div>
     <div class="side"><div class="card s"><div class="t">Answer = table × q</div><div class="math" id="answer-math"></div></div></div>
@@ -395,11 +395,11 @@
     scanfile: { title: "The scan file (36 bytes per output)", head: ["entries", "size"], rows: [["1,000,000 outputs", "36 MB"], ["10,000,000 outputs", "360 MB"]],
       note: "Every wallet downloads the whole file: the price of finding outputs without telling the server which." },
     blockroots: { title: "The block roots (32 bytes per block of 65,536 outputs)", head: ["entries", "size"], rows: [["1,000,000 outputs", "16 blocks: 512 B"], ["10,000,000 outputs", "153 blocks: 4.9 KB"]],
-      note: "The toy uses blocks of 4 outputs; the real server uses 2^16." },
+      note: "The example uses blocks of 4 outputs; the server uses 2^16." },
     "setup-size": { title: "The setup data of both PIR tables", head: ["entries", "read setup", "nullifier setup"], rows: [["1,000,000", "≈ 103 MB", "≈ 25 MB"], ["10,000,000", "≈ 326 MB", "≈ 105 MB"]],
       note: "Grows with the square root of the table: rows ≈ 627 cells × √(outputs / 627) for the read table. Estimated with the server's sizing rule; Preprod today: 27 MB and 6.6 MB." },
     readup: { title: "One read call, up (32 vectors × columns × 4 B)", head: ["entries", "size"], rows: [["1,000,000 outputs", "≈ 3.2 MB"], ["10,000,000 outputs", "≈ 10 MB"]],
-      note: "The real client sends 32 vectors per call; the toy shows 3. Preprod today: 806 KB." },
+      note: "The real client sends 32 vectors per call; the example shows 3. Preprod today: 806 KB." },
     readdown: { title: "One read call, down (32 vectors × rows × 4 B)", head: ["entries", "size"], rows: [["1,000,000 outputs", "≈ 3.2 MB"], ["10,000,000 outputs", "≈ 10.2 MB"]], note: "Preprod today: 883 KB." },
     nfup: { title: "One nullifier call, up (32 vectors × buckets × 4 B)", head: ["entries", "size"], rows: [["1,000,000 nullifiers", "≈ 1 MB"], ["10,000,000 nullifiers", "≈ 2 MB"]],
       note: "Estimated with the server's bucket sizing (8,192 and 16,384 buckets). Preprod today: 262 KB." },
@@ -431,7 +431,7 @@
     if (e.target.closest("[data-tip]") && !e.relatedTarget?.closest?.("[data-tip]")) tip.hidden = true;
   });
 
-  // ── the toy SimplePIR, computed here so every number is exact ───────────────────────────────────────────────────
+  // ── the example's SimplePIR, computed here so every number is exact ───────────────────────────────────────────────────
   const Q = 65536, DELTA = 4096, N = 2; // plaintext modulus p = Q / Δ = 16
   const mod = (x) => ((x % Q) + Q) % Q;
   let seed = 20261113;
