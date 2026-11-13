@@ -9,14 +9,21 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Typed routes for a module's HTTP API (`src/helpers/typed-routes.ts`): `typedRoute` declares a route's method, path,
+  input and answer as TypeBox schemas, and `registerTypedRoutes(api, namespace, routes)` serves them under
+  `/<namespace>` from `on-start-api`. The input (a `GET`'s parameters, a `POST`'s body) is checked before the handler
+  runs (400 `invalid-request`, naming paths and rules, never values), and the answer before it is sent (a wrong one is
+  the module API's 500). A handler refuses with `RouteError`; each answer is read at one committed height with the
+  chain-data headers, at most 8 requests of a registration run at once (503 `busy`), and answers are ASCII-escaped
+  JSON. `pageCursor(schema)` gives keyset pages' opaque cursors. `typebox` 1.4.3 is a new runtime dependency.
 - MIP-0018 token metadata as two public modules: `token-metadata` (`TOKEN_METADATA`) creates, fills and guards its
   tables, and refuses a start above its database's first height with `TokenMetadataStartAfterDatabase` as the cause;
   `token-metadata-api` (`TOKEN_METADATA_API`) serves them on one route, `POST /token-metadata-api/v1/tokens`
   (`docs/token-metadata-api.md`), whose TypeBox-checked body selects tokens by colors, contract, domain separator
-  and kind. `typebox` 1.4.3 is a new runtime dependency.
+  and kind, through the core's typed routes.
   `TokenMetadataRevisionGap` is the cause of a refused gap between its revisions.
 - `contractLogsItemOf` and `unresolvedLogSitesOf`, with the types `ContractLog` and `UnresolvedLogSite`: a module's
-  reads of the `contract-logs` item. The exported surface is 74 names, 34 values and 40 types.
+  reads of the `contract-logs` item. The exported surface is 81 names, 39 values and 42 types.
 - A module declaration's optional `latestStarts` (`{ [network]: height }`): a new database whose start would be above
   an enabled module's height on its network starts there, with the entries starting with it; the process logs the
   move and `umbradb config check` notes it. `token-metadata` declares each official network's first block with

@@ -50,7 +50,7 @@ describe("examples/stats-module", () => {
 describe("the documents' code", () => {
   const documents = ["docs/module-guide.md", "README.md"].map((file) => ({ file, text: read(file) }));
 
-  it("imports only from umbradb, zod, Node.js and the example's module, and only names src/index.ts exports", () => {
+  it("imports only from umbradb, zod, typebox, Node.js and the example's module, and only names src/index.ts exports", () => {
     expect(importProblems(documents, surfaceNames())).toEqual([]);
   }, 60_000);
 

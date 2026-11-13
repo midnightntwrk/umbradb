@@ -13,13 +13,18 @@ import { LABEL_ATTEMPT, LABEL_PID, LABEL_REPOSITORY, START_ATTEMPTS, startContai
 import { POSTGRES_IMAGE } from "./postgres-image.js";
 
 /**
- * How every test starts a container (`containers.ts`): a start that Testcontainers gave up on after its fixed 10 s wait
- * for the ports is tried again, its container removed; every container carries the labels that tell whose it is; and
+ * How every test starts a container (`containers.ts`): a start that failed in one of the ways a loaded machine makes it
+ * fail (`TRIED_AGAIN`) is tried again, its container removed; every container carries the labels that tell whose it is; and
  * every test that starts one starts it this way.
  */
 
 const REPOSITORY = fileURLToPath(new URL("..", import.meta.url));
 const PORTS_NOT_BOUND = "Timed out after 10000ms while waiting for container ports to be bound to the host";
+/** The wait strategy's error when the host's mapped port is never reached (`HostPortWaitStrategy`). */
+const HOST_PORT_NOT_BOUND = "Port 34248 not bound after 120000ms";
+/** Docker's error when the wait strategy runs a command in a container that has stopped. */
+const CONTAINER_STOPPED =
+  "(HTTP code 409) container stopped/paused - container 07240f6fe86cd836ac79754edbeb75519e2653a02d31205b75aba3ed1c42e60e is not running";
 
 /**
  * A container whose `start` fails as `failures` says, in order, and then resolves with a started container that counts
@@ -66,6 +71,17 @@ describe("startContainer", () => {
     const always = scripted(Array.from({ length: START_ATTEMPTS }, () => PORTS_NOT_BOUND));
     await expect(startContainer(always.container)).rejects.toThrow(PORTS_NOT_BOUND);
     expect(always.starts()).toBe(START_ATTEMPTS);
+  });
+
+  it("tries a start again after the wait strategy found the host's port unreachable or the container stopped", async () => {
+    const mixed = scripted([HOST_PORT_NOT_BOUND, CONTAINER_STOPPED, PORTS_NOT_BOUND]);
+    expect(await startContainer(mixed.container)).toHaveProperty("stop");
+    expect(mixed.starts()).toBe(4);
+    for (const failure of [HOST_PORT_NOT_BOUND, CONTAINER_STOPPED]) {
+      const always = scripted(Array.from({ length: START_ATTEMPTS }, () => failure));
+      await expect(startContainer(always.container)).rejects.toThrow(failure);
+      expect(always.starts()).toBe(START_ATTEMPTS);
+    }
   });
 
   it("never tries again after any other error", async () => {
