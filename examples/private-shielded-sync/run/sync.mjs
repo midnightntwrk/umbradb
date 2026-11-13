@@ -7,7 +7,7 @@
  *     PSS_NODE_WS=<ws-url> node examples/private-shielded-sync/run/sync.mjs up --label <name> --out <dir>
  *       --build <checkout> [--api-port <p>] [--admin-port <p>]
  *       [--module <file.ts>#<export> --module-config <file.json> [--module-start <height>]]
- *       [--sweep-off-from next|<height>]
+ *       [--sweep on|off [--sweep-from next|<height>]]
  *     node examples/private-shielded-sync/run/sync.mjs down|record|destroy --label <name> --out <dir>
  *     PSS_NODE_WS=<ws-url> node examples/private-shielded-sync/run/sync.mjs config --label <name> --out <dir>
  *       --build <checkout> [--module <file.ts>#<export> --module-config <file.json> [--module-start <height>]]
@@ -17,11 +17,12 @@
  *   detached, with the build mounted read only and `--out` read-write at their own paths. The core entry has no stop.
  *   With `--module`, the module's entry starts at `--module-start` (default: the stored cursor + 1, so a module that
  *   owns no tables and declares `startsMidChain` can join a synced database).
- * - `--sweep-off-from` adds a `core` revision from that height (`next`: the stored cursor + 1) with `sweep: "off"` and
- *   `developmentOptIn: true` (the core refuses the sweep off without the opt-in): from there on the ledger-state
- *   module deletes no stored node, which saves the reclamation cascade's round trips on every block and lets the
- *   tables grow. The revision is kept in `<out>/core-revisions.json` and written into every later configuration, since
- *   a revision that started at or below the cursor must stay as recorded. It must start above the cursor.
+ * - `--sweep on|off` adds a `core` revision from `--sweep-from` (default `next`: the stored cursor + 1) with that
+ *   `sweep`, and `developmentOptIn: true` with `off` (the core refuses the sweep off without the opt-in). The revision
+ *   is kept in `<out>/core-revisions.json` and written into every later configuration, since a revision that started
+ *   at or below the cursor must stay as recorded. It must start above the cursor. Turning the sweep off does not make
+ *   a long sync faster: the ledger-state module still reads its whole queue of unreferenced nodes on every block, and
+ *   with no sweep that queue grows by about one key per height, so each block gets slower.
  * - `config` writes the configuration file and the `umbradb` link into `--out`, as `up` does, and starts nothing (the
  *   module's start is `--module-start`, 0 unless given): for `umbradb config check` before an `up`.
  * - `down` stops the run container (SIGTERM; the height in progress finishes) and removes it; the database stays.
@@ -60,7 +61,8 @@ const { values } = parseArgs({
     module: { type: "string" },
     "module-config": { type: "string" },
     "module-start": { type: "string" },
-    "sweep-off-from": { type: "string" },
+    sweep: { type: "string" },
+    "sweep-from": { type: "string" },
   },
 });
 const fail = (message) => {
@@ -106,14 +108,15 @@ function coreRevisions() {
   return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : [];
 }
 
-/** Records a `sweep: "off"` revision from `start` (above `cursor`) in `<out>/core-revisions.json`. */
-function addSweepOff(start, cursor) {
-  if (start <= cursor) fail(`--sweep-off-from ${start} is not above the stored cursor ${cursor}`);
+/** Records a revision with `sweep` from `start` (above `cursor`) in `<out>/core-revisions.json`. */
+function addSweep(sweep, start, cursor) {
+  if (sweep !== "on" && sweep !== "off") fail("--sweep takes on or off");
+  if (start <= cursor) fail(`--sweep-from ${start} is not above the stored cursor ${cursor}`);
   const revisions = coreRevisions();
   const last = revisions.at(-1);
   if (last !== undefined && BigInt(last.start) >= start) fail(`a core revision already starts at ${last.start}`);
-  if (last?.settings.sweep === "off") fail(`the sweep is already off from ${last.start}`);
-  revisions.push({ start: String(start), settings: { sweep: "off", developmentOptIn: true } });
+  if ((last?.settings.sweep ?? "on") === sweep) fail(`the sweep is already ${sweep}`);
+  revisions.push({ start: String(start), settings: sweep === "off" ? { sweep, developmentOptIn: true } : { sweep } });
   writeFileSync(join(out, "core-revisions.json"), `${JSON.stringify(revisions, null, 2)}\n`);
 }
 
@@ -196,8 +199,10 @@ async function up() {
   }
   const moduleSpec = values.module;
   const cursor = cursorOf(secretEnv);
-  const sweepOff = values["sweep-off-from"];
-  if (sweepOff !== undefined) addSweepOff(sweepOff === "next" ? cursor + 1n : BigInt(sweepOff), cursor);
+  if (values.sweep !== undefined) {
+    const from = values["sweep-from"] ?? "next";
+    addSweep(values.sweep, from === "next" ? cursor + 1n : BigInt(from), cursor);
+  }
   const moduleStart = moduleSpec === undefined ? "0" : (values["module-start"] ?? String(cursor + 1n));
   const configFile = writeConfig(build, moduleStart);
   const apiPort = values["api-port"] ?? "";
