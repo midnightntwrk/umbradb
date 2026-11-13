@@ -66,6 +66,8 @@ describe.skipIf(!installed)("the command line (with the client's install)", () =
     const synced = await cli(["sync", ...common, "--server", r.origin, "--stats", join(dir, "stats.json")]);
     expect(synced.code, synced.stderr).toBe(0);
     expect(synced.stdout).toContain("unspent coins (7)");
+    // FR-006: the seed is in no output or log line.
+    expect(`${synced.stdout}${synced.stderr}`).not.toContain(Buffer.alloc(32, 0xa1).toString("hex").slice(0, 16));
     const state = JSON.parse(readFileSync(join(dir, "data", "wallets", "seed-a.seed", "state.json"), "utf8")) as WalletState;
     expect(state.coins).toHaveLength(9);
     const stats = JSON.parse(readFileSync(join(dir, "stats.json"), "utf8")) as Record<string, any>;

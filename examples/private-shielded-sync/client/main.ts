@@ -237,13 +237,18 @@ async function cmdSend(): Promise<void> {
   try {
     // The fee wallet's sync is the long step (minutes); the path is built after it so its root is fresh.
     if (sdk !== null) {
+      const proofServer = opt["proof-server"] ?? process.env.PSS_PROOF_SERVER?.trim() ?? "http://127.0.0.1:49343";
+      // FR-126: the spend's proof input holds the coin secret key, so the prover must run on this machine.
+      if (!["127.0.0.1", "localhost", "[::1]"].includes(new URL(proofServer).hostname)) {
+        throw new Error(`the proof server must be local (loopback), not ${new URL(proofServer).hostname}`);
+      }
       const started = performance.now();
       feeWallet = await sdk.openFeeWallet(
         s.all!,
         {
           network,
           nodeWs,
-          proofServer: opt["proof-server"] ?? process.env.PSS_PROOF_SERVER?.trim() ?? "http://127.0.0.1:49343",
+          proofServer,
           indexerHttp: env("PSS_INDEXER_HTTP"),
           indexerWs: graphqlWsUrl(env("PSS_INDEXER_WS")),
           projectId: env("PSS_BLOCKFROST_PROJECT_ID"),
