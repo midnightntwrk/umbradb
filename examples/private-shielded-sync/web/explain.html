@@ -90,6 +90,7 @@
   .math .eq.one { flex-wrap: nowrap; overflow-x: auto; gap: 3px; font-size: 10.5px; padding-bottom: 2px; }
   .math .eq.one td { padding: 1px 3px; }
   .math td.hit { background: var(--mine); font-weight: 700; }
+  .math td.nm { color: var(--muted); text-align: left; padding-left: 0; font-family: system-ui, sans-serif; font-size: 10.5px; }
   .math td.selrow { background: var(--sel); }
   .ft { border-collapse: collapse; width: 100%; font-size: 11.5px; margin-top: 4px; }
   .ft th, .ft td { text-align: left; padding: 2px 6px 2px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
@@ -140,12 +141,12 @@
         <div class="d">9 outputs (commitment + ciphertext), 5 nullifiers, the tree's root.</div>
       </div>
       <div class="card s"><div class="t">Read table: one record per output, 3 per column</div>
-        <div class="d">A record holds the commitment, ciphertext elements 1–5 and the lower Merkle path.</div>
+        <div class="d">A record holds the commitment, ciphertext elements 1–5 and the lower Merkle path. Here each record is one number (r0 = 7 … r8 = 8). Column c holds records 3c, 3c + 1, 3c + 2, top to bottom: column 0 is r0, r1, r2; column 2 is r6, r7, r8.</div>
         <div class="diag"><div class="grid" style="grid-template-columns: repeat(3, auto)">
           <div class="colhead">col 0</div><div class="colhead">col 1</div><div class="colhead">col 2</div>
-          <div class="cell">r0</div><div class="cell">r3</div><div class="cell">r6</div>
-          <div class="cell">r1</div><div class="cell">r4</div><div class="cell">r7</div>
-          <div class="cell">r2</div><div class="cell">r5</div><div class="cell">r8</div>
+          <div class="cell">r0 = 7</div><div class="cell">r3 = 9</div><div class="cell">r6 = 11</div>
+          <div class="cell">r1 = 12</div><div class="cell">r4 = 14</div><div class="cell">r7 = 2</div>
+          <div class="cell">r2 = 3</div><div class="cell">r5 = 5</div><div class="cell">r8 = 8</div>
         </div></div>
       </div>
       <div class="card s gpu"><span class="gpu-tag" data-tip="setup">gpu</span><div class="t">Draws the public matrix A and computes the setup data H</div>
@@ -261,9 +262,9 @@
         <div class="d">Output 2 is in column 0 and output 6 in column 2. The call always carries the same number of vectors: here 3, so column 1 is added as padding. The real client sends 32.</div>
         <div class="diag"><div class="grid" style="grid-template-columns: repeat(3, auto)">
           <div class="colhead">col 0</div><div class="colhead">col 1</div><div class="colhead">col 2</div>
-          <div class="cell sel">r0</div><div class="cell pad">r3</div><div class="cell sel mine">r6</div>
-          <div class="cell sel">r1</div><div class="cell pad">r4</div><div class="cell sel">r7</div>
-          <div class="cell sel mine">r2</div><div class="cell pad">r5</div><div class="cell sel">r8</div>
+          <div class="cell sel">r0 = 7</div><div class="cell pad">r3 = 9</div><div class="cell sel mine">r6 = 11</div>
+          <div class="cell sel">r1 = 12</div><div class="cell pad">r4 = 14</div><div class="cell sel">r7 = 2</div>
+          <div class="cell sel mine">r2 = 3</div><div class="cell pad">r5 = 5</div><div class="cell sel">r8 = 8</div>
         </div></div>
       </div>
       <div class="card w"><div class="t">Builds one encrypted vector per column</div>
@@ -509,6 +510,9 @@
   const mat = (rows, cls = () => "") => `<span class="m"><table>${rows.map((r, i) => `<tr>${r.map((x, j) => `<td class="${cls(i, j)}">${x}</td>`).join("")}</tr>`).join("")}</table></span>`;
   const eq = (...parts) => `<div class="eq">${parts.join("")}</div>`;
   const eqOne = (...parts) => `<div class="eq one">${parts.join("")}</div>`;
+  /** A column vector with a name beside each entry (which record or slot it is). */
+  const vecL = (xs, names, hit = () => false) =>
+    `<span class="m"><table>${xs.map((x, i) => `<tr><td class="${hit(i) ? "hit" : ""}">${x}</td><td class="nm">${names[i]}</td></tr>`).join("")}</table></span>`;
   const lbl = (t) => `<span class="lbl">${t}</span>`;
 
   document.getElementById("a-matrix-0").innerHTML = eq(lbl("A ="), mat(A), lbl("3 table columns × n = 2, random numbers mod 65,536"));
@@ -529,12 +533,13 @@
   document.getElementById("answer-math").innerHTML =
     eq(lbl("table ="), mat(D), lbl("×"), vec(v0.q), lbl("="), vec(v0.ans)) + `<div class="lbl">mod 65,536. The server cannot undo A·s: it does not know s.</div>`;
   document.getElementById("decode-math").innerHTML =
-    eq(lbl("answer"), vec(v0.ans), lbl("− H·s"), vec(v0.Hs), lbl("="), vec(v0.diff), lbl("≈ Δ ×"), vec(v0.out, (i) => (i === 2 ? "hit" : "")),
+    eq(lbl("answer"), vec(v0.ans), lbl("− H·s"), vec(v0.Hs), lbl("="), vec(v0.diff), lbl("≈ Δ ×"), vecL(v0.out, ["r0", "r1", "r2"], (i) => i === 2),
       lbl("+ noise"), vec(v0.noiseLeft)) +
-    `<div class="lbl">answer − H·s = Δ·(column 0) + table·e. The noise stays far below Δ/2 = 2,048, so rounding gives column 0 exactly: records 0, 1, 2 = ${v0.out.join(", ")}. Record 2 (${v0.out[2]}) is the wallet's.</div>`;
+    `<div class="lbl">answer − H·s = Δ·(column 0) + table·e. The noise stays far below Δ/2 = 2,048, so rounding gives column 0 exactly, top to bottom: r0 = ${v0.out[0]}, r1 = ${v0.out[1]}, r2 = ${v0.out[2]}. The wallet wanted r2 (output 2): the last number of the column.</div>`;
   document.getElementById("others-math").innerHTML =
-    eq(lbl("column 2 →"), vec(v2.out, (i) => (i === 0 ? "hit" : ""))) + `<div class="lbl">records 6, 7, 8; record 6 (${v2.out[0]}) is the wallet's.</div>` +
-    eq(lbl("column 1 →"), vec(v1.out)) + `<div class="lbl">padding: decoded and dropped.</div>`;
+    `<div class="lbl">Decoding a vector gives its whole column, top to bottom.</div>` +
+    eq(lbl("column 2 →"), vecL(v2.out, ["r6", "r7", "r8"], (i) => i === 0)) + `<div class="lbl">The wallet wanted r6 (output 6): the first number of column 2, ${v2.out[0]}.</div>` +
+    eq(lbl("column 1 →"), vecL(v1.out, ["r3", "r4", "r5"])) + `<div class="lbl">Padding: r3, r4, r5, decoded and dropped.</div>`;
 
   document.getElementById("nf-setup-0").innerHTML = eq(lbl("A′ ="), mat(AN), lbl("H′ ="), mat(HN)) +
     `<div class="lbl">A′: 4 buckets × n = 2. H′: 2 slots × n = 2. Mod 65,536.</div>`;
@@ -552,12 +557,12 @@
   document.getElementById("nf-answer-math").innerHTML =
     eq(lbl("table ="), mat(DN), lbl("×"), vec(w0.q), lbl("="), vec(w0.ans)) + `<div class="lbl">mod 65,536. The same multiplication for every vector, whichever bucket it asks for.</div>`;
   document.getElementById("nf-decode-math").innerHTML =
-    eq(lbl("answer"), vec(w0.ans), lbl("− H′·s"), vec(w0.Hs), lbl("="), vec(w0.diff), lbl("≈ Δ ×"), vec(w0.out, (i) => (w0.out[i] === 13 ? "hit" : "")),
+    eq(lbl("answer"), vec(w0.ans), lbl("− H′·s"), vec(w0.Hs), lbl("="), vec(w0.diff), lbl("≈ Δ ×"), vecL(w0.out, ["n1", "n3"], (i) => w0.out[i] === 13),
       lbl("+ noise"), vec(w0.noiseLeft)) +
     `<div class="lbl">Rounding gives bucket 0 exactly: slots = ${w0.out.join(", ")}. The wallet's nf(coin 2) = 13 is there.</div>`;
   document.getElementById("nf-others-math").innerHTML =
-    eq(lbl("bucket 2 →"), vec(w2.out)) + `<div class="lbl">slots ${w2.out.join(", ")}: nf(coin 6) = 3 is not there.</div>` +
-    eq(lbl("bucket 1 →"), vec(w1.out)) + `<div class="lbl">padding: decoded and dropped.</div>`;
+    eq(lbl("bucket 2 →"), vecL(w2.out, ["n4", "empty"])) + `<div class="lbl">slots ${w2.out.join(", ")}: nf(coin 6) = 3 is not there.</div>` +
+    eq(lbl("bucket 1 →"), vecL(w1.out, ["n2", "empty"])) + `<div class="lbl">padding: decoded and dropped.</div>`;
 
   // ── the scan tiles (illustrative bytes) ─────────────────────────────────────────────────────────────────────────
   const hx = (n) => Array.from({ length: n }, () => Math.floor(rand() * 256).toString(16).padStart(2, "0")).join("");
