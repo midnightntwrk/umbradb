@@ -223,12 +223,12 @@
   <div class="body g2" style="gap: 12px">
     <table class="io" style="font-size: 13px">
       <tr><th>Part</th><th>Kind</th><th>What it is</th><th>Its job</th></tr>
-      <tr><td class="sym">u</td><td><span class="b secret">secret</span></td><td>all 0s, with a 1 at the column the wallet wants</td><td><b>selects</b> the column</td></tr>
+      <tr><td class="sym">u</td><td><span class="b secret">secret</span></td><td>set by the wallet from what it wants: all 0s, a 1 at the wanted column</td><td><b>selects</b> the column</td></tr>
       <tr><td class="sym">Δ</td><td><span class="b public">public</span></td><td>a large constant (4,096 here)</td><td><b>lifts</b> the 1 far above the noise, so it survives to the end</td></tr>
       <tr><td class="sym">A</td><td><span class="b public">public</span></td><td>random numbers, one row per table column, from a public seed</td><td>with s, <b>makes the mask</b></td></tr>
-      <tr><td class="sym">s</td><td><span class="b secret">secret</span></td><td>random numbers (2 here, 1,024 for real), new per vector, never sent</td><td>the <b>key</b> to the mask</td></tr>
+      <tr><td class="sym">s</td><td><span class="b secret">secret</span></td><td>made up by the wallet: random numbers (2 here, 1,024 for real), new per vector, never sent</td><td>the <b>key</b> to the mask</td></tr>
       <tr><td class="sym">A·s</td><td><span class="b secret">secret</span></td><td>one number per column</td><td>the <b>mask</b>: random-looking numbers laid over Δ·u</td></tr>
-      <tr><td class="sym">e</td><td><span class="b secret">secret</span></td><td>tiny random noise (−2 … 2 here)</td><td>makes the mask impossible to strip without s (Learning With Errors)</td></tr>
+      <tr><td class="sym">e</td><td><span class="b secret">secret</span></td><td>made up by the wallet: tiny random noise (−2 … 2 here), new per vector</td><td>makes the mask impossible to strip without s (Learning With Errors)</td></tr>
       <tr><td class="sym">q</td><td><span class="b sent">sent</span></td><td>the sum, one number per column</td><td>what the server receives</td></tr>
     </table>
     <div style="display: grid; gap: 10px; align-content: start">
@@ -237,7 +237,7 @@
       <div class="box"><h3>The example's numbers: where is the 4,096?</h3><div class="math" id="m-pir-demo"></div></div>
     </div>
   </div>
-  <div class="sees"><div class="sv"><b>Server sees</b>q and the table. q looks random, so it cannot tell which entry carries Δ, and it cannot remove the mask without s.</div><div class="wl"><b>Stays on the wallet</b>s, e and u. Only s can remove the mask, and only the wallet has it.</div></div>
+  <div class="sees"><div class="sv"><b>Server sees</b>q and the table. q looks random, so it cannot tell which entry carries Δ, and it cannot remove the mask without s.</div><div class="wl"><b>Stays on the wallet</b>s, e and u: the wallet makes all three for each vector and drops them after decoding. Only s removes the mask.</div></div>
 </section>
 
 <section class="slide" id="s-example" data-step="" data-title="The example chain">
