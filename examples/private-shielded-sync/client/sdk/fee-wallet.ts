@@ -143,14 +143,17 @@ export interface Submitted {
   readonly timings: { readonly balanceMs: number; readonly signMs: number; readonly proveMs: number; readonly validateMs: number; readonly toInBlockMs: number; readonly toFinalizedMs: number };
 }
 
-/** An SDK error as text: its message, or its tag and fields (the SDK's tagged errors may carry no message). */
-function describe(error: unknown): string {
-  if (error instanceof Error && error.message) return error.message;
-  try {
-    return JSON.stringify(error, (_k, v: unknown) => (typeof v === "bigint" ? v.toString() : v instanceof Uint8Array ? `<${v.length} bytes>` : v)) ?? String(error);
-  } catch {
-    return String(error);
-  }
+/**
+ * An SDK error as text: its message, or its tag (the SDK's tagged errors may carry no message), then its causes'.
+ * Validation refused a transaction with no input as `…/validationService/WellFormedError` and an empty message.
+ */
+export function describe(error: unknown, depth = 0): string {
+  if (depth > 4 || error === undefined || error === null) return "";
+  const e = error as { message?: unknown; _tag?: unknown; cause?: unknown };
+  let own = typeof e.message === "string" && e.message !== "" ? e.message : typeof e._tag === "string" ? e._tag : error instanceof Error ? error.name : String(error);
+  if (own === "[object Object]") own = "";
+  const cause = describe(e.cause, depth + 1);
+  return cause === "" ? own : own === "" ? cause : `${own} (cause: ${cause})`;
 }
 
 /** Balances the unproven transaction for Dust, proves, validates, submits and waits for finality. */
