@@ -17,6 +17,8 @@ This folder holds:
   ([`gpu/README.md`](gpu/README.md));
 - `run/sync.mjs`: runs UmbraDB with the module against a node in Docker;
 - `bench/`: the benchmark of the whole flow (`bench.ts`, spec §8) and micro-benchmarks (`micro.ts`);
+- `web/`: a page that runs the client one step at a time in a browser, with each step's debug output (below);
+- `run/probe.ts`: checks a running server against the database it is built from, without a wallet;
 - `test/`.
 
 Neither `pir/`, `shared/` nor `kernel/` imports anything from UmbraDB, so the server module and the client use them
@@ -133,6 +135,47 @@ node examples/private-shielded-sync/run/sync.mjs down --label preprod --out <out
 node examples/private-shielded-sync/run/sync.mjs destroy --label preprod --out <out>  # run, database, volume, network
 docker rm -f pss-proof-server
 ```
+
+## The step-by-step page (`web/`)
+
+A page that runs the client's own code in the browser, one step per button, and shows what each step did:
+
+0. load the scan kernel and the ledger package (WebAssembly);
+1. derive the wallet's keys from a mnemonic or a Zswap seed (or generate a test wallet);
+2. get the manifest and the four shared files, each checked against the manifest;
+3. scan for the wallet's outputs (one CPU thread, or WebGPU);
+4. fetch read-table records by PIR, for the scan's matches or for positions typed in (any output can be fetched, to
+   test before a wallet has coins in the synced range); each record is checked for ownership and, with the debug
+   routes, against the stored output;
+5. look up nullifiers by PIR, for the found coins' or for nullifiers typed in (or filled from stored spends);
+6. get the tail, scan its outputs, and check each fetched position's full 32-hash path against the tail's root;
+7. show the coins and the balance.
+
+A side panel lists every request the server saw, with its size and time. The keys stay in the page's worker.
+
+    npm ci --ignore-scripts --prefix examples/private-shielded-sync/client      # once
+    node examples/private-shielded-sync/web/build.ts                            # writes web/dist/
+    O=<the sync's out folder>
+    node examples/private-shielded-sync/web/serve.ts --port 10490 --server http://127.0.0.1:10480 \
+      --db-url postgres://postgres@127.0.0.1:<port>/umbradb --db-password-file $O/pg-password \
+      --admin-secret-file $O/pss-admin-secret
+    # open http://127.0.0.1:10490/
+
+`serve.ts` serves the page cross-origin isolated (the PIR library keeps its matrices in a `SharedArrayBuffer`) on
+127.0.0.1 and passes `/pss/v1/…` to the module's API, except the admin routes.
+
+Two options turn on debug routes that are no part of the private protocol:
+- **`--db-url`** reads the server's database directly, so the page can compare what PIR returned with what UmbraDB
+  stored, and can fill real nullifiers.
+- **`--admin-secret-file`** adds a button that builds a snapshot at the synced height. The page never holds the
+  secret.
+
+The worker runs the client's files bundled by esbuild:
+- `web/shims/` replaces the Node.js modules they import: SHA-256 from `@noble/hashes`, AES-128-CTR in plain
+  TypeScript (checked equal to Node.js's), and `crypto.getRandomValues`.
+- `@midnightntwrk/ledger-v9` is loaded from its `.wasm` (`web/ledger-v9.ts`).
+
+`npx tsc -p examples/private-shielded-sync/web` type-checks the page and the worker.
 
 ## Checks
 
