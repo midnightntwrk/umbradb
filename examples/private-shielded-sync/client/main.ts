@@ -263,7 +263,14 @@ async function cmdSend(): Promise<void> {
         const result = await runSync(t, readState(statePath()));
         timings.syncMs = performance.now() - started;
         writeState(statePath(), result.state);
-        const coin = chooseCoin(unspentCoins(result.state), token, amount, position);
+        let coin;
+        try {
+          coin = chooseCoin(unspentCoins(result.state), token, amount, position);
+        } catch (error) {
+          // Another attempt would read the same coins: only a path or root problem is worth a refresh.
+          attempt = 3;
+          throw error;
+        }
         started = performance.now();
         const path = coinPath(result.view, coin, t.kernel);
         timings.pathMs = performance.now() - started;

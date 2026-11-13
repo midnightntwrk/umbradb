@@ -8,6 +8,7 @@ information retrieval (SimplePIR), so the server answers without learning which 
 This folder holds:
 
 - `server/`: the server, an UmbraDB module (below);
+- `client/`: the client, a Node.js command line (below);
 - `pir/`: SimplePIR (tables, setup data, queries, answers, decoding) and the nullifier buckets;
 - `shared/`: the wire formats, record layouts and the snapshot manifest;
 - `kernel/`: the scan kernel, a WebAssembly build of the ownership test, decryption and Poseidon on the Midnight
@@ -16,7 +17,7 @@ This folder holds:
 - `test/`, `bench/`.
 
 Neither `pir/`, `shared/` nor `kernel/` imports anything from UmbraDB, so the server module and the client use them
-unchanged. The client comes later.
+unchanged. The client imports nothing from `server/`.
 
 ## Running it
 
@@ -138,6 +139,95 @@ curl -X POST -H "Authorization: Bearer <secret>" -H "Content-Type: application/j
 
 `sync.mjs config` (same arguments, plus `--module-start`) writes the configuration without starting anything, for
 `node <checkout>/dist/cli/main.js config check <dir>/umbradb.config.ts`.
+
+## Client (`client/`)
+
+A Node.js 24 command line that syncs a wallet with the module's routes, prints its balance, spends one coin, and checks
+its result against the ledger's own replay of the stored events.
+
+**Install.** The Midnight packages it needs (`@midnightntwrk/ledger-v9` 1.0.1, `ledger-v8` 8.1.3, the wallet SDK 2.0.0,
+`@scure/bip39`, …) are in the client's own `package.json` and lock file, never in umbradb's dependencies:
+
+```sh
+npm ci --ignore-scripts --prefix examples/private-shielded-sync/client
+```
+
+**Secrets** come only from the environment, loaded from a file outside the repository with `node --env-file`: the
+wallet's mnemonic (`PSS_MNEMONIC_<WALLET>` for `--wallet <WALLET>`, or the variable `--mnemonic-env` names) and, for
+`send`, the indexer key (`PSS_BLOCKFROST_PROJECT_ID`) and endpoints (`PSS_NETWORK`, `PSS_NODE_WS`, `PSS_NODE_HTTP`,
+`PSS_INDEXER_HTTP`, `PSS_INDEXER_WS`, `PSS_PROOF_SERVER`). Nothing secret is printed, logged or sent to the server; the
+indexer key goes only to the indexer, as its `project_id` header. A generated test wallet can be given as a file holding
+its 32-byte Zswap seed in hex (`--zswap-seed-file`).
+
+```sh
+C=examples/private-shielded-sync/client/main.ts
+E=--env-file=<secrets.env>
+node $E $C sync --wallet A --server http://127.0.0.1:10480            # local state + balance; --stats <file> for timings
+node $E $C balance --wallet A                                          # from the local state, no network
+node $E $C address --wallet B                                          # mn_shield-addr_preprod1…
+node $E $C send --wallet A --to <B's address> --token <hex> --amount 400000000   # one coin; --dry-run, --no-submit
+node $E $C cross-check --wallet A --db-url postgres://postgres@127.0.0.1:58171/umbradb --db-password-file <file>
+```
+
+State and cache live under `--data` (default `~/.pss-client`): `wallets/<label>/state.json` (directory 700, file 600)
+and `cache/<digest>` (artifacts are the same for every wallet, so wallets share it).
+
+**`sync`** (spec FR-110–115):
+
+1. `GET /manifest`; its SHA-256 is the snapshot identifier, checked against `Pss-Snapshot-Id`.
+2. The scan file, block roots and both setup-data artifacts, each by `GET /blob/<digest>` unless cached; digest and size
+   checked while streaming. The block roots must give the manifest's root.
+3. The scan (`kernel/`'s `ScanPool`, `--threads`): the positions whose 4 bytes match.
+4. PIR reads of those positions' records: their distinct columns in calls of exactly `queriesPerCall` vectors, padded
+   with uniformly random columns; one full call when nothing matched. A record's lower path must give its block's
+   root. Element 0 encrypts zero, so the 224-byte ciphertext is rebuilt as point, pad 0, elements 1–5, and decrypted by
+   the ledger's own decryption (the kernel's `decrypt_coin`); the coin is kept only if its commitment equals the
+   record's. A match that fails a check is dropped and listed as rejected.
+5. Each coin's nullifier (`coinNullifier`) looked up in the nullifier table by PIR, the same way.
+6. `GET /tail`: every tail output is tested (the client has their ciphertexts), tail nullifiers mark spends, and the
+   snapshot's and the tail's block roots must give the tail's root.
+7. The local state: per coin its position, token type, value, nonce, commitment, nullifier, lower path (when the PIR
+   record had one), source and where it was spent; the snapshot and tail it reflects; pending transfers.
+
+A 409 (the snapshot was replaced) or a tail of another snapshot starts the sync again from the new manifest (three
+attempts). Every request is recorded without its body (method, path, lengths, time) for the statistics.
+
+**`send`** (spec FR-120–128; the transfer spike's sequence):
+
+1. The Dust fee wallet: the wallet SDK's facade from the mnemonic's seeds, its indexer behind a loopback proxy that adds
+   the Blockfrost header, its Dust wallet started at Preprod's ledger 9 fork (minutes; done first so the root is fresh).
+2. A sync, the coin (the smallest unspent coin of the token that holds the amount, or `--position`), its 32 siblings:
+   the lower k from its PIR record or from the tail's commitments, the upper 32 − k from the block roots. They must
+   give the tail's root; the tail must be at most `--max-lag` (300) blocks behind the node's finalized head, and the
+   node's `midnight_zswapStateRoot` after the tail's block must equal it. Three attempts.
+3. A one-use `ZswapLocalState`: one collapsed update over 0 … i − 1 (the left siblings), `insertCoin`, one single-hash
+   update per non-empty right sibling; its root checked; `spend`. The payment and the change, each `ZswapOutput.new`
+   with a ciphertext to its owner; `Transaction.fromParts`.
+4. Dust-only balancing, signing, proving at the local proof server (never a remote one: the proof input holds the coin
+   secret key), `validateTransaction`, submission as `midnight.sendMnTransaction` through the SDK's node client, wait for
+   finality. The spent coin and the change's commitment are kept as a pending transfer until a sync sees both.
+
+A record of the transfer (public data only) is written under `<data>/transfers/`.
+
+**`cross-check`** (spec FR-140): reads every stored `zswap-output` and `zswap-input` event up to the local state's tail
+height from the database, replays them with the ledger's own `ZswapLocalState.replayRawEvents` and the wallet's keys
+(ledger 8 heights with `@midnightntwrk/ledger-v8`, ledger 9 heights with `ledger-v9`, the state carried across by its
+serialization), and compares every coin, spend and the unspent set with the local state. Exit code 1 on a difference.
+
+| File | Does |
+|---|---|
+| `main.ts` | The command line |
+| `keys.ts`, `ledger.ts` | Keys from a Zswap seed and the scan secret; the ledger package's type and loader |
+| `http.ts`, `cache.ts` | Requests (recorded, no bodies) and artifacts cached by digest |
+| `pir-calls.ts` | Padded PIR read and nullifier calls |
+| `sync.ts`, `state.ts` | The sync and its checks; the local state and the balance |
+| `tree.ts`, `send.ts`, `address.ts`, `node-rpc.ts` | Paths and collapsed updates; the spend; shielded addresses; node checks |
+| `cross-check.ts` | The ledger cross-check |
+| `sdk-api.ts`, `sdk/` | The wallet SDK part (seeds, fee wallet, proving, submission), loaded only when needed |
+
+`npm run typecheck` checks the client except `sdk/`, which needs the install:
+`npm run typecheck --prefix examples/private-shielded-sync/client`. The tests run the client with the repository's
+vendored ledger 9 build (the same release as the npm package); the command-line test runs only with the install.
 
 ## PIR library (`pir/`)
 
@@ -268,6 +358,10 @@ on arm64.
 | `test/server-tree.test.ts` | The tree's roots against the vendored ledger's stored `zswap_root` (k 0–3, 16, 20); incremental, block and tail trees against a naive recursion of the ledger's rules. |
 | `test/server-build.test.ts` | The builder on real v9 ledger events (`test/server-chain.ts`): manifest, scan file, block roots, every read record and nullifier by PIR, determinism, a wrong root or `first_free`, dense positions, the worker thread, an empty chain. |
 | `test/server-module.test.ts` | The module in UmbraDB's real process on PostgreSQL 18 over a tape of the same chain: story 1, the tail, both query routes with a PIR round trip, refusals, the admin guard, builds on request (a changed stored root fails), pruning, logging, a restart, joining a synced database. |
+| `test/client-sync.test.ts` | The client against the module in the real process (PostgreSQL 18) over the synthetic chain, snapshot at 4 and tail to 7: three wallets' coins, spends and balances equal the ledger's replay (FR-140, SC-001) and the wallets' own local states; identical request shapes (FR-142); no key, public key, nullifier or commitment in any request (FR-143); one full call with no coins; cache; local state file; rejected matches (FR-111); a snapshot replaced mid-sync. |
+| `test/client-send.test.ts` | Paths give the core's root (FR-121); spends from PIR, partial-block and tail paths accepted by the chain's Zswap state, outputs found by both wallets; a wrong sibling refused; collapsed-update bytes equal the ledger's (FR-123); coin choice; pending transfers (FR-128); shielded addresses (and, with the install, equal to the SDK's codec and the npm package's keys). |
+| `test/client-fork.test.ts` | Across a ledger 8 → 9 upgrade: ledger 8 coins and spends, a ledger 8 coin spent under ledger 9; the client equals the replay with both packages. |
+| `test/client-cli.test.ts` | With the install: `sync`, `balance`, `address`, `cross-check` (and a negative control) as separate processes. |
 | `test/server-config.test.ts` | `run/sync.mjs config` and `umbradb config check` on a built checkout (type check with erasable syntax, evaluation, settings), and a negative control. |
 
 Fixtures (`test/fixtures/`): `entries.bin`, `pads.bin`, `mine.bin`, `scalar.bin` and `sample.txt` are 16,384 scan
