@@ -216,7 +216,7 @@ export class GpuScanner implements Scanner {
    */
   async #run(b: Buffers, set: PassSet, n: number, last: GPUComputePipeline): Promise<Uint32Array> {
     const d = this.#device;
-    const span = this.#timestamps ? new TimestampSpan(d) : null;
+    const span = this.#timestamps ? TimestampSpan.open(d) : null;
     const submit = (pipeline: GPUComputePipeline, group: GPUBindGroup, writes?: GPUComputePassTimestampWrites) => {
       const enc = d.createCommandEncoder();
       this.#dispatch(enc, pipeline, group, n, writes);
@@ -233,8 +233,8 @@ export class GpuScanner implements Scanner {
     await Promise.all([b.staging.mapAsync(GPUMapMode.READ, 0, bytes), span?.map()]);
     const out = new Uint32Array(b.staging.getMappedRange(0, bytes).slice(0));
     b.staging.unmap();
-    if (span) {
-      const ms = span.ms();
+    if (this.#timestamps) {
+      const ms = span === null ? null : span.ms();
       this.#gpuMs = ms === null || this.#gpuMs === null ? null : this.#gpuMs + ms;
     }
     return out;

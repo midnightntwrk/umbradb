@@ -68,25 +68,54 @@ export function writeView(device: GPUDevice, buffer: GPUBuffer, offset: number, 
   device.queue.writeBuffer(buffer, offset, bytes as Uint8Array<ArrayBuffer>);
 }
 
+/** Query sets made per device at most; Metal has a small system-wide pool of counter sample buffers. */
+const QUERY_SETS_PER_DEVICE = 8;
+const querySets = new WeakMap<GPUDevice, { free: GPUQuerySet[]; made: number }>();
+
 /**
  * The GPU's execution time of a span of compute passes, by two timestamp queries: the first pass of the span writes
  * the start (`begin`), the last one the end (`end`); `resolve` adds the copy to a mappable buffer to the last command
  * encoder; after submission, `map` (awaited with the span's other read-backs) and `ms` read it. Only on a device with
  * the `timestamp-query` feature. For measurement only: no result depends on it.
+ *
+ * Query sets are reused, not destroyed: Deno 2.7.5 does not free a destroyed query set's Metal counter sample buffer
+ * before the object is collected, and after a few dozen spans `createQuerySet` failed ("Cannot allocate sample
+ * buffer"), which invalidated the call's command buffer. `open` answers null when the device's
+ * `QUERY_SETS_PER_DEVICE` sets are all in use, and that call goes unmeasured.
  */
 export class TimestampSpan {
+  readonly #pool: { free: GPUQuerySet[]; made: number };
   readonly #querySet: GPUQuerySet;
   readonly #resolved: GPUBuffer;
   readonly #staging: GPUBuffer;
+  #released = false;
 
-  constructor(device: GPUDevice) {
-    this.#querySet = device.createQuerySet({ type: "timestamp", count: 2 });
+  private constructor(device: GPUDevice, pool: { free: GPUQuerySet[]; made: number }, querySet: GPUQuerySet) {
+    this.#pool = pool;
+    this.#querySet = querySet;
     this.#resolved = device.createBuffer({ size: 16, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC });
     this.#staging = device.createBuffer({ size: 16, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
   }
 
   static available(device: GPUDevice): boolean {
     return device.features.has("timestamp-query");
+  }
+
+  /** A span on a free query set, or null without the feature or when every query set of the device is in use. */
+  static open(device: GPUDevice): TimestampSpan | null {
+    if (!TimestampSpan.available(device)) return null;
+    let pool = querySets.get(device);
+    if (pool === undefined) {
+      pool = { free: [], made: 0 };
+      querySets.set(device, pool);
+    }
+    let querySet = pool.free.pop();
+    if (querySet === undefined) {
+      if (pool.made >= QUERY_SETS_PER_DEVICE) return null;
+      querySet = device.createQuerySet({ type: "timestamp", count: 2 });
+      pool.made += 1;
+    }
+    return new TimestampSpan(device, pool, querySet);
   }
 
   get begin(): GPUComputePassTimestampWrites {
@@ -123,8 +152,11 @@ export class TimestampSpan {
     return Number(end - start) / 1e6;
   }
 
+  /** Returns the query set to the device's pool and frees the buffers; a second call does nothing. */
   destroy(): void {
-    this.#querySet.destroy();
+    if (this.#released) return;
+    this.#released = true;
+    this.#pool.free.push(this.#querySet);
     this.#resolved.destroy();
     this.#staging.destroy();
   }

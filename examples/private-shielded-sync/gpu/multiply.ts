@@ -246,7 +246,7 @@ export class GpuMultiplier implements Multiplier {
       const tParams = buffer(TRANSPOSE_PARAMS_BYTES, U.UNIFORM | U.COPY_DST);
       d.queue.writeBuffer(tParams, 0, new Uint32Array([matrix.cols, count, colsPadded, countPadded]));
 
-      span = this.#timestamps ? new TimestampSpan(d) : null;
+      span = this.#timestamps ? TimestampSpan.open(d) : null;
       const enc = d.createCommandEncoder();
       {
         const pass = enc.beginComputePass(span ? { timestampWrites: span.begin } : {});
