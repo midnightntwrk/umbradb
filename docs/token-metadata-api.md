@@ -89,7 +89,6 @@ echoes the input. The route is one of the core's typed routes (module guide §7)
 | Status | Code | When |
 |---|---|---|
 | 400 | `invalid-request` | the body matches no selector (the message names the schema path and rule), or a cursor this API did not issue for that contract |
-| 503 | `busy` | more than 8 requests at once (`Retry-After: 1`; on PGlite requests run one at a time instead) |
 | 404 | `not-found` | a path the module has no route for (the module API's answer) |
 | 405 | `method-not-allowed` | a method other than `POST` (`Allow: POST`) |
 | 413 | `request-too-large` | a body over the listener's limit |

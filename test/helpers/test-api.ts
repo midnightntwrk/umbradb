@@ -2,7 +2,7 @@ import Type from "typebox";
 import { z } from "zod";
 import { defineModule, type ModuleDeclaration } from "../../src/modules/declaration.js";
 import { pageCursor } from "../../src/helpers/page-cursor.js";
-import { invalidRequest, RouteError, registerTypedRoutes, typedRoute } from "../../src/helpers/typed-routes.js";
+import { RouteError, registerTypedRoutes, typedRoute } from "../../src/helpers/typed-routes.js";
 
 /**
  * `test-api`: a module whose whole API is typed routes (`src/helpers/typed-routes.ts`), over the core's blocks table,
@@ -12,7 +12,6 @@ import { invalidRequest, RouteError, registerTypedRoutes, typedRoute } from "../
  * - `GET /test-api/v1/blocks?limit=&cursor=`: the committed blocks from the newest, a page at a time (`pageCursor`).
  * - `POST /test-api/v1/echo` `{ text }`: `{ text }` back. Two texts exercise the error paths: `refuse` throws a
  *   `RouteError` (409 `refused`), and `wrong-answer` returns an answer its schema refuses (the module API's 500).
- *   `slow:<ms>` answers after `<ms>` milliseconds, to fill the concurrency limit.
  */
 
 export const TEST_API_ID = "test-api";
@@ -66,18 +65,13 @@ export const ROUTES = [
     async handle({ text }) {
       if (text === "refuse") throw new RouteError(409, "refused", "this text is refused");
       if (text === "wrong-answer") return { text: 42 } as unknown as { text: string };
-      if (text.startsWith("slow:")) {
-        const ms = Number(text.slice(5));
-        if (!Number.isInteger(ms) || ms < 0 || ms > 5_000) throw invalidRequest("slow: a whole number of milliseconds up to 5000");
-        await new Promise((resolve) => setTimeout(resolve, ms));
-      }
       return { text };
     },
   }),
 ];
 
-/** The `test-api` module, with at most `maxConcurrent` requests at once (default: the helper's). */
-export function testApi(maxConcurrent?: number): ModuleDeclaration {
+/** The `test-api` module. */
+export function testApi(): ModuleDeclaration {
   return defineModule({
     id: TEST_API_ID,
     version: "1.0.0",
@@ -89,7 +83,7 @@ export function testApi(maxConcurrent?: number): ModuleDeclaration {
     migrations: [],
     points: {
       async "on-start-api"(_p, api) {
-        registerTypedRoutes(api, TEST_API_ID, ROUTES, maxConcurrent === undefined ? {} : { maxConcurrent });
+        registerTypedRoutes(api, TEST_API_ID, ROUTES);
       },
     },
   }) as ModuleDeclaration;

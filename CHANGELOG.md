@@ -14,8 +14,8 @@ adheres to [Semantic Versioning](https://semver.org/).
   `/<namespace>` from `on-start-api`. The input (a `GET`'s parameters, a `POST`'s body) is checked before the handler
   runs (400 `invalid-request`, naming paths and rules, never values), and the answer before it is sent (a wrong one is
   the module API's 500). A handler refuses with `RouteError`; each answer is read at one committed height with the
-  chain-data headers, at most 8 requests of a registration run at once (503 `busy`), and answers are ASCII-escaped
-  JSON. `pageCursor(schema)` gives keyset pages' opaque cursors. `typebox` 1.4.3 is a new runtime dependency.
+  chain-data headers, and answers are ASCII-escaped JSON. `pageCursor(schema)` gives keyset pages' opaque cursors.
+  `typebox` 1.4.3 is a new runtime dependency.
 - MIP-0018 token metadata as two public modules: `token-metadata` (`TOKEN_METADATA`) creates, fills and guards its
   tables, and refuses a start above its database's first height with `TokenMetadataStartAfterDatabase` as the cause;
   `token-metadata-api` (`TOKEN_METADATA_API`) serves them on one route, `POST /token-metadata-api/v1/tokens`

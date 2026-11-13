@@ -8,8 +8,7 @@ import type { ApiRegistry } from "../../src/modules/declaration.js";
 /**
  * Typed routes (`src/helpers/typed-routes.ts`) and page cursors (`src/helpers/page-cursor.ts`) on their own, with a
  * stand-in registry and read handle: the namespace, the input check of a `POST`'s body and of a `GET`'s parameters,
- * the answer check, the error envelope, the concurrency limit, the answer before any committed height, ASCII JSON, and
- * cursors. Through the real process and its HTTP listener: `typed-routes.process.test.ts`.
+ * the answer check, the error envelope, the answer before any committed height, ASCII JSON, and cursors. Through the real process and its HTTP listener: `typed-routes.process.test.ts`.
  */
 
 type Handler = Parameters<ApiRegistry["http"]>[2];
@@ -36,17 +35,16 @@ const Body = Type.Object({ name: Type.String({ maxLength: 8 }) }, strict);
 const Reply = Type.Object({ greeting: Type.String() }, strict);
 
 /** Registers one `POST /ns/v1/hello` whose handler is `handle`, and returns its registered handler. */
-function hello(handle: (body: { name: string }) => Promise<unknown>, maxConcurrent?: number): Handler {
+function hello(handle: (body: { name: string }) => Promise<unknown>): Handler {
   const { api, routes } = registry();
   const route = typedRoute({ method: "POST", path: "/v1/hello", input: Body, response: Reply, handle: handle as never });
-  registerTypedRoutes(api, "ns", [route], maxConcurrent === undefined ? {} : { maxConcurrent });
+  registerTypedRoutes(api, "ns", [route]);
   expect([...routes.keys()]).toEqual(["POST /ns/v1/hello"]);
   return routes.get("POST /ns/v1/hello")!;
 }
 
 const call = (h: Handler, body: unknown, read = readAt()): Promise<Answer> => h({ params: {}, body }, read);
 const json = (a: Answer): any => JSON.parse(a.body as string);
-const tick = () => new Promise((r) => setTimeout(r, 0));
 
 describe("typed routes", () => {
   it("serve a route under its namespace, answering ASCII JSON with the fixed and chain-data headers", async () => {
@@ -130,33 +128,6 @@ describe("typed routes", () => {
     expect([answer.status, (answer.body as { error: { code: string } }).error.code, ran]).toEqual([503, "no-committed-height", false]);
   });
 
-  it("refuse requests above the limit with 503 busy, and free the slot when a request ends, answered or failed", async () => {
-    const gates: (() => void)[] = [];
-    let fail = false;
-    const h = hello(
-      () =>
-        new Promise((resolve, reject) => {
-          gates.push(() => (fail ? reject(new Error("failed")) : resolve({ greeting: "hi" })));
-        }),
-      1,
-    );
-    const first = call(h, { name: "a" });
-    await tick();
-    const busy = await call(h, { name: "b" });
-    expect([busy.status, json(busy).error.code, busy.headers?.["retry-after"]]).toEqual([503, "busy", "1"]);
-    gates.shift()!();
-    expect((await first).status).toBe(200);
-    fail = true;
-    const failing = call(h, { name: "c" });
-    await tick();
-    gates.shift()!();
-    await expect(failing).rejects.toThrow("failed");
-    fail = false;
-    const after = call(h, { name: "d" });
-    await tick();
-    gates.shift()!();
-    expect((await after).status).toBe(200);
-  });
 
   it("refuse a namespace that is not a module id and a path that does not start with /", () => {
     const route = typedRoute({ method: "POST", path: "/v1/hello", input: Body, response: Reply, handle: async () => ({ greeting: "" }) });

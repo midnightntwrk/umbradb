@@ -1,12 +1,10 @@
 import Value from "typebox/value";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { tokenColor } from "../../../src/features/token-metadata/color.js";
-import { DEFAULT_MAX_CONCURRENT_REQUESTS, registerTypedRoutes, typedRoute } from "../../../src/helpers/typed-routes.js";
 import { TokensRequest, TokensResponse } from "../../../src/features/token-metadata-api/schemas.js";
 import { encodeCursor, markJson } from "../../../src/features/token-metadata-api/handlers.js";
 import { commonRecords, EVENT_NAME, metadataRecord, toHex, withdrawRecords } from "../../../src/features/token-metadata/codec/index.js";
 import type { Field } from "../../../src/features/token-metadata/rules.js";
-import type { ApiRegistry } from "../../../src/modules/declaration.js";
 import type { UmbraDBHandle } from "../../../src/library/start-umbradb.js";
 import { cursorReaches } from "../../library/library-fixtures.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../../runner/process-backends.js";
@@ -23,7 +21,7 @@ import { blockLogs, contract, domain, eventData, get, type Got, miscData, post, 
  * - **Marks:** `ok`, `partial` and `incorrect` through the route; `unresolved` through `markJson` (an unresolved site
  *   through the process: `events.test.ts`).
  * - **Input:** a body that matches no selector is 400 `invalid-request`, naming the rule and never the input; a forged or
- *   foreign cursor is 400. The module API's own 404 and 405 are as they are. 503 `busy` beyond eight requests at once.
+ *   foreign cursor is 400. The module API's own 404 and 405 are as they are.
  * - **Output:** ASCII JSON with hostile text, the response headers and the core's `X-Umbra-*`.
  */
 
@@ -257,23 +255,3 @@ describe("the marks no chain of the harness gives here", () => {
   });
 });
 
-describe("busy beyond eight requests at once", () => {
-  it("answers the ninth request in flight 503 busy with Retry-After (the core's default limit), and serves again once one ends", async () => {
-    const handlers = new Map<string, Parameters<ApiRegistry["http"]>[2]>();
-    let release!: () => void;
-    const held = new Promise<void>((resolve) => (release = resolve));
-    const slow = typedRoute({ method: "POST", path: "/v1/tokens", input: TokensRequest, response: TokensResponse, handle: async () => (await held, { items: [], nextCursor: null }) });
-    registerTypedRoutes({ http: (_m, path, handler) => void handlers.set(path, handler), subscription: () => undefined }, "token-metadata-api", [slow]);
-    const handler = handlers.get(TOKENS_PATH)!;
-    const read = { height: 5n, query: async (sql: string) => (sql.includes("core_block_commit") ? [{ hash: new Uint8Array(32) }] : []) };
-    const req = { params: {}, body: { contract: "a".repeat(64) } };
-    const inFlight = Array.from({ length: DEFAULT_MAX_CONCURRENT_REQUESTS }, () => handler(req, read));
-    const busy = await handler(req, read);
-    expect(busy.status).toBe(503);
-    expect(busy.headers).toMatchObject({ "retry-after": "1" });
-    expect(JSON.parse(busy.body as string)).toEqual({ error: { code: "busy", message: "too many requests in progress; retry shortly" } });
-    release();
-    await Promise.all(inFlight);
-    expect((await handler(req, read)).status).toBe(200);
-  });
-});

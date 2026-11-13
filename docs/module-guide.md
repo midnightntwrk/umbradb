@@ -501,8 +501,6 @@ counts and queue (after a restart, for one).
   - **Errors:** throw `RouteError(status, code, message)` to refuse a request; it's answered as `{ "error": { "code",
     "message" } }`.
   - **One height:** every answer is read at one committed height, with the chain-data headers.
-  - **Bounded:** at most 8 requests run at once (`{ maxConcurrent }` to change it); more are answered 503 `busy`. On
-    PGlite requests already run one at a time.
   - **Safe text:** the JSON is ASCII-escaped, with headers that keep a browser from running it.
 
   For keyset pages, `pageCursor(schema)` gives `encode(value)` and `decode(text)`, the opaque `nextCursor` of a page
