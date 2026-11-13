@@ -1,0 +1,41 @@
+[package]
+name = "pss-kernel"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "Apache-2.0"
+publish = false
+description = "Scan kernel of the private shielded sync example: the ownership test, decryption and Poseidon, on the Midnight ledger's own crates."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# The ledger's published crates at the versions the public `node-2.1.101` tag of `midnight-node` locks (the
+# `ledger-9.1.0.1` release, the code Preprod's node runs). `Cargo.lock` pins every other crate, at the node's version
+# wherever the node locks the same crate; `build.sh` builds with `--locked`.
+[dependencies]
+transient-crypto = { package = "midnight-transient-crypto", version = "=3.0.1" }
+coin-structure = { package = "midnight-coin-structure", version = "=3.0.1" }
+base-crypto = { package = "midnight-base-crypto", version = "=1.1.1" }
+serialize = { package = "midnight-serialize", version = "=1.2.1" }
+midnight-curves = "=0.3.1"
+midnight-circuits = "=7.3.0"
+ff = "0.13"
+group = "0.13"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rand = "0.8"
+rand_chacha = "0.3"
+
+# The kernel never asks for randomness. `getrandom` 0.2 (through `rand`) needs a source on wasm32-unknown-unknown to
+# compile; the registered one always fails.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom02 = { package = "getrandom", version = "0.2", features = ["custom"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+debug = false
+strip = "symbols"
