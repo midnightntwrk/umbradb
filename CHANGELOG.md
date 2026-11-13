@@ -7,7 +7,16 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Added
+
+- Typed routes for a module's HTTP API (`src/helpers/typed-routes.ts`): `typedRoute` declares a route's method, path,
+  input and answer as TypeBox schemas, and `registerTypedRoutes(api, namespace, routes)` serves them under
+  `/<namespace>` from `on-start-api`. The input (a `GET`'s parameters, a `POST`'s body) is checked before the handler
+  runs (400 `invalid-request`, naming paths and rules, never values), and the answer before it is sent (a wrong one is
+  the module API's 500). A handler refuses with `RouteError`; each answer is read at one committed height with the
+  chain-data headers, at most 8 requests of a registration run at once (503 `busy`), and answers are ASCII-escaped
+  JSON. `pageCursor(schema)` gives keyset pages' opaque cursors. `typebox` 1.4.3 is a new runtime dependency. The
+  exported surface is 73 names, 33 values and 40 types.
 
 ## [0.10.0] - 2026-10-27
 

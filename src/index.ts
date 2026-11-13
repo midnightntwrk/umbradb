@@ -8,8 +8,8 @@
  *   declarations, whose `entry` writes their entries (`CORE_BLOCK_PARSED.entry({ start, config: {} })`).
  * - **A module**: {@link defineModule} and its types, the points ({@link POINTS}), the handles, the cursor-table and
  *   height-versioned-table helpers, the canonical encodings and the contents hash (with the content-defined tables of
- *   UmbraDB's own declarations), the module API's envelope helpers, `hexBytes` for a settings schema, and
- *   `retainedStatesOf`.
+ *   UmbraDB's own declarations), the module API's envelope helpers, typed routes and page cursors for a module's HTTP
+ *   API, `hexBytes` for a settings schema, and `retainedStatesOf`.
  * - **A host program**: {@link startUmbraDB}, UmbraDB run in the host's own process, with its options, its handle and
  *   their types (the network request, the mounted handlers, the private link's channel); {@link finalizedHeight}, a
  *   node's finalized height for a new database's start; {@link InMemoryBlockSource} and `BlockRef`, an in-memory chain;
@@ -35,6 +35,8 @@ export { contentsHash } from "./library/contents-hash.js";
 export { encodeCanonical, encodeRow } from "./determinism/cbor.js";
 export { cursorTable } from "./helpers/cursor-table.js";
 export { heightVersionedTable } from "./helpers/height-versioned.js";
+export { type PageCursor, pageCursor } from "./helpers/page-cursor.js";
+export { invalidRequest, registerTypedRoutes, RouteError, type TypedRoute, typedRoute } from "./helpers/typed-routes.js";
 export type { LedgerPackage, LedgerTask, ParsedTransaction } from "./ledger/types.js";
 export { type MessagePortLike, messagePortChannel, type PrivateLinkChannel } from "./library/channels.js";
 export { finalizedHeight } from "./library/finalized-height.js";

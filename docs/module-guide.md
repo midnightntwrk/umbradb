@@ -468,6 +468,45 @@ counts and queue (after a restart, for one).
 - **Stating the height you read.** `answerChainData(read, answer)` as in §2.4. For other shapes:
   `readChainDataView(read)` gives `{ view, height, hash }`, `chainDataHeaders(view)` the three headers, and
   `withViewExtensions(body, view)` puts them in a GraphQL response's `extensions`, its `data` unchanged.
+- **Typed routes** (the recommended way to write an HTTP API). Declare each route with `typedRoute({ method, path,
+  input, response, handle })`, `input` and `response` being [TypeBox](https://github.com/sinclairzx81/typebox)
+  schemas (add `typebox` to your own dependencies, at the version UmbraDB pins), and register them from `on-start-api`
+  with `registerTypedRoutes(api, "<your-module-id>", routes)`:
+
+  ```ts
+  import Type from "typebox";
+  import { RouteError, registerTypedRoutes, typedRoute } from "umbradb";
+
+  const strict = { additionalProperties: false } as const;
+  const block = typedRoute({
+    method: "GET",
+    path: "/v1/blocks/:height",                       // served as /my-module/v1/blocks/:height
+    input: Type.Object({ height: Type.String({ pattern: "^(0|[1-9][0-9]{0,14})$" }) }, strict),
+    response: Type.Object({ height: Type.String(), rows: Type.Integer() }, strict),
+    async handle({ height }, read) {
+      const [row] = await read.query("SELECT rows FROM my_module.counts WHERE height = $1", [BigInt(height)]);
+      if (row === undefined) throw new RouteError(404, "no-row", "no row at that height");
+      return { height, rows: Number(row.rows) };
+    },
+  });
+  // in points: async "on-start-api"(_p, api) { registerTypedRoutes(api, "my-module", [block]); }
+  ```
+
+  The helper does the rest the same way for every module:
+  - **Input:** a `GET`'s query and path parameters (strings) or a `POST`'s body is checked against `input` before
+    your handler runs. If it doesn't match, the answer is 400 `invalid-request`, naming paths and rules but never the
+    values sent.
+  - **Answer:** your answer is checked against `response`. One that doesn't match is a bug, answered 500
+    `internal-error` and logged, never sent.
+  - **Errors:** throw `RouteError(status, code, message)` to refuse a request; it's answered as `{ "error": { "code",
+    "message" } }`.
+  - **One height:** every answer is read at one committed height, with the chain-data headers.
+  - **Bounded:** at most 8 requests run at once (`{ maxConcurrent }` to change it); more are answered 503 `busy`. On
+    PGlite requests already run one at a time.
+  - **Safe text:** the JSON is ASCII-escaped, with headers that keep a browser from running it.
+
+  For keyset pages, `pageCursor(schema)` gives `encode(value)` and `decode(text)`, the opaque `nextCursor` of a page
+  and its check (400 `invalid-request` for anything it didn't issue).
 - **Subscriptions.** `api.subscription(name, handler)`: the handler gets the subscriber's `args` and an `emit`, and
   returns its unsubscribe. Call the `emit`s from `on-after-db-write`, putting in each value the height a subscriber
   needs. `emit` never waits: a subscriber more than 1 MiB behind is disconnected. After a restart a subscriber may see
