@@ -18,6 +18,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { availableParallelism, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { loadLedger } from "../client/ledger.ts";
 import { loadSdk } from "../client/sdk-api.ts";
@@ -217,7 +218,7 @@ function fail(message: string): never {
   throw new Error(message);
 }
 
-const fileURLDir = (relative: string): string => resolve(dirname(new URL(import.meta.url).pathname), relative);
+const fileURLDir = (relative: string): string => resolve(dirname(fileURLToPath(import.meta.url)), relative);
 
 function cmdReport(): void {
   const file = positionals[1] ?? fail("report needs the results.json to render");
