@@ -8,13 +8,13 @@
  * group takes one or two per distinct (contract, symbol). Nothing here fetches anything.
  */
 
-import Value from "typebox/value";
 import type { ReadHandle } from "../../db/api.js";
 import { COMMON_KEY_HEX, type Field as StateField, fieldUsable, IMAGE_KEY_HEX, parseStandards, tokenMark } from "../token-metadata/rules.js";
 import { decodeUtf8, fromHex, toHex } from "../token-metadata/codec/index.js";
 import { hasColor } from "../token-metadata/color.js";
 import { commonFields, tokenMapKey, markInputs, type MarkInputs, symbolGroup, type TokenKey, tokenFields, tokensOfColors, tokensOfContract, tokensOfDomain } from "./sql.js";
-import { badRequest } from "./router.js";
+import { pageCursor } from "../../helpers/page-cursor.js";
+import { invalidRequest } from "../../helpers/typed-routes.js";
 import {
   type Common,
   ContractCursor,
@@ -144,24 +144,15 @@ async function tokensOf(read: ReadHandle, keys: readonly TokenKey[]): Promise<To
 
 // ── Cursors of a contract's pages ────────────────────────────────────────────────────────────────────────────────
 
-const base64url = {
-  encode: (text: string): string => btoa(String.fromCharCode(...new TextEncoder().encode(text))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""),
-  decode: (raw: string): string => new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(atob(raw.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0))),
-};
+/** A contract page's cursors (the core's page cursors, of {@link ContractCursor}). */
+const contractCursors = pageCursor(ContractCursor);
 
-export const encodeCursor = (cursor: ContractCursor): string => base64url.encode(JSON.stringify(cursor));
+export const encodeCursor = (cursor: ContractCursor): string => contractCursors.encode(cursor);
 
-/** The cursor `raw`, if this API issued it for `contract`; else a 400 (a cursor binds its contract). */
+/** The cursor `raw`, if this API issued it for `contract`; else a 400 `invalid-request` (a cursor binds its contract). */
 export function decodeCursor(raw: string, contract: string): ContractCursor {
-  let value: unknown;
-  try {
-    value = JSON.parse(base64url.decode(raw));
-  } catch {
-    throw badRequest("cursor: not a cursor this API issued");
-  }
-  if (!Value.Check(ContractCursor, value) || value.c !== contract) {
-    throw badRequest("cursor: not a cursor this API issued for this contract");
-  }
+  const value = contractCursors.decode(raw);
+  if (value.c !== contract) throw invalidRequest("cursor: not a cursor this route issued for this contract");
   return value;
 }
 

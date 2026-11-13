@@ -1,7 +1,7 @@
 import Value from "typebox/value";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { tokenColor } from "../../../src/features/token-metadata/color.js";
-import { DEFAULT_MAX_CONCURRENT_REQUESTS, registerRoutes, typedRoute } from "../../../src/features/token-metadata-api/router.js";
+import { DEFAULT_MAX_CONCURRENT_REQUESTS, registerTypedRoutes, typedRoute } from "../../../src/helpers/typed-routes.js";
 import { TokensRequest, TokensResponse } from "../../../src/features/token-metadata-api/schemas.js";
 import { encodeCursor, markJson } from "../../../src/features/token-metadata-api/handlers.js";
 import { commonRecords, EVENT_NAME, metadataRecord, toHex, withdrawRecords } from "../../../src/features/token-metadata/codec/index.js";
@@ -22,8 +22,8 @@ import { blockLogs, contract, domain, eventData, get, type Got, miscData, post, 
  * - **A token:** every defined field in key order, the common fields, its group by symbol, its mark, its image pending.
  * - **Marks:** `ok`, `partial` and `incorrect` through the route; `unresolved` through `markJson` (an unresolved site
  *   through the process: `events.test.ts`).
- * - **Input:** a body that matches no selector is 400 `BAD_REQUEST`, naming the rule and never the input; a forged or
- *   foreign cursor is 400. The module API's own 404 and 405 are as they are. 503 `BUSY` beyond eight requests at once.
+ * - **Input:** a body that matches no selector is 400 `invalid-request`, naming the rule and never the input; a forged or
+ *   foreign cursor is 400. The module API's own 404 and 405 are as they are. 503 `busy` beyond eight requests at once.
  * - **Output:** ASCII JSON with hostile text, the response headers and the core's `X-Umbra-*`.
  */
 
@@ -143,7 +143,7 @@ describe.each(PROCESS_BACKENDS)("token-metadata-api on $name", (backend: Process
     } while (cursor !== null);
     expect(pages).toEqual(ids(whole));
     const first = (await tokens({ contract: hex(A), limit: 1 })).json.nextCursor as string;
-    expect(await tokens({ contract: hex(B), cursor: first })).toMatchObject({ status: 400, json: { error: { code: "BAD_REQUEST" } } });
+    expect(await tokens({ contract: hex(B), cursor: first })).toMatchObject({ status: 400, json: { error: { code: "invalid-request" } } });
   }, 60_000);
 
   it("marks: ok, partial (the missing common fields) and incorrect (the contract's rejection reasons)", async () => {
@@ -175,7 +175,7 @@ describe.each(PROCESS_BACKENDS)("token-metadata-api on $name", (backend: Process
     expect(got.headers["x-umbra-hash"]).toMatch(/^0x[0-9a-f]{64}$/);
   }, 60_000);
 
-  it("a body that matches no selector is 400 BAD_REQUEST naming the rule, never the input", async () => {
+  it("a body that matches no selector is 400 invalid-request naming the rule, never the input", async () => {
     const SECRET = "f".repeat(63) + "x";
     const bad: unknown[] = [
       undefined,
@@ -202,10 +202,10 @@ describe.each(PROCESS_BACKENDS)("token-metadata-api on $name", (backend: Process
     ];
     for (const body of bad) {
       const got = body === undefined ? await post(origin, TOKENS_PATH, undefined) : await tokens(body);
-      expect([JSON.stringify(body)?.slice(0, 80), got.status, got.json?.error?.code]).toEqual([JSON.stringify(body)?.slice(0, 80), 400, "BAD_REQUEST"]);
+      expect([JSON.stringify(body)?.slice(0, 80), got.status, got.json?.error?.code]).toEqual([JSON.stringify(body)?.slice(0, 80), 400, "invalid-request"]);
       expect(got.text).not.toContain(SECRET);
     }
-    expect((await tokens({ colors: [SECRET] })).json.error.message).toMatch(/^body\/colors\/0: must match pattern/);
+    expect((await tokens({ colors: [SECRET] })).json.error.message).toMatch(/^input\/colors\/0: must match pattern/);
   }, 60_000);
 
   it("the module API's own answers: an unknown path 404, another method 405 with Allow; no route outside the namespace", async () => {
@@ -257,13 +257,13 @@ describe("the marks no chain of the harness gives here", () => {
   });
 });
 
-describe("BUSY beyond eight requests at once", () => {
-  it("answers the ninth request in flight 503 BUSY with Retry-After, and serves again once one ends", async () => {
+describe("busy beyond eight requests at once", () => {
+  it("answers the ninth request in flight 503 busy with Retry-After (the core's default limit), and serves again once one ends", async () => {
     const handlers = new Map<string, Parameters<ApiRegistry["http"]>[2]>();
     let release!: () => void;
     const held = new Promise<void>((resolve) => (release = resolve));
-    const slow = typedRoute({ method: "POST", path: "/v1/tokens", body: TokensRequest, response: TokensResponse, handle: async () => (await held, { items: [], nextCursor: null }) });
-    registerRoutes({ http: (_m, path, handler) => void handlers.set(path, handler), subscription: () => undefined }, "token-metadata-api", [slow]);
+    const slow = typedRoute({ method: "POST", path: "/v1/tokens", input: TokensRequest, response: TokensResponse, handle: async () => (await held, { items: [], nextCursor: null }) });
+    registerTypedRoutes({ http: (_m, path, handler) => void handlers.set(path, handler), subscription: () => undefined }, "token-metadata-api", [slow]);
     const handler = handlers.get(TOKENS_PATH)!;
     const read = { height: 5n, query: async (sql: string) => (sql.includes("core_block_commit") ? [{ hash: new Uint8Array(32) }] : []) };
     const req = { params: {}, body: { contract: "a".repeat(64) } };
@@ -271,7 +271,7 @@ describe("BUSY beyond eight requests at once", () => {
     const busy = await handler(req, read);
     expect(busy.status).toBe(503);
     expect(busy.headers).toMatchObject({ "retry-after": "1" });
-    expect(JSON.parse(busy.body as string)).toEqual({ error: { code: "BUSY", message: "too many requests in progress; retry shortly" } });
+    expect(JSON.parse(busy.body as string)).toEqual({ error: { code: "busy", message: "too many requests in progress; retry shortly" } });
     release();
     await Promise.all(inFlight);
     expect((await handler(req, read)).status).toBe(200);

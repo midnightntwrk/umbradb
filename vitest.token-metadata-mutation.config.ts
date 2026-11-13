@@ -27,7 +27,7 @@ export default defineConfig({
       "test/features/token-metadata-api/api.test.ts",
       "test/features/token-metadata-api/routes.test.ts",
       "test/features/token-metadata-api/api-edges.test.ts",
-      "test/features/token-metadata-api/router.test.ts",
+      "test/features/token-metadata-api/sql.test.ts",
     ],
   },
 });

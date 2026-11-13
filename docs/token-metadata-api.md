@@ -23,7 +23,7 @@ A JSON body with exactly one of four selectors. Every 32-byte value is 64 lowerc
 | Contract and domain separator | `{ "contract": <address>, "domainSep": <hex> }` | that token's described kinds |
 | One token | `{ "contract": <address>, "domainSep": <hex>, "kind": 1 \| 2 \| 3 }` | that token, or none |
 
-Any other property, a missing one, or a value outside its rule is 400 `BAD_REQUEST`. A `cursor` is the `nextCursor` of
+Any other property, a missing one, or a value outside its rule is 400 `invalid-request`. A `cursor` is the `nextCursor` of
 an earlier answer for the same contract; any other is 400.
 
 ## Answer
@@ -83,12 +83,13 @@ set; `eventIndex` is the event's position among its transaction's log sites.
 
 ## Errors
 
-Every error is `{ "error": { "code": <string>, "message": <string> } }`; a message never echoes the input.
+Every error is `{ "error": { "code": <string>, "message": <string> } }`, the module API's envelope; a message never
+echoes the input. The route is one of the core's typed routes (module guide §7), so its codes are the module API's.
 
 | Status | Code | When |
 |---|---|---|
-| 400 | `BAD_REQUEST` | the body matches no selector (the message names the schema path and rule), or a cursor this API did not issue for that contract |
-| 503 | `BUSY` | more than 8 requests at once (`Retry-After: 1`) |
+| 400 | `invalid-request` | the body matches no selector (the message names the schema path and rule), or a cursor this API did not issue for that contract |
+| 503 | `busy` | more than 8 requests at once (`Retry-After: 1`; on PGlite requests run one at a time instead) |
 | 404 | `not-found` | a path the module has no route for (the module API's answer) |
 | 405 | `method-not-allowed` | a method other than `POST` (`Allow: POST`) |
 | 413 | `request-too-large` | a body over the listener's limit |
