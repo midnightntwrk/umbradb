@@ -168,11 +168,7 @@
   <div style="flex: 1; display: grid; align-content: center; gap: 18px; max-width: 1060px">
     <h1>How a wallet finds, reads and checks its shielded coins without the server learning which</h1>
     <p class="lead" style="font-size: 19px">One small example, followed from the server's snapshot to the wallet's balance. Every number on these slides is computed by this page, and every value says where it came from, so each step can be checked by hand.</p>
-    <div class="claim" style="max-width: 760px">
-      <b>Move:</b> ← → or space · <b>O</b>: the list of slides · <b>Home</b> / <b>End</b><br>
-      <b>Hover</b> a dashed size (<span class="sz" data-tip="scanfile">324 B</span>) or a <span class="gpu-tag" data-tip="scan">gpu</span> tag for the values at 1M and 10M entries.<br>
-      The live version runs on the <a href="index.html">step-by-step page</a>.
-    </div>
+    <p class="muted">The same steps run live, against Preprod, on the <a href="index.html">step-by-step page</a>.</p>
   </div>
 </section>
 
@@ -208,35 +204,40 @@
       <tr><th style="width: 32%">Mechanism</th><th style="width: 18%">Steps</th><th>Why the server learns nothing</th></tr>
       <tr><td><b>The same download for every wallet</b>: the manifest, the scan file, the block roots, the setup data, the tail</td><td>2 (files), 6 (tail)</td><td>What is downloaded does not depend on the wallet. The server sees "someone downloaded the snapshot", as from every other wallet.</td></tr>
       <tr><td><b>Local trial decryption</b> of every output's scan entry</td><td>3 (scan)</td><td>Nothing is sent. The wallet tests all entries with its own key, on its own device.</td></tr>
-      <tr><td><b>Private information retrieval (SimplePIR)</b>, with a fixed number of query vectors per call</td><td>4 (records), 5 (nullifiers)</td><td>Each query vector is A·s + e + Δ·u. Without the wallet's secret s, it cannot be told apart from random numbers, so the server cannot see which column it asks for. Every call has the same number of vectors, so the count says nothing either.</td></tr>
+      <tr><td><b>Private information retrieval (SimplePIR)</b>, with a fixed number of query vectors per call</td><td>4 (records), 5 (nullifiers)</td><td>Each query vector hides the column it asks for behind a mask that only the wallet can remove, because only the wallet knows the secret the mask is made from (the equation, part by part: <a data-to="s-pir"></a>). Every call has the same number of vectors, so the count says nothing either.</td></tr>
     </table>
     <div class="claim">The server still multiplies its whole table by each vector and sends back an answer; only the wallet, which holds s, can turn that answer into the column it asked for.</div>
   </div>
 </section>
 
-<section class="slide" id="s-legend" data-step="" data-title="Reading the slides">
-  <div class="top">How to read the slides</div>
-  <h2>Reading the slides</h2>
-  <div class="body g2">
-    <div class="box"><h3>Every value has a kind</h3>
-      <table class="io">
-        <tr><td><span class="b secret">secret</span></td><td>Known only to the wallet. Never sent. The privacy argument is about these.</td></tr>
-        <tr><td><span class="b public">public</span></td><td>Known to everyone: chain data, the snapshot's files, the public matrices, the parameters.</td></tr>
-        <tr><td><span class="b sent">sent</span></td><td>Crosses the wire. The server sees it, and it must reveal nothing about the secret values.</td></tr>
-        <tr><td><span class="b server">server</span></td><td>Held by the server. Public data, arranged for answering.</td></tr>
-      </table>
-    </div>
-    <div class="box"><h3>Every slide that computes something says</h3>
-      <ul>
-        <li><b>Inputs</b>: each value used, its kind, and the slide it came from (click to jump there);</li>
-        <li><b>Outputs</b>: each value produced, and the slide that uses it next;</li>
-        <li><b>Server sees</b> and <b>Stays on the wallet</b>: the privacy check for that step.</li>
-      </ul>
-      <p class="muted small">All arithmetic is modulo 65,536 (the real system uses 2<sup>32</sup>). The worked rows show each multiplication, so any number can be checked by hand.</p>
-    </div>
-    <div class="box w"><h3><span class="where w">Wallet</span> &nbsp;runs on the user's device</h3><p>Holds the mnemonic and every secret value.</p></div>
-    <div class="box s"><h3><span class="where s">Server</span> &nbsp;the UmbraDB module</h3><p>Builds the snapshot from UmbraDB's tables and answers requests. Curious: it keeps every request.</p></div>
+<section class="slide" id="s-pir" data-step="" data-title="The SimplePIR equation, part by part">
+  <div class="top">The approach</div>
+  <h2>The SimplePIR equation, part by part</h2>
+  <p class="lead">To ask for one column of the server's table without saying which, the wallet sends a query vector q, one number per table column:</p>
+  <div style="display: flex; justify-content: center; align-items: baseline; gap: 14px; font: 600 28px/1.15 ui-monospace, SFMono-Regular, Menlo, monospace">
+    <span class="v-sent">q</span><span>=</span>
+    <span><span class="v-public">A</span>·<span class="v-secret">s</span></span><span>+</span>
+    <span class="v-secret">e</span><span>+</span>
+    <span><span class="v-public">Δ</span>·<span class="v-secret">u</span></span>
   </div>
+  <div class="body g2" style="gap: 12px">
+    <table class="io" style="font-size: 13px">
+      <tr><th>Part</th><th>Kind</th><th>What it is</th><th>Its job</th></tr>
+      <tr><td class="sym">u</td><td><span class="b secret">secret</span></td><td>all 0s, with a 1 at the column the wallet wants</td><td><b>selects</b> the column</td></tr>
+      <tr><td class="sym">Δ</td><td><span class="b public">public</span></td><td>a large constant (4,096 here)</td><td><b>lifts</b> the 1 far above the noise, so it survives to the end</td></tr>
+      <tr><td class="sym">A</td><td><span class="b public">public</span></td><td>random numbers, one row per table column, from a public seed</td><td>with s, <b>makes the mask</b></td></tr>
+      <tr><td class="sym">s</td><td><span class="b secret">secret</span></td><td>random numbers (2 here, 1,024 for real), new per vector, never sent</td><td>the <b>key</b> to the mask</td></tr>
+      <tr><td class="sym">A·s</td><td><span class="b secret">secret</span></td><td>one number per column</td><td>the <b>mask</b>: random-looking numbers laid over Δ·u</td></tr>
+      <tr><td class="sym">e</td><td><span class="b secret">secret</span></td><td>tiny random noise (−2 … 2 here)</td><td>makes the mask impossible to strip without s (Learning With Errors)</td></tr>
+      <tr><td class="sym">q</td><td><span class="b sent">sent</span></td><td>the sum, one number per column</td><td>what the server receives</td></tr>
+    </table>
+    <div style="display: grid; gap: 10px; align-content: start">
+      <div class="box s"><h3>The server: answer = table × q</h3><p class="small">It multiplies its whole table by q, without knowing which column q selects.</p></div>
+      <div class="box w"><h3>The wallet: answer − H·s = Δ·(the wanted column) + small noise</h3><p class="small">H = table × A is public setup data, downloaded once. With its own s the wallet computes H·s and removes the mask; dividing by Δ and rounding drops the noise and leaves the column exactly.</p></div>
+      <div class="box"><h3>The example's numbers: where is the 4,096?</h3><div class="math" id="m-pir-demo"></div></div>
+    </div>
+  </div>
+  <div class="sees"><div class="sv"><b>Server sees</b>q and the table. q looks random, so it cannot tell which entry carries Δ, and it cannot remove the mask without s.</div><div class="wl"><b>Stays on the wallet</b>s, e and u. Only s can remove the mask, and only the wallet has it.</div></div>
 </section>
 
 <section class="slide" id="s-example" data-step="" data-title="The example chain">
@@ -916,6 +917,11 @@
     return `${name} = ${parts} = ${n(total)} = ${n(k)} × 65,536 + <b>${n(mod(total))}</b>`;
   }
   const set = (id, html) => (document.getElementById(id).innerHTML = html);
+
+  // the equation slide: the mask hides where Δ was added
+  set("m-pir-demo",
+    eq(lbl("A·s + e ="), vec(v0.As.map((x, i) => mod(x + v0.e[i])), "secret"), lbl("+ Δ·u ="), vec(v0.u.map((x) => x * DELTA), "secret", (i) => (v0.u[i] ? "selrow" : "")), lbl("= q ="), vec(v0.q, "sent")) +
+    `<div class="lbl">The server gets only q. Without s, nothing shows which number carries the 4,096. (The query worked out in step 4.)</div>`);
 
   // step 0: A, H; A′, H′
   set("m-setup-read", eq(lbl("seed →"), lbl("A ="), mat(A, "public"), lbl("&nbsp;&nbsp; H = read table × A ="), mat(H, "public")) +
