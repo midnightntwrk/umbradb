@@ -6,5 +6,6 @@
     "verbatimModuleSyntax": true,
     "paths": { "umbradb": ["../../src/index.ts"] }
   },
-  "include": ["**/*.ts"]
+  "include": ["**/*.ts"],
+  "exclude": ["server/**", "test/server-*.ts"]
 }
