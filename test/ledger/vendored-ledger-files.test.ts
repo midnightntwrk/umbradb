@@ -131,7 +131,7 @@ describe("vendored ledger builds: the recorded sources and pins", () => {
     expect(rc3).toContain("postBlockUpdateExact");
   });
 
-  it("applies to rc.3 the v9 patches that apply there: the node store, the VM's log decoding, the exports, the exact update", () => {
+  it("applies to rc.3 the v9 patches that apply there: the node store, the VM's log decoding, the exports, the exact update, the evidence", () => {
     expect(patchesOf("v9-rc3")).toEqual([
       "0001-storage-core-external-node-store.patch",
       "0002-onchain-vm-public-decode-event.patch",
@@ -139,6 +139,7 @@ describe("vendored ledger builds: the recorded sources and pins", () => {
       "0004-wasm-bindgen-0.2.108.patch",
       "0005-ledger-wasm-exact-post-block-update.patch",
       "0006-ledger-wasm-state-trees.patch",
+      "0007-ledger-wasm-zswap-output-evidence.patch",
     ]);
     // The storage patch is v9's, byte for byte: storage-core is the same source at both tags.
     const patch = (version: string, name: string): string => readFileSync(join(ledgerDir, version, "patches", name), "utf8");
@@ -163,6 +164,27 @@ describe("vendored ledger builds: the recorded sources and pins", () => {
     expect(added("v9-rc3")).toEqual(added("v9"));
     expect(added("v9-rc5")).toEqual(added("v9"));
     expect(added("v9").join("\n")).toContain('#[wasm_bindgen(js_name = "stateTrees")]');
+  });
+
+  it("gives every version the same, expose-only export of a zswap output's preimage evidence, last", () => {
+    const added = (version: string): string[] => {
+      const name = patchesOf(version).at(-1) as string;
+      expect(name, version).toMatch(/-ledger-wasm-zswap-output-evidence\.patch$/);
+      return addedLines(version, name);
+    };
+    for (const version of ["v8", "v9-rc3", "v9-rc5"]) expect(added(version), version).toEqual(added("v9"));
+    const text = added("v9").join("\n");
+    expect(text).toContain("preimage_evidence_kind: String");
+    expect(text).toContain("preimageEvidenceKind: 'ciphertext' | 'publicPreimage' | 'none'");
+    // It reads the event's evidence and changes nothing: the patch touches only the JavaScript conversion and its
+    // declarations.
+    const files = readFileSync(join(ledgerDir, "v9", "patches", patchesOf("v9").at(-1) as string), "utf8")
+      .split("\n")
+      .filter((line) => line.startsWith("diff --git "));
+    expect(files).toEqual([
+      "diff --git a/ledger-wasm/ledger-v9.template.d.ts b/ledger-wasm/ledger-v9.template.d.ts",
+      "diff --git a/ledger-wasm/src/conversions.rs b/ledger-wasm/src/conversions.rs",
+    ]);
   });
 
   for (const version of VERSIONS) {

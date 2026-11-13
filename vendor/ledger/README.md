@@ -70,6 +70,7 @@ Its patches are v9's where they apply:
   `apply_system_tx`): the update is the ledger's `post_block_update`, whose prevalidation a clamped fullness always
   passes, as that node calls it;
 - `0006-ledger-wasm-state-trees.patch` — the tree values, as v8's `0005-…` and v9's `0007-…` (below).
+- `0007-ledger-wasm-zswap-output-evidence.patch` — a zswap output's preimage evidence, as v9's `0008-…` (below).
 
 v9's `0004-…` (the translation's timers) and `0005-…` (the conversion) do not apply: `midnight-node` 2.0.0-rc.4 carries
 no v8 → v9 translation, and the rc.3 package has no `convertFromV8`. The build takes about a minute and a half on this
@@ -192,6 +193,20 @@ and each root its untagged serialization. Ledger 8 has DUST state too, so the si
 (mainnet's genesis state has three) has first free index 0 and root `00`, the zero digest as a SCALE compact integer.
 `test/ledger/fixtures/state-trees/` holds the six values of fixed states, computed in Rust at the pinned commits
 (`oracle/`), which `test/ledger/state-trees.test.ts` checks the packages and the adapters against.
+
+A zswap output's preimage evidence (`v8/patches/0006-…`, `v9-rc3/patches/0007-…`, `v9-rc5/patches/0008-…`,
+`v9/patches/0008-…`, the same lines in each, last). The published packages describe a `zswapOutput` event by its
+commitment, contract and tree index only, though the event holds the output's `ZswapPreimageEvidence` (`ledger/src/
+events.rs`): its coin encrypted to the recipient, its coin and recipient in the clear (outputs system transactions
+make), or nothing (outputs contracts own). Each package's `ledger-wasm` event conversion (`src/conversions.rs`
+`event_details_to_value`) reads it, changing nothing, into two more fields of the event's details, declared in the
+package's `.d.ts`:
+
+- `preimageEvidenceKind`: `'ciphertext'`, `'publicPreimage'` or `'none'`;
+- `ciphertext` (a ciphertext only, absent otherwise): a `Uint8Array` of 224 bytes, the `CoinCiphertext`'s point `c` in
+  its 32-byte compressed encoding (the bytes its `Serializable` writes), then its six elements `ciph`, each its 32-byte
+  little-endian integer (`Fr::as_le_bytes`, zero-padded to 32). The event's own serialization holds the same values,
+  each element as a SCALE compact integer there.
 
 The v8 package has no `decodeLogItem`: v8 contract logs are not MIP-0002 events, and the v8 adapter returns null for
 them. The owner proposes these patches upstream, as a few pull requests, once `midnight-ledger`
