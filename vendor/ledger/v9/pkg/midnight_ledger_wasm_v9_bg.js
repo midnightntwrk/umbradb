@@ -9734,7 +9734,7 @@ export function __wbg_entries_58c7934c745daac7(arg0) {
     const ret = Object.entries(arg0);
     return ret;
 }
-export function __wbg_error_45b1bc6d2d0313df(arg0, arg1) {
+export function __wbg_error_7bd638de5b1d494e(arg0, arg1) {
     console.error(getStringFromWasm0(arg0, arg1));
 }
 export function __wbg_event_new(arg0) {
@@ -10186,7 +10186,7 @@ export function __wbg_zswaptransient_new(arg0) {
     return ret;
 }
 export function __wbindgen_cast_0000000000000001(arg0, arg1) {
-    // Cast intrinsic for `Closure(Closure { dtor_idx: 3993, function: Function { arguments: [Externref], shim_idx: 3994, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+    // Cast intrinsic for `Closure(Closure { dtor_idx: 4367, function: Function { arguments: [Externref], shim_idx: 4368, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
     const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen_9720efcf037de6c0___closure__destroy___dyn_core_ed718c3d60ebd546___ops__function__FnMut__wasm_bindgen_9720efcf037de6c0___JsValue____Output_______, wasm_bindgen_9720efcf037de6c0___convert__closures_____invoke___wasm_bindgen_9720efcf037de6c0___JsValue_____);
     return ret;
 }

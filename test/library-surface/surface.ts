@@ -31,11 +31,11 @@ export const EXPORTED_SURFACE: Surface = Object.freeze({
   types: Object.freeze([
     "Address", "ApiRegistry", "BlockContext", "BlockRef", "BlockWriteHandle", "CoreVersion", "Entry", "ErrorCode",
     "FieldKind", "FieldSchema", "HttpAnswer", "HttpFileAnswer", "HttpHandler", "HttpRequest", "HttpRouteOptions",
-    "ItemDeclaration", "ItemSink", "LedgerPackage", "LedgerTask", "Lifetime",
+    "ItemDeclaration", "ItemSink", "LedgerEvent", "LedgerPackage", "LedgerTask", "Lifetime",
     "MessagePortLike", "Migration", "ModuleDeclaration", "NodeHttpHandler", "NodeUpgradeHandler", "ParsedTransaction",
     "PointCallbacks", "PointName", "PrivateLinkChannel", "ProcessContext", "ReadHandle", "Revision", "SchemaWriteHandle",
     "UmbraConfig", "UmbraDBBackup", "UmbraDBCondition", "UmbraDBEnd", "UmbraDBHandle", "UmbraDBNetwork",
-    "UmbraDBOptions", "UmbraDBReason", "UmbraDBStarted", "UmbraDBStatus",
+    "UmbraDBOptions", "UmbraDBReason", "UmbraDBStarted", "UmbraDBStatus", "ZswapEvidence",
   ]),
 });
 

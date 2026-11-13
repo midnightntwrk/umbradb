@@ -41,7 +41,7 @@ function event(content: Record<string, unknown> & { tag: string }, debug = ""): 
 const A = "ab".repeat(32);
 const C = "cd".repeat(32);
 const bytesOf = (text: string): Uint8Array => Uint8Array.from(Buffer.from(text, "hex"));
-const NONE = { nullifier: null, commitment: null, treeIndex: null, contractAddress: null };
+const NONE = { nullifier: null, commitment: null, treeIndex: null, contractAddress: null, evidence: null, ciphertext: null };
 
 describe("fieldBytes: a field element as the ledger serializes it", () => {
   it("is 32 bytes, little-endian", () => {
@@ -108,13 +108,37 @@ describe("ledgerEventOf: the extracted fields", () => {
   });
 
   it("takes a zswap output's commitment, tree index and contract", () => {
-    const created = event({ tag: "zswapOutput", commitment: C, contract: A, mtIndex: 5n });
+    const created = event({ tag: "zswapOutput", commitment: C, contract: A, mtIndex: 5n, preimageEvidenceKind: "none" });
     expect(ledgerEventOf(created, "zswap-output", 1)).toMatchObject({
       commitment: bytesOf(C),
       treeIndex: 5n,
       contractAddress: bytesOf(A),
       nullifier: null,
     });
+  });
+
+  it("takes a zswap output's preimage evidence: its kind, and a ciphertext's 224 bytes as a copy", () => {
+    const output = (evidence: Record<string, unknown>) =>
+      event({ tag: "zswapOutput", commitment: C, contract: undefined, mtIndex: 0n, ...evidence });
+    const ciphertext = Uint8Array.from({ length: 224 }, (_, i) => i);
+    const encrypted = ledgerEventOf(output({ preimageEvidenceKind: "ciphertext", ciphertext }), "zswap-output", 0);
+    expect([encrypted.evidence, hex(encrypted.ciphertext as Uint8Array)]).toEqual(["ciphertext", hex(ciphertext)]);
+    expect(encrypted.ciphertext).not.toBe(ciphertext);
+    expect(ledgerEventOf(output({ preimageEvidenceKind: "publicPreimage" }), "zswap-output", 0)).toMatchObject({ evidence: "public", ciphertext: null });
+    expect(ledgerEventOf(output({ preimageEvidenceKind: "none" }), "zswap-output", 0)).toMatchObject({ evidence: "none", ciphertext: null });
+  });
+
+  it("refuses a zswap output without its evidence kind, a ciphertext of another length, and a ciphertext beside other evidence", () => {
+    const output = (evidence: Record<string, unknown>) =>
+      event({ tag: "zswapOutput", commitment: C, contract: undefined, mtIndex: 0n, ...evidence });
+    expect(() => ledgerEventOf(output({}), "zswap-output", 0)).toThrow(/preimage evidence kind is undefined/);
+    expect(() => ledgerEventOf(output({ preimageEvidenceKind: "other" }), "zswap-output", 0)).toThrow(/preimage evidence kind is other/);
+    for (const ciphertext of [undefined, new Uint8Array(223), new Uint8Array(225), "00".repeat(224)]) {
+      expect(() => ledgerEventOf(output({ preimageEvidenceKind: "ciphertext", ciphertext }), "zswap-output", 0)).toThrow(/not 224 bytes/);
+    }
+    expect(() => ledgerEventOf(output({ preimageEvidenceKind: "none", ciphertext: new Uint8Array(224) }), "zswap-output", 0)).toThrow(
+      /none evidence and a ciphertext/,
+    );
   });
 
   it("takes the DUST events' indexes, nullifier and commitment", () => {

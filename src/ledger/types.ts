@@ -117,6 +117,16 @@ export type LedgerEventKind =
   | "dust-generation-dtime-update"
   | "dust-spend-processed";
 
+/**
+ * The kind of a zswap output's preimage evidence (the ledger's `ZswapPreimageEvidence`): its coin encrypted to the
+ * recipient (`ciphertext`), its coin and recipient in the clear (`public`, as system transactions make outputs), or
+ * neither (`none`, as for an output a contract owns).
+ */
+export type ZswapEvidence = "ciphertext" | "public" | "none";
+
+/** The byte length of a zswap output's ciphertext ({@link LedgerEvent.ciphertext}): a point and six elements. */
+export const ZSWAP_CIPHERTEXT_BYTES = 224;
+
 /** A ledger event other than a contract log, as `core-ledger-state` stores it. */
 export interface LedgerEvent {
   /** The index of its transaction in {@link ApplyInput.transactions}. */
@@ -134,6 +144,14 @@ export interface LedgerEvent {
   treeIndex: bigint | null;
   /** The contract a zswap input or output belongs to, or the contract a deploy created. */
   contractAddress: Uint8Array | null;
+  /** A zswap output's preimage evidence kind; null for every other kind of event. */
+  evidence: ZswapEvidence | null;
+  /**
+   * A zswap output's ciphertext, when its evidence is one ({@link ZSWAP_CIPHERTEXT_BYTES} bytes): the sender's
+   * one-time point `G × y` in its 32-byte compressed encoding, then the six elements, each its 32-byte little-endian
+   * integer (element 0 encrypts 0, the recipient's ownership test; 1–5 the coin). Null otherwise.
+   */
+  ciphertext: Uint8Array | null;
 }
 
 /** The event types of a MIP-0002 contract log, as the ledger names them. */

@@ -103,12 +103,12 @@ describe("the in-memory source's block items (for tests and module authors)", ()
       specVersion: IN_MEMORY_SPEC_VERSION,
       timestampMs: IN_MEMORY_START_MS + 18_000n,
     });
-    expect(items["block-body"]).toEqual({ specVersion: 2_001_000, extrinsics: [] });
-    expect(items["runtime-metadata"]).toEqual({ specVersion: 2_001_000, metadata: new Uint8Array(0) });
+    expect(items["block-body"]).toEqual({ specVersion: 2_001_100, extrinsics: [] });
+    expect(items["runtime-metadata"]).toEqual({ specVersion: 2_001_100, metadata: new Uint8Array(0) });
     expect(items["ledger-version"]).toBe(IN_MEMORY_LEDGER);
     expect(Object.isFrozen(items)).toBe(true);
     expect(Object.isFrozen(items["block-header"])).toBe(true);
-    expect(IN_MEMORY_SPEC_VERSION).toBe(2_001_000);
+    expect(IN_MEMORY_SPEC_VERSION).toBe(2_001_100);
     expect(IN_MEMORY_LEDGER).toBe("v9");
   });
 

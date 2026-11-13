@@ -150,7 +150,7 @@ const PGLITE_ASSETS = ["pglite.wasm", "pglite.data", "initdb.wasm"];
 const PGLITE_TOOLS_ASSETS = ["pg_dump.wasm"];
 
 /** The vendored ledger versions whose WebAssembly the ledger worker fetches. */
-const LEDGERS = ["v8", "v9-rc3", "v9"] as const;
+const LEDGERS = ["v8", "v9-rc3", "v9-rc5", "v9"] as const;
 
 const NODE_BUILTIN = /^(node:|(assert|async_hooks|buffer|child_process|crypto|events|fs|fs\/promises|http|https|module|net|os|path|perf_hooks|stream|stream\/promises|tls|url|util|worker_threads|zlib)$)/;
 

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import * as v8 from "../../vendor/ledger/v8/pkg/midnight_ledger_wasm_fs.js";
 import * as v9 from "../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js";
 import * as v9rc3 from "../../vendor/ledger/v9-rc3/pkg/midnight_ledger_wasm_v9_fs.js";
+import * as v9rc5 from "../../vendor/ledger/v9-rc5/pkg/midnight_ledger_wasm_v9_fs.js";
 import type { ApplyInput } from "../../src/ledger/types.js";
 import { free } from "./node-format.js";
 
@@ -18,8 +19,8 @@ import { free } from "./node-format.js";
 // - The system transaction is `DistributeReserve(1000000000000000)`: for v8 the bytes 0.9.5's replay decoder test
 //   decodes (a captured devnet sample), for v9 (both packages) the same payload under v9's tag.
 
-/** The vendored ledger packages: v8, v9 (rc.5) and v9 as runtime 2.0 built it (rc.3). */
-export type Ledger = "v8" | "v9" | "v9-rc3";
+/** The vendored ledger packages: v8, v9 (9.1.0.1), and v9 as runtime 2.0 (rc.3) and runtime 2.1.0 (rc.5) built it. */
+export type Ledger = "v8" | "v9" | "v9-rc3" | "v9-rc5";
 
 /**
  * The packages share every constructor these fixtures use; the tests use them all through v9's declarations (the
@@ -31,6 +32,7 @@ export const RAW: Readonly<Record<Ledger, RawPackage>> = {
   v8: v8 as unknown as RawPackage,
   v9,
   "v9-rc3": v9rc3 as unknown as RawPackage,
+  "v9-rc5": v9rc5 as unknown as RawPackage,
 };
 
 /** The network id every fixture and adapter in these tests uses. */
@@ -124,7 +126,7 @@ export function mixedIntent(raw: RawPackage, contract: ContractFixture): { bytes
     hex(contract.address),
     "emit",
     emitOperation(raw),
-    { gas: GAS, effects: EMPTY_EFFECTS, program: logProgram([cellValue(Uint8Array.of(1))]) },
+    { gas: fixtureGas(raw), effects: EMPTY_EFFECTS, program: logProgram([cellValue(Uint8Array.of(1))]) },
     undefined,
     [],
     empty,
@@ -157,7 +159,21 @@ const EMPTY_EFFECTS = {
   claimedUnshieldedSpends: new Map(),
 };
 
+/**
+ * The gas a fixture transcript declares, by package. The v8, rc.3 and rc.5 packages take the writes of these log
+ * transcripts netted against an equal declared deletion (rc.3 fails them without it). Ledger 9.1.0.1 (`v9`) no longer
+ * nets them (`midnight-ledger` 9.1.0.0-rc.7: "refine transcript gas accounting for transcripts that both write and
+ * delete state"; 9.1.0.1: "price each segment's writes separately"): a transcript that declares deletions it never
+ * performs runs out of gas. Its calls declare the bytes they may write (the two-value log of the adapter suite writes
+ * 472) and no deletion.
+ */
 const GAS = { readTime: 0n, computeTime: 10_000_000_000n, bytesWritten: 65_536n, bytesDeleted: 65_536n };
+const GAS_V9 = { readTime: 0n, computeTime: 10_000_000_000n, bytesWritten: 4_096n, bytesDeleted: 0n };
+
+/** The gas a fixture transcript of `raw` declares (see {@link GAS}). */
+export function fixtureGas(raw: RawPackage): v9.Transcript<v9.AlignedValue>["gas"] {
+  return raw === RAW.v9 ? GAS_V9 : GAS;
+}
 
 /** A bytes atom of `length`, whose value is `bytes` (no trailing zero byte: the atom's normal form). */
 export function atom(bytes: Uint8Array, length: number = bytes.length): v9.AlignedValue {
@@ -198,7 +214,7 @@ export function callTransaction(
   entryPoint: string | Uint8Array = "emit",
 ): Uint8Array {
   const transcript = (program: v9.Op<v9.AlignedValue>[] | undefined): v9.Transcript<v9.AlignedValue> | undefined =>
-    program === undefined ? undefined : { gas: GAS, effects: EMPTY_EFFECTS, program };
+    program === undefined ? undefined : { gas: fixtureGas(raw), effects: EMPTY_EFFECTS, program };
   const empty = { value: [], alignment: [] };
   const call = new raw.ContractCallPrototype(
     hex(contract.address),

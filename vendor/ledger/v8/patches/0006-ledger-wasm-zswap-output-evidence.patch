@@ -1,0 +1,107 @@
+diff --git a/ledger-wasm/ledger-v8.template.d.ts b/ledger-wasm/ledger-v8.template.d.ts
+index 3d98911..c3e1a61 100644
+--- a/ledger-wasm/ledger-v8.template.d.ts
++++ b/ledger-wasm/ledger-v8.template.d.ts
+@@ -268,6 +268,16 @@ export type EventDetails =
+     commitment: CoinCommitment,
+     contract: ContractAddress | undefined,
+     mtIndex: bigint,
++    /**
++     * UmbraDB: the kind of the output's preimage evidence: its coin encrypted to the recipient, its
++     * coin and recipient in the clear, or neither.
++     */
++    preimageEvidenceKind: 'ciphertext' | 'publicPreimage' | 'none',
++    /**
++     * UmbraDB: for a ciphertext, its 224 bytes: the point's 32-byte compressed encoding, then the six
++     * elements, each its 32-byte little-endian integer. Absent for the other kinds.
++     */
++    ciphertext?: Uint8Array,
+   } | {
+     tag: 'dustInitialUtxo',
+     generation: DustGenerationInfo,
+diff --git a/ledger-wasm/src/conversions.rs b/ledger-wasm/src/conversions.rs
+index a730a86..0f4906a 100644
+--- a/ledger-wasm/src/conversions.rs
++++ b/ledger-wasm/src/conversions.rs
+@@ -351,6 +351,10 @@ enum PreEventDetails {
+         commitment: String,
+         contract: Option<String>,
+         mt_index: u64,
++        // UmbraDB: the output's preimage evidence, as the event holds it (`preimage_evidence_parts`).
++        preimage_evidence_kind: String,
++        #[serde(default, skip_serializing_if = "Option::is_none")]
++        ciphertext: Option<serde_bytes::ByteBuf>,
+     },
+     DustInitialUtxo {
+         output: PreQualifiedDustOutput,
+@@ -568,6 +572,44 @@ pub fn event_source_to_value(event_source: &EventSource) -> Result<JsValue, JsEr
+     })?)
+ }
+ 
++/// UmbraDB: the byte length of an output's ciphertext as `preimage_evidence_parts` gives it: the
++/// point (32 bytes) and the six elements (32 bytes each).
++const COIN_CIPHERTEXT_BYTES: usize = 32 + 6 * 32;
++
++/// UmbraDB: a zswap output's preimage evidence, read from the event and changed in nothing: its kind
++/// (`ciphertext`, `publicPreimage` or `none`) and, for a ciphertext, its 224 bytes: the point's
++/// 32-byte compressed encoding (the bytes its `Serializable` writes), then each of the six
++/// elements as its 32-byte little-endian integer (`Fr::as_le_bytes`, zero-padded to 32).
++fn preimage_evidence_parts(
++    evidence: &ledger::events::ZswapPreimageEvidence,
++) -> Result<(String, Option<serde_bytes::ByteBuf>), JsError> {
++    use ledger::events::ZswapPreimageEvidence as E;
++    match evidence {
++        E::Ciphertext(ciphertext) => {
++            let mut bytes = Vec::with_capacity(COIN_CIPHERTEXT_BYTES);
++            Serializable::serialize(&ciphertext.c, &mut bytes)?;
++            if bytes.len() != 32 {
++                return Err(JsError::new("a ciphertext's point does not serialize to 32 bytes"));
++            }
++            for element in ciphertext.ciph.iter() {
++                let le = element.as_le_bytes();
++                if le.len() > 32 {
++                    return Err(JsError::new("a ciphertext element is longer than 32 bytes"));
++                }
++                let mut word = [0u8; 32];
++                word[..le.len()].copy_from_slice(&le);
++                bytes.extend_from_slice(&word);
++            }
++            if bytes.len() != COIN_CIPHERTEXT_BYTES {
++                return Err(JsError::new("a ciphertext is not 224 bytes"));
++            }
++            Ok(("ciphertext".to_string(), Some(serde_bytes::ByteBuf::from(bytes))))
++        }
++        E::PublicPreimage { .. } => Ok(("publicPreimage".to_string(), None)),
++        E::None => Ok(("none".to_string(), None)),
++    }
++}
++
+ pub fn event_details_to_value(
+     event_details: &EventDetails<InMemoryDB>,
+ ) -> Result<JsValue, JsError> {
+@@ -583,14 +625,19 @@ pub fn event_details_to_value(
+         },
+         L::ZswapOutput {
+             commitment,
+-            preimage_evidence: _,
++            preimage_evidence,
+             contract,
+             mt_index,
+-        } => P::ZswapOutput {
+-            commitment: to_hex_ser(commitment)?,
+-            contract: contract.as_ref().map(|c| to_hex_ser(&**c)).transpose()?,
+-            mt_index: *mt_index,
+-        },
++        } => {
++            let (preimage_evidence_kind, ciphertext) = preimage_evidence_parts(preimage_evidence)?;
++            P::ZswapOutput {
++                commitment: to_hex_ser(commitment)?,
++                contract: contract.as_ref().map(|c| to_hex_ser(&**c)).transpose()?,
++                mt_index: *mt_index,
++                preimage_evidence_kind,
++                ciphertext,
++            }
++        }
+         L::DustInitialUtxo {
+             output,
+             generation,

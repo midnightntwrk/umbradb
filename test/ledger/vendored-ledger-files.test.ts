@@ -8,12 +8,13 @@ import { describe, expect, it } from "vitest";
 // and that the committed package is exactly the one SHA256SUMS records. (`npm run vendor:ledger` rebuilds the packages
 // and compares them with SHA256SUMS; this test checks the committed files without rebuilding.)
 //
-// There is a third build besides v8 and v9: v9 as runtime 2.0 built it, `ledger-9.1.0.0-rc.3`.
+// There are two more builds besides v8 and v9: v9 as runtime 2.0 built it, `ledger-9.1.0.0-rc.3`, and as runtime 2.1.0
+// built it, `ledger-9.1.0.0-rc.5`.
 
 const ledgerDir = fileURLToPath(new URL("../../vendor/ledger/", import.meta.url));
 
 /** Every vendored ledger version: `vendor/ledger/<version>/`. */
-const VERSIONS = ["v8", "v9", "v9-rc3"] as const;
+const VERSIONS = ["v8", "v9", "v9-rc3", "v9-rc5"] as const;
 
 interface Upstream {
   repository: string;
@@ -35,13 +36,18 @@ function filesUnder(dir: string): string[] {
 }
 
 const patchesOf = (version: string): string[] => readdirSync(join(ledgerDir, version, "patches")).sort();
+/** The lines a patch adds (its `+` lines, without the file headers). */
+const addedLines = (version: string, name: string): string[] =>
+  readFileSync(join(ledgerDir, version, "patches", name), "utf8")
+    .split("\n")
+    .filter((line) => line.startsWith("+") && !line.startsWith("+++"));
 const patchText = (version: string): string =>
   patchesOf(version)
     .map((name) => readFileSync(join(ledgerDir, version, "patches", name), "utf8"))
     .join("\n");
 
 describe("vendored ledger builds: the recorded sources and pins", () => {
-  it("pins v8 to ledger-8.1.2 and v9 to ledger-9.1.0.0-rc.5 of midnight-ledger", () => {
+  it("pins v8 to ledger-8.1.2 and v9 to ledger-9.1.0.1 of midnight-ledger", () => {
     const v8 = readUpstream("v8");
     expect(v8).toMatchObject({
       repository: "https://github.com/midnightntwrk/midnight-ledger",
@@ -53,10 +59,12 @@ describe("vendored ledger builds: the recorded sources and pins", () => {
     const v9 = readUpstream("v9");
     expect(v9).toMatchObject({
       repository: "https://github.com/midnightntwrk/midnight-ledger",
-      commit: "67f9f97246339539af0091c4d8c6bc5ab236a191",
-      tag: "ledger-9.1.0.0-rc.5",
-      versionName: "ledger-9.1.0.0-rc.5",
+      // The release midnight-node 2.1.101 runs (its Cargo.lock: midnight-ledger-v9 1.0.1 and the other 9.1.0.1 crates).
+      commit: "a2b30128ca4b660b73a068e29b56b48ede8c9a74",
+      tag: "ledger-9.1.0.1",
+      versionName: "ledger-9.1.0.1",
       build: { crate: "midnight-ledger-wasm-v9", wasmBindgen: "0.2.108" },
+      package: { name: "@umbradb/vendored-ledger-v9", version: "1.0.1" },
     });
   });
 
@@ -79,6 +87,27 @@ describe("vendored ledger builds: the recorded sources and pins", () => {
     expect(directories).toEqual([...VERSIONS].sort());
   });
 
+  it("pins v9-rc5 to ledger-9.1.0.0-rc.5, the v9 ledger midnight-node 2.1.0-rc.4 (runtime 2.1.0) builds, as a package of its own", () => {
+    expect(readUpstream("v9-rc5")).toEqual({
+      repository: "https://github.com/midnightntwrk/midnight-ledger",
+      // The workspace tag; the node's per-crate tags crate-ledger-9.1.0.0-rc.5 etc. are isolate commits of it.
+      commit: "67f9f97246339539af0091c4d8c6bc5ab236a191",
+      tag: "ledger-9.1.0.0-rc.5",
+      versionName: "ledger-9.1.0.0-rc.5",
+      build: {
+        crate: "midnight-ledger-wasm-v9",
+        wasmBindgen: "0.2.108",
+        dtsTemplate: "ledger-wasm/ledger-v9.template.d.ts",
+        dtsName: "ledger-v9.d.ts",
+      },
+      package: { name: "@umbradb/vendored-ledger-v9-rc5", version: "1.0.0-rc.5" },
+    });
+    // The translation and ledger v8 release midnight-node 2.1.0-rc.4 pins.
+    const rc5 = patchText("v9-rc5");
+    expect(rc5).toContain('rev = "da96e33d78ee9b7d3867b15c1037510d499cd909"');
+    expect(rc5).toContain('version = "=8.1.2"');
+  });
+
   it("numbers the patches, keeps the node's storage layout, and builds the v8 to v9 translation the node pins", () => {
     for (const version of VERSIONS) {
       const patches = patchesOf(version);
@@ -87,21 +116,22 @@ describe("vendored ledger builds: the recorded sources and pins", () => {
       expect(patchText(version)).toContain('features = ["layout-v2", "gc-v1"]');
     }
     const v9 = patchText("v9");
-    expect(v9).toContain('rev = "da96e33d78ee9b7d3867b15c1037510d499cd909"');
-    expect(v9).toContain('version = "=8.1.2"');
+    // The translation at the tag midnight-node 2.1.101 pins (state-translation-v8-v9-node-2.1.101), and ledger v8 8.1.3.
+    expect(v9).toContain('rev = "39cfd0531524b87e53198ce136777530c29646aa"');
+    expect(v9).toContain('version = "=8.1.3"');
     // ledger-8.1.2 pins wasm-bindgen 0.2.104, whose generated bindings differ from run to run; the v8 patches move it
-    // to 0.2.108, the version ledger-9.1.0.0-rc.5 pins.
+    // to 0.2.108, the version ledger-9.1.0.1 pins.
     expect(patchText("v8")).toContain('+wasm-bindgen = "=0.2.108"');
     // The rc.3 package: the node that builds it carries no v8 to v9 translation, and neither does it; ledger-9.1.0.0-rc.3
     // pins wasm-bindgen 0.2.104 as ledger-8.1.2 does, moved to 0.2.108 the same way.
     const rc3 = patchText("v9-rc3");
-    expect(rc3).not.toContain("da96e33d78ee9b7d3867b15c1037510d499cd909");
+    expect(rc3).not.toContain("v8-to-v9-state-translation");
     expect(rc3).not.toContain("convertFromV8");
     expect(rc3).toContain('+wasm-bindgen = "=0.2.108"');
     expect(rc3).toContain("postBlockUpdateExact");
   });
 
-  it("applies to rc.3 the v9 patches that apply there: the node store, the VM's log decoding, the exports, the exact update", () => {
+  it("applies to rc.3 the v9 patches that apply there: the node store, the VM's log decoding, the exports, the exact update, the evidence", () => {
     expect(patchesOf("v9-rc3")).toEqual([
       "0001-storage-core-external-node-store.patch",
       "0002-onchain-vm-public-decode-event.patch",
@@ -109,6 +139,7 @@ describe("vendored ledger builds: the recorded sources and pins", () => {
       "0004-wasm-bindgen-0.2.108.patch",
       "0005-ledger-wasm-exact-post-block-update.patch",
       "0006-ledger-wasm-state-trees.patch",
+      "0007-ledger-wasm-zswap-output-evidence.patch",
     ]);
     // The storage patch is v9's, byte for byte: storage-core is the same source at both tags.
     const patch = (version: string, name: string): string => readFileSync(join(ledgerDir, version, "patches", name), "utf8");
@@ -123,17 +154,37 @@ describe("vendored ledger builds: the recorded sources and pins", () => {
     expect(dockerfile).toContain("wasm-bindgen-cli --version 0.2.108");
   });
 
-  it("gives every version the same export of the tree values, last", () => {
+  it("gives every version the same export of the tree values", () => {
     const added = (version: string): string[] => {
-      const name = patchesOf(version).at(-1) as string;
-      expect(name, version).toMatch(/-ledger-wasm-state-trees\.patch$/);
-      return readFileSync(join(ledgerDir, version, "patches", name), "utf8")
-        .split("\n")
-        .filter((line) => line.startsWith("+") && !line.startsWith("+++"));
+      const name = patchesOf(version).find((patch) => patch.endsWith("-ledger-wasm-state-trees.patch"));
+      expect(name, version).toBeDefined();
+      return addedLines(version, name as string);
     };
     expect(added("v8")).toEqual(added("v9"));
     expect(added("v9-rc3")).toEqual(added("v9"));
+    expect(added("v9-rc5")).toEqual(added("v9"));
     expect(added("v9").join("\n")).toContain('#[wasm_bindgen(js_name = "stateTrees")]');
+  });
+
+  it("gives every version the same, expose-only export of a zswap output's preimage evidence, last", () => {
+    const added = (version: string): string[] => {
+      const name = patchesOf(version).at(-1) as string;
+      expect(name, version).toMatch(/-ledger-wasm-zswap-output-evidence\.patch$/);
+      return addedLines(version, name);
+    };
+    for (const version of ["v8", "v9-rc3", "v9-rc5"]) expect(added(version), version).toEqual(added("v9"));
+    const text = added("v9").join("\n");
+    expect(text).toContain("preimage_evidence_kind: String");
+    expect(text).toContain("preimageEvidenceKind: 'ciphertext' | 'publicPreimage' | 'none'");
+    // It reads the event's evidence and changes nothing: the patch touches only the JavaScript conversion and its
+    // declarations.
+    const files = readFileSync(join(ledgerDir, "v9", "patches", patchesOf("v9").at(-1) as string), "utf8")
+      .split("\n")
+      .filter((line) => line.startsWith("diff --git "));
+    expect(files).toEqual([
+      "diff --git a/ledger-wasm/ledger-v9.template.d.ts b/ledger-wasm/ledger-v9.template.d.ts",
+      "diff --git a/ledger-wasm/src/conversions.rs b/ledger-wasm/src/conversions.rs",
+    ]);
   });
 
   for (const version of VERSIONS) {

@@ -1029,7 +1029,7 @@ describe("absent fields take their declared defaults", () => {
     expect(checked.entries[0]?.settings).toEqual({
       network: "preprod",
       ledgerTable: builtInLedgerTable("preprod"),
-      ledgerSources: { v8: "vendored", "v9-rc3": "vendored", v9: "vendored", v10: "vendored" },
+      ledgerSources: { v8: "vendored", "v9-rc3": "vendored", "v9-rc5": "vendored", v9: "vendored", v10: "vendored" },
       sweep: "on",
       retainStates: 0,
       database: { kind: "pglite", memory: true },
@@ -1053,7 +1053,7 @@ describe("absent fields take their declared defaults", () => {
     expect(checked.entries[0]?.settings).toEqual({
       network: "preprod",
       ledgerTable: builtInLedgerTable("preprod"),
-      ledgerSources: { v8: "vendored", "v9-rc3": "vendored", v9: "vendored", v10: "vendored" },
+      ledgerSources: { v8: "vendored", "v9-rc3": "vendored", "v9-rc5": "vendored", v9: "vendored", v10: "vendored" },
       sweep: "on",
       retainStates: 0,
       database: { kind: "pglite", memory: true },
@@ -1129,7 +1129,7 @@ describe("the validated configuration", () => {
       buildVersion: true,
       data: {
         network: "preprod",
-        ledgerSources: { v8: "vendored", "v9-rc3": "vendored", v9: "vendored", v10: "vendored" },
+        ledgerSources: { v8: "vendored", "v9-rc3": "vendored", "v9-rc5": "vendored", v9: "vendored", v10: "vendored" },
         sweep: "on",
         retainStates: 0,
       },

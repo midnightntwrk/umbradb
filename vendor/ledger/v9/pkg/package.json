@@ -1,13 +1,13 @@
 {
   "name": "@umbradb/vendored-ledger-v9",
-  "version": "1.0.0-rc.5",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "description": "Vendored midnight-ledger WASM build for UmbraDB (vendor/ledger, design.md §5.2)",
   "upstream": {
     "repository": "https://github.com/midnightntwrk/midnight-ledger",
-    "commit": "67f9f97246339539af0091c4d8c6bc5ab236a191",
-    "versionName": "ledger-9.1.0.0-rc.5"
+    "commit": "a2b30128ca4b660b73a068e29b56b48ede8c9a74",
+    "versionName": "ledger-9.1.0.1"
   },
   "imports": {
     "#self": {

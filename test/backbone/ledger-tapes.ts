@@ -103,10 +103,10 @@ export interface LedgerScenario {
 export const RUNTIME_1_0 = eventsRuntime(1_000_000, V2_0);
 
 /**
- * The v9 runtime an upgrade's F is built by: 2_001_000 (v9; runtime 2.1, so no parent-time allowance for the first
+ * The v9 runtime an upgrade's F is built by: 2_001_100 (v9; runtime 2.1.100, so no parent-time allowance for the first
  * regular transaction), 2.0's event layout.
  */
-export const RUNTIME_2_1 = eventsRuntime(2_001_000, V2_0);
+export const RUNTIME_2_1 = eventsRuntime(2_001_100, V2_0);
 
 /** The vendored v9 package's Node.js entry, for a fresh instance's conversion. */
 const V9_PACKAGE = new URL("../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js", import.meta.url).href;
