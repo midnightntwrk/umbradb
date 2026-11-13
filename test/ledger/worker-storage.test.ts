@@ -33,6 +33,11 @@ import { STAGENET } from "./v9-rc3-checks.js";
 
 const LONG = 240_000;
 const V9_PACKAGE = new URL("../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js", import.meta.url).href;
+/** Each v9 package's Node.js entry, for a fresh instance's load. */
+const PACKAGE_PATH = {
+  v9: V9_PACKAGE,
+  "v9-rc5": new URL("../../vendor/ledger/v9-rc5/pkg/midnight_ledger_wasm_v9_fs.js", import.meta.url).href,
+} as const;
 const hash = (byte: number): Uint8Array => new Uint8Array(32).fill(byte);
 const at = (height: bigint): BlockId => ({ height, hash: hash(Number(height) + 1) });
 const rows = (applied: AppliedState): string[] => applied.batch.rootCounts.map((c) => `${hex(c.key)} ${c.delta}`).sort();
@@ -75,7 +80,7 @@ function input(height: bigint, transactions: number, rest: Partial<ApplyBlock> =
 }
 
 /** An engine with a store over `nodes`, past block 0 on `ledger` (a blank genesis), block 0 written and committed. */
-async function started(ledger: "v8" | "v9" | "v9-rc3", nodes = new Nodes()) {
+async function started(ledger: "v8" | "v9" | "v9-rc3" | "v9-rc5", nodes = new Nodes()) {
   const engine = new LedgerEngine({ load: loadLedgerPackage, store: nodes });
   const zero = await engine.genesis({
     ledger,
@@ -195,32 +200,38 @@ describe("the ledger worker's stored states", () => {
     await expect(rc3.apply(input(1n, 0, { ledger: "v8" }))).rejects.toThrow(/block 1 is a v8 block on a v9-rc3 state/);
   });
 
-  it("carries a v9-rc3 state into v9 at the first rc.5 block, loading it in rc.5 by its key from the store: a 2.0 → 2.1 upgrade", {
-    timeout: LONG,
-  }, async () => {
-    // One store for both runs: in this thread the packages remember what they flushed before, as a database would.
-    const shared = new Nodes();
-    for (const transactions of [[], [zswapOutputTransaction(RAW.v9)]]) {
-      const { engine, nodes } = await started("v9-rc3", shared);
-      const u = await step(engine, nodes, input(1n, 1, { ledger: "v9-rc3" }), [zswapOutputTransaction(RAW["v9-rc3"])]);
-      expect(u.ledger).toBe("v9-rc3");
-      const block = input(2n, transactions.length, { ledger: "v9" });
-      const f = await step(engine, nodes, block, transactions);
-      // The reference: the state at U rebuilt from the stored nodes without the packages and read by rc.5 — the same
-      // root —, then F applied to it.
-      const atU = RAW.v9.LedgerState.deserialize(rebuildTagged("ledger-state[v18]", u.stateKey, (k) => nodes.find(k)));
-      expect(hex(RAW.v9.stateRoot(atU))).toBe(hex(u.stateRoot));
-      const reference = referenceReplay(RAW.v9, atU, { ...block, transactions });
-      expect(hex(f.stateRoot)).toBe(hex(RAW.v9.stateRoot(reference.state)));
-      expect(f.ledger).toBe("v9");
-      expect(f.output.results.map((r) => r.outcome)).toEqual(transactions.map(() => "success"));
-      // The v9 state persisted and the rc.3 one released in F's batch.
-      expect(rows(f)).toEqual([`${hex(f.stateKey)} 1`, `${hex(u.stateKey)} -1`].sort());
-      // From the store alone the state at F loads in a fresh rc.5 instance, as a restart after F would load it.
-      const loaded = await runInFreshInstance({ packagePath: V9_PACKAGE, op: "load", key: f.stateKey, nodes: nodes.all() });
-      expect(hex(loaded.stateRoot as Uint8Array)).toBe(hex(f.stateRoot));
-    }
-  });
+  for (const [from, to] of [
+    ["v9-rc3", "v9"],
+    ["v9-rc3", "v9-rc5"],
+    ["v9-rc5", "v9"],
+  ] as const) {
+    it(`carries a ${from} state into ${to} at ${to}'s first block, loading it in ${to}'s package by its key from the store: an upgrade within v9`, {
+      timeout: LONG,
+    }, async () => {
+      // One store for both runs: in this thread the packages remember what they flushed before, as a database would.
+      const shared = new Nodes();
+      for (const transactions of [[], [zswapOutputTransaction(RAW[to])]]) {
+        const { engine, nodes } = await started(from, shared);
+        const u = await step(engine, nodes, input(1n, 1, { ledger: from }), [zswapOutputTransaction(RAW[from])]);
+        expect(u.ledger).toBe(from);
+        const block = input(2n, transactions.length, { ledger: to });
+        const f = await step(engine, nodes, block, transactions);
+        // The reference: the state at U rebuilt from the stored nodes without the packages and read by F's package —
+        // the same root —, then F applied to it.
+        const atU = RAW[to].LedgerState.deserialize(rebuildTagged("ledger-state[v18]", u.stateKey, (k) => nodes.find(k)));
+        expect(hex(RAW[to].stateRoot(atU))).toBe(hex(u.stateRoot));
+        const reference = referenceReplay(RAW[to], atU, { ...block, transactions });
+        expect(hex(f.stateRoot)).toBe(hex(RAW[to].stateRoot(reference.state)));
+        expect(f.ledger).toBe(to);
+        expect(f.output.results.map((r) => r.outcome)).toEqual(transactions.map(() => "success"));
+        // F's package's state persisted and the earlier one released in F's batch.
+        expect(rows(f)).toEqual([`${hex(f.stateKey)} 1`, `${hex(u.stateKey)} -1`].sort());
+        // From the store alone the state at F loads in a fresh instance of F's package, as a restart after F would.
+        const loaded = await runInFreshInstance({ packagePath: PACKAGE_PATH[to], op: "load", key: f.stateKey, nodes: nodes.all() });
+        expect(hex(loaded.stateRoot as Uint8Array)).toBe(hex(f.stateRoot));
+      }
+    });
+  }
 
   it("carries stagenet's rc.3 state into rc.5, whose rules differ on its next block: F is rc.5's", { timeout: LONG }, async () => {
     // Stagenet's genesis state stored by the rc.3 package, as the database holds it after block 0.
