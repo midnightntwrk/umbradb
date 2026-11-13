@@ -7,5 +7,5 @@
     "paths": { "umbradb": ["../../src/index.ts"] }
   },
   "include": ["**/*.ts"],
-  "exclude": ["server/**", "test/server-*.ts", "test/client-*.ts", "client/sdk/**", "client/node_modules/**"]
+  "exclude": ["server/**", "test/server-*.ts", "test/client-*.ts", "client/sdk/**", "client/node_modules/**", "gpu/**"]
 }

@@ -1,0 +1,665 @@
+{
+  "date": "2026-11-13T09:25:30.292Z",
+  "ok": true,
+  "environment": {
+    "gpu": "Apple M4 Max",
+    "deno": "2.7.5",
+    "node": "v24.9.0",
+    "cpus": 16,
+    "cpuThreads": 8,
+    "loadAverage": {
+      "before": [
+        7.5576171875,
+        8.09619140625,
+        7.31591796875
+      ],
+      "cpuBefore": [
+        6.8203125,
+        7.87841796875,
+        7.25927734375
+      ],
+      "cpuAfter": [
+        15.5888671875,
+        10.0673828125,
+        8.09619140625
+      ],
+      "after": [
+        15.5888671875,
+        10.0673828125,
+        8.09619140625
+      ]
+    },
+    "quick": false
+  },
+  "notes": [
+    "GPU times are wall-clock from the call to the result in host memory (upload of the call's input, dispatches, read-back); 'pinned' means the matrix was copied to the GPU once before (GpuMultiplier.pin), as a server does with its tables.",
+    "Deno's WebGPU answers every await on the GPU after a floor of about 12 ms even with no work (setup.denoRoundTripFloorMs); each call pays it once per read-back. 'execution' times are the GPU's own, from timestamp queries around the call's dispatches (null where Deno 2.7.5 on Apple silicon left the end timestamp of a short pass unwritten); 'concurrent' is 16 pinned calls in flight together, which share the floor.",
+    "CPU times come from Node (cpu-reference.ts): ScanPool after one warm-up call and WorkerMultiplier after three (one for the 1,024-vector setup), with the given threads, and one thread (Kernel.scanValues on a sample, inlineMultiplier).",
+    "On this shared machine the CPU worker multiply is bimodal: the same call takes either about its best time or several times longer (a worker held back by the load), so both the best and the median are given.",
+    "The machine was shared with a running Preprod sync; see the load averages."
+  ],
+  "setup": {
+    "scannerCreateMs": 89.92987500000163,
+    "multiplierCreateMs": 1.7255829999994603,
+    "cpuReferenceWallMs": 42897.11474999999,
+    "denoRoundTripFloorMs": [
+      11.917958000001818,
+      13.110124999999243,
+      13.098249999999098,
+      11.79737500000192,
+      11.088250000000698,
+      13.105874999997468,
+      11.624082999998791
+    ]
+  },
+  "tables": {
+    "read": {
+      "rows": 6897,
+      "cols": 6296,
+      "records": 69255,
+      "recordBytes": 705,
+      "perColumn": 11
+    },
+    "nullifier": {
+      "rows": 1656,
+      "cols": 2048,
+      "records": 57770,
+      "bucketBits": 11,
+      "capacity": 46
+    }
+  },
+  "checks": [
+    {
+      "name": "scan vectors: GPU scanValues = CPU ScanPool.scanValues",
+      "ok": true,
+      "detail": "16384 entries, 524288 bytes equal"
+    },
+    {
+      "name": "scan vectors: GPU scan = CPU ScanPool.scan",
+      "ok": true,
+      "detail": "GPU 18 hits, CPU 18 hits"
+    },
+    {
+      "name": "scan preprod: GPU scanValues = CPU ScanPool.scanValues",
+      "ok": true,
+      "detail": "70000 entries, 2240000 bytes equal"
+    },
+    {
+      "name": "scan preprod: GPU scan = CPU ScanPool.scan",
+      "ok": true,
+      "detail": "GPU 82 hits, CPU 82 hits"
+    },
+    {
+      "name": "scan vectors: GPU values = the ledger's (pads.bin)",
+      "ok": true,
+      "detail": "16,384 values equal"
+    },
+    {
+      "name": "scan vectors: GPU hits = the ledger's (mine.bin)",
+      "ok": true,
+      "detail": "18 of 18"
+    },
+    {
+      "name": "multiply read-answer: GPU = CPU WorkerMultiplier",
+      "ok": true,
+      "detail": "read table answer: 6897 × 6296 16-bit grid × 32 query vectors (vector-major); 882816 bytes equal (pinned and unpinned)"
+    },
+    {
+      "name": "multiply read-setup: GPU = CPU WorkerMultiplier",
+      "ok": true,
+      "detail": "read table setup H = grid × A: 6897 × 6296 grid × 1024 columns of A (row-major); 28250112 bytes equal (pinned and unpinned)"
+    },
+    {
+      "name": "multiply nullifier-answer: GPU = CPU WorkerMultiplier",
+      "ok": true,
+      "detail": "nullifier table answer: 1656 × 2048 16-bit grid × 32 query vectors (vector-major); 211968 bytes equal (pinned and unpinned)"
+    },
+    {
+      "name": "multiply nullifier-setup: GPU = CPU WorkerMultiplier",
+      "ok": true,
+      "detail": "nullifier table setup H = grid × A: 1656 × 2048 grid × 1024 columns of A (row-major); 6782976 bytes equal (pinned and unpinned)"
+    },
+    {
+      "name": "multiply client-hs: GPU = CPU WorkerMultiplier",
+      "ok": true,
+      "detail": "client H·s: 6897 × 1024 32-bit matrix × 32 secrets (vector-major); 882816 bytes equal"
+    },
+    {
+      "name": "multiply client-as: GPU = CPU WorkerMultiplier",
+      "ok": true,
+      "detail": "client A·s: 4096 × 1024 rows of A × 32 secrets (vector-major); 524288 bytes equal"
+    },
+    {
+      "name": "multiply odd-1x1x1-16: GPU = CPU WorkerMultiplier",
+      "ok": true,
+      "detail": "odd shape: 1 × 1 16-bit × 1 vectors (row-major); 4 bytes equal"
+    },
+    {
+      "name": "multiply odd-5x7x1-16: GPU = CPU WorkerMultiplier",
+      "ok": true,
+      "detail": "odd shape: 5 × 7 16-bit × 1 vectors (vector-major); 20 bytes equal"
+    },
+    {
+      "name": "multiply odd-37x51x3-16: GPU = CPU WorkerMultiplier",
+      "ok": true,
+      "detail": "odd shape: 37 × 51 16-bit × 3 vectors (row-major); 444 bytes equal"
+    },
+    {
+      "name": "multiply odd-101x1023x33-16: GPU = CPU WorkerMultiplier",
+      "ok": true,
+      "detail": "odd shape: 101 × 1023 16-bit × 33 vectors (vector-major); 13332 bytes equal"
+    },
+    {
+      "name": "multiply odd-13x9x65-32: GPU = CPU WorkerMultiplier",
+      "ok": true,
+      "detail": "odd shape: 13 × 9 32-bit × 65 vectors (row-major); 3380 bytes equal"
+    },
+    {
+      "name": "multiply odd-3x2049x7-32: GPU = CPU WorkerMultiplier",
+      "ok": true,
+      "detail": "odd shape: 3 × 2049 32-bit × 7 vectors (vector-major); 84 bytes equal"
+    },
+    {
+      "name": "negative control, scan: one tag bit changed in a hit",
+      "ok": true,
+      "detail": "GPU hits differ from the CPU's for the original: lost [556], gained []"
+    },
+    {
+      "name": "negative control, scan: one point byte changed",
+      "ok": true,
+      "detail": "entries whose value differs from the CPU's for the original: [556] (changed 556)"
+    },
+    {
+      "name": "negative control, multiply: one grid cell changed",
+      "ok": true,
+      "detail": "32 answer values differ from the CPU's for the original, all in row(s) [2299] (changed row 2299)"
+    },
+    {
+      "name": "negative control, multiply: one query value changed",
+      "ok": true,
+      "detail": "6878 answer values differ, all in vector(s) [5] (changed vector 5)"
+    },
+    {
+      "name": "PIR round trip, read table, GPU answers and setup",
+      "ok": true,
+      "detail": "352 records decoded, 0 differ from the table"
+    },
+    {
+      "name": "PIR round trip, nullifier table, GPU answers and setup",
+      "ok": true,
+      "detail": "1472 records decoded, 0 differ from the table"
+    }
+  ],
+  "scan": [
+    {
+      "set": "vectors",
+      "entries": 16384,
+      "composition": {
+        "ledger encryptions (test vectors)": 16384
+      },
+      "gpu": {
+        "firstCallMs": 108.05058300000019,
+        "scanValuesMs": [
+          89.60174999999799,
+          91.28700000000026,
+          87.18954200000007
+        ],
+        "scanMs": [
+          144.132999999998,
+          143.93333300000086,
+          142.192791999998
+        ],
+        "bestUsPerEntry": 5.321627319335942,
+        "executionScanValuesMs": [
+          75.997875,
+          76.248,
+          72.99325
+        ],
+        "executionScanMs": [
+          null,
+          null,
+          null
+        ],
+        "executionUsPerEntry": 4.638542175292969
+      },
+      "cpu": {
+        "threads": 8,
+        "poolScanValuesMs": 1155.1665,
+        "poolScanMs": 1170.130542,
+        "poolUsPerEntry": 70.50576782226562,
+        "singleThreadUsPerEntry": 529.3123378906257,
+        "singleThreadSample": 512
+      },
+      "speedupOverPool": 13.248911205428731,
+      "speedupOverOneThread": 99.46437548668399
+    },
+    {
+      "set": "preprod",
+      "entries": 70000,
+      "composition": {
+        "ledger encryptions (test vectors)": 16384,
+        "subgroup point, random tag": 51737,
+        "all zero (no ciphertext)": 1094,
+        "undecodable: not on the curve": 128,
+        "random 36 bytes": 256,
+        "forced match, small-order point (refused)": 7,
+        "forced match, subgroup point (a hit)": 64,
+        "curve point, random tag": 256,
+        "forced match, point outside the subgroup (refused)": 64,
+        "undecodable: all bytes 0xff": 1,
+        "undecodable: (0, −1) with the sign bit (ZIP 216)": 1,
+        "forced match, identity (refused)": 1,
+        "undecodable: v not below p": 3,
+        "forced match, point bytes zero (refused)": 1,
+        "undecodable: identity with the sign bit (ZIP 216)": 1,
+        "forced match, (0, −1) (refused)": 1,
+        "point bytes zero, tag not zero (an order-4 point)": 1
+      },
+      "gpu": {
+        "firstCallMs": 347.8439160000016,
+        "scanValuesMs": [
+          379.80579200000284,
+          435.50637500000084,
+          420.28729100000055
+        ],
+        "scanMs": [
+          470.52179199999955,
+          498.4931250000009,
+          486.0068749999991
+        ],
+        "bestUsPerEntry": 5.425797028571469,
+        "executionScanValuesMs": [
+          348.676209,
+          403.041792,
+          391.795208
+        ],
+        "executionScanMs": [
+          null,
+          null,
+          null
+        ],
+        "executionUsPerEntry": 5.5970743999999995
+      },
+      "cpu": {
+        "threads": 8,
+        "poolScanValuesMs": 4845.926459,
+        "poolScanMs": 5814.351000000001,
+        "poolUsPerEntry": 69.22752084285715,
+        "singleThreadUsPerEntry": 544.2493476562476,
+        "singleThreadSample": 512
+      },
+      "speedupOverPool": 12.758958818089758,
+      "speedupOverOneThread": 100.30772341654296
+    }
+  ],
+  "multiply": [
+    {
+      "id": "read-answer",
+      "what": "read table answer: 6897 × 6296 16-bit grid × 32 query vectors (vector-major)",
+      "rows": 6897,
+      "cols": 6296,
+      "vectors": 32,
+      "layout": "vector-major",
+      "multiplyAdds": 1389552384,
+      "gpu": {
+        "unpinnedMs": [
+          27.67566699999952,
+          26.843707999996695,
+          27.151874999999563
+        ],
+        "pinMs": 20.48041700000249,
+        "pinnedMs": [
+          20.20037500000035,
+          14.877624999997352,
+          14.961833000001207,
+          15.9185830000024,
+          16.014749999998457,
+          15.004791999999725,
+          15.02850000000035,
+          16.899584000002505,
+          15.589583000000857,
+          15.167874999999185
+        ],
+        "bestMs": 14.877624999997352,
+        "executionMs": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          1.669375,
+          null,
+          null,
+          null,
+          null
+        ],
+        "executionMedianMs": 1.669375,
+        "executionGMultiplyAddsPerSecond": 832.3788148259079,
+        "concurrent": {
+          "calls": 16,
+          "totalMs": 57.62541599999895,
+          "perCallMs": 3.6015884999999344,
+          "allEqual": true
+        }
+      },
+      "cpu": {
+        "threads": 8,
+        "workerMs": [
+          63.13737500000025,
+          50.94604199999958,
+          210.2985000000008,
+          175.19333300000108,
+          57.29541700000118,
+          50.61954100000003,
+          45.41645799999969,
+          48.29095799999959,
+          46.74083299999984
+        ],
+        "workerBestMs": 45.41645799999969,
+        "workerMedianMs": 50.94604199999958,
+        "singleThreadMs": [
+          356.02195799999936,
+          399.75433300000077,
+          358.5110829999994,
+          361.85762500000055,
+          6205.828208999999,
+          5968.405541999997,
+          345.0228329999991,
+          351.205958999999,
+          363.20200000000114
+        ],
+        "singleThreadMedianMs": 361.85762500000055
+      },
+      "speedupOverWorkers": 3.424339704758565,
+      "speedupOverOneThread": 24.32227085976861
+    },
+    {
+      "id": "read-setup",
+      "what": "read table setup H = grid × A: 6897 × 6296 grid × 1024 columns of A (row-major)",
+      "rows": 6897,
+      "cols": 6296,
+      "vectors": 1024,
+      "layout": "row-major",
+      "multiplyAdds": 44465676288,
+      "gpu": {
+        "unpinnedMs": [
+          102.93633300000147,
+          101.49283300000025,
+          99.8760000000002
+        ],
+        "pinMs": 19.888624999999593,
+        "pinnedMs": [
+          108.76945899999919,
+          102.95074999999997,
+          100.43025000000125,
+          105.03116600000067
+        ],
+        "bestMs": 100.43025000000125,
+        "executionMs": [
+          82.617875,
+          83.341458,
+          78.529625,
+          82.472833
+        ],
+        "executionMedianMs": 82.545354,
+        "executionGMultiplyAddsPerSecond": 538.6817565528885,
+        "concurrent": null
+      },
+      "cpu": {
+        "threads": 8,
+        "workerMs": [
+          2243.4463339999966,
+          2145.4855830000015,
+          2256.106667
+        ],
+        "workerBestMs": 2145.4855830000015,
+        "workerMedianMs": 2243.4463339999966,
+        "singleThreadMs": [],
+        "singleThreadMedianMs": null
+      },
+      "speedupOverWorkers": 22.3383525780327,
+      "speedupOverOneThread": null
+    },
+    {
+      "id": "nullifier-answer",
+      "what": "nullifier table answer: 1656 × 2048 16-bit grid × 32 query vectors (vector-major)",
+      "rows": 1656,
+      "cols": 2048,
+      "vectors": 32,
+      "layout": "vector-major",
+      "multiplyAdds": 108527616,
+      "gpu": {
+        "unpinnedMs": [
+          16.03808299999946,
+          13.938916999999492,
+          15.735499999998865
+        ],
+        "pinMs": 13.76945799999885,
+        "pinnedMs": [
+          15.161250000001019,
+          14.193457999997918,
+          14.439957999999024,
+          14.665333999997529,
+          15.154459000001225,
+          13.808666000000812,
+          15.122125000001688,
+          15.071250000000873,
+          13.708167000000685,
+          15.170125000000553
+        ],
+        "bestMs": 13.708167000000685,
+        "executionMs": [
+          null,
+          null,
+          null,
+          0.541459,
+          null,
+          null,
+          0.346709,
+          null,
+          null,
+          null
+        ],
+        "executionMedianMs": 0.44408400000000003,
+        "executionGMultiplyAddsPerSecond": 244.38533250466125,
+        "concurrent": {
+          "calls": 16,
+          "totalMs": 38.80883300000278,
+          "perCallMs": 2.4255520625001736,
+          "allEqual": true
+        }
+      },
+      "cpu": {
+        "threads": 8,
+        "workerMs": [
+          3.5893750000032014,
+          3.4492910000044503,
+          3.5820000000021537,
+          4.040499999995518,
+          4.237207999998645,
+          3.712042000006477,
+          3.3515409999963595,
+          3.702916999995068,
+          4.0601669999959995
+        ],
+        "workerBestMs": 3.3515409999963595,
+        "workerMedianMs": 3.702916999995068,
+        "singleThreadMs": [
+          26.047583999999915,
+          25.47200000000157,
+          25.403874999996333,
+          25.695833999998285,
+          25.504750000000058,
+          25.25937499999418,
+          25.129625000001397,
+          25.667084000000614,
+          25.2757500000007
+        ],
+        "singleThreadMedianMs": 25.47200000000157
+      },
+      "speedupOverWorkers": 0.27012488248756256,
+      "speedupOverOneThread": 1.8581623640856066
+    },
+    {
+      "id": "nullifier-setup",
+      "what": "nullifier table setup H = grid × A: 1656 × 2048 grid × 1024 columns of A (row-major)",
+      "rows": 1656,
+      "cols": 2048,
+      "vectors": 1024,
+      "layout": "row-major",
+      "multiplyAdds": 3472883712,
+      "gpu": {
+        "unpinnedMs": [
+          23.618875000000116,
+          22.64300000000003,
+          22.072250000001077
+        ],
+        "pinMs": 13.728209000000788,
+        "pinnedMs": [
+          20.90266700000211,
+          21.34912500000064,
+          21.502832999998645,
+          22.047374999998283
+        ],
+        "bestMs": 20.90266700000211,
+        "executionMs": [
+          5.884,
+          5.536333,
+          5.34,
+          5.833083
+        ],
+        "executionMedianMs": 5.6847080000000005,
+        "executionGMultiplyAddsPerSecond": 610.9168161319807,
+        "concurrent": null
+      },
+      "cpu": {
+        "threads": 8,
+        "workerMs": [
+          146.34100000000035,
+          116.84920899999997,
+          115.76066600000195
+        ],
+        "workerBestMs": 115.76066600000195,
+        "workerMedianMs": 116.84920899999997,
+        "singleThreadMs": [
+          812.103833000001,
+          810.7027909999961,
+          810.5508749999935
+        ],
+        "singleThreadMedianMs": 810.7027909999961
+      },
+      "speedupOverWorkers": 5.590157897075438,
+      "speedupOverOneThread": 38.78465800559872
+    },
+    {
+      "id": "client-hs",
+      "what": "client H·s: 6897 × 1024 32-bit matrix × 32 secrets (vector-major)",
+      "rows": 6897,
+      "cols": 1024,
+      "vectors": 32,
+      "layout": "vector-major",
+      "multiplyAdds": 226000896,
+      "gpu": {
+        "unpinnedMs": [
+          18.580041999997775,
+          17.64875000000029,
+          16.00433399999747,
+          18.257583999999042,
+          18.315209000000323,
+          16.43462499999805
+        ],
+        "pinMs": null,
+        "pinnedMs": [],
+        "bestMs": 16.00433399999747,
+        "executionMs": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "executionMedianMs": null,
+        "executionGMultiplyAddsPerSecond": null,
+        "concurrent": null
+      },
+      "cpu": {
+        "threads": 8,
+        "workerMs": [
+          7.2502499999973224,
+          9.819415999998455,
+          8.430292000004556,
+          7.995790999993915,
+          8.15633300000627
+        ],
+        "workerBestMs": 7.2502499999973224,
+        "workerMedianMs": 8.15633300000627,
+        "singleThreadMs": [
+          65.56337500000518,
+          62.81312500000058,
+          53.728125000001455,
+          58.24383300000045,
+          88.76687500000116
+        ],
+        "singleThreadMedianMs": 62.81312500000058
+      },
+      "speedupOverWorkers": 0.5096327657250567,
+      "speedupOverOneThread": 3.9247571938957604
+    },
+    {
+      "id": "client-as",
+      "what": "client A·s: 4096 × 1024 rows of A × 32 secrets (vector-major)",
+      "rows": 4096,
+      "cols": 1024,
+      "vectors": 32,
+      "layout": "vector-major",
+      "multiplyAdds": 134217728,
+      "gpu": {
+        "unpinnedMs": [
+          16.217874999998457,
+          16.65375000000131,
+          16.347083000000566,
+          16.10295799999949,
+          15.065083000001323,
+          15.621624999999767
+        ],
+        "pinMs": null,
+        "pinnedMs": [],
+        "bestMs": 15.065083000001323,
+        "executionMs": [
+          null,
+          null,
+          null,
+          0.586209,
+          null,
+          null
+        ],
+        "executionMedianMs": 0.586209,
+        "executionGMultiplyAddsPerSecond": 228.95883208889663,
+        "concurrent": null
+      },
+      "cpu": {
+        "threads": 8,
+        "workerMs": [
+          8.714249999997264,
+          7.069792000002053,
+          20.72849999999744,
+          21.95324999999866,
+          21.294291999998677
+        ],
+        "workerBestMs": 7.069792000002053,
+        "workerMedianMs": 20.72849999999744,
+        "singleThreadMs": [
+          35.15779199999815,
+          32.38991700000042,
+          33.71954100000585,
+          31.982457999998587,
+          31.81070799999725
+        ],
+        "singleThreadMedianMs": 32.38991700000042
+      },
+      "speedupOverWorkers": 1.3759300230868703,
+      "speedupOverOneThread": 2.1499992399641994
+    }
+  ]
+}
