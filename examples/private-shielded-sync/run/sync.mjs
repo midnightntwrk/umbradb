@@ -8,12 +8,16 @@
  *       --build <checkout> [--api-port <p>] [--admin-port <p>]
  *       [--module <file.ts>#<export> --module-config <file.json> [--module-start <height>]]
  *     node examples/private-shielded-sync/run/sync.mjs down|record|destroy --label <name> --out <dir>
+ *     PSS_NODE_WS=<ws-url> node examples/private-shielded-sync/run/sync.mjs config --label <name> --out <dir>
+ *       --build <checkout> [--module <file.ts>#<export> --module-config <file.json> [--module-start <height>]]
  *
  * - `up` creates the network, the volume and the database when they do not exist (a new database starts at 0, an
  *   existing one resumes at its cursor), writes the configuration into `--out` and starts the run container,
  *   detached, with the build mounted read only and `--out` read-write at their own paths. The core entry has no stop.
  *   With `--module`, the module's entry starts at `--module-start` (default: the stored cursor + 1, so a module that
  *   owns no tables and declares `startsMidChain` can join a synced database).
+ * - `config` writes the configuration file and the `umbradb` link into `--out`, as `up` does, and starts nothing (the
+ *   module's start is `--module-start`, 0 unless given): for `umbradb config check` before an `up`.
  * - `down` stops the run container (SIGTERM; the height in progress finishes) and removes it; the database stays.
  * - `record` appends every changed `/status` sample to `status.jsonl` and the run's log to `run.log`, until killed.
  * - `destroy` removes the run container, the database, its volume and the network.
@@ -56,7 +60,7 @@ const fail = (message) => {
   process.stderr.write(`${message}\n`);
   process.exit(2);
 };
-if (!["up", "down", "record", "destroy"].includes(command ?? "")) fail("usage: sync.mjs up|down|record|destroy --label <name> --out <dir> ...");
+if (!["up", "config", "down", "record", "destroy"].includes(command ?? "")) fail("usage: sync.mjs up|config|down|record|destroy --label <name> --out <dir> ...");
 const label = values.label ?? fail("--label is required");
 if (!/^[a-z0-9-]+$/.test(label)) fail("--label takes lowercase letters, digits and -");
 const out = resolve(values.out ?? fail("--out is required"));
@@ -122,6 +126,27 @@ function configText({ moduleSpec, moduleConfig, moduleStart }) {
   return lines.join("\n");
 }
 
+/** Writes `<out>/umbradb.config.ts` and the `umbradb` link to the build; returns the file. */
+function writeConfig(build, moduleStart) {
+  const moduleSpec = values.module;
+  const moduleConfig =
+    moduleSpec === undefined || values["module-config"] === undefined ? "{}" : readFileSync(resolve(values["module-config"]), "utf8").trim();
+  const link = join(out, "node_modules", "umbradb");
+  if (!existsSync(link)) {
+    mkdirSync(join(out, "node_modules"), { recursive: true });
+    symlinkSync(build, link, "dir");
+  }
+  const configFile = join(out, "umbradb.config.ts");
+  writeFileSync(configFile, configText({ moduleSpec, moduleConfig, moduleStart }));
+  return configFile;
+}
+
+async function config() {
+  const build = resolve(values.build ?? fail("--build is required (a built UmbraDB checkout)"));
+  mkdirSync(out, { recursive: true });
+  process.stdout.write(`${writeConfig(build, values["module-start"] ?? "0")}\n`);
+}
+
 async function up() {
   const build = resolve(values.build ?? fail("--build is required (a built UmbraDB checkout)"));
   if (!existsSync(join(build, "dist", "cli", "main.js"))) fail(`no ${build}/dist/cli/main.js: npm ci && npm run build there`);
@@ -145,19 +170,8 @@ async function up() {
     await sleep(1000);
   }
   const moduleSpec = values.module;
-  let moduleStart = "0";
-  let moduleConfig = "{}";
-  if (moduleSpec !== undefined) {
-    moduleConfig = values["module-config"] === undefined ? "{}" : readFileSync(resolve(values["module-config"]), "utf8").trim();
-    moduleStart = values["module-start"] ?? String(cursorOf(secretEnv) + 1n);
-  }
-  const link = join(out, "node_modules", "umbradb");
-  if (!existsSync(link)) {
-    mkdirSync(join(out, "node_modules"), { recursive: true });
-    symlinkSync(build, link, "dir");
-  }
-  const configFile = join(out, "umbradb.config.ts");
-  writeFileSync(configFile, configText({ moduleSpec, moduleConfig, moduleStart }));
+  const moduleStart = moduleSpec === undefined ? "0" : (values["module-start"] ?? String(cursorOf(secretEnv) + 1n));
+  const configFile = writeConfig(build, moduleStart);
   const apiPort = values["api-port"] ?? "";
   const adminPort = values["admin-port"] ?? "";
   docker(["run", "-d", "--name", names.run, "--init", "--network", names.network, "--stop-timeout", String(STOP_TIMEOUT_S),
@@ -208,4 +222,4 @@ async function destroy() {
   }
 }
 
-await { up, down, record, destroy }[command]();
+await { up, config, down, record, destroy }[command]();

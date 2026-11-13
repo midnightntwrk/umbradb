@@ -5,23 +5,25 @@ which coins are its own. The server publishes a scan file of 36 bytes per shield
 locally with its encryption secret key, then reads its own outputs and checks its nullifiers with single-server private
 information retrieval (SimplePIR), so the server answers without learning which records were read.
 
-This folder holds, so far, the parts both sides share:
+This folder holds:
 
+- `server/`: the server, an UmbraDB module (below);
 - `pir/`: SimplePIR (tables, setup data, queries, answers, decoding) and the nullifier buckets;
 - `shared/`: the wire formats, record layouts and the snapshot manifest;
 - `kernel/`: the scan kernel, a WebAssembly build of the ownership test, decryption and Poseidon on the Midnight
   ledger's own Rust crates, with its Node.js loader and worker pool;
+- `run/sync.mjs`: runs UmbraDB with the module against a node in Docker;
 - `test/`, `bench/`.
 
 Neither `pir/`, `shared/` nor `kernel/` imports anything from UmbraDB, so the server module and the client use them
-unchanged. The server module and the client come later.
+unchanged. The client comes later.
 
 ## Running it
 
 From the repository's root:
 
 ```sh
-npm run typecheck                                   # includes this folder (tsconfig.json here)
+npm run typecheck                                   # includes this folder (tsconfig.json here, server/tsconfig.json)
 npx vitest run examples/private-shielded-sync       # the tests below
 node examples/private-shielded-sync/bench/micro.ts  # micro-benchmarks, JSON under bench/results/
 examples/private-shielded-sync/kernel/build.sh --check   # rebuilds the kernel in Docker, compares with the committed one
@@ -61,6 +63,81 @@ const batch = await buildQueries(table, columns);                             //
 const values = await decodeAnswers(setupMatrix(setupFile, table.rows), batch, answers);
 const records = values.map((v, k) => columnRecords(table, v)[positionOf(positions[k], table.perColumn).slot]);
 ```
+
+## Server module (`server/`)
+
+`server/module.ts` exports `pssModule`, a public-side module (`private-shielded-sync`) that requires `ledger-events`,
+`ledger-state`, `blocks` and `config`, owns no tables and declares `startsMidChain: true`, so it can be added to a
+database that is already synced, above its cursor. A configuration file imports it by path; `umbradb` resolves through
+the repository's own package name, so a built checkout (`npm ci && npm run build`) serves it.
+
+| File | Does |
+|---|---|
+| `declaration.ts`, `module.ts` | The declaration (only types from `umbradb`) and `defineModule` of it |
+| `settings.ts` | The settings schema |
+| `zswap-index.ts`, `sql.ts` | The in-memory index of outputs (by tree position) and Zswap nullifiers, and its reads |
+| `tree.ts` | The commitment tree with the ledger's rules: leaves, block roots, lower paths, incremental trees, the stored root's decoding |
+| `build.ts`, `build-worker.ts`, `build-host.ts` | The snapshot builder, its worker thread, and the per-step measurements |
+| `store.ts` | The data directory |
+| `tail.ts` | The tail's tree and body |
+| `server.ts` | Points, snapshots, tail, routes, logging |
+
+**How it works.** At start (`on-start-db`) it reads every stored `zswap-output` and `zswap-input` row of
+`core_ledger_state.events` into memory; after each committed height it adds that height's events, taken from the
+`ledger-events` and `ledger-state` items. Positions must be dense. A snapshot is built at a committed height S in a
+worker thread from that index: the outputs at or below S must be exactly the core's `zswap_first_free` at S, and the
+tree's root must equal the core's `zswap_root` at S, else the build fails and nothing is published. The latest snapshot
+and the one before it are kept (and loaded again at start); the latest one's PIR tables are held in memory. The tail
+(everything after S) is kept after each height, its root checked against the core's. A fault in the module is logged
+and refuses builds or tails with its reason; it never halts the core's processing.
+
+**Settings** (all `operational` but the secret):
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `dataDir` | required | Where snapshots are written; relative to the process's working directory |
+| `pathSplit` | 16 | k, 0–20: the tree is cut k levels above the leaves; read records carry k lower siblings |
+| `queriesPerCall` | 32 | Vectors in every query call |
+| `snapshotEvery` | 0 | Build at every height that is a multiple of this while the node's finalized head is less than this many heights ahead; 0: only on request |
+| `adminSecret` | none | `secret`, 16 characters or more: the admin routes need `Authorization: Bearer <secret>`; without one they answer 403 |
+| `threads` | 0 | Threads for the PIR multiplication (answers and setup data); 0: one fewer than the CPUs, at most 8 |
+
+**Routes** (all under `/pss/v1`; integers little-endian; errors are `{ "error": { "code", "message" } }`):
+
+| Route | Answer |
+|---|---|
+| `GET /manifest` | The manifest's canonical JSON bytes; `Pss-Snapshot-Id` = its SHA-256 (the snapshot identifier). 503 `no-snapshot` before the first |
+| `GET /blob/<digest>` | An artifact of the latest or previous snapshot (or a manifest by the snapshot identifier), streamed with `Range` (206, 416), `ETag`, `Cache-Control: immutable`. 404 otherwise |
+| `GET /tail` | Header (132 bytes: `PSST`, version, snapshot id, height, block hash, `first_free`, root, four section lengths), then the commitments of positions T0 … F − 1 (32 each), the outputs from F on (257 each: flags, commitment, ciphertext), the nullifiers spent after S (40 each), the current roots of the blocks from T0's on (32 each) |
+| `POST /query/read`, `POST /query/nullifier` | Body `application/octet-stream`: `PSSQ`, version, snapshot id, count = `queriesPerCall`, count × C values; answer `PSSA`, version, snapshot id, count, count × R values. 409 `snapshot-replaced` (with `snapshot`) for another snapshot, 400 for another count or length, 415 for another content type |
+| `POST /admin/snapshot` | JSON `{ "height"? }` (default: the latest indexed height; not below the served snapshot's): 202 and the build starts; 409 while one runs |
+| `GET /admin/snapshot` | The index, the tip, the served and previous snapshots, the running and last build |
+
+Each request is logged as one JSON line on stdout (`event: "request"`: route, status, body and answer lengths, range,
+milliseconds), never its body; builds, loads and faults are logged the same way.
+
+**Data directory.** `snapshots/<id>/` holds `manifest.json`, each artifact as the file named by its SHA-256, and
+`build-stats.json`: per step (`scan`, `tree`, `readTable`, `readSetup`, `nullifierTable`, `nullifierSetup`,
+`manifest`) the duration, the artifact's size, the tree's hashes per second, and the process's peak resident memory
+while the step ran; the index's load at start; the process's peak. `builds/` holds builds in progress (removed at
+start).
+
+**Running it on Preprod** with `run/sync.mjs` (the database already synced by the same script; the module joins above
+the cursor):
+
+```sh
+cat > pss.json <<'JSON'
+{ "dataDir": "pss-data", "pathSplit": 16, "queriesPerCall": 32, "snapshotEvery": 0, "adminSecret": "<16+ characters>", "threads": 8 }
+JSON
+PSS_NODE_WS=ws://192.168.100.82:9944 node examples/private-shielded-sync/run/sync.mjs up --label <name> --out <dir> \
+  --build <built checkout> --module <built checkout>/examples/private-shielded-sync/server/module.ts#pssModule \
+  --module-config pss.json
+curl -X POST -H "Authorization: Bearer <secret>" -H "Content-Type: application/json" -d '{}' \
+  http://<api>/pss/v1/admin/snapshot
+```
+
+`sync.mjs config` (same arguments, plus `--module-start`) writes the configuration without starting anything, for
+`node <checkout>/dist/cli/main.js config check <dir>/umbradb.config.ts`.
 
 ## PIR library (`pir/`)
 
@@ -188,6 +265,10 @@ on arm64.
 | `test/pir.test.ts` | Cell encoding; grid shape; table file; noise check; A against AES directly; Gaussian error statistics; PIR read equals direct read for random tables and positions, every position of a table, a 705-byte table across threads, an empty table; two queries for one column differ in every value; the multiply interface. |
 | `test/buckets.test.ts` | Nullifier records; bucket bits; sorted, padded buckets; the `bucketBits` choice against brute force; PIR lookups of present and absent nullifiers equal direct lookups. |
 | `test/wire.test.ts` | Query, answer and tail formats with their strict checks; record layouts; the manifest's canonical form and identifier. |
+| `test/server-tree.test.ts` | The tree's roots against the vendored ledger's stored `zswap_root` (k 0–3, 16, 20); incremental, block and tail trees against a naive recursion of the ledger's rules. |
+| `test/server-build.test.ts` | The builder on real v9 ledger events (`test/server-chain.ts`): manifest, scan file, block roots, every read record and nullifier by PIR, determinism, a wrong root or `first_free`, dense positions, the worker thread, an empty chain. |
+| `test/server-module.test.ts` | The module in UmbraDB's real process on PostgreSQL 18 over a tape of the same chain: story 1, the tail, both query routes with a PIR round trip, refusals, the admin guard, builds on request (a changed stored root fails), pruning, logging, a restart, joining a synced database. |
+| `test/server-config.test.ts` | `run/sync.mjs config` and `umbradb config check` on a built checkout (type check with erasable syntax, evaluation, settings), and a negative control. |
 
 Fixtures (`test/fixtures/`): `entries.bin`, `pads.bin`, `mine.bin`, `scalar.bin` and `sample.txt` are 16,384 scan
 entries made with the ledger's `encrypt` (about one in a thousand to the test key), the ledger's value for each, which
