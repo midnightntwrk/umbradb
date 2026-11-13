@@ -128,6 +128,12 @@
   .math .m.secret { border-color: var(--secret); } .math .m.public { border-color: var(--public); } .math .m.sent { border-color: var(--sent); }
   .work { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; background: var(--soft); border-radius: 6px; padding: 6px 9px; margin-top: 6px; line-height: 1.6; }
   .work .r { color: var(--muted); }
+  .big { font: 600 20px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .big .who { display: inline-block; min-width: 150px; font: 700 11px/1 system-ui, sans-serif; letter-spacing: .05em; text-transform: uppercase; vertical-align: 4px; }
+  .big .who.w { color: var(--wallet); } .big .who.s { color: var(--server); }
+  .big .why { font: 400 13px/1.4 system-ui, sans-serif; color: var(--muted); margin: 0 0 6px 150px; }
+  .big .cont { padding-left: 150px; }
+  .v-server { color: var(--server); }
   .claim { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; font-size: 14px; background: var(--soft); }
 
   .gpu-tag { display: inline-block; background: var(--gpu); color: #fff; font: 600 10px/16px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .06em; padding: 0 6px; border-radius: 3px; cursor: help; vertical-align: 2px; }
@@ -204,16 +210,16 @@
       <tr><th style="width: 32%">Mechanism</th><th style="width: 18%">Steps</th><th>Why the server learns nothing</th></tr>
       <tr><td><b>The same download for every wallet</b>: the manifest, the scan file, the block roots, the setup data, the tail</td><td>2 (files), 6 (tail)</td><td>What is downloaded does not depend on the wallet. The server sees "someone downloaded the snapshot", as from every other wallet.</td></tr>
       <tr><td><b>Local trial decryption</b> of every output's scan entry</td><td>3 (scan)</td><td>Nothing is sent. The wallet tests all entries with its own key, on its own device.</td></tr>
-      <tr><td><b>Private information retrieval (SimplePIR)</b>, with a fixed number of query vectors per call</td><td>4 (records), 5 (nullifiers)</td><td>Each query vector hides the column it asks for behind a mask that only the wallet can remove, because only the wallet knows the secret the mask is made from (the equation, part by part: <a data-to="s-pir"></a>). Every call has the same number of vectors, so the count says nothing either.</td></tr>
+      <tr><td><b>Private information retrieval (SimplePIR)</b>, with a fixed number of query vectors per call</td><td>4 (records), 5 (nullifiers)</td><td>Each query vector hides the column it asks for behind a mask that only the wallet can remove, because only the wallet knows the secret the mask is made from (SimplePIR, explained from <a data-to="s-pir"></a>). Every call has the same number of vectors, so the count says nothing either.</td></tr>
     </table>
     <div class="claim">The server still multiplies its whole table by each vector and sends back an answer; only the wallet, which holds s, can turn that answer into the column it asked for.</div>
   </div>
 </section>
 
-<section class="slide" id="s-pir" data-step="" data-title="The SimplePIR equation, part by part">
-  <div class="top">The approach</div>
-  <h2>The SimplePIR equation, part by part</h2>
-  <p class="lead">To ask for one column of the server's table without saying which, the wallet sends a query vector q, one number per table column:</p>
+<section class="slide" id="s-pir" data-step="pir" data-title="SimplePIR: the query, part by part">
+  <div class="top">SimplePIR · 1 of 2 · the query</div>
+  <h2>SimplePIR: the query, part by part</h2>
+  <p class="lead">SimplePIR (Henzinger et al., USENIX Security 2023) is the private information retrieval scheme used here. To ask for one column of the server's table without saying which, the wallet sends a query vector q, one number per table column:</p>
   <div style="display: flex; justify-content: center; align-items: baseline; gap: 14px; font: 600 28px/1.15 ui-monospace, SFMono-Regular, Menlo, monospace">
     <span class="v-sent">q</span><span>=</span>
     <span><span class="v-public">A</span>·<span class="v-secret">s</span></span><span>+</span>
@@ -232,12 +238,33 @@
       <tr><td class="sym">q</td><td><span class="b sent">sent</span></td><td>the sum, one number per column</td><td>what the server receives</td></tr>
     </table>
     <div style="display: grid; gap: 10px; align-content: start">
-      <div class="box s"><h3>The server: answer = table × q</h3><p class="small">It multiplies its whole table by q, without knowing which column q selects.</p></div>
-      <div class="box w"><h3>The wallet: answer − H·s = Δ·(the wanted column) + small noise</h3><p class="small">H = table × A is public setup data, downloaded once. With its own s the wallet computes H·s and removes the mask; dividing by Δ and rounding drops the noise and leaves the column exactly.</p></div>
       <div class="box"><h3>The example's numbers: where is the 4,096?</h3><div class="math" id="m-pir-demo"></div></div>
+      <div class="box"><h3>Then</h3><p class="small">The server multiplies its table by q, and the wallet removes the mask from the answer: <a data-to="s-roundtrip"></a></p></div>
     </div>
   </div>
   <div class="sees"><div class="sv"><b>Server sees</b>q and the table. q looks random, so it cannot tell which entry carries Δ, and it cannot remove the mask without s.</div><div class="wl"><b>Stays on the wallet</b>s, e and u: the wallet makes all three for each vector and drops them after decoding. Only s removes the mask.</div></div>
+</section>
+
+<section class="slide" id="s-roundtrip" data-step="pir" data-title="SimplePIR: the round trip">
+  <div class="top">SimplePIR · 2 of 2 · the round trip</div>
+  <h2>SimplePIR: the server returns M·q, the wallet removes the mask</h2>
+  <p class="lead">M is the server's table (rows × columns). u has a 1 at one column, so M·u is exactly that column: what the wallet wants.</p>
+  <div class="body" style="grid-template-columns: 1.25fr 1fr">
+    <div class="box big">
+      <div><span class="who w">① Wallet sends</span><span class="v-sent">q</span> = <span class="v-public">A</span>·<span class="v-secret">s</span> + <span class="v-secret">e</span> + <span class="v-public">Δ</span>·<span class="v-secret">u</span></div>
+      <div class="why">s, e, u made up by the wallet (slide before); q looks random.</div>
+      <div><span class="who s">② Server returns</span><span class="v-sent">ans</span> = <span class="v-server">M</span> · <span class="v-sent">q</span></div>
+      <div class="why">Its whole table times q: the same work whatever q asks for. It knows M and q, not s, e or u.</div>
+      <div><span class="who w">③ Wallet unmasks</span><span class="v-sent">ans</span> − <span class="v-public">H</span>·<span class="v-secret">s</span></div>
+      <div class="why">H = M·A is the setup data every wallet downloads; s is the wallet's own.</div>
+      <div class="cont">= <span class="v-server">M</span>·(<span class="v-public">A</span>·<span class="v-secret">s</span> + <span class="v-secret">e</span> + <span class="v-public">Δ</span>·<span class="v-secret">u</span>) − <span class="v-server">M</span>·<span class="v-public">A</span>·<span class="v-secret">s</span></div>
+      <div class="cont">= <span class="v-public">Δ</span>·(<span class="v-server">M</span>·<span class="v-secret">u</span>) + <span class="v-server">M</span>·<span class="v-secret">e</span></div>
+      <div class="cont">÷ <span class="v-public">Δ</span>, round → <b><span class="v-server">M</span>·<span class="v-secret">u</span></b> &nbsp;<span style="font: 400 14px system-ui, sans-serif">= the wanted column</span></div>
+      <div class="why" style="margin-top: 4px">The mask M·A·s cancels; M·e is small (here at most 3 × 15 × 2 = 90, far below Δ / 2 = 2,048), so rounding drops it.</div>
+    </div>
+    <div class="box"><h3>The same, with the example's numbers (column 0)</h3><div class="math" id="m-roundtrip" style="font-size: 13.5px"></div></div>
+  </div>
+  <div class="sees"><div class="sv"><b>Server sees</b>q, and the ans it computed. Step ③ needs s, which it never gets.</div><div class="wl"><b>Stays on the wallet</b>s, e, u, and the decoded column.</div></div>
 </section>
 
 <section class="slide" id="s-example" data-step="" data-title="The example chain">
@@ -923,6 +950,13 @@
     eq(lbl("A·s + e ="), vec(v0.As.map((x, i) => mod(x + v0.e[i])), "secret"), lbl("+ Δ·u ="), vec(v0.u.map((x) => x * DELTA), "secret", (i) => (v0.u[i] ? "selrow" : "")), lbl("= q ="), vec(v0.q, "sent")) +
     `<div class="lbl">The server gets only q. Without s, nothing shows which number carries the 4,096. (The query worked out in step 4.)</div>`);
 
+  // the round trip slide: ② ans = M·q, ③ unmask, and M·u is the column
+  set("m-roundtrip",
+    eq(lbl("② ans = M·q ="), mat(D, "public"), lbl("·"), vec(v0.q, "sent"), lbl("="), vec(v0.ans, "sent")) +
+    eq(lbl("③ ans − H·s ="), vec(v0.ans, "sent"), lbl("−"), vec(v0.Hs), lbl("="), vec(v0.diff), lbl("÷ Δ, round →"), vec(v0.out, "secret")) +
+    eq(lbl("check: M·u ="), mat(D, "public", (i, j) => (j === 0 ? "selrow" : "")), lbl("·"), vec(v0.u, "secret", (i) => (v0.u[i] ? "selrow" : "")), lbl("="), vecL(D.map((row) => row[0]), ["r0", "r1", "r2"], (i) => i === 2, "secret")) +
+    `<div class="lbl">mod 65,536. Rounding gives ${v0.out.join(", ")}: column 0 of M, which holds r2 = 3, the wallet's record. H·s is worked out entry by entry in step 4.</div>`);
+
   // step 0: A, H; A′, H′
   set("m-setup-read", eq(lbl("seed →"), lbl("A ="), mat(A, "public"), lbl("&nbsp;&nbsp; H = read table × A ="), mat(H, "public")) +
     `<div class="lbl">A: one row per read-table column (3) × n = 2. H: one row per table row (3) × n = 2.</div>`);
@@ -1002,9 +1036,10 @@
     a.textContent = i < 0 ? "?" : `slide ${i + 1} →`;
     a.title = i < 0 ? "" : slides[i].dataset.title;
   }
-  const STEPS = ["0 Snapshot", "1 Keys", "2 Files", "3 Scan", "4 Records", "5 Nullifiers", "6 Tail", "7 Result"];
+  const STEPS = [["pir", "SimplePIR"], ["0", "0 Snapshot"], ["1", "1 Keys"], ["2", "2 Files"], ["3", "3 Scan"], ["4", "4 Records"], ["5", "5 Nullifiers"], ["6", "6 Tail"], ["7", "7 Result"]];
+  const order = (k) => (k === "pir" ? -1 : k === "" ? NaN : Number(k));
   const strip = document.getElementById("strip");
-  strip.innerHTML = STEPS.map((t, i) => `${i ? '<span class="sep">›</span>' : ""}<span class="st" data-step="${i}">${t}</span>`).join("");
+  strip.innerHTML = STEPS.map(([k, t], i) => `${i ? '<span class="sep">›</span>' : ""}<span class="st" data-step="${k}">${t}</span>`).join("");
   strip.addEventListener("click", (e) => {
     const st = e.target.closest(".st");
     if (st) show(slides.findIndex((s) => s.dataset.step === st.dataset.step));
@@ -1018,7 +1053,7 @@
     const step = slides[current].dataset.step;
     strip.querySelectorAll(".st").forEach((el) => {
       el.classList.toggle("on", el.dataset.step === step);
-      el.classList.toggle("done", step !== "" && Number(el.dataset.step) < Number(step));
+      el.classList.toggle("done", order(el.dataset.step) < order(step));
     });
     document.getElementById("count").textContent = `${current + 1} / ${slides.length}`;
     document.getElementById("title").textContent = slides[current].dataset.title;
