@@ -89,6 +89,10 @@
   .math .lbl { color: var(--muted); font-family: system-ui, sans-serif; font-size: 11px; }
   .math td.hit { background: var(--mine); font-weight: 700; }
   .math td.selrow { background: var(--sel); }
+  .ft { border-collapse: collapse; width: 100%; font-size: 11.5px; margin-top: 4px; }
+  .ft th, .ft td { text-align: left; padding: 2px 6px 2px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .ft th { color: var(--muted); font-weight: 500; }
+  .ft td.r { text-align: right; white-space: nowrap; }
   .note { background: var(--chip); border-radius: 6px; padding: 6px 8px; font-size: 11.5px; margin-top: 6px; }
 
   .tooltip { position: fixed; z-index: 10; max-width: 470px; background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.18); padding: 10px 12px; font-size: 12px; pointer-events: none; }
@@ -142,7 +146,7 @@
           <div class="cell">r2</div><div class="cell">r5</div><div class="cell">r8</div>
         </div></div>
       </div>
-      <div class="card s"><div class="t">Nullifier table: buckets by the nullifier's first 2 bits</div>
+      <div class="card s"><div class="t">Nullifier table: buckets by the nullifier's first 2 bits, and its setup data</div>
         <div class="diag buckets">
           <div class="bucket"><div class="h">bucket 0</div><div class="cell">n1</div><div class="cell">n3</div></div>
           <div class="bucket"><div class="h">bucket 1</div><div class="cell">n2</div></div>
@@ -161,6 +165,20 @@
             <div class="blk"><div class="cell">c8</div><div class="cell dim">·</div><div class="cell dim">·</div><div class="cell dim">·</div></div>
           </div>
         </div>
+      </div>
+      <div class="card s"><div class="t">Writes the snapshot: a manifest and 6 files</div>
+        <div class="d">The setup data is built here, with everything else, once per snapshot.</div>
+        <table class="ft">
+          <tr><th>file</th><th>who uses it</th><th class="r">built in</th></tr>
+          <tr><td>scan file</td><td>every wallet downloads it</td><td class="r">4 ms</td></tr>
+          <tr><td>block roots</td><td>every wallet downloads it</td><td class="r">506 ms (tree)</td></tr>
+          <tr><td>read setup <span class="mono">H = read table × A</span></td><td>every wallet downloads it</td><td class="r">951 ms</td></tr>
+          <tr><td>nullifier setup</td><td>every wallet downloads it</td><td class="r">66 ms</td></tr>
+          <tr><td>read table</td><td>the server keeps it, to answer</td><td class="r">56 ms</td></tr>
+          <tr><td>nullifier table</td><td>the server keeps it, to answer</td><td class="r">10 ms</td></tr>
+          <tr><td>manifest</td><td>names the files by SHA-256; fetched first</td><td class="r">2 ms</td></tr>
+        </table>
+        <div class="d" style="margin-top: 4px">Measured on Preprod at height 720,058 (6,861 outputs, 3,910 nullifiers): 1.7 s in all, on the CPU. The read setup is the largest step and grows with the table (hover the gpu tag above).</div>
       </div>
     </div>
   </div>
