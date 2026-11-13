@@ -13,26 +13,142 @@ This folder holds:
 - `shared/`: the wire formats, record layouts and the snapshot manifest;
 - `kernel/`: the scan kernel, a WebAssembly build of the ownership test, decryption and Poseidon on the Midnight
   ledger's own Rust crates, with its Node.js loader and worker pool;
+- `gpu/`: WebGPU versions of the scan and the PIR multiply, byte-equal to the CPU kernels, for Deno and browsers
+  ([`gpu/README.md`](gpu/README.md));
 - `run/sync.mjs`: runs UmbraDB with the module against a node in Docker;
-- `test/`, `bench/`.
+- `bench/`: the benchmark of the whole flow (`bench.ts`, spec §8) and micro-benchmarks (`micro.ts`);
+- `test/`.
 
 Neither `pir/`, `shared/` nor `kernel/` imports anything from UmbraDB, so the server module and the client use them
-unchanged. The client imports nothing from `server/`.
+unchanged. The client imports nothing from `server/`; the benchmark, an operator's tool, imports both.
 
-## Running it
+## Running it end to end
 
-From the repository's root:
+Every command runs from the repository's root, with Node.js 24 and Docker. The placeholders:
+
+- `<node-ws>`: the Midnight node's WebSocket URL (for Preprod, a node of release 2.1.101);
+- `<out>`: a folder outside the repository for the server's configuration, records and snapshots;
+- `<data>`: a folder outside the repository for the client's wallet states, artifact cache and transfer records;
+- `<secrets.env>`: a file outside the repository (mode 600) holding the secrets as environment variables, read only
+  with `node --env-file`:
+
+| Variable | Used by |
+|---|---|
+| `PSS_MNEMONIC_A`, `PSS_MNEMONIC_B`, … | `--wallet A`, `--wallet B`, …: the wallet's 24 words |
+| `PSS_NETWORK` | `address`, `send`; `sync` and `bench.ts` check the manifest names it (`preprod`) |
+| `PSS_NODE_WS`, `PSS_NODE_HTTP` | `send`: the node's WebSocket and JSON-RPC URLs |
+| `PSS_INDEXER_HTTP`, `PSS_INDEXER_WS`, `PSS_BLOCKFROST_PROJECT_ID` | `send`: the indexer the Dust fee wallet reads, and its key (sent only to it, as its `project_id` header) |
+| `PSS_PROOF_SERVER` | `send`: the local proof server (default `http://127.0.0.1:49343`) |
+
+**1. Build and install.** The server runs this checkout's build; the client's Midnight packages are its own:
 
 ```sh
-npm run typecheck                                   # includes this folder (tsconfig.json here, server/tsconfig.json)
-npx vitest run examples/private-shielded-sync       # the tests below
-node examples/private-shielded-sync/bench/micro.ts  # micro-benchmarks, JSON under bench/results/
+npm ci && npm run build
+npm ci --ignore-scripts --prefix examples/private-shielded-sync/client
+```
+
+**2. Start the server**: `umbradb run` with the core modules the module needs and the module itself, PostgreSQL 18
+beside it, both in Docker on one network (`run/sync.mjs`). It syncs the network from height 0 and keeps following it.
+The module's settings are a JSON file; the admin secret is a random string only the operator holds:
+
+```sh
+mkdir -p <out> && chmod 700 <out>
+node -e 'process.stdout.write(require("node:crypto").randomBytes(24).toString("hex"))' > <out>/pss-admin-secret
+node -e 'const fs = require("node:fs"); fs.writeFileSync(process.argv[1] + "/pss.json", JSON.stringify({ dataDir: "pss-data",
+  pathSplit: 16, queriesPerCall: 32, snapshotEvery: 0, threads: 6, adminSecret: fs.readFileSync(process.argv[1] + "/pss-admin-secret", "utf8") }),
+  { mode: 0o600 })' <out>
+PSS_NODE_WS=<node-ws> node examples/private-shielded-sync/run/sync.mjs up --label preprod --out <out> --build "$PWD" \
+  --api-port 10480 --admin-port 10481 \
+  --module "$PWD/examples/private-shielded-sync/server/module.ts#pssModule" --module-config <out>/pss.json
+node examples/private-shielded-sync/run/sync.mjs record --label preprod --out <out> &   # until killed
+curl -s http://127.0.0.1:10481/status                                                    # state, cursor, head
+```
+
+`up` prints (and appends to `<out>/runs.jsonl`) where everything listens: the module API (`api`), the admin endpoints
+(`admin`) and the database (`database`, user `postgres`, database `umbradb`, password in `<out>/pg-password`). The
+containers are `pss-preprod-run` and `pss-preprod-pg`. `record` appends every change of `/status` to
+`<out>/status.jsonl` and the run's output to `<out>/run.log`; it follows one container, so start it again after every
+`up`. A sync of Preprod from height 0 takes about a day.
+
+The module owns no tables and declares `startsMidChain`, so it can also join a database the same script synced
+without it: `sync.mjs down`, then the same `up` with `--module`; it starts above the stored cursor (or at
+`--module-start <height>`). `sync.mjs config` (same arguments) writes `<out>/umbradb.config.ts` without starting
+anything, for `node dist/cli/main.js config check <out>/umbradb.config.ts`.
+
+**3. Build a snapshot** at the latest committed height (or `{"height": h}`), and wait until it is served:
+
+```sh
+A="Authorization: Bearer $(cat <out>/pss-admin-secret)"
+curl -s -X POST -H "$A" -H "Content-Type: application/json" -d '{}' http://127.0.0.1:10480/pss/v1/admin/snapshot
+curl -s -H "$A" http://127.0.0.1:10480/pss/v1/admin/snapshot      # again until "building" is null and "last" is ok
+curl -s http://127.0.0.1:10480/pss/v1/manifest
+```
+
+With `snapshotEvery: N` the module also builds one at every multiple of N once it follows the head.
+
+**4. Sync wallets, read balances, check them against the ledger:**
+
+```sh
+C=examples/private-shielded-sync/client/main.ts
+E=--env-file=<secrets.env>
+D="--data <data> --server http://127.0.0.1:10480"
+node $E $C sync --wallet A $D                 # writes <data>/wallets/A/state.json, prints the balance
+node $E $C sync --wallet B $D --stats <data>/b-stats.json   # … and each step's time, bytes and requests
+node $E $C balance --wallet A --data <data>   # from the local state, no network
+node $E $C address --wallet B                 # mn_shield-addr_preprod1…
+node $E $C cross-check --wallet A --data <data> --db-url postgres://postgres@<database>/umbradb \
+  --db-password-file <out>/pg-password       # replays the stored events with the ledger; exit 1 on a difference
+```
+
+**5. Send** a part of one coin from A to B. Proving needs a local proof server of the network's ledger release (for
+Preprod's ledger 9.1: `midnightntwrk/proof-server:9.0.0`); the fee wallet syncs its Dust through the indexer first
+(minutes):
+
+```sh
+docker run -d --name pss-proof-server -p 127.0.0.1:49343:6300 midnightntwrk/proof-server:9.0.0
+T="--wallet A $D --to $(node $E $C address --wallet B) --token <token type, 64 hex> --amount <base units>"
+node $E $C send $T --dry-run      # sync, coin, path, root checks against the node, spend; no fee wallet
+node $E $C send $T --no-submit    # also the fee wallet, Dust balancing, proving and validation; nothing submitted
+node $E $C send $T                # submits, waits for finality, writes the record under <data>/transfers/
+node $E $C sync --wallet B $D && node $E $C sync --wallet A $D   # B finds the coin; A sees the spend and the change
+```
+
+`--position <i>` picks the coin; without it, the smallest unspent coin of the token that covers the amount.
+
+**6. Benchmark** the whole flow (below, "Benchmarks"):
+
+```sh
+node --expose-gc $E examples/private-shielded-sync/bench/bench.ts run --wallet A --wallet B --generated \
+  --server http://127.0.0.1:10480 --build --admin-secret-file <out>/pss-admin-secret \
+  --pss-data <out>/pss-data --sync-records <out> --status-url http://127.0.0.1:10481/status \
+  --server-container pss-preprod-run \
+  --db-url postgres://postgres@<database>/umbradb --db-password-file <out>/pg-password \
+  --transfer <data>/transfers/<time>.json
+```
+
+**7. Stop:**
+
+```sh
+node examples/private-shielded-sync/run/sync.mjs down --label preprod --out <out>     # the database stays
+node examples/private-shielded-sync/run/sync.mjs destroy --label preprod --out <out>  # run, database, volume, network
+docker rm -f pss-proof-server
+```
+
+## Checks
+
+```sh
+npm run typecheck                                        # includes this folder (tsconfig.json here, server/tsconfig.json)
+npm run typecheck --prefix examples/private-shielded-sync/client   # the client with the wallet SDK (after its install)
+npx vitest run examples/private-shielded-sync --maxWorkers=4       # the tests below
+node examples/private-shielded-sync/bench/micro.ts       # micro-benchmarks, JSON under bench/results/
 examples/private-shielded-sync/kernel/build.sh --check   # rebuilds the kernel in Docker, compares with the committed one
 ```
 
 The `.ts` files run directly under Node.js 24 (its own type stripping): the multiply and scan worker threads load
 `pir/multiply-worker.ts` and `kernel/scan-worker.ts` as they are. So the code here uses only TypeScript that strips to
 JavaScript unchanged (`erasableSyntaxOnly`, `verbatimModuleSyntax`).
+
+## The libraries in code
 
 A server, in outline:
 
@@ -123,22 +239,9 @@ milliseconds), never its body; builds, loads and faults are logged the same way.
 while the step ran; the index's load at start; the process's peak. `builds/` holds builds in progress (removed at
 start).
 
-**Running it on Preprod** with `run/sync.mjs` (the database already synced by the same script; the module joins above
-the cursor):
-
-```sh
-cat > pss.json <<'JSON'
-{ "dataDir": "pss-data", "pathSplit": 16, "queriesPerCall": 32, "snapshotEvery": 0, "adminSecret": "<16+ characters>", "threads": 8 }
-JSON
-PSS_NODE_WS=ws://192.168.100.82:9944 node examples/private-shielded-sync/run/sync.mjs up --label <name> --out <dir> \
-  --build <built checkout> --module <built checkout>/examples/private-shielded-sync/server/module.ts#pssModule \
-  --module-config pss.json
-curl -X POST -H "Authorization: Bearer <secret>" -H "Content-Type: application/json" -d '{}' \
-  http://<api>/pss/v1/admin/snapshot
-```
-
-`sync.mjs config` (same arguments, plus `--module-start`) writes the configuration without starting anything, for
-`node <checkout>/dist/cli/main.js config check <dir>/umbradb.config.ts`.
+**Running it**: steps 2 and 3 of "Running it end to end" above. A module entry in any UmbraDB configuration works the
+same way: import `pssModule` from `server/module.ts` and add `pssModule.entry({ start, config: { dataDir, … } })`
+beside the core entries (`core-chain-events`, `core-block-parsed`, `core-tx-results`, `core-ledger-state`).
 
 ## Client (`client/`)
 
@@ -159,18 +262,10 @@ wallet's mnemonic (`PSS_MNEMONIC_<WALLET>` for `--wallet <WALLET>`, or the varia
 indexer key goes only to the indexer, as its `project_id` header. A generated test wallet can be given as a file holding
 its 32-byte Zswap seed in hex (`--zswap-seed-file`).
 
-```sh
-C=examples/private-shielded-sync/client/main.ts
-E=--env-file=<secrets.env>
-node $E $C sync --wallet A --server http://127.0.0.1:10480            # local state + balance; --stats <file> for timings
-node $E $C balance --wallet A                                          # from the local state, no network
-node $E $C address --wallet B                                          # mn_shield-addr_preprod1…
-node $E $C send --wallet A --to <B's address> --token <hex> --amount 400000000   # one coin; --dry-run, --no-submit
-node $E $C cross-check --wallet A --db-url postgres://postgres@127.0.0.1:58171/umbradb --db-password-file <file>
-```
-
-State and cache live under `--data` (default `~/.pss-client`): `wallets/<label>/state.json` (directory 700, file 600)
-and `cache/<digest>` (artifacts are the same for every wallet, so wallets share it).
+The commands are in steps 4 and 5 of "Running it end to end"; `main.ts help` lists every option. State and cache live
+under `--data` (default `~/.pss-client`): `wallets/<label>/state.json` (directory 700, file 600), `cache/<digest>`
+(artifacts are the same for every wallet, so wallets share it) and `transfers/<time>.json`. `sync --stats <file>` and
+`send`'s record include the process's peak resident memory (`client/memory.ts`).
 
 **`sync`** (spec FR-110–115):
 
@@ -347,6 +442,19 @@ the coin decryption fixtures. Set `PSS_KERNEL_CARGO_CACHE` to a Docker volume na
 runs. A rebuild on an x86-64 host resolves the same image index to its amd64 variant; the output has been checked only
 on arm64.
 
+## GPU kernels (`gpu/`)
+
+`GpuScanner` and `GpuMultiplier` implement the scan's `Scanner` and the PIR library's `Multiplier` on WebGPU, with the
+same outputs and refusals as `ScanPool` and `WorkerMultiplier`. Node has no WebGPU, so the server module and the
+client's command line keep the CPU kernels; Deno and browsers pass a device. One command compares both with the CPU
+on real-sized inputs and writes the timings to `gpu/results/`:
+
+    deno task --config examples/private-shielded-sync/gpu/deno.json check
+
+On an Apple M4 Max the GPU scan takes about 5.4 µs per output against about 69 µs on 8 CPU threads, and a 32-vector
+read call's multiply about 15 ms against about 45 ms. [`gpu/README.md`](gpu/README.md) has the interfaces, the check
+and the measurements.
+
 ## Tests
 
 | File | Covers |
@@ -363,6 +471,7 @@ on arm64.
 | `test/client-fork.test.ts` | Across a ledger 8 → 9 upgrade: ledger 8 coins and spends, a ledger 8 coin spent under ledger 9; the client equals the replay with both packages. |
 | `test/client-cli.test.ts` | With the install: `sync`, `balance`, `address`, `cross-check` (and a negative control) as separate processes. |
 | `test/server-config.test.ts` | `run/sync.mjs config` and `umbradb config check` on a built checkout (type check with erasable syntax, evaluation, settings), and a negative control. |
+| `test/bench-run.test.ts` | The benchmark against the module in the real process (PostgreSQL 18) over the synthetic chain, wallets A, B and C: every cell of spec §8 has a value for the server and each client, and the report renders it; the snapshot's counts and versions; per-step values and the server's times from its log; the naive baseline; the read table at k = 16, 8, 2 and 0 (k 2 gives the served snapshot); the server's view of every request and identical request shapes; the scan by thread count; the transfer row (and a dry-run record); no key, seed, nonce or nullifier in `results.json`; exactly the cells without their input reported missing; `--build`; the command line (`run`, `report --transfer`, with the install); log pairing, speed and formatting rules. |
 
 Fixtures (`test/fixtures/`): `entries.bin`, `pads.bin`, `mine.bin`, `scalar.bin` and `sample.txt` are 16,384 scan
 entries made with the ledger's `encrypt` (about one in a thousand to the test key), the ledger's value for each, which
@@ -372,6 +481,63 @@ commitments, written by `kernel/build.sh --vectors`. `poseidon-constants.json` h
 Poseidon constants (Apache-2.0) for the BigInt reference. Every key in the fixtures is a test key from a fixed seed.
 
 ## Benchmarks
+
+### The whole flow (`bench/bench.ts`, spec §8)
+
+`bench.ts run` runs the flow of spec §1 against a running server for one or more wallets and writes `results.json`
+and `REPORT.md` under `bench/results/<date>-<network>/` (or `--out`): the machine, the software versions, the network,
+the snapshot's height, output and nullifier counts, and a value for every cell of spec §8, for the server and for each
+wallet's client on their own rows (FR-151), then the naive baseline (FR-152), the read table at k = 16, 8 and 0
+(FR-153), the scan by thread count, and what the server observed (FR-154). A cell whose input was not given says so;
+the run's log names the cells still without a value. `bench.ts help` lists every option.
+
+In order, it:
+
+1. with `--build`, asks the server for a snapshot at its latest height (the admin route) and waits until it is served;
+2. reads the manifest, and the snapshot's `build-stats.json` from the module's data directory (`--pss-data`);
+3. syncs each wallet with the client's own `sync()` as a fresh client (an empty cache, its own scan and PIR threads),
+   one after the other, timing each step and sampling the peak memory of its own process and of the server meanwhile;
+4. scans the snapshot's scan file at each `--scan-threads` count;
+5. with `--db-url`: the database's size; the snapshot's stored events read with the module's own query; for each
+   `--path-splits` k, the module's own builder run in-process on them (a temporary directory; the build checks the
+   core's root, and at the served k it reproduces the served snapshot's identifier) and one read call of
+   `queriesPerCall` vectors with client and server in the benchmark's process;
+6. reads the server's request lines (`--server-container`: `docker logs`; or `--server-log <file>`) and pairs each with
+   the client's request; computes the sync's speed from `--sync-records` and reads the transfer from `--transfer`.
+
+| Row of spec §8 | Source |
+|---|---|
+| Chain sync | `--db-url` (size per schema), `--sync-records` (`status.jsonl`: heights per second while syncing, restarts left out) |
+| Read events for a snapshot | The module's query for every Zswap row up to the snapshot height, run by the benchmark (`--db-url`) |
+| Build scan file, tree and paths, read and nullifier tables and setup data | The snapshot's `build-stats.json` (`--pss-data`); without it, the benchmark's own build at the served k |
+| Download, scan, read coins, nullifier lookups, tail, whole `sync` (client) | Each wallet's sync, step by step (`client/sync.ts`'s `onStep`) |
+| Read coins, nullifier lookups (server) | The module's request line for the call (decode, multiply, encode: `--server-container` or `--server-log`); its memory from `docker stats` (`--server-container`) or `ps` (`--server-pid`) |
+| Transfer | The record `send` wrote (`--transfer`); "not run" without it |
+
+The client's memory is the benchmark process's (each wallet runs in it, one after the other; `node --expose-gc` lets it
+collect between wallets). `docker stats` reports the container's memory about every 0.5–1 s, so a call shorter than
+that gets the nearest samples. The results hold wallet labels and counts only: no key, position, value or nullifier.
+
+`bench.ts report <results.json> [--transfer <record>] [--out <dir>]` renders `REPORT.md` again, adding a transfer
+record: the head report can be produced before the transfer and completed after it.
+
+**The Preprod report.** With the sync at the node's finalized head and the transfer of step 5 done:
+
+```sh
+O=<out>                                     # run/sync.mjs's output folder (the patched sync's)
+node --expose-gc --env-file=<secrets.env> examples/private-shielded-sync/bench/bench.ts run \
+  --wallet A --wallet B --generated --server http://127.0.0.1:10480 --network preprod \
+  --build --admin-secret-file $O/pss-admin-secret --pss-data $O/pss-data --sync-records $O \
+  --status-url http://127.0.0.1:10481/status --server-container pss-patched-run \
+  --db-url postgres://postgres@127.0.0.1:58171/umbradb --db-password-file $O/pg-password \
+  --threads 8 --scan-threads 1,2,4,8 --path-splits 16,8,0 \
+  --transfer <data>/transfers/<time>.json
+```
+
+It writes `bench/results/<date>-preprod/`; the log's last line must say that every cell of spec §8 has a value
+(SC-005). Commit that folder.
+
+### Micro-benchmarks (`bench/micro.ts`)
 
 `bench/micro.ts` measures the scan (per entry, per thread count) and, for 10,000, 100,000 and 1,000,000 records of 704
 and 40 bytes, building the grid and its digest, the setup data, the server's answer to 1 and 32 vectors, and the
