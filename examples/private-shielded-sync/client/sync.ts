@@ -52,7 +52,13 @@ export interface SyncOptions {
   readonly previous?: WalletState | null;
   readonly maxAttempts?: number;
   readonly log?: (line: string) => void;
+  /** Told when each step starts and ends (the benchmark measures each step's peak memory with it). */
+  readonly onStep?: (step: SyncStep, phase: "start" | "end") => void;
 }
+
+/** The steps of a sync, in order (spec FR-110; §8's client rows). */
+export const SYNC_STEPS = ["manifest", "downloads", "scan", "read", "decrypt", "nullifier", "tail"] as const;
+export type SyncStep = (typeof SYNC_STEPS)[number];
 
 /** What each step took (spec §8's client rows). Times in milliseconds. */
 export interface SyncStats {
@@ -168,11 +174,13 @@ export async function sync(options: SyncOptions): Promise<SyncResult> {
 async function syncOnce(options: SyncOptions): Promise<SyncResult> {
   const { ledger, keys, http, cache, kernel, scanPool, multiplier } = options;
   const log = options.log ?? (() => {});
+  const step = options.onStep ?? (() => {});
   const hash: Hash2 = (a, b) => kernel.hash2(a, b)!;
   const firstRequest = http.records.length;
   const started = performance.now();
 
   // 1. Manifest.
+  step("manifest", "start");
   let t = performance.now();
   const served = await http.manifest();
   const idBytes = new Uint8Array(createHash("sha256").update(served.bytes).digest());
@@ -189,8 +197,10 @@ async function syncOnce(options: SyncOptions): Promise<SyncResult> {
   const blockSize = 2 ** k;
   const firstFree = manifest.firstFree;
   log(`manifest ${id.slice(0, 16)}…: height ${manifest.height}, first_free ${firstFree}, k ${k}`);
+  step("manifest", "end");
 
   // 2. Downloads (the same four artifacts for every wallet).
+  step("downloads", "start");
   const a = manifest.artifacts;
   const downloads = {
     scan: await cache.fetch(http, a.scan),
@@ -203,17 +213,23 @@ async function syncOnce(options: SyncOptions): Promise<SyncResult> {
   if (!equalBytes(rootOverBlocks(blockRoots, k, hash), Buffer.from(manifest.root, "hex"))) {
     throw new Error("the snapshot's block roots do not give the manifest's root");
   }
+  step("downloads", "end");
 
   // 3. Scan.
+  step("scan", "start");
   t = performance.now();
   const matches = await scanPool.scan(scanFile, keys.scanSecret);
   const scanStat = { ms: performance.now() - t, entries: firstFree, threads: scanPool.threads, matches: matches.length };
   log(`scan: ${firstFree} entries, ${matches.length} matches, ${Math.round(scanStat.ms)} ms`);
+  step("scan", "end");
 
   // 4. Read the matches by PIR; decrypt and check each.
+  step("read", "start");
   const read = emptyCallStats();
   const readSetup = setupMatrix(cache.read(a.readSetup), a.readTable.rows);
   const records = await readPositions(http, manifest, idBytes, readSetup, matches, multiplier, read);
+  step("read", "end");
+  step("decrypt", "start");
   t = performance.now();
   const coins: CoinRecord[] = [];
   const rejected: RejectedMatch[] = [];
@@ -228,8 +244,10 @@ async function syncOnce(options: SyncOptions): Promise<SyncResult> {
     take(position, checkSnapshotMatch(kernel, keys, entry, record, position % blockSize, blockRoots.subarray(block * NODE_BYTES, (block + 1) * NODE_BYTES)), "snapshot");
   }
   const decryptMs = performance.now() - t;
+  step("decrypt", "end");
 
   // 5. Nullifier lookups by PIR (one full call even with no coin).
+  step("nullifier", "start");
   const nullifierStats = { ...emptyCallStats(), lookups: coins.length };
   const nullifierSetup = setupMatrix(cache.read(a.nullifierSetup), a.nullifierTable.rows);
   const found = await lookupNullifiers(http, manifest, idBytes, nullifierSetup, coins.map((c) => c.nullifier), multiplier, nullifierStats);
@@ -237,8 +255,10 @@ async function syncOnce(options: SyncOptions): Promise<SyncResult> {
     const entry = found.get(coins[i]!.nullifier);
     if (entry) coins[i] = { ...coins[i]!, spent: { height: entry.height, txIndex: entry.txIndex, source: "snapshot" } };
   }
+  step("nullifier", "end");
 
   // 6. The tail.
+  step("tail", "start");
   t = performance.now();
   const tailBytes = await http.tail();
   const tailFetchMs = performance.now() - t;
@@ -276,6 +296,7 @@ async function syncOnce(options: SyncOptions): Promise<SyncResult> {
     if (spent) coins[i] = { ...c, spent: { ...spent, source: "tail" } };
   }
   const tailClientMs = performance.now() - t;
+  step("tail", "end");
 
   // 7. Pending transfers (FR-128): one stays until its spend is seen on chain and its change output is found.
   const byNullifier = new Map(coins.map((c) => [c.nullifier, c]));

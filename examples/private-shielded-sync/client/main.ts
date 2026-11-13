@@ -25,6 +25,7 @@ import { compareWithClient, readZswapEvents, replayZswapEvents } from "./cross-c
 import { PssHttp } from "./http.ts";
 import { keysFromZswapSeed, type WalletKeys } from "./keys.ts";
 import { type Ledger, loadLedger, loadLedgerV8 } from "./ledger.ts";
+import { watchRss } from "./memory.ts";
 import { finalizedHead, zswapRootAt } from "./node-rpc.ts";
 import { loadSdk, type SdkSeeds } from "./sdk-api.ts";
 import { chooseCoin, coinPath, planTransfer } from "./send.ts";
@@ -186,6 +187,7 @@ async function runSync(t: Tools, previous: WalletState | null): Promise<SyncResu
 }
 
 async function cmdSync(): Promise<void> {
+  const memory = watchRss();
   const s = await seeds();
   const t = await tools(s.zswap);
   try {
@@ -194,7 +196,7 @@ async function cmdSync(): Promise<void> {
     const stateBytes = writeState(path, result.state);
     log(`state written to ${path} (${stateBytes} bytes)`);
     if (opt.stats) {
-      writeFileSync(opt.stats, json({ ...result.stats, stateBytes, threads: t.scanPool.threads, server: opt.server, manifest: { height: result.manifest.height, firstFree: result.manifest.firstFree, pathSplit: result.manifest.pathSplit } }));
+      writeFileSync(opt.stats, json({ ...result.stats, stateBytes, peakRssBytes: memory.stop(), threads: t.scanPool.threads, server: opt.server, manifest: { height: result.manifest.height, firstFree: result.manifest.firstFree, pathSplit: result.manifest.pathSplit } }));
     }
     process.stdout.write(`${opt.json ? json(result.state) : formatBalance(result.state)}\n`);
   } finally {
@@ -227,9 +229,11 @@ async function cmdSend(): Promise<void> {
   const nodeHttp = opt["node-http"] ?? env("PSS_NODE_HTTP");
   const nodeWs = opt["node-ws"] ?? env("PSS_NODE_WS");
   const maxLag = Number(opt["max-lag"]);
+  // The transfer row of the benchmark (spec §8) reads the client's peak memory from the record.
+  const memory = watchRss();
   const s = await seeds();
   if (s.all === null && !opt["dry-run"]) throw new Error("send needs the wallet's mnemonic for its Dust fee wallet (or --dry-run)");
-  const record: Record<string, unknown> = { startedAt: new Date().toISOString(), network, token, amount: amount.toString(), recipient: opt.to, timings: {} };
+  const record: Record<string, unknown> = { startedAt: new Date().toISOString(), wallet: label(), network, token, amount: amount.toString(), recipient: opt.to, timings: {} };
   const timings = record.timings as Record<string, number>;
   const t = await tools(s.zswap);
   const sdk = opt["dry-run"] ? null : await loadSdk();
@@ -325,6 +329,7 @@ async function cmdSend(): Promise<void> {
       }
     }
     record.finishedAt = new Date().toISOString();
+    record.peakRssBytes = memory.stop();
     const out = opt.out ?? join(resolve(opt.data), "transfers", `${String(record.startedAt).replace(/[:.]/g, "-")}.json`);
     mkdirSync(join(out, ".."), { recursive: true, mode: 0o700 });
     writeFileSync(out, json(record), { mode: 0o600 });
