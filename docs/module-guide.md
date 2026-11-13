@@ -508,6 +508,22 @@ configSchema: z.object({
   trees' first free indexes and roots); `ledger-events` (every ledger event but contract logs: zswap inputs and
   outputs, deploys, DUST events, …); `segment-results` (per transaction, its outcome and each segment's success);
   `vm-logs` (the contract logs of the applied segments; none on ledger `v8`).
+- **Ledger events.** `ledger-events` is an array of `LedgerEvent` (a type of the package entry), one per event in
+  application order, and `core_ledger_state.events` (a public table) holds the same, one row each keyed
+  `(height, tx_index, event_index)`: `kind`, `logical_segment`, `physical_segment`, `bytes` (the ledger's serialization
+  of the event), and what is read from it — `nullifier` (a zswap input's, a DUST spend's), `commitment` (a zswap
+  output's, a DUST spend's new one), `tree_index` (a zswap output's position in the commitment tree, a DUST spend's
+  commitment index, a DUST initial UTXO's generation index), `contract_address`, and, for a `zswap-output` only:
+  - `evidence` (`ZswapEvidence`): `ciphertext` (the coin encrypted to its recipient), `public` (the coin and
+    recipient in the clear, as system transactions make outputs) or `none` (an output a contract owns); null for every
+    other kind;
+  - `ciphertext`: for `ciphertext` evidence, its 224 bytes, null otherwise: the sender's one-time point in its 32-byte
+    compressed encoding, then six elements, each its 32-byte little-endian integer. Element 0 encrypts 0, which is
+    the recipient's ownership test (point × encryption secret → `k = Poseidon(k*.x, k*.y)`; element 0 = `Poseidon(k,
+    0)`); elements 1–5 encrypt the coin's value, token type and nonce.
+  The table's constraints keep them consistent (`evidence` set exactly for zswap outputs, `ciphertext` exactly for
+  `ciphertext` evidence, 224 bytes). A database synced by a build without these columns is synced again: the
+  migration that adds them refuses one that holds a zswap output.
 - **Earlier states.** The core entry's `retainStates` (default 0) keeps the states of that many blocks before the
   latest. With `ledger-state` required, `retainedStatesOf(p).load(height, read)` loads the state after `height` and
   gives its key and root; outside the window it rejects with `state-not-retained`, which your code may catch.

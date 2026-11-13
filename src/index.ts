@@ -35,7 +35,7 @@ export { contentsHash } from "./library/contents-hash.js";
 export { encodeCanonical, encodeRow } from "./determinism/cbor.js";
 export { cursorTable } from "./helpers/cursor-table.js";
 export { heightVersionedTable } from "./helpers/height-versioned.js";
-export type { LedgerPackage, LedgerTask, ParsedTransaction } from "./ledger/types.js";
+export type { LedgerEvent, LedgerPackage, LedgerTask, ParsedTransaction, ZswapEvidence } from "./ledger/types.js";
 export { type MessagePortLike, messagePortChannel, type PrivateLinkChannel } from "./library/channels.js";
 export { finalizedHeight } from "./library/finalized-height.js";
 export {

@@ -12,8 +12,9 @@ import type { ModuleDeclaration } from "../../src/modules/declaration.js";
  * - `src/backbone/core-ledger-state/sweep.ts` does not exist, and no file under `src/` names the sweep's step, its
  *   reset, its budget, its grey picker or its three tables ({@link SWEEP_NAMES}, as whole words);
  * - the `ledger-state` item's tables are exactly `nodes`, `root_counts`, `states`, `ref_counts`, `unreferenced`;
- * - every part UmbraDB declares, on either side, that has migrations has exactly one, `001`, and the parts that have
- *   none ({@link WITHOUT_MIGRATIONS}) still have none.
+ * - every part UmbraDB declares, on either side, that has migrations has one, `001` (`core-ledger-state` also a later
+ *   `002`, which adds the zswap outputs' evidence), and the parts that have none ({@link WITHOUT_MIGRATIONS}) still have
+ *   none.
  */
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -75,7 +76,7 @@ describe("the runtime sweep removed", () => {
     );
   });
 
-  it("every part UmbraDB declares that has migrations has exactly one, 001, and the parts that have none still have none", () => {
+  it("every part UmbraDB declares that has migrations has one, 001 (core-ledger-state also 002, the zswap outputs' evidence), and the parts that have none still have none", () => {
     const parts = new Map<string, readonly string[]>();
     for (const side of ["public", "private"] as const) {
       for (const part of partsOf(side)) parts.set(part.id, part.migrations.map((migration) => migration.id));
@@ -87,6 +88,6 @@ describe("the runtime sweep removed", () => {
     const without = [...parts].filter(([, ids]) => ids.length === 0).map(([id]) => id).sort();
     expect(without).toEqual(WITHOUT_MIGRATIONS);
     const others = [...parts].filter(([, ids]) => ids.length > 0 && (ids.length !== 1 || ids[0] !== "001"));
-    expect(others.map(([id, ids]) => `${id}: ${ids.join(", ")}`)).toEqual([]);
+    expect(others.map(([id, ids]) => `${id}: ${ids.join(", ")}`)).toEqual(["core-ledger-state: 001, 002"]);
   });
 });
