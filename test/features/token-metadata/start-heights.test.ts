@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { UnresolvedLogSite } from "../../../src/backbone/contract-logs/contract-logs.js";
 import { servedGroups, servedIdentities } from "./served-state.js";
 import { TOKEN_METADATA_API } from "../../../src/features/token-metadata-api/token-metadata-api.js";
-import { record } from "../../../src/features/token-metadata/codec/index.js";
+import { metadataRecord } from "../../../src/features/token-metadata/codec/index.js";
 import { MetadataState, type ObservedEvent } from "./model.js";
 import { FIRST_CONTRACT_LOG_HEIGHTS, TOKEN_METADATA, tokenMetadataWith } from "../../../src/features/token-metadata/token-metadata.js";
 import { miscAtom } from "../../../src/features/token-metadata/log-reader.js";
@@ -56,12 +56,12 @@ const event = (contract: number, domain: number, tokenKind: 1 | 2 | 3, records: 
 
 /** Block i is at height 21 + i (`chains.ts`'s S is 20). */
 const CHAIN: Generated[][][] = [
-  /* 21 */ [[event(1, 1, 1, [record.utf8("name", "Acme"), record.utf8("symbol", "ACME"), record.uint("decimals", 6)])]],
-  /* 22 */ [[{ kind: "invalid", contract: 1, domain: 1 }], [event(2, 1, 3, [record.utf8("name", "Zeta")])]],
+  /* 21 */ [[event(1, 1, 1, [metadataRecord.utf8("name", "Acme"), metadataRecord.utf8("symbol", "ACME"), metadataRecord.uint("decimals", 6)])]],
+  /* 22 */ [[{ kind: "invalid", contract: 1, domain: 1 }], [event(2, 1, 3, [metadataRecord.utf8("name", "Zeta")])]],
   /* 23 */ [],
-  /* 24 */ [[event(1, 1, 1, [record.tombstone("name"), record.tombstone("symbol"), record.tombstone("decimals")])]],
-  /* 25 */ [[event(1, 1, 1, [record.utf8("name", "Acme II"), record.utf8("symbol", "ACME")]), { kind: "foreign", contract: 2 }]],
-  /* 26 */ [[event(1, 2, 2, [record.utf8("symbol", "ACME"), record.uint("decimals", 2)])]],
+  /* 24 */ [[event(1, 1, 1, [metadataRecord.tombstone("name"), metadataRecord.tombstone("symbol"), metadataRecord.tombstone("decimals")])]],
+  /* 25 */ [[event(1, 1, 1, [metadataRecord.utf8("name", "Acme II"), metadataRecord.utf8("symbol", "ACME")]), { kind: "foreign", contract: 2 }]],
+  /* 26 */ [[event(1, 2, 2, [metadataRecord.utf8("symbol", "ACME"), metadataRecord.uint("decimals", 2)])]],
 ];
 const { logs, events } = build(CHAIN);
 const FIRST = 21;

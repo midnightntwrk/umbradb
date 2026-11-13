@@ -31,7 +31,7 @@ export {
   InvalidHeader,
   InvalidRecord,
   PayloadTooLarge,
-  record,
+  metadataRecord,
   recordsSize,
   withdrawRecords,
 } from './encode.js';

@@ -5,7 +5,7 @@ import {
   encodePayload,
   EVENT_NAME,
   type MetadataRecord,
-  record,
+  metadataRecord,
   recordsSize,
   splitMiscData,
   toHex,
@@ -32,10 +32,10 @@ export type Generated =
 const KEYS = ["name", "symbol", "decimals", "standards", "image", "extra"] as const;
 
 const recordArb: fc.Arbitrary<MetadataRecord> = fc.oneof(
-  fc.constantFrom(...KEYS).map((key) => record.tombstone(key)),
-  fc.tuple(fc.constantFrom("name", "symbol", "extra"), fc.constantFrom("Acme", "ACME", "acme", "Zeta Ω", "x".repeat(70))).map(([k, v]) => record.utf8(k, v)),
-  fc.tuple(fc.constantFrom("decimals", "extra"), fc.integer({ min: 0, max: 300 })).map(([k, v]) => record.uint(k, v)),
-  fc.constantFrom(record.utf8("standards", "mip-0004"), record.uri("image", "https://example.com/a.png"), record.bytes("name", Uint8Array.of(1))),
+  fc.constantFrom(...KEYS).map((key) => metadataRecord.tombstone(key)),
+  fc.tuple(fc.constantFrom("name", "symbol", "extra"), fc.constantFrom("Acme", "ACME", "acme", "Zeta Ω", "x".repeat(70))).map(([k, v]) => metadataRecord.utf8(k, v)),
+  fc.tuple(fc.constantFrom("decimals", "extra"), fc.integer({ min: 0, max: 300 })).map(([k, v]) => metadataRecord.uint(k, v)),
+  fc.constantFrom(metadataRecord.utf8("standards", "mip-0004"), metadataRecord.uri("image", "https://example.com/a.png"), metadataRecord.bytes("name", Uint8Array.of(1))),
 );
 
 const generatedArb: fc.Arbitrary<Generated> = fc.oneof(
@@ -84,10 +84,10 @@ function rawOf(g: Generated): Uint8Array {
   let payload: Uint8Array;
   if (g.kind === "foreign") {
     name.set(new TextEncoder().encode("mip-0018:token-metadata[v2]"));
-    payload = encodePayload({ domainSep: bytes32(1), kind: 1 }, [record.utf8("name", "Foreign")]);
+    payload = encodePayload({ domainSep: bytes32(1), kind: 1 }, [metadataRecord.utf8("name", "Foreign")]);
   } else if (g.kind === "invalid") {
     name.set(EVENT_NAME);
-    payload = encodePayload({ domainSep: bytes32(g.domain), kind: 1 }, [record.utf8("name", "Bad")]);
+    payload = encodePayload({ domainSep: bytes32(g.domain), kind: 1 }, [metadataRecord.utf8("name", "Bad")]);
     payload[33 + 1 + 4] = 6;
   } else {
     name.set(EVENT_NAME);

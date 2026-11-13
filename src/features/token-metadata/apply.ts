@@ -142,7 +142,7 @@ async function applyRecords(w: Pick<BlockWriteHandle, "execute" | "query">, toke
 }
 
 /** Writes block `height`'s rejected events and unresolved log sites, and applies its accepted events, in chain order. */
-export async function writeBlock(
+export async function writeTokenMetadata(
   w: Pick<BlockWriteHandle, "execute" | "query">,
   height: bigint,
   logs: readonly ContractLog[],

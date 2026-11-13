@@ -114,7 +114,7 @@ export const KindName = Type.Union([Type.Literal("shielded-utxo"), Type.Literal(
 export type KindName = Type.Static<typeof KindName>;
 
 /** A token with every defined field (up to {@link MAX_TOKEN_FIELDS}), its common fields, group, mark and image. */
-export const Token = Type.Object(
+export const TokenJson = Type.Object(
   {
     contractAddress: Hex32,
     domainSep: Hex32,
@@ -131,10 +131,10 @@ export const Token = Type.Object(
   },
   strict,
 );
-export type Token = Type.Static<typeof Token>;
+export type TokenJson = Type.Static<typeof TokenJson>;
 
 /** The answer: the selected tokens, and for a contract's page the cursor of the next one (else `null`). */
-export const TokensResponse = Type.Object({ items: Type.Array(Token), nextCursor: Type.Union([Type.String(), Type.Null()]) }, strict);
+export const TokensResponse = Type.Object({ items: Type.Array(TokenJson), nextCursor: Type.Union([Type.String(), Type.Null()]) }, strict);
 export type TokensResponse = Type.Static<typeof TokensResponse>;
 
 /** Every error the module answers: a code and a message that never echoes the input. */

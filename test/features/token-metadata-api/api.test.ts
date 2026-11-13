@@ -1,10 +1,10 @@
 import Value from "typebox/value";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { tokenColor } from "../../../src/features/token-metadata/color.js";
-import { DEFAULT_MAX_CONCURRENT_REQUESTS, registerRoutes, route } from "../../../src/features/token-metadata-api/router.js";
+import { DEFAULT_MAX_CONCURRENT_REQUESTS, registerRoutes, typedRoute } from "../../../src/features/token-metadata-api/router.js";
 import { TokensRequest, TokensResponse } from "../../../src/features/token-metadata-api/schemas.js";
 import { encodeCursor, markJson } from "../../../src/features/token-metadata-api/handlers.js";
-import { commonRecords, EVENT_NAME, record, toHex, withdrawRecords } from "../../../src/features/token-metadata/codec/index.js";
+import { commonRecords, EVENT_NAME, metadataRecord, toHex, withdrawRecords } from "../../../src/features/token-metadata/codec/index.js";
 import type { Field } from "../../../src/features/token-metadata/rules.js";
 import type { ApiRegistry } from "../../../src/modules/declaration.js";
 import type { UmbraDBHandle } from "../../../src/library/start-umbradb.js";
@@ -46,7 +46,7 @@ const LOGS = new Map([
   [
     BigInt(S + 1),
     blockLogs(
-      [0, A, eventData(D7, 1, [...commonRecords({ name: "Acme Gold", symbol: "AG", decimals: 6 }), record.uri("image", IMAGE)])],
+      [0, A, eventData(D7, 1, [...commonRecords({ name: "Acme Gold", symbol: "AG", decimals: 6 }), metadataRecord.uri("image", IMAGE)])],
       [0, A, eventData(D7, 2, commonRecords({ name: "Acme Gold (unshielded)", symbol: "AGU", decimals: 6 }))],
       [1, B, eventData(D7, 1, commonRecords({ name: "Only a name" }))],
       [2, C, eventData(D7, 1, commonRecords({ name: "Cee", symbol: "C", decimals: 0 }))],
@@ -262,7 +262,7 @@ describe("BUSY beyond eight requests at once", () => {
     const handlers = new Map<string, Parameters<ApiRegistry["http"]>[2]>();
     let release!: () => void;
     const held = new Promise<void>((resolve) => (release = resolve));
-    const slow = route({ method: "POST", path: "/v1/tokens", body: TokensRequest, response: TokensResponse, handle: async () => (await held, { items: [], nextCursor: null }) });
+    const slow = typedRoute({ method: "POST", path: "/v1/tokens", body: TokensRequest, response: TokensResponse, handle: async () => (await held, { items: [], nextCursor: null }) });
     registerRoutes({ http: (_m, path, handler) => void handlers.set(path, handler), subscription: () => undefined }, "token-metadata-api", [slow]);
     const handler = handlers.get(TOKENS_PATH)!;
     const read = { height: 5n, query: async (sql: string) => (sql.includes("core_block_commit") ? [{ hash: new Uint8Array(32) }] : []) };

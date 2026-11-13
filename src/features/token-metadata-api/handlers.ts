@@ -13,7 +13,7 @@ import type { ReadHandle } from "../../db/api.js";
 import { COMMON_KEY_HEX, type Field as StateField, fieldUsable, IMAGE_KEY_HEX, parseStandards, tokenMark } from "../token-metadata/rules.js";
 import { decodeUtf8, fromHex, toHex } from "../token-metadata/codec/index.js";
 import { hasColor } from "../token-metadata/color.js";
-import { commonFields, keyOf, markInputs, type MarkInputs, symbolGroup, type TokenKey, tokenFields, tokensOfColors, tokensOfContract, tokensOfDomain } from "./sql.js";
+import { commonFields, tokenMapKey, markInputs, type MarkInputs, symbolGroup, type TokenKey, tokenFields, tokensOfColors, tokensOfContract, tokensOfDomain } from "./sql.js";
 import { badRequest } from "./router.js";
 import {
   type Common,
@@ -28,7 +28,7 @@ import {
   MAX_MARK_REASONS,
   MAX_MARK_UNRESOLVED,
   MAX_TOKEN_FIELDS,
-  type Token,
+  type TokenJson,
   type TokensRequest,
   type TokensResponse,
 } from "./schemas.js";
@@ -100,14 +100,14 @@ export function markJson(common: ReadonlyMap<string, StateField>, inputs: MarkIn
 const NO_MARK_INPUTS: MarkInputs = { count: 0, reasons: [], unresolved: { count: 0, positions: [] } };
 
 /** The full answer object of each token in `keys`, in that order. */
-async function tokensOf(read: ReadHandle, keys: readonly TokenKey[]): Promise<Token[]> {
+async function tokensOf(read: ReadHandle, keys: readonly TokenKey[]): Promise<TokenJson[]> {
   const fields = await tokenFields(read, keys, MAX_TOKEN_FIELDS);
   const commons = await commonFields(read, keys);
   const marks = await markInputs(read, keys.map((k) => k.contractAddress), MAX_MARK_REASONS, MAX_MARK_UNRESOLVED);
   const groups = new Map<string, Group | null>();
-  const out: Token[] = [];
+  const out: TokenJson[] = [];
   for (const k of keys) {
-    const common = commons.get(keyOf(k))!;
+    const common = commons.get(tokenMapKey(k))!;
     const symbol = common.get(COMMON_KEY_HEX.symbol);
     let group: Group | null = null;
     if (symbol !== undefined && symbol.usable === true) {
@@ -123,7 +123,7 @@ async function tokensOf(read: ReadHandle, keys: readonly TokenKey[]): Promise<To
       }
       group = groups.get(at) ?? null;
     }
-    const own = fields.get(keyOf(k))!;
+    const own = fields.get(tokenMapKey(k))!;
     out.push({
       contractAddress: k.contractAddress,
       domainSep: k.domainSep,

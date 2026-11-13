@@ -4,7 +4,7 @@
  */
 
 import type { BlockWriteHandle, SchemaWriteHandle } from "../../db/api.js";
-import { SCHEMA } from "./schema.js";
+import { TOKEN_METADATA_SCHEMA } from "./schema.js";
 
 /** A token: its id (the hash of domain separator and contract), kind, contract and domain separator. */
 export interface TokenRef {
@@ -46,25 +46,25 @@ type Write = Pick<BlockWriteHandle, "execute" | "query">;
  */
 export const STATEMENTS = Object.freeze({
   /** One rejected event or unresolved log site. */
-  insertEvent: `INSERT INTO ${SCHEMA}.events (height, tx_index, event_index, contract_address, classification, reason)
+  insertEvent: `INSERT INTO ${TOKEN_METADATA_SCHEMA}.events (height, tx_index, event_index, contract_address, classification, reason)
      VALUES ($1, $2, $3, $4, $5, $6)`,
   /** A token's row, if it has none. */
-  insertToken: `INSERT INTO ${SCHEMA}.tokens (id, kind, contract_address, domain_sep) VALUES ($1, $2, $3, $4)
+  insertToken: `INSERT INTO ${TOKEN_METADATA_SCHEMA}.tokens (id, kind, contract_address, domain_sep) VALUES ($1, $2, $3, $4)
      ON CONFLICT (id, kind) DO NOTHING`,
   /** A token's current usable symbol, or null. */
-  setTokenSymbol: `UPDATE ${SCHEMA}.tokens SET symbol = $3 WHERE id = $1 AND kind = $2`,
+  setTokenSymbol: `UPDATE ${TOKEN_METADATA_SCHEMA}.tokens SET symbol = $3 WHERE id = $1 AND kind = $2`,
   /** Deletes a token (its fields are gone already). */
-  deleteToken: `DELETE FROM ${SCHEMA}.tokens WHERE id = $1 AND kind = $2`,
+  deleteToken: `DELETE FROM ${TOKEN_METADATA_SCHEMA}.tokens WHERE id = $1 AND kind = $2`,
   /** Whether a token has a field. */
-  tokenHasFields: `SELECT 1 AS one FROM ${SCHEMA}.fields WHERE token_id = $1 AND kind = $2 LIMIT 1`,
+  tokenHasFields: `SELECT 1 AS one FROM ${TOKEN_METADATA_SCHEMA}.fields WHERE token_id = $1 AND kind = $2 LIMIT 1`,
   /** Sets one field's current value, inserting or replacing its row. */
-  setField: `INSERT INTO ${SCHEMA}.fields (token_id, kind, key, val_type, value, uint_value, usable, set_height, set_tx,
+  setField: `INSERT INTO ${TOKEN_METADATA_SCHEMA}.fields (token_id, kind, key, val_type, value, uint_value, usable, set_height, set_tx,
       set_event, set_record) VALUES ($1, $2, $3, $4, $5, $6::numeric, $7, $8, $9, $10, $11)
      ON CONFLICT (token_id, kind, key) DO UPDATE SET val_type = EXCLUDED.val_type, value = EXCLUDED.value,
       uint_value = EXCLUDED.uint_value, usable = EXCLUDED.usable, set_height = EXCLUDED.set_height,
       set_tx = EXCLUDED.set_tx, set_event = EXCLUDED.set_event, set_record = EXCLUDED.set_record`,
   /** Deletes one field. */
-  deleteField: `DELETE FROM ${SCHEMA}.fields WHERE token_id = $1 AND kind = $2 AND key = $3`,
+  deleteField: `DELETE FROM ${TOKEN_METADATA_SCHEMA}.fields WHERE token_id = $1 AND kind = $2 AND key = $3`,
   /** S, the database's first height (the core's one-row table). */
   databaseStart: "SELECT start_height FROM core_chain.identity WHERE id = 1",
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { tokenColor } from "../../../src/features/token-metadata/color.js";
-import { commonRecords, record, toHex, withdrawRecords } from "../../../src/features/token-metadata/codec/index.js";
+import { commonRecords, metadataRecord, toHex, withdrawRecords } from "../../../src/features/token-metadata/codec/index.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../../runner/process-backends.js";
 import { blockLogs, contract, domain, eventData, post, serve, TOKENS_PATH } from "../token-metadata/harness.js";
 
@@ -34,10 +34,10 @@ const LOGS = new Map([
     blockLogs(
       [0, X, eventData(D, 1, COMMON)],
       [0, X, eventData(D, 3, COMMON)],
-      [1, Y, eventData(D, 1, [...commonRecords({ name: "Good", symbol: "G", decimals: 6, standards: "a b" }), record.bytes("image_sha256", new Uint8Array(32).fill(1))])],
+      [1, Y, eventData(D, 1, [...commonRecords({ name: "Good", symbol: "G", decimals: 6, standards: "a b" }), metadataRecord.bytes("image_sha256", new Uint8Array(32).fill(1))])],
       [2, Z, eventData(D, 1, commonRecords({ name: NAME_70, symbol: SYMBOL_15 }))],
       [2, Z, eventData(domain(2), 1, commonRecords({ symbol: "ABCDEFGHIJKLXYZ" }))],
-      [3, U, eventData(D, 1, [record.utf8("foo", "x")])],
+      [3, U, eventData(D, 1, [metadataRecord.utf8("foo", "x")])],
     ),
   ],
   [
@@ -48,10 +48,10 @@ const LOGS = new Map([
         1,
         Y,
         eventData(D, 1, [
-          record.utf8("name", ""),
-          record.utf8("decimals", "6"),
-          record.utf8("standards", "a  b"),
-          record.bytes("image_sha256", new Uint8Array(31).fill(1)),
+          metadataRecord.utf8("name", ""),
+          metadataRecord.utf8("decimals", "6"),
+          metadataRecord.utf8("standards", "a  b"),
+          metadataRecord.bytes("image_sha256", new Uint8Array(31).fill(1)),
         ]),
       ],
     ),

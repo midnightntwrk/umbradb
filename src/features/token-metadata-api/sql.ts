@@ -7,7 +7,7 @@
  */
 
 import type { ReadHandle } from "../../db/api.js";
-import { SCHEMA } from "../token-metadata/schema.js";
+import { TOKEN_METADATA_SCHEMA } from "../token-metadata/schema.js";
 import { COMMON_KEY_HEX, type Field, firstCharacters, IMAGE_KEY_HEX, lengthLimited, symbolGroups } from "../token-metadata/rules.js";
 import { decodeUtf8, fromHex, toHex } from "../token-metadata/codec/index.js";
 
@@ -19,7 +19,7 @@ export interface TokenKey {
   readonly domainSep: string;
 }
 
-export const keyOf = (k: Pick<TokenKey, "id" | "kind">): string => `${k.id}/${k.kind}`;
+export const tokenMapKey = (k: Pick<TokenKey, "id" | "kind">): string => `${k.id}/${k.kind}`;
 const bytes = (hex: string): Uint8Array => fromHex(hex);
 const num = (v: unknown): number => Number(v);
 const tokenKeyOf = (r: Record<string, unknown>): TokenKey => ({
@@ -37,7 +37,7 @@ const FIELD_COLUMNS = `f.token_id AS id, f.kind::int AS kind, f.key, f.val_type:
 const BY_IDS = "unnest($1::bytea[], $2::int[]) AS i(id, k)";
 const firstOfContract = (classification: "reject" | "unresolved", columns: string) =>
   `SELECT c.address, ${columns} FROM unnest($1::bytea[]) AS c(address) CROSS JOIN LATERAL (
-     SELECT reason, height, tx_index, event_index FROM ${SCHEMA}.events e
+     SELECT reason, height, tx_index, event_index FROM ${TOKEN_METADATA_SCHEMA}.events e
      WHERE e.contract_address = c.address AND e.classification = '${classification}'
      ORDER BY height, tx_index, event_index LIMIT $2) e
    ORDER BY c.address, e.height, e.tx_index, e.event_index`;
@@ -45,46 +45,46 @@ const firstOfContract = (classification: "reject" | "unresolved", columns: strin
 /** Every statement the API sends, by name; each is static (`$n` parameters only). */
 export const STATEMENTS = Object.freeze({
   /** The kind 1 and 2 tokens of colors `$1`: a token's id is its color (`tokens`' primary key). */
-  tokensOfColors: `SELECT ${TOKEN_COLUMNS} FROM ${SCHEMA}.tokens t WHERE t.id = ANY($1::bytea[]) AND t.kind IN (1, 2)
+  tokensOfColors: `SELECT ${TOKEN_COLUMNS} FROM ${TOKEN_METADATA_SCHEMA}.tokens t WHERE t.id = ANY($1::bytea[]) AND t.kind IN (1, 2)
      ORDER BY t.contract_address, t.domain_sep, t.kind`,
   /** The first `$1` tokens of contract `$2`, by (domainSep, kind) (`tokens_contract_idx`). */
-  tokensOfContract: `SELECT ${TOKEN_COLUMNS} FROM ${SCHEMA}.tokens t WHERE t.contract_address = $2
+  tokensOfContract: `SELECT ${TOKEN_COLUMNS} FROM ${TOKEN_METADATA_SCHEMA}.tokens t WHERE t.contract_address = $2
      ORDER BY t.domain_sep, t.kind LIMIT $1`,
   /** The same after (domainSep `$3`, kind `$4`). */
-  tokensOfContractAfter: `SELECT ${TOKEN_COLUMNS} FROM ${SCHEMA}.tokens t
+  tokensOfContractAfter: `SELECT ${TOKEN_COLUMNS} FROM ${TOKEN_METADATA_SCHEMA}.tokens t
      WHERE t.contract_address = $2 AND (t.domain_sep, t.kind) > ($3::bytea, $4::smallint)
      ORDER BY t.domain_sep, t.kind LIMIT $1`,
   /** The tokens of (contract `$1`, domainSep `$2`) of kinds `$3`. */
-  tokensOfDomain: `SELECT ${TOKEN_COLUMNS} FROM ${SCHEMA}.tokens t
+  tokensOfDomain: `SELECT ${TOKEN_COLUMNS} FROM ${TOKEN_METADATA_SCHEMA}.tokens t
      WHERE t.contract_address = $1 AND t.domain_sep = $2 AND t.kind = ANY($3::smallint[]) ORDER BY t.kind`,
   /** The first `$3` fields of each token, in key byte order. */
   tokenFields: `SELECT ${FIELD_COLUMNS} FROM ${BY_IDS} CROSS JOIN LATERAL (
-       SELECT * FROM ${SCHEMA}.fields WHERE token_id = i.id AND kind = i.k ORDER BY key LIMIT $3) f
+       SELECT * FROM ${TOKEN_METADATA_SCHEMA}.fields WHERE token_id = i.id AND kind = i.k ORDER BY key LIMIT $3) f
      ORDER BY f.token_id, f.kind, f.key`,
   /** How many fields each token has. */
   tokenFieldCounts: `SELECT i.id, i.k AS kind,
-       (SELECT count(*) FROM ${SCHEMA}.fields WHERE token_id = i.id AND kind = i.k)::int AS n
+       (SELECT count(*) FROM ${TOKEN_METADATA_SCHEMA}.fields WHERE token_id = i.id AND kind = i.k)::int AS n
      FROM ${BY_IDS}`,
   /** The common fields (keys `$3`) of each token, in the order they were last set. */
   commonFields: `SELECT ${FIELD_COLUMNS} FROM ${BY_IDS}
-     JOIN ${SCHEMA}.fields f ON f.token_id = i.id AND f.kind = i.k AND f.key = ANY($3::bytea[])
+     JOIN ${TOKEN_METADATA_SCHEMA}.fields f ON f.token_id = i.id AND f.kind = i.k AND f.key = ANY($3::bytea[])
      ORDER BY f.token_id, f.kind, f.set_height, f.set_tx, f.set_event, f.set_record`,
   /** Each contract's rejected and unresolved event counts. */
   markCounts: `SELECT c.address,
-       (SELECT count(*) FROM ${SCHEMA}.events e WHERE e.contract_address = c.address AND e.classification = 'reject')::int AS rejected,
-       (SELECT count(*) FROM ${SCHEMA}.events e WHERE e.contract_address = c.address AND e.classification = 'unresolved')::int AS unresolved
+       (SELECT count(*) FROM ${TOKEN_METADATA_SCHEMA}.events e WHERE e.contract_address = c.address AND e.classification = 'reject')::int AS rejected,
+       (SELECT count(*) FROM ${TOKEN_METADATA_SCHEMA}.events e WHERE e.contract_address = c.address AND e.classification = 'unresolved')::int AS unresolved
      FROM unnest($1::bytea[]) AS c(address)`,
   /** Each contract's first `$2` rejection reasons. */
   markReasons: firstOfContract("reject", "e.reason"),
   /** Each contract's first `$2` unresolved positions. */
   markPositions: firstOfContract("unresolved", "e.height::text AS height, e.tx_index::int AS tx_index, e.event_index::int AS event_index"),
   /** How many tokens of contract `$1` have the whole usable symbol `$2` (`tokens_symbol_idx`). */
-  groupCount: `SELECT count(*)::int AS n FROM ${SCHEMA}.tokens WHERE contract_address = $1 AND symbol = $2`,
+  groupCount: `SELECT count(*)::int AS n FROM ${TOKEN_METADATA_SCHEMA}.tokens WHERE contract_address = $1 AND symbol = $2`,
   /** The first `$3` of them, by (domainSep, kind). */
-  groupMembers: `SELECT domain_sep, kind::int AS kind FROM ${SCHEMA}.tokens WHERE contract_address = $1 AND symbol = $2
+  groupMembers: `SELECT domain_sep, kind::int AS kind FROM ${TOKEN_METADATA_SCHEMA}.tokens WHERE contract_address = $1 AND symbol = $2
      ORDER BY domain_sep, kind LIMIT $3`,
   /** The tokens of contract `$1` whose usable symbol starts with `$2` (below `$3`), unordered: `symbolGroups` orders them. */
-  groupPrefix: `SELECT domain_sep, kind::int AS kind, symbol FROM ${SCHEMA}.tokens
+  groupPrefix: `SELECT domain_sep, kind::int AS kind, symbol FROM ${TOKEN_METADATA_SCHEMA}.tokens
      WHERE contract_address = $1 AND symbol >= $2 AND symbol < $3`,
 });
 
@@ -104,7 +104,7 @@ export function fieldOf(r: Record<string, unknown>): Field {
 }
 
 /** The row key of a field row: its token's id and kind. */
-const fieldKeyOf = (r: Record<string, unknown>): string => keyOf({ id: toHex(r.id as Uint8Array), kind: num(r.kind) });
+const fieldKeyOf = (r: Record<string, unknown>): string => tokenMapKey({ id: toHex(r.id as Uint8Array), kind: num(r.kind) });
 
 // ── Selecting tokens ─────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -132,7 +132,7 @@ export async function tokensOfDomain(read: ReadHandle, contract: string, domainS
 
 /** The fields of each token, the first `limit` in key byte order, and how many it has: two statements. */
 export async function tokenFields(read: ReadHandle, keys: readonly TokenKey[], limit: number): Promise<Map<string, { fields: Field[]; count: number }>> {
-  const out = new Map(keys.map((k) => [keyOf(k), { fields: [] as Field[], count: 0 }]));
+  const out = new Map(keys.map((k) => [tokenMapKey(k), { fields: [] as Field[], count: 0 }]));
   if (keys.length === 0) return out;
   for (const r of await read.query(STATEMENTS.tokenFields, [...idsParams(keys), limit])) out.get(fieldKeyOf(r))!.fields.push(fieldOf(r));
   for (const r of await read.query(STATEMENTS.tokenFieldCounts, idsParams(keys))) out.get(fieldKeyOf(r))!.count = num(r.n);
@@ -141,7 +141,7 @@ export async function tokenFields(read: ReadHandle, keys: readonly TokenKey[], l
 
 /** The common fields of each token (for its mark), in the order they were last set: one statement. */
 export async function commonFields(read: ReadHandle, keys: readonly TokenKey[]): Promise<Map<string, Map<string, Field>>> {
-  const out = new Map(keys.map((k) => [keyOf(k), new Map<string, Field>()]));
+  const out = new Map(keys.map((k) => [tokenMapKey(k), new Map<string, Field>()]));
   if (keys.length === 0) return out;
   const common = [...Object.values(COMMON_KEY_HEX), ...Object.values(IMAGE_KEY_HEX)].map(bytes);
   for (const r of await read.query(STATEMENTS.commonFields, [...idsParams(keys), common])) out.get(fieldKeyOf(r))!.set(toHex(r.key as Uint8Array), fieldOf(r));

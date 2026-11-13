@@ -23,16 +23,16 @@
  */
 
 /** The indexer's schema: its id with `-` replaced by `_`. */
-export const SCHEMA = "token_metadata";
+export const TOKEN_METADATA_SCHEMA = "token_metadata";
 
 /** The `table` item of `events` (append-only): rejected events and unresolved log sites, per contract. */
-export const EVENTS_ITEM = "token-metadata-events";
+export const TOKEN_METADATA_EVENTS_ITEM = "token-metadata-events";
 
 /** The `table` item of `tokens` and `fields` (mutable): the described tokens and their current fields. */
-export const STATE_ITEM = "token-metadata-state";
+export const TOKEN_METADATA_STATE_ITEM = "token-metadata-state";
 
 /** Migration `001`: the three tables and their indexes. Never edited once released; a change is a new migration. */
-export const MIGRATION_001 = `CREATE TABLE ${SCHEMA}.tokens (
+export const MIGRATION_001 = `CREATE TABLE ${TOKEN_METADATA_SCHEMA}.tokens (
   id bytea NOT NULL CHECK (octet_length(id) = 32),
   kind smallint NOT NULL CHECK (kind IN (1, 2, 3)),
   contract_address bytea NOT NULL CHECK (octet_length(contract_address) = 32),
@@ -40,9 +40,9 @@ export const MIGRATION_001 = `CREATE TABLE ${SCHEMA}.tokens (
   symbol bytea CHECK (symbol IS NULL OR octet_length(symbol) <= 255),
   PRIMARY KEY (id, kind)
 );
-CREATE UNIQUE INDEX tokens_contract_idx ON ${SCHEMA}.tokens (contract_address, domain_sep, kind);
-CREATE INDEX tokens_symbol_idx ON ${SCHEMA}.tokens (contract_address, symbol, domain_sep, kind) WHERE symbol IS NOT NULL;
-CREATE TABLE ${SCHEMA}.fields (
+CREATE UNIQUE INDEX tokens_contract_idx ON ${TOKEN_METADATA_SCHEMA}.tokens (contract_address, domain_sep, kind);
+CREATE INDEX tokens_symbol_idx ON ${TOKEN_METADATA_SCHEMA}.tokens (contract_address, symbol, domain_sep, kind) WHERE symbol IS NOT NULL;
+CREATE TABLE ${TOKEN_METADATA_SCHEMA}.fields (
   token_id bytea NOT NULL,
   kind smallint NOT NULL,
   key bytea NOT NULL CHECK (octet_length(key) BETWEEN 1 AND 255),
@@ -56,9 +56,9 @@ CREATE TABLE ${SCHEMA}.fields (
   set_record integer NOT NULL CHECK (set_record >= 0),
   CHECK ((val_type = 2) = (uint_value IS NOT NULL)),
   PRIMARY KEY (token_id, kind, key),
-  FOREIGN KEY (token_id, kind) REFERENCES ${SCHEMA}.tokens (id, kind) ON DELETE CASCADE
+  FOREIGN KEY (token_id, kind) REFERENCES ${TOKEN_METADATA_SCHEMA}.tokens (id, kind) ON DELETE CASCADE
 );
-CREATE TABLE ${SCHEMA}.events (
+CREATE TABLE ${TOKEN_METADATA_SCHEMA}.events (
   height bigint NOT NULL CHECK (height >= 0),
   tx_index integer NOT NULL CHECK (tx_index >= 0),
   event_index integer NOT NULL CHECK (event_index >= 0),
@@ -67,9 +67,9 @@ CREATE TABLE ${SCHEMA}.events (
   reason text NOT NULL CHECK (reason ~ '^[a-z0-9-]{1,64}$'),
   PRIMARY KEY (height, tx_index, event_index)
 );
-CREATE INDEX events_reject_idx ON ${SCHEMA}.events (contract_address, height, tx_index, event_index) INCLUDE (reason)
+CREATE INDEX events_reject_idx ON ${TOKEN_METADATA_SCHEMA}.events (contract_address, height, tx_index, event_index) INCLUDE (reason)
   WHERE classification = 'reject';
-CREATE INDEX events_unresolved_idx ON ${SCHEMA}.events (contract_address, height, tx_index, event_index)
+CREATE INDEX events_unresolved_idx ON ${TOKEN_METADATA_SCHEMA}.events (contract_address, height, tx_index, event_index)
   WHERE classification = 'unresolved';`;
 
 /** The module's migrations, in order. */

@@ -19,7 +19,7 @@
 import { z } from "zod";
 import { UMBRADB_VERSION } from "../../config/build.js";
 import { defineModule } from "../../modules/declaration.js";
-import { EVENTS_ITEM, STATE_ITEM } from "../token-metadata/schema.js";
+import { TOKEN_METADATA_EVENTS_ITEM, TOKEN_METADATA_STATE_ITEM } from "../token-metadata/schema.js";
 import { registerRoutes } from "./router.js";
 import { ROUTES } from "./routes.js";
 
@@ -31,7 +31,7 @@ export const TOKEN_METADATA_API = defineModule({
   id: TOKEN_METADATA_API_ID,
   version: UMBRADB_VERSION,
   side: "public",
-  requires: [EVENTS_ITEM, STATE_ITEM],
+  requires: [TOKEN_METADATA_EVENTS_ITEM, TOKEN_METADATA_STATE_ITEM],
   provides: [],
   startsMidChain: true,
   configSchema: z.object({}),

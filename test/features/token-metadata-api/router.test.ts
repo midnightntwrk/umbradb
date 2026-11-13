@@ -1,7 +1,7 @@
 import Type from "typebox";
 import { describe, expect, it } from "vitest";
 import type { ReadHandle } from "../../../src/db/api.js";
-import { ApiError, JSON_HEADERS, registerRoutes, route, toAsciiJson } from "../../../src/features/token-metadata-api/router.js";
+import { RouteError, JSON_HEADERS, registerRoutes, typedRoute, toAsciiJson } from "../../../src/features/token-metadata-api/router.js";
 import { prefixEnd } from "../../../src/features/token-metadata-api/sql.js";
 import type { ApiRegistry } from "../../../src/modules/declaration.js";
 
@@ -36,7 +36,7 @@ const Reply = Type.Object({ greeting: Type.String() }, { additionalProperties: f
 /** Registers one route under `ns` whose handler is `handle`, and returns its registered handler. */
 function one(handle: (body: { name: string }) => Promise<unknown>, maxConcurrent?: number): Handler {
   const { api, routes } = registry();
-  registerRoutes(api, "ns", [route({ method: "POST", path: "/v1/hello", body: Body, response: Reply, handle: handle as never })], maxConcurrent);
+  registerRoutes(api, "ns", [typedRoute({ method: "POST", path: "/v1/hello", body: Body, response: Reply, handle: handle as never })], maxConcurrent);
   expect([...routes.keys()]).toEqual(["POST /ns/v1/hello"]);
   return routes.get("POST /ns/v1/hello")!;
 }
@@ -77,13 +77,13 @@ describe("the typed router", () => {
       (e: unknown) => e,
     );
     expect(error).toBeInstanceOf(Error);
-    expect(error).not.toBeInstanceOf(ApiError);
+    expect(error).not.toBeInstanceOf(RouteError);
     expect((error as Error).message).toMatch(/^\/ns\/v1\/hello built an answer its schema refuses: body/);
     expect((error as Error).message).not.toContain("secret-answer");
   });
 
-  it("answers a handler's ApiError in the one envelope, and passes any other error on", async () => {
-    const refused = await call(one(async () => Promise.reject(new ApiError(404, "NOT_FOUND", "no such greeting"))), { name: "a" });
+  it("answers a handler's RouteError in the one envelope, and passes any other error on", async () => {
+    const refused = await call(one(async () => Promise.reject(new RouteError(404, "NOT_FOUND", "no such greeting"))), { name: "a" });
     expect([refused.status, json(refused)]).toEqual([404, { error: { code: "NOT_FOUND", message: "no such greeting" } }]);
     expect(refused.headers).toMatchObject(JSON_HEADERS);
     const broken = new Error("broken");

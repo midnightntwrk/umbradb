@@ -1,6 +1,6 @@
 import net from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { commonRecords, record } from "../../../src/features/token-metadata/codec/index.js";
+import { commonRecords, metadataRecord } from "../../../src/features/token-metadata/codec/index.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../../runner/process-backends.js";
 import { blockLogs, contract, domain, eventData, post, serve, TOKENS_PATH } from "./harness.js";
 
@@ -79,8 +79,8 @@ describe.each(PROCESS_BACKENDS)("no network request, on $name", (backend: Proces
             A,
             eventData(D, 1, [
               ...commonRecords({ name: "Pictured", symbol: "PIC", decimals: 0 }),
-              record.uri("image", IMAGE),
-              record.bytes("image_sha256", new Uint8Array(32).fill(7)),
+              metadataRecord.uri("image", IMAGE),
+              metadataRecord.bytes("image_sha256", new Uint8Array(32).fill(7)),
             ]),
           ]),
         ],

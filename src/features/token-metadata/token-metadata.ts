@@ -32,9 +32,9 @@ import { z } from "zod";
 import { UMBRADB_VERSION } from "../../config/build.js";
 import { CONTRACT_LOGS_ITEM, contractLogsItemOf, unresolvedLogSitesOf } from "../../backbone/contract-logs/contract-logs.js";
 import { defineModule } from "../../modules/declaration.js";
-import { type LogReader, writeBlock } from "./apply.js";
+import { type LogReader, writeTokenMetadata } from "./apply.js";
 import { miscAtom } from "./log-reader.js";
-import { EVENTS_ITEM, MIGRATIONS, SCHEMA, STATE_ITEM } from "./schema.js";
+import { TOKEN_METADATA_EVENTS_ITEM, MIGRATIONS, TOKEN_METADATA_SCHEMA, TOKEN_METADATA_STATE_ITEM } from "./schema.js";
 import { databaseStart } from "./sql.js";
 
 
@@ -108,11 +108,11 @@ export function tokenMetadataWith(reader: LogReader, latestStarts: Readonly<Reco
     side: "public",
     requires: [CONTRACT_LOGS_ITEM],
     provides: [
-      { name: EVENTS_ITEM, lifetimes: ["table"], table: { schema: SCHEMA, tables: ["events"], kind: "append-only" } },
+      { name: TOKEN_METADATA_EVENTS_ITEM, lifetimes: ["table"], table: { schema: TOKEN_METADATA_SCHEMA, tables: ["events"], kind: "append-only" } },
       {
-        name: STATE_ITEM,
+        name: TOKEN_METADATA_STATE_ITEM,
         lifetimes: ["table"],
-        table: { schema: SCHEMA, tables: ["tokens", "fields"], kind: "mutable" },
+        table: { schema: TOKEN_METADATA_SCHEMA, tables: ["tokens", "fields"], kind: "mutable" },
       },
     ],
     startsMidChain: true,
@@ -130,7 +130,7 @@ export function tokenMetadataWith(reader: LogReader, latestStarts: Readonly<Reco
         if (first.start > start) throw new TokenMetadataStartAfterDatabase(first.start, start);
       },
       async "on-db-write"(_p, b, w) {
-        await writeBlock(w, b.height, contractLogsItemOf(b, TOKEN_METADATA_ID), reader, unresolvedLogSitesOf(b, TOKEN_METADATA_ID));
+        await writeTokenMetadata(w, b.height, contractLogsItemOf(b, TOKEN_METADATA_ID), reader, unresolvedLogSitesOf(b, TOKEN_METADATA_ID));
       },
     },
   });

@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { sep } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { writeBlock } from "../../../src/features/token-metadata/apply.js";
+import { writeTokenMetadata } from "../../../src/features/token-metadata/apply.js";
 import { servedIdentities } from "./served-state.js";
 import { commonRecords, toHex } from "../../../src/features/token-metadata/codec/index.js";
 import { blockLogs, contract, domain, eventData } from "./harness.js";
@@ -72,7 +72,7 @@ describe("Intl only where the module serves", () => {
       },
     };
     const long = "x".repeat(70);
-    await writeBlock(w, 5n, blockLogs([0, contract(1), eventData(domain(1), 1, commonRecords({ name: long, symbol: long }))]));
+    await writeTokenMetadata(w, 5n, blockLogs([0, contract(1), eventData(domain(1), 1, commonRecords({ name: long, symbol: long }))]));
     expect(statements.some((s) => s.sql.includes("INSERT INTO token_metadata.fields"))).toBe(true);
     expect(segment).not.toHaveBeenCalled();
     const [identity] = await servedIdentities(w, "n");

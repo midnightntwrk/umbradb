@@ -73,7 +73,7 @@ export function recordsSize(records: readonly MetadataRecord[]): number {
 const utf8 = (s: string | Uint8Array): Uint8Array => (typeof s === 'string' ? new TextEncoder().encode(s) : s);
 
 /** Record constructors. Keys given as strings are UTF-8 encoded. */
-export const record = {
+export const metadataRecord = {
   bytes: (key: string | Uint8Array, value: Uint8Array): MetadataRecord => ({ key: utf8(key), valType: ValType.Bytes, value }),
   utf8: (key: string | Uint8Array, text: string): MetadataRecord => ({ key: utf8(key), valType: ValType.Utf8, value: utf8(text) }),
   /** Unsigned integer; `width` defaults to the smallest that holds the value (1 byte for `decimals`, like `Uint<8>`). */
@@ -96,10 +96,10 @@ export const record = {
  * Withdraws a token: Null records at `name`, `symbol`, `decimals` and `standards`, in that order (39 bytes; the same
  * records as the Compact module's `withdraw(domainSep, kind)`). A token identity exists only while one of its fields
  * has a value, so once every key it has is deleted consumers do not reference it. A token with keys beyond these
- * four adds a Null record for each of them (`[...withdrawRecords(), record.tombstone('logo')]`).
+ * four adds a Null record for each of them (`[...withdrawRecords(), metadataRecord.tombstone('logo')]`).
  */
 export function withdrawRecords(): MetadataRecord[] {
-  return ['name', 'symbol', 'decimals', 'standards'].map((key) => record.tombstone(key));
+  return ['name', 'symbol', 'decimals', 'standards'].map((key) => metadataRecord.tombstone(key));
 }
 
 /** The common fields (`name`, `symbol`, `decimals` as `Uint<8>`, optional `standards`) as records, in that order. */
@@ -110,10 +110,10 @@ export function commonRecords(fields: {
   standards?: string | readonly string[];
 }): MetadataRecord[] {
   const out: MetadataRecord[] = [];
-  if (fields.name !== undefined) out.push(record.utf8('name', fields.name));
-  if (fields.symbol !== undefined) out.push(record.utf8('symbol', fields.symbol));
-  if (fields.decimals !== undefined) out.push(record.uint('decimals', fields.decimals, 1));
+  if (fields.name !== undefined) out.push(metadataRecord.utf8('name', fields.name));
+  if (fields.symbol !== undefined) out.push(metadataRecord.utf8('symbol', fields.symbol));
+  if (fields.decimals !== undefined) out.push(metadataRecord.uint('decimals', fields.decimals, 1));
   if (fields.standards !== undefined)
-    out.push(record.utf8('standards', typeof fields.standards === 'string' ? fields.standards : fields.standards.join(' ')));
+    out.push(metadataRecord.utf8('standards', typeof fields.standards === 'string' ? fields.standards : fields.standards.join(' ')));
   return out;
 }

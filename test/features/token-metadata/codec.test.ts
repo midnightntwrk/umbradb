@@ -8,7 +8,7 @@ import {
   InvalidRecord,
   minimalUintWidth,
   PayloadTooLarge,
-  record,
+  metadataRecord,
   recordsSize,
   ValType,
   withdrawRecords,
@@ -56,12 +56,12 @@ describe("each of the codec's MIP rules is needed", () => {
 describe("the encoder", () => {
   it("round-trips a record of every value type through the decoder", () => {
     const records = [
-      record.bytes("b", Uint8Array.of(0, 255)),
-      record.utf8("name", "Token ✓"),
-      record.uint("decimals", 6),
-      record.uint("wide", 1n << 100n, 13),
-      record.json("meta", '{"a":[1,2]}'),
-      record.uri("image", "ipfs://bafy/x.png"),
+      metadataRecord.bytes("b", Uint8Array.of(0, 255)),
+      metadataRecord.utf8("name", "Token ✓"),
+      metadataRecord.uint("decimals", 6),
+      metadataRecord.uint("wide", 1n << 100n, 13),
+      metadataRecord.json("meta", '{"a":[1,2]}'),
+      metadataRecord.uri("image", "ipfs://bafy/x.png"),
       ...withdrawRecords().slice(0, 1),
     ];
     const payload = encodePayload({ domainSep, kind: 1 }, records);
@@ -85,7 +85,7 @@ describe("the encoder", () => {
   });
 
   it("refuses a header, a record or a size the MIP forbids", () => {
-    const one = [record.utf8("name", "x")];
+    const one = [metadataRecord.utf8("name", "x")];
     expect(() => encodePayload({ domainSep: domainSep.slice(1), kind: 1 }, one)).toThrow(InvalidHeader);
     expect(() => encodePayload({ domainSep, kind: 4 as 1 }, one)).toThrow(/kind must be 1, 2 or 3, got 4/);
     expect(() => encodePayload({ domainSep, kind: 1 }, [])).toThrow(InvalidRecord);
@@ -93,7 +93,7 @@ describe("the encoder", () => {
     expect(() => encodePayload({ domainSep, kind: 1 }, [{ key: Uint8Array.of(1), valType: 1, value: new Uint8Array(256) }])).toThrow(/value must be 0-255 bytes/);
     expect(() => encodePayload({ domainSep, kind: 1 }, [{ key: Uint8Array.of(1), valType: 6, value: new Uint8Array() }])).toThrow(/valType must be 0-5, got 6/);
     expect(() => encodePayload({ domainSep, kind: 1 }, [{ key: Uint8Array.of(1), valType: ValType.Null, value: Uint8Array.of(0) }])).toThrow(/bad-null-length/);
-    const big = [record.bytes("a", new Uint8Array(200)), record.bytes("b", new Uint8Array(30))];
+    const big = [metadataRecord.bytes("a", new Uint8Array(200)), metadataRecord.bytes("b", new Uint8Array(30))];
     const tooLarge = (() => {
       try {
         encodePayload({ domainSep, kind: 2 }, big);

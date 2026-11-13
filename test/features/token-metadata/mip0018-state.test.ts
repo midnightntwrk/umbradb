@@ -3,7 +3,7 @@
  * level, "not referenced at all", chain order, rollback, common fields, display and the mark.
  */
 import { describe, expect, it } from "vitest";
-import { EVENT_NAME, encodePayload, type MetadataRecord, record } from "../../../src/features/token-metadata/codec/index.js";
+import { EVENT_NAME, encodePayload, type MetadataRecord, metadataRecord } from "../../../src/features/token-metadata/codec/index.js";
 import { COMMON_KEY_HEX, fieldUsable, firstCharacters, IMAGE_KEY_HEX, lengthLimited, parseStandards, tokenMark, UNRESOLVED_LOG_REASON } from "../../../src/features/token-metadata/rules.js";
 import { ChainOrderError, formatAmount, MetadataState, recordEffects, symbolGroups, toHex, type IdentityRef } from "./model.js";
 
@@ -37,31 +37,31 @@ describe("per-key tombstones (MIP Applying records)", () => {
   it("a Null deletes only its key; a Null for a missing key is a no-op; deleting every key withdraws the identity everywhere; a later record revives only that field", () => {
     const s = new MetadataState();
     const emit = emitter(s);
-    emit(1, [record.utf8("name", "Gold"), record.utf8("symbol", "ACME"), record.uint("decimals", 6), record.utf8("standards", "mip-0011")]);
-    emit(1, [record.utf8("name", "Two"), record.utf8("symbol", "ACME")], { domainSep: DS2 });
-    emit(1, [record.utf8("symbol", "ACME")], { domainSep: DS3 }); // a third member: the group outlives one member's Null
+    emit(1, [metadataRecord.utf8("name", "Gold"), metadataRecord.utf8("symbol", "ACME"), metadataRecord.uint("decimals", 6), metadataRecord.utf8("standards", "mip-0011")]);
+    emit(1, [metadataRecord.utf8("name", "Two"), metadataRecord.utf8("symbol", "ACME")], { domainSep: DS2 });
+    emit(1, [metadataRecord.utf8("symbol", "ACME")], { domainSep: DS3 }); // a third member: the group outlives one member's Null
     expect(s.groups()).toHaveLength(1);
     expect(s.groups()[0]!.members).toHaveLength(3);
 
-    emit(1, [record.tombstone("name")]);
+    emit(1, [metadataRecord.tombstone("name")]);
     expect(keys(s, ref(1))).toEqual(["symbol", "decimals", "standards"]);
 
-    emit(1, [record.tombstone("retire"), record.tombstone("name")]);
+    emit(1, [metadataRecord.tombstone("retire"), metadataRecord.tombstone("name")]);
     expect(keys(s, ref(1))).toEqual(["symbol", "decimals", "standards"]);
 
-    emit(1, [record.tombstone("symbol")]);
+    emit(1, [metadataRecord.tombstone("symbol")]);
     // A Null at its symbol removes ONLY that member from the group (S9); the two others keep it.
     expect(s.groups().map((g) => g.members)).toEqual([[{ domainSep: DS2, kind: 1 }, { domainSep: DS3, kind: 1 }]]);
 
     const held = s.identity(ref(1))!.fields; // a snapshot: later events never change it
-    emit(1, [record.tombstone("decimals"), record.tombstone("standards")]);
+    emit(1, [metadataRecord.tombstone("decimals"), metadataRecord.tombstone("standards")]);
     expect(held.size).toBe(2);
     expect(s.identity(ref(1))).toBeUndefined();
     expect(s.identities().map((i) => i.domainSep)).toEqual([DS2, DS3]);
     expect(s.display(ref(1), 100n)).toBeUndefined();
     expect(JSON.stringify(s.identities())).not.toContain(DS1);
 
-    emit(1, [record.utf8("name", "New")]);
+    emit(1, [metadataRecord.utf8("name", "New")]);
     expect(keys(s, ref(1))).toEqual(["name"]);
     expect(Buffer.from(s.identity(ref(1))!.fields.get(COMMON_KEY_HEX.name)!.value).toString()).toBe("New");
   });
@@ -69,7 +69,7 @@ describe("per-key tombstones (MIP Applying records)", () => {
   it("records apply in order within one event, and a non-Null record replaces the value without history", () => {
     const s = new MetadataState();
     const emit = emitter(s);
-    emit(3, [record.utf8("name", "A"), record.tombstone("name"), record.utf8("name", "B"), record.utf8("symbol", "X"), record.utf8("symbol", "Y")]);
+    emit(3, [metadataRecord.utf8("name", "A"), metadataRecord.tombstone("name"), metadataRecord.utf8("name", "B"), metadataRecord.utf8("symbol", "X"), metadataRecord.utf8("symbol", "Y")]);
     const id = s.identity(ref(3))!;
     expect([...id.fields.keys()]).toEqual([COMMON_KEY_HEX.name, COMMON_KEY_HEX.symbol]);
     expect(Buffer.from(id.fields.get(COMMON_KEY_HEX.symbol)!.value).toString()).toBe("Y");
@@ -79,8 +79,8 @@ describe("per-key tombstones (MIP Applying records)", () => {
   it("an event of one contract never touches another contract's identity with the same header", () => {
     const s = new MetadataState();
     const emit = emitter(s);
-    emit(3, [record.utf8("name", "Mine")]);
-    emit(3, [record.tombstone("name")], { contract: B });
+    emit(3, [metadataRecord.utf8("name", "Mine")]);
+    emit(3, [metadataRecord.tombstone("name")], { contract: B });
     expect(keys(s, ref(3))).toEqual(["name"]);
     expect(s.identity(ref(3, DS1, B))).toBeUndefined();
   });
@@ -88,8 +88,8 @@ describe("per-key tombstones (MIP Applying records)", () => {
   it("a rejected event applies none of its records and is stored as the contract's rejection", () => {
     const s = new MetadataState();
     const emit = emitter(s);
-    emit(3, [record.utf8("name", "Kept")]);
-    const bad = encodePayload({ domainSep: ds(DS1), kind: 3 }, [record.tombstone("name")]);
+    emit(3, [metadataRecord.utf8("name", "Kept")]);
+    const bad = encodePayload({ domainSep: ds(DS1), kind: 3 }, [metadataRecord.tombstone("name")]);
     bad[38] = 6; // the Null record's valType byte → reserved valType 6
     expect(emit(3, [], { payload: bad }).result).toBe("reject");
     expect(keys(s, ref(3))).toEqual(["name"]);
@@ -102,14 +102,14 @@ describe("per-key tombstones (MIP Applying records)", () => {
     const s = new MetadataState();
     const at = (block: number, records: MetadataRecord[]) =>
       s.apply({ network: NET, position: { block, tx: 0, event: 0 }, contractAddress: A, type: "Misc", name: EVENT_NAME, payload: encodePayload({ domainSep: ds(DS1), kind: 3 }, records) });
-    at(1, [record.utf8("name", "One"), record.utf8("symbol", "ONE")]);
-    at(2, [record.tombstone("name"), record.tombstone("symbol")]);
+    at(1, [metadataRecord.utf8("name", "One"), metadataRecord.utf8("symbol", "ONE")]);
+    at(2, [metadataRecord.tombstone("name"), metadataRecord.tombstone("symbol")]);
     expect(s.identity(ref(3))).toBeUndefined();
-    expect(() => at(2, [record.utf8("name", "x")])).toThrow(ChainOrderError);
+    expect(() => at(2, [metadataRecord.utf8("name", "x")])).toThrow(ChainOrderError);
     s.rollbackTo(NET, 1);
     expect(keys(s, ref(3))).toEqual(["name", "symbol"]);
-    expect(() => at(1, [record.utf8("name", "x")])).toThrow(ChainOrderError);
-    at(2, [record.tombstone("symbol")]);
+    expect(() => at(1, [metadataRecord.utf8("name", "x")])).toThrow(ChainOrderError);
+    at(2, [metadataRecord.tombstone("symbol")]);
     expect(keys(s, ref(3))).toEqual(["name"]);
   });
 });
@@ -121,37 +121,37 @@ describe("defined keys (MIP Keys)", () => {
     const s = new MetadataState(new Map([[S, new Set([kHex])]]));
     const emit = emitter(s);
     // S10: an undefined key alone: the event is accepted, the key stored, the identity does not exist.
-    expect(emit(3, [record.utf8("foo", "x")]).result).toBe("accept");
+    expect(emit(3, [metadataRecord.utf8("foo", "x")]).result).toBe("accept");
     expect(s.identity(ref(3))).toBeUndefined();
     expect(s.identities()).toEqual([]);
     expect([...s.storedFields(ref(3))!.keys()].map((k) => Buffer.from(k, "hex").toString())).toEqual(["foo"]);
     expect(tokenMark({ fields: s.identity(ref(3))?.fields, contractRejections: [] }).mark).toBe("none");
     // A defined key makes it exist; only defined keys are served.
-    emit(3, [record.utf8("name", "Acme"), record.utf8("symbol", "ACME")]);
+    emit(3, [metadataRecord.utf8("name", "Acme"), metadataRecord.utf8("symbol", "ACME")]);
     expect(keys(s, ref(3))).toEqual(["name", "symbol"]);
     // A key of standard S is served only while `standards` declares S.
-    emit(3, [record.utf8("k", "v")]);
+    emit(3, [metadataRecord.utf8("k", "v")]);
     expect(keys(s, ref(3))).toEqual(["name", "symbol"]);
-    emit(3, [record.utf8("standards", `mip-0004 ${S}`)]);
+    emit(3, [metadataRecord.utf8("standards", `mip-0004 ${S}`)]);
     expect(keys(s, ref(3))).toEqual(["name", "symbol", "k", "standards"]);
-    emit(3, [record.utf8("standards", "mip-0004")]);
+    emit(3, [metadataRecord.utf8("standards", "mip-0004")]);
     expect(keys(s, ref(3))).toEqual(["name", "symbol", "standards"]);
-    emit(3, [record.utf8("standards", `${S}  bad`)]); // an unusable `standards` declares nothing
+    emit(3, [metadataRecord.utf8("standards", `${S}  bad`)]); // an unusable `standards` declares nothing
     expect(keys(s, ref(3))).toEqual(["name", "symbol", "standards"]);
-    emit(3, [record.utf8("standards", S)]);
+    emit(3, [metadataRecord.utf8("standards", S)]);
     expect(keys(s, ref(3))).toEqual(["name", "symbol", "k", "standards"]);
     // Deleting the defined keys: while `k` counts (S declared) it keeps the identity in existence; dropping S then
     // withdraws it, although `foo` and `k` remain stored.
-    emit(3, [record.tombstone("name"), record.tombstone("symbol")]);
+    emit(3, [metadataRecord.tombstone("name"), metadataRecord.tombstone("symbol")]);
     expect(keys(s, ref(3))).toEqual(["k", "standards"]);
-    emit(3, [record.tombstone("standards")]);
+    emit(3, [metadataRecord.tombstone("standards")]);
     expect(s.identity(ref(3))).toBeUndefined();
     expect(s.identities()).toEqual([]);
     expect(s.groups()).toEqual([]);
     expect([...s.storedFields(ref(3))!.keys()].map((k) => Buffer.from(k, "hex").toString()).sort()).toEqual(["foo", "k"]);
     // Without the standard in the registry (the MIPs' registry is empty), `k` is never served.
     const plain = new MetadataState();
-    emitter(plain)(3, [record.utf8("standards", S), record.utf8("k", "v")]);
+    emitter(plain)(3, [metadataRecord.utf8("standards", S), metadataRecord.utf8("k", "v")]);
     expect(keys(plain, ref(3))).toEqual(["standards"]);
     // A rollback recomputes served fields from the stored ones (back to block 4: S declared).
     s.rollbackTo(NET, 4);
@@ -171,8 +171,8 @@ describe("common fields (MIP Common fields)", () => {
 
     const s = new MetadataState();
     const emit = emitter(s);
-    emit(3, [record.utf8("name", "Good"), record.uint("decimals", 6)]);
-    emit(3, [record.utf8("name", ""), record.utf8("decimals", "6")]);
+    emit(3, [metadataRecord.utf8("name", "Good"), metadataRecord.uint("decimals", 6)]);
+    emit(3, [metadataRecord.utf8("name", ""), metadataRecord.utf8("decimals", "6")]);
     const f = s.identity(ref(3))!.fields;
     expect(f.get(COMMON_KEY_HEX.name)!.usable).toBe(false);
     expect(f.get(COMMON_KEY_HEX.decimals)!.usable).toBe(false);
@@ -202,16 +202,16 @@ describe("common fields (MIP Common fields)", () => {
     // Through the state (A6 and S12's unusable hash), and the mark of a complete token with usable, unusable or no images.
     const s = new MetadataState();
     const emit = emitter(s);
-    const common = [record.utf8("name", "Acme"), record.utf8("symbol", "ACME"), record.uint("decimals", 6)];
-    emit(3, [...common, record.uri("image", "https://example.org/acme.png"), record.bytes("image_sha256", new Uint8Array(32).fill(0xab))]);
+    const common = [metadataRecord.utf8("name", "Acme"), metadataRecord.utf8("symbol", "ACME"), metadataRecord.uint("decimals", 6)];
+    emit(3, [...common, metadataRecord.uri("image", "https://example.org/acme.png"), metadataRecord.bytes("image_sha256", new Uint8Array(32).fill(0xab))]);
     emit(3, common, { domainSep: DS2 });
-    emit(3, [...common, record.utf8("image", "acme.png"), record.bytes("image_sha256", new Uint8Array(31).fill(0xab))], { domainSep: DS3 });
+    emit(3, [...common, metadataRecord.utf8("image", "acme.png"), metadataRecord.bytes("image_sha256", new Uint8Array(31).fill(0xab))], { domainSep: DS3 });
     const usable = (domainSep: string) => [IMAGE_KEY_HEX.image, IMAGE_KEY_HEX.imageSha256].map((k) => s.identity(ref(3, domainSep))!.fields.get(k)?.usable);
     expect([usable(DS1), usable(DS2), usable(DS3)]).toEqual([[true, true], [undefined, undefined], [false, false]]);
     for (const d of [DS1, DS2, DS3])
       expect(tokenMark({ fields: s.identity(ref(3, d))!.fields, contractRejections: [] }), d).toEqual({ mark: "ok", reasons: [], missing: [], tags: [] });
     // Image keys are common fields: an identity described only by `image` exists, and its mark is partial.
-    emit(1, [record.uri("image", "https://example.org/x.png")], { domainSep: DS2 });
+    emit(1, [metadataRecord.uri("image", "https://example.org/x.png")], { domainSep: DS2 });
     expect(keys(s, ref(1, DS2))).toEqual(["image"]);
     expect(tokenMark({ fields: s.identity(ref(1, DS2))!.fields, contractRejections: [] }).mark).toBe("partial");
   });
@@ -220,19 +220,19 @@ describe("common fields (MIP Common fields)", () => {
     const text = (s0: MetadataState, r: IdentityRef, key: "name" | "symbol") => Buffer.from(s0.identity(r)!.fields.get(COMMON_KEY_HEX[key])!.value).toString("utf8");
     const s = new MetadataState();
     const emit = emitter(s);
-    emit(3, [record.utf8("name", "N".repeat(70)), record.utf8("symbol", "ABCDEFGHIJKLMNO")]);
+    emit(3, [metadataRecord.utf8("name", "N".repeat(70)), metadataRecord.utf8("symbol", "ABCDEFGHIJKLMNO")]);
     expect([text(s, ref(3), "name"), text(s, ref(3), "symbol")]).toEqual(["N".repeat(64), "ABCDEFGHIJKL"]);
     expect([...s.identity(ref(3))!.fields.values()].map((f) => f.usable)).toEqual([true, true]);
     // At the cut: a family emoji (a ZWJ sequence of 5 code points) is one character, kept whole or dropped whole.
     const family = "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}";
-    emit(3, [record.utf8("name", `${"a".repeat(63)}${family}zz`)], { domainSep: DS2 });
+    emit(3, [metadataRecord.utf8("name", `${"a".repeat(63)}${family}zz`)], { domainSep: DS2 });
     expect(text(s, ref(3, DS2), "name")).toBe(`${"a".repeat(63)}${family}`);
-    emit(3, [record.utf8("name", `${"a".repeat(64)}${family}`)], { domainSep: DS2 });
+    emit(3, [metadataRecord.utf8("name", `${"a".repeat(64)}${family}`)], { domainSep: DS2 });
     expect(text(s, ref(3, DS2), "name")).toBe("a".repeat(64));
     // Combining marks stay with their base; a flag (two regional indicators) is one character.
-    emit(3, [record.utf8("symbol", "e\u0301".repeat(13))], { domainSep: DS3 });
+    emit(3, [metadataRecord.utf8("symbol", "e\u0301".repeat(13))], { domainSep: DS3 });
     expect(text(s, ref(3, DS3), "symbol")).toBe("e\u0301".repeat(12));
-    emit(3, [record.utf8("symbol", "ABCDEFGHIJK\u{1F1FA}\u{1F1F8}\u{1F1FA}\u{1F1F8}")], { domainSep: DS3 });
+    emit(3, [metadataRecord.utf8("symbol", "ABCDEFGHIJK\u{1F1FA}\u{1F1F8}\u{1F1FA}\u{1F1F8}")], { domainSep: DS3 });
     expect(text(s, ref(3, DS3), "symbol")).toBe("ABCDEFGHIJK\u{1F1FA}\u{1F1F8}");
     // Exactly at the limit, and other keys: unchanged.
     expect(firstCharacters("x".repeat(64), 64)).toBe("x".repeat(64));
@@ -241,8 +241,8 @@ describe("common fields (MIP Common fields)", () => {
     // Grouping uses the cut value: two 15-character symbols with the same first 12 characters are one group.
     const g = new MetadataState();
     const ge = emitter(g);
-    ge(1, [record.utf8("symbol", "ACMEDOLLARUSONE")]);
-    ge(3, [record.utf8("symbol", "ACMEDOLLARUSTWO")]);
+    ge(1, [metadataRecord.utf8("symbol", "ACMEDOLLARUSONE")]);
+    ge(3, [metadataRecord.utf8("symbol", "ACMEDOLLARUSTWO")]);
     expect(g.groups().map((x) => [Buffer.from(x.symbol, "hex").toString(), x.members.map((m) => m.kind)])).toEqual([["ACMEDOLLARUS", [1, 3]]]);
     // Negative control: grouping the uncut values would give no group.
     const uncut = (symbol: string, kind: number) => ({ network: NET, contractAddress: A, domainSep: DS1, kind, fields: new Map([[COMMON_KEY_HEX.symbol, { value: enc(symbol), usable: true }]]) });
@@ -281,13 +281,13 @@ describe("marks (one function)", () => {
   it("✓ complete, ⚠ partial, ⚠ incorrect (contract rejection, reasons shown), ⚠ unresolved (the contract has unresolved logs: reason unresolved-log, never a clean ✓), no mark without events or after withdrawal; usable standards as tags", () => {
     const s = new MetadataState();
     const emit = emitter(s);
-    emit(3, [record.utf8("name", "Acme"), record.utf8("symbol", "ACME"), record.uint("decimals", 6), record.utf8("standards", "mip-0004 mip-0004 x")]);
+    emit(3, [metadataRecord.utf8("name", "Acme"), metadataRecord.utf8("symbol", "ACME"), metadataRecord.uint("decimals", 6), metadataRecord.utf8("standards", "mip-0004 mip-0004 x")]);
     expect(tokenMark({ fields: fieldsOf(s, ref(3)), contractRejections: [] })).toEqual({ mark: "ok", reasons: [], missing: [], tags: ["mip-0004", "x"] });
 
-    emit(3, [record.utf8("name", "Half")], { domainSep: DS2 });
+    emit(3, [metadataRecord.utf8("name", "Half")], { domainSep: DS2 });
     expect(tokenMark({ fields: fieldsOf(s, ref(3, DS2)), contractRejections: [] })).toMatchObject({ mark: "partial", missing: ["symbol", "decimals"] });
 
-    emit(3, [record.utf8("symbol", "")], { domainSep: DS2 });
+    emit(3, [metadataRecord.utf8("symbol", "")], { domainSep: DS2 });
     expect(tokenMark({ fields: fieldsOf(s, ref(3, DS2)), contractRejections: [] }).missing).toEqual(["symbol", "decimals"]);
 
     expect(tokenMark({ fields: fieldsOf(s, ref(3)), contractRejections: ["reserved-valtype", "invalid-utf8"] })).toEqual({
@@ -300,17 +300,17 @@ describe("marks (one function)", () => {
 
     expect(tokenMark({ fields: undefined, contractRejections: [] })).toEqual({ mark: "none", reasons: [], missing: [], tags: [] });
 
-    emit(3, [record.tombstone("name"), record.tombstone("symbol"), record.tombstone("decimals"), record.tombstone("standards")]);
+    emit(3, [metadataRecord.tombstone("name"), metadataRecord.tombstone("symbol"), metadataRecord.tombstone("decimals"), metadataRecord.tombstone("standards")]);
     expect(tokenMark({ fields: fieldsOf(s, ref(3)), contractRejections: [] }).mark).toBe("none");
 
-    emit(3, [record.utf8("standards", "mip-0004  x")]);
+    emit(3, [metadataRecord.utf8("standards", "mip-0004  x")]);
     expect(tokenMark({ fields: fieldsOf(s, ref(3)), contractRejections: [] })).toMatchObject({ mark: "partial", tags: [] });
 
     // Unresolved logs of the contract — ⚠ unresolved for a complete, a partial and an absent
     // identity (the unresolved log may have described, renamed or withdrawn it); ⚠ incorrect wins, its reasons end with
     // `unresolved-log`; zero unresolved logs change nothing.
     expect(tokenMark({ fields: fieldsOf(s, ref(3, DS2)), contractRejections: [], contractUnresolvedLogs: 0 }).mark).toBe("partial");
-    emit(3, [record.utf8("name", "Acme"), record.utf8("symbol", "ACME"), record.uint("decimals", 6)], { domainSep: DS3 });
+    emit(3, [metadataRecord.utf8("name", "Acme"), metadataRecord.utf8("symbol", "ACME"), metadataRecord.uint("decimals", 6)], { domainSep: DS3 });
     expect(tokenMark({ fields: fieldsOf(s, ref(3, DS3)), contractRejections: [] }).mark).toBe("ok");
     expect(tokenMark({ fields: fieldsOf(s, ref(3, DS3)), contractRejections: [], contractUnresolvedLogs: 2 }))
       .toEqual({ mark: "unresolved", reasons: [UNRESOLVED_LOG_REASON], missing: [], tags: [] });
@@ -325,8 +325,8 @@ describe("marks (one function)", () => {
   it("a withdrawn identity is marked exactly like one never described (current state only): ⚠ incorrect from its contract's rejections, otherwise none; an empty field map is the same as none", () => {
     const s = new MetadataState();
     const emit = emitter(s);
-    emit(3, [record.utf8("name", "Gone"), record.utf8("symbol", "GONE"), record.uint("decimals", 2), record.utf8("standards", "mip-0004")]);
-    emit(3, [record.tombstone("name"), record.tombstone("symbol"), record.tombstone("decimals"), record.tombstone("standards")]);
+    emit(3, [metadataRecord.utf8("name", "Gone"), metadataRecord.utf8("symbol", "GONE"), metadataRecord.uint("decimals", 2), metadataRecord.utf8("standards", "mip-0004")]);
+    emit(3, [metadataRecord.tombstone("name"), metadataRecord.tombstone("symbol"), metadataRecord.tombstone("decimals"), metadataRecord.tombstone("standards")]);
     const withdrawn = fieldsOf(s, ref(3));
     const never = fieldsOf(s, ref(3, DS3));
     expect(withdrawn).toBeUndefined();

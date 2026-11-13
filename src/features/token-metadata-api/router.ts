@@ -9,7 +9,7 @@
  *   `BAD_REQUEST`, with the schema's paths and rules (never the input's values) in the message.
  * - **Output.** The answer is checked against its schema before it is sent: an answer that does not match is a bug,
  *   answered 500 by the module API, never sent half-right.
- * - **Errors.** One envelope, `{ "error": { "code", "message" } }`: a handler throws an {@link ApiError}; the module API
+ * - **Errors.** One envelope, `{ "error": { "code", "message" } }`: a handler throws an {@link RouteError}; the module API
  *   answers what no route reaches (404 `not-found`, 405 `method-not-allowed`, 500 `internal-error`).
  * - **Every answer** is ASCII-escaped JSON with fixed security headers and the core's `X-Umbra-*` chain-data headers,
  *   read at one committed height; at most `maxConcurrent` requests run at once, more get 503 `BUSY`.
@@ -27,8 +27,8 @@ export const DEFAULT_MAX_CONCURRENT_REQUESTS = 8;
 const MAX_ERRORS = 3;
 
 /** A request a handler refuses: its status, code and a message that never echoes the input. */
-export class ApiError extends Error {
-  override readonly name = "ApiError";
+export class RouteError extends Error {
+  override readonly name = "RouteError";
   constructor(
     readonly status: number,
     readonly code: string,
@@ -39,7 +39,7 @@ export class ApiError extends Error {
 }
 
 /** A 400 `BAD_REQUEST`. */
-export const badRequest = (message: string): ApiError => new ApiError(400, "BAD_REQUEST", message);
+export const badRequest = (message: string): RouteError => new RouteError(400, "BAD_REQUEST", message);
 
 /** A route: its method, its path under the namespace, its body and answer schemas, and the handler between them. */
 export interface Route<B extends TSchema, R extends TSchema> {
@@ -50,8 +50,8 @@ export interface Route<B extends TSchema, R extends TSchema> {
   handle(body: Static<B>, read: ReadHandle): Promise<Static<R>>;
 }
 
-/** {@link Route}, typed by its schemas (`route({ …, body: Schema, response: Schema, handle })`). */
-export const route = <B extends TSchema, R extends TSchema>(r: Route<B, R>): Route<B, R> => r;
+/** {@link Route}, typed by its schemas (`typedRoute({ …, body: Schema, response: Schema, handle })`). */
+export const typedRoute = <B extends TSchema, R extends TSchema>(r: Route<B, R>): Route<B, R> => r;
 
 /** JSON with every non-ASCII character and `<`, `>`, `&` escaped: the body is pure ASCII and parses to the same value. */
 export function toAsciiJson(value: unknown): string {
@@ -120,7 +120,7 @@ export function registerRoutes(
             }
             return answer(200, result);
           } catch (error) {
-            if (error instanceof ApiError) return answer(error.status, { error: { code: error.code, message: error.message } });
+            if (error instanceof RouteError) return answer(error.status, { error: { code: error.code, message: error.message } });
             throw error;
           }
         });

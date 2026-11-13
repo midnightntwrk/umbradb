@@ -5,7 +5,7 @@
  */
 
 import type { ReadHandle } from "../../../src/db/api.js";
-import { SCHEMA } from "../../../src/features/token-metadata/schema.js";
+import { TOKEN_METADATA_SCHEMA } from "../../../src/features/token-metadata/schema.js";
 import { type Field } from "../../../src/features/token-metadata/rules.js";
 import { type IdentityState, type SymbolGroup, symbolGroups } from "./model.js";
 import { toHex } from "../../../src/features/token-metadata/codec/index.js";
@@ -16,7 +16,7 @@ export async function servedIdentities(read: Pick<ReadHandle, "query">, network:
   const rows = await read.query(
     `SELECT t.contract_address, t.domain_sep, t.kind, f.key, f.val_type, f.value, f.uint_value::text AS uint_value, f.usable,
        f.set_height, f.set_tx, f.set_event, f.set_record
-     FROM ${SCHEMA}.tokens t JOIN ${SCHEMA}.fields f ON f.token_id = t.id AND f.kind = t.kind
+     FROM ${TOKEN_METADATA_SCHEMA}.tokens t JOIN ${TOKEN_METADATA_SCHEMA}.fields f ON f.token_id = t.id AND f.kind = t.kind
      ORDER BY t.contract_address, t.domain_sep, t.kind, f.key`,
   );
   const byIdentity = new Map<string, { contractAddress: string; domainSep: string; kind: number; fields: Map<string, Field> }>();
