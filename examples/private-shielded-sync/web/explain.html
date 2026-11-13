@@ -137,14 +137,19 @@
       <div class="card s"><div class="t">Reads the chain from UmbraDB's tables</div>
         <div class="d">9 outputs (commitment + ciphertext), 5 nullifiers, the tree's root.</div>
       </div>
-      <div class="card s gpu"><span class="gpu-tag" data-tip="setup">gpu</span><div class="t">Read table: one record per output, 3 per column</div>
-        <div class="d">A record holds the commitment, ciphertext elements 1–5 and the lower Merkle path. Setup data <b>H = table × A</b> lets a client decode answers.</div>
+      <div class="card s"><div class="t">Read table: one record per output, 3 per column</div>
+        <div class="d">A record holds the commitment, ciphertext elements 1–5 and the lower Merkle path.</div>
         <div class="diag"><div class="grid" style="grid-template-columns: repeat(3, auto)">
           <div class="colhead">col 0</div><div class="colhead">col 1</div><div class="colhead">col 2</div>
           <div class="cell">r0</div><div class="cell">r3</div><div class="cell">r6</div>
           <div class="cell">r1</div><div class="cell">r4</div><div class="cell">r7</div>
           <div class="cell">r2</div><div class="cell">r5</div><div class="cell">r8</div>
         </div></div>
+      </div>
+      <div class="card s gpu"><span class="gpu-tag" data-tip="setup">gpu</span><div class="t">Draws the public matrix A and computes the setup data H</div>
+        <div class="d"><b>A</b> is a matrix of random numbers: one row per column of the read table (3 here), and n columns (2 here, 1,024 on the real server). It is made from a random <b>seed</b> written in the manifest, so anyone can rebuild it and nobody downloads it. It is public: hiding a query needs a secret that only the wallet holds, not a secret A.</div>
+        <div class="math" id="a-matrix-0"></div>
+        <div class="d">The <b>setup data H = read table × A</b> (3 rows × n) is what lets a wallet decode an answer (step 4). It is computed once per snapshot and downloaded by every wallet.</div>
       </div>
       <div class="card s"><div class="t">Nullifier table: buckets by the nullifier's first 2 bits, and its setup data</div>
         <div class="diag buckets">
@@ -208,8 +213,8 @@
       <div class="card w"><div class="t">Checks everything it got</div>
         <div class="d">Each file's SHA-256 equals the manifest's. The block roots hash up to the manifest's root: <span class="mono">h(h(R0,R1), h(R2,0)) = root</span>.</div>
       </div>
-      <div class="card w"><div class="t">Keeps the setup data</div>
-        <div class="d">The read setup <b>H</b> of this example (3 rows × n = 2):</div>
+      <div class="card w"><div class="t">Rebuilds A, keeps H</div>
+        <div class="d">It rebuilds the public matrix <b>A</b> from the manifest's seed (the same numbers the server drew in step 0) and keeps the downloaded setup data <b>H</b>:</div>
         <div class="math" id="h-matrix"></div>
       </div>
     </div>
@@ -467,9 +472,13 @@
   const eq = (...parts) => `<div class="eq">${parts.join("")}</div>`;
   const lbl = (t) => `<span class="lbl">${t}</span>`;
 
-  document.getElementById("h-matrix").innerHTML = eq(lbl("H ="), mat(H)) + `<div class="lbl">= table × A, mod 65,536. Same for every wallet.</div>`;
+  document.getElementById("a-matrix-0").innerHTML = eq(lbl("A ="), mat(A), lbl("3 table columns × n = 2, random numbers mod 65,536"));
+  document.getElementById("h-matrix").innerHTML =
+    eq(lbl("A ="), mat(A), lbl("rebuilt from the seed"), lbl("&nbsp; H ="), mat(H), lbl("downloaded")) +
+    `<div class="lbl">H = read table × A, mod 65,536. Both are the same for every wallet.</div>`;
   document.getElementById("query-math").innerHTML =
-    eq(lbl("A (public) ="), mat(A), lbl("s (secret) ="), vec(v0.s)) +
+    eq(lbl("A (public, from step 2) ="), mat(A), lbl("s (secret) ="), vec(v0.s)) +
+    `<div class="lbl">s: two random numbers the wallet picks for this vector and never sends. A·s then looks random to anyone without s.</div>` +
     eq(lbl("A·s ="), vec(v0.As), lbl("+ e ="), vec(v0.e), lbl("+ Δ·u ="), vec(v0.u.map((x) => x * DELTA), (i) => (v0.u[i] ? "selrow" : ""))) +
     eq(lbl("q ="), vec(v0.q)) + `<div class="lbl">u = 1 at column 0: the wanted column.</div>`;
   document.getElementById("wire-math").innerHTML =
