@@ -153,8 +153,8 @@ const transportReader = () => z.strictObject({ user: text(), password: z.string(
 /** The node's WebSocket URL. */
 const NODE = /^wss?:\/\/\S+$/;
 
-/** A ledger version: `../config/build.ts`'s `LedgerName`, including `v9-rc3`. */
-const LEDGER = z.enum(["v8", "v9-rc3", "v9", "v10"]);
+/** A ledger version: `../config/build.ts`'s `LedgerName`, including `v9-rc3` and `v9-rc5`. */
+const LEDGER = z.enum(["v8", "v9-rc3", "v9-rc5", "v9", "v10"]);
 
 /** Where a ledger version's packages come from. */
 const SOURCE = z.enum(["vendored", "released"]).default("vendored");
@@ -172,7 +172,10 @@ const BASE = {
     })
     .optional()
     .meta(DATA),
-  ledgerSources: z.strictObject({ v8: SOURCE, "v9-rc3": SOURCE, v9: SOURCE, v10: SOURCE }).prefault({}).meta(DATA),
+  ledgerSources: z
+    .strictObject({ v8: SOURCE, "v9-rc3": SOURCE, "v9-rc5": SOURCE, v9: SOURCE, v10: SOURCE })
+    .prefault({})
+    .meta(DATA),
   sweep: z.enum(["on", "off"]).default("on").meta(DATA),
   retainStates: count().default(0).meta(DATA),
   // Operational, its `password` part secret: `./redact.ts` hides a `password` part of an operational field.

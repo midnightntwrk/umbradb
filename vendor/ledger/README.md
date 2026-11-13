@@ -10,12 +10,18 @@ packages are built here, reproducibly, from a pinned upstream commit.
 |---|---|---|---|
 | `v8/` | `midnightntwrk/midnight-ledger` `36d7442172136758e33009f75ff4aa56616cff40` | `ledger-8.1.2` | The v8 ledger of `midnight-node` 2.1.0-rc.4 (`Cargo.toml` `mn-ledger-8 = "=8.1.2"`); the mainnet node reports `=8.1.2` for block 0 |
 | `v9-rc3/` | `midnightntwrk/midnight-ledger` `4823b5351b17cc49e30f19760dbd30a73cf95e22` | `ledger-9.1.0.0-rc.3` | The v9 ledger of `midnight-node` 2.0.0-rc.4, which runtime 2.0 (`spec_version` 2,000,000–2,000,999; stagenet) builds (`Cargo.toml:445` `crate-ledger-9.1.0.0-rc.3`); a package of its own |
-| `v9/` | `midnightntwrk/midnight-ledger` `67f9f97246339539af0091c4d8c6bc5ab236a191` | `ledger-9.1.0.0-rc.5` | The v9 ledger of `midnight-node` 2.1.0-rc.4 (per-crate tags `crate-ledger-9.1.0.0-rc.5` etc., each an isolate commit of this tree), runtime 2.1 on |
+| `v9-rc5/` | `midnightntwrk/midnight-ledger` `67f9f97246339539af0091c4d8c6bc5ab236a191` | `ledger-9.1.0.0-rc.5` | The v9 ledger of `midnight-node` 2.1.0-rc.4 (per-crate tags `crate-ledger-9.1.0.0-rc.5` etc., each an isolate commit of this tree), which runtime 2.1.0 (`spec_version` 2,001,000–2,001,099; devnets) builds; a package of its own |
+| `v9/` | `midnightntwrk/midnight-ledger` `a2b30128ca4b660b73a068e29b56b48ede8c9a74` | `ledger-9.1.0.1` | The v9 ledger of `midnight-node` 2.1.101 (tag `node-2.1.101`, `Cargo.lock`: `midnight-ledger-v9` 1.0.1 and the other 9.1.0.1 crates from crates.io), which runtime 2.1.100 (`spec_version` 2,001,100 on; mainnet, Preprod, preview) builds |
 
 The v9 package also contains the ledger team's v8 → v9 state translation (`v8-to-v9-state-translation` at
-`midnight-ledger` `da96e33d78ee9b7d3867b15c1037510d499cd909`, the revision `midnight-node` 2.1.0-rc.4 pins) and ledger
-v8 8.1.2, built against this v9 tree exactly as the node builds them: the translation's crates.io dependencies on the
-v9 crates resolve to this tree, so v8 and v9 share one storage crate (see `v9/patches/0005-…`).
+`midnight-ledger` `39cfd0531524b87e53198ce136777530c29646aa`, the tag `state-translation-v8-v9-node-2.1.101` that
+`midnight-node` 2.1.101 pins) and ledger v8 8.1.3 with its storage 2.0.5 (crates.io), built against this v9 tree
+exactly as the node builds them: the translation's crates.io dependencies on the v9 crates (`midnight-ledger-v9`,
+`midnight-onchain-state`, `midnight-storage` 3.0.0, `midnight-storage-core`) resolve to this tree through
+`[patch.crates-io]`, so the translation links this v9 ledger, and v8's storage 2.0.5 and v9's storage 3.0.0 share this
+tree's `storage-core`, and so one arena (see `v9/patches/0005-…`). The `v9-rc5` package does the same at its own
+release: translation `da96e33d78ee9b7d3867b15c1037510d499cd909` (the revision `midnight-node` 2.1.0-rc.4 pins) and
+ledger v8 8.1.2, where v8 and v9 share one storage crate (`v9-rc5/patches/0005-…`).
 
 Each version directory holds:
 
@@ -33,12 +39,12 @@ Each version directory holds:
 
 Runtime 2.0 is `midnight-node` 2.0.0-rc.4's, which builds v9 from `crate-ledger-9.1.0.0-rc.3`; rc.3 → rc.5 changed rules
 the state root depends on (DUST generation's uniqueness, `fresh_dust_output`'s times, `verify.rs`), so the rc.5 package
-gives stagenet another root than its node's from block 1 on. The two releases share one storage
+gives stagenet another root than its node's from block 1 on. The releases share one storage
 format — no stored type's tag differs, nor `storage-core`'s hashing — so a state the rc.3 package stored loads in the
-rc.5 package with the same root and serialization, which is how a chain's 2.0 → 2.1 upgrade carries its state (the
-ledger worker's engine).
+rc.5 and the 9.1.0.1 packages with the same root and serialization (`test/ledger/ledger-v9-rc3.test.ts`), which is how
+a chain's upgrade from runtime 2.0 carries its state (the ledger worker's engine).
 
-`v9-rc3/` is built from the workspace tag `ledger-9.1.0.0-rc.3` (`4823b53`), as `v9/` is from its workspace tag. The
+`v9-rc3/` is built from the workspace tag `ledger-9.1.0.0-rc.3` (`4823b53`), as `v9-rc5/` and `v9/` are from theirs. The
 node's `Cargo.lock` takes the v9 crates from per-crate tags: `crate-ledger-9.1.0.0-rc.3`, `zswap-9.0.0-rc.3`,
 `base-crypto-1.1.0-rc.2`, `transient-crypto-3.0.0-rc.2`, `onchain-state-4.0.0-rc.3` and `zkir-2.2.0-rc.3` are isolate
 commits of `4823b53`, and `coin-structure-3.0.0-rc.1`, `onchain-runtime-4.0.0-rc.2`, `onchain-vm-4.0.0-rc.2` and
@@ -70,11 +76,44 @@ no v8 → v9 translation, and the rc.3 package has no `convertFromV8`. The build
 repository's arm64 Mac (77 s recording, 64 s rebuilding, both from a clean container); the package is 10 MB (its `.wasm`
 10.2 MB, without the translation and the v8 ledger the v9 package carries).
 
+### v9 and v9-rc5: ledger 9.1.0.1, and ledger v9 as runtime 2.1.0 built it
+
+The public networks run `midnight-node` 2.1.101 (Preprod's node answers `2.1.101-bbd616b1`, runtime 2,001,100, read
+2026-11-13). Its public tag `node-2.1.101` (`86774ed`) locks the ledger 9 crates from crates.io at the `ledger-9.1.0.1`
+release (`a2b3012`): `midnight-ledger-v9` 1.0.1, `midnight-zswap` 9.0.1, `midnight-coin-structure` 3.0.1,
+`midnight-transient-crypto` 3.0.1, `midnight-onchain-*` 4.0.1, `midnight-storage` 3.0.0, `midnight-storage-core` 1.2.3,
+`midnight-serialize` 1.2.1, `midnight-base-crypto` 1.1.1; ledger v8 8.1.3 with `midnight-storage` 2.0.5; and the
+translation at `39cfd05`. Mainnet (3,346,139), preview (1,572) and Preprod (3,348,434) went from runtime 1,000,300
+straight to 2,001,100, so every ledger 9 block of theirs was built by it.
+
+rc.5 → 9.1.0.1 changed rules the state root depends on: transaction pricing (each segment's writes priced
+separately, each deploy charged for its state, shared call effects counted in the time to dismiss), which sets a
+block's fullness and so the fee prices the post-block update writes, and outcomes (a transcript whose declared
+deletions offset its writes runs out of gas; repeated committee signatures and DUST registrations, contracts over 256
+operations and DUST in contract transcripts fail). The recorded devnet tape (`devnet-v8-v9-0-235`, built by
+`midnight-node` 2.1.0-rc.4 at runtime 2,001,000) replays with its node's roots in the 9.1.0.1 package through the
+conversion and up to block 124, and halts at block 125, its first contract call, whose transcript declares netted
+deletions. So rc.5 stays as a package of its own, `v9-rc5`, for runtime 2.1.0, as `v9-rc3` does for runtime 2.0, and
+`v9` is 9.1.0.1 from runtime 2.1.100 on.
+
+`v9/`'s patches are rc.5's (`v9-rc5/`) rebased onto 9.1.0.1: `0001-…`, `0002-…`, `0006-…` and `0007-…` apply as they
+are; `0003-…` differs in its `Cargo.lock` line (`midnight-storage-core 1.2.3`), `0004-…` in its context (9.1.0.1 adds
+`NODE_OVERHEAD` there), and `0005-…` pins ledger v8 8.1.3, the translation at `39cfd05` and the `[patch.crates-io]`
+entries above, with its `Cargo.lock` hunks regenerated by `cargo metadata` in the build image (the resolved v8 set is
+exactly `node-2.1.101`'s: `midnight-ledger` 8.1.3, `midnight-storage` 2.0.5, `midnight-onchain-*` 3.x, `midnight-zswap`
+8.1.3). The post-block update the patches export is unchanged in `midnight-node` 2.1.101 (`clamp_and_normalize`,
+`compute_overall_fullness` and `post_block_update.rs` are the same), and the oracles of `test/ledger/fixtures/` give
+9.1.0.1 rc.5's values for every state and block cost (only the fixtures' call changed, see below). Since rc.6,
+`StateValue` is generic over its value kind, and its tag names it: a state value's tagged serialization starts
+`midnight:impact-state-value[v2](fab-aligned-value[v1]):` in the `v9` package. The test fixtures' contract calls
+declare, for `v9`, the bytes they write and no deletion (`test/ledger/adapter-fixtures.ts` `fixtureGas`). The build
+takes about 80 s on this repository's arm64 Mac.
+
 ## Rebuilding
 
 ```sh
 npm run vendor:ledger                  # rebuild every version and compare with SHA256SUMS and pkg/ (exit 1 on a difference)
-npm run vendor:ledger -- v9            # one version (v8, v9-rc3 or v9)
+npm run vendor:ledger -- v9            # one version (v8, v9-rc3, v9-rc5 or v9)
 npm run vendor:ledger -- --record v9   # replace pkg/ with the new build and rewrite SHA256SUMS
 ```
 
@@ -85,7 +124,7 @@ Everything that goes into a build is pinned (`Dockerfile`): the Rust 1.98.1 imag
 clang 14 and the other Debian packages at exact versions from a dated Debian snapshot, `wasm-bindgen-cli` 0.2.108 built
 with `cargo install --locked`, and binaryen `version_133` checked against its SHA-256. ledger-8.1.2 pins wasm-bindgen
 0.2.104, whose CLI numbers its generated adapters differently from run to run on the same input (three runs, three
-outputs); `v8/patches/0002-…` moves it to 0.2.108, the version ledger-9.1.0.0-rc.5 pins, which gave the same bytes in
+outputs); `v8/patches/0002-…` moves it to 0.2.108, the version ledger-9.1.0.0-rc.5 and 9.1.0.1 pin, which gave the same bytes in
 six runs. The build follows
 upstream's own release recipe (`midnight-ledger` `bagel.nix`): `cargo build --profile wasm` for
 `wasm32-unknown-unknown`, `wasm-bindgen --target bundler --omit-default-module-path --weak-refs --reference-types`,
@@ -142,7 +181,7 @@ JavaScript numbers, which cannot hold a `FixedPoint` (a deploy's block usage of 
 `test/ledger/fixtures/post-block-update/` holds the node's values for a table of block costs, computed in Rust at the
 pinned commits (`oracle/`), which `test/ledger/post-block-update.test.ts` checks the packages and the adapters against.
 
-The tree values (`v8/patches/0005-…`, `v9/patches/0007-…`, `v9-rc3/patches/0006-…`). The published packages give a state's zswap first free index only; the official indexer stores, per block, the
+The tree values (`v8/patches/0005-…`, `v9/patches/0007-…`, `v9-rc5/patches/0007-…`, `v9-rc3/patches/0006-…`). The published packages give a state's zswap first free index only; the official indexer stores, per block, the
 zswap commitment tree's first free index and root and the DUST commitment and generation trees' first free indexes and
 roots. Every package exports `stateTrees(state)`: `{ zswapFirstFree, zswapRoot, dustCommitmentFirstFree,
 dustCommitmentRoot, dustGenerationFirstFree, dustGenerationRoot }`, read from the ledger's Rust state as that indexer
