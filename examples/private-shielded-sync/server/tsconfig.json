@@ -3,6 +3,6 @@
   "compilerOptions": {
     "erasableSyntaxOnly": false
   },
-  "include": ["*.ts", "../test/server-*.ts"],
+  "include": ["*.ts", "../test/server-*.ts", "../test/client-*.ts"],
   "exclude": []
 }

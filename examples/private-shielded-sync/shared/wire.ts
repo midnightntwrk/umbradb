@@ -96,11 +96,13 @@ function decodeCall(
   if (expect.count !== undefined && count !== expect.count) {
     throw new WireError(`${what} carries ${count} vectors; exactly ${expect.count} are required`, 400);
   }
-  const expected = CALL_HEADER_BYTES + count * length * 4;
-  if (bytes.length !== expected) throw new WireError(`${what} must be ${expected} bytes, got ${bytes.length}`, 400);
+  // Another snapshot is 409 before the length is checked: a call built for a replaced snapshot has that snapshot's
+  // column count, so its length differs too, and the client must learn the snapshot changed (FR-067).
   if (expect.snapshotId && !equalBytes(snapshotId, expect.snapshotId)) {
     throw new WireError(`${what} names another snapshot`, 409);
   }
+  const expected = CALL_HEADER_BYTES + count * length * 4;
+  if (bytes.length !== expected) throw new WireError(`${what} must be ${expected} bytes, got ${bytes.length}`, 400);
   // Copy into an aligned buffer (the body's offset may not be a multiple of 4).
   const values = new Uint32Array(count * length);
   new Uint8Array(values.buffer).set(bytes.subarray(CALL_HEADER_BYTES));

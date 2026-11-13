@@ -84,6 +84,8 @@ describe("query and answer bodies", () => {
     expect(refuse(version)).toBe(400);
     expect(refuse(body, { queriesPerCall: 32 })).toBe(400);
     expect(refuse(body, { snapshotId: bytes(32) })).toBe(409);
+    // A call for a replaced snapshot has that snapshot's column count: still 409, not 400 (FR-067).
+    expect(refuse(body, { snapshotId: bytes(32) }, 10)).toBe(409);
     expect(refuse(encodeAnswerBody({ snapshotId: id, count: 2, values: words(18) }, 9))).toBe(400);
     expect(refuse(body)).toBe(0);
   });

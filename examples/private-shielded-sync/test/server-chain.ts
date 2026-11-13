@@ -41,6 +41,11 @@ export interface ScenarioChain {
   readonly contract: Uint8Array;
   /** Every spend: its height and nullifier (hex). */
   readonly spends: readonly { readonly height: number; readonly nullifier: string }[];
+  /**
+   * The Zswap chain state after the last block: every offer applied in chain order, a post-block update after each
+   * block (so its past roots are the chain's), for checking that a spend made elsewhere is one the chain accepts.
+   */
+  readonly zswap: V9.ZswapChainState;
 }
 
 function wallet(raw: Raw, name: string, fill: number): ChainWallet {
@@ -124,15 +129,24 @@ export async function scenarioChain(): Promise<ScenarioChain> {
   const blocks: LedgerTx[][] = [[]];
   const spends: { height: number; nullifier: string }[] = [];
   const ttlAt = (height: number): number => Number(CHAIN_START_MS) + height * 6_000 + 60_000;
+  let zswap = new raw.ZswapChainState();
+  const seal = (): void => {
+    zswap = zswap.postBlockUpdate(new Date(Number(CHAIN_START_MS) + (blocks.length - 1) * 6_000), 3_600n);
+  };
   /** Adds a block of transactions, each an offer; applies every offer to every wallet in order. */
   const add = (txs: readonly { readonly offer: Offer; readonly bytes?: Uint8Array }[]): void => {
     blocks.push(txs.map((tx) => ({ bytes: tx.bytes ?? erased(raw, tx.offer), kind: "regular" as const })));
-    for (const tx of txs) for (const w of wallets) w.local = w.local.apply(w.keys, tx.offer as never);
+    for (const tx of txs) {
+      for (const w of wallets) w.local = w.local.apply(w.keys, tx.offer as never);
+      [zswap] = zswap.tryApply(tx.offer as never);
+    }
+    seal();
   };
   const plain = (offer: Offer) => ({ offer });
 
   add([plain(merge([output(raw, token, A, 100n), output(raw, token, A, 200n), output(raw, token, A, 300n)])), plain(merge([output(raw, token, B, 50n), output(raw, token, B, 60n)]))]);
   blocks.push([{ bytes: contract.deploy, kind: "regular" }]);
+  seal();
   add([contractOutput(raw, token, contract.address, ttlAt(3)), plain(output(raw, token, A, 70n))]);
   {
     const s = spend(raw, token, A, 100n, [output(raw, token, B, 40n), output(raw, token, A, 60n)]);
@@ -160,5 +174,5 @@ export async function scenarioChain(): Promise<ScenarioChain> {
     const failed = height.types.filter((type) => type !== "success");
     if (failed.length > 0) throw new Error(`scenarioChain: block ${h} has ${failed.join(", ")} transactions: a fixture problem`);
   }
-  return { scenario, wallets: { A, B }, contract: contract.address, spends };
+  return { scenario, wallets: { A, B }, contract: contract.address, spends, zswap };
 }
