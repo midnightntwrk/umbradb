@@ -1418,6 +1418,16 @@ export type EventDetails =
     commitment: CoinCommitment,
     contract: ContractAddress | undefined,
     mtIndex: bigint,
+    /**
+     * UmbraDB: the kind of the output's preimage evidence: its coin encrypted to the recipient, its
+     * coin and recipient in the clear, or neither.
+     */
+    preimageEvidenceKind: 'ciphertext' | 'publicPreimage' | 'none',
+    /**
+     * UmbraDB: for a ciphertext, its 224 bytes: the point's 32-byte compressed encoding, then the six
+     * elements, each its 32-byte little-endian integer. Absent for the other kinds.
+     */
+    ciphertext?: Uint8Array,
   } | {
     tag: 'dustInitialUtxo',
     generation: DustGenerationInfo,

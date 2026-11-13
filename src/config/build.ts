@@ -13,10 +13,12 @@
 import { LEDGER_RELEASES } from "../ledger/releases.js";
 
 /**
- * A ledger version: a major version, or `v9-rc3`, which is ledger v9 as runtime 2.0 built it (`ledger-9.1.0.0-rc.3`, a
- * package of its own). `v9` is the rc.5 release that runtime 2.1 builds.
+ * A ledger version: a major version, or a v9 release candidate that a runtime built and that gives other state roots
+ * than the final release, each a package of its own: `v9-rc3`, ledger v9 as runtime 2.0 built it
+ * (`ledger-9.1.0.0-rc.3`), and `v9-rc5`, as runtime 2.1.0 built it (`ledger-9.1.0.0-rc.5`, `midnight-node`
+ * 2.1.0-rc.4). `v9` is `ledger-9.1.0.1`, which runtime 2.1.100 (`midnight-node` 2.1.101) builds.
  */
-export type LedgerName = "v8" | "v9-rc3" | "v9" | "v10";
+export type LedgerName = "v8" | "v9-rc3" | "v9-rc5" | "v9" | "v10";
 
 /** One WASM package of a ledger version, identified by its content hash. */
 export type LedgerPackageIdentity = {

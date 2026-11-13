@@ -110,8 +110,8 @@
       ]
     },
     "v9": {
-      "release": "ledger-9.1.0.0-rc.5",
-      "commit": "67f9f97246339539af0091c4d8c6bc5ab236a191",
+      "release": "ledger-9.1.0.1",
+      "commit": "a2b30128ca4b660b73a068e29b56b48ede8c9a74",
       "states": [
         {
           "name": "undeployed-genesis",

@@ -428,7 +428,7 @@ counts and queue (after a restart, for one).
 | `block-header` | `core-block-fetch` | block | `on-fetch` | height, hashes, roots, `specVersion`, `timestampMs` |
 | `block-body` | `core-block-fetch` | block | `on-fetch` | the extrinsics; an unsigned one's call decoded |
 | `runtime-metadata` | `core-block-fetch` | block | `on-fetch` | the runtime's `spec_version` and metadata bytes |
-| `ledger-version` | `core-block-fetch` | block | `on-fetch` | the block's ledger version (`v8`, `v9`) |
+| `ledger-version` | `core-block-fetch` | block | `on-fetch` | the block's ledger version (`v8`, `v9-rc3`, `v9-rc5`, `v9`) |
 | `blocks` | `core-block-commit` | table | any read | `core_block_commit.blocks`: hashes, versions, `block_time` |
 | `chain-events` | `core-chain-events` | both | `on-fetch` | `System::Events`; `core_chain_events.events` |
 | `block-parsed` | `core-block-parsed` | both | `on-parse` | transactions; `core_block_parsed.transactions` |
@@ -549,6 +549,22 @@ configSchema: z.object({
   trees' first free indexes and roots); `ledger-events` (every ledger event but contract logs: zswap inputs and
   outputs, deploys, DUST events, …); `segment-results` (per transaction, its outcome and each segment's success);
   `vm-logs` (the contract logs of the applied segments; none on ledger `v8`).
+- **Ledger events.** `ledger-events` is an array of `LedgerEvent` (a type of the package entry), one per event in
+  application order, and `core_ledger_state.events` (a public table) holds the same, one row each keyed
+  `(height, tx_index, event_index)`: `kind`, `logical_segment`, `physical_segment`, `bytes` (the ledger's serialization
+  of the event), and what is read from it — `nullifier` (a zswap input's, a DUST spend's), `commitment` (a zswap
+  output's, a DUST spend's new one), `tree_index` (a zswap output's position in the commitment tree, a DUST spend's
+  commitment index, a DUST initial UTXO's generation index), `contract_address`, and, for a `zswap-output` only:
+  - `evidence` (`ZswapEvidence`): `ciphertext` (the coin encrypted to its recipient), `public` (the coin and
+    recipient in the clear, as system transactions make outputs) or `none` (an output a contract owns); null for every
+    other kind;
+  - `ciphertext`: for `ciphertext` evidence, its 224 bytes, null otherwise: the sender's one-time point in its 32-byte
+    compressed encoding, then six elements, each its 32-byte little-endian integer. Element 0 encrypts 0, which is
+    the recipient's ownership test (point × encryption secret → `k = Poseidon(k*.x, k*.y)`; element 0 = `Poseidon(k,
+    0)`); elements 1–5 encrypt the coin's value, token type and nonce.
+  The table's constraints keep them consistent (`evidence` set exactly for zswap outputs, `ciphertext` exactly for
+  `ciphertext` evidence, 224 bytes). A database synced by a build without these columns is synced again: the
+  migration that adds them refuses one that holds a zswap output.
 - **Earlier states.** The core entry's `retainStates` (default 0) keeps the states of that many blocks before the
   latest. With `ledger-state` required, `retainedStatesOf(p).load(height, read)` loads the state after `height` and
   gives its key and root; outside the window it rejects with `state-not-retained`, which your code may catch.
@@ -764,7 +780,7 @@ const blockRuntimes = defineModule({
 });
 
 test("block-runtimes stores every height and answers the latest", async () => {
-  // Blocks 0 to 10 in memory, each of runtime 2,001,000 with no extrinsics. The `custom` network's genesis is the
+  // Blocks 0 to 10 in memory, each of runtime 2,001,100 with no extrinsics. The `custom` network's genesis is the
   // chain's block 0, and its ledger table gives that runtime a ledger version (v9).
   const source = new InMemoryBlockSource({ head: 10n });
   const genesis = await source.block(0n);
@@ -805,7 +821,7 @@ test("block-runtimes stores every height and answers the latest", async () => {
     const answer = await fetch(`http://127.0.0.1:${port}/block-runtimes/latest`);
     assert.equal(answer.status, 200);
     assert.equal(answer.headers.get("x-umbra-height"), "10");
-    assert.deepEqual(await answer.json(), { height: "10", spec_version: 2_001_000, extrinsics: 0 });
+    assert.deepEqual(await answer.json(), { height: "10", spec_version: 2_001_100, extrinsics: 0 });
   } finally {
     server.close();
     await handle.stop();
@@ -815,7 +831,7 @@ test("block-runtimes stores every height and answers the latest", async () => {
 ```
 
 The `custom` network's genesis hash is the in-memory chain's block 0, and its ledger table gives the chain's runtime
-(2,001,000: every in-memory block's unless the source's `items` option gives another) a ledger version. `node` is
+(2,001,100: every in-memory block's unless the source's `items` option gives another) a ledger version. `node` is
 checked as a setting and never contacted: with a `source`, UmbraDB makes no node client. The core's `stop` ends the run
 once height 10 is committed: `ended` resolves `stopped`, and the module API answers reads at that height until
 `stop()`. Put your module in place of `blockRuntimes` (its declaration in `modules`, its entry in `entries`), with the

@@ -36,8 +36,8 @@ describe("the core version's ledgers", () => {
         versionName: string;
         package: { name: string; version: string };
       };
-    // v9 as runtime 2.0 built it (rc.3) is a package of its own, between v8 and v9 (rc.5).
-    expect(VENDORED_LEDGERS).toEqual(["v8", "v9-rc3", "v9"]);
+    // v9 as runtimes 2.0 (rc.3) and 2.1.0 (rc.5) built it are packages of their own, between v8 and v9 (9.1.0.1).
+    expect(VENDORED_LEDGERS).toEqual(["v8", "v9-rc3", "v9-rc5", "v9"]);
     const ledgers = VENDORED_LEDGERS.map((ledger) => ({
       ledger,
       versionName: upstream(ledger).versionName,
@@ -87,7 +87,10 @@ describe("startup refuses a vendored package whose files are not the recorded on
     expect(VENDORED_LEDGER_ROOT).toBe(VENDORED_ROOT);
     expect(() => verifyLedgerPackages()).not.toThrow();
     expect(() =>
-      verifyLedgerPackages({ root: copy.root, sources: { v8: "vendored", "v9-rc3": "vendored", v9: "vendored", v10: "vendored" } }),
+      verifyLedgerPackages({
+        root: copy.root,
+        sources: { v8: "vendored", "v9-rc3": "vendored", "v9-rc5": "vendored", v9: "vendored", v10: "vendored" },
+      }),
     ).not.toThrow();
   });
 

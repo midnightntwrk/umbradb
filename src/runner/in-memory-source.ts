@@ -26,10 +26,11 @@ import type { ReadHandle } from "../db/api.js";
 import type { BlockRef, BlockSource } from "./block-source.js";
 
 /**
- * The `spec_version` of every in-memory block unless given: runtime 2.1's, which every known network's built-in ledger
- * table maps to v9 ({@link IN_MEMORY_LEDGER}); those tables map runtime 2.0 (2,000,000–2,000,999) to `v9-rc3`.
+ * The `spec_version` of every in-memory block unless given: runtime 2.1.100's, which every known network's built-in
+ * ledger table maps to v9 ({@link IN_MEMORY_LEDGER}); those tables map runtime 2.0 (2,000,000–2,000,999) to `v9-rc3`
+ * and runtime 2.1.0 (2,001,000–2,001,099) to `v9-rc5`.
  */
-export const IN_MEMORY_SPEC_VERSION = 2_001_000;
+export const IN_MEMORY_SPEC_VERSION = 2_001_100;
 
 /** The ledger version of every in-memory block unless given: the one the tables pair with its runtime. */
 export const IN_MEMORY_LEDGER = "v9";

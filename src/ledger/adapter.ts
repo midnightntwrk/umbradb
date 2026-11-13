@@ -75,7 +75,9 @@ import type {
   StateSummary,
   TransactionResult,
   VmLog,
+  ZswapEvidence,
 } from "./types.js";
+import { ZSWAP_CIPHERTEXT_BYTES } from "./types.js";
 
 /** A resource cost in the ledger's dimensions (`SyntheticCost`). */
 export interface SyntheticCost {
@@ -251,6 +253,13 @@ const KIND_BY_VARIANT: Readonly<Record<string, EventKind>> = {
   DustSpendProcessed: "dust-spend-processed",
 };
 
+/** A zswap output's evidence kind, by the name the packages' patched event details give it (`preimageEvidenceKind`). */
+const EVIDENCE_BY_KIND: Readonly<Record<string, ZswapEvidence>> = {
+  ciphertext: "ciphertext",
+  publicPreimage: "public",
+  none: "none",
+};
+
 const hexText = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
 const bytesOf = (hex: string): Uint8Array => Uint8Array.from(Buffer.from(hex, "hex"));
 const sha256 = (bytes: Uint8Array): Uint8Array => Uint8Array.from(createHash("sha256").update(bytes).digest());
@@ -344,22 +353,42 @@ export function eventKindOf(event: RawEvent): EventKind {
 export function ledgerEventOf(event: RawEvent, kind: LedgerEventKind, transaction: number): LedgerEvent {
   const content = event.content as Record<string, unknown>;
   const optionalAddress = (value: unknown): Uint8Array | null => (typeof value === "string" ? bytesOf(value) : null);
-  const extracted: Pick<LedgerEvent, "nullifier" | "commitment" | "treeIndex" | "contractAddress"> = {
+  const extracted: Pick<
+    LedgerEvent,
+    "nullifier" | "commitment" | "treeIndex" | "contractAddress" | "evidence" | "ciphertext"
+  > = {
     nullifier: null,
     commitment: null,
     treeIndex: null,
     contractAddress: null,
+    evidence: null,
+    ciphertext: null,
   };
   switch (kind) {
     case "zswap-input":
       extracted.nullifier = bytesOf(content.nullifier as string);
       extracted.contractAddress = optionalAddress(content.contract);
       break;
-    case "zswap-output":
+    case "zswap-output": {
       extracted.commitment = bytesOf(content.commitment as string);
       extracted.treeIndex = BigInt(content.mtIndex as bigint);
       extracted.contractAddress = optionalAddress(content.contract);
+      const evidence = EVIDENCE_BY_KIND[String(content.preimageEvidenceKind)];
+      if (evidence === undefined) {
+        throw new Error(`a zswap output event whose preimage evidence kind is ${String(content.preimageEvidenceKind)}`);
+      }
+      extracted.evidence = evidence;
+      const ciphertext = content.ciphertext;
+      if (evidence === "ciphertext") {
+        if (!(ciphertext instanceof Uint8Array) || ciphertext.length !== ZSWAP_CIPHERTEXT_BYTES) {
+          throw new Error(`a zswap output event whose ciphertext is not ${ZSWAP_CIPHERTEXT_BYTES} bytes`);
+        }
+        extracted.ciphertext = Uint8Array.from(ciphertext);
+      } else if (ciphertext !== undefined) {
+        throw new Error(`a zswap output event with ${evidence} evidence and a ciphertext`);
+      }
       break;
+    }
     case "dust-initial-utxo":
       extracted.treeIndex = BigInt(content.generationIndex as bigint);
       break;

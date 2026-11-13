@@ -94,6 +94,8 @@ function eventRows(height: bigint, output: ApplyOutput): string[] {
       commitment: plainHex(event.commitment),
       tree_index: event.treeIndex === null ? null : `${event.treeIndex}`,
       contract_address: plainHex(event.contractAddress),
+      evidence: event.evidence,
+      ciphertext: plainHex(event.ciphertext),
     });
   });
 }
@@ -107,7 +109,8 @@ const SEGMENTS_SQL = `SELECT height::text, tx_index::text, segment, success FROM
   ORDER BY height, tx_index, segment`;
 const EVENTS_SQL = `SELECT height::text, tx_index::text, event_index::text, kind, logical_segment, physical_segment,
   encode(bytes, 'hex') AS bytes, encode(nullifier, 'hex') AS nullifier, encode(commitment, 'hex') AS commitment,
-  tree_index::text, encode(contract_address, 'hex') AS contract_address
+  tree_index::text, encode(contract_address, 'hex') AS contract_address, evidence,
+  encode(ciphertext, 'hex') AS ciphertext
   FROM core_ledger_state.events ORDER BY height, tx_index, event_index`;
 
 /** Compares two lists of rows, naming each one missing or unexpected. */

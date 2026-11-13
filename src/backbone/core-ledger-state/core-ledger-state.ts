@@ -99,7 +99,7 @@ import type { BlockWriteHandle, ReadHandle } from "../../db/api.js";
 import { UmbraError } from "../../db/errors.js";
 import { firstRegularAtParentTime, parentTimestampMs } from "../../ledger/replay.js";
 import type { ChainOutcome, LedgerEvent, LedgerName, StateSummary, TransactionResult, VmLog } from "../../ledger/types.js";
-import { type AppliedState, type ContractKeys, isEvictionRefused } from "../../ledger/worker/engine.js";
+import { type AppliedState, type ContractKeys, convertsFromV8, isEvictionRefused } from "../../ledger/worker/engine.js";
 import type { LedgerHost } from "../../ledger/worker/host.js";
 import { type BlockContext, type DefinedModule, defineModule, type ModuleDeclaration, type ProcessContext } from "../../modules/declaration.js";
 import { blockHeaderOf, ledgerVersionOf } from "../core-block-commit/core-block-commit.js";
@@ -411,7 +411,7 @@ export async function applyBlock(
     const persists = (options.persistsContracts ?? ((c: BlockContext) => c.active(CORE_CONTRACT_STATES_ID)))(b);
     const applyWith = (options.ledgerOf ?? (() => ledger))(b, parent.ledger);
     // At the conversion block F the worker converts the v8 state first, so every contract it holds gets new keys.
-    const others = persists ? [maintainedOf(b), parent.ledger === "v8" && applyWith === "v9" ? await deployedBelow(read, b.height) : []] : [];
+    const others = persists ? [maintainedOf(b), convertsFromV8(parent.ledger, applyWith) ? await deployedBelow(read, b.height) : []] : [];
     applied = await host.apply(
       {
         ledger: applyWith,

@@ -26,14 +26,17 @@ import type { FoundTape } from "../tape/real/real-tapes.js";
 /** The ledger's core modules as the build enables them (`core-ledger-state` and what it requires). */
 export const LEDGER_CORE: readonly ModuleDeclaration[] = Object.freeze([CORE_CHAIN_EVENTS, CORE_BLOCK_PARSED, CORE_TX_RESULTS, CORE_LEDGER_STATE]);
 
-/** The devnet's `core` settings: a custom network, its genesis from the manifest, its table v8 then v9. */
+/**
+ * The devnet's `core` settings: a custom network, its genesis from the manifest, its table v8 then v9 as its node
+ * (2.1.0-rc.4, runtime 2_001_000) built it, `v9-rc5`.
+ */
 export const devnetSettings = (found: FoundTape): Readonly<Record<string, unknown>> => ({
   network: "custom",
   genesisHash: (found.tape.notes as { readonly genesis: { readonly hash: string } }).genesis.hash,
   ledgerTable: {
     rows: [
       { specVersionMin: 1_000_000, specVersionMax: 1_999_999, ledger: "v8" },
-      { specVersionMin: 2_000_000, specVersionMax: 2_999_999, ledger: "v9" },
+      { specVersionMin: 2_000_000, specVersionMax: 2_999_999, ledger: "v9-rc5" },
     ],
   },
 });

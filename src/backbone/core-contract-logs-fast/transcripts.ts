@@ -26,8 +26,8 @@
  *
  * The function takes what a ledger task takes: the native parsed object and `rawPackages()`. The module's ledger task
  * (`./task.ts`) runs it in the ledger worker on the block's one parse. It reads with the v9 package of the block's
- * ledger, the one `rawPackages()` holds: rc.5's, or rc.3's on runtime 2.0 blocks (`v9-rc3`, with the same API in a
- * module of its own).
+ * ledger, the one `rawPackages()` holds: 9.1.0.1's, rc.5's on runtime 2.1.0 blocks (`v9-rc5`), or rc.3's on runtime
+ * 2.0 blocks (`v9-rc3`), each with the same API in a module of its own.
  */
 
 import type { LogItem } from "../../ledger/types.js";
@@ -56,8 +56,15 @@ export interface LogSite {
 /** The vendored v9 package's name in `rawPackages()` (`src/ledger/releases.ts`). */
 export const V9_PACKAGE = "@umbradb/vendored-ledger-v9";
 
-/** The vendored v9 packages' names in `rawPackages()`: rc.5's, and rc.3's for runtime 2.0 blocks. */
-export const V9_PACKAGES: readonly string[] = Object.freeze([V9_PACKAGE, "@umbradb/vendored-ledger-v9-rc3"]);
+/**
+ * The vendored v9 packages' names in `rawPackages()`: 9.1.0.1's, rc.5's for runtime 2.1.0 blocks, and rc.3's for
+ * runtime 2.0 blocks.
+ */
+export const V9_PACKAGES: readonly string[] = Object.freeze([
+  V9_PACKAGE,
+  "@umbradb/vendored-ledger-v9-rc5",
+  "@umbradb/vendored-ledger-v9-rc3",
+]);
 
 /** What of the v9 package the reading uses. */
 interface V9Raw {
