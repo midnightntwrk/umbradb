@@ -26,7 +26,8 @@
  * - `config` writes the configuration file and the `umbradb` link into `--out`, as `up` does, and starts nothing (the
  *   module's start is `--module-start`, 0 unless given): for `umbradb config check` before an `up`.
  * - `down` stops the run container (SIGTERM; the height in progress finishes) and removes it; the database stays.
- * - `record` appends every changed `/status` sample to `status.jsonl` and the run's log to `run.log`, until killed.
+ * - `record` appends every changed `/status` sample to `status.jsonl` and the run's log to `run.log`, until killed. It
+ *   rides through a restart (`down`, then `up`): it waits up to 15 minutes for the run container to come back.
  * - `destroy` removes the run container, the database, its volume and the network.
  *
  * The core modules are the ones the module needs: chain events, parsed blocks, transaction results, ledger state.
@@ -47,6 +48,8 @@ const DATABASE = "umbradb";
 const ADMIN_PORT = 8081;
 const API_PORT = 8080;
 const STOP_TIMEOUT_S = 300;
+/** How long `record` waits for a stopped run container to come back (a restart) before it stops. */
+const RESTART_WAIT_S = 900;
 const CORE_MODULES = ["CORE_CHAIN_EVENTS", "CORE_BLOCK_PARSED", "CORE_TX_RESULTS", "CORE_LEDGER_STATE"];
 
 const [command, ...rest] = process.argv.slice(2);
@@ -224,11 +227,17 @@ async function down() {
 }
 
 async function record() {
-  const admin = docker(["port", names.run, `${ADMIN_PORT}/tcp`]).split("\n")[0];
   const log = createWriteStream(join(out, "run.log"), { flags: "a" });
-  const logs = spawn("docker", ["logs", "-f", "-t", "--since", new Date().toISOString(), names.run], { stdio: ["ignore", "pipe", "pipe"] });
-  logs.stdout.pipe(log);
-  logs.stderr.pipe(log);
+  /** Follows the run container's log from now; a restarted container is a new one, so it is followed again. */
+  const follow = () => {
+    const logs = spawn("docker", ["logs", "-f", "-t", "--since", new Date().toISOString(), names.run], { stdio: ["ignore", "pipe", "pipe"] });
+    logs.stdout.pipe(log, { end: false });
+    logs.stderr.pipe(log, { end: false });
+    return logs;
+  };
+  const adminOf = () => docker(["port", names.run, `${ADMIN_PORT}/tcp`]).split("\n")[0];
+  let admin = adminOf();
+  let logs = follow();
   let last = "";
   for (;;) {
     try {
@@ -240,7 +249,19 @@ async function record() {
         last = key;
       }
     } catch {
-      if (!running(names.run)) break;
+      if (!running(names.run)) {
+        // A `down` followed by an `up` (a restart) leaves the container away for a minute or two: wait up to
+        // RESTART_WAIT_S for it, then follow the new one; stop only if it does not come back.
+        logs.kill();
+        let back = false;
+        for (let waited = 0; waited < RESTART_WAIT_S && !back; waited += 2) {
+          await sleep(2000);
+          back = running(names.run);
+        }
+        if (!back) break;
+        admin = adminOf();
+        logs = follow();
+      }
     }
     await sleep(1000);
   }
