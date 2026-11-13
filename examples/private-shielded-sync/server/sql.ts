@@ -1,0 +1,100 @@
+/**
+ * The module's reads of the core's tables (spec FR-002, FR-010–013): `core_ledger_state.events` (item `ledger-events`),
+ * `core_ledger_state.states` (item `ledger-state`), `core_block_commit.blocks` (item `blocks`) and the chain's identity.
+ * The module owns no tables and writes nothing.
+ */
+
+import type { ReadHandle, ZswapEvidence } from "umbradb";
+import type { NullifierEvent, OutputEvent } from "./zswap-index.ts";
+
+type Reader = Pick<ReadHandle, "query">;
+
+/** Zswap outputs and inputs of the heights `($1, $2]`, in application order. DUST spends are another kind. */
+const ZSWAP_EVENTS_SQL = `SELECT height, tx_index, kind, tree_index, commitment, evidence, ciphertext, nullifier
+  FROM core_ledger_state.events
+  WHERE kind IN ('zswap-output', 'zswap-input') AND height > $1::bigint AND height <= $2::bigint
+  ORDER BY height, tx_index, event_index`;
+const CURSOR_SQL = "SELECT max(height) AS height FROM core_block_commit.blocks";
+const STATE_AT_SQL = `SELECT s.zswap_first_free, s.zswap_root, b.hash
+  FROM core_ledger_state.states s JOIN core_block_commit.blocks b ON b.height = s.height
+  WHERE s.height = $1::bigint`;
+const BLOCK_HASH_SQL = "SELECT hash FROM core_block_commit.blocks WHERE height = $1::bigint";
+const GENESIS_SQL = "SELECT genesis_hash FROM core_chain.identity WHERE id = 1";
+
+const bytes = (value: unknown, what: string): Uint8Array => {
+  if (!(value instanceof Uint8Array)) throw new TypeError(`${what} is not bytes`);
+  return value;
+};
+
+const int = (value: unknown, what: string): number => {
+  const n = typeof value === "bigint" ? Number(value) : typeof value === "number" ? value : Number.NaN;
+  if (!Number.isSafeInteger(n) || n < 0) throw new TypeError(`${what} is not a non-negative integer: ${String(value)}`);
+  return n;
+};
+
+/** One height's Zswap events, grouped. */
+export interface HeightEvents {
+  readonly height: number;
+  readonly outputs: OutputEvent[];
+  readonly nullifiers: NullifierEvent[];
+}
+
+/** The Zswap events of the heights `(from, to]`, grouped by height in increasing order (heights without any omitted). */
+export async function zswapEvents(read: Reader, from: number, to: number): Promise<HeightEvents[]> {
+  const rows = await read.query(ZSWAP_EVENTS_SQL, [from, to]);
+  const out: HeightEvents[] = [];
+  let current: HeightEvents | undefined;
+  for (const row of rows) {
+    const height = int(row.height, "events.height");
+    if (current === undefined || current.height !== height) {
+      current = { height, outputs: [], nullifiers: [] };
+      out.push(current);
+    }
+    const txIndex = int(row.tx_index, "events.tx_index");
+    if (row.kind === "zswap-output") {
+      current.outputs.push({
+        height,
+        txIndex,
+        position: int(row.tree_index, "events.tree_index"),
+        commitment: bytes(row.commitment, "events.commitment"),
+        evidence: row.evidence as ZswapEvidence,
+        ciphertext: row.ciphertext === null ? null : bytes(row.ciphertext, "events.ciphertext"),
+      });
+    } else {
+      current.nullifiers.push({ height, txIndex, nullifier: bytes(row.nullifier, "events.nullifier") });
+    }
+  }
+  return out;
+}
+
+/** The committed height (the cursor), or −1 before any. */
+export async function cursorOf(read: Reader): Promise<number> {
+  const [row] = await read.query(CURSOR_SQL);
+  return row?.height === null || row?.height === undefined ? -1 : int(row.height, "blocks.height");
+}
+
+/** The tree's first free index and stored root after block `height`, and the block's hash; null when none is stored. */
+export async function stateAt(
+  read: Reader,
+  height: number,
+): Promise<{ readonly firstFree: number; readonly root: Uint8Array; readonly hash: Uint8Array } | null> {
+  const [row] = await read.query(STATE_AT_SQL, [height]);
+  if (row === undefined) return null;
+  return {
+    firstFree: int(row.zswap_first_free, "states.zswap_first_free"),
+    root: bytes(row.zswap_root, "states.zswap_root"),
+    hash: bytes(row.hash, "blocks.hash"),
+  };
+}
+
+/** The hash of block `height`, or null when none is stored. */
+export async function blockHashAt(read: Reader, height: number): Promise<Uint8Array | null> {
+  const [row] = await read.query(BLOCK_HASH_SQL, [height]);
+  return row === undefined ? null : bytes(row.hash, "blocks.hash");
+}
+
+/** The chain's genesis hash, or null on a database that has none recorded. */
+export async function genesisHashOf(read: Reader): Promise<Uint8Array | null> {
+  const [row] = await read.query(GENESIS_SQL);
+  return row === undefined ? null : bytes(row.genesis_hash, "identity.genesis_hash");
+}
