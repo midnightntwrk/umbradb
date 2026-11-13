@@ -124,6 +124,10 @@ export default defineConfig({
         // not see; `test/browser/` holds it (headless Chrome; its replacements of Node.js against Node.js's own). The
         // match anywhere would otherwise take `browser/src/` in, held to `src/**`'s floors by its Node.js tests alone.
         "browser/**",
+        // The examples (`examples/`) are not in the package. Their tests run with the rest (the default include takes
+        // `examples/**/*.test.ts`), but their code is not held to `src/**`'s floors; the match anywhere would
+        // otherwise take in an example's own `src/` folder.
+        "examples/**",
       ],
       reporter: ["text", "json-summary", "html"],
       reportsDirectory: "./coverage",
