@@ -729,7 +729,9 @@ async function tail(): Promise<Json> {
   // Each fetched position's full path, as a spend builds it, against the tail's root.
   const view = { pathSplit: m.pathSplit, snapshotFirstFree: m.firstFree, snapshotBlockRoots: blockRoots, tail: tl };
   const paths = [];
-  for (const [p, f] of [...fetched].slice(0, 16)) {
+  for (const [p, f0] of [...fetched].slice(0, 16)) {
+    // A position in the snapshot's partial block: the tail carries its commitment.
+    const f = f0.commitment === null && p >= t0 && p < m.firstFree ? { ...f0, commitment: tl.commitments.slice(32 * (p - t0), 32 * (p - t0) + 32) } : f0;
     if (f.commitment === null) {
       paths.push({ position: p, result: "skipped: its commitment is not known here (not the wallet's coin; read its path to fetch it from the debug database)" });
       continue;
