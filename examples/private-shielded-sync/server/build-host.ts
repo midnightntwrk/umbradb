@@ -36,8 +36,8 @@ type FromWorker =
   | { readonly kind: "done"; readonly result: BuildResult }
   | { readonly kind: "failed"; readonly code: string; readonly message: string };
 
-/** Runs `job` in a new worker thread; rejects with a {@link BuildFailure}. */
-export function runBuildWorker(job: BuildJob): Promise<WorkerOutcome> {
+/** Runs `job` in a new worker thread; rejects with a {@link BuildFailure}. `onStep` is told each step's start and end. */
+export function runBuildWorker(job: BuildJob, onStep?: (name: BuildStep, phase: "start" | "end", ms?: number) => void): Promise<WorkerOutcome> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL("./build-worker.ts", import.meta.url), { workerData: job });
     const steps: Partial<Record<BuildStep, StepStats>> = {};
@@ -61,6 +61,7 @@ export function runBuildWorker(job: BuildJob): Promise<WorkerOutcome> {
     worker.on("message", (message: FromWorker) => {
       if (message.kind === "step") {
         sample();
+        onStep?.(message.name, message.phase, message.report?.ms);
         if (message.phase === "start") {
           current = message.name;
           stepPeak = process.memoryUsage.rss();

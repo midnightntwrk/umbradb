@@ -113,9 +113,10 @@ const VIEWS: Record<string, (r: Json) => string> = {
       facts([
         ["snapshot", `${short(String(r.snapshotId), 24)} at height ${m.height}`],
         ["outputs (first_free)", String(m.firstFree)],
+        ["table size (debug)", m.padding ? `padded to ${Number(m.padding).toLocaleString("en-US")} entries: the outputs spread among noise in the scan file and both tables` : undefined],
         ["tree root", short(String(m.root), 24)],
         ["path split k", `${m.pathSplit} (blocks of ${2 ** Number(m.pathSplit)} outputs; ${m.blocks} block root(s))`],
-        ["read table", `${rt.rows} × ${rt.cols} cells, ${rt.recordsPerColumn} records per column`],
+        ["read table", `${rt.rows} × ${rt.cols} cells, ${rt.recordsPerColumn} records per column, ${Number(rt.records).toLocaleString("en-US")} records`],
         ["nullifier table", `${nt.rows} × ${nt.cols} cells, ${nt.bucketBits} bucket bits, capacity ${nt.capacity}`],
         ["vectors per call", String(m.queriesPerCall)],
         ["checks", checksHtml(r.checks)],
@@ -130,9 +131,10 @@ const VIEWS: Record<string, (r: Json) => string> = {
         ["engine", String(r.engine)],
         ["entries tested", String(r.entries)],
         ["matches", matches.length === 0 ? "none (no output in this snapshot is the wallet's)" : String(matches.length)],
+        ["matches in the padding", Array.isArray(r.noiseMatches) ? `${(r.noiseMatches as number[]).join(", ")} (noise slots, dropped)` : undefined],
         ["time", `${r.ms} ms, ${r.usPerEntry} µs per entry`],
         ["note", String(r.note)],
-      ]) + (matches.length === 0 ? "" : table(["position", "scan entry (point ‖ 4 bytes of element 0)"], matches.map((m) => [String(m.position), esc(String(m.entry))])))
+      ]) + (matches.length === 0 ? "" : table(["position", "scan entry (point ‖ 4 bytes of element 0)"], matches.map((m) => [`${m.position}${m.slot !== m.position ? `<br><small>slot ${m.slot}</small>` : ""}`, esc(String(m.entry))])))
     );
   },
   read: (r) => {
@@ -151,7 +153,7 @@ const VIEWS: Record<string, (r: Json) => string> = {
         records.map((x) => {
           const elements = x.ciphertextElements1to5 === null ? "" : String(x.ciphertextElements1to5);
           return [
-            `${x.position}<br><small>col ${x.column}, slot ${x.slotInColumn}</small>`,
+            `${x.position}<br><small>${x.tableIndex === undefined ? "" : `table index ${x.tableIndex}, `}col ${x.column}, slot ${x.slotInColumn}</small>`,
             esc(short(String(x.commitment), 24)),
             x.ciphertextElements1to5 === null ? "none (output carries no ciphertext)" : esc(short(String(x.ciphertextElements1to5), 24)),
             Array.isArray(x.lowerPath) ? `${(x.lowerPath as unknown[]).length} hashes, ${esc(String(x.lowerPathCheck))}` : esc(String(x.lowerPath)),
@@ -201,13 +203,16 @@ const VIEWS: Record<string, (r: Json) => string> = {
   },
 };
 VIEWS.generate = VIEWS.keys!;
+const padded = (s: Json): string => (s.padding ? `, tables padded to ${Number(s.padding).toLocaleString("en-US")} entries` : "");
 VIEWS.reload = (r) => {
   const now = r.snapshot as Json;
   const before = r.previous as Json | null;
+  const steps = ((r.last as Json | undefined)?.steps ?? null) as Record<string, number> | null;
   return facts([
-    ["new snapshot", `${short(String(now.id), 24)} at height ${now.height}, ${now.firstFree} outputs`],
-    ["previous", before === null ? "none" : `${short(String(before.id), 24)} at height ${before.height}, ${before.firstFree} outputs`],
-    ["build and wait", `${r.ms} ms`],
+    ["new snapshot", `${short(String(now.id), 24)} at height ${now.height}, ${now.firstFree} outputs${padded(now)}`],
+    ["previous", before === null ? "none" : `${short(String(before.id), 24)} at height ${before.height}, ${before.firstFree} outputs${padded(before)}`],
+    ["build and wait", `${(Number(r.ms) / 1000).toFixed(1)} s`],
+    ["build steps", steps === null ? undefined : Object.entries(steps).map(([k, ms]) => `${k} ${(ms / 1000).toFixed(1)} s`).join(", ")],
   ]);
 };
 
@@ -285,6 +290,7 @@ async function run(button: HTMLButtonElement): Promise<void> {
 async function reload(card: HTMLElement, status: HTMLElement): Promise<void> {
   const out = $(".reload-out", card);
   const text = $<HTMLInputElement>("#snapshot-height").value.trim();
+  const padding = $<HTMLSelectElement>("#snapshot-padding").value;
   if (text !== "" && !/^\d+$/.test(text)) {
     out.innerHTML = `<div class="error">the height is a whole number</div>`;
     return;
@@ -292,16 +298,30 @@ async function reload(card: HTMLElement, status: HTMLElement): Promise<void> {
   card.querySelectorAll("button").forEach((b) => (b.disabled = true));
   status.className = "status run";
   status.textContent = "building a snapshot…";
-  out.innerHTML = `<div class="progress">building a snapshot at ${text === "" ? "the synced height" : text} and waiting for it…</div>`;
+  const what = `a snapshot at ${text === "" ? "the synced height" : text}${padding === "" ? "" : `, padded to ${Number(padding).toLocaleString("en-US")} entries`}`;
+  out.innerHTML = `<div class="progress">building ${what} and waiting for it…</div>`;
+  // While the build runs, the server's status names the step in progress and the steps done (a padded build is long).
+  const started = performance.now();
+  const poll = setInterval(async () => {
+    const s = (await fetch("/debug/snapshot").then((x) => x.json()).catch(() => null)) as Json | null;
+    const b = s?.building as Json | null | undefined;
+    if (!b) return;
+    const done = Object.entries((b.done ?? {}) as Record<string, number>).map(([k, ms]) => `${k} ${(ms / 1000).toFixed(1)} s`);
+    const now = b.step ? `${b.step} for ${((Date.now() - Date.parse(String(b.stepStartedAt))) / 1000).toFixed(0)} s` : "preparing";
+    const p = $(".progress", out);
+    if (p) p.textContent = `building ${what}: ${now}${done.length > 0 ? `; done: ${done.join(", ")}` : ""} (${((performance.now() - started) / 1000).toFixed(0)} s in all)`;
+  }, 1000);
   let r: Response;
   let body: Json;
   try {
-    r = await fetch("/debug/reload-snapshot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(text === "" ? {} : { height: Number(text) }) });
+    const request: Json = { ...(text === "" ? {} : { height: Number(text) }), ...(padding === "" ? {} : { padding: Number(padding) }) };
+    r = await fetch("/debug/reload-snapshot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request) });
     body = (await r.json()) as Json;
   } catch (error) {
     r = new Response(null, { status: 502 });
     body = { error: String(error) };
   }
+  clearInterval(poll);
   card.querySelectorAll("button").forEach((b) => (b.disabled = false));
   if (!r.ok) {
     status.className = "status bad";

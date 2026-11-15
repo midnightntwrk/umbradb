@@ -11,7 +11,7 @@
 
 import { createHash } from "node:crypto";
 import { cellsPerRecord, decodeRecord, encodeRecord, ZERO_CELL } from "./encode.ts";
-import { checkNoise, HALF_PLAIN, PLAIN_MODULUS } from "./params.ts";
+import { checkNoise, HALF_PLAIN, MAX_COLUMNS, PLAIN_MODULUS } from "./params.ts";
 
 export interface GridShape {
   /** R = perColumn × E. */
@@ -37,11 +37,15 @@ export const GRID_HEADER_BYTES = 32;
 const GRID_MAGIC = 0x47535350; // "PSSG" read as a little-endian u32
 const GRID_FORMAT_VERSION = 1;
 
-/** The read table's shape for `records` records of `recordBytes` bytes (FR-061). */
+/**
+ * The read table's shape for `records` records of `recordBytes` bytes (FR-061): about square. Above the noise check's
+ * column limit (FR-058, about 16.7M read records) the columns are capped there and grow taller instead (Q57).
+ */
 export function positionalShape(records: number, recordBytes: number): GridShape {
   if (!Number.isInteger(records) || records < 0) throw new Error(`record count must be ≥ 0: ${records}`);
   const e = cellsPerRecord(recordBytes);
-  const perColumn = Math.max(1, Math.round(Math.sqrt(records * e) / e));
+  let perColumn = Math.max(1, Math.round(Math.sqrt(records * e) / e));
+  if (Math.ceil(records / perColumn) > MAX_COLUMNS) perColumn = Math.ceil(records / MAX_COLUMNS);
   const cols = Math.max(1, Math.ceil(records / perColumn));
   return { rows: perColumn * e, cols, perColumn, cellsPerRecord: e, recordBytes, records };
 }

@@ -34,7 +34,7 @@ import { rootOverBlocks } from "../client/sync.ts";
 import { type Hash2, rootFromPath } from "../client/tree.ts";
 import { compileKernel, Kernel } from "../kernel/index.ts";
 import { setupMatrix, WorkerMultiplier } from "../pir/index.ts";
-import { decodeManifest, decodeReadRecord, splitTail } from "../shared/index.ts";
+import { decodeManifest, decodeReadRecord, slotCount, slotOf, splitTail } from "../shared/index.ts";
 
 const { values: opt } = parseArgs({
   options: {
@@ -160,9 +160,10 @@ const stored = outputs.map((r, i) => {
 // 3. The scan file, every entry.
 let scanMismatches = 0;
 let withoutCiphertext = 0;
-check(scan.length === 36 * manifest.firstFree, `scan file ${scan.length} bytes = 36 × ${manifest.firstFree}`);
+check(scan.length === 36 * slotCount(manifest), `scan file ${scan.length} bytes = 36 × ${slotCount(manifest)}`);
 stored.forEach((o, i) => {
-  const entry = scan.subarray(36 * i, 36 * i + 36);
+  const s = slotOf(manifest, i);
+  const entry = scan.subarray(36 * s, 36 * s + 36);
   const want = o.ciphertext === null ? new Uint8Array(36) : o.ciphertext.subarray(0, 36);
   if (o.ciphertext === null) withoutCiphertext++;
   if (!equal(entry, want)) scanMismatches++;

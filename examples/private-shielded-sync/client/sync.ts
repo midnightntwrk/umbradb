@@ -24,7 +24,10 @@ import {
   type Manifest,
   type ReadRecord,
   NULLIFIER_RECORD_BYTES,
+  positionAtSlot,
   SCAN_ENTRY_BYTES,
+  slotCount,
+  slotOf,
   splitTail,
   TAIL_OUTPUT_BYTES,
   toHex,
@@ -218,9 +221,16 @@ async function syncOnce(options: SyncOptions): Promise<SyncResult> {
   // 3. Scan.
   step("scan", "start");
   t = performance.now();
-  const matches = await scanPool.scan(scanFile, keys.scanSecret);
-  const scanStat = { ms: performance.now() - t, entries: firstFree, threads: scanPool.threads, matches: matches.length };
-  log(`scan: ${firstFree} entries, ${matches.length} matches, ${Math.round(scanStat.ms)} ms`);
+  // The scan finds slots; a padded snapshot's slot maps to its tree position, or to none for noise (Q57).
+  const matches: number[] = [];
+  let noiseMatches = 0;
+  for (const s of await scanPool.scan(scanFile, keys.scanSecret)) {
+    const position = positionAtSlot(manifest, s);
+    if (position === null) noiseMatches++;
+    else matches.push(position);
+  }
+  const scanStat = { ms: performance.now() - t, entries: slotCount(manifest), threads: scanPool.threads, matches: matches.length };
+  log(`scan: ${scanStat.entries} entries, ${matches.length} matches${noiseMatches > 0 ? ` (and ${noiseMatches} in the padding, dropped)` : ""}, ${Math.round(scanStat.ms)} ms`);
   step("scan", "end");
 
   // 4. Read the matches by PIR; decrypt and check each.
@@ -240,7 +250,8 @@ async function syncOnce(options: SyncOptions): Promise<SyncResult> {
   for (const position of matches) {
     const record = decodeReadRecord(records.get(position)!, k);
     const block = Math.floor(position / blockSize);
-    const entry = scanFile.subarray(SCAN_ENTRY_BYTES * position, SCAN_ENTRY_BYTES * (position + 1));
+    const slot = slotOf(manifest, position);
+    const entry = scanFile.subarray(SCAN_ENTRY_BYTES * slot, SCAN_ENTRY_BYTES * (slot + 1));
     take(position, checkSnapshotMatch(kernel, keys, entry, record, position % blockSize, blockRoots.subarray(block * NODE_BYTES, (block + 1) * NODE_BYTES)), "snapshot");
   }
   const decryptMs = performance.now() - t;

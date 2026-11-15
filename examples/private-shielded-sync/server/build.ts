@@ -10,13 +10,14 @@
  * root is not the core's `zswap_root` at S (FR-041).
  */
 
-import { createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createHash, randomBytes } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, renameSync, rmSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { compileKernel, Kernel } from "../kernel/kernel.ts";
 import {
-  buildNullifierTable,
+  buildNullifierTableOf,
   buildSetup,
+  cellsPerRecord,
   createGrid,
   deriveSeed,
   encodeGridHeader,
@@ -24,9 +25,11 @@ import {
   gridCellBytes,
   gridDigest,
   type GridShape,
+  HALF_PLAIN,
   type Multiplier,
-  type NullifierEntry,
+  NULLIFIER_RECORD_BYTES,
   PIR_PARAMS,
+  PLAIN_MODULUS,
   positionalShape,
   positionOf,
   setRecord,
@@ -35,6 +38,7 @@ import {
 } from "../pir/index.ts";
 import { FORMAT_VERSION } from "../shared/constants.ts";
 import { encodeManifest, type Manifest, snapshotId, toHex } from "../shared/manifest.ts";
+import { slotOf } from "../shared/padding.ts";
 import { CIPHERTEXT_BYTES, FLAG_CIPHERTEXT, FLAG_LOWER_PATH, readRecordBytes, SCAN_ENTRY_BYTES } from "../shared/records.ts";
 import { buildTree, countingHash, type Hash2, type IncrementalTreeState, NODE_BYTES } from "./tree.ts";
 import { COMMITMENT_BYTES, EVIDENCE_CODE, type IndexSlice, NULLIFIER_BYTES } from "./zswap-index.ts";
@@ -62,6 +66,60 @@ export interface BuildJob {
   /** Absolute. */
   readonly dataDir: string;
   readonly slice: IndexSlice;
+  /**
+   * Debug (Q57): the scan file, the read table and the nullifier table hold this many entries, the real ones spread
+   * among deterministic noise (`../shared/padding.ts`). At least the outputs and the nullifiers; absent: no padding.
+   */
+  readonly padding?: number;
+}
+
+/** Bytes of A (as the setup's transposed copy) and of the setup data, per table column and row, with n = 1,024. */
+const A_BYTES_PER_COLUMN = 1024 * 4;
+const SETUP_BYTES_PER_ROW = 1024 * 4;
+
+/**
+ * About the most memory a padded build of `size` entries holds at once: both tables, their setup data and A, the scan
+ * file, and the nullifier arrays. For the refusal of builds that would not fit (Q57).
+ */
+export function paddedBuildBytes(size: number, pathSplit: number): number {
+  const read = positionalShape(size, readRecordBytes(pathSplit));
+  const nullifierCells = cellsPerRecord(NULLIFIER_RECORD_BYTES);
+  // The nullifier grid's rows are its fullest bucket's load: allow half again the mean.
+  const nullifierGrid = 1.5 * size * nullifierCells * 2;
+  return (
+    read.rows * read.cols * 2 +
+    read.cols * A_BYTES_PER_COLUMN +
+    read.rows * SETUP_BYTES_PER_ROW +
+    nullifierGrid +
+    size * SCAN_ENTRY_BYTES +
+    size * (NULLIFIER_BYTES + 12)
+  );
+}
+
+/** A deterministic byte stream for one use of a padded build: AES-128-CTR keyed by SHA-256(label, block hash, size). */
+function noiseStream(label: string, blockHash: Uint8Array, size: number): (out: Uint8Array) => void {
+  const seed = createHash("sha256").update(`pss-padding/${label}/`).update(blockHash).update(String(size)).digest();
+  const cipher = createCipheriv("aes-128-ctr", seed.subarray(0, 16), seed.subarray(16, 32));
+  const chunk = 1 << 24;
+  const zero = new Uint8Array(chunk);
+  return (out) => {
+    for (let off = 0; off < out.length; off += chunk) {
+      const n = Math.min(chunk, out.length - off);
+      out.set(cipher.update(zero.subarray(0, n)), off);
+    }
+  };
+}
+
+/** Fills every cell of `grid` with a uniformly random 9-bit value (stored centred). */
+function fillNoise(grid: Grid, next: (out: Uint8Array) => void): void {
+  const cells = grid.cells;
+  const bytes = new Uint8Array(cells.buffer, cells.byteOffset, cells.byteLength);
+  const chunk = 1 << 24;
+  for (let off = 0; off < cells.length; off += chunk) {
+    const n = Math.min(chunk, cells.length - off);
+    next(bytes.subarray(off * 2, (off + n) * 2));
+    for (let i = off; i < off + n; i++) cells[i] = (cells[i]! & (PLAIN_MODULUS - 1)) - HALF_PLAIN;
+  }
 }
 
 /** The steps of a build, in order (spec §8's server rows). */
@@ -176,6 +234,13 @@ export async function buildSnapshot(job: BuildJob, hooks: BuildHooks = {}): Prom
       `the index holds ${n} outputs at height ${job.height}, the core's zswap_first_free there is ${job.expectedFirstFree}`,
     );
   }
+  const padding = job.padding;
+  if (padding !== undefined && (!Number.isSafeInteger(padding) || n < 1 || padding < n || padding < job.slice.nullifiers)) {
+    throw new BuildError("invalid-job", `padding ${padding} must be a whole number of at least the ${n} outputs and ${job.slice.nullifiers} nullifiers`);
+  }
+  const slots = padding ?? n;
+  /** Where output `i` sits in the scan file and the read table. */
+  const slotOfOutput = (i: number): number => (padding === undefined ? i : slotOf({ firstFree: n, padding: { size: padding } }, i));
   const commitments = new Uint8Array(job.slice.commitments, 0, n * COMMITMENT_BYTES);
   const ciphertexts = new Uint8Array(job.slice.ciphertexts, 0, n * CIPHERTEXT_BYTES);
   const evidence = new Uint8Array(job.slice.evidence, 0, n);
@@ -202,11 +267,24 @@ export async function buildSnapshot(job: BuildJob, hooks: BuildHooks = {}): Prom
   try {
     // Scan file (FR-030, FR-031): the point and the first 4 bytes of element 0, or 36 zero bytes.
     begin("scan");
-    const scan = new Uint8Array(n * SCAN_ENTRY_BYTES);
-    for (let i = 0; i < n; i++) {
-      if (evidence[i] === EVIDENCE_CODE.ciphertext) {
-        scan.set(ciphertexts.subarray(i * CIPHERTEXT_BYTES, i * CIPHERTEXT_BYTES + SCAN_ENTRY_BYTES), i * SCAN_ENTRY_BYTES);
+    const scan = new Uint8Array(slots * SCAN_ENTRY_BYTES);
+    if (padding !== undefined) {
+      // Noise entries copy a real output's entry (its point, or its zero bytes) with 4 random tag bytes, so each costs
+      // a scanner what a real one does (Q57).
+      const random = new Uint32Array(2 * slots);
+      noiseStream("scan", job.blockHash, padding)(new Uint8Array(random.buffer));
+      const view = new DataView(scan.buffer);
+      for (let s = 0; s < slots; s++) {
+        const from = random[2 * s]! % n;
+        if (evidence[from] !== EVIDENCE_CODE.ciphertext) continue;
+        scan.set(ciphertexts.subarray(from * CIPHERTEXT_BYTES, from * CIPHERTEXT_BYTES + 32), s * SCAN_ENTRY_BYTES);
+        view.setUint32(s * SCAN_ENTRY_BYTES + 32, random[2 * s + 1]!, true);
       }
+    }
+    for (let i = 0; i < n; i++) {
+      const at = slotOfOutput(i) * SCAN_ENTRY_BYTES;
+      if (evidence[i] === EVIDENCE_CODE.ciphertext) scan.set(ciphertexts.subarray(i * CIPHERTEXT_BYTES, i * CIPHERTEXT_BYTES + SCAN_ENTRY_BYTES), at);
+      else scan.fill(0, at, at + SCAN_ENTRY_BYTES);
     }
     const scanRef = artifact(dir, [scan]);
     end("scan", { bytes: scanRef.size });
@@ -233,7 +311,8 @@ export async function buildSnapshot(job: BuildJob, hooks: BuildHooks = {}): Prom
     // Read table (FR-060, FR-061): one record per position.
     begin("readTable");
     const recordBytes = readRecordBytes(k);
-    const readGrid = createGrid(positionalShape(n, recordBytes));
+    const readGrid = createGrid(positionalShape(slots, recordBytes));
+    if (padding !== undefined) fillNoise(readGrid, noiseStream("read", job.blockHash, padding));
     const record = new Uint8Array(recordBytes);
     const pathBytes = k * NODE_BYTES;
     for (let i = 0; i < n; i++) {
@@ -250,7 +329,7 @@ export async function buildSnapshot(job: BuildJob, hooks: BuildHooks = {}): Prom
         flags |= FLAG_LOWER_PATH;
       }
       record[0] = flags;
-      const { column, slot } = positionOf(i, readGrid.perColumn);
+      const { column, slot } = positionOf(slotOfOutput(i), readGrid.perColumn);
       setRecord(readGrid, column, slot, record);
     }
     const readDigest = gridDigest(readGrid);
@@ -266,18 +345,32 @@ export async function buildSnapshot(job: BuildJob, hooks: BuildHooks = {}): Prom
 
     // Nullifier table (FR-062–064).
     begin("nullifierTable");
-    const values = new Uint8Array(job.slice.nullifierValues, 0, job.slice.nullifiers * NULLIFIER_BYTES);
-    const heights = new DataView(job.slice.nullifierHeights, 0, job.slice.nullifiers * 4);
-    const txs = new DataView(job.slice.nullifierTxs, 0, job.slice.nullifiers * 4);
-    const entries: NullifierEntry[] = [];
-    for (let i = 0; i < job.slice.nullifiers; i++) {
-      entries.push({
-        nullifier: values.subarray(i * NULLIFIER_BYTES, (i + 1) * NULLIFIER_BYTES),
-        height: heights.getUint32(i * 4, true),
-        txIndex: txs.getUint32(i * 4, true),
-      });
+    const real = job.slice.nullifiers;
+    const count = padding ?? real;
+    let values: Uint8Array = new Uint8Array(job.slice.nullifierValues, 0, real * NULLIFIER_BYTES);
+    let heights: Uint32Array = new Uint32Array(job.slice.nullifierHeights, 0, real);
+    let txs: Uint32Array = new Uint32Array(job.slice.nullifierTxs, 0, real);
+    if (padding !== undefined) {
+      // Noise: random nullifiers, spent at random heights up to S in one of the first 8 transactions (Q57).
+      const next = noiseStream("nullifier", job.blockHash, padding);
+      const allValues = new Uint8Array(count * NULLIFIER_BYTES);
+      allValues.set(values);
+      next(allValues.subarray(real * NULLIFIER_BYTES));
+      const allHeights = new Uint32Array(count);
+      const allTxs = new Uint32Array(count);
+      allHeights.set(heights);
+      allTxs.set(txs);
+      next(new Uint8Array(allHeights.buffer, real * 4));
+      next(new Uint8Array(allTxs.buffer, real * 4));
+      for (let i = real; i < count; i++) {
+        allHeights[i] = allHeights[i]! % (job.height + 1);
+        allTxs[i] = allTxs[i]! % 8;
+      }
+      values = allValues;
+      heights = allHeights;
+      txs = allTxs;
     }
-    const nullifierTable = buildNullifierTable(entries);
+    const nullifierTable = buildNullifierTableOf({ count, values, heights, txs });
     const nullifierGrid = nullifierTable.grid;
     const nullifierDigest = gridDigest(nullifierGrid);
     const nullifierRef = artifact(dir, [encodeGridHeader(nullifierGrid), gridCellBytes(nullifierGrid)]);
@@ -313,6 +406,7 @@ export async function buildSnapshot(job: BuildJob, hooks: BuildHooks = {}): Prom
       root: toHex(tree.root),
       pathSplit: k,
       queriesPerCall: job.queriesPerCall,
+      ...(padding === undefined ? {} : { padding: { size: padding } }),
       pir: { ...PIR_PARAMS },
       artifacts: {
         scan: scanRef,

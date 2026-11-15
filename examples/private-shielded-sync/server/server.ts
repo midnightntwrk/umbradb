@@ -19,7 +19,7 @@
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import { statSync, writeFileSync } from "node:fs";
-import { arch, availableParallelism, platform } from "node:os";
+import { arch, availableParallelism, platform, totalmem } from "node:os";
 import { join, resolve } from "node:path";
 import type {
   ApiRegistry,
@@ -37,7 +37,7 @@ import { answerQueries, type Grid, MAX_COLUMNS, type Multiplier, WorkerMultiplie
 import { OCTET_STREAM, ROUTES } from "../shared/constants.ts";
 import { fromHex, type Manifest, toHex } from "../shared/manifest.ts";
 import { CALL_HEADER_BYTES, decodeQueryBody, encodeAnswerBody, WireError } from "../shared/wire.ts";
-import type { BuildJob, BuildResult, GridTransfer } from "./build.ts";
+import { type BuildJob, type BuildResult, type GridTransfer, paddedBuildBytes } from "./build.ts";
 import { BuildFailure, runBuildWorker, type WorkerOutcome } from "./build-host.ts";
 import { type Settings, settingsOf } from "./settings.ts";
 import { blockHashAt, cursorOf, genesisHashOf, stateAt, zswapEvents } from "./sql.ts";
@@ -104,6 +104,12 @@ interface Building {
   readonly height: number;
   readonly trigger: "admin" | "every";
   readonly startedAt: string;
+  /** Debug (Q57): the padded size, or null. */
+  readonly padding: number | null;
+  /** The step running now, and when it started; the steps done, with their milliseconds. */
+  step: string | null;
+  stepStartedAt: string | null;
+  readonly done: Record<string, number>;
 }
 
 interface LastBuild {
@@ -114,6 +120,9 @@ interface LastBuild {
   readonly message: string | null;
   readonly finishedAt: string;
   readonly totalMs: number;
+  /** Debug (Q57): the padded size, or null; each step's milliseconds when the build succeeded. */
+  readonly padding: number | null;
+  readonly steps: Record<string, number> | null;
 }
 
 /** The index's load at start, for the benchmark (spec §8, "Read events for a snapshot"). */
@@ -403,14 +412,34 @@ export class PssServer {
   // ── builds ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
   /** Starts a build at S (≤ the index's height); an answer when it cannot start, null when it started. */
-  async #startBuild(height: number, read: ReadHandle, trigger: Building["trigger"]): Promise<HttpAnswer | null> {
+  async #startBuild(height: number, read: ReadHandle, trigger: Building["trigger"], padding?: number): Promise<HttpAnswer | null> {
     if (this.#building !== null) {
       return error(409, "build-running", `a snapshot is being built at ${this.#building.height}`, { building: this.#building });
     }
     if (this.index.error !== null) return error(500, "index-broken", this.index.error);
     if (this.#genesis === null) return error(500, "no-genesis", "the database records no genesis hash");
+    if (padding !== undefined) {
+      const outputs = this.index.outputsAt(height);
+      const nullifiers = this.index.nullifiersAt(height);
+      if (outputs < 1 || padding < outputs || padding < nullifiers) {
+        return error(400, "invalid-padding", `padding must be at least the ${outputs} outputs and ${nullifiers} nullifiers at ${height} (and there must be an output)`);
+      }
+      // Refused when the build would hold more than half the machine's memory, with the snapshot served now (Q57).
+      const held = this.#current === null ? 0 : this.#current.readGrid.cells.byteLength + this.#current.nullifierGrid.cells.byteLength;
+      const needed = paddedBuildBytes(padding, this.settings.pathSplit);
+      const limit = totalmem() / 2;
+      if (needed + held > limit) {
+        const gib = (b: number): string => `${(b / 2 ** 30).toFixed(1)} GiB`;
+        return error(
+          507,
+          "padding-too-large",
+          `a snapshot padded to ${padding.toLocaleString("en-US")} entries needs about ${gib(needed)}, plus ${gib(held)} the served snapshot holds; the limit is half this machine's memory, ${gib(limit)}`,
+          { neededBytes: Math.round(needed), heldBytes: held, limitBytes: limit },
+        );
+      }
+    }
     // Taken before the read below, so a second request arriving meanwhile is refused (one build at a time).
-    const building: Building = { height, trigger, startedAt: new Date().toISOString() };
+    const building: Building = { height, trigger, startedAt: new Date().toISOString(), padding: padding ?? null, step: null, stepStartedAt: null, done: {} };
     this.#building = building;
     let prepared;
     try {
@@ -441,6 +470,7 @@ export class PssServer {
       threads: this.#threads,
       dataDir: this.dataDir,
       slice,
+      ...(padding === undefined ? {} : { padding }),
     };
     const started = performance.now();
     const readEvents = {
@@ -449,8 +479,18 @@ export class PssServer {
       rowsPerSecond: prepared.ms > 0 ? ((outputs + nullifiers) * 1000) / prepared.ms : 0,
       peakRssBytes: prepared.peakRssBytes,
     };
-    this.#log({ event: "build-started", height, trigger, outputs, nullifiers, pathSplit: job.pathSplit });
-    runBuildWorker(job).then(
+    this.#log({ event: "build-started", height, trigger, outputs, nullifiers, pathSplit: job.pathSplit, padding: padding ?? null });
+    const onStep = (name: string, phase: "start" | "end", ms?: number): void => {
+      if (phase === "start") {
+        building.step = name;
+        building.stepStartedAt = new Date().toISOString();
+      } else {
+        building.done[name] = Math.round(ms ?? 0);
+        building.step = null;
+        building.stepStartedAt = null;
+      }
+    };
+    runBuildWorker(job, onStep).then(
       (outcome) => this.#promote(outcome, building, nullifiers, readEvents, started),
       (cause: unknown) => this.#failed(building, cause, started),
     );
@@ -460,7 +500,7 @@ export class PssServer {
   #failed(building: Building, cause: unknown, started: number): void {
     const code = cause instanceof BuildFailure ? cause.code : "build-failed";
     const message = cause instanceof Error ? cause.message : String(cause);
-    this.#last = { height: building.height, ok: false, id: null, code, message, finishedAt: new Date().toISOString(), totalMs: performance.now() - started };
+    this.#last = { height: building.height, ok: false, id: null, code, message, finishedAt: new Date().toISOString(), totalMs: performance.now() - started, padding: building.padding, steps: null };
     this.#building = null;
     this.#log({ event: "build-failed", height: building.height, code, message });
   }
@@ -501,6 +541,7 @@ export class PssServer {
         nullifiers,
         pathSplit: result.manifest.pathSplit,
         queriesPerCall: result.manifest.queriesPerCall,
+        padding: building.padding,
         threads: this.#threads,
         startedAt: building.startedAt,
         finishedAt: new Date().toISOString(),
@@ -514,7 +555,8 @@ export class PssServer {
         machine: { node: process.version, platform: platform(), arch: arch(), cpus: availableParallelism() },
       };
       writeFileSync(join(snapshot.dir, STATS_FILE), `${JSON.stringify(stats, null, 2)}\n`);
-      this.#last = { height: building.height, ok: true, id: snapshot.id, code: null, message: null, finishedAt: stats.finishedAt, totalMs };
+      const stepMs = Object.fromEntries(Object.entries(outcome.steps).map(([name, step]) => [name, Math.round(step.ms)]));
+      this.#last = { height: building.height, ok: true, id: snapshot.id, code: null, message: null, finishedAt: stats.finishedAt, totalMs, padding: building.padding, steps: stepMs };
       this.#log({ event: "build-done", height: building.height, id: snapshot.id, totalMs, previous: this.#previous?.id ?? null, pruned });
     } catch (cause) {
       this.#failed(building, cause, started);
@@ -656,8 +698,12 @@ export class PssServer {
   async #adminBuild(req: HttpRequest<unknown>, read: ReadHandle): Promise<HttpAnswer> {
     const refused = this.#admin(req);
     if (refused !== null) return refused;
-    const body = (req.body ?? {}) as { height?: unknown };
+    const body = (req.body ?? {}) as { height?: unknown; padding?: unknown };
     if (typeof body !== "object" || body === null || Array.isArray(body)) return error(400, "invalid-request", "the body is a JSON object");
+    const padding = body.padding;
+    if (padding !== undefined && padding !== null && (typeof padding !== "number" || !Number.isSafeInteger(padding) || padding < 1)) {
+      return error(400, "invalid-padding", "padding is a whole number of entries, or absent");
+    }
     const indexed = this.index.height;
     if (indexed < 0) return error(409, "no-committed-height", "no height is committed yet");
     const height = body.height === undefined ? indexed : body.height;
@@ -668,7 +714,7 @@ export class PssServer {
     if (current !== null && height < current.manifest.height) {
       return error(400, "invalid-height", `height must not be below the current snapshot's ${current.manifest.height}`);
     }
-    const refusedBuild = await this.#startBuild(height, read, "admin");
+    const refusedBuild = await this.#startBuild(height, read, "admin", typeof padding === "number" ? padding : undefined);
     if (refusedBuild !== null) return refusedBuild;
     return { status: 202, body: { building: this.#building } };
   }
@@ -697,7 +743,10 @@ export class PssServer {
       indexLoad: this.#indexLoad,
       tip: tip === null ? null : { height: tip.height, firstFree: tip.firstFree, root: toHex(tip.root) },
       head: this.#head,
-      current: this.#current === null ? null : { id: this.#current.id, height: this.#current.manifest.height, firstFree: this.#current.manifest.firstFree },
+      current:
+        this.#current === null
+          ? null
+          : { id: this.#current.id, height: this.#current.manifest.height, firstFree: this.#current.manifest.firstFree, padding: this.#current.manifest.padding?.size ?? null },
       previous: this.#previous === null ? null : { id: this.#previous.id },
       tail: this.#tail === null ? null : { next: this.#tail.tree.next, error: this.#tail.error },
       building: this.#building,

@@ -38,6 +38,11 @@ export interface Manifest {
   readonly pathSplit: number;
   /** Vectors per query call (FR-065). */
   readonly queriesPerCall: number;
+  /**
+   * Debug (Q57): the scan file, the read table and the nullifier table hold `size` entries, the real outputs spread
+   * among noise (`./padding.ts`). Absent on every snapshot built from the chain alone.
+   */
+  readonly padding?: { readonly size: number };
   /** SimplePIR parameters (FR-050). */
   readonly pir: { readonly logQ: number; readonly n: number; readonly sigma: number; readonly cellBits: number; readonly plainModulus: number };
   readonly artifacts: {
@@ -123,14 +128,20 @@ export function validateManifest(m: Manifest): void {
   need(typeof m.pir === "object" && m.pir !== null, "pir");
   for (const k of ["logQ", "n", "cellBits", "plainModulus"] as const) need(isCount(m.pir[k]), `pir.${k}`);
   need(typeof m.pir.sigma === "number" && m.pir.sigma > 0, "pir.sigma");
+  let slots = m.firstFree;
+  if (m.padding !== undefined) {
+    need(typeof m.padding === "object" && m.padding !== null && Object.keys(m.padding).length === 1, "padding is {size}");
+    need(isCount(m.padding.size) && m.firstFree >= 1 && m.padding.size >= m.firstFree, "padding.size ≥ firstFree ≥ 1");
+    slots = m.padding.size;
+  }
   const a = m.artifacts;
   need(typeof a === "object" && a !== null, "artifacts");
   checkRef(a.scan, "scan");
-  need(a.scan.size === 36 * m.firstFree, "scan.size = 36 × firstFree");
+  need(a.scan.size === 36 * slots, "scan.size = 36 × slots");
   checkRef(a.blockRoots, "blockRoots");
   need(isCount(a.blockRoots.blocks) && a.blockRoots.size === 32 * a.blockRoots.blocks, "blockRoots.blocks");
   checkTable(a.readTable, "readTable");
-  need(a.readTable.records === m.firstFree, "readTable.records = firstFree");
+  need(a.readTable.records === slots, "readTable.records = slots");
   checkRef(a.readSetup, "readSetup");
   need(a.readSetup.size === a.readTable.rows * m.pir.n * 4, "readSetup.size = R × n × 4");
   checkTable(a.nullifierTable, "nullifierTable");

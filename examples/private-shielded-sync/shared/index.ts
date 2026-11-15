@@ -4,3 +4,4 @@ export * from "./constants.ts";
 export * from "./records.ts";
 export * from "./wire.ts";
 export * from "./manifest.ts";
+export * from "./padding.ts";

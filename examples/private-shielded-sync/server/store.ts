@@ -8,7 +8,7 @@
 import { createHash } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { deserializeGrid, type Grid } from "../pir/index.ts";
+import { checkNoise, decodeGridHeader, GRID_HEADER_BYTES, type Grid } from "../pir/index.ts";
 import { decodeManifest, type Manifest, snapshotId, toHex } from "../shared/manifest.ts";
 import { BUILDS_DIR, MANIFEST_FILE, SNAPSHOTS_DIR } from "./build.ts";
 
@@ -94,9 +94,32 @@ export function verifyArtifacts(snapshot: StoredSnapshot): void {
   }
 }
 
-/** A PIR table artifact loaded into shared memory. */
+/**
+ * A PIR table artifact loaded into shared memory, read in chunks: a padded snapshot's table is larger than the 2 GiB
+ * `readFileSync` reads (Q57).
+ */
 export function loadGrid(snapshot: StoredSnapshot, name: "readTable" | "nullifierTable"): Grid {
-  return deserializeGrid(new Uint8Array(readFileSync(join(snapshot.dir, snapshot.manifest.artifacts[name].digest))));
+  const path = join(snapshot.dir, snapshot.manifest.artifacts[name].digest);
+  const fd = openSync(path, "r");
+  try {
+    const header = new Uint8Array(GRID_HEADER_BYTES);
+    if (readSync(fd, header, 0, GRID_HEADER_BYTES, 0) !== GRID_HEADER_BYTES) throw new Error(`${name} is shorter than its header`);
+    const shape = decodeGridHeader(header);
+    const expected = GRID_HEADER_BYTES + shape.rows * shape.cols * 2;
+    if (statSync(path).size !== expected) throw new Error(`${name} must be ${expected} bytes`);
+    checkNoise(shape.cols);
+    const cells = new Int16Array(new SharedArrayBuffer(shape.rows * shape.cols * 2));
+    const bytes = new Uint8Array(cells.buffer);
+    const chunk = 1 << 26;
+    for (let off = 0; off < bytes.length; ) {
+      const read = readSync(fd, bytes, off, Math.min(chunk, bytes.length - off), GRID_HEADER_BYTES + off);
+      if (read === 0) throw new Error(`${name} ended early`);
+      off += read;
+    }
+    return { ...shape, cells };
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /** An artifact's bytes. */

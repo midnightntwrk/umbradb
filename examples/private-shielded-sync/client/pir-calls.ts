@@ -20,7 +20,7 @@ import {
   positionOf,
   type TableInfo,
 } from "../pir/index.ts";
-import { decodeAnswerBody, encodeQueryBody, fromHex, type Manifest, type PirTableRef } from "../shared/index.ts";
+import { decodeAnswerBody, encodeQueryBody, fromHex, type Manifest, type PirTableRef, slotOf } from "../shared/index.ts";
 import type { PssHttp } from "./http.ts";
 
 /** Where a call's time went (spec §8: client build, round trip, client decode) and what it moved. */
@@ -96,7 +96,13 @@ async function pirColumns(
   return out;
 }
 
-/** Reads the records at `positions` of the read table by PIR (story 3); record bytes by position. */
+/** Where tree position `position` sits in the read table: its slot (`../shared/padding.ts`), column and place there. */
+export function readCell(manifest: Manifest, position: number): { index: number; column: number; slot: number } {
+  const index = slotOf(manifest, position);
+  return { index, ...positionOf(index, manifest.artifacts.readTable.perColumn) };
+}
+
+/** Reads the records of tree positions `positions` from the read table by PIR (story 3); record bytes by position. */
 export async function readPositions(
   http: PssHttp,
   manifest: Manifest,
@@ -107,15 +113,10 @@ export async function readPositions(
   stats: CallStats = emptyCallStats(),
 ): Promise<Map<number, Uint8Array>> {
   const ref = manifest.artifacts.readTable;
-  for (const p of positions) {
-    if (!Number.isInteger(p) || p < 0 || p >= ref.records) throw new Error(`position ${p} is not in the read table`);
-  }
-  const columns = await pirColumns(http, "read", ref, manifest, snapshotId, setup, positions.map((p) => positionOf(p, ref.perColumn).column), multiplier, stats);
+  const cells = positions.map((p) => readCell(manifest, p));
+  const columns = await pirColumns(http, "read", ref, manifest, snapshotId, setup, cells.map((c) => c.column), multiplier, stats);
   const out = new Map<number, Uint8Array>();
-  for (const p of positions) {
-    const { column, slot } = positionOf(p, ref.perColumn);
-    out.set(p, columnRecords(ref, columns.get(column)!)[slot]!);
-  }
+  positions.forEach((p, i) => out.set(p, columnRecords(ref, columns.get(cells[i]!.column)!)[cells[i]!.slot]!));
   return out;
 }
 

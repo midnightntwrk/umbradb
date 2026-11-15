@@ -88,6 +88,12 @@ curl -s http://127.0.0.1:10480/pss/v1/manifest
 
 With `snapshotEvery: N` the module also builds one at every multiple of N once it follows the head.
 
+For timing at sizes the chain has not reached, the admin route also takes `"padding": N` (debug): the scan file and
+both PIR tables then hold N entries, output i at slot ⌊i·N/first_free⌋ and the other slots deterministic noise
+(scan entries copying real points, random read cells, random nullifiers). The manifest records `"padding": {"size":
+N}` and clients map positions to slots. A build that would need more than half the machine's memory is refused with
+its estimate; on 48 GiB that admits 10M entries. While a build runs, the status names its step.
+
 **4. Sync wallets, read balances, check them against the ledger:**
 
 ```sh
@@ -177,11 +183,13 @@ Two options turn on debug routes that are no part of the private protocol:
 - **`--db-url`** reads the server's database directly, so the page can compare what PIR returned with what UmbraDB
   stored, and can fill real nullifiers.
 - **`--admin-secret-file`** adds `POST /debug/reload-snapshot` and a "Reload the snapshot" control in step 2. The route
-  builds a new snapshot, waits for it, and answers with the new and previous snapshots. Its body is `{}` for the synced
-  height or `{"height": h}`; the module refuses a height below the served snapshot's. The control then gets the new
-  snapshot's files and clears the later steps. The page never holds the secret. For example:
+  builds a new snapshot, waits for it (up to two hours), and answers with the new and previous snapshots. Its body is
+  `{}` for the synced height or `{"height": h}`, and optionally `"padding": N`; the module refuses a height below the
+  served snapshot's. The control's "table size" drop-down sets the padding (none, 100k, 1M, 2M, 10M, 20M, 100M) and
+  shows the build's step while it runs. The control then gets the new snapshot's files and clears the later steps. The
+  page never holds the secret. For example:
 
-      curl -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:10490/debug/reload-snapshot
+      curl -X POST -H 'Content-Type: application/json' -d '{"padding": 1000000}' http://127.0.0.1:10490/debug/reload-snapshot
 
 The worker runs the client's files bundled by esbuild:
 - `web/shims/` replaces the Node.js modules they import: SHA-256 from `@noble/hashes`, AES-128-CTR in plain

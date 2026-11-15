@@ -28,6 +28,7 @@
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 6px 0; }
   textarea, input[type=text] { width: 100%; background: var(--code); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 7px 8px; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
   textarea { min-height: 54px; resize: vertical; }
+  select { background: var(--code); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; margin-left: 4px; }
   button { background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 7px 12px; font: inherit; cursor: pointer; }
   button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--line); }
   button:disabled { opacity: .5; cursor: default; }
@@ -92,8 +93,19 @@
       <div class="row"><button data-run="files">Get files</button></div>
       <div class="row" id="reload-row" hidden>
         <input type="text" id="snapshot-height" placeholder="height (default: the synced height)" autocomplete="off" style="width: 260px">
+        <label>table size
+          <select id="snapshot-padding" title="Pads the scan file, the read table and the nullifier table to this many entries: the real ones spread among noise">
+            <option value="">none: the actual data (smallest tables)</option>
+            <option value="100000">100k</option>
+            <option value="1000000">1M</option>
+            <option value="2000000">2M</option>
+            <option value="10000000">10M</option>
+            <option value="20000000">20M</option>
+            <option value="100000000">100M</option>
+          </select>
+        </label>
         <button class="secondary" data-run="reload">Reload the snapshot (debug)</button>
-        <span class="desc" style="margin: 0">builds a new snapshot on the server, then gets its files</span>
+        <span class="desc" style="margin: 0">builds a new snapshot on the server, then gets its files. A table size pads the scan file and both PIR tables to that many entries, the real data spread among noise, to time each step with more data.</span>
       </div>
       <div class="reload-out"></div>
       <div class="out"></div>

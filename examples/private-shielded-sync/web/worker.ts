@@ -15,12 +15,12 @@ import { formatShieldedAddress } from "../client/address.ts";
 import { PssHttp } from "../client/http.ts";
 import { keysFromZswapSeed, type WalletKeys } from "../client/keys.ts";
 import type { Ledger } from "../client/ledger.ts";
-import { emptyCallStats, lookupNullifiers, paddedCalls, readPositions } from "../client/pir-calls.ts";
+import { emptyCallStats, lookupNullifiers, paddedCalls, readCell, readPositions } from "../client/pir-calls.ts";
 import { coinPath } from "../client/send.ts";
 import { checkCiphertext, checkSnapshotMatch, rootOverBlocks } from "../client/sync.ts";
 import { type Hash2, rootFromPath, TREE_DEPTH } from "../client/tree.ts";
 import { Kernel } from "../kernel/index.ts";
-import { bucketOf, decodeNullifierRecord, inlineMultiplier, type Matrix, NULLIFIER_RECORD_BYTES, positionOf, setupMatrix } from "../pir/index.ts";
+import { bucketOf, decodeNullifierRecord, inlineMultiplier, type Matrix, NULLIFIER_RECORD_BYTES, setupMatrix } from "../pir/index.ts";
 import {
   type ArtifactRef,
   decodeManifest,
@@ -28,7 +28,10 @@ import {
   decodeTailHeader,
   decodeTailOutput,
   type Manifest,
+  positionAtSlot,
   ROUTES,
+  slotCount,
+  slotOf,
   splitTail,
   TAIL_OUTPUT_BYTES,
 } from "../shared/index.ts";
@@ -414,6 +417,7 @@ async function getFiles(): Promise<Json> {
       height: m.height,
       blockHash: m.blockHash,
       firstFree: m.firstFree,
+      padding: m.padding?.size ?? null,
       root: m.root,
       pathSplit: m.pathSplit,
       queriesPerCall: m.queriesPerCall,
@@ -442,7 +446,7 @@ async function scan(args: { gpu?: boolean; chunk?: number }, progress: (text: st
   const w = need(keys, "derive the keys");
   const m = need(manifest, "get the files");
   const file = files.get(m.artifacts.scan.digest)!;
-  const n = m.firstFree;
+  const n = slotCount(m);
   const t = now();
   let found: number[] = [];
   let engine: string;
@@ -459,12 +463,19 @@ async function scan(args: { gpu?: boolean; chunk?: number }, progress: (text: st
     engine = "WebAssembly scan kernel, one thread";
   }
   const ms = now() - t;
-  matches = found.sort((x, y) => x - y);
+  // The scan finds slots; in a padded snapshot a slot holds an output's tree position or noise (Q57).
+  found.sort((x, y) => x - y);
+  const noise = found.filter((s) => positionAtSlot(m, s) === null);
+  matches = found.map((s) => positionAtSlot(m, s)).filter((p): p is number => p !== null);
   return {
     engine,
     entries: n,
     entryBytes: 36,
-    matches: matches.map((p) => ({ position: p, entry: hex(file.subarray(36 * p, 36 * p + 36)) })),
+    matches: matches.map((p) => {
+      const s = slotOf(m, p);
+      return { position: p, slot: s, entry: hex(file.subarray(36 * s, 36 * s + 36)) };
+    }),
+    ...(noise.length > 0 ? { noiseMatches: noise } : {}),
     ms: round(ms),
     usPerEntry: n === 0 ? 0 : round((1000 * ms) / n),
     note: "a match means the first 4 bytes of element 0 equal the wallet's pad: about 1 in 4 billion for an output that is not the wallet's",
@@ -478,7 +489,7 @@ async function read(args: { positions?: number[] }): Promise<Json> {
   const positions = [...new Set(args.positions && args.positions.length > 0 ? args.positions : matches)].sort((x, y) => x - y);
   for (const p of positions) if (!Number.isInteger(p) || p < 0 || p >= m.firstFree) throw new Error(`position ${p} is not in the snapshot (0 to ${m.firstFree - 1})`);
   const ref = m.artifacts.readTable;
-  const plan = paddedCalls(positions.map((p) => positionOf(p, ref.perColumn).column), ref.cols, m.queriesPerCall);
+  const plan = paddedCalls(positions.map((p) => readCell(m, p).column), ref.cols, m.queriesPerCall);
   const stats = emptyCallStats();
   const t = now();
   const records = await readPositions(http, m, id, need(readSetup, "get the files"), positions, inlineMultiplier, stats);
@@ -491,9 +502,10 @@ async function read(args: { positions?: number[] }): Promise<Json> {
     const r = decodeReadRecord(records.get(p)!, m.pathSplit);
     fetched.set(p, { commitment: r.commitment, lowerPath: r.lowerPath });
     const block = Math.floor(p / blockSize);
-    const { column, slot } = positionOf(p, ref.perColumn);
+    const { index, column, slot } = readCell(m, p);
     const item: Json = {
       position: p,
+      ...(m.padding === undefined ? {} : { tableIndex: index }),
       column,
       slotInColumn: slot,
       commitment: hex(r.commitment),
@@ -506,7 +518,7 @@ async function read(args: { positions?: number[] }): Promise<Json> {
         : "DOES NOT give the block's root";
     }
     if (keys !== null) {
-      const checked = checkSnapshotMatch(k, keys, file.subarray(36 * p, 36 * p + 36), r, p % blockSize, blockRoots.subarray(32 * block, 32 * block + 32));
+      const checked = checkSnapshotMatch(k, keys, file.subarray(36 * index, 36 * index + 36), r, p % blockSize, blockRoots.subarray(32 * block, 32 * block + 32));
       if ("reason" in checked) item.ownership = `not the wallet's: ${checked.reason}`;
       else {
         const coin = coinOf(p, checked.coin, checked.commitment, checked.lowerPath, "snapshot");

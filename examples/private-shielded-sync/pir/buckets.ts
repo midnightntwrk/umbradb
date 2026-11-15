@@ -93,24 +93,96 @@ export interface NullifierTable {
   readonly capacity: number;
 }
 
+/**
+ * Nullifier entries as typed arrays: nullifier `i` is `values[32i … 32i + 31]`, spent at `heights[i]` in transaction
+ * `txs[i]`. A table of millions of entries is built from these without one object per entry (Q57).
+ */
+export interface NullifierColumns {
+  readonly count: number;
+  readonly values: Uint8Array;
+  readonly heights: Uint32Array;
+  readonly txs: Uint32Array;
+}
+
+/** Each bucket's load when the nullifiers are cut by `bits` bits. */
+function loadsOf(c: NullifierColumns, bits: number): Uint32Array {
+  const loads = new Uint32Array(2 ** bits);
+  const shift = 24 - bits;
+  const v = c.values;
+  for (let i = 0, o = 0; i < c.count; i++, o += NULLIFIER_BYTES) loads[((v[o]! << 16) | (v[o + 1]! << 8) | v[o + 2]!) >>> shift]!++;
+  return loads;
+}
+
+const maxOf = (loads: Uint32Array): number => loads.reduce((m, l) => (l > m ? l : m), 0);
+
+/** Builds the nullifier table (FR-062–064) from typed arrays. Nullifiers must be distinct. */
+export function buildNullifierTableOf(c: NullifierColumns, bucketBits?: number): NullifierTable {
+  if (c.values.length < c.count * NULLIFIER_BYTES || c.heights.length < c.count || c.txs.length < c.count) {
+    throw new Error("the nullifier columns are shorter than their count");
+  }
+  const e = cellsPerRecord(NULLIFIER_RECORD_BYTES);
+  let choice: { bucketBits: number; capacity: number; loads: Uint32Array } | null = null;
+  if (bucketBits !== undefined) {
+    const loads = loadsOf(c, bucketBits);
+    choice = { bucketBits, capacity: Math.max(1, maxOf(loads)), loads };
+  } else {
+    let best = Infinity;
+    for (let bits = MIN_BUCKET_BITS; bits <= MAX_BUCKET_BITS; bits++) {
+      if (!noiseBoundHolds(2 ** bits)) continue;
+      const loads = loadsOf(c, bits);
+      const capacity = Math.max(1, maxOf(loads));
+      const cost = capacity * e + 2 ** bits;
+      if (cost < best) {
+        best = cost;
+        choice = { bucketBits: bits, capacity, loads };
+      }
+    }
+    if (choice === null) throw new Error("no bucket size passes the PIR noise check");
+  }
+  // The entries in bucket order (a counting sort), then each bucket sorted by nullifier bytes.
+  const { loads } = choice;
+  const starts = new Float64Array(loads.length + 1);
+  for (let b = 0; b < loads.length; b++) starts[b + 1] = starts[b]! + loads[b]!;
+  const fill = starts.slice(0, loads.length);
+  const order = new Uint32Array(c.count);
+  const shift = 24 - choice.bucketBits;
+  const v = c.values;
+  for (let i = 0, o = 0; i < c.count; i++, o += NULLIFIER_BYTES) order[fill[((v[o]! << 16) | (v[o + 1]! << 8) | v[o + 2]!) >>> shift]!++] = i;
+  const cmp = (a: number, b: number): number => {
+    for (let k = 0, x = a * NULLIFIER_BYTES, y = b * NULLIFIER_BYTES; k < NULLIFIER_BYTES; k++) if (v[x + k] !== v[y + k]) return v[x + k]! - v[y + k]!;
+    return 0;
+  };
+  const grid = createGrid(bucketShape(c.count, choice.bucketBits, choice.capacity));
+  const record = new Uint8Array(NULLIFIER_RECORD_BYTES);
+  const view = new DataView(record.buffer);
+  for (let column = 0; column < loads.length; column++) {
+    const bucket = order.subarray(starts[column], starts[column + 1]);
+    bucket.sort(cmp);
+    for (let slot = 0; slot < bucket.length; slot++) {
+      const i = bucket[slot]!;
+      if (slot > 0 && cmp(bucket[slot - 1]!, i) === 0) throw new Error("duplicate nullifier");
+      record.set(v.subarray(i * NULLIFIER_BYTES, (i + 1) * NULLIFIER_BYTES), 0);
+      view.setUint32(32, c.heights[i]!, true);
+      view.setUint32(36, c.txs[i]!, true);
+      setRecord(grid, column, slot, record);
+    }
+  }
+  return { grid, bucketBits: choice.bucketBits, capacity: choice.capacity };
+}
+
 /** Builds the nullifier table (FR-062–064). Nullifiers must be distinct. */
 export function buildNullifierTable(entries: readonly NullifierEntry[], bucketBits?: number): NullifierTable {
-  const nullifiers = entries.map((e) => e.nullifier);
-  const choice =
-    bucketBits === undefined
-      ? chooseBucketBits(nullifiers)
-      : { bucketBits, capacity: Math.max(1, maxLoad(nullifiers, bucketBits)) };
-  const buckets: NullifierEntry[][] = Array.from({ length: 2 ** choice.bucketBits }, () => []);
-  for (const e of entries) buckets[bucketOf(e.nullifier, choice.bucketBits)]!.push(e);
-  const grid = createGrid(bucketShape(entries.length, choice.bucketBits, choice.capacity));
-  buckets.forEach((bucket, column) => {
-    bucket.sort((a, b) => compareBytes(a.nullifier, b.nullifier));
-    for (let slot = 1; slot < bucket.length; slot++) {
-      if (compareBytes(bucket[slot - 1]!.nullifier, bucket[slot]!.nullifier) === 0) throw new Error("duplicate nullifier");
-    }
-    bucket.forEach((e, slot) => setRecord(grid, column, slot, encodeNullifierRecord(e)));
+  const count = entries.length;
+  const values = new Uint8Array(count * NULLIFIER_BYTES);
+  const heights = new Uint32Array(count);
+  const txs = new Uint32Array(count);
+  entries.forEach((e, i) => {
+    if (e.nullifier.length !== NULLIFIER_BYTES) throw new Error("a nullifier is 32 bytes");
+    values.set(e.nullifier, i * NULLIFIER_BYTES);
+    heights[i] = e.height;
+    txs[i] = e.txIndex;
   });
-  return { grid, bucketBits: choice.bucketBits, capacity: choice.capacity };
+  return buildNullifierTableOf({ count, values, heights, txs }, bucketBits);
 }
 
 /**
