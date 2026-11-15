@@ -91,8 +91,9 @@ With `snapshotEvery: N` the module also builds one at every multiple of N once i
 For timing at sizes the chain has not reached, the admin route also takes `"padding": N` (debug): the scan file and
 both PIR tables then hold N entries, output i at slot ⌊i·N/first_free⌋ and the other slots deterministic noise
 (scan entries copying real points, random read cells, random nullifiers). The manifest records `"padding": {"size":
-N}` and clients map positions to slots. A build that would need more than half the machine's memory is refused with
-its estimate; on 48 GiB that admits 10M entries. While a build runs, the status names its step.
+N}` and clients map positions to slots. A build is refused with its estimate when it would need more than the memory
+free at the time, or more than half the machine's memory with the served snapshot. A 10M build needs about 14.5 GiB.
+While a build runs, the status names its step.
 
 **4. Sync wallets, read balances, check them against the ledger:**
 

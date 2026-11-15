@@ -19,7 +19,7 @@
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import { statSync, writeFileSync } from "node:fs";
-import { arch, availableParallelism, platform, totalmem } from "node:os";
+import { arch, availableParallelism, freemem, platform, totalmem } from "node:os";
 import { join, resolve } from "node:path";
 import type {
   ApiRegistry,
@@ -424,17 +424,23 @@ export class PssServer {
       if (outputs < 1 || padding < outputs || padding < nullifiers) {
         return error(400, "invalid-padding", `padding must be at least the ${outputs} outputs and ${nullifiers} nullifiers at ${height} (and there must be an output)`);
       }
-      // Refused when the build would hold more than half the machine's memory, with the snapshot served now (Q57).
+      // Refused when the build would hold more than half the machine's memory with the snapshot served now, or more
+      // than the memory free now: a 10M build on a machine whose other programs held most of its memory swapped for
+      // 25 minutes without finishing (Q57).
       const held = this.#current === null ? 0 : this.#current.readGrid.cells.byteLength + this.#current.nullifierGrid.cells.byteLength;
       const needed = paddedBuildBytes(padding, this.settings.pathSplit);
-      const limit = totalmem() / 2;
-      if (needed + held > limit) {
+      const half = totalmem() / 2;
+      const free = freemem();
+      if (needed + held > half || needed > free) {
         const gib = (b: number): string => `${(b / 2 ** 30).toFixed(1)} GiB`;
         return error(
           507,
           "padding-too-large",
-          `a snapshot padded to ${padding.toLocaleString("en-US")} entries needs about ${gib(needed)}, plus ${gib(held)} the served snapshot holds; the limit is half this machine's memory, ${gib(limit)}`,
-          { neededBytes: Math.round(needed), heldBytes: held, limitBytes: limit },
+          `a snapshot padded to ${padding.toLocaleString("en-US")} entries needs about ${gib(needed)}; ` +
+            (needed > free
+              ? `${gib(free)} of memory is free now`
+              : `with the ${gib(held)} the served snapshot holds, that is over half this machine's memory, ${gib(half)}`),
+          { neededBytes: Math.round(needed), heldBytes: held, halfBytes: half, freeBytes: free },
         );
       }
     }
