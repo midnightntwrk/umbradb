@@ -31,65 +31,142 @@ export function scanEntry(ciphertext: Uint8Array | null): Uint8Array {
   return out;
 }
 
-/** Read-record flag: the output has a ciphertext (elements 1–5 present). */
-export const FLAG_CIPHERTEXT = 1;
-/** Read-record flag: the lower Merkle path is present. */
-export const FLAG_LOWER_PATH = 2;
+/**
+ * The read record (FR-060, decision Q58): what a sync reads by PIR for each scan match, 98 bytes.
+ *
+ * - **16 bytes of the commitment.** The wallet recomputes the commitment of the coin it decrypts and compares these
+ *   bytes: that drops a scan match that is not the wallet's (the scan compares 4 bytes) and a ciphertext a sender
+ *   forged (the ledger does not check that a ciphertext matches its commitment), at 128-bit strength.
+ * - **Ciphertext elements 1–5, shrunk to 82 bytes.** Element i is `Poseidon(k, i) + m_i`; the coin's messages are the
+ *   nonce's last byte (1), its other 31 bytes (2), the token type's last byte (3), its other 31 bytes (4) and the value
+ *   (5, 16 bytes). The wallet computes every pad, so a short message needs only its element's low bytes:
+ *   `m = (e − pad) mod 2^(8b)`, then `e = pad + m` in the field. Elements 1 and 3 keep 1 byte, 5 keeps 16; 2 and 4 keep
+ *   all 32 (a 31-byte message plus its pad passes the prime about 1 time in 200, and only the top byte tells).
+ *   Zero bytes: the output has no ciphertext.
+ *
+ * The lower Merkle path is not here: a wallet reads it from the path table only when it spends (`encodePathRecord`).
+ */
+export const COMMITMENT_PREFIX_BYTES = 16;
+/** The shrunk elements 1–5: (element, low bytes kept). */
+const SHRUNK: readonly (readonly [number, number])[] = [
+  [1, 1],
+  [2, 32],
+  [3, 1],
+  [4, 32],
+  [5, 16],
+];
+export const SHRUNK_ELEMENTS_BYTES = SHRUNK.reduce((n, [, b]) => n + b, 0);
+export const READ_RECORD_BYTES = COMMITMENT_PREFIX_BYTES + SHRUNK_ELEMENTS_BYTES;
 
-/** Bytes of a read record for tree cut `k` (FR-060): flags (1), commitment (32), elements 1–5 (160), path (32k). */
-export function readRecordBytes(pathSplit: number): number {
-  if (!Number.isInteger(pathSplit) || pathSplit < 0 || pathSplit > 32) throw new Error(`path split out of range: ${pathSplit}`);
-  return 193 + 32 * pathSplit;
+/** The scalar field's prime (BLS12-381), in which ciphertext elements and pads live. */
+const FIELD_PRIME = 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001n;
+
+function leBig(bytes: Uint8Array): bigint {
+  let v = 0n;
+  for (let i = bytes.length - 1; i >= 0; i--) v = (v << 8n) | BigInt(bytes[i]!);
+  return v;
 }
 
-/** A read record's fields (FR-060). */
-export interface ReadRecord {
-  readonly commitment: Uint8Array;
-  /** Elements 1–5 (160 bytes), or null when the output has no ciphertext. */
-  readonly elements: Uint8Array | null;
-  /** The k lower sibling hashes, leaf upward (32 bytes each), or null when the block was not full at the snapshot. */
-  readonly lowerPath: readonly Uint8Array[] | null;
-}
-
-export function encodeReadRecord(record: ReadRecord, pathSplit: number): Uint8Array {
-  const out = new Uint8Array(readRecordBytes(pathSplit));
-  checkLength(record.commitment, COMMITMENT_BYTES, "commitment");
-  out.set(record.commitment, 1);
-  let flags = 0;
-  if (record.elements) {
-    checkLength(record.elements, 5 * ELEMENT_BYTES, "elements 1–5");
-    out.set(record.elements, 33);
-    flags |= FLAG_CIPHERTEXT;
+function bigLe(v: bigint, length: number): Uint8Array {
+  const out = new Uint8Array(length);
+  for (let i = 0; i < length; i++) {
+    out[i] = Number(v & 0xffn);
+    v >>= 8n;
   }
-  if (record.lowerPath) {
-    if (record.lowerPath.length !== pathSplit) throw new Error(`lower path must have ${pathSplit} hashes`);
-    record.lowerPath.forEach((h, i) => {
-      checkLength(h, HASH_BYTES, "path hash");
-      out.set(h, 193 + 32 * i);
-    });
-    flags |= FLAG_LOWER_PATH;
-  }
-  out[0] = flags;
   return out;
 }
 
-export function decodeReadRecord(bytes: Uint8Array, pathSplit: number): ReadRecord {
-  checkLength(bytes, readRecordBytes(pathSplit), "read record");
-  const flags = bytes[0]!;
-  if (flags & ~(FLAG_CIPHERTEXT | FLAG_LOWER_PATH)) throw new Error(`unknown read-record flags ${flags}`);
-  const lowerPath =
-    flags & FLAG_LOWER_PATH
-      ? Array.from({ length: pathSplit }, (_, i) => bytes.slice(193 + 32 * i, 225 + 32 * i))
-      : null;
-  return {
-    commitment: bytes.slice(1, 33),
-    elements: flags & FLAG_CIPHERTEXT ? bytes.slice(33, 193) : null,
-    lowerPath,
-  };
+/** A read record's fields. */
+export interface ReadRecord {
+  /** The commitment's first 16 bytes. */
+  readonly commitmentPrefix: Uint8Array;
+  /** Elements 1–5 shrunk (82 bytes), or null when the output has no ciphertext. */
+  readonly elements: Uint8Array | null;
+}
+
+/** Elements 1–5 of a full ciphertext (point, elements 0–5), shrunk to 82 bytes. */
+export function shrinkElements(ciphertext: Uint8Array): Uint8Array {
+  checkLength(ciphertext, CIPHERTEXT_BYTES, "ciphertext");
+  const out = new Uint8Array(SHRUNK_ELEMENTS_BYTES);
+  let at = 0;
+  for (const [element, keep] of SHRUNK) {
+    const from = POINT_BYTES + element * ELEMENT_BYTES;
+    out.set(ciphertext.subarray(from, from + keep), at);
+    at += keep;
+  }
+  return out;
+}
+
+/**
+ * Elements 1–5 in full (160 bytes) from their shrunk form and the ciphertext's six pads (6 × 32 bytes, the wallet's
+ * own `Poseidon(k, i)`). Garbage, not an error, for a ciphertext that is not the wallet's: its decryption then fails.
+ */
+export function rebuildElements(shrunk: Uint8Array, pads: Uint8Array): Uint8Array {
+  checkLength(shrunk, SHRUNK_ELEMENTS_BYTES, "shrunk elements");
+  checkLength(pads, 6 * ELEMENT_BYTES, "pads");
+  const out = new Uint8Array(5 * ELEMENT_BYTES);
+  let at = 0;
+  for (const [element, keep] of SHRUNK) {
+    const low = shrunk.subarray(at, at + keep);
+    at += keep;
+    const to = (element - 1) * ELEMENT_BYTES;
+    if (keep === ELEMENT_BYTES) {
+      out.set(low, to);
+      continue;
+    }
+    const pad = pads.subarray(element * ELEMENT_BYTES, (element + 1) * ELEMENT_BYTES);
+    const mask = (1n << BigInt(8 * keep)) - 1n;
+    const message = (leBig(low) - (leBig(pad) & mask)) & mask;
+    out.set(bigLe((leBig(pad) + message) % FIELD_PRIME, ELEMENT_BYTES), to);
+  }
+  return out;
+}
+
+export function encodeReadRecord(commitment: Uint8Array, ciphertext: Uint8Array | null): Uint8Array {
+  checkLength(commitment, COMMITMENT_BYTES, "commitment");
+  const out = new Uint8Array(READ_RECORD_BYTES);
+  out.set(commitment.subarray(0, COMMITMENT_PREFIX_BYTES), 0);
+  if (ciphertext !== null) out.set(shrinkElements(ciphertext), COMMITMENT_PREFIX_BYTES);
+  return out;
+}
+
+export function decodeReadRecord(bytes: Uint8Array): ReadRecord {
+  checkLength(bytes, READ_RECORD_BYTES, "read record");
+  const elements = bytes.slice(COMMITMENT_PREFIX_BYTES);
+  return { commitmentPrefix: bytes.slice(0, COMMITMENT_PREFIX_BYTES), elements: elements.some((b) => b !== 0) ? elements : null };
+}
+
+/**
+ * The path record (Q58): a position's k lower sibling hashes, leaf upward, read by PIR only to spend. Zero bytes when
+ * its block was not full at the snapshot (the tail then gives the path); a full block's path has no zero hash.
+ */
+export function pathRecordBytes(pathSplit: number): number {
+  if (!Number.isInteger(pathSplit) || pathSplit < 1 || pathSplit > 32) throw new Error(`a path table needs a path split from 1 to 32: ${pathSplit}`);
+  return HASH_BYTES * pathSplit;
+}
+
+export function encodePathRecord(lowerPath: readonly Uint8Array[] | null, pathSplit: number): Uint8Array {
+  const out = new Uint8Array(pathRecordBytes(pathSplit));
+  if (lowerPath === null) return out;
+  if (lowerPath.length !== pathSplit) throw new Error(`lower path must have ${pathSplit} hashes`);
+  lowerPath.forEach((h, i) => {
+    checkLength(h, HASH_BYTES, "path hash");
+    out.set(h, HASH_BYTES * i);
+  });
+  return out;
+}
+
+export function decodePathRecord(bytes: Uint8Array, pathSplit: number): Uint8Array[] | null {
+  checkLength(bytes, pathRecordBytes(pathSplit), "path record");
+  if (!bytes.some((b) => b !== 0)) return null;
+  return Array.from({ length: pathSplit }, (_, i) => bytes.slice(HASH_BYTES * i, HASH_BYTES * (i + 1)));
 }
 
 /** A tail output (FR-070): flags (1, bit 0 = has ciphertext), commitment (32), ciphertext (224, zero when absent). */
 export const TAIL_OUTPUT_BYTES = 1 + COMMITMENT_BYTES + CIPHERTEXT_BYTES;
+
+/** Tail-output flag: the output has a ciphertext. */
+export const FLAG_CIPHERTEXT = 1;
 
 export interface TailOutput {
   readonly commitment: Uint8Array;

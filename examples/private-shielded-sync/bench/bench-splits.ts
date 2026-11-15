@@ -91,10 +91,8 @@ const gridOf = (t: { rows: number; cols: number; perColumn: number; cellsPerReco
   cells: new Int16Array(t.cells),
 });
 
-const stepOf = (s: { ms: number; bytes?: number; hashes?: number; hashesPerSecond?: number; peakRssBytes: number } | undefined): BuildStep => {
-  if (s === undefined) throw new Error("the build reported no such step");
-  return { ms: s.ms, bytes: s.bytes, hashes: s.hashes, hashesPerSecond: s.hashesPerSecond, peakRssBytes: s.peakRssBytes };
-};
+const stepOf = (s: { ms: number; bytes?: number; hashes?: number; hashesPerSecond?: number; peakRssBytes: number } | undefined): BuildStep | null =>
+  s === undefined ? null : { ms: s.ms, bytes: s.bytes, hashes: s.hashes, hashesPerSecond: s.hashesPerSecond, peakRssBytes: s.peakRssBytes };
 
 export interface SplitOptions {
   readonly events: SnapshotEvents;
@@ -141,13 +139,9 @@ export async function pathSplitRuns(o: SplitOptions): Promise<PathSplitRun[]> {
       const outcome = await runBuildWorker(job);
       const buildMs = performance.now() - started;
       const r = outcome.result;
-      const ref = r.manifest.artifacts.readTable;
-      const grid = gridOf(r.readGrid);
-      const setup = setupMatrix(new Uint8Array(readFileSync(join(r.dir, r.manifest.artifacts.readSetup.digest))), grid.rows);
-      const info: TableInfo = { ...grid, seed: fromHex(ref.seed, 32) };
       const idBytes = fromHex(r.id, 32);
-      const wanted = o.positions.filter((p) => p < grid.records).map((p) => Math.floor(p / grid.perColumn));
-      const call = async (columns: readonly number[]) => {
+      /** One call on `grid` (read or path table): build, the server's decode-multiply-encode, decode, every record checked. */
+      const callOn = (grid: Grid, setup: ReturnType<typeof setupMatrix>, info: TableInfo) => async (columns: readonly number[]) => {
         o.probe.mark();
         const from = Date.now();
         let t = performance.now();
@@ -174,11 +168,30 @@ export async function pathSplitRuns(o: SplitOptions): Promise<PathSplitRun[]> {
             checked++;
           }
         });
-        return { bytesUp: body.length, bytesDown: answerBody.length, clientBuildMs, serverMultiplyMs, clientDecodeMs, peakRssBytes: o.probe.peak(from, Date.now()), checked };
+        return { vectors: columns.length, bytesUp: body.length, bytesDown: answerBody.length, clientBuildMs, serverMultiplyMs, clientDecodeMs, peakRssBytes: o.probe.peak(from, Date.now()), recordsChecked: checked };
       };
-      const [first] = paddedCalls(wanted, grid.cols, m.queriesPerCall);
-      await call(first!.columns); // warms both multiplications' threads
-      const measured = await call(paddedCalls(wanted, grid.cols, m.queriesPerCall)[0]!.columns);
+      /** A warm-up call, then the measured one, over `wanted`'s columns padded to a full call. */
+      const measure = async (grid: Grid, setup: ReturnType<typeof setupMatrix>, info: TableInfo, wanted: readonly number[]) => {
+        const call = callOn(grid, setup, info);
+        await call(paddedCalls(wanted, grid.cols, m.queriesPerCall)[0]!.columns); // warms both multiplications' threads
+        return call(paddedCalls(wanted, grid.cols, m.queriesPerCall)[0]!.columns);
+      };
+      const ref = r.manifest.artifacts.readTable;
+      const grid = gridOf(r.readGrid);
+      const setup = setupMatrix(new Uint8Array(readFileSync(join(r.dir, r.manifest.artifacts.readSetup.digest))), grid.rows);
+      const measured = await measure(grid, setup, { ...grid, seed: fromHex(ref.seed, 32) }, o.positions.filter((p) => p < grid.records).map((p) => Math.floor(p / grid.perColumn)));
+      // The path table (Q58): the positions a wallet would spend from, those in blocks full at the snapshot.
+      let path: PathSplitRun["path"] = null;
+      const pathRef = r.manifest.artifacts.pathTable;
+      const pathSetupRef = r.manifest.artifacts.pathSetup;
+      if (r.pathGrid !== null && pathRef !== undefined && pathSetupRef !== undefined) {
+        const pathGrid = gridOf(r.pathGrid);
+        const pathSetup = setupMatrix(new Uint8Array(readFileSync(join(r.dir, pathSetupRef.digest))), pathGrid.rows);
+        const full = Math.floor(o.events.firstFree / 2 ** k) * 2 ** k;
+        const spendable = o.positions.filter((p) => p < full).map((p) => Math.floor(p / pathGrid.perColumn));
+        const pathCall = spendable.length === 0 ? null : await measure(pathGrid, pathSetup, { ...pathGrid, seed: fromHex(pathRef.seed, 32) }, spendable);
+        path = { recordBytes: pathGrid.recordBytes, rows: pathGrid.rows, cols: pathGrid.cols, perColumn: pathGrid.perColumn, tableBytes: pathRef.size, setupBytes: pathSetupRef.size, call: pathCall };
+      }
       out.push({
         k,
         snapshotId: r.id,
@@ -189,19 +202,11 @@ export async function pathSplitRuns(o: SplitOptions): Promise<PathSplitRun[]> {
         perColumn: grid.perColumn,
         blocks: r.manifest.artifacts.blockRoots.blocks,
         sizes: { blockRoots: r.manifest.artifacts.blockRoots.size, readTable: ref.size, readSetup: r.manifest.artifacts.readSetup.size },
-        steps: Object.fromEntries(BUILD_STEP_NAMES.map((name) => [name, stepOf(outcome.steps[name])])) as Record<BuildStepName, BuildStep>,
+        steps: Object.fromEntries(BUILD_STEP_NAMES.map((name) => [name, stepOf(outcome.steps[name])])) as Record<BuildStepName, BuildStep | null>,
         buildMs,
         threads: o.threads,
-        call: {
-          vectors: m.queriesPerCall,
-          bytesUp: measured.bytesUp,
-          bytesDown: measured.bytesDown,
-          clientBuildMs: measured.clientBuildMs,
-          serverMultiplyMs: measured.serverMultiplyMs,
-          clientDecodeMs: measured.clientDecodeMs,
-          peakRssBytes: measured.peakRssBytes,
-          recordsChecked: measured.checked,
-        },
+        path,
+        call: measured,
       });
       o.log(`path split ${k}: ${grid.rows} × ${grid.cols}, built in ${Math.round(buildMs)} ms, call ${Math.round(measured.serverMultiplyMs)} ms on the server side; snapshot ${r.id.slice(0, 16)}…${k === m.pathSplit ? (r.id === o.servedId ? " (= the served one)" : " (differs from the served one)") : ""}`);
       rmSync(dataDir, { recursive: true, force: true });

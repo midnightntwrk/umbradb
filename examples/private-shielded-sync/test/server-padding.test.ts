@@ -29,8 +29,9 @@ import {
   positionOf,
   readRecord,
   setupMatrix,
+  widestShape,
 } from "../pir/index.ts";
-import { fromHex, type Manifest, positionAtSlot, readRecordBytes, slotCount, slotOf } from "../shared/index.ts";
+import { fromHex, type Manifest, positionAtSlot, READ_RECORD_BYTES, slotCount, slotOf } from "../shared/index.ts";
 import { type BuildJob, type BuildResult, buildSnapshot, paddedBuildBytes } from "../server/build.ts";
 import { rootFromStored } from "../server/tree.ts";
 import { ZswapIndex } from "../server/zswap-index.ts";
@@ -77,8 +78,8 @@ function jobAt(c: ScenarioChain, index: ZswapIndex, height: number, padding?: nu
 }
 
 const build = (job: BuildJob): Promise<BuildResult> => buildSnapshot(job, { kernel, multiplier: inlineMultiplier });
-const gridOf = (t: BuildResult["readGrid"]): Grid => ({ ...t, cells: new Int16Array(t.cells) });
-const file = (r: BuildResult, name: keyof Manifest["artifacts"]): Uint8Array => new Uint8Array(readFileSync(join(r.dir, r.manifest.artifacts[name].digest)));
+const gridOf = (t: NonNullable<BuildResult["pathGrid"]>): Grid => ({ ...t, cells: new Int16Array(t.cells) });
+const file = (r: BuildResult, name: keyof Manifest["artifacts"]): Uint8Array => new Uint8Array(readFileSync(join(r.dir, r.manifest.artifacts[name]!.digest)));
 
 beforeAll(async () => {
   chain = await scenarioChain();
@@ -116,15 +117,26 @@ describe("the slot mapping", () => {
   });
 });
 
-describe("the read table's shape", () => {
-  it("is unchanged below the column limit (Preprod's 69,310 records: 6,897 × 6,301) and capped above it", () => {
-    const preprod = positionalShape(69_310, readRecordBytes(16));
-    expect([preprod.rows, preprod.cols, preprod.perColumn]).toEqual([6_897, 6_301, 11]);
+describe("the tables' shapes", () => {
+  it("read table: about square below the column limit (Preprod's 69,310 records of 98 bytes: 2,464 × 2,476), capped above it", () => {
+    const preprod = positionalShape(69_310, READ_RECORD_BYTES);
+    expect([preprod.rows, preprod.cols, preprod.perColumn]).toEqual([2_464, 2_476, 28]);
+    // The 705-byte records of the first layout: the same shape as before the cap.
+    const old = positionalShape(69_310, 705);
+    expect([old.rows, old.cols, old.perColumn]).toEqual([6_897, 6_301, 11]);
     for (const n of [20_000_000, 100_000_000]) {
-      const s = positionalShape(n, readRecordBytes(16));
+      const s = positionalShape(n, 705);
       expect(s.cols).toBeLessThanOrEqual(MAX_COLUMNS);
       expect(s.perColumn * s.cols).toBeGreaterThanOrEqual(n);
     }
+  });
+
+  it("path table: as wide as the noise check allows (Q58)", () => {
+    const preprod = widestShape(69_310, 512);
+    expect([preprod.rows, preprod.cols, preprod.perColumn]).toEqual([456, 69_310, 1]);
+    const tenMillion = widestShape(10_000_000, 512);
+    expect([tenMillion.rows, tenMillion.cols, tenMillion.perColumn]).toEqual([44_688, 102_041, 98]);
+    expect(tenMillion.cols).toBeLessThanOrEqual(MAX_COLUMNS);
   });
 
   it("estimates a 10M build under 24 GiB and a 20M build over it", () => {
@@ -183,6 +195,17 @@ describe("a padded build of the test chain", () => {
       const answers = await answerQueries(read, batch.queries, 2, inlineMultiplier);
       const [values] = await decodeAnswers(setup, batch, answers, inlineMultiplier);
       expect(hex(columnRecords(ref, values!)[at.slot]!)).toBe(hex(want));
+    }
+
+    // Path table: every real output's path record equals the unpadded table's.
+    const plainPath = gridOf(plain.pathGrid!);
+    const pathGrid = gridOf(padded.pathGrid!);
+    const pt = m.artifacts.pathTable!;
+    const plainPt = plain.manifest.artifacts.pathTable!;
+    for (let i = 0; i < m.firstFree; i++) {
+      const at = positionOf(slotOf(m, i), pt.perColumn);
+      const was = positionOf(i, plainPt.perColumn);
+      expect(hex(readRecord(pathGrid, at.column, at.slot)), `path ${i}`).toBe(hex(readRecord(plainPath, was.column, was.slot)));
     }
 
     // Nullifier table: each spent nullifier in its bucket, with its height and transaction.

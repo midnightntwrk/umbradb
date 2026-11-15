@@ -278,7 +278,7 @@ and refuses builds or tails with its reason; it never halts the core's processin
 | Setting | Default | Meaning |
 |---|---|---|
 | `dataDir` | required | Where snapshots are written; relative to the process's working directory |
-| `pathSplit` | 16 | k, 0–20: the tree is cut k levels above the leaves; read records carry k lower siblings |
+| `pathSplit` | 16 | k, 0–20: the tree is cut k levels above the leaves; the path table holds each position's k lower siblings, read only to spend (none at 0) |
 | `queriesPerCall` | 32 | Vectors in every query call |
 | `snapshotEvery` | 0 | Build at every height that is a multiple of this while the node's finalized head is less than this many heights ahead; 0: only on request |
 | `adminSecret` | none | `secret`, 16 characters or more: the admin routes need `Authorization: Bearer <secret>`; without one they answer 403 |
@@ -291,7 +291,7 @@ and refuses builds or tails with its reason; it never halts the core's processin
 | `GET /manifest` | The manifest's canonical JSON bytes; `Pss-Snapshot-Id` = its SHA-256 (the snapshot identifier). 503 `no-snapshot` before the first |
 | `GET /blob/<digest>` | An artifact of the latest or previous snapshot (or a manifest by the snapshot identifier), streamed with `Range` (206, 416), `ETag`, `Cache-Control: immutable`. 404 otherwise |
 | `GET /tail` | Header (132 bytes: `PSST`, version, snapshot id, height, block hash, `first_free`, root, four section lengths), then the commitments of positions T0 … F − 1 (32 each), the outputs from F on (257 each: flags, commitment, ciphertext), the nullifiers spent after S (40 each), the current roots of the blocks from T0's on (32 each) |
-| `POST /query/read`, `POST /query/nullifier` | Body `application/octet-stream`: `PSSQ`, version, snapshot id, count = `queriesPerCall`, count × C values; answer `PSSA`, version, snapshot id, count, count × R values. 409 `snapshot-replaced` (with `snapshot`) for another snapshot, 400 for another count or length, 415 for another content type |
+| `POST /query/read`, `POST /query/path`, `POST /query/nullifier` | Body `application/octet-stream`: `PSSQ`, version, snapshot id, count = `queriesPerCall`, count × C values; answer `PSSA`, version, snapshot id, count, count × R values. 409 `snapshot-replaced` (with `snapshot`) for another snapshot, 400 for another count or length, 415 for another content type |
 | `POST /admin/snapshot` | JSON `{ "height"? }` (default: the latest indexed height; not below the served snapshot's): 202 and the build starts; 409 while one runs |
 | `GET /admin/snapshot` | The index, the tip, the served and previous snapshots, the running and last build |
 
@@ -299,7 +299,7 @@ Each request is logged as one JSON line on stdout (`event: "request"`: route, st
 milliseconds), never its body; builds, loads and faults are logged the same way.
 
 **Data directory.** `snapshots/<id>/` holds `manifest.json`, each artifact as the file named by its SHA-256, and
-`build-stats.json`: per step (`scan`, `tree`, `readTable`, `readSetup`, `nullifierTable`, `nullifierSetup`,
+`build-stats.json`: per step (`scan`, `tree`, `readTable`, `readSetup`, `pathTable`, `pathSetup`, `nullifierTable`, `nullifierSetup`,
 `manifest`) the duration, the artifact's size, the tree's hashes per second, and the process's peak resident memory
 while the step ran; the index's load at start; the process's peak. `builds/` holds builds in progress (removed at
 start).
@@ -338,16 +338,18 @@ under `--data` (default `~/.pss-client`): `wallets/<label>/state.json` (director
 2. The scan file, block roots and both setup-data artifacts, each by `GET /blob/<digest>` unless cached; digest and size
    checked while streaming. The block roots must give the manifest's root.
 3. The scan (`kernel/`'s `ScanPool`, `--threads`): the positions whose 4 bytes match.
-4. PIR reads of those positions' records: their distinct columns in calls of exactly `queriesPerCall` vectors, padded
-   with uniformly random columns; one full call when nothing matched. A record's lower path must give its block's
-   root. Element 0 encrypts zero, so the 224-byte ciphertext is rebuilt as point, pad 0, elements 1–5, and decrypted by
-   the ledger's own decryption (the kernel's `decrypt_coin`); the coin is kept only if its commitment equals the
-   record's. A match that fails a check is dropped and listed as rejected.
+4. PIR reads of those positions' 98-byte records: their distinct columns in calls of exactly `queriesPerCall` vectors,
+   padded with uniformly random columns; one full call when nothing matched. A record is the commitment's first 16
+   bytes and ciphertext elements 1–5 shrunk to 82 bytes; the client rebuilds the elements from its own pads. Element 0
+   encrypts zero, so the 224-byte ciphertext is rebuilt as point, pad 0, elements 1–5, and decrypted by the ledger's own
+   decryption (the kernel's `decrypt_coin`); the coin is kept only if its commitment starts with the record's 16 bytes.
+   A match that fails a check is dropped and listed as rejected. No Merkle path is read: `send` reads a coin's lower
+   path from the path table (`POST /query/path`, its setup data downloaded then) and checks it against its block's root.
 5. Each coin's nullifier (`coinNullifier`) looked up in the nullifier table by PIR, the same way.
 6. `GET /tail`: every tail output is tested (the client has their ciphertexts), tail nullifiers mark spends, and the
    snapshot's and the tail's block roots must give the tail's root.
-7. The local state: per coin its position, token type, value, nonce, commitment, nullifier, lower path (when the PIR
-   record had one), source and where it was spent; the snapshot and tail it reflects; pending transfers.
+7. The local state: per coin its position, token type, value, nonce, commitment, nullifier, lower path (null until a
+   spend reads it), source and where it was spent; the snapshot and tail it reflects; pending transfers.
 
 A 409 (the snapshot was replaced) or a tail of another snapshot starts the sync again from the new manifest (three
 attempts). Every request is recorded without its body (method, path, lengths, time) for the statistics.
@@ -428,7 +430,7 @@ cell (p = 512, Δ = 2^23).
 
 All integers little-endian; binary bodies are `application/octet-stream`; routes under `/pss/v1`.
 
-- **Query body** (`POST /query/read`, `POST /query/nullifier`): magic `PSSQ` (4), format version (2), snapshot
+- **Query body** (`POST /query/read`, `POST /query/path`, `POST /query/nullifier`): magic `PSSQ` (4), format version (2), snapshot
   identifier (32), vector count (2), then count × C 32-bit values, vector by vector. Decoding is strict: exact length,
   the required vector count, and the current snapshot (a `WireError` with status 400, or 409 for another snapshot).
 - **Answer body**: the same 40-byte header with magic `PSSA`, then count × R values.
@@ -436,11 +438,15 @@ All integers little-endian; binary bodies are `application/octet-stream`; routes
   `first_free` as 64 bits, root, and the byte lengths of four sections), then the sections: commitments (32 bytes
   each), outputs (257 bytes: flags, commitment, 224-byte ciphertext), nullifier records (40 bytes), block roots (32).
 - **Records** (`records.ts`): scan entry (point and the first 4 bytes of element 0, or 36 zero bytes); read record
-  (flags, commitment, elements 1–5, k lower path hashes: 193 + 32k bytes); tail output.
+  (98 bytes: the commitment's first 16 bytes, then element 1's first byte, element 2, element 3's first byte, element 4
+  and element 5's first 16 bytes; elements zero without a ciphertext); path record (the k lower hashes, 32k bytes; zero
+  outside the full blocks); tail output. Elements 1–5 hold the nonce's last byte and other 31 bytes, the token type's
+  last byte and other 31 bytes, and the value; the client recovers each short message as `(element − pad) mod 2^(8b)`.
 - **Manifest** (`manifest.ts`): JSON in canonical form (keys sorted, no whitespace); the snapshot identifier is its
   SHA-256. It names the network, genesis hash, height, block hash, `first_free`, root, `pathSplit`,
-  `queriesPerCall`, the PIR parameters, and the digest, size and parameters of six artifacts: scan file, block roots,
-  read table, read setup data, nullifier table (with `bucketBits` and `capacity`), nullifier setup data.
+  `queriesPerCall`, the PIR parameters, and the digest, size and parameters of eight artifacts (six at k = 0): scan
+  file, block roots, read table, read setup data, path table and path setup data (the path table as wide as the noise
+  check allows, so its setup data is small), nullifier table (with `bucketBits` and `capacity`), nullifier setup data.
 
 A ciphertext is 224 bytes throughout: the one-time point's 32-byte compressed encoding, then elements 0–5, each its
 32-byte little-endian integer.

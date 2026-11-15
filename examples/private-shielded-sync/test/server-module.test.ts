@@ -37,6 +37,7 @@ import {
 import {
   decodeAnswerBody,
   decodeManifest,
+  decodePathRecord,
   decodeReadRecord,
   decodeTailOutput,
   encodeQueryBody,
@@ -44,6 +45,7 @@ import {
   type Manifest,
   OCTET_STREAM,
   ROUTES,
+  shrinkElements,
   snapshotId,
   splitTail,
   toHex,
@@ -212,17 +214,18 @@ async function storedState(db: ProcessDatabase, height: number): Promise<{ first
 }
 
 /** Reads `positions` of the served read table by PIR in calls of exactly `queriesPerCall` vectors (random padding). */
-async function readByPir(r: Run, m: Manifest, id: string, positions: readonly number[]): Promise<Uint8Array[]> {
-  const t = m.artifacts.readTable;
+/** Reads positions from the read table (POST /query/read) or the path table (POST /query/path) by PIR. */
+async function readByPir(r: Run, m: Manifest, id: string, positions: readonly number[], which: "read" | "path" = "read"): Promise<Uint8Array[]> {
+  const t = which === "read" ? m.artifacts.readTable : m.artifacts.pathTable!;
   const table: TableInfo = { ...t, seed: fromHex(t.seed, 32) };
-  const setup = setupMatrix(await blobBytes(r, m.artifacts.readSetup.digest), t.rows);
+  const setup = setupMatrix(await blobBytes(r, (which === "read" ? m.artifacts.readSetup : m.artifacts.pathSetup!).digest), t.rows);
   const out: Uint8Array[] = [];
   for (let from = 0; from < positions.length; from += m.queriesPerCall) {
     const wanted = positions.slice(from, from + m.queriesPerCall);
     const columns = [...wanted.map((i) => positionOf(i, t.perColumn).column)];
     while (columns.length < m.queriesPerCall) columns.push(randomInt(t.cols));
     const batch = await buildQueries(table, columns, multiplier);
-    const answer = await fetch(`${r.origin}${ROUTES.queryRead}`, {
+    const answer = await fetch(`${r.origin}${which === "read" ? ROUTES.queryRead : ROUTES.queryPath}`, {
       method: "POST",
       headers: { "Content-Type": OCTET_STREAM },
       body: bodyOf(encodeQueryBody({ snapshotId: fromHex(id, 32), count: columns.length, values: batch.queries }, t.cols)),
@@ -305,7 +308,7 @@ describe("the module on a chain it follows from genesis (PostgreSQL 18)", () => 
     expect(s.index).toMatchObject({ height: 7, outputs: 15, nullifiers: 3, error: null, fromItems: 8, fromDatabase: 0 });
     // The build statistics beside the snapshot: every step with its duration, size and peak memory.
     const stats = JSON.parse(readFileSync(join(dataDir, "snapshots", id, STATS_FILE), "utf8")) as Record<string, any>;
-    expect(Object.keys(stats.steps)).toEqual(["scan", "tree", "readTable", "readSetup", "nullifierTable", "nullifierSetup", "manifest"]);
+    expect(Object.keys(stats.steps)).toEqual(["scan", "tree", "readTable", "readSetup", "pathTable", "pathSetup", "nullifierTable", "nullifierSetup", "manifest"]);
     for (const step of Object.values(stats.steps) as Record<string, number>[]) {
       expect(step.ms).toBeGreaterThanOrEqual(0);
       expect(step.peakRssBytes).toBeGreaterThan(0);
@@ -387,23 +390,27 @@ describe("the module on a chain it follows from genesis (PostgreSQL 18)", () => 
     expect(hex(naiveRoot(all, 32 - k)!)).toBe(toHex(tail.header.root));
   });
 
-  it("stories 3 and 4 (server half): every position read through POST /query/read is the stored output's record; nullifiers looked up through POST /query/nullifier", { timeout: LONG }, async () => {
+  it("stories 3 and 4 (server half): every position read through POST /query/read is the stored output's record, through POST /query/path its lower path; nullifiers looked up through POST /query/nullifier", { timeout: LONG }, async () => {
     const { manifest, id } = await manifestOf(r);
     const outputs = (await storedOutputs(db)).filter((o) => o.height <= 4);
     const positions = outputs.map((o) => o.position);
     const records = await readByPir(r, manifest, id, positions);
+    records.forEach((bytes, i) => {
+      const record = decodeReadRecord(bytes);
+      const o = outputs[i]!;
+      expect(hex(record.commitmentPrefix)).toBe(hex(o.commitment.subarray(0, 16)));
+      expect(record.elements && hex(record.elements)).toBe(o.ciphertext && hex(shrinkElements(o.ciphertext)));
+    });
     const leaves = outputs.map((o) => kernel.leaf(o.commitment));
     const blockRoots = await blobBytes(r, manifest.artifacts.blockRoots.digest);
     const k = manifest.pathSplit;
-    records.forEach((bytes, i) => {
-      const record = decodeReadRecord(bytes, k);
-      const o = outputs[i]!;
-      expect(hex(record.commitment)).toBe(hex(o.commitment));
-      expect(record.elements && hex(record.elements)).toBe(o.ciphertext && hex(o.ciphertext.subarray(64)));
-      expect(record.lowerPath !== null, `path ${i}`).toBe(i < 8);
-      if (record.lowerPath === null) return;
+    const paths = await readByPir(r, manifest, id, positions, "path");
+    paths.forEach((bytes, i) => {
+      const lowerPath = decodePathRecord(bytes, k);
+      expect(lowerPath !== null, `path ${i}`).toBe(i < 8);
+      if (lowerPath === null) return;
       let node = leaves[i]!;
-      record.lowerPath.forEach((sibling, l) => {
+      lowerPath.forEach((sibling, l) => {
         node = ((i >> l) & 1) === 0 ? hash(node, sibling) : hash(sibling, node);
       });
       const block = i >> k;
@@ -526,7 +533,7 @@ describe("the module on a chain it follows from genesis (PostgreSQL 18)", () => 
     expect((await blob(r, (s.previous as { id: string }).id)).status).toBe(200);
     const outputs = await storedOutputs(db);
     const [record] = await readByPir(r, manifest, id, [14]);
-    expect(hex(decodeReadRecord(record!, manifest.pathSplit).commitment)).toBe(hex(outputs[14]!.commitment));
+    expect(hex(decodeReadRecord(record!).commitmentPrefix)).toBe(hex(outputs[14]!.commitment.subarray(0, 16)));
     expect((await requestBuild(r)).status).toBe(403);
   });
 });

@@ -32,7 +32,8 @@ export interface ServedFile {
 }
 
 /** The names of the manifest's artifacts. */
-export const ARTIFACT_NAMES = ["scan", "blockRoots", "readTable", "readSetup", "nullifierTable", "nullifierSetup"] as const;
+/** The manifest's artifacts; `pathTable` and `pathSetup` are absent when its path split is 0. */
+export const ARTIFACT_NAMES = ["scan", "blockRoots", "readTable", "readSetup", "pathTable", "pathSetup", "nullifierTable", "nullifierSetup"] as const;
 
 /** The snapshots under `dataDir`, newest first (height, then the manifest's modification time). */
 export function listSnapshots(dataDir: string, onIgnored: (dir: string, why: string) => void = () => {}): StoredSnapshot[] {
@@ -61,6 +62,7 @@ export function servedFiles(snapshot: Pick<StoredSnapshot, "id" | "dir" | "manif
   files.set(snapshot.id, { path: join(snapshot.dir, MANIFEST_FILE), size: snapshot.manifestBytes.length, contentType: "application/json" });
   for (const name of ARTIFACT_NAMES) {
     const ref = snapshot.manifest.artifacts[name];
+    if (ref === undefined) continue;
     files.set(ref.digest, { path: join(snapshot.dir, ref.digest), size: ref.size, contentType: "application/octet-stream" });
   }
   return files;
@@ -87,6 +89,7 @@ export function fileDigest(path: string): string {
 export function verifyArtifacts(snapshot: StoredSnapshot): void {
   for (const name of ARTIFACT_NAMES) {
     const ref = snapshot.manifest.artifacts[name];
+    if (ref === undefined) continue;
     const path = join(snapshot.dir, ref.digest);
     if (!existsSync(path)) throw new Error(`artifact ${name} (${ref.digest}) is missing`);
     if (statSync(path).size !== ref.size) throw new Error(`artifact ${name} is not ${ref.size} bytes`);
@@ -98,8 +101,10 @@ export function verifyArtifacts(snapshot: StoredSnapshot): void {
  * A PIR table artifact loaded into shared memory, read in chunks: a padded snapshot's table is larger than the 2 GiB
  * `readFileSync` reads (Q57).
  */
-export function loadGrid(snapshot: StoredSnapshot, name: "readTable" | "nullifierTable"): Grid {
-  const path = join(snapshot.dir, snapshot.manifest.artifacts[name].digest);
+export function loadGrid(snapshot: StoredSnapshot, name: "readTable" | "pathTable" | "nullifierTable"): Grid {
+  const ref = snapshot.manifest.artifacts[name];
+  if (ref === undefined) throw new Error(`the snapshot has no ${name}`);
+  const path = join(snapshot.dir, ref.digest);
   const fd = openSync(path, "r");
   try {
     const header = new Uint8Array(GRID_HEADER_BYTES);
@@ -124,7 +129,9 @@ export function loadGrid(snapshot: StoredSnapshot, name: "readTable" | "nullifie
 
 /** An artifact's bytes. */
 export function readArtifact(snapshot: Pick<StoredSnapshot, "dir" | "manifest">, name: (typeof ARTIFACT_NAMES)[number]): Uint8Array {
-  return new Uint8Array(readFileSync(join(snapshot.dir, snapshot.manifest.artifacts[name].digest)));
+  const ref = snapshot.manifest.artifacts[name];
+  if (ref === undefined) throw new Error(`the snapshot has no ${name}`);
+  return new Uint8Array(readFileSync(join(snapshot.dir, ref.digest)));
 }
 
 /** Deletes every snapshot directory under `dataDir` but those named in `keep`; returns the identifiers deleted. */

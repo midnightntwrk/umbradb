@@ -15,15 +15,16 @@ import { formatShieldedAddress } from "../client/address.ts";
 import { PssHttp } from "../client/http.ts";
 import { keysFromZswapSeed, type WalletKeys } from "../client/keys.ts";
 import type { Ledger } from "../client/ledger.ts";
-import { emptyCallStats, lookupNullifiers, paddedCalls, readCell, readPositions } from "../client/pir-calls.ts";
+import { emptyCallStats, lookupNullifiers, paddedCalls, readCell, readPaths, readPositions } from "../client/pir-calls.ts";
 import { coinPath } from "../client/send.ts";
-import { checkCiphertext, checkSnapshotMatch, rootOverBlocks } from "../client/sync.ts";
+import { checkCiphertext, checkLowerPath, checkSnapshotMatch, rootOverBlocks } from "../client/sync.ts";
 import { type Hash2, rootFromPath, TREE_DEPTH } from "../client/tree.ts";
 import { Kernel } from "../kernel/index.ts";
 import { bucketOf, decodeNullifierRecord, inlineMultiplier, type Matrix, NULLIFIER_RECORD_BYTES, setupMatrix } from "../pir/index.ts";
 import {
   type ArtifactRef,
   decodeManifest,
+  decodePathRecord,
   decodeReadRecord,
   decodeTailHeader,
   decodeTailOutput,
@@ -141,6 +142,8 @@ let manifestId: Uint8Array | null = null;
 const files = new Map<string, Uint8Array>();
 let readSetup: Matrix | null = null;
 let nullifierSetup: Matrix | null = null;
+/** The path table's setup data: downloaded only when the page reads paths, as a spend would (Q58). */
+let pathSetup: Matrix | null = null;
 let matches: number[] = [];
 interface Coin {
   position: number;
@@ -154,7 +157,8 @@ interface Coin {
   spent: { height: number; txIndex: number; source: string } | null;
 }
 const coins = new Map<number, Coin>();
-const fetched = new Map<number, { commitment: Uint8Array; lowerPath: readonly Uint8Array[] | null }>();
+/** Positions read: the full commitment when known (a coin of the wallet's), and the lower path once read. */
+const fetched = new Map<number, { commitment: Uint8Array | null; lowerPath: readonly Uint8Array[] | null }>();
 
 const need = <T>(value: T | null, what: string): T => {
   if (value === null) throw new Error(`${what} first`);
@@ -221,7 +225,20 @@ function decodeBody(e: Exchange, side: "request" | "response"): Json | null {
   if (route.startsWith("/blob/")) {
     const digest = route.slice("/blob/".length);
     const a = manifest?.artifacts;
-    const name = a === undefined ? "artifact" : a.scan.digest === digest ? "scan file" : a.blockRoots.digest === digest ? "block roots" : a.readSetup.digest === digest ? "read table setup" : a.nullifierSetup.digest === digest ? "nullifier table setup" : "artifact";
+    const name =
+      a === undefined
+        ? "artifact"
+        : a.scan.digest === digest
+          ? "scan file"
+          : a.blockRoots.digest === digest
+            ? "block roots"
+            : a.readSetup.digest === digest
+              ? "read table setup"
+              : a.pathSetup?.digest === digest
+                ? "path table setup"
+                : a.nullifierSetup.digest === digest
+                  ? "nullifier table setup"
+                  : "artifact";
     const out: Json = { format: `${name}, addressed by its SHA-256`, digest };
     if (name === "scan file") {
       out.entries = b.length / 36;
@@ -406,6 +423,7 @@ async function getFiles(): Promise<Json> {
   readSetup = setupMatrix(files.get(a.readSetup.digest)!, a.readTable.rows);
   nullifierSetup = setupMatrix(files.get(a.nullifierSetup.digest)!, a.nullifierTable.rows);
   const setupMs = now() - t2;
+  pathSetup = null;
   coins.clear();
   fetched.clear();
   matches = [];
@@ -422,7 +440,11 @@ async function getFiles(): Promise<Json> {
       pathSplit: m.pathSplit,
       queriesPerCall: m.queriesPerCall,
       pir: m.pir,
-      readTable: { rows: a.readTable.rows, cols: a.readTable.cols, recordsPerColumn: a.readTable.perColumn, records: a.readTable.records },
+      readTable: { rows: a.readTable.rows, cols: a.readTable.cols, recordsPerColumn: a.readTable.perColumn, records: a.readTable.records, recordBytes: a.readTable.recordBytes },
+      pathTable:
+        a.pathTable === undefined || a.pathSetup === undefined
+          ? null
+          : { rows: a.pathTable.rows, cols: a.pathTable.cols, recordsPerColumn: a.pathTable.perColumn, recordBytes: a.pathTable.recordBytes, setupBytes: a.pathSetup.size },
       nullifierTable: { rows: a.nullifierTable.rows, cols: a.nullifierTable.cols, bucketBits: a.nullifierTable.bucketBits, capacity: a.nullifierTable.capacity },
       blocks: a.blockRoots.blocks,
     },
@@ -494,39 +516,32 @@ async function read(args: { positions?: number[] }): Promise<Json> {
   const t = now();
   const records = await readPositions(http, m, id, need(readSetup, "get the files"), positions, inlineMultiplier, stats);
   const callMs = now() - t;
-  const blockSize = 2 ** m.pathSplit;
   const file = files.get(m.artifacts.scan.digest)!;
-  const blockRoots = files.get(m.artifacts.blockRoots.digest)!;
   const out = [];
   for (const p of positions) {
-    const r = decodeReadRecord(records.get(p)!, m.pathSplit);
-    fetched.set(p, { commitment: r.commitment, lowerPath: r.lowerPath });
-    const block = Math.floor(p / blockSize);
+    const r = decodeReadRecord(records.get(p)!);
     const { index, column, slot } = readCell(m, p);
     const item: Json = {
       position: p,
       ...(m.padding === undefined ? {} : { tableIndex: index }),
       column,
       slotInColumn: slot,
-      commitment: hex(r.commitment),
-      ciphertextElements1to5: r.elements === null ? null : hex(r.elements),
-      lowerPath: r.lowerPath === null ? `none (block ${block} is not full at the snapshot; the tail gives its path)` : r.lowerPath.map(hex),
+      commitmentPrefix: hex(r.commitmentPrefix),
+      elementsShrunk: r.elements === null ? null : hex(r.elements),
     };
-    if (r.lowerPath !== null) {
-      item.lowerPathCheck = equal(rootFromPath(k.leaf(r.commitment), p % blockSize, r.lowerPath, hash), blockRoots.subarray(32 * block, 32 * block + 32))
-        ? "gives the block's root"
-        : "DOES NOT give the block's root";
-    }
+    let commitment: Uint8Array | null = null;
     if (keys !== null) {
-      const checked = checkSnapshotMatch(k, keys, file.subarray(36 * index, 36 * index + 36), r, p % blockSize, blockRoots.subarray(32 * block, 32 * block + 32));
+      const checked = checkSnapshotMatch(k, keys, file.subarray(36 * index, 36 * index + 36), r);
       if ("reason" in checked) item.ownership = `not the wallet's: ${checked.reason}`;
       else {
-        const coin = coinOf(p, checked.coin, checked.commitment, checked.lowerPath, "snapshot");
+        commitment = checked.commitment;
+        const coin = coinOf(p, checked.coin, checked.commitment, m.pathSplit === 0 ? [] : null, "snapshot");
         coins.set(p, coin);
-        item.ownership = "the wallet's: decrypted, and the commitment of the decrypted coin equals the record's";
-        item.coin = { tokenType: coin.tokenType, value: coin.value, nonce: coin.nonce, nullifier: coin.nullifier };
+        item.ownership = "the wallet's: elements rebuilt from its pads, decrypted, and the decrypted coin's commitment starts with the record's 16 bytes";
+        item.coin = { tokenType: coin.tokenType, value: coin.value, nonce: coin.nonce, nullifier: coin.nullifier, commitment: coin.commitment };
       }
     }
+    fetched.set(p, { commitment, lowerPath: fetched.get(p)?.lowerPath ?? null });
     // The comparison with the stored output is the page's, one row at a time (its "Compare" button): a lookup by
     // position reads the whole events table, about 140 ms on the full Preprod database.
     out.push(item);
@@ -543,6 +558,80 @@ async function read(args: { positions?: number[] }): Promise<Json> {
     stats: { ...stats, buildMs: round(stats.buildMs), roundTripMs: round(stats.roundTripMs), decodeMs: round(stats.decodeMs) },
     records: out,
     ms: round(callMs),
+  };
+}
+
+/**
+ * Reads lower Merkle paths from the path table by PIR, as a spend does (Q58): only then is the path table's setup data
+ * downloaded. Positions default to the wallet's snapshot coins. Each path is checked against its block's root from the
+ * coin's commitment (with the debug database, from the stored commitment for a position that is not the wallet's).
+ */
+async function paths(args: { positions?: number[] }, progress: (text: string) => void): Promise<Json> {
+  const k = need(kernel, "load the kernel");
+  const m = need(manifest, "get the files");
+  const id = need(manifestId, "get the files");
+  const ref = m.artifacts.pathTable;
+  const setupRef = m.artifacts.pathSetup;
+  if (ref === undefined || setupRef === undefined) throw new Error("this snapshot has no path table (its path split is 0): the block roots give every path");
+  const blockSize = 2 ** m.pathSplit;
+  const fullBlocks = Math.floor(m.firstFree / blockSize);
+  const own = [...coins.values()].filter((c) => c.source === "snapshot").map((c) => c.position);
+  const asked = [...new Set(args.positions && args.positions.length > 0 ? args.positions : own)].sort((x, y) => x - y);
+  if (asked.length === 0) throw new Error("no position: read the wallet's coins first, or enter positions");
+  for (const p of asked) if (!Number.isInteger(p) || p < 0 || p >= m.firstFree) throw new Error(`position ${p} is not in the snapshot (0 to ${m.firstFree - 1})`);
+  const positions = asked.filter((p) => Math.floor(p / blockSize) < fullBlocks);
+  const fromTail = asked.filter((p) => Math.floor(p / blockSize) >= fullBlocks);
+  const t = now();
+  let download: Json | null = null;
+  if (pathSetup === null) {
+    progress(`downloading the path table's setup data (${(setupRef.size / 1048576).toFixed(1)} MB), once per snapshot`);
+    download = await fetchBlob(setupRef, "path table setup");
+    pathSetup = setupMatrix(files.get(setupRef.digest)!, ref.rows);
+  }
+  const plan = paddedCalls(positions.map((p) => readCell(m, p, ref).column), ref.cols, m.queriesPerCall);
+  const stats = emptyCallStats();
+  const records = positions.length === 0 ? new Map<number, Uint8Array>() : await readPaths(http, m, id, pathSetup, positions, inlineMultiplier, stats);
+  const blockRoots = files.get(m.artifacts.blockRoots.digest)!;
+  const out = [];
+  for (const p of positions) {
+    const lower = decodePathRecord(records.get(p)!, m.pathSplit);
+    const { column, slot } = readCell(m, p, ref);
+    const item: Json = { position: p, column, slotInColumn: slot };
+    if (lower === null) {
+      item.result = "FAILED: the path table holds no path for a position in a full block";
+      out.push(item);
+      continue;
+    }
+    item.lowerPath = lower.map(hex);
+    let commitment = fetched.get(p)?.commitment ?? (coins.has(p) ? fromHexStrict(coins.get(p)!.commitment, 32) : null);
+    let from = "the wallet's coin";
+    if (commitment === null) {
+      const db = await debugJson(`/debug/output?position=${p}`);
+      if (db !== null && typeof db.commitment === "string") {
+        commitment = fromHexStrict(db.commitment, 32);
+        from = "the database (debug)";
+      }
+    }
+    const block = Math.floor(p / blockSize);
+    if (commitment === null) item.result = "read; no commitment to check it with (not the wallet's coin, and no debug database)";
+    else {
+      const ok = checkLowerPath(k, commitment, p % blockSize, lower, blockRoots.subarray(32 * block, 32 * block + 32));
+      item.result = ok ? `gives block ${block}'s root from the commitment of ${from}` : `DOES NOT give block ${block}'s root`;
+    }
+    fetched.set(p, { commitment, lowerPath: lower });
+    const coin = coins.get(p);
+    if (coin !== undefined) coin.lowerPath = lower.map(hex);
+    out.push(item);
+  }
+  for (const p of fromTail) out.push({ position: p, result: `not read: block ${Math.floor(p / blockSize)} was not full at the snapshot, so the tail gives its path` });
+  return {
+    positions: asked,
+    download,
+    calls: plan.map((c, i) => ({ call: i + 1, vectors: c.columns.length, realColumns: c.real, paddingColumns: c.columns.length - c.real.length })),
+    table: { rows: ref.rows, cols: ref.cols, recordsPerColumn: ref.perColumn, recordBytes: ref.recordBytes },
+    stats: { ...stats, buildMs: round(stats.buildMs), roundTripMs: round(stats.roundTripMs), decodeMs: round(stats.decodeMs) },
+    records: out,
+    ms: round(now() - t),
   };
 }
 
@@ -641,6 +730,10 @@ async function tail(): Promise<Json> {
   const view = { pathSplit: m.pathSplit, snapshotFirstFree: m.firstFree, snapshotBlockRoots: blockRoots, tail: tl };
   const paths = [];
   for (const [p, f] of [...fetched].slice(0, 16)) {
+    if (f.commitment === null) {
+      paths.push({ position: p, result: "skipped: its commitment is not known here (not the wallet's coin; read its path to fetch it from the debug database)" });
+      continue;
+    }
     const t3 = now();
     try {
       const { siblings } = coinPath(view, { position: p, commitment: hex(f.commitment), lowerPath: f.lowerPath === null ? null : f.lowerPath.map(hex) }, k);
@@ -666,7 +759,7 @@ async function tail(): Promise<Json> {
       ...(debug === null ? [] : [`database (debug): root at ${tl.header.height} ${debug.root === hex(tl.header.root) ? "equals" : "DIFFERS FROM"} the tail's`]),
     ],
     walletCoinsInTail: keys === null ? "derive the keys to scan the tail" : tailCoins,
-    paths: paths.length === 0 ? "fetch some positions first to check their paths here" : paths,
+    paths: paths.length === 0 ? "read some positions and their paths first to check their full paths here" : paths,
     fetchMs: round(fetchMs),
     clientMs: round(now() - t2),
   };
@@ -695,6 +788,7 @@ const STEPS: Record<string, (args: never, progress: (text: string) => void) => P
   scan,
   read,
   nullifiers,
+  paths,
   tail,
   summary,
   sampleSpends,

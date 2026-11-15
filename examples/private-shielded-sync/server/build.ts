@@ -1,6 +1,6 @@
 /**
  * The snapshot builder (spec §5.2–5.5): from the index's first `first_free` outputs and the nullifiers spent at or
- * below the snapshot height S, it writes the six artifacts and the manifest under the data directory and returns
+ * below the snapshot height S, it writes the artifacts (eight; six when k is 0) and the manifest under the data directory and returns
  * what the server holds in memory. It runs in a worker thread (`./build-worker.ts`) so the block loop is never held;
  * tests call it directly.
  *
@@ -34,12 +34,13 @@ import {
   positionOf,
   setRecord,
   setupBytes,
+  widestShape,
   WorkerMultiplier,
 } from "../pir/index.ts";
 import { FORMAT_VERSION } from "../shared/constants.ts";
 import { encodeManifest, type Manifest, snapshotId, toHex } from "../shared/manifest.ts";
 import { slotOf } from "../shared/padding.ts";
-import { CIPHERTEXT_BYTES, FLAG_CIPHERTEXT, FLAG_LOWER_PATH, readRecordBytes, SCAN_ENTRY_BYTES } from "../shared/records.ts";
+import { CIPHERTEXT_BYTES, encodeReadRecord, pathRecordBytes, READ_RECORD_BYTES, SCAN_ENTRY_BYTES } from "../shared/records.ts";
 import { buildTree, countingHash, type Hash2, type IncrementalTreeState, NODE_BYTES } from "./tree.ts";
 import { COMMITMENT_BYTES, EVIDENCE_CODE, type IndexSlice, NULLIFIER_BYTES } from "./zswap-index.ts";
 
@@ -82,18 +83,13 @@ const SETUP_BYTES_PER_ROW = 1024 * 4;
  * file, and the nullifier arrays. For the refusal of builds that would not fit (Q57).
  */
 export function paddedBuildBytes(size: number, pathSplit: number): number {
-  const read = positionalShape(size, readRecordBytes(pathSplit));
+  const read = positionalShape(size, READ_RECORD_BYTES);
+  const path = pathSplit > 0 ? widestShape(size, pathRecordBytes(pathSplit)) : null;
   const nullifierCells = cellsPerRecord(NULLIFIER_RECORD_BYTES);
   // The nullifier grid's rows are its fullest bucket's load: allow half again the mean.
   const nullifierGrid = 1.5 * size * nullifierCells * 2;
-  return (
-    read.rows * read.cols * 2 +
-    read.cols * A_BYTES_PER_COLUMN +
-    read.rows * SETUP_BYTES_PER_ROW +
-    nullifierGrid +
-    size * SCAN_ENTRY_BYTES +
-    size * (NULLIFIER_BYTES + 12)
-  );
+  const table = (t: GridShape | null): number => (t === null ? 0 : t.rows * t.cols * 2 + t.cols * A_BYTES_PER_COLUMN + t.rows * SETUP_BYTES_PER_ROW);
+  return table(read) + table(path) + nullifierGrid + size * SCAN_ENTRY_BYTES + size * (NULLIFIER_BYTES + 12);
 }
 
 /** A deterministic byte stream for one use of a padded build: AES-128-CTR keyed by SHA-256(label, block hash, size). */
@@ -123,7 +119,7 @@ function fillNoise(grid: Grid, next: (out: Uint8Array) => void): void {
 }
 
 /** The steps of a build, in order (spec §8's server rows). */
-export const BUILD_STEPS = ["scan", "tree", "readTable", "readSetup", "nullifierTable", "nullifierSetup", "manifest"] as const;
+export const BUILD_STEPS = ["scan", "tree", "readTable", "readSetup", "pathTable", "pathSetup", "nullifierTable", "nullifierSetup", "manifest"] as const;
 export type BuildStep = (typeof BUILD_STEPS)[number];
 
 /** What a step reports at its end. */
@@ -158,6 +154,8 @@ export interface BuildResult {
   readonly manifest: Manifest;
   readonly manifestBytes: Uint8Array;
   readonly readGrid: GridTransfer;
+  /** Null when k is 0. */
+  readonly pathGrid: GridTransfer | null;
   readonly nullifierGrid: GridTransfer;
   readonly blockRoots: Uint8Array;
   /** Where the tail's tree starts: the upper tree over the full blocks, and the partial block. */
@@ -239,7 +237,7 @@ export async function buildSnapshot(job: BuildJob, hooks: BuildHooks = {}): Prom
     throw new BuildError("invalid-job", `padding ${padding} must be a whole number of at least the ${n} outputs and ${job.slice.nullifiers} nullifiers`);
   }
   const slots = padding ?? n;
-  /** Where output `i` sits in the scan file and the read table. */
+  /** Where output `i` sits in the scan file, the read table and the path table. */
   const slotOfOutput = (i: number): number => (padding === undefined ? i : slotOf({ firstFree: n, padding: { size: padding } }, i));
   const commitments = new Uint8Array(job.slice.commitments, 0, n * COMMITMENT_BYTES);
   const ciphertexts = new Uint8Array(job.slice.ciphertexts, 0, n * CIPHERTEXT_BYTES);
@@ -308,27 +306,14 @@ export async function buildSnapshot(job: BuildJob, hooks: BuildHooks = {}): Prom
     const treeMs = performance.now() - started;
     end("tree", { bytes: rootsRef.size, hashes: counted.count(), hashesPerSecond: treeMs > 0 ? (counted.count() * 1000) / treeMs : 0 });
 
-    // Read table (FR-060, FR-061): one record per position.
+    // Read table (FR-060, FR-061, Q58): one 98-byte record per position: 16 bytes of the commitment and the shrunk
+    // ciphertext elements 1–5.
     begin("readTable");
-    const recordBytes = readRecordBytes(k);
-    const readGrid = createGrid(positionalShape(slots, recordBytes));
+    const readGrid = createGrid(positionalShape(slots, READ_RECORD_BYTES));
     if (padding !== undefined) fillNoise(readGrid, noiseStream("read", job.blockHash, padding));
-    const record = new Uint8Array(recordBytes);
-    const pathBytes = k * NODE_BYTES;
     for (let i = 0; i < n; i++) {
-      record.fill(0);
-      let flags = 0;
-      record.set(commitments.subarray(i * COMMITMENT_BYTES, (i + 1) * COMMITMENT_BYTES), 1);
-      if (evidence[i] === EVIDENCE_CODE.ciphertext) {
-        // Elements 1–5: ciphertext bytes 64 … 223 (after the point and element 0).
-        record.set(ciphertexts.subarray(i * CIPHERTEXT_BYTES + 64, (i + 1) * CIPHERTEXT_BYTES), 33);
-        flags |= FLAG_CIPHERTEXT;
-      }
-      if (i < tree.fullLeaves) {
-        record.set(tree.paths.subarray(i * pathBytes, (i + 1) * pathBytes), 193);
-        flags |= FLAG_LOWER_PATH;
-      }
-      record[0] = flags;
+      const ciphertext = evidence[i] === EVIDENCE_CODE.ciphertext ? ciphertexts.subarray(i * CIPHERTEXT_BYTES, (i + 1) * CIPHERTEXT_BYTES) : null;
+      const record = encodeReadRecord(commitments.subarray(i * COMMITMENT_BYTES, (i + 1) * COMMITMENT_BYTES), ciphertext);
       const { column, slot } = positionOf(slotOfOutput(i), readGrid.perColumn);
       setRecord(readGrid, column, slot, record);
     }
@@ -342,6 +327,32 @@ export async function buildSnapshot(job: BuildJob, hooks: BuildHooks = {}): Prom
     const readSetup = await buildSetup(readGrid, readSeed, multiplier);
     const readSetupRef = artifact(dir, [setupBytes(readSetup)]);
     end("readSetup", { bytes: readSetupRef.size });
+
+    // Path table (Q58): each position's k lower siblings, read only to spend; zero bytes outside the full blocks.
+    // As wide as the noise check allows, so its setup data, downloaded to spend, is small. None when k is 0.
+    let path: { grid: Grid; ref: { digest: string; size: number }; seed: Uint8Array; setupRef: { digest: string; size: number } } | null = null;
+    if (k > 0) {
+      begin("pathTable");
+      const pathGrid = createGrid(widestShape(slots, pathRecordBytes(k)));
+      if (padding !== undefined) fillNoise(pathGrid, noiseStream("path", job.blockHash, padding));
+      const pathBytes = k * NODE_BYTES;
+      const empty = new Uint8Array(pathBytes);
+      for (let i = 0; i < n; i++) {
+        const { column, slot } = positionOf(slotOfOutput(i), pathGrid.perColumn);
+        setRecord(pathGrid, column, slot, i < tree.fullLeaves ? tree.paths.subarray(i * pathBytes, (i + 1) * pathBytes) : empty);
+      }
+      const pathDigest = gridDigest(pathGrid);
+      const pathRef = artifact(dir, [encodeGridHeader(pathGrid), gridCellBytes(pathGrid)]);
+      if (pathRef.digest !== toHex(pathDigest)) throw new Error("the path table's file is not its grid digest");
+      end("pathTable", { bytes: pathRef.size });
+
+      begin("pathSetup");
+      const pathSeed = deriveSeed("path", pathDigest);
+      const pathSetup = await buildSetup(pathGrid, pathSeed, multiplier);
+      const pathSetupRef = artifact(dir, [setupBytes(pathSetup)]);
+      end("pathSetup", { bytes: pathSetupRef.size });
+      path = { grid: pathGrid, ref: pathRef, seed: pathSeed, setupRef: pathSetupRef };
+    }
 
     // Nullifier table (FR-062–064).
     begin("nullifierTable");
@@ -413,6 +424,7 @@ export async function buildSnapshot(job: BuildJob, hooks: BuildHooks = {}): Prom
         blockRoots: { ...rootsRef, blocks: tree.blocks },
         readTable: table(readGrid, readRef, readSeed),
         readSetup: readSetupRef,
+        ...(path === null ? {} : { pathTable: table(path.grid, path.ref, path.seed), pathSetup: path.setupRef }),
         nullifierTable: { ...table(nullifierGrid, nullifierRef, nullifierSeed), bucketBits: nullifierTable.bucketBits, capacity: nullifierTable.capacity },
         nullifierSetup: nullifierSetupRef,
       },
@@ -430,6 +442,7 @@ export async function buildSnapshot(job: BuildJob, hooks: BuildHooks = {}): Prom
       manifest,
       manifestBytes,
       readGrid: transfer(readGrid),
+      pathGrid: path === null ? null : transfer(path.grid),
       nullifierGrid: transfer(nullifierGrid),
       blockRoots: tree.blockRoots,
       upper: tree.upper,

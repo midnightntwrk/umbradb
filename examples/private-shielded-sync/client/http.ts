@@ -106,9 +106,10 @@ export class PssHttp {
     return (await this.#bytes("GET", ROUTES.tail)).bytes;
   }
 
-  /** `POST /query/read` or `/query/nullifier` with an encoded query body; the answer body. */
-  async query(table: "read" | "nullifier", body: Uint8Array): Promise<Uint8Array> {
-    return (await this.#bytes("POST", table === "read" ? ROUTES.queryRead : ROUTES.queryNullifier, body)).bytes;
+  /** `POST /query/read`, `/query/path` or `/query/nullifier` with an encoded query body; the answer body. */
+  async query(table: "read" | "path" | "nullifier", body: Uint8Array): Promise<Uint8Array> {
+    const route = table === "read" ? ROUTES.queryRead : table === "path" ? ROUTES.queryPath : ROUTES.queryNullifier;
+    return (await this.#bytes("POST", route, body)).bytes;
   }
 
   /**

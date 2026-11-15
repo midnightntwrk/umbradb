@@ -30,7 +30,7 @@ import { finalizedHead, zswapRootAt } from "./node-rpc.ts";
 import { loadSdk, type SdkSeeds } from "./sdk-api.ts";
 import { chooseCoin, coinPath, planTransfer } from "./send.ts";
 import { formatBalance, readState, unspentCoins, type WalletState, writeState } from "./state.ts";
-import { sync, type SyncResult } from "./sync.ts";
+import { lowerPathsByPir, pathInTable, sync, type SyncResult } from "./sync.ts";
 
 const HELP = `usage: node [--env-file=<secrets.env>] examples/private-shielded-sync/client/main.ts <command> [options]
 
@@ -280,6 +280,13 @@ async function cmdSend(): Promise<void> {
           attempt = 3;
           throw error;
         }
+        // The lower path is read by PIR only now, to spend (Q58), unless the tail gives it.
+        if (coin.lowerPath === null && pathInTable(result.manifest, coin)) {
+          const read = await lowerPathsByPir({ http: new PssHttp(opt.server), cache: new BlobCache(join(resolve(opt.data), "cache")), kernel: t.kernel, multiplier: t.multiplier }, result, [coin]);
+          coin = { ...coin, lowerPath: read.paths.get(coin.position)! };
+          timings.pathReadMs = read.stats.ms;
+          record.pathRead = { setup: read.stats.setup, buildMs: read.stats.buildMs, roundTripMs: read.stats.roundTripMs, decodeMs: read.stats.decodeMs, bytesUp: read.stats.bytesUp, bytesDown: read.stats.bytesDown };
+        }
         started = performance.now();
         const path = coinPath(result.view, coin, t.kernel);
         timings.pathMs = performance.now() - started;
@@ -291,7 +298,7 @@ async function cmdSend(): Promise<void> {
         plan = planTransfer({ ledger: t.ledger, keys: t.keys, network, coin, siblings: path.siblings, root: path.root, recipient, amount });
         timings.stateMs = plan.stateMs;
         timings.spendMs = plan.spendMs;
-        record.coin = { position: coin.position, value: coin.value, commitment: coin.commitment, source: coin.source, lowerPathFromPir: coin.lowerPath !== null };
+        record.coin = { position: coin.position, value: coin.value, commitment: coin.commitment, source: coin.source, lowerPathFromPir: record.pathRead !== undefined };
         record.anchor = { tailHeight: result.state.tail.height, tailBlockHash: result.state.tail.blockHash, root: result.state.tail.root, nodeHead: head.height, snapshot: result.state.snapshot };
         record.spend = { nullifier: plan.nullifier, leftHashes: plan.leftHashes, rightUpdates: plan.rightUpdates };
         record.outputs = { payment: plan.payment, change: plan.change };

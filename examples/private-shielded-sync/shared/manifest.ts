@@ -50,6 +50,9 @@ export interface Manifest {
     readonly blockRoots: ArtifactRef & { readonly blocks: number };
     readonly readTable: PirTableRef;
     readonly readSetup: ArtifactRef;
+    /** Lower Merkle paths, read only to spend (Q58); absent when pathSplit is 0 (no lower path). */
+    readonly pathTable?: PirTableRef;
+    readonly pathSetup?: ArtifactRef;
     readonly nullifierTable: PirTableRef & { readonly bucketBits: number; readonly capacity: number };
     readonly nullifierSetup: ArtifactRef;
   };
@@ -142,8 +145,18 @@ export function validateManifest(m: Manifest): void {
   need(isCount(a.blockRoots.blocks) && a.blockRoots.size === 32 * a.blockRoots.blocks, "blockRoots.blocks");
   checkTable(a.readTable, "readTable");
   need(a.readTable.records === slots, "readTable.records = slots");
+  need(a.readTable.recordBytes === 98, "readTable.recordBytes = 98");
   checkRef(a.readSetup, "readSetup");
   need(a.readSetup.size === a.readTable.rows * m.pir.n * 4, "readSetup.size = R × n × 4");
+  if (m.pathSplit === 0) {
+    need(a.pathTable === undefined && a.pathSetup === undefined, "no path table when pathSplit is 0");
+  } else {
+    checkTable(a.pathTable, "pathTable");
+    need(a.pathTable!.records === slots, "pathTable.records = slots");
+    need(a.pathTable!.recordBytes === 32 * m.pathSplit, "pathTable.recordBytes = 32 × pathSplit");
+    checkRef(a.pathSetup, "pathSetup");
+    need(a.pathSetup!.size === a.pathTable!.rows * m.pir.n * 4, "pathSetup.size = R × n × 4");
+  }
   checkTable(a.nullifierTable, "nullifierTable");
   need(isCount(a.nullifierTable.bucketBits) && a.nullifierTable.cols === 2 ** a.nullifierTable.bucketBits, "nullifierTable.bucketBits");
   need(isCount(a.nullifierTable.capacity) && a.nullifierTable.capacity === a.nullifierTable.perColumn, "nullifierTable.capacity");

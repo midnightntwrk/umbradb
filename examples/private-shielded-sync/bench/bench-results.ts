@@ -12,7 +12,7 @@ import type { SyncStep } from "../client/sync.ts";
 export const RESULTS_FORMAT = 1;
 
 /** The steps of a snapshot build (`server/build.ts`), in order. */
-export const BUILD_STEP_NAMES = ["scan", "tree", "readTable", "readSetup", "nullifierTable", "nullifierSetup", "manifest"] as const;
+export const BUILD_STEP_NAMES = ["scan", "tree", "readTable", "readSetup", "pathTable", "pathSetup", "nullifierTable", "nullifierSetup", "manifest"] as const;
 export type BuildStepName = (typeof BUILD_STEP_NAMES)[number];
 
 /** A step of the server's snapshot build, as `build-stats.json` (or the benchmark's own build) reports it. */
@@ -144,7 +144,23 @@ export interface ScanSweepRow {
   readonly peakRssBytes: number | null;
 }
 
-/** The read table and one read call at one `pathSplit` (spec FR-153), built by the module's own builder in-process. */
+/** One call of `queriesPerCall` vectors, client and server in the benchmark's process (no network). */
+export interface SplitCall {
+  readonly vectors: number;
+  readonly bytesUp: number;
+  readonly bytesDown: number;
+  readonly clientBuildMs: number;
+  readonly serverMultiplyMs: number;
+  readonly clientDecodeMs: number;
+  readonly peakRssBytes: number | null;
+  /** Records of the call's columns decoded and found equal to the table's own. */
+  readonly recordsChecked: number;
+}
+
+/**
+ * The read table and one read call at one `pathSplit` (spec FR-153), built by the module's own builder in-process; and
+ * since Q58 the path table, which k sizes (the read table no longer depends on k), with one path call (a spend's).
+ */
 export interface PathSplitRun {
   readonly k: number;
   readonly snapshotId: string;
@@ -156,22 +172,22 @@ export interface PathSplitRun {
   readonly perColumn: number;
   readonly blocks: number;
   readonly sizes: { readonly blockRoots: number; readonly readTable: number; readonly readSetup: number };
-  /** Every step of the build (FR-153 reports the tree and the read table's). */
-  readonly steps: Readonly<Record<BuildStepName, BuildStep>>;
+  /** Every step of the build (FR-153 reports the tree and the tables'); the path table's are null at k = 0. */
+  readonly steps: Readonly<Record<BuildStepName, BuildStep | null>>;
+  /** The path table at this k (Q58), with one call of its own; null at k = 0 (no lower path). */
+  readonly path: {
+    readonly recordBytes: number;
+    readonly rows: number;
+    readonly cols: number;
+    readonly perColumn: number;
+    readonly tableBytes: number;
+    readonly setupBytes: number;
+    readonly call: SplitCall | null;
+  } | null;
   readonly buildMs: number;
   readonly threads: number;
   /** One call of `queriesPerCall` vectors, client and server in the benchmark's process (no network). */
-  readonly call: {
-    readonly vectors: number;
-    readonly bytesUp: number;
-    readonly bytesDown: number;
-    readonly clientBuildMs: number;
-    readonly serverMultiplyMs: number;
-    readonly clientDecodeMs: number;
-    readonly peakRssBytes: number | null;
-    /** Records of the call's columns decoded and found equal to the table's own. */
-    readonly recordsChecked: number;
-  };
+  readonly call: SplitCall;
 }
 
 export interface ChainSync {

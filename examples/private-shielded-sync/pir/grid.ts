@@ -50,6 +50,18 @@ export function positionalShape(records: number, recordBytes: number): GridShape
   return { rows: perColumn * e, cols, perColumn, cellsPerRecord: e, recordBytes, records };
 }
 
+/**
+ * The path table's shape (Q58): as wide as the noise check allows, so the fewest rows. A wallet reads it only to spend,
+ * and its setup data, which it downloads for that, grows with the rows; the call's upload grows with the columns.
+ */
+export function widestShape(records: number, recordBytes: number): GridShape {
+  if (!Number.isInteger(records) || records < 0) throw new Error(`record count must be ≥ 0: ${records}`);
+  const e = cellsPerRecord(recordBytes);
+  const perColumn = Math.max(1, Math.ceil(records / MAX_COLUMNS));
+  const cols = Math.max(1, Math.ceil(records / perColumn));
+  return { rows: perColumn * e, cols, perColumn, cellsPerRecord: e, recordBytes, records };
+}
+
 /** Column and slot of record `index` in a table with `perColumn` records per column (FR-061). */
 export function positionOf(index: number, perColumn: number): { column: number; slot: number } {
   return { column: Math.floor(index / perColumn), slot: index % perColumn };

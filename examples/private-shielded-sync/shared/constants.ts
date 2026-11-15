@@ -1,7 +1,7 @@
 /** Constants shared by the server module and the client (spec §5.7, FR-081). */
 
 /** The version of every wire format and of the manifest. A change to any layout below changes it. */
-export const FORMAT_VERSION = 1;
+export const FORMAT_VERSION = 2;
 
 /** Route prefix of the module's HTTP API. */
 export const ROUTE_PREFIX = "/pss/v1";
@@ -13,6 +13,8 @@ export const ROUTES = Object.freeze({
   tail: `${ROUTE_PREFIX}/tail`,
   queryRead: `${ROUTE_PREFIX}/query/read`,
   queryNullifier: `${ROUTE_PREFIX}/query/nullifier`,
+  /** Lower Merkle paths, read only to spend (Q58). */
+  queryPath: `${ROUTE_PREFIX}/query/path`,
   adminSnapshot: `${ROUTE_PREFIX}/admin/snapshot`,
 });
 

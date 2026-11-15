@@ -16,6 +16,7 @@ import { type Multiplier, LWE_N, setupMatrix } from "../pir/index.ts";
 import {
   CIPHERTEXT_BYTES,
   decodeManifest,
+  decodePathRecord,
   decodeNullifierRecord,
   decodeReadRecord,
   decodeTailOutput,
@@ -25,6 +26,7 @@ import {
   type ReadRecord,
   NULLIFIER_RECORD_BYTES,
   positionAtSlot,
+  rebuildElements,
   SCAN_ENTRY_BYTES,
   slotCount,
   slotOf,
@@ -36,7 +38,7 @@ import { BlobCache, type FetchStat } from "./cache.ts";
 import { type PssHttp, type RequestRecord, SnapshotReplaced } from "./http.ts";
 import type { WalletKeys } from "./keys.ts";
 import type { Ledger } from "./ledger.ts";
-import { type CallStats, emptyCallStats, lookupNullifiers, readPositions } from "./pir-calls.ts";
+import { type CallStats, emptyCallStats, lookupNullifiers, readPaths, readPositions } from "./pir-calls.ts";
 import type { TreeView } from "./send.ts";
 import { type CoinRecord, type PendingTransfer, type RejectedMatch, STATE_FORMAT, type WalletState } from "./state.ts";
 import { type Hash2, levelsRoot, NODE_BYTES, rootFromPath, TREE_DEPTH, treeLevels } from "./tree.ts";
@@ -102,42 +104,39 @@ export type CheckedMatch = { readonly coin: Coin; readonly commitment: Uint8Arra
 
 /**
  * The ledger's own decryption of a full ciphertext (the kernel's `decrypt_coin`) and the commitment check: the coin is
- * kept only if `coinCommitment(coin, coinPublicKey)` equals the record's commitment.
+ * kept only if `coinCommitment(coin, coinPublicKey)` starts with `expected` — the full commitment (a tail output) or the
+ * read record's first 16 bytes (Q58). The recomputed commitment is returned.
  */
-export function checkCiphertext(kernel: Kernel, keys: WalletKeys, ciphertext: Uint8Array, commitment: Uint8Array, lowerPath: readonly Uint8Array[] | null): CheckedMatch {
+export function checkCiphertext(kernel: Kernel, keys: WalletKeys, ciphertext: Uint8Array, expected: Uint8Array, lowerPath: readonly Uint8Array[] | null): CheckedMatch {
   const coin = kernel.decryptCoin(ciphertext, keys.scanSecret);
   if (coin === null) return { reason: "the ciphertext does not decrypt to a coin" };
-  if (!equalBytes(kernel.commitment(coin, keys.coinPublicKey), commitment)) return { reason: "the decrypted coin's commitment differs from the record's" };
+  const commitment = kernel.commitment(coin, keys.coinPublicKey);
+  if (!equalBytes(commitment.subarray(0, expected.length), expected)) return { reason: "the decrypted coin's commitment differs from the record's" };
   return { coin, commitment, lowerPath };
 }
 
 /**
- * A scan match read by PIR: its scan entry (point, 4 bytes of element 0) and its read record (commitment, elements
- * 1–5, lower path). Element 0 encrypts zero, so it equals the first pad: the scan matched its first 4 bytes, and the
- * commitment check confirms the rest. A lower path must give the snapshot's root of the record's block.
+ * A scan match read by PIR: its scan entry (point, 4 bytes of element 0) and its read record (16 bytes of the
+ * commitment, elements 1–5 shrunk). Element 0 encrypts zero, so it equals the first pad: the scan matched its first 4
+ * bytes. The wallet rebuilds elements 1–5 from its pads, decrypts the ledger's way, and checks the recomputed
+ * commitment's first 16 bytes. The lower path is not read here; a spend reads it (`checkLowerPath`).
  */
-export function checkSnapshotMatch(
-  kernel: Kernel,
-  keys: WalletKeys,
-  entry: Uint8Array,
-  record: ReadRecord,
-  indexInBlock: number,
-  blockRoot: Uint8Array,
-): CheckedMatch {
+export function checkSnapshotMatch(kernel: Kernel, keys: WalletKeys, entry: Uint8Array, record: ReadRecord): CheckedMatch {
   if (record.elements === null) return { reason: "the record has no ciphertext" };
   const point = entry.subarray(0, 32);
   const pads = kernel.pads(point, keys.scanSecret);
   if (pads === null) return { reason: "the point is not one the ledger accepts" };
   if (!equalBytes(pads.subarray(0, 4), entry.subarray(32, 36))) return { reason: "the scan entry is not the wallet's" };
-  if (record.lowerPath !== null) {
-    const root = rootFromPath(kernel.leaf(record.commitment), indexInBlock, record.lowerPath, (a, b) => kernel.hash2(a, b)!);
-    if (!equalBytes(root, blockRoot)) return { reason: "the record's lower path does not give its block's root" };
-  }
   const ciphertext = new Uint8Array(CIPHERTEXT_BYTES);
   ciphertext.set(point, 0);
   ciphertext.set(pads.subarray(0, 32), 32);
-  ciphertext.set(record.elements, 64);
-  return checkCiphertext(kernel, keys, ciphertext, record.commitment, record.lowerPath);
+  ciphertext.set(rebuildElements(record.elements, pads), 64);
+  return checkCiphertext(kernel, keys, ciphertext, record.commitmentPrefix, null);
+}
+
+/** Whether a lower path read from the path table gives its block's root from the coin's commitment. */
+export function checkLowerPath(kernel: Kernel, commitment: Uint8Array, indexInBlock: number, lowerPath: readonly Uint8Array[], blockRoot: Uint8Array): boolean {
+  return equalBytes(rootFromPath(kernel.leaf(commitment), indexInBlock, lowerPath, (a, b) => kernel.hash2(a, b)!), blockRoot);
 }
 
 /** The local state's record of a checked coin; its nullifier is the ledger's `coinNullifier`. */
@@ -154,6 +153,55 @@ function coinRecord(ledger: Ledger, keys: WalletKeys, position: number, m: { rea
     source,
     spent: null,
   };
+}
+
+/** Whether a snapshot coin's lower path is in the path table: its block was full at the snapshot (k > 0). */
+export function pathInTable(manifest: Pick<Manifest, "pathSplit" | "firstFree">, coin: Pick<CoinRecord, "position" | "source">): boolean {
+  const size = 2 ** manifest.pathSplit;
+  return manifest.pathSplit > 0 && coin.source === "snapshot" && coin.position < Math.floor(manifest.firstFree / size) * size;
+}
+
+/** What reading lower paths to spend cost (Q58): the path table's setup data (once per snapshot) and the call. */
+export interface PathReadStats extends CallStats {
+  readonly setup: FetchStat;
+  readonly ms: number;
+}
+
+/**
+ * Reads the lower paths of `coins` from the path table by PIR, to spend them (Q58): downloads the table's setup data
+ * the first time (cached by digest), reads the positions in one padded call, and checks each path against its block's
+ * root from the coin's commitment. Returns the paths as hex, by position.
+ */
+export async function lowerPathsByPir(
+  options: Pick<SyncOptions, "http" | "cache" | "kernel" | "multiplier">,
+  result: Pick<SyncResult, "manifest" | "state" | "view">,
+  coins: readonly Pick<CoinRecord, "position" | "commitment" | "source">[],
+): Promise<{ paths: Map<number, string[]>; stats: PathReadStats }> {
+  const { http, cache, kernel, multiplier } = options;
+  const m = result.manifest;
+  const ref = m.artifacts.pathTable;
+  const setupRef = m.artifacts.pathSetup;
+  if (ref === undefined || setupRef === undefined) throw new Error("the snapshot has no path table (path split 0)");
+  for (const c of coins) if (!pathInTable(m, c)) throw new Error(`position ${c.position} has no path in the path table (its block was not full at the snapshot)`);
+  const started = performance.now();
+  const setup = await cache.fetch(http, setupRef);
+  const call = emptyCallStats();
+  const positions = coins.map((c) => c.position);
+  const records = await readPaths(http, m, Buffer.from(result.state.snapshot.id, "hex"), setupMatrix(cache.read(setupRef), ref.rows), positions, multiplier, call);
+  const k = m.pathSplit;
+  const size = 2 ** k;
+  const paths = new Map<number, string[]>();
+  for (const c of coins) {
+    const lower = decodePathRecord(records.get(c.position)!, k);
+    if (lower === null) throw new Error(`the path table holds no path for position ${c.position}`);
+    const block = Math.floor(c.position / size);
+    const blockRoot = result.view.snapshotBlockRoots.subarray(block * NODE_BYTES, (block + 1) * NODE_BYTES);
+    if (!checkLowerPath(kernel, Buffer.from(c.commitment, "hex"), c.position % size, lower, blockRoot)) {
+      throw new Error(`the lower path read for position ${c.position} does not give its block's root`);
+    }
+    paths.set(c.position, lower.map(hex));
+  }
+  return { paths, stats: { ...call, setup, ms: performance.now() - started } };
 }
 
 /** Runs `sync`, starting again when the snapshot is replaced (at most `maxAttempts` times). */
@@ -248,11 +296,12 @@ async function syncOnce(options: SyncOptions): Promise<SyncResult> {
     else coins.push(coinRecord(ledger, keys, position, checked, source));
   };
   for (const position of matches) {
-    const record = decodeReadRecord(records.get(position)!, k);
-    const block = Math.floor(position / blockSize);
+    const record = decodeReadRecord(records.get(position)!);
     const slot = slotOf(manifest, position);
     const entry = scanFile.subarray(SCAN_ENTRY_BYTES * slot, SCAN_ENTRY_BYTES * (slot + 1));
-    take(position, checkSnapshotMatch(kernel, keys, entry, record, position % blockSize, blockRoots.subarray(block * NODE_BYTES, (block + 1) * NODE_BYTES)), "snapshot");
+    const checked = checkSnapshotMatch(kernel, keys, entry, record);
+    // With k = 0 the path is all above the blocks: there is no lower path to read.
+    take(position, "reason" in checked || k > 0 ? checked : { ...checked, lowerPath: [] }, "snapshot");
   }
   const decryptMs = performance.now() - t;
   step("decrypt", "end");

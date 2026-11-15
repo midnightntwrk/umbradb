@@ -23,7 +23,7 @@ import { walletKeys, type WalletKeys } from "../client/keys.ts";
 import type { Ledger } from "../client/ledger.ts";
 import { chooseCoin, coinPath, planTransfer } from "../client/send.ts";
 import { type CoinRecord, unspentCoins, type WalletState } from "../client/state.ts";
-import { sync, type SyncResult } from "../client/sync.ts";
+import { lowerPathsByPir, pathInTable, sync, type SyncResult } from "../client/sync.ts";
 import {
   bigIntToLe32,
   leToBigInt,
@@ -57,17 +57,21 @@ let syncB: SyncResult;
 let storedRoot7: string;
 const hash = (a: Uint8Array, b: Uint8Array): Uint8Array => kernel.hash2(a, b)!;
 
+/**
+ * A sync, then (as a spend does, Q58) the lower paths of the coins in blocks full at the snapshot, read by PIR from the
+ * path table: the sync itself reads none.
+ */
 async function syncOf(keys: WalletKeys, previous: WalletState | null = null): Promise<SyncResult> {
-  return sync({
-    ledger,
-    keys,
-    http: new PssHttp(r.origin),
-    cache: new BlobCache(mkdtempSync(join(dir, "cache-"))),
-    kernel,
-    scanPool,
-    multiplier: inlineMultiplier,
-    previous,
-  });
+  const http = new PssHttp(r.origin);
+  const cache = new BlobCache(mkdtempSync(join(dir, "cache-")));
+  const result = await sync({ ledger, keys, http, cache, kernel, scanPool, multiplier: inlineMultiplier, previous });
+  expect(result.state.coins.every((c) => c.lowerPath === null)).toBe(true);
+  const wanted = result.state.coins.filter((c) => pathInTable(result.manifest, c));
+  if (wanted.length === 0) return result;
+  const { paths, stats } = await lowerPathsByPir({ http, cache, kernel, multiplier: inlineMultiplier }, result, wanted);
+  expect(stats.calls).toBe(1);
+  const coins = result.state.coins.map((c) => (paths.has(c.position) ? { ...c, lowerPath: paths.get(c.position)! } : c));
+  return { ...result, state: { ...result.state, coins } };
 }
 
 const recipientOf = (k: WalletKeys) => ({ coinPublicKey: toHex(k.coinPublicKey), encryptionPublicKey: toHex(k.encryptionPublicKey) });

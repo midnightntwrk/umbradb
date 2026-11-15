@@ -32,7 +32,7 @@ import {
   type TableInfo,
   WorkerMultiplier,
 } from "../pir/index.ts";
-import { decodeManifest, decodeReadRecord, fromHex, readRecordBytes, snapshotId, toHex } from "../shared/index.ts";
+import { decodeManifest, decodePathRecord, decodeReadRecord, fromHex, READ_RECORD_BYTES, shrinkElements, snapshotId, toHex } from "../shared/index.ts";
 import { BuildError, type BuildJob, type BuildResult, buildSnapshot, MANIFEST_FILE, SNAPSHOTS_DIR } from "../server/build.ts";
 import { runBuildWorker } from "../server/build-host.ts";
 import { blockLevels, NODE_BYTES, rootFromStored } from "../server/tree.ts";
@@ -173,7 +173,7 @@ describe("a snapshot built from the index (story 1)", () => {
     }
   });
 
-  it("read table: every position read by PIR through the client's decode is the record of its output, with its lower path when its block is full", { timeout: LONG }, async () => {
+  it("read table: every position read by PIR through the client's decode is its output's 98-byte record (Q58)", { timeout: LONG }, async () => {
     const index = indexOf(chain);
     const outputs = outputsOf(chain);
     const k = 2;
@@ -181,7 +181,7 @@ describe("a snapshot built from the index (story 1)", () => {
     const t = result.manifest.artifacts.readTable;
     const table: TableInfo = { ...t, seed: fromHex(t.seed, 32) };
     const setup = setupMatrix(new Uint8Array(readFileSync(join(result.dir, result.manifest.artifacts.readSetup.digest))), t.rows);
-    expect(t.recordBytes).toBe(readRecordBytes(k));
+    expect(t.recordBytes).toBe(READ_RECORD_BYTES);
     // The seed is the grid digest's (FR-053): the table file's SHA-256.
     expect(t.seed).toBe(toHex(deriveSeed("read", fromHex(t.digest, 32))));
     const grid = { ...result.readGrid, cells: new Int16Array(result.readGrid.cells) };
@@ -192,24 +192,48 @@ describe("a snapshot built from the index (story 1)", () => {
     const { answerQueries } = await import("../pir/index.ts");
     const answers = await answerQueries(grid, batch.queries, columns.length, multiplier);
     const values = await decodeAnswers(setup, batch, answers, multiplier);
+    positions.forEach((i, q) => {
+      const record = decodeReadRecord(columnRecords(t, values[q]!)[positionOf(i, t.perColumn).slot]!);
+      const e = outputs[i]!;
+      expect(hex(record.commitmentPrefix), `commitment ${i}`).toBe(hex(e.commitment!.subarray(0, 16)));
+      expect(record.elements === null ? null : hex(record.elements), `elements ${i}`).toBe(e.ciphertext === null ? null : hex(shrinkElements(e.ciphertext)));
+    });
+  });
+
+  it("path table: every position read by PIR is its lower path in a full block and zeros elsewhere; none at k = 0 (Q58)", { timeout: LONG }, async () => {
+    const index = indexOf(chain);
+    const outputs = outputsOf(chain);
+    const k = 2;
+    const result = await build(jobAt(chain, index, 7, k));
+    const t = result.manifest.artifacts.pathTable!;
+    expect(t.recordBytes).toBe(32 * k);
+    expect(t.seed).toBe(toHex(deriveSeed("path", fromHex(t.digest, 32))));
+    // As wide as the noise check allows: 15 records fit one row of records.
+    expect([t.perColumn, t.cols]).toEqual([1, 15]);
+    const table: TableInfo = { ...t, seed: fromHex(t.seed, 32) };
+    const setup = setupMatrix(new Uint8Array(readFileSync(join(result.dir, result.manifest.artifacts.pathSetup!.digest))), t.rows);
+    const grid = { ...result.pathGrid!, cells: new Int16Array(result.pathGrid!.cells) };
+    const positions = Array.from({ length: 15 }, (_, i) => i);
+    const columns = positions.map((i) => positionOf(i, t.perColumn).column);
+    const batch = await buildQueries(table, columns, multiplier);
+    const { answerQueries } = await import("../pir/index.ts");
+    const answers = await answerQueries(grid, batch.queries, columns.length, multiplier);
+    const values = await decodeAnswers(setup, batch, answers, multiplier);
     const leaves = outputs.map((e) => kernel.leaf(e.commitment!));
     positions.forEach((i, q) => {
-      const bytes = columnRecords(t, values[q]!)[positionOf(i, t.perColumn).slot]!;
-      const record = decodeReadRecord(bytes, k);
-      const e = outputs[i]!;
-      expect(hex(record.commitment), `commitment ${i}`).toBe(hex(e.commitment!));
-      expect(record.elements === null ? null : hex(record.elements), `elements ${i}`).toBe(e.ciphertext === null ? null : hex(e.ciphertext.subarray(64)));
+      const lowerPath = decodePathRecord(columnRecords(t, values[q]!)[positionOf(i, t.perColumn).slot]!, k);
       const full = i < Math.floor(15 / 4) * 4;
-      expect(record.lowerPath !== null, `path flag ${i}`).toBe(full);
-      if (record.lowerPath !== null) {
-        let node = leaves[i]!;
-        record.lowerPath.forEach((sibling, l) => {
-          node = ((i >> l) & 1) === 0 ? hash(node, sibling) : hash(sibling, node);
-        });
-        const block = Math.floor(i / 4);
-        expect(hex(node), `path ${i}`).toBe(hex(naiveRoot(leaves.slice(block * 4, block * 4 + 4), 2)!));
-      }
+      expect(lowerPath !== null, `path ${i}`).toBe(full);
+      if (lowerPath === null) return;
+      let node = leaves[i]!;
+      lowerPath.forEach((sibling, l) => {
+        node = ((i >> l) & 1) === 0 ? hash(node, sibling) : hash(sibling, node);
+      });
+      const block = Math.floor(i / 4);
+      expect(hex(node), `path ${i}`).toBe(hex(naiveRoot(leaves.slice(block * 4, block * 4 + 4), 2)!));
     });
+    const flat = await build(jobAt(chain, index, 7, 0));
+    expect([flat.manifest.artifacts.pathTable, flat.manifest.artifacts.pathSetup, flat.pathGrid]).toEqual([undefined, undefined, null]);
   });
 
   it("nullifier table: every spent nullifier is found by PIR with its height and transaction; absent ones are not", { timeout: LONG }, async () => {
@@ -298,7 +322,7 @@ describe("determinism and the build's checks", () => {
       const direct = await build({ ...job, dataDir: dataDir });
       const outcome = await runBuildWorker(job);
       expect(outcome.result.id).toBe(direct.id);
-      expect(Object.keys(outcome.steps)).toEqual(["scan", "tree", "readTable", "readSetup", "nullifierTable", "nullifierSetup", "manifest"]);
+      expect(Object.keys(outcome.steps)).toEqual(["scan", "tree", "readTable", "readSetup", "pathTable", "pathSetup", "nullifierTable", "nullifierSetup", "manifest"]);
       for (const step of Object.values(outcome.steps)) expect(step!.peakRssBytes).toBeGreaterThan(0);
       expect(outcome.steps.tree!.hashes).toBeGreaterThan(0);
       expect(existsSync(join(dir, SNAPSHOTS_DIR, outcome.result.id, MANIFEST_FILE))).toBe(true);

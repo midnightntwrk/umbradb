@@ -116,7 +116,8 @@ const VIEWS: Record<string, (r: Json) => string> = {
         ["table size (debug)", m.padding ? `padded to ${Number(m.padding).toLocaleString("en-US")} entries: the outputs spread among noise in the scan file and both tables` : undefined],
         ["tree root", short(String(m.root), 24)],
         ["path split k", `${m.pathSplit} (blocks of ${2 ** Number(m.pathSplit)} outputs; ${m.blocks} block root(s))`],
-        ["read table", `${rt.rows} × ${rt.cols} cells, ${rt.recordsPerColumn} records per column, ${Number(rt.records).toLocaleString("en-US")} records`],
+        ["read table", `${rt.rows} × ${rt.cols} cells, ${rt.recordsPerColumn} records of ${rt.recordBytes} bytes per column, ${Number(rt.records).toLocaleString("en-US")} records`],
+        ["path table", m.pathTable ? `${(m.pathTable as Json).rows} × ${(m.pathTable as Json).cols} cells, ${(m.pathTable as Json).recordsPerColumn} records of ${(m.pathTable as Json).recordBytes} bytes per column; its setup data, ${kb(Number((m.pathTable as Json).setupBytes))}, is downloaded only to spend (step 6)` : "none (path split 0)"],
         ["nullifier table", `${nt.rows} × ${nt.cols} cells, ${nt.bucketBits} bucket bits, capacity ${nt.capacity}`],
         ["vectors per call", String(m.queriesPerCall)],
         ["checks", checksHtml(r.checks)],
@@ -149,17 +150,16 @@ const VIEWS: Record<string, (r: Json) => string> = {
         ["time", `build ${s.buildMs} ms, round trip ${s.roundTripMs} ms, decode ${s.decodeMs} ms`],
       ]) +
       table(
-        ["position", "commitment", "ciphertext (elements 1–5)", "lower path", "wallet's?", "database (debug)"],
+        ["position", "commitment, first 16 bytes", "elements 1–5, shrunk (82 bytes)", "wallet's?", "database (debug)"],
         records.map((x) => {
-          const elements = x.ciphertextElements1to5 === null ? "" : String(x.ciphertextElements1to5);
+          const elements = x.elementsShrunk === null ? "" : String(x.elementsShrunk);
           return [
             `${x.position}<br><small>${x.tableIndex === undefined ? "" : `table index ${x.tableIndex}, `}col ${x.column}, slot ${x.slotInColumn}</small>`,
-            esc(short(String(x.commitment), 24)),
-            x.ciphertextElements1to5 === null ? "none (output carries no ciphertext)" : esc(short(String(x.ciphertextElements1to5), 24)),
-            Array.isArray(x.lowerPath) ? `${(x.lowerPath as unknown[]).length} hashes, ${esc(String(x.lowerPathCheck))}` : esc(String(x.lowerPath)),
+            esc(String(x.commitmentPrefix)),
+            x.elementsShrunk === null ? "none (output carries no ciphertext)" : esc(short(String(x.elementsShrunk), 24)),
             x.ownership === undefined ? "derive keys to check" : x.coin ? `<span class="good">${esc(String(x.ownership))}</span><br>${esc(JSON.stringify(x.coin))}` : esc(String(x.ownership)),
             databaseRoutes
-              ? `<button class="secondary small" data-compare="${x.position}" data-commitment="${esc(String(x.commitment))}" data-elements="${esc(elements)}">Compare</button>`
+              ? `<button class="secondary small" data-compare="${x.position}" data-commitment="${esc(String(x.commitmentPrefix))}" data-elements="${esc(elements)}">Compare</button>`
               : "—",
           ];
         }),
@@ -177,6 +177,27 @@ const VIEWS: Record<string, (r: Json) => string> = {
         ["time", `build ${s.buildMs} ms, round trip ${s.roundTripMs} ms, decode ${s.decodeMs} ms`],
         ["note", r.note === undefined ? undefined : String(r.note)],
       ]) + table(["nullifier", "bucket", "whose", "result"], (r.results as Json[]).map((x) => [esc(short(String(x.nullifier), 24)), String(x.bucket), esc(String(x.of)), esc(String(x.result))]))
+    );
+  },
+  paths: (r) => {
+    const calls = r.calls as Json[];
+    const s = r.stats as Json;
+    const d = r.download as Json | null;
+    const t = r.table as Json;
+    return (
+      facts([
+        ["positions", (r.positions as number[]).join(", ")],
+        ["path table", `${t.rows} × ${t.cols} cells, ${t.recordsPerColumn} records of ${t.recordBytes} bytes per column (as wide as the noise check allows, so its setup data is small)`],
+        ["setup data", d === null ? "already downloaded for this snapshot" : `${kb(Number(d.bytes))} downloaded in ${d.ms} ms (once per snapshot, only to spend)`],
+        ["calls", calls.length === 0 ? "none: no position in a full block" : calls.map((c) => `call ${c.call}: ${c.vectors} vectors, real columns [${(c.realColumns as number[]).join(", ")}], ${c.paddingColumns} random`).join("; ")],
+        ["bytes", `${kb(Number(s.bytesUp))} up, ${kb(Number(s.bytesDown))} down`],
+        ["time", `build ${s.buildMs} ms, round trip ${s.roundTripMs} ms, decode ${s.decodeMs} ms`],
+      ]) +
+      table(["position", "lower path", "check"], (r.records as Json[]).map((x) => [
+        `${x.position}${x.column === undefined ? "" : `<br><small>col ${x.column}, slot ${x.slotInColumn}</small>`}`,
+        Array.isArray(x.lowerPath) ? `${(x.lowerPath as unknown[]).length} hashes: ${esc(short(String((x.lowerPath as string[])[0]), 16))} …` : "—",
+        mark(!/FAILED|NOT/.test(String(x.result)), String(x.result)),
+      ]))
     );
   },
   tail: (r) => {
@@ -236,6 +257,7 @@ const ARGS: Record<string, () => Json> = {
   generate: () => ({ generate: true }),
   scan: () => ({ gpu: $<HTMLInputElement>("#gpu").checked }),
   read: () => ({ positions: parsePositions($<HTMLInputElement>("#positions").value) }),
+  paths: () => ({ positions: parsePositions($<HTMLInputElement>("#path-positions").value) }),
   nullifiers: () => ({ nullifiers: $<HTMLTextAreaElement>("#nullifiers").value.split(/\s+/).filter(Boolean) }),
 };
 const STEP_OF: Record<string, string> = { generate: "keys" };
@@ -332,7 +354,7 @@ async function reload(card: HTMLElement, status: HTMLElement): Promise<void> {
     return;
   }
   out.innerHTML = VIEWS.reload!(body) + `<details><summary>debug: the server's answer</summary><pre>${esc(abbreviated(body))}</pre></details>`;
-  for (const id of ["#step-scan", "#step-read", "#step-nullifiers", "#step-tail", "#step-summary"]) {
+  for (const id of ["#step-scan", "#step-read", "#step-nullifiers", "#step-paths", "#step-tail", "#step-summary"]) {
     const section = $(id);
     $(".out", section).innerHTML = `<div class="note">The snapshot changed: run this step again.</div>`;
     const s = $(".status", section);
@@ -378,8 +400,11 @@ async function compare(button: HTMLButtonElement): Promise<void> {
     const db = (await r.json()) as Json;
     const ms = Math.round(performance.now() - t);
     if (!r.ok) throw new Error(String(db.error ?? r.status));
-    const dbElements = db.ciphertext === null ? "" : String(db.ciphertext).slice(128, 448);
-    const equal = db.commitment === commitment && dbElements === elements;
+    // The record's form of the stored output: the commitment's first 16 bytes; of the ciphertext (point, elements 0–5,
+    // 32 bytes each), element 1's first byte, element 2, element 3's first byte, element 4, element 5's first 16 bytes.
+    const ct = db.ciphertext === null ? null : String(db.ciphertext);
+    const dbElements = ct === null ? "" : ct.slice(128, 130) + ct.slice(192, 256) + ct.slice(256, 258) + ct.slice(320, 384) + ct.slice(384, 416);
+    const equal = String(db.commitment).slice(0, 32) === commitment && dbElements === elements;
     cell.innerHTML = `${mark(equal, equal ? "equals the stored output" : "differs from the stored output")}<br><small>height ${db.height}, tx ${db.txIndex}, ${esc(String(db.evidence))}; lookup ${ms} ms</small>`;
   } catch (error) {
     button.disabled = false;

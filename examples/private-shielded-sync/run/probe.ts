@@ -28,13 +28,13 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { BlobCache } from "../client/cache.ts";
 import { PssHttp } from "../client/http.ts";
-import { emptyCallStats, lookupNullifiers, readPositions } from "../client/pir-calls.ts";
+import { emptyCallStats, lookupNullifiers, readPaths, readPositions } from "../client/pir-calls.ts";
 import { coinPath } from "../client/send.ts";
 import { rootOverBlocks } from "../client/sync.ts";
 import { type Hash2, rootFromPath } from "../client/tree.ts";
 import { compileKernel, Kernel } from "../kernel/index.ts";
 import { setupMatrix, WorkerMultiplier } from "../pir/index.ts";
-import { decodeManifest, decodeReadRecord, slotCount, slotOf, splitTail } from "../shared/index.ts";
+import { decodeManifest, decodePathRecord, decodeReadRecord, shrinkElements, slotCount, slotOf, splitTail } from "../shared/index.ts";
 
 const { values: opt } = parseArgs({
   options: {
@@ -187,23 +187,34 @@ const multiplier = new WorkerMultiplier(Number(opt.threads));
 const readStats = emptyCallStats();
 t = performance.now();
 const records = await readPositions(http, manifest, manifestId, setupMatrix(cache.read(a.readSetup), a.readTable.rows), positions, multiplier, readStats);
+const lowerPaths = new Map<number, Uint8Array[]>();
 const readMs = ms(t);
-let pathsChecked = 0;
 for (const p of positions) {
-  const r = decodeReadRecord(records.get(p)!, k);
+  const r = decodeReadRecord(records.get(p)!);
   const o = stored[p]!;
-  check(equal(r.commitment, o.commitment), `position ${p}: commitment`);
-  check(equal(r.elements, o.ciphertext === null ? null : o.ciphertext.subarray(64, 224)), `position ${p}: elements 1–5`);
-  const block = Math.floor(p / blockSize);
-  if (block < fullBlocks) {
-    check(r.lowerPath !== null, `position ${p}: a lower path in a full block`);
-    if (r.lowerPath !== null) {
-      const root = rootFromPath(kernel.leaf(r.commitment), p % blockSize, r.lowerPath, hash);
-      check(equal(root, blockRoots.subarray(32 * block, 32 * block + 32)), `position ${p}: lower path gives block ${block}'s root`);
-      pathsChecked++;
-    }
-  } else {
-    check(r.lowerPath === null, `position ${p}: no lower path in the partial block`);
+  check(equal(r.commitmentPrefix, o.commitment.subarray(0, 16)), `position ${p}: the commitment's first 16 bytes`);
+  check(equal(r.elements, o.ciphertext === null ? null : shrinkElements(o.ciphertext)), `position ${p}: elements 1–5, shrunk`);
+}
+
+// 4a. Path calls (Q58: what a spend reads) for the sampled positions in full blocks, checked against the block roots.
+const inFullBlocks = positions.filter((p) => Math.floor(p / blockSize) < fullBlocks);
+const pathStats = emptyCallStats();
+let pathsChecked = 0;
+let pathReadMs = 0;
+if (a.pathTable !== undefined && a.pathSetup !== undefined && inFullBlocks.length > 0) {
+  await cache.fetch(http, a.pathSetup);
+  t = performance.now();
+  const paths = await readPaths(http, manifest, manifestId, setupMatrix(cache.read(a.pathSetup), a.pathTable.rows), inFullBlocks, multiplier, pathStats);
+  pathReadMs = ms(t);
+  for (const p of inFullBlocks) {
+    const lower = decodePathRecord(paths.get(p)!, k);
+    check(lower !== null, `position ${p}: a lower path in a full block`);
+    if (lower === null) continue;
+    lowerPaths.set(p, lower);
+    const block = Math.floor(p / blockSize);
+    const root = rootFromPath(kernel.leaf(stored[p]!.commitment), p % blockSize, lower, hash);
+    check(equal(root, blockRoots.subarray(32 * block, 32 * block + 32)), `position ${p}: lower path gives block ${block}'s root`);
+    pathsChecked++;
   }
 }
 
@@ -229,9 +240,9 @@ const view = { pathSplit: k, snapshotFirstFree: n, snapshotBlockRoots: blockRoot
 let fullPaths = 0;
 t = performance.now();
 for (const p of positions) {
-  const r = decodeReadRecord(records.get(p)!, k);
+  const lower = lowerPaths.get(p);
   try {
-    const { root } = coinPath(view, { position: p, commitment: hex(r.commitment), lowerPath: r.lowerPath === null ? null : r.lowerPath.map(hex) }, kernel);
+    const { root } = coinPath(view, { position: p, commitment: hex(stored[p]!.commitment), lowerPath: lower === undefined ? null : lower.map(hex) }, kernel);
     check(equal(root, tailCoreRoot), `position ${p}: full path gives the core's root`);
     fullPaths++;
   } catch (error) {
@@ -268,13 +279,15 @@ Object.assign(report, {
   downloads: { ms: downloadMs, bytes: [a.scan, a.blockRoots, a.readSetup, a.nullifierSetup].reduce((s, r) => s + r.size, 0) },
   scan: { entries: n, mismatches: scanMismatches },
   tail: { height: tail.header.height, firstFree: tail.header.firstFree, ms: tailMs, fullPaths, pathMs },
-  read: { positions: positions.length, pathsChecked, ms: readMs, calls: readStats.calls, bytesUp: readStats.bytesUp, bytesDown: readStats.bytesDown },
+  read: { positions: positions.length, ms: readMs, calls: readStats.calls, bytesUp: readStats.bytesUp, bytesDown: readStats.bytesDown },
+  path: { positions: inFullBlocks.length, pathsChecked, ms: pathReadMs, calls: pathStats.calls, bytesUp: pathStats.bytesUp, bytesDown: pathStats.bytesDown },
   nullifier: { stored: picked.size, random: randomOnes.length, ms: nullifierMs, calls: nullifierStats.calls, bytesUp: nullifierStats.bytesUp, bytesDown: nullifierStats.bytesDown },
   failures,
 });
 process.stdout.write(
   `scan file: ${n} entries checked, ${scanMismatches} differ (${withoutCiphertext} outputs without a ciphertext)\n` +
-    `read: ${positions.length} positions in ${readStats.calls} call(s), ${readMs} ms; commitments, elements and ${pathsChecked} lower paths checked\n` +
+    `read: ${positions.length} positions in ${readStats.calls} call(s), ${readMs} ms; commitment prefixes and shrunk elements checked\n` +
+    `path: ${inFullBlocks.length} positions in ${pathStats.calls} call(s), ${pathReadMs} ms; ${pathsChecked} lower paths checked\n` +
     `tail: height ${tail.header.height}, first_free ${tail.header.firstFree}, ${tailMs} ms; ${fullPaths} full 32-hash paths give the core's root (${pathMs} ms)\n` +
     `nullifier: ${picked.size} stored spends and ${randomOnes.length} random in ${nullifierStats.calls} call(s), ${nullifierMs} ms\n` +
     (failures.length === 0 ? "every check passed\n" : `${failures.length} check(s) failed:\n${failures.slice(0, 20).map((f) => `  - ${f}`).join("\n")}\n`),

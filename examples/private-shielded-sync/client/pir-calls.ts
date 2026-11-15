@@ -65,7 +65,7 @@ export function paddedCalls(wanted: readonly number[], cols: number, perCall: nu
 /** Runs the calls for `columns` against one table; the decoded column (cells) of each real column. */
 async function pirColumns(
   http: PssHttp,
-  table: "read" | "nullifier",
+  table: "read" | "path" | "nullifier",
   ref: PirTableRef,
   manifest: Manifest,
   snapshotId: Uint8Array,
@@ -96,10 +96,13 @@ async function pirColumns(
   return out;
 }
 
-/** Where tree position `position` sits in the read table: its slot (`../shared/padding.ts`), column and place there. */
-export function readCell(manifest: Manifest, position: number): { index: number; column: number; slot: number } {
+/**
+ * Where tree position `position` sits in a positional table (the read table, or the path table): its slot
+ * (`../shared/padding.ts`), column and place there.
+ */
+export function readCell(manifest: Manifest, position: number, ref: PirTableRef = manifest.artifacts.readTable): { index: number; column: number; slot: number } {
   const index = slotOf(manifest, position);
-  return { index, ...positionOf(index, manifest.artifacts.readTable.perColumn) };
+  return { index, ...positionOf(index, ref.perColumn) };
 }
 
 /** Reads the records of tree positions `positions` from the read table by PIR (story 3); record bytes by position. */
@@ -115,6 +118,28 @@ export async function readPositions(
   const ref = manifest.artifacts.readTable;
   const cells = positions.map((p) => readCell(manifest, p));
   const columns = await pirColumns(http, "read", ref, manifest, snapshotId, setup, cells.map((c) => c.column), multiplier, stats);
+  const out = new Map<number, Uint8Array>();
+  positions.forEach((p, i) => out.set(p, columnRecords(ref, columns.get(cells[i]!.column)!)[cells[i]!.slot]!));
+  return out;
+}
+
+/**
+ * Reads the path records of tree positions `positions` from the path table by PIR (Q58: only to spend); record bytes
+ * by position. Throws when the snapshot has no path table (its path split is 0).
+ */
+export async function readPaths(
+  http: PssHttp,
+  manifest: Manifest,
+  snapshotId: Uint8Array,
+  setup: Matrix,
+  positions: readonly number[],
+  multiplier: Multiplier,
+  stats: CallStats = emptyCallStats(),
+): Promise<Map<number, Uint8Array>> {
+  const ref = manifest.artifacts.pathTable;
+  if (ref === undefined) throw new Error("the snapshot has no path table (path split 0)");
+  const cells = positions.map((p) => readCell(manifest, p, ref));
+  const columns = await pirColumns(http, "path", ref, manifest, snapshotId, setup, cells.map((c) => c.column), multiplier, stats);
   const out = new Map<number, Uint8Array>();
   positions.forEach((p, i) => out.set(p, columnRecords(ref, columns.get(cells[i]!.column)!)[cells[i]!.slot]!));
   return out;

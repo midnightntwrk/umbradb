@@ -88,6 +88,8 @@ interface Snapshot {
   readonly manifestBytes: Uint8Array;
   readonly files: Map<string, ServedFile>;
   readonly readGrid: Grid;
+  /** Lower paths, read only to spend (Q58); null when the snapshot's k is 0. */
+  readonly pathGrid: Grid | null;
   readonly nullifierGrid: Grid;
   /** Nullifiers spent at or below its height. */
   readonly nullifiers: number;
@@ -305,6 +307,7 @@ export class PssServer {
       manifestBytes: latest.manifestBytes,
       files: servedFiles(latest),
       readGrid: loadGrid(latest, "readTable"),
+      pathGrid: latest.manifest.artifacts.pathTable === undefined ? null : loadGrid(latest, "pathTable"),
       nullifierGrid: loadGrid(latest, "nullifierTable"),
       nullifiers: this.index.nullifiersAt(latest.manifest.height),
     };
@@ -428,7 +431,8 @@ export class PssServer {
       // Refused when the build would hold more than half the machine's memory with the snapshot served now, or more
       // than half the memory available now: a 10M build on a machine whose other programs held most of its memory
       // swapped for 25 minutes without finishing (Q57).
-      const held = this.#current === null ? 0 : this.#current.readGrid.cells.byteLength + this.#current.nullifierGrid.cells.byteLength;
+      const c = this.#current;
+      const held = c === null ? 0 : c.readGrid.cells.byteLength + (c.pathGrid?.cells.byteLength ?? 0) + c.nullifierGrid.cells.byteLength;
       const needed = paddedBuildBytes(padding, this.settings.pathSplit);
       const half = totalmem() / 2;
       const available = availableMemory();
@@ -528,6 +532,7 @@ export class PssServer {
         manifestBytes: result.manifestBytes,
         files: servedFiles({ id: result.id, dir: result.dir, manifest: result.manifest, manifestBytes: result.manifestBytes }),
         readGrid: gridOf(result.readGrid),
+        pathGrid: result.pathGrid === null ? null : gridOf(result.pathGrid),
         nullifierGrid: gridOf(result.nullifierGrid),
         nullifiers,
       };
@@ -589,6 +594,7 @@ export class PssServer {
     this.#route(api, "GET", ROUTES.tail, async () => this.#tailAnswer());
     this.#binaryRoute(api, ROUTES.queryRead, "read", maxBodyBytes);
     this.#binaryRoute(api, ROUTES.queryNullifier, "nullifier", maxBodyBytes);
+    this.#binaryRoute(api, ROUTES.queryPath, "path", maxBodyBytes);
     this.#route(api, "POST", ROUTES.adminSnapshot, async (req, read) => this.#adminBuild(req, read));
     this.#route(api, "GET", ROUTES.adminSnapshot, async (req) => this.#adminStatus(req));
   }
@@ -598,7 +604,7 @@ export class PssServer {
     api.http(method, path, this.#logged(`${method} ${path}`, handler));
   }
 
-  #binaryRoute(api: ApiRegistry, path: string, table: "read" | "nullifier", maxBodyBytes: number): void {
+  #binaryRoute(api: ApiRegistry, path: string, table: "read" | "path" | "nullifier", maxBodyBytes: number): void {
     const handler: Handler<Uint8Array> = async (req) => this.#query(req, table);
     api.http("POST", path, this.#logged(`POST ${path}`, handler), { body: "binary", maxBodyBytes });
   }
@@ -671,12 +677,13 @@ export class PssServer {
     };
   }
 
-  async #query(req: HttpRequest<Uint8Array>, table: "read" | "nullifier"): Promise<HttpAnswer> {
+  async #query(req: HttpRequest<Uint8Array>, table: "read" | "path" | "nullifier"): Promise<HttpAnswer> {
     if (req.headers["content-type"] !== OCTET_STREAM) return error(415, "unsupported-media-type", `the body must be ${OCTET_STREAM}`);
     const snapshot = this.#current;
     const multiplier = this.#multiplier;
     if (snapshot === null || multiplier === null) return error(503, "no-snapshot", "no snapshot has been built yet");
-    const grid = table === "read" ? snapshot.readGrid : snapshot.nullifierGrid;
+    const grid = table === "read" ? snapshot.readGrid : table === "path" ? snapshot.pathGrid : snapshot.nullifierGrid;
+    if (grid === null) return error(404, "no-path-table", "this snapshot has no path table (its path split is 0)");
     let call;
     try {
       call = decodeQueryBody(req.body, grid.cols, { queriesPerCall: snapshot.manifest.queriesPerCall, snapshotId: snapshot.idBytes });

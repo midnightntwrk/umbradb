@@ -7,7 +7,7 @@
  * `missingCells` lists them (the report prints the list; the tests require it empty).
  */
 
-import { BUILD_STEP_NAMES, type BenchResults, type BuildStep, type CallRow, type WalletRun } from "./bench-results.ts";
+import { BUILD_STEP_NAMES, type BenchResults, type BuildStep, type CallRow, type SplitCall, type WalletRun } from "./bench-results.ts";
 
 // ── formatting ───────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -76,7 +76,7 @@ const noStats = "no build statistics (give --pss-data, or --db-url for an in-pro
 const noServerMemory = "the server's memory was not sampled (give --server-container or --server-pid)";
 const noServerLog = "no server log line for the request (give --server-container or --server-log)";
 
-function buildRow(r: BenchResults, part: string, steps: readonly ("scan" | "tree" | "readTable" | "readSetup" | "nullifierTable" | "nullifierSetup")[], storage: (s: Record<string, BuildStep>) => string, computing: (s: Record<string, BuildStep>) => string): Section8Row {
+function buildRow(r: BenchResults, part: string, steps: readonly ("scan" | "tree" | "readTable" | "readSetup" | "pathTable" | "pathSetup" | "nullifierTable" | "nullifierSetup")[], storage: (s: Record<string, BuildStep>) => string, computing: (s: Record<string, BuildStep>) => string): Section8Row {
   const b = r.serverBuild;
   const got = steps.map((n) => b?.steps[n] ?? null);
   if (b === null || got.some((s) => s === null)) return row(part, "server", { storage: missing(noStats), memory: missing(noStats), computing: missing(noStats) });
@@ -90,7 +90,7 @@ function buildRow(r: BenchResults, part: string, steps: readonly ("scan" | "tree
 }
 
 const label = (step: string): string =>
-  ({ scan: "scan file", tree: "tree", readTable: "table", readSetup: "setup", nullifierTable: "table", nullifierSetup: "setup", manifest: "manifest" })[step] ?? step;
+  ({ scan: "scan file", tree: "tree", readTable: "table", readSetup: "setup", pathTable: "table", pathSetup: "setup", nullifierTable: "table", nullifierSetup: "setup", manifest: "manifest" })[step] ?? step;
 
 function callRows(part: string, w: WalletRun, c: CallRow): Section8Row[] {
   const calls = c.calls > 1 ? ` (mean of ${c.calls} calls)` : "";
@@ -130,6 +130,9 @@ export function section8(r: BenchResults): Section8Row[] {
   );
   rows.push(
     buildRow(r, "Build read table and setup data", ["readTable", "readSetup"], (s) => `table ${fmtBytes(s.readTable!.bytes)}, setup ${fmtBytes(s.readSetup!.bytes)}`, (s) => `table ${fmtMs(s.readTable!.ms)}, setup ${fmtMs(s.readSetup!.ms)}`),
+  );
+  rows.push(
+    buildRow(r, "Build path table and setup data", ["pathTable", "pathSetup"], (s) => `table ${fmtBytes(s.pathTable!.bytes)}, setup ${fmtBytes(s.pathSetup!.bytes)}`, (s) => `table ${fmtMs(s.pathTable!.ms)}, setup ${fmtMs(s.pathSetup!.ms)}`),
   );
   rows.push(
     buildRow(r, "Build nullifier table and setup data", ["nullifierTable", "nullifierSetup"], (s) => `table ${fmtBytes(s.nullifierTable!.bytes)}, setup ${fmtBytes(s.nullifierSetup!.bytes)}`, (s) => `table ${fmtMs(s.nullifierTable!.ms)}, setup ${fmtMs(s.nullifierSetup!.ms)}`),
@@ -299,29 +302,30 @@ export function renderReport(r: BenchResults): string {
     "",
   );
 
-  out.push("## The read table at each `pathSplit` (FR-153)", "");
+  out.push("## The read and path tables at each `pathSplit` (FR-153, Q58)", "");
   if (r.pathSplits.length === 0) {
     out.push("**Not measured:** no database was given (`--db-url`), so the read table could not be built in-process.", "");
   } else {
     out.push(
       `The served snapshot has k = ${s.pathSplit}. For each k below, the benchmark read the snapshot's stored events with the module's own query and ran the module's own builder in-process ` +
-        `(${r.pathSplits[0]!.threads} threads); the build checks the core's root at the height. A read record is 193 + 32k bytes. The call is one call of ${s.queriesPerCall} vectors with client and server in the benchmark's process (no network), after one warm-up call; every record of its columns was checked against the table's own.`,
+        `(${r.pathSplits[0]!.threads} threads); the build checks the core's root at the height. A read record is 98 bytes at every k (the commitment's first 16 bytes, ciphertext elements 1–5 shrunk); the k lower path hashes are in the path table, 32k bytes a record, which a wallet reads only to spend (none at k = 0). Each call is one call of ${s.queriesPerCall} vectors with client and server in the benchmark's process (no network), after one warm-up call; every record of its columns was checked against the table's own.`,
       "",
     );
     out.push(
       table(
-        ["k", "Record", "Grid R × C (per column)", "Block roots", "Read table", "Read setup", "Tree", "Table", "Setup", "Peak", "Same as served"],
+        ["k", "Read record", "Read grid R × C (per column)", "Path record", "Path grid R × C (per column)", "Block roots", "Read table / setup", "Path table / setup", "Tree", "Tables and setups", "Peak", "Same as served"],
         r.pathSplits.map((p) => [
           String(p.k),
           `${p.recordBytes} B`,
           `${group(p.rows)} × ${group(p.cols)} (${p.perColumn})`,
+          p.path === null ? "—" : `${p.path.recordBytes} B`,
+          p.path === null ? "none (k = 0)" : `${group(p.path.rows)} × ${group(p.path.cols)} (${p.path.perColumn})`,
           `${fmtBytes(p.sizes.blockRoots)} (${group(p.blocks)})`,
-          fmtBytes(p.sizes.readTable),
-          fmtBytes(p.sizes.readSetup),
-          `${fmtMs(p.steps.tree.ms)}, ${fmtRate(p.steps.tree.hashesPerSecond, 0)} hashes/s`,
-          fmtMs(p.steps.readTable.ms),
-          fmtMs(p.steps.readSetup.ms),
-          fmtBytes(Math.max(p.steps.tree.peakRssBytes ?? 0, p.steps.readTable.peakRssBytes ?? 0, p.steps.readSetup.peakRssBytes ?? 0)),
+          `${fmtBytes(p.sizes.readTable)} / ${fmtBytes(p.sizes.readSetup)}`,
+          p.path === null ? "—" : `${fmtBytes(p.path.tableBytes)} / ${fmtBytes(p.path.setupBytes)}`,
+          `${fmtMs(p.steps.tree!.ms)}, ${fmtRate(p.steps.tree!.hashesPerSecond, 0)} hashes/s`,
+          (["readTable", "readSetup", "pathTable", "pathSetup"] as const).filter((n) => p.steps[n] !== null).map((n) => `${n} ${fmtMs(p.steps[n]!.ms)}`).join(", "),
+          fmtBytes(Math.max(...(["tree", "readTable", "readSetup", "pathTable", "pathSetup"] as const).map((n) => p.steps[n]?.peakRssBytes ?? 0))),
           p.sameAsServed === null ? "—" : p.sameAsServed ? "yes (same identifier)" : "**no**",
         ]),
       ),
@@ -329,8 +333,12 @@ export function renderReport(r: BenchResults): string {
     );
     out.push(
       table(
-        ["k", "Up", "Down", "Client build", "Server multiply", "Client decode", "Peak", "Records checked"],
-        r.pathSplits.map((p) => [String(p.k), fmtBytes(p.call.bytesUp), fmtBytes(p.call.bytesDown), fmtMs(p.call.clientBuildMs), fmtMs(p.call.serverMultiplyMs), fmtMs(p.call.clientDecodeMs), fmtBytes(p.call.peakRssBytes), group(p.call.recordsChecked)]),
+        ["k", "Call", "Up", "Down", "Client build", "Server multiply", "Client decode", "Peak", "Records checked"],
+        r.pathSplits.flatMap((p) => {
+          const calls: [string, SplitCall][] = [["read (each sync)", p.call]];
+          if (p.path?.call) calls.push(["path (each spend)", p.path.call]);
+          return calls.map(([name, c]) => [String(p.k), name, fmtBytes(c.bytesUp), fmtBytes(c.bytesDown), fmtMs(c.clientBuildMs), fmtMs(c.serverMultiplyMs), fmtMs(c.clientDecodeMs), fmtBytes(c.peakRssBytes), group(c.recordsChecked)]);
+        }),
       ),
       "",
     );

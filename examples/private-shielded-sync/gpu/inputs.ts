@@ -18,7 +18,7 @@
 import { type Kernel } from "../kernel/kernel.ts";
 import { buildNullifierTable, type NullifierEntry } from "../pir/buckets.ts";
 import { buildPositionalGrid, type Grid } from "../pir/grid.ts";
-import { readRecordBytes } from "../shared/records.ts";
+import { READ_RECORD_BYTES } from "../shared/records.ts";
 import { add, compress, decompress, mul, P, type Point } from "../test/reference.ts";
 import { JUBJUB_R } from "./field.ts";
 
@@ -236,10 +236,10 @@ export function preprodSet(f: Fixtures, kernel: Kernel, total = 70_000, seed = 5
   return { name: "preprod", entries, secret, composition };
 }
 
-/** Preprod's read table: `records` (default 69,255) records of `readRecordBytes(16)` = 705 random bytes. */
+/** Preprod's read table: `records` (default 69,255) records of `READ_RECORD_BYTES` = 98 random bytes. */
 export function readTable(records = 69_255, seed = 7): Grid {
   const rng = new Rng(seed);
-  const size = readRecordBytes(16);
+  const size = READ_RECORD_BYTES;
   const bytes = rng.bytes(records * size);
   return buildPositionalGrid(records, size, bytes);
 }

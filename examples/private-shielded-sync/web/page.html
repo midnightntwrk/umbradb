@@ -119,8 +119,8 @@
     </section>
 
     <section class="card" id="step-read">
-      <h2><span class="num">4</span>Fetch records by PIR (commitments, ciphertexts, paths)<span class="status"></span></h2>
-      <p class="desc">Reads the read-table records of the positions privately: the calls carry encrypted query vectors, padded with random columns. Leave empty to fetch the scan's matches, or pick positions to test with any output. Each row's Compare button checks that record against the database (debug).</p>
+      <h2><span class="num">4</span>Fetch records by PIR (commitment prefix, ciphertext)<span class="status"></span></h2>
+      <p class="desc">Reads the read-table records of the positions privately: the calls carry encrypted query vectors, padded with random columns. A record is 98 bytes: the commitment's first 16 bytes and ciphertext elements 1–5 shrunk to 82 bytes; the wallet rebuilds the elements from its own pads. Leave empty to fetch the scan's matches, or pick positions to test with any output. Each row's Compare button checks that record against the database (debug).</p>
       <input type="text" id="positions" placeholder="positions, e.g. 0, 17, 100-104 (default: the scan's matches)" autocomplete="off">
       <div class="row"><button data-run="read">Fetch records</button><button class="secondary" data-fill="positions">Pick 5 random positions</button></div>
       <div class="out"></div>
@@ -134,15 +134,23 @@
       <div class="out"></div>
     </section>
 
+    <section class="card" id="step-paths">
+      <h2><span class="num">6</span>Merkle paths by PIR (only to spend)<span class="status"></span></h2>
+      <p class="desc">A sync does not read Merkle paths: a wallet reads its coin's lower path from the path table only when it spends. The first read downloads the path table's setup data (once per snapshot). Leave empty for the wallet's snapshot coins, or enter positions. Each path is checked against its block's root.</p>
+      <input type="text" id="path-positions" placeholder="positions, e.g. 21589, 69250 (default: the wallet's snapshot coins)" autocomplete="off">
+      <div class="row"><button data-run="paths">Read paths</button></div>
+      <div class="out"></div>
+    </section>
+
     <section class="card" id="step-tail">
-      <h2><span class="num">6</span>Get the tail<span class="status"></span></h2>
-      <p class="desc">Everything after the snapshot, in full: the partial block's commitments, new outputs (scanned here too), spends, block roots. It also checks each fetched position's full 32-hash Merkle path against the tail's root, as a spend would build it.</p>
+      <h2><span class="num">7</span>Get the tail<span class="status"></span></h2>
+      <p class="desc">Everything after the snapshot, in full: the partial block's commitments, new outputs (scanned here too), spends, block roots. It also checks the full 32-hash Merkle path of each position read (with a path from step 6, or from the tail), against the tail's root, as a spend would build it.</p>
       <div class="row"><button data-run="tail">Get tail</button></div>
       <div class="out"></div>
     </section>
 
     <section class="card" id="step-summary">
-      <h2><span class="num">7</span>Coins and balance<span class="status"></span></h2>
+      <h2><span class="num">8</span>Coins and balance<span class="status"></span></h2>
       <p class="desc">The coins found so far, their nullifiers and whether they are spent.</p>
       <div class="row"><button data-run="summary">Show</button></div>
       <div class="out"></div>

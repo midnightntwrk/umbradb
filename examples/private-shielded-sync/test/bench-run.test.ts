@@ -162,6 +162,7 @@ describe("the benchmark on the synthetic chain (snapshot at 4, tail to 7)", () =
       "Build scan file",
       "Build tree and paths",
       "Build read table and setup data",
+      "Build path table and setup data",
       "Build nullifier table and setup data",
       "Download scan file, block roots, setup data",
       "Scan",
@@ -245,21 +246,31 @@ describe("the benchmark on the synthetic chain (snapshot at 4, tail to 7)", () =
     expect(renderReport(results)).toContain(`9 × 256 B + 1 × 32 B = **${fmtBytes(9 * 256 + 32)}**`);
   });
 
-  it("FR-153: the read table at k = 16, 8 and 0 (and the served 2) from the module's builder in-process; at the served k it gives the served snapshot", () => {
+  it("FR-153: the read and path tables at k = 16, 8 and 0 (and the served 2) from the module's builder in-process; at the served k it gives the served snapshot", () => {
     expect(results.pathSplits.map((p) => p.k)).toEqual([16, 8, 2, 0]);
     for (const p of results.pathSplits) {
-      expect(p.recordBytes).toBe(193 + 32 * p.k);
+      // Q58: the read record is 98 bytes at every k; the path table holds the k lower hashes (none at k = 0).
+      expect(p.recordBytes).toBe(98);
+      expect(p.path === null ? 0 : p.path.recordBytes).toBe(32 * p.k);
+      expect(p.path === null).toBe(p.k === 0);
       expect(p.sizes.blockRoots).toBe(32 * p.blocks);
       expect(p.call.bytesUp).toBe(40 + 16 * p.cols * 4);
       expect(p.call.bytesDown).toBe(40 + 16 * p.rows * 4);
       expect(p.call.recordsChecked).toBeGreaterThan(0);
-      expect(p.steps.tree.hashes).toBeGreaterThanOrEqual(0);
+      expect(p.steps.tree!.hashes).toBeGreaterThanOrEqual(0);
+      if (p.path !== null) {
+        expect([p.steps.pathTable, p.steps.pathSetup].every((x) => x !== null)).toBe(true);
+        if (p.path.call !== null) {
+          expect(p.path.call.bytesUp).toBe(40 + 16 * p.path.cols * 4);
+          expect(p.path.call.recordsChecked).toBeGreaterThan(0);
+        }
+      } else expect([p.steps.pathTable, p.steps.pathSetup]).toEqual([null, null]);
     }
     expect(results.pathSplits.map((p) => p.blocks)).toEqual([1, 1, 3, 9]);
     expect(results.pathSplits.find((p) => p.k === 2)).toMatchObject({ sameAsServed: true, snapshotId: results.snapshot.id });
     expect(results.pathSplits.filter((p) => p.k !== 2).every((p) => p.sameAsServed === null)).toBe(true);
     const report = renderReport(results);
-    expect(report).toContain("## The read table at each `pathSplit` (FR-153)");
+    expect(report).toContain("## The read and path tables at each `pathSplit` (FR-153, Q58)");
     expect(report).toContain("yes (same identifier)");
   });
 
@@ -335,7 +346,7 @@ describe("without the optional inputs, each cell says why it has no value", () =
         "Chain sync (core modules) / server / computing",
         "Read events for a snapshot / server / memory",
         "Read events for a snapshot / server / computing",
-        ...["Build scan file", "Build tree and paths", "Build read table and setup data", "Build nullifier table and setup data"].flatMap((p) => [`${p} / server / storage`, `${p} / server / memory`, `${p} / server / computing`]),
+        ...["Build scan file", "Build tree and paths", "Build read table and setup data", "Build path table and setup data", "Build nullifier table and setup data"].flatMap((p) => [`${p} / server / storage`, `${p} / server / memory`, `${p} / server / computing`]),
         "Read coins (one call) / server (C's call) / memory",
         "Read coins (one call) / server (C's call) / computing",
         "Nullifier lookups (one call) / server (C's call) / memory",

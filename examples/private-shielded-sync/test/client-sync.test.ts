@@ -21,7 +21,7 @@ import { type FetchLike, PssHttp } from "../client/http.ts";
 import { keysFromZswapSeed, walletKeys, type WalletKeys } from "../client/keys.ts";
 import type { Ledger } from "../client/ledger.ts";
 import { formatBalance, readState, unspentCoins, type WalletState, writeState } from "../client/state.ts";
-import { checkCiphertext, checkSnapshotMatch, sync, type SyncResult } from "../client/sync.ts";
+import { checkCiphertext, checkLowerPath, checkSnapshotMatch, lowerPathsByPir, pathInTable, sync, type SyncResult } from "../client/sync.ts";
 import { compileKernel, Kernel, ScanPool } from "../kernel/index.ts";
 import { WorkerMultiplier } from "../pir/index.ts";
 import { decodeReadRecord, encodeReadRecord, ROUTES, toHex } from "../shared/index.ts";
@@ -173,12 +173,12 @@ describe("sync on the synthetic chain (snapshot at 4, tail to 7)", () => {
     }
   });
 
-  it("story 3: a coin in a block full at the snapshot keeps its PIR lower path (checked against its block's root during the sync); one in the snapshot's partial block or the tail has none", () => {
+  it("story 3 (Q58): a sync reads no lower path; a coin in a block full at the snapshot has one in the path table, read only to spend", () => {
     for (const name of ["A", "B"] as const) {
-      const coins = results[name]!.state.coins;
+      const { state, manifest } = results[name]!;
+      expect(state.coins.every((c) => c.lowerPath === null)).toBe(true);
       // k = 2 and first_free 9 at the snapshot: blocks 0–3 and 4–7 are full, position 8 is in the partial block.
-      expect(coins.filter((c) => c.lowerPath !== null).map((c) => c.position)).toEqual(coins.filter((c) => c.position < 8).map((c) => c.position));
-      for (const c of coins) if (c.lowerPath !== null) expect(c.lowerPath).toHaveLength(2);
+      expect(state.coins.filter((c) => pathInTable(manifest, c)).map((c) => c.position)).toEqual(state.coins.filter((c) => c.position < 8).map((c) => c.position));
     }
     expect(results.A!.state.coins.some((c) => c.position === 8 || c.position >= 9)).toBe(true);
   });
@@ -273,7 +273,7 @@ describe("sync on the synthetic chain (snapshot at 4, tail to 7)", () => {
 });
 
 describe("FR-111: a scan match the record does not confirm is dropped and reported", () => {
-  it("a wrong commitment, no ciphertext, a lower path that does not give the block root, an entry that is not the wallet's; the genuine record passes", { timeout: LONG }, async () => {
+  it("a wrong commitment prefix, no ciphertext, an entry that is not the wallet's, a chance match; the genuine record passes; a lower path that does not give the block root fails its check", { timeout: LONG }, async () => {
     const { state, manifest, view } = await syncWallet("A");
     const coin = state.coins.find((c) => c.position === 2)!;
     const http = new PssHttp(r.origin);
@@ -281,24 +281,28 @@ describe("FR-111: a scan match the record does not confirm is dropped and report
     await cache.fetch(http, manifest.artifacts.scan);
     const scanFile = cache.read(manifest.artifacts.scan);
     const entry = scanFile.subarray(36 * 2, 36 * 3);
-    const blockRoot = view.snapshotBlockRoots.subarray(0, 32);
-    // The genuine record, rebuilt from what the sync read.
+    // The genuine record, rebuilt from the stored output.
     const stored = await db.query("SELECT commitment, ciphertext FROM core_ledger_state.events WHERE kind = 'zswap-output' AND tree_index = 2");
     const ciphertext = new Uint8Array(stored[0]!.ciphertext as Buffer);
     const commitment = new Uint8Array(stored[0]!.commitment as Buffer);
-    const lowerPath = coin.lowerPath!.map((h) => new Uint8Array(Buffer.from(h, "hex")));
-    const record = decodeReadRecord(encodeReadRecord({ commitment, elements: ciphertext.subarray(64), lowerPath }, 2), 2);
-    expect("coin" in checkSnapshotMatch(kernel, keys.A, entry, record, 2, blockRoot)).toBe(true);
-    const wrongCommitment = { ...record, commitment: commitment.map((b, i) => (i === 0 ? b ^ 1 : b)) };
-    expect(checkSnapshotMatch(kernel, keys.A, entry, { ...wrongCommitment, lowerPath: null }, 2, blockRoot)).toEqual({ reason: "the decrypted coin's commitment differs from the record's" });
-    expect(checkSnapshotMatch(kernel, keys.A, entry, { ...record, elements: null }, 2, blockRoot)).toEqual({ reason: "the record has no ciphertext" });
-    expect(checkSnapshotMatch(kernel, keys.A, entry, record, 1, blockRoot)).toEqual({ reason: "the record's lower path does not give its block's root" });
-    expect(checkSnapshotMatch(kernel, keys.B, entry, record, 2, blockRoot)).toEqual({ reason: "the scan entry is not the wallet's" });
+    const record = decodeReadRecord(encodeReadRecord(commitment, ciphertext));
+    const genuine = checkSnapshotMatch(kernel, keys.A, entry, record);
+    expect("coin" in genuine && toHex(genuine.commitment)).toBe(toHex(commitment));
+    expect(toHex(commitment)).toBe(coin.commitment);
+    const wrongPrefix = { ...record, commitmentPrefix: record.commitmentPrefix.map((b, i) => (i === 15 ? b ^ 1 : b)) };
+    expect(checkSnapshotMatch(kernel, keys.A, entry, wrongPrefix)).toEqual({ reason: "the decrypted coin's commitment differs from the record's" });
+    expect(checkSnapshotMatch(kernel, keys.A, entry, { ...record, elements: null })).toEqual({ reason: "the record has no ciphertext" });
+    expect(checkSnapshotMatch(kernel, keys.B, entry, record)).toEqual({ reason: "the scan entry is not the wallet's" });
     // A match by chance on the 4 bytes: the other elements decrypt to garbage or to a coin whose commitment differs.
-    const elements = ciphertext.subarray(64).map((b, i) => (i === 40 ? b ^ 1 : b));
-    const chance = checkSnapshotMatch(kernel, keys.A, entry, { ...record, elements, lowerPath: null }, 2, blockRoot);
-    expect("reason" in chance).toBe(true);
+    const elements = record.elements!.map((b, i) => (i === 40 ? b ^ 1 : b));
+    expect("reason" in checkSnapshotMatch(kernel, keys.A, entry, { ...record, elements })).toBe(true);
     expect("coin" in checkCiphertext(kernel, keys.A, ciphertext, commitment, null)).toBe(true);
+    // The lower path a spend reads: right for the coin, wrong with one hash changed.
+    const { paths } = await lowerPathsByPir({ http, cache, kernel, multiplier }, { manifest, state, view }, [coin]);
+    const lower = paths.get(2)!.map((h) => new Uint8Array(Buffer.from(h, "hex")));
+    const blockRoot = view.snapshotBlockRoots.subarray(0, 32);
+    expect(checkLowerPath(kernel, commitment, 2, lower, blockRoot)).toBe(true);
+    expect(checkLowerPath(kernel, commitment, 1, lower, blockRoot)).toBe(false);
   });
 });
 

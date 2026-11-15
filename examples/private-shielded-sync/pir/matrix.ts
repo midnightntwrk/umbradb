@@ -16,7 +16,7 @@ const BLOCK_BYTES = 16;
 const ROW_BYTES = LWE_N * 4;
 
 /** The table names the seed derivation uses. */
-export type TableName = "read" | "nullifier";
+export type TableName = "read" | "path" | "nullifier";
 
 /** `SHA-256("umbradb-pss/seed/v1" ‖ table name (UTF-8) ‖ grid digest)`. */
 export function deriveSeed(table: TableName, gridDigest: Uint8Array): Uint8Array {
