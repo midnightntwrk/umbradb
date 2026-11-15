@@ -5,7 +5,8 @@
  *       [--db-url postgres://postgres@127.0.0.1:58171/umbradb --db-password-file <file>] [--admin-secret-file <file>]
  *
  * - `/` and the built files from `web/dist/` (`./build.ts` first), cross-origin isolated (`Cross-Origin-Opener-Policy`
- *   and `Cross-Origin-Embedder-Policy`): the PIR library keeps the setup matrix in a `SharedArrayBuffer`;
+ *   and `Cross-Origin-Embedder-Policy`): the PIR library keeps the setup matrix in a `SharedArrayBuffer`; as their
+ *   brotli or gzip copy when the browser accepts one;
  * - `/pss/v1/…` (not the admin routes) to `--server`, as the page's client would call the server itself;
  * - with `--db-url`, the debug routes the page uses to compare what it got with what UmbraDB stored (they read the
  *   server's database directly and are no part of the private protocol):
@@ -194,15 +195,29 @@ async function proxy(req: IncomingMessage, res: ServerResponse, url: URL): Promi
   res.end(Buffer.from(await r.arrayBuffer()));
 }
 
-function file(res: ServerResponse, pathname: string): void {
+/**
+ * A built file, as its brotli or gzip copy (`./build.ts` writes them) when the browser accepts that encoding and the
+ * copy is not older than the file. The PIR and debug routes are not compressed: their bodies are pseudorandom.
+ */
+function file(req: IncomingMessage, res: ServerResponse, pathname: string): void {
   const path = normalize(join(dist, pathname === "/" ? "index.html" : pathname));
   if (!path.startsWith(dist) || !existsSync(path) || !statSync(path).isFile()) {
     res.writeHead(404, { "Content-Type": "text/plain" });
     res.end("not found");
     return;
   }
-  res.writeHead(200, { "Content-Type": TYPES[extname(path)] ?? "application/octet-stream", "Cache-Control": "no-store" });
-  createReadStream(path).pipe(res);
+  const accepted = String(req.headers["accept-encoding"] ?? "");
+  const modified = statSync(path).mtimeMs;
+  const copy = [
+    ["br", `${path}.br`],
+    ["gzip", `${path}.gz`],
+  ].find(([encoding, p]) => new RegExp(`\\b${encoding}\\b`).test(accepted) && existsSync(p!) && statSync(p!).mtimeMs >= modified);
+  const headers: Record<string, string> = { "Content-Type": TYPES[extname(path)] ?? "application/octet-stream", "Cache-Control": "no-store", Vary: "Accept-Encoding" };
+  if (copy !== undefined) headers["Content-Encoding"] = copy[0]!;
+  const sent = copy?.[1] ?? path;
+  headers["Content-Length"] = String(statSync(sent).size);
+  res.writeHead(200, headers);
+  createReadStream(sent).pipe(res);
 }
 
 const server = createServer((req, res) => {
@@ -210,7 +225,7 @@ const server = createServer((req, res) => {
   res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
   res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
   const url = new URL(req.url ?? "/", "http://localhost");
-  const handle = url.pathname.startsWith("/pss/v1/") ? proxy(req, res, url) : url.pathname.startsWith("/debug/") ? debug(req, res, url) : (file(res, url.pathname), Promise.resolve());
+  const handle = url.pathname.startsWith("/pss/v1/") ? proxy(req, res, url) : url.pathname.startsWith("/debug/") ? debug(req, res, url) : (file(req, res, url.pathname), Promise.resolve());
   handle.catch((error: unknown) => {
     if (!res.headersSent) json(res, 502, { error: error instanceof Error ? error.message : String(error) });
     else res.end();

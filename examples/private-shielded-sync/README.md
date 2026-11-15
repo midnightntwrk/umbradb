@@ -178,7 +178,10 @@ all" up to 4 MB; any size can be downloaded). The keys stay in the page's worker
     # open http://127.0.0.1:10490/
 
 `serve.ts` serves the page cross-origin isolated (the PIR library keeps its matrices in a `SharedArrayBuffer`) on
-127.0.0.1 and passes `/pss/v1/…` to the module's API, except the admin routes.
+127.0.0.1 and passes `/pss/v1/…` to the module's API, except the admin routes. `build.ts` writes a brotli and a gzip
+copy of each page file, and `serve.ts` sends the one the browser accepts: the 11.9 MB of files (10.8 MB of it the
+ledger's WASM) load as 4.3 MB. The PIR routes are not compressed: queries, answers and setup data are pseudorandom
+and do not shrink.
 
 Two options turn on debug routes that are no part of the private protocol:
 - **`--db-url`** reads the server's database directly, so the page can compare what PIR returned with what UmbraDB

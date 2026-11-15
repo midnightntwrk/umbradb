@@ -9,16 +9,19 @@
  *   Node.js's `Buffer` injected (`buffer`);
  * - `index.html` (`./page.html`) and `explain.html` (`./explain.html`, how each step works);
  * - `pss-kernel.wasm` (the scan kernel; the worker checks its SHA-256 against the committed one, built in) and
- *   `ledger-v9.wasm` (from the client's install of `@midnightntwrk/ledger-v9`).
+ *   `ledger-v9.wasm` (from the client's install of `@midnightntwrk/ledger-v9`);
+ * - beside each `.html`, `.js` and `.wasm` file, its brotli (`.br`, quality 11) and gzip (`.gz`, level 9) copy, which
+ *   `./serve.ts` sends to a browser that accepts it: about 12 MB of files load as about 5 MB.
  *
  * The client's packages (`@scure/bip39`, `@midnightntwrk/wallet-sdk-hd`, `@noble/hashes`, the ledger) resolve from
  * `client/node_modules`. No type check runs here; `npx tsc -p examples/private-shielded-sync/web` does that.
  */
 
-import { copyFileSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 import { build, type Plugin } from "esbuild";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -93,4 +96,16 @@ copyFileSync(join(HERE, "page.html"), join(out, "index.html"));
 copyFileSync(join(HERE, "explain.html"), join(out, "explain.html"));
 copyFileSync(join(EXAMPLE, "kernel", "pss-kernel.wasm"), join(out, "pss-kernel.wasm"));
 copyFileSync(join(LEDGER, "midnight_ledger_wasm_v9_bg.wasm"), join(out, "ledger-v9.wasm"));
-process.stdout.write(`built ${out}\n`);
+// Compressed copies, made once here at the highest settings (serve.ts only picks one).
+let plain = 0;
+let brotli = 0;
+for (const name of readdirSync(out)) {
+  if (!/\.(html|js|wasm)$/.test(name)) continue;
+  const bytes = readFileSync(join(out, name));
+  const br = brotliCompressSync(bytes, { params: { [constants.BROTLI_PARAM_QUALITY]: 11, [constants.BROTLI_PARAM_SIZE_HINT]: bytes.length } });
+  writeFileSync(join(out, `${name}.br`), br);
+  writeFileSync(join(out, `${name}.gz`), gzipSync(bytes, { level: 9 }));
+  plain += bytes.length;
+  brotli += br.length;
+}
+process.stdout.write(`built ${out} (${(plain / 1048576).toFixed(1)} MB; ${(brotli / 1048576).toFixed(1)} MB with brotli)\n`);
