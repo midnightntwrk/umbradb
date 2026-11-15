@@ -10,12 +10,14 @@
     --wallet: #2457d6; --server: #7b3fe4; --wire: #0f7b6c;
     --secret: #b26a00; --secret-bg: #fff3d6; --public: #4a5565; --public-bg: #eef1f5; --sent: #0f7b6c; --sent-bg: #dcf4ee;
     --mine: #fff1c2; --mine-line: #d39b00; --sel: #d9f2ec; --pad: #e9edf2; --gpu: #e8590c; --ok: #137a3a; --bad: #b42318;
+    --p1: #0d9488; --p2: #2563eb; --p3: #d97706; --p4: #7c3aed;
   }
   @media (prefers-color-scheme: dark) { :root {
     --bg: #0b0e12; --slide: #151a20; --ink: #e6e9ee; --muted: #9aa4b2; --line: #2a3039; --soft: #1b2129;
     --wallet: #7aa2ff; --server: #b48cff; --wire: #3cc4ae;
     --secret: #f0b44c; --secret-bg: #3a2c0c; --public: #b8c1cd; --public-bg: #222933; --sent: #3cc4ae; --sent-bg: #0f3029;
-    --mine: #4a3b10; --mine-line: #e0b02e; --sel: #12372f; --pad: #262c35; --ok: #4cc27a; --bad: #ff7a6e; } }
+    --mine: #4a3b10; --mine-line: #e0b02e; --sel: #12372f; --pad: #262c35; --ok: #4cc27a; --bad: #ff7a6e;
+    --p1: #2dd4bf; --p2: #60a5fa; --p3: #fbbf24; --p4: #a78bfa; } }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; }
   a { color: var(--wallet); text-decoration: none; }
@@ -128,6 +130,19 @@
   .math .m.secret { border-color: var(--secret); } .math .m.public { border-color: var(--public); } .math .m.sent { border-color: var(--sent); }
   .work { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; background: var(--soft); border-radius: 6px; padding: 6px 9px; margin-top: 6px; line-height: 1.6; }
   .work .r { color: var(--muted); }
+  /* the four pieces of the data */
+  .mk { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; color: #fff; font: 700 12px/1 system-ui, sans-serif; margin-right: 6px; vertical-align: 1px; }
+  .mk.p1 { background: var(--p1); } .mk.p2 { background: var(--p2); } .mk.p3 { background: var(--p3); } .mk.p4 { background: var(--p4); }
+  .pc { border-left: 5px solid var(--line); } .pc.p1 { border-left-color: var(--p1); } .pc.p2 { border-left-color: var(--p2); } .pc.p3 { border-left-color: var(--p3); } .pc.p4 { border-left-color: var(--p4); }
+  .cell.p1 { box-shadow: inset 0 0 0 2px var(--p1); } .cell.p2 { box-shadow: inset 0 0 0 2px var(--p2); } .cell.p3 { box-shadow: inset 0 0 0 2px var(--p3); } .cell.p4 { box-shadow: inset 0 0 0 2px var(--p4); }
+  .bytes { display: flex; height: 30px; border-radius: 6px; overflow: hidden; font: 600 11.5px/1 system-ui, sans-serif; margin: 6px 0 3px; }
+  .bytes > div { display: flex; align-items: center; justify-content: center; color: #fff; white-space: nowrap; overflow: hidden; border-right: 1px solid var(--slide); }
+  .bytes .p1 { background: var(--p1); } .bytes .p2 { background: var(--p2); }
+  .bytes .x { background: repeating-linear-gradient(45deg, var(--pad), var(--pad) 4px, var(--soft) 4px, var(--soft) 8px); color: var(--muted); }
+  .g4 { grid-template-columns: repeat(4, 1fr); }
+  .pieces { display: grid; gap: 8px; align-content: start; }
+  .pieces .box p { margin: 2px 0; font-size: 13px; }
+  .pieces .box h3 { margin-bottom: 2px; }
   .big { font: 600 20px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
   .big .who { display: inline-block; min-width: 150px; font: 700 11px/1 system-ui, sans-serif; letter-spacing: .05em; text-transform: uppercase; vertical-align: 4px; }
   .big .who.w { color: var(--wallet); } .big .who.s { color: var(--server); }
@@ -300,62 +315,111 @@
 </section>
 
 <!-- ═══════════════════════════════════════════════════ step 0 -->
-<section class="slide" id="s-tables" data-step="0" data-title="Step 0: the server lays out its tables">
-  <div class="top">Step 0 · The server builds a snapshot · 1 of 3 <span class="where s">Server</span></div>
-  <h2>The server lays out the snapshot's tables</h2>
-  <div class="body g3">
-    <div class="box s"><h3>Read table: one record per output</h3>
-      <p class="small">Column c holds records 3c, 3c + 1, 3c + 2, top to bottom. PIR always returns whole columns.</p>
+<section class="slide" id="s-split" data-step="0" data-title="Step 0: how the ledger's data is split">
+  <div class="top">Step 0 · The server builds a snapshot · 1 of 4 <span class="where s">Server</span></div>
+  <h2>How the ledger's data is split into four pieces</h2>
+  <p class="lead">The ledger keeps every shielded output as a leaf of one Merkle tree of commitments, with its ciphertext, and every spend as a nullifier. The server cuts this into four pieces, each served in the way that keeps the wallet private.</p>
+  <div class="body" style="grid-template-columns: 1.05fr 1fr">
+    <div class="box"><h3>The ledger</h3>
+      <div class="tree">
+        <div class="row"><div class="cell">root</div></div>
+        <div class="row"><div class="cell">h(R0, R1)</div><div class="cell p4">h(R2, 0)</div></div>
+        <div class="row"><div class="cell">R0</div><div class="cell p4">R1</div><div class="cell">R2</div><div class="cell dim">0</div></div>
+        <div class="row">
+          <div class="blk" style="flex-direction: column; align-items: center"><div class="row"><div class="cell p2">h(c0, c1)</div><div class="cell">h(c2, c3)</div></div><div class="row"><div class="cell">c0</div><div class="cell">c1</div><div class="cell mine">c2</div><div class="cell p2">c3</div></div></div>
+          <div class="blk" style="align-self: end"><div class="cell">c4</div><div class="cell">c5</div><div class="cell">c6</div><div class="cell">c7</div></div>
+          <div class="blk" style="align-self: end"><div class="cell">c8</div><div class="cell dim">·</div><div class="cell dim">·</div><div class="cell dim">·</div></div>
+        </div>
+      </div>
+      <p class="small" style="margin-top: 6px">Output 2's path to the root: <span class="mk p2">②</span><span class="mono">c3, h(c0, c1)</span>, inside its block, kept in its record; <span class="mk p4">④</span><span class="mono">R1, h(R2, 0)</span>, above the blocks, from the block roots.</p>
+      <p class="small" style="margin: 10px 0 0"><b>Output 2 on the chain: 256 bytes</b> <span class="muted">(widths not to scale)</span></p>
+      <div class="bytes">
+        <div class="p2" style="flex: 0 0 112px">commitment 32 B</div>
+        <div class="p1" style="flex: 0 0 82px">point 32 B</div>
+        <div class="p1" style="flex: 0 0 30px">4 B</div>
+        <div class="x" style="flex: 0 0 70px">rest of e0</div>
+        <div class="p2" style="flex: 1">ciphertext elements 1–5: 160 B</div>
+      </div>
+      <p class="small muted">Element 0 encrypts zero: the wallet recomputes it from the scan, so only its first 4 bytes are kept, in the scan file.</p>
+      <p class="small" style="margin-top: 8px"><b>Spends:</b> nullifiers <span class="mono">n1 … n5</span> → <span class="mk p3">③</span></p>
+    </div>
+    <div class="pieces">
+      <div class="box pc p1"><h3><span class="mk p1">①</span>Scan file <span class="b public">downloaded whole</span></h3>
+        <p>Per output: the point and element 0's first 4 bytes, <b>36 B</b>.</p><p class="muted">Finds the wallet's outputs (step 3). Example: 9 × 36 B; Preprod: about 2.5 MB.</p></div>
+      <div class="box pc p2"><h3><span class="mk p2">②</span>Commitment matrix <span class="b sent">read by PIR</span></h3>
+        <p>Per output, one record: the commitment, elements 1–5 and the lower Merkle path inside its block, <b>705 B</b> (32 + 160 + 16 × 32 + 1).</p><p class="muted">Gives the coin and the lower half of its path (step 4). Records are stacked 3 to a column here.</p></div>
+      <div class="box pc p3"><h3><span class="mk p3">③</span>Nullifier buckets <span class="b sent">read by PIR</span></h3>
+        <p>Each spend's nullifier with its height and transaction, grouped by the nullifier's first bits, <b>40 B</b> each.</p><p class="muted">Tells whether a coin is spent (step 5).</p></div>
+      <div class="box pc p4"><h3><span class="mk p4">④</span>Block roots <span class="b public">downloaded whole</span></h3>
+        <p>One 32-byte root per block of 65,536 outputs (4 here).</p><p class="muted">The upper half of every path (steps 2 and 6).</p></div>
+      <p class="small muted" style="margin: 0">Anything newer than the snapshot comes in the tail, in full (step 6).</p>
+    </div>
+  </div>
+</section>
+
+<section class="slide" id="s-tables" data-step="0" data-title="Step 0: the example's data in the four pieces">
+  <div class="top">Step 0 · The server builds a snapshot · 2 of 4 <span class="where s">Server</span></div>
+  <h2>The example's data in the four pieces</h2>
+  <div class="body g4">
+    <div class="box pc p1"><h3><span class="mk p1">①</span>Scan file</h3>
+      <p class="small">9 entries of 36 B, one per output, in position order.</p>
+      <div class="grid" style="grid-template-columns: repeat(3, auto)">
+        <div class="cell">0</div><div class="cell">1</div><div class="cell">2</div>
+        <div class="cell">3</div><div class="cell">4</div><div class="cell">5</div>
+        <div class="cell">6</div><div class="cell">7</div><div class="cell">8</div>
+      </div>
+      <p class="small muted">Each: point ‖ 4 bytes of element 0.</p>
+    </div>
+    <div class="box pc p2"><h3><span class="mk p2">②</span>Commitment matrix</h3>
+      <p class="small">Column c holds records 3c, 3c + 1, 3c + 2, top to bottom. PIR returns whole columns.</p>
       <div class="grid" style="grid-template-columns: repeat(3, auto)">
         <div class="colhead">column 0</div><div class="colhead">column 1</div><div class="colhead">column 2</div>
         <div class="cell">r0 = 7</div><div class="cell">r3 = 9</div><div class="cell">r6 = 11</div>
         <div class="cell">r1 = 12</div><div class="cell">r4 = 14</div><div class="cell">r7 = 2</div>
         <div class="cell">r2 = 3</div><div class="cell">r5 = 5</div><div class="cell">r8 = 8</div>
       </div>
-      <p class="small muted">As a matrix (rows × columns): <span class="mono">[[7, 9, 11], [12, 14, 2], [3, 5, 8]]</span>.</p>
+      <p class="small muted">Each record is one number here (a real one is 705 B). As a matrix: <span class="mono">[[7, 9, 11], [12, 14, 2], [3, 5, 8]]</span>.</p>
     </div>
-    <div class="box s"><h3>Nullifier table: buckets</h3>
-      <p class="small">A nullifier's bucket is its first 2 bits; one column per bucket, two slots per bucket, 0 for an empty slot.</p>
+    <div class="box pc p3"><h3><span class="mk p3">③</span>Nullifier buckets</h3>
+      <p class="small">Bucket = the nullifier's first 2 bits; one column per bucket, two slots, 0 when empty.</p>
       <div class="buckets">
         <div class="bucket"><div class="h">bucket 0</div><div class="cell">n1 = 5</div><div class="cell">n3 = 13</div></div>
         <div class="bucket"><div class="h">bucket 1</div><div class="cell">n2 = 9</div><div class="cell dim">0</div></div>
         <div class="bucket"><div class="h">bucket 2</div><div class="cell">n4 = 6</div><div class="cell dim">0</div></div>
         <div class="bucket"><div class="h">bucket 3</div><div class="cell">n5 = 11</div><div class="cell dim">0</div></div>
       </div>
-      <p class="small muted">As a matrix: <span class="mono">[[5, 9, 6, 11], [13, 0, 0, 0]]</span>. A real slot also holds the spend's height and transaction.</p>
+      <p class="small muted">As a matrix: <span class="mono">[[5, 9, 6, 11], [13, 0, 0, 0]]</span>.</p>
     </div>
-    <div class="box s"><h3>Merkle tree, in blocks of 4 leaves</h3>
-      <p class="small">Each block's root is published. A record carries its leaf's path up to its block root.</p>
+    <div class="box pc p4"><h3><span class="mk p4">④</span>Block roots</h3>
+      <p class="small">R0, R1, R2: the roots of the blocks of 4 leaves. Below them, each record holds its own path.</p>
       <div class="tree">
         <div class="row"><div class="cell">root</div></div>
         <div class="row"><div class="cell">R0</div><div class="cell">R1</div><div class="cell">R2</div></div>
-        <div class="row">
-          <div class="blk"><div class="cell">c0</div><div class="cell">c1</div><div class="cell">c2</div><div class="cell">c3</div></div>
-          <div class="blk"><div class="cell">c4</div><div class="cell">c5</div><div class="cell">c6</div><div class="cell">c7</div></div>
-        </div>
+        <div class="row"><div class="blk"><div class="cell">c0</div><div class="cell">c1</div><div class="cell">c2</div><div class="cell">c3</div></div></div>
+        <div class="row"><div class="blk"><div class="cell">c4</div><div class="cell">c5</div><div class="cell">c6</div><div class="cell">c7</div></div></div>
         <div class="row"><div class="blk"><div class="cell">c8</div><div class="cell dim">·</div><div class="cell dim">·</div><div class="cell dim">·</div></div></div>
       </div>
     </div>
   </div>
   <div class="body g2" style="flex: none">
     <div class="box"><h3>Inputs</h3><table class="io">
-      <tr><td class="sym">outputs 0–8</td><td><span class="b public">public</span></td><td>commitments and ciphertexts, from UmbraDB's tables of the chain</td><td class="from"><a data-to="s-example"></a></td></tr>
+      <tr><td class="sym">outputs 0–8</td><td><span class="b public">public</span></td><td>commitments and ciphertexts, split as on the previous slide</td><td class="from"><a data-to="s-example"></a></td></tr>
       <tr><td class="sym">n1–n5</td><td><span class="b public">public</span></td><td>the nullifiers of every spend, from the same tables</td><td class="from"><a data-to="s-example"></a></td></tr>
     </table></div>
     <div class="box"><h3>Outputs</h3><table class="io">
-      <tr><td class="sym">read table</td><td><span class="b server">server</span></td><td>kept to answer read calls; also used for H</td><td class="from"><a data-to="s-setup"></a></td></tr>
+      <tr><td class="sym">commitment matrix</td><td><span class="b server">server</span></td><td>kept to answer read calls; also used for H</td><td class="from"><a data-to="s-setup"></a></td></tr>
       <tr><td class="sym">nullifier table</td><td><span class="b server">server</span></td><td>kept to answer nullifier calls; also used for H′</td><td class="from"><a data-to="s-setup"></a></td></tr>
-      <tr><td class="sym">R0, R1, R2</td><td><span class="b public">public</span></td><td>block roots, downloaded by every wallet</td><td class="from"><a data-to="s-files"></a></td></tr>
+      <tr><td class="sym">scan file, R0–R2</td><td><span class="b public">public</span></td><td>downloaded by every wallet</td><td class="from"><a data-to="s-files"></a></td></tr>
     </table></div>
   </div>
 </section>
 
 <section class="slide" id="s-setup" data-step="0" data-title="Step 0: the public matrices and the setup data">
-  <div class="top">Step 0 · The server builds a snapshot · 2 of 3 <span class="where s">Server</span></div>
+  <div class="top">Step 0 · The server builds a snapshot · 3 of 4 <span class="where s">Server</span></div>
   <h2>The public matrices A, A′ and the setup data H, H′ <span class="gpu-tag" data-tip="setup">gpu</span></h2>
   <p class="lead">A is a matrix of random numbers, one row per table column and n columns (n = 2 here, 1,024 on the real server). It is generated from a random seed written in the manifest, so every wallet rebuilds the same A; nobody downloads it. A is public: the query is hidden by the wallet's secret s, not by A. The setup data H = table × A lets a wallet decode an answer.</p>
   <div class="body g2">
-    <div class="box s"><h3>For the read table</h3><div class="math" id="m-setup-read"></div><div class="work" id="w-setup-read"></div></div>
+    <div class="box s"><h3>For the commitment matrix</h3><div class="math" id="m-setup-read"></div><div class="work" id="w-setup-read"></div></div>
     <div class="box s"><h3>For the nullifier table</h3><div class="math" id="m-setup-nf"></div><div class="work" id="w-setup-nf"></div></div>
   </div>
   <div class="body g2" style="flex: none">
@@ -371,7 +435,7 @@
 </section>
 
 <section class="slide" id="s-snapshot" data-step="0" data-title="Step 0: the snapshot's files">
-  <div class="top">Step 0 · The server builds a snapshot · 3 of 3 <span class="where s">Server</span></div>
+  <div class="top">Step 0 · The server builds a snapshot · 4 of 4 <span class="where s">Server</span></div>
   <h2>The snapshot: a manifest and six files</h2>
   <p class="lead">Built once per snapshot, for every wallet alike. The times are a real build on Preprod at height 720,058 (6,861 outputs, 3,910 nullifiers): 1.7 s in all, on the CPU.</p>
   <div class="body">
@@ -380,9 +444,9 @@
       <tr><td>manifest</td><td>height, tree root, parameters, the seeds of A and A′, the SHA-256 of each file</td><td>fetched first by every wallet</td><td class="r"><span class="sz" data-tip="manifest">1.4 KB</span></td><td class="r">2 ms</td></tr>
       <tr><td>scan file</td><td>per output: the ciphertext's point and the first 4 bytes of its element 0</td><td>downloaded by every wallet</td><td class="r"><span class="sz" data-tip="scanfile">9 × 36 B = 324 B</span></td><td class="r">4 ms</td></tr>
       <tr><td>block roots</td><td>R0, R1, R2</td><td>downloaded by every wallet</td><td class="r"><span class="sz" data-tip="blockroots">3 × 32 B = 96 B</span></td><td class="r">506 ms (tree)</td></tr>
-      <tr><td>read setup <span class="mono">H</span></td><td>read table × A</td><td>downloaded by every wallet</td><td class="r"><span class="sz" data-tip="setup-size">3 × 2 numbers</span></td><td class="r">951 ms <span class="gpu-tag" data-tip="setup">gpu</span></td></tr>
+      <tr><td>read setup <span class="mono">H</span></td><td>commitment matrix × A</td><td>downloaded by every wallet</td><td class="r"><span class="sz" data-tip="setup-size">3 × 2 numbers</span></td><td class="r">951 ms <span class="gpu-tag" data-tip="setup">gpu</span></td></tr>
       <tr><td>nullifier setup <span class="mono">H′</span></td><td>nullifier table × A′</td><td>downloaded by every wallet</td><td class="r"><span class="sz" data-tip="setup-size">2 × 2 numbers</span></td><td class="r">66 ms</td></tr>
-      <tr><td>read table</td><td>the records</td><td>kept by the server, to answer</td><td class="r">3 × 3 numbers</td><td class="r">56 ms</td></tr>
+      <tr><td>commitment matrix</td><td>the records</td><td>kept by the server, to answer</td><td class="r">3 × 3 numbers</td><td class="r">56 ms</td></tr>
       <tr><td>nullifier table</td><td>the buckets</td><td>kept by the server, to answer</td><td class="r">2 × 4 numbers</td><td class="r">10 ms</td></tr>
     </table>
   </div>
@@ -473,7 +537,7 @@
   <div class="top">Step 4 · Fetch my records by PIR · 1 of 5 <span class="where w">Wallet</span></div>
   <h2>Which columns to ask for, and why one extra</h2>
   <div class="body g12">
-    <div class="box w"><h3>The read table, as the wallet sees it</h3>
+    <div class="box w"><h3>The commitment matrix, as the wallet sees it</h3>
       <div class="grid" style="grid-template-columns: repeat(3, auto)">
         <div class="colhead">column 0</div><div class="colhead">column 1</div><div class="colhead">column 2</div>
         <div class="cell sel">r0</div><div class="cell pad">r3</div><div class="cell sel mine">r6</div>
@@ -542,7 +606,7 @@
   </div>
   <div class="body g2" style="flex: none">
     <div class="box"><h3>Inputs</h3><table class="io">
-      <tr><td class="sym">read table</td><td><span class="b server">server</span></td><td>[[7, 9, 11], [12, 14, 2], [3, 5, 8]]</td><td class="from"><a data-to="s-tables"></a></td></tr>
+      <tr><td class="sym">commitment matrix</td><td><span class="b server">server</span></td><td>[[7, 9, 11], [12, 14, 2], [3, 5, 8]]</td><td class="from"><a data-to="s-tables"></a></td></tr>
       <tr><td class="sym">q</td><td><span class="b sent">sent</span></td><td>from the wallet</td><td class="from"><a data-to="s-query"></a></td></tr>
     </table></div>
     <div class="box"><h3>Outputs</h3><table class="io">
@@ -856,7 +920,7 @@
     blockroots: { title: "The block roots (32 bytes per block of 65,536 outputs)", head: ["entries", "size"], rows: [["1,000,000 outputs", "16 blocks: 512 B"], ["10,000,000 outputs", "153 blocks: 4.9 KB"]],
       note: "The example uses blocks of 4 outputs; the server uses 2^16." },
     "setup-size": { title: "The setup data of both PIR tables", head: ["entries", "read setup", "nullifier setup"], rows: [["1,000,000", "≈ 103 MB", "≈ 25 MB"], ["10,000,000", "≈ 326 MB", "≈ 105 MB"]],
-      note: "Grows with the square root of the table: rows ≈ 627 cells × √(outputs / 627) for the read table. Estimated with the server's sizing rule; Preprod today: 27 MB and 6.6 MB." },
+      note: "Grows with the square root of the table: rows ≈ 627 cells × √(outputs / 627) for the commitment matrix. Estimated with the server's sizing rule; Preprod today: 27 MB and 6.6 MB." },
     readup: { title: "One read call, up (32 vectors × columns × 4 B)", head: ["entries", "size"], rows: [["1,000,000 outputs", "≈ 3.2 MB"], ["10,000,000 outputs", "≈ 10 MB"]],
       note: "The real client sends 32 vectors per call; the example shows 3. Preprod today: 806 KB." },
     readdown: { title: "One read call, down (32 vectors × rows × 4 B)", head: ["entries", "size"], rows: [["1,000,000 outputs", "≈ 3.2 MB"], ["10,000,000 outputs", "≈ 10.2 MB"]], note: "Preprod today: 883 KB." },
@@ -958,8 +1022,8 @@
     `<div class="lbl">mod 65,536. Rounding gives ${v0.out.join(", ")}: column 0 of M, which holds r2 = 3, the wallet's record. H·s is worked out entry by entry in step 4.</div>`);
 
   // step 0: A, H; A′, H′
-  set("m-setup-read", eq(lbl("seed →"), lbl("A ="), mat(A, "public"), lbl("&nbsp;&nbsp; H = read table × A ="), mat(H, "public")) +
-    `<div class="lbl">A: one row per read-table column (3) × n = 2. H: one row per table row (3) × n = 2.</div>`);
+  set("m-setup-read", eq(lbl("seed →"), lbl("A ="), mat(A, "public"), lbl("&nbsp;&nbsp; H = commitment matrix × A ="), mat(H, "public")) +
+    `<div class="lbl">A: one row per column of the commitment matrix (3) × n = 2. H: one row per table row (3) × n = 2.</div>`);
   set("w-setup-read", `<div class="r">One entry of H, worked: row 0 of the table [7, 9, 11] times column 0 of A.</div>` +
     worked("H[0][0]", [[D[0][0], A[0][0]], [D[0][1], A[1][0]], [D[0][2], A[2][0]]]));
   set("m-setup-nf", eq(lbl("seed′ →"), lbl("A′ ="), mat(AN, "public"), lbl("&nbsp;&nbsp; H′ = nullifier table × A′ ="), mat(HN, "public")) +
