@@ -19,6 +19,7 @@
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import { statSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { arch, availableParallelism, freemem, platform, totalmem } from "node:os";
 import { join, resolve } from "node:path";
 import type {
@@ -425,22 +426,22 @@ export class PssServer {
         return error(400, "invalid-padding", `padding must be at least the ${outputs} outputs and ${nullifiers} nullifiers at ${height} (and there must be an output)`);
       }
       // Refused when the build would hold more than half the machine's memory with the snapshot served now, or more
-      // than the memory free now: a 10M build on a machine whose other programs held most of its memory swapped for
-      // 25 minutes without finishing (Q57).
+      // than half the memory available now: a 10M build on a machine whose other programs held most of its memory
+      // swapped for 25 minutes without finishing (Q57).
       const held = this.#current === null ? 0 : this.#current.readGrid.cells.byteLength + this.#current.nullifierGrid.cells.byteLength;
       const needed = paddedBuildBytes(padding, this.settings.pathSplit);
       const half = totalmem() / 2;
-      const free = freemem();
-      if (needed + held > half || needed > free) {
+      const available = availableMemory();
+      if (needed + held > half || needed > available / 2) {
         const gib = (b: number): string => `${(b / 2 ** 30).toFixed(1)} GiB`;
         return error(
           507,
           "padding-too-large",
           `a snapshot padded to ${padding.toLocaleString("en-US")} entries needs about ${gib(needed)}; ` +
-            (needed > free
-              ? `${gib(free)} of memory is free now`
+            (needed > available / 2
+              ? `${gib(available)} of memory is available now, and a padded build may use half of it`
               : `with the ${gib(held)} the served snapshot holds, that is over half this machine's memory, ${gib(half)}`),
-          { neededBytes: Math.round(needed), heldBytes: held, halfBytes: half, freeBytes: free },
+          { neededBytes: Math.round(needed), heldBytes: held, halfBytes: half, availableBytes: available },
         );
       }
     }
@@ -772,6 +773,23 @@ export class PssServer {
   async close(): Promise<void> {
     await this.#multiplier?.close();
     this.#multiplier = null;
+  }
+}
+
+/**
+ * The memory the system could give a build now (Q57). On macOS: free, inactive, speculative and purgeable pages from
+ * `vm_stat`, since `os.freemem()` there counts only unused pages, which the file cache keeps near zero. Elsewhere
+ * `os.freemem()` (on Linux, MemAvailable).
+ */
+function availableMemory(): number {
+  if (platform() !== "darwin") return freemem();
+  try {
+    const out = execFileSync("vm_stat", { encoding: "utf8", timeout: 2000 });
+    const page = Number(/page size of (\d+) bytes/.exec(out)?.[1] ?? 4096);
+    const pages = (name: string): number => Number(new RegExp(`Pages ${name}:\\s+(\\d+)`).exec(out)?.[1] ?? 0);
+    return page * (pages("free") + pages("inactive") + pages("speculative") + pages("purgeable"));
+  } catch {
+    return freemem();
   }
 }
 
