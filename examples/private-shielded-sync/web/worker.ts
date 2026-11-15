@@ -515,16 +515,8 @@ async function read(args: { positions?: number[] }): Promise<Json> {
         item.coin = { tokenType: coin.tokenType, value: coin.value, nonce: coin.nonce, nullifier: coin.nullifier };
       }
     }
-    const db = await debugJson(`/debug/output?position=${p}`);
-    if (db !== null) {
-      const dbElements = db.ciphertext === null ? null : String(db.ciphertext).slice(128, 448);
-      item.database = {
-        height: db.height,
-        txIndex: db.txIndex,
-        evidence: db.evidence,
-        equal: db.commitment === hex(r.commitment) && dbElements === (r.elements === null ? null : hex(r.elements)),
-      };
-    }
+    // The comparison with the stored output is the page's, one row at a time (its "Compare" button): a lookup by
+    // position reads the whole events table, about 140 ms on the full Preprod database.
     out.push(item);
   }
   return {

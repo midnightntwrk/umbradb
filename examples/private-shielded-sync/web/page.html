@@ -31,6 +31,7 @@
   button { background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 7px 12px; font: inherit; cursor: pointer; }
   button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--line); }
   button:disabled { opacity: .5; cursor: default; }
+  button.small { padding: 2px 8px; font-size: 12px; }
   label { color: var(--muted); }
   .status { font-size: 12px; color: var(--muted); margin-left: auto; }
   .status.ok { color: var(--ok); } .status.bad { color: var(--bad); } .status.run { color: var(--warn); }
@@ -107,7 +108,7 @@
 
     <section class="card" id="step-read">
       <h2><span class="num">4</span>Fetch records by PIR (commitments, ciphertexts, paths)<span class="status"></span></h2>
-      <p class="desc">Reads the read-table records of the positions privately: the calls carry encrypted query vectors, padded with random columns. Leave empty to fetch the scan's matches, or pick positions to test with any output.</p>
+      <p class="desc">Reads the read-table records of the positions privately: the calls carry encrypted query vectors, padded with random columns. Leave empty to fetch the scan's matches, or pick positions to test with any output. Each row's Compare button checks that record against the database (debug).</p>
       <input type="text" id="positions" placeholder="positions, e.g. 0, 17, 100-104 (default: the scan's matches)" autocomplete="off">
       <div class="row"><button data-run="read">Fetch records</button><button class="secondary" data-fill="positions">Pick 5 random positions</button></div>
       <div class="out"></div>

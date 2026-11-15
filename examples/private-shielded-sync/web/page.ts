@@ -149,14 +149,16 @@ const VIEWS: Record<string, (r: Json) => string> = {
       table(
         ["position", "commitment", "ciphertext (elements 1–5)", "lower path", "wallet's?", "database (debug)"],
         records.map((x) => {
-          const db = x.database as Json | undefined;
+          const elements = x.ciphertextElements1to5 === null ? "" : String(x.ciphertextElements1to5);
           return [
             `${x.position}<br><small>col ${x.column}, slot ${x.slotInColumn}</small>`,
             esc(short(String(x.commitment), 24)),
             x.ciphertextElements1to5 === null ? "none (output carries no ciphertext)" : esc(short(String(x.ciphertextElements1to5), 24)),
             Array.isArray(x.lowerPath) ? `${(x.lowerPath as unknown[]).length} hashes, ${esc(String(x.lowerPathCheck))}` : esc(String(x.lowerPath)),
             x.ownership === undefined ? "derive keys to check" : x.coin ? `<span class="good">${esc(String(x.ownership))}</span><br>${esc(JSON.stringify(x.coin))}` : esc(String(x.ownership)),
-            db === undefined ? "—" : `${mark(Boolean(db.equal), db.equal ? "equals the stored output" : "differs from the stored output")}<br><small>height ${db.height}, tx ${db.txIndex}, ${db.evidence}</small>`,
+            databaseRoutes
+              ? `<button class="secondary small" data-compare="${x.position}" data-commitment="${esc(String(x.commitment))}" data-elements="${esc(elements)}">Compare</button>`
+              : "—",
           ];
         }),
       )
@@ -233,6 +235,8 @@ const ARGS: Record<string, () => Json> = {
 };
 const STEP_OF: Record<string, string> = { generate: "keys" };
 let firstFree = 0;
+/** Whether the page's server reads the database (`serve.ts --db-url`): the read rows then offer "Compare". */
+let databaseRoutes = false;
 
 async function run(button: HTMLButtonElement): Promise<void> {
   const name = button.dataset.run!;
@@ -262,6 +266,7 @@ async function run(button: HTMLButtonElement): Promise<void> {
     if (name === "load") {
       const d = (answer.result!.debugEndpoints ?? null) as Json | null;
       if (d?.snapshotBuilds) $("#reload-row").hidden = false;
+      databaseRoutes = Boolean(d?.database);
     }
     if (name === "files") {
       firstFree = Number((answer.result!.manifest as Json).firstFree);
@@ -338,6 +343,32 @@ async function fill(button: HTMLButtonElement): Promise<void> {
   }
 }
 
+/**
+ * Debug, one read row: reads the stored output at the row's position (`/debug/output`) and compares its commitment and
+ * ciphertext elements 1–5 with what the PIR read returned. The cell then shows the result and the lookup's time.
+ */
+async function compare(button: HTMLButtonElement): Promise<void> {
+  const cell = button.closest("td")!;
+  const { compare: position, commitment, elements } = button.dataset;
+  button.disabled = true;
+  button.textContent = "comparing…";
+  const t = performance.now();
+  try {
+    const r = await fetch(`/debug/output?position=${position}`);
+    const db = (await r.json()) as Json;
+    const ms = Math.round(performance.now() - t);
+    if (!r.ok) throw new Error(String(db.error ?? r.status));
+    const dbElements = db.ciphertext === null ? "" : String(db.ciphertext).slice(128, 448);
+    const equal = db.commitment === commitment && dbElements === elements;
+    cell.innerHTML = `${mark(equal, equal ? "equals the stored output" : "differs from the stored output")}<br><small>height ${db.height}, tx ${db.txIndex}, ${esc(String(db.evidence))}; lookup ${ms} ms</small>`;
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = "Compare";
+    cell.querySelector(".error")?.remove();
+    cell.insertAdjacentHTML("beforeend", `<div class="error">${esc(error instanceof Error ? error.message : String(error))}</div>`);
+  }
+}
+
 // ── one request, whole ──────────────────────────────────────────────────────────────────────────────────────────
 
 const SHOW_ALL_LIMIT = 4 * 1024 * 1024;
@@ -411,5 +442,6 @@ document.addEventListener("click", (event) => {
   if (target === null) return;
   if (target.dataset.run) void run(target);
   else if (target.dataset.fill) void fill(target);
+  else if (target.dataset.compare) void compare(target);
 });
 void run($<HTMLButtonElement>('[data-run="load"]'));
