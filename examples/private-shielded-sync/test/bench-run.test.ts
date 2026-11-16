@@ -30,7 +30,7 @@ import { compileIpirWasm } from "../ipir/wallet-node.ts";
 import { ipirMasksBytes, ipirRequestBytes, ipirResponseBytes } from "../ipir/sizes.ts";
 import { ROUTES, toHex } from "../shared/index.ts";
 import { parseStatusSamples, readSyncRecords, syncRate } from "../bench/bench-chain.ts";
-import { compareRuns, renderComparison } from "../bench/bench-compare.ts";
+import { certificateRows, compareRuns, renderComparison, renderSchemeReport } from "../bench/bench-compare.ts";
 import { parseDockerMemory, selfProbe } from "../bench/bench-probes.ts";
 import { COLUMNS, fmtBytes, fmtMs, missingCells, renderReport, section8 } from "../bench/bench-report.ts";
 import type { BenchResults } from "../bench/bench-results.ts";
@@ -471,7 +471,7 @@ describe("parts of the benchmark", () => {
 
   it("formatting", () => {
     expect([fmtBytes(32), fmtBytes(2048), fmtBytes(5 * 1024 ** 2), fmtBytes(1.25 * 1024 ** 3)]).toEqual(["32 B", "2.00 KiB", "5.00 MiB", "1.25 GiB"]);
-    expect([fmtMs(0.5), fmtMs(5.25), fmtMs(250), fmtMs(12_340), fmtMs(125_000), fmtMs(5.5 * 3_600_000)]).toEqual(["0.50 ms", "5.3 ms", "250 ms", "12.34 s", "2 min 5 s", "5.50 h"]);
+    expect([fmtMs(0.5), fmtMs(5.25), fmtMs(250), fmtMs(12_340), fmtMs(125_000), fmtMs(119_600), fmtMs(5.5 * 3_600_000)]).toEqual(["0.50 ms", "5.3 ms", "250 ms", "12.34 s", "2 min 5 s", "2 min 0 s", "5.50 h"]);
   });
 });
 
@@ -607,6 +607,19 @@ describe("both schemes (00058 FR-050): the benchmark asks for a SimplePIR and an
     expect(key).toContain("| Network | read: one query up |");
     expect(key).not.toContain("| Memory | Server: resident before the build |");
     expect(key.split("\n").length).toBeLessThan(tables.split("\n").length);
+    // The report: section 1 from the runs, then the given sections with the shapes and certificates filled in.
+    const certDir = join(dir, "cert");
+    mkdirSync(certDir, { recursive: true });
+    writeFileSync(join(certDir, "noise-x-read.json"), JSON.stringify({ rows: 2048, cols: 4096, database_sha256: "ab" }));
+    writeFileSync(join(certDir, "cert-x-read.json"), JSON.stringify({ database_sha256: "ab", actual_profile: { certified_failure_bits: 290, meets_128: true }, screens: { worst_case_query: { certified_failure_bits: 280 } } }));
+    const certs = certificateRows(certDir);
+    expect(certs).toEqual([{ label: "x", table: "read", rows: 2048, cols: 4096, bits: 290, meets128: true, worstCaseQueryBits: 280, databaseSha256: "ab", file: "cert-x-read.json" }]);
+    const doc = renderSchemeReport(c, { title: "Both schemes", notes: "\n## 2. Shapes\n\n<!-- shapes -->\n\n## 3. Certificates\n\n<!-- certificates -->\n", certificates: certs });
+    expect(doc.startsWith("# Both schemes\n")).toBe(true);
+    expect(doc).toContain("## 1. Side by side, one table per size");
+    expect(doc).toContain(`| 15 | IPIR+SP | ${ipir.snapshot.tables.read!.rows.toLocaleString("en-US")} × `);
+    expect(doc).toContain("| x | read | 2,048 × 4,096 | 2^-290 | yes | 2^-280 | `cert/cert-x-read.json` |");
+    expect(doc).not.toContain("<!--");
   });
 });
 

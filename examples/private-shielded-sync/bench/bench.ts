@@ -27,7 +27,7 @@ import { loadSdk } from "../client/sdk-api.ts";
 import { compileIpirWasm } from "../ipir/wallet-node.ts";
 import { isSchemeName, SCHEME_NAMES } from "../pir/scheme.ts";
 import { readSyncRecords } from "./bench-chain.ts";
-import { compareRuns, renderComparison } from "./bench-compare.ts";
+import { certificateRows, compareRuns, renderComparison, renderSchemeReport } from "./bench-compare.ts";
 import { dockerProbe, type MemoryProbe, pidProbe } from "./bench-probes.ts";
 import { missingCells, renderReport } from "./bench-report.ts";
 import type { BenchResults } from "./bench-results.ts";
@@ -38,7 +38,8 @@ import type { Reader } from "./bench-splits.ts";
 const HELP = `usage:
   node [--env-file=<secrets.env>] examples/private-shielded-sync/bench/bench.ts run [options]
   node examples/private-shielded-sync/bench/bench.ts report <results.json> [--transfer <record>] [--out <dir>]
-  node examples/private-shielded-sync/bench/bench.ts compare <results.json>… --out <dir>
+  node examples/private-shielded-sync/bench/bench.ts compare <results.json>… --out <dir> [--notes <file.md>]
+       [--cert <dir>] [--title <text>]
 
 wallets (at least one; each syncs as a fresh client):
   --wallet <name>               mnemonic from the environment variable PSS_MNEMONIC_<NAME> (repeatable)
@@ -75,6 +76,12 @@ measurement:
 
 output:
   --out <dir>                   the results folder (default bench/results/<date>-<network>/)
+
+compare (both schemes side by side; spec 00058):
+  --notes <file.md>             also write REPORT.md: section 1 from the runs, then this file's sections, its
+                                <!-- shapes --> and <!-- certificates --> markers filled in
+  --cert <dir>                  the certificates' cert-<label>-<table>.json and noise-<label>-<table>.json files
+  --title <text>                REPORT.md's title
   --work <dir>                  scratch for caches, states and builds (default: a temporary folder, removed after)
 `;
 
@@ -107,6 +114,9 @@ const { values: opt, positionals } = parseArgs({
     transfer: { type: "string" },
     out: { type: "string" },
     work: { type: "string" },
+    notes: { type: "string" },
+    cert: { type: "string" },
+    title: { type: "string" },
     help: { type: "boolean", default: false },
   },
 });
@@ -258,6 +268,13 @@ function cmdCompare(): void {
   writeFileSync(join(dir, "TABLES.md"), renderComparison(comparison));
   writeFileSync(join(dir, "KEY-TABLES.md"), renderComparison(comparison, { keyOnly: true }));
   log(`wrote ${join(dir, "compare.json")}, TABLES.md (every row) and KEY-TABLES.md (the key rows) from ${files.length} run(s)`);
+  if (opt.notes !== undefined) {
+    // The report: section 1 from the runs, then the given sections (shapes and certificates filled in).
+    const certificates = opt.cert === undefined ? [] : certificateRows(resolve(opt.cert));
+    const title = opt.title ?? "SimplePIR and IPIR+SP side by side";
+    writeFileSync(join(dir, "REPORT.md"), renderSchemeReport(comparison, { title, notes: readFileSync(opt.notes, "utf8"), certificates }));
+    log(`wrote ${join(dir, "REPORT.md")} with ${certificates.length} certificate(s)`);
+  }
 }
 
 function cmdReport(): void {

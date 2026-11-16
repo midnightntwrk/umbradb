@@ -611,7 +611,10 @@ one the served snapshot must use); an IPIR+SP snapshot needs the add-on on the s
 snapshot size and scheme, and writes `compare.json`, `TABLES.md` and `KEY-TABLES.md` (the key rows only): per size,
 both schemes side by side (median,
 smallest and largest, number of samples), rows grouped as memory, space, network and time, each marked measured (the
-field of `results.json`) or calculated (the formula), and the checks SC-002 and SC-003 of spec 00058.
+field of `results.json`) or calculated (the formula), and the checks SC-002 and SC-003 of spec 00058. With `--notes
+<file.md>` it also writes `REPORT.md`: section 1 is the key rows per size, then the file's own sections, in which
+`<!-- shapes -->` becomes the tables' shapes per size and scheme and `<!-- certificates -->` the correctness
+certificates found in `--cert <dir>` (`cert-<label>-<table>.json` from upstream's `certify_native.py`).
 
 **The Preprod report.** With the sync at the node's finalized head and the transfer of step 5 done:
 

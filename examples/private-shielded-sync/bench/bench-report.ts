@@ -42,7 +42,11 @@ export function fmtMs(ms: number | null | undefined): string {
   if (ms < 10) return `${ms.toFixed(1)} ms`;
   if (ms < 1000) return `${Math.round(ms)} ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(2)} s`;
-  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)} min ${Math.round((ms % 60_000) / 1000)} s`;
+  if (ms < 3_600_000) {
+    // Rounded to the second first, so that 119.6 s reads 2 min 0 s, not 1 min 60 s.
+    const seconds = Math.round(ms / 1000);
+    return `${Math.floor(seconds / 60)} min ${seconds % 60} s`;
+  }
   return `${(ms / 3_600_000).toFixed(2)} h`;
 }
 

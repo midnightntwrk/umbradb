@@ -11,12 +11,17 @@
  *
  * Samples: a figure of the build or of the snapshot gives one sample per run; a figure of a wallet's call gives one per
  * wallet per run (the calls of wallets A and B are pooled).
+ *
+ * `renderSchemeReport` writes the comparison's `REPORT.md`: a lead, the key rows per size, SC-002 and SC-003, then the
+ * caller's own sections (a Markdown file), in which `<!-- shapes -->` is replaced by the table shapes per size and
+ * scheme and `<!-- certificates -->` by the correctness certificates given (`certificateRows`).
  */
 
-import { basename, dirname, relative } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { basename, dirname, join, relative } from "node:path";
 import { SCHEME_NAMES, type SchemeName } from "../pir/scheme.ts";
 import { fmtBytes, fmtMs } from "./bench-report.ts";
-import { BUILD_STEP_NAMES, type BenchResults, type CallRow, type WalletRun } from "./bench-results.ts";
+import { BUILD_STEP_NAMES, type BenchResults, type BenchTableName, type CallRow, TABLE_NAMES, type TableShape, type WalletRun } from "./bench-results.ts";
 
 export interface CompareRun {
   /** The `results.json` the run wrote (absolute). */
@@ -56,6 +61,8 @@ export interface SizeComparison {
   readonly files: Readonly<Record<SchemeName, readonly string[]>>;
   /** Load average (1 min) at the runs' starts, smallest and largest. */
   readonly load: { readonly min: number | null; readonly max: number | null };
+  /** Each scheme's tables at this size, from its first run (the same in every run: builds are deterministic). */
+  readonly tables: Readonly<Record<SchemeName, { readonly file: string; readonly tables: Readonly<Record<BenchTableName, TableShape | null>> } | null>>;
   readonly rows: readonly ComparisonRow[];
 }
 
@@ -256,6 +263,12 @@ export function compareRuns(runs: readonly CompareRun[], outDir: string): Compar
         label: sizeLabel(entries, padding, group[0]!.results.snapshot.outputs),
         files: Object.fromEntries(SCHEME_NAMES.map((s) => [s, of(s).map((g) => rel(g.file))])) as Record<SchemeName, string[]>,
         load: { min: loads.length === 0 ? null : Math.min(...loads), max: loads.length === 0 ? null : Math.max(...loads) },
+        tables: Object.fromEntries(
+          SCHEME_NAMES.map((s) => {
+            const first = [...of(s)].sort((a, b) => a.file.localeCompare(b.file))[0];
+            return [s, first === undefined ? null : { file: rel(first.file), tables: first.results.snapshot.tables }];
+          }),
+        ) as SizeComparison["tables"],
         rows: defs.map((d) => ({
           group: d.group,
           name: d.name,
@@ -351,4 +364,98 @@ export function renderComparison(c: Comparison, options: { readonly keyOnly?: bo
     "",
   );
   return out.join("\n");
+}
+
+// ── the comparison's report ─────────────────────────────────────────────────────────────────────────────────────
+
+/** One table's correctness certificate (upstream's `certify_native.py --screens` on a project table, review F3). */
+export interface CertificateRow {
+  readonly label: string;
+  readonly table: string;
+  readonly rows: number;
+  readonly cols: number;
+  /** The certified bound: one answer fails with probability at most 2^-bits. */
+  readonly bits: number | null;
+  readonly meets128: boolean;
+  /** Upstream's counterfactual screen with every cell 0xFFFF in the query term, on the same masks. */
+  readonly worstCaseQueryBits: number | null;
+  readonly databaseSha256: string;
+  readonly file: string;
+}
+
+/** The certificates in `dir`: each `cert-<label>-<table>.json` with its report `noise-<label>-<table>.json`. */
+export function certificateRows(dir: string): CertificateRow[] {
+  const out: CertificateRow[] = [];
+  for (const name of readdirSync(dir).sort()) {
+    const m = /^cert-(.+)-(read|path|nullifier)\.json$/.exec(name);
+    if (m === null) continue;
+    const cert = JSON.parse(readFileSync(join(dir, name), "utf8")) as Record<string, any>;
+    const noise = JSON.parse(readFileSync(join(dir, `noise-${m[1]}-${m[2]}.json`), "utf8")) as Record<string, any>;
+    const actual = cert.actual_profile ?? {};
+    out.push({
+      label: m[1]!,
+      table: m[2]!,
+      rows: Number(noise.rows),
+      cols: Number(noise.cols),
+      bits: finite(actual.certified_failure_bits) ? actual.certified_failure_bits : null,
+      meets128: actual.meets_128 === true,
+      worstCaseQueryBits: finite(cert.screens?.worst_case_query?.certified_failure_bits) ? cert.screens.worst_case_query.certified_failure_bits : null,
+      databaseSha256: String(cert.database_sha256 ?? noise.database_sha256),
+      file: name,
+    });
+  }
+  return out;
+}
+
+const SCHEME_TITLE: Readonly<Record<SchemeName, string>> = { simplepir: "SimplePIR", "ipir-sp": "IPIR+SP" };
+
+/** The table shapes per size and scheme (Markdown). */
+export function renderShapes(c: Comparison): string {
+  const out = [
+    "| Entries | Scheme | Read table: cells R × C (groups × records per group) | Path table | Nullifier table | From |",
+    "|---|---|---|---|---|---|",
+  ];
+  for (const s of c.sizes) {
+    for (const scheme of SCHEME_NAMES) {
+      const t = s.tables[scheme];
+      if (t === null) continue;
+      const cell = (name: BenchTableName): string => {
+        const x = t.tables[name];
+        return x === null ? "—" : `${x.rows.toLocaleString("en-US")} × ${x.cols.toLocaleString("en-US")} (${x.groups.toLocaleString("en-US")} × ${x.perGroup.toLocaleString("en-US")})`;
+      };
+      out.push(`| ${s.entries.toLocaleString("en-US")} | ${SCHEME_TITLE[scheme]} | ${TABLE_NAMES.map(cell).join(" | ")} | \`${t.file}\` |`);
+    }
+  }
+  return out.join("\n");
+}
+
+/** The certificates (Markdown). */
+export function renderCertificates(rows: readonly CertificateRow[]): string {
+  const out = ["| Snapshot | Table | Cells R × C | One answer fails with probability at most | Meets 2^-128 | Worst-case-query screen | File |", "|---|---|---|---|---|---|---|"];
+  for (const r of rows) {
+    out.push(
+      `| ${r.label} | ${r.table} | ${r.rows.toLocaleString("en-US")} × ${r.cols.toLocaleString("en-US")} | ${r.bits === null ? "no bound" : `2^-${r.bits}`} | ${r.meets128 ? "yes" : "no"} | ${r.worstCaseQueryBits === null ? "no bound" : `2^-${r.worstCaseQueryBits}`} | \`cert/${r.file}\` |`,
+    );
+  }
+  return out.join("\n");
+}
+
+/**
+ * The comparison's `REPORT.md`: a title and lead, section 1 (the key rows, one table per size, then SC-002 and
+ * SC-003), then `notes` with its markers replaced (see the module comment).
+ */
+export function renderSchemeReport(c: Comparison, o: { readonly title: string; readonly notes: string; readonly certificates: readonly CertificateRow[] }): string {
+  const runs = c.sizes.reduce((n, s) => n + SCHEME_NAMES.reduce((m, scheme) => m + s.files[scheme].length, 0), 0);
+  const out = [
+    `# ${o.title}`,
+    "",
+    `${runs} benchmark runs, ${c.sizes.length} snapshot sizes (${c.sizes.map((s) => s.entries.toLocaleString("en-US")).join(", ")} entries), both schemes at each, ${c.queriesPerCall ?? "?"} queries per call. ` +
+      "Section 1 is generated by `examples/private-shielded-sync/bench/bench.ts compare` from the runs' `results.json` files under `runs/`; the sections after it were written for this report and given to the command with `--notes`.",
+    "",
+    "## 1. Side by side, one table per size",
+    "",
+    renderComparison(c, { keyOnly: true }),
+    o.notes.replace("<!-- shapes -->", renderShapes(c)).replace("<!-- certificates -->", renderCertificates(o.certificates)),
+  ];
+  return `${out.join("\n").trimEnd()}\n`;
 }
