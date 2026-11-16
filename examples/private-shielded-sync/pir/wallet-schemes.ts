@@ -6,12 +6,15 @@
  * browser worker) and list it in `SCHEMES`.
  */
 
+import { IPIR_SP_WALLET } from "./ipir-sp-wallet.ts";
 import { isSchemeName, type SchemeName, SchemeUnavailable, type WalletScheme, type WalletSchemeEntry, type WalletSchemeOptions } from "./scheme.ts";
 import { SIMPLEPIR_WALLET } from "./simplepir-wallet.ts";
 import type { Manifest } from "../shared/manifest.ts";
 
 const SCHEMES: { readonly [S in SchemeName]?: WalletSchemeEntry } = {
   simplepir: SIMPLEPIR_WALLET,
+  // Needs the caller to give its WebAssembly (`WalletSchemeOptions.ipirWasm`).
+  "ipir-sp": IPIR_SP_WALLET,
 };
 
 /** Opens the snapshot's scheme for the wallet; throws {@link SchemeUnavailable} when this build does not have it. */

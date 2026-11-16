@@ -7,11 +7,14 @@
  * a file it needs is missing, so the module refuses that scheme's builds and keeps serving the others.
  */
 
+import { IPIR_SP_SERVER } from "./ipir-sp-server.ts";
 import { type SchemeName, type ServerScheme, type ServerSchemeEntry, type ServerSchemeOptions, SchemeUnavailable, isSchemeName } from "./scheme.ts";
 import { SIMPLEPIR_SERVER } from "./simplepir-server.ts";
 
 const SCHEMES: { readonly [S in SchemeName]?: ServerSchemeEntry } = {
   simplepir: SIMPLEPIR_SERVER,
+  // Opened only where its native add-on is built (`../ipir/build.sh native`); refused by name elsewhere.
+  "ipir-sp": IPIR_SP_SERVER,
 };
 
 /** The registered scheme of this name; throws {@link SchemeUnavailable} for any other name. */
