@@ -468,12 +468,37 @@ in the WebAssembly on one thread. Both decode all 32 answers here. Measured, fro
 - Decoding 32 answers is 12 to 20 times cheaper under IPIR+SP. Its noise sample of every table built was 2^34.1 to
   2^34.4 against the limit 2^37 (3 rows checked per table).
 
-## 10. What was not measured
+## 10. Addendum: the wallet's requests on worker threads
+
+Sections 1 to 9 were measured with the wallet's IPIR+SP WebAssembly on one thread. The wallet now deals a call's 32
+requests to worker threads, each with its own instance (`ipir/pool.ts`; the command line's `--threads`, the page's Web
+Workers). Measured afterwards with `bench/micro.ts --schemes ipir-sp --records 69329,1000000 --sizes 98,40
+--wallet-threads 2,4,8` (`micro-wallet-workers.json`, load average 6–8), best of 3 (2 at 1,000,000), every decoded
+record checked:
+
+| Table (records × bytes; rows × columns) | One thread | 2 workers | 4 workers | 8 workers |
+|---|---|---|---|---|
+| Read, real size (69,329 × 98; 2,048 × 2,048) | 245 ms | 123 ms | 67 ms | 32 ms |
+| Read, 1,000,000 (1,000,000 × 98; 4,096 × 12,288) | 357 ms | 178 ms | 90 ms | 45 ms |
+| Nullifier, real size (69,329 × 40; 2,048 × 2,048) | 243 ms | 122 ms | 61 ms | 31 ms |
+| Nullifier, 1,000,000 (1,000,000 × 40; 2,048 × 10,240) | 291 ms | 147 ms | 73 ms | 37 ms |
+
+- Starting the workers takes 31–41 ms, once per wallet run; opening a table on all of them 3–6 ms; the first call
+  costs at most 3 ms more than the best one, except one run at 4 workers (108 ms against 90 ms).
+- Decoding 32 answers takes 0.2–2.1 ms on the workers (0.7–3.7 ms on one thread).
+- With 8 threads on both sides, IPIR+SP's wallet builds a read call in 32 ms against SimplePIR's 29 ms at the real
+  size, and in 45 ms against 64 ms at 1,000,000. SimplePIR's figures are section 1's medians inside whole syncs;
+  IPIR+SP's are this micro-benchmark's best runs, and the whole-sync runs of section 1 were not repeated.
+- In the page at 1,000,000 entries (8 Web Workers, Chromium): an IPIR+SP read call builds in 49–58 ms (375 ms on one
+  thread) and a nullifier call in 48 ms; SimplePIR's read call in 180–207 ms (279–346 ms) and decodes in 13–15 ms
+  (80–110 ms).
+
+## 11. What was not measured
 
 - **A real network.** Every request went over 127.0.0.1; round trips include no network latency or bandwidth limit.
   On a slow link SimplePIR's per-snapshot download and IPIR+SP's per-call upload weigh more than here.
 - **Equal thread budgets.** IPIR+SP's server used up to 16 threads per request, SimplePIR's 6; IPIR+SP's wallet one
-  thread, SimplePIR's 8. No run fixed the threads to the same count, and CPU time was not measured, only wall time.
+  thread, SimplePIR's 8 (section 10 gives the wallet's request time at 8 threads). No run fixed the threads to the same count, and CPU time was not measured, only wall time.
 - **An idle machine.** All timings were taken while other work ran on the machine (load average 7–27).
 - **The transfer.** Only the path read a spend makes; no transaction was built or proved here (task 4.3 covers
   `send`).

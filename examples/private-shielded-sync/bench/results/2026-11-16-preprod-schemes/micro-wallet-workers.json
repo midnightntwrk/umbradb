@@ -1,0 +1,356 @@
+{
+  "kind": "private-shielded-sync micro-benchmarks",
+  "started": {
+    "time": "2026-11-16T12:38:23.803Z",
+    "loadavg": [
+      6.0615234375,
+      7.7158203125,
+      7.40771484375
+    ]
+  },
+  "finished": {
+    "time": "2026-11-16T12:38:54.729Z",
+    "loadavg": [
+      6.83447265625,
+      7.71630859375,
+      7.41650390625
+    ]
+  },
+  "machine": {
+    "cpu": "Apple M4 Max",
+    "cores": 16,
+    "memoryBytes": 51539607552,
+    "platform": "darwin 24.6.0",
+    "node": "v24.9.0"
+  },
+  "kernel": {
+    "digest": "b34f9b0003e1b1f96b8c46cdc6acaf5e98ff9a07ba1106bad2babdf79fbcfe36",
+    "bytes": 751590,
+    "sha256Checked": true
+  },
+  "serverThreads": 15,
+  "schemes": [
+    "ipir-sp"
+  ],
+  "workerWarmUpMs": 145.06,
+  "scan": [
+    {
+      "threads": 1,
+      "entries": 16384,
+      "ms": 8537.14,
+      "microsPerEntryPerThread": 521.1,
+      "effectiveMicrosPerEntry": 521.07,
+      "projectedSecondsPerMillion": 521.066
+    }
+  ],
+  "pir": [
+    {
+      "scheme": "ipir-sp",
+      "records": 69329,
+      "recordBytes": 98,
+      "table": {
+        "rows": 2048,
+        "cols": 2048,
+        "perRow": 41,
+        "cellsPerRecord": 49
+      },
+      "bytes": {
+        "tableFile": 8388608,
+        "masks": 14884,
+        "cellsHeld": 8388608,
+        "packingHeld": 33587200,
+        "request": 40228,
+        "response": 5700,
+        "queryBody32": 1287336,
+        "answerBody32": 182440,
+        "rawRecords": 6794242
+      },
+      "noise": {
+        "checkedRows": 3,
+        "maxPhaseErrorLog2": 34.105908508571154,
+        "phaseLimitLog2": 37
+      },
+      "timings": {
+        "buildCellsMs": 28.7,
+        "digestMs": 2.8,
+        "buildMs": 397.05,
+        "addonSetupMs": 1.3699999999999999,
+        "addonReadMs": 0.574916,
+        "addonHintsMs": 23.691750000000003,
+        "addonPackingMs": 334.141833,
+        "addonPrepareMs": 360.922833,
+        "addonCheckMs": 23.20725,
+        "addonTotalMs": 386.56933399999997,
+        "walletOpenMs": 6.68,
+        "serverAnswer1Ms": 0.83,
+        "clientRequest1OneThreadMs": 7.83,
+        "clientDecode1OneThreadMs": 0.09,
+        "serverAnswer32Ms": 24.29,
+        "clientRequest32OneThreadMs": 244.94,
+        "clientDecode32OneThreadMs": 1.02
+      },
+      "walletWorkers": [
+        {
+          "threads": 2,
+          "startMs": 36.34,
+          "openMs": 3.27,
+          "firstCallMs": 124.68,
+          "request32Ms": 123.28,
+          "decode32Ms": 0.59
+        },
+        {
+          "threads": 4,
+          "startMs": 40.54,
+          "openMs": 4.07,
+          "firstCallMs": 70.46,
+          "request32Ms": 67.3,
+          "decode32Ms": 0.35
+        },
+        {
+          "threads": 8,
+          "startMs": 40.34,
+          "openMs": 4.2,
+          "firstCallMs": 34.38,
+          "request32Ms": 31.65,
+          "decode32Ms": 0.37
+        }
+      ],
+      "memoryAfter": {
+        "rss": 875511808,
+        "arrayBuffers": 44597757
+      },
+      "check": "every decoded record equals the generated one"
+    },
+    {
+      "scheme": "ipir-sp",
+      "records": 1000000,
+      "recordBytes": 98,
+      "table": {
+        "rows": 4096,
+        "cols": 12288,
+        "perRow": 250,
+        "cellsPerRecord": 49
+      },
+      "bytes": {
+        "tableFile": 100663296,
+        "masks": 89124,
+        "cellsHeld": 100663296,
+        "packingHeld": 201523200,
+        "request": 52772,
+        "response": 33860,
+        "queryBody32": 1688744,
+        "answerBody32": 1083560,
+        "rawRecords": 98000000
+      },
+      "noise": {
+        "checkedRows": 3,
+        "maxPhaseErrorLog2": 34.20212382383046,
+        "phaseLimitLog2": 37
+      },
+      "timings": {
+        "buildCellsMs": 697.95,
+        "digestMs": 33.73,
+        "buildMs": 2208.63,
+        "addonSetupMs": 0.557708,
+        "addonReadMs": 6.332292,
+        "addonHintsMs": 205.88737500000002,
+        "addonPackingMs": 1901.997998,
+        "addonPrepareMs": 2131.5666659999997,
+        "addonCheckMs": 68.750083,
+        "addonTotalMs": 2208.503334,
+        "walletOpenMs": 4.51,
+        "serverAnswer1Ms": 2.11,
+        "clientRequest1OneThreadMs": 11.2,
+        "clientDecode1OneThreadMs": 0.37,
+        "serverAnswer32Ms": 70.72,
+        "clientRequest32OneThreadMs": 356.57,
+        "clientDecode32OneThreadMs": 3.74
+      },
+      "walletWorkers": [
+        {
+          "threads": 2,
+          "startMs": 34.6,
+          "openMs": 5.18,
+          "firstCallMs": 178.78,
+          "request32Ms": 178.07,
+          "decode32Ms": 2.09
+        },
+        {
+          "threads": 4,
+          "startMs": 34.21,
+          "openMs": 5.37,
+          "firstCallMs": 108.29,
+          "request32Ms": 89.7,
+          "decode32Ms": 1.2
+        },
+        {
+          "threads": 8,
+          "startMs": 37.07,
+          "openMs": 5.51,
+          "firstCallMs": 47.15,
+          "request32Ms": 45.42,
+          "decode32Ms": 1.12
+        }
+      ],
+      "memoryAfter": {
+        "rss": 1364803584,
+        "arrayBuffers": 149110639
+      },
+      "check": "every decoded record equals the generated one"
+    },
+    {
+      "scheme": "ipir-sp",
+      "records": 69329,
+      "recordBytes": 40,
+      "table": {
+        "rows": 2048,
+        "cols": 2048,
+        "perRow": 102,
+        "cellsPerRecord": 20
+      },
+      "bytes": {
+        "tableFile": 8388608,
+        "masks": 14884,
+        "cellsHeld": 8388608,
+        "packingHeld": 33587200,
+        "request": 40228,
+        "response": 5700,
+        "queryBody32": 1287336,
+        "answerBody32": 182440,
+        "rawRecords": 2773160
+      },
+      "noise": {
+        "checkedRows": 3,
+        "maxPhaseErrorLog2": 34.14974711950468,
+        "phaseLimitLog2": 37
+      },
+      "timings": {
+        "buildCellsMs": 7.95,
+        "digestMs": 2.92,
+        "buildMs": 362.79,
+        "addonSetupMs": 0.533125,
+        "addonReadMs": 0.567041,
+        "addonHintsMs": 21.683667,
+        "addonPackingMs": 313.537958,
+        "addonPrepareMs": 338.231333,
+        "addonCheckMs": 23.217958,
+        "addonTotalMs": 362.691416,
+        "walletOpenMs": 2.35,
+        "serverAnswer1Ms": 0.56,
+        "clientRequest1OneThreadMs": 7.48,
+        "clientDecode1OneThreadMs": 0.04,
+        "serverAnswer32Ms": 22.71,
+        "clientRequest32OneThreadMs": 243.02,
+        "clientDecode32OneThreadMs": 0.66
+      },
+      "walletWorkers": [
+        {
+          "threads": 2,
+          "startMs": 34.88,
+          "openMs": 2.92,
+          "firstCallMs": 123.05,
+          "request32Ms": 121.95,
+          "decode32Ms": 0.56
+        },
+        {
+          "threads": 4,
+          "startMs": 33.52,
+          "openMs": 2.92,
+          "firstCallMs": 61.91,
+          "request32Ms": 61.46,
+          "decode32Ms": 0.34
+        },
+        {
+          "threads": 8,
+          "startMs": 36.97,
+          "openMs": 3.03,
+          "firstCallMs": 31.42,
+          "request32Ms": 31.09,
+          "decode32Ms": 0.22
+        }
+      ],
+      "memoryAfter": {
+        "rss": 1426866176,
+        "arrayBuffers": 155269463
+      },
+      "check": "every decoded record equals the generated one"
+    },
+    {
+      "scheme": "ipir-sp",
+      "records": 1000000,
+      "recordBytes": 40,
+      "table": {
+        "rows": 2048,
+        "cols": 10240,
+        "perRow": 512,
+        "cellsPerRecord": 20
+      },
+      "bytes": {
+        "tableFile": 41943040,
+        "masks": 74276,
+        "cellsHeld": 41943040,
+        "packingHeld": 167936000,
+        "request": 40228,
+        "response": 28228,
+        "queryBody32": 1287336,
+        "answerBody32": 903336,
+        "rawRecords": 40000000
+      },
+      "noise": {
+        "checkedRows": 3,
+        "maxPhaseErrorLog2": 34.41362792902417,
+        "phaseLimitLog2": 37
+      },
+      "timings": {
+        "buildCellsMs": 109.56,
+        "digestMs": 14.18,
+        "buildMs": 1763.28,
+        "addonSetupMs": 0.534125,
+        "addonReadMs": 2.746709,
+        "addonHintsMs": 111.251832,
+        "addonPackingMs": 1581.400418,
+        "addonPrepareMs": 1704.548667,
+        "addonCheckMs": 54.556167,
+        "addonTotalMs": 1763.163208,
+        "walletOpenMs": 4.09,
+        "serverAnswer1Ms": 1.58,
+        "clientRequest1OneThreadMs": 8.91,
+        "clientDecode1OneThreadMs": 0.18,
+        "serverAnswer32Ms": 52.25,
+        "clientRequest32OneThreadMs": 291.19,
+        "clientDecode32OneThreadMs": 3.13
+      },
+      "walletWorkers": [
+        {
+          "threads": 2,
+          "startMs": 30.74,
+          "openMs": 4.71,
+          "firstCallMs": 146.42,
+          "request32Ms": 146.62,
+          "decode32Ms": 1.77
+        },
+        {
+          "threads": 4,
+          "startMs": 34.76,
+          "openMs": 4.8,
+          "firstCallMs": 73.69,
+          "request32Ms": 72.91,
+          "decode32Ms": 1.08
+        },
+        {
+          "threads": 8,
+          "startMs": 35.64,
+          "openMs": 5.06,
+          "firstCallMs": 37.4,
+          "request32Ms": 37.25,
+          "decode32Ms": 0.96
+        }
+      ],
+      "memoryAfter": {
+        "rss": 1539768320,
+        "arrayBuffers": 89639037
+      },
+      "check": "every decoded record equals the generated one"
+    }
+  ]
+}

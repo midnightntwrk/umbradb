@@ -182,10 +182,17 @@ A page that runs the client's own code in the browser, one step per button, and 
 
 The page runs on either scheme, following the manifest. On an IPIR+SP snapshot the worker also fetches
 `pss-ipir.wasm` (beside the page; `build.ts` copies it and builds its committed SHA-256 into the worker) and compiles
-it only if the digest matches; a SimplePIR snapshot never fetches it. The wallet's IPIR+SP math then runs in that
-WebAssembly on the worker's one thread, its secrets drawn from the browser's `crypto.getRandomValues`. Every panel that
-shows sizes or shapes speaks for the scheme in use: SimplePIR's setup data, grid and query vectors as before; IPIR+SP's
+it only if the digest matches; a SimplePIR snapshot never fetches it. Every panel that shows sizes or shapes speaks for the scheme in use: SimplePIR's setup data, grid and query vectors as before; IPIR+SP's
 masks, rows × columns of 16-bit cells with records per row, and each request's and answer's byte counts.
+
+A call's work is spread over Web Workers: one fewer than the browser's processors, at most 8.
+- IPIR+SP: the call's 32 requests are dealt to `ipir-worker.js` workers (`ipir/pool.ts`), each with its own instance of
+  the WebAssembly and its secrets drawn from that worker's `crypto.getRandomValues`.
+- SimplePIR: the two multiplications of a call (`A × s` to build it, `H × s` to decode its answer) are split by rows
+  over `multiply-worker.js` workers on shared memory (`web/multiply-web.ts`). Expanding the public matrix A and
+  sampling the errors stay on the client's thread.
+- The page starts these workers and hands each to the client over a `MessagePort` (`web/call-workers.ts`): a worker
+  that starts its own workers fails to load them in some embedded browsers.
 
 `explain.html`, linked from the page, explains each step on a small example chain of 9 outputs and 5 spends, in three lanes:
 the wallet, the wire and the server, with time going down. It covers:
@@ -231,9 +238,17 @@ Two options turn on debug routes that are no part of the private protocol:
       curl -X POST -H 'Content-Type: application/json' -d '{"height": 3439524, "scheme": "ipir-sp"}' http://127.0.0.1:10490/debug/reload-snapshot
 
 The page was checked on both schemes in Chromium against a Preprod snapshot at 3,439,524 (69,329 outputs), and on
-IPIR+SP padded to 1,000,000 entries. Each call moved the bytes the command line's does. An IPIR+SP read call of 32
-requests took about 250 ms to build and 0.5 ms to decode in the page (375 ms and 1.5 ms at 1,000,000); SimplePIR's
-took about 100 ms and 24 ms, also on the worker's one thread.
+both padded to 1,000,000 entries. Each call moved the bytes the command line's does. Read calls of 32 requests,
+measured in the page at 1,000,000 entries (height 3,444,622):
+
+| Scheme | Build, one thread | Build, 8 workers | Decode, one thread | Decode, 8 workers |
+|---|---|---|---|---|
+| IPIR+SP | 375 ms | 49–58 ms | 1.5 ms | 1–3 ms |
+| SimplePIR | 279–346 ms | 180–207 ms | 80–110 ms | 13–15 ms |
+
+SimplePIR's remaining build time is the expansion of A (AES-128-CTR in TypeScript) and the error sampling, on one
+thread. At the real size, on one thread, an IPIR+SP read call took about 250 ms to build and 0.5 ms to decode, and
+SimplePIR's about 100 ms and 24 ms; the workers were not timed at that size.
 
 The worker runs the client's files bundled by esbuild:
 - `web/shims/` replaces the Node.js modules they import: SHA-256 from `@noble/hashes`, AES-128-CTR in plain
@@ -256,8 +271,8 @@ examples/private-shielded-sync/ipir/build.sh --check     # rebuilds pss-ipir.was
 (cd examples/private-shielded-sync/ipir && cargo test --release)   # the IPIR+SP core crate's round trips
 ```
 
-The `.ts` files run directly under Node.js 24 (its own type stripping): the multiply and scan worker threads load
-`pir/multiply-worker.ts` and `kernel/scan-worker.ts` as they are. So the code here uses only TypeScript that strips to
+The `.ts` files run directly under Node.js 24 (its own type stripping): the multiply, scan and IPIR+SP worker threads
+load `pir/multiply-worker.ts`, `kernel/scan-worker.ts` and `ipir/pool-worker-node.ts` as they are. So the code here uses only TypeScript that strips to
 JavaScript unchanged (`erasableSyntaxOnly`, `verbatimModuleSyntax`).
 
 ## The libraries in code
@@ -413,6 +428,12 @@ command line reads `ipir/pss-ipir.wasm` and compiles it only if its SHA-256 equa
 (`compileIpirWasm`); a missing file or another digest stops the wallet with a message naming the file, and a SimplePIR
 snapshot never reads it. Code that calls `sync()` itself passes a function giving the compiled module as
 `SyncOptions.ipirWasm`.
+
+A call's 32 IPIR+SP requests are made on `--threads` worker threads (`nodeIpirPool`, `ipir/pool-node.ts`; given to
+`sync()` as `SyncOptions.ipirWorkers`), started only for an IPIR+SP snapshot: request `q` goes to worker
+`q mod threads`, each worker has its own instance of the WebAssembly, and the worker that made a request decodes its
+answer. With 8 threads a call builds in about 32 ms instead of 245 ms (45 ms instead of 357 ms at 1,000,000 records).
+With `--threads 1`, or without `ipirWorkers`, the requests are made one after the other on the calling thread.
 
 **`send`** (spec FR-120–128; the transfer spike's sequence):
 
@@ -576,13 +597,17 @@ IPIR+SP snapshot is ignored at start, and SimplePIR keeps working. A wallet whos
 digest stops with a message naming `ipir/pss-ipir.wasm`. The WebAssembly has one import, `env.fill_random`, answered
 from `crypto.getRandomValues` in Node and in browsers; it zeroes each buffer before the host fills it and refuses a draw
 of 16 bytes or more that comes back all zero or equal to the previous one, so a broken random source fails the request
-instead of repeating a secret.
+instead of repeating a secret. That comparison is per instance; when a call's requests are made in several workers,
+the pool also refuses a call in which two requests carry the same key (`checkDistinctKeys`, `ipir/engine.ts`).
 
 | File | Does |
 |---|---|
 | `ipir/sizes.ts` | The profile's constants and every byte length as a function of the shape |
 | `ipir/native.ts` | The add-on's loader (refuses another profile), table build from cells or a cell file, answers, release, hand-over between threads |
 | `ipir/wallet.ts`, `ipir/wallet-node.ts` | The WebAssembly's wrapper (no Node.js import; the page loads it) and its digest-checked compile in Node |
+| `ipir/engine.ts` | One instance as tables and calls; a call's requests on the calling thread; the duplicate-key check |
+| `ipir/pool.ts`, `ipir/pool-worker.ts` | A call's requests dealt to worker threads, each with its own instance; what one worker does with a message (no Node.js import) |
+| `ipir/pool-node.ts`, `ipir/pool-worker-node.ts` | The pool over Node's `worker_threads` |
 | `ipir/core/` | The Rust crate `pss-ipir-core`: profile, setup from (seed, snapshot digest), server table with its build check, client; `examples/noise_report.rs` for the certificate |
 | `ipir/node/`, `ipir/wasm/` | The add-on's and the WebAssembly's exports |
 | `ipir/vendor/` | Upstream's crates, unchanged |
@@ -818,4 +843,4 @@ and 40 bytes (`--records`, `--sizes`), building the grid and its digest, the set
 vectors, and the client's query build and decode (one thread and worker threads). With `ipir-sp` in `--schemes` (the
 default runs both; it needs the add-on) it measures the same for IPIR+SP: the cells in the rule's shape, the add-on's
 table build and masks, the answer to 1 and 32 requests, and the wallet's WebAssembly opening the table, making 1 and 32
-requests and decoding them. It checks every decoded record and writes JSON to `bench/results/micro-<date>.json`.
+requests and decoding them, on one thread and on the worker pool (`--wallet-threads`, default 2, 4 and 8). It checks every decoded record and writes JSON to `bench/results/micro-<date>.json`.
