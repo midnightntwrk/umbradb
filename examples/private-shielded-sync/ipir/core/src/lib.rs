@@ -51,6 +51,10 @@ pub mod profile {
     pub const RESPONSE_BITS: usize = 22;
     /// Most cells one table may hold (16-bit storage).
     pub const MAX_CELLS: usize = 1 << 30;
+    /// Most rows one table may have. With the query rounded to 49 bits (nearest), upstream's correctness certificate
+    /// stays below 2^-128 only up to here: 2^-85 at 65,536 rows of 0xFFFF cells, 2^-83 at 131,072 rows of random
+    /// cells, at most 2^-161 at 32,768 rows with every cell 0xFFFF (`docs/research/00058-ipir-sp-review.md`, F4).
+    pub const MAX_ROWS: usize = 1 << 15;
     /// A cell decodes correctly while its phase error is below q / (2p) = 2^37.
     pub const PHASE_LIMIT_LOG2: u32 = (Q_BITS - P_BITS - 1) as u32;
     /// Bytes of the key in each request: `DIGITS × RING` coefficients of `Q_BITS` bits.
@@ -98,7 +102,7 @@ impl From<ReinspiringError> for Error {
 }
 
 /// Checks a table shape: rows and columns non-zero multiples of [`profile::RING`], at most
-/// [`profile::MAX_CELLS`] cells.
+/// [`profile::MAX_CELLS`] cells and at most [`profile::MAX_ROWS`] rows.
 pub fn check_shape(rows: usize, cols: usize) -> Result<(), Error> {
     if rows == 0 || cols == 0 || !rows.is_multiple_of(RING) || !cols.is_multiple_of(RING) {
         return Err(Error::new(format!(
@@ -108,6 +112,11 @@ pub fn check_shape(rows: usize, cols: usize) -> Result<(), Error> {
     if rows.checked_mul(cols).is_none_or(|cells| cells > MAX_CELLS) {
         return Err(Error::new(format!(
             "an IPIR+SP table holds at most 2^30 cells, {rows} × {cols} is more"
+        )));
+    }
+    if rows > MAX_ROWS {
+        return Err(Error::new(format!(
+            "an IPIR+SP table has at most {MAX_ROWS} rows (the decoding bound of 49-bit queries), got {rows}"
         )));
     }
     Ok(())

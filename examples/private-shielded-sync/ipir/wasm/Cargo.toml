@@ -20,3 +20,5 @@ pss-ipir-core = { path = "../core", default-features = false }
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 getrandom02 = { package = "getrandom", version = "0.2", features = ["custom"] }
 getrandom03 = { package = "getrandom", version = "0.3" }
+# The fingerprint of the previous draw, so that a host giving the same bytes twice is refused (src/lib.rs, review F8).
+sha2 = "0.10"

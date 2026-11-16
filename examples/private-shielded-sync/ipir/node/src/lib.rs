@@ -56,6 +56,7 @@ pub struct Profile {
     pub response_bits: u32,
     pub key_bytes: u32,
     pub max_cells: f64,
+    pub max_rows: u32,
     pub phase_limit_log2: u32,
 }
 
@@ -72,6 +73,7 @@ pub fn profile() -> Profile {
         response_bits: profile::RESPONSE_BITS as u32,
         key_bytes: profile::KEY_BYTES as u32,
         max_cells: profile::MAX_CELLS as f64,
+        max_rows: profile::MAX_ROWS as u32,
         phase_limit_log2: profile::PHASE_LIMIT_LOG2,
     }
 }
@@ -319,6 +321,30 @@ pub fn respond(handle: u32, requests: Uint8Array, count: u32) -> Result<AsyncTas
 #[napi]
 pub fn release(handle: u32) -> bool {
     tables().remove(&handle).is_some()
+}
+
+/// What a held table is, so that a thread given only its handle (the server, from the build's worker) can check it.
+#[napi(object)]
+pub struct TableInfo {
+    pub rows: u32,
+    pub cols: u32,
+    /// The setup identifier, which every request, answer and mask file of the table carries.
+    pub setup_id: Buffer,
+    /// Bytes of the cells and of the compiled packing matrices in memory.
+    pub table_bytes: f64,
+    pub packing_bytes: f64,
+}
+
+/// The table under `handle`, or null when there is none (released, or never built).
+#[napi]
+pub fn table_info(handle: u32) -> Option<TableInfo> {
+    tables().get(&handle).map(|table| TableInfo {
+        rows: table.rows() as u32,
+        cols: table.cols() as u32,
+        setup_id: table.id().to_vec().into(),
+        table_bytes: table.table_bytes() as f64,
+        packing_bytes: table.packing_bytes() as f64,
+    })
 }
 
 /// Tables held in the registry.

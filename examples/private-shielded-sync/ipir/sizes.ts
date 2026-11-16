@@ -6,7 +6,8 @@
  * 16-bit cells, key digits base 2^19 × 2, Gaussian secrets, two published masks at 29 bits, query at 49 bits per
  * row (nearest), answer at 22 bits per column.
  *
- * A table is `rows × cols` 16-bit cells, both non-zero multiples of 2,048, at most 2^30 cells, held column-major:
+ * A table is `rows × cols` 16-bit cells, both non-zero multiples of 2,048, at most 2^30 cells and 32,768 rows, held
+ * column-major:
  * cell (row, col) is at index `col × rows + row`. One request reads one whole row of `cols` cells.
  *
  * | Bytes | Formula | 2,048 × 2,048 |
@@ -35,6 +36,12 @@ export const IPIR_QUERY_BITS = 49;
 export const IPIR_RESPONSE_BITS = 22;
 /** Most cells one table may hold. */
 export const IPIR_MAX_CELLS = 2 ** 30;
+/**
+ * Most rows one table may have: with the query rounded to 49 bits, upstream's correctness certificate stays below
+ * 2^-128 only up to 32,768 rows (`docs/research/00058-ipir-sp-review.md`, finding F4). The longest request is then
+ * `ipirRequestBytes(32,768)` = 228,388 bytes.
+ */
+export const IPIR_MAX_ROWS = 2 ** 15;
 /** A cell decodes correctly while its phase error is below 2 to this power (q / 2p). */
 export const IPIR_PHASE_LIMIT_LOG2 = IPIR_Q_BITS - IPIR_P_BITS - 1;
 /** Every request, answer and mask file starts with a 4-byte magic and the 32-byte setup identifier. */
@@ -69,13 +76,17 @@ export function ipirMasksBytes(cols: number): number {
   return IPIR_HEADER_BYTES + Math.ceil((2 * IPIR_MASK_BITS * cols) / 8);
 }
 
-/** Throws unless rows and columns are non-zero multiples of 2,048 and the table holds at most 2^30 cells. */
+/**
+ * Throws unless rows and columns are non-zero multiples of 2,048, the table holds at most 2^30 cells and has at most
+ * 32,768 rows.
+ */
 export function checkIpirShape(rows: number, cols: number): void {
   const multiple = (n: number): boolean => Number.isSafeInteger(n) && n > 0 && n % IPIR_RING === 0;
   if (!multiple(rows) || !multiple(cols)) {
     throw new Error(`an IPIR+SP table's rows and columns must be non-zero multiples of ${IPIR_RING}, got ${rows} × ${cols}`);
   }
   if (rows * cols > IPIR_MAX_CELLS) throw new Error(`an IPIR+SP table holds at most 2^30 cells, ${rows} × ${cols} is more`);
+  if (rows > IPIR_MAX_ROWS) throw new Error(`an IPIR+SP table has at most ${IPIR_MAX_ROWS} rows (the decoding bound of 49-bit queries), got ${rows}`);
 }
 
 /** The byte lengths of a table shape; throws on a shape {@link checkIpirShape} refuses. */

@@ -104,6 +104,10 @@ describe("sizes", () => {
     expect(ipirSizes(32_768, 12_288)).toMatchObject({ requestBytes: 228_388, responseBytes: 33_860, masksBytes: 89_124 });
     expect(() => ipirSizes(2048, 1000)).toThrow(/multiples of 2048/);
     expect(() => ipirSizes(65_536, 32_768)).toThrow(/2\^30 cells/);
+    // At most 32,768 rows (review F4), in TypeScript, in the add-on and in the WebAssembly's setup.
+    expect(() => ipirSizes(34_816, 2048)).toThrow(/at most 32768 rows/);
+    expect(() => addon.sizes(34_816, 2048)).toThrow(/at most 32768 rows/);
+    expect(addon.profile().maxRows).toBe(32_768);
     expect(() => addon.sizes(2048, 1000)).toThrow(/multiples of 2048/);
   });
 

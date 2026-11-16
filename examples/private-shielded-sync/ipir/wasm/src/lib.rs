@@ -5,6 +5,12 @@
 //! (FR-032). The upstream crates also draw from it when they build NTT tables (spiral-rs's primitive-root search), so
 //! it must work even for calls that make no request.
 //!
+//! The import cannot report failure, so each draw is checked here (`docs/research/00058-ipir-sp-review.md`, F8): the
+//! buffer is zeroed before the host is called, and a draw of 16 bytes or more (a request's seed is 32) that comes back
+//! all zero, or equal to the previous such draw, is refused. A host that returns without writing, or returns the same
+//! bytes each time, therefore cannot give two requests the same secret: the request fails instead ("OS entropy
+//! unavailable") and the instance stays usable. Only the previous draw's SHA-256 is kept, never its bytes.
+//!
 //! Exports (lengths in bytes; a 0 handle or a -1 status means failure, and `error_ptr`/`error_len` give the message):
 //!
 //! | export | does |
@@ -24,24 +30,58 @@ use std::sync::Mutex;
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 mod entropy {
+    use sha2::{Digest, Sha256};
+    use std::sync::Mutex;
+
     #[link(wasm_import_module = "env")]
     unsafe extern "C" {
         /// Fills `len` bytes at `dest` from the host's cryptographic source.
         fn fill_random(dest: *mut u8, len: usize);
     }
 
+    /// Draws shorter than this are not checked (an all-zero draw of 16 bytes has probability 2^-128).
+    const CHECKED: usize = 16;
+
+    /// SHA-256 of the previous checked draw.
+    static PREVIOUS: Mutex<[u8; 32]> = Mutex::new([0; 32]);
+
+    /// Fills `len` bytes at `dest` from the host; false (and the bytes zeroed) when the draw cannot be fresh.
+    ///
+    /// # Safety
+    /// `dest` addresses `len` writable bytes (possibly uninitialised).
+    unsafe fn draw(dest: *mut u8, len: usize) -> bool {
+        unsafe {
+            std::ptr::write_bytes(dest, 0, len);
+            fill_random(dest, len);
+        }
+        if len < CHECKED {
+            return true;
+        }
+        let bytes = unsafe { std::slice::from_raw_parts_mut(dest, len) };
+        let digest: [u8; 32] = Sha256::digest(&*bytes).into();
+        let mut previous = PREVIOUS.lock().unwrap_or_else(|e| e.into_inner());
+        let fresh = bytes.iter().any(|&b| b != 0) && digest != *previous;
+        *previous = digest;
+        if !fresh {
+            bytes.fill(0);
+        }
+        fresh
+    }
+
     // getrandom 0.2 (rand 0.8 and the crates on it, spiral-rs's primitive-root search included).
     fn host(dest: &mut [u8]) -> Result<(), getrandom02::Error> {
-        unsafe { fill_random(dest.as_mut_ptr(), dest.len()) };
-        Ok(())
+        if unsafe { draw(dest.as_mut_ptr(), dest.len()) } {
+            Ok(())
+        } else {
+            Err(std::num::NonZeroU32::new(getrandom02::Error::CUSTOM_START).unwrap().into())
+        }
     }
     getrandom02::register_custom_getrandom!(host);
 
     // getrandom 0.3 (rand 0.9's OsRng: the secret of each request), selected by `--cfg getrandom_backend="custom"`.
     #[unsafe(no_mangle)]
     unsafe extern "Rust" fn __getrandom_v03_custom(dest: *mut u8, len: usize) -> Result<(), getrandom03::Error> {
-        unsafe { fill_random(dest, len) };
-        Ok(())
+        if unsafe { draw(dest, len) } { Ok(()) } else { Err(getrandom03::Error::new_custom(0)) }
     }
 }
 

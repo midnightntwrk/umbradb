@@ -164,12 +164,17 @@ fn each_request_has_a_fresh_secret() {
 
 #[test]
 fn shapes_and_cell_counts_are_checked() {
-    for (rows, cols) in [(0, 2048), (2048, 0), (2048, 1000), (3000, 2048), (1 << 16, 1 << 15)] {
+    for (rows, cols) in [(0, 2048), (2048, 0), (2048, 1000), (3000, 2048), (1 << 16, 1 << 15), ((1 << 15) + 2048, 2048), (1 << 16, 2048), (1 << 19, 2048)] {
         assert!(check_shape(rows, cols).is_err(), "{rows} × {cols}");
         assert!(TableSetup::new(rows, cols, SEED, SNAPSHOT).is_err(), "{rows} × {cols}");
     }
     assert!(check_shape(1 << 15, 1 << 15).is_ok());
     assert!(check_shape(2048, 2048).is_ok());
+    // At most 32,768 rows (review F4); the columns may take the rest of the 2^30 cells.
+    assert_eq!(MAX_ROWS, 32_768);
+    assert!(check_shape(MAX_ROWS, 2048).is_ok());
+    assert!(check_shape(2048, 1 << 19).is_ok());
+    assert!(check_shape(1 << 16, 2048).unwrap_err().to_string().contains("at most 32768 rows"));
 
     let setup = TableSetup::new(2048, 2048, SEED, SNAPSHOT).unwrap();
     assert!(ServerTable::build(setup, vec![0; 2048 * 2048 - 1], &BuildOptions::default()).is_err());

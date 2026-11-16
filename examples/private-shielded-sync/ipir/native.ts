@@ -21,6 +21,9 @@
  *   order. Wrong lengths reject before any work.
  * - `IpirServerTable.release()`: frees the table (an answer in flight keeps it until it finishes). A table that is
  *   garbage-collected without `release()` is released then.
+ * - `IpirServerTable.detach() → handle` and `adoptIpirTable(handle, rows, cols) → { table, info }`: a table built in
+ *   one thread (the build's worker) answered from another (the server's). The add-on's registry belongs to the
+ *   process, so a handle is valid in every thread; `tableInfo(handle)` describes the table under it, or null.
  */
 
 import { existsSync } from "node:fs";
@@ -33,6 +36,7 @@ import {
   IPIR_KEY_BYTES,
   IPIR_MASK_BITS,
   IPIR_MAX_CELLS,
+  IPIR_MAX_ROWS,
   IPIR_P_BITS,
   IPIR_PHASE_LIMIT_LOG2,
   IPIR_Q_BITS,
@@ -119,6 +123,7 @@ export interface IpirAddon {
     responseBits: number;
     keyBytes: number;
     maxCells: number;
+    maxRows: number;
     phaseLimitLog2: number;
   };
   sizes(rows: number, cols: number): { requestBytes: number; responseBytes: number; masksBytes: number };
@@ -141,6 +146,18 @@ export interface IpirAddon {
   respond(handle: number, requests: Uint8Array, count: number): Promise<Uint8Array>;
   release(handle: number): boolean;
   tableCount(): number;
+  tableInfo(handle: number): IpirTableInfo | null;
+}
+
+/** A held table as the add-on describes it (`tableInfo`). */
+export interface IpirTableInfo {
+  readonly rows: number;
+  readonly cols: number;
+  /** The setup identifier (32 bytes). */
+  readonly setupId: Uint8Array;
+  /** Bytes of the cells and of the compiled packing matrices in memory. */
+  readonly tableBytes: number;
+  readonly packingBytes: number;
 }
 
 /** Whether the add-on file exists (it is built by `build.sh native`, not committed). */
@@ -172,6 +189,7 @@ export function loadIpirAddon(path: string = IPIR_ADDON_PATH): IpirAddon {
     responseBits: IPIR_RESPONSE_BITS,
     keyBytes: IPIR_KEY_BYTES,
     maxCells: IPIR_MAX_CELLS,
+    maxRows: IPIR_MAX_ROWS,
     phaseLimitLog2: IPIR_PHASE_LIMIT_LOG2,
   };
   for (const [key, value] of Object.entries(expected)) {
@@ -230,6 +248,32 @@ export class IpirServerTable {
     this.#addon.release(this.#handle);
     this.#handle = undefined;
   }
+
+  /**
+   * Gives up this object's hold on the table without freeing it, and returns its handle: the caller now owns the table
+   * and must hand the handle to {@link adoptIpirTable} (in any thread of the process: the add-on's registry is the
+   * process's) or release it. This object refuses every call after.
+   */
+  detach(): number {
+    if (this.#handle === undefined) throw new Error("this IPIR+SP table was released");
+    const handle = this.#handle;
+    unreleased.unregister(this);
+    this.#handle = undefined;
+    return handle;
+  }
+}
+
+/**
+ * Takes over a table by its handle (one {@link IpirServerTable.detach} gave, possibly in another thread). Throws, and
+ * leaves the table as it was, when the add-on holds no table under the handle or it is not `rows × cols`.
+ */
+export function adoptIpirTable(handle: number, rows: number, cols: number, addon: IpirAddon = loadIpirAddon()): { table: IpirServerTable; info: IpirTableInfo } {
+  const info = addon.tableInfo(handle);
+  if (info === null) throw new Error(`the IPIR+SP add-on holds no table under handle ${handle}`);
+  if (info.rows !== rows || info.cols !== cols) {
+    throw new Error(`the IPIR+SP table under handle ${handle} is ${info.rows} × ${info.cols}, not ${rows} × ${cols}`);
+  }
+  return { table: new IpirServerTable(addon, handle, rows, cols), info };
 }
 
 /** What to build a table from. */
