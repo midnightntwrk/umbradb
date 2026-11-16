@@ -7,11 +7,17 @@
  * server (`./serve.ts`) passes `/pss/v1/…` to the module's API; `/debug/…` reads the server's database, for the
  * comparisons the page shows, and is no part of the private protocol.
  *
- * PIR follows the manifest's scheme (spec 00058 FR-060). SimplePIR runs in TypeScript on this thread. IPIR+SP runs in
- * the wallet's WebAssembly (`pss-ipir.wasm`, beside the page): fetched only when a manifest names `ipir-sp`, compiled
- * only if its SHA-256 equals the committed one built into this file (`IPIR_DIGEST`, FR-031), and given to the scheme
- * through `ipirWasm`. Its secrets come from this worker's `crypto.getRandomValues`, through the wrapper
- * (`../ipir/wallet.ts`, FR-032); one thread.
+ * PIR follows the manifest's scheme (spec 00058 FR-060), and a call's work is spread over Web Workers the page starts
+ * for this worker (`./call-workers.ts`; `CALL_THREADS`: one fewer than the browser's processors, at most 8; this
+ * thread alone when the browser reports one processor):
+ *
+ * - SimplePIR runs in TypeScript; its two multiplications per call (`A × s` to build, `H × s` to decode) are split by
+ *   rows over `multiply-worker.js` workers (`./multiply-web.ts`), over shared memory.
+ * - IPIR+SP runs in the wallet's WebAssembly (`pss-ipir.wasm`, beside the page): fetched only when a manifest names
+ *   `ipir-sp`, compiled only if its SHA-256 equals the committed one built into this file (`IPIR_DIGEST`, FR-031), and
+ *   given to the scheme through `ipirWasm`. A call's requests are dealt to `ipir-worker.js` workers
+ *   (`../ipir/pool.ts`), each with its own instance of the WebAssembly. Every request's secret comes from the
+ *   `crypto.getRandomValues` of the thread that makes it, through the wrapper (`../ipir/wallet.ts`, FR-032).
  */
 
 import { generateMnemonic, mnemonicToSeedSync, validateMnemonic } from "@scure/bip39";
@@ -25,11 +31,14 @@ import { emptyCallStats, lookupNullifiers, paddedCalls, readCell, readPaths, rea
 import { coinPath } from "../client/send.ts";
 import { checkCiphertext, checkLowerPath, checkSnapshotMatch, rootOverBlocks } from "../client/sync.ts";
 import { type Hash2, rootFromPath, TREE_DEPTH } from "../client/tree.ts";
+import { IpirPool } from "../ipir/pool.ts";
+import type { IpirReply } from "../ipir/pool-worker.ts";
 import { Kernel } from "../kernel/index.ts";
 import {
   bucketOf,
   decodeNullifierRecord,
   inlineMultiplier,
+  type Multiplier,
   NULLIFIER_RECORD_BYTES,
   openWalletScheme,
   PUBLIC_ARTIFACT,
@@ -51,7 +60,9 @@ import {
   splitTail,
   TAIL_OUTPUT_BYTES,
 } from "../shared/index.ts";
+import { callWorkerFailed, startCallWorker } from "./call-workers.ts";
 import { initLedger } from "./ledger-v9.ts";
+import { WebMultiplier } from "./multiply-web.ts";
 import { ascii4, callPlan, cellOf, compileChecked, describeCallBody, describePublicArtifact, hex, tableOfRoute, tableSummary } from "./scheme-view.ts";
 import { sha256 as sha256Noble } from "@noble/hashes/sha2.js";
 
@@ -103,6 +114,35 @@ function startGpu(): Promise<GpuScan> {
   return gpu;
 }
 let keys: WalletKeys | null = null;
+
+/** Threads for a call's work: one fewer than the browser's processors, at most 8. */
+const CALL_THREADS = Math.min(8, Math.max(1, (self.navigator?.hardwareConcurrency ?? 1) - 1));
+
+/**
+ * SimplePIR's multiplication: on Web Workers over shared memory (started at the first SimplePIR call), or on this
+ * thread when there is one thread or the page is not cross-origin isolated (no `SharedArrayBuffer` to hand over).
+ */
+const multiplier: Multiplier = CALL_THREADS > 1 && self.crossOriginIsolated ? new WebMultiplier(CALL_THREADS) : inlineMultiplier;
+
+/**
+ * The Web Workers that make a call's IPIR+SP requests, started when the first IPIR+SP snapshot is opened and kept for
+ * the page's life; null when one thread is all there is.
+ */
+const ipirWorkers: IpirPool | null =
+  CALL_THREADS > 1
+    ? new IpirPool(CALL_THREADS, () => {
+        const worker = startCallWorker("ipir-worker.js");
+        return {
+          post: (task, transfer) => worker.port.postMessage(task, transfer),
+          listen(onReply, onError) {
+            worker.port.onmessage = (event: MessageEvent<IpirReply>) => onReply(event.data);
+            worker.onFail(onError);
+          },
+          busy: () => undefined,
+          terminate: async () => worker.stop(),
+        };
+      })
+    : null;
 
 /** The wallet's IPIR+SP WebAssembly, compiled once per page load, and what loading it took (shown by the files step). */
 let ipirModule: Promise<{ module: WebAssembly.Module; bytes: number; sha256: string; ms: number }> | null = null;
@@ -177,7 +217,10 @@ const http = new PssHttp(self.location.origin, { fetch: capturingFetch });
 let manifest: Manifest | null = null;
 let manifestId: Uint8Array | null = null;
 const files = new Map<string, Uint8Array>();
-/** The snapshot's PIR scheme (`../pir/scheme.ts`) and its tables, as a wallet opens them; PIR runs on one thread here. */
+/**
+ * The snapshot's PIR scheme (`../pir/scheme.ts`) and its tables, as a wallet opens them. SimplePIR multiplies on
+ * `multiplier`; IPIR+SP's requests are made on `ipirWorkers`.
+ */
 let scheme: WalletScheme | null = null;
 let readTable: WalletTable | null = null;
 let nullifierTable: WalletTable | null = null;
@@ -442,11 +485,12 @@ async function getFiles(): Promise<Json> {
   readTable = nullifierTable = pathTable = null;
   let wasm: Awaited<ReturnType<typeof loadIpirWasm>> | null = null;
   scheme = await openWalletScheme(m, {
-    multiplier: inlineMultiplier,
+    multiplier,
     ipirWasm: async () => {
       wasm = await loadIpirWasm();
       return wasm.module;
     },
+    ...(ipirWorkers === null ? {} : { ipirWorkers }),
   });
   const label = PUBLIC_ARTIFACT[m.scheme];
   for (const [name, ref] of [["scan file", a.scan], ["block roots", a.blockRoots], [`read table ${label}`, a.readPublic], [`nullifier table ${label}`, a.nullifierPublic]] as const) {
@@ -485,7 +529,7 @@ async function getFiles(): Promise<Json> {
     },
     manifestBytes: served.bytes.length,
     downloads,
-    ...(loaded === null ? {} : { ipirWasm: { bytes: loaded.bytes, sha256: loaded.sha256, ms: round(loaded.ms), threads: 1 } }),
+    ...(loaded === null ? {} : { ipirWasm: { bytes: loaded.bytes, sha256: loaded.sha256, ms: round(loaded.ms), threads: ipirWorkers?.threads ?? 1 } }),
     checks: [
       "the manifest's SHA-256 is the identifier the server names",
       "every artifact's size and SHA-256 equal the manifest's",
@@ -836,6 +880,7 @@ const STEPS: Record<string, (args: never, progress: (text: string) => void) => P
 };
 
 self.onmessage = async (event: MessageEvent<{ id: number; step: string; args: Json }>) => {
+  if (callWorkerFailed(event.data)) return;
   const { id, step, args } = event.data;
   const progress = (text: string) => self.postMessage({ id, progress: text });
   const t = now();

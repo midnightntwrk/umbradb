@@ -4,8 +4,9 @@
  *     npm ci --ignore-scripts --prefix examples/private-shielded-sync/client   # once: the client's packages
  *     node examples/private-shielded-sync/web/build.ts
  *
- * - `page.js` (`./page.ts`) and `worker.js` (`./worker.ts`, the client), bundled by the repository's esbuild for the
- *   browser, with `node:crypto` and the other Node.js modules the client's files import replaced by `./shims/`, and
+ * - `page.js` (`./page.ts`), `worker.js` (`./worker.ts`, the client) and the Web Workers the client spreads a call's
+ *   work over, `ipir-worker.js` (`./ipir-worker.ts`, IPIR+SP's requests) and `multiply-worker.js`
+ *   (`./multiply-worker.ts`, SimplePIR's multiplication), bundled by the repository's esbuild for the browser, with `node:crypto` and the other Node.js modules the client's files import replaced by `./shims/`, and
  *   Node.js's `Buffer` injected (`buffer`);
  * - `index.html` (`./page.html`) and `explain.html` (`./explain.html`, how each step works);
  * - `pss-kernel.wasm` (the scan kernel; the worker checks its SHA-256 against the committed one, built in as
@@ -101,6 +102,8 @@ const common = {
 };
 await build({ ...common, entryPoints: { worker: join(HERE, "worker.ts") }, outdir: out, plugins: [ledgerPlugin()] });
 await build({ ...common, entryPoints: { page: join(HERE, "page.ts") }, outdir: out });
+// The call workers import no Node.js module and need no `Buffer`.
+await build({ ...common, inject: [], entryPoints: { "ipir-worker": join(HERE, "ipir-worker.ts"), "multiply-worker": join(HERE, "multiply-worker.ts") }, outdir: out });
 copyFileSync(join(HERE, "page.html"), join(out, "index.html"));
 copyFileSync(join(HERE, "explain.html"), join(out, "explain.html"));
 copyFileSync(join(EXAMPLE, "kernel", "pss-kernel.wasm"), join(out, "pss-kernel.wasm"));

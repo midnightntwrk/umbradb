@@ -4,6 +4,7 @@
  * Sizes, shapes and calls are worded for the snapshot's PIR scheme (`./scheme-view.ts`, spec 00058 FR-060).
  */
 
+import { serveCallWorkers } from "./call-workers.ts";
 import { callText, cellText, kb, pathTableText, tableText } from "./scheme-view.ts";
 import type { SchemeName } from "../pir/scheme.ts";
 
@@ -21,7 +22,10 @@ interface Answer {
 const worker = new Worker("worker.js", { type: "module" });
 let nextId = 1;
 const waiting = new Map<number, { resolve: (a: Answer) => void; progress: (t: string) => void }>();
+/** Starts the Web Workers the client spreads a call's work over, when it asks for them. */
+const startCallWorker = serveCallWorkers(worker);
 worker.onmessage = (event: MessageEvent<Answer>) => {
+  if (startCallWorker(event.data)) return;
   const a = event.data;
   const w = waiting.get(a.id);
   if (w === undefined) return;
@@ -125,7 +129,7 @@ const VIEWS: Record<string, (r: Json) => string> = {
         ["path table", m.pathTable ? tableText(s, "path", m.pathTable as Json) : "none (path split 0)"],
         ["nullifier table", tableText(s, "nullifier", m.nullifierTable as Json)],
         [ipir ? "requests per call" : "vectors per call", String(m.queriesPerCall)],
-        ["wallet's WebAssembly", w === undefined ? undefined : `pss-ipir.wasm, ${kb(Number(w.bytes))}, SHA-256 ${short(String(w.sha256), 16)} (committed), fetched and compiled in ${w.ms} ms (once per page); its math runs on one thread`],
+        ["wallet's WebAssembly", w === undefined ? undefined : `pss-ipir.wasm, ${kb(Number(w.bytes))}, SHA-256 ${short(String(w.sha256), 16)} (committed), fetched and compiled in ${w.ms} ms (once per page); a call's requests are made on ${Number(w.threads) > 1 ? `${w.threads} worker threads, each with its own instance` : "one thread"}`],
         ["checks", checksHtml(r.checks)],
         ["time", ipir ? `${r.ms} ms (tables opened ${r.openTablesMs} ms)` : `${r.ms} ms (setup matrices ${r.setupMatricesMs} ms)`],
       ]) + table(["file", "size", "ms", "SHA-256"], downloads.map((d) => [esc(String(d.name)), kb(Number(d.bytes)), String(d.ms), esc(String(d.sha256))]))
