@@ -1,28 +1,35 @@
-# IPIR+SP: review of the code against its specification, and security status of the parameters
+# IPIR+SP: review of the code against the papers and its specification, and security status of the parameters
 
 Review for spec 00058 (second PIR scheme of the private shielded sync example), 2026-11-16.
 
-**Limitation.** The two papers (ReinsPIRe, ePrint 2026/1934; InsPIRe, ePrint 2025/1352) could not be obtained: the
-ePrint site blocks automated download. Nothing in this document was checked against a paper. The code was compared
-with (a) upstream's own specification files, which cite the papers' algorithm and lemma numbers, and (b) the
-mathematics derived from first principles and confirmed by an independent numerical recomputation. Each item carries
-one of three marks:
+**Sources.** The code was compared with (a) upstream's own specification files, (b) the mathematics derived from
+first principles and confirmed by an independent numerical recomputation, and (c) the two papers: InsPIRe (ePrint
+2025/1352, PDF of 2026-08-10, 40 pages) and ReinsPIRe (ePrint 2026/1934, PDF of 2026-09-08, 34 pages). Parts A to C
+were written before the papers were available; Part D is the comparison with the papers. Marks used in Part A:
 
 - **[spec]** checked against upstream's specification;
 - **[derived]** derived independently and checked (numerically where stated);
-- **[paper]** needs the paper.
+- **[paper]** checked against the paper in Part D.
 
 ## Result in short
 
-- No deviation was found. An independent program reproduced, bit for bit, the library's request, published masks
-  and answer at d = 8, 16 and 2,048, and the decode equation held for every coefficient.
+- Every step the code shares with the papers is implemented as printed (Part D.1). The profile used differs from the
+  papers in five ways, all upstream's own choices (Part D.2): it sends one key and decodes with two masks, its query
+  masks have ring structure, it rounds query, answer and masks, its plaintext modulus is not the papers', and it has
+  neither the papers' second-dimension folding nor the verifiable variant.
+- Neither paper analyses the one-key, two-mask output or the rounding. The server's view is a function of a subset of
+  the view the papers prove private, so their security theorem covers it; the rounding terms are the largest error
+  terms and are covered by upstream's certificate, not by the papers' noise theorem.
+- No deviation was found between the code and upstream's specification or the derived equations. An independent
+  program reproduced, bit for bit, the library's request, published masks and answer at d = 8, 16 and 2,048, and the
+  decode equation held for every coefficient.
 - The error budget explains the measured phase error (2^34.2–2^34.4): the rms error is 2^32.2; the limit 2^37 is 27.9
   times that.
 - Lattice estimator, computed here: 2^136.8 classical (MATZOV model), 2^109.5 classical and 2^96.4–2^99.4 quantum
   (core-SVP). Upstream calls the profile experimental and still requires an independent review.
 - Upstream's correctness certificate, run here on random 16-bit tables: one answer fails with probability at most
-  2^-300 (2,048 × 2,048) and 2^-222 (32,768 × 12,288). It drops below 2^-128 from 131,072 rows; the project's shape
-  check admits 524,288.
+  2^-300 (2,048 × 2,048) and 2^-222 (32,768 × 12,288). It drops below 2^-128 from 131,072 rows; the project caps
+  tables at 32,768 rows for that reason (finding F4). On the project's own tables the bound is 2^-268 or better.
 - The project's layer draws a fresh secret per request from the platform's cryptographic source and never returns it
   to JavaScript. Findings are in Part C; none blocks a proof of concept.
 
@@ -121,8 +128,9 @@ The first sum goes to the body (through H), the second to the mask of slot e. Bo
 
 `body + a·s + a_other·τ₋₁(s) = Δ·m + e_first − e_div + Σ_steps [Σ_j D_j·τ_e(e_j) + δ·τ_{5e}(s)]`.
 
-Upstream's noise exporter builds the same two operators (`reinspiring/src/noise.rs:258-296`). Whether this is
-Algorithms 1–2 and Appendices D.1/D.2 as printed: **[paper]**.
+Upstream's noise exporter builds the same two operators (`reinspiring/src/noise.rs:258-296`). This is InsPIRe's
+Algorithm 1 and ReinsPIRe's Algorithms 1–2 with Appendices D.1 and D.2 as printed, stopped before the last key
+switch **[paper]** (Part D).
 
 ### A.6 Online packing
 
@@ -218,8 +226,9 @@ One direct quotation; the other statements are paraphrased with their locations.
   (`SECURITY.md:118-130`).
 - The two-mask output and the rounded masks are marked experimental (`reinspiring/README.md:30-36`,
   `SPEC.md:202`); the certificate is stated not to be an independent review (`tools/security/NATIVE_CERTIFICATE.md:3-8`).
-- The paper's own configuration is given as p = 2^14 (`SPEC.md:41`) with a ternary secret (`native.rs:27`); this
-  profile uses p = 2^16 and a Gaussian secret. What the paper proves for each: **[paper]**.
+- Upstream gives the paper's configuration as p = 2^14 (`SPEC.md:41`) with a ternary secret (`native.rs:27`); this
+  profile uses p = 2^16 and a Gaussian secret. ReinsPIRe states no plaintext modulus for its profile, and InsPIRe
+  draws the secret from the error distribution, as this profile does (Part D.2, P4 and D.3).
 
 ### B.2 Assumptions used
 
@@ -304,25 +313,107 @@ bound, and a union bound over all cells. Tables are upstream's deterministic ran
 
 | Id | Severity | Finding | Location | Status |
 |---|---|---|---|---|
-| F1 | note | Nothing was checked against the papers. Items marked [paper]: that the walk of A.5 is Algorithms 1–2 and Appendices D.1/D.2 as printed; the lemma bounds; whether the paper covers p = 2^16, the Gaussian secret, the two-mask output and rounded masks. | this document | open until the PDFs are read |
+| F1 | note | The papers were read after Parts A to C were written. Result in Part D: the shared steps are as printed; the two-mask output, the ring-structured query masks, the rounding and p = 2^16 are not in the papers (P1 to P4). | Part D | closed |
 | F2 | note (blocker for production use) | Upstream's profile is experimental; its release gates (independent review of the key-dependent-message composition, per-snapshot certificate, timing audit) are open. | `reinspiring/SECURITY.md:3`, `:118-130` | open; to be stated wherever the scheme is described |
-| F3 | should fix | The build check decodes 3 rows; it is a smoke test. Upstream's certificate (`NativeServer::build_analyzed` plus `certify_native.py`) is not run on the project's snapshots. | `core/src/server.rs:102-123`; `ipir-sp/src/native.rs:164` | open; here it was run on synthetic tables only |
-| F4 | should fix | `check_shape` admits up to 524,288 rows. With 49-bit nearest rounding the certificate drops below 2^-128 at 131,072 rows of random cells (2^-83) and at 65,536 rows of 0xFFFF cells (2^-85). At 32,768 rows the screen with every cell at 0xFFFF in the query term still gives ≤ 2^-161. | `core/src/lib.rs:102-114` | open; cap rows at 32,768 or use dithered queries above |
+| F3 | should fix | The build check decodes 3 rows; it is a smoke test. Upstream's certificate (`NativeServer::build_analyzed` plus `certify_native.py`) is not run on the project's snapshots. | `core/src/server.rs:102-123`; `ipir-sp/src/native.rs:164` | done: certificates on the project's tables at the real size and at 1,000,000 outputs, 2^-268 or better (`bench/results/2026-11-16-preprod-schemes/REPORT.md` §7) |
+| F4 | should fix | `check_shape` admits up to 524,288 rows. With 49-bit nearest rounding the certificate drops below 2^-128 at 131,072 rows of random cells (2^-83) and at 65,536 rows of 0xFFFF cells (2^-85). At 32,768 rows the screen with every cell at 0xFFFF in the query term still gives ≤ 2^-161. | `core/src/lib.rs:102-114` | fixed: tables are capped at 32,768 rows (`core/src/lib.rs:66`, `:126`; `pir/ipir/shape.ts`) |
 | F5 | note | Nearest rounding with ties upward has mean +½, which shifts every cell's phase by half its column sum (2^30 at 32,768 rows of 0xFFFF). Inside upstream's reserve. | `ipir-native-client/src/wire.rs:32-44` | no action below the F4 cap |
 | F6 | note | Not erased after a request: the 32-byte seed and ChaCha20 state, τ₅(s), w·s and the selection products. The secret can be re-derived from the seed while it remains in memory. | `ipir-native-client/src/lib.rs:396-400`; `reinspiring/src/native.rs:397`, `:525-529` | open; upstream code, upstream claims heap hygiene only |
-| F7 | note | A request state is erased only when the caller calls `free()`; there is no finalizer. A state never freed keeps its secret in the module's memory. | `wallet.ts:236-245` | open; callers in `pir/ipir/` not reviewed |
-| F8 | note | The import `fill_random` cannot report failure and the Rust side always returns success. A host that returned without writing would give every request the same all-zero seed, hence the same secret. The only host is `wallet.ts`, which uses `crypto.getRandomValues`. | `wasm/src/lib.rs:34-45`; `wallet.ts:78-84` | open; hardening: return a status, or refuse two equal seeds |
+| F7 | note | A request state is erased only when the caller calls `free()`; there is no finalizer. A state never freed keeps its secret in the module's memory. | `wallet.ts:236-245` | the scheme layer frees every request's state after decoding (`pir/ipir-sp-wallet.ts:65`, `:136`); still no finalizer |
+| F8 | note | The import `fill_random` cannot report failure and the Rust side always returns success. A host that returned without writing would give every request the same all-zero seed, hence the same secret. The only host is `wallet.ts`, which uses `crypto.getRandomValues`. | `wasm/src/lib.rs:34-45`; `wallet.ts:78-84` | fixed: the buffer is zeroed first and a draw equal to the previous one, or all zero, is refused (`wasm/src/lib.rs`, `entropy::draw`) |
 | F9 | note | Whether the number and timing of requests are independent of the wanted rows is decided above this layer and was not reviewed. | `pir/ipir/` (outside scope) | not verified |
 | F10 | note | A wrong or tampered answer decodes to wrong cells without an error. The application must verify decoded data and must not let the server observe behaviour that depends on it. | `ipir-native-client/src/lib.rs:482-510` | by design; not verified above this layer |
 | F11 | note | Concrete security is 2^109.5 under core-SVP and 2^96–2^99 quantum; only the MATZOV model gives more than 128 bits. | B.3 | open; a statement to carry into the documentation |
 | F12 | note | Constant time of the sampler scan and the x86 SIMD kernels were not examined (dependency not read; host is aarch64). | A.3, A.4 | not verified |
+| F13 | note | The profile is not the scheme the papers analyse: one key with two masks (P1) and the rounding of query, answer and masks (P3) have no published analysis. Privacy follows from the papers' theorem by discarding part of the view; correctness rests on upstream's certificate. | Part D.2, D.3 | open; to be stated wherever the scheme is described |
 
 No deviation between the code and upstream's specification, or between the code and the derived equations, was
 found.
 
+## Part D — the code against the two papers
+
+"InsPIRe" is ePrint 2025/1352 and "ReinsPIRe" is ePrint 2026/1934; page numbers are the PDFs' own. The papers write
+the table as D with n1 rows and n0 columns and query a column: their n0 is this project's row count (the query
+length) and their n1 its column count (the answer length). τ_g is X → X^5, τ_h is X → X^(−1).
+
+### D.1 Steps taken from the papers
+
+| Paper | What it prescribes | Code | Finding |
+|---|---|---|---|
+| InsPIRe §2, p. 6 | `b = −⟨a, s⟩ + e + Δ·m`; the secret is drawn from the error distribution | `reinspiring/src/native.rs:381-404`; `native_gaussian.rs:21-35` | same signs; secret and errors from one σ = 6.4 table |
+| InsPIRe §2, p. 6 (key switching) | key `y = −s′·w + s·g_z + e`; switch `(0, b) + g⁻¹(a)·K`; digits in [−z/2, z/2) | `native.rs:512-544`, `:1144-1161` | OK |
+| InsPIRe Lemma 1, p. 9 | trace over the powers of g = 5 and h = 2d − 1 equals d times the constant term | `compile.rs:14-43` | OK |
+| InsPIRe Algorithm 1, p. 11, TRANSFORM | `ã = Σ a[i]·X^(−i)`; slots τ_g^j, then τ_h∘τ_g^j | `native.rs:1166-1177`, `:904-916` | OK |
+| InsPIRe Algorithm 1, PACK line 4 | aggregate the d transformed masks with X^k | `native.rs:1166-1235` | OK |
+| InsPIRe Algorithm 1, COLLAPSEHALF and COLLAPSEONE; Appendix C, p. 29 | from slot d/2 − 1 down, switch slot k into slot k − 1 with τ_g^(k−1)(K_g); the second half the same under τ_h; d − 2 key switches | `native.rs:925-963` | OK: same order, same key images, d − 2 steps |
+| InsPIRe Algorithm 1, COLLAPSE line 6 | a last switch with K_h joins the two halves into one mask | `native.rs:965-978` | present in upstream's one-mask mode; the profile used stops before it (P1) |
+| InsPIRe Appendix G.1, p. 34; ReinsPIRe Appendix E.1, p. 31 | approximate, signed gadget digits | `native.rs:1144-1161` | OK; the code rounds the 16 dropped bits to nearest where the paper truncates |
+| ReinsPIRe Lemmas 1–2, Algorithm 1, Corollary 1, pp. 9–10 | the d − 2 products with automorphic images of one key become one matrix H′ per limb, entries at most d·z/2 | `compile.rs:219-296`; `native.rs:982-993` | OK; (d − 2)·2^18 < 2^31, so the `i32` storage is safe by the lemma |
+| ReinsPIRe Appendix C, pp. 27–28 | H′ by a ring FFT at powers of X² | `compile.rs:219`, `:254` | result equal to the direct sum (A.8); the routine was not compared line by line |
+| ReinsPIRe Algorithm 2, p. 11, Pack | answer body = first-pass values + H′·y + Σ t″_j·y′_j | `native.rs:706-767` | OK; the last sum belongs to K_h and is absent (P1) |
+| ReinsPIRe §3.4, p. 10 | products mod 2^k through NTT primes with product above d·q² | `lift_ntt.rs:32`, `:335-350` | OK |
+| ReinsPIRe Appendix D.1, Lemma 10, pp. 28–29 | no inverse of d mod 2^k: aggregate over d·q, then floor-divide by d; error at most d² for a ternary secret | `native.rs:1217`, `:1231` | OK: exact integers, arithmetic shift. A.5's bound 65·d(d − 1) is the lemma with the sampler's bound 65 in place of 1 |
+| ReinsPIRe Appendix D.2, p. 29 | aggregation as `ã′_k = Σ_j c_(j,k)·X^(j+k)` evaluated at X^(2i) by a ring FFT | `native.rs:1166-1235` | OK, including the placement of each coefficient |
+| ReinsPIRe Algorithm 3, p. 13, Query | `b = −A·s + e + Δ·p`; `y_j = −w_j·s + e_j + z^j·s(X^5)` | `native.rs:381-404`, `:512-544` | OK up to P2 and P3; weights 2^(16+19j), the approximate gadget's |
+| ReinsPIRe Algorithm 3, Eval | `[D, H′]·u` | `ipir-sp/src/native.rs:414-432`; `native_matrix.rs:273` | OK, as two products |
+| ReinsPIRe §5.1, p. 17 | d = 2,048, q = 2^54, σ = 6.4, ℓ = 2, z = 2^19 | `NativeParams::new(2048, 54, 16, 19, 2, Gaussian)` | same five values; p is not stated (P4) |
+
+### D.2 Where the profile used differs from the papers
+
+| Id | Difference | Paper | Code | Effect |
+|---|---|---|---|---|
+| P1 | One key, two masks | Two keys (K_g, K_h) and one answer mask (InsPIRe Algorithm 1; ReinsPIRe Algorithm 2). A single key appears only for at most d/2 packed values (InsPIRe §3.3, p. 12) and for prime cyclotomic rings (ReinsPIRe Appendix G, pp. 32–34) | only K_g is sent; both end masks are published and the wallet adds `a_other·τ_h(s)` itself (`native.rs:965-978`, `:426-437`) | upload of keys halves (27,648 against 55,296 bytes); one key switch fewer; two masks per block; a second ring product in decoding. Not analysed in either paper |
+| P2 | Query masks with ring structure | A uniform in Z_q^(n0×d): one independent mask per query entry (ReinsPIRe Algorithm 3; InsPIRe's setup, `A ← U`, p. 17) | rows/d ring polynomials; entry r uses a negacyclic rotation of its block's polynomial (`ipir-native-client/src/lib.rs:354-361`; `native.rs:381-404`) | hints by ring products instead of n1·n0·d multiplications. The query is rows/d Ring-LWE samples, fewer than the n0 samples the papers' assumption grants (D.3) |
+| P3 | Rounding | Full 54-bit words: upload (n0 + 2ℓd)·log q bits, download 2·n1·log q bits (ReinsPIRe Theorem 3, p. 14); modulus switching only as a footnote (p. 15) and as InsPIRe Lemma 9 (p. 37), with one modulus for mask and body | query to 49 bits, answer body to 22 bits, masks to 29 bits and sent once per snapshot | sizes below. The mask and answer rounding are the largest error terms (A.7) and are outside the papers' noise theorem |
+| P4 | Plaintext modulus 2^16 | ReinsPIRe gives no p for q = 2^54. InsPIRe uses 65,536 at q = 2^53 and 65,535 at q = 2^56 (Table 1, p. 19). Upstream's "p = 2^14" (`SPEC.md:41`) is not in the paper | p = 2^16 | correctness at this p rests on D.3 and on the certificate (B.4), not on a paper's parameter set |
+| P5 | Folding and verification | ReinsPIRe+ folds the answer with one more ciphertext (Appendix D.3, p. 30); vReinsPIRe protects against a malicious server (§4) | neither | the answer is cols × 22 bits, not the paper's 12 KB; no protection against a server that answers wrongly (B.5) |
+
+Also noted:
+
+- **The meaning of σ = 6.4.** InsPIRe defines its parameter as a Gaussian width (p. 5), under which 6.4 is a standard
+  deviation of 2.55; neither paper says which is meant. The code's table has standard deviation 6.400 (A.3), the
+  larger reading: at least the papers' noise for security, and the certificate is computed with it.
+- **The public random string.** The papers assume a uniform string from a trusted party (InsPIRe §2.1, p. 7). The code
+  expands a seed with SHA-256 and ChaCha20 (A.2), and the project derives the seed from the table. Equivalent for a
+  server that follows the protocol; a hash-as-random-oracle assumption otherwise.
+
+Sizes for one request at 2,048 × 2,048, the papers' formula against the code:
+
+| | ReinsPIRe Theorem 3 | Code |
+|---|---|---|
+| Upload | 13,824 + 55,296 = 69,120 bytes | 36 + 27,648 + 12,544 = 40,228 bytes |
+| Download | 27,648 bytes (mask and body) | 5,700 bytes, plus 14,884 bytes of masks once per snapshot |
+
+### D.3 What the papers' theorems give for this profile
+
+- **Noise (ReinsPIRe Theorem 2, p. 14; InsPIRe Theorem 2, p. 12).** The error is subgaussian with
+  `σ² ≤ n0·p²·σ_lwe² + ℓ·d²·z²·σ_ks²/4`, under the heuristic that the terms are independent. With n0 = 32,768,
+  p = 2^16, ℓ = 2, d = 2,048, z = 2^19 and 6.4 this is 2^32.2, against the decoding limit 2^37. The query term is
+  2^52.4 of a 2^64.4 total: the row count barely moves it. The profile has one key switch fewer than the theorem
+  counts. Not in the theorem: the 16 dropped digit bits (2^27.9), the mask rounding (2^31.9), the answer rounding
+  (2^30.2) and the offset of the query rounding (A.7).
+- **Privacy (ReinsPIRe Theorems 4 and 10, pp. 14 and 26; InsPIRe Theorem 13, p. 33).** Assumption: Ring-LWE with
+  key-dependent messages, n0 plain samples and 2ℓ encryptions of scaled automorphic images of the secret; server
+  that follows the protocol. The profile shows the server rows/d plain samples (P2) and ℓ such encryptions (P1), then
+  rounds (P3), which the server could do itself. An attacker on the profile is therefore an attacker on the papers'
+  scheme that discards part of what it is given. The weights 2^16 and 2^35 are in InsPIRe's function family (any
+  constant times τ_g).
+- **Many queries (InsPIRe Appendix F.1, p. 34).** Privacy holds for many queries under one public string when every
+  query has a new secret, with a loss proportional to the number of queries. The project does this (A.9), also inside
+  a call of 32 requests.
+- **Correctness for every table.** Theorem 10 asks that decoding fail with negligible probability for every table
+  with cells below p. InsPIRe's own target is 2^-40 (p. 19). At the 32,768-row cap, upstream's screen with every cell
+  at 0xFFFF gives at most 2^-161 (B.4).
+- **"Over 128-bit security" (ReinsPIRe §5.1, p. 17).** Stated for these five parameters from the lattice estimator,
+  without the cost model. B.3 reproduces it under the estimator's default model only (2^136.8); core-SVP gives
+  2^109.5.
+
 ## What was not done
 
-- Reading the papers (F1); certifying a real snapshot of the project (F3); reviewing `pir/ipir/` (F9, F10).
+- Certifying tables above the benchmark's sizes; reviewing `pir/ipir/` (F9, F10).
+- Reading the papers' reference implementations, which may hold the plaintext modulus the papers leave out (P4).
+- The parts of the papers the code does not use: InsPIRe §4–§6 (its own PIR constructions), ReinsPIRe §4 and
+  Appendix B.2 (verification), and the proofs of the noise theorems, which were applied, not re-derived.
 - Attacks outside the four of B.3, and any analysis of the key-dependent-message assumption itself.
 - The x86 SIMD paths, the dithered variant and the one-mask mode.
 
