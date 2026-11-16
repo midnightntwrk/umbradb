@@ -1,0 +1,5204 @@
+{
+  "date": "2026-11-16T05:19:21.639Z",
+  "ok": true,
+  "environment": {
+    "gpu": "Apple M4 Max",
+    "deno": "2.7.5",
+    "node": "v24.9.0",
+    "cpus": 16,
+    "loadAverage": {
+      "before": [
+        21.6015625,
+        20.1455078125,
+        16.755859375
+      ],
+      "after": [
+        33.4287109375,
+        24.98046875,
+        19.185546875
+      ]
+    },
+    "quick": false,
+    "runs": 9
+  },
+  "notes": [
+    "Deno WebGPU figures (Deno's wgpu on Metal). Wall times run from the call to the result in host memory and include Deno's floor of about 12 ms per read-back (setup.denoRoundTripFloorMs); 'exec' times are the GPU's own, from timestamp queries around the stage's passes (null where Deno left a short pass's end timestamp unwritten). 'together' is 16 calls in flight at once, which share the floor.",
+    "GPU first pass: the requests' selection words unpacked and the table scanned once for all the call's requests, read back unrounded. GPU packing: the key words unpacked and every block's compiled matrix multiplied, read back unrounded. GPU answer: both, the sums rounded and packed on the GPU, the 68-byte heads (with SHA-256 of each request, WebCrypto) on the host.",
+    "CPU: the native add-on (upstream's code, rustc release build, rayon over the machine's cores) under Node; respond is IpirServerTable.respond's wall time, which answers a call's requests one after another; first pass and packing are upstream's own timers (NativeTiming) summed over the call's requests. On arm64 upstream takes its scalar paths (no NEON).",
+    "Memory on the GPU: the table's cells (2 bytes each) and the compiled matrices (32 MiB per 2,048 columns) stay resident; a call adds its scratch (requests, limbs, partial sums, output).",
+    "The machine was shared with other work; see the load averages."
+  ],
+  "setup": {
+    "kernelsCompileMs": 17.99445799999998,
+    "denoRoundTripFloorMs": [
+      12.093624999999996,
+      11.995165999999998,
+      11.167916999999996,
+      11.74304200000001,
+      11.430166,
+      12.619457999999995,
+      13.123915999999994
+    ]
+  },
+  "checks": [
+    {
+      "name": "2048x2048-random: wallet decodes the CPU's answers to their rows",
+      "ok": true,
+      "detail": "32 of 32 rows"
+    },
+    {
+      "name": "2048x2048-random: the exported preparation's masks equal the build's",
+      "ok": true,
+      "detail": "matrix entries within ±37429449 (2^25.16)"
+    },
+    {
+      "name": "2048x2048-random: respondTimed = respond (×1)",
+      "ok": true,
+      "detail": "the timed path gives the same answers"
+    },
+    {
+      "name": "2048x2048-random: respondTimed = respond (×32)",
+      "ok": true,
+      "detail": "the timed path gives the same answers"
+    },
+    {
+      "name": "2048x2048-random: GPU first pass = upstream's (32 requests)",
+      "ok": true,
+      "detail": "65536 values mod 2^54 equal"
+    },
+    {
+      "name": "2048x2048-random: GPU packing product = upstream's (32 requests)",
+      "ok": true,
+      "detail": "65536 values mod 2^54 equal"
+    },
+    {
+      "name": "2048x2048-random: GPU answers = IpirServerTable.respond (×1)",
+      "ok": true,
+      "detail": "5700 bytes equal"
+    },
+    {
+      "name": "2048x2048-random: GPU answers = IpirServerTable.respond (×32)",
+      "ok": true,
+      "detail": "182400 bytes equal"
+    },
+    {
+      "name": "2048x2048-random: GPU hint columns = upstream's",
+      "ok": true,
+      "detail": "2048 × 2,048 values mod 2^54 equal; GPU 182.55 ms"
+    },
+    {
+      "name": "2048x2048-random: GPU answers with chunks of 2097152 bytes (512 rows) = IpirServerTable.respond (×32)",
+      "ok": true,
+      "detail": "182400 bytes equal"
+    },
+    {
+      "name": "2048x2048-random: GPU hint columns with chunks = without",
+      "ok": true,
+      "detail": "4194304 values"
+    },
+    {
+      "name": "negative control: one selection word changed",
+      "ok": true,
+      "detail": "first-pass values differ in request(s) [5] (changed 5), 2048 columns"
+    },
+    {
+      "name": "negative control: one key word changed",
+      "ok": true,
+      "detail": "packing values differ in request(s) [3] (changed 3)"
+    },
+    {
+      "name": "negative control: one cell changed",
+      "ok": true,
+      "detail": "first-pass values differ in column(s) [1234] of 32 requests (changed column 1234)"
+    },
+    {
+      "name": "negative control: a request of another setup is refused",
+      "ok": true,
+      "detail": "request 0 is not for this table's setup (magic or setup id)"
+    },
+    {
+      "name": "2048x2048-ffff: wallet decodes the CPU's answers to their rows",
+      "ok": true,
+      "detail": "32 of 32 rows"
+    },
+    {
+      "name": "2048x2048-ffff: the exported preparation's masks equal the build's",
+      "ok": true,
+      "detail": "matrix entries within ±34732231 (2^25.05)"
+    },
+    {
+      "name": "2048x2048-ffff: respondTimed = respond (×1)",
+      "ok": true,
+      "detail": "the timed path gives the same answers"
+    },
+    {
+      "name": "2048x2048-ffff: respondTimed = respond (×32)",
+      "ok": true,
+      "detail": "the timed path gives the same answers"
+    },
+    {
+      "name": "2048x2048-ffff: GPU first pass = upstream's (32 requests)",
+      "ok": true,
+      "detail": "65536 values mod 2^54 equal"
+    },
+    {
+      "name": "2048x2048-ffff: GPU packing product = upstream's (32 requests)",
+      "ok": true,
+      "detail": "65536 values mod 2^54 equal"
+    },
+    {
+      "name": "2048x2048-ffff: GPU answers = IpirServerTable.respond (×1)",
+      "ok": true,
+      "detail": "5700 bytes equal"
+    },
+    {
+      "name": "2048x2048-ffff: GPU answers = IpirServerTable.respond (×32)",
+      "ok": true,
+      "detail": "182400 bytes equal"
+    },
+    {
+      "name": "4096x12288-random: wallet decodes the CPU's answers to their rows",
+      "ok": true,
+      "detail": "32 of 32 rows"
+    },
+    {
+      "name": "4096x12288-random: the exported preparation's masks equal the build's",
+      "ok": true,
+      "detail": "matrix entries within ±39159565 (2^25.22)"
+    },
+    {
+      "name": "4096x12288-random: respondTimed = respond (×1)",
+      "ok": true,
+      "detail": "the timed path gives the same answers"
+    },
+    {
+      "name": "4096x12288-random: respondTimed = respond (×32)",
+      "ok": true,
+      "detail": "the timed path gives the same answers"
+    },
+    {
+      "name": "4096x12288-random: GPU first pass = upstream's (32 requests)",
+      "ok": true,
+      "detail": "393216 values mod 2^54 equal"
+    },
+    {
+      "name": "4096x12288-random: GPU packing product = upstream's (32 requests)",
+      "ok": true,
+      "detail": "393216 values mod 2^54 equal"
+    },
+    {
+      "name": "4096x12288-random: GPU answers = IpirServerTable.respond (×1)",
+      "ok": true,
+      "detail": "33860 bytes equal"
+    },
+    {
+      "name": "4096x12288-random: GPU answers = IpirServerTable.respond (×32)",
+      "ok": true,
+      "detail": "1083520 bytes equal"
+    },
+    {
+      "name": "4096x12288-random: GPU hint columns = upstream's",
+      "ok": true,
+      "detail": "12288 × 2,048 values mod 2^54 equal; GPU 572.34 ms"
+    },
+    {
+      "name": "4096x12288-random: GPU answers with chunks of 16777216 bytes (512 rows) = IpirServerTable.respond (×32)",
+      "ok": true,
+      "detail": "1083520 bytes equal"
+    },
+    {
+      "name": "4096x12288-random: GPU hint columns with chunks = without",
+      "ok": true,
+      "detail": "25165824 values"
+    },
+    {
+      "name": "4096x12288-ffff: wallet decodes the CPU's answers to their rows",
+      "ok": true,
+      "detail": "32 of 32 rows"
+    },
+    {
+      "name": "4096x12288-ffff: the exported preparation's masks equal the build's",
+      "ok": true,
+      "detail": "matrix entries within ±34715162 (2^25.05)"
+    },
+    {
+      "name": "4096x12288-ffff: respondTimed = respond (×1)",
+      "ok": true,
+      "detail": "the timed path gives the same answers"
+    },
+    {
+      "name": "4096x12288-ffff: respondTimed = respond (×32)",
+      "ok": true,
+      "detail": "the timed path gives the same answers"
+    },
+    {
+      "name": "4096x12288-ffff: GPU first pass = upstream's (32 requests)",
+      "ok": true,
+      "detail": "393216 values mod 2^54 equal"
+    },
+    {
+      "name": "4096x12288-ffff: GPU packing product = upstream's (32 requests)",
+      "ok": true,
+      "detail": "393216 values mod 2^54 equal"
+    },
+    {
+      "name": "4096x12288-ffff: GPU answers = IpirServerTable.respond (×1)",
+      "ok": true,
+      "detail": "33860 bytes equal"
+    },
+    {
+      "name": "4096x12288-ffff: GPU answers = IpirServerTable.respond (×32)",
+      "ok": true,
+      "detail": "1083520 bytes equal"
+    },
+    {
+      "name": "32768x12288-random: wallet decodes the CPU's answers to their rows",
+      "ok": true,
+      "detail": "32 of 32 rows"
+    },
+    {
+      "name": "32768x12288-random: the exported preparation's masks equal the build's",
+      "ok": true,
+      "detail": "matrix entries within ±38157295 (2^25.19)"
+    },
+    {
+      "name": "32768x12288-random: respondTimed = respond (×1)",
+      "ok": true,
+      "detail": "the timed path gives the same answers"
+    },
+    {
+      "name": "32768x12288-random: respondTimed = respond (×32)",
+      "ok": true,
+      "detail": "the timed path gives the same answers"
+    },
+    {
+      "name": "32768x12288-random: GPU first pass = upstream's (32 requests)",
+      "ok": true,
+      "detail": "393216 values mod 2^54 equal"
+    },
+    {
+      "name": "32768x12288-random: GPU packing product = upstream's (32 requests)",
+      "ok": true,
+      "detail": "393216 values mod 2^54 equal"
+    },
+    {
+      "name": "32768x12288-random: GPU answers = IpirServerTable.respond (×1)",
+      "ok": true,
+      "detail": "33860 bytes equal"
+    },
+    {
+      "name": "32768x12288-random: GPU answers = IpirServerTable.respond (×32)",
+      "ok": true,
+      "detail": "1083520 bytes equal"
+    },
+    {
+      "name": "32768x12288-random: GPU hint columns = upstream's",
+      "ok": true,
+      "detail": "12288 × 2,048 values mod 2^54 equal; GPU 2.92 s"
+    },
+    {
+      "name": "32768x12288-ffff: wallet decodes the CPU's answers to their rows",
+      "ok": true,
+      "detail": "32 of 32 rows"
+    },
+    {
+      "name": "32768x12288-ffff: the exported preparation's masks equal the build's",
+      "ok": true,
+      "detail": "matrix entries within ±35756135 (2^25.09)"
+    },
+    {
+      "name": "32768x12288-ffff: respondTimed = respond (×1)",
+      "ok": true,
+      "detail": "the timed path gives the same answers"
+    },
+    {
+      "name": "32768x12288-ffff: respondTimed = respond (×32)",
+      "ok": true,
+      "detail": "the timed path gives the same answers"
+    },
+    {
+      "name": "32768x12288-ffff: GPU first pass = upstream's (32 requests)",
+      "ok": true,
+      "detail": "393216 values mod 2^54 equal"
+    },
+    {
+      "name": "32768x12288-ffff: GPU packing product = upstream's (32 requests)",
+      "ok": true,
+      "detail": "393216 values mod 2^54 equal"
+    },
+    {
+      "name": "32768x12288-ffff: GPU answers = IpirServerTable.respond (×1)",
+      "ok": true,
+      "detail": "33860 bytes equal"
+    },
+    {
+      "name": "32768x12288-ffff: GPU answers = IpirServerTable.respond (×32)",
+      "ok": true,
+      "detail": "1083520 bytes equal"
+    }
+  ],
+  "summary": [
+    {
+      "table": "2048x2048-random",
+      "requests": 1,
+      "gpuFirstPassWallMs": 14.802874999999858,
+      "gpuFirstPassExecMs": 0.346417,
+      "gpuPackingWallMs": 15.518874999999753,
+      "gpuPackingExecMs": 0.365417,
+      "gpuAnswerWallMs": 14.623291999999765,
+      "gpuAnswerExecMs": 0.9687499999999999,
+      "gpuAnswerConcurrentPerCallMs": 4.015973937500007,
+      "gpuUploadMs": 21.016458000000057,
+      "gpuResidentMiB": 40,
+      "gpuCallScratchMiB": 0.5179862976074219,
+      "cpuRespondMs": 1.052041000000031,
+      "cpuFirstPassMs": 0.37525,
+      "cpuPackingMs": 0.32899999999999996
+    },
+    {
+      "table": "2048x2048-random",
+      "requests": 32,
+      "gpuFirstPassWallMs": 17.723500000000058,
+      "gpuFirstPassExecMs": 1.564375,
+      "gpuPackingWallMs": 19.46954100000039,
+      "gpuPackingExecMs": 5.058667,
+      "gpuAnswerWallMs": 20.761457999999948,
+      "gpuAnswerExecMs": 4.264666999999999,
+      "gpuAnswerConcurrentPerCallMs": 8.405453124999951,
+      "gpuUploadMs": 21.016458000000057,
+      "gpuResidentMiB": 40,
+      "gpuCallScratchMiB": 12.571540832519531,
+      "cpuRespondMs": 36.308832999999936,
+      "cpuFirstPassMs": 12.137623999999999,
+      "cpuPackingMs": 11.840499999999999
+    },
+    {
+      "table": "2048x2048-ffff",
+      "requests": 1,
+      "gpuFirstPassWallMs": 13.736917000000176,
+      "gpuFirstPassExecMs": 0.346292,
+      "gpuPackingWallMs": 13.226542000000336,
+      "gpuPackingExecMs": 0.366542,
+      "gpuAnswerWallMs": 14.670583000000079,
+      "gpuAnswerExecMs": 0.670125,
+      "gpuAnswerConcurrentPerCallMs": 3.2019426874999795,
+      "gpuUploadMs": 21.73583299999973,
+      "gpuResidentMiB": 40,
+      "gpuCallScratchMiB": 0.5179862976074219,
+      "cpuRespondMs": 1.4632500000000164,
+      "cpuFirstPassMs": 0.448083,
+      "cpuPackingMs": 0.705417
+    },
+    {
+      "table": "2048x2048-ffff",
+      "requests": 32,
+      "gpuFirstPassWallMs": 16.434291999999914,
+      "gpuFirstPassExecMs": 1.567417,
+      "gpuPackingWallMs": 16.49566700000014,
+      "gpuPackingExecMs": 2.177333,
+      "gpuAnswerWallMs": 21.186625000000276,
+      "gpuAnswerExecMs": 6.898167000000001,
+      "gpuAnswerConcurrentPerCallMs": 7.0404895624999995,
+      "gpuUploadMs": 21.73583299999973,
+      "gpuResidentMiB": 40,
+      "gpuCallScratchMiB": 12.571540832519531,
+      "cpuRespondMs": 37.850625000000036,
+      "cpuFirstPassMs": 13.535664000000002,
+      "cpuPackingMs": 13.770962000000003
+    },
+    {
+      "table": "4096x12288-random",
+      "requests": 1,
+      "gpuFirstPassWallMs": 14.961041000002297,
+      "gpuFirstPassExecMs": 0.241291,
+      "gpuPackingWallMs": 16.891374999999243,
+      "gpuPackingExecMs": 1.0955,
+      "gpuAnswerWallMs": 15.028958999999304,
+      "gpuAnswerExecMs": 0.795543,
+      "gpuAnswerConcurrentPerCallMs": 5.23345049999989,
+      "gpuUploadMs": 112.74299999999857,
+      "gpuResidentMiB": 288,
+      "gpuCallScratchMiB": 3.239910125732422,
+      "cpuRespondMs": 3.751792000000023,
+      "cpuFirstPassMs": 1.824875,
+      "cpuPackingMs": 1.5202499999999999
+    },
+    {
+      "table": "4096x12288-random",
+      "requests": 32,
+      "gpuFirstPassWallMs": 21.795458000000508,
+      "gpuFirstPassExecMs": 3.778167,
+      "gpuPackingWallMs": 23.630583999998635,
+      "gpuPackingExecMs": 6.468125,
+      "gpuAnswerWallMs": 28.969750000000204,
+      "gpuAnswerExecMs": 10.407584,
+      "gpuAnswerConcurrentPerCallMs": 20.18423437499996,
+      "gpuUploadMs": 112.74299999999857,
+      "gpuResidentMiB": 288,
+      "gpuCallScratchMiB": 25.67310333251953,
+      "cpuRespondMs": 149.50466599999982,
+      "cpuFirstPassMs": 77.50979200000002,
+      "cpuPackingMs": 74.618542
+    },
+    {
+      "table": "4096x12288-ffff",
+      "requests": 1,
+      "gpuFirstPassWallMs": 15.1997080000001,
+      "gpuFirstPassExecMs": 0.664292,
+      "gpuPackingWallMs": 16.412250000001222,
+      "gpuPackingExecMs": 1.056208,
+      "gpuAnswerWallMs": 15.352207999996608,
+      "gpuAnswerExecMs": 0.8104169999999999,
+      "gpuAnswerConcurrentPerCallMs": 5.720893250000245,
+      "gpuUploadMs": 69.49124999999913,
+      "gpuResidentMiB": 288,
+      "gpuCallScratchMiB": 3.239910125732422,
+      "cpuRespondMs": 13.541207999999642,
+      "cpuFirstPassMs": 6.122375,
+      "cpuPackingMs": 6.738957999999999
+    },
+    {
+      "table": "4096x12288-ffff",
+      "requests": 32,
+      "gpuFirstPassWallMs": 20.846292000001995,
+      "gpuFirstPassExecMs": 3.800125,
+      "gpuPackingWallMs": 22.918792000004032,
+      "gpuPackingExecMs": 6.51525,
+      "gpuAnswerWallMs": 30.34770800000115,
+      "gpuAnswerExecMs": 10.224250000000001,
+      "gpuAnswerConcurrentPerCallMs": 15.134999999999764,
+      "gpuUploadMs": 69.49124999999913,
+      "gpuResidentMiB": 288,
+      "gpuCallScratchMiB": 25.67310333251953,
+      "cpuRespondMs": 607.0872909999998,
+      "cpuFirstPassMs": 304.35462300000006,
+      "cpuPackingMs": 264.625166
+    },
+    {
+      "table": "32768x12288-random",
+      "requests": 1,
+      "gpuFirstPassWallMs": 19.345832999999402,
+      "gpuFirstPassExecMs": 4.355625,
+      "gpuPackingWallMs": 16.0013750000071,
+      "gpuPackingExecMs": 1.054833,
+      "gpuAnswerWallMs": 17.185624999998254,
+      "gpuAnswerExecMs": 2.575999,
+      "gpuAnswerConcurrentPerCallMs": 10.024934937499893,
+      "gpuUploadMs": 158.2762500000099,
+      "gpuResidentMiB": 960,
+      "gpuCallScratchMiB": 8.344890594482422,
+      "cpuRespondMs": 26.6776660000005,
+      "cpuFirstPassMs": 17.022917,
+      "cpuPackingMs": 3.5387079999999997
+    },
+    {
+      "table": "32768x12288-random",
+      "requests": 32,
+      "gpuFirstPassWallMs": 59.40562499999942,
+      "gpuFirstPassExecMs": 39.739834,
+      "gpuPackingWallMs": 25.884957999995095,
+      "gpuPackingExecMs": 8.593417,
+      "gpuAnswerWallMs": 58.416291000001365,
+      "gpuAnswerExecMs": 37.279208,
+      "gpuAnswerConcurrentPerCallMs": 83.40572918749967,
+      "gpuUploadMs": 158.2762500000099,
+      "gpuResidentMiB": 960,
+      "gpuCallScratchMiB": 81.03247833251953,
+      "cpuRespondMs": 796.4053750000003,
+      "cpuFirstPassMs": 559.5250400000001,
+      "cpuPackingMs": 103.36403899999999
+    },
+    {
+      "table": "32768x12288-ffff",
+      "requests": 1,
+      "gpuFirstPassWallMs": 16.37891599998693,
+      "gpuFirstPassExecMs": 1.7485,
+      "gpuPackingWallMs": 15.801624999992782,
+      "gpuPackingExecMs": 0.512,
+      "gpuAnswerWallMs": 17.958374999987427,
+      "gpuAnswerExecMs": 2.681333,
+      "gpuAnswerConcurrentPerCallMs": 8.709992187501484,
+      "gpuUploadMs": 163.45441700000083,
+      "gpuResidentMiB": 960,
+      "gpuCallScratchMiB": 8.344890594482422,
+      "cpuRespondMs": 25.28899999999976,
+      "cpuFirstPassMs": 22.49225,
+      "cpuPackingMs": 4.822709
+    },
+    {
+      "table": "32768x12288-ffff",
+      "requests": 32,
+      "gpuFirstPassWallMs": 56.2337079999852,
+      "gpuFirstPassExecMs": 37.50125,
+      "gpuPackingWallMs": 25.580333999998402,
+      "gpuPackingExecMs": 8.317708,
+      "gpuAnswerWallMs": 62.32408299998497,
+      "gpuAnswerExecMs": 38.683167,
+      "gpuAnswerConcurrentPerCallMs": 73.65771350000068,
+      "gpuUploadMs": 163.45441700000083,
+      "gpuResidentMiB": 960,
+      "gpuCallScratchMiB": 81.03247833251953,
+      "cpuRespondMs": 1027.9429579999996,
+      "cpuFirstPassMs": 678.69304,
+      "cpuPackingMs": 152.641545
+    }
+  ],
+  "cases": [
+    {
+      "id": "2048x2048-random",
+      "rows": 2048,
+      "cols": 2048,
+      "kind": "random",
+      "cpu": {
+        "node": "v24.9.0",
+        "cpus": 16,
+        "loadBefore": [
+          21.6015625,
+          20.1455078125,
+          16.755859375
+        ],
+        "loadAfter": [
+          20.75244140625,
+          19.99365234375,
+          16.7216796875
+        ],
+        "build": {
+          "rows": 2048,
+          "cols": 2048,
+          "setupMs": 1.229209,
+          "readMs": 1.074667,
+          "hintsMs": 31.579125,
+          "packingMs": 398.039,
+          "layoutMs": 0,
+          "prepareMs": 438.501541,
+          "publishMs": 0.042624999999999996,
+          "checkMs": 32.533041,
+          "totalMs": 473.659542,
+          "tableBytes": 8388608,
+          "packingBytes": 33587200,
+          "masksBytes": 14884,
+          "checkedRows": [
+            0,
+            519,
+            2047
+          ],
+          "maxPhaseError": 18589155328,
+          "maxPhaseErrorLog2": 34.113742166049185,
+          "phaseLimitLog2": 37
+        },
+        "buildMs": 477.098875,
+        "referenceMs": 651.2534579999999,
+        "referenceMasksEqual": true,
+        "matrixMaxAbs": 37429449,
+        "respond": [
+          {
+            "count": 1,
+            "respondMs": [
+              1.037584000000038,
+              1.052041000000031,
+              1.1519170000000258,
+              1.0971660000000156,
+              1.4829169999999294,
+              0.8842919999999594,
+              1.2967909999999847,
+              0.7344590000000153,
+              0.7885830000000169
+            ],
+            "stages": [
+              {
+                "deserializeMs": 0.11825000000000001,
+                "matrixVectorMs": 0.277375,
+                "packingMs": 0.321,
+                "serializationMs": 0.080666
+              },
+              {
+                "deserializeMs": 0.08062499999999999,
+                "matrixVectorMs": 0.372042,
+                "packingMs": 0.443583,
+                "serializationMs": 0.082292
+              },
+              {
+                "deserializeMs": 0.069208,
+                "matrixVectorMs": 0.544375,
+                "packingMs": 0.5404169999999999,
+                "serializationMs": 0.08545799999999999
+              },
+              {
+                "deserializeMs": 0.068125,
+                "matrixVectorMs": 0.37525,
+                "packingMs": 0.32899999999999996,
+                "serializationMs": 0.08158299999999999
+              },
+              {
+                "deserializeMs": 0.06804199999999999,
+                "matrixVectorMs": 0.477083,
+                "packingMs": 0.328042,
+                "serializationMs": 0.08174999999999999
+              },
+              {
+                "deserializeMs": 0.067458,
+                "matrixVectorMs": 0.426166,
+                "packingMs": 0.319459,
+                "serializationMs": 0.081333
+              },
+              {
+                "deserializeMs": 0.070958,
+                "matrixVectorMs": 0.456125,
+                "packingMs": 0.38125000000000003,
+                "serializationMs": 0.081834
+              },
+              {
+                "deserializeMs": 0.067125,
+                "matrixVectorMs": 0.280084,
+                "packingMs": 0.288167,
+                "serializationMs": 0.080875
+              },
+              {
+                "deserializeMs": 0.06787499999999999,
+                "matrixVectorMs": 0.326625,
+                "packingMs": 0.34075,
+                "serializationMs": 0.080583
+              }
+            ],
+            "timedEqual": true
+          },
+          {
+            "count": 32,
+            "respondMs": [
+              36.308832999999936,
+              41.61579100000006,
+              32.74470800000006,
+              39.40116699999999,
+              50.903542000000016,
+              54.01062500000012,
+              30.501625000000104,
+              26.607332999999926,
+              30.335459000000128
+            ],
+            "stages": [
+              {
+                "deserializeMs": 2.345832,
+                "matrixVectorMs": 13.43925,
+                "packingMs": 14.715003,
+                "serializationMs": 2.633585
+              },
+              {
+                "deserializeMs": 2.1973350000000003,
+                "matrixVectorMs": 11.163831000000002,
+                "packingMs": 10.140419000000001,
+                "serializationMs": 2.597999
+              },
+              {
+                "deserializeMs": 2.1963719999999998,
+                "matrixVectorMs": 11.427795,
+                "packingMs": 10.716539,
+                "serializationMs": 2.601500999999999
+              },
+              {
+                "deserializeMs": 2.2366289999999998,
+                "matrixVectorMs": 14.820371999999997,
+                "packingMs": 15.565083999999999,
+                "serializationMs": 2.6326650000000003
+              },
+              {
+                "deserializeMs": 2.194751,
+                "matrixVectorMs": 12.137623999999999,
+                "packingMs": 11.135252,
+                "serializationMs": 2.6281710000000005
+              },
+              {
+                "deserializeMs": 2.2136240000000003,
+                "matrixVectorMs": 12.722537999999998,
+                "packingMs": 12.237291999999998,
+                "serializationMs": 2.6718350000000006
+              },
+              {
+                "deserializeMs": 2.2002930000000003,
+                "matrixVectorMs": 9.350749,
+                "packingMs": 9.837292,
+                "serializationMs": 2.6031699999999995
+              },
+              {
+                "deserializeMs": 2.2174149999999995,
+                "matrixVectorMs": 12.772959000000004,
+                "packingMs": 13.696416999999999,
+                "serializationMs": 2.6675
+              },
+              {
+                "deserializeMs": 2.229539000000001,
+                "matrixVectorMs": 9.504961000000003,
+                "packingMs": 11.840499999999999,
+                "serializationMs": 2.604293
+              }
+            ],
+            "timedEqual": true
+          }
+        ],
+        "wallet": {
+          "openMs": 6.638582999999926,
+          "requestMs": [
+            16.88387499999999,
+            8.692375000000084,
+            8.554583999999977,
+            8.631749999999897,
+            8.422667000000047,
+            8.597584000000097,
+            8.272624999999948,
+            8.068624999999997,
+            7.8440839999999525,
+            8.125832999999943,
+            8.362083999999982,
+            8.383833999999979,
+            8.627083999999968,
+            7.988249999999994,
+            8.077499999999986,
+            8.348542000000066,
+            8.435624999999959,
+            8.461291999999958,
+            8,
+            8.486667000000011,
+            8.075958000000014,
+            7.800707999999986,
+            7.879916999999978,
+            7.929666999999995,
+            9.08604200000002,
+            8.540540999999962,
+            8.366375000000062,
+            8.776958000000036,
+            8.364874999999984,
+            8.337125000000015,
+            11.019709000000034,
+            8.96545900000001
+          ],
+          "decodeMs": [
+            0.36924999999996544,
+            0.11695799999984047,
+            0.10174999999981083,
+            0.11362499999995634,
+            0.08370799999988776,
+            0.0745839999999589,
+            0.07437499999991815,
+            0.07008299999984047,
+            0.11166600000001381,
+            0.09166700000014316,
+            0.06941699999993034,
+            0.057624999999916326,
+            0.06708300000013878,
+            0.05741600000010294,
+            0.06470899999999347,
+            0.06262500000002547,
+            0.07966699999997218,
+            0.0648750000000291,
+            0.04808400000001711,
+            0.04329199999983757,
+            0.041749999999865395,
+            0.03654200000005403,
+            0.037833999999975276,
+            0.041707999999971435,
+            0.04108300000007148,
+            0.0388749999999618,
+            0.05029200000012679,
+            0.04595799999992778,
+            0.08141699999987395,
+            0.051832999999987805,
+            0.039416000000073836,
+            0.06662500000015825
+          ]
+        },
+        "decodedWrong": 0,
+        "decodedRows": 32
+      },
+      "gpu": {
+        "firstCreateMs": 27.083999999999833,
+        "uploadMs": 21.016458000000057,
+        "residentBytes": 41943040,
+        "chunkRows": 2048,
+        "calls": {
+          "1": {
+            "shape": {
+              "count": 1,
+              "countPadded": 1,
+              "requestsPerInvocation": 1,
+              "segmentRows": 256,
+              "scanSegments": 8,
+              "packSegments": 16,
+              "scratchBytes": 543148
+            },
+            "firstPass": {
+              "wallMs": [
+                13.46762499999977,
+                14.512459000000035,
+                13.163250000000062,
+                14.802874999999858,
+                15.974249999999756,
+                15.660584000000199,
+                17.035707999999886,
+                17.23245799999995,
+                14.58770800000002
+              ],
+              "stages": [
+                {
+                  "unpack": 0.011792,
+                  "scan": 0.346167,
+                  "pack": null,
+                  "finish": 0.0195,
+                  "total": 0.377459
+                },
+                {
+                  "unpack": 0.66275,
+                  "scan": 0.345042,
+                  "pack": null,
+                  "finish": 0.019,
+                  "total": 1.026792
+                },
+                {
+                  "unpack": 0.011459,
+                  "scan": 0.34525,
+                  "pack": null,
+                  "finish": 0.019,
+                  "total": 0.375709
+                },
+                {
+                  "unpack": 0.011542,
+                  "scan": 0.348042,
+                  "pack": null,
+                  "finish": 0.018042,
+                  "total": 0.377626
+                },
+                {
+                  "unpack": 0.01175,
+                  "scan": 0.344125,
+                  "pack": null,
+                  "finish": 0.017791,
+                  "total": 0.373666
+                },
+                {
+                  "unpack": 0.011542,
+                  "scan": 0.346417,
+                  "pack": null,
+                  "finish": 0.018666,
+                  "total": 0.376625
+                },
+                {
+                  "unpack": 0.012959,
+                  "scan": 0.47125,
+                  "pack": null,
+                  "finish": 0.024708,
+                  "total": 0.508917
+                },
+                {
+                  "unpack": 0.011375,
+                  "scan": 0.440167,
+                  "pack": null,
+                  "finish": 0.044667,
+                  "total": 0.49620899999999996
+                },
+                {
+                  "unpack": 0.011833,
+                  "scan": 0.349791,
+                  "pack": null,
+                  "finish": 0.044667,
+                  "total": 0.406291
+                }
+              ]
+            },
+            "packing": {
+              "wallMs": [
+                15.413625000000138,
+                15.676958000000013,
+                16.505040999999892,
+                16.544374999999945,
+                14.839249999999993,
+                15.518874999999753,
+                14.542332999999871,
+                15.765124999999898,
+                15.155915999999706
+              ],
+              "stages": [
+                {
+                  "unpack": 0.012208,
+                  "scan": null,
+                  "pack": 0.366084,
+                  "finish": 0.027292,
+                  "total": 0.405584
+                },
+                {
+                  "unpack": 0.012083,
+                  "scan": null,
+                  "pack": 0.365875,
+                  "finish": 0.026959,
+                  "total": 0.404917
+                },
+                {
+                  "unpack": 0.014917,
+                  "scan": null,
+                  "pack": 0.363083,
+                  "finish": 0.027708,
+                  "total": 0.40570799999999996
+                },
+                {
+                  "unpack": 0.012083,
+                  "scan": null,
+                  "pack": 0.362916,
+                  "finish": 0.027667,
+                  "total": 0.402666
+                },
+                {
+                  "unpack": 0.012167,
+                  "scan": null,
+                  "pack": 0.359958,
+                  "finish": 0.027333,
+                  "total": 0.399458
+                },
+                {
+                  "unpack": 0.012208,
+                  "scan": null,
+                  "pack": 0.38075,
+                  "finish": 0.027083,
+                  "total": 0.420041
+                },
+                {
+                  "unpack": 0.01325,
+                  "scan": null,
+                  "pack": 0.35975,
+                  "finish": 0.02725,
+                  "total": 0.40025
+                },
+                {
+                  "unpack": 0.013625,
+                  "scan": null,
+                  "pack": 0.4755,
+                  "finish": 0.027167,
+                  "total": 0.516292
+                },
+                {
+                  "unpack": 0.012,
+                  "scan": null,
+                  "pack": 0.365417,
+                  "finish": 0.027333,
+                  "total": 0.40475
+                }
+              ]
+            },
+            "answer": {
+              "wallMs": [
+                15.255249999999705,
+                15.78170799999998,
+                14.779833000000053,
+                14.260667000000012,
+                15.973916999999801,
+                14.574791999999889,
+                14.34762499999988,
+                14.623291999999765,
+                13.399625000000015
+              ],
+              "stages": [
+                {
+                  "unpack": 0.024917,
+                  "scan": 0.346,
+                  "pack": 0.375833,
+                  "finish": 0.222,
+                  "total": 0.9687499999999999
+                },
+                {
+                  "unpack": 0.024416,
+                  "scan": 0.34575,
+                  "pack": 0.35675,
+                  "finish": 0.363542,
+                  "total": 1.090458
+                },
+                {
+                  "unpack": 0.024417,
+                  "scan": 0.346291,
+                  "pack": 0.3585,
+                  "finish": 0.219958,
+                  "total": 0.949166
+                },
+                {
+                  "unpack": 0.026958,
+                  "scan": 0.344625,
+                  "pack": 0.360583,
+                  "finish": 0.225459,
+                  "total": 0.9576250000000001
+                },
+                {
+                  "unpack": 0.024958,
+                  "scan": 0.387417,
+                  "pack": 0.551375,
+                  "finish": 0.224375,
+                  "total": 1.1881249999999999
+                },
+                {
+                  "unpack": 0.025292,
+                  "scan": 0.414083,
+                  "pack": 0.506625,
+                  "finish": 0.539667,
+                  "total": 1.4856669999999998
+                },
+                {
+                  "unpack": 0.024875,
+                  "scan": 0.34725,
+                  "pack": 0.363,
+                  "finish": 0.53175,
+                  "total": 1.266875
+                },
+                {
+                  "unpack": 0.023709,
+                  "scan": 0.34525,
+                  "pack": 0.3585,
+                  "finish": 0.22375,
+                  "total": 0.951209
+                },
+                {
+                  "unpack": 0.028417,
+                  "scan": 0.347333,
+                  "pack": 0.358583,
+                  "finish": 0.223083,
+                  "total": 0.9574159999999999
+                }
+              ]
+            },
+            "concurrent": {
+              "calls": 16,
+              "totalMs": 64.25558300000012,
+              "perCallMs": 4.015973937500007,
+              "allEqual": true
+            }
+          },
+          "32": {
+            "shape": {
+              "count": 32,
+              "countPadded": 32,
+              "requestsPerInvocation": 2,
+              "segmentRows": 256,
+              "scanSegments": 8,
+              "packSegments": 8,
+              "scratchBytes": 13182216
+            },
+            "firstPass": {
+              "wallMs": [
+                16.652250000000095,
+                18.31116699999984,
+                18.407624999999825,
+                16.625583000000006,
+                17.529875000000175,
+                19.496000000000095,
+                18.109708000000865,
+                17.723500000000058,
+                16.754667000000154
+              ],
+              "stages": [
+                {
+                  "unpack": 0.023667,
+                  "scan": 1.544041,
+                  "pack": null,
+                  "finish": 0.016458,
+                  "total": 1.584166
+                },
+                {
+                  "unpack": 0.023542,
+                  "scan": 1.545167,
+                  "pack": null,
+                  "finish": 0.043084,
+                  "total": 1.611793
+                },
+                {
+                  "unpack": 0.024417,
+                  "scan": 1.592833,
+                  "pack": null,
+                  "finish": 0.043541,
+                  "total": 1.660791
+                },
+                {
+                  "unpack": 0.023125,
+                  "scan": 1.561875,
+                  "pack": null,
+                  "finish": 0.044958,
+                  "total": 1.6299579999999998
+                },
+                {
+                  "unpack": 0.02275,
+                  "scan": 1.564375,
+                  "pack": null,
+                  "finish": 0.043125,
+                  "total": 1.63025
+                },
+                {
+                  "unpack": 0.023042,
+                  "scan": 1.613958,
+                  "pack": null,
+                  "finish": 0.042542,
+                  "total": 1.679542
+                },
+                {
+                  "unpack": 0.023917,
+                  "scan": 1.594833,
+                  "pack": null,
+                  "finish": 0.88325,
+                  "total": 2.502
+                },
+                {
+                  "unpack": 0.040917,
+                  "scan": 1.595292,
+                  "pack": null,
+                  "finish": 0.04425,
+                  "total": 1.680459
+                },
+                {
+                  "unpack": 0.025,
+                  "scan": 1.545542,
+                  "pack": null,
+                  "finish": 0.031083,
+                  "total": 1.601625
+                }
+              ]
+            },
+            "packing": {
+              "wallMs": [
+                20.974957999999788,
+                18.919332999999824,
+                19.064124999999876,
+                20.519000000000233,
+                18.880874999999833,
+                19.46954100000039,
+                18.658042000000023,
+                19.60741599999983,
+                19.881000000000313
+              ],
+              "stages": [
+                {
+                  "unpack": 0.05675,
+                  "scan": null,
+                  "pack": 5.079625,
+                  "finish": 0.043542,
+                  "total": 5.179917
+                },
+                {
+                  "unpack": 0.052792,
+                  "scan": null,
+                  "pack": 4.988667,
+                  "finish": 0.50525,
+                  "total": 5.546709
+                },
+                {
+                  "unpack": 0.057958,
+                  "scan": null,
+                  "pack": 5.039375,
+                  "finish": 0.044,
+                  "total": 5.1413329999999995
+                },
+                {
+                  "unpack": 0.058084,
+                  "scan": null,
+                  "pack": 5.073875,
+                  "finish": 0.04375,
+                  "total": 5.175709
+                },
+                {
+                  "unpack": 0.053083,
+                  "scan": null,
+                  "pack": 4.987208,
+                  "finish": 0.497916,
+                  "total": 5.538207
+                },
+                {
+                  "unpack": 0.052375,
+                  "scan": null,
+                  "pack": 5.058667,
+                  "finish": 0.043833,
+                  "total": 5.154875
+                },
+                {
+                  "unpack": 0.054875,
+                  "scan": null,
+                  "pack": 5.074333,
+                  "finish": 0.5825,
+                  "total": 5.711708
+                },
+                {
+                  "unpack": 0.05275,
+                  "scan": null,
+                  "pack": 4.987792,
+                  "finish": 0.498625,
+                  "total": 5.539167
+                },
+                {
+                  "unpack": 0.050542,
+                  "scan": null,
+                  "pack": 5.166,
+                  "finish": 0.043125,
+                  "total": 5.259667
+                }
+              ]
+            },
+            "answer": {
+              "wallMs": [
+                25.26458300000013,
+                23.342625000000226,
+                26.28558299999986,
+                18.603958000000148,
+                20.334082999999737,
+                20.624125000000276,
+                20.52645900000016,
+                20.761457999999948,
+                22.97699999999986
+              ],
+              "stages": [
+                {
+                  "unpack": 0.086084,
+                  "scan": 1.550083,
+                  "pack": 5.173916,
+                  "finish": 0.569,
+                  "total": 7.3790830000000005
+                },
+                {
+                  "unpack": 0.087417,
+                  "scan": 1.560791,
+                  "pack": 5.561917,
+                  "finish": 0.569,
+                  "total": 7.7791250000000005
+                },
+                {
+                  "unpack": 0.088125,
+                  "scan": 1.568625,
+                  "pack": 5.121542,
+                  "finish": 0.173333,
+                  "total": 6.951625
+                },
+                {
+                  "unpack": 0.022291,
+                  "scan": 0.50175,
+                  "pack": 1.718042,
+                  "finish": 0.638333,
+                  "total": 2.8804160000000003
+                },
+                {
+                  "unpack": 0.025292,
+                  "scan": 0.580542,
+                  "pack": 1.959709,
+                  "finish": 0.061125,
+                  "total": 2.626668
+                },
+                {
+                  "unpack": 0.270959,
+                  "scan": 0.585625,
+                  "pack": 1.904416,
+                  "finish": 0.186167,
+                  "total": 2.9471670000000003
+                },
+                {
+                  "unpack": 0.432375,
+                  "scan": 0.691584,
+                  "pack": 2.187375,
+                  "finish": 0.064458,
+                  "total": 3.3757919999999997
+                },
+                {
+                  "unpack": 1.257792,
+                  "scan": 0.789542,
+                  "pack": 2.135,
+                  "finish": 0.082333,
+                  "total": 4.264666999999999
+                },
+                {
+                  "unpack": 0.109875,
+                  "scan": 1.587792,
+                  "pack": 2.892334,
+                  "finish": 0.191583,
+                  "total": 4.7815840000000005
+                }
+              ]
+            },
+            "concurrent": {
+              "calls": 16,
+              "totalMs": 134.48724999999922,
+              "perCallMs": 8.405453124999951,
+              "allEqual": true
+            }
+          }
+        },
+        "hintsMs": 182.5450420000002
+      }
+    },
+    {
+      "id": "2048x2048-ffff",
+      "rows": 2048,
+      "cols": 2048,
+      "kind": "ffff",
+      "cpu": {
+        "node": "v24.9.0",
+        "cpus": 16,
+        "loadBefore": [
+          20.75244140625,
+          19.99365234375,
+          16.7216796875
+        ],
+        "loadAfter": [
+          19.81103515625,
+          19.81103515625,
+          16.67626953125
+        ],
+        "build": {
+          "rows": 2048,
+          "cols": 2048,
+          "setupMs": 0.584459,
+          "readMs": 1.258542,
+          "hintsMs": 27.094,
+          "packingMs": 357.73658400000005,
+          "layoutMs": 0.000042,
+          "prepareMs": 388.80775,
+          "publishMs": 0.030708,
+          "checkMs": 25.54675,
+          "totalMs": 416.645708,
+          "tableBytes": 8388608,
+          "packingBytes": 33587200,
+          "masksBytes": 14884,
+          "checkedRows": [
+            0,
+            865,
+            2047
+          ],
+          "maxPhaseError": 19897778176,
+          "maxPhaseErrorLog2": 34.211888294546,
+          "phaseLimitLog2": 37
+        },
+        "buildMs": 418.08050000000003,
+        "referenceMs": 618.109541,
+        "referenceMasksEqual": true,
+        "matrixMaxAbs": 34732231,
+        "respond": [
+          {
+            "count": 1,
+            "respondMs": [
+              1.132249999999999,
+              1.5764169999999922,
+              1.700458000000026,
+              1.340249999999969,
+              1.2839999999999918,
+              1.3734160000000202,
+              1.7290000000000418,
+              1.4632500000000164,
+              2.4663329999999632
+            ],
+            "stages": [
+              {
+                "deserializeMs": 0.078875,
+                "matrixVectorMs": 1.472875,
+                "packingMs": 0.726833,
+                "serializationMs": 0.187542
+              },
+              {
+                "deserializeMs": 0.06887499999999999,
+                "matrixVectorMs": 0.592333,
+                "packingMs": 0.720417,
+                "serializationMs": 0.082125
+              },
+              {
+                "deserializeMs": 0.069417,
+                "matrixVectorMs": 0.33225000000000005,
+                "packingMs": 1.0252919999999999,
+                "serializationMs": 0.08325
+              },
+              {
+                "deserializeMs": 0.069708,
+                "matrixVectorMs": 0.674083,
+                "packingMs": 0.574708,
+                "serializationMs": 0.082
+              },
+              {
+                "deserializeMs": 0.070958,
+                "matrixVectorMs": 0.445375,
+                "packingMs": 0.738333,
+                "serializationMs": 0.082583
+              },
+              {
+                "deserializeMs": 0.06899999999999999,
+                "matrixVectorMs": 0.448083,
+                "packingMs": 0.705417,
+                "serializationMs": 0.200708
+              },
+              {
+                "deserializeMs": 0.07012499999999999,
+                "matrixVectorMs": 0.40258299999999997,
+                "packingMs": 0.404375,
+                "serializationMs": 0.08566700000000001
+              },
+              {
+                "deserializeMs": 0.068792,
+                "matrixVectorMs": 0.454542,
+                "packingMs": 0.653208,
+                "serializationMs": 0.081375
+              },
+              {
+                "deserializeMs": 0.068583,
+                "matrixVectorMs": 0.29854200000000003,
+                "packingMs": 0.563709,
+                "serializationMs": 0.08129199999999999
+              }
+            ],
+            "timedEqual": true
+          },
+          {
+            "count": 32,
+            "respondMs": [
+              27.47758299999998,
+              45.11208399999998,
+              44.73229200000003,
+              51.41362499999991,
+              33.960959,
+              35.90229199999999,
+              37.850625000000036,
+              38.92637500000001,
+              32.184166000000005
+            ],
+            "stages": [
+              {
+                "deserializeMs": 2.2070400000000006,
+                "matrixVectorMs": 13.535664000000002,
+                "packingMs": 13.770962000000003,
+                "serializationMs": 2.931587
+              },
+              {
+                "deserializeMs": 2.2452069999999997,
+                "matrixVectorMs": 16.933625000000003,
+                "packingMs": 17.793875999999997,
+                "serializationMs": 2.9007099999999992
+              },
+              {
+                "deserializeMs": 2.216085,
+                "matrixVectorMs": 16.116960000000002,
+                "packingMs": 17.767457,
+                "serializationMs": 2.714207
+              },
+              {
+                "deserializeMs": 2.1909619999999994,
+                "matrixVectorMs": 11.360458,
+                "packingMs": 11.415793999999996,
+                "serializationMs": 2.600329
+              },
+              {
+                "deserializeMs": 2.248125,
+                "matrixVectorMs": 16.126832,
+                "packingMs": 16.934210000000004,
+                "serializationMs": 3.0862939999999996
+              },
+              {
+                "deserializeMs": 2.2347490000000008,
+                "matrixVectorMs": 11.926958999999998,
+                "packingMs": 12.183076999999999,
+                "serializationMs": 2.6208340000000003
+              },
+              {
+                "deserializeMs": 2.365627000000001,
+                "matrixVectorMs": 13.275416000000002,
+                "packingMs": 13.510707,
+                "serializationMs": 2.609209
+              },
+              {
+                "deserializeMs": 2.4238330000000006,
+                "matrixVectorMs": 18.620291,
+                "packingMs": 18.804498,
+                "serializationMs": 2.8808759999999984
+              },
+              {
+                "deserializeMs": 2.2717519999999998,
+                "matrixVectorMs": 11.241501999999999,
+                "packingMs": 12.719664999999999,
+                "serializationMs": 2.6450000000000005
+              }
+            ],
+            "timedEqual": true
+          }
+        ],
+        "wallet": {
+          "openMs": 6.3319589999999835,
+          "requestMs": [
+            10.986125000000015,
+            8.037915999999996,
+            8.35670799999997,
+            8.169167000000016,
+            8.229249999999979,
+            7.842874999999935,
+            7.943458000000078,
+            7.805000000000064,
+            7.91695900000002,
+            7.799125000000004,
+            8.101249999999936,
+            7.8523329999999305,
+            8.263832999999977,
+            7.835540999999921,
+            7.753708999999958,
+            7.77374999999995,
+            7.754083000000037,
+            8.171334000000002,
+            7.932542000000012,
+            8.360332999999969,
+            7.855249999999955,
+            8.61379199999999,
+            8.01404100000002,
+            7.932332999999971,
+            8.014332999999965,
+            7.906708000000094,
+            7.897749999999974,
+            7.877416999999923,
+            7.953708000000006,
+            7.865042000000017,
+            7.81737499999997,
+            7.854624999999942
+          ],
+          "decodeMs": [
+            0.3394580000001497,
+            0.12254199999983939,
+            0.1201250000001437,
+            0.12404199999991761,
+            0.12045800000009876,
+            0.07212500000014188,
+            0.07191700000021228,
+            0.0701249999999618,
+            0.06329200000004676,
+            0.0681250000000091,
+            0.06704199999990124,
+            0.06412499999987631,
+            0.06391700000017408,
+            0.054416999999830296,
+            0.055083999999851585,
+            0.05720799999994597,
+            0.060415999999804626,
+            0.047416999999995824,
+            0.05216700000005403,
+            0.03645800000003874,
+            0.0365830000000642,
+            0.03604100000006838,
+            0.05662499999993997,
+            0.06429099999991195,
+            0.04066699999998491,
+            0.04112499999996544,
+            0.03883399999995163,
+            0.054874999999810825,
+            0.04808299999990595,
+            0.040042000000084954,
+            0.039416999999957625,
+            0.06533399999989342
+          ]
+        },
+        "decodedWrong": 0,
+        "decodedRows": 32
+      },
+      "gpu": {
+        "firstCreateMs": 23.836041999999907,
+        "uploadMs": 21.73583299999973,
+        "residentBytes": 41943040,
+        "chunkRows": 2048,
+        "calls": {
+          "1": {
+            "shape": {
+              "count": 1,
+              "countPadded": 1,
+              "requestsPerInvocation": 1,
+              "segmentRows": 256,
+              "scanSegments": 8,
+              "packSegments": 16,
+              "scratchBytes": 543148
+            },
+            "firstPass": {
+              "wallMs": [
+                13.736917000000176,
+                13.188333000000057,
+                13.748125000000073,
+                14.973915999999917,
+                13.691374999999425,
+                13.624249999999847,
+                14.865749999999935,
+                15.211750000000393,
+                13.268750000000182
+              ],
+              "stages": [
+                {
+                  "unpack": 0.01125,
+                  "scan": 0.346208,
+                  "pack": null,
+                  "finish": 0.018584,
+                  "total": 0.376042
+                },
+                {
+                  "unpack": 0.011667,
+                  "scan": 0.347125,
+                  "pack": null,
+                  "finish": 0.017958,
+                  "total": 0.37675000000000003
+                },
+                {
+                  "unpack": 0.011417,
+                  "scan": 0.348834,
+                  "pack": null,
+                  "finish": 0.018291,
+                  "total": 0.378542
+                },
+                {
+                  "unpack": 0.012166,
+                  "scan": 0.351208,
+                  "pack": null,
+                  "finish": 0.018125,
+                  "total": 0.38149900000000003
+                },
+                {
+                  "unpack": 0.012334,
+                  "scan": 0.343875,
+                  "pack": null,
+                  "finish": 0.018625,
+                  "total": 0.374834
+                },
+                {
+                  "unpack": 0.011625,
+                  "scan": 0.346292,
+                  "pack": null,
+                  "finish": 0.018042,
+                  "total": 0.375959
+                },
+                {
+                  "unpack": 0.011459,
+                  "scan": 0.344458,
+                  "pack": null,
+                  "finish": 0.019416,
+                  "total": 0.37533299999999997
+                },
+                {
+                  "unpack": 0.012209,
+                  "scan": 0.345125,
+                  "pack": null,
+                  "finish": 0.018333,
+                  "total": 0.37566700000000003
+                },
+                {
+                  "unpack": 0.011375,
+                  "scan": 0.35175,
+                  "pack": null,
+                  "finish": 0.018834,
+                  "total": 0.381959
+                }
+              ]
+            },
+            "packing": {
+              "wallMs": [
+                13.226542000000336,
+                13.353583000000071,
+                14.402166999999281,
+                12.891041000000769,
+                12.619666000000507,
+                13.184249999999338,
+                15.175500000000284,
+                13.220416000000114,
+                13.567124999999578
+              ],
+              "stages": [
+                {
+                  "unpack": 0.021875,
+                  "scan": null,
+                  "pack": 0.365875,
+                  "finish": 0.02725,
+                  "total": 0.41500000000000004
+                },
+                {
+                  "unpack": 0.012875,
+                  "scan": null,
+                  "pack": 0.362875,
+                  "finish": 0.026917,
+                  "total": 0.402667
+                },
+                {
+                  "unpack": 0.012,
+                  "scan": null,
+                  "pack": 0.366542,
+                  "finish": 0.02675,
+                  "total": 0.405292
+                },
+                {
+                  "unpack": 0.01225,
+                  "scan": null,
+                  "pack": 0.360667,
+                  "finish": 0.027375,
+                  "total": 0.40029200000000004
+                },
+                {
+                  "unpack": 0.011916,
+                  "scan": null,
+                  "pack": 0.364667,
+                  "finish": 0.026792,
+                  "total": 0.40337500000000004
+                },
+                {
+                  "unpack": 0.013583,
+                  "scan": null,
+                  "pack": 0.366625,
+                  "finish": 0.026917,
+                  "total": 0.40712499999999996
+                },
+                {
+                  "unpack": 0.01175,
+                  "scan": null,
+                  "pack": 0.369209,
+                  "finish": 0.028041,
+                  "total": 0.40900000000000003
+                },
+                {
+                  "unpack": 0.012541,
+                  "scan": null,
+                  "pack": 0.378125,
+                  "finish": 0.02775,
+                  "total": 0.418416
+                },
+                {
+                  "unpack": 0.012416,
+                  "scan": null,
+                  "pack": 0.378917,
+                  "finish": 0.027,
+                  "total": 0.418333
+                }
+              ]
+            },
+            "answer": {
+              "wallMs": [
+                15.097625000000335,
+                13.355458999999428,
+                13.619042000000263,
+                15.364666999999827,
+                14.670583000000079,
+                13.483666000000085,
+                13.839082999999846,
+                17.96741700000075,
+                14.8559580000001
+              ],
+              "stages": [
+                {
+                  "unpack": 0.011458,
+                  "scan": 0.15325,
+                  "pack": 0.225208,
+                  "finish": 0.128792,
+                  "total": 0.518708
+                },
+                {
+                  "unpack": 0.011792,
+                  "scan": 0.179583,
+                  "pack": 0.19325,
+                  "finish": 0.128792,
+                  "total": 0.513417
+                },
+                {
+                  "unpack": 0.018208,
+                  "scan": 0.148542,
+                  "pack": 0.16175,
+                  "finish": 0.098333,
+                  "total": 0.426833
+                },
+                {
+                  "unpack": 0.011875,
+                  "scan": 0.184292,
+                  "pack": 0.227708,
+                  "finish": 0.084875,
+                  "total": 0.50875
+                },
+                {
+                  "unpack": 0.0145,
+                  "scan": 0.21175,
+                  "pack": 0.223542,
+                  "finish": 0.344167,
+                  "total": 0.793959
+                },
+                {
+                  "unpack": 0.024625,
+                  "scan": 0.345875,
+                  "pack": 0.35775,
+                  "finish": 0.1245,
+                  "total": 0.85275
+                },
+                {
+                  "unpack": 0.014542,
+                  "scan": 0.210833,
+                  "pack": 0.223125,
+                  "finish": 0.221625,
+                  "total": 0.670125
+                },
+                {
+                  "unpack": 0.028208,
+                  "scan": 0.36025,
+                  "pack": 0.558042,
+                  "finish": 0.122458,
+                  "total": 1.068958
+                },
+                {
+                  "unpack": 0.024292,
+                  "scan": 0.401042,
+                  "pack": 0.482791,
+                  "finish": 0.793791,
+                  "total": 1.701916
+                }
+              ]
+            },
+            "concurrent": {
+              "calls": 16,
+              "totalMs": 51.23108299999967,
+              "perCallMs": 3.2019426874999795,
+              "allEqual": true
+            }
+          },
+          "32": {
+            "shape": {
+              "count": 32,
+              "countPadded": 32,
+              "requestsPerInvocation": 2,
+              "segmentRows": 256,
+              "scanSegments": 8,
+              "packSegments": 8,
+              "scratchBytes": 13182216
+            },
+            "firstPass": {
+              "wallMs": [
+                14.211040999999568,
+                15.163416000000325,
+                18.50054199999977,
+                17.025832999999693,
+                15.892041999999492,
+                16.75733300000047,
+                16.326875000000655,
+                17.618249999999534,
+                16.434291999999914
+              ],
+              "stages": [
+                {
+                  "unpack": 0.010625,
+                  "scan": 0.672083,
+                  "pack": null,
+                  "finish": 0.014709,
+                  "total": 0.697417
+                },
+                {
+                  "unpack": 0.01675,
+                  "scan": 0.987,
+                  "pack": null,
+                  "finish": 0.013666,
+                  "total": 1.0174159999999999
+                },
+                {
+                  "unpack": 0.027292,
+                  "scan": 1.618667,
+                  "pack": null,
+                  "finish": 0.129041,
+                  "total": 1.7750000000000001
+                },
+                {
+                  "unpack": 0.684459,
+                  "scan": 1.547792,
+                  "pack": null,
+                  "finish": 0.129041,
+                  "total": 2.361292
+                },
+                {
+                  "unpack": 0.028458,
+                  "scan": 1.560042,
+                  "pack": null,
+                  "finish": 0.043958,
+                  "total": 1.632458
+                },
+                {
+                  "unpack": 0.042417,
+                  "scan": 1.781292,
+                  "pack": null,
+                  "finish": 0.044,
+                  "total": 1.867709
+                },
+                {
+                  "unpack": 0.041792,
+                  "scan": 1.776833,
+                  "pack": null,
+                  "finish": 0.641292,
+                  "total": 2.459917
+                },
+                {
+                  "unpack": 0.02725,
+                  "scan": 1.612208,
+                  "pack": null,
+                  "finish": 0.642333,
+                  "total": 2.281791
+                },
+                {
+                  "unpack": 0.023,
+                  "scan": 1.567417,
+                  "pack": null,
+                  "finish": 0.798958,
+                  "total": 2.3893750000000002
+                }
+              ]
+            },
+            "packing": {
+              "wallMs": [
+                20.36870799999997,
+                20.40745799999968,
+                15.855542000000241,
+                15.144249999999374,
+                16.49566700000014,
+                15.811499999999796,
+                17.599334000000454,
+                16.010040999999546,
+                17.102082999999766
+              ],
+              "stages": [
+                {
+                  "unpack": 0.056333,
+                  "scan": null,
+                  "pack": 5.234875,
+                  "finish": 0.03325,
+                  "total": 5.324458
+                },
+                {
+                  "unpack": 0.054958,
+                  "scan": null,
+                  "pack": 5.311333,
+                  "finish": 0.483958,
+                  "total": 5.850249
+                },
+                {
+                  "unpack": 0.013708,
+                  "scan": null,
+                  "pack": 1.618875,
+                  "finish": 0.370041,
+                  "total": 2.002624
+                },
+                {
+                  "unpack": 0.015375,
+                  "scan": null,
+                  "pack": 1.7935,
+                  "finish": 0.013875,
+                  "total": 1.82275
+                },
+                {
+                  "unpack": 0.364542,
+                  "scan": null,
+                  "pack": 1.885583,
+                  "finish": 0.013084,
+                  "total": 2.263209
+                },
+                {
+                  "unpack": 0.385417,
+                  "scan": null,
+                  "pack": 2.000792,
+                  "finish": 0.015166,
+                  "total": 2.4013750000000003
+                },
+                {
+                  "unpack": 0.017583,
+                  "scan": null,
+                  "pack": 2.177333,
+                  "finish": 0.014209,
+                  "total": 2.209125
+                },
+                {
+                  "unpack": 0.024125,
+                  "scan": null,
+                  "pack": 2.627,
+                  "finish": 0.217791,
+                  "total": 2.8689159999999996
+                },
+                {
+                  "unpack": 0.274542,
+                  "scan": null,
+                  "pack": 3.108791,
+                  "finish": 0.016458,
+                  "total": 3.399791
+                }
+              ]
+            },
+            "answer": {
+              "wallMs": [
+                22.11949999999979,
+                21.747792000000118,
+                21.186625000000276,
+                22.5170420000004,
+                22.270542000000205,
+                17.662749999999505,
+                15.458625000000211,
+                17.77583400000003,
+                18.593582999999853
+              ],
+              "stages": [
+                {
+                  "unpack": 0.072834,
+                  "scan": 1.554417,
+                  "pack": 4.994792,
+                  "finish": 0.408875,
+                  "total": 7.030918
+                },
+                {
+                  "unpack": 0.089333,
+                  "scan": 1.549084,
+                  "pack": 5.08175,
+                  "finish": 0.178,
+                  "total": 6.898167000000001
+                },
+                {
+                  "unpack": 0.086625,
+                  "scan": 1.550917,
+                  "pack": 5.072167,
+                  "finish": 0.632833,
+                  "total": 7.342542
+                },
+                {
+                  "unpack": 0.086833,
+                  "scan": 1.591209,
+                  "pack": 5.832458,
+                  "finish": 0.656167,
+                  "total": 8.166667
+                },
+                {
+                  "unpack": 0.0875,
+                  "scan": 1.551875,
+                  "pack": 5.52975,
+                  "finish": 0.17575,
+                  "total": 7.344875
+                },
+                {
+                  "unpack": 0.0215,
+                  "scan": 0.502792,
+                  "pack": 1.615792,
+                  "finish": 0.424,
+                  "total": 2.564084
+                },
+                {
+                  "unpack": 0.165833,
+                  "scan": 0.507125,
+                  "pack": 1.656417,
+                  "finish": 0.060458,
+                  "total": 2.3898330000000003
+                },
+                {
+                  "unpack": 0.032208,
+                  "scan": 0.57325,
+                  "pack": 1.843375,
+                  "finish": 0.062125,
+                  "total": 2.510958
+                },
+                {
+                  "unpack": 0.031583,
+                  "scan": 0.573458,
+                  "pack": 1.899958,
+                  "finish": 0.066625,
+                  "total": 2.571624
+                }
+              ]
+            },
+            "concurrent": {
+              "calls": 16,
+              "totalMs": 112.64783299999999,
+              "perCallMs": 7.0404895624999995,
+              "allEqual": true
+            }
+          }
+        },
+        "hintsMs": null
+      }
+    },
+    {
+      "id": "4096x12288-random",
+      "rows": 4096,
+      "cols": 12288,
+      "kind": "random",
+      "cpu": {
+        "node": "v24.9.0",
+        "cpus": 16,
+        "loadBefore": [
+          19.81103515625,
+          19.81103515625,
+          16.67626953125
+        ],
+        "loadAfter": [
+          17.6240234375,
+          19.3291015625,
+          16.55859375
+        ],
+        "build": {
+          "rows": 4096,
+          "cols": 12288,
+          "setupMs": 0.59375,
+          "readMs": 9.660667,
+          "hintsMs": 363.97920700000003,
+          "packingMs": 2311.243293,
+          "layoutMs": 0,
+          "prepareMs": 2708.646417,
+          "publishMs": 0.236375,
+          "checkMs": 102.45637500000001,
+          "totalMs": 2823.5850830000004,
+          "tableBytes": 100663296,
+          "packingBytes": 201523200,
+          "masksBytes": 89124,
+          "checkedRows": [
+            0,
+            1158,
+            4095
+          ],
+          "maxPhaseError": 20669530112,
+          "maxPhaseErrorLog2": 34.2667865406949,
+          "phaseLimitLog2": 37
+        },
+        "buildMs": 2824.985416,
+        "referenceMs": 4835.17275,
+        "referenceMasksEqual": true,
+        "matrixMaxAbs": 39159565,
+        "respond": [
+          {
+            "count": 1,
+            "respondMs": [
+              3.1688340000000608,
+              3.118582999999944,
+              3.751792000000023,
+              6.4503749999998945,
+              21.469375000000127,
+              3.1362910000002557,
+              4.736667000000125,
+              3.72387499999968,
+              4.368333000000348
+            ],
+            "stages": [
+              {
+                "deserializeMs": 0.089875,
+                "matrixVectorMs": 1.8495,
+                "packingMs": 1.5202499999999999,
+                "serializationMs": 0.14925
+              },
+              {
+                "deserializeMs": 0.089458,
+                "matrixVectorMs": 2.2236249999999997,
+                "packingMs": 1.7573750000000001,
+                "serializationMs": 0.16195900000000002
+              },
+              {
+                "deserializeMs": 0.090208,
+                "matrixVectorMs": 1.606042,
+                "packingMs": 1.445,
+                "serializationMs": 0.167625
+              },
+              {
+                "deserializeMs": 0.090125,
+                "matrixVectorMs": 1.6517909999999998,
+                "packingMs": 1.864167,
+                "serializationMs": 0.15687500000000001
+              },
+              {
+                "deserializeMs": 0.09025,
+                "matrixVectorMs": 2.2695,
+                "packingMs": 1.375208,
+                "serializationMs": 0.14508300000000002
+              },
+              {
+                "deserializeMs": 0.089167,
+                "matrixVectorMs": 1.383958,
+                "packingMs": 1.360625,
+                "serializationMs": 0.161917
+              },
+              {
+                "deserializeMs": 0.09025,
+                "matrixVectorMs": 1.297167,
+                "packingMs": 1.3296670000000002,
+                "serializationMs": 0.163458
+              },
+              {
+                "deserializeMs": 0.09879099999999999,
+                "matrixVectorMs": 1.824875,
+                "packingMs": 1.694917,
+                "serializationMs": 0.162666
+              },
+              {
+                "deserializeMs": 0.090042,
+                "matrixVectorMs": 2.026167,
+                "packingMs": 1.919958,
+                "serializationMs": 0.1535
+              }
+            ],
+            "timedEqual": true
+          },
+          {
+            "count": 32,
+            "respondMs": [
+              107.32825000000003,
+              126.8542080000002,
+              133.68787500000008,
+              143.59004099999993,
+              149.50466599999982,
+              265.37837500000023,
+              195.83279200000015,
+              211.1782919999996,
+              225.3472499999998
+            ],
+            "stages": [
+              {
+                "deserializeMs": 3.0321670000000003,
+                "matrixVectorMs": 65.889206,
+                "packingMs": 68.021333,
+                "serializationMs": 5.537083
+              },
+              {
+                "deserializeMs": 2.914834,
+                "matrixVectorMs": 66.151375,
+                "packingMs": 59.600207999999995,
+                "serializationMs": 5.121455999999999
+              },
+              {
+                "deserializeMs": 2.92679,
+                "matrixVectorMs": 140.542207,
+                "packingMs": 110.67932999999998,
+                "serializationMs": 5.471041
+              },
+              {
+                "deserializeMs": 2.969873000000001,
+                "matrixVectorMs": 68.27962600000001,
+                "packingMs": 59.616247,
+                "serializationMs": 5.031291000000001
+              },
+              {
+                "deserializeMs": 3.1904570000000003,
+                "matrixVectorMs": 111.24441599999999,
+                "packingMs": 91.13624800000001,
+                "serializationMs": 5.380123
+              },
+              {
+                "deserializeMs": 3.075122,
+                "matrixVectorMs": 94.24250099999996,
+                "packingMs": 94.135411,
+                "serializationMs": 5.220171000000001
+              },
+              {
+                "deserializeMs": 3.5942949999999994,
+                "matrixVectorMs": 139.593791,
+                "packingMs": 179.848162,
+                "serializationMs": 6.795663999999998
+              },
+              {
+                "deserializeMs": 3.342706,
+                "matrixVectorMs": 77.50979200000002,
+                "packingMs": 74.618542,
+                "serializationMs": 5.272499999999999
+              },
+              {
+                "deserializeMs": 3.021584,
+                "matrixVectorMs": 75.655792,
+                "packingMs": 73.86220799999998,
+                "serializationMs": 5.147043000000001
+              }
+            ],
+            "timedEqual": true
+          }
+        ],
+        "wallet": {
+          "openMs": 11.403999999999996,
+          "requestMs": [
+            13.540291999999681,
+            11.403499999999894,
+            11.35558299999957,
+            11.296125000000302,
+            11.293458999999984,
+            11.324290999999903,
+            11.420582999999624,
+            11.2956250000002,
+            11.2521670000001,
+            11.289624999999887,
+            11.412959000000228,
+            13.13591600000018,
+            11.315167000000201,
+            11.36304199999995,
+            11.233458000000155,
+            11.208042000000205,
+            11.167249999999967,
+            11.20091599999978,
+            11.271166999999878,
+            11.297790999999961,
+            11.232083999999759,
+            11.503791999999976,
+            12.077583000000232,
+            11.06066600000031,
+            13.353916000000027,
+            11.519874999999956,
+            11.314166999999998,
+            11.281542000000172,
+            12.091207999999824,
+            11.46304199999986,
+            11.501999999999953,
+            11.306250000000091
+          ],
+          "decodeMs": [
+            1.8519999999998618,
+            0.4142920000003869,
+            0.2515419999999722,
+            0.2078750000000582,
+            0.17525000000023283,
+            0.15870799999993324,
+            0.15662500000053114,
+            0.5227079999995112,
+            0.21683299999949668,
+            0.17912499999965803,
+            0.21158400000058464,
+            0.1522500000000946,
+            0.5853329999999914,
+            0.2504580000004353,
+            0.253458999999566,
+            0.2530829999996058,
+            0.1700829999999769,
+            0.15762499999982538,
+            0.14825000000018917,
+            0.2065420000008089,
+            0.21974999999929423,
+            0.16391700000076526,
+            0.14879199999995762,
+            0.15554100000008475,
+            0.1968750000005457,
+            0.21608300000025338,
+            0.1879590000007738,
+            0.155374999999367,
+            0.16058299999986048,
+            0.19029200000022684,
+            0.15370900000016263,
+            4.0960419999992155
+          ]
+        },
+        "decodedWrong": 0,
+        "decodedRows": 32
+      },
+      "gpu": {
+        "firstCreateMs": 65.10945899999933,
+        "uploadMs": 112.74299999999857,
+        "residentBytes": 301989888,
+        "chunkRows": 4096,
+        "calls": {
+          "1": {
+            "shape": {
+              "count": 1,
+              "countPadded": 1,
+              "requestsPerInvocation": 1,
+              "segmentRows": 256,
+              "scanSegments": 16,
+              "packSegments": 16,
+              "scratchBytes": 3397292
+            },
+            "firstPass": {
+              "wallMs": [
+                13.847333000001527,
+                14.999916999997367,
+                13.996374999998807,
+                15.312333999998373,
+                15.258834000000206,
+                13.198124999998981,
+                14.961041000002297,
+                15.962875000001077,
+                14.130249999998341
+              ],
+              "stages": [
+                {
+                  "unpack": 0.003709,
+                  "scan": 0.219375,
+                  "pack": null,
+                  "finish": 0.008166,
+                  "total": 0.23124999999999998
+                },
+                {
+                  "unpack": 0.003416,
+                  "scan": 0.234791,
+                  "pack": null,
+                  "finish": 0.008583,
+                  "total": 0.24679
+                },
+                {
+                  "unpack": 0.00375,
+                  "scan": 0.241291,
+                  "pack": null,
+                  "finish": 0.008583,
+                  "total": 0.253624
+                },
+                {
+                  "unpack": 0.003791,
+                  "scan": 0.249959,
+                  "pack": null,
+                  "finish": 0.0085,
+                  "total": 0.26225
+                },
+                {
+                  "unpack": 0.00375,
+                  "scan": 0.238458,
+                  "pack": null,
+                  "finish": 0.008916,
+                  "total": 0.251124
+                },
+                {
+                  "unpack": 0.003459,
+                  "scan": 0.242167,
+                  "pack": null,
+                  "finish": 0.009,
+                  "total": 0.254626
+                },
+                {
+                  "unpack": 0.003791,
+                  "scan": 0.238792,
+                  "pack": null,
+                  "finish": 0.008542,
+                  "total": 0.251125
+                },
+                {
+                  "unpack": 0.004,
+                  "scan": 0.320125,
+                  "pack": null,
+                  "finish": 0.008208,
+                  "total": 0.332333
+                },
+                {
+                  "unpack": 0.00425,
+                  "scan": 0.320125,
+                  "pack": null,
+                  "finish": 0.217,
+                  "total": 0.5413749999999999
+                }
+              ]
+            },
+            "packing": {
+              "wallMs": [
+                15.198208000001614,
+                14.286457999998674,
+                16.72599999999875,
+                16.891374999999243,
+                16.119332999998733,
+                16.97416599999997,
+                16.959124999997584,
+                19.143833000001905,
+                23.53112500000134
+              ],
+              "stages": [
+                {
+                  "unpack": 0.005084,
+                  "scan": null,
+                  "pack": 0.516458,
+                  "finish": 0.011583,
+                  "total": 0.533125
+                },
+                {
+                  "unpack": 0.005458,
+                  "scan": null,
+                  "pack": 0.540458,
+                  "finish": 0.011958,
+                  "total": 0.557874
+                },
+                {
+                  "unpack": 0.006916,
+                  "scan": null,
+                  "pack": 0.629167,
+                  "finish": 0.046875,
+                  "total": 0.6829580000000001
+                },
+                {
+                  "unpack": 0.011834,
+                  "scan": null,
+                  "pack": 1.155833,
+                  "finish": 0.030916,
+                  "total": 1.1985830000000002
+                },
+                {
+                  "unpack": 0.012458,
+                  "scan": null,
+                  "pack": 1.099208,
+                  "finish": 0.030916,
+                  "total": 1.142582
+                },
+                {
+                  "unpack": 0.011625,
+                  "scan": null,
+                  "pack": 1.101459,
+                  "finish": 0.029209,
+                  "total": 1.142293
+                },
+                {
+                  "unpack": 0.012125,
+                  "scan": null,
+                  "pack": 1.098708,
+                  "finish": 0.031791,
+                  "total": 1.142624
+                },
+                {
+                  "unpack": 0.012083,
+                  "scan": null,
+                  "pack": 1.0955,
+                  "finish": 0.031791,
+                  "total": 1.1393739999999999
+                },
+                {
+                  "unpack": 0.012458,
+                  "scan": null,
+                  "pack": 1.054542,
+                  "finish": 0.050584,
+                  "total": 1.1175840000000001
+                }
+              ]
+            },
+            "answer": {
+              "wallMs": [
+                14.926791999998386,
+                15.15229200000249,
+                14.4498330000024,
+                14.540583000001789,
+                15.028958999999304,
+                15.324834000002738,
+                13.515500000001339,
+                15.60441599999831,
+                15.662625000000844
+              ],
+              "stages": [
+                {
+                  "unpack": 0.072792,
+                  "scan": 0.278833,
+                  "pack": 0.572958,
+                  "finish": 0.082083,
+                  "total": 1.006666
+                },
+                {
+                  "unpack": 0.0095,
+                  "scan": 0.234,
+                  "pack": 0.442875,
+                  "finish": 0.07975,
+                  "total": 0.7661250000000001
+                },
+                {
+                  "unpack": 0.007583,
+                  "scan": 0.228875,
+                  "pack": 0.426042,
+                  "finish": 0.075667,
+                  "total": 0.738167
+                },
+                {
+                  "unpack": 0.007292,
+                  "scan": 0.238709,
+                  "pack": 0.435833,
+                  "finish": 0.075,
+                  "total": 0.756834
+                },
+                {
+                  "unpack": 0.018667,
+                  "scan": 0.225959,
+                  "pack": 0.493792,
+                  "finish": 0.077667,
+                  "total": 0.816085
+                },
+                {
+                  "unpack": 0.007292,
+                  "scan": 0.229375,
+                  "pack": 0.430083,
+                  "finish": 0.076333,
+                  "total": 0.7430829999999999
+                },
+                {
+                  "unpack": 0.007792,
+                  "scan": 0.252917,
+                  "pack": 0.458959,
+                  "finish": 0.075875,
+                  "total": 0.795543
+                },
+                {
+                  "unpack": 0.00775,
+                  "scan": 0.2345,
+                  "pack": 0.499833,
+                  "finish": 0.08025,
+                  "total": 0.822333
+                },
+                {
+                  "unpack": 0.040625,
+                  "scan": 0.245709,
+                  "pack": 0.498709,
+                  "finish": 0.075875,
+                  "total": 0.8609180000000001
+                }
+              ]
+            },
+            "concurrent": {
+              "calls": 16,
+              "totalMs": 83.73520799999824,
+              "perCallMs": 5.23345049999989,
+              "allEqual": true
+            }
+          },
+          "32": {
+            "shape": {
+              "count": 32,
+              "countPadded": 32,
+              "requestsPerInvocation": 2,
+              "segmentRows": 1024,
+              "scanSegments": 4,
+              "packSegments": 2,
+              "scratchBytes": 26920200
+            },
+            "firstPass": {
+              "wallMs": [
+                23.429833000001963,
+                31.64970899999753,
+                23.53441699999894,
+                19.235874999998487,
+                19.462500000001455,
+                22.89641599999959,
+                20.233500000002095,
+                20.807541999998648,
+                21.795458000000508
+              ],
+              "stages": [
+                {
+                  "unpack": 0.011334,
+                  "scan": 3.807791,
+                  "pack": null,
+                  "finish": 0.034291,
+                  "total": 3.8534159999999997
+                },
+                {
+                  "unpack": 0.012292,
+                  "scan": 3.725666,
+                  "pack": null,
+                  "finish": 0.027708,
+                  "total": 3.765666
+                },
+                {
+                  "unpack": 0.012125,
+                  "scan": 3.778167,
+                  "pack": null,
+                  "finish": 0.034708,
+                  "total": 3.8249999999999997
+                },
+                {
+                  "unpack": 0.011875,
+                  "scan": 3.727333,
+                  "pack": null,
+                  "finish": 0.028208,
+                  "total": 3.767416
+                },
+                {
+                  "unpack": 0.011333,
+                  "scan": 3.94125,
+                  "pack": null,
+                  "finish": 0.034333,
+                  "total": 3.9869160000000003
+                },
+                {
+                  "unpack": 0.019209,
+                  "scan": 3.72475,
+                  "pack": null,
+                  "finish": 0.042542,
+                  "total": 3.786501
+                },
+                {
+                  "unpack": 0.011417,
+                  "scan": 3.896167,
+                  "pack": null,
+                  "finish": 0.034458,
+                  "total": 3.9420420000000003
+                },
+                {
+                  "unpack": 0.019125,
+                  "scan": 3.737459,
+                  "pack": null,
+                  "finish": 0.033458,
+                  "total": 3.7900419999999997
+                },
+                {
+                  "unpack": 0.012459,
+                  "scan": 3.79625,
+                  "pack": null,
+                  "finish": 0.037083,
+                  "total": 3.8457920000000003
+                }
+              ]
+            },
+            "packing": {
+              "wallMs": [
+                30.7243750000016,
+                23.42395899999974,
+                22.725000000002183,
+                27.07654200000252,
+                24.099957999998878,
+                23.52587499999936,
+                23.62029099999927,
+                23.630583999998635,
+                24.95129100000122
+              ],
+              "stages": [
+                {
+                  "unpack": 0.011708,
+                  "scan": null,
+                  "pack": 6.487958,
+                  "finish": 0.029042,
+                  "total": 6.528708
+                },
+                {
+                  "unpack": 0.010958,
+                  "scan": null,
+                  "pack": 6.454041,
+                  "finish": 0.0265,
+                  "total": 6.491499
+                },
+                {
+                  "unpack": 0.011041,
+                  "scan": null,
+                  "pack": 6.403209,
+                  "finish": 0.026542,
+                  "total": 6.440792
+                },
+                {
+                  "unpack": 0.011416,
+                  "scan": null,
+                  "pack": 8.169958,
+                  "finish": 0.027959,
+                  "total": 8.209332999999999
+                },
+                {
+                  "unpack": 0.010917,
+                  "scan": null,
+                  "pack": 6.4085,
+                  "finish": 0.026542,
+                  "total": 6.445959
+                },
+                {
+                  "unpack": 0.012083,
+                  "scan": null,
+                  "pack": 6.815834,
+                  "finish": 0.025875,
+                  "total": 6.853791999999999
+                },
+                {
+                  "unpack": 0.0115,
+                  "scan": null,
+                  "pack": 6.468125,
+                  "finish": 0.028833,
+                  "total": 6.508458
+                },
+                {
+                  "unpack": 0.011458,
+                  "scan": null,
+                  "pack": 6.40925,
+                  "finish": 0.0285,
+                  "total": 6.4492080000000005
+                },
+                {
+                  "unpack": 0.01125,
+                  "scan": null,
+                  "pack": 6.477042,
+                  "finish": 0.026833,
+                  "total": 6.515125
+                }
+              ]
+            },
+            "answer": {
+              "wallMs": [
+                27.96245799999815,
+                27.699375000000146,
+                28.206749999997555,
+                29.121083000001818,
+                30.843708000000333,
+                31.39366599999994,
+                28.969750000000204,
+                28.268208999998024,
+                30.475459000001138
+              ],
+              "stages": [
+                {
+                  "unpack": 0.057416,
+                  "scan": 3.792791,
+                  "pack": 6.475292,
+                  "finish": 0.079334,
+                  "total": 10.404833
+                },
+                {
+                  "unpack": 0.029125,
+                  "scan": 3.731625,
+                  "pack": 6.419958,
+                  "finish": 0.071834,
+                  "total": 10.252542
+                },
+                {
+                  "unpack": 0.795417,
+                  "scan": 3.830625,
+                  "pack": 6.41375,
+                  "finish": 0.065625,
+                  "total": 11.105417
+                },
+                {
+                  "unpack": 0.100459,
+                  "scan": 3.728167,
+                  "pack": 6.515875,
+                  "finish": 0.063083,
+                  "total": 10.407584
+                },
+                {
+                  "unpack": 0.591875,
+                  "scan": 3.829333,
+                  "pack": 6.411542,
+                  "finish": 0.071083,
+                  "total": 10.903832999999999
+                },
+                {
+                  "unpack": 0.059375,
+                  "scan": 3.7815,
+                  "pack": 6.449291,
+                  "finish": 0.064459,
+                  "total": 10.354624999999999
+                },
+                {
+                  "unpack": 0.115459,
+                  "scan": 4.040458,
+                  "pack": 6.592084,
+                  "finish": 0.064417,
+                  "total": 10.812418000000001
+                },
+                {
+                  "unpack": 0.042083,
+                  "scan": 3.720833,
+                  "pack": 6.720667,
+                  "finish": 0.066917,
+                  "total": 10.5505
+                },
+                {
+                  "unpack": 0.073625,
+                  "scan": 3.779875,
+                  "pack": 6.418875,
+                  "finish": 0.068375,
+                  "total": 10.34075
+                }
+              ]
+            },
+            "concurrent": {
+              "calls": 16,
+              "totalMs": 322.94774999999936,
+              "perCallMs": 20.18423437499996,
+              "allEqual": true
+            }
+          }
+        },
+        "hintsMs": 572.3441669999993
+      }
+    },
+    {
+      "id": "4096x12288-ffff",
+      "rows": 4096,
+      "cols": 12288,
+      "kind": "ffff",
+      "cpu": {
+        "node": "v24.9.0",
+        "cpus": 16,
+        "loadBefore": [
+          17.6240234375,
+          19.3291015625,
+          16.55859375
+        ],
+        "loadAfter": [
+          28.56298828125,
+          21.669921875,
+          17.4765625
+        ],
+        "build": {
+          "rows": 4096,
+          "cols": 12288,
+          "setupMs": 0.613542,
+          "readMs": 10.157292,
+          "hintsMs": 429.852165,
+          "packingMs": 3251.972709,
+          "layoutMs": 0,
+          "prepareMs": 3706.550792,
+          "publishMs": 0.198416,
+          "checkMs": 118.89637499999999,
+          "totalMs": 3842.880792,
+          "tableBytes": 100663296,
+          "packingBytes": 201523200,
+          "masksBytes": 89124,
+          "checkedRows": [
+            0,
+            3055,
+            4095
+          ],
+          "maxPhaseError": 16777216000,
+          "maxPhaseErrorLog2": 33.965784284662085,
+          "phaseLimitLog2": 37
+        },
+        "buildMs": 3844.23,
+        "referenceMs": 5833.052583000001,
+        "referenceMasksEqual": true,
+        "matrixMaxAbs": 34715162,
+        "respond": [
+          {
+            "count": 1,
+            "respondMs": [
+              19.811916999999994,
+              13.013375000000451,
+              24.64929200000006,
+              16.860333999999966,
+              12.149375000000873,
+              13.541207999999642,
+              19.48791699999947,
+              8.299790999999459,
+              10.964582999999948
+            ],
+            "stages": [
+              {
+                "deserializeMs": 0.12808399999999998,
+                "matrixVectorMs": 5.836667,
+                "packingMs": 9.338875,
+                "serializationMs": 0.219958
+              },
+              {
+                "deserializeMs": 0.335417,
+                "matrixVectorMs": 20.316333,
+                "packingMs": 6.23375,
+                "serializationMs": 0.433375
+              },
+              {
+                "deserializeMs": 0.29154199999999997,
+                "matrixVectorMs": 4.945833,
+                "packingMs": 4.036292,
+                "serializationMs": 0.334458
+              },
+              {
+                "deserializeMs": 0.9067500000000001,
+                "matrixVectorMs": 17.854167,
+                "packingMs": 6.738957999999999,
+                "serializationMs": 0.168708
+              },
+              {
+                "deserializeMs": 0.420833,
+                "matrixVectorMs": 11.769667,
+                "packingMs": 5.035875000000001,
+                "serializationMs": 0.311708
+              },
+              {
+                "deserializeMs": 0.440084,
+                "matrixVectorMs": 4.34375,
+                "packingMs": 24.389625000000002,
+                "serializationMs": 0.585667
+              },
+              {
+                "deserializeMs": 0.170958,
+                "matrixVectorMs": 10.700667000000001,
+                "packingMs": 4.841291,
+                "serializationMs": 0.15225
+              },
+              {
+                "deserializeMs": 0.09079100000000001,
+                "matrixVectorMs": 5.9235,
+                "packingMs": 9.859083,
+                "serializationMs": 0.35966699999999996
+              },
+              {
+                "deserializeMs": 0.111042,
+                "matrixVectorMs": 6.122375,
+                "packingMs": 8.107167,
+                "serializationMs": 0.148292
+              }
+            ],
+            "timedEqual": true
+          },
+          {
+            "count": 32,
+            "respondMs": [
+              607.0872909999998,
+              477.38545800000065,
+              766.6206670000001,
+              938.5627080000004,
+              664.3504580000008,
+              687.5592909999996,
+              513.287542,
+              549.3632080000007,
+              599.0247920000002
+            ],
+            "stages": [
+              {
+                "deserializeMs": 4.125129000000001,
+                "matrixVectorMs": 304.35462300000006,
+                "packingMs": 370.8249169999999,
+                "serializationMs": 7.753419
+              },
+              {
+                "deserializeMs": 5.617331999999999,
+                "matrixVectorMs": 564.0233760000001,
+                "packingMs": 358.86408400000005,
+                "serializationMs": 10.702707000000002
+              },
+              {
+                "deserializeMs": 8.042874,
+                "matrixVectorMs": 226.545501,
+                "packingMs": 264.625166,
+                "serializationMs": 8.233288000000002
+              },
+              {
+                "deserializeMs": 4.995622,
+                "matrixVectorMs": 256.65445800000003,
+                "packingMs": 211.18850200000003,
+                "serializationMs": 9.128874999999999
+              },
+              {
+                "deserializeMs": 4.815046000000001,
+                "matrixVectorMs": 179.58437199999995,
+                "packingMs": 225.74433300000007,
+                "serializationMs": 8.352127000000003
+              },
+              {
+                "deserializeMs": 5.070123,
+                "matrixVectorMs": 215.50133200000002,
+                "packingMs": 185.68013099999996,
+                "serializationMs": 7.6954590000000005
+              },
+              {
+                "deserializeMs": 4.710041,
+                "matrixVectorMs": 342.99483299999997,
+                "packingMs": 248.92541299999996,
+                "serializationMs": 7.635707999999999
+              },
+              {
+                "deserializeMs": 7.1683330000000005,
+                "matrixVectorMs": 335.740084,
+                "packingMs": 366.27829100000014,
+                "serializationMs": 10.229000000000001
+              },
+              {
+                "deserializeMs": 4.881418999999998,
+                "matrixVectorMs": 411.09849899999995,
+                "packingMs": 340.346124,
+                "serializationMs": 9.180208000000002
+              }
+            ],
+            "timedEqual": true
+          }
+        ],
+        "wallet": {
+          "openMs": 14.13391700000011,
+          "requestMs": [
+            15.975625000000036,
+            12.033374999999978,
+            23.31179199999997,
+            11.872624999999971,
+            11.923791000000165,
+            11.752042000000074,
+            12.024791000000278,
+            12.05929100000003,
+            11.994333000000097,
+            11.705417000000125,
+            18.216207999999824,
+            25.53654200000028,
+            13.644624999999905,
+            20.932707999999366,
+            11.179541999999856,
+            11.490999999999985,
+            16.47900000000027,
+            12.863666000000194,
+            20.017790999999306,
+            14.528708000000734,
+            11.733374999999796,
+            18.797750000000633,
+            12.022417000000132,
+            12.051583000000392,
+            11.950749999999971,
+            11.930250000000342,
+            20.341416999999637,
+            12.265124999999898,
+            13.710959000000003,
+            11.90625,
+            11.897291999999652,
+            11.895333000000392
+          ],
+          "decodeMs": [
+            3.569415999998455,
+            0.2955419999998412,
+            0.17233300000225427,
+            0.17545899999822723,
+            0.24204200000167475,
+            0.18487499999901047,
+            0.5792500000025029,
+            0.45633299999826704,
+            0.5427909999998519,
+            0.17224999999962165,
+            0.14395799999692827,
+            1.2277919999978621,
+            0.1927079999986745,
+            0.20808300000135205,
+            0.2071670000004815,
+            0.2013330000008864,
+            0.1884169999975711,
+            0.19712499999877764,
+            0.1968749999978172,
+            0.19695800000044983,
+            0.20270800000071176,
+            0.18233300000065356,
+            0.19520799999736482,
+            0.21945899999991525,
+            0.21379200000228593,
+            0.204583000002458,
+            0.20449999999982538,
+            0.19800000000032014,
+            0.19962500000110595,
+            0.19962500000110595,
+            0.20275000000037835,
+            0.20287499999903957
+          ]
+        },
+        "decodedWrong": 0,
+        "decodedRows": 32
+      },
+      "gpu": {
+        "firstCreateMs": 145.66729099999793,
+        "uploadMs": 69.49124999999913,
+        "residentBytes": 301989888,
+        "chunkRows": 4096,
+        "calls": {
+          "1": {
+            "shape": {
+              "count": 1,
+              "countPadded": 1,
+              "requestsPerInvocation": 1,
+              "segmentRows": 256,
+              "scanSegments": 16,
+              "packSegments": 16,
+              "scratchBytes": 3397292
+            },
+            "firstPass": {
+              "wallMs": [
+                12.90820800000074,
+                14.055458000002545,
+                16.255791000003228,
+                16.763417000001937,
+                16.595208000006096,
+                15.135708000001614,
+                16.455000000001746,
+                15.1997080000001,
+                14.826333999997587
+              ],
+              "stages": [
+                {
+                  "unpack": 0.005458,
+                  "scan": 0.289417,
+                  "pack": null,
+                  "finish": 0.013375,
+                  "total": 0.30824999999999997
+                },
+                {
+                  "unpack": 0.011542,
+                  "scan": 0.391083,
+                  "pack": null,
+                  "finish": 0.014042,
+                  "total": 0.416667
+                },
+                {
+                  "unpack": 0.012,
+                  "scan": 0.663166,
+                  "pack": null,
+                  "finish": 0.019042,
+                  "total": 0.694208
+                },
+                {
+                  "unpack": 0.01175,
+                  "scan": 0.660042,
+                  "pack": null,
+                  "finish": 0.026125,
+                  "total": 0.697917
+                },
+                {
+                  "unpack": 0.011334,
+                  "scan": 0.664292,
+                  "pack": null,
+                  "finish": 0.026417,
+                  "total": 0.702043
+                },
+                {
+                  "unpack": 0.011542,
+                  "scan": 0.68625,
+                  "pack": null,
+                  "finish": 0.025959,
+                  "total": 0.723751
+                },
+                {
+                  "unpack": 0.011708,
+                  "scan": 0.68625,
+                  "pack": null,
+                  "finish": 0.027084,
+                  "total": 0.7250420000000001
+                },
+                {
+                  "unpack": 0.011666,
+                  "scan": 0.673292,
+                  "pack": null,
+                  "finish": 0.024,
+                  "total": 0.708958
+                },
+                {
+                  "unpack": 0.011542,
+                  "scan": 0.674208,
+                  "pack": null,
+                  "finish": 0.02625,
+                  "total": 0.7120000000000001
+                }
+              ]
+            },
+            "packing": {
+              "wallMs": [
+                14.483125000006112,
+                16.339207999997598,
+                16.149375000000873,
+                20.26691700000083,
+                18.37354100000084,
+                18.353041000002122,
+                16.412250000001222,
+                16.815584000003582,
+                16.114166999999725
+              ],
+              "stages": [
+                {
+                  "unpack": 0.012084,
+                  "scan": null,
+                  "pack": 1.05675,
+                  "finish": 0.040083,
+                  "total": 1.1089170000000002
+                },
+                {
+                  "unpack": 0.012333,
+                  "scan": null,
+                  "pack": 1.056375,
+                  "finish": 0.026333,
+                  "total": 1.0950410000000002
+                },
+                {
+                  "unpack": 0.018041,
+                  "scan": null,
+                  "pack": 1.054208,
+                  "finish": 0.026708,
+                  "total": 1.098957
+                },
+                {
+                  "unpack": 0.012458,
+                  "scan": null,
+                  "pack": 1.093458,
+                  "finish": 0.026125,
+                  "total": 1.132041
+                },
+                {
+                  "unpack": 0.012666,
+                  "scan": null,
+                  "pack": 1.054292,
+                  "finish": 0.040833,
+                  "total": 1.107791
+                },
+                {
+                  "unpack": 0.014209,
+                  "scan": null,
+                  "pack": 1.053917,
+                  "finish": 0.026125,
+                  "total": 1.094251
+                },
+                {
+                  "unpack": 0.012042,
+                  "scan": null,
+                  "pack": 1.053834,
+                  "finish": 0.026958,
+                  "total": 1.0928339999999999
+                },
+                {
+                  "unpack": 0.012042,
+                  "scan": null,
+                  "pack": 1.058042,
+                  "finish": 0.025875,
+                  "total": 1.095959
+                },
+                {
+                  "unpack": 0.012542,
+                  "scan": null,
+                  "pack": 1.056208,
+                  "finish": 0.02675,
+                  "total": 1.0955000000000001
+                }
+              ]
+            },
+            "answer": {
+              "wallMs": [
+                18.351666000002297,
+                18.284041999999317,
+                13.831707999997889,
+                14.089124999998603,
+                14.785624999996799,
+                15.352207999996608,
+                15.071125000002212,
+                16.98937499999738,
+                15.383916000006138
+              ],
+              "stages": [
+                {
+                  "unpack": 0.008959,
+                  "scan": 0.242833,
+                  "pack": 0.460959,
+                  "finish": 0.097666,
+                  "total": 0.8104169999999999
+                },
+                {
+                  "unpack": 0.008584,
+                  "scan": 0.249583,
+                  "pack": 0.449958,
+                  "finish": 0.089125,
+                  "total": 0.79725
+                },
+                {
+                  "unpack": 0.009416,
+                  "scan": 0.235875,
+                  "pack": 0.4175,
+                  "finish": 0.096417,
+                  "total": 0.759208
+                },
+                {
+                  "unpack": 0.008542,
+                  "scan": 0.239167,
+                  "pack": 0.438916,
+                  "finish": 0.094959,
+                  "total": 0.781584
+                },
+                {
+                  "unpack": 0.009625,
+                  "scan": 0.25225,
+                  "pack": 0.459708,
+                  "finish": 0.095917,
+                  "total": 0.8175
+                },
+                {
+                  "unpack": 0.008959,
+                  "scan": 0.246041,
+                  "pack": 0.443375,
+                  "finish": 0.098292,
+                  "total": 0.796667
+                },
+                {
+                  "unpack": 0.010542,
+                  "scan": 0.256666,
+                  "pack": 0.459708,
+                  "finish": 0.106959,
+                  "total": 0.833875
+                },
+                {
+                  "unpack": 0.012458,
+                  "scan": 0.288667,
+                  "pack": 0.506042,
+                  "finish": 0.123167,
+                  "total": 0.930334
+                },
+                {
+                  "unpack": 0.01175,
+                  "scan": 0.290792,
+                  "pack": 0.511333,
+                  "finish": 0.1395,
+                  "total": 0.9533750000000001
+                }
+              ]
+            },
+            "concurrent": {
+              "calls": 16,
+              "totalMs": 91.53429200000392,
+              "perCallMs": 5.720893250000245,
+              "allEqual": true
+            }
+          },
+          "32": {
+            "shape": {
+              "count": 32,
+              "countPadded": 32,
+              "requestsPerInvocation": 2,
+              "segmentRows": 1024,
+              "scanSegments": 4,
+              "packSegments": 2,
+              "scratchBytes": 26920200
+            },
+            "firstPass": {
+              "wallMs": [
+                19.880249999994703,
+                19.78362499999639,
+                23.301957999996375,
+                21.264666999995825,
+                21.491749999993772,
+                20.058415999999852,
+                20.846292000001995,
+                20.14337499999965,
+                21.220374999997148
+              ],
+              "stages": [
+                {
+                  "unpack": 0.010916,
+                  "scan": 3.794166,
+                  "pack": null,
+                  "finish": 0.02775,
+                  "total": 3.8328320000000002
+                },
+                {
+                  "unpack": 0.011209,
+                  "scan": 4.1095,
+                  "pack": null,
+                  "finish": 0.034584,
+                  "total": 4.1552929999999995
+                },
+                {
+                  "unpack": 0.011541,
+                  "scan": 3.746375,
+                  "pack": null,
+                  "finish": 0.03225,
+                  "total": 3.790166
+                },
+                {
+                  "unpack": 0.011083,
+                  "scan": 3.738417,
+                  "pack": null,
+                  "finish": 0.035167,
+                  "total": 3.7846670000000002
+                },
+                {
+                  "unpack": 0.011,
+                  "scan": 3.882542,
+                  "pack": null,
+                  "finish": 0.032375,
+                  "total": 3.925917
+                },
+                {
+                  "unpack": 0.011584,
+                  "scan": 3.7405,
+                  "pack": null,
+                  "finish": 0.031916,
+                  "total": 3.784
+                },
+                {
+                  "unpack": 0.0125,
+                  "scan": 3.90275,
+                  "pack": null,
+                  "finish": 0.032959,
+                  "total": 3.9482090000000003
+                },
+                {
+                  "unpack": 0.011958,
+                  "scan": 3.800125,
+                  "pack": null,
+                  "finish": 0.032417,
+                  "total": 3.8445
+                },
+                {
+                  "unpack": 0.010875,
+                  "scan": 3.902792,
+                  "pack": null,
+                  "finish": 0.032917,
+                  "total": 3.9465839999999996
+                }
+              ]
+            },
+            "packing": {
+              "wallMs": [
+                23.04820800000016,
+                22.356166999998095,
+                21.795208000003186,
+                23.966583000001265,
+                22.918792000004032,
+                22.937166000003344,
+                22.351916999999958,
+                21.57179200000246,
+                23.474084000001312
+              ],
+              "stages": [
+                {
+                  "unpack": 0.010333,
+                  "scan": null,
+                  "pack": 6.71275,
+                  "finish": 0.025917,
+                  "total": 6.749
+                },
+                {
+                  "unpack": 0.0185,
+                  "scan": null,
+                  "pack": 6.543291,
+                  "finish": 0.028417,
+                  "total": 6.590208
+                },
+                {
+                  "unpack": 0.010542,
+                  "scan": null,
+                  "pack": 6.414583,
+                  "finish": 0.028167,
+                  "total": 6.453292
+                },
+                {
+                  "unpack": 0.011625,
+                  "scan": null,
+                  "pack": 6.419542,
+                  "finish": 0.027,
+                  "total": 6.4581669999999995
+                },
+                {
+                  "unpack": 0.010917,
+                  "scan": null,
+                  "pack": 6.701875,
+                  "finish": 0.029083,
+                  "total": 6.741875
+                },
+                {
+                  "unpack": 0.011,
+                  "scan": null,
+                  "pack": 6.51525,
+                  "finish": 0.028083,
+                  "total": 6.554333
+                },
+                {
+                  "unpack": 0.010542,
+                  "scan": null,
+                  "pack": 6.428333,
+                  "finish": 0.026708,
+                  "total": 6.4655830000000005
+                },
+                {
+                  "unpack": 0.010792,
+                  "scan": null,
+                  "pack": 6.393458,
+                  "finish": 0.02725,
+                  "total": 6.4315
+                },
+                {
+                  "unpack": 0.010583,
+                  "scan": null,
+                  "pack": 6.576625,
+                  "finish": 0.029458,
+                  "total": 6.616666
+                }
+              ]
+            },
+            "answer": {
+              "wallMs": [
+                36.12524999999732,
+                40.1247499999954,
+                29.144499999994878,
+                29.104791000005207,
+                30.611540999998397,
+                28.16604200000438,
+                27.25945800000045,
+                32.94375000000582,
+                30.34770800000115
+              ],
+              "stages": [
+                {
+                  "unpack": 0.029917,
+                  "scan": 3.726334,
+                  "pack": 6.358583,
+                  "finish": 0.064083,
+                  "total": 10.178917
+                },
+                {
+                  "unpack": 0.028208,
+                  "scan": 3.72475,
+                  "pack": 6.354125,
+                  "finish": 0.066334,
+                  "total": 10.173417
+                },
+                {
+                  "unpack": 0.030208,
+                  "scan": 3.722792,
+                  "pack": 6.360167,
+                  "finish": 0.064209,
+                  "total": 10.177375999999999
+                },
+                {
+                  "unpack": 0.027667,
+                  "scan": 3.730375,
+                  "pack": 6.355792,
+                  "finish": 0.058708,
+                  "total": 10.172542
+                },
+                {
+                  "unpack": 2.957666,
+                  "scan": 3.779167,
+                  "pack": 6.362625,
+                  "finish": 0.063458,
+                  "total": 13.162916
+                },
+                {
+                  "unpack": 0.025583,
+                  "scan": 3.78975,
+                  "pack": 6.597542,
+                  "finish": 0.062167,
+                  "total": 10.475042
+                },
+                {
+                  "unpack": 0.030834,
+                  "scan": 3.778125,
+                  "pack": 6.39975,
+                  "finish": 0.06475,
+                  "total": 10.273459
+                },
+                {
+                  "unpack": 0.026958,
+                  "scan": 3.723791,
+                  "pack": 6.553958,
+                  "finish": 0.06025,
+                  "total": 10.364957
+                },
+                {
+                  "unpack": 0.029167,
+                  "scan": 3.774083,
+                  "pack": 6.354917,
+                  "finish": 0.066083,
+                  "total": 10.224250000000001
+                }
+              ]
+            },
+            "concurrent": {
+              "calls": 16,
+              "totalMs": 242.15999999999622,
+              "perCallMs": 15.134999999999764,
+              "allEqual": true
+            }
+          }
+        },
+        "hintsMs": null
+      }
+    },
+    {
+      "id": "32768x12288-random",
+      "rows": 32768,
+      "cols": 12288,
+      "kind": "random",
+      "cpu": {
+        "node": "v24.9.0",
+        "cpus": 16,
+        "loadBefore": [
+          29.7861328125,
+          22.158203125,
+          17.6982421875
+        ],
+        "loadAfter": [
+          29.85595703125,
+          23.04931640625,
+          18.20263671875
+        ],
+        "build": {
+          "rows": 32768,
+          "cols": 12288,
+          "setupMs": 1.6732500000000001,
+          "readMs": 184.813834,
+          "hintsMs": 3081.941707,
+          "packingMs": 2540.175418,
+          "layoutMs": 0,
+          "prepareMs": 5756.815625,
+          "publishMs": 0.213625,
+          "checkMs": 168.661,
+          "totalMs": 6146.68875,
+          "tableBytes": 805306368,
+          "packingBytes": 201523200,
+          "masksBytes": 89124,
+          "checkedRows": [
+            0,
+            16177,
+            32767
+          ],
+          "maxPhaseError": 23152558080,
+          "maxPhaseErrorLog2": 34.43045255166553,
+          "phaseLimitLog2": 37
+        },
+        "buildMs": 6150.619917,
+        "referenceMs": 9203.577207999999,
+        "referenceMasksEqual": true,
+        "matrixMaxAbs": 38157295,
+        "respond": [
+          {
+            "count": 1,
+            "respondMs": [
+              49.4902919999995,
+              22.375833000000057,
+              27.91374999999971,
+              19.671666999999616,
+              27.98333399999956,
+              23.692917000000307,
+              23.289583999999195,
+              26.6776660000005,
+              28.431209000000308
+            ],
+            "stages": [
+              {
+                "deserializeMs": 0.902709,
+                "matrixVectorMs": 22.204458,
+                "packingMs": 4.331375,
+                "serializationMs": 0.736625
+              },
+              {
+                "deserializeMs": 0.475083,
+                "matrixVectorMs": 19.673,
+                "packingMs": 5.036666,
+                "serializationMs": 0.77625
+              },
+              {
+                "deserializeMs": 0.581375,
+                "matrixVectorMs": 15.690624999999999,
+                "packingMs": 3.9295,
+                "serializationMs": 0.5818340000000001
+              },
+              {
+                "deserializeMs": 1.156667,
+                "matrixVectorMs": 17.022917,
+                "packingMs": 2.015417,
+                "serializationMs": 0.6980829999999999
+              },
+              {
+                "deserializeMs": 0.418666,
+                "matrixVectorMs": 16.57975,
+                "packingMs": 3.5387079999999997,
+                "serializationMs": 0.862667
+              },
+              {
+                "deserializeMs": 1.3245,
+                "matrixVectorMs": 16.131333,
+                "packingMs": 2.6800420000000003,
+                "serializationMs": 0.47183400000000003
+              },
+              {
+                "deserializeMs": 0.6138330000000001,
+                "matrixVectorMs": 32.1805,
+                "packingMs": 2.502042,
+                "serializationMs": 0.46075
+              },
+              {
+                "deserializeMs": 0.499083,
+                "matrixVectorMs": 16.34075,
+                "packingMs": 2.008167,
+                "serializationMs": 0.494958
+              },
+              {
+                "deserializeMs": 0.696667,
+                "matrixVectorMs": 19.641333,
+                "packingMs": 3.9719170000000004,
+                "serializationMs": 0.524875
+              }
+            ],
+            "timedEqual": true
+          },
+          {
+            "count": 32,
+            "respondMs": [
+              685.1376660000005,
+              972.9588750000003,
+              1133.8854169999995,
+              1046.9888329999994,
+              689.7829590000001,
+              796.4053750000003,
+              709.7342499999995,
+              889.6813330000004,
+              767.1832919999979
+            ],
+            "stages": [
+              {
+                "deserializeMs": 13.913758000000001,
+                "matrixVectorMs": 485.6785839999999,
+                "packingMs": 87.55279,
+                "serializationMs": 19.145499
+              },
+              {
+                "deserializeMs": 13.814123999999998,
+                "matrixVectorMs": 488.1483759999999,
+                "packingMs": 96.66287,
+                "serializationMs": 18.556917000000002
+              },
+              {
+                "deserializeMs": 16.815668000000002,
+                "matrixVectorMs": 523.509376,
+                "packingMs": 89.21987399999999,
+                "serializationMs": 19.446170000000002
+              },
+              {
+                "deserializeMs": 14.410791999999997,
+                "matrixVectorMs": 505.8486670000001,
+                "packingMs": 91.26062199999998,
+                "serializationMs": 18.120253
+              },
+              {
+                "deserializeMs": 16.045249000000002,
+                "matrixVectorMs": 559.5250400000001,
+                "packingMs": 103.36403899999999,
+                "serializationMs": 19.662415
+              },
+              {
+                "deserializeMs": 15.839417,
+                "matrixVectorMs": 575.315291,
+                "packingMs": 134.73712500000002,
+                "serializationMs": 17.793789
+              },
+              {
+                "deserializeMs": 14.366919999999997,
+                "matrixVectorMs": 695.510792,
+                "packingMs": 185.07562199999992,
+                "serializationMs": 18.771582
+              },
+              {
+                "deserializeMs": 14.053214,
+                "matrixVectorMs": 629.558586,
+                "packingMs": 172.887333,
+                "serializationMs": 17.175337
+              },
+              {
+                "deserializeMs": 14.192122000000003,
+                "matrixVectorMs": 711.3944169999999,
+                "packingMs": 149.97079,
+                "serializationMs": 16.951832000000003
+              }
+            ],
+            "timedEqual": true
+          }
+        ],
+        "wallet": {
+          "openMs": 13.506875000000036,
+          "requestMs": [
+            44.032500000000255,
+            36.191791000000194,
+            35.927708000000166,
+            36.13108300000022,
+            36.1156660000006,
+            35.85087500000009,
+            35.97437499999978,
+            36.12983299999996,
+            35.69791699999951,
+            36.87845800000014,
+            37.961959000000206,
+            36.54516599999988,
+            37.10350000000017,
+            35.80933300000015,
+            36.57554199999959,
+            37.47791700000016,
+            40.969333000000006,
+            39.529875000000175,
+            40.32483300000058,
+            41.881749999999556,
+            49.67004199999974,
+            36.93537500000002,
+            36.24620799999957,
+            36.60112500000014,
+            39.98004200000014,
+            44.51079200000004,
+            38.99024999999983,
+            46.76983300000029,
+            45.900665999999546,
+            41.566375000000335,
+            56.39995799999997,
+            47.393833000000086
+          ],
+          "decodeMs": [
+            1.2060420000016165,
+            0.43145799999911105,
+            0.5157499999986612,
+            0.19774999999935972,
+            0.17595799999980954,
+            0.1542920000028971,
+            0.1416669999998703,
+            0.16991699999925913,
+            0.14545900000302936,
+            0.1580420000027516,
+            0.14162500000020373,
+            0.14295800000036252,
+            0.1719169999996666,
+            0.1404580000016722,
+            0.14616700000260607,
+            0.18291700000190758,
+            0.16879200000039418,
+            0.15741699999853154,
+            0.16008299999884912,
+            0.14975000000049477,
+            0.14179100000183098,
+            0.1466660000005504,
+            0.14483299999847077,
+            0.15204200000152923,
+            0.162625000000844,
+            0.1327500000006694,
+            0.14616599999862956,
+            0.1422920000004524,
+            0.1298750000023574,
+            0.12508399999933317,
+            0.14383300000190502,
+            0.14429200000085984
+          ]
+        },
+        "decodedWrong": 0,
+        "decodedRows": 32
+      },
+      "gpu": {
+        "firstCreateMs": 264.08533299999544,
+        "uploadMs": 158.2762500000099,
+        "residentBytes": 1006632960,
+        "chunkRows": 32768,
+        "calls": {
+          "1": {
+            "shape": {
+              "count": 1,
+              "countPadded": 1,
+              "requestsPerInvocation": 1,
+              "segmentRows": 512,
+              "scanSegments": 64,
+              "packSegments": 16,
+              "scratchBytes": 8750252
+            },
+            "firstPass": {
+              "wallMs": [
+                19.723915999988094,
+                19.077707999997074,
+                20.322667000000365,
+                19.345832999999402,
+                18.771249999990687,
+                18.335791999998037,
+                19.50054100000125,
+                19.212167000005138,
+                19.733165999990888
+              ],
+              "stages": [
+                {
+                  "unpack": 0.01625,
+                  "scan": 3.7895,
+                  "pack": null,
+                  "finish": 0.046,
+                  "total": 3.85175
+                },
+                {
+                  "unpack": 0.016,
+                  "scan": 4.34675,
+                  "pack": null,
+                  "finish": 0.21725,
+                  "total": 4.58
+                },
+                {
+                  "unpack": 0.0165,
+                  "scan": 4.330041,
+                  "pack": null,
+                  "finish": 0.09125,
+                  "total": 4.437791
+                },
+                {
+                  "unpack": 0.016208,
+                  "scan": 4.366125,
+                  "pack": null,
+                  "finish": 0.077417,
+                  "total": 4.4597500000000005
+                },
+                {
+                  "unpack": 0.016458,
+                  "scan": 4.355083,
+                  "pack": null,
+                  "finish": 0.090875,
+                  "total": 4.462415999999999
+                },
+                {
+                  "unpack": 0.015583,
+                  "scan": 4.3645,
+                  "pack": null,
+                  "finish": 0.090292,
+                  "total": 4.470375
+                },
+                {
+                  "unpack": 0.015667,
+                  "scan": 4.355625,
+                  "pack": null,
+                  "finish": 0.091125,
+                  "total": 4.462417
+                },
+                {
+                  "unpack": 0.01675,
+                  "scan": 4.401583,
+                  "pack": null,
+                  "finish": 0.090667,
+                  "total": 4.5089999999999995
+                },
+                {
+                  "unpack": 0.016333,
+                  "scan": 4.368458,
+                  "pack": null,
+                  "finish": 0.6285,
+                  "total": 5.013291000000001
+                }
+              ]
+            },
+            "packing": {
+              "wallMs": [
+                16.33741700000246,
+                16.0013750000071,
+                14.302917000008165,
+                16.352582999999868,
+                16.33679200000188,
+                15.799499999993714,
+                15.5904589999991,
+                15.492874999996275,
+                16.123749999998836
+              ],
+              "stages": [
+                {
+                  "unpack": 0.011958,
+                  "scan": null,
+                  "pack": 1.05125,
+                  "finish": 0.025875,
+                  "total": 1.089083
+                },
+                {
+                  "unpack": 0.012125,
+                  "scan": null,
+                  "pack": 1.05125,
+                  "finish": 0.025459,
+                  "total": 1.088834
+                },
+                {
+                  "unpack": 0.011917,
+                  "scan": null,
+                  "pack": 1.05475,
+                  "finish": 0.026167,
+                  "total": 1.092834
+                },
+                {
+                  "unpack": 0.0135,
+                  "scan": null,
+                  "pack": 1.055208,
+                  "finish": 0.025625,
+                  "total": 1.094333
+                },
+                {
+                  "unpack": 0.012833,
+                  "scan": null,
+                  "pack": 1.055167,
+                  "finish": 0.025958,
+                  "total": 1.093958
+                },
+                {
+                  "unpack": 0.012208,
+                  "scan": null,
+                  "pack": 1.052791,
+                  "finish": 0.025666,
+                  "total": 1.090665
+                },
+                {
+                  "unpack": 0.01275,
+                  "scan": null,
+                  "pack": 1.059834,
+                  "finish": 0.025625,
+                  "total": 1.098209
+                },
+                {
+                  "unpack": 0.012584,
+                  "scan": null,
+                  "pack": 1.0585,
+                  "finish": 0.026083,
+                  "total": 1.097167
+                },
+                {
+                  "unpack": 0.012125,
+                  "scan": null,
+                  "pack": 1.054833,
+                  "finish": 0.026,
+                  "total": 1.0929579999999999
+                }
+              ]
+            },
+            "answer": {
+              "wallMs": [
+                18.3627919999999,
+                18.222916999991867,
+                18.06295799999498,
+                18.100290999995195,
+                17.1282910000009,
+                16.028040999997756,
+                16.64862500000163,
+                17.04191699999501,
+                17.185624999998254
+              ],
+              "stages": [
+                {
+                  "unpack": 0.093166,
+                  "scan": 1.68225,
+                  "pack": 0.539375,
+                  "finish": 0.261208,
+                  "total": 2.575999
+                },
+                {
+                  "unpack": 0.072375,
+                  "scan": 1.925375,
+                  "pack": 0.44425,
+                  "finish": 0.407625,
+                  "total": 2.849625
+                },
+                {
+                  "unpack": 0.136958,
+                  "scan": 1.768625,
+                  "pack": 0.4915,
+                  "finish": 0.251083,
+                  "total": 2.648166
+                },
+                {
+                  "unpack": 0.015625,
+                  "scan": 1.689042,
+                  "pack": 0.4875,
+                  "finish": 0.262959,
+                  "total": 2.455126
+                },
+                {
+                  "unpack": 0.0095,
+                  "scan": 1.725125,
+                  "pack": 0.495084,
+                  "finish": 0.285875,
+                  "total": 2.515584
+                },
+                {
+                  "unpack": 0.009667,
+                  "scan": 1.676083,
+                  "pack": 0.447708,
+                  "finish": 0.307792,
+                  "total": 2.44125
+                },
+                {
+                  "unpack": 0.017917,
+                  "scan": 1.63975,
+                  "pack": 0.445416,
+                  "finish": 0.303584,
+                  "total": 2.406667
+                },
+                {
+                  "unpack": 0.010458,
+                  "scan": 1.7335,
+                  "pack": 0.52225,
+                  "finish": 0.32875,
+                  "total": 2.594958
+                },
+                {
+                  "unpack": 0.016625,
+                  "scan": 1.858,
+                  "pack": 0.5145,
+                  "finish": 0.372792,
+                  "total": 2.761917
+                }
+              ]
+            },
+            "concurrent": {
+              "calls": 16,
+              "totalMs": 160.39895899999829,
+              "perCallMs": 10.024934937499893,
+              "allEqual": true
+            }
+          },
+          "32": {
+            "shape": {
+              "count": 32,
+              "countPadded": 32,
+              "requestsPerInvocation": 2,
+              "segmentRows": 2048,
+              "scanSegments": 16,
+              "packSegments": 2,
+              "scratchBytes": 84968712
+            },
+            "firstPass": {
+              "wallMs": [
+                58.314750000005006,
+                59.40562499999942,
+                57.51554200000828,
+                58.65558299999975,
+                60.54216599999927,
+                59.37924999999814,
+                63.283500000005006,
+                62.168625000005704,
+                60.56466600000567
+              ],
+              "stages": [
+                {
+                  "unpack": 0.0865,
+                  "scan": 36.348875,
+                  "pack": null,
+                  "finish": 0.110333,
+                  "total": 36.545708
+                },
+                {
+                  "unpack": 0.076791,
+                  "scan": 37.849375,
+                  "pack": null,
+                  "finish": 0.235166,
+                  "total": 38.161332
+                },
+                {
+                  "unpack": 0.080334,
+                  "scan": 38.146333,
+                  "pack": null,
+                  "finish": 0.112625,
+                  "total": 38.339292
+                },
+                {
+                  "unpack": 0.078792,
+                  "scan": 39.739834,
+                  "pack": null,
+                  "finish": 0.113958,
+                  "total": 39.932584
+                },
+                {
+                  "unpack": 0.078208,
+                  "scan": 39.34775,
+                  "pack": null,
+                  "finish": 0.122083,
+                  "total": 39.548041
+                },
+                {
+                  "unpack": 0.081459,
+                  "scan": 41.990625,
+                  "pack": null,
+                  "finish": 0.116958,
+                  "total": 42.189042
+                },
+                {
+                  "unpack": 0.087417,
+                  "scan": 42.781375,
+                  "pack": null,
+                  "finish": 0.105291,
+                  "total": 42.974083
+                },
+                {
+                  "unpack": 0.075416,
+                  "scan": 42.633625,
+                  "pack": null,
+                  "finish": 0.116042,
+                  "total": 42.825083
+                },
+                {
+                  "unpack": 0.392209,
+                  "scan": 42.287292,
+                  "pack": null,
+                  "finish": 0.112084,
+                  "total": 42.791585
+                }
+              ]
+            },
+            "packing": {
+              "wallMs": [
+                27.373749999998836,
+                25.884957999995095,
+                25.607457999998587,
+                27.894375000003492,
+                27.700041999996756,
+                26.713042000003043,
+                25.027708000008715,
+                25.069750000009662,
+                24.97908400000597
+              ],
+              "stages": [
+                {
+                  "unpack": 0.012541,
+                  "scan": null,
+                  "pack": 8.895375,
+                  "finish": 0.032542,
+                  "total": 8.940458
+                },
+                {
+                  "unpack": 0.01225,
+                  "scan": null,
+                  "pack": 8.807083,
+                  "finish": 0.029375,
+                  "total": 8.848708
+                },
+                {
+                  "unpack": 0.012334,
+                  "scan": null,
+                  "pack": 8.69425,
+                  "finish": 0.032583,
+                  "total": 8.739167
+                },
+                {
+                  "unpack": 0.012542,
+                  "scan": null,
+                  "pack": 8.593417,
+                  "finish": 0.028459,
+                  "total": 8.634418
+                },
+                {
+                  "unpack": 0.012042,
+                  "scan": null,
+                  "pack": 8.613459,
+                  "finish": 0.0305,
+                  "total": 8.656001
+                },
+                {
+                  "unpack": 0.012459,
+                  "scan": null,
+                  "pack": 8.295834,
+                  "finish": 0.030584,
+                  "total": 8.338877
+                },
+                {
+                  "unpack": 0.011958,
+                  "scan": null,
+                  "pack": 8.210709,
+                  "finish": 0.028125,
+                  "total": 8.250791999999999
+                },
+                {
+                  "unpack": 0.011708,
+                  "scan": null,
+                  "pack": 8.140834,
+                  "finish": 0.028875,
+                  "total": 8.181417
+                },
+                {
+                  "unpack": 0.012416,
+                  "scan": null,
+                  "pack": 7.988167,
+                  "finish": 0.029542,
+                  "total": 8.030125
+                }
+              ]
+            },
+            "answer": {
+              "wallMs": [
+                59.34779200000048,
+                58.416291000001365,
+                57.07258300000103,
+                54.64433399999689,
+                56.06479200000467,
+                56.16629199999443,
+                59.47612500000105,
+                58.89787499999511,
+                63.71675000000687
+              ],
+              "stages": [
+                {
+                  "unpack": 0.090708,
+                  "scan": 29.802625,
+                  "pack": 6.381875,
+                  "finish": 1.004,
+                  "total": 37.279208
+                },
+                {
+                  "unpack": 0.088708,
+                  "scan": 29.790208,
+                  "pack": 6.45225,
+                  "finish": 0.839625,
+                  "total": 37.170791
+                },
+                {
+                  "unpack": 0.098083,
+                  "scan": 28.504375,
+                  "pack": 6.459583,
+                  "finish": 0.868,
+                  "total": 35.930041
+                },
+                {
+                  "unpack": 0.128458,
+                  "scan": 28.921083,
+                  "pack": 6.421583,
+                  "finish": 0.815541,
+                  "total": 36.286665
+                },
+                {
+                  "unpack": 0.092416,
+                  "scan": 29.155042,
+                  "pack": 6.695708,
+                  "finish": 0.80675,
+                  "total": 36.749916
+                },
+                {
+                  "unpack": 0.099708,
+                  "scan": 29.869625,
+                  "pack": 6.688709,
+                  "finish": 0.825334,
+                  "total": 37.483376
+                },
+                {
+                  "unpack": 0.095083,
+                  "scan": 30.25625,
+                  "pack": 7.012083,
+                  "finish": 0.883083,
+                  "total": 38.246499
+                },
+                {
+                  "unpack": 0.096833,
+                  "scan": 31.959833,
+                  "pack": 7.105041,
+                  "finish": 0.912667,
+                  "total": 40.074374
+                },
+                {
+                  "unpack": 0.1015,
+                  "scan": 33.978,
+                  "pack": 7.38425,
+                  "finish": 0.8775,
+                  "total": 42.34125
+                }
+              ]
+            },
+            "concurrent": {
+              "calls": 16,
+              "totalMs": 1334.4916669999948,
+              "perCallMs": 83.40572918749967,
+              "allEqual": true
+            }
+          }
+        },
+        "hintsMs": 2918.4145839999983
+      }
+    },
+    {
+      "id": "32768x12288-ffff",
+      "rows": 32768,
+      "cols": 12288,
+      "kind": "ffff",
+      "cpu": {
+        "node": "v24.9.0",
+        "cpus": 16,
+        "loadBefore": [
+          28.74072265625,
+          23.03173828125,
+          18.25244140625
+        ],
+        "loadAfter": [
+          33.640625,
+          24.87890625,
+          19.1162109375
+        ],
+        "build": {
+          "rows": 32768,
+          "cols": 12288,
+          "setupMs": 1.089333,
+          "readMs": 78.759875,
+          "hintsMs": 2902.537958,
+          "packingMs": 2359.996207,
+          "layoutMs": 0.000083,
+          "prepareMs": 5416.178209,
+          "publishMs": 0.204583,
+          "checkMs": 197.753791,
+          "totalMs": 5695.948209,
+          "tableBytes": 805306368,
+          "packingBytes": 201523200,
+          "masksBytes": 89124,
+          "checkedRows": [
+            0,
+            1136,
+            32767
+          ],
+          "maxPhaseError": 22145925120,
+          "maxPhaseErrorLog2": 34.36632221424581,
+          "phaseLimitLog2": 37
+        },
+        "buildMs": 5697.787583,
+        "referenceMs": 8583.271,
+        "referenceMasksEqual": true,
+        "matrixMaxAbs": 35756135,
+        "respond": [
+          {
+            "count": 1,
+            "respondMs": [
+              20.009665999999925,
+              19.555457999999817,
+              32.470917000000554,
+              20.91504199999963,
+              25.28899999999976,
+              33.430083000000195,
+              33.68529199999921,
+              27.71995799999968,
+              25.286333999999442
+            ],
+            "stages": [
+              {
+                "deserializeMs": 0.456958,
+                "matrixVectorMs": 30.178,
+                "packingMs": 6.585583,
+                "serializationMs": 2.067916
+              },
+              {
+                "deserializeMs": 2.6320829999999997,
+                "matrixVectorMs": 18.69475,
+                "packingMs": 9.335125,
+                "serializationMs": 0.519625
+              },
+              {
+                "deserializeMs": 0.464666,
+                "matrixVectorMs": 19.427834,
+                "packingMs": 3.729792,
+                "serializationMs": 0.496875
+              },
+              {
+                "deserializeMs": 0.418458,
+                "matrixVectorMs": 23.981292,
+                "packingMs": 4.822709,
+                "serializationMs": 0.49558399999999997
+              },
+              {
+                "deserializeMs": 0.637166,
+                "matrixVectorMs": 21.221833,
+                "packingMs": 5.44425,
+                "serializationMs": 0.508667
+              },
+              {
+                "deserializeMs": 0.451708,
+                "matrixVectorMs": 16.600584,
+                "packingMs": 3.109292,
+                "serializationMs": 0.494834
+              },
+              {
+                "deserializeMs": 0.412625,
+                "matrixVectorMs": 22.49225,
+                "packingMs": 6.069416,
+                "serializationMs": 1.2495
+              },
+              {
+                "deserializeMs": 1.411083,
+                "matrixVectorMs": 42.496792,
+                "packingMs": 3.3806249999999998,
+                "serializationMs": 0.495042
+              },
+              {
+                "deserializeMs": 0.542875,
+                "matrixVectorMs": 43.675332999999995,
+                "packingMs": 3.270833,
+                "serializationMs": 0.6744159999999999
+              }
+            ],
+            "timedEqual": true
+          },
+          {
+            "count": 32,
+            "respondMs": [
+              768.8799579999995,
+              1048.3445839999986,
+              1089.347167,
+              1027.9429579999996,
+              1301.365417000001,
+              1272.8855830000011,
+              747.7478749999991,
+              670.5600419999973,
+              670.4181669999998
+            ],
+            "stages": [
+              {
+                "deserializeMs": 19.219793,
+                "matrixVectorMs": 631.077336,
+                "packingMs": 149.554289,
+                "serializationMs": 23.696623000000002
+              },
+              {
+                "deserializeMs": 17.5075,
+                "matrixVectorMs": 672.3070419999999,
+                "packingMs": 123.383706,
+                "serializationMs": 20.799625999999996
+              },
+              {
+                "deserializeMs": 14.160497999999997,
+                "matrixVectorMs": 608.978248,
+                "packingMs": 130.96608,
+                "serializationMs": 18.384041999999997
+              },
+              {
+                "deserializeMs": 14.915163999999994,
+                "matrixVectorMs": 678.69304,
+                "packingMs": 148.84354100000002,
+                "serializationMs": 19.633872000000004
+              },
+              {
+                "deserializeMs": 17.505711999999992,
+                "matrixVectorMs": 964.11938,
+                "packingMs": 351.67504,
+                "serializationMs": 29.392457
+              },
+              {
+                "deserializeMs": 15.346211000000002,
+                "matrixVectorMs": 860.3926690000003,
+                "packingMs": 313.38475199999993,
+                "serializationMs": 21.571455000000007
+              },
+              {
+                "deserializeMs": 21.500333999999995,
+                "matrixVectorMs": 663.6982889999999,
+                "packingMs": 181.42674900000003,
+                "serializationMs": 25.517249000000007
+              },
+              {
+                "deserializeMs": 17.61175,
+                "matrixVectorMs": 695.4809989999999,
+                "packingMs": 152.641545,
+                "serializationMs": 20.661874999999995
+              },
+              {
+                "deserializeMs": 22.417170000000002,
+                "matrixVectorMs": 894.6083300000004,
+                "packingMs": 216.28841599999993,
+                "serializationMs": 23.238208999999998
+              }
+            ],
+            "timedEqual": true
+          }
+        ],
+        "wallet": {
+          "openMs": 15.508791000000201,
+          "requestMs": [
+            37.294457999999395,
+            34.62420800000018,
+            34.50774999999976,
+            36.82308399999965,
+            39.935583999999835,
+            42.69529199999943,
+            34.78141599999981,
+            40.501084000000446,
+            40.63429199999973,
+            37.41883299999972,
+            38.380458000000544,
+            44.88516600000003,
+            59.841457999999875,
+            36.86004099999991,
+            39.12470899999971,
+            39.10162500000024,
+            38.09599999999955,
+            34.93212500000027,
+            35.80037500000071,
+            40.350000000000364,
+            37.95929199999955,
+            34.562292000000525,
+            34.460541000000376,
+            35.261750000000575,
+            36.53504200000043,
+            36.398583000000144,
+            39.016999999999825,
+            38.5117909999999,
+            37.93687500000033,
+            38.92845799999941,
+            42.203583000000435,
+            39.19129200000043
+          ],
+          "decodeMs": [
+            4.273291999998037,
+            0.3767919999991136,
+            0.6109169999981532,
+            0.5039169999981823,
+            0.8559170000007725,
+            0.15416600000025937,
+            0.1447500000031141,
+            0.4464170000028389,
+            0.47608300000138115,
+            0.4485839999979362,
+            0.45808300000135205,
+            0.41945900000064285,
+            0.44408300000213785,
+            0.2895829999979469,
+            0.22062500000174623,
+            0.1381249999976717,
+            0.5102920000026643,
+            0.38820900000064285,
+            0.6959169999972801,
+            2.0742500000014843,
+            0.9861669999991136,
+            0.1797499999993306,
+            0.13683400000081747,
+            0.15595899999971152,
+            0.1671249999999418,
+            0.15175000000090222,
+            6.037374999999884,
+            0.14520899999843095,
+            0.14400000000023283,
+            0.14175000000250293,
+            2.7631249999976717,
+            0.16779200000019046
+          ]
+        },
+        "decodedWrong": 0,
+        "decodedRows": 32
+      },
+      "gpu": {
+        "firstCreateMs": 510.56529200001387,
+        "uploadMs": 163.45441700000083,
+        "residentBytes": 1006632960,
+        "chunkRows": 32768,
+        "calls": {
+          "1": {
+            "shape": {
+              "count": 1,
+              "countPadded": 1,
+              "requestsPerInvocation": 1,
+              "segmentRows": 512,
+              "scanSegments": 64,
+              "packSegments": 16,
+              "scratchBytes": 8750252
+            },
+            "firstPass": {
+              "wallMs": [
+                15.11508300001151,
+                15.86558299997705,
+                16.641582999989623,
+                16.37891599998693,
+                19.279792000015732,
+                16.801374999980908,
+                15.892208000004757,
+                16.580375000019558,
+                15.441749999998137
+              ],
+              "stages": [
+                {
+                  "unpack": 0.005333,
+                  "scan": 1.914334,
+                  "pack": null,
+                  "finish": 0.114459,
+                  "total": 2.034126
+                },
+                {
+                  "unpack": 0.00475,
+                  "scan": 1.684791,
+                  "pack": null,
+                  "finish": 0.114459,
+                  "total": 1.8039999999999998
+                },
+                {
+                  "unpack": 0.004958,
+                  "scan": 1.708125,
+                  "pack": null,
+                  "finish": 0.026708,
+                  "total": 1.7397909999999999
+                },
+                {
+                  "unpack": 0.005167,
+                  "scan": 1.7485,
+                  "pack": null,
+                  "finish": 0.027416,
+                  "total": 1.781083
+                },
+                {
+                  "unpack": 0.004875,
+                  "scan": 1.693417,
+                  "pack": null,
+                  "finish": 0.028041,
+                  "total": 1.726333
+                },
+                {
+                  "unpack": 0.004833,
+                  "scan": 1.915959,
+                  "pack": null,
+                  "finish": 0.027083,
+                  "total": 1.947875
+                },
+                {
+                  "unpack": 0.005,
+                  "scan": 1.920958,
+                  "pack": null,
+                  "finish": 0.058834,
+                  "total": 1.984792
+                },
+                {
+                  "unpack": 0.005084,
+                  "scan": 1.765792,
+                  "pack": null,
+                  "finish": 0.057417,
+                  "total": 1.828293
+                },
+                {
+                  "unpack": 0.004833,
+                  "scan": 1.688083,
+                  "pack": null,
+                  "finish": 0.057417,
+                  "total": 1.750333
+                }
+              ]
+            },
+            "packing": {
+              "wallMs": [
+                16.631541000009747,
+                15.801624999992782,
+                14.957874999992782,
+                16.658625000010943,
+                14.40191600000253,
+                15.319208000000799,
+                15.801624999992782,
+                15.92225000000326,
+                15.501749999995809
+              ],
+              "stages": [
+                {
+                  "unpack": 0.004,
+                  "scan": null,
+                  "pack": 0.46075,
+                  "finish": 0.008583,
+                  "total": 0.473333
+                },
+                {
+                  "unpack": 0.003667,
+                  "scan": null,
+                  "pack": 0.512,
+                  "finish": 0.0085,
+                  "total": 0.524167
+                },
+                {
+                  "unpack": 0.004,
+                  "scan": null,
+                  "pack": 0.492458,
+                  "finish": 0.008417,
+                  "total": 0.504875
+                },
+                {
+                  "unpack": 0.003917,
+                  "scan": null,
+                  "pack": 0.567125,
+                  "finish": 0.008417,
+                  "total": 0.579459
+                },
+                {
+                  "unpack": 0.004125,
+                  "scan": null,
+                  "pack": 0.524791,
+                  "finish": 0.02,
+                  "total": 0.548916
+                },
+                {
+                  "unpack": 0.004166,
+                  "scan": null,
+                  "pack": 0.524791,
+                  "finish": 0.02,
+                  "total": 0.548957
+                },
+                {
+                  "unpack": 0.004667,
+                  "scan": null,
+                  "pack": 0.495959,
+                  "finish": 0.009541,
+                  "total": 0.510167
+                },
+                {
+                  "unpack": 0.00425,
+                  "scan": null,
+                  "pack": 0.5055,
+                  "finish": 0.008625,
+                  "total": 0.5183749999999999
+                },
+                {
+                  "unpack": 0.0055,
+                  "scan": null,
+                  "pack": 0.516166,
+                  "finish": 0.009792,
+                  "total": 0.531458
+                }
+              ]
+            },
+            "answer": {
+              "wallMs": [
+                17.018750000017462,
+                18.49849999998696,
+                16.637625000003027,
+                17.958374999987427,
+                18.01016599999275,
+                17.600207999988925,
+                19.00429099999019,
+                17.265125000005355,
+                18.191374999994878
+              ],
+              "stages": [
+                {
+                  "unpack": 0.008708,
+                  "scan": 1.868458,
+                  "pack": 0.568459,
+                  "finish": 0.263583,
+                  "total": 2.7092080000000003
+                },
+                {
+                  "unpack": 0.159,
+                  "scan": 2.021542,
+                  "pack": 0.489375,
+                  "finish": 0.258667,
+                  "total": 2.928584
+                },
+                {
+                  "unpack": 0.012625,
+                  "scan": 1.711625,
+                  "pack": 0.498541,
+                  "finish": 0.260084,
+                  "total": 2.482875
+                },
+                {
+                  "unpack": 1.253834,
+                  "scan": 1.710792,
+                  "pack": 0.45175,
+                  "finish": 0.252417,
+                  "total": 3.668793
+                },
+                {
+                  "unpack": 0.024916,
+                  "scan": 1.694208,
+                  "pack": 0.500459,
+                  "finish": 0.255791,
+                  "total": 2.475374
+                },
+                {
+                  "unpack": 0.008792,
+                  "scan": 1.7105,
+                  "pack": 0.4955,
+                  "finish": 0.257834,
+                  "total": 2.472626
+                },
+                {
+                  "unpack": 0.008667,
+                  "scan": 1.707459,
+                  "pack": 0.495083,
+                  "finish": 0.249208,
+                  "total": 2.460417
+                },
+                {
+                  "unpack": 0.00825,
+                  "scan": 1.839958,
+                  "pack": 0.579875,
+                  "finish": 0.25325,
+                  "total": 2.681333
+                },
+                {
+                  "unpack": 0.05225,
+                  "scan": 1.909542,
+                  "pack": 0.540042,
+                  "finish": 0.258834,
+                  "total": 2.7606680000000003
+                }
+              ]
+            },
+            "concurrent": {
+              "calls": 16,
+              "totalMs": 139.35987500002375,
+              "perCallMs": 8.709992187501484,
+              "allEqual": true
+            }
+          },
+          "32": {
+            "shape": {
+              "count": 32,
+              "countPadded": 32,
+              "requestsPerInvocation": 2,
+              "segmentRows": 2048,
+              "scanSegments": 16,
+              "packSegments": 2,
+              "scratchBytes": 84968712
+            },
+            "firstPass": {
+              "wallMs": [
+                52.460707999998704,
+                51.28529100000742,
+                52.061332999990555,
+                55.029458000004524,
+                56.2337079999852,
+                56.563374999997905,
+                57.75449999998091,
+                59.10466699997778,
+                58.608333000011044
+              ],
+              "stages": [
+                {
+                  "unpack": 0.08625,
+                  "scan": 34.056834,
+                  "pack": null,
+                  "finish": 0.109959,
+                  "total": 34.253043000000005
+                },
+                {
+                  "unpack": 0.076583,
+                  "scan": 33.981208,
+                  "pack": null,
+                  "finish": 0.103875,
+                  "total": 34.161666000000004
+                },
+                {
+                  "unpack": 0.073333,
+                  "scan": 34.740958,
+                  "pack": null,
+                  "finish": 0.113417,
+                  "total": 34.927708
+                },
+                {
+                  "unpack": 0.079625,
+                  "scan": 35.237042,
+                  "pack": null,
+                  "finish": 0.102792,
+                  "total": 35.419459
+                },
+                {
+                  "unpack": 0.085666,
+                  "scan": 37.50125,
+                  "pack": null,
+                  "finish": 0.103416,
+                  "total": 37.690332
+                },
+                {
+                  "unpack": 0.08675,
+                  "scan": 38.318917,
+                  "pack": null,
+                  "finish": 0.137584,
+                  "total": 38.543251
+                },
+                {
+                  "unpack": 0.08675,
+                  "scan": 39.642666,
+                  "pack": null,
+                  "finish": 0.146292,
+                  "total": 39.875707999999996
+                },
+                {
+                  "unpack": 0.081208,
+                  "scan": 39.756458,
+                  "pack": null,
+                  "finish": 0.141417,
+                  "total": 39.979083
+                },
+                {
+                  "unpack": 0.087625,
+                  "scan": 39.701833,
+                  "pack": null,
+                  "finish": 0.141417,
+                  "total": 39.930875
+                }
+              ]
+            },
+            "packing": {
+              "wallMs": [
+                24.67783299999428,
+                25.183291999972425,
+                26.675791999994544,
+                25.580333999998402,
+                24.852332999987993,
+                27.25458300000173,
+                30.745332999998936,
+                30.610833999991883,
+                24.759458999993512
+              ],
+              "stages": [
+                {
+                  "unpack": 0.013208,
+                  "scan": null,
+                  "pack": 8.6535,
+                  "finish": 0.029708,
+                  "total": 8.696416
+                },
+                {
+                  "unpack": 0.01325,
+                  "scan": null,
+                  "pack": 8.530416,
+                  "finish": 0.030917,
+                  "total": 8.574583
+                },
+                {
+                  "unpack": 0.012041,
+                  "scan": null,
+                  "pack": 8.363584,
+                  "finish": 0.030542,
+                  "total": 8.406167
+                },
+                {
+                  "unpack": 0.013167,
+                  "scan": null,
+                  "pack": 8.317708,
+                  "finish": 0.028541,
+                  "total": 8.359416
+                },
+                {
+                  "unpack": 0.012334,
+                  "scan": null,
+                  "pack": 8.196083,
+                  "finish": 0.029791,
+                  "total": 8.238208
+                },
+                {
+                  "unpack": 0.012833,
+                  "scan": null,
+                  "pack": 8.130917,
+                  "finish": 0.02925,
+                  "total": 8.173
+                },
+                {
+                  "unpack": 0.011208,
+                  "scan": null,
+                  "pack": 8.019959,
+                  "finish": 0.029375,
+                  "total": 8.060542
+                },
+                {
+                  "unpack": 0.012708,
+                  "scan": null,
+                  "pack": 8.506792,
+                  "finish": 0.028209,
+                  "total": 8.547709000000001
+                },
+                {
+                  "unpack": 0.012042,
+                  "scan": null,
+                  "pack": 8.043167,
+                  "finish": 0.030917,
+                  "total": 8.086126
+                }
+              ]
+            },
+            "answer": {
+              "wallMs": [
+                62.32408299998497,
+                56.54100000002654,
+                62.36433300000499,
+                58.87362500000745,
+                68.64704199999687,
+                57.88366700001643,
+                66.9141660000023,
+                63.23729099999764,
+                60.779000000009546
+              ],
+              "stages": [
+                {
+                  "unpack": 0.099,
+                  "scan": 29.548584,
+                  "pack": 6.613583,
+                  "finish": 0.931792,
+                  "total": 37.192959
+                },
+                {
+                  "unpack": 0.089958,
+                  "scan": 30.527,
+                  "pack": 6.462125,
+                  "finish": 0.950125,
+                  "total": 38.029208
+                },
+                {
+                  "unpack": 0.090375,
+                  "scan": 30.874583,
+                  "pack": 6.581792,
+                  "finish": 0.883542,
+                  "total": 38.430292
+                },
+                {
+                  "unpack": 0.088792,
+                  "scan": 30.878125,
+                  "pack": 6.793709,
+                  "finish": 0.922541,
+                  "total": 38.683167
+                },
+                {
+                  "unpack": 0.088625,
+                  "scan": 30.571041,
+                  "pack": 6.613875,
+                  "finish": 0.890375,
+                  "total": 38.163916
+                },
+                {
+                  "unpack": 0.093125,
+                  "scan": 31.5715,
+                  "pack": 6.914417,
+                  "finish": 0.82275,
+                  "total": 39.401792
+                },
+                {
+                  "unpack": 0.0895,
+                  "scan": 32.2845,
+                  "pack": 6.977958,
+                  "finish": 0.860958,
+                  "total": 40.212916
+                },
+                {
+                  "unpack": 0.098625,
+                  "scan": 31.829208,
+                  "pack": 6.992792,
+                  "finish": 0.860083,
+                  "total": 39.780708000000004
+                },
+                {
+                  "unpack": 0.098833,
+                  "scan": 32.885208,
+                  "pack": 7.277625,
+                  "finish": 0.828917,
+                  "total": 41.090583
+                }
+              ]
+            },
+            "concurrent": {
+              "calls": 16,
+              "totalMs": 1178.523416000011,
+              "perCallMs": 73.65771350000068,
+              "allEqual": true
+            }
+          }
+        },
+        "hintsMs": null
+      }
+    }
+  ]
+}

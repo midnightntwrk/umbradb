@@ -8,8 +8,9 @@
     ]
   },
   "tasks": {
-    "typecheck": "deno check device.ts field.ts scan-wgsl.ts scan.ts scanner.ts multiply-wgsl.ts multiply.ts inputs.ts jobs.ts cpu-reference.ts check.ts",
-    "check": "deno task typecheck && deno run --allow-read --allow-write --allow-run=node --allow-env --allow-sys check.ts"
+    "typecheck": "deno check device.ts field.ts scan-wgsl.ts scan.ts scanner.ts multiply-wgsl.ts multiply.ts inputs.ts jobs.ts cpu-reference.ts check.ts ipir-wire.ts ipir-wgsl.ts ipir.ts ipir-jobs.ts ipir-cpu-reference.ts ipir-check.ts ipir-browser-page.ts",
+    "check": "deno task typecheck && deno run --allow-read --allow-write --allow-run=node --allow-env --allow-sys check.ts",
+    "ipir-check": "deno task typecheck && deno run --allow-read --allow-write --allow-run=node --allow-env --allow-sys ipir-check.ts"
   },
   "unstable": [
     "node-globals"
