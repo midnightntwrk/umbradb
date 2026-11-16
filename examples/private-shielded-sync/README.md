@@ -282,6 +282,7 @@ and refuses builds or tails with its reason; it never halts the core's processin
 |---|---|---|
 | `dataDir` | required | Where snapshots are written; relative to the process's working directory |
 | `pathSplit` | 16 | k, 0–20: the tree is cut k levels above the leaves; the path table holds each position's k lower siblings, read only to spend (none at 0) |
+| `scheme` | `simplepir` | The PIR scheme of the next snapshot: `simplepir`, or `ipir-sp` where this build has it (a build of a scheme it lacks is refused, 501 `scheme-unavailable`) |
 | `queriesPerCall` | 32 | Vectors in every query call |
 | `snapshotEvery` | 0 | Build at every height that is a multiple of this while the node's finalized head is less than this many heights ahead; 0: only on request |
 | `adminSecret` | none | `secret`, 16 characters or more: the admin routes need `Authorization: Bearer <secret>`; without one they answer 403 |
@@ -294,8 +295,8 @@ and refuses builds or tails with its reason; it never halts the core's processin
 | `GET /manifest` | The manifest's canonical JSON bytes; `Pss-Snapshot-Id` = its SHA-256 (the snapshot identifier). 503 `no-snapshot` before the first |
 | `GET /blob/<digest>` | An artifact of the latest or previous snapshot (or a manifest by the snapshot identifier), streamed with `Range` (206, 416), `ETag`, `Cache-Control: immutable`. 404 otherwise |
 | `GET /tail` | Header (132 bytes: `PSST`, version, snapshot id, height, block hash, `first_free`, root, four section lengths), then the commitments of positions T0 … F − 1 (32 each), the outputs from F on (257 each: flags, commitment, ciphertext), the nullifiers spent after S (40 each), the current roots of the blocks from T0's on (32 each) |
-| `POST /query/read`, `POST /query/path`, `POST /query/nullifier` | Body `application/octet-stream`: `PSSQ`, version, snapshot id, count = `queriesPerCall`, count × C values; answer `PSSA`, version, snapshot id, count, count × R values. 409 `snapshot-replaced` (with `snapshot`) for another snapshot, 400 for another count or length, 415 for another content type |
-| `POST /admin/snapshot` | JSON `{ "height"? }` (default: the latest indexed height; not below the served snapshot's): 202 and the build starts; 409 while one runs |
+| `POST /query/read`, `POST /query/path`, `POST /query/nullifier` | Body `application/octet-stream`: `PSSQ`, version, snapshot id, count = `queriesPerCall`, count requests of the table's scheme (SimplePIR: C values each); answer `PSSA`, version, snapshot id, count, count responses (SimplePIR: R values each). 409 `snapshot-replaced` (with `snapshot`) for another snapshot, 400 for another count or length, 415 for another content type |
+| `POST /admin/snapshot` | JSON `{ "height"?, "padding"?, "scheme"? }` (default: the latest indexed height, not below the served snapshot's; the settings' scheme): 202 and the build starts; 409 while one runs; 400 `invalid-scheme`, 501 `scheme-unavailable` |
 | `GET /admin/snapshot` | The index, the tip, the served and previous snapshots, the running and last build |
 
 Each request is logged as one JSON line on stdout (`event: "request"`: route, status, body and answer lengths, range,
@@ -434,9 +435,10 @@ cell (p = 512, Δ = 2^23).
 All integers little-endian; binary bodies are `application/octet-stream`; routes under `/pss/v1`.
 
 - **Query body** (`POST /query/read`, `POST /query/path`, `POST /query/nullifier`): magic `PSSQ` (4), format version (2), snapshot
-  identifier (32), vector count (2), then count × C 32-bit values, vector by vector. Decoding is strict: exact length,
-  the required vector count, and the current snapshot (a `WireError` with status 400, or 409 for another snapshot).
-- **Answer body**: the same 40-byte header with magic `PSSA`, then count × R values.
+  identifier (32), vector count (2), then count requests, each of the length the table's scheme gives
+  (`pir/scheme.ts`; SimplePIR: C 32-bit values). Decoding is strict: exact length, the required vector count, and the
+  current snapshot (a `WireError` with status 400, or 409 for another snapshot).
+- **Answer body**: the same 40-byte header with magic `PSSA`, then count responses (SimplePIR: R values each).
 - **Tail** (`GET /tail`): a 132-byte header (magic `PSST`, version, reserved, snapshot identifier, height, block hash,
   `first_free` as 64 bits, root, and the byte lengths of four sections), then the sections: commitments (32 bytes
   each), outputs (257 bytes: flags, commitment, 224-byte ciphertext), nullifier records (40 bytes), block roots (32).
@@ -445,11 +447,14 @@ All integers little-endian; binary bodies are `application/octet-stream`; routes
   and element 5's first 16 bytes; elements zero without a ciphertext); path record (the k lower hashes, 32k bytes; zero
   outside the full blocks); tail output. Elements 1–5 hold the nonce's last byte and other 31 bytes, the token type's
   last byte and other 31 bytes, and the value; the client recovers each short message as `(element − pad) mod 2^(8b)`.
-- **Manifest** (`manifest.ts`): JSON in canonical form (keys sorted, no whitespace); the snapshot identifier is its
-  SHA-256. It names the network, genesis hash, height, block hash, `first_free`, root, `pathSplit`,
-  `queriesPerCall`, the PIR parameters, and the digest, size and parameters of eight artifacts (six at k = 0): scan
-  file, block roots, read table, read setup data, path table and path setup data (the path table as wide as the noise
-  check allows, so its setup data is small), nullifier table (with `bucketBits` and `capacity`), nullifier setup data.
+- **Manifest** (`manifest.ts`, format 3): JSON in canonical form (keys sorted, no whitespace); the snapshot identifier
+  is its SHA-256. It names the PIR `scheme`, the network, genesis hash, height, block hash, `first_free`, root,
+  `pathSplit`, `queriesPerCall`, the scheme's parameters (`pir`), and the digest and size of eight artifacts (six at
+  k = 0): scan file, block roots, and each PIR table (`readTable`, `pathTable`, `nullifierTable`) with its public
+  artifact (`readPublic`, `pathPublic`, `nullifierPublic`; under SimplePIR the setup data). A table's entry gives its
+  records, record size, `groups` (what a request selects: SimplePIR's columns) and `perGroup`, and the scheme's
+  `layout` (SimplePIR: rows, columns, cells per record, seed); the nullifier table adds `bucketBits` and `capacity`.
+  Under SimplePIR the path table is as wide as the noise check allows, so its setup data is small.
 
 A ciphertext is 224 bytes throughout: the one-time point's 32-byte compressed encoding, then elements 0–5, each its
 32-byte little-endian integer.
