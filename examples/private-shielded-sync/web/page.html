@@ -89,7 +89,7 @@
 
     <section class="card" id="step-files">
       <h2><span class="num">2</span>Get the files<span class="status"></span></h2>
-      <p class="desc">The manifest, then the four files every wallet downloads alike: the scan file (36 bytes per output), the block roots, and the setup data of both PIR tables. Each is checked against the manifest's SHA-256.</p>
+      <p class="desc">The manifest, then the four files every wallet downloads alike: the scan file (36 bytes per output), the block roots, and the public artifact of the read and nullifier tables (SimplePIR's setup data, or IPIR+SP's two masks per table). Each is checked against the manifest's SHA-256. On an IPIR+SP snapshot the wallet's WebAssembly is fetched too, and compiled only if its SHA-256 is the committed one.</p>
       <div class="row"><button data-run="files">Get files</button></div>
       <div class="row" id="reload-row" hidden>
         <input type="text" id="snapshot-height" placeholder="height (default: the synced height)" autocomplete="off" style="width: 260px">
@@ -104,8 +104,15 @@
             <option value="100000000">100M</option>
           </select>
         </label>
+        <label>PIR scheme
+          <select id="snapshot-scheme" title="The PIR scheme of this one build (the admin route's scheme); the server's setting when left as it is">
+            <option value="">the server's setting</option>
+            <option value="simplepir">SimplePIR</option>
+            <option value="ipir-sp">IPIR+SP</option>
+          </select>
+        </label>
         <button class="secondary" data-run="reload">Reload the snapshot (debug)</button>
-        <span class="desc" style="margin: 0">builds a new snapshot on the server, then gets its files. A table size pads the scan file and both PIR tables to that many entries, the real data spread among noise, to time each step with more data.</span>
+        <span class="desc" style="margin: 0">builds a new snapshot on the server, then gets its files. A table size pads the scan file and the PIR tables to that many entries, the real data spread among noise, to time each step with more data. The scheme builds the same height under SimplePIR or IPIR+SP, so both can be compared on the same data.</span>
       </div>
       <div class="reload-out"></div>
       <div class="out"></div>
@@ -120,7 +127,7 @@
 
     <section class="card" id="step-read">
       <h2><span class="num">4</span>Fetch records by PIR (commitment prefix, ciphertext)<span class="status"></span></h2>
-      <p class="desc">Reads the read-table records of the positions privately: the calls carry encrypted query vectors, padded with random columns. A record is 98 bytes: the commitment's first 16 bytes and ciphertext elements 1–5 shrunk to 82 bytes; the wallet rebuilds the elements from its own pads. Leave empty to fetch the scan's matches, or pick positions to test with any output. Each row's Compare button checks that record against the database (debug).</p>
+      <p class="desc">Reads the read-table records of the positions privately: the calls carry encrypted requests (SimplePIR: query vectors, one per column asked for; IPIR+SP: one request per row asked for, each with its own key), padded with random columns or rows. A record is 98 bytes: the commitment's first 16 bytes and ciphertext elements 1–5 shrunk to 82 bytes; the wallet rebuilds the elements from its own pads. Leave empty to fetch the scan's matches, or pick positions to test with any output. Each row's Compare button checks that record against the database (debug).</p>
       <input type="text" id="positions" placeholder="positions, e.g. 0, 17, 100-104 (default: the scan's matches)" autocomplete="off">
       <div class="row"><button data-run="read">Fetch records</button><button class="secondary" data-fill="positions">Pick 5 random positions</button></div>
       <div class="out"></div>
@@ -136,7 +143,7 @@
 
     <section class="card" id="step-paths">
       <h2><span class="num">6</span>Merkle paths by PIR (only to spend)<span class="status"></span></h2>
-      <p class="desc">A sync does not read Merkle paths: a wallet reads its coin's lower path from the path table only when it spends. The first read downloads the path table's setup data (once per snapshot). Leave empty for the wallet's snapshot coins, or enter positions. Each path is checked against its block's root.</p>
+      <p class="desc">A sync does not read Merkle paths: a wallet reads its coin's lower path from the path table only when it spends. The first read downloads the path table's setup data or masks (once per snapshot). Leave empty for the wallet's snapshot coins, or enter positions. Each path is checked against its block's root.</p>
       <input type="text" id="path-positions" placeholder="positions, e.g. 21589, 69250 (default: the wallet's snapshot coins)" autocomplete="off">
       <div class="row"><button data-run="paths">Read paths</button></div>
       <div class="out"></div>
@@ -160,7 +167,7 @@
   <aside class="side">
     <section class="card">
       <h2>What the server saw</h2>
-      <p class="desc">Every request the page's client made. Click one to see exactly what went out and what came back. No request depends on the keys except in its encrypted query vectors.</p>
+      <p class="desc">Every request the page's client made. Click one to see exactly what went out and what came back. No request depends on the keys except in its encrypted PIR requests.</p>
       <div id="totals" class="facts"></div>
       <div style="max-height: 560px; overflow: auto"><table><thead><tr><th>Request</th><th>Up</th><th>Down</th><th>ms</th></tr></thead><tbody id="requests"></tbody></table></div>
     </section>

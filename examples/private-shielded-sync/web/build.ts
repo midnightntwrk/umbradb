@@ -8,8 +8,10 @@
  *   browser, with `node:crypto` and the other Node.js modules the client's files import replaced by `./shims/`, and
  *   Node.js's `Buffer` injected (`buffer`);
  * - `index.html` (`./page.html`) and `explain.html` (`./explain.html`, how each step works);
- * - `pss-kernel.wasm` (the scan kernel; the worker checks its SHA-256 against the committed one, built in) and
- *   `ledger-v9.wasm` (from the client's install of `@midnightntwrk/ledger-v9`);
+ * - `pss-kernel.wasm` (the scan kernel; the worker checks its SHA-256 against the committed one, built in as
+ *   `KERNEL_DIGEST`), `pss-ipir.wasm` (the wallet's IPIR+SP math, `../ipir/pss-ipir.wasm`; fetched only for an IPIR+SP
+ *   snapshot and checked against its committed SHA-256, built in as `IPIR_DIGEST`) and `ledger-v9.wasm` (from the
+ *   client's install of `@midnightntwrk/ledger-v9`);
  * - beside each `.html`, `.js` and `.wasm` file, its brotli (`.br`, quality 11) and gzip (`.gz`, level 9) copy, which
  *   `./serve.ts` sends to a browser that accepts it: about 12 MB of files load as about 5 MB.
  *
@@ -69,7 +71,14 @@ function ledgerPlugin(): Plugin {
 
 const node = join(HERE, "shims", "node.ts");
 mkdirSync(out, { recursive: true });
-const kernelDigest = readFileSync(join(EXAMPLE, "kernel", "pss-kernel.wasm.sha256"), "utf8").trim().split(/\s+/)[0]!;
+/** The SHA-256 a `.sha256` file beside a committed `.wasm` records. */
+const committedDigest = (path: string): string => {
+  const digest = readFileSync(path, "utf8").trim().split(/\s+/)[0] ?? "";
+  if (!/^[0-9a-f]{64}$/.test(digest)) throw new Error(`no SHA-256 in ${path}`);
+  return digest;
+};
+const kernelDigest = committedDigest(join(EXAMPLE, "kernel", "pss-kernel.wasm.sha256"));
+const ipirDigest = committedDigest(join(EXAMPLE, "ipir", "pss-ipir.wasm.sha256"));
 const common = {
   bundle: true,
   format: "esm" as const,
@@ -87,7 +96,7 @@ const common = {
     "node:worker_threads": node,
   },
   inject: [join(HERE, "shims", "buffer.ts")],
-  define: { global: "globalThis", KERNEL_DIGEST: JSON.stringify(kernelDigest) },
+  define: { global: "globalThis", KERNEL_DIGEST: JSON.stringify(kernelDigest), IPIR_DIGEST: JSON.stringify(ipirDigest) },
   logLevel: "warning" as const,
 };
 await build({ ...common, entryPoints: { worker: join(HERE, "worker.ts") }, outdir: out, plugins: [ledgerPlugin()] });
@@ -95,6 +104,7 @@ await build({ ...common, entryPoints: { page: join(HERE, "page.ts") }, outdir: o
 copyFileSync(join(HERE, "page.html"), join(out, "index.html"));
 copyFileSync(join(HERE, "explain.html"), join(out, "explain.html"));
 copyFileSync(join(EXAMPLE, "kernel", "pss-kernel.wasm"), join(out, "pss-kernel.wasm"));
+copyFileSync(join(EXAMPLE, "ipir", "pss-ipir.wasm"), join(out, "pss-ipir.wasm"));
 copyFileSync(join(LEDGER, "midnight_ledger_wasm_v9_bg.wasm"), join(out, "ledger-v9.wasm"));
 // Compressed copies, made once here at the highest settings (serve.ts only picks one).
 let plain = 0;
