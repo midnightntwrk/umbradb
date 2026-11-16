@@ -11,13 +11,16 @@
  *   WebAssembly from the platform's cryptographic source (FR-032, Q5); the caller puts the wanted groups first and pads
  *   with random ones. Its answer decodes, for each wanted request, the row's cells into its `perGroup` records
  *   (`./ipir/encode.ts`); the padding requests' answers are not decoded.
- * - Secrets (review F7: a request's state is erased only by its `free()`): every request's state is freed once its
- *   call's answer is decoded, when the decode fails, when making the call fails part-way, and, for a call whose answer
- *   never came (a network error, a replaced snapshot), when its table is disposed; disposing the scheme disposes every
- *   table it opened. `sync` and `lowerPathsByPir` dispose both in `finally` blocks.
+ * - Threads: with `WalletSchemeOptions.ipirWorkers` a call's requests are made on worker threads, each with its own
+ *   instance of the WebAssembly (`../ipir/pool.ts`); without, one after the other on the calling thread
+ *   (`../ipir/engine.ts`). The bytes sent are of the same form either way.
+ * - Secrets (review F7: a request's state is erased only by freeing it): a call's states are freed once its answer is
+ *   decoded, when the decode fails, when making the call fails part-way, and, for a call whose answer never came (a
+ *   network error, a replaced snapshot), when its table is disposed; disposing the scheme disposes every table it
+ *   opened. `sync` and `lowerPathsByPir` dispose both in `finally` blocks.
  */
 
-import { IpirWallet, type IpirRequestState, type IpirTableClient } from "../ipir/wallet.ts";
+import { inlineIpirEngine, type IpirEngineTable } from "../ipir/engine.ts";
 import { IPIR_DIGIT_BITS, IPIR_DIGITS, IPIR_MASK_BITS, IPIR_P_BITS, IPIR_Q_BITS, IPIR_QUERY_BITS, IPIR_RESPONSE_BITS, IPIR_RING } from "../ipir/sizes.ts";
 import { ipirRowRecords } from "./ipir/encode.ts";
 import { SchemeUnavailable, type WalletCall, type WalletScheme, type WalletSchemeEntry, type WalletTable } from "./scheme.ts";
@@ -53,18 +56,10 @@ async function moduleOf(load: (() => WebAssembly.Module | Promise<WebAssembly.Mo
   }
 }
 
-/** One table, as a wallet calls it; `release` frees its client once its outstanding request states are freed. */
-function tableOf(client: IpirTableClient, ref: PirTableRef, release: () => void): WalletTable {
-  const { requestBytes, responseBytes } = client.sizes;
+/** One table, as a wallet calls it; `release` tells the scheme it was disposed. */
+function tableOf(engine: IpirEngineTable, ref: PirTableRef, release: () => void): WalletTable {
+  const { requestBytes, responseBytes } = engine.sizes;
   const e = ref.layout.cellsPerRecord;
-  /** The request states made and not yet freed (calls not decoded yet). */
-  const live = new Set<IpirRequestState>();
-  const free = (states: readonly IpirRequestState[]): void => {
-    for (const state of states) {
-      live.delete(state);
-      state.free();
-    }
-  };
   let disposed = false;
   return {
     groups: ref.groups,
@@ -73,22 +68,10 @@ function tableOf(client: IpirTableClient, ref: PirTableRef, release: () => void)
     responseBytes,
     async prepareCall(groups: readonly number[]): Promise<WalletCall> {
       if (disposed) throw new Error("this IPIR+SP table was disposed");
-      const requests = new Uint8Array(groups.length * requestBytes);
-      const states: IpirRequestState[] = [];
-      try {
-        groups.forEach((group, q) => {
-          const request = client.request(group);
-          states.push(request.state);
-          live.add(request.state);
-          requests.set(request.bytes, q * requestBytes);
-        });
-      } catch (error) {
-        free(states);
-        throw error;
-      }
+      const call = await engine.call(groups);
       let decoded = false;
       return {
-        requests,
+        requests: call.requests,
         async decode(responses: Uint8Array, wanted: number): Promise<Uint8Array[][]> {
           if (decoded) throw new Error("an IPIR+SP call's answer is decoded once");
           decoded = true;
@@ -97,14 +80,10 @@ function tableOf(client: IpirTableClient, ref: PirTableRef, release: () => void)
               throw new Error(`an answer to ${groups.length} requests is ${groups.length * responseBytes} bytes, got ${responses.length}`);
             }
             if (!Number.isSafeInteger(wanted) || wanted < 0 || wanted > groups.length) throw new Error(`wanted ${wanted} of ${groups.length} requests`);
-            const out: Uint8Array[][] = [];
-            for (let q = 0; q < wanted; q++) {
-              const row = client.decode(states[q]!, responses.subarray(q * responseBytes, (q + 1) * responseBytes));
-              out.push(ipirRowRecords(row, ref.perGroup, e, ref.recordBytes));
-            }
-            return out;
+            const rows = await call.decode(responses, wanted);
+            return rows.map((row) => ipirRowRecords(row, ref.perGroup, e, ref.recordBytes));
           } finally {
-            free(states);
+            call.free();
           }
         },
       };
@@ -112,7 +91,8 @@ function tableOf(client: IpirTableClient, ref: PirTableRef, release: () => void)
     dispose() {
       if (disposed) return;
       disposed = true;
-      free([...live]);
+      // Frees the table and the states of its calls not decoded yet.
+      engine.free();
       release();
     },
   };
@@ -123,18 +103,16 @@ export const IPIR_SP_WALLET: WalletSchemeEntry = {
   name: "ipir-sp",
   async open(manifest, options): Promise<WalletScheme> {
     checkParams(manifest.pir);
-    const wallet = new IpirWallet(await moduleOf(options.ipirWasm));
+    const module = await moduleOf(options.ipirWasm);
+    const engine = options.ipirWorkers === undefined ? inlineIpirEngine(module) : await options.ipirWorkers.engine(module);
     const open = new Set<WalletTable>();
     return {
       name: "ipir-sp",
       async openTable(ref: PirTableRef, publicArtifact: Uint8Array): Promise<WalletTable> {
         const l = ref.layout;
         // The setup's snapshot input is the table file's digest; its seed is the manifest's (FR-012).
-        const client = wallet.openTable({ rows: l.rows, cols: l.cols, seed: fromHex(l.seed, 32), snapshot: fromHex(ref.digest, 32), masks: publicArtifact });
-        const table = tableOf(client, ref, () => {
-          open.delete(table);
-          client.free();
-        });
+        const opened = await engine.openTable({ rows: l.rows, cols: l.cols, seed: fromHex(l.seed, 32), snapshot: fromHex(ref.digest, 32), masks: publicArtifact });
+        const table = tableOf(opened, ref, () => open.delete(table));
         open.add(table);
         return table;
       },

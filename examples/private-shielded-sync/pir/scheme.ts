@@ -21,6 +21,7 @@
  */
 
 import type { Manifest, NullifierTableRef, PirTableRef, SchemeParams, TableLayout } from "../shared/manifest.ts";
+import type { IpirWorkers } from "../ipir/engine.ts";
 import type { TableName } from "./matrix.ts";
 import type { Multiplier } from "./multiply.ts";
 
@@ -224,6 +225,12 @@ export interface WalletSchemeOptions {
    * {@link SchemeUnavailable} naming the file.
    */
   readonly ipirWasm?: () => WebAssembly.Module | Promise<WebAssembly.Module>;
+  /**
+   * IPIR+SP: worker threads that make a call's requests (`../ipir/pool.ts`; the command line's `nodeIpirPool`, the
+   * page's Web Workers). Started only when a snapshot uses IPIR+SP, and closed by the caller. Without them the requests
+   * are made one after the other on the calling thread.
+   */
+  readonly ipirWorkers?: IpirWorkers;
 }
 
 /** A scheme's wallet side for one snapshot (its parameters checked against this build's). */

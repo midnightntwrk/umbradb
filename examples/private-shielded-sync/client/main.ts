@@ -17,6 +17,8 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { compileKernel, Kernel, ScanPool } from "../kernel/index.ts";
+import type { IpirWorkers } from "../ipir/engine.ts";
+import { nodeIpirPool } from "../ipir/pool-node.ts";
 import { compileIpirWasm } from "../ipir/wallet-node.ts";
 import { inlineMultiplier, type Multiplier, WorkerMultiplier } from "../pir/index.ts";
 import { toHex } from "../shared/index.ts";
@@ -54,7 +56,8 @@ options:
   --data <dir>               state and cache (default ~/.pss-client): <dir>/wallets/<label>/state.json, <dir>/cache/
   --label <name>             the state's folder (default: the wallet name, or "seed-" and the seed file's name)
   --network <name>           the network the server must serve (default PSS_NETWORK when set)
-  --threads <n>              scan and PIR threads (default: CPUs − 1, at most 8)
+  --threads <n>              scan and PIR threads (default: CPUs − 1, at most 8); with 1, IPIR+SP's requests
+                             are made one after the other
   --stats <file>             sync: write the step statistics as JSON
   --json                     print JSON instead of text
   --node-http <url>          send: the node's JSON-RPC (default PSS_NODE_HTTP)
@@ -149,6 +152,8 @@ interface Tools {
   multiplier: Multiplier;
   /** IPIR+SP: the wallet's WebAssembly, read and digest-checked only when a snapshot uses IPIR+SP (00058 FR-031). */
   ipirWasm(): WebAssembly.Module;
+  /** IPIR+SP: worker threads for a call's requests, started only when a snapshot uses IPIR+SP; none with one thread. */
+  ipirWorkers: IpirWorkers | undefined;
   close(): Promise<void>;
 }
 
@@ -160,6 +165,7 @@ async function tools(zswapSeed: Uint8Array): Promise<Tools> {
   const n = threads();
   const scanPool = new ScanPool({ threads: n, module });
   const multiplier: Multiplier = n > 1 ? new WorkerMultiplier(n) : inlineMultiplier;
+  const ipirWorkers = n > 1 ? nodeIpirPool(n) : undefined;
   return {
     ledger,
     kernel,
@@ -167,9 +173,11 @@ async function tools(zswapSeed: Uint8Array): Promise<Tools> {
     scanPool,
     multiplier,
     ipirWasm: () => compileIpirWasm(),
+    ipirWorkers,
     async close() {
       await scanPool.close();
       await multiplier.close();
+      await ipirWorkers?.close();
     },
   };
 }
@@ -185,6 +193,7 @@ async function runSync(t: Tools, previous: WalletState | null): Promise<SyncResu
     scanPool: t.scanPool,
     multiplier: t.multiplier,
     ipirWasm: t.ipirWasm,
+    ...(t.ipirWorkers === undefined ? {} : { ipirWorkers: t.ipirWorkers }),
     ...(network ? { network } : {}),
     previous,
     log,
@@ -287,7 +296,7 @@ async function cmdSend(): Promise<void> {
         }
         // The lower path is read by PIR only now, to spend (Q58), unless the tail gives it.
         if (coin.lowerPath === null && pathInTable(result.manifest, coin)) {
-          const read = await lowerPathsByPir({ http: new PssHttp(opt.server), cache: new BlobCache(join(resolve(opt.data), "cache")), kernel: t.kernel, multiplier: t.multiplier, ipirWasm: t.ipirWasm }, result, [coin]);
+          const read = await lowerPathsByPir({ http: new PssHttp(opt.server), cache: new BlobCache(join(resolve(opt.data), "cache")), kernel: t.kernel, multiplier: t.multiplier, ipirWasm: t.ipirWasm, ...(t.ipirWorkers === undefined ? {} : { ipirWorkers: t.ipirWorkers }) }, result, [coin]);
           coin = { ...coin, lowerPath: read.paths.get(coin.position)! };
           timings.pathReadMs = read.stats.ms;
           record.pathRead = { public: read.stats.public, buildMs: read.stats.buildMs, roundTripMs: read.stats.roundTripMs, decodeMs: read.stats.decodeMs, bytesUp: read.stats.bytesUp, bytesDown: read.stats.bytesDown };

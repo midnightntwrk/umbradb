@@ -20,7 +20,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { compileKernel, Kernel } from "../kernel/index.ts";
+import type { IpirWorkers } from "../ipir/engine.ts";
 import { loadIpirAddon, type IpirAddon } from "../ipir/native.ts";
+import { nodeIpirPool } from "../ipir/pool-node.ts";
 import { ipirMasksBytes, ipirRequestBytes, ipirResponseBytes } from "../ipir/sizes.ts";
 import { type IpirRequest, IpirTableClient } from "../ipir/wallet.ts";
 import { compileIpirWasm, IPIR_WASM_PATH } from "../ipir/wallet-node.ts";
@@ -105,10 +107,10 @@ async function call(wallet: WalletTable, server: ServerTable, wanted: readonly n
  * Every record of a positional table, and every nullifier's lookup, read by PIR through `scheme`'s wallet side and the
  * server's tables (adopted from the build, or loaded from the snapshot's files).
  */
-async function readAll(result: BuildResult, source: "adopted" | "loaded", perCall = 8): Promise<{ read: Uint8Array[]; path: Uint8Array[]; spent: (readonly [number, number] | null)[]; absent: boolean }> {
+async function readAll(result: BuildResult, source: "adopted" | "loaded", perCall = 8, ipirWorkers?: IpirWorkers): Promise<{ read: Uint8Array[]; path: Uint8Array[]; spent: (readonly [number, number] | null)[]; absent: boolean }> {
   const m = result.manifest;
   const server = await openServerScheme(m.scheme, { threads: 1, multiplier: inlineMultiplier });
-  const wallet = await openWalletScheme(m, { multiplier: inlineMultiplier, ipirWasm: () => wasm });
+  const wallet = await openWalletScheme(m, { multiplier: inlineMultiplier, ipirWasm: () => wasm, ...(ipirWorkers === undefined ? {} : { ipirWorkers }) });
   const tables: ServerTable[] = [];
   try {
     const open = async (name: Name) => {
@@ -244,6 +246,17 @@ describe("an IPIR+SP snapshot (FR-010 to FR-015)", () => {
       expect(got.spent, source).toEqual(reference.spent);
       expect(got.absent).toBe(true);
       expect(decodeReadRecord(got.read[7]!).elements).toBeNull();
+    }
+    // The same through the wallet's worker threads (`ipir/pool.ts`): each call's requests dealt to 3 workers.
+    const pool = nodeIpirPool(3);
+    try {
+      const got = await readAll(ipir, "loaded", 8, pool);
+      expect(got.read.map(toHex)).toEqual(reference.read.map(toHex));
+      expect(got.path.map(toHex)).toEqual(reference.path.map(toHex));
+      expect(got.spent).toEqual(reference.spent);
+      expect(got.absent).toBe(true);
+    } finally {
+      await pool.close();
     }
   });
 

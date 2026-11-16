@@ -32,6 +32,8 @@ import type { Ledger } from "../client/ledger.ts";
 import { writeState } from "../client/state.ts";
 import { lowerPathsByPir, pathInTable, SYNC_STEPS, type SyncResult, type SyncStep, sync } from "../client/sync.ts";
 import { committedKernelDigest, compileKernel, Kernel, ScanPool } from "../kernel/index.ts";
+import type { IpirWorkers } from "../ipir/engine.ts";
+import { nodeIpirPool } from "../ipir/pool-node.ts";
 import { inlineMultiplier, type Multiplier, type WalletSchemeOptions, WorkerMultiplier } from "../pir/index.ts";
 import { decodeManifest, type Manifest, ROUTES } from "../shared/index.ts";
 import { slotCount } from "../shared/padding.ts";
@@ -272,12 +274,15 @@ interface WalletOutcome {
 }
 
 /** What the scheme options of a wallet's sync and path read are. */
-const walletSchemeOptions = (o: BenchOptions): Pick<WalletSchemeOptions, "ipirWasm"> => (o.ipirWasm === undefined ? {} : { ipirWasm: o.ipirWasm });
+const walletSchemeOptions = (o: BenchOptions, workers?: IpirWorkers): Pick<WalletSchemeOptions, "ipirWasm" | "ipirWorkers"> =>
+  o.ipirWasm === undefined ? {} : { ipirWasm: o.ipirWasm, ...(workers === undefined ? {} : { ipirWorkers: workers }) };
 
 async function runWallet(o: BenchOptions, w: BenchWallet, kernel: Kernel, module: WebAssembly.Module, manifest: Manifest, snapshotId: string, self: MemoryProbe): Promise<WalletOutcome> {
   const keys = keysFromZswapSeed(o.ledger, w.zswapSeed, kernel);
   const scanPool = new ScanPool({ threads: o.clientThreads, module });
   const multiplier: Multiplier = o.clientThreads > 1 ? new WorkerMultiplier(o.clientThreads) : inlineMultiplier;
+  // IPIR+SP's requests on as many threads as SimplePIR's multiplication; started only for an IPIR+SP snapshot.
+  const ipirWorkers = o.clientThreads > 1 && o.ipirWasm !== undefined ? nodeIpirPool(o.clientThreads) : undefined;
   const answeredAt: number[] = [];
   const f = fetchOf(o);
   const http = new PssHttp(o.server, {
@@ -306,7 +311,7 @@ async function runWallet(o: BenchOptions, w: BenchWallet, kernel: Kernel, module
       kernel,
       scanPool,
       multiplier,
-      ...walletSchemeOptions(o),
+      ...walletSchemeOptions(o, ipirWorkers),
       ...(o.network === undefined ? {} : { network: o.network }),
       previous: null,
       log: (line) => o.log(`${w.label}: ${line}`),
@@ -329,7 +334,7 @@ async function runWallet(o: BenchOptions, w: BenchWallet, kernel: Kernel, module
       self.mark();
       server?.mark();
       const pathFrom = Date.now();
-      const read = await lowerPathsByPir({ http, cache, kernel, multiplier, ...walletSchemeOptions(o) }, result, coins);
+      const read = await lowerPathsByPir({ http, cache, kernel, multiplier, ...walletSchemeOptions(o, ipirWorkers) }, result, coins);
       self.mark();
       server?.mark();
       pathRead = { stats: read.stats, paths: read.paths.size, records, from: pathFrom, to: Date.now() };
@@ -338,6 +343,7 @@ async function runWallet(o: BenchOptions, w: BenchWallet, kernel: Kernel, module
   } finally {
     await scanPool.close();
     await multiplier.close();
+    await ipirWorkers?.close();
   }
   const stateBytes = writeState(join(o.workDir, "wallets", w.label, "state.json"), result.state);
   const stats = result.stats;

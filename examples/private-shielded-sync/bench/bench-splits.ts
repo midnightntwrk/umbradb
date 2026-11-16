@@ -21,6 +21,7 @@ import { readIpirRecord } from "../pir/ipir/encode.ts";
 import { openServerScheme } from "../pir/server-schemes.ts";
 import { decodeAnswerBody, decodeQueryBody, encodeAnswerBody, encodeQueryBody, equalBytes, fromHex, type Manifest, type PirTableRef, toHex } from "../shared/index.ts";
 import type { BuildJob } from "../server/build.ts";
+import { nodeIpirPool } from "../ipir/pool-node.ts";
 import { runBuildWorker } from "../server/build-host.ts";
 import { genesisHashOf, stateAt, zswapEvents } from "../server/sql.ts";
 import { rootFromStored } from "../server/tree.ts";
@@ -121,7 +122,12 @@ export async function pathSplitRuns(o: SplitOptions): Promise<PathSplitRun[]> {
   const m = o.manifest;
   const server = await openServerScheme(m.scheme, { threads: o.threads });
   const client: Multiplier = o.clientThreads > 1 ? new WorkerMultiplier(o.clientThreads) : inlineMultiplier;
-  const wallet = await openWalletScheme(m, { multiplier: client, ...(o.ipirWasm === undefined ? {} : { ipirWasm: o.ipirWasm }) });
+  const ipirWorkers = o.clientThreads > 1 && o.ipirWasm !== undefined ? nodeIpirPool(o.clientThreads) : undefined;
+  const wallet = await openWalletScheme(m, {
+    multiplier: client,
+    ...(o.ipirWasm === undefined ? {} : { ipirWasm: o.ipirWasm }),
+    ...(ipirWorkers === undefined ? {} : { ipirWorkers }),
+  });
   try {
     for (const k of o.ks) {
       const dataDir = join(o.workDir, `k${k}`);
@@ -244,6 +250,7 @@ export async function pathSplitRuns(o: SplitOptions): Promise<PathSplitRun[]> {
     wallet.dispose();
     await server.close();
     await client.close();
+    await ipirWorkers?.close();
   }
   return out;
 }

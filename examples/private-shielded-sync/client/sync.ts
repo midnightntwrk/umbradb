@@ -58,6 +58,8 @@ export interface SyncOptions {
    * a snapshot that uses IPIR+SP. Without it such a sync stops with a message naming the file.
    */
   readonly ipirWasm?: WalletSchemeOptions["ipirWasm"];
+  /** IPIR+SP: worker threads that make a call's requests (the command line: `nodeIpirPool`); without, one thread. */
+  readonly ipirWorkers?: WalletSchemeOptions["ipirWorkers"];
   /** The network the manifest must name, if given. */
   readonly network?: string;
   /** The previous state: its pending transfers carry over until a sync confirms them (FR-128). */
@@ -184,7 +186,7 @@ export interface PathReadStats extends CallStats {
  * block's root from the coin's commitment. Returns the paths as hex, by position.
  */
 export async function lowerPathsByPir(
-  options: Pick<SyncOptions, "http" | "cache" | "kernel" | "multiplier" | "ipirWasm">,
+  options: Pick<SyncOptions, "http" | "cache" | "kernel" | "multiplier" | "ipirWasm" | "ipirWorkers">,
   result: Pick<SyncResult, "manifest" | "state" | "view">,
   coins: readonly Pick<CoinRecord, "position" | "commitment" | "source">[],
 ): Promise<{ paths: Map<number, string[]>; stats: PathReadStats }> {
@@ -227,8 +229,12 @@ export async function lowerPathsByPir(
 }
 
 /** What the snapshot's scheme is opened with: each scheme takes its own part. */
-function schemeOptions(options: Pick<SyncOptions, "multiplier" | "ipirWasm">): WalletSchemeOptions {
-  return { multiplier: options.multiplier, ...(options.ipirWasm === undefined ? {} : { ipirWasm: options.ipirWasm }) };
+function schemeOptions(options: Pick<SyncOptions, "multiplier" | "ipirWasm" | "ipirWorkers">): WalletSchemeOptions {
+  return {
+    multiplier: options.multiplier,
+    ...(options.ipirWasm === undefined ? {} : { ipirWasm: options.ipirWasm }),
+    ...(options.ipirWorkers === undefined ? {} : { ipirWorkers: options.ipirWorkers }),
+  };
 }
 
 /** Runs `sync`, starting again when the snapshot is replaced (at most `maxAttempts` times). */

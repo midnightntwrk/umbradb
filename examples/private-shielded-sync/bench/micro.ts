@@ -3,7 +3,7 @@
  *
  *   node examples/private-shielded-sync/bench/micro.ts [--out <file>] [--records 10000,100000,1000000]
  *        [--sizes 704,40] [--schemes simplepir,ipir-sp] [--threads <server threads>] [--scan-threads 1,2,4,8,15]
- *        [--runs 3] [--quick]
+ *        [--wallet-threads 2,4,8] [--runs 3] [--quick]
  *
  * - Scan: the 16,384 test-vector entries per thread count; µs per entry (wall time × threads / entries) and effective
  *   µs per entry (wall time / entries).
@@ -18,7 +18,9 @@
  *   build from the cells (its own report: hints, packing, the decoding check, bytes held) and the masks; the server's
  *   answer to 1 and to 32 requests (the add-on, off the main thread); the wallet's WebAssembly (one thread, as in a
  *   wallet): opening the table from its masks, making 1 and 32 requests (each with a fresh secret), decoding their
- *   answers. Every decoded record is checked against the generated one.
+ *   answers; then the same 32 requests on the wallet's worker pool (`ipir/pool.ts`) for each `--wallet-threads` count:
+ *   starting the workers, opening the table on all of them, the first call, the best call, the decode. Every decoded
+ *   record is checked against the generated one.
  *
  * Times are the best of `--runs` (default 3; 2 at a million records); a table's setup or build is run once. Records
  * are generated from their index (not stored), so a table of a million 704-byte records needs only its cells (2 bytes
@@ -49,6 +51,7 @@ import {
 } from "../pir/index.ts";
 import { CALL_HEADER_BYTES } from "../shared/index.ts";
 import { buildIpirTable } from "../ipir/native.ts";
+import { nodeIpirPool } from "../ipir/pool-node.ts";
 import { IpirWallet, type IpirRequestState } from "../ipir/wallet.ts";
 import { compileIpirWasm } from "../ipir/wallet-node.ts";
 import { ipirRowRecords, putIpirRecord } from "../pir/ipir/encode.ts";
@@ -63,6 +66,7 @@ const { values: args } = parseArgs({
     runs: { type: "string" },
     threads: { type: "string" },
     "scan-threads": { type: "string" },
+    "wallet-threads": { type: "string", default: "2,4,8" },
     quick: { type: "boolean", default: false },
   },
 });
@@ -243,6 +247,7 @@ async function benchIpir(count: number, size: number, wasm: WebAssembly.Module) 
     addonTotalMs: report.totalMs,
     walletOpenMs,
   };
+  const walletWorkers: { threads: number; startMs: number; openMs: number; firstCallMs: number; request32Ms: number; decode32Ms: number }[] = [];
   try {
     for (const n of [1, 32]) {
       const wanted = indices.slice(0, n);
@@ -270,6 +275,38 @@ async function benchIpir(count: number, size: number, wasm: WebAssembly.Module) 
       Object.assign(timings, { [`serverAnswer${n}Ms`]: answer.ms, [`clientRequest${n}OneThreadMs`]: request.ms, [`clientDecode${n}OneThreadMs`]: decode.ms });
       log(`  ${n} request(s): answer ${answer.ms} ms; wallet request ${request.ms} ms, decode ${decode.ms} ms (one thread)`);
     }
+    // The same 32 requests on the wallet's worker pool.
+    const wantedRows = indices.map((i) => positionOf(i, perGroup).column);
+    for (const threads of list(args["wallet-threads"]!).filter((t) => t >= 1)) {
+      const pool = nodeIpirPool(threads);
+      try {
+        let t = performance.now();
+        const engine = await pool.engine(wasm);
+        const startMs = ms(t);
+        t = performance.now();
+        const table = await engine.openTable({ rows, cols, seed, snapshot: digest, masks: built.masks });
+        const openMs = ms(t);
+        t = performance.now();
+        let call = await table.call(wantedRows);
+        const firstCallMs = ms(t);
+        const request = await best(runs, async () => {
+          call.free();
+          call = await table.call(wantedRows);
+        });
+        const answers = await built.table.respond(call.requests, wantedRows.length);
+        const decode = await best(runs, () => call.decode(answers, wantedRows.length));
+        indices.forEach((i, q) => {
+          const got = ipirRowRecords(decode.value[q]!, perGroup, e, size)[positionOf(i, perGroup).slot]!;
+          if (count > 0 && !equal(got, record(i, size))) throw new Error(`IPIR+SP read of ${i} on ${threads} workers differs from the record`);
+        });
+        call.free();
+        table.free();
+        walletWorkers.push({ threads, startMs, openMs, firstCallMs, request32Ms: request.ms, decode32Ms: decode.ms });
+        log(`  32 requests on ${threads} workers: start ${startMs} ms, open ${openMs} ms, first call ${firstCallMs} ms, best call ${request.ms} ms, decode ${decode.ms} ms`);
+      } finally {
+        await pool.close();
+      }
+    }
   } finally {
     client.free();
     built.table.release();
@@ -293,6 +330,7 @@ async function benchIpir(count: number, size: number, wasm: WebAssembly.Module) 
     },
     noise: { checkedRows: report.checkedRows.length, maxPhaseErrorLog2: report.maxPhaseErrorLog2, phaseLimitLog2: report.phaseLimitLog2 },
     timings,
+    walletWorkers,
     memoryAfter: { rss: memory.rss, arrayBuffers: memory.arrayBuffers },
     check: "every decoded record equals the generated one",
   };
