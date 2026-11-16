@@ -19,11 +19,16 @@
  * - `IpirServerTable.respond(requests, count) → Promise<Uint8Array>`: `count` requests laid end to end (each
  *   `ipirRequestBytes(rows)` bytes) → `count` answers laid end to end (each `ipirResponseBytes(cols)` bytes), same
  *   order. Wrong lengths reject before any work.
+ * - `IpirServerTable.respondTimed(requests, count) → Promise<{ answers, stages }>`: the same answers, with upstream's
+ *   timing of each one's stages (parse, first pass, packing, encoding).
  * - `IpirServerTable.release()`: frees the table (an answer in flight keeps it until it finishes). A table that is
  *   garbage-collected without `release()` is released then.
  * - `IpirServerTable.detach() → handle` and `adoptIpirTable(handle, rows, cols) → { table, info }`: a table built in
  *   one thread (the build's worker) answered from another (the server's). The add-on's registry belongs to the
  *   process, so a handle is valid in every thread; `tableInfo(handle)` describes the table under it, or null.
+ * - `ipirGpuReference({ cellsPath, rows, cols, seed, snapshot }, requests, count, { hints? })`: the public values a GPU
+ *   responder needs (compiled packing matrices, query masks, hint columns) and upstream's unrounded first pass and
+ *   packing product for the requests, to set up and check `gpu/ipir.ts`.
  */
 
 import { existsSync } from "node:fs";
@@ -144,9 +149,23 @@ export interface IpirAddon {
     options?: IpirBuildOptions,
   ): Promise<RawBuilt>;
   respond(handle: number, requests: Uint8Array, count: number): Promise<Uint8Array>;
+  /** As `respond`, with upstream's timing of each answer's stages (added for the GPU check; absent in older builds). */
+  respondTimed?(handle: number, requests: Uint8Array, count: number): Promise<{ answers: Uint8Array; stages: IpirAnswerStages[] }>;
   release(handle: number): boolean;
   tableCount(): number;
   tableInfo(handle: number): IpirTableInfo | null;
+}
+
+/** Upstream's own timing of one answer's stages (`NativeTiming`), in milliseconds. */
+export interface IpirAnswerStages {
+  /** Parsing the request and lifting its words. */
+  readonly deserializeMs: number;
+  /** The first pass over the table. */
+  readonly matrixVectorMs: number;
+  /** The packing of every output block. */
+  readonly packingMs: number;
+  /** Rounding and encoding the answer. */
+  readonly serializationMs: number;
 }
 
 /** A held table as the add-on describes it (`tableInfo`). */
@@ -241,6 +260,22 @@ export class IpirServerTable {
     return await this.#addon.respond(this.#handle, requests, count);
   }
 
+  /**
+   * As {@link IpirServerTable.respond}, with upstream's timing of each answer's stages (parse, first pass, packing,
+   * encoding); the requests are answered one after another, as `respond` does.
+   */
+  async respondTimed(requests: Uint8Array, count: number): Promise<{ answers: Uint8Array; stages: IpirAnswerStages[] }> {
+    if (this.#handle === undefined) throw new Error("this IPIR+SP table was released");
+    if (typeof this.#addon.respondTimed !== "function") {
+      throw new Error("this IPIR+SP add-on has no respondTimed export: rebuild it with build.sh native");
+    }
+    if (!Number.isSafeInteger(count) || count < 1) throw new Error(`a call holds at least one request, got ${count}`);
+    if (requests.length !== count * this.sizes.requestBytes) {
+      throw new Error(`${count} requests to this table are ${count * this.sizes.requestBytes} bytes, got ${requests.length}`);
+    }
+    return await this.#addon.respondTimed(this.#handle, requests, count);
+  }
+
   /** Frees the table; an answer in flight keeps it until it finishes. Idempotent. */
   release(): void {
     if (this.#handle === undefined) return;
@@ -294,6 +329,96 @@ export interface IpirBuiltTable {
   readonly table: IpirServerTable;
   readonly masks: Uint8Array;
   readonly report: IpirBuildReport;
+}
+
+/** One output block of 2,048 columns as a GPU responder takes it (`gpu/ipir.ts`). Public values only. */
+export interface IpirGpuBlock {
+  /** The compiled packing matrix: 2,048 rows × 4,096 columns, row-major, signed (centred modulo 2^54). */
+  readonly matrix: Int32Array;
+  /** The hint columns, if asked for: 2,048 columns × 2,048 coefficients modulo 2^54 (column c at `c × 2,048`). */
+  readonly hints: BigUint64Array | null;
+}
+
+/**
+ * Upstream's public preparation of a table and its unrounded intermediate results for given requests, to set up and
+ * check a GPU responder (`gpu/ipir.ts`, `gpu/ipir-check.ts`). Every value is public.
+ */
+export interface IpirGpuReference {
+  readonly setupId: Uint8Array;
+  /** The published masks: equal to {@link buildIpirTable}'s for the same input. */
+  readonly masks: Uint8Array;
+  /** The public query masks: `rows` coefficients, polynomial b at `b × 2,048`. */
+  readonly queryMasks: BigUint64Array;
+  readonly blocks: readonly IpirGpuBlock[];
+  /** Upstream's first pass for each request: `count × cols` values modulo 2^54, request-major. */
+  readonly firstPass: BigUint64Array;
+  /** Upstream's packing product for each request, before the first pass is added: `count × cols` values. */
+  readonly packing: BigUint64Array;
+}
+
+interface RawGpuReference {
+  readonly setupId: Uint8Array;
+  readonly masks: Uint8Array;
+  readonly queryMasks: Uint8Array;
+  readonly blocks: readonly { readonly matrix: Uint8Array; readonly hints?: Uint8Array | null }[];
+  readonly firstPass: Uint8Array;
+  readonly packing: Uint8Array;
+}
+
+/** The add-on's export for the GPU check (`node/src/lib.rs`, `gpuReference`). */
+interface IpirGpuExports {
+  gpuReference(
+    path: string,
+    rows: number,
+    cols: number,
+    seed: Uint8Array,
+    snapshot: Uint8Array,
+    requests: Uint8Array,
+    count: number,
+    withHints: boolean,
+  ): Promise<RawGpuReference>;
+}
+
+/** A typed view of `bytes`, copied when its offset is not aligned for the type. */
+function viewOf<T>(bytes: Uint8Array, ctor: { new (b: ArrayBuffer, o: number, n: number): T; BYTES_PER_ELEMENT: number }): T {
+  const size = ctor.BYTES_PER_ELEMENT;
+  if (bytes.byteLength % size !== 0) throw new Error(`${bytes.byteLength} bytes are not whole ${size}-byte words`);
+  const aligned = bytes.byteOffset % size === 0 && bytes.buffer instanceof ArrayBuffer ? bytes : bytes.slice();
+  return new ctor(aligned.buffer as ArrayBuffer, aligned.byteOffset, aligned.byteLength / size);
+}
+
+/**
+ * Repeats upstream's preparation of the table in `cellsPath` (raw column-major 16-bit cells, as
+ * {@link buildIpirTable} reads a path) and returns its public values and, for `count` requests laid end to end,
+ * upstream's unrounded first pass and packing product (`pss_ipir_core::gpu_reference`). Off the main thread. With
+ * `hints`, also every block's hint columns (32 MiB per block). Costs about one table build.
+ */
+export async function ipirGpuReference(
+  input: { readonly cellsPath: string; readonly rows: number; readonly cols: number; readonly seed: Uint8Array; readonly snapshot: Uint8Array },
+  requests: Uint8Array,
+  count: number,
+  options: { readonly hints?: boolean } = {},
+  addon: IpirAddon = loadIpirAddon(),
+): Promise<IpirGpuReference> {
+  const exports = addon as unknown as Partial<IpirGpuExports>;
+  if (typeof exports.gpuReference !== "function") {
+    throw new Error("this IPIR+SP add-on has no gpuReference export: rebuild it with build.sh native");
+  }
+  const { cellsPath, rows, cols, seed, snapshot } = input;
+  checkIpirShape(rows, cols);
+  if (!Number.isSafeInteger(count) || count < 0) throw new Error(`a request count must be a whole number, got ${count}`);
+  const raw = await exports.gpuReference(cellsPath, rows, cols, seed, snapshot, requests, count, options.hints ?? false);
+  return {
+    setupId: raw.setupId,
+    masks: raw.masks,
+    queryMasks: viewOf(raw.queryMasks, BigUint64Array),
+    blocks: raw.blocks.map((b) => ({
+      matrix: viewOf(b.matrix, Int32Array),
+      hints: b.hints ? viewOf(b.hints, BigUint64Array) : null,
+    })),
+    firstPass: viewOf(raw.firstPass, BigUint64Array),
+    packing: viewOf(raw.packing, BigUint64Array),
+  };
 }
 
 /** Builds a table off the main thread. Rejects a bad shape, input or option, and a table whose checked rows do not decode. */

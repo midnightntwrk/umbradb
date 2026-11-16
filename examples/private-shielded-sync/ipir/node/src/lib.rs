@@ -317,6 +317,87 @@ pub fn respond(handle: u32, requests: Uint8Array, count: u32) -> Result<AsyncTas
     }))
 }
 
+/// Upstream's own timing of one answer's stages (`ipir_sp::native::NativeTiming`), in milliseconds.
+#[napi(object)]
+pub struct AnswerStages {
+    /// Parsing the request and lifting its words.
+    pub deserialize_ms: f64,
+    /// The first pass over the table.
+    pub matrix_vector_ms: f64,
+    /// The packing of every output block.
+    pub packing_ms: f64,
+    /// Rounding and encoding the answer.
+    pub serialization_ms: f64,
+}
+
+#[napi(object)]
+pub struct TimedAnswers {
+    /// The answers laid end to end, as `respond` gives them.
+    pub answers: Buffer,
+    /// Each request's stages, in order.
+    pub stages: Vec<AnswerStages>,
+}
+
+pub struct RespondTimedTask {
+    table: Arc<ServerTable>,
+    requests: Vec<u8>,
+    count: usize,
+}
+
+impl Task for RespondTimedTask {
+    type Output = (Vec<u8>, Vec<AnswerStages>);
+    type JsValue = TimedAnswers;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        let each = profile::request_bytes(self.table.rows());
+        if self.count == 0 || self.count.checked_mul(each) != Some(self.requests.len()) {
+            return Err(reason(format!(
+                "{} requests to this table are {} bytes, got {}",
+                self.count,
+                self.count.saturating_mul(each),
+                self.requests.len()
+            )));
+        }
+        guarded("answer", || {
+            let mut answers = Vec::new();
+            let mut stages = Vec::with_capacity(self.count);
+            for request in self.requests.chunks_exact(each) {
+                let (answer, t) = self.table.respond_timed(request)?;
+                answers.extend(answer);
+                stages.push(AnswerStages {
+                    deserialize_ms: ms(t.deserialize),
+                    matrix_vector_ms: ms(t.matrix_vector),
+                    packing_ms: ms(t.packing),
+                    serialization_ms: ms(t.serialization),
+                });
+            }
+            Ok((answers, stages))
+        })
+    }
+
+    fn resolve(&mut self, _env: Env, (answers, stages): Self::Output) -> Result<TimedAnswers> {
+        Ok(TimedAnswers {
+            answers: answers.into(),
+            stages,
+        })
+    }
+}
+
+/// As `respond`, with upstream's own timing of each answer's stages. Requests are answered one after another.
+#[napi(ts_return_type = "Promise<TimedAnswers>")]
+pub fn respond_timed(handle: u32, requests: Uint8Array, count: u32) -> Result<AsyncTask<RespondTimedTask>> {
+    let table = tables().get(&handle).cloned().ok_or_else(|| {
+        reason(format!(
+            "no IPIR+SP table has handle {handle} (released or never built)"
+        ))
+    })?;
+    Ok(AsyncTask::new(RespondTimedTask {
+        table,
+        requests: requests.to_vec(),
+        count: count as usize,
+    }))
+}
+
 /// Removes a table from the registry; its memory is freed once no answer is in flight. False if there was none.
 #[napi]
 pub fn release(handle: u32) -> bool {
@@ -351,4 +432,129 @@ pub fn table_info(handle: u32) -> Option<TableInfo> {
 #[napi]
 pub fn table_count() -> u32 {
     tables().len() as u32
+}
+
+/// One output block of 2,048 columns, for a GPU responder (`../../gpu/ipir.ts`). Public values only.
+#[napi(object)]
+pub struct GpuBlock {
+    /// The compiled packing matrix: 2,048 rows × 4,096 columns, row-major, signed 32-bit little-endian words.
+    pub matrix: Buffer,
+    /// The hint columns, if asked for: 2,048 columns × 2,048 coefficients (column-major), 64-bit little-endian.
+    pub hints: Option<Buffer>,
+}
+
+/// What `gpuReference` gives (`pss_ipir_core::GpuReference`). Every value is public.
+#[napi(object)]
+pub struct GpuReference {
+    pub setup_id: Buffer,
+    /// The published masks; equal to `buildTableFrom…`'s for the same setup and cells.
+    pub masks: Buffer,
+    /// The public query masks: rows coefficients, 64-bit little-endian.
+    pub query_masks: Buffer,
+    pub blocks: Vec<GpuBlock>,
+    /// Upstream's first pass of each request: count × cols values modulo 2^54, 64-bit little-endian.
+    pub first_pass: Buffer,
+    /// Upstream's packing product of each request (before the first pass is added): count × cols values, 64-bit
+    /// little-endian.
+    pub packing: Buffer,
+}
+
+fn le_bytes<T: Copy>(values: &[T], to: impl Fn(T) -> Vec<u8>) -> Vec<u8> {
+    values.iter().flat_map(|&x| to(x)).collect()
+}
+
+pub struct GpuReferenceTask {
+    path: String,
+    rows: usize,
+    cols: usize,
+    seed: [u8; 32],
+    snapshot: [u8; 32],
+    requests: Vec<u8>,
+    count: usize,
+    with_hints: bool,
+}
+
+type GpuReferenceBytes = (
+    Vec<u8>,
+    Vec<u8>,
+    Vec<u8>,
+    Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    Vec<u8>,
+    Vec<u8>,
+);
+
+impl Task for GpuReferenceTask {
+    type Output = GpuReferenceBytes;
+    type JsValue = GpuReference;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        guarded("GPU reference", || {
+            let setup = TableSetup::new(self.rows, self.cols, self.seed, self.snapshot)?;
+            let cells = read_cells(self.path.as_ref(), self.rows, self.cols)?;
+            let r = pss_ipir_core::gpu_reference(&setup, &cells, &self.requests, self.count, self.with_hints)?;
+            let u64s = |v: &[u64]| le_bytes(v, |x: u64| x.to_le_bytes().to_vec());
+            Ok((
+                r.setup_id.to_vec(),
+                r.masks,
+                u64s(&r.query_masks),
+                r.blocks
+                    .iter()
+                    .map(|b| {
+                        (
+                            le_bytes(&b.matrix, |x: i32| x.to_le_bytes().to_vec()),
+                            b.hints.as_deref().map(u64s),
+                        )
+                    })
+                    .collect(),
+                u64s(&r.first_pass),
+                u64s(&r.packing),
+            ))
+        })
+    }
+
+    fn resolve(&mut self, _env: Env, out: Self::Output) -> Result<GpuReference> {
+        let (setup_id, masks, query_masks, blocks, first_pass, packing) = out;
+        Ok(GpuReference {
+            setup_id: setup_id.into(),
+            masks: masks.into(),
+            query_masks: query_masks.into(),
+            blocks: blocks
+                .into_iter()
+                .map(|(matrix, hints)| GpuBlock {
+                    matrix: matrix.into(),
+                    hints: hints.map(Buffer::from),
+                })
+                .collect(),
+            first_pass: first_pass.into(),
+            packing: packing.into(),
+        })
+    }
+}
+
+/// For checking a GPU responder: repeats upstream's preparation of the table in the cell file (column-major 16-bit
+/// little-endian cells, as `buildTableFromFile` reads) and returns its public values (compiled packing matrices, hint
+/// columns with `withHints`, query masks, published masks) and, for `count` requests laid end to end, upstream's
+/// unrounded first pass and packing product. Runs on libuv's pool. Public values only; no table is registered.
+#[napi(ts_return_type = "Promise<GpuReference>")]
+#[allow(clippy::too_many_arguments)]
+pub fn gpu_reference(
+    path: String,
+    rows: u32,
+    cols: u32,
+    seed: Uint8Array,
+    snapshot: Uint8Array,
+    requests: Uint8Array,
+    count: u32,
+    with_hints: bool,
+) -> Result<AsyncTask<GpuReferenceTask>> {
+    Ok(AsyncTask::new(GpuReferenceTask {
+        path,
+        rows: rows as usize,
+        cols: cols as usize,
+        seed: bytes32(&seed, "the seed")?,
+        snapshot: bytes32(&snapshot, "the snapshot digest")?,
+        requests: requests.to_vec(),
+        count: count as usize,
+        with_hints,
+    }))
 }

@@ -2,7 +2,7 @@
 
 use crate::{Error, TableSetup, check_shape, profile::*};
 use ipir_native_client::{NativePublished, NativeRequest};
-use ipir_sp::native::NativeServer;
+use ipir_sp::native::{NativeServer, NativeTiming};
 use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -171,6 +171,19 @@ impl ServerTable {
             )));
         }
         Ok(self.server.respond(request)?.0)
+    }
+
+    /// Answers one request as [`ServerTable::respond`] does, with upstream's own timing of its stages (parsing, first
+    /// pass, packing, rounding and encoding).
+    pub fn respond_timed(&self, request: &[u8]) -> Result<(Vec<u8>, NativeTiming), Error> {
+        let want = request_bytes(self.rows());
+        if request.len() != want {
+            return Err(Error::new(format!(
+                "a request to this table is {want} bytes, got {}",
+                request.len()
+            )));
+        }
+        Ok(self.server.respond(request)?)
     }
 
     /// Answers `count` requests laid end to end; the answers are laid end to end in the same order. Every length is

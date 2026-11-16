@@ -13,6 +13,8 @@
 //! - [`ServerTable`] (feature `server`): builds a table, publishes its masks, answers requests, and checks at build
 //!   time that sampled rows decode ([`BuildReport`]).
 //! - [`Client`]: the wallet; loads the masks, makes a request for a row with a fresh secret, decodes the answer.
+//! - [`gpu_reference`] (feature `server`): the public values a GPU responder needs (compiled packing matrices, hint
+//!   columns, query masks) and upstream's unrounded first pass and packing product for given requests.
 //!
 //! Byte lengths are functions of the shape only: [`profile::request_bytes`], [`profile::response_bytes`],
 //! [`profile::masks_bytes`].
@@ -27,7 +29,14 @@ use rand_chacha::ChaCha20Rng;
 use std::fmt;
 
 #[cfg(feature = "server")]
+mod gpu;
+#[cfg(feature = "server")]
 mod server;
+#[cfg(feature = "server")]
+pub use gpu::{GpuBlock, GpuReference, gpu_reference};
+/// Upstream's timing of one answer's stages ([`ServerTable::respond_timed`]).
+#[cfg(feature = "server")]
+pub use ipir_sp::native::NativeTiming;
 #[cfg(feature = "server")]
 pub use server::{BuildOptions, BuildReport, ServerTable, read_cells};
 
