@@ -603,6 +603,10 @@ describe("both schemes (00058 FR-050): the benchmark asks for a SimplePIR and an
     expect(tables).toContain("| Group | Figure | SimplePIR | IPIR+SP | IPIR+SP ÷ SimplePIR | How |");
     expect(tables).toContain("**SC-002**");
     expect(tables).not.toContain("**not measured**");
+    const key = renderComparison(c, { keyOnly: true });
+    expect(key).toContain("| Network | read: one query up |");
+    expect(key).not.toContain("| Memory | Server: resident before the build |");
+    expect(key.split("\n").length).toBeLessThan(tables.split("\n").length);
   });
 });
 

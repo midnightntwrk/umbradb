@@ -256,7 +256,8 @@ function cmdCompare(): void {
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "compare.json"), `${JSON.stringify(comparison, null, 2)}\n`);
   writeFileSync(join(dir, "TABLES.md"), renderComparison(comparison));
-  log(`wrote ${join(dir, "compare.json")} and TABLES.md from ${files.length} run(s)`);
+  writeFileSync(join(dir, "KEY-TABLES.md"), renderComparison(comparison, { keyOnly: true }));
+  log(`wrote ${join(dir, "compare.json")}, TABLES.md (every row) and KEY-TABLES.md (the key rows) from ${files.length} run(s)`);
 }
 
 function cmdReport(): void {

@@ -608,7 +608,8 @@ record: the head report can be produced before the transfer and completed after 
 **Both schemes (spec 00058).** `--scheme simplepir|ipir-sp` names the scheme `--build` asks for (without `--build`, the
 one the served snapshot must use); an IPIR+SP snapshot needs the add-on on the server's side and the committed
 `ipir/pss-ipir.wasm` on the wallet's. `bench.ts compare <results.json>… --out <dir>` reads several runs, groups them by
-snapshot size and scheme, and writes `compare.json` and `TABLES.md`: per size, both schemes side by side (median,
+snapshot size and scheme, and writes `compare.json`, `TABLES.md` and `KEY-TABLES.md` (the key rows only): per size,
+both schemes side by side (median,
 smallest and largest, number of samples), rows grouped as memory, space, network and time, each marked measured (the
 field of `results.json`) or calculated (the formula), and the checks SC-002 and SC-003 of spec 00058.
 

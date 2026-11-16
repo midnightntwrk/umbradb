@@ -38,6 +38,8 @@ export type Unit = "bytes" | "ms" | "ratio";
 export interface ComparisonRow {
   readonly group: Group;
   readonly name: string;
+  /** One of the figures a short table shows (`renderComparison(c, { keyOnly: true })`). */
+  readonly key: boolean;
   readonly unit: Unit;
   readonly kind: "measured" | "calculated";
   /** Measured: the field of `results.json`; calculated: the formula. */
@@ -104,6 +106,37 @@ const calls = (r: BenchResults, name: CallName, f: (c: CallRow) => number | null
   });
 
 const TABLE_LABEL: Readonly<Record<CallName, string>> = { read: "read", nullifier: "nullifier", path: "path" };
+
+/** The rows of the short table: the figures story 3 asks for, per call and per query, without the detail rows. */
+const KEY_ROWS: ReadonlySet<string> = new Set([
+  "Server: peak during the build (its own statistics)",
+  "Server: resident once served",
+  "Server: held by the three tables",
+  "Wallet: peak during its sync (A, B)",
+  "Read table file",
+  "Path table file",
+  "Nullifier table file",
+  "Read public artifact (setup data / masks)",
+  "Path public artifact",
+  "Nullifier public artifact",
+  "Scan file",
+  "Snapshot on disk, all artifacts",
+  "Wallet: once per snapshot, read and nullifier public artifacts",
+  "Wallet: once per snapshot, path public artifact (first spend)",
+  ...(["read", "nullifier", "path"] as const).flatMap((t) => [`${t} call: up`, `${t} call: down`, `${t}: one query up`, `${t}: one query down`]),
+  ...["A", "B"].flatMap((w) => [`Wallet ${w}: whole first sync, up`, `Wallet ${w}: whole first sync, down`]),
+  "Wallet A: a later sync, down (artifacts cached)",
+  "Naive baseline: every output slot in full and every nullifier entry",
+  "Wallet A: first sync down ÷ naive baseline",
+  "Build: whole (its own statistics)",
+  "Build step readSetup",
+  "Build step pathSetup",
+  "Build step nullifierSetup",
+  ...(["read", "nullifier", "path"] as const).flatMap((t) => [`${t} call: server`, `${t}: server per query`, `${t} call: wallet builds it`, `${t}: wallet builds one query`, `${t} call: wallet decodes its answer`]),
+  "Wallet A: whole first sync",
+  "Wallet A: whole first sync without the scan",
+  "Wallet B: whole first sync",
+]);
 
 function rowDefs(q: number): RowDef[] {
   const perQuery = (bytes: number): number => (bytes - 40) / q;
@@ -226,6 +259,7 @@ export function compareRuns(runs: readonly CompareRun[], outDir: string): Compar
         rows: defs.map((d) => ({
           group: d.group,
           name: d.name,
+          key: KEY_ROWS.has(d.name),
           unit: d.unit,
           kind: d.kind,
           how: d.how,
@@ -280,8 +314,8 @@ const ratioText = (a: Figure, b: Figure): string => {
 
 const escape = (s: string): string => s.replace(/\|/g, "\\|");
 
-/** The side-by-side tables, one per size, then SC-002 and SC-003 (Markdown). */
-export function renderComparison(c: Comparison): string {
+/** The side-by-side tables, one per size (only the key rows with `keyOnly`), then SC-002 and SC-003 (Markdown). */
+export function renderComparison(c: Comparison, options: { readonly keyOnly?: boolean } = {}): string {
   const out: string[] = [];
   for (const s of c.sizes) {
     out.push(`### ${s.label[0]!.toUpperCase()}${s.label.slice(1)}`, "");
@@ -293,6 +327,7 @@ export function renderComparison(c: Comparison): string {
     );
     out.push("| Group | Figure | SimplePIR | IPIR+SP | IPIR+SP ÷ SimplePIR | How |", "|---|---|---|---|---|---|");
     for (const r of s.rows) {
+      if (options.keyOnly === true && !r.key) continue;
       const a = r.values.simplepir;
       const b = r.values["ipir-sp"];
       out.push(
