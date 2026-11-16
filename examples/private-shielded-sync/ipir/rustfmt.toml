@@ -1,0 +1,2 @@
+# Formatting of this workspace's own crates (core, node, wasm); the vendored crates are never reformatted.
+max_width = 120
