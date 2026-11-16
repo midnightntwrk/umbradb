@@ -1,23 +1,44 @@
 /**
- * The scheme seam (spec FR-001 to FR-004): a snapshot built with SimplePIR from a fixed synthetic index has the same
- * table and setup-data files as before the seam was introduced. The digests below were recorded from the builder at
- * `990e41d4`, before any change of the seam, for the same input; the manifest's own bytes are not pinned (its format
- * changed with the seam).
+ * The scheme seam (spec 00058 FR-001 to FR-004, FR-022), with SimplePIR behind it:
+ *
+ * - a snapshot built from a fixed synthetic index has the same table and setup-data files as before the seam was
+ *   introduced: the digests below were recorded from the builder at `990e41d4`, before any change, for the same input
+ *   (the manifest's own bytes are not pinned: its format changed with the seam);
+ * - every record read back through the interface (the wallet's table, the server's table adopted from the build and
+ *   loaded from its file) is the record put in, with SimplePIR's request and response sizes (C × 4, R × 4);
+ * - the padded-build estimate is SimplePIR's formula from before the seam;
+ * - a scheme this build does not have is refused by name everywhere: manifest, registries, settings, builder.
  *
  * The input is made here from counters, not from ledger transactions, so it is the same on every run: 300 outputs over
  * 10 heights (every 7th without a ciphertext) and 37 nullifiers. Two builds: unpadded, and padded to 1,000 entries
  * (which fills the tables with the builder's deterministic noise first). Both at path split 2.
  */
 
-import { createHash } from "node:crypto";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { createHash, randomInt } from "node:crypto";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { compileKernel, Kernel } from "../kernel/index.ts";
-import { inlineMultiplier } from "../pir/index.ts";
-import type { Manifest } from "../shared/index.ts";
-import { type BuildJob, type BuildResult, buildSnapshot, MANIFEST_FILE } from "../server/build.ts";
+import {
+  bucketOf,
+  cellsPerRecord,
+  findInBucket,
+  inlineMultiplier,
+  LWE_N,
+  MAX_COLUMNS,
+  openWalletScheme,
+  positionalShape,
+  positionOf,
+  SchemeUnavailable,
+  type ServerTable,
+  type WalletTable,
+  widestShape,
+} from "../pir/index.ts";
+import { maxRequestBytes, openServerScheme, serverSchemeEntry } from "../pir/server-schemes.ts";
+import { decodeReadRecord, encodeReadRecord, type Manifest, NULLIFIER_RECORD_BYTES, pathRecordBytes, READ_RECORD_BYTES, SCAN_ENTRY_BYTES } from "../shared/index.ts";
+import { BuildError, type BuildJob, type BuildResult, buildSnapshot, BUILDS_DIR, MANIFEST_FILE, paddedBuildBytes, SNAPSHOTS_DIR } from "../server/build.ts";
+import { SETTINGS_SCHEMA } from "../server/settings.ts";
 import { buildTree } from "../server/tree.ts";
 import { type NullifierEvent, type OutputEvent, ZswapIndex } from "../server/zswap-index.ts";
 
@@ -57,6 +78,7 @@ function job(padding?: number): BuildJob {
     expectedRoot,
     pathSplit: K,
     queriesPerCall: 4,
+    scheme: "simplepir",
     threads: 1,
     dataDir,
     slice: index.slice(OUTPUTS, NULLIFIERS),
@@ -66,18 +88,21 @@ function job(padding?: number): BuildJob {
 
 const build = (j: BuildJob): Promise<BuildResult> => buildSnapshot(j, { kernel, multiplier: inlineMultiplier });
 
-/** The digests of the files that must not change: the scan file, the block roots, each table and its setup data. */
+/**
+ * The digests of the files that must not change: the scan file, the block roots, each table and its setup data (under
+ * the seam, SimplePIR's public artifact: `readPublic` was `readSetup`, and so on).
+ */
 function digestsOf(m: Manifest): Record<string, string> {
   const a = m.artifacts;
   return {
     scan: a.scan.digest,
     blockRoots: a.blockRoots.digest,
     readTable: a.readTable.digest,
-    readSetup: a.readSetup.digest,
+    readSetup: a.readPublic.digest,
     pathTable: a.pathTable!.digest,
-    pathSetup: a.pathSetup!.digest,
+    pathSetup: a.pathPublic!.digest,
     nullifierTable: a.nullifierTable.digest,
-    nullifierSetup: a.nullifierSetup.digest,
+    nullifierSetup: a.nullifierPublic.digest,
   };
 }
 
@@ -135,5 +160,138 @@ describe("SimplePIR behind the scheme seam (FR-004)", () => {
       got[label] = digests;
     }
     expect(got).toEqual(PINNED);
+  });
+});
+
+/** The nullifiers of the synthetic index with their place, in index order. */
+const nullifiersOf = (): { nullifier: Uint8Array; height: number; txIndex: number }[] =>
+  Array.from({ length: NULLIFIERS }, (_, j) => ({ nullifier: sha("pss-pin/nullifier/", String(j)), height: (j % HEIGHTS) + 1, txIndex: j % 3 }));
+
+/** One full call (the wanted groups, then random ones) through a wallet table and a server table: the wanted groups' records. */
+async function call(wallet: WalletTable, server: ServerTable, wanted: readonly number[], perCall: number): Promise<Uint8Array[][]> {
+  const groups = [...wanted];
+  while (groups.length < perCall) groups.push(randomInt(wallet.groups));
+  const prepared = await wallet.prepareCall(groups);
+  expect(prepared.requests.length).toBe(perCall * wallet.requestBytes);
+  const answers = await server.answer(prepared.requests, perCall);
+  expect(answers.length).toBe(perCall * server.responseBytes);
+  return prepared.decode(answers, wanted.length);
+}
+
+describe("SimplePIR through the scheme interface (FR-004, FR-022)", () => {
+  it("reads every record back through the wallet's and the server's tables, adopted from the build and loaded from its file", { timeout: LONG }, async () => {
+    const result = await build(job());
+    const m = result.manifest;
+    const a = m.artifacts;
+    expect(m.scheme).toBe("simplepir");
+    const server = await openServerScheme("simplepir", { threads: 1, multiplier: inlineMultiplier });
+    const wallet = await openWalletScheme(m, { multiplier: inlineMultiplier });
+    try {
+      for (const source of ["adopted", "loaded"] as const) {
+        const open = (name: "read" | "path" | "nullifier") => {
+          const ref = name === "read" ? a.readTable : name === "path" ? a.pathTable! : a.nullifierTable;
+          return source === "adopted" ? server.adoptTable(ref, result.tables[name]!) : server.loadTable(ref, join(result.dir, ref.digest));
+        };
+        // Read table: record i is output i's 98-byte record.
+        const read = await open("read");
+        const readWallet = await wallet.openTable(a.readTable, new Uint8Array(readFileSync(join(result.dir, a.readPublic.digest))));
+        expect([read.requestBytes, read.responseBytes, read.heldBytes]).toEqual([a.readTable.layout.cols * 4, a.readTable.layout.rows * 4, a.readTable.size - 32]);
+        expect([readWallet.requestBytes, readWallet.responseBytes, readWallet.groups, readWallet.perGroup]).toEqual([read.requestBytes, read.responseBytes, a.readTable.groups, a.readTable.perGroup]);
+        const positions = [0, 1, 7, 150, 299];
+        const groups = [...new Set(positions.map((i) => positionOf(i, a.readTable.perGroup).column))];
+        const records = await call(readWallet, read, groups, m.queriesPerCall);
+        for (const i of positions) {
+          const { column, slot } = positionOf(i, a.readTable.perGroup);
+          const o = outputOf(i, 1);
+          const got = decodeReadRecord(records[groups.indexOf(column)]![slot]!);
+          expect(Buffer.from(encodeReadRecord(o.commitment, o.ciphertext)).equals(Buffer.from(records[groups.indexOf(column)]![slot]!)), `${source} read ${i}`).toBe(true);
+          expect(got.elements === null).toBe(o.ciphertext === null);
+        }
+        // Path table: its records are k × 32 bytes; group sizes as the manifest says.
+        const path = await open("path");
+        const pathWallet = await wallet.openTable(a.pathTable!, new Uint8Array(readFileSync(join(result.dir, a.pathPublic!.digest))));
+        const pathRecords = await call(pathWallet, path, [0], m.queriesPerCall);
+        expect(pathRecords[0]!.length).toBe(a.pathTable!.perGroup);
+        expect(pathRecords[0]!.every((r) => r.length === 32 * K)).toBe(true);
+        // Nullifier table: every nullifier in its bucket with its place; an absent one is not.
+        const nullifier = await open("nullifier");
+        const nullifierWallet = await wallet.openTable(a.nullifierTable, new Uint8Array(readFileSync(join(result.dir, a.nullifierPublic.digest))));
+        const spent = nullifiersOf();
+        const absent = sha("pss-pin/absent");
+        const buckets = [...new Set([...spent.map((e) => e.nullifier), absent].map((n) => bucketOf(n, a.nullifierTable.bucketBits)))];
+        for (let from = 0; from < buckets.length; from += m.queriesPerCall) {
+          const part = buckets.slice(from, from + m.queriesPerCall);
+          const got = await call(nullifierWallet, nullifier, part, m.queriesPerCall);
+          for (const e of spent) {
+            const at = part.indexOf(bucketOf(e.nullifier, a.nullifierTable.bucketBits));
+            if (at < 0) continue;
+            const found = findInBucket(got[at]!, e.nullifier);
+            expect([found?.height, found?.txIndex], `${source} nullifier`).toEqual([e.height, e.txIndex]);
+          }
+          const at = part.indexOf(bucketOf(absent, a.nullifierTable.bucketBits));
+          if (at >= 0) expect(findInBucket(got[at]!, absent)).toBeNull();
+        }
+      }
+    } finally {
+      wallet.dispose();
+      await server.close();
+    }
+  });
+
+  it("refuses a request body of another length before any work, and a wallet on other SimplePIR parameters", { timeout: LONG }, async () => {
+    const result = await build(job());
+    const m = result.manifest;
+    await expect(openWalletScheme({ ...m, pir: { ...m.pir, n: 512 } })).rejects.toThrow(/parameters/);
+    const server = await openServerScheme("simplepir", { threads: 1, multiplier: inlineMultiplier });
+    try {
+      const table = await server.loadTable(m.artifacts.readTable, join(result.dir, m.artifacts.readTable.digest));
+      await expect(table.answer(new Uint8Array(table.requestBytes - 4), 1)).rejects.toThrow();
+      // A table file that is not the manifest's entry is refused.
+      await expect(server.loadTable(m.artifacts.readTable, join(result.dir, m.artifacts.nullifierTable.digest))).rejects.toThrow();
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("estimates a padded build as before the seam: SimplePIR's tables, setup data and A, the scan file and the nullifier arrays", () => {
+    const before = (size: number, k: number): number => {
+      const table = (t: { rows: number; cols: number } | null) => (t === null ? 0 : t.rows * t.cols * 2 + t.cols * LWE_N * 4 + t.rows * LWE_N * 4);
+      const read = positionalShape(size, READ_RECORD_BYTES);
+      const path = k > 0 ? widestShape(size, pathRecordBytes(k)) : null;
+      return table(read) + table(path) + 1.5 * size * cellsPerRecord(NULLIFIER_RECORD_BYTES) * 2 + size * SCAN_ENTRY_BYTES + size * (32 + 12);
+    };
+    for (const [size, k] of [[1000, 2], [1_000_000, 16], [10_000_000, 16], [2_000_000, 0]] as const) {
+      expect(paddedBuildBytes(size, k, "simplepir"), `${size} at k ${k}`).toBe(before(size, k));
+    }
+  });
+
+  it("fixes the query routes' body limit from SimplePIR's widest table, as before the seam (MAX_COLUMNS × 4 per request)", () => {
+    expect(maxRequestBytes()).toBe(MAX_COLUMNS * 4);
+    expect(serverSchemeEntry("simplepir").maxRequestBytes).toBe(MAX_COLUMNS * 4);
+  });
+});
+
+describe("a scheme this build does not have (FR-001, FR-002; story 2, scenario 3)", () => {
+  it("is refused by name by the registries; the settings accept both names and default to SimplePIR", async () => {
+    expect(() => serverSchemeEntry("ipir-sp")).toThrow(SchemeUnavailable);
+    expect(() => serverSchemeEntry("ipir-sp")).toThrow(/PIR scheme "ipir-sp" is not available in this build/);
+    await expect(openServerScheme("ipir-sp", { threads: 1 })).rejects.toThrow(/"ipir-sp"/);
+    await expect(openWalletScheme({ scheme: "ipir-sp", pir: { logQ: 32, n: 1024, sigma: 6.4, cellBits: 9, plainModulus: 512 } })).rejects.toThrow(/PIR scheme "ipir-sp" is not available in this build/);
+    expect(SETTINGS_SCHEMA.parse({ dataDir: "d" }).scheme).toBe("simplepir");
+    expect(SETTINGS_SCHEMA.parse({ dataDir: "d", scheme: "ipir-sp" }).scheme).toBe("ipir-sp");
+    expect(() => SETTINGS_SCHEMA.parse({ dataDir: "d", scheme: "doublepir" })).toThrow();
+  });
+
+  it("fails a build with code scheme-unavailable and leaves nothing behind", { timeout: LONG }, async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pss-scheme-none-"));
+    try {
+      const failure = await build({ ...job(), scheme: "ipir-sp", dataDir: dir }).catch((e: unknown) => e);
+      expect(failure).toBeInstanceOf(BuildError);
+      expect((failure as BuildError).code).toBe("scheme-unavailable");
+      expect((failure as BuildError).message).toMatch(/"ipir-sp"/);
+      for (const sub of [SNAPSHOTS_DIR, BUILDS_DIR]) expect(existsSync(join(dir, sub)) ? readdirSync(join(dir, sub)) : []).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

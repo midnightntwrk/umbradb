@@ -285,7 +285,7 @@ async function cmdSend(): Promise<void> {
           const read = await lowerPathsByPir({ http: new PssHttp(opt.server), cache: new BlobCache(join(resolve(opt.data), "cache")), kernel: t.kernel, multiplier: t.multiplier }, result, [coin]);
           coin = { ...coin, lowerPath: read.paths.get(coin.position)! };
           timings.pathReadMs = read.stats.ms;
-          record.pathRead = { setup: read.stats.setup, buildMs: read.stats.buildMs, roundTripMs: read.stats.roundTripMs, decodeMs: read.stats.decodeMs, bytesUp: read.stats.bytesUp, bytesDown: read.stats.bytesDown };
+          record.pathRead = { public: read.stats.public, buildMs: read.stats.buildMs, roundTripMs: read.stats.roundTripMs, decodeMs: read.stats.decodeMs, bytesUp: read.stats.bytesUp, bytesDown: read.stats.bytesDown };
         }
         started = performance.now();
         const path = coinPath(result.view, coin, t.kernel);

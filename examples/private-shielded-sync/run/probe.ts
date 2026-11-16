@@ -33,7 +33,7 @@ import { coinPath } from "../client/send.ts";
 import { rootOverBlocks } from "../client/sync.ts";
 import { type Hash2, rootFromPath } from "../client/tree.ts";
 import { compileKernel, Kernel } from "../kernel/index.ts";
-import { setupMatrix, WorkerMultiplier } from "../pir/index.ts";
+import { openWalletScheme, type WalletTable, WorkerMultiplier } from "../pir/index.ts";
 import { decodeManifest, decodePathRecord, decodeReadRecord, shrinkElements, slotCount, slotOf, splitTail } from "../shared/index.ts";
 
 const { values: opt } = parseArgs({
@@ -109,7 +109,7 @@ const cacheDir = mkdtempSync(join(tmpdir(), "pss-probe-"));
 const cache = new BlobCache(cacheDir);
 const a = manifest.artifacts;
 let t = performance.now();
-for (const ref of [a.scan, a.blockRoots, a.readSetup, a.nullifierSetup]) await cache.fetch(http, ref);
+for (const ref of [a.scan, a.blockRoots, a.readPublic, a.nullifierPublic]) await cache.fetch(http, ref);
 const downloadMs = ms(t);
 const kernel = new Kernel(compileKernel());
 const hash: Hash2 = (x, y) => kernel.hash2(x, y)!;
@@ -130,8 +130,8 @@ check(Number(state.zswap_first_free) === manifest.firstFree, `first_free ${manif
 check(equal(Buffer.from(manifest.root, "hex"), coreRoot), "the manifest's root = the core's zswap_root at its height");
 check(equal(rootOverBlocks(blockRoots, k, hash), Buffer.from(manifest.root, "hex")), "the block roots give the manifest's root");
 process.stdout.write(
-  `manifest ${hex(manifestId).slice(0, 16)}…: height ${H}, first_free ${manifest.firstFree}, k ${k}, ` +
-    `read table ${a.readTable.rows} × ${a.readTable.cols}, nullifier table ${a.nullifierTable.rows} × ${a.nullifierTable.cols}; ` +
+  `manifest ${hex(manifestId).slice(0, 16)}…: height ${H}, first_free ${manifest.firstFree}, k ${k}, scheme ${manifest.scheme}, ` +
+    `read table ${a.readTable.groups} groups of ${a.readTable.perGroup}, nullifier table ${a.nullifierTable.groups} buckets of ${a.nullifierTable.perGroup}; ` +
     `downloads ${downloadMs} ms\n`,
 );
 
@@ -184,9 +184,17 @@ for (let i = 0, added = 0; i < n && added < 4; i++) {
 while (sample.size < Math.min(n, Number(opt.samples))) sample.add(randomBytes(4).readUInt32BE() % n);
 const positions = [...sample].sort((x, y) => x - y);
 const multiplier = new WorkerMultiplier(Number(opt.threads));
+// The manifest's scheme, as a wallet opens it (`../pir/scheme.ts`).
+const scheme = await openWalletScheme(manifest, { multiplier });
+const tables: WalletTable[] = [];
+const open = async (ref: Parameters<typeof scheme.openTable>[0], publicRef: { digest: string; size: number }): Promise<WalletTable> => {
+  const table = await scheme.openTable(ref, cache.read(publicRef));
+  tables.push(table);
+  return table;
+};
 const readStats = emptyCallStats();
 t = performance.now();
-const records = await readPositions(http, manifest, manifestId, setupMatrix(cache.read(a.readSetup), a.readTable.rows), positions, multiplier, readStats);
+const records = await readPositions(http, manifest, manifestId, await open(a.readTable, a.readPublic), positions, readStats);
 const lowerPaths = new Map<number, Uint8Array[]>();
 const readMs = ms(t);
 for (const p of positions) {
@@ -201,10 +209,10 @@ const inFullBlocks = positions.filter((p) => Math.floor(p / blockSize) < fullBlo
 const pathStats = emptyCallStats();
 let pathsChecked = 0;
 let pathReadMs = 0;
-if (a.pathTable !== undefined && a.pathSetup !== undefined && inFullBlocks.length > 0) {
-  await cache.fetch(http, a.pathSetup);
+if (a.pathTable !== undefined && a.pathPublic !== undefined && inFullBlocks.length > 0) {
+  await cache.fetch(http, a.pathPublic);
   t = performance.now();
-  const paths = await readPaths(http, manifest, manifestId, setupMatrix(cache.read(a.pathSetup), a.pathTable.rows), inFullBlocks, multiplier, pathStats);
+  const paths = await readPaths(http, manifest, manifestId, await open(a.pathTable, a.pathPublic), inFullBlocks, pathStats);
   pathReadMs = ms(t);
   for (const p of inFullBlocks) {
     const lower = decodePathRecord(paths.get(p)!, k);
@@ -261,7 +269,7 @@ while (picked.size < want) {
 const randomOnes = Array.from({ length: Number(opt.nullifiers) }, () => hex(randomBytes(32)));
 const nullifierStats = emptyCallStats();
 t = performance.now();
-const found = await lookupNullifiers(http, manifest, manifestId, setupMatrix(cache.read(a.nullifierSetup), a.nullifierTable.rows), [...picked.keys(), ...randomOnes], multiplier, nullifierStats);
+const found = await lookupNullifiers(http, manifest, manifestId, await open(a.nullifierTable, a.nullifierPublic), [...picked.keys(), ...randomOnes], nullifierStats);
 const nullifierMs = ms(t);
 for (const [nf, place] of picked) {
   const e = found.get(nf);
@@ -269,6 +277,8 @@ for (const [nf, place] of picked) {
 }
 for (const nf of randomOnes) check(found.get(nf) === null, `random nullifier ${nf.slice(0, 16)}… not found`);
 
+for (const table of tables) table.dispose();
+scheme.dispose();
 await multiplier.close();
 await sql.end();
 rmSync(cacheDir, { recursive: true, force: true });
@@ -276,7 +286,7 @@ rmSync(cacheDir, { recursive: true, force: true });
 Object.assign(report, {
   snapshot: { id: hex(manifestId), height: H, firstFree: n, pathSplit: k, fullBlocks },
   database: { outputs: outputs.length, outputsWithoutCiphertext: withoutCiphertext, spends: spends.length, readMs: dbMs },
-  downloads: { ms: downloadMs, bytes: [a.scan, a.blockRoots, a.readSetup, a.nullifierSetup].reduce((s, r) => s + r.size, 0) },
+  downloads: { ms: downloadMs, bytes: [a.scan, a.blockRoots, a.readPublic, a.nullifierPublic].reduce((s, r) => s + r.size, 0) },
   scan: { entries: n, mismatches: scanMismatches },
   tail: { height: tail.header.height, firstFree: tail.header.firstFree, ms: tailMs, fullPaths, pathMs },
   read: { positions: positions.length, ms: readMs, calls: readStats.calls, bytesUp: readStats.bytesUp, bytesDown: readStats.bytesDown },

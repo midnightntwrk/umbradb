@@ -20,7 +20,16 @@ import { coinPath } from "../client/send.ts";
 import { checkCiphertext, checkLowerPath, checkSnapshotMatch, rootOverBlocks } from "../client/sync.ts";
 import { type Hash2, rootFromPath, TREE_DEPTH } from "../client/tree.ts";
 import { Kernel } from "../kernel/index.ts";
-import { bucketOf, decodeNullifierRecord, inlineMultiplier, type Matrix, NULLIFIER_RECORD_BYTES, setupMatrix } from "../pir/index.ts";
+import {
+  bucketOf,
+  decodeNullifierRecord,
+  inlineMultiplier,
+  NULLIFIER_RECORD_BYTES,
+  openWalletScheme,
+  PUBLIC_ARTIFACT,
+  type WalletScheme,
+  type WalletTable,
+} from "../pir/index.ts";
 import {
   type ArtifactRef,
   decodeManifest,
@@ -140,10 +149,12 @@ const http = new PssHttp(self.location.origin, { fetch: capturingFetch });
 let manifest: Manifest | null = null;
 let manifestId: Uint8Array | null = null;
 const files = new Map<string, Uint8Array>();
-let readSetup: Matrix | null = null;
-let nullifierSetup: Matrix | null = null;
-/** The path table's setup data: downloaded only when the page reads paths, as a spend would (Q58). */
-let pathSetup: Matrix | null = null;
+/** The snapshot's PIR scheme (`../pir/scheme.ts`) and its tables, as a wallet opens them; PIR runs on one thread here. */
+let scheme: WalletScheme | null = null;
+let readTable: WalletTable | null = null;
+let nullifierTable: WalletTable | null = null;
+/** The path table: its public artifact is downloaded only when the page reads paths, as a spend would (Q58). */
+let pathTable: WalletTable | null = null;
 let matches: number[] = [];
 interface Coin {
   position: number;
@@ -194,6 +205,16 @@ function decodeBody(e: Exchange, side: "request" | "response"): Json | null {
   if (route.startsWith("/query/")) {
     const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
     const count = v.getUint16(38, true);
+    if (manifest !== null && manifest.scheme !== "simplepir") {
+      return {
+        format: `${side === "request" ? "query" : "answer"} body: 40-byte header, then ${count} ${side === "request" ? "requests" : "responses"} of the ${manifest.scheme} scheme`,
+        magic: ascii4(b),
+        formatVersion: v.getUint16(4, true),
+        snapshotId: hex(b.subarray(6, 38)),
+        vectors: count,
+        bytesPerItem: (b.length - 40) / Math.max(1, count),
+      };
+    }
     const perVector = (b.length - 40) / 4 / Math.max(1, count);
     return {
       format: side === "request" ? "query body: 40-byte header, then the query vectors (u32, little-endian)" : "answer body: 40-byte header, then the answer vectors (u32, little-endian)",
@@ -232,12 +253,12 @@ function decodeBody(e: Exchange, side: "request" | "response"): Json | null {
           ? "scan file"
           : a.blockRoots.digest === digest
             ? "block roots"
-            : a.readSetup.digest === digest
-              ? "read table setup"
-              : a.pathSetup?.digest === digest
-                ? "path table setup"
-                : a.nullifierSetup.digest === digest
-                  ? "nullifier table setup"
+            : a.readPublic.digest === digest
+              ? `read table ${PUBLIC_ARTIFACT[manifest!.scheme]}`
+              : a.pathPublic?.digest === digest
+                ? `path table ${PUBLIC_ARTIFACT[manifest!.scheme]}`
+                : a.nullifierPublic.digest === digest
+                  ? `nullifier table ${PUBLIC_ARTIFACT[manifest!.scheme]}`
                   : "artifact";
     const out: Json = { format: `${name}, addressed by its SHA-256`, digest };
     if (name === "scan file") {
@@ -245,7 +266,7 @@ function decodeBody(e: Exchange, side: "request" | "response"): Json | null {
       out.first = Array.from({ length: Math.min(4, b.length / 36) }, (_, i) => ({ position: i, point: hex(b.subarray(36 * i, 36 * i + 32)), element0Prefix: hex(b.subarray(36 * i + 32, 36 * i + 36)) }));
     } else if (name === "block roots") {
       out.roots = Array.from({ length: Math.min(16, b.length / 32) }, (_, i) => hex(b.subarray(32 * i, 32 * i + 32)));
-    } else if (name.endsWith("setup")) {
+    } else if (name.endsWith("setup data")) {
       out.layout = `rows × 1024 u32 (H = table × A), ${b.length / 4 / 1024} rows`;
       out.firstValues = u32s(b, 0, 8);
     }
@@ -413,17 +434,23 @@ async function getFiles(): Promise<Json> {
   const m = manifest;
   const a = m.artifacts;
   const downloads = [];
-  for (const [name, ref] of [["scan file", a.scan], ["block roots", a.blockRoots], ["read table setup", a.readSetup], ["nullifier table setup", a.nullifierSetup]] as const) {
+  // A manifest naming a scheme this page's build does not have stops here, with its name.
+  scheme?.dispose();
+  scheme = null;
+  readTable = nullifierTable = pathTable = null;
+  scheme = await openWalletScheme(m, { multiplier: inlineMultiplier });
+  const label = PUBLIC_ARTIFACT[m.scheme];
+  for (const [name, ref] of [["scan file", a.scan], ["block roots", a.blockRoots], [`read table ${label}`, a.readPublic], [`nullifier table ${label}`, a.nullifierPublic]] as const) {
     downloads.push(await fetchBlob(ref, name));
   }
   const blockRoots = files.get(a.blockRoots.digest)!;
   const rootOk = equal(rootOverBlocks(blockRoots, m.pathSplit, hash), fromHexStrict(m.root, 32));
   if (!rootOk) throw new Error("the block roots do not give the manifest's root");
   const t2 = now();
-  readSetup = setupMatrix(files.get(a.readSetup.digest)!, a.readTable.rows);
-  nullifierSetup = setupMatrix(files.get(a.nullifierSetup.digest)!, a.nullifierTable.rows);
+  readTable = await scheme.openTable(a.readTable, files.get(a.readPublic.digest)!);
+  nullifierTable = await scheme.openTable(a.nullifierTable, files.get(a.nullifierPublic.digest)!);
   const setupMs = now() - t2;
-  pathSetup = null;
+  pathTable = null;
   coins.clear();
   fetched.clear();
   matches = [];
@@ -439,13 +466,14 @@ async function getFiles(): Promise<Json> {
       root: m.root,
       pathSplit: m.pathSplit,
       queriesPerCall: m.queriesPerCall,
+      scheme: m.scheme,
       pir: m.pir,
-      readTable: { rows: a.readTable.rows, cols: a.readTable.cols, recordsPerColumn: a.readTable.perColumn, records: a.readTable.records, recordBytes: a.readTable.recordBytes },
+      readTable: { rows: a.readTable.layout.rows, cols: a.readTable.layout.cols, recordsPerColumn: a.readTable.perGroup, records: a.readTable.records, recordBytes: a.readTable.recordBytes },
       pathTable:
-        a.pathTable === undefined || a.pathSetup === undefined
+        a.pathTable === undefined || a.pathPublic === undefined
           ? null
-          : { rows: a.pathTable.rows, cols: a.pathTable.cols, recordsPerColumn: a.pathTable.perColumn, recordBytes: a.pathTable.recordBytes, setupBytes: a.pathSetup.size },
-      nullifierTable: { rows: a.nullifierTable.rows, cols: a.nullifierTable.cols, bucketBits: a.nullifierTable.bucketBits, capacity: a.nullifierTable.capacity },
+          : { rows: a.pathTable.layout.rows, cols: a.pathTable.layout.cols, recordsPerColumn: a.pathTable.perGroup, recordBytes: a.pathTable.recordBytes, setupBytes: a.pathPublic.size },
+      nullifierTable: { rows: a.nullifierTable.layout.rows, cols: a.nullifierTable.layout.cols, bucketBits: a.nullifierTable.bucketBits, capacity: a.nullifierTable.capacity },
       blocks: a.blockRoots.blocks,
     },
     manifestBytes: served.bytes.length,
@@ -511,16 +539,16 @@ async function read(args: { positions?: number[] }): Promise<Json> {
   const positions = [...new Set(args.positions && args.positions.length > 0 ? args.positions : matches)].sort((x, y) => x - y);
   for (const p of positions) if (!Number.isInteger(p) || p < 0 || p >= m.firstFree) throw new Error(`position ${p} is not in the snapshot (0 to ${m.firstFree - 1})`);
   const ref = m.artifacts.readTable;
-  const plan = paddedCalls(positions.map((p) => readCell(m, p).column), ref.cols, m.queriesPerCall);
+  const plan = paddedCalls(positions.map((p) => readCell(m, p).group), ref.groups, m.queriesPerCall);
   const stats = emptyCallStats();
   const t = now();
-  const records = await readPositions(http, m, id, need(readSetup, "get the files"), positions, inlineMultiplier, stats);
+  const records = await readPositions(http, m, id, need(readTable, "get the files"), positions, stats);
   const callMs = now() - t;
   const file = files.get(m.artifacts.scan.digest)!;
   const out = [];
   for (const p of positions) {
     const r = decodeReadRecord(records.get(p)!);
-    const { index, column, slot } = readCell(m, p);
+    const { index, group: column, slot } = readCell(m, p);
     const item: Json = {
       position: p,
       ...(m.padding === undefined ? {} : { tableIndex: index }),
@@ -550,9 +578,9 @@ async function read(args: { positions?: number[] }): Promise<Json> {
     positions,
     calls: plan.map((c, i) => ({
       call: i + 1,
-      vectors: c.columns.length,
+      vectors: c.groups.length,
       realColumns: c.real,
-      paddingColumns: c.columns.length - c.real.length,
+      paddingColumns: c.groups.length - c.real.length,
       note: "the server sees only the number of calls and their sizes, never which columns are real",
     })),
     stats: { ...stats, buildMs: round(stats.buildMs), roundTripMs: round(stats.roundTripMs), decodeMs: round(stats.decodeMs) },
@@ -571,8 +599,8 @@ async function paths(args: { positions?: number[] }, progress: (text: string) =>
   const m = need(manifest, "get the files");
   const id = need(manifestId, "get the files");
   const ref = m.artifacts.pathTable;
-  const setupRef = m.artifacts.pathSetup;
-  if (ref === undefined || setupRef === undefined) throw new Error("this snapshot has no path table (its path split is 0): the block roots give every path");
+  const publicRef = m.artifacts.pathPublic;
+  if (ref === undefined || publicRef === undefined) throw new Error("this snapshot has no path table (its path split is 0): the block roots give every path");
   const blockSize = 2 ** m.pathSplit;
   const fullBlocks = Math.floor(m.firstFree / blockSize);
   const own = [...coins.values()].filter((c) => c.source === "snapshot").map((c) => c.position);
@@ -583,19 +611,20 @@ async function paths(args: { positions?: number[] }, progress: (text: string) =>
   const fromTail = asked.filter((p) => Math.floor(p / blockSize) >= fullBlocks);
   const t = now();
   let download: Json | null = null;
-  if (pathSetup === null) {
-    progress(`downloading the path table's setup data (${(setupRef.size / 1048576).toFixed(1)} MB), once per snapshot`);
-    download = await fetchBlob(setupRef, "path table setup");
-    pathSetup = setupMatrix(files.get(setupRef.digest)!, ref.rows);
+  if (pathTable === null) {
+    const label = PUBLIC_ARTIFACT[m.scheme];
+    progress(`downloading the path table's ${label} (${(publicRef.size / 1048576).toFixed(1)} MB), once per snapshot`);
+    download = await fetchBlob(publicRef, `path table ${label}`);
+    pathTable = await need(scheme, "get the files").openTable(ref, files.get(publicRef.digest)!);
   }
-  const plan = paddedCalls(positions.map((p) => readCell(m, p, ref).column), ref.cols, m.queriesPerCall);
+  const plan = paddedCalls(positions.map((p) => readCell(m, p, ref).group), ref.groups, m.queriesPerCall);
   const stats = emptyCallStats();
-  const records = positions.length === 0 ? new Map<number, Uint8Array>() : await readPaths(http, m, id, pathSetup, positions, inlineMultiplier, stats);
+  const records = positions.length === 0 ? new Map<number, Uint8Array>() : await readPaths(http, m, id, pathTable, positions, stats);
   const blockRoots = files.get(m.artifacts.blockRoots.digest)!;
   const out = [];
   for (const p of positions) {
     const lower = decodePathRecord(records.get(p)!, m.pathSplit);
-    const { column, slot } = readCell(m, p, ref);
+    const { group: column, slot } = readCell(m, p, ref);
     const item: Json = { position: p, column, slotInColumn: slot };
     if (lower === null) {
       item.result = "FAILED: the path table holds no path for a position in a full block";
@@ -627,8 +656,8 @@ async function paths(args: { positions?: number[] }, progress: (text: string) =>
   return {
     positions: asked,
     download,
-    calls: plan.map((c, i) => ({ call: i + 1, vectors: c.columns.length, realColumns: c.real, paddingColumns: c.columns.length - c.real.length })),
-    table: { rows: ref.rows, cols: ref.cols, recordsPerColumn: ref.perColumn, recordBytes: ref.recordBytes },
+    calls: plan.map((c, i) => ({ call: i + 1, vectors: c.groups.length, realColumns: c.real, paddingColumns: c.groups.length - c.real.length })),
+    table: { rows: ref.layout.rows, cols: ref.layout.cols, recordsPerColumn: ref.perGroup, recordBytes: ref.recordBytes },
     stats: { ...stats, buildMs: round(stats.buildMs), roundTripMs: round(stats.roundTripMs), decodeMs: round(stats.decodeMs) },
     records: out,
     ms: round(now() - t),
@@ -659,10 +688,10 @@ async function nullifiers(args: { nullifiers?: string[] }): Promise<Json> {
   const own = [...coins.values()].filter((c) => c.source === "snapshot").map((c) => c.nullifier);
   const list = [...new Set([...own, ...manual])];
   const ref = m.artifacts.nullifierTable;
-  const plan = paddedCalls(list.map((nf) => bucketOf(fromHexStrict(nf, 32), ref.bucketBits)), ref.cols, m.queriesPerCall);
+  const plan = paddedCalls(list.map((nf) => bucketOf(fromHexStrict(nf, 32), ref.bucketBits)), ref.groups, m.queriesPerCall);
   const stats = emptyCallStats();
   const t = now();
-  const found = await lookupNullifiers(http, m, id, need(nullifierSetup, "get the files"), list, inlineMultiplier, stats);
+  const found = await lookupNullifiers(http, m, id, need(nullifierTable, "get the files"), list, stats);
   const ms = now() - t;
   const results = list.map((nf) => {
     const e = found.get(nf) ?? null;
@@ -677,7 +706,7 @@ async function nullifiers(args: { nullifiers?: string[] }): Promise<Json> {
   });
   return {
     lookups: list.length,
-    calls: plan.map((c, i) => ({ call: i + 1, vectors: c.columns.length, realBuckets: c.real, paddingBuckets: c.columns.length - c.real.length })),
+    calls: plan.map((c, i) => ({ call: i + 1, vectors: c.groups.length, realBuckets: c.real, paddingBuckets: c.groups.length - c.real.length })),
     stats: { ...stats, buildMs: round(stats.buildMs), roundTripMs: round(stats.roundTripMs), decodeMs: round(stats.decodeMs) },
     results,
     note: list.length === 0 ? "no nullifier to look up: one call is still sent, so the server cannot tell a wallet with no coin" : undefined,

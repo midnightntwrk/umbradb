@@ -8,6 +8,8 @@
  * - **Snapshots.** On the admin route, or every `snapshotEvery` heights while following the node, it builds one at a
  *   committed height S in a worker thread (`./build-host.ts`), checks it against the core's `zswap_first_free` and
  *   `zswap_root` at S, and serves it once complete. It keeps that snapshot and the one before, and loads both at start.
+ *   Each snapshot's PIR tables are its scheme's (`../pir/scheme.ts`): the settings' `scheme`, or the admin request's for
+ *   one build; the server answers a call through the table's scheme and knows nothing of its bytes.
  * - **Tail.** From the current snapshot to the committed height (`./tail.ts`), kept after each height, its root
  *   checked against the core's `zswap_root` whenever outputs were added.
  * - **Routes** under `/pss/v1` (spec §5.7), each logged with its body and answer lengths and time (FR-080), never its
@@ -34,17 +36,19 @@ import type {
   SchemaWriteHandle,
 } from "umbradb";
 import { compileKernel, Kernel } from "../kernel/kernel.ts";
-import { answerQueries, type Grid, MAX_COLUMNS, type Multiplier, WorkerMultiplier } from "../pir/index.ts";
+import type { TableName } from "../pir/matrix.ts";
+import { isSchemeName, SCHEME_NAMES, type SchemeName, SchemeUnavailable, type ServerScheme, type ServerTable, type TableTransfer } from "../pir/scheme.ts";
+import { maxRequestBytes, openServerScheme, serverSchemeEntry } from "../pir/server-schemes.ts";
 import { OCTET_STREAM, ROUTES } from "../shared/constants.ts";
-import { fromHex, type Manifest, toHex } from "../shared/manifest.ts";
+import { fromHex, type Manifest, type PirTableRef, toHex } from "../shared/manifest.ts";
 import { CALL_HEADER_BYTES, decodeQueryBody, encodeAnswerBody, WireError } from "../shared/wire.ts";
-import { type BuildJob, type BuildResult, type GridTransfer, paddedBuildBytes } from "./build.ts";
+import { type BuildJob, type BuildResult, paddedBuildBytes } from "./build.ts";
 import { BuildFailure, runBuildWorker, type WorkerOutcome } from "./build-host.ts";
 import { type Settings, settingsOf } from "./settings.ts";
 import { blockHashAt, cursorOf, genesisHashOf, stateAt, zswapEvents } from "./sql.ts";
 import {
+  artifactPath,
   listSnapshots,
-  loadGrid,
   prepareDataDir,
   pruneSnapshots,
   readArtifact,
@@ -79,6 +83,14 @@ interface Pending {
   readonly tip: TailTip;
 }
 
+/** The PIR tables of a snapshot, as its scheme answers from them. */
+interface Tables {
+  readonly read: ServerTable;
+  /** Lower paths, read only to spend (Q58); null when the snapshot's k is 0. */
+  readonly path: ServerTable | null;
+  readonly nullifier: ServerTable;
+}
+
 /** The snapshot served: its manifest, files and PIR tables. */
 interface Snapshot {
   readonly id: string;
@@ -87,12 +99,31 @@ interface Snapshot {
   readonly manifest: Manifest;
   readonly manifestBytes: Uint8Array;
   readonly files: Map<string, ServedFile>;
-  readonly readGrid: Grid;
-  /** Lower paths, read only to spend (Q58); null when the snapshot's k is 0. */
-  readonly pathGrid: Grid | null;
-  readonly nullifierGrid: Grid;
+  readonly tables: Tables;
   /** Nullifiers spent at or below its height. */
   readonly nullifiers: number;
+}
+
+const releaseTables = (t: Tables): void => {
+  t.read.release();
+  t.path?.release();
+  t.nullifier.release();
+};
+
+/** A build's tables, adopted by their scheme; on a failure, those adopted are released and the others discarded. */
+async function adoptTables(scheme: ServerScheme, result: BuildResult): Promise<Tables> {
+  const a = result.manifest.artifacts;
+  const steps: [PirTableRef, TableTransfer][] = [[a.readTable, result.tables.read], [a.nullifierTable, result.tables.nullifier]];
+  if (a.pathTable !== undefined && result.tables.path !== null) steps.splice(1, 0, [a.pathTable, result.tables.path]);
+  const adopted: ServerTable[] = [];
+  try {
+    for (const [ref, transfer] of steps) adopted.push(await scheme.adoptTable(ref, transfer));
+  } catch (cause) {
+    for (const t of adopted) t.release();
+    for (const [, transfer] of steps.slice(adopted.length)) scheme.discardTransfer(transfer);
+    throw cause;
+  }
+  return adopted.length === 3 ? { read: adopted[0]!, path: adopted[1]!, nullifier: adopted[2]! } : { read: adopted[0]!, path: null, nullifier: adopted[1]! };
 }
 
 interface Tail {
@@ -107,6 +138,8 @@ interface Building {
   readonly height: number;
   readonly trigger: "admin" | "every";
   readonly startedAt: string;
+  /** The PIR scheme of the build's tables. */
+  readonly scheme: SchemeName;
   /** Debug (Q57): the padded size, or null. */
   readonly padding: number | null;
   /** The step running now, and when it started; the steps done, with their milliseconds. */
@@ -123,6 +156,7 @@ interface LastBuild {
   readonly message: string | null;
   readonly finishedAt: string;
   readonly totalMs: number;
+  readonly scheme: SchemeName;
   /** Debug (Q57): the padded size, or null; each step's milliseconds when the build succeeded. */
   readonly padding: number | null;
   readonly steps: Record<string, number> | null;
@@ -163,16 +197,6 @@ function networkOf(config: unknown): string {
   return "unknown";
 }
 
-const gridOf = (t: GridTransfer): Grid => ({
-  rows: t.rows,
-  cols: t.cols,
-  perColumn: t.perColumn,
-  cellsPerRecord: t.cellsPerRecord,
-  recordBytes: t.recordBytes,
-  records: t.records,
-  cells: new Int16Array(t.cells),
-});
-
 /** Peak resident memory while `body` runs, sampled every 10 ms. */
 async function measured<T>(body: () => Promise<T>): Promise<{ value: T; ms: number; peakRssBytes: number }> {
   let peak = process.memoryUsage.rss();
@@ -208,7 +232,8 @@ export class PssServer {
   #building: Building | null = null;
   #last: LastBuild | null = null;
   #indexLoad: IndexLoad | null = null;
-  #multiplier: Multiplier | null = null;
+  /** The schemes opened (their threads, their add-ons), each once, by name. */
+  readonly #schemes = new Map<SchemeName, Promise<ServerScheme>>();
   /** Heights added from the block's items, and heights read from the database (items missed). */
   #fromItems = 0;
   #fromDatabase = 0;
@@ -289,6 +314,7 @@ export class PssServer {
         const hash = await blockHashAt(w, m.height);
         if (hash === null || toHex(hash) !== m.blockHash) throw new Error(`block ${m.height}'s hash is not the manifest's`);
         if (m.firstFree !== this.index.outputsAt(m.height)) throw new Error(`the index has another first_free at ${m.height}`);
+        serverSchemeEntry(m.scheme);
         verifyArtifacts(snapshot);
         valid.push(snapshot);
       } catch (cause) {
@@ -299,6 +325,8 @@ export class PssServer {
     const [latest, before] = valid;
     if (before !== undefined) this.#previous = { id: before.id, files: servedFiles(before) };
     if (latest === undefined) return;
+    const a = latest.manifest.artifacts;
+    const scheme = await this.#scheme(latest.manifest.scheme);
     const snapshot: Snapshot = {
       id: latest.id,
       idBytes: fromHex(latest.id, 32),
@@ -306,9 +334,11 @@ export class PssServer {
       manifest: latest.manifest,
       manifestBytes: latest.manifestBytes,
       files: servedFiles(latest),
-      readGrid: loadGrid(latest, "readTable"),
-      pathGrid: latest.manifest.artifacts.pathTable === undefined ? null : loadGrid(latest, "pathTable"),
-      nullifierGrid: loadGrid(latest, "nullifierTable"),
+      tables: {
+        read: await scheme.loadTable(a.readTable, artifactPath(latest, "readTable")),
+        path: a.pathTable === undefined ? null : await scheme.loadTable(a.pathTable, artifactPath(latest, "pathTable")),
+        nullifier: await scheme.loadTable(a.nullifierTable, artifactPath(latest, "nullifierTable")),
+      },
       nullifiers: this.index.nullifiersAt(latest.manifest.height),
     };
     const tree = TailTree.fromSnapshot(
@@ -322,6 +352,18 @@ export class PssServer {
     this.#tail = { tree, error: null, checked: -1, cache: null };
     this.#advanceTail();
     this.#log({ event: "snapshot-loaded", id: snapshot.id, height: snapshot.manifest.height, previous: this.#previous?.id ?? null });
+  }
+
+  /** The scheme of this name, opened once (its threads, its add-on); throws {@link SchemeUnavailable} if this build lacks it. */
+  #scheme(name: SchemeName): Promise<ServerScheme> {
+    let opened = this.#schemes.get(name);
+    if (opened === undefined) {
+      opened = openServerScheme(name, { threads: this.#threads });
+      this.#schemes.set(name, opened);
+      // A scheme that failed to open is tried again next time (its add-on may have been built since).
+      opened.catch(() => this.#schemes.delete(name));
+    }
+    return opened;
   }
 
   #leaf(position: number): Uint8Array {
@@ -415,8 +457,20 @@ export class PssServer {
 
   // ── builds ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
-  /** Starts a build at S (≤ the index's height); an answer when it cannot start, null when it started. */
-  async #startBuild(height: number, read: ReadHandle, trigger: Building["trigger"], padding?: number): Promise<HttpAnswer | null> {
+  /**
+   * Starts a build at S (≤ the index's height) with `scheme` (the settings' unless given); an answer when it cannot
+   * start, null when it started.
+   */
+  async #startBuild(height: number, read: ReadHandle, trigger: Building["trigger"], padding?: number, scheme: SchemeName = this.settings.scheme): Promise<HttpAnswer | null> {
+    // The scheme is opened first, so a scheme this build lacks (or whose add-on is missing) refuses the build before
+    // anything is read (00058). The checks after it run without a pause up to `#building`, so two requests arriving
+    // together still start one build.
+    try {
+      await this.#scheme(scheme);
+    } catch (cause) {
+      if (!(cause instanceof SchemeUnavailable)) throw cause;
+      return error(501, "scheme-unavailable", cause.message, { scheme });
+    }
     if (this.#building !== null) {
       return error(409, "build-running", `a snapshot is being built at ${this.#building.height}`, { building: this.#building });
     }
@@ -432,8 +486,8 @@ export class PssServer {
       // than half the memory available now: a 10M build on a machine whose other programs held most of its memory
       // swapped for 25 minutes without finishing (Q57).
       const c = this.#current;
-      const held = c === null ? 0 : c.readGrid.cells.byteLength + (c.pathGrid?.cells.byteLength ?? 0) + c.nullifierGrid.cells.byteLength;
-      const needed = paddedBuildBytes(padding, this.settings.pathSplit);
+      const held = c === null ? 0 : c.tables.read.heldBytes + (c.tables.path?.heldBytes ?? 0) + c.tables.nullifier.heldBytes;
+      const needed = paddedBuildBytes(padding, this.settings.pathSplit, scheme);
       const half = totalmem() / 2;
       const available = availableMemory();
       if (needed + held > half || needed > available / 2) {
@@ -450,7 +504,7 @@ export class PssServer {
       }
     }
     // Taken before the read below, so a second request arriving meanwhile is refused (one build at a time).
-    const building: Building = { height, trigger, startedAt: new Date().toISOString(), padding: padding ?? null, step: null, stepStartedAt: null, done: {} };
+    const building: Building = { height, trigger, startedAt: new Date().toISOString(), scheme, padding: padding ?? null, step: null, stepStartedAt: null, done: {} };
     this.#building = building;
     let prepared;
     try {
@@ -478,6 +532,7 @@ export class PssServer {
       expectedRoot: rootFromStored(state.root),
       pathSplit: this.settings.pathSplit,
       queriesPerCall: this.settings.queriesPerCall,
+      scheme,
       threads: this.#threads,
       dataDir: this.dataDir,
       slice,
@@ -490,7 +545,7 @@ export class PssServer {
       rowsPerSecond: prepared.ms > 0 ? ((outputs + nullifiers) * 1000) / prepared.ms : 0,
       peakRssBytes: prepared.peakRssBytes,
     };
-    this.#log({ event: "build-started", height, trigger, outputs, nullifiers, pathSplit: job.pathSplit, padding: padding ?? null });
+    this.#log({ event: "build-started", height, trigger, scheme, outputs, nullifiers, pathSplit: job.pathSplit, padding: padding ?? null });
     const onStep = (name: string, phase: "start" | "end", ms?: number): void => {
       if (phase === "start") {
         building.step = name;
@@ -511,19 +566,23 @@ export class PssServer {
   #failed(building: Building, cause: unknown, started: number): void {
     const code = cause instanceof BuildFailure ? cause.code : "build-failed";
     const message = cause instanceof Error ? cause.message : String(cause);
-    this.#last = { height: building.height, ok: false, id: null, code, message, finishedAt: new Date().toISOString(), totalMs: performance.now() - started, padding: building.padding, steps: null };
+    this.#last = { height: building.height, ok: false, id: null, code, message, finishedAt: new Date().toISOString(), totalMs: performance.now() - started, scheme: building.scheme, padding: building.padding, steps: null };
     this.#building = null;
     this.#log({ event: "build-failed", height: building.height, code, message });
   }
 
-  #promote(outcome: WorkerOutcome, building: Building, nullifiers: number, readEvents: Record<string, number>, started: number): void {
+  async #promote(outcome: WorkerOutcome, building: Building, nullifiers: number, readEvents: Record<string, number>, started: number): Promise<void> {
     const result: BuildResult = outcome.result;
     try {
-      const current = this.#current;
-      if (current !== null && current.manifest.height > result.manifest.height) {
+      // The build's tables, made answerable here by their scheme (opened when the build started); freed if superseded.
+      const scheme = await this.#scheme(result.manifest.scheme);
+      if (this.#current !== null && this.#current.manifest.height > result.manifest.height) {
+        const current = this.#current;
+        for (const t of [result.tables.read, result.tables.path, result.tables.nullifier]) if (t !== null) scheme.discardTransfer(t);
         pruneSnapshots(this.dataDir, new Set([current.id, ...(this.#previous === null ? [] : [this.#previous.id])]));
         throw new BuildFailure("superseded", `a snapshot at ${current.manifest.height} is newer than this one at ${result.manifest.height}`);
       }
+      const { read, path, nullifier } = await adoptTables(scheme, result);
       const snapshot: Snapshot = {
         id: result.id,
         idBytes: fromHex(result.id, 32),
@@ -531,14 +590,15 @@ export class PssServer {
         manifest: result.manifest,
         manifestBytes: result.manifestBytes,
         files: servedFiles({ id: result.id, dir: result.dir, manifest: result.manifest, manifestBytes: result.manifestBytes }),
-        readGrid: gridOf(result.readGrid),
-        pathGrid: result.pathGrid === null ? null : gridOf(result.pathGrid),
-        nullifierGrid: gridOf(result.nullifierGrid),
+        tables: { read, path, nullifier },
         nullifiers,
       };
       const tail: Tail = { tree: TailTree.fromStates(result.manifest.pathSplit, this.#hash, result.upper, result.partial), error: null, checked: -1, cache: null };
+      const current = this.#current;
       if (current === null || current.id !== snapshot.id) this.#previous = current === null ? this.#previous : { id: current.id, files: current.files };
       this.#current = snapshot;
+      // The replaced snapshot's files are still served by digest; its tables answer no more calls (409 from now on).
+      if (current !== null) releaseTables(current.tables);
       this.#tail = tail;
       this.#advanceTail();
       const keep = new Set([snapshot.id, ...(this.#previous === null ? [] : [this.#previous.id])]);
@@ -553,6 +613,7 @@ export class PssServer {
         nullifiers,
         pathSplit: result.manifest.pathSplit,
         queriesPerCall: result.manifest.queriesPerCall,
+        scheme: result.manifest.scheme,
         padding: building.padding,
         threads: this.#threads,
         startedAt: building.startedAt,
@@ -568,8 +629,8 @@ export class PssServer {
       };
       writeFileSync(join(snapshot.dir, STATS_FILE), `${JSON.stringify(stats, null, 2)}\n`);
       const stepMs = Object.fromEntries(Object.entries(outcome.steps).map(([name, step]) => [name, Math.round(step.ms)]));
-      this.#last = { height: building.height, ok: true, id: snapshot.id, code: null, message: null, finishedAt: stats.finishedAt, totalMs, padding: building.padding, steps: stepMs };
-      this.#log({ event: "build-done", height: building.height, id: snapshot.id, totalMs, previous: this.#previous?.id ?? null, pruned });
+      this.#last = { height: building.height, ok: true, id: snapshot.id, code: null, message: null, finishedAt: stats.finishedAt, totalMs, scheme: building.scheme, padding: building.padding, steps: stepMs };
+      this.#log({ event: "build-done", height: building.height, id: snapshot.id, scheme: building.scheme, totalMs, previous: this.#previous?.id ?? null, pruned });
     } catch (cause) {
       this.#failed(building, cause, started);
       return;
@@ -585,10 +646,13 @@ export class PssServer {
    */
   routes(p: ProcessContext, api: ApiRegistry): void {
     this.#network = networkOf(p.items.get("config"));
-    this.#multiplier = new WorkerMultiplier(this.#threads);
+    // The settings' scheme is opened now (its threads started), as the snapshot's was at start; a scheme this build
+    // lacks is reported when a build asks for it.
+    this.#scheme(this.settings.scheme).catch((cause: unknown) => this.#log({ event: "scheme-unavailable", scheme: this.settings.scheme, message: cause instanceof Error ? cause.message : String(cause) }));
     const queriesPerCall = Math.max(this.settings.queriesPerCall, this.#current?.manifest.queriesPerCall ?? 0);
-    // The body limit is fixed at registration: the largest table any snapshot can have (FR-058 caps its columns).
-    const maxBodyBytes = CALL_HEADER_BYTES + queriesPerCall * MAX_COLUMNS * 4;
+    // The body limit is fixed at registration: the largest request of any table any registered scheme can build
+    // (SimplePIR: the noise check caps its columns, FR-058), times the calls' request count (00058 FR-022).
+    const maxBodyBytes = CALL_HEADER_BYTES + queriesPerCall * maxRequestBytes();
     this.#route(api, "GET", ROUTES.manifest, async () => this.#manifest());
     this.#route(api, "GET", `${ROUTES.blob}:digest`, async (req) => this.#blob(req.params.digest ?? ""));
     this.#route(api, "GET", ROUTES.tail, async () => this.#tailAnswer());
@@ -604,7 +668,7 @@ export class PssServer {
     api.http(method, path, this.#logged(`${method} ${path}`, handler));
   }
 
-  #binaryRoute(api: ApiRegistry, path: string, table: "read" | "path" | "nullifier", maxBodyBytes: number): void {
+  #binaryRoute(api: ApiRegistry, path: string, table: TableName, maxBodyBytes: number): void {
     const handler: Handler<Uint8Array> = async (req) => this.#query(req, table);
     api.http("POST", path, this.#logged(`POST ${path}`, handler), { body: "binary", maxBodyBytes });
   }
@@ -677,26 +741,26 @@ export class PssServer {
     };
   }
 
-  async #query(req: HttpRequest<Uint8Array>, table: "read" | "path" | "nullifier"): Promise<HttpAnswer> {
+  async #query(req: HttpRequest<Uint8Array>, name: TableName): Promise<HttpAnswer> {
     if (req.headers["content-type"] !== OCTET_STREAM) return error(415, "unsupported-media-type", `the body must be ${OCTET_STREAM}`);
     const snapshot = this.#current;
-    const multiplier = this.#multiplier;
-    if (snapshot === null || multiplier === null) return error(503, "no-snapshot", "no snapshot has been built yet");
-    const grid = table === "read" ? snapshot.readGrid : table === "path" ? snapshot.pathGrid : snapshot.nullifierGrid;
-    if (grid === null) return error(404, "no-path-table", "this snapshot has no path table (its path split is 0)");
+    if (snapshot === null) return error(503, "no-snapshot", "no snapshot has been built yet");
+    const table = snapshot.tables[name];
+    if (table === null) return error(404, "no-path-table", "this snapshot has no path table (its path split is 0)");
     let call;
     try {
-      call = decodeQueryBody(req.body, grid.cols, { queriesPerCall: snapshot.manifest.queriesPerCall, snapshotId: snapshot.idBytes });
+      // The scheme's request length: a body of another length is refused before any work (00058 FR-022).
+      call = decodeQueryBody(req.body, table.requestBytes, { queriesPerCall: snapshot.manifest.queriesPerCall, snapshotId: snapshot.idBytes });
     } catch (cause) {
       if (!(cause instanceof WireError)) throw cause;
       const code = cause.status === 409 ? "snapshot-replaced" : "invalid-query";
       return error(cause.status, code, cause.message, cause.status === 409 ? { snapshot: snapshot.id } : {});
     }
-    const answers = await answerQueries(grid, call.values, call.count, multiplier);
+    const answers = await table.answer(call.payload, call.count);
     return {
       status: 200,
       headers: { "Content-Type": OCTET_STREAM, "Cache-Control": "no-store", "Pss-Snapshot-Id": snapshot.id },
-      body: encodeAnswerBody({ snapshotId: snapshot.idBytes, count: call.count, values: answers }, grid.rows),
+      body: encodeAnswerBody({ snapshotId: snapshot.idBytes, count: call.count, payload: answers }, table.responseBytes),
     };
   }
 
@@ -712,11 +776,16 @@ export class PssServer {
   async #adminBuild(req: HttpRequest<unknown>, read: ReadHandle): Promise<HttpAnswer> {
     const refused = this.#admin(req);
     if (refused !== null) return refused;
-    const body = (req.body ?? {}) as { height?: unknown; padding?: unknown };
+    const body = (req.body ?? {}) as { height?: unknown; padding?: unknown; scheme?: unknown };
     if (typeof body !== "object" || body === null || Array.isArray(body)) return error(400, "invalid-request", "the body is a JSON object");
     const padding = body.padding;
     if (padding !== undefined && padding !== null && (typeof padding !== "number" || !Number.isSafeInteger(padding) || padding < 1)) {
       return error(400, "invalid-padding", "padding is a whole number of entries, or absent");
+    }
+    // The scheme of this one build (00058 FR-002), so two schemes can be built at one height one after the other.
+    const scheme = body.scheme ?? undefined;
+    if (scheme !== undefined && scheme !== null && !isSchemeName(scheme)) {
+      return error(400, "invalid-scheme", `scheme is one of ${SCHEME_NAMES.join(", ")}, or absent`);
     }
     const indexed = this.index.height;
     if (indexed < 0) return error(409, "no-committed-height", "no height is committed yet");
@@ -728,7 +797,7 @@ export class PssServer {
     if (current !== null && height < current.manifest.height) {
       return error(400, "invalid-height", `height must not be below the current snapshot's ${current.manifest.height}`);
     }
-    const refusedBuild = await this.#startBuild(height, read, "admin", typeof padding === "number" ? padding : undefined);
+    const refusedBuild = await this.#startBuild(height, read, "admin", typeof padding === "number" ? padding : undefined, isSchemeName(scheme) ? scheme : undefined);
     if (refusedBuild !== null) return refusedBuild;
     return { status: 202, body: { building: this.#building } };
   }
@@ -760,7 +829,13 @@ export class PssServer {
       current:
         this.#current === null
           ? null
-          : { id: this.#current.id, height: this.#current.manifest.height, firstFree: this.#current.manifest.firstFree, padding: this.#current.manifest.padding?.size ?? null },
+          : {
+              id: this.#current.id,
+              height: this.#current.manifest.height,
+              firstFree: this.#current.manifest.firstFree,
+              scheme: this.#current.manifest.scheme,
+              padding: this.#current.manifest.padding?.size ?? null,
+            },
       previous: this.#previous === null ? null : { id: this.#previous.id },
       tail: this.#tail === null ? null : { next: this.#tail.tree.next, error: this.#tail.error },
       building: this.#building,
@@ -768,6 +843,7 @@ export class PssServer {
       settings: {
         dataDir: this.dataDir,
         pathSplit: this.settings.pathSplit,
+        scheme: this.settings.scheme,
         queriesPerCall: this.settings.queriesPerCall,
         snapshotEvery: this.settings.snapshotEvery,
         threads: this.#threads,
@@ -776,10 +852,21 @@ export class PssServer {
     };
   }
 
-  /** Stops the PIR threads (a test's process end; `umbradb run` exits without it, the threads being unreferenced). */
+  /**
+   * Releases the served tables and stops every scheme's threads (a test's process end; `umbradb run` exits without it,
+   * the threads being unreferenced).
+   */
   async close(): Promise<void> {
-    await this.#multiplier?.close();
-    this.#multiplier = null;
+    if (this.#current !== null) releaseTables(this.#current.tables);
+    const schemes = [...this.#schemes.values()];
+    this.#schemes.clear();
+    for (const opened of schemes) {
+      try {
+        await (await opened).close();
+      } catch {
+        // A scheme that never opened has nothing to close.
+      }
+    }
   }
 }
 

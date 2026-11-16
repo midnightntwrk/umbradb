@@ -8,7 +8,6 @@
 import { createHash } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { checkNoise, decodeGridHeader, GRID_HEADER_BYTES, type Grid } from "../pir/index.ts";
 import { decodeManifest, type Manifest, snapshotId, toHex } from "../shared/manifest.ts";
 import { BUILDS_DIR, MANIFEST_FILE, SNAPSHOTS_DIR } from "./build.ts";
 
@@ -31,9 +30,8 @@ export interface ServedFile {
   readonly contentType: string;
 }
 
-/** The names of the manifest's artifacts. */
-/** The manifest's artifacts; `pathTable` and `pathSetup` are absent when its path split is 0. */
-export const ARTIFACT_NAMES = ["scan", "blockRoots", "readTable", "readSetup", "pathTable", "pathSetup", "nullifierTable", "nullifierSetup"] as const;
+/** The manifest's artifacts; `pathTable` and `pathPublic` are absent when its path split is 0. */
+export const ARTIFACT_NAMES = ["scan", "blockRoots", "readTable", "readPublic", "pathTable", "pathPublic", "nullifierTable", "nullifierPublic"] as const;
 
 /** The snapshots under `dataDir`, newest first (height, then the manifest's modification time). */
 export function listSnapshots(dataDir: string, onIgnored: (dir: string, why: string) => void = () => {}): StoredSnapshot[] {
@@ -97,41 +95,16 @@ export function verifyArtifacts(snapshot: StoredSnapshot): void {
   }
 }
 
-/**
- * A PIR table artifact loaded into shared memory, read in chunks: a padded snapshot's table is larger than the 2 GiB
- * `readFileSync` reads (Q57).
- */
-export function loadGrid(snapshot: StoredSnapshot, name: "readTable" | "pathTable" | "nullifierTable"): Grid {
+/** Where an artifact of a stored snapshot is (a PIR table's file is loaded from here by its scheme). */
+export function artifactPath(snapshot: Pick<StoredSnapshot, "dir" | "manifest">, name: (typeof ARTIFACT_NAMES)[number]): string {
   const ref = snapshot.manifest.artifacts[name];
   if (ref === undefined) throw new Error(`the snapshot has no ${name}`);
-  const path = join(snapshot.dir, ref.digest);
-  const fd = openSync(path, "r");
-  try {
-    const header = new Uint8Array(GRID_HEADER_BYTES);
-    if (readSync(fd, header, 0, GRID_HEADER_BYTES, 0) !== GRID_HEADER_BYTES) throw new Error(`${name} is shorter than its header`);
-    const shape = decodeGridHeader(header);
-    const expected = GRID_HEADER_BYTES + shape.rows * shape.cols * 2;
-    if (statSync(path).size !== expected) throw new Error(`${name} must be ${expected} bytes`);
-    checkNoise(shape.cols);
-    const cells = new Int16Array(new SharedArrayBuffer(shape.rows * shape.cols * 2));
-    const bytes = new Uint8Array(cells.buffer);
-    const chunk = 1 << 26;
-    for (let off = 0; off < bytes.length; ) {
-      const read = readSync(fd, bytes, off, Math.min(chunk, bytes.length - off), GRID_HEADER_BYTES + off);
-      if (read === 0) throw new Error(`${name} ended early`);
-      off += read;
-    }
-    return { ...shape, cells };
-  } finally {
-    closeSync(fd);
-  }
+  return join(snapshot.dir, ref.digest);
 }
 
 /** An artifact's bytes. */
 export function readArtifact(snapshot: Pick<StoredSnapshot, "dir" | "manifest">, name: (typeof ARTIFACT_NAMES)[number]): Uint8Array {
-  const ref = snapshot.manifest.artifacts[name];
-  if (ref === undefined) throw new Error(`the snapshot has no ${name}`);
-  return new Uint8Array(readFileSync(join(snapshot.dir, ref.digest)));
+  return new Uint8Array(readFileSync(artifactPath(snapshot, name)));
 }
 
 /** Deletes every snapshot directory under `dataDir` but those named in `keep`; returns the identifiers deleted. */

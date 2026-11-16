@@ -114,7 +114,8 @@ export interface WalletRun {
   readonly stateBytes: number;
   readonly peakRssBytes: number | null;
   readonly manifest: { readonly ms: number; readonly bytes: number };
-  readonly downloads: Readonly<Record<"scan" | "blockRoots" | "readSetup" | "nullifierSetup", DownloadRow>>;
+  /** `readPublic` and `nullifierPublic`: the scheme's public artifacts (SimplePIR: setup data). */
+  readonly downloads: Readonly<Record<"scan" | "blockRoots" | "readPublic" | "nullifierPublic", DownloadRow>>;
   readonly cacheBytes: number;
   readonly scan: { readonly ms: number; readonly entries: number; readonly threads: number; readonly microsPerOutput: number };
   readonly read: CallRow;
@@ -171,7 +172,8 @@ export interface PathSplitRun {
   readonly cols: number;
   readonly perColumn: number;
   readonly blocks: number;
-  readonly sizes: { readonly blockRoots: number; readonly readTable: number; readonly readSetup: number };
+  /** `readPublic`: the read table's public artifact (SimplePIR: setup data). */
+  readonly sizes: { readonly blockRoots: number; readonly readTable: number; readonly readPublic: number };
   /** Every step of the build (FR-153 reports the tree and the tables'); the path table's are null at k = 0. */
   readonly steps: Readonly<Record<BuildStepName, BuildStep | null>>;
   /** The path table at this k (Q58), with one call of its own; null at k = 0 (no lower path). */
@@ -181,7 +183,7 @@ export interface PathSplitRun {
     readonly cols: number;
     readonly perColumn: number;
     readonly tableBytes: number;
-    readonly setupBytes: number;
+    readonly publicBytes: number;
     readonly call: SplitCall | null;
   } | null;
   readonly buildMs: number;
@@ -266,6 +268,8 @@ export interface BenchResults {
     readonly queriesPerCall: number;
     readonly blocks: number;
     readonly artifacts: Readonly<Record<string, number>>;
+    /** The PIR scheme of the snapshot's tables. */
+    readonly scheme: string;
     readonly pir: Readonly<Record<string, number>>;
     /** Whether the benchmark asked the server for this snapshot (`--build`). */
     readonly builtByBench: boolean;

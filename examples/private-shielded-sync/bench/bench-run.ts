@@ -293,7 +293,7 @@ async function runWallet(o: BenchOptions, w: BenchWallet, kernel: Kernel, module
       };
     };
     const downloads = Object.fromEntries(
-      (["scan", "blockRoots", "readSetup", "nullifierSetup"] as const).map((name) => {
+      (["scan", "blockRoots", "readPublic", "nullifierPublic"] as const).map((name) => {
         const d = stats.downloads[name];
         const r = requests.find((q, i) => stats.requests[i]!.path === `${ROUTES.blob}${d.digest}`);
         return [name, { size: d.size, bytes: d.bytes, ms: d.ms, cached: d.cached, serverMs: r?.server?.ms ?? null }];
@@ -510,6 +510,7 @@ export async function runBench(o: BenchOptions): Promise<BenchResults> {
         queriesPerCall: manifest.queriesPerCall,
         blocks: manifest.artifacts.blockRoots.blocks,
         artifacts: Object.fromEntries(Object.entries(manifest.artifacts).map(([name, ref]) => [name, ref.size])),
+        scheme: manifest.scheme,
         pir: { ...manifest.pir },
         builtByBench: o.build !== null,
       },

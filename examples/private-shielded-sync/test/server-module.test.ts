@@ -7,7 +7,7 @@
  */
 
 import { randomInt } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,18 +23,9 @@ import { core, entryOf, startProcess } from "../../../test/runner/process-build.
 import { TapeNode } from "../../../tools/tape/index.js";
 import { listenOnRandomPort } from "../../../tools/tape/port.js";
 import { compileKernel, Kernel } from "../kernel/index.ts";
+import { bucketOf, findInBucket, openWalletScheme, positionOf, type WalletTable, WorkerMultiplier } from "../pir/index.ts";
 import {
-  bucketOf,
-  buildQueries,
-  columnRecords,
-  decodeAnswers,
-  findInBucket,
-  positionOf,
-  setupMatrix,
-  type TableInfo,
-  WorkerMultiplier,
-} from "../pir/index.ts";
-import {
+  canonicalJson,
   decodeAnswerBody,
   decodeManifest,
   decodePathRecord,
@@ -160,11 +151,11 @@ async function built(r: Run, height: number): Promise<Record<string, any>> {
   throw new Error(`no build at ${height} finished: ${r.logs.join("\n")}`);
 }
 
-async function requestBuild(r: Run, height?: number): Promise<Response> {
+async function requestBuild(r: Run, height?: number, extra: Record<string, unknown> = {}): Promise<Response> {
   return fetch(`${r.origin}${ROUTES.adminSnapshot}`, {
     method: "POST",
     headers: { ...auth, "Content-Type": "application/json" },
-    body: JSON.stringify(height === undefined ? {} : { height }),
+    body: JSON.stringify({ ...(height === undefined ? {} : { height }), ...extra }),
   });
 }
 
@@ -213,47 +204,52 @@ async function storedState(db: ProcessDatabase, height: number): Promise<{ first
   return { firstFree: Number(row!.zswap_first_free), root: new Uint8Array(row!.zswap_root as Buffer), hash: hex(row!.hash as Buffer) };
 }
 
-/** Reads `positions` of the served read table by PIR in calls of exactly `queriesPerCall` vectors (random padding). */
-/** Reads positions from the read table (POST /query/read) or the path table (POST /query/path) by PIR. */
+/**
+ * One call to a served table through the manifest's scheme (`../pir/scheme.ts`), as a wallet makes it: the wanted
+ * groups, padded to exactly `queriesPerCall` with random ones; the wanted groups' records.
+ */
+async function callTable(r: Run, m: Manifest, id: string, route: string, table: WalletTable, wanted: readonly number[]): Promise<Uint8Array[][]> {
+  const groups = [...wanted];
+  while (groups.length < m.queriesPerCall) groups.push(randomInt(table.groups));
+  const prepared = await table.prepareCall(groups);
+  const answer = await fetch(`${r.origin}${route}`, {
+    method: "POST",
+    headers: { "Content-Type": OCTET_STREAM },
+    body: bodyOf(encodeQueryBody({ snapshotId: fromHex(id, 32), count: groups.length, payload: prepared.requests }, table.requestBytes)),
+  });
+  expect(answer.status).toBe(200);
+  const decoded = decodeAnswerBody(new Uint8Array(await answer.arrayBuffer()), table.responseBytes, { count: groups.length, snapshotId: fromHex(id, 32) });
+  return prepared.decode(decoded.payload, wanted.length);
+}
+
+/** Reads positions from the read table (POST /query/read) or the path table (POST /query/path) by PIR, in full calls. */
 async function readByPir(r: Run, m: Manifest, id: string, positions: readonly number[], which: "read" | "path" = "read"): Promise<Uint8Array[]> {
   const t = which === "read" ? m.artifacts.readTable : m.artifacts.pathTable!;
-  const table: TableInfo = { ...t, seed: fromHex(t.seed, 32) };
-  const setup = setupMatrix(await blobBytes(r, (which === "read" ? m.artifacts.readSetup : m.artifacts.pathSetup!).digest), t.rows);
-  const out: Uint8Array[] = [];
-  for (let from = 0; from < positions.length; from += m.queriesPerCall) {
-    const wanted = positions.slice(from, from + m.queriesPerCall);
-    const columns = [...wanted.map((i) => positionOf(i, t.perColumn).column)];
-    while (columns.length < m.queriesPerCall) columns.push(randomInt(t.cols));
-    const batch = await buildQueries(table, columns, multiplier);
-    const answer = await fetch(`${r.origin}${which === "read" ? ROUTES.queryRead : ROUTES.queryPath}`, {
-      method: "POST",
-      headers: { "Content-Type": OCTET_STREAM },
-      body: bodyOf(encodeQueryBody({ snapshotId: fromHex(id, 32), count: columns.length, values: batch.queries }, t.cols)),
-    });
-    expect(answer.status).toBe(200);
-    const decoded = decodeAnswerBody(new Uint8Array(await answer.arrayBuffer()), t.rows, { count: columns.length, snapshotId: fromHex(id, 32) });
-    const values = await decodeAnswers(setup, batch, decoded.values, multiplier);
-    wanted.forEach((i, q) => out.push(columnRecords(t, values[q]!)[positionOf(i, t.perColumn).slot]!));
+  const scheme = await openWalletScheme(m, { multiplier });
+  try {
+    const table = await scheme.openTable(t, await blobBytes(r, (which === "read" ? m.artifacts.readPublic : m.artifacts.pathPublic!).digest));
+    const out: Uint8Array[] = [];
+    for (let from = 0; from < positions.length; from += m.queriesPerCall) {
+      const wanted = positions.slice(from, from + m.queriesPerCall);
+      const records = await callTable(r, m, id, which === "read" ? ROUTES.queryRead : ROUTES.queryPath, table, wanted.map((i) => positionOf(i, t.perGroup).column));
+      wanted.forEach((i, q) => out.push(records[q]![positionOf(i, t.perGroup).slot]!));
+    }
+    return out;
+  } finally {
+    scheme.dispose();
   }
-  return out;
 }
 
 async function lookupByPir(r: Run, m: Manifest, id: string, nullifiers: readonly Uint8Array[]) {
   const t = m.artifacts.nullifierTable;
-  const table: TableInfo = { ...t, seed: fromHex(t.seed, 32) };
-  const setup = setupMatrix(await blobBytes(r, m.artifacts.nullifierSetup.digest), t.rows);
-  const columns = nullifiers.map((n) => bucketOf(n, t.bucketBits));
-  while (columns.length < m.queriesPerCall) columns.push(randomInt(t.cols));
-  const batch = await buildQueries(table, columns, multiplier);
-  const answer = await fetch(`${r.origin}${ROUTES.queryNullifier}`, {
-    method: "POST",
-    headers: { "Content-Type": OCTET_STREAM },
-    body: bodyOf(encodeQueryBody({ snapshotId: fromHex(id, 32), count: columns.length, values: batch.queries }, t.cols)),
-  });
-  expect(answer.status).toBe(200);
-  const decoded = decodeAnswerBody(new Uint8Array(await answer.arrayBuffer()), t.rows);
-  const values = await decodeAnswers(setup, batch, decoded.values, multiplier);
-  return nullifiers.map((n, q) => findInBucket(columnRecords(t, values[q]!), n));
+  const scheme = await openWalletScheme(m, { multiplier });
+  try {
+    const table = await scheme.openTable(t, await blobBytes(r, m.artifacts.nullifierPublic.digest));
+    const records = await callTable(r, m, id, ROUTES.queryNullifier, table, nullifiers.map((n) => bucketOf(n, t.bucketBits)));
+    return nullifiers.map((n, q) => findInBucket(records[q]!, n));
+  } finally {
+    scheme.dispose();
+  }
 }
 
 beforeAll(async () => {
@@ -425,9 +421,10 @@ describe("the module on a chain it follows from genesis (PostgreSQL 18)", () => 
 
   it("query refusals: another snapshot 409 naming the served one, another vector count 400, another content type 415", { timeout: LONG }, async () => {
     const { manifest, id } = await manifestOf(r);
-    const cols = manifest.artifacts.readTable.cols;
+    // SimplePIR: a request is the table's C query values of 4 bytes.
+    const requestBytes = manifest.artifacts.readTable.layout.cols * 4;
     const body = (snapshot: Uint8Array, count: number) =>
-      encodeQueryBody({ snapshotId: snapshot, count, values: new Uint32Array(count * cols) }, cols);
+      encodeQueryBody({ snapshotId: snapshot, count, payload: new Uint8Array(count * requestBytes) }, requestBytes);
     const post = (bytes: Uint8Array, type = OCTET_STREAM) =>
       fetch(`${r.origin}${ROUTES.queryRead}`, { method: "POST", headers: { "Content-Type": type }, body: bodyOf(bytes) });
     const other = await post(body(new Uint8Array(32).fill(1), manifest.queriesPerCall));
@@ -438,7 +435,7 @@ describe("the module on a chain it follows from genesis (PostgreSQL 18)", () => 
     const nullifierOther = await fetch(`${r.origin}${ROUTES.queryNullifier}`, {
       method: "POST",
       headers: { "Content-Type": OCTET_STREAM },
-      body: bodyOf(encodeQueryBody({ snapshotId: new Uint8Array(32), count: manifest.queriesPerCall, values: new Uint32Array(manifest.queriesPerCall * manifest.artifacts.nullifierTable.cols) }, manifest.artifacts.nullifierTable.cols)),
+      body: bodyOf(encodeQueryBody({ snapshotId: new Uint8Array(32), count: manifest.queriesPerCall, payload: new Uint8Array(manifest.queriesPerCall * manifest.artifacts.nullifierTable.layout.cols * 4) }, manifest.artifacts.nullifierTable.layout.cols * 4)),
     });
     expect(nullifierOther.status).toBe(409);
   });
@@ -487,7 +484,7 @@ describe("the module on a chain it follows from genesis (PostgreSQL 18)", () => 
     expect(readdirSync(join(dataDir, "snapshots")).sort()).toEqual([five.id, seven.id].sort());
     expect((await blob(r, first.manifest.artifacts.scan.digest)).status).toBe(404);
     // The previous snapshot's files are still served; its query calls are refused (409).
-    expect((await blob(r, five.manifest.artifacts.readSetup.digest)).status).toBe(200);
+    expect((await blob(r, five.manifest.artifacts.readPublic.digest)).status).toBe(200);
 
     expect((await requestBuild(r, 7)).status).toBe(202);
     const again = await built(r, 7);
@@ -497,6 +494,20 @@ describe("the module on a chain it follows from genesis (PostgreSQL 18)", () => 
 
     expect((await requestBuild(r, 6)).status).toBe(400);
     expect((await requestBuild(r, 8)).status).toBe(400);
+
+    // The admin request may name the scheme of one build (00058 FR-002): SimplePIR by name gives the same snapshot; a
+    // scheme this build does not have is refused by name before anything is built; an unknown name is 400.
+    expect((await requestBuild(r, 7, { scheme: "simplepir" })).status).toBe(202);
+    expect((await built(r, 7)).last).toMatchObject({ ok: true, id: seven.id, scheme: "simplepir" });
+    const unavailable = await requestBuild(r, 7, { scheme: "ipir-sp" });
+    expect(unavailable.status).toBe(501);
+    expect(await unavailable.json()).toMatchObject({ error: { code: "scheme-unavailable", message: expect.stringContaining('"ipir-sp"') }, scheme: "ipir-sp" });
+    const unknown = await requestBuild(r, 7, { scheme: "doublepir" });
+    expect(unknown.status).toBe(400);
+    expect(await unknown.json()).toMatchObject({ error: { code: "invalid-scheme" } });
+    expect((await status(r)).building).toBeNull();
+    expect((await manifestOf(r)).id).toBe(seven.id);
+    expect(seven.manifest.scheme).toBe("simplepir");
     snapshotAt7 = seven.id;
     const tail = await fetch(`${r.origin}${ROUTES.tail}`);
     tailAt7 = new Uint8Array(await tail.arrayBuffer());
@@ -509,21 +520,34 @@ describe("the module on a chain it follows from genesis (PostgreSQL 18)", () => 
     await readByPir(r, manifest, id, [0]);
     const lines = r.logs.slice(before).map((line) => JSON.parse(line) as Record<string, unknown>).filter((line) => line.event === "request");
     const query = lines.find((line) => line.route === `POST ${ROUTES.queryRead}`)!;
-    const t = manifest.artifacts.readTable;
+    // SimplePIR's sizes, as before the scheme seam (00058 FR-004): C × 4 bytes up and R × 4 down per request.
+    const t = manifest.artifacts.readTable.layout;
+    expect(manifest.scheme).toBe("simplepir");
     expect(query).toMatchObject({ status: 200, bodyBytes: 40 + manifest.queriesPerCall * t.cols * 4, answerBytes: 40 + manifest.queriesPerCall * t.rows * 4 });
     expect(typeof query.ms).toBe("number");
     expect(Object.keys(query).sort()).toEqual(["answerBytes", "at", "bodyBytes", "event", "ms", "pss", "range", "route", "status"]);
     const blobLine = lines.find((line) => String(line.route).startsWith("GET /pss/v1/blob/"))!;
-    expect(blobLine.answerBytes).toBe(manifest.artifacts.readSetup.size);
+    expect(blobLine.answerBytes).toBe(manifest.artifacts.readPublic.size);
   });
 
-  it("restart: a new process on the same database and data directory serves the latest snapshot and the one before, rebuilds the tail to the same bytes, and answers queries; without a secret the admin routes answer 403", { timeout: LONG }, async () => {
+  it("restart: a new process on the same database and data directory serves the latest snapshot and the one before, rebuilds the tail to the same bytes, and answers queries; a stored format-2 snapshot is ignored; without a secret the admin routes answer 403", { timeout: LONG }, async () => {
     await r.close();
+    // A snapshot of the format before the scheme seam (00058), with a well-formed name and manifest: ignored at start,
+    // as format-1 ones were, and pruned at the next build.
+    const format2 = JSON.parse(readFileSync(join(dataDir, "snapshots", snapshotAt7, "manifest.json"), "utf8")) as Record<string, unknown>;
+    format2.formatVersion = 2;
+    delete format2.scheme;
+    const oldBytes = new TextEncoder().encode(canonicalJson(format2));
+    const oldId = toHex(snapshotId(oldBytes));
+    mkdirSync(join(dataDir, "snapshots", oldId));
+    writeFileSync(join(dataDir, "snapshots", oldId, "manifest.json"), oldBytes);
     const { adminSecret: _secret, ...withoutSecret } = config();
     r = await run(db, { stop: 7, pss: { start: 0, config: { ...withoutSecret, snapshotEvery: 0 } } });
     await stoppedAt(r, 7);
     const { manifest, id } = await manifestOf(r);
     expect(id).toBe(snapshotAt7);
+    const ignored = r.logs.map((line) => JSON.parse(line) as Record<string, unknown>).filter((line) => line.event === "snapshot-ignored");
+    expect(ignored.find((line) => String(line.dir).endsWith(oldId))).toMatchObject({ why: "invalid manifest: formatVersion 2" });
     const tail = new Uint8Array(await (await fetch(`${r.origin}${ROUTES.tail}`)).arrayBuffer());
     expect(hex(tail)).toBe(hex(tailAt7));
     const s = r.server().status() as Record<string, any>;

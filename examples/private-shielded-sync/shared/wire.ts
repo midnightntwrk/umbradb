@@ -2,17 +2,21 @@
  * Binary wire formats of the module's HTTP API (spec §5.7, FR-081), defined once for the server and the client.
  * Integers are little-endian.
  *
- * Query body (`POST /query/read`, `POST /query/nullifier`), 40-byte header then values:
+ * Query body (`POST /query/read`, `/query/path`, `/query/nullifier`), 40-byte header then the requests:
  *
  * | Offset | Bytes | Field |
  * |---|---|---|
  * | 0 | 4 | Magic `PSSQ` |
  * | 4 | 2 | Format version |
  * | 6 | 32 | Snapshot identifier |
- * | 38 | 2 | Vector count |
- * | 40 | count × C × 4 | Query values, vector by vector |
+ * | 38 | 2 | Request count |
+ * | 40 | count × request bytes | The requests, one after the other |
  *
- * Answer body: the same header with magic `PSSA`, then count × R × 4 bytes of answer values, vector by vector.
+ * Answer body: the same header with magic `PSSA`, then count × response bytes, one response per request in order.
+ *
+ * The bytes after the header are the PIR scheme's (`../pir/scheme.ts`, 00058 FR-022): the table gives the length of
+ * one request and of one response, and this file checks only that a body is whole. Under SimplePIR a request is the
+ * table's C query values and a response its R answer values, 32-bit little-endian.
  *
  * Tail body (`GET /tail`), 132-byte header then four sections in this order: commitments (32 bytes each), outputs
  * (`TAIL_OUTPUT_BYTES` each), nullifiers (`NULLIFIER_RECORD_BYTES` each), block roots (32 bytes each):
@@ -45,28 +49,34 @@ export const TAIL_HEADER_BYTES = 132;
 export const SNAPSHOT_ID_BYTES = 32;
 export const MAX_VECTOR_COUNT = 0xffff;
 
-/** A decoded query or answer body. `values` is vector-major (`count × length`). */
+/** A query or answer body: its header's fields, and the `count` requests or responses after it. */
 export interface CallBody {
   readonly snapshotId: Uint8Array;
   readonly count: number;
-  readonly values: Uint32Array;
+  /** `count` items of the scheme's request (or response) length, one after the other. */
+  readonly payload: Uint8Array;
 }
 
-function encodeCall(magic: number, body: CallBody, length: number): Uint8Array {
+function checkItemBytes(itemBytes: number): void {
+  if (!Number.isSafeInteger(itemBytes) || itemBytes < 1) throw new Error(`a request or response must be at least 1 byte: ${itemBytes}`);
+}
+
+function encodeCall(magic: number, body: CallBody, itemBytes: number): Uint8Array {
+  checkItemBytes(itemBytes);
   if (body.snapshotId.length !== SNAPSHOT_ID_BYTES) throw new Error("snapshot identifier must be 32 bytes");
   if (!Number.isInteger(body.count) || body.count < 1 || body.count > MAX_VECTOR_COUNT) {
     throw new Error(`vector count out of range: ${body.count}`);
   }
-  if (body.values.length !== body.count * length) {
-    throw new Error(`expected ${body.count} × ${length} values, got ${body.values.length}`);
+  if (body.payload.length !== body.count * itemBytes) {
+    throw new Error(`expected ${body.count} × ${itemBytes} bytes, got ${body.payload.length}`);
   }
-  const out = new Uint8Array(CALL_HEADER_BYTES + body.values.length * 4);
+  const out = new Uint8Array(CALL_HEADER_BYTES + body.payload.length);
   const view = new DataView(out.buffer);
   view.setUint32(0, magic, true);
   view.setUint16(4, FORMAT_VERSION, true);
   out.set(body.snapshotId, 6);
   view.setUint16(38, body.count, true);
-  out.set(new Uint8Array(body.values.buffer, body.values.byteOffset, body.values.byteLength), CALL_HEADER_BYTES);
+  out.set(body.payload, CALL_HEADER_BYTES);
   return out;
 }
 
@@ -83,9 +93,10 @@ function decodeCall(
   magic: number,
   what: string,
   bytes: Uint8Array,
-  length: number,
+  itemBytes: number,
   expect: { count?: number; snapshotId?: Uint8Array },
 ): CallBody {
+  checkItemBytes(itemBytes);
   if (bytes.length < CALL_HEADER_BYTES) throw new WireError(`${what} shorter than its header`, 400);
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (view.getUint32(0, true) !== magic) throw new WireError(`not a ${what}`, 400);
@@ -97,50 +108,49 @@ function decodeCall(
     throw new WireError(`${what} carries ${count} vectors; exactly ${expect.count} are required`, 400);
   }
   // Another snapshot is 409 before the length is checked: a call built for a replaced snapshot has that snapshot's
-  // column count, so its length differs too, and the client must learn the snapshot changed (FR-067).
+  // request length, so its length differs too, and the client must learn the snapshot changed (FR-067).
   if (expect.snapshotId && !equalBytes(snapshotId, expect.snapshotId)) {
     throw new WireError(`${what} names another snapshot`, 409);
   }
-  const expected = CALL_HEADER_BYTES + count * length * 4;
+  const expected = CALL_HEADER_BYTES + count * itemBytes;
   if (bytes.length !== expected) throw new WireError(`${what} must be ${expected} bytes, got ${bytes.length}`, 400);
-  // Copy into an aligned buffer (the body's offset may not be a multiple of 4).
-  const values = new Uint32Array(count * length);
-  new Uint8Array(values.buffer).set(bytes.subarray(CALL_HEADER_BYTES));
-  return { snapshotId, count, values };
+  // A view, not a copy: the scheme copies what it needs aligned.
+  return { snapshotId, count, payload: bytes.subarray(CALL_HEADER_BYTES) };
 }
 
-/** Encodes a query call: `count` vectors of C values. */
-export function encodeQueryBody(body: CallBody, cols: number): Uint8Array {
-  return encodeCall(QUERY_MAGIC, body, cols);
+/** Encodes a query call: `count` requests of `requestBytes` each (the table's, from its scheme). */
+export function encodeQueryBody(body: CallBody, requestBytes: number): Uint8Array {
+  return encodeCall(QUERY_MAGIC, body, requestBytes);
 }
 
 /**
- * Decodes a query call for a table of `cols` columns, strictly: exact length, `queriesPerCall` vectors when given
- * (FR-065), and the current snapshot when given (409 otherwise, FR-067).
+ * Decodes a query call to a table whose requests are `requestBytes` long, strictly: exact length, `queriesPerCall`
+ * requests when given (FR-065), and the current snapshot when given (409 otherwise, FR-067).
  */
 export function decodeQueryBody(
   bytes: Uint8Array,
-  cols: number,
+  requestBytes: number,
   expect: { queriesPerCall?: number; snapshotId?: Uint8Array } = {},
 ): CallBody {
-  return decodeCall(QUERY_MAGIC, "query body", bytes, cols, { count: expect.queriesPerCall, snapshotId: expect.snapshotId });
+  return decodeCall(QUERY_MAGIC, "query body", bytes, requestBytes, { count: expect.queriesPerCall, snapshotId: expect.snapshotId });
 }
 
-export function encodeAnswerBody(body: CallBody, rows: number): Uint8Array {
-  return encodeCall(ANSWER_MAGIC, body, rows);
+/** Encodes an answer: `count` responses of `responseBytes` each. */
+export function encodeAnswerBody(body: CallBody, responseBytes: number): Uint8Array {
+  return encodeCall(ANSWER_MAGIC, body, responseBytes);
 }
 
 export function decodeAnswerBody(
   bytes: Uint8Array,
-  rows: number,
+  responseBytes: number,
   expect: { count?: number; snapshotId?: Uint8Array } = {},
 ): CallBody {
-  return decodeCall(ANSWER_MAGIC, "answer body", bytes, rows, expect);
+  return decodeCall(ANSWER_MAGIC, "answer body", bytes, responseBytes, expect);
 }
 
-/** The request-body limit of a query route (FR-079). */
-export function queryBodyLimit(queriesPerCall: number, cols: number): number {
-  return CALL_HEADER_BYTES + queriesPerCall * cols * 4;
+/** The request-body limit of a query route (FR-079): `queriesPerCall` requests of at most `requestBytes`. */
+export function queryBodyLimit(queriesPerCall: number, requestBytes: number): number {
+  return CALL_HEADER_BYTES + queriesPerCall * requestBytes;
 }
 
 /** The tail header's fields. */

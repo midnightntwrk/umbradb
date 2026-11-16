@@ -205,7 +205,9 @@ describe("the benchmark on the synthetic chain (snapshot at 4, tail to 7)", () =
     expect(results.software.umbradb).toMatch(/^\d+\.\d+\.\d+/);
     expect(results.software.kernelDigest).toMatch(/^[0-9a-f]{64}$/);
     expect(results.serverBuild!.source).toContain("build-stats.json");
-    expect(results.serverBuild!.steps.readSetup!.bytes).toBe(results.snapshot.artifacts.readSetup);
+    // The read table's setup step writes its public artifact (SimplePIR: the setup data, `readPublic` since 00058).
+    expect(results.serverBuild!.steps.readSetup!.bytes).toBe(results.snapshot.artifacts.readPublic);
+    expect(results.snapshot.scheme).toBe("simplepir");
     expect(results.readEvents).toMatchObject({ rows: 9 + 1, height: 4 });
     expect(results.chainSync.database!.bytes).toBeGreaterThan(0);
     expect(results.chainSync.database!.schemas.map((s) => s.schema)).toContain("core_ledger_state");

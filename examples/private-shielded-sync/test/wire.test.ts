@@ -38,41 +38,45 @@ import {
   toHex,
   WireError,
 } from "../shared/index.ts";
+import { SchemeUnavailable } from "../pir/scheme.ts";
 
 const bytes = (n: number) => new Uint8Array(randomBytes(n));
-const words = (n: number) => new Uint32Array(randomBytes(n * 4).buffer);
 
+/**
+ * A call body after its header is the scheme's bytes (00058 FR-022): `count` requests (or responses) of a length the
+ * table gives. Here a SimplePIR table of 17 columns and 5 rows: requests of 17 × 4 bytes, responses of 5 × 4.
+ */
 describe("query and answer bodies", () => {
   const id = bytes(32);
 
   it("round-trip, with a 40-byte header: magic, version, snapshot, count", () => {
-    const values = words(3 * 17);
-    const body = encodeQueryBody({ snapshotId: id, count: 3, values }, 17);
+    const payload = bytes(3 * 17 * 4);
+    const body = encodeQueryBody({ snapshotId: id, count: 3, payload }, 17 * 4);
     expect(body.length).toBe(CALL_HEADER_BYTES + 3 * 17 * 4);
     expect(new TextDecoder().decode(body.subarray(0, 4))).toBe("PSSQ");
     expect(body[4]).toBe(FORMAT_VERSION);
     expect(body[38]).toBe(3);
-    const back = decodeQueryBody(body, 17, { queriesPerCall: 3, snapshotId: id });
-    expect(back.values).toEqual(values);
+    const back = decodeQueryBody(body, 17 * 4, { queriesPerCall: 3, snapshotId: id });
+    expect(back.payload).toEqual(payload);
     expect(back.snapshotId).toEqual(id);
-    const answer = encodeAnswerBody({ snapshotId: id, count: 3, values: words(3 * 5) }, 5);
+    const answer = encodeAnswerBody({ snapshotId: id, count: 3, payload: bytes(3 * 5 * 4) }, 5 * 4);
     expect(new TextDecoder().decode(answer.subarray(0, 4))).toBe("PSSA");
-    expect(decodeAnswerBody(answer, 5, { count: 3 }).count).toBe(3);
+    expect(decodeAnswerBody(answer, 5 * 4, { count: 3 }).count).toBe(3);
   });
 
   it("decode from an unaligned offset", () => {
-    const values = words(2 * 9);
-    const body = encodeQueryBody({ snapshotId: id, count: 2, values }, 9);
+    const payload = bytes(2 * 9 * 4);
+    const body = encodeQueryBody({ snapshotId: id, count: 2, payload }, 9 * 4);
     const shifted = new Uint8Array(body.length + 1);
     shifted.set(body, 1);
-    expect(decodeQueryBody(shifted.subarray(1), 9).values).toEqual(values);
+    expect(decodeQueryBody(shifted.subarray(1), 9 * 4).payload).toEqual(payload);
   });
 
   it("are refused when anything is off (400), or name another snapshot (409)", () => {
-    const body = encodeQueryBody({ snapshotId: id, count: 2, values: words(2 * 9) }, 9);
-    const refuse = (b: Uint8Array, expect: Parameters<typeof decodeQueryBody>[2] = {}, cols = 9) => {
+    const body = encodeQueryBody({ snapshotId: id, count: 2, payload: bytes(2 * 9 * 4) }, 9 * 4);
+    const refuse = (b: Uint8Array, expect: Parameters<typeof decodeQueryBody>[2] = {}, requestBytes = 9 * 4) => {
       try {
-        decodeQueryBody(b, cols, expect);
+        decodeQueryBody(b, requestBytes, expect);
       } catch (e) {
         return (e as WireError).status;
       }
@@ -81,7 +85,7 @@ describe("query and answer bodies", () => {
     expect(refuse(body.subarray(0, 39))).toBe(400);
     expect(refuse(body.subarray(0, body.length - 1))).toBe(400);
     expect(refuse(Uint8Array.of(...body, 0))).toBe(400);
-    expect(refuse(body, {}, 10)).toBe(400);
+    expect(refuse(body, {}, 10 * 4)).toBe(400);
     const magic = body.slice();
     magic[0] = 0;
     expect(refuse(magic)).toBe(400);
@@ -90,20 +94,21 @@ describe("query and answer bodies", () => {
     expect(refuse(version)).toBe(400);
     expect(refuse(body, { queriesPerCall: 32 })).toBe(400);
     expect(refuse(body, { snapshotId: bytes(32) })).toBe(409);
-    // A call for a replaced snapshot has that snapshot's column count: still 409, not 400 (FR-067).
-    expect(refuse(body, { snapshotId: bytes(32) }, 10)).toBe(409);
-    expect(refuse(encodeAnswerBody({ snapshotId: id, count: 2, values: words(18) }, 9))).toBe(400);
+    // A call for a replaced snapshot has that snapshot's request length: still 409, not 400 (FR-067).
+    expect(refuse(body, { snapshotId: bytes(32) }, 10 * 4)).toBe(409);
+    expect(refuse(encodeAnswerBody({ snapshotId: id, count: 2, payload: bytes(18 * 4) }, 9 * 4))).toBe(400);
     expect(refuse(body)).toBe(0);
   });
 
-  it("size the query routes' body limit as queriesPerCall × C × 4 plus the header (FR-079)", () => {
-    expect(queryBodyLimit(32, 25_000)).toBe(40 + 32 * 25_000 * 4);
+  it("size the query routes' body limit as queriesPerCall × the largest request plus the header (FR-079); SimplePIR's request is C × 4", () => {
+    expect(queryBodyLimit(32, 25_000 * 4)).toBe(40 + 32 * 25_000 * 4);
   });
 
-  it("refuse to encode an inconsistent call", () => {
-    expect(() => encodeQueryBody({ snapshotId: id, count: 2, values: words(5) }, 3)).toThrow();
-    expect(() => encodeQueryBody({ snapshotId: bytes(31), count: 1, values: words(3) }, 3)).toThrow();
-    expect(() => encodeQueryBody({ snapshotId: id, count: 0, values: words(0) }, 3)).toThrow();
+  it("refuse to encode an inconsistent call, or a request length below 1 byte", () => {
+    expect(() => encodeQueryBody({ snapshotId: id, count: 2, payload: bytes(5 * 4) }, 3 * 4)).toThrow();
+    expect(() => encodeQueryBody({ snapshotId: bytes(31), count: 1, payload: bytes(3 * 4) }, 3 * 4)).toThrow();
+    expect(() => encodeQueryBody({ snapshotId: id, count: 0, payload: bytes(0) }, 3 * 4)).toThrow();
+    expect(() => decodeQueryBody(encodeQueryBody({ snapshotId: id, count: 1, payload: bytes(4) }, 4), 0)).toThrow(/at least 1 byte/);
   });
 });
 
@@ -212,6 +217,7 @@ describe("manifest (FR-021, FR-022)", () => {
   const hex32 = () => toHex(bytes(32));
   const manifest = (): Manifest => ({
     formatVersion: FORMAT_VERSION,
+    scheme: "simplepir",
     network: "preprod",
     genesisHash: hex32(),
     height: 3_400_000,
@@ -224,12 +230,12 @@ describe("manifest (FR-021, FR-022)", () => {
     artifacts: {
       scan: { digest: hex32(), size: 36_000 },
       blockRoots: { digest: hex32(), size: 32, blocks: 1 },
-      readTable: { digest: hex32(), size: 32 + 88 * 1000 * 2, rows: 88, cols: 1000, perColumn: 1, cellsPerRecord: 88, recordBytes: 98, records: 1000, seed: hex32() },
-      readSetup: { digest: hex32(), size: 88 * 1024 * 4 },
-      pathTable: { digest: hex32(), size: 32 + 456 * 1000 * 2, rows: 456, cols: 1000, perColumn: 1, cellsPerRecord: 456, recordBytes: 512, records: 1000, seed: hex32() },
-      pathSetup: { digest: hex32(), size: 456 * 1024 * 4 },
-      nullifierTable: { digest: hex32(), size: 32 + 36 * 3 * 16 * 2, rows: 108, cols: 16, perColumn: 3, cellsPerRecord: 36, recordBytes: 40, records: 20, seed: hex32(), bucketBits: 4, capacity: 3 },
-      nullifierSetup: { digest: hex32(), size: 108 * 1024 * 4 },
+      readTable: { digest: hex32(), size: 32 + 88 * 1000 * 2, records: 1000, recordBytes: 98, groups: 1000, perGroup: 1, layout: { rows: 88, cols: 1000, cellsPerRecord: 88, seed: hex32() } },
+      readPublic: { digest: hex32(), size: 88 * 1024 * 4 },
+      pathTable: { digest: hex32(), size: 32 + 456 * 1000 * 2, records: 1000, recordBytes: 512, groups: 1000, perGroup: 1, layout: { rows: 456, cols: 1000, cellsPerRecord: 456, seed: hex32() } },
+      pathPublic: { digest: hex32(), size: 456 * 1024 * 4 },
+      nullifierTable: { digest: hex32(), size: 32 + 36 * 3 * 16 * 2, records: 20, recordBytes: 40, groups: 16, perGroup: 3, layout: { rows: 108, cols: 16, cellsPerRecord: 36, seed: hex32() }, bucketBits: 4, capacity: 3 },
+      nullifierPublic: { digest: hex32(), size: 108 * 1024 * 4 },
     },
   });
 
@@ -256,10 +262,30 @@ describe("manifest (FR-021, FR-022)", () => {
     // The path table (Q58): 32 × pathSplit bytes per record, and none at all when pathSplit is 0.
     expect(() => encodeManifest({ ...m, pathSplit: 8 })).toThrow(/pathTable.recordBytes/);
     expect(() => encodeManifest({ ...m, pathSplit: 0 })).toThrow(/no path table/);
-    const { pathTable: _t, pathSetup: _s, ...withoutPath } = m.artifacts;
+    const { pathTable: _t, pathPublic: _s, ...withoutPath } = m.artifacts;
     expect(() => encodeManifest({ ...m, pathSplit: 0, artifacts: withoutPath })).not.toThrow();
     expect(() => encodeManifest({ ...m, artifacts: withoutPath })).toThrow(/pathTable/);
     expect(() => encodeManifest({ ...m, formatVersion: FORMAT_VERSION + 1 })).toThrow(/formatVersion/);
+    // A format-2 manifest (before the scheme seam) is refused: a stored snapshot of it is ignored and rebuilt.
+    expect(FORMAT_VERSION).toBe(3);
+    expect(() => encodeManifest({ ...m, formatVersion: 2 })).toThrow(/formatVersion 2/);
+    // SimplePIR's layout checked against the files' sizes (00058 FR-003).
+    const r = m.artifacts.readTable;
+    expect(() => encodeManifest({ ...m, artifacts: { ...m.artifacts, readPublic: { ...m.artifacts.readPublic, size: 87 * 1024 * 4 } } })).toThrow(/readPublic.size/);
+    expect(() => encodeManifest({ ...m, artifacts: { ...m.artifacts, readTable: { ...r, layout: { ...r.layout, cols: 999 } } } })).toThrow(/layout.cols = groups/);
+    expect(() => encodeManifest({ ...m, artifacts: { ...m.artifacts, readTable: { ...r, layout: { ...r.layout, rows: 87 } } } })).toThrow(/layout.rows/);
+    expect(() => encodeManifest({ ...m, artifacts: { ...m.artifacts, readTable: { ...r, records: 1001 } } })).toThrow(/readTable.records/);
+  });
+
+  it("names its PIR scheme, part of the snapshot identifier; a scheme this build cannot read is refused with its name (00058 story 2)", () => {
+    const m = manifest();
+    expect(new TextDecoder().decode(encodeManifest(m))).toContain('"scheme":"simplepir"');
+    const other = { ...m, scheme: "ipir-sp" } as Manifest;
+    expect(() => encodeManifest(other)).toThrow(SchemeUnavailable);
+    expect(() => encodeManifest(other)).toThrow(/PIR scheme "ipir-sp" is not available in this build/);
+    expect(() => encodeManifest({ ...m, scheme: "nonesuch" } as unknown as Manifest)).toThrow(/PIR scheme "nonesuch"/);
+    const { scheme: _scheme, ...unnamed } = m;
+    expect(() => encodeManifest(unnamed as Manifest)).toThrow(/invalid manifest: scheme/);
   });
 
   it("names the routes under /pss/v1", () => {

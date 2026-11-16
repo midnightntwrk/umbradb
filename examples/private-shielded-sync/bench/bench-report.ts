@@ -7,7 +7,11 @@
  * `missingCells` lists them (the report prints the list; the tests require it empty).
  */
 
+import { isSchemeName, PUBLIC_ARTIFACT } from "../pir/scheme.ts";
 import { BUILD_STEP_NAMES, type BenchResults, type BuildStep, type CallRow, type SplitCall, type WalletRun } from "./bench-results.ts";
+
+/** What the snapshot's scheme calls the public artifact a wallet downloads per table (SimplePIR: setup data). */
+const publicLabel = (r: BenchResults): string => (isSchemeName(r.snapshot.scheme) ? PUBLIC_ARTIFACT[r.snapshot.scheme] : "public artifact");
 
 // ── formatting ───────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -140,10 +144,11 @@ export function section8(r: BenchResults): Section8Row[] {
   for (const w of r.wallets) {
     const d = w.downloads;
     const one = (name: string, x: typeof d.scan) => `${name} ${x.cached ? "cached" : `${fmtBytes(x.bytes)} in ${fmtMs(x.ms)}`}`;
+    const label = publicLabel(r);
     rows.push(
-      row("Download scan file, block roots, setup data", `client ${w.label}`, {
+      row(`Download scan file, block roots, ${label}`, `client ${w.label}`, {
         storage: value(`${fmtBytes(w.cacheBytes)} cache`),
-        inFlight: value([one("scan file", d.scan), one("block roots", d.blockRoots), one("read setup", d.readSetup), one("nullifier setup", d.nullifierSetup)].join("; ")),
+        inFlight: value([one("scan file", d.scan), one("block roots", d.blockRoots), one(`read ${label}`, d.readPublic), one(`nullifier ${label}`, d.nullifierPublic)].join("; ")),
       }),
     );
   }
@@ -255,7 +260,9 @@ export function renderReport(r: BenchResults): string {
         ["Server memory", r.server.memory],
         ["Server log", r.server.log],
         ["Load average (1, 5, 15 min)", `start ${r.loadAverage.start.join(" / ")}; end ${r.loadAverage.end.join(" / ")}`],
-        ["SimplePIR", `q = 2^${s.pir.logQ}, n = ${s.pir.n}, σ = ${s.pir.sigma}, ${s.pir.cellBits} bits per cell (p = ${s.pir.plainModulus})`],
+        s.scheme === "simplepir"
+          ? ["SimplePIR", `q = 2^${s.pir.logQ}, n = ${s.pir.n}, σ = ${s.pir.sigma}, ${s.pir.cellBits} bits per cell (p = ${s.pir.plainModulus})`]
+          : [`PIR scheme ${s.scheme}`, Object.entries(s.pir).map(([k, v]) => `${k} ${v}`).join(", ")],
         ["Artifacts", Object.entries(s.artifacts).map(([n, b]) => `${n} ${fmtBytes(b)}`).join(", ")],
       ],
     ),
@@ -321,8 +328,8 @@ export function renderReport(r: BenchResults): string {
           p.path === null ? "—" : `${p.path.recordBytes} B`,
           p.path === null ? "none (k = 0)" : `${group(p.path.rows)} × ${group(p.path.cols)} (${p.path.perColumn})`,
           `${fmtBytes(p.sizes.blockRoots)} (${group(p.blocks)})`,
-          `${fmtBytes(p.sizes.readTable)} / ${fmtBytes(p.sizes.readSetup)}`,
-          p.path === null ? "—" : `${fmtBytes(p.path.tableBytes)} / ${fmtBytes(p.path.setupBytes)}`,
+          `${fmtBytes(p.sizes.readTable)} / ${fmtBytes(p.sizes.readPublic)}`,
+          p.path === null ? "—" : `${fmtBytes(p.path.tableBytes)} / ${fmtBytes(p.path.publicBytes)}`,
           `${fmtMs(p.steps.tree!.ms)}, ${fmtRate(p.steps.tree!.hashesPerSecond, 0)} hashes/s`,
           (["readTable", "readSetup", "pathTable", "pathSetup"] as const).filter((n) => p.steps[n] !== null).map((n) => `${n} ${fmtMs(p.steps[n]!.ms)}`).join(", "),
           fmtBytes(Math.max(...(["tree", "readTable", "readSetup", "pathTable", "pathSetup"] as const).map((n) => p.steps[n]?.peakRssBytes ?? 0))),

@@ -16,21 +16,18 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { LedgerEvent } from "../../../src/ledger/types.js";
 import { compileKernel, Kernel } from "../kernel/index.ts";
 import {
-  answerQueries,
   bucketOf,
-  buildQueries,
-  columnRecords,
-  decodeAnswers,
   findInBucket,
-  type Grid,
   inlineMultiplier,
   MAX_COLUMNS,
+  openWalletScheme,
   positionalShape,
   positionOf,
   readRecord,
-  setupMatrix,
   widestShape,
 } from "../pir/index.ts";
+import { openServerScheme } from "../pir/server-schemes.ts";
+import { gridOfTransfer } from "../pir/simplepir-server.ts";
 import { fromHex, type Manifest, positionAtSlot, READ_RECORD_BYTES, slotCount, slotOf } from "../shared/index.ts";
 import { type BuildJob, type BuildResult, buildSnapshot, paddedBuildBytes } from "../server/build.ts";
 import { rootFromStored } from "../server/tree.ts";
@@ -70,6 +67,7 @@ function jobAt(c: ScenarioChain, index: ZswapIndex, height: number, padding?: nu
     expectedRoot: rootFromStored(h.trees.zswapRoot),
     pathSplit: 2,
     queriesPerCall: 4,
+    scheme: "simplepir",
     threads: 1,
     dataDir,
     slice: index.slice(index.outputsAt(height), index.nullifiersAt(height)),
@@ -78,7 +76,6 @@ function jobAt(c: ScenarioChain, index: ZswapIndex, height: number, padding?: nu
 }
 
 const build = (job: BuildJob): Promise<BuildResult> => buildSnapshot(job, { kernel, multiplier: inlineMultiplier });
-const gridOf = (t: NonNullable<BuildResult["pathGrid"]>): Grid => ({ ...t, cells: new Int16Array(t.cells) });
 const file = (r: BuildResult, name: keyof Manifest["artifacts"]): Uint8Array => new Uint8Array(readFileSync(join(r.dir, r.manifest.artifacts[name]!.digest)));
 
 beforeAll(async () => {
@@ -140,8 +137,8 @@ describe("the tables' shapes", () => {
   });
 
   it("estimates a 10M build under 24 GiB and a 20M build over it", () => {
-    expect(paddedBuildBytes(10_000_000, 16)).toBeLessThan(24 * 2 ** 30);
-    expect(paddedBuildBytes(20_000_000, 16)).toBeGreaterThan(24 * 2 ** 30);
+    expect(paddedBuildBytes(10_000_000, 16, "simplepir")).toBeLessThan(24 * 2 ** 30);
+    expect(paddedBuildBytes(20_000_000, 16, "simplepir")).toBeGreaterThan(24 * 2 ** 30);
   });
 });
 
@@ -181,40 +178,47 @@ describe("a padded build of the test chain", () => {
     }
     expect(copies).toBeGreaterThan(n / 2);
 
-    // Read table: every real record, read back by PIR, equals the unpadded table's.
-    const plainRead = gridOf(plain.readGrid);
-    const read = gridOf(padded.readGrid);
+    // Read table: every real record, read back by PIR through the scheme, equals the unpadded table's.
+    const plainRead = gridOfTransfer(plain.tables.read);
+    const read = gridOfTransfer(padded.tables.read);
     const ref = m.artifacts.readTable;
-    const setup = setupMatrix(file(padded, "readSetup"), ref.rows);
-    const info = { ...ref, seed: fromHex(ref.seed, 32) };
-    for (let i = 0; i < m.firstFree; i++) {
-      const at = positionOf(slotOf(m, i), ref.perColumn);
-      const want = readRecord(plainRead, positionOf(i, plain.manifest.artifacts.readTable.perColumn).column, positionOf(i, plain.manifest.artifacts.readTable.perColumn).slot);
-      expect(hex(readRecord(read, at.column, at.slot))).toBe(hex(want));
-      const batch = await buildQueries(info, [at.column, (at.column + 1) % ref.cols], inlineMultiplier);
-      const answers = await answerQueries(read, batch.queries, 2, inlineMultiplier);
-      const [values] = await decodeAnswers(setup, batch, answers, inlineMultiplier);
-      expect(hex(columnRecords(ref, values!)[at.slot]!)).toBe(hex(want));
+    const plainRef = plain.manifest.artifacts.readTable;
+    const server = await openServerScheme(m.scheme, { threads: 1, multiplier: inlineMultiplier });
+    const wallet = await openWalletScheme(m, { multiplier: inlineMultiplier });
+    try {
+      const table = await server.adoptTable(ref, padded.tables.read);
+      const client = await wallet.openTable(ref, file(padded, "readPublic"));
+      for (let i = 0; i < m.firstFree; i++) {
+        const at = positionOf(slotOf(m, i), ref.perGroup);
+        const want = readRecord(plainRead, positionOf(i, plainRef.perGroup).column, positionOf(i, plainRef.perGroup).slot);
+        expect(hex(readRecord(read, at.column, at.slot))).toBe(hex(want));
+        const call = await client.prepareCall([at.column, (at.column + 1) % ref.groups]);
+        const [records] = await call.decode(await table.answer(call.requests, 2), 1);
+        expect(hex(records![at.slot]!)).toBe(hex(want));
+      }
+    } finally {
+      wallet.dispose();
+      await server.close();
     }
 
     // Path table: every real output's path record equals the unpadded table's.
-    const plainPath = gridOf(plain.pathGrid!);
-    const pathGrid = gridOf(padded.pathGrid!);
+    const plainPath = gridOfTransfer(plain.tables.path!);
+    const pathGrid = gridOfTransfer(padded.tables.path!);
     const pt = m.artifacts.pathTable!;
     const plainPt = plain.manifest.artifacts.pathTable!;
     for (let i = 0; i < m.firstFree; i++) {
-      const at = positionOf(slotOf(m, i), pt.perColumn);
-      const was = positionOf(i, plainPt.perColumn);
+      const at = positionOf(slotOf(m, i), pt.perGroup);
+      const was = positionOf(i, plainPt.perGroup);
       expect(hex(readRecord(pathGrid, at.column, at.slot)), `path ${i}`).toBe(hex(readRecord(plainPath, was.column, was.slot)));
     }
 
     // Nullifier table: each spent nullifier in its bucket, with its height and transaction.
-    const nullifiers = gridOf(padded.nullifierGrid);
+    const nullifiers = gridOfTransfer(padded.tables.nullifier);
     const nt = m.artifacts.nullifierTable;
     for (const spend of chain.spends) {
       const v = fromHex(spend.nullifier, 32);
       const column = bucketOf(v, nt.bucketBits);
-      const records = Array.from({ length: nt.perColumn }, (_, slot) => readRecord(nullifiers, column, slot));
+      const records = Array.from({ length: nt.perGroup }, (_, slot) => readRecord(nullifiers, column, slot));
       const found = findInBucket(records, v);
       expect(found?.height).toBe(spend.height);
     }
