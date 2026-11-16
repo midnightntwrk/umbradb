@@ -3,7 +3,7 @@
 The ownership test (the scan) and the PIR multiply on a GPU through WebGPU, with the same inputs, outputs and refusals
 as the CPU kernels (spec story 7). WebGPU exists in Deno and in browsers, not in Node, so the server module and the
 client's command line keep the CPU kernels; code running where WebGPU exists passes a device and gets the same
-interfaces.
+interfaces. IPIR+SP's server answer runs here too, byte for byte as the native add-on's ([IPIR+SP](#ipirsp)).
 
 ## Example
 
@@ -125,6 +125,114 @@ column-major on the GPU, so one invocation reads its 8 vectors' values for a col
 than the device's binding limit (at most 1 GiB) are split into row chunks. A matrix is copied to the GPU on every call
 unless pinned.
 
+## IPIR+SP
+
+IPIR+SP's server answer (spec 00058, story 6) on the GPU: `GpuIpirTable.respond(requests, count)` ([ipir.ts](ipir.ts))
+returns the same bytes as the native add-on's `IpirServerTable.respond` (`../ipir/native.ts`) for the same table and
+requests.
+
+```ts
+// Node, once per table: upstream's preparation repeated by the add-on, public values only.
+import { ipirGpuReference } from "../ipir/native.ts";
+const ref = await ipirGpuReference({ cellsPath, rows, cols, seed, snapshot }, new Uint8Array(0), 0);
+// `ref.setupId` and `ref.blocks[k].matrix` (and the table's cells) go to where WebGPU is: Deno or a page.
+
+// Deno or a browser:
+import { GpuIpirTable } from "./ipir.ts";
+const table = await GpuIpirTable.create(device, { rows, cols, cells, setupId, matrices });
+const answers = await table.respond(requests, count); // = IpirServerTable.respond(requests, count)
+const hints = await table.hints(queryMasks); // preparation's hint columns, as upstream computes them
+table.release();
+```
+
+**What runs on the GPU.** A table is set up once: its 16-bit cells (column-major, as the add-on takes them) are copied
+and laid out row-major, and each output block's compiled packing matrix (2,048 × 4,096 signed 32-bit entries, 32 MiB
+per 2,048 columns) is copied and laid out column-major; both stay resident. A call then runs, on the GPU: unpacking of
+the requests' 49-bit selection words and 54-bit key words; the first pass of every request of the call in one scan of
+the table (`Σ_r cell · (x << 5) mod 2^54` per column; the CPU answers a call's requests one after another, each with
+its own scan); the packing product of every block (`H · K_g mod 2^54`); the sums rounded to 22 bits and packed. The host
+checks each request's magic and setup id and writes the 68-byte heads (SHA-256 of each request, WebCrypto).
+`firstPass` and `packingProduct` return the two steps alone, unrounded. `hints` computes preparation's hint columns
+with the first pass's kernel, against the 2,048 public query-mask columns.
+
+**Not on the GPU.** The rest of preparation (aggregation by an integer ring FFT, floor division by 2,048, digit
+decomposition, the two trace chains of 1,023 dependent steps each, matrix compilation): it runs once per table and
+snapshot, takes about 0.34–0.43 s per 2,048 columns on the CPU, and needs integers up to 2^65 and a long sequential
+chain. The wallet's math: its Gaussian draws must come from the platform's random source, its ring products (about 6
+of 20 ms of a request at 32,768 rows, natively) would put the secret in GPU memory, and decoding takes under 0.2 ms.
+
+**Limb layout.** WGSL has 32-bit integers only. A 54-bit word is four 16-bit limbs in a `vec4<u32>`; a cell times a
+limb fits 32 bits. A sum keeps four 32-bit accumulators of weights 2^0, 2^16, 2^32 and 2^48: the two low ones receive
+only 16-bit pieces of each product (exact over up to 16,384 rows), the two high ones may wrap (their weights make the
+wrap vanish modulo 2^54). A signed matrix entry h is `hs · 2^16 + h0` (h0 unsigned 16-bit, hs signed), so both its
+products with a limb are exact in 32 bits. The sums of segments of rows (and of key words) are added modulo 2^54 at the
+end. One invocation of the first pass reads 8 adjacent columns of its rows (one `vec4<u32>` per row) for up to 2
+requests; the packing, 4 adjacent matrix rows for up to 2 requests; buffers bound to one dispatch stay below 1 GiB.
+These shapes were the fastest measured here (more than 16 `vec4` accumulators per invocation spill registers and run
+3–15 times slower); all are options of `create`.
+
+**The check.** From the repository's root, with the add-on built (`examples/private-shielded-sync/ipir/build.sh native`):
+
+```sh
+deno task --config examples/private-shielded-sync/gpu/deno.json ipir-check --work <folder>          # about 3 minutes here
+deno task --config examples/private-shielded-sync/gpu/deno.json ipir-check --quick                  # 2,048 × 2,048 only
+```
+
+For tables of 2,048 × 2,048, 4,096 × 12,288 and 32,768 × 12,288 (random 16-bit cells, and every cell 0xFFFF), the CPU
+side under Node ([ipir-cpu-reference.ts](ipir-cpu-reference.ts)) builds the table with the add-on, makes 32 requests
+with the wallet's WebAssembly, answers calls of 1 and 32 with `IpirServerTable.respond`, decodes the answers against
+the table, and exports the compiled matrices, hint columns and upstream's unrounded first pass and packing product
+(`ipirGpuReference`). The GPU side compares byte for byte: the first pass and the packing product of the 32 requests,
+the answers to the calls of 1 and 32, and (random tables) the hint columns; for one table also a table split into
+small chunks and negative controls (one changed selection word, key word or cell changes exactly the values it should;
+a request of another setup is refused). Options: `--runs N`, `--out FILE`, `--keep`, `--only ID`. The cell files of
+the largest table take 805 MB in the work folder while it runs.
+
+**Results.** [results/ipir-check-2026-11-16.json](results/ipir-check-2026-11-16.json): Apple M4 Max, Deno 2.7.5, Node
+24.9.0. All 59 checks passed: every first pass, packing product, answer and hint column equal to the CPU's. Medians of
+9 timed runs, random tables; "exec" is the GPU's own execution time (timestamp queries), "wall" runs from the call to
+the result in host memory and includes Deno's floor of about 12 ms per read-back:
+
+| Table | Requests | GPU first pass, exec | GPU packing, exec | GPU answer, wall (exec) | 16 calls at once, per call | CPU `respond` (first pass, packing) |
+|---|---|---|---|---|---|---|
+| 2,048 × 2,048 | 1 | 0.35 ms | 0.37 ms | 14.6 ms (0.97 ms) | 4.0 ms | 1.05 ms (0.38, 0.33) |
+| 2,048 × 2,048 | 32 | 1.56 ms | 5.06 ms | 20.8 ms (4.3 ms) | 8.4 ms | 36.3 ms (12.1, 11.8) |
+| 4,096 × 12,288 | 1 | 0.24 ms | 1.10 ms | 15.0 ms (0.80 ms) | 5.2 ms | 3.75 ms (1.82, 1.52) |
+| 4,096 × 12,288 | 32 | 3.78 ms | 6.47 ms | 29.0 ms (10.4 ms) | 20.2 ms | 150 ms (77.5, 74.6) |
+| 32,768 × 12,288 | 1 | 4.36 ms | 1.05 ms | 17.2 ms (2.58 ms) | 10.0 ms | 26.7 ms (17.0, 3.5) |
+| 32,768 × 12,288 | 32 | 39.7 ms | 8.59 ms | 58.4 ms (37.3 ms) | 83.4 ms | 796 ms (560, 103) |
+
+| Table | Upload (cells and matrices) | GPU memory: resident + one call of 1 / of 32 | Hint columns: GPU / CPU (add-on build) |
+|---|---|---|---|
+| 2,048 × 2,048 | 21 ms | 40 MiB + 0.5 / 12.6 MiB | 183 ms / 32 ms |
+| 4,096 × 12,288 | 70–113 ms | 288 MiB + 3.2 / 25.7 MiB | 572 ms / 364 ms |
+| 32,768 × 12,288 | 158–163 ms | 960 MiB + 8.3 / 81.0 MiB | 2.92 s / 3.08 s |
+
+- The CPU is the add-on on this machine (upstream's code; on arm64 it takes its scalar paths, no NEON), with rayon over
+  16 cores, answering a call's requests one after another; first pass and packing are upstream's own timers. The
+  machine was shared with another lane's benchmarks (load average 17–33 during the run), which slows the CPU's figures
+  most: earlier, less loaded runs measured 9–11 ms (phase 1) and 43 ms per answer at 32,768 × 12,288, and 515 ms for 32.
+- The GPU computes each hint column directly (rows × 2,048 products), the CPU by NTT products: the GPU is slower at
+  2,048 rows and about even at 32,768.
+- The all-0xFFFF tables gave the same GPU times within noise (in the results file).
+
+**In a browser.** [results/ipir-browser-2026-11-16.json](results/ipir-browser-2026-11-16.json): the same `GpuIpirTable`
+in the desktop app's Chromium 156 ([ipir-browser.ts](ipir-browser.ts) bundles and serves
+[ipir-browser-page.ts](ipir-browser-page.ts); `node examples/private-shielded-sync/gpu/ipir-browser.ts --out FILE`,
+then open the printed address), on synthetic tables (random cells and matrices, requests of random words), with
+sampled first-pass and packing values checked against `BigInt` sums (all equal). Medians of 9:
+
+| Table | Answer of 1, wall | Answer of 32, wall (exec) | First pass of 32, exec |
+|---|---|---|---|
+| 2,048 × 2,048 | 5.8 ms | 11.4 ms (6.8 ms) | 1.57 ms |
+| 4,096 × 12,288 | 2.3 ms | 15.9 ms (10.4 ms) | 4.39 ms |
+| 32,768 × 12,288 | 5.9 ms | 66.9 ms (48.2 ms) | 33.2 ms |
+
+The scan check of spec 00053 found Chromium's WebGPU running the scan shader about seven times faster than Deno's. For
+these kernels the GPU's execution times in the two are close (first pass of 32 requests at 32,768 × 12,288: 33 ms in
+Chromium, 37–40 ms in Deno); what differs is the floor per read-back, about 12 ms in Deno and 1–2 ms in Chromium, so a
+single answer takes 2–6 ms in the page and 15–17 ms in Deno. Chromium's timestamps are quantized to 65.5 µs.
+
 ## Files
 
 | File | What it holds |
@@ -134,18 +242,24 @@ unless pinned.
 | [scan-wgsl.ts](scan-wgsl.ts), [scan.ts](scan.ts), [scanner.ts](scanner.ts) | The ownership test: shader, `GpuScanner`, the `Scanner` interface |
 | [multiply-wgsl.ts](multiply-wgsl.ts), [multiply.ts](multiply.ts) | The PIR multiply: shaders, `GpuMultiplier` |
 | [check.ts](check.ts), [inputs.ts](inputs.ts), [jobs.ts](jobs.ts), [cpu-reference.ts](cpu-reference.ts) | The check (Deno), its inputs, the files it exchanges with the CPU side, the CPU side (Node) |
-| [deno.json](deno.json), [node-globals.d.ts](node-globals.d.ts) | Deno's configuration: the `check` and `typecheck` tasks |
-| `results/` | Results of the check |
+| [ipir-wgsl.ts](ipir-wgsl.ts), [ipir.ts](ipir.ts), [ipir-wire.ts](ipir-wire.ts) | IPIR+SP: shaders, `GpuIpirTable`, request and answer bytes and the `BigInt` reference |
+| [ipir-check.ts](ipir-check.ts), [ipir-jobs.ts](ipir-jobs.ts), [ipir-cpu-reference.ts](ipir-cpu-reference.ts) | IPIR+SP's check (Deno), the files it exchanges with the CPU side, the CPU side (Node, the add-on and the wallet's WebAssembly) |
+| [ipir-browser.ts](ipir-browser.ts), [ipir-browser-page.ts](ipir-browser-page.ts) | IPIR+SP's kernels in a browser: the serving script (Node, esbuild) and the page |
+| [deno.json](deno.json), [node-globals.d.ts](node-globals.d.ts) | Deno's configuration: the `check`, `ipir-check` and `typecheck` tasks |
+| `results/` | Results of the checks |
 
-The GPU modules (`device`, `field`, `scan*`, `multiply*`) import no Node module at run time, so they also run in a
-browser once bundled; that runtime was not exercised here.
+The GPU modules (`device`, `field`, `scan*`, `multiply*`, `ipir`, `ipir-wgsl`, `ipir-wire`) import no Node module at
+run time, so they also run in a browser once bundled; IPIR+SP's were run in Chromium ([IPIR+SP](#ipirsp)), the others
+were not.
 
 ## Type checking
 
 This folder is left out of `npm run typecheck` (the example's `tsconfig.json` excludes `gpu/**`): Node's TypeScript
 setup has no WebGPU types. `deno task --config examples/private-shielded-sync/gpu/deno.json typecheck` checks it with
-Deno's (`strict`, `noUncheckedIndexedAccess`); `check` runs it first. `node-globals.d.ts` declares Node's `Buffer`,
-which `pir/matrix.ts` uses.
+Deno's (`strict`, `noUncheckedIndexedAccess`); `check` and `ipir-check` run it first. `node-globals.d.ts` declares
+Node's `Buffer`, which `pir/matrix.ts` uses. `ipir-wire.ts` has no WebGPU types and is also checked by the example's
+`tsc` (the test `test/ipir-gpu-reference.test.ts` imports it); `ipir-browser.ts` runs under Node and is checked by
+neither.
 
 ## Deno's WebGPU on Apple silicon
 

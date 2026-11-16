@@ -11,7 +11,7 @@ description = "IPIR+SP for the private shielded sync example: the profile, the s
 default = ["server"]
 # The server table (build, masks, answers, the decoding check). Off for the wallet's WebAssembly, which links only
 # the client crate.
-server = ["dep:ipir-sp", "dep:bytemuck"]
+server = ["dep:ipir-sp", "dep:bytemuck", "dep:reinspiring", "dep:rayon"]
 
 [dependencies]
 ipir-native-client = { path = "../vendor/ipir-sp/ipir-native-client" }
@@ -19,6 +19,9 @@ rand_chacha = "0.3.1"
 sha2 = "0.10"
 ipir-sp = { path = "../vendor/ipir-sp/ipir-sp", features = ["native-reinspiring"], optional = true }
 bytemuck = { version = "1", optional = true }
+# For `gpu_reference` (src/gpu.rs): upstream's preparation steps and kernels, called directly.
+reinspiring = { path = "../vendor/ipir-sp/reinspiring", optional = true }
+rayon = { version = "1", optional = true }
 
 [dev-dependencies]
 # For the noise report (`examples/noise_report.rs`), as upstream's `native_noise` example uses them.
