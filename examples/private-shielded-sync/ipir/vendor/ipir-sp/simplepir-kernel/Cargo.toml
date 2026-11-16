@@ -1,0 +1,35 @@
+[package]
+name = "simplepir-kernel"
+version = "0.1.0-rc.4"
+edition = "2021"
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+description = "Backend-agnostic SimplePIR first-dimension kernels."
+repository = "https://github.com/valargroup/ipir-sp"
+
+[dependencies]
+inspiring = { path = "../inspiring", version = "=0.1.0-rc.3" }
+rayon = "1.10"
+spiral-rs = { workspace = true }
+
+[features]
+default = []
+cuda = ["dep:cudarc"]
+
+[dependencies.cudarc]
+version = "=0.17.3"
+optional = true
+default-features = false
+features = ["std", "driver", "nvrtc", "dynamic-loading", "cuda-12000"]
+
+[dev-dependencies]
+criterion = "0.5"
+rand_chacha = "0.3.1"
+
+[[bench]]
+name = "first_dim"
+harness = false
+
+[[example]]
+name = "cuda_bench"
+required-features = ["cuda"]

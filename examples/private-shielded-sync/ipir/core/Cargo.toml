@@ -1,0 +1,21 @@
+[package]
+name = "pss-ipir-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+license = "Apache-2.0"
+publish = false
+description = "IPIR+SP for the private shielded sync example: the profile, the server table and the wallet's client, over the vendored upstream crates."
+
+[features]
+default = ["server"]
+# The server table (build, masks, answers, the decoding check). Off for the wallet's WebAssembly, which links only
+# the client crate.
+server = ["dep:ipir-sp", "dep:bytemuck"]
+
+[dependencies]
+ipir-native-client = { path = "../vendor/ipir-sp/ipir-native-client" }
+rand_chacha = "0.3.1"
+sha2 = "0.10"
+ipir-sp = { path = "../vendor/ipir-sp/ipir-sp", features = ["native-reinspiring"], optional = true }
+bytemuck = { version = "1", optional = true }

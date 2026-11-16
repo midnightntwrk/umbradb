@@ -1,0 +1,6 @@
+# The toolchain the add-on and the committed `pss-ipir.wasm` are built with (upstream pins 1.89; its crates build
+# and pass on 1.92 here).
+[toolchain]
+channel = "1.92.0"
+components = ["rustfmt", "clippy"]
+targets = ["wasm32-unknown-unknown"]

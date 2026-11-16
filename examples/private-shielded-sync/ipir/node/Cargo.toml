@@ -1,0 +1,20 @@
+[package]
+name = "pss-ipir-node"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+license = "Apache-2.0"
+publish = false
+description = "Native add-on for Node (N-API): builds IPIR+SP server tables and answers requests off the main thread."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pss-ipir-core = { path = "../core" }
+# N-API bindings. `build.sh native` copies the built library to `../pss-ipir.node`; no npm tooling is involved.
+napi = "=3.16.1"
+napi-derive = "=3.7.0"
+
+[build-dependencies]
+napi-build = "=2.6.0"
