@@ -572,15 +572,20 @@ the run's log names the cells still without a value. `bench.ts help` lists every
 
 In order, it:
 
-1. with `--build`, asks the server for a snapshot at its latest height (the admin route) and waits until it is served;
-2. reads the manifest, and the snapshot's `build-stats.json` from the module's data directory (`--pss-data`);
+1. with `--build`, asks the server for a snapshot at its latest height (or `--build-height`; with `--scheme` and
+   `--padding` for that one build) through the admin route and waits until it is served, sampling the server's memory
+   before, during and after;
+2. reads the manifest, and the snapshot's `build-stats.json` from the module's data directory (`--pss-data`); with
+   `--admin-secret-file`, the bytes each served table says it holds (the module's status);
 3. syncs each wallet with the client's own `sync()` as a fresh client (an empty cache, its own scan and PIR threads),
    one after the other, timing each step and sampling the peak memory of its own process and of the server meanwhile;
+   then reads its lower paths from the path table as `send` does (one call; `--skip-path-read` leaves it out);
 4. scans the snapshot's scan file at each `--scan-threads` count;
 5. with `--db-url`: the database's size; the snapshot's stored events read with the module's own query; for each
    `--path-splits` k, the module's own builder run in-process on them (a temporary directory; the build checks the
    core's root, and at the served k it reproduces the served snapshot's identifier) and one read call of
-   `queriesPerCall` vectors with client and server in the benchmark's process;
+   `queriesPerCall` requests with client and server in the benchmark's process, every record checked against the table
+   file;
 6. reads the server's request lines (`--server-container`: `docker logs`; or `--server-log <file>`) and pairs each with
    the client's request; computes the sync's speed from `--sync-records` and reads the transfer from `--transfer`.
 
@@ -588,9 +593,9 @@ In order, it:
 |---|---|
 | Chain sync | `--db-url` (size per schema), `--sync-records` (`status.jsonl`: heights per second while syncing, restarts left out) |
 | Read events for a snapshot | The module's query for every Zswap row up to the snapshot height, run by the benchmark (`--db-url`) |
-| Build scan file, tree and paths, read and nullifier tables and setup data | The snapshot's `build-stats.json` (`--pss-data`); without it, the benchmark's own build at the served k |
+| Build scan file, tree and paths, the tables and their public artifacts (setup data or masks) | The snapshot's `build-stats.json` (`--pss-data`); without it, the benchmark's own build at the served k |
 | Download, scan, read coins, nullifier lookups, tail, whole `sync` (client) | Each wallet's sync, step by step (`client/sync.ts`'s `onStep`) |
-| Read coins, nullifier lookups (server) | The module's request line for the call (decode, multiply, encode: `--server-container` or `--server-log`); its memory from `docker stats` (`--server-container`) or `ps` (`--server-pid`) |
+| Read coins, nullifier lookups, lower paths (server) | The module's request line for the call (decode, answer, encode: `--server-container` or `--server-log`); its memory from `docker stats` (`--server-container`) or `ps` (`--server-pid`) |
 | Transfer | The record `send` wrote (`--transfer`); "not run" without it |
 
 The client's memory is the benchmark process's (each wallet runs in it, one after the other; `node --expose-gc` lets it
@@ -599,6 +604,13 @@ that gets the nearest samples. The results hold wallet labels and counts only: n
 
 `bench.ts report <results.json> [--transfer <record>] [--out <dir>]` renders `REPORT.md` again, adding a transfer
 record: the head report can be produced before the transfer and completed after it.
+
+**Both schemes (spec 00058).** `--scheme simplepir|ipir-sp` names the scheme `--build` asks for (without `--build`, the
+one the served snapshot must use); an IPIR+SP snapshot needs the add-on on the server's side and the committed
+`ipir/pss-ipir.wasm` on the wallet's. `bench.ts compare <results.json>… --out <dir>` reads several runs, groups them by
+snapshot size and scheme, and writes `compare.json` and `TABLES.md`: per size, both schemes side by side (median,
+smallest and largest, number of samples), rows grouped as memory, space, network and time, each marked measured (the
+field of `results.json`) or calculated (the formula), and the checks SC-002 and SC-003 of spec 00058.
 
 **The Preprod report.** With the sync at the node's finalized head and the transfer of step 5 done:
 
@@ -619,6 +631,8 @@ It writes `bench/results/<date>-preprod/`; the log's last line must say that eve
 ### Micro-benchmarks (`bench/micro.ts`)
 
 `bench/micro.ts` measures the scan (per entry, per thread count) and, for 10,000, 100,000 and 1,000,000 records of 704
-and 40 bytes, building the grid and its digest, the setup data, the server's answer to 1 and 32 vectors, and the
-client's query build and decode (one thread and worker threads). It checks every decoded record and writes JSON to
-`bench/results/micro-<date>.json`.
+and 40 bytes (`--records`, `--sizes`), building the grid and its digest, the setup data, the server's answer to 1 and 32
+vectors, and the client's query build and decode (one thread and worker threads). With `ipir-sp` in `--schemes` (the
+default runs both; it needs the add-on) it measures the same for IPIR+SP: the cells in the rule's shape, the add-on's
+table build and masks, the answer to 1 and 32 requests, and the wallet's WebAssembly opening the table, making 1 and 32
+requests and decoding them. It checks every decoded record and writes JSON to `bench/results/micro-<date>.json`.

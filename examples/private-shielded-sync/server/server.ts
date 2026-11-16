@@ -850,6 +850,13 @@ export class PssServer {
               firstFree: this.#current.manifest.firstFree,
               scheme: this.#current.manifest.scheme,
               padding: this.#current.manifest.padding?.size ?? null,
+              // What each served table says it holds in memory (SimplePIR: the grid's cells; IPIR+SP: the add-on's
+              // cells and compiled packing), for the benchmark (00058 FR-050).
+              heldBytes: {
+                read: this.#current.tables.read.heldBytes,
+                path: this.#current.tables.path?.heldBytes ?? null,
+                nullifier: this.#current.tables.nullifier.heldBytes,
+              },
             },
       previous: this.#previous === null ? null : { id: this.#previous.id },
       tail: this.#tail === null ? null : { next: this.#tail.tree.next, error: this.#tail.error },

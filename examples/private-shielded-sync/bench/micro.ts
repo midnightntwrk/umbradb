@@ -1,8 +1,9 @@
 /**
- * Micro-benchmarks of the PIR library and the scan kernel (plan task C8). Writes one JSON file.
+ * Micro-benchmarks of the PIR schemes and the scan kernel (plan task C8; spec 00058 task 5.1). Writes one JSON file.
  *
  *   node examples/private-shielded-sync/bench/micro.ts [--out <file>] [--records 10000,100000,1000000]
- *        [--sizes 704,40] [--threads <server threads>] [--scan-threads 1,2,4,8,15] [--quick]
+ *        [--sizes 704,40] [--schemes simplepir,ipir-sp] [--threads <server threads>] [--scan-threads 1,2,4,8,15]
+ *        [--runs 3] [--quick]
  *
  * - Scan: the 16,384 test-vector entries per thread count; µs per entry (wall time × threads / entries) and effective
  *   µs per entry (wall time / entries).
@@ -12,8 +13,16 @@
  *   direct read. Times are the best of a few runs; setup is run once. The multiply workers are warmed first (their
  *   first call pays the JIT's compilation, recorded as `workerWarmUpMs`).
  *
- * Records are generated from their index (not stored), so a table of a million 704-byte records needs only its grid
- * (2 bytes per cell) in memory.
+ * - IPIR+SP (`--schemes` includes `ipir-sp`; needs the add-on, `ipir/build.sh native`), for the same record counts and
+ *   sizes, in the table shape the scheme's rule picks: the cells written column-major, their digest, the add-on's table
+ *   build from the cells (its own report: hints, packing, the decoding check, bytes held) and the masks; the server's
+ *   answer to 1 and to 32 requests (the add-on, off the main thread); the wallet's WebAssembly (one thread, as in a
+ *   wallet): opening the table from its masks, making 1 and 32 requests (each with a fresh secret), decoding their
+ *   answers. Every decoded record is checked against the generated one.
+ *
+ * Times are the best of `--runs` (default 3; 2 at a million records); a table's setup or build is run once. Records
+ * are generated from their index (not stored), so a table of a million 704-byte records needs only its cells (2 bytes
+ * per cell) in memory; IPIR+SP holds them once more in the add-on.
  */
 
 import { createHash } from "node:crypto";
@@ -39,12 +48,19 @@ import {
   WorkerMultiplier,
 } from "../pir/index.ts";
 import { CALL_HEADER_BYTES } from "../shared/index.ts";
+import { buildIpirTable } from "../ipir/native.ts";
+import { IpirWallet, type IpirRequestState } from "../ipir/wallet.ts";
+import { compileIpirWasm } from "../ipir/wallet-node.ts";
+import { ipirRowRecords, putIpirRecord } from "../pir/ipir/encode.ts";
+import { positionalIpirShape } from "../pir/ipir/shape.ts";
 
 const { values: args } = parseArgs({
   options: {
     out: { type: "string" },
     records: { type: "string", default: "10000,100000,1000000" },
     sizes: { type: "string", default: "704,40" },
+    schemes: { type: "string", default: "simplepir,ipir-sp" },
+    runs: { type: "string" },
     threads: { type: "string" },
     "scan-threads": { type: "string" },
     quick: { type: "boolean", default: false },
@@ -56,6 +72,9 @@ const serverThreads = Number(args.threads ?? Math.max(1, availableParallelism() 
 const recordCounts = args.quick ? [10_000] : list(args.records!);
 const recordSizes = list(args.sizes!);
 const scanThreads = args["scan-threads"] ? list(args["scan-threads"]) : [1, 2, 4, 8, serverThreads].filter((t, i, a) => a.indexOf(t) === i);
+const schemes = args.schemes!.split(",").map((x) => x.trim()).filter((x) => x !== "");
+for (const scheme of schemes) if (scheme !== "simplepir" && scheme !== "ipir-sp") throw new Error(`unknown scheme ${scheme}: simplepir, ipir-sp`);
+const runsOf = (count: number): number => (args.runs === undefined ? (count >= 1_000_000 ? 2 : 3) : Number(args.runs));
 const today = new Date().toISOString().slice(0, 10);
 const out = args.out ?? new URL(`./results/micro-${today}.json`, import.meta.url).pathname;
 
@@ -138,7 +157,7 @@ async function benchPir(count: number, size: number, workers: Multiplier) {
   // Columns to read: spread over the table.
   const indices = Array.from({ length: 32 }, (_, k) => Math.floor(((k + 0.5) * count) / 32) % Math.max(1, count));
   const columns = indices.map((i) => positionOf(i, grid.perColumn).column);
-  const runs = count >= 1_000_000 ? 2 : 3;
+  const runs = runsOf(count);
 
   const timings: Record<string, number> = { buildGridMs, digestMs, setupMs };
   for (const n of [1, 32]) {
@@ -165,6 +184,7 @@ async function benchPir(count: number, size: number, workers: Multiplier) {
   }
   const memory = process.memoryUsage();
   return {
+    scheme: "simplepir",
     records: count,
     recordBytes: size,
     grid: { rows: grid.rows, cols: grid.cols, perColumn: grid.perColumn, cellsPerRecord: grid.cellsPerRecord },
@@ -182,8 +202,104 @@ async function benchPir(count: number, size: number, workers: Multiplier) {
   };
 }
 
+/** IPIR+SP for one record count and size (see the module comment). */
+async function benchIpir(count: number, size: number, wasm: WebAssembly.Module) {
+  log(`ipir-sp: ${count} records of ${size} bytes`);
+  const shape = positionalIpirShape(count, size);
+  const { rows, cols, cellsPerRecord: e, perGroup } = shape;
+  let t0 = performance.now();
+  let cells: Uint16Array | null = new Uint16Array(rows * cols);
+  for (let i = 0; i < count; i++) {
+    const { column: row, slot } = positionOf(i, perGroup);
+    putIpirRecord(cells, rows, row, slot, e, record(i, size));
+  }
+  const buildCellsMs = ms(t0);
+  t0 = performance.now();
+  const digest = new Uint8Array(createHash("sha256").update(new Uint8Array(cells.buffer)).digest());
+  const digestMs = ms(t0);
+  const seed = deriveSeed("read", digest);
+  t0 = performance.now();
+  const built = await buildIpirTable({ cells, rows, cols, seed, snapshot: digest });
+  const buildMs = ms(t0);
+  cells = null; // the add-on holds its own copy
+  const report = built.report;
+  log(`  table ${rows}×${cols} (${perGroup} per row): cells ${buildCellsMs} ms, digest ${digestMs} ms, add-on build ${buildMs} ms (hints ${Math.round(report.hintsMs)} ms, packing ${Math.round(report.packingMs)} ms), phase error 2^${report.maxPhaseErrorLog2.toFixed(2)}`);
+  const runs = runsOf(count);
+  const wallet = new IpirWallet(wasm);
+  t0 = performance.now();
+  const client = wallet.openTable({ rows, cols, seed, snapshot: digest, masks: built.masks });
+  const walletOpenMs = ms(t0);
+  const indices = Array.from({ length: 32 }, (_, k) => Math.floor(((k + 0.5) * count) / 32) % Math.max(1, count));
+  const timings: Record<string, number> = {
+    buildCellsMs,
+    digestMs,
+    buildMs,
+    addonSetupMs: report.setupMs,
+    addonReadMs: report.readMs,
+    addonHintsMs: report.hintsMs,
+    addonPackingMs: report.packingMs,
+    addonPrepareMs: report.prepareMs,
+    addonCheckMs: report.checkMs,
+    addonTotalMs: report.totalMs,
+    walletOpenMs,
+  };
+  try {
+    for (const n of [1, 32]) {
+      const wanted = indices.slice(0, n);
+      // Requests: each run makes n fresh ones; the last run's are answered and decoded, the others freed.
+      let states: IpirRequestState[] = [];
+      let body = new Uint8Array(0);
+      const request = await best(runs, () => {
+        for (const s of states) s.free();
+        states = [];
+        body = new Uint8Array(n * client.sizes.requestBytes);
+        wanted.forEach((i, q) => {
+          const r = client.request(positionOf(i, perGroup).column);
+          states.push(r.state);
+          body.set(r.bytes, q * client.sizes.requestBytes);
+        });
+      });
+      const answer = await best(runs, () => built.table.respond(body, n));
+      const decode = await best(runs, () => states.map((state, q) => client.decode(state, answer.value.subarray(q * client.sizes.responseBytes, (q + 1) * client.sizes.responseBytes))));
+      // Every decoded record equals the generated one.
+      wanted.forEach((i, q) => {
+        const got = ipirRowRecords(decode.value[q]!, perGroup, e, size)[positionOf(i, perGroup).slot]!;
+        if (count > 0 && !equal(got, record(i, size))) throw new Error(`IPIR+SP read of ${i} differs from the record`);
+      });
+      for (const s of states) s.free();
+      Object.assign(timings, { [`serverAnswer${n}Ms`]: answer.ms, [`clientRequest${n}OneThreadMs`]: request.ms, [`clientDecode${n}OneThreadMs`]: decode.ms });
+      log(`  ${n} request(s): answer ${answer.ms} ms; wallet request ${request.ms} ms, decode ${decode.ms} ms (one thread)`);
+    }
+  } finally {
+    client.free();
+    built.table.release();
+  }
+  const memory = process.memoryUsage();
+  return {
+    scheme: "ipir-sp",
+    records: count,
+    recordBytes: size,
+    table: { rows, cols, perRow: perGroup, cellsPerRecord: e },
+    bytes: {
+      tableFile: rows * cols * 2,
+      masks: built.masks.length,
+      cellsHeld: report.tableBytes,
+      packingHeld: report.packingBytes,
+      request: client.sizes.requestBytes,
+      response: client.sizes.responseBytes,
+      queryBody32: CALL_HEADER_BYTES + 32 * client.sizes.requestBytes,
+      answerBody32: CALL_HEADER_BYTES + 32 * client.sizes.responseBytes,
+      rawRecords: count * size,
+    },
+    noise: { checkedRows: report.checkedRows.length, maxPhaseErrorLog2: report.maxPhaseErrorLog2, phaseLimitLog2: report.phaseLimitLog2 },
+    timings,
+    memoryAfter: { rss: memory.rss, arrayBuffers: memory.arrayBuffers },
+    check: "every decoded record equals the generated one",
+  };
+}
+
 const started = { time: new Date().toISOString(), loadavg: loadavg() };
-log(`server threads ${serverThreads}; scan threads ${scanThreads.join(",")}; records ${recordCounts.join(",")} × ${recordSizes.join(",")} bytes`);
+log(`schemes ${schemes.join(",")}; server threads ${serverThreads}; scan threads ${scanThreads.join(",")}; records ${recordCounts.join(",")} × ${recordSizes.join(",")} bytes`);
 /** Runs both multiply loops on every worker until the JIT has compiled them (about 0.6 s cold on 15 threads). */
 async function warm(workers: Multiplier) {
   const t0 = performance.now();
@@ -197,13 +313,20 @@ async function warm(workers: Multiplier) {
   return ms(t0);
 }
 
-const scan = await benchScan();
+const scan = scanThreads.length === 0 ? [] : await benchScan();
 const workers = new WorkerMultiplier(serverThreads);
 const warmUpMs = await warm(workers);
 log(`multiply workers warmed in ${warmUpMs} ms`);
+const wasm = schemes.includes("ipir-sp") ? compileIpirWasm() : null;
 const pir = [];
 try {
-  for (const size of recordSizes) for (const count of recordCounts) pir.push(await benchPir(count, size, workers));
+  for (const size of recordSizes) {
+    for (const count of recordCounts) {
+      if (schemes.includes("simplepir")) pir.push(await benchPir(count, size, workers));
+      if (wasm !== null) pir.push(await benchIpir(count, size, wasm));
+      (globalThis as { gc?: () => void }).gc?.();
+    }
+  }
 } finally {
   await workers.close();
 }
@@ -224,6 +347,7 @@ const result = {
     sha256Checked: createHash("sha256").update(readFileSync(KERNEL_PATH)).digest("hex") === committedKernelDigest(),
   },
   serverThreads,
+  schemes,
   workerWarmUpMs: warmUpMs,
   scan,
   pir,
