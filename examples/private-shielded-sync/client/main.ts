@@ -17,6 +17,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { compileKernel, Kernel, ScanPool } from "../kernel/index.ts";
+import { compileIpirWasm } from "../ipir/wallet-node.ts";
 import { inlineMultiplier, type Multiplier, WorkerMultiplier } from "../pir/index.ts";
 import { toHex } from "../shared/index.ts";
 import { formatShieldedAddress, parseShieldedAddress } from "./address.ts";
@@ -146,6 +147,8 @@ interface Tools {
   keys: WalletKeys;
   scanPool: ScanPool;
   multiplier: Multiplier;
+  /** IPIR+SP: the wallet's WebAssembly, read and digest-checked only when a snapshot uses IPIR+SP (00058 FR-031). */
+  ipirWasm(): WebAssembly.Module;
   close(): Promise<void>;
 }
 
@@ -163,6 +166,7 @@ async function tools(zswapSeed: Uint8Array): Promise<Tools> {
     keys,
     scanPool,
     multiplier,
+    ipirWasm: () => compileIpirWasm(),
     async close() {
       await scanPool.close();
       await multiplier.close();
@@ -180,6 +184,7 @@ async function runSync(t: Tools, previous: WalletState | null): Promise<SyncResu
     kernel: t.kernel,
     scanPool: t.scanPool,
     multiplier: t.multiplier,
+    ipirWasm: t.ipirWasm,
     ...(network ? { network } : {}),
     previous,
     log,
@@ -282,7 +287,7 @@ async function cmdSend(): Promise<void> {
         }
         // The lower path is read by PIR only now, to spend (Q58), unless the tail gives it.
         if (coin.lowerPath === null && pathInTable(result.manifest, coin)) {
-          const read = await lowerPathsByPir({ http: new PssHttp(opt.server), cache: new BlobCache(join(resolve(opt.data), "cache")), kernel: t.kernel, multiplier: t.multiplier }, result, [coin]);
+          const read = await lowerPathsByPir({ http: new PssHttp(opt.server), cache: new BlobCache(join(resolve(opt.data), "cache")), kernel: t.kernel, multiplier: t.multiplier, ipirWasm: t.ipirWasm }, result, [coin]);
           coin = { ...coin, lowerPath: read.paths.get(coin.position)! };
           timings.pathReadMs = read.stats.ms;
           record.pathRead = { public: read.stats.public, buildMs: read.stats.buildMs, roundTripMs: read.stats.roundTripMs, decodeMs: read.stats.decodeMs, bytesUp: read.stats.bytesUp, bytesDown: read.stats.bytesDown };

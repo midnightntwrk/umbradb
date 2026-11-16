@@ -16,7 +16,8 @@ import { fromHex, type PirTableRef, type SchemeParams } from "../shared/manifest
 /** Throws unless the snapshot's SimplePIR parameters are this build's: decoding assumes every one of them. */
 function checkParams(pir: SchemeParams): void {
   const keys = ["logQ", "n", "sigma", "cellBits", "plainModulus"] as const;
-  if (keys.some((k) => pir[k] !== PIR_PARAMS[k])) {
+  const given = pir as Partial<typeof PIR_PARAMS>;
+  if (keys.some((k) => given[k] !== PIR_PARAMS[k])) {
     throw new SchemeUnavailable("simplepir", `the snapshot's parameters ${JSON.stringify(pir)} are not this build's ${JSON.stringify(PIR_PARAMS)}`);
   }
 }

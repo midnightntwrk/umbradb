@@ -496,10 +496,17 @@ describe("the module on a chain it follows from genesis (PostgreSQL 18)", () => 
     expect((await requestBuild(r, 8)).status).toBe(400);
 
     // The admin request may name the scheme of one build (00058 FR-002): SimplePIR by name gives the same snapshot; a
-    // scheme this build does not have is refused by name before anything is built; an unknown name is 400.
+    // scheme this build cannot run (here IPIR+SP with its add-on looked for where there is none, as on a machine that
+    // did not build it) is refused by name before anything is built; an unknown name is 400.
     expect((await requestBuild(r, 7, { scheme: "simplepir" })).status).toBe(202);
     expect((await built(r, 7)).last).toMatchObject({ ok: true, id: seven.id, scheme: "simplepir" });
-    const unavailable = await requestBuild(r, 7, { scheme: "ipir-sp" });
+    process.env.PSS_IPIR_ADDON = join(dataDir, "no-such-add-on.node");
+    let unavailable: Response;
+    try {
+      unavailable = await requestBuild(r, 7, { scheme: "ipir-sp" });
+    } finally {
+      delete process.env.PSS_IPIR_ADDON;
+    }
     expect(unavailable.status).toBe(501);
     expect(await unavailable.json()).toMatchObject({ error: { code: "scheme-unavailable", message: expect.stringContaining('"ipir-sp"') }, scheme: "ipir-sp" });
     const unknown = await requestBuild(r, 7, { scheme: "doublepir" });

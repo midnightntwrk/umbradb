@@ -47,6 +47,34 @@ export class SchemeUnavailable extends Error {
   }
 }
 
+/**
+ * A call of the right length whose bytes are not requests of the table (IPIR+SP: a request made for another table's
+ * setup), refused before any work; the server answers 400 `invalid-query`.
+ */
+export class RequestRefused extends Error {}
+
+/**
+ * A table the scheme cannot lay out within its size limit (IPIR+SP: 2^30 cells). A padded build is refused with it
+ * before anything is read (spec 00058 edge cases); a build from the chain fails with it.
+ */
+export class TableTooLarge extends Error {
+  readonly scheme: SchemeName;
+  readonly table: TableName;
+  /** The fewest cells the table's records take, and the most a table may hold. */
+  readonly neededCells: number;
+  readonly maxCells: number;
+  constructor(scheme: SchemeName, table: TableName, records: number, recordBytes: number, neededCells: number, maxCells: number) {
+    super(
+      `${scheme}: the ${table} table of ${records.toLocaleString("en-US")} records of ${recordBytes} bytes needs at least ` +
+        `${neededCells.toLocaleString("en-US")} cells; a table holds at most ${maxCells.toLocaleString("en-US")}`,
+    );
+    this.scheme = scheme;
+    this.table = table;
+    this.neededCells = neededCells;
+    this.maxCells = maxCells;
+  }
+}
+
 // ── server side ──────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** A table as the builder describes it before any record is placed. */
@@ -92,9 +120,12 @@ export interface EncodedTable {
   readonly file: readonly Uint8Array[];
   /**
    * The scheme's setup of the table once its file is written (the build step `<table>Setup`): `fileDigest` is the
-   * file's SHA-256, from which the scheme derives the table's public seed (FR-012).
+   * file's SHA-256, from which the scheme derives the table's public seed (FR-012); `filePath` is where the file was
+   * written, which the scheme may read back instead of holding the cells twice (IPIR+SP's add-on does). The file is
+   * moved into the snapshot's directory after the build, so the path is valid only during this call. Called once; the
+   * encoded table holds no cells after it.
    */
-  setup(fileDigest: Uint8Array): Promise<PreparedTable>;
+  setup(fileDigest: Uint8Array, filePath: string): Promise<PreparedTable>;
 }
 
 /** A table set up: what the manifest and the server need of it. */
@@ -127,7 +158,7 @@ export interface ServerTable {
   readonly heldBytes: number;
   /**
    * Answers `count` requests (`count × requestBytes` bytes, length checked by the caller) with `count × responseBytes`
-   * bytes, in the same order.
+   * bytes, in the same order. Rejects with {@link RequestRefused} when a request is not one of this table's.
    */
   answer(requests: Uint8Array, count: number): Promise<Uint8Array>;
   /**
@@ -158,8 +189,11 @@ export interface ServerScheme {
   adoptTable(ref: PirTableRef, transfer: TableTransfer): Promise<ServerTable>;
   /** Frees a transfer that will not be adopted (a build superseded, or failed after its setup). */
   discardTransfer(transfer: TableTransfer): void;
-  /** A stored table, from its file (at start). */
-  loadTable(ref: PirTableRef, path: string): Promise<ServerTable>;
+  /**
+   * A stored table, from its file (at start). `publicPath` is the table's stored public artifact: a scheme that sets
+   * the table up again (IPIR+SP) refuses a table whose public artifact comes out different (FR-013).
+   */
+  loadTable(ref: PirTableRef, path: string, publicPath: string): Promise<ServerTable>;
   /** Stops the scheme's threads. Tables it answers from are unusable after; transfers it made are not freed. */
   close(): Promise<void>;
 }
@@ -183,6 +217,13 @@ export interface ServerSchemeEntry {
 export interface WalletSchemeOptions {
   /** SimplePIR: the multiplication for the wallet's A·s and H·s (the command line's worker pool, the page's inline one). */
   readonly multiplier?: Multiplier;
+  /**
+   * IPIR+SP: gives the wallet's compiled WebAssembly (`ipir/pss-ipir.wasm`), its digest already checked against the
+   * committed one (FR-031): in Node `compileIpirWasm` (`../ipir/wallet-node.ts`), in the page the worker's own check.
+   * Called only when a snapshot uses IPIR+SP; without it, or when it throws, the wallet stops with
+   * {@link SchemeUnavailable} naming the file.
+   */
+  readonly ipirWasm?: () => WebAssembly.Module | Promise<WebAssembly.Module>;
 }
 
 /** A scheme's wallet side for one snapshot (its parameters checked against this build's). */

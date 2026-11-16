@@ -189,8 +189,8 @@ describe("SimplePIR through the scheme interface (FR-004, FR-022)", () => {
     try {
       for (const source of ["adopted", "loaded"] as const) {
         const open = (name: "read" | "path" | "nullifier") => {
-          const ref = name === "read" ? a.readTable : name === "path" ? a.pathTable! : a.nullifierTable;
-          return source === "adopted" ? server.adoptTable(ref, result.tables[name]!) : server.loadTable(ref, join(result.dir, ref.digest));
+          const [ref, publicRef] = name === "read" ? [a.readTable, a.readPublic] : name === "path" ? [a.pathTable!, a.pathPublic!] : [a.nullifierTable, a.nullifierPublic];
+          return source === "adopted" ? server.adoptTable(ref, result.tables[name]!) : server.loadTable(ref, join(result.dir, ref.digest), join(result.dir, publicRef.digest));
         };
         // Read table: record i is output i's 98-byte record.
         const read = await open("read");
@@ -244,10 +244,10 @@ describe("SimplePIR through the scheme interface (FR-004, FR-022)", () => {
     await expect(openWalletScheme({ ...m, pir: { ...m.pir, n: 512 } })).rejects.toThrow(/parameters/);
     const server = await openServerScheme("simplepir", { threads: 1, multiplier: inlineMultiplier });
     try {
-      const table = await server.loadTable(m.artifacts.readTable, join(result.dir, m.artifacts.readTable.digest));
+      const table = await server.loadTable(m.artifacts.readTable, join(result.dir, m.artifacts.readTable.digest), join(result.dir, m.artifacts.readPublic.digest));
       await expect(table.answer(new Uint8Array(table.requestBytes - 4), 1)).rejects.toThrow();
       // A table file that is not the manifest's entry is refused.
-      await expect(server.loadTable(m.artifacts.readTable, join(result.dir, m.artifacts.nullifierTable.digest))).rejects.toThrow();
+      await expect(server.loadTable(m.artifacts.readTable, join(result.dir, m.artifacts.nullifierTable.digest), join(result.dir, m.artifacts.readPublic.digest))).rejects.toThrow();
     } finally {
       await server.close();
     }
@@ -272,11 +272,13 @@ describe("SimplePIR through the scheme interface (FR-004, FR-022)", () => {
 });
 
 describe("a scheme this build does not have (FR-001, FR-002; story 2, scenario 3)", () => {
+  // Both names are registered since phase 3 (IPIR+SP's refusals without its add-on or WebAssembly are in
+  // `server-ipir-scheme.test.ts`); a name no registry has stands for a scheme this build lacks.
   it("is refused by name by the registries; the settings accept both names and default to SimplePIR", async () => {
-    expect(() => serverSchemeEntry("ipir-sp")).toThrow(SchemeUnavailable);
-    expect(() => serverSchemeEntry("ipir-sp")).toThrow(/PIR scheme "ipir-sp" is not available in this build/);
-    await expect(openServerScheme("ipir-sp", { threads: 1 })).rejects.toThrow(/"ipir-sp"/);
-    await expect(openWalletScheme({ scheme: "ipir-sp", pir: { logQ: 32, n: 1024, sigma: 6.4, cellBits: 9, plainModulus: 512 } })).rejects.toThrow(/PIR scheme "ipir-sp" is not available in this build/);
+    expect(() => serverSchemeEntry("doublepir")).toThrow(SchemeUnavailable);
+    expect(() => serverSchemeEntry("doublepir")).toThrow(/PIR scheme "doublepir" is not available in this build/);
+    await expect(openServerScheme("doublepir", { threads: 1 })).rejects.toThrow(/"doublepir"/);
+    await expect(openWalletScheme({ scheme: "doublepir" as never, pir: { logQ: 32, n: 1024, sigma: 6.4, cellBits: 9, plainModulus: 512 } })).rejects.toThrow(/PIR scheme "doublepir" is not available in this build/);
     expect(SETTINGS_SCHEMA.parse({ dataDir: "d" }).scheme).toBe("simplepir");
     expect(SETTINGS_SCHEMA.parse({ dataDir: "d", scheme: "ipir-sp" }).scheme).toBe("ipir-sp");
     expect(() => SETTINGS_SCHEMA.parse({ dataDir: "d", scheme: "doublepir" })).toThrow();
@@ -285,10 +287,10 @@ describe("a scheme this build does not have (FR-001, FR-002; story 2, scenario 3
   it("fails a build with code scheme-unavailable and leaves nothing behind", { timeout: LONG }, async () => {
     const dir = mkdtempSync(join(tmpdir(), "pss-scheme-none-"));
     try {
-      const failure = await build({ ...job(), scheme: "ipir-sp", dataDir: dir }).catch((e: unknown) => e);
+      const failure = await build({ ...job(), scheme: "doublepir" as never, dataDir: dir }).catch((e: unknown) => e);
       expect(failure).toBeInstanceOf(BuildError);
       expect((failure as BuildError).code).toBe("scheme-unavailable");
-      expect((failure as BuildError).message).toMatch(/"ipir-sp"/);
+      expect((failure as BuildError).message).toMatch(/"doublepir"/);
       for (const sub of [SNAPSHOTS_DIR, BUILDS_DIR]) expect(existsSync(join(dir, sub)) ? readdirSync(join(dir, sub)) : []).toEqual([]);
     } finally {
       rmSync(dir, { recursive: true, force: true });

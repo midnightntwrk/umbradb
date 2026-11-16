@@ -13,7 +13,7 @@
 
 import { createHash } from "node:crypto";
 import type { Coin, Kernel, ScanPool } from "../kernel/index.ts";
-import { type Multiplier, type NullifierEntry, openWalletScheme, type WalletScheme } from "../pir/index.ts";
+import { type Multiplier, type NullifierEntry, openWalletScheme, type WalletScheme, type WalletSchemeOptions } from "../pir/index.ts";
 import {
   CIPHERTEXT_BYTES,
   decodeManifest,
@@ -53,6 +53,11 @@ export interface SyncOptions {
   readonly scanPool: ScanPool;
   /** SimplePIR: the multiplication for the wallet's side of each call (`../pir/scheme.ts`). */
   readonly multiplier: Multiplier;
+  /**
+   * IPIR+SP: gives the wallet's WebAssembly, its digest checked (the command line: `compileIpirWasm`); called only for
+   * a snapshot that uses IPIR+SP. Without it such a sync stops with a message naming the file.
+   */
+  readonly ipirWasm?: WalletSchemeOptions["ipirWasm"];
   /** The network the manifest must name, if given. */
   readonly network?: string;
   /** The previous state: its pending transfers carry over until a sync confirms them (FR-128). */
@@ -179,18 +184,18 @@ export interface PathReadStats extends CallStats {
  * block's root from the coin's commitment. Returns the paths as hex, by position.
  */
 export async function lowerPathsByPir(
-  options: Pick<SyncOptions, "http" | "cache" | "kernel" | "multiplier">,
+  options: Pick<SyncOptions, "http" | "cache" | "kernel" | "multiplier" | "ipirWasm">,
   result: Pick<SyncResult, "manifest" | "state" | "view">,
   coins: readonly Pick<CoinRecord, "position" | "commitment" | "source">[],
 ): Promise<{ paths: Map<number, string[]>; stats: PathReadStats }> {
-  const { http, cache, kernel, multiplier } = options;
+  const { http, cache, kernel } = options;
   const m = result.manifest;
   const ref = m.artifacts.pathTable;
   const publicRef = m.artifacts.pathPublic;
   if (ref === undefined || publicRef === undefined) throw new Error("the snapshot has no path table (path split 0)");
   for (const c of coins) if (!pathInTable(m, c)) throw new Error(`position ${c.position} has no path in the path table (its block was not full at the snapshot)`);
   const started = performance.now();
-  const scheme = await openWalletScheme(m, { multiplier });
+  const scheme = await openWalletScheme(m, schemeOptions(options));
   let records: Map<number, Uint8Array>;
   const call = emptyCallStats();
   let fetched: FetchStat;
@@ -219,6 +224,11 @@ export async function lowerPathsByPir(
     paths.set(c.position, lower.map(hex));
   }
   return { paths, stats: { ...call, public: fetched, ms: performance.now() - started } };
+}
+
+/** What the snapshot's scheme is opened with: each scheme takes its own part. */
+function schemeOptions(options: Pick<SyncOptions, "multiplier" | "ipirWasm">): WalletSchemeOptions {
+  return { multiplier: options.multiplier, ...(options.ipirWasm === undefined ? {} : { ipirWasm: options.ipirWasm }) };
 }
 
 /** Runs `sync`, starting again when the snapshot is replaced (at most `maxAttempts` times). */
@@ -258,8 +268,8 @@ async function syncOnce(options: SyncOptions): Promise<SyncResult> {
     throw new Error(`the server serves network ${manifest.network}, not ${options.network}`);
   }
   // The scheme's parameters are checked against this build's here (SimplePIR: all five of them); a scheme this build
-  // does not have stops the sync with its name.
-  const scheme = await openWalletScheme(manifest, { multiplier: options.multiplier });
+  // does not have, or whose WebAssembly the wallet was not given, stops the sync with its name.
+  const scheme = await openWalletScheme(manifest, schemeOptions(options));
   try {
     return await syncWith(options, scheme, { manifest, idBytes, id, manifestStat: { ms: performance.now() - t, bytes: served.bytes.length }, started, firstRequest });
   } finally {

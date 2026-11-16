@@ -6,7 +6,8 @@
  *
  * The three PIR tables go through the job's scheme (`../pir/scheme.ts`, spec 00058): the builder decides which record
  * goes where (by slot, or by bucket) and the scheme lays the table out, writes its file, sets it up and gives its
- * public artifact (SimplePIR: the grid file and its setup data).
+ * public artifact (SimplePIR: the grid file and its setup data; IPIR+SP: the cell file, which its add-on reads back,
+ * and the masks). A build that fails frees the tables it set up (IPIR+SP's are held by the add-on).
  *
  * Every artifact is a function of the outputs, the nullifiers and the parameters, so building one height twice gives
  * the same digests and the same snapshot identifier (FR-022, FR-145). The build fails, writing nothing, when the
@@ -72,8 +73,9 @@ function tableSpecs(size: number, pathSplit: number): TableSpec[] {
 
 /**
  * About the most memory a padded build of `size` entries holds at once: the scheme's tables as it builds them (under
- * SimplePIR, both positional tables with their setup data and A, and the nullifier grid), the scan file, and the
- * nullifier arrays. For the refusal of builds that would not fit (Q57).
+ * SimplePIR, both positional tables with their setup data and A, and the nullifier grid; under IPIR+SP, the add-on's
+ * cells and packing of every table and one table's cells in JavaScript), the scan file, and the nullifier arrays.
+ * For the refusal of builds that would not fit (Q57). Throws `TableTooLarge` for a table the scheme cannot lay out.
  */
 export function paddedBuildBytes(size: number, pathSplit: number, scheme: SchemeName): number {
   return serverSchemeEntry(scheme).buildBytes(tableSpecs(size, pathSplit)) + size * SCAN_ENTRY_BYTES + size * (NULLIFIER_BYTES + 12);
@@ -179,12 +181,16 @@ function artifact(dir: string, parts: readonly Uint8Array[]): { digest: string; 
   return written;
 }
 
-/** A PIR table built: its two artifacts, its manifest entry's parts, and what the server answers from. */
+/**
+ * A PIR table built: its two artifacts, its manifest entry's parts, and what the server answers from. The encoded
+ * table is not kept: once its file is written and set up it holds no cells (IPIR+SP's are freed then).
+ */
 interface BuiltTable {
   readonly ref: PirTableRef;
   readonly publicRef: { digest: string; size: number };
-  readonly encoded: EncodedTable;
-  readonly prepared: PreparedTable;
+  /** The nullifier table only: its bucket bits. */
+  readonly bucketBits: number | undefined;
+  readonly transfer: TableTransfer;
 }
 
 /** Builds the snapshot of `job` (see the module comment). */
@@ -235,6 +241,8 @@ export async function buildSnapshot(job: BuildJob, hooks: BuildHooks = {}): Prom
   }
   const dir = join(buildsDir, `${job.height}-${randomBytes(6).toString("hex")}`);
   mkdirSync(dir);
+  /** Tables set up so far: freed if the build fails after them (IPIR+SP's live in its add-on, outside the heap). */
+  const made: TableTransfer[] = [];
   /**
    * A table through the scheme: its records (`sourceOf`, timed with the table), its file (step `<name>Table`), then its
    * setup and public artifact (`<name>Setup`).
@@ -242,11 +250,12 @@ export async function buildSnapshot(job: BuildJob, hooks: BuildHooks = {}): Prom
   const table = async (sourceOf: () => TableSource, steps: readonly [BuildStep, BuildStep]): Promise<BuiltTable> => {
     begin(steps[0]);
     const source = sourceOf();
-    const encoded = scheme.encodeTable(source);
+    const encoded: EncodedTable = scheme.encodeTable(source);
     const file = artifact(dir, encoded.file);
     end(steps[0], { bytes: file.size });
     begin(steps[1]);
-    const prepared = await encoded.setup(fromHex(file.digest, 32));
+    const prepared: PreparedTable = await encoded.setup(fromHex(file.digest, 32), join(dir, file.digest));
+    made.push(prepared.transfer);
     const publicRef = artifact(dir, prepared.public);
     end(steps[1], { bytes: publicRef.size, ...(prepared.stats === undefined ? {} : { scheme: prepared.stats }) });
     const ref: PirTableRef = {
@@ -258,7 +267,7 @@ export async function buildSnapshot(job: BuildJob, hooks: BuildHooks = {}): Prom
       perGroup: encoded.perGroup,
       layout: prepared.layout,
     };
-    return { ref, publicRef, encoded, prepared };
+    return { ref, publicRef, bucketBits: encoded.bucketBits, transfer: prepared.transfer };
   };
   try {
     // Scan file (FR-030, FR-031): the point and the first 4 bytes of element 0, or 36 zero bytes.
@@ -373,7 +382,7 @@ export async function buildSnapshot(job: BuildJob, hooks: BuildHooks = {}): Prom
       return nullifierSource({ count, values, heights, txs });
     };
     const nullifier = await table(nullifierEntries, ["nullifierTable", "nullifierSetup"]);
-    const bucketBits = nullifier.encoded.bucketBits;
+    const bucketBits = nullifier.bucketBits;
     if (bucketBits === undefined) throw new Error(`the ${scheme.name} scheme gave the nullifier table no bucket bits`);
 
     // Manifest (FR-021, FR-022): canonical JSON; its SHA-256 is the snapshot identifier.
@@ -397,7 +406,7 @@ export async function buildSnapshot(job: BuildJob, hooks: BuildHooks = {}): Prom
         readTable: read.ref,
         readPublic: read.publicRef,
         ...(path === null ? {} : { pathTable: path.ref, pathPublic: path.publicRef }),
-        nullifierTable: { ...nullifier.ref, bucketBits, capacity: nullifier.encoded.perGroup },
+        nullifierTable: { ...nullifier.ref, bucketBits, capacity: nullifier.ref.perGroup },
         nullifierPublic: nullifier.publicRef,
       },
     };
@@ -413,13 +422,14 @@ export async function buildSnapshot(job: BuildJob, hooks: BuildHooks = {}): Prom
       dir: final,
       manifest,
       manifestBytes,
-      tables: { read: read.prepared.transfer, path: path === null ? null : path.prepared.transfer, nullifier: nullifier.prepared.transfer },
+      tables: { read: read.transfer, path: path === null ? null : path.transfer, nullifier: nullifier.transfer },
       blockRoots: tree.blockRoots,
       upper: tree.upper,
       partial: tree.partial,
       steps,
     };
   } catch (error) {
+    for (const transfer of made) scheme.discardTransfer(transfer);
     rmSync(dir, { recursive: true, force: true });
     throw error;
   } finally {

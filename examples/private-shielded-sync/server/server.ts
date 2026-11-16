@@ -37,8 +37,8 @@ import type {
 } from "umbradb";
 import { compileKernel, Kernel } from "../kernel/kernel.ts";
 import type { TableName } from "../pir/matrix.ts";
-import { isSchemeName, SCHEME_NAMES, type SchemeName, SchemeUnavailable, type ServerScheme, type ServerTable, type TableTransfer } from "../pir/scheme.ts";
-import { maxRequestBytes, openServerScheme, serverSchemeEntry } from "../pir/server-schemes.ts";
+import { isSchemeName, RequestRefused, SCHEME_NAMES, type SchemeName, SchemeUnavailable, type ServerScheme, type ServerTable, TableTooLarge, type TableTransfer } from "../pir/scheme.ts";
+import { maxRequestBytes, openServerScheme } from "../pir/server-schemes.ts";
 import { OCTET_STREAM, ROUTES } from "../shared/constants.ts";
 import { fromHex, type Manifest, type PirTableRef, toHex } from "../shared/manifest.ts";
 import { CALL_HEADER_BYTES, decodeQueryBody, encodeAnswerBody, WireError } from "../shared/wire.ts";
@@ -314,7 +314,8 @@ export class PssServer {
         const hash = await blockHashAt(w, m.height);
         if (hash === null || toHex(hash) !== m.blockHash) throw new Error(`block ${m.height}'s hash is not the manifest's`);
         if (m.firstFree !== this.index.outputsAt(m.height)) throw new Error(`the index has another first_free at ${m.height}`);
-        serverSchemeEntry(m.scheme);
+        // A scheme this build lacks, or cannot open here (IPIR+SP without its add-on): the snapshot is ignored (Q15).
+        await this.#scheme(m.scheme);
         verifyArtifacts(snapshot);
         valid.push(snapshot);
       } catch (cause) {
@@ -335,9 +336,9 @@ export class PssServer {
       manifestBytes: latest.manifestBytes,
       files: servedFiles(latest),
       tables: {
-        read: await scheme.loadTable(a.readTable, artifactPath(latest, "readTable")),
-        path: a.pathTable === undefined ? null : await scheme.loadTable(a.pathTable, artifactPath(latest, "pathTable")),
-        nullifier: await scheme.loadTable(a.nullifierTable, artifactPath(latest, "nullifierTable")),
+        read: await scheme.loadTable(a.readTable, artifactPath(latest, "readTable"), artifactPath(latest, "readPublic")),
+        path: a.pathTable === undefined ? null : await scheme.loadTable(a.pathTable, artifactPath(latest, "pathTable"), artifactPath(latest, "pathPublic")),
+        nullifier: await scheme.loadTable(a.nullifierTable, artifactPath(latest, "nullifierTable"), artifactPath(latest, "nullifierPublic")),
       },
       nullifiers: this.index.nullifiersAt(latest.manifest.height),
     };
@@ -487,7 +488,14 @@ export class PssServer {
       // swapped for 25 minutes without finishing (Q57).
       const c = this.#current;
       const held = c === null ? 0 : c.tables.read.heldBytes + (c.tables.path?.heldBytes ?? 0) + c.tables.nullifier.heldBytes;
-      const needed = paddedBuildBytes(padding, this.settings.pathSplit, scheme);
+      let needed: number;
+      try {
+        needed = paddedBuildBytes(padding, this.settings.pathSplit, scheme);
+      } catch (cause) {
+        // A table the scheme cannot lay out (IPIR+SP: over 2^30 cells), refused with the estimate (00058 edge cases).
+        if (!(cause instanceof TableTooLarge)) throw cause;
+        return error(507, "table-too-large", cause.message, { scheme, table: cause.table, neededCells: cause.neededCells, maxCells: cause.maxCells });
+      }
       const half = totalmem() / 2;
       const available = availableMemory();
       if (needed + held > half || needed > available / 2) {
@@ -756,7 +764,14 @@ export class PssServer {
       const code = cause.status === 409 ? "snapshot-replaced" : "invalid-query";
       return error(cause.status, code, cause.message, cause.status === 409 ? { snapshot: snapshot.id } : {});
     }
-    const answers = await table.answer(call.payload, call.count);
+    let answers: Uint8Array;
+    try {
+      answers = await table.answer(call.payload, call.count);
+    } catch (cause) {
+      // Bytes of the right length that are not this table's requests (00058: an IPIR+SP request of another table).
+      if (!(cause instanceof RequestRefused)) throw cause;
+      return error(400, "invalid-query", cause.message);
+    }
     return {
       status: 200,
       headers: { "Content-Type": OCTET_STREAM, "Cache-Control": "no-store", "Pss-Snapshot-Id": snapshot.id },

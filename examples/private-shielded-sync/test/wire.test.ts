@@ -280,10 +280,11 @@ describe("manifest (FR-021, FR-022)", () => {
   it("names its PIR scheme, part of the snapshot identifier; a scheme this build cannot read is refused with its name (00058 story 2)", () => {
     const m = manifest();
     expect(new TextDecoder().decode(encodeManifest(m))).toContain('"scheme":"simplepir"');
-    const other = { ...m, scheme: "ipir-sp" } as Manifest;
+    // This build reads IPIR+SP manifests (00058 phase 3): SimplePIR's parameters under that name are invalid.
+    expect(() => encodeManifest({ ...m, scheme: "ipir-sp" })).toThrow(/invalid manifest: pir.ring/);
+    const other = { ...m, scheme: "nonesuch" } as unknown as Manifest;
     expect(() => encodeManifest(other)).toThrow(SchemeUnavailable);
-    expect(() => encodeManifest(other)).toThrow(/PIR scheme "ipir-sp" is not available in this build/);
-    expect(() => encodeManifest({ ...m, scheme: "nonesuch" } as unknown as Manifest)).toThrow(/PIR scheme "nonesuch"/);
+    expect(() => encodeManifest(other)).toThrow(/PIR scheme "nonesuch" is not available in this build/);
     const { scheme: _scheme, ...unnamed } = m;
     expect(() => encodeManifest(unnamed as Manifest)).toThrow(/invalid manifest: scheme/);
   });

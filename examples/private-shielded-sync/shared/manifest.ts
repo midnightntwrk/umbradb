@@ -25,8 +25,24 @@ export interface ArtifactRef {
 /** SimplePIR's parameters (FR-050): q = 2^logQ, LWE dimension n, error σ, bits per cell and p = 2^cellBits. */
 export type SimplePirParams = PirParams;
 
+/**
+ * IPIR+SP's profile (00058, `../ipir/sizes.ts`): ring size, q = 2^qBits, p = 2^pBits (bits per cell), key digits of
+ * `digitBits` bits, two published masks of `maskBits` bits per column, query `queryBits` per row, answer
+ * `responseBits` per column.
+ */
+export interface IpirSpParams {
+  readonly ring: number;
+  readonly qBits: number;
+  readonly pBits: number;
+  readonly digitBits: number;
+  readonly digits: number;
+  readonly maskBits: number;
+  readonly queryBits: number;
+  readonly responseBits: number;
+}
+
 /** A scheme's parameters, tagged by `Manifest.scheme`. */
-export type SchemeParams = SimplePirParams;
+export type SchemeParams = SimplePirParams | IpirSpParams;
 
 /** A SimplePIR table's grid: R rows × C columns of cells (a group is a column), and the seed of its public matrix A. */
 export interface SimplePirLayout {
@@ -39,8 +55,22 @@ export interface SimplePirLayout {
   readonly seed: string;
 }
 
+/**
+ * An IPIR+SP table (00058 FR-011): rows × cols 16-bit cells, both multiples of the ring size (a group is a row), and
+ * the seed of its public setup. The setup's other input, the snapshot digest, is the table file's digest.
+ */
+export interface IpirSpLayout {
+  /** groups. */
+  readonly rows: number;
+  /** A row holds perGroup = ⌊cols / cellsPerRecord⌋ records. */
+  readonly cols: number;
+  /** E = ⌈8 × recordBytes / pBits⌉. */
+  readonly cellsPerRecord: number;
+  readonly seed: string;
+}
+
 /** A scheme's layout of one table, tagged by `Manifest.scheme`. */
-export type TableLayout = SimplePirLayout;
+export type TableLayout = SimplePirLayout | IpirSpLayout;
 
 /** A PIR table: its file, how a wallet addresses its records, and the scheme's layout. */
 export interface PirTableRef extends ArtifactRef {
@@ -85,7 +115,7 @@ export interface Manifest {
     readonly scan: ArtifactRef;
     readonly blockRoots: ArtifactRef & { readonly blocks: number };
     readonly readTable: PirTableRef;
-    /** The read table's public artifact, which every wallet downloads (SimplePIR's setup data). */
+    /** The read table's public artifact, which every wallet downloads (SimplePIR's setup data, IPIR+SP's masks). */
     readonly readPublic: ArtifactRef;
     /** Lower Merkle paths, read only to spend (Q58); absent when pathSplit is 0 (no lower path). */
     readonly pathTable?: PirTableRef;
@@ -157,14 +187,17 @@ function checkTable(t: PirTableRef | undefined, name: string): void {
   need(typeof t!.layout === "object" && t!.layout !== null, `${name}.layout`);
 }
 
-/** What the manifest's checks know of a scheme: its parameters, and a table's layout against its files' sizes. */
-interface SchemeRules {
-  checkParams(pir: SchemeParams): void;
-  checkTable(t: PirTableRef, publicRef: ArtifactRef, pir: SchemeParams, name: string, publicName: string): void;
+/**
+ * What the manifest's checks know of a scheme: its parameters, and a table's layout against its files' sizes. The
+ * parameters given to `checkTable` have passed `checkParams`.
+ */
+interface SchemeRules<P extends SchemeParams> {
+  checkParams(pir: Partial<P>): void;
+  checkTable(t: PirTableRef, publicRef: ArtifactRef, pir: P, name: string, publicName: string): void;
 }
 
 /** SimplePIR: the table file is a 32-byte header and R × C 16-bit cells; the setup data R × n 32-bit values. */
-const SIMPLEPIR_RULES: SchemeRules = {
+const SIMPLEPIR_RULES: SchemeRules<SimplePirParams> = {
   checkParams(pir) {
     for (const k of ["logQ", "n", "cellBits", "plainModulus"] as const) need(isCount(pir[k]) && pir[k] > 0, `pir.${k}`);
     need(typeof pir.sigma === "number" && pir.sigma > 0, "pir.sigma");
@@ -181,8 +214,34 @@ const SIMPLEPIR_RULES: SchemeRules = {
   },
 };
 
+/**
+ * IPIR+SP (00058): the table file is rows × cols cells of pBits bits, column-major, with no header (`../pir/ipir/
+ * encode.ts`); the public artifact is the two masks, a 36-byte header and 2 × maskBits bits per column.
+ */
+const IPIR_SP_RULES: SchemeRules<IpirSpParams> = {
+  checkParams(pir) {
+    for (const k of ["ring", "qBits", "pBits", "digitBits", "digits", "maskBits", "queryBits", "responseBits"] as const) need(isCount(pir[k]) && pir[k] > 0, `pir.${k}`);
+    need(pir.pBits! % 8 === 0, "pir.pBits is whole bytes");
+  },
+  checkTable(t, publicRef, pir, name, publicName) {
+    const l = t.layout;
+    for (const k of ["rows", "cols", "cellsPerRecord"] as const) need(isCount(l[k]) && l[k] > 0, `${name}.layout.${k}`);
+    need(l.rows % pir.ring === 0 && l.cols % pir.ring === 0, `${name}.layout rows and cols are multiples of ${pir.ring}`);
+    need(l.rows * l.cols <= 2 ** 30, `${name}.layout holds at most 2^30 cells`);
+    need(l.rows === t.groups, `${name}.layout.rows = groups`);
+    need(l.cellsPerRecord === Math.ceil((8 * t.recordBytes) / pir.pBits), `${name}.layout.cellsPerRecord = ⌈8 × recordBytes / pBits⌉`);
+    need(t.perGroup === Math.floor(l.cols / l.cellsPerRecord), `${name}.perGroup = ⌊layout.cols / cellsPerRecord⌋`);
+    need(t.size === (l.rows * l.cols * pir.pBits) / 8, `${name}.size matches its shape`);
+    need(HEX32.test(l.seed), `${name}.layout.seed`);
+    need(publicRef.size === 36 + Math.ceil((2 * pir.maskBits * l.cols) / 8), `${publicName}.size = 36 + ⌈2 × maskBits × cols / 8⌉`);
+  },
+};
+
 /** The schemes whose manifests this build can read. */
-const SCHEME_RULES: { readonly [S in SchemeName]?: SchemeRules } = { simplepir: SIMPLEPIR_RULES };
+const SCHEME_RULES: { readonly simplepir: SchemeRules<SimplePirParams>; readonly "ipir-sp": SchemeRules<IpirSpParams> } = {
+  simplepir: SIMPLEPIR_RULES,
+  "ipir-sp": IPIR_SP_RULES,
+};
 
 /**
  * Checks a manifest. A scheme this build does not know throws {@link SchemeUnavailable}, whose message names it (a
@@ -192,7 +251,8 @@ export function validateManifest(m: Manifest): void {
   need(typeof m === "object" && m !== null, "not an object");
   need(m.formatVersion === FORMAT_VERSION, `formatVersion ${String(m.formatVersion)}`);
   need(typeof m.scheme === "string" && m.scheme.length > 0, "scheme");
-  const rules = isSchemeName(m.scheme) ? SCHEME_RULES[m.scheme] : undefined;
+  // Each scheme's rules read the parameters as that scheme's (method parameters are bivariant, so the cast holds).
+  const rules = isSchemeName(m.scheme) ? (SCHEME_RULES[m.scheme] as SchemeRules<SchemeParams> | undefined) : undefined;
   if (rules === undefined) throw new SchemeUnavailable(m.scheme, "this build cannot read its manifest");
   need(typeof m.network === "string" && m.network.length > 0, "network");
   for (const k of ["genesisHash", "blockHash", "root"] as const) need(HEX32.test(m[k]), k);
