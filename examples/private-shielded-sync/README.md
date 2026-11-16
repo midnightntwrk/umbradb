@@ -555,8 +555,11 @@ real and the 1,000,000-entry snapshots (the report's section 7).
 **Security status.** Upstream calls this profile experimental; its release gates (an independent review of the
 key-dependent-message composition, a certificate per served snapshot, a timing audit) are open. A lattice estimate gives
 more than 128 bits only under one cost model: about 2^137 under MATZOV, against 2^109.5 classical and 2^96 to 2^99
-quantum under Core-SVP. Answers are not authenticated, under either scheme. The review of the code against upstream's
-specification and the estimate are in
+quantum under Core-SVP. Answers are not authenticated, under either scheme. The profile is also not the scheme the two
+papers analyse: it sends one key and decodes with two masks where the papers send two keys and return one mask, and it
+rounds the query, the answer and the masks; neither change has a published analysis. The papers' privacy theorem still
+covers it, because the server sees a function of a subset of what the theorem lets it see; correctness rests on
+upstream's certificate. The review of the code against the papers and upstream's specification, and the estimate, are in
 [`docs/research/00058-ipir-sp-review.md`](../../docs/research/00058-ipir-sp-review.md).
 
 **Building.** `ipir/build.sh` builds on the host with the toolchain `ipir/rust-toolchain.toml` pins (1.92.0 and the
