@@ -25,7 +25,8 @@
  * **Where it goes.** A {@link TraceSink}, which the command builds over a file (`./file-sink.ts`). This module imports
  * no file API, so the browser build bundles it as it is. Lines are kept in memory and handed to the sink every
  * {@link FLUSH_LINES} heights and at {@link stopTrace}. A sink that throws (a full disk) stops the trace: what it held
- * is dropped, {@link TraceOptions.log} gets one line, and the process goes on untraced.
+ * is dropped, {@link TraceOptions.log} gets one line, and the process goes on untraced. The ledger worker's thread
+ * stops its own trace at the next request it gets, which no longer says when it was posted (`./worker-trace.ts`).
  *
  * **One trace per process.** The state is this module's, since the trace is the process's: one `umbradb run` is one
  * process with one database. A program that runs several processes in one Node.js process does not start it.

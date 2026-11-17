@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { BlockWriteHandle } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
+import type { LedgerHost } from "../../src/ledger/worker/host.js";
 import {
   FLUSH_LINES,
   OTHER_STATEMENTS,
@@ -8,8 +9,10 @@ import {
   startTrace,
   stopTrace,
   traceEndBlock,
+  tracing,
   type TraceSink,
 } from "../../src/trace/trace.js";
+import { buildContentsHash, byteHashedTables, dagOptedOut, type ReadableDatabase } from "../backbone/refcount-contents.js";
 import { type DagRun, type DagRunOptions, runDag, runProblems } from "../backbone/refcount-process.js";
 import { BACKUP_BACKENDS, type BackupBackend } from "../backup/backup-fixtures.js";
 import { LAST } from "../ledger/fixtures/sweep-fixture.js";
@@ -24,13 +27,22 @@ import { LAST } from "../ledger/fixtures/sweep-fixture.js";
  * transaction):
  * - a height whose block transaction fails after its reclamation step, and which the process makes again, adds its
  *   step to the chain of step outputs once: every height's `sh` is a clean run's (negative control: a run whose step
- *   differs from one height on).
+ *   differs from one height on);
+ * - a sink that fails during the sync stops the trace with one line in the log, and the sync goes on to store what a
+ *   clean run stores. That the worker's thread then stops its own trace is seen in its messages
+ *   (`test/ledger/worker-messages.test.ts`).
  */
 
 const postgres = BACKUP_BACKENDS.find((backend) => backend.kind === "postgres") as BackupBackend;
 
 /** Every height of the fixture, once each, in order. */
 const EVERY_HEIGHT = Array.from({ length: LAST + 1 }, (_, h) => h);
+
+/** The whole database at the last height: the build's contents hash and each table it takes by its bytes. */
+async function databaseOf(db: ReadableDatabase): Promise<{ readonly hash: string; readonly tables: [string, string][] }> {
+  const optedOut = dagOptedOut();
+  return { hash: await buildContentsHash(db, optedOut), tables: [...(await byteHashedTables(db, optedOut))] };
+}
 
 /** A traced run of the extended DAG on a new database, with `options`: the run, its lines and its database. */
 async function tracedRun(options: DagRunOptions = {}) {
@@ -181,5 +193,45 @@ describe("the block trace when something fails or overflows, on PostgreSQL", () 
     const below = (lines: readonly Record<string, unknown>[]) => chainOf(lines.filter((line) => BigInt(line.h as number) < differs));
     expect(below(other.lines)).toEqual(below(cleanLines));
     expect(other.lines.find((line) => line.h === Number(differs))?.sh).not.toBe(cleanLines.find((line) => line.h === Number(differs))?.sh);
+  }, 600_000);
+
+  it("a sink that fails during the sync stops the trace at its flush, with one line in its log; the sync goes on and stores what a clean run stores", async () => {
+    const { db: cleanDb } = await cleanRun();
+    const log: string[] = [];
+    const failing: TraceSink = {
+      blocks: () => {
+        throw new Error("no space left on device");
+      },
+      statements: () => undefined,
+      worker: () => undefined,
+    };
+    startTrace(failing, { log: (line) => log.push(line) });
+    // The trace holds all but 40 of a flush's lines when the process starts: its first flush is at the 40th height
+    // committed, and fails.
+    const failsAt = 40;
+    for (let line = 0; line < FLUSH_LINES - failsAt; line++) traceEndBlock(BigInt(1_000_000 + line));
+    const db = await postgres.database();
+    let stoppedAt: number | null = null;
+    const run = await runDag(db, {
+      dag: "extended",
+      // Whether the trace is still on, read at each height once it is committed (its worker's commit, which comes
+      // before the height's line).
+      worker: (host) =>
+        Object.create(host, {
+          commit: {
+            value: (block: Parameters<LedgerHost["commit"]>[0]) => {
+              if (stoppedAt === null && !tracing()) stoppedAt = Number(block.height);
+              return host.commit(block);
+            },
+          },
+        }) as LedgerHost,
+    });
+    expect(log).toEqual(["block trace stopped, the process goes on untraced: writing it failed: no space left on device"]);
+    expect(tracing()).toBe(false);
+    // It stopped within the sync, at the flush after height 39's line: height 40 is the first committed untraced.
+    expect(stoppedAt).toBe(failsAt);
+    expect(run.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
+    expect(runProblems(run, "extended")).toEqual([]);
+    expect(await databaseOf(db)).toEqual(await databaseOf(cleanDb));
   }, 600_000);
 });
