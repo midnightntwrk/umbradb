@@ -270,6 +270,12 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   block that touches the contract, so a block writes the same. The kept keys are forgotten whenever the worker drops
   a state it applied or held (a pending block replaced by another, a state loaded in place of the one it holds, an
   apply that failed), and at most 16,384 are kept, about 8 MB, the least recently used dropped first.
+- **The vendored ledger packages are built for speed.** `vendor/ledger/build-in-container.sh` builds them at
+  `opt-level = 3`, where upstream's `wasm` profile is `opt-level = "z"`, and builds blst's C code at `-O3` with its
+  field multiplication inlined into its callers. No ledger source changes, and every state root is the same. The
+  `.wasm` files about double, from 10 to 15 MB each to 21 to 29 MB. The four packages are recorded again, so the
+  core version changes: a database an earlier build synced continues as an upgrade, its `core` revision kept as a
+  `versionEntry` and this build's `core` entry from the next height.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 
