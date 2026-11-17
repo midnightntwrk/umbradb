@@ -854,6 +854,32 @@
   <div class="sees"><div class="sv"><b>Server sees</b>The same four kinds of request, of the same sizes, from every wallet.</div><div class="wl"><b>Stays on the wallet</b>Keys, matches, columns, buckets, coins, which coins are spent.</div></div>
 </section>
 
+<!-- ═══════════════════════════════════════════════════ Dust -->
+<section class="slide" id="s-dust" data-step="dust" data-title="Dust: one public file, one private check per chain">
+  <div class="top">Dust · Steps 9 to 11 of the page <span class="where c">Wire</span></div>
+  <h2>Dust: one public file, then one private check per chain</h2>
+  <div class="body lanes">
+    <div><div class="lanehead w">Wallet</div>
+      <div class="box w"><h3>Derives its Dust key</h3><div class="flow" style="font-size: 13px"><span class="cell">24 words</span><span class="arrow">→</span><span class="cell">HD path m/44'/2400'/0'/2/0</span><span class="arrow">→</span><span class="cell mine">Dust secret key</span></div></div>
+      <div class="box w"><h3>Walks each chain through the file</h3><p class="small">From each first coin: its nullifier's first 4 bytes, found at an entry above the coin's position; the next coin from that entry's time, fee and position (the ledger's <span class="mono">successorDustUtxo</span>); again from the next entry. Nothing is sent.</p></div>
+      <div class="box w"><h3>Checks each chain's end</h3><p class="small">The record at the last coin's position must be its commitment. If not, the match was another wallet's: it is dropped and the search goes on after it.</p></div>
+    </div>
+    <div><div class="lanehead c">On the wire</div>
+      <div class="msg right"><div class="label">GET /dust/manifest, /dust/chunk/n</div><div class="line"></div></div>
+      <div class="msg left"><div class="label">the Dust file</div><div class="size">about 9 B per spend: 0.59 MB for Preprod's 65,035</div><div class="line"></div></div>
+      <div class="msg right"><div class="label">GET /dust/coins?owner=key</div><div class="size">names the Dust public key</div><div class="line"></div></div>
+      <div class="msg left"><div class="label">first coins, generation updates</div><div class="line"></div></div>
+      <div class="msg right"><div class="label">POST /dust/check/query</div><div class="size">32 requests, every chain's end in one call</div><div class="line"></div></div>
+      <div class="msg left"><div class="label">32 answers</div><div class="line"></div></div>
+    </div>
+    <div><div class="lanehead s">Server</div>
+      <div class="box s"><h3>Lists every Dust spend</h3><p class="small">Per spend: 4 bytes of the nullifier, the declared time, the fee, the new commitment's position. Full chunks never change, so a wallet keeps them.</p></div>
+      <div class="box s"><h3>A PIR table of commitments by position</h3><p class="small">Each spend's new commitment and each first coin's; answered as the read table is, in either scheme.</p></div>
+    </div>
+  </div>
+  <div class="sees"><div class="sv"><b>Server sees</b>The wallet's Dust public key (its first coins are asked for by it), the same file download as every wallet, and check calls of one size.</div><div class="wl"><b>Stays on the wallet</b>The Dust secret key, which spends are its, its coins' values and positions.</div></div>
+</section>
+
 <!-- ═══════════════════════════════════════════════════ closing -->
 <section class="slide" id="s-why" data-step="" data-title="Why the server learns nothing">
   <div class="top">Review</div>
@@ -879,6 +905,7 @@
     <table class="tbl">
       <tr><th style="width: 26%">What</th><th>Why</th><th style="width: 32%">How to close it</th></tr>
       <tr><td><b>A rough count above 32</b></td><td>A wallet needing more than 32 columns (or buckets) sends a second call, so the server learns "more than 32".</td><td>Always send a fixed number of calls, or raise the vectors per call; costs bytes for everyone.</td></tr>
+      <tr><td><b>The Dust public key</b></td><td>A wallet asks for its first coins by its Dust public key, so the server knows which keys sync (not which spends are theirs).</td><td>Read the first coins by PIR too; not part of this proof of concept.</td></tr>
       <tr><td><b>When and how often a wallet syncs, and its IP address</b></td><td>PIR hides what is asked, not that someone asked.</td><td>A relay or Tor; syncing on a regular schedule.</td></tr>
       <tr><td><b>Timing around a spend</b></td><td>If the same operator runs the node a transaction is sent to, "this client synced, then a new nullifier appeared" can be correlated.</td><td>Submit transactions through another path.</td></tr>
       <tr><td><b>Correct answers</b> (out of scope)</td><td>A dishonest server cannot learn which coins a wallet has, but it could answer wrongly, for example "unspent" for a spent coin.</td><td>Checks against a trusted root, or attestation; not part of this proof of concept. A wrong "unspent" shows when the spend is refused on chain.</td></tr>
@@ -1129,8 +1156,8 @@
     a.textContent = i < 0 ? "?" : `slide ${i + 1} →`;
     a.title = i < 0 ? "" : slides[i].dataset.title;
   }
-  const STEPS = [["pir", "SimplePIR"], ["ipir", "IPIR+SP"], ["0", "0 Snapshot"], ["1", "1 Keys"], ["2", "2 Files"], ["3", "3 Scan"], ["4", "4 Records"], ["5", "5 Nullifiers"], ["6", "6 Tail"], ["7", "7 Result"]];
-  const order = (k) => (k === "pir" ? -2 : k === "ipir" ? -1 : k === "" ? NaN : Number(k));
+  const STEPS = [["pir", "SimplePIR"], ["ipir", "IPIR+SP"], ["0", "0 Snapshot"], ["1", "1 Keys"], ["2", "2 Files"], ["3", "3 Scan"], ["4", "4 Records"], ["5", "5 Nullifiers"], ["6", "6 Tail"], ["7", "7 Result"], ["dust", "Dust"]];
+  const order = (k) => (k === "pir" ? -2 : k === "ipir" ? -1 : k === "dust" ? 8 : k === "" ? NaN : Number(k));
   const strip = document.getElementById("strip");
   strip.innerHTML = STEPS.map(([k, t], i) => `${i ? '<span class="sep">›</span>' : ""}<span class="st" data-step="${k}">${t}</span>`).join("");
   strip.addEventListener("click", (e) => {

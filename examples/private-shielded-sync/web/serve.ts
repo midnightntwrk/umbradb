@@ -202,7 +202,8 @@ async function proxy(req: IncomingMessage, res: ServerResponse, url: URL): Promi
   }
   const r = await fetch(new URL(url.pathname + url.search, upstream), { method: req.method, headers, ...(body === undefined ? {} : { body }) });
   const out: Record<string, string> = { "Cache-Control": "no-store" };
-  for (const h of ["content-type", "content-length", "content-range", "etag", "pss-snapshot-id", "accept-ranges"]) {
+  // `pss-dust-check-id`: the Dust check table's identifier, which the wallet checks against its manifest (spec 00062).
+  for (const h of ["content-type", "content-length", "content-range", "etag", "pss-snapshot-id", "pss-dust-check-id", "accept-ranges"]) {
     const v = r.headers.get(h);
     if (v !== null) out[h] = v;
   }

@@ -162,6 +162,27 @@
       <div class="row"><button data-run="summary">Show</button></div>
       <div class="out"></div>
     </section>
+
+    <section class="card" id="step-dust-file">
+      <h2><span class="num">9</span>Dust: get the file and my first coins<span class="status"></span></h2>
+      <p class="desc">Dust needs the mnemonic of step 1: its Dust seed (HD m/44'/2400'/0'/2/0) gives the Dust key. Gets the Dust file's manifest and each chunk (every Dust spend of the current ledger era, about 9 bytes each: a 4-byte nullifier prefix, the declared time, the fee and the new commitment's position), checking each against the manifest's SHA-256; a chunk kept from an earlier run is not downloaded again. Then the Dust parameters, and this wallet's first coins and generation updates: the one request that names the wallet (its Dust public key).</p>
+      <div class="row"><button data-run="dustFile">Get the Dust file</button></div>
+      <div class="out"></div>
+    </section>
+
+    <section class="card" id="step-dust-walk">
+      <h2><span class="num">10</span>Dust: walk my chains<span class="status"></span></h2>
+      <p class="desc">For each first coin, computes the coin's nullifier, finds its 4-byte prefix in the file from the first entry above the coin's own position, derives the next coin from that entry's time, fee and position (the ledger's <code>successorDustUtxo</code>), and goes on from the entry after. Nothing is sent. A prefix can match another wallet's spend: step 11 checks each chain's end.</p>
+      <div class="row"><button data-run="dustWalk">Walk the chains</button></div>
+      <div class="out"></div>
+    </section>
+
+    <section class="card" id="step-dust-check">
+      <h2><span class="num">11</span>Dust: check each chain by PIR<span class="status"></span></h2>
+      <p class="desc">Gets the Dust check table's manifest and public artifact (once per table), then walks again and reads, by PIR, the commitment at each chain's last coin's position, all chains in calls padded to the same number of requests, so the server cannot tell which positions or how many chains. A commitment that is not the coin's drops that match, the search goes on after it, and the new end is checked in a further call. A chain without a spend needs no check; a coin newer than the table is not checkable yet. A wallet with nothing to check still sends one call.</p>
+      <div class="row"><button data-run="dustCheck">Check by PIR</button></div>
+      <div class="out"></div>
+    </section>
   </div>
 
   <aside class="side">

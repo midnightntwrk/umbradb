@@ -5,6 +5,7 @@
  */
 
 import { serveCallWorkers } from "./call-workers.ts";
+import { dustBytes, dustChainRows } from "./dust-view.ts";
 import { callText, cellText, kb, pathTableText, tableText } from "./scheme-view.ts";
 import type { SchemeName } from "../pir/scheme.ts";
 
@@ -233,6 +234,50 @@ const VIEWS: Record<string, (r: Json) => string> = {
       facts(Object.entries(balance).map(([t, v]) => [`balance ${short(t, 16)}`, v] as [string, unknown]))
     );
   },
+};
+VIEWS.dustFile = (r) => {
+  const m = r.manifest as Json;
+  const p = r.parameters as Json;
+  const chunks = r.chunks as Json[];
+  const firsts = r.firstCoins as Json[];
+  return (
+    facts([
+      ["Dust file", `to height ${Number(m.height).toLocaleString("en-US")} (era from ${Number(m.eraHeight).toLocaleString("en-US")}), ${Number(m.entries).toLocaleString("en-US")} entries in ${m.chunks} chunks of ${m.chunkEntries}, ${m.prefixBytes}-byte prefixes`],
+      ["chunks", `${r.chunksFromCache} from the page's cache, ${r.chunksDownloaded} downloaded (${kb(Number(r.chunkBytesDownloaded))})`],
+      ["parameters", `${p.nightDustRatio} Specks per Star, decay ${p.generationDecayRate}, grace ${p.dustGracePeriodSeconds} s (${p.source === "initial" ? "the ledger's initial ones" : `changed at ${p.changedAt}`})`],
+      ["Dust key", `…${r.keyEnds} (last digits; the key is a public key)`],
+      ["first coins in the era", firsts.length === 0 ? "none" : firsts.map((f) => `height ${f.height}, position ${f.position}`).join("; ")],
+      ["generation updates", String((r.updates as Json[]).length)],
+      ["bytes", dustBytes(r.bytes as Json)],
+      ["checks", checksHtml(r.checks)],
+      ["note", String(r.note)],
+      ["time", `${r.ms} ms`],
+    ]) + table(["chunk", "entries", "heights", "size", "from", "ms"], chunks.map((c) => [String(c.n), `${c.first} … ${Number(c.first) + Number(c.count) - 1}`, `${c.firstHeight} … ${c.lastHeight}`, kb(Number(c.bytes)), c.cached ? "cache" : "server", String(c.ms)]))
+  );
+};
+VIEWS.dustWalk = (r) =>
+  facts([
+    ["entries searched", Number(r.entries).toLocaleString("en-US")],
+    ["chains", String((r.chains as Json[]).length)],
+    ["note", String(r.note)],
+    ["time", `${r.ms} ms`],
+  ]) + dustChainRows(r.chains as Json[], false, null);
+VIEWS.dustCheck = (r) => {
+  const c = r.check as Json | null;
+  const b = r.bytes as Json;
+  const cb = b.check as Json;
+  const batches = r.batches as Json[];
+  const sch = (c?.scheme ?? "simplepir") as SchemeName;
+  return (
+    facts([
+      ["check table", c === null ? `none served: ${String(r.checkUnavailable)}` : `${short(String(c.id), 16)}: ${SCHEME_NAME[sch] ?? sch}, height ${Number(c.height).toLocaleString("en-US")}, ${Number(c.commitments).toLocaleString("en-US")} commitments, ${c.groups} groups of ${c.perGroup}`],
+      [sch === "simplepir" ? "setup data" : "masks", c === null ? undefined : `${kb(Number((c.publicArtifact as Json).bytes))}, ${(c.publicArtifact as Json).cached ? "from the page's cache" : "downloaded (once per check table)"}`],
+      ["calls", c === null ? "none" : `${r.calls} call${r.calls === 1 ? "" : "s"} of ${c.queriesPerCall} requests: ${batches.map((x, i) => `call ${i + 1} reads ${x.readable} chain end(s)${(x.positions as number[]).length > Number(x.readable) ? ` (${(x.positions as number[]).length - Number(x.readable)} beyond the table)` : ""}, the rest random`).join("; ")}`],
+      ["check bytes", `${kb(Number(cb.callsUp))} up, ${kb(Number(cb.callsDown))} down in the calls; manifest ${kb(Number(cb.manifest))} and ${sch === "simplepir" ? "setup data" : "masks"} ${kb(Number(cb.publicArtifact))} down`],
+      ["Dust sync in all", dustBytes(b)],
+      ["time", `${r.ms} ms`],
+    ]) + dustChainRows(r.chains as Json[], true, c === null ? null : Number(c.commitments))
+  );
 };
 VIEWS.generate = VIEWS.keys!;
 const padded = (s: Json): string => (s.padding ? `, tables padded to ${Number(s.padding).toLocaleString("en-US")} entries` : "");

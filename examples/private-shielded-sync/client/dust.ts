@@ -32,9 +32,10 @@ import {
   dustPrefixOfField,
   findDustPrefix,
   fromHex,
+  ROUTES,
 } from "../shared/index.ts";
 import { type DustChecker, type DustCheckOutcome, isDustCheckReplaced } from "./dust-check.ts";
-import type { PssHttp } from "./http.ts";
+import type { PssHttp, RequestRecord } from "./http.ts";
 import type { Ledger } from "./ledger.ts";
 
 /** A Dust coin as the ledger package gives it (`QualifiedDustOutput`). */
@@ -280,22 +281,136 @@ export function decodeDustCoins(ledger: Ledger, answer: DustCoinsAnswer, owner: 
   return { starts, updates };
 }
 
-/** The Dust file, downloaded and checked against its manifest. */
-export async function downloadDustFile(http: PssHttp): Promise<{ manifest: DustManifest; file: DustFileView }> {
+/**
+ * Files kept by SHA-256 (the Dust file's chunks, the check table's public artifact): the command line's on disk
+ * (`DiskDustCache`, `./cache.ts`), the page's in memory (a `Map`). A full chunk, and a chunk at a given entry count,
+ * never changes, so a wallet that kept it never downloads it again.
+ */
+export interface DustCache {
+  get(sha256: string): Uint8Array | undefined;
+  set(sha256: string, bytes: Uint8Array): unknown;
+}
+
+/** One chunk of a download: where it came from and what it cost. */
+export interface DustChunkFetch {
+  readonly n: number;
+  readonly first: number;
+  readonly count: number;
+  readonly firstHeight: number;
+  readonly lastHeight: number;
+  readonly bytes: number;
+  readonly sha256: string;
+  readonly cached: boolean;
+  readonly ms: number;
+}
+
+/**
+ * The Dust file, downloaded and checked against its manifest: each chunk at the entry count the manifest lists, from
+ * `cache` when it holds the chunk's SHA-256 (checked again) and kept there once downloaded.
+ */
+export async function downloadDustFile(http: PssHttp, cache?: DustCache): Promise<{ manifest: DustManifest; file: DustFileView; chunks: DustChunkFetch[] }> {
   const manifest = await http.dustManifest();
   if (manifest.version !== 1) throw new Error(`a Dust manifest of version ${String(manifest.version)}; this wallet reads version 1`);
   const chunks: DustChunk[] = [];
+  const fetches: DustChunkFetch[] = [];
   for (const [n, ref] of manifest.chunks.entries()) {
-    const bytes = await http.dustChunk(n, ref.count);
+    const started = performance.now();
+    const kept = cache?.get(ref.sha256);
+    const cached = kept !== undefined && kept.length === ref.bytes && createHash("sha256").update(kept).digest("hex") === ref.sha256;
+    const bytes = cached ? kept : await http.dustChunk(n, ref.count);
     const sha256 = createHash("sha256").update(bytes).digest("hex");
     if (bytes.length !== ref.bytes || sha256 !== ref.sha256) throw new Error(`Dust chunk ${n}: ${bytes.length} bytes with SHA-256 ${sha256}, the manifest names ${ref.bytes} and ${ref.sha256}`);
     const chunk = decodeDustChunk(bytes);
     if (chunk.first !== ref.first || chunk.count !== ref.count || chunk.firstHeight !== ref.firstHeight) throw new Error(`Dust chunk ${n} is not the one the manifest lists`);
+    if (!cached) cache?.set(ref.sha256, bytes);
     chunks.push(chunk);
+    fetches.push({ n, first: ref.first, count: ref.count, firstHeight: ref.firstHeight, lastHeight: ref.lastHeight, bytes: bytes.length, sha256, cached, ms: performance.now() - started });
   }
   const file = new DustFileView(chunks, manifest.prefixBytes);
   if (file.entries !== manifest.entries) throw new Error(`the Dust chunks hold ${file.entries} entries, the manifest ${manifest.entries}`);
-  return { manifest, file };
+  return { manifest, file, chunks: fetches };
+}
+
+/**
+ * A chain as the command line and the page show it, every number that may pass 2^53 in decimal: the first coin, the
+ * spends found (with their file entries), the check, the false matches dropped, and the current coin.
+ */
+export interface DustChainSummary {
+  readonly firstCoinHeight: number;
+  readonly generationIndex: string;
+  /** Stars of Night behind the chain. */
+  readonly nightValue: string;
+  /** When the Night output was spent (the generation record's `dtime`), or null. */
+  readonly dtime: string | null;
+  readonly spends: number;
+  /** The file entries the spends were taken from. */
+  readonly entries: readonly number[];
+  readonly status: DustChainStatus;
+  readonly falseMatchesDropped: number;
+  readonly droppedEntries: readonly number[];
+  readonly coin: {
+    readonly seq: number;
+    readonly position: string;
+    readonly ctime: string;
+    /** Specks. */
+    readonly valueAtCreation: string;
+    readonly valueNow: string;
+    readonly commitment: string;
+  };
+}
+
+/** What the check of a chain found, in words (`commitments`: the positions the check table covers). */
+export function dustStatusText(c: DustChainSummary, commitments: number | null): string {
+  if (c.status === "checked") return `checked: the record at position ${c.coin.position} is the last coin's commitment`;
+  if (c.status === "not-checkable") return `not checkable yet: the check table covers positions below ${commitments ?? "?"}`;
+  if (c.status === "no-spend") return "nothing to check: the first coin is public";
+  return "not checked";
+}
+
+export function dustChainSummary(c: DustChain, valueNow: bigint, commitment: bigint): DustChainSummary {
+  return {
+    firstCoinHeight: c.start.height,
+    generationIndex: c.start.generationIndex.toString(),
+    nightValue: c.start.generation.value.toString(),
+    dtime: c.generation.dtime?.toISOString() ?? null,
+    spends: c.steps.length,
+    entries: c.steps.map((step) => step.entry),
+    status: c.status,
+    falseMatchesDropped: c.dropped.length,
+    droppedEntries: c.dropped,
+    coin: {
+      seq: c.coin.seq,
+      position: c.coin.mtIndex.toString(),
+      ctime: c.coin.ctime.toISOString(),
+      valueAtCreation: c.coin.initialValue.toString(),
+      valueNow: valueNow.toString(),
+      commitment: `0x${commitment.toString(16).padStart(64, "0")}`,
+    },
+  };
+}
+
+/** What a Dust sync moved, split as the command line prints it, from the requests' records (bodies' lengths). */
+export function dustTransfer(records: readonly RequestRecord[]) {
+  const sum = (paths: readonly string[], field: "answerBytes" | "bodyBytes"): number =>
+    records.filter((r) => paths.some((p) => r.path.startsWith(p))).reduce((t, r) => t + r[field], 0);
+  const checkPaths = [ROUTES.dustCheckManifest, ROUTES.dustCheckBlob, ROUTES.dustCheckQuery];
+  return {
+    requests: records.length,
+    down: sum([""], "answerBytes"),
+    up: sum([""], "bodyBytes"),
+    manifest: sum([ROUTES.dustManifest], "answerBytes"),
+    chunks: sum([ROUTES.dustChunk], "answerBytes"),
+    coins: sum([ROUTES.dustCoins], "answerBytes"),
+    parameters: sum([ROUTES.dustParameters], "answerBytes"),
+    check: {
+      requests: records.filter((r) => checkPaths.some((p) => r.path.startsWith(p))).length,
+      manifest: sum([ROUTES.dustCheckManifest], "answerBytes"),
+      publicArtifact: sum([ROUTES.dustCheckBlob], "answerBytes"),
+      calls: records.filter((r) => r.path === ROUTES.dustCheckQuery).length,
+      callsUp: sum([ROUTES.dustCheckQuery], "bodyBytes"),
+      callsDown: sum([ROUTES.dustCheckQuery], "answerBytes"),
+    },
+  };
 }
 
 export interface DustSyncResult {
@@ -311,6 +426,8 @@ export interface DustSyncResult {
   readonly commitments: readonly bigint[];
   /** The check table used, when the chains were checked. */
   readonly checker: DustChecker | null;
+  /** Each chunk of the download: from the cache or downloaded. */
+  readonly chunks: readonly DustChunkFetch[];
   readonly at: Date;
   readonly ms: number;
 }
@@ -338,6 +455,8 @@ export async function dustSync(options: {
   readonly http: PssHttp;
   /** Opens the check table; null when the server serves none (the chains then end unchecked). */
   readonly openChecker?: () => Promise<DustChecker | null>;
+  /** Keeps the chunks by SHA-256, so a later sync downloads only the new ones. */
+  readonly cache?: DustCache;
   readonly now?: Date;
   readonly log?: (line: string) => void;
 }): Promise<DustSyncResult> {
@@ -348,7 +467,7 @@ export async function dustSync(options: {
   let checker: DustChecker | null = null;
   try {
     const owner = secretKey.publicKey;
-    const { manifest, file } = await downloadDustFile(http);
+    const { manifest, file, chunks: fetches } = await downloadDustFile(http, options.cache);
     log(`Dust file to height ${manifest.height}: ${manifest.entries} entries in ${manifest.chunks.length} chunks`);
     const parameters = await http.dustParameters();
     const params = new ledger.DustParameters(BigInt(parameters.nightDustRatio), BigInt(parameters.generationDecayRate), BigInt(parameters.dustGracePeriodSeconds));
@@ -380,7 +499,7 @@ export async function dustSync(options: {
     const at = options.now ?? new Date();
     const values = chains.map((c) => ledger.updatedValue(c.coin.ctime, c.coin.initialValue, c.generation, at, params));
     const commitments = chains.map((c) => ledger.dustCommitment(c.coin));
-    return { manifest, parameters, owner, chains, updates, values, commitments, checker, at, ms: performance.now() - started };
+    return { manifest, parameters, owner, chains, updates, values, commitments, checker, chunks: fetches, at, ms: performance.now() - started };
   } catch (error) {
     checker?.dispose();
     throw error;

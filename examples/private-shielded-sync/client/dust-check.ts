@@ -9,10 +9,14 @@
  * not reach yet (it was built at an earlier height) is not read: it is "not checkable yet".
  */
 
+import { createHash } from "node:crypto";
+import type { DustCache } from "./dust.ts";
 import { HttpError, type PssHttp } from "./http.ts";
 import { paddedCalls } from "./pir-calls.ts";
 import { openWalletScheme, type WalletScheme, type WalletSchemeOptions, type WalletTable } from "../pir/index.ts";
 import { decodeAnswerBody, decodeDustCheckManifest, type DustCheckManifest, dustCheckCell, dustCheckId, encodeQueryBody, equalBytes, toHex } from "../shared/index.ts";
+
+const sha256 = (b: Uint8Array): Uint8Array => new Uint8Array(createHash("sha256").update(b).digest());
 
 /** A coin's check: its record is its commitment, it is not, or the table does not reach its position. */
 export type DustCheckOutcome = "match" | "mismatch" | "beyond";
@@ -23,9 +27,10 @@ export interface DustCheckStats {
   /** The query calls' bodies and answers. */
   bytesUp: number;
   bytesDown: number;
-  /** The manifest and the public artifact, downloaded once. */
+  /** The manifest and the public artifact, downloaded once (the artifact not at all when the cache holds it). */
   manifestBytes: number;
   publicBytes: number;
+  publicCached: boolean;
   ms: number;
 }
 
@@ -49,18 +54,25 @@ export class DustChecker {
     this.stats = stats;
   }
 
-  /** Reads the check's manifest and public artifact and opens its table through its scheme. */
-  static async open(http: PssHttp, options: WalletSchemeOptions = {}): Promise<DustChecker> {
+  /**
+   * Reads the check's manifest and public artifact (from `cache` when it holds the artifact's SHA-256, kept there once
+   * downloaded) and opens its table through its scheme.
+   */
+  static async open(http: PssHttp, options: WalletSchemeOptions = {}, cache?: DustCache): Promise<DustChecker> {
     const started = performance.now();
     const { bytes, servedId } = await http.dustCheckManifest();
     const manifest = decodeDustCheckManifest(bytes);
     const idBytes = dustCheckId(bytes);
     if (servedId !== null && servedId !== toHex(idBytes)) throw new Error(`the Dust check manifest's SHA-256 is ${toHex(idBytes)}, the server names ${servedId}`);
-    const publicArtifact = await http.dustCheckBlob(manifest.public.digest, manifest.public.size);
+    const ref = manifest.public;
+    const kept = cache?.get(ref.digest);
+    const publicCached = kept !== undefined && kept.length === ref.size && toHex(sha256(kept)) === ref.digest;
+    const publicArtifact = publicCached ? kept : await http.dustCheckBlob(ref.digest, ref.size);
+    if (!publicCached) cache?.set(ref.digest, publicArtifact);
     const scheme = await openWalletScheme(manifest, options);
     try {
       const table = await scheme.openTable(manifest.table, publicArtifact);
-      const stats: DustCheckStats = { calls: 0, bytesUp: 0, bytesDown: 0, manifestBytes: bytes.length, publicBytes: publicArtifact.length, ms: performance.now() - started };
+      const stats: DustCheckStats = { calls: 0, bytesUp: 0, bytesDown: 0, manifestBytes: bytes.length, publicBytes: publicArtifact.length, publicCached, ms: performance.now() - started };
       return new DustChecker(http, manifest, idBytes, scheme, table, stats);
     } catch (error) {
       scheme.dispose();

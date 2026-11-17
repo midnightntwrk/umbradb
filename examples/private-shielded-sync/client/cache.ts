@@ -4,7 +4,8 @@
  * cache. A file is written under a temporary name and renamed once its digest and size are checked.
  */
 
-import { mkdirSync, readFileSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ArtifactRef } from "../shared/index.ts";
 import type { PssHttp } from "./http.ts";
@@ -56,5 +57,37 @@ export class BlobCache {
   /** Bytes the cache holds for `refs`. */
   sizeOf(refs: readonly ArtifactRef[]): number {
     return refs.filter((r) => this.has(r)).reduce((n, r) => n + r.size, 0);
+  }
+}
+
+/**
+ * The Dust sync's files by SHA-256 (spec 00062: the Dust file's chunks, the check table's public artifact), in the same
+ * folder as the artifacts: a file named by its digest, written under a temporary name and renamed, read back only when
+ * its bytes still have that digest.
+ */
+export class DiskDustCache {
+  readonly dir: string;
+
+  constructor(dir: string) {
+    this.dir = dir;
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+  }
+
+  get(sha256: string): Uint8Array | undefined {
+    if (!/^[0-9a-f]{64}$/.test(sha256)) return undefined;
+    let bytes: Uint8Array;
+    try {
+      bytes = new Uint8Array(readFileSync(join(this.dir, sha256)));
+    } catch {
+      return undefined;
+    }
+    return createHash("sha256").update(bytes).digest("hex") === sha256 ? bytes : undefined;
+  }
+
+  set(sha256: string, bytes: Uint8Array): void {
+    if (!/^[0-9a-f]{64}$/.test(sha256)) throw new Error(`not a digest: ${sha256}`);
+    const partial = join(this.dir, `${sha256}.partial-${process.pid}`);
+    writeFileSync(partial, bytes, { mode: 0o600 });
+    renameSync(partial, join(this.dir, sha256));
   }
 }

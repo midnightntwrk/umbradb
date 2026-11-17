@@ -183,7 +183,16 @@ A page that runs the client's own code in the browser, one step per button, and 
 6. read lower Merkle paths from the path table by PIR, as a spend does (its public artifact is downloaded then), each
    checked against its block's root;
 7. get the tail, scan its outputs, and check each fetched position's full 32-hash path against the tail's root;
-8. show the coins and the balance.
+8. show the coins and the balance;
+9. Dust (below, "Dust"): get the Dust file, the parameters and the wallet's first coins and generation updates, with
+   the Dust seed of the mnemonic step 1 took (a wallet given by its Zswap seed has none); chunks and the check table's
+   public artifact are kept by SHA-256 for the page's life, so a second run downloads only the new ones, and the step
+   says how many came from the cache;
+10. walk each Dust chain through the file, locally: per chain, the first coin, the spends found with their file
+    entries, and the current coin (sequence number, position, creation time, value, commitment);
+11. check each chain's end by PIR in the Dust check table, all chains in calls padded to the same number of requests,
+    dropping a false match; per chain checked, dropped or not checkable, and the Dust sync's bytes split as the
+    command line splits them.
 
 The page runs on either scheme, following the manifest. On an IPIR+SP snapshot the worker also fetches
 `pss-ipir.wasm` (beside the page; `build.ts` copies it and builds its committed SHA-256 into the worker) and compiles
@@ -204,7 +213,8 @@ the wallet, the wire and the server, with time going down. It covers:
 - the read table, the nullifier buckets and the tree;
 - a worked SimplePIR example with small numbers, computed in the page, and one slide on what IPIR+SP changes for the
   wallet, with its measured sizes at today's chain size;
-- a `gpu` tag on the steps the GPU kernels speed up, and a hover on every size, showing values at 1M and 10M entries.
+- a `gpu` tag on the steps the GPU kernels speed up, and a hover on every size, showing values at 1M and 10M entries;
+- one slide on Dust (steps 9 to 11): the file, the walk and the check, and what the server sees (the Dust public key).
 
 A side panel lists every request the server saw, with its size and time. Clicking one shows it whole: the request's
 headers and body and the answer's, each with its size and SHA-256, decoded where the format is known (manifest, query
@@ -261,7 +271,11 @@ The worker runs the client's files bundled by esbuild:
 - `@midnightntwrk/ledger-v9` is loaded from its `.wasm` (`web/ledger-v9.ts`).
 
 `web/scheme-view.ts` holds what the page shows of each scheme (table lines, call plans, the body and artifact
-decoders, the digest-checked compile), without the DOM, so `test/web-scheme-view.test.ts` checks it under Node.
+decoders, the digest-checked compile), without the DOM, so `test/web-scheme-view.test.ts` checks it under Node. The
+Dust steps are `web/dust-steps.ts` (the command line's `dust`, from `client/dust.ts` and `client/dust-check.ts`, cut
+into the three steps) and `web/dust-view.ts` (the chains and bytes as the page shows them), both without the DOM, so
+`test/server-web-dust.test.ts` runs them under Node in both schemes. The request panel decodes the Dust routes too: a
+chunk's header and the bytes of each part, the check table's public artifact, and its query and answer bodies.
 `npx tsc -p examples/private-shielded-sync/web` type-checks the page and the worker.
 
 ## Checks
@@ -725,7 +739,10 @@ node --env-file=<secrets.env> examples/private-shielded-sync/client/main.ts dust
 
 It prints the file, the parameters and the check table, then per chain the spends found (with their file entries), the
 check, the false matches dropped and the current coin (sequence number, position, value at creation and now,
-commitment), and the bytes moved; `--json` prints the same as JSON, `--no-check` walks without the check. For example,
+commitment), and the bytes moved; `--json` prints the same as JSON, `--no-check` walks without the check. Chunks and
+the check table's public artifact are kept by SHA-256 in `--data`'s `cache/` (beside the snapshot's artifacts), so a
+later run downloads only the chunks that are new; the first line says how many came from the cache. The step page
+runs the same code in three steps (above, "The step-by-step page", steps 9 to 11). For example,
 on Preprod, one of a wallet's two chains in the era and the totals:
 
 ```
@@ -881,6 +898,7 @@ wallet's math was moved to the GPU and what was not.
 | `test/server-dust-index.test.ts` | The Dust index over real Preprod events: each chunk against the entries read from the events, full chunks unchanged as the file grows, a chunk at an earlier count, the era's first height, first coins and updates by owner, the parameters, the commitments by position (a gap and a position filled twice refused), what breaks it. |
 | `test/server-dust.test.ts` | The Dust routes in UmbraDB's real process (PostgreSQL 18) over Preprod events written into the test database: the file, a key's coins, the parameters, refusals; the check table built at start in SimplePIR and read through the wallet's code, refusals, a build refused for another stored `dust_commitment_first_free`, the table rebuilt in IPIR+SP by an IPIR+SP snapshot build and read through it. |
 | `test/dust-walk.test.ts` | The walk: a chain of several spends across chunks, a match below the coin's position, a false match without and with a check, a chain with no spend, two chains in one file; with the ledger's functions, a chain found again from the encoded file, and what a generation record's `dtime` changes; the coins answer decoded from real events. |
+| `test/server-web-dust.test.ts` | The page's Dust steps under Node in both schemes, over the world of `test/server-dust-world.ts` (also the check test's): a wallet with three chains (the false match dropped, a chain not checkable, a chain with nothing to check), a second run from the page's cache, a generated wallet with no chain (one padded call), the page's rendering of the chains and bytes, refusals. |
 | `test/server-dust-check.test.ts` | The check in both schemes: the module's builder and the scheme's server table called through the wallet's code; another wallet's spend before the real one dropped by the check, a chain's end beyond the table not checkable, two padded calls of one size. |
 | `test/bench-run.test.ts` | The benchmark against the module in the real process (PostgreSQL 18) over the synthetic chain, wallets A, B and C: every cell of spec §8 has a value for the server and each client, and the report renders it; the snapshot's counts and versions; per-step values and the server's times from its log; the naive baseline; the read table at k = 16, 8, 2 and 0 (k 2 gives the served snapshot); the server's view of every request and identical request shapes; the scan by thread count; the transfer row (and a dry-run record); no key, seed, nonce or nullifier in `results.json`; exactly the cells without their input reported missing; `--build`; the command line (`run`, `report --transfer`, with the install); log pairing, speed and formatting rules. |
 

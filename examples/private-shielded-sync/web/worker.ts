@@ -18,6 +18,10 @@
  *   given to the scheme through `ipirWasm`. A call's requests are dealt to `ipir-worker.js` workers
  *   (`../ipir/pool.ts`), each with its own instance of the WebAssembly. Every request's secret comes from the
  *   `crypto.getRandomValues` of the thread that makes it, through the wrapper (`../ipir/wallet.ts`, FR-032).
+ *
+ * The Dust steps (spec 00062) are `./dust-steps.ts`, the command line's `dust` cut into three: the Dust seed comes from
+ * the same mnemonic (HD role 2, `WalletSeeds.dust`) and stays here; chunks and the check table's public artifact are
+ * kept by SHA-256 for the page's life, so running the steps again downloads only what is new.
  */
 
 import { generateMnemonic, mnemonicToSeedSync, validateMnemonic } from "@scure/bip39";
@@ -47,8 +51,10 @@ import {
 } from "../pir/index.ts";
 import {
   type ArtifactRef,
+  decodeDustChunk,
   decodeManifest,
   decodePathRecord,
+  dustChunkLayout,
   decodeReadRecord,
   decodeTailHeader,
   decodeTailOutput,
@@ -61,6 +67,7 @@ import {
   TAIL_OUTPUT_BYTES,
 } from "../shared/index.ts";
 import { callWorkerFailed, startCallWorker } from "./call-workers.ts";
+import { DustSteps } from "./dust-steps.ts";
 import { initLedger } from "./ledger-v9.ts";
 import { WebMultiplier } from "./multiply-web.ts";
 import { ascii4, callPlan, cellOf, compileChecked, describeCallBody, describePublicArtifact, hex, tableOfRoute, tableSummary } from "./scheme-view.ts";
@@ -114,6 +121,9 @@ function startGpu(): Promise<GpuScan> {
   return gpu;
 }
 let keys: WalletKeys | null = null;
+/** The Dust steps (made once the ledger is loaded), and the files they keep by SHA-256 for the page's life. */
+let dust: DustSteps | null = null;
+const dustCache = new Map<string, Uint8Array>();
 
 /** Threads for a call's work: one fewer than the browser's processors, at most 8. */
 const CALL_THREADS = Math.min(8, Math.max(1, (self.navigator?.hardwareConcurrency ?? 1) - 1));
@@ -268,6 +278,7 @@ function decodeBody(e: Exchange, side: "request" | "response"): Json | null {
   const route = e.path.replace("/pss/v1", "");
   if (e.status >= 400 && side === "response") return null;
   if (route === "/manifest") return { format: "manifest (canonical JSON); its SHA-256 is the snapshot identifier" };
+  if (route.startsWith("/dust/")) return decodeDustBody(route, side, b, e.requestBody);
   if (route.startsWith("/query/")) {
     // The call's own snapshot (its header names it), else the current one.
     const m = (b.length >= 40 ? manifests.get(hex(b.subarray(6, 38))) : undefined) ?? manifest;
@@ -314,6 +325,37 @@ function decodeBody(e: Exchange, side: "request" | "response"): Json | null {
       Object.assign(out, describePublicArtifact(manifest.scheme, b, t?.layout.cols ?? null));
     }
     return out;
+  }
+  return null;
+}
+
+/** What a Dust route's body is (spec 00062; the JSON ones show as text). */
+function decodeDustBody(route: string, side: "request" | "response", b: Uint8Array, requestBody: Uint8Array | null): Json | null {
+  if (route.startsWith("/dust/chunk/") && side === "response") {
+    const c = decodeDustChunk(b);
+    const layout = dustChunkLayout(b);
+    return {
+      format: "Dust chunk (shared/dust-file.ts): magic PSSDUST1, header, prefixes, fee list, then times, fees and positions as differences",
+      first: c.first,
+      count: c.count,
+      firstHeight: c.firstHeight,
+      prefixBytes: c.prefixBytes,
+      firstTime: new Date(c.times[0]! * 1000).toISOString(),
+      firstPosition: c.positions[0],
+      bytesByPart: layout,
+      firstPrefixes: Array.from({ length: Math.min(4, c.count) }, (_, i) => hex(c.prefixes.subarray(i * c.prefixBytes, (i + 1) * c.prefixBytes))),
+    };
+  }
+  if (route === "/dust/check/manifest") return { format: "the Dust check table's manifest (canonical JSON); its SHA-256 is the check's identifier" };
+  if (route === "/dust/check/query") {
+    const m = (b.length >= 40 ? dust?.checkManifests.get(hex(b.subarray(6, 38))) : undefined) ?? null;
+    if (m === null) return { format: "a call to the Dust check table (its manifest is not known here)" };
+    return { table: "Dust check table (32-byte commitments by position)", ...describeCallBody(m.scheme, side, b, m.table, side === "response" ? requestBody : null, sha256Sync) };
+  }
+  if (route.startsWith("/dust/check/blob/") && side === "response") {
+    const digest = route.slice("/dust/check/blob/".length);
+    const m = [...(dust?.checkManifests.values() ?? [])].find((x) => x.public.digest === digest);
+    return { format: `the Dust check table's ${m === undefined ? "public artifact" : PUBLIC_ARTIFACT[m.scheme]}, addressed by its SHA-256`, digest, ...(m === undefined ? {} : describePublicArtifact(m.scheme, b, m.table.layout.cols)) };
   }
   return null;
 }
@@ -402,6 +444,13 @@ async function load(): Promise<Json> {
   const ledgerInfo = await initLedger("ledger-v9.wasm");
   ledger = ledgerInfo.ledger as unknown as Ledger;
   const ledgerMs = now() - t2;
+  dust?.dispose();
+  dust = new DustSteps({
+    ledger,
+    http,
+    cache: dustCache,
+    scheme: { multiplier, ipirWasm: async () => (await loadIpirWasm()).module, ...(ipirWorkers === null ? {} : { ipirWorkers }) },
+  });
   const debug = await debugJson("/debug/info");
   // Not awaited: a failure is reported by the scan that asks for the GPU.
   if ("gpu" in navigator) startGpu().catch(() => undefined);
@@ -427,12 +476,17 @@ async function deriveKeys(args: { mnemonic?: string; seedHex?: string; generate?
     const words = phrase.trim().split(/\s+/).join(" ");
     if (!validateMnemonic(words, wordlist)) throw new Error("not a valid BIP-39 English mnemonic");
     const master = mnemonicToSeedSync(words);
-    seed = WalletSeeds.fromMasterSeed(master).shielded;
+    const seeds = WalletSeeds.fromMasterSeed(master);
+    seed = seeds.shielded;
+    // The Dust seed (role 2) for the Dust steps: copied there, wiped here.
+    need(dust, "load the ledger").setSeed(seeds.dust);
+    seeds.dust.fill(0);
     master.fill(0);
-    source = `mnemonic (${words.split(" ").length} words) → BIP-39 seed → HD m/44'/2400'/0'/3/0`;
+    source = `mnemonic (${words.split(" ").length} words) → BIP-39 seed → HD m/44'/2400'/0'/3/0 (Zswap) and m/44'/2400'/0'/2/0 (Dust)`;
   } else if (args.seedHex !== undefined && args.seedHex.trim() !== "") {
     seed = fromHexStrict(args.seedHex, 32);
-    source = "32-byte Zswap seed";
+    need(dust, "load the ledger").setSeed(null);
+    source = "32-byte Zswap seed (no Dust key: the Dust steps need a mnemonic)";
   } else {
     throw new Error("give a mnemonic, a Zswap seed, or generate one");
   }
@@ -875,6 +929,9 @@ const STEPS: Record<string, (args: never, progress: (text: string) => void) => P
   tail,
   summary,
   sampleSpends,
+  dustFile: () => need(dust, "load the ledger").getFile(),
+  dustWalk: () => need(dust, "load the ledger").walk(),
+  dustCheck: () => need(dust, "load the ledger").check(),
   exchange,
   exchangeBytes,
 };

@@ -24,10 +24,10 @@ import { compileIpirWasm } from "../ipir/wallet-node.ts";
 import { inlineMultiplier, type Multiplier, WorkerMultiplier } from "../pir/index.ts";
 import { ROUTES, toHex } from "../shared/index.ts";
 import { formatShieldedAddress, parseShieldedAddress } from "./address.ts";
-import { BlobCache } from "./cache.ts";
+import { BlobCache, DiskDustCache } from "./cache.ts";
 import { compareWithClient, readZswapEvents, replayZswapEvents } from "./cross-check.ts";
 import { DustChecker } from "./dust-check.ts";
-import { dustSync } from "./dust.ts";
+import { dustChainSummary, dustStatusText, dustSync, dustTransfer } from "./dust.ts";
 import { HttpError, PssHttp } from "./http.ts";
 import { keysFromZswapSeed, type WalletKeys } from "./keys.ts";
 import { type Ledger, loadLedger, loadLedgerV8 } from "./ledger.ts";
@@ -409,9 +409,12 @@ async function cmdDust(): Promise<void> {
   const scheme = { multiplier, ipirWasm: () => compileIpirWasm(), ...(ipirWorkers === undefined ? {} : { ipirWorkers }) };
   /** Why no check was made although asked for: the server serves no check table (503). */
   let checkUnavailable: string | null = null;
+  // Chunks and the check table's public artifact are kept by SHA-256 beside the artifacts: a later run downloads only
+  // what is new.
+  const cache = new DiskDustCache(join(resolve(opt.data), "cache"));
   const openChecker = async (): Promise<DustChecker | null> => {
     try {
-      return await DustChecker.open(http, scheme);
+      return await DustChecker.open(http, scheme, cache);
     } catch (error) {
       if (!(error instanceof HttpError) || error.status !== 503) throw error;
       checkUnavailable = error.message;
@@ -420,56 +423,20 @@ async function cmdDust(): Promise<void> {
   };
   let result;
   try {
-    result = await dustSync({ ledger, dustSeed: s.all.dust, http, log, ...(opt["no-check"] ? {} : { openChecker }) });
+    result = await dustSync({ ledger, dustSeed: s.all.dust, http, log, cache, ...(opt["no-check"] ? {} : { openChecker }) });
   } finally {
     await multiplier.close();
     await ipirWorkers?.close();
   }
   const checker = result.checker;
   checker?.dispose();
-  const sum = (paths: readonly string[], field: "answerBytes" | "bodyBytes"): number => http.records.filter((r) => paths.some((p) => r.path.startsWith(p))).reduce((t, r) => t + r[field], 0);
-  const checkPaths = [ROUTES.dustCheckManifest, ROUTES.dustCheckBlob, ROUTES.dustCheckQuery];
-  const transfer = {
-    requests: http.records.length,
-    down: sum([""], "answerBytes"),
-    up: sum([""], "bodyBytes"),
-    manifest: sum([ROUTES.dustManifest], "answerBytes"),
-    chunks: sum([ROUTES.dustChunk], "answerBytes"),
-    coins: sum([ROUTES.dustCoins], "answerBytes"),
-    parameters: sum([ROUTES.dustParameters], "answerBytes"),
-    check: {
-      requests: http.records.filter((r) => checkPaths.some((p) => r.path.startsWith(p))).length,
-      manifest: sum([ROUTES.dustCheckManifest], "answerBytes"),
-      publicArtifact: sum([ROUTES.dustCheckBlob], "answerBytes"),
-      calls: checker?.stats.calls ?? 0,
-      callsUp: sum([ROUTES.dustCheckQuery], "bodyBytes"),
-      callsDown: sum([ROUTES.dustCheckQuery], "answerBytes"),
-    },
-  };
+  const transfer = dustTransfer(http.records);
   const m = result.manifest;
   const p = result.parameters;
-  const chains = result.chains.map((c, i) => ({
-    firstCoinHeight: c.start.height,
-    generationIndex: c.start.generationIndex,
-    nightValue: c.start.generation.value,
-    dtime: c.generation.dtime?.toISOString() ?? null,
-    spends: c.steps.length,
-    entries: c.steps.map((step) => step.entry),
-    status: c.status,
-    falseMatchesDropped: c.dropped.length,
-    droppedEntries: c.dropped,
-    coin: {
-      seq: c.coin.seq,
-      position: c.coin.mtIndex,
-      ctime: c.coin.ctime.toISOString(),
-      valueAtCreation: c.coin.initialValue,
-      valueNow: result.values[i]!,
-      commitment: `0x${result.commitments[i]!.toString(16).padStart(64, "0")}`,
-    },
-  }));
+  const chains = result.chains.map((c, i) => dustChainSummary(c, result.values[i]!, result.commitments[i]!));
   const report = {
     server: http.origin,
-    file: { eraHeight: m.eraHeight, height: m.height, entries: m.entries, chunks: m.chunks.length, chunkEntries: m.chunkEntries, prefixBytes: m.prefixBytes },
+    file: { eraHeight: m.eraHeight, height: m.height, entries: m.entries, chunks: m.chunks.length, chunkEntries: m.chunkEntries, prefixBytes: m.prefixBytes, chunksFromCache: result.chunks.filter((c) => c.cached).length },
     parameters: p,
     check:
       checker === null
@@ -488,23 +455,16 @@ async function cmdDust(): Promise<void> {
     process.stdout.write(`${json(report)}\n`);
     return;
   }
-  const f = (v: number | bigint): string => v.toLocaleString("en-US");
+  const f = (v: number | bigint | string): string => (typeof v === "string" ? BigInt(v) : v).toLocaleString("en-US");
   const lines = [
-    `Dust file from ${report.server}: to height ${f(m.height)} (era from ${f(m.eraHeight)}), ${f(m.entries)} entries in ${m.chunks.length} chunks`,
+    `Dust file from ${report.server}: to height ${f(m.height)} (era from ${f(m.eraHeight)}), ${f(m.entries)} entries in ${m.chunks.length} chunks (${report.file.chunksFromCache} from the cache)`,
     `parameters: ${p.nightDustRatio}, ${p.generationDecayRate}, ${p.dustGracePeriodSeconds} s (${p.source === "initial" ? "the ledger's initial ones" : `changed at ${p.changedAt}`})`,
     report.check === null
       ? `check: not made (${checkUnavailable ?? "--no-check"})`
       : `check table ${report.check.id.slice(0, 16)}…: ${report.check.scheme}, height ${f(report.check.height)}, ${f(report.check.commitments)} commitments, ${report.check.queriesPerCall} requests per call`,
     `key …${report.keyEnds}: ${chains.length} chains in the era, ${report.updates} generation updates`,
   ];
-  const statusText = (c: (typeof chains)[number]): string =>
-    c.status === "checked"
-      ? `checked: the record at position ${c.coin.position} is the last coin's commitment`
-      : c.status === "not-checkable"
-        ? `not checkable yet: the check table covers positions below ${report.check!.commitments}`
-        : c.status === "no-spend"
-          ? "nothing to check: the first coin is public"
-          : "not checked";
+  const statusText = (c: (typeof chains)[number]): string => dustStatusText(c, report.check?.commitments ?? null);
   chains.forEach((c, i) => {
     lines.push(
       `chain ${i + 1}: first coin at height ${f(c.firstCoinHeight)}, generation index ${c.generationIndex}, backed by ${f(c.nightValue)} Stars of Night${c.dtime === null ? "" : `, Night spent at ${c.dtime}`}`,
