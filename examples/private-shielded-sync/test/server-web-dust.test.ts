@@ -8,6 +8,8 @@
  * - Step 10 walks without a check: chain A follows another wallet's spend placed before its own and loses itself.
  * - Step 11 checks the chains' ends together: A's false match dropped and A's real end checked, B's end beyond the
  *   table not checkable, C needs nothing; two padded calls.
+ * - Step 12 (phase 9) reads the paying coin's path in one padded call to the path table, builds the Dust local state
+ *   (both roots the snapshot's) and spends the coin in memory; nothing else is sent.
  * - A generated wallet (no first coin): nothing to walk, one padded check call, no error.
  * - Every answer is plain JSON (the page shows it with `JSON.stringify`), and the page's view of the chains and bytes
  *   (`web/dust-view.ts`) renders it.
@@ -22,16 +24,18 @@ import { afterAll, describe, expect, it } from "vitest";
 import * as ledger from "../../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js";
 import { PssHttp } from "../client/http.ts";
 import { compileIpirWasm } from "../ipir/wallet-node.ts";
+import { compileKernel, Kernel } from "../kernel/kernel.ts";
 import { inlineMultiplier } from "../pir/index.ts";
 import { ROUTES } from "../shared/index.ts";
 import { DustSteps } from "../web/dust-steps.ts";
-import { dustBytes, dustChainRows } from "../web/dust-view.ts";
+import { dustBytes, dustChainRows, dustSpendRows } from "../web/dust-view.ts";
 import { DUST_SEED, dustWorld } from "./server-dust-world.ts";
 
 const world = await dustWorld();
 afterAll(() => world.dispose());
 const { A, B, C, FALSE_AT, FILE_POSITIONS } = world;
 const entry = (position: number): number => FILE_POSITIONS.indexOf(position);
+const kernel = new Kernel(compileKernel());
 type Json = Record<string, any>;
 
 for (const scheme of ["simplepir", "ipir-sp"] as const) {
@@ -48,6 +52,8 @@ for (const scheme of ["simplepir", "ipir-sp"] as const) {
         http,
         cache,
         scheme: options,
+        kernel: () => kernel,
+        network: async () => "undeployed",
         decodeCoins: (answer, owner) => {
           owners.push(owner);
           expect(answer.owner).toBe(owner.toString());
@@ -102,7 +108,33 @@ for (const scheme of ["simplepir", "ipir-sp"] as const) {
       expect(recheck.check.publicArtifact.cached).toBe(true);
       expect(recheck.bytes.check.publicArtifact).toBe(0);
       expect(recheck.chains.map((c: Json) => c.status)).toEqual(["checked", "not-checkable", "no-spend"]);
-      for (const answer of [got, walked, checked, again, recheck]) expect(() => JSON.stringify(answer)).not.toThrow();
+      // Step 12: the paying coin's path read in one padded call, the local state's roots the snapshot's, the spend in memory.
+      const before = http.records.length;
+      const spent = (await steps.spend()) as Json;
+      const m = routes.built.manifest;
+      expect([1, 3]).toContain(spent.chain);
+      expect(spent.coin.position).toBe(spent.chain === 1 ? "30" : "7");
+      expect(spent.snapshot).toMatchObject({ scheme, height: m.height, commitments: 64, pathSplit: 2, blockTime: new Date(m.blockTime * 1000).toISOString() });
+      const pathCalls = http.records.slice(before).filter((r) => r.path === ROUTES.dustPathQuery);
+      expect(pathCalls).toHaveLength(1);
+      expect(routes.pathQueries()).toBe(1);
+      expect(spent.path).toMatchObject({ lowerByPir: 2, upperFromBlockRoots: 30, calls: 1, bytesUp: pathCalls[0]!.bodyBytes, bytesDown: pathCalls[0]!.answerBytes, pathPublic: m.tree.pathPublic!.size, blockRoots: m.tree.blockRoots.size, generationRecords: m.generation.file.size });
+      expect(spent.roots).toEqual({ commitment: { fromPath: m.tree.root, localState: m.tree.root, snapshot: m.tree.root }, generation: { localState: m.generation.root, snapshot: m.generation.root } });
+      expect(spent.generationRecords).toBe(8);
+      expect(BigInt(spent.spend.vFee)).toBeGreaterThanOrEqual(BigInt(spent.spend.fee));
+      expect(BigInt(spent.spend.fee)).toBeGreaterThan(0n);
+      expect(spent.spend).toMatchObject({ network: "undeployed", proven: false, sent: false });
+      // Only the path call and the snapshot's public files went out; a second spend reads the path again, nothing else.
+      expect(http.records.slice(before).map((r) => r.path.startsWith(ROUTES.dustCheckBlob) ? "blob" : r.path).sort()).toEqual(["blob", "blob", "blob", ROUTES.dustPathQuery].sort());
+      const again2 = http.records.length;
+      const spentAgain = (await steps.spend()) as Json;
+      expect(http.records.slice(again2).map((r) => r.path)).toEqual([ROUTES.dustPathQuery]);
+      expect(spentAgain.path).toMatchObject({ calls: 1, pathPublic: 0, blockRoots: 0, generationRecords: 0 });
+      const spendView = dustSpendRows(spent).map(([k, v]) => `${k}: ${v}`).join("\n");
+      expect(spendView).toContain("path read: 2 lower siblings by PIR in 1 call of 4 requests");
+      expect(spendView).toContain("✓ from the path: the snapshot's");
+      expect(spendView).not.toContain("✗");
+      for (const answer of [got, walked, checked, again, recheck, spent]) expect(() => JSON.stringify(answer)).not.toThrow();
       // The page's view: one row per chain, as the command line words it.
       const rows = dustChainRows(checked.chains, true, checked.check.commitments);
       expect(rows.match(/<tr>/g)).toHaveLength(4);
@@ -138,6 +170,7 @@ describe("the page's Dust steps, refused", () => {
     const routes = await world.serve("simplepir");
     const steps = new DustSteps({ ledger: ledger as never, http: new PssHttp("http://dust.test", { fetch: routes.fetch }), cache: new Map(), scheme: { multiplier: inlineMultiplier } });
     await expect(steps.walk()).rejects.toThrow(/get the Dust file first/);
+    await expect(steps.spend()).rejects.toThrow(/get the Dust file first/);
     await expect(steps.getFile()).rejects.toThrow(/derive the keys from a mnemonic first/);
     steps.setSeed(DUST_SEED);
     steps.setSeed(null);

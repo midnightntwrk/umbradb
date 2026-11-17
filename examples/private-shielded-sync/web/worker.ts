@@ -19,9 +19,10 @@
  *   (`../ipir/pool.ts`), each with its own instance of the WebAssembly. Every request's secret comes from the
  *   `crypto.getRandomValues` of the thread that makes it, through the wrapper (`../ipir/wallet.ts`, FR-032).
  *
- * The Dust steps (spec 00062) are `./dust-steps.ts`, the command line's `dust` cut into three: the Dust seed comes from
- * the same mnemonic (HD role 2, `WalletSeeds.dust`) and stays here; chunks and the check table's public artifact are
- * kept by SHA-256 for the page's life, so running the steps again downloads only what is new.
+ * The Dust steps (spec 00062) are `./dust-steps.ts`, the command line's `dust` cut into four (the last, phase 9's
+ * spend in memory, its `dust --spend`): the Dust seed comes from the same mnemonic (HD role 2, `WalletSeeds.dust`) and
+ * stays here; chunks and the Dust snapshot's public files are kept by SHA-256 for the page's life, so running the steps
+ * again downloads only what is new.
  */
 
 import { generateMnemonic, mnemonicToSeedSync, validateMnemonic } from "@scure/bip39";
@@ -346,16 +347,25 @@ function decodeDustBody(route: string, side: "request" | "response", b: Uint8Arr
       firstPrefixes: Array.from({ length: Math.min(4, c.count) }, (_, i) => hex(c.prefixes.subarray(i * c.prefixBytes, (i + 1) * c.prefixBytes))),
     };
   }
-  if (route === "/dust/check/manifest") return { format: "the Dust check table's manifest (canonical JSON); its SHA-256 is the check's identifier" };
-  if (route === "/dust/check/query") {
+  if (route === "/dust/check/manifest") return { format: "the Dust snapshot's manifest (canonical JSON); its SHA-256 is the check's identifier" };
+  if (route === "/dust/check/query" || route === "/dust/check/path") {
+    const path = route === "/dust/check/path";
     const m = (b.length >= 40 ? dust?.checkManifests.get(hex(b.subarray(6, 38))) : undefined) ?? null;
-    if (m === null) return { format: "a call to the Dust check table (its manifest is not known here)" };
-    return { table: "Dust check table (32-byte commitments by position)", ...describeCallBody(m.scheme, side, b, m.table, side === "response" ? requestBody : null, sha256Sync) };
+    if (m === null) return { format: `a call to the Dust snapshot's ${path ? "path table" : "check table"} (its manifest is not known here)` };
+    if (path && m.tree.pathTable === undefined) return { format: "a call to the Dust snapshot's path table (it has none: the tree is not cut)" };
+    return path
+      ? { table: `Dust path table (each position's ${m.tree.pathSplit} lower siblings, ${32 * m.tree.pathSplit} bytes)`, ...describeCallBody(m.scheme, side, b, m.tree.pathTable!, side === "response" ? requestBody : null, sha256Sync) }
+      : { table: "Dust check table (32-byte commitments by position)", ...describeCallBody(m.scheme, side, b, m.table, side === "response" ? requestBody : null, sha256Sync) };
   }
   if (route.startsWith("/dust/check/blob/") && side === "response") {
     const digest = route.slice("/dust/check/blob/".length);
-    const m = [...(dust?.checkManifests.values() ?? [])].find((x) => x.public.digest === digest);
-    return { format: `the Dust check table's ${m === undefined ? "public artifact" : PUBLIC_ARTIFACT[m.scheme]}, addressed by its SHA-256`, digest, ...(m === undefined ? {} : describePublicArtifact(m.scheme, b, m.table.layout.cols)) };
+    for (const m of dust?.checkManifests.values() ?? []) {
+      if (m.public.digest === digest) return { format: `the Dust check table's ${PUBLIC_ARTIFACT[m.scheme]}, addressed by its SHA-256`, digest, ...describePublicArtifact(m.scheme, b, m.table.layout.cols) };
+      if (m.tree.pathPublic?.digest === digest) return { format: `the Dust path table's ${PUBLIC_ARTIFACT[m.scheme]}, addressed by its SHA-256`, digest, ...describePublicArtifact(m.scheme, b, m.tree.pathTable!.layout.cols) };
+      if (m.tree.blockRoots.digest === digest) return { format: `the Dust commitment tree's block roots: ${m.tree.blockRoots.blocks} roots of 32 bytes, one per block of 2^${m.tree.pathSplit} leaves (public)`, digest, firstRoot: hex(b.subarray(0, 32)) };
+      if (m.generation.file.digest === digest) return { format: `the generation records (shared/dust-check.ts): magic PSSDGEN1, the count, then ${m.generation.records} records of 88 bytes (value, owner, initial nonce, dtime); public`, digest, records: m.generation.records };
+    }
+    return { format: "a file of the Dust snapshot, addressed by its SHA-256 (its manifest is not known here)", digest };
   }
   return null;
 }
@@ -450,6 +460,8 @@ async function load(): Promise<Json> {
     http,
     cache: dustCache,
     scheme: { multiplier, ipirWasm: async () => (await loadIpirWasm()).module, ...(ipirWorkers === null ? {} : { ipirWorkers }) },
+    kernel: () => kernel!,
+    network: async () => (manifest ?? decodeManifest((await http.manifest()).bytes)).network,
   });
   const debug = await debugJson("/debug/info");
   // Not awaited: a failure is reported by the scan that asks for the GPU.
@@ -932,6 +944,7 @@ const STEPS: Record<string, (args: never, progress: (text: string) => void) => P
   dustFile: () => need(dust, "load the ledger").getFile(),
   dustWalk: () => need(dust, "load the ledger").walk(),
   dustCheck: () => need(dust, "load the ledger").check(),
+  dustSpend: () => need(dust, "load the ledger").spend(),
   exchange,
   exchangeBytes,
 };

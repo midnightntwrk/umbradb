@@ -53,3 +53,25 @@ export function dustBytes(b: Json): string {
   return `${kb(Number(b.down))} down in ${b.requests} requests (manifest ${kb(Number(b.manifest))}, chunks ${kb(Number(b.chunks))}, coins ${kb(Number(b.coins))}, parameters ${kb(Number(b.parameters))}, check ${kb(Number(c.manifest) + Number(c.publicArtifact) + Number(c.callsDown))}); ${kb(Number(b.up))} up`;
 }
 
+/** Step 12, the spend (`./dust-steps.ts` `spend`): its rows as label and HTML, the path read's bytes first. */
+export function dustSpendRows(r: Json): [string, string][] {
+  const coin = r.coin as Json;
+  const snap = r.snapshot as Json;
+  const path = r.path as Json;
+  const roots = r.roots as Json;
+  const c = roots.commitment as Json;
+  const g = roots.generation as Json;
+  const sp = r.spend as Json;
+  const pub = snap.scheme === "simplepir" ? "setup data" : "masks";
+  return [
+    ["paying coin", esc(`chain ${r.chain}, seq ${coin.seq}, position ${big(coin.position)}: ${big(coin.valueAtSpendTime)} Specks at the snapshot's block time`)],
+    ["Dust snapshot", esc(`${short(String(snap.id), 16)} at height ${big(snap.height)}, block time ${snap.blockTime}, ${big(snap.commitments)} commitments, tree cut ${snap.pathSplit} levels above the leaves`)],
+    ["path read", esc(`${path.lowerByPir} lower siblings by PIR in ${path.calls} call of ${snap.queriesPerCall} requests: ${kb(Number(path.bytesUp))} up, ${kb(Number(path.bytesDown))} down; ${path.upperFromBlockRoots} upper siblings from the public block roots; ${path.ms} ms`)],
+    ["once per snapshot", esc(`path table's ${pub} ${kb(Number(path.pathPublic))}, block roots ${kb(Number(path.blockRoots))}, generation records ${kb(Number(path.generationRecords))} down (0 when the page's cache held them)`)],
+    ["commitment root", `${mark(c.fromPath === c.snapshot, `from the path: the snapshot's (${short(String(c.snapshot), 16)})`)}<br>${mark(c.localState === c.snapshot, "the local state's: the snapshot's")}`],
+    ["generation root", mark(g.localState === g.snapshot, `the local state's, from ${big(r.generationRecords)} records: the snapshot's (${short(String(g.snapshot), 16)})`)],
+    ["spend", esc(`made in memory on ${sp.network}: the fee of a transaction holding only this spend is ${big(sp.fee)} Specks (vFee ${big(sp.vFee)}); nullifier ${short(String(sp.nullifier), 18)}; not proven, not sent`)],
+    ["note", esc(String(r.note))],
+    ["time", esc(`${r.ms} ms`)],
+  ];
+}

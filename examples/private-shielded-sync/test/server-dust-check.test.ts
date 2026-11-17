@@ -6,7 +6,8 @@
  * holds another wallet's spend whose prefix is the first coin's, placed before the real spend.
  *
  * Phase 9, in both schemes too: the coin's Merkle path read privately (one padded call to the path table, the upper
- * siblings from the block roots) gives the snapshot's root.
+ * siblings from the block roots) gives the snapshot's root; the local state built from it and the generation records
+ * has the snapshot's two roots, and spends the coin; the fee of a transaction paid with it is covered by the spend.
  *
  * The world (chains, file, snapshot, routes) is `./server-dust-world.ts`. IPIR+SP needs its native add-on
  * (`ipir/build.sh native`).
@@ -16,11 +17,12 @@ import { afterAll, describe, expect, it } from "vitest";
 import * as ledger from "../../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js";
 import { DustChecker } from "../client/dust-check.ts";
 import { fieldBytes, walkDustChains } from "../client/dust.ts";
+import { chooseDustChain, dustLocalState, dustSpendable, payFeeWithDust } from "../client/dust-spend.ts";
 import { compileKernel, Kernel } from "../kernel/kernel.ts";
 import { PssHttp } from "../client/http.ts";
 import { compileIpirWasm } from "../ipir/wallet-node.ts";
 import { inlineMultiplier, type SchemeName } from "../pir/index.ts";
-import { ROUTES } from "../shared/index.ts";
+import { fromHex, ROUTES } from "../shared/index.ts";
 import { dustWorld, SNAPSHOT_TIME } from "./server-dust-world.ts";
 
 const world = await dustWorld();
@@ -72,8 +74,8 @@ for (const scheme of ["simplepir", "ipir-sp"] as const) {
     });
   });
 
-  describe(`a Dust coin's private path (${scheme}, phase 9)`, () => {
-    it("acceptance 2: the coin's path, read in one padded call, gives the snapshot's root; another commitment is refused; the generation records are the snapshot's", { timeout: 300_000 }, async () => {
+  describe(`spending a Dust coin from its private path (${scheme}, phase 9)`, () => {
+    it("acceptance 2 and 4: the coin's path, read in one padded call, gives the snapshot's root; the local state from it and the generation records has the snapshot's two roots and spends the coin; a transaction's fee paid with it is covered", { timeout: 300_000 }, async () => {
       const routes = await world.serve(scheme);
       const http = new PssHttp("http://dust.test", { fetch: routes.fetch });
       const checker = await DustChecker.open(http, scheme === "simplepir" ? { multiplier: inlineMultiplier } : { ipirWasm: () => compileIpirWasm() });
@@ -93,7 +95,59 @@ for (const scheme of ["simplepir", "ipir-sp"] as const) {
         // A second path read downloads nothing more than its call.
         expect(checker.pathStats.pathPublicBytes).toBe(m.tree.pathPublic!.size);
 
-        expect(await checker.generationRecords()).toHaveLength(8);
+        const records = await checker.generationRecords();
+        expect(records).toHaveLength(8);
+        const { state } = dustLocalState(ledger as never, {
+          params: world.params,
+          secretKey: world.secretKey,
+          owner: world.owner,
+          coin: A2,
+          siblings: path.siblings,
+          records,
+          commitmentRoot: fromHex(m.tree.root, 32),
+          generationRoot: fromHex(m.generation.root, 32),
+        });
+        expect(state.commitmentTreeRoot()).toBe(BigInt(`0x${Buffer.from(fromHex(m.tree.root, 32)).reverse().toString("hex")}`));
+        const ctime = new Date(m.blockTime * 1000);
+        const [, spend] = state.spend(world.secretKey, A2, 1_000n, ctime);
+        expect(spend.oldNullifier).toBe(ledger.dustNullifier(A2, world.secretKey));
+        // The wrong roots are refused.
+        expect(() => dustLocalState(ledger as never, { params: world.params, secretKey: world.secretKey, owner: world.owner, coin: A2, siblings: path.siblings, records, commitmentRoot: new Uint8Array(32), generationRoot: fromHex(m.generation.root, 32) })).toThrow(/commitment tree's root/);
+        expect(() => dustLocalState(ledger as never, { params: world.params, secretKey: world.secretKey, owner: world.owner, coin: A2, siblings: path.siblings, records: records.map((r, i) => (i === 0 ? { ...r, value: r.value + 1n } : r)), commitmentRoot: fromHex(m.tree.root, 32), generationRoot: fromHex(m.generation.root, 32) })).toThrow(/generation tree's root/);
+
+        // The fee of an (empty) transaction paid with the coin: the spend covers the merged transaction's fee.
+        const parameters = ledger.LedgerParameters.initialParameters();
+        const paid = payFeeWithDust(ledger as never, { network: "undeployed", base: ledger.Transaction.fromParts("undeployed") as never, local: state, secretKey: world.secretKey, coin: A2, ctime, ttl: new Date(ctime.getTime() + 600_000), parameters, margin: 5 });
+        expect(paid.fee).toBeGreaterThan(0n);
+        expect(paid.spend.vFee).toBeGreaterThanOrEqual(paid.fee);
+        expect(paid.transaction.eraseProofs().feesWithMargin(parameters, 5)).toBeLessThanOrEqual(paid.spend.vFee);
+        const intent = paid.transaction.intents?.get(1);
+        expect(intent?.dustActions?.spends).toHaveLength(1);
+        expect(intent?.dustActions?.ctime.getTime()).toBe(ctime.getTime());
+      } finally {
+        checker.dispose();
+      }
+    });
+
+    it("the paying coin: a checked end or a public first coin the snapshot holds, worth the most at its block time; B's end, beyond the snapshot, cannot pay", { timeout: 300_000 }, async () => {
+      const routes = await world.serve(scheme);
+      const http = new PssHttp("http://dust.test", { fetch: routes.fetch });
+      const checker = await DustChecker.open(http, scheme === "simplepir" ? { multiplier: inlineMultiplier } : { ipirWasm: () => compileIpirWasm() });
+      try {
+        const chains = await walkDustChains(file, [A, B, C], [], functions, async (batch) => checker.check(batch.map((e) => ({ position: Number(e.coin.mtIndex), commitment: fieldBytes(ledger.dustCommitment(e.coin)) }))));
+        expect(chains.map((c) => c.status)).toEqual(["checked", "not-checkable", "no-spend"]);
+        const m = checker.manifest;
+        const ctime = new Date(m.blockTime * 1000);
+        const value = (i: number) => ledger.updatedValue(chains[i]!.coin.ctime, chains[i]!.coin.initialValue, chains[i]!.generation, ctime, world.params);
+        const best = value(0) >= value(2) ? 0 : 2;
+        expect(chooseDustChain(ledger as never, chains, world.params, m.commitments, ctime)).toEqual({ chain: best, value: value(best) });
+        const ready = await dustSpendable(ledger as never, { checker, chains, params: world.params, secretKey: world.secretKey, owner: world.owner, kernel });
+        expect([ready.chain, ready.value, ready.roots]).toEqual([best, value(best), { commitment: m.tree.root, generation: m.generation.root }]);
+        expect(ready.ctime.getTime()).toBe(SNAPSHOT_TIME * 1000);
+        const c = await dustSpendable(ledger as never, { checker, chains, params: world.params, secretKey: world.secretKey, owner: world.owner, kernel, chain: 2 });
+        expect([c.chain, Number(c.coin.mtIndex)]).toEqual([2, 7]);
+        await expect(dustSpendable(ledger as never, { checker, chains, params: world.params, secretKey: world.secretKey, owner: world.owner, kernel, chain: 1 })).rejects.toThrow(/no Dust coin of this wallet is in the Dust snapshot/);
+        expect(chooseDustChain(ledger as never, [chains[1]!], world.params, m.commitments, ctime)).toBeNull();
       } finally {
         checker.dispose();
       }

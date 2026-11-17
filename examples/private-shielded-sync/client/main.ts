@@ -22,12 +22,13 @@ import type { IpirWorkers } from "../ipir/engine.ts";
 import { nodeIpirPool } from "../ipir/pool-node.ts";
 import { compileIpirWasm } from "../ipir/wallet-node.ts";
 import { inlineMultiplier, type Multiplier, WorkerMultiplier } from "../pir/index.ts";
-import { ROUTES, toHex } from "../shared/index.ts";
+import { decodeManifest, fromHex, ROUTES, toHex } from "../shared/index.ts";
 import { formatShieldedAddress, parseShieldedAddress } from "./address.ts";
 import { BlobCache, DiskDustCache } from "./cache.ts";
 import { compareWithClient, readZswapEvents, replayZswapEvents } from "./cross-check.ts";
 import { DustChecker } from "./dust-check.ts";
-import { dustChainSummary, dustStatusText, dustSync, dustTransfer } from "./dust.ts";
+import { type DustSpendable, dustSpendable, payFeeWithDust } from "./dust-spend.ts";
+import { dustChainSummary, dustStatusText, dustSync, type DustSyncResult, dustTransfer } from "./dust.ts";
 import { HttpError, PssHttp } from "./http.ts";
 import { keysFromZswapSeed, type WalletKeys } from "./keys.ts";
 import { type Ledger, loadLedger, loadLedgerV8 } from "./ledger.ts";
@@ -51,7 +52,10 @@ commands:
   dust          download the Dust file, this wallet's first coins and the Dust parameters; walk each of the wallet's
                 Dust chains through the file; check each chain's last coin by PIR in the Dust check table (dropping a
                 false match); print each chain's spends, check and current coin (spec 00062; needs the mnemonic,
-                whose Dust seed gives the Dust key) [--no-check: walk only]
+                whose Dust seed gives the Dust key) [--no-check: walk only] [--spend: also read the paying coin's
+                Merkle path by PIR, build the ledger's Dust local state from it and the generation records, and
+                spend the coin in memory for the fee of a transaction holding only that spend; nothing is proven
+                or sent]
 
 wallet (one of):
   --wallet <name>            mnemonic from the environment variable PSS_MNEMONIC_<NAME>
@@ -96,6 +100,7 @@ const { values: opt, positionals } = parseArgs({
     "dry-run": { type: "boolean", default: false },
     "no-submit": { type: "boolean", default: false },
     "no-check": { type: "boolean", default: false },
+    spend: { type: "boolean", default: false },
     "node-http": { type: "string" },
     "node-ws": { type: "string" },
     "proof-server": { type: "string" },
@@ -138,6 +143,9 @@ function label(): string {
 }
 
 const statePath = (): string => join(resolve(opt.data), "wallets", label(), "state.json");
+
+/** The fee's margin in blocks, as the SDK's fee wallet is configured (`costParameters.feeBlocksMargin`). */
+const FEE_MARGIN_BLOCKS = 5;
 
 /** The wallet's seeds. The Dust and Night seeds exist only for a mnemonic (needed by `send`). */
 async function seeds(): Promise<{ zswap: Uint8Array; all: SdkSeeds | null }> {
@@ -401,6 +409,7 @@ async function cmdCrossCheck(): Promise<void> {
 async function cmdDust(): Promise<void> {
   const s = await seeds();
   if (s.all === null) throw new Error("dust needs the wallet's mnemonic (--wallet or --mnemonic-env): its Dust seed gives the Dust key");
+  if (opt.spend && opt["no-check"]) throw new Error("--spend needs the check (its snapshot holds the paths): drop --no-check");
   const ledger = await loadLedger();
   const http = new PssHttp(opt.server);
   const n = threads();
@@ -422,15 +431,22 @@ async function cmdDust(): Promise<void> {
     }
   };
   let result;
+  let spend: Awaited<ReturnType<typeof spendInMemory>> | null = null;
+  let transfer: ReturnType<typeof dustTransfer>;
   try {
     result = await dustSync({ ledger, dustSeed: s.all.dust, http, log, cache, ...(opt["no-check"] ? {} : { openChecker }) });
+    // The sync's bytes, before the spend's path read (whose files share the check's blob route).
+    transfer = dustTransfer(http.records);
+    if (opt.spend) {
+      if (result.checker === null) throw new Error(`--spend needs the Dust snapshot: ${checkUnavailable ?? "none served"}`);
+      spend = await spendInMemory(ledger, http, result, s.all.dust);
+    }
   } finally {
+    result?.checker?.dispose();
     await multiplier.close();
     await ipirWorkers?.close();
   }
   const checker = result.checker;
-  checker?.dispose();
-  const transfer = dustTransfer(http.records);
   const m = result.manifest;
   const p = result.parameters;
   const chains = result.chains.map((c, i) => dustChainSummary(c, result.values[i]!, result.commitments[i]!));
@@ -450,6 +466,7 @@ async function cmdDust(): Promise<void> {
     at: result.at.toISOString(),
     ms: Math.round(result.ms),
     bytes: transfer,
+    spend: spend === null ? null : spend.report,
   };
   if (opt.json) {
     process.stdout.write(`${json(report)}\n`);
@@ -483,7 +500,78 @@ async function cmdDust(): Promise<void> {
       `check: ${transfer.check.calls} call${transfer.check.calls === 1 ? "" : "s"} of ${report.check.queriesPerCall} requests, ${f(transfer.check.callsUp)} bytes up and ${f(transfer.check.callsDown)} down; once per check table: manifest ${f(transfer.check.manifest)} and public artifact ${f(transfer.check.publicArtifact)} bytes down`,
     );
   }
+  if (spend !== null) lines.push(...spend.lines);
   process.stdout.write(`${lines.join("\n")}\n`);
+}
+
+/** The ledger parameters in force, from the module (`/dust/parameters`): the fee's prices. */
+function ledgerParametersOf(ledger: Ledger, sync: DustSyncResult): { bytes: Uint8Array; parameters: ReturnType<Ledger["LedgerParameters"]["initialParameters"]>; height: number } {
+  const hex = sync.parameters.ledgerParameters;
+  if (hex === null || hex === undefined) throw new Error("the module serves no ledger parameters yet (it has committed no block since it started): try again after a block");
+  const bytes = fromHex(hex);
+  return { bytes, parameters: ledger.LedgerParameters.deserialize(bytes), height: sync.parameters.ledgerParametersHeight ?? 0 };
+}
+
+/** The Dust parameters the walk used, as the ledger's object. */
+const dustParamsOf = (ledger: Ledger, sync: DustSyncResult) =>
+  new ledger.DustParameters(BigInt(sync.parameters.nightDustRatio), BigInt(sync.parameters.generationDecayRate), BigInt(sync.parameters.dustGracePeriodSeconds));
+
+/** What a Dust spend's preparation moved and showed: the path read, the local state's roots against the snapshot's. */
+function spendableReport(ready: DustSpendable, checker: DustChecker) {
+  const m = checker.manifest;
+  const p = checker.pathStats;
+  return {
+    chain: ready.chain + 1,
+    coin: { seq: ready.coin.seq, position: Number(ready.coin.mtIndex), valueAtSpendTime: ready.value.toString() },
+    snapshot: { height: m.height, blockTime: ready.ctime.toISOString(), commitments: m.commitments, pathSplit: m.tree.pathSplit },
+    path: {
+      lowerByPir: ready.path.lower,
+      upperFromBlockRoots: ready.path.siblings.length - ready.path.lower,
+      calls: p.calls,
+      requestsPerCall: m.queriesPerCall,
+      bytesUp: p.bytesUp,
+      bytesDown: p.bytesDown,
+      oncePerSnapshot: { pathPublic: p.pathPublicBytes, blockRoots: p.blockRootsBytes, generationRecords: p.generationBytes },
+      ms: Math.round(ready.ms.path),
+    },
+    roots: {
+      commitment: { fromPath: toHex(ready.path.root), localState: ready.roots.commitment, snapshot: m.tree.root },
+      generation: { localState: ready.roots.generation, snapshot: m.generation.root },
+    },
+    generationRecords: ready.records,
+    stateMs: Math.round(ready.ms.state),
+  };
+}
+
+/**
+ * `dust --spend`: the paying coin's path read by PIR, the ledger's Dust local state from it and the generation records
+ * (both roots the snapshot's, which the module checked against the core's), and the coin spent in memory for the fee
+ * of a transaction holding only that spend. Nothing is proven or sent.
+ */
+async function spendInMemory(ledger: Ledger, http: PssHttp, sync: DustSyncResult, dustSeed: Uint8Array) {
+  const checker = sync.checker!;
+  const key = ledger.DustSecretKey.fromSeed(dustSeed);
+  try {
+    const ready = await dustSpendable(ledger, { checker, chains: sync.chains, params: dustParamsOf(ledger, sync), secretKey: key, owner: sync.owner, kernel: new Kernel(compileKernel()) });
+    const { parameters, height } = ledgerParametersOf(ledger, sync);
+    // The network's name, for the transaction: the snapshot's manifest names it.
+    const network = decodeManifest((await http.manifest()).bytes).network;
+    const paid = payFeeWithDust(ledger, { network, base: ledger.Transaction.fromParts(network), local: ready.state, secretKey: key, coin: ready.coin, ctime: ready.ctime, ttl: new Date(Date.now() + 30 * 60_000), parameters, margin: FEE_MARGIN_BLOCKS });
+    const r = spendableReport(ready, checker);
+    const report = { ...r, spend: { network, fee: paid.fee.toString(), vFee: paid.spend.vFee.toString(), rounds: paid.rounds, ledgerParametersHeight: height, nullifier: `0x${paid.spend.oldNullifier.toString(16).padStart(64, "0")}`, proven: false, sent: false } };
+    const f = (v: number | bigint | string): string => (typeof v === "string" ? BigInt(v) : v).toLocaleString("en-US");
+    const same = (a: string, b: string): string => (a === b ? "= the snapshot's" : `≠ the snapshot's ${b}`);
+    const lines = [
+      `spend: chain ${r.chain}, coin seq ${r.coin.seq} at position ${f(r.coin.position)}, worth ${f(r.coin.valueAtSpendTime)} Specks at the Dust snapshot's block time ${r.snapshot.blockTime} (height ${f(r.snapshot.height)})`,
+      `  path read: ${r.path.lowerByPir} lower siblings by PIR in ${r.path.calls} call of ${r.path.requestsPerCall} requests, ${f(r.path.bytesUp)} bytes up and ${f(r.path.bytesDown)} down; ${r.path.upperFromBlockRoots} upper from the block roots; once per snapshot: path table's ${checker.manifest.scheme === "simplepir" ? "setup data" : "masks"} ${f(r.path.oncePerSnapshot.pathPublic)}, block roots ${f(r.path.oncePerSnapshot.blockRoots)}, generation records ${f(r.path.oncePerSnapshot.generationRecords)} bytes down; ${r.path.ms} ms`,
+      `  commitment root from the path ${r.roots.commitment.fromPath.slice(0, 16)}… ${same(r.roots.commitment.fromPath, r.roots.commitment.snapshot)}`,
+      `  local state (${f(r.generationRecords)} generation records, ${r.stateMs} ms): commitment root ${same(r.roots.commitment.localState, r.roots.commitment.snapshot)}, generation root ${same(r.roots.generation.localState, r.roots.generation.snapshot)}`,
+      `  spent in memory, dated at the snapshot's block time: the fee of a transaction holding only this spend is ${f(report.spend.fee)} Specks (vFee ${f(report.spend.vFee)}, ledger parameters at height ${f(height)}); nullifier ${report.spend.nullifier.slice(0, 18)}…; not proven, not sent`,
+    ];
+    return { report, lines };
+  } finally {
+    key.clear();
+  }
 }
 
 try {

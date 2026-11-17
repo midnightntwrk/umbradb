@@ -5,7 +5,7 @@
  */
 
 import { serveCallWorkers } from "./call-workers.ts";
-import { dustBytes, dustChainRows } from "./dust-view.ts";
+import { dustBytes, dustChainRows, dustSpendRows } from "./dust-view.ts";
 import { callText, cellText, kb, pathTableText, tableText } from "./scheme-view.ts";
 import type { SchemeName } from "../pir/scheme.ts";
 
@@ -279,6 +279,7 @@ VIEWS.dustCheck = (r) => {
     ]) + dustChainRows(r.chains as Json[], true, c === null ? null : Number(c.commitments))
   );
 };
+VIEWS.dustSpend = (r) => facts(dustSpendRows(r));
 VIEWS.generate = VIEWS.keys!;
 const padded = (s: Json): string => (s.padding ? `, tables padded to ${Number(s.padding).toLocaleString("en-US")} entries` : "");
 const SCHEME_NAME: Record<string, string> = { simplepir: "SimplePIR", "ipir-sp": "IPIR+SP" };

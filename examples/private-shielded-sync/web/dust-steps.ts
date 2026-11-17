@@ -10,6 +10,10 @@
  * 3. **Check**: the check table's manifest and public artifact (cached the same way), then the walk again with every
  *    chain's end checked by PIR in calls padded to `queriesPerCall` requests; a refused match is dropped and the search
  *    resumes after it. A wallet with nothing to check still sends one call.
+ * 4. **Spend** (phase 9): the paying coin's Merkle path, its lower siblings read by PIR from the Dust snapshot's path
+ *    table in one padded call and the upper ones from the public block roots; the generation records; the ledger's
+ *    Dust local state from both, whose roots must be the snapshot's; the coin spent in memory for the fee of a
+ *    transaction holding only that spend (`../client/dust-spend.ts`). Nothing is proven or sent.
  *
  * The Dust seed (from the mnemonic the keys step takes) stays here; each step makes the secret key from it and clears
  * the key before it returns. Every number that may pass 2^53 is given in decimal, as the page shows it.
@@ -31,10 +35,12 @@ import {
   ledgerDustFunctions,
   walkDustChains,
 } from "../client/dust.ts";
+import { dustSpendable, payFeeWithDust } from "../client/dust-spend.ts";
 import { HttpError, type PssHttp } from "../client/http.ts";
 import type { Ledger } from "../client/ledger.ts";
+import type { Kernel } from "../kernel/kernel.ts";
 import type { WalletSchemeOptions } from "../pir/scheme.ts";
-import type { DustCheckManifest, DustCoinsAnswer, DustManifest, DustParametersAnswer } from "../shared/index.ts";
+import { type DustCheckManifest, type DustCoinsAnswer, type DustManifest, type DustParametersAnswer, fromHex, toHex } from "../shared/index.ts";
 
 type Json = Record<string, unknown>;
 const round = (x: number): number => Math.round(x * 100) / 100;
@@ -49,6 +55,10 @@ export interface DustStepsOptions {
   /** Decodes the coins answer (the ledger's events); a test that has no such events gives its own. */
   readonly decodeCoins?: (answer: DustCoinsAnswer, owner: bigint) => { starts: DustChainStart[]; updates: DustUpdate[] };
   readonly now?: () => Date;
+  /** The tree hashes, for the spend's path (step 4). */
+  readonly kernel?: () => Kernel;
+  /** The network's name, for the spend's transaction (step 4): the snapshot's manifest names it. */
+  readonly network?: () => Promise<string>;
 }
 
 interface Got {
@@ -67,6 +77,8 @@ export class DustSteps {
   #seed: Uint8Array | null = null;
   #got: Got | null = null;
   #checker: DustChecker | null = null;
+  /** The chains of the last check (step 3), which step 4 pays from. */
+  #checked: DustChain[] | null = null;
   /** Every check manifest this page used, by identifier, so a call to one decodes with its own table. */
   readonly checkManifests = new Map<string, DustCheckManifest>();
 
@@ -79,6 +91,7 @@ export class DustSteps {
     this.#seed?.fill(0);
     this.#seed = seed === null ? null : Uint8Array.from(seed);
     this.#got = null;
+    this.#checked = null;
   }
 
   /** Runs `body` with the wallet's Dust secret key, cleared after. */
@@ -154,6 +167,7 @@ export class DustSteps {
     const { http, ledger } = this.#o;
     const t = performance.now();
     const firstRecord = http.records.length;
+    this.#checked = null;
     let unavailable: string | null = null;
     let chains: DustChain[] = [];
     const batches: Json[] = [];
@@ -192,6 +206,7 @@ export class DustSteps {
         if (!isDustCheckReplaced(error) || attempt >= 2) throw error;
       }
     }
+    this.#checked = chains;
     const checker = this.#checker;
     const m = checker?.manifest;
     return {
@@ -219,6 +234,54 @@ export class DustSteps {
     };
   }
 
+  /** Step 4: the paying coin's path read by PIR, the Dust local state, the coin spent in memory. Nothing is sent. */
+  async spend(): Promise<Json> {
+    const got = this.#need();
+    const checker = this.#checker;
+    const chains = this.#checked;
+    if (checker === null || chains === null) throw new Error("check the chains by PIR first (step 11): the spend pays from a checked coin, with the check's snapshot");
+    const { ledger, http } = this.#o;
+    if (this.#o.kernel === undefined || this.#o.network === undefined) throw new Error("the page gives no kernel or network for the spend");
+    const t = performance.now();
+    const firstRecord = http.records.length;
+    const before = { ...checker.pathStats };
+    const parametersHex = got.parameters.ledgerParameters;
+    if (parametersHex === null || parametersHex === undefined) throw new Error("the module serves no ledger parameters yet (no block committed since it started): get the Dust file again after a block");
+    const parameters = ledger.LedgerParameters.deserialize(fromHex(parametersHex));
+    const network = await this.#o.network();
+    return this.#withKey(async (key) => {
+      const ready = await dustSpendable(ledger, { checker, chains, params: this.#params(got.parameters), secretKey: key, owner: key.publicKey, kernel: this.#o.kernel!() });
+      const paid = payFeeWithDust(ledger, { network, base: ledger.Transaction.fromParts(network), local: ready.state, secretKey: key, coin: ready.coin, ctime: ready.ctime, ttl: new Date((this.#o.now?.() ?? new Date()).getTime() + 30 * 60_000), parameters, margin: 5 });
+      const m = checker.manifest;
+      const p = checker.pathStats;
+      return {
+        chain: ready.chain + 1,
+        coin: { seq: ready.coin.seq, position: ready.coin.mtIndex.toString(), valueAtSpendTime: ready.value.toString() },
+        snapshot: { id: checker.id, scheme: m.scheme, height: m.height, blockTime: ready.ctime.toISOString(), commitments: m.commitments, pathSplit: m.tree.pathSplit, queriesPerCall: m.queriesPerCall },
+        path: {
+          lowerByPir: ready.path.lower,
+          upperFromBlockRoots: ready.path.siblings.length - ready.path.lower,
+          calls: p.calls - before.calls,
+          bytesUp: p.bytesUp - before.bytesUp,
+          bytesDown: p.bytesDown - before.bytesDown,
+          pathPublic: p.pathPublicBytes - before.pathPublicBytes,
+          blockRoots: p.blockRootsBytes - before.blockRootsBytes,
+          generationRecords: p.generationBytes - before.generationBytes,
+          ms: round(ready.ms.path),
+        },
+        roots: {
+          commitment: { fromPath: toHex(ready.path.root), localState: ready.roots.commitment, snapshot: m.tree.root },
+          generation: { localState: ready.roots.generation, snapshot: m.generation.root },
+        },
+        generationRecords: ready.records,
+        spend: { network, fee: paid.fee.toString(), vFee: paid.spend.vFee.toString(), rounds: paid.rounds, nullifier: `0x${paid.spend.oldNullifier.toString(16).padStart(64, "0")}`, proven: false, sent: false },
+        requests: http.records.length - firstRecord,
+        note: "the spend is made in memory, dated at the Dust snapshot's block time: not proven, not sent. The command line's send --dust-fee private proves it at a local proof server. The chain keeps the snapshot's roots about an hour (its global TTL) after the block; the snapshot is rebuilt by hand (the admin route)",
+        ms: round(performance.now() - t),
+      };
+    });
+  }
+
   #need(): Got {
     if (this.#got === null) throw new Error("get the Dust file first (step 9)");
     return this.#got;
@@ -227,5 +290,6 @@ export class DustSteps {
   dispose(): void {
     this.#checker?.dispose();
     this.#checker = null;
+    this.#checked = null;
   }
 }

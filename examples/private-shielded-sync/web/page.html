@@ -183,6 +183,13 @@
       <div class="row"><button data-run="dustCheck">Check by PIR</button></div>
       <div class="out"></div>
     </section>
+
+    <section class="card" id="step-dust-spend">
+      <h2><span class="num">12</span>Dust: read my coin's path and spend it (not sent)<span class="status"></span></h2>
+      <p class="desc">Takes the checked coin worth the most, reads its Merkle path in the Dust commitment tree: the lower siblings by PIR from the Dust snapshot's path table, in one call padded to the same number of requests, and the upper ones from the snapshot's public block roots; the root they give must be the snapshot's (which the server checked against the chain's). Then downloads the generation records (public), builds the ledger's Dust local state from the path and the records, checks both its roots against the snapshot's, and spends the coin in memory for the fee of a transaction holding only that spend, dated at the snapshot's block time. Nothing is proven or sent.</p>
+      <div class="row"><button data-run="dustSpend">Read the path and spend</button></div>
+      <div class="out"></div>
+    </section>
   </div>
 
   <aside class="side">
