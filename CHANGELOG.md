@@ -133,6 +133,13 @@ is refused. For the `umbradb` command, only those two keys break. The change is 
 
 ### Changed since `v0.10.0-rc.2`: ledger v9 at `ledger-9.1.0.1`
 
+**Breaking for a `custom` network whose ledger table names `v9` for runtime 2.1.0, and for a module test that
+depends on the in-memory source's runtime.** A ledger table's row that gives `spec_version` 2,001,000 to 2,001,099 the
+name `v9` must name `v9-rc5`: the configuration is accepted as before, but those blocks are then applied with
+`ledger-9.1.0.1`, and the sync halts at the first block the two releases apply differently. The blocks of
+`InMemoryBlockSource` are of runtime 2,001,100 (`spec_version`), where they were of 2,001,000: a test that asserts the
+number changes it, and a custom ledger table that covers 2,001,000 only halts on them with `unknown-runtime`.
+
 - **Ledger v9 is `ledger-9.1.0.1` from runtime 2.1.100 on** (`spec_version` 2,001,100), the release `midnight-node`
   2.1.101 builds, which mainnet, Preprod and preview run. Before, every runtime from 2.1 on was applied with
   `ledger-9.1.0.0-rc.5`, whose transaction pricing and outcomes differ: a Preprod sync halted with `root-mismatch` at
