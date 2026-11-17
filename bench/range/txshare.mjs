@@ -1,6 +1,6 @@
 // Share of blocks with transactions near given heights, from the node: a block's extrinsics above the minimum of its
 // range. 400 consecutive blocks from each height given, and from 20,000, 2,000 and 400 below the head.
-//   UMBRADB_LOCAL_NODE=ws://<host>:9944 node txshare.mjs [<height> ...]
+//   UMBRADB_LOCAL_NODE=<the node's address, ws or wss://<host>:9944> node txshare.mjs [<height> ...]
 const node = process.env.UMBRADB_LOCAL_NODE;
 if (!node) throw new Error("set UMBRADB_LOCAL_NODE to the node's WebSocket address");
 const url = node.replace(/^ws(s?):\/\//, "http$1://");

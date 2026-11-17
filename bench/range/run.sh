@@ -4,7 +4,7 @@
 #   run.sh <label> <stop-height> [KEY=VALUE ...]     (the KEY=VALUE pairs go to the run's environment)
 #
 # Environment, besides lib.sh's:
-#   UMBRADB_LOCAL_NODE  the node's WebSocket address (required), e.g. ws://<host>:9944
+#   UMBRADB_LOCAL_NODE  the node's WebSocket address (required), ws or wss://<host>:9944
 #   TEMPLATE            the template database to clone (required)
 #   BENCH_CHAIN         the core entry's network (default preprod)
 #   TRACE               "off" runs without the block trace (default: traced, UMBRADB_TRACE=<run folder>/trace.jsonl)

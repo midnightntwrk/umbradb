@@ -136,6 +136,14 @@ describe("the range bench's scripts hold nothing of one machine", () => {
     }
   });
 
+  it("no script writes the plain WebSocket scheme with a host, which the repository's code scan reports", () => {
+    // .semgrepignore: the rule matches the scheme anywhere but before localhost, comments included; scanned code writes
+    // "ws or wss://". The README is Markdown, which the scan leaves out.
+    for (const file of FILES.filter((name) => /\.(?:sh|mjs)$/.test(name))) {
+      expect(readFileSync(join(SCRIPTS, file), "utf8"), file).not.toMatch(/\bws:\/\/(?!localhost\b)/);
+    }
+  });
+
   it("every shell script parses", () => {
     for (const file of FILES.filter((name) => name.endsWith(".sh"))) {
       const parsed = spawnSync("bash", ["-n", join(SCRIPTS, file)], { encoding: "utf8" });
