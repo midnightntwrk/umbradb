@@ -402,3 +402,7 @@ Later changes may add keys to a line for the work they measure; the files and th
 | `queuedMs` | What the requests waited between their post and their start, less their transit. It overlaps the requests before them and is not a part of `spanMs`. |
 | `gcMs`, `gcN`, `gcMajorMs` | The garbage collections of the thread's JavaScript heap that began in the span, and of them the major ones. A collection reported after its span's line was written is in a later line as `gcOf.<height>` and `gcNOf.<height>`; `gcOf.0` and `gcNOf.0`, in the thread's first line, are collections that began before its trace started. |
 | `ext`, `heap`, `rss` | The thread's memory in MiB when the block was applied: what it holds outside its JavaScript heap (the ledger packages' WebAssembly memory), its JavaScript heap in use, and the process's resident set. |
+
+**Reading a trace.** The range bench ([`bench/range/`](../bench/range/README.md)) syncs a stretch of a chain from a
+copy of a database with the trace on and reads these files: speed with and without the waits for the node, each
+stage's mean, statements per block, the worker thread's time, and two runs side by side.
