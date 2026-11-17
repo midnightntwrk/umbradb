@@ -260,6 +260,10 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   copy does not hold its key; if it does, the change goes unseen, but by `verify`, until a block that does not continue
   the one before, or the bound, empties the copy. In the block trace, `counts` and `references` hold only the keys asked
   of the database, and `copyHits`, `copyMisses` and `copyEmptied` are new; the operator guide lists them.
+- **PostgreSQL sessions prepare the statements that take no parameter too.** A statement PostgreSQL plans is prepared
+  once per session and reused whether or not it has parameters, within the session's bound of 256 texts and its rule
+  for schema changes. The statements every block repeats without a parameter (the head read, the queue read, the
+  digest read, the shadow tables' probe and drains) are no longer parsed and planned at every execution.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 
