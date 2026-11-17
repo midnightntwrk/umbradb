@@ -9,7 +9,7 @@
  *   then the whole answer as debug JSON. The right-hand panel lists every request the server saw. Sizes, shapes and
  *   calls are worded for the snapshot's PIR scheme (`./scheme-view.ts`, spec 00058 FR-060).
  *
- * The mnemonic field is one element, shown in the tab in view; a wallet derived or generated in Details is the Wallet
+ * The mnemonic field is one element (hidden as a password is, with an eye button to show it), shown in the tab in view; a wallet derived or generated in Details is the Wallet
  * tab's too. Tabs follow the ARIA tabs pattern: arrow keys, Home and End move between them.
  */
 
@@ -323,7 +323,7 @@ function parsePositions(text: string): number[] {
 }
 
 const ARGS: Record<string, () => Json> = {
-  keys: () => ({ mnemonic: $<HTMLTextAreaElement>("#mnemonic").value, seedHex: $<HTMLInputElement>("#seed").value }),
+  keys: () => ({ mnemonic: $<HTMLInputElement>("#mnemonic").value, seedHex: $<HTMLInputElement>("#seed").value }),
   generate: () => ({ generate: true }),
   scan: () => ({ gpu: $<HTMLInputElement>("#gpu").checked }),
   read: () => ({ positions: parsePositions($<HTMLInputElement>("#positions").value) }),
@@ -384,7 +384,7 @@ async function runStep(button: HTMLButtonElement): Promise<void> {
       firstFree = Number((answer.result!.manifest as Json).firstFree);
     }
     // A wallet generated here is the Wallet tab's too.
-    if (name === "generate" && typeof answer.result!.generatedMnemonic === "string") $<HTMLTextAreaElement>("#mnemonic").value = answer.result!.generatedMnemonic;
+    if (name === "generate" && typeof answer.result!.generatedMnemonic === "string") $<HTMLInputElement>("#mnemonic").value = answer.result!.generatedMnemonic;
   } else {
     status.className = "status bad";
     status.textContent = "failed";
@@ -590,8 +590,20 @@ function showTab(name: (typeof TABS)[number], focus = false): void {
     $(`#panel-${t}`).hidden = !on;
     if (on && focus) tab.focus();
   }
-  $(`#mnemonic-slot-${name}`).appendChild($("#mnemonic"));
+  $(`#mnemonic-slot-${name}`).appendChild($("#mnemonic-field"));
 }
+
+// The mnemonic is hidden as a password is; the eye shows it and hides it again.
+$("#mnemonic-show").addEventListener("click", () => {
+  const field = $<HTMLInputElement>("#mnemonic");
+  const show = field.type === "password";
+  field.type = show ? "text" : "password";
+  const eye = $<HTMLButtonElement>("#mnemonic-show");
+  const label = show ? "Hide the mnemonic" : "Show the mnemonic";
+  eye.setAttribute("aria-pressed", String(show));
+  eye.setAttribute("aria-label", label);
+  eye.title = label;
+});
 
 for (const t of TABS) {
   const tab = $<HTMLButtonElement>(`#tab-${t}`);

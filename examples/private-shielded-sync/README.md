@@ -191,7 +191,8 @@ A page that runs the client's own code in the browser, in two tabs over one work
   it ran (marked "by the Wallet tab's sync") and the request list with its requests; a wallet derived or generated in
   Details is the Wallet tab's too.
 
-The mnemonic field is one element, shown in the tab in view. The tabs follow the ARIA tabs pattern (arrow keys, Home
+The mnemonic field is one element, shown in the tab in view; it hides what is typed, as a password field does, and
+its eye button shows it. The tabs follow the ARIA tabs pattern (arrow keys, Home
 and End move between them) and each keeps its state when hidden. The Details tab's steps:
 
 0. load the scan kernel and the ledger package (WebAssembly);
