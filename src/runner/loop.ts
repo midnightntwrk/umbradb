@@ -159,6 +159,7 @@ import {
   stopHeightSchedule,
 } from "./dispatch.js";
 import type { LoopPause } from "./pause.js";
+import { traceAdd, traceDropBlock, traceEndBlock } from "../trace/trace.js";
 import type { MisuseReports } from "./process-context.js";
 
 /** What the loop runs over. */
@@ -842,24 +843,34 @@ export class FinalizedLoop {
     let run: HeightRun | undefined;
     const watch = this.#watchHeight(height);
     try {
+      const beginFrom = performance.now();
       run = resume === undefined ? await this.#begin(height, previous) : this.#again(resume);
+      const prepareFrom = performance.now();
+      // The wait for the block from its source, and the height's start.
+      traceAdd("beginMs", prepareFrom - beginFrom);
       await this.prepare(run);
+      traceAdd("prepareMs", performance.now() - prepareFrom);
       if (!(await this.lockstepWait(run))) {
         // Stopped at the lockstep wait: the height's run, and its window, end here.
         this.#unwatch(watch, false);
+        traceDropBlock();
         return null;
       }
       // For slow-height reports the block transaction is on-db-write's: its BEGIN, its callbacks, the cursor check, the
       // COMMIT.
       this.#enter("on-db-write");
+      const transactionFrom = performance.now();
       await this.#transacting(this.commit(run));
+      traceAdd("txMs", performance.now() - transactionFrom);
       committed = true;
       this.input.observer?.committed?.(run.block);
       this.#unwatch(watch, true);
       await this.#afterCommit(run);
+      traceEndBlock(run.block.height);
       this.#check();
       return run.block;
     } catch (error) {
+      traceDropBlock();
       if (!committed) this.#unwatch(watch, false);
       const failure = this.#failure(height, error, committed);
       if (!committed && run !== undefined) this.#hold(run, failure);

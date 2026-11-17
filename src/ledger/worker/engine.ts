@@ -109,6 +109,7 @@ import type {
   LedgerTask,
 } from "../types.js";
 import { plainDataProblem } from "../plain-data.js";
+import { endApply, timed } from "../../trace/worker-trace.js";
 
 /** What loads an adapter: `loadLedgerPackage`, or a test package's loader. */
 export type LedgerLoader = (ledger: LedgerName, options: LedgerPackageOptions) => Promise<LedgerPackage>;
@@ -368,7 +369,7 @@ export class LedgerEngine {
     if (transactions.length === 0) return Object.freeze([]);
     const adapter = await this.#adapter(ledger);
     const arrays = [...transactions];
-    const parsed = Object.freeze(arrays.map((bytes, index) => adapter.parseTransaction(bytes, index)));
+    const parsed = timed("parse", () => Object.freeze(arrays.map((bytes, index) => adapter.parseTransaction(bytes, index))));
     // `block-parsed` reaches the main thread as plain data, so the adapter's parse is checked for that.
     this.#plain(parsed, (problem) => new TypeError(`the ${ledger} adapter parsed block ${block.height} into ${problem}, not plain data`));
     this.#kept.set(key, { height: block.height, ledger, transactions: arrays, parsed });
@@ -407,8 +408,10 @@ export class LedgerEngine {
     input: ApplyInput,
     keys: Keys,
   ): Settled {
-    const { state: after, output } = adapter.apply(state, input);
-    return this.#settled(adapter, block, after, output, keys);
+    const { state: after, output } = timed("adapterApply", () => adapter.apply(state, input));
+    const settled = timed("settle", () => this.#settled(adapter, block, after, output, keys));
+    endApply(block.height, input.transactions.length);
+    return settled;
   }
 
   /**
@@ -422,21 +425,25 @@ export class LedgerEngine {
     output: ApplyOutput,
     keys: Keys,
   ): Settled {
-    const key = adapter.stateKey(state);
+    const key = timed("stateKey", () => adapter.stateKey(state));
     this.#installStore(adapter, key);
     // Read before the flush, while every node of the state is still pending in memory (see the module comment).
-    const stateRoot = adapter.stateRoot(state);
-    const summary = adapter.stateSummary(state);
-    adapter.persist(key);
-    const contracts = keys.contracts.map((address): ContractKeys => {
-      const stateKey = adapter.contractStateKey(state, address);
-      const zswapStateKey = adapter.contractZswapStateKey(state, address);
-      if (stateKey !== null) adapter.persist(stateKey);
-      if (zswapStateKey !== null) adapter.persist(zswapStateKey);
-      return { address, stateKey, zswapStateKey };
+    const stateRoot = timed("stateRoot", () => adapter.stateRoot(state));
+    const summary = timed("summary", () => adapter.stateSummary(state));
+    timed("persist", () => adapter.persist(key));
+    const contracts = timed("contracts", () =>
+      keys.contracts.map((address): ContractKeys => {
+        const stateKey = adapter.contractStateKey(state, address);
+        const zswapStateKey = adapter.contractZswapStateKey(state, address);
+        if (stateKey !== null) adapter.persist(stateKey);
+        if (zswapStateKey !== null) adapter.persist(zswapStateKey);
+        return { address, stateKey, zswapStateKey };
+      }),
+    );
+    timed("release", () => {
+      for (const released of keys.release) adapter.release(released);
     });
-    for (const released of keys.release) adapter.release(released);
-    const batch = adapter.flush();
+    const batch = timed("flush", () => adapter.flush());
     const result: AppliedState = {
       ledger: block.ledger,
       height: block.height,

@@ -37,6 +37,7 @@ import type { BackupSeams } from "../backup/backup.js";
 import { backupArguments, runBackup } from "./backup.js";
 import { type RestoreCommandSeams, restoreArguments, runRestore } from "./restore.js";
 import { type RunSeams, runFailed, runProcess } from "./run.js";
+import { TRACE_STEPS_VARIABLE, TRACE_VARIABLE } from "../trace/file-sink.js";
 
 /** The exit statuses. */
 export const EXIT = Object.freeze({ ok: 0, failed: 1, usage: 2, unavailable: 3 } as const);
@@ -69,7 +70,10 @@ Exit status:
 /** Where a command writes, and the working directory it reads relative paths from. */
 export interface CommandIo {
   readonly cwd: string;
-  /** The environment a command reads (`PATH`, `UMBRADB_PG_DUMP`); this process's unless given. */
+  /**
+   * The environment a command reads (`PATH`, `UMBRADB_PG_DUMP`, `UMBRADB_TRACE`, `UMBRADB_TRACE_STEPS`); this process's
+   * unless given.
+   */
   readonly env?: Readonly<Record<string, string | undefined>>;
   stdout(text: string): void;
   stderr(text: string): void;
@@ -190,7 +194,14 @@ export function runProcessCommand(seams: RunSeams = {}): CommandHandler {
     const parsed = runArguments(args);
     if (typeof parsed === "string") return usage(io, parsed);
     const end = await runProcess(
-      { file: parsed.file, updateHash: parsed.updateHash, cwd: io.cwd, log: (line) => io.stderr(`${line}\n`) },
+      {
+        file: parsed.file,
+        updateHash: parsed.updateHash,
+        cwd: io.cwd,
+        log: (line) => io.stderr(`${line}\n`),
+        trace: (io.env ?? process.env)[TRACE_VARIABLE],
+        traceSteps: (io.env ?? process.env)[TRACE_STEPS_VARIABLE] === "1",
+      },
       seams,
     );
     return runFailed(end) ? EXIT.failed : EXIT.ok;

@@ -26,6 +26,7 @@
 import { parentPort, workerData } from "node:worker_threads";
 import type { LedgerName, LedgerPackage, LedgerPackageOptions } from "../types.js";
 import { LedgerEngine, type LedgerLoader, type LedgerWorkerModule, ledgerTasksOf } from "./engine.js";
+import { posting, requestArrived, requestEnded, requestStarted, startWorkerTrace, traceClock } from "../../trace/worker-trace.js";
 import { bridgeStore } from "./node-bridge.js";
 
 export type { LedgerWorkerModule } from "./engine.js";
@@ -42,6 +43,11 @@ interface WorkerData {
   readonly memory: SharedArrayBuffer;
   readonly loader: string | null;
   readonly loaderData?: unknown;
+  /**
+   * Whether the process is traced (`src/trace/trace.ts`): each applied block's entry is then posted to the host, and
+   * the answers and node requests say when they were posted (`./protocol.ts`).
+   */
+  readonly trace?: boolean;
 }
 
 /**
@@ -52,7 +58,15 @@ export async function runLedgerWorker(modules: readonly LedgerWorkerModule[] = [
   if (parentPort === null) throw new Error("runLedgerWorker runs in the ledger worker's thread, which startLedgerWorker starts");
   const port = parentPort;
   const tasks = ledgerTasksOf(modules);
-  const { memory, loader, loaderData } = workerData as WorkerData;
+  const { memory, loader, loaderData, trace } = workerData as WorkerData;
+  const traced = trace === true;
+  if (traced) startWorkerTrace((entry) => port.postMessage({ type: "trace", entry } satisfies FromLedgerWorker));
+  /** Posts `message`; in a traced process it says when, and the time posting an answer is recorded. Untraced, as given. */
+  const send = (message: Exclude<FromLedgerWorker, { readonly type: "trace" }>): void => {
+    if (!traced) return port.postMessage(message);
+    if (message.type === "answer") posting(() => port.postMessage({ ...message, at: traceClock() } satisfies FromLedgerWorker));
+    else port.postMessage({ ...message, at: traceClock() } satisfies FromLedgerWorker);
+  };
   const loaded = (loader === null ? await import("../load.js") : await import(loader)) as LoaderModule;
   const load: LedgerLoader =
     loaded.loadLedger === undefined
@@ -61,7 +75,7 @@ export async function runLedgerWorker(modules: readonly LedgerWorkerModule[] = [
   let current = 0;
   const store = bridgeStore(
     memory,
-    () => port.postMessage({ type: "node", id: current } satisfies FromLedgerWorker),
+    () => send({ type: "node", id: current }),
     (key) => engine.pendingNode(key),
   );
   const engine: LedgerEngine = new LedgerEngine({ load, store, tasks });
@@ -96,26 +110,31 @@ export async function runLedgerWorker(modules: readonly LedgerWorkerModule[] = [
   let chain: Promise<void> = Promise.resolve();
   /** The trap that left the package in no known state, after which nothing runs (the host ends the thread). */
   let trapped: Error | null = null;
-  port.on("message", ({ id, request }: ToLedgerWorker) => {
+  port.on("message", ({ id, request, at }: ToLedgerWorker) => {
+    // Traced only (null otherwise): when the request arrived, for the time it waits and the time the thread is idle.
+    const arrival = requestArrived(at);
     chain = chain.then(async () => {
+      requestStarted(request.type, arrival);
       current = id;
       store.begin();
       try {
         if (trapped !== null) throw trapped;
         const value = await run(request);
-        port.postMessage({ type: "answer", id, ok: true, value } satisfies FromLedgerWorker);
+        send({ type: "answer", id, ok: true, value });
       } catch (thrown) {
         const fatal = thrown instanceof WebAssembly.RuntimeError;
         const error = thrown instanceof Error ? thrown : new Error(String(thrown));
         const read = store.lastError === null ? "" : ` (the node store: ${store.lastError})`;
-        port.postMessage({
+        send({
           type: "answer",
           id,
           ok: false,
           fatal,
           error: { name: error.name, message: `${error.message}${read}` },
-        } satisfies FromLedgerWorker);
+        });
         if (fatal) trapped = error;
+      } finally {
+        requestEnded();
       }
     });
   });
