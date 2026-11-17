@@ -5,10 +5,12 @@ import { type PostgresTestServer, startPostgresServer } from "./postgres-server.
 
 /**
  * PostgreSQL's prepared statements (00033 F2): a session prepares a parameterized text once and reuses it, at most 256
- * texts in its life. A schema change on any session the process opened to the database, through any pool, or a
- * writer's rollback, retires the texts prepared before it, so a reused text never meets `cached plan must not change
- * result type` inside a transaction. Privileges are checked at each execution, under the role then current. A pool
- * opened with `preparedStatements: false` prepares nothing.
+ * texts in its life. A text PostgreSQL plans is prepared too when it takes no parameter: the statements a block
+ * repeats without one are then planned once, under the same bound and the same rule for schema changes; transaction
+ * control and `SET` are never prepared. A schema change on any session the process opened to the database, through any
+ * pool, or a writer's rollback, retires the texts prepared before it, so a reused text never meets `cached plan must
+ * not change result type` inside a transaction. Privileges are checked at each execution, under the role then current.
+ * A pool opened with `preparedStatements: false` prepares nothing.
  */
 
 const SCHEMA = `
@@ -48,6 +50,62 @@ describe("prepared statements on PostgreSQL (00033 F2)", () => {
       read.query("SELECT statement FROM pg_prepared_statements WHERE statement LIKE 'SELECT * FROM t.rows%'"),
     );
     expect(names).toHaveLength(1);
+    await db.close();
+  });
+
+  it("prepares a text that takes no parameter once per session and reuses it, whatever PostgreSQL plans; never transaction control or SET", async () => {
+    const { db, exec } = await database();
+    await exec("CREATE ROLE umbradb_parameterless_reader NOLOGIN; GRANT USAGE ON SCHEMA t TO umbradb_parameterless_reader; GRANT SELECT ON t.rows TO umbradb_parameterless_reader; GRANT umbradb_parameterless_reader TO CURRENT_USER");
+    const texts = [
+      "SELECT height, label FROM t.rows ORDER BY height DESC LIMIT 1",
+      "  select count(*)::int AS n FROM t.rows",
+      "WITH d AS (DELETE FROM t.rows WHERE height < 0 RETURNING *) SELECT count(*)::int AS n FROM d",
+      "INSERT INTO t.rows SELECT height, label FROM t.rows WHERE height < 0",
+      "UPDATE t.rows SET label = label WHERE height < 0",
+      "DELETE FROM t.rows WHERE height < 0",
+      "VALUES (1)",
+      "TABLE t.blocks",
+    ];
+    for (let i = 0; i < 4; i++) {
+      await db.transaction(async (tx) => {
+        await tx.execute('SET LOCAL ROLE "umbradb_parameterless_reader"');
+        expect(await tx.query(texts[0] as string)).toEqual([{ height: 1n, label: "one" }]);
+        await tx.execute("RESET ROLE");
+        for (const text of texts.slice(1)) await tx.query(text);
+      });
+    }
+    const prepared = await db.transaction((tx) => tx.query("SELECT statement FROM pg_prepared_statements"));
+    const statements = prepared.map((row) => String(row.statement));
+    // Each once, on the writer's session.
+    for (const text of texts) expect(statements.filter((statement) => statement === text), text).toHaveLength(1);
+    expect(statements.filter((statement) => /^\s*(SET|RESET|BEGIN|COMMIT|ROLLBACK)\b/i.test(statement))).toEqual([]);
+    await db.close();
+  });
+
+  it("reuses a parameterless text after a column was added: no cached plan of another result type is met", async () => {
+    const { db } = await database();
+    const all = "SELECT * FROM t.rows ORDER BY height";
+    await db.transaction((tx) => tx.query(all));
+    await db.read((read) => read.query(all));
+    await db.transaction((tx) => tx.execute("ALTER TABLE t.rows ADD COLUMN extra integer NOT NULL DEFAULT 7"));
+    const inBlock = await db.transaction(async (tx) => {
+      const rows = await tx.query(all);
+      await tx.execute("INSERT INTO t.blocks VALUES (2)");
+      return rows;
+    });
+    expect(inBlock).toEqual([{ height: 1n, label: "one", extra: 7 }]);
+    expect(await db.read((read) => read.query(all))).toEqual([{ height: 1n, label: "one", extra: 7 }]);
+    await db.close();
+  });
+
+  it("counts parameterless texts in the bound of 256, and answers every query above it, unprepared", async () => {
+    const { db } = await database();
+    for (let i = 0; i < 400; i++) {
+      const [row] = await db.read((read) => read.query(`SELECT ${i} AS n`));
+      expect(row?.n).toBe(i);
+    }
+    expect(await preparedCount(db)).toBeLessThanOrEqual(256);
+    expect(await preparedCount(db)).toBeGreaterThanOrEqual(200);
     await db.close();
   });
 

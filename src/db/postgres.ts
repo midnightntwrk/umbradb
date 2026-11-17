@@ -248,6 +248,17 @@ interface Outcome {
 const PREPARED_TEXTS = 256;
 
 /**
+ * A statement PostgreSQL plans, by its first word. Such a text is prepared even when it takes no parameter: sent
+ * unprepared it is parsed and planned again at every execution, which for the statements a block repeats (the head
+ * read, the queue read, the digest read, the shadow tables' probe and drains) costs several times their execution.
+ * Transaction control and `SET` are not planned, and run on the simple protocol or unprepared as before.
+ */
+const PLANNED = /^\s*(SELECT|WITH|INSERT|UPDATE|DELETE|MERGE|VALUES|TABLE)\b/i;
+
+/**
+ * Which texts a session prepares: every statement with parameters, and every statement PostgreSQL plans
+ * ({@link PLANNED}), up to {@link PREPARED_TEXTS} in the session's life.
+ *
  * Counts the statements that may change a table's columns (DDL) on any session this process opened to one database,
  * through any pool: a session reuses only the texts it prepared since the last one. PostgreSQL re-plans a prepared
  * statement after DDL, but refuses one whose result columns changed (`cached plan must not change result type`), which
@@ -295,10 +306,10 @@ class Session {
       ...connection,
       max: 1,
       fetch_types: false,
-      // A statement with parameters is prepared once per session, by name, and reused: without it the driver describes
-      // every such statement before running it, a second round trip each time. The sessions are UmbraDB's own, pinned
-      // for their life with no pooler between, so a named statement stays theirs; `send` decides which texts
-      // (`prepares`).
+      // A statement is prepared once per session, by name, and reused. Without it the driver describes every statement
+      // with parameters before running it, a second round trip each time, and the server parses and plans every
+      // statement again. The sessions are UmbraDB's own, pinned for their life with no pooler between, so a named
+      // statement stays theirs; `send` decides which texts (`PLANNED`, `prepares`).
       prepare: true,
       // Never recycled: the writer's connection holds the writer lock for as long as it lives (./writer-lock.ts).
       max_lifetime: null,
@@ -406,7 +417,7 @@ class Session {
     }
     try {
       // `simple` is a runtime option of `unsafe` the driver's types do not declare (`postgres` 3.4.9 `index.js`).
-      const prepare = !simple && args.length > 0 && this.prepares(text);
+      const prepare = !simple && (args.length > 0 || PLANNED.test(text)) && this.prepares(text);
       const options = { simple, prepare } as unknown as postgres.UnsafeQueryOptions;
       const sent = performance.now();
       try {
