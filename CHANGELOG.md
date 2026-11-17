@@ -278,11 +278,11 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   `versionEntry` and this build's `core` entry from the next height.
 - **The vendored ledger keeps the Poseidon pre-computation between hashes.** `midnight-circuits` computed its
   Poseidon round constants and matrices again at every hash; the build now patches the crate, at the version each
-  ledger's `Cargo.lock` pins and checked against the checksum recorded there, to compute them once per field type.
-  They depend on the field alone, so every hash and every state root is the same, and a block spends less time
-  hashing. The four packages are recorded again, so the core version changes: a database an earlier build synced
-  continues as an upgrade, its `core` revision kept as a `versionEntry`. The patch is dropped once a ledger release
-  keeps the pre-computation itself.
+  ledger's `Cargo.lock` pins and checked against the checksum recorded there, so that it keeps one copy per thread and
+  field type and hands each hash a copy. They depend on the field alone, so a hash's result does not change: the
+  packages give the unpatched ledger's tree roots on the test states. The four packages are recorded again, so the
+  core version changes: a database an earlier build synced continues as an upgrade, its `core` revision kept as a
+  `versionEntry`. The patch is dropped once a ledger release keeps the pre-computation itself.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 

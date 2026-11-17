@@ -206,15 +206,19 @@ and each root its untagged serialization. Ledger 8 has DUST state too, so the si
 
 The Poseidon pre-computation kept (`crates/midnight-circuits-<version>/0001-…`, with `v8/patches/0006-…`,
 `v9-rc3/patches/0007-…`, `v9-rc5/patches/0008-…`, `v9/patches/0008-…`). `midnight-circuits` built
-`PreComputedRoundCPU` again at every hash (`SpongeCPU::init`); it depends on the field alone. The crate patch keeps
-one copy per field type and changes nothing else, so every hash and every state root is the same. It is the one
-patch here that changes a dependency's code and not only what the package exposes, and is dropped when a ledger
-release carries the fix. The build takes the crate's source from crates.io at the version and checksum the pristine
-`Cargo.lock` pins (6.1.0 for v8, 7.2.1 for v9-rc3, 7.2.4 for v9-rc5, 7.3.0 for v9), applies the patch at a fixed
-path, and the workspace patch points Cargo at that path (`[patch.crates-io]`) and takes the registry's source and
-checksum of that version out of `Cargo.lock`, so the build stays `--locked`. The `Cargo.lock` of each v9 package
-also pins an older `midnight-circuits` (6.2.1 at rc.3, 6.3.0 at rc.5 and 9.1.0.1, for `midnight-zkir` 2.2.0); that
-one is left as it is.
+`PreComputedRoundCPU` again at every hash (`SpongeCPU::init`); it depends on the field alone. The crate patch
+replaces that line by a copy of a value it keeps per thread and field type, and changes nothing else.
+`test/ledger/vendored-ledger-files.test.ts` checks the patches' text in the four versions, and runs the build script's
+crate step with stand-ins (a download that differs from the checksum, or a lock without one, stops the build before
+anything is unpacked); no test counts how often the value is computed, and what it saves is measured by a sync.
+`test/ledger/state-trees.test.ts` checks that each package's tree roots, which are Poseidon hashes, are the unpatched
+ledger's. It is the one patch here that changes a dependency's code and not only what the package exposes, and is
+dropped when a ledger release carries the fix. The build takes the crate's source from crates.io at the version and
+checksum the pristine `Cargo.lock` pins (6.1.0 for v8, 7.2.1 for v9-rc3, 7.2.4 for v9-rc5, 7.3.0 for v9), applies the
+patch at a fixed path, and the workspace patch points Cargo at that path (`[patch.crates-io]`) and takes the
+registry's source and checksum of that version out of `Cargo.lock`, so the build stays `--locked`. The `Cargo.lock` of
+each v9 package also pins an older `midnight-circuits` (6.2.1 at rc.3, 6.3.0 at rc.5 and 9.1.0.1, for `midnight-zkir`
+2.2.0); that one is left as it is.
 
 The v8 package has no `decodeLogItem`: v8 contract logs are not MIP-0002 events, and the v8 adapter returns null for
 them. The owner proposes these patches upstream, as a few pull requests, once `midnight-ledger`

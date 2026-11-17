@@ -447,7 +447,14 @@ describe("vendored ledger builds: the recorded sources and pins", () => {
     }
   });
 
-  it("patches midnight-circuits in every version, at the version its Cargo.lock pins, to keep the Poseidon pre-computation", () => {
+  // What is checked here is the patches' text and that every version carries them: one crate patch per version, for
+  // the midnight-circuits its Cargo.lock pins, that removes only the line that built the pre-computation at every hash
+  // and adds the same lines in the four; and the workspace patch that points Cargo at the patched copy. That the
+  // patched crate computes the pre-computation once per thread and field type is what its source reads: no test counts
+  // it (a counter would need a patch of the package of its own). That a hash's result is unchanged is
+  // `state-trees.test.ts`'s, in the four versions: each package's tree roots, Poseidon hashes, against an unpatched
+  // checkout's. What the patch saves is measured by a sync, not here.
+  it("patches midnight-circuits in every version, at the version its Cargo.lock pins: one line of poseidon_cpu.rs, the same change in the four", () => {
     const CIRCUITS = { v8: "6.1.0", "v9-rc3": "7.2.1", "v9-rc5": "7.2.4", v9: "7.3.0" } as const;
     const WORKSPACE_PATCH = {
       v8: "0006-midnight-circuits-poseidon-pre-computation-kept.patch",
