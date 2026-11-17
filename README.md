@@ -205,6 +205,13 @@ transport reader's login.
 
 `--config` defaults to `umbradb.config.ts` in the working directory.
 
+`umbradb run` reads two variables of its environment, for measuring a sync. `UMBRADB_TRACE=<file>` writes the block
+trace: one JSON line per committed height in `<file>` saying where its time went, the statements' totals in
+`<file>.stmts.json`, and one line per block the ledger worker applied in `<file>.worker.jsonl`.
+`UMBRADB_TRACE_STEPS=1` beside it adds each reclamation step's detail to a height's line. Without `UMBRADB_TRACE`
+nothing is traced, and a traced process stores what an untraced one stores. The keys are in the
+[operator guide](docs/operator-guide.md#measuring-a-sync-the-block-trace).
+
 ```sh
 npx umbradb backup --out preview-10000.backup                            # umbradb.config.ts's database
 npx umbradb restore preview-10000.backup --config restored.config.ts     # into an empty database

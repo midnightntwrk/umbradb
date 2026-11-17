@@ -7,7 +7,15 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Added
+
+- **A block trace for measuring a sync.** With `UMBRADB_TRACE=<file>` in its environment, `umbradb run` writes where
+  each committed height's time went: the ledger worker's apply, the reclamation step and its reads, the block's
+  transaction, every statement's client time, and the phases inside the worker with the worker thread's whole time
+  between two applied blocks. It is off unless the variable is set and changes nothing that is stored.
+  `UMBRADB_TRACE_STEPS=1` beside it adds each step's count changes, new nodes and deleted nodes. The trace also records
+  memory at every block: `mem` in a height's line for the main thread, `ext`, `heap` and `rss` in the worker's line.
+  The operator guide's "Measuring a sync: the block trace" lists the files and their keys.
 
 ## [0.10.0] - 2026-10-27
 
