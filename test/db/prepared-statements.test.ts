@@ -63,6 +63,8 @@ describe("prepared statements on PostgreSQL (00033 F2)", () => {
       "INSERT INTO t.rows SELECT height, label FROM t.rows WHERE height < 0",
       "UPDATE t.rows SET label = label WHERE height < 0",
       "DELETE FROM t.rows WHERE height < 0",
+      "MERGE INTO t.rows AS r USING (VALUES (1::bigint)) AS v (height) ON r.height = v.height " +
+        "WHEN MATCHED THEN UPDATE SET label = r.label",
       "VALUES (1)",
       "TABLE t.blocks",
     ];
@@ -74,10 +76,14 @@ describe("prepared statements on PostgreSQL (00033 F2)", () => {
         for (const text of texts.slice(1)) await tx.query(text);
       });
     }
-    const prepared = await db.transaction((tx) => tx.query("SELECT statement FROM pg_prepared_statements"));
+    const prepared = await db.transaction((tx) =>
+      tx.query("SELECT statement, (generic_plans + custom_plans)::int AS runs FROM pg_prepared_statements"),
+    );
     const statements = prepared.map((row) => String(row.statement));
     // Each once, on the writer's session.
     for (const text of texts) expect(statements.filter((statement) => statement === text), text).toHaveLength(1);
+    // And each of the four executions ran that prepared statement: PostgreSQL counts a plan of it for each.
+    for (const text of texts) expect(prepared.find((row) => row.statement === text)?.runs, text).toBe(4);
     expect(statements.filter((statement) => /^\s*(SET|RESET|BEGIN|COMMIT|ROLLBACK)\b/i.test(statement))).toEqual([]);
     await db.close();
   });
@@ -209,6 +215,62 @@ describe("prepared statements on PostgreSQL (00033 F2)", () => {
     const [row] = await db.transaction((tx) => tx.query(READ_ROW, [1n]));
     expect(row).toEqual({ height: 1n, label: "one" });
     await db.close();
+  });
+
+  describe("the same for a text without parameters", () => {
+    const READ_ONE = "SELECT * FROM t.rows WHERE height = 1";
+
+    it("after a schema change made by a script (a migration's several statements)", async () => {
+      const { db } = await database();
+      await db.transaction((tx) => tx.query(READ_ONE));
+      await db.transaction((tx) => runMultiStatement(tx, "ALTER TABLE t.rows ADD COLUMN extra integer NOT NULL DEFAULT 7; SELECT 1;"));
+      const [row] = await db.transaction((tx) => tx.query(READ_ONE));
+      expect(row).toEqual({ height: 1n, label: "one", extra: 7 });
+      await db.close();
+    });
+
+    it("after a schema change the writer made, in a second pool of the process that only reads the same database", async () => {
+      const created = await server.createDatabase();
+      await created.exec(SCHEMA);
+      const writer = created.open({ committedHeight, readConnections: 1 });
+      const reads = created.open({ committedHeight, readConnections: 1 });
+      await reads.read((read) => read.query(READ_ONE));
+      await writer.transaction((tx) => tx.execute("ALTER TABLE t.rows ADD COLUMN extra integer NOT NULL DEFAULT 7"));
+      const [row] = await reads.read((read) => read.query(READ_ONE));
+      expect(row).toEqual({ height: 1n, label: "one", extra: 7 });
+      await writer.close();
+      await reads.close();
+    });
+
+    it("not reused after a schema change the transaction that prepared it then rolled back", async () => {
+      const { db } = await database();
+      const failed = new Error("the migration failed");
+      await expect(
+        db.transaction(async (tx) => {
+          await tx.execute("ALTER TABLE t.rows ADD COLUMN extra integer NOT NULL DEFAULT 7");
+          // Prepared here, against the altered table.
+          await tx.query(READ_ONE);
+          throw failed;
+        }),
+      ).rejects.toBe(failed);
+      const [row] = await db.transaction((tx) => tx.query(READ_ONE));
+      expect(row).toEqual({ height: 1n, label: "one" });
+      await db.close();
+    });
+
+    it("privileges checked at each execution, under the role current then", async () => {
+      const { db, exec } = await database();
+      await exec("CREATE ROLE umbradb_parameterless_noread NOLOGIN; GRANT USAGE ON SCHEMA t TO umbradb_parameterless_noread;");
+      await exec(`GRANT umbradb_parameterless_noread TO CURRENT_USER`);
+      await db.transaction((tx) => tx.query(READ_ONE));
+      await expect(
+        db.transaction(async (tx) => {
+          await tx.execute("SET LOCAL ROLE umbradb_parameterless_noread");
+          return tx.query(READ_ONE);
+        }),
+      ).rejects.toMatchObject({ message: expect.stringMatching(/permission denied/) });
+      await db.close();
+    });
   });
 
   it("prepares nothing on a pool opened with preparedStatements: false", async () => {
