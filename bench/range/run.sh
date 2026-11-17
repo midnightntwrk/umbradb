@@ -132,13 +132,16 @@ PORT="$(docker port "$RUN" 8081/tcp 2>/dev/null | head -1 | sed 's/.*://')" || P
 LAST=""; CURSOR=""; MOVED="$SECONDS"; STALLED=""
 while :; do
   if [ "$(docker inspect -f '{{.State.Running}}' "$RUN" 2>/dev/null)" != "true" ]; then break; fi
-  S="$(curl -s -m 2 "http://127.0.0.1:$PORT/status" || true)"
+  S="$(curl -s -f -m 2 "http://127.0.0.1:$PORT/status" || true)"
   if [ -n "$S" ] && [ "$S" != "$LAST" ]; then
     LAST="$S"; NOW="$(node -e 'console.log(Date.now())')"
-    echo "{\"at\":$NOW,\"status\":$S}" >> "$OUT/status.jsonl"
-    STATE="$(echo "$S" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);console.log((j.state??"")+" "+(j.cursor??""))}catch{console.log("? ")}})')"
-    case "$STATE" in stopped*|halted*|refused*) break;; esac
-    if [ "${STATE#* }" != "$CURSOR" ]; then CURSOR="${STATE#* }"; MOVED="$SECONDS"; fi
+    # A sample is kept only if it is JSON: an answer cut by the timeout is not.
+    STATE="$(echo "$S" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);console.log((j.state??"")+" "+(j.cursor??""))}catch{}})')"
+    if [ -n "$STATE" ]; then
+      echo "{\"at\":$NOW,\"status\":$S}" >> "$OUT/status.jsonl"
+      case "$STATE" in stopped*|halted*|refused*) break;; esac
+      if [ "${STATE#* }" != "$CURSOR" ]; then CURSOR="${STATE#* }"; MOVED="$SECONDS"; fi
+    fi
   fi
   if [ $((SECONDS - MOVED)) -ge "$STALL_LIMIT" ]; then
     STALLED=1; echo "run.sh: the cursor has not moved for $STALL_LIMIT s (STALL_LIMIT): the run is stopped" >&2; break

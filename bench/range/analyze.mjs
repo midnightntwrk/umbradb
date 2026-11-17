@@ -2,8 +2,11 @@
 // block's time goes: stages, the reclamation step's reads, and each statement's client time against the server's.
 //   node analyze.mjs <run folder>
 import { existsSync, readFileSync } from "node:fs";
+import { jsonFile, jsonLines, oneLine } from "./lines.mjs";
+oneLine("analyze.mjs");
 const out = process.argv[2];
-const rows = readFileSync(`${out}/trace.jsonl`, "utf8").trim().split("\n").map((l) => JSON.parse(l)).filter((r) => r.st);
+const rows = jsonLines(`${out}/trace.jsonl`).filter((r) => r.st);
+if (rows.length < 2) throw new Error(`${out}: its trace has ${rows.length === 0 ? "no height" : "one height"}, and a run's first is left out: nothing to read`);
 const skeleton = (t) => t.replace(/\$\d+/g, "?").replace(/'[^']*'/g, "?").replace(/\b\d+\b/g, "?").replace(/\s+/g, "").slice(0, 200);
 const mean = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
 const q = (a, p) => { const s = [...a].sort((x, y) => x - y); return s.length ? s[Math.floor(p * (s.length - 1))] : 0; };
@@ -58,7 +61,7 @@ if (existsSync(`${out}/trace.jsonl.stmts.json`)) {
     let text = m[8]; if (text.startsWith('"')) text = text.slice(1, -1).replace(/""/g, '"');
     return { calls: +m[1], exec: +m[2], plan: +m[3], wal: +m[7], text };
   }).filter(Boolean);
-  const stmts = JSON.parse(readFileSync(`${out}/trace.jsonl.stmts.json`, "utf8")).sort((a, b) => b.ms - a.ms);
+  const stmts = jsonFile(`${out}/trace.jsonl.stmts.json`).sort((a, b) => b.ms - a.ms);
   const n = rows.length;
   let clientAll = 0, serverAll = 0, callsAll = 0;
   console.log("\n== statements: per block count, client ms per call, server exec ms per call, client ms per block");

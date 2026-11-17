@@ -6,7 +6,8 @@
 // and the rest of the worker's time.
 //   node worker.mjs <run folder> ...      (SKIP=<n> skips each run's first n blocks as warm-up; default 20)
 //   FROM=<height> TO=<height> limit the heights
-import { readFileSync } from "node:fs";
+import { jsonLines, oneLine } from "./lines.mjs";
+oneLine("worker.mjs");
 const skip = Number(process.env.SKIP ?? 20);
 const from = Number(process.env.FROM ?? 0), to = Number(process.env.TO ?? Infinity);
 const keys = ["parse", "adapterApply", "deserialize", "segments", "wellFormed", "cost", "stateApply", "applySystem", "events", "postBlockUpdate", "settle", "stateKey", "stateRoot", "summary", "persist", "contracts", "release", "flush"];
@@ -15,7 +16,7 @@ const med = (rows, k) => { const v = rows.map((r) => r[k] ?? 0).sort((a, b) => a
 const total = (rows, f) => f(rows, "adapterApply") + f(rows, "settle");
 const cols = [];
 for (const dir of process.argv.slice(2)) {
-  const t = readFileSync(`${dir}/trace.jsonl.worker.jsonl`, "utf8").trim().split("\n").map((l) => JSON.parse(l)).slice(skip).filter((r) => r.h >= from && r.h <= to);
+  const t = jsonLines(`${dir}/trace.jsonl.worker.jsonl`).slice(skip).filter((r) => r.h >= from && r.h <= to);
   const e = t.filter((r) => r.tx === 0), x = t.filter((r) => r.tx > 0);
   cols.push({ dir: dir.split("/").filter(Boolean).at(-1), e, x, txs: x.reduce((a, r) => a + r.tx, 0) });
 }

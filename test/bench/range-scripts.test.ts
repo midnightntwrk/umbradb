@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -537,6 +537,78 @@ describe("the scripts that read a run folder", () => {
       expect(old.stdout).toContain("== busy: the worker's time");
     } finally {
       rmSync(runs, { recursive: true, force: true });
+    }
+  });
+
+  it("a run stopped mid-write: a last line cut in half is left out and said, and the rest is read as it would be", () => {
+    writeRun("cut1", "chain-end");
+    writeRun("cut2", "chain-end");
+    try {
+      for (const file of ["trace.jsonl", "trace.jsonl.worker.jsonl"]) appendFileSync(join(folder("cut1"), file), '{"h":105,"t":7');
+      for (const script of ["compare.mjs", "analyze.mjs", "worker.mjs", "worker-time.mjs"]) {
+        const whole = run(script, [folder("cut2")], { SKIP: "0" });
+        const cut = run(script, [folder("cut1")], { SKIP: "0" });
+        expect(cut.code, script).toBe(whole.code);
+        // The run's name is its folder's: the rest of the output is the same.
+        expect(cut.stdout.replaceAll("cut1", "cut2"), script).toBe(whole.stdout);
+        expect(cut.stderr, script).toMatch(/last line \(\d+\) is cut/);
+        expect(cut.stderr, script).not.toMatch(/^\s+at /m);
+      }
+    } finally {
+      for (const label of ["cut1", "cut2"]) rmSync(folder(label), { recursive: true, force: true });
+    }
+  });
+
+  it("a run that did not end well: each reader ends with one line naming what is missing, not a stack", () => {
+    mkdirSync(folder("broken"));
+    try {
+      // An empty trace and worker file, and a status file whose cursor never moved.
+      for (const file of ["trace.jsonl", "trace.jsonl.worker.jsonl"]) writeFileSync(join(folder("broken"), file), "");
+      writeFileSync(join(folder("broken"), "result.json"), "");
+      writeFileSync(join(folder("broken"), "status.jsonl"), `${JSON.stringify({ at: 1, status: { state: "running", cursor: "100" } })}\n${JSON.stringify({ at: 2, status: { state: "halted", cursor: "100", reason: "node" } })}\n`);
+      for (const script of ["compare.mjs", "analyze.mjs", "worker.mjs", "worker-time.mjs", "summary.mjs"]) {
+        const result = run(script, [folder("broken")], { SKIP: "0" });
+        expect(result.code, script).toBe(1);
+        expect(result.stderr.trimEnd().split("\n"), script).toHaveLength(1);
+        expect(result.stderr, script).toMatch(new RegExp(`^${script.replace(".", "\\.")}: `));
+        expect(result.stderr, script).toContain(script === "summary.mjs" ? "committed no height" : "holds no line");
+      }
+      // No status file at all: named.
+      rmSync(join(folder("broken"), "status.jsonl"));
+      expect(run("summary.mjs", [folder("broken")])).toMatchObject({ code: 1, stderr: expect.stringContaining("status.jsonl") });
+      // A trace of one height: after the first, left out, nothing is left to read, which is said, not Infinity or NaN.
+      writeFileSync(join(folder("broken"), "trace.jsonl"), `${readFileSync(join(folder("a"), "trace.jsonl"), "utf8").split("\n")[0]}\n`);
+      writeFileSync(join(folder("broken"), "result.json"), readFileSync(join(folder("a"), "result.json"), "utf8"));
+      for (const script of ["compare.mjs", "analyze.mjs"]) {
+        const result = run(script, [folder("broken")]);
+        expect(result.code, script).toBe(1);
+        expect(result.stdout, script).not.toMatch(/Infinity|NaN/);
+        expect(result.stderr, script).toContain("one height");
+      }
+    } finally {
+      rmSync(folder("broken"), { recursive: true, force: true });
+    }
+  });
+
+  it("compare.mjs takes a run's chain from its last line that has one, and says when a run has none", () => {
+    // A build that works in batches writes the chain at a batch's last height only: here the last height has none.
+    writeRun("no-last", "chain-end", (line, index) => (index === 4 ? (({ sh: _sh, ...rest }) => rest)(line) : line));
+    writeRun("none", "chain-end", ({ sh: _sh, ...line }) => line);
+    try {
+      const result = run("compare.mjs", [folder("a"), folder("no-last"), folder("none")]);
+      expect(result.code).toBe(1);
+      const [, first, second, third] = result.stdout.trimEnd().split("\n") as [string, string, string, string];
+      expect(first).toContain("chain-end same (h 104, stopped)");
+      // Its chain at height 103 is not the first run's at 104.
+      expect(second).toContain("chain-103 DIFFERENT (h 103, stopped)");
+      expect(third).toContain("no chain (stopped)");
+      expect(result.stdout).not.toContain("undefined");
+      // A first run with no chain: nothing is said to be the same.
+      const reversed = run("compare.mjs", [folder("none"), folder("a")]);
+      expect(reversed.code).toBe(1);
+      expect(reversed.stdout).not.toMatch(/\bsame\b|undefined/);
+    } finally {
+      for (const label of ["no-last", "none"]) rmSync(folder(label), { recursive: true, force: true });
     }
   });
 

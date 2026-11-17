@@ -18,10 +18,11 @@
 // start, less their transit: the time the requests before them ran) and garbage collection of the worker's heap.
 // A run whose worker entries have no spanMs did not record the worker's whole time: nothing is printed for it but
 // that, and the script ends with status 1.
-import { readFileSync } from "node:fs";
+import { jsonLines, oneLine } from "./lines.mjs";
+oneLine("worker-time.mjs");
 const skip = Number(process.env.SKIP ?? 20);
 const from = Number(process.env.FROM ?? 0), to = Number(process.env.TO ?? Infinity);
-const lines = (file) => readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+const lines = jsonLines;
 const v = (r, k) => r[k] ?? 0;
 const sum = (r, prefix) => Object.keys(r).reduce((a, k) => (k.startsWith(prefix) ? a + r[k] : a), 0);
 const mean = (rows, f) => (rows.length ? rows.reduce((a, r) => a + f(r), 0) / rows.length : NaN);

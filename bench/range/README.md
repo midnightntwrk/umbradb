@@ -164,7 +164,10 @@ key is in the trace, so a run of an older build and a run of a newer one can be 
 
 ## Reading runs
 
-Each takes run folders (`$BENCH_DIR/<label>`) or, for the `.sh` scripts, labels.
+Each takes run folders (`$BENCH_DIR/<label>`) or, for the `.sh` scripts, labels. A run that did not end well is said
+in one line, not a stack, with status 1: an empty trace, a run whose cursor never moved (see its `run.log`), a trace of
+one height. A trace's last line cut mid-write (a run stopped by a signal) is left out, with a note on standard error.
+The `.mjs` readers share `lines.mjs` for this.
 
 | Script | Gives |
 |---|---|
