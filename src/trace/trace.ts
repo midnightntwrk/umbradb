@@ -13,7 +13,7 @@
  *   value) and {@link tracePush} (an item of a list);
  * - `sh`, the chain of step outputs ({@link traceChain}): a SHA-256 over what every height so far gave, 16 hex digits
  *   of it. Two runs of the same heights whose last `sh` are equal computed the same thing at every height;
- * - each statement text's count and client time, from send to answer ({@link traceStatement}): the first
+ * - each statement text's count and client time, from send to answer or failure ({@link traceStatement}): the first
  *   {@link STATEMENT_TEXTS} texts by name, the statements of any other text together under {@link OTHER_STATEMENTS};
  * - the ledger worker as this thread sees it, added to the height being processed when a message of the worker is
  *   handled (`src/ledger/worker/host.ts`): each request type's round trips (`rt.<type>`, `rtN.<type>`), the answers'
@@ -185,8 +185,9 @@ function totalsOf(trace: Active, key: string): StatementTotals {
 }
 
 /**
- * One statement's client time, from send to answer: counted under its text (see {@link STATEMENT_TEXTS}) and in the
- * current height's `sqlN` and `sqlMs`; a `COMMIT`'s time is also the height's `commitMs`.
+ * One statement's client time, from send to its answer or its failure: counted under its text (see
+ * {@link STATEMENT_TEXTS}) and in the current height's `sqlN` and `sqlMs`; a `COMMIT`'s time is also the height's
+ * `commitMs`.
  */
 export function traceStatement(text: string, ms: number): void {
   if (active === null) return;

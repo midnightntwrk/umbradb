@@ -407,9 +407,12 @@ class Session {
       const prepare = !simple && args.length > 0 && this.prepares(text);
       const options = { simple, prepare } as unknown as postgres.UnsafeQueryOptions;
       const sent = performance.now();
-      const result = await this.sql.unsafe(text, args as string[], options).raw();
-      traceStatement(text, performance.now() - sent);
-      return result;
+      try {
+        return await this.sql.unsafe(text, args as string[], options).raw();
+      } finally {
+        // Answered or failed (a timeout, a lost connection), the statement took this time of the session.
+        traceStatement(text, performance.now() - sent);
+      }
     } catch (error) {
       if (this.ended) throw handleClosed("database");
       const classified = classifyDriverError(error, this.role);

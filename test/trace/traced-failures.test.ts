@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { UmbraError } from "../../src/db/errors.js";
 import {
   FLUSH_LINES,
   OTHER_STATEMENTS,
@@ -13,10 +14,18 @@ import { BACKUP_BACKENDS, type BackupBackend } from "../backup/backup-fixtures.j
 /**
  * The block trace when something fails or overflows (`src/trace/trace.ts`), on PostgreSQL 18, through the database API:
  * - reads that differ by a comment, more texts than the statements' totals keep by name: the first texts by name, every
- *   other statement in one last entry, none lost.
+ *   other statement in one last entry, none lost;
+ * - a statement that fails is counted with its time, and fails as it does untraced.
  */
 
 const postgres = BACKUP_BACKENDS.find((backend) => backend.kind === "postgres") as BackupBackend;
+
+/** What a promise rejects with, or "resolved". */
+const outcome = (running: Promise<unknown>): Promise<unknown> =>
+  running.then(
+    () => "resolved",
+    (error: unknown) => error,
+  );
 
 /** What a sink was given, as lines and the statements' last totals. */
 function memorySink() {
@@ -71,4 +80,34 @@ describe("the block trace when something fails or overflows, on PostgreSQL", () 
     expect(statements.reduce((sum, statement) => sum + statement.n, 0)).toBe(counted);
     expect(counted).toBeGreaterThanOrEqual(2 * sent);
   }, 120_000);
+
+  it("a statement that fails is counted under its text with its time, and its error is the one an untraced read gets", async () => {
+    const db = await postgres.database();
+    // It fails once it has slept: the division by zero is met when the row is computed, after the sleep.
+    const failing = "SELECT 1 / (count(*) - 1) FROM pg_sleep(0.3)";
+    const untraced = await outcome(db.query(failing));
+    expect(untraced).toBeInstanceOf(UmbraError);
+    const trace = memorySink();
+    startTrace(trace.sink);
+    const traced = await outcome(db.query(failing));
+    traceEndBlock(1n);
+    stopTrace();
+    const shape = (error: unknown) => {
+      const { name, message, code, retryable, details } = error as UmbraError;
+      return { name, message, code, retryable, details };
+    };
+    expect(shape(traced)).toEqual(shape(untraced));
+    const [entry] = trace.statements().filter((statement) => statement.q === failing);
+    expect(entry?.n).toBe(1);
+    expect(entry?.ms).toBeGreaterThanOrEqual(290);
+    const [line] = trace.blocks();
+    expect(line?.sqlMs as number).toBeGreaterThanOrEqual(290);
+    // The same statement that succeeds after its sleep is counted alike.
+    const passing = "SELECT 1 / count(*) FROM pg_sleep(0.3)";
+    const second = memorySink();
+    startTrace(second.sink);
+    await db.query(passing);
+    stopTrace();
+    expect(second.statements().find((statement) => statement.q === passing)?.n).toBe(1);
+  }, 60_000);
 });
