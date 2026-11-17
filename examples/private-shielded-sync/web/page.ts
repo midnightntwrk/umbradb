@@ -1,12 +1,23 @@
 /**
- * The page: one card per step, each sending one message to the client's worker (`./worker.ts`) and showing what came
- * back: the main facts, then the whole answer as debug JSON. The right-hand panel lists every request the server saw.
- * Sizes, shapes and calls are worded for the snapshot's PIR scheme (`./scheme-view.ts`, spec 00058 FR-060).
+ * The page, in two tabs over one worker (`./worker.ts`) and one wallet:
+ *
+ * - **Wallet** (opens first): the mnemonic and Sync, which runs the worker's `walletSync` (`./wallet-sync.ts`): the
+ *   keys, the shielded sync and the Dust sync in order, the step in progress shown; then the balances
+ *   (`./wallet-view.ts`) and what the sync cost. The Details tab's cards of the steps it ran are filled with their
+ *   answers, and its request list with its requests.
+ * - **Details**: one card per step, each sending one message to the worker and showing what came back: the main facts,
+ *   then the whole answer as debug JSON. The right-hand panel lists every request the server saw. Sizes, shapes and
+ *   calls are worded for the snapshot's PIR scheme (`./scheme-view.ts`, spec 00058 FR-060).
+ *
+ * The mnemonic field is one element, shown in the tab in view; a wallet derived or generated in Details is the Wallet
+ * tab's too. Tabs follow the ARIA tabs pattern: arrow keys, Home and End move between them.
  */
 
 import { serveCallWorkers } from "./call-workers.ts";
 import { dustBytes, dustChainRows, dustSpendRows } from "./dust-view.ts";
 import { callText, cellText, kb, pathTableText, tableText } from "./scheme-view.ts";
+import type { WalletSyncResult } from "./wallet-sync.ts";
+import { walletBalancesHtml, walletCostHtml, walletFailureHtml } from "./wallet-view.ts";
 import type { SchemeName } from "../pir/scheme.ts";
 
 type Json = Record<string, unknown>;
@@ -323,8 +334,23 @@ const STEP_OF: Record<string, string> = { generate: "keys" };
 let firstFree = 0;
 /** Whether the page's server reads the database (`serve.ts --db-url`): the read rows then offer "Compare". */
 let databaseRoutes = false;
+/** Steps running now: one worker serves both tabs, so Sync waits for the Details steps and they for it. */
+let running = 0;
+const busy = (delta: number): void => {
+  running += delta;
+  $<HTMLButtonElement>("#wallet-sync").disabled = running > 0;
+};
 
 async function run(button: HTMLButtonElement): Promise<void> {
+  busy(1);
+  try {
+    await runStep(button);
+  } finally {
+    busy(-1);
+  }
+}
+
+async function runStep(button: HTMLButtonElement): Promise<void> {
   const name = button.dataset.run!;
   const card = button.closest("section")!;
   const status = $(".status", card);
@@ -357,6 +383,8 @@ async function run(button: HTMLButtonElement): Promise<void> {
     if (name === "files") {
       firstFree = Number((answer.result!.manifest as Json).firstFree);
     }
+    // A wallet generated here is the Wallet tab's too.
+    if (name === "generate" && typeof answer.result!.generatedMnemonic === "string") $<HTMLTextAreaElement>("#mnemonic").value = answer.result!.generatedMnemonic;
   } else {
     status.className = "status bad";
     status.textContent = "failed";
@@ -475,6 +503,111 @@ async function compare(button: HTMLButtonElement): Promise<void> {
   }
 }
 
+// ── the Wallet tab ──────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The Details card of each step the Wallet sync runs. */
+const CARD_OF: Record<string, string> = {
+  keys: "#step-keys",
+  files: "#step-files",
+  scan: "#step-scan",
+  read: "#step-read",
+  nullifiers: "#step-nullifiers",
+  tail: "#step-tail",
+  summary: "#step-summary",
+  dustFile: "#step-dust-file",
+  dustWalk: "#step-dust-walk",
+  dustCheck: "#step-dust-check",
+};
+
+/** Fills a Details card with what the Wallet sync's step did, as the card's own button would. */
+function fillCard(step: WalletSyncResult["steps"][number]): void {
+  const card = $(CARD_OF[step.name]!);
+  const status = $(".status", card);
+  const out = $(".out", card);
+  if (step.ok) {
+    status.className = "status ok";
+    status.textContent = `done in ${step.ms} ms (by the Wallet tab's sync)`;
+    out.innerHTML = (VIEWS[step.name]?.(step.answer!) ?? "") + `<details><summary>debug: the step's whole answer</summary><pre>${esc(abbreviated(step.answer))}</pre></details>`;
+    if (step.name === "files") firstFree = Number((step.answer!.manifest as Json).firstFree);
+  } else {
+    status.className = "status bad";
+    status.textContent = "failed (in the Wallet tab's sync)";
+    out.innerHTML = `<div class="error">${esc(step.error ?? "failed")}</div>`;
+  }
+}
+
+/** The loading of the client (step 0), which a sync waits for. */
+let loaded: Promise<void> = Promise.resolve();
+
+async function walletSync(): Promise<void> {
+  const status = $("#wallet-status");
+  const progress = $("#wallet-progress");
+  const failure = $("#wallet-failure");
+  busy(1);
+  const steps = [...document.querySelectorAll<HTMLButtonElement>("#panel-details button[data-run]")];
+  steps.forEach((b) => (b.disabled = true));
+  status.className = "status run";
+  status.textContent = "syncing…";
+  failure.innerHTML = "";
+  progress.textContent = "waiting for the client to load";
+  try {
+    await loaded;
+    if ($("#step-load .status").classList.contains("bad")) throw new Error("the client did not load (Details, step 0)");
+    progress.textContent = "starting";
+    // The keys from the shared field (step 1's), the scan on the WebGPU when the Details tab's scan option says so.
+    const answer = await call("walletSync", { ...ARGS.keys!(), gpu: $<HTMLInputElement>("#gpu").checked }, (t) => (progress.textContent = t));
+    if (!answer.ok) throw new Error(answer.error ?? "failed");
+    const r = answer.result as unknown as WalletSyncResult;
+    for (const s of r.steps) fillCard(s);
+    $("#wallet-balances .out").innerHTML = walletBalancesHtml(r);
+    $("#wallet-cost .out").innerHTML = walletCostHtml(r);
+    failure.innerHTML = walletFailureHtml(r);
+    status.className = r.ok ? "status ok" : "status bad";
+    status.textContent = r.ok ? `synced in ${(r.cost.ms / 1000).toFixed(1)} s` : `failed at ${r.failed!.label}`;
+    progress.textContent = "";
+  } catch (error) {
+    status.className = "status bad";
+    status.textContent = "failed";
+    progress.textContent = "";
+    failure.innerHTML = `<div class="error">${esc(error instanceof Error ? error.message : String(error))}</div>`;
+  } finally {
+    steps.forEach((b) => (b.disabled = false));
+    busy(-1);
+  }
+}
+
+// ── the tabs ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const TABS = ["wallet", "details"] as const;
+
+/** Shows one tab: its panel in view, the other hidden (each keeps its state), the mnemonic field moved into it. */
+function showTab(name: (typeof TABS)[number], focus = false): void {
+  for (const t of TABS) {
+    const tab = $<HTMLButtonElement>(`#tab-${t}`);
+    const on = t === name;
+    tab.setAttribute("aria-selected", String(on));
+    tab.tabIndex = on ? 0 : -1;
+    $(`#panel-${t}`).hidden = !on;
+    if (on && focus) tab.focus();
+  }
+  $(`#mnemonic-slot-${name}`).appendChild($("#mnemonic"));
+}
+
+for (const t of TABS) {
+  const tab = $<HTMLButtonElement>(`#tab-${t}`);
+  tab.addEventListener("click", () => showTab(t));
+  tab.addEventListener("keydown", (event) => {
+    const at = TABS.indexOf(t);
+    const to =
+      event.key === "ArrowRight" ? TABS[(at + 1) % TABS.length] : event.key === "ArrowLeft" ? TABS[(at + TABS.length - 1) % TABS.length] : event.key === "Home" ? TABS[0] : event.key === "End" ? TABS[TABS.length - 1] : undefined;
+    if (to === undefined) return;
+    event.preventDefault();
+    showTab(to, true);
+  });
+}
+$("#wallet-sync").addEventListener("click", () => void walletSync());
+showTab("wallet");
+
 // ── one request, whole ──────────────────────────────────────────────────────────────────────────────────────────
 
 const SHOW_ALL_LIMIT = 4 * 1024 * 1024;
@@ -550,4 +683,4 @@ document.addEventListener("click", (event) => {
   else if (target.dataset.fill) void fill(target);
   else if (target.dataset.compare) void compare(target);
 });
-void run($<HTMLButtonElement>('[data-run="load"]'));
+loaded = run($<HTMLButtonElement>('[data-run="load"]'));

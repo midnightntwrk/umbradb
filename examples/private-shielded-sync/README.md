@@ -171,11 +171,29 @@ docker rm -f pss-proof-server
 
 ## The step-by-step page (`web/`)
 
-A page that runs the client's own code in the browser, one step per button, and shows what each step did:
+A page that runs the client's own code in the browser, in two tabs over one worker and one wallet:
+
+- **Wallet** (opens first): the wallet's mnemonic and one button, **Sync**. Sync runs, in order, the Details tab's
+  steps 1 to 5 and 7 to 11 (the keys, the shielded sync, the Dust sync; no path read, no spend, no debug request),
+  showing the step in progress. Then, in the centre, the balances: shielded per token type (the type, shortened: the
+  example knows no token's name; the sum of its unspent coins in base units, as `balance` prints it; the number of
+  coins), and Dust per chain in the era (its value now in Specks; whether its last coin is checked, not checkable yet
+  or has nothing to check) with the total. An empty wallet shows zeros. At the bottom, what the last sync cost: its
+  processing time, bytes up and bytes down, in total and by part (shielded with the keys, Dust), and the time split
+  into the wallet's own computing and waiting for the server; by step on request. A step that fails is named with its
+  message, and what completed before it stays. A second sync on the same snapshot costs less: the files, Dust chunks
+  and check table's public artifact the page holds are not downloaded again, and the opened tables are kept.
+- **Details**: one step per button, each showing what it did (below). A sync from Wallet fills the cards of the steps
+  it ran (marked "by the Wallet tab's sync") and the request list with its requests; a wallet derived or generated in
+  Details is the Wallet tab's too.
+
+The mnemonic field is one element, shown in the tab in view. The tabs follow the ARIA tabs pattern (arrow keys, Home
+and End move between them) and each keeps its state when hidden. The Details tab's steps:
 
 0. load the scan kernel and the ledger package (WebAssembly);
 1. derive the wallet's keys from a mnemonic or a Zswap seed (or generate a test wallet);
-2. get the manifest and the four shared files, each checked against the manifest;
+2. get the manifest and the four shared files, each checked against the manifest (a file the page already holds is not
+   downloaded again, and the tables of a snapshot already opened are kept);
 3. scan for the wallet's outputs (one CPU thread, or WebGPU);
 4. fetch read-table records by PIR, for the scan's matches or for positions typed in (any output can be fetched, to
    test before a wallet has coins in the synced range); each record is checked for ownership and, with the debug
@@ -277,6 +295,11 @@ The worker runs the client's files bundled by esbuild:
 
 `web/scheme-view.ts` holds what the page shows of each scheme (table lines, call plans, the body and artifact
 decoders, the digest-checked compile), without the DOM, so `test/web-scheme-view.test.ts` checks it under Node. The
+shielded steps are `web/shielded-steps.ts`, the Wallet tab's sync `web/wallet-sync.ts` and what it shows
+`web/wallet-view.ts`, without the DOM, so `test/server-web-wallet.test.ts` runs the sync under Node against the module
+in UmbraDB's real process and the Dust world. A step's cost: its time measured around it; its bytes and the time it
+waited for the server from the requests the client recorded during it (each request's time from sending to the
+answer's last byte; a step's requests run one after the other), the rest of its time computing. The
 Dust steps are `web/dust-steps.ts` (the command line's `dust` and `dust --spend`, from `client/dust.ts`,
 `client/dust-check.ts` and `client/dust-spend.ts`, cut into the four steps) and `web/dust-view.ts` (the chains, bytes
 and spend as the page shows them), both without the DOM, so `test/server-web-dust.test.ts` runs them under Node in
@@ -985,6 +1008,7 @@ wallet's math was moved to the GPU and what was not.
 | `test/server-dust.test.ts` | The Dust routes in UmbraDB's real process (PostgreSQL 18) over Preprod events written into the test database: the file, a key's coins, the parameters, refusals; the Dust snapshot built at start in SimplePIR (its commitment and generation roots the stored ones, Preprod's), read through the wallet's code (the check, a coin's path at four positions), refusals, a build refused for another stored `dust_commitment_first_free`, the snapshot rebuilt in IPIR+SP by an IPIR+SP snapshot build and read through it (the check and a path); the ledger parameters served. |
 | `test/dust-walk.test.ts` | The walk: a chain of several spends across chunks, a match below the coin's position, a false match without and with a check, a chain with no spend, two chains in one file; with the ledger's functions, a chain found again from the encoded file, and what a generation record's `dtime` changes; the coins answer decoded from real events. |
 | `test/server-web-dust.test.ts` | The page's Dust steps under Node in both schemes, over the world of `test/server-dust-world.ts` (also the check test's): a wallet with three chains (the false match dropped, a chain not checkable, a chain with nothing to check), a second run from the page's cache, step 12 (one padded path call, both roots the snapshot's, the spend in memory, the snapshot's files from the page's cache the second time), a generated wallet with no chain (one padded call), the page's rendering of the chains, bytes and spend, refusals. |
+| `test/server-web-wallet.test.ts` | The page's Wallet tab under Node: its sync over the page's shielded and Dust steps against the module in UmbraDB's real process (PostgreSQL 18) and the Dust world: every step in order with its progress, the shielded balances equal to the ledger's own replay of the stored events, the Dust chains with their status and values, the cost by step and by part adding up to the requests made; a second sync downloading less (files held, tables kept, chunks and the public artifact cached); a wallet with nothing showing zeros; a failing step named with its message, the steps before it kept, and a Dust failure keeping the shielded balances; the view's rendering. |
 | `test/dust-walk-compare.test.ts` | The one-pass walk of all chains against the search per chain it replaced, on the same files: many chains, false matches, chains starting in the middle, two chains wanting one prefix (one starting later), chains with no spend, 2-, 4- and 6-byte prefixes, the ledger's own functions; the same chains, entries, coins, dropped matches, statuses and check batches. |
 | `test/server-dust-check.test.ts` | The check in both schemes: the module's builder and the scheme's server table called through the wallet's code; another wallet's spend before the real one dropped by the check, a chain's end beyond the table not checkable, two padded calls of one size; a coin's path in one padded call giving the snapshot's root, the Dust local state's two roots, the spend, a fee paid with it, wrong roots refused, the paying coin chosen, and a build refused for a commitment or generation root other than the core's. |
 | `test/bench-run.test.ts` | The benchmark against the module in the real process (PostgreSQL 18) over the synthetic chain, wallets A, B and C: every cell of spec §8 has a value for the server and each client, and the report renders it; the snapshot's counts and versions; per-step values and the server's times from its log; the naive baseline; the read table at k = 16, 8, 2 and 0 (k 2 gives the served snapshot); the server's view of every request and identical request shapes; the scan by thread count; the transfer row (and a dry-run record); no key, seed, nonce or nullifier in `results.json`; exactly the cells without their input reported missing; `--build`; the command line (`run`, `report --transfer`, with the install); log pairing, speed and formatting rules. |

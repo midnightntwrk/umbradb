@@ -19,6 +19,9 @@
  *   (`../ipir/pool.ts`), each with its own instance of the WebAssembly. Every request's secret comes from the
  *   `crypto.getRandomValues` of the thread that makes it, through the wrapper (`../ipir/wallet.ts`, FR-032).
  *
+ * The shielded steps (2 to 8) are `./shielded-steps.ts`; the Wallet tab's sync (phase 10) runs them and the Dust steps
+ * in order (`./wallet-sync.ts`, the `walletSync` step) on the same state, so the Details tab's steps show what it did.
+ *
  * The Dust steps (spec 00062) are `./dust-steps.ts`, the command line's `dust` cut into four (the last, phase 9's
  * spend in memory, its `dust --spend`): the Dust seed comes from the same mnemonic (HD role 2, `WalletSeeds.dust`) and
  * stays here; chunks and the Dust snapshot's public files are kept by SHA-256 for the page's life, so running the steps
@@ -30,48 +33,20 @@ import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { WalletSeeds } from "@midnightntwrk/wallet-sdk-hd";
 import { formatShieldedAddress } from "../client/address.ts";
 import { PssHttp } from "../client/http.ts";
-import { keysFromZswapSeed, type WalletKeys } from "../client/keys.ts";
+import { keysFromZswapSeed } from "../client/keys.ts";
 import type { Ledger } from "../client/ledger.ts";
-import { emptyCallStats, lookupNullifiers, paddedCalls, readCell, readPaths, readPositions } from "../client/pir-calls.ts";
-import { coinPath } from "../client/send.ts";
-import { checkCiphertext, checkLowerPath, checkSnapshotMatch, rootOverBlocks } from "../client/sync.ts";
-import { type Hash2, rootFromPath, TREE_DEPTH } from "../client/tree.ts";
 import { IpirPool } from "../ipir/pool.ts";
 import type { IpirReply } from "../ipir/pool-worker.ts";
 import { Kernel } from "../kernel/index.ts";
-import {
-  bucketOf,
-  decodeNullifierRecord,
-  inlineMultiplier,
-  type Multiplier,
-  NULLIFIER_RECORD_BYTES,
-  openWalletScheme,
-  PUBLIC_ARTIFACT,
-  type WalletScheme,
-  type WalletTable,
-} from "../pir/index.ts";
-import {
-  type ArtifactRef,
-  decodeDustChunk,
-  decodeManifest,
-  decodePathRecord,
-  dustChunkLayout,
-  decodeReadRecord,
-  decodeTailHeader,
-  decodeTailOutput,
-  type Manifest,
-  positionAtSlot,
-  ROUTES,
-  slotCount,
-  slotOf,
-  splitTail,
-  TAIL_OUTPUT_BYTES,
-} from "../shared/index.ts";
+import { inlineMultiplier, type Multiplier, PUBLIC_ARTIFACT } from "../pir/index.ts";
+import { decodeDustChunk, decodeManifest, dustChunkLayout, decodeTailHeader } from "../shared/index.ts";
 import { callWorkerFailed, startCallWorker } from "./call-workers.ts";
 import { DustSteps } from "./dust-steps.ts";
 import { initLedger } from "./ledger-v9.ts";
 import { WebMultiplier } from "./multiply-web.ts";
-import { ascii4, callPlan, cellOf, compileChecked, describeCallBody, describePublicArtifact, hex, tableOfRoute, tableSummary } from "./scheme-view.ts";
+import { ascii4, compileChecked, describeCallBody, describePublicArtifact, hex, tableOfRoute } from "./scheme-view.ts";
+import { type GpuScan, ShieldedSteps } from "./shielded-steps.ts";
+import { runWalletSync, walletSyncSteps } from "./wallet-sync.ts";
 import { sha256 as sha256Noble } from "@noble/hashes/sha2.js";
 
 declare const KERNEL_DIGEST: string;
@@ -84,7 +59,6 @@ const fromHexStrict = (s: string, len: number): Uint8Array => {
   if (!new RegExp(`^[0-9a-f]{${len * 2}}$`).test(t)) throw new Error(`not ${len} bytes of hex: ${s.slice(0, 20)}…`);
   return Uint8Array.from(t.match(/../g)!, (h) => parseInt(h, 16));
 };
-const equal = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && a.every((x, i) => x === b[i]);
 const now = (): number => performance.now();
 const round = (x: number): number => Math.round(x * 100) / 100;
 const sha256Sync = (b: Uint8Array): Uint8Array => sha256Noble(b);
@@ -93,10 +67,6 @@ const sha256 = async (b: Uint8Array): Promise<string> => hex(new Uint8Array(awai
 // ── state ───────────────────────────────────────────────────────────────────────────────────────────────────────
 let ledger: Ledger | null = null;
 let kernel: Kernel | null = null;
-let hash: Hash2 = () => {
-  throw new Error("the kernel is not loaded");
-};
-type GpuScan = { scan(entries: Uint8Array, secret: Uint8Array): Promise<number[]> };
 let gpu: Promise<GpuScan> | null = null;
 
 /**
@@ -121,7 +91,8 @@ function startGpu(): Promise<GpuScan> {
   })();
   return gpu;
 }
-let keys: WalletKeys | null = null;
+/** The shielded steps (made once the kernel and the ledger are loaded): the snapshot's files, tables and coins. */
+let shielded: ShieldedSteps | null = null;
 /** The Dust steps (made once the ledger is loaded), and the files they keep by SHA-256 for the page's life. */
 let dust: DustSteps | null = null;
 const dustCache = new Map<string, Uint8Array>();
@@ -225,34 +196,6 @@ async function capturingFetch(url: string, init: RequestInit = {}): Promise<Resp
 }
 
 const http = new PssHttp(self.location.origin, { fetch: capturingFetch });
-let manifest: Manifest | null = null;
-let manifestId: Uint8Array | null = null;
-const files = new Map<string, Uint8Array>();
-/**
- * The snapshot's PIR scheme (`../pir/scheme.ts`) and its tables, as a wallet opens them. SimplePIR multiplies on
- * `multiplier`; IPIR+SP's requests are made on `ipirWorkers`.
- */
-let scheme: WalletScheme | null = null;
-let readTable: WalletTable | null = null;
-let nullifierTable: WalletTable | null = null;
-/** The path table: its public artifact is downloaded only when the page reads paths, as a spend would (Q58). */
-let pathTable: WalletTable | null = null;
-let matches: number[] = [];
-interface Coin {
-  position: number;
-  tokenType: string;
-  value: string;
-  nonce: string;
-  commitment: string;
-  nullifier: string;
-  lowerPath: string[] | null;
-  source: "snapshot" | "tail";
-  spent: { height: number; txIndex: number; source: string } | null;
-}
-const coins = new Map<number, Coin>();
-/** Positions read: the full commitment when known (a coin of the wallet's), and the lower path once read. */
-const fetched = new Map<number, { commitment: Uint8Array | null; lowerPath: readonly Uint8Array[] | null }>();
-
 const need = <T>(value: T | null, what: string): T => {
   if (value === null) throw new Error(`${what} first`);
   return value;
@@ -269,9 +212,6 @@ function newRequests(): Json[] {
   return out;
 }
 
-/** Every manifest this page got, by snapshot identifier: a call is decoded with the shapes of its own snapshot. */
-const manifests = new Map<string, Manifest>();
-
 /** What a body is, field by field, where its format is known (`../shared/wire.ts`, the manifest, the artifacts). */
 function decodeBody(e: Exchange, side: "request" | "response"): Json | null {
   const b = side === "request" ? e.requestBody : e.responseBody;
@@ -282,7 +222,8 @@ function decodeBody(e: Exchange, side: "request" | "response"): Json | null {
   if (route.startsWith("/dust/")) return decodeDustBody(route, side, b, e.requestBody);
   if (route.startsWith("/query/")) {
     // The call's own snapshot (its header names it), else the current one.
-    const m = (b.length >= 40 ? manifests.get(hex(b.subarray(6, 38))) : undefined) ?? manifest;
+    const manifest = shielded?.manifest ?? null;
+    const m = (b.length >= 40 ? shielded?.manifests.get(hex(b.subarray(6, 38))) : undefined) ?? manifest;
     return describeCallBody(m?.scheme ?? "simplepir", side, b, m === null ? null : tableOfRoute(m, route), side === "response" ? e.requestBody : null, sha256Sync);
   }
   if (route === "/tail") {
@@ -300,6 +241,7 @@ function decodeBody(e: Exchange, side: "request" | "response"): Json | null {
   }
   if (route.startsWith("/blob/")) {
     const digest = route.slice("/blob/".length);
+    const manifest = shielded?.manifest ?? null;
     const a = manifest?.artifacts;
     const name =
       a === undefined
@@ -448,12 +390,22 @@ async function load(): Promise<Json> {
   const kernelDigest = await sha256(kernelBytes);
   if (kernelDigest !== KERNEL_DIGEST) throw new Error(`the scan kernel's SHA-256 is ${kernelDigest}, not the committed ${KERNEL_DIGEST}`);
   kernel = new Kernel(await WebAssembly.compile(kernelBytes as Uint8Array<ArrayBuffer>));
-  hash = (a, b) => kernel!.hash2(a, b)!;
   const kernelMs = now() - t;
   const t2 = now();
   const ledgerInfo = await initLedger("ledger-v9.wasm");
   ledger = ledgerInfo.ledger as unknown as Ledger;
   const ledgerMs = now() - t2;
+  shielded?.dispose();
+  shielded = new ShieldedSteps({
+    ledger,
+    kernel,
+    http,
+    multiplier,
+    ipirWasm: loadIpirWasm,
+    ...(ipirWorkers === null ? {} : { ipirWorkers }),
+    debugJson,
+    gpu: startGpu,
+  });
   dust?.dispose();
   dust = new DustSteps({
     ledger,
@@ -461,7 +413,7 @@ async function load(): Promise<Json> {
     cache: dustCache,
     scheme: { multiplier, ipirWasm: async () => (await loadIpirWasm()).module, ...(ipirWorkers === null ? {} : { ipirWorkers }) },
     kernel: () => kernel!,
-    network: async () => (manifest ?? decodeManifest((await http.manifest()).bytes)).network,
+    network: async () => (shielded?.manifest ?? decodeManifest((await http.manifest()).bytes)).network,
   });
   const debug = await debugJson("/debug/info");
   // Not awaited: a failure is reported by the scan that asks for the GPU.
@@ -502,11 +454,9 @@ async function deriveKeys(args: { mnemonic?: string; seedHex?: string; generate?
   } else {
     throw new Error("give a mnemonic, a Zswap seed, or generate one");
   }
-  keys = keysFromZswapSeed(l, seed, k);
+  const keys = keysFromZswapSeed(l, seed, k);
   seed.fill(0);
-  coins.clear();
-  fetched.clear();
-  matches = [];
+  need(shielded, "load the ledger").setKeys(keys);
   const address = formatShieldedAddress({ coinPublicKey: hex(keys.coinPublicKey), encryptionPublicKey: hex(keys.encryptionPublicKey) }, "preprod");
   return {
     source,
@@ -520,412 +470,16 @@ async function deriveKeys(args: { mnemonic?: string; seedHex?: string; generate?
   };
 }
 
-async function fetchBlob(ref: ArtifactRef, name: string): Promise<Json> {
-  const path = `${ROUTES.blob}${ref.digest}`;
-  const t = now();
-  const response = await capturingFetch(`${self.location.origin}${path}`);
-  if (!response.ok) throw new Error(`GET ${path}: ${response.status}`);
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  const ms = now() - t;
-  const digest = await sha256(bytes);
-  if (digest !== ref.digest || bytes.length !== ref.size) throw new Error(`${name}: got ${bytes.length} bytes with SHA-256 ${digest}, expected ${ref.size} bytes with ${ref.digest}`);
-  files.set(ref.digest, bytes);
-  return { name, bytes: bytes.length, ms: round(ms), sha256: `${digest.slice(0, 16)}… (equals the manifest's)` };
-}
-
-async function getFiles(): Promise<Json> {
-  need(kernel, "load the kernel");
-  const t = now();
-  const served = await http.manifest();
-  manifestId = fromHexStrict(await sha256(served.bytes), 32);
-  if (served.servedId !== null && served.servedId !== hex(manifestId)) throw new Error("the manifest's SHA-256 is not the identifier the server names");
-  manifest = decodeManifest(served.bytes);
-  manifests.set(hex(manifestId), manifest);
-  const m = manifest;
-  const a = m.artifacts;
-  const downloads = [];
-  // A manifest naming a scheme this page's build does not have stops here, with its name. The IPIR+SP WebAssembly is
-  // fetched and checked only when the scheme asks for it.
-  scheme?.dispose();
-  scheme = null;
-  readTable = nullifierTable = pathTable = null;
-  let wasm: Awaited<ReturnType<typeof loadIpirWasm>> | null = null;
-  scheme = await openWalletScheme(m, {
-    multiplier,
-    ipirWasm: async () => {
-      wasm = await loadIpirWasm();
-      return wasm.module;
-    },
-    ...(ipirWorkers === null ? {} : { ipirWorkers }),
-  });
-  const label = PUBLIC_ARTIFACT[m.scheme];
-  for (const [name, ref] of [["scan file", a.scan], ["block roots", a.blockRoots], [`read table ${label}`, a.readPublic], [`nullifier table ${label}`, a.nullifierPublic]] as const) {
-    downloads.push(await fetchBlob(ref, name));
-  }
-  const blockRoots = files.get(a.blockRoots.digest)!;
-  const rootOk = equal(rootOverBlocks(blockRoots, m.pathSplit, hash), fromHexStrict(m.root, 32));
-  if (!rootOk) throw new Error("the block roots do not give the manifest's root");
-  const t2 = now();
-  readTable = await scheme.openTable(a.readTable, files.get(a.readPublic.digest)!);
-  nullifierTable = await scheme.openTable(a.nullifierTable, files.get(a.nullifierPublic.digest)!);
-  const setupMs = now() - t2;
-  pathTable = null;
-  coins.clear();
-  fetched.clear();
-  matches = [];
-  const debug = await debugJson(`/debug/state?height=${m.height}`);
-  const loaded = wasm as Awaited<ReturnType<typeof loadIpirWasm>> | null;
-  return {
-    snapshotId: hex(manifestId),
-    manifest: {
-      network: m.network,
-      height: m.height,
-      blockHash: m.blockHash,
-      firstFree: m.firstFree,
-      padding: m.padding?.size ?? null,
-      root: m.root,
-      pathSplit: m.pathSplit,
-      queriesPerCall: m.queriesPerCall,
-      scheme: m.scheme,
-      pir: m.pir,
-      readTable: tableSummary(m.scheme, a.readTable),
-      pathTable: a.pathTable === undefined || a.pathPublic === undefined ? null : tableSummary(m.scheme, a.pathTable, a.pathPublic.size),
-      nullifierTable: tableSummary(m.scheme, a.nullifierTable),
-      blocks: a.blockRoots.blocks,
-    },
-    manifestBytes: served.bytes.length,
-    downloads,
-    ...(loaded === null ? {} : { ipirWasm: { bytes: loaded.bytes, sha256: loaded.sha256, ms: round(loaded.ms), threads: ipirWorkers?.threads ?? 1 } }),
-    checks: [
-      "the manifest's SHA-256 is the identifier the server names",
-      "every artifact's size and SHA-256 equal the manifest's",
-      "the block roots give the manifest's root",
-      ...(m.scheme === "ipir-sp"
-        ? [
-            "the IPIR+SP WebAssembly's SHA-256 equals the committed one built into the page",
-            "the WebAssembly set up the read and nullifier tables from their seeds and digests and accepted their masks (it refuses masks of another setup)",
-          ]
-        : []),
-      ...(debug === null
-        ? []
-        : [`database (debug): first_free ${String(debug.firstFree)}, root ${String(debug.root)} at ${m.height}: ${debug.firstFree === m.firstFree && debug.root === m.root ? "equal to the manifest" : "DIFFERENT from the manifest"}`]),
-    ],
-    ...(m.scheme === "simplepir" ? { setupMatricesMs: round(setupMs) } : { openTablesMs: round(setupMs) }),
-    ms: round(now() - t),
-  };
-}
-
-async function scan(args: { gpu?: boolean; chunk?: number }, progress: (text: string) => void): Promise<Json> {
-  const k = need(kernel, "load the kernel");
-  const w = need(keys, "derive the keys");
-  const m = need(manifest, "get the files");
-  const file = files.get(m.artifacts.scan.digest)!;
-  const n = slotCount(m);
-  const t = now();
-  let found: number[] = [];
-  let engine: string;
-  if (args.gpu) {
-    found = await (await startGpu()).scan(file, w.scanSecret);
-    engine = "WebGPU (gpu/scan.ts)";
-  } else {
-    const chunk = args.chunk ?? 2000;
-    for (let at = 0; at < n; at += chunk) {
-      const count = Math.min(chunk, n - at);
-      for (const i of k.scan(file.subarray(36 * at, 36 * (at + count)), w.scanSecret)) found.push(at + i);
-      progress(`scanned ${at + count} of ${n} entries, ${found.length} match(es)`);
-    }
-    engine = "WebAssembly scan kernel, one thread";
-  }
-  const ms = now() - t;
-  // The scan finds slots; in a padded snapshot a slot holds an output's tree position or noise (Q57).
-  found.sort((x, y) => x - y);
-  const noise = found.filter((s) => positionAtSlot(m, s) === null);
-  matches = found.map((s) => positionAtSlot(m, s)).filter((p): p is number => p !== null);
-  return {
-    engine,
-    entries: n,
-    entryBytes: 36,
-    matches: matches.map((p) => {
-      const s = slotOf(m, p);
-      return { position: p, slot: s, entry: hex(file.subarray(36 * s, 36 * s + 36)) };
-    }),
-    ...(noise.length > 0 ? { noiseMatches: noise } : {}),
-    ms: round(ms),
-    usPerEntry: n === 0 ? 0 : round((1000 * ms) / n),
-    note: "a match means the first 4 bytes of element 0 equal the wallet's pad: about 1 in 4 billion for an output that is not the wallet's",
-  };
-}
-
-async function read(args: { positions?: number[] }): Promise<Json> {
-  const k = need(kernel, "load the kernel");
-  const m = need(manifest, "get the files");
-  const id = need(manifestId, "get the files");
-  const positions = [...new Set(args.positions && args.positions.length > 0 ? args.positions : matches)].sort((x, y) => x - y);
-  for (const p of positions) if (!Number.isInteger(p) || p < 0 || p >= m.firstFree) throw new Error(`position ${p} is not in the snapshot (0 to ${m.firstFree - 1})`);
-  const ref = m.artifacts.readTable;
-  const plan = paddedCalls(positions.map((p) => readCell(m, p).group), ref.groups, m.queriesPerCall);
-  const stats = emptyCallStats();
-  const t = now();
-  const records = await readPositions(http, m, id, need(readTable, "get the files"), positions, stats);
-  const callMs = now() - t;
-  const file = files.get(m.artifacts.scan.digest)!;
-  const out = [];
-  for (const p of positions) {
-    const r = decodeReadRecord(records.get(p)!);
-    const { index, group, slot } = readCell(m, p);
-    const item: Json = {
-      position: p,
-      ...(m.padding === undefined ? {} : { tableIndex: index }),
-      ...cellOf(m.scheme, group, slot),
-      commitmentPrefix: hex(r.commitmentPrefix),
-      elementsShrunk: r.elements === null ? null : hex(r.elements),
-    };
-    let commitment: Uint8Array | null = null;
-    if (keys !== null) {
-      const checked = checkSnapshotMatch(k, keys, file.subarray(36 * index, 36 * index + 36), r);
-      if ("reason" in checked) item.ownership = `not the wallet's: ${checked.reason}`;
-      else {
-        commitment = checked.commitment;
-        const coin = coinOf(p, checked.coin, checked.commitment, m.pathSplit === 0 ? [] : null, "snapshot");
-        coins.set(p, coin);
-        item.ownership = "the wallet's: elements rebuilt from its pads, decrypted, and the decrypted coin's commitment starts with the record's 16 bytes";
-        item.coin = { tokenType: coin.tokenType, value: coin.value, nonce: coin.nonce, nullifier: coin.nullifier, commitment: coin.commitment };
-      }
-    }
-    fetched.set(p, { commitment, lowerPath: fetched.get(p)?.lowerPath ?? null });
-    // The comparison with the stored output is the page's, one row at a time (its "Compare" button): a lookup by
-    // position reads the whole events table, about 140 ms on the full Preprod database.
-    out.push(item);
-  }
-  return {
-    positions,
-    calls: callPlan(m.scheme, plan, false, `the server sees only the number of calls and their sizes, never which ${m.scheme === "simplepir" ? "columns" : "rows"} are real`),
-    stats: { ...stats, buildMs: round(stats.buildMs), roundTripMs: round(stats.roundTripMs), decodeMs: round(stats.decodeMs) },
-    records: out,
-    ms: round(callMs),
-  };
-}
-
 /**
- * Reads lower Merkle paths from the path table by PIR, as a spend does (Q58): only then is the path table's public
- * artifact (SimplePIR's setup data, IPIR+SP's masks) downloaded. Positions default to the wallet's snapshot coins. Each path is checked against its block's root from the
- * coin's commitment (with the debug database, from the stored commitment for a position that is not the wallet's).
+ * The Wallet tab's sync (`./wallet-sync.ts`): the keys from the mnemonic (as step 1), then the shielded and Dust steps
+ * a wallet needs for its balances, on this worker's state, so the Details tab's steps show what it did.
  */
-async function paths(args: { positions?: number[] }, progress: (text: string) => void): Promise<Json> {
-  const k = need(kernel, "load the kernel");
-  const m = need(manifest, "get the files");
-  const id = need(manifestId, "get the files");
-  const ref = m.artifacts.pathTable;
-  const publicRef = m.artifacts.pathPublic;
-  if (ref === undefined || publicRef === undefined) throw new Error("this snapshot has no path table (its path split is 0): the block roots give every path");
-  const blockSize = 2 ** m.pathSplit;
-  const fullBlocks = Math.floor(m.firstFree / blockSize);
-  const own = [...coins.values()].filter((c) => c.source === "snapshot").map((c) => c.position);
-  const asked = [...new Set(args.positions && args.positions.length > 0 ? args.positions : own)].sort((x, y) => x - y);
-  if (asked.length === 0) throw new Error("no position: read the wallet's coins first, or enter positions");
-  for (const p of asked) if (!Number.isInteger(p) || p < 0 || p >= m.firstFree) throw new Error(`position ${p} is not in the snapshot (0 to ${m.firstFree - 1})`);
-  const positions = asked.filter((p) => Math.floor(p / blockSize) < fullBlocks);
-  const fromTail = asked.filter((p) => Math.floor(p / blockSize) >= fullBlocks);
-  const t = now();
-  let download: Json | null = null;
-  if (pathTable === null) {
-    const label = PUBLIC_ARTIFACT[m.scheme];
-    progress(`downloading the path table's ${label} (${(publicRef.size / 1048576).toFixed(1)} MB), once per snapshot`);
-    download = await fetchBlob(publicRef, `path table ${label}`);
-    pathTable = await need(scheme, "get the files").openTable(ref, files.get(publicRef.digest)!);
-  }
-  const plan = paddedCalls(positions.map((p) => readCell(m, p, ref).group), ref.groups, m.queriesPerCall);
-  const stats = emptyCallStats();
-  const records = positions.length === 0 ? new Map<number, Uint8Array>() : await readPaths(http, m, id, pathTable, positions, stats);
-  const blockRoots = files.get(m.artifacts.blockRoots.digest)!;
-  const out = [];
-  for (const p of positions) {
-    const lower = decodePathRecord(records.get(p)!, m.pathSplit);
-    const { group, slot } = readCell(m, p, ref);
-    const item: Json = { position: p, ...cellOf(m.scheme, group, slot) };
-    if (lower === null) {
-      item.result = "FAILED: the path table holds no path for a position in a full block";
-      out.push(item);
-      continue;
-    }
-    item.lowerPath = lower.map(hex);
-    let commitment = fetched.get(p)?.commitment ?? (coins.has(p) ? fromHexStrict(coins.get(p)!.commitment, 32) : null);
-    let from = "the wallet's coin";
-    if (commitment === null) {
-      const db = await debugJson(`/debug/output?position=${p}`);
-      if (db !== null && typeof db.commitment === "string") {
-        commitment = fromHexStrict(db.commitment, 32);
-        from = "the database (debug)";
-      }
-    }
-    const block = Math.floor(p / blockSize);
-    if (commitment === null) item.result = "read; no commitment to check it with (not the wallet's coin, and no debug database)";
-    else {
-      const ok = checkLowerPath(k, commitment, p % blockSize, lower, blockRoots.subarray(32 * block, 32 * block + 32));
-      item.result = ok ? `gives block ${block}'s root from the commitment of ${from}` : `DOES NOT give block ${block}'s root`;
-    }
-    fetched.set(p, { commitment, lowerPath: lower });
-    const coin = coins.get(p);
-    if (coin !== undefined) coin.lowerPath = lower.map(hex);
-    out.push(item);
-  }
-  for (const p of fromTail) out.push({ position: p, result: `not read: block ${Math.floor(p / blockSize)} was not full at the snapshot, so the tail gives its path` });
-  return {
-    positions: asked,
-    scheme: m.scheme,
-    download,
-    calls: callPlan(m.scheme, plan, false),
-    table: tableSummary(m.scheme, ref),
-    stats: { ...stats, buildMs: round(stats.buildMs), roundTripMs: round(stats.roundTripMs), decodeMs: round(stats.decodeMs) },
-    records: out,
-    ms: round(now() - t),
-  };
-}
-
-function coinOf(position: number, coin: { tokenType: Uint8Array; nonce: Uint8Array; value: bigint }, commitment: Uint8Array, lowerPath: readonly Uint8Array[] | null, source: Coin["source"]): Coin {
-  const l = need(ledger, "load the ledger");
-  const w = need(keys, "derive the keys");
-  const info = { type: hex(coin.tokenType), nonce: hex(coin.nonce), value: coin.value };
-  return {
-    position,
-    tokenType: info.type,
-    value: coin.value.toString(),
-    nonce: info.nonce,
-    commitment: hex(commitment),
-    nullifier: l.coinNullifier(info, w.zswap.coinSecretKey),
-    lowerPath: lowerPath === null ? null : lowerPath.map(hex),
-    source,
-    spent: null,
-  };
-}
-
-async function nullifiers(args: { nullifiers?: string[] }): Promise<Json> {
-  const m = need(manifest, "get the files");
-  const id = need(manifestId, "get the files");
-  const manual = (args.nullifiers ?? []).map((s) => hex(fromHexStrict(s, 32)));
-  const own = [...coins.values()].filter((c) => c.source === "snapshot").map((c) => c.nullifier);
-  const list = [...new Set([...own, ...manual])];
-  const ref = m.artifacts.nullifierTable;
-  const plan = paddedCalls(list.map((nf) => bucketOf(fromHexStrict(nf, 32), ref.bucketBits)), ref.groups, m.queriesPerCall);
-  const stats = emptyCallStats();
-  const t = now();
-  const found = await lookupNullifiers(http, m, id, need(nullifierTable, "get the files"), list, stats);
-  const ms = now() - t;
-  const results = list.map((nf) => {
-    const e = found.get(nf) ?? null;
-    const coin = [...coins.values()].find((c) => c.nullifier === nf);
-    if (coin !== undefined && e !== null) coin.spent = { height: e.height, txIndex: e.txIndex, source: "snapshot" };
-    return {
-      nullifier: nf,
-      bucket: bucketOf(fromHexStrict(nf, 32), ref.bucketBits),
-      of: coin === undefined ? "entered by hand" : `the wallet's coin at ${coin.position}`,
-      result: e === null ? "not in the snapshot's nullifier table (unspent at the snapshot)" : `spent at height ${e.height}, transaction ${e.txIndex}`,
-    };
-  });
-  return {
-    lookups: list.length,
-    calls: callPlan(m.scheme, plan, true),
-    stats: { ...stats, buildMs: round(stats.buildMs), roundTripMs: round(stats.roundTripMs), decodeMs: round(stats.decodeMs) },
-    results,
-    note: list.length === 0 ? "no nullifier to look up: one call is still sent, so the server cannot tell a wallet with no coin" : undefined,
-    ms: round(ms),
-  };
-}
-
-async function tail(): Promise<Json> {
-  const k = need(kernel, "load the kernel");
-  const m = need(manifest, "get the files");
-  const id = need(manifestId, "get the files");
-  const t = now();
-  const bytes = await http.tail();
-  const fetchMs = now() - t;
-  const t2 = now();
-  const tl = splitTail(bytes);
-  if (!equal(tl.header.snapshotId, id)) throw new Error("the tail belongs to another snapshot: get the files again");
-  const blockSize = 2 ** m.pathSplit;
-  const t0 = Math.floor(m.firstFree / blockSize) * blockSize;
-  const blockRoots = files.get(m.artifacts.blockRoots.digest)!;
-  const all = new Uint8Array(32 * (t0 / blockSize) + tl.blockRoots.length);
-  all.set(blockRoots.subarray(0, 32 * (t0 / blockSize)), 0);
-  all.set(tl.blockRoots, 32 * (t0 / blockSize));
-  const rootOk = equal(rootOverBlocks(all, m.pathSplit, hash), tl.header.root);
-  const outputs = tl.outputs.length / TAIL_OUTPUT_BYTES;
-  const decoded = Array.from({ length: outputs }, (_, i) => decodeTailOutput(tl.outputs.subarray(i * TAIL_OUTPUT_BYTES, (i + 1) * TAIL_OUTPUT_BYTES)));
-  const tailCoins = [];
-  if (keys !== null) {
-    const entries = new Uint8Array(36 * outputs);
-    decoded.forEach((o, i) => o.ciphertext !== null && entries.set(o.ciphertext.subarray(0, 36), 36 * i));
-    for (const i of outputs === 0 ? [] : k.scan(entries, keys.scanSecret)) {
-      const o = decoded[i]!;
-      const checked = checkCiphertext(k, keys, o.ciphertext!, o.commitment, null);
-      if ("reason" in checked) continue;
-      const coin = coinOf(m.firstFree + i, checked.coin, checked.commitment, null, "tail");
-      coins.set(coin.position, coin);
-      tailCoins.push({ position: coin.position, tokenType: coin.tokenType, value: coin.value });
-    }
-  }
-  const tailNullifiers = new Map<string, { height: number; txIndex: number }>();
-  for (let off = 0; off < tl.nullifiers.length; off += NULLIFIER_RECORD_BYTES) {
-    const e = decodeNullifierRecord(tl.nullifiers.subarray(off, off + NULLIFIER_RECORD_BYTES));
-    tailNullifiers.set(hex(e.nullifier), { height: e.height, txIndex: e.txIndex });
-  }
-  for (const c of coins.values()) {
-    const s = c.spent === null ? tailNullifiers.get(c.nullifier) : undefined;
-    if (s) c.spent = { ...s, source: "tail" };
-  }
-  // Each fetched position's full path, as a spend builds it, against the tail's root.
-  const view = { pathSplit: m.pathSplit, snapshotFirstFree: m.firstFree, snapshotBlockRoots: blockRoots, tail: tl };
-  const paths = [];
-  for (const [p, f0] of [...fetched].slice(0, 16)) {
-    // A position in the snapshot's partial block: the tail carries its commitment.
-    const f = f0.commitment === null && p >= t0 && p < m.firstFree ? { ...f0, commitment: tl.commitments.slice(32 * (p - t0), 32 * (p - t0) + 32) } : f0;
-    if (f.commitment === null) {
-      paths.push({ position: p, result: "skipped: its commitment is not known here (not the wallet's coin; read its path to fetch it from the debug database)" });
-      continue;
-    }
-    const t3 = now();
-    try {
-      const { siblings } = coinPath(view, { position: p, commitment: hex(f.commitment), lowerPath: f.lowerPath === null ? null : f.lowerPath.map(hex) }, k);
-      paths.push({ position: p, siblings: siblings.length, result: `the ${TREE_DEPTH}-hash path gives the tail's root`, ms: round(now() - t3) });
-    } catch (error) {
-      paths.push({ position: p, result: `FAILED: ${error instanceof Error ? error.message : String(error)}` });
-    }
-  }
-  const debug = await debugJson(`/debug/state?height=${tl.header.height}`);
-  return {
-    header: {
-      height: tl.header.height,
-      blockHash: hex(tl.header.blockHash),
-      firstFree: tl.header.firstFree,
-      root: hex(tl.header.root),
-      sectionBytes: tl.header.sections,
-    },
-    bytes: bytes.length,
-    outputs,
-    nullifiers: tailNullifiers.size,
-    checks: [
-      `the snapshot's full blocks' roots and the tail's block roots give the tail's root: ${rootOk ? "yes" : "NO"}`,
-      ...(debug === null ? [] : [`database (debug): root at ${tl.header.height} ${debug.root === hex(tl.header.root) ? "equals" : "DIFFERS FROM"} the tail's`]),
-    ],
-    walletCoinsInTail: keys === null ? "derive the keys to scan the tail" : tailCoins,
-    paths: paths.length === 0 ? "read some positions and their paths first to check their full paths here" : paths,
-    fetchMs: round(fetchMs),
-    clientMs: round(now() - t2),
-  };
-}
-
-function summary(): Json {
-  const list = [...coins.values()].sort((a, b) => a.position - b.position);
-  const balance: Record<string, string> = {};
-  for (const c of list) if (c.spent === null) balance[c.tokenType] = (BigInt(balance[c.tokenType] ?? "0") + BigInt(c.value)).toString();
-  return { coins: list, unspentBalanceByTokenType: balance };
-}
-
-async function sampleSpends(args: { n?: number }): Promise<Json> {
-  const m = need(manifest, "get the files");
-  const r = await debugJson(`/debug/spends?n=${args.n ?? 5}&maxHeight=${m.height}`);
-  if (r === null) throw new Error("the page's server has no database (start serve.ts with --db-url)");
-  return r;
+async function walletSync(args: { mnemonic?: string; seedHex?: string; gpu?: boolean }, progress: (text: string) => void): Promise<Json> {
+  const s = need(shielded, "load the kernel");
+  const d = need(dust, "load the ledger");
+  const steps = walletSyncSteps({ keys: () => deriveKeys({ mnemonic: args.mnemonic ?? "", seedHex: args.seedHex ?? "" }), shielded: s, dust: d, gpu: args.gpu ?? false });
+  const result = await runWalletSync(steps, { http, progress });
+  return result as unknown as Json;
 }
 
 // ── messages ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -933,14 +487,15 @@ async function sampleSpends(args: { n?: number }): Promise<Json> {
 const STEPS: Record<string, (args: never, progress: (text: string) => void) => Promise<Json> | Json> = {
   load,
   keys: deriveKeys,
-  files: getFiles,
-  scan,
-  read,
-  nullifiers,
-  paths,
-  tail,
-  summary,
-  sampleSpends,
+  files: () => need(shielded, "load the kernel").getFiles(),
+  scan: (args: { gpu?: boolean }, progress) => need(shielded, "load the kernel").scan(args, progress),
+  read: (args: { positions?: number[] }) => need(shielded, "load the kernel").read(args),
+  nullifiers: (args: { nullifiers?: string[] }) => need(shielded, "load the kernel").nullifiers(args),
+  paths: (args: { positions?: number[] }, progress) => need(shielded, "load the kernel").paths(args, progress),
+  tail: () => need(shielded, "load the kernel").tail(),
+  summary: () => need(shielded, "load the kernel").summary(),
+  sampleSpends: (args: { n?: number }) => need(shielded, "load the kernel").sampleSpends(args),
+  walletSync,
   dustFile: () => need(dust, "load the ledger").getFile(),
   dustWalk: () => need(dust, "load the ledger").walk(),
   dustCheck: () => need(dust, "load the ledger").check(),

@@ -166,6 +166,15 @@ export class PssHttp {
     return (await this.#bytes("POST", route, body)).bytes;
   }
 
+  /** `GET /blob/<digest>` in memory (the page's), checked against its SHA-256 and size. */
+  async blob(digest: string, size: number): Promise<Uint8Array> {
+    const route = `${ROUTES.blob}${digest}`;
+    const { bytes } = await this.#bytes("GET", route);
+    const got = createHash("sha256").update(bytes).digest("hex");
+    if (got !== digest || bytes.length !== size) throw new Error(`GET ${route}: got ${bytes.length} bytes with SHA-256 ${got}, expected ${size} bytes`);
+    return bytes;
+  }
+
   /**
    * `GET /blob/<digest>` streamed into `path` (through a temporary file), checking its SHA-256 and size; the bytes
    * written.
