@@ -5,7 +5,7 @@
 #   /out  an empty directory that receives the built package
 #
 # Steps: fetch the pinned upstream commit, apply the patches in file-name order, build the WASM
-# crate with the `wasm` profile for wasm32-unknown-unknown (`cargo --locked`), then produce the
+# crate with the `wasm` profile for wasm32-unknown-unknown (`cargo --locked`), for speed (below), then produce the
 # package the way upstream's own release recipe does (midnight-ledger bagel.nix): wasm-bindgen
 # `--target bundler`, `wasm-opt -Os`, the hand-written TypeScript declarations assembled from the
 # template, a Node.js entry that instantiates the module from the file next to it, and a
@@ -77,6 +77,13 @@ esac
 exec "$rustc" "${args[@]}"
 WRAPPER
 chmod +x "$wrapper"
+
+# Built for speed, not for size: upstream's `wasm` profile sets `opt-level = "z"`, and `blst`'s build script compiles
+# its C code at `-O2` whatever the profile says. The profile's level is overridden to 3, and blst's C code is compiled
+# at `-O3` with an inline threshold high enough that its field multiplication (`mul_mont_n`, a call from every
+# Poseidon round) is inlined into its fixed-size callers. No source changes, and every state root is the same.
+export CARGO_PROFILE_WASM_OPT_LEVEL=3
+export CFLAGS_wasm32_unknown_unknown="-O3 -mllvm -inline-threshold=5000"
 
 cd "$src"
 RUSTC_WRAPPER="$wrapper" cargo build --locked --profile wasm --target wasm32-unknown-unknown -p "$crate"

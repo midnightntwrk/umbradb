@@ -165,6 +165,16 @@ describe("vendored ledger builds: the recorded sources and pins", () => {
     expect(added("v9").join("\n")).toContain('#[wasm_bindgen(js_name = "stateTrees")]');
   });
 
+  it("builds every version for speed: opt-level 3, and blst's C code at -O3 with its field multiplication inlined", () => {
+    const script = readFileSync(join(ledgerDir, "build-in-container.sh"), "utf8");
+    expect(script).toContain("export CARGO_PROFILE_WASM_OPT_LEVEL=3");
+    expect(script).toContain('export CFLAGS_wasm32_unknown_unknown="-O3 -mllvm -inline-threshold=5000"');
+    // Both are set before the one cargo build, which stays locked.
+    const build = script.indexOf("cargo build --locked --profile wasm --target wasm32-unknown-unknown");
+    expect(build).toBeGreaterThan(script.indexOf("CARGO_PROFILE_WASM_OPT_LEVEL=3"));
+    expect(build).toBeGreaterThan(script.indexOf("CFLAGS_wasm32_unknown_unknown="));
+  });
+
   for (const version of VERSIONS) {
     it(`the committed ${version} package is exactly the one SHA256SUMS records`, () => {
       const recorded = readFileSync(join(ledgerDir, version, "SHA256SUMS"), "utf8")
