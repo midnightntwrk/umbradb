@@ -77,10 +77,13 @@ describe.skipIf(!installed)("the command line (with the client's install)", () =
     const balance = await cli(["balance", ...common, "--json"]);
     expect(balance.code, balance.stderr).toBe(0);
     expect(JSON.parse(balance.stdout).unspent).toHaveLength(7);
+    const shielded = formatShieldedAddress({ coinPublicKey: chain.wallets.A.keys.coinPublicKey, encryptionPublicKey: chain.wallets.A.keys.encryptionPublicKey }, "preprod");
     const address = await cli(["address", ...common, "--network", "preprod"]);
-    expect(address.stdout.trim()).toBe(
-      formatShieldedAddress({ coinPublicKey: chain.wallets.A.keys.coinPublicKey, encryptionPublicKey: chain.wallets.A.keys.encryptionPublicKey }, "preprod"),
-    );
+    // A wallet given by its Zswap seed has the shielded address only (phase 12: the Dust and Night ones need a mnemonic).
+    expect(address.stdout).toBe(`shielded    ${shielded}\ndust        none (a wallet given by its Zswap seed has no Dust or Night key)\nunshielded  none (a wallet given by its Zswap seed has no Dust or Night key)\n`);
+    expect((await cli(["address", ...common, "--network", "preprod", "--only", "shielded"])).stdout).toBe(`${shielded}\n`);
+    const noDust = await cli(["address", ...common, "--network", "preprod", "--only", "dust"]);
+    expect([noDust.code, noDust.stderr.includes("no dust address")]).toEqual([1, true]);
   });
 
   it("cross-check replays the database's stored events with the ledger packages and finds no difference (exit 0); a changed local state is found out (exit 1)", { timeout: LONG }, async () => {
@@ -115,6 +118,10 @@ describe.skipIf(!installed)("the command line (with the client's install)", () =
     expect(report.check).toBeNull();
     expect(report.checkUnavailable).toContain("no Dust check table has been built yet");
     expect(`${stdout}${stderr}`).not.toContain("abandon");
+    // Phase 12: a mnemonic's three addresses (each checked against the wallet SDK's in client-address.test.ts).
+    const addresses = await run(process.execPath, [MAIN, "address", "--mnemonic-env", "PSS_TEST_MNEMONIC", "--network", "preprod"], { env: { PATH: process.env.PATH ?? "", PSS_TEST_MNEMONIC: mnemonic } });
+    expect(addresses.stdout).toMatch(/^shielded {4}mn_shield-addr_preprod1[a-z0-9]+\ndust {8}mn_dust_preprod1[a-z0-9]+\nunshielded {2}mn_addr_preprod1[a-z0-9]+\n$/);
+    expect(`${addresses.stdout}${addresses.stderr}`).not.toContain("abandon");
     const text = await cli(["dust", "--zswap-seed-file", seedFile, "--server", r.origin]);
     expect(text.code).toBe(1);
     expect(text.stderr).toContain("dust needs the wallet's mnemonic");
@@ -131,7 +138,7 @@ describe.skipIf(!installed)("the command line (with the client's install)", () =
     expect(noCheck.code).toBe(1);
     const fee = await cli(["send", "--zswap-seed-file", seedFile, "--to", "x", "--token", "0".repeat(64), "--amount", "1", "--network", "undeployed", "--node-http", "http://127.0.0.1:1", "--node-ws", "ws://127.0.0.1:1", "--dust-fee", "indexer"]);
     expect([fee.code, fee.stderr.includes("--dust-fee is sdk or private, not indexer")]).toEqual([1, true]);
-    const to = (await cli(["address", "--zswap-seed-file", seedFile, "--network", "undeployed"])).stdout.trim();
+    const to = (await cli(["address", "--zswap-seed-file", seedFile, "--network", "undeployed", "--only", "shielded"])).stdout.trim();
     const seedOnly = await cli(["send", "--zswap-seed-file", seedFile, "--to", to, "--token", "0".repeat(64), "--amount", "1", "--network", "undeployed", "--node-http", "http://127.0.0.1:1", "--node-ws", "ws://127.0.0.1:1", "--dust-fee", "private", "--dry-run"]);
     expect([seedOnly.code, seedOnly.stderr.includes("--dust-fee private needs the wallet's mnemonic")]).toEqual([1, true]);
   });

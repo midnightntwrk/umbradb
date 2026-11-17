@@ -117,6 +117,8 @@ const VIEWS: Record<string, (r: Json) => string> = {
     facts([
       ["derived from", String(r.source)],
       ["shielded address", String(r.shieldedAddress)],
+      ["Dust address", ((r.addresses as Json | undefined)?.dust as string | null | undefined) ?? "none (a Zswap seed has no Dust key)"],
+      ["unshielded (Night) address", ((r.addresses as Json | undefined)?.unshielded as string | null | undefined) ?? "none (a Zswap seed has no Night key)"],
       ["coin public key", String(r.coinPublicKey)],
       ["encryption public key", String(r.encryptionPublicKey)],
       ["scan secret", String(r.scanSecret)],
@@ -383,8 +385,9 @@ async function runStep(button: HTMLButtonElement): Promise<void> {
     if (name === "files") {
       firstFree = Number((answer.result!.manifest as Json).firstFree);
     }
-    // A wallet generated here is the Wallet tab's too.
+    // A wallet generated here is the Wallet tab's too, with its addresses.
     if (name === "generate" && typeof answer.result!.generatedMnemonic === "string") $<HTMLInputElement>("#mnemonic").value = answer.result!.generatedMnemonic;
+    if (name === "keys" || name === "generate") showAddresses(answer.result!.addresses as Json | undefined);
   } else {
     status.className = "status bad";
     status.textContent = "failed";
@@ -559,6 +562,8 @@ async function walletSync(): Promise<void> {
     if (!answer.ok) throw new Error(answer.error ?? "failed");
     const r = answer.result as unknown as WalletSyncResult;
     for (const s of r.steps) fillCard(s);
+    const keysStep = r.steps.find((s) => s.name === "keys" && s.ok);
+    if (keysStep !== undefined) showAddresses(keysStep.answer!.addresses as Json | undefined);
     $("#wallet-balances .out").innerHTML = walletBalancesHtml(r);
     $("#wallet-cost .out").innerHTML = walletCostHtml(r);
     failure.innerHTML = walletFailureHtml(r);
@@ -574,6 +579,48 @@ async function walletSync(): Promise<void> {
     steps.forEach((b) => (b.disabled = false));
     busy(-1);
   }
+}
+
+/**
+ * The wallet's addresses under Sync, once its keys are known: each whole (wrapped on a narrow window) with a button
+ * that copies it. A wallet given by its Zswap seed has only the shielded one.
+ */
+function showAddresses(a: Json | undefined): void {
+  if (a === undefined) return;
+  const none: string[] = [];
+  for (const kind of ["shielded", "dust", "unshielded"] as const) {
+    const value = a[kind] as string | null;
+    const row = $(`#address-${kind}`).closest<HTMLElement>(".addr-row")!;
+    row.hidden = value === null;
+    $(`#address-${kind}`).textContent = value ?? "";
+    if (value === null) none.push(kind === "dust" ? "Dust" : "unshielded (Night)");
+  }
+  const note = $("#addresses-note");
+  note.hidden = none.length === 0;
+  note.textContent = none.length === 0 ? "" : `No ${none.join(" or ")} address: a wallet given by its Zswap seed has no Dust or Night key.`;
+  $("#wallet-addresses").hidden = false;
+}
+
+/** Copies an address whole; where the clipboard is refused, selects it for the keyboard's copy instead. */
+async function copyAddress(button: HTMLButtonElement): Promise<void> {
+  const code = $(`#address-${button.dataset.copy}`);
+  const text = code.textContent ?? "";
+  try {
+    await navigator.clipboard.writeText(text);
+    button.textContent = "Copied";
+  } catch {
+    const range = document.createRange();
+    range.selectNodeContents(code);
+    const selection = getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    button.textContent = "Selected: copy it";
+  }
+  button.classList.add("copied");
+  setTimeout(() => {
+    button.textContent = "Copy";
+    button.classList.remove("copied");
+  }, 1500);
 }
 
 // ── the tabs ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -691,7 +738,8 @@ document.addEventListener("click", (event) => {
   }
   const target = el.closest("button");
   if (target === null) return;
-  if (target.dataset.run) void run(target);
+  if (target.dataset.copy) void copyAddress(target);
+  else if (target.dataset.run) void run(target);
   else if (target.dataset.fill) void fill(target);
   else if (target.dataset.compare) void compare(target);
 });

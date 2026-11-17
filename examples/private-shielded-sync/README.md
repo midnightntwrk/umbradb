@@ -129,7 +129,7 @@ D="--data <data> --server http://127.0.0.1:10480"
 node $E $C sync --wallet A $D                 # writes <data>/wallets/A/state.json, prints the balance
 node $E $C sync --wallet B $D --stats <data>/b-stats.json   # … and each step's time, bytes and requests
 node $E $C balance --wallet A --data <data>   # from the local state, no network
-node $E $C address --wallet B                 # mn_shield-addr_preprod1…
+node $E $C address --wallet B                 # shielded mn_shield-addr_preprod1…, dust mn_dust_preprod1…, unshielded mn_addr_preprod1…
 node $E $C cross-check --wallet A --data <data> --db-url postgres://postgres@<database>/umbradb \
   --db-password-file <out>/pg-password       # replays the stored events with the ledger; exit 1 on a difference
 ```
@@ -140,7 +140,7 @@ Preprod's ledger 9.1: `midnightntwrk/proof-server:9.0.0`); the fee wallet syncs 
 
 ```sh
 docker run -d --name pss-proof-server -p 127.0.0.1:49343:6300 midnightntwrk/proof-server:9.0.0
-T="--wallet A $D --to $(node $E $C address --wallet B) --token <token type, 64 hex> --amount <base units>"
+T="--wallet A $D --to $(node $E $C address --wallet B --only shielded) --token <token type, 64 hex> --amount <base units>"
 node $E $C send $T --dry-run      # sync, coin, path, root checks against the node, spend; no fee wallet
 node $E $C send $T --no-submit    # also the fee wallet, Dust balancing, proving and validation; nothing submitted
 node $E $C send $T --dust-fee private --no-submit   # the fee paid by the wallet's own Dust coin (below, "Dust"): no indexer
@@ -173,7 +173,13 @@ docker rm -f pss-proof-server
 
 A page that runs the client's own code in the browser, in two tabs over one worker and one wallet:
 
-- **Wallet** (opens first): the wallet's mnemonic and one button, **Sync**. Sync runs, in order, the Details tab's
+- **Wallet** (opens first): the wallet's mnemonic and one button, **Sync**, and under it, once the keys are known
+  (after Sync, or Derive keys or Generate in Details), the wallet's three addresses, each whole (wrapped on a narrow
+  window) with a button that copies it: shielded (`mn_shield-addr_<network>1…`), Dust (`mn_dust_<network>1…`, the
+  Dust public key in SCALE compact encoding) and unshielded, the Night key's (`mn_addr_<network>1…`, the user address
+  of the Schnorr key made from the HD role 0 seed). They are made by `client/address.ts` and `client/keys.ts`
+  (`walletAddresses`), as the wallet SDK makes them (`test/client-address.test.ts`); the command line's `address`
+  prints the same three. A wallet given by its Zswap seed has the shielded one only. Sync runs, in order, the Details tab's
   steps 1 to 5 and 7 to 11 (the keys, the shielded sync, the Dust sync; no path read, no spend, no debug request),
   showing the step in progress. Its scan runs on the GPU (the page's WebGPU scan) whenever the browser's WebGPU starts;
   where the browser has no WebGPU, gives no adapter, or the GPU scan fails, it scans on the CPU (one thread) and says
@@ -1013,6 +1019,7 @@ wallet's math was moved to the GPU and what was not.
 | `test/server-dust.test.ts` | The Dust routes in UmbraDB's real process (PostgreSQL 18) over Preprod events written into the test database: the file, a key's coins, the parameters, refusals; the Dust snapshot built at start in SimplePIR (its commitment and generation roots the stored ones, Preprod's), read through the wallet's code (the check, a coin's path at four positions), refusals, a build refused for another stored `dust_commitment_first_free`, the snapshot rebuilt in IPIR+SP by an IPIR+SP snapshot build and read through it (the check and a path); the ledger parameters served. |
 | `test/dust-walk.test.ts` | The walk: a chain of several spends across chunks, a match below the coin's position, a false match without and with a check, a chain with no spend, two chains in one file; with the ledger's functions, a chain found again from the encoded file, and what a generation record's `dtime` changes; the coins answer decoded from real events. |
 | `test/server-web-dust.test.ts` | The page's Dust steps under Node in both schemes, over the world of `test/server-dust-world.ts` (also the check test's): a wallet with three chains (the false match dropped, a chain not checkable, a chain with nothing to check), a second run from the page's cache, step 12 (one padded path call, both roots the snapshot's, the spend in memory, the snapshot's files from the page's cache the second time), a generated wallet with no chain (one padded call), the page's rendering of the chains, bytes and spend, refusals. |
+| `test/client-address.test.ts` | The wallet's shielded, Dust and unshielded (Night) addresses from the example's own code equal the wallet SDK's (its address codecs over keys its ledger package derives, and its unshielded key store) for the same HD seeds of two mnemonics, on Preprod, mainnet and a local network; the Dust payload's SCALE compact encoding at every length; a Zswap seed gives the shielded address only. With the client's install. |
 | `test/server-web-wallet.test.ts` | The page's Wallet tab under Node: its sync over the page's shielded and Dust steps against the module in UmbraDB's real process (PostgreSQL 18) and the Dust world: every step in order with its progress, the shielded balances equal to the ledger's own replay of the stored events, the Dust chains with their status and values, the cost by step and by part adding up to the requests made; the scan on a GPU scanner, and on the CPU with its reason when there is no WebGPU, the scanner does not start or fails, with the same matches and balances every way (the WebGPU kernel's matches against the CPU kernel's are `gpu/check.ts`'s); a second sync downloading less (files held, tables kept, chunks and the public artifact cached); a wallet with nothing showing zeros; a failing step named with its message, the steps before it kept, and a Dust failure keeping the shielded balances; the view's rendering. |
 | `test/dust-walk-compare.test.ts` | The one-pass walk of all chains against the search per chain it replaced, on the same files: many chains, false matches, chains starting in the middle, two chains wanting one prefix (one starting later), chains with no spend, 2-, 4- and 6-byte prefixes, the ledger's own functions; the same chains, entries, coins, dropped matches, statuses and check batches. |
 | `test/server-dust-check.test.ts` | The check in both schemes: the module's builder and the scheme's server table called through the wallet's code; another wallet's spend before the real one dropped by the check, a chain's end beyond the table not checkable, two padded calls of one size; a coin's path in one padded call giving the snapshot's root, the Dust local state's two roots, the spend, a fee paid with it, wrong roots refused, the paying coin chosen, and a build refused for a commitment or generation root other than the core's. |

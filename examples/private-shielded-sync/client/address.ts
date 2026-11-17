@@ -1,9 +1,16 @@
 /**
- * Shielded addresses (spec FR-120): bech32m (BIP-350) strings `mn_shield-addr_<network>1…` whose 64-byte payload is
- * the coin public key followed by the encryption public key, as the wallet SDK's `ShieldedAddress` codec writes them
- * (`@midnightntwrk/wallet-sdk-address-format`). Midnight addresses are longer than BIP-173's 90 characters, so no
- * overall length limit applies. Mainnet addresses carry no network segment.
+ * Midnight addresses, as the wallet SDK's codecs write them (`@midnightntwrk/wallet-sdk-address-format`): bech32m
+ * (BIP-350) strings `mn_<type>_<network>1…`. Midnight addresses are longer than BIP-173's 90 characters, so no overall
+ * length limit applies. Mainnet addresses carry no network segment.
+ *
+ * - Shielded (spec FR-120), type `shield-addr`: the coin public key followed by the encryption public key, 64 bytes.
+ * - Dust (spec 00062 phase 12), type `dust`: the Dust public key (a field element) in SCALE compact encoding, as the
+ *   SDK's `DustAddress` (`ScaleBigInt`).
+ * - Unshielded (phase 12), type `addr`: the 32-byte user address of the Night signing key (`./keys.ts`
+ *   `nightAddress`), as the SDK's `UnshieldedAddress`.
  */
+
+import { scaleCompact } from "./tree.ts";
 
 const CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 const GENERATOR = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
@@ -82,7 +89,9 @@ export interface ShieldedAddress {
   readonly encryptionPublicKey: string;
 }
 
-const prefixOf = (network: string): string => (network === "mainnet" ? "mn_shield-addr" : `mn_shield-addr_${network}`);
+/** The human-readable part of a Midnight address of `type` on `network`. */
+const prefixFor = (type: string, network: string): string => (network === "mainnet" ? `mn_${type}` : `mn_${type}_${network}`);
+const prefixOf = (network: string): string => prefixFor("shield-addr", network);
 
 /** Parses a shielded address for `network`; refuses another network, type or payload size. */
 export function parseShieldedAddress(text: string, network: string): ShieldedAddress {
@@ -97,4 +106,15 @@ export function formatShieldedAddress(address: ShieldedAddress, network: string)
   const data = Buffer.concat([Buffer.from(address.coinPublicKey, "hex"), Buffer.from(address.encryptionPublicKey, "hex")]);
   if (data.length !== 64) throw new Error("a shielded address needs two 32-byte keys");
   return bech32mEncode(prefixOf(network), new Uint8Array(data));
+}
+
+/** The Dust address of a Dust public key: `mn_dust_<network>1…`. */
+export function formatDustAddress(publicKey: bigint, network: string): string {
+  return bech32mEncode(prefixFor("dust", network), scaleCompact(publicKey));
+}
+
+/** The unshielded (Night) address of a 32-byte user address in hex: `mn_addr_<network>1…`. */
+export function formatUnshieldedAddress(userAddress: string, network: string): string {
+  if (!/^[0-9a-f]{64}$/.test(userAddress)) throw new Error("an unshielded address carries 32 bytes");
+  return bech32mEncode(prefixFor("addr", network), new Uint8Array(Buffer.from(userAddress, "hex")));
 }

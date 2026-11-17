@@ -31,9 +31,8 @@
 import { generateMnemonic, mnemonicToSeedSync, validateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { WalletSeeds } from "@midnightntwrk/wallet-sdk-hd";
-import { formatShieldedAddress } from "../client/address.ts";
 import { PssHttp } from "../client/http.ts";
-import { keysFromZswapSeed } from "../client/keys.ts";
+import { keysFromZswapSeed, type WalletAddresses, walletAddresses } from "../client/keys.ts";
 import type { Ledger } from "../client/ledger.ts";
 import { IpirPool } from "../ipir/pool.ts";
 import type { IpirReply } from "../ipir/pool-worker.ts";
@@ -435,6 +434,9 @@ async function deriveKeys(args: { mnemonic?: string; seedHex?: string; generate?
   let mnemonic: string | null = null;
   let seed: Uint8Array;
   let source: string;
+  // The Dust and Night seeds of a mnemonic, for the addresses (wiped once they are made).
+  let dustSeed: Uint8Array | null = null;
+  let nightSeed: Uint8Array | null = null;
   if (args.generate) mnemonic = generateMnemonic(wordlist, 256);
   const phrase = mnemonic ?? args.mnemonic;
   if (phrase !== undefined && phrase.trim() !== "") {
@@ -443,11 +445,12 @@ async function deriveKeys(args: { mnemonic?: string; seedHex?: string; generate?
     const master = mnemonicToSeedSync(words);
     const seeds = WalletSeeds.fromMasterSeed(master);
     seed = seeds.shielded;
-    // The Dust seed (role 2) for the Dust steps: copied there, wiped here.
+    // The Dust seed (role 2) for the Dust steps: copied there, wiped here after the address.
     need(dust, "load the ledger").setSeed(seeds.dust);
-    seeds.dust.fill(0);
+    dustSeed = seeds.dust;
+    nightSeed = seeds.unshielded;
     master.fill(0);
-    source = `mnemonic (${words.split(" ").length} words) → BIP-39 seed → HD m/44'/2400'/0'/3/0 (Zswap) and m/44'/2400'/0'/2/0 (Dust)`;
+    source = `mnemonic (${words.split(" ").length} words) → BIP-39 seed → HD m/44'/2400'/0'/3/0 (Zswap), m/44'/2400'/0'/2/0 (Dust) and m/44'/2400'/0'/0/0 (Night)`;
   } else if (args.seedHex !== undefined && args.seedHex.trim() !== "") {
     seed = fromHexStrict(args.seedHex, 32);
     need(dust, "load the ledger").setSeed(null);
@@ -458,11 +461,19 @@ async function deriveKeys(args: { mnemonic?: string; seedHex?: string; generate?
   const keys = keysFromZswapSeed(l, seed, k);
   seed.fill(0);
   need(shielded, "load the ledger").setKeys(keys);
-  const address = formatShieldedAddress({ coinPublicKey: hex(keys.coinPublicKey), encryptionPublicKey: hex(keys.encryptionPublicKey) }, "preprod");
+  // The network of the snapshot when one is open, else Preprod's (this page's).
+  let addresses: WalletAddresses;
+  try {
+    addresses = walletAddresses(l, { keys, dustSeed, nightSeed, network: need(shielded, "load the ledger").manifest?.network ?? "preprod" });
+  } finally {
+    dustSeed?.fill(0);
+    nightSeed?.fill(0);
+  }
   return {
     source,
     ...(mnemonic === null ? {} : { generatedMnemonic: mnemonic }),
-    shieldedAddress: address,
+    shieldedAddress: addresses.shielded,
+    addresses,
     coinPublicKey: hex(keys.coinPublicKey),
     encryptionPublicKey: hex(keys.encryptionPublicKey),
     scanSecret: "held in the worker, never shown or sent",

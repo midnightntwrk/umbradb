@@ -23,14 +23,14 @@ import { nodeIpirPool } from "../ipir/pool-node.ts";
 import { compileIpirWasm } from "../ipir/wallet-node.ts";
 import { inlineMultiplier, type Multiplier, WorkerMultiplier } from "../pir/index.ts";
 import { decodeManifest, fromHex, ROUTES, toHex } from "../shared/index.ts";
-import { formatShieldedAddress, parseShieldedAddress } from "./address.ts";
+import { parseShieldedAddress } from "./address.ts";
 import { BlobCache, DiskDustCache } from "./cache.ts";
 import { compareWithClient, readZswapEvents, replayZswapEvents } from "./cross-check.ts";
 import { DustChecker } from "./dust-check.ts";
 import { type DustSpendable, dustSpendable, payFeeWithDust } from "./dust-spend.ts";
 import { dustChainSummary, dustStatusText, dustSync, type DustSyncResult, dustTransfer } from "./dust.ts";
 import { HttpError, PssHttp } from "./http.ts";
-import { keysFromZswapSeed, type WalletKeys } from "./keys.ts";
+import { keysFromZswapSeed, type WalletKeys, walletAddresses } from "./keys.ts";
 import { type Ledger, loadLedger, loadLedgerV8 } from "./ledger.ts";
 import { watchRss } from "./memory.ts";
 import { finalizedHead, zswapRootAt } from "./node-rpc.ts";
@@ -49,7 +49,8 @@ commands:
                 [--dust-fee sdk|private: who pays the fee; sdk (default): the wallet SDK's Dust wallet, fed by the
                 public indexer; private: the wallet's own Dust coin, found by the Dust sync and spent with its
                 Merkle paths read from the module (spec 00062 phase 9)]
-  address       print the wallet's shielded address for --network
+  address       print the wallet's addresses for --network: shielded, Dust and unshielded (Night; the last two need
+                the mnemonic) [--only shielded|dust|unshielded: that address alone, bare]
   cross-check   replay the database's stored Zswap events up to the local state's tail height with the ledger's own
                 ZswapLocalState and compare with the local state (FR-140)
   dust          download the Dust file, this wallet's first coins and the Dust parameters; walk each of the wallet's
@@ -108,6 +109,7 @@ const { values: opt, positionals } = parseArgs({
     spend: { type: "boolean", default: false },
     "dust-fee": { type: "string", default: "sdk" },
     "dust-chain": { type: "string" },
+    only: { type: "string" },
     "node-http": { type: "string" },
     "node-ws": { type: "string" },
     "proof-server": { type: "string" },
@@ -265,12 +267,26 @@ function cmdBalance(): void {
   process.stdout.write(`${opt.json ? json({ balances: Object.fromEntries([...unspentCoins(state).reduce((m, c) => m.set(c.tokenType, (m.get(c.tokenType) ?? 0n) + BigInt(c.value)), new Map<string, bigint>())]), unspent: unspentCoins(state), state }) : formatBalance(state)}\n`);
 }
 
+/**
+ * `address`: the wallet's shielded, Dust and unshielded (Night) addresses, one per line with its kind; a wallet given by
+ * its Zswap seed has only the shielded one. `--only <kind>` prints that address alone (for `--to "$(… address …)"`).
+ */
 async function cmdAddress(): Promise<void> {
+  const only = opt.only;
+  if (only !== undefined && !["shielded", "dust", "unshielded"].includes(only)) throw new Error(`--only is shielded, dust or unshielded, not ${only}`);
   const s = await seeds();
   const ledger = await loadLedger();
   const keys = keysFromZswapSeed(ledger, s.zswap, new Kernel(compileKernel()));
   const network = opt.network ?? env("PSS_NETWORK");
-  process.stdout.write(`${formatShieldedAddress({ coinPublicKey: toHex(keys.coinPublicKey), encryptionPublicKey: toHex(keys.encryptionPublicKey) }, network)}\n`);
+  const a = walletAddresses(ledger, { keys, dustSeed: s.all?.dust ?? null, nightSeed: s.all?.unshielded ?? null, network });
+  const none = "none (a wallet given by its Zswap seed has no Dust or Night key)";
+  if (only !== undefined) {
+    const value = a[only as "shielded" | "dust" | "unshielded"];
+    if (value === null) throw new Error(`no ${only} address: ${none}`);
+    process.stdout.write(`${value}\n`);
+    return;
+  }
+  process.stdout.write(`shielded    ${a.shielded}\ndust        ${a.dust ?? none}\nunshielded  ${a.unshielded ?? none}\n`);
 }
 
 async function cmdSend(): Promise<void> {

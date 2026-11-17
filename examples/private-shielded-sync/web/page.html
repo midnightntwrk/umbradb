@@ -79,6 +79,12 @@
   #panel-wallet tfoot td { border-top: 1px solid var(--line); border-bottom: 0; }
   .costline { font-size: 13px; margin: 6px 0 8px; }
   .costline.warn { color: var(--warn); }
+  .addresses { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+  .addr-row { display: grid; grid-template-columns: 9.5em minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; padding: 4px 0; }
+  .addr-label { color: var(--muted); }
+  .addr { font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; word-break: break-all; background: none; }
+  .addr-row button.copied { color: var(--ok); border-color: var(--ok); }
+  @media (max-width: 560px) { .addr-row { grid-template-columns: minmax(0, 1fr) auto; } .addr-label { grid-column: 1 / -1; } }
 </style>
 </head>
 <body>
@@ -93,11 +99,16 @@
 <div id="panel-wallet" role="tabpanel" aria-labelledby="tab-wallet" tabindex="0">
   <section class="card" id="wallet-top">
     <h2>Wallet<span class="status" id="wallet-status"></span></h2>
-    <p class="desc">The wallet's 24-word mnemonic (the same field as the Details tab's step 1; it stays in this page). Sync derives the keys, syncs the shielded coins (files, scan on the GPU where the browser has WebGPU and on the CPU otherwise, private reads, nullifier lookups, tail) and the Dust (file, walk, private check), the Details tab's steps 1 to 5 and 7 to 11, and shows the balances. It reads no Merkle path and builds no spend.</p>
     <div id="mnemonic-slot-wallet"></div>
     <div class="row"><button type="button" id="wallet-sync">Sync</button></div>
     <div id="wallet-progress" class="progress" aria-live="polite"></div>
     <div id="wallet-failure"></div>
+    <div id="wallet-addresses" class="addresses" hidden>
+      <div class="addr-row"><span class="addr-label">Shielded</span><code class="addr" id="address-shielded"></code><button type="button" class="secondary small" data-copy="shielded" aria-label="Copy the shielded address">Copy</button></div>
+      <div class="addr-row"><span class="addr-label">Dust</span><code class="addr" id="address-dust"></code><button type="button" class="secondary small" data-copy="dust" aria-label="Copy the Dust address">Copy</button></div>
+      <div class="addr-row"><span class="addr-label">Unshielded (Night)</span><code class="addr" id="address-unshielded"></code><button type="button" class="secondary small" data-copy="unshielded" aria-label="Copy the unshielded address">Copy</button></div>
+      <div class="note" id="addresses-note" hidden></div>
+    </div>
   </section>
   <section class="card" id="wallet-balances">
     <h2>Balances</h2>
