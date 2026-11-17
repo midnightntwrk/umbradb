@@ -109,6 +109,68 @@
         }
       ]
     },
+    "v9-rc5": {
+      "release": "ledger-9.1.0.0-rc.5",
+      "commit": "67f9f97246339539af0091c4d8c6bc5ab236a191",
+      "states": [
+        {
+          "name": "undeployed-genesis",
+          "file": "genesis/genesis_state_undeployed.mn",
+          "sha256": "203123b300a29319040208b420251738e1c1b5e01c644ea67d87da9b706df4d2",
+          "zswapFirstFree": "28",
+          "zswapRoot": "73b35bda8df702a240f2b7605bca3ea4f7bdb4110f5c6d35c58ed512faf7697303",
+          "dustCommitmentFirstFree": "20",
+          "dustCommitmentRoot": "73aab58e33489e418eb112107b90563cc4406daefb26e3de02a1edea6668d56429",
+          "dustGenerationFirstFree": "20",
+          "dustGenerationRoot": "73c4ed3cfd580081d0979d3629d06c5093f78ea5d9c86c3bb69d17630fd1fdd946"
+        },
+        {
+          "name": "stagenet-genesis",
+          "file": "genesis/genesis_state_stagenet.mn",
+          "sha256": "35dabdabc470cad12648cddd6f8fdbb1176ba8a1c6c4c5431b69e3c6b1c68c50",
+          "zswapFirstFree": "28",
+          "zswapRoot": "7350654856019725f19fc67c80cd4d619c205609b24d0cf1f8ac34505dcfe6bd14",
+          "dustCommitmentFirstFree": "20",
+          "dustCommitmentRoot": "738c212f539a0b5f3abf1ef7a7df03b829084a691a18f5acb8e0f6d00481b25a3e",
+          "dustGenerationFirstFree": "20",
+          "dustGenerationRoot": "732fb2e990a920fb8f459fc9988b81223f629d854f86ad6ccb65085ad7d3f59e12"
+        },
+        {
+          "name": "stagenet-3",
+          "file": "state-trees/stagenet-3.state",
+          "sha256": "4a66238046cd572de9f0375eda6aa02499c9d8cc6a0a87b902ff617896d7fa1a",
+          "zswapFirstFree": "28",
+          "zswapRoot": "7350654856019725f19fc67c80cd4d619c205609b24d0cf1f8ac34505dcfe6bd14",
+          "dustCommitmentFirstFree": "119",
+          "dustCommitmentRoot": "7361d2d39ac0c8ce36e7638eb8ce032bd7a05696ad2e4bd2042714c08d45f5a40b",
+          "dustGenerationFirstFree": "119",
+          "dustGenerationRoot": "73a9e734ebc614359acab7efadf4815ccfc1f2bfd2790c0b673ca1b27535278b39",
+          "node": {
+            "network": "stagenet",
+            "height": 3,
+            "hash": "0x551a8589124014ce52d4576b025bee7e44889b3a647fd7a6c70c29e872881dab",
+            "stateRoot": "00d7895bf63efcd8f4c37a94ea1bfee17ffcdf5d06d7710c3fdc353c9d62bb153f"
+          }
+        },
+        {
+          "name": "stagenet-4950",
+          "file": "state-trees/stagenet-4950.state",
+          "sha256": "f15a31247d711e85096c9429a990958f22ba927fe26d71a686815d2cd595d879",
+          "zswapFirstFree": "28",
+          "zswapRoot": "7350654856019725f19fc67c80cd4d619c205609b24d0cf1f8ac34505dcfe6bd14",
+          "dustCommitmentFirstFree": "2102",
+          "dustCommitmentRoot": "73fffd5bbfe6b34d6fc9a811fa0f6a4d18c589637ad6d29e7953cefe5d402cae4b",
+          "dustGenerationFirstFree": "2101",
+          "dustGenerationRoot": "737db2c39ce2c6c6ce8819f5277aa8038439a453aa320dde7e828e2cf726a1de56",
+          "node": {
+            "network": "stagenet",
+            "height": 4950,
+            "hash": "0xf47cfe0b8e05e23a01462b3a236f9ddf7e0cf3d864e53d66bb37eef1ce61bc38",
+            "stateRoot": "0015858398cc5c978ddd2c7e7e3318cd85559580f21c17fb9771589791da5a3735"
+          }
+        }
+      ]
+    },
     "v9": {
       "release": "ledger-9.1.0.1",
       "commit": "a2b30128ca4b660b73a068e29b56b48ede8c9a74",
