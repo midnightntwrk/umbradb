@@ -15,6 +15,7 @@ import { coreEntry } from "../../src/config/entries.js";
 import { versionText } from "../../src/config/history.js";
 import { plainData } from "../../src/config/plain-data.js";
 import { entriesAtCursor, validateConfig } from "../../src/config/validate.js";
+import { validateDeclarations } from "../../src/modules/validation.js";
 import { spawnChild } from "../child-processes.js";
 import { startContainer } from "../containers.js";
 import { POSTGRES_IMAGE } from "../postgres-image.js";
@@ -1141,7 +1142,7 @@ exit 0
       writeFileSync(join(host.env.BUILD, "index.ts"), `export * from ${JSON.stringify(fileURLToPath(new URL("../../src/index.ts", import.meta.url)))};\n`);
       // A revision's data as the history records it: its settings of kind data, defaults applied (validated here).
       const settings = { network: "preprod", node: "ws://node.invalid:9944", database: { kind: "postgres", host: "db", port: 5432, user: "postgres", name: "x", ssl: "disable" } } as const;
-      const dataOf = (more: object): object => validateConfig({ config: { data: plainData({ entries: [coreEntry({ start: 0, config: { ...settings, ...more } })] }) }, declarations: commandBuild(), side: "public" }).entries[0]?.data as object;
+      const dataOf = (more: object): object => validateConfig({ config: { data: plainData({ entries: [coreEntry({ start: 0, config: { ...settings, ...more } })] }) }, declarations: validateDeclarations(commandBuild()), side: "public" }).entries[0]?.data as object;
       const earlier = dataOf({ retainStates: 5 });
       const later = dataOf({});
       const thisBuild = versionText(buildCoreVersion());
@@ -1153,7 +1154,7 @@ exit 0
         const file = join(host.home, label, "umbradb.config.ts");
         const loaded = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", "const m = await import(process.argv[1]); console.log(JSON.stringify(m.default));", file], { encoding: "utf8" });
         expect(loaded.status, loaded.stderr).toBe(0);
-        const config = validateConfig({ config: { file, data: plainData(JSON.parse(loaded.stdout)) }, declarations: commandBuild(), side: "public" });
+        const config = validateConfig({ config: { file, data: plainData(JSON.parse(loaded.stdout)) }, declarations: validateDeclarations(commandBuild()), side: "public" });
         entriesAtCursor(config, 100n);
         return config.entries.filter((entry) => entry.id === "core");
       };
@@ -1285,7 +1286,7 @@ exit 0
       }
       const result = run("equal.sh", made, { BENCH_DIR: home, BENCH_PG_CONTAINER: (container as StartedPostgreSqlContainer).getId() });
       expect(result.code, result.stderr).toBe(0);
-      const [a, b, c] = result.stdout.trimEnd().split("\n").map((line) => line.split("|")[1]?.trim() ?? "");
+      const [a, b, c] = result.stdout.trimEnd().split("\n").map((line) => line.split("|")[1]?.trim() ?? "") as [string, string, string];
       // Each table's rows and a hash of them: the first 64 bits of each row's MD5 added up, the sum's MD5, 16 hex digits.
       const md5 = (text: string): string => createHash("md5").update(text).digest("hex");
       const rows = psql("bench_eq_a", "SELECT encode(node_key, 'hex') || md5(children) FROM core_ledger_state.nodes").trimEnd().split("\n");
