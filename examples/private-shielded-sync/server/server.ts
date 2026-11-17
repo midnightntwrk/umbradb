@@ -14,6 +14,10 @@
  *   checked against the core's `zswap_root` whenever outputs were added.
  * - **Routes** under `/pss/v1` (spec §5.7), each logged with its body and answer lengths and time (FR-080), never its
  *   body.
+ * - **Dust** (spec 00062): the Dust events of the current ledger era in their own index (`./dust-index.ts`), read and
+ *   extended along the same two paths as the Zswap index, decoded with the repository's vendored ledger build; routes
+ *   under `/pss/v1/dust/` serve the Dust file (manifest and chunks), one owner's first coins and generation updates,
+ *   and the Dust parameters. A Dust failure breaks only the Dust routes.
  *
  * Nothing here throws out of a block point: a failure is logged, and a broken index or tail refuses builds and tail
  * answers with its reason, so the core's processing is never halted by this module.
@@ -42,10 +46,12 @@ import { maxRequestBytes, openServerScheme } from "../pir/server-schemes.ts";
 import { OCTET_STREAM, ROUTES } from "../shared/constants.ts";
 import { fromHex, type Manifest, type PirTableRef, toHex } from "../shared/manifest.ts";
 import { CALL_HEADER_BYTES, decodeQueryBody, encodeAnswerBody, WireError } from "../shared/wire.ts";
+import type { DustCoinsAnswer, DustParametersAnswer } from "../shared/dust-file.ts";
 import { type BuildJob, type BuildResult, paddedBuildBytes } from "./build.ts";
 import { BuildFailure, runBuildWorker, type WorkerOutcome } from "./build-host.ts";
+import { coinEventJson, type DustEvent, DustIndex, isDustEventKind, ledgerDustDecoder } from "./dust-index.ts";
 import { type Settings, settingsOf } from "./settings.ts";
-import { blockHashAt, cursorOf, genesisHashOf, stateAt, zswapEvents } from "./sql.ts";
+import { blockHashAt, cursorOf, dustEvents, genesisHashOf, stateAt, zswapEvents } from "./sql.ts";
 import {
   artifactPath,
   listSnapshots,
@@ -80,6 +86,7 @@ interface LedgerStateItem {
 interface Pending {
   readonly outputs: OutputEvent[];
   readonly nullifiers: NullifierEvent[];
+  readonly dust: DustEvent[];
   readonly tip: TailTip;
 }
 
@@ -217,6 +224,8 @@ export class PssServer {
   readonly settings: Settings;
   readonly dataDir: string;
   readonly index = new ZswapIndex();
+  /** The Dust events of the current ledger era (00062). */
+  readonly dust: DustIndex;
   readonly #log: (record: Record<string, unknown>) => void;
   readonly #kernel: Kernel;
   readonly #hash: Hash2;
@@ -237,10 +246,13 @@ export class PssServer {
   /** Heights added from the block's items, and heights read from the database (items missed). */
   #fromItems = 0;
   #fromDatabase = 0;
+  /** Whether the Dust index's start ran (it marks the index broken itself when it fails). */
+  #dustStarted = false;
 
   constructor(settings: Settings, options: PssOptions) {
     this.settings = settings;
     this.dataDir = resolve(settings.dataDir);
+    this.dust = new DustIndex({ eraHeight: settings.dustEraHeight });
     const sink = options.log ?? ((line: string) => void process.stdout.write(`${line}\n`));
     this.#log = (record) => sink(JSON.stringify({ pss: true, at: new Date().toISOString(), ...record }));
     this.#kernel = new Kernel(compileKernel());
@@ -264,7 +276,36 @@ export class PssServer {
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       this.index.markBroken(`the module could not start: ${message}`);
+      if (!this.#dustStarted) this.dust.markBroken(`the module could not start: ${message}`);
       this.#log({ event: "start-failed", message });
+    }
+  }
+
+  /**
+   * The Dust index from the stored rows of the era up to `cursor`, decoded with the vendored ledger build (loaded once
+   * here). A failure marks only the Dust index broken.
+   */
+  async #startDust(w: SchemaWriteHandle, cursor: number): Promise<void> {
+    this.#dustStarted = true;
+    try {
+      const load = await measured(async () => {
+        const ledger = await import("../../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js");
+        this.dust.useDecoder(ledgerDustDecoder(ledger));
+        let rows = 0;
+        if (cursor >= this.dust.eraHeight) {
+          for (const group of await dustEvents(w, -1, cursor, this.dust.eraHeight)) {
+            this.dust.appendHeight(group.height, group.events);
+            rows += group.events.length;
+          }
+        }
+        if (cursor >= 0) this.dust.advanceTo(cursor);
+        return rows;
+      });
+      this.#log({ event: "dust-loaded", rows: load.value, ms: load.ms, peakRssBytes: load.peakRssBytes, ...this.dust.status() });
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      this.dust.markBroken(`the Dust index could not be loaded: ${message}`);
+      this.#log({ event: "dust-start-failed", message });
     }
   }
 
@@ -290,6 +331,7 @@ export class PssServer {
       peakRssBytes: load.peakRssBytes,
     };
     this.#log({ event: "index-loaded", ...this.#indexLoad, outputs: this.index.outputs, nullifiers: this.index.nullifiers, error: this.index.error });
+    await this.#startDust(w, cursor);
     if (cursor >= 0) {
       const state = await stateAt(w, cursor);
       if (state !== null) {
@@ -387,6 +429,7 @@ export class PssServer {
       const height = Number(b.height);
       const outputs: OutputEvent[] = [];
       const nullifiers: NullifierEvent[] = [];
+      const dust: DustEvent[] = [];
       for (const e of events) {
         if (e.kind === "zswap-output") {
           if (e.commitment === null || e.treeIndex === null || e.evidence === null) throw new Error(`an output at ${height} without its fields`);
@@ -394,10 +437,12 @@ export class PssServer {
         } else if (e.kind === "zswap-input") {
           if (e.nullifier === null) throw new Error(`an input at ${height} without its nullifier`);
           nullifiers.push({ height, txIndex: e.transaction, nullifier: e.nullifier });
+        } else if (isDustEventKind(e.kind)) {
+          dust.push({ height, txIndex: e.transaction, kind: e.kind, bytes: e.bytes, nullifier: e.nullifier, commitment: e.commitment, treeIndex: e.treeIndex === null ? null : Number(e.treeIndex) });
         }
       }
       const tip: TailTip = { height, blockHash: b.hash, firstFree: Number(state.zswapFirstFree), root: rootFromStored(state.zswapRoot) };
-      this.#pending.set(height, { outputs, nullifiers, tip });
+      this.#pending.set(height, { outputs, nullifiers, dust, tip });
     } catch (cause) {
       this.#log({ event: "stash-failed", height: Number(b.height), message: cause instanceof Error ? cause.message : String(cause) });
     }
@@ -408,6 +453,7 @@ export class PssServer {
     const height = Number(b.height);
     const pending = this.#pending.get(height);
     for (const key of [...this.#pending.keys()]) if (key <= height) this.#pending.delete(key);
+    await this.#commitDust(height, pending, read);
     try {
       if (height <= this.index.height) return;
       if (pending !== undefined && height === this.index.height + 1) {
@@ -432,6 +478,27 @@ export class PssServer {
       }
     } catch (cause) {
       this.#log({ event: "height-failed", height, message: cause instanceof Error ? cause.message : String(cause) });
+    }
+  }
+
+  /**
+   * Adds the committed height to the Dust index: from the block's item when it follows the index, else every height
+   * since the index's from the database. A failed read is logged and read again with the next height.
+   */
+  async #commitDust(height: number, pending: Pending | undefined, read: ReadHandle): Promise<void> {
+    const dust = this.dust;
+    try {
+      if (height <= dust.height) return;
+      if (dust.error !== null) {
+        dust.advanceTo(height);
+      } else if (pending !== undefined && height === dust.height + 1) {
+        dust.appendHeight(height, pending.dust);
+      } else {
+        for (const group of await dustEvents(read, dust.height, height, dust.eraHeight)) dust.appendHeight(group.height, group.events);
+        dust.advanceTo(height);
+      }
+    } catch (cause) {
+      this.#log({ event: "dust-height-failed", height, message: cause instanceof Error ? cause.message : String(cause) });
     }
   }
 
@@ -669,6 +736,10 @@ export class PssServer {
     this.#binaryRoute(api, ROUTES.queryPath, "path", maxBodyBytes);
     this.#route(api, "POST", ROUTES.adminSnapshot, async (req, read) => this.#adminBuild(req, read));
     this.#route(api, "GET", ROUTES.adminSnapshot, async (req) => this.#adminStatus(req));
+    this.#route(api, "GET", ROUTES.dustManifest, async () => this.#dustManifest());
+    this.#route(api, "GET", `${ROUTES.dustChunk}:n`, async (req) => this.#dustChunk(req.params.n ?? ""));
+    this.#route(api, "GET", ROUTES.dustCoins, async (req) => this.#dustCoins(req.params.owner));
+    this.#route(api, "GET", ROUTES.dustParameters, async () => this.#dustParameters());
   }
 
   /** Registers a JSON route, logged (FR-080). */
@@ -779,6 +850,72 @@ export class PssServer {
     };
   }
 
+  // ── Dust (00062) ───────────────────────────────────────────────────────────────────────────────────────────────
+
+  /** The answer when the Dust index cannot be served, else null. */
+  #dustRefused(): HttpAnswer | null {
+    const reason = this.dust.error;
+    return reason === null ? null : error(500, "dust-broken", reason);
+  }
+
+  #dustManifest(): HttpAnswer {
+    const refused = this.#dustRefused();
+    if (refused !== null) return refused;
+    return { status: 200, headers: { "Cache-Control": "no-cache" }, body: this.dust.manifest() };
+  }
+
+  /** Chunk `n`'s bytes; a full chunk never changes, so it may be cached for good. */
+  #dustChunk(n: string): HttpAnswer {
+    const refused = this.#dustRefused();
+    if (refused !== null) return refused;
+    if (!/^(0|[1-9][0-9]{0,8})$/.test(n)) return error(400, "invalid-chunk", "a chunk number is a whole number in decimal");
+    const chunk = this.dust.chunk(Number(n));
+    if (chunk === null) return error(404, "no-such-chunk", `the Dust file has ${this.dust.chunks} chunks`);
+    return {
+      status: 200,
+      headers: {
+        "Content-Type": OCTET_STREAM,
+        ETag: `"${chunk.sha256}"`,
+        "Cache-Control": chunk.full ? "public, max-age=31536000, immutable" : "no-cache",
+      },
+      body: chunk.bytes,
+    };
+  }
+
+  /** One owner's first coins and generation updates (the owner is shown to the server: spec 00062, assumptions). */
+  #dustCoins(owner: string | undefined): HttpAnswer {
+    const refused = this.#dustRefused();
+    if (refused !== null) return refused;
+    if (owner === undefined || !/^(0|[1-9][0-9]{0,77})$/.test(owner) || BigInt(owner) >= 1n << 256n) {
+      return error(400, "invalid-owner", "owner is a Dust public key in decimal");
+    }
+    const coins = this.dust.coinsOf(BigInt(owner));
+    const body: DustCoinsAnswer = {
+      owner,
+      eraHeight: this.dust.eraHeight,
+      height: this.dust.height,
+      firstCoins: coins.firstCoins.map(coinEventJson),
+      updates: coins.updates.map(coinEventJson),
+    };
+    return { status: 200, headers: { "Cache-Control": "no-store" }, body };
+  }
+
+  #dustParameters(): HttpAnswer {
+    const refused = this.#dustRefused();
+    if (refused !== null) return refused;
+    const p = this.dust.parameters();
+    if (p === null) return error(503, "dust-not-ready", "the Dust index has not started");
+    const body: DustParametersAnswer = {
+      nightDustRatio: p.values.nightDustRatio.toString(),
+      generationDecayRate: p.values.generationDecayRate.toString(),
+      dustGracePeriodSeconds: p.values.dustGracePeriodSeconds.toString(),
+      source: p.source,
+      changedAt: p.height,
+      height: this.dust.height,
+    };
+    return { status: 200, headers: { "Cache-Control": "no-cache" }, body };
+  }
+
   #admin(req: HttpRequest<unknown>): HttpAnswer | null {
     const secret = this.settings.adminSecret;
     if (secret === undefined) return error(403, "admin-disabled", "no adminSecret is configured");
@@ -860,6 +997,7 @@ export class PssServer {
             },
       previous: this.#previous === null ? null : { id: this.#previous.id },
       tail: this.#tail === null ? null : { next: this.#tail.tree.next, error: this.#tail.error },
+      dust: this.dust.status(),
       building: this.#building,
       last: this.#last,
       settings: {
@@ -869,6 +1007,7 @@ export class PssServer {
         queriesPerCall: this.settings.queriesPerCall,
         snapshotEvery: this.settings.snapshotEvery,
         threads: this.#threads,
+        dustEraHeight: this.settings.dustEraHeight,
         admin: this.settings.adminSecret !== undefined,
       },
     };

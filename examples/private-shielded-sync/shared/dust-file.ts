@@ -98,6 +98,34 @@ export interface DustManifest {
   readonly chunks: readonly DustChunkRef[];
 }
 
+/** A ledger event as the Dust routes answer it: its block height and its bytes in hexadecimal. */
+export interface DustEventJson {
+  readonly height: number;
+  readonly bytes: string;
+}
+
+/** `GET /dust/coins?owner=…`: one owner's `dust-initial-utxo` and `dust-generation-dtime-update` events, in chain order. */
+export interface DustCoinsAnswer {
+  /** The owner asked for, decimal. */
+  readonly owner: string;
+  readonly eraHeight: number;
+  /** The last block height the answer covers. */
+  readonly height: number;
+  readonly firstCoins: readonly DustEventJson[];
+  readonly updates: readonly DustEventJson[];
+}
+
+/** `GET /dust/parameters`: the Dust parameters in force, each decimal. */
+export interface DustParametersAnswer {
+  readonly nightDustRatio: string;
+  readonly generationDecayRate: string;
+  readonly dustGracePeriodSeconds: string;
+  /** The ledger's initial values, or a `param-change` event's at `changedAt`. */
+  readonly source: "initial" | "param-change";
+  readonly changedAt: number | null;
+  readonly height: number;
+}
+
 /** The prefix of a nullifier given as its 32-byte little-endian encoding. */
 export function dustPrefix(nullifier: Uint8Array, prefixBytes: number = DUST_PREFIX_BYTES): Uint8Array {
   if (nullifier.length !== 32) throw new Error(`a nullifier is 32 bytes, got ${nullifier.length}`);

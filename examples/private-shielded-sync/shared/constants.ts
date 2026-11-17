@@ -19,6 +19,14 @@ export const ROUTES = Object.freeze({
   /** Lower Merkle paths, read only to spend (Q58). */
   queryPath: `${ROUTE_PREFIX}/query/path`,
   adminSnapshot: `${ROUTE_PREFIX}/admin/snapshot`,
+  /** The Dust file's manifest, JSON (spec 00062 FR-011). */
+  dustManifest: `${ROUTE_PREFIX}/dust/manifest`,
+  /** Followed by the chunk's number. */
+  dustChunk: `${ROUTE_PREFIX}/dust/chunk/`,
+  /** With `?owner=<Dust public key, decimal>`: that owner's first coins and generation updates, JSON. */
+  dustCoins: `${ROUTE_PREFIX}/dust/coins`,
+  /** The Dust parameters in force, JSON. */
+  dustParameters: `${ROUTE_PREFIX}/dust/parameters`,
 });
 
 /** Default vectors per query call (FR-065). */

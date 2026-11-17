@@ -1,10 +1,11 @@
 /**
- * The module's reads of the core's tables (spec FR-002, FR-010–013): `core_ledger_state.events` (item `ledger-events`),
- * `core_ledger_state.states` (item `ledger-state`), `core_block_commit.blocks` (item `blocks`) and the chain's identity.
- * The module owns no tables and writes nothing.
+ * The module's reads of the core's tables (spec FR-002, FR-010–013; 00062 FR-010): `core_ledger_state.events` (item
+ * `ledger-events`), `core_ledger_state.states` (item `ledger-state`), `core_block_commit.blocks` (item `blocks`) and the
+ * chain's identity. The module owns no tables and writes nothing.
  */
 
 import type { ReadHandle, ZswapEvidence } from "umbradb";
+import { type DustEvent, isDustEventKind } from "./dust-index.ts";
 import type { NullifierEvent, OutputEvent } from "./zswap-index.ts";
 
 type Reader = Pick<ReadHandle, "query">;
@@ -13,6 +14,12 @@ type Reader = Pick<ReadHandle, "query">;
 const ZSWAP_EVENTS_SQL = `SELECT height, tx_index, kind, tree_index, commitment, evidence, ciphertext, nullifier
   FROM core_ledger_state.events
   WHERE kind IN ('zswap-output', 'zswap-input') AND height > $1::bigint AND height <= $2::bigint
+  ORDER BY height, tx_index, event_index`;
+/** Dust events and parameter changes of the heights `($1, $2]` at or above the era's first height `$3`, in chain order. */
+const DUST_EVENTS_SQL = `SELECT height, tx_index, kind, bytes, nullifier, commitment, tree_index
+  FROM core_ledger_state.events
+  WHERE kind IN ('dust-spend-processed', 'dust-initial-utxo', 'dust-generation-dtime-update', 'param-change')
+    AND height > $1::bigint AND height <= $2::bigint AND height >= $3::bigint
   ORDER BY height, tx_index, event_index`;
 const CURSOR_SQL = "SELECT max(height) AS height FROM core_block_commit.blocks";
 const STATE_AT_SQL = `SELECT s.zswap_first_free, s.zswap_root, b.hash
@@ -63,6 +70,28 @@ export async function zswapEvents(read: Reader, from: number, to: number): Promi
     } else {
       current.nullifiers.push({ height, txIndex, nullifier: bytes(row.nullifier, "events.nullifier") });
     }
+  }
+  return out;
+}
+
+/** The Dust events of the heights `(from, to]` at or above `eraHeight`, grouped by height in increasing order. */
+export async function dustEvents(read: Reader, from: number, to: number, eraHeight: number): Promise<{ readonly height: number; readonly events: DustEvent[] }[]> {
+  const rows = await read.query(DUST_EVENTS_SQL, [from, to, eraHeight]);
+  const out: { height: number; events: DustEvent[] }[] = [];
+  for (const row of rows) {
+    const height = int(row.height, "events.height");
+    const kind = String(row.kind);
+    if (!isDustEventKind(kind)) throw new TypeError(`events.kind ${kind} is not a Dust kind`);
+    if (out.at(-1)?.height !== height) out.push({ height, events: [] });
+    out.at(-1)!.events.push({
+      height,
+      txIndex: int(row.tx_index, "events.tx_index"),
+      kind,
+      bytes: bytes(row.bytes, "events.bytes"),
+      nullifier: row.nullifier === null ? null : bytes(row.nullifier, "events.nullifier"),
+      commitment: row.commitment === null ? null : bytes(row.commitment, "events.commitment"),
+      treeIndex: row.tree_index === null ? null : int(row.tree_index, "events.tree_index"),
+    });
   }
   return out;
 }

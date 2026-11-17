@@ -10,6 +10,7 @@
 import { z } from "zod";
 import { DEFAULT_SCHEME, SCHEME_NAMES } from "../pir/scheme.ts";
 import { DEFAULT_PATH_SPLIT, DEFAULT_QUERIES_PER_CALL } from "../shared/constants.ts";
+import { DEFAULT_DUST_ERA_HEIGHT } from "./dust-index.ts";
 import { MAX_PATH_SPLIT } from "./tree.ts";
 
 /** The shortest admin secret accepted. */
@@ -36,6 +37,11 @@ export const SETTINGS_SCHEMA = z.object({
    * CPUs, at most 8.
    */
   threads: z.number().int().min(0).max(256).default(0).meta({ kind: "operational" }),
+  /**
+   * The first height of the ledger era the Dust file covers (00062 FR-013): the Dust state restarts where the ledger's
+   * event format changes. Preprod's by default; the index is read again from the database at every start.
+   */
+  dustEraHeight: z.number().int().min(0).default(DEFAULT_DUST_ERA_HEIGHT).meta({ kind: "operational" }),
 });
 
 export type Settings = z.infer<typeof SETTINGS_SCHEMA>;
