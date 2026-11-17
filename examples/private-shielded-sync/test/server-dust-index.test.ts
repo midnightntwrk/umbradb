@@ -1,19 +1,22 @@
 /**
- * The module's Dust index (spec 00062 FR-001, FR-006, FR-007, FR-011, FR-013) over real Preprod events
+ * The module's Dust index (spec 00062 FR-001, FR-006, FR-007, FR-011, FR-012, FR-013) over real Preprod events
  * (`./server-dust-fixture.ts`) decoded with the vendored ledger build: the file it serves, chunk by chunk, against the
  * entries read from the events independently; full chunks that do not change as the file grows; the era's first
- * height; the first coins and updates by owner; the parameters; and what breaks it.
+ * height; the first coins and updates by owner; the parameters; the commitments by position for the check table; and
+ * what breaks it.
  */
 
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { decodeDustChunk, dustEntryAt, type DustEntry } from "../shared/index.ts";
 import { type DustDecoder, type DustEvent, DustIndex, dustParametersOfText, ledgerDustDecoder } from "../server/dust-index.ts";
-import { byHeight, coinRows, dustEventOf, entryOf, FIXTURE, ledger, ownerOf, spendRows } from "./server-dust-fixture.ts";
+import { byHeight, coinRows, commitmentsUpTo, dustEventOf, entryOf, FIXTURE, ledger, ownerOf, spendRows } from "./server-dust-fixture.ts";
 
 const hex = (b: Uint8Array): string => Buffer.from(b).toString("hex");
 const decoder = ledgerDustDecoder(ledger);
 const ERA = 3_348_434;
+const LAST = FIXTURE.at(-1)!.height;
+const CHUNK = 64;
 
 function same(a: DustEntry, b: DustEntry): void {
   expect([hex(a.prefix), a.time, a.fee, a.position]).toEqual([hex(b.prefix), b.time, b.fee, b.position]);
@@ -30,15 +33,16 @@ function indexUpTo(upto: number, chunkEntries: number, options: { eraHeight?: nu
 
 describe("the Dust index over Preprod events", () => {
   it("lists every spend of the era in chain order; each chunk decodes alone to the entries read from the events; the manifest names each chunk's range, heights, length and SHA-256", () => {
-    const index = indexUpTo(3_349_867, 4);
+    const index = indexUpTo(LAST, CHUNK);
     const spends = spendRows();
-    expect(index.entries).toBe(10);
+    expect(spends).toHaveLength(144);
+    expect(index.entries).toBe(144);
     const manifest = index.manifest();
-    expect(manifest).toMatchObject({ version: 1, eraHeight: ERA, height: 3_349_867, entries: 10, chunkEntries: 4, prefixBytes: 4 });
+    expect(manifest).toMatchObject({ version: 1, eraHeight: ERA, height: LAST, entries: 144, chunkEntries: CHUNK, prefixBytes: 4 });
     expect(manifest.chunks.map((c) => [c.first, c.count, c.firstHeight, c.lastHeight])).toEqual([
-      [0, 4, spends[0]!.height, spends[3]!.height],
-      [4, 4, spends[4]!.height, spends[7]!.height],
-      [8, 2, spends[8]!.height, spends[9]!.height],
+      [0, 64, spends[0]!.height, spends[63]!.height],
+      [64, 64, spends[64]!.height, spends[127]!.height],
+      [128, 16, spends[128]!.height, spends[143]!.height],
     ]);
     manifest.chunks.forEach((ref, n) => {
       const chunk = index.chunk(n)!;
@@ -47,7 +51,7 @@ describe("the Dust index over Preprod events", () => {
       expect([decoded.first, decoded.firstHeight, decoded.count]).toEqual([ref.first, ref.firstHeight, ref.count]);
       for (let i = 0; i < decoded.count; i++) same(dustEntryAt(decoded, i), entryOf(spends[ref.first + i]!));
     });
-    // The new commitments are kept, by entry, for the private check.
+    // The new commitments are kept, by entry, for the check table.
     spends.forEach((row, i) => expect(hex(index.commitment(i))).toBe(row.commitment));
     expect(index.chunk(3)).toBeNull();
     expect(index.chunk(-1)).toBeNull();
@@ -56,19 +60,29 @@ describe("the Dust index over Preprod events", () => {
 
   it("story 1, scenario 2 (SC-002): as the file grows, the full chunks stay byte-identical and only the last chunk and the manifest change", () => {
     const spends = spendRows();
-    // The file at the height of its 5th spend: one full chunk of 4, a last one of 1.
-    const early = indexUpTo(spends[4]!.height, 4);
-    const late = indexUpTo(3_349_867, 4);
-    expect(early.entries).toBe(5);
+    // The file at the height of its 100th spend: one full chunk of 64, a last one that grows.
+    const at = spends[99]!.height;
+    const early = indexUpTo(at, CHUNK);
+    const late = indexUpTo(LAST, CHUNK);
+    const entries = spends.filter((r) => r.height <= at).length;
+    expect(early.entries).toBe(entries);
+    expect(entries).toBeGreaterThan(64);
+    expect(entries).toBeLessThan(128);
     expect(hex(early.chunk(0)!.bytes)).toBe(hex(late.chunk(0)!.bytes));
     expect(early.chunk(1)!.full).toBe(false);
     expect(hex(early.chunk(1)!.bytes)).not.toBe(hex(late.chunk(1)!.bytes));
     expect(early.manifest().chunks[0]).toEqual(late.manifest().chunks[0]);
+    // Chunk n at the count an earlier manifest names is that manifest's chunk, however the file grew since.
+    const earlyLast = early.manifest().chunks[1]!;
+    const atCount = late.chunk(1, earlyLast.count)!;
+    expect([hex(atCount.bytes), atCount.sha256, atCount.full]).toEqual([hex(early.chunk(1)!.bytes), earlyLast.sha256, false]);
+    expect(late.chunk(0, 64)).toBe(late.chunk(0));
+    expect([late.chunk(2, 17), late.chunk(2, 0), late.chunk(2, 1.5)]).toEqual([null, null, null]);
     // The same index, grown: its kept full chunk is the one encoded before.
-    const growing = indexUpTo(spends[3]!.height, 4);
+    const growing = indexUpTo(at, CHUNK);
     const first = growing.chunk(0)!;
     const before = growing.manifest();
-    for (const group of byHeight(FIXTURE.filter((r) => r.height > spends[3]!.height))) growing.appendHeight(group.height, group.rows.map((r) => dustEventOf(r)));
+    for (const group of byHeight(FIXTURE.filter((r) => r.height > at))) growing.appendHeight(group.height, group.rows.map((r) => dustEventOf(r)));
     expect(growing.chunk(0)).toBe(first);
     expect(growing.manifest()).not.toBe(before);
     expect(growing.manifest().chunks).toHaveLength(3);
@@ -76,65 +90,88 @@ describe("the Dust index over Preprod events", () => {
 
   it("FR-013: events below the era's first height are not read; a manifest below it lists nothing", () => {
     const spends = spendRows();
-    // The era starts at the 4th spend's height: the first three spends (two heights) are outside it.
-    const index = indexUpTo(3_349_867, 4, { eraHeight: spends[3]!.height });
-    expect(index.entries).toBe(7);
-    same(index.entry(0), entryOf(spends[3]!));
-    // The first coin below that height belongs to no owner here.
-    const early = coinRows().find((r) => r.height < spends[3]!.height)!;
-    expect(index.coinsOf(ownerOf(early)).firstCoins).toEqual([]);
-    const before = indexUpTo(ERA - 1, 4);
+    // The era starts at the 4th spend's height: the spends below it (and every first coin of the boundary block) are outside.
+    const era = spends[3]!.height;
+    const index = indexUpTo(LAST, CHUNK, { eraHeight: era });
+    expect(index.entries).toBe(spends.filter((r) => r.height >= era).length);
+    same(index.entry(0), entryOf(spends.find((r) => r.height >= era)!));
+    const early = coinRows().find((r) => r.height < era)!;
+    expect(index.coinsOf(ownerOf(early)).firstCoins.every((e) => e.height >= era)).toBe(true);
+    const before = indexUpTo(ERA - 1, CHUNK);
     expect(before.manifest()).toMatchObject({ height: ERA - 1, entries: 0, chunks: [] });
   });
 
   it("FR-011: an owner's first coins and generation updates, each list in chain order, as the events' bytes; another owner's are not given", () => {
-    const index = indexUpTo(3_349_867, 4096);
+    const index = indexUpTo(LAST, 4096);
     const coins = coinRows();
     const owners = [...new Set(coins.map(ownerOf))];
-    expect(owners).toHaveLength(2);
+    expect(owners).toHaveLength(47);
     for (const owner of owners) {
       const mine = coins.filter((r) => ownerOf(r) === owner);
       const got = index.coinsOf(owner);
       expect(got.firstCoins.map((e) => [e.height, hex(e.bytes)])).toEqual(mine.filter((r) => r.kind === "dust-initial-utxo").map((r) => [r.height, r.bytes]));
       expect(got.updates.map((e) => [e.height, hex(e.bytes)])).toEqual(mine.filter((r) => r.kind === "dust-generation-dtime-update").map((r) => [r.height, r.bytes]));
     }
-    // One owner has two first coins and one update (the second coin's Night spent the first's): the update's record is
+    // An owner with two first coins and one update (the second coin's Night spent the first's): the update's record is
     // the first coin's generation record with its dtime set.
-    const two = owners.find((o) => index.coinsOf(o).firstCoins.length === 2)!;
+    const two = owners.find((o) => index.coinsOf(o).firstCoins.length === 2 && index.coinsOf(o).updates.length === 1)!;
     const update = ledger.Event.deserialize(index.coinsOf(two).updates[0]!.bytes).content as unknown as { update: { annotation: { nonce: string; dtime?: Date } } };
-    const first = ledger.Event.deserialize(index.coinsOf(two).firstCoins[0]!.bytes).content as unknown as { generation: { nonce: string; dtime?: Date } };
-    expect(update.update.annotation.nonce).toBe(first.generation.nonce);
-    expect(first.generation.dtime).toBeUndefined();
+    const firsts = index.coinsOf(two).firstCoins.map((e) => ledger.Event.deserialize(e.bytes).content as unknown as { generation: { nonce: string; dtime?: Date } });
+    expect(firsts.map((f) => f.generation.nonce)).toContain(update.update.annotation.nonce);
+    expect(firsts.every((f) => f.generation.dtime === undefined)).toBe(true);
     expect(update.update.annotation.dtime).toBeInstanceOf(Date);
     expect(index.coinsOf(12345n)).toEqual({ firstCoins: [], updates: [] });
-    expect(index.status()).toMatchObject({ entries: 10, firstCoins: 3, updates: 1, owners: 2, error: null });
+    expect(index.status()).toMatchObject({ entries: 144, firstCoins: 110, updates: 5, owners: 47, error: null });
   });
 
   it("the parameters: the ledger's initial ones, until the era has a parameter change; a change's are read from the event's rendering", () => {
-    const index = indexUpTo(3_349_867, 4096);
+    const index = indexUpTo(LAST, 4096);
     expect(index.parameters()).toEqual({ values: { nightDustRatio: 5_000_000_000n, generationDecayRate: 8_267n, dustGracePeriodSeconds: 10_800n }, source: "initial", height: null });
     // As the ledger renders a `LedgerParameters` (here the one Preprod set at height 0, in the earlier format).
     const text = "…, k_withdrawal_minimum_multiple: FixedPoint(0.5) }, dust: DustParameters { night_dust_ratio: 5000000000, generation_decay_rate: 8267, dust_grace_period: Duration(10800) }, fee_prices: FeePrices { …";
     expect(dustParametersOfText(text)).toEqual({ nightDustRatio: 5_000_000_000n, generationDecayRate: 8_267n, dustGracePeriodSeconds: 10_800n });
     expect(() => dustParametersOfText("ParamChange(LedgerParameters { … })")).toThrow(/without its Dust parameters/);
     const changed = { nightDustRatio: 7n, generationDecayRate: 8n, dustGracePeriodSeconds: 9n };
-    const withChange = indexUpTo(3_349_867, 4096, { decoder: { ...decoder, parameters: () => changed } });
-    withChange.appendHeight(3_349_900, [{ height: 3_349_900, txIndex: 0, kind: "param-change", bytes: new Uint8Array(1), nullifier: null, commitment: null, treeIndex: null }]);
-    expect(withChange.parameters()).toEqual({ values: changed, source: "param-change", height: 3_349_900 });
+    const withChange = indexUpTo(LAST, 4096, { decoder: { ...decoder, parameters: () => changed } });
+    withChange.appendHeight(LAST + 1, [{ height: LAST + 1, txIndex: 0, kind: "param-change", bytes: new Uint8Array(1), nullifier: null, commitment: null, treeIndex: null }]);
+    expect(withChange.parameters()).toEqual({ values: changed, source: "param-change", height: LAST + 1 });
     expect(new DustIndex({ eraHeight: 0 }).parameters()).toBeNull();
+  });
+
+  it("FR-012: the commitments by position at a height fill 0 to n − 1 exactly once (n the core's dust_commitment_first_free), from the spends' rows and the first coins' outputs; a gap or a position filled twice is refused", () => {
+    const index = indexUpTo(LAST, 4096);
+    for (const [height, firstFree] of [[ERA, 100], [3_349_459, 113], [LAST, 254]] as const) {
+      const table = index.commitments(height);
+      expect([table.height, table.count]).toEqual([height, firstFree]);
+      const expected = commitmentsUpTo(height);
+      expect(expected.size).toBe(firstFree);
+      for (let p = 0; p < table.count; p++) expect(hex(table.bytes.subarray(32 * p, 32 * p + 32)), `position ${p}`).toBe(hex(expected.get(p)!));
+    }
+    expect(index.commitments(ERA - 1).count).toBe(0);
+    expect(() => index.commitments(LAST + 1)).toThrow(/is at/);
+
+    // Without the boundary block's first coins (the era set later than it starts), positions 0 to 99 are empty.
+    const late = indexUpTo(LAST, 4096, { eraHeight: ERA + 1 });
+    expect(() => late.commitments()).toThrow(/position 0 is empty: the era's 144 spends and 10 first coins up to height 3349867 do not fill positions 0 to 253/);
+    // A first coin the decoder places on a spend's position: filled twice.
+    const spend = spendRows()[0]!;
+    const twice = indexUpTo(LAST, 4096, { decoder: { ...decoder, firstCoin: (bytes) => ({ ...decoder.firstCoin(bytes), position: spend.treeIndex! }) } });
+    expect(() => twice.commitments()).toThrow(/position 102 is filled twice \(the second time by a first coin at height 3348434\)/);
   });
 
   it("refuses what it cannot serve: a position that does not rise breaks it (nothing of that height taken, later heights ignored); an event it cannot decode; no decoder", () => {
     const spends = spendRows();
-    const index = indexUpTo(spends[4]!.height, 4);
+    const at = spends[4]!.height;
+    const index = indexUpTo(at, CHUNK);
     const before = index.entries;
-    const repeat: DustEvent = { ...dustEventOf(spends[1]!), height: spends[4]!.height + 1 };
-    index.appendHeight(spends[4]!.height + 1, [repeat]);
-    expect(index.error).toMatch(/cannot be read: a Dust commitment position 103 after 106/);
+    const lastPosition = spends.filter((r) => r.height <= at).at(-1)!.treeIndex;
+    const repeat: DustEvent = { ...dustEventOf(spends[1]!), height: at + 1 };
+    index.appendHeight(at + 1, [repeat]);
+    expect(index.error).toContain(`cannot be read: a Dust commitment position ${spends[1]!.treeIndex} after ${lastPosition}`);
     expect(index.entries).toBe(before);
-    index.appendHeight(spends[4]!.height + 2, [dustEventOf(spends[9]!, spends[4]!.height + 2)]);
+    index.appendHeight(at + 2, [dustEventOf(spends[9]!, at + 2)]);
     expect(index.entries).toBe(before);
-    expect(index.height).toBe(spends[4]!.height + 2);
+    expect(index.height).toBe(at + 2);
 
     const garbled = new DustIndex({ eraHeight: 0 });
     garbled.useDecoder(decoder);

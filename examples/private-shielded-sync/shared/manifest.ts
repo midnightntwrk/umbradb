@@ -295,6 +295,20 @@ export function validateManifest(m: Manifest): void {
   rules.checkTable(a.nullifierTable, a.nullifierPublic, m.pir, "nullifierTable", "nullifierPublic");
 }
 
+/**
+ * Checks one positional PIR table's entry and its public artifact by a scheme's rules, for a manifest other than the
+ * snapshot's (the Dust check table, spec 00062). Throws as {@link validateManifest} does.
+ */
+export function validateSchemeTable(scheme: string, pir: SchemeParams, t: PirTableRef, publicRef: ArtifactRef, name: string, publicName: string): void {
+  const rules = isSchemeName(scheme) ? (SCHEME_RULES[scheme] as SchemeRules<SchemeParams> | undefined) : undefined;
+  if (rules === undefined) throw new SchemeUnavailable(scheme, "this build cannot read its manifest");
+  need(typeof pir === "object" && pir !== null, "pir");
+  rules.checkParams(pir);
+  checkTable(t, name);
+  checkRef(publicRef, publicName);
+  rules.checkTable(t, publicRef, pir, name, publicName);
+}
+
 export function toHex(bytes: Uint8Array): string {
   return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("hex");
 }

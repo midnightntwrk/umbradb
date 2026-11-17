@@ -101,7 +101,7 @@ describe.skipIf(!installed)("the command line (with the client's install)", () =
     expect((JSON.parse(bad.stdout) as Record<string, any>).differences).toEqual([expect.objectContaining({ what: "only-ledger", position: state.coins[0]!.position })]);
   });
 
-  it("dust (spec 00062): downloads the Dust file, coins and parameters and walks the wallet's chains (none on this chain, which has no Dust events); refuses a wallet without a mnemonic", { timeout: LONG }, async () => {
+  it("dust (spec 00062): downloads the Dust file, coins and parameters and walks the wallet's chains (none on this chain, which has no Dust events, nor a check table); refuses a wallet without a mnemonic", { timeout: LONG }, async () => {
     // BIP-39's public test vector, not a wallet anyone holds.
     const mnemonic = `${"abandon ".repeat(23)}art`;
     const { stdout, stderr } = await run(process.execPath, [MAIN, "dust", "--mnemonic-env", "PSS_TEST_MNEMONIC", "--server", r.origin, "--json"], {
@@ -110,7 +110,10 @@ describe.skipIf(!installed)("the command line (with the client's install)", () =
     const report = JSON.parse(stdout) as Record<string, any>;
     expect(report.file).toMatchObject({ eraHeight: 3_348_434, height: 7, entries: 0, chunks: 0, chunkEntries: 4096, prefixBytes: 4 });
     expect(report.parameters).toMatchObject({ nightDustRatio: "5000000000", generationDecayRate: "8267", dustGracePeriodSeconds: "10800", source: "initial" });
-    expect([report.firstCoins, report.chains, report.bytes.requests, report.bytes.up]).toEqual([0, [], 3, 0]);
+    expect([report.firstCoins, report.chains, report.bytes.requests, report.bytes.up]).toEqual([0, [], 4, 0]);
+    // Below the era there is no Dust commitment, so the module serves no check table: the walk goes on without it.
+    expect(report.check).toBeNull();
+    expect(report.checkUnavailable).toContain("no Dust check table has been built yet");
     expect(`${stdout}${stderr}`).not.toContain("abandon");
     const text = await cli(["dust", "--zswap-seed-file", seedFile, "--server", r.origin]);
     expect(text.code).toBe(1);

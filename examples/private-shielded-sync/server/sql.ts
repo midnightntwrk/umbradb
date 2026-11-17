@@ -26,6 +26,7 @@ const STATE_AT_SQL = `SELECT s.zswap_first_free, s.zswap_root, b.hash
   FROM core_ledger_state.states s JOIN core_block_commit.blocks b ON b.height = s.height
   WHERE s.height = $1::bigint`;
 const BLOCK_HASH_SQL = "SELECT hash FROM core_block_commit.blocks WHERE height = $1::bigint";
+const DUST_FIRST_FREE_SQL = "SELECT dust_commitment_first_free FROM core_ledger_state.states WHERE height = $1::bigint";
 const GENESIS_SQL = "SELECT genesis_hash FROM core_chain.identity WHERE id = 1";
 
 const bytes = (value: unknown, what: string): Uint8Array => {
@@ -114,6 +115,12 @@ export async function stateAt(
     root: bytes(row.zswap_root, "states.zswap_root"),
     hash: bytes(row.hash, "blocks.hash"),
   };
+}
+
+/** The Dust commitment tree's first free position after block `height` (00062), or null when no state is stored. */
+export async function dustFirstFreeAt(read: Reader, height: number): Promise<number | null> {
+  const [row] = await read.query(DUST_FIRST_FREE_SQL, [height]);
+  return row === undefined ? null : int(row.dust_commitment_first_free, "states.dust_commitment_first_free");
 }
 
 /** The hash of block `height`, or null when none is stored. */

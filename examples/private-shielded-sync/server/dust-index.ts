@@ -8,7 +8,9 @@
  *   new commitment (32 bytes, kept for the private check). They make the Dust file (`../shared/dust-file.ts`): a full
  *   chunk is encoded once and kept; the last one is encoded again when it has grown.
  * - **First coins** (`dust-initial-utxo`) and **generation updates** (`dust-generation-dtime-update`), by owner (the
- *   Dust public key), each as its event's bytes, which the wallet decodes with its own ledger package.
+ *   Dust public key), each as its event's bytes, which the wallet decodes with its own ledger package; and each first
+ *   coin's position and commitment (computed by the decoder), which with the spends' new commitments fill the Dust
+ *   commitment tree's positions for the check table (`commitments`, `./dust-check.ts`).
  * - **The Dust parameters**: the ledger's initial ones, or those of the era's last `param-change` event.
  *
  * Events below the era's first height (the setting `dustEraHeight`) are ignored: the Dust state restarts there, and the
@@ -71,8 +73,11 @@ export interface DustParameterValues {
 export interface DustDecoder {
   /** A spend's declared time (whole seconds since the Unix epoch), fee and commitment position. */
   spend(bytes: Uint8Array): { readonly time: number; readonly fee: bigint; readonly position: number };
-  /** The owner (Dust public key) of a first coin. */
-  firstCoinOwner(bytes: Uint8Array): bigint;
+  /**
+   * A first coin's owner (Dust public key), its position in the Dust commitment tree, and its commitment (32 bytes,
+   * the field element little-endian), which the event does not carry and the ledger computes (`dustCommitment`).
+   */
+  firstCoin(bytes: Uint8Array): { readonly owner: bigint; readonly position: number; readonly commitment: Uint8Array };
   /** The owner of the generation record a generation update changes. */
   updateOwner(bytes: Uint8Array): bigint;
   /** The Dust parameters a `param-change` event sets. */
@@ -115,6 +120,18 @@ export function dustParametersOfText(text: string): DustParameterValues {
 
 type Ledger = typeof V9;
 
+/** A field element as 32 bytes, little-endian (as the core stores a Dust spend's commitment). */
+export function fieldBytes(value: bigint): Uint8Array {
+  if (value < 0n || value >= 1n << 256n) throw new RangeError(`not a 32-byte field element: ${value}`);
+  const out = new Uint8Array(32);
+  let rest = value;
+  for (let i = 0; i < 32; i++) {
+    out[i] = Number(rest & 0xffn);
+    rest >>= 8n;
+  }
+  return out;
+}
+
 /** The decoder of the ledger package (the repository's vendored build of `@midnightntwrk/ledger-v9` 1.0.1). */
 export function ledgerDustDecoder(ledger: Ledger): DustDecoder {
   const content = (bytes: Uint8Array, tag: string): Record<string, unknown> => {
@@ -136,7 +153,11 @@ export function ledgerDustDecoder(ledger: Ledger): DustDecoder {
       const position = Number(c.commitmentIndex as bigint);
       return { time: ms / 1000, fee: c.vFee as bigint, position };
     },
-    firstCoinOwner: (bytes) => owner((content(bytes, "dustInitialUtxo").output as { owner?: unknown } | undefined)?.owner),
+    firstCoin(bytes) {
+      const output = content(bytes, "dustInitialUtxo").output as V9.QualifiedDustOutput | undefined;
+      if (output === undefined) throw new Error("a first coin without its output");
+      return { owner: owner(output.owner), position: Number(output.mtIndex), commitment: fieldBytes(ledger.dustCommitment(output)) };
+    },
     updateOwner: (bytes) => owner((content(bytes, "dustGenerationDtimeUpdate").update as { annotation?: { owner?: unknown } } | undefined)?.annotation?.owner),
     parameters: (bytes) => dustParametersOfText(ledger.Event.deserialize(bytes).toString(true)),
     initial: { nightDustRatio: initial.nightDustRatio, generationDecayRate: initial.generationDecayRate, dustGracePeriodSeconds: initial.dustGracePeriodSeconds },
@@ -146,7 +167,8 @@ export function ledgerDustDecoder(ledger: Ledger): DustDecoder {
 /** One event checked and decoded, ready to be taken. */
 type Decoded =
   | { readonly kind: "spend"; readonly height: number; readonly prefix: Uint8Array; readonly time: number; readonly fee: bigint; readonly position: number; readonly commitment: Uint8Array }
-  | { readonly kind: "first-coin" | "update"; readonly height: number; readonly owner: bigint; readonly bytes: Uint8Array }
+  | { readonly kind: "first-coin"; readonly height: number; readonly owner: bigint; readonly bytes: Uint8Array; readonly position: number; readonly commitment: Uint8Array }
+  | { readonly kind: "update"; readonly height: number; readonly owner: bigint; readonly bytes: Uint8Array }
   | { readonly kind: "parameters"; readonly height: number; readonly values: DustParameterValues };
 
 export interface DustIndexOptions {
@@ -176,10 +198,14 @@ export class DustIndex {
   readonly #owners = new Map<bigint, { firstCoins: DustCoinEvent[]; updates: DustCoinEvent[] }>();
   #firstCoins = 0;
   #updates = 0;
+  // First coins' heights, positions and commitments (computed by the decoder), for the check table.
+  readonly #coinHeights: number[] = [];
+  readonly #coinPositions: number[] = [];
+  readonly #coinCommitments = new GrowableBytes();
   #changed: { readonly values: DustParameterValues; readonly height: number } | null = null;
   // Encoded chunks: every full one, and the last one at its entry count.
   readonly #full = new Map<number, EncodedDustChunk>();
-  #last: { readonly entries: number; readonly chunk: EncodedDustChunk } | null = null;
+  #last: { readonly first: number; readonly count: number; readonly chunk: EncodedDustChunk } | null = null;
   #manifest: { readonly height: number; readonly entries: number; readonly manifest: DustManifest } | null = null;
 
   constructor(options: DustIndexOptions) {
@@ -258,8 +284,11 @@ export class DustIndex {
         if (position !== e.treeIndex) throw new Error(`a spend whose event names position ${position} and whose row ${e.treeIndex}`);
         return { kind: "spend", height, prefix: dustPrefix(e.nullifier, this.prefixBytes), time, fee, position, commitment: e.commitment };
       }
-      case "dust-initial-utxo":
-        return { kind: "first-coin", height, owner: decoder.firstCoinOwner(e.bytes), bytes: e.bytes };
+      case "dust-initial-utxo": {
+        const coin = decoder.firstCoin(e.bytes);
+        if (!Number.isSafeInteger(coin.position) || coin.position < 0 || coin.commitment.length !== 32) throw new Error("a first coin without its position or commitment");
+        return { kind: "first-coin", height, bytes: e.bytes, ...coin };
+      }
       case "dust-generation-dtime-update":
         return { kind: "update", height, owner: decoder.updateOwner(e.bytes), bytes: e.bytes };
       case "param-change":
@@ -279,6 +308,11 @@ export class DustIndex {
         return;
       case "first-coin":
       case "update": {
+        if (d.kind === "first-coin") {
+          this.#coinHeights.push(d.height);
+          this.#coinPositions.push(d.position);
+          this.#coinCommitments.push(d.commitment);
+        }
         let lists = this.#owners.get(d.owner);
         if (lists === undefined) {
           lists = { firstCoins: [], updates: [] };
@@ -318,21 +352,60 @@ export class DustIndex {
     return this.#commitments.bytes.slice(i * 32, (i + 1) * 32);
   }
 
+  /**
+   * The Dust commitment tree's leaves at `height` (the index's by default) by position, for the check table (spec
+   * 00062 FR-012): each spend's new commitment and each first coin's, at or below `height`. Throws
+   * {@link DustCoverageError} unless they fill every position from 0 to the largest exactly once.
+   */
+  commitments(height: number = this.#height): { readonly height: number; readonly count: number; readonly bytes: Uint8Array } {
+    if (height > this.#height) throw new Error(`the Dust index is at ${this.#height}, not ${height}`);
+    const spends = countAtOrBelow(this.#heights, height);
+    const coins = countAtOrBelow(this.#coinHeights, height);
+    let count = 0;
+    for (let i = 0; i < spends; i++) count = Math.max(count, this.#positions[i]! + 1);
+    for (let j = 0; j < coins; j++) count = Math.max(count, this.#coinPositions[j]! + 1);
+    const bytes = new Uint8Array(count * 32);
+    const filled = new Uint8Array(count);
+    const put = (position: number, from: Uint8Array, at: number, what: string): void => {
+      if (filled[position] !== 0) throw new DustCoverageError(`the Dust commitment position ${position} is filled twice (the second time by ${what})`);
+      filled[position] = 1;
+      bytes.set(from.subarray(at * 32, at * 32 + 32), position * 32);
+    };
+    const spent = this.#commitments.bytes;
+    for (let i = 0; i < spends; i++) put(this.#positions[i]!, spent, i, `spend ${i}`);
+    const firsts = this.#coinCommitments.bytes;
+    for (let j = 0; j < coins; j++) put(this.#coinPositions[j]!, firsts, j, `a first coin at height ${this.#coinHeights[j]}`);
+    const empty = filled.indexOf(0);
+    if (empty >= 0) {
+      throw new DustCoverageError(
+        `the Dust commitment position ${empty} is empty: the era's ${spends} spends and ${coins} first coins up to height ${height} do not fill positions 0 to ${count - 1}`,
+      );
+    }
+    return { height, count, bytes };
+  }
+
   /** The number of chunks the file has now. */
   get chunks(): number {
     return Math.ceil(this.entries / this.chunkEntries);
   }
 
-  /** Chunk `n` encoded, or null when the file has no such chunk. A full chunk is encoded once. */
-  chunk(n: number): EncodedDustChunk | null {
+  /**
+   * Chunk `n` encoded, with its first `count` entries (all it holds now unless given), or null when the file has no
+   * such chunk or not that many entries in it. A chunk is a function of its entries, so chunk `n` at a given count never
+   * changes: a wallet asks for the count its manifest names, and gets those bytes however the file grew since. A full
+   * chunk is encoded once; the last partial one is kept at its count.
+   */
+  chunk(n: number, count?: number): EncodedDustChunk | null {
     if (!Number.isSafeInteger(n) || n < 0 || n >= this.chunks) return null;
     const first = n * this.chunkEntries;
-    const count = Math.min(this.chunkEntries, this.entries - first);
+    const held = Math.min(this.chunkEntries, this.entries - first);
+    if (count !== undefined && (!Number.isSafeInteger(count) || count < 1 || count > held)) return null;
+    count ??= held;
     const full = count === this.chunkEntries;
     if (full) {
       const kept = this.#full.get(n);
       if (kept !== undefined) return kept;
-    } else if (this.#last !== null && this.#last.entries === this.entries) {
+    } else if (this.#last !== null && this.#last.first === first && this.#last.count === count) {
       return this.#last.chunk;
     }
     const entries: DustEntry[] = [];
@@ -340,7 +413,7 @@ export class DustIndex {
     const bytes = encodeDustChunk(dustChunkOf(first, this.#heights[first]!, entries, this.prefixBytes));
     const chunk: EncodedDustChunk = { bytes, sha256: createHash("sha256").update(bytes).digest("hex"), full };
     if (full) this.#full.set(n, chunk);
-    else this.#last = { entries: this.entries, chunk };
+    else this.#last = { first, count, chunk };
     return chunk;
   }
 
@@ -391,6 +464,21 @@ export class DustIndex {
       error: this.#error,
     };
   }
+}
+
+/** The Dust events do not fill the commitment positions exactly once: the check table cannot be built. */
+export class DustCoverageError extends Error {}
+
+/** How many of the non-decreasing `values` are at most `limit`. */
+function countAtOrBelow(values: readonly number[], limit: number): number {
+  let lo = 0;
+  let hi = values.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (values[mid]! <= limit) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
 }
 
 /** A coin event as the coins route answers it: its height and its bytes in hexadecimal. */

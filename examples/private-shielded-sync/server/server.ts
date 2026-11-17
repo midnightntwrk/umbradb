@@ -18,6 +18,10 @@
  *   extended along the same two paths as the Zswap index, decoded with the repository's vendored ledger build; routes
  *   under `/pss/v1/dust/` serve the Dust file (manifest and chunks), one owner's first coins and generation updates,
  *   and the Dust parameters. A Dust failure breaks only the Dust routes.
+ * - **Dust check** (00062 FR-012): the Dust commitments by position as a PIR table of the module's scheme, with its own
+ *   manifest (`./dust-check.ts`), built in a worker thread at start and whenever a snapshot build starts (in that
+ *   build's scheme), and served under `/pss/v1/dust/check/`. The commitments must fill positions 0 to n − 1 exactly
+ *   once, with n the core's `dust_commitment_first_free` at the height, or the build fails with the reason.
  *
  * Nothing here throws out of a block point: a failure is logged, and a broken index or tail refuses builds and tail
  * answers with its reason, so the core's processing is never halted by this module.
@@ -46,12 +50,14 @@ import { maxRequestBytes, openServerScheme } from "../pir/server-schemes.ts";
 import { OCTET_STREAM, ROUTES } from "../shared/constants.ts";
 import { fromHex, type Manifest, type PirTableRef, toHex } from "../shared/manifest.ts";
 import { CALL_HEADER_BYTES, decodeQueryBody, encodeAnswerBody, WireError } from "../shared/wire.ts";
+import type { DustCheckManifest } from "../shared/dust-check.ts";
 import type { DustCoinsAnswer, DustParametersAnswer } from "../shared/dust-file.ts";
 import { type BuildJob, type BuildResult, paddedBuildBytes } from "./build.ts";
 import { BuildFailure, runBuildWorker, type WorkerOutcome } from "./build-host.ts";
-import { coinEventJson, type DustEvent, DustIndex, isDustEventKind, ledgerDustDecoder } from "./dust-index.ts";
+import { clearDustCheckBuilds, DustCheckFailure, type DustCheckResult, pruneDustChecks, runDustCheckWorker } from "./dust-check.ts";
+import { coinEventJson, DustCoverageError, type DustEvent, DustIndex, isDustEventKind, ledgerDustDecoder } from "./dust-index.ts";
 import { type Settings, settingsOf } from "./settings.ts";
-import { blockHashAt, cursorOf, dustEvents, genesisHashOf, stateAt, zswapEvents } from "./sql.ts";
+import { blockHashAt, cursorOf, dustEvents, dustFirstFreeAt, genesisHashOf, stateAt, zswapEvents } from "./sql.ts";
 import {
   artifactPath,
   listSnapshots,
@@ -131,6 +137,36 @@ async function adoptTables(scheme: ServerScheme, result: BuildResult): Promise<T
     throw cause;
   }
   return adopted.length === 3 ? { read: adopted[0]!, path: adopted[1]!, nullifier: adopted[2]! } : { read: adopted[0]!, path: null, nullifier: adopted[1]! };
+}
+
+/** The Dust check table served (00062). */
+interface DustCheck {
+  readonly id: string;
+  readonly idBytes: Uint8Array;
+  readonly dir: string;
+  readonly manifest: DustCheckManifest;
+  readonly manifestBytes: Uint8Array;
+  readonly table: ServerTable;
+}
+
+interface DustCheckBuilding {
+  readonly height: number;
+  readonly scheme: SchemeName;
+  /** `start`, or the snapshot build's trigger. */
+  readonly trigger: string;
+  readonly startedAt: string;
+}
+
+interface DustCheckLast {
+  readonly height: number;
+  readonly ok: boolean;
+  readonly id: string | null;
+  readonly scheme: SchemeName;
+  readonly code: string | null;
+  readonly message: string | null;
+  readonly commitments: number | null;
+  readonly finishedAt: string;
+  readonly ms: number;
 }
 
 interface Tail {
@@ -248,6 +284,11 @@ export class PssServer {
   #fromDatabase = 0;
   /** Whether the Dust index's start ran (it marks the index broken itself when it fails). */
   #dustStarted = false;
+  #dustCheck: DustCheck | null = null;
+  /** The check table before the current one: its public artifact is still served. */
+  #dustCheckPrevious: { readonly id: string; readonly dir: string; readonly publicDigest: string } | null = null;
+  #dustCheckBuilding: DustCheckBuilding | null = null;
+  #dustCheckLast: DustCheckLast | null = null;
 
   constructor(settings: Settings, options: PssOptions) {
     this.settings = settings;
@@ -343,6 +384,10 @@ export class PssServer {
     }
     prepareDataDir(this.dataDir);
     await this.#loadSnapshots(w, cursor);
+    // No stored check table is served: it is built again from the index at start.
+    clearDustCheckBuilds(this.dataDir);
+    pruneDustChecks(this.dataDir, new Set());
+    if (cursor >= 0) await this.#tryDustCheck(cursor, w, this.settings.scheme, "start");
   }
 
   async #loadSnapshots(w: SchemaWriteHandle, cursor: number): Promise<void> {
@@ -635,7 +680,126 @@ export class PssServer {
       (outcome) => this.#promote(outcome, building, nullifiers, readEvents, started),
       (cause: unknown) => this.#failed(building, cause, started),
     );
+    // The Dust check table follows every snapshot build, in its scheme (00062: the same triggers).
+    await this.#tryDustCheck(height, read, scheme, trigger);
     return null;
+  }
+
+  // ── the Dust check table (00062) ───────────────────────────────────────────────────────────────────────────────
+
+  /** {@link #startDustCheck}, its unexpected failures (a database read) logged, never thrown to the caller. */
+  async #tryDustCheck(height: number, read: Pick<ReadHandle, "query">, scheme: SchemeName, trigger: string): Promise<void> {
+    try {
+      await this.#startDustCheck(height, read, scheme, trigger);
+    } catch (cause) {
+      this.#dustCheckBuilding = null;
+      this.#log({ event: "dust-check-failed", height, scheme, trigger, code: "start-failed", message: cause instanceof Error ? cause.message : String(cause) });
+    }
+  }
+
+  /**
+   * Starts a build of the Dust check table at `height` in `scheme`, in a worker thread. The commitments are taken from
+   * the index and compared with the core's `dust_commitment_first_free` before this returns; the build goes on after.
+   * Returns why it did not start, or null. One builds at a time: a trigger while one builds is logged and skipped.
+   */
+  async #startDustCheck(height: number, read: Pick<ReadHandle, "query">, scheme: SchemeName, trigger: string): Promise<string | null> {
+    const running = this.#dustCheckBuilding;
+    if (running !== null) {
+      const message = `a Dust check table is being built at ${running.height}`;
+      this.#log({ event: "dust-check-busy", height, scheme, trigger, message });
+      return message;
+    }
+    const refuse = (code: string, message: string, commitments: number | null = null): string => {
+      this.#dustCheckLast = { height, ok: false, id: null, scheme, code, message, commitments, finishedAt: new Date().toISOString(), ms: 0 };
+      this.#log({ event: "dust-check-refused", height, scheme, trigger, code, message });
+      return message;
+    };
+    if (this.dust.error !== null) return refuse("dust-broken", this.dust.error);
+    let table;
+    try {
+      table = this.dust.commitments(Math.min(height, this.dust.height));
+    } catch (cause) {
+      if (!(cause instanceof DustCoverageError)) throw cause;
+      return refuse("coverage", cause.message);
+    }
+    if (table.count === 0) return refuse("no-commitments", `the Dust index has no commitment at or below height ${height} (the era starts at ${this.dust.eraHeight})`);
+    const firstFree = await dustFirstFreeAt(read, table.height);
+    if (firstFree !== null && firstFree !== table.count) {
+      return refuse(
+        "first-free-mismatch",
+        `the Dust events up to height ${table.height} fill positions 0 to ${table.count - 1}; the core's dust_commitment_first_free there is ${firstFree}`,
+        table.count,
+      );
+    }
+    const building: DustCheckBuilding = { height: table.height, scheme, trigger, startedAt: new Date().toISOString() };
+    this.#dustCheckBuilding = building;
+    const started = performance.now();
+    this.#log({ event: "dust-check-started", height: table.height, scheme, trigger, commitments: table.count });
+    runDustCheckWorker({
+      eraHeight: this.dust.eraHeight,
+      height: table.height,
+      commitments: table.bytes,
+      count: table.count,
+      scheme,
+      threads: this.#threads,
+      queriesPerCall: this.settings.queriesPerCall,
+      dataDir: this.dataDir,
+    }).then(
+      (result) => this.#adoptDustCheck(result, building, started),
+      (cause: unknown) => this.#dustCheckFailed(building, cause, started),
+    );
+    return null;
+  }
+
+  async #adoptDustCheck(result: DustCheckResult, building: DustCheckBuilding, started: number): Promise<void> {
+    let table: ServerTable;
+    try {
+      const scheme = await this.#scheme(result.manifest.scheme);
+      try {
+        table = await scheme.adoptTable(result.manifest.table, result.transfer);
+      } catch (cause) {
+        scheme.discardTransfer(result.transfer);
+        throw cause;
+      }
+    } catch (cause) {
+      this.#dustCheckFailed(building, cause, started);
+      return;
+    }
+    const previous = this.#dustCheck;
+    this.#dustCheck = { id: result.id, idBytes: fromHex(result.id, 32), dir: result.dir, manifest: result.manifest, manifestBytes: result.manifestBytes, table };
+    if (previous !== null) {
+      // Its calls are refused from now on (409 naming the new one); its public artifact is still served.
+      previous.table.release();
+      if (previous.id !== result.id) this.#dustCheckPrevious = { id: previous.id, dir: previous.dir, publicDigest: previous.manifest.public.digest };
+    }
+    const keep = new Set([result.id, ...(this.#dustCheckPrevious === null ? [] : [this.#dustCheckPrevious.id])]);
+    pruneDustChecks(this.dataDir, keep);
+    const ms = performance.now() - started;
+    const m = result.manifest;
+    this.#dustCheckLast = { height: building.height, ok: true, id: result.id, scheme: m.scheme, code: null, message: null, commitments: m.commitments, finishedAt: new Date().toISOString(), ms };
+    this.#dustCheckBuilding = null;
+    this.#log({
+      event: "dust-check-built",
+      height: m.height,
+      id: result.id,
+      scheme: m.scheme,
+      commitments: m.commitments,
+      groups: m.table.groups,
+      perGroup: m.table.perGroup,
+      tableBytes: m.table.size,
+      publicBytes: m.public.size,
+      tableMs: result.tableMs,
+      setupMs: result.setupMs,
+      ms,
+    });
+  }
+
+  #dustCheckFailed(building: DustCheckBuilding, cause: unknown, started: number): void {
+    const code = cause instanceof DustCheckFailure ? cause.code : "build-failed";
+    const message = cause instanceof Error ? cause.message : String(cause);
+    this.#dustCheckLast = { height: building.height, ok: false, id: null, scheme: building.scheme, code, message, commitments: null, finishedAt: new Date().toISOString(), ms: performance.now() - started };
+    this.#dustCheckBuilding = null;
+    this.#log({ event: "dust-check-failed", height: building.height, scheme: building.scheme, code, message });
   }
 
   #failed(building: Building, cause: unknown, started: number): void {
@@ -737,9 +901,13 @@ export class PssServer {
     this.#route(api, "POST", ROUTES.adminSnapshot, async (req, read) => this.#adminBuild(req, read));
     this.#route(api, "GET", ROUTES.adminSnapshot, async (req) => this.#adminStatus(req));
     this.#route(api, "GET", ROUTES.dustManifest, async () => this.#dustManifest());
-    this.#route(api, "GET", `${ROUTES.dustChunk}:n`, async (req) => this.#dustChunk(req.params.n ?? ""));
+    this.#route(api, "GET", `${ROUTES.dustChunk}:n`, async (req) => this.#dustChunk(req.params.n ?? "", req.params.count));
     this.#route(api, "GET", ROUTES.dustCoins, async (req) => this.#dustCoins(req.params.owner));
     this.#route(api, "GET", ROUTES.dustParameters, async () => this.#dustParameters());
+    this.#route(api, "GET", ROUTES.dustCheckManifest, async () => this.#dustCheckManifest());
+    this.#route(api, "GET", `${ROUTES.dustCheckBlob}:digest`, async (req) => this.#dustCheckBlob(req.params.digest ?? ""));
+    const checkQuery: Handler<Uint8Array> = async (req) => this.#dustCheckQuery(req);
+    api.http("POST", ROUTES.dustCheckQuery, this.#logged(`POST ${ROUTES.dustCheckQuery}`, checkQuery), { body: "binary", maxBodyBytes });
   }
 
   /** Registers a JSON route, logged (FR-080). */
@@ -864,19 +1032,25 @@ export class PssServer {
     return { status: 200, headers: { "Cache-Control": "no-cache" }, body: this.dust.manifest() };
   }
 
-  /** Chunk `n`'s bytes; a full chunk never changes, so it may be cached for good. */
-  #dustChunk(n: string): HttpAnswer {
+  /**
+   * Chunk `n`'s bytes, with its first `count` entries when the query names them (the count the manifest lists, so a
+   * wallet gets the manifest's bytes while the file grows). Chunk `n` at a count never changes, so it, and a full
+   * chunk, may be cached for good; the last chunk asked for without a count may change.
+   */
+  #dustChunk(n: string, count: string | undefined): HttpAnswer {
     const refused = this.#dustRefused();
     if (refused !== null) return refused;
-    if (!/^(0|[1-9][0-9]{0,8})$/.test(n)) return error(400, "invalid-chunk", "a chunk number is a whole number in decimal");
-    const chunk = this.dust.chunk(Number(n));
-    if (chunk === null) return error(404, "no-such-chunk", `the Dust file has ${this.dust.chunks} chunks`);
+    const decimal = /^(0|[1-9][0-9]{0,8})$/;
+    if (!decimal.test(n)) return error(400, "invalid-chunk", "a chunk number is a whole number in decimal");
+    if (count !== undefined && !decimal.test(count)) return error(400, "invalid-count", "count is a whole number of entries in decimal");
+    const chunk = this.dust.chunk(Number(n), count === undefined ? undefined : Number(count));
+    if (chunk === null) return error(404, "no-such-chunk", `the Dust file has ${this.dust.chunks} chunks of ${this.dust.chunkEntries} entries and ${this.dust.entries} entries in all`);
     return {
       status: 200,
       headers: {
         "Content-Type": OCTET_STREAM,
         ETag: `"${chunk.sha256}"`,
-        "Cache-Control": chunk.full ? "public, max-age=31536000, immutable" : "no-cache",
+        "Cache-Control": chunk.full || count !== undefined ? "public, max-age=31536000, immutable" : "no-cache",
       },
       body: chunk.bytes,
     };
@@ -916,6 +1090,65 @@ export class PssServer {
     return { status: 200, headers: { "Cache-Control": "no-cache" }, body };
   }
 
+  /** The check table's manifest; 503 (with the last build's reason) before one is built. */
+  #dustCheckManifest(): HttpAnswer {
+    const check = this.#dustCheck;
+    if (check === null) {
+      const last = this.#dustCheckLast;
+      return error(503, "no-dust-check", "no Dust check table has been built yet", { building: this.#dustCheckBuilding, last });
+    }
+    return {
+      status: 200,
+      headers: { "Content-Type": "application/json", "Cache-Control": "no-cache", ETag: `"${check.id}"`, "Pss-Dust-Check-Id": check.id },
+      body: check.manifestBytes,
+    };
+  }
+
+  /** The public artifact of the current check table, or of the one before. */
+  #dustCheckBlob(digest: string): HttpAnswer | HttpFileAnswer {
+    if (!/^[0-9a-f]{64}$/.test(digest)) return error(400, "invalid-digest", "a digest is 64 lower-case hex digits");
+    const current = this.#dustCheck;
+    const dir =
+      current !== null && current.manifest.public.digest === digest
+        ? current.dir
+        : this.#dustCheckPrevious?.publicDigest === digest
+          ? this.#dustCheckPrevious.dir
+          : null;
+    if (dir === null) return error(404, "no-such-artifact", "no Dust check table served has a public artifact of this digest");
+    return {
+      status: 200,
+      headers: { ETag: `"${digest}"`, "Cache-Control": "public, max-age=31536000, immutable" },
+      file: { path: join(dir, digest), contentType: OCTET_STREAM },
+    };
+  }
+
+  /** A call to the check table: the query wire format with the check's identifier where the snapshot's goes. */
+  async #dustCheckQuery(req: HttpRequest<Uint8Array>): Promise<HttpAnswer> {
+    if (req.headers["content-type"] !== OCTET_STREAM) return error(415, "unsupported-media-type", `the body must be ${OCTET_STREAM}`);
+    const check = this.#dustCheck;
+    if (check === null) return error(503, "no-dust-check", "no Dust check table has been built yet");
+    let call;
+    try {
+      call = decodeQueryBody(req.body, check.table.requestBytes, { queriesPerCall: check.manifest.queriesPerCall, snapshotId: check.idBytes });
+    } catch (cause) {
+      if (!(cause instanceof WireError)) throw cause;
+      const code = cause.status === 409 ? "dust-check-replaced" : "invalid-query";
+      return error(cause.status, code, cause.message, cause.status === 409 ? { check: check.id } : {});
+    }
+    let answers: Uint8Array;
+    try {
+      answers = await check.table.answer(call.payload, call.count);
+    } catch (cause) {
+      if (!(cause instanceof RequestRefused)) throw cause;
+      return error(400, "invalid-query", cause.message);
+    }
+    return {
+      status: 200,
+      headers: { "Content-Type": OCTET_STREAM, "Cache-Control": "no-store", "Pss-Dust-Check-Id": check.id },
+      body: encodeAnswerBody({ snapshotId: check.idBytes, count: call.count, payload: answers }, check.table.responseBytes),
+    };
+  }
+
   #admin(req: HttpRequest<unknown>): HttpAnswer | null {
     const secret = this.settings.adminSecret;
     if (secret === undefined) return error(403, "admin-disabled", "no adminSecret is configured");
@@ -951,7 +1184,7 @@ export class PssServer {
     }
     const refusedBuild = await this.#startBuild(height, read, "admin", typeof padding === "number" ? padding : undefined, isSchemeName(scheme) ? scheme : undefined);
     if (refusedBuild !== null) return refusedBuild;
-    return { status: 202, body: { building: this.#building } };
+    return { status: 202, body: { building: this.#building, dustCheck: { building: this.#dustCheckBuilding, last: this.#dustCheckLast } } };
   }
 
   async #adminStatus(req: HttpRequest<unknown>): Promise<HttpAnswer> {
@@ -998,6 +1231,21 @@ export class PssServer {
       previous: this.#previous === null ? null : { id: this.#previous.id },
       tail: this.#tail === null ? null : { next: this.#tail.tree.next, error: this.#tail.error },
       dust: this.dust.status(),
+      dustCheck: {
+        current:
+          this.#dustCheck === null
+            ? null
+            : {
+                id: this.#dustCheck.id,
+                height: this.#dustCheck.manifest.height,
+                commitments: this.#dustCheck.manifest.commitments,
+                scheme: this.#dustCheck.manifest.scheme,
+                heldBytes: this.#dustCheck.table.heldBytes,
+              },
+        previous: this.#dustCheckPrevious === null ? null : { id: this.#dustCheckPrevious.id },
+        building: this.#dustCheckBuilding,
+        last: this.#dustCheckLast,
+      },
       building: this.#building,
       last: this.#last,
       settings: {
@@ -1019,6 +1267,7 @@ export class PssServer {
    */
   async close(): Promise<void> {
     if (this.#current !== null) releaseTables(this.#current.tables);
+    this.#dustCheck?.table.release();
     const schemes = [...this.#schemes.values()];
     this.#schemes.clear();
     for (const opened of schemes) {

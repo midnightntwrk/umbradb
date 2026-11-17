@@ -1,9 +1,12 @@
 /**
- * The module's Dust routes through UmbraDB's real process on PostgreSQL 18 (spec 00062 FR-007, FR-010, FR-011,
- * FR-013), with the harness of `server-module.test.ts`. The test chain (`./server-chain.ts`) has no Dust events, so
+ * The module's Dust routes through UmbraDB's real process on PostgreSQL 18 (spec 00062 FR-007, FR-010 to FR-013,
+ * SC-004), with the harness of `server-module.test.ts`. The test chain (`./server-chain.ts`) has no Dust events, so
  * real Preprod ones (`./server-dust-fixture.ts`) are written into the core's events table at the chain's committed
- * heights before the module joins (`startsMidChain`); the module reads them at start, follows the later heights, and
- * serves them. Every expectation is taken from the fixture's events, read with the vendored ledger build.
+ * heights, and the core's `dust_commitment_first_free` set to theirs, before the module joins (`startsMidChain`); the
+ * module reads them at start, builds its Dust check table, follows the later heights, and serves them. The check table
+ * is read by PIR through the wallet's own code (`../client/dust-check.ts`) in SimplePIR, then in IPIR+SP after a
+ * snapshot build of that scheme rebuilt it (which needs the IPIR+SP add-on, `ipir/build.sh native`). Every expectation
+ * is taken from the fixture's events, read with the vendored ledger build.
  */
 
 import { createHash } from "node:crypto";
@@ -22,11 +25,26 @@ import { PROCESS_BACKENDS, type ProcessDatabase } from "../../../test/runner/pro
 import { core, entryOf as moduleEntry, startProcess } from "../../../test/runner/process-build.js";
 import { TapeNode } from "../../../tools/tape/index.js";
 import { listenOnRandomPort } from "../../../tools/tape/port.js";
-import { decodeDustChunk, type DustCoinsAnswer, dustEntryAt, type DustManifest, type DustParametersAnswer, OCTET_STREAM, ROUTES } from "../shared/index.ts";
+import { DustChecker } from "../client/dust-check.ts";
+import { PssHttp } from "../client/http.ts";
+import { compileIpirWasm } from "../ipir/wallet-node.ts";
+import { inlineMultiplier } from "../pir/index.ts";
+import {
+  decodeDustCheckManifest,
+  decodeDustChunk,
+  type DustCoinsAnswer,
+  dustEntryAt,
+  type DustManifest,
+  type DustParametersAnswer,
+  encodeQueryBody,
+  fromHex,
+  OCTET_STREAM,
+  ROUTES,
+} from "../shared/index.ts";
 import { pssDeclaration } from "../server/declaration.ts";
 import type { PssServer } from "../server/server.ts";
 import { scenarioChain, type ScenarioChain } from "./server-chain.ts";
-import { entryOf, FIXTURE, type FixtureRow, ownerOf, spendRows } from "./server-dust-fixture.ts";
+import { commitmentsUpTo, entryOf, FIXTURE, type FixtureRow, ownerOf, spendRows } from "./server-dust-fixture.ts";
 
 const LONG = 600_000;
 const SECRET = "pss-dust-test-admin-secret-012345";
@@ -35,11 +53,14 @@ const hex = (b: Uint8Array): string => Buffer.from(b).toString("hex");
 
 /** The test chain's height each fixture row is written at: the era's first block is 2, the module joins at 5. */
 function testHeight(row: FixtureRow): number {
-  if (row.height <= 3_349_443) return 2;
+  if (row.height <= 3_348_434) return 2;
   if (row.height <= 3_349_459) return 3;
   return 4;
 }
 const ERA = 2;
+/** The core's `dust_commitment_first_free` after each test height: Preprod's after the heights written there. */
+const FIRST_FREE: Readonly<Record<number, number>> = { 2: 100, 3: 113, 4: 254, 5: 254, 6: 254, 7: 254 };
+const LAST = FIXTURE.at(-1)!.height;
 
 interface Run {
   readonly handle: ProcessHandle;
@@ -99,6 +120,28 @@ async function stoppedAt(r: Run, height: number): Promise<void> {
   expect(end, r.lines.join("\n")).toMatchObject({ kind: "stopped", height: BigInt(height) });
 }
 
+/** Sets the core's stored `dust_commitment_first_free` at the given test heights to the fixture's. */
+async function setFirstFree(db: ProcessDatabase, heights: readonly number[]): Promise<void> {
+  for (const h of heights) await db.admin!.unsafe("UPDATE core_ledger_state.states SET dust_commitment_first_free = $1 WHERE height = $2", [FIRST_FREE[h]!, h]);
+}
+
+const auth = { Authorization: `Bearer ${SECRET}` };
+
+async function adminStatus(r: Run): Promise<Record<string, any>> {
+  return (await (await fetch(`${r.origin}${ROUTES.adminSnapshot}`, { headers: auth })).json()) as Record<string, any>;
+}
+
+/** Waits until no check table builds and the last one is in `scheme` at `height` (or failed, when `ok` is false). */
+async function checkBuilt(r: Run, scheme: string, height: number, ok = true): Promise<Record<string, any>> {
+  for (let waited = 0; waited < 240_000; waited += 50) {
+    const s = await adminStatus(r);
+    const last = s.dustCheck?.last;
+    if (s.dustCheck?.building === null && last?.scheme === scheme && last?.height === height && last?.ok === ok) return s;
+    await sleep(50);
+  }
+  throw new Error(`no Dust check table in ${scheme} at ${height}: ${r.logs.join("\n")}`);
+}
+
 /** Writes the fixture's rows at their test heights, and one spend again below the era (which the module must not read). */
 async function writeFixture(db: ProcessDatabase): Promise<void> {
   const rows = [...FIXTURE.map((row) => ({ row, height: testHeight(row) })), { row: spendRows()[5]!, height: ERA - 1 }];
@@ -133,6 +176,7 @@ beforeAll(async () => {
   await stoppedAt(coreOnly, 4);
   await coreOnly.close();
   await writeFixture(db);
+  await setFirstFree(db, [2, 3, 4]);
   r = await run(chain, db, {
     stop: 7,
     resumeAt: 4,
@@ -150,9 +194,9 @@ afterAll(async () => {
 describe("the module's Dust routes over stored Preprod events (PostgreSQL 18)", () => {
   it("loads the era's stored events at start (not the spend below the era) and follows the later heights", { timeout: LONG }, () => {
     const s = r.server().status() as Record<string, any>;
-    expect(s.dust).toMatchObject({ eraHeight: ERA, height: 7, entries: 10, chunks: 1, firstCoins: 3, updates: 1, owners: 2, parameters: "initial", error: null });
+    expect(s.dust).toMatchObject({ eraHeight: ERA, height: 7, entries: 144, chunks: 1, firstCoins: 110, updates: 5, owners: 47, parameters: "initial", error: null });
     const loaded = r.logs.map((line) => JSON.parse(line) as Record<string, unknown>).find((line) => line.event === "dust-loaded");
-    expect(loaded).toMatchObject({ rows: FIXTURE.length, height: 4, entries: 10 });
+    expect(loaded).toMatchObject({ rows: FIXTURE.length, height: 4, entries: 144 });
     expect(s.settings.dustEraHeight).toBe(ERA);
   });
 
@@ -160,9 +204,9 @@ describe("the module's Dust routes over stored Preprod events (PostgreSQL 18)", 
     const answer = await fetch(`${r.origin}${ROUTES.dustManifest}`);
     expect(answer.status).toBe(200);
     const manifest = (await answer.json()) as DustManifest;
-    expect(manifest).toMatchObject({ version: 1, eraHeight: ERA, height: 7, entries: 10, chunkEntries: 4096, prefixBytes: 4 });
+    expect(manifest).toMatchObject({ version: 1, eraHeight: ERA, height: 7, entries: 144, chunkEntries: 4096, prefixBytes: 4 });
     expect(manifest.chunks).toHaveLength(1);
-    expect(manifest.chunks[0]).toMatchObject({ first: 0, count: 10, firstHeight: 2, lastHeight: 3 });
+    expect(manifest.chunks[0]).toMatchObject({ first: 0, count: 144, firstHeight: 3, lastHeight: 4 });
 
     const chunk = await fetch(`${r.origin}${ROUTES.dustChunk}0`);
     expect(chunk.status).toBe(200);
@@ -179,6 +223,14 @@ describe("the module's Dust routes over stored Preprod events (PostgreSQL 18)", 
       expect([hex(got.prefix), got.time, got.fee, got.position], `entry ${i}`).toEqual([hex(want.prefix), want.time, want.fee, want.position]);
     });
 
+    // At the count the manifest names: the same bytes, cached for good (chunk n at a count never changes).
+    const counted = await fetch(`${r.origin}${ROUTES.dustChunk}0?count=144`);
+    expect(counted.headers.get("cache-control")).toContain("immutable");
+    expect(Buffer.from(await counted.arrayBuffer()).equals(Buffer.from(bytes))).toBe(true);
+    const fewer = new Uint8Array(await (await fetch(`${r.origin}${ROUTES.dustChunk}0?count=100`)).arrayBuffer());
+    expect(decodeDustChunk(fewer).count).toBe(100);
+    expect((await fetch(`${r.origin}${ROUTES.dustChunk}0?count=145`)).status).toBe(404);
+    expect((await fetch(`${r.origin}${ROUTES.dustChunk}0?count=x`)).status).toBe(400);
     expect((await fetch(`${r.origin}${ROUTES.dustChunk}1`)).status).toBe(404);
     for (const bad of ["x", "01", "-1", "1e3"]) expect((await fetch(`${r.origin}${ROUTES.dustChunk}${bad}`)).status, bad).toBe(400);
   });
@@ -234,5 +286,112 @@ describe("the module's Dust routes over stored Preprod events (PostgreSQL 18)", 
       .find((l) => l.event === "request" && l.route === `GET ${ROUTES.dustManifest}`);
     expect(line).toMatchObject({ status: 200, bodyBytes: 0 });
     expect(line!.answerBytes).toBeGreaterThan(0);
+  });
+});
+
+describe("the Dust check table (FR-012, FR-023, SC-004)", () => {
+  /** The commitments at test height 4, which every later height keeps: positions 0 to 253. */
+  const expected = commitmentsUpTo(LAST);
+  const positions = [0, 99, 100, 101, 102, 150, 253];
+  const coinsAt = (ps: readonly number[]) => ps.map((position) => ({ position, commitment: expected.get(position)! }));
+
+  it("built at start in the configured scheme (SimplePIR) at the height the module started from: positions 0 to 253; the manifest names it, and its public artifact is served by digest", { timeout: LONG }, async () => {
+    const s = await checkBuilt(r, "simplepir", 4);
+    expect(s.dustCheck.current).toMatchObject({ height: 4, commitments: 254, scheme: "simplepir" });
+    const answer = await fetch(`${r.origin}${ROUTES.dustCheckManifest}`);
+    expect(answer.status).toBe(200);
+    const bytes = new Uint8Array(await answer.arrayBuffer());
+    const manifest = decodeDustCheckManifest(bytes);
+    expect(answer.headers.get("pss-dust-check-id")).toBe(createHash("sha256").update(bytes).digest("hex"));
+    expect(manifest).toMatchObject({ version: 1, eraHeight: ERA, height: 4, commitments: 254, scheme: "simplepir", queriesPerCall: 4, table: { records: 254, recordBytes: 32 } });
+    const artifact = await fetch(`${r.origin}${ROUTES.dustCheckBlob}${manifest.public.digest}`);
+    expect(artifact.status).toBe(200);
+    expect(artifact.headers.get("cache-control")).toContain("immutable");
+    expect((await artifact.arrayBuffer()).byteLength).toBe(manifest.public.size);
+    expect((await fetch(`${r.origin}${ROUTES.dustCheckBlob}${"0".repeat(64)}`)).status).toBe(404);
+    // The table file is not served: only the public artifact a wallet needs.
+    expect((await fetch(`${r.origin}${ROUTES.dustCheckBlob}${manifest.table.digest}`)).status).toBe(404);
+    const built = r.logs.map((line) => JSON.parse(line) as Record<string, unknown>).find((line) => line.event === "dust-check-built")!;
+    expect(built).toMatchObject({ height: 4, scheme: "simplepir", commitments: 254 });
+  });
+
+  it("the wallet's check (SimplePIR): each position read by PIR is the fixture's commitment there; another commitment is refused; a position the table does not reach is not checkable; one call per queriesPerCall positions, each exactly queriesPerCall requests", { timeout: LONG }, async () => {
+    const http = new PssHttp(r.origin);
+    const checker = await DustChecker.open(http, { multiplier: inlineMultiplier });
+    try {
+      expect(await checker.check(coinsAt(positions.slice(0, 4)))).toEqual(["match", "match", "match", "match"]);
+      expect(checker.stats.calls).toBe(1);
+      const wrong = { position: 150, commitment: Uint8Array.from(expected.get(150)!, (b, i) => (i === 0 ? b ^ 1 : b)) };
+      expect(await checker.check([...coinsAt(positions.slice(4)), wrong, { position: 254, commitment: new Uint8Array(32) }])).toEqual(["match", "match", "match", "mismatch", "beyond"]);
+      // Each call has the same size: its 40-byte header and exactly queriesPerCall requests.
+      const calls = http.records.filter((rec) => rec.path === ROUTES.dustCheckQuery);
+      expect(calls.length).toBe(checker.stats.calls);
+      expect(new Set(calls.map((c) => c.bodyBytes)).size).toBe(1);
+      expect(calls[0]!.bodyBytes).toBe(40 + 4 * checker.manifest.table.layout.cols * 4);
+      expect(checker.stats.bytesUp).toBe(calls.reduce((t, c) => t + c.bodyBytes, 0));
+      // Nothing to check still makes one call.
+      const before = checker.stats.calls;
+      expect(await checker.check([])).toEqual([]);
+      expect(checker.stats.calls).toBe(before + 1);
+    } finally {
+      checker.dispose();
+    }
+  });
+
+  it("query refusals: another check's identifier 409 naming the served one, another request count 400, another content type 415", { timeout: LONG }, async () => {
+    const bytes = new Uint8Array(await (await fetch(`${r.origin}${ROUTES.dustCheckManifest}`)).arrayBuffer());
+    const manifest = decodeDustCheckManifest(bytes);
+    const id = createHash("sha256").update(bytes).digest("hex");
+    const requestBytes = manifest.table.layout.cols * 4;
+    const body = (check: Uint8Array, count: number) => encodeQueryBody({ snapshotId: check, count, payload: new Uint8Array(count * requestBytes) }, requestBytes);
+    const post = (b: Uint8Array, type = OCTET_STREAM) => fetch(`${r.origin}${ROUTES.dustCheckQuery}`, { method: "POST", headers: { "Content-Type": type }, body: b as Uint8Array<ArrayBuffer> });
+    const other = await post(body(new Uint8Array(32).fill(1), 4));
+    expect(other.status).toBe(409);
+    expect(await other.json()).toMatchObject({ error: { code: "dust-check-replaced" }, check: id });
+    expect((await post(body(fromHex(id, 32), 3))).status).toBe(400);
+    expect((await post(body(fromHex(id, 32), 4), "application/json")).status).toBe(415);
+  });
+
+  it("a snapshot build at a height whose stored dust_commitment_first_free differs from the events' commitments: the check table is not rebuilt, and the reason is reported", { timeout: LONG }, async () => {
+    const before = (await adminStatus(r)).dustCheck.current.id as string;
+    // Heights 5 to 7 were committed after the module joined, with the test chain's own value (0).
+    const answer = await fetch(`${r.origin}${ROUTES.adminSnapshot}`, { method: "POST", headers: { ...auth, "Content-Type": "application/json" }, body: JSON.stringify({ height: 7 }) });
+    expect(answer.status).toBe(202);
+    const s = await checkBuilt(r, "simplepir", 7, false);
+    expect(s.dustCheck.last).toMatchObject({ code: "first-free-mismatch", message: "the Dust events up to height 7 fill positions 0 to 253; the core's dust_commitment_first_free there is 0" });
+    expect(s.dustCheck.current.id).toBe(before);
+  });
+
+  it("SC-004: a snapshot build in IPIR+SP rebuilds the check table in IPIR+SP at its height; the wallet's check through IPIR+SP gives the same answers; a call to the replaced table is refused, whose public artifact is still served", { timeout: LONG }, async () => {
+    await setFirstFree(db, [5, 6, 7]);
+    const old = decodeDustCheckManifest(new Uint8Array(await (await fetch(`${r.origin}${ROUTES.dustCheckManifest}`)).arrayBuffer()));
+    const oldHttp = new PssHttp(r.origin);
+    const oldChecker = await DustChecker.open(oldHttp, { multiplier: inlineMultiplier });
+    // Wait for the snapshot build the previous test started, then ask for one in IPIR+SP.
+    for (let waited = 0; (await adminStatus(r)).building !== null && waited < 240_000; waited += 50) await sleep(50);
+    const answer = await fetch(`${r.origin}${ROUTES.adminSnapshot}`, { method: "POST", headers: { ...auth, "Content-Type": "application/json" }, body: JSON.stringify({ height: 7, scheme: "ipir-sp" }) });
+    expect(answer.status, await answer.clone().text()).toBe(202);
+    const s = await checkBuilt(r, "ipir-sp", 7);
+    expect(s.dustCheck.current).toMatchObject({ height: 7, commitments: 254, scheme: "ipir-sp" });
+    expect(s.dustCheck.previous).not.toBeNull();
+    const http = new PssHttp(r.origin);
+    const checker = await DustChecker.open(http, { ipirWasm: () => compileIpirWasm() });
+    try {
+      expect(checker.manifest).toMatchObject({ scheme: "ipir-sp", height: 7, commitments: 254 });
+      const wrong = { position: 0, commitment: new Uint8Array(32) };
+      expect(await checker.check([...coinsAt(positions), wrong, { position: 254, commitment: new Uint8Array(32) }])).toEqual([...positions.map(() => "match"), "mismatch", "beyond"]);
+      const calls = http.records.filter((rec) => rec.path === ROUTES.dustCheckQuery);
+      expect(new Set(calls.map((c) => c.bodyBytes)).size).toBe(1);
+    } finally {
+      checker.dispose();
+    }
+    // The SimplePIR table is replaced: a call to it is refused by name; its public artifact is still served.
+    await expect(oldChecker.check(coinsAt([0]))).rejects.toMatchObject({ status: 409, code: "dust-check-replaced" });
+    oldChecker.dispose();
+    expect((await fetch(`${r.origin}${ROUTES.dustCheckBlob}${old.public.digest}`)).status).toBe(200);
+    // The log names the routes, with lengths only.
+    const lines = r.logs.map((line) => JSON.parse(line) as Record<string, unknown>).filter((line) => line.event === "request" && line.route === `POST ${ROUTES.dustCheckQuery}`);
+    expect(lines.length).toBeGreaterThan(0);
+    expect(Object.keys(lines[0]!).sort()).toEqual(["answerBytes", "at", "bodyBytes", "event", "ms", "pss", "range", "route", "status"]);
   });
 });

@@ -27,6 +27,12 @@ export const ROUTES = Object.freeze({
   dustCoins: `${ROUTE_PREFIX}/dust/coins`,
   /** The Dust parameters in force, JSON. */
   dustParameters: `${ROUTE_PREFIX}/dust/parameters`,
+  /** The Dust check table's manifest (`./dust-check.ts`), canonical JSON. */
+  dustCheckManifest: `${ROUTE_PREFIX}/dust/check/manifest`,
+  /** Followed by the SHA-256 of one of the Dust check table's files: its public artifact. */
+  dustCheckBlob: `${ROUTE_PREFIX}/dust/check/blob/`,
+  /** A query call to the Dust check table, the check's identifier in place of the snapshot's. */
+  dustCheckQuery: `${ROUTE_PREFIX}/dust/check/query`,
 });
 
 /** Default vectors per query call (FR-065). */

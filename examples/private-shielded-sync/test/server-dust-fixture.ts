@@ -1,8 +1,10 @@
 /**
- * Real Dust events for the module's tests (spec 00062): `fixtures/dust-events.json` holds Preprod's current-era events
- * as the core stores them (the era's first 10 spends, and every first coin and generation update of two owners up to
- * height 3,349,867), which no test chain can make without a Night registration. The expected file entries are taken
- * from the events with the vendored ledger build, independently of the module's own decoding.
+ * Real Dust events for the module's tests (spec 00062): `fixtures/dust-events.json` holds every Dust event of Preprod's
+ * current era from its first height, 3,348,434, to 3,349,867, as the core stores them: 144 spends, 110 first coins and
+ * 5 generation updates, whose commitments fill the Dust commitment tree's positions 0 to 253 (the core's
+ * `dust_commitment_first_free` there is 254). No test chain can make such events without a Night registration. The
+ * expected file entries and commitments are taken from the events with the vendored ledger build, independently of the
+ * module's own decoding.
  */
 
 import { readFileSync } from "node:fs";
@@ -47,6 +49,31 @@ export function dustEventOf(row: FixtureRow, height = row.height): DustEvent {
 export function entryOf(row: FixtureRow): DustEntry {
   const c = ledger.Event.deserialize(fromHex(row.bytes)).content as unknown as { vFee: bigint; declaredTime: Date; commitmentIndex: bigint };
   return { prefix: fromHex(row.nullifier!).slice(0, 4), time: c.declaredTime.getTime() / 1000, fee: c.vFee, position: Number(c.commitmentIndex) };
+}
+
+/** A first coin row's position and commitment (32 bytes, little-endian), computed with the ledger package. */
+export function firstCoinOf(row: FixtureRow): { position: number; commitment: Uint8Array } {
+  const output = (ledger.Event.deserialize(fromHex(row.bytes)).content as unknown as { output: ledger.QualifiedDustOutput }).output;
+  let value = ledger.dustCommitment(output);
+  const commitment = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) {
+    commitment[i] = Number(value & 0xffn);
+    value >>= 8n;
+  }
+  return { position: Number(output.mtIndex), commitment };
+}
+
+/** Every commitment of the fixture up to `height`, by position (spends' from their rows, first coins' computed). */
+export function commitmentsUpTo(height: number): Map<number, Uint8Array> {
+  const out = new Map<number, Uint8Array>();
+  for (const row of FIXTURE.filter((r) => r.height <= height)) {
+    if (row.kind === "dust-spend-processed") out.set(row.treeIndex!, fromHex(row.commitment!));
+    else if (row.kind === "dust-initial-utxo") {
+      const c = firstCoinOf(row);
+      out.set(c.position, c.commitment);
+    }
+  }
+  return out;
 }
 
 /** The owner (Dust public key) of a first coin or a generation update row. */

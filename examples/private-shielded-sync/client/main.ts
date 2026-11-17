@@ -26,8 +26,9 @@ import { ROUTES, toHex } from "../shared/index.ts";
 import { formatShieldedAddress, parseShieldedAddress } from "./address.ts";
 import { BlobCache } from "./cache.ts";
 import { compareWithClient, readZswapEvents, replayZswapEvents } from "./cross-check.ts";
+import { DustChecker } from "./dust-check.ts";
 import { dustSync } from "./dust.ts";
-import { PssHttp } from "./http.ts";
+import { HttpError, PssHttp } from "./http.ts";
 import { keysFromZswapSeed, type WalletKeys } from "./keys.ts";
 import { type Ledger, loadLedger, loadLedgerV8 } from "./ledger.ts";
 import { watchRss } from "./memory.ts";
@@ -48,8 +49,9 @@ commands:
   cross-check   replay the database's stored Zswap events up to the local state's tail height with the ledger's own
                 ZswapLocalState and compare with the local state (FR-140)
   dust          download the Dust file, this wallet's first coins and the Dust parameters; walk each of the wallet's
-                Dust chains through the file; print each chain's spends and current coin (spec 00062; needs the
-                mnemonic, whose Dust seed gives the Dust key)
+                Dust chains through the file; check each chain's last coin by PIR in the Dust check table (dropping a
+                false match); print each chain's spends, check and current coin (spec 00062; needs the mnemonic,
+                whose Dust seed gives the Dust key) [--no-check: walk only]
 
 wallet (one of):
   --wallet <name>            mnemonic from the environment variable PSS_MNEMONIC_<NAME>
@@ -93,6 +95,7 @@ const { values: opt, positionals } = parseArgs({
     position: { type: "string" },
     "dry-run": { type: "boolean", default: false },
     "no-submit": { type: "boolean", default: false },
+    "no-check": { type: "boolean", default: false },
     "node-http": { type: "string" },
     "node-ws": { type: "string" },
     "proof-server": { type: "string" },
@@ -390,25 +393,58 @@ async function cmdCrossCheck(): Promise<void> {
 }
 
 /**
- * `dust` (spec 00062 FR-024): per chain, the spends found (with the file entries they were taken from), false matches
- * dropped, and the current coin (sequence number, position, value); the bytes moved. The key is shown by its last
- * digits only; the secret key and the mnemonic never.
+ * `dust` (spec 00062 FR-024): per chain, the spends found (with the file entries they were taken from), the check of
+ * its last coin (FR-023: checked, false matches dropped, or not checkable yet), and the current coin (sequence number,
+ * position, value); the bytes moved, the check's apart. The key is shown by its last digits only; the secret key and
+ * the mnemonic never.
  */
 async function cmdDust(): Promise<void> {
   const s = await seeds();
   if (s.all === null) throw new Error("dust needs the wallet's mnemonic (--wallet or --mnemonic-env): its Dust seed gives the Dust key");
   const ledger = await loadLedger();
   const http = new PssHttp(opt.server);
-  const result = await dustSync({ ledger, dustSeed: s.all.dust, http, log });
-  const bytes = (path: string): number => http.records.filter((r) => r.path.startsWith(path)).reduce((n, r) => n + r.answerBytes, 0);
+  const n = threads();
+  const multiplier: Multiplier = n > 1 ? new WorkerMultiplier(n) : inlineMultiplier;
+  const ipirWorkers = n > 1 ? nodeIpirPool(n) : undefined;
+  const scheme = { multiplier, ipirWasm: () => compileIpirWasm(), ...(ipirWorkers === undefined ? {} : { ipirWorkers }) };
+  /** Why no check was made although asked for: the server serves no check table (503). */
+  let checkUnavailable: string | null = null;
+  const openChecker = async (): Promise<DustChecker | null> => {
+    try {
+      return await DustChecker.open(http, scheme);
+    } catch (error) {
+      if (!(error instanceof HttpError) || error.status !== 503) throw error;
+      checkUnavailable = error.message;
+      return null;
+    }
+  };
+  let result;
+  try {
+    result = await dustSync({ ledger, dustSeed: s.all.dust, http, log, ...(opt["no-check"] ? {} : { openChecker }) });
+  } finally {
+    await multiplier.close();
+    await ipirWorkers?.close();
+  }
+  const checker = result.checker;
+  checker?.dispose();
+  const sum = (paths: readonly string[], field: "answerBytes" | "bodyBytes"): number => http.records.filter((r) => paths.some((p) => r.path.startsWith(p))).reduce((t, r) => t + r[field], 0);
+  const checkPaths = [ROUTES.dustCheckManifest, ROUTES.dustCheckBlob, ROUTES.dustCheckQuery];
   const transfer = {
     requests: http.records.length,
-    down: http.records.reduce((n, r) => n + r.answerBytes, 0),
-    up: http.records.reduce((n, r) => n + r.bodyBytes, 0),
-    manifest: bytes(ROUTES.dustManifest),
-    chunks: bytes(ROUTES.dustChunk),
-    coins: bytes(ROUTES.dustCoins),
-    parameters: bytes(ROUTES.dustParameters),
+    down: sum([""], "answerBytes"),
+    up: sum([""], "bodyBytes"),
+    manifest: sum([ROUTES.dustManifest], "answerBytes"),
+    chunks: sum([ROUTES.dustChunk], "answerBytes"),
+    coins: sum([ROUTES.dustCoins], "answerBytes"),
+    parameters: sum([ROUTES.dustParameters], "answerBytes"),
+    check: {
+      requests: http.records.filter((r) => checkPaths.some((p) => r.path.startsWith(p))).length,
+      manifest: sum([ROUTES.dustCheckManifest], "answerBytes"),
+      publicArtifact: sum([ROUTES.dustCheckBlob], "answerBytes"),
+      calls: checker?.stats.calls ?? 0,
+      callsUp: sum([ROUTES.dustCheckQuery], "bodyBytes"),
+      callsDown: sum([ROUTES.dustCheckQuery], "answerBytes"),
+    },
   };
   const m = result.manifest;
   const p = result.parameters;
@@ -419,8 +455,9 @@ async function cmdDust(): Promise<void> {
     dtime: c.generation.dtime?.toISOString() ?? null,
     spends: c.steps.length,
     entries: c.steps.map((step) => step.entry),
+    status: c.status,
     falseMatchesDropped: c.dropped.length,
-    checked: false,
+    droppedEntries: c.dropped,
     coin: {
       seq: c.coin.seq,
       position: c.coin.mtIndex,
@@ -434,6 +471,11 @@ async function cmdDust(): Promise<void> {
     server: http.origin,
     file: { eraHeight: m.eraHeight, height: m.height, entries: m.entries, chunks: m.chunks.length, chunkEntries: m.chunkEntries, prefixBytes: m.prefixBytes },
     parameters: p,
+    check:
+      checker === null
+        ? null
+        : { id: checker.id, scheme: checker.manifest.scheme, height: checker.manifest.height, commitments: checker.manifest.commitments, queriesPerCall: checker.manifest.queriesPerCall },
+    checkUnavailable,
     keyEnds: result.owner.toString().slice(-8),
     firstCoins: result.chains.length,
     updates: result.updates.length,
@@ -446,24 +488,41 @@ async function cmdDust(): Promise<void> {
     process.stdout.write(`${json(report)}\n`);
     return;
   }
-  const n = (v: number | bigint): string => v.toLocaleString("en-US");
+  const f = (v: number | bigint): string => v.toLocaleString("en-US");
   const lines = [
-    `Dust file from ${report.server}: to height ${n(m.height)} (era from ${n(m.eraHeight)}), ${n(m.entries)} entries in ${m.chunks.length} chunks`,
+    `Dust file from ${report.server}: to height ${f(m.height)} (era from ${f(m.eraHeight)}), ${f(m.entries)} entries in ${m.chunks.length} chunks`,
     `parameters: ${p.nightDustRatio}, ${p.generationDecayRate}, ${p.dustGracePeriodSeconds} s (${p.source === "initial" ? "the ledger's initial ones" : `changed at ${p.changedAt}`})`,
+    report.check === null
+      ? `check: not made (${checkUnavailable ?? "--no-check"})`
+      : `check table ${report.check.id.slice(0, 16)}…: ${report.check.scheme}, height ${f(report.check.height)}, ${f(report.check.commitments)} commitments, ${report.check.queriesPerCall} requests per call`,
     `key …${report.keyEnds}: ${chains.length} chains in the era, ${report.updates} generation updates`,
   ];
+  const statusText = (c: (typeof chains)[number]): string =>
+    c.status === "checked"
+      ? `checked: the record at position ${c.coin.position} is the last coin's commitment`
+      : c.status === "not-checkable"
+        ? `not checkable yet: the check table covers positions below ${report.check!.commitments}`
+        : c.status === "no-spend"
+          ? "nothing to check: the first coin is public"
+          : "not checked";
   chains.forEach((c, i) => {
     lines.push(
-      `chain ${i + 1}: first coin at height ${n(c.firstCoinHeight)}, generation index ${c.generationIndex}, backed by ${n(c.nightValue)} Stars of Night${c.dtime === null ? "" : `, Night spent at ${c.dtime}`}`,
-      `  spends found: ${c.spends}${c.spends === 0 ? "" : ` (file entries ${c.entries.join(", ")}; not checked: the private check is not built)`}`,
-      `  false matches dropped: ${c.falseMatchesDropped}`,
-      `  current coin: seq ${c.coin.seq}, position ${c.coin.position}, created ${c.coin.ctime}, value at creation ${n(c.coin.valueAtCreation)} Specks, value now ${n(c.coin.valueNow)} Specks`,
+      `chain ${i + 1}: first coin at height ${f(c.firstCoinHeight)}, generation index ${c.generationIndex}, backed by ${f(c.nightValue)} Stars of Night${c.dtime === null ? "" : `, Night spent at ${c.dtime}`}`,
+      `  spends found: ${c.spends}${c.spends === 0 ? "" : ` (file entries ${c.entries.join(", ")})`}`,
+      `  check: ${statusText(c)}`,
+      `  false matches dropped: ${c.falseMatchesDropped}${c.falseMatchesDropped === 0 ? "" : ` (file entries ${c.droppedEntries.join(", ")})`}`,
+      `  current coin: seq ${c.coin.seq}, position ${c.coin.position}, created ${c.coin.ctime}, value at creation ${f(c.coin.valueAtCreation)} Specks, value now ${f(c.coin.valueNow)} Specks`,
       `  commitment ${c.coin.commitment}`,
     );
   });
   lines.push(
-    `downloaded ${n(transfer.down)} bytes in ${transfer.requests} requests (manifest ${n(transfer.manifest)}, chunks ${n(transfer.chunks)}, coins ${n(transfer.coins)}, parameters ${n(transfer.parameters)}); uploaded ${transfer.up} bytes of request bodies; ${report.ms} ms`,
+    `downloaded ${f(transfer.down)} bytes in ${transfer.requests} requests (manifest ${f(transfer.manifest)}, chunks ${f(transfer.chunks)}, coins ${f(transfer.coins)}, parameters ${f(transfer.parameters)}, check ${f(transfer.check.manifest + transfer.check.publicArtifact + transfer.check.callsDown)}); uploaded ${f(transfer.up)} bytes of request bodies; ${report.ms} ms`,
   );
+  if (report.check !== null) {
+    lines.push(
+      `check: ${transfer.check.calls} call${transfer.check.calls === 1 ? "" : "s"} of ${report.check.queriesPerCall} requests, ${f(transfer.check.callsUp)} bytes up and ${f(transfer.check.callsDown)} down; once per check table: manifest ${f(transfer.check.manifest)} and public artifact ${f(transfer.check.publicArtifact)} bytes down`,
+    );
+  }
   process.stdout.write(`${lines.join("\n")}\n`);
 }
 

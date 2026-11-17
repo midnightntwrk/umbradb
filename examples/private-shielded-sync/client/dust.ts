@@ -12,9 +12,11 @@
  * `dtime` later than a spend's declared time leaves the value derived for that spend unchanged (checked against the
  * ledger in `test/dust-walk.test.ts`).
  *
- * Nothing here confirms a match yet (the private check, FR-023, is not built): each step reports the entry it was
- * taken from. The walk takes a {@link DustCheck} for that: called with a chain's last derived coin once the chain has
- * no further match, it drops a match the check refuses and resumes the search after it. The command line passes none.
+ * A 4-byte prefix can match another wallet's spend, so a chain's end is checked (FR-023, `./dust-check.ts`): once no
+ * chain finds a further match, the last derived coin of every chain with a spend is checked in one batch (one padded
+ * PIR call per `queriesPerCall` chains); a refused match is dropped, that chain's search resumes after it from the coin
+ * before, and its new end is checked in a further batch. A chain whose end the check table does not reach yet is
+ * reported as not checkable. Without a check, each step still reports the file entry it was taken from.
  *
  * The ledger's functions are behind {@link DustFunctions}, so a test can replace them. The secret key never leaves
  * {@link ledgerDustFunctions}; nothing here logs or returns it.
@@ -31,6 +33,7 @@ import {
   findDustPrefix,
   fromHex,
 } from "../shared/index.ts";
+import { type DustChecker, type DustCheckOutcome, isDustCheckReplaced } from "./dust-check.ts";
 import type { PssHttp } from "./http.ts";
 import type { Ledger } from "./ledger.ts";
 
@@ -79,6 +82,13 @@ export interface DustStep {
   readonly coin: DustCoin;
 }
 
+/**
+ * Where a chain's walk ended: `no-spend` (its first coin is public and needs no check), `checked` (the last coin's
+ * commitment is the one at its position), `not-checkable` (the check table does not reach its position yet), or
+ * `unchecked` (no check was made).
+ */
+export type DustChainStatus = "no-spend" | "checked" | "not-checkable" | "unchecked";
+
 export interface DustChain {
   readonly start: DustChainStart;
   /** The generation record the walk passed (the first coin's, with its update's `dtime` when there is one). */
@@ -88,6 +98,7 @@ export interface DustChain {
   readonly dropped: readonly number[];
   /** The chain's current coin: the last step's, or the first coin. */
   readonly coin: DustCoin;
+  readonly status: DustChainStatus;
 }
 
 /**
@@ -95,6 +106,9 @@ export interface DustChain {
  * (the private check of FR-023 reads the commitment at the coin's position).
  */
 export type DustCheck = (coin: DustCoin, entry: number) => boolean | Promise<boolean>;
+
+/** Checks several chains' last derived coins at once (one PIR batch); one outcome per coin, in order. */
+export type DustBatchCheck = (ends: readonly { readonly coin: DustCoin; readonly entry: number }[]) => Promise<readonly DustCheckOutcome[]>;
 
 /** The decoded chunks of the file as one list of entries. */
 export class DustFileView {
@@ -165,32 +179,84 @@ export function generationOf(start: DustChainStart, updates: readonly DustUpdate
   return update === undefined ? start.generation : { ...start.generation, dtime: update.dtime };
 }
 
-/** Walks one chain through the file. */
-export async function walkDustChain(file: DustFileView, start: DustChainStart, updates: readonly DustUpdate[], functions: DustFunctions, check?: DustCheck): Promise<DustChain> {
-  const generation = generationOf(start, updates);
-  const steps: DustStep[] = [];
-  const dropped: number[] = [];
-  let coin = start.coin;
-  let from = file.firstAbove(Number(coin.mtIndex));
+/** One chain's walk in progress. */
+interface Walker {
+  readonly start: DustChainStart;
+  readonly generation: DustGeneration;
+  readonly steps: DustStep[];
+  readonly dropped: number[];
+  coin: DustCoin;
+  /** The file entry the search goes on from. */
+  from: number;
+  /** Null while its end waits for a check. */
+  status: DustChainStatus | null;
+}
+
+/** Searches the file from the walker's place, taking every match, until none is found. */
+function advance(file: DustFileView, w: Walker, functions: DustFunctions): void {
   for (;;) {
-    const found = file.find(dustPrefixOfField(functions.nullifier(coin), file.prefixBytes), from);
-    if (found >= 0) {
-      const e = file.entry(found);
-      coin = functions.successor(coin, new Date(e.time * 1000), e.fee, BigInt(e.position), generation);
-      steps.push({ entry: found, position: e.position, time: e.time, fee: e.fee, coin });
-      from = found + 1;
-      continue;
-    }
-    // No further match: the last derived coin is checked (a first coin is public and needs none); a refused match is
-    // dropped and the search resumes after it from the coin before.
-    const last = steps.at(-1);
-    if (last === undefined || check === undefined || (await check(last.coin, last.entry))) break;
-    steps.pop();
-    dropped.push(last.entry);
-    coin = steps.at(-1)?.coin ?? start.coin;
-    from = last.entry + 1;
+    const found = file.find(dustPrefixOfField(functions.nullifier(w.coin), file.prefixBytes), w.from);
+    if (found < 0) return;
+    const e = file.entry(found);
+    w.coin = functions.successor(w.coin, new Date(e.time * 1000), e.fee, BigInt(e.position), w.generation);
+    w.steps.push({ entry: found, position: e.position, time: e.time, fee: e.fee, coin: w.coin });
+    w.from = found + 1;
   }
-  return { start, generation, steps, dropped, coin };
+}
+
+/**
+ * Walks every chain through the file. With `check`, the chains' ends are checked together, batch after batch, until
+ * every chain's end is confirmed, not checkable, or back at its first coin; without, each chain ends `unchecked` (or
+ * `no-spend`).
+ */
+export async function walkDustChains(
+  file: DustFileView,
+  starts: readonly DustChainStart[],
+  updates: readonly DustUpdate[],
+  functions: DustFunctions,
+  check?: DustBatchCheck,
+): Promise<DustChain[]> {
+  const walkers: Walker[] = starts.map((start) => ({
+    start,
+    generation: generationOf(start, updates),
+    steps: [],
+    dropped: [],
+    coin: start.coin,
+    from: file.firstAbove(Number(start.coin.mtIndex)),
+    status: null,
+  }));
+  for (const w of walkers) advance(file, w, functions);
+  for (;;) {
+    for (const w of walkers) if (w.status === null && w.steps.length === 0) w.status = "no-spend";
+    const open = walkers.filter((w) => w.status === null);
+    if (open.length === 0) break;
+    if (check === undefined) {
+      for (const w of open) w.status = "unchecked";
+      break;
+    }
+    const outcomes = await check(open.map((w) => ({ coin: w.coin, entry: w.steps.at(-1)!.entry })));
+    open.forEach((w, i) => {
+      const outcome = outcomes[i];
+      if (outcome === "match") w.status = "checked";
+      else if (outcome === "beyond") w.status = "not-checkable";
+      else if (outcome === "mismatch") {
+        // The last match was another wallet's: dropped, and the search resumes after it from the coin before.
+        const last = w.steps.pop()!;
+        w.dropped.push(last.entry);
+        w.coin = w.steps.at(-1)?.coin ?? w.start.coin;
+        w.from = last.entry + 1;
+        advance(file, w, functions);
+      } else throw new Error(`a check gave ${String(outcome)} for a chain's end`);
+    });
+  }
+  return walkers.map((w) => ({ start: w.start, generation: w.generation, steps: w.steps, dropped: w.dropped, coin: w.coin, status: w.status! }));
+}
+
+/** Walks one chain through the file, its end checked one coin at a time by `check` when given. */
+export async function walkDustChain(file: DustFileView, start: DustChainStart, updates: readonly DustUpdate[], functions: DustFunctions, check?: DustCheck): Promise<DustChain> {
+  const batch: DustBatchCheck | undefined =
+    check === undefined ? undefined : async (ends) => Promise.all(ends.map(async (e) => ((await check(e.coin, e.entry)) ? ("match" as const) : ("mismatch" as const))));
+  return (await walkDustChains(file, [start], updates, functions, batch))[0]!;
 }
 
 /** The first coins and updates of a coins answer, decoded; events of another owner, or another kind, are refused. */
@@ -220,7 +286,7 @@ export async function downloadDustFile(http: PssHttp): Promise<{ manifest: DustM
   if (manifest.version !== 1) throw new Error(`a Dust manifest of version ${String(manifest.version)}; this wallet reads version 1`);
   const chunks: DustChunk[] = [];
   for (const [n, ref] of manifest.chunks.entries()) {
-    const bytes = await http.dustChunk(n);
+    const bytes = await http.dustChunk(n, ref.count);
     const sha256 = createHash("sha256").update(bytes).digest("hex");
     if (bytes.length !== ref.bytes || sha256 !== ref.sha256) throw new Error(`Dust chunk ${n}: ${bytes.length} bytes with SHA-256 ${sha256}, the manifest names ${ref.bytes} and ${ref.sha256}`);
     const chunk = decodeDustChunk(bytes);
@@ -243,19 +309,43 @@ export interface DustSyncResult {
   readonly values: readonly bigint[];
   /** Each chain's current coin's commitment. */
   readonly commitments: readonly bigint[];
+  /** The check table used, when the chains were checked. */
+  readonly checker: DustChecker | null;
   readonly at: Date;
   readonly ms: number;
 }
 
+/** A field element as 32 bytes, little-endian (as the check table holds a commitment). */
+export function fieldBytes(value: bigint): Uint8Array {
+  const out = new Uint8Array(32);
+  let rest = value;
+  for (let i = 0; i < 32; i++) {
+    out[i] = Number(rest & 0xffn);
+    rest >>= 8n;
+  }
+  return out;
+}
+
 /**
  * The whole Dust sync of one wallet: the key from its Dust seed (FR-020, as the wallet SDK derives it), the downloads,
- * and a walk of each chain. The secret key is cleared before this returns.
+ * and a walk of each chain, checked through the check table when `openChecker` is given (FR-023). A check table
+ * replaced while the wallet calls it (409) is opened again and the walk made again, at most twice. The secret key is
+ * cleared before this returns; the checker is the caller's to dispose.
  */
-export async function dustSync(options: { readonly ledger: Ledger; readonly dustSeed: Uint8Array; readonly http: PssHttp; readonly check?: DustCheck; readonly now?: Date; readonly log?: (line: string) => void }): Promise<DustSyncResult> {
+export async function dustSync(options: {
+  readonly ledger: Ledger;
+  readonly dustSeed: Uint8Array;
+  readonly http: PssHttp;
+  /** Opens the check table; null when the server serves none (the chains then end unchecked). */
+  readonly openChecker?: () => Promise<DustChecker | null>;
+  readonly now?: Date;
+  readonly log?: (line: string) => void;
+}): Promise<DustSyncResult> {
   const { ledger, http } = options;
   const log = options.log ?? (() => {});
   const started = performance.now();
   const secretKey = ledger.DustSecretKey.fromSeed(options.dustSeed);
+  let checker: DustChecker | null = null;
   try {
     const owner = secretKey.publicKey;
     const { manifest, file } = await downloadDustFile(http);
@@ -265,12 +355,35 @@ export async function dustSync(options: { readonly ledger: Ledger; readonly dust
     const { starts, updates } = decodeDustCoins(ledger, await http.dustCoins(owner), owner);
     log(`${starts.length} first coins and ${updates.length} generation updates of this key in the era`);
     const functions = ledgerDustFunctions(ledger, secretKey, params);
-    const chains: DustChain[] = [];
-    for (const start of starts) chains.push(await walkDustChain(file, start, updates, functions, options.check));
+    let chains: DustChain[] = [];
+    for (let attempt = 1; ; attempt++) {
+      try {
+        if (options.openChecker !== undefined) {
+          checker = await options.openChecker();
+          if (checker !== null && checker.manifest.eraHeight !== manifest.eraHeight) throw new Error(`the Dust check table's era starts at ${checker.manifest.eraHeight}, the file's at ${manifest.eraHeight}`);
+          if (checker !== null) log(`Dust check table at height ${checker.manifest.height}: ${checker.manifest.commitments} commitments, ${checker.manifest.scheme}`);
+        }
+        const c = checker;
+        const check: DustBatchCheck | undefined =
+          c === null ? undefined : (ends) => c.check(ends.map((e) => ({ position: Number(e.coin.mtIndex), commitment: fieldBytes(ledger.dustCommitment(e.coin)) })));
+        chains = await walkDustChains(file, starts, updates, functions, check);
+        // A wallet with nothing to check still makes one call, as one with a chain to check does.
+        if (c !== null && c.stats.calls === 0) await c.check([]);
+        break;
+      } catch (error) {
+        if (!isDustCheckReplaced(error) || attempt >= 2) throw error;
+        log("the Dust check table was replaced; opening the new one");
+        checker?.dispose();
+        checker = null;
+      }
+    }
     const at = options.now ?? new Date();
     const values = chains.map((c) => ledger.updatedValue(c.coin.ctime, c.coin.initialValue, c.generation, at, params));
     const commitments = chains.map((c) => ledger.dustCommitment(c.coin));
-    return { manifest, parameters, owner, chains, updates, values, commitments, at, ms: performance.now() - started };
+    return { manifest, parameters, owner, chains, updates, values, commitments, checker, at, ms: performance.now() - started };
+  } catch (error) {
+    checker?.dispose();
+    throw error;
   } finally {
     secretKey.clear();
   }

@@ -220,9 +220,12 @@ describe("the coins answer, decoded from real Preprod events", () => {
   const ownerOf = (bytes: string): bigint => (ledger.Event.deserialize(Buffer.from(bytes, "hex")).content as unknown as { output: { owner: bigint } }).output.owner;
   const firsts = events.filter((e) => e.kind === "dust-initial-utxo");
   const updates = events.filter((e) => e.kind === "dust-generation-dtime-update");
-  const owner = ownerOf(firsts.find((e) => firsts.filter((f) => ownerOf(f.bytes) === ownerOf(e.bytes)).length === 2)!.bytes);
+  // An owner with two first coins and one update of the first one's record.
+  const owner = ownerOf(firsts.find((e) => firsts.filter((f) => ownerOf(f.bytes) === ownerOf(e.bytes)).length === 2 && updates.some((u) => (ledger.Event.deserialize(Buffer.from(u.bytes, "hex")).content as unknown as { update: { annotation: { owner: bigint } } }).update.annotation.owner === ownerOf(e.bytes)))!.bytes);
   const mine = firsts.filter((e) => ownerOf(e.bytes) === owner);
-  const answer = { owner: owner.toString(), eraHeight: 0, height: 4_000_000, firstCoins: mine.map((e) => ({ height: e.height, bytes: e.bytes })), updates: updates.map((e) => ({ height: e.height, bytes: e.bytes })) };
+  const updateOwner = (bytes: string): bigint => (ledger.Event.deserialize(Buffer.from(bytes, "hex")).content as unknown as { update: { annotation: { owner: bigint } } }).update.annotation.owner;
+  const theirs = updates.filter((e) => updateOwner(e.bytes) === owner);
+  const answer = { owner: owner.toString(), eraHeight: 0, height: 4_000_000, firstCoins: mine.map((e) => ({ height: e.height, bytes: e.bytes })), updates: theirs.map((e) => ({ height: e.height, bytes: e.bytes })) };
 
   it("gives each first coin's coin and generation record, and each update's record nonce and dtime; the update names the first coin's record", () => {
     const decoded = decodeDustCoins(ledger as never, answer, owner);
@@ -239,5 +242,7 @@ describe("the coins answer, decoded from real Preprod events", () => {
     const other = firsts.find((e) => ownerOf(e.bytes) !== owner)!;
     expect(() => decodeDustCoins(ledger as never, { ...answer, firstCoins: [{ height: other.height, bytes: other.bytes }] }, owner)).toThrow(/first coin of another owner/);
     expect(() => decodeDustCoins(ledger as never, { ...answer, firstCoins: [], updates: [{ height: 1, bytes: mine[0]!.bytes }] }, owner)).toThrow(/tagged dustInitialUtxo/);
+    const otherUpdate = updates.find((e) => updateOwner(e.bytes) !== owner)!;
+    expect(() => decodeDustCoins(ledger as never, { ...answer, updates: [{ height: otherUpdate.height, bytes: otherUpdate.bytes }] }, owner)).toThrow(/update of another owner/);
   });
 });

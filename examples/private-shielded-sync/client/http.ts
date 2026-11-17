@@ -107,9 +107,12 @@ export class PssHttp {
     return this.#json<DustManifest>(ROUTES.dustManifest);
   }
 
-  /** `GET /dust/chunk/<n>`: the chunk's bytes (checked by the caller against the manifest). */
-  async dustChunk(n: number): Promise<Uint8Array> {
-    return (await this.#bytes("GET", `${ROUTES.dustChunk}${n}`)).bytes;
+  /**
+   * `GET /dust/chunk/<n>?count=<entries>`: the chunk's bytes with the entries the manifest lists, so they are the
+   * manifest's while the file grows (checked by the caller against it).
+   */
+  async dustChunk(n: number, count: number): Promise<Uint8Array> {
+    return (await this.#bytes("GET", `${ROUTES.dustChunk}${n}`, undefined, `?count=${count}`)).bytes;
   }
 
   /** `GET /dust/coins?owner=<key>`: the owner's first coins and generation updates; the record names the route only. */
@@ -120,6 +123,25 @@ export class PssHttp {
   /** `GET /dust/parameters`. */
   async dustParameters(): Promise<DustParametersAnswer> {
     return this.#json<DustParametersAnswer>(ROUTES.dustParameters);
+  }
+
+  /** `GET /dust/check/manifest`: its bytes and the identifier the server names (checked by the caller). */
+  async dustCheckManifest(): Promise<{ bytes: Uint8Array; servedId: string | null }> {
+    const { bytes, headers } = await this.#bytes("GET", ROUTES.dustCheckManifest);
+    return { bytes, servedId: headers.get("pss-dust-check-id") };
+  }
+
+  /** `GET /dust/check/blob/<digest>`: the check table's public artifact, checked against its digest and size. */
+  async dustCheckBlob(digest: string, size: number): Promise<Uint8Array> {
+    const { bytes } = await this.#bytes("GET", `${ROUTES.dustCheckBlob}${digest}`);
+    const got = createHash("sha256").update(bytes).digest("hex");
+    if (got !== digest || bytes.length !== size) throw new Error(`GET ${ROUTES.dustCheckBlob}${digest}: got ${bytes.length} bytes with SHA-256 ${got}, expected ${size} bytes`);
+    return bytes;
+  }
+
+  /** `POST /dust/check/query` with an encoded query body; the answer body. */
+  async dustCheckQuery(body: Uint8Array): Promise<Uint8Array> {
+    return (await this.#bytes("POST", ROUTES.dustCheckQuery, body)).bytes;
   }
 
   /** `GET /manifest`: its bytes and the identifier the server names (checked by the caller against their SHA-256). */
