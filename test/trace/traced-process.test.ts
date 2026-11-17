@@ -1,10 +1,17 @@
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import type { LedgerHost } from "../../src/ledger/worker/host.js";
 import { LAST } from "../ledger/fixtures/sweep-fixture.js";
 import { buildContentsHash, byteHashedTables, dagOptedOut, type ReadableDatabase } from "../backbone/refcount-contents.js";
 import { type DagRun, runDag, runProblems } from "../backbone/refcount-process.js";
 import { BACKUP_BACKENDS, type BackupBackend } from "../backup/backup-fixtures.js";
+import { fileTraceSink } from "../../src/trace/file-sink.js";
 import { startTrace, stopTrace, type TraceSink } from "../../src/trace/trace.js";
-import { addingUpProblems, unaccountedOfBusy, type WorkerLine } from "./worker-time.js";
+import { addingUpProblems, sumOf, unaccountedMs, unaccountedOfBusy, type WorkerLine } from "./worker-time.js";
 
 /**
  * The block trace through the real process (`src/trace/trace.ts`), on PostgreSQL 18: the extended DAG fixture of
@@ -15,9 +22,13 @@ import { addingUpProblems, unaccountedOfBusy, type WorkerLine } from "./worker-t
  * - The trace has one line per committed height, with the stages' times, the step's sizes and reads, and the chain of
  *   step outputs; one worker line per applied block, posted by the worker's thread; and the statements' totals.
  * - Two traced runs end with the same chain of step outputs.
- * - The worker's lines say where the thread's whole time went: the parts of each add up to its span, and the main
- *   thread's lines hold each request type's round trips.
+ * - The worker's lines say where the thread's whole time went: the parts of each add up to its span, the node waits
+ *   are the node-store bridge's requests, and the main thread's lines hold each request type's round trips. The
+ *   range bench's reader (`bench/range/worker-time.mjs`) reads the files such a run writes.
  */
+
+/** The height the second test's first process stops at; the traced one goes on from there. */
+const RESUMED = 40;
 
 const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
 
@@ -160,5 +171,82 @@ describe("the block trace through the process, on PostgreSQL", () => {
     expect(statements.find((statement) => statement.q === "COMMIT")?.n).toBeGreaterThanOrEqual(LAST + 1);
     expect(statements.some((statement) => statement.q.includes("core_ledger_state.ref_counts"))).toBe(true);
     expect(first.reduce((sum, line) => sum + ((line.sqlN as number | undefined) ?? 0), 0)).toBeLessThanOrEqual(statements.reduce((sum, statement) => sum + statement.n, 0));
+  }, 600_000);
+
+  it("a worker that reads stored nodes: the waits its lines record are the bridge's requests, and the bench's reader reads the run's files", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "umbradb-worker-time-"));
+    try {
+      // A process stops at RESUMED and a traced one goes on from its database. The second one's worker holds nothing
+      // of the state: it reads it from the database through the bridge, when it loads it and at every block that
+      // reaches a stored node it does not hold.
+      const db = await postgres.database();
+      const before = await runDag(db, { dag: "extended", last: RESUMED });
+      expect(before.status).toMatchObject({ cursor: BigInt(RESUMED), reason: null });
+      let host: LedgerHost | undefined;
+      startTrace(fileTraceSink(join(directory, "trace.jsonl")));
+      const run = await runDag(db, { dag: "extended", resume: BigInt(RESUMED), worker: (started) => (host = started) });
+      stopTrace();
+      expect(run.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
+      expect(run.failure).toBeNull();
+      const applied = LAST - RESUMED;
+      const lines = (file: string): WorkerLine[] => readFileSync(join(directory, file), "utf8").trimEnd().split("\n").map((line) => JSON.parse(line) as WorkerLine);
+      const worker = lines("trace.jsonl.worker.jsonl");
+      const blocks = lines("trace.jsonl");
+      const total = (rows: readonly WorkerLine[], key: string): number => rows.reduce((sum, line) => sum + ((line[key] as number | undefined) ?? 0), 0);
+      const bridge = (host as LedgerHost).bridge();
+
+      // One line per applied block, by the thread that applied it; their parts add up.
+      expect(worker.map((line) => line.h)).toEqual(Array.from({ length: applied }, (_, h) => RESUMED + 1 + h));
+      expect(blocks.map((line) => line.h)).toEqual(worker.map((line) => line.h));
+      expect(addingUpProblems(worker)).toEqual([]);
+      expect(unaccountedOfBusy(worker)).toBeLessThan(0.1);
+      // The node waits are those the bridge answered, and the nodes those its answers carried.
+      expect(bridge.requests).toBeGreaterThan(0);
+      expect(total(worker, "nodeWaits")).toBe(bridge.requests);
+      expect(total(worker, "nodeGot")).toBe(bridge.nodes);
+      expect(total(worker, "nodeGets")).toBeGreaterThanOrEqual(bridge.requests);
+      expect(total(worker, "nodeWaitMs")).toBeGreaterThan(0);
+      // Each wait fell inside a request, and the thread was blocked for less than the request ran.
+      for (const line of worker) {
+        expect(sumOf(line, "node.rq.")).toBeCloseTo((line.nodeWaitMs as number | undefined) ?? 0, 1);
+        expect((line.nodeWaitMs as number | undefined) ?? 0).toBeLessThanOrEqual(sumOf(line, "rq.") + 0.01);
+      }
+      // The main thread answered as many node requests, and noticed each while the worker was blocked on it.
+      expect(total(blocks, "nodeReads")).toBe(bridge.requests);
+      expect(total(blocks, "nodeNoticeMs")).toBeGreaterThan(0);
+      expect(total(blocks, "nodeNoticeMs")).toBeLessThanOrEqual(total(worker, "nodeWaitMs") + 0.01 * bridge.requests);
+      expect(total(blocks, "nodeReadMs")).toBeGreaterThan(0);
+
+      // The reader's table of the worker's time adds up to the span, and says whether the worker had work.
+      const script = fileURLToPath(new URL("../../bench/range/worker-time.mjs", import.meta.url));
+      const { FROM: _from, TO: _to, ...env } = process.env;
+      const read = spawnSync(process.execPath, [script, directory], { encoding: "utf8", env: { ...env, SKIP: "0" } });
+      expect(read.status, read.stderr).toBe(0);
+      const [ofWorker, ofMain] = read.stdout.split("the main thread, ms per committed block") as [string, string];
+      const row = (text: string, name: string): number[] =>
+        (text.split("\n").find((line) => line.trimStart().startsWith(name)) ?? "").slice(32).trim().split(/\s+/).map((cell) => Number.parseFloat(cell));
+      // The fixture's blocks carry no transaction: every block is an empty one.
+      expect(row(ofWorker, "blocks")).toEqual([applied, applied, 0]);
+      const span = total(worker, "spanMs") / applied;
+      expect(row(ofWorker, "span")[0]).toBeCloseTo(span, 2);
+      // The table's lines: the apply's parts, every other request type the thread ran, and what is not a request.
+      const types = [...new Set(worker.flatMap((line) => Object.keys(line).filter((key) => key.startsWith("rq.")).map((key) => key.slice(3))))];
+      expect(types).toEqual(expect.arrayContaining(["apply", "commit", "evict", "load", "release"]));
+      const others = types.filter((type) => !["apply", "genesis", "parse"].includes(type));
+      const parts = ["adapterApply", "settle", "apply, rest", "parse, the phase", "parse, rest", ...others, "posting answers", "node waits", "transit", "idle", "unaccounted"];
+      expect(parts.reduce((sum, name) => sum + (row(ofWorker, name)[0] as number), 0)).toBeCloseTo(span, 1);
+      expect(row(ofWorker, "node waits")[0]).toBeCloseTo(total(worker, "nodeWaitMs") / applied, 2);
+      expect(row(ofWorker, "unaccounted")[0]).toBeCloseTo(worker.reduce((sum, line) => sum + unaccountedMs(line), 0) / applied, 2);
+      expect(ofWorker).toMatch(/the worker is waiting for work: it had no request to run for [\d.]+% of its span/);
+      expect(ofWorker).toMatch(/unaccounted: [\d.-]+% of the span over all blocks \([\d.-]+% of the time it was not idle\), at most [\d.]+% of one block's/);
+      expect(ofWorker).toMatch(new RegExp(`node waits: ${bridge.requests} of [\\d.]+ ms each`));
+      // The main thread's side: the run's first line only dates the second.
+      expect(row(ofMain, "blocks")).toEqual([applied - 1, applied - 1, 0]);
+      expect(row(ofMain, "wait for the worker's apply")[0]).toBeCloseTo((total(blocks.slice(1), "applyMs") - total(blocks.slice(1), "rootWaitMs")) / (applied - 1), 2);
+      expect(row(ofMain, "node requests ")[0]).toBeCloseTo(total(blocks.slice(1), "nodeReads") / (applied - 1), 2);
+    } finally {
+      stopTrace();
+      rmSync(directory, { recursive: true, force: true });
+    }
   }, 600_000);
 });
