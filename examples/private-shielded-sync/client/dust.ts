@@ -7,6 +7,12 @@
  * above the coin's own (a spend's new commitment is always appended after the coin it spends), derives the next coin
  * from the matching entry with the ledger's `successorDustUtxo`, and repeats from the entry after the match.
  *
+ * The file is read once for all chains (spec 00062 phase 8): each chain's wanted prefix is kept in a map from prefix to
+ * the chains waiting on it, and each entry, in order, is looked up there; a chain takes the entry when it is at or after
+ * the chain's place, derives its next coin, and waits on that coin's prefix from the next entry on, in the same pass. A
+ * successor's spend is always later in the file, so one pass finds every spend of every chain, as a search per chain
+ * would (`walkDustChainsOneByOne`, kept as the reference the tests compare it with).
+ *
  * The generation record passed to `successorDustUtxo` is the first coin's, with its `dtime` once an update of that
  * record (same nonce) exists: the Night output behind a chain is spent once, so a record has at most one `dtime`; a
  * `dtime` later than a spend's declared time leaves the value derived for that spend unchanged (checked against the
@@ -193,7 +199,103 @@ interface Walker {
   status: DustChainStatus | null;
 }
 
-/** Searches the file from the walker's place, taking every match, until none is found. */
+/**
+ * A prefix as a map key: its bytes little-endian as a number when it is at most 4 bytes (a 4-byte prefix is a 32-bit
+ * number), else its bytes as a string. The filter index is its first two bytes (its first byte when it has one).
+ */
+function prefixKey(bytes: Uint8Array, at: number, width: number): number | string {
+  if (width <= 4) {
+    let v = 0;
+    for (let k = width - 1; k >= 0; k--) v = v * 256 + bytes[at + k]!;
+    return v;
+  }
+  let out = "";
+  for (let k = 0; k < width; k++) out += String.fromCharCode(bytes[at + k]!);
+  return out;
+}
+const filterIndex = (bytes: Uint8Array, at: number, width: number): number => bytes[at]! | (width > 1 ? bytes[at + 1]! << 8 : 0);
+/** Whether this platform's 32-bit arrays are little-endian, as the prefixes' keys are. */
+const LITTLE_ENDIAN = new Uint8Array(Uint32Array.of(1).buffer)[0] === 1;
+
+/**
+ * Advances `walkers` together in one pass over the file: each waits on its coin's nullifier prefix in a map (with a
+ * count by the prefix's first two bytes, so most entries cost one array read), and takes an entry with that prefix at
+ * or after its place; it then derives its next coin and waits on that coin's prefix from the next entry on. Two chains
+ * may wait on one prefix: each takes the entry. The pass stops when no chain waits or the file ends.
+ */
+function advanceAll(file: DustFileView, walkers: readonly Walker[], functions: DustFunctions): void {
+  if (walkers.length === 0) return;
+  const width = file.prefixBytes;
+  const waiting = new Map<number | string, Walker[]>();
+  const counts = new Uint32Array(65_536);
+  let left = 0;
+  const wait = (w: Walker): void => {
+    const prefix = dustPrefixOfField(functions.nullifier(w.coin), width);
+    const key = prefixKey(prefix, 0, width);
+    const list = waiting.get(key);
+    if (list === undefined) waiting.set(key, [w]);
+    else list.push(w);
+    counts[filterIndex(prefix, 0, width)]!++;
+    left++;
+  };
+  let from = file.entries;
+  for (const w of walkers) {
+    if (w.from >= file.entries) continue;
+    wait(w);
+    from = Math.min(from, w.from);
+  }
+  /** Entry `k` of `chunk` has a prefix some chain waits on (`key`, counted under `f`): the chains at or before it take it. */
+  const hit = (chunk: DustChunk, k: number, key: number | string, f: number): void => {
+    const list = waiting.get(key);
+    if (list === undefined) return;
+    const i = chunk.first + k;
+    // A chain whose place is later (it started further on, or resumes after a dropped match) keeps waiting.
+    const taking = list.filter((w) => w.from <= i);
+    if (taking.length === 0) return;
+    const staying = list.filter((w) => w.from > i);
+    if (staying.length === 0) waiting.delete(key);
+    else waiting.set(key, staying);
+    counts[f]! -= taking.length;
+    left -= taking.length;
+    const time = chunk.times[k]!;
+    const fee = chunk.fees[k]!;
+    const position = chunk.positions[k]!;
+    for (const w of taking) {
+      w.coin = functions.successor(w.coin, new Date(time * 1000), fee, BigInt(position), w.generation);
+      w.steps.push({ entry: i, position, time, fee, coin: w.coin });
+      w.from = i + 1;
+      if (w.from < file.entries) wait(w);
+    }
+  };
+  for (const chunk of file.chunks) {
+    if (left === 0) return;
+    if (chunk.first + chunk.count <= from) continue;
+    const prefixes = chunk.prefixes;
+    const k0 = Math.max(0, from - chunk.first);
+    if (width === 4 && LITTLE_ENDIAN && prefixes.byteOffset % 4 === 0) {
+      // 4-byte prefixes read as 32-bit numbers, which are their keys: most entries cost one read and one count.
+      const words = new Uint32Array(prefixes.buffer, prefixes.byteOffset, chunk.count);
+      for (let k = k0; k < chunk.count; k++) {
+        const v = words[k]!;
+        if (counts[v & 0xffff] !== 0) {
+          hit(chunk, k, v, v & 0xffff);
+          if (left === 0) return;
+        }
+      }
+    } else {
+      for (let k = k0; k < chunk.count; k++) {
+        const at = k * width;
+        const f = filterIndex(prefixes, at, width);
+        if (counts[f] !== 0) {
+          hit(chunk, k, prefixKey(prefixes, at, width), f);
+          if (left === 0) return;
+        }
+      }
+    }
+  }
+}
+
+/** Searches the file from the walker's place, taking every match, until none is found (one chain at a time). */
 function advance(file: DustFileView, w: Walker, functions: DustFunctions): void {
   for (;;) {
     const found = file.find(dustPrefixOfField(functions.nullifier(w.coin), file.prefixBytes), w.from);
@@ -206,15 +308,42 @@ function advance(file: DustFileView, w: Walker, functions: DustFunctions): void 
 }
 
 /**
- * Walks every chain through the file. With `check`, the chains' ends are checked together, batch after batch, until
- * every chain's end is confirmed, not checkable, or back at its first coin; without, each chain ends `unchecked` (or
- * `no-spend`).
+ * Walks every chain through the file, in one pass for all of them. With `check`, the chains' ends are checked together,
+ * batch after batch, until every chain's end is confirmed, not checkable, or back at its first coin; the chains whose
+ * last match was refused resume together, in one more pass from the earliest of their places. Without a check, each
+ * chain ends `unchecked` (or `no-spend`).
  */
 export async function walkDustChains(
   file: DustFileView,
   starts: readonly DustChainStart[],
   updates: readonly DustUpdate[],
   functions: DustFunctions,
+  check?: DustBatchCheck,
+): Promise<DustChain[]> {
+  return walkWith((walkers) => advanceAll(file, walkers, functions), file, starts, updates, check);
+}
+
+/**
+ * The same walk, searching the file once per chain: the reference `walkDustChains` is compared with in the tests and
+ * the benchmark (`bench/dust-walk.ts`). Its results are the same; it reads the file once per chain.
+ */
+export async function walkDustChainsOneByOne(
+  file: DustFileView,
+  starts: readonly DustChainStart[],
+  updates: readonly DustUpdate[],
+  functions: DustFunctions,
+  check?: DustBatchCheck,
+): Promise<DustChain[]> {
+  return walkWith((walkers) => {
+    for (const w of walkers) advance(file, w, functions);
+  }, file, starts, updates, check);
+}
+
+async function walkWith(
+  advanceMany: (walkers: readonly Walker[]) => void,
+  file: DustFileView,
+  starts: readonly DustChainStart[],
+  updates: readonly DustUpdate[],
   check?: DustBatchCheck,
 ): Promise<DustChain[]> {
   const walkers: Walker[] = starts.map((start) => ({
@@ -226,7 +355,7 @@ export async function walkDustChains(
     from: file.firstAbove(Number(start.coin.mtIndex)),
     status: null,
   }));
-  for (const w of walkers) advance(file, w, functions);
+  advanceMany(walkers);
   for (;;) {
     for (const w of walkers) if (w.status === null && w.steps.length === 0) w.status = "no-spend";
     const open = walkers.filter((w) => w.status === null);
@@ -236,6 +365,7 @@ export async function walkDustChains(
       break;
     }
     const outcomes = await check(open.map((w) => ({ coin: w.coin, entry: w.steps.at(-1)!.entry })));
+    const resuming: Walker[] = [];
     open.forEach((w, i) => {
       const outcome = outcomes[i];
       if (outcome === "match") w.status = "checked";
@@ -246,9 +376,10 @@ export async function walkDustChains(
         w.dropped.push(last.entry);
         w.coin = w.steps.at(-1)?.coin ?? w.start.coin;
         w.from = last.entry + 1;
-        advance(file, w, functions);
+        resuming.push(w);
       } else throw new Error(`a check gave ${String(outcome)} for a chain's end`);
     });
+    advanceMany(resuming);
   }
   return walkers.map((w) => ({ start: w.start, generation: w.generation, steps: w.steps, dropped: w.dropped, coin: w.coin, status: w.status! }));
 }

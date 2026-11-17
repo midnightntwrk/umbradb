@@ -26,8 +26,8 @@ This folder holds:
 - `gpu/`: WebGPU versions of the scan, SimplePIR's multiply and IPIR+SP's answer, byte-equal to the CPU kernels, for
   Deno and browsers ([`gpu/README.md`](gpu/README.md));
 - `run/sync.mjs`: runs UmbraDB with the module against a node in Docker;
-- `bench/`: the benchmark of the whole flow (`bench.ts`, spec §8), micro-benchmarks (`micro.ts`) and the Dust file's
-  sizes on a real chain (`dust-sizes.ts`);
+- `bench/`: the benchmark of the whole flow (`bench.ts`, spec §8), micro-benchmarks (`micro.ts`), the Dust file's
+  sizes on a real chain (`dust-sizes.ts`) and the Dust walk's time on a synthetic file (`dust-walk.ts`);
 - `web/`: a page that runs the client one step at a time in a browser, with each step's debug output (below);
 - `run/probe.ts`: checks a running server against the database it is built from, without a wallet;
 - `test/`.
@@ -691,7 +691,10 @@ first coin of its key, it computes the coin's nullifier and searches the file fo
 position is above the coin's own (a spend's new commitment is always appended after the coin it spends); on a match it
 derives the next coin from the entry's time, fee and position, and searches on from the entry after. The generation
 record passed is the first coin's, with the `dtime` of its update when there is one (a Night output is spent once): a
-`dtime` later than a spend's declared time leaves the derived coin unchanged, an earlier one lowers its value.
+`dtime` later than a spend's declared time leaves the derived coin unchanged, an earlier one lowers its value. The
+file is read once for all of a wallet's chains (a map from each chain's wanted prefix to the chains waiting on it): over
+10,000,000 entries, 17 ms for 1 chain, 19 ms for 100 and 150 ms for 10,000, against 13 ms, 1.0 s and 104 s for a search
+per chain (`bench/dust-walk.ts`, by hand, with stand-in ledger functions).
 
 **The check** (`server/dust-check.ts`, `client/dust-check.ts`). A 4-byte prefix can match another wallet's spend (one search over
 65,035 entries has about one chance in 66,000), and the coin derived from it is wrong. So the module also publishes a
@@ -899,6 +902,7 @@ wallet's math was moved to the GPU and what was not.
 | `test/server-dust.test.ts` | The Dust routes in UmbraDB's real process (PostgreSQL 18) over Preprod events written into the test database: the file, a key's coins, the parameters, refusals; the check table built at start in SimplePIR and read through the wallet's code, refusals, a build refused for another stored `dust_commitment_first_free`, the table rebuilt in IPIR+SP by an IPIR+SP snapshot build and read through it. |
 | `test/dust-walk.test.ts` | The walk: a chain of several spends across chunks, a match below the coin's position, a false match without and with a check, a chain with no spend, two chains in one file; with the ledger's functions, a chain found again from the encoded file, and what a generation record's `dtime` changes; the coins answer decoded from real events. |
 | `test/server-web-dust.test.ts` | The page's Dust steps under Node in both schemes, over the world of `test/server-dust-world.ts` (also the check test's): a wallet with three chains (the false match dropped, a chain not checkable, a chain with nothing to check), a second run from the page's cache, a generated wallet with no chain (one padded call), the page's rendering of the chains and bytes, refusals. |
+| `test/dust-walk-compare.test.ts` | The one-pass walk of all chains against the search per chain it replaced, on the same files: many chains, false matches, chains starting in the middle, two chains wanting one prefix (one starting later), chains with no spend, 2-, 4- and 6-byte prefixes, the ledger's own functions; the same chains, entries, coins, dropped matches, statuses and check batches. |
 | `test/server-dust-check.test.ts` | The check in both schemes: the module's builder and the scheme's server table called through the wallet's code; another wallet's spend before the real one dropped by the check, a chain's end beyond the table not checkable, two padded calls of one size. |
 | `test/bench-run.test.ts` | The benchmark against the module in the real process (PostgreSQL 18) over the synthetic chain, wallets A, B and C: every cell of spec §8 has a value for the server and each client, and the report renders it; the snapshot's counts and versions; per-step values and the server's times from its log; the naive baseline; the read table at k = 16, 8, 2 and 0 (k 2 gives the served snapshot); the server's view of every request and identical request shapes; the scan by thread count; the transfer row (and a dry-run record); no key, seed, nonce or nullifier in `results.json`; exactly the cells without their input reported missing; `--build`; the command line (`run`, `report --transfer`, with the install); log pairing, speed and formatting rules. |
 
