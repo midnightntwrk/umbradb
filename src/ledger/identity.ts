@@ -33,8 +33,9 @@
  *
  * In a process whose graph loads ledger packages, a file is therefore hashed by the main thread once, at startup, and
  * by the worker once, before the first block of its version (again by a worker started anew), never per block or
- * request. The three packages are 35 MB: 15 to 20 ms of the main thread's startup on an idle Apple M4 Max (up to 40 ms
- * on a loaded one), and 4 to 7 ms of the worker's first block of a version.
+ * request. The four packages are 49 MB. Measured when they were three, of 35 MB: 15 to 20 ms of the main thread's
+ * startup on an idle Apple M4 Max (up to 40 ms on a loaded one), and 4 to 7 ms of the worker's first block of a
+ * version.
  *
  * Node.js only (`node:fs`, `node:crypto`). The browser build bundles `browser/src/ledger/identity.ts` in this module's
  * place, which rejects the same `ledgerSources` and reads no file: `browser/build.ts` checks every package file it

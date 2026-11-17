@@ -14,9 +14,9 @@
  *
  * The three are the same adapter over packages with the same API; only the release and the package differ.
  *
- * Both decode contract logs with the VM's own decoding (`decodeLogItem`, which the v9 patches export). `apply` reports
- * each contract log an applied segment emitted, with its value in the ledger's serialization (`serializeStateValue`,
- * the input `decodeLogItem` takes).
+ * All three decode contract logs with the VM's own decoding (`decodeLogItem`, which the v9 patches export). `apply`
+ * reports each contract log an applied segment emitted, with its value in the ledger's serialization
+ * (`serializeStateValue`, the input `decodeLogItem` takes).
  */
 
 import type * as V9Rc3Package from "../../vendor/ledger/v9-rc3/pkg/midnight_ledger_wasm_v9_fs.js";
@@ -29,7 +29,7 @@ import type { LedgerPackage, LedgerPackageOptions } from "./types.js";
 /** What a v9 package needs for its contract logs: the VM's decoding and the serialization of a logged value. */
 type V9Logs = Pick<typeof V9Package, "decodeLogItem" | "StateValue" | "serializeStateValue">;
 
-/** The contract-log half of a v9 adapter's spec (both packages: the same exports). */
+/** The contract-log half of a v9 adapter's spec (the three packages: the same exports). */
 function v9Logs(raw: V9Logs): Pick<AdapterSpec, "decodeLogItem" | "loggedValue"> {
   return {
     decodeLogItem: (value) => raw.decodeLogItem(value),

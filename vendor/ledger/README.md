@@ -107,7 +107,7 @@ exactly `node-2.1.101`'s: `midnight-ledger` 8.1.3, `midnight-storage` 2.0.5, `mi
 `StateValue` is generic over its value kind, and its tag names it: a state value's tagged serialization starts
 `midnight:impact-state-value[v2](fab-aligned-value[v1]):` in the `v9` package. The test fixtures' contract calls
 declare, for `v9`, the bytes they write and no deletion (`test/ledger/adapter-fixtures.ts` `fixtureGas`). The build
-takes about 80 s on this repository's arm64 Mac.
+takes about 80 s on an arm64 Mac.
 
 ## Rebuilding
 

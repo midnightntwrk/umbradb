@@ -51,8 +51,8 @@ export const UMBRADB_VERSION = "0.10.0";
  * This build's core version, as a new plain object at every call, so no caller's change reaches another's.
  *
  * Its `ledgers` lists the ledger versions the build carries, one item each, in version order: v8, then v9 as runtime
- * 2.0 built it (rc.3), then v9 (rc.5). Each item has the release name of its adapter (`versionName`) and each package's
- * name, version and SHA-256.
+ * 2.0 built it (rc.3), then v9 as runtime 2.1.0 built it (rc.5), then v9 (9.1.0.1). Each item has the release name of
+ * its adapter (`versionName`) and each package's name, version and SHA-256.
  *
  * A build that changes a ledger package is a new core version. An existing database then needs a `versionEntry` for
  * the old one and a revision starting above the cursor.

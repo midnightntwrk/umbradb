@@ -121,7 +121,7 @@ function decoded(raw: V9Raw, value: unknown): LogItem | null {
 
 /**
  * The `log` sites of `transaction` — a native transaction of a v9 package (a system transaction has none) — in the
- * ledger's order (see the module comment), read with the v9 package of `packages` (`rawPackages()`: rc.5's or rc.3's).
+ * ledger's order (see the module comment), read with the v9 package of `packages` (`rawPackages()`: 9.1.0.1's, rc.5's or rc.3's).
  */
 export function logSitesOf(transaction: unknown, packages: Readonly<Record<string, unknown>>): LogSite[] {
   const name = V9_PACKAGES.find((candidate) => packages[candidate] !== undefined);
