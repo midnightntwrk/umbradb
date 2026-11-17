@@ -39,6 +39,7 @@ a command line, and the file is never under version control.
 ### The database container
 
 ```bash
+(umask 077 && node -e 'console.log(require("node:crypto").randomBytes(24).toString("hex"))' > "$BENCH_DIR/pg-password")
 docker network create umbradb-bench-net
 docker volume create umbradb-bench-pgdata
 docker run -d --name umbradb-bench-pg --network umbradb-bench-net -p 127.0.0.1::5432 \
@@ -54,15 +55,35 @@ network, not through a port of the host, so that the measurement is not one of D
 ### A template
 
 A template is a database no session is connected to, which `CREATE DATABASE … TEMPLATE` clones in seconds. A run
-clones it, continues the clone to its stop height and leaves the template as it was. It must hold only what the
-configuration `run.sh` writes can continue: one `core` entry from height 0 and the core modules chain events, parsed
-blocks, transaction results, ledger state, contract states and full contract logs, with the sweep on.
+clones it, continues the clone to its stop height and leaves the template as it was. It must be in the bench's own
+database container, and hold only what the configuration `run.sh` writes can continue: `core` entries from height 0
+(one, or several revisions of which the last is continued, see "A build with other ledger packages") and the core
+modules chain events, parsed blocks, transaction results, ledger state, contract states and full contract logs, with
+the sweep on.
 
-- **The first one** is a database synced from genesis to the height where the range begins, with a configuration of
-  that shape. The one `scripts/local-preprod-sync.mjs` writes is, and with `--keep` its database stays. Bring it into
-  the bench's container as PostgreSQL moves any database between servers: the server's roles first
-  (`pg_dumpall --roles-only`: a database's dump does not hold them, and each module's schema belongs to a role),
-  then the database's dump restored into a new database.
+- **The first one** is a database synced from genesis to the height where the range begins, by the build the
+  template is for, with a configuration of that shape. `scripts/local-preprod-sync.mjs --label <name> --stop
+  <height> --out <dir> --keep` writes one (the sweep is on unless `--sweep off`), and with `--keep` its database
+  container `umbradb-lp-<name>-pg`, which holds the database `umbradb`, stays. That server is not the bench's (it has
+  no `pg_stat_statements`, and a run clones a template only within one server), so the database is moved into the
+  bench's container, as PostgreSQL moves any database between servers: the roles that own the modules' schemas
+  first, since a database's dump does not hold roles; then the database, its owners kept.
+
+  **Not run end to end.** The commands below follow PostgreSQL's tools and the two scripts' settings, and have not
+  been run as a whole. `--no-role-passwords` and the `grep` keep the kept server's `postgres` role, and its
+  password, out of the bench's server; the modules' roles have no password.
+
+  ```bash
+  KEPT=umbradb-lp-<name>-pg
+  docker exec "$KEPT" pg_dumpall -U postgres --roles-only --no-role-passwords \
+    | grep -E '^(CREATE ROLE|ALTER ROLE|GRANT) umbradb_[mi]_' \
+    | docker exec -i umbradb-bench-pg psql -U postgres -v ON_ERROR_STOP=1
+  docker exec umbradb-bench-pg createdb -U postgres <template>
+  docker exec "$KEPT" pg_dump -U postgres -Fc umbradb \
+    | docker exec -i umbradb-bench-pg pg_restore -U postgres --exit-on-error -d <template>
+  docker exec umbradb-bench-pg psql -U postgres -c "ALTER DATABASE <template> IS_TEMPLATE true"
+  bench/range/preflight.sh <template>=<height>     # the template's cursor is at the height
+  ```
 - **At a later height**: sync a clone of a template to it with `run.sh <label> <height>`, then
   `docker exec umbradb-bench-pg psql -U postgres -c "CREATE DATABASE <template> TEMPLATE bench_<label> IS_TEMPLATE true"`.
 
