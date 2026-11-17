@@ -276,6 +276,13 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   `.wasm` files about double, from 10 to 15 MB each to 21 to 29 MB. The four packages are recorded again, so the
   core version changes: a database an earlier build synced continues as an upgrade, its `core` revision kept as a
   `versionEntry` and this build's `core` entry from the next height.
+- **The vendored ledger keeps the Poseidon pre-computation between hashes.** `midnight-circuits` computed its
+  Poseidon round constants and matrices again at every hash; the build now patches the crate, at the version each
+  ledger's `Cargo.lock` pins and checked against the checksum recorded there, to compute them once per field type.
+  They depend on the field alone, so every hash and every state root is the same, and a block spends less time
+  hashing. The four packages are recorded again, so the core version changes: a database an earlier build synced
+  continues as an upgrade, its `core` revision kept as a `versionEntry`. The patch is dropped once a ledger release
+  keeps the pre-computation itself.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 
