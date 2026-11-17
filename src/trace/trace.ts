@@ -181,13 +181,16 @@ export function traceChain(value: unknown): void {
 /**
  * Ends the current height as `height`, committed: its line is kept and the next height starts empty. The line also
  * gets the main thread's memory then (`./memory.ts`), `mem`: its JavaScript heap in use, what it holds outside the
- * heap and the process's resident set, in MiB.
+ * heap and the process's resident set, in MiB. Each number of the line is rounded to 0.001, as the worker's lines are:
+ * its times are in ms, and its counts are whole.
  */
 export function traceEndBlock(height: bigint): void {
   if (active === null) return;
   const memory = threadMemory();
   if (memory !== null) active.block.mem = [memory.heap, memory.external, memory.rss];
-  active.lines.push(JSON.stringify({ h: Number(height), t: performance.now(), ...active.block }));
+  const line: Record<string, unknown> = { h: Number(height), t: performance.now(), ...active.block };
+  for (const [key, value] of Object.entries(line)) if (typeof value === "number") line[key] = +value.toFixed(3);
+  active.lines.push(JSON.stringify(line));
   active.block = {};
   if (active.lines.length >= FLUSH_LINES) flush(active);
 }

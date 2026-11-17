@@ -132,6 +132,27 @@ describe("the block trace, started", () => {
     for (const text of memory.kept.blocks) expect(text.endsWith("\n")).toBe(true);
   });
 
+  it("rounds each number of a height's line to 0.001, as the worker's lines: its times in ms; counts, text and lists as they were", () => {
+    const memory = memorySink();
+    startTrace(memory.sink);
+    traceAdd("encMs", 8.975870000001692);
+    traceAdd("rt.apply", 2.5);
+    traceAdd("rt.apply", 0.12345);
+    traceAdd("sqlN", 1);
+    traceAdd("sqlN", 1);
+    traceMark("tx", 3);
+    traceChain(["1"]);
+    tracePush("reads", ["rows", 2, 0.125, 1]);
+    traceEndBlock(1n);
+    stopTrace();
+    const [line] = memory.blockLines() as [Record<string, unknown>];
+    // The sums as added were 8.975870000001692 and 2.62345: a line that is not rounded fails here.
+    expect(line).toMatchObject({ h: 1, encMs: 8.976, "rt.apply": 2.623, sqlN: 2, tx: 3, reads: [["rows", 2, 0.125, 1]] });
+    expect(line.sh).toMatch(/^[0-9a-f]{16}$/);
+    for (const value of Object.values(line)) if (typeof value === "number") expect(value).toBe(+value.toFixed(3));
+    expect(memory.kept.blocks.join("")).not.toMatch(/\d\.\d{4,}/);
+  });
+
   it("records the steps' detail only when asked", () => {
     expect(traceSteps()).toBe(false);
     startTrace(memorySink().sink);
