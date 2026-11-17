@@ -14,9 +14,10 @@
 #                       CORE_EXTRA=',"prefetchWindow":128'
 #   PREPARE_SQL         a file of SQL run on the clone before the run
 #   UPGRADE             set to 1 for a BUILD whose core version is not the template's (other ledger packages): the
-#                       configuration then keeps each of the template's core revisions as a version entry, with
-#                       the core version and the data settings the clone's configuration history records for it, and
-#                       BUILD's core revision starts at the clone's height + 1
+#                       configuration then keeps each of the template's core revisions with the core version and the
+#                       data settings the clone's configuration history records for it (a version entry, or a core
+#                       entry for one of BUILD's own version), and BUILD's core revision starts at the clone's
+#                       height + 1
 #   NODE_FLAGS          flags for the run's node, e.g. "--cpu-prof --cpu-prof-dir=<run folder>"
 #   STALL_LIMIT         seconds the cursor may stay where it is before the run is stopped as stuck (default 900)
 #
@@ -108,30 +109,51 @@ bench_psql -d postgres -c "CREATE EXTENSION IF NOT EXISTS pg_stat_statements" -c
 bench_psql -d "$DB" -c "CHECKPOINT" >/dev/null
 
 CONFIG="{\"network\":\"${BENCH_CHAIN:-preprod}\",\"node\":\"$UMBRADB_LOCAL_NODE\",\"database\":{\"kind\":\"postgres\",\"host\":\"$BENCH_PG_CONTAINER\",\"port\":5432,\"user\":\"postgres\",\"name\":\"$DB\",\"ssl\":\"disable\"},\"listen\":{\"admin\":\"0.0.0.0:8081\"},\"sweep\":\"${SWEEP:-on}\"${CORE_EXTRA:-}}"
-# The core revisions the clone's configuration history records, as entries: each with its core version and its data
-# settings. $1 limits them (a condition on a row of core_chain.config).
+# The core revisions the clone's configuration history records, as calls of the configuration's recorded (below): each
+# with its start, its core version and its data settings. $1 limits them (a condition on a row of core_chain.config).
 recorded_revisions() {
-  bench_psql -d "$DB" -c "SELECT format('    versionEntry({ id: \"core\", start: %s, version: %s, config: %s }),', start, version, data) FROM core_chain.config WHERE entry_id = 'core' AND $1 ORDER BY start"
+  bench_psql -d "$DB" -c "SELECT format('    recorded(%s, %s, %s),', start, version, data) FROM core_chain.config WHERE entry_id = 'core' AND $1 ORDER BY start"
 }
 if [ "${UPGRADE:-}" = 1 ]; then
   CURSOR="$(bench_psql -d "$DB" -c "SELECT max(height) FROM core_block_commit.blocks")"
   # Every recorded revision stays as recorded; BUILD's own starts after the cursor.
   CORE_ENTRIES="$(recorded_revisions true)
-    coreEntry({ start: $((CURSOR + 1)), stop: $STOP, config: $CONFIG }),"
+    coreEntry({ start: $((CURSOR + 1)), stop: $STOP, config: CONFIG }),"
 elif [ -n "${SWEEP_OFF_FROM:-}" ]; then
   OFF="${CONFIG/\"sweep\":\"on\"/\"sweep\":\"off\",\"developmentOptIn\":true}"
   CORE_ENTRIES="    coreEntry({ start: 0, config: $CONFIG }),
     coreEntry({ start: $SWEEP_OFF_FROM, stop: $STOP, config: $OFF }),"
 else
-  # A template whose sync went on with another build records more than one core revision: the earlier ones stay as
-  # recorded, and BUILD continues the last one from its start.
+  # A template whose sync went on with other settings or another build records more than one core revision: the
+  # earlier ones stay as recorded, and BUILD continues the last one from its start.
   LAST_START="$(bench_psql -d "$DB" -c "SELECT coalesce(max(start), 0) FROM core_chain.config WHERE entry_id = 'core'")"
   EARLIER="$(recorded_revisions "start < $LAST_START")"
   CORE_ENTRIES="${EARLIER:+$EARLIER
-}    coreEntry({ start: $LAST_START, stop: $STOP, config: $CONFIG }),"
+}    coreEntry({ start: $LAST_START, stop: $STOP, config: CONFIG }),"
 fi
 cat > "$OUT/umbradb.config.ts" <<CONFIG_FILE
 import { CORE_CHAIN_EVENTS, CORE_BLOCK_PARSED, CORE_TX_RESULTS, CORE_LEDGER_STATE, CORE_CONTRACT_STATES, CORE_CONTRACT_LOGS_FULL, coreEntry, defineConfig, versionEntry } from "umbradb";
+
+// This run's core settings.
+const CONFIG = $CONFIG as const;
+
+// A version as the configuration history writes it: JSON with its keys sorted.
+const canonical = (value: unknown): string =>
+  value === null || typeof value !== "object"
+    ? JSON.stringify(value)
+    : Array.isArray(value)
+      ? "[" + value.map(canonical).join(",") + "]"
+      : "{" + Object.keys(value).sort().map((key) => JSON.stringify(key) + ":" + canonical((value as Record<string, unknown>)[key])).join(",") + "}";
+const THIS_BUILD = canonical(coreEntry({ start: 0, config: CONFIG }).version);
+
+// A core revision the clone's history records, with its version and its data settings. One of this build's version is
+// validated against this build's schema at startup, so it is a coreEntry whose settings are its recorded data and the
+// two required settings a revision does not record, the node and the database (this run's). One of another build's is
+// a versionEntry with its data as recorded.
+const recorded = (start: number, version: object, data: object) =>
+  canonical(version) === THIS_BUILD
+    ? coreEntry({ start, config: { ...data, node: CONFIG.node, database: CONFIG.database } as never })
+    : versionEntry({ id: "core", start, version: version as never, config: data as never });
 
 export default defineConfig({
   entries: [

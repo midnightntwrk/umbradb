@@ -239,12 +239,18 @@ equality: the table is marked `NOT READ` and the script ends with `not compared`
 
 A build whose vendored ledger packages differ from those of the build that synced a template has another core
 version, and a database keeps the core version of each `core` revision. With `UPGRADE=1`, `run.sh` writes the run's
-configuration as an upgrade: each `core` revision of the template stays as a `versionEntry`, with the core version
-and the data settings the clone's configuration history records, and the build's own `core` revision starts at the
-clone's height + 1.
+configuration as an upgrade: each `core` revision of the template stays, with the core version and the data settings
+the clone's configuration history records, and the build's own `core` revision starts at the clone's height + 1.
 
 A template that already records more than one `core` revision needs no `UPGRADE` for the build of its last revision:
-`run.sh` keeps the earlier revisions as recorded and continues the last one from its start.
+`run.sh` keeps the earlier revisions as recorded and continues the last one from its start, with the run's settings.
+Those must give the data settings the last revision recorded (a `retainStates` that is not the default, say, in
+`CORE_EXTRA`): startup refuses a revision that has already run with other data settings.
+
+How an earlier revision is kept depends on its version, which the configuration file compares with the build's when
+the process loads it: one of another build's version is a `versionEntry` with its recorded data; one of the build's own
+version is a `coreEntry` with its recorded data and the run's node and database, since startup validates it against
+the build's settings, which require those two and which a revision's record does not hold.
 
 ```bash
 UPGRADE=1 TEMPLATE=<template> bench/range/run.sh my-label <stop-height>

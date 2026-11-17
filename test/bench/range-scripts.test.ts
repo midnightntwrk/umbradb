@@ -6,6 +6,12 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { commandBuild } from "../../src/cli/build-modules.js";
+import { buildCoreVersion } from "../../src/config/build.js";
+import { coreEntry } from "../../src/config/entries.js";
+import { versionText } from "../../src/config/history.js";
+import { plainData } from "../../src/config/plain-data.js";
+import { entriesAtCursor, validateConfig } from "../../src/config/validate.js";
 import { startContainer } from "../containers.js";
 import { POSTGRES_IMAGE } from "../postgres-image.js";
 
@@ -1055,6 +1061,49 @@ exit 0
       } finally {
         host.done();
         drop("bench_old_run");
+      }
+    }, 120_000);
+
+    it("the configuration run.sh writes for a template of several core revisions is valid: an earlier one of this build, and one of another build", () => {
+      const host = machine();
+      // The build run.sh mounts, as a package whose entry is the repository's source (loaded below with tsx).
+      writeFileSync(join(host.env.BUILD, "package.json"), '{"name":"umbradb","type":"module","exports":{".":"./index.ts"}}\n');
+      writeFileSync(join(host.env.BUILD, "index.ts"), `export * from ${JSON.stringify(fileURLToPath(new URL("../../src/index.ts", import.meta.url)))};\n`);
+      // A revision's data as the history records it: its settings of kind data, defaults applied (validated here).
+      const settings = { network: "preprod", node: "ws://node.invalid:9944", database: { kind: "postgres", host: "db", port: 5432, user: "postgres", name: "x", ssl: "disable" } } as const;
+      const dataOf = (more: object): object => validateConfig({ config: { data: plainData({ entries: [coreEntry({ start: 0, config: { ...settings, ...more } })] }) }, declarations: commandBuild(), side: "public" }).entries[0]?.data as object;
+      const earlier = dataOf({ retainStates: 5 });
+      const later = dataOf({});
+      const thisBuild = versionText(buildCoreVersion());
+      const otherBuild = versionText({ ...buildCoreVersion(), umbradb: "0.9.5" });
+      template("rev_this", [{ start: 0, version: thisBuild, data: earlier }, { start: 50, version: thisBuild, data: later }]);
+      template("rev_other", [{ start: 0, version: otherBuild, data: { network: "preprod", sweep: "on" } }, { start: 50, version: thisBuild, data: later }]);
+      /** The configuration run.sh wrote for `label`, imported as the process imports it, and validated at the cursor 100. */
+      const checked = (label: string) => {
+        const file = join(host.home, label, "umbradb.config.ts");
+        const loaded = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", "const m = await import(process.argv[1]); console.log(JSON.stringify(m.default));", file], { encoding: "utf8" });
+        expect(loaded.status, loaded.stderr).toBe(0);
+        const config = validateConfig({ config: { file, data: plainData(JSON.parse(loaded.stdout)) }, declarations: commandBuild(), side: "public" });
+        entriesAtCursor(config, 100n);
+        return config.entries.filter((entry) => entry.id === "core");
+      };
+      try {
+        for (const [label, templateName] of [["two-of-this", "rev_this"], ["other-first", "rev_other"]] as const) {
+          host.play([sample("syncing", 100), sample("stopped", 200)]);
+          const result = run("run.sh", [label, "200"], { ...host.env, TEMPLATE: templateName });
+          expect(result.code, result.stderr).toBe(0);
+        }
+        // This build's earlier revision: validated against this build's schema, with the data it recorded.
+        const [first, second] = checked("two-of-this");
+        expect(first).toMatchObject({ start: 0, buildVersion: true, data: earlier });
+        expect(second).toMatchObject({ start: 50, buildVersion: true, data: later });
+        // Another build's: a version entry with its recorded data as written, not validated against this build's schema.
+        const [other, own] = checked("other-first");
+        expect(other).toMatchObject({ start: 0, buildVersion: false, settings: { network: "preprod", sweep: "on" } });
+        expect(own).toMatchObject({ start: 50, buildVersion: true, data: later });
+      } finally {
+        host.done();
+        drop("bench_two_of_this", "bench_other_first", "rev_this", "rev_other");
       }
     }, 120_000);
 
