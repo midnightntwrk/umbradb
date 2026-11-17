@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -9,9 +9,11 @@ import { TRACE_STEPS_VARIABLE, TRACE_VARIABLE } from "../../src/trace/file-sink.
 import { stopTrace, traceSteps, tracing } from "../../src/trace/trace.js";
 
 /**
- * `umbradb run` and `UMBRADB_TRACE` (`src/cli/run.ts`): the command starts the block trace only when its environment
- * names a file, from before its process starts until the command ends, and writes it relative to its working
- * directory. The process here refuses at startup (PGlite without the development opt-in), so it commits no height.
+ * `umbradb run` and `UMBRADB_TRACE` (`src/cli/run.ts`, `src/cli/command.ts`): the command starts the block trace only
+ * when its environment names a file, from before its process starts until the command ends, and writes it relative to
+ * its working directory. It opens the files first and starts nothing when it cannot; a write that fails later stops the
+ * trace and not the command. The process here refuses at startup (PGlite without the development opt-in), so it
+ * commits no height.
  */
 
 const directories: string[] = [];
@@ -20,12 +22,30 @@ afterEach(() => {
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
-/** Runs `umbradb run` on a file that refuses, with `env`; resolves with the exit code and whether it was traced. */
+/** What {@link run} saw. */
+interface RunResult {
+  readonly code: number;
+  /** Whether the process was started. */
+  readonly started: boolean;
+  /** Whether the trace, and its steps' detail, were on when the process was started. */
+  readonly traced: boolean;
+  readonly steps: boolean;
+  readonly directory: string;
+  /** What the command wrote on stderr. */
+  readonly stderr: string;
+}
+
+/**
+ * Runs `umbradb run` on a file that refuses, with `env`, in a new working directory: `before` is called with it before
+ * the command, `started` once the process is started.
+ */
 async function run(
   env: CommandIo["env"],
-): Promise<{ readonly code: number; readonly traced: boolean; readonly steps: boolean; readonly directory: string }> {
+  setup: { readonly before?: (directory: string) => void; readonly started?: (directory: string) => void } = {},
+): Promise<RunResult> {
   const directory = mkdtempSync(join(tmpdir(), "umbradb-run-trace-"));
   directories.push(directory);
+  setup.before?.(directory);
   const config = {
     entries: [
       {
@@ -43,19 +63,28 @@ async function run(
   };
   writeFileSync(join(directory, "umbradb.config.ts"), `export default ${JSON.stringify(config)};\n`);
   const signals = new EventEmitter();
+  let started = false;
   let traced = false;
   let steps = false;
   const command = runProcessCommand({
     signals,
     started: (handle) => {
+      started = true;
       traced = tracing();
       steps = traceSteps();
+      setup.started?.(directory);
       void handle.started.catch(() => signals.emit("SIGTERM"));
     },
   });
-  const io: CommandIo = { cwd: directory, stdout: () => undefined, stderr: () => undefined, ...(env === undefined ? {} : { env }) };
+  let stderr = "";
+  const io: CommandIo = {
+    cwd: directory,
+    stdout: () => undefined,
+    stderr: (text) => void (stderr += text),
+    ...(env === undefined ? {} : { env }),
+  };
   const code = await runCommand(["run"], io, { run: command });
-  return { code, traced, steps, directory };
+  return { code, started, traced, steps, directory, stderr };
 }
 
 describe("umbradb run and UMBRADB_TRACE", () => {
@@ -74,10 +103,51 @@ describe("umbradb run and UMBRADB_TRACE", () => {
     expect(result.code).toBe(EXIT.failed);
     expect(result.traced).toBe(true);
     expect(result.steps).toBe(false);
-    // The command stopped the trace, which wrote the statements' totals; no height committed, so no line.
+    // The command opened the three files before the process started, and stopped the trace at its end, which wrote
+    // the statements' totals; no height committed, so no line.
     expect(tracing()).toBe(false);
     expect(readFileSync(join(result.directory, "trace.jsonl.stmts.json"), "utf8")).toBe("[]");
-    expect(existsSync(join(result.directory, "trace.jsonl"))).toBe(false);
+    expect(readFileSync(join(result.directory, "trace.jsonl"), "utf8")).toBe("");
+    expect(readFileSync(join(result.directory, "trace.jsonl.worker.jsonl"), "utf8")).toBe("");
+  });
+
+  it("a file it cannot open, its folder missing: the command says so on stderr and exits 1, nothing started", async () => {
+    const refused = await run({ [TRACE_VARIABLE]: "missing/trace.jsonl" });
+    expect(refused.code).toBe(EXIT.failed);
+    expect(refused.started).toBe(false);
+    expect(tracing()).toBe(false);
+    expect(refused.stderr).toMatch(
+      /^umbradb run: UMBRADB_TRACE names a file that cannot be written, so nothing was started: ENOENT[^\n]*missing\/trace\.jsonl[^\n]*\n$/,
+    );
+    expect(existsSync(join(refused.directory, "missing"))).toBe(false);
+    // Negative control: with the folder there, the same variable starts the process, traced, and nothing is said of it.
+    const started = await run({ [TRACE_VARIABLE]: "missing/trace.jsonl" }, { before: (directory) => mkdirSync(join(directory, "missing")) });
+    expect(started.started).toBe(true);
+    expect(started.traced).toBe(true);
+    expect(started.stderr).not.toContain(TRACE_VARIABLE);
+    expect(readFileSync(join(started.directory, "missing", "trace.jsonl.stmts.json"), "utf8")).toBe("[]");
+  });
+
+  it("a write that fails once the process is started: the trace stops with one line on stderr, and the command ends as it would have", async () => {
+    // The folder goes once the process is started, so the trace's write at the command's end cannot be made.
+    const setup = (remove: boolean) => ({
+      before: (directory: string) => mkdirSync(join(directory, "out")),
+      started: (directory: string) => {
+        if (remove) rmSync(join(directory, "out"), { recursive: true, force: true });
+      },
+    });
+    const stopped = (stderr: string): string[] => stderr.split("\n").filter((line) => line.startsWith("block trace stopped"));
+    const failed = await run({ [TRACE_VARIABLE]: "out/trace.jsonl" }, setup(true));
+    // The exit status of this file's run, traced or not: its process refuses at startup.
+    expect(failed.code).toBe(EXIT.failed);
+    expect(failed.traced).toBe(true);
+    expect(tracing()).toBe(false);
+    expect(stopped(failed.stderr)).toEqual([expect.stringMatching(/^block trace stopped, the process goes on untraced: writing it failed: ENOENT/)]);
+    // Negative control: with the folder kept, no such line, and the statements' totals are written.
+    const kept = await run({ [TRACE_VARIABLE]: "out/trace.jsonl" }, setup(false));
+    expect(kept.code).toBe(EXIT.failed);
+    expect(stopped(kept.stderr)).toEqual([]);
+    expect(readFileSync(join(kept.directory, "out", "trace.jsonl.stmts.json"), "utf8")).toBe("[]");
   });
 
   it("UMBRADB_TRACE_STEPS=1 beside it adds the steps' detail; alone, or with another value, it does nothing", async () => {

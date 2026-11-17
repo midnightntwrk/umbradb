@@ -8,6 +8,9 @@
  * - `<file>.worker.jsonl`: one JSON line per block the ledger worker applied, with what its thread's time went to
  *   since the line before (`./worker-trace.ts`).
  *
+ * The three are opened when the sink is built, so a path that cannot be written is known before anything is traced:
+ * the command then refuses to start (`src/cli/command.ts`). A write that fails later stops the trace (`./trace.ts`).
+ *
  * Only the command imports this module, so the file API stays out of the browser build.
  */
 
@@ -23,11 +26,18 @@ export const TRACE_VARIABLE = "UMBRADB_TRACE";
  */
 export const TRACE_STEPS_VARIABLE = "UMBRADB_TRACE_STEPS";
 
-/** The sink that writes a trace to `file` and the two files beside it (see the module comment). */
+/**
+ * The sink that writes a trace to `file` and the two files beside it (see the module comment). It opens the three
+ * first, creating each that does not exist and adding nothing to any, and throws if one cannot be opened for writing
+ * (its folder does not exist, no permission).
+ */
 export function fileTraceSink(file: string): TraceSink {
+  const statements = `${file}.stmts.json`;
+  const worker = `${file}.worker.jsonl`;
+  for (const path of [file, statements, worker]) appendFileSync(path, "");
   return Object.freeze({
     blocks: (text: string) => appendFileSync(file, text),
-    statements: (json: string) => writeFileSync(`${file}.stmts.json`, json),
-    worker: (text: string) => appendFileSync(`${file}.worker.jsonl`, text),
+    statements: (json: string) => writeFileSync(statements, json),
+    worker: (text: string) => appendFileSync(worker, text),
   });
 }

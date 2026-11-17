@@ -55,14 +55,14 @@
  * line per committed height saying where its time went (`src/trace/trace.ts`, `src/trace/file-sink.ts`), from before
  * the process starts until the command ends. With `UMBRADB_TRACE_STEPS=1` beside it, each line also holds its step's
  * count changes, new nodes and deleted nodes. It is a measuring aid, off unless the variable is set, and changes
- * nothing the process stores.
+ * nothing the process stores. The command opens the files before it starts anything, and refuses when it cannot
+ * (`./command.ts`); a write that fails later stops the trace, with one line in the process's log, and the process goes
+ * on.
  */
 
-import { resolve } from "node:path";
 import { startAdminServer } from "../admin/server.js";
 import { DEFAULT_CONFIG_FILE } from "../config/load.js";
-import { fileTraceSink } from "../trace/file-sink.js";
-import { startTrace, stopTrace } from "../trace/trace.js";
+import { startTrace, stopTrace, type TraceSink } from "../trace/trace.js";
 import {
   type BackupSignals,
   type EngineInput,
@@ -179,8 +179,8 @@ export interface RunOptions {
   readonly cwd: string;
   /** Where the process's log lines go (already redacted by the process). */
   readonly log: (line: string) => void;
-  /** `UMBRADB_TRACE`: the block trace's file, relative to `cwd`; no trace when absent or empty. */
-  readonly trace?: string | undefined;
+  /** The block trace's sink: `UMBRADB_TRACE`'s files, which the command opened (`./command.ts`). No trace when absent. */
+  readonly trace?: TraceSink | undefined;
   /** `UMBRADB_TRACE_STEPS` is `1`: the trace also records each step in detail. */
   readonly traceSteps?: boolean | undefined;
 }
@@ -210,11 +210,9 @@ export async function runProcess(options: RunOptions, seams: RunSeams = {}): Pro
   const stop = stopSignal(seams.signals ?? process);
   // From here to the end, SIGUSR2 is the command's: relayed to the process, or logged as ignored.
   const usr2 = backupSignalRelay(seams.backupSignals ?? process, options.log);
-  const traced = options.trace !== undefined && options.trace !== "";
+  const traced = options.trace !== undefined;
   // Before the process starts, so its ledger worker's thread is started traced too.
-  if (traced) {
-    startTrace(fileTraceSink(resolve(options.cwd, options.trace as string)), { steps: options.traceSteps === true });
-  }
+  if (options.trace !== undefined) startTrace(options.trace, { steps: options.traceSteps === true, log: options.log });
   try {
     const handle = (seams.start ?? startProcess)({
       config: { file: options.file ?? DEFAULT_CONFIG_FILE },

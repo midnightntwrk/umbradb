@@ -333,18 +333,24 @@ restored process's first start compares it the same way.
 `umbradb run` writes a block trace when its environment names a file for it:
 
 ```sh
+mkdir -p run
 UMBRADB_TRACE=run/trace.jsonl umbradb run [--config umbradb.config.ts]
 ```
 
 | Variable | What it does |
 |---|---|
-| `UMBRADB_TRACE=<file>` | Writes the trace to `<file>` (relative to the working directory) and two files beside it. Unset or empty: no trace. |
+| `UMBRADB_TRACE=<file>` | Writes the trace to `<file>` (relative to the working directory, in a folder that exists) and two files beside it. Unset or empty: no trace. |
 | `UMBRADB_TRACE_STEPS=1` | Beside `UMBRADB_TRACE`: each height's line also holds its reclamation step's count changes (`d`), new nodes (`nn`) and deleted nodes (`del`), each key by its first 6 bytes. A line is then several kB long. |
 
 The trace only measures. A process that is not traced computes, stores, logs and sends between its threads what it
 did before; a traced one stores the same tables. Only the command starts it: a host program's process
 (`startUmbraDB`) is not traced. The files are appended to, so give each run a new file. Lines are written every 200
 heights and when the command ends.
+
+The command opens the three files before it starts the process, creating those that do not exist. If it cannot (the
+folder does not exist, no permission), it says so on stderr and exits 1 without starting anything. A write that fails
+later (a full disk) stops the trace, with one line in the process's log (`block trace stopped, the process goes on
+untraced: …`), and the sync goes on untraced.
 
 | File | Holds |
 |---|---|

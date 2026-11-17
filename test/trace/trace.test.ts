@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getHeapSpaceStatistics } from "node:v8";
@@ -280,6 +280,82 @@ describe("the block trace's files", () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+
+  it("are opened when the sink is built: each missing one created empty, an existing one left as it is; a folder that does not exist throws", () => {
+    const directory = mkdtempSync(join(tmpdir(), "umbradb-trace-"));
+    try {
+      const file = join(directory, "trace.jsonl");
+      writeFileSync(file, '{"h":1}\n');
+      fileTraceSink(file);
+      expect(readFileSync(file, "utf8")).toBe('{"h":1}\n');
+      expect(readFileSync(`${file}.stmts.json`, "utf8")).toBe("");
+      expect(readFileSync(`${file}.worker.jsonl`, "utf8")).toBe("");
+      expect(() => fileTraceSink(join(directory, "missing", "trace.jsonl"))).toThrow(/ENOENT/);
+      expect(existsSync(join(directory, "missing"))).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("the block trace, when its sink fails", () => {
+  it("stops at the flush that failed, with one line in its log; the heights after it and the stop record nothing and throw nothing", () => {
+    const directory = mkdtempSync(join(tmpdir(), "umbradb-trace-"));
+    const folder = join(directory, "run");
+    /** A trace into `folder`, removed after the start when `remove`: one more height than a flush holds, then the stop. */
+    const traced = (remove: boolean): { readonly log: string[]; readonly afterFlush: boolean } => {
+      mkdirSync(folder, { recursive: true });
+      const log: string[] = [];
+      startTrace(fileTraceSink(join(folder, "trace.jsonl")), { log: (line) => log.push(line) });
+      if (remove) rmSync(folder, { recursive: true, force: true });
+      for (let height = 1; height <= FLUSH_LINES; height++) traceEndBlock(BigInt(height));
+      const afterFlush = tracing();
+      traceAdd("applyMs", 1);
+      traceEndBlock(BigInt(FLUSH_LINES + 1));
+      stopTrace();
+      return { log, afterFlush };
+    };
+    try {
+      // Negative control: with the folder kept, the same heights are written and the trace goes on past the flush.
+      expect(traced(false)).toEqual({ log: [], afterFlush: true });
+      expect(readFileSync(join(folder, "trace.jsonl"), "utf8").trimEnd().split("\n")).toHaveLength(FLUSH_LINES + 1);
+      rmSync(folder, { recursive: true, force: true });
+      // The folder removed once the trace started: the first flush cannot write, and the trace stops there.
+      const failed = traced(true);
+      expect(failed.afterFlush).toBe(false);
+      expect(failed.log).toEqual([expect.stringMatching(/^block trace stopped, the process goes on untraced: writing it failed: ENOENT/)]);
+      expect(tracing()).toBe(false);
+      expect(existsSync(folder)).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("stops without throwing when the stop's own flush fails, says what the sink threw, and says nothing without a log", () => {
+    const log: string[] = [];
+    const failing = (thrown: unknown): TraceSink => ({
+      blocks: () => undefined,
+      statements: () => {
+        throw thrown;
+      },
+      worker: () => undefined,
+    });
+    startTrace(failing(new RangeError("no space left")), { log: (line) => log.push(line) });
+    traceEndBlock(1n);
+    expect(() => stopTrace()).not.toThrow();
+    expect(tracing()).toBe(false);
+    startTrace(failing("no room"), { log: (line) => log.push(line) });
+    stopTrace();
+    expect(log).toEqual([
+      "block trace stopped, the process goes on untraced: writing it failed: no space left",
+      "block trace stopped, the process goes on untraced: writing it failed: no room",
+    ]);
+    // Without a log, the same failure at a flush stops the trace and says nothing.
+    startTrace(failing(new RangeError("no space left")));
+    for (let height = 1; height <= FLUSH_LINES; height++) traceEndBlock(BigInt(height));
+    expect(tracing()).toBe(false);
+    expect(log).toHaveLength(2);
   });
 });
 

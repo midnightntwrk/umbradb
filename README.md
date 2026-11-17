@@ -223,9 +223,9 @@ npx umbradb restore preview-10000.backup --config restored.config.ts     # into 
 | 1 | Startup refused, or processing halted | A finding, or the check could not finish | Refused | Refused |
 | 2 | Wrong argument | Wrong argument | Wrong argument | Wrong argument |
 
-`run` exits 1 at once, without a signal, when the configuration cannot be loaded or fails its schemas. A refused
-backup writes no file, and a refused restore commits nothing. No command or an unknown one prints the usage and exits
-2; 3 is kept for a command a build does not provide.
+`run` exits 1 at once, without a signal, when the configuration cannot be loaded or fails its schemas, or when
+`UMBRADB_TRACE` names a file it cannot open. A refused backup writes no file, and a refused restore commits nothing.
+No command or an unknown one prints the usage and exits 2; 3 is kept for a command a build does not provide.
 
 ## In your own program: `startUmbraDB`
 
