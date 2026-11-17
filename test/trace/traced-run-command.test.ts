@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -87,6 +87,12 @@ async function run(
   return { code, started, traced, steps, directory, stderr };
 }
 
+/**
+ * What the working directory holds after a run that wrote no trace: the configuration file alone (the refused PGlite
+ * start creates no folder).
+ */
+const UNTRACED_FILES = ["umbradb.config.ts"];
+
 describe("umbradb run and UMBRADB_TRACE", () => {
   it("unset or empty: the process is not traced and no file is written", async () => {
     for (const env of [{}, { [TRACE_VARIABLE]: "" }, { [TRACE_VARIABLE]: undefined }]) {
@@ -94,7 +100,8 @@ describe("umbradb run and UMBRADB_TRACE", () => {
       expect(result.code).toBe(EXIT.failed);
       expect(result.traced).toBe(false);
       expect(tracing()).toBe(false);
-      expect(existsSync(join(result.directory, "trace.jsonl.stmts.json"))).toBe(false);
+      // Negative control: the traced run below leaves its three files in the same directory.
+      expect(readdirSync(result.directory).sort()).toEqual(UNTRACED_FILES);
     }
   });
 
@@ -106,6 +113,9 @@ describe("umbradb run and UMBRADB_TRACE", () => {
     // The command opened the three files before the process started, and stopped the trace at its end, which wrote
     // the statements' totals; no height committed, so no line.
     expect(tracing()).toBe(false);
+    expect(readdirSync(result.directory).sort()).toEqual(
+      [...UNTRACED_FILES, "trace.jsonl", "trace.jsonl.stmts.json", "trace.jsonl.worker.jsonl"].sort(),
+    );
     expect(readFileSync(join(result.directory, "trace.jsonl.stmts.json"), "utf8")).toBe("[]");
     expect(readFileSync(join(result.directory, "trace.jsonl"), "utf8")).toBe("");
     expect(readFileSync(join(result.directory, "trace.jsonl.worker.jsonl"), "utf8")).toBe("");

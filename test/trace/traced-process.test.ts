@@ -1,14 +1,17 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { LAST } from "../ledger/fixtures/sweep-fixture.js";
+import { buildContentsHash, byteHashedTables, dagOptedOut, type ReadableDatabase } from "../backbone/refcount-contents.js";
 import { type DagRun, runDag, runProblems } from "../backbone/refcount-process.js";
-import { PROCESS_BACKENDS } from "../runner/process-backends.js";
+import { BACKUP_BACKENDS, type BackupBackend } from "../backup/backup-fixtures.js";
 import { startTrace, stopTrace, type TraceSink } from "../../src/trace/trace.js";
 import { addingUpProblems, unaccountedOfBusy, type WorkerLine } from "./worker-time.js";
 
 /**
  * The block trace through the real process (`src/trace/trace.ts`), on PostgreSQL 18: the extended DAG fixture of
- * `test/backbone/ledger-refcount-process.test.ts`, run once without the trace and once with it.
- * - Traced, the process stores what it stores untraced, at every height.
+ * `test/backbone/ledger-refcount-process.test.ts`, run once without the trace and twice with it.
+ * - Traced, the process stores what it stores untraced: the ledger state's tables at every height, and at the last
+ *   the whole database, by the build's contents hash and by each table's digest. (The fixture's blocks carry no
+ *   transaction.)
  * - The trace has one line per committed height, with the stages' times, the step's sizes and reads, and the chain of
  *   step outputs; one worker line per applied block, posted by the worker's thread; and the statements' totals.
  * - Two traced runs end with the same chain of step outputs.
@@ -18,9 +21,18 @@ import { addingUpProblems, unaccountedOfBusy, type WorkerLine } from "./worker-t
 
 const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
 
-/** The tables of every height as text, for comparing two runs. */
+/** The ledger state's tables of every height as text, for comparing two runs. */
 const tablesText = (run: DagRun): string =>
   JSON.stringify([...run.tables].map(([h, t]) => [`${h}`, [...t.rows].map(([k, c]) => `${k}:${hex(c)}`), [...t.refs], [...t.roots], [...t.queue], [...t.digests]]));
+
+/**
+ * The whole database at the last height: the build's contents hash, and each table it takes by its bytes as the MD5 of
+ * its rows (`../backbone/refcount-contents.ts`), the tables of the fixture's watchers left out as the hash leaves them.
+ */
+async function databaseOf(db: ReadableDatabase): Promise<{ readonly hash: string; readonly tables: [string, string][] }> {
+  const optedOut = dagOptedOut();
+  return { hash: await buildContentsHash(db, optedOut), tables: [...(await byteHashedTables(db, optedOut))] };
+}
 
 function memorySink() {
   const kept = { blocks: "", statements: "[]", worker: "" };
@@ -39,7 +51,7 @@ function memorySink() {
   };
 }
 
-const postgres = PROCESS_BACKENDS.find((backend) => backend.kind === "postgres") as (typeof PROCESS_BACKENDS)[number];
+const postgres = BACKUP_BACKENDS.find((backend) => backend.kind === "postgres") as BackupBackend;
 
 describe("the block trace through the process, on PostgreSQL", () => {
   beforeAll(() => postgres.start(), 180_000);
@@ -47,18 +59,27 @@ describe("the block trace through the process, on PostgreSQL", () => {
   afterEach(() => stopTrace());
 
   it("a traced run stores what an untraced run stores, and its trace has every height, the worker's applies and the statements", async () => {
-    const plain = await runDag(await postgres.database(), { dag: "extended" });
+    const plainDb = await postgres.database();
+    const plain = await runDag(plainDb, { dag: "extended" });
     expect(plain.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
+    const plainDatabase = await databaseOf(plainDb);
+    // The comparison below takes in more than the ledger state: among others the committed blocks (the cursor), the
+    // chain's configuration and events, and the digests.
+    expect(plainDatabase.tables.map(([table]) => table)).toEqual(
+      expect.arrayContaining(["core_block_commit.blocks", "core_chain.config", "core_chain_events.events", "core_digest.tables"]),
+    );
 
     const traces = [memorySink(), memorySink()];
     const traced: DagRun[] = [];
     for (const [index, trace] of traces.entries()) {
       // The second with the steps' detail, which changes neither the chain nor what is stored.
       startTrace(trace.sink, { steps: index === 1 });
-      const run = await runDag(await postgres.database(), { dag: "extended" });
+      const db = await postgres.database();
+      const run = await runDag(db, { dag: "extended" });
       stopTrace();
       expect(run.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
       expect(runProblems(run, "extended")).toEqual([]);
+      expect(await databaseOf(db)).toEqual(plainDatabase);
       traced.push(run);
     }
     for (const run of traced) expect(tablesText(run)).toBe(tablesText(plain));
