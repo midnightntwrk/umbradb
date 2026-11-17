@@ -253,6 +253,27 @@ describe("the module's Dust routes over stored Preprod events (PostgreSQL 18)", 
     expect((await fetch(`${r.origin}${ROUTES.dustChunk}0?count=x`)).status).toBe(400);
     expect((await fetch(`${r.origin}${ROUTES.dustChunk}1`)).status).toBe(404);
     for (const bad of ["x", "01", "-1", "1e3"]) expect((await fetch(`${r.origin}${ROUTES.dustChunk}${bad}`)).status, bad).toBe(400);
+
+    // Phase 12: GET /dust/chunks?from=<n>&entries=<the manifest's entry count>, the chunks from n one after another,
+    // the last cut at the count; the same as the single chunks, cached for good.
+    const all = await fetch(`${r.origin}${ROUTES.dustChunks}?from=0&entries=144`);
+    expect([all.status, all.headers.get("content-type"), all.headers.get("cache-control"), all.headers.get("pss-dust-chunks")]).toEqual([200, OCTET_STREAM, "public, max-age=31536000, immutable", "1"]);
+    expect(Buffer.from(await all.arrayBuffer()).equals(Buffer.from(bytes))).toBe(true);
+    const cut = new Uint8Array(await (await fetch(`${r.origin}${ROUTES.dustChunks}?from=0&entries=100`)).arrayBuffer());
+    expect(Buffer.from(cut).equals(Buffer.from(fewer))).toBe(true);
+    for (const [query, status, code] of [
+      ["?from=0&entries=145", 404, "no-such-chunks"],
+      ["?from=1&entries=144", 404, "no-such-chunks"],
+      ["?from=0&entries=0", 400, "invalid-entries"],
+      ["?from=0", 400, "invalid-entries"],
+      ["?entries=144", 400, "invalid-from"],
+      ["?from=x&entries=144", 400, "invalid-from"],
+      ["?from=0&entries=1e3", 400, "invalid-entries"],
+    ] as const) {
+      const refused = await fetch(`${r.origin}${ROUTES.dustChunks}${query}`);
+      expect(refused.status, query).toBe(status);
+      expect(await refused.json(), query).toMatchObject({ error: { code } });
+    }
   });
 
   it("GET /dust/coins?owner=…: that owner's first coins and generation updates as the events' bytes, in chain order; a malformed owner is refused", { timeout: LONG }, async () => {

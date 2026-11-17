@@ -26,7 +26,7 @@ import { PssHttp } from "../client/http.ts";
 import { compileIpirWasm } from "../ipir/wallet-node.ts";
 import { compileKernel, Kernel } from "../kernel/kernel.ts";
 import { inlineMultiplier } from "../pir/index.ts";
-import { ROUTES } from "../shared/index.ts";
+import { decodeDustChunk, ROUTES } from "../shared/index.ts";
 import { DustSteps } from "../web/dust-steps.ts";
 import { dustBytes, dustChainRows, dustSpendRows } from "../web/dust-view.ts";
 import { DUST_SEED, dustWorld } from "./server-dust-world.ts";
@@ -66,7 +66,11 @@ for (const scheme of ["simplepir", "ipir-sp"] as const) {
       expect(owners).toEqual([world.owner]);
       expect(got).toMatchObject({ manifest: { entries: 42, chunks: 3, chunkEntries: 16, prefixBytes: 4 }, chunksFromCache: 0, chunksDownloaded: 3, keyEnds: world.owner.toString().slice(-8) });
       expect(got.firstCoins.map((f: Json) => f.position)).toEqual(["3", "5", "7"]);
-      expect(got.bytes).toMatchObject({ requests: 6, chunks: got.chunkBytesDownloaded, check: { requests: 0 } });
+      // Phase 12: the three chunks in one request (`GET /dust/chunks` from chunk 0 at the manifest's entry count).
+      expect(got.bytes).toMatchObject({ requests: 4, chunks: got.chunkBytesDownloaded, check: { requests: 0 } });
+      expect(got.chunkRequest).toMatchObject({ from: 0, entries: 42, chunks: 3, bytes: got.chunkBytesDownloaded });
+      expect(routes.chunksQueries()).toEqual([{ from: 0, entries: 42 }]);
+      expect(http.records.filter((r) => r.path.startsWith(ROUTES.dustChunk))).toEqual([]);
       // The coins request names the key in its query string only: the request record holds the route.
       expect(http.records.map((r) => r.path)).toContain(ROUTES.dustCoins);
       expect(http.records.some((r) => r.path.includes(world.owner.toString()))).toBe(false);
@@ -77,7 +81,7 @@ for (const scheme of ["simplepir", "ipir-sp"] as const) {
         [2, [entry(25), entry(64)], "unchecked"],
         [0, [], "no-spend"],
       ]);
-      expect(http.records).toHaveLength(6);
+      expect(http.records).toHaveLength(4);
 
       const checked = (await steps.check()) as Json;
       expect(checked.check).toMatchObject({ scheme, commitments: 64, queriesPerCall: 4, publicArtifact: { cached: false } });
@@ -103,7 +107,24 @@ for (const scheme of ["simplepir", "ipir-sp"] as const) {
       });
 
       const again = (await steps.getFile()) as Json;
-      expect(again).toMatchObject({ chunksFromCache: 3, chunksDownloaded: 0, chunkBytesDownloaded: 0, bytes: { chunks: 0 } });
+      expect(again).toMatchObject({ chunksFromCache: 3, chunksDownloaded: 0, chunkBytesDownloaded: 0, chunkRequest: null, bytes: { chunks: 0 } });
+      expect(routes.chunksQueries()).toHaveLength(1);
+      // A page that holds the first two chunks asks for the third only, in one request.
+      // (The page's cache also holds the check table's public artifact: only chunks are kept here.)
+      const firstOf = (b: Uint8Array): number | null => {
+        try {
+          return decodeDustChunk(b).first;
+        } catch {
+          return null;
+        }
+      };
+      const prefix = new Map([...cache].filter(([, b]) => (firstOf(b) ?? 99) < 32));
+      expect(prefix.size).toBe(2);
+      const partial = new DustSteps({ ledger: ledger as never, http, cache: prefix, scheme: options, decodeCoins: () => ({ starts: [], updates: [] }) });
+      partial.setSeed(DUST_SEED);
+      expect(await partial.getFile()).toMatchObject({ chunksFromCache: 2, chunksDownloaded: 1, chunkRequest: { from: 2, chunks: 1 } });
+      expect(routes.chunksQueries().at(-1)).toEqual({ from: 2, entries: 42 });
+      partial.dispose();
       const recheck = (await steps.check()) as Json;
       expect(recheck.check.publicArtifact.cached).toBe(true);
       expect(recheck.bytes.check.publicArtifact).toBe(0);

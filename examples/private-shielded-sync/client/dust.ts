@@ -436,30 +436,54 @@ export interface DustChunkFetch {
 }
 
 /**
- * The Dust file, downloaded and checked against its manifest: each chunk at the entry count the manifest lists, from
- * `cache` when it holds the chunk's SHA-256 (checked again) and kept there once downloaded.
+ * The Dust file, downloaded and checked against its manifest. The chunks `cache` holds (by SHA-256, checked again) are
+ * taken from it up to the first it lacks; that one and every later one come in one request (`GET /dust/chunks`, phase
+ * 12), cut at the manifest's entry count, split by the manifest's lengths and each checked against its SHA-256, then
+ * kept in the cache. A wallet's cache holds a prefix of the file (full chunks never change), so a later sync asks for
+ * the new chunks only; a chunk held after a lacking one is downloaded again with the rest.
  */
-export async function downloadDustFile(http: PssHttp, cache?: DustCache): Promise<{ manifest: DustManifest; file: DustFileView; chunks: DustChunkFetch[] }> {
+export async function downloadDustFile(
+  http: PssHttp,
+  cache?: DustCache,
+): Promise<{ manifest: DustManifest; file: DustFileView; chunks: DustChunkFetch[]; request: { readonly from: number; readonly entries: number; readonly chunks: number; readonly bytes: number; readonly ms: number } | null }> {
   const manifest = await http.dustManifest();
   if (manifest.version !== 1) throw new Error(`a Dust manifest of version ${String(manifest.version)}; this wallet reads version 1`);
+  const held = (ref: DustManifest["chunks"][number]): Uint8Array | null => {
+    const kept = cache?.get(ref.sha256);
+    return kept !== undefined && kept.length === ref.bytes && createHash("sha256").update(kept).digest("hex") === ref.sha256 ? kept : null;
+  };
+  let from = 0;
+  const kept: Uint8Array[] = [];
+  for (const ref of manifest.chunks) {
+    const bytes = held(ref);
+    if (bytes === null) break;
+    kept.push(bytes);
+    from++;
+  }
+  const started = performance.now();
+  const body = from < manifest.chunks.length ? await http.dustChunks(from, manifest.entries) : new Uint8Array(0);
+  const ms = performance.now() - started;
+  const expected = manifest.chunks.slice(from).reduce((t, ref) => t + ref.bytes, 0);
+  if (body.length !== expected) throw new Error(`the Dust chunks from ${from} came as ${body.length} bytes, the manifest lists ${expected}`);
   const chunks: DustChunk[] = [];
   const fetches: DustChunkFetch[] = [];
+  let at = 0;
   for (const [n, ref] of manifest.chunks.entries()) {
-    const started = performance.now();
-    const kept = cache?.get(ref.sha256);
-    const cached = kept !== undefined && kept.length === ref.bytes && createHash("sha256").update(kept).digest("hex") === ref.sha256;
-    const bytes = cached ? kept : await http.dustChunk(n, ref.count);
+    const cached = n < from;
+    const bytes = cached ? kept[n]! : body.subarray(at, (at += ref.bytes));
     const sha256 = createHash("sha256").update(bytes).digest("hex");
     if (bytes.length !== ref.bytes || sha256 !== ref.sha256) throw new Error(`Dust chunk ${n}: ${bytes.length} bytes with SHA-256 ${sha256}, the manifest names ${ref.bytes} and ${ref.sha256}`);
     const chunk = decodeDustChunk(bytes);
     if (chunk.first !== ref.first || chunk.count !== ref.count || chunk.firstHeight !== ref.firstHeight) throw new Error(`Dust chunk ${n} is not the one the manifest lists`);
-    if (!cached) cache?.set(ref.sha256, bytes);
+    if (!cached) cache?.set(ref.sha256, bytes.slice());
     chunks.push(chunk);
-    fetches.push({ n, first: ref.first, count: ref.count, firstHeight: ref.firstHeight, lastHeight: ref.lastHeight, bytes: bytes.length, sha256, cached, ms: performance.now() - started });
+    // A downloaded chunk's time is the one request's, shared by every chunk it carried.
+    fetches.push({ n, first: ref.first, count: ref.count, firstHeight: ref.firstHeight, lastHeight: ref.lastHeight, bytes: bytes.length, sha256, cached, ms: cached ? 0 : ms });
   }
   const file = new DustFileView(chunks, manifest.prefixBytes);
   if (file.entries !== manifest.entries) throw new Error(`the Dust chunks hold ${file.entries} entries, the manifest ${manifest.entries}`);
-  return { manifest, file, chunks: fetches };
+  const request = from < manifest.chunks.length ? { from, entries: manifest.entries, chunks: manifest.chunks.length - from, bytes: body.length, ms } : null;
+  return { manifest, file, chunks: fetches, request };
 }
 
 /**
@@ -530,7 +554,7 @@ export function dustTransfer(records: readonly RequestRecord[]) {
     down: sum([""], "answerBytes"),
     up: sum([""], "bodyBytes"),
     manifest: sum([ROUTES.dustManifest], "answerBytes"),
-    chunks: sum([ROUTES.dustChunk], "answerBytes"),
+    chunks: sum([ROUTES.dustChunk, ROUTES.dustChunks], "answerBytes"),
     coins: sum([ROUTES.dustCoins], "answerBytes"),
     parameters: sum([ROUTES.dustParameters], "answerBytes"),
     check: {

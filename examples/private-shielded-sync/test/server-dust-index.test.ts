@@ -8,7 +8,9 @@
 
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { decodeDustChunk, dustEntryAt, type DustEntry } from "../shared/index.ts";
+import { downloadDustFile } from "../client/dust.ts";
+import { PssHttp } from "../client/http.ts";
+import { decodeDustChunk, dustEntryAt, type DustEntry, ROUTES } from "../shared/index.ts";
 import { type DustDecoder, type DustEvent, DustIndex, dustParametersOfText, ledgerDustDecoder } from "../server/dust-index.ts";
 import { compileKernel, Kernel } from "../kernel/kernel.ts";
 import { dustTree } from "../server/dust-tree.ts";
@@ -229,5 +231,103 @@ describe("the Dust index over Preprod events", () => {
     // Heights still advance, and must rise.
     expect(() => none.appendHeight(5, [])).toThrow(/must increase/);
     expect(() => none.advanceTo(4)).toThrow(/must not decrease/);
+  });
+});
+
+describe("the Dust chunks in one answer (phase 12, GET /dust/chunks)", () => {
+  const SMALL = 16;
+  const concat = (parts: readonly Uint8Array[]): Uint8Array => {
+    const out = new Uint8Array(parts.reduce((t, p) => t + p.length, 0));
+    parts.reduce((at, p) => (out.set(p, at), at + p.length), 0);
+    return out;
+  };
+  /** The index over the fixture's heights up to `upto`, and the heights after it, to grow it by. */
+  const growing = (upto: number) => {
+    const index = indexUpTo(upto, SMALL);
+    const later = byHeight(FIXTURE.filter((r) => r.height > upto));
+    return { index, grow: (groups: number) => later.splice(0, groups).forEach((g) => index.appendHeight(g.height, g.rows.map((r) => dustEventOf(r)))) };
+  };
+  /** The module's two routes over an index, as `PssHttp` asks for them; `between` runs after each manifest is served. */
+  const serving = (index: DustIndex, between: () => void = () => {}) => {
+    const asked: string[] = [];
+    const fetch = async (url: string): Promise<Response> => {
+      const u = new URL(url);
+      asked.push(`${u.pathname}${u.search}`);
+      if (u.pathname === ROUTES.dustManifest) {
+        const body = JSON.stringify(index.manifest());
+        between();
+        return new Response(body);
+      }
+      if (u.pathname === ROUTES.dustChunks) {
+        const answer = index.chunksFrom(Number(u.searchParams.get("from")), Number(u.searchParams.get("entries")));
+        return answer === null ? new Response("{}", { status: 404 }) : new Response(answer.bytes as Uint8Array<ArrayBuffer>);
+      }
+      return new Response("{}", { status: 404 });
+    };
+    return { http: new PssHttp("http://dust.test", { fetch }), asked };
+  };
+
+  it("the answer from any chunk is the single chunks at the manifest's counts, one after another; the last cut at the entry count; what it refuses", () => {
+    const index = indexUpTo(LAST, SMALL);
+    const m = index.manifest();
+    expect(m.chunks.length).toBe(Math.ceil(144 / SMALL));
+    for (let from = 0; from < m.chunks.length; from++) {
+      const single = m.chunks.slice(from).map((c, i) => index.chunk(from + i, c.count)!.bytes);
+      const merged = index.chunksFrom(from, m.entries)!;
+      expect([merged.chunks, hex(merged.bytes)]).toEqual([m.chunks.length - from, hex(concat(single))]);
+    }
+    // At a smaller entry count: the chunks a manifest listing that count names, the last cut there.
+    for (const entries of [1, SMALL - 1, SMALL, SMALL + 1, 100, 143]) {
+      const last = Math.ceil(entries / SMALL) - 1;
+      const answer = index.chunksFrom(0, entries)!;
+      const single = Array.from({ length: last + 1 }, (_, n) => index.chunk(n, Math.min(SMALL, entries - n * SMALL))!.bytes);
+      expect(hex(answer.bytes), String(entries)).toBe(hex(concat(single)));
+      expect(decodeDustChunk(single.at(-1)!).count).toBe(entries - last * SMALL);
+    }
+    expect(index.chunksFrom(0, 145)).toBeNull();
+    expect(index.chunksFrom(0, 0)).toBeNull();
+    expect(index.chunksFrom(m.chunks.length, m.entries)).toBeNull();
+    expect(index.chunksFrom(-1, m.entries)).toBeNull();
+    expect(index.chunksFrom(Math.ceil(100 / SMALL), 100)).toBeNull();
+  });
+
+  it("the wallet: one request for every chunk it lacks; a later sync asks from the first chunk it lacks only; a file that grows between the manifest and the chunks still verifies", async () => {
+    const mid = spendRows()[60]!.height;
+    const { index, grow } = growing(mid);
+    const cache = new Map<string, Uint8Array>();
+    const first = serving(index);
+    const one = await downloadDustFile(first.http, cache);
+    const n1 = one.manifest.chunks.length;
+    expect(n1).toBeGreaterThan(2);
+    expect(first.asked).toEqual([ROUTES.dustManifest, `${ROUTES.dustChunks}?from=0&entries=${one.manifest.entries}`]);
+    expect(one.request).toMatchObject({ from: 0, entries: one.manifest.entries, chunks: n1 });
+    expect(one.file.entries).toBe(index.entries);
+    expect(cache.size).toBe(n1);
+
+    // The file grows: the cached full chunks are a prefix; the last partial one changed, so it is asked for again.
+    grow(3);
+    expect(index.entries).toBeGreaterThan(one.manifest.entries);
+    const second = serving(index);
+    const two = await downloadDustFile(second.http, cache);
+    const lacking = Math.floor(one.manifest.entries / SMALL);
+    expect(second.asked).toEqual([ROUTES.dustManifest, `${ROUTES.dustChunks}?from=${lacking}&entries=${two.manifest.entries}`]);
+    expect(two.chunks.map((c) => c.cached)).toEqual(two.manifest.chunks.map((_, n) => n < lacking));
+    for (let i = 0; i < two.file.entries; i++) expect(hex(dustEntryAt(two.file.chunks[Math.floor(i / SMALL)]!, i % SMALL).prefix)).toBe(hex(index.entry(i).prefix));
+
+    // Nothing new: no chunks request.
+    const third = serving(index);
+    expect((await downloadDustFile(third.http, cache)).request).toBeNull();
+    expect(third.asked).toEqual([ROUTES.dustManifest]);
+
+    // The file grows between the manifest and the chunks: the answer is cut at the manifest's count, and checks out.
+    grow(3);
+    const racing = serving(index, () => grow(4));
+    const before = index.entries;
+    const four = await downloadDustFile(racing.http, cache);
+    expect(index.entries).toBeGreaterThan(before);
+    expect(four.manifest.entries).toBe(before);
+    expect(four.file.entries).toBe(before);
+    expect(racing.asked.at(-1)).toMatch(new RegExp(`^${ROUTES.dustChunks}\\?from=\\d+&entries=${before}$`));
+    expect(four.request).not.toBeNull();
   });
 });

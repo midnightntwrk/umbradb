@@ -61,6 +61,8 @@ export interface DustRoutes {
   queries(): number;
   /** Calls to the path table. */
   pathQueries(): number;
+  /** The `GET /dust/chunks` requests answered, each's chunk number and entry count (phase 12). */
+  chunksQueries(): readonly { readonly from: number; readonly entries: number }[];
   readonly built: DustCheckResult;
 }
 
@@ -181,11 +183,23 @@ export async function dustWorld() {
     const idBytes = fromHex(built.id, 32);
     let queries = 0;
     let pathQueries = 0;
+    const chunksQueries: { from: number; entries: number }[] = [];
     const json = (body: unknown): Response => new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
     const fetch = async (url: string, init: RequestInit = {}): Promise<Response> => {
       const u = new URL(url);
       const path = u.pathname;
       if (path === ROUTES.dustManifest) return json(manifest);
+      // The world's file does not grow: chunks from n at its own entry count, one after another.
+      if (path === ROUTES.dustChunks) {
+        const from = Number(u.searchParams.get("from"));
+        const entries = Number(u.searchParams.get("entries"));
+        if (!Number.isInteger(from) || from < 0 || from >= chunkBytes.length || entries !== manifest.entries) return new Response("{}", { status: 404 });
+        chunksQueries.push({ from, entries });
+        const parts = chunkBytes.slice(from);
+        const body = new Uint8Array(parts.reduce((t, p) => t + p.length, 0));
+        parts.reduce((at, p) => (body.set(p, at), at + p.length), 0);
+        return new Response(body as Uint8Array<ArrayBuffer>, { headers: { "Content-Type": "application/octet-stream" } });
+      }
       if (path.startsWith(ROUTES.dustChunk)) {
         const n = Number(path.slice(ROUTES.dustChunk.length));
         const count = Number(u.searchParams.get("count"));
@@ -210,7 +224,7 @@ export async function dustWorld() {
       }
       return new Response("{}", { status: 404 });
     };
-    return { fetch, queries: () => queries, pathQueries: () => pathQueries, built };
+    return { fetch, queries: () => queries, pathQueries: () => pathQueries, chunksQueries: () => chunksQueries, built };
   }
 
   return {

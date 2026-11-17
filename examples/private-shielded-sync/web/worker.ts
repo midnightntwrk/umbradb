@@ -272,21 +272,57 @@ function decodeBody(e: Exchange, side: "request" | "response"): Json | null {
 }
 
 /** What a Dust route's body is (spec 00062; the JSON ones show as text). */
+/** A chunk's header and the bytes of each part. */
+function describeDustChunk(b: Uint8Array): Json {
+  const c = decodeDustChunk(b);
+  return {
+    first: c.first,
+    count: c.count,
+    firstHeight: c.firstHeight,
+    prefixBytes: c.prefixBytes,
+    firstTime: new Date(c.times[0]! * 1000).toISOString(),
+    firstPosition: c.positions[0],
+    bytesByPart: dustChunkLayout(b),
+    firstPrefixes: Array.from({ length: Math.min(4, c.count) }, (_, i) => hex(c.prefixes.subarray(i * c.prefixBytes, (i + 1) * c.prefixBytes))),
+  };
+}
+
+/**
+ * A `/dust/chunks` answer split into the chunks it carried, by a Dust manifest this page got whose chunks from some
+ * number on have the answer's length and SHA-256s; null when none does.
+ */
+function splitDustChunks(b: Uint8Array): Json | null {
+  for (const m of [...(dust?.fileManifests ?? [])].reverse()) {
+    let rest = m.chunks.reduce((t, c) => t + c.bytes, 0);
+    for (let from = 0; from < m.chunks.length; rest -= m.chunks[from]!.bytes, from++) {
+      if (rest !== b.length) continue;
+      let at = 0;
+      const parts: Json[] = [];
+      let ok = true;
+      for (const [i, ref] of m.chunks.slice(from).entries()) {
+        const part = b.subarray(at, (at += ref.bytes));
+        if (hex(sha256Sync(part)) !== ref.sha256) {
+          ok = false;
+          break;
+        }
+        parts.push({ n: from + i, bytes: ref.bytes, sha256: `${ref.sha256.slice(0, 16)}… (equals the manifest's)`, ...describeDustChunk(part) });
+      }
+      if (ok) return { from, entries: m.entries, chunks: parts };
+    }
+  }
+  return null;
+}
+
 function decodeDustBody(route: string, side: "request" | "response", b: Uint8Array, requestBody: Uint8Array | null): Json | null {
-  if (route.startsWith("/dust/chunk/") && side === "response") {
-    const c = decodeDustChunk(b);
-    const layout = dustChunkLayout(b);
+  if (route === "/dust/chunks" && side === "response") {
+    const split = splitDustChunks(b);
     return {
-      format: "Dust chunk (shared/dust-file.ts): magic PSSDUST1, header, prefixes, fee list, then times, fees and positions as differences",
-      first: c.first,
-      count: c.count,
-      firstHeight: c.firstHeight,
-      prefixBytes: c.prefixBytes,
-      firstTime: new Date(c.times[0]! * 1000).toISOString(),
-      firstPosition: c.positions[0],
-      bytesByPart: layout,
-      firstPrefixes: Array.from({ length: Math.min(4, c.count) }, (_, i) => hex(c.prefixes.subarray(i * c.prefixBytes, (i + 1) * c.prefixBytes))),
+      format: "Dust chunks (GET /dust/chunks?from=<n>&entries=<the manifest's entry count>): chunks n to the last, one after another, each as GET /dust/chunk/<n>?count=<c> gives it and split by the manifest's lengths",
+      ...(split ?? { note: "no Dust manifest this page holds lists chunks of these lengths" }),
     };
+  }
+  if (route.startsWith("/dust/chunk/") && side === "response") {
+    return { format: "Dust chunk (shared/dust-file.ts): magic PSSDUST1, header, prefixes, fee list, then times, fees and positions as differences", ...describeDustChunk(b) };
   }
   if (route === "/dust/check/manifest") return { format: "the Dust snapshot's manifest (canonical JSON); its SHA-256 is the check's identifier" };
   if (route === "/dust/check/query" || route === "/dust/check/path") {

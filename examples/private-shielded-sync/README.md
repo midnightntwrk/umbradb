@@ -215,9 +215,10 @@ and End move between them) and each keeps its state when hidden. The Details tab
 7. get the tail, scan its outputs, and check each fetched position's full 32-hash path against the tail's root;
 8. show the coins and the balance;
 9. Dust (below, "Dust"): get the Dust file, the parameters and the wallet's first coins and generation updates, with
-   the Dust seed of the mnemonic step 1 took (a wallet given by its Zswap seed has none); chunks and the check table's
-   public artifact are kept by SHA-256 for the page's life, so a second run downloads only the new ones, and the step
-   says how many came from the cache;
+   the Dust seed of the mnemonic step 1 took (a wallet given by its Zswap seed has none); the chunks the page lacks come
+   in one request (`GET /dust/chunks`); chunks and the check table's public artifact are kept by SHA-256 for the page's
+   life, so a second run downloads only the new ones, and the step says how many came from the cache and which chunks
+   the one request carried;
 10. walk each Dust chain through the file, locally: per chain, the first coin, the spends found with their file
     entries, and the current coin (sequence number, position, creation time, value, commitment);
 11. check each chain's end by PIR in the Dust check table, all chains in calls padded to the same number of requests,
@@ -314,7 +315,8 @@ answer's last byte; a step's requests run one after the other), the rest of its 
 Dust steps are `web/dust-steps.ts` (the command line's `dust` and `dust --spend`, from `client/dust.ts`,
 `client/dust-check.ts` and `client/dust-spend.ts`, cut into the four steps) and `web/dust-view.ts` (the chains, bytes
 and spend as the page shows them), both without the DOM, so `test/server-web-dust.test.ts` runs them under Node in
-both schemes. The request panel decodes the Dust routes too: a chunk's header and the bytes of each part, the Dust
+both schemes. The request panel decodes the Dust routes too: each chunk a `/dust/chunks` answer carried (its number,
+header and the bytes of each part, split by the manifest's lengths and checked against its SHA-256s), the Dust
 snapshot's public files (the check and path tables' public artifacts, the block roots, the generation records), and
 the check and path tables' query and answer bodies.
 `npx tsc -p examples/private-shielded-sync/web` type-checks the page and the worker.
@@ -734,8 +736,10 @@ to height 3,448,835):
 Reading and decoding the 973,053 events of both eras took 13.5 s, building the files 0.5 s.
 
 **The walk** (`client/dust.ts`). The wallet's Dust key comes from the mnemonic's Dust seed (`DustSecretKey.fromSeed`,
-as the wallet SDK derives it). It downloads the manifest and each chunk at the entry count the manifest lists (checked
-against its SHA-256), its first coins and generation updates (`GET /dust/coins?owner=…`) and the parameters. For each
+as the wallet SDK derives it). It downloads the manifest, then every chunk its cache does not hold in one request
+(`GET /dust/chunks?from=<the first chunk it lacks>&entries=<the manifest's entry count>`), which it splits by the
+manifest's lengths and checks against each chunk's SHA-256 (cached full chunks never change, so they are a prefix of
+the file and a later sync asks for the new chunks only), its first coins and generation updates (`GET /dust/coins?owner=…`) and the parameters. For each
 first coin of its key, it computes the coin's nullifier and searches the file for its prefix from the first entry whose
 position is above the coin's own (a spend's new commitment is always appended after the coin it spends); on a match it
 derives the next coin from the entry's time, fee and position, and searches on from the entry after. The generation
@@ -840,7 +844,8 @@ has been submitted this way yet.
 | Route | Answer |
 |---|---|
 | `GET /dust/manifest` | The Dust file's manifest, JSON |
-| `GET /dust/chunk/<n>[?count=<c>]` | Chunk n's bytes, with its first c entries when `count` is given (the count the manifest lists); cached for good when full or with a count. 404 beyond the file, 400 for a number that is not plain decimal |
+| `GET /dust/chunk/<n>[?count=<c>]` | Chunk n's bytes, with its first c entries when `count` is given (the count the manifest lists); cached for good when full or with a count. 404 beyond the file, 400 for a number that is not plain decimal. The wallet no longer asks for single chunks |
+| `GET /dust/chunks?from=<n>&entries=<e>` | Chunks n to the last of the file as a manifest listing e entries gives them, one after another, each as `/dust/chunk/<n>?count=<c>` gives it, the last cut at e (so the file growing since the manifest changes nothing); `Pss-Dust-Chunks` = how many. Cached for good. 400 `invalid-from` or `invalid-entries` for a number that is not plain decimal (or entries 0), 404 `no-such-chunks` when the file has fewer than e entries or no chunk n at e |
 | `GET /dust/coins?owner=<key>` | JSON: that Dust public key's `dust-initial-utxo` and `dust-generation-dtime-update` events, each `{height, bytes}` with the bytes in hexadecimal, in chain order. 400 for a key that is not plain decimal |
 | `GET /dust/parameters` | JSON: the Dust parameters in force (decimal strings): the ledger's initial ones, or the era's last `param-change` event's; and the ledger parameters in force (`ledgerParameters`, the ledger's tagged serialization in hexadecimal, from the core's `ledger-state` item, with `ledgerParametersHeight`; null until a block is committed after start) |
 | `GET /dust/check/manifest` | The Dust snapshot's manifest bytes; `Pss-Dust-Check-Id` = its SHA-256. 503 `no-dust-check` (with the last build's reason) before one is built |
@@ -873,6 +878,10 @@ chain 2: first coin at height 3,398,886, generation index 1052, backed by 5,001,
   current coin: seq 5, position 21383, created 2026-11-13T05:47:12.000Z, value at creation 253,921,104,116,881,266 Specks, value now 15,785,552,934,341,881,266 Specks
 downloaded 6,918,127 bytes in 24 requests (manifest 3,023, chunks 665,787, coins 1,260, parameters 146, check 6,247,911); uploaded 186,536 bytes of request bodies; 223 ms
 ```
+
+That run asked for each of its 18 chunks alone. Since phase 12 the chunks come in one request: a first `dust` run on
+Preprod (19 chunks, 74,939 entries) makes 7 requests instead of 25 (6,941,411 bytes down, 687,537 of them chunks), and
+a second one with nothing new makes 5, as before.
 
 **Not covered.** The earlier ledger era, whose events are
 decoded only to measure the file's size; hiding the Dust public key when asking for its first coins (the coins request
@@ -1015,8 +1024,8 @@ wallet's math was moved to the GPU and what was not.
 | `test/ipir-gpu-reference.test.ts` | What the GPU responder is checked against, without a GPU: the add-on's `gpuReference` export and the answer arithmetic of `gpu/ipir-wire.ts`. |
 | `test/web-scheme-view.test.ts` | The page's per-scheme presentation: SimplePIR's lines as before, IPIR+SP's sizes, a real IPIR+SP call decoded part by part, the masks, the WebAssembly compiled only with the committed digest. |
 | `test/dust-file.test.ts` | The Dust file's chunks: round trips, a negative time difference, a position jump, fees by index and in full, a chunk decoded alone, full chunks unchanged as the file grows, bad bytes. |
-| `test/server-dust-index.test.ts` | The Dust index over real Preprod events: each chunk against the entries read from the events, full chunks unchanged as the file grows, a chunk at an earlier count, the era's first height, first coins and updates by owner, the parameters, the commitments by position (a gap and a position filled twice refused), the commitment and generation trees against Preprod's stored roots at three heights and k = 0, 2, 16, the stored state's block time in whole seconds, what breaks it. |
-| `test/server-dust.test.ts` | The Dust routes in UmbraDB's real process (PostgreSQL 18) over Preprod events written into the test database: the file, a key's coins, the parameters, refusals; the Dust snapshot built at start in SimplePIR (its commitment and generation roots the stored ones, Preprod's), read through the wallet's code (the check, a coin's path at four positions), refusals, a build refused for another stored `dust_commitment_first_free`, the snapshot rebuilt in IPIR+SP by an IPIR+SP snapshot build and read through it (the check and a path); the ledger parameters served. |
+| `test/server-dust-index.test.ts` | The Dust index over real Preprod events: each chunk against the entries read from the events, full chunks unchanged as the file grows, a chunk at an earlier count, the chunks in one answer from any chunk equal to the single chunks one after another and cut at any entry count, the wallet's one request for the chunks it lacks (from the first it lacks on a later sync, none when it holds all, and a file grown between the manifest and the chunks still checked), the era's first height, first coins and updates by owner, the parameters, the commitments by position (a gap and a position filled twice refused), the commitment and generation trees against Preprod's stored roots at three heights and k = 0, 2, 16, the stored state's block time in whole seconds, what breaks it. |
+| `test/server-dust.test.ts` | The Dust routes in UmbraDB's real process (PostgreSQL 18) over Preprod events written into the test database: the file (one chunk at a time and all from a chunk in one answer, cut at an entry count, refusals), a key's coins, the parameters, refusals; the Dust snapshot built at start in SimplePIR (its commitment and generation roots the stored ones, Preprod's), read through the wallet's code (the check, a coin's path at four positions), refusals, a build refused for another stored `dust_commitment_first_free`, the snapshot rebuilt in IPIR+SP by an IPIR+SP snapshot build and read through it (the check and a path); the ledger parameters served. |
 | `test/dust-walk.test.ts` | The walk: a chain of several spends across chunks, a match below the coin's position, a false match without and with a check, a chain with no spend, two chains in one file; with the ledger's functions, a chain found again from the encoded file, and what a generation record's `dtime` changes; the coins answer decoded from real events. |
 | `test/server-web-dust.test.ts` | The page's Dust steps under Node in both schemes, over the world of `test/server-dust-world.ts` (also the check test's): a wallet with three chains (the false match dropped, a chain not checkable, a chain with nothing to check), a second run from the page's cache, step 12 (one padded path call, both roots the snapshot's, the spend in memory, the snapshot's files from the page's cache the second time), a generated wallet with no chain (one padded call), the page's rendering of the chains, bytes and spend, refusals. |
 | `test/client-address.test.ts` | The wallet's shielded, Dust and unshielded (Night) addresses from the example's own code equal the wallet SDK's (its address codecs over keys its ledger package derives, and its unshielded key store) for the same HD seeds of two mnemonics, on Preprod, mainnet and a local network; the Dust payload's SCALE compact encoding at every length; a Zswap seed gives the shielded address only. With the client's install. |

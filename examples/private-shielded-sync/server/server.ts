@@ -955,6 +955,7 @@ export class PssServer {
     this.#route(api, "GET", ROUTES.adminSnapshot, async (req) => this.#adminStatus(req));
     this.#route(api, "GET", ROUTES.dustManifest, async () => this.#dustManifest());
     this.#route(api, "GET", `${ROUTES.dustChunk}:n`, async (req) => this.#dustChunk(req.params.n ?? "", req.params.count));
+    this.#route(api, "GET", ROUTES.dustChunks, async (req) => this.#dustChunks(req.params.from, req.params.entries));
     this.#route(api, "GET", ROUTES.dustCoins, async (req) => this.#dustCoins(req.params.owner));
     this.#route(api, "GET", ROUTES.dustParameters, async () => this.#dustParameters());
     this.#route(api, "GET", ROUTES.dustCheckManifest, async () => this.#dustCheckManifest());
@@ -1109,6 +1110,22 @@ export class PssServer {
       },
       body: chunk.bytes,
     };
+  }
+
+  /**
+   * Chunks `from` to the last of the file as a manifest listing `entries` entries gives them, one after another, the
+   * last cut at `entries` (phase 12): what a wallet lacks, in one answer, which it splits and checks by the manifest's
+   * lengths and SHA-256s. The same two numbers always give the same bytes, so the answer may be cached for good.
+   */
+  #dustChunks(from: string | undefined, entries: string | undefined): HttpAnswer {
+    const refused = this.#dustRefused();
+    if (refused !== null) return refused;
+    const decimal = /^(0|[1-9][0-9]{0,8})$/;
+    if (from === undefined || !decimal.test(from)) return error(400, "invalid-from", "from is the first chunk's number in decimal");
+    if (entries === undefined || !decimal.test(entries) || entries === "0") return error(400, "invalid-entries", "entries is the manifest's entry count in decimal");
+    const answer = this.dust.chunksFrom(Number(from), Number(entries));
+    if (answer === null) return error(404, "no-such-chunks", `the Dust file has ${this.dust.entries} entries in chunks of ${this.dust.chunkEntries}: no chunk ${from} at ${entries} entries`);
+    return { status: 200, headers: { "Content-Type": OCTET_STREAM, "Cache-Control": "public, max-age=31536000, immutable", "Pss-Dust-Chunks": String(answer.chunks) }, body: answer.bytes };
   }
 
   /** One owner's first coins and generation updates (the owner is shown to the server: spec 00062, assumptions). */

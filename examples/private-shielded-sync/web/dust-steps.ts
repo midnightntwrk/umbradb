@@ -3,9 +3,10 @@
  * `test/server-web-dust.test.ts` runs them under Node. They are the command line's `dust` (`../client/dust.ts`,
  * `../client/dust-check.ts`) cut into the page's three steps:
  *
- * 1. **Get the file**: the Dust manifest, each chunk at the entry count the manifest lists (from the page's cache when
- *    it holds the chunk's SHA-256, so a second run downloads only what is new), the parameters, and the wallet's first
- *    coins and generation updates (the one request that names the wallet: its Dust public key).
+ * 1. **Get the file**: the Dust manifest, the chunks the page's cache holds (by SHA-256) up to the first it lacks, and
+ *    every later chunk in one request (`GET /dust/chunks`, cut at the manifest's entry count), so a second run downloads
+ *    only what is new; the parameters, and the wallet's first coins and generation updates (the one request that names
+ *    the wallet: its Dust public key).
  * 2. **Walk**: each chain through the downloaded file, locally; nothing is sent.
  * 3. **Check**: the check table's manifest and public artifact (cached the same way), then the walk again with every
  *    chain's end checked by PIR in calls padded to `queriesPerCall` requests; a refused match is dropped and the search
@@ -81,6 +82,8 @@ export class DustSteps {
   #checked: DustChain[] | null = null;
   /** Every check manifest this page used, by identifier, so a call to one decodes with its own table. */
   readonly checkManifests = new Map<string, DustCheckManifest>();
+  /** The last Dust file manifests this page got, so a `/dust/chunks` answer splits into the chunks it carried. */
+  readonly fileManifests: DustManifest[] = [];
 
   constructor(options: DustStepsOptions) {
     this.#o = options;
@@ -114,7 +117,9 @@ export class DustSteps {
     const { http, ledger } = this.#o;
     const t = performance.now();
     const firstRecord = http.records.length;
-    const { manifest, file, chunks } = await downloadDustFile(http, this.#o.cache);
+    const { manifest, file, chunks, request } = await downloadDustFile(http, this.#o.cache);
+    this.fileManifests.push(manifest);
+    if (this.fileManifests.length > 8) this.fileManifests.shift();
     const parameters = await http.dustParameters();
     const owner = await this.#withKey((key) => key.publicKey);
     const answer = await http.dustCoins(owner);
@@ -127,6 +132,7 @@ export class DustSteps {
       chunksFromCache: chunks.length - downloaded.length,
       chunksDownloaded: downloaded.length,
       chunkBytesDownloaded: downloaded.reduce((n, c) => n + c.bytes, 0),
+      chunkRequest: request === null ? null : { ...request, ms: round(request.ms) },
       parameters,
       keyEnds: owner.toString().slice(-8),
       firstCoins: starts.map((s) => ({ height: s.height, generationIndex: s.generationIndex.toString(), position: s.coin.mtIndex.toString(), nightValue: s.generation.value.toString() })),

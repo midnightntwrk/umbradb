@@ -23,6 +23,8 @@ export const ROUTES = Object.freeze({
   dustManifest: `${ROUTE_PREFIX}/dust/manifest`,
   /** Followed by the chunk's number. */
   dustChunk: `${ROUTE_PREFIX}/dust/chunk/`,
+  /** `GET …/dust/chunks?from=<first chunk>&entries=<the manifest's entry count>`: those chunks, one after another. */
+  dustChunks: `${ROUTE_PREFIX}/dust/chunks`,
   /** With `?owner=<Dust public key, decimal>`: that owner's first coins and generation updates, JSON. */
   dustCoins: `${ROUTE_PREFIX}/dust/coins`,
   /** The Dust parameters in force, JSON. */

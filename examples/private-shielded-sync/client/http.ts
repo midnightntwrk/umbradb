@@ -115,6 +115,14 @@ export class PssHttp {
     return (await this.#bytes("GET", `${ROUTES.dustChunk}${n}`, undefined, `?count=${count}`)).bytes;
   }
 
+  /**
+   * `GET /dust/chunks?from=<n>&entries=<e>` (phase 12): chunks `n` to the last of a file of `e` entries (the manifest's
+   * count), one after another; the caller splits and checks them by the manifest's lengths and SHA-256s.
+   */
+  async dustChunks(from: number, entries: number): Promise<Uint8Array> {
+    return (await this.#bytes("GET", ROUTES.dustChunks, undefined, `?from=${from}&entries=${entries}`)).bytes;
+  }
+
   /** `GET /dust/coins?owner=<key>`: the owner's first coins and generation updates; the record names the route only. */
   async dustCoins(owner: bigint): Promise<DustCoinsAnswer> {
     return this.#json<DustCoinsAnswer>(ROUTES.dustCoins, `?owner=${owner.toString()}`);

@@ -495,6 +495,26 @@ export class DustIndex {
     return chunk;
   }
 
+  /**
+   * Chunks `from` to the last of a file of `entries` entries, encoded and one after another, the last cut at `entries`
+   * (each as `chunk(n, count)` gives it, so the bytes are a manifest's that lists `entries`, however the file grew
+   * since); null when the file has fewer entries or `from` is not one of those chunks.
+   */
+  chunksFrom(from: number, entries: number): { readonly bytes: Uint8Array; readonly chunks: number } | null {
+    if (!Number.isSafeInteger(entries) || entries < 1 || entries > this.entries) return null;
+    const last = Math.ceil(entries / this.chunkEntries) - 1;
+    if (!Number.isSafeInteger(from) || from < 0 || from > last) return null;
+    const parts: Uint8Array[] = [];
+    for (let n = from; n <= last; n++) parts.push(this.chunk(n, Math.min(this.chunkEntries, entries - n * this.chunkEntries))!.bytes);
+    const bytes = new Uint8Array(parts.reduce((t, p) => t + p.length, 0));
+    let at = 0;
+    for (const p of parts) {
+      bytes.set(p, at);
+      at += p.length;
+    }
+    return { bytes, chunks: parts.length };
+  }
+
   /** The file's manifest at the index's height. */
   manifest(): DustManifest {
     const kept = this.#manifest;

@@ -257,6 +257,7 @@ VIEWS.dustFile = (r) => {
     facts([
       ["Dust file", `to height ${Number(m.height).toLocaleString("en-US")} (era from ${Number(m.eraHeight).toLocaleString("en-US")}), ${Number(m.entries).toLocaleString("en-US")} entries in ${m.chunks} chunks of ${m.chunkEntries}, ${m.prefixBytes}-byte prefixes`],
       ["chunks", `${r.chunksFromCache} from the page's cache, ${r.chunksDownloaded} downloaded (${kb(Number(r.chunkBytesDownloaded))})`],
+      ["chunks request", r.chunkRequest === null || r.chunkRequest === undefined ? "none: every chunk from the page's cache" : `one: GET /dust/chunks?from=${(r.chunkRequest as Json).from}&entries=${(r.chunkRequest as Json).entries}, chunks ${(r.chunkRequest as Json).from} to ${Number((r.chunkRequest as Json).from) + Number((r.chunkRequest as Json).chunks) - 1} (${kb(Number((r.chunkRequest as Json).bytes))}, ${(r.chunkRequest as Json).ms} ms)`],
       ["parameters", `${p.nightDustRatio} Specks per Star, decay ${p.generationDecayRate}, grace ${p.dustGracePeriodSeconds} s (${p.source === "initial" ? "the ledger's initial ones" : `changed at ${p.changedAt}`})`],
       ["Dust key", `…${r.keyEnds} (last digits; the key is a public key)`],
       ["first coins in the era", firsts.length === 0 ? "none" : firsts.map((f) => `height ${f.height}, position ${f.position}`).join("; ")],
@@ -265,7 +266,7 @@ VIEWS.dustFile = (r) => {
       ["checks", checksHtml(r.checks)],
       ["note", String(r.note)],
       ["time", `${r.ms} ms`],
-    ]) + table(["chunk", "entries", "heights", "size", "from", "ms"], chunks.map((c) => [String(c.n), `${c.first} … ${Number(c.first) + Number(c.count) - 1}`, `${c.firstHeight} … ${c.lastHeight}`, kb(Number(c.bytes)), c.cached ? "cache" : "server", String(c.ms)]))
+    ]) + table(["chunk", "entries", "heights", "size", "from"], chunks.map((c) => [String(c.n), `${c.first} … ${Number(c.first) + Number(c.count) - 1}`, `${c.firstHeight} … ${c.lastHeight}`, kb(Number(c.bytes)), c.cached ? "cache" : "server (the one request)"]))
   );
 };
 VIEWS.dustWalk = (r) =>
