@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, chmodSync, cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -33,11 +33,14 @@ interface Ran {
   readonly stderr: string;
 }
 
-/** Runs one script with `args`, in an environment without the bench's variables unless `env` gives them. */
-function run(script: string, args: readonly string[], env: Readonly<Record<string, string>> = {}): Ran {
+/**
+ * Runs one script with `args`, in an environment without the bench's variables unless `env` gives them, from `cwd`
+ * (this process's own unless given).
+ */
+function run(script: string, args: readonly string[], env: Readonly<Record<string, string>> = {}, cwd?: string): Ran {
   const base = Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^(BENCH_|BUILD$|TEMPLATE$|UMBRADB_LOCAL_NODE$|SKIP$|FROM$|TO$)/.test(name)));
   const command = script.endsWith(".sh") ? "bash" : process.execPath;
-  const result = spawnSync(command, [join(SCRIPTS, script), ...args], { encoding: "utf8", env: { ...base, ...env } });
+  const result = spawnSync(command, [join(SCRIPTS, script), ...args], { encoding: "utf8", env: { ...base, ...env }, cwd });
   return { code: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
@@ -823,7 +826,7 @@ exit 0
         writeFileSync(join(bin, "log"), log);
         for (const file of ["served", "calls.log", "running", "created"]) rmSync(join(bin, file), { force: true });
       },
-      calls: (): string => readFileSync(join(bin, "calls.log"), "utf8"),
+      calls: (): string => (existsSync(join(bin, "calls.log")) ? readFileSync(join(bin, "calls.log"), "utf8") : ""),
       done: (): void => rmSync(home, { recursive: true, force: true }),
     };
   };
@@ -981,6 +984,40 @@ exit 0
         drop("bench_first", "bench_second");
       }
     });
+
+    it("negative control: the password file inside a run's folder is found whatever path names it, before anything is removed", () => {
+      const host = machine();
+      try {
+        // A run's folder that run.sh made, with a password file in it.
+        host.play([sample("syncing", 100), sample("stopped", 200)]);
+        expect(run("run.sh", ["old-run", "200"], host.env).code).toBe(0);
+        const inside = join(host.home, "old-run", "password");
+        symlinkSync(join(host.home, "old-run"), join(host.home, "link-to-run"));
+        symlinkSync(inside, join(host.home, "link-to-password"));
+        symlinkSync(host.home, join(host.home, "alias"));
+        // Each names that file: from the machine's folder, with . and .., through a link to the folder, as a link, and
+        // the run's folder named through a link to the machine's folder while the password's path does not.
+        const ways: [string, string, Record<string, string>][] = [
+          ["a relative path", "old-run/password", {}],
+          ["a . component", `${host.home}/./old-run/password`, {}],
+          ["a .. component", `${join(host.home, "build")}/../old-run/password`, {}],
+          ["a link to the folder", join(host.home, "link-to-run", "password"), {}],
+          ["a link to the file", join(host.home, "link-to-password"), {}],
+          ["the bench folder through a link", inside, { BENCH_DIR: join(host.home, "alias") }],
+        ];
+        const outcomes = ways.map(([way, path, env]) => {
+          writeFileSync(inside, "not a password\n", { mode: 0o600 });
+          host.play([sample("syncing", 100), sample("stopped", 200)]);
+          const result = run("run.sh", ["old-run", "200"], { ...host.env, BENCH_PG_PASSWORD_FILE: path, ...env }, host.home);
+          const kept = existsSync(inside) && readFileSync(inside, "utf8") === "not a password\n";
+          return { way, kept, code: result.code, refused: result.stderr.includes("names the password file or its folder"), ran: /^run -d /m.test(host.calls()) };
+        });
+        expect(outcomes).toEqual(ways.map(([way]) => ({ way, kept: true, code: 2, refused: true, ran: false })));
+      } finally {
+        host.done();
+        drop("bench_old_run");
+      }
+    }, 120_000);
   });
 
   it("refuses without a label", () => {

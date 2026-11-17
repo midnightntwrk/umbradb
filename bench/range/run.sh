@@ -25,10 +25,10 @@
 # umbradb-bench-run-<label>. Touches only the bench's own Docker objects.
 #
 # What it removes and drops is a run's own, checked before anything is changed: the label's folder only if it is
-# empty or an earlier run's of this label in this place (its marker, .bench-run, written below), never the password
-# file's; the label's database only if an earlier run.sh made it (its comment, written below), never a template; and
-# only once the container, the network, the password file and the template are there. Exit status 2: refused, nothing
-# changed.
+# empty or an earlier run's of this label in this place (its marker, .bench-run, written below), never one that holds
+# the password file (compared by the files the paths lead to); the label's database only if an earlier run.sh made it
+# (its comment, written below), never a template; and only once the container, the network, the password file and the
+# template are there. Exit status 2: refused, nothing changed.
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 if [ $# -lt 2 ]; then echo "usage: run.sh <label> <stop-height> [KEY=VALUE ...]" >&2; exit 2; fi
@@ -57,7 +57,21 @@ check_name "the database prefix (BENCH_DB_PREFIX)" "$BENCH_DB_PREFIX"
 case "$TEMPLATE" in "$BENCH_DB_PREFIX"*) refuse "the template $TEMPLATE begins with the runs' prefix $BENCH_DB_PREFIX, so a run's label could name it";; esac
 [ "${#DB}" -le 63 ] || refuse "the database name $DB is longer than the 63 bytes PostgreSQL keeps of a name"
 case "$STALL_LIMIT" in ""|*[!0123456789]*) refuse "STALL_LIMIT is a number of seconds: $STALL_LIMIT";; esac
-case "$BENCH_PG_PASSWORD_FILE" in "$OUT"|"$OUT"/*) refuse "the label $LABEL names the password file or its folder ($BENCH_PG_PASSWORD_FILE)";; esac
+# Whether the file $1 names is the folder $2 or lies inside it, whatever path names either (relative, with . or ..,
+# through links): the folder that holds the name, links resolved, and each folder above it up to /, are compared with
+# $2 by device and inode; for a link, the same again for what it leads to.
+inside() {
+  local file="$1" dir hops=0 target
+  while :; do
+    [ "$file" -ef "$2" ] && return 0
+    dir="$(cd -P "$(dirname "$file")" 2>/dev/null && pwd -P)" || return 1
+    while :; do [ "$dir" -ef "$2" ] && return 0; [ "$dir" != / ] || break; dir="$(dirname "$dir")"; done
+    [ -L "$file" ] && [ $((hops += 1)) -le 40 ] || return 1
+    target="$(readlink "$file")"
+    case "$target" in /*) file="$target";; *) file="$(dirname "$file")/$target";; esac
+  done
+}
+if inside "$BENCH_PG_PASSWORD_FILE" "$OUT"; then refuse "the label $LABEL names the password file or its folder ($BENCH_PG_PASSWORD_FILE)"; fi
 # A folder run.sh may empty: none, an empty one, or one an earlier run of this label made in this place (its marker
 # says so). A link is none of them, nor is a marker that is a link.
 run_folder() {
