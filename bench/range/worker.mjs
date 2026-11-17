@@ -14,9 +14,13 @@ const keys = ["parse", "adapterApply", "deserialize", "segments", "wellFormed", 
 // The keys of a worker line that are not phases: its height and transactions, its span, the time outside requests, the
 // node waits' totals, the collections, the memory; and every key with a dot (requests, node waits by phase).
 const NOT_PHASES = new Set(["h", "tx", "spanMs", "idleMs", "transitMs", "queuedMs", "nodeWaitMs", "nodeWaits", "nodeGets", "nodeGot", "gcMs", "gcN", "gcMajorMs", "ext", "heap", "rss"]);
-const mean = (rows, k) => (rows.length ? rows.reduce((a, r) => a + (r[k] ?? 0), 0) / rows.length : NaN);
-const med = (rows, k) => { const v = rows.map((r) => r[k] ?? 0).sort((a, b) => a - b); return v.length ? v[v.length >> 1] : NaN; };
-const total = (rows, f) => f(rows, "adapterApply") + f(rows, "settle");
+// The mean and the median over rows of a key, or of a function of the row.
+const value = (k) => (typeof k === "function" ? k : (r) => r[k] ?? 0);
+const mean = (rows, k) => (rows.length ? rows.reduce((a, r) => a + value(k)(r), 0) / rows.length : NaN);
+const med = (rows, k) => { const v = rows.map(value(k)).sort((a, b) => a - b); return v.length ? v[v.length >> 1] : NaN; };
+// A block's apply: its two phases added up first, so that its median is a block's (the phases' medians may come from
+// different blocks, and their sum from none).
+const apply = (r) => (r.adapterApply ?? 0) + (r.settle ?? 0);
 const cols = [];
 for (const dir of process.argv.slice(2)) {
   const t = jsonLines(`${dir}/trace.jsonl.worker.jsonl`).slice(skip).filter((r) => r.h >= from && r.h <= to);
@@ -31,5 +35,5 @@ const traced = [...keys.filter((k) => seen.has(k)), ...[...seen].filter((k) => !
 console.log("phase".padEnd(18) + cols.map((c) => c.dir.slice(0, 26).padStart(26)).join(" | "));
 console.log("".padEnd(18) + cols.map(() => "   empty  tx-mean   tx-med").join(" | "));
 for (const k of traced) console.log(k.padEnd(18) + cols.map((c) => (c.present.has(k) ? `${f(mean(c.e, k))} ${f(mean(c.x, k))} ${f(med(c.x, k))}` : "n/a".padStart(26))).join(" | "));
-console.log("apply".padEnd(18) + cols.map((c) => `${f(total(c.e, mean))} ${f(total(c.x, mean))} ${f(total(c.x, med))}`).join(" | "));
+console.log("apply".padEnd(18) + cols.map((c) => `${f(mean(c.e, apply))} ${f(mean(c.x, apply))} ${f(med(c.x, apply))}`).join(" | "));
 console.log("blocks e/tx, txs".padEnd(18) + cols.map((c) => `${c.e.length}/${c.x.length}, ${c.txs}`.padStart(26)).join(" | "));

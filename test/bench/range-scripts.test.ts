@@ -501,6 +501,24 @@ describe("the scripts that read a run folder", () => {
     expect(run("worker.mjs", [folder("a")], { SKIP: "0", FROM: "103" }).stdout).toContain("2/0, 0");
   });
 
+  it("worker.mjs: a block's apply is its phases added up, so the apply's median is the median of those sums", () => {
+    // Three blocks with transactions whose (adapterApply, settle) are (1, 9), (9, 1) and (10, 10): applies of 10, 10
+    // and 20 ms, whose median is 10. The phases' own medians, 9 and 9, add up to 18, no block's apply.
+    mkdirSync(folder("three"));
+    try {
+      const lines = [[1, 9], [9, 1], [10, 10]].map(([adapterApply, settle], index) => JSON.stringify({ h: 100 + index, tx: 1, adapterApply, settle }));
+      writeFileSync(join(folder("three"), "trace.jsonl.worker.jsonl"), `${lines.join("\n")}\n`);
+      const result = run("worker.mjs", [folder("three")], { SKIP: "0" });
+      expect(result.code, result.stderr).toBe(0);
+      const row = (name: string): string[] => (result.stdout.split("\n").find((line) => line.startsWith(name)) ?? "").trim().split(/\s+/);
+      // No empty block: its mean is left blank. With transactions: mean 13.33, median 10.
+      expect(row("apply ")).toEqual(["apply", "13.33", "10.00"]);
+      expect(row("adapterApply")).toEqual(["adapterApply", "6.67", "9.00"]);
+    } finally {
+      rmSync(folder("three"), { recursive: true, force: true });
+    }
+  });
+
   it("worker-time.mjs: where the worker's time went between two applied blocks, adding up to its span, and the main thread's side", () => {
     // Its own folder: the tests above count the folders of `directory`.
     const runs = mkdtempSync(join(tmpdir(), "umbradb-bench-range-worker-time-"));
