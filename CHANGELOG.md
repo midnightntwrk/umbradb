@@ -7,15 +7,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Added
-
-- **A block trace for measuring a sync.** With `UMBRADB_TRACE=<file>` in its environment, `umbradb run` writes where
-  each committed height's time went: the ledger worker's apply, the reclamation step and its reads, the block's
-  transaction, every statement's client time, and the phases inside the worker with the worker thread's whole time
-  between two applied blocks. It is off unless the variable is set and changes nothing that is stored.
-  `UMBRADB_TRACE_STEPS=1` beside it adds each step's count changes, new nodes and deleted nodes. The trace also records
-  memory at every block: `mem` in a height's line for the main thread, `ext`, `heap` and `rss` in the worker's line.
-  The operator guide's "Measuring a sync: the block trace" lists the files and their keys.
+_No unreleased changes._
 
 ## [0.10.0] - 2026-10-27
 
@@ -158,6 +150,16 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   and a ledger table's rows take `v9-rc5` as a name. The core version changes with the packages, so a database synced
   by a build that has the reference counting above continues as an upgrade: its `core` revision kept as a
   `versionEntry`, and this build's `core` entry from the next height.
+
+### Changed since `v0.10.0-rc.2`: sync speed
+
+- **A block trace for measuring a sync.** With `UMBRADB_TRACE=<file>` in its environment, `umbradb run` writes where
+  each committed height's time went: the ledger worker's apply, the reclamation step and its reads, the block's
+  transaction, every statement's client time, and the phases inside the worker with the worker thread's whole time
+  between two applied blocks. It is off unless the variable is set and changes nothing that is stored.
+  `UMBRADB_TRACE_STEPS=1` beside it adds each step's count changes, new nodes and deleted nodes. The trace also records
+  memory at every block: `mem` in a height's line for the main thread, `ext`, `heap` and `rss` in the worker's line.
+  The operator guide's "Measuring a sync: the block trace" lists the files and their keys.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 
