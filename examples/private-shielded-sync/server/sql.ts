@@ -130,19 +130,23 @@ export async function dustStateAt(
   readonly commitmentRoot: Uint8Array;
   readonly generationFirstFree: number;
   readonly generationRoot: Uint8Array;
-  /** Seconds since the Unix epoch. */
+  /**
+   * Whole seconds since the Unix epoch: the block's time without its milliseconds (Preprod has blocks at …06.001), as
+   * the ledger keys its Dust root history (`TimeFilterMap`, by `Timestamp::to_secs`). A spend dated at it selects the
+   * roots recorded after this block.
+   */
   readonly blockTime: number;
 } | null> {
   const [row] = await read.query(DUST_STATE_SQL, [height]);
   if (row === undefined) return null;
   const time = row.block_time instanceof Date ? row.block_time.getTime() : Date.parse(String(row.block_time));
-  if (!Number.isSafeInteger(time) || time % 1000 !== 0) throw new TypeError(`blocks.block_time is not whole seconds: ${String(row.block_time)}`);
+  if (!Number.isSafeInteger(time) || time < 0) throw new TypeError(`blocks.block_time is not a time: ${String(row.block_time)}`);
   return {
     commitmentFirstFree: int(row.dust_commitment_first_free, "states.dust_commitment_first_free"),
     commitmentRoot: bytes(row.dust_commitment_root, "states.dust_commitment_root"),
     generationFirstFree: int(row.dust_generation_first_free, "states.dust_generation_first_free"),
     generationRoot: bytes(row.dust_generation_root, "states.dust_generation_root"),
-    blockTime: time / 1000,
+    blockTime: Math.floor(time / 1000),
   };
 }
 

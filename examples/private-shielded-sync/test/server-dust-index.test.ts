@@ -12,6 +12,7 @@ import { decodeDustChunk, dustEntryAt, type DustEntry } from "../shared/index.ts
 import { type DustDecoder, type DustEvent, DustIndex, dustParametersOfText, ledgerDustDecoder } from "../server/dust-index.ts";
 import { compileKernel, Kernel } from "../kernel/kernel.ts";
 import { dustTree } from "../server/dust-tree.ts";
+import { dustStateAt } from "../server/sql.ts";
 import { rootFromStored } from "../server/tree.ts";
 import { byHeight, coinRows, commitmentsUpTo, dustEventOf, entryOf, FIXTURE, FIXTURE_STATES, ledger, ownerOf, spendRows } from "./server-dust-fixture.ts";
 
@@ -186,6 +187,15 @@ describe("the Dust index over Preprod events", () => {
     // A record's dtime changes the root: dropping one gives another root than the core's.
     const changed = records.map((r) => (r.dtime === null ? r : { ...r, dtime: null }));
     expect(index.generationRoot(changed)).not.toBe(index.generationRoot(records));
+  });
+
+  it("the stored state at a height: the block's time in whole seconds, its milliseconds dropped (as the ledger keys its Dust roots); no row, none", async () => {
+    const row = { dust_commitment_first_free: 254n, dust_commitment_root: Buffer.alloc(33, 1), dust_generation_first_free: 110n, dust_generation_root: Buffer.alloc(33, 2) };
+    const at = (block_time: unknown) => dustStateAt({ query: async () => [{ ...row, block_time }] } as never, 7);
+    expect((await at(new Date("2026-11-17T15:41:06.001Z")))!.blockTime).toBe(Date.parse("2026-11-17T15:41:06Z") / 1000);
+    expect((await at(new Date("2026-11-17T15:41:06.999Z")))!.blockTime).toBe(Date.parse("2026-11-17T15:41:06Z") / 1000);
+    expect(await at(new Date("2026-11-17T15:41:06Z"))).toMatchObject({ commitmentFirstFree: 254, generationFirstFree: 110, blockTime: Date.parse("2026-11-17T15:41:06Z") / 1000 });
+    expect(await dustStateAt({ query: async () => [] } as never, 7)).toBeNull();
   });
 
   it("refuses what it cannot serve: a position that does not rise breaks it (nothing of that height taken, later heights ignored); an event it cannot decode; no decoder", () => {
