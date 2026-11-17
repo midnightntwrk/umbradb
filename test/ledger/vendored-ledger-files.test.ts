@@ -134,6 +134,9 @@ function standInsDir(): string {
   }
   return standIns;
 }
+afterAll(() => {
+  if (standIns !== undefined) rmSync(standIns, { recursive: true, force: true });
+});
 
 /** The crates.io dependencies `version` patches: its directories `crates/<name>-<version>/`. */
 const patchedCrates = (version: string): string[] =>
@@ -142,27 +145,51 @@ const patchedCrates = (version: string): string[] =>
 const crateNameAndVersion = (dep: string): [string, string] => [dep.slice(0, dep.lastIndexOf("-")), dep.slice(dep.lastIndexOf("-") + 1)];
 const sha256Of = (path: string): string => createHash("sha256").update(readFileSync(path)).digest("hex");
 
-/** A `Cargo.lock` entry of a crates.io crate. */
-const lockEntry = (name: string, version: string, checksum: string): string =>
-  [`[[package]]`, `name = "${name}"`, `version = "${version}"`, `source = "registry+https://github.com/rust-lang/crates.io-index"`, `checksum = "${checksum}"`, ""].join("\n");
+/** A `Cargo.lock` entry of a crates.io crate, with or without its checksum. */
+const lockEntry = (name: string, version: string, checksum: string | undefined): string =>
+  [
+    `[[package]]`,
+    `name = "${name}"`,
+    `version = "${version}"`,
+    `source = "registry+https://github.com/rust-lang/crates.io-index"`,
+    ...(checksum === undefined ? [] : [`checksum = "${checksum}"`]),
+    "",
+  ].join("\n");
+
+interface BuildStepOptions {
+  /** The build script, or a changed copy of it. */
+  readonly script?: string;
+  /** What the download serves of each patched crate: the archive the lock pins (the default), another one, or nothing. */
+  readonly served?: "pinned" | "other" | "none";
+  /** Whether the source's `Cargo.lock` gives a checksum for each patched crate's version (the default: it does). */
+  readonly checksum?: boolean;
+}
 
 /**
- * Writes, under `root`, a `.crate` archive in `served/` for each crate `version` patches (its one file `Cargo.toml`, under
- * the directory `<name>-<version>/` as crates.io serves it) and the source's `Cargo.lock`, which pins each archive's
- * SHA-256.
+ * Writes, under `root`, two `.crate` archives for each crate `version` patches, each its one file `Cargo.toml` under the
+ * directory `<name>-<version>/` as crates.io serves it: the one the source's `Cargo.lock` pins, and another whose
+ * `Cargo.toml` has one more line. `served/` gets the one `served` names, or neither. The lock also pins another version
+ * of the crate and another crate at the same version, each with another checksum, before the crate's own entry.
  */
-function writeCrates(root: string, version: string): void {
+function writeCrates(root: string, version: string, { served = "pinned", checksum = true }: BuildStepOptions): void {
   mkdirSync(join(root, "served"));
   mkdirSync(join(root, "source"));
   const lock = ["version = 4", ""];
   for (const dep of patchedCrates(version)) {
     const [name, crateVersion] = crateNameAndVersion(dep);
-    mkdirSync(join(root, "crate-sources", dep), { recursive: true });
-    writeFileSync(join(root, "crate-sources", dep, "Cargo.toml"), `[package]\nname = "${name}"\nversion = "${crateVersion}"\n`);
-    const archive = join(root, "served", `${dep}.crate`);
-    const tar = spawnSync("tar", ["-czf", archive, "-C", join(root, "crate-sources"), dep], { encoding: "utf8", env: { ...process.env, COPYFILE_DISABLE: "1" } });
-    if (tar.status !== 0) throw new Error(`tar: ${tar.stderr}`);
-    lock.push(lockEntry(name, crateVersion, sha256Of(archive)));
+    const archives: Record<"pinned" | "other", string> = { pinned: "", other: "" };
+    for (const which of ["pinned", "other"] as const) {
+      const sources = join(root, "crate-sources", which);
+      mkdirSync(join(sources, dep), { recursive: true });
+      const extra = which === "other" ? "# not the archive the lock pins\n" : "";
+      writeFileSync(join(sources, dep, "Cargo.toml"), `[package]\nname = "${name}"\nversion = "${crateVersion}"\n${extra}`);
+      archives[which] = join(root, "crate-sources", `${which}-${dep}.crate`);
+      const tar = spawnSync("tar", ["-czf", archives[which], "-C", sources, dep], { encoding: "utf8", env: { ...process.env, COPYFILE_DISABLE: "1" } });
+      if (tar.status !== 0) throw new Error(`tar: ${tar.stderr}`);
+    }
+    if (served !== "none") cpSync(archives[served], join(root, "served", `${dep}.crate`));
+    lock.push(lockEntry(name, "0.1.0", "e".repeat(64)), lockEntry(`${name}-derive`, crateVersion, "d".repeat(64)));
+    lock.push(lockEntry(name, crateVersion, checksum ? sha256Of(archives.pinned) : undefined));
   }
   writeFileSync(join(root, "source", "Cargo.lock"), lock.join("\n"));
 }
@@ -175,9 +202,6 @@ const crateStepCalls = (version: string): string[] =>
       .sort()
       .map((patch) => `git apply /build/crates/${dep} /in/crates/${dep}/${patch}`),
   ]);
-afterAll(() => {
-  if (standIns !== undefined) rmSync(standIns, { recursive: true, force: true });
-});
 
 /** `upstream.json`'s values by their jq path (`.build.crate`), for the stand-in for `jq`. */
 function jqFields(value: unknown, path = ""): string[] {
@@ -188,20 +212,26 @@ function jqFields(value: unknown, path = ""): string[] {
 interface BuildStepRun {
   readonly status: number | null;
   readonly stderr: string;
-  /** The stand-ins' calls in order (`git apply <directory> <patch>`, `cargo <arguments>`), the temporary root shown as nothing. */
+  /**
+   * The stand-ins' calls in order (`curl <address>`, `git apply <directory> <patch>`, `cargo <arguments>`), the
+   * temporary root shown as nothing.
+   */
   readonly calls: readonly string[];
+  /** The directories under `/build/crates/` when the script stopped: the crates it unpacked. */
+  readonly unpacked: readonly string[];
   /** What `cargo` received, if the script reached it. */
   readonly cargo?: { readonly args: readonly string[]; readonly cwd: string; readonly env: Readonly<Record<string, string>> };
 }
 
 /**
- * Runs `script` (the build script, or a changed copy of it) on this host for `version`, up to its one `cargo build`.
+ * Runs the build script (or `options.script`, a changed copy of it) on this host for `version`, up to its one `cargo build`.
  * The container's fixed paths (`/in`, `/out`, `/build`, `/opt`) are moved under a temporary directory, `/in` holding
  * the version's directory without its built package, and the stand-ins come first on the `PATH`; the source's
  * `Cargo.lock` pins the archive the download serves of each crate the version patches (`writeCrates`). The environment
  * is otherwise empty, so a setting the script does not hand the build cannot come from this host's.
  */
-function runBuildStep(version: string, script: string = BUILD_SCRIPT): BuildStepRun {
+function runBuildStep(version: string, options: BuildStepOptions = {}): BuildStepRun {
+  const script = options.script ?? BUILD_SCRIPT;
   const root = realpathSync(mkdtempSync(join(tmpdir(), "umbradb-build-step-")));
   try {
     const relocated = script.replace(/(^|[\s"'=(])\/(in|out|build|opt)(?=[/\s"');]|$)/gm, (_, before: string, dir: string) => `${before}${root}/${dir}`);
@@ -212,7 +242,7 @@ function runBuildStep(version: string, script: string = BUILD_SCRIPT): BuildStep
     const upstream = readUpstream(version);
     writeFileSync(join(root, "fields"), `${jqFields(upstream).join("\n")}\n`);
     writeFileSync(join(root, "calls"), "");
-    writeCrates(root, version);
+    writeCrates(root, version, options);
     const ran = spawnSync("bash", [join(root, "build-in-container.sh")], {
       encoding: "utf8",
       env: { PATH: `${standInsDir()}:${process.env.PATH ?? "/usr/bin:/bin"}`, STAND_IN_DIR: root, STAND_IN_COMMIT: upstream.commit },
@@ -220,10 +250,12 @@ function runBuildStep(version: string, script: string = BUILD_SCRIPT): BuildStep
     const shown = (text: string): string => text.split(root).join("");
     const read = (name: string): string | undefined => (existsSync(join(root, name)) ? readFileSync(join(root, name), "utf8") : undefined);
     const args = read("cargo.args");
+    const crates = join(root, "build", "crates");
     return {
       status: ran.status,
       stderr: shown(ran.stderr),
       calls: shown(read("calls") ?? "").split("\n").filter((line) => line !== ""),
+      unpacked: existsSync(crates) ? readdirSync(crates).filter((name) => statSync(join(crates, name)).isDirectory()).sort() : [],
       ...(args === undefined
         ? {}
         : {
@@ -368,10 +400,11 @@ describe("vendored ledger builds: the recorded sources and pins", () => {
     expect(added("v9").join("\n")).toContain('#[wasm_bindgen(js_name = "stateTrees")]');
   });
 
-  // The build script is run on this host with stand-ins for git, jq and cargo (`runBuildStep`): what is checked is the
-  // environment and the arguments its one `cargo build` receives. What the compiler makes of the settings (that blst's
-  // field multiplication is inlined) and what a block gains by them are not checked by a test: the packages recorded
-  // with them differ from those built without them, and a rebuild gives the recorded bytes (`npm run vendor:ledger`).
+  // The build script is run on this host with stand-ins for git, jq, curl and cargo (`runBuildStep`): what is checked is
+  // the environment and the arguments its one `cargo build` receives. What the compiler makes of the settings (that
+  // blst's field multiplication is inlined) and what a block gains by them are not checked by a test: the packages
+  // recorded with them differ from those built without them, and a rebuild gives the recorded bytes (`npm run
+  // vendor:ledger`).
   it("hands the one cargo build of every version the speed settings it asks for: opt-level 3, and -O3 with a high inline threshold for C code", () => {
     for (const version of VERSIONS) {
       const run = runBuildStep(version);
@@ -408,7 +441,7 @@ describe("vendored ledger builds: the recorded sources and pins", () => {
       "C flags exported again without the inline threshold": changed('cd "$src"\n', 'export CFLAGS_wasm32_unknown_unknown="-O3"\ncd "$src"\n'),
     };
     for (const [control, script] of Object.entries(scripts)) {
-      const run = runBuildStep("v9", script);
+      const run = runBuildStep("v9", { script });
       expect(run.status, `${control}: ${run.stderr}`).toBe(AT_BUILD);
       expect(settingsReceived(run), control).not.toEqual(SPEED_SETTINGS);
     }
@@ -447,10 +480,52 @@ describe("vendored ledger builds: the recorded sources and pins", () => {
     expect(circuitsPatch("v9-rc5")).toEqual(circuitsPatch("v8"));
     expect(circuitsPatch("v9-rc3")).toEqual(circuitsPatch("v8"));
     expect(circuitsPatch("v8").join("\n")).toContain("fn kept_pre_computed<F: PoseidonField>() -> PreComputedRoundCPU<F>");
-    // The build script unpacks a patched crate only at the checksum the pristine Cargo.lock records.
-    const script = readFileSync(join(ledgerDir, "build-in-container.sh"), "utf8");
-    expect(script).toContain('echo "$checksum  /build/crates/$dep.crate" | sha256sum -c -');
-    expect(script.indexOf("for dep_dir in /in/crates/*/")).toBeLessThan(script.indexOf("for patch in /in/patches/*.patch"));
+  });
+
+  // The build script's crate step, run with the stand-in download (`runBuildStep`): the archive it serves is the one the
+  // source's Cargo.lock pins, another one, or none, and the lock may give no checksum for the crate's version. Before the
+  // step the lock also pins another version of the crate and another crate at the same version, each with another
+  // checksum, so a checksum read from the wrong entry shows. Where the build goes on, the crate's patches are applied
+  // before the workspace's (the test of the speed settings above checks the order of the calls).
+  it("unpacks a patched crate only when its download has the checksum the pristine Cargo.lock pins, and stops before unpacking otherwise", () => {
+    for (const version of VERSIONS) {
+      const [dep, ...more] = patchedCrates(version);
+      expect([dep, ...more], version).toEqual([expect.stringMatching(/^midnight-circuits-/)]);
+      const download = `curl https://static.crates.io/crates/midnight-circuits/${dep}.crate`;
+      const built = runBuildStep(version);
+      expect(built.status, `${version}: ${built.stderr}`).toBe(AT_BUILD);
+      expect(built.unpacked, version).toEqual([dep]);
+      const stops = [
+        { when: "another archive is served", options: { served: "other" }, status: 1, calls: [download], says: /computed checksum did NOT match/ },
+        { when: "the lock gives no checksum", options: { checksum: false }, status: 1, calls: [], says: new RegExp(`Cargo\\.lock pins no checksum for ${dep}`) },
+        { when: "the download fails", options: { served: "none" }, status: 22, calls: [download], says: /404/ },
+      ] as const;
+      for (const { when, options, status, calls, says } of stops) {
+        const run = runBuildStep(version, options);
+        expect(run.status, `${version}, ${when}: ${run.stderr}`).toBe(status);
+        expect(run.stderr, `${version}, ${when}`).toMatch(says);
+        // Nothing unpacked, no patch applied, no build.
+        expect(run.unpacked, `${version}, ${when}`).toEqual([]);
+        expect(run.calls, `${version}, ${when}`).toEqual(calls);
+      }
+    }
+  });
+
+  it("negative control: with the checksum's check made to always pass, the other archive is unpacked, patched and built", () => {
+    const check = "| sha256sum -c - >/dev/null\n";
+    expect(BUILD_SCRIPT).toContain(check);
+    const scripts = {
+      "the check's failure ignored": BUILD_SCRIPT.replace(check, "| sha256sum -c - >/dev/null || true\n"),
+      "the check left out": BUILD_SCRIPT.replace(/^.*\| sha256sum -c - >\/dev\/null\n/m, ""),
+    };
+    for (const [control, script] of Object.entries(scripts)) {
+      expect(script, control).not.toBe(BUILD_SCRIPT);
+      for (const version of VERSIONS) {
+        const run = runBuildStep(version, { script, served: "other" });
+        expect(run.status, `${control}, ${version}: ${run.stderr}`).toBe(AT_BUILD);
+        expect(run.unpacked, `${control}, ${version}`).toEqual(patchedCrates(version));
+      }
+    }
   });
 
   for (const version of VERSIONS) {
