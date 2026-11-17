@@ -351,12 +351,13 @@ the lines of up to 199 heights and the worker's lines since the last write.
 The command opens the three files before it starts the process, creating those that do not exist. If it cannot (the
 folder does not exist, no permission), it says so on stderr and exits 1 without starting anything. A write that fails
 later (a full disk) stops the trace, with one line in the process's log (`block trace stopped, the process goes on
-untraced: …`), and the sync goes on untraced.
+untraced: …`), and the sync goes on untraced; the ledger worker's thread stops its own trace at the next request it
+gets.
 
 | File | Holds |
 |---|---|
-| `<file>` | One JSON line per committed height: what the main thread's time went to. A height whose work after its commit (`on-after-db-write`) fails has none. |
-| `<file>.stmts.json` | One entry per statement text (`q`, its first 260 characters) the main thread sent on PostgreSQL: how many times it ran (`n`), its client time from send to answer in ms (`ms`) and its slowest call (`max`). On PGlite statements are not traced, so it is `[]`. |
+| `<file>` | One JSON line per committed height: what the main thread's time went to. A height whose work after its commit (`on-after-db-write`) fails has none. A height that failed and was made again has the line of the run that committed it, and its step is in `sh` once. A height whose `COMMIT` lost its answer has its line once the next run finds it committed (none if it did not commit); that line also holds what was sent until then, and no `txMs`. |
+| `<file>.stmts.json` | One entry per statement text (`q`, its first 260 characters) the main thread sent on PostgreSQL: how many times it was sent (`n`, those that failed included), its client time from send to answer or failure in ms (`ms`) and its slowest call (`max`). The first 1,024 texts sent are kept by name; the statements of any other text are counted together in a last entry whose `q` is `(other statement texts)`, present once it counts one. On PGlite statements are not traced, so it is `[]`. |
 | `<file>.worker.jsonl` | One JSON line per block the ledger worker applied: what the worker thread's time went to since the line before. |
 
 **A height's line.** Times are in ms; every number is rounded to 0.001. A key is absent where its stage did not run at
@@ -376,7 +377,7 @@ that height.
 | `txMs` | The block's transaction, from its `BEGIN` to its `COMMIT` answered. |
 | `writeBlockMs`, `writeRefcountMs` | Inside it: the ledger state's node writes, and the step's writes. |
 | `commitMs` | The client time of the last `COMMIT` sent since the line before: the block's own, unless the process committed another write after it. |
-| `sqlN`, `sqlMs` | The statements the main thread sent on PostgreSQL since the line before, and their client time from send to answer. A run's first line also holds the startup's statements, and a module API request's or the admin endpoints' reads during a sync count in the height then in progress. |
+| `sqlN`, `sqlMs` | The statements the main thread sent on PostgreSQL since the line before, and their client time from send to answer or failure. A run's first line also holds the startup's statements, and a module API request's or the admin endpoints' reads during a sync count in the height then in progress. A height that does not commit drops what it counted (the statements' file keeps them). |
 | `encMs`, `decMs` | Those statements' parameters encoded, and their rows decoded. |
 | `rt.<type>`, `rtN.<type>` | The ledger worker's requests of that type (`apply`, `parse`, `commit`, `evict`, `load`, `release`, …): their round trips, from the post to the answer handled, and how many. |
 | `backMs` | From the worker posting an answer to the main thread handling it. |
