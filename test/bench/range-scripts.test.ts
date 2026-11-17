@@ -19,9 +19,10 @@ import { POSTGRES_IMAGE } from "../postgres-image.js";
  * - negative controls: `compare.mjs` shows where two runs differ, and `tables.sh` marks the tables in which two small
  *   databases differ; `tables.sh` and `equal.sh` fail, and never count a difference of 0, when a read fails.
  *
- * `tables.sh` runs on a PostgreSQL container of this file's own, and so does `run.sh`, with a stand-in for its run's
- * container (no build and no node: the stand-in answers `/status` as a test says). `equal.sh` past its failures,
- * `contents-hash.sh`, `roundtrip.sh` and `preflight.sh` need a build, a node or a synced database and are not run here.
+ * `tables.sh`, `equal.sh` and `roundtrip.mjs` run on a PostgreSQL container of this file's own, and so does `run.sh`,
+ * with a stand-in for its run's container (no build and no node: the stand-in answers `/status` as a test says).
+ * `contents-hash.sh`, `roundtrip.sh` (the container around `roundtrip.mjs`) and `preflight.sh` past the password file's
+ * mode need a build, a node or a synced database and are not run here.
  */
 
 const SCRIPTS = fileURLToPath(new URL("../../bench/range/", import.meta.url));
@@ -1134,6 +1135,51 @@ exit 0
     } finally {
       rmSync(build, { recursive: true, force: true });
       psql("postgres", "DROP DATABASE bench_roundtrip WITH (FORCE)");
+    }
+  });
+
+  it("equal.sh hashes the node tables with a sum over their rows, which grows with no table, and marks a changed child", () => {
+    const home = mkdtempSync(join(tmpdir(), "umbradb-bench-range-equal-"));
+    const key = (i: string): string => `decode(md5('k' || ${i}) || md5('l' || ${i}), 'hex')`;
+    const made = ["eq-a", "eq-b", "eq-c"];
+    try {
+      for (const label of made) {
+        const name = `bench_${label.replaceAll("-", "_")}`;
+        psql("postgres", `CREATE DATABASE ${name}`);
+        // eq-c: one node's children differ by one byte.
+        const children = label === "eq-c" ? `CASE WHEN i = 7 THEN '\\x01'::bytea ELSE ${key("(i % 30) + 1")} END` : key("(i % 30) + 1");
+        psql(
+          name,
+          `CREATE SCHEMA core_block_commit; CREATE SCHEMA core_ledger_state;
+           CREATE TABLE core_block_commit.blocks (height bigint PRIMARY KEY);
+           CREATE TABLE core_ledger_state.nodes (node_key bytea PRIMARY KEY, data bytea NOT NULL, children bytea NOT NULL);
+           CREATE TABLE core_ledger_state.ref_counts (node_key bytea PRIMARY KEY, count integer NOT NULL);
+           CREATE TABLE core_ledger_state.root_counts (node_key bytea PRIMARY KEY, count integer NOT NULL);
+           CREATE TABLE core_ledger_state.unreferenced (node_key bytea PRIMARY KEY);
+           INSERT INTO core_block_commit.blocks VALUES (100);
+           INSERT INTO core_ledger_state.nodes SELECT ${key("i")}, '\\x00', ${children} FROM generate_series(1, 30) i;
+           INSERT INTO core_ledger_state.ref_counts SELECT ${key("i")}, 1 FROM generate_series(2, 30) i;
+           INSERT INTO core_ledger_state.root_counts VALUES (${key("1")}, 1);`,
+        );
+        mkdirSync(join(home, label));
+        writeFileSync(join(home, label, "status.jsonl"), `${JSON.stringify({ at: 1, status: { state: "stopped", cursor: "100", modules: [{ tables: [{ schema: "core_demo", table: "t", height: "100", digest: "ab" }] }] } })}\n`);
+      }
+      const result = run("equal.sh", made, { BENCH_DIR: home, BENCH_PG_CONTAINER: (container as StartedPostgreSqlContainer).getId() });
+      expect(result.code, result.stderr).toBe(0);
+      const [a, b, c] = result.stdout.trimEnd().split("\n").map((line) => line.split("|")[1]?.trim() ?? "");
+      // Each table's rows and a hash of them: the first 64 bits of each row's MD5 added up, the sum's MD5, 16 hex digits.
+      const md5 = (text: string): string => createHash("md5").update(text).digest("hex");
+      const rows = psql("bench_eq_a", "SELECT encode(node_key, 'hex') || md5(children) FROM core_ledger_state.nodes").trimEnd().split("\n");
+      const sum = rows.reduce((total, text) => total + BigInt.asIntN(64, BigInt(`0x${md5(text).slice(0, 16)}`)), 0n);
+      expect(a).toContain(`nodes 30:${md5(sum.toString()).slice(0, 16)} `);
+      expect(a).toMatch(/^100 nodes 30:[0-9a-f]{16} ref_counts 29:[0-9a-f]{16} root_counts 1:[0-9a-f]{16} queue 0:[0-9a-f]{16}$/);
+      expect(b).toBe(a);
+      // One child changed: the nodes' hash differs, and nothing else.
+      expect(c).not.toBe(a);
+      expect(c.replace(/nodes \S+/, "")).toBe(a.replace(/nodes \S+/, ""));
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      for (const label of made) psql("postgres", `DROP DATABASE IF EXISTS bench_${label.replaceAll("-", "_")} WITH (FORCE)`);
     }
   });
 

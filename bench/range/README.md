@@ -187,7 +187,7 @@ The `.mjs` readers share `lines.mjs` for this.
 | `analyze.mjs a` | stages by kind of block, the step's reads, each statement's client and server time |
 | `worker.mjs a b …` | the phases of the worker's apply, for empty blocks and blocks with transactions |
 | `worker-time.mjs a b …` | the worker's whole time between two applied blocks as a table that adds up to its span (the apply's stages without their node waits, the node waits, each other request type, posting answers, transit, idle, unaccounted), with queued time and garbage collection apart; whether the worker is saturated (idle under 5% of its span) or waiting for work; then the main thread's block: its wait for the worker's apply, its other stages, and each request type's round trip. A run whose worker lines have no `spanMs` is named and not read (exit 1) |
-| `equal.sh a b …` | per-table digests and node-table contents of each run's database (exit 2 if a run could not be read) |
+| `equal.sh a b …` | per-table digests and node-table contents of each run's database: each node table's rows and a hash of them, summed over the rows as `tables.sh` does, so a table of any size is read (exit 2 if a run could not be read) |
 | `contents-hash.sh a b …` | the exported contents hash of each run's database |
 | `tables.sh a b …` | for every table any of the runs has, each run's row count and a hash of its rows (`absent` where a run has no such table), the tables that differ from the first run's marked, and the number of differences: exit 0 if none, 1 if some; exit 2, with no count, if a database or a table could not be read |
 | `profile.mjs a` | self time by function, from a run made with `NODE_FLAGS="--cpu-prof --cpu-prof-dir=<run folder>"` |
