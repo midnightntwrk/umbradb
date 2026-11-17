@@ -20,18 +20,17 @@ import type { LedgerEvent } from "../../../src/ledger/types.js";
 import { compileKernel, Kernel } from "../kernel/index.ts";
 import {
   bucketOf,
-  buildQueries,
-  columnRecords,
-  decodeAnswers,
   deriveSeed,
   findInBucket,
   gridDigest,
   inlineMultiplier,
+  openWalletScheme,
   positionOf,
-  setupMatrix,
-  type TableInfo,
+  type TableName,
   WorkerMultiplier,
 } from "../pir/index.ts";
+import { openServerScheme } from "../pir/server-schemes.ts";
+import { gridOfTransfer } from "../pir/simplepir-server.ts";
 import { decodeManifest, decodePathRecord, decodeReadRecord, fromHex, READ_RECORD_BYTES, shrinkElements, snapshotId, toHex } from "../shared/index.ts";
 import { BuildError, type BuildJob, type BuildResult, buildSnapshot, MANIFEST_FILE, SNAPSHOTS_DIR } from "../server/build.ts";
 import { runBuildWorker } from "../server/build-host.ts";
@@ -83,6 +82,7 @@ function jobAt(c: ScenarioChain, index: ZswapIndex, height: number, k: number, d
     expectedRoot: rootFromStored(h.trees.zswapRoot),
     pathSplit: k,
     queriesPerCall: 4,
+    scheme: "simplepir",
     threads: 2,
     dataDir: dir,
     slice: index.slice(index.outputsAt(height), index.nullifiersAt(height)),
@@ -90,6 +90,27 @@ function jobAt(c: ScenarioChain, index: ZswapIndex, height: number, k: number, d
 }
 
 const build = (job: BuildJob): Promise<BuildResult> => buildSnapshot(job, { kernel, multiplier: inlineMultiplier });
+
+/**
+ * Reads `groups` of a built table by PIR through its scheme (`../pir/scheme.ts`): the wallet's table from the manifest
+ * entry and the public artifact on disk, the server's table adopted from the build's transfer, one call. The records
+ * of each group, in slot order.
+ */
+async function pirRead(result: BuildResult, name: TableName, groups: readonly number[]): Promise<Uint8Array[][]> {
+  const a = result.manifest.artifacts;
+  const [ref, publicRef] = name === "read" ? [a.readTable, a.readPublic] : name === "path" ? [a.pathTable!, a.pathPublic!] : [a.nullifierTable, a.nullifierPublic];
+  const server = await openServerScheme(result.manifest.scheme, { threads: 2, multiplier });
+  const wallet = await openWalletScheme(result.manifest, { multiplier });
+  try {
+    const table = await server.adoptTable(ref, result.tables[name]!);
+    const client = await wallet.openTable(ref, new Uint8Array(readFileSync(join(result.dir, publicRef.digest))));
+    const call = await client.prepareCall(groups);
+    return await call.decode(await table.answer(call.requests, groups.length), groups.length);
+  } finally {
+    wallet.dispose();
+    await server.close();
+  }
+}
 
 /** A naive tree of `leaves` (32 bytes each) of depth `depth`: the ledger's rules written as a recursion. */
 function naiveRoot(leaves: readonly Uint8Array[], depth: number, from = 0): Uint8Array | null {
@@ -179,21 +200,15 @@ describe("a snapshot built from the index (story 1)", () => {
     const k = 2;
     const result = await build(jobAt(chain, index, 7, k));
     const t = result.manifest.artifacts.readTable;
-    const table: TableInfo = { ...t, seed: fromHex(t.seed, 32) };
-    const setup = setupMatrix(new Uint8Array(readFileSync(join(result.dir, result.manifest.artifacts.readSetup.digest))), t.rows);
     expect(t.recordBytes).toBe(READ_RECORD_BYTES);
     // The seed is the grid digest's (FR-053): the table file's SHA-256.
-    expect(t.seed).toBe(toHex(deriveSeed("read", fromHex(t.digest, 32))));
-    const grid = { ...result.readGrid, cells: new Int16Array(result.readGrid.cells) };
-    expect(toHex(gridDigest(grid))).toBe(t.digest);
+    expect(t.layout.seed).toBe(toHex(deriveSeed("read", fromHex(t.digest, 32))));
+    expect(toHex(gridDigest(gridOfTransfer(result.tables.read)))).toBe(t.digest);
     const positions = Array.from({ length: 15 }, (_, i) => i);
-    const columns = positions.map((i) => positionOf(i, t.perColumn).column);
-    const batch = await buildQueries(table, columns, multiplier);
-    const { answerQueries } = await import("../pir/index.ts");
-    const answers = await answerQueries(grid, batch.queries, columns.length, multiplier);
-    const values = await decodeAnswers(setup, batch, answers, multiplier);
+    const columns = positions.map((i) => positionOf(i, t.perGroup).column);
+    const values = await pirRead(result, "read", columns);
     positions.forEach((i, q) => {
-      const record = decodeReadRecord(columnRecords(t, values[q]!)[positionOf(i, t.perColumn).slot]!);
+      const record = decodeReadRecord(values[q]![positionOf(i, t.perGroup).slot]!);
       const e = outputs[i]!;
       expect(hex(record.commitmentPrefix), `commitment ${i}`).toBe(hex(e.commitment!.subarray(0, 16)));
       expect(record.elements === null ? null : hex(record.elements), `elements ${i}`).toBe(e.ciphertext === null ? null : hex(shrinkElements(e.ciphertext)));
@@ -207,21 +222,15 @@ describe("a snapshot built from the index (story 1)", () => {
     const result = await build(jobAt(chain, index, 7, k));
     const t = result.manifest.artifacts.pathTable!;
     expect(t.recordBytes).toBe(32 * k);
-    expect(t.seed).toBe(toHex(deriveSeed("path", fromHex(t.digest, 32))));
+    expect(t.layout.seed).toBe(toHex(deriveSeed("path", fromHex(t.digest, 32))));
     // As wide as the noise check allows: 15 records fit one row of records.
-    expect([t.perColumn, t.cols]).toEqual([1, 15]);
-    const table: TableInfo = { ...t, seed: fromHex(t.seed, 32) };
-    const setup = setupMatrix(new Uint8Array(readFileSync(join(result.dir, result.manifest.artifacts.pathSetup!.digest))), t.rows);
-    const grid = { ...result.pathGrid!, cells: new Int16Array(result.pathGrid!.cells) };
+    expect([t.perGroup, t.groups, t.layout.cols]).toEqual([1, 15, 15]);
     const positions = Array.from({ length: 15 }, (_, i) => i);
-    const columns = positions.map((i) => positionOf(i, t.perColumn).column);
-    const batch = await buildQueries(table, columns, multiplier);
-    const { answerQueries } = await import("../pir/index.ts");
-    const answers = await answerQueries(grid, batch.queries, columns.length, multiplier);
-    const values = await decodeAnswers(setup, batch, answers, multiplier);
+    const columns = positions.map((i) => positionOf(i, t.perGroup).column);
+    const values = await pirRead(result, "path", columns);
     const leaves = outputs.map((e) => kernel.leaf(e.commitment!));
     positions.forEach((i, q) => {
-      const lowerPath = decodePathRecord(columnRecords(t, values[q]!)[positionOf(i, t.perColumn).slot]!, k);
+      const lowerPath = decodePathRecord(values[q]![positionOf(i, t.perGroup).slot]!, k);
       const full = i < Math.floor(15 / 4) * 4;
       expect(lowerPath !== null, `path ${i}`).toBe(full);
       if (lowerPath === null) return;
@@ -233,22 +242,17 @@ describe("a snapshot built from the index (story 1)", () => {
       expect(hex(node), `path ${i}`).toBe(hex(naiveRoot(leaves.slice(block * 4, block * 4 + 4), 2)!));
     });
     const flat = await build(jobAt(chain, index, 7, 0));
-    expect([flat.manifest.artifacts.pathTable, flat.manifest.artifacts.pathSetup, flat.pathGrid]).toEqual([undefined, undefined, null]);
+    expect([flat.manifest.artifacts.pathTable, flat.manifest.artifacts.pathPublic, flat.tables.path]).toEqual([undefined, undefined, null]);
   });
 
   it("nullifier table: every spent nullifier is found by PIR with its height and transaction; absent ones are not", { timeout: LONG }, async () => {
     const index = indexOf(chain);
     const result = await build(jobAt(chain, index, 7, 2));
     const t = result.manifest.artifacts.nullifierTable;
-    const table: TableInfo = { ...t, seed: fromHex(t.seed, 32) };
-    const setup = setupMatrix(new Uint8Array(readFileSync(join(result.dir, result.manifest.artifacts.nullifierSetup.digest))), t.rows);
-    const grid = { ...result.nullifierGrid, cells: new Int16Array(result.nullifierGrid.cells) };
-    const { answerQueries } = await import("../pir/index.ts");
     const absent = [new Uint8Array(32).fill(3), new Uint8Array(32).fill(0xfe)];
     const looked = [...chain.spends.map((s) => fromHex(s.nullifier, 32)), ...absent];
-    const batch = await buildQueries(table, looked.map((n) => bucketOf(n, t.bucketBits)), multiplier);
-    const values = await decodeAnswers(setup, batch, await answerQueries(grid, batch.queries, looked.length, multiplier), multiplier);
-    const found = looked.map((n, q) => findInBucket(columnRecords(t, values[q]!), n));
+    const values = await pirRead(result, "nullifier", looked.map((n) => bucketOf(n, t.bucketBits)));
+    const found = looked.map((n, q) => findInBucket(values[q]!, n));
     const txOf = (s: { height: number }) =>
       (chain.scenario.heights[s.height]!.output.events as readonly LedgerEvent[]).find((e) => e.kind === "zswap-input")!.transaction;
     expect(found.slice(0, 3).map((f) => f && [hex(f.nullifier), f.height, f.txIndex])).toEqual(chain.spends.map((s) => [s.nullifier, s.height, txOf(s)]));
@@ -326,8 +330,8 @@ describe("determinism and the build's checks", () => {
       for (const step of Object.values(outcome.steps)) expect(step!.peakRssBytes).toBeGreaterThan(0);
       expect(outcome.steps.tree!.hashes).toBeGreaterThan(0);
       expect(existsSync(join(dir, SNAPSHOTS_DIR, outcome.result.id, MANIFEST_FILE))).toBe(true);
-      // The grids come back in shared memory, the same cells.
-      expect(toHex(gridDigest({ ...outcome.result.readGrid, cells: new Int16Array(outcome.result.readGrid.cells) }))).toBe(direct.manifest.artifacts.readTable.digest);
+      // The tables come back in shared memory, the same cells.
+      expect(toHex(gridDigest(gridOfTransfer(outcome.result.tables.read)))).toBe(direct.manifest.artifacts.readTable.digest);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -341,7 +345,14 @@ describe("determinism and the build's checks", () => {
     expect(result.manifest.firstFree).toBe(0);
     expect(result.manifest.root).toBe(toHex(new Uint8Array(32)));
     expect([result.manifest.artifacts.scan.size, result.manifest.artifacts.blockRoots.size]).toEqual([0, 0]);
-    expect([result.readGrid.cols, result.nullifierGrid.records]).toEqual([1, 0]);
+    expect([result.manifest.artifacts.readTable.groups, result.manifest.artifacts.nullifierTable.records]).toEqual([1, 0]);
+    expect([gridOfTransfer(result.tables.read).cols, gridOfTransfer(result.tables.nullifier).records]).toEqual([1, 0]);
+    // A table of no record still answers a call, through its scheme: zero records (spec 00058 edge case).
+    for (const name of ["read", "path", "nullifier"] as const) {
+      const [records] = await pirRead(result, name, [0]);
+      expect(records!.length, name).toBeGreaterThan(0);
+      expect(records!.every((r) => r.every((b) => b === 0)), name).toBe(true);
+    }
     expect(NODE_BYTES).toBe(32);
     expect(blockLevels(new Uint8Array(32), 0, hash)).toHaveLength(1);
   });

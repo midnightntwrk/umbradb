@@ -1,0 +1,46 @@
+[package]
+name = "inspiring"
+version = "0.1.0-rc.3"
+edition = "2021"
+rust-version = "1.78"
+license = "MIT OR Apache-2.0"
+description = "InspiRING.Pack: a single-primitive ring-packing crate (eprint 2025/1352, Algorithm 1) on top of spiral-rs."
+repository = "https://github.com/valargroup/ipir-sp"
+documentation = "https://docs.rs/inspiring"
+readme = "README.md"
+keywords = ["fhe", "lattice", "rlwe", "lwe", "pir"]
+categories = ["cryptography"]
+
+# We commit Cargo.lock per the top-level `.gitignore` policy (reproducible
+# benches and noise tests are part of the contract).
+
+[dependencies]
+# spiral-rs is pinned to Valar's fork so `inspiring` inherits the single-CRT
+# accumulator fix and the non-AVX-512 NTT path. See
+# ../docs/spiral-rs-mapping.md for the full audit.
+spiral-rs = { workspace = true }
+
+# Deterministic PRNG. spiral-rs already pulls in rand_chacha 0.3 transitively,
+# but we list it explicitly to make our own use a first-class dependency.
+rand_chacha = "0.3.1"
+rayon = "1"
+# `WeightedIndex` for the frozen default Gaussian sampler (same version spiral-rs uses).
+rand = "0.8.5"
+
+# Discrete-Gaussian sampling, NTT, polynomial arithmetic, and ChaCha20 RNG all
+# come from spiral-rs; we do not need a separate crypto stack.
+
+thiserror = "1.0"
+memmap2 = "0.9"
+bytemuck = "1"
+
+[dev-dependencies]
+# Phase 9 tests: byte-equality with the Python oracle requires a JSON parser.
+serde_json = "1.0"
+sha2 = "0.10"
+# Phase 10 benchmarks (criterion).
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "pack"
+harness = false

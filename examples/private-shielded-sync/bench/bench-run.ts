@@ -3,22 +3,26 @@
  * part, as `BenchResults` (`bench-results.ts`). `bench.ts` is its command line; the tests call it directly.
  *
  * In order:
- * 1. Optionally asks the server for a snapshot at its latest height (the admin route) and waits for it.
- * 2. The manifest; the server's own build statistics for that snapshot (`<dataDir>/snapshots/<id>/build-stats.json`).
+ * 1. Optionally asks the server for a snapshot (the admin route: at a height, with a scheme and a padding when given)
+ *    and waits for it, sampling the server's memory around it.
+ * 2. The manifest; the server's own build statistics for that snapshot (`<dataDir>/snapshots/<id>/build-stats.json`);
+ *    with the admin secret, the bytes each served table says it holds.
  * 3. Each wallet's `sync` (the client's own code, `client/sync.ts`) as a fresh client: its own artifact cache, scan
  *    threads and PIR threads; each step's duration and the peak memory of this process and of the server while it ran;
- *    every request with the server's log line for it.
+ *    every request with the server's log line for it. Then, as `send` would, the lower paths of its coins from the path
+ *    table (`lowerPathsByPir`), measured the same way.
  * 4. The scan of the snapshot's scan file at several thread counts.
  * 5. With the database: its size; the snapshot's stored events read with the module's own query; the read table built
  *    in-process for each `pathSplit` (FR-153) and one read call on each.
  * 6. The sync's speed from its status records; the transfer from the record `send` wrote; the naive baseline (FR-152).
  *
+ * Every scheme runs through the seam (`../pir/scheme.ts`); IPIR+SP's wallet needs `ipirWasm` (spec 00058 FR-050).
  * Nothing secret enters the results: wallets are labels with counts.
  */
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { arch, availableParallelism, cpus, loadavg, platform, release, totalmem } from "node:os";
 import { join } from "node:path";
 import { BlobCache } from "../client/cache.ts";
@@ -26,24 +30,31 @@ import { type FetchLike, PssHttp } from "../client/http.ts";
 import { keysFromZswapSeed, type WalletKeys } from "../client/keys.ts";
 import type { Ledger } from "../client/ledger.ts";
 import { writeState } from "../client/state.ts";
-import { SYNC_STEPS, type SyncStep, sync } from "../client/sync.ts";
+import { lowerPathsByPir, pathInTable, SYNC_STEPS, type SyncResult, type SyncStep, sync } from "../client/sync.ts";
 import { committedKernelDigest, compileKernel, Kernel, ScanPool } from "../kernel/index.ts";
-import { inlineMultiplier, type Multiplier, WorkerMultiplier } from "../pir/index.ts";
+import type { IpirWorkers } from "../ipir/engine.ts";
+import { nodeIpirPool } from "../ipir/pool-node.ts";
+import { inlineMultiplier, type Multiplier, type WalletSchemeOptions, WorkerMultiplier } from "../pir/index.ts";
 import { decodeManifest, type Manifest, ROUTES } from "../shared/index.ts";
+import { slotCount } from "../shared/padding.ts";
 import { cursorOf, databaseSize, type StatusSample, syncRate } from "./bench-chain.ts";
 import type { MemoryProbe } from "./bench-probes.ts";
 import { selfProbe } from "./bench-probes.ts";
 import {
   BUILD_STEP_NAMES,
   type BenchResults,
+  type BenchTableName,
   type BuildStep,
   type BuildStepName,
   type CallRow,
   type ChainSync,
   type EventRead,
+  type PathRead,
   type PathSplitRun,
   RESULTS_FORMAT,
   type ScanSweepRow,
+  TABLE_NAMES,
+  type TableShape,
   type TransferRow,
   type WalletRun,
 } from "./bench-results.ts";
@@ -85,8 +96,19 @@ export interface BenchOptions {
   readonly serverLog: { readonly source: string; lines(since: Date): Promise<string[]> } | null;
   /** The server's memory, or null when it cannot be sampled. */
   readonly serverMemory: MemoryProbe | null;
-  /** Ask the server for a snapshot first (admin route). */
-  readonly build: { readonly adminSecret: string; readonly height?: number; readonly timeoutMs?: number } | null;
+  /**
+   * Ask the server for a snapshot first (admin route): at `height` (else its latest), with `scheme` and `padding` for
+   * this one build when given (00058 FR-002; Q57).
+   */
+  readonly build: { readonly adminSecret: string; readonly height?: number; readonly scheme?: string; readonly padding?: number; readonly timeoutMs?: number } | null;
+  /** The admin secret, to read the module's status (the bytes its tables hold) when no build is asked for. */
+  readonly adminSecret?: string;
+  /** The scheme the served snapshot must use (the benchmark refuses another); none: any. */
+  readonly scheme?: string;
+  /** Read each wallet's lower paths from the path table after its sync, as `send` does (default true). */
+  readonly pathRead?: boolean;
+  /** IPIR+SP: the wallet's WebAssembly (`compileIpirWasm`); SimplePIR runs without it. */
+  readonly ipirWasm?: WalletSchemeOptions["ipirWasm"];
   /** The record `send` wrote, or null. */
   readonly transfer: { readonly record: Record<string, unknown>; readonly source: string } | null;
   readonly log: (line: string) => void;
@@ -97,31 +119,69 @@ export interface BenchOptions {
 
 const fetchOf = (o: BenchOptions): FetchLike => o.fetch ?? ((u, init) => fetch(u, init));
 
-/** Asks the server for a snapshot and waits until it is served (decision Q33's admin route). */
-async function requestBuild(o: BenchOptions): Promise<void> {
+/** The module's admin status (`GET` of the admin snapshot route). */
+async function adminStatus(o: BenchOptions, secret: string): Promise<Record<string, any>> {
+  const answer = await fetchOf(o)(`${new URL(o.server).origin}${ROUTES.adminSnapshot}`, { method: "GET", headers: { Authorization: `Bearer ${secret}` } });
+  if (answer.status !== 200) throw new Error(`GET ${ROUTES.adminSnapshot}: ${answer.status}`);
+  return (await answer.json()) as Record<string, any>;
+}
+
+const median = (xs: readonly number[]): number | null => {
+  if (xs.length === 0) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  return s.length % 2 === 1 ? s[(s.length - 1) / 2]! : (s[s.length / 2 - 1]! + s[s.length / 2]!) / 2;
+};
+
+/**
+ * Asks the server for a snapshot and waits until it is served (decision Q33's admin route; 00058: with a scheme and a
+ * padding). The server's resident memory: the probe's peak in the second before the request, its peak from the request
+ * to the snapshot being served, and once served, the median of its peaks over 250 ms windows from 1 to 3 s after.
+ */
+async function requestBuild(o: BenchOptions): Promise<NonNullable<BenchResults["build"]>> {
   const build = o.build!;
   const f = fetchOf(o);
   const url = `${new URL(o.server).origin}${ROUTES.adminSnapshot}`;
   const auth = { Authorization: `Bearer ${build.adminSecret}` };
-  const status = async (): Promise<Record<string, any>> => {
-    const answer = await f(url, { method: "GET", headers: auth });
-    if (answer.status !== 200) throw new Error(`GET ${ROUTES.adminSnapshot}: ${answer.status}`);
-    return (await answer.json()) as Record<string, any>;
-  };
+  const status = (): Promise<Record<string, any>> => adminStatus(o, build.adminSecret);
   const before = (await status()).last?.finishedAt ?? null;
-  const body = build.height === undefined ? {} : { height: build.height };
+  const body = { ...(build.height === undefined ? {} : { height: build.height }), ...(build.scheme === undefined ? {} : { scheme: build.scheme }), ...(build.padding === undefined ? {} : { padding: build.padding }) };
+  const memory = o.serverMemory;
+  // Let a sparse probe take a sample or two first.
+  if (memory !== null) await new Promise((resolve) => setTimeout(resolve, 1000));
+  const askedAt = Date.now();
   const answer = await f(url, { method: "POST", headers: { ...auth, "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  if (answer.status !== 202) throw new Error(`POST ${ROUTES.adminSnapshot}: ${answer.status} ${(await answer.text()).slice(0, 300)}`);
+  if (answer.status !== 202) throw new Error(`POST ${ROUTES.adminSnapshot} ${JSON.stringify(body)}: ${answer.status} ${(await answer.text()).slice(0, 400)}`);
   const requested = ((await answer.json()) as Record<string, any>).building?.height;
-  o.log(`snapshot requested at height ${String(requested)}; waiting for the build`);
+  o.log(`snapshot requested at height ${String(requested)}${build.scheme === undefined ? "" : `, scheme ${build.scheme}`}${build.padding === undefined ? "" : `, padded to ${build.padding}`}; waiting for the build`);
   const deadline = Date.now() + (build.timeoutMs ?? 2 * 3600 * 1000);
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 500));
     const s = await status();
     if (s.building === null && s.last?.finishedAt !== before && s.last !== null && s.last !== undefined) {
       if (s.last.ok !== true) throw new Error(`the snapshot build failed: ${s.last.code}: ${s.last.message}`);
+      const servedAt = Date.now();
       o.log(`snapshot ${String(s.last.id).slice(0, 16)}… built at ${s.last.height} in ${Math.round(s.last.totalMs)} ms`);
-      return;
+      let after: number | null = null;
+      if (memory !== null) {
+        // 1 to 3 s after: the median of the probe's peaks over 250 ms windows.
+        const peaks: number[] = [];
+        for (let at = servedAt + 1250; at <= servedAt + 3000; at += 250) {
+          await new Promise((resolve) => setTimeout(resolve, Math.max(0, at - Date.now())));
+          memory.mark();
+          const x = memory.peak(at - 250, at);
+          if (x !== null) peaks.push(x);
+        }
+        after = median(peaks);
+      }
+      return {
+        height: typeof s.last.height === "number" ? s.last.height : null,
+        scheme: build.scheme ?? (typeof s.last.scheme === "string" ? s.last.scheme : null),
+        padding: build.padding ?? null,
+        ms: servedAt - askedAt,
+        rssBeforeBytes: memory?.peak(askedAt - 1000, askedAt) ?? null,
+        rssPeakBytes: memory?.peak(askedAt, servedAt) ?? null,
+        rssAfterBytes: after,
+      };
     }
   }
   throw new Error("the snapshot build did not finish in time");
@@ -135,7 +195,8 @@ function serverBuildFromStats(path: string): NonNullable<BenchResults["serverBui
   const step = (name: BuildStepName): BuildStep | null => {
     const x = s.steps?.[name];
     if (x === undefined || x === null) return null;
-    return { ms: x.ms, bytes: x.bytes, hashes: x.hashes, hashesPerSecond: x.hashesPerSecond, peakRssBytes: numberOr(x.peakRssBytes) };
+    const scheme = x.scheme !== null && typeof x.scheme === "object" ? (x.scheme as Record<string, number>) : undefined;
+    return { ms: x.ms, bytes: x.bytes, hashes: x.hashes, hashesPerSecond: x.hashesPerSecond, peakRssBytes: numberOr(x.peakRssBytes), ...(scheme === undefined ? {} : { scheme }) };
   };
   const read = (x: Record<string, any> | null | undefined, height: number): EventRead | null =>
     x === null || x === undefined ? null : { rows: x.rows, ms: x.ms, rowsPerSecond: x.rowsPerSecond, peakRssBytes: numberOr(x.peakRssBytes), height: x.height ?? height };
@@ -212,10 +273,16 @@ interface WalletOutcome {
   finish(lines: readonly ServerRequestLine[], used: Set<ServerRequestLine>): WalletRun;
 }
 
+/** What the scheme options of a wallet's sync and path read are. */
+const walletSchemeOptions = (o: BenchOptions, workers?: IpirWorkers): Pick<WalletSchemeOptions, "ipirWasm" | "ipirWorkers"> =>
+  o.ipirWasm === undefined ? {} : { ipirWasm: o.ipirWasm, ...(workers === undefined ? {} : { ipirWorkers: workers }) };
+
 async function runWallet(o: BenchOptions, w: BenchWallet, kernel: Kernel, module: WebAssembly.Module, manifest: Manifest, snapshotId: string, self: MemoryProbe): Promise<WalletOutcome> {
   const keys = keysFromZswapSeed(o.ledger, w.zswapSeed, kernel);
   const scanPool = new ScanPool({ threads: o.clientThreads, module });
   const multiplier: Multiplier = o.clientThreads > 1 ? new WorkerMultiplier(o.clientThreads) : inlineMultiplier;
+  // IPIR+SP's requests on as many threads as SimplePIR's multiplication; started only for an IPIR+SP snapshot.
+  const ipirWorkers = o.clientThreads > 1 && o.ipirWasm !== undefined ? nodeIpirPool(o.clientThreads) : undefined;
   const answeredAt: number[] = [];
   const f = fetchOf(o);
   const http = new PssHttp(o.server, {
@@ -230,7 +297,11 @@ async function runWallet(o: BenchOptions, w: BenchWallet, kernel: Kernel, module
   const server = o.serverMemory;
   self.mark();
   const from = Date.now();
-  let result;
+  let result: SyncResult;
+  let to = 0;
+  /** Answers received by the end of the sync (the path read's come after). */
+  let syncAnswers = 0;
+  let pathRead: { stats: Awaited<ReturnType<typeof lowerPathsByPir>>["stats"]; paths: number; records: number; from: number; to: number } | null = null;
   try {
     result = await sync({
       ledger: o.ledger,
@@ -240,6 +311,7 @@ async function runWallet(o: BenchOptions, w: BenchWallet, kernel: Kernel, module
       kernel,
       scanPool,
       multiplier,
+      ...walletSchemeOptions(o, ipirWorkers),
       ...(o.network === undefined ? {} : { network: o.network }),
       previous: null,
       log: (line) => o.log(`${w.label}: ${line}`),
@@ -250,13 +322,29 @@ async function runWallet(o: BenchOptions, w: BenchWallet, kernel: Kernel, module
         else windows[step]!.to = Date.now();
       },
     });
+    self.mark();
+    to = Date.now();
+    syncAnswers = answeredAt.length;
+    if (result.state.snapshot.id !== snapshotId) throw new Error(`${w.label} synced against snapshot ${result.state.snapshot.id}, not the benchmark's ${snapshotId}: the server replaced it`);
+    // The lower paths `send` would read to spend this wallet's unspent coins (Q58): one padded call, random groups
+    // only when it has none in a full block.
+    if ((o.pathRead ?? true) && result.manifest.artifacts.pathTable !== undefined) {
+      const coins = result.state.coins.filter((c) => c.spent === null && pathInTable(result.manifest, c));
+      const records = http.records.length;
+      self.mark();
+      server?.mark();
+      const pathFrom = Date.now();
+      const read = await lowerPathsByPir({ http, cache, kernel, multiplier, ...walletSchemeOptions(o, ipirWorkers) }, result, coins);
+      self.mark();
+      server?.mark();
+      pathRead = { stats: read.stats, paths: read.paths.size, records, from: pathFrom, to: Date.now() };
+      o.log(`${w.label}: ${read.paths.size} lower path(s) read from the path table and checked against their blocks' roots`);
+    }
   } finally {
     await scanPool.close();
     await multiplier.close();
+    await ipirWorkers?.close();
   }
-  self.mark();
-  const to = Date.now();
-  if (result.state.snapshot.id !== snapshotId) throw new Error(`${w.label} synced against snapshot ${result.state.snapshot.id}, not the benchmark's ${snapshotId}: the server replaced it`);
   const stateBytes = writeState(join(o.workDir, "wallets", w.label, "state.json"), result.state);
   const stats = result.stats;
   const coins = result.state.coins;
@@ -268,9 +356,9 @@ async function runWallet(o: BenchOptions, w: BenchWallet, kernel: Kernel, module
   const steps = Object.fromEntries(SYNC_STEPS.map((s) => [s, peak(s)])) as WalletRun["steps"];
   const requestMs = stats.requests.reduce((n, r) => n + r.ms, 0);
   const finish = (serverLines: readonly ServerRequestLine[], used: Set<ServerRequestLine>): WalletRun => {
-    // A sync started again (409) reports its last attempt's requests: the last ones answered.
+    // A sync started again (409) reports its last attempt's requests: the last ones answered before the path read.
     const n = stats.requests.length;
-    const zipped = answeredAt.length >= n ? answeredAt.slice(answeredAt.length - n) : null;
+    const zipped = syncAnswers >= n ? answeredAt.slice(syncAnswers - n, syncAnswers) : null;
     const requests = pairRequests(stats.requests, zipped, serverLines, used);
     const serverMsOf = (path: string): number | null => {
       const matched = requests.filter((r) => r.route === path);
@@ -293,12 +381,37 @@ async function runWallet(o: BenchOptions, w: BenchWallet, kernel: Kernel, module
       };
     };
     const downloads = Object.fromEntries(
-      (["scan", "blockRoots", "readSetup", "nullifierSetup"] as const).map((name) => {
+      (["scan", "blockRoots", "readPublic", "nullifierPublic"] as const).map((name) => {
         const d = stats.downloads[name];
         const r = requests.find((q, i) => stats.requests[i]!.path === `${ROUTES.blob}${d.digest}`);
         return [name, { size: d.size, bytes: d.bytes, ms: d.ms, cached: d.cached, serverMs: r?.server?.ms ?? null }];
       }),
     ) as WalletRun["downloads"];
+    let path: PathRead | null = null;
+    if (pathRead !== null) {
+      const p = pathRead;
+      const records = http.records.slice(p.records);
+      const pathRequests = pairRequests(records, answeredAt.length >= syncAnswers + records.length ? answeredAt.slice(syncAnswers, syncAnswers + records.length) : null, serverLines, used);
+      const calls = Math.max(1, p.stats.calls);
+      const queried = pathRequests.filter((q) => q.route === ROUTES.queryPath);
+      const serverMs = queried.length === 0 || queried.some((q) => q.server === null) ? null : queried.reduce((n, q) => n + q.server!.ms, 0) / calls;
+      const blob = pathRequests.find((q, i) => records[i]!.path === `${ROUTES.blob}${p.stats.public.digest}`);
+      path = {
+        calls: p.stats.calls,
+        bytesUp: p.stats.bytesUp / calls,
+        bytesDown: p.stats.bytesDown / calls,
+        roundTripMs: p.stats.roundTripMs / calls,
+        clientBuildMs: p.stats.buildMs / calls,
+        clientDecodeMs: p.stats.decodeMs / calls,
+        serverMs,
+        clientPeakRssBytes: self.peak(p.from, p.to),
+        serverPeakRssBytes: server === null ? null : server.peak(p.from, p.to),
+        paths: p.paths,
+        public: { size: p.stats.public.size, bytes: p.stats.public.bytes, ms: p.stats.public.ms, cached: p.stats.public.cached, serverMs: blob?.server?.ms ?? null },
+        ms: p.stats.ms,
+        requests: pathRequests,
+      };
+    }
     return {
       label: w.label,
       source: w.source,
@@ -329,6 +442,7 @@ async function runWallet(o: BenchOptions, w: BenchWallet, kernel: Kernel, module
       nullifier: { ...callRow(stats.nullifier, ROUTES.queryNullifier, "nullifier"), lookups: stats.nullifier.lookups },
       tail: { bytes: stats.tail.bytes, ms: stats.tail.ms, clientMs: stats.tail.clientMs, outputs: stats.tail.outputs, nullifiers: stats.tail.nullifiers, matches: stats.tail.matches, serverMs: serverMsOf(ROUTES.tail) },
       requests,
+      path,
     };
   };
   const positions = [...coins.filter((c) => c.source === "snapshot").map((c) => c.position), ...result.state.rejected.map((r) => r.position)].filter((p) => p < manifest.firstFree);
@@ -365,6 +479,54 @@ async function scanSweep(o: BenchOptions, module: WebAssembly.Module, scanFile: 
   return rows;
 }
 
+/** Each artifact's file under the module's data directory and its size on disk (null when it is not there). */
+function onDisk(pssData: string, id: string, manifest: Manifest): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [name, ref] of Object.entries(manifest.artifacts)) {
+    const file = join(pssData, "snapshots", id, ref.digest);
+    if (existsSync(file)) out[name] = statSync(file).size;
+  }
+  return out;
+}
+
+/** The naive baseline (FR-152): every output slot in full (256 bytes) and every nullifier entry (32 bytes). */
+export function naiveOf(manifest: Manifest): BenchResults["naive"] {
+  const outputs = slotCount(manifest);
+  const nullifiers = manifest.artifacts.nullifierTable.records;
+  return { outputs, nullifiers, outputBytes: outputs * 256, nullifierBytes: nullifiers * 32, totalBytes: outputs * 256 + nullifiers * 32 };
+}
+
+/**
+ * The snapshot's tables from the manifest, with the bytes of one request and one response measured on the first call
+ * the benchmark made to each: `(body − 40) / queriesPerCall`.
+ */
+function tableShapes(manifest: Manifest, wallets: readonly WalletRun[]): Record<BenchTableName, TableShape | null> {
+  const a = manifest.artifacts;
+  const q = manifest.queriesPerCall;
+  const perQuery = (bytes: number | undefined): number | null => (bytes === undefined ? null : (bytes - 40) / q);
+  const first = wallets[0];
+  const shape = (ref: typeof a.readTable | undefined, publicRef: { size: number } | undefined, call: CallRow | null | undefined): TableShape | null =>
+    ref === undefined || publicRef === undefined
+      ? null
+      : {
+          records: ref.records,
+          recordBytes: ref.recordBytes,
+          groups: ref.groups,
+          perGroup: ref.perGroup,
+          rows: ref.layout.rows,
+          cols: ref.layout.cols,
+          tableBytes: ref.size,
+          publicBytes: publicRef.size,
+          requestBytes: call === null || call === undefined || call.calls === 0 ? null : perQuery(call.bytesUp),
+          responseBytes: call === null || call === undefined || call.calls === 0 ? null : perQuery(call.bytesDown),
+        };
+  return {
+    read: shape(a.readTable, a.readPublic, first?.read),
+    path: shape(a.pathTable, a.pathPublic, wallets.find((w) => w.path !== null)?.path),
+    nullifier: shape(a.nullifierTable, a.nullifierPublic, first?.nullifier),
+  };
+}
+
 /** Runs the benchmark (see the module comment). */
 export async function runBench(o: BenchOptions): Promise<BenchResults> {
   if (o.wallets.length === 0) throw new Error("the benchmark needs at least one wallet");
@@ -377,13 +539,27 @@ export async function runBench(o: BenchOptions): Promise<BenchResults> {
   const self = selfProbe();
   const notes: string[] = [...(o.notes ?? [])];
   try {
-    if (o.build !== null) await requestBuild(o);
+    const build = o.build === null ? null : await requestBuild(o);
     // The snapshot under test.
     const http = new PssHttp(o.server, { fetch: fetchOf(o) });
     const served = await http.manifest();
     const id = createHash("sha256").update(served.bytes).digest("hex");
     const manifest = decodeManifest(served.bytes);
-    o.log(`snapshot ${id.slice(0, 16)}… at height ${manifest.height}: ${manifest.firstFree} outputs, ${manifest.artifacts.nullifierTable.records} nullifiers, k ${manifest.pathSplit}`);
+    o.log(`snapshot ${id.slice(0, 16)}… at height ${manifest.height}: ${manifest.scheme}, ${manifest.firstFree} outputs${manifest.padding === undefined ? "" : ` padded to ${manifest.padding.size}`}, ${manifest.artifacts.nullifierTable.records} nullifier entries, k ${manifest.pathSplit}`);
+    const scheme = o.scheme ?? o.build?.scheme;
+    if (scheme !== undefined && manifest.scheme !== scheme) throw new Error(`the served snapshot uses ${manifest.scheme}, not ${scheme}`);
+    // The bytes each served table says it holds, from the module's status (a module without the field gives nulls).
+    let heldBytes: BenchResults["server"]["heldBytes"] = null;
+    const secret = o.build?.adminSecret ?? o.adminSecret;
+    if (secret !== undefined) {
+      try {
+        const current = (await adminStatus(o, secret)).current as { id?: string; heldBytes?: Partial<Record<BenchTableName, number | null>> } | null;
+        if (current?.id !== id) notes.push(`The module's status names another snapshot (${String(current?.id).slice(0, 16)}…) than the manifest: the bytes its tables hold were not recorded.`);
+        else heldBytes = Object.fromEntries(TABLE_NAMES.map((t) => [t, typeof current.heldBytes?.[t] === "number" ? current.heldBytes[t] : null])) as Record<BenchTableName, number | null>;
+      } catch (error) {
+        notes.push(`The module's status could not be read: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     let serverBuild: BenchResults["serverBuild"] = null;
     const statsFile = o.pssData === null ? null : join(o.pssData, "snapshots", id, "build-stats.json");
     if (statsFile !== null && existsSync(statsFile)) serverBuild = serverBuildFromStats(statsFile);
@@ -428,6 +604,7 @@ export async function runBench(o: BenchOptions): Promise<BenchResults> {
         positions: first.positions,
         probe: self,
         log: o.log,
+        ...walletSchemeOptions(o),
       });
     } else {
       notes.push("No database was given: the chain sync's size, the event read and the pathSplit builds (FR-153) were not measured.");
@@ -459,9 +636,9 @@ export async function runBench(o: BenchOptions): Promise<BenchResults> {
     }
     const used = new Set<ServerRequestLine>();
     const wallets = runs.map((r) => r.finish(serverLines, used));
-    const total = wallets.reduce((n, w) => n + w.requests.length, 0);
-    const matched = wallets.reduce((n, w) => n + w.requests.filter((q) => q.server !== null).length, 0);
-    if (o.serverLog !== null) logSource = `${logSource}; ${matched} of ${total} requests paired with a server line`;
+    const all = wallets.flatMap((w) => [...w.requests, ...(w.path?.requests ?? [])]);
+    const matched = all.filter((q) => q.server !== null).length;
+    if (o.serverLog !== null) logSource = `${logSource}; ${matched} of ${all.length} requests paired with a server line`;
 
     // Status records: modules and versions.
     let serverModules: BenchResults["software"]["serverModules"] = null;
@@ -499,7 +676,9 @@ export async function runBench(o: BenchOptions): Promise<BenchResults> {
         memory: o.serverMemory?.method ?? "not sampled (give --server-container or --server-pid)",
         log: logSource,
         threads: serverBuild?.threads ?? null,
+        heldBytes,
       },
+      build,
       snapshot: {
         id,
         height: manifest.height,
@@ -510,7 +689,11 @@ export async function runBench(o: BenchOptions): Promise<BenchResults> {
         queriesPerCall: manifest.queriesPerCall,
         blocks: manifest.artifacts.blockRoots.blocks,
         artifacts: Object.fromEntries(Object.entries(manifest.artifacts).map(([name, ref]) => [name, ref.size])),
+        onDisk: o.pssData === null ? null : onDisk(o.pssData, id, manifest),
+        scheme: manifest.scheme,
         pir: { ...manifest.pir },
+        padding: manifest.padding?.size ?? null,
+        tables: tableShapes(manifest, wallets),
         builtByBench: o.build !== null,
       },
       chainSync: {
@@ -525,13 +708,7 @@ export async function runBench(o: BenchOptions): Promise<BenchResults> {
       wallets,
       scanSweep: scanRows,
       pathSplits: splits,
-      naive: {
-        outputs: manifest.firstFree,
-        nullifiers: manifest.artifacts.nullifierTable.records,
-        outputBytes: manifest.firstFree * 256,
-        nullifierBytes: manifest.artifacts.nullifierTable.records * 32,
-        totalBytes: manifest.firstFree * 256 + manifest.artifacts.nullifierTable.records * 32,
-      },
+      naive: naiveOf(manifest),
       requestShapesIdentical: shapes.length < 2 ? null : shapes.every((s) => s === shapes[0]),
       transfer: o.transfer === null ? null : transferRow(o.transfer.record, o.transfer.source),
       notes,

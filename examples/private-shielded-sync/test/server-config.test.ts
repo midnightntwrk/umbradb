@@ -35,10 +35,12 @@ describe("run/sync.mjs's configuration with the module passes umbradb config che
       symlinkSync(join(REPOSITORY, "node_modules", entry), join(checkout, "node_modules", entry), "dir");
     }
     symlinkSync(join(REPOSITORY, "vendor"), join(checkout, "vendor"), "dir");
-    for (const folder of ["server", "shared", "pir", "kernel", "run"]) {
+    // `ipir/` since spec 00058 (the server's IPIR+SP scheme imports its wrappers), without what git ignores there: its
+    // build folder and the add-on built for this machine (a checkout has neither; IPIR+SP is then unavailable).
+    for (const folder of ["server", "shared", "pir", "kernel", "run", "ipir"]) {
       cpSync(join(EXAMPLE, folder), join(checkout, "examples", "private-shielded-sync", folder), {
         recursive: true,
-        filter: (source) => !source.includes(`${join("kernel", "target")}`),
+        filter: (source) => !source.includes(`${join("kernel", "target")}`) && !source.includes(`${join("ipir", "target")}`) && !source.endsWith("pss-ipir.node"),
       });
     }
     const built = await runNode(

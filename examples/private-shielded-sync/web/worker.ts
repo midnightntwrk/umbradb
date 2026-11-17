@@ -6,6 +6,18 @@
  * The mnemonic and the keys stay in this worker: no request carries them. Requests go to the page's own origin, whose
  * server (`./serve.ts`) passes `/pss/v1/…` to the module's API; `/debug/…` reads the server's database, for the
  * comparisons the page shows, and is no part of the private protocol.
+ *
+ * PIR follows the manifest's scheme (spec 00058 FR-060), and a call's work is spread over Web Workers the page starts
+ * for this worker (`./call-workers.ts`; `CALL_THREADS`: one fewer than the browser's processors, at most 8; this
+ * thread alone when the browser reports one processor):
+ *
+ * - SimplePIR runs in TypeScript; its two multiplications per call (`A × s` to build, `H × s` to decode) are split by
+ *   rows over `multiply-worker.js` workers (`./multiply-web.ts`), over shared memory.
+ * - IPIR+SP runs in the wallet's WebAssembly (`pss-ipir.wasm`, beside the page): fetched only when a manifest names
+ *   `ipir-sp`, compiled only if its SHA-256 equals the committed one built into this file (`IPIR_DIGEST`, FR-031), and
+ *   given to the scheme through `ipirWasm`. A call's requests are dealt to `ipir-worker.js` workers
+ *   (`../ipir/pool.ts`), each with its own instance of the WebAssembly. Every request's secret comes from the
+ *   `crypto.getRandomValues` of the thread that makes it, through the wrapper (`../ipir/wallet.ts`, FR-032).
  */
 
 import { generateMnemonic, mnemonicToSeedSync, validateMnemonic } from "@scure/bip39";
@@ -19,8 +31,20 @@ import { emptyCallStats, lookupNullifiers, paddedCalls, readCell, readPaths, rea
 import { coinPath } from "../client/send.ts";
 import { checkCiphertext, checkLowerPath, checkSnapshotMatch, rootOverBlocks } from "../client/sync.ts";
 import { type Hash2, rootFromPath, TREE_DEPTH } from "../client/tree.ts";
+import { IpirPool } from "../ipir/pool.ts";
+import type { IpirReply } from "../ipir/pool-worker.ts";
 import { Kernel } from "../kernel/index.ts";
-import { bucketOf, decodeNullifierRecord, inlineMultiplier, type Matrix, NULLIFIER_RECORD_BYTES, setupMatrix } from "../pir/index.ts";
+import {
+  bucketOf,
+  decodeNullifierRecord,
+  inlineMultiplier,
+  type Multiplier,
+  NULLIFIER_RECORD_BYTES,
+  openWalletScheme,
+  PUBLIC_ARTIFACT,
+  type WalletScheme,
+  type WalletTable,
+} from "../pir/index.ts";
 import {
   type ArtifactRef,
   decodeManifest,
@@ -36,13 +60,17 @@ import {
   splitTail,
   TAIL_OUTPUT_BYTES,
 } from "../shared/index.ts";
+import { callWorkerFailed, startCallWorker } from "./call-workers.ts";
 import { initLedger } from "./ledger-v9.ts";
+import { WebMultiplier } from "./multiply-web.ts";
+import { ascii4, callPlan, cellOf, compileChecked, describeCallBody, describePublicArtifact, hex, tableOfRoute, tableSummary } from "./scheme-view.ts";
 import { sha256 as sha256Noble } from "@noble/hashes/sha2.js";
 
 declare const KERNEL_DIGEST: string;
+/** The committed SHA-256 of `ipir/pss-ipir.wasm` (`ipir/pss-ipir.wasm.sha256`), injected by `./build.ts`. */
+declare const IPIR_DIGEST: string;
 
 type Json = Record<string, unknown>;
-const hex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 const fromHexStrict = (s: string, len: number): Uint8Array => {
   const t = s.trim().replace(/^0x/, "").toLowerCase();
   if (!new RegExp(`^[0-9a-f]{${len * 2}}$`).test(t)) throw new Error(`not ${len} bytes of hex: ${s.slice(0, 20)}…`);
@@ -86,6 +114,55 @@ function startGpu(): Promise<GpuScan> {
   return gpu;
 }
 let keys: WalletKeys | null = null;
+
+/** Threads for a call's work: one fewer than the browser's processors, at most 8. */
+const CALL_THREADS = Math.min(8, Math.max(1, (self.navigator?.hardwareConcurrency ?? 1) - 1));
+
+/**
+ * SimplePIR's multiplication: on Web Workers over shared memory (started at the first SimplePIR call), or on this
+ * thread when there is one thread or the page is not cross-origin isolated (no `SharedArrayBuffer` to hand over).
+ */
+const multiplier: Multiplier = CALL_THREADS > 1 && self.crossOriginIsolated ? new WebMultiplier(CALL_THREADS) : inlineMultiplier;
+
+/**
+ * The Web Workers that make a call's IPIR+SP requests, started when the first IPIR+SP snapshot is opened and kept for
+ * the page's life; null when one thread is all there is.
+ */
+const ipirWorkers: IpirPool | null =
+  CALL_THREADS > 1
+    ? new IpirPool(CALL_THREADS, () => {
+        const worker = startCallWorker("ipir-worker.js");
+        return {
+          post: (task, transfer) => worker.port.postMessage(task, transfer),
+          listen(onReply, onError) {
+            worker.port.onmessage = (event: MessageEvent<IpirReply>) => onReply(event.data);
+            worker.onFail(onError);
+          },
+          busy: () => undefined,
+          terminate: async () => worker.stop(),
+        };
+      })
+    : null;
+
+/** The wallet's IPIR+SP WebAssembly, compiled once per page load, and what loading it took (shown by the files step). */
+let ipirModule: Promise<{ module: WebAssembly.Module; bytes: number; sha256: string; ms: number }> | null = null;
+
+/**
+ * Fetches `pss-ipir.wasm` and compiles it if its SHA-256 equals the committed one (FR-031); called by the IPIR+SP
+ * scheme only, so a SimplePIR snapshot never fetches it. A failed load is tried again at the next call.
+ */
+function loadIpirWasm(): Promise<{ module: WebAssembly.Module; bytes: number; sha256: string; ms: number }> {
+  ipirModule ??= (async () => {
+    const t = now();
+    const response = await fetch("pss-ipir.wasm");
+    if (!response.ok) throw new Error(`GET pss-ipir.wasm: ${response.status}`);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const module = await compileChecked(bytes, IPIR_DIGEST, sha256);
+    return { module, bytes: bytes.length, sha256: IPIR_DIGEST, ms: now() - t };
+  })();
+  ipirModule.catch(() => (ipirModule = null));
+  return ipirModule;
+}
 
 // ── every request, kept whole ───────────────────────────────────────────────────────────────────────────────────
 
@@ -140,10 +217,15 @@ const http = new PssHttp(self.location.origin, { fetch: capturingFetch });
 let manifest: Manifest | null = null;
 let manifestId: Uint8Array | null = null;
 const files = new Map<string, Uint8Array>();
-let readSetup: Matrix | null = null;
-let nullifierSetup: Matrix | null = null;
-/** The path table's setup data: downloaded only when the page reads paths, as a spend would (Q58). */
-let pathSetup: Matrix | null = null;
+/**
+ * The snapshot's PIR scheme (`../pir/scheme.ts`) and its tables, as a wallet opens them. SimplePIR multiplies on
+ * `multiplier`; IPIR+SP's requests are made on `ipirWorkers`.
+ */
+let scheme: WalletScheme | null = null;
+let readTable: WalletTable | null = null;
+let nullifierTable: WalletTable | null = null;
+/** The path table: its public artifact is downloaded only when the page reads paths, as a spend would (Q58). */
+let pathTable: WalletTable | null = null;
 let matches: number[] = [];
 interface Coin {
   position: number;
@@ -176,13 +258,8 @@ function newRequests(): Json[] {
   return out;
 }
 
-const ascii4 = (b: Uint8Array): string => String.fromCharCode(...b.subarray(0, 4));
-const u32s = (b: Uint8Array, at: number, n: number): number[] => {
-  const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
-  const out: number[] = [];
-  for (let i = 0; i < n && at + 4 * i + 4 <= b.length; i++) out.push(v.getUint32(at + 4 * i, true));
-  return out;
-};
+/** Every manifest this page got, by snapshot identifier: a call is decoded with the shapes of its own snapshot. */
+const manifests = new Map<string, Manifest>();
 
 /** What a body is, field by field, where its format is known (`../shared/wire.ts`, the manifest, the artifacts). */
 function decodeBody(e: Exchange, side: "request" | "response"): Json | null {
@@ -192,22 +269,9 @@ function decodeBody(e: Exchange, side: "request" | "response"): Json | null {
   if (e.status >= 400 && side === "response") return null;
   if (route === "/manifest") return { format: "manifest (canonical JSON); its SHA-256 is the snapshot identifier" };
   if (route.startsWith("/query/")) {
-    const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
-    const count = v.getUint16(38, true);
-    const perVector = (b.length - 40) / 4 / Math.max(1, count);
-    return {
-      format: side === "request" ? "query body: 40-byte header, then the query vectors (u32, little-endian)" : "answer body: 40-byte header, then the answer vectors (u32, little-endian)",
-      magic: ascii4(b),
-      formatVersion: v.getUint16(4, true),
-      snapshotId: hex(b.subarray(6, 38)),
-      vectors: count,
-      valuesPerVector: perVector,
-      meaning:
-        side === "request"
-          ? `each vector is A·s + e + Δ·u over the table's ${perVector} columns: one is the wanted column (or a random padding column), the server cannot tell which`
-          : `each vector is the table (${perVector} rows) times one query vector; only the client can remove A·s and read its column`,
-      firstValuesOfVector0: u32s(b, 40, 8),
-    };
+    // The call's own snapshot (its header names it), else the current one.
+    const m = (b.length >= 40 ? manifests.get(hex(b.subarray(6, 38))) : undefined) ?? manifest;
+    return describeCallBody(m?.scheme ?? "simplepir", side, b, m === null ? null : tableOfRoute(m, route), side === "response" ? e.requestBody : null, sha256Sync);
   }
   if (route === "/tail") {
     const h = decodeTailHeader(b);
@@ -232,12 +296,12 @@ function decodeBody(e: Exchange, side: "request" | "response"): Json | null {
           ? "scan file"
           : a.blockRoots.digest === digest
             ? "block roots"
-            : a.readSetup.digest === digest
-              ? "read table setup"
-              : a.pathSetup?.digest === digest
-                ? "path table setup"
-                : a.nullifierSetup.digest === digest
-                  ? "nullifier table setup"
+            : a.readPublic.digest === digest
+              ? `read table ${PUBLIC_ARTIFACT[manifest!.scheme]}`
+              : a.pathPublic?.digest === digest
+                ? `path table ${PUBLIC_ARTIFACT[manifest!.scheme]}`
+                : a.nullifierPublic.digest === digest
+                  ? `nullifier table ${PUBLIC_ARTIFACT[manifest!.scheme]}`
                   : "artifact";
     const out: Json = { format: `${name}, addressed by its SHA-256`, digest };
     if (name === "scan file") {
@@ -245,9 +309,9 @@ function decodeBody(e: Exchange, side: "request" | "response"): Json | null {
       out.first = Array.from({ length: Math.min(4, b.length / 36) }, (_, i) => ({ position: i, point: hex(b.subarray(36 * i, 36 * i + 32)), element0Prefix: hex(b.subarray(36 * i + 32, 36 * i + 36)) }));
     } else if (name === "block roots") {
       out.roots = Array.from({ length: Math.min(16, b.length / 32) }, (_, i) => hex(b.subarray(32 * i, 32 * i + 32)));
-    } else if (name.endsWith("setup")) {
-      out.layout = `rows × 1024 u32 (H = table × A), ${b.length / 4 / 1024} rows`;
-      out.firstValues = u32s(b, 0, 8);
+    } else if (manifest !== null && name.endsWith(PUBLIC_ARTIFACT[manifest.scheme])) {
+      const t = name.startsWith("read") ? a!.readTable : name.startsWith("path") ? a!.pathTable : a!.nullifierTable;
+      Object.assign(out, describePublicArtifact(manifest.scheme, b, t?.layout.cols ?? null));
     }
     return out;
   }
@@ -410,24 +474,41 @@ async function getFiles(): Promise<Json> {
   manifestId = fromHexStrict(await sha256(served.bytes), 32);
   if (served.servedId !== null && served.servedId !== hex(manifestId)) throw new Error("the manifest's SHA-256 is not the identifier the server names");
   manifest = decodeManifest(served.bytes);
+  manifests.set(hex(manifestId), manifest);
   const m = manifest;
   const a = m.artifacts;
   const downloads = [];
-  for (const [name, ref] of [["scan file", a.scan], ["block roots", a.blockRoots], ["read table setup", a.readSetup], ["nullifier table setup", a.nullifierSetup]] as const) {
+  // A manifest naming a scheme this page's build does not have stops here, with its name. The IPIR+SP WebAssembly is
+  // fetched and checked only when the scheme asks for it.
+  scheme?.dispose();
+  scheme = null;
+  readTable = nullifierTable = pathTable = null;
+  let wasm: Awaited<ReturnType<typeof loadIpirWasm>> | null = null;
+  scheme = await openWalletScheme(m, {
+    multiplier,
+    ipirWasm: async () => {
+      wasm = await loadIpirWasm();
+      return wasm.module;
+    },
+    ...(ipirWorkers === null ? {} : { ipirWorkers }),
+  });
+  const label = PUBLIC_ARTIFACT[m.scheme];
+  for (const [name, ref] of [["scan file", a.scan], ["block roots", a.blockRoots], [`read table ${label}`, a.readPublic], [`nullifier table ${label}`, a.nullifierPublic]] as const) {
     downloads.push(await fetchBlob(ref, name));
   }
   const blockRoots = files.get(a.blockRoots.digest)!;
   const rootOk = equal(rootOverBlocks(blockRoots, m.pathSplit, hash), fromHexStrict(m.root, 32));
   if (!rootOk) throw new Error("the block roots do not give the manifest's root");
   const t2 = now();
-  readSetup = setupMatrix(files.get(a.readSetup.digest)!, a.readTable.rows);
-  nullifierSetup = setupMatrix(files.get(a.nullifierSetup.digest)!, a.nullifierTable.rows);
+  readTable = await scheme.openTable(a.readTable, files.get(a.readPublic.digest)!);
+  nullifierTable = await scheme.openTable(a.nullifierTable, files.get(a.nullifierPublic.digest)!);
   const setupMs = now() - t2;
-  pathSetup = null;
+  pathTable = null;
   coins.clear();
   fetched.clear();
   matches = [];
   const debug = await debugJson(`/debug/state?height=${m.height}`);
+  const loaded = wasm as Awaited<ReturnType<typeof loadIpirWasm>> | null;
   return {
     snapshotId: hex(manifestId),
     manifest: {
@@ -439,26 +520,31 @@ async function getFiles(): Promise<Json> {
       root: m.root,
       pathSplit: m.pathSplit,
       queriesPerCall: m.queriesPerCall,
+      scheme: m.scheme,
       pir: m.pir,
-      readTable: { rows: a.readTable.rows, cols: a.readTable.cols, recordsPerColumn: a.readTable.perColumn, records: a.readTable.records, recordBytes: a.readTable.recordBytes },
-      pathTable:
-        a.pathTable === undefined || a.pathSetup === undefined
-          ? null
-          : { rows: a.pathTable.rows, cols: a.pathTable.cols, recordsPerColumn: a.pathTable.perColumn, recordBytes: a.pathTable.recordBytes, setupBytes: a.pathSetup.size },
-      nullifierTable: { rows: a.nullifierTable.rows, cols: a.nullifierTable.cols, bucketBits: a.nullifierTable.bucketBits, capacity: a.nullifierTable.capacity },
+      readTable: tableSummary(m.scheme, a.readTable),
+      pathTable: a.pathTable === undefined || a.pathPublic === undefined ? null : tableSummary(m.scheme, a.pathTable, a.pathPublic.size),
+      nullifierTable: tableSummary(m.scheme, a.nullifierTable),
       blocks: a.blockRoots.blocks,
     },
     manifestBytes: served.bytes.length,
     downloads,
+    ...(loaded === null ? {} : { ipirWasm: { bytes: loaded.bytes, sha256: loaded.sha256, ms: round(loaded.ms), threads: ipirWorkers?.threads ?? 1 } }),
     checks: [
       "the manifest's SHA-256 is the identifier the server names",
       "every artifact's size and SHA-256 equal the manifest's",
       "the block roots give the manifest's root",
+      ...(m.scheme === "ipir-sp"
+        ? [
+            "the IPIR+SP WebAssembly's SHA-256 equals the committed one built into the page",
+            "the WebAssembly set up the read and nullifier tables from their seeds and digests and accepted their masks (it refuses masks of another setup)",
+          ]
+        : []),
       ...(debug === null
         ? []
         : [`database (debug): first_free ${String(debug.firstFree)}, root ${String(debug.root)} at ${m.height}: ${debug.firstFree === m.firstFree && debug.root === m.root ? "equal to the manifest" : "DIFFERENT from the manifest"}`]),
     ],
-    setupMatricesMs: round(setupMs),
+    ...(m.scheme === "simplepir" ? { setupMatricesMs: round(setupMs) } : { openTablesMs: round(setupMs) }),
     ms: round(now() - t),
   };
 }
@@ -511,21 +597,20 @@ async function read(args: { positions?: number[] }): Promise<Json> {
   const positions = [...new Set(args.positions && args.positions.length > 0 ? args.positions : matches)].sort((x, y) => x - y);
   for (const p of positions) if (!Number.isInteger(p) || p < 0 || p >= m.firstFree) throw new Error(`position ${p} is not in the snapshot (0 to ${m.firstFree - 1})`);
   const ref = m.artifacts.readTable;
-  const plan = paddedCalls(positions.map((p) => readCell(m, p).column), ref.cols, m.queriesPerCall);
+  const plan = paddedCalls(positions.map((p) => readCell(m, p).group), ref.groups, m.queriesPerCall);
   const stats = emptyCallStats();
   const t = now();
-  const records = await readPositions(http, m, id, need(readSetup, "get the files"), positions, inlineMultiplier, stats);
+  const records = await readPositions(http, m, id, need(readTable, "get the files"), positions, stats);
   const callMs = now() - t;
   const file = files.get(m.artifacts.scan.digest)!;
   const out = [];
   for (const p of positions) {
     const r = decodeReadRecord(records.get(p)!);
-    const { index, column, slot } = readCell(m, p);
+    const { index, group, slot } = readCell(m, p);
     const item: Json = {
       position: p,
       ...(m.padding === undefined ? {} : { tableIndex: index }),
-      column,
-      slotInColumn: slot,
+      ...cellOf(m.scheme, group, slot),
       commitmentPrefix: hex(r.commitmentPrefix),
       elementsShrunk: r.elements === null ? null : hex(r.elements),
     };
@@ -548,13 +633,7 @@ async function read(args: { positions?: number[] }): Promise<Json> {
   }
   return {
     positions,
-    calls: plan.map((c, i) => ({
-      call: i + 1,
-      vectors: c.columns.length,
-      realColumns: c.real,
-      paddingColumns: c.columns.length - c.real.length,
-      note: "the server sees only the number of calls and their sizes, never which columns are real",
-    })),
+    calls: callPlan(m.scheme, plan, false, `the server sees only the number of calls and their sizes, never which ${m.scheme === "simplepir" ? "columns" : "rows"} are real`),
     stats: { ...stats, buildMs: round(stats.buildMs), roundTripMs: round(stats.roundTripMs), decodeMs: round(stats.decodeMs) },
     records: out,
     ms: round(callMs),
@@ -562,8 +641,8 @@ async function read(args: { positions?: number[] }): Promise<Json> {
 }
 
 /**
- * Reads lower Merkle paths from the path table by PIR, as a spend does (Q58): only then is the path table's setup data
- * downloaded. Positions default to the wallet's snapshot coins. Each path is checked against its block's root from the
+ * Reads lower Merkle paths from the path table by PIR, as a spend does (Q58): only then is the path table's public
+ * artifact (SimplePIR's setup data, IPIR+SP's masks) downloaded. Positions default to the wallet's snapshot coins. Each path is checked against its block's root from the
  * coin's commitment (with the debug database, from the stored commitment for a position that is not the wallet's).
  */
 async function paths(args: { positions?: number[] }, progress: (text: string) => void): Promise<Json> {
@@ -571,8 +650,8 @@ async function paths(args: { positions?: number[] }, progress: (text: string) =>
   const m = need(manifest, "get the files");
   const id = need(manifestId, "get the files");
   const ref = m.artifacts.pathTable;
-  const setupRef = m.artifacts.pathSetup;
-  if (ref === undefined || setupRef === undefined) throw new Error("this snapshot has no path table (its path split is 0): the block roots give every path");
+  const publicRef = m.artifacts.pathPublic;
+  if (ref === undefined || publicRef === undefined) throw new Error("this snapshot has no path table (its path split is 0): the block roots give every path");
   const blockSize = 2 ** m.pathSplit;
   const fullBlocks = Math.floor(m.firstFree / blockSize);
   const own = [...coins.values()].filter((c) => c.source === "snapshot").map((c) => c.position);
@@ -583,20 +662,21 @@ async function paths(args: { positions?: number[] }, progress: (text: string) =>
   const fromTail = asked.filter((p) => Math.floor(p / blockSize) >= fullBlocks);
   const t = now();
   let download: Json | null = null;
-  if (pathSetup === null) {
-    progress(`downloading the path table's setup data (${(setupRef.size / 1048576).toFixed(1)} MB), once per snapshot`);
-    download = await fetchBlob(setupRef, "path table setup");
-    pathSetup = setupMatrix(files.get(setupRef.digest)!, ref.rows);
+  if (pathTable === null) {
+    const label = PUBLIC_ARTIFACT[m.scheme];
+    progress(`downloading the path table's ${label} (${(publicRef.size / 1048576).toFixed(1)} MB), once per snapshot`);
+    download = await fetchBlob(publicRef, `path table ${label}`);
+    pathTable = await need(scheme, "get the files").openTable(ref, files.get(publicRef.digest)!);
   }
-  const plan = paddedCalls(positions.map((p) => readCell(m, p, ref).column), ref.cols, m.queriesPerCall);
+  const plan = paddedCalls(positions.map((p) => readCell(m, p, ref).group), ref.groups, m.queriesPerCall);
   const stats = emptyCallStats();
-  const records = positions.length === 0 ? new Map<number, Uint8Array>() : await readPaths(http, m, id, pathSetup, positions, inlineMultiplier, stats);
+  const records = positions.length === 0 ? new Map<number, Uint8Array>() : await readPaths(http, m, id, pathTable, positions, stats);
   const blockRoots = files.get(m.artifacts.blockRoots.digest)!;
   const out = [];
   for (const p of positions) {
     const lower = decodePathRecord(records.get(p)!, m.pathSplit);
-    const { column, slot } = readCell(m, p, ref);
-    const item: Json = { position: p, column, slotInColumn: slot };
+    const { group, slot } = readCell(m, p, ref);
+    const item: Json = { position: p, ...cellOf(m.scheme, group, slot) };
     if (lower === null) {
       item.result = "FAILED: the path table holds no path for a position in a full block";
       out.push(item);
@@ -626,9 +706,10 @@ async function paths(args: { positions?: number[] }, progress: (text: string) =>
   for (const p of fromTail) out.push({ position: p, result: `not read: block ${Math.floor(p / blockSize)} was not full at the snapshot, so the tail gives its path` });
   return {
     positions: asked,
+    scheme: m.scheme,
     download,
-    calls: plan.map((c, i) => ({ call: i + 1, vectors: c.columns.length, realColumns: c.real, paddingColumns: c.columns.length - c.real.length })),
-    table: { rows: ref.rows, cols: ref.cols, recordsPerColumn: ref.perColumn, recordBytes: ref.recordBytes },
+    calls: callPlan(m.scheme, plan, false),
+    table: tableSummary(m.scheme, ref),
     stats: { ...stats, buildMs: round(stats.buildMs), roundTripMs: round(stats.roundTripMs), decodeMs: round(stats.decodeMs) },
     records: out,
     ms: round(now() - t),
@@ -659,10 +740,10 @@ async function nullifiers(args: { nullifiers?: string[] }): Promise<Json> {
   const own = [...coins.values()].filter((c) => c.source === "snapshot").map((c) => c.nullifier);
   const list = [...new Set([...own, ...manual])];
   const ref = m.artifacts.nullifierTable;
-  const plan = paddedCalls(list.map((nf) => bucketOf(fromHexStrict(nf, 32), ref.bucketBits)), ref.cols, m.queriesPerCall);
+  const plan = paddedCalls(list.map((nf) => bucketOf(fromHexStrict(nf, 32), ref.bucketBits)), ref.groups, m.queriesPerCall);
   const stats = emptyCallStats();
   const t = now();
-  const found = await lookupNullifiers(http, m, id, need(nullifierSetup, "get the files"), list, inlineMultiplier, stats);
+  const found = await lookupNullifiers(http, m, id, need(nullifierTable, "get the files"), list, stats);
   const ms = now() - t;
   const results = list.map((nf) => {
     const e = found.get(nf) ?? null;
@@ -677,7 +758,7 @@ async function nullifiers(args: { nullifiers?: string[] }): Promise<Json> {
   });
   return {
     lookups: list.length,
-    calls: plan.map((c, i) => ({ call: i + 1, vectors: c.columns.length, realBuckets: c.real, paddingBuckets: c.columns.length - c.real.length })),
+    calls: callPlan(m.scheme, plan, true),
     stats: { ...stats, buildMs: round(stats.buildMs), roundTripMs: round(stats.roundTripMs), decodeMs: round(stats.decodeMs) },
     results,
     note: list.length === 0 ? "no nullifier to look up: one call is still sent, so the server cannot tell a wallet with no coin" : undefined,
@@ -799,6 +880,7 @@ const STEPS: Record<string, (args: never, progress: (text: string) => void) => P
 };
 
 self.onmessage = async (event: MessageEvent<{ id: number; step: string; args: Json }>) => {
+  if (callWorkerFailed(event.data)) return;
   const { id, step, args } = event.data;
   const progress = (text: string) => self.postMessage({ id, progress: text });
   const t = now();

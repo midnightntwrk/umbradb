@@ -1,0 +1,441 @@
+{
+  "kind": "private-shielded-sync micro-benchmarks",
+  "started": {
+    "time": "2026-11-16T05:56:23.264Z",
+    "loadavg": [
+      8.13134765625,
+      10.27880859375,
+      13.05029296875
+    ]
+  },
+  "finished": {
+    "time": "2026-11-16T05:57:15.260Z",
+    "loadavg": [
+      6.60009765625,
+      9.4384765625,
+      12.57421875
+    ]
+  },
+  "machine": {
+    "cpu": "Apple M4 Max",
+    "cores": 16,
+    "memoryBytes": 51539607552,
+    "platform": "darwin 24.6.0",
+    "node": "v24.9.0"
+  },
+  "kernel": {
+    "digest": "b34f9b0003e1b1f96b8c46cdc6acaf5e98ff9a07ba1106bad2babdf79fbcfe36",
+    "bytes": 751590,
+    "sha256Checked": true
+  },
+  "serverThreads": 6,
+  "schemes": [
+    "simplepir",
+    "ipir-sp"
+  ],
+  "workerWarmUpMs": 82.28,
+  "scan": [
+    {
+      "threads": 1,
+      "entries": 16384,
+      "ms": 8314.34,
+      "microsPerEntryPerThread": 507.5,
+      "effectiveMicrosPerEntry": 507.47,
+      "projectedSecondsPerMillion": 507.467
+    },
+    {
+      "threads": 2,
+      "entries": 16384,
+      "ms": 4186.46,
+      "microsPerEntryPerThread": 511,
+      "effectiveMicrosPerEntry": 255.52,
+      "projectedSecondsPerMillion": 255.521
+    },
+    {
+      "threads": 4,
+      "entries": 16384,
+      "ms": 2108.06,
+      "microsPerEntryPerThread": 514.7,
+      "effectiveMicrosPerEntry": 128.67,
+      "projectedSecondsPerMillion": 128.666
+    },
+    {
+      "threads": 8,
+      "entries": 16384,
+      "ms": 1063.47,
+      "microsPerEntryPerThread": 519.3,
+      "effectiveMicrosPerEntry": 64.91,
+      "projectedSecondsPerMillion": 64.909
+    },
+    {
+      "threads": 6,
+      "entries": 16384,
+      "ms": 1419.35,
+      "microsPerEntryPerThread": 519.8,
+      "effectiveMicrosPerEntry": 86.63,
+      "projectedSecondsPerMillion": 86.63
+    }
+  ],
+  "pir": [
+    {
+      "scheme": "simplepir",
+      "records": 69329,
+      "recordBytes": 98,
+      "grid": {
+        "rows": 2464,
+        "cols": 2477,
+        "perColumn": 28,
+        "cellsPerRecord": 88
+      },
+      "bytes": {
+        "tableFile": 12206688,
+        "setup": 10092544,
+        "publicMatrixA": 10145792,
+        "queryBody32": 317096,
+        "answerBody32": 315432,
+        "rawRecords": 6794242
+      },
+      "timings": {
+        "buildGridMs": 51.44,
+        "digestMs": 4.09,
+        "setupMs": 261.95,
+        "serverAnswer1Ms": 3.47,
+        "clientBuild1OneThreadMs": 4.4,
+        "clientBuild1WorkersMs": 4.64,
+        "clientDecode1OneThreadMs": 0.92,
+        "clientDecode1WorkersMs": 0.3,
+        "serverAnswer32Ms": 7.93,
+        "clientBuild32OneThreadMs": 23.97,
+        "clientBuild32WorkersMs": 8.8,
+        "clientDecode32OneThreadMs": 18.95,
+        "clientDecode32WorkersMs": 3.59
+      },
+      "memoryAfter": {
+        "rss": 692158464,
+        "arrayBuffers": 210002549
+      },
+      "check": "every decoded record equals the direct read"
+    },
+    {
+      "scheme": "ipir-sp",
+      "records": 69329,
+      "recordBytes": 98,
+      "table": {
+        "rows": 2048,
+        "cols": 2048,
+        "perRow": 41,
+        "cellsPerRecord": 49
+      },
+      "bytes": {
+        "tableFile": 8388608,
+        "masks": 14884,
+        "cellsHeld": 8388608,
+        "packingHeld": 33587200,
+        "request": 40228,
+        "response": 5700,
+        "queryBody32": 1287336,
+        "answerBody32": 182440,
+        "rawRecords": 6794242
+      },
+      "noise": {
+        "checkedRows": 3,
+        "maxPhaseErrorLog2": 34.105908508571154,
+        "phaseLimitLog2": 37
+      },
+      "timings": {
+        "buildCellsMs": 39.46,
+        "digestMs": 2.72,
+        "buildMs": 403.46,
+        "addonSetupMs": 1.1895,
+        "addonReadMs": 0.543042,
+        "addonHintsMs": 22.764416999999998,
+        "addonPackingMs": 347.63100000000003,
+        "addonPrepareMs": 373.520167,
+        "addonCheckMs": 23.274375,
+        "addonTotalMs": 398.88912500000004,
+        "walletOpenMs": 6.34,
+        "serverAnswer1Ms": 0.68,
+        "clientRequest1OneThreadMs": 7.53,
+        "clientDecode1OneThreadMs": 0.1,
+        "serverAnswer32Ms": 25.46,
+        "clientRequest32OneThreadMs": 239.52,
+        "clientDecode32OneThreadMs": 1.01
+      },
+      "memoryAfter": {
+        "rss": 904708096,
+        "arrayBuffers": 74034505
+      },
+      "check": "every decoded record equals the generated one"
+    },
+    {
+      "scheme": "simplepir",
+      "records": 1000000,
+      "recordBytes": 98,
+      "grid": {
+        "rows": 9416,
+        "cols": 9346,
+        "perColumn": 107,
+        "cellsPerRecord": 88
+      },
+      "bytes": {
+        "tableFile": 176003904,
+        "setup": 38567936,
+        "publicMatrixA": 38281216,
+        "queryBody32": 1196328,
+        "answerBody32": 1205288,
+        "rawRecords": 98000000
+      },
+      "timings": {
+        "buildGridMs": 907.46,
+        "digestMs": 55.33,
+        "setupMs": 3651.44,
+        "serverAnswer1Ms": 5.81,
+        "clientBuild1OneThreadMs": 12.4,
+        "clientBuild1WorkersMs": 11.01,
+        "clientDecode1OneThreadMs": 4.19,
+        "clientDecode1WorkersMs": 0.8,
+        "serverAnswer32Ms": 112.69,
+        "clientBuild32OneThreadMs": 90.48,
+        "clientBuild32WorkersMs": 33.55,
+        "clientDecode32OneThreadMs": 73.35,
+        "clientDecode32WorkersMs": 13.4
+      },
+      "memoryAfter": {
+        "rss": 1553170432,
+        "arrayBuffers": 485612325
+      },
+      "check": "every decoded record equals the direct read"
+    },
+    {
+      "scheme": "ipir-sp",
+      "records": 1000000,
+      "recordBytes": 98,
+      "table": {
+        "rows": 4096,
+        "cols": 12288,
+        "perRow": 250,
+        "cellsPerRecord": 49
+      },
+      "bytes": {
+        "tableFile": 100663296,
+        "masks": 89124,
+        "cellsHeld": 100663296,
+        "packingHeld": 201523200,
+        "request": 52772,
+        "response": 33860,
+        "queryBody32": 1688744,
+        "answerBody32": 1083560,
+        "rawRecords": 98000000
+      },
+      "noise": {
+        "checkedRows": 3,
+        "maxPhaseErrorLog2": 34.20212382383046,
+        "phaseLimitLog2": 37
+      },
+      "timings": {
+        "buildCellsMs": 650,
+        "digestMs": 33.52,
+        "buildMs": 2223.29,
+        "addonSetupMs": 0.5505,
+        "addonReadMs": 6.106917,
+        "addonHintsMs": 206.63279,
+        "addonPackingMs": 1919.163835,
+        "addonPrepareMs": 2146.756667,
+        "addonCheckMs": 68.658041,
+        "addonTotalMs": 2223.0245840000002,
+        "walletOpenMs": 5.05,
+        "serverAnswer1Ms": 2.42,
+        "clientRequest1OneThreadMs": 10.96,
+        "clientDecode1OneThreadMs": 0.38,
+        "serverAnswer32Ms": 72.5,
+        "clientRequest32OneThreadMs": 349.16,
+        "clientDecode32OneThreadMs": 3.57
+      },
+      "memoryAfter": {
+        "rss": 1997537280,
+        "arrayBuffers": 529950307
+      },
+      "check": "every decoded record equals the generated one"
+    },
+    {
+      "scheme": "simplepir",
+      "records": 69329,
+      "recordBytes": 40,
+      "grid": {
+        "rows": 1584,
+        "cols": 1576,
+        "perColumn": 44,
+        "cellsPerRecord": 36
+      },
+      "bytes": {
+        "tableFile": 4992800,
+        "setup": 6488064,
+        "publicMatrixA": 6455296,
+        "queryBody32": 201768,
+        "answerBody32": 202792,
+        "rawRecords": 2773160
+      },
+      "timings": {
+        "buildGridMs": 16.17,
+        "digestMs": 1.73,
+        "setupMs": 114.6,
+        "serverAnswer1Ms": 0.26,
+        "clientBuild1OneThreadMs": 2.44,
+        "clientBuild1WorkersMs": 1.93,
+        "clientDecode1OneThreadMs": 0.55,
+        "clientDecode1WorkersMs": 0.2,
+        "serverAnswer32Ms": 3.34,
+        "clientBuild32OneThreadMs": 15.56,
+        "clientBuild32WorkersMs": 5.98,
+        "clientDecode32OneThreadMs": 12.18,
+        "clientDecode32WorkersMs": 2.38
+      },
+      "memoryAfter": {
+        "rss": 2164883456,
+        "arrayBuffers": 521885453
+      },
+      "check": "every decoded record equals the direct read"
+    },
+    {
+      "scheme": "ipir-sp",
+      "records": 69329,
+      "recordBytes": 40,
+      "table": {
+        "rows": 2048,
+        "cols": 2048,
+        "perRow": 102,
+        "cellsPerRecord": 20
+      },
+      "bytes": {
+        "tableFile": 8388608,
+        "masks": 14884,
+        "cellsHeld": 8388608,
+        "packingHeld": 33587200,
+        "request": 40228,
+        "response": 5700,
+        "queryBody32": 1287336,
+        "answerBody32": 182440,
+        "rawRecords": 2773160
+      },
+      "noise": {
+        "checkedRows": 3,
+        "maxPhaseErrorLog2": 34.14974711950468,
+        "phaseLimitLog2": 37
+      },
+      "timings": {
+        "buildCellsMs": 9.04,
+        "digestMs": 2.73,
+        "buildMs": 361.95,
+        "addonSetupMs": 0.511084,
+        "addonReadMs": 0.41195899999999996,
+        "addonHintsMs": 20.742083,
+        "addonPackingMs": 315.162667,
+        "addonPrepareMs": 338.231958,
+        "addonCheckMs": 22.597375,
+        "addonTotalMs": 361.83645800000005,
+        "walletOpenMs": 2.35,
+        "serverAnswer1Ms": 0.66,
+        "clientRequest1OneThreadMs": 7.37,
+        "clientDecode1OneThreadMs": 0.06,
+        "serverAnswer32Ms": 22.31,
+        "clientRequest32OneThreadMs": 239.47,
+        "clientDecode32OneThreadMs": 0.99
+      },
+      "memoryAfter": {
+        "rss": 2170912768,
+        "arrayBuffers": 502840153
+      },
+      "check": "every decoded record equals the generated one"
+    },
+    {
+      "scheme": "simplepir",
+      "records": 1000000,
+      "recordBytes": 40,
+      "grid": {
+        "rows": 6012,
+        "cols": 5989,
+        "perColumn": 167,
+        "cellsPerRecord": 36
+      },
+      "bytes": {
+        "tableFile": 72011768,
+        "setup": 24625152,
+        "publicMatrixA": 24530944,
+        "queryBody32": 766632,
+        "answerBody32": 769576,
+        "rawRecords": 40000000
+      },
+      "timings": {
+        "buildGridMs": 236.21,
+        "digestMs": 22.29,
+        "setupMs": 1498.48,
+        "serverAnswer1Ms": 2.22,
+        "clientBuild1OneThreadMs": 8.67,
+        "clientBuild1WorkersMs": 7.4,
+        "clientDecode1OneThreadMs": 2.15,
+        "clientDecode1WorkersMs": 0.54,
+        "serverAnswer32Ms": 45.92,
+        "clientBuild32OneThreadMs": 59.94,
+        "clientBuild32WorkersMs": 21.56,
+        "clientDecode32OneThreadMs": 46.98,
+        "clientDecode32WorkersMs": 8.65
+      },
+      "memoryAfter": {
+        "rss": 2312880128,
+        "arrayBuffers": 714964865
+      },
+      "check": "every decoded record equals the direct read"
+    },
+    {
+      "scheme": "ipir-sp",
+      "records": 1000000,
+      "recordBytes": 40,
+      "table": {
+        "rows": 2048,
+        "cols": 10240,
+        "perRow": 512,
+        "cellsPerRecord": 20
+      },
+      "bytes": {
+        "tableFile": 41943040,
+        "masks": 74276,
+        "cellsHeld": 41943040,
+        "packingHeld": 167936000,
+        "request": 40228,
+        "response": 28228,
+        "queryBody32": 1287336,
+        "answerBody32": 903336,
+        "rawRecords": 40000000
+      },
+      "noise": {
+        "checkedRows": 3,
+        "maxPhaseErrorLog2": 34.41362792902417,
+        "phaseLimitLog2": 37
+      },
+      "timings": {
+        "buildCellsMs": 115.37,
+        "digestMs": 13.74,
+        "buildMs": 1767.63,
+        "addonSetupMs": 0.534917,
+        "addonReadMs": 3.602001,
+        "addonHintsMs": 109.691001,
+        "addonPackingMs": 1584.48021,
+        "addonPrepareMs": 1705.472833,
+        "addonCheckMs": 55.876417,
+        "addonTotalMs": 1767.506625,
+        "walletOpenMs": 4.25,
+        "serverAnswer1Ms": 1.6,
+        "clientRequest1OneThreadMs": 9.11,
+        "clientDecode1OneThreadMs": 0.35,
+        "serverAnswer32Ms": 48.92,
+        "clientRequest32OneThreadMs": 290.59,
+        "clientDecode32OneThreadMs": 3.03
+      },
+      "memoryAfter": {
+        "rss": 1985740800,
+        "arrayBuffers": 758850637
+      },
+      "check": "every decoded record equals the generated one"
+    }
+  ]
+}

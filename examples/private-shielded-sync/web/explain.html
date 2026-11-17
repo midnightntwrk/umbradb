@@ -282,6 +282,35 @@
   <div class="sees"><div class="sv"><b>Server sees</b>q, and the ans it computed. Step ③ needs s, which it never gets.</div><div class="wl"><b>Stays on the wallet</b>s, e, u, and the decoded column.</div></div>
 </section>
 
+<section class="slide" id="s-ipir" data-step="ipir" data-title="IPIR+SP: what changes for the wallet">
+  <div class="top">IPIR+SP · the second scheme</div>
+  <h2>IPIR+SP: no setup data, a key with every query</h2>
+  <p class="lead">A snapshot can also be built with IPIR+SP, the scheme of the Zcash wallet services (<span class="mono">valargroup/ipir-sp</span>): SimplePIR's pass over the table, then a Ring-LWE packing step on the server (InsPIRe, ReinsPIRe). The wallet's steps stay the same; what it downloads, sends and decodes changes. The manifest names the scheme, and the wallet follows it.</p>
+  <div class="body g2" style="gap: 12px">
+    <table class="io" style="font-size: 13px">
+      <tr><th></th><th>SimplePIR</th><th>IPIR+SP</th></tr>
+      <tr><td><b>The table</b></td><td>R × C cells of 9 bits; a query asks for a column</td><td>rows × columns of 16-bit cells (multiples of 2,048, at most 32,768 rows); a query asks for a row</td></tr>
+      <tr><td><b>Once per snapshot, per table</b></td><td>the setup data H = table × A, 1,024 numbers per row</td><td>no setup data: two public masks, two 29-bit numbers per column</td></tr>
+      <tr><td><b>Each query sends</b></td><td>q, one 32-bit number per column</td><td>its own key (27,648 bytes) and one 49-bit number per row; every query has its own secret</td></tr>
+      <tr><td><b>Each answer</b></td><td>one 32-bit number per row</td><td>one 22-bit number per column, after the SHA-256 of its query</td></tr>
+      <tr><td><b>The wallet decodes with</b></td><td>H and s</td><td>the masks and the query's secret, in a WebAssembly file (one thread)</td></tr>
+    </table>
+    <div class="box"><h3>At Preprod's size today (69,329 outputs), measured</h3>
+      <table class="tbl" style="font-size: 13px">
+        <tr><th></th><th class="r">SimplePIR</th><th class="r">IPIR+SP</th></tr>
+        <tr><td>once per snapshot, read and nullifier tables</td><td class="r">16,875,520 B</td><td class="r">29,768 B</td></tr>
+        <tr><td>before a first spend, path table</td><td class="r">1,867,776 B</td><td class="r">74,276 B</td></tr>
+        <tr><td>one read call, up / down</td><td class="r">317,096 / 315,432 B</td><td class="r">1,287,336 / 182,440 B</td></tr>
+        <tr><td>one nullifier call, up / down</td><td class="r">262,184 / 212,008 B</td><td class="r">1,287,336 / 182,440 B</td></tr>
+        <tr><td>wallet builds a read call (32 queries)</td><td class="r">29 ms, 8 threads</td><td class="r">257 ms, 1 thread</td></tr>
+      </table>
+      <p class="small muted">Medians over 6 samples, <span class="mono">bench/results/2026-11-16-preprod-schemes/REPORT.md</span>. The upload is larger because each of the 32 queries carries its own key (884,736 bytes of a call). At 1,000,000 entries the once-per-snapshot download is 178,248 B against 63,045,632 B.</p>
+    </div>
+  </div>
+  <div class="claim"><b>Security status.</b> Upstream calls this parameter set experimental. A lattice estimate gives more than 128 bits only under one cost model (MATZOV: about 2<sup>137</sup>; Core-SVP: 2<sup>109.5</sup> classical, 2<sup>96</sup>–2<sup>99</sup> quantum). See <span class="mono">docs/research/00058-ipir-sp-review.md</span>.</div>
+  <div class="sees"><div class="sv"><b>Server sees</b>each query's key and its numbers, one per row; without the query's secret it cannot tell which row is asked for.</div><div class="wl"><b>Stays on the wallet</b>each query's secret, drawn from the platform's random source, freed once its answer is decoded.</div></div>
+</section>
+
 <section class="slide" id="s-example" data-step="" data-title="The example chain">
   <div class="top">The example</div>
   <h2>The example chain: 9 outputs, 5 spends, one wallet</h2>
@@ -860,7 +889,7 @@
 <section class="slide" id="s-scale" data-step="" data-title="At scale">
   <div class="top">Review</div>
   <h2>At scale: sizes and times for 1 million and 10 million outputs</h2>
-  <p class="lead">Measured on an Apple M4 Max where stated; otherwise scaled from those measurements with the server's sizing rule. Preprod today has about 69,000 outputs.</p>
+  <p class="lead">SimplePIR's figures, measured on an Apple M4 Max where stated; otherwise scaled from those measurements with the server's sizing rule. Preprod today has about 69,000 outputs. IPIR+SP's measured sizes: <a data-to="s-ipir"></a></p>
   <div class="body g2">
     <div class="box"><h3>What every wallet downloads or sends</h3>
       <table class="tbl">
@@ -1100,8 +1129,8 @@
     a.textContent = i < 0 ? "?" : `slide ${i + 1} →`;
     a.title = i < 0 ? "" : slides[i].dataset.title;
   }
-  const STEPS = [["pir", "SimplePIR"], ["0", "0 Snapshot"], ["1", "1 Keys"], ["2", "2 Files"], ["3", "3 Scan"], ["4", "4 Records"], ["5", "5 Nullifiers"], ["6", "6 Tail"], ["7", "7 Result"]];
-  const order = (k) => (k === "pir" ? -1 : k === "" ? NaN : Number(k));
+  const STEPS = [["pir", "SimplePIR"], ["ipir", "IPIR+SP"], ["0", "0 Snapshot"], ["1", "1 Keys"], ["2", "2 Files"], ["3", "3 Scan"], ["4", "4 Records"], ["5", "5 Nullifiers"], ["6", "6 Tail"], ["7", "7 Result"]];
+  const order = (k) => (k === "pir" ? -2 : k === "ipir" ? -1 : k === "" ? NaN : Number(k));
   const strip = document.getElementById("strip");
   strip.innerHTML = STEPS.map(([k, t], i) => `${i ? '<span class="sep">›</span>' : ""}<span class="st" data-step="${k}">${t}</span>`).join("");
   strip.addEventListener("click", (e) => {

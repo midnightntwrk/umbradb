@@ -1,0 +1,24 @@
+[package]
+name = "pss-ipir-wasm"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+license = "Apache-2.0"
+publish = false
+description = "The wallet's IPIR+SP as WebAssembly: C-ABI exports, one host import for randomness."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pss-ipir-core = { path = "../core", default-features = false }
+
+# Both `getrandom` majors in the tree need a source on wasm32-unknown-unknown; both call the one host import
+# `env.fill_random` (src/lib.rs). `build.sh wasm` passes `--cfg getrandom_backend="custom"` for 0.3.
+#   0.2 <- rand 0.8 / rand_core 0.6 (rand_chacha, inspiring, reinspiring, valar-spiral-rs)
+#   0.3 <- rand 0.9 `os_rng` (ipir-native-client: the secret of each request)
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom02 = { package = "getrandom", version = "0.2", features = ["custom"] }
+getrandom03 = { package = "getrandom", version = "0.3" }
+# The fingerprint of the previous draw, so that a host giving the same bytes twice is refused (src/lib.rs, review F8).
+sha2 = "0.10"

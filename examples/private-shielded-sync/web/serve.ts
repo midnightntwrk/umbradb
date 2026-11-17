@@ -14,10 +14,11 @@
  *   `/debug/spends?n=K&maxHeight=H` (stored spends, at random);
  * - with `--admin-secret-file`, the module's admin snapshot route with the secret added here (the page never holds
  *   it): `POST /debug/reload-snapshot` with `{}` (the module's indexed height), `{"height": h}`, and optionally
- *   `"padding": N` (tables of N entries, the real ones spread among noise, Q57) builds a snapshot, waits for it (up to
- *   two hours) and answers with the new snapshot (identifier, height, first_free, padding) and the previous one;
- *   `POST /debug/snapshot` only starts a build and `GET /debug/snapshot` reports on builds. A height below the served
- *   snapshot's is refused by the module.
+ *   `"padding": N` (tables of N entries, the real ones spread among noise, Q57) and `"scheme": "simplepir"` or
+ *   `"ipir-sp"` (the PIR scheme of this one build; the module's setting without it) builds a snapshot, waits for it (up
+ *   to two hours) and answers with the new snapshot (identifier, height, first_free, scheme, padding) and the previous
+ *   one; `POST /debug/snapshot` only starts a build and `GET /debug/snapshot` reports on builds. A height below the
+ *   served snapshot's is refused by the module, and so is a scheme it does not have (400 or 501).
  */
 
 import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
@@ -77,21 +78,35 @@ const rootHex = (stored: unknown): string | null => {
   return b.length === 33 && b[0] === 0x73 ? b.subarray(1).toString("hex") : null;
 };
 
+/** A build the page asks for: height, padding and scheme, each optional. */
+interface Build {
+  height?: number;
+  padding?: number;
+  scheme?: string;
+}
+
 /**
  * The build a body asks for: `{}` builds at the module's indexed height; `"height"` picks one; `"padding"` (debug, Q57)
- * pads the snapshot's tables to that many entries. null for anything else.
+ * pads the snapshot's tables to that many entries; `"scheme"` names the PIR scheme of this build (a lower-case name,
+ * passed on: the module refuses one it does not know or have). null for anything else.
  */
-function requestedBuild(body: Buffer): { height?: number; padding?: number } | null {
+function requestedBuild(body: Buffer): Build | null {
   if (body.length === 0) return {};
   try {
-    const parsed = JSON.parse(body.toString("utf8")) as { height?: unknown; padding?: unknown };
-    const out: { height?: number; padding?: number } = {};
+    const parsed = JSON.parse(body.toString("utf8")) as { height?: unknown; padding?: unknown; scheme?: unknown };
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const out: Build = {};
     for (const key of ["height", "padding"] as const) {
       const v = parsed[key];
       if (v === undefined || v === null || v === "") continue;
       const n = Number(v);
       if (!Number.isSafeInteger(n) || n < 0) return null;
       out[key] = n;
+    }
+    const s = parsed.scheme;
+    if (s !== undefined && s !== null && s !== "") {
+      if (typeof s !== "string" || !/^[a-z0-9-]{1,32}$/.test(s)) return null;
+      out.scheme = s;
     }
     return out;
   } catch {
@@ -100,7 +115,7 @@ function requestedBuild(body: Buffer): { height?: number; padding?: number } | n
 }
 
 /** The module's admin snapshot route, with the secret added here. */
-async function admin(method: "GET" | "POST", build: { height?: number; padding?: number } = {}): Promise<{ status: number; body: Record<string, unknown> }> {
+async function admin(method: "GET" | "POST", build: Build = {}): Promise<{ status: number; body: Record<string, unknown> }> {
   const r = await fetch(new URL("/pss/v1/admin/snapshot", upstream), {
     method,
     headers: { Authorization: `Bearer ${adminSecret}`, ...(method === "POST" ? { "Content-Type": "application/json" } : {}) },
@@ -113,11 +128,11 @@ async function admin(method: "GET" | "POST", build: { height?: number; padding?:
 const RELOAD_WAIT_MS = 2 * 60 * 60 * 1000;
 
 /**
- * Builds a snapshot (at `height`, or the module's indexed height; padded when asked) and waits for it: the new
- * snapshot's identifier, height, first_free, padding and build time, or why it did not build. The server then serves
+ * Builds a snapshot (at `height`, or the module's indexed height; padded and with a scheme when asked) and waits for
+ * it: the new snapshot's identifier, height, first_free, scheme, padding and build time, or why it did not build. The server then serves
  * it, and keeps the previous one. `GET /debug/snapshot` meanwhile reports the step in progress.
  */
-async function reloadSnapshot(build: { height?: number; padding?: number }): Promise<[number, Record<string, unknown>]> {
+async function reloadSnapshot(build: Build): Promise<[number, Record<string, unknown>]> {
   const started = performance.now();
   const before = (await admin("GET")).body.current as Record<string, unknown> | null;
   const start = await admin("POST", build);
@@ -140,7 +155,7 @@ async function debug(req: IncomingMessage, res: ServerResponse, url: URL): Promi
   if (route === "snapshot" || route === "reload-snapshot") {
     if (adminSecret === null) return json(res, 404, { error: "start serve.ts with --admin-secret-file" });
     const build = req.method === "POST" ? requestedBuild(await readBody(req)) : {};
-    if (build === null) return json(res, 400, { error: 'the body is {} or {"height": <integer>, "padding": <integer>}, either optional' });
+    if (build === null) return json(res, 400, { error: 'the body is {} or {"height": <integer>, "padding": <integer>, "scheme": "simplepir" | "ipir-sp"}, each optional' });
     if (route === "snapshot") {
       const r = await admin(req.method === "POST" ? "POST" : "GET", build);
       return json(res, r.status, r.body);

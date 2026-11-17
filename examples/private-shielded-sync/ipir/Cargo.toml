@@ -1,0 +1,45 @@
+# IPIR+SP for the private shielded sync example.
+#
+#   core/    pss-ipir-core: the profile, the server table (feature `server`) and the wallet's client
+#   node/    pss-ipir-node: the native add-on for Node (N-API), built by `build.sh native`
+#   wasm/    pss-ipir-wasm: the wallet's WebAssembly, built by `build.sh wasm`
+#   vendor/  upstream `valargroup/ipir-sp` crates at 791b528 (see vendor/ORIGIN.md)
+#
+# `cargo test --release` here runs the tests of `core` only (default-members); the vendored crates keep their own
+# tests, run with `-p <crate>`.
+[workspace]
+resolver = "2"
+members = [
+  "core",
+  "node",
+  "wasm",
+  "vendor/ipir-sp/inspiring",
+  "vendor/ipir-sp/reinspiring",
+  "vendor/ipir-sp/ipir-native-client",
+  "vendor/ipir-sp/ipir-sp",
+  "vendor/ipir-sp/simplepir-kernel",
+]
+default-members = ["core"]
+
+# The vendored crates take spiral-rs from their workspace, as upstream's root manifest declares it.
+[workspace.dependencies]
+spiral-rs = { package = "valar-spiral-rs", version = "=0.5.3-rc.1" }
+
+# Upstream's release profile.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+
+# The wallet's WebAssembly (`cargo build --profile wasm`): a panic traps instead of unwinding, symbols are stripped.
+[profile.wasm]
+inherits = "release"
+lto = true
+panic = "abort"
+debug = false
+strip = "symbols"
+
+# As upstream: spiral-rs's Barrett reduction relies on wrapping u64 arithmetic, which debug overflow checks turn into
+# a panic.
+[profile.dev.package.valar-spiral-rs]
+overflow-checks = false

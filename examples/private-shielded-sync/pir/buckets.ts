@@ -5,13 +5,15 @@
  * - A nullifier's bucket is its first `bucketBits` bits, byte 0 first, most significant bit first. Bucket j is column j.
  * - A bucket holds `capacity` records sorted by nullifier bytes, padded with zero records; `capacity` is the largest
  *   bucket's load (at least 1, so the grid always has a row).
- * - `bucketBits` is chosen in [4, 24] to minimise R + C, among the values whose column count passes the noise check
- *   (FR-058); ties go to the smaller value.
+ * - Under SimplePIR, `bucketBits` is chosen in [4, 24] to minimise R + C, among the values whose column count passes
+ *   the noise check (FR-058); ties go to the smaller value. The placement of entries in buckets (`nullifierSource`) is
+ *   the same for every scheme; the choice of `bucketBits` is the scheme's.
  */
 
 import { cellsPerRecord } from "./encode.ts";
 import { createGrid, type Grid, type GridShape, setRecord } from "./grid.ts";
 import { noiseBoundHolds } from "./params.ts";
+import type { BucketSource } from "./scheme.ts";
 
 export const NULLIFIER_BYTES = 32;
 export const NULLIFIER_RECORD_BYTES = 40;
@@ -115,59 +117,82 @@ function loadsOf(c: NullifierColumns, bits: number): Uint32Array {
 
 const maxOf = (loads: Uint32Array): number => loads.reduce((m, l) => (l > m ? l : m), 0);
 
-/** Builds the nullifier table (FR-062–064) from typed arrays. Nullifiers must be distinct. */
-export function buildNullifierTableOf(c: NullifierColumns, bucketBits?: number): NullifierTable {
+/**
+ * The nullifier table's entries as a scheme sees them (`./scheme.ts`): the fullest bucket at any cut, and every entry
+ * put in its bucket (bucket j is group j), each bucket sorted by nullifier bytes. Nullifiers must be distinct; a
+ * duplicate throws while the entries are put.
+ */
+export function nullifierSource(c: NullifierColumns): BucketSource {
   if (c.values.length < c.count * NULLIFIER_BYTES || c.heights.length < c.count || c.txs.length < c.count) {
     throw new Error("the nullifier columns are shorter than their count");
   }
-  const e = cellsPerRecord(NULLIFIER_RECORD_BYTES);
-  let choice: { bucketBits: number; capacity: number; loads: Uint32Array } | null = null;
-  if (bucketBits !== undefined) {
-    const loads = loadsOf(c, bucketBits);
-    choice = { bucketBits, capacity: Math.max(1, maxOf(loads)), loads };
-  } else {
-    let best = Infinity;
-    for (let bits = MIN_BUCKET_BITS; bits <= MAX_BUCKET_BITS; bits++) {
-      if (!noiseBoundHolds(2 ** bits)) continue;
-      const loads = loadsOf(c, bits);
-      const capacity = Math.max(1, maxOf(loads));
-      const cost = capacity * e + 2 ** bits;
-      if (cost < best) {
-        best = cost;
-        choice = { bucketBits: bits, capacity, loads };
-      }
-    }
-    if (choice === null) throw new Error("no bucket size passes the PIR noise check");
-  }
-  // The entries in bucket order (a counting sort), then each bucket sorted by nullifier bytes.
-  const { loads } = choice;
-  const starts = new Float64Array(loads.length + 1);
-  for (let b = 0; b < loads.length; b++) starts[b + 1] = starts[b]! + loads[b]!;
-  const fill = starts.slice(0, loads.length);
-  const order = new Uint32Array(c.count);
-  const shift = 24 - choice.bucketBits;
   const v = c.values;
-  for (let i = 0, o = 0; i < c.count; i++, o += NULLIFIER_BYTES) order[fill[((v[o]! << 16) | (v[o + 1]! << 8) | v[o + 2]!) >>> shift]!++] = i;
-  const cmp = (a: number, b: number): number => {
-    for (let k = 0, x = a * NULLIFIER_BYTES, y = b * NULLIFIER_BYTES; k < NULLIFIER_BYTES; k++) if (v[x + k] !== v[y + k]) return v[x + k]! - v[y + k]!;
-    return 0;
+  return {
+    name: "nullifier",
+    records: c.count,
+    recordBytes: NULLIFIER_RECORD_BYTES,
+    maxLoad: (bits) => maxOf(loadsOf(c, bits)),
+    fill(bits, put) {
+      // The entries in bucket order (a counting sort), then each bucket sorted by nullifier bytes.
+      const loads = loadsOf(c, bits);
+      const starts = new Float64Array(loads.length + 1);
+      for (let b = 0; b < loads.length; b++) starts[b + 1] = starts[b]! + loads[b]!;
+      const fill = starts.slice(0, loads.length);
+      const order = new Uint32Array(c.count);
+      const shift = 24 - bits;
+      for (let i = 0, o = 0; i < c.count; i++, o += NULLIFIER_BYTES) order[fill[((v[o]! << 16) | (v[o + 1]! << 8) | v[o + 2]!) >>> shift]!++] = i;
+      const cmp = (a: number, b: number): number => {
+        for (let k = 0, x = a * NULLIFIER_BYTES, y = b * NULLIFIER_BYTES; k < NULLIFIER_BYTES; k++) if (v[x + k] !== v[y + k]) return v[x + k]! - v[y + k]!;
+        return 0;
+      };
+      const record = new Uint8Array(NULLIFIER_RECORD_BYTES);
+      const view = new DataView(record.buffer);
+      for (let bucket = 0; bucket < loads.length; bucket++) {
+        const entries = order.subarray(starts[bucket], starts[bucket + 1]);
+        entries.sort(cmp);
+        for (let slot = 0; slot < entries.length; slot++) {
+          const i = entries[slot]!;
+          if (slot > 0 && cmp(entries[slot - 1]!, i) === 0) throw new Error("duplicate nullifier");
+          record.set(v.subarray(i * NULLIFIER_BYTES, (i + 1) * NULLIFIER_BYTES), 0);
+          view.setUint32(32, c.heights[i]!, true);
+          view.setUint32(36, c.txs[i]!, true);
+          put(bucket, slot, record);
+        }
+      }
+    },
   };
-  const grid = createGrid(bucketShape(c.count, choice.bucketBits, choice.capacity));
-  const record = new Uint8Array(NULLIFIER_RECORD_BYTES);
-  const view = new DataView(record.buffer);
-  for (let column = 0; column < loads.length; column++) {
-    const bucket = order.subarray(starts[column], starts[column + 1]);
-    bucket.sort(cmp);
-    for (let slot = 0; slot < bucket.length; slot++) {
-      const i = bucket[slot]!;
-      if (slot > 0 && cmp(bucket[slot - 1]!, i) === 0) throw new Error("duplicate nullifier");
-      record.set(v.subarray(i * NULLIFIER_BYTES, (i + 1) * NULLIFIER_BYTES), 0);
-      view.setUint32(32, c.heights[i]!, true);
-      view.setUint32(36, c.txs[i]!, true);
-      setRecord(grid, column, slot, record);
-    }
+}
+
+/**
+ * SimplePIR's choice of FR-064: the `bucketBits` (and its capacity) that minimises R + C = capacity × E + 2^bits,
+ * among the bit counts whose column count passes the noise check (FR-058); ties go to the smaller value.
+ */
+export function simplePirBucketBits(source: Pick<BucketSource, "maxLoad" | "recordBytes">): { bucketBits: number; capacity: number } {
+  const e = cellsPerRecord(source.recordBytes);
+  let best: { bucketBits: number; capacity: number; cost: number } | null = null;
+  for (let bits = MIN_BUCKET_BITS; bits <= MAX_BUCKET_BITS; bits++) {
+    if (!noiseBoundHolds(2 ** bits)) continue;
+    const capacity = Math.max(1, source.maxLoad(bits));
+    const cost = capacity * e + 2 ** bits;
+    if (best === null || cost < best.cost) best = { bucketBits: bits, capacity, cost };
   }
-  return { grid, bucketBits: choice.bucketBits, capacity: choice.capacity };
+  if (best === null) throw new Error("no bucket size passes the PIR noise check");
+  return { bucketBits: best.bucketBits, capacity: best.capacity };
+}
+
+/** The SimplePIR grid of a bucket source cut by `bucketBits` bits, `capacity` entries per bucket (column). */
+export function bucketGrid(source: BucketSource, bucketBits: number, capacity: number): Grid {
+  const e = cellsPerRecord(source.recordBytes);
+  const grid = createGrid({ rows: capacity * e, cols: 2 ** bucketBits, perColumn: capacity, cellsPerRecord: e, recordBytes: source.recordBytes, records: source.records });
+  source.fill(bucketBits, (bucket, slot, record) => setRecord(grid, bucket, slot, record));
+  return grid;
+}
+
+/** Builds the nullifier table (FR-062–064) from typed arrays, as SimplePIR lays it out. Nullifiers must be distinct. */
+export function buildNullifierTableOf(c: NullifierColumns, bucketBits?: number): NullifierTable {
+  const source = nullifierSource(c);
+  const choice = bucketBits === undefined ? simplePirBucketBits(source) : { bucketBits, capacity: Math.max(1, source.maxLoad(bucketBits)) };
+  return { grid: bucketGrid(source, choice.bucketBits, choice.capacity), ...choice };
 }
 
 /** Builds the nullifier table (FR-062–064). Nullifiers must be distinct. */

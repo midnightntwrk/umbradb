@@ -1,25 +1,16 @@
 /**
- * PIR reads of the read table and lookups in the nullifier table (spec FR-055–059, FR-112, stories 3 and 4).
+ * PIR reads of the read table and lookups in the nullifier table (spec FR-055–059, FR-112, stories 3 and 4), through
+ * the snapshot's scheme (`../pir/scheme.ts`): this file decides which groups a call asks for and pads it; the scheme's
+ * table makes the request bytes and decodes the answer.
  *
- * Every call carries exactly `queriesPerCall` vectors: the columns the wallet needs (each once), then columns chosen
- * uniformly at random from a cryptographic source; each vector has its own fresh secret and error (`pir/query.ts`). A
- * wallet that needs nothing still sends one full call, so the number of calls is the only thing that depends on how
- * many coins a wallet has (one per `queriesPerCall` distinct columns).
+ * Every call carries exactly `queriesPerCall` requests: the groups the wallet needs (each once), then groups chosen
+ * uniformly at random from a cryptographic source; each request has its own fresh secret. A wallet that needs nothing
+ * still sends one full call, so the number of calls is the only thing that depends on how many coins a wallet has (one
+ * per `queriesPerCall` distinct groups).
  */
 
 import { randomInt } from "node:crypto";
-import {
-  bucketOf,
-  buildQueries,
-  columnRecords,
-  decodeAnswers,
-  findInBucket,
-  type Matrix,
-  type Multiplier,
-  type NullifierEntry,
-  positionOf,
-  type TableInfo,
-} from "../pir/index.ts";
+import { bucketOf, findInBucket, type NullifierEntry, positionOf, type TableName, type WalletTable } from "../pir/index.ts";
 import { decodeAnswerBody, encodeQueryBody, fromHex, type Manifest, type PirTableRef, slotOf } from "../shared/index.ts";
 import type { PssHttp } from "./http.ts";
 
@@ -37,59 +28,44 @@ export function emptyCallStats(): CallStats {
   return { calls: 0, buildMs: 0, roundTripMs: 0, decodeMs: 0, bytesUp: 0, bytesDown: 0 };
 }
 
-function tableInfo(ref: PirTableRef): TableInfo {
-  return {
-    rows: ref.rows,
-    cols: ref.cols,
-    perColumn: ref.perColumn,
-    cellsPerRecord: ref.cellsPerRecord,
-    recordBytes: ref.recordBytes,
-    records: ref.records,
-    seed: fromHex(ref.seed, 32),
-  };
-}
-
-/** The distinct `wanted` columns, cut into calls of `perCall`, each padded with uniformly random columns (FR-112). */
-export function paddedCalls(wanted: readonly number[], cols: number, perCall: number): { real: number[]; columns: number[] }[] {
+/** The distinct `wanted` groups, cut into calls of `perCall`, each padded with uniformly random groups (FR-112). */
+export function paddedCalls(wanted: readonly number[], groups: number, perCall: number): { real: number[]; groups: number[] }[] {
   const distinct = [...new Set(wanted)];
-  const calls: { real: number[]; columns: number[] }[] = [];
+  const calls: { real: number[]; groups: number[] }[] = [];
   for (let from = 0; from === 0 || from < distinct.length; from += perCall) {
     const real = distinct.slice(from, from + perCall);
-    const columns = [...real];
-    while (columns.length < perCall) columns.push(randomInt(cols));
-    calls.push({ real, columns });
+    const padded = [...real];
+    while (padded.length < perCall) padded.push(randomInt(groups));
+    calls.push({ real, groups: padded });
   }
   return calls;
 }
 
-/** Runs the calls for `columns` against one table; the decoded column (cells) of each real column. */
-async function pirColumns(
+/** Runs the calls for `wanted` against one table; the records of each wanted group, in slot order. */
+async function pirGroups(
   http: PssHttp,
-  table: "read" | "path" | "nullifier",
-  ref: PirTableRef,
+  name: TableName,
+  table: WalletTable,
   manifest: Manifest,
   snapshotId: Uint8Array,
-  setup: Matrix,
   wanted: readonly number[],
-  multiplier: Multiplier,
   stats: CallStats,
-): Promise<Map<number, Uint16Array>> {
-  const info = tableInfo(ref);
-  const out = new Map<number, Uint16Array>();
-  for (const call of paddedCalls(wanted, ref.cols, manifest.queriesPerCall)) {
+): Promise<Map<number, Uint8Array[]>> {
+  const out = new Map<number, Uint8Array[]>();
+  for (const call of paddedCalls(wanted, table.groups, manifest.queriesPerCall)) {
     let t = performance.now();
-    const batch = await buildQueries(info, call.columns, multiplier);
-    const body = encodeQueryBody({ snapshotId, count: call.columns.length, values: batch.queries }, ref.cols);
+    const prepared = await table.prepareCall(call.groups);
+    const body = encodeQueryBody({ snapshotId, count: call.groups.length, payload: prepared.requests }, table.requestBytes);
     stats.buildMs += performance.now() - t;
     t = performance.now();
-    const answer = await http.query(table, body);
+    const answer = await http.query(name, body);
     stats.roundTripMs += performance.now() - t;
     stats.bytesUp += body.length;
     stats.bytesDown += answer.length;
     t = performance.now();
-    const decoded = decodeAnswerBody(answer, ref.rows, { count: call.columns.length, snapshotId });
-    const values = await decodeAnswers(setup, batch, decoded.values, multiplier);
-    call.real.forEach((column, q) => out.set(column, values[q]!));
+    const decoded = decodeAnswerBody(answer, table.responseBytes, { count: call.groups.length, snapshotId });
+    const records = await prepared.decode(decoded.payload, call.real.length);
+    call.real.forEach((group, q) => out.set(group, records[q]!));
     stats.decodeMs += performance.now() - t;
     stats.calls++;
   }
@@ -98,70 +74,81 @@ async function pirColumns(
 
 /**
  * Where tree position `position` sits in a positional table (the read table, or the path table): its slot
- * (`../shared/padding.ts`), column and place there.
+ * (`../shared/padding.ts`), group and place there.
  */
-export function readCell(manifest: Manifest, position: number, ref: PirTableRef = manifest.artifacts.readTable): { index: number; column: number; slot: number } {
+export function readCell(manifest: Manifest, position: number, ref: PirTableRef = manifest.artifacts.readTable): { index: number; group: number; slot: number } {
   const index = slotOf(manifest, position);
-  return { index, ...positionOf(index, ref.perColumn) };
+  const { column, slot } = positionOf(index, ref.perGroup);
+  return { index, group: column, slot };
 }
 
-/** Reads the records of tree positions `positions` from the read table by PIR (story 3); record bytes by position. */
-export async function readPositions(
+/** The records at tree positions `positions` of a positional table, read by PIR; record bytes by position. */
+async function readPositional(
   http: PssHttp,
+  name: "read" | "path",
+  ref: PirTableRef,
   manifest: Manifest,
   snapshotId: Uint8Array,
-  setup: Matrix,
+  table: WalletTable,
   positions: readonly number[],
-  multiplier: Multiplier,
-  stats: CallStats = emptyCallStats(),
+  stats: CallStats,
 ): Promise<Map<number, Uint8Array>> {
-  const ref = manifest.artifacts.readTable;
-  const cells = positions.map((p) => readCell(manifest, p));
-  const columns = await pirColumns(http, "read", ref, manifest, snapshotId, setup, cells.map((c) => c.column), multiplier, stats);
+  const cells = positions.map((p) => readCell(manifest, p, ref));
+  const groups = await pirGroups(http, name, table, manifest, snapshotId, cells.map((c) => c.group), stats);
   const out = new Map<number, Uint8Array>();
-  positions.forEach((p, i) => out.set(p, columnRecords(ref, columns.get(cells[i]!.column)!)[cells[i]!.slot]!));
+  positions.forEach((p, i) => out.set(p, groups.get(cells[i]!.group)![cells[i]!.slot]!));
   return out;
 }
 
 /**
- * Reads the path records of tree positions `positions` from the path table by PIR (Q58: only to spend); record bytes
- * by position. Throws when the snapshot has no path table (its path split is 0).
+ * Reads the records of tree positions `positions` from the read table by PIR (story 3), through `table` (the
+ * scheme's, opened from the manifest's `readTable` and `readPublic`); record bytes by position.
+ */
+export async function readPositions(
+  http: PssHttp,
+  manifest: Manifest,
+  snapshotId: Uint8Array,
+  table: WalletTable,
+  positions: readonly number[],
+  stats: CallStats = emptyCallStats(),
+): Promise<Map<number, Uint8Array>> {
+  return readPositional(http, "read", manifest.artifacts.readTable, manifest, snapshotId, table, positions, stats);
+}
+
+/**
+ * Reads the path records of tree positions `positions` from the path table by PIR (Q58: only to spend), through
+ * `table` (opened from `pathTable` and `pathPublic`); record bytes by position. Throws when the snapshot has no path
+ * table (its path split is 0).
  */
 export async function readPaths(
   http: PssHttp,
   manifest: Manifest,
   snapshotId: Uint8Array,
-  setup: Matrix,
+  table: WalletTable,
   positions: readonly number[],
-  multiplier: Multiplier,
   stats: CallStats = emptyCallStats(),
 ): Promise<Map<number, Uint8Array>> {
   const ref = manifest.artifacts.pathTable;
   if (ref === undefined) throw new Error("the snapshot has no path table (path split 0)");
-  const cells = positions.map((p) => readCell(manifest, p, ref));
-  const columns = await pirColumns(http, "path", ref, manifest, snapshotId, setup, cells.map((c) => c.column), multiplier, stats);
-  const out = new Map<number, Uint8Array>();
-  positions.forEach((p, i) => out.set(p, columnRecords(ref, columns.get(cells[i]!.column)!)[cells[i]!.slot]!));
-  return out;
+  return readPositional(http, "path", ref, manifest, snapshotId, table, positions, stats);
 }
 
-/** Looks up `nullifiers` (hex) in the nullifier table by PIR (story 4): the entry where present, else null. */
+/**
+ * Looks up `nullifiers` (hex) in the nullifier table by PIR (story 4), through `table` (opened from `nullifierTable`
+ * and `nullifierPublic`): the entry where present, else null.
+ */
 export async function lookupNullifiers(
   http: PssHttp,
   manifest: Manifest,
   snapshotId: Uint8Array,
-  setup: Matrix,
+  table: WalletTable,
   nullifiers: readonly string[],
-  multiplier: Multiplier,
   stats: CallStats = emptyCallStats(),
 ): Promise<Map<string, NullifierEntry | null>> {
   const ref = manifest.artifacts.nullifierTable;
   const bytes = nullifiers.map((n) => fromHex(n, 32));
-  const columns = await pirColumns(http, "nullifier", ref, manifest, snapshotId, setup, bytes.map((n) => bucketOf(n, ref.bucketBits)), multiplier, stats);
+  const buckets = await pirGroups(http, "nullifier", table, manifest, snapshotId, bytes.map((n) => bucketOf(n, ref.bucketBits)), stats);
   const out = new Map<string, NullifierEntry | null>();
-  nullifiers.forEach((hex, i) => {
-    const column = bucketOf(bytes[i]!, ref.bucketBits);
-    out.set(hex, findInBucket(columnRecords(ref, columns.get(column)!), bytes[i]!));
-  });
+  nullifiers.forEach((hex, i) => out.set(hex, findInBucket(buckets.get(bucketOf(bytes[i]!, ref.bucketBits))!, bytes[i]!)));
   return out;
 }

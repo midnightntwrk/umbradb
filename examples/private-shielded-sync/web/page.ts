@@ -1,7 +1,12 @@
 /**
  * The page: one card per step, each sending one message to the client's worker (`./worker.ts`) and showing what came
  * back: the main facts, then the whole answer as debug JSON. The right-hand panel lists every request the server saw.
+ * Sizes, shapes and calls are worded for the snapshot's PIR scheme (`./scheme-view.ts`, spec 00058 FR-060).
  */
+
+import { serveCallWorkers } from "./call-workers.ts";
+import { callText, cellText, kb, pathTableText, tableText } from "./scheme-view.ts";
+import type { SchemeName } from "../pir/scheme.ts";
 
 type Json = Record<string, unknown>;
 interface Answer {
@@ -17,7 +22,10 @@ interface Answer {
 const worker = new Worker("worker.js", { type: "module" });
 let nextId = 1;
 const waiting = new Map<number, { resolve: (a: Answer) => void; progress: (t: string) => void }>();
+/** Starts the Web Workers the client spreads a call's work over, when it asks for them. */
+const startCallWorker = serveCallWorkers(worker);
 worker.onmessage = (event: MessageEvent<Answer>) => {
+  if (startCallWorker(event.data)) return;
   const a = event.data;
   const w = waiting.get(a.id);
   if (w === undefined) return;
@@ -38,7 +46,6 @@ const call = (step: string, args: Json, progress: (t: string) => void): Promise<
 const $ = <T extends HTMLElement>(sel: string, root: ParentNode = document): T => root.querySelector(sel) as T;
 const esc = (s: string): string => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 const short = (s: string, keep = 40): string => (s.length > keep + 16 ? `${s.slice(0, keep)}…${s.slice(-10)}` : s);
-const kb = (n: number): string => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(2)} MB`);
 const abbreviated = (v: unknown): string =>
   JSON.stringify(v, (_k, x) => (typeof x === "string" && x.length > 120 ? `${x.slice(0, 64)}…${x.slice(-12)} (${x.length} chars)` : x), 2);
 
@@ -106,22 +113,25 @@ const VIEWS: Record<string, (r: Json) => string> = {
     ]) + (r.generatedMnemonic ? `<div class="warnbox">New test wallet. Its mnemonic (keep it to reuse the wallet):<br><code>${esc(String(r.generatedMnemonic))}</code></div>` : ""),
   files: (r) => {
     const m = r.manifest as Json;
-    const rt = m.readTable as Json;
-    const nt = m.nullifierTable as Json;
+    const s = m.scheme as SchemeName;
     const downloads = r.downloads as Json[];
+    const w = r.ipirWasm as Json | undefined;
+    const ipir = s === "ipir-sp";
     return (
       facts([
         ["snapshot", `${short(String(r.snapshotId), 24)} at height ${m.height}`],
+        ["PIR scheme", ipir ? "IPIR+SP: the wallet downloads two masks per table, and every request carries its own key" : undefined],
         ["outputs (first_free)", String(m.firstFree)],
-        ["table size (debug)", m.padding ? `padded to ${Number(m.padding).toLocaleString("en-US")} entries: the outputs spread among noise in the scan file and both tables` : undefined],
+        ["table size (debug)", m.padding ? `padded to ${Number(m.padding).toLocaleString("en-US")} entries: the outputs spread among noise in the scan file and ${ipir ? "the tables" : "both tables"}` : undefined],
         ["tree root", short(String(m.root), 24)],
         ["path split k", `${m.pathSplit} (blocks of ${2 ** Number(m.pathSplit)} outputs; ${m.blocks} block root(s))`],
-        ["read table", `${rt.rows} × ${rt.cols} cells, ${rt.recordsPerColumn} records of ${rt.recordBytes} bytes per column, ${Number(rt.records).toLocaleString("en-US")} records`],
-        ["path table", m.pathTable ? `${(m.pathTable as Json).rows} × ${(m.pathTable as Json).cols} cells, ${(m.pathTable as Json).recordsPerColumn} records of ${(m.pathTable as Json).recordBytes} bytes per column; its setup data, ${kb(Number((m.pathTable as Json).setupBytes))}, is downloaded only to spend (step 6)` : "none (path split 0)"],
-        ["nullifier table", `${nt.rows} × ${nt.cols} cells, ${nt.bucketBits} bucket bits, capacity ${nt.capacity}`],
-        ["vectors per call", String(m.queriesPerCall)],
+        ["read table", tableText(s, "read", m.readTable as Json)],
+        ["path table", m.pathTable ? tableText(s, "path", m.pathTable as Json) : "none (path split 0)"],
+        ["nullifier table", tableText(s, "nullifier", m.nullifierTable as Json)],
+        [ipir ? "requests per call" : "vectors per call", String(m.queriesPerCall)],
+        ["wallet's WebAssembly", w === undefined ? undefined : `pss-ipir.wasm, ${kb(Number(w.bytes))}, SHA-256 ${short(String(w.sha256), 16)} (committed), fetched and compiled in ${w.ms} ms (once per page); a call's requests are made on ${Number(w.threads) > 1 ? `${w.threads} worker threads, each with its own instance` : "one thread"}`],
         ["checks", checksHtml(r.checks)],
-        ["time", `${r.ms} ms (setup matrices ${r.setupMatricesMs} ms)`],
+        ["time", ipir ? `${r.ms} ms (tables opened ${r.openTablesMs} ms)` : `${r.ms} ms (setup matrices ${r.setupMatricesMs} ms)`],
       ]) + table(["file", "size", "ms", "SHA-256"], downloads.map((d) => [esc(String(d.name)), kb(Number(d.bytes)), String(d.ms), esc(String(d.sha256))]))
     );
   },
@@ -145,7 +155,7 @@ const VIEWS: Record<string, (r: Json) => string> = {
     return (
       facts([
         ["positions", (r.positions as number[]).join(", ") || "none: one padded call is still sent"],
-        ["calls", calls.map((c) => `call ${c.call}: ${c.vectors} vectors, real columns [${(c.realColumns as number[]).join(", ")}], ${c.paddingColumns} random`).join("; ")],
+        ["calls", calls.map(callText).join("; ")],
         ["bytes", `${kb(Number(s.bytesUp))} up, ${kb(Number(s.bytesDown))} down`],
         ["time", `build ${s.buildMs} ms, round trip ${s.roundTripMs} ms, decode ${s.decodeMs} ms`],
       ]) +
@@ -154,7 +164,7 @@ const VIEWS: Record<string, (r: Json) => string> = {
         records.map((x) => {
           const elements = x.elementsShrunk === null ? "" : String(x.elementsShrunk);
           return [
-            `${x.position}<br><small>${x.tableIndex === undefined ? "" : `table index ${x.tableIndex}, `}col ${x.column}, slot ${x.slotInColumn}</small>`,
+            `${x.position}<br><small>${x.tableIndex === undefined ? "" : `table index ${x.tableIndex}, `}${cellText(x)}</small>`,
             esc(String(x.commitmentPrefix)),
             x.elementsShrunk === null ? "none (output carries no ciphertext)" : esc(short(String(x.elementsShrunk), 24)),
             x.ownership === undefined ? "derive keys to check" : x.coin ? `<span class="good">${esc(String(x.ownership))}</span><br>${esc(JSON.stringify(x.coin))}` : esc(String(x.ownership)),
@@ -172,7 +182,7 @@ const VIEWS: Record<string, (r: Json) => string> = {
     return (
       facts([
         ["lookups", String(r.lookups)],
-        ["calls", calls.map((c) => `call ${c.call}: ${c.vectors} vectors, real buckets [${(c.realBuckets as number[]).join(", ")}], ${c.paddingBuckets} random`).join("; ")],
+        ["calls", calls.map(callText).join("; ")],
         ["bytes", `${kb(Number(s.bytesUp))} up, ${kb(Number(s.bytesDown))} down`],
         ["time", `build ${s.buildMs} ms, round trip ${s.roundTripMs} ms, decode ${s.decodeMs} ms`],
         ["note", r.note === undefined ? undefined : String(r.note)],
@@ -184,17 +194,18 @@ const VIEWS: Record<string, (r: Json) => string> = {
     const s = r.stats as Json;
     const d = r.download as Json | null;
     const t = r.table as Json;
+    const sch = (r.scheme ?? "simplepir") as SchemeName;
     return (
       facts([
         ["positions", (r.positions as number[]).join(", ")],
-        ["path table", `${t.rows} × ${t.cols} cells, ${t.recordsPerColumn} records of ${t.recordBytes} bytes per column (as wide as the noise check allows, so its setup data is small)`],
-        ["setup data", d === null ? "already downloaded for this snapshot" : `${kb(Number(d.bytes))} downloaded in ${d.ms} ms (once per snapshot, only to spend)`],
-        ["calls", calls.length === 0 ? "none: no position in a full block" : calls.map((c) => `call ${c.call}: ${c.vectors} vectors, real columns [${(c.realColumns as number[]).join(", ")}], ${c.paddingColumns} random`).join("; ")],
+        ["path table", pathTableText(sch, t)],
+        [sch === "simplepir" ? "setup data" : "masks", d === null ? "already downloaded for this snapshot" : `${kb(Number(d.bytes))} downloaded in ${d.ms} ms (once per snapshot, only to spend)`],
+        ["calls", calls.length === 0 ? "none: no position in a full block" : calls.map(callText).join("; ")],
         ["bytes", `${kb(Number(s.bytesUp))} up, ${kb(Number(s.bytesDown))} down`],
         ["time", `build ${s.buildMs} ms, round trip ${s.roundTripMs} ms, decode ${s.decodeMs} ms`],
       ]) +
       table(["position", "lower path", "check"], (r.records as Json[]).map((x) => [
-        `${x.position}${x.column === undefined ? "" : `<br><small>col ${x.column}, slot ${x.slotInColumn}</small>`}`,
+        `${x.position}${x.column === undefined && x.row === undefined ? "" : `<br><small>${cellText(x)}</small>`}`,
         Array.isArray(x.lowerPath) ? `${(x.lowerPath as unknown[]).length} hashes: ${esc(short(String((x.lowerPath as string[])[0]), 16))} …` : "—",
         mark(!/FAILED|NOT/.test(String(x.result)), String(x.result)),
       ]))
@@ -225,13 +236,15 @@ const VIEWS: Record<string, (r: Json) => string> = {
 };
 VIEWS.generate = VIEWS.keys!;
 const padded = (s: Json): string => (s.padding ? `, tables padded to ${Number(s.padding).toLocaleString("en-US")} entries` : "");
+const SCHEME_NAME: Record<string, string> = { simplepir: "SimplePIR", "ipir-sp": "IPIR+SP" };
+const schemeOf = (s: Json): string => (typeof s.scheme === "string" ? `, ${SCHEME_NAME[s.scheme] ?? s.scheme}` : "");
 VIEWS.reload = (r) => {
   const now = r.snapshot as Json;
   const before = r.previous as Json | null;
   const steps = ((r.last as Json | undefined)?.steps ?? null) as Record<string, number> | null;
   return facts([
-    ["new snapshot", `${short(String(now.id), 24)} at height ${now.height}, ${now.firstFree} outputs${padded(now)}`],
-    ["previous", before === null ? "none" : `${short(String(before.id), 24)} at height ${before.height}, ${before.firstFree} outputs${padded(before)}`],
+    ["new snapshot", `${short(String(now.id), 24)} at height ${now.height}, ${now.firstFree} outputs${schemeOf(now)}${padded(now)}`],
+    ["previous", before === null ? "none" : `${short(String(before.id), 24)} at height ${before.height}, ${before.firstFree} outputs${schemeOf(before)}${padded(before)}`],
     ["build and wait", `${(Number(r.ms) / 1000).toFixed(1)} s`],
     ["build steps", steps === null ? undefined : Object.entries(steps).map(([k, ms]) => `${k} ${(ms / 1000).toFixed(1)} s`).join(", ")],
   ]);
@@ -313,6 +326,7 @@ async function reload(card: HTMLElement, status: HTMLElement): Promise<void> {
   const out = $(".reload-out", card);
   const text = $<HTMLInputElement>("#snapshot-height").value.trim();
   const padding = $<HTMLSelectElement>("#snapshot-padding").value;
+  const scheme = $<HTMLSelectElement>("#snapshot-scheme").value;
   if (text !== "" && !/^\d+$/.test(text)) {
     out.innerHTML = `<div class="error">the height is a whole number</div>`;
     return;
@@ -320,7 +334,8 @@ async function reload(card: HTMLElement, status: HTMLElement): Promise<void> {
   card.querySelectorAll("button").forEach((b) => (b.disabled = true));
   status.className = "status run";
   status.textContent = "building a snapshot…";
-  const what = `a snapshot at ${text === "" ? "the synced height" : text}${padding === "" ? "" : `, padded to ${Number(padding).toLocaleString("en-US")} entries`}`;
+  const kind = scheme === "" ? "a snapshot" : scheme === "ipir-sp" ? "an IPIR+SP snapshot" : `a ${SCHEME_NAME[scheme] ?? scheme} snapshot`;
+  const what = `${kind} at ${text === "" ? "the synced height" : text}${padding === "" ? "" : `, padded to ${Number(padding).toLocaleString("en-US")} entries`}`;
   out.innerHTML = `<div class="progress">building ${what} and waiting for it…</div>`;
   // While the build runs, the server's status names the step in progress and the steps done (a padded build is long).
   const started = performance.now();
@@ -336,7 +351,7 @@ async function reload(card: HTMLElement, status: HTMLElement): Promise<void> {
   let r: Response;
   let body: Json;
   try {
-    const request: Json = { ...(text === "" ? {} : { height: Number(text) }), ...(padding === "" ? {} : { padding: Number(padding) }) };
+    const request: Json = { ...(text === "" ? {} : { height: Number(text) }), ...(padding === "" ? {} : { padding: Number(padding) }), ...(scheme === "" ? {} : { scheme }) };
     r = await fetch("/debug/reload-snapshot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request) });
     body = (await r.json()) as Json;
   } catch (error) {

@@ -1,7 +1,8 @@
 /**
- * `sync` (spec FR-110–115, stories 2–4): fetch the manifest; download the scan file, block roots and both setup-data
- * artifacts (skipping cached ones); scan; read the matches by PIR; decrypt and check each; look their nullifiers up by
- * PIR; fetch the tail and apply it; return the wallet's local state.
+ * `sync` (spec FR-110–115, stories 2–4): fetch the manifest; open its PIR scheme; download the scan file, block roots
+ * and the public artifacts of the read and nullifier tables (skipping cached ones); scan; read the matches by PIR;
+ * decrypt and check each; look their nullifiers up by PIR; fetch the tail and apply it; return the wallet's local state.
+ * A manifest naming a scheme this build does not have stops the sync with a message naming it (00058 story 2).
  *
  * Checks that cost nothing are made on the server's data: the manifest's identifier is its SHA-256; each artifact's
  * digest and size; the block roots give the manifest's root; a record's lower path gives its block's root; every coin's
@@ -12,7 +13,7 @@
 
 import { createHash } from "node:crypto";
 import type { Coin, Kernel, ScanPool } from "../kernel/index.ts";
-import { type Multiplier, LWE_N, setupMatrix } from "../pir/index.ts";
+import { type Multiplier, type NullifierEntry, openWalletScheme, type WalletScheme, type WalletSchemeOptions } from "../pir/index.ts";
 import {
   CIPHERTEXT_BYTES,
   decodeManifest,
@@ -50,7 +51,15 @@ export interface SyncOptions {
   readonly cache: BlobCache;
   readonly kernel: Kernel;
   readonly scanPool: ScanPool;
+  /** SimplePIR: the multiplication for the wallet's side of each call (`../pir/scheme.ts`). */
   readonly multiplier: Multiplier;
+  /**
+   * IPIR+SP: gives the wallet's WebAssembly, its digest checked (the command line: `compileIpirWasm`); called only for
+   * a snapshot that uses IPIR+SP. Without it such a sync stops with a message naming the file.
+   */
+  readonly ipirWasm?: WalletSchemeOptions["ipirWasm"];
+  /** IPIR+SP: worker threads that make a call's requests (the command line: `nodeIpirPool`); without, one thread. */
+  readonly ipirWorkers?: WalletSchemeOptions["ipirWorkers"];
   /** The network the manifest must name, if given. */
   readonly network?: string;
   /** The previous state: its pending transfers carry over until a sync confirms them (FR-128). */
@@ -69,7 +78,8 @@ export type SyncStep = (typeof SYNC_STEPS)[number];
 export interface SyncStats {
   attempts: number;
   manifest: { ms: number; bytes: number };
-  downloads: { scan: FetchStat; blockRoots: FetchStat; readSetup: FetchStat; nullifierSetup: FetchStat };
+  /** The four downloads; `readPublic` and `nullifierPublic` are the scheme's public artifacts (SimplePIR: setup data). */
+  downloads: { scan: FetchStat; blockRoots: FetchStat; readPublic: FetchStat; nullifierPublic: FetchStat };
   cacheBytes: number;
   scan: { ms: number; entries: number; threads: number; matches: number };
   read: CallStats;
@@ -161,33 +171,47 @@ export function pathInTable(manifest: Pick<Manifest, "pathSplit" | "firstFree">,
   return manifest.pathSplit > 0 && coin.source === "snapshot" && coin.position < Math.floor(manifest.firstFree / size) * size;
 }
 
-/** What reading lower paths to spend cost (Q58): the path table's setup data (once per snapshot) and the call. */
+/**
+ * What reading lower paths to spend cost (Q58): the path table's public artifact (SimplePIR: setup data; once per
+ * snapshot) and the call.
+ */
 export interface PathReadStats extends CallStats {
-  readonly setup: FetchStat;
+  readonly public: FetchStat;
   readonly ms: number;
 }
 
 /**
- * Reads the lower paths of `coins` from the path table by PIR, to spend them (Q58): downloads the table's setup data
- * the first time (cached by digest), reads the positions in one padded call, and checks each path against its block's
- * root from the coin's commitment. Returns the paths as hex, by position.
+ * Reads the lower paths of `coins` from the path table by PIR, to spend them (Q58): downloads the table's public
+ * artifact the first time (cached by digest), reads the positions in one padded call, and checks each path against its
+ * block's root from the coin's commitment. Returns the paths as hex, by position.
  */
 export async function lowerPathsByPir(
-  options: Pick<SyncOptions, "http" | "cache" | "kernel" | "multiplier">,
+  options: Pick<SyncOptions, "http" | "cache" | "kernel" | "multiplier" | "ipirWasm" | "ipirWorkers">,
   result: Pick<SyncResult, "manifest" | "state" | "view">,
   coins: readonly Pick<CoinRecord, "position" | "commitment" | "source">[],
 ): Promise<{ paths: Map<number, string[]>; stats: PathReadStats }> {
-  const { http, cache, kernel, multiplier } = options;
+  const { http, cache, kernel } = options;
   const m = result.manifest;
   const ref = m.artifacts.pathTable;
-  const setupRef = m.artifacts.pathSetup;
-  if (ref === undefined || setupRef === undefined) throw new Error("the snapshot has no path table (path split 0)");
+  const publicRef = m.artifacts.pathPublic;
+  if (ref === undefined || publicRef === undefined) throw new Error("the snapshot has no path table (path split 0)");
   for (const c of coins) if (!pathInTable(m, c)) throw new Error(`position ${c.position} has no path in the path table (its block was not full at the snapshot)`);
   const started = performance.now();
-  const setup = await cache.fetch(http, setupRef);
+  const scheme = await openWalletScheme(m, schemeOptions(options));
+  let records: Map<number, Uint8Array>;
   const call = emptyCallStats();
-  const positions = coins.map((c) => c.position);
-  const records = await readPaths(http, m, Buffer.from(result.state.snapshot.id, "hex"), setupMatrix(cache.read(setupRef), ref.rows), positions, multiplier, call);
+  let fetched: FetchStat;
+  try {
+    fetched = await cache.fetch(http, publicRef);
+    const table = await scheme.openTable(ref, cache.read(publicRef));
+    try {
+      records = await readPaths(http, m, Buffer.from(result.state.snapshot.id, "hex"), table, coins.map((c) => c.position), call);
+    } finally {
+      table.dispose();
+    }
+  } finally {
+    scheme.dispose();
+  }
   const k = m.pathSplit;
   const size = 2 ** k;
   const paths = new Map<number, string[]>();
@@ -201,7 +225,16 @@ export async function lowerPathsByPir(
     }
     paths.set(c.position, lower.map(hex));
   }
-  return { paths, stats: { ...call, setup, ms: performance.now() - started } };
+  return { paths, stats: { ...call, public: fetched, ms: performance.now() - started } };
+}
+
+/** What the snapshot's scheme is opened with: each scheme takes its own part. */
+function schemeOptions(options: Pick<SyncOptions, "multiplier" | "ipirWasm" | "ipirWorkers">): WalletSchemeOptions {
+  return {
+    multiplier: options.multiplier,
+    ...(options.ipirWasm === undefined ? {} : { ipirWasm: options.ipirWasm }),
+    ...(options.ipirWorkers === undefined ? {} : { ipirWorkers: options.ipirWorkers }),
+  };
 }
 
 /** Runs `sync`, starting again when the snapshot is replaced (at most `maxAttempts` times). */
@@ -223,16 +256,14 @@ export async function sync(options: SyncOptions): Promise<SyncResult> {
 }
 
 async function syncOnce(options: SyncOptions): Promise<SyncResult> {
-  const { ledger, keys, http, cache, kernel, scanPool, multiplier } = options;
-  const log = options.log ?? (() => {});
+  const { http } = options;
   const step = options.onStep ?? (() => {});
-  const hash: Hash2 = (a, b) => kernel.hash2(a, b)!;
   const firstRequest = http.records.length;
   const started = performance.now();
 
   // 1. Manifest.
   step("manifest", "start");
-  let t = performance.now();
+  const t = performance.now();
   const served = await http.manifest();
   const idBytes = new Uint8Array(createHash("sha256").update(served.bytes).digest());
   const id = hex(idBytes);
@@ -242,8 +273,34 @@ async function syncOnce(options: SyncOptions): Promise<SyncResult> {
   if (options.network !== undefined && manifest.network !== options.network) {
     throw new Error(`the server serves network ${manifest.network}, not ${options.network}`);
   }
-  if (manifest.pir.n !== LWE_N) throw new Error(`the manifest's PIR dimension ${manifest.pir.n} is not ${LWE_N}`);
-  const manifestStat = { ms: performance.now() - t, bytes: served.bytes.length };
+  // The scheme's parameters are checked against this build's here (SimplePIR: all five of them); a scheme this build
+  // does not have, or whose WebAssembly the wallet was not given, stops the sync with its name.
+  const scheme = await openWalletScheme(manifest, schemeOptions(options));
+  try {
+    return await syncWith(options, scheme, { manifest, idBytes, id, manifestStat: { ms: performance.now() - t, bytes: served.bytes.length }, started, firstRequest });
+  } finally {
+    scheme.dispose();
+  }
+}
+
+/** What step 1 of a sync gives the rest. */
+interface ManifestStep {
+  readonly manifest: Manifest;
+  readonly idBytes: Uint8Array;
+  readonly id: string;
+  readonly manifestStat: { readonly ms: number; readonly bytes: number };
+  readonly started: number;
+  readonly firstRequest: number;
+}
+
+/** Steps 1 (its end) to 7 of a sync, with the snapshot's scheme open. */
+async function syncWith(options: SyncOptions, scheme: WalletScheme, at: ManifestStep): Promise<SyncResult> {
+  const { ledger, keys, http, cache, kernel, scanPool } = options;
+  const log = options.log ?? (() => {});
+  const step = options.onStep ?? (() => {});
+  const hash: Hash2 = (a, b) => kernel.hash2(a, b)!;
+  const { manifest, idBytes, id, manifestStat, started, firstRequest } = at;
+  let t: number;
   const k = manifest.pathSplit;
   const blockSize = 2 ** k;
   const firstFree = manifest.firstFree;
@@ -256,8 +313,8 @@ async function syncOnce(options: SyncOptions): Promise<SyncResult> {
   const downloads = {
     scan: await cache.fetch(http, a.scan),
     blockRoots: await cache.fetch(http, a.blockRoots),
-    readSetup: await cache.fetch(http, a.readSetup),
-    nullifierSetup: await cache.fetch(http, a.nullifierSetup),
+    readPublic: await cache.fetch(http, a.readPublic),
+    nullifierPublic: await cache.fetch(http, a.nullifierPublic),
   };
   const scanFile = cache.read(a.scan);
   const blockRoots = cache.read(a.blockRoots);
@@ -284,8 +341,13 @@ async function syncOnce(options: SyncOptions): Promise<SyncResult> {
   // 4. Read the matches by PIR; decrypt and check each.
   step("read", "start");
   const read = emptyCallStats();
-  const readSetup = setupMatrix(cache.read(a.readSetup), a.readTable.rows);
-  const records = await readPositions(http, manifest, idBytes, readSetup, matches, multiplier, read);
+  const readTable = await scheme.openTable(a.readTable, cache.read(a.readPublic));
+  let records: Map<number, Uint8Array>;
+  try {
+    records = await readPositions(http, manifest, idBytes, readTable, matches, read);
+  } finally {
+    readTable.dispose();
+  }
   step("read", "end");
   step("decrypt", "start");
   t = performance.now();
@@ -309,8 +371,13 @@ async function syncOnce(options: SyncOptions): Promise<SyncResult> {
   // 5. Nullifier lookups by PIR (one full call even with no coin).
   step("nullifier", "start");
   const nullifierStats = { ...emptyCallStats(), lookups: coins.length };
-  const nullifierSetup = setupMatrix(cache.read(a.nullifierSetup), a.nullifierTable.rows);
-  const found = await lookupNullifiers(http, manifest, idBytes, nullifierSetup, coins.map((c) => c.nullifier), multiplier, nullifierStats);
+  const nullifierTable = await scheme.openTable(a.nullifierTable, cache.read(a.nullifierPublic));
+  let found: Map<string, NullifierEntry | null>;
+  try {
+    found = await lookupNullifiers(http, manifest, idBytes, nullifierTable, coins.map((c) => c.nullifier), nullifierStats);
+  } finally {
+    nullifierTable.dispose();
+  }
   for (let i = 0; i < coins.length; i++) {
     const entry = found.get(coins[i]!.nullifier);
     if (entry) coins[i] = { ...coins[i]!, spent: { height: entry.height, txIndex: entry.txIndex, source: "snapshot" } };
@@ -383,7 +450,7 @@ async function syncOnce(options: SyncOptions): Promise<SyncResult> {
     attempts: 1,
     manifest: manifestStat,
     downloads,
-    cacheBytes: cache.sizeOf([a.scan, a.blockRoots, a.readSetup, a.nullifierSetup]),
+    cacheBytes: cache.sizeOf([a.scan, a.blockRoots, a.readPublic, a.nullifierPublic]),
     scan: scanStat,
     read,
     decrypt: { ms: decryptMs, accepted: coins.filter((c) => c.source === "snapshot").length, rejected: rejected.length },

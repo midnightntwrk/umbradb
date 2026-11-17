@@ -1,8 +1,13 @@
 /**
  * The snapshot builder (spec §5.2–5.5): from the index's first `first_free` outputs and the nullifiers spent at or
- * below the snapshot height S, it writes the artifacts (eight; six when k is 0) and the manifest under the data directory and returns
- * what the server holds in memory. It runs in a worker thread (`./build-worker.ts`) so the block loop is never held;
- * tests call it directly.
+ * below the snapshot height S, it writes the artifacts (eight; six when k is 0) and the manifest under the data
+ * directory and returns what the server holds in memory. It runs in a worker thread (`./build-worker.ts`) so the block
+ * loop is never held; tests call it directly.
+ *
+ * The three PIR tables go through the job's scheme (`../pir/scheme.ts`, spec 00058): the builder decides which record
+ * goes where (by slot, or by bucket) and the scheme lays the table out, writes its file, sets it up and gives its
+ * public artifact (SimplePIR: the grid file and its setup data; IPIR+SP: the cell file, which its add-on reads back,
+ * and the masks). A build that fails frees the tables it set up (IPIR+SP's are held by the add-on).
  *
  * Every artifact is a function of the outputs, the nullifiers and the parameters, so building one height twice gives
  * the same digests and the same snapshot identifier (FR-022, FR-145). The build fails, writing nothing, when the
@@ -14,33 +19,14 @@ import { createCipheriv, createHash, randomBytes } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, renameSync, rmSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { compileKernel, Kernel } from "../kernel/kernel.ts";
-import {
-  buildNullifierTableOf,
-  buildSetup,
-  cellsPerRecord,
-  createGrid,
-  deriveSeed,
-  encodeGridHeader,
-  type Grid,
-  gridCellBytes,
-  gridDigest,
-  type GridShape,
-  HALF_PLAIN,
-  type Multiplier,
-  NULLIFIER_RECORD_BYTES,
-  PIR_PARAMS,
-  PLAIN_MODULUS,
-  positionalShape,
-  positionOf,
-  setRecord,
-  setupBytes,
-  widestShape,
-  WorkerMultiplier,
-} from "../pir/index.ts";
+import { nullifierSource } from "../pir/buckets.ts";
+import type { Multiplier } from "../pir/multiply.ts";
+import { type EncodedTable, type PreparedTable, type SchemeName, SchemeUnavailable, type ServerScheme, type TableSource, type TableSpec, type TableTransfer } from "../pir/scheme.ts";
+import { openServerScheme, serverSchemeEntry } from "../pir/server-schemes.ts";
 import { FORMAT_VERSION } from "../shared/constants.ts";
-import { encodeManifest, type Manifest, snapshotId, toHex } from "../shared/manifest.ts";
+import { encodeManifest, fromHex, type Manifest, type PirTableRef, snapshotId, toHex } from "../shared/manifest.ts";
 import { slotOf } from "../shared/padding.ts";
-import { CIPHERTEXT_BYTES, encodeReadRecord, pathRecordBytes, READ_RECORD_BYTES, SCAN_ENTRY_BYTES } from "../shared/records.ts";
+import { CIPHERTEXT_BYTES, encodeReadRecord, NULLIFIER_RECORD_BYTES, pathRecordBytes, READ_RECORD_BYTES, SCAN_ENTRY_BYTES } from "../shared/records.ts";
 import { buildTree, countingHash, type Hash2, type IncrementalTreeState, NODE_BYTES } from "./tree.ts";
 import { COMMITMENT_BYTES, EVIDENCE_CODE, type IndexSlice, NULLIFIER_BYTES } from "./zswap-index.ts";
 
@@ -62,7 +48,9 @@ export interface BuildJob {
   readonly expectedRoot: Uint8Array;
   readonly pathSplit: number;
   readonly queriesPerCall: number;
-  /** Worker threads for the setup data's multiplication. */
+  /** The PIR scheme of every table (00058 FR-001, FR-002). */
+  readonly scheme: SchemeName;
+  /** Worker threads for the scheme's setup (SimplePIR: the setup data's multiplication). */
   readonly threads: number;
   /** Absolute. */
   readonly dataDir: string;
@@ -74,22 +62,23 @@ export interface BuildJob {
   readonly padding?: number;
 }
 
-/** Bytes of A (as the setup's transposed copy) and of the setup data, per table column and row, with n = 1,024. */
-const A_BYTES_PER_COLUMN = 1024 * 4;
-const SETUP_BYTES_PER_ROW = 1024 * 4;
+/** The PIR tables of a snapshot of `size` slots and entries, as a scheme sizes them. */
+function tableSpecs(size: number, pathSplit: number): TableSpec[] {
+  return [
+    { name: "read", records: size, recordBytes: READ_RECORD_BYTES },
+    ...(pathSplit > 0 ? [{ name: "path" as const, records: size, recordBytes: pathRecordBytes(pathSplit) }] : []),
+    { name: "nullifier", records: size, recordBytes: NULLIFIER_RECORD_BYTES },
+  ];
+}
 
 /**
- * About the most memory a padded build of `size` entries holds at once: both tables, their setup data and A, the scan
- * file, and the nullifier arrays. For the refusal of builds that would not fit (Q57).
+ * About the most memory a padded build of `size` entries holds at once: the scheme's tables as it builds them (under
+ * SimplePIR, both positional tables with their setup data and A, and the nullifier grid; under IPIR+SP, the add-on's
+ * cells and packing of every table and one table's cells in JavaScript), the scan file, and the nullifier arrays.
+ * For the refusal of builds that would not fit (Q57). Throws `TableTooLarge` for a table the scheme cannot lay out.
  */
-export function paddedBuildBytes(size: number, pathSplit: number): number {
-  const read = positionalShape(size, READ_RECORD_BYTES);
-  const path = pathSplit > 0 ? widestShape(size, pathRecordBytes(pathSplit)) : null;
-  const nullifierCells = cellsPerRecord(NULLIFIER_RECORD_BYTES);
-  // The nullifier grid's rows are its fullest bucket's load: allow half again the mean.
-  const nullifierGrid = 1.5 * size * nullifierCells * 2;
-  const table = (t: GridShape | null): number => (t === null ? 0 : t.rows * t.cols * 2 + t.cols * A_BYTES_PER_COLUMN + t.rows * SETUP_BYTES_PER_ROW);
-  return table(read) + table(path) + nullifierGrid + size * SCAN_ENTRY_BYTES + size * (NULLIFIER_BYTES + 12);
+export function paddedBuildBytes(size: number, pathSplit: number, scheme: SchemeName): number {
+  return serverSchemeEntry(scheme).buildBytes(tableSpecs(size, pathSplit)) + size * SCAN_ENTRY_BYTES + size * (NULLIFIER_BYTES + 12);
 }
 
 /** A deterministic byte stream for one use of a padded build: AES-128-CTR keyed by SHA-256(label, block hash, size). */
@@ -106,18 +95,6 @@ function noiseStream(label: string, blockHash: Uint8Array, size: number): (out: 
   };
 }
 
-/** Fills every cell of `grid` with a uniformly random 9-bit value (stored centred). */
-function fillNoise(grid: Grid, next: (out: Uint8Array) => void): void {
-  const cells = grid.cells;
-  const bytes = new Uint8Array(cells.buffer, cells.byteOffset, cells.byteLength);
-  const chunk = 1 << 24;
-  for (let off = 0; off < cells.length; off += chunk) {
-    const n = Math.min(chunk, cells.length - off);
-    next(bytes.subarray(off * 2, (off + n) * 2));
-    for (let i = off; i < off + n; i++) cells[i] = (cells[i]! & (PLAIN_MODULUS - 1)) - HALF_PLAIN;
-  }
-}
-
 /** The steps of a build, in order (spec §8's server rows). */
 export const BUILD_STEPS = ["scan", "tree", "readTable", "readSetup", "pathTable", "pathSetup", "nullifierTable", "nullifierSetup", "manifest"] as const;
 export type BuildStep = (typeof BUILD_STEPS)[number];
@@ -130,20 +107,17 @@ export interface StepReport {
   /** The tree's hashes, and hashes per second. */
   readonly hashes?: number;
   readonly hashesPerSecond?: number;
+  /** A table's setup: the scheme's own measurements (for IPIR+SP the noise sample, 00058 FR-015). */
+  readonly scheme?: Readonly<Record<string, number>>;
 }
 
 export interface BuildHooks {
   /** Told when each step starts and ends. */
   step?(name: BuildStep, phase: "start" | "end", report?: StepReport): void;
-  /** The multiplication for the setup data; a worker pool of `job.threads` threads unless given. */
+  /** SimplePIR: the multiplication for the setup data; the scheme's pool of `job.threads` threads unless given. */
   readonly multiplier?: Multiplier;
   /** The kernel for leaves and hashes; compiled from the committed file unless given. */
   readonly kernel?: Kernel;
-}
-
-/** A grid as it crosses threads: its shape and its cells' shared buffer. */
-export interface GridTransfer extends GridShape {
-  readonly cells: SharedArrayBuffer;
 }
 
 export interface BuildResult {
@@ -153,10 +127,8 @@ export interface BuildResult {
   readonly dir: string;
   readonly manifest: Manifest;
   readonly manifestBytes: Uint8Array;
-  readonly readGrid: GridTransfer;
-  /** Null when k is 0. */
-  readonly pathGrid: GridTransfer | null;
-  readonly nullifierGrid: GridTransfer;
+  /** What the server answers from, per table, from the scheme (`ServerScheme.adoptTable`); no path table when k is 0. */
+  readonly tables: { readonly read: TableTransfer; readonly path: TableTransfer | null; readonly nullifier: TableTransfer };
   readonly blockRoots: Uint8Array;
   /** Where the tail's tree starts: the upper tree over the full blocks, and the partial block. */
   readonly upper: IncrementalTreeState;
@@ -166,7 +138,7 @@ export interface BuildResult {
 
 /** Why a build failed: `code` is stable, the message says what differed. */
 export class BuildError extends Error {
-  readonly code: "first-free-mismatch" | "root-mismatch" | "invalid-job";
+  readonly code: "first-free-mismatch" | "root-mismatch" | "invalid-job" | "scheme-unavailable";
   constructor(code: BuildError["code"], message: string) {
     super(message);
     this.code = code;
@@ -209,15 +181,17 @@ function artifact(dir: string, parts: readonly Uint8Array[]): { digest: string; 
   return written;
 }
 
-const transfer = (grid: Grid): GridTransfer => ({
-  rows: grid.rows,
-  cols: grid.cols,
-  perColumn: grid.perColumn,
-  cellsPerRecord: grid.cellsPerRecord,
-  recordBytes: grid.recordBytes,
-  records: grid.records,
-  cells: grid.cells.buffer as SharedArrayBuffer,
-});
+/**
+ * A PIR table built: its two artifacts, its manifest entry's parts, and what the server answers from. The encoded
+ * table is not kept: once its file is written and set up it holds no cells (IPIR+SP's are freed then).
+ */
+interface BuiltTable {
+  readonly ref: PirTableRef;
+  readonly publicRef: { digest: string; size: number };
+  /** The nullifier table only: its bucket bits. */
+  readonly bucketBits: number | undefined;
+  readonly transfer: TableTransfer;
+}
 
 /** Builds the snapshot of `job` (see the module comment). */
 export async function buildSnapshot(job: BuildJob, hooks: BuildHooks = {}): Promise<BuildResult> {
@@ -258,10 +232,43 @@ export async function buildSnapshot(job: BuildJob, hooks: BuildHooks = {}): Prom
   const snapshotsDir = join(job.dataDir, SNAPSHOTS_DIR);
   mkdirSync(buildsDir, { recursive: true });
   mkdirSync(snapshotsDir, { recursive: true });
+  let scheme: ServerScheme;
+  try {
+    scheme = await openServerScheme(job.scheme, { threads: Math.max(1, job.threads), ...(hooks.multiplier === undefined ? {} : { multiplier: hooks.multiplier }) });
+  } catch (cause) {
+    if (cause instanceof SchemeUnavailable) throw new BuildError("scheme-unavailable", cause.message);
+    throw cause;
+  }
   const dir = join(buildsDir, `${job.height}-${randomBytes(6).toString("hex")}`);
   mkdirSync(dir);
-  const ownMultiplier = hooks.multiplier === undefined;
-  const multiplier = hooks.multiplier ?? new WorkerMultiplier(Math.max(1, job.threads));
+  /** Tables set up so far: freed if the build fails after them (IPIR+SP's live in its add-on, outside the heap). */
+  const made: TableTransfer[] = [];
+  /**
+   * A table through the scheme: its records (`sourceOf`, timed with the table), its file (step `<name>Table`), then its
+   * setup and public artifact (`<name>Setup`).
+   */
+  const table = async (sourceOf: () => TableSource, steps: readonly [BuildStep, BuildStep]): Promise<BuiltTable> => {
+    begin(steps[0]);
+    const source = sourceOf();
+    const encoded: EncodedTable = scheme.encodeTable(source);
+    const file = artifact(dir, encoded.file);
+    end(steps[0], { bytes: file.size });
+    begin(steps[1]);
+    const prepared: PreparedTable = await encoded.setup(fromHex(file.digest, 32), join(dir, file.digest));
+    made.push(prepared.transfer);
+    const publicRef = artifact(dir, prepared.public);
+    end(steps[1], { bytes: publicRef.size, ...(prepared.stats === undefined ? {} : { scheme: prepared.stats }) });
+    const ref: PirTableRef = {
+      digest: file.digest,
+      size: file.size,
+      records: source.records,
+      recordBytes: source.recordBytes,
+      groups: encoded.groups,
+      perGroup: encoded.perGroup,
+      layout: prepared.layout,
+    };
+    return { ref, publicRef, bucketBits: encoded.bucketBits, transfer: prepared.transfer };
+  };
   try {
     // Scan file (FR-030, FR-031): the point and the first 4 bytes of element 0, or 36 zero bytes.
     begin("scan");
@@ -306,109 +313,83 @@ export async function buildSnapshot(job: BuildJob, hooks: BuildHooks = {}): Prom
     const treeMs = performance.now() - started;
     end("tree", { bytes: rootsRef.size, hashes: counted.count(), hashesPerSecond: treeMs > 0 ? (counted.count() * 1000) / treeMs : 0 });
 
-    // Read table (FR-060, FR-061, Q58): one 98-byte record per position: 16 bytes of the commitment and the shrunk
+    // Read table (FR-060, FR-061, Q58): one 98-byte record per slot: 16 bytes of the commitment and the shrunk
     // ciphertext elements 1–5.
-    begin("readTable");
-    const readGrid = createGrid(positionalShape(slots, READ_RECORD_BYTES));
-    if (padding !== undefined) fillNoise(readGrid, noiseStream("read", job.blockHash, padding));
-    for (let i = 0; i < n; i++) {
-      const ciphertext = evidence[i] === EVIDENCE_CODE.ciphertext ? ciphertexts.subarray(i * CIPHERTEXT_BYTES, (i + 1) * CIPHERTEXT_BYTES) : null;
-      const record = encodeReadRecord(commitments.subarray(i * COMMITMENT_BYTES, (i + 1) * COMMITMENT_BYTES), ciphertext);
-      const { column, slot } = positionOf(slotOfOutput(i), readGrid.perColumn);
-      setRecord(readGrid, column, slot, record);
-    }
-    const readDigest = gridDigest(readGrid);
-    const readRef = artifact(dir, [encodeGridHeader(readGrid), gridCellBytes(readGrid)]);
-    if (readRef.digest !== toHex(readDigest)) throw new Error("the read table's file is not its grid digest");
-    end("readTable", { bytes: readRef.size });
+    const read = await table(
+      () => ({
+        name: "read",
+        records: slots,
+        recordBytes: READ_RECORD_BYTES,
+        ...(padding === undefined ? {} : { noise: noiseStream("read", job.blockHash, padding) }),
+        fill(put) {
+          for (let i = 0; i < n; i++) {
+            const ciphertext = evidence[i] === EVIDENCE_CODE.ciphertext ? ciphertexts.subarray(i * CIPHERTEXT_BYTES, (i + 1) * CIPHERTEXT_BYTES) : null;
+            put(slotOfOutput(i), encodeReadRecord(commitments.subarray(i * COMMITMENT_BYTES, (i + 1) * COMMITMENT_BYTES), ciphertext));
+          }
+        },
+      }),
+      ["readTable", "readSetup"],
+    );
 
-    begin("readSetup");
-    const readSeed = deriveSeed("read", readDigest);
-    const readSetup = await buildSetup(readGrid, readSeed, multiplier);
-    const readSetupRef = artifact(dir, [setupBytes(readSetup)]);
-    end("readSetup", { bytes: readSetupRef.size });
-
-    // Path table (Q58): each position's k lower siblings, read only to spend; zero bytes outside the full blocks.
-    // As wide as the noise check allows, so its setup data, downloaded to spend, is small. None when k is 0.
-    let path: { grid: Grid; ref: { digest: string; size: number }; seed: Uint8Array; setupRef: { digest: string; size: number } } | null = null;
+    // Path table (Q58): each position's k lower siblings, read only to spend; zero bytes outside the full blocks. None
+    // when k is 0. (SimplePIR makes it as wide as the noise check allows, so its setup data, downloaded to spend, is
+    // small.)
+    let path: BuiltTable | null = null;
     if (k > 0) {
-      begin("pathTable");
-      const pathGrid = createGrid(widestShape(slots, pathRecordBytes(k)));
-      if (padding !== undefined) fillNoise(pathGrid, noiseStream("path", job.blockHash, padding));
       const pathBytes = k * NODE_BYTES;
       const empty = new Uint8Array(pathBytes);
-      for (let i = 0; i < n; i++) {
-        const { column, slot } = positionOf(slotOfOutput(i), pathGrid.perColumn);
-        setRecord(pathGrid, column, slot, i < tree.fullLeaves ? tree.paths.subarray(i * pathBytes, (i + 1) * pathBytes) : empty);
-      }
-      const pathDigest = gridDigest(pathGrid);
-      const pathRef = artifact(dir, [encodeGridHeader(pathGrid), gridCellBytes(pathGrid)]);
-      if (pathRef.digest !== toHex(pathDigest)) throw new Error("the path table's file is not its grid digest");
-      end("pathTable", { bytes: pathRef.size });
-
-      begin("pathSetup");
-      const pathSeed = deriveSeed("path", pathDigest);
-      const pathSetup = await buildSetup(pathGrid, pathSeed, multiplier);
-      const pathSetupRef = artifact(dir, [setupBytes(pathSetup)]);
-      end("pathSetup", { bytes: pathSetupRef.size });
-      path = { grid: pathGrid, ref: pathRef, seed: pathSeed, setupRef: pathSetupRef };
+      path = await table(
+        () => ({
+          name: "path",
+          records: slots,
+          recordBytes: pathRecordBytes(k),
+          ...(padding === undefined ? {} : { noise: noiseStream("path", job.blockHash, padding) }),
+          fill(put) {
+            for (let i = 0; i < n; i++) put(slotOfOutput(i), i < tree.fullLeaves ? tree.paths.subarray(i * pathBytes, (i + 1) * pathBytes) : empty);
+          },
+        }),
+        ["pathTable", "pathSetup"],
+      );
     }
 
-    // Nullifier table (FR-062–064).
-    begin("nullifierTable");
-    const real = job.slice.nullifiers;
-    const count = padding ?? real;
-    let values: Uint8Array = new Uint8Array(job.slice.nullifierValues, 0, real * NULLIFIER_BYTES);
-    let heights: Uint32Array = new Uint32Array(job.slice.nullifierHeights, 0, real);
-    let txs: Uint32Array = new Uint32Array(job.slice.nullifierTxs, 0, real);
-    if (padding !== undefined) {
-      // Noise: random nullifiers, spent at random heights up to S in one of the first 8 transactions (Q57).
-      const next = noiseStream("nullifier", job.blockHash, padding);
-      const allValues = new Uint8Array(count * NULLIFIER_BYTES);
-      allValues.set(values);
-      next(allValues.subarray(real * NULLIFIER_BYTES));
-      const allHeights = new Uint32Array(count);
-      const allTxs = new Uint32Array(count);
-      allHeights.set(heights);
-      allTxs.set(txs);
-      next(new Uint8Array(allHeights.buffer, real * 4));
-      next(new Uint8Array(allTxs.buffer, real * 4));
-      for (let i = real; i < count; i++) {
-        allHeights[i] = allHeights[i]! % (job.height + 1);
-        allTxs[i] = allTxs[i]! % 8;
+    // Nullifier table (FR-062–064): the entries, then their buckets (`nullifierSource`).
+    const nullifierEntries = (): TableSource => {
+      const real = job.slice.nullifiers;
+      const count = padding ?? real;
+      let values: Uint8Array = new Uint8Array(job.slice.nullifierValues, 0, real * NULLIFIER_BYTES);
+      let heights: Uint32Array = new Uint32Array(job.slice.nullifierHeights, 0, real);
+      let txs: Uint32Array = new Uint32Array(job.slice.nullifierTxs, 0, real);
+      if (padding !== undefined) {
+        // Noise: random nullifiers, spent at random heights up to S in one of the first 8 transactions (Q57).
+        const next = noiseStream("nullifier", job.blockHash, padding);
+        const allValues = new Uint8Array(count * NULLIFIER_BYTES);
+        allValues.set(values);
+        next(allValues.subarray(real * NULLIFIER_BYTES));
+        const allHeights = new Uint32Array(count);
+        const allTxs = new Uint32Array(count);
+        allHeights.set(heights);
+        allTxs.set(txs);
+        next(new Uint8Array(allHeights.buffer, real * 4));
+        next(new Uint8Array(allTxs.buffer, real * 4));
+        for (let i = real; i < count; i++) {
+          allHeights[i] = allHeights[i]! % (job.height + 1);
+          allTxs[i] = allTxs[i]! % 8;
+        }
+        values = allValues;
+        heights = allHeights;
+        txs = allTxs;
       }
-      values = allValues;
-      heights = allHeights;
-      txs = allTxs;
-    }
-    const nullifierTable = buildNullifierTableOf({ count, values, heights, txs });
-    const nullifierGrid = nullifierTable.grid;
-    const nullifierDigest = gridDigest(nullifierGrid);
-    const nullifierRef = artifact(dir, [encodeGridHeader(nullifierGrid), gridCellBytes(nullifierGrid)]);
-    if (nullifierRef.digest !== toHex(nullifierDigest)) throw new Error("the nullifier table's file is not its grid digest");
-    end("nullifierTable", { bytes: nullifierRef.size });
-
-    begin("nullifierSetup");
-    const nullifierSeed = deriveSeed("nullifier", nullifierDigest);
-    const nullifierSetup = await buildSetup(nullifierGrid, nullifierSeed, multiplier);
-    const nullifierSetupRef = artifact(dir, [setupBytes(nullifierSetup)]);
-    end("nullifierSetup", { bytes: nullifierSetupRef.size });
+      return nullifierSource({ count, values, heights, txs });
+    };
+    const nullifier = await table(nullifierEntries, ["nullifierTable", "nullifierSetup"]);
+    const bucketBits = nullifier.bucketBits;
+    if (bucketBits === undefined) throw new Error(`the ${scheme.name} scheme gave the nullifier table no bucket bits`);
 
     // Manifest (FR-021, FR-022): canonical JSON; its SHA-256 is the snapshot identifier.
     begin("manifest");
-    const table = (grid: Grid, ref: { digest: string; size: number }, seed: Uint8Array) => ({
-      digest: ref.digest,
-      size: ref.size,
-      rows: grid.rows,
-      cols: grid.cols,
-      perColumn: grid.perColumn,
-      cellsPerRecord: grid.cellsPerRecord,
-      recordBytes: grid.recordBytes,
-      records: grid.records,
-      seed: toHex(seed),
-    });
     const manifest: Manifest = {
       formatVersion: FORMAT_VERSION,
+      scheme: scheme.name,
       network: job.network,
       genesisHash: toHex(job.genesisHash),
       height: job.height,
@@ -418,15 +399,15 @@ export async function buildSnapshot(job: BuildJob, hooks: BuildHooks = {}): Prom
       pathSplit: k,
       queriesPerCall: job.queriesPerCall,
       ...(padding === undefined ? {} : { padding: { size: padding } }),
-      pir: { ...PIR_PARAMS },
+      pir: { ...scheme.params },
       artifacts: {
         scan: scanRef,
         blockRoots: { ...rootsRef, blocks: tree.blocks },
-        readTable: table(readGrid, readRef, readSeed),
-        readSetup: readSetupRef,
-        ...(path === null ? {} : { pathTable: table(path.grid, path.ref, path.seed), pathSetup: path.setupRef }),
-        nullifierTable: { ...table(nullifierGrid, nullifierRef, nullifierSeed), bucketBits: nullifierTable.bucketBits, capacity: nullifierTable.capacity },
-        nullifierSetup: nullifierSetupRef,
+        readTable: read.ref,
+        readPublic: read.publicRef,
+        ...(path === null ? {} : { pathTable: path.ref, pathPublic: path.publicRef }),
+        nullifierTable: { ...nullifier.ref, bucketBits, capacity: nullifier.ref.perGroup },
+        nullifierPublic: nullifier.publicRef,
       },
     };
     const manifestBytes = encodeManifest(manifest);
@@ -441,19 +422,18 @@ export async function buildSnapshot(job: BuildJob, hooks: BuildHooks = {}): Prom
       dir: final,
       manifest,
       manifestBytes,
-      readGrid: transfer(readGrid),
-      pathGrid: path === null ? null : transfer(path.grid),
-      nullifierGrid: transfer(nullifierGrid),
+      tables: { read: read.transfer, path: path === null ? null : path.transfer, nullifier: nullifier.transfer },
       blockRoots: tree.blockRoots,
       upper: tree.upper,
       partial: tree.partial,
       steps,
     };
   } catch (error) {
+    for (const transfer of made) scheme.discardTransfer(transfer);
     rmSync(dir, { recursive: true, force: true });
     throw error;
   } finally {
-    if (ownMultiplier) await multiplier.close();
+    await scheme.close();
   }
 }
 

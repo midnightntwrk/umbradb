@@ -3,11 +3,20 @@
  * wallet's client on their own rows, the naive baseline (FR-152), the read table at each `pathSplit` (FR-153), the scan
  * by thread count, what the server observes (FR-154), the chain sync, the transfer and the notes.
  *
+ * Any scheme (spec 00058 FR-050): a table's public artifact is named as its scheme names it (`PUBLIC_ARTIFACT`), and a
+ * group is what one request selects (SimplePIR: a column; IPIR+SP: a row).
+ *
  * `section8` builds the table as cells; a cell the spec asks for that has no value is `missing`, with the reason, and
  * `missingCells` lists them (the report prints the list; the tests require it empty).
  */
 
+import { isSchemeName, PUBLIC_ARTIFACT } from "../pir/scheme.ts";
 import { BUILD_STEP_NAMES, type BenchResults, type BuildStep, type CallRow, type SplitCall, type WalletRun } from "./bench-results.ts";
+
+/** What the snapshot's scheme calls the public artifact a wallet downloads per table (SimplePIR: setup data). */
+const publicLabel = (r: BenchResults): string => (isSchemeName(r.snapshot.scheme) ? PUBLIC_ARTIFACT[r.snapshot.scheme] : "public artifact");
+/** What one request selects in the snapshot's scheme. */
+const groupLabel = (r: BenchResults): string => ({ simplepir: "column", "ipir-sp": "row" })[r.snapshot.scheme] ?? "group";
 
 // ── formatting ───────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -33,7 +42,11 @@ export function fmtMs(ms: number | null | undefined): string {
   if (ms < 10) return `${ms.toFixed(1)} ms`;
   if (ms < 1000) return `${Math.round(ms)} ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(2)} s`;
-  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)} min ${Math.round((ms % 60_000) / 1000)} s`;
+  if (ms < 3_600_000) {
+    // Rounded to the second first, so that 119.6 s reads 2 min 0 s, not 1 min 60 s.
+    const seconds = Math.round(ms / 1000);
+    return `${Math.floor(seconds / 60)} min ${seconds % 60} s`;
+  }
   return `${(ms / 3_600_000).toFixed(2)} h`;
 }
 
@@ -92,12 +105,25 @@ function buildRow(r: BenchResults, part: string, steps: readonly ("scan" | "tree
 const label = (step: string): string =>
   ({ scan: "scan file", tree: "tree", readTable: "table", readSetup: "setup", pathTable: "table", pathSetup: "setup", nullifierTable: "table", nullifierSetup: "setup", manifest: "manifest" })[step] ?? step;
 
+/** The setup step's figures its scheme reports, when it reports any (IPIR+SP: hints, packing, the noise sample). */
+function schemeStepText(x: BuildStep | null | undefined): string {
+  const s = x?.scheme;
+  if (s === undefined) return "";
+  const parts: string[] = [];
+  if (s.hintsMs !== undefined) parts.push(`hints ${fmtMs(s.hintsMs)}`);
+  if (s.packingMs !== undefined) parts.push(`packing ${fmtMs(s.packingMs)}`);
+  if (s.checkMs !== undefined) parts.push(`check ${fmtMs(s.checkMs)}`);
+  if (s.packingBytes !== undefined) parts.push(`packing held ${fmtBytes(s.packingBytes)}`);
+  if (s.maxPhaseErrorLog2 !== undefined) parts.push(`largest phase error 2^${s.maxPhaseErrorLog2.toFixed(2)} of 2^${s.phaseLimitLog2 ?? "?"} over ${s.checkedRows ?? "?"} rows`);
+  return parts.join(", ");
+}
+
 function callRows(part: string, w: WalletRun, c: CallRow): Section8Row[] {
   const calls = c.calls > 1 ? ` (mean of ${c.calls} calls)` : "";
   return [
     row(part, `server (${w.label}'s call)`, {
       memory: needs([c.serverPeakRssBytes], noServerMemory, () => fmtBytes(c.serverPeakRssBytes)),
-      computing: needs([c.serverMs], noServerLog, () => `multiply ${fmtMs(c.serverMs)} (the route's time: decode, multiply, encode)${calls}`),
+      computing: needs([c.serverMs], noServerLog, () => `answer ${fmtMs(c.serverMs)} (the route's time: decode the body, answer, encode)${calls}`),
     }),
     row(part, `client ${w.label}`, {
       memory: needs([c.clientPeakRssBytes], "not sampled", () => fmtBytes(c.clientPeakRssBytes)),
@@ -128,22 +154,24 @@ export function section8(r: BenchResults): Section8Row[] {
   rows.push(
     buildRow(r, "Build tree and paths", ["tree"], (s) => `${fmtBytes(s.tree!.bytes)} block roots`, (s) => `${fmtMs(s.tree!.ms)}, ${fmtRate(s.tree!.hashesPerSecond, 0)} hashes/s (${group(s.tree!.hashes ?? 0)} hashes)`),
   );
-  rows.push(
-    buildRow(r, "Build read table and setup data", ["readTable", "readSetup"], (s) => `table ${fmtBytes(s.readTable!.bytes)}, setup ${fmtBytes(s.readSetup!.bytes)}`, (s) => `table ${fmtMs(s.readTable!.ms)}, setup ${fmtMs(s.readSetup!.ms)}`),
-  );
-  rows.push(
-    buildRow(r, "Build path table and setup data", ["pathTable", "pathSetup"], (s) => `table ${fmtBytes(s.pathTable!.bytes)}, setup ${fmtBytes(s.pathSetup!.bytes)}`, (s) => `table ${fmtMs(s.pathTable!.ms)}, setup ${fmtMs(s.pathSetup!.ms)}`),
-  );
-  rows.push(
-    buildRow(r, "Build nullifier table and setup data", ["nullifierTable", "nullifierSetup"], (s) => `table ${fmtBytes(s.nullifierTable!.bytes)}, setup ${fmtBytes(s.nullifierSetup!.bytes)}`, (s) => `table ${fmtMs(s.nullifierTable!.ms)}, setup ${fmtMs(s.nullifierSetup!.ms)}`),
-  );
+  const pub = publicLabel(r);
+  for (const [name, table, setup] of [
+    ["read", "readTable", "readSetup"],
+    ["path", "pathTable", "pathSetup"],
+    ["nullifier", "nullifierTable", "nullifierSetup"],
+  ] as const) {
+    rows.push(
+      buildRow(r, `Build ${name} table and ${pub}`, [table, setup], (s) => `table ${fmtBytes(s[table]!.bytes)}, ${pub} ${fmtBytes(s[setup]!.bytes)}`, (s) => `table ${fmtMs(s[table]!.ms)}, setup ${fmtMs(s[setup]!.ms)}`),
+    );
+  }
   for (const w of r.wallets) {
     const d = w.downloads;
     const one = (name: string, x: typeof d.scan) => `${name} ${x.cached ? "cached" : `${fmtBytes(x.bytes)} in ${fmtMs(x.ms)}`}`;
+    const label = publicLabel(r);
     rows.push(
-      row("Download scan file, block roots, setup data", `client ${w.label}`, {
+      row(`Download scan file, block roots, ${label}`, `client ${w.label}`, {
         storage: value(`${fmtBytes(w.cacheBytes)} cache`),
-        inFlight: value([one("scan file", d.scan), one("block roots", d.blockRoots), one("read setup", d.readSetup), one("nullifier setup", d.nullifierSetup)].join("; ")),
+        inFlight: value([one("scan file", d.scan), one("block roots", d.blockRoots), one(`read ${label}`, d.readPublic), one(`nullifier ${label}`, d.nullifierPublic)].join("; ")),
       }),
     );
   }
@@ -161,6 +189,7 @@ export function section8(r: BenchResults): Section8Row[] {
   });
   for (const w of r.wallets) rows.push(...callRows("Read coins (one call)", w, w.read));
   for (const w of r.wallets) rows.push(...callRows("Nullifier lookups (one call)", w, w.nullifier));
+  for (const w of r.wallets) if (w.path !== null) rows.push(...callRows("Lower paths to spend (one call)", w, w.path));
   for (const w of r.wallets) {
     rows.push(
       row("Tail", `server (served to ${w.label})`, {
@@ -232,7 +261,7 @@ export function renderReport(r: BenchResults): string {
   out.push(`# Private shielded sync: benchmark on ${r.network}`, "");
   out.push(
     `Snapshot ${short(s.id)} at height ${group(s.height)} (block ${short(s.blockHash)}): ${plural(s.outputs, "shielded output")}, ${plural(s.nullifiers, "nullifier")}, ` +
-      `\`pathSplit\` k = ${s.pathSplit}, ${s.queriesPerCall} vectors per query call${s.builtByBench ? " (built for this run)" : ""}. ` +
+      `\`pathSplit\` k = ${s.pathSplit}, ${s.queriesPerCall} requests per query call, PIR scheme ${s.scheme}${s.padding === null ? "" : `, padded to ${group(s.padding)} entries (debug)`}${s.builtByBench ? " (built for this run)" : ""}. ` +
       `Run from ${r.startedAt} to ${r.finishedAt}; wallets ${walletNames}. Written by \`examples/private-shielded-sync/bench/bench.ts\`; every number is in \`results.json\` beside this file.`,
     "",
   );
@@ -255,12 +284,53 @@ export function renderReport(r: BenchResults): string {
         ["Server memory", r.server.memory],
         ["Server log", r.server.log],
         ["Load average (1, 5, 15 min)", `start ${r.loadAverage.start.join(" / ")}; end ${r.loadAverage.end.join(" / ")}`],
-        ["SimplePIR", `q = 2^${s.pir.logQ}, n = ${s.pir.n}, σ = ${s.pir.sigma}, ${s.pir.cellBits} bits per cell (p = ${s.pir.plainModulus})`],
+        s.scheme === "simplepir"
+          ? ["SimplePIR", `q = 2^${s.pir.logQ}, n = ${s.pir.n}, σ = ${s.pir.sigma}, ${s.pir.cellBits} bits per cell (p = ${s.pir.plainModulus})`]
+          : [`PIR scheme ${s.scheme}`, Object.entries(s.pir).map(([k, v]) => `${k} ${v}`).join(", ")],
         ["Artifacts", Object.entries(s.artifacts).map(([n, b]) => `${n} ${fmtBytes(b)}`).join(", ")],
+        ["Artifacts on disk", s.onDisk === null ? "not read (give --pss-data)" : Object.entries(s.onDisk).map(([n, b]) => `${n} ${fmtBytes(b)}`).join(", ")],
       ],
     ),
     "",
   );
+
+  out.push("## The PIR tables", "");
+  out.push(
+    `One request selects one ${groupLabel(r)} of the table (a group) and its answer carries the group's records. A table is R × C cells. ` +
+      `Request and response are the bytes of one query in a call body and in its answer (after the 40-byte header), measured on the first call to the table; ` +
+      `"held" is what the served table says it holds in the server's memory (from the module's status${r.server.heldBytes === null ? "; not read: give --admin-secret-file" : ""}).`,
+    "",
+  );
+  out.push(
+    table(
+      ["Table", "Records × bytes", "Cells R × C", "Groups × records per group", "Table file", publicLabel(r), "Request / response per query", "Held"],
+      (["read", "path", "nullifier"] as const).map((name) => {
+        const t = s.tables[name];
+        if (t === null) return [name, "—", "—", "—", "—", "—", "—", "—"];
+        const held = r.server.heldBytes?.[name] ?? null;
+        return [
+          name,
+          `${group(t.records)} × ${t.recordBytes} B`,
+          `${group(t.rows)} × ${group(t.cols)}`,
+          `${group(t.groups)} × ${group(t.perGroup)}`,
+          fmtBytes(t.tableBytes),
+          fmtBytes(t.publicBytes),
+          t.requestBytes === null || t.responseBytes === null ? "no call made" : `${group(t.requestBytes)} B / ${group(t.responseBytes)} B`,
+          held === null ? "?" : fmtBytes(held),
+        ];
+      }),
+    ),
+    "",
+  );
+  const bq = r.build;
+  if (bq !== null) {
+    out.push(
+      `The benchmark asked the server for this snapshot (${bq.scheme ?? "the settings' scheme"}${bq.padding === null ? "" : `, padded to ${group(bq.padding)}`}); it was served ${fmtMs(bq.ms)} after the request. ` +
+        `The server process's resident memory (${r.server.memory}): ${fmtBytes(bq.rssBeforeBytes)} before the request, a peak of ${fmtBytes(bq.rssPeakBytes)} until the snapshot was served, ${fmtBytes(bq.rssAfterBytes)} once served (the median of its peaks over 250 ms windows from 1 to 3 s after)` +
+        `${r.serverBuild?.steps === undefined ? "" : `; the build statistics' own peak, sampled every 10 ms in the process, ${fmtBytes(Math.max(0, ...BUILD_STEP_NAMES.map((n) => r.serverBuild!.steps[n]?.peakRssBytes ?? 0)))}`}.`,
+      "",
+    );
+  }
 
   out.push("## The measurements of spec §8", "");
   out.push(
@@ -297,7 +367,7 @@ export function renderReport(r: BenchResults): string {
       }),
     ),
     "",
-    "A first sync downloads the snapshot's artifacts once (the scan file, block roots and both setup matrices, the same for every wallet); a later sync against the same snapshot moves only the manifest, the query calls and the tail. " +
+    `A first sync downloads the snapshot's artifacts once (the scan file, block roots and the read and nullifier tables' ${publicLabel(r)}, the same for every wallet); a later sync against the same snapshot moves only the manifest, the query calls and the tail. ` +
       "Both include the tail (outputs after the snapshot, in full, for every wallet); the baseline counts only the snapshot.",
     "",
   );
@@ -308,21 +378,21 @@ export function renderReport(r: BenchResults): string {
   } else {
     out.push(
       `The served snapshot has k = ${s.pathSplit}. For each k below, the benchmark read the snapshot's stored events with the module's own query and ran the module's own builder in-process ` +
-        `(${r.pathSplits[0]!.threads} threads); the build checks the core's root at the height. A read record is 98 bytes at every k (the commitment's first 16 bytes, ciphertext elements 1–5 shrunk); the k lower path hashes are in the path table, 32k bytes a record, which a wallet reads only to spend (none at k = 0). Each call is one call of ${s.queriesPerCall} vectors with client and server in the benchmark's process (no network), after one warm-up call; every record of its columns was checked against the table's own.`,
+        `(${r.pathSplits[0]!.threads} threads); the build checks the core's root at the height. A read record is 98 bytes at every k (the commitment's first 16 bytes, ciphertext elements 1–5 shrunk); the k lower path hashes are in the path table, 32k bytes a record, which a wallet reads only to spend (none at k = 0). Each call is one call of ${s.queriesPerCall} requests with client and server in the benchmark's process (no network), after one warm-up call; every record of its groups was checked against the table file's own. A table is R × C cells; one request selects one ${groupLabel(r)} (a group) of the records in brackets.`,
       "",
     );
     out.push(
       table(
-        ["k", "Read record", "Read grid R × C (per column)", "Path record", "Path grid R × C (per column)", "Block roots", "Read table / setup", "Path table / setup", "Tree", "Tables and setups", "Peak", "Same as served"],
+        ["k", "Read record", `Read table R × C (records per ${groupLabel(r)})`, "Path record", `Path table R × C (records per ${groupLabel(r)})`, "Block roots", `Read table / ${publicLabel(r)}`, `Path table / ${publicLabel(r)}`, "Tree", "Tables and setups", "Peak", "Same as served"],
         r.pathSplits.map((p) => [
           String(p.k),
           `${p.recordBytes} B`,
-          `${group(p.rows)} × ${group(p.cols)} (${p.perColumn})`,
+          `${group(p.rows)} × ${group(p.cols)} (${p.perGroup})`,
           p.path === null ? "—" : `${p.path.recordBytes} B`,
-          p.path === null ? "none (k = 0)" : `${group(p.path.rows)} × ${group(p.path.cols)} (${p.path.perColumn})`,
+          p.path === null ? "none (k = 0)" : `${group(p.path.rows)} × ${group(p.path.cols)} (${p.path.perGroup})`,
           `${fmtBytes(p.sizes.blockRoots)} (${group(p.blocks)})`,
-          `${fmtBytes(p.sizes.readTable)} / ${fmtBytes(p.sizes.readSetup)}`,
-          p.path === null ? "—" : `${fmtBytes(p.path.tableBytes)} / ${fmtBytes(p.path.setupBytes)}`,
+          `${fmtBytes(p.sizes.readTable)} / ${fmtBytes(p.sizes.readPublic)}`,
+          p.path === null ? "—" : `${fmtBytes(p.path.tableBytes)} / ${fmtBytes(p.path.publicBytes)}`,
           `${fmtMs(p.steps.tree!.ms)}, ${fmtRate(p.steps.tree!.hashesPerSecond, 0)} hashes/s`,
           (["readTable", "readSetup", "pathTable", "pathSetup"] as const).filter((n) => p.steps[n] !== null).map((n) => `${n} ${fmtMs(p.steps[n]!.ms)}`).join(", "),
           fmtBytes(Math.max(...(["tree", "readTable", "readSetup", "pathTable", "pathSetup"] as const).map((n) => p.steps[n]?.peakRssBytes ?? 0))),
@@ -333,7 +403,7 @@ export function renderReport(r: BenchResults): string {
     );
     out.push(
       table(
-        ["k", "Call", "Up", "Down", "Client build", "Server multiply", "Client decode", "Peak", "Records checked"],
+        ["k", "Call", "Up", "Down", "Client build", "Server answer", "Client decode", "Peak", "Records checked"],
         r.pathSplits.flatMap((p) => {
           const calls: [string, SplitCall][] = [["read (each sync)", p.call]];
           if (p.path?.call) calls.push(["path (each spend)", p.path.call]);
@@ -414,7 +484,7 @@ export function renderReport(r: BenchResults): string {
     "",
   );
   out.push(
-    `A wallet sends one call to each table for every ${s.queriesPerCall} distinct columns it reads (at least one): the number of calls is the only part of a sync that depends on how many coins it holds, and the server sees it.`,
+    `A wallet sends one call to each table for every ${s.queriesPerCall} distinct ${groupLabel(r)}s it reads (at least one): the number of calls is the only part of a sync that depends on how many coins it holds, and the server sees it.`,
     "",
   );
 
@@ -472,10 +542,10 @@ export function renderReport(r: BenchResults): string {
     out.push(`From ${b.source}; total ${fmtMs(b.totalMs)}.`, "");
     out.push(
       table(
-        ["Step", "Duration", "Size", "Peak"],
+        ["Step", "Duration", "Size", "Peak", "The scheme's own figures"],
         BUILD_STEP_NAMES.map((name) => {
           const x = b.steps[name];
-          return [name, fmtMs(x?.ms), x?.bytes === undefined ? "—" : fmtBytes(x.bytes), fmtBytes(x?.peakRssBytes)];
+          return [name, fmtMs(x?.ms), x?.bytes === undefined ? "—" : fmtBytes(x.bytes), fmtBytes(x?.peakRssBytes), schemeStepText(x) || "—"];
         }),
       ),
       "",
@@ -495,7 +565,8 @@ export function renderReport(r: BenchResults): string {
   const notes = [
     "Each wallet is a fresh client in the benchmark's process: its own empty cache, scan threads and PIR threads (whose first call pays their compilation), as a new `client/main.ts sync` would be.",
     "\"Per call\" values are a sync's totals divided by its calls.",
-    "The server's time for a query route is what it logged for the request: the body decoded, the multiplication, the answer encoded.",
+    "The server's time for a query route is what it logged for the request: the body decoded, the scheme's answer to every request of the call, the answer encoded.",
+    "\"Lower paths to spend\" is the read `send` makes before a transfer (`lowerPathsByPir`), run after each wallet's sync: the path table's public artifact once, then one call for the wallet's unspent coins whose block was full at the snapshot (random groups only when it has none); every path read is checked against its block's root.",
     "Results hold wallet labels and counts only: no keys, positions, values or nullifiers.",
     ...r.notes,
   ];

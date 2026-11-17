@@ -1,0 +1,4 @@
+# cargo's output (all builds of this workspace, including `build.sh --check`)
+target/
+# The native add-on is built for the host by `build.sh native` and never committed.
+pss-ipir.node

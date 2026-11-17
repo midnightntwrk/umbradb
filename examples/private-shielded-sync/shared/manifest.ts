@@ -1,12 +1,19 @@
 /**
- * The snapshot manifest (spec FR-021, FR-022): JSON naming the height, block hash, `first_free`, root and every other
- * artifact's digest, size and parameters. It is encoded canonically (keys sorted, no whitespace, integers only except
- * σ), so building the same snapshot twice gives the same bytes; the snapshot identifier is their SHA-256.
+ * The snapshot manifest (spec FR-021, FR-022; 00058 FR-003): JSON naming the height, block hash, `first_free`, root,
+ * the PIR scheme and every other artifact's digest, size and parameters. It is encoded canonically (keys sorted, no
+ * whitespace, integers only except σ), so building the same snapshot twice gives the same bytes; the snapshot
+ * identifier is their SHA-256, so two schemes at one height give two identifiers.
  *
  * Digests, hashes and the seed are lower-case hex. The root is the tree root as a 32-byte little-endian field element.
+ *
+ * Each PIR table's entry has the scheme-independent fields (records, record size, groups, records per group) and the
+ * scheme's own `layout`; the manifest's `pir` holds the scheme's parameters. Both are tagged by the manifest's
+ * `scheme`, and checked here by that scheme's rules (`SCHEME_RULES`).
  */
 
 import { createHash } from "node:crypto";
+import type { PirParams } from "../pir/params.ts";
+import { isSchemeName, type SchemeName, SchemeUnavailable } from "../pir/scheme.ts";
 import { FORMAT_VERSION } from "./constants.ts";
 
 export interface ArtifactRef {
@@ -15,19 +22,78 @@ export interface ArtifactRef {
   readonly size: number;
 }
 
-/** A PIR table's artifact and parameters: the grid's shape and the seed of its public matrix A. */
-export interface PirTableRef extends ArtifactRef {
+/** SimplePIR's parameters (FR-050): q = 2^logQ, LWE dimension n, error σ, bits per cell and p = 2^cellBits. */
+export type SimplePirParams = PirParams;
+
+/**
+ * IPIR+SP's profile (00058, `../ipir/sizes.ts`): ring size, q = 2^qBits, p = 2^pBits (bits per cell), key digits of
+ * `digitBits` bits, two published masks of `maskBits` bits per column, query `queryBits` per row, answer
+ * `responseBits` per column.
+ */
+export interface IpirSpParams {
+  readonly ring: number;
+  readonly qBits: number;
+  readonly pBits: number;
+  readonly digitBits: number;
+  readonly digits: number;
+  readonly maskBits: number;
+  readonly queryBits: number;
+  readonly responseBits: number;
+}
+
+/** A scheme's parameters, tagged by `Manifest.scheme`. */
+export type SchemeParams = SimplePirParams | IpirSpParams;
+
+/** A SimplePIR table's grid: R rows × C columns of cells (a group is a column), and the seed of its public matrix A. */
+export interface SimplePirLayout {
+  /** R = perGroup × cellsPerRecord. */
   readonly rows: number;
+  /** C = groups. */
   readonly cols: number;
-  readonly perColumn: number;
+  /** E = ⌈8 × recordBytes / cellBits⌉. */
   readonly cellsPerRecord: number;
-  readonly recordBytes: number;
-  readonly records: number;
   readonly seed: string;
+}
+
+/**
+ * An IPIR+SP table (00058 FR-011): rows × cols 16-bit cells, both multiples of the ring size (a group is a row), and
+ * the seed of its public setup. The setup's other input, the snapshot digest, is the table file's digest.
+ */
+export interface IpirSpLayout {
+  /** groups. */
+  readonly rows: number;
+  /** A row holds perGroup = ⌊cols / cellsPerRecord⌋ records. */
+  readonly cols: number;
+  /** E = ⌈8 × recordBytes / pBits⌉. */
+  readonly cellsPerRecord: number;
+  readonly seed: string;
+}
+
+/** A scheme's layout of one table, tagged by `Manifest.scheme`. */
+export type TableLayout = SimplePirLayout | IpirSpLayout;
+
+/** A PIR table: its file, how a wallet addresses its records, and the scheme's layout. */
+export interface PirTableRef extends ArtifactRef {
+  /** How many records the table holds (the rest of its slots are unused). */
+  readonly records: number;
+  readonly recordBytes: number;
+  /** How many groups a request selects among. */
+  readonly groups: number;
+  /** Records per group: record i is slot i mod perGroup of group ⌊i / perGroup⌋. */
+  readonly perGroup: number;
+  readonly layout: TableLayout;
+}
+
+/** The nullifier table: bucket j is group j, of `capacity` = perGroup entries (FR-062–064). */
+export interface NullifierTableRef extends PirTableRef {
+  readonly bucketBits: number;
+  readonly capacity: number;
 }
 
 export interface Manifest {
   readonly formatVersion: number;
+  /** The PIR scheme of every table (00058 FR-003). */
+  readonly scheme: SchemeName;
   readonly network: string;
   readonly genesisHash: string;
   readonly height: number;
@@ -43,18 +109,19 @@ export interface Manifest {
    * among noise (`./padding.ts`). Absent on every snapshot built from the chain alone.
    */
   readonly padding?: { readonly size: number };
-  /** SimplePIR parameters (FR-050). */
-  readonly pir: { readonly logQ: number; readonly n: number; readonly sigma: number; readonly cellBits: number; readonly plainModulus: number };
+  /** The scheme's parameters. */
+  readonly pir: SchemeParams;
   readonly artifacts: {
     readonly scan: ArtifactRef;
     readonly blockRoots: ArtifactRef & { readonly blocks: number };
     readonly readTable: PirTableRef;
-    readonly readSetup: ArtifactRef;
+    /** The read table's public artifact, which every wallet downloads (SimplePIR's setup data, IPIR+SP's masks). */
+    readonly readPublic: ArtifactRef;
     /** Lower Merkle paths, read only to spend (Q58); absent when pathSplit is 0 (no lower path). */
     readonly pathTable?: PirTableRef;
-    readonly pathSetup?: ArtifactRef;
-    readonly nullifierTable: PirTableRef & { readonly bucketBits: number; readonly capacity: number };
-    readonly nullifierSetup: ArtifactRef;
+    readonly pathPublic?: ArtifactRef;
+    readonly nullifierTable: NullifierTableRef;
+    readonly nullifierPublic: ArtifactRef;
   };
 }
 
@@ -110,27 +177,90 @@ function checkRef(r: ArtifactRef | undefined, name: string): void {
   need(isCount(r!.size), `${name}.size`);
 }
 
+/** The scheme-independent fields of a table's entry. */
 function checkTable(t: PirTableRef | undefined, name: string): void {
   checkRef(t, name);
-  for (const k of ["rows", "cols", "perColumn", "cellsPerRecord", "recordBytes", "records"] as const) {
+  for (const k of ["records", "recordBytes", "groups", "perGroup"] as const) {
     need(isCount(t![k]) && (k === "records" || t![k] > 0), `${name}.${k}`);
   }
-  need(t!.rows === t!.perColumn * t!.cellsPerRecord, `${name}.rows = perColumn × cellsPerRecord`);
-  need(t!.size === 32 + t!.rows * t!.cols * 2, `${name}.size matches its shape`);
-  need(HEX32.test(t!.seed), `${name}.seed`);
+  need(t!.records <= t!.groups * t!.perGroup, `${name}.records ≤ groups × perGroup`);
+  need(typeof t!.layout === "object" && t!.layout !== null, `${name}.layout`);
 }
 
+/**
+ * What the manifest's checks know of a scheme: its parameters, and a table's layout against its files' sizes. The
+ * parameters given to `checkTable` have passed `checkParams`.
+ */
+interface SchemeRules<P extends SchemeParams> {
+  checkParams(pir: Partial<P>): void;
+  checkTable(t: PirTableRef, publicRef: ArtifactRef, pir: P, name: string, publicName: string): void;
+}
+
+/** SimplePIR: the table file is a 32-byte header and R × C 16-bit cells; the setup data R × n 32-bit values. */
+const SIMPLEPIR_RULES: SchemeRules<SimplePirParams> = {
+  checkParams(pir) {
+    for (const k of ["logQ", "n", "cellBits", "plainModulus"] as const) need(isCount(pir[k]) && pir[k] > 0, `pir.${k}`);
+    need(typeof pir.sigma === "number" && pir.sigma > 0, "pir.sigma");
+  },
+  checkTable(t, publicRef, pir, name, publicName) {
+    const l = t.layout;
+    for (const k of ["rows", "cols", "cellsPerRecord"] as const) need(isCount(l[k]) && l[k] > 0, `${name}.layout.${k}`);
+    need(l.cols === t.groups, `${name}.layout.cols = groups`);
+    need(l.cellsPerRecord === Math.ceil((8 * t.recordBytes) / pir.cellBits), `${name}.layout.cellsPerRecord = ⌈8 × recordBytes / cellBits⌉`);
+    need(l.rows === t.perGroup * l.cellsPerRecord, `${name}.layout.rows = perGroup × cellsPerRecord`);
+    need(t.size === 32 + l.rows * l.cols * 2, `${name}.size matches its shape`);
+    need(HEX32.test(l.seed), `${name}.layout.seed`);
+    need(publicRef.size === l.rows * pir.n * 4, `${publicName}.size = R × n × 4`);
+  },
+};
+
+/**
+ * IPIR+SP (00058): the table file is rows × cols cells of pBits bits, column-major, with no header (`../pir/ipir/
+ * encode.ts`); the public artifact is the two masks, a 36-byte header and 2 × maskBits bits per column.
+ */
+const IPIR_SP_RULES: SchemeRules<IpirSpParams> = {
+  checkParams(pir) {
+    for (const k of ["ring", "qBits", "pBits", "digitBits", "digits", "maskBits", "queryBits", "responseBits"] as const) need(isCount(pir[k]) && pir[k] > 0, `pir.${k}`);
+    need(pir.pBits! % 8 === 0, "pir.pBits is whole bytes");
+  },
+  checkTable(t, publicRef, pir, name, publicName) {
+    const l = t.layout;
+    for (const k of ["rows", "cols", "cellsPerRecord"] as const) need(isCount(l[k]) && l[k] > 0, `${name}.layout.${k}`);
+    need(l.rows % pir.ring === 0 && l.cols % pir.ring === 0, `${name}.layout rows and cols are multiples of ${pir.ring}`);
+    need(l.rows * l.cols <= 2 ** 30, `${name}.layout holds at most 2^30 cells`);
+    need(l.rows === t.groups, `${name}.layout.rows = groups`);
+    need(l.cellsPerRecord === Math.ceil((8 * t.recordBytes) / pir.pBits), `${name}.layout.cellsPerRecord = ⌈8 × recordBytes / pBits⌉`);
+    need(t.perGroup === Math.floor(l.cols / l.cellsPerRecord), `${name}.perGroup = ⌊layout.cols / cellsPerRecord⌋`);
+    need(t.size === (l.rows * l.cols * pir.pBits) / 8, `${name}.size matches its shape`);
+    need(HEX32.test(l.seed), `${name}.layout.seed`);
+    need(publicRef.size === 36 + Math.ceil((2 * pir.maskBits * l.cols) / 8), `${publicName}.size = 36 + ⌈2 × maskBits × cols / 8⌉`);
+  },
+};
+
+/** The schemes whose manifests this build can read. */
+const SCHEME_RULES: { readonly simplepir: SchemeRules<SimplePirParams>; readonly "ipir-sp": SchemeRules<IpirSpParams> } = {
+  simplepir: SIMPLEPIR_RULES,
+  "ipir-sp": IPIR_SP_RULES,
+};
+
+/**
+ * Checks a manifest. A scheme this build does not know throws {@link SchemeUnavailable}, whose message names it (a
+ * wallet stops on it, 00058 story 2); anything else wrong throws "invalid manifest: …".
+ */
 export function validateManifest(m: Manifest): void {
   need(typeof m === "object" && m !== null, "not an object");
   need(m.formatVersion === FORMAT_VERSION, `formatVersion ${String(m.formatVersion)}`);
+  need(typeof m.scheme === "string" && m.scheme.length > 0, "scheme");
+  // Each scheme's rules read the parameters as that scheme's (method parameters are bivariant, so the cast holds).
+  const rules = isSchemeName(m.scheme) ? (SCHEME_RULES[m.scheme] as SchemeRules<SchemeParams> | undefined) : undefined;
+  if (rules === undefined) throw new SchemeUnavailable(m.scheme, "this build cannot read its manifest");
   need(typeof m.network === "string" && m.network.length > 0, "network");
   for (const k of ["genesisHash", "blockHash", "root"] as const) need(HEX32.test(m[k]), k);
   for (const k of ["height", "firstFree"] as const) need(isCount(m[k]), k);
   need(isCount(m.pathSplit) && m.pathSplit <= 32, "pathSplit");
   need(isCount(m.queriesPerCall) && m.queriesPerCall >= 1 && m.queriesPerCall <= 0xffff, "queriesPerCall");
   need(typeof m.pir === "object" && m.pir !== null, "pir");
-  for (const k of ["logQ", "n", "cellBits", "plainModulus"] as const) need(isCount(m.pir[k]), `pir.${k}`);
-  need(typeof m.pir.sigma === "number" && m.pir.sigma > 0, "pir.sigma");
+  rules.checkParams(m.pir);
   let slots = m.firstFree;
   if (m.padding !== undefined) {
     need(typeof m.padding === "object" && m.padding !== null && Object.keys(m.padding).length === 1, "padding is {size}");
@@ -146,22 +276,23 @@ export function validateManifest(m: Manifest): void {
   checkTable(a.readTable, "readTable");
   need(a.readTable.records === slots, "readTable.records = slots");
   need(a.readTable.recordBytes === 98, "readTable.recordBytes = 98");
-  checkRef(a.readSetup, "readSetup");
-  need(a.readSetup.size === a.readTable.rows * m.pir.n * 4, "readSetup.size = R × n × 4");
+  checkRef(a.readPublic, "readPublic");
+  rules.checkTable(a.readTable, a.readPublic, m.pir, "readTable", "readPublic");
   if (m.pathSplit === 0) {
-    need(a.pathTable === undefined && a.pathSetup === undefined, "no path table when pathSplit is 0");
+    need(a.pathTable === undefined && a.pathPublic === undefined, "no path table when pathSplit is 0");
   } else {
     checkTable(a.pathTable, "pathTable");
     need(a.pathTable!.records === slots, "pathTable.records = slots");
     need(a.pathTable!.recordBytes === 32 * m.pathSplit, "pathTable.recordBytes = 32 × pathSplit");
-    checkRef(a.pathSetup, "pathSetup");
-    need(a.pathSetup!.size === a.pathTable!.rows * m.pir.n * 4, "pathSetup.size = R × n × 4");
+    checkRef(a.pathPublic, "pathPublic");
+    rules.checkTable(a.pathTable!, a.pathPublic!, m.pir, "pathTable", "pathPublic");
   }
   checkTable(a.nullifierTable, "nullifierTable");
-  need(isCount(a.nullifierTable.bucketBits) && a.nullifierTable.cols === 2 ** a.nullifierTable.bucketBits, "nullifierTable.bucketBits");
-  need(isCount(a.nullifierTable.capacity) && a.nullifierTable.capacity === a.nullifierTable.perColumn, "nullifierTable.capacity");
-  checkRef(a.nullifierSetup, "nullifierSetup");
-  need(a.nullifierSetup.size === a.nullifierTable.rows * m.pir.n * 4, "nullifierSetup.size = R × n × 4");
+  need(a.nullifierTable.recordBytes === 40, "nullifierTable.recordBytes = 40");
+  need(isCount(a.nullifierTable.bucketBits) && a.nullifierTable.groups === 2 ** a.nullifierTable.bucketBits, "nullifierTable.bucketBits");
+  need(isCount(a.nullifierTable.capacity) && a.nullifierTable.capacity === a.nullifierTable.perGroup, "nullifierTable.capacity");
+  checkRef(a.nullifierPublic, "nullifierPublic");
+  rules.checkTable(a.nullifierTable, a.nullifierPublic, m.pir, "nullifierTable", "nullifierPublic");
 }
 
 export function toHex(bytes: Uint8Array): string {

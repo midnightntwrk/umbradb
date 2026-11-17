@@ -1,7 +1,10 @@
 /** Constants shared by the server module and the client (spec §5.7, FR-081). */
 
-/** The version of every wire format and of the manifest. A change to any layout below changes it. */
-export const FORMAT_VERSION = 2;
+/**
+ * The version of every wire format and of the manifest. A change to any layout below changes it. 3: the manifest names
+ * the PIR scheme, and a call body after its header is the scheme's bytes (spec 00058 FR-003, FR-022).
+ */
+export const FORMAT_VERSION = 3;
 
 /** Route prefix of the module's HTTP API. */
 export const ROUTE_PREFIX = "/pss/v1";

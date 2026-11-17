@@ -1,0 +1,91 @@
+use inspiring::key_switching::{ks_call_count, KeySwitchingMatrix};
+use inspiring::{pack, GadgetParams, LweBatch, LweCiphertext, PackPreprocessed, RlweParams};
+use spiral_rs::poly::{PolyMatrix, PolyMatrixNTT, PolyMatrixRaw};
+
+fn params() -> RlweParams {
+    RlweParams::new(
+        8,
+        12289,
+        4,
+        3.2,
+        GadgetParams {
+            bits_per: 3,
+            ell: 5,
+        },
+    )
+    .expect("valid tiny test parameters")
+}
+
+fn zero_ks<'a>(params: &'a RlweParams) -> KeySwitchingMatrix<'a> {
+    KeySwitchingMatrix {
+        mat: PolyMatrixNTT::zero(&params.spiral, 2, params.gadget.ell),
+        params,
+    }
+}
+
+fn crs<'a>(params: &'a RlweParams) -> PolyMatrixNTT<'a> {
+    let mut crs = PolyMatrixRaw::zero(&params.spiral, params.d, 1);
+    for row in 0..params.d {
+        for col in 0..params.d {
+            crs.get_poly_mut(row, 0)[col] = (row * params.d + col + 1) as u64;
+        }
+    }
+    crs.ntt()
+}
+
+fn batch(params: &RlweParams) -> LweBatch {
+    LweBatch {
+        inner: (0..params.d)
+            .map(|idx| LweCiphertext {
+                a: vec![0; params.d],
+                b: idx as u64,
+            })
+            .collect(),
+    }
+}
+
+#[test]
+fn preprocessing_evaluates_linear_cascade_not_cdks_tree_shape() {
+    let params = params();
+    let crs = crs(&params);
+    let kg = zero_ks(&params);
+    let kh = zero_ks(&params);
+
+    ks_call_count::reset();
+    let _pre = PackPreprocessed::build(&params, &crs, &kg, &kh).expect("valid preprocessing");
+
+    assert_eq!(ks_call_count::get(), (params.d - 1) as u64);
+    assert_ne!(
+        ks_call_count::get(),
+        params.d.ilog2() as u64,
+        "CDKS-style logarithmic-level switching accidentally appeared"
+    );
+}
+
+#[test]
+fn pack_uses_precomputed_cascade_without_online_key_switch_products() {
+    let params = params();
+    let crs = crs(&params);
+    let kg = zero_ks(&params);
+    let kh = zero_ks(&params);
+    let pre = PackPreprocessed::build(&params, &crs, &kg, &kh).expect("valid preprocessing");
+
+    ks_call_count::reset();
+    let _ = pack(&batch(&params), &pre).expect("pack succeeds");
+
+    assert_eq!(ks_call_count::get(), 0);
+}
+
+#[test]
+fn preprocessing_api_accepts_exactly_two_base_key_switching_matrices() {
+    let params = params();
+    let crs = crs(&params);
+    let kg = zero_ks(&params);
+    let kh = zero_ks(&params);
+    let pre = PackPreprocessed::build(&params, &crs, &kg, &kh).expect("valid preprocessing");
+
+    assert_eq!(pre.collapse_a_final_ntt.rows, 1);
+    assert_eq!(pre.collapse_a_final_ntt.cols, 1);
+    assert_eq!(pre.collapse_b_offset_ntt.rows, 1);
+    assert_eq!(pre.collapse_b_offset_ntt.cols, 1);
+}

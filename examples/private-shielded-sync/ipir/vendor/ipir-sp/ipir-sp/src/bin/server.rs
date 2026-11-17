@@ -1,0 +1,235 @@
+#[cfg(feature = "http_server")]
+use actix_web::{get, post, web, App, HttpServer};
+#[cfg(feature = "http_server")]
+use clap::Parser;
+#[cfg(feature = "http_server")]
+use inspiring::{QueryPackPreprocessed, RlweParams, TopKeyImages};
+#[cfg(feature = "http_server")]
+use ipir_sp::client::IPIRClient;
+#[cfg(feature = "http_server")]
+use ipir_sp::serialize::{
+    deserialize_packing_keys, serialized_fresh_query_len, serialized_packing_keys_len,
+};
+#[cfg(feature = "http_server")]
+use ipir_sp::server::{
+    build_pack_preprocessed_blocks, published_c1_rows, verify_query_masks_distinct_from_key_masks,
+    IPIRServer,
+};
+#[cfg(feature = "http_server")]
+use ipir_sp::{ProductionSimplePirParams, SimplePirProfile, YpirSchemeParams};
+
+/// Headroom above the exact query length in the request-body limit. Queries
+/// have one fixed size, so this only absorbs framing differences; anything
+/// larger is refused before it is buffered.
+#[cfg(feature = "http_server")]
+const QUERY_BODY_SLACK_BYTES: usize = 4096;
+
+/// Largest request body the server will buffer.
+#[cfg(feature = "http_server")]
+fn query_body_limit(rlwe: &RlweParams, ypir: &YpirSchemeParams) -> usize {
+    serialized_fresh_query_len(rlwe, ypir) + QUERY_BODY_SLACK_BYTES
+}
+
+#[cfg(feature = "http_server")]
+#[derive(Parser, Debug)]
+#[command(version, about = "Run an IPIR-SP HTTP server")]
+struct Args {
+    /// Number of items in the database.
+    num_items: usize,
+    /// Size of each item in bits.
+    item_size_bits: Option<usize>,
+    /// Port.
+    #[clap(long, short, default_value = "8080")]
+    port: u16,
+    /// Deterministic setup seed shared with the demo client.
+    #[clap(long, default_value = "7")]
+    setup_seed: u64,
+    /// First-dimension evaluator; packing always uses the CPU.
+    #[arg(long, default_value = "cpu", value_parser = ["cpu", "cuda"])]
+    matvec_backend: String,
+    /// CUDA device ordinal (defaults to zero when CUDA is selected).
+    #[arg(long)]
+    cuda_device: Option<usize>,
+}
+
+#[cfg(feature = "http_server")]
+struct ServerState {
+    rlwe: &'static RlweParams,
+    ypir: YpirSchemeParams,
+    server: IPIRServer<u16>,
+    /// Snapshot-constant `c1` rows, served once from `/public-params`.
+    published_c1: Vec<u8>,
+    preprocessed: Vec<QueryPackPreprocessed<'static>>,
+    top_keys: TopKeyImages<'static>,
+}
+
+#[cfg(feature = "http_server")]
+#[post("/query")]
+async fn query(
+    body: web::Bytes,
+    data: web::Data<ServerState>,
+) -> Result<Vec<u8>, actix_web::error::Error> {
+    let packing_keys_len = serialized_packing_keys_len(data.rlwe);
+    let query_len = serialized_fresh_query_len(data.rlwe, &data.ypir);
+    if body.len() != query_len {
+        return Err(actix_web::error::ErrorBadRequest(format!(
+            "query must be {query_len} bytes, got {}",
+            body.len()
+        )));
+    }
+    let packing_keys = deserialize_packing_keys(data.rlwe, &body[..packing_keys_len])
+        .map_err(actix_web::error::ErrorBadRequest)?;
+    let online_query = &body[packing_keys_len..];
+    data.server
+        .perform_full_online_computation_simplepir_measured(
+            data.rlwe,
+            online_query,
+            &packing_keys,
+            &data.top_keys,
+            &data.preprocessed,
+        )
+        .map(|(response, _)| response)
+        .map_err(|e| match e {
+            inspiring::InspiringError::Internal(_) => actix_web::error::ErrorInternalServerError(e),
+            _ => actix_web::error::ErrorBadRequest(e),
+        })
+}
+
+#[cfg(feature = "http_server")]
+#[get("/")]
+async fn index(data: web::Data<ServerState>) -> String {
+    format!("Hello {}!", data.rlwe.d)
+}
+
+#[cfg(feature = "http_server")]
+#[get("/public-params")]
+async fn public_params(data: web::Data<ServerState>) -> Vec<u8> {
+    data.published_c1.clone()
+}
+
+#[cfg(feature = "http_server")]
+#[get("/info")]
+async fn info(data: web::Data<ServerState>) -> String {
+    format!(
+        "rows={} cols={}",
+        data.server.db_rows(),
+        data.server.db_cols()
+    )
+}
+
+#[cfg(feature = "http_server")]
+fn seed_from_u64(value: u64) -> [u8; 32] {
+    let mut seed = [0u8; 32];
+    seed[..8].copy_from_slice(&value.to_le_bytes());
+    seed
+}
+
+#[cfg(feature = "http_server")]
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    let args = Args::parse();
+    if args.cuda_device.is_some() && args.matvec_backend != "cuda" {
+        return Err(std::io::Error::other(
+            "--cuda-device requires --matvec-backend cuda",
+        ));
+    }
+    let backend = if args.matvec_backend == "cuda" {
+        ipir_sp::server::MatvecBackend::Cuda {
+            device: args.cuda_device.unwrap_or(0),
+        }
+    } else {
+        ipir_sp::server::MatvecBackend::Cpu
+    };
+    let item_size_bits = args.item_size_bits.unwrap_or(16_384 * 8);
+    let profile = ProductionSimplePirParams::new(
+        args.num_items as u64,
+        item_size_bits as u64,
+        SimplePirProfile::P14,
+    )
+    .expect("valid params");
+    let ypir = profile.ypir().clone();
+    let client = Box::leak(Box::new(IPIRClient::new(&profile)));
+    let setup =
+        client.generate_public_query_setup_simplepir_from_seed(seed_from_u64(args.setup_seed));
+    verify_query_masks_distinct_from_key_masks(client.rlwe_params(), setup.polys())
+        .map_err(std::io::Error::other)?;
+
+    let pt_modulus = ypir.p;
+    let db = (0..ypir.db_rows * ypir.db_cols).map(|idx| (idx as u64 % pt_modulus) as u16);
+    let server =
+        IPIRServer::<u16>::try_from_profile_with_backend(&profile, db, false, true, backend)
+            .map_err(std::io::Error::other)?;
+    let offline =
+        server.perform_offline_precomputation_simplepir(client.rlwe_params(), setup.polys());
+    let preprocessed = build_pack_preprocessed_blocks(client.rlwe_params(), &offline.crs_blocks)
+        .expect("preprocessing builds");
+    let top_keys = TopKeyImages::build(client.rlwe_params());
+
+    let published_c1 = published_c1_rows(&preprocessed, client.rlwe_params().q);
+    let body_limit = query_body_limit(client.rlwe_params(), &ypir);
+    let app_data = web::Data::new(ServerState {
+        rlwe: client.rlwe_params(),
+        ypir,
+        server,
+        published_c1,
+        preprocessed,
+        top_keys,
+    });
+
+    println!("Listening on http://127.0.0.1:{}", args.port);
+    // No CORS layer: clients are native, and a browser on another origin has
+    // no reason to drive queries here.
+    HttpServer::new(move || {
+        App::new()
+            .app_data(app_data.clone())
+            .app_data(web::PayloadConfig::new(body_limit))
+            .service(index)
+            .service(query)
+            .service(public_params)
+            .service(info)
+    })
+    .workers(1)
+    .bind(("127.0.0.1", args.port))?
+    .run()
+    .await
+}
+
+#[cfg(not(feature = "http_server"))]
+fn main() {
+    panic!("This binary requires the 'http_server' feature.");
+}
+
+#[cfg(all(test, feature = "http_server"))]
+mod tests {
+    use super::*;
+    #[test]
+    fn backend_arguments_have_explicit_defaults_and_validate_values() {
+        let cpu = Args::try_parse_from(["server", "32768"]).unwrap();
+        assert_eq!(cpu.matvec_backend, "cpu");
+        assert_eq!(cpu.cuda_device, None);
+        let gpu = Args::try_parse_from([
+            "server",
+            "32768",
+            "--matvec-backend",
+            "cuda",
+            "--cuda-device",
+            "2",
+        ])
+        .unwrap();
+        assert_eq!(gpu.cuda_device, Some(2));
+        assert!(Args::try_parse_from(["server", "32768", "--matvec-backend", "invalid"]).is_err());
+    }
+
+    #[test]
+    fn query_body_limit_is_exact_query_length_plus_slack() {
+        let profile =
+            ProductionSimplePirParams::new(32_768, 16_384 * 8, SimplePirProfile::P14).unwrap();
+        let limit = query_body_limit(profile.rlwe(), profile.ypir());
+        assert_eq!(
+            limit,
+            serialized_fresh_query_len(profile.rlwe(), profile.ypir()) + QUERY_BODY_SLACK_BYTES
+        );
+        // The old limit was 4 GiB; the production query is a few MiB.
+        assert!(limit < 64 << 20, "limit {limit} is not query-sized");
+    }
+}

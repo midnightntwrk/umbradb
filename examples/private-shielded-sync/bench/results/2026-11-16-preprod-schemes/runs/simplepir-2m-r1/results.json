@@ -1,0 +1,962 @@
+{
+  "kind": "private-shielded-sync bench",
+  "format": 2,
+  "startedAt": "2026-11-16T05:25:48.738Z",
+  "finishedAt": "2026-11-16T05:31:24.934Z",
+  "loadAverage": {
+    "start": [
+      15.88,
+      20.42,
+      19.26
+    ],
+    "end": [
+      23.14,
+      19.87,
+      19.05
+    ]
+  },
+  "machine": {
+    "cpu": "Apple M4 Max",
+    "cores": 16,
+    "memoryBytes": 51539607552,
+    "platform": "darwin 24.6.0",
+    "arch": "arm64",
+    "node": "v24.9.0"
+  },
+  "software": {
+    "umbradb": "0.10.0",
+    "commit": "e1f7637250b6",
+    "kernelDigest": "b34f9b0003e1b1f96b8c46cdc6acaf5e98ff9a07ba1106bad2babdf79fbcfe36",
+    "ledger": "@midnightntwrk/ledger-v9 1.0.1",
+    "serverModules": [
+      {
+        "id": "core-chain",
+        "version": "0.10.0"
+      },
+      {
+        "id": "core-block-fetch",
+        "version": "0.10.0"
+      },
+      {
+        "id": "core-block-commit",
+        "version": "0.10.0"
+      },
+      {
+        "id": "core-digest",
+        "version": "0.10.0"
+      },
+      {
+        "id": "core-health",
+        "version": "0.10.0"
+      },
+      {
+        "id": "core-status",
+        "version": "0.10.0"
+      },
+      {
+        "id": "core-config",
+        "version": "0.10.0"
+      },
+      {
+        "id": "core-chain-events",
+        "version": "0.10.0"
+      },
+      {
+        "id": "core-block-parsed",
+        "version": "0.10.0"
+      },
+      {
+        "id": "core-tx-results",
+        "version": "0.10.0"
+      },
+      {
+        "id": "core-ledger-state",
+        "version": "0.10.0"
+      },
+      {
+        "id": "core-contract-logs-full",
+        "version": "0.10.0"
+      },
+      {
+        "id": "core-contract-states",
+        "version": "0.10.0"
+      },
+      {
+        "id": "private-shielded-sync",
+        "version": "0.1.0"
+      }
+    ],
+    "serverMachine": {
+      "node": "v24.9.0",
+      "platform": "darwin",
+      "arch": "arm64",
+      "cpus": 16
+    }
+  },
+  "network": "preprod",
+  "server": {
+    "origin": "http://127.0.0.1:10580",
+    "memory": "process 53587, `ps -o rss=` every 200 ms",
+    "log": "the stack's run.log; 20 of 20 requests paired with a server line",
+    "threads": 6,
+    "heldBytes": {
+      "read": 352025696,
+      "path": 1824000000,
+      "nullifier": 180486144
+    }
+  },
+  "build": {
+    "height": 3439524,
+    "scheme": "simplepir",
+    "padding": 2000000,
+    "ms": 63003,
+    "rssBeforeBytes": 1876869120,
+    "rssPeakBytes": 3447668736,
+    "rssAfterBytes": 965132288
+  },
+  "snapshot": {
+    "id": "25f9609d23e7146bb8c04b639a7f584ff45a4c11838f6c017d9aa2427397d43c",
+    "height": 3439524,
+    "blockHash": "44cfe1a013b99757c852adf8322a1a8b29a74e981793f57f938e6f61a134c9de",
+    "outputs": 69329,
+    "nullifiers": 2000000,
+    "pathSplit": 16,
+    "queriesPerCall": 32,
+    "blocks": 2,
+    "artifacts": {
+      "blockRoots": 64,
+      "nullifierPublic": 45121536,
+      "nullifierTable": 180486176,
+      "pathPublic": 37355520,
+      "pathTable": 1824000032,
+      "readPublic": 54427648,
+      "readTable": 352025728,
+      "scan": 72000000
+    },
+    "onDisk": {
+      "blockRoots": 64,
+      "nullifierPublic": 45121536,
+      "nullifierTable": 180486176,
+      "pathPublic": 37355520,
+      "pathTable": 1824000032,
+      "readPublic": 54427648,
+      "readTable": 352025728,
+      "scan": 72000000
+    },
+    "scheme": "simplepir",
+    "pir": {
+      "cellBits": 9,
+      "logQ": 32,
+      "n": 1024,
+      "plainModulus": 512,
+      "sigma": 6.4
+    },
+    "padding": 2000000,
+    "tables": {
+      "read": {
+        "records": 2000000,
+        "recordBytes": 98,
+        "groups": 13246,
+        "perGroup": 151,
+        "rows": 13288,
+        "cols": 13246,
+        "tableBytes": 352025728,
+        "publicBytes": 54427648,
+        "requestBytes": 52984,
+        "responseBytes": 53152
+      },
+      "path": {
+        "records": 2000000,
+        "recordBytes": 512,
+        "groups": 100000,
+        "perGroup": 20,
+        "rows": 9120,
+        "cols": 100000,
+        "tableBytes": 1824000032,
+        "publicBytes": 37355520,
+        "requestBytes": 400000,
+        "responseBytes": 36480
+      },
+      "nullifier": {
+        "records": 2000000,
+        "recordBytes": 40,
+        "groups": 8192,
+        "perGroup": 306,
+        "rows": 11016,
+        "cols": 8192,
+        "tableBytes": 180486176,
+        "publicBytes": 45121536,
+        "requestBytes": 32768,
+        "responseBytes": 44064
+      }
+    },
+    "builtByBench": true
+  },
+  "chainSync": {
+    "database": null,
+    "cursor": null,
+    "rate": null,
+    "runs": null,
+    "modules": [
+      "core-chain",
+      "core-block-fetch",
+      "core-block-commit",
+      "core-digest",
+      "core-health",
+      "core-status",
+      "core-config",
+      "core-chain-events",
+      "core-block-parsed",
+      "core-tx-results",
+      "core-ledger-state",
+      "core-contract-logs-full",
+      "core-contract-states",
+      "private-shielded-sync"
+    ]
+  },
+  "serverBuild": {
+    "source": "the server's build-stats.json (admin build at 3439524, 6 threads)",
+    "totalMs": 62985.914000000106,
+    "threads": 6,
+    "steps": {
+      "scan": {
+        "ms": 243.75204199994914,
+        "bytes": 72000000,
+        "peakRssBytes": 2189475840
+      },
+      "tree": {
+        "ms": 4601.679375000065,
+        "bytes": 64,
+        "hashes": 69353,
+        "hashesPerSecond": 15071.281662079156,
+        "peakRssBytes": 2231156736
+      },
+      "readTable": {
+        "ms": 585.3597500000615,
+        "bytes": 352025728,
+        "peakRssBytes": 2668118016
+      },
+      "readSetup": {
+        "ms": 7523.194916999899,
+        "bytes": 54427648,
+        "peakRssBytes": 2715353088
+      },
+      "pathTable": {
+        "ms": 3871.4276669998653,
+        "bytes": 1824000032,
+        "peakRssBytes": 2823798784
+      },
+      "pathSetup": {
+        "ms": 40255.60504100006,
+        "bytes": 37355520,
+        "peakRssBytes": 3453583360
+      },
+      "nullifierTable": {
+        "ms": 1334.7135409999173,
+        "bytes": 180486176,
+        "peakRssBytes": 1271300096
+      },
+      "nullifierSetup": {
+        "ms": 4043.420832999982,
+        "bytes": 45121536,
+        "peakRssBytes": 1342619648
+      },
+      "manifest": {
+        "ms": 1.3136660000309348,
+        "bytes": 1961,
+        "peakRssBytes": 950091776
+      }
+    },
+    "indexLoad": {
+      "rows": 127141,
+      "ms": 817.6116250000001,
+      "rowsPerSecond": 155502.92597662122,
+      "peakRssBytes": 795164672,
+      "height": 3440511
+    },
+    "indexSlice": {
+      "rows": 127141,
+      "ms": 0.9961669999174774,
+      "rowsPerSecond": 127630206.59240106,
+      "peakRssBytes": 1846280192,
+      "height": 3439524
+    }
+  },
+  "readEvents": null,
+  "wallets": [
+    {
+      "label": "A",
+      "source": "mnemonic",
+      "coins": {
+        "found": 10,
+        "fromSnapshot": 10,
+        "fromTail": 0,
+        "spent": 3,
+        "unspent": 7,
+        "rejected": 0,
+        "tokenTypes": 3
+      },
+      "scanMatches": 10,
+      "steps": {
+        "manifest": {
+          "ms": 18,
+          "clientPeakRssBytes": 638402560,
+          "serverPeakRssBytes": 990658560
+        },
+        "downloads": {
+          "ms": 380,
+          "clientPeakRssBytes": 773406720,
+          "serverPeakRssBytes": 990658560
+        },
+        "scan": {
+          "ms": 129746,
+          "clientPeakRssBytes": 851247104,
+          "serverPeakRssBytes": 1132118016
+        },
+        "read": {
+          "ms": 385,
+          "clientPeakRssBytes": 851247104,
+          "serverPeakRssBytes": 644382720
+        },
+        "decrypt": {
+          "ms": 39,
+          "clientPeakRssBytes": 535216128,
+          "serverPeakRssBytes": 644382720
+        },
+        "nullifier": {
+          "ms": 250,
+          "clientPeakRssBytes": 658046976,
+          "serverPeakRssBytes": 831766528
+        },
+        "tail": {
+          "ms": 5,
+          "clientPeakRssBytes": 658063360,
+          "serverPeakRssBytes": 831766528
+        }
+      },
+      "attempts": 1,
+      "totalMs": 130821.38954199999,
+      "computingMs": 130011.36499999998,
+      "bytesUp": 2744144,
+      "bytesDown": 174783741,
+      "stateBytes": 5652,
+      "peakRssBytes": 851247104,
+      "manifest": {
+        "ms": 17.535166999994544,
+        "bytes": 1961
+      },
+      "downloads": {
+        "scan": {
+          "size": 72000000,
+          "bytes": 72000000,
+          "ms": 196.65566599999147,
+          "cached": false,
+          "serverMs": 0.087
+        },
+        "blockRoots": {
+          "size": 64,
+          "bytes": 64,
+          "ms": 10.031917000000249,
+          "cached": false,
+          "serverMs": 0.075
+        },
+        "readPublic": {
+          "size": 54427648,
+          "bytes": 54427648,
+          "ms": 89.8159580000065,
+          "cached": false,
+          "serverMs": 0.038
+        },
+        "nullifierPublic": {
+          "size": 45121536,
+          "bytes": 45121536,
+          "ms": 61.390208999990136,
+          "cached": false,
+          "serverMs": 0.054
+        }
+      },
+      "cacheBytes": 171549248,
+      "scan": {
+        "ms": 129742.40262500002,
+        "entries": 2000000,
+        "threads": 8,
+        "microsPerOutput": 64.8712013125
+      },
+      "read": {
+        "calls": 1,
+        "bytesUp": 1695528,
+        "bytesDown": 1700904,
+        "roundTripMs": 260.4344170000113,
+        "clientBuildMs": 79.95658299999195,
+        "clientDecodeMs": 20.249207999993814,
+        "serverMs": 250.952,
+        "clientPeakRssBytes": 851247104,
+        "serverPeakRssBytes": 644382720
+      },
+      "decrypt": {
+        "ms": 38.53991599997971,
+        "accepted": 10,
+        "rejected": 0
+      },
+      "nullifier": {
+        "calls": 1,
+        "bytesUp": 1048616,
+        "bytesDown": 1410088,
+        "roundTripMs": 171.2402080000029,
+        "clientBuildMs": 35.864958000020124,
+        "clientDecodeMs": 24.0556660000002,
+        "serverMs": 166.662,
+        "clientPeakRssBytes": 658046976,
+        "serverPeakRssBytes": 831766528,
+        "lookups": 10
+      },
+      "tail": {
+        "bytes": 121540,
+        "ms": 4.110917000012705,
+        "clientMs": 1.3133749999979045,
+        "outputs": 0,
+        "nullifiers": 0,
+        "matches": 0,
+        "serverMs": 1.572
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "route": "/pss/v1/manifest",
+          "status": 200,
+          "bodyBytes": 0,
+          "answerBytes": 1961,
+          "clientMs": 16.894750000006752,
+          "server": {
+            "route": "GET /pss/v1/manifest",
+            "status": 200,
+            "bodyBytes": 0,
+            "answerBytes": 1961,
+            "range": null,
+            "ms": 0.01,
+            "at": "2026-11-16T05:26:55.785Z"
+          }
+        },
+        {
+          "method": "GET",
+          "route": "/pss/v1/blob/<digest>",
+          "status": 200,
+          "bodyBytes": 0,
+          "answerBytes": 72000000,
+          "clientMs": 196.4916249999951,
+          "server": {
+            "route": "GET /pss/v1/blob/:digest",
+            "status": 200,
+            "bodyBytes": 0,
+            "answerBytes": 72000000,
+            "range": null,
+            "ms": 0.087,
+            "at": "2026-11-16T05:26:55.813Z"
+          }
+        },
+        {
+          "method": "GET",
+          "route": "/pss/v1/blob/<digest>",
+          "status": 200,
+          "bodyBytes": 0,
+          "answerBytes": 64,
+          "clientMs": 9.890999999988708,
+          "server": {
+            "route": "GET /pss/v1/blob/:digest",
+            "status": 200,
+            "bodyBytes": 0,
+            "answerBytes": 64,
+            "range": null,
+            "ms": 0.075,
+            "at": "2026-11-16T05:26:56.003Z"
+          }
+        },
+        {
+          "method": "GET",
+          "route": "/pss/v1/blob/<digest>",
+          "status": 200,
+          "bodyBytes": 0,
+          "answerBytes": 54427648,
+          "clientMs": 89.7715840000019,
+          "server": {
+            "route": "GET /pss/v1/blob/:digest",
+            "status": 200,
+            "bodyBytes": 0,
+            "answerBytes": 54427648,
+            "range": null,
+            "ms": 0.038,
+            "at": "2026-11-16T05:26:56.007Z"
+          }
+        },
+        {
+          "method": "GET",
+          "route": "/pss/v1/blob/<digest>",
+          "status": 200,
+          "bodyBytes": 0,
+          "answerBytes": 45121536,
+          "clientMs": 61.263833000004524,
+          "server": {
+            "route": "GET /pss/v1/blob/:digest",
+            "status": 200,
+            "bodyBytes": 0,
+            "answerBytes": 45121536,
+            "range": null,
+            "ms": 0.054,
+            "at": "2026-11-16T05:26:56.103Z"
+          }
+        },
+        {
+          "method": "POST",
+          "route": "/pss/v1/query/read",
+          "status": 200,
+          "bodyBytes": 1695528,
+          "answerBytes": 1700904,
+          "clientMs": 260.4016249999986,
+          "server": {
+            "route": "POST /pss/v1/query/read",
+            "status": 200,
+            "bodyBytes": 1695528,
+            "answerBytes": 1700904,
+            "range": null,
+            "ms": 250.952,
+            "at": "2026-11-16T05:29:06.287Z"
+          }
+        },
+        {
+          "method": "POST",
+          "route": "/pss/v1/query/nullifier",
+          "status": 200,
+          "bodyBytes": 1048616,
+          "answerBytes": 1410088,
+          "clientMs": 171.228208000015,
+          "server": {
+            "route": "POST /pss/v1/query/nullifier",
+            "status": 200,
+            "bodyBytes": 1048616,
+            "answerBytes": 1410088,
+            "range": null,
+            "ms": 166.662,
+            "at": "2026-11-16T05:29:06.572Z"
+          }
+        },
+        {
+          "method": "GET",
+          "route": "/pss/v1/tail",
+          "status": 200,
+          "bodyBytes": 0,
+          "answerBytes": 121540,
+          "clientMs": 4.081917000003159,
+          "server": {
+            "route": "GET /pss/v1/tail",
+            "status": 200,
+            "bodyBytes": 0,
+            "answerBytes": 121540,
+            "range": null,
+            "ms": 1.572,
+            "at": "2026-11-16T05:29:06.602Z"
+          }
+        }
+      ],
+      "path": {
+        "calls": 1,
+        "bytesUp": 12800040,
+        "bytesDown": 1167400,
+        "roundTripMs": 1376.2154169999994,
+        "clientBuildMs": 479.5179580000113,
+        "clientDecodeMs": 11.899166999995941,
+        "serverMs": 1358.872,
+        "clientPeakRssBytes": 1035042816,
+        "serverPeakRssBytes": 2739896320,
+        "paths": 4,
+        "public": {
+          "size": 37355520,
+          "bytes": 37355520,
+          "ms": 115.42129200001364,
+          "cached": false,
+          "serverMs": 0.066
+        },
+        "ms": 2021.3218749999942,
+        "requests": [
+          {
+            "method": "GET",
+            "route": "/pss/v1/blob/<digest>",
+            "status": 200,
+            "bodyBytes": 0,
+            "answerBytes": 37355520,
+            "clientMs": 115.36966600001324,
+            "server": {
+              "route": "GET /pss/v1/blob/:digest",
+              "status": 200,
+              "bodyBytes": 0,
+              "answerBytes": 37355520,
+              "range": null,
+              "ms": 0.066,
+              "at": "2026-11-16T05:29:06.607Z"
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/pss/v1/query/path",
+            "status": 200,
+            "bodyBytes": 12800040,
+            "answerBytes": 1167400,
+            "clientMs": 1376.1952089999977,
+            "server": {
+              "route": "POST /pss/v1/query/path",
+              "status": 200,
+              "bodyBytes": 12800040,
+              "answerBytes": 1167400,
+              "range": null,
+              "ms": 1358.872,
+              "at": "2026-11-16T05:29:08.608Z"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "label": "B",
+      "source": "mnemonic",
+      "coins": {
+        "found": 1,
+        "fromSnapshot": 1,
+        "fromTail": 0,
+        "spent": 0,
+        "unspent": 1,
+        "rejected": 0,
+        "tokenTypes": 1
+      },
+      "scanMatches": 1,
+      "steps": {
+        "manifest": {
+          "ms": 11,
+          "clientPeakRssBytes": 873840640,
+          "serverPeakRssBytes": 2739896320
+        },
+        "downloads": {
+          "ms": 361,
+          "clientPeakRssBytes": 1219624960,
+          "serverPeakRssBytes": 2759098368
+        },
+        "scan": {
+          "ms": 132896,
+          "clientPeakRssBytes": 1288093696,
+          "serverPeakRssBytes": 2768715776
+        },
+        "read": {
+          "ms": 493,
+          "clientPeakRssBytes": 1288093696,
+          "serverPeakRssBytes": 717996032
+        },
+        "decrypt": {
+          "ms": 7,
+          "clientPeakRssBytes": 542556160,
+          "serverPeakRssBytes": 717996032
+        },
+        "nullifier": {
+          "ms": 297,
+          "clientPeakRssBytes": 670466048,
+          "serverPeakRssBytes": 858161152
+        },
+        "tail": {
+          "ms": 5,
+          "clientPeakRssBytes": 670973952,
+          "serverPeakRssBytes": 858161152
+        }
+      },
+      "attempts": 1,
+      "totalMs": 134068.21987499998,
+      "computingMs": 133200.31620899987,
+      "bytesUp": 2744144,
+      "bytesDown": 174783741,
+      "stateBytes": 1014,
+      "peakRssBytes": 1288093696,
+      "manifest": {
+        "ms": 10.907666999992216,
+        "bytes": 1961
+      },
+      "downloads": {
+        "scan": {
+          "size": 72000000,
+          "bytes": 72000000,
+          "ms": 194.1157499999972,
+          "cached": false,
+          "serverMs": 0.096
+        },
+        "blockRoots": {
+          "size": 64,
+          "bytes": 64,
+          "ms": 7.899708000011742,
+          "cached": false,
+          "serverMs": 0.054
+        },
+        "readPublic": {
+          "size": 54427648,
+          "bytes": 54427648,
+          "ms": 72.1691250000149,
+          "cached": false,
+          "serverMs": 0.043
+        },
+        "nullifierPublic": {
+          "size": 45121536,
+          "bytes": 45121536,
+          "ms": 72.76304099999834,
+          "cached": false,
+          "serverMs": 0.036
+        }
+      },
+      "cacheBytes": 171549248,
+      "scan": {
+        "ms": 132892.469292,
+        "entries": 2000000,
+        "threads": 8,
+        "microsPerOutput": 66.446234646
+      },
+      "read": {
+        "calls": 1,
+        "bytesUp": 1695528,
+        "bytesDown": 1700904,
+        "roundTripMs": 316.9611670000013,
+        "clientBuildMs": 92.16091700003017,
+        "clientDecodeMs": 56.37641699996311,
+        "serverMs": 306.17,
+        "clientPeakRssBytes": 1288093696,
+        "serverPeakRssBytes": 717996032
+      },
+      "decrypt": {
+        "ms": 6.885125000029802,
+        "accepted": 1,
+        "rejected": 0
+      },
+      "nullifier": {
+        "calls": 1,
+        "bytesUp": 1048616,
+        "bytesDown": 1410088,
+        "roundTripMs": 189.73245900002075,
+        "clientBuildMs": 61.82170800003223,
+        "clientDecodeMs": 17.71333300002152,
+        "serverMs": 182.306,
+        "clientPeakRssBytes": 670466048,
+        "serverPeakRssBytes": 858161152,
+        "lookups": 1
+      },
+      "tail": {
+        "bytes": 121540,
+        "ms": 4.199457999959122,
+        "clientMs": 1.2331669999985024,
+        "outputs": 0,
+        "nullifiers": 0,
+        "matches": 0,
+        "serverMs": 1.612
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "route": "/pss/v1/manifest",
+          "status": 200,
+          "bodyBytes": 0,
+          "answerBytes": 1961,
+          "clientMs": 10.463582999975188,
+          "server": {
+            "route": "GET /pss/v1/manifest",
+            "status": 200,
+            "bodyBytes": 0,
+            "answerBytes": 1961,
+            "range": null,
+            "ms": 0.015,
+            "at": "2026-11-16T05:29:08.669Z"
+          }
+        },
+        {
+          "method": "GET",
+          "route": "/pss/v1/blob/<digest>",
+          "status": 200,
+          "bodyBytes": 0,
+          "answerBytes": 72000000,
+          "clientMs": 194.02108299999963,
+          "server": {
+            "route": "GET /pss/v1/blob/:digest",
+            "status": 200,
+            "bodyBytes": 0,
+            "answerBytes": 72000000,
+            "range": null,
+            "ms": 0.096,
+            "at": "2026-11-16T05:29:08.678Z"
+          }
+        },
+        {
+          "method": "GET",
+          "route": "/pss/v1/blob/<digest>",
+          "status": 200,
+          "bodyBytes": 0,
+          "answerBytes": 64,
+          "clientMs": 7.799542000022484,
+          "server": {
+            "route": "GET /pss/v1/blob/:digest",
+            "status": 200,
+            "bodyBytes": 0,
+            "answerBytes": 64,
+            "range": null,
+            "ms": 0.054,
+            "at": "2026-11-16T05:29:08.872Z"
+          }
+        },
+        {
+          "method": "GET",
+          "route": "/pss/v1/blob/<digest>",
+          "status": 200,
+          "bodyBytes": 0,
+          "answerBytes": 54427648,
+          "clientMs": 72.11395800000173,
+          "server": {
+            "route": "GET /pss/v1/blob/:digest",
+            "status": 200,
+            "bodyBytes": 0,
+            "answerBytes": 54427648,
+            "range": null,
+            "ms": 0.043,
+            "at": "2026-11-16T05:29:08.878Z"
+          }
+        },
+        {
+          "method": "GET",
+          "route": "/pss/v1/blob/<digest>",
+          "status": 200,
+          "bodyBytes": 0,
+          "answerBytes": 45121536,
+          "clientMs": 72.66066600001068,
+          "server": {
+            "route": "GET /pss/v1/blob/:digest",
+            "status": 200,
+            "bodyBytes": 0,
+            "answerBytes": 45121536,
+            "range": null,
+            "ms": 0.036,
+            "at": "2026-11-16T05:29:08.950Z"
+          }
+        },
+        {
+          "method": "POST",
+          "route": "/pss/v1/query/read",
+          "status": 200,
+          "bodyBytes": 1695528,
+          "answerBytes": 1700904,
+          "clientMs": 316.9366250000312,
+          "server": {
+            "route": "POST /pss/v1/query/read",
+            "status": 200,
+            "bodyBytes": 1695528,
+            "answerBytes": 1700904,
+            "range": null,
+            "ms": 306.17,
+            "at": "2026-11-16T05:31:22.363Z"
+          }
+        },
+        {
+          "method": "POST",
+          "route": "/pss/v1/query/nullifier",
+          "status": 200,
+          "bodyBytes": 1048616,
+          "answerBytes": 1410088,
+          "clientMs": 189.7195420000353,
+          "server": {
+            "route": "POST /pss/v1/query/nullifier",
+            "status": 200,
+            "bodyBytes": 1048616,
+            "answerBytes": 1410088,
+            "range": null,
+            "ms": 182.306,
+            "at": "2026-11-16T05:31:22.708Z"
+          }
+        },
+        {
+          "method": "GET",
+          "route": "/pss/v1/tail",
+          "status": 200,
+          "bodyBytes": 0,
+          "answerBytes": 121540,
+          "clientMs": 4.188667000038549,
+          "server": {
+            "route": "GET /pss/v1/tail",
+            "status": 200,
+            "bodyBytes": 0,
+            "answerBytes": 121540,
+            "range": null,
+            "ms": 1.612,
+            "at": "2026-11-16T05:31:22.731Z"
+          }
+        }
+      ],
+      "path": {
+        "calls": 1,
+        "bytesUp": 12800040,
+        "bytesDown": 1167400,
+        "roundTripMs": 1472.6804169999668,
+        "clientBuildMs": 448.9896249999874,
+        "clientDecodeMs": 14.67516699997941,
+        "serverMs": 1443.041,
+        "clientPeakRssBytes": 1128497152,
+        "serverPeakRssBytes": 2723315712,
+        "paths": 0,
+        "public": {
+          "size": 37355520,
+          "bytes": 37355520,
+          "ms": 64.98766699997941,
+          "cached": false,
+          "serverMs": 0.047
+        },
+        "ms": 2013.3606659999932,
+        "requests": [
+          {
+            "method": "GET",
+            "route": "/pss/v1/blob/<digest>",
+            "status": 200,
+            "bodyBytes": 0,
+            "answerBytes": 37355520,
+            "clientMs": 64.79233299999032,
+            "server": {
+              "route": "GET /pss/v1/blob/:digest",
+              "status": 200,
+              "bodyBytes": 0,
+              "answerBytes": 37355520,
+              "range": null,
+              "ms": 0.047,
+              "at": "2026-11-16T05:31:22.735Z"
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/pss/v1/query/path",
+            "status": 200,
+            "bodyBytes": 12800040,
+            "answerBytes": 1167400,
+            "clientMs": 1472.653833999997,
+            "server": {
+              "route": "POST /pss/v1/query/path",
+              "status": 200,
+              "bodyBytes": 12800040,
+              "answerBytes": 1167400,
+              "range": null,
+              "ms": 1443.041,
+              "at": "2026-11-16T05:31:24.730Z"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "scanSweep": [],
+  "pathSplits": [],
+  "naive": {
+    "outputs": 2000000,
+    "nullifiers": 2000000,
+    "outputBytes": 512000000,
+    "nullifierBytes": 64000000,
+    "totalBytes": 576000000
+  },
+  "requestShapesIdentical": true,
+  "transfer": null,
+  "notes": [
+    "No database was given: the chain sync's size, the event read and the pathSplit builds (FR-153) were not measured."
+  ]
+}

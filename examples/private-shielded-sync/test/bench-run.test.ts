@@ -8,6 +8,9 @@
  * `run/sync.mjs record` takes them from the admin route. The transfer row reads a record in the format `send` writes
  * (`client/main.ts`), with the timings of the transfer spike's run on Preprod: the benchmark reads the record, it does
  * not transfer.
+ *
+ * Both PIR schemes (spec 00058 FR-050): the snapshot built at the start is SimplePIR's; the benchmark then asks the
+ * server for a SimplePIR and an IPIR+SP snapshot at one height and measures both, and `compare` puts them side by side.
  */
 
 import { execFile } from "node:child_process";
@@ -23,8 +26,11 @@ import { PROCESS_BACKENDS, type ProcessDatabase } from "../../../test/runner/pro
 import { keysFromZswapSeed } from "../client/keys.ts";
 import type { Ledger } from "../client/ledger.ts";
 import { compileKernel, Kernel } from "../kernel/index.ts";
+import { compileIpirWasm } from "../ipir/wallet-node.ts";
+import { ipirMasksBytes, ipirRequestBytes, ipirResponseBytes } from "../ipir/sizes.ts";
 import { ROUTES, toHex } from "../shared/index.ts";
 import { parseStatusSamples, readSyncRecords, syncRate } from "../bench/bench-chain.ts";
+import { certificateRows, compareRuns, renderComparison, renderSchemeReport } from "../bench/bench-compare.ts";
 import { parseDockerMemory, selfProbe } from "../bench/bench-probes.ts";
 import { COLUMNS, fmtBytes, fmtMs, missingCells, renderReport, section8 } from "../bench/bench-report.ts";
 import type { BenchResults } from "../bench/bench-results.ts";
@@ -95,6 +101,8 @@ function options(over: Partial<BenchOptions> = {}): BenchOptions {
     serverLog: { source: "the module's log lines (in-process)", lines: async () => [...r.logs] },
     serverMemory,
     build: null,
+    adminSecret: ADMIN_SECRET,
+    ipirWasm: () => compileIpirWasm(),
     transfer: { record: TRANSFER_RECORD, source: "a record in send's format" },
     log: () => {},
     ...rest,
@@ -168,6 +176,7 @@ describe("the benchmark on the synthetic chain (snapshot at 4, tail to 7)", () =
       "Scan",
       "Read coins (one call)",
       "Nullifier lookups (one call)",
+      "Lower paths to spend (one call)",
       "Tail",
       "Whole `sync`",
       "Transfer",
@@ -181,12 +190,13 @@ describe("the benchmark on the synthetic chain (snapshot at 4, tail to 7)", () =
         "Scan",
         "Read coins (one call)",
         "Nullifier lookups (one call)",
+        "Lower paths to spend (one call)",
         "Tail",
         "Whole `sync`",
         // The transfer record names its sender, A.
         ...(w === "A" ? ["Transfer"] : []),
       ]);
-      expect(rows.filter((x) => x.side === `server (${w}'s call)`).map((x) => x.part)).toEqual(["Read coins (one call)", "Nullifier lookups (one call)"]);
+      expect(rows.filter((x) => x.side === `server (${w}'s call)`).map((x) => x.part)).toEqual(["Read coins (one call)", "Nullifier lookups (one call)", "Lower paths to spend (one call)"]);
     }
     // The spec's "—" cells stay empty, every other cell has text.
     const chainRow = rows.find((x) => x.part === "Chain sync (core modules)")!;
@@ -205,7 +215,9 @@ describe("the benchmark on the synthetic chain (snapshot at 4, tail to 7)", () =
     expect(results.software.umbradb).toMatch(/^\d+\.\d+\.\d+/);
     expect(results.software.kernelDigest).toMatch(/^[0-9a-f]{64}$/);
     expect(results.serverBuild!.source).toContain("build-stats.json");
-    expect(results.serverBuild!.steps.readSetup!.bytes).toBe(results.snapshot.artifacts.readSetup);
+    // The read table's setup step writes its public artifact (SimplePIR: the setup data, `readPublic` since 00058).
+    expect(results.serverBuild!.steps.readSetup!.bytes).toBe(results.snapshot.artifacts.readPublic);
+    expect(results.snapshot.scheme).toBe("simplepir");
     expect(results.readEvents).toMatchObject({ rows: 9 + 1, height: 4 });
     expect(results.chainSync.database!.bytes).toBeGreaterThan(0);
     expect(results.chainSync.database!.schemas.map((s) => s.schema)).toContain("core_ledger_state");
@@ -214,6 +226,14 @@ describe("the benchmark on the synthetic chain (snapshot at 4, tail to 7)", () =
     expect(results.chainSync.rate!.toHeight).toBeLessThanOrEqual(7);
     expect(results.chainSync.rate!.heightsPerSecond).toBeGreaterThan(0);
     expect(results.chainSync.runs).toBe(1);
+    // 00058: the tables described without a scheme's words; what each served table holds, from the module's status.
+    const t = results.snapshot.tables;
+    expect(results.snapshot.padding).toBeNull();
+    expect(t.read).toMatchObject({ records: 9, recordBytes: 98, groups: t.read!.cols, requestBytes: t.read!.cols * 4, responseBytes: t.read!.rows * 4, publicBytes: results.snapshot.artifacts.readPublic });
+    expect(t.path).toMatchObject({ recordBytes: 64, requestBytes: t.path!.cols * 4, responseBytes: t.path!.rows * 4 });
+    expect(results.server.heldBytes).toEqual({ read: 2 * t.read!.rows * t.read!.cols, path: 2 * t.path!.rows * t.path!.cols, nullifier: 2 * t.nullifier!.rows * t.nullifier!.cols });
+    expect(results.snapshot.onDisk).toEqual(results.snapshot.artifacts);
+    expect(results.build).toBeNull();
   });
 
   it("FR-151: each wallet's sync is measured step by step for the client, and the PIR calls on the server from its own log lines", () => {
@@ -237,8 +257,19 @@ describe("the benchmark on the synthetic chain (snapshot at 4, tail to 7)", () =
       expect(w.stateBytes).toBeGreaterThan(0);
       expect(w.computingMs).toBeLessThanOrEqual(w.totalMs);
       expect(w.bytesDown).toBe(w.requests.reduce((n, q) => n + q.answerBytes, 0));
+      // The path read after the sync: its public artifact and one call of the path table's size, the server's time
+      // from its log line.
+      const path = results.snapshot.tables.path!;
+      expect(w.path).toMatchObject({ calls: 1, bytesUp: 40 + 16 * path.cols * 4, bytesDown: 40 + 16 * path.rows * 4 });
+      expect(w.path!.public).toMatchObject({ size: path.publicBytes, bytes: path.publicBytes, cached: false });
+      expect(w.path!.serverMs).not.toBeNull();
+      expect(w.path!.requests.map((q) => `${q.method} ${q.route}`)).toEqual([`GET ${ROUTES.blob}<digest>`, `POST ${ROUTES.queryPath}`]);
     }
-    expect(results.server.log).toContain("24 of 24 requests paired");
+    // A holds coins in blocks full at the snapshot; C holds none, and still sends one full call.
+    expect(byLabel.A!.path!.paths).toBeGreaterThan(0);
+    expect(byLabel.C!.path!.paths).toBe(0);
+    // 8 requests of each sync, and the path read's 2 (its public artifact, its call).
+    expect(results.server.log).toContain("30 of 30 requests paired");
   });
 
   it("FR-152: the naive baseline is every output in full (256 bytes) and every nullifier (32 bytes) of the snapshot", () => {
@@ -351,6 +382,8 @@ describe("without the optional inputs, each cell says why it has no value", () =
         "Read coins (one call) / server (C's call) / computing",
         "Nullifier lookups (one call) / server (C's call) / memory",
         "Nullifier lookups (one call) / server (C's call) / computing",
+        "Lower paths to spend (one call) / server (C's call) / memory",
+        "Lower paths to spend (one call) / server (C's call) / computing",
         "Transfer / client / memory",
         "Transfer / client / inFlight",
         "Transfer / client / computing",
@@ -438,7 +471,7 @@ describe("parts of the benchmark", () => {
 
   it("formatting", () => {
     expect([fmtBytes(32), fmtBytes(2048), fmtBytes(5 * 1024 ** 2), fmtBytes(1.25 * 1024 ** 3)]).toEqual(["32 B", "2.00 KiB", "5.00 MiB", "1.25 GiB"]);
-    expect([fmtMs(0.5), fmtMs(5.25), fmtMs(250), fmtMs(12_340), fmtMs(125_000), fmtMs(5.5 * 3_600_000)]).toEqual(["0.50 ms", "5.3 ms", "250 ms", "12.34 s", "2 min 5 s", "5.50 h"]);
+    expect([fmtMs(0.5), fmtMs(5.25), fmtMs(250), fmtMs(12_340), fmtMs(125_000), fmtMs(119_600), fmtMs(5.5 * 3_600_000)]).toEqual(["0.50 ms", "5.3 ms", "250 ms", "12.34 s", "2 min 5 s", "2 min 0 s", "5.50 h"]);
   });
 });
 
@@ -465,7 +498,7 @@ describe.skipIf(!installed)("the command line (with the client's install)", () =
     expect(results.pathSplits.map((p) => [p.k, p.sameAsServed])).toEqual([[2, true], [0, null]]);
     // Without a server log, the server's times are the only cells missing besides the transfer.
     expect(new Set(missingCells(results).map((g) => `${g.part} / ${g.column}`))).toEqual(
-      new Set(["Read coins (one call) / computing", "Nullifier lookups (one call) / computing", "Transfer / memory", "Transfer / inFlight", "Transfer / computing"]),
+      new Set(["Read coins (one call) / computing", "Nullifier lookups (one call) / computing", "Lower paths to spend (one call) / computing", "Transfer / memory", "Transfer / inFlight", "Transfer / computing"]),
     );
     expect(readFileSync(join(out, "REPORT.md"), "utf8")).toContain("# Private shielded sync: benchmark on custom");
     const record = join(dir, "transfer.json");
@@ -473,7 +506,7 @@ describe.skipIf(!installed)("the command line (with the client's install)", () =
     await run(process.execPath, [BENCH, "report", join(out, "results.json"), "--transfer", record], { env: { PATH: process.env.PATH ?? "" } });
     const again = JSON.parse(readFileSync(join(out, "results.json"), "utf8")) as BenchResults;
     expect(again.transfer).toMatchObject({ submitted: true, bytesSubmitted: 18_526 });
-    expect(new Set(missingCells(again).map((g) => g.part))).toEqual(new Set(["Read coins (one call)", "Nullifier lookups (one call)"]));
+    expect(new Set(missingCells(again).map((g) => g.part))).toEqual(new Set(["Read coins (one call)", "Nullifier lookups (one call)", "Lower paths to spend (one call)"]));
     expect(readFileSync(join(out, "REPORT.md"), "utf8")).toContain("finalized in block 3,399,948");
   });
 });
@@ -489,3 +522,107 @@ describe("the benchmark asks the server for its snapshot", () => {
     expect(missingCells(results)).toEqual([]);
   });
 });
+
+describe("both schemes (00058 FR-050): the benchmark asks for a SimplePIR and an IPIR+SP snapshot at one height", () => {
+  let simple: BenchResults;
+  let ipir: BenchResults;
+
+  beforeAll(async () => {
+    simple = await runBench(options({ build: { adminSecret: ADMIN_SECRET, height: 7, scheme: "simplepir" }, pathSplits: [2], scanThreads: [1] }));
+    ipir = await runBench(options({ build: { adminSecret: ADMIN_SECRET, height: 7, scheme: "ipir-sp" }, pathSplits: [2], scanThreads: [1] }));
+  }, LONG);
+
+  it("IPIR+SP: every cell has a value, each wallet finds what it finds under SimplePIR, and every call is the scheme's size", () => {
+    expect(simple.snapshot).toMatchObject({ height: 7, scheme: "simplepir", builtByBench: true });
+    expect(ipir.snapshot).toMatchObject({ height: 7, scheme: "ipir-sp", builtByBench: true, padding: null });
+    expect(ipir.snapshot.id).not.toBe(simple.snapshot.id);
+    expect(ipir.build).toMatchObject({ height: 7, scheme: "ipir-sp", padding: null });
+    expect(ipir.build!.rssPeakBytes).toBeGreaterThan(0);
+    expect(ipir.build!.rssAfterBytes).toBeGreaterThan(0);
+    expect(missingCells(ipir)).toEqual([]);
+    const coins = (r: BenchResults) => r.wallets.map((w) => [w.label, w.coins.found, w.coins.spent, w.coins.unspent, w.path?.paths]);
+    expect(coins(ipir)).toEqual(coins(simple));
+    for (const name of ["read", "path", "nullifier"] as const) {
+      const t = ipir.snapshot.tables[name]!;
+      expect(t.rows % 2048, name).toBe(0);
+      expect(t.groups, name).toBe(t.rows);
+      expect(t.requestBytes, name).toBe(ipirRequestBytes(t.rows));
+      expect(t.responseBytes, name).toBe(ipirResponseBytes(t.cols));
+      expect(t.publicBytes, name).toBe(ipirMasksBytes(t.cols));
+      expect(t.tableBytes, name).toBe(2 * t.rows * t.cols);
+      // The add-on's cells and compiled packing (33,587,200 bytes per 2,048 columns).
+      expect(ipir.server.heldBytes![name], name).toBe(2 * t.rows * t.cols + 33_587_200 * (t.cols / 2048));
+    }
+    const t = ipir.snapshot.tables;
+    for (const w of ipir.wallets) {
+      expect([w.read.bytesUp, w.read.bytesDown]).toEqual([40 + 16 * ipirRequestBytes(t.read!.rows), 40 + 16 * ipirResponseBytes(t.read!.cols)]);
+      expect([w.downloads.readPublic.bytes, w.downloads.nullifierPublic.bytes]).toEqual([t.read!.publicBytes, t.nullifier!.publicBytes]);
+      expect(w.path).toMatchObject({ calls: 1, bytesUp: 40 + 16 * ipirRequestBytes(t.path!.rows), bytesDown: 40 + 16 * ipirResponseBytes(t.path!.cols) });
+      expect(w.path!.serverMs).not.toBeNull();
+      expect(w.read.serverMs).not.toBeNull();
+    }
+    expect(ipir.wallets.find((w) => w.label === "A")!.path!.paths).toBeGreaterThan(0);
+    // The setup steps carry the add-on's report: its noise sample under the limit.
+    for (const step of ["readSetup", "pathSetup", "nullifierSetup"] as const) {
+      expect(ipir.serverBuild!.steps[step]!.scheme!.maxPhaseErrorLog2, step).toBeLessThan(37);
+      expect(ipir.serverBuild!.steps[step]!.bytes, step).toBe(ipirMasksBytes(ipir.serverBuild!.steps[step]!.scheme!.cols!));
+    }
+    expect(ipir.requestShapesIdentical).toBe(true);
+  });
+
+  it("IPIR+SP in-process (FR-153): the build at the served k gives the served snapshot; every record read is checked against the table file", () => {
+    expect(ipir.pathSplits.map((p) => [p.k, p.sameAsServed])).toEqual([[2, true]]);
+    const p = ipir.pathSplits[0]!;
+    expect(p.groups).toBe(p.rows);
+    expect(p.call.bytesUp).toBe(40 + 16 * ipirRequestBytes(p.rows));
+    expect(p.call.recordsChecked).toBeGreaterThan(0);
+    expect(p.path!.call!.recordsChecked).toBeGreaterThan(0);
+    expect(simple.pathSplits.map((x) => [x.k, x.sameAsServed])).toEqual([[2, true]]);
+  });
+
+  it("the report names the scheme's artifacts and groups, and compare puts both schemes side by side", () => {
+    const report = renderReport(ipir);
+    expect(report).toContain("| Build read table and masks | server |");
+    expect(report).toContain("records per row");
+    expect(report).toContain("largest phase error 2^");
+    expect(report).not.toContain("setup data");
+    expect(renderReport(simple)).toContain("| Build read table and setup data | server |");
+    const c = compareRuns([{ file: join(dir, "simple", "results.json"), results: simple }, { file: join(dir, "ipir", "results.json"), results: ipir }], dir);
+    expect(c.sizes.map((x) => x.entries)).toEqual([15]);
+    expect(c.sizes[0]!.files).toEqual({ simplepir: ["simple/results.json"], "ipir-sp": ["ipir/results.json"] });
+    const row = (name: string) => c.sizes[0]!.rows.find((r) => r.name === name)!;
+    expect(row("read call: up").values["ipir-sp"]).toMatchObject({ median: 40 + 16 * ipirRequestBytes(ipir.snapshot.tables.read!.rows), n: 3 });
+    expect(row("read call: up").values.simplepir.median).toBe(simple.wallets[0]!.read.bytesUp);
+    expect(row("read: one query up").values["ipir-sp"].median).toBe(ipirRequestBytes(ipir.snapshot.tables.read!.rows));
+    expect(row("Server: held by the read table (as the scheme reports)").values.simplepir.median).toBe(simple.server.heldBytes!.read);
+    expect(row("Wallet: once per snapshot, read and nullifier public artifacts").values["ipir-sp"].median).toBe(t(ipir, "read") + t(ipir, "nullifier"));
+    // No run at 1,000,000: SC-002 is not checked; SC-003 asks for three sizes.
+    expect(c.sc002.met).toBeNull();
+    expect(c.sc003.met).toBe(false);
+    const tables = renderComparison(c);
+    expect(tables).toContain("| Group | Figure | SimplePIR | IPIR+SP | IPIR+SP ÷ SimplePIR | How |");
+    expect(tables).toContain("**SC-002**");
+    expect(tables).not.toContain("**not measured**");
+    const key = renderComparison(c, { keyOnly: true });
+    expect(key).toContain("| Network | read: one query up |");
+    expect(key).not.toContain("| Memory | Server: resident before the build |");
+    expect(key.split("\n").length).toBeLessThan(tables.split("\n").length);
+    // The report: section 1 from the runs, then the given sections with the shapes and certificates filled in.
+    const certDir = join(dir, "cert");
+    mkdirSync(certDir, { recursive: true });
+    writeFileSync(join(certDir, "noise-x-read.json"), JSON.stringify({ rows: 2048, cols: 4096, database_sha256: "ab" }));
+    writeFileSync(join(certDir, "cert-x-read.json"), JSON.stringify({ database_sha256: "ab", actual_profile: { certified_failure_bits: 290, meets_128: true }, screens: { worst_case_query: { certified_failure_bits: 280 } } }));
+    const certs = certificateRows(certDir);
+    expect(certs).toEqual([{ label: "x", table: "read", rows: 2048, cols: 4096, bits: 290, meets128: true, worstCaseQueryBits: 280, databaseSha256: "ab", file: "cert-x-read.json" }]);
+    const doc = renderSchemeReport(c, { title: "Both schemes", notes: "\n## 2. Shapes\n\n<!-- shapes -->\n\n## 3. Certificates\n\n<!-- certificates -->\n", certificates: certs });
+    expect(doc.startsWith("# Both schemes\n")).toBe(true);
+    expect(doc).toContain("## 1. Side by side, one table per size");
+    expect(doc).toContain(`| 15 | IPIR+SP | ${ipir.snapshot.tables.read!.rows.toLocaleString("en-US")} × `);
+    expect(doc).toContain("| x | read | 2,048 × 4,096 | 2^-290 | yes | 2^-280 | `cert/cert-x-read.json` |");
+    expect(doc).not.toContain("<!--");
+  });
+});
+
+function t(r: BenchResults, name: "read" | "nullifier"): number {
+  return r.snapshot.tables[name]!.publicBytes;
+}

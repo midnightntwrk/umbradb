@@ -8,8 +8,10 @@
  *     --server http://127.0.0.1:10480 --db-url postgres://postgres@127.0.0.1:58171/umbradb --db-password-file <file> \
  *     --pss-data <out>/pss-data --sync-records <out> --server-container pss-patched-run --status-url <admin>/status
  *   node examples/private-shielded-sync/bench/bench.ts report <results.json> [--transfer <record>]
+ *   node examples/private-shielded-sync/bench/bench.ts compare <results.json>… --out <dir>
  *
- * `report` renders `REPORT.md` again from a `results.json`, adding the transfer record `send` wrote when given. Run
+ * `report` renders `REPORT.md` again from a `results.json`, adding the transfer record `send` wrote when given.
+ * `compare` puts runs of both PIR schemes side by side, per snapshot size (`bench-compare.ts`, spec 00058 FR-051). Run
  * `bench.ts help` for every option. Secrets come only from the environment (mnemonics) and from files named on the
  * command line (database password, admin secret); none is printed or written.
  */
@@ -22,7 +24,10 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { loadLedger } from "../client/ledger.ts";
 import { loadSdk } from "../client/sdk-api.ts";
+import { compileIpirWasm } from "../ipir/wallet-node.ts";
+import { isSchemeName, SCHEME_NAMES } from "../pir/scheme.ts";
 import { readSyncRecords } from "./bench-chain.ts";
+import { certificateRows, compareRuns, renderComparison, renderSchemeReport } from "./bench-compare.ts";
 import { dockerProbe, type MemoryProbe, pidProbe } from "./bench-probes.ts";
 import { missingCells, renderReport } from "./bench-report.ts";
 import type { BenchResults } from "./bench-results.ts";
@@ -33,6 +38,8 @@ import type { Reader } from "./bench-splits.ts";
 const HELP = `usage:
   node [--env-file=<secrets.env>] examples/private-shielded-sync/bench/bench.ts run [options]
   node examples/private-shielded-sync/bench/bench.ts report <results.json> [--transfer <record>] [--out <dir>]
+  node examples/private-shielded-sync/bench/bench.ts compare <results.json>… --out <dir> [--notes <file.md>]
+       [--cert <dir>] [--title <text>]
 
 wallets (at least one; each syncs as a fresh client):
   --wallet <name>               mnemonic from the environment variable PSS_MNEMONIC_<NAME> (repeatable)
@@ -44,7 +51,10 @@ server:
   --network <name>              the network the server must serve (default PSS_NETWORK when set)
   --build                       first ask the server for a snapshot at its latest height (admin route) and wait
   --build-height <h>            … at this height instead
-  --admin-secret-file <path>    the admin secret (for --build)
+  --scheme <name>               the PIR scheme (${SCHEME_NAMES.join(", ")}): the one --build asks for; without --build,
+                                the one the served snapshot must use
+  --padding <n>                 with --build: pad the snapshot to n entries (debug)
+  --admin-secret-file <path>    the admin secret (for --build; without it, read for the bytes the tables hold)
   --pss-data <dir>              the module's data directory: the snapshot's build-stats.json (server rows)
   --server-container <name>     the server's container: memory by docker stats, request lines by docker logs
   --server-pid <pid>            a local server process: memory by ps
@@ -59,12 +69,19 @@ database and sync (read only):
 measurement:
   --threads <n>                 client scan and PIR threads (default: CPUs − 1, at most 8)
   --scan-threads <list>         thread counts of the scan by thread count (default 1,2,4,8)
-  --path-splits <list>          FR-153's k values (default 16,8,0)
+  --path-splits <list>          FR-153's k values (default 16,8,0; empty: none)
   --build-threads <n>           threads of the in-process builds (default: the server's, else 4)
+  --skip-path-read              do not read each wallet's lower paths from the path table after its sync
   --transfer <file>             the transfer record send wrote (the "transfer" row; "not run" without it)
 
 output:
   --out <dir>                   the results folder (default bench/results/<date>-<network>/)
+
+compare (both schemes side by side; spec 00058):
+  --notes <file.md>             also write REPORT.md: section 1 from the runs, then this file's sections, its
+                                <!-- shapes --> and <!-- certificates --> markers filled in
+  --cert <dir>                  the certificates' cert-<label>-<table>.json and noise-<label>-<table>.json files
+  --title <text>                REPORT.md's title
   --work <dir>                  scratch for caches, states and builds (default: a temporary folder, removed after)
 `;
 
@@ -78,6 +95,8 @@ const { values: opt, positionals } = parseArgs({
     network: { type: "string" },
     build: { type: "boolean", default: false },
     "build-height": { type: "string" },
+    scheme: { type: "string" },
+    padding: { type: "string" },
     "admin-secret-file": { type: "string" },
     "pss-data": { type: "string" },
     "server-container": { type: "string" },
@@ -91,9 +110,13 @@ const { values: opt, positionals } = parseArgs({
     "scan-threads": { type: "string", default: "1,2,4,8" },
     "path-splits": { type: "string", default: "16,8,0" },
     "build-threads": { type: "string" },
+    "skip-path-read": { type: "boolean", default: false },
     transfer: { type: "string" },
     out: { type: "string" },
     work: { type: "string" },
+    notes: { type: "string" },
+    cert: { type: "string" },
+    title: { type: "string" },
     help: { type: "boolean", default: false },
   },
 });
@@ -176,6 +199,13 @@ async function cmdRun(): Promise<void> {
       : container !== undefined
         ? { source: `docker logs of ${container}`, lines: (since: Date) => dockerLogLines(container, since) }
         : null;
+  const scheme = opt.scheme;
+  if (scheme !== undefined && !isSchemeName(scheme)) throw new Error(`--scheme is one of ${SCHEME_NAMES.join(", ")}`);
+  const padding = opt.padding === undefined ? undefined : Number(opt.padding);
+  if (padding !== undefined && (!Number.isSafeInteger(padding) || padding < 1)) throw new Error("--padding must be a whole number ≥ 1");
+  const building = opt.build || opt["build-height"] !== undefined;
+  if (padding !== undefined && !building) throw new Error("--padding needs --build or --build-height");
+  const adminSecret = opt["admin-secret-file"] === undefined ? undefined : readFileSync(opt["admin-secret-file"], "utf8").trim();
   const work = opt.work === undefined ? mkdtempSync(join(tmpdir(), "pss-bench-")) : resolve(opt.work);
   const db = await database();
   const network = opt.network ?? process.env.PSS_NETWORK?.trim();
@@ -197,12 +227,19 @@ async function cmdRun(): Promise<void> {
       statusUrl: opt["status-url"] ?? null,
       serverLog,
       serverMemory,
-      build: opt.build || opt["build-height"] !== undefined
+      build: building
         ? {
-            adminSecret: readFileSync(opt["admin-secret-file"] ?? fail("--build needs --admin-secret-file"), "utf8").trim(),
+            adminSecret: adminSecret ?? fail("--build needs --admin-secret-file"),
             ...(opt["build-height"] === undefined ? {} : { height: Number(opt["build-height"]) }),
+            ...(scheme === undefined ? {} : { scheme }),
+            ...(padding === undefined ? {} : { padding }),
           }
         : null,
+      ...(adminSecret === undefined ? {} : { adminSecret }),
+      ...(scheme === undefined ? {} : { scheme }),
+      pathRead: !opt["skip-path-read"],
+      // Compiled only for an IPIR+SP snapshot; refused when its digest is not the committed one (FR-031).
+      ipirWasm: () => compileIpirWasm(),
       transfer: opt.transfer === undefined ? null : { record: JSON.parse(readFileSync(opt.transfer, "utf8")) as Record<string, unknown>, source: `the record ${opt.transfer.split("/").pop()}` },
       log,
     });
@@ -220,6 +257,26 @@ function fail(message: string): never {
 
 const fileURLDir = (relative: string): string => resolve(dirname(fileURLToPath(import.meta.url)), relative);
 
+function cmdCompare(): void {
+  const files = positionals.slice(1);
+  if (files.length === 0) fail("compare needs the results.json files to compare");
+  const dir = resolve(opt.out ?? fail("compare needs --out <dir>"));
+  const runs = files.map((file) => ({ file: resolve(file), results: JSON.parse(readFileSync(file, "utf8")) as BenchResults }));
+  const comparison = compareRuns(runs, dir);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "compare.json"), `${JSON.stringify(comparison, null, 2)}\n`);
+  writeFileSync(join(dir, "TABLES.md"), renderComparison(comparison));
+  writeFileSync(join(dir, "KEY-TABLES.md"), renderComparison(comparison, { keyOnly: true }));
+  log(`wrote ${join(dir, "compare.json")}, TABLES.md (every row) and KEY-TABLES.md (the key rows) from ${files.length} run(s)`);
+  if (opt.notes !== undefined) {
+    // The report: section 1 from the runs, then the given sections (shapes and certificates filled in).
+    const certificates = opt.cert === undefined ? [] : certificateRows(resolve(opt.cert));
+    const title = opt.title ?? "SimplePIR and IPIR+SP side by side";
+    writeFileSync(join(dir, "REPORT.md"), renderSchemeReport(comparison, { title, notes: readFileSync(opt.notes, "utf8"), certificates }));
+    log(`wrote ${join(dir, "REPORT.md")} with ${certificates.length} certificate(s)`);
+  }
+}
+
 function cmdReport(): void {
   const file = positionals[1] ?? fail("report needs the results.json to render");
   const results = JSON.parse(readFileSync(file, "utf8")) as BenchResults;
@@ -233,6 +290,7 @@ try {
   if (opt.help || command === "help") process.stdout.write(HELP);
   else if (command === "run") await cmdRun();
   else if (command === "report") cmdReport();
+  else if (command === "compare") cmdCompare();
   else throw new Error(`unknown command ${command}; see bench.ts help`);
 } catch (error) {
   log(`error: ${error instanceof Error ? error.message : String(error)}`);
