@@ -5,7 +5,10 @@
  * HTTP that runs the module's wire format. The chains are derived with the vendored ledger's own functions; the file
  * holds another wallet's spend whose prefix is the first coin's, placed before the real spend.
  *
- * The world (chains, file, check table, routes) is `./server-dust-world.ts`. IPIR+SP needs its native add-on
+ * Phase 9, in both schemes too: the coin's Merkle path read privately (one padded call to the path table, the upper
+ * siblings from the block roots) gives the snapshot's root.
+ *
+ * The world (chains, file, snapshot, routes) is `./server-dust-world.ts`. IPIR+SP needs its native add-on
  * (`ipir/build.sh native`).
  */
 
@@ -13,15 +16,17 @@ import { afterAll, describe, expect, it } from "vitest";
 import * as ledger from "../../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js";
 import { DustChecker } from "../client/dust-check.ts";
 import { fieldBytes, walkDustChains } from "../client/dust.ts";
+import { compileKernel, Kernel } from "../kernel/kernel.ts";
 import { PssHttp } from "../client/http.ts";
 import { compileIpirWasm } from "../ipir/wallet-node.ts";
 import { inlineMultiplier, type SchemeName } from "../pir/index.ts";
 import { ROUTES } from "../shared/index.ts";
-import { dustWorld } from "./server-dust-world.ts";
+import { dustWorld, SNAPSHOT_TIME } from "./server-dust-world.ts";
 
 const world = await dustWorld();
 afterAll(() => world.dispose());
 const { A, B, C, A1, A2, B2, FALSE_AT, FILE_POSITIONS, file, functions } = world;
+const kernel = new Kernel(compileKernel());
 /** The world's check routes, as a `fetch` for the wallet's `PssHttp`. */
 async function served(scheme: SchemeName): Promise<{ http: PssHttp; queries: () => number }> {
   const routes = await world.serve(scheme);
@@ -61,6 +66,34 @@ for (const scheme of ["simplepir", "ipir-sp"] as const) {
         expect(new Set(calls.map((r) => r.bodyBytes)).size).toBe(1);
         expect(checker.stats.bytesUp).toBe(calls.reduce((t, r) => t + r.bodyBytes, 0));
         expect(checker.stats.bytesDown).toBe(calls.reduce((t, r) => t + r.answerBytes, 0));
+      } finally {
+        checker.dispose();
+      }
+    });
+  });
+
+  describe(`a Dust coin's private path (${scheme}, phase 9)`, () => {
+    it("acceptance 2: the coin's path, read in one padded call, gives the snapshot's root; another commitment is refused; the generation records are the snapshot's", { timeout: 300_000 }, async () => {
+      const routes = await world.serve(scheme);
+      const http = new PssHttp("http://dust.test", { fetch: routes.fetch });
+      const checker = await DustChecker.open(http, scheme === "simplepir" ? { multiplier: inlineMultiplier } : { ipirWasm: () => compileIpirWasm() });
+      try {
+        const m = checker.manifest;
+        expect(m).toMatchObject({ version: 2, blockTime: SNAPSHOT_TIME, tree: { pathSplit: 2 }, generation: { records: 8 } });
+        const commitment = fieldBytes(ledger.dustCommitment(A2));
+        const path = await checker.readPath(Number(A2.mtIndex), commitment, kernel);
+        expect([path.siblings.length, path.lower, Buffer.from(path.root).toString("hex")]).toEqual([32, 2, m.tree.root]);
+        expect(routes.pathQueries()).toBe(1);
+        const calls = http.records.filter((r) => r.path === ROUTES.dustPathQuery);
+        expect(calls).toHaveLength(1);
+        expect(checker.pathStats).toMatchObject({ calls: 1, bytesUp: calls[0]!.bodyBytes, bytesDown: calls[0]!.answerBytes });
+        expect(checker.pathStats.pathPublicBytes).toBe(m.tree.pathPublic!.size);
+        // Another commitment at that position gives another root: refused.
+        await expect(checker.readPath(Number(A2.mtIndex), new Uint8Array(32), kernel)).rejects.toThrow(/not the Dust snapshot's/);
+        // A second path read downloads nothing more than its call.
+        expect(checker.pathStats.pathPublicBytes).toBe(m.tree.pathPublic!.size);
+
+        expect(await checker.generationRecords()).toHaveLength(8);
       } finally {
         checker.dispose();
       }

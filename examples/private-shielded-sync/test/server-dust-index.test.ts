@@ -10,7 +10,10 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { decodeDustChunk, dustEntryAt, type DustEntry } from "../shared/index.ts";
 import { type DustDecoder, type DustEvent, DustIndex, dustParametersOfText, ledgerDustDecoder } from "../server/dust-index.ts";
-import { byHeight, coinRows, commitmentsUpTo, dustEventOf, entryOf, FIXTURE, ledger, ownerOf, spendRows } from "./server-dust-fixture.ts";
+import { compileKernel, Kernel } from "../kernel/kernel.ts";
+import { dustTree } from "../server/dust-tree.ts";
+import { rootFromStored } from "../server/tree.ts";
+import { byHeight, coinRows, commitmentsUpTo, dustEventOf, entryOf, FIXTURE, FIXTURE_STATES, ledger, ownerOf, spendRows } from "./server-dust-fixture.ts";
 
 const hex = (b: Uint8Array): string => Buffer.from(b).toString("hex");
 const decoder = ledgerDustDecoder(ledger);
@@ -157,6 +160,32 @@ describe("the Dust index over Preprod events", () => {
     const spend = spendRows()[0]!;
     const twice = indexUpTo(LAST, 4096, { decoder: { ...decoder, firstCoin: (bytes) => ({ ...decoder.firstCoin(bytes), position: spend.treeIndex! }) } });
     expect(() => twice.commitments()).toThrow(/position 102 is filled twice \(the second time by a first coin at height 3348434\)/);
+  });
+
+  it("phase 9, acceptance 1 and 3: at three heights, the commitment tree over the commitments by position (the Zswap tree's leaf and node hashes) and the generation tree over the records (each with its latest dtime, by the ledger) have the core's stored roots", () => {
+    const index = indexUpTo(LAST, 4096);
+    const kernel = new Kernel(compileKernel());
+    const hash = (a: Uint8Array, b: Uint8Array): Uint8Array => kernel.hash2(a, b)!;
+    for (const state of FIXTURE_STATES) {
+      const table = index.commitments(state.height);
+      expect(table.count).toBe(state.commitmentFirstFree);
+      for (const k of [0, 2, 16]) {
+        const { tree, paths } = dustTree(table.count, k, (i) => kernel.leaf(table.bytes.subarray(32 * i, 32 * i + 32)), hash);
+        expect(hex(tree.root), `commitment root at ${state.height}, k ${k}`).toBe(hex(rootFromStored(Buffer.from(state.commitmentRoot, "hex"))));
+        expect(paths.length).toBe(table.count * k * 32);
+      }
+      const records = index.generationRecords(state.height);
+      expect(records.length).toBe(state.generationFirstFree);
+      const root = index.generationRoot(records)!;
+      const stored = rootFromStored(Buffer.from(state.generationRoot, "hex"));
+      expect(root.toString(16).padStart(64, "0")).toBe(Buffer.from(stored).reverse().toString("hex"));
+    }
+    // At the last height, the updated records carry their dtime; the others none.
+    const records = index.generationRecords(LAST);
+    expect(records.filter((r) => r.dtime !== null)).toHaveLength(5);
+    // A record's dtime changes the root: dropping one gives another root than the core's.
+    const changed = records.map((r) => (r.dtime === null ? r : { ...r, dtime: null }));
+    expect(index.generationRoot(changed)).not.toBe(index.generationRoot(records));
   });
 
   it("refuses what it cannot serve: a position that does not rise breaks it (nothing of that height taken, later heights ignored); an event it cannot decode; no decoder", () => {

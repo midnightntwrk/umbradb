@@ -2,11 +2,14 @@
  * The module's Dust routes through UmbraDB's real process on PostgreSQL 18 (spec 00062 FR-007, FR-010 to FR-013,
  * SC-004), with the harness of `server-module.test.ts`. The test chain (`./server-chain.ts`) has no Dust events, so
  * real Preprod ones (`./server-dust-fixture.ts`) are written into the core's events table at the chain's committed
- * heights, and the core's `dust_commitment_first_free` set to theirs, before the module joins (`startsMidChain`); the
- * module reads them at start, builds its Dust check table, follows the later heights, and serves them. The check table
- * is read by PIR through the wallet's own code (`../client/dust-check.ts`) in SimplePIR, then in IPIR+SP after a
- * snapshot build of that scheme rebuilt it (which needs the IPIR+SP add-on, `ipir/build.sh native`). Every expectation
- * is taken from the fixture's events, read with the vendored ledger build.
+ * heights, and the core's stored Dust tree values (`dust_commitment_first_free`, `dust_commitment_root`,
+ * `dust_generation_first_free`, `dust_generation_root`) set to Preprod's there, before the module joins
+ * (`startsMidChain`); the module reads them at start, builds its Dust snapshot (check table, commitment tree checked
+ * against the stored root, path table, generation records checked against theirs), follows the later heights, and
+ * serves them. The check table and a coin's path are read by PIR through the wallet's own code
+ * (`../client/dust-check.ts`) in SimplePIR, then in IPIR+SP after a snapshot build of that scheme rebuilt them (which
+ * needs the IPIR+SP add-on, `ipir/build.sh native`). Every expectation is taken from the fixture's events and stored
+ * values, read with the vendored ledger build.
  */
 
 import { createHash } from "node:crypto";
@@ -25,7 +28,9 @@ import { PROCESS_BACKENDS, type ProcessDatabase } from "../../../test/runner/pro
 import { core, entryOf as moduleEntry, startProcess } from "../../../test/runner/process-build.js";
 import { TapeNode } from "../../../tools/tape/index.js";
 import { listenOnRandomPort } from "../../../tools/tape/port.js";
+import * as ledger from "../../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js";
 import { DustChecker } from "../client/dust-check.ts";
+import { compileKernel, Kernel } from "../kernel/kernel.ts";
 import { PssHttp } from "../client/http.ts";
 import { compileIpirWasm } from "../ipir/wallet-node.ts";
 import { inlineMultiplier } from "../pir/index.ts";
@@ -43,8 +48,9 @@ import {
 } from "../shared/index.ts";
 import { pssDeclaration } from "../server/declaration.ts";
 import type { PssServer } from "../server/server.ts";
+import { rootFromStored } from "../server/tree.ts";
 import { scenarioChain, type ScenarioChain } from "./server-chain.ts";
-import { commitmentsUpTo, entryOf, FIXTURE, type FixtureRow, ownerOf, spendRows } from "./server-dust-fixture.ts";
+import { commitmentsUpTo, entryOf, FIXTURE, FIXTURE_STATES, type FixtureRow, type FixtureState, ownerOf, spendRows } from "./server-dust-fixture.ts";
 
 const LONG = 600_000;
 const SECRET = "pss-dust-test-admin-secret-012345";
@@ -58,8 +64,10 @@ function testHeight(row: FixtureRow): number {
   return 4;
 }
 const ERA = 2;
-/** The core's `dust_commitment_first_free` after each test height: Preprod's after the heights written there. */
-const FIRST_FREE: Readonly<Record<number, number>> = { 2: 100, 3: 113, 4: 254, 5: 254, 6: 254, 7: 254 };
+/** The core's stored Dust tree values after each test height: Preprod's after the heights written there. */
+const STATE: Readonly<Record<number, FixtureState>> = { 2: FIXTURE_STATES[0]!, 3: FIXTURE_STATES[1]!, 4: FIXTURE_STATES[2]!, 5: FIXTURE_STATES[2]!, 6: FIXTURE_STATES[2]!, 7: FIXTURE_STATES[2]! };
+/** A stored root as the snapshot's manifest names it: 32 bytes little-endian, hexadecimal. */
+const rootHex = (stored: string): string => hex(rootFromStored(Buffer.from(stored, "hex")));
 const LAST = FIXTURE.at(-1)!.height;
 
 interface Run {
@@ -120,9 +128,21 @@ async function stoppedAt(r: Run, height: number): Promise<void> {
   expect(end, r.lines.join("\n")).toMatchObject({ kind: "stopped", height: BigInt(height) });
 }
 
-/** Sets the core's stored `dust_commitment_first_free` at the given test heights to the fixture's. */
-async function setFirstFree(db: ProcessDatabase, heights: readonly number[]): Promise<void> {
-  for (const h of heights) await db.admin!.unsafe("UPDATE core_ledger_state.states SET dust_commitment_first_free = $1 WHERE height = $2", [FIRST_FREE[h]!, h]);
+/** Sets the core's stored Dust tree values at the given test heights to the fixture's. */
+async function setStates(db: ProcessDatabase, heights: readonly number[]): Promise<void> {
+  for (const h of heights) {
+    const s = STATE[h]!;
+    await db.admin!.unsafe(
+      "UPDATE core_ledger_state.states SET dust_commitment_first_free = $1, dust_commitment_root = $2, dust_generation_first_free = $3, dust_generation_root = $4 WHERE height = $5",
+      [s.commitmentFirstFree, Buffer.from(s.commitmentRoot, "hex"), s.generationFirstFree, Buffer.from(s.generationRoot, "hex"), h],
+    );
+  }
+}
+
+/** The block time stored at `height`, in seconds. */
+async function blockTimeAt(db: ProcessDatabase, height: number): Promise<number> {
+  const [row] = await db.admin!.unsafe("SELECT block_time FROM core_block_commit.blocks WHERE height = $1", [height]);
+  return (row!.block_time as Date).getTime() / 1000;
 }
 
 const auth = { Authorization: `Bearer ${SECRET}` };
@@ -176,7 +196,7 @@ beforeAll(async () => {
   await stoppedAt(coreOnly, 4);
   await coreOnly.close();
   await writeFixture(db);
-  await setFirstFree(db, [2, 3, 4]);
+  await setStates(db, [2, 3, 4]);
   r = await run(chain, db, {
     stop: 7,
     resumeAt: 4,
@@ -264,17 +284,23 @@ describe("the module's Dust routes over stored Preprod events (PostgreSQL 18)", 
     for (const owner of owners) expect(r.logs.join("\n")).not.toContain(owner.toString().slice(0, 20));
   });
 
-  it("GET /dust/parameters: the ledger's initial Dust parameters, the era having no parameter change", { timeout: LONG }, async () => {
+  it("GET /dust/parameters: the ledger's initial Dust parameters, the era having no parameter change; the ledger parameters in force at the last height, as the core's item gave them (the wallet's fee)", { timeout: LONG }, async () => {
     const answer = await fetch(`${r.origin}${ROUTES.dustParameters}`);
     expect(answer.status).toBe(200);
-    expect((await answer.json()) as DustParametersAnswer).toEqual({
+    const body = (await answer.json()) as DustParametersAnswer;
+    expect(body).toEqual({
       nightDustRatio: "5000000000",
       generationDecayRate: "8267",
       dustGracePeriodSeconds: "10800",
       source: "initial",
       changedAt: null,
       height: 7,
+      ledgerParameters: expect.stringMatching(/^[0-9a-f]+$/),
+      ledgerParametersHeight: 7,
     });
+    const parameters = ledger.LedgerParameters.deserialize(fromHex(body.ledgerParameters!));
+    expect(parameters.dust.nightDustRatio).toBe(5_000_000_000n);
+    expect(parameters.feePrices).toBeDefined();
   });
 
   it("FR-080: one log line per Dust request with its route, status and answer length", { timeout: LONG }, async () => {
@@ -295,7 +321,7 @@ describe("the Dust check table (FR-012, FR-023, SC-004)", () => {
   const positions = [0, 99, 100, 101, 102, 150, 253];
   const coinsAt = (ps: readonly number[]) => ps.map((position) => ({ position, commitment: expected.get(position)! }));
 
-  it("built at start in the configured scheme (SimplePIR) at the height the module started from: positions 0 to 253; the manifest names it, and its public artifact is served by digest", { timeout: LONG }, async () => {
+  it("built at start in the configured scheme (SimplePIR) at the height the module started from: positions 0 to 253; the commitment tree's root and the generation records' are the core's stored ones (acceptance 1 and 3); the manifest names them, and the public files are served by digest", { timeout: LONG }, async () => {
     const s = await checkBuilt(r, "simplepir", 4);
     expect(s.dustCheck.current).toMatchObject({ height: 4, commitments: 254, scheme: "simplepir" });
     const answer = await fetch(`${r.origin}${ROUTES.dustCheckManifest}`);
@@ -303,16 +329,53 @@ describe("the Dust check table (FR-012, FR-023, SC-004)", () => {
     const bytes = new Uint8Array(await answer.arrayBuffer());
     const manifest = decodeDustCheckManifest(bytes);
     expect(answer.headers.get("pss-dust-check-id")).toBe(createHash("sha256").update(bytes).digest("hex"));
-    expect(manifest).toMatchObject({ version: 1, eraHeight: ERA, height: 4, commitments: 254, scheme: "simplepir", queriesPerCall: 4, table: { records: 254, recordBytes: 32 } });
-    const artifact = await fetch(`${r.origin}${ROUTES.dustCheckBlob}${manifest.public.digest}`);
-    expect(artifact.status).toBe(200);
-    expect(artifact.headers.get("cache-control")).toContain("immutable");
-    expect((await artifact.arrayBuffer()).byteLength).toBe(manifest.public.size);
+    const state = STATE[4]!;
+    expect(manifest).toMatchObject({
+      version: 2,
+      eraHeight: ERA,
+      height: 4,
+      blockTime: await blockTimeAt(db, 4),
+      commitments: 254,
+      scheme: "simplepir",
+      queriesPerCall: 4,
+      table: { records: 254, recordBytes: 32 },
+      tree: { pathSplit: 2, root: rootHex(state.commitmentRoot), blockRoots: { blocks: 64, size: 64 * 32 }, pathTable: { records: 254, recordBytes: 64 } },
+      generation: { records: state.generationFirstFree, root: rootHex(state.generationRoot) },
+    });
+    for (const ref of [manifest.public, manifest.tree.blockRoots, manifest.tree.pathPublic!, manifest.generation.file]) {
+      const artifact = await fetch(`${r.origin}${ROUTES.dustCheckBlob}${ref.digest}`);
+      expect(artifact.status).toBe(200);
+      expect(artifact.headers.get("cache-control")).toContain("immutable");
+      expect((await artifact.arrayBuffer()).byteLength).toBe(ref.size);
+    }
     expect((await fetch(`${r.origin}${ROUTES.dustCheckBlob}${"0".repeat(64)}`)).status).toBe(404);
-    // The table file is not served: only the public artifact a wallet needs.
-    expect((await fetch(`${r.origin}${ROUTES.dustCheckBlob}${manifest.table.digest}`)).status).toBe(404);
+    // The table files are not served: only the public files a wallet needs.
+    for (const table of [manifest.table, manifest.tree.pathTable!]) expect((await fetch(`${r.origin}${ROUTES.dustCheckBlob}${table.digest}`)).status).toBe(404);
     const built = r.logs.map((line) => JSON.parse(line) as Record<string, unknown>).find((line) => line.event === "dust-check-built")!;
     expect(built).toMatchObject({ height: 4, scheme: "simplepir", commitments: 254 });
+  });
+
+  it("acceptance 2 (SimplePIR): a coin's path, its lower siblings read by PIR in one padded call, gives the core's stored root at every position read; another commitment gives another root, refused; the generation records are the stored root's", { timeout: LONG }, async () => {
+    const http = new PssHttp(r.origin);
+    const checker = await DustChecker.open(http, { multiplier: inlineMultiplier });
+    const kernel = new Kernel(compileKernel());
+    try {
+      const root = rootHex(STATE[4]!.commitmentRoot);
+      for (const position of [0, 101, 252, 253]) {
+        const path = await checker.readPath(position, expected.get(position)!, kernel);
+        expect([position, hex(path.root), path.siblings.length]).toEqual([position, root, 32]);
+      }
+      const calls = http.records.filter((rec) => rec.path === ROUTES.dustPathQuery);
+      expect(calls).toHaveLength(4);
+      expect(new Set(calls.map((c) => c.bodyBytes)).size).toBe(1);
+      expect(checker.pathStats).toMatchObject({ calls: 4, bytesUp: 4 * calls[0]!.bodyBytes });
+      await expect(checker.readPath(150, expected.get(151)!, kernel)).rejects.toThrow(/not the Dust snapshot's/);
+      await expect(checker.readPath(254, new Uint8Array(32), kernel)).rejects.toThrow(/not in the Dust snapshot's tree/);
+      const records = await checker.generationRecords();
+      expect(records).toHaveLength(STATE[4]!.generationFirstFree);
+    } finally {
+      checker.dispose();
+    }
   });
 
   it("the wallet's check (SimplePIR): each position read by PIR is the fixture's commitment there; another commitment is refused; a position the table does not reach is not checkable; one call per queriesPerCall positions, each exactly queriesPerCall requests", { timeout: LONG }, async () => {
@@ -363,7 +426,7 @@ describe("the Dust check table (FR-012, FR-023, SC-004)", () => {
   });
 
   it("SC-004: a snapshot build in IPIR+SP rebuilds the check table in IPIR+SP at its height; the wallet's check through IPIR+SP gives the same answers; a call to the replaced table is refused, whose public artifact is still served", { timeout: LONG }, async () => {
-    await setFirstFree(db, [5, 6, 7]);
+    await setStates(db, [5, 6, 7]);
     const old = decodeDustCheckManifest(new Uint8Array(await (await fetch(`${r.origin}${ROUTES.dustCheckManifest}`)).arrayBuffer()));
     const oldHttp = new PssHttp(r.origin);
     const oldChecker = await DustChecker.open(oldHttp, { multiplier: inlineMultiplier });
@@ -382,6 +445,11 @@ describe("the Dust check table (FR-012, FR-023, SC-004)", () => {
       expect(await checker.check([...coinsAt(positions), wrong, { position: 254, commitment: new Uint8Array(32) }])).toEqual([...positions.map(() => "match"), "mismatch", "beyond"]);
       const calls = http.records.filter((rec) => rec.path === ROUTES.dustCheckQuery);
       expect(new Set(calls.map((c) => c.bodyBytes)).size).toBe(1);
+      // Acceptance 2 in IPIR+SP: the path read gives the stored root at height 7.
+      expect(checker.manifest.tree.root).toBe(rootHex(STATE[7]!.commitmentRoot));
+      const path = await checker.readPath(253, expected.get(253)!, new Kernel(compileKernel()));
+      expect(hex(path.root)).toBe(rootHex(STATE[7]!.commitmentRoot));
+      expect(http.records.filter((rec) => rec.path === ROUTES.dustPathQuery)).toHaveLength(1);
     } finally {
       checker.dispose();
     }

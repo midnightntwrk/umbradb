@@ -144,6 +144,11 @@ export class PssHttp {
     return (await this.#bytes("POST", ROUTES.dustCheckQuery, body)).bytes;
   }
 
+  /** `POST /dust/check/path` (the Dust path table, read only to spend) with an encoded query body; the answer body. */
+  async dustPathQuery(body: Uint8Array): Promise<Uint8Array> {
+    return (await this.#bytes("POST", ROUTES.dustPathQuery, body)).bytes;
+  }
+
   /** `GET /manifest`: its bytes and the identifier the server names (checked by the caller against their SHA-256). */
   async manifest(): Promise<{ bytes: Uint8Array; servedId: string | null }> {
     const { bytes, headers } = await this.#bytes("GET", ROUTES.manifest);

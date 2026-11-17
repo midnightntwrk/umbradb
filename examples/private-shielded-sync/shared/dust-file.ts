@@ -124,6 +124,12 @@ export interface DustParametersAnswer {
   readonly source: "initial" | "param-change";
   readonly changedAt: number | null;
   readonly height: number;
+  /**
+   * The ledger parameters after the latest committed block the module saw, in the ledger's tagged serialization,
+   * hexadecimal (a wallet's fee is computed with them); null until the module has seen a block (phase 9).
+   */
+  readonly ledgerParameters: string | null;
+  readonly ledgerParametersHeight: number | null;
 }
 
 /** The prefix of a nullifier given as its 32-byte little-endian encoding. */

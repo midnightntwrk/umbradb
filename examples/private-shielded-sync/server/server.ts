@@ -50,14 +50,14 @@ import { maxRequestBytes, openServerScheme } from "../pir/server-schemes.ts";
 import { OCTET_STREAM, ROUTES } from "../shared/constants.ts";
 import { fromHex, type Manifest, type PirTableRef, toHex } from "../shared/manifest.ts";
 import { CALL_HEADER_BYTES, decodeQueryBody, encodeAnswerBody, WireError } from "../shared/wire.ts";
-import type { DustCheckManifest } from "../shared/dust-check.ts";
+import { type DustCheckManifest, encodeDustGenerationRecords } from "../shared/dust-check.ts";
 import type { DustCoinsAnswer, DustParametersAnswer } from "../shared/dust-file.ts";
 import { type BuildJob, type BuildResult, paddedBuildBytes } from "./build.ts";
 import { BuildFailure, runBuildWorker, type WorkerOutcome } from "./build-host.ts";
 import { clearDustCheckBuilds, DustCheckFailure, type DustCheckResult, pruneDustChecks, runDustCheckWorker } from "./dust-check.ts";
 import { coinEventJson, DustCoverageError, type DustEvent, DustIndex, isDustEventKind, ledgerDustDecoder } from "./dust-index.ts";
 import { type Settings, settingsOf } from "./settings.ts";
-import { blockHashAt, cursorOf, dustEvents, dustFirstFreeAt, genesisHashOf, stateAt, zswapEvents } from "./sql.ts";
+import { blockHashAt, cursorOf, dustEvents, dustStateAt, genesisHashOf, stateAt, zswapEvents } from "./sql.ts";
 import {
   artifactPath,
   listSnapshots,
@@ -86,6 +86,8 @@ export interface PssOptions {
 interface LedgerStateItem {
   readonly zswapFirstFree: bigint;
   readonly zswapRoot: Uint8Array;
+  /** The ledger parameters after the block, in the ledger's tagged serialization (00062 phase 9: the wallet's fee). */
+  readonly parameters?: Uint8Array;
 }
 
 /** One committed height's events and tip, waiting for `on-after-db-write`. */
@@ -94,6 +96,7 @@ interface Pending {
   readonly nullifiers: NullifierEvent[];
   readonly dust: DustEvent[];
   readonly tip: TailTip;
+  readonly parameters: Uint8Array | null;
 }
 
 /** The PIR tables of a snapshot, as its scheme answers from them. */
@@ -141,6 +144,10 @@ async function adoptTables(scheme: ServerScheme, result: BuildResult): Promise<T
 
 /** The Dust check table served (00062). */
 interface DustCheck {
+  /** The path table (k > 0), read by PIR to spend. */
+  readonly pathTable: ServerTable | null;
+  /** The files served by digest: the tables' public artifacts, the block roots, the generation records. */
+  readonly files: ReadonlySet<string>;
   readonly id: string;
   readonly idBytes: Uint8Array;
   readonly dir: string;
@@ -286,7 +293,9 @@ export class PssServer {
   #dustStarted = false;
   #dustCheck: DustCheck | null = null;
   /** The check table before the current one: its public artifact is still served. */
-  #dustCheckPrevious: { readonly id: string; readonly dir: string; readonly publicDigest: string } | null = null;
+  #dustCheckPrevious: { readonly id: string; readonly dir: string; readonly files: ReadonlySet<string> } | null = null;
+  /** The ledger parameters after the latest committed block whose item carried them (00062 phase 9). */
+  #ledgerParameters: { readonly height: number; readonly bytes: Uint8Array } | null = null;
   #dustCheckBuilding: DustCheckBuilding | null = null;
   #dustCheckLast: DustCheckLast | null = null;
 
@@ -487,7 +496,7 @@ export class PssServer {
         }
       }
       const tip: TailTip = { height, blockHash: b.hash, firstFree: Number(state.zswapFirstFree), root: rootFromStored(state.zswapRoot) };
-      this.#pending.set(height, { outputs, nullifiers, dust, tip });
+      this.#pending.set(height, { outputs, nullifiers, dust, tip, parameters: state.parameters ?? null });
     } catch (cause) {
       this.#log({ event: "stash-failed", height: Number(b.height), message: cause instanceof Error ? cause.message : String(cause) });
     }
@@ -498,6 +507,7 @@ export class PssServer {
     const height = Number(b.height);
     const pending = this.#pending.get(height);
     for (const key of [...this.#pending.keys()]) if (key <= height) this.#pending.delete(key);
+    if (pending?.parameters) this.#ledgerParameters = { height, bytes: pending.parameters };
     await this.#commitDust(height, pending, read);
     try {
       if (height <= this.index.height) return;
@@ -723,13 +733,30 @@ export class PssServer {
       return refuse("coverage", cause.message);
     }
     if (table.count === 0) return refuse("no-commitments", `the Dust index has no commitment at or below height ${height} (the era starts at ${this.dust.eraHeight})`);
-    const firstFree = await dustFirstFreeAt(read, table.height);
-    if (firstFree !== null && firstFree !== table.count) {
+    let records;
+    try {
+      records = this.dust.generationRecords(table.height);
+    } catch (cause) {
+      if (!(cause instanceof DustCoverageError)) throw cause;
+      return refuse("coverage", cause.message, table.count);
+    }
+    const state = await dustStateAt(read, table.height);
+    if (state === null) return refuse("no-state", `the core stores no ledger state at ${table.height}`, table.count);
+    if (state.commitmentFirstFree !== table.count) {
       return refuse(
         "first-free-mismatch",
-        `the Dust events up to height ${table.height} fill positions 0 to ${table.count - 1}; the core's dust_commitment_first_free there is ${firstFree}`,
+        `the Dust events up to height ${table.height} fill positions 0 to ${table.count - 1}; the core's dust_commitment_first_free there is ${state.commitmentFirstFree}`,
         table.count,
       );
+    }
+    if (state.generationFirstFree !== records.length) {
+      return refuse("generation-first-free-mismatch", `the Dust events up to height ${table.height} give ${records.length} generation records; the core's dust_generation_first_free there is ${state.generationFirstFree}`, table.count);
+    }
+    // The generation tree's root, by the ledger, must be the core's (phase 9 acceptance 3).
+    const generationRoot = rootFromStored(state.generationRoot);
+    const computed = this.dust.generationRoot(records);
+    if (computed === null || toHex(fieldLe(computed)) !== toHex(generationRoot)) {
+      return refuse("generation-root-mismatch", `the generation tree of ${records.length} records at height ${table.height} has the root ${computed === null ? "none" : toHex(fieldLe(computed))}; the core's dust_generation_root is ${toHex(generationRoot)}`, table.count);
     }
     const building: DustCheckBuilding = { height: table.height, scheme, trigger, startedAt: new Date().toISOString() };
     this.#dustCheckBuilding = building;
@@ -744,6 +771,12 @@ export class PssServer {
       threads: this.#threads,
       queriesPerCall: this.settings.queriesPerCall,
       dataDir: this.dataDir,
+      blockTime: state.blockTime,
+      pathSplit: this.settings.pathSplit,
+      expectedRoot: rootFromStored(state.commitmentRoot),
+      generation: encodeDustGenerationRecords(records),
+      generationRecords: records.length,
+      generationRoot: toHex(generationRoot),
     }).then(
       (result) => this.#adoptDustCheck(result, building, started),
       (cause: unknown) => this.#dustCheckFailed(building, cause, started),
@@ -753,24 +786,39 @@ export class PssServer {
 
   async #adoptDustCheck(result: DustCheckResult, building: DustCheckBuilding, started: number): Promise<void> {
     let table: ServerTable;
+    let pathTable: ServerTable | null = null;
     try {
       const scheme = await this.#scheme(result.manifest.scheme);
       try {
         table = await scheme.adoptTable(result.manifest.table, result.transfer);
       } catch (cause) {
         scheme.discardTransfer(result.transfer);
+        if (result.pathTransfer !== null) scheme.discardTransfer(result.pathTransfer);
         throw cause;
+      }
+      const t = result.manifest.tree;
+      if (result.pathTransfer !== null && t.pathTable !== undefined) {
+        try {
+          pathTable = await scheme.adoptTable(t.pathTable, result.pathTransfer);
+        } catch (cause) {
+          table.release();
+          scheme.discardTransfer(result.pathTransfer);
+          throw cause;
+        }
       }
     } catch (cause) {
       this.#dustCheckFailed(building, cause, started);
       return;
     }
+    const m0 = result.manifest;
+    const files = new Set([m0.public.digest, m0.tree.blockRoots.digest, m0.generation.file.digest, ...(m0.tree.pathPublic === undefined ? [] : [m0.tree.pathPublic.digest])]);
     const previous = this.#dustCheck;
-    this.#dustCheck = { id: result.id, idBytes: fromHex(result.id, 32), dir: result.dir, manifest: result.manifest, manifestBytes: result.manifestBytes, table };
+    this.#dustCheck = { id: result.id, idBytes: fromHex(result.id, 32), dir: result.dir, manifest: result.manifest, manifestBytes: result.manifestBytes, table, pathTable, files };
     if (previous !== null) {
-      // Its calls are refused from now on (409 naming the new one); its public artifact is still served.
+      // Its calls are refused from now on (409 naming the new one); its public files are still served.
       previous.table.release();
-      if (previous.id !== result.id) this.#dustCheckPrevious = { id: previous.id, dir: previous.dir, publicDigest: previous.manifest.public.digest };
+      previous.pathTable?.release();
+      if (previous.id !== result.id) this.#dustCheckPrevious = { id: previous.id, dir: previous.dir, files: previous.files };
     }
     const keep = new Set([result.id, ...(this.#dustCheckPrevious === null ? [] : [this.#dustCheckPrevious.id])]);
     pruneDustChecks(this.dataDir, keep);
@@ -790,6 +838,14 @@ export class PssServer {
       publicBytes: m.public.size,
       tableMs: result.tableMs,
       setupMs: result.setupMs,
+      treeMs: result.treeMs,
+      pathMs: result.pathMs,
+      root: m.tree.root,
+      blocks: m.tree.blockRoots.blocks,
+      pathTableBytes: m.tree.pathTable?.size ?? null,
+      pathPublicBytes: m.tree.pathPublic?.size ?? null,
+      generationRecords: m.generation.records,
+      generationRoot: m.generation.root,
       ms,
     });
   }
@@ -906,8 +962,10 @@ export class PssServer {
     this.#route(api, "GET", ROUTES.dustParameters, async () => this.#dustParameters());
     this.#route(api, "GET", ROUTES.dustCheckManifest, async () => this.#dustCheckManifest());
     this.#route(api, "GET", `${ROUTES.dustCheckBlob}:digest`, async (req) => this.#dustCheckBlob(req.params.digest ?? ""));
-    const checkQuery: Handler<Uint8Array> = async (req) => this.#dustCheckQuery(req);
+    const checkQuery: Handler<Uint8Array> = async (req) => this.#dustCheckQuery(req, "check");
     api.http("POST", ROUTES.dustCheckQuery, this.#logged(`POST ${ROUTES.dustCheckQuery}`, checkQuery), { body: "binary", maxBodyBytes });
+    const pathQuery: Handler<Uint8Array> = async (req) => this.#dustCheckQuery(req, "path");
+    api.http("POST", ROUTES.dustPathQuery, this.#logged(`POST ${ROUTES.dustPathQuery}`, pathQuery), { body: "binary", maxBodyBytes });
   }
 
   /** Registers a JSON route, logged (FR-080). */
@@ -1086,6 +1144,8 @@ export class PssServer {
       source: p.source,
       changedAt: p.height,
       height: this.dust.height,
+      ledgerParameters: this.#ledgerParameters === null ? null : toHex(this.#ledgerParameters.bytes),
+      ledgerParametersHeight: this.#ledgerParameters?.height ?? null,
     };
     return { status: 200, headers: { "Cache-Control": "no-cache" }, body };
   }
@@ -1104,17 +1164,12 @@ export class PssServer {
     };
   }
 
-  /** The public artifact of the current check table, or of the one before. */
+  /** A public file of the current Dust snapshot, or of the one before: the tables' public artifacts, the block roots, the generation records. */
   #dustCheckBlob(digest: string): HttpAnswer | HttpFileAnswer {
     if (!/^[0-9a-f]{64}$/.test(digest)) return error(400, "invalid-digest", "a digest is 64 lower-case hex digits");
     const current = this.#dustCheck;
-    const dir =
-      current !== null && current.manifest.public.digest === digest
-        ? current.dir
-        : this.#dustCheckPrevious?.publicDigest === digest
-          ? this.#dustCheckPrevious.dir
-          : null;
-    if (dir === null) return error(404, "no-such-artifact", "no Dust check table served has a public artifact of this digest");
+    const dir = current?.files.has(digest) ? current.dir : this.#dustCheckPrevious?.files.has(digest) ? this.#dustCheckPrevious.dir : null;
+    if (dir === null) return error(404, "no-such-artifact", "no Dust snapshot served has a public file of this digest");
     return {
       status: 200,
       headers: { ETag: `"${digest}"`, "Cache-Control": "public, max-age=31536000, immutable" },
@@ -1122,14 +1177,16 @@ export class PssServer {
     };
   }
 
-  /** A call to the check table: the query wire format with the check's identifier where the snapshot's goes. */
-  async #dustCheckQuery(req: HttpRequest<Uint8Array>): Promise<HttpAnswer> {
+  /** A call to the check table or the path table: the query wire format with the check's identifier where the snapshot's goes. */
+  async #dustCheckQuery(req: HttpRequest<Uint8Array>, which: "check" | "path"): Promise<HttpAnswer> {
     if (req.headers["content-type"] !== OCTET_STREAM) return error(415, "unsupported-media-type", `the body must be ${OCTET_STREAM}`);
     const check = this.#dustCheck;
     if (check === null) return error(503, "no-dust-check", "no Dust check table has been built yet");
+    const table = which === "check" ? check.table : check.pathTable;
+    if (table === null) return error(404, "no-path-table", "this Dust snapshot has no path table (its path split is 0)");
     let call;
     try {
-      call = decodeQueryBody(req.body, check.table.requestBytes, { queriesPerCall: check.manifest.queriesPerCall, snapshotId: check.idBytes });
+      call = decodeQueryBody(req.body, table.requestBytes, { queriesPerCall: check.manifest.queriesPerCall, snapshotId: check.idBytes });
     } catch (cause) {
       if (!(cause instanceof WireError)) throw cause;
       const code = cause.status === 409 ? "dust-check-replaced" : "invalid-query";
@@ -1137,7 +1194,7 @@ export class PssServer {
     }
     let answers: Uint8Array;
     try {
-      answers = await check.table.answer(call.payload, call.count);
+      answers = await table.answer(call.payload, call.count);
     } catch (cause) {
       if (!(cause instanceof RequestRefused)) throw cause;
       return error(400, "invalid-query", cause.message);
@@ -1145,7 +1202,7 @@ export class PssServer {
     return {
       status: 200,
       headers: { "Content-Type": OCTET_STREAM, "Cache-Control": "no-store", "Pss-Dust-Check-Id": check.id },
-      body: encodeAnswerBody({ snapshotId: check.idBytes, count: call.count, payload: answers }, check.table.responseBytes),
+      body: encodeAnswerBody({ snapshotId: check.idBytes, count: call.count, payload: answers }, table.responseBytes),
     };
   }
 
@@ -1268,6 +1325,7 @@ export class PssServer {
   async close(): Promise<void> {
     if (this.#current !== null) releaseTables(this.#current.tables);
     this.#dustCheck?.table.release();
+    this.#dustCheck?.pathTable?.release();
     const schemes = [...this.#schemes.values()];
     this.#schemes.clear();
     for (const opened of schemes) {
@@ -1310,6 +1368,17 @@ function answerBytes(answer: HttpAnswer | HttpFileAnswer): number {
   if (body instanceof Uint8Array) return body.length;
   if (typeof body === "string") return Buffer.byteLength(body);
   return Buffer.byteLength(JSON.stringify(body) ?? "");
+}
+
+/** A field element as 32 bytes, little-endian. */
+function fieldLe(value: bigint): Uint8Array {
+  const out = new Uint8Array(32);
+  let v = value;
+  for (let i = 0; i < 32; i++) {
+    out[i] = Number(v & 0xffn);
+    v >>= 8n;
+  }
+  return out;
 }
 
 /** The settings of a process context's latest revision (re-exported for the declaration). */

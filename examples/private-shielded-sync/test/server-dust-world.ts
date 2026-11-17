@@ -10,6 +10,11 @@
  *
  * The file's entries are at positions 10 to 49, then 64 and 65; the check table holds positions 0 to 63. The wallet's
  * Dust seed is 32 bytes of 9.
+ *
+ * The Dust snapshot's tree (phase 9) is built over the same 64 commitments, cut at k = 2, its root computed here and
+ * handed to the builder as the core's; the generation records are 8, the wallet's at indexes 3, 5 and 7 (chains A, B
+ * and C), the others another owner's; the snapshot is dated after every coin. The parameters route gives the ledger's
+ * initial parameters as those in force.
  */
 
 import { createHash, randomBytes } from "node:crypto";
@@ -18,6 +23,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as ledger from "../../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js";
 import { type DustChainStart, type DustCoin, DustFileView, fieldBytes, ledgerDustFunctions } from "../client/dust.ts";
+import { generationInfoOf } from "../client/dust-spend.ts";
+import { compileKernel, Kernel } from "../kernel/kernel.ts";
+import { dustTree } from "../server/dust-tree.ts";
 import { inlineMultiplier, type SchemeName } from "../pir/index.ts";
 import { openServerScheme } from "../pir/server-schemes.ts";
 import { buildDustCheck, type DustCheckResult } from "../server/dust-check.ts";
@@ -27,6 +35,8 @@ import {
   type DustCoinsAnswer,
   dustChunkOf,
   dustChunkRanges,
+  type DustGenerationRecord,
+  encodeDustGenerationRecords,
   type DustEntry,
   type DustManifest,
   type DustParametersAnswer,
@@ -35,16 +45,22 @@ import {
   encodeDustChunk,
   fromHex,
   ROUTES,
+  toHex,
 } from "../shared/index.ts";
 
 export const DUST_SEED = new Uint8Array(32).fill(9);
 const T0 = 1_794_000_000;
+/** The Dust snapshot's block time: after every coin of the world. */
+export const SNAPSHOT_TIME = T0 + 10_000;
+const PATH_SPLIT = 2;
 const CHUNK_ENTRIES = 16;
 
 /** The world's Dust routes: a `fetch` and how many check calls it answered. */
 export interface DustRoutes {
   readonly fetch: (url: string, init?: RequestInit) => Promise<Response>;
   queries(): number;
+  /** Calls to the path table. */
+  pathQueries(): number;
   readonly built: DustCheckResult;
 }
 
@@ -105,12 +121,30 @@ export async function dustWorld() {
       sha256: createHash("sha256").update(b).digest("hex"),
     })),
   };
-  const parameters: DustParametersAnswer = { nightDustRatio: "5000000000", generationDecayRate: "8267", dustGracePeriodSeconds: "10800", source: "initial", changedAt: null, height: 200 };
+  const parameters: DustParametersAnswer = {
+    nightDustRatio: "5000000000",
+    generationDecayRate: "8267",
+    dustGracePeriodSeconds: "10800",
+    source: "initial",
+    changedAt: null,
+    height: 200,
+    ledgerParameters: toHex(ledger.LedgerParameters.initialParameters().serialize()),
+    ledgerParametersHeight: 200,
+  };
 
   /** The tree's leaves: this wallet's coins where they are; every other position (the false match's too) another coin's. */
   const commitments = new Uint8Array(TABLE * 32);
   for (let p = 0; p < TABLE; p++) commitments.set(randomBytes(32), p * 32);
   for (const coin of [A.coin, B.coin, C.coin, A1, A2, B1]) commitments.set(fieldBytes(ledger.dustCommitment(coin)), Number(coin.mtIndex) * 32);
+
+  // The tree over the commitments (the core's root, here), and the generation records with their root (the ledger's).
+  const kernel = new Kernel(compileKernel());
+  const tree = dustTree(TABLE, PATH_SPLIT, (i) => kernel.leaf(commitments.subarray(32 * i, 32 * i + 32)), (a, b) => kernel.hash2(a, b)!);
+  const records: DustGenerationRecord[] = Array.from({ length: 8 }, (_, i) => ({ value: 1_000_000n + BigInt(i), owner: 77n, nonce: toHex(Uint8Array.from(randomBytes(32))), dtime: null }));
+  for (const s of [A, B, C]) records[Number(s.generationIndex)] = { value: s.generation.value, owner, nonce: s.generation.nonce, dtime: null };
+  let generationState = new ledger.DustLocalState(params);
+  records.forEach((r, i) => (generationState = generationState.insertGenerationInfo(BigInt(i), generationInfoOf(r), undefined)));
+  const generationRoot = toHex(fieldBytes(generationState.generatingTreeRoot()!));
 
   const dirs: string[] = [];
 
@@ -119,13 +153,32 @@ export async function dustWorld() {
     const dataDir = mkdtempSync(join(tmpdir(), "pss-dust-world-"));
     dirs.push(dataDir);
     const built = await buildDustCheck(
-      { eraHeight: 0, height: 9, commitments, count: TABLE, scheme, threads: 1, queriesPerCall: 4, dataDir },
+      {
+        eraHeight: 0,
+        height: 9,
+        commitments,
+        count: TABLE,
+        scheme,
+        threads: 1,
+        queriesPerCall: 4,
+        dataDir,
+        blockTime: SNAPSHOT_TIME,
+        pathSplit: PATH_SPLIT,
+        expectedRoot: tree.tree.root,
+        generation: encodeDustGenerationRecords(records),
+        generationRecords: records.length,
+        generationRoot,
+      },
       scheme === "simplepir" ? { multiplier: inlineMultiplier } : {},
     );
     const server = await openServerScheme(scheme, { threads: 1, multiplier: inlineMultiplier });
     const table = await server.adoptTable(built.manifest.table, built.transfer);
+    const pathTable = await server.adoptTable(built.manifest.tree.pathTable!, built.pathTransfer!);
+    const m = built.manifest;
+    const files = new Set([m.public.digest, m.tree.blockRoots.digest, m.tree.pathPublic!.digest, m.generation.file.digest]);
     const idBytes = fromHex(built.id, 32);
     let queries = 0;
+    let pathQueries = 0;
     const json = (body: unknown): Response => new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
     const fetch = async (url: string, init: RequestInit = {}): Promise<Response> => {
       const u = new URL(url);
@@ -144,21 +197,27 @@ export async function dustWorld() {
         return json(answer);
       }
       if (path === ROUTES.dustCheckManifest) return new Response(built.manifestBytes as Uint8Array<ArrayBuffer>, { headers: { "Content-Type": "application/json", "Pss-Dust-Check-Id": built.id } });
-      if (path === `${ROUTES.dustCheckBlob}${built.manifest.public.digest}`) return new Response(readFileSync(join(built.dir, built.manifest.public.digest)));
-      if (path === ROUTES.dustCheckQuery && init.method === "POST") {
-        queries++;
-        const call = decodeQueryBody(init.body as Uint8Array, table.requestBytes, { queriesPerCall: 4, snapshotId: idBytes });
-        const answers = await table.answer(call.payload, call.count);
-        return new Response(encodeAnswerBody({ snapshotId: idBytes, count: call.count, payload: answers }, table.responseBytes) as Uint8Array<ArrayBuffer>, { headers: { "Content-Type": "application/octet-stream" } });
+      if (path.startsWith(ROUTES.dustCheckBlob) && files.has(path.slice(ROUTES.dustCheckBlob.length))) return new Response(readFileSync(join(built.dir, path.slice(ROUTES.dustCheckBlob.length))));
+      if ((path === ROUTES.dustCheckQuery || path === ROUTES.dustPathQuery) && init.method === "POST") {
+        const t = path === ROUTES.dustCheckQuery ? table : pathTable;
+        if (path === ROUTES.dustCheckQuery) queries++;
+        else pathQueries++;
+        const call = decodeQueryBody(init.body as Uint8Array, t.requestBytes, { queriesPerCall: 4, snapshotId: idBytes });
+        const answers = await t.answer(call.payload, call.count);
+        return new Response(encodeAnswerBody({ snapshotId: idBytes, count: call.count, payload: answers }, t.responseBytes) as Uint8Array<ArrayBuffer>, { headers: { "Content-Type": "application/octet-stream" } });
       }
       return new Response("{}", { status: 404 });
     };
-    return { fetch, queries: () => queries, built };
+    return { fetch, queries: () => queries, pathQueries: () => pathQueries, built };
   }
 
   return {
     owner,
+    secretKey,
+    params,
     functions,
+    commitments,
+    records,
     A,
     B,
     C,

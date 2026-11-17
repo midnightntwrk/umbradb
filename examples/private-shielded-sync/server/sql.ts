@@ -26,7 +26,10 @@ const STATE_AT_SQL = `SELECT s.zswap_first_free, s.zswap_root, b.hash
   FROM core_ledger_state.states s JOIN core_block_commit.blocks b ON b.height = s.height
   WHERE s.height = $1::bigint`;
 const BLOCK_HASH_SQL = "SELECT hash FROM core_block_commit.blocks WHERE height = $1::bigint";
-const DUST_FIRST_FREE_SQL = "SELECT dust_commitment_first_free FROM core_ledger_state.states WHERE height = $1::bigint";
+const DUST_STATE_SQL = `SELECT s.dust_commitment_first_free, s.dust_commitment_root, s.dust_generation_first_free, s.dust_generation_root,
+    b.block_time
+  FROM core_ledger_state.states s JOIN core_block_commit.blocks b ON b.height = s.height
+  WHERE s.height = $1::bigint`;
 const GENESIS_SQL = "SELECT genesis_hash FROM core_chain.identity WHERE id = 1";
 
 const bytes = (value: unknown, what: string): Uint8Array => {
@@ -117,10 +120,30 @@ export async function stateAt(
   };
 }
 
-/** The Dust commitment tree's first free position after block `height` (00062), or null when no state is stored. */
-export async function dustFirstFreeAt(read: Reader, height: number): Promise<number | null> {
-  const [row] = await read.query(DUST_FIRST_FREE_SQL, [height]);
-  return row === undefined ? null : int(row.dust_commitment_first_free, "states.dust_commitment_first_free");
+/** The Dust trees after block `height` as the core stored them (00062), and the block's time; null when no state is stored. */
+export async function dustStateAt(
+  read: Reader,
+  height: number,
+): Promise<{
+  readonly commitmentFirstFree: number;
+  /** Stored roots: the ledger's untagged serialization (`rootFromStored` decodes them). */
+  readonly commitmentRoot: Uint8Array;
+  readonly generationFirstFree: number;
+  readonly generationRoot: Uint8Array;
+  /** Seconds since the Unix epoch. */
+  readonly blockTime: number;
+} | null> {
+  const [row] = await read.query(DUST_STATE_SQL, [height]);
+  if (row === undefined) return null;
+  const time = row.block_time instanceof Date ? row.block_time.getTime() : Date.parse(String(row.block_time));
+  if (!Number.isSafeInteger(time) || time % 1000 !== 0) throw new TypeError(`blocks.block_time is not whole seconds: ${String(row.block_time)}`);
+  return {
+    commitmentFirstFree: int(row.dust_commitment_first_free, "states.dust_commitment_first_free"),
+    commitmentRoot: bytes(row.dust_commitment_root, "states.dust_commitment_root"),
+    generationFirstFree: int(row.dust_generation_first_free, "states.dust_generation_first_free"),
+    generationRoot: bytes(row.dust_generation_root, "states.dust_generation_root"),
+    blockTime: time / 1000,
+  };
 }
 
 /** The hash of block `height`, or null when none is stored. */

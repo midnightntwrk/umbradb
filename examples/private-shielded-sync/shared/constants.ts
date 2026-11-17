@@ -33,6 +33,8 @@ export const ROUTES = Object.freeze({
   dustCheckBlob: `${ROUTE_PREFIX}/dust/check/blob/`,
   /** A query call to the Dust check table, the check's identifier in place of the snapshot's. */
   dustCheckQuery: `${ROUTE_PREFIX}/dust/check/query`,
+  /** A query call to the Dust path table (each position's lower Merkle path), read only to spend (phase 9). */
+  dustPathQuery: `${ROUTE_PREFIX}/dust/check/path`,
 });
 
 /** Default vectors per query call (FR-065). */

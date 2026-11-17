@@ -35,6 +35,7 @@ import {
   dustPrefix,
   encodeDustChunk,
 } from "../shared/dust-file.ts";
+import type { DustGenerationRecord } from "../shared/dust-check.ts";
 import { toHex } from "../shared/manifest.ts";
 import { GrowableBytes } from "./zswap-index.ts";
 
@@ -77,9 +78,21 @@ export interface DustDecoder {
    * A first coin's owner (Dust public key), its position in the Dust commitment tree, and its commitment (32 bytes,
    * the field element little-endian), which the event does not carry and the ledger computes (`dustCommitment`).
    */
-  firstCoin(bytes: Uint8Array): { readonly owner: bigint; readonly position: number; readonly commitment: Uint8Array };
+  firstCoin(bytes: Uint8Array): {
+    readonly owner: bigint;
+    readonly position: number;
+    readonly commitment: Uint8Array;
+    /** Its generation record's index in the generation tree, and the record (phase 9). */
+    readonly generationIndex: number;
+    readonly generation: DustGenerationRecord;
+  };
   /** The owner of the generation record a generation update changes. */
-  updateOwner(bytes: Uint8Array): bigint;
+  update(bytes: Uint8Array): { readonly owner: bigint; readonly nonce: string; readonly dtime: number | null };
+  /**
+   * The generation tree's root over `records` (record `i` at index `i`), as the ledger computes it: each record's leaf
+   * is its `merkle_hash`, which only the ledger package computes (phase 9).
+   */
+  generationRoot(records: readonly DustGenerationRecord[]): bigint;
   /** The Dust parameters a `param-change` event sets. */
   parameters(bytes: Uint8Array): DustParameterValues;
   /** The ledger's initial Dust parameters. */
@@ -144,6 +157,12 @@ export function ledgerDustDecoder(ledger: Ledger): DustDecoder {
     return value;
   };
   const initial = ledger.LedgerParameters.initialParameters().dust;
+  /** A generation record as the generation file holds it (`dtime` in whole seconds, or null). */
+  const recordOf = (g: V9.DustGenerationInfo): DustGenerationRecord => {
+    const ms = g.dtime?.getTime();
+    if (ms !== undefined && (!Number.isSafeInteger(ms) || ms % 1000 !== 0)) throw new Error(`a generation record whose dtime is ${String(g.dtime)}`);
+    return { value: g.value, owner: owner(g.owner), nonce: g.nonce, dtime: ms === undefined ? null : ms / 1000 };
+  };
   return {
     spend(bytes) {
       const c = content(bytes, "dustSpendProcessed");
@@ -154,11 +173,31 @@ export function ledgerDustDecoder(ledger: Ledger): DustDecoder {
       return { time: ms / 1000, fee: c.vFee as bigint, position };
     },
     firstCoin(bytes) {
-      const output = content(bytes, "dustInitialUtxo").output as V9.QualifiedDustOutput | undefined;
-      if (output === undefined) throw new Error("a first coin without its output");
-      return { owner: owner(output.owner), position: Number(output.mtIndex), commitment: fieldBytes(ledger.dustCommitment(output)) };
+      const c = content(bytes, "dustInitialUtxo");
+      const output = c.output as V9.QualifiedDustOutput | undefined;
+      const generation = c.generation as V9.DustGenerationInfo | undefined;
+      if (output === undefined || generation === undefined) throw new Error("a first coin without its output or generation record");
+      return {
+        owner: owner(output.owner),
+        position: Number(output.mtIndex),
+        commitment: fieldBytes(ledger.dustCommitment(output)),
+        generationIndex: Number(c.generationIndex as bigint),
+        generation: recordOf(generation),
+      };
     },
-    updateOwner: (bytes) => owner((content(bytes, "dustGenerationDtimeUpdate").update as { annotation?: { owner?: unknown } } | undefined)?.annotation?.owner),
+    update(bytes) {
+      const annotation = (content(bytes, "dustGenerationDtimeUpdate").update as { annotation?: V9.DustGenerationInfo } | undefined)?.annotation;
+      if (annotation === undefined) throw new Error("a generation update without its record");
+      const record = recordOf(annotation);
+      return { owner: owner(record.owner), nonce: record.nonce, dtime: record.dtime };
+    },
+    generationRoot(records) {
+      let local = new ledger.DustLocalState(ledger.LedgerParameters.initialParameters().dust);
+      records.forEach((r, i) => {
+        local = local.insertGenerationInfo(BigInt(i), { value: r.value, owner: r.owner, nonce: r.nonce, dtime: r.dtime === null ? undefined : new Date(r.dtime * 1000) }, undefined);
+      });
+      return local.generatingTreeRoot() ?? 0n;
+    },
     parameters: (bytes) => dustParametersOfText(ledger.Event.deserialize(bytes).toString(true)),
     initial: { nightDustRatio: initial.nightDustRatio, generationDecayRate: initial.generationDecayRate, dustGracePeriodSeconds: initial.dustGracePeriodSeconds },
   };
@@ -167,8 +206,17 @@ export function ledgerDustDecoder(ledger: Ledger): DustDecoder {
 /** One event checked and decoded, ready to be taken. */
 type Decoded =
   | { readonly kind: "spend"; readonly height: number; readonly prefix: Uint8Array; readonly time: number; readonly fee: bigint; readonly position: number; readonly commitment: Uint8Array }
-  | { readonly kind: "first-coin"; readonly height: number; readonly owner: bigint; readonly bytes: Uint8Array; readonly position: number; readonly commitment: Uint8Array }
-  | { readonly kind: "update"; readonly height: number; readonly owner: bigint; readonly bytes: Uint8Array }
+  | {
+      readonly kind: "first-coin";
+      readonly height: number;
+      readonly owner: bigint;
+      readonly bytes: Uint8Array;
+      readonly position: number;
+      readonly commitment: Uint8Array;
+      readonly generationIndex: number;
+      readonly generation: DustGenerationRecord;
+    }
+  | { readonly kind: "update"; readonly height: number; readonly owner: bigint; readonly bytes: Uint8Array; readonly nonce: string; readonly dtime: number | null }
   | { readonly kind: "parameters"; readonly height: number; readonly values: DustParameterValues };
 
 export interface DustIndexOptions {
@@ -202,6 +250,11 @@ export class DustIndex {
   readonly #coinHeights: number[] = [];
   readonly #coinPositions: number[] = [];
   readonly #coinCommitments = new GrowableBytes();
+  // First coins' generation indexes and records, and the updates' records (nonce and dtime), for the generation tree.
+  readonly #coinGenerationIndexes: number[] = [];
+  readonly #coinGenerations: DustGenerationRecord[] = [];
+  readonly #updateHeights: number[] = [];
+  readonly #updateRecords: { readonly nonce: string; readonly dtime: number | null }[] = [];
   #changed: { readonly values: DustParameterValues; readonly height: number } | null = null;
   // Encoded chunks: every full one, and the last one at its entry count.
   readonly #full = new Map<number, EncodedDustChunk>();
@@ -290,7 +343,7 @@ export class DustIndex {
         return { kind: "first-coin", height, bytes: e.bytes, ...coin };
       }
       case "dust-generation-dtime-update":
-        return { kind: "update", height, owner: decoder.updateOwner(e.bytes), bytes: e.bytes };
+        return { kind: "update", height, bytes: e.bytes, ...decoder.update(e.bytes) };
       case "param-change":
         return { kind: "parameters", height, values: decoder.parameters(e.bytes) };
     }
@@ -312,6 +365,11 @@ export class DustIndex {
           this.#coinHeights.push(d.height);
           this.#coinPositions.push(d.position);
           this.#coinCommitments.push(d.commitment);
+          this.#coinGenerationIndexes.push(d.generationIndex);
+          this.#coinGenerations.push(d.generation);
+        } else {
+          this.#updateHeights.push(d.height);
+          this.#updateRecords.push({ nonce: d.nonce, dtime: d.dtime });
         }
         let lists = this.#owners.get(d.owner);
         if (lists === undefined) {
@@ -382,6 +440,32 @@ export class DustIndex {
       );
     }
     return { height, count, bytes };
+  }
+
+  /**
+   * Every generation record of the era at `height` (the index's by default), record `i` at generation index `i`: each
+   * first coin's record, with the `dtime` of the last update of that record (same nonce) at or below `height`. Throws
+   * {@link DustCoverageError} unless the indexes run from 0 without a gap or a repeat (phase 9).
+   */
+  generationRecords(height: number = this.#height): DustGenerationRecord[] {
+    if (height > this.#height) throw new Error(`the Dust index is at ${this.#height}, not ${height}`);
+    const coins = countAtOrBelow(this.#coinHeights, height);
+    const updates = countAtOrBelow(this.#updateHeights, height);
+    const dtimes = new Map<string, number | null>();
+    for (let u = 0; u < updates; u++) dtimes.set(this.#updateRecords[u]!.nonce, this.#updateRecords[u]!.dtime);
+    const out: (DustGenerationRecord | undefined)[] = new Array(coins);
+    for (let j = 0; j < coins; j++) {
+      const i = this.#coinGenerationIndexes[j]!;
+      if (i >= coins || out[i] !== undefined) throw new DustCoverageError(`the Dust generation index ${i} is out of range or given twice (${coins} first coins up to height ${height})`);
+      const g = this.#coinGenerations[j]!;
+      out[i] = dtimes.has(g.nonce) ? { ...g, dtime: dtimes.get(g.nonce)! } : g;
+    }
+    return out as DustGenerationRecord[];
+  }
+
+  /** The generation tree's root over `records`, by the ledger (the decoder); null before the index has one. */
+  generationRoot(records: readonly DustGenerationRecord[]): bigint | null {
+    return this.#decoder === null ? null : this.#decoder.generationRoot(records);
   }
 
   /** The number of chunks the file has now. */

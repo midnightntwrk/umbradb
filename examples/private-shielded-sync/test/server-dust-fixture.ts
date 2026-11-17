@@ -2,7 +2,8 @@
  * Real Dust events for the module's tests (spec 00062): `fixtures/dust-events.json` holds every Dust event of Preprod's
  * current era from its first height, 3,348,434, to 3,349,867, as the core stores them: 144 spends, 110 first coins and
  * 5 generation updates, whose commitments fill the Dust commitment tree's positions 0 to 253 (the core's
- * `dust_commitment_first_free` there is 254). No test chain can make such events without a Night registration. The
+ * `dust_commitment_first_free` there is 254), and the core's stored Dust tree values (first free positions and roots) at
+ * three of those heights, the oracle for both trees. No test chain can make such events without a Night registration. The
  * expected file entries and commitments are taken from the events with the vendored ledger build, independently of the
  * module's own decoding.
  */
@@ -28,9 +29,19 @@ export interface FixtureRow {
 
 const fromHex = (hex: string): Uint8Array => Uint8Array.from(Buffer.from(hex, "hex"));
 
-export const FIXTURE: readonly FixtureRow[] = (
-  JSON.parse(readFileSync(new URL("./fixtures/dust-events.json", import.meta.url), "utf8")) as { events: FixtureRow[] }
-).events;
+/** The core's stored Dust tree values at one Preprod height (roots in the ledger's untagged serialization, hexadecimal). */
+export interface FixtureState {
+  readonly height: number;
+  readonly commitmentFirstFree: number;
+  readonly commitmentRoot: string;
+  readonly generationFirstFree: number;
+  readonly generationRoot: string;
+}
+
+const parsed = JSON.parse(readFileSync(new URL("./fixtures/dust-events.json", import.meta.url), "utf8")) as { events: FixtureRow[]; states: FixtureState[] };
+export const FIXTURE: readonly FixtureRow[] = parsed.events;
+/** The core's stored Dust tree values at 3,348,434, 3,349,459 and 3,349,867: the oracle for both trees. */
+export const FIXTURE_STATES: readonly FixtureState[] = parsed.states;
 
 /** A fixture row as the module's index takes it, at `height` (its own unless given). */
 export function dustEventOf(row: FixtureRow, height = row.height): DustEvent {
