@@ -248,16 +248,21 @@ interface Outcome {
 const PREPARED_TEXTS = 256;
 
 /**
- * A statement PostgreSQL plans, by its first word. Such a text is prepared even when it takes no parameter: sent
- * unprepared it is parsed and planned again at every execution, which for the statements a block repeats (the head
- * read, the queue read, the digest read, the shadow tables' probe and drains) costs several times their execution.
- * Transaction control and `SET` are not planned, and run on the simple protocol or unprepared as before.
+ * A statement PostgreSQL plans, by its first word after spaces, in any case. Such a text is prepared even when it takes
+ * no parameter: sent unprepared it is parsed and planned again at every execution, which for the statements a block
+ * repeats (the head read, the queue read of a run that sweeps, the digest read, the shadow tables' probe and drains)
+ * costs several times their execution. Prepared, it is parsed once on its session, and PostgreSQL reuses the plan it
+ * keeps for it where it chooses to, planning again after a change to what it reads. A text without parameters that
+ * starts with anything else (a comment, a parenthesis, `SET`, transaction control) is not matched, and runs as before:
+ * unprepared, or on the simple protocol.
  */
 const PLANNED = /^\s*(SELECT|WITH|INSERT|UPDATE|DELETE|MERGE|VALUES|TABLE)\b/i;
 
 /**
  * Which texts a session prepares: every statement with parameters, and every statement PostgreSQL plans
- * ({@link PLANNED}), up to {@link PREPARED_TEXTS} in the session's life.
+ * ({@link PLANNED}), up to {@link PREPARED_TEXTS} in the session's life, none it retired (below). A text retired on a
+ * session, such as one a reader ran at startup before the writer's migrations, runs unprepared on that session for the
+ * rest of its life: parsed and planned at every execution, as before.
  *
  * Counts the statements that may change a table's columns (DDL) on any session this process opened to one database,
  * through any pool: a session reuses only the texts it prepared since the last one. PostgreSQL re-plans a prepared

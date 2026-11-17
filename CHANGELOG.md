@@ -260,10 +260,15 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   copy does not hold its key; if it does, the change goes unseen, but by `verify`, until a block that does not continue
   the one before, or the bound, empties the copy. In the block trace, `counts` and `references` hold only the keys asked
   of the database, and `copyHits`, `copyMisses` and `copyEmptied` are new; the operator guide lists them.
-- **PostgreSQL sessions prepare the statements that take no parameter too.** A statement PostgreSQL plans is prepared
-  once per session and reused whether or not it has parameters, within the session's bound of 256 texts and its rule
-  for schema changes. The statements every block repeats without a parameter (the head read, the queue read, the
-  digest read, the shadow tables' probe and drains) are no longer parsed and planned at every execution.
+- **PostgreSQL sessions prepare the statements that take no parameter too.** A text without parameters that starts with
+  `SELECT`, `WITH`, `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `VALUES` or `TABLE` is now prepared once per session and run
+  by name, as a text with parameters already was, within the session's bound of 256 texts: it is parsed once on that
+  session, and PostgreSQL reuses the plan it keeps for it where it chooses to. The statements every block repeats
+  without a parameter (the head read, the queue read of a run that sweeps, the digest read, the shadow tables' probe and
+  drains) are such texts. A text that starts otherwise (a comment, a parenthesis, `SET`, transaction control) runs
+  unprepared as before, and so does, for the rest of a session's life, a text that session ran before a schema change
+  the process made (a migration, a writer's rollback). When several executions of a new text are sent at once on one
+  handle, the first prepares it and the others run unnamed.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 
