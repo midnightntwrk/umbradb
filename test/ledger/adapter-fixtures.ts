@@ -245,6 +245,46 @@ export function zswapOutputTransaction(raw: RawPackage): Uint8Array {
   return raw.Transaction.fromParts(NETWORK_ID, offer, undefined, undefined).eraseProofs().serialize();
 }
 
+/**
+ * A proof-erased transaction whose guaranteed zswap output of 10 units of the shielded native token is owned by
+ * `contract`, with a call of `emit` on it that receives the coin: its guaranteed transcript claims the output's
+ * commitment, as `midnight-ledger`'s `kernel_claim_zswap_coin_receive` program fragment does
+ * (`onchain-runtime/vendored/program_fragments.rs`), so the effects the transcript declares are those it runs and every
+ * contract-owned output is claimed. The commitment tree then holds a leaf with `contract`'s address beside it.
+ */
+export function contractReceiveTransaction(raw: RawPackage, contract: ContractFixture): Uint8Array {
+  const token = raw.shieldedToken().raw;
+  const output = raw.ZswapOutput.newContractOwned(raw.createShieldedCoinInfo(token, 10n), 0, hex(contract.address));
+  const commitment = fromHex(output.commitment);
+  let end = commitment.length;
+  while (end > 0 && commitment[end - 1] === 0) end -= 1;
+  const program: v9.Op<v9.AlignedValue>[] = [
+    { swap: { n: 0 } },
+    // The effects' second field, the shielded receives claimed.
+    { idx: { cached: true, pushPath: true, path: [{ tag: "value", value: atom(Uint8Array.of(1)) }] } },
+    { push: { storage: false, value: cellValue(commitment.slice(0, end), 32) } },
+    { push: { storage: false, value: { tag: "null" } } },
+    { ins: { cached: true, n: 2 } },
+    { swap: { n: 0 } },
+  ];
+  const empty = { value: [], alignment: [] };
+  const call = new raw.ContractCallPrototype(
+    hex(contract.address),
+    "emit",
+    emitOperation(raw),
+    { gas: fixtureGas(raw), effects: { ...EMPTY_EFFECTS, claimedShieldedReceives: [output.commitment] }, program },
+    undefined,
+    [],
+    empty,
+    empty,
+    raw.communicationCommitmentRandomness(),
+    "emit",
+  );
+  const intent = raw.Intent.new(new Date(T0 + 60_000)).addCall(call);
+  const offer = raw.ZswapOffer.fromOutput(output, token, 10n);
+  return raw.Transaction.fromParts(NETWORK_ID, offer, undefined, intent).eraseProofs().serialize();
+}
+
 /** `DistributeReserve(1000000000000000)` (see the header). */
 export function systemTransaction(ledger: Ledger): Uint8Array {
   return systemTransactionOf(ledger, "05");

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { contractStatesOf } from "../../src/backbone/core-contract-states/core-contract-states.js";
 import { loadLedgerPackage } from "../../src/ledger/load.js";
-import type { ApplyInput, ChainOutcome, LedgerName, LedgerPackage, LedgerPackageOptions, StoredNode } from "../../src/ledger/types.js";
+import type { ApplyInput, ChainOutcome, LedgerName, LedgerPackage, LedgerPackageOptions, StateSummary, StoredNode } from "../../src/ledger/types.js";
 import { type AppliedState, type ApplyBlock, type BlockId, LedgerEngine, type LedgerLoader, ZSWAP_KEYS_KEPT } from "../../src/ledger/worker/engine.js";
 import type { BlockContext } from "../../src/modules/declaration.js";
 import {
@@ -9,6 +9,7 @@ import {
   callTransaction,
   cellValue,
   contractFixture,
+  contractReceiveTransaction,
   FAILING_PROGRAM,
   failingSystemTransaction,
   hex,
@@ -111,6 +112,23 @@ function countingZswapKeys(change: (real: LedgerPackage) => Partial<LedgerPackag
       };
     },
   };
+}
+
+/**
+ * The oracle of a kept zswap state key: the key an engine gives that gets `blocks` (each block's transactions, from
+ * height 1) and is told of `address` at block `height` only. It has no key of the contract by then, so the package
+ * builds it from that block's state.
+ */
+async function zswapKeyBuiltAt(blocks: readonly (readonly Uint8Array[])[], height: number, address: Uint8Array): Promise<string> {
+  const { engine } = await atGenesis();
+  let applied: AppliedState | undefined;
+  for (const [index, transactions] of blocks.slice(0, height).entries()) {
+    const block = at(BigInt(index + 1));
+    await engine.parse("v9", block, [...transactions]);
+    applied = await engine.apply(applyBlock(block.height, transactions.length, index + 1 === height ? { contracts: [address] } : {}));
+    engine.commit(block);
+  }
+  return hex(applied?.contracts[0]?.zswapStateKey as Uint8Array);
 }
 
 /** The rows `core-contract-states` makes of `applied`'s contract keys (it throws for a contract with one key of two). */
@@ -525,6 +543,130 @@ describe("the ledger worker's engine", () => {
     keepsNone.commit(at(1n));
     await keepsNone.apply(applyBlock(2n, 0, { contracts: [one.address] }));
     expect(none.built()).toBe(2);
+  });
+
+  it("builds a contract's zswap state key again for the same first free index with another root, and for the same root with another index", { timeout: LONG }, async () => {
+    // On one chain a tree with a new leaf has both another index and another root, so each comparison of `#zswapKey`
+    // is shown alone with a summary the package is made to give: the real tree stays as block 1 left it.
+    let change: ((summary: StateSummary) => StateSummary) | undefined;
+    const counting = countingZswapKeys((real) => ({
+      stateSummary: (state) => (change ?? ((summary: StateSummary) => summary))(real.stateSummary(state)),
+    }));
+    const { engine } = await atGenesis(new LedgerEngine({ load: counting.load }));
+    const contract = await contractFixture(RAW.v9);
+    const contracts = [contract.address];
+    await engine.parse("v9", at(1n), [contract.deploy, zswapOutputTransaction(RAW.v9)]);
+    const one = await engine.apply(applyBlock(1n, 2, { contracts }));
+    expect(engine.commit(at(1n))).toBe(true);
+    expect(counting.built()).toBe(1);
+    const key = hex(one.contracts[0]?.zswapStateKey as Uint8Array);
+    // Block 2: the same first free index, another root.
+    const otherRoot = (summary: StateSummary): StateSummary => ({ ...summary, zswapRoot: Uint8Array.from(summary.zswapRoot, (byte) => byte ^ 0xff) });
+    change = otherRoot;
+    const two = await engine.apply(applyBlock(2n, 0, { contracts }));
+    expect(engine.commit(at(2n))).toBe(true);
+    expect(two.summary.zswapFirstFree).toBe(one.summary.zswapFirstFree);
+    expect(hex(two.summary.zswapRoot)).not.toBe(hex(one.summary.zswapRoot));
+    expect(counting.built()).toBe(2);
+    // Block 3: the root block 2 gave, another first free index.
+    change = (summary) => ({ ...otherRoot(summary), zswapFirstFree: summary.zswapFirstFree + 1n });
+    const three = await engine.apply(applyBlock(3n, 0, { contracts }));
+    expect(hex(three.summary.zswapRoot)).toBe(hex(two.summary.zswapRoot));
+    expect(three.summary.zswapFirstFree).not.toBe(two.summary.zswapFirstFree);
+    expect(counting.built()).toBe(3);
+    // The real tree did not change, so the package gives the same key each time.
+    expect([two, three].map((applied) => hex(applied.contracts[0]?.zswapStateKey as Uint8Array))).toEqual([key, key]);
+  });
+
+  it("builds a contract's zswap state key again in another package, at the first block of an upgrade within v9", { timeout: LONG }, async () => {
+    // The v9 package under two names, `v9-rc5` and `v9`: two adapters over one package, so a state of one loads in
+    // the other from memory, as an upgrade within v9 loads the state at U by its key in F's package.
+    const counting = countingZswapKeys();
+    const named = async (ledger: LedgerName, options: LedgerPackageOptions): Promise<LedgerPackage> => ({ ...(await counting.load("v9", options)), ledger });
+    const engine = new LedgerEngine({ load: named, store: { get: () => null } });
+    await engine.genesis({
+      ledger: "v9-rc5",
+      ...at(0n),
+      parentHash: new Uint8Array(32),
+      timestampMs: BigInt(T0),
+      transactions: 0,
+      genesisState: blankGenesis(),
+      includesBlockZero: true,
+    });
+    expect(engine.commit(at(0n))).toBe(true);
+    const contract = await contractFixture(RAW.v9);
+    const contracts = [contract.address];
+    await engine.parse("v9-rc5", at(1n), [contract.deploy]);
+    const one = await engine.apply(applyBlock(1n, 1, { ledger: "v9-rc5", contracts }));
+    expect(engine.commit(at(1n))).toBe(true);
+    expect(counting.built()).toBe(1);
+    // Block 2, the upgrade's first block, adds nothing: the same tree, but another package, so built again.
+    const two = await engine.apply(applyBlock(2n, 0, { contracts }));
+    expect(two.ledger).toBe("v9");
+    expect(hex(two.summary.zswapRoot)).toBe(hex(one.summary.zswapRoot));
+    expect(counting.built()).toBe(2);
+    expect(hex(two.contracts[0]?.zswapStateKey as Uint8Array)).toBe(hex(one.contracts[0]?.zswapStateKey as Uint8Array));
+    // Block 3 in the same package: kept.
+    expect(engine.commit(at(2n))).toBe(true);
+    await engine.apply(applyBlock(3n, 0, { contracts }));
+    expect(counting.built()).toBe(2);
+  });
+
+  it("gives no zswap state key, kept or not, for a contract that a later state of the same chain does not hold", { timeout: LONG }, async () => {
+    // No ledger removes a contract, so on one chain a state after one that holds it holds it too: the package is made
+    // to answer that block 2's state does not, with the zswap tree unchanged.
+    let absent = false;
+    const counting = countingZswapKeys((real) => ({
+      contractStateKey: (state, address) => (absent ? null : real.contractStateKey(state, address)),
+      contractZswapStateKey: (state, address) => (absent ? null : real.contractZswapStateKey(state, address)),
+    }));
+    const { engine } = await atGenesis(new LedgerEngine({ load: counting.load }));
+    const contract = await contractFixture(RAW.v9);
+    const contracts = [contract.address];
+    await engine.parse("v9", at(1n), [contract.deploy]);
+    const one = await engine.apply(applyBlock(1n, 1, { contracts }));
+    expect(engine.commit(at(1n))).toBe(true);
+    expect(one.contracts[0]?.zswapStateKey).not.toBeNull();
+    expect(counting.built()).toBe(1);
+    absent = true;
+    const two = await engine.apply(applyBlock(2n, 0, { contracts }));
+    expect(hex(two.summary.zswapRoot)).toBe(hex(one.summary.zswapRoot));
+    expect(two.contracts).toEqual([{ address: contract.address, stateKey: null, zswapStateKey: null }]);
+    expect(counting.built()).toBe(2);
+    expect(contractRowsOf(two)).toEqual([]);
+  });
+
+  it("keeps each contract's own zswap state key: two contracts that own other commitments do not share one", { timeout: LONG }, async () => {
+    const counting = countingZswapKeys();
+    const { engine } = await atGenesis(new LedgerEngine({ load: counting.load }));
+    const [first, second] = await Promise.all([contractFixture(RAW.v9), contractFixture(RAW.v9)]);
+    const contracts = [first.address, second.address];
+    const blocks = [
+      [first.deploy, second.deploy],
+      [contractReceiveTransaction(RAW.v9, first), contractReceiveTransaction(RAW.v9, second)],
+      [callTransaction(RAW.v9, first, logProgram([cellValue(Uint8Array.of(7))]))],
+    ];
+    const applied: AppliedState[] = [];
+    const built: number[] = [];
+    for (const [index, transactions] of blocks.entries()) {
+      const block = at(BigInt(index + 1));
+      await engine.parse("v9", block, transactions);
+      applied.push(await engine.apply(applyBlock(block.height, transactions.length, { contracts })));
+      expect(engine.commit(block)).toBe(true);
+      built.push(counting.built());
+    }
+    const keys = applied.map((block) => block.contracts.map((contract) => hex(contract.zswapStateKey as Uint8Array)));
+    // Block 1: neither owns a commitment, so each filtered tree is the whole tree collapsed: the same key for both,
+    // each built.
+    expect(keys[0]?.[0]).toBe(keys[0]?.[1]);
+    // Block 2: each receives a coin, a leaf with its address beside it: each key built again, and they differ.
+    expect(applied[1]?.output.results.map((result) => result.outcome)).toEqual(["success", "success"]);
+    expect(applied[1]?.summary.zswapFirstFree).toBe(2n);
+    expect(keys[1]?.[0]).not.toBe(keys[1]?.[1]);
+    // Block 3 adds no commitment: both kept, each its own, each the key built from block 3's state.
+    expect(built).toEqual([2, 4, 4]);
+    expect(keys[2]).toEqual(keys[1]);
+    for (const [index, address] of contracts.entries()) expect(keys[2]?.[index]).toBe(await zswapKeyBuiltAt(blocks, 3, address));
   });
 
   it("gives block 0 again while pending, with its outcomes, and refuses a parse of another ledger", { timeout: LONG }, async () => {
