@@ -72,7 +72,7 @@ interface Active {
   /** The chain of step outputs of the heights ended so far. */
   chain: Hash;
   /** The chain with the current height's step outputs, which replaces it when the height ends; null before any. */
-  pending: Hash | null;
+  heightChain: Hash | null;
   block: Record<string, unknown>;
   lines: string[];
   worker: string[];
@@ -108,7 +108,7 @@ export function startTrace(sink: TraceSink, options: TraceOptions = {}): void {
     statements: new Map(),
     other: { n: 0, ms: 0, max: 0 },
     chain: createHash("sha256"),
-    pending: null,
+    heightChain: null,
     block: {},
     lines: [],
     worker: [],
@@ -212,9 +212,9 @@ export function traceStatement(text: string, ms: number): void {
  */
 export function traceChain(value: unknown): void {
   if (active === null) return;
-  active.pending ??= active.chain.copy();
-  active.pending.update(JSON.stringify(value));
-  active.block.sh = active.pending.copy().digest("hex").slice(0, 16);
+  active.heightChain ??= active.chain.copy();
+  active.heightChain.update(JSON.stringify(value));
+  active.block.sh = active.heightChain.copy().digest("hex").slice(0, 16);
 }
 
 /**
@@ -231,8 +231,8 @@ export function traceEndBlock(height: bigint): void {
   for (const [key, value] of Object.entries(line)) if (typeof value === "number") line[key] = +value.toFixed(3);
   active.lines.push(JSON.stringify(line));
   active.block = {};
-  if (active.pending !== null) active.chain = active.pending;
-  active.pending = null;
+  if (active.heightChain !== null) active.chain = active.heightChain;
+  active.heightChain = null;
   if (active.lines.length >= FLUSH_LINES) flush(active);
 }
 
@@ -243,7 +243,7 @@ export function traceEndBlock(height: bigint): void {
 export function traceDropBlock(): void {
   if (active === null) return;
   active.block = {};
-  active.pending = null;
+  active.heightChain = null;
 }
 
 /** Keeps one line of the ledger worker (`./worker-trace.ts`'s entry for an applied block). */
