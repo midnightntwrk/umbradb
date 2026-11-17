@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { contractStatesOf } from "../../src/backbone/core-contract-states/core-contract-states.js";
 import { loadLedgerPackage } from "../../src/ledger/load.js";
 import type { ApplyInput, ChainOutcome, LedgerName, LedgerPackage, LedgerPackageOptions, StoredNode } from "../../src/ledger/types.js";
-import { type AppliedState, type ApplyBlock, type BlockId, LedgerEngine, type LedgerLoader } from "../../src/ledger/worker/engine.js";
+import { type AppliedState, type ApplyBlock, type BlockId, LedgerEngine, type LedgerLoader, ZSWAP_KEYS_KEPT } from "../../src/ledger/worker/engine.js";
 import type { BlockContext } from "../../src/modules/declaration.js";
 import {
   block as fixtureBlock,
@@ -486,6 +486,45 @@ describe("the ledger worker's engine", () => {
     expect((await engine.load({ ledger: "v9", ...at(2n), stateKey: two.stateKey })).loaded).toBe(true);
     expect(keyOf(await engine.apply(applyBlock(3n, 0, { contracts })))).toBe(first);
     expect(counting.built()).toBe(4);
+  });
+
+  it("keeps the zswap state keys of as many contracts as its bound, drops the least recently used, and builds a dropped one again", { timeout: LONG }, async () => {
+    expect(ZSWAP_KEYS_KEPT).toBe(16_384);
+    expect(() => new LedgerEngine({ load: loadLedgerPackage, zswapKeysKept: -1 })).toThrow(RangeError);
+    expect(() => new LedgerEngine({ load: loadLedgerPackage, zswapKeysKept: 1.5 })).toThrow(RangeError);
+    const counting = countingZswapKeys();
+    const { engine } = await atGenesis(new LedgerEngine({ load: counting.load, zswapKeysKept: 2 }));
+    const [one, two, three] = await Promise.all([contractFixture(RAW.v9), contractFixture(RAW.v9), contractFixture(RAW.v9)]);
+    const named = async (height: bigint, contracts: Uint8Array[], transactions: Uint8Array[] = []): Promise<AppliedState> => {
+      if (transactions.length > 0) await engine.parse("v9", at(height), transactions);
+      const applied = await engine.apply(applyBlock(height, transactions.length, { contracts }));
+      expect(engine.commit(at(height))).toBe(true);
+      return applied;
+    };
+    // Block 1 deploys the three, each named: three keys built, two kept (the first is dropped as the third is kept).
+    const deployed = await named(1n, [one.address, two.address, three.address], [one.deploy, two.deploy, three.deploy]);
+    expect(counting.built()).toBe(3);
+    // The second is used: kept, and now the most recently used.
+    expect(hex((await named(2n, [two.address])).contracts[0]?.zswapStateKey as Uint8Array)).toBe(hex(deployed.contracts[1]?.zswapStateKey as Uint8Array));
+    expect(counting.built()).toBe(3);
+    // The first was dropped: built again, and kept in place of the least recently used, the third.
+    await named(3n, [one.address]);
+    expect(counting.built()).toBe(4);
+    // The second is still kept (the order is by use, not by when a key was first kept).
+    await named(4n, [two.address]);
+    expect(counting.built()).toBe(4);
+    // The third was dropped: built again, the same key as at its deploy (nothing changed its tree).
+    const again = await named(5n, [three.address]);
+    expect(counting.built()).toBe(5);
+    expect(hex(again.contracts[0]?.zswapStateKey as Uint8Array)).toBe(hex(deployed.contracts[2]?.zswapStateKey as Uint8Array));
+    // A bound of 0 keeps none.
+    const none = countingZswapKeys();
+    const { engine: keepsNone } = await atGenesis(new LedgerEngine({ load: none.load, zswapKeysKept: 0 }));
+    await keepsNone.parse("v9", at(1n), [one.deploy]);
+    await keepsNone.apply(applyBlock(1n, 1, { contracts: [one.address] }));
+    keepsNone.commit(at(1n));
+    await keepsNone.apply(applyBlock(2n, 0, { contracts: [one.address] }));
+    expect(none.built()).toBe(2);
   });
 
   it("gives block 0 again while pending, with its outcomes, and refuses a parse of another ledger", { timeout: LONG }, async () => {
