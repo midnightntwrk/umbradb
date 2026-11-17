@@ -56,8 +56,8 @@
  * the process starts until the command ends. With `UMBRADB_TRACE_STEPS=1` beside it, each line also holds its step's
  * count changes, new nodes and deleted nodes. It is a measuring aid, off unless the variable is set, and changes
  * nothing the process stores. The command opens the files before it starts anything, and refuses when it cannot
- * (`./command.ts`); a write that fails later stops the trace, with one line in the process's log, and the process goes
- * on.
+ * (`./command.ts`); a write that fails later halts processing with that error, and one at the command's end fails
+ * the command.
  */
 
 import { startAdminServer } from "../admin/server.js";
@@ -212,7 +212,7 @@ export async function runProcess(options: RunOptions, seams: RunSeams = {}): Pro
   const usr2 = backupSignalRelay(seams.backupSignals ?? process, options.log);
   const traced = options.trace !== undefined;
   // Before the process starts, so its ledger worker's thread is started traced too.
-  if (options.trace !== undefined) startTrace(options.trace, { steps: options.traceSteps === true, log: options.log });
+  if (options.trace !== undefined) startTrace(options.trace, { steps: options.traceSteps === true });
   try {
     const handle = (seams.start ?? startProcess)({
       config: { file: options.file ?? DEFAULT_CONFIG_FILE },

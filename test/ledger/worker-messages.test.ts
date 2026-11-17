@@ -3,7 +3,7 @@ import { loadLedgerPackage } from "../../src/ledger/load.js";
 import type { StoredNode } from "../../src/ledger/types.js";
 import { type ApplyBlock, type AppliedState, type BlockId, LedgerEngine } from "../../src/ledger/worker/engine.js";
 import { type LedgerHost, startLedgerWorker } from "../../src/ledger/worker/host.js";
-import { FLUSH_LINES, startTrace, stopTrace, traceEndBlock, tracing, type TraceSink } from "../../src/trace/trace.js";
+import { startTrace, stopTrace, traceEndBlock, type TraceSink } from "../../src/trace/trace.js";
 import { addingUpProblems, sumOf, type WorkerLine } from "../trace/worker-time.js";
 import { contractFixture, hex, NETWORK_ID, RAW, T0, zswapOutputTransaction } from "./adapter-fixtures.js";
 import type { SeenMessage } from "./fixtures/message-spy-loader.js";
@@ -18,8 +18,6 @@ import type { SeenMessage } from "./fixtures/message-spy-loader.js";
  *   node request also says when it was posted; the worker posts one entry per applied block, whose parts add up to its
  *   span and whose node waits are the bridge's requests; and the main thread's height gets each request type's round
  *   trips, the answers' way back and the node requests' times.
- * - Traced, then stopped on the main thread because its sink failed: the requests after it do not say when they were
- *   posted, and from the first of them the worker posts what an untraced worker posts.
  */
 
 const LONG = 240_000;
@@ -100,22 +98,14 @@ afterEach(async () => {
   await Promise.all(hosts.splice(0).map((host) => host.close()));
 });
 
-/**
- * The sequence (see the module comment) on a new worker; `ended` runs once its last apply is answered, `applied` once
- * its first is.
- */
-async function sequence(
-  stored: Awaited<ReturnType<typeof storedState>>,
-  ended: () => void = () => undefined,
-  applied: () => void = () => undefined,
-): Promise<Sequence> {
+/** The sequence (see the module comment) on a new worker; `ended` runs once its last apply is answered. */
+async function sequence(stored: Awaited<ReturnType<typeof storedState>>, ended: () => void = () => undefined): Promise<Sequence> {
   const reader = mapReader(stored.nodes);
   const host = startLedgerWorker({ loader: SPY });
   hosts.push(host);
   await host.load({ ledger: "v9", ...at(1n), stateKey: stored.stateKey }, reader);
   await host.parse("v9", at(2n), [stored.next]);
   const two = await host.apply(applyBlock(2n, 1), reader);
-  applied();
   expect(await host.commit(at(2n))).toBe(true);
   await host.release({ upTo: 2n });
   await host.parse("v9", at(3n), []);
@@ -198,41 +188,5 @@ describe("the messages between the main thread and the ledger worker", () => {
     expect(block.nodeReadMs).toBeGreaterThan(0);
     // The worker is blocked from before its node request is posted until after the main thread has noticed it.
     expect(block.nodeNoticeMs as number).toBeLessThanOrEqual(total("nodeWaitMs") + 0.01);
-  });
-
-  it("traced, then stopped on the main thread when its sink fails: from the next request on, the worker posts no entry and says no time, and computes the same", { timeout: LONG }, async () => {
-    const stored = await storedState();
-    const plain = await sequence(stored);
-    const log: string[] = [];
-    const failing: TraceSink = {
-      blocks: () => {
-        throw new Error("no space left on device");
-      },
-      statements: () => undefined,
-      worker: () => undefined,
-    };
-    startTrace(failing, { log: (line) => log.push(line) });
-    // The trace holds a flush's lines but one: the height ended after block 2's apply hands the sink its lines, and the
-    // sink fails, which stops the trace.
-    for (let height = 1; height < FLUSH_LINES; height++) traceEndBlock(BigInt(height));
-    const stopped = await sequence(stored, () => undefined, () => traceEndBlock(2n));
-    expect(log).toEqual(["block trace stopped, the process goes on untraced: writing it failed: no space left on device"]);
-    expect(tracing()).toBe(false);
-    expect(stopped.applied).toEqual(plain.applied);
-    expect(stopped.bridge).toEqual(plain.bridge);
-    // The requests before the stop say when they were posted; the commit after it and every later one do not.
-    expect(of(stopped.seen, "in").map((message) => message.keys)).toEqual([
-      ...REQUESTS.slice(0, 3).map(() => ["id", "request", "at"]),
-      ...REQUESTS.slice(3).map(() => ["id", "request"]),
-    ]);
-    const fromCommit = (seen: readonly SeenMessage[]): SeenMessage[] => seen.slice(seen.findIndex((message) => message.way === "in" && message.type === "commit"));
-    const first = stopped.seen.findIndex((message) => message.way === "in" && !message.keys.includes("at"));
-    expect(stopped.seen[first]?.type).toBe("commit");
-    // Before the commit: block 2's entry, and answers that say when.
-    expect(of(stopped.seen.slice(0, first), "out", "trace")).toHaveLength(1);
-    // From the commit on: what an untraced worker posts, and no entry, block 3's apply included.
-    const after = of(fromCommit(stopped.seen), "out");
-    expect(after.map((message) => message.type)).toEqual(of(fromCommit(plain.seen), "out").map((message) => message.type));
-    for (const message of after) expect(message.keys).toEqual(message.type === "node" ? ["type", "id"] : ["type", "id", "ok", "value"]);
   });
 });

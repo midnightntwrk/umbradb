@@ -24,9 +24,10 @@
  *
  * **Where it goes.** A {@link TraceSink}, which the command builds over a file (`./file-sink.ts`). This module imports
  * no file API, so the browser build bundles it as it is. Lines are kept in memory and handed to the sink every
- * {@link FLUSH_LINES} heights and at {@link stopTrace}. A sink that throws (a full disk) stops the trace: what it held
- * is dropped, {@link TraceOptions.log} gets one line, and the process goes on untraced. The ledger worker's thread
- * stops its own trace at the next request it gets, which no longer says when it was posted (`./worker-trace.ts`).
+ * {@link FLUSH_LINES} heights and at {@link stopTrace}. A sink that throws (a full disk) stops the trace, and its error
+ * is thrown on (`writing the block trace failed: …`): at a height's end it halts processing at that height, which is
+ * committed; at the stop it fails the command. A path that cannot be written at all is refused before the process
+ * starts (`./file-sink.ts`).
  *
  * **One trace per process.** The state is this module's, since the trace is the process's: one `umbradb run` is one
  * process with one database. A program that runs several processes in one Node.js process does not start it.
@@ -59,15 +60,12 @@ export interface TraceOptions {
    * first bytes of their keys. It makes a line several kB long, so it is asked for only by the analyses that need it.
    */
   readonly steps?: boolean;
-  /** Where the one line that says the sink failed, and the trace stopped, goes; nowhere unless given. */
-  readonly log?: (line: string) => void;
 }
 
 /** A started trace. */
 interface Active {
   readonly sink: TraceSink;
   readonly steps: boolean;
-  readonly log: ((line: string) => void) | undefined;
   readonly statements: Map<string, StatementTotals>;
   /** The statements of the texts not in {@link Active.statements}: those after the first {@link STATEMENT_TEXTS}. */
   readonly other: StatementTotals;
@@ -107,7 +105,6 @@ export function startTrace(sink: TraceSink, options: TraceOptions = {}): void {
   active = {
     sink,
     steps: options.steps === true,
-    log: options.log,
     statements: new Map(),
     other: { n: 0, ms: 0, max: 0 },
     chain: createHash("sha256"),
@@ -137,8 +134,8 @@ export function traceSteps(): boolean {
 }
 
 /**
- * Hands the sink the lines in memory and the statements' totals. If the sink throws, the trace stops (the process goes
- * on: the trace only measures) and its `log` gets one line.
+ * Hands the sink the lines in memory and the statements' totals. If the sink throws, the trace stops and the error goes
+ * on, named as the trace's: thrown by {@link traceEndBlock}, it halts processing at that height.
  */
 function flush(trace: Active): void {
   const { lines, worker } = trace;
@@ -153,7 +150,7 @@ function flush(trace: Active): void {
   } catch (error) {
     if (active === trace) active = null;
     const reason = error instanceof Error ? error.message : String(error);
-    trace.log?.(`block trace stopped, the process goes on untraced: writing it failed: ${reason}`);
+    throw new Error(`writing the block trace failed: ${reason}`, { cause: error });
   }
 }
 

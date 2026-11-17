@@ -3,10 +3,8 @@
  * applied block and the next. Core.
  *
  * **Off unless started.** {@link startWorkerTrace} is called by the worker thread's main (`src/ledger/worker/run.ts`)
- * only when the main thread started a trace before it started the thread, and {@link stopWorkerTrace} by the same at
- * the first request that does not say when it was posted: the main thread's trace has stopped (its file could not be
- * written). While it is off, {@link timed} only calls its work and the others return at their first line: one
- * comparison with null each.
+ * only when the main thread started a trace before it started the thread. While it is off, {@link timed} only calls
+ * its work and the others return at their first line: one comparison with null each.
  *
  * **One entry per applied block.** {@link endApply} posts it and starts over. The main thread keeps the entry
  * (`src/ledger/worker/host.ts`, `traceWorker`), so the worker writes no file. What ran since the apply before is in

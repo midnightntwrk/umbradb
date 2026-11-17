@@ -26,7 +26,7 @@
 import { parentPort, workerData } from "node:worker_threads";
 import type { LedgerName, LedgerPackage, LedgerPackageOptions } from "../types.js";
 import { LedgerEngine, type LedgerLoader, type LedgerWorkerModule, ledgerTasksOf } from "./engine.js";
-import { posting, requestArrived, requestEnded, requestStarted, startWorkerTrace, stopWorkerTrace, traceClock, workerTracing } from "../../trace/worker-trace.js";
+import { posting, requestArrived, requestEnded, requestStarted, startWorkerTrace, traceClock } from "../../trace/worker-trace.js";
 import { bridgeStore } from "./node-bridge.js";
 
 export type { LedgerWorkerModule } from "./engine.js";
@@ -45,8 +45,7 @@ interface WorkerData {
   readonly loaderData?: unknown;
   /**
    * Whether the process is traced (`src/trace/trace.ts`): each applied block's entry is then posted to the host, and
-   * the answers and node requests say when they were posted (`./protocol.ts`), until a request comes that does not say
-   * when it was posted: the main thread's trace has stopped, and this thread's stops with it.
+   * the answers and node requests say when they were posted (`./protocol.ts`).
    */
   readonly trace?: boolean;
 }
@@ -64,7 +63,7 @@ export async function runLedgerWorker(modules: readonly LedgerWorkerModule[] = [
   if (traced) startWorkerTrace((entry) => port.postMessage({ type: "trace", entry } satisfies FromLedgerWorker));
   /** Posts `message`; in a traced process it says when, and the time posting an answer is recorded. Untraced, as given. */
   const send = (message: Exclude<FromLedgerWorker, { readonly type: "trace" }>): void => {
-    if (!workerTracing()) return port.postMessage(message);
+    if (!traced) return port.postMessage(message);
     if (message.type === "answer") posting(() => port.postMessage({ ...message, at: traceClock() } satisfies FromLedgerWorker));
     else port.postMessage({ ...message, at: traceClock() } satisfies FromLedgerWorker);
   };
@@ -112,9 +111,6 @@ export async function runLedgerWorker(modules: readonly LedgerWorkerModule[] = [
   /** The trap that left the package in no known state, after which nothing runs (the host ends the thread). */
   let trapped: Error | null = null;
   port.on("message", ({ id, request, at }: ToLedgerWorker) => {
-    // A traced main thread says when it posted each request: one that does not has stopped its trace (its file could
-    // not be written), and this thread stops timing, observing and posting entries from here on.
-    if (at === undefined && workerTracing()) stopWorkerTrace();
     // Traced only (null otherwise): when the request arrived, for the time it waits and the time the thread is idle.
     const arrival = requestArrived(at);
     chain = chain.then(async () => {

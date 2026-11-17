@@ -11,9 +11,9 @@ import { stopTrace, traceSteps, tracing } from "../../src/trace/trace.js";
 /**
  * `umbradb run` and `UMBRADB_TRACE` (`src/cli/run.ts`, `src/cli/command.ts`): the command starts the block trace only
  * when its environment names a file, from before its process starts until the command ends, and writes it relative to
- * its working directory. It opens the files first and starts nothing when it cannot; a write that fails later stops the
- * trace and not the command. The process here refuses at startup (PGlite without the development opt-in), so it
- * commits no height.
+ * its working directory. It opens the files first and starts nothing when it cannot; a write that fails at its end fails
+ * the command. The process here refuses at startup (PGlite without the development opt-in), so it commits no height
+ * (a write that fails during a sync is `./traced-failures.test.ts`'s).
  */
 
 const directories: string[] = [];
@@ -138,7 +138,7 @@ describe("umbradb run and UMBRADB_TRACE", () => {
     expect(readFileSync(join(started.directory, "missing", "trace.jsonl.stmts.json"), "utf8")).toBe("[]");
   });
 
-  it("a write that fails once the process is started: the trace stops with one line on stderr, and the command ends as it would have", async () => {
+  it("a write that fails once the process is started, at the command's end: the command fails with the write's error, the trace off", async () => {
     // The folder goes once the process is started, so the trace's write at the command's end cannot be made.
     const setup = (remove: boolean) => ({
       before: (directory: string) => mkdirSync(join(directory, "out")),
@@ -146,17 +146,12 @@ describe("umbradb run and UMBRADB_TRACE", () => {
         if (remove) rmSync(join(directory, "out"), { recursive: true, force: true });
       },
     });
-    const stopped = (stderr: string): string[] => stderr.split("\n").filter((line) => line.startsWith("block trace stopped"));
-    const failed = await run({ [TRACE_VARIABLE]: "out/trace.jsonl" }, setup(true));
-    // The exit status of this file's run, traced or not: its process refuses at startup.
-    expect(failed.code).toBe(EXIT.failed);
-    expect(failed.traced).toBe(true);
+    await expect(run({ [TRACE_VARIABLE]: "out/trace.jsonl" }, setup(true))).rejects.toThrow(/^writing the block trace failed: ENOENT/);
     expect(tracing()).toBe(false);
-    expect(stopped(failed.stderr)).toEqual([expect.stringMatching(/^block trace stopped, the process goes on untraced: writing it failed: ENOENT/)]);
-    // Negative control: with the folder kept, no such line, and the statements' totals are written.
+    // Negative control: with the folder kept, the command ends with its run's status (this file's process refuses at
+    // startup), and the statements' totals are written.
     const kept = await run({ [TRACE_VARIABLE]: "out/trace.jsonl" }, setup(false));
     expect(kept.code).toBe(EXIT.failed);
-    expect(stopped(kept.stderr)).toEqual([]);
     expect(readFileSync(join(kept.directory, "out", "trace.jsonl.stmts.json"), "utf8")).toBe("[]");
   });
 

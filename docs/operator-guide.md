@@ -350,9 +350,9 @@ the lines of up to 199 heights and the worker's lines since the last write.
 
 The command opens the three files before it starts the process, creating those that do not exist. If it cannot (the
 folder does not exist, no permission), it says so on stderr and exits 1 without starting anything. A write that fails
-later (a full disk) stops the trace, with one line in the process's log (`block trace stopped, the process goes on
-untraced: …`), and the sync goes on untraced; the ledger worker's thread stops its own trace at the next request it
-gets.
+later (a full disk) stops processing: at a flush during the sync, the process halts at the height whose line could not
+be written, that height committed, with a message that ends `writing the block trace failed: <reason>`; at the
+command's end, the command fails with that error.
 
 | File | Holds |
 |---|---|

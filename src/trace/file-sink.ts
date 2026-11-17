@@ -10,7 +10,7 @@
  *   since the line before (`./worker-trace.ts`).
  *
  * The three are opened when the sink is built, so a path that cannot be written is known before anything is traced:
- * the command then refuses to start (`src/cli/command.ts`). A write that fails later stops the trace (`./trace.ts`).
+ * the command then refuses to start (`src/cli/command.ts`). A write that fails later stops processing (`./trace.ts`).
  *
  * Only the command imports this module, so the file API stays out of the browser build.
  */
