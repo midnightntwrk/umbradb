@@ -17,7 +17,7 @@ import { free } from "./node-format.js";
 // - A contract call is proof-erased (`(signature, (), pedersen)`), as `midnight-ledger`'s own integration tests apply
 //   calls without a prover (`integration-tests/src/test/utils/log-contract.ts`): proving a call would need its circuit.
 // - The system transaction is `DistributeReserve(1000000000000000)`: for v8 the bytes 0.9.5's replay decoder test
-//   decodes (a captured devnet sample), for v9 (both packages) the same payload under v9's tag.
+//   decodes (a captured devnet sample), for v9 (the three packages) the same payload under v9's tag.
 
 /** The vendored ledger packages: v8, v9 (9.1.0.1), and v9 as runtime 2.0 (rc.3) and runtime 2.1.0 (rc.5) built it. */
 export type Ledger = "v8" | "v9" | "v9-rc3" | "v9-rc5";

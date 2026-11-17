@@ -405,10 +405,11 @@ describe("on the recorded ranges from genesis (each skipped by name without its 
   }
 
   /**
-   * The state stored at `height` (by the rc.3 package) loads in the rc.5 package with the stored root, the node's. A
-   * fresh ledger worker reads it from the database through the node-store bridge, as F of a 2.0 → 2.1 upgrade does.
+   * The state stored at `height` (by the rc.3 package) loads in the `v9` package (9.1.0.1) with the stored root, the
+   * node's. A fresh ledger worker reads it from the database through the node-store bridge, as F of a 2.0 → 2.1
+   * upgrade does.
    */
-  async function expectLoadsInRc5(db: ProcessDatabase, hashAt: ReadonlyMap<string, string>, height: bigint): Promise<void> {
+  async function expectLoadsInV9(db: ProcessDatabase, hashAt: ReadonlyMap<string, string>, height: bigint): Promise<void> {
     const [row] = await db.query(
       `SELECT encode(s.state_key, 'hex') AS key, encode(s.state_root, 'hex') AS root, b.ledger_version AS ledger
          FROM core_ledger_state.states s JOIN core_block_commit.blocks b USING (height) WHERE s.height = ${height}`,
@@ -442,22 +443,23 @@ describe("on the recorded ranges from genesis (each skipped by name without its 
 
   // Stagenet runs runtime 2.0, whose node (2.0.0) builds ledger v9 from `crate-ledger-9.1.0.0-rc.3`. The built-in table
   // maps runtime 2.0 to that ledger's own package, `v9-rc3`, and every root is the node's. The state stored at the
-  // range's end loads in the rc.5 package with the node's root, since a 2.0 → 2.1 upgrade carries it.
+  // range's end loads in the `v9` package (9.1.0.1) with the node's root, since a 2.0 → 2.1 upgrade carries it.
   tapeTest(
     "stagenet-0-10000",
-    "every state root of stagenet (runtime 2.0, its rc.3 package), from genesis, is the node's, and the state at its end loads in rc.5 with that root",
+    "every state root of stagenet (runtime 2.0, its rc.3 package), from genesis, is the node's, and the state at its end loads in v9 (9.1.0.1) with that root",
     async (found) =>
       replayRange(found, BigInt(found.tape.to), { network: found.tape.network }, undefined, (db, hashAt) =>
-        expectLoadsInRc5(db, hashAt, BigInt(found.tape.to)),
+        expectLoadsInV9(db, hashAt, BigInt(found.tape.to)),
       ),
     { timeoutMs: REPLAY_MS + 600_000 },
   );
-  // The committed control: the old table, which mapped runtime 2.0 to rc.5, set here as a configured row. It halts at
-  // block 1 with root-mismatch, and nothing of block 1 is stored. Block 1's one system transaction is a
-  // `CNightGeneratesDustUpdate`, a DUST generation, whose rules changed between rc.3 and rc.5.
+  // The committed control: a table that maps runtime 2.0 to `v9` (9.1.0.1; the old table mapped it to rc.5, then the
+  // `v9` package), set here as a configured row. It halts at block 1 with root-mismatch, and nothing of block 1 is
+  // stored. Block 1's one system transaction is a `CNightGeneratesDustUpdate`, a DUST generation, whose rules changed
+  // after rc.3.
   tapeTest(
     "stagenet-0-10000",
-    "control: with the old table (runtime 2.0 → rc.5) stagenet's replay halts at block 1 with root-mismatch",
+    "control: with runtime 2.0 mapped to v9 (9.1.0.1), as the old table mapped it to rc.5, stagenet's replay halts at block 1 with root-mismatch",
     async (found) =>
       replayRange(
         found,

@@ -22,7 +22,8 @@ import { blockWith, mnsvItem } from "./version-checks.js";
  *   runtime 2.0 to 2.1.0 or to 2.1.100 carries it.
  *
  * The oracle is stagenet's node (`./v9-rc3-checks.ts`): the rc.3 package replays its first blocks with the node's
- * roots, which the rc.5 package does not (the committed control, `ledger-v9-rc3.negative-control.test.ts`).
+ * roots, which a later v9 package does not (the committed control, `ledger-v9-rc3.negative-control.test.ts`, on the
+ * `v9` package).
  */
 
 const LONG = 240_000;
@@ -31,9 +32,9 @@ const sha256OfManifest = (): string =>
 
 describe("v9 as runtime 2.0 built it, a ledger package of its own", () => {
   let rc3: LedgerPackage;
-  let rc5: LedgerPackage;
+  let v9: LedgerPackage;
   beforeAll(async () => {
-    [rc3, rc5] = await Promise.all([
+    [rc3, v9] = await Promise.all([
       loadLedgerPackage("v9-rc3", { networkId: NETWORK_ID }),
       loadLedgerPackage("v9", { networkId: NETWORK_ID }),
     ]);
@@ -53,7 +54,7 @@ describe("v9 as runtime 2.0 built it, a ledger package of its own", () => {
       ["@umbradb/vendored-ledger-v9-rc3"],
     ]);
     // Its own module: not the v9 package under another name.
-    expect(rc3.rawPackages()["@umbradb/vendored-ledger-v9-rc3"]).not.toBe(rc5.rawPackages()["@umbradb/vendored-ledger-v9"]);
+    expect(rc3.rawPackages()["@umbradb/vendored-ledger-v9-rc3"]).not.toBe(v9.rawPackages()["@umbradb/vendored-ledger-v9"]);
     // The node that builds it (2.0.0-rc.4) carries no v8 → v9 translation: neither does it.
     expect(rc3.convertFromV8).toBeUndefined();
   });
