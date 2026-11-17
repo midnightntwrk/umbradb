@@ -147,9 +147,9 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   ledger name `v9-rc5`, for runtime 2.1.0 (`spec_version` 2,001,000 to 2,001,099; devnets that `midnight-node`
   2.1.0-rc.4 built): the built-in ledger tables map that range to it and 2,001,100 on to `v9`, the ledger worker
   converts a v8 state to either and carries a `v9-rc3` or `v9-rc5` state on to the next package, and `ledgerSources`
-  and a ledger table's rows take `v9-rc5` as a name. The core version changes with the packages, so a database an
-  earlier build synced continues as an upgrade: its `core` revision kept as a `versionEntry`, and this build's `core`
-  entry from the next height.
+  and a ledger table's rows take `v9-rc5` as a name. The core version changes with the packages, so a database synced
+  by a build that has the reference counting above continues as an upgrade: its `core` revision kept as a
+  `versionEntry`, and this build's `core` entry from the next height.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 
