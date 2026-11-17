@@ -13,8 +13,11 @@ const q = (a, p) => { const s = [...a].sort((x, y) => x - y); return s.length ? 
 const f = (n, w = 7, d = 2) => n.toFixed(d).padStart(w);
 for (let i = 1; i < rows.length; i++) { rows[i].total = rows[i].t - rows[i - 1].t; rows[i].afterTx = rows[i - 1].tx > 0; }
 const body = rows.slice(1);
-// A stage is printed only where the trace has its key; `total` is the time between two heights' ends.
-const stages = ["total", "beginMs", "prepareMs", "applyMs", "rootWaitMs", "stepMs", "evictMs", "txMs", "writeBlockMs", "writeRefcountMs", "commitMs", "sqlMs", "encMs", "decMs"].filter((s) => s === "total" || rows.some((r) => s in r));
+// The stages in a block's order. A stage is printed only where the trace has its key, and a key ending in Ms that this
+// list does not hold is printed after them, not dropped; `total` is the time between two heights' ends.
+const KNOWN = ["beginMs", "prepareMs", "applyMs", "rootWaitMs", "collectMs", "stepMs", "passMs", "evictMs", "txMs", "writeBlockMs", "writeRefcountMs", "commitMs", "sqlMs", "encMs", "decMs"];
+const present = new Set(rows.flatMap((r) => Object.keys(r)));
+const stages = ["total", ...KNOWN.filter((s) => present.has(s)), ...[...present].filter((k) => k.endsWith("Ms") && !KNOWN.includes(k)).sort()];
 const report = (name, rs) => {
   if (!rs.length) return;
   console.log(`\n== ${name}: ${rs.length} blocks, ${f(1000 / mean(rs.map((r) => r.total)), 0, 1)} heights/s, deltas ${f(mean(rs.map((r) => r.st[3])), 0, 0)}, new ${f(mean(rs.map((r) => r.st[0])), 0, 1)}, deleted ${f(mean(rs.map((r) => r.st[4])), 0, 1)}, rounds ${f(mean(rs.map((r) => r.st[5])), 0, 2)}, statements ${f(mean(rs.map((r) => r.sqlN ?? 0)), 0, 1)}`);

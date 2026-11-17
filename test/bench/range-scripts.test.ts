@@ -291,11 +291,11 @@ describe("the scripts that read a run folder", () => {
     expect(same.code).toBe(0);
     const [header, first, second] = same.stdout.trimEnd().split("\n") as [string, string, string];
     // No run's trace has a key of a column printed only where it is: the header ends with the chain's.
-    expect(header.trim().split(/\s+/)).toEqual(["run", "h/s", "ms/blk", "own", "h/s", "own", "wait", "apply", "step", "blk-tx", "cnt-wr", "stmts", "reads", "cnt-keys", "row-keys", "retries", "step", "chain"]);
+    expect(header.trim().split(/\s+/)).toEqual(["run", "h/s", "ms/blk", "own", "h/s", "own", "wait", "apply", "reclaim", "blk-tx", "cnt-wr", "stmts", "reads", "cnt-keys", "row-keys", "retries", "step", "chain"]);
     // The first height of a run is left out: the means are over heights 101 to 104, which took 60 ms. Of them 6 ms
     // were waits for the node (5 ms for a block above the usual 1 ms, 1 ms for a root), so the build's own are 13.5 ms
     // per block, and the apply is counted without the root wait.
-    expect(cells(first, 15)).toEqual(["a", "2", "500", "74.07", "13.50", "1.50", "4.50", "3.00", "4.00", "2.00", "20.00", "4.0", "30", "10", "1"]);
+    expect(cells(first, 15)).toEqual(["a", "2", "500", "74.07", "13.50", "1.50", "4.50", "3.50", "4.00", "2.00", "20.00", "4.0", "30", "10", "1"]);
     expect(first).toContain("chain-end same (h 104, stopped)");
     expect(second).toContain("chain-end same (h 104, stopped)");
     // Two runs of the same heights that did the same show no difference: every cell after the name is equal.
@@ -305,7 +305,7 @@ describe("the scripts that read a run folder", () => {
     expect(different.stdout).toContain("chain-other DIFFERENT");
   });
 
-  it("compare.mjs: a column whose key only some traces have is printed for them, with - for the others", () => {
+  it("compare.mjs: a column whose key only some traces have is printed for them, with n/a for the others", () => {
     // A build that applies blocks ahead of their turn records it per height: used at two of the four heights after
     // the first, one result dropped. Keys read under a name another build adds are counted with the stored keys.
     const ahead = (line: Line, index: number): Line => ({
@@ -322,7 +322,7 @@ describe("the scripts that read a run folder", () => {
       expect(result.code).toBe(0);
       const [header, first, second, third] = result.stdout.trimEnd().split("\n") as [string, string, string, string];
       expect(header.trim().split(/\s+/).slice(16)).toEqual(["ahead", "dropped", "step", "chain"]);
-      expect(cells(first, 17).slice(15)).toEqual(["-", "-"]);
+      expect(cells(first, 17).slice(15)).toEqual(["n/a", "n/a"]);
       expect(cells(second, 17).slice(11)).toEqual(["5.0", "30", "15", "1", "50.0", "1"]);
       expect(cells(third, 17).slice(15)).toEqual(["100.0", "0"]);
       // Alone, the run without the keys has neither column.
@@ -348,15 +348,15 @@ describe("the scripts that read a run folder", () => {
       expect(result.code).toBe(0);
       const [header, first, second] = result.stdout.trimEnd().split("\n") as [string, string, string];
       // "own h/s" is one column: the header has one word more than a line has cells before it.
-      const names = ["run", "h/s", "ms/blk", "own h/s", "own", "wait", "apply", "step", "blk-tx", "cnt-wr", "stmts", "reads", "cnt-keys", "row-keys", "retries"];
+      const names = ["run", "h/s", "ms/blk", "own h/s", "own", "wait", "apply", "reclaim", "blk-tx", "cnt-wr", "stmts", "reads", "cnt-keys", "row-keys", "retries"];
       expect(header.trim().split(/\s+/).slice(0, 16).join(" ")).toBe(names.join(" "));
       const [base, changed] = [cells(first, 15), cells(second, 15)];
       const differing = names.filter((_, column) => column > 0 && base[column] !== changed[column]);
-      expect(differing).toEqual(["own h/s", "own", "step", "stmts", "cnt-keys"]);
+      expect(differing).toEqual(["own h/s", "own", "reclaim", "stmts", "cnt-keys"]);
       const of = (name: string): [string | undefined, string | undefined] => [base[names.indexOf(name)], changed[names.indexOf(name)]];
       expect(of("own")).toEqual(["13.50", "16.50"]);
       expect(of("own h/s")).toEqual(["74.07", "60.61"]);
-      expect(of("step")).toEqual(["3.00", "6.00"]);
+      expect(of("reclaim")).toEqual(["3.50", "6.50"]);
       expect(of("stmts")).toEqual(["20.00", "40.00"]);
       expect(of("cnt-keys")).toEqual(["30", "15"]);
       expect(second).toContain("chain-end same");
@@ -369,6 +369,25 @@ describe("the scripts that read a run folder", () => {
       expect(marked.stdout).toContain("chain-end same (h 104, stopped)");
     } finally {
       rmSync(folder("slower"), { recursive: true, force: true });
+    }
+  });
+
+  it("compare.mjs: the reclamation's time is its collect, its step and its eviction, and a key a run lacks prints n/a, not 0", () => {
+    // A build that collects at every height and runs the step at a batch's last height only, and a build that records
+    // neither the block's transaction nor the reclamation.
+    writeRun("batched", "chain-end", ({ stepMs: _step, evictMs: _evict, ...line }, index) => ({ ...line, collectMs: 1, ...(index === 4 ? { stepMs: 8, evictMs: 2 } : {}) }));
+    writeRun("bare", "chain-end", ({ txMs: _tx, stepMs: _step, evictMs: _evict, ...line }) => line);
+    try {
+      const result = run("compare.mjs", [folder("a"), folder("batched"), folder("bare")]);
+      expect(result.code, result.stderr).toBe(0);
+      const [, ...lines] = result.stdout.trimEnd().split("\n");
+      const names = ["run", "h/s", "ms/blk", "own h/s", "own", "wait", "apply", "reclaim", "blk-tx", "cnt-wr", "stmts", "reads", "cnt-keys", "row-keys", "retries"];
+      const of = (name: string): (string | undefined)[] => lines.map((line) => cells(line, 15)[names.indexOf(name)]);
+      // a: 3 + 0.5 a height; batched: 1 a height and 8 + 2 at the last, over four heights; bare: none of the three.
+      expect(of("reclaim")).toEqual(["3.50", "3.50", "n/a"]);
+      expect(of("blk-tx")).toEqual(["4.00", "4.00", "n/a"]);
+    } finally {
+      for (const label of ["batched", "bare"]) rmSync(folder(label), { recursive: true, force: true });
     }
   });
 
@@ -399,6 +418,39 @@ describe("the scripts that read a run folder", () => {
       expect(result.stdout).toMatch(/^ {2}stepMs\s+mean\s+3\.00/m);
     } finally {
       rmSync(folder("no-evict"), { recursive: true, force: true });
+    }
+  });
+
+  it("analyze.mjs: the reclamation's collect, and a stage it does not know, are printed where the trace has them", () => {
+    writeRun("more", "chain-end", (line) => ({ ...line, collectMs: 1, laterMs: 2 }));
+    try {
+      const result = run("analyze.mjs", [folder("more")]);
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stdout).toMatch(/^ {2}collectMs\s+mean\s+1\.00/m);
+      expect(result.stdout).toMatch(/^ {2}laterMs\s+mean\s+2\.00/m);
+      // In a block's order: the collect before the step.
+      expect(result.stdout.indexOf("  collectMs")).toBeLessThan(result.stdout.indexOf("  stepMs"));
+    } finally {
+      rmSync(folder("more"), { recursive: true, force: true });
+    }
+  });
+
+  it("worker.mjs: a phase it does not know is printed, and a run without a phase's key shows n/a, not 0", () => {
+    writeRun("w2", "chain-end");
+    try {
+      // The same worker lines with a phase another build adds, and without flush.
+      const lines = readFileSync(join(folder("w2"), "trace.jsonl.worker.jsonl"), "utf8").trimEnd().split("\n").map((line) => {
+        const { flush: _flush, ...rest } = JSON.parse(line) as Line;
+        return JSON.stringify({ ...rest, verify: 2 });
+      });
+      writeFileSync(join(folder("w2"), "trace.jsonl.worker.jsonl"), `${lines.join("\n")}\n`);
+      const result = run("worker.mjs", [folder("a"), folder("w2")], { SKIP: "0" });
+      expect(result.code, result.stderr).toBe(0);
+      const row = (name: string): string[] => (result.stdout.split("\n").find((line) => line.startsWith(`${name} `)) ?? "").trim().split(/\s+/);
+      expect(row("verify")).toEqual(["verify", "n/a", "|", "2.00", "2.00", "2.00"]);
+      expect(row("flush")).toEqual(["flush", "0.50", "0.50", "0.50", "|", "n/a"]);
+    } finally {
+      rmSync(folder("w2"), { recursive: true, force: true });
     }
   });
 
@@ -447,7 +499,8 @@ describe("the scripts that read a run folder", () => {
         { h: 102, tx: 0, spanMs: 10, ...apply, idleMs: 5.5, transitMs: 0.5, queuedMs: 0, "gcOf.101": 4, "gcNOf.101": 2 },
       ];
       // `collectMs` is a key a later build's reclamation adds: where a trace has it, it counts in the step's line.
-      const block = { beginMs: 1, txMs: 2, collectMs: 0.5, stepMs: 1, evictMs: 0.5, sqlMs: 3, encMs: 0.25, decMs: 0.25, backMs: 0.5, "rtN.apply": 1 };
+      // `laterMs` is a key this reader does not know: it is printed, not dropped.
+      const block = { beginMs: 1, txMs: 2, collectMs: 0.5, stepMs: 1, evictMs: 0.5, sqlMs: 3, encMs: 0.25, decMs: 0.25, backMs: 0.5, laterMs: 0.5, "rtN.apply": 1 };
       const blocks = [
         { h: 99, t: 0 },
         { h: 100, t: 10, tx: 0, ...block, applyMs: 3, rootWaitMs: 0, "rt.apply": 4, "rt.commit": 1, "rtN.commit": 1 },
@@ -514,6 +567,7 @@ describe("the scripts that read a run folder", () => {
       expect(row(ofMain, "answers' way back")).toEqual([0.5, 0.5, 0.5, 3]);
       expect(row(ofMain, "node requests, to notice")).toEqual([0.333, 0, 1, 2]);
       expect(row(ofMain, "node requests, to read")).toEqual([1.333, 0, 4, 8]);
+      expect(row(ofMain, "laterMs")).toEqual([0.5, 0.5, 0.5, 3]);
       expect(row(ofMain, "apply ")).toEqual([7, 4, 13, 42]);
       expect(row(ofMain, "commit ")).toEqual([0.667, 1, 0, 4]);
       expect(row(ofMain, "apply answers")).toEqual([1, 1, 1]);

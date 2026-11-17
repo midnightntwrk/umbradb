@@ -131,6 +131,13 @@ for (const dir of process.argv.slice(2)) {
     ["  node requests, to notice", (r) => v(r, "nodeNoticeMs")],
     ["  node requests, to read", (r) => v(r, "nodeReadMs")],
   ], whole);
+  // A key of the block's line in ms that the lines above do not read is printed, not dropped.
+  const placed = ["beginMs", "applyMs", "rootWaitMs", "collectMs", "stepMs", "evictMs", "txMs", "sqlMs", "encMs", "decMs", "backMs", "nodeNoticeMs", "nodeReadMs"];
+  const other = [...new Set(blocks.flatMap((r) => Object.keys(r)))].filter((k) => k.endsWith("Ms") && !placed.includes(k)).sort();
+  if (other.length) {
+    console.log("  the block line's other stages (each inside or beside the lines above):");
+    table(blocks, other.map((k) => [`  ${k}`, (r) => v(r, k)]), whole);
+  }
   console.log("  the worker's requests, post to answer handled (they overlap one another and the lines above):");
   table(blocks, trips.map((t) => [`  ${t}`, (r) => v(r, `rt.${t}`)]), whole);
   console.log("  counts per block:");

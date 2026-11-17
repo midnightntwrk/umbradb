@@ -160,7 +160,9 @@ files hold and what each key means. What the readers take from them:
 `run.sh … UMBRADB_TRACE_STEPS=1` adds each step's count changes, new nodes and deleted nodes to a height's line.
 
 A later build may write keys an earlier one does not. The readers print a stage, a phase or a column only where its
-key is in the trace, so a run of an older build and a run of a newer one can be read side by side.
+key is in the trace, and print a stage or a phase they do not know rather than drop it; a run whose trace has none
+of a column's keys shows `n/a` there, not 0. So a run of an older build and a run of a newer one can be read side by
+side.
 
 ## Reading runs
 
@@ -194,20 +196,24 @@ node bench/range/compare.mjs $BENCH_DIR/base $BENCH_DIR/changed
 
 - **Compare builds by `own h/s`**, the speed without the waits for the node, between runs whose `wait` column is
   near 0. `h/s` is what the clock saw, the node's answers included.
-- **Then by the stage the change is about** (`apply`, `step`, `blk-tx`, `cnt-wr`; `analyze.mjs`, `worker.mjs` and
+- **Then by the stage the change is about** (`apply`, `reclaim`, `blk-tx`, `cnt-wr`; `analyze.mjs`, `worker.mjs` and
   `worker-time.mjs` for more): a stage's mean over a few thousand blocks moves less with the machine than the whole
-  block does.
+  block does. `reclaim` is the reclamation's whole time per block, its collect, its step and its eviction
+  (`collectMs + stepMs + evictMs`), wherever a build runs them.
 - **`stmts`, `reads`, `cnt-keys` and `row-keys` do not depend on the machine at all**: a change that claims fewer
   statements or keys per block shows it exactly, in any run.
-- The last column says whether the run computed the same steps as the first run (`same` or `DIFFERENT`). Two runs
-  from one template to one stop height must say `same`, whatever their builds, unless the change is meant to store
-  something else.
+- The last column says whether the run computed the same steps as the first run (`same` or `DIFFERENT`), from each
+  run's last trace line that has its chain. Builds that run the reclamation step at the same heights compute the
+  same chain, so two runs of them from one template to one stop height say `same` unless the change is meant to store
+  something else. A build that changes when the step runs (in batches, for example) says `DIFFERENT` here although it
+  stores the same: `tables.sh` is then the check.
 
 ## Two builds stored the same
 
 A change that claims to store the same contents is run on every range beside a run of the build before it, and:
 
-1. `compare.mjs base changed` says `same` for the chain of step outputs;
+1. `compare.mjs base changed` says `same` for the chain of step outputs, where both builds run the reclamation step
+   at the same heights (otherwise the chains differ and the checks below decide);
 2. `equal.sh base changed` prints the same digests and node-table hashes;
 3. `contents-hash.sh base changed` prints the same hash;
 4. `tables.sh base changed` ends with `differences from base: 0` and exit status 0.
