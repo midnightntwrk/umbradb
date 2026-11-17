@@ -53,7 +53,7 @@ Every command runs from the repository's root, with Node.js 24 and Docker. The p
 | `PSS_MNEMONIC_A`, `PSS_MNEMONIC_B`, … | `--wallet A`, `--wallet B`, …: the wallet's 24 words |
 | `PSS_NETWORK` | `address`, `send`; `sync` and `bench.ts` check the manifest names it (`preprod`) |
 | `PSS_NODE_WS`, `PSS_NODE_HTTP` | `send`: the node's WebSocket and JSON-RPC URLs |
-| `PSS_INDEXER_HTTP`, `PSS_INDEXER_WS`, `PSS_BLOCKFROST_PROJECT_ID` | `send`: the indexer the Dust fee wallet reads, and its key (sent only to it, as its `project_id` header) |
+| `PSS_INDEXER_HTTP`, `PSS_INDEXER_WS`, `PSS_BLOCKFROST_PROJECT_ID` | `send` with `--dust-fee sdk` (the default): the indexer the Dust fee wallet reads, and its key (sent only to it, as its `project_id` header); `--dust-fee private` needs none |
 | `PSS_PROOF_SERVER` | `send`: the local proof server (default `http://127.0.0.1:49343`) |
 
 **1. Build and install.** The server runs this checkout's build; the client's Midnight packages are its own:
@@ -143,6 +143,7 @@ docker run -d --name pss-proof-server -p 127.0.0.1:49343:6300 midnightntwrk/proo
 T="--wallet A $D --to $(node $E $C address --wallet B) --token <token type, 64 hex> --amount <base units>"
 node $E $C send $T --dry-run      # sync, coin, path, root checks against the node, spend; no fee wallet
 node $E $C send $T --no-submit    # also the fee wallet, Dust balancing, proving and validation; nothing submitted
+node $E $C send $T --dust-fee private --no-submit   # the fee paid by the wallet's own Dust coin (below, "Dust"): no indexer
 node $E $C send $T                # submits, waits for finality, writes the record under <data>/transfers/
 node $E $C sync --wallet B $D && node $E $C sync --wallet A $D   # B finds the coin; A sees the spend and the change
 ```
@@ -192,7 +193,11 @@ A page that runs the client's own code in the browser, one step per button, and 
     entries, and the current coin (sequence number, position, creation time, value, commitment);
 11. check each chain's end by PIR in the Dust check table, all chains in calls padded to the same number of requests,
     dropping a false match; per chain checked, dropped or not checkable, and the Dust sync's bytes split as the
-    command line splits them.
+    command line splits them;
+12. read the paying coin's Merkle path (its lower siblings by PIR from the Dust snapshot's path table in one padded
+    call, the upper ones from the public block roots), download the generation records, build the ledger's Dust local
+    state, check both its roots against the snapshot's, and spend the coin in memory for the fee of a transaction
+    holding only that spend; the path read's bytes, the roots compared and the fee. Nothing is proven or sent.
 
 The page runs on either scheme, following the manifest. On an IPIR+SP snapshot the worker also fetches
 `pss-ipir.wasm` (beside the page; `build.ts` copies it and builds its committed SHA-256 into the worker) and compiles
@@ -272,10 +277,12 @@ The worker runs the client's files bundled by esbuild:
 
 `web/scheme-view.ts` holds what the page shows of each scheme (table lines, call plans, the body and artifact
 decoders, the digest-checked compile), without the DOM, so `test/web-scheme-view.test.ts` checks it under Node. The
-Dust steps are `web/dust-steps.ts` (the command line's `dust`, from `client/dust.ts` and `client/dust-check.ts`, cut
-into the three steps) and `web/dust-view.ts` (the chains and bytes as the page shows them), both without the DOM, so
-`test/server-web-dust.test.ts` runs them under Node in both schemes. The request panel decodes the Dust routes too: a
-chunk's header and the bytes of each part, the check table's public artifact, and its query and answer bodies.
+Dust steps are `web/dust-steps.ts` (the command line's `dust` and `dust --spend`, from `client/dust.ts`,
+`client/dust-check.ts` and `client/dust-spend.ts`, cut into the four steps) and `web/dust-view.ts` (the chains, bytes
+and spend as the page shows them), both without the DOM, so `test/server-web-dust.test.ts` runs them under Node in
+both schemes. The request panel decodes the Dust routes too: a chunk's header and the bytes of each part, the Dust
+snapshot's public files (the check and path tables' public artifacts, the block roots, the generation records), and
+the check and path tables' query and answer bodies.
 `npx tsc -p examples/private-shielded-sync/web` type-checks the page and the worker.
 
 ## Checks
@@ -345,7 +352,8 @@ the repository's own package name, so a built checkout (`npm ci && npm run build
 | `tail.ts` | The tail's tree and body |
 | `server.ts` | Points, snapshots, tail, routes, logging |
 | `dust-index.ts` | The Dust events of the current ledger era: the Dust file, first coins and updates by owner, the parameters, the commitments by position (below, "Dust") |
-| `dust-check.ts`, `dust-check-worker.ts` | The Dust check table's builder and its worker thread |
+| `dust-check.ts`, `dust-check-worker.ts` | The Dust snapshot's builder (check table, commitment tree, path table, generation records) and its worker thread |
+| `dust-tree.ts` | The Dust commitment tree (the Zswap tree's code) and every position's lower path, the last partial block's too |
 
 **How it works.** At start (`on-start-db`) it reads every stored `zswap-output` and `zswap-input` row of
 `core_ledger_state.events` into memory; after each committed height it adds that height's events, taken from the
@@ -378,8 +386,8 @@ and refuses builds or tails with its reason; it never halts the core's processin
 | `GET /tail` | Header (132 bytes: `PSST`, version, snapshot id, height, block hash, `first_free`, root, four section lengths), then the commitments of positions T0 … F − 1 (32 each), the outputs from F on (257 each: flags, commitment, ciphertext), the nullifiers spent after S (40 each), the current roots of the blocks from T0's on (32 each) |
 | `POST /query/read`, `POST /query/path`, `POST /query/nullifier` | Body `application/octet-stream`: `PSSQ`, version, snapshot id, count = `queriesPerCall`, count requests of the table's scheme (SimplePIR: C values each; IPIR+SP: `36 + 27,648 + ⌈49·rows/8⌉` bytes each); answer `PSSA`, version, snapshot id, count, count responses (SimplePIR: R values each; IPIR+SP: `68 + ⌈22·cols/8⌉` bytes each). 409 `snapshot-replaced` (with `snapshot`) for another snapshot, 400 for another count or length, 400 `invalid-query` for IPIR+SP requests made for another table's setup, 415 for another content type |
 | `POST /admin/snapshot` | JSON `{ "height"?, "padding"?, "scheme"? }` (default: the latest indexed height, not below the served snapshot's; the settings' scheme): 202 and the build starts; 409 while one runs; 400 `invalid-scheme`, 501 `scheme-unavailable`; 507 for a padded build too large (`padding-too-large` for memory, `table-too-large` for an IPIR+SP table over its cell limit) |
-| `GET /admin/snapshot` | The index, the tip, the served and previous snapshots, the running and last build, the Dust index and check table |
-| `GET /dust/…`, `POST /dust/check/query` | The Dust file, a key's first coins, the Dust parameters and the check table: below, "Dust" |
+| `GET /admin/snapshot` | The index, the tip, the served and previous snapshots, the running and last build, the Dust index and the Dust snapshot (with the bytes its check and path tables hold) |
+| `GET /dust/…`, `POST /dust/check/query`, `POST /dust/check/path` | The Dust file, a key's first coins, the Dust parameters and the Dust snapshot (check table, path table, public files): below, "Dust" |
 
 Each request is logged as one JSON line on stdout (`event: "request"`: route, status, body and answer lengths, range,
 milliseconds), never its body; builds, loads and faults are logged the same way.
@@ -473,6 +481,12 @@ With `--threads 1`, or without `ipirWorkers`, the requests are made one after th
    secret key), `validateTransaction`, submission as `midnight.sendMnTransaction` through the SDK's node client, wait for
    finality. The spent coin and the change's commitment are kept as a pending transfer until a sync sees both.
 
+With `--dust-fee private`, step 1 is skipped (no SDK wallet, no indexer) and step 4's fee comes from the wallet's own
+Dust coin (below, "Dust", "Spending a Dust coin"): the Dust sync with the check, the coin's path read by PIR, the
+ledger's Dust local state, a balancing intent spending the coin, then proving at the local proof server with the SDK's
+HTTP prover client, binding, and the SDK's own well-formedness check (`Capabilities.v9WellFormedCheck`, what
+`validateTransaction` runs) against the ledger parameters the module serves; submission as above.
+
 A record of the transfer (public data only) is written under `<data>/transfers/`.
 
 **`cross-check`** (spec FR-140): reads every stored `zswap-output` and `zswap-input` event up to the local state's tail
@@ -489,8 +503,9 @@ serialization), and compares every coin, spend and the unspent set with the loca
 | `sync.ts`, `state.ts` | The sync and its checks; the local state and the balance |
 | `tree.ts`, `send.ts`, `address.ts`, `node-rpc.ts` | Paths and collapsed updates; the spend; shielded addresses; node checks |
 | `cross-check.ts` | The ledger cross-check |
-| `dust.ts`, `dust-check.ts` | The Dust sync: the file's download, the walk of each chain, the check of each chain's last coin (below, "Dust") |
-| `sdk-api.ts`, `sdk/` | The wallet SDK part (seeds, fee wallet, proving, submission), loaded only when needed |
+| `dust.ts`, `dust-check.ts` | The Dust sync: the file's download, the walk of each chain, the check of each chain's last coin, a coin's path (below, "Dust") |
+| `dust-spend.ts` | The paying Dust coin, the ledger's Dust local state from its path and the generation records, the fee paid with it (below, "Dust") |
+| `sdk-api.ts`, `sdk/` | The wallet SDK part (seeds, fee wallet, proving, validation, submission), loaded only when needed |
 
 `npm run typecheck` checks the client except `sdk/`, which needs the install:
 `npm run typecheck --prefix examples/private-shielded-sync/client`. The tests run the client with the repository's
@@ -699,9 +714,10 @@ per chain (`bench/dust-walk.ts`, by hand, with stand-in ledger functions).
 **The check** (`server/dust-check.ts`, `client/dust-check.ts`). A 4-byte prefix can match another wallet's spend (one search over
 65,035 entries has about one chance in 66,000), and the coin derived from it is wrong. So the module also publishes a
 PIR table of the Dust commitment tree's leaves by position: each spend's new commitment, and each first coin's
-(`dustCommitment` of its output). It is built in a worker thread at start and whenever a snapshot build starts, in
-that build's scheme, through the same seam as the snapshot's tables (as a positional table named `read`), with a
-manifest of its own (`shared/dust-check.ts`, canonical JSON, its SHA-256 the check's identifier). The build is refused
+(`dustCommitment` of its output). It is part of the Dust snapshot, built in a worker thread at start and whenever a
+snapshot build starts, in that build's scheme, through the same seam as the snapshot's tables (as a positional table
+named `read`), with a manifest of its own (`shared/dust-check.ts`, canonical JSON, its SHA-256 the check's identifier;
+the snapshot's other parts are below, "Spending a Dust coin"). The build is refused
 with its reason unless the commitments fill positions 0 to n − 1 exactly once, with n the core's
 `dust_commitment_first_free` at the height. Once no chain finds a further match, the wallet checks the last coin of
 every chain with a spend in one call of exactly `queriesPerCall` requests, padded with random groups: the record at the
@@ -719,6 +735,72 @@ On Preprod at 74,260 commitments (height 3,457,201), for one chain:
 | Downloaded once per check table (public artifact) | 6,057,984 bytes of setup data | 14,884 bytes of masks |
 | One call: up / down | 186,536 / 189,352 bytes | 1,287,336 / 182,440 bytes |
 
+**Spending a Dust coin** (`server/dust-tree.ts`, `client/dust-spend.ts`). The ledger's `DustLocalState::spend`
+needs the coin's leaf and path in the Dust commitment tree, the generation record of its Night output with its path in
+the generation tree, and the map from the Night's initial nonce to the record's index. The Dust snapshot holds the
+rest of what that takes, all built at one height:
+
+- the commitment tree over the check table's commitments. It is the Zswap tree (`server/tree.ts`, unchanged): height
+  32, each leaf the scan kernel's `leaf` of the commitment's 32 little-endian bytes, the same node hash, an empty
+  subtree 0 and not hashed. Its root must be the core's `dust_commitment_root` at the height (the build fails with
+  `root-mismatch` otherwise). Cut k levels above the leaves (`pathSplit`) like the Zswap tree: its block roots are
+  public, each position's k lower siblings are a positional PIR table named `path` (the last, partial block's too);
+- the era's generation records, one public file (`PSSDGEN1`, 88 bytes a record: value, owner, the Night output's
+  initial nonce, the time its Night was spent or all ones). A record's leaf (`merkle_hash`) is not exposed in
+  JavaScript, so the tree is the ledger's: every record inserted in index order into a Dust local state. Its root
+  must be the core's `dust_generation_root` (`generation-root-mismatch` otherwise). The ledger takes about 7 ms a
+  record (12 s for Preprod's 1,680), so the build worker computes it, not the server's event loop;
+- the block's time, in whole seconds (the stored time without its milliseconds, as the ledger keys its roots).
+
+The wallet takes the coin that pays: a chain's end confirmed by the check, or a public first coin, that the snapshot
+holds (position below its commitments), worth the most at the snapshot's block time (`--dust-chain` picks one). It
+reads the coin's k lower siblings in one call of exactly `queriesPerCall` requests padded with random groups (the
+path table's public artifact downloaded then, once per snapshot), takes the upper 32 − k from the block roots, and
+refuses a root other than the snapshot's. It inserts every generation record in index order (its own with their
+initial nonce), applies the commitment tree around its coin as collapsed updates from the 32 siblings (the Zswap
+tree's serialization, which `DustStateMerkleTreeCollapsedUpdate.deserialize` takes), inserts the coin at its
+position, and checks both roots against the snapshot's. The fee is paid as the wallet SDK balances Dust: a balancing
+intent whose `DustActions`, dated at the snapshot's block time, spend the coin; the spend's `vFee` is raised until it
+covers the merged transaction's `feesWithMargin` (margin 5 blocks, the SDK's) under the ledger parameters in force,
+which the module serves from the core's `ledger-state` item.
+
+**Which roots a spend is checked against.** The chain keeps each tree's root per block time and checks a Dust spend
+against the root recorded at the last block at or before its declared time (ledger `verify.rs`, `root_history.get`);
+at every block it drops the roots older than that block's time less the global TTL (3,600 s in the initial
+parameters). So a spend dated at the snapshot's block time is good for about an hour after that block; `send` refuses
+to submit one from a snapshot more than 3,000 s old. The snapshot is rebuilt by hand, with the admin route
+(`POST /admin/snapshot`): nothing rebuilds it on a timer.
+
+On Preprod at 76,018 commitments and 1,681 generation records (height 3,459,760, k = 16; the IPIR+SP row at
+3,459,704, 75,940 commitments), for one coin:
+
+| | SimplePIR | IPIR+SP |
+|---|---|---|
+| Path table | 69,328,448 bytes | 41,943,040 bytes (2,048 groups × 40 records) |
+| Snapshot built in (worker; tree, path table, generation tree) | 19.9 s (5.7, 1.9, 12.0) | 20.9 s |
+| Downloaded once per snapshot | path table's setup data 1,867,776, block roots 64, generation records 147,940 bytes | masks 74,276, block roots 64, generation records 147,676 bytes |
+| The path call: up / down | 9,730,344 / 58,408 bytes | 1,287,336 / 903,336 bytes |
+| The local state (1,681 inserts) | 11.8 s | 12.2 s |
+
+`dust --spend` prints it (`--dust-chain 2`, the test wallet's chain with 5 spends):
+
+```
+spend: chain 2, coin seq 5 at position 21,383, worth 15,991,566,433,802,881,266 Specks at the Dust snapshot's block time 2026-11-17T15:31:30.000Z (height 3,459,627)
+  path read: 16 lower siblings by PIR in 1 call of 32 requests, 9,712,808 bytes up and 58,408 down; 16 upper from the block roots; once per snapshot: path table's setup data 0, block roots 0, generation records 0 bytes down; 397 ms
+  commitment root from the path c14a9a1a6a12c7c2… = the snapshot's
+  local state (1,676 generation records, 12033 ms): commitment root = the snapshot's, generation root = the snapshot's
+  spent in memory, dated at the snapshot's block time: the fee of a transaction holding only this spend is 156,032,600,344,324 Specks (vFee 156,032,600,344,324, ledger parameters at height 3,459,666); nullifier 0x24a7cedd97e42345…; not proven, not sent
+```
+
+`send --dust-fee private --no-submit` of 100 pssUSD from the 750 coin, with the fee paid by that Dust coin: the fee
+385,524,859,401,903 Specks, proven at the local proof server in 2.0 s, validated, 18,526 bytes, nothing submitted.
+
+What is manual or missing: the Dust snapshot is rebuilt by hand (the admin route) and a spend is good for about an
+hour after its block; the generation tree costs about 7 ms a record in the ledger, on the server's worker and on the
+wallet at each spend (12 s on Preprod); the SDK's validation runs against a blank ledger state, which holds no Dust
+roots, so the roots are checked only by the module against the core's and by the chain at inclusion; no transaction
+has been submitted this way yet.
+
 **Routes** (under `/pss/v1`; each logged as the others are, never with a query string):
 
 | Route | Answer |
@@ -726,10 +808,10 @@ On Preprod at 74,260 commitments (height 3,457,201), for one chain:
 | `GET /dust/manifest` | The Dust file's manifest, JSON |
 | `GET /dust/chunk/<n>[?count=<c>]` | Chunk n's bytes, with its first c entries when `count` is given (the count the manifest lists); cached for good when full or with a count. 404 beyond the file, 400 for a number that is not plain decimal |
 | `GET /dust/coins?owner=<key>` | JSON: that Dust public key's `dust-initial-utxo` and `dust-generation-dtime-update` events, each `{height, bytes}` with the bytes in hexadecimal, in chain order. 400 for a key that is not plain decimal |
-| `GET /dust/parameters` | JSON: the Dust parameters in force (decimal strings): the ledger's initial ones, or the era's last `param-change` event's |
-| `GET /dust/check/manifest` | The check table's manifest bytes; `Pss-Dust-Check-Id` = its SHA-256. 503 `no-dust-check` (with the last build's reason) before one is built |
-| `GET /dust/check/blob/<digest>` | The public artifact of the current check table or the one before |
-| `POST /dust/check/query` | The query wire format (below), the check's identifier in the snapshot identifier's place; 409 `dust-check-replaced` (with `check`) for another one |
+| `GET /dust/parameters` | JSON: the Dust parameters in force (decimal strings): the ledger's initial ones, or the era's last `param-change` event's; and the ledger parameters in force (`ledgerParameters`, the ledger's tagged serialization in hexadecimal, from the core's `ledger-state` item, with `ledgerParametersHeight`; null until a block is committed after start) |
+| `GET /dust/check/manifest` | The Dust snapshot's manifest bytes; `Pss-Dust-Check-Id` = its SHA-256. 503 `no-dust-check` (with the last build's reason) before one is built |
+| `GET /dust/check/blob/<digest>` | A public file of the current Dust snapshot or the one before: the check and path tables' public artifacts, the block roots, the generation records |
+| `POST /dust/check/query`, `POST /dust/check/path` | The query wire format (below) to the check table or the path table, the snapshot's identifier in the snapshot identifier's place; 409 `dust-check-replaced` (with `check`) for another one |
 
 A Dust failure (an event that cannot be decoded, a position that does not rise) breaks only the Dust routes, with its
 reason (500 `dust-broken`).
@@ -743,10 +825,11 @@ node --env-file=<secrets.env> examples/private-shielded-sync/client/main.ts dust
 It prints the file, the parameters and the check table, then per chain the spends found (with their file entries), the
 check, the false matches dropped and the current coin (sequence number, position, value at creation and now,
 commitment), and the bytes moved; `--json` prints the same as JSON, `--no-check` walks without the check. Chunks and
-the check table's public artifact are kept by SHA-256 in `--data`'s `cache/` (beside the snapshot's artifacts), so a
-later run downloads only the chunks that are new; the first line says how many came from the cache. The step page
-runs the same code in three steps (above, "The step-by-step page", steps 9 to 11). For example,
-on Preprod, one of a wallet's two chains in the era and the totals:
+the Dust snapshot's public files are kept by SHA-256 in `--data`'s `cache/` (beside the snapshot's artifacts), so a
+later run downloads only the chunks that are new; the first line says how many came from the cache. `--spend` also
+reads the paying coin's path and spends it in memory (above, "Spending a Dust coin"). The step page runs the same code
+in four steps (above, "The step-by-step page", steps 9 to 12). For example, on Preprod, one of a wallet's two chains
+in the era and the totals:
 
 ```
 chain 2: first coin at height 3,398,886, generation index 1052, backed by 5,001,000,000 Stars of Night
@@ -757,7 +840,7 @@ chain 2: first coin at height 3,398,886, generation index 1052, backed by 5,001,
 downloaded 6,918,127 bytes in 24 requests (manifest 3,023, chunks 665,787, coins 1,260, parameters 146, check 6,247,911); uploaded 186,536 bytes of request bodies; 223 ms
 ```
 
-**Not covered.** The Merkle path of a Dust coin, which spending it needs; the earlier ledger era, whose events are
+**Not covered.** The earlier ledger era, whose events are
 decoded only to measure the file's size; hiding the Dust public key when asking for its first coins (the coins request
 names it, and the server sees it). A `param-change` event inside the era is read from the event's text rendering
 (the ledger package does not decode it); Preprod's era has none, so that path is tested on a rendering only.
@@ -791,7 +874,7 @@ All integers little-endian; binary bodies are `application/octet-stream`; routes
   Under SimplePIR the path table is as wide as the noise check allows, so its setup data is small.
 
 - **Dust** (`dust-file.ts`, `dust-check.ts`): the Dust file's chunks and manifest, the coins and parameters answers,
-  and the check table's manifest: above, "Dust".
+  and the Dust snapshot's manifest and generation file: above, "Dust".
 
 A ciphertext is 224 bytes throughout: the one-time point's 32-byte compressed encoding, then elements 0–5, each its
 32-byte little-endian integer.
@@ -898,12 +981,12 @@ wallet's math was moved to the GPU and what was not.
 | `test/ipir-gpu-reference.test.ts` | What the GPU responder is checked against, without a GPU: the add-on's `gpuReference` export and the answer arithmetic of `gpu/ipir-wire.ts`. |
 | `test/web-scheme-view.test.ts` | The page's per-scheme presentation: SimplePIR's lines as before, IPIR+SP's sizes, a real IPIR+SP call decoded part by part, the masks, the WebAssembly compiled only with the committed digest. |
 | `test/dust-file.test.ts` | The Dust file's chunks: round trips, a negative time difference, a position jump, fees by index and in full, a chunk decoded alone, full chunks unchanged as the file grows, bad bytes. |
-| `test/server-dust-index.test.ts` | The Dust index over real Preprod events: each chunk against the entries read from the events, full chunks unchanged as the file grows, a chunk at an earlier count, the era's first height, first coins and updates by owner, the parameters, the commitments by position (a gap and a position filled twice refused), what breaks it. |
-| `test/server-dust.test.ts` | The Dust routes in UmbraDB's real process (PostgreSQL 18) over Preprod events written into the test database: the file, a key's coins, the parameters, refusals; the check table built at start in SimplePIR and read through the wallet's code, refusals, a build refused for another stored `dust_commitment_first_free`, the table rebuilt in IPIR+SP by an IPIR+SP snapshot build and read through it. |
+| `test/server-dust-index.test.ts` | The Dust index over real Preprod events: each chunk against the entries read from the events, full chunks unchanged as the file grows, a chunk at an earlier count, the era's first height, first coins and updates by owner, the parameters, the commitments by position (a gap and a position filled twice refused), the commitment and generation trees against Preprod's stored roots at three heights and k = 0, 2, 16, the stored state's block time in whole seconds, what breaks it. |
+| `test/server-dust.test.ts` | The Dust routes in UmbraDB's real process (PostgreSQL 18) over Preprod events written into the test database: the file, a key's coins, the parameters, refusals; the Dust snapshot built at start in SimplePIR (its commitment and generation roots the stored ones, Preprod's), read through the wallet's code (the check, a coin's path at four positions), refusals, a build refused for another stored `dust_commitment_first_free`, the snapshot rebuilt in IPIR+SP by an IPIR+SP snapshot build and read through it (the check and a path); the ledger parameters served. |
 | `test/dust-walk.test.ts` | The walk: a chain of several spends across chunks, a match below the coin's position, a false match without and with a check, a chain with no spend, two chains in one file; with the ledger's functions, a chain found again from the encoded file, and what a generation record's `dtime` changes; the coins answer decoded from real events. |
-| `test/server-web-dust.test.ts` | The page's Dust steps under Node in both schemes, over the world of `test/server-dust-world.ts` (also the check test's): a wallet with three chains (the false match dropped, a chain not checkable, a chain with nothing to check), a second run from the page's cache, a generated wallet with no chain (one padded call), the page's rendering of the chains and bytes, refusals. |
+| `test/server-web-dust.test.ts` | The page's Dust steps under Node in both schemes, over the world of `test/server-dust-world.ts` (also the check test's): a wallet with three chains (the false match dropped, a chain not checkable, a chain with nothing to check), a second run from the page's cache, step 12 (one padded path call, both roots the snapshot's, the spend in memory, the snapshot's files from the page's cache the second time), a generated wallet with no chain (one padded call), the page's rendering of the chains, bytes and spend, refusals. |
 | `test/dust-walk-compare.test.ts` | The one-pass walk of all chains against the search per chain it replaced, on the same files: many chains, false matches, chains starting in the middle, two chains wanting one prefix (one starting later), chains with no spend, 2-, 4- and 6-byte prefixes, the ledger's own functions; the same chains, entries, coins, dropped matches, statuses and check batches. |
-| `test/server-dust-check.test.ts` | The check in both schemes: the module's builder and the scheme's server table called through the wallet's code; another wallet's spend before the real one dropped by the check, a chain's end beyond the table not checkable, two padded calls of one size. |
+| `test/server-dust-check.test.ts` | The check in both schemes: the module's builder and the scheme's server table called through the wallet's code; another wallet's spend before the real one dropped by the check, a chain's end beyond the table not checkable, two padded calls of one size; a coin's path in one padded call giving the snapshot's root, the Dust local state's two roots, the spend, a fee paid with it, wrong roots refused, the paying coin chosen, and a build refused for a commitment or generation root other than the core's. |
 | `test/bench-run.test.ts` | The benchmark against the module in the real process (PostgreSQL 18) over the synthetic chain, wallets A, B and C: every cell of spec §8 has a value for the server and each client, and the report renders it; the snapshot's counts and versions; per-step values and the server's times from its log; the naive baseline; the read table at k = 16, 8, 2 and 0 (k 2 gives the served snapshot); the server's view of every request and identical request shapes; the scan by thread count; the transfer row (and a dry-run record); no key, seed, nonce or nullifier in `results.json`; exactly the cells without their input reported missing; `--build`; the command line (`run`, `report --transfer`, with the install); log pairing, speed and formatting rules. |
 
 Fixtures (`test/fixtures/`): `entries.bin`, `pads.bin`, `mine.bin`, `scalar.bin` and `sample.txt` are 16,384 scan

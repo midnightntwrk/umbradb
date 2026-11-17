@@ -160,6 +160,14 @@ for (const scheme of ["simplepir", "ipir-sp"] as const) {
       const checked = (await steps.check()) as Json;
       expect(checked).toMatchObject({ chains: [], calls: 1, batches: [{ positions: [], outcomes: [], readable: 0 }], checkUnavailable: null });
       expect(routes.queries()).toBe(1);
+      // No chain, nothing to pay with: step 12 says so and reads no path.
+      const kernelled = new DustSteps({ ledger: ledger as never, http, cache: new Map(), scheme: options, kernel: () => kernel, network: async () => "undeployed" });
+      kernelled.setSeed(crypto.getRandomValues(new Uint8Array(32)));
+      await kernelled.getFile();
+      await kernelled.check();
+      await expect(kernelled.spend()).rejects.toThrow(/no Dust chain in the era/);
+      expect(routes.pathQueries()).toBe(0);
+      kernelled.dispose();
       steps.dispose();
     });
   });

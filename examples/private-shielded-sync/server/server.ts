@@ -1294,7 +1294,7 @@ export class PssServer {
                 height: this.#dustCheck.manifest.height,
                 commitments: this.#dustCheck.manifest.commitments,
                 scheme: this.#dustCheck.manifest.scheme,
-                heldBytes: this.#dustCheck.table.heldBytes,
+                heldBytes: { check: this.#dustCheck.table.heldBytes, path: this.#dustCheck.pathTable?.heldBytes ?? null },
               },
         previous: this.#dustCheckPrevious === null ? null : { id: this.#dustCheckPrevious.id },
         building: this.#dustCheckBuilding,

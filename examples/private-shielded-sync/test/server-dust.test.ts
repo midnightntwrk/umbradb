@@ -324,6 +324,9 @@ describe("the Dust check table (FR-012, FR-023, SC-004)", () => {
   it("built at start in the configured scheme (SimplePIR) at the height the module started from: positions 0 to 253; the commitment tree's root and the generation records' are the core's stored ones (acceptance 1 and 3); the manifest names them, and the public files are served by digest", { timeout: LONG }, async () => {
     const s = await checkBuilt(r, "simplepir", 4);
     expect(s.dustCheck.current).toMatchObject({ height: 4, commitments: 254, scheme: "simplepir" });
+    // Both tables are held: the check table and the path table.
+    expect(s.dustCheck.current.heldBytes.check).toBeGreaterThan(0);
+    expect(s.dustCheck.current.heldBytes.path).toBeGreaterThan(0);
     const answer = await fetch(`${r.origin}${ROUTES.dustCheckManifest}`);
     expect(answer.status).toBe(200);
     const bytes = new Uint8Array(await answer.arrayBuffer());

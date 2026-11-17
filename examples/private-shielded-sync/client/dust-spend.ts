@@ -89,6 +89,7 @@ export async function dustSpendable(
   },
 ): Promise<DustSpendable> {
   const m = args.checker.manifest;
+  if (args.chains.length === 0) throw new Error("this wallet has no Dust chain in the era (no first coin of its Dust key): no Dust coin to pay with");
   const ctime = new Date(m.blockTime * 1000);
   let chosen = chooseDustChain(ledger, args.chains, args.params, m.commitments, ctime);
   if (args.chain !== undefined) {
