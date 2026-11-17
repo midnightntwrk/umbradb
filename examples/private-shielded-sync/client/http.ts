@@ -3,13 +3,14 @@
  * lengths, time), which the benchmark and the request-shape test read; the record never holds a body.
  *
  * A request carries nothing that depends on the wallet beyond what PIR hides: the manifest, the same artifacts for
- * every wallet, the tail, and query calls of exactly `queriesPerCall` vectors.
+ * every wallet, the tail, and query calls of exactly `queriesPerCall` vectors. The one exception is the Dust coins
+ * request (spec 00062), which names the wallet's Dust public key, as the spec accepts; its record holds the route only.
  */
 
 import { createHash } from "node:crypto";
 import { createWriteStream, renameSync, rmSync } from "node:fs";
 import { once } from "node:events";
-import { OCTET_STREAM, ROUTES } from "../shared/index.ts";
+import { type DustCoinsAnswer, type DustManifest, type DustParametersAnswer, OCTET_STREAM, ROUTES } from "../shared/index.ts";
 
 /** One request as the server sees it, without its body. */
 export interface RequestRecord {
@@ -56,7 +57,8 @@ export class PssHttp {
     this.#fetch = options.fetch ?? ((u, init) => fetch(u, init));
   }
 
-  async #request(method: "GET" | "POST", path: string, body?: Uint8Array): Promise<{ response: Response; started: number }> {
+  /** `query` (with its `?`) is sent but not recorded: the record holds the route alone. */
+  async #request(method: "GET" | "POST", path: string, body?: Uint8Array, query = ""): Promise<{ response: Response; started: number }> {
     const started = performance.now();
     const init: RequestInit =
       body === undefined
@@ -64,7 +66,7 @@ export class PssHttp {
         : { method, headers: { "Content-Type": OCTET_STREAM }, body: body as Uint8Array<ArrayBuffer> };
     let response: Response;
     try {
-      response = await this.#fetch(`${this.origin}${path}`, init);
+      response = await this.#fetch(`${this.origin}${path}${query}`, init);
     } catch (cause) {
       throw new Error(`the server at ${this.origin} is unreachable (${method} ${path})`, { cause });
     }
@@ -88,11 +90,36 @@ export class PssHttp {
     this.records.push({ method, path, bodyBytes, status, answerBytes, ms: performance.now() - started });
   }
 
-  async #bytes(method: "GET" | "POST", path: string, body?: Uint8Array): Promise<{ bytes: Uint8Array; headers: Headers }> {
-    const { response, started } = await this.#request(method, path, body);
+  async #bytes(method: "GET" | "POST", path: string, body?: Uint8Array, query = ""): Promise<{ bytes: Uint8Array; headers: Headers }> {
+    const { response, started } = await this.#request(method, path, body, query);
     const bytes = new Uint8Array(await response.arrayBuffer());
     this.#record(method, path, body?.length ?? 0, response.status, bytes.length, started);
     return { bytes, headers: response.headers };
+  }
+
+  async #json<T>(path: string, query = ""): Promise<T> {
+    const { bytes } = await this.#bytes("GET", path, undefined, query);
+    return JSON.parse(new TextDecoder().decode(bytes)) as T;
+  }
+
+  /** `GET /dust/manifest` (spec 00062). */
+  async dustManifest(): Promise<DustManifest> {
+    return this.#json<DustManifest>(ROUTES.dustManifest);
+  }
+
+  /** `GET /dust/chunk/<n>`: the chunk's bytes (checked by the caller against the manifest). */
+  async dustChunk(n: number): Promise<Uint8Array> {
+    return (await this.#bytes("GET", `${ROUTES.dustChunk}${n}`)).bytes;
+  }
+
+  /** `GET /dust/coins?owner=<key>`: the owner's first coins and generation updates; the record names the route only. */
+  async dustCoins(owner: bigint): Promise<DustCoinsAnswer> {
+    return this.#json<DustCoinsAnswer>(ROUTES.dustCoins, `?owner=${owner.toString()}`);
+  }
+
+  /** `GET /dust/parameters`. */
+  async dustParameters(): Promise<DustParametersAnswer> {
+    return this.#json<DustParametersAnswer>(ROUTES.dustParameters);
   }
 
   /** `GET /manifest`: its bytes and the identifier the server names (checked by the caller against their SHA-256). */

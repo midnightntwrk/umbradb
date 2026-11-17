@@ -1,7 +1,8 @@
 /**
  * The command line (`client/main.ts`) as a separate process, with the client's install (`@midnightntwrk/ledger-v9`
- * 1.0.1 and `ledger-v8` 8.1.3 from `client/node_modules`; skipped without it): `sync`, `balance`, `address` and
- * `cross-check` against the module in UmbraDB's real process and its PostgreSQL 18 database, over the synthetic chain.
+ * 1.0.1 and `ledger-v8` 8.1.3 from `client/node_modules`; skipped without it): `sync`, `balance`, `address`,
+ * `cross-check` and `dust` against the module in UmbraDB's real process and its PostgreSQL 18 database, over the
+ * synthetic chain.
  */
 
 import { execFile } from "node:child_process";
@@ -98,6 +99,22 @@ describe.skipIf(!installed)("the command line (with the client's install)", () =
     const bad = await cli(args);
     expect(bad.code).toBe(1);
     expect((JSON.parse(bad.stdout) as Record<string, any>).differences).toEqual([expect.objectContaining({ what: "only-ledger", position: state.coins[0]!.position })]);
+  });
+
+  it("dust (spec 00062): downloads the Dust file, coins and parameters and walks the wallet's chains (none on this chain, which has no Dust events); refuses a wallet without a mnemonic", { timeout: LONG }, async () => {
+    // BIP-39's public test vector, not a wallet anyone holds.
+    const mnemonic = `${"abandon ".repeat(23)}art`;
+    const { stdout, stderr } = await run(process.execPath, [MAIN, "dust", "--mnemonic-env", "PSS_TEST_MNEMONIC", "--server", r.origin, "--json"], {
+      env: { PATH: process.env.PATH ?? "", PSS_TEST_MNEMONIC: mnemonic },
+    });
+    const report = JSON.parse(stdout) as Record<string, any>;
+    expect(report.file).toMatchObject({ eraHeight: 3_348_434, height: 7, entries: 0, chunks: 0, chunkEntries: 4096, prefixBytes: 4 });
+    expect(report.parameters).toMatchObject({ nightDustRatio: "5000000000", generationDecayRate: "8267", dustGracePeriodSeconds: "10800", source: "initial" });
+    expect([report.firstCoins, report.chains, report.bytes.requests, report.bytes.up]).toEqual([0, [], 3, 0]);
+    expect(`${stdout}${stderr}`).not.toContain("abandon");
+    const text = await cli(["dust", "--zswap-seed-file", seedFile, "--server", r.origin]);
+    expect(text.code).toBe(1);
+    expect(text.stderr).toContain("dust needs the wallet's mnemonic");
   });
 
   it("refuses a wallet it cannot name, and a missing mnemonic variable, without printing anything secret", async () => {

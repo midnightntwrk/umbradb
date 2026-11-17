@@ -1,5 +1,6 @@
 /**
- * The private shielded sync client (spec §6, §7): `sync`, `balance`, `send`, `address`, `cross-check`.
+ * The private shielded sync client (spec §6, §7): `sync`, `balance`, `send`, `address`, `cross-check`, and `dust`
+ * (spec 00062, `./dust.ts`).
  *
  *   npm ci --ignore-scripts --prefix examples/private-shielded-sync/client      # once: the Midnight packages
  *   node --env-file=<secrets.env> examples/private-shielded-sync/client/main.ts sync --wallet A
@@ -21,10 +22,11 @@ import type { IpirWorkers } from "../ipir/engine.ts";
 import { nodeIpirPool } from "../ipir/pool-node.ts";
 import { compileIpirWasm } from "../ipir/wallet-node.ts";
 import { inlineMultiplier, type Multiplier, WorkerMultiplier } from "../pir/index.ts";
-import { toHex } from "../shared/index.ts";
+import { ROUTES, toHex } from "../shared/index.ts";
 import { formatShieldedAddress, parseShieldedAddress } from "./address.ts";
 import { BlobCache } from "./cache.ts";
 import { compareWithClient, readZswapEvents, replayZswapEvents } from "./cross-check.ts";
+import { dustSync } from "./dust.ts";
 import { PssHttp } from "./http.ts";
 import { keysFromZswapSeed, type WalletKeys } from "./keys.ts";
 import { type Ledger, loadLedger, loadLedgerV8 } from "./ledger.ts";
@@ -45,6 +47,9 @@ commands:
   address       print the wallet's shielded address for --network
   cross-check   replay the database's stored Zswap events up to the local state's tail height with the ledger's own
                 ZswapLocalState and compare with the local state (FR-140)
+  dust          download the Dust file, this wallet's first coins and the Dust parameters; walk each of the wallet's
+                Dust chains through the file; print each chain's spends and current coin (spec 00062; needs the
+                mnemonic, whose Dust seed gives the Dust key)
 
 wallet (one of):
   --wallet <name>            mnemonic from the environment variable PSS_MNEMONIC_<NAME>
@@ -384,6 +389,84 @@ async function cmdCrossCheck(): Promise<void> {
   }
 }
 
+/**
+ * `dust` (spec 00062 FR-024): per chain, the spends found (with the file entries they were taken from), false matches
+ * dropped, and the current coin (sequence number, position, value); the bytes moved. The key is shown by its last
+ * digits only; the secret key and the mnemonic never.
+ */
+async function cmdDust(): Promise<void> {
+  const s = await seeds();
+  if (s.all === null) throw new Error("dust needs the wallet's mnemonic (--wallet or --mnemonic-env): its Dust seed gives the Dust key");
+  const ledger = await loadLedger();
+  const http = new PssHttp(opt.server);
+  const result = await dustSync({ ledger, dustSeed: s.all.dust, http, log });
+  const bytes = (path: string): number => http.records.filter((r) => r.path.startsWith(path)).reduce((n, r) => n + r.answerBytes, 0);
+  const transfer = {
+    requests: http.records.length,
+    down: http.records.reduce((n, r) => n + r.answerBytes, 0),
+    up: http.records.reduce((n, r) => n + r.bodyBytes, 0),
+    manifest: bytes(ROUTES.dustManifest),
+    chunks: bytes(ROUTES.dustChunk),
+    coins: bytes(ROUTES.dustCoins),
+    parameters: bytes(ROUTES.dustParameters),
+  };
+  const m = result.manifest;
+  const p = result.parameters;
+  const chains = result.chains.map((c, i) => ({
+    firstCoinHeight: c.start.height,
+    generationIndex: c.start.generationIndex,
+    nightValue: c.start.generation.value,
+    dtime: c.generation.dtime?.toISOString() ?? null,
+    spends: c.steps.length,
+    entries: c.steps.map((step) => step.entry),
+    falseMatchesDropped: c.dropped.length,
+    checked: false,
+    coin: {
+      seq: c.coin.seq,
+      position: c.coin.mtIndex,
+      ctime: c.coin.ctime.toISOString(),
+      valueAtCreation: c.coin.initialValue,
+      valueNow: result.values[i]!,
+      commitment: `0x${result.commitments[i]!.toString(16).padStart(64, "0")}`,
+    },
+  }));
+  const report = {
+    server: http.origin,
+    file: { eraHeight: m.eraHeight, height: m.height, entries: m.entries, chunks: m.chunks.length, chunkEntries: m.chunkEntries, prefixBytes: m.prefixBytes },
+    parameters: p,
+    keyEnds: result.owner.toString().slice(-8),
+    firstCoins: result.chains.length,
+    updates: result.updates.length,
+    chains,
+    at: result.at.toISOString(),
+    ms: Math.round(result.ms),
+    bytes: transfer,
+  };
+  if (opt.json) {
+    process.stdout.write(`${json(report)}\n`);
+    return;
+  }
+  const n = (v: number | bigint): string => v.toLocaleString("en-US");
+  const lines = [
+    `Dust file from ${report.server}: to height ${n(m.height)} (era from ${n(m.eraHeight)}), ${n(m.entries)} entries in ${m.chunks.length} chunks`,
+    `parameters: ${p.nightDustRatio}, ${p.generationDecayRate}, ${p.dustGracePeriodSeconds} s (${p.source === "initial" ? "the ledger's initial ones" : `changed at ${p.changedAt}`})`,
+    `key …${report.keyEnds}: ${chains.length} chains in the era, ${report.updates} generation updates`,
+  ];
+  chains.forEach((c, i) => {
+    lines.push(
+      `chain ${i + 1}: first coin at height ${n(c.firstCoinHeight)}, generation index ${c.generationIndex}, backed by ${n(c.nightValue)} Stars of Night${c.dtime === null ? "" : `, Night spent at ${c.dtime}`}`,
+      `  spends found: ${c.spends}${c.spends === 0 ? "" : ` (file entries ${c.entries.join(", ")}; not checked: the private check is not built)`}`,
+      `  false matches dropped: ${c.falseMatchesDropped}`,
+      `  current coin: seq ${c.coin.seq}, position ${c.coin.position}, created ${c.coin.ctime}, value at creation ${n(c.coin.valueAtCreation)} Specks, value now ${n(c.coin.valueNow)} Specks`,
+      `  commitment ${c.coin.commitment}`,
+    );
+  });
+  lines.push(
+    `downloaded ${n(transfer.down)} bytes in ${transfer.requests} requests (manifest ${n(transfer.manifest)}, chunks ${n(transfer.chunks)}, coins ${n(transfer.coins)}, parameters ${n(transfer.parameters)}); uploaded ${transfer.up} bytes of request bodies; ${report.ms} ms`,
+  );
+  process.stdout.write(`${lines.join("\n")}\n`);
+}
+
 try {
   if (opt.help || command === "help") process.stdout.write(HELP);
   else if (command === "sync") await cmdSync();
@@ -391,6 +474,7 @@ try {
   else if (command === "send") await cmdSend();
   else if (command === "address") await cmdAddress();
   else if (command === "cross-check") await cmdCrossCheck();
+  else if (command === "dust") await cmdDust();
   else throw new Error(`unknown command ${command}; see main.ts help`);
 } catch (error) {
   log(`error: ${error instanceof Error ? error.message : String(error)}`);
