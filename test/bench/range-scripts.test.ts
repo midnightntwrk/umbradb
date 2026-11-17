@@ -1,0 +1,551 @@
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { startContainer } from "../containers.js";
+import { POSTGRES_IMAGE } from "../postgres-image.js";
+
+/**
+ * The range bench's scripts (`bench/range/`):
+ * - they hold nothing of one machine: no home directory, no private address, and every script that needs the
+ *   machine's folder, the node's address or a template refuses to run without it;
+ * - the scripts that read a run folder give the right numbers on a small run written here, with the fields the block
+ *   trace writes (`src/trace/trace.ts`; `test/trace/traced-process.test.ts` holds the process to those fields), and
+ *   print a stage, a phase or a column only where its key is in the trace;
+ * - negative controls: `compare.mjs` shows where two runs differ, and `tables.sh` marks the tables in which two small
+ *   databases differ.
+ *
+ * `run.sh` past its arguments, `equal.sh`, `contents-hash.sh`, `roundtrip.sh` and `preflight.sh` need a build, a node
+ * or a synced database and are not run here; `tables.sh` runs on a PostgreSQL container of this file's own.
+ */
+
+const SCRIPTS = fileURLToPath(new URL("../../bench/range/", import.meta.url));
+const FILES = readdirSync(SCRIPTS).sort();
+
+interface Ran {
+  readonly code: number | null;
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
+/** Runs one script with `args`, in an environment without the bench's variables unless `env` gives them. */
+function run(script: string, args: readonly string[], env: Readonly<Record<string, string>> = {}): Ran {
+  const base = Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^(BENCH_|BUILD$|TEMPLATE$|UMBRADB_LOCAL_NODE$|SKIP$|FROM$|TO$)/.test(name)));
+  const command = script.endsWith(".sh") ? "bash" : process.execPath;
+  const result = spawnSync(command, [join(SCRIPTS, script), ...args], { encoding: "utf8", env: { ...base, ...env } });
+  return { code: result.status, stdout: result.stdout, stderr: result.stderr };
+}
+
+let directory = "";
+const folder = (label: string): string => join(directory, label);
+
+type Line = Record<string, unknown>;
+
+/**
+ * A run folder of five heights, 100 to 104, the third with a transaction: each height creates one node and deletes the
+ * one of the height before, so its count changes are +1 for its own node and −1 for the one before. `change` rewrites
+ * a height's line (`index` 0 to 4) before it is written; `ends` are the clock's ms at each height's end.
+ */
+function writeRun(label: string, lastChain: string, change: (line: Line, index: number) => Line = (line) => line, ends: readonly number[] = [0, 10, 30, 40, 60]): void {
+  mkdirSync(folder(label));
+  const lines = ends.map((t, index) => {
+    const h = 100 + index;
+    return JSON.stringify(
+      change(
+        {
+          h,
+          t,
+          tx: index === 2 ? 1 : 0,
+          // The fourth height waited 5 ms for its block and 1 ms for the node's root.
+          beginMs: index === 3 ? 6 : 1,
+          prepareMs: 6,
+          applyMs: (index === 2 ? 12 : 2) + (index === 3 ? 1 : 0),
+          rootWaitMs: index === 3 ? 1 : 0,
+          stepMs: 3,
+          evictMs: 0.5,
+          txMs: 4,
+          writeBlockMs: 1,
+          writeRefcountMs: 2,
+          commitMs: 0.5,
+          sqlN: 20,
+          sqlMs: 5,
+          encMs: 0.1,
+          decMs: 0.1,
+          reads: [["rows", 10, 0.1, 10], ["queue", 0, 0.1, 1], ["counts", 30, 0.2, 30], ["references", 1, 0.1, 1]],
+          st: [1, 0, 0, 2, 1, 1, 1, 1, 2],
+          sh: index === ends.length - 1 ? lastChain : `chain-${h}`,
+        },
+        index,
+      ),
+    );
+  });
+  writeFileSync(join(folder(label), "trace.jsonl"), `${lines.join("\n")}\n`);
+  writeFileSync(join(folder(label), "trace.jsonl.stmts.json"), JSON.stringify([{ q: "COMMIT", n: 5, ms: 2.5, max: 0.6 }]));
+  const worker = ends.map((_, index) => JSON.stringify({ h: 100 + index, tx: index === 2 ? 1 : 0, adapterApply: index === 2 ? 9 : 1, stateApply: index === 2 ? 5 : 0, settle: 1, flush: 0.5 }));
+  writeFileSync(join(folder(label), "trace.jsonl.worker.jsonl"), `${worker.join("\n")}\n`);
+  const status = [
+    { at: 1_000, status: { state: "running", cursor: "100" } },
+    { at: 2_000, status: { state: "running", cursor: "102" } },
+    { at: 3_000, status: { state: "stopped", cursor: "104", reason: null } },
+    { at: 3_500, status: { state: "stopped", cursor: "104", reason: null } },
+  ];
+  writeFileSync(join(folder(label), "status.jsonl"), `${status.map((sample) => JSON.stringify(sample)).join("\n")}\n`);
+  writeFileSync(join(folder(label), "run.log"), ["admin endpoints listening", "node retries in 1000 ms (node-retrying, connect, attempt 1)", "processing stopped at 104"].join("\n"));
+  writeFileSync(join(folder(label), "result.json"), run("summary.mjs", [folder(label)]).stdout);
+}
+
+/** The run folders every test below may read; a test that needs another writes it beside them and removes it. */
+const RUNS = ["a", "b", "c"];
+
+/** The cells of a line of `compare.mjs`, the run's name first; the chain's text after them is left out. */
+const cells = (line: string, count: number): string[] => line.trim().split(/\s+/).slice(0, count);
+
+beforeAll(() => {
+  directory = mkdtempSync(join(tmpdir(), "umbradb-bench-range-"));
+  writeRun("a", "chain-end");
+  writeRun("b", "chain-end");
+  writeRun("c", "chain-other");
+});
+afterAll(() => rmSync(directory, { recursive: true, force: true }));
+
+describe("the range bench's scripts hold nothing of one machine", () => {
+  it("the folder holds the run, its readers, the comparisons and the machine and chain tools", () => {
+    expect(FILES).toEqual(
+      expect.arrayContaining([
+        ...["run.sh", "lib.sh", "preflight.sh"],
+        ...["summary.mjs", "compare.mjs", "analyze.mjs", "worker.mjs", "worker-time.mjs"],
+        ...["equal.sh", "contents-hash.sh", "contents-hash.mjs", "tables.sh"],
+        ...["txshare.mjs", "roundtrip.sh", "roundtrip.mjs", "profile.mjs"],
+        "README.md",
+      ]),
+    );
+  });
+
+  it("no home directory, no private address, no password", () => {
+    for (const file of FILES) {
+      const text = readFileSync(join(SCRIPTS, file), "utf8");
+      expect(text, file).not.toMatch(/\/Users\/|\/home\/[a-z]/);
+      // Loopback is no machine's own; a private network's address is.
+      expect(text, file).not.toMatch(/\b(?:10\.\d{1,3}|192\.168|172\.(?:1[6-9]|2\d|3[01]))\.\d{1,3}\.\d{1,3}\b/);
+      expect(text, file).not.toMatch(/PGPASSWORD=[^%$\s]/);
+    }
+  });
+
+  it("every shell script parses", () => {
+    for (const file of FILES.filter((name) => name.endsWith(".sh"))) {
+      const parsed = spawnSync("bash", ["-n", join(SCRIPTS, file)], { encoding: "utf8" });
+      expect(parsed.status, `${file}: ${parsed.stderr}`).toBe(0);
+    }
+  });
+
+  it("npm run bench:range is run.sh", () => {
+    const manifest = JSON.parse(readFileSync(fileURLToPath(new URL("../../package.json", import.meta.url)), "utf8")) as { scripts: Record<string, string> };
+    expect(manifest.scripts["bench:range"]).toBe("bash bench/range/run.sh");
+  });
+
+  it("the scripts that need the machine's folder refuse without BENCH_DIR", () => {
+    for (const script of ["run.sh", "equal.sh", "tables.sh", "contents-hash.sh", "roundtrip.sh", "preflight.sh"]) {
+      const result = run(script, ["label", "100"]);
+      expect(result.code, script).toBe(2);
+      expect(result.stderr, script).toContain("set BENCH_DIR");
+    }
+  });
+
+  it("run.sh refuses a wrong label, a wrong stop height, a missing node address, a missing or wrong template and a checkout that is not built", () => {
+    const env = { BENCH_DIR: directory, BUILD: directory };
+    expect(run("run.sh", ["label"], env)).toMatchObject({ code: 2, stderr: expect.stringContaining("usage: run.sh") });
+    expect(run("run.sh", ["Bad_Label", "100"], env)).toMatchObject({ code: 2, stderr: expect.stringContaining("a label is lowercase letters, digits and -") });
+    expect(run("run.sh", ["label", "10x"], env)).toMatchObject({ code: 2, stderr: expect.stringContaining("the stop height is a number") });
+    expect(run("run.sh", ["label", "100"], env)).toMatchObject({ code: 2, stderr: expect.stringContaining("set UMBRADB_LOCAL_NODE") });
+    const node = { ...env, UMBRADB_LOCAL_NODE: "ws://node.invalid:9944" };
+    expect(run("run.sh", ["label", "100"], node)).toMatchObject({ code: 2, stderr: expect.stringContaining("set TEMPLATE") });
+    expect(run("run.sh", ["label", "100"], { ...node, TEMPLATE: "a template; --" })).toMatchObject({ code: 2, stderr: expect.stringContaining("a template's name is lowercase letters, digits and _") });
+    const refused = run("run.sh", ["label", "100"], { ...node, TEMPLATE: "template_at_100" });
+    expect(refused).toMatchObject({ code: 2, stderr: expect.stringContaining("is not built") });
+    // Refused before anything was created.
+    expect(readdirSync(directory).sort()).toEqual(RUNS);
+  });
+
+  it("txshare.mjs refuses without the node's address", () => {
+    const result = run("txshare.mjs", []);
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain("set UMBRADB_LOCAL_NODE");
+  });
+});
+
+describe("the scripts that read a run folder", () => {
+  it("summary.mjs: heights per second from the first to the last sample whose cursor moved", () => {
+    expect(JSON.parse(readFileSync(join(folder("a"), "result.json"), "utf8"))).toEqual({
+      from: 100,
+      to: 104,
+      heights: 4,
+      seconds: 2,
+      heightsPerSecond: 2,
+      msPerHeight: 500,
+      endState: "stopped",
+      reason: null,
+      nodeRetries: 1,
+    });
+  });
+
+  it("compare.mjs: stage means, keys read, and whether the chains of step outputs are equal", () => {
+    const same = run("compare.mjs", [folder("a"), folder("b")]);
+    expect(same.code).toBe(0);
+    const [header, first, second] = same.stdout.trimEnd().split("\n") as [string, string, string];
+    // No run's trace has a key of a column printed only where it is: the header ends with the chain's.
+    expect(header.trim().split(/\s+/)).toEqual(["run", "h/s", "ms/blk", "own", "h/s", "own", "wait", "apply", "step", "blk-tx", "cnt-wr", "stmts", "reads", "cnt-keys", "row-keys", "retries", "step", "chain"]);
+    // The first height of a run is left out: the means are over heights 101 to 104, which took 60 ms. Of them 6 ms
+    // were waits for the node (5 ms for a block above the usual 1 ms, 1 ms for a root), so the build's own are 13.5 ms
+    // per block, and the apply is counted without the root wait.
+    expect(cells(first, 15)).toEqual(["a", "2", "500", "74.07", "13.50", "1.50", "4.50", "3.00", "4.00", "2.00", "20.00", "4.0", "30", "10", "1"]);
+    expect(first).toContain("chain-end same (h 104, stopped)");
+    expect(second).toContain("chain-end same (h 104, stopped)");
+    // Two runs of the same heights that did the same show no difference: every cell after the name is equal.
+    expect(cells(second, 15).slice(1)).toEqual(cells(first, 15).slice(1));
+    const different = run("compare.mjs", [folder("a"), folder("c")]);
+    expect(different.code).toBe(1);
+    expect(different.stdout).toContain("chain-other DIFFERENT");
+  });
+
+  it("compare.mjs: a column whose key only some traces have is printed for them, with - for the others", () => {
+    // A build that applies blocks ahead of their turn records it per height: used at two of the four heights after
+    // the first, one result dropped. Keys read under a name another build adds are counted with the stored keys.
+    const ahead = (line: Line, index: number): Line => ({
+      ...line,
+      aheadUsed: index === 1 || index === 2 ? 1 : 0,
+      ...(index === 3 ? { aheadDropped: 1 } : {}),
+      reads: [...(line.reads as unknown[]), ["missing", 5, 0.1, 5]],
+    });
+    writeRun("ahead", "chain-end", ahead);
+    // A run of such a build that dropped nothing never wrote the key of a drop: its count is 0, not unknown.
+    writeRun("kept", "chain-end", (line) => ({ ...line, aheadUsed: 1 }));
+    try {
+      const result = run("compare.mjs", [folder("a"), folder("ahead"), folder("kept")]);
+      expect(result.code).toBe(0);
+      const [header, first, second, third] = result.stdout.trimEnd().split("\n") as [string, string, string, string];
+      expect(header.trim().split(/\s+/).slice(16)).toEqual(["ahead", "dropped", "step", "chain"]);
+      expect(cells(first, 17).slice(15)).toEqual(["-", "-"]);
+      expect(cells(second, 17).slice(11)).toEqual(["5.0", "30", "15", "1", "50.0", "1"]);
+      expect(cells(third, 17).slice(15)).toEqual(["100.0", "0"]);
+      // Alone, the run without the keys has neither column.
+      expect(run("compare.mjs", [folder("a")]).stdout).not.toMatch(/ahead|dropped/);
+    } finally {
+      for (const label of ["ahead", "kept"]) rmSync(folder(label), { recursive: true, force: true });
+    }
+  });
+
+  it("negative control: compare.mjs shows where two runs differ, and nowhere else", () => {
+    // The same heights and the same steps, by a build whose reclamation step takes twice as long, sends twice the
+    // statements and asks for half the count keys: each height ends 3 ms later than in run a.
+    const slower = (line: Line): Line => ({
+      ...line,
+      stepMs: 6,
+      sqlN: 40,
+      reads: (line.reads as [string, number, number, number][]).map(([kind, asked, ms, found]) => [kind, kind === "counts" ? asked / 2 : asked, ms, found]),
+    });
+    writeRun("slower", "chain-end", slower, [0, 13, 36, 49, 72]);
+    try {
+      const result = run("compare.mjs", [folder("a"), folder("slower")]);
+      // The chains are equal: the two runs computed the same steps, at another speed.
+      expect(result.code).toBe(0);
+      const [header, first, second] = result.stdout.trimEnd().split("\n") as [string, string, string];
+      // "own h/s" is one column: the header has one word more than a line has cells before it.
+      const names = ["run", "h/s", "ms/blk", "own h/s", "own", "wait", "apply", "step", "blk-tx", "cnt-wr", "stmts", "reads", "cnt-keys", "row-keys", "retries"];
+      expect(header.trim().split(/\s+/).slice(0, 16).join(" ")).toBe(names.join(" "));
+      const [base, changed] = [cells(first, 15), cells(second, 15)];
+      const differing = names.filter((_, column) => column > 0 && base[column] !== changed[column]);
+      expect(differing).toEqual(["own h/s", "own", "step", "stmts", "cnt-keys"]);
+      const of = (name: string): [string | undefined, string | undefined] => [base[names.indexOf(name)], changed[names.indexOf(name)]];
+      expect(of("own")).toEqual(["13.50", "16.50"]);
+      expect(of("own h/s")).toEqual(["74.07", "60.61"]);
+      expect(of("step")).toEqual(["3.00", "6.00"]);
+      expect(of("stmts")).toEqual(["20.00", "40.00"]);
+      expect(of("cnt-keys")).toEqual(["30", "15"]);
+      expect(second).toContain("chain-end same");
+      // With another chain as well, the run is marked and the script fails.
+      rmSync(folder("slower"), { recursive: true, force: true });
+      writeRun("slower", "chain-slower", slower, [0, 13, 36, 49, 72]);
+      const marked = run("compare.mjs", [folder("a"), folder("slower")]);
+      expect(marked.code).toBe(1);
+      expect(marked.stdout).toContain("chain-slower DIFFERENT (h 104, stopped)");
+      expect(marked.stdout).toContain("chain-end same (h 104, stopped)");
+    } finally {
+      rmSync(folder("slower"), { recursive: true, force: true });
+    }
+  });
+
+  it("analyze.mjs: stages by kind of block, the step's reads, the statements", () => {
+    const result = run("analyze.mjs", [folder("a")]);
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stdout).toContain("== all: 4 blocks");
+    expect(result.stdout).toContain("== empty: 3 blocks");
+    expect(result.stdout).toContain("== empty, after an empty block: 2 blocks");
+    expect(result.stdout).toContain("== empty, after a block with transactions: 1 blocks");
+    expect(result.stdout).toContain("== with transactions: 1 blocks");
+    expect(result.stdout).toContain("transaction share 0.250");
+    expect(result.stdout).toMatch(/counts\s+1\.00 calls\/block/);
+    // The statements' totals are over every height of the run, the first included: 5 COMMITs in 5 heights.
+    expect(result.stdout).toContain("total: 1.0 statements/block");
+    // The stages of all blocks: 60 ms over four heights, of which the reclamation step is 3 ms a block.
+    expect(result.stdout).toMatch(/^ {2}total\s+mean\s+15\.00\s+p50\s+10\.00/m);
+    expect(result.stdout).toMatch(/^ {2}stepMs\s+mean\s+3\.00\s+p50\s+3\.00\s+p90\s+3\.00\s+share\s+20\.0%$/m);
+  });
+
+  it("analyze.mjs: a stage is printed only where the trace has its key", () => {
+    writeRun("no-evict", "chain-end", ({ evictMs: _evict, ...line }) => line);
+    try {
+      expect(run("analyze.mjs", [folder("a")]).stdout).toMatch(/^ {2}evictMs\s+mean\s+0\.50/m);
+      const result = run("analyze.mjs", [folder("no-evict")]);
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stdout).not.toContain("evictMs");
+      expect(result.stdout).toMatch(/^ {2}stepMs\s+mean\s+3\.00/m);
+    } finally {
+      rmSync(folder("no-evict"), { recursive: true, force: true });
+    }
+  });
+
+  it("worker.mjs: the phases of the worker's apply, by kind of block, a phase only where the trace has its key", () => {
+    const result = run("worker.mjs", [folder("a")], { SKIP: "0" });
+    expect(result.code, result.stderr).toBe(0);
+    const row = (name: string): string[] => (result.stdout.split("\n").find((line) => line.startsWith(name)) ?? "").trim().split(/\s+/);
+    expect(row("adapterApply")).toEqual(["adapterApply", "1.00", "9.00", "9.00"]);
+    expect(row("stateApply")).toEqual(["stateApply", "0.00", "5.00", "5.00"]);
+    expect(row("apply ")).toEqual(["apply", "2.00", "10.00", "10.00"]);
+    expect(result.stdout).toContain("4/1, 1");
+    // The run's worker lines hold four phases: no line for the others.
+    const printed = result.stdout.split("\n").slice(2, -3).map((line) => line.trim().split(/\s+/)[0]);
+    expect(printed).toEqual(["adapterApply", "stateApply", "settle", "flush"]);
+    // Limited to the heights after the block with a transaction.
+    expect(run("worker.mjs", [folder("a")], { SKIP: "0", FROM: "103" }).stdout).toContain("2/0, 0");
+  });
+
+  it("worker-time.mjs: where the worker's time went between two applied blocks, adding up to its span, and the main thread's side", () => {
+    // Its own folder: the tests above count the folders of `directory`.
+    const runs = mkdtempSync(join(tmpdir(), "umbradb-bench-range-worker-time-"));
+    try {
+      const write = (label: string, worker: readonly object[], blocks: readonly object[]): string => {
+        mkdirSync(join(runs, label));
+        writeFileSync(join(runs, label, "trace.jsonl.worker.jsonl"), `${worker.map((line) => JSON.stringify(line)).join("\n")}\n`);
+        writeFileSync(join(runs, label, "trace.jsonl"), `${blocks.map((line) => JSON.stringify(line)).join("\n")}\n`);
+        return join(runs, label);
+      };
+      // Three applied blocks, the second with transactions. Its apply waited 3.5 ms for stored nodes inside its two
+      // stages and its load 2 ms; 4 ms of its garbage collections were reported late, in the entry after it. In the
+      // first and the last, 0.5 ms are in no request and not idle.
+      const apply = { "rqN.apply": 1, "rq.apply": 4, adapterApply: 2, settle: 1, "post.apply": 0.5 };
+      const worker = [
+        { h: 100, tx: 0, spanMs: 10, ...apply, "rq.commit": 1, "rqN.commit": 1, "post.commit": 0.25, idleMs: 4.5, transitMs: 0.5, queuedMs: 2, gcMs: 1, gcN: 1 },
+        {
+          h: 101,
+          tx: 2,
+          spanMs: 20,
+          ...{ "rqN.apply": 1, "rq.apply": 12, adapterApply: 8, stateApply: 6, settle: 2, "post.apply": 0.5 },
+          ...{ "node.adapterApply": 3, "node.stateApply": 3, "node.settle": 0.5, "node.rq.apply": 3.5 },
+          ...{ "rqN.parse": 1, "rq.parse": 2, parse: 1.5, "post.parse": 0.25 },
+          ...{ "rqN.load": 1, "rq.load": 3, "node.rq.load": 2 },
+          ...{ nodeWaitMs: 5.5, nodeWaits: 4, nodeGets: 10, nodeGot: 8 },
+          ...{ idleMs: 3, transitMs: 1, queuedMs: 6, gcMs: 2, gcN: 1, gcMajorMs: 2 },
+        },
+        { h: 102, tx: 0, spanMs: 10, ...apply, idleMs: 5.5, transitMs: 0.5, queuedMs: 0, "gcOf.101": 4, "gcNOf.101": 2 },
+      ];
+      // `collectMs` is a key a later build's reclamation adds: where a trace has it, it counts in the step's line.
+      const block = { beginMs: 1, txMs: 2, collectMs: 0.5, stepMs: 1, evictMs: 0.5, sqlMs: 3, encMs: 0.25, decMs: 0.25, backMs: 0.5, "rtN.apply": 1 };
+      const blocks = [
+        { h: 99, t: 0 },
+        { h: 100, t: 10, tx: 0, ...block, applyMs: 3, rootWaitMs: 0, "rt.apply": 4, "rt.commit": 1, "rtN.commit": 1 },
+        { h: 101, t: 40, tx: 2, ...block, applyMs: 14, rootWaitMs: 2, "rt.apply": 13, nodeNoticeMs: 1, nodeReadMs: 4, nodeReads: 4 },
+        { h: 102, t: 50, tx: 0, ...block, applyMs: 3, rootWaitMs: 0, "rt.apply": 4, "rt.commit": 1, "rtN.commit": 1 },
+      ];
+      const result = run("worker-time.mjs", [write("w", worker, blocks)], { SKIP: "0" });
+      expect(result.code, result.stderr).toBe(0);
+      const [ofWorker, ofMain] = result.stdout.split("== w: the main thread") as [string, string];
+      /** The numbers of the first line of `text` named `name`: all blocks, empty blocks, blocks with transactions. */
+      const row = (text: string, name: string): number[] =>
+        (text.split("\n").find((line) => line.trimStart().startsWith(name)) ?? "").slice(32).replace(/%/g, "").trim().split(/\s+/).map(Number);
+      expect(ofWorker).toContain("== w: the worker's time, ms per applied block (heights 100 to 102");
+      expect(row(ofWorker, "blocks")).toEqual([3, 2, 1]);
+      // Mean ms per block for all, empty and with transactions, then the share of the span over all blocks.
+      const parts: Record<string, number[]> = {
+        adapterApply: [3, 2, 5],
+        settle: [1.167, 1, 1.5],
+        "apply, rest": [0.833, 0.5, 1.5],
+        "parse, the phase": [0.5, 0, 1.5],
+        "parse, rest": [0.083, 0, 0.25],
+        commit: [0.25, 0.375, 0],
+        load: [0.333, 0, 1],
+        "posting answers": [0.667, 0.625, 0.75],
+        "node waits": [1.833, 0, 5.5],
+        transit: [0.667, 0.5, 1],
+        idle: [3.667, 4.5, 2],
+        unaccounted: [0.333, 0.5, 0],
+      };
+      expect(row(ofWorker, "span")).toEqual([13.333, 10, 20, 100]);
+      for (const [name, expected] of Object.entries(parts)) {
+        const found = row(ofWorker, name);
+        expect(found.slice(0, 3), name).toEqual(expected);
+        // The fourth number is the line's share of the span over all blocks, in percent to one decimal.
+        expect(Math.abs((found[3] as number) - (100 * (expected[0] as number)) / 13.333), `${name}'s share`).toBeLessThan(0.06);
+      }
+      // The lines add up to the span, in each column.
+      for (const column of [0, 1, 2]) {
+        expect(Object.values(parts).reduce((sum, found) => sum + (found[column] as number), 0), `column ${column}`).toBeCloseTo(row(ofWorker, "span")[column] as number, 2);
+      }
+      // Apart, since they overlap the lines above; the collections reported late are counted in the block they ran in.
+      expect(row(ofWorker, "queued")).toEqual([2.667, 1, 6, 20]);
+      expect(row(ofWorker, "garbage collection ")).toEqual([2.333, 0.5, 6, 17.5]);
+      expect(row(ofWorker, "of it major")).toEqual([0.667, 0, 2, 5]);
+      expect(row(ofWorker, "garbage collections")).toEqual([1.333, 0.5, 3]);
+      expect(row(ofWorker, "apply requests")).toEqual([1, 1, 1]);
+      expect(row(ofWorker, "load requests")).toEqual([0.333, 0, 1]);
+      expect(row(ofWorker, "nodes asked of the store")).toEqual([3.333, 0, 10]);
+      expect(ofWorker).toContain("node waits: 4 of 1.375 ms each; by where they fell, ms per block: adapterApply 1.000, settle 0.167, load 0.667, other 0.000");
+      expect(ofWorker).toContain("the worker is waiting for work: it had no request to run for 32.5% of its span (transit included)");
+      expect(ofWorker).toContain("unaccounted: 2.50% of the span over all blocks (3.70% of the time it was not idle), at most 5.0% of one block's");
+
+      // The main thread: the run's first line only dates the second; three blocks of 10, 30 and 10 ms.
+      expect(ofMain).toContain("ms per committed block (heights 100 to 102");
+      expect(row(ofMain, "blocks")).toEqual([3, 2, 1]);
+      expect(row(ofMain, "the block, by the clock")).toEqual([16.667, 10, 30, 100]);
+      expect(row(ofMain, "wait for the block")).toEqual([1, 1, 1, 6]);
+      // The apply as the main thread waited for it, without the wait for the node's root.
+      expect(row(ofMain, "wait for the worker's apply")).toEqual([6, 3, 12, 36]);
+      expect(row(ofMain, "wait for the node's root")).toEqual([0.667, 0, 2, 4]);
+      expect(row(ofMain, "reclamation step")).toEqual([2, 2, 2, 12]);
+      expect(row(ofMain, "the block's transaction")).toEqual([2, 2, 2, 12]);
+      expect(row(ofMain, "statements, client time")).toEqual([3, 3, 3, 18]);
+      expect(row(ofMain, "answers' way back")).toEqual([0.5, 0.5, 0.5, 3]);
+      expect(row(ofMain, "node requests, to notice")).toEqual([0.333, 0, 1, 2]);
+      expect(row(ofMain, "node requests, to read")).toEqual([1.333, 0, 4, 8]);
+      expect(row(ofMain, "apply ")).toEqual([7, 4, 13, 42]);
+      expect(row(ofMain, "commit ")).toEqual([0.667, 1, 0, 4]);
+      expect(row(ofMain, "apply answers")).toEqual([1, 1, 1]);
+      expect(row(ofMain, "node requests ")).toEqual([1.333, 0, 4]);
+
+      // Limited to the block with transactions; and a worker with no time to spare is called saturated.
+      const limited = run("worker-time.mjs", [join(runs, "w")], { SKIP: "0", FROM: "101", TO: "101" });
+      expect(row(limited.stdout, "blocks")).toEqual([1, 0, 1]);
+      expect(row(limited.stdout, "span")[0]).toBe(20);
+      const busy = write("busy", [{ h: 1, tx: 0, spanMs: 10, "rq.apply": 9.75, "rqN.apply": 1, idleMs: 0.25 }], [{ h: 0, t: 0 }, { h: 1, t: 10, tx: 0 }]);
+      expect(run("worker-time.mjs", [busy], { SKIP: "0" }).stdout).toContain("the worker is saturated: it had no request to run for 2.5% of its span");
+
+      // Nothing to read after the warm-up: said, not a table of nothing.
+      expect(run("worker-time.mjs", [busy])).toMatchObject({ code: 1, stdout: expect.stringContaining("== busy: no applied block after the first 20") });
+
+      // A run whose worker lines have no span is named and nothing is made up for it; the runs after it are still
+      // read.
+      const old = run("worker-time.mjs", [folder("a"), busy], { SKIP: "0" });
+      expect(old.code).toBe(1);
+      expect(old.stdout).toContain("== a: its worker entries have no spanMs");
+      expect(old.stdout).toContain("== busy: the worker's time");
+    } finally {
+      rmSync(runs, { recursive: true, force: true });
+    }
+  });
+
+  it("profile.mjs: self time by function of a run's CPU profiles", () => {
+    const profile = {
+      nodes: [
+        { id: 1, callFrame: { functionName: "step", url: "file:///build/dist/backbone/refcount.js", lineNumber: 9 } },
+        { id: 2, callFrame: { functionName: "", url: "", lineNumber: 0 } },
+      ],
+      samples: [1, 2, 1],
+      timeDeltas: [1_000, 500, 2_000],
+    };
+    writeFileSync(join(folder("a"), "main.cpuprofile"), JSON.stringify(profile));
+    const result = run("profile.mjs", [folder("a")]);
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stdout).toContain("== main.cpuprofile: 4 ms sampled");
+    expect(result.stdout).toMatch(/3 ms\s+85\.7%\s+step dist\/backbone\/refcount\.js:10/);
+  });
+});
+
+describe("tables.sh on small databases", () => {
+  let container: StartedPostgreSqlContainer | undefined;
+
+  /** Runs `sql` in `database` of the container, the way the bench's scripts do. */
+  const psql = (database: string, sql: string): void => {
+    const done = spawnSync("docker", ["exec", "-i", (container as StartedPostgreSqlContainer).getId(), "psql", "-U", "postgres", "-q", "-v", "ON_ERROR_STOP=1", "-d", database], { encoding: "utf8", input: sql });
+    if (done.status !== 0) throw new Error(`psql in ${database}: ${done.stderr}`);
+  };
+
+  /**
+   * A database of the bench's prefix with two tables of a core schema, one of a module's, and one of a schema the
+   * comparison does not read.
+   */
+  const database = (label: string, more: string): void => {
+    // A run's database is the prefix and its label with - as _ (`lib.sh`).
+    const name = `bench_${label.replaceAll("-", "_")}`;
+    psql("postgres", `CREATE DATABASE ${name}`);
+    psql(
+      name,
+      `CREATE SCHEMA core_demo; CREATE SCHEMA contract_demo; CREATE SCHEMA other;
+       CREATE TABLE core_demo.blocks (height bigint PRIMARY KEY, hash bytea NOT NULL);
+       CREATE TABLE core_demo.nodes (node_key bytea PRIMARY KEY, children bytea[] NOT NULL);
+       CREATE TABLE contract_demo.states (address text PRIMARY KEY, state bytea);
+       CREATE TABLE other.notes (note text);
+       INSERT INTO core_demo.blocks VALUES (1, '\\x01'), (2, '\\x02'), (3, '\\x03');
+       INSERT INTO core_demo.nodes VALUES ('\\xaa', '{}'), ('\\xbb', ARRAY['\\xaa'::bytea]);
+       INSERT INTO contract_demo.states VALUES ('one', '\\x10'), ('two', NULL);
+       ${more}`,
+    );
+  };
+
+  beforeAll(async () => {
+    container = await startContainer(new PostgreSqlContainer(POSTGRES_IMAGE).withUsername("postgres"));
+    // The same rows, inserted in another order and with a note only this database has, in a schema that is not read.
+    database("same-a", "");
+    database("same-b", "INSERT INTO other.notes VALUES ('only here'); UPDATE core_demo.blocks SET hash = hash;");
+    // One byte of one row changed; one row more; and a table that is not there.
+    database("changed", "UPDATE core_demo.nodes SET children = ARRAY['\\xab'::bytea] WHERE node_key = '\\xbb'; INSERT INTO core_demo.blocks VALUES (4, '\\x04'); DROP TABLE contract_demo.states;");
+  }, 300_000);
+  afterAll(async () => {
+    await container?.stop();
+  }, 60_000);
+
+  /** `tables.sh` on the container, and its lines as [table, each run's count and hash, whether marked]. */
+  const tables = (labels: readonly string[]) => {
+    const result = run("tables.sh", labels, { BENCH_DIR: directory, BENCH_PG_CONTAINER: (container as StartedPostgreSqlContainer).getId() });
+    const lines = result.stdout.trimEnd().split("\n");
+    const rows = new Map(lines.slice(0, -1).map((line) => {
+      const [table, ...rest] = line.trim().split(/\s+/) as [string, ...string[]];
+      return [table, { hashes: rest.filter((cell) => cell !== "DIFFERENT"), marked: rest.includes("DIFFERENT") }] as const;
+    }));
+    return { result, rows, last: lines.at(-1) };
+  };
+
+  it("two databases with the same rows: every table's count and hash are equal, and no difference is counted", () => {
+    const { result, rows, last } = tables(["same-a", "same-b"]);
+    expect(result.code, result.stderr).toBe(0);
+    // The tables of the core's and the modules' schemas, and no other.
+    expect([...rows.keys()]).toEqual(["contract_demo.states", "core_demo.blocks", "core_demo.nodes"]);
+    for (const [table, { hashes, marked }] of rows) {
+      expect(hashes[0], table).toMatch(/^[23]:[0-9a-f]{12}$/);
+      expect(hashes[1], table).toBe(hashes[0]);
+      expect(marked, table).toBe(false);
+    }
+    expect(rows.get("core_demo.blocks")?.hashes[0]).toMatch(/^3:/);
+    expect(last).toBe("differences from same-a: 0");
+  });
+
+  it("negative control: a changed row, a row more and a missing table are each marked, and counted", () => {
+    const { result, rows, last } = tables(["same-a", "same-b", "changed"]);
+    expect(result.code, result.stderr).toBe(0);
+    for (const [table, { hashes, marked }] of rows) {
+      expect(hashes[1], table).toBe(hashes[0]);
+      expect(hashes[2], table).not.toBe(hashes[0]);
+      expect(marked, table).toBe(true);
+    }
+    // The same number of rows with one byte changed: only the hash differs.
+    expect(rows.get("core_demo.nodes")?.hashes.map((cell) => cell.split(":")[0])).toEqual(["2", "2", "2"]);
+    expect(rows.get("core_demo.blocks")?.hashes[2]).toMatch(/^4:/);
+    expect(rows.get("contract_demo.states")?.hashes[2]).toBe("absent");
+    expect(last).toBe("differences from same-a: 3");
+    // Read the other way round, the missing table is not listed: the first run's tables are the ones compared.
+    const reversed = tables(["changed", "same-a"]);
+    expect([...reversed.rows.keys()]).toEqual(["core_demo.blocks", "core_demo.nodes"]);
+    expect(reversed.last).toBe("differences from changed: 2");
+  });
+});
