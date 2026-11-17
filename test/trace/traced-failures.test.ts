@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { BlockWriteHandle } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
@@ -30,7 +31,9 @@ import { LAST } from "../ledger/fixtures/sweep-fixture.js";
  *   differs from one height on);
  * - a sink that fails during the sync stops the trace with one line in the log, and the sync goes on to store what a
  *   clean run stores. That the worker's thread then stops its own trace is seen in its messages
- *   (`test/ledger/worker-messages.test.ts`).
+ *   (`test/ledger/worker-messages.test.ts`);
+ * - a delay put into one stage, the step's writes at one height, is in that stage's time of that height's line
+ *   (negative control: the line with that stage at zero fails the same check).
  */
 
 const postgres = BACKUP_BACKENDS.find((backend) => backend.kind === "postgres") as BackupBackend;
@@ -233,5 +236,39 @@ describe("the block trace when something fails or overflows, on PostgreSQL", () 
     expect(run.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
     expect(runProblems(run, "extended")).toEqual([]);
     expect(await databaseOf(db)).toEqual(await databaseOf(cleanDb));
+  }, 600_000);
+
+  it("a delay put into the step's writes at one height is in that height's writeRefcountMs, inside its txMs; with writeRefcountMs at zero the same check fails", async () => {
+    const delayed = 30n;
+    const DELAY_MS = 300;
+    let slept = false;
+    // The step's first statement at that height waits before it is sent: a stage made slower by a known amount.
+    const slow = (w: Pick<BlockWriteHandle, "execute">, height: bigint): Pick<BlockWriteHandle, "execute"> =>
+      height !== delayed
+        ? w
+        : {
+            execute: async (sql, params) => {
+              if (!slept) {
+                slept = true;
+                await sleep(DELAY_MS);
+              }
+              return w.execute(sql, params);
+            },
+          };
+    const { run, lines } = await tracedRun({ core: { refcountWriter: slow } });
+    expect(slept).toBe(true);
+    expect(run.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
+    /** Where the delay must be: the step's writes, which the block's transaction holds with the node writes. */
+    const attribution = (line: Record<string, unknown>): string[] => {
+      const problems: string[] = [];
+      const ms = (key: string): number => (line[key] as number | undefined) ?? 0;
+      if (ms("writeRefcountMs") < DELAY_MS) problems.push(`writeRefcountMs ${ms("writeRefcountMs")} is under the delay`);
+      if (ms("txMs") < ms("writeRefcountMs") + ms("writeBlockMs")) problems.push(`txMs ${ms("txMs")} does not hold the writes`);
+      return problems;
+    };
+    const line = lines.find((candidate) => candidate.h === Number(delayed)) as Record<string, unknown>;
+    expect(attribution(line)).toEqual([]);
+    // Negative control: the stage at zero, as a trace that did not time it would write.
+    expect(attribution({ ...line, writeRefcountMs: 0 })).toEqual(["writeRefcountMs 0 is under the delay"]);
   }, 600_000);
 });
