@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, type MockInstance, vi } from "vitest";
+import { contractStatesOf } from "../../src/backbone/core-contract-states/core-contract-states.js";
 import { loadLedgerPackage } from "../../src/ledger/load.js";
 import type { ApplyInput, ChainOutcome, LedgerName, LedgerPackage, LedgerPackageOptions, StoredNode } from "../../src/ledger/types.js";
-import { type AppliedState, type ApplyBlock, type BlockId, LedgerEngine } from "../../src/ledger/worker/engine.js";
+import { type AppliedState, type ApplyBlock, type BlockId, LedgerEngine, type LedgerLoader } from "../../src/ledger/worker/engine.js";
+import type { BlockContext } from "../../src/modules/declaration.js";
 import {
   block as fixtureBlock,
   callTransaction,
@@ -88,6 +90,32 @@ async function atGenesis(engine = new LedgerEngine({ load: loadLedgerPackage }))
   expect(engine.commit(at(0n))).toBe(true);
   return { engine, zero };
 }
+
+/**
+ * A loader of the real packages whose calls of `contractZswapStateKey` are counted (`built`), with the methods `change`
+ * gives (each made with the real package) in place of the package's own.
+ */
+function countingZswapKeys(change: (real: LedgerPackage) => Partial<LedgerPackage> = () => ({})): { readonly load: LedgerLoader; built(): number } {
+  let built = 0;
+  return {
+    built: () => built,
+    async load(ledger, options) {
+      const real = await loadLedgerPackage(ledger, options);
+      const changed: LedgerPackage = { ...real, ...change(real) };
+      return {
+        ...changed,
+        contractZswapStateKey: (state, address) => {
+          built += 1;
+          return changed.contractZswapStateKey(state, address);
+        },
+      };
+    },
+  };
+}
+
+/** The rows `core-contract-states` makes of `applied`'s contract keys (it throws for a contract with one key of two). */
+const contractRowsOf = (applied: AppliedState) =>
+  contractStatesOf({ height: applied.height, items: new Map([["ledger-state", { contracts: applied.contracts }]]) } as unknown as BlockContext);
 
 describe("the ledger worker's engine", () => {
   it("parses each transaction once and keeps the parse for the block's apply", { timeout: LONG }, async () => {
@@ -355,6 +383,109 @@ describe("the ledger worker's engine", () => {
     const five = await engine.apply(applyBlock(5n, 0, { contracts: absent }));
     expect([four.contracts[0]?.zswapStateKey, five.contracts[0]?.zswapStateKey]).toEqual([null, null]);
     expect(built).toBe(4);
+  });
+
+  it("gives no zswap state key for a contract that a block applied in place of a pending one does not hold, with the same zswap tree", { timeout: LONG }, async () => {
+    const counting = countingZswapKeys();
+    const { engine } = await atGenesis(new LedgerEngine({ load: counting.load }));
+    const contract = await contractFixture(RAW.v9);
+    const contracts = [contract.address];
+    // Block 1 deploys the contract, which adds no commitment, and stays pending: the contract's keys are built.
+    await engine.parse("v9", at(1n), [contract.deploy]);
+    const deployed = await engine.apply(applyBlock(1n, 1, { contracts }));
+    const kept = deployed.contracts[0]?.zswapStateKey ?? null;
+    expect(kept).not.toBeNull();
+    expect(counting.built()).toBe(1);
+    // Another block 1 on the same parent, in which the deploy failed: the pending state is dropped, and the state
+    // applied in its place does not hold the contract. Its zswap tree is the same (empty).
+    const other = { height: 1n, hash: hash(0xee) };
+    await engine.parse("v9", other, [contract.deploy]);
+    const failed = await engine.apply(applyBlock(1n, 1, { ...other, outcomes: ["failure"], contracts }));
+    expect(engine.holds()).toMatchObject({ committed: at(0n), pending: other });
+    expect(failed.summary.zswapFirstFree).toBe(deployed.summary.zswapFirstFree);
+    expect(hex(failed.summary.zswapRoot)).toBe(hex(deployed.summary.zswapRoot));
+    expect(failed.contracts).toEqual([{ address: contract.address, stateKey: null, zswapStateKey: null }]);
+    expect(failed.batch.rootCounts.some((count) => hex(count.key) === hex(kept as Uint8Array))).toBe(false);
+    expect(contractRowsOf(failed)).toEqual([]);
+  });
+
+  it("gives no zswap state key for a contract that a state loaded in place of the one held does not hold, with the same zswap tree", { timeout: LONG }, async () => {
+    const counting = countingZswapKeys();
+    const stored = new Map<string, StoredNode>();
+    const keep = (applied: AppliedState): AppliedState => {
+      for (const node of applied.batch.inserts) stored.set(hex(node.key), node);
+      return applied;
+    };
+    const { engine, zero } = await atGenesis(new LedgerEngine({ load: counting.load, store: { get: (key) => stored.get(hex(key)) ?? null } }));
+    keep(zero);
+    const contract = await contractFixture(RAW.v9);
+    const contracts = [contract.address];
+    // Block 1 deploys the contract, which adds no commitment, and commits: the contract's keys are built.
+    await engine.parse("v9", at(1n), [contract.deploy]);
+    const deployed = keep(await engine.apply(applyBlock(1n, 1, { contracts })));
+    expect(engine.commit(at(1n))).toBe(true);
+    const kept = deployed.contracts[0]?.zswapStateKey ?? null;
+    expect(kept).not.toBeNull();
+    expect(counting.built()).toBe(1);
+    // The state at 0, from before the deploy, loaded by its key, then another block 1 on it in which the deploy failed.
+    expect((await engine.load({ ledger: "v9", ...at(0n), stateKey: zero.stateKey })).loaded).toBe(true);
+    const other = { height: 1n, hash: hash(0xee) };
+    await engine.parse("v9", other, [contract.deploy]);
+    const failed = await engine.apply(applyBlock(1n, 1, { ...other, outcomes: ["failure"], contracts }));
+    expect(failed.summary.zswapFirstFree).toBe(deployed.summary.zswapFirstFree);
+    expect(hex(failed.summary.zswapRoot)).toBe(hex(deployed.summary.zswapRoot));
+    expect(failed.contracts).toEqual([{ address: contract.address, stateKey: null, zswapStateKey: null }]);
+    expect(failed.batch.rootCounts.some((count) => hex(count.key) === hex(kept as Uint8Array))).toBe(false);
+    expect(contractRowsOf(failed)).toEqual([]);
+  });
+
+  it("builds a contract's zswap state key again after the engine abandons the state it was built from: pending states dropped, a state loaded in place, a failed apply", { timeout: LONG }, async () => {
+    let failFlush = false;
+    const counting = countingZswapKeys((real) => ({
+      flush: () => {
+        const batch = real.flush();
+        if (!failFlush) return batch;
+        failFlush = false;
+        throw new Error("the flush failed");
+      },
+    }));
+    const stored = new Map<string, StoredNode>();
+    const keep = (applied: AppliedState): AppliedState => {
+      for (const node of applied.batch.inserts) stored.set(hex(node.key), node);
+      return applied;
+    };
+    const { engine, zero } = await atGenesis(new LedgerEngine({ load: counting.load, store: { get: (key) => stored.get(hex(key)) ?? null } }));
+    keep(zero);
+    const contract = await contractFixture(RAW.v9);
+    const contracts = [contract.address];
+    const keyOf = (applied: AppliedState): string => hex(applied.contracts[0]?.zswapStateKey as Uint8Array);
+    // Block 1 deploys the contract and stays pending: built.
+    await engine.parse("v9", at(1n), [contract.deploy]);
+    const first = keyOf(await engine.apply(applyBlock(1n, 1, { contracts })));
+    expect(counting.built()).toBe(1);
+    // Another block 1 with the same deploy: the pending state is dropped, so the key is built again (the same tree
+    // and contract, so the same key).
+    const other = { height: 1n, hash: hash(0xee) };
+    await engine.parse("v9", other, [contract.deploy]);
+    expect(keyOf(keep(await engine.apply(applyBlock(1n, 1, { ...other, contracts }))))).toBe(first);
+    expect(counting.built()).toBe(2);
+    expect(engine.commit(other)).toBe(true);
+    // Block 2 names the contract and adds nothing: kept.
+    const two = keep(await engine.apply(applyBlock(2n, 0, { parentHash: other.hash, contracts })));
+    expect(keyOf(two)).toBe(first);
+    expect(counting.built()).toBe(2);
+    expect(engine.commit(at(2n))).toBe(true);
+    // Block 3's apply fails after the kept key was used: the key is built again when block 3 is applied again.
+    failFlush = true;
+    await expect(engine.apply(applyBlock(3n, 0, { contracts }))).rejects.toThrow(/the flush failed/);
+    expect(counting.built()).toBe(2);
+    expect(keyOf(keep(await engine.apply(applyBlock(3n, 0, { contracts }))))).toBe(first);
+    expect(counting.built()).toBe(3);
+    expect(engine.commit(at(3n))).toBe(true);
+    // The state at 2 loaded by its key in place of the one at 3: the key is built again for block 3.
+    expect((await engine.load({ ledger: "v9", ...at(2n), stateKey: two.stateKey })).loaded).toBe(true);
+    expect(keyOf(await engine.apply(applyBlock(3n, 0, { contracts })))).toBe(first);
+    expect(counting.built()).toBe(4);
   });
 
   it("gives block 0 again while pending, with its outcomes, and refuses a parse of another ledger", { timeout: LONG }, async () => {
