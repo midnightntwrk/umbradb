@@ -171,10 +171,71 @@ describe("the range bench's scripts hold nothing of one machine", () => {
     expect(readdirSync(directory).sort()).toEqual(RUNS);
   });
 
+  it("a label and a template's name are held to lowercase whatever the locale", () => {
+    // bash before 5.0 (macOS's /bin/bash) matches a bracket range by the locale's collation, where a-z holds capitals.
+    const env = { BENCH_DIR: directory, BUILD: directory, UMBRADB_LOCAL_NODE: "ws://node.invalid:9944", LC_ALL: "en_US.UTF-8" };
+    const label = expect.stringContaining("a label is lowercase letters, digits and -");
+    const template = expect.stringContaining("a template's name is lowercase letters, digits and _");
+    expect(run("run.sh", ["Base", "100"], { ...env, TEMPLATE: "template_at_100" })).toMatchObject({ code: 2, stderr: label });
+    expect(run("run.sh", ["base", "100"], { ...env, TEMPLATE: "Bench_SRC" })).toMatchObject({ code: 2, stderr: template });
+    expect(run("run.sh", ["base", "100"], { ...env, TEMPLATE: "modèle" })).toMatchObject({ code: 2, stderr: template });
+    expect(run("tables.sh", ["Base"], env)).toMatchObject({ code: 2, stderr: label });
+    expect(readdirSync(directory).sort()).toEqual(RUNS);
+  });
+
   it("txshare.mjs refuses without the node's address", () => {
     const result = run("txshare.mjs", []);
     expect(result.code).not.toBe(0);
     expect(result.stderr).toContain("set UMBRADB_LOCAL_NODE");
+  });
+});
+
+describe("run.sh removes and drops only what a run made, and checks before it does", () => {
+  // A machine's folder that holds a build, the password file at its default place and a run folder of run.sh's.
+  let home = "";
+  let build = "";
+  const RUN_PACKAGE = '{"type":"module","private":true}\n';
+  beforeAll(() => {
+    home = mkdtempSync(join(tmpdir(), "umbradb-bench-range-guard-"));
+    build = join(home, "build");
+    mkdirSync(join(build, "dist", "cli"), { recursive: true });
+    writeFileSync(join(build, "dist", "cli", "main.js"), "");
+    writeFileSync(join(home, "pg-password"), "not a password\n", { mode: 0o600 });
+    mkdirSync(join(home, "old-run"));
+    writeFileSync(join(home, "old-run", "package.json"), RUN_PACKAGE);
+    writeFileSync(join(home, "old-run", "result.json"), "{}\n");
+  });
+  afterAll(() => rmSync(home, { recursive: true, force: true }));
+
+  /** run.sh with this folder, a node's address, a template and a database container that does not exist. */
+  const guarded = (label: string, env: Readonly<Record<string, string>> = {}): Ran =>
+    run("run.sh", [label, "100"], { BENCH_DIR: home, BUILD: build, UMBRADB_LOCAL_NODE: "ws://node.invalid:9944", TEMPLATE: "template_at_100", BENCH_PG_CONTAINER: "umbradb-bench-test-no-such-container", ...env });
+  const untouched = (): void => {
+    expect(readdirSync(home).sort()).toEqual(["build", "old-run", "pg-password"]);
+    expect(readFileSync(join(home, "pg-password"), "utf8")).toBe("not a password\n");
+    expect(readdirSync(join(home, "old-run")).sort()).toEqual(["package.json", "result.json"]);
+    expect(readFileSync(join(build, "dist", "cli", "main.js"), "utf8")).toBe("");
+  };
+
+  it("refuses a label whose folder holds the password file, or is not a run's", () => {
+    expect(guarded("pg-password")).toMatchObject({ code: 2, stderr: expect.stringContaining("password file") });
+    expect(guarded("build")).toMatchObject({ code: 2, stderr: expect.stringContaining("is not a run's folder") });
+    untouched();
+  });
+
+  it("refuses a database name that could be a template's, another prefix's, or cut by PostgreSQL", () => {
+    expect(guarded("base", { TEMPLATE: "bench_at_100" })).toMatchObject({ code: 2, stderr: expect.stringContaining("begins with the runs' prefix") });
+    for (const prefix of ["bench; drop", "Bench_", "bench-"]) {
+      expect(guarded("base", { BENCH_DB_PREFIX: prefix }), prefix).toMatchObject({ code: 2, stderr: expect.stringContaining("the database prefix") });
+    }
+    expect(guarded("a".repeat(60))).toMatchObject({ code: 2, stderr: expect.stringContaining("63 bytes") });
+    expect(guarded("base", { STALL_LIMIT: "ten" })).toMatchObject({ code: 2, stderr: expect.stringContaining("STALL_LIMIT") });
+    untouched();
+  });
+
+  it("checks the database container before it removes a run's folder", () => {
+    expect(guarded("old-run")).toMatchObject({ code: 2, stderr: expect.stringContaining("umbradb-bench-test-no-such-container is not running") });
+    untouched();
   });
 });
 
@@ -571,6 +632,28 @@ describe("tables.sh on small databases", () => {
     expect([...reversed.rows.keys()]).toEqual(["contract_demo.states", "core_demo.blocks", "core_demo.nodes"]);
     expect(reversed.rows.get("contract_demo.states")).toMatchObject({ hashes: ["absent", expect.stringMatching(/^2:/)], marked: true });
     expect(reversed.last).toBe("differences from changed: 3");
+  });
+
+  it("run.sh drops no database a run did not make: a template, or one made by hand", () => {
+    // A template database of a run's name, marked as one; another made by hand; and the template a run would clone.
+    psql("postgres", "CREATE DATABASE run_template; CREATE DATABASE bench_kept IS_TEMPLATE true; CREATE DATABASE bench_by_hand;");
+    for (const name of ["bench_kept", "bench_by_hand"]) psql(name, "CREATE TABLE kept (note text); INSERT INTO kept VALUES ('kept');");
+    const home = mkdtempSync(join(tmpdir(), "umbradb-bench-range-drop-"));
+    try {
+      mkdirSync(join(home, "build", "dist", "cli"), { recursive: true });
+      writeFileSync(join(home, "build", "dist", "cli", "main.js"), "");
+      writeFileSync(join(home, "pg-password"), "not a password\n", { mode: 0o600 });
+      const env = { BENCH_DIR: home, BUILD: join(home, "build"), UMBRADB_LOCAL_NODE: "ws://node.invalid:9944", TEMPLATE: "run_template", BENCH_PG_CONTAINER: (container as StartedPostgreSqlContainer).getId(), BENCH_NETWORK: "bridge" };
+      expect(run("run.sh", ["kept", "100"], env)).toMatchObject({ code: 2, stderr: expect.stringContaining("bench_kept is marked as a template") });
+      expect(run("run.sh", ["by-hand", "100"], env)).toMatchObject({ code: 2, stderr: expect.stringContaining("bench_by_hand exists and was not made by run.sh") });
+      // A template that is not there is named before anything is changed.
+      expect(run("run.sh", ["fresh", "100"], { ...env, TEMPLATE: "no_such_template" })).toMatchObject({ code: 2, stderr: expect.stringContaining("no template database no_such_template") });
+      for (const name of ["bench_kept", "bench_by_hand"]) expect(psql(name, "SELECT note FROM kept"), name).toBe("kept\n");
+      expect(psql("postgres", "SELECT count(*) FROM pg_database WHERE datname = 'bench_fresh'")).toBe("0\n");
+      expect(readdirSync(home).sort()).toEqual(["build", "pg-password"]);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("refuses without a label", () => {

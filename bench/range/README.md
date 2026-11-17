@@ -64,11 +64,12 @@ blocks, transaction results, ledger state, contract states and full contract log
   (`pg_dumpall --roles-only`: a database's dump does not hold them, and each module's schema belongs to a role),
   then the database's dump restored into a new database.
 - **At a later height**: sync a clone of a template to it with `run.sh <label> <height>`, then
-  `docker exec umbradb-bench-pg psql -U postgres -c "CREATE DATABASE <template> TEMPLATE bench_<label>"`.
+  `docker exec umbradb-bench-pg psql -U postgres -c "CREATE DATABASE <template> TEMPLATE bench_<label> IS_TEMPLATE true"`.
 
-A template's name is lowercase letters, digits and `_`. A template can be continued by the build that synced it and
-by a later build that stores the same; for a build with other ledger packages see "A build with other ledger
-packages" below.
+A template's name is lowercase letters, digits and `_`, and does not begin with the runs' prefix (`bench_`), which
+`run.sh` refuses: a run's label could otherwise name it. `IS_TEMPLATE true` makes PostgreSQL refuse to drop it, and
+`run.sh` never drops a database so marked. A template can be continued by the build that synced it and by a later
+build that stores the same; for a build with other ledger packages see "A build with other ledger packages" below.
 
 ### Choosing a range
 
@@ -99,6 +100,13 @@ TEMPLATE=<template> bench/range/run.sh my-label <stop-height>
 - Drops and clones the database `bench_my_label`, writes `$BENCH_DIR/my-label/umbradb.config.ts`, and runs
   `node $BUILD/dist/cli/main.js run` in the container `umbradb-bench-run-my-label` on the bench network until the
   `core` entry's stop height.
+- Removes and drops only a run's own: the label's folder if it is empty or an earlier run's, and the label's database
+  if an earlier `run.sh` made it (it puts a comment on each), never a database marked as a template. It first checks
+  that the container is running, the network, the password file and the template are there; a refusal (status 2)
+  changes nothing.
+- An interrupt removes the run's container. A run whose cursor has not moved for `STALL_LIMIT` seconds (900 unless
+  given; a range that crosses a change of ledger version converts for minutes) is stopped, and `run.sh` ends with
+  status 1.
 - Records, in `$BENCH_DIR/my-label/`: `status.jsonl` (each change of `/status`), `run.log`,
   `pg_stat_statements.csv`, `table_stats.csv`, `result.json` (heights per second), and the block trace.
 - Arguments after the stop height are `KEY=VALUE` pairs for the run's environment.
