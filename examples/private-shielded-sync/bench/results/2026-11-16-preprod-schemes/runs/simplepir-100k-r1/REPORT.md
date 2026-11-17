@@ -15,7 +15,7 @@ Snapshot `c90fc1c7a943054d…` at height 3,439,524 (block `44cfe1a013b99757…`)
 | Server | http://127.0.0.1:10580; its process: Node.js v24.9.0, darwin arm64, 16 CPUs (from its build statistics); 6 PIR threads |
 | Server modules | core-chain 0.10.0, core-block-fetch 0.10.0, core-block-commit 0.10.0, core-digest 0.10.0, core-health 0.10.0, core-status 0.10.0, core-config 0.10.0, core-chain-events 0.10.0, core-block-parsed 0.10.0, core-tx-results 0.10.0, core-ledger-state 0.10.0, core-contract-logs-full 0.10.0, core-contract-states 0.10.0, private-shielded-sync 0.1.0 |
 | Server memory | process 53587, `ps -o rss=` every 200 ms |
-| Server log | the file /Users/edwardalvarado/todo/Umbra/resources/00058-poc-ipir/stack/run.log; 20 of 20 requests paired with a server line |
+| Server log | the stack's run.log; 20 of 20 requests paired with a server line |
 | Load average (1, 5, 15 min) | start 18.36 / 12.89 / 11.84; end 19.52 / 13.56 / 12.1 |
 | SimplePIR | q = 2^32, n = 1024, σ = 6.4, 9 bits per cell (p = 512) |
 | Artifacts | blockRoots 64 B, nullifierPublic 10.4 MiB, nullifierTable 10.4 MiB, pathPublic 1.78 MiB, pathTable 87.0 MiB, readPublic 11.7 MiB, readTable 16.8 MiB, scan 3.43 MiB |

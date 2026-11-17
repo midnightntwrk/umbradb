@@ -18,9 +18,12 @@ The folders under `vendor/ipir-sp/` are copies of five crates of the IPIR+SP rep
 | `ipir-sp` | 0.1.0-rc.8 | `MIT OR Apache-2.0` | none |
 | `simplepir-kernel` | 0.1.0-rc.4 | `MIT OR Apache-2.0` | none |
 
-The repository itself has no licence file at its root. The crates' declarations are the only licence statements;
-whether they cover the repository as a whole has not been settled with its authors. Until it is, no file of this
-branch is pushed or published (spec 00058, FR-041).
+The repository itself has no licence file at its root. Each crate is published on crates.io at the version copied
+here, under `MIT OR Apache-2.0` (checked 2026-11-16), and the copy is used on those terms.
+
+`LICENSE-MIT` and `LICENSE-APACHE` next to this file are the two texts, for the three crates that ship none. They are
+the files `inspiring` and `ipir-native-client` ship (identical in both); the copyright line of `LICENSE-MIT`,
+"inspiring contributors", is the only one upstream wrote.
 
 ## What was copied and what was left out
 

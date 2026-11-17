@@ -2,14 +2,16 @@
 # Phase 5.2: one repetition at one size: the benchmark asks the run's stack for a SimplePIR snapshot, then an IPIR+SP
 # one, at height 3,439,524, and measures wallets A and B against each.
 #   run-pair.sh <size label> <rep> [<padding>] [--db]
+# Environment: W (this checkout), S (the stack's folder: run.log, pss-data, the secret files), BENCH (work and log
+# folders), SECRETS_ENV (the env file with the wallets' variables).
 # Results: <worktree>/examples/private-shielded-sync/bench/results/2026-11-16-preprod-schemes/runs/<scheme>-<label>-r<rep>/
 set -uo pipefail
 label=$1; rep=$2; padding=${3:-}; db=${4:-}
-W=/Users/edwardalvarado/todo/Umbra/experiments/poc-ipir
-S=/Users/edwardalvarado/todo/Umbra/resources/00058-poc-ipir/stack
+W=${W:?this checkout}
+S=${S:?the folder of the stack}
 R=$W/examples/private-shielded-sync/bench/results/2026-11-16-preprod-schemes/runs
-WORK=/Users/edwardalvarado/todo/Umbra/resources/00058-poc-ipir/bench/work
-LOGS=/Users/edwardalvarado/todo/Umbra/resources/00058-poc-ipir/bench/logs
+WORK=${BENCH:?the folder for work files and logs}/work
+LOGS=$BENCH/logs
 pid=$(lsof -ti tcp:10581 -sTCP:LISTEN)
 [ -n "$pid" ] || { echo "the stack is not running"; exit 2; }
 for scheme in simplepir ipir-sp; do
@@ -23,7 +25,7 @@ for scheme in simplepir ipir-sp; do
   [ -n "$padding" ] && args+=(--padding "$padding")
   if [ "$db" = "--db" ]; then args+=(--db-url postgres://postgres@127.0.0.1:51158/poc_ipir --db-password-file "$S/pg-password" --path-splits 16 --build-threads 6); fi
   echo "$(date -u +%FT%TZ) $name: load $(sysctl -n vm.loadavg)"
-  (cd "$W" && node --expose-gc --env-file=/Users/edwardalvarado/todo/Umbra/resources/00053-private-shielded-sync/secrets.env \
+  (cd "$W" && node --expose-gc --env-file="${SECRETS_ENV:?the env file of the wallets}" \
     examples/private-shielded-sync/bench/bench.ts "${args[@]}") > "$LOGS/$name.log" 2>&1
   code=$?
   rm -rf "$WORK/$name"

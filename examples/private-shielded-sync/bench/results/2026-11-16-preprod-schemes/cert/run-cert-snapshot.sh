@@ -5,7 +5,7 @@
 # masks it builds against the stored ones), then upstream's certify_native.py --screens (vendored copy), unchanged.
 set -euo pipefail
 snap=$1; label=$2
-W=/Users/edwardalvarado/todo/Umbra/experiments/poc-ipir/examples/private-shielded-sync/ipir
+W=$(cd "$(dirname "$0")/../../../../ipir" && pwd)
 E=$W/target/release/examples/noise_report
 T=$W/vendor/ipir-sp/reinspiring/tools/security/certify_native.py
 here=$(cd "$(dirname "$0")" && pwd)

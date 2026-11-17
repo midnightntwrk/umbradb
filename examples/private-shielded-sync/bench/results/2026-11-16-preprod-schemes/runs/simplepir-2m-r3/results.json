@@ -97,7 +97,7 @@
   "server": {
     "origin": "http://127.0.0.1:10580",
     "memory": "process 53587, `ps -o rss=` every 200 ms",
-    "log": "the file /Users/edwardalvarado/todo/Umbra/resources/00058-poc-ipir/stack/run.log; 20 of 20 requests paired with a server line",
+    "log": "the stack's run.log; 20 of 20 requests paired with a server line",
     "threads": 6,
     "heldBytes": {
       "read": 352025696,

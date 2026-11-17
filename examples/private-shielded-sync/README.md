@@ -30,8 +30,8 @@ This folder holds:
 Neither `pir/`, `shared/`, `ipir/` nor `kernel/` imports anything from UmbraDB, so the server module and the client use
 them unchanged. The client imports nothing from `server/`; the benchmark, an operator's tool, imports both.
 
-`ipir/vendor/` is upstream code whose licence is not settled: this branch must not be pushed or published until it is
-(below, "IPIR+SP", and [`ipir/vendor/ORIGIN.md`](ipir/vendor/ORIGIN.md)).
+`ipir/vendor/` is upstream code, copied unchanged under `MIT OR Apache-2.0` (below, "IPIR+SP", and
+[`ipir/vendor/ORIGIN.md`](ipir/vendor/ORIGIN.md)).
 
 ## Running it end to end
 
@@ -619,8 +619,8 @@ the CPU.
 
 **Origin and licence.** `ipir/vendor/ipir-sp/` is a copy of five crates of `valargroup/ipir-sp` at a recorded commit,
 with no copied file changed; [`ipir/vendor/ORIGIN.md`](ipir/vendor/ORIGIN.md) gives the commit, each crate's declared
-licence and what was left out. The repository has no licence file at its root, and whether the crates' declarations
-cover it has not been settled with its authors. Until it is, this branch must not be pushed or published.
+licence and what was left out. The repository has no licence file at its root; each crate is published on crates.io
+at the copied version under `MIT OR Apache-2.0`, and both texts are in `ipir/vendor/`.
 
 ## Wire formats (`shared/`)
 

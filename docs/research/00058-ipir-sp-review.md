@@ -43,7 +43,7 @@ were written before the papers were available; Part D is the comparison with the
   `adoptIpirTable`, `tableInfo`) to `native.ts` and `node/src/lib.rs`; read as a diff, it touches no secret.
 - Not read: the scheme layer above `ipir/` (`pir/ipir/`, outside the permitted paths) and the dependency
   `valar-spiral-rs`, which holds the sampler's scan loop (its behaviour was established by replay, A.3).
-- Scratch files (`review/` below): `/Users/edwardalvarado/todo/Umbra/resources/00058-poc-ipir/review/`.
+- Scratch files (`review/` below): a folder outside the repository, not committed.
 
 ## Part A — algorithm walk
 
@@ -419,7 +419,7 @@ Sizes for one request at 2,048 × 2,048, the papers' formula against the code:
 
 ## Reproduction
 
-In `/Users/edwardalvarado/todo/Umbra/resources/00058-poc-ipir/review/`:
+In `review/` (outside the repository, not committed):
 
 - `numcheck/`: `cargo build --release`, then `./target/release/numcheck <d> <rows> <cols> <mask bits>
   <random|ffff|zero> <rows to check>`; logs `run-small.log`, `run-2048-random.log`, `run-2048-ffff.log`.
