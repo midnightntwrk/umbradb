@@ -1,0 +1,27 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 8ee9d92..cd36956 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -3037,8 +3037,6 @@ dependencies = [
+ [[package]]
+ name = "midnight-circuits"
+ version = "7.2.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "1314c0a31776426d17fe31efd4286a489d08c10231e16499da26d9052d258972"
+ dependencies = [
+  "base64 0.13.1",
+  "ff",
+diff --git a/Cargo.toml b/Cargo.toml
+index 8d67524..eecf8a0 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -67,6 +67,9 @@ panic = "abort"
+ # present in consumer builds is fine, as they don't/shouldn't *want* the local
+ # packages.
+ [patch.crates-io]
++# (UmbraDB) midnight-circuits with its Poseidon pre-computation kept between hashes: the crate's source at this
++# version, with the build's own patch applied (`vendor/ledger/build-in-container.sh`, the version's `crates/`).
++midnight-circuits = { path = "/build/crates/midnight-circuits-7.2.1" }
+ midnight-base-crypto = { path = "base-crypto" }
+ midnight-serialize = { path = "serialize" }
+ # Because we rely on additions in 2.2

@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # Builds one vendored ledger package inside the build image (vendor/ledger/Dockerfile).
 #
-#   /in   the version directory, read-only: upstream.json and patches/*.patch
+#   /in   the version directory, read-only: upstream.json, patches/*.patch and crates/<name>-<version>/*.patch
 #   /out  an empty directory that receives the built package
 #
-# Steps: fetch the pinned upstream commit, apply the patches in file-name order, build the WASM
-# crate with the `wasm` profile for wasm32-unknown-unknown (`cargo --locked`), for speed (below), then produce the
+# Steps: fetch the pinned upstream commit; unpack each crates.io dependency the version patches
+# (crates/<name>-<version>/: the crate at the checksum Cargo.lock pins, with those patches applied,
+# which a patch of the workspace's Cargo.toml and Cargo.lock then points Cargo at); apply the patches
+# in file-name order; build the WASM crate with the `wasm` profile for wasm32-unknown-unknown
+# (`cargo --locked`), for speed (below), then produce the
 # package the way upstream's own release recipe does (midnight-ledger bagel.nix): wasm-bindgen
 # `--target bundler`, `wasm-opt -Os`, the hand-written TypeScript declarations assembled from the
 # template, a Node.js entry that instantiates the module from the file next to it, and a
@@ -38,6 +41,36 @@ if [ "$(git -C "$src" rev-parse HEAD)" != "$commit" ]; then
   echo "build: fetched $(git -C "$src" rev-parse HEAD), expected $commit" >&2
   exit 1
 fi
+
+# A patched crates.io dependency (vendor/ledger/README.md): the crate's source as crates.io serves it, checked
+# against the checksum the pristine Cargo.lock records for that version, unpacked at a fixed path with the
+# version's patches for it applied. One of the patches below points the workspace at that path.
+shopt -s nullglob
+for dep_dir in /in/crates/*/; do
+  dep=$(basename "$dep_dir")
+  dep_name=${dep%-*}
+  dep_version=${dep##*-}
+  checksum=$(awk -v name="$dep_name" -v version="$dep_version" '
+    $0 == "[[package]]" { n = ""; v = "" }
+    $1 == "name" { n = $3 }
+    $1 == "version" { v = $3 }
+    $1 == "checksum" && n == "\"" name "\"" && v == "\"" version "\"" { gsub(/"/, "", $3); print $3 }
+  ' "$src/Cargo.lock")
+  if [ -z "$checksum" ]; then
+    echo "build: Cargo.lock pins no checksum for $dep" >&2
+    exit 1
+  fi
+  mkdir -p /build/crates
+  curl -fsSL --retry 3 "https://static.crates.io/crates/$dep_name/$dep.crate" -o "/build/crates/$dep.crate"
+  echo "$checksum  /build/crates/$dep.crate" | sha256sum -c - >/dev/null
+  tar -xzf "/build/crates/$dep.crate" -C /build/crates
+  rm "/build/crates/$dep.crate"
+  for patch in "$dep_dir"*.patch; do
+    echo "build: applying $dep/$(basename "$patch")"
+    (cd "/build/crates/$dep" && git apply --whitespace=nowarn "$patch")
+  done
+done
+shopt -u nullglob
 
 shopt -s nullglob
 for patch in /in/patches/*.patch; do

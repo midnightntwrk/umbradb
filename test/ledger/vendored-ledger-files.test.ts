@@ -61,10 +61,12 @@ const SPEED_SETTINGS = {
 const AT_BUILD = 97;
 
 /**
- * Stand-ins for what needs the network or the compiler. `git`: `init` makes the directory, the fetch and the checkout
- * do nothing, `rev-parse` gives the pinned commit, `apply` records the patch and where it was applied. `jq`: the one
- * form the script uses before its build (`jq -er <path> <file>`), answered from the version's `upstream.json`. `cargo`:
- * records its arguments, its working directory and its environment, and exits.
+ * Stand-ins for what needs the network or the compiler. `git`: `init` makes the directory, the fetch does nothing, the
+ * checkout gives the source's `Cargo.lock`, `rev-parse` gives the pinned commit, `apply` records the patch and where it
+ * was applied. `jq`: the one form the script uses before its build (`jq -er <path> <file>`), answered from the
+ * version's `upstream.json`. `curl`: records the address and serves the archive put in `served/` under its file name,
+ * or fails as a missing file does. `cargo`: records its arguments, its working directory and its environment, and
+ * exits.
  */
 const STAND_INS: Readonly<Record<string, string>> = {
   git: `#!/usr/bin/env bash
@@ -81,7 +83,8 @@ command=$1
 shift
 case "$command" in
   init) mkdir -p "\${@: -1}" ;;
-  fetch | checkout) ;;
+  fetch) ;;
+  checkout) cp -R "$STAND_IN_DIR/source/." "$dir/" ;;
   rev-parse) printf '%s\\n' "$STAND_IN_COMMIT" ;;
   apply) printf 'git apply %s %s\\n' "$dir" "\${@: -1}" >> "$STAND_IN_DIR/calls" ;;
   *) echo "git stand-in: unexpected git $command $*" >&2; exit 2 ;;
@@ -91,6 +94,23 @@ esac
 set -euo pipefail
 if [ $# -ne 3 ] || [ "$1" != "-er" ]; then echo "jq stand-in: unexpected jq $*" >&2; exit 2; fi
 awk -F '\\t' -v path="$2" '$1 == path { print $2; found = 1 } END { exit !found }' "$STAND_IN_DIR/fields"
+`,
+  curl: `#!/usr/bin/env bash
+set -euo pipefail
+url=""
+out=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) out=$2; shift 2 ;;
+    --retry) shift 2 ;;
+    -*) shift ;;
+    *) url=$1; shift ;;
+  esac
+done
+printf 'curl %s\\n' "$url" >> "$STAND_IN_DIR/calls"
+served="$STAND_IN_DIR/served/\${url##*/}"
+if [ ! -f "$served" ]; then echo "curl: (22) The requested URL returned error: 404" >&2; exit 22; fi
+cp "$served" "$out"
 `,
   cargo: `#!/usr/bin/env bash
 printf 'cargo %s\\n' "$*" >> "$STAND_IN_DIR/calls"
@@ -106,13 +126,55 @@ let standIns: string | undefined;
 function standInsDir(): string {
   if (standIns === undefined) {
     standIns = realpathSync(mkdtempSync(join(tmpdir(), "umbradb-build-stand-ins-")));
-    for (const [name, text] of Object.entries(STAND_INS)) {
+    const shasum = spawnSync("bash", ["-c", "command -v sha256sum"], { encoding: "utf8" }).status === 0 ? {} : { sha256sum: '#!/bin/sh\nexec shasum -a 256 "$@"\n' };
+    for (const [name, text] of Object.entries({ ...STAND_INS, ...shasum })) {
       writeFileSync(join(standIns, name), text);
       chmodSync(join(standIns, name), 0o755);
     }
   }
   return standIns;
 }
+
+/** The crates.io dependencies `version` patches: its directories `crates/<name>-<version>/`. */
+const patchedCrates = (version: string): string[] =>
+  existsSync(join(ledgerDir, version, "crates")) ? readdirSync(join(ledgerDir, version, "crates")).sort() : [];
+/** A patched crate's name and version, split as the build script splits its directory's name. */
+const crateNameAndVersion = (dep: string): [string, string] => [dep.slice(0, dep.lastIndexOf("-")), dep.slice(dep.lastIndexOf("-") + 1)];
+const sha256Of = (path: string): string => createHash("sha256").update(readFileSync(path)).digest("hex");
+
+/** A `Cargo.lock` entry of a crates.io crate. */
+const lockEntry = (name: string, version: string, checksum: string): string =>
+  [`[[package]]`, `name = "${name}"`, `version = "${version}"`, `source = "registry+https://github.com/rust-lang/crates.io-index"`, `checksum = "${checksum}"`, ""].join("\n");
+
+/**
+ * Writes, under `root`, a `.crate` archive in `served/` for each crate `version` patches (its one file `Cargo.toml`, under
+ * the directory `<name>-<version>/` as crates.io serves it) and the source's `Cargo.lock`, which pins each archive's
+ * SHA-256.
+ */
+function writeCrates(root: string, version: string): void {
+  mkdirSync(join(root, "served"));
+  mkdirSync(join(root, "source"));
+  const lock = ["version = 4", ""];
+  for (const dep of patchedCrates(version)) {
+    const [name, crateVersion] = crateNameAndVersion(dep);
+    mkdirSync(join(root, "crate-sources", dep), { recursive: true });
+    writeFileSync(join(root, "crate-sources", dep, "Cargo.toml"), `[package]\nname = "${name}"\nversion = "${crateVersion}"\n`);
+    const archive = join(root, "served", `${dep}.crate`);
+    const tar = spawnSync("tar", ["-czf", archive, "-C", join(root, "crate-sources"), dep], { encoding: "utf8", env: { ...process.env, COPYFILE_DISABLE: "1" } });
+    if (tar.status !== 0) throw new Error(`tar: ${tar.stderr}`);
+    lock.push(lockEntry(name, crateVersion, sha256Of(archive)));
+  }
+  writeFileSync(join(root, "source", "Cargo.lock"), lock.join("\n"));
+}
+
+/** The calls the crate step makes for `version`: each crate's download, then its patches applied to its unpacked copy. */
+const crateStepCalls = (version: string): string[] =>
+  patchedCrates(version).flatMap((dep) => [
+    `curl https://static.crates.io/crates/${crateNameAndVersion(dep)[0]}/${dep}.crate`,
+    ...readdirSync(join(ledgerDir, version, "crates", dep))
+      .sort()
+      .map((patch) => `git apply /build/crates/${dep} /in/crates/${dep}/${patch}`),
+  ]);
 afterAll(() => {
   if (standIns !== undefined) rmSync(standIns, { recursive: true, force: true });
 });
@@ -135,8 +197,9 @@ interface BuildStepRun {
 /**
  * Runs `script` (the build script, or a changed copy of it) on this host for `version`, up to its one `cargo build`.
  * The container's fixed paths (`/in`, `/out`, `/build`, `/opt`) are moved under a temporary directory, `/in` holding
- * the version's directory without its built package, and the stand-ins come first on the `PATH`. The environment is
- * otherwise empty, so a setting the script does not hand the build cannot come from this host's.
+ * the version's directory without its built package, and the stand-ins come first on the `PATH`; the source's
+ * `Cargo.lock` pins the archive the download serves of each crate the version patches (`writeCrates`). The environment
+ * is otherwise empty, so a setting the script does not hand the build cannot come from this host's.
  */
 function runBuildStep(version: string, script: string = BUILD_SCRIPT): BuildStepRun {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "umbradb-build-step-")));
@@ -149,6 +212,7 @@ function runBuildStep(version: string, script: string = BUILD_SCRIPT): BuildStep
     const upstream = readUpstream(version);
     writeFileSync(join(root, "fields"), `${jqFields(upstream).join("\n")}\n`);
     writeFileSync(join(root, "calls"), "");
+    writeCrates(root, version);
     const ran = spawnSync("bash", [join(root, "build-in-container.sh")], {
       encoding: "utf8",
       env: { PATH: `${standInsDir()}:${process.env.PATH ?? "/usr/bin:/bin"}`, STAND_IN_DIR: root, STAND_IN_COMMIT: upstream.commit },
@@ -277,6 +341,7 @@ describe("vendored ledger builds: the recorded sources and pins", () => {
       "0004-wasm-bindgen-0.2.108.patch",
       "0005-ledger-wasm-exact-post-block-update.patch",
       "0006-ledger-wasm-state-trees.patch",
+      "0007-midnight-circuits-poseidon-pre-computation-kept.patch",
     ]);
     // The storage patch is v9's, byte for byte: storage-core is the same source at both tags.
     const patch = (version: string, name: string): string => readFileSync(join(ledgerDir, version, "patches", name), "utf8");
@@ -316,8 +381,13 @@ describe("vendored ledger builds: the recorded sources and pins", () => {
       expect(run.cargo?.cwd, version).toBe("/build/src");
       expect(settingsReceived(run), version).toEqual(SPEED_SETTINGS);
       expect(run.cargo?.env.RUSTC_WRAPPER, version).toBe("/build/rustc-wrapper.sh");
-      // The version's patches, each applied to the source in file-name order, then the one build.
-      expect(run.calls, version).toEqual([...patchesOf(version).map((name) => `git apply /build/src /in/patches/${name}`), `cargo ${args.join(" ")}`]);
+      // Each patched crate downloaded and patched, then the version's patches applied to the source in file-name
+      // order, then the one build.
+      expect(run.calls, version).toEqual([
+        ...crateStepCalls(version),
+        ...patchesOf(version).map((name) => `git apply /build/src /in/patches/${name}`),
+        `cargo ${args.join(" ")}`,
+      ]);
     }
   });
 
@@ -342,6 +412,45 @@ describe("vendored ledger builds: the recorded sources and pins", () => {
       expect(run.status, `${control}: ${run.stderr}`).toBe(AT_BUILD);
       expect(settingsReceived(run), control).not.toEqual(SPEED_SETTINGS);
     }
+  });
+
+  it("patches midnight-circuits in every version, at the version its Cargo.lock pins, to keep the Poseidon pre-computation", () => {
+    const CIRCUITS = { v8: "6.1.0", "v9-rc3": "7.2.1", "v9-rc5": "7.2.4", v9: "7.3.0" } as const;
+    const WORKSPACE_PATCH = {
+      v8: "0006-midnight-circuits-poseidon-pre-computation-kept.patch",
+      "v9-rc3": "0007-midnight-circuits-poseidon-pre-computation-kept.patch",
+      "v9-rc5": "0008-midnight-circuits-poseidon-pre-computation-kept.patch",
+      v9: "0008-midnight-circuits-poseidon-pre-computation-kept.patch",
+    } as const;
+    const circuitsPatch = (version: (typeof VERSIONS)[number]): string[] => {
+      const crates = readdirSync(join(ledgerDir, version, "crates"));
+      expect(crates, version).toEqual([`midnight-circuits-${CIRCUITS[version]}`]);
+      const patches = readdirSync(join(ledgerDir, version, "crates", crates[0] as string)).sort();
+      expect(patches, version).toEqual(["0001-poseidon-pre-computation-kept.patch"]);
+      const text = readFileSync(join(ledgerDir, version, "crates", crates[0] as string, patches[0] as string), "utf8");
+      // One file of the crate, and nothing removed from it but the line that built the pre-computation at every hash.
+      expect(text.match(/^diff --git /gm), version).toHaveLength(1);
+      expect(text).toContain("a/src/hash/poseidon/poseidon_cpu.rs");
+      expect(text.split("\n").filter((line) => line.startsWith("-") && !line.startsWith("---")), version).toEqual([
+        "-        let pre_computed = PreComputedRoundCPU::init();",
+      ]);
+      // The workspace is pointed at the patched copy, and the lock no longer names the registry's for that version.
+      expect(patchesOf(version), version).toContain(WORKSPACE_PATCH[version]);
+      const workspace = readFileSync(join(ledgerDir, version, "patches", WORKSPACE_PATCH[version]), "utf8");
+      expect(workspace, version).toContain(`+midnight-circuits = { path = "/build/crates/midnight-circuits-${CIRCUITS[version]}" }`);
+      expect(workspace, version).toContain(`\n name = "midnight-circuits"\n version = "${CIRCUITS[version]}"\n-source = `);
+      expect(workspace.match(/^-checksum = "[0-9a-f]{64}"$/gm), version).toHaveLength(1);
+      return text.split("\n").filter((line) => line.startsWith("+") && !line.startsWith("+++"));
+    };
+    // The same change in the four versions of the crate.
+    expect(circuitsPatch("v9")).toEqual(circuitsPatch("v8"));
+    expect(circuitsPatch("v9-rc5")).toEqual(circuitsPatch("v8"));
+    expect(circuitsPatch("v9-rc3")).toEqual(circuitsPatch("v8"));
+    expect(circuitsPatch("v8").join("\n")).toContain("fn kept_pre_computed<F: PoseidonField>() -> PreComputedRoundCPU<F>");
+    // The build script unpacks a patched crate only at the checksum the pristine Cargo.lock records.
+    const script = readFileSync(join(ledgerDir, "build-in-container.sh"), "utf8");
+    expect(script).toContain('echo "$checksum  /build/crates/$dep.crate" | sha256sum -c -');
+    expect(script.indexOf("for dep_dir in /in/crates/*/")).toBeLessThan(script.indexOf("for patch in /in/patches/*.patch"));
   });
 
   for (const version of VERSIONS) {
