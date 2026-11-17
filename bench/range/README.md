@@ -204,9 +204,10 @@ node bench/range/compare.mjs $BENCH_DIR/base $BENCH_DIR/changed
 ```
 
 - **Compare builds by `own h/s`**, the speed without the waits for the node, between runs whose `wait` column is
-  near 0. `h/s` is what the clock saw, the node's answers included. A block's wait for the node is its wait for the
-  block above the run's median one (`beginMs`) and its wait for the block's state root (`rootWaitMs`); the means leave
-  out a run's first height.
+  small. `h/s` is what the clock saw, the node's answers included. A block's wait is all of its wait for the block
+  from its source (`beginMs`, which also holds the height's start: under 0.1 ms per block on the runs measured) and
+  its wait for the block's state root (`rootWaitMs`), so a node that is slow at every block shows in `wait`, not in
+  `own`; the means leave out a run's first height.
 - **Then by the stage the change is about** (`apply`, `reclaim`, `blk-tx`, `cnt-wr`; `analyze.mjs`, `worker.mjs` and
   `worker-time.mjs` for more): a stage's mean over a few thousand blocks moves less with the machine than the whole
   block does. `reclaim` is the reclamation's whole time per block, its collect, its step and its eviction
@@ -259,8 +260,9 @@ A run reads its blocks and each block's state root from the node, so a node that
 the wait comes and goes whatever the build is. So:
 
 - `result.json` counts the node client's retries (`nodeRetries`); a run with any is made again;
-- `compare.mjs` prints `own h/s` beside the clock's `h/s`. Own speed is a little high for a run that waited (7% for
-  one that waited 3.3 ms per block), so a run with a large `wait` is made again.
+- `compare.mjs` prints `own h/s` beside the clock's `h/s`, and `wait`, the waits it leaves out. A run with a large
+  `wait` is made again: own speed leaves the wait out, but not what the wait changed in the work around it (the
+  blocks prepared ahead, the caches).
 
 Speed also depends on what else the machine runs. Runs of one build over the same heights have differed by up to 4%
 on a quiet machine and by more than 10% beside other work. Treat a difference of own speed under 5% as noise, compare

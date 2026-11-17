@@ -306,10 +306,10 @@ describe("the scripts that read a run folder", () => {
     const [header, first, second] = same.stdout.trimEnd().split("\n") as [string, string, string];
     // No run's trace has a key of a column printed only where it is: the header ends with the chain's.
     expect(header.trim().split(/\s+/)).toEqual(["run", "h/s", "ms/blk", "own", "h/s", "own", "wait", "apply", "reclaim", "blk-tx", "cnt-wr", "stmts", "reads", "cnt-keys", "row-keys", "retries", "step", "chain"]);
-    // The first height of a run is left out: the means are over heights 101 to 104, which took 60 ms. Of them 6 ms
-    // were waits for the node (5 ms for a block above the usual 1 ms, 1 ms for a root), so the build's own are 13.5 ms
-    // per block, and the apply is counted without the root wait.
-    expect(cells(first, 15)).toEqual(["a", "2", "500", "74.07", "13.50", "1.50", "4.50", "3.50", "4.00", "2.00", "20.00", "4.0", "30", "10", "1"]);
+    // The first height of a run is left out: the means are over heights 101 to 104, which took 60 ms. Of them 10 ms
+    // were waits for the block or the node (9 ms for the blocks, 1 ms for a root), so the build's own are 12.5 ms per
+    // block, and the apply is counted without the root wait.
+    expect(cells(first, 15)).toEqual(["a", "2", "500", "80.00", "12.50", "2.50", "4.50", "3.50", "4.00", "2.00", "20.00", "4.0", "30", "10", "1"]);
     expect(first).toContain("chain-end same (h 104, stopped)");
     expect(second).toContain("chain-end same (h 104, stopped)");
     // Two runs of the same heights that did the same show no difference: every cell after the name is equal.
@@ -368,8 +368,8 @@ describe("the scripts that read a run folder", () => {
       const differing = names.filter((_, column) => column > 0 && base[column] !== changed[column]);
       expect(differing).toEqual(["own h/s", "own", "reclaim", "stmts", "cnt-keys"]);
       const of = (name: string): [string | undefined, string | undefined] => [base[names.indexOf(name)], changed[names.indexOf(name)]];
-      expect(of("own")).toEqual(["13.50", "16.50"]);
-      expect(of("own h/s")).toEqual(["74.07", "60.61"]);
+      expect(of("own")).toEqual(["12.50", "15.50"]);
+      expect(of("own h/s")).toEqual(["80.00", "64.52"]);
       expect(of("reclaim")).toEqual(["3.50", "6.50"]);
       expect(of("stmts")).toEqual(["20.00", "40.00"]);
       expect(of("cnt-keys")).toEqual(["30", "15"]);
@@ -383,6 +383,24 @@ describe("the scripts that read a run folder", () => {
       expect(marked.stdout).toContain("chain-end same (h 104, stopped)");
     } finally {
       rmSync(folder("slower"), { recursive: true, force: true });
+    }
+  });
+
+  it("negative control: compare.mjs takes out a wait for the node that every block has, not only the part above the usual one", () => {
+    // The same heights by the same build, with a node that answers each block 20 ms later: each height ends 20 ms later
+    // than in run a, and all of it was the wait for the block.
+    writeRun("delayed", "chain-end", (line) => ({ ...line, beginMs: (line.beginMs as number) + 20 }), [0, 30, 70, 100, 140]);
+    try {
+      const result = run("compare.mjs", [folder("a"), folder("delayed")]);
+      expect(result.code, result.stderr).toBe(0);
+      const [, first, second] = result.stdout.trimEnd().split("\n") as [string, string, string];
+      const names = ["run", "h/s", "ms/blk", "own h/s", "own", "wait", "apply", "reclaim", "blk-tx", "cnt-wr", "stmts", "reads", "cnt-keys", "row-keys", "retries"];
+      const [base, delayed] = [cells(first, 15), cells(second, 15)];
+      // h/s and ms/blk are the status samples' (the same file in both runs); of the trace's columns only the wait moves.
+      expect(names.filter((_, column) => column > 0 && base[column] !== delayed[column])).toEqual(["wait"]);
+      expect(Number(delayed[names.indexOf("wait")]) - Number(base[names.indexOf("wait")])).toBe(20);
+    } finally {
+      rmSync(folder("delayed"), { recursive: true, force: true });
     }
   });
 

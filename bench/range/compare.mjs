@@ -4,9 +4,12 @@
 // Columns:
 //   h/s, ms/blk   from the /status samples: the run as the clock saw it, waits for the node included
 //   own h/s       1000 / own, the speed to compare builds by
-//   own           ms per block without the two waits for the node: for the block (beginMs) above its median, and for
-//                 the node's state root once the worker had answered (rootWaitMs)
-//   wait          those two waits, ms per block; a run with a large one was held up by the node, not by the build
+//   own           ms per block without the two waits: for the block from its source (beginMs, all of it; it also
+//                 holds the height's start, under 0.1 ms on the runs measured) and for the node's state root once the
+//                 worker had answered (rootWaitMs). A wait that every block has is taken out as much as one that
+//                 comes and goes
+//   wait          those two waits, ms per block; a run with a large one was held up by its source or the node, not by
+//                 the build
 //   apply … reads per-block means from the trace: the apply as the main thread saw it less the root wait, the
 //                 reclamation (its collect, its step and its eviction: collectMs + stepMs + evictMs, as
 //                 worker-time.mjs's "reclamation step"), the block's transaction, the count write, statements, the
@@ -25,15 +28,13 @@
 import { jsonFile, jsonLines, oneLine } from "./lines.mjs";
 oneLine("compare.mjs");
 const mean = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
-const median = (a) => [...a].sort((x, y) => x - y)[a.length >> 1] ?? 0;
 const runs = process.argv.slice(2).map((dir) => {
   const rows = jsonLines(`${dir}/trace.jsonl`).filter((r) => r.st);
   if (rows.length < 2) throw new Error(`${dir}: its trace has ${rows.length === 0 ? "no height" : "one height"}, and a run's first is left out: nothing to read`);
   const res = jsonFile(`${dir}/result.json`);
   for (let i = 1; i < rows.length; i++) rows[i].total = rows[i].t - rows[i - 1].t;
   const body = rows.slice(1);
-  const usualBegin = median(body.map((r) => r.beginMs ?? 0));
-  for (const r of body) r.wait = Math.max(0, (r.beginMs ?? 0) - usualBegin) + (r.rootWaitMs ?? 0);
+  for (const r of body) r.wait = (r.beginMs ?? 0) + (r.rootWaitMs ?? 0);
   const chain = rows.findLast((r) => typeof r.sh === "string");
   return { name: dir.split("/").filter(Boolean).at(-1), rows, body, res, chain, own: mean(body.map((r) => r.total - r.wait)) };
 });
