@@ -7,6 +7,10 @@ information retrieval, so the server answers without learning which records were
 chosen per snapshot: SimplePIR (the default) and IPIR+SP (spec 00058, below), which removes the large per-snapshot
 download at the cost of a larger upload per call.
 
+The wallet also follows its Dust (spec 00062, below, "Dust"): the server publishes every Dust spend of the current
+ledger era as one file of about 9 bytes per spend; the wallet finds its own spends in it by a 4-byte nullifier prefix,
+derives its coins with the ledger's own functions, and confirms each chain's last coin with one PIR read.
+
 This folder holds:
 
 - `server/`: the server, an UmbraDB module (below);
@@ -22,7 +26,8 @@ This folder holds:
 - `gpu/`: WebGPU versions of the scan, SimplePIR's multiply and IPIR+SP's answer, byte-equal to the CPU kernels, for
   Deno and browsers ([`gpu/README.md`](gpu/README.md));
 - `run/sync.mjs`: runs UmbraDB with the module against a node in Docker;
-- `bench/`: the benchmark of the whole flow (`bench.ts`, spec §8) and micro-benchmarks (`micro.ts`);
+- `bench/`: the benchmark of the whole flow (`bench.ts`, spec §8), micro-benchmarks (`micro.ts`) and the Dust file's
+  sizes on a real chain (`dust-sizes.ts`);
 - `web/`: a page that runs the client one step at a time in a browser, with each step's debug output (below);
 - `run/probe.ts`: checks a running server against the database it is built from, without a wallet;
 - `test/`.
@@ -325,6 +330,8 @@ the repository's own package name, so a built checkout (`npm ci && npm run build
 | `store.ts` | The data directory |
 | `tail.ts` | The tail's tree and body |
 | `server.ts` | Points, snapshots, tail, routes, logging |
+| `dust-index.ts` | The Dust events of the current ledger era: the Dust file, first coins and updates by owner, the parameters, the commitments by position (below, "Dust") |
+| `dust-check.ts`, `dust-check-worker.ts` | The Dust check table's builder and its worker thread |
 
 **How it works.** At start (`on-start-db`) it reads every stored `zswap-output` and `zswap-input` row of
 `core_ledger_state.events` into memory; after each committed height it adds that height's events, taken from the
@@ -346,6 +353,7 @@ and refuses builds or tails with its reason; it never halts the core's processin
 | `snapshotEvery` | 0 | Build at every height that is a multiple of this while the node's finalized head is less than this many heights ahead; 0: only on request |
 | `adminSecret` | none | `secret`, 16 characters or more: the admin routes need `Authorization: Bearer <secret>`; without one they answer 403 |
 | `threads` | 0 | Threads for SimplePIR's multiplication (answers and setup data); 0: one fewer than the CPUs, at most 8. IPIR+SP's add-on answers on its own thread pool (all cores; no limit is set) |
+| `dustEraHeight` | 3,348,434 | The first height of the ledger era the Dust file covers (Preprod's); events below it are not read (below, "Dust") |
 
 **Routes** (all under `/pss/v1`; integers little-endian; errors are `{ "error": { "code", "message" } }`):
 
@@ -356,7 +364,8 @@ and refuses builds or tails with its reason; it never halts the core's processin
 | `GET /tail` | Header (132 bytes: `PSST`, version, snapshot id, height, block hash, `first_free`, root, four section lengths), then the commitments of positions T0 … F − 1 (32 each), the outputs from F on (257 each: flags, commitment, ciphertext), the nullifiers spent after S (40 each), the current roots of the blocks from T0's on (32 each) |
 | `POST /query/read`, `POST /query/path`, `POST /query/nullifier` | Body `application/octet-stream`: `PSSQ`, version, snapshot id, count = `queriesPerCall`, count requests of the table's scheme (SimplePIR: C values each; IPIR+SP: `36 + 27,648 + ⌈49·rows/8⌉` bytes each); answer `PSSA`, version, snapshot id, count, count responses (SimplePIR: R values each; IPIR+SP: `68 + ⌈22·cols/8⌉` bytes each). 409 `snapshot-replaced` (with `snapshot`) for another snapshot, 400 for another count or length, 400 `invalid-query` for IPIR+SP requests made for another table's setup, 415 for another content type |
 | `POST /admin/snapshot` | JSON `{ "height"?, "padding"?, "scheme"? }` (default: the latest indexed height, not below the served snapshot's; the settings' scheme): 202 and the build starts; 409 while one runs; 400 `invalid-scheme`, 501 `scheme-unavailable`; 507 for a padded build too large (`padding-too-large` for memory, `table-too-large` for an IPIR+SP table over its cell limit) |
-| `GET /admin/snapshot` | The index, the tip, the served and previous snapshots, the running and last build |
+| `GET /admin/snapshot` | The index, the tip, the served and previous snapshots, the running and last build, the Dust index and check table |
+| `GET /dust/…`, `POST /dust/check/query` | The Dust file, a key's first coins, the Dust parameters and the check table: below, "Dust" |
 
 Each request is logged as one JSON line on stdout (`event: "request"`: route, status, body and answer lengths, range,
 milliseconds), never its body; builds, loads and faults are logged the same way.
@@ -466,6 +475,7 @@ serialization), and compares every coin, spend and the unspent set with the loca
 | `sync.ts`, `state.ts` | The sync and its checks; the local state and the balance |
 | `tree.ts`, `send.ts`, `address.ts`, `node-rpc.ts` | Paths and collapsed updates; the spend; shielded addresses; node checks |
 | `cross-check.ts` | The ledger cross-check |
+| `dust.ts`, `dust-check.ts` | The Dust sync: the file's download, the walk of each chain, the check of each chain's last coin (below, "Dust") |
 | `sdk-api.ts`, `sdk/` | The wallet SDK part (seeds, fee wallet, proving, submission), loaded only when needed |
 
 `npm run typecheck` checks the client except `sdk/`, which needs the install:
@@ -622,6 +632,116 @@ with no copied file changed; [`ipir/vendor/ORIGIN.md`](ipir/vendor/ORIGIN.md) gi
 licence and what was left out. The repository has no licence file at its root; each crate is published on crates.io
 at the copied version under `MIT OR Apache-2.0`, and both texts are in `ipir/vendor/`.
 
+## Dust (spec 00062)
+
+A wallet's Dust follows from public data and its Dust secret key. Each Night output starts a chain of Dust coins whose
+first coin the ledger publishes (`dust-initial-utxo`, with the generation record behind it). Each spend publishes the
+spent coin's nullifier with the time it declared, the fee it paid and the position of the new coin's commitment
+(`dust-spend-processed`), and the next coin is the ledger's `successorDustUtxo` of those and the wallet's key. The core
+stores all of these in `core_ledger_state.events`. The module serves every spend of the current ledger era as one file;
+the wallet searches it for its own coins' nullifier prefixes, derives each next coin, and checks each chain's last
+coin by PIR. The server sees which Dust public key asked for its first coins, and nothing of which spends are its.
+
+**The ledger era.** The Dust state restarts where the ledger's event format changes: on Preprod the first
+`midnight:event[v14]:` event is at height 3,348,434, where the commitment positions and generation indexes start again
+from 0 (that block re-creates 100 first coins). The setting `dustEraHeight` (that height by default) is where the file
+starts; events below it are not read.
+
+**The file** (`shared/dust-file.ts`). One entry per spend, in chain order (height, transaction, event): the first 4
+bytes of the nullifier's 32-byte little-endian encoding, the declared time as a signed difference from the previous
+entry's, the fee as its place in the chunk's list of fees that occur more than once or in full, and the commitment
+position as the difference from the previous one minus one (integers LEB128). The entries are cut into chunks of 4,096
+that decode alone: a chunk's header gives its first entry's number, block height, declared time and position, and the
+prefixes come first, at a fixed width, so a wallet searches them without decoding the rest. A chunk is a function of
+its entries, so a full chunk never changes and chunk n at a given count never does either. The manifest (JSON) gives
+the era's first height, the last height listed, the entry count, and each chunk's entry range, heights, length and
+SHA-256.
+
+**Sizes on Preprod** (`bench/dust-sizes.ts`; [`bench/results/2026-11-17-preprod-dust/REPORT.md`](bench/results/2026-11-17-preprod-dust/REPORT.md),
+to height 3,448,835):
+
+| | Current era (served) | Earlier era (measured only) |
+|---|---|---|
+| Spends | 65,035 (heights 3,349,439 to 3,448,835) | 908,018 (heights 1,207 to 3,348,427) |
+| File | 594,615 bytes in 16 chunks, 9.14 per entry | 7,170,736 bytes in 222 chunks, 7.90 per entry |
+| Per entry: prefix, time, fee, fee lists, position | 4.00, 1.02, 2.57, 0.55, 1.00 | 4.00, 1.08, 1.67, 0.14, 1.00 |
+| Compressed chunk by chunk (brotli to gzip) | 6.88 to 7.25 bytes per entry | 5.61 to 5.83 bytes per entry |
+| Fees stored by their place in the chunk's list | 80.5% | 90.2% |
+
+Reading and decoding the 973,053 events of both eras took 13.5 s, building the files 0.5 s.
+
+**The walk** (`client/dust.ts`). The wallet's Dust key comes from the mnemonic's Dust seed (`DustSecretKey.fromSeed`,
+as the wallet SDK derives it). It downloads the manifest and each chunk at the entry count the manifest lists (checked
+against its SHA-256), its first coins and generation updates (`GET /dust/coins?owner=…`) and the parameters. For each
+first coin of its key, it computes the coin's nullifier and searches the file for its prefix from the first entry whose
+position is above the coin's own (a spend's new commitment is always appended after the coin it spends); on a match it
+derives the next coin from the entry's time, fee and position, and searches on from the entry after. The generation
+record passed is the first coin's, with the `dtime` of its update when there is one (a Night output is spent once): a
+`dtime` later than a spend's declared time leaves the derived coin unchanged, an earlier one lowers its value.
+
+**The check** (`server/dust-check.ts`, `client/dust-check.ts`). A 4-byte prefix can match another wallet's spend (one search over
+65,035 entries has about one chance in 66,000), and the coin derived from it is wrong. So the module also publishes a
+PIR table of the Dust commitment tree's leaves by position: each spend's new commitment, and each first coin's
+(`dustCommitment` of its output). It is built in a worker thread at start and whenever a snapshot build starts, in
+that build's scheme, through the same seam as the snapshot's tables (as a positional table named `read`), with a
+manifest of its own (`shared/dust-check.ts`, canonical JSON, its SHA-256 the check's identifier). The build is refused
+with its reason unless the commitments fill positions 0 to n − 1 exactly once, with n the core's
+`dust_commitment_first_free` at the height. Once no chain finds a further match, the wallet checks the last coin of
+every chain with a spend in one call of exactly `queriesPerCall` requests, padded with random groups: the record at the
+coin's position must be its commitment. A mismatch drops that match, the search resumes after it from the coin before,
+and the new end is checked in a further call. A chain without a spend needs no check (its first coin is public); a coin
+at a position the table does not reach yet (it was built at an earlier height) is reported as not checkable yet. A
+wallet with nothing to check still sends one call.
+
+On Preprod at 74,260 commitments (height 3,457,201), for one chain:
+
+| | SimplePIR | IPIR+SP |
+|---|---|---|
+| Table | 1,457 groups × 51 records; file 4,309,838 bytes | 2,048 groups × 128 records; file 8,388,608 bytes |
+| Built in | 0.23 s | 0.43 s |
+| Downloaded once per check table (public artifact) | 6,057,984 bytes of setup data | 14,884 bytes of masks |
+| One call: up / down | 186,536 / 189,352 bytes | 1,287,336 / 182,440 bytes |
+
+**Routes** (under `/pss/v1`; each logged as the others are, never with a query string):
+
+| Route | Answer |
+|---|---|
+| `GET /dust/manifest` | The Dust file's manifest, JSON |
+| `GET /dust/chunk/<n>[?count=<c>]` | Chunk n's bytes, with its first c entries when `count` is given (the count the manifest lists); cached for good when full or with a count. 404 beyond the file, 400 for a number that is not plain decimal |
+| `GET /dust/coins?owner=<key>` | JSON: that Dust public key's `dust-initial-utxo` and `dust-generation-dtime-update` events, each `{height, bytes}` with the bytes in hexadecimal, in chain order. 400 for a key that is not plain decimal |
+| `GET /dust/parameters` | JSON: the Dust parameters in force (decimal strings): the ledger's initial ones, or the era's last `param-change` event's |
+| `GET /dust/check/manifest` | The check table's manifest bytes; `Pss-Dust-Check-Id` = its SHA-256. 503 `no-dust-check` (with the last build's reason) before one is built |
+| `GET /dust/check/blob/<digest>` | The public artifact of the current check table or the one before |
+| `POST /dust/check/query` | The query wire format (below), the check's identifier in the snapshot identifier's place; 409 `dust-check-replaced` (with `check`) for another one |
+
+A Dust failure (an event that cannot be decoded, a position that does not rise) breaks only the Dust routes, with its
+reason (500 `dust-broken`).
+
+**Running it** against a server (step 2 above; on Preprod the index loads in about 2 s):
+
+```sh
+node --env-file=<secrets.env> examples/private-shielded-sync/client/main.ts dust --wallet A --server http://127.0.0.1:10480
+```
+
+It prints the file, the parameters and the check table, then per chain the spends found (with their file entries), the
+check, the false matches dropped and the current coin (sequence number, position, value at creation and now,
+commitment), and the bytes moved; `--json` prints the same as JSON, `--no-check` walks without the check. For example,
+on Preprod, one of a wallet's two chains in the era and the totals:
+
+```
+chain 2: first coin at height 3,398,886, generation index 1052, backed by 5,001,000,000 Stars of Night
+  spends found: 5 (file entries 19845, 19848, 19851, 19854, 20330)
+  check: checked: the record at position 21383 is the last coin's commitment
+  false matches dropped: 0
+  current coin: seq 5, position 21383, created 2026-11-13T05:47:12.000Z, value at creation 253,921,104,116,881,266 Specks, value now 15,785,552,934,341,881,266 Specks
+downloaded 6,918,127 bytes in 24 requests (manifest 3,023, chunks 665,787, coins 1,260, parameters 146, check 6,247,911); uploaded 186,536 bytes of request bodies; 223 ms
+```
+
+**Not covered.** The Merkle path of a Dust coin, which spending it needs; the earlier ledger era, whose events are
+decoded only to measure the file's size; hiding the Dust public key when asking for its first coins (the coins request
+names it, and the server sees it). A `param-change` event inside the era is read from the event's text rendering
+(the ledger package does not decode it); Preprod's era has none, so that path is tested on a rendering only.
+
 ## Wire formats (`shared/`)
 
 All integers little-endian; binary bodies are `application/octet-stream`; routes under `/pss/v1`.
@@ -649,6 +769,9 @@ All integers little-endian; binary bodies are `application/octet-stream`; routes
   and `perGroup`, and the scheme's `layout` (rows, columns, cells per record, seed, for both); the nullifier table adds
   `bucketBits` and `capacity`.
   Under SimplePIR the path table is as wide as the noise check allows, so its setup data is small.
+
+- **Dust** (`dust-file.ts`, `dust-check.ts`): the Dust file's chunks and manifest, the coins and parameters answers,
+  and the check table's manifest: above, "Dust".
 
 A ciphertext is 224 bytes throughout: the one-time point's 32-byte compressed encoding, then elements 0–5, each its
 32-byte little-endian integer.
@@ -745,7 +868,7 @@ wallet's math was moved to the GPU and what was not.
 | `test/client-sync.test.ts` | The client against the module in the real process (PostgreSQL 18) over the synthetic chain, snapshot at 4 and tail to 7: three wallets' coins, spends and balances equal the ledger's replay (FR-140, SC-001) and the wallets' own local states; identical request shapes (FR-142); no key, public key, nullifier or commitment in any request (FR-143); one full call with no coins; cache; local state file; rejected matches (FR-111); a snapshot replaced mid-sync. |
 | `test/client-send.test.ts` | Paths give the core's root (FR-121); spends from PIR, partial-block and tail paths accepted by the chain's Zswap state, outputs found by both wallets; a wrong sibling refused; collapsed-update bytes equal the ledger's (FR-123); coin choice; pending transfers (FR-128); shielded addresses (and, with the install, equal to the SDK's codec and the npm package's keys). |
 | `test/client-fork.test.ts` | Across a ledger 8 → 9 upgrade: ledger 8 coins and spends, a ledger 8 coin spent under ledger 9; the client equals the replay with both packages. |
-| `test/client-cli.test.ts` | With the install: `sync`, `balance`, `address`, `cross-check` (and a negative control) as separate processes. |
+| `test/client-cli.test.ts` | With the install: `sync`, `balance`, `address`, `cross-check` (and a negative control) and `dust` as separate processes. |
 | `test/server-config.test.ts` | `run/sync.mjs config` and `umbradb config check` on a built checkout (type check with erasable syntax, evaluation, settings), and a negative control. |
 | `test/server-scheme.test.ts` | The scheme seam with SimplePIR: table and setup-data digests pinned from before the seam, records read back through the interface, the padded-build estimate, an unknown scheme refused everywhere. |
 | `test/ipir-shape.test.ts` | IPIR+SP's shape rule against a brute-force search, the row cap, nullifier buckets, the cell encoding (no add-on needed). |
@@ -754,6 +877,11 @@ wallet's math was moved to the GPU and what was not.
 | `test/client-ipir.test.ts` | IPIR+SP end to end in UmbraDB's real process: three wallets equal the ledger's replay, identical request shapes, the same height under SimplePIR gives the same coins, a spend on an IPIR+SP lower path accepted, refusals, padding, restart with and without the add-on, the command line. |
 | `test/ipir-gpu-reference.test.ts` | What the GPU responder is checked against, without a GPU: the add-on's `gpuReference` export and the answer arithmetic of `gpu/ipir-wire.ts`. |
 | `test/web-scheme-view.test.ts` | The page's per-scheme presentation: SimplePIR's lines as before, IPIR+SP's sizes, a real IPIR+SP call decoded part by part, the masks, the WebAssembly compiled only with the committed digest. |
+| `test/dust-file.test.ts` | The Dust file's chunks: round trips, a negative time difference, a position jump, fees by index and in full, a chunk decoded alone, full chunks unchanged as the file grows, bad bytes. |
+| `test/server-dust-index.test.ts` | The Dust index over real Preprod events: each chunk against the entries read from the events, full chunks unchanged as the file grows, a chunk at an earlier count, the era's first height, first coins and updates by owner, the parameters, the commitments by position (a gap and a position filled twice refused), what breaks it. |
+| `test/server-dust.test.ts` | The Dust routes in UmbraDB's real process (PostgreSQL 18) over Preprod events written into the test database: the file, a key's coins, the parameters, refusals; the check table built at start in SimplePIR and read through the wallet's code, refusals, a build refused for another stored `dust_commitment_first_free`, the table rebuilt in IPIR+SP by an IPIR+SP snapshot build and read through it. |
+| `test/dust-walk.test.ts` | The walk: a chain of several spends across chunks, a match below the coin's position, a false match without and with a check, a chain with no spend, two chains in one file; with the ledger's functions, a chain found again from the encoded file, and what a generation record's `dtime` changes; the coins answer decoded from real events. |
+| `test/server-dust-check.test.ts` | The check in both schemes: the module's builder and the scheme's server table called through the wallet's code; another wallet's spend before the real one dropped by the check, a chain's end beyond the table not checkable, two padded calls of one size. |
 | `test/bench-run.test.ts` | The benchmark against the module in the real process (PostgreSQL 18) over the synthetic chain, wallets A, B and C: every cell of spec §8 has a value for the server and each client, and the report renders it; the snapshot's counts and versions; per-step values and the server's times from its log; the naive baseline; the read table at k = 16, 8, 2 and 0 (k 2 gives the served snapshot); the server's view of every request and identical request shapes; the scan by thread count; the transfer row (and a dry-run record); no key, seed, nonce or nullifier in `results.json`; exactly the cells without their input reported missing; `--build`; the command line (`run`, `report --transfer`, with the install); log pairing, speed and formatting rules. |
 
 Fixtures (`test/fixtures/`): `entries.bin`, `pads.bin`, `mine.bin`, `scalar.bin` and `sample.txt` are 16,384 scan
@@ -762,6 +890,8 @@ are the test key's, the test key's scalar, and four worked entries. `coins.bin`,
 `coin-public-key.bin` are 48 coins encrypted with the ledger's `encrypt` (two thirds to the test key) with their
 commitments, written by `kernel/build.sh --vectors`. `poseidon-constants.json` holds `midnight-circuits` 7.3.0's
 Poseidon constants (Apache-2.0) for the BigInt reference. Every key in the fixtures is a test key from a fixed seed.
+`dust-events.json` holds every Dust event of Preprod's current era from 3,348,434 to 3,349,867 as the core stores them
+(public chain data: 144 spends, 110 first coins, 5 updates; their commitments fill positions 0 to 253).
 
 ## Benchmarks
 
