@@ -11,7 +11,8 @@ bad() { printf 'FAIL  %s\n' "$1"; FAILED=1; }
 check() { if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
 NODE_HTTP="$(printf '%s' "${UMBRADB_LOCAL_NODE:-}" | sed -E 's#^ws(s?)://#http\1://#')"
 rpc() { curl -s -m 5 -H 'Content-Type: application/json' -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$1\",\"params\":[]}" "$NODE_HTTP"; }
-mode_of() { stat -f %Lp "$1" 2>/dev/null || stat -c %a "$1"; }
+# GNU stat first: its -f is "file system status", which prints to standard output; BSD stat refuses -c silently.
+mode_of() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
 
 echo "== tools"
 check "node is 24 or newer ($(node --version 2>/dev/null))" '[ "$(node -p "process.versions.node.split(\".\")[0]")" -ge 24 ]'

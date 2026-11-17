@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -236,6 +236,30 @@ describe("run.sh removes and drops only what a run made, and checks before it do
   it("checks the database container before it removes a run's folder", () => {
     expect(guarded("old-run")).toMatchObject({ code: 2, stderr: expect.stringContaining("umbradb-bench-test-no-such-container is not running") });
     untouched();
+  });
+});
+
+describe("preflight.sh", () => {
+  it("reads the password file's mode with GNU stat (Linux) and with BSD stat (macOS)", () => {
+    const home = mkdtempSync(join(tmpdir(), "umbradb-bench-range-preflight-"));
+    // GNU stat first in PATH where the machine's own is BSD's: GNU coreutils installs it as gstat.
+    const gnu = spawnSync("bash", ["-c", "stat --version 2>/dev/null | grep -q GNU && echo system || command -v gstat"], { encoding: "utf8" }).stdout.trim();
+    try {
+      mkdirSync(join(home, "gnu"));
+      if (gnu !== "" && gnu !== "system") symlinkSync(gnu, join(home, "gnu", "stat"));
+      const line = (env: Readonly<Record<string, string>>): string | undefined =>
+        run("preflight.sh", [], { BENCH_DIR: home, BENCH_PG_CONTAINER: "umbradb-bench-test-no-such-container", ...env }).stdout.split("\n").find((text) => text.includes("password file"));
+      const paths: [string, Record<string, string>][] = [["the machine's stat", {}], ...(gnu === "" ? [] : [["GNU stat", { PATH: `${join(home, "gnu")}:${process.env.PATH ?? ""}` }] as [string, Record<string, string>]])];
+      for (const [which, env] of paths) {
+        writeFileSync(join(home, "pg-password"), "not a password\n", { mode: 0o600 });
+        chmodSync(join(home, "pg-password"), 0o600);
+        expect(line(env), which).toBe("PASS  the password file exists with mode 600");
+        chmodSync(join(home, "pg-password"), 0o644);
+        expect(line(env), which).toBe("FAIL  the password file exists with mode 600");
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });
 
