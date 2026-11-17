@@ -36,7 +36,8 @@
  * - `gcMs`, `gcN`: the garbage collections of the thread's JavaScript heap that began in the span, and of them
  *   `gcMajorMs`, the major ones. They overlap everything above. The runtime reports a collection only once the thread
  *   is back in its event loop, so one reported after its span's entry was posted is in a later entry as
- *   `gcOf.<height>` and `gcNOf.<height>`, named by the height of the entry it belongs to.
+ *   `gcOf.<height>` and `gcNOf.<height>`, named by the height of the entry it belongs to (`gcOf.0`, in the thread's
+ *   first entry, for one that began before the trace started).
  * - The thread's memory when the block was applied (`./memory.ts`), in MiB: `ext`, what the thread holds outside its
  *   JavaScript heap, which is its ledger packages' WebAssembly memory; `heap`, its JavaScript heap in use; and `rss`,
  *   the process's resident set.

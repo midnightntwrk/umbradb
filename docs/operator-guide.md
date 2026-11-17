@@ -345,7 +345,8 @@ UMBRADB_TRACE=run/trace.jsonl umbradb run [--config umbradb.config.ts]
 The trace only measures. A process that is not traced computes, stores, logs and sends between its threads what it
 did before; a traced one stores the same tables. Only the command starts it: a host program's process
 (`startUmbraDB`) is not traced. The files are appended to, so give each run a new file. Lines are written every 200
-heights and when the command ends.
+heights and when the command ends, a stop by SIGTERM or SIGINT included; a process that is killed, or that dies, loses
+the lines of up to 199 heights and the worker's lines since the last write.
 
 The command opens the three files before it starts the process, creating those that do not exist. If it cannot (the
 folder does not exist, no permission), it says so on stderr and exits 1 without starting anything. A write that fails
@@ -354,11 +355,12 @@ untraced: …`), and the sync goes on untraced.
 
 | File | Holds |
 |---|---|
-| `<file>` | One JSON line per committed height: what the main thread's time went to. |
-| `<file>.stmts.json` | One entry per statement text (`q`, its first 260 characters): how many times it ran (`n`), its client time from send to answer in ms (`ms`) and its slowest call (`max`). |
+| `<file>` | One JSON line per committed height: what the main thread's time went to. A height whose work after its commit (`on-after-db-write`) fails has none. |
+| `<file>.stmts.json` | One entry per statement text (`q`, its first 260 characters) the main thread sent on PostgreSQL: how many times it ran (`n`), its client time from send to answer in ms (`ms`) and its slowest call (`max`). On PGlite statements are not traced, so it is `[]`. |
 | `<file>.worker.jsonl` | One JSON line per block the ledger worker applied: what the worker thread's time went to since the line before. |
 
-**A height's line.** Times are in ms. A key is absent where its stage did not run at that height.
+**A height's line.** Times are in ms; every number is rounded to 0.001. A key is absent where its stage did not run at
+that height.
 
 | Key | What it is |
 |---|---|
@@ -373,9 +375,9 @@ untraced: …`), and the sync goes on untraced.
 | `sh` | The chain of step outputs: 16 hex digits of a SHA-256 over what every height so far gave. Two runs of the same heights whose last `sh` are equal computed the same step at every height. |
 | `txMs` | The block's transaction, from its `BEGIN` to its `COMMIT` answered. |
 | `writeBlockMs`, `writeRefcountMs` | Inside it: the ledger state's node writes, and the step's writes. |
-| `commitMs` | The `COMMIT`'s client time. |
-| `sqlN`, `sqlMs` | The statements sent for the height and their client time, from send to answer. |
-| `encMs`, `decMs` | The parameters' encoding and the rows' decoding. |
+| `commitMs` | The client time of the last `COMMIT` sent since the line before: the block's own, unless the process committed another write after it. |
+| `sqlN`, `sqlMs` | The statements the main thread sent on PostgreSQL since the line before, and their client time from send to answer. A run's first line also holds the startup's statements, and a module API request's or the admin endpoints' reads during a sync count in the height then in progress. |
+| `encMs`, `decMs` | Those statements' parameters encoded, and their rows decoded. |
 | `rt.<type>`, `rtN.<type>` | The ledger worker's requests of that type (`apply`, `parse`, `commit`, `evict`, `load`, `release`, …): their round trips, from the post to the answer handled, and how many. |
 | `backMs` | From the worker posting an answer to the main thread handling it. |
 | `nodeNoticeMs`, `nodeReadMs`, `nodeReads` | The worker's requests for stored nodes: from the worker posting one to the main thread handling it, from then to the worker woken, and how many. |
@@ -397,5 +399,5 @@ Later changes may add keys to a line for the work they measure; the files and th
 | `node.<phase>`, `node.rq.<type>` | Of `nodeWaitMs`: what fell inside that phase, and inside a request of that type. |
 | `idleMs`, `transitMs` | The time no request ran, and of it the time a request already posted had not reached the thread. |
 | `queuedMs` | What the requests waited between their post and their start, less their transit. It overlaps the requests before them and is not a part of `spanMs`. |
-| `gcMs`, `gcN`, `gcMajorMs` | The garbage collections of the thread's JavaScript heap that began in the span, and of them the major ones. A collection reported after its span's line was written is in a later line as `gcOf.<height>` and `gcNOf.<height>`. |
+| `gcMs`, `gcN`, `gcMajorMs` | The garbage collections of the thread's JavaScript heap that began in the span, and of them the major ones. A collection reported after its span's line was written is in a later line as `gcOf.<height>` and `gcNOf.<height>`; `gcOf.0` and `gcNOf.0`, in the thread's first line, are collections that began before its trace started. |
 | `ext`, `heap`, `rss` | The thread's memory in MiB when the block was applied: what it holds outside its JavaScript heap (the ledger packages' WebAssembly memory), its JavaScript heap in use, and the process's resident set. |

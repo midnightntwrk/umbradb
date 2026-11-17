@@ -2,9 +2,10 @@
  * The block trace: where each height's time goes, for measuring a sync. Core.
  *
  * **Off unless started.** Nothing here runs until {@link startTrace} is called, and only `umbradb run` calls it, when
- * its environment sets `UMBRADB_TRACE` (`src/cli/run.ts`). While it is off every function below returns at its first
- * line, so a process that is not traced computes, reads and writes exactly what it did before the trace existed. The
- * trace never changes what is stored: it only measures.
+ * its environment sets `UMBRADB_TRACE` (`src/cli/run.ts`). While it is off every function below that records returns
+ * at its first line ({@link tracedRead}'s wrapper times its read whatever the state, and its callers build it only
+ * while tracing), so a process that is not traced computes, reads and writes exactly what it did before the trace
+ * existed. The trace never changes what is stored: it only measures.
  *
  * **What it records**, on the main thread:
  * - one line per committed height ({@link traceEndBlock}): its height `h`, the clock `t` (ms) when it ended, and
