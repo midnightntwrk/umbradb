@@ -28,7 +28,7 @@ import { compileKernel, Kernel } from "../kernel/kernel.ts";
 import { dustTree } from "../server/dust-tree.ts";
 import { inlineMultiplier, type SchemeName } from "../pir/index.ts";
 import { openServerScheme } from "../pir/server-schemes.ts";
-import { buildDustCheck, type DustCheckResult } from "../server/dust-check.ts";
+import { buildDustCheck, type DustCheckJob, type DustCheckResult } from "../server/dust-check.ts";
 import {
   decodeDustChunk,
   decodeQueryBody,
@@ -148,29 +148,31 @@ export async function dustWorld() {
 
   const dirs: string[] = [];
 
-  /** The module's Dust routes over the file and a check table built in `scheme`. */
-  async function serve(scheme: SchemeName): Promise<DustRoutes> {
+  /** The Dust snapshot's build job in `scheme`, its roots the core's (here, the ones computed above), in a new folder. */
+  function job(scheme: SchemeName): DustCheckJob {
     const dataDir = mkdtempSync(join(tmpdir(), "pss-dust-world-"));
     dirs.push(dataDir);
-    const built = await buildDustCheck(
-      {
-        eraHeight: 0,
-        height: 9,
-        commitments,
-        count: TABLE,
-        scheme,
-        threads: 1,
-        queriesPerCall: 4,
-        dataDir,
-        blockTime: SNAPSHOT_TIME,
-        pathSplit: PATH_SPLIT,
-        expectedRoot: tree.tree.root,
-        generation: encodeDustGenerationRecords(records),
-        generationRecords: records.length,
-        generationRoot,
-      },
-      scheme === "simplepir" ? { multiplier: inlineMultiplier } : {},
-    );
+    return {
+      eraHeight: 0,
+      height: 9,
+      commitments,
+      count: TABLE,
+      scheme,
+      threads: 1,
+      queriesPerCall: 4,
+      dataDir,
+      blockTime: SNAPSHOT_TIME,
+      pathSplit: PATH_SPLIT,
+      expectedRoot: tree.tree.root,
+      generation: encodeDustGenerationRecords(records),
+      generationRecords: records.length,
+      expectedGenerationRoot: fromHex(generationRoot, 32),
+    };
+  }
+
+  /** The module's Dust routes over the file and a check table built in `scheme`. */
+  async function serve(scheme: SchemeName): Promise<DustRoutes> {
+    const built = await buildDustCheck(job(scheme), scheme === "simplepir" ? { multiplier: inlineMultiplier } : {});
     const server = await openServerScheme(scheme, { threads: 1, multiplier: inlineMultiplier });
     const table = await server.adoptTable(built.manifest.table, built.transfer);
     const pathTable = await server.adoptTable(built.manifest.tree.pathTable!, built.pathTransfer!);
@@ -231,6 +233,7 @@ export async function dustWorld() {
     entries,
     file,
     manifest,
+    job,
     serve,
     dispose() {
       for (const d of dirs) rmSync(d, { recursive: true, force: true });

@@ -752,12 +752,8 @@ export class PssServer {
     if (state.generationFirstFree !== records.length) {
       return refuse("generation-first-free-mismatch", `the Dust events up to height ${table.height} give ${records.length} generation records; the core's dust_generation_first_free there is ${state.generationFirstFree}`, table.count);
     }
-    // The generation tree's root, by the ledger, must be the core's (phase 9 acceptance 3).
-    const generationRoot = rootFromStored(state.generationRoot);
-    const computed = this.dust.generationRoot(records);
-    if (computed === null || toHex(fieldLe(computed)) !== toHex(generationRoot)) {
-      return refuse("generation-root-mismatch", `the generation tree of ${records.length} records at height ${table.height} has the root ${computed === null ? "none" : toHex(fieldLe(computed))}; the core's dust_generation_root is ${toHex(generationRoot)}`, table.count);
-    }
+    // The generation tree's root must be the core's (phase 9 acceptance 3): the build worker checks it, since the ledger
+    // takes about 7 ms a record and would hold up the event loop.
     const building: DustCheckBuilding = { height: table.height, scheme, trigger, startedAt: new Date().toISOString() };
     this.#dustCheckBuilding = building;
     const started = performance.now();
@@ -776,7 +772,7 @@ export class PssServer {
       expectedRoot: rootFromStored(state.commitmentRoot),
       generation: encodeDustGenerationRecords(records),
       generationRecords: records.length,
-      generationRoot: toHex(generationRoot),
+      expectedGenerationRoot: rootFromStored(state.generationRoot),
     }).then(
       (result) => this.#adoptDustCheck(result, building, started),
       (cause: unknown) => this.#dustCheckFailed(building, cause, started),
@@ -840,6 +836,7 @@ export class PssServer {
       setupMs: result.setupMs,
       treeMs: result.treeMs,
       pathMs: result.pathMs,
+      generationMs: result.generationMs,
       root: m.tree.root,
       blocks: m.tree.blockRoots.blocks,
       pathTableBytes: m.tree.pathTable?.size ?? null,
@@ -1368,17 +1365,6 @@ function answerBytes(answer: HttpAnswer | HttpFileAnswer): number {
   if (body instanceof Uint8Array) return body.length;
   if (typeof body === "string") return Buffer.byteLength(body);
   return Buffer.byteLength(JSON.stringify(body) ?? "");
-}
-
-/** A field element as 32 bytes, little-endian. */
-function fieldLe(value: bigint): Uint8Array {
-  const out = new Uint8Array(32);
-  let v = value;
-  for (let i = 0; i < 32; i++) {
-    out[i] = Number(v & 0xffn);
-    v >>= 8n;
-  }
-  return out;
 }
 
 /** The settings of a process context's latest revision (re-exported for the declaration). */

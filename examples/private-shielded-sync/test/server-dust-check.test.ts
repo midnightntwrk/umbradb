@@ -13,12 +13,15 @@
  * (`ipir/build.sh native`).
  */
 
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import * as ledger from "../../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js";
 import { DustChecker } from "../client/dust-check.ts";
 import { fieldBytes, walkDustChains } from "../client/dust.ts";
 import { chooseDustChain, dustLocalState, dustSpendable, payFeeWithDust } from "../client/dust-spend.ts";
 import { compileKernel, Kernel } from "../kernel/kernel.ts";
+import { buildDustCheck } from "../server/dust-check.ts";
 import { PssHttp } from "../client/http.ts";
 import { compileIpirWasm } from "../ipir/wallet-node.ts";
 import { inlineMultiplier, type SchemeName } from "../pir/index.ts";
@@ -154,3 +157,13 @@ for (const scheme of ["simplepir", "ipir-sp"] as const) {
     });
   });
 }
+
+describe("the Dust snapshot's build refuses roots that are not the core's (phase 9 acceptance 1 and 3)", () => {
+  it("a commitment root or a generation root other than the core's fails the build with its code, and leaves no folder", { timeout: 120_000 }, async () => {
+    const wrongTree = world.job("simplepir");
+    await expect(buildDustCheck({ ...wrongTree, expectedRoot: new Uint8Array(32) }, { multiplier: inlineMultiplier })).rejects.toMatchObject({ code: "root-mismatch" });
+    const wrongGeneration = world.job("simplepir");
+    await expect(buildDustCheck({ ...wrongGeneration, expectedGenerationRoot: new Uint8Array(32) }, { multiplier: inlineMultiplier, ledger: ledger as never })).rejects.toMatchObject({ code: "generation-root-mismatch" });
+    for (const j of [wrongTree, wrongGeneration]) expect(readdirSync(join(j.dataDir, "dust-check")).filter((n) => n !== ".building")).toEqual([]);
+  });
+});

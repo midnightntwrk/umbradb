@@ -8,8 +8,9 @@
  * - the commitment tree (`./dust-tree.ts`): its root, which must be the core's `dust_commitment_root` at the height
  *   (else the build fails), its block roots, and a path table of every position's k lower siblings (when k > 0), so a
  *   wallet reads its coin's path to spend it without the server learning which coin;
- * - the generation records (checked by the server against the core's `dust_generation_root` before the build starts),
- *   one public file.
+ * - the generation records, one public file; the tree the ledger builds from them must have the core's
+ *   `dust_generation_root` at the height (else the build fails). It is computed here, in the worker: the ledger takes
+ *   about 7 ms a record.
  *
  * The two tables go through the seam as positional sources named `read` and `path`: the name only picks the layout
  * family and the domain of the public seed, whose other input, the table file's digest, already makes it the table's
@@ -28,9 +29,11 @@ import type { Multiplier } from "../pir/multiply.ts";
 import { type PreparedTable, type SchemeName, SchemeUnavailable, type ServerScheme, type TableTransfer } from "../pir/scheme.ts";
 import { openServerScheme } from "../pir/server-schemes.ts";
 import { compileKernel, Kernel } from "../kernel/kernel.ts";
-import { DUST_CHECK_RECORD_BYTES, type DustCheckManifest, dustCheckId, encodeDustCheckManifest } from "../shared/dust-check.ts";
+import type * as V9 from "../../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js";
+import { decodeDustGenerationRecords, DUST_CHECK_RECORD_BYTES, type DustCheckManifest, dustCheckId, encodeDustCheckManifest } from "../shared/dust-check.ts";
 import { type ArtifactRef, fromHex, type PirTableRef, toHex } from "../shared/manifest.ts";
 import { artifact, MANIFEST_FILE } from "./build.ts";
+import { dustGenerationRoot } from "./dust-index.ts";
 import { dustTree } from "./dust-tree.ts";
 
 /** The folder under the module's data directory that holds the check tables, and its builds in progress. */
@@ -56,10 +59,11 @@ export interface DustCheckJob {
   readonly pathSplit: number;
   /** The core's `dust_commitment_root` at `height`, 32 bytes little-endian: the tree's root must be it. */
   readonly expectedRoot: Uint8Array;
-  /** The generation file (`encodeDustGenerationRecords`) and its record count and root, already checked. */
+  /** The generation file (`encodeDustGenerationRecords`) and its record count (already checked against the core's). */
   readonly generation: Uint8Array;
   readonly generationRecords: number;
-  readonly generationRoot: string;
+  /** The core's `dust_generation_root` at `height`, 32 bytes little-endian: the generation tree's root must be it. */
+  readonly expectedGenerationRoot: Uint8Array;
 }
 
 export interface DustCheckResult {
@@ -70,11 +74,12 @@ export interface DustCheckResult {
   /** What the server answers from (`ServerScheme.adoptTable`): the check table, and the path table when k > 0. */
   readonly transfer: TableTransfer;
   readonly pathTransfer: TableTransfer | null;
-  /** Milliseconds: the check table's layout and file, then its setup; the commitment tree; the path table. */
+  /** Milliseconds: the check table's layout and file, then its setup; the commitment tree; the path table; the generation tree. */
   readonly tableMs: number;
   readonly setupMs: number;
   readonly treeMs: number;
   readonly pathMs: number;
+  readonly generationMs: number;
 }
 
 /** A check table's build that failed: its stable code and message. */
@@ -86,8 +91,22 @@ export class DustCheckFailure extends Error {
   }
 }
 
+/** The ledger package the generation tree is computed with (the vendored one the core builds on). */
+const loadLedger = async (): Promise<typeof V9> => (await import(new URL("../../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js", import.meta.url).href)) as typeof V9;
+
+/** A field element as 32 bytes, little-endian. */
+function fieldLe(value: bigint): Uint8Array {
+  const out = new Uint8Array(32);
+  let rest = value;
+  for (let i = 0; i < 32; i++) {
+    out[i] = Number(rest & 0xffn);
+    rest >>= 8n;
+  }
+  return out;
+}
+
 /** Builds the check table of `job` in this thread (the worker's, or a test's). */
-export async function buildDustCheck(job: DustCheckJob, hooks: { readonly multiplier?: Multiplier } = {}): Promise<DustCheckResult> {
+export async function buildDustCheck(job: DustCheckJob, hooks: { readonly multiplier?: Multiplier; readonly ledger?: typeof V9 } = {}): Promise<DustCheckResult> {
   const { count } = job;
   if (!Number.isSafeInteger(count) || count < 1 || job.commitments.length !== count * DUST_CHECK_RECORD_BYTES) {
     throw new DustCheckFailure("invalid-job", `a check table of ${count} commitments needs ${count * DUST_CHECK_RECORD_BYTES} bytes, got ${job.commitments.length}`);
@@ -172,6 +191,16 @@ export async function buildDustCheck(job: DustCheckJob, hooks: { readonly multip
       };
     }
     const pathMs = performance.now() - started;
+
+    // The generation tree, by the ledger: its root must be the core's.
+    started = performance.now();
+    const records = decodeDustGenerationRecords(job.generation);
+    if (records.length !== job.generationRecords) throw new DustCheckFailure("invalid-job", `the generation file holds ${records.length} records, the job ${job.generationRecords}`);
+    const generationRoot = toHex(fieldLe(dustGenerationRoot(hooks.ledger ?? (await loadLedger()), records)));
+    if (generationRoot !== toHex(job.expectedGenerationRoot)) {
+      throw new DustCheckFailure("generation-root-mismatch", `the generation tree of ${records.length} records at height ${job.height} has the root ${generationRoot}; the core's dust_generation_root is ${toHex(job.expectedGenerationRoot)}`);
+    }
+    const generationMs = performance.now() - started;
     const generationFile = artifact(dir, [job.generation]);
 
     const manifest: DustCheckManifest = {
@@ -186,7 +215,7 @@ export async function buildDustCheck(job: DustCheckJob, hooks: { readonly multip
       table,
       public: publicRef,
       tree: { pathSplit: k, root: toHex(built.tree.root), blockRoots: { ...blockRoots, blocks: built.tree.blocks }, ...(pathRefs ?? {}) },
-      generation: { records: job.generationRecords, root: job.generationRoot, file: generationFile },
+      generation: { records: job.generationRecords, root: generationRoot, file: generationFile },
     };
     const manifestBytes = encodeDustCheckManifest(manifest);
     const id = toHex(dustCheckId(manifestBytes));
@@ -194,7 +223,7 @@ export async function buildDustCheck(job: DustCheckJob, hooks: { readonly multip
     const final = join(root, id);
     if (existsSync(final)) rmSync(dir, { recursive: true, force: true });
     else renameSync(dir, final);
-    return { id, dir: final, manifest, manifestBytes, transfer: prepared.transfer, pathTransfer: preparedPath?.transfer ?? null, tableMs, setupMs, treeMs, pathMs };
+    return { id, dir: final, manifest, manifestBytes, transfer: prepared.transfer, pathTransfer: preparedPath?.transfer ?? null, tableMs, setupMs, treeMs, pathMs, generationMs };
   } catch (error) {
     if (prepared !== null) scheme.discardTransfer(prepared.transfer);
     if (preparedPath !== null) scheme.discardTransfer(preparedPath.transfer);

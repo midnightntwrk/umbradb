@@ -191,13 +191,7 @@ export function ledgerDustDecoder(ledger: Ledger): DustDecoder {
       const record = recordOf(annotation);
       return { owner: owner(record.owner), nonce: record.nonce, dtime: record.dtime };
     },
-    generationRoot(records) {
-      let local = new ledger.DustLocalState(ledger.LedgerParameters.initialParameters().dust);
-      records.forEach((r, i) => {
-        local = local.insertGenerationInfo(BigInt(i), { value: r.value, owner: r.owner, nonce: r.nonce, dtime: r.dtime === null ? undefined : new Date(r.dtime * 1000) }, undefined);
-      });
-      return local.generatingTreeRoot() ?? 0n;
-    },
+    generationRoot: (records) => dustGenerationRoot(ledger, records),
     parameters: (bytes) => dustParametersOfText(ledger.Event.deserialize(bytes).toString(true)),
     initial: { nightDustRatio: initial.nightDustRatio, generationDecayRate: initial.generationDecayRate, dustGracePeriodSeconds: initial.dustGracePeriodSeconds },
   };
@@ -567,3 +561,16 @@ function countAtOrBelow(values: readonly number[], limit: number): number {
 
 /** A coin event as the coins route answers it: its height and its bytes in hexadecimal. */
 export const coinEventJson = (e: DustCoinEvent): DustEventJson => ({ height: e.height, bytes: toHex(e.bytes) });
+
+/**
+ * The generation tree's root over `records` (record `i` at index `i`), by the ledger: each inserted into a Dust local
+ * state, which computes the record's leaf (`merkle_hash`, not exposed in JavaScript). About 7 ms a record (Preprod's
+ * 1,676 in 12 s), so the server runs it in the snapshot's build worker, not on its event loop.
+ */
+export function dustGenerationRoot(ledger: typeof V9, records: readonly DustGenerationRecord[]): bigint {
+  let local = new ledger.DustLocalState(ledger.LedgerParameters.initialParameters().dust);
+  records.forEach((r, i) => {
+    local = local.insertGenerationInfo(BigInt(i), { value: r.value, owner: r.owner, nonce: r.nonce, dtime: r.dtime === null ? undefined : new Date(r.dtime * 1000) }, undefined);
+  });
+  return local.generatingTreeRoot() ?? 0n;
+}
