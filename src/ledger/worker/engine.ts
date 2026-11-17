@@ -465,9 +465,16 @@ export class LedgerEngine {
   /**
    * The zswap state key of the contract `address` in `state`, whose summary is `summary`. The package builds it from
    * the state's commitment tree with every range that is not the contract's collapsed, up to the tree's first free
-   * index: a function of that tree, that index and the address. So the key computed for the same tree (the same first
-   * free index and root) is this state's too, and the package is not asked to build it again: most blocks that touch
-   * a contract add no commitment. A contract the state does not hold has none; nothing is kept for it.
+   * index, and has none for a contract the state does not hold (nothing is kept for it). The key built for the same
+   * tree (the same first free index and root) is returned again and the package is not asked: most blocks that touch
+   * a contract add no commitment. Two assumptions make the kept key this state's:
+   * - The state holds the contract. A kept key is returned before the package could answer that it does not, and
+   *   exists only for a contract an earlier state held: a contract is never removed, and the engine's states follow
+   *   one chain.
+   * - An equal first free index and root are the same tree for the package's filter, which keeps a leaf by the
+   *   contract address stored beside it. The root does not cover that address (it is computed from the leaves' hashes
+   *   only), but the tree only grows, one leaf with its address at the first free index, so two states of one chain
+   *   with the same first free index hold the same leaves with the same addresses. The root is a further check.
    */
   #zswapKey(adapter: LedgerPackage, state: StateHandle, address: Uint8Array, summary: StateSummary): Uint8Array | null {
     let known = this.#zswapKeys.get(adapter);
