@@ -1,16 +1,28 @@
 // What one statement costs from the run container to the database, by kind: run inside a node container on the bench
-// network (see roundtrip.sh, which sets BENCH_PG_HOST and PGPASSWORD). Each case runs N times one after another on one connection; prints p50 / mean in ms.
+// network (see roundtrip.sh, which sets BENCH_PG_HOST and PGPASSWORD). Each case runs REPEAT times (3000 unless given)
+// one after another on one connection; prints p50 / mean in ms. BENCH_PG_PORT is the database's port (5432 unless
+// given). The keys asked for are sampled from the database's node and count tables, sent as the build sends a
+// parameter (its parameterText), and each case's first answer is checked before anything is timed: a case that found
+// nothing would time misses.
 //   node roundtrip.mjs <build> <database>
 import { createRequire } from "node:module";
+import { oneLine } from "./lines.mjs";
+oneLine("roundtrip.mjs");
 const [build, database] = process.argv.slice(2);
 const require = createRequire(`${build}/package.json`);
 const postgres = require("postgres");
 const { parameterText } = await import(`${build}/dist/deterministic-postgresql/index.js`);
-const sql = postgres({ host: process.env.BENCH_PG_HOST, port: 5432, user: "postgres", password: process.env.PGPASSWORD, database, max: 1, prepare: true, fetch_types: false });
-const N = 3000;
+const sql = postgres({ host: process.env.BENCH_PG_HOST, port: Number(process.env.BENCH_PG_PORT ?? 5432), user: "postgres", password: process.env.PGPASSWORD, database, max: 1, prepare: true, fetch_types: false });
+const N = Number(process.env.REPEAT ?? 3000);
+if (!Number.isInteger(N) || N < 1) throw new Error(`REPEAT is a whole number above 0: ${process.env.REPEAT}`);
 const q = (a, p) => [...a].sort((x, y) => x - y)[Math.floor(p * (a.length - 1))];
-const keys = (await sql.unsafe("SELECT node_key FROM core_ledger_state.nodes ORDER BY node_key LIMIT 2000").raw()).map((r) => r[0]);
-const counted = (await sql.unsafe("SELECT node_key FROM core_ledger_state.ref_counts ORDER BY node_key LIMIT 2000").raw()).map((r) => r[0]);
+// The samples as decoded values (a bytea is a Buffer of its bytes). A .raw() answer gives each value as the bytes of
+// its text form instead (\x and hex digits), which parameterText would send as other keys.
+const nodes = await sql.unsafe("SELECT node_key, children FROM core_ledger_state.nodes ORDER BY node_key LIMIT 2000");
+const keys = nodes.map((r) => r.node_key);
+const childrenOf = new Map(nodes.map((r) => [r.node_key.toString("hex"), r.children.toString("hex")]));
+const counted = (await sql.unsafe("SELECT node_key FROM core_ledger_state.ref_counts ORDER BY node_key LIMIT 2000")).map((r) => r.node_key);
+if (keys.length === 0 || counted.length === 0) throw new Error(`${database} has no stored node or no count to sample`);
 const pick = (from, n, at) => Array.from({ length: n }, (_, i) => from[(at * 7 + i * 13) % from.length]);
 const STORED = "SELECT node_key FROM core_ledger_state.nodes WHERE node_key = ANY($1::bytea[])";
 const CHILDREN = "SELECT node_key, children FROM core_ledger_state.nodes WHERE node_key = ANY($1::bytea[])";
@@ -33,8 +45,23 @@ const cases = [
   ["counts, 1000 keys", (i) => sql.unsafe(COUNTS, [parameterText(pick(counted, 1000, i), 0)], { prepare: true }).raw()],
 ];
 await sql.unsafe("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY", [], { simple: true });
+// Each case's first answer, from .raw() as timed: every distinct key asked for is found, a node's children are the ones
+// sampled with it, and every count asked for is above 0 (the count table holds no row of 0).
+const hex = (key) => key.toString("hex");
+const text = (value) => value.toString();
+const distinct = (asked) => new Set(asked.map(hex)).size;
+for (const [name, run] of cases.filter(([name]) => !name.startsWith("SELECT"))) {
+  const asked = name.startsWith("counts") ? null : distinct(pick(keys, Number(/(\d+) keys/.exec(name)[1]), 0));
+  const rows = await run(0);
+  if (asked !== null && rows.length !== asked) throw new Error(`${name}: ${rows.length} of the ${asked} keys asked for were found: the keys are not asked for as stored`);
+  for (const [key, second, refs] of rows) {
+    if (name.startsWith("children") && text(second) !== `\\x${childrenOf.get(text(key).slice(2))}`) throw new Error(`${name}: key ${text(key)} answered other children than were sampled with it`);
+    if (name.startsWith("counts") && !(Number(text(refs)) > 0)) throw new Error(`${name}: key ${text(key)} answered a count of ${text(refs)}: the keys are not asked for as stored`);
+  }
+}
+console.log("each case's first answer checked: the keys asked for found, with their stored children and counts above 0");
 for (const [name, run] of cases) {
-  for (let i = 0; i < 200; i++) await run(i);
+  for (let i = 0; i < Math.min(200, N); i++) await run(i);
   const times = [];
   let bytes = 0;
   for (let i = 0; i < N; i++) {
@@ -51,10 +78,11 @@ for (const [name, run] of [
   ["14 statements, one after another", async (i) => { for (const s of fourteen(i)) await s(); }],
   ["14 statements, pipelined", (i) => Promise.all(fourteen(i).map((s) => s()))],
 ]) {
-  for (let i = 0; i < 100; i++) await run(i);
+  const n = Math.ceil(N / 3);
+  for (let i = 0; i < Math.min(100, n); i++) await run(i);
   const times = [];
-  for (let i = 0; i < 1000; i++) { const t = performance.now(); await run(i); times.push(performance.now() - t); }
-  console.log(`${name.padEnd(34)} p50 ${q(times, 0.5).toFixed(3)}  mean ${(times.reduce((a, b) => a + b, 0) / 1000).toFixed(3)}`);
+  for (let i = 0; i < n; i++) { const t = performance.now(); await run(i); times.push(performance.now() - t); }
+  console.log(`${name.padEnd(34)} p50 ${q(times, 0.5).toFixed(3)}  mean ${(times.reduce((a, b) => a + b, 0) / n).toFixed(3)}`);
 }
 await sql.unsafe("ROLLBACK", [], { simple: true });
 await sql.end();

@@ -191,7 +191,7 @@ The `.mjs` readers share `lines.mjs` for this.
 | `contents-hash.sh a b …` | the exported contents hash of each run's database |
 | `tables.sh a b …` | for every table any of the runs has, each run's row count and a hash of its rows (`absent` where a run has no such table), the tables that differ from the first run's marked, and the number of differences: exit 0 if none, 1 if some; exit 2, with no count, if a database or a table could not be read |
 | `profile.mjs a` | self time by function, from a run made with `NODE_FLAGS="--cpu-prof --cpu-prof-dir=<run folder>"` |
-| `roundtrip.sh a` | what one statement costs from a run's container to the database, by kind of statement: the machine's floor under every statement of a block |
+| `roundtrip.sh a` | what one statement costs from a run's container to the database, by kind of statement: the machine's floor under every statement of a block. The keys it asks for are sampled from the run's database and sent as the build sends them; each case's first answer is checked to hold them (their children, counts above 0) before anything is timed |
 | `txshare.mjs [<height> …]` | the share of blocks with transactions near heights of the chain, from the node |
 
 `worker.mjs` and `worker-time.mjs` take `SKIP=<n>` (the lines left out as warm-up, 20 by default) and `FROM=<height>`

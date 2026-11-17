@@ -1065,6 +1065,42 @@ exit 0
     }, 120_000);
   });
 
+  it("roundtrip.mjs asks for the keys it sampled, decoded: each case's answer holds them, their children and counts above 0", () => {
+    // 40 nodes, each the parent of the next two: every key is stored, is a child of two nodes, and has a count of 2.
+    psql("postgres", "CREATE DATABASE bench_roundtrip");
+    const key = (i: string): string => `decode(md5('k' || ${i}) || md5('l' || ${i}), 'hex')`;
+    psql(
+      "bench_roundtrip",
+      `CREATE SCHEMA core_ledger_state;
+       CREATE TABLE core_ledger_state.nodes (node_key bytea PRIMARY KEY, data bytea NOT NULL, children bytea NOT NULL);
+       CREATE TABLE core_ledger_state.ref_counts (node_key bytea PRIMARY KEY, count integer NOT NULL);
+       CREATE TABLE core_ledger_state.root_counts (node_key bytea PRIMARY KEY, count integer NOT NULL);
+       INSERT INTO core_ledger_state.nodes SELECT ${key("i")}, '\\x00', ${key("(i % 40) + 1")} || ${key("((i + 1) % 40) + 1")} FROM generate_series(1, 40) i;
+       INSERT INTO core_ledger_state.ref_counts SELECT ${key("i")}, 2 FROM generate_series(1, 40) i;
+       INSERT INTO core_ledger_state.root_counts VALUES (${key("1")}, 1);`,
+    );
+    // The build the script takes: the repository's dependencies, and its mapping from the source (run with tsx).
+    const build = mkdtempSync(join(tmpdir(), "umbradb-bench-range-build-"));
+    try {
+      writeFileSync(join(build, "package.json"), '{"type":"module"}\n');
+      symlinkSync(fileURLToPath(new URL("../../node_modules", import.meta.url)), join(build, "node_modules"));
+      mkdirSync(join(build, "dist", "deterministic-postgresql"), { recursive: true });
+      writeFileSync(join(build, "dist", "deterministic-postgresql", "index.js"), `export * from ${JSON.stringify(fileURLToPath(new URL("../../src/deterministic-postgresql/index.ts", import.meta.url)))};\n`);
+      const started = container as StartedPostgreSqlContainer;
+      const env = { ...process.env, BENCH_PG_HOST: started.getHost(), BENCH_PG_PORT: String(started.getPort()), PGPASSWORD: started.getPassword(), REPEAT: "3" };
+      const result = spawnSync(process.execPath, ["--import", "tsx", join(SCRIPTS, "roundtrip.mjs"), build, "bench_roundtrip"], { encoding: "utf8", env });
+      const answer = (name: string): number => Number(/answer (\d+) bytes/.exec(result.stdout.split("\n").find((line) => line.startsWith(name)) ?? "")?.[1]);
+      // An answer's values arrive as text: a key is \x and 64 hex digits (66 bytes), two children's keys 130.
+      expect(answer("stored keys, 22 keys"), result.stdout + result.stderr).toBe(22 * 66);
+      expect(answer("children, 5 keys")).toBe(5 * (66 + 130));
+      expect(result.stdout).toContain("each case's first answer checked: the keys asked for found, with their stored children and counts above 0");
+      expect(result.status, result.stderr).toBe(0);
+    } finally {
+      rmSync(build, { recursive: true, force: true });
+      psql("postgres", "DROP DATABASE bench_roundtrip WITH (FORCE)");
+    }
+  });
+
   it("refuses without a label", () => {
     const result = run("tables.sh", [], { BENCH_DIR: directory });
     expect(result).toMatchObject({ code: 2, stderr: expect.stringContaining("usage: tables.sh") });
