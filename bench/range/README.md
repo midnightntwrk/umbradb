@@ -121,10 +121,11 @@ TEMPLATE=<template> bench/range/run.sh my-label <stop-height>
 - Drops and clones the database `bench_my_label`, writes `$BENCH_DIR/my-label/umbradb.config.ts`, and runs
   `node $BUILD/dist/cli/main.js run` in the container `umbradb-bench-run-my-label` on the bench network until the
   `core` entry's stop height.
-- Removes and drops only a run's own: the label's folder if it is empty or an earlier run's, and the label's database
-  if an earlier `run.sh` made it (it puts a comment on each), never a database marked as a template. It first checks
-  that the container is running, the network, the password file and the template are there; a refusal (status 2)
-  changes nothing.
+- Removes and drops only a run's own: the label's folder if it is empty or holds the marker `.bench-run` that an
+  earlier run of the same label wrote there (it names the label and the folder, links resolved, so a run folder that
+  was moved or copied is not one), and the label's database if an earlier `run.sh` made it (it puts a comment on
+  each), never a database marked as a template. It first checks that the container is running, the network, the
+  password file and the template are there; a refusal (status 2) changes nothing.
 - An interrupt removes the run's container. A run whose cursor has not moved for `STALL_LIMIT` seconds (900 unless
   given; a range that crosses a change of ledger version converts for minutes) is stopped, and `run.sh` ends with
   status 1.

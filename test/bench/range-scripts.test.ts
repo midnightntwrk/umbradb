@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,9 +19,9 @@ import { POSTGRES_IMAGE } from "../postgres-image.js";
  * - negative controls: `compare.mjs` shows where two runs differ, and `tables.sh` marks the tables in which two small
  *   databases differ; `tables.sh` and `equal.sh` fail, and never count a difference of 0, when a read fails.
  *
- * `run.sh` past its arguments, `equal.sh` past its failures, `contents-hash.sh`, `roundtrip.sh` and `preflight.sh`
- * need a build, a node or a synced database and are not run here; `tables.sh` runs on a PostgreSQL container of this
- * file's own.
+ * `tables.sh` runs on a PostgreSQL container of this file's own, and so does `run.sh`, with a stand-in for its run's
+ * container (no build and no node: the stand-in answers `/status` as a test says). `equal.sh` past its failures,
+ * `contents-hash.sh`, `roundtrip.sh` and `preflight.sh` need a build, a node or a synced database and are not run here.
  */
 
 const SCRIPTS = fileURLToPath(new URL("../../bench/range/", import.meta.url));
@@ -207,10 +207,10 @@ describe("the range bench's scripts hold nothing of one machine", () => {
 });
 
 describe("run.sh removes and drops only what a run made, and checks before it does", () => {
-  // A machine's folder that holds a build, the password file at its default place and a run folder of run.sh's.
+  // A machine's folder that holds a build, the password file at its default place and a run folder of run.sh's: its
+  // marker names its label and its folder, every link resolved.
   let home = "";
   let build = "";
-  const RUN_PACKAGE = '{"type":"module","private":true}\n';
   beforeAll(() => {
     home = mkdtempSync(join(tmpdir(), "umbradb-bench-range-guard-"));
     build = join(home, "build");
@@ -218,7 +218,8 @@ describe("run.sh removes and drops only what a run made, and checks before it do
     writeFileSync(join(build, "dist", "cli", "main.js"), "");
     writeFileSync(join(home, "pg-password"), "not a password\n", { mode: 0o600 });
     mkdirSync(join(home, "old-run"));
-    writeFileSync(join(home, "old-run", "package.json"), RUN_PACKAGE);
+    writeFileSync(join(home, "old-run", ".bench-run"), `a run folder of the range bench, bench/range/run.sh\nlabel old-run\nfolder ${realpathSync(join(home, "old-run"))}\n`);
+    writeFileSync(join(home, "old-run", "package.json"), '{"type":"module","private":true}\n');
     writeFileSync(join(home, "old-run", "result.json"), "{}\n");
   });
   afterAll(() => rmSync(home, { recursive: true, force: true }));
@@ -229,7 +230,7 @@ describe("run.sh removes and drops only what a run made, and checks before it do
   const untouched = (): void => {
     expect(readdirSync(home).sort()).toEqual(["build", "old-run", "pg-password"]);
     expect(readFileSync(join(home, "pg-password"), "utf8")).toBe("not a password\n");
-    expect(readdirSync(join(home, "old-run")).sort()).toEqual(["package.json", "result.json"]);
+    expect(readdirSync(join(home, "old-run")).sort()).toEqual([".bench-run", "package.json", "result.json"]);
     expect(readFileSync(join(build, "dist", "cli", "main.js"), "utf8")).toBe("");
   };
 
@@ -691,7 +692,7 @@ describe("the scripts that read a run folder", () => {
   });
 });
 
-describe("tables.sh on small databases", () => {
+describe("on small databases in a PostgreSQL container of this file's own", () => {
   let container: StartedPostgreSqlContainer | undefined;
 
   /** Runs `sql` in `database` of the container, the way the bench's scripts do, and gives what it printed. */
@@ -723,8 +724,113 @@ describe("tables.sh on small databases", () => {
     );
   };
 
+  /** A recorded revision of the `core` entry: its start, its version as `core_chain.config` holds it, its data fields. */
+  interface Revision {
+    readonly start: number;
+    readonly version: string;
+    readonly data: object;
+  }
+
+  /** A template run.sh can clone: the tables of `core_chain.config` and `core_block_commit.blocks` it reads. */
+  const template = (name: string, revisions: readonly Revision[], cursor = 100): void => {
+    psql("postgres", `CREATE DATABASE ${name}`);
+    const rows = revisions.map(({ start, version, data }) => `('core', ${start}, '${version}', '${JSON.stringify(data)}', '{}')`);
+    psql(
+      name,
+      `CREATE SCHEMA core_chain; CREATE SCHEMA core_block_commit;
+       CREATE TABLE core_chain.config (entry_id text NOT NULL, start bigint NOT NULL, stop bigint, version text NOT NULL, data jsonb, data_hash bytea, provides text[] NOT NULL, PRIMARY KEY (entry_id, start));
+       CREATE TABLE core_block_commit.blocks (height bigint PRIMARY KEY);
+       INSERT INTO core_chain.config (entry_id, start, version, data, provides) VALUES ${rows.join(", ")};
+       INSERT INTO core_block_commit.blocks VALUES (${cursor});`,
+    );
+  };
+
+  /** A sample of `/status` as the process answers it. */
+  const sample = (state: string, cursor: number, reason: unknown = null): object => ({ state, cursor: String(cursor), reason, modules: [] });
+
+  /**
+   * A machine for run.sh: a folder with a build, the password file at its default place, and a stand-in for the run's
+   * container first in PATH, as `docker` and `curl`. A docker command that names no run container goes to docker, so
+   * the database container, its databases and run.sh's statements are real; no run is made. The run's container
+   * answers `/status` with the samples `play` gives, one per request; once they are served it keeps the last answer
+   * until it is stopped (`stays`), or it ends at once (`dies`). Stopped or ended, it exited with `exit`. Every docker
+   * command is logged in `calls.log`; the env file a command names is never read.
+   */
+  const machine = () => {
+    const home = mkdtempSync(join(tmpdir(), "umbradb-bench-range-machine-"));
+    const bin = join(home, ".stand-in");
+    const docker = spawnSync("bash", ["-c", "command -v docker"], { encoding: "utf8" }).stdout.trim();
+    mkdirSync(join(home, "build", "dist", "cli"), { recursive: true });
+    writeFileSync(join(home, "build", "dist", "cli", "main.js"), "");
+    writeFileSync(join(home, "pg-password"), "not a password\n", { mode: 0o600 });
+    mkdirSync(bin);
+    writeFileSync(
+      join(bin, "docker"),
+      `#!/bin/bash
+S="${bin}"
+printf '%s\\n' "$*" >> "$S/calls.log"
+case " $* " in *" umbradb-bench-run-"*) ;; *) exec "${docker}" "$@";; esac
+served="$(cat "$S/served" 2>/dev/null || echo 0)"
+if [ "$(cat "$S/end")" = dies ] && [ "$served" -ge "$(wc -l < "$S/status.jsonl" | tr -d ' ')" ]; then rm -f "$S/running"; fi
+case "$1" in
+  run) touch "$S/running" "$S/created"; echo stand-in;;
+  port) [ -f "$S/running" ] && echo 127.0.0.1:1;;
+  inspect)
+    [ -f "$S/created" ] || { echo "Error: No such object" >&2; exit 1; }
+    case "$3" in
+      *Running*) if [ -f "$S/running" ]; then echo true; else echo false; fi;;
+      *) if [ -f "$S/running" ]; then echo '{"Status":"running","Running":true,"ExitCode":0,"OOMKilled":false,"Error":""}'; else printf '{"Status":"exited","Running":false,"ExitCode":%s,"OOMKilled":false,"Error":""}\\n' "$(cat "$S/exit")"; fi;;
+    esac;;
+  stop) rm -f "$S/running";;
+  logs) [ -f "$S/created" ] && cat "$S/log";;
+  rm) rm -f "$S/running" "$S/created";;
+  *) echo "stand-in docker: not answered: $*" >&2; exit 1;;
+esac
+`,
+      { mode: 0o755 },
+    );
+    writeFileSync(
+      join(bin, "curl"),
+      `#!/bin/bash
+S="${bin}"
+[ -f "$S/running" ] || exit 7
+n="$(cat "$S/served" 2>/dev/null || echo 0)"
+if [ "$n" -lt "$(wc -l < "$S/status.jsonl" | tr -d ' ')" ]; then n=$((n + 1)); echo "$n" > "$S/served"; fi
+[ "$n" -gt 0 ] && sed -n "\${n}p" "$S/status.jsonl"
+exit 0
+`,
+      { mode: 0o755 },
+    );
+    const env = {
+      BENCH_DIR: home,
+      BUILD: join(home, "build"),
+      UMBRADB_LOCAL_NODE: "ws://node.invalid:9944",
+      TEMPLATE: "range_template",
+      BENCH_PG_CONTAINER: (container as StartedPostgreSqlContainer).getId(),
+      BENCH_NETWORK: "bridge",
+      // A run whose stand-in never ends is stopped by run.sh itself, so no test can wait for one.
+      STALL_LIMIT: "10",
+      PATH: `${bin}:${process.env.PATH ?? ""}`,
+    };
+    return {
+      home,
+      env,
+      /** Sets what the next run's container does, and forgets the last one's calls. */
+      play: (status: readonly object[], end: "stays" | "dies" = "stays", exit = 0, log = "admin endpoints listening\n"): void => {
+        writeFileSync(join(bin, "status.jsonl"), status.map((line) => `${JSON.stringify(line)}\n`).join(""));
+        writeFileSync(join(bin, "end"), end);
+        writeFileSync(join(bin, "exit"), String(exit));
+        writeFileSync(join(bin, "log"), log);
+        for (const file of ["served", "calls.log", "running", "created"]) rmSync(join(bin, file), { force: true });
+      },
+      calls: (): string => readFileSync(join(bin, "calls.log"), "utf8"),
+      done: (): void => rmSync(home, { recursive: true, force: true }),
+    };
+  };
+
   beforeAll(async () => {
-    container = await startContainer(new PostgreSqlContainer(POSTGRES_IMAGE).withUsername("postgres"));
+    // pg_stat_statements loaded, as in the bench's own server: run.sh resets it before a run.
+    container = await startContainer(new PostgreSqlContainer(POSTGRES_IMAGE).withUsername("postgres").withCommand(["postgres", "-c", "shared_preload_libraries=pg_stat_statements"]));
     // The same rows, inserted in another order and with a note only this database has, in a schema that is not read.
     database("same-a", "");
     database("same-b", "INSERT INTO other.notes VALUES ('only here'); UPDATE core_demo.blocks SET hash = hash;");
@@ -733,6 +839,8 @@ describe("tables.sh on small databases", () => {
     // A database with no table of a core's or a module's schema: a run's database never is one.
     psql("postgres", "CREATE DATABASE bench_empty");
     psql("bench_empty", "CREATE SCHEMA other; CREATE TABLE other.notes (note text);");
+    // The template the runs of a stand-in container clone: one core revision from height 0, its cursor at 100.
+    template("range_template", [{ start: 0, version: '{"umbradb":"0.0.0","ledgers":[]}', data: { network: "preprod", sweep: "on" } }]);
   }, 300_000);
   afterAll(async () => {
     await container?.stop();
@@ -820,6 +928,59 @@ describe("tables.sh on small databases", () => {
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
+  });
+
+  describe("run.sh, with a stand-in for the run's container", () => {
+    /** Whether the server holds a database of that name. */
+    const exists = (name: string): boolean => psql("postgres", `SELECT count(*) FROM pg_database WHERE datname = '${name}'`) === "1\n";
+    const drop = (...names: string[]): void => {
+      for (const name of names) psql("postgres", `DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+    };
+
+    it("negative control: a folder of a package.json of a general form and other files is not a run's, and is left whole", () => {
+      const host = machine();
+      try {
+        // A scratch project of ES modules whose package.json is, word for word, the one run.sh writes in a run's folder.
+        mkdirSync(join(host.home, "example", "src"), { recursive: true });
+        writeFileSync(join(host.home, "example", "package.json"), '{"type":"module","private":true}\n');
+        writeFileSync(join(host.home, "example", "src", "notes.mjs"), "export const kept = true;\n");
+        host.play([], "dies");
+        const result = run("run.sh", ["example", "200"], host.env);
+        expect(readdirSync(join(host.home, "example")).sort(), result.stderr).toEqual(["package.json", "src"]);
+        expect(readFileSync(join(host.home, "example", "src", "notes.mjs"), "utf8")).toBe("export const kept = true;\n");
+        expect(result.code, result.stderr).toBe(2);
+        expect(result.stderr).toContain("is not a run's folder");
+        expect(exists("bench_example")).toBe(false);
+      } finally {
+        host.done();
+        drop("bench_example");
+      }
+    });
+
+    it("a run's folder is known by its marker, which names its folder and label: a folder run.sh made is used again, a copy of it under another label is not", () => {
+      const host = machine();
+      try {
+        host.play([sample("syncing", 100), sample("stopped", 200)]);
+        expect(run("run.sh", ["first", "200"], host.env).code).toBe(0);
+        expect(readdirSync(join(host.home, "first"))).toContain(".bench-run");
+        // The same label again: the folder is emptied and the run made again.
+        writeFileSync(join(host.home, "first", "left-over"), "");
+        host.play([sample("syncing", 100), sample("stopped", 200)]);
+        expect(run("run.sh", ["first", "200"], host.env).code).toBe(0);
+        expect(readdirSync(join(host.home, "first"))).not.toContain("left-over");
+        writeFileSync(join(host.home, "first", "left-over-of-first"), "");
+        // A copy of that folder under another label holds a marker that names the other: not this label's.
+        cpSync(join(host.home, "first"), join(host.home, "second"), { recursive: true, verbatimSymlinks: true });
+        const copied = run("run.sh", ["second", "200"], host.env);
+        expect(readdirSync(join(host.home, "second")), copied.stderr).toContain("left-over-of-first");
+        expect(copied.code, copied.stderr).toBe(2);
+        expect(copied.stderr).toContain("is not a run's folder");
+        expect(exists("bench_second")).toBe(false);
+      } finally {
+        host.done();
+        drop("bench_first", "bench_second");
+      }
+    });
   });
 
   it("refuses without a label", () => {

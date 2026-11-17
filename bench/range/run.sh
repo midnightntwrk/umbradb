@@ -25,9 +25,10 @@
 # umbradb-bench-run-<label>. Touches only the bench's own Docker objects.
 #
 # What it removes and drops is a run's own, checked before anything is changed: the label's folder only if it is
-# empty or an earlier run's (its package.json, written below), never the password file's; the label's database only
-# if an earlier run.sh made it (its comment, written below), never a template; and only once the container, the
-# network, the password file and the template are there. Exit status 2: refused, nothing changed.
+# empty or an earlier run's of this label in this place (its marker, .bench-run, written below), never the password
+# file's; the label's database only if an earlier run.sh made it (its comment, written below), never a template; and
+# only once the container, the network, the password file and the template are there. Exit status 2: refused, nothing
+# changed.
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 if [ $# -lt 2 ]; then echo "usage: run.sh <label> <stop-height> [KEY=VALUE ...]" >&2; exit 2; fi
@@ -45,6 +46,10 @@ OUT="$BENCH_DIR/$LABEL"
 RUN="$(run_container_of "$LABEL")"
 PACKAGE='{"type":"module","private":true}'
 MARK="a run of the range bench, bench/range/run.sh"
+# The marker of a run's folder: what run.sh writes in it, naming the label and the folder with every link resolved.
+# Nothing else makes a folder a run's, a package.json least of all: any project of ES modules has that one.
+MARKER=".bench-run"
+marker_of() { printf 'a run folder of the range bench, bench/range/run.sh\nlabel %s\nfolder %s\n' "$LABEL" "$(cd -P "$1" && pwd -P)"; }
 STALL_LIMIT="${STALL_LIMIT:-900}"
 refuse() { echo "run.sh: $*; nothing was changed" >&2; exit 2; }
 
@@ -53,8 +58,13 @@ case "$TEMPLATE" in "$BENCH_DB_PREFIX"*) refuse "the template $TEMPLATE begins w
 [ "${#DB}" -le 63 ] || refuse "the database name $DB is longer than the 63 bytes PostgreSQL keeps of a name"
 case "$STALL_LIMIT" in ""|*[!0123456789]*) refuse "STALL_LIMIT is a number of seconds: $STALL_LIMIT";; esac
 case "$BENCH_PG_PASSWORD_FILE" in "$OUT"|"$OUT"/*) refuse "the label $LABEL names the password file or its folder ($BENCH_PG_PASSWORD_FILE)";; esac
-# A folder run.sh may empty: none, an empty one, or one an earlier run made.
-run_folder() { if [ -L "$1" ]; then return 1; elif [ ! -e "$1" ]; then return 0; fi; [ -d "$1" ] && { [ -z "$(ls -A "$1")" ] || [ "$(cat "$1/package.json" 2>/dev/null)" = "$PACKAGE" ]; }; }
+# A folder run.sh may empty: none, an empty one, or one an earlier run of this label made in this place (its marker
+# says so). A link is none of them, nor is a marker that is a link.
+run_folder() {
+  if [ -L "$1" ]; then return 1; elif [ ! -e "$1" ]; then return 0; fi
+  [ -d "$1" ] || return 1
+  [ -z "$(ls -A "$1")" ] || { [ -f "$1/$MARKER" ] && [ ! -L "$1/$MARKER" ] && [ "$(cat "$1/$MARKER")" = "$(marker_of "$1")" ]; }
+}
 run_folder "$OUT" || refuse "$OUT is not a run's folder: move it, or choose another label"
 command -v curl >/dev/null && command -v node >/dev/null || refuse "curl and node are needed on this machine"
 [ -r "$BENCH_PG_PASSWORD_FILE" ] && [ -s "$BENCH_PG_PASSWORD_FILE" ] || refuse "no password in $BENCH_PG_PASSWORD_FILE (BENCH_PG_PASSWORD_FILE)"
@@ -69,7 +79,9 @@ case "$EXISTING" in
 esac
 
 docker rm -f "$RUN" >/dev/null 2>&1 || true
-rm -rf "$OUT"; mkdir -p "$OUT/node_modules"
+rm -rf "$OUT"; mkdir "$OUT"
+marker_of "$OUT" > "$OUT/$MARKER"
+mkdir "$OUT/node_modules"
 ln -s "$BUILD" "$OUT/node_modules/umbradb"
 echo "$PACKAGE" > "$OUT/package.json"
 bench_psql -c "DROP DATABASE IF EXISTS $DB WITH (FORCE)" -c "CREATE DATABASE $DB TEMPLATE $TEMPLATE" -c "COMMENT ON DATABASE $DB IS '$MARK'"
