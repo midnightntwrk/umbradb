@@ -274,6 +274,35 @@ describe("the block trace, started", () => {
     expect(other.blockLines()[0]?.sh).not.toBe(chain[2]);
   });
 
+  it("adds a height's step outputs to the chain when the height ends: a height dropped and made again chains as a height made once", () => {
+    const values = [["1", ["aa"]], ["2", ["bb"]], ["3", ["cc"]]] as const;
+    /** Each line's sh for three heights, the second dropped `drops` times before it ends, then ended with `second`. */
+    const chained = (drops: number, second: readonly unknown[] = values[1]): unknown[] => {
+      const memory = memorySink();
+      startTrace(memory.sink);
+      traceChain(values[0]);
+      traceEndBlock(1n);
+      for (let drop = 0; drop < drops; drop++) {
+        traceChain(values[1]);
+        traceDropBlock();
+      }
+      traceChain(second);
+      traceEndBlock(2n);
+      traceChain(values[2]);
+      traceEndBlock(3n);
+      stopTrace();
+      return memory.blockLines().map((line) => line.sh);
+    };
+    const once = chained(0);
+    expect(chained(1)).toEqual(once);
+    expect(chained(3)).toEqual(once);
+    // Negative control: a height made again with another step's outputs chains elsewhere, from that height on.
+    const other = chained(1, ["2", ["dd"]]);
+    expect(other[0]).toBe(once[0]);
+    expect(other[1]).not.toBe(once[1]);
+    expect(other[2]).not.toBe(once[2]);
+  });
+
   it("starts each trace's chain and totals anew", () => {
     const first = memorySink();
     startTrace(first.sink);

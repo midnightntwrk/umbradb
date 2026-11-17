@@ -12,7 +12,8 @@
  *   whatever the height's code added in between with {@link traceAdd} (a duration in ms, summed), {@link traceMark} (a
  *   value) and {@link tracePush} (an item of a list);
  * - `sh`, the chain of step outputs ({@link traceChain}): a SHA-256 over what every height so far gave, 16 hex digits
- *   of it. Two runs of the same heights whose last `sh` are equal computed the same thing at every height;
+ *   of it, a height's outputs joining it when the height ends and dropped with a height that does not. Two runs of the
+ *   same heights whose last `sh` are equal computed the same thing at every height;
  * - each statement text's count and client time, from send to answer or failure ({@link traceStatement}): the first
  *   {@link STATEMENT_TEXTS} texts by name, the statements of any other text together under {@link OTHER_STATEMENTS};
  * - the ledger worker as this thread sees it, added to the height being processed when a message of the worker is
@@ -69,7 +70,10 @@ interface Active {
   readonly statements: Map<string, StatementTotals>;
   /** The statements of the texts not in {@link Active.statements}: those after the first {@link STATEMENT_TEXTS}. */
   readonly other: StatementTotals;
-  readonly chain: Hash;
+  /** The chain of step outputs of the heights ended so far. */
+  chain: Hash;
+  /** The chain with the current height's step outputs, which replaces it when the height ends; null before any. */
+  pending: Hash | null;
   block: Record<string, unknown>;
   lines: string[];
   worker: string[];
@@ -106,6 +110,7 @@ export function startTrace(sink: TraceSink, options: TraceOptions = {}): void {
     statements: new Map(),
     other: { n: 0, ms: 0, max: 0 },
     chain: createHash("sha256"),
+    pending: null,
     block: {},
     lines: [],
     worker: [],
@@ -203,12 +208,15 @@ export function traceStatement(text: string, ms: number): void {
 
 /**
  * Extends the chain of step outputs with `value` (JSON) and sets the current height's `sh` to the chain so far. The
- * caller builds `value` only while {@link tracing}.
+ * caller builds `value` only while {@link tracing}. The height's values join the chain when it ends
+ * ({@link traceEndBlock}) and are dropped with it ({@link traceDropBlock}), so a height made again after a failure is
+ * chained once.
  */
 export function traceChain(value: unknown): void {
   if (active === null) return;
-  active.chain.update(JSON.stringify(value));
-  active.block.sh = active.chain.copy().digest("hex").slice(0, 16);
+  active.pending ??= active.chain.copy();
+  active.pending.update(JSON.stringify(value));
+  active.block.sh = active.pending.copy().digest("hex").slice(0, 16);
 }
 
 /**
@@ -225,13 +233,19 @@ export function traceEndBlock(height: bigint): void {
   for (const [key, value] of Object.entries(line)) if (typeof value === "number") line[key] = +value.toFixed(3);
   active.lines.push(JSON.stringify(line));
   active.block = {};
+  if (active.pending !== null) active.chain = active.pending;
+  active.pending = null;
   if (active.lines.length >= FLUSH_LINES) flush(active);
 }
 
-/** Drops what the current height recorded: it did not commit, and is recorded again when it runs again. */
+/**
+ * Drops what the current height recorded, its step outputs included: it did not commit, and is recorded again when it
+ * runs again.
+ */
 export function traceDropBlock(): void {
   if (active === null) return;
   active.block = {};
+  active.pending = null;
 }
 
 /** Keeps one line of the ledger worker (`./worker-trace.ts`'s entry for an applied block). */

@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import type { BlockWriteHandle } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
 import {
   FLUSH_LINES,
@@ -9,16 +10,41 @@ import {
   traceEndBlock,
   type TraceSink,
 } from "../../src/trace/trace.js";
+import { type DagRun, type DagRunOptions, runDag, runProblems } from "../backbone/refcount-process.js";
 import { BACKUP_BACKENDS, type BackupBackend } from "../backup/backup-fixtures.js";
+import { LAST } from "../ledger/fixtures/sweep-fixture.js";
 
 /**
- * The block trace when something fails or overflows (`src/trace/trace.ts`), on PostgreSQL 18, through the database API:
+ * The block trace when something fails or overflows (`src/trace/trace.ts`), on PostgreSQL 18. Through the database API:
  * - reads that differ by a comment, more texts than the statements' totals keep by name: the first texts by name, every
  *   other statement in one last entry, none lost;
  * - a statement that fails is counted with its time, and fails as it does untraced.
+ *
+ * Through the real process, on the extended DAG fixture of `./traced-process.test.ts` (its blocks carry no
+ * transaction):
+ * - a height whose block transaction fails after its reclamation step, and which the process makes again, adds its
+ *   step to the chain of step outputs once: every height's `sh` is a clean run's (negative control: a run whose step
+ *   differs from one height on).
  */
 
 const postgres = BACKUP_BACKENDS.find((backend) => backend.kind === "postgres") as BackupBackend;
+
+/** Every height of the fixture, once each, in order. */
+const EVERY_HEIGHT = Array.from({ length: LAST + 1 }, (_, h) => h);
+
+/** A traced run of the extended DAG on a new database, with `options`: the run, its lines and its database. */
+async function tracedRun(options: DagRunOptions = {}) {
+  const trace = memorySink();
+  startTrace(trace.sink);
+  const db = await postgres.database();
+  let run: DagRun;
+  try {
+    run = await runDag(db, { dag: "extended", ...options });
+  } finally {
+    stopTrace();
+  }
+  return { run, lines: trace.blocks(), db };
+}
 
 /** What a promise rejects with, or "resolved". */
 const outcome = (running: Promise<unknown>): Promise<unknown> =>
@@ -47,6 +73,10 @@ describe("the block trace when something fails or overflows, on PostgreSQL", () 
   beforeAll(() => postgres.start(), 180_000);
   afterAll(() => postgres.stop(), 60_000);
   afterEach(() => stopTrace());
+
+  /** The clean traced run, made once for the tests that compare with it. */
+  let clean: ReturnType<typeof tracedRun> | undefined;
+  const cleanRun = () => (clean ??= tracedRun());
 
   it(`reads that differ by a comment, over ${STATEMENT_TEXTS} texts: the first texts by name, the others in one last entry, across a flush, none lost`, async () => {
     const db = await postgres.database();
@@ -110,4 +140,46 @@ describe("the block trace when something fails or overflows, on PostgreSQL", () 
     stopTrace();
     expect(second.statements().find((statement) => statement.q === passing)?.n).toBe(1);
   }, 60_000);
+
+  it("a height whose block transaction fails after its step, made again by the process, adds that step to the chain once: every height's sh is a clean run's", async () => {
+    const { run: cleanDag, lines: cleanLines } = await cleanRun();
+    expect(cleanDag.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
+    expect(cleanLines.map((line) => line.h)).toEqual(EVERY_HEIGHT);
+    // A height whose step deletes nodes, and the next such height above it.
+    const deleting = [...cleanDag.evicted].filter(([, keys]) => keys.length > 0).map(([height]) => height);
+    const failed = deleting.find((height) => height >= 10n) as bigint;
+    const differs = deleting.find((height) => height > failed) as bigint;
+    expect(failed).toBeDefined();
+    expect(differs).toBeDefined();
+
+    // The step's first write at that height fails once, as a lost connection does: the process rolls the block back
+    // and makes it again from on-compute, which computes and chains the same step again.
+    let faults = 0;
+    const failOnce = (w: Pick<BlockWriteHandle, "execute">, height: bigint): Pick<BlockWriteHandle, "execute"> =>
+      height !== failed || faults > 0
+        ? w
+        : {
+            execute: async () => {
+              faults += 1;
+              throw new UmbraError("connection-lost", "the writer's connection was lost (the test's fault)");
+            },
+          };
+    const retried = await tracedRun({ core: { refcountWriter: failOnce }, settings: { backoffCeilingMs: 20 } });
+    expect(faults).toBe(1);
+    expect(retried.run.lines.filter((line) => line.includes("retries in"))).toHaveLength(1);
+    expect(retried.run.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
+    expect(runProblems(retried.run, "extended")).toEqual([]);
+    // One line per committed height: the failed run of the height has none.
+    expect(retried.lines.map((line) => line.h)).toEqual(EVERY_HEIGHT);
+    const chainOf = (lines: readonly Record<string, unknown>[]) => lines.map((line) => [line.h, line.sh ?? null]);
+    expect(chainOf(retried.lines)).toEqual(chainOf(cleanLines));
+
+    // Negative control: a run whose step differs from one height on (it deletes nothing there) has the clean chain
+    // below that height and another one from it.
+    const other = await tracedRun({ revisions: [{ start: differs, settings: { sweep: "off" } }] });
+    expect(other.run.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
+    const below = (lines: readonly Record<string, unknown>[]) => chainOf(lines.filter((line) => BigInt(line.h as number) < differs));
+    expect(below(other.lines)).toEqual(below(cleanLines));
+    expect(other.lines.find((line) => line.h === Number(differs))?.sh).not.toBe(cleanLines.find((line) => line.h === Number(differs))?.sh);
+  }, 600_000);
 });
