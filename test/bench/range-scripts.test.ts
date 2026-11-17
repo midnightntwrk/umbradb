@@ -196,6 +196,14 @@ describe("the range bench's scripts hold nothing of one machine", () => {
     expect(result.code).not.toBe(0);
     expect(result.stderr).toContain("set UMBRADB_LOCAL_NODE");
   });
+
+  it("txshare.mjs refuses a height that is not a whole number, before it asks the node, in one line", () => {
+    for (const height of ["12x", "-5", "1.5"]) {
+      const result = run("txshare.mjs", [height], { UMBRADB_LOCAL_NODE: "ws://node.invalid:9944" });
+      expect(result.code, height).toBe(1);
+      expect(result.stderr.trimEnd(), height).toBe(`txshare.mjs: a height is a whole number: ${height}`);
+    }
+  });
 });
 
 describe("run.sh removes and drops only what a run made, and checks before it does", () => {

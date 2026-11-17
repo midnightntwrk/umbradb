@@ -135,10 +135,12 @@ TEMPLATE=<template> bench/range/run.sh my-label <stop-height>
   `CORE_EXTRA=',"prefetchWindow":128' run.sh …`. A setting under test is given this way to one run and not to the
   other.
 - `BUILD=<another checkout>` runs that checkout's build. Two builds are compared from two checkouts, each built.
-- `NODE_FLAGS="--cpu-prof --cpu-prof-dir=$BENCH_DIR/my-label"` writes CPU profiles, which `profile.mjs` reads.
+- `NODE_FLAGS="--cpu-prof --cpu-prof-dir=$BENCH_DIR/my-label"` writes CPU profiles, which `profile.mjs` reads. The
+  flags are given to the run as written, so the folder is an absolute path (`BENCH_DIR` absolute).
 - A label is lowercase letters, digits and `-`.
 - Do not edit `run.sh` while a run is in progress: bash reads it as it executes.
-- One run at a time on a machine: two runs share the database server and the node.
+- One run at a time on a machine: two runs share the database server and the node. A run resets the server's
+  `pg_stat_statements` at its start, so the bench's server serves nothing else.
 - Drop a run's database once its results are recorded:
   `docker exec umbradb-bench-pg psql -U postgres -c "DROP DATABASE bench_my_label WITH (FORCE)"`.
 
@@ -195,7 +197,9 @@ node bench/range/compare.mjs $BENCH_DIR/base $BENCH_DIR/changed
 ```
 
 - **Compare builds by `own h/s`**, the speed without the waits for the node, between runs whose `wait` column is
-  near 0. `h/s` is what the clock saw, the node's answers included.
+  near 0. `h/s` is what the clock saw, the node's answers included. A block's wait for the node is its wait for the
+  block above the run's median one (`beginMs`) and its wait for the block's state root (`rootWaitMs`); the means leave
+  out a run's first height.
 - **Then by the stage the change is about** (`apply`, `reclaim`, `blk-tx`, `cnt-wr`; `analyze.mjs`, `worker.mjs` and
   `worker-time.mjs` for more): a stage's mean over a few thousand blocks moves less with the machine than the whole
   block does. `reclaim` is the reclamation's whole time per block, its collect, its step and its eviction

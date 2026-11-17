@@ -1,5 +1,6 @@
 #!/bin/bash
-# Prints each run's contents hash (contents-hash.mjs), computed by BUILD's exported contentsHash; about 30 s each.
+# Prints each run's contents hash (contents-hash.mjs), computed by BUILD's exported contentsHash; it reads every row,
+# so it takes seconds near genesis and minutes on a database of tens of gigabytes.
 #   contents-hash.sh <label> <label> ...
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
