@@ -1,5 +1,8 @@
 import { spawnSync } from "node:child_process";
+import { once } from "node:events";
 import { createHash } from "node:crypto";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +15,7 @@ import { coreEntry } from "../../src/config/entries.js";
 import { versionText } from "../../src/config/history.js";
 import { plainData } from "../../src/config/plain-data.js";
 import { entriesAtCursor, validateConfig } from "../../src/config/validate.js";
+import { spawnChild } from "../child-processes.js";
 import { startContainer } from "../containers.js";
 import { POSTGRES_IMAGE } from "../postgres-image.js";
 
@@ -215,6 +219,72 @@ describe("the range bench's scripts hold nothing of one machine", () => {
       expect(result.code, height).toBe(1);
       expect(result.stderr.trimEnd(), height).toBe(`txshare.mjs: a height is a whole number: ${height}`);
     }
+  });
+});
+
+describe("txshare.mjs", () => {
+  /**
+   * txshare.mjs against a node of this process whose best block is 1000 and whose block at height h holds `body(h)`'s
+   * extrinsics, each [version byte, pallet, call, length of its arguments]: its window of 400 blocks below the head.
+   */
+  const share = async (body: (height: number) => readonly (readonly [number, number, number, number])[]): Promise<Ran> => {
+    const extrinsic = ([version, pallet, call, length]: readonly [number, number, number, number]): string => {
+      const bytes = Buffer.concat([Buffer.from([version, pallet, call]), Buffer.alloc(length, 7)]);
+      // A SCALE compact length: one byte below 64, two below 16,384.
+      const prefix = bytes.length < 64 ? Buffer.from([bytes.length << 2]) : Buffer.from([((bytes.length << 2) | 1) & 0xff, bytes.length >> 6]);
+      return `0x${Buffer.concat([prefix, bytes]).toString("hex")}`;
+    };
+    const answer = (method: string, params: unknown[]): unknown => {
+      if (method === "chain_getHeader") return { number: `0x${(1000).toString(16)}` };
+      if (method === "chain_getFinalizedHead") return "0xfinal";
+      if (method === "system_chain") return "Test";
+      if (method === "chain_getBlockHash") return `0xheight${String(params[0])}`;
+      if (method === "chain_getBlock") return { block: { extrinsics: body(Number(String(params[0]).slice(8))).map(extrinsic) } };
+      throw new Error(`not answered: ${method}`);
+    };
+    const server = createServer((request, response) => {
+      let text = "";
+      request.on("data", (chunk) => (text += chunk)).on("end", () => {
+        const { id, method, params } = JSON.parse(text) as { id: number; method: string; params: unknown[] };
+        response.setHeader("content-type", "application/json").end(JSON.stringify({ jsonrpc: "2.0", id, result: answer(method, params) }));
+      });
+    });
+    server.listen(0);
+    await once(server, "listening");
+    try {
+      const child = spawnChild(process.execPath, [join(SCRIPTS, "txshare.mjs")], { env: { ...process.env, UMBRADB_LOCAL_NODE: `ws://localhost:${(server.address() as AddressInfo).port}` } });
+      let stdout = "";
+      let stderr = "";
+      child.stdout?.on("data", (chunk) => (stdout += chunk));
+      child.stderr?.on("data", (chunk) => (stderr += chunk));
+      const [code] = (await once(child, "close")) as [number | null];
+      return { code, stdout, stderr };
+    } finally {
+      server.close();
+    }
+  };
+  // An inherent (a bare call of pallet 3, as the timestamp's), another that only some blocks have (pallet 7), and a
+  // transaction (an unsigned call of pallet 5, with a payload).
+  const INHERENT = [0x05, 3, 0, 8] as const;
+  const OTHER_INHERENT = [0x05, 7, 1, 8] as const;
+  const TRANSACTION = [0x04, 5, 0, 300] as const;
+
+  it("a range where every block has a transaction: the counts cannot tell it from one where none has, and it says so", async () => {
+    const result = await share(() => [INHERENT, TRANSACTION]);
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stdout).not.toMatch(/with transactions|transactions per block/);
+    expect(result.stdout).toContain("from 600: 400 consecutive blocks; extrinsics per block: 2 in 400");
+    expect(result.stdout).toContain("every block has 2 extrinsics: the counts cannot tell whether none or every one carries a transaction");
+    expect(result.stdout).toContain("by kind: v5 3.0 in 100% of blocks (1.00 per block); v4 5.0 in 100% (1.00)");
+  });
+
+  it("varying inherent counts are counted above the fewest, which is said to be a proxy, and shown by kind", async () => {
+    const result = await share((height) => (height % 2 === 0 ? [INHERENT, OTHER_INHERENT] : [INHERENT]));
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stdout).not.toMatch(/with transactions|transactions per block/);
+    expect(result.stdout).toContain("extrinsics per block: 1 in 200, 2 in 200");
+    expect(result.stdout).toContain("above the fewest (1): 50% of blocks, 0.50 per block, 0% after another such block");
+    expect(result.stdout).toContain("by kind: v5 3.0 in 100% of blocks (1.00 per block); v5 7.1 in 50% (0.50)");
   });
 });
 

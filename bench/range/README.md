@@ -96,7 +96,13 @@ build that stores the same; for a build with other ledger packages see "A build 
 
 A block without transactions and a block with them cost very different amounts, so a speed is a speed on a range.
 `txshare.mjs [<height> ...]` asks the node for 400 consecutive blocks from each height, and from 20,000, 2,000 and
-400 below the head, and prints the share of blocks with transactions and the mean transactions per block:
+400 below the head, and prints for each window how many blocks have each count of extrinsics, the share and mean of
+the extrinsics above the window's fewest, and the extrinsics by kind (an unsigned call by its pallet's and call's
+indexes, `v4 5.0`) with the share of blocks that have each. It counts extrinsics, not transactions: the share above
+the fewest is a proxy, which counts an inherent that only some blocks have and cannot see a transaction in a window
+where every block has one (it then says that every block has the same count). The kinds tell them apart: an inherent
+is in every block, once, and a ledger transaction is an unsigned call of the Midnight pallet, its call 0. A run's
+trace counts transactions exactly: `analyze.mjs` prints the run's transaction share.
 
 ```bash
 UMBRADB_LOCAL_NODE=ws://<host>:9944 node bench/range/txshare.mjs <height> <height>
@@ -192,7 +198,7 @@ The `.mjs` readers share `lines.mjs` for this.
 | `tables.sh a b …` | for every table any of the runs has, each run's row count and a hash of its rows (`absent` where a run has no such table), the tables that differ from the first run's marked, and the number of differences: exit 0 if none, 1 if some; exit 2, with no count, if a database or a table could not be read |
 | `profile.mjs a` | self time by function, from a run made with `NODE_FLAGS="--cpu-prof --cpu-prof-dir=<run folder>"` |
 | `roundtrip.sh a` | what one statement costs from a run's container to the database, by kind of statement: the machine's floor under every statement of a block. The keys it asks for are sampled from the run's database and sent as the build sends them; each case's first answer is checked to hold them (their children, counts above 0) before anything is timed |
-| `txshare.mjs [<height> …]` | the share of blocks with transactions near heights of the chain, from the node |
+| `txshare.mjs [<height> …]` | near heights of the chain, from the node: extrinsics per block, the share of blocks with more than the fewest (a proxy for transactions) and the extrinsics by kind |
 
 `worker.mjs` and `worker-time.mjs` take `SKIP=<n>` (the lines left out as warm-up, 20 by default) and `FROM=<height>`
 and `TO=<height>`.
