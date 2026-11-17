@@ -870,10 +870,11 @@ export class FinalizedLoop {
       this.#check();
       return run.block;
     } catch (error) {
-      traceDropBlock();
       if (!committed) this.#unwatch(watch, false);
       const failure = this.#failure(height, error, committed);
       if (!committed && run !== undefined) this.#hold(run, failure);
+      // Held with its COMMIT's outcome unknown, the height keeps its trace line for the run that learns it (#settle).
+      if (!(this.#held?.uncertain === true && this.#held.run === run)) traceDropBlock();
       throw failure;
     }
   }
@@ -1040,6 +1041,8 @@ export class FinalizedLoop {
       throw this.#failure(run.height, error, false);
     }
     const outcome = this.commitOutcome(held, cursor);
+    // The height's trace line, kept through an uncertain COMMIT (#process): written if it committed, else dropped.
+    if (outcome !== "committed") traceDropBlock();
     if (outcome === "not-committed") {
       // The height again, above the cursor before it (which the cursor read is).
       this.#resume = held;
@@ -1064,8 +1067,10 @@ export class FinalizedLoop {
     observer?.committed?.(run.block);
     try {
       await this.#afterCommit(run);
+      traceEndBlock(run.block.height);
       this.#check();
     } catch (error) {
+      traceDropBlock();
       throw this.#failure(run.height, error, true);
     }
     return run.block;
