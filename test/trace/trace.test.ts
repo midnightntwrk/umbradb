@@ -7,7 +7,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fileTraceSink, TRACE_VARIABLE } from "../../src/trace/file-sink.js";
 import {
   FLUSH_LINES,
+  OTHER_STATEMENTS,
   STATEMENT_KEY_LENGTH,
+  STATEMENT_TEXTS,
   startTrace,
   stopTrace,
   traceAdd,
@@ -196,6 +198,59 @@ describe("the block trace, started", () => {
     const [first, second] = memory.blockLines();
     expect(first).toMatchObject({ sqlN: 4, sqlMs: 6.6, commitMs: 0.6 });
     expect(second).toMatchObject({ sqlN: 1, sqlMs: 0.4, commitMs: 0.4 });
+  });
+
+  it(`keeps the first ${STATEMENT_TEXTS} statement texts by name across flushes, and counts every statement of any other text in one last entry`, () => {
+    const written: string[] = [];
+    const sink: TraceSink = { blocks: () => undefined, statements: (json) => written.push(json), worker: () => undefined };
+    startTrace(sink);
+    // Reads that differ by a comment, a new text each: more than the bound before the first flush, as many again before
+    // each of two more; a COMMIT sent first and in every round.
+    const perFlush = STATEMENT_TEXTS + 500;
+    let sent = 0;
+    traceStatement("COMMIT", 1);
+    for (let flush = 0; flush < 3; flush++) {
+      for (let i = 0; i < perFlush; i++) traceStatement(`SELECT 1 /* ${sent++} */`, 0.5);
+      traceStatement("COMMIT", 1);
+      for (let height = 1; height <= FLUSH_LINES; height++) traceEndBlock(BigInt(flush * FLUSH_LINES + height));
+    }
+    stopTrace();
+    type Entry = { q: string; n: number; ms: number; max: number };
+    const files = written.map((json) => JSON.parse(json) as Entry[]);
+    expect(files).toHaveLength(4);
+    // Every file: the bound's texts by name, then the others' entry; no file larger than the first.
+    for (const [index, file] of files.entries()) {
+      expect(file).toHaveLength(STATEMENT_TEXTS + 1);
+      expect(file.at(-1)?.q).toBe(OTHER_STATEMENTS);
+      expect((written[index] as string).length).toBeLessThanOrEqual((written[0] as string).length + 64);
+    }
+    const last = files.at(-1) as Entry[];
+    // The texts kept are the first sent; a kept text goes on counting.
+    expect(last[0]).toEqual({ q: "COMMIT", n: 4, ms: 4, max: 1 });
+    expect(last[1]?.q).toBe("SELECT 1 /* 0 */");
+    expect(last.at(-2)?.q).toBe(`SELECT 1 /* ${STATEMENT_TEXTS - 2} */`);
+    const others = sent - (STATEMENT_TEXTS - 1);
+    expect(last.at(-1)).toEqual({ q: OTHER_STATEMENTS, n: others, ms: others * 0.5, max: 0.5 });
+    // No statement is lost: the entries count every one sent.
+    expect(last.reduce((sum, entry) => sum + entry.n, 0)).toBe(sent + 4);
+  });
+
+  it("counts a statement whose own text is the others' name in the others' entry, which is absent while it is empty", () => {
+    const memory = memorySink();
+    startTrace(memory.sink);
+    traceStatement("SELECT 1", 1);
+    // Started again: the first trace is stopped, and writes its totals.
+    startTrace(memory.sink);
+    traceStatement(OTHER_STATEMENTS, 2);
+    traceStatement("SELECT 1", 1);
+    stopTrace();
+    expect(memory.kept.statements.map((json) => JSON.parse(json) as unknown)).toEqual([
+      [{ q: "SELECT 1", n: 1, ms: 1, max: 1 }],
+      [
+        { q: "SELECT 1", n: 1, ms: 1, max: 1 },
+        { q: OTHER_STATEMENTS, n: 1, ms: 2, max: 2 },
+      ],
+    ]);
   });
 
   it("chains the step outputs: each height's sh is the SHA-256 over every value so far", () => {

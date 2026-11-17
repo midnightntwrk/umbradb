@@ -4,7 +4,8 @@
  * For `UMBRADB_TRACE=<file>`:
  * - `<file>`: one JSON line per committed height;
  * - `<file>.stmts.json`: each statement text's count `n`, client time `ms` and slowest call `max`, written again at
- *   every flush;
+ *   every flush; the first 1,024 texts by name, the others together in a last entry (`./trace.ts`'s
+ *   `STATEMENT_TEXTS`);
  * - `<file>.worker.jsonl`: one JSON line per block the ledger worker applied, with what its thread's time went to
  *   since the line before (`./worker-trace.ts`).
  *

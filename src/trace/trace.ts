@@ -13,7 +13,8 @@
  *   value) and {@link tracePush} (an item of a list);
  * - `sh`, the chain of step outputs ({@link traceChain}): a SHA-256 over what every height so far gave, 16 hex digits
  *   of it. Two runs of the same heights whose last `sh` are equal computed the same thing at every height;
- * - each statement text's count and client time, from send to answer ({@link traceStatement});
+ * - each statement text's count and client time, from send to answer ({@link traceStatement}): the first
+ *   {@link STATEMENT_TEXTS} texts by name, the statements of any other text together under {@link OTHER_STATEMENTS};
  * - the ledger worker as this thread sees it, added to the height being processed when a message of the worker is
  *   handled (`src/ledger/worker/host.ts`): each request type's round trips (`rt.<type>`, `rtN.<type>`), the answers'
  *   way back (`backMs`) and the node requests' times (`nodeNoticeMs`, `nodeReadMs`, `nodeReads`);
@@ -66,6 +67,8 @@ interface Active {
   readonly steps: boolean;
   readonly log: ((line: string) => void) | undefined;
   readonly statements: Map<string, StatementTotals>;
+  /** The statements of the texts not in {@link Active.statements}: those after the first {@link STATEMENT_TEXTS}. */
+  readonly other: StatementTotals;
   readonly chain: Hash;
   block: Record<string, unknown>;
   lines: string[];
@@ -78,6 +81,19 @@ export const FLUSH_LINES = 200;
 /** How much of a statement's text names it in the totals, its whitespace collapsed. */
 export const STATEMENT_KEY_LENGTH = 260;
 
+/**
+ * How many statement texts the totals keep by name: the first sent. With {@link STATEMENT_KEY_LENGTH} it bounds what
+ * they hold, whatever texts a client sends (reads that differ by a comment): at most 266,240 characters of text, and
+ * for texts in ASCII a file of at most about 0.3 MB at each flush. A sync of Preprod sends 120 to 230 texts.
+ */
+export const STATEMENT_TEXTS = 1_024;
+
+/**
+ * The name the totals give the statements of every text not kept by name ({@link STATEMENT_TEXTS}), in the last entry.
+ * A statement whose own text is this name is counted there too, so the name stands for nothing else.
+ */
+export const OTHER_STATEMENTS = "(other statement texts)";
+
 let active: Active | null = null;
 
 /** Starts the trace into `sink`; a trace already started is stopped first. */
@@ -88,6 +104,7 @@ export function startTrace(sink: TraceSink, options: TraceOptions = {}): void {
     steps: options.steps === true,
     log: options.log,
     statements: new Map(),
+    other: { n: 0, ms: 0, max: 0 },
     chain: createHash("sha256"),
     block: {},
     lines: [],
@@ -124,7 +141,9 @@ function flush(trace: Active): void {
   try {
     if (lines.length > 0) trace.sink.blocks(`${lines.join("\n")}\n`);
     if (worker.length > 0) trace.sink.worker(`${worker.join("\n")}\n`);
-    trace.sink.statements(JSON.stringify([...trace.statements].map(([q, totals]) => ({ q, ...totals }))));
+    const entries = [...trace.statements].map(([q, totals]) => ({ q, ...totals }));
+    if (trace.other.n > 0) entries.push({ q: OTHER_STATEMENTS, ...trace.other });
+    trace.sink.statements(JSON.stringify(entries));
   } catch (error) {
     if (active === trace) active = null;
     const reason = error instanceof Error ? error.message : String(error);
@@ -153,17 +172,29 @@ export function tracePush(key: string, item: unknown): void {
 }
 
 /**
- * One statement's client time, from send to answer: counted under its text and in the current height's `sqlN` and
- * `sqlMs`; a `COMMIT`'s time is also the height's `commitMs`.
+ * The totals the statements of the text `key` are counted in: its own, made while fewer than {@link STATEMENT_TEXTS}
+ * are kept, else the others'.
+ */
+function totalsOf(trace: Active, key: string): StatementTotals {
+  const kept = trace.statements.get(key);
+  if (kept !== undefined) return kept;
+  if (key === OTHER_STATEMENTS || trace.statements.size >= STATEMENT_TEXTS) return trace.other;
+  const totals = { n: 0, ms: 0, max: 0 };
+  trace.statements.set(key, totals);
+  return totals;
+}
+
+/**
+ * One statement's client time, from send to answer: counted under its text (see {@link STATEMENT_TEXTS}) and in the
+ * current height's `sqlN` and `sqlMs`; a `COMMIT`'s time is also the height's `commitMs`.
  */
 export function traceStatement(text: string, ms: number): void {
   if (active === null) return;
   const key = text.replace(/\s+/g, " ").slice(0, STATEMENT_KEY_LENGTH);
-  const totals = active.statements.get(key) ?? { n: 0, ms: 0, max: 0 };
+  const totals = totalsOf(active, key);
   totals.n += 1;
   totals.ms += ms;
   if (ms > totals.max) totals.max = ms;
-  active.statements.set(key, totals);
   traceAdd("sqlN", 1);
   traceAdd("sqlMs", ms);
   if (key === "COMMIT") traceMark("commitMs", ms);
