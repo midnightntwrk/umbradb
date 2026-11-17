@@ -335,25 +335,40 @@ class Session {
   private readonly preparedTexts = new Set<string>();
   /** The texts it prepared before a schema change: never prepared again on this session. */
   private readonly retiredTexts = new Set<string>();
+  /** Prepared texts without parameters a named execution of which was answered: the driver holds their statement. */
+  private readonly answeredTexts = new Set<string>();
+  /** Prepared texts without parameters whose first named execution is in flight. */
+  private readonly namingTexts = new Set<string>();
   private seenSchemaChanges = 0;
 
   /**
-   * Whether `text` runs as a named prepared statement: one prepared since the last schema change, or a new one while
-   * this session has prepared fewer than {@link PREPARED_TEXTS} in its life. The driver keeps each without limit for the
-   * session's life (it keys them by text, every parameter typed alike). A caller sending ever new texts, such as a
-   * private client's reads or a module's built SQL, so costs the server at most that many; the rest run as now,
-   * described first.
+   * Whether `text` runs as a named prepared statement (`"first"` for the execution that prepares a text without
+   * parameters): one prepared since the last schema change, or a new one while this session has prepared fewer than
+   * {@link PREPARED_TEXTS} in its life. The driver keeps each without limit for the session's life (it keys them by
+   * text, every parameter typed alike). A caller sending ever new texts, such as a private client's reads or a module's
+   * built SQL, so costs the server at most that many; the rest run as now, described first.
+   *
+   * A text without parameters is named by one execution at a time until one is answered. The driver learns a prepared
+   * statement only from the server's answer, and gives every execution sent before it a new name, which the server
+   * keeps for the session's life. So an execution sent while the text's first is unanswered (a caller sending several
+   * at once on one handle) runs unnamed, in its place in the order, as such a text ran before it was prepared. A text
+   * with parameters needs none of this: the driver describes it first and sends nothing behind it until it is answered.
    */
-  private prepares(text: string): boolean {
+  private prepares(text: string, parameterless: boolean): boolean | "first" {
     if (this.seenSchemaChanges !== this.schemaChanges.count) {
       this.seenSchemaChanges = this.schemaChanges.count;
       for (const known of this.preparedTexts) this.retiredTexts.add(known);
       this.preparedTexts.clear();
+      this.answeredTexts.clear();
     }
-    if (this.preparedTexts.has(text)) return true;
-    if (this.retiredTexts.has(text) || this.preparedTexts.size + this.retiredTexts.size >= this.preparedLimit) return false;
-    this.preparedTexts.add(text);
-    return true;
+    if (!this.preparedTexts.has(text)) {
+      if (this.retiredTexts.has(text) || this.preparedTexts.size + this.retiredTexts.size >= this.preparedLimit) return false;
+      this.preparedTexts.add(text);
+    }
+    if (!parameterless || this.answeredTexts.has(text)) return true;
+    if (this.namingTexts.has(text)) return false;
+    this.namingTexts.add(text);
+    return "first";
   }
 
   /** True until the connection is lost or ended. */
@@ -415,13 +430,17 @@ class Session {
         cause: "lost-earlier",
       });
     }
+    let first = false;
     try {
+      const prepare = !simple && (args.length > 0 || PLANNED.test(text)) && this.prepares(text, args.length === 0);
+      first = prepare === "first";
       // `simple` is a runtime option of `unsafe` the driver's types do not declare (`postgres` 3.4.9 `index.js`).
-      const prepare = !simple && (args.length > 0 || PLANNED.test(text)) && this.prepares(text);
-      const options = { simple, prepare } as unknown as postgres.UnsafeQueryOptions;
+      const options = { simple, prepare: prepare !== false } as unknown as postgres.UnsafeQueryOptions;
       const sent = performance.now();
       try {
-        return await this.sql.unsafe(text, args as string[], options).raw();
+        const result = await this.sql.unsafe(text, args as string[], options).raw();
+        if (first && this.preparedTexts.has(text)) this.answeredTexts.add(text);
+        return result;
       } finally {
         // Answered or failed (a timeout, a lost connection), the statement took this time of the session.
         traceStatement(text, performance.now() - sent);
@@ -431,6 +450,9 @@ class Session {
       const classified = classifyDriverError(error, this.role);
       if (classified.code === "connection-lost") this.state = "lost";
       throw classified;
+    } finally {
+      // Answered or failed: the next execution names it (the driver reuses its statement if the server parsed it).
+      if (first) this.namingTexts.delete(text);
     }
   }
 

@@ -82,6 +82,52 @@ describe("prepared statements on PostgreSQL (00033 F2)", () => {
     await db.close();
   });
 
+  it("prepares a text once on a session when many executions of it are sent at once, before the first is answered", async () => {
+    const { db } = await database();
+    const texts = [1, 2, 3].map((batch) => `SELECT height, label, ${batch} AS batch FROM t.rows ORDER BY height`);
+    const prepared = await db.transaction(async (tx) => {
+      for (const [index, text] of texts.entries()) {
+        const answers = await Promise.all(Array.from({ length: 100 }, () => tx.query(text)));
+        for (const rows of answers) expect(rows).toEqual([{ height: 1n, label: "one", batch: index + 1 }]);
+      }
+      // A text with parameters, the same way: the driver describes it first and sends nothing behind it meanwhile.
+      const answers = await Promise.all(Array.from({ length: 100 }, () => tx.query(READ_ROW, [1n])));
+      for (const rows of answers) expect(rows).toEqual([{ height: 1n, label: "one" }]);
+      return tx.query("SELECT statement FROM pg_prepared_statements");
+    });
+    const statements = prepared.map((row) => String(row.statement));
+    expect([...texts, READ_ROW].map((text) => statements.filter((statement) => statement === text).length)).toEqual([
+      1, 1, 1, 1,
+    ]);
+    expect(statements.length).toBeLessThanOrEqual(256);
+    await db.close();
+  });
+
+  it("keeps the bound of 256 on the server's prepared statements when executions of new texts are sent at once", async () => {
+    const { db } = await database();
+    const prepared = await db.read(async (read) => {
+      const texts = Array.from({ length: 300 }, (_, i) => `SELECT ${i} AS n`);
+      const answers = await Promise.all(texts.flatMap((text) => [read.query(text), read.query(text)]));
+      expect(answers.map((rows) => rows[0]?.n)).toEqual(texts.flatMap((_, i) => [i, i]));
+      return read.query("SELECT statement FROM pg_prepared_statements");
+    });
+    expect(prepared.length).toBeLessThanOrEqual(256);
+    expect(prepared.length).toBeGreaterThanOrEqual(200);
+    await db.close();
+  });
+
+  it("runs statements sent at once in the order they were sent, a text's first named execution among them", async () => {
+    const { db } = await database();
+    const count = "SELECT count(*)::int AS n FROM t.rows";
+    const add = "INSERT INTO t.rows SELECT max(height) + 1, 'added' FROM t.rows";
+    const counts = await db.transaction(async (tx) => {
+      const sent = [count, count, add, count, add, count, count].map((text) => tx.query(text));
+      return (await Promise.all(sent)).map((rows) => rows[0]?.n);
+    });
+    expect(counts).toEqual([1, 1, undefined, 2, undefined, 3, 3]);
+    await db.close();
+  });
+
   it("reuses a parameterless text after a column was added: no cached plan of another result type is met", async () => {
     const { db } = await database();
     const all = "SELECT * FROM t.rows ORDER BY height";
