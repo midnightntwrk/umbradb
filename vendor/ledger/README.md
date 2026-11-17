@@ -72,9 +72,9 @@ Its patches are v9's where they apply:
 - `0006-ledger-wasm-state-trees.patch` — the tree values, as v8's `0005-…` and v9's `0007-…` (below).
 
 v9's `0004-…` (the translation's timers) and `0005-…` (the conversion) do not apply: `midnight-node` 2.0.0-rc.4 carries
-no v8 → v9 translation, and the rc.3 package has no `convertFromV8`. The build takes about a minute and a half on this
-repository's arm64 Mac (77 s recording, 64 s rebuilding, both from a clean container); the package is 10 MB (its `.wasm`
-10.2 MB, without the translation and the v8 ledger the v9 package carries).
+no v8 → v9 translation, and the rc.3 package has no `convertFromV8`. The build takes about three minutes on this
+repository's arm64 Mac (175 s recording, 183 s rebuilding, both from a clean container); the package is 21 MB (its `.wasm`
+21.3 MB, without the translation and the v8 ledger the v9 package carries).
 
 ### v9 and v9-rc5: ledger 9.1.0.1, and ledger v9 as runtime 2.1.0 built it
 
@@ -107,7 +107,7 @@ exactly `node-2.1.101`'s: `midnight-ledger` 8.1.3, `midnight-storage` 2.0.5, `mi
 `StateValue` is generic over its value kind, and its tag names it: a state value's tagged serialization starts
 `midnight:impact-state-value[v2](fab-aligned-value[v1]):` in the `v9` package. The test fixtures' contract calls
 declare, for `v9`, the bytes they write and no deletion (`test/ledger/adapter-fixtures.ts` `fixtureGas`). The build
-takes about 80 s on an arm64 Mac.
+takes about four minutes on this repository's arm64 Mac (220 s recording, 238 s rebuilding).
 
 ## Rebuilding
 
