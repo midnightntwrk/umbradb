@@ -128,7 +128,11 @@ outputs); `v8/patches/0002-…` moves it to 0.2.108, the version ledger-9.1.0.0-
 six runs. The build follows
 upstream's own release recipe (`midnight-ledger` `bagel.nix`): `cargo build --profile wasm` for
 `wasm32-unknown-unknown`, `wasm-bindgen --target bundler --omit-default-module-path --weak-refs --reference-types`,
-`wasm-opt -Os --enable-reference-types`, the hand-written declarations assembled from the template. Paths inside the
+`wasm-opt -Os --enable-reference-types`, the hand-written declarations assembled from the template. It differs from
+that recipe in two settings, for speed: the `wasm` profile's `opt-level = "z"` is overridden to 3
+(`CARGO_PROFILE_WASM_OPT_LEVEL`), and blst's C code, which its build script compiles at `-O2`, is compiled at `-O3`
+with a high inline threshold (`CFLAGS_wasm32_unknown_unknown`), so the field multiplication is inlined into its
+fixed-size callers. Neither changes a source or a computed value; the `.wasm` about doubles. Paths inside the
 container are fixed, so the bytes do not depend on where the repository is checked out. Each host runs the image's
 native variant (the amd64 Rust toolchain cannot run under emulation on an arm64 Mac); CI rebuilds on amd64 and arm64
 runners and compares both with `SHA256SUMS` (`.github/workflows/vendored-ledger.yml`), and uploads a build that differs.
