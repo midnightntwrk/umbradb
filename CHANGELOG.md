@@ -266,7 +266,10 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   database, and `copyHits`, `copyMisses` and `copyEmptied` are new; the operator guide lists them.
 - **A contract's zswap state key is built only when the zswap tree changed.** The ledger worker keeps, per contract,
   the key it built and the tree (first free index and root) it built it from, and asks the package again only for
-  another tree; the key is still persisted in every block that touches the contract, so a block writes the same.
+  another tree, another package, or a state that does not hold the contract; the key is still persisted in every
+  block that touches the contract, so a block writes the same. The kept keys are forgotten whenever the worker drops
+  a state it applied or held (a pending block replaced by another, a state loaded in place of the one it holds, an
+  apply that failed), and at most 16,384 are kept, about 8 MB, the least recently used dropped first.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 
