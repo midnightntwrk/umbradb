@@ -264,6 +264,9 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   not hold its key; if it does, the change goes unseen, but by `verify`, until a block that does not continue the one
   before, or the bound, empties the copy. In the block trace, `counts` and `references` hold only the keys asked of the
   database, and `copyHits`, `copyMisses` and `copyEmptied` are new; the operator guide lists them.
+- **A contract's zswap state key is built only when the zswap tree changed.** The ledger worker keeps, per contract,
+  the key it built and the tree (first free index and root) it built it from, and asks the package again only for
+  another tree; the key is still persisted in every block that touches the contract, so a block writes the same.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 
