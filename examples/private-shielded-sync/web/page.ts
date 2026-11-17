@@ -1,11 +1,23 @@
 /**
- * The page: one card per step, each sending one message to the client's worker (`./worker.ts`) and showing what came
- * back: the main facts, then the whole answer as debug JSON. The right-hand panel lists every request the server saw.
- * Sizes, shapes and calls are worded for the snapshot's PIR scheme (`./scheme-view.ts`, spec 00058 FR-060).
+ * The page, in two tabs over one worker (`./worker.ts`) and one wallet:
+ *
+ * - **Wallet** (opens first): the mnemonic and Sync, which runs the worker's `walletSync` (`./wallet-sync.ts`): the
+ *   keys, the shielded sync and the Dust sync in order, the step in progress shown; then the balances
+ *   (`./wallet-view.ts`) and what the sync cost. The Details tab's cards of the steps it ran are filled with their
+ *   answers, and its request list with its requests.
+ * - **Details**: one card per step, each sending one message to the worker and showing what came back: the main facts,
+ *   then the whole answer as debug JSON. The right-hand panel lists every request the server saw. Sizes, shapes and
+ *   calls are worded for the snapshot's PIR scheme (`./scheme-view.ts`, spec 00058 FR-060).
+ *
+ * The mnemonic field is one element (hidden as a password is, with an eye button to show it), shown in the tab in view; a wallet derived or generated in Details is the Wallet
+ * tab's too. Tabs follow the ARIA tabs pattern: arrow keys, Home and End move between them.
  */
 
 import { serveCallWorkers } from "./call-workers.ts";
+import { dustBytes, dustChainRows, dustSpendRows } from "./dust-view.ts";
 import { callText, cellText, kb, pathTableText, tableText } from "./scheme-view.ts";
+import type { WalletSyncResult } from "./wallet-sync.ts";
+import { walletBalancesHtml, walletCostHtml, walletFailureHtml } from "./wallet-view.ts";
 import type { SchemeName } from "../pir/scheme.ts";
 
 type Json = Record<string, unknown>;
@@ -105,6 +117,8 @@ const VIEWS: Record<string, (r: Json) => string> = {
     facts([
       ["derived from", String(r.source)],
       ["shielded address", String(r.shieldedAddress)],
+      ["Dust address", ((r.addresses as Json | undefined)?.dust as string | null | undefined) ?? "none (a Zswap seed has no Dust key)"],
+      ["unshielded (Night) address", ((r.addresses as Json | undefined)?.unshielded as string | null | undefined) ?? "none (a Zswap seed has no Night key)"],
       ["coin public key", String(r.coinPublicKey)],
       ["encryption public key", String(r.encryptionPublicKey)],
       ["scan secret", String(r.scanSecret)],
@@ -234,6 +248,52 @@ const VIEWS: Record<string, (r: Json) => string> = {
     );
   },
 };
+VIEWS.dustFile = (r) => {
+  const m = r.manifest as Json;
+  const p = r.parameters as Json;
+  const chunks = r.chunks as Json[];
+  const firsts = r.firstCoins as Json[];
+  return (
+    facts([
+      ["Dust file", `to height ${Number(m.height).toLocaleString("en-US")} (era from ${Number(m.eraHeight).toLocaleString("en-US")}), ${Number(m.entries).toLocaleString("en-US")} entries in ${m.chunks} chunks of ${m.chunkEntries}, ${m.prefixBytes}-byte prefixes`],
+      ["chunks", `${r.chunksFromCache} from the page's cache, ${r.chunksDownloaded} downloaded (${kb(Number(r.chunkBytesDownloaded))})`],
+      ["chunks request", r.chunkRequest === null || r.chunkRequest === undefined ? "none: every chunk from the page's cache" : `one: GET /dust/chunks?from=${(r.chunkRequest as Json).from}&entries=${(r.chunkRequest as Json).entries}, chunks ${(r.chunkRequest as Json).from} to ${Number((r.chunkRequest as Json).from) + Number((r.chunkRequest as Json).chunks) - 1} (${kb(Number((r.chunkRequest as Json).bytes))}, ${(r.chunkRequest as Json).ms} ms)`],
+      ["parameters", `${p.nightDustRatio} Specks per Star, decay ${p.generationDecayRate}, grace ${p.dustGracePeriodSeconds} s (${p.source === "initial" ? "the ledger's initial ones" : `changed at ${p.changedAt}`})`],
+      ["Dust key", `…${r.keyEnds} (last digits; the key is a public key)`],
+      ["first coins in the era", firsts.length === 0 ? "none" : firsts.map((f) => `height ${f.height}, position ${f.position}`).join("; ")],
+      ["generation updates", String((r.updates as Json[]).length)],
+      ["bytes", dustBytes(r.bytes as Json)],
+      ["checks", checksHtml(r.checks)],
+      ["note", String(r.note)],
+      ["time", `${r.ms} ms`],
+    ]) + table(["chunk", "entries", "heights", "size", "from"], chunks.map((c) => [String(c.n), `${c.first} … ${Number(c.first) + Number(c.count) - 1}`, `${c.firstHeight} … ${c.lastHeight}`, kb(Number(c.bytes)), c.cached ? "cache" : "server (the one request)"]))
+  );
+};
+VIEWS.dustWalk = (r) =>
+  facts([
+    ["entries searched", Number(r.entries).toLocaleString("en-US")],
+    ["chains", String((r.chains as Json[]).length)],
+    ["note", String(r.note)],
+    ["time", `${r.ms} ms`],
+  ]) + dustChainRows(r.chains as Json[], false, null);
+VIEWS.dustCheck = (r) => {
+  const c = r.check as Json | null;
+  const b = r.bytes as Json;
+  const cb = b.check as Json;
+  const batches = r.batches as Json[];
+  const sch = (c?.scheme ?? "simplepir") as SchemeName;
+  return (
+    facts([
+      ["check table", c === null ? `none served: ${String(r.checkUnavailable)}` : `${short(String(c.id), 16)}: ${SCHEME_NAME[sch] ?? sch}, height ${Number(c.height).toLocaleString("en-US")}, ${Number(c.commitments).toLocaleString("en-US")} commitments, ${c.groups} groups of ${c.perGroup}`],
+      [sch === "simplepir" ? "setup data" : "masks", c === null ? undefined : `${kb(Number((c.publicArtifact as Json).bytes))}, ${(c.publicArtifact as Json).cached ? "from the page's cache" : "downloaded (once per check table)"}`],
+      ["calls", c === null ? "none" : `${r.calls} call${r.calls === 1 ? "" : "s"} of ${c.queriesPerCall} requests: ${batches.map((x, i) => `call ${i + 1} reads ${x.readable} chain end(s)${(x.positions as number[]).length > Number(x.readable) ? ` (${(x.positions as number[]).length - Number(x.readable)} beyond the table)` : ""}, the rest random`).join("; ")}`],
+      ["check bytes", `${kb(Number(cb.callsUp))} up, ${kb(Number(cb.callsDown))} down in the calls; manifest ${kb(Number(cb.manifest))} and ${sch === "simplepir" ? "setup data" : "masks"} ${kb(Number(cb.publicArtifact))} down`],
+      ["Dust sync in all", dustBytes(b)],
+      ["time", `${r.ms} ms`],
+    ]) + dustChainRows(r.chains as Json[], true, c === null ? null : Number(c.commitments))
+  );
+};
+VIEWS.dustSpend = (r) => facts(dustSpendRows(r));
 VIEWS.generate = VIEWS.keys!;
 const padded = (s: Json): string => (s.padding ? `, tables padded to ${Number(s.padding).toLocaleString("en-US")} entries` : "");
 const SCHEME_NAME: Record<string, string> = { simplepir: "SimplePIR", "ipir-sp": "IPIR+SP" };
@@ -266,7 +326,7 @@ function parsePositions(text: string): number[] {
 }
 
 const ARGS: Record<string, () => Json> = {
-  keys: () => ({ mnemonic: $<HTMLTextAreaElement>("#mnemonic").value, seedHex: $<HTMLInputElement>("#seed").value }),
+  keys: () => ({ mnemonic: $<HTMLInputElement>("#mnemonic").value, seedHex: $<HTMLInputElement>("#seed").value }),
   generate: () => ({ generate: true }),
   scan: () => ({ gpu: $<HTMLInputElement>("#gpu").checked }),
   read: () => ({ positions: parsePositions($<HTMLInputElement>("#positions").value) }),
@@ -277,8 +337,23 @@ const STEP_OF: Record<string, string> = { generate: "keys" };
 let firstFree = 0;
 /** Whether the page's server reads the database (`serve.ts --db-url`): the read rows then offer "Compare". */
 let databaseRoutes = false;
+/** Steps running now: one worker serves both tabs, so Sync waits for the Details steps and they for it. */
+let running = 0;
+const busy = (delta: number): void => {
+  running += delta;
+  $<HTMLButtonElement>("#wallet-sync").disabled = running > 0;
+};
 
 async function run(button: HTMLButtonElement): Promise<void> {
+  busy(1);
+  try {
+    await runStep(button);
+  } finally {
+    busy(-1);
+  }
+}
+
+async function runStep(button: HTMLButtonElement): Promise<void> {
   const name = button.dataset.run!;
   const card = button.closest("section")!;
   const status = $(".status", card);
@@ -311,6 +386,9 @@ async function run(button: HTMLButtonElement): Promise<void> {
     if (name === "files") {
       firstFree = Number((answer.result!.manifest as Json).firstFree);
     }
+    // A wallet generated here is the Wallet tab's too, with its addresses.
+    if (name === "generate" && typeof answer.result!.generatedMnemonic === "string") $<HTMLInputElement>("#mnemonic").value = answer.result!.generatedMnemonic;
+    if (name === "keys" || name === "generate") showAddresses(answer.result!.addresses as Json | undefined);
   } else {
     status.className = "status bad";
     status.textContent = "failed";
@@ -429,6 +507,167 @@ async function compare(button: HTMLButtonElement): Promise<void> {
   }
 }
 
+// ── the Wallet tab ──────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The Details card of each step the Wallet sync runs. */
+const CARD_OF: Record<string, string> = {
+  keys: "#step-keys",
+  files: "#step-files",
+  scan: "#step-scan",
+  read: "#step-read",
+  nullifiers: "#step-nullifiers",
+  tail: "#step-tail",
+  summary: "#step-summary",
+  dustFile: "#step-dust-file",
+  dustWalk: "#step-dust-walk",
+  dustCheck: "#step-dust-check",
+};
+
+/** Fills a Details card with what the Wallet sync's step did, as the card's own button would. */
+function fillCard(step: WalletSyncResult["steps"][number]): void {
+  const card = $(CARD_OF[step.name]!);
+  const status = $(".status", card);
+  const out = $(".out", card);
+  if (step.ok) {
+    status.className = "status ok";
+    status.textContent = `done in ${step.ms} ms (by the Wallet tab's sync)`;
+    out.innerHTML = (VIEWS[step.name]?.(step.answer!) ?? "") + `<details><summary>debug: the step's whole answer</summary><pre>${esc(abbreviated(step.answer))}</pre></details>`;
+    if (step.name === "files") firstFree = Number((step.answer!.manifest as Json).firstFree);
+  } else {
+    status.className = "status bad";
+    status.textContent = "failed (in the Wallet tab's sync)";
+    out.innerHTML = `<div class="error">${esc(step.error ?? "failed")}</div>`;
+  }
+}
+
+/** The loading of the client (step 0), which a sync waits for. */
+let loaded: Promise<void> = Promise.resolve();
+
+async function walletSync(): Promise<void> {
+  const status = $("#wallet-status");
+  const progress = $("#wallet-progress");
+  const failure = $("#wallet-failure");
+  busy(1);
+  const steps = [...document.querySelectorAll<HTMLButtonElement>("#panel-details button[data-run]")];
+  steps.forEach((b) => (b.disabled = true));
+  status.className = "status run";
+  status.textContent = "syncing…";
+  failure.innerHTML = "";
+  progress.textContent = "waiting for the client to load";
+  try {
+    await loaded;
+    if ($("#step-load .status").classList.contains("bad")) throw new Error("the client did not load (Details, step 0)");
+    progress.textContent = "starting";
+    // The keys from the shared field (step 1's); the worker scans on the GPU where WebGPU starts, else on the CPU.
+    const answer = await call("walletSync", ARGS.keys!(), (t) => (progress.textContent = t));
+    if (!answer.ok) throw new Error(answer.error ?? "failed");
+    const r = answer.result as unknown as WalletSyncResult;
+    for (const s of r.steps) fillCard(s);
+    const keysStep = r.steps.find((s) => s.name === "keys" && s.ok);
+    if (keysStep !== undefined) showAddresses(keysStep.answer!.addresses as Json | undefined);
+    $("#wallet-balances .out").innerHTML = walletBalancesHtml(r);
+    $("#wallet-cost .out").innerHTML = walletCostHtml(r);
+    failure.innerHTML = walletFailureHtml(r);
+    status.className = r.ok ? "status ok" : "status bad";
+    status.textContent = r.ok ? `synced in ${(r.cost.ms / 1000).toFixed(1)} s` : `failed at ${r.failed!.label}`;
+    progress.textContent = "";
+  } catch (error) {
+    status.className = "status bad";
+    status.textContent = "failed";
+    progress.textContent = "";
+    failure.innerHTML = `<div class="error">${esc(error instanceof Error ? error.message : String(error))}</div>`;
+  } finally {
+    steps.forEach((b) => (b.disabled = false));
+    busy(-1);
+  }
+}
+
+/**
+ * The wallet's addresses under Sync, once its keys are known: each whole (wrapped on a narrow window) with a button
+ * that copies it. A wallet given by its Zswap seed has only the shielded one.
+ */
+function showAddresses(a: Json | undefined): void {
+  if (a === undefined) return;
+  const none: string[] = [];
+  for (const kind of ["shielded", "dust", "unshielded"] as const) {
+    const value = a[kind] as string | null;
+    const row = $(`#address-${kind}`).closest<HTMLElement>(".addr-row")!;
+    row.hidden = value === null;
+    $(`#address-${kind}`).textContent = value ?? "";
+    if (value === null) none.push(kind === "dust" ? "Dust" : "unshielded (Night)");
+  }
+  const note = $("#addresses-note");
+  note.hidden = none.length === 0;
+  note.textContent = none.length === 0 ? "" : `No ${none.join(" or ")} address: a wallet given by its Zswap seed has no Dust or Night key.`;
+  $("#wallet-addresses").hidden = false;
+}
+
+/** Copies an address whole; where the clipboard is refused, selects it for the keyboard's copy instead. */
+async function copyAddress(button: HTMLButtonElement): Promise<void> {
+  const code = $(`#address-${button.dataset.copy}`);
+  const text = code.textContent ?? "";
+  try {
+    await navigator.clipboard.writeText(text);
+    button.textContent = "Copied";
+  } catch {
+    const range = document.createRange();
+    range.selectNodeContents(code);
+    const selection = getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    button.textContent = "Selected: copy it";
+  }
+  button.classList.add("copied");
+  setTimeout(() => {
+    button.textContent = "Copy";
+    button.classList.remove("copied");
+  }, 1500);
+}
+
+// ── the tabs ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const TABS = ["wallet", "details"] as const;
+
+/** Shows one tab: its panel in view, the other hidden (each keeps its state), the mnemonic field moved into it. */
+function showTab(name: (typeof TABS)[number], focus = false): void {
+  for (const t of TABS) {
+    const tab = $<HTMLButtonElement>(`#tab-${t}`);
+    const on = t === name;
+    tab.setAttribute("aria-selected", String(on));
+    tab.tabIndex = on ? 0 : -1;
+    $(`#panel-${t}`).hidden = !on;
+    if (on && focus) tab.focus();
+  }
+  $(`#mnemonic-slot-${name}`).appendChild($("#mnemonic-field"));
+}
+
+// The mnemonic is hidden as a password is; the eye shows it and hides it again.
+$("#mnemonic-show").addEventListener("click", () => {
+  const field = $<HTMLInputElement>("#mnemonic");
+  const show = field.type === "password";
+  field.type = show ? "text" : "password";
+  const eye = $<HTMLButtonElement>("#mnemonic-show");
+  const label = show ? "Hide the mnemonic" : "Show the mnemonic";
+  eye.setAttribute("aria-pressed", String(show));
+  eye.setAttribute("aria-label", label);
+  eye.title = label;
+});
+
+for (const t of TABS) {
+  const tab = $<HTMLButtonElement>(`#tab-${t}`);
+  tab.addEventListener("click", () => showTab(t));
+  tab.addEventListener("keydown", (event) => {
+    const at = TABS.indexOf(t);
+    const to =
+      event.key === "ArrowRight" ? TABS[(at + 1) % TABS.length] : event.key === "ArrowLeft" ? TABS[(at + TABS.length - 1) % TABS.length] : event.key === "Home" ? TABS[0] : event.key === "End" ? TABS[TABS.length - 1] : undefined;
+    if (to === undefined) return;
+    event.preventDefault();
+    showTab(to, true);
+  });
+}
+$("#wallet-sync").addEventListener("click", () => void walletSync());
+showTab("wallet");
+
 // ── one request, whole ──────────────────────────────────────────────────────────────────────────────────────────
 
 const SHOW_ALL_LIMIT = 4 * 1024 * 1024;
@@ -500,8 +739,9 @@ document.addEventListener("click", (event) => {
   }
   const target = el.closest("button");
   if (target === null) return;
-  if (target.dataset.run) void run(target);
+  if (target.dataset.copy) void copyAddress(target);
+  else if (target.dataset.run) void run(target);
   else if (target.dataset.fill) void fill(target);
   else if (target.dataset.compare) void compare(target);
 });
-void run($<HTMLButtonElement>('[data-run="load"]'));
+loaded = run($<HTMLButtonElement>('[data-run="load"]'));

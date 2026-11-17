@@ -1,7 +1,8 @@
 /**
  * The command line (`client/main.ts`) as a separate process, with the client's install (`@midnightntwrk/ledger-v9`
- * 1.0.1 and `ledger-v8` 8.1.3 from `client/node_modules`; skipped without it): `sync`, `balance`, `address` and
- * `cross-check` against the module in UmbraDB's real process and its PostgreSQL 18 database, over the synthetic chain.
+ * 1.0.1 and `ledger-v8` 8.1.3 from `client/node_modules`; skipped without it): `sync`, `balance`, `address`,
+ * `cross-check` and `dust` against the module in UmbraDB's real process and its PostgreSQL 18 database, over the
+ * synthetic chain.
  */
 
 import { execFile } from "node:child_process";
@@ -76,10 +77,13 @@ describe.skipIf(!installed)("the command line (with the client's install)", () =
     const balance = await cli(["balance", ...common, "--json"]);
     expect(balance.code, balance.stderr).toBe(0);
     expect(JSON.parse(balance.stdout).unspent).toHaveLength(7);
+    const shielded = formatShieldedAddress({ coinPublicKey: chain.wallets.A.keys.coinPublicKey, encryptionPublicKey: chain.wallets.A.keys.encryptionPublicKey }, "preprod");
     const address = await cli(["address", ...common, "--network", "preprod"]);
-    expect(address.stdout.trim()).toBe(
-      formatShieldedAddress({ coinPublicKey: chain.wallets.A.keys.coinPublicKey, encryptionPublicKey: chain.wallets.A.keys.encryptionPublicKey }, "preprod"),
-    );
+    // A wallet given by its Zswap seed has the shielded address only (phase 12: the Dust and Night ones need a mnemonic).
+    expect(address.stdout).toBe(`shielded    ${shielded}\ndust        none (a wallet given by its Zswap seed has no Dust or Night key)\nunshielded  none (a wallet given by its Zswap seed has no Dust or Night key)\n`);
+    expect((await cli(["address", ...common, "--network", "preprod", "--only", "shielded"])).stdout).toBe(`${shielded}\n`);
+    const noDust = await cli(["address", ...common, "--network", "preprod", "--only", "dust"]);
+    expect([noDust.code, noDust.stderr.includes("no dust address")]).toEqual([1, true]);
   });
 
   it("cross-check replays the database's stored events with the ledger packages and finds no difference (exit 0); a changed local state is found out (exit 1)", { timeout: LONG }, async () => {
@@ -98,6 +102,45 @@ describe.skipIf(!installed)("the command line (with the client's install)", () =
     const bad = await cli(args);
     expect(bad.code).toBe(1);
     expect((JSON.parse(bad.stdout) as Record<string, any>).differences).toEqual([expect.objectContaining({ what: "only-ledger", position: state.coins[0]!.position })]);
+  });
+
+  it("dust (spec 00062): downloads the Dust file, coins and parameters and walks the wallet's chains (none on this chain, which has no Dust events, nor a check table); refuses a wallet without a mnemonic", { timeout: LONG }, async () => {
+    // BIP-39's public test vector, not a wallet anyone holds.
+    const mnemonic = `${"abandon ".repeat(23)}art`;
+    const { stdout, stderr } = await run(process.execPath, [MAIN, "dust", "--mnemonic-env", "PSS_TEST_MNEMONIC", "--server", r.origin, "--json"], {
+      env: { PATH: process.env.PATH ?? "", PSS_TEST_MNEMONIC: mnemonic },
+    });
+    const report = JSON.parse(stdout) as Record<string, any>;
+    expect(report.file).toMatchObject({ eraHeight: 3_348_434, height: 7, entries: 0, chunks: 0, chunkEntries: 4096, prefixBytes: 4 });
+    expect(report.parameters).toMatchObject({ nightDustRatio: "5000000000", generationDecayRate: "8267", dustGracePeriodSeconds: "10800", source: "initial" });
+    expect([report.firstCoins, report.chains, report.bytes.requests, report.bytes.up]).toEqual([0, [], 4, 0]);
+    // Below the era there is no Dust commitment, so the module serves no check table: the walk goes on without it.
+    expect(report.check).toBeNull();
+    expect(report.checkUnavailable).toContain("no Dust check table has been built yet");
+    expect(`${stdout}${stderr}`).not.toContain("abandon");
+    // Phase 12: a mnemonic's three addresses (each checked against the wallet SDK's in client-address.test.ts).
+    const addresses = await run(process.execPath, [MAIN, "address", "--mnemonic-env", "PSS_TEST_MNEMONIC", "--network", "preprod"], { env: { PATH: process.env.PATH ?? "", PSS_TEST_MNEMONIC: mnemonic } });
+    expect(addresses.stdout).toMatch(/^shielded {4}mn_shield-addr_preprod1[a-z0-9]+\ndust {8}mn_dust_preprod1[a-z0-9]+\nunshielded {2}mn_addr_preprod1[a-z0-9]+\n$/);
+    expect(`${addresses.stdout}${addresses.stderr}`).not.toContain("abandon");
+    const text = await cli(["dust", "--zswap-seed-file", seedFile, "--server", r.origin]);
+    expect(text.code).toBe(1);
+    expect(text.stderr).toContain("dust needs the wallet's mnemonic");
+    // Phase 9: a spend needs the Dust snapshot, which this chain has none of; nothing secret is printed.
+    const env = { PATH: process.env.PATH ?? "", PSS_TEST_MNEMONIC: mnemonic };
+    const spend = await run(process.execPath, [MAIN, "dust", "--mnemonic-env", "PSS_TEST_MNEMONIC", "--server", r.origin, "--spend"], { env }).then(
+      () => ({ code: 0, stderr: "" }),
+      (e: { code: number; stderr: string }) => ({ code: e.code, stderr: e.stderr }),
+    );
+    expect(spend.code).toBe(1);
+    expect(spend.stderr).toMatch(/--spend needs the Dust snapshot: .*no Dust check table has been built yet/);
+    expect(spend.stderr).not.toContain("abandon");
+    const noCheck = await cli(["dust", "--zswap-seed-file", seedFile, "--server", r.origin, "--spend", "--no-check"]);
+    expect(noCheck.code).toBe(1);
+    const fee = await cli(["send", "--zswap-seed-file", seedFile, "--to", "x", "--token", "0".repeat(64), "--amount", "1", "--network", "undeployed", "--node-http", "http://127.0.0.1:1", "--node-ws", "ws://127.0.0.1:1", "--dust-fee", "indexer"]);
+    expect([fee.code, fee.stderr.includes("--dust-fee is sdk or private, not indexer")]).toEqual([1, true]);
+    const to = (await cli(["address", "--zswap-seed-file", seedFile, "--network", "undeployed", "--only", "shielded"])).stdout.trim();
+    const seedOnly = await cli(["send", "--zswap-seed-file", seedFile, "--to", to, "--token", "0".repeat(64), "--amount", "1", "--network", "undeployed", "--node-http", "http://127.0.0.1:1", "--node-ws", "ws://127.0.0.1:1", "--dust-fee", "private", "--dry-run"]);
+    expect([seedOnly.code, seedOnly.stderr.includes("--dust-fee private needs the wallet's mnemonic")]).toEqual([1, true]);
   });
 
   it("refuses a wallet it cannot name, and a missing mnemonic variable, without printing anything secret", async () => {

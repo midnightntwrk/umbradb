@@ -1,10 +1,11 @@
 /**
- * The module's reads of the core's tables (spec FR-002, FR-010–013): `core_ledger_state.events` (item `ledger-events`),
- * `core_ledger_state.states` (item `ledger-state`), `core_block_commit.blocks` (item `blocks`) and the chain's identity.
- * The module owns no tables and writes nothing.
+ * The module's reads of the core's tables (spec FR-002, FR-010–013; 00062 FR-010): `core_ledger_state.events` (item
+ * `ledger-events`), `core_ledger_state.states` (item `ledger-state`), `core_block_commit.blocks` (item `blocks`) and the
+ * chain's identity. The module owns no tables and writes nothing.
  */
 
 import type { ReadHandle, ZswapEvidence } from "umbradb";
+import { type DustEvent, isDustEventKind } from "./dust-index.ts";
 import type { NullifierEvent, OutputEvent } from "./zswap-index.ts";
 
 type Reader = Pick<ReadHandle, "query">;
@@ -14,11 +15,21 @@ const ZSWAP_EVENTS_SQL = `SELECT height, tx_index, kind, tree_index, commitment,
   FROM core_ledger_state.events
   WHERE kind IN ('zswap-output', 'zswap-input') AND height > $1::bigint AND height <= $2::bigint
   ORDER BY height, tx_index, event_index`;
+/** Dust events and parameter changes of the heights `($1, $2]` at or above the era's first height `$3`, in chain order. */
+const DUST_EVENTS_SQL = `SELECT height, tx_index, kind, bytes, nullifier, commitment, tree_index
+  FROM core_ledger_state.events
+  WHERE kind IN ('dust-spend-processed', 'dust-initial-utxo', 'dust-generation-dtime-update', 'param-change')
+    AND height > $1::bigint AND height <= $2::bigint AND height >= $3::bigint
+  ORDER BY height, tx_index, event_index`;
 const CURSOR_SQL = "SELECT max(height) AS height FROM core_block_commit.blocks";
 const STATE_AT_SQL = `SELECT s.zswap_first_free, s.zswap_root, b.hash
   FROM core_ledger_state.states s JOIN core_block_commit.blocks b ON b.height = s.height
   WHERE s.height = $1::bigint`;
 const BLOCK_HASH_SQL = "SELECT hash FROM core_block_commit.blocks WHERE height = $1::bigint";
+const DUST_STATE_SQL = `SELECT s.dust_commitment_first_free, s.dust_commitment_root, s.dust_generation_first_free, s.dust_generation_root,
+    b.block_time
+  FROM core_ledger_state.states s JOIN core_block_commit.blocks b ON b.height = s.height
+  WHERE s.height = $1::bigint`;
 const GENESIS_SQL = "SELECT genesis_hash FROM core_chain.identity WHERE id = 1";
 
 const bytes = (value: unknown, what: string): Uint8Array => {
@@ -67,6 +78,28 @@ export async function zswapEvents(read: Reader, from: number, to: number): Promi
   return out;
 }
 
+/** The Dust events of the heights `(from, to]` at or above `eraHeight`, grouped by height in increasing order. */
+export async function dustEvents(read: Reader, from: number, to: number, eraHeight: number): Promise<{ readonly height: number; readonly events: DustEvent[] }[]> {
+  const rows = await read.query(DUST_EVENTS_SQL, [from, to, eraHeight]);
+  const out: { height: number; events: DustEvent[] }[] = [];
+  for (const row of rows) {
+    const height = int(row.height, "events.height");
+    const kind = String(row.kind);
+    if (!isDustEventKind(kind)) throw new TypeError(`events.kind ${kind} is not a Dust kind`);
+    if (out.at(-1)?.height !== height) out.push({ height, events: [] });
+    out.at(-1)!.events.push({
+      height,
+      txIndex: int(row.tx_index, "events.tx_index"),
+      kind,
+      bytes: bytes(row.bytes, "events.bytes"),
+      nullifier: row.nullifier === null ? null : bytes(row.nullifier, "events.nullifier"),
+      commitment: row.commitment === null ? null : bytes(row.commitment, "events.commitment"),
+      treeIndex: row.tree_index === null ? null : int(row.tree_index, "events.tree_index"),
+    });
+  }
+  return out;
+}
+
 /** The committed height (the cursor), or −1 before any. */
 export async function cursorOf(read: Reader): Promise<number> {
   const [row] = await read.query(CURSOR_SQL);
@@ -84,6 +117,36 @@ export async function stateAt(
     firstFree: int(row.zswap_first_free, "states.zswap_first_free"),
     root: bytes(row.zswap_root, "states.zswap_root"),
     hash: bytes(row.hash, "blocks.hash"),
+  };
+}
+
+/** The Dust trees after block `height` as the core stored them (00062), and the block's time; null when no state is stored. */
+export async function dustStateAt(
+  read: Reader,
+  height: number,
+): Promise<{
+  readonly commitmentFirstFree: number;
+  /** Stored roots: the ledger's untagged serialization (`rootFromStored` decodes them). */
+  readonly commitmentRoot: Uint8Array;
+  readonly generationFirstFree: number;
+  readonly generationRoot: Uint8Array;
+  /**
+   * Whole seconds since the Unix epoch: the block's time without its milliseconds (Preprod has blocks at …06.001), as
+   * the ledger keys its Dust root history (`TimeFilterMap`, by `Timestamp::to_secs`). A spend dated at it selects the
+   * roots recorded after this block.
+   */
+  readonly blockTime: number;
+} | null> {
+  const [row] = await read.query(DUST_STATE_SQL, [height]);
+  if (row === undefined) return null;
+  const time = row.block_time instanceof Date ? row.block_time.getTime() : Date.parse(String(row.block_time));
+  if (!Number.isSafeInteger(time) || time < 0) throw new TypeError(`blocks.block_time is not a time: ${String(row.block_time)}`);
+  return {
+    commitmentFirstFree: int(row.dust_commitment_first_free, "states.dust_commitment_first_free"),
+    commitmentRoot: bytes(row.dust_commitment_root, "states.dust_commitment_root"),
+    generationFirstFree: int(row.dust_generation_first_free, "states.dust_generation_first_free"),
+    generationRoot: bytes(row.dust_generation_root, "states.dust_generation_root"),
+    blockTime: Math.floor(time / 1000),
   };
 }
 

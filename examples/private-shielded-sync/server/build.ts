@@ -173,8 +173,8 @@ function writeArtifact(path: string, parts: readonly Uint8Array[]): { digest: st
   return { digest: hash.digest("hex"), size };
 }
 
-/** Writes an artifact into `dir` under its own digest. */
-function artifact(dir: string, parts: readonly Uint8Array[]): { digest: string; size: number } {
+/** Writes an artifact into `dir` under its own digest (also the Dust check table's, `./dust-check.ts`). */
+export function artifact(dir: string, parts: readonly Uint8Array[]): { digest: string; size: number } {
   const tmp = join(dir, `.writing-${randomBytes(6).toString("hex")}`);
   const written = writeArtifact(tmp, parts);
   renameSync(tmp, join(dir, written.digest));

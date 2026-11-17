@@ -19,6 +19,24 @@ export const ROUTES = Object.freeze({
   /** Lower Merkle paths, read only to spend (Q58). */
   queryPath: `${ROUTE_PREFIX}/query/path`,
   adminSnapshot: `${ROUTE_PREFIX}/admin/snapshot`,
+  /** The Dust file's manifest, JSON (spec 00062 FR-011). */
+  dustManifest: `${ROUTE_PREFIX}/dust/manifest`,
+  /** Followed by the chunk's number. */
+  dustChunk: `${ROUTE_PREFIX}/dust/chunk/`,
+  /** `GET …/dust/chunks?from=<first chunk>&entries=<the manifest's entry count>`: those chunks, one after another. */
+  dustChunks: `${ROUTE_PREFIX}/dust/chunks`,
+  /** With `?owner=<Dust public key, decimal>`: that owner's first coins and generation updates, JSON. */
+  dustCoins: `${ROUTE_PREFIX}/dust/coins`,
+  /** The Dust parameters in force, JSON. */
+  dustParameters: `${ROUTE_PREFIX}/dust/parameters`,
+  /** The Dust check table's manifest (`./dust-check.ts`), canonical JSON. */
+  dustCheckManifest: `${ROUTE_PREFIX}/dust/check/manifest`,
+  /** Followed by the SHA-256 of one of the Dust check table's files: its public artifact. */
+  dustCheckBlob: `${ROUTE_PREFIX}/dust/check/blob/`,
+  /** A query call to the Dust check table, the check's identifier in place of the snapshot's. */
+  dustCheckQuery: `${ROUTE_PREFIX}/dust/check/query`,
+  /** A query call to the Dust path table (each position's lower Merkle path), read only to spend (phase 9). */
+  dustPathQuery: `${ROUTE_PREFIX}/dust/check/path`,
 });
 
 /** Default vectors per query call (FR-065). */
