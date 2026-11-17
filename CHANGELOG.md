@@ -165,6 +165,13 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   `UMBRADB_TRACE_STEPS=1` beside it adds each step's count changes, new nodes and deleted nodes. The trace also records
   memory at every block: `mem` in a height's line for the main thread, `ext`, `heap` and `rss` in the worker's line.
   The operator guide's "Measuring a sync: the block trace" lists the files and their keys.
+- **A range bench for measuring a change of the sync** (`bench/range/`, `npm run bench:range`). A run clones a
+  template database that stops at a height, syncs it on with `umbradb run` and the block trace for a number of heights
+  against a node, and its readers give heights per second by the clock and without the waits for the node, each
+  stage's time per block, statements and keys read per block, and where the worker thread's time went. `compare.mjs`
+  reads two runs side by side; `equal.sh`, `contents-hash.sh` and `tables.sh` say whether two builds stored the same.
+  It is not part of the package and changes nothing under `src/`. `bench/range/README.md` says how to make a template,
+  choose a range, make a run and read it.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 
