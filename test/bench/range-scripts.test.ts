@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,10 +17,11 @@ import { POSTGRES_IMAGE } from "../postgres-image.js";
  *   trace writes (`src/trace/trace.ts`; `test/trace/traced-process.test.ts` holds the process to those fields), and
  *   print a stage, a phase or a column only where its key is in the trace;
  * - negative controls: `compare.mjs` shows where two runs differ, and `tables.sh` marks the tables in which two small
- *   databases differ.
+ *   databases differ; `tables.sh` and `equal.sh` fail, and never count a difference of 0, when a read fails.
  *
- * `run.sh` past its arguments, `equal.sh`, `contents-hash.sh`, `roundtrip.sh` and `preflight.sh` need a build, a node
- * or a synced database and are not run here; `tables.sh` runs on a PostgreSQL container of this file's own.
+ * `run.sh` past its arguments, `equal.sh` past its failures, `contents-hash.sh`, `roundtrip.sh` and `preflight.sh`
+ * need a build, a node or a synced database and are not run here; `tables.sh` runs on a PostgreSQL container of this
+ * file's own.
  */
 
 const SCRIPTS = fileURLToPath(new URL("../../bench/range/", import.meta.url));
@@ -465,10 +467,11 @@ describe("the scripts that read a run folder", () => {
 describe("tables.sh on small databases", () => {
   let container: StartedPostgreSqlContainer | undefined;
 
-  /** Runs `sql` in `database` of the container, the way the bench's scripts do. */
-  const psql = (database: string, sql: string): void => {
-    const done = spawnSync("docker", ["exec", "-i", (container as StartedPostgreSqlContainer).getId(), "psql", "-U", "postgres", "-q", "-v", "ON_ERROR_STOP=1", "-d", database], { encoding: "utf8", input: sql });
+  /** Runs `sql` in `database` of the container, the way the bench's scripts do, and gives what it printed. */
+  const psql = (database: string, sql: string): string => {
+    const done = spawnSync("docker", ["exec", "-i", (container as StartedPostgreSqlContainer).getId(), "psql", "-U", "postgres", "-q", "-At", "-v", "ON_ERROR_STOP=1", "-d", database], { encoding: "utf8", input: sql });
     if (done.status !== 0) throw new Error(`psql in ${database}: ${done.stderr}`);
+    return done.stdout;
   };
 
   /**
@@ -500,18 +503,22 @@ describe("tables.sh on small databases", () => {
     database("same-b", "INSERT INTO other.notes VALUES ('only here'); UPDATE core_demo.blocks SET hash = hash;");
     // One byte of one row changed; one row more; and a table that is not there.
     database("changed", "UPDATE core_demo.nodes SET children = ARRAY['\\xab'::bytea] WHERE node_key = '\\xbb'; INSERT INTO core_demo.blocks VALUES (4, '\\x04'); DROP TABLE contract_demo.states;");
+    // A database with no table of a core's or a module's schema: a run's database never is one.
+    psql("postgres", "CREATE DATABASE bench_empty");
+    psql("bench_empty", "CREATE SCHEMA other; CREATE TABLE other.notes (note text);");
   }, 300_000);
   afterAll(async () => {
     await container?.stop();
   }, 60_000);
 
-  /** `tables.sh` on the container, and its lines as [table, each run's count and hash, whether marked]. */
-  const tables = (labels: readonly string[]) => {
-    const result = run("tables.sh", labels, { BENCH_DIR: directory, BENCH_PG_CONTAINER: (container as StartedPostgreSqlContainer).getId() });
+  /** `tables.sh` on the container, and its lines as [table, each run's count and hash, how marked]. */
+  const tables = (labels: readonly string[], env: Readonly<Record<string, string>> = {}) => {
+    const result = run("tables.sh", labels, { BENCH_DIR: directory, BENCH_PG_CONTAINER: (container as StartedPostgreSqlContainer).getId(), ...env });
     const lines = result.stdout.trimEnd().split("\n");
     const rows = new Map(lines.slice(0, -1).map((line) => {
       const [table, ...rest] = line.trim().split(/\s+/) as [string, ...string[]];
-      return [table, { hashes: rest.filter((cell) => cell !== "DIFFERENT"), marked: rest.includes("DIFFERENT") }] as const;
+      const marks = ["DIFFERENT", "NOT", "READ"];
+      return [table, { hashes: rest.filter((cell) => !marks.includes(cell)), marked: rest.includes("DIFFERENT"), unread: rest.includes("READ") }] as const;
     }));
     return { result, rows, last: lines.at(-1) };
   };
@@ -522,7 +529,7 @@ describe("tables.sh on small databases", () => {
     // The tables of the core's and the modules' schemas, and no other.
     expect([...rows.keys()]).toEqual(["contract_demo.states", "core_demo.blocks", "core_demo.nodes"]);
     for (const [table, { hashes, marked }] of rows) {
-      expect(hashes[0], table).toMatch(/^[23]:[0-9a-f]{12}$/);
+      expect(hashes[0], table).toMatch(/^[23]:[0-9a-f]{16}$/);
       expect(hashes[1], table).toBe(hashes[0]);
       expect(marked, table).toBe(false);
     }
@@ -530,9 +537,21 @@ describe("tables.sh on small databases", () => {
     expect(last).toBe("differences from same-a: 0");
   });
 
-  it("negative control: a changed row, a row more and a missing table are each marked, and counted", () => {
+  it("a table's hash is a sum over its rows, which needs no sort and grows with no table", () => {
+    // Each row's text form hashed with MD5; the first 64 bits of each, as a signed number, added up; the sum's text
+    // hashed with MD5 again, 16 hex digits of it. One text value of every row's hash, as an aggregate into a string
+    // would build, is refused by PostgreSQL above 1 GB: about 33 million rows of 32 bytes.
+    const texts = psql("bench_same_a", "SELECT t::text FROM core_demo.blocks t").trimEnd().split("\n");
+    expect(texts).toHaveLength(3);
+    const md5 = (text: string): string => createHash("md5").update(text).digest("hex");
+    const sum = texts.reduce((total, text) => total + BigInt.asIntN(64, BigInt(`0x${md5(text).slice(0, 16)}`)), 0n);
+    const { rows } = tables(["same-a"]);
+    expect(rows.get("core_demo.blocks")?.hashes).toEqual([`3:${md5(sum.toString()).slice(0, 16)}`]);
+  });
+
+  it("negative control: a changed row, a row more and a missing table are each marked and counted, and the status is 1", () => {
     const { result, rows, last } = tables(["same-a", "same-b", "changed"]);
-    expect(result.code, result.stderr).toBe(0);
+    expect(result.code, result.stderr).toBe(1);
     for (const [table, { hashes, marked }] of rows) {
       expect(hashes[1], table).toBe(hashes[0]);
       expect(hashes[2], table).not.toBe(hashes[0]);
@@ -543,9 +562,75 @@ describe("tables.sh on small databases", () => {
     expect(rows.get("core_demo.blocks")?.hashes[2]).toMatch(/^4:/);
     expect(rows.get("contract_demo.states")?.hashes[2]).toBe("absent");
     expect(last).toBe("differences from same-a: 3");
-    // Read the other way round, the missing table is not listed: the first run's tables are the ones compared.
+  });
+
+  it("negative control: a table only a later run has is listed, marked and counted", () => {
+    // The tables compared are every run's, not the first run's only.
     const reversed = tables(["changed", "same-a"]);
-    expect([...reversed.rows.keys()]).toEqual(["core_demo.blocks", "core_demo.nodes"]);
-    expect(reversed.last).toBe("differences from changed: 2");
+    expect(reversed.result.code, reversed.result.stderr).toBe(1);
+    expect([...reversed.rows.keys()]).toEqual(["contract_demo.states", "core_demo.blocks", "core_demo.nodes"]);
+    expect(reversed.rows.get("contract_demo.states")).toMatchObject({ hashes: ["absent", expect.stringMatching(/^2:/)], marked: true });
+    expect(reversed.last).toBe("differences from changed: 3");
+  });
+
+  it("refuses without a label", () => {
+    const result = run("tables.sh", [], { BENCH_DIR: directory });
+    expect(result).toMatchObject({ code: 2, stderr: expect.stringContaining("usage: tables.sh") });
+    expect(result.stdout).not.toContain("differences");
+  });
+
+  it("a database it cannot read ends it with status 2 and no count, whichever run it is", () => {
+    for (const labels of [["typo", "same-a"], ["same-a", "typo"]]) {
+      const { result } = tables(labels);
+      expect(result.code, labels.join(" ")).toBe(2);
+      expect(result.stdout, labels.join(" ")).not.toContain("differences");
+      expect(result.stderr, labels.join(" ")).toContain("bench_typo");
+    }
+  });
+
+  it("an empty read ends it with status 2 and no count: a database with no table of the schemas it reads", () => {
+    for (const labels of [["empty", "same-a"], ["same-a", "empty"], ["empty"]]) {
+      const { result } = tables(labels);
+      expect(result.code, labels.join(" ")).toBe(2);
+      expect(result.stdout, labels.join(" ")).not.toContain("differences");
+      expect(result.stderr, labels.join(" ")).toContain("bench_empty");
+    }
+  });
+
+  it("a read of one table that fails, or answers nothing, is marked, not counted as equal, and ends it with status 2 and no count", () => {
+    // A stand-in for docker, first in PATH: a statement that reads core_demo.nodes fails (or prints nothing and
+    // succeeds), as a query PostgreSQL refuses would; every other command goes to docker.
+    const docker = spawnSync("bash", ["-c", "command -v docker"], { encoding: "utf8" }).stdout.trim();
+    const bin = mkdtempSync(join(tmpdir(), "umbradb-bench-range-docker-"));
+    try {
+      writeFileSync(
+        join(bin, "docker"),
+        `#!/bin/sh\nfor a in "$@"; do case "$a" in *"FROM core_demo.nodes t"*) if [ "$STAND_IN" = empty ]; then exit 0; fi; echo "ERROR:  a read that fails" >&2; exit 1;; esac; done\nexec "${docker}" "$@"\n`,
+        { mode: 0o755 },
+      );
+      for (const mode of ["fails", "empty"]) {
+        const { result, rows, last } = tables(["same-a", "same-b"], { PATH: `${bin}:${process.env.PATH ?? ""}`, STAND_IN: mode });
+        expect(result.code, mode).toBe(2);
+        expect(rows.get("core_demo.nodes"), mode).toMatchObject({ hashes: ["error", "error"], unread: true });
+        expect(rows.get("core_demo.blocks"), mode).toMatchObject({ hashes: [expect.stringMatching(/^3:/), expect.stringMatching(/^3:/)], unread: false });
+        expect(last, mode).toBe("not compared: 2 reads failed");
+        expect(result.stdout, mode).not.toContain("differences");
+        expect(result.stderr, mode).toContain("core_demo.nodes");
+      }
+    } finally {
+      rmSync(bin, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("equal.sh fails closed", () => {
+  it("a run it cannot read ends it with status 2, says which, and prints no stack", () => {
+    // No database container answers here, so every run's query fails too; the status file of run a has no tables, and
+    // a run that never wrote one has no status file.
+    const absent = run("equal.sh", ["a", "nothing"], { BENCH_DIR: directory, BENCH_PG_CONTAINER: "umbradb-bench-test-no-such-container" });
+    expect(absent.code).toBe(2);
+    expect(absent.stdout).toContain("not compared:");
+    expect(absent.stderr).toContain("equal.sh: could not read");
+    expect(absent.stderr).not.toMatch(/^\s+at /m);
   });
 });

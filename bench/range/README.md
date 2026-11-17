@@ -144,9 +144,9 @@ Each takes run folders (`$BENCH_DIR/<label>`) or, for the `.sh` scripts, labels.
 | `analyze.mjs a` | stages by kind of block, the step's reads, each statement's client and server time |
 | `worker.mjs a b …` | the phases of the worker's apply, for empty blocks and blocks with transactions |
 | `worker-time.mjs a b …` | the worker's whole time between two applied blocks as a table that adds up to its span (the apply's stages without their node waits, the node waits, each other request type, posting answers, transit, idle, unaccounted), with queued time and garbage collection apart; whether the worker is saturated (idle under 5% of its span) or waiting for work; then the main thread's block: its wait for the worker's apply, its other stages, and each request type's round trip. A run whose worker lines have no `spanMs` is named and not read (exit 1) |
-| `equal.sh a b …` | per-table digests and node-table contents of each run's database |
+| `equal.sh a b …` | per-table digests and node-table contents of each run's database (exit 2 if a run could not be read) |
 | `contents-hash.sh a b …` | the exported contents hash of each run's database |
-| `tables.sh a b …` | every table's row count and a hash of its rows, per run, with the tables that differ from the first run's marked, and the number of differences |
+| `tables.sh a b …` | for every table any of the runs has, each run's row count and a hash of its rows (`absent` where a run has no such table), the tables that differ from the first run's marked, and the number of differences: exit 0 if none, 1 if some; exit 2, with no count, if a database or a table could not be read |
 | `profile.mjs a` | self time by function, from a run made with `NODE_FLAGS="--cpu-prof --cpu-prof-dir=<run folder>"` |
 | `roundtrip.sh a` | what one statement costs from a run's container to the database, by kind of statement: the machine's floor under every statement of a block |
 | `txshare.mjs [<height> …]` | the share of blocks with transactions near heights of the chain, from the node |
@@ -178,10 +178,12 @@ A change that claims to store the same contents is run on every range beside a r
 1. `compare.mjs base changed` says `same` for the chain of step outputs;
 2. `equal.sh base changed` prints the same digests and node-table hashes;
 3. `contents-hash.sh base changed` prints the same hash;
-4. `tables.sh base changed` ends with `differences from base: 0`.
+4. `tables.sh base changed` ends with `differences from base: 0` and exit status 0.
 
 `tables.sh` reads every row of every table of the core's and the modules' schemas; on a database of tens of gigabytes
-that takes minutes.
+that takes minutes. A table's hash is a sum over its rows (the first 64 bits of each row's MD5), so it needs no sort
+and reads a table of any size. A table only one run has is a difference. A read that fails is never taken for
+equality: the table is marked `NOT READ` and the script ends with `not compared` and status 2.
 
 ### A build with other ledger packages
 
