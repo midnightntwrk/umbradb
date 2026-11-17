@@ -46,6 +46,9 @@ commands:
   balance       print the balance and unspent coins of the local state (no network)
   send          spend one coin: --to <shielded address> --token <hex> --amount <base units> [--position <i>]
                 [--dry-run: stop before the fee wallet] [--no-submit: balance, prove and validate, do not submit]
+                [--dust-fee sdk|private: who pays the fee; sdk (default): the wallet SDK's Dust wallet, fed by the
+                public indexer; private: the wallet's own Dust coin, found by the Dust sync and spent with its
+                Merkle paths read from the module (spec 00062 phase 9)]
   address       print the wallet's shielded address for --network
   cross-check   replay the database's stored Zswap events up to the local state's tail height with the ledger's own
                 ZswapLocalState and compare with the local state (FR-140)
@@ -78,6 +81,8 @@ options:
   --db-url <url>             cross-check: postgres://user@host:port/database (password from --db-password-file)
   --db-password-file <path>  cross-check: the database password
   --out <file>               cross-check, send: write the report or the transfer record as JSON
+  --dust-chain <n>           dust --spend, send --dust-fee private: the Dust chain that pays (1, 2, … as dust
+                             prints them; default: the one the Dust snapshot holds that is worth the most)
 `;
 
 const { values: opt, positionals } = parseArgs({
@@ -101,6 +106,8 @@ const { values: opt, positionals } = parseArgs({
     "no-submit": { type: "boolean", default: false },
     "no-check": { type: "boolean", default: false },
     spend: { type: "boolean", default: false },
+    "dust-fee": { type: "string", default: "sdk" },
+    "dust-chain": { type: "string" },
     "node-http": { type: "string" },
     "node-ws": { type: "string" },
     "proof-server": { type: "string" },
@@ -144,8 +151,26 @@ function label(): string {
 
 const statePath = (): string => join(resolve(opt.data), "wallets", label(), "state.json");
 
+/** `--dust-chain`, as the chain's index (0-based), or undefined. */
+function dustChain(): number | undefined {
+  if (opt["dust-chain"] === undefined) return undefined;
+  const n = Number(opt["dust-chain"]);
+  if (!Number.isInteger(n) || n < 1) throw new Error("--dust-chain is a chain's number as dust prints it (1, 2, …)");
+  return n - 1;
+}
+
+type UnprovenTransaction = ReturnType<Ledger["Transaction"]["fromParts"]>;
+
 /** The fee's margin in blocks, as the SDK's fee wallet is configured (`costParameters.feeBlocksMargin`). */
 const FEE_MARGIN_BLOCKS = 5;
+/** An intent's time to live, as the SDK's balancing gives it (`payProveSubmit`'s default). */
+const INTENT_TTL_MS = 30 * 60_000;
+/**
+ * The oldest Dust snapshot a real send pays from, in seconds: the chain checks a Dust spend against the roots it
+ * recorded at the spend's time (the snapshot's block time) and drops roots older than its global TTL (3,600 s in the
+ * initial ledger parameters) at every block; this leaves ten minutes for proving and inclusion.
+ */
+const DUST_SNAPSHOT_MAX_AGE_S = 3_000;
 
 /** The wallet's seeds. The Dust and Night seeds exist only for a mnemonic (needed by `send`). */
 async function seeds(): Promise<{ zswap: Uint8Array; all: SdkSeeds | null }> {
@@ -250,6 +275,8 @@ async function cmdAddress(): Promise<void> {
 
 async function cmdSend(): Promise<void> {
   if (!opt.to || !opt.token || !opt.amount) throw new Error("send needs --to <shielded address> --token <hex> --amount <base units>");
+  const dustFee = opt["dust-fee"];
+  if (dustFee !== "sdk" && dustFee !== "private") throw new Error(`--dust-fee is sdk or private, not ${dustFee}`);
   const network = opt.network ?? env("PSS_NETWORK");
   const recipient = parseShieldedAddress(opt.to, network);
   const token = opt.token.toLowerCase();
@@ -262,20 +289,21 @@ async function cmdSend(): Promise<void> {
   // The transfer row of the benchmark (spec §8) reads the client's peak memory from the record.
   const memory = watchRss();
   const s = await seeds();
+  if (s.all === null && dustFee === "private") throw new Error("--dust-fee private needs the wallet's mnemonic: its Dust seed gives the Dust key");
   if (s.all === null && !opt["dry-run"]) throw new Error("send needs the wallet's mnemonic for its Dust fee wallet (or --dry-run)");
-  const record: Record<string, unknown> = { startedAt: new Date().toISOString(), wallet: label(), network, token, amount: amount.toString(), recipient: opt.to, timings: {} };
+  const record: Record<string, unknown> = { startedAt: new Date().toISOString(), wallet: label(), network, token, amount: amount.toString(), recipient: opt.to, dustFee, timings: {} };
   const timings = record.timings as Record<string, number>;
   const t = await tools(s.zswap);
   const sdk = opt["dry-run"] ? null : await loadSdk();
+  const proofServer = opt["proof-server"] ?? process.env.PSS_PROOF_SERVER?.trim() ?? "http://127.0.0.1:49343";
+  // FR-126: the spends' proof inputs hold the coin and Dust secret keys, so the prover must run on this machine.
+  if (sdk !== null && !["127.0.0.1", "localhost", "[::1]"].includes(new URL(proofServer).hostname)) {
+    throw new Error(`the proof server must be local (loopback), not ${new URL(proofServer).hostname}`);
+  }
   let feeWallet: Awaited<ReturnType<NonNullable<typeof sdk>["openFeeWallet"]>> | null = null;
   try {
     // The fee wallet's sync is the long step (minutes); the path is built after it so its root is fresh.
-    if (sdk !== null) {
-      const proofServer = opt["proof-server"] ?? process.env.PSS_PROOF_SERVER?.trim() ?? "http://127.0.0.1:49343";
-      // FR-126: the spend's proof input holds the coin secret key, so the prover must run on this machine.
-      if (!["127.0.0.1", "localhost", "[::1]"].includes(new URL(proofServer).hostname)) {
-        throw new Error(`the proof server must be local (loopback), not ${new URL(proofServer).hostname}`);
-      }
+    if (sdk !== null && dustFee === "sdk") {
       const started = performance.now();
       feeWallet = await sdk.openFeeWallet(
         s.all!,
@@ -340,33 +368,58 @@ async function cmdSend(): Promise<void> {
     }
     if (plan === null) throw new Error("no spend could be built against a current root after three attempts", { cause: lastError });
     log(`spend built: nullifier ${plan.nullifier.slice(0, 16)}…, ${plan.leftHashes} left hashes, ${plan.rightUpdates} right updates`);
-    if (feeWallet !== null && sdk !== null) {
-      const submitted = await sdk.payProveSubmit(feeWallet, plan.unproven, nodeWs, { log, submit: !opt["no-submit"] });
-      record.transaction = submitted;
-      Object.assign(timings, submitted.timings);
-      if (submitted.finalized !== null) {
-        // FR-128: the spent coin is marked; the change's commitment waits for the next sync.
-        const state = readState(statePath())!;
-        const coin = record.coin as { position: number };
-        writeState(statePath(), {
-          ...state,
-          pending: [
-            ...state.pending,
-            {
-              txHash: submitted.txHash,
-              block: { hash: submitted.finalized.blockHash, height: submitted.finalized.blockHeight },
-              spent: { position: coin.position, nullifier: plan.nullifier },
-              change: plan.change,
-              payment: { commitment: plan.payment.commitment, value: plan.payment.value, tokenType: plan.payment.tokenType },
-              at: new Date().toISOString(),
-            },
-          ],
-        });
-        log(`finalized in block ${submitted.finalized.blockHeight} (${submitted.finalized.blockHash}), transaction ${submitted.txHash}`);
+    let submitted: { txHash: string; finalized: { blockHash: string; blockHeight: number } | null } | null = null;
+    if (dustFee === "private") {
+      // The fee paid by the wallet's own Dust coin: Dust sync, the coin's paths read privately, its spend (phase 9).
+      const paid = await payWithPrivateDust(t, plan.unproven, network, s.all!.dust);
+      record.dust = paid.report;
+      Object.assign(timings, paid.timings);
+      log(`fee: ${paid.report.spend.fee} Specks paid by Dust chain ${paid.report.chain}'s coin at position ${paid.report.coin.position} (vFee ${paid.report.spend.vFee})`);
+      if (sdk !== null) {
+        const proven = await sdk.proveAndValidate(paid.unproven, { network, proofServer, ledgerParameters: paid.ledgerParameters, log });
+        Object.assign(timings, proven.timings);
+        const transaction: Record<string, unknown> = { txHash: proven.txHash, identifiers: proven.identifiers, bytes: proven.bytes.length, validation: proven.validation, finalized: null, inBlock: null };
+        record.transaction = transaction;
+        if (!opt["no-submit"]) {
+          const age = Date.now() / 1000 - paid.blockTime.getTime() / 1000;
+          if (age > DUST_SNAPSHOT_MAX_AGE_S) {
+            throw new Error(`the Dust snapshot's block is ${Math.round(age)} s old (more than ${DUST_SNAPSHOT_MAX_AGE_S} s): the chain may no longer hold its roots; rebuild the snapshot (POST ${ROUTES.adminSnapshot}) and send again`);
+          }
+          const sent = await sdk.submitFinalized(proven.bytes, nodeWs, { log });
+          Object.assign(transaction, { finalized: sent.finalized, inBlock: sent.inBlock });
+          Object.assign(timings, { toInBlockMs: sent.toInBlockMs, toFinalizedMs: sent.toFinalizedMs });
+          submitted = { txHash: proven.txHash, finalized: sent.finalized };
+        }
       }
+    } else if (feeWallet !== null && sdk !== null) {
+      const result = await sdk.payProveSubmit(feeWallet, plan.unproven, nodeWs, { log, submit: !opt["no-submit"] });
+      record.transaction = result;
+      Object.assign(timings, result.timings);
+      submitted = result;
+    }
+    if (submitted !== null && submitted.finalized !== null) {
+      // FR-128: the spent coin is marked; the change's commitment waits for the next sync.
+      const state = readState(statePath())!;
+      const coin = record.coin as { position: number };
+      writeState(statePath(), {
+        ...state,
+        pending: [
+          ...state.pending,
+          {
+            txHash: submitted.txHash,
+            block: { hash: submitted.finalized.blockHash, height: submitted.finalized.blockHeight },
+            spent: { position: coin.position, nullifier: plan.nullifier },
+            change: plan.change,
+            payment: { commitment: plan.payment.commitment, value: plan.payment.value, tokenType: plan.payment.tokenType },
+            at: new Date().toISOString(),
+          },
+        ],
+      });
+      log(`finalized in block ${submitted.finalized.blockHeight} (${submitted.finalized.blockHash}), transaction ${submitted.txHash}`);
     }
     record.finishedAt = new Date().toISOString();
     record.peakRssBytes = memory.stop();
+    record.submitted = submitted !== null && submitted.finalized !== null;
     const out = opt.out ?? join(resolve(opt.data), "transfers", `${String(record.startedAt).replace(/[:.]/g, "-")}.json`);
     mkdirSync(join(out, ".."), { recursive: true, mode: 0o700 });
     writeFileSync(out, json(record), { mode: 0o600 });
@@ -375,6 +428,43 @@ async function cmdSend(): Promise<void> {
   } finally {
     await feeWallet?.stop();
     await t.close();
+  }
+}
+
+/**
+ * `send --dust-fee private`: the wallet's Dust sync with the check, the paying coin's Merkle path read by PIR, the
+ * ledger's Dust local state from it and the generation records (both roots the snapshot's), and `unproven` with its
+ * fee paid by that coin (a balancing intent dated at the snapshot's block time, `payFeeWithDust`). Nothing is proven.
+ */
+async function payWithPrivateDust(t: Tools, unproven: Uint8Array, network: string, dustSeed: Uint8Array) {
+  const http = new PssHttp(opt.server);
+  const cache = new DiskDustCache(join(resolve(opt.data), "cache"));
+  const scheme = { multiplier: t.multiplier, ipirWasm: t.ipirWasm, ...(t.ipirWorkers === undefined ? {} : { ipirWorkers: t.ipirWorkers }) };
+  let started = performance.now();
+  const sync = await dustSync({ ledger: t.ledger, dustSeed, http, log, cache, openChecker: () => DustChecker.open(http, scheme, cache) });
+  const dustSyncMs = performance.now() - started;
+  try {
+    const checker = sync.checker!;
+    const key = t.ledger.DustSecretKey.fromSeed(dustSeed);
+    try {
+      const ready = await dustSpendable(t.ledger, { checker, chains: sync.chains, params: dustParamsOf(t.ledger, sync), secretKey: key, owner: sync.owner, kernel: t.kernel, ...(dustChain() === undefined ? {} : { chain: dustChain()! }) });
+      const lp = ledgerParametersOf(t.ledger, sync);
+      started = performance.now();
+      const base: UnprovenTransaction = t.ledger.Transaction.deserialize("signature", "pre-proof", "pre-binding", unproven) as UnprovenTransaction;
+      const paid = payFeeWithDust(t.ledger, { network, base, local: ready.state, secretKey: key, coin: ready.coin, ctime: ready.ctime, ttl: new Date(Date.now() + INTENT_TTL_MS), parameters: lp.parameters, margin: FEE_MARGIN_BLOCKS });
+      const feeMs = performance.now() - started;
+      if (paid.spend.vFee > ready.value) throw new Error(`the fee (${paid.spend.vFee} Specks) is more than the Dust coin holds (${ready.value} Specks)`);
+      const report = {
+        ...spendableReport(ready, checker),
+        check: { id: checker.id, scheme: checker.manifest.scheme, calls: checker.stats.calls },
+        spend: { fee: paid.fee.toString(), vFee: paid.spend.vFee.toString(), rounds: paid.rounds, ledgerParametersHeight: lp.height, nullifier: `0x${paid.spend.oldNullifier.toString(16).padStart(64, "0")}` },
+      };
+      return { unproven: paid.transaction.serialize(), ledgerParameters: lp.bytes, blockTime: ready.ctime, report, timings: { dustSyncMs, dustPathMs: ready.ms.path, dustStateMs: ready.ms.state, dustFeeMs: feeMs } };
+    } finally {
+      key.clear();
+    }
+  } finally {
+    sync.checker?.dispose();
   }
 }
 
@@ -550,12 +640,12 @@ function spendableReport(ready: DustSpendable, checker: DustChecker) {
  */
 async function spendInMemory(ledger: Ledger, http: PssHttp, sync: DustSyncResult, dustSeed: Uint8Array) {
   const checker = sync.checker!;
+  const { parameters, height } = ledgerParametersOf(ledger, sync);
+  // The network's name, for the transaction: the snapshot's manifest names it.
+  const network = decodeManifest((await http.manifest()).bytes).network;
   const key = ledger.DustSecretKey.fromSeed(dustSeed);
   try {
-    const ready = await dustSpendable(ledger, { checker, chains: sync.chains, params: dustParamsOf(ledger, sync), secretKey: key, owner: sync.owner, kernel: new Kernel(compileKernel()) });
-    const { parameters, height } = ledgerParametersOf(ledger, sync);
-    // The network's name, for the transaction: the snapshot's manifest names it.
-    const network = decodeManifest((await http.manifest()).bytes).network;
+    const ready = await dustSpendable(ledger, { checker, chains: sync.chains, params: dustParamsOf(ledger, sync), secretKey: key, owner: sync.owner, kernel: new Kernel(compileKernel()), ...(dustChain() === undefined ? {} : { chain: dustChain()! }) });
     const paid = payFeeWithDust(ledger, { network, base: ledger.Transaction.fromParts(network), local: ready.state, secretKey: key, coin: ready.coin, ctime: ready.ctime, ttl: new Date(Date.now() + 30 * 60_000), parameters, margin: FEE_MARGIN_BLOCKS });
     const r = spendableReport(ready, checker);
     const report = { ...r, spend: { network, fee: paid.fee.toString(), vFee: paid.spend.vFee.toString(), rounds: paid.rounds, ledgerParametersHeight: height, nullifier: `0x${paid.spend.oldNullifier.toString(16).padStart(64, "0")}`, proven: false, sent: false } };

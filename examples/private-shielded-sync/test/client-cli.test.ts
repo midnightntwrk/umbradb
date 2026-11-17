@@ -118,6 +118,22 @@ describe.skipIf(!installed)("the command line (with the client's install)", () =
     const text = await cli(["dust", "--zswap-seed-file", seedFile, "--server", r.origin]);
     expect(text.code).toBe(1);
     expect(text.stderr).toContain("dust needs the wallet's mnemonic");
+    // Phase 9: a spend needs the Dust snapshot, which this chain has none of; nothing secret is printed.
+    const env = { PATH: process.env.PATH ?? "", PSS_TEST_MNEMONIC: mnemonic };
+    const spend = await run(process.execPath, [MAIN, "dust", "--mnemonic-env", "PSS_TEST_MNEMONIC", "--server", r.origin, "--spend"], { env }).then(
+      () => ({ code: 0, stderr: "" }),
+      (e: { code: number; stderr: string }) => ({ code: e.code, stderr: e.stderr }),
+    );
+    expect(spend.code).toBe(1);
+    expect(spend.stderr).toMatch(/--spend needs the Dust snapshot: .*no Dust check table has been built yet/);
+    expect(spend.stderr).not.toContain("abandon");
+    const noCheck = await cli(["dust", "--zswap-seed-file", seedFile, "--server", r.origin, "--spend", "--no-check"]);
+    expect(noCheck.code).toBe(1);
+    const fee = await cli(["send", "--zswap-seed-file", seedFile, "--to", "x", "--token", "0".repeat(64), "--amount", "1", "--network", "undeployed", "--node-http", "http://127.0.0.1:1", "--node-ws", "ws://127.0.0.1:1", "--dust-fee", "indexer"]);
+    expect([fee.code, fee.stderr.includes("--dust-fee is sdk or private, not indexer")]).toEqual([1, true]);
+    const to = (await cli(["address", "--zswap-seed-file", seedFile, "--network", "undeployed"])).stdout.trim();
+    const seedOnly = await cli(["send", "--zswap-seed-file", seedFile, "--to", to, "--token", "0".repeat(64), "--amount", "1", "--network", "undeployed", "--node-http", "http://127.0.0.1:1", "--node-ws", "ws://127.0.0.1:1", "--dust-fee", "private", "--dry-run"]);
+    expect([seedOnly.code, seedOnly.stderr.includes("--dust-fee private needs the wallet's mnemonic")]).toEqual([1, true]);
   });
 
   it("refuses a wallet it cannot name, and a missing mnemonic variable, without printing anything secret", async () => {

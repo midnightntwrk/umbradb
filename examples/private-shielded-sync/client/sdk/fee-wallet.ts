@@ -28,6 +28,7 @@ import {
   NodeClient,
   ProtocolVersion,
   PublicKey,
+  SerializedTransaction,
   ShieldedWallet,
   type UnshieldedKeystore,
   UnshieldedWallet,
@@ -199,13 +200,38 @@ export async function payProveSubmit(
     };
   }
 
+  const sent = await submitFinalized(bytes, nodeWs, { log });
+  return {
+    txHash: tx.transactionHash(),
+    identifiers: tx.identifiers(),
+    bytes: bytes.length,
+    validation: "ok",
+    finalized: sent.finalized,
+    inBlock: sent.inBlock,
+    timings: { balanceMs, signMs, proveMs, validateMs, toInBlockMs: sent.toInBlockMs, toFinalizedMs: sent.toFinalizedMs },
+  };
+}
+
+export interface Sent {
+  readonly finalized: { readonly blockHash: string; readonly blockHeight: number };
+  readonly inBlock: { readonly blockHash: string; readonly blockHeight: number } | null;
+  readonly toInBlockMs: number;
+  readonly toFinalizedMs: number;
+}
+
+/**
+ * Submits a finalized transaction (serialized) as the unsigned extrinsic `midnight.sendMnTransaction` through the SDK's
+ * Polkadot node client and waits for finality (FR-127, decision Q24: it reports the block).
+ */
+export async function submitFinalized(bytes: Uint8Array, nodeWs: string, options: { log?: (line: string) => void } = {}): Promise<Sent> {
+  const log = options.log ?? (() => {});
   const client = await NodeClient.PolkadotNodeClient.init(NodeClient.makeConfig({ nodeURL: new URL(nodeWs) }));
   const submitted = performance.now();
-  let inBlock: Submitted["inBlock"] = null;
+  let inBlock: Sent["inBlock"] = null;
   let toInBlockMs = Number.NaN;
   try {
     const final = await new Promise<{ blockHash: string; blockHeight: number }>((resolve, reject) => {
-      const sub = client.sendMidnightTransaction(bytes).subscribe({
+      const sub = client.sendMidnightTransaction(SerializedTransaction.of(bytes)).subscribe({
         next: (ev) => {
           const e = ev as unknown as { _tag: string; blockHash?: string; blockHeight?: bigint | number };
           log(`submission: ${e._tag}${e.blockHeight !== undefined ? ` at ${e.blockHeight}` : ""}`);
@@ -221,15 +247,7 @@ export async function payProveSubmit(
         error: (err: unknown) => reject(err instanceof Error ? err : new Error(String(err))),
       });
     });
-    return {
-      txHash: tx.transactionHash(),
-      identifiers: tx.identifiers(),
-      bytes: bytes.length,
-      validation: "ok",
-      finalized: final,
-      inBlock,
-      timings: { balanceMs, signMs, proveMs, validateMs, toInBlockMs, toFinalizedMs: performance.now() - submitted },
-    };
+    return { finalized: final, inBlock, toInBlockMs, toFinalizedMs: performance.now() - submitted };
   } finally {
     await client.close();
   }
