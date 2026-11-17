@@ -128,10 +128,14 @@ TEMPLATE=<template> bench/range/run.sh my-label <stop-height>
   earlier `run.sh` made it (it puts a comment on each), never a database marked as a template. It first checks that
   the container is running, the network, the password file and the template are there; a refusal (status 2) changes
   nothing.
-- An interrupt removes the run's container. A run whose cursor has not moved for `STALL_LIMIT` seconds (900 unless
-  given; a range that crosses a change of ledger version converts for minutes) is stopped, and `run.sh` ends with
-  status 1.
-- Records, in `$BENCH_DIR/my-label/`: `status.jsonl` (each change of `/status`), `run.log`,
+- Exits 0 only for a complete run: its last `/status` sample is the stop height in the state `stopped`, and its
+  process then ends with status 0 once `run.sh` stops it. Any other end exits 1, naming the last state and how the
+  process ended, with the log's last lines: a halt, a stop below the height (at an upgrade boundary), a container that
+  ended or was killed, or a cursor that has not moved for `STALL_LIMIT` seconds (900 unless given; a range that
+  crosses a change of ledger version converts for minutes), which `run.sh` stops. An interrupt exits 130. However a
+  run ends, its container is removed, its log kept in `run.log` and its state as it ended (exit code, a kill for
+  memory) in `container.json`.
+- Records, in `$BENCH_DIR/my-label/`: `status.jsonl` (each change of `/status`), `run.log`, `container.json`,
   `pg_stat_statements.csv`, `table_stats.csv`, `result.json` (heights per second), and the block trace.
 - Arguments after the stop height are `KEY=VALUE` pairs for the run's environment.
 - `CORE_EXTRA` adds settings to the run's `core` entry, as JSON members after a comma:

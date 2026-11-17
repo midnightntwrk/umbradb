@@ -20,15 +20,19 @@
 #   NODE_FLAGS          flags for the run's node, e.g. "--cpu-prof --cpu-prof-dir=<run folder>"
 #   STALL_LIMIT         seconds the cursor may stay where it is before the run is stopped as stuck (default 900)
 #
-# Writes $BENCH_DIR/<label>/: umbradb.config.ts, run.log, status.jsonl, pg_stat_statements.csv, table_stats.csv,
-# result.json and the trace's files. Its database is <prefix><label with - as _>, its container
-# umbradb-bench-run-<label>. Touches only the bench's own Docker objects.
+# Writes $BENCH_DIR/<label>/: umbradb.config.ts, run.log, container.json (the run container's state as it ended),
+# status.jsonl, pg_stat_statements.csv, table_stats.csv, result.json and the trace's files. Its database is
+# <prefix><label with - as _>, its container umbradb-bench-run-<label>. Touches only the bench's own Docker objects.
 #
 # What it removes and drops is a run's own, checked before anything is changed: the label's folder only if it is
 # empty or an earlier run's of this label in this place (its marker, .bench-run, written below), never one that holds
 # the password file (compared by the files the paths lead to); the label's database only if an earlier run.sh made it
 # (its comment, written below), never a template; and only once the container, the network, the password file and the
-# template are there. Exit status 2: refused, nothing changed.
+# template are there.
+#
+# Exit status: 0 the run is complete (it stopped at the stop height and its process then ended with status 0); 1 it
+# is not (it halted, stopped below the height, its container ended, or it was stopped as stuck: run.sh names what it
+# saw and prints the log's last lines); 2 refused, nothing changed; 130 interrupted.
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 if [ $# -lt 2 ]; then echo "usage: run.sh <label> <stop-height> [KEY=VALUE ...]" >&2; exit 2; fi
@@ -145,9 +149,19 @@ CONFIG_FILE
 ENVS=()
 if [ "${TRACE:-on}" != off ]; then ENVS+=(-e "UMBRADB_TRACE=$OUT/trace.jsonl"); fi
 for kv in "$@"; do ENVS+=(-e "$kv"); done
-# From here the run's container exists: it is removed however run.sh ends, an interrupt included.
-trap 'docker rm -f "$RUN" >/dev/null 2>&1 || true' EXIT
-trap 'echo "run.sh: interrupted; the run container is removed" >&2; exit 130' INT TERM
+# The run's container once it has ended or been stopped, however run.sh ends (an interrupt included): its state
+# (status, exit code, a kill for memory, its error, its times) into container.json and its log into run.log, then it
+# is removed. Once only.
+KEPT=""
+keep_container() {
+  [ -z "$KEPT" ] || return 0
+  KEPT=1
+  docker inspect -f '{{json .State}}' "$RUN" > "$OUT/container.json" 2>/dev/null || rm -f "$OUT/container.json"
+  docker logs "$RUN" > "$OUT/run.log" 2>&1 || true
+  docker rm -f "$RUN" >/dev/null 2>&1 || true
+}
+trap keep_container EXIT
+trap 'echo "run.sh: interrupted; the run container is removed, its log and state kept in $OUT" >&2; exit 130' INT TERM
 # shellcheck disable=SC2086  # NODE_FLAGS is a list of flags
 docker run -d --name "$RUN" --network "$BENCH_NETWORK" --env-file <(printf 'PGPASSWORD=%s\n' "$(cat "$BENCH_PG_PASSWORD_FILE")") \
   ${ENVS[@]+"${ENVS[@]}"} -v "$BUILD:$BUILD:ro" -v "$OUT:$OUT" -w "$OUT" -p 127.0.0.1::8081 "$BENCH_NODE_IMAGE" \
@@ -176,9 +190,16 @@ while :; do
 done
 # Stopped with SIGTERM, so the process closes cleanly and the trace is written to its end.
 docker stop -t 120 "$RUN" >/dev/null 2>&1 || true
-docker logs "$RUN" > "$OUT/run.log" 2>&1 || true
-docker rm -f "$RUN" >/dev/null 2>&1 || true
+keep_container
 bench_psql -d postgres -c "COPY (SELECT calls, round(total_exec_time::numeric,2) AS exec_ms, round((total_plan_time)::numeric,2) AS plan_ms, rows, shared_blks_hit, shared_blks_read, wal_bytes, left(regexp_replace(query, '\s+', ' ', 'g'), 400) AS query FROM pg_stat_statements s JOIN pg_database d ON d.oid = s.dbid WHERE d.datname = '$DB' ORDER BY total_exec_time DESC) TO STDOUT WITH (FORMAT csv, HEADER)" > "$OUT/pg_stat_statements.csv"
 bench_psql -d "$DB" -c "COPY (SELECT schemaname||'.'||relname AS t, seq_scan, idx_scan, idx_tup_fetch, n_tup_ins, n_tup_upd, n_tup_hot_upd, n_tup_del, n_live_tup, n_dead_tup FROM pg_stat_user_tables WHERE schemaname LIKE 'core%' ORDER BY 1) TO STDOUT WITH (FORMAT csv, HEADER)" > "$OUT/table_stats.csv"
-node "$SCRIPTS/summary.mjs" "$OUT" | tee "$OUT/result.json"
-[ -z "$STALLED" ] || exit 1
+node "$SCRIPTS/summary.mjs" "$OUT" > "$OUT/result.json" || true
+cat "$OUT/result.json"
+# A complete run: its last /status sample is the stop height, stopped, and its process then ended with status 0 (it
+# exits 1 after a halt or a refusal). Anything else (a halt, a stop below the height, a container that ended or was
+# killed, a run stopped as stuck) fails, with the container's state and the log's last lines.
+ENDED="$(node -e 'try{const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));console.log(s.OOMKilled?"killed for memory":`status ${s.ExitCode}`)}catch{console.log("unknown")}' "$OUT/container.json")"
+if [ "${STATE:-}" = "stopped $STOP" ] && [ "$ENDED" = "status 0" ] && [ -z "$STALLED" ]; then exit 0; fi
+echo "run.sh: the run did not complete: its last status was ${STATE:-none}, not stopped $STOP; its process ended with $ENDED ($OUT/container.json); the last lines of $OUT/run.log:" >&2
+tail -n 20 "$OUT/run.log" | sed 's/^/  /' >&2
+exit 1

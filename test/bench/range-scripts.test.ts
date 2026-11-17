@@ -35,12 +35,14 @@ interface Ran {
 
 /**
  * Runs one script with `args`, in an environment without the bench's variables unless `env` gives them, from `cwd`
- * (this process's own unless given).
+ * (this process's own unless given). With `termAfter`, a shell script is sent SIGTERM after that many seconds by a
+ * shell that started it, as an interrupt would (spawnSync's own timeout closes its output first).
  */
-function run(script: string, args: readonly string[], env: Readonly<Record<string, string>> = {}, cwd?: string): Ran {
+function run(script: string, args: readonly string[], env: Readonly<Record<string, string>> = {}, cwd?: string, termAfter?: number): Ran {
   const base = Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^(BENCH_|BUILD$|TEMPLATE$|UMBRADB_LOCAL_NODE$|SKIP$|FROM$|TO$)/.test(name)));
   const command = script.endsWith(".sh") ? "bash" : process.execPath;
-  const result = spawnSync(command, [join(SCRIPTS, script), ...args], { encoding: "utf8", env: { ...base, ...env }, cwd });
+  const argv = termAfter === undefined ? [join(SCRIPTS, script), ...args] : ["-c", `bash "$0" "$@" & pid=$!; sleep ${termAfter}; kill -TERM "$pid"; wait "$pid"`, join(SCRIPTS, script), ...args];
+  const result = spawnSync(command, argv, { encoding: "utf8", env: { ...base, ...env }, cwd });
   return { code: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
@@ -1016,6 +1018,49 @@ exit 0
       } finally {
         host.done();
         drop("bench_old_run");
+      }
+    }, 120_000);
+
+    it("a run succeeds only if it stopped at the height asked for and its process then ended cleanly; any other end fails, its container's state and log kept", () => {
+      const host = machine();
+      const log = "admin endpoints listening\nthe stand-in's last line\n";
+      // Each run asks for height 200. [what the container does, how run.sh is ended, what run.sh must say]
+      const cases: [string, () => void, Record<string, string>, number | undefined][] = [
+        ["halted after progress", () => host.play([sample("syncing", 100), sample("syncing", 125), sample("halted", 125, { code: "root-mismatch" })], "stays", 1, log), {}, undefined],
+        ["stopped below the height asked for", () => host.play([sample("syncing", 100), sample("stopped", 150)], "stays", 0, log), {}, undefined],
+        ["its container died after progress", () => host.play([sample("syncing", 100), sample("syncing", 150)], "dies", 137, log), {}, undefined],
+        ["stopped by run.sh, the cursor stuck", () => host.play([sample("syncing", 100), sample("syncing", 110)], "stays", 0, log), { STALL_LIMIT: "1" }, undefined],
+        ["interrupted", () => host.play([sample("syncing", 100), sample("syncing", 110)], "stays", 0, log), {}, 5],
+        ["complete", () => host.play([sample("syncing", 100), sample("syncing", 150), sample("stopped", 200)], "stays", 0, log), {}, undefined],
+      ];
+      try {
+        const outcomes = cases.map(([what, play, env, timeout]) => {
+          play();
+          const result = run("run.sh", ["ended", "200"], { ...host.env, ...env }, undefined, timeout);
+          const folder = join(host.home, "ended");
+          const state = existsSync(join(folder, "container.json")) ? (JSON.parse(readFileSync(join(folder, "container.json"), "utf8")) as { ExitCode: number }) : null;
+          return {
+            what,
+            code: result.code,
+            said: result.stderr.includes("the run did not complete") && result.stderr.includes("the stand-in's last line"),
+            exitKept: state?.ExitCode ?? null,
+            logKept: existsSync(join(folder, "run.log")) && readFileSync(join(folder, "run.log"), "utf8") === log,
+            removed: /^rm -f umbradb-bench-run-ended$/m.test(host.calls().split(/^run -d /m)[1] ?? ""),
+          };
+        });
+        expect(outcomes).toEqual([
+          { what: "halted after progress", code: 1, said: true, exitKept: 1, logKept: true, removed: true },
+          { what: "stopped below the height asked for", code: 1, said: true, exitKept: 0, logKept: true, removed: true },
+          { what: "its container died after progress", code: 1, said: true, exitKept: 137, logKept: true, removed: true },
+          { what: "stopped by run.sh, the cursor stuck", code: 1, said: true, exitKept: 0, logKept: true, removed: true },
+          // Removed at once, its state as it was then: running.
+          { what: "interrupted", code: 130, said: false, exitKept: 0, logKept: true, removed: true },
+          { what: "complete", code: 0, said: false, exitKept: 0, logKept: true, removed: true },
+        ]);
+        expect(JSON.parse(readFileSync(join(host.home, "ended", "result.json"), "utf8"))).toMatchObject({ from: 100, to: 200, endState: "stopped" });
+      } finally {
+        host.done();
+        drop("bench_ended");
       }
     }, 120_000);
   });
