@@ -80,14 +80,14 @@ function startGpu(): Promise<GpuScan> {
     const { GpuScanner } = await import("../gpu/scan.ts" as string);
     const poseidon = (await import("../test/fixtures/poseidon-constants.json")).default;
     const device = await openGpu();
-    if (device === null) throw new Error("no WebGPU device in this browser");
+    if (device === null) throw new Error("this browser's WebGPU gives no GPU adapter");
     const scanner = (await GpuScanner.create(device.device, poseidon)) as GpuScan;
     const entries = new Uint8Array(36 * 64);
     for (let i = 0; i < entries.length; i++) entries[i] = (i * 151 + 7) & 255;
     const one = new Uint8Array(32);
     one[0] = 1;
     await scanner.scan(entries, one);
-    return scanner;
+    return { scan: (e: Uint8Array, secret: Uint8Array) => scanner.scan(e, secret), description: String(device.description) };
   })();
   return gpu;
 }
@@ -404,7 +404,8 @@ async function load(): Promise<Json> {
     ipirWasm: loadIpirWasm,
     ...(ipirWorkers === null ? {} : { ipirWorkers }),
     debugJson,
-    gpu: startGpu,
+    // Without WebGPU in this browser there is no scanner to start; with it, starting may still fail (no adapter).
+    ...("gpu" in navigator ? { gpu: startGpu } : {}),
   });
   dust?.dispose();
   dust = new DustSteps({
@@ -474,10 +475,11 @@ async function deriveKeys(args: { mnemonic?: string; seedHex?: string; generate?
  * The Wallet tab's sync (`./wallet-sync.ts`): the keys from the mnemonic (as step 1), then the shielded and Dust steps
  * a wallet needs for its balances, on this worker's state, so the Details tab's steps show what it did.
  */
-async function walletSync(args: { mnemonic?: string; seedHex?: string; gpu?: boolean }, progress: (text: string) => void): Promise<Json> {
+async function walletSync(args: { mnemonic?: string; seedHex?: string }, progress: (text: string) => void): Promise<Json> {
   const s = need(shielded, "load the kernel");
   const d = need(dust, "load the ledger");
-  const steps = walletSyncSteps({ keys: () => deriveKeys({ mnemonic: args.mnemonic ?? "", seedHex: args.seedHex ?? "" }), shielded: s, dust: d, gpu: args.gpu ?? false });
+  // The scan on the GPU where it starts, else on the CPU with the reason (phase 11).
+  const steps = walletSyncSteps({ keys: () => deriveKeys({ mnemonic: args.mnemonic ?? "", seedHex: args.seedHex ?? "" }), shielded: s, dust: d });
   const result = await runWalletSync(steps, { http, progress });
   return result as unknown as Json;
 }

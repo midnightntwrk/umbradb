@@ -16,6 +16,10 @@
  *   public artifact are held, and the opened tables kept.
  * - A wallet with nothing (a seed that received nothing, a new Dust key): zero balances, no error.
  * - A step that fails (the tail refused) is named with its message; the steps before it stay, with their cost.
+ * - The scan (phase 11): Node has no WebGPU, so the sync scans on the CPU and says why; with a GPU scanner it scans
+ *   there, and where the scanner does not start or fails it falls back to the CPU with the reason; the balances are the
+ *   same every way. The stand-in scanner answers with the CPU kernel: that the WebGPU kernel's matches equal the CPU
+ *   kernel's on the same entries is the GPU check's (`gpu/check.ts`, Deno), not Node's.
  */
 
 import { mkdtempSync, rmSync } from "node:fs";
@@ -31,9 +35,9 @@ import type { Ledger } from "../client/ledger.ts";
 import { compileKernel, Kernel } from "../kernel/kernel.ts";
 import { inlineMultiplier } from "../pir/index.ts";
 import { DustSteps } from "../web/dust-steps.ts";
-import { ShieldedSteps } from "../web/shielded-steps.ts";
+import { type GpuScan, ShieldedSteps } from "../web/shielded-steps.ts";
 import { runWalletSync, type WalletSyncResult, walletSyncSteps } from "../web/wallet-sync.ts";
-import { walletBalancesHtml, walletCostHtml, walletFailureHtml } from "../web/wallet-view.ts";
+import { walletBalancesHtml, walletCostHtml, walletFailureHtml, walletScanText } from "../web/wallet-view.ts";
 import { ADMIN_SECRET, builtAt, type ModuleRun, startModule, stoppedAt } from "./client-harness.ts";
 import { type DustRoutes, DUST_SEED, dustWorld } from "./server-dust-world.ts";
 import { type ScenarioChain, scenarioChain } from "./server-chain.ts";
@@ -89,9 +93,9 @@ function worldFetch(refuse: (path: string) => boolean = () => false): FetchLike 
 }
 
 /** A wallet as the page's worker holds one: its shielded and Dust steps over one client, and its sync's steps. */
-function pageWallet(zswapSeed: Uint8Array, dustSeed: Uint8Array, fetchLike: FetchLike) {
+function pageWallet(zswapSeed: Uint8Array, dustSeed: Uint8Array, fetchLike: FetchLike, scan: { gpu?: () => Promise<GpuScan>; useGpu?: boolean } = {}) {
   const http = new PssHttp(r.origin, { fetch: fetchLike });
-  const shielded = new ShieldedSteps({ ledger: L, kernel, http, multiplier: inlineMultiplier, ipirWasm: async () => Promise.reject(new Error("no IPIR+SP here")) });
+  const shielded = new ShieldedSteps({ ledger: L, kernel, http, multiplier: inlineMultiplier, ipirWasm: async () => Promise.reject(new Error("no IPIR+SP here")), ...(scan.gpu === undefined ? {} : { gpu: scan.gpu }) });
   const dust = new DustSteps({
     ledger: L,
     http,
@@ -105,7 +109,7 @@ function pageWallet(zswapSeed: Uint8Array, dustSeed: Uint8Array, fetchLike: Fetc
     dust.setSeed(dustSeed);
     return { source: "the test's seeds" };
   };
-  const steps = walletSyncSteps({ keys, shielded, dust });
+  const steps = walletSyncSteps({ keys, shielded, dust, ...(scan.useGpu === undefined ? {} : { gpu: scan.useGpu }) });
   const progress: string[] = [];
   return { http, shielded, dust, steps, progress, sync: () => runWalletSync(steps, { http, progress: (t) => progress.push(t) }) };
 }
@@ -185,6 +189,13 @@ describe("the Wallet tab's sync (phase 10)", () => {
     expect(cost).toMatch(/Last sync: .+ of processing \(the wallet computing .+, waiting for the server .+\); up .+, down .+ in \d+ requests\./);
     expect(cost).toContain("shielded (with the keys)");
     expect(walletFailureHtml(first)).toBe("");
+    // Node has no WebGPU: the CPU scanned, and the page says why, beside the cost.
+    expect(first.scan).toMatchObject({ gpu: false, device: null, fallback: "this browser has no WebGPU" });
+    expect(first.scan!.ms).toBe(first.steps.find((s) => s.name === "scan")!.ms);
+    expect(walletScanText(first)).toMatch(/^Scan: on the CPU \(the WebAssembly kernel, one thread\), [\d,]+ entries in .+, because the GPU scan did not run: this browser has no WebGPU\.$/);
+    expect(cost).toContain("because the GPU scan did not run: this browser has no WebGPU");
+    // The per-step table keeps the scan's time.
+    expect(cost).toContain(`<td class="mono">Find my outputs (scan)</td><td class="mono">${first.scan!.ms >= 1000 ? `${(first.scan!.ms / 1000).toFixed(1)} s` : `${Math.round(first.scan!.ms)} ms`}</td>`);
   });
 
   it("a second sync of the same wallet downloads less: the files, the Dust chunks and the check table's public artifact are held, the opened tables kept; the same balances", { timeout: LONG }, async () => {
@@ -200,6 +211,44 @@ describe("the Wallet tab's sync (phase 10)", () => {
     expect(files.requests).toBe(1);
     expect(second.steps.find((s) => s.name === "dustFile")!.answer).toMatchObject({ chunksDownloaded: 0 });
     expect(second.steps.find((s) => s.name === "dustCheck")!.answer).toMatchObject({ check: { publicArtifact: { cached: true } } });
+  });
+
+  it("the scan (phase 11): on the GPU when it starts; on the CPU with the reason when it does not start or fails, or when asked; the same matches and balances every way; the Details box's scan still fails without a GPU", { timeout: LONG }, async () => {
+    const expected = await ledgerBalances(SEED_A);
+    // A stand-in GPU scanner: the CPU kernel's answer, so the sync's GPU path is followed with known matches.
+    let gpuScans = 0;
+    const standIn: GpuScan = {
+      description: "a stand-in adapter",
+      scan: async (entries, secret) => {
+        gpuScans++;
+        return kernel.scan(entries, secret);
+      },
+    };
+    const runs = {
+      gpu: await pageWallet(SEED_A, DUST_SEED, worldFetch(), { gpu: async () => standIn }).sync(),
+      noAdapter: await pageWallet(SEED_A, DUST_SEED, worldFetch(), { gpu: async () => Promise.reject(new Error("this browser's WebGPU gives no GPU adapter")) }).sync(),
+      failed: await pageWallet(SEED_A, DUST_SEED, worldFetch(), { gpu: async () => ({ scan: async () => Promise.reject(new Error("the GPU device was lost")) }) }).sync(),
+      cpuAsked: await pageWallet(SEED_A, DUST_SEED, worldFetch(), { gpu: async () => standIn, useGpu: false }).sync(),
+    };
+    expect(gpuScans).toBe(1);
+    expect(runs.gpu.scan).toMatchObject({ gpu: true, device: "a stand-in adapter", fallback: null });
+    expect(walletScanText(runs.gpu)).toMatch(/^Scan: on the GPU \(WebGPU, a stand-in adapter\), [\d,]+ entries in .+\.$/);
+    expect(runs.noAdapter.scan).toMatchObject({ gpu: false, fallback: "this browser's WebGPU gives no GPU adapter" });
+    expect(runs.failed.scan).toMatchObject({ gpu: false, fallback: "the GPU device was lost" });
+    expect(runs.cpuAsked.scan).toMatchObject({ gpu: false, fallback: null });
+    expect(walletScanText(runs.cpuAsked)).toMatch(/one thread\), [\d,]+ entries in [^,]+\.$/);
+    const matchesOf = (x: WalletSyncResult) => (x.steps.find((s) => s.name === "scan")!.answer!.matches as Json[]).map((m) => m.position);
+    for (const [name, run] of Object.entries(runs)) {
+      expect(run.ok, name).toBe(true);
+      expect(run.balances.shielded, name).toEqual(expected);
+      expect(matchesOf(run), name).toEqual(matchesOf(first));
+    }
+    expect(matchesOf(first).length).toBeGreaterThan(0);
+    // The Details tab's scan with its box ticked and no GPU fails as before (no fallback there).
+    const details = pageWallet(SEED_A, DUST_SEED, worldFetch());
+    details.steps[0]!.run(() => {});
+    await details.shielded.getFiles({ debug: false });
+    await expect(details.shielded.scan({ gpu: true })).rejects.toThrow("this browser has no WebGPU");
   });
 
   it("a wallet with nothing: zero balances shown plainly, no error", { timeout: LONG }, async () => {

@@ -55,12 +55,23 @@ export function walletFailureHtml(r: WalletSyncResult): string {
 
 const costRow = (name: string, c: WalletCost): string[] => [esc(name), seconds(c.ms), seconds(c.computeMs), seconds(c.waitMs), kb(c.up), kb(c.down), String(c.requests)];
 
-/** The last sync's cost: the totals in one line, then by part and by step. */
+/** Which scan ran and its time: on the GPU, or on the CPU and why. */
+export function walletScanText(r: WalletSyncResult): string {
+  const s = r.scan;
+  if (s === null) return "Scan: not run.";
+  const n = s.entries.toLocaleString("en-US");
+  if (s.gpu) return `Scan: on the GPU (WebGPU${s.device ? `, ${s.device}` : ""}), ${n} entries in ${seconds(s.ms)}.`;
+  return `Scan: on the CPU (the WebAssembly kernel, one thread), ${n} entries in ${seconds(s.ms)}${s.fallback === null ? "." : `, because the GPU scan did not run: ${s.fallback}.`}`;
+}
+
+/** The last sync's cost: the totals in one line, which scan ran, then by part and by step. */
 export function walletCostHtml(r: WalletSyncResult): string {
   const c = r.cost;
   const line = `Last sync: ${seconds(c.ms)} of processing (the wallet computing ${seconds(c.computeMs)}, waiting for the server ${seconds(c.waitMs)}); up ${kb(c.up)}, down ${kb(c.down)} in ${c.requests} requests.`;
+  const scan = r.scan;
+  const scanLine = `<div class="costline ${scan !== null && scan.fallback !== null ? "warn" : ""}" id="wallet-scan">${esc(walletScanText(r))}</div>`;
   const head = ["", "time", "computing", "waiting for the server", "up", "down", "requests"];
   const parts = table(head, [costRow("shielded (with the keys)", c.parts.shielded), costRow("Dust", c.parts.dust)], costRow("total", c));
   const steps = table(head, r.steps.map((s) => costRow(`${s.label}${s.ok ? "" : " (failed)"}`, s)));
-  return `<div class="costline">${esc(line)}</div>${parts}<details><summary>by step</summary>${steps}</details>`;
+  return `<div class="costline">${esc(line)}</div>${scanLine}${parts}<details><summary>by step</summary>${steps}</details>`;
 }

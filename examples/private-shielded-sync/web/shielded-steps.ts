@@ -62,8 +62,17 @@ const fromHexStrict = (s: string, len: number): Uint8Array => {
   return Uint8Array.from(t.match(/../g)!, (h) => parseInt(h, 16));
 };
 
-/** The GPU scanner (`../gpu/scan.ts`), when the browser has WebGPU. */
-export type GpuScan = { scan(entries: Uint8Array, secret: Uint8Array): Promise<number[]> };
+/** The GPU scanner (`../gpu/scan.ts`), when the browser has WebGPU, and its adapter's description. */
+export type GpuScan = { scan(entries: Uint8Array, secret: Uint8Array): Promise<number[]>; readonly description?: string };
+
+/** Which scan ran: on the GPU, or on the CPU and, when the GPU was asked for, why not on it. */
+export interface ScanEngine {
+  readonly gpu: boolean;
+  /** The GPU's adapter, when it ran there. */
+  readonly device: string | null;
+  /** Why the CPU scanned although the GPU was asked for; null when it was not asked for or ran. */
+  readonly fallback: string | null;
+}
 
 /** The wallet's IPIR+SP WebAssembly, digest-checked, and what loading it took (shown by the files step). */
 export type IpirWasmLoad = { module: WebAssembly.Module; bytes: number; sha256: string; ms: number };
@@ -80,7 +89,7 @@ export interface ShieldedStepsOptions {
   readonly ipirWorkers?: IpirWorkers & { readonly threads?: number };
   /** The page server's debug routes, or none (under Node, or a server without a database). */
   readonly debugJson?: (path: string) => Promise<Json | null>;
-  /** The GPU scanner, when the browser has one. */
+  /** The GPU scanner, when the browser has WebGPU; it rejects when WebGPU does not start (no adapter, no device). */
   readonly gpu?: () => Promise<GpuScan>;
 }
 
@@ -245,28 +254,43 @@ export class ShieldedSteps {
     };
   }
 
-  /** Step 3: every scan entry tested locally; nothing is sent. */
-  async scan(args: { gpu?: boolean; chunk?: number } = {}, progress: (text: string) => void = () => {}): Promise<Json> {
+  /**
+   * Step 3: every scan entry tested locally; nothing is sent. With `gpu` on the WebGPU scanner, else on the WebAssembly
+   * kernel on this thread. With `fallback` too (the Wallet tab's sync), a GPU that does not start or fails scans on the
+   * CPU instead and the answer says why; without it (the Details tab's box) the step fails, as before.
+   */
+  async scan(args: { gpu?: boolean; fallback?: boolean; chunk?: number } = {}, progress: (text: string) => void = () => {}): Promise<Json> {
     const k = this.#o.kernel;
     const w = this.#need(this.#keys, "derive the keys");
     const m = this.#need(this.#manifest, "get the files");
     const file = this.#files.get(m.artifacts.scan.digest)!;
     const n = slotCount(m);
     const t = now();
-    let found: number[] = [];
-    let engine: string;
+    let found: number[] | null = null;
+    let engine = "WebAssembly scan kernel, one thread";
+    let used: ScanEngine = { gpu: false, device: null, fallback: null };
     if (args.gpu) {
-      if (this.#o.gpu === undefined) throw new Error("no WebGPU here");
-      found = await (await this.#o.gpu()).scan(file, w.scanSecret);
-      engine = "WebGPU (gpu/scan.ts)";
-    } else {
+      try {
+        if (this.#o.gpu === undefined) throw new Error("this browser has no WebGPU");
+        const scanner = await this.#o.gpu();
+        progress(`scanning ${n} entries on the GPU`);
+        found = await scanner.scan(file, w.scanSecret);
+        engine = "WebGPU (gpu/scan.ts)";
+        used = { gpu: true, device: scanner.description ?? null, fallback: null };
+      } catch (error) {
+        if (!args.fallback) throw error;
+        used = { gpu: false, device: null, fallback: error instanceof Error ? error.message : String(error) };
+      }
+    }
+    if (found === null) {
+      const hits: number[] = [];
       const chunk = args.chunk ?? 2000;
       for (let at = 0; at < n; at += chunk) {
         const count = Math.min(chunk, n - at);
-        for (const i of k.scan(file.subarray(36 * at, 36 * (at + count)), w.scanSecret)) found.push(at + i);
-        progress(`scanned ${at + count} of ${n} entries, ${found.length} match(es)`);
+        for (const i of k.scan(file.subarray(36 * at, 36 * (at + count)), w.scanSecret)) hits.push(at + i);
+        progress(`scanned ${at + count} of ${n} entries on the CPU, ${hits.length} match(es)`);
       }
-      engine = "WebAssembly scan kernel, one thread";
+      found = hits;
     }
     const ms = now() - t;
     // The scan finds slots; in a padded snapshot a slot holds an output's tree position or noise (Q57).
@@ -275,6 +299,7 @@ export class ShieldedSteps {
     this.#matches = found.map((s) => positionAtSlot(m, s)).filter((p): p is number => p !== null);
     return {
       engine,
+      scanEngine: used,
       entries: n,
       entryBytes: 36,
       matches: this.#matches.map((p) => {

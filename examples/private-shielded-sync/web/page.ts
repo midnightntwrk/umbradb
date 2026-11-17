@@ -554,8 +554,8 @@ async function walletSync(): Promise<void> {
     await loaded;
     if ($("#step-load .status").classList.contains("bad")) throw new Error("the client did not load (Details, step 0)");
     progress.textContent = "starting";
-    // The keys from the shared field (step 1's), the scan on the WebGPU when the Details tab's scan option says so.
-    const answer = await call("walletSync", { ...ARGS.keys!(), gpu: $<HTMLInputElement>("#gpu").checked }, (t) => (progress.textContent = t));
+    // The keys from the shared field (step 1's); the worker scans on the GPU where WebGPU starts, else on the CPU.
+    const answer = await call("walletSync", ARGS.keys!(), (t) => (progress.textContent = t));
     if (!answer.ok) throw new Error(answer.error ?? "failed");
     const r = answer.result as unknown as WalletSyncResult;
     for (const s of r.steps) fillCard(s);

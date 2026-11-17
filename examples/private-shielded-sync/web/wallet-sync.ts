@@ -4,7 +4,7 @@
  * each as the Details tab's step of the same name runs it (so the page fills those steps' cards with the answers):
  *
  * - the keys (step 1, from the mnemonic: the Zswap keys and the Dust key);
- * - the shielded sync: get the files (2), scan (3), read the matches' records by PIR (4), look up their nullifiers by
+ * - the shielded sync: get the files (2), scan (3; on the GPU where the browser has WebGPU, else on the CPU), read the matches' records by PIR (4), look up their nullifiers by
  *   PIR (5), get the tail (7), the coins and balance (8);
  * - the Dust sync: get the file (9), walk the chains (10), check each chain's end by PIR (11).
  *
@@ -22,7 +22,7 @@
 import { dustStatusText } from "../client/dust.ts";
 import type { PssHttp, RequestRecord } from "../client/http.ts";
 import type { DustSteps } from "./dust-steps.ts";
-import type { ShieldedSteps } from "./shielded-steps.ts";
+import type { ScanEngine, ShieldedSteps } from "./shielded-steps.ts";
 
 type Json = Record<string, unknown>;
 const round = (x: number): number => Math.round(x * 100) / 100;
@@ -39,13 +39,15 @@ export interface WalletSyncStep {
 
 /**
  * The sync's steps over the page's shielded and Dust steps, after `keys` (which derives the wallet's keys). The scan
- * runs on the WebGPU when `gpu` is set (the Details tab's scan option), else on the WebAssembly kernel.
+ * runs on the GPU (the page's WebGPU scan) and, where the browser has no WebGPU or it does not start or fails, on the
+ * CPU (the WebAssembly kernel, one thread), saying why: a GPU failure never fails the sync. `gpu: false` scans on the
+ * CPU from the start.
  */
 export function walletSyncSteps(o: { readonly keys: () => Promise<Json> | Json; readonly shielded: ShieldedSteps; readonly dust: DustSteps; readonly gpu?: boolean }): WalletSyncStep[] {
   return [
     { name: "keys", label: "Wallet keys", part: "shielded", run: () => o.keys() },
     { name: "files", label: "Get the files", part: "shielded", run: () => o.shielded.getFiles({ debug: false }) },
-    { name: "scan", label: "Find my outputs (scan)", part: "shielded", run: (progress) => o.shielded.scan({ gpu: o.gpu ?? false }, progress) },
+    { name: "scan", label: "Find my outputs (scan)", part: "shielded", run: (progress) => o.shielded.scan({ gpu: o.gpu ?? true, fallback: true }, progress) },
     { name: "read", label: "Fetch records by PIR", part: "shielded", run: () => o.shielded.read({}) },
     { name: "nullifiers", label: "Check nullifiers by PIR", part: "shielded", run: () => o.shielded.nullifiers({}) },
     { name: "tail", label: "Get the tail", part: "shielded", run: () => o.shielded.tail({ debug: false }) },
@@ -121,6 +123,8 @@ export interface WalletSyncResult {
   readonly balances: WalletBalances;
   /** The whole sync, and by part. */
   readonly cost: WalletCost & { readonly parts: Readonly<Record<WalletSyncPart, WalletCost>> };
+  /** Which scan ran (GPU, or CPU and why) and its time; null when the scan did not complete. */
+  readonly scan: (ScanEngine & { readonly ms: number; readonly entries: number }) | null;
   readonly startedAt: string;
 }
 
@@ -199,10 +203,13 @@ export async function runWalletSync(steps: readonly WalletSyncStep[], o: { reado
       break;
     }
   }
+  const scanStep = done.find((s) => s.name === "scan" && s.ok);
+  const scanAnswer = scanStep?.answer as { scanEngine?: ScanEngine; entries?: number } | undefined;
   return {
     ok: failed === null,
     failed,
     steps: done,
+    scan: scanStep === undefined || scanAnswer?.scanEngine === undefined ? null : { ...scanAnswer.scanEngine, ms: scanStep.ms, entries: scanAnswer.entries ?? 0 },
     balances: balancesOf(done),
     cost: { ...costOf(done), parts: { shielded: costOf(done.filter((s) => s.part === "shielded")), dust: costOf(done.filter((s) => s.part === "dust")) } },
     startedAt,

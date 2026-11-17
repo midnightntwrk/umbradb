@@ -71,6 +71,7 @@
   #panel-wallet h3 { margin: 14px 0 6px; font-size: 14px; }
   #panel-wallet tfoot td { border-top: 1px solid var(--line); border-bottom: 0; }
   .costline { font-size: 13px; margin: 6px 0 8px; }
+  .costline.warn { color: var(--warn); }
 </style>
 </head>
 <body>
@@ -85,7 +86,7 @@
 <div id="panel-wallet" role="tabpanel" aria-labelledby="tab-wallet" tabindex="0">
   <section class="card" id="wallet-top">
     <h2>Wallet<span class="status" id="wallet-status"></span></h2>
-    <p class="desc">The wallet's 24-word mnemonic (the same field as the Details tab's step 1; it stays in this page). Sync derives the keys, syncs the shielded coins (files, scan, private reads, nullifier lookups, tail) and the Dust (file, walk, private check), the Details tab's steps 1 to 5 and 7 to 11, and shows the balances. It reads no Merkle path and builds no spend.</p>
+    <p class="desc">The wallet's 24-word mnemonic (the same field as the Details tab's step 1; it stays in this page). Sync derives the keys, syncs the shielded coins (files, scan on the GPU where the browser has WebGPU and on the CPU otherwise, private reads, nullifier lookups, tail) and the Dust (file, walk, private check), the Details tab's steps 1 to 5 and 7 to 11, and shows the balances. It reads no Merkle path and builds no spend.</p>
     <div id="mnemonic-slot-wallet"></div>
     <div class="row"><button type="button" id="wallet-sync">Sync</button></div>
     <div id="wallet-progress" class="progress" aria-live="polite"></div>
