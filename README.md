@@ -216,9 +216,17 @@ npx umbradb restore preview-10000.backup --config restored.config.ts     # into 
 | 1 | Startup refused, or processing halted | A finding, or the check could not finish | Refused | Refused |
 | 2 | Wrong argument | Wrong argument | Wrong argument | Wrong argument |
 
-`run` exits 1 at once, without a signal, when the configuration cannot be loaded or fails its schemas. A refused
-backup writes no file, and a refused restore commits nothing. No command or an unknown one prints the usage and exits
-2; 3 is kept for a command a build does not provide.
+`run` exits 1 at once, without a signal, when the configuration cannot be loaded or fails its schemas, or when
+`UMBRADB_TRACE` names a file it cannot open. A refused backup writes no file, and a refused restore commits nothing.
+No command or an unknown one prints the usage and exits 2; 3 is kept for a command a build does not provide.
+
+`umbradb run` reads two variables of its environment, for measuring a sync. `UMBRADB_TRACE=<file>` writes the block
+trace: one JSON line per committed height in `<file>` saying where its time went, the statements' totals in
+`<file>.stmts.json`, and one line per block the ledger worker applied in `<file>.worker.jsonl`.
+`UMBRADB_TRACE_STEPS=1` beside it adds each reclamation step's detail to a height's line. Without `UMBRADB_TRACE`
+nothing is traced, and a traced process stores what an untraced one stores. A write of the trace that fails once the
+process is started (a full disk) halts processing. The keys are in the
+[operator guide](docs/operator-guide.md#measuring-a-sync-the-block-trace).
 
 ## In your own program: `startUmbraDB`
 

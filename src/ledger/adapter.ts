@@ -58,6 +58,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { timed } from "../trace/worker-trace.js";
 import type { LedgerRelease } from "./releases.js";
 import type {
   AppliedBlock,
@@ -537,7 +538,7 @@ export function createLedgerAdapter(spec: AdapterSpec): LedgerPackage {
 
     try {
       input.transactions.forEach((bytes, index) => {
-        const native = nativeOf(bytes);
+        const native = timed("deserialize", () => nativeOf(bytes));
         const failedOnChain = outcomes?.[index] === "failure";
         if (native.kind === "system") {
           if (failedOnChain) {
@@ -549,7 +550,7 @@ export function createLedgerAdapter(spec: AdapterSpec): LedgerPackage {
           free(parameters);
           let applied: [RawState, RawEvent[]];
           try {
-            applied = state.applySystemTx(native.transaction, blockTime);
+            applied = timed("applySystem", () => state.applySystemTx(native.transaction, blockTime));
           } catch (error) {
             throw new Error(`ledger ${spec.ledger}: system transaction ${index} of block ${input.height} failed`, {
               cause: error,
@@ -563,7 +564,7 @@ export function createLedgerAdapter(spec: AdapterSpec): LedgerPackage {
           return;
         }
         const transaction = native.transaction;
-        const segments = [0, ...fallibleSegments(transaction)];
+        const segments = timed("segments", () => [0, ...fallibleSegments(transaction)]);
         const failure: TransactionResult = {
           outcome: "failure",
           segments: segments.map((segment) => ({ segment, success: false })),
@@ -572,9 +573,12 @@ export function createLedgerAdapter(spec: AdapterSpec): LedgerPackage {
           results.push(failure);
           return;
         }
-        const verified =
-          wellFormedAt(transaction, blockTime) ??
-          (input.firstRegularAtParentTime && !regularApplied ? wellFormedAt(transaction, parentTime) : null);
+        const verified = timed(
+          "wellFormed",
+          () =>
+            wellFormedAt(transaction, blockTime) ??
+            (input.firstRegularAtParentTime && !regularApplied ? wellFormedAt(transaction, parentTime) : null),
+        );
         if (verified === null) {
           results.push(failure);
           return;
@@ -582,7 +586,7 @@ export function createLedgerAdapter(spec: AdapterSpec): LedgerPackage {
         const parameters = state.parameters;
         let cost: SyntheticCost;
         try {
-          cost = transaction.cost(parameters, true);
+          cost = timed("cost", () => transaction.cost(parameters, true));
         } catch {
           free(parameters);
           free(verified);
@@ -591,7 +595,7 @@ export function createLedgerAdapter(spec: AdapterSpec): LedgerPackage {
         }
         free(parameters);
         const transactionContext = new raw.TransactionContext(state as never, context);
-        const [next, result] = state.apply(verified, transactionContext);
+        const [next, result] = timed("stateApply", () => state.apply(verified, transactionContext));
         free(verified);
         free(transactionContext);
         if (result.type === "failure") {
@@ -615,11 +619,11 @@ export function createLedgerAdapter(spec: AdapterSpec): LedgerPackage {
             segments: failed.map(([segment, isFailed]) => ({ segment, success: !isFailed })),
           });
         }
-        collect(result.events, index);
+        timed("events", () => collect(result.events, index));
         free(result);
       });
 
-      const after = raw.postBlockUpdateExact(state, blockTime, fullness);
+      const after = timed("postBlockUpdate", () => raw.postBlockUpdateExact(state, blockTime, fullness));
       const afterParameters = after.parameters;
       const serialized = afterParameters.serialize();
       free(afterParameters);

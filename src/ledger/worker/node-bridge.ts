@@ -29,6 +29,7 @@
  */
 
 import type { ReadHandle } from "../../db/api.js";
+import { nodeAsked, nodeGot, nodeWaited, nodeWaitFrom } from "../../trace/worker-trace.js";
 import { childRefKeys } from "../node-refs.js";
 import type { NodeStore, StoredNode } from "../types.js";
 
@@ -240,6 +241,8 @@ export function bridgeStore(
       lastError = null;
     },
     get(key) {
+      // The calls of the worker's trace (this one and three around the wait) do nothing in a process that is not traced.
+      nodeAsked();
       const own = local(key);
       if (own !== undefined) return served(own);
       const wanted = hexOf(key);
@@ -250,8 +253,10 @@ export function bridgeStore(
       }
       new Uint8Array(memory, HEADER_BYTES, KEY_BYTES).set(key);
       Atomics.store(control, STATE, ASKED);
+      const waitFrom = nodeWaitFrom();
       ask();
       while (Atomics.load(control, STATE) === ASKED) Atomics.wait(control, STATE, ASKED);
+      nodeWaited(waitFrom);
       const length = Atomics.load(control, LENGTH);
       const status = Atomics.load(control, STATUS);
       const data = new Uint8Array(memory, HEADER_BYTES, length).slice();
@@ -261,6 +266,7 @@ export function bridgeStore(
         return null;
       }
       const [first, ...rest] = decodeNodes(data);
+      nodeGot(first === undefined ? 0 : 1 + rest.length);
       for (const node of rest) sent.set(hexOf(node.key), node);
       return first === undefined ? null : served(first);
     },

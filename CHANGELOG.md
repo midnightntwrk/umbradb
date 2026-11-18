@@ -151,6 +151,21 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   by a build that has the reference counting above continues as an upgrade: its `core` revision kept as a
   `versionEntry`, and this build's `core` entry from the next height.
 
+### Changed since `v0.10.0-rc.2`: sync speed
+
+- **A block trace for measuring a sync.** With `UMBRADB_TRACE=<file>` in its environment, `umbradb run` writes where
+  each committed height's time went: the ledger worker's apply, the reclamation step and its reads, the block's
+  transaction, every statement's client time, and the phases inside the worker with the worker thread's whole time
+  between two applied blocks. It is off unless the variable is set and changes nothing that is stored. The command
+  exits 1 without starting anything when it cannot open the file; a write that fails later halts processing, with
+  that write's error.
+  The statements' totals keep the first 1,024 texts by name and count the others in one entry, failed statements
+  included. A height that failed, or whose `COMMIT` lost its answer, has one line once it is committed, and its step
+  is in the chain of step outputs once.
+  `UMBRADB_TRACE_STEPS=1` beside it adds each step's count changes, new nodes and deleted nodes. The trace also records
+  memory at every block: `mem` in a height's line for the main thread, `ext`, `heap` and `rss` in the worker's line.
+  The operator guide's "Measuring a sync: the block trace" lists the files and their keys.
+
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 
 The first importable, published public surface. Everything below is imported from the package root

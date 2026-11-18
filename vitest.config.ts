@@ -55,6 +55,8 @@ const CORE_ARCH = {
   "**/src/library/**": { lines: 90, branches: 85, perFile: true },
   // The default for `src/**`, added with the ledger adapters' directory.
   "**/src/ledger/**": { lines: 90, branches: 85, perFile: true },
+  // The default for `src/**`, added with the block trace's directory.
+  "**/src/trace/**": { lines: 90, branches: 85, perFile: true },
   // The test tape: not in the package, but the tests of ingest, faults and differentials stand on it, so it
   // is measured and held to the default like `src/**`.
   "**/tools/tape/**": { lines: 90, branches: 85, perFile: true },

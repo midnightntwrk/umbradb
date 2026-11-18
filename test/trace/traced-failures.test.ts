@@ -1,0 +1,257 @@
+import { setTimeout as sleep } from "node:timers/promises";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import type { BlockWriteHandle } from "../../src/db/api.js";
+import { UmbraError } from "../../src/db/errors.js";
+import {
+  FLUSH_LINES,
+  OTHER_STATEMENTS,
+  STATEMENT_TEXTS,
+  startTrace,
+  stopTrace,
+  traceEndBlock,
+  tracing,
+  type TraceSink,
+} from "../../src/trace/trace.js";
+import { type DagRun, type DagRunOptions, runDag, runProblems } from "../backbone/refcount-process.js";
+import { BACKUP_BACKENDS, type BackupBackend } from "../backup/backup-fixtures.js";
+import { LAST } from "../ledger/fixtures/sweep-fixture.js";
+
+/**
+ * The block trace when something fails or overflows (`src/trace/trace.ts`), on PostgreSQL 18. Through the database API:
+ * - reads that differ by a comment, more texts than the statements' totals keep by name: the first texts by name, every
+ *   other statement in one last entry, none lost;
+ * - a statement that fails is counted with its time, and fails as it does untraced.
+ *
+ * Through the real process, on the extended DAG fixture of `./traced-process.test.ts` (its blocks carry no
+ * transaction):
+ * - a height whose block transaction fails after its reclamation step, and which the process makes again, adds its
+ *   step to the chain of step outputs once: every height's `sh` is a clean run's (negative control: a run whose step
+ *   differs from one height on);
+ * - a sink that fails during the sync halts processing at the height whose line it could not write, with the write's
+ *   error as the reason (negative control: a sink that writes, the same heights);
+ * - a delay put into one stage, the step's writes at one height, is in that stage's time of that height's line
+ *   (negative control: the line with that stage at zero fails the same check).
+ */
+
+const postgres = BACKUP_BACKENDS.find((backend) => backend.kind === "postgres") as BackupBackend;
+
+/** Every height of the fixture, once each, in order. */
+const EVERY_HEIGHT = Array.from({ length: LAST + 1 }, (_, h) => h);
+
+/** A traced run of the extended DAG on a new database, with `options`: the run and its lines. */
+async function tracedRun(options: DagRunOptions = {}) {
+  const trace = memorySink();
+  startTrace(trace.sink);
+  const db = await postgres.database();
+  let run: DagRun;
+  try {
+    run = await runDag(db, { dag: "extended", ...options });
+  } finally {
+    stopTrace();
+  }
+  return { run, lines: trace.blocks() };
+}
+
+/** What a promise rejects with, or "resolved". */
+const outcome = (running: Promise<unknown>): Promise<unknown> =>
+  running.then(
+    () => "resolved",
+    (error: unknown) => error,
+  );
+
+/** What a sink was given, as lines and the statements' last totals. */
+function memorySink() {
+  const kept = { blocks: "", statements: "[]" };
+  const sink: TraceSink = {
+    blocks: (text) => void (kept.blocks += text),
+    statements: (json) => void (kept.statements = json),
+    worker: () => undefined,
+  };
+  return {
+    sink,
+    blocks: (): Record<string, unknown>[] =>
+      kept.blocks === "" ? [] : kept.blocks.trimEnd().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>),
+    statements: () => JSON.parse(kept.statements) as { q: string; n: number; ms: number; max: number }[],
+  };
+}
+
+describe("the block trace when something fails or overflows, on PostgreSQL", () => {
+  beforeAll(() => postgres.start(), 180_000);
+  afterAll(() => postgres.stop(), 60_000);
+  afterEach(() => stopTrace());
+
+  /** The clean traced run, made once for the tests that compare with it. */
+  let clean: ReturnType<typeof tracedRun> | undefined;
+  const cleanRun = () => (clean ??= tracedRun());
+
+  it(`reads that differ by a comment, over ${STATEMENT_TEXTS} texts: the first texts by name, the others in one last entry, across a flush, none lost`, async () => {
+    const db = await postgres.database();
+    const trace = memorySink();
+    startTrace(trace.sink);
+    const sent = STATEMENT_TEXTS + 100;
+    const read = (from: number) =>
+      db.read(async (handle) => {
+        for (let i = from; i < from + sent; i++) await handle.query(`SELECT 1 /* ${i} */`);
+      });
+    await read(0);
+    // A flush, then as many new texts again.
+    for (let height = 1; height <= FLUSH_LINES; height++) traceEndBlock(BigInt(height));
+    const atFlush = trace.statements();
+    await read(sent);
+    traceEndBlock(BigInt(FLUSH_LINES + 1));
+    stopTrace();
+    const statements = trace.statements();
+    for (const totals of [atFlush, statements]) {
+      expect(totals).toHaveLength(STATEMENT_TEXTS + 1);
+      expect(totals.at(-1)?.q).toBe(OTHER_STATEMENTS);
+    }
+    // The first texts sent are kept by name, the read's own statements among them; the last are not.
+    const names = new Set(statements.map((statement) => statement.q));
+    expect(names.has("SELECT 1 /* 0 */")).toBe(true);
+    expect(names.has(`SELECT 1 /* ${2 * sent - 1} */`)).toBe(false);
+    expect(statements.at(-1)?.n).toBeGreaterThanOrEqual(sent + 100);
+    // Every statement the session sent is in the totals: as many as the lines counted.
+    const lines = trace.blocks();
+    const counted = lines.reduce((sum, line) => sum + ((line.sqlN as number | undefined) ?? 0), 0);
+    expect(statements.reduce((sum, statement) => sum + statement.n, 0)).toBe(counted);
+    expect(counted).toBeGreaterThanOrEqual(2 * sent);
+  }, 120_000);
+
+  it("a statement that fails is counted under its text with its time, and its error is the one an untraced read gets", async () => {
+    const db = await postgres.database();
+    // It fails once it has slept: the division by zero is met when the row is computed, after the sleep.
+    const failing = "SELECT 1 / (count(*) - 1) FROM pg_sleep(0.3)";
+    const untraced = await outcome(db.query(failing));
+    expect(untraced).toBeInstanceOf(UmbraError);
+    const trace = memorySink();
+    startTrace(trace.sink);
+    const traced = await outcome(db.query(failing));
+    traceEndBlock(1n);
+    stopTrace();
+    const shape = (error: unknown) => {
+      const { name, message, code, retryable, details } = error as UmbraError;
+      return { name, message, code, retryable, details };
+    };
+    expect(shape(traced)).toEqual(shape(untraced));
+    const [entry] = trace.statements().filter((statement) => statement.q === failing);
+    expect(entry?.n).toBe(1);
+    expect(entry?.ms).toBeGreaterThanOrEqual(290);
+    const [line] = trace.blocks();
+    expect(line?.sqlMs as number).toBeGreaterThanOrEqual(290);
+    // The same statement that succeeds after its sleep is counted alike.
+    const passing = "SELECT 1 / count(*) FROM pg_sleep(0.3)";
+    const second = memorySink();
+    startTrace(second.sink);
+    await db.query(passing);
+    stopTrace();
+    expect(second.statements().find((statement) => statement.q === passing)?.n).toBe(1);
+  }, 60_000);
+
+  it("a height whose block transaction fails after its step, made again by the process, adds that step to the chain once: every height's sh is a clean run's", async () => {
+    const { run: cleanDag, lines: cleanLines } = await cleanRun();
+    expect(cleanDag.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
+    expect(cleanLines.map((line) => line.h)).toEqual(EVERY_HEIGHT);
+    // A height whose step deletes nodes, and the next such height above it.
+    const deleting = [...cleanDag.evicted].filter(([, keys]) => keys.length > 0).map(([height]) => height);
+    const failed = deleting.find((height) => height >= 10n) as bigint;
+    const differs = deleting.find((height) => height > failed) as bigint;
+    expect(failed).toBeDefined();
+    expect(differs).toBeDefined();
+
+    // The step's first write at that height fails once, as a lost connection does: the process rolls the block back
+    // and makes it again from on-compute, which computes and chains the same step again.
+    let faults = 0;
+    const failOnce = (w: Pick<BlockWriteHandle, "execute">, height: bigint): Pick<BlockWriteHandle, "execute"> =>
+      height !== failed || faults > 0
+        ? w
+        : {
+            execute: async () => {
+              faults += 1;
+              throw new UmbraError("connection-lost", "the writer's connection was lost (the test's fault)");
+            },
+          };
+    const retried = await tracedRun({ core: { refcountWriter: failOnce }, settings: { backoffCeilingMs: 20 } });
+    expect(faults).toBe(1);
+    expect(retried.run.lines.filter((line) => line.includes("retries in"))).toHaveLength(1);
+    expect(retried.run.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
+    expect(runProblems(retried.run, "extended")).toEqual([]);
+    // One line per committed height: the failed run of the height has none.
+    expect(retried.lines.map((line) => line.h)).toEqual(EVERY_HEIGHT);
+    const chainOf = (lines: readonly Record<string, unknown>[]) => lines.map((line) => [line.h, line.sh ?? null]);
+    expect(chainOf(retried.lines)).toEqual(chainOf(cleanLines));
+
+    // Negative control: a run whose step differs from one height on (it deletes nothing there) has the clean chain
+    // below that height and another one from it.
+    const other = await tracedRun({ revisions: [{ start: differs, settings: { sweep: "off" } }] });
+    expect(other.run.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
+    const below = (lines: readonly Record<string, unknown>[]) => chainOf(lines.filter((line) => BigInt(line.h as number) < differs));
+    expect(below(other.lines)).toEqual(below(cleanLines));
+    expect(other.lines.find((line) => line.h === Number(differs))?.sh).not.toBe(cleanLines.find((line) => line.h === Number(differs))?.sh);
+  }, 600_000);
+
+  it("a sink that fails during the sync halts processing at the height whose line it could not write, with the write's error as the reason; that height and those before it are committed", async () => {
+    /** A run whose trace already holds all but 40 of a flush's lines, so that its first flush is at height 39's end. */
+    const prefilled = async (sink: TraceSink) => {
+      startTrace(sink);
+      for (let line = 0; line < FLUSH_LINES - 40; line++) traceEndBlock(BigInt(1_000_000 + line));
+      const db = await postgres.database();
+      try {
+        return await runDag(db, { dag: "extended", halts: true });
+      } finally {
+        stopTrace();
+      }
+    };
+    const run = await prefilled({
+      blocks: () => {
+        throw new Error("no space left on device");
+      },
+      statements: () => undefined,
+      worker: () => undefined,
+    });
+    expect(tracing()).toBe(false);
+    expect(run.status).toMatchObject({ state: "halted", cursor: 39n, reason: { height: 39n } });
+    expect(run.lines.filter((line) => line.startsWith("processing halted"))).toEqual([
+      expect.stringMatching(/: writing the block trace failed: no space left on device$/),
+    ]);
+    expect(runProblems(run, "extended")).toEqual([]);
+    // Negative control: the same trace into a sink that writes goes past that flush to the last height.
+    const kept = memorySink();
+    const passed = await prefilled(kept.sink);
+    expect(passed.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
+    expect(kept.blocks().filter((line) => (line.h as number) <= LAST).map((line) => line.h)).toEqual(EVERY_HEIGHT);
+  }, 600_000);
+
+  it("a delay put into the step's writes at one height is in that height's writeRefcountMs, inside its txMs; with writeRefcountMs at zero the same check fails", async () => {
+    const delayed = 30n;
+    const DELAY_MS = 300;
+    let slept = false;
+    // The step's first statement at that height waits before it is sent: a stage made slower by a known amount.
+    const slow = (w: Pick<BlockWriteHandle, "execute">, height: bigint): Pick<BlockWriteHandle, "execute"> =>
+      height !== delayed
+        ? w
+        : {
+            execute: async (sql, params) => {
+              if (!slept) {
+                slept = true;
+                await sleep(DELAY_MS);
+              }
+              return w.execute(sql, params);
+            },
+          };
+    const { run, lines } = await tracedRun({ core: { refcountWriter: slow } });
+    expect(slept).toBe(true);
+    expect(run.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
+    /** Where the delay must be: the step's writes, which the block's transaction holds with the node writes. */
+    const attribution = (line: Record<string, unknown>): string[] => {
+      const problems: string[] = [];
+      const ms = (key: string): number => (line[key] as number | undefined) ?? 0;
+      if (ms("writeRefcountMs") < DELAY_MS) problems.push(`writeRefcountMs ${ms("writeRefcountMs")} is under the delay`);
+      if (ms("txMs") < ms("writeRefcountMs") + ms("writeBlockMs")) problems.push(`txMs ${ms("txMs")} does not hold the writes`);
+      return problems;
+    };
+    const line = lines.find((candidate) => candidate.h === Number(delayed)) as Record<string, unknown>;
+    expect(attribution(line)).toEqual([]);
+    // Negative control: the stage at zero, as a trace that did not time it would write.
+    expect(attribution({ ...line, writeRefcountMs: 0 })).toEqual(["writeRefcountMs 0 is under the delay"]);
+  }, 600_000);
+});

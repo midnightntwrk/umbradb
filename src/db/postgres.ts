@@ -51,6 +51,7 @@ import { type DurabilityWarning, probeDurability } from "./durability-probe.js";
 import { commitRolledBack, handleClosed, queryTimeout, statementRefused, UmbraError } from "./errors.js";
 import { allowMultiStatement } from "./multi-statement.js";
 import { readTimeoutMs } from "./read-options.js";
+import { traceAdd, traceStatement } from "../trace/trace.js";
 import { allowWriterStart, takeWriterLock, type WriterSession } from "./writer-lock.js";
 
 /**
@@ -357,13 +358,16 @@ class Session {
    * the simple protocol. Its parameters are checked before anything is sent.
    */
   async run(text: string, params: readonly unknown[] = [], simple = false): Promise<Outcome> {
+    const encodeFrom = performance.now();
     const args = params.map((value, index) => parameterText(value, index));
+    traceAdd("encMs", performance.now() - encodeFrom);
     type Raw = Buffer[][] & {
       columns?: { name: string; type: number }[] | null;
       count: number | null;
       command: string;
     };
     const result = (await this.send(text, args, simple)) as Raw;
+    const decodeFrom = performance.now();
     if (SCHEMA_CHANGE.test(result.command) || (this.role === "writer" && result.command === "ROLLBACK")) {
       this.schemaChanges.count += 1;
     }
@@ -372,6 +376,7 @@ class Session {
       columns,
       [...result].map((values) => values.map((value) => (value === null ? null : value.toString("utf8")))),
     );
+    traceAdd("decMs", performance.now() - decodeFrom);
     return { rows, count: result.count ?? 0, command: result.command };
   }
 
@@ -401,7 +406,13 @@ class Session {
       // `simple` is a runtime option of `unsafe` the driver's types do not declare (`postgres` 3.4.9 `index.js`).
       const prepare = !simple && args.length > 0 && this.prepares(text);
       const options = { simple, prepare } as unknown as postgres.UnsafeQueryOptions;
-      return await this.sql.unsafe(text, args as string[], options).raw();
+      const sent = performance.now();
+      try {
+        return await this.sql.unsafe(text, args as string[], options).raw();
+      } finally {
+        // Answered or failed (a timeout, a lost connection), the statement took this time of the session.
+        traceStatement(text, performance.now() - sent);
+      }
     } catch (error) {
       if (this.ended) throw handleClosed("database");
       const classified = classifyDriverError(error, this.role);
