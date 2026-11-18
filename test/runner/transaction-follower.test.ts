@@ -8,7 +8,10 @@ import type { BlockRef } from "../../src/runner/block-source.js";
 import { type CommitOutcome, FinalizedLoop, type HeightRun, type HeldHeight, type LoopInput } from "../../src/runner/loop.js";
 import { entry } from "../modules/graph-fixtures.js";
 import { continuesModule, type COptions, H, HEAD, loggingFollower, losingCommits } from "./block-continues-harness.js";
+import { type ChainBlock, chainOf, finalized, opening, RUNTIME } from "../backbone/fetch-fixtures.js";
+import { halted, ingest, PATIENCE_MS, slow } from "../backbone/ingest-harness.js";
 import { cursorOf, InMemoryBlockSource, LOOP_BACKBONE, loopInput, RUNNER_BACKENDS, startWith } from "./loop-harness.js";
+import { PROCESS_BACKENDS } from "./process-backends.js";
 
 /**
  * What the finalized loop (`src/runner/loop.ts`) tells the follower of each block's transaction
@@ -35,6 +38,8 @@ import { cursorOf, InMemoryBlockSource, LOOP_BACKBONE, loopInput, RUNNER_BACKEND
  *   start tells `committed h` at its re-delivery;
  * - a stop while a height is held with its `COMMIT`'s answer lost: nothing told; the next start re-delivers the
  *   cursor's block and tells it committed, h when the `COMMIT` landed, h − 1 when it did not (and h is then made again);
+ * - through the process over the node source, whose queue prepares heights ahead of the loop: a failure in h's
+ *   `on-fetch` or `on-parse` there: `rolledBack h` once the loop takes h, never written;
  * - a retryable failure after the commit (in `on-after-db-write`), then the same loop's next run: `committed h` once,
  *   not again at that run's re-delivery of h, which this loop released already.
  * The loop also logs `COMMIT answered h` when h's block transaction resolved and `cursor read <outcome> h` after a lost
@@ -454,6 +459,70 @@ function deferredModule(): ModuleDeclaration {
         if (b.height === H) await w.execute("UPDATE d.rows SET k = $1 WHERE height = $2", [H - 1n, b.height]);
       },
     },
+  };
+}
+
+/** Through the process over the node source and a tape node, whose queue prepares heights ahead of the loop. */
+describe.each(PROCESS_BACKENDS)("what the loop tells the follower of a height the node source prepared, through the process on $name", (backend) => {
+  beforeAll(() => backend.start(), 180_000);
+  afterAll(() => backend.stop(), 60_000);
+
+  const LAST = 8;
+
+  it.each(["on-fetch", "on-parse"] as const)("a failure in %s of h, run in the source's queue: rolledBack h once when the loop reaches h, never written", async (point) => {
+    const db = await backend.database();
+    const chain = chainOf(BigInt(LAST));
+    const records = [
+      ...opening(chain[0] as ChainBlock, chain[LAST] as ChainBlock),
+      ...chain.slice(1).flatMap((block, index) => finalized(block, RUNTIME, index === 0)),
+    ];
+    const log: string[] = [];
+    /** The process's loop, telling a logging follower. */
+    class Following extends FinalizedLoop {
+      constructor(input: LoopInput) {
+        super({ ...input, follower: loggingFollower(log) });
+      }
+    }
+    // A slow on-compute keeps the loop behind the prefetch, so h is prepared ahead of it.
+    const run = await ingest(db, records, {
+      start: 1n,
+      settings: { prefetchWindow: 8 },
+      user: [failingAt(point, H), slow(20)],
+      loop: Following,
+    });
+    let status: unknown;
+    try {
+      await halted(run);
+      status = run.handle.status();
+    } finally {
+      await run.close();
+    }
+    expect(status).toMatchObject({ state: "halted", cursor: H - 1n });
+    expect(log.filter((line) => line.startsWith("told "))).toEqual([
+      "told written 1",
+      "told committed 1",
+      "told written 2",
+      "told committed 2",
+      `told rolledBack ${H}`,
+    ]);
+  }, PATIENCE_MS * 2);
+});
+
+/** Module `f`, which fails at `point` of `height` every time it runs there (the queue may prepare a height twice). */
+function failingAt(point: "on-fetch" | "on-parse", height: bigint): ModuleDeclaration {
+  const fail = (b: BlockContext): void => {
+    if (b.height === height) throw new Error(`f cannot ${point} ${height}`);
+  };
+  return {
+    id: "f",
+    version: "1.0.0",
+    side: "public",
+    requires: ["block-header"],
+    provides: [{ name: "f-rows", lifetimes: ["table"], table: { schema: "f", tables: ["rows"], kind: "append-only" } }],
+    startsMidChain: true,
+    configSchema: z.object({}),
+    migrations: [{ id: "001", sql: "CREATE TABLE f.rows (height bigint PRIMARY KEY)" }],
+    points: point === "on-fetch" ? { async "on-fetch"(_p, b) { fail(b); } } : { async "on-parse"(_p, b) { fail(b); } },
   };
 }
 

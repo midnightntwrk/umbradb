@@ -79,7 +79,8 @@
  * knows h committed (the `COMMIT`'s answer, the cursor read after a lost one, the re-delivery of the cursor's block at a
  * run's start), and `rolledBack` once for a transaction that did not commit (a failure before the `COMMIT`, or of a
  * `COMMIT` that answered with an error; the lockstep wait stopping the loop; the cursor read after a lost `COMMIT`
- * finding the cursor before h). After a `COMMIT` whose answer was lost it is told nothing until that cursor read, and
+ * finding the cursor before h), also for a height whose `on-fetch` or `on-parse` failed in a source's queue, told when
+ * the loop takes that height. After a `COMMIT` whose answer was lost it is told nothing until that cursor read, and
  * nothing then either when the cursor is unexpected (neither h nor the one before it: processing halts without knowing
  * the outcome). Whether the answer was lost is the database's error, whatever failure the loop reports: a misuse
  * recorded during the `COMMIT` is reported first and halts, and the follower is told nothing of h then. A stop while such a height is held tells nothing: the next start's cursor read settles it, and its
@@ -171,7 +172,7 @@ import type {
 } from "../modules/declaration.js";
 import type { HeightRange, ResolvedGraph, ResolvedRange } from "../modules/graph.js";
 import { BlockItems, revisionAt } from "./block-context.js";
-import type { BlockRef, BlockSource, QueueRunner } from "./block-source.js";
+import type { BlockRef, BlockSource, PreparedBlock, QueueRunner } from "./block-source.js";
 import {
   CallbackFailure,
   type EntryBoundary,
@@ -548,6 +549,11 @@ export class FinalizedLoop {
   #continuing = new WeakMap<HeightRun, number>();
   /** The writer's session each height's block transaction ran on, from its start. */
   readonly #writtenOn = new WeakMap<HeightRun, number | null>();
+  /**
+   * The block of each height whose last preparation in the source's queue failed, until the loop takes that height
+   * ({@link #prepared}).
+   */
+  readonly #failedPreparations = new Map<bigint, BlockRef>();
   /** The heights' runs some of whose block contexts said `continues` true, with the session that held then. */
   readonly #toldContinuing = new WeakMap<HeightRun, number>();
   /** The last block this loop told the follower committed, which it does not tell again ({@link #tell}). */
@@ -1059,10 +1065,28 @@ export class FinalizedLoop {
   /** A new run of `height` above `previous`: its block from the source, prepared by it when it prepares heights. */
   async #begin(height: bigint, previous: BlockRef | null): Promise<HeightRun> {
     const { source } = this.input;
-    const prepared = source.prepared === undefined ? undefined : await source.prepared(height);
+    const prepared = source.prepared === undefined ? undefined : await this.#prepared(source.prepared.bind(source), height);
     const block = prepared?.block ?? (await source.block(height));
     const items = prepared?.items ?? this.itemsAt(height);
     return { height, block, range: this.#rangeAt(height), items, previous, prepared: prepared !== undefined };
+  }
+
+  /**
+   * The height `height` as the source's queue prepared it (`BlockSource.prepared`). When the queue's `on-fetch` or
+   * `on-parse` of it failed, the height's run ends here, before it was written: the follower is told `rolledBack` for
+   * the block that failed, now that the loop takes that failure, never from the queue (another height's transaction
+   * may be open while the queue prepares).
+   */
+  async #prepared(prepared: (height: bigint) => Promise<PreparedBlock>, height: bigint): Promise<PreparedBlock> {
+    try {
+      return await prepared(height);
+    } catch (error) {
+      const failed = this.#failedPreparations.get(height);
+      if (failed !== undefined) this.#tell("rolledBack", failed);
+      throw error;
+    } finally {
+      for (const at of this.#failedPreparations.keys()) if (at <= height) this.#failedPreparations.delete(at);
+    }
   }
 
   /** `held`'s run again: its items as `on-parse` left them, from the point it resumes at. */
@@ -1288,6 +1312,11 @@ export class FinalizedLoop {
         try {
           await queuePoint(run, "on-fetch", activity);
           await queuePoint(run, "on-parse", activity);
+          this.#failedPreparations.delete(block.height);
+        } catch (error) {
+          // Told to the follower only when the loop takes this height and finds its preparation failed (#prepared).
+          this.#failedPreparations.set(block.height, block);
+          throw error;
         } finally {
           // A second prepare of the height still running (a best block and the finalized one) loses its entry: the
           // loop then waits for it with its window not yet open, which counts less, never more.
