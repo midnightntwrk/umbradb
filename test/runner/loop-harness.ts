@@ -3,6 +3,7 @@ import { CORE_DIGEST as DIGESTS } from "../../src/backbone/core-digest/core-dige
 import { cursorHeight, readCursor } from "../../src/backbone/core-block-commit/sql.js";
 import type { BlockWriteHandle, Database, Transaction } from "../../src/db/api.js";
 import { startDatabase } from "../../src/db/migrate.js";
+import { WRITER_LOCK_HOLDER_SQL } from "../../src/db/writer-lock.js";
 import type { SchemaPlan } from "../../src/db/roles.js";
 import { migrationPart, schemaPlan } from "../../src/modules/adapters.js";
 import type { ModuleDeclaration, PointName } from "../../src/modules/declaration.js";
@@ -31,6 +32,11 @@ export interface RunnerDatabase {
    * engine is inside a transaction, else 0.
    */
   openTransactions(): Promise<number>;
+  /**
+   * PostgreSQL only: terminates the backend of the session holding the writer lock, and resolves once PostgreSQL no
+   * longer lists it, so the writer's next statement fails with `connection-lost`.
+   */
+  terminateWriter?(): Promise<void>;
 }
 
 export interface RunnerBackend {
@@ -63,6 +69,12 @@ function postgresRunner(): RunnerBackend {
               "AND xact_start IS NOT NULL",
           );
           return (rows[0] as unknown as { open: number }).open;
+        },
+        async terminateWriter() {
+          const [holder] = await database.admin.unsafe(WRITER_LOCK_HOLDER_SQL);
+          const pid = Number(holder?.pid);
+          if (!Number.isSafeInteger(pid)) throw new Error("no session holds the writer lock");
+          await database.terminate(pid);
         },
       };
     },

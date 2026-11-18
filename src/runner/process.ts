@@ -2207,6 +2207,8 @@ class Process implements ProcessHandle {
       ...(this.#side === "public" && this.#lockstep === undefined ? { fastSync: settings.fastSync as unknown as FastSync } : {}),
       observer: {
         slow: (event) => this.#slowBlockEvent(event, settings.slowBlockMs as number),
+        dropped: (failure) =>
+          this.#log(`processing: a block below height ${failure.height} failed first, so its kept failure is dropped: ${messageOf(failure)}`),
         head: (head) => {
           if (this.#head === null || head.height > this.#head) this.#head = head.height;
           // Nothing to process (the loop waits): whatever was retried works again.

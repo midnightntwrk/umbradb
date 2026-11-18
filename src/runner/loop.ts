@@ -190,7 +190,32 @@
  * of the transaction while it is open). The source's finality check is answered, for a height taken and not committed,
  * from the block taken ({@link QueueRunner.storedHash}). A block's trace record is held when its writes end and written
  * after the `COMMIT` (`../trace/trace.ts`), and a block's slow window is held until the `COMMIT` or the rollback, which
- * tells its `ended`. In this version a failure inside a chunk rolls it back and stops the loop at the block in progress.
+ * tells its `ended`.
+ *
+ * **A failure inside a chunk** is handled as a height alone handles it at the same block k; what was written below k
+ * is committed where the transaction allows, and stored again one block per transaction where it does not:
+ * - taking block j fails: the chunk is a..j − 1, and j fails when the loop reaches it, as a height alone;
+ * - k > a fails before its first write (its `on-compute`, a misuse found there, the worker failing its apply): the
+ *   chunk commits at k − 1, the follower is told `committed` a..k − 1 and `rolledBack` k, the points after the commit
+ *   of a..k − 1 run, then k's failure stops the loop (a retryable one holds k, as a held height);
+ * - k's writes fail, not retryable (a callback, the cursor check, a misuse, a statement that aborted the
+ *   transaction): the transaction rolls back, the follower is told `rolledBack` a..k, a..k − 1 are stored again in
+ *   this run, then k's failure, kept, is thrown, k not called again;
+ * - a retryable failure while the transaction is open (a lost connection, the writer's session replaced, a callback's
+ *   retryable error in k's writes): the follower is told `rolledBack` a..k and the chunk is held ({@link HeldChunk}); the
+ *   next run reads the cursor on the writer: at a − 1, a..k − 1 are stored again and k alone from where it resumes;
+ *   anything else halts with `unexpected-cursor` at a;
+ * - the `COMMIT` answered with an error: `rolledBack` a..b, then a..b stored again in this run, the block whose own
+ *   `COMMIT` fails stopping the loop;
+ * - the `COMMIT`'s answer lost: nothing is told, the chunk held with its trace records; the next run's cursor read at b
+ *   with its hash tells `committed` a..b and runs their points after the commit; at a − 1 tells `rolledBack` a..b and
+ *   stores them again; anything else halts with `unexpected-cursor` at a, nothing told;
+ * - a failure of `on-after-db-write` or `on-stop-height` of block j stops the loop at j, committed, the cursor at b;
+ *   the blocks above j get no such callbacks.
+ * A block stored again runs from `on-compute` with its items as `on-parse` left them, nothing fetched or parsed again,
+ * and its `continues` is false. No chunk forms again at or below the highest height of a chunk that did not commit,
+ * until the cursor reaches it, so a failed chunk is never formed again. A failure of a block stored again is its own;
+ * a failure kept for a block above it is dropped and logged when that one stops processing ({@link LoopObserver.dropped}).
  */
 
 import { BLOCKS_TABLE } from "../backbone/core-block-commit/sql.js";
@@ -302,6 +327,11 @@ export interface LoopObserver {
   committed?(block: BlockRef): void;
   /** A window became slow, or a slow window closed (see the module comment). */
   slow?(event: SlowBlockEvent): void;
+  /**
+   * A failure kept for a block above blocks stored again after a chunk's rollback, dropped because one of those blocks
+   * failed first and stops processing (see the module comment): the process logs it.
+   */
+  dropped?(failure: HeightFailure): void;
 }
 
 /**
@@ -539,10 +569,28 @@ interface Carried {
   readonly watch: Watch;
 }
 
-/** How a chunk ended: the new cursor, and the block it carries over when it committed below its last. */
+/**
+ * How a chunk ended: the new cursor, and the block it carries over when it committed below its last; or, `again`, it
+ * did not commit, and its blocks are stored again one per transaction from the cursor before it.
+ */
 interface ChunkEnd {
   readonly cursor: BlockRef | null;
   readonly carried?: Carried;
+  readonly again?: true;
+}
+
+/**
+ * A chunk a retryable failure stopped, or whose `COMMIT` lost its answer (`uncertain`), kept for the loop's next run
+ * (see the module comment). Its runs are the blocks begun in its transaction, in height order: when not `uncertain`,
+ * the last of them is the block that failed, retried alone from where it resumes. `carried` is a block whose
+ * `on-compute` ran after the chunk's last (`blockBeforeCommitted`), and `kept` that block's failure, thrown once the
+ * chunk is settled.
+ */
+export interface HeldChunk {
+  readonly runs: readonly HeightRun[];
+  readonly uncertain: boolean;
+  readonly carried?: HeightRun;
+  readonly kept?: HeightFailure;
 }
 
 /** The programming error of `blockBeforeCommitted()` called where it is not allowed. */
@@ -727,6 +775,17 @@ export class FinalizedLoop {
   #takeFailure: TakeFailure | undefined;
   /** The blocks taken and not committed yet, by height: what the source's finality check is answered from. */
   readonly #uncommitted = new Map<bigint, BlockRef>();
+  /** The highest height of a chunk that did not commit, until the cursor reaches it: no chunk forms at or below it. */
+  #alone: bigint | null = null;
+  /**
+   * The blocks of a chunk that did not commit, stored again one per transaction from where each resumes (from
+   * `on-compute`, with its items as `on-parse` left them), by height; kept across runs until the loop processes them.
+   */
+  readonly #remade = new Map<bigint, HeldHeight>();
+  /** The failure of a block above blocks stored again, thrown when the loop reaches it, the block not called again. */
+  #keptFailure: HeightFailure | undefined;
+  /** The chunk the last run held for the next. */
+  #heldChunk: HeldChunk | undefined;
   /**
    * The heights' runs of this run of the loop whose block before committed in it ({@link continues}), each with the
    * writer's session that committed it, which the writer must still have when a block context says true; a run leaves
@@ -830,6 +889,8 @@ export class FinalizedLoop {
     const { db, graph, source, observer } = this.input;
     const held = this.#held;
     this.#held = undefined;
+    const heldChunk = this.#heldChunk;
+    this.#heldChunk = undefined;
     this.#resume = undefined;
     // A new run: no block before continues into it, whatever an earlier run committed, and nothing taken is kept.
     this.#lastStored = null;
@@ -837,14 +898,21 @@ export class FinalizedLoop {
     this.#taken.clear();
     this.#takeFailure = undefined;
     this.#uncommitted.clear();
+    for (const run of heldChunk === undefined ? [] : [...heldChunk.runs, ...(heldChunk.carried === undefined ? [] : [heldChunk.carried])]) {
+      this.#uncommitted.set(run.height, run.block);
+    }
     let cursor: BlockRef | null;
-    if (held === undefined) {
+    if (held !== undefined) {
+      cursor = await this.#settle(held);
+    } else if (heldChunk !== undefined) {
+      cursor = await this.#settleChunk(heldChunk);
+    } else {
       cursor = await db.read((read) => source.cursor(read));
       const at = cursor;
       if (at !== null) await this.#timed("redelivery", at.height, "on-after-db-write", () => this.redeliver(at));
-    } else {
-      cursor = await this.#settle(held);
     }
+    // Blocks to store again that the cursor has passed are gone.
+    for (const height of this.#remade.keys()) if (cursor !== null && height <= cursor.height) this.#remade.delete(height);
     const last = this.lastHeight();
     if (cursor !== null && last !== null && cursor.height >= last) return this.#stopped(cursor.height);
     for (;;) {
@@ -885,6 +953,13 @@ export class FinalizedLoop {
           done = await this.#process(height, cursor);
         } else {
           const ended = await this.#chunk(height, end ?? height, cursor, given);
+          if (ended.again === true) {
+            // Not committed: its blocks again from the cursor before it, one per transaction.
+            cursor = ended.cursor;
+            carried = undefined;
+            height = cursor === null ? graph.start - 1n : cursor.height;
+            continue;
+          }
           done = ended.cursor;
           carried = ended.carried;
         }
@@ -892,6 +967,7 @@ export class FinalizedLoop {
         if (done === null) return SIGNALLED;
         cursor = done;
         height = done.height;
+        if (this.#alone !== null && height >= this.#alone) this.#alone = null;
         if (height === last) return this.#stopped(height);
       }
     }
@@ -1227,8 +1303,16 @@ export class FinalizedLoop {
     opened?: { readonly watch: Watch; readonly beginFrom: number },
   ): Promise<BlockRef | null> {
     let committed = false;
-    const resume = this.#resume?.run.height === height ? this.#resume : undefined;
+    const resume = this.#resume?.run.height === height ? this.#resume : this.#remade.get(height);
     this.#resume = undefined;
+    this.#remade.delete(height);
+    const kept = this.#keptFailure;
+    if (kept !== undefined && kept.height === height) {
+      // Its failure was kept while the blocks below it were stored again: it is not called again.
+      this.#keptFailure = undefined;
+      if (opened !== undefined) this.#unwatch(opened.watch, false);
+      throw kept;
+    }
     let run: HeightRun | undefined;
     // A chunk whose takes left this height alone hands over its window, open since the takes began.
     const watch = opened?.watch ?? this.#watchHeight(height);
@@ -1270,6 +1354,13 @@ export class FinalizedLoop {
     } catch (error) {
       if (!committed) this.#unwatch(watch, false);
       const failure = this.#failure(height, error, committed);
+      // A block stored again failed: a failure kept for a block above it is dropped, and logged, when this one stops
+      // processing; it stays kept while this one is retried.
+      const above = this.#keptFailure;
+      if (above !== undefined && above.height > height && !isRetryable(failure)) {
+        this.#keptFailure = undefined;
+        this.input.observer?.dropped?.(above);
+      }
       if (!committed && run !== undefined) {
         this.#hold(run, failure);
         // The transaction did not commit, unless its body ended and its COMMIT lost its answer: then its outcome is not
@@ -1318,8 +1409,25 @@ export class FinalizedLoop {
     const { fastSync, lockstep } = this.input;
     if (fastSync === undefined || lockstep !== undefined) return null;
     if (this.#resume?.run.height === first || this.#takeFailure?.height === first) return null;
-    const limits = { head, rangeEnd: this.#rangeAt(first).range.to, last: this.lastHeight(), alone: null };
+    const limits = { head, rangeEnd: this.#rangeAt(first).range.to, last: this.lastHeight(), alone: this.aloneUpTo() };
     return chunkEnd(fastSync, first, limits);
+  }
+
+  /**
+   * The highest height of a chunk that did not commit while the cursor is below it, else null: no chunk forms at or
+   * below it (see the module comment). A negative control's seam.
+   */
+  protected aloneUpTo(): bigint | null {
+    return this.#alone;
+  }
+
+  /**
+   * The failure of a block above the blocks of a chunk stored again after a rollback: thrown once they are stored, when
+   * the loop reaches the block, which is not called again. A negative control's seam: undefined stores that block again
+   * alone too.
+   */
+  protected keptFailure(failure: HeightFailure): HeightFailure | undefined {
+    return failure;
   }
 
   /**
@@ -1404,7 +1512,12 @@ export class FinalizedLoop {
     const windows: Watch[] = [watch];
     let current: HeightRun | undefined;
     let bodyEnd: number | undefined;
-    /** A block whose on-compute asked that the block before be committed: it is carried over, not written here. */
+    /** True once the transaction's body ended without a failure: a failure after it is the COMMIT's. */
+    let bodyDone = false;
+    /**
+     * A block after the first whose on-compute asked that the block before be committed, or failed: the chunk commits
+     * at the block before it, and it is carried over (or its failure thrown), not written here.
+     */
     let carried: { readonly run: HeightRun; readonly computing: Promise<void>; readonly computeFrom: number } | undefined;
     try {
       const head = computed ?? (await this.#begin(first, previous));
@@ -1455,9 +1568,14 @@ export class FinalizedLoop {
               this.#reached(run, "on-compute");
               chunk.computing = run;
               const computing = this.compute(run, this.#viewOpener(chunk, run), { inSeries: true });
-              const asked = await Promise.race([computing.then(() => false), chunk.asked.promise.then(() => true)]);
+              const settled = computing.then(
+                () => "computed" as const,
+                () => "failed" as const,
+              );
+              const outcome = await Promise.race([settled, chunk.asked.promise.then(() => "asked" as const)]);
               chunk.computing = undefined;
-              if (asked) {
+              if (outcome !== "computed") {
+                // Asked, or failed before its first write: the chunk commits at the block before.
                 computing.catch(() => undefined);
                 carried = { run, computing, computeFrom };
                 break;
@@ -1471,6 +1589,7 @@ export class FinalizedLoop {
               chunk.open = false;
             });
             for (const run of runs) if (run !== carried?.run) this.#bodiesEnded.add(run);
+            bodyDone = true;
           } finally {
             chunk.open = false;
             bodyEnd = performance.now();
@@ -1480,8 +1599,13 @@ export class FinalizedLoop {
     } catch (error) {
       this.#chunkOpen = undefined;
       chunk.committed.reject(error);
-      await carried?.computing.catch(() => undefined);
-      throw this.#chunkFailed(error, runs, current, windows, bodyEnd !== undefined);
+      let carriedFailure: { readonly error: unknown } | undefined;
+      if (carried !== undefined) {
+        await carried.computing.catch((failed: unknown) => {
+          carriedFailure = { error: failed };
+        });
+      }
+      return this.#notCommitted(error, { first, previous, runs, current, windows, bodyDone, carried: carried?.run, carriedFailure });
     }
     this.#chunkOpen = undefined;
     const commitMs = performance.now() - (bodyEnd as number);
@@ -1498,12 +1622,13 @@ export class FinalizedLoop {
     traceCommitHeld([first, lastRun.height], commitMs);
     // blockBeforeCommitted() resolves: the carried block's on-compute goes on, with no transaction open.
     chunk.committed.resolve();
-    let computeFailure: { readonly error: unknown } | undefined;
+    /** The carried block's failure before its writes: its own, taken before the points after the commit run. */
+    let computeFailure: HeightFailure | undefined;
     if (carried !== undefined) {
       try {
         await carried.computing;
       } catch (error) {
-        computeFailure = { error };
+        computeFailure = this.#consumed(this.#failure(carried.run.height, error, false));
       }
       traceAdd("prepareMs", performance.now() - carried.computeFrom);
       this.#park(windows.at(-1) as Watch);
@@ -1526,10 +1651,9 @@ export class FinalizedLoop {
       // The carried block failed before its writes: as a height alone that fails at on-compute.
       this.#unwatch(window, false);
       traceDropBlock();
-      const failure = this.#failure(carried.run.height, computeFailure.error, false);
-      this.#hold(carried.run, failure);
+      this.#hold(carried.run, computeFailure);
       this.#tell("rolledBack", carried.run.block);
-      throw failure;
+      throw computeFailure;
     }
     this.#unpark(window);
     return { cursor: lastRun.block, carried: { run: carried.run, watch: window } };
@@ -1573,27 +1697,167 @@ export class FinalizedLoop {
   }
 
   /**
-   * A chunk's transaction did not commit, or its `first` block failed before it: the failure of the block in progress
-   * (`current`), its windows closed, its lines dropped, the follower told of each block begun, unless the `COMMIT`'s
-   * answer was lost (`bodyEnded` and a retryable error: its outcome is not known); the first block held for a retry
-   * when the failure came before or in its own writes, as for a height processed alone.
+   * The chunk's transaction did not commit, or its first block failed before or in its writes (see the module
+   * comment's failure rule): the windows closed, the record of the last stored block cleared; then by where it failed:
+   * - before the `BEGIN` or in the first block's writes: as a height alone (held for a retry when retryable);
+   * - the `COMMIT`'s answer lost: the chunk held, its outcome unknown, nothing told, its trace records kept;
+   * - in the writes of a block k after the first, retryable: the chunk held; the next run stores a..k − 1 again and k
+   *   alone from where it resumes;
+   * - in those writes, not retryable: a..k − 1 stored again in this run, then k's failure thrown, k not called again;
+   * - the `COMMIT` answered with an error: every block stored again, one per transaction.
+   * The follower is told `rolledBack` for each block begun but where the answer was lost. Resolves to store the blocks
+   * again from the cursor before the chunk, or rejects with the failure that stops the loop.
    */
-  #chunkFailed(
+  async #notCommitted(
     error: unknown,
-    runs: readonly HeightRun[],
-    current: HeightRun | undefined,
-    windows: readonly Watch[],
-    bodyEnded: boolean,
-  ): HeightFailure {
-    const failing = current ?? runs[0];
-    const failure = this.#failure(failing?.height ?? 0n, error, false);
+    at: {
+      readonly first: bigint;
+      readonly previous: BlockRef | null;
+      readonly runs: readonly HeightRun[];
+      readonly current: HeightRun | undefined;
+      readonly windows: readonly Watch[];
+      readonly bodyDone: boolean;
+      readonly carried: HeightRun | undefined;
+      readonly carriedFailure: { readonly error: unknown } | undefined;
+    },
+  ): Promise<ChunkEnd> {
+    const { first, previous, runs, current, windows, bodyDone, carried, carriedFailure } = at;
     this.#endWindows(windows, false);
+    this.#lastStored = null;
+    const failing = current ?? runs[0];
+    const stored = carried === undefined ? runs : runs.slice(0, -1);
+    const last = stored.at(-1);
+    const kept = carried !== undefined && carriedFailure !== undefined ? this.#consumed(this.#failure(carried.height, carriedFailure.error, false)) : undefined;
+    if (bodyDone && answerLost(error) && last !== undefined) {
+      // The COMMIT's outcome is not known: the next run's cursor read decides.
+      traceDropBlock();
+      this.#heldChunk = this.heldChunk(Object.freeze({ runs: stored, uncertain: true, ...(carried === undefined ? {} : { carried }), ...(kept === undefined ? {} : { kept }) }));
+      throw this.#failure(last.height, error, false);
+    }
     traceDropHeld();
     traceDropBlock();
-    this.#lastStored = null;
-    if (!(bodyEnded && answerLost(error))) for (const run of runs) this.#tell("rolledBack", run.block);
-    if (failing !== undefined && failing === runs[0] && !bodyEnded) this.#hold(failing, failure);
+    for (const run of runs) this.#tell("rolledBack", run.block);
+    if (!bodyDone && (failing === undefined || failing === runs[0])) {
+      // Before the BEGIN, or in the first block's own writes: as a height alone.
+      const failure = this.#failure(failing?.height ?? first, error, false);
+      if (failing !== undefined) this.#hold(failing, failure);
+      throw failure;
+    }
+    if (!bodyDone) {
+      const k = failing as HeightRun;
+      const failure = this.#consumed(this.#failure(k.height, error, false));
+      this.#alone = k.height;
+      if (isRetryable(failure)) {
+        this.#heldChunk = this.heldChunk(Object.freeze({ runs, uncertain: false }));
+        throw failure;
+      }
+      const thrown = this.keptFailure(failure);
+      this.#storeAgain(thrown === undefined ? runs : runs.slice(0, runs.indexOf(k)), runs.at(-1));
+      this.#keptFailure = thrown;
+      return { cursor: previous, again: true };
+    }
+    // The COMMIT answered with an error: every block again, one per transaction; the block whose own COMMIT fails stops.
+    this.#alone = (carried ?? (last as HeightRun)).height;
+    this.#storeAgain(kept === undefined && carried !== undefined ? runs : stored, carried);
+    this.#keptFailure = kept;
+    return { cursor: previous, again: true };
+  }
+
+  /**
+   * Keeps `runs`, blocks of a chunk that did not commit, to be stored again one per transaction ({@link #remade}): each
+   * from `on-compute` with its items as `on-parse` left them, but `resumeFrom`, the block that failed in its writes,
+   * from where it resumes.
+   */
+  #storeAgain(runs: readonly HeightRun[], resumeFrom?: HeightRun): void {
+    for (const run of runs) {
+      const progress = this.#progress.get(run);
+      if (progress === undefined) continue;
+      const from: ResumePoint = run === resumeFrom ? progress.from : "on-compute";
+      this.#remade.set(run.height, Object.freeze({ run, items: progress.items, from, uncertain: false }));
+    }
+  }
+
+  /** `failure`, the misuse it carries taken from the loop's record, so the blocks stored after it are not failed by it. */
+  #consumed(failure: HeightFailure): HeightFailure {
+    if (this.#misuse !== undefined && failure.cause === this.#misuse.error) this.#misuse = undefined;
     return failure;
+  }
+
+  /** The chunk kept for the next run when a retryable failure or a lost answer stopped it (see {@link HeldChunk}): a seam. */
+  protected heldChunk(held: HeldChunk): HeldChunk | undefined {
+    return held;
+  }
+
+  /**
+   * The start of a run after one that held the chunk `held` (see the module comment): the cursor read on the writer;
+   * after a lost answer, at the chunk's last block with its hash, the chunk committed: the follower and the observer
+   * are told and each block's points after the commit run; at the cursor before the chunk, it did not: (after a lost
+   * answer, the follower told `rolledBack`) its blocks are kept to be stored again one per transaction; anything else
+   * stops with `unexpected-cursor` at the chunk's first block, nothing told. Resolves with the cursor to go on from.
+   */
+  async #settleChunk(held: HeldChunk): Promise<BlockRef | null> {
+    const { db, source, observer } = this.input;
+    const first = held.runs[0] as HeightRun;
+    const last = held.runs.at(-1) as HeightRun;
+    let cursor: BlockRef | null;
+    try {
+      cursor = await db.transaction((tx) => source.cursor(tx));
+    } catch (error) {
+      this.#heldChunk = held;
+      throw this.#failure(first.height, error, false);
+    }
+    const carried = held.carried === undefined ? [] : [held.carried];
+    if (held.uncertain && isBlock(cursor, last.block)) {
+      for (const run of held.runs) {
+        this.#tell("committed", run.block);
+        this.#uncommitted.delete(run.height);
+      }
+      observer?.committed?.(last.block);
+      traceCommitHeld([first.height, last.height], 0);
+      for (const run of held.runs) {
+        traceResumeHeld();
+        try {
+          await this.#afterCommit(run);
+          traceEndBlock(run.height);
+          this.#check();
+        } catch (error) {
+          traceDropHeld();
+          traceDropBlock();
+          throw this.#failure(run.height, error, true);
+        }
+      }
+      if (held.carried !== undefined) {
+        this.#alone = held.carried.height;
+        if (held.kept === undefined) this.#storeAgain(carried);
+        this.#keptFailure = held.kept;
+      }
+      return last.block;
+    }
+    traceDropHeld();
+    if (!isBlock(cursor, first.previous)) {
+      const expected = held.uncertain
+        ? `neither height ${last.height} with the block's hash (committed) nor ${cursorText(first.previous)} (not committed)`
+        : `not ${cursorText(first.previous)}, where it was`;
+      throw this.#failure(
+        first.height,
+        new UnexpectedCursor(
+          `after the transaction of heights ${first.height} to ${last.height} was lost the cursor is at ` +
+            `${cursorText(cursor)}, ${expected}: another writer changed the database while the connection was lost`,
+        ),
+        false,
+      );
+    }
+    if (held.uncertain) {
+      for (const run of [...held.runs, ...carried]) this.#tell("rolledBack", run.block);
+      this.#alone = (held.carried ?? last).height;
+      this.#storeAgain(held.kept === undefined ? [...held.runs, ...carried] : held.runs);
+      this.#keptFailure = held.kept;
+    } else {
+      // The block that failed, last, again alone from where it resumes; the blocks below it from on-compute.
+      this.#alone = last.height;
+      this.#storeAgain(held.runs, last);
+    }
+    return first.previous;
   }
 
   /** The window of `height`, a block after its chunk's first: the window before it is held, its timer stopped. */
