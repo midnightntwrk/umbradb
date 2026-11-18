@@ -28,6 +28,10 @@ import { type Child, childKey, decodeChildren, encodeChildren, hex, nodeKey, ref
  *   new nodes nothing reaches, the two rewrites of a queued node, queued keys referenced again, contract keys,
  *   `retainStates` 0 and above, lowered windows and `sweep` turned off and on. A history in one form (`oneForm`) writes
  *   every key with one child list throughout and only admissible batches, as the sweep's model needs.
+ *   A history under the flush rule (`flushRule`) writes a node new or in another form only where the ledger package's
+ *   flush would: where a key the block raises reaches it through the block's own nodes. The reclamation of a run of
+ *   blocks (`src/backbone/core-ledger-state/run-reclaim.ts`) takes such histories, and the package that flushes them
+ *   may be told of deletions at a run's end only ({@link GraphWorld.commit} with none inside a run).
  *
  * Child lists are the ledger's `layout-v2` bytes, built with `test/ledger/node-format.ts`, an implementation of the
  * node format and its keys of its own.
@@ -321,17 +325,34 @@ export interface BlockScript {
 export interface HistoryScript {
   readonly retainStates: number;
   readonly oneForm: boolean;
+  /**
+   * Whether every block follows the ledger package's flush rule (see the module comment): a stored node is rewritten
+   * only where a node the block flushes references it under a key the block raises, and the block writes no stray
+   * rewrite, no node nothing reaches and no rewrite of a queued node.
+   */
+  readonly flushRule?: boolean;
   readonly blocks: readonly BlockScript[];
 }
 
 /**
  * Generated histories. With `oneForm`, no node is rewritten, none is written again in another form after its
  * deletion, and every batch is admissible: no new node that a rising key does not reach, no rewrite.
+ * With `flushRule`, nodes are rewritten and written again in another form, each under the package's flush rule
+ * ({@link HistoryScript.flushRule}).
  */
 export function historyScripts(options: {
   readonly oneForm: boolean;
+  readonly flushRule?: boolean;
   readonly maxBlocks?: number;
 }): fc.Arbitrary<HistoryScript> {
+  if (options.flushRule === true) {
+    // The same draws, without the cases the flush rule excludes; the world narrows the rewrites.
+    return historyScripts({ ...options, flushRule: false }).map((script) => ({
+      ...script,
+      flushRule: true,
+      blocks: script.blocks.map((block) => ({ ...block, strays: 0, orphans: 0, boundary: "none" as const })),
+    }));
+  }
   const none = fc.constant(0);
   const rarely = fc.oneof({ weight: 4, arbitrary: none }, { weight: 1, arbitrary: fc.constant(1) });
   const kind: fc.Arbitrary<BlockKind> = fc.oneof(
@@ -440,6 +461,7 @@ const treeRefs = (tree: readonly Child[]): string[] => refsOf([...tree]).map(hex
  */
 export class GraphWorld {
   readonly #oneForm: boolean;
+  readonly #flushRule: boolean;
   #retainStates: number;
   #height = -1;
   #wasOn = true;
@@ -454,6 +476,7 @@ export class GraphWorld {
 
   constructor(script: HistoryScript) {
     this.#oneForm = script.oneForm;
+    this.#flushRule = script.flushRule === true;
     this.#retainStates = script.retainStates;
   }
 
@@ -525,6 +548,26 @@ export class GraphWorld {
       write(node, tree ?? this.#tree(node));
     };
     const reachedFromRising = (): Set<string> => reach(rising.map((node) => node.key), listAfter);
+    /**
+     * The stored keys where the package's flush stops: those a rising key reaches through the block's own nodes. A
+     * stored node rewritten there is under the flush rule.
+     */
+    const flushStops = (): Set<string> => {
+      const seen = new Set<string>();
+      const stops = new Set<string>();
+      const stack = rising.map((node) => node.key);
+      for (let key = stack.pop(); key !== undefined; key = stack.pop()) {
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const tree = inserts.get(key);
+        if (tree === undefined) {
+          if (this.#stored.has(key)) stops.add(key);
+          continue;
+        }
+        for (const ref of treeRefs(tree)) if (!seen.has(ref)) stack.push(ref);
+      }
+      return stops;
+    };
     const parentsOf = (key: string): number => {
       let parents = 0;
       for (const stored of this.#stored) {
@@ -564,7 +607,7 @@ export class GraphWorld {
     for (const node of rising) ensure(node);
     if (!this.#oneForm) {
       for (let i = 0; i < script.rewrites; i++) {
-        const reached = reachedFromRising();
+        const reached = this.#flushRule ? flushStops() : reachedFromRising();
         const candidates = sorted(reached)
           .filter((key) => this.#stored.has(key) && !inserts.has(key))
           .map((key) => this.#node(key))
