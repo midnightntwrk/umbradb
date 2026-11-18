@@ -31,7 +31,9 @@
  *   `SET LOCAL ROLE` and local settings are back after it.
  * - It cannot end or leave the transaction: a statement whose first word is transaction control, also behind empty
  *   statements, or that sets the session authorization, is refused before it is sent (`./statement-refusal.ts`), and
- *   the server refuses `DO` and `CALL` that would end it (`2D000`) and two statements in one call (`42601`).
+ *   the server refuses `DO` and `CALL` that would end it (`2D000`). A text of two statements that passes that check
+ *   is sent and refused by the server, neither statement run (`42601`: `SELECT 1; COMMIT`); one whose first
+ *   statement the check refuses is not sent (`COMMIT; SELECT 1`: `control-refused`).
  * - A view whose statements only read takes no transaction id and no subtransaction id; `now()` and the transaction
  *   id are the transaction's.
  * - On PostgreSQL the open and close go through a path of the session that never counts as a schema change, so the
@@ -51,13 +53,16 @@
  *
  * **What it does not undo.** Functions that act outside the transaction run and stay: a session-level advisory lock
  * (`pg_advisory_lock`) taken in a view outlives it and the commit, and `pg_terminate_backend` or `pg_cancel_backend`
- * act at once. `txid_current()` gives the transaction an id, which stays. The session's prepared statements and
- * cursors are no part of a transaction either: a statement prepared by name (`PREPARE`) in a view outlives it, as
- * through any handle, and one deallocated in a view (`DEALLOCATE`) stays deallocated; a cursor a view fetched from
- * (the transaction's own, or one an earlier transaction declared `WITH HOLD`) keeps its place, and a holdable cursor
- * closed in a view stays closed, while a cursor declared inside a view is gone after it. A custom setting first made
- * in a view reads `''`, not NULL, after it: treat `''` as unset. `LISTEN` and `UNLISTEN` in a view are undone, and
- * `NOTIFY` is accepted and dropped with the rolled-back subtransaction. On PGlite,
+ * act at once. `txid_current()` gives the transaction an id, which stays. The session's prepared statements and cursors
+ * are no part of a transaction either: a statement prepared by name (`PREPARE`) in a view outlives it, as through any
+ * handle, and one deallocated in a view (`DEALLOCATE`) stays deallocated; a cursor a view fetched from (the
+ * transaction's own, or one an earlier transaction declared `WITH HOLD`) keeps its place, also when a later statement
+ * of the view failed, and a holdable cursor closed in a view stays closed, while a cursor declared inside a view is
+ * gone after it. A cursor whose own fetch failed in a view cannot be fetched from after it (`55000`). On PostgreSQL the
+ * names the session prepared its own texts under are prepared statements too: after a `DEALLOCATE ALL` in a view, the
+ * next use of each such text fails with `26000`, in the view or in the transaction after it, which that failure aborts.
+ * A custom setting first made in a view reads `''`, not NULL, after it: treat `''` as unset. `LISTEN` and `UNLISTEN` in
+ * a view are undone, and `NOTIFY` is accepted and dropped with the rolled-back subtransaction. On PGlite,
  * `set_config('session_authorization', …)` inside a `SELECT` is not caught, and nothing undoes it for the engine's
  * life.
  *
