@@ -53,7 +53,15 @@ import { runProblems } from "./refcount-process.js";
  * - every row of the backbone's and the ledger modules' tables (`nodes` with its payloads, the counts and the queue
  *   included) is compared after every height and at each halt, with an uninterrupted run or a run with the memory off;
  * - what `core-ledger-state` keeps is its own: a module that changes the bytes of a published `ledger-state` item after
- *   the block changes nothing the next block takes;
+ *   the block, or right after the block's state row was written and before its `on-db-write` ended, changes nothing
+ *   the next block takes; the block context's hash changed between `core-block-commit`'s two rows changes neither row;
+ * - with `retainStates` 2 and the `states` row of 8 deleted while 9's `COMMIT` answer was lost, 10 commits and 11 halts
+ *   releasing 8, as reading the released keys alone does, with the rows of an uninterrupted run to 10 less that row;
+ * - with the checking option and `retainStates` 2, a kept key the next block does not release, changed or removed,
+ *   fails that block's `on-compute`, naming it;
+ * - a pause between h − 1 and h inside the run: h takes the block before from memory; a failure in `on-stop-height` of
+ *   an entry stopping at h: h + 1 reads it; a kept block two heights below (a skipped height): h reads
+ *   `core-ledger-state`'s block before, and `core-block-commit`, which kept h − 1, does not;
  * - the keys it keeps are the retention window's and no more, through a long run, a `retainStates` raised and lowered,
  *   and a retried height; the block before is read again after an activation boundary of another module (not: no
  *   height of the run is a first one), a stop as before an upgrade, and failures after the block was kept: at
@@ -391,6 +399,37 @@ describe.each(PROCESS_BACKENDS)("the block before, kept in memory, through the p
     expect(named?.[1], message).toBe("the kept key of the state after block 0");
     expect(named?.[2]).toMatch(memory);
     expect(named?.[3]).toMatch(/^0x[0-9a-f]{64}$/);
+  }, PATIENCE_MS * 2);
+
+  it("a pause between h − 1 and h, held and released inside the run: h takes the block before from memory, and the rows are an uninterrupted run's", async () => {
+    let paused = 0;
+    const before = await beforeRun(await backend.database(), { last: LAST, pauseAfter: { at: H - 1n, reached: () => paused++ } });
+    expect(paused).toBe(1);
+    expect(before.run.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
+    expect(readsOf(before.calls)).toEqual(readsAt([]));
+    expect(loadedKeys(before.loads)).toEqual(loadsOf(before, LAST));
+    expect(rowDifferences(before.rows, (await uninterrupted()).before.rows)).toEqual([]);
+  }, PATIENCE_MS * 2);
+
+  it("a failure in on-stop-height of an entry stopping at h, after h committed: h + 1, the next run's first height, reads the block before; the rows are an uninterrupted run's", async () => {
+    const before = await beforeRun(await backend.database(), {
+      last: LAST,
+      faultsStop: Number(H),
+      faults: new Map([[`on-stop-height@${H}`, connectionLost()]]),
+    });
+    expect(before.run.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
+    expect(before.run.lines.some((line) => line.startsWith("processing retries in"))).toBe(true);
+    expect(readsOf(before.calls)).toEqual(readsAt([{ height: H + 1n }]));
+    expect(rowDifferences(before.rows, (await uninterrupted()).before.rows)).toEqual([]);
+  }, PATIENCE_MS * 4);
+
+  it("a kept block two heights below (a skipped height): h reads core-ledger-state's block before though its context says continues, and core-block-commit, which kept h − 1, does not", async () => {
+    const skipped = (kept: KeptBlock): KeptBlock => (kept.height === H - 1n ? { ...kept, height: H - 2n } : kept);
+    const before = await beforeRun(await backend.database(), { last: LAST, core: { keep: skipped } });
+    expect(before.run.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
+    const at = `ledger on-compute@${H}#1`;
+    expect(readsOf(before.calls)).toEqual({ ...readsAt([]), state: [at], time: [at], keys: [at] });
+    expect(rowDifferences(before.rows, (await uninterrupted()).before.rows)).toEqual([]);
   }, PATIENCE_MS * 2);
 
   /** Each kept value a test changes, with how, and the field the failure names. */

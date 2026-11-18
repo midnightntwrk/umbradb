@@ -159,7 +159,7 @@ export interface IngestOptions {
   readonly commit?: ModuleDeclaration;
   /** The start of each core or user module's entry (for example to test the mid-chain refusal); S unless given. */
   readonly startOf?: (id: string) => number;
-  /** The stop of each core module's entry (for example the handoff of `contract-logs`); none unless given. */
+  /** The stop of each core or user module's entry (for example the handoff of `contract-logs`); none unless given. */
   readonly stopOf?: (id: string) => number | undefined;
   /** The process's ledger worker (a test package's, a negative control's); `startLedgerWorker` unless given. */
   readonly ledgerWorker?: () => LedgerHost;
@@ -209,7 +209,7 @@ export async function ingest(db: ProcessDatabase, records: readonly TapeRecord[]
     ...(options.core ?? []).map((module) =>
       entryOf(module, options.startOf?.(module.id) ?? Number(options.start), {}, options.stopOf?.(module.id)),
     ),
-    ...user.map((module) => entryOf(module, options.startOf?.(module.id) ?? Number(options.start))),
+    ...user.map((module) => entryOf(module, options.startOf?.(module.id) ?? Number(options.start), {}, options.stopOf?.(module.id))),
   ];
   const lines: string[] = [];
   const Source = options.Source ?? NodeBlockSource;
