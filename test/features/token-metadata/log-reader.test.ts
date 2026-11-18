@@ -2,17 +2,20 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import * as v9 from "../../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js";
 import * as v9rc3 from "../../../vendor/ledger/v9-rc3/pkg/midnight_ledger_wasm_v9_fs.js";
-import { miscAtom, UnknownLogSerialization } from "../../../src/features/token-metadata/log-reader.js";
+import * as v9rc5 from "../../../vendor/ledger/v9-rc5/pkg/midnight_ledger_wasm_v9_fs.js";
+import { miscAtom, STATE_VALUE_TAG, STATE_VALUE_TAG_RC, UnknownLogSerialization } from "../../../src/features/token-metadata/log-reader.js";
 
 /**
  * The log reader: a `Misc` log's data, the ledger's tagged serialization of the logged value, is a candidate's bytes
  * only when it is a cell holding one atom of at most 288 bytes; any other value under the known tag is not; an unknown
- * tag is an error. Checked differentially against both v9 ledger packages' own serialization.
+ * tag is an error. Checked differentially against the three v9 ledger packages' own serialization: ledger 9.1.0.1
+ * writes one tag, the two release candidates another, and the body under both is the same.
  */
 
 type Package = typeof v9;
 const PACKAGES: readonly (readonly [string, Package])[] = [
-  ["v9 (rc.5)", v9],
+  ["v9 (9.1.0.1)", v9],
+  ["v9-rc5", v9rc5 as unknown as Package],
   ["v9-rc3", v9rc3 as unknown as Package],
 ];
 
@@ -78,9 +81,19 @@ describe("the log reader's refusals", () => {
 
   it("throws UnknownLogSerialization for a tag it does not know, naming the tag", () => {
     const bytes = known();
-    const text = Buffer.from(bytes).toString("latin1").replace("impact-state-value[v2]", "impact-state-value[v3]");
+    const text = Buffer.from(bytes).toString("latin1").replace(STATE_VALUE_TAG, "impact-state-value[v3]");
     expect(() => miscAtom(Uint8Array.from(Buffer.from(text, "latin1")))).toThrow(UnknownLogSerialization);
     expect(() => miscAtom(Uint8Array.from(Buffer.from(text, "latin1")))).toThrow(/impact-state-value\[v3\]/);
+  });
+
+  it("each v9 package writes a tag the reader knows: 9.1.0.1 its own, the release candidates the shorter one", () => {
+    const tagOf = (bytes: Uint8Array): string => Buffer.from(bytes).toString("latin1").split(":")[1]!;
+    const tags = PACKAGES.map(([label, api]) => [label, tagOf(api.serializeStateValue(cell(api, Uint8Array.of(0x40), 288)))]);
+    expect(tags).toEqual([
+      ["v9 (9.1.0.1)", STATE_VALUE_TAG],
+      ["v9-rc5", STATE_VALUE_TAG_RC],
+      ["v9-rc3", STATE_VALUE_TAG_RC],
+    ]);
   });
 
   it("throws UnknownLogSerialization for bytes that are not a tagged serialization", () => {

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { UnresolvedLogSite } from "../../../src/backbone/contract-logs/contract-logs.js";
 import { candidatesOf, TokenMetadataLogError } from "../../../src/features/token-metadata/apply.js";
-import { miscAtom, UnknownLogSerialization } from "../../../src/features/token-metadata/log-reader.js";
+import { miscAtom, STATE_VALUE_TAG, UnknownLogSerialization } from "../../../src/features/token-metadata/log-reader.js";
 import { tokenMetadataWith } from "../../../src/features/token-metadata/token-metadata.js";
 import {
   commonRecords,
@@ -88,9 +88,9 @@ const OTHER_TYPES = [
   "Unpaused",
 ] as const;
 
-/** `data` with its tag changed to `impact-state-value[v3]`. */
+/** `data` with its tag (the v9 ledger package's) changed to `impact-state-value[v3]`. */
 function retagged(data: Uint8Array): Uint8Array {
-  return Uint8Array.from(Buffer.from(Buffer.from(data).toString("latin1").replace("impact-state-value[v2]", "impact-state-value[v3]"), "latin1"));
+  return Uint8Array.from(Buffer.from(Buffer.from(data).toString("latin1").replace(STATE_VALUE_TAG, "impact-state-value[v3]"), "latin1"));
 }
 
 describe.each(PROCESS_BACKENDS)("token-metadata's event rows on $name", (backend: ProcessBackend) => {

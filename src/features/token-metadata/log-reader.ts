@@ -2,8 +2,9 @@
  * The log reader of `token-metadata`: the bytes of a `Misc` contract log's value, read from `contract-logs`' `data`
  * on the main thread, without the ledger.
  *
- * **What `data` holds.** The ledger's tagged serialization of the logged value (`serializeStateValue`):
- * `midnight:impact-state-value[v2]:`, then the value's storage nodes in topological order — a SCALE compact count, and
+ * **What `data` holds.** The ledger's tagged serialization of the logged value (`serializeStateValue`): `midnight:`,
+ * the tag and `:` (one of {@link STATE_VALUE_TAGS}: ledger 9.1.0.1 names the aligned value's own tag in it, the earlier
+ * v9 packages do not, and the body is the same), then the value's storage nodes in topological order — a SCALE compact count, and
  * for each node its child count, its children's indices (compact) and its data (a compact length and the bytes).
  * A cell is two nodes: its aligned value (no children) and the cell itself (one child, index 0, data `01`). The
  * aligned value is its `Value` then its `Alignment`, each in the ledger's flagged-int encoding
@@ -18,8 +19,14 @@
  * hide every event behind it. Every length is checked before the bytes it covers are read.
  */
 
-/** The tag of the ledger's serialization of a state value, as both v9 ledger packages write it. */
-export const STATE_VALUE_TAG = "impact-state-value[v2]";
+/** The tag of the ledger's serialization of a state value, as ledger v9 writes it (ledger-9.1.0.1, runtime 2.1.100 on). */
+export const STATE_VALUE_TAG = "impact-state-value[v2](fab-aligned-value[v1])";
+
+/** The tag the earlier v9 packages write (ledger-9.1.0.0-rc.3 and rc.5): the same body under a shorter tag. */
+export const STATE_VALUE_TAG_RC = "impact-state-value[v2]";
+
+/** Every tag the reader knows; the body under each is the same. */
+export const STATE_VALUE_TAGS: ReadonlySet<string> = new Set([STATE_VALUE_TAG, STATE_VALUE_TAG_RC]);
 
 /** The most bytes a `Misc` event's name and payload take together. */
 export const MISC_DATA_SIZE = 288;
@@ -181,7 +188,7 @@ function singleAtom(data: Uint8Array): Uint8Array | null {
  */
 export function miscAtom(data: Uint8Array): Uint8Array | null {
   const { tag, body } = tagOf(data);
-  if (tag !== STATE_VALUE_TAG) throw new UnknownLogSerialization(tag);
+  if (!STATE_VALUE_TAGS.has(tag)) throw new UnknownLogSerialization(tag);
   try {
     const reader = new Reader(data, body);
     if (reader.compact() !== 2) return null;
