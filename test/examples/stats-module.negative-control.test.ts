@@ -26,7 +26,7 @@ describe("the example's checks fail on a changed copy", () => {
 
   it("the type check fails when the module imports a name src/index.ts does not export", async () => {
     const copy = exampleCopy((file, text) =>
-      file === "stats-module.ts" ? text.replace("answerChainData, defineModule", "answerChainData, commandBuild, defineModule") : text,
+      file === "stats-module.ts" ? text.replace("defineModule, defineRoute", "commandBuild, defineModule, defineRoute") : text,
     );
     try {
       const result = await typeCheck(`${copy.dir}/tsconfig.json`);
