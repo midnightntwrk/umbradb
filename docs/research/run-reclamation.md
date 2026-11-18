@@ -702,7 +702,7 @@ commit; a key missing from the set costs one read. So the set is used only while
 | Event | The set | Why |
 |---|---|---|
 | A run deletes a key | the key leaves it, in step 10, before the net write | the net write's `DELETE` is the only statement that deletes rows of `nodes` |
-| A block whose context says the block before does not continue into it (`b.continues` false): a process's first block, every block made again after a failure (a rollback, a lost connection, a `COMMIT` that did not land), the block after a `COMMIT` whose answer was lost, a block on another writer's session than the one that committed the block before | emptied at the block's `on-compute`, before it is handed over | nothing the set learned is known to hold: the block before may have rolled back, or another writer may have held the database in between (below) |
+| A block whose context says the block before does not continue into it (`b.continues` false): a process's first block, every block made again after a failure (a rollback, a lost connection, a `COMMIT` that did not land), the first block after any rollback, the block after a `COMMIT` whose answer was lost, a block on another writer's session than the one that wrote the block before | emptied at the block's `on-compute`, before it is handed over | nothing the set learned is known to hold: the block before may have rolled back, or another writer may have held the database in between (below) |
 | `on-settle` throws (a check, a refusal with restarts off, a failed read or write) | emptied before the error goes on | nothing a failed settle learned is kept; the block made again does not continue either |
 | The process restarts | a new process context: empty | the set is the context's |
 | A restore | the process after it starts empty | `umbradb restore` loads an empty database that no process holds (`src/backup/restore.ts`) |
@@ -716,7 +716,8 @@ commit; a key missing from the set costs one read. So the set is used only while
 cursor at h with h's hash is taken as h committed (section 5.4). Another process may have committed h in between: one
 that took the writer lock while this process was away, with a configuration that sweeps at h, and deleted keys this
 process's set holds, then released the lock. The block after h does not continue (the engine sets `continues` only
-after a `COMMIT` answered in the same run of the loop), so the set is emptied before it is used, and a reference to a
+when the block before was stored in the same run of the loop, its `COMMIT` answered or its rows written in the
+transaction still open, on the same writer's session), so the set is emptied before it is used, and a reference to a
 key the other writer deleted halts with `missing-reference`, as it would without the set.
 
 **The bound.** At most 500,000 keys (`KNOWN_KEYS_MAX`): a key that would take the set past it empties it first, so it
