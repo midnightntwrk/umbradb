@@ -276,7 +276,17 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   whose answer was lost, a replaced writer's session, a refused eviction's restart, a trap in the apply ahead (which
   now ends that worker thread only, the block judged at its turn), or an input that differs, which also restarts the
   worker thread. Blocks 0 and 1, a v8 → v9 conversion and an upgrade within v9 are applied at their turn. What is
-  stored at a height does not change. A new operational setting of the `core` entry, `applyAhead` (`true`), turns it
+  stored at a height does not change. The worker's engine keeps, with each state it holds pending, the input the block
+  was applied from, and gives a pending block's result back only for that input; it applies no block after an apply
+  failed once its state was made (the package may hold a key it persisted and did not flush). In both cases it refuses
+  with `ApplyNeedsNewThread`, and `core-ledger-state` applies the block in a new worker thread, from the state the
+  database stores. This also holds for a height made again without blocks applied ahead. The node requests of a block
+  applied ahead are answered through a read lent for it, a read of another request that sees the block before its
+  parent or a later one, or a read of the database; never through an older read of another request, in which a node
+  written since is missing. On PostgreSQL the ledger worker's reads of the database for a request given no read do not
+  wait for the reader pool: they take a pooled reader when one is free, and otherwise run on one more reader session,
+  opened at its first use, so the process may hold `readConnections` + 1 reader sessions. A new operational setting of
+  the `core` entry, `applyAhead` (`true`), turns it
   off with `false`. In the block trace, `aheadUsed` and `aheadDropped` are new, and `applyMs` is the wait for the
   result at the block's `on-compute`; the operator guide lists them. `docs/research/apply-ahead.md` describes the rule
   and why a result applied ahead is the one an apply at the block's turn gives.
