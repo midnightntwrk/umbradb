@@ -293,6 +293,13 @@ export interface RunOutcome {
   /** The distinct nodes the run's blocks handed over. */
   readonly handed: number;
   /**
+   * How step 1 classified them against the database, each node by the last child list the run holds for it: new (no
+   * row), rewritten (a row with another child list) and unchanged (a row with that list). They sum to `handed`.
+   */
+  readonly newNodes: number;
+  readonly rewrittenNodes: number;
+  readonly unchangedNodes: number;
+  /**
    * The keys left stored, queued, only because a child list the run's last block replaced referenced them (and no
    * root count after the block before the last): what the per-block step keeps only if it still stored that list's
    * node at the block before. The same run made again without its last block keeps none of them (see the module
@@ -937,6 +944,9 @@ export class RunReclaim {
       evict: evicted.map((record) => this.#bytes(record)),
       rounds,
       handed: nodes.length,
+      newNodes: nodes.filter((record) => record.kind === "new").length,
+      rewrittenNodes: nodes.filter((record) => record.kind === "replaces").length,
+      unchangedNodes: nodes.filter((record) => record.kind === "same").length,
       keptByReplaced,
     });
   }

@@ -233,6 +233,7 @@ describe("T2: a run of one block is the per-block step", () => {
             expect(outcome.net.queued.map(hex), where).toEqual(step.queued.map(hex));
             expect(outcome.evict.map(hex), where).toEqual(step.deleted.map(hex));
             expect(outcome.rounds, where).toBe(step.rounds);
+            expect([outcome.newNodes, outcome.rewrittenNodes, outcome.unchangedNodes], where).toEqual([step.newNodes.length, step.rewritten.length, step.unchanged.length]);
             seen.followed += 1;
             seen.rewrites += step.rewritten.length;
             seen.deletions += step.deleted.length;
@@ -544,6 +545,35 @@ describe("by hand", () => {
       // After two, s0 is what the last block released: kept and queued. After three it was never written.
       expect([outcome.net.queued.map(hex), outcome.evict.map(hex)]).toEqual(count === 2 ? [[s0.key], []] : [[], [s0.key]]);
     }
+  });
+
+  it("says how it classified the run's nodes against the database: new, rewritten and unchanged, as the per-block step classifies them", async () => {
+    // Stored: r0 over w, which references c. The block writes w with c embedded under a new root r1, and c again
+    // with the list its row holds.
+    const r0 = over("r0", wReferencing);
+    const r1 = over("r1", wEmbedding);
+    const found: NodeTables = {
+      rows: new Map([[r0.key, r0.children], [wReferencing.key, wReferencing.children], [c.key, c.children]]),
+      refs: new Map([[wReferencing.key, 1], [c.key, 1]]),
+      queue: new Set(),
+    };
+    const flush = { inserts: flushed(wEmbedding, r1, c), rootCounts: raise(r1) };
+    const reclaim = new RunReclaim({ first: 1n, on: true });
+    reclaim.collect(1n, flush, true);
+    const outcome = await reclaim.compute(runTables(found, new Map([[r0.key, 1], [r1.key, 1]])));
+    expect([outcome.newNodes, outcome.rewrittenNodes, outcome.unchangedNodes, outcome.handed]).toEqual([1, 1, 1, 3]);
+    const step = await refcountStep(stepTables(found, new Map([[r0.key, 1]])), flush, { height: 1n, on: true });
+    expect([step.newNodes.map(hex), step.rewritten.map(hex), step.unchanged.map(hex)]).toEqual([[r1.key], [wReferencing.key], [c.key]]);
+    // Only the new and rewritten nodes are written; c lost w's reference and keeps none, kept by the list w had.
+    expect(outcome.net.inserts.map((node) => hex(node.key)).sort()).toEqual([r1.key, wEmbedding.key].sort());
+    expect(outcome.net.queued.map(hex)).toEqual([c.key]);
+    // Over two blocks the counts are of the nodes the run holds at its end: r1 is new, w is rewritten once, and c is
+    // unchanged though two blocks flush it.
+    const two = new RunReclaim({ first: 1n, on: true });
+    two.collect(1n, flush, true);
+    two.collect(2n, { inserts: flushed(c), rootCounts: [] }, true);
+    const both = await two.compute(runTables(found, new Map([[r0.key, 1], [r1.key, 1]])));
+    expect([both.newNodes, both.rewrittenNodes, both.unchangedNodes, both.handed]).toEqual([1, 1, 1, 3]);
   });
 
   it("the last child list written for a key inside a run is the one stored", async () => {
