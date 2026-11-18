@@ -99,8 +99,9 @@ import type { BlockWriteHandle, ReadHandle } from "../../db/api.js";
 import { UmbraError } from "../../db/errors.js";
 import { firstRegularAtParentTime, parentTimestampMs } from "../../ledger/replay.js";
 import type { ChainOutcome, LedgerEvent, LedgerName, StateSummary, TransactionResult, VmLog } from "../../ledger/types.js";
-import { type AppliedState, type ContractKeys, isEvictionRefused } from "../../ledger/worker/engine.js";
+import { type AppliedState, type ContractKeys, convertsFromV8, isEvictionRefused } from "../../ledger/worker/engine.js";
 import type { LedgerHost } from "../../ledger/worker/host.js";
+import { traceAdd, traceChain, tracedRead, traceMark, traceSteps, tracing } from "../../trace/trace.js";
 import { type BlockContext, type DefinedModule, defineModule, type ModuleDeclaration, type ProcessContext } from "../../modules/declaration.js";
 import { blockHeaderOf, ledgerVersionOf } from "../core-block-commit/core-block-commit.js";
 import type { BlockLedgerSource } from "../core-block-fetch/ledger-source.js";
@@ -126,6 +127,7 @@ import {
   type RefcountCheck,
   type RefcountFault,
   type RefcountStep,
+  type RefcountTables,
   refcountStep,
   sqlRefcountTables,
   writeRefcount,
@@ -411,7 +413,7 @@ export async function applyBlock(
     const persists = (options.persistsContracts ?? ((c: BlockContext) => c.active(CORE_CONTRACT_STATES_ID)))(b);
     const applyWith = (options.ledgerOf ?? (() => ledger))(b, parent.ledger);
     // At the conversion block F the worker converts the v8 state first, so every contract it holds gets new keys.
-    const others = persists ? [maintainedOf(b), parent.ledger === "v8" && applyWith === "v9" ? await deployedBelow(read, b.height) : []] : [];
+    const others = persists ? [maintainedOf(b), convertsFromV8(parent.ledger, applyWith) ? await deployedBelow(read, b.height) : []] : [];
     applied = await host.apply(
       {
         ledger: applyWith,
@@ -428,7 +430,10 @@ export async function applyBlock(
       read,
     );
   }
+  // Traced apart: the wait for the node's root once the worker has answered is the node's time, not the apply's.
+  const rootFrom = performance.now();
   const node = await nodeRoot;
+  traceAdd("rootWaitMs", performance.now() - rootFrom);
   if (!(options.rootMatches ?? sameBytes)(applied.stateRoot, node)) {
     throw new UmbraError(
       "root-mismatch",
@@ -516,14 +521,70 @@ export async function refcountOf(
   options: CoreLedgerStateOptions = {},
 ): Promise<RefcountStep> {
   const on = revisionAt(revisionsOf(p), b.height)?.sweep !== "off";
-  const tables = sqlRefcountTables(read);
+  const stepFrom = performance.now();
+  const tables = tracing() ? tracedTables(sqlRefcountTables(read)) : sqlRefcountTables(read);
   const step = await refcountStep(
     options.refcountFault === undefined ? tables : { ...tables, fault: options.refcountFault },
     applied.batch,
     { height: b.height, on, ...(options.refcountUnchecked === undefined ? {} : { unchecked: options.refcountUnchecked }) },
   );
+  const evictFrom = performance.now();
   if (step.deleted.length > 0) await boundLedger(p).ledger.evict(step.deleted);
+  if (tracing()) {
+    traceAdd("stepMs", evictFrom - stepFrom);
+    traceAdd("evictMs", performance.now() - evictFrom);
+    traceStep(step);
+  }
   return step;
+}
+
+/** `tables` with each read recorded in the block trace (`src/trace/trace.ts`), by its name. */
+function tracedTables(tables: RefcountTables): RefcountTables {
+  return {
+    rows: tracedRead("rows", (keys) => tables.rows(keys)),
+    changed: tracedRead("changed", (nodes) => tables.changed(nodes)),
+    queue: tracedRead("queue", () => tables.queue()),
+    counts: tracedRead("counts", (keys) => tables.counts(keys)),
+    references: tracedRead("references", (keys) => tables.references(keys)),
+  };
+}
+
+/**
+ * Records `step` in the block trace: its outputs extend the chain of step outputs (`sh`), and `st` is its sizes, in
+ * order the new, rewritten and unchanged nodes, the count changes, the deleted nodes, the rounds, the keys queued and
+ * unqueued, and the keys whose count stays above 0. A trace of the steps' detail also gets the count changes (`d`), the
+ * new nodes (`nn`) and the deleted nodes (`del`), each key by its first 6 bytes.
+ */
+function traceStep(step: RefcountStep): void {
+  const hex = (key: Uint8Array): string => Buffer.from(key).toString("hex");
+  traceChain([
+    String(step.height),
+    step.newNodes.map(hex),
+    step.rewritten.map(hex),
+    step.unchanged.map(hex),
+    step.deltas.map((change) => [hex(change.key), change.delta]),
+    step.counted,
+    step.deleted.map(hex),
+    step.rounds,
+    step.unqueued.map(hex),
+    step.queued.map(hex),
+  ]);
+  traceMark("st", [
+    step.newNodes.length,
+    step.rewritten.length,
+    step.unchanged.length,
+    step.deltas.length,
+    step.deleted.length,
+    step.rounds,
+    step.queued.length,
+    step.unqueued.length,
+    step.counted,
+  ]);
+  if (!traceSteps()) return;
+  const short = (key: Uint8Array): string => Buffer.from(key.subarray(0, 6)).toString("hex");
+  traceMark("d", step.deltas.map((change) => [short(change.key), change.delta]));
+  traceMark("nn", step.newNodes.map(short));
+  traceMark("del", step.deleted.map(short));
 }
 
 /**
@@ -545,7 +606,10 @@ export async function computeBlock(
   read: Pick<ReadHandle, "query">,
   options: CoreLedgerStateOptions = {},
 ): Promise<ComputedBlock> {
+  const applyFrom = performance.now();
   const applied = await applyBlock(p, b, read, options);
+  traceAdd("applyMs", performance.now() - applyFrom);
+  traceMark("tx", applied.output.results.length);
   try {
     return { applied, step: await refcountOf(p, b, read, applied, options) };
   } catch (error) {
@@ -648,13 +712,17 @@ export function coreLedgerState(options: CoreLedgerStateOptions = {}): DefinedMo
       async "on-db-write"(p, b, w) {
         const { applied, step } = pendingOf(p, b);
         // The node writes first: a rewritten node can be among those the step deletes.
+        const writeFrom = performance.now();
         const written = await writeBlock(options.nodeWriter?.(w, b.height) ?? w, applied);
+        const refcountFrom = performance.now();
+        traceAdd("writeBlockMs", refcountFrom - writeFrom);
         await writeRefcount(
           options.refcountWriter?.(w, b.height) ?? w,
           step,
           written,
           options.refcountUnchecked === undefined ? {} : { unchecked: options.refcountUnchecked },
         );
+        traceAdd("writeRefcountMs", performance.now() - refcountFrom);
       },
       async "on-after-db-write"(p, b) {
         // Not awaited: this callback runs inside a read, which on PGlite holds the one queue, and the commit may wait

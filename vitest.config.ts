@@ -55,6 +55,8 @@ const CORE_ARCH = {
   "**/src/library/**": { lines: 90, branches: 85, perFile: true },
   // The default for `src/**`, added with the ledger adapters' directory.
   "**/src/ledger/**": { lines: 90, branches: 85, perFile: true },
+  // The default for `src/**`, added with the block trace's directory.
+  "**/src/trace/**": { lines: 90, branches: 85, perFile: true },
   // The test tape: not in the package, but the tests of ingest, faults and differentials stand on it, so it
   // is measured and held to the default like `src/**`.
   "**/tools/tape/**": { lines: 90, branches: 85, perFile: true },
@@ -65,6 +67,10 @@ const CORE_ARCH = {
   "**/src/deterministic-postgresql/**": { lines: 95, branches: 90, perFile: true },
   "**/src/deterministic-postgresql/errors.ts": { lines: 95, branches: 91, perFile: true },
 } as const;
+
+// A shard's coverage is partial, so floors are checked only after `--merge-reports`. Read from Vitest's own arguments,
+// not the environment, which test workers inherit: tests that import this config must see the floors.
+const coverageShard = process.argv.some((arg) => arg === "--shard" || arg.startsWith("--shard="));
 
 export default defineConfig({
   test: {
@@ -92,6 +98,9 @@ export default defineConfig({
     // budget above neither run failed, so there is no cap. On a crowded machine, `npm run test:conformance --
     // --maxWorkers=<n>` sets one for a run.
     testTimeout: 60_000,
+    // Node 24's V8 can abort a worker ("Check failed: jit_page.has_value()") while freeing a Wasm-to-JS wrapper it
+    // tiered up (PGlite's, the ledger's). Never tiering wrappers up avoids that path; Wasm code itself still tiers up.
+    execArgv: ["--wasm-wrapper-tiering-budget=2147483647"],
     coverage: {
       provider: "v8",
       // Setting `include` also makes Vitest report every matching file no test loaded, at 0 %, so such a file is held
@@ -125,9 +134,9 @@ export default defineConfig({
         // match anywhere would otherwise take `browser/src/` in, held to `src/**`'s floors by its Node.js tests alone.
         "browser/**",
       ],
-      reporter: ["text", "json-summary", "html"],
+      reporter: coverageShard ? ["text-summary"] : ["text", "json-summary", "html"],
       reportsDirectory: "./coverage",
-      thresholds: {
+      thresholds: coverageShard ? undefined : {
         // Repo-wide floor, checked PER FILE (`perFile: true`). Applies to every included file no glob of CORE_ARCH
         // matches.
         perFile: true,

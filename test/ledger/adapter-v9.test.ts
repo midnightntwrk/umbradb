@@ -5,7 +5,7 @@ import { hex, NETWORK_ID } from "./adapter-fixtures.js";
 import { describeLedgerPackage } from "./adapter-suite.js";
 import { AdapterWorkerHost, type LoadedState } from "./adapter-worker-host.js";
 
-// The adapter test suite against the v9 adapter (`src/ledger/v9.ts`, ledger-9.1.0.0-rc.5 from `vendor/ledger/v9`),
+// The adapter test suite against the v9 adapter (`src/ledger/v9.ts`, ledger-9.1.0.1 from `vendor/ledger/v9`),
 // whose `apply` reports contract logs, and the v9-only `convertFromV8` through both adapters, since every version has
 // one interface.
 

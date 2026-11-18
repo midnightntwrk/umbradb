@@ -37,6 +37,17 @@
  * loader. It runs the ledger tasks of the modules its entry gives it (`./run.ts`); UmbraDB's entry (`./entry.ts`)
  * also adds those of {@link LedgerWorkerOptions.modules}.
  *
+ * **In a traced process** (`src/trace/trace.ts`; nothing of this otherwise, and the messages are then as without it)
+ * a request is posted with the clock both threads share (`at`, `./protocol.ts`), and the height being processed when a
+ * message of the worker is handled gets, in ms:
+ * - `rt.<type>`: each request's round trip, from its post to its answer handled, summed by the request's type, and
+ *   `rtN.<type>`, how many answers;
+ * - `backMs`: from the worker posting an answer to this thread handling it, which is the answer's way back and the
+ *   time this thread was busy with something else;
+ * - `nodeNoticeMs`: the same for the worker's node requests, during which the worker is blocked; `nodeReadMs`: from
+ *   handling a node request to waking the worker (the wait for a read where none was open, the statements, the
+ *   answer written); `nodeReads`: how many.
+ *
  * {@link inThreadLedger} is the same interface over an engine on the main thread, for the tests and for a negative
  * control that moves ledger work to the main thread. It cannot read stored nodes, since that would block the thread
  * that owns the database.
@@ -61,6 +72,8 @@ import {
 } from "./engine.js";
 import { BridgeServer, bridgeMemory, type NodeReader } from "./node-bridge.js";
 import type { FromLedgerWorker, LedgerRequest, LedgerRequestKind, SerializedError, ToLedgerWorker } from "./protocol.js";
+import { traceAdd, traceWorker, tracing } from "../../trace/trace.js";
+import { traceClock } from "../../trace/worker-trace.js";
 
 
 /** The step a ledger worker runs now (see the module comment). */
@@ -304,7 +317,8 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
     const memory = bridgeMemory(options.bridgeBytes);
     const output = options.output ?? "inherit";
     const worker = new Worker(entry, {
-      workerData: { memory, loader, loaderData: options.loaderData, modules },
+      // `trace`: whether this process is traced (`src/trace/trace.ts`), so the thread posts its applies' entries.
+      workerData: { memory, loader, loaderData: options.loaderData, modules, trace: tracing() },
       ...workerStreams(output),
     });
     drainWorkerOutput(worker, "ledger worker", output);
@@ -326,12 +340,30 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
     return started;
   };
 
-  /** Answers the worker's node request for request `id` (see the module comment). */
-  const answerNode = (id: number): void => {
+  /**
+   * Answers a node request through `read`; in a traced process `from` is when the node request was handled, and the
+   * time from then to the worker woken is recorded (null otherwise: nothing is).
+   */
+  const answerTimed = (bridge: BridgeServer, read: NodeReader | null, from: number | null): Promise<void> => {
+    const answer = bridge.answer(read);
+    if (from === null) return answer;
+    return answer.then(() => {
+      traceAdd("nodeReadMs", performance.now() - from);
+      traceAdd("nodeReads", 1);
+    });
+  };
+
+  /**
+   * Answers the worker's node request for request `id` (see the module comment). In a traced process `at` is when the
+   * worker posted it, and the times of the module comment are recorded.
+   */
+  const answerNode = (id: number, at: number | undefined): void => {
     const { bridge } = thread;
+    const from = tracing() ? performance.now() : null;
+    if (from !== null && at !== undefined) traceAdd("nodeNoticeMs", traceClock() - at);
     const own = pending.get(id)?.read ?? [...pending.values()].find((request) => request.read !== null)?.read ?? null;
     if (own !== null || database === null) {
-      void bridge.answer(own);
+      void answerTimed(bridge, own, from);
       return;
     }
     let answered = false;
@@ -339,7 +371,7 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
       if (answered) return;
       answered = true;
       waiting.delete(viaRequest);
-      await bridge.answer(read);
+      await answerTimed(bridge, read, from);
     };
     const viaRequest = (read: NodeReader): void => void once(read);
     waiting.add(viaRequest);
@@ -348,11 +380,22 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
 
   const onMessage = (message: FromLedgerWorker): void => {
     if (message.type === "node") {
-      answerNode(message.id);
+      answerNode(message.id, message.at);
+      return;
+    }
+    if (message.type === "trace") {
+      traceWorker(message.entry);
       return;
     }
     answeredAt = performance.now();
     const request = pending.get(message.id);
+    if (tracing()) {
+      if (message.at !== undefined) traceAdd("backMs", traceClock() - message.at);
+      if (request !== undefined) {
+        traceAdd(`rt.${request.kind}`, answeredAt - request.sent);
+        traceAdd(`rtN.${request.kind}`, 1);
+      }
+    }
     if (message.ok) {
       pending.delete(message.id);
       request?.resolve(message.value);
@@ -366,11 +409,14 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
 
   let thread = spawn();
 
-  /** Posts `request` to the current thread under a new number, `entry` its pending record. */
+  /**
+   * Posts `request` to the current thread under a new number, `entry` its pending record. In a traced process the
+   * message also says when it was posted.
+   */
   const post = (request: LedgerRequest, record: Omit<Pending, "request" | "kind" | "height" | "sent">): void => {
     const id = next++;
     pending.set(id, { request, kind: request.type, height: heightOf(request), sent: performance.now(), ...record });
-    thread.worker.postMessage({ id, request } satisfies ToLedgerWorker);
+    thread.worker.postMessage((tracing() ? { id, request, at: traceClock() } : { id, request }) satisfies ToLedgerWorker);
   };
 
   const send = <T>(request: LedgerRequest, read?: NodeReader): Promise<T> => {

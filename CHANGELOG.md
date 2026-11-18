@@ -47,9 +47,10 @@ UmbraDB 0.10.0 is a new architecture: nothing of 0.9.5's API or databases is car
   future-only revisions, and one version per build. The database is given as parts with an `ssl` mode, never a
   connection string, and a core on PostgreSQL reads its transport with a login that may only read.
 - **The ledger:** version selection from the runtime's digest with built-in network tables, the vendored ledger
-  packages v8 and v9 (the rc.3 build runtime 2.0 uses and the rc.5 release runtime 2.1 uses) behind one adapter
-  interface, the v8 to v9 conversion, the ledger worker and its tasks, the ledger state stored in the database with a
-  retention window and a mark-and-sweep, and the state-root check on every block.
+  packages v8 and v9 (the rc.3 build runtime 2.0 uses, the rc.5 release runtime 2.1.0 uses and `ledger-9.1.0.1`, which
+  runtime 2.1.100 on uses) behind one adapter interface, the v8 to v9 conversion, the ledger worker and its tasks, the
+  ledger state stored in the database with a retention window and a mark-and-sweep, and the state-root check on every
+  block.
 - **Private processes:** binding to a public database, block intake from it, the process transport with opt-in mutual
   TLS, independent and lockstep instances, and the public configuration hash a private process accepts.
 - **Determinism and backups:** the canonical encoding, the contents hash, per-table digests with checkpoints every
@@ -143,6 +144,48 @@ is refused. For the `umbradb` command, only those two keys break. The change is 
   `ledger-refcount-invalid`. A database or a backup written by an earlier build, `v0.10.0-rc.1` and `rc.2` included,
   is refused (`migration-checksum-changed`, `backup-build-mismatch`): resync into a new database. The change is the
   OpenSpec change `ledger-refcount`.
+
+### Changed since `v0.10.0-rc.2`: ledger v9 at `ledger-9.1.0.1`
+
+**Breaking for a `custom` network whose ledger table names `v9` for runtime 2.1.0, and for a module test that
+depends on the in-memory source's runtime.** A ledger table's row that gives `spec_version` 2,001,000 to 2,001,099 the
+name `v9` must name `v9-rc5`: the configuration is accepted as before, but those blocks are then applied with
+`ledger-9.1.0.1`, and the sync halts at the first block the two releases apply differently. The blocks of
+`InMemoryBlockSource` are of runtime 2,001,100 (`spec_version`), where they were of 2,001,000: a test that asserts the
+number changes it, and a custom ledger table that covers 2,001,000 only halts on them with `unknown-runtime`.
+
+- **Ledger v9 is `ledger-9.1.0.1` from runtime 2.1.100 on** (`spec_version` 2,001,100), the release `midnight-node`
+  2.1.101 builds, which mainnet, Preprod and preview run. Before, every runtime from 2.1 on was applied with
+  `ledger-9.1.0.0-rc.5`, whose transaction pricing and outcomes differ: a Preprod sync halted with `root-mismatch` at
+  height 3,349,443, soon after the network's change to ledger v9 at 3,348,434. The rc.5 package stays, under the
+  ledger name `v9-rc5`, for runtime 2.1.0 (`spec_version` 2,001,000 to 2,001,099; devnets that `midnight-node`
+  2.1.0-rc.4 built): the built-in ledger tables map that range to it and 2,001,100 on to `v9`, the ledger worker
+  converts a v8 state to either and carries a `v9-rc3` or `v9-rc5` state on to the next package, and `ledgerSources`
+  and a ledger table's rows take `v9-rc5` as a name. The core version changes with the packages, so a database synced
+  by a build that has the reference counting above continues as an upgrade: its `core` revision kept as a
+  `versionEntry`, and this build's `core` entry from the next height.
+
+### Changed since `v0.10.0-rc.2`: sync speed
+
+- **A block trace for measuring a sync.** With `UMBRADB_TRACE=<file>` in its environment, `umbradb run` writes where
+  each committed height's time went: the ledger worker's apply, the reclamation step and its reads, the block's
+  transaction, every statement's client time, and the phases inside the worker with the worker thread's whole time
+  between two applied blocks. It is off unless the variable is set and changes nothing that is stored. The command
+  exits 1 without starting anything when it cannot open the file; a write that fails later halts processing, with
+  that write's error.
+  The statements' totals keep the first 1,024 texts by name and count the others in one entry, failed statements
+  included. A height that failed, or whose `COMMIT` lost its answer, has one line once it is committed, and its step
+  is in the chain of step outputs once.
+  `UMBRADB_TRACE_STEPS=1` beside it adds each step's count changes, new nodes and deleted nodes. The trace also records
+  memory at every block: `mem` in a height's line for the main thread, `ext`, `heap` and `rss` in the worker's line.
+  The operator guide's "Measuring a sync: the block trace" lists the files and their keys.
+- **A range bench for measuring a change of the sync** (`bench/range/`, `npm run bench:range`). A run clones a
+  template database that stops at a height, syncs it on with `umbradb run` and the block trace for a number of heights
+  against a node, and its readers give heights per second by the clock and without the waits for the node, each
+  stage's time per block, statements and keys read per block, and where the worker thread's time went. `compare.mjs`
+  reads two runs side by side; `equal.sh`, `contents-hash.sh` and `tables.sh` say whether two builds stored the same.
+  It is not part of the package and changes nothing under `src/`. `bench/range/README.md` says how to make a template,
+  choose a range, make a run and read it.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 

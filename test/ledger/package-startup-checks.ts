@@ -33,6 +33,7 @@ export const REPOSITORY = fileURLToPath(new URL("../../", import.meta.url));
 export const PACKAGE_FILES: Readonly<Record<(typeof VENDORED_LEDGERS)[number], { readonly entry: string; readonly wasm: string }>> = {
   v8: { entry: "pkg/midnight_ledger_wasm_fs.js", wasm: "pkg/midnight_ledger_wasm_bg.wasm" },
   "v9-rc3": { entry: "pkg/midnight_ledger_wasm_v9_fs.js", wasm: "pkg/midnight_ledger_wasm_v9_bg.wasm" },
+  "v9-rc5": { entry: "pkg/midnight_ledger_wasm_v9_fs.js", wasm: "pkg/midnight_ledger_wasm_v9_bg.wasm" },
   v9: { entry: "pkg/midnight_ledger_wasm_v9_fs.js", wasm: "pkg/midnight_ledger_wasm_v9_bg.wasm" },
 };
 

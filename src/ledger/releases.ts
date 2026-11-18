@@ -48,14 +48,26 @@ export const LEDGER_RELEASES = Object.freeze({
       }),
     ] as const),
   }),
-  v9: Object.freeze({
+  // Ledger v9 as runtime 2.1.0 built it (`midnight-node` 2.1.0-rc.4: `crate-ledger-9.1.0.0-rc.5`), a package of its own.
+  "v9-rc5": Object.freeze({
     versionName: "ledger-9.1.0.0-rc.5",
     packages: Object.freeze([
       Object.freeze({
-        name: "@umbradb/vendored-ledger-v9",
+        name: "@umbradb/vendored-ledger-v9-rc5",
         version: "1.0.0-rc.5",
-        sha256: "0x452eb208ef7e6f557489ad450e179a6424dfe83557ff458e44d96798ba97858b",
+        sha256: "0x836641470f4a9edb2914a511d9f6a2aa03e0dcdc3bc2b3e1ad449954ffbbc287",
       }),
     ] as const),
   }),
-}) satisfies Readonly<Record<"v8" | "v9-rc3" | "v9", LedgerRelease>>;
+  // Ledger v9 as runtime 2.1.100 builds it (`midnight-node` 2.1.101: `midnight-ledger-v9` 1.0.1, `ledger-9.1.0.1`).
+  v9: Object.freeze({
+    versionName: "ledger-9.1.0.1",
+    packages: Object.freeze([
+      Object.freeze({
+        name: "@umbradb/vendored-ledger-v9",
+        version: "1.0.1",
+        sha256: "0x24d82569c42bc2f0921a47b8188e73a8c5361d64355fddb06f85c76d8fb254f7",
+      }),
+    ] as const),
+  }),
+}) satisfies Readonly<Record<"v8" | "v9-rc3" | "v9-rc5" | "v9", LedgerRelease>>;

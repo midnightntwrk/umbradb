@@ -1,17 +1,17 @@
 diff --git a/Cargo.lock b/Cargo.lock
-index e1d6429..478749c 100644
+index 4c78d2f..58d0ba4 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
-@@ -3183,6 +3183,7 @@ dependencies = [
+@@ -3332,6 +3332,7 @@ dependencies = [
   "midnight-onchain-runtime-wasm",
   "midnight-serialize",
   "midnight-storage",
-+ "midnight-storage-core 1.2.2",
++ "midnight-storage-core 1.2.3",
   "midnight-transient-crypto 2.2.0",
-  "midnight-transient-crypto 3.0.0",
-  "midnight-zkir",
+  "midnight-transient-crypto 3.0.1",
+  "midnight-zkir 2.2.0",
 diff --git a/ledger-wasm/Cargo.toml b/ledger-wasm/Cargo.toml
-index 7b4f65c..ec57cd1 100644
+index 1c26127..a304ae9 100644
 --- a/ledger-wasm/Cargo.toml
 +++ b/ledger-wasm/Cargo.toml
 @@ -17,6 +17,8 @@ ledger = { path = "../ledger", package = "midnight-ledger-v9", default-features

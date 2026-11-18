@@ -6,6 +6,7 @@ import type { BlockRef } from "../../src/runner/block-source.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import { type CommitOutcome, FinalizedLoop, type HeldHeight, type LoopInput } from "../../src/runner/loop.js";
 import type { ProcessHandle, ProcessStatus } from "../../src/runner/process.js";
+import { startTrace, stopTrace } from "../../src/trace/trace.js";
 import { type CommitFault, CommitProxy } from "./commit-proxy.js";
 import { PROCESS_BACKENDS, type ProcessDatabase } from "./process-backends.js";
 import { core, entryOf, settle, startProcess, testBuild } from "./process-build.js";
@@ -322,6 +323,34 @@ describe("recovery after a lost database connection on PostgreSQL 18", () => {
     expect(landedProblems(await recoveryRun("after"))).toEqual([]);
     expect(processedAgainProblems(await recoveryRun("before"), "before")).toEqual([]);
     expect(neitherProblems(await recoveryRun("neither"))).toEqual([]);
+  }, 3 * RUN_MS);
+
+  it("traced: after a COMMIT that landed, h's line is written once, by the run that finds it committed; after one that did not, h's line is its second run's; with the cursor moved by another writer, h has none", async () => {
+    /** A recovery run with the block trace on: what it observed, and its lines. */
+    const traced = async (fault: Fault) => {
+      let text = "";
+      startTrace({ blocks: (lines) => void (text += lines), statements: () => undefined, worker: () => undefined });
+      let observed: RecoveryObservation;
+      try {
+        observed = await recoveryRun(fault);
+      } finally {
+        stopTrace();
+      }
+      const lines = text.trimEnd().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
+      return { observed, lines, heights: lines.map((line) => line.h) };
+    };
+    const landed = await traced("after");
+    expect(landedProblems(landed.observed)).toEqual([]);
+    expect(landed.heights).toEqual([1, 2, 3, 4, 5]);
+    // The line is h's own: its stages before the block transaction were recorded by its first run.
+    const own = landed.lines.find((line) => line.h === Number(H)) as Record<string, unknown>;
+    expect(own).toEqual(expect.objectContaining({ beginMs: expect.any(Number), prepareMs: expect.any(Number) }));
+    const again = await traced("before");
+    expect(processedAgainProblems(again.observed, "before")).toEqual([]);
+    expect(again.heights).toEqual([1, 2, 3, 4, 5]);
+    const neither = await traced("neither");
+    expect(neitherProblems(neither.observed)).toEqual([]);
+    expect(neither.heights).toEqual([1, 2]);
   }, 3 * RUN_MS);
 
   it("negative controls: an uncertain COMMIT read as lost when it landed, or as landed when it did not, fails", async () => {

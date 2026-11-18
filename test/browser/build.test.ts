@@ -305,6 +305,7 @@ describe("the browser build", () => {
     for (const [version, lib] of [
       ["v8", "midnight_ledger_wasm"],
       ["v9-rc3", "midnight_ledger_wasm_v9"],
+      ["v9-rc5", "midnight_ledger_wasm_v9"],
       ["v9", "midnight_ledger_wasm_v9"],
     ] as const) {
       const pkg = join(REPOSITORY, "vendor/ledger", version);

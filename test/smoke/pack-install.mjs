@@ -82,7 +82,7 @@ if (!existsSync(tscBin)) fail(`typescript compiler not found at ${tscBin} -- ins
 const MODULE_TEST = "examples/try-module/try-module.ts";
 
 /** The ledger versions the build carries: each a directory of `vendor/ledger/`. */
-const LEDGERS = ["v8", "v9-rc3", "v9"];
+const LEDGERS = ["v8", "v9-rc3", "v9-rc5", "v9"];
 
 /** The retired names whose import must fail: 0.9.5's storage parts and TransactionHistory's. */
 const RETIRED_VALUES = [

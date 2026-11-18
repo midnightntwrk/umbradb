@@ -5,7 +5,7 @@
 #
 #   docker run --rm -v "$PWD/test/ledger/fixtures/post-block-update/oracle:/oracle:ro" -v "<out>:/out" \
 #     umbradb-ledger-build:<tag> bash /oracle/run.sh v8 36d7442172136758e33009f75ff4aa56616cff40
-#   ... bash /oracle/run.sh v9 67f9f97246339539af0091c4d8c6bc5ab236a191
+#   ... bash /oracle/run.sh v9 a2b30128ca4b660b73a068e29b56b48ede8c9a74
 #
 # The oracle is a crate of its own that depends on the checkout's crates by path, with the
 # checkout's own `Cargo.lock` (so every third-party crate is the version upstream pins) and its

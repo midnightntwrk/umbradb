@@ -78,7 +78,8 @@ describe("core-contract-logs-fast's literal rule (a literal pushed by the transc
   });
 });
 
-const GAS = { readTime: 0n, computeTime: 2_000_000_000n, bytesWritten: 65_536n, bytesDeleted: 65_536n };
+/** As `test/ledger/adapter-fixtures.ts`'s `fixtureGas` for the v9 package (no deletion declared), less compute time. */
+const GAS = { readTime: 0n, computeTime: 2_000_000_000n, bytesWritten: 4_096n, bytesDeleted: 0n };
 const EFFECTS = {
   claimedNullifiers: [],
   claimedShieldedReceives: [],

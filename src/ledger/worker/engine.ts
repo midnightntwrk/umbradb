@@ -37,19 +37,20 @@
  * `core-ledger-state` asks for the state at h − 1 before every apply. So a restarted process, with a fresh worker
  * that holds nothing, loads the state at the cursor once, and a process that keeps running reads nothing.
  *
- * **The v8 → v9 conversion.** A block of ledger v9 on a committed v8 state is the first block F built by a v9 runtime
- * after v8 blocks. The engine first converts the state with the v9 package's `convertFromV8`, the ledger team's
- * translation shipped with the vendored v9. It reads the v8 state's nodes from the node store by its key (the state at
- * U is committed, so its nodes are in the database). It then applies F to the converted state, as the node and the
- * official indexer do, even when F has no transaction. F's batch is the v9 package's: the converted state's new nodes
- * with F's, the v9 key persisted, and the released keys (the v8 state's among them) released.
+ * **The v8 → v9 conversion.** A block of ledger v9 (`v9`, or `v9-rc5` for runtime 2.1.0) on a committed v8 state is
+ * the first block F built by a v9 runtime after v8 blocks. The engine first converts the state with that v9 package's
+ * `convertFromV8`, the ledger team's translation shipped with it. It reads the v8 state's nodes from the node store by
+ * its key (the state at U is committed, so its nodes are in the database). It then applies F to the converted state,
+ * as the node and the official indexer do, even when F has no transaction. F's batch is the v9 package's: the
+ * converted state's new nodes with F's, the v9 key persisted, and the released keys (the v8 state's among them)
+ * released.
  *
- * **The 2.0 → 2.1 upgrade.** A block of ledger v9 (rc.5, runtime 2.1 on) on a committed `v9-rc3` state (v9 as runtime
- * 2.0 built it) is F of that upgrade. The two packages share one storage format, so the engine loads the state at U in
- * the rc.5 package by its key from the node store, as a restart loads a stored state (U is committed, so its nodes are
- * in the database), and applies F to it. F's batch is the rc.5 package's, as at a conversion. Any other change of
- * ledger is refused: no conversion to rc.3 exists (the node that builds rc.3, `midnight-node` 2.0.0-rc.4, has none),
- * and none goes back.
+ * **An upgrade within v9.** A block of a later v9 build on a committed state of an earlier one is F of an upgrade
+ * within v9: `v9-rc3` (runtime 2.0) to `v9-rc5` (runtime 2.1.0) or `v9` (runtime 2.1.100 on), and `v9-rc5` to `v9`.
+ * The packages share one storage format, so the engine loads the state at U in F's package by its key from the node
+ * store, as a restart loads a stored state (U is committed, so its nodes are in the database), and applies F to it.
+ * F's batch is F's package's, as at a conversion. Any other change of ledger is refused: no conversion to rc.3 exists
+ * (the node that builds rc.3, `midnight-node` 2.0.0-rc.4, has none), and none goes back.
  *
  * **What a block gives** ({@link AppliedState}):
  * - the state's key and root; the main thread compares the root with the node's;
@@ -108,6 +109,7 @@ import type {
   LedgerTask,
 } from "../types.js";
 import { plainDataProblem } from "../plain-data.js";
+import { endApply, timed } from "../../trace/worker-trace.js";
 
 /** What loads an adapter: `loadLedgerPackage`, or a test package's loader. */
 export type LedgerLoader = (ledger: LedgerName, options: LedgerPackageOptions) => Promise<LedgerPackage>;
@@ -308,6 +310,19 @@ const idOf = (block: BlockId): BlockId => Object.freeze({ height: block.height, 
 /** Block 0's keys: nothing released, no contract. */
 const NO_KEYS: Keys = Object.freeze({ release: [], contracts: [] });
 
+/**
+ * Whether a block of ledger `to` on a state of ledger `from` converts it with `to`'s `convertFromV8` (see the module
+ * comment): the v9 packages that carry the translation, `v9` and `v9-rc5`, on a v8 state.
+ */
+export const convertsFromV8 = (from: LedgerName, to: LedgerName): boolean => from === "v8" && (to === "v9" || to === "v9-rc5");
+
+/** The upgrades within v9 whose F loads the state at U in F's package (see the module comment): `[from, to]`. */
+const V9_CARRIES: readonly (readonly [LedgerName, LedgerName])[] = Object.freeze([
+  ["v9-rc3", "v9-rc5"],
+  ["v9-rc3", "v9"],
+  ["v9-rc5", "v9"],
+] as const);
+
 /** The ledger worker's engine (see the module comment). */
 export class LedgerEngine {
   readonly #load: LedgerLoader;
@@ -354,7 +369,7 @@ export class LedgerEngine {
     if (transactions.length === 0) return Object.freeze([]);
     const adapter = await this.#adapter(ledger);
     const arrays = [...transactions];
-    const parsed = Object.freeze(arrays.map((bytes, index) => adapter.parseTransaction(bytes, index)));
+    const parsed = timed("parse", () => Object.freeze(arrays.map((bytes, index) => adapter.parseTransaction(bytes, index))));
     // `block-parsed` reaches the main thread as plain data, so the adapter's parse is checked for that.
     this.#plain(parsed, (problem) => new TypeError(`the ${ledger} adapter parsed block ${block.height} into ${problem}, not plain data`));
     this.#kept.set(key, { height: block.height, ledger, transactions: arrays, parsed });
@@ -393,8 +408,10 @@ export class LedgerEngine {
     input: ApplyInput,
     keys: Keys,
   ): Settled {
-    const { state: after, output } = adapter.apply(state, input);
-    return this.#settled(adapter, block, after, output, keys);
+    const { state: after, output } = timed("adapterApply", () => adapter.apply(state, input));
+    const settled = timed("settle", () => this.#settled(adapter, block, after, output, keys));
+    endApply(block.height, input.transactions.length);
+    return settled;
   }
 
   /**
@@ -408,21 +425,25 @@ export class LedgerEngine {
     output: ApplyOutput,
     keys: Keys,
   ): Settled {
-    const key = adapter.stateKey(state);
+    const key = timed("stateKey", () => adapter.stateKey(state));
     this.#installStore(adapter, key);
     // Read before the flush, while every node of the state is still pending in memory (see the module comment).
-    const stateRoot = adapter.stateRoot(state);
-    const summary = adapter.stateSummary(state);
-    adapter.persist(key);
-    const contracts = keys.contracts.map((address): ContractKeys => {
-      const stateKey = adapter.contractStateKey(state, address);
-      const zswapStateKey = adapter.contractZswapStateKey(state, address);
-      if (stateKey !== null) adapter.persist(stateKey);
-      if (zswapStateKey !== null) adapter.persist(zswapStateKey);
-      return { address, stateKey, zswapStateKey };
+    const stateRoot = timed("stateRoot", () => adapter.stateRoot(state));
+    const summary = timed("summary", () => adapter.stateSummary(state));
+    timed("persist", () => adapter.persist(key));
+    const contracts = timed("contracts", () =>
+      keys.contracts.map((address): ContractKeys => {
+        const stateKey = adapter.contractStateKey(state, address);
+        const zswapStateKey = adapter.contractZswapStateKey(state, address);
+        if (stateKey !== null) adapter.persist(stateKey);
+        if (zswapStateKey !== null) adapter.persist(zswapStateKey);
+        return { address, stateKey, zswapStateKey };
+      }),
+    );
+    timed("release", () => {
+      for (const released of keys.release) adapter.release(released);
     });
-    for (const released of keys.release) adapter.release(released);
-    const batch = adapter.flush();
+    const batch = timed("flush", () => adapter.flush());
     const result: AppliedState = {
       ledger: block.ledger,
       height: block.height,
@@ -531,13 +552,13 @@ export class LedgerEngine {
     if (!sameBytes(committed.hash, input.parentHash)) {
       throw new Error(`block ${input.height} cannot be applied: its parent is not block ${committed.height}, whose state the ledger worker holds`);
     }
-    const converts = committed.ledger === "v8" && input.ledger === "v9";
-    const carries = committed.ledger === "v9-rc3" && input.ledger === "v9";
+    const converts = convertsFromV8(committed.ledger, input.ledger);
+    const carries = V9_CARRIES.some(([from, to]) => committed.ledger === from && input.ledger === to);
     if (committed.ledger !== input.ledger && !converts && !carries) {
       throw new Error(
         `block ${input.height} is a ${input.ledger} block on a ${committed.ledger} state: the ledger worker changes a ` +
-          "state's ledger only at an upgrade's first block, from v8 to v9 (a conversion: v8 → v9) and from v9-rc3 to v9 " +
-          "(a 2.0 → 2.1 upgrade: v9-rc3 → v9)",
+          "state's ledger only at an upgrade's first block, from v8 to v9 or v9-rc5 (a conversion: v8 → v9) and from an " +
+          "earlier v9 build to a later one (v9-rc3 → v9-rc5, v9-rc3 → v9, v9-rc5 → v9)",
       );
     }
     const transactions = this.#transactions(input, input.ledger, input.transactions);
@@ -556,15 +577,15 @@ export class LedgerEngine {
     if (!converts && !carries) {
       return this.#pend(committed.adapter, input, this.#applied(committed.adapter, input, committed.state, block, keys));
     }
-    const adapter = await this.#adapter("v9");
+    const adapter = await this.#adapter(input.ledger);
     let state: StateHandle;
     if (carries) {
-      // A 2.0 → 2.1 upgrade: the rc.3 state at U loaded in the rc.5 package by its key, then F applied to it.
-      state = adapter.load(committed.key, this.#storeFor("carry the v9-rc3 state into v9"));
+      // An upgrade within v9: the state at U loaded in F's package by its key, then F applied to it.
+      state = adapter.load(committed.key, this.#storeFor(`carry the ${committed.ledger} state into ${input.ledger}`));
     } else {
       // The v8 state at U is converted first, then F is applied to it (see the module comment).
       const convert = adapter.convertFromV8;
-      if (convert === undefined) throw new Error("the ledger v9 adapter has no convertFromV8");
+      if (convert === undefined) throw new Error(`the ledger ${input.ledger} adapter has no convertFromV8`);
       state = convert(committed.key, this.#storeFor("convert the v8 state"));
     }
     this.#installed.add(adapter);

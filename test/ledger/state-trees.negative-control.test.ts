@@ -12,7 +12,7 @@ import { stateTreesProblems } from "./state-trees-checks.js";
  */
 
 const LONG = 240_000;
-const LEDGERS = ["v8", "v9-rc3", "v9"] as const satisfies readonly Ledger[];
+const LEDGERS = ["v8", "v9-rc3", "v9-rc5", "v9"] as const satisfies readonly Ledger[];
 
 for (const ledger of LEDGERS) {
   describe(`${ledger}: The check fails on a root read from the wrong tree`, () => {
