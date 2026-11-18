@@ -30,6 +30,9 @@ import { cursorOf, InMemoryBlockSource, LOOP_BACKBONE, loopInput, RUNNER_BACKEND
  *   `COMMIT` the database refused: `rolledBack h` exactly once (after `written h` for the refused `COMMIT`, whose body
  *   ended);
  * - a cursor read after a lost `COMMIT` that fails itself: nothing told until a later run's read succeeds;
+ * - a misuse (a kept write handle used) while h's `COMMIT` runs, that `COMMIT` landing with its answer lost: the misuse
+ *   is the failure reported and halts, and nothing of h's outcome is told, since the loop does not know it; the next
+ *   start tells `committed h` at its re-delivery;
  * - a stop while a height is held with its `COMMIT`'s answer lost: nothing told; the next start re-delivers the
  *   cursor's block and tells it committed, h when the `COMMIT` landed, h − 1 when it did not (and h is then made again);
  * - a retryable failure after the commit (in `on-after-db-write`), then the same loop's next run: `committed h` once,
@@ -327,6 +330,49 @@ describe.each(RUNNER_BACKENDS)("what the loop tells the transaction's follower o
     ]);
     expect(await cursorOf(raw)).toBe(HEAD);
   }, 60_000);
+  it("a misuse while h's COMMIT runs, the COMMIT landed with its answer lost: the misuse halts, the follower is told nothing of h's outcome, and the next start tells h committed", async () => {
+    const keeper: { w?: BlockWriteHandle; misuse: boolean } = { misuse: false };
+    // After the loop's body ended and before the COMMIT: a use of the write handle module k kept (a timer of its).
+    const wrap = (db: Database): Database => ({
+      read: (body, options) => db.read(body, options),
+      transaction: <T>(body: (tx: Transaction) => Promise<T>): Promise<T> =>
+        db.transaction(async (tx) => {
+          const value = await body(tx);
+          if (keeper.misuse) {
+            keeper.misuse = false;
+            await keeper.w?.execute("SELECT 1").catch(() => undefined);
+          }
+          return value;
+        }),
+      writerSession: () => db.writerSession(),
+      close: () => db.close(),
+    });
+    const armed = { done: false };
+    const { raw, log, losing, loopOf, run } = await setUp(
+      {
+        atWrite: (height) => {
+          if (height === H && !armed.done) {
+            armed.done = true;
+            losing.state.armed = "landed";
+            keeper.misuse = true;
+          }
+        },
+      },
+      HEAD,
+      {},
+      { modules: () => [keepingModule(keeper)], wrap },
+    );
+    const failure = await run(loopOf());
+    expect(failure).toMatchObject({ height: H, committed: false });
+    expect(String((failure as { cause?: unknown }).cause)).toContain("handle");
+    expect(told(log)).toEqual([...plain(1n), ...plain(2n), `told written ${H}`]);
+    // h committed: the next start re-delivers it and tells it committed.
+    expect(await cursorOf(raw)).toBe(H);
+    log.push("the next start");
+    expect(await run(loopOf())).toBeUndefined();
+    expect(told(log.slice(log.indexOf("the next start")))).toEqual([`told committed ${H}`, ...plain(4n), ...plain(5n)]);
+  }, 60_000);
+
   it("a stop while a height is held with its COMMIT's answer lost: nothing told; the next start tells the cursor's block committed at its re-delivery", async () => {
     for (const how of ["landed", "lost"] as const) {
       const armed = { done: false };
@@ -406,6 +452,25 @@ function deferredModule(): ModuleDeclaration {
         await w.execute("INSERT INTO d.rows (height, k) VALUES ($1, $1)", [b.height]);
         // At h a second row with the key of h − 1: refused only when the transaction commits.
         if (b.height === H) await w.execute("UPDATE d.rows SET k = $1 WHERE height = $2", [H - 1n, b.height]);
+      },
+    },
+  };
+}
+
+/** Module `k`, which keeps the block write handle of its `on-db-write` in `keeper` (a module that leaves a timer behind). */
+function keepingModule(keeper: { w?: BlockWriteHandle }): ModuleDeclaration {
+  return {
+    id: "k",
+    version: "1.0.0",
+    side: "public",
+    requires: ["block-header"],
+    provides: [{ name: "k-rows", lifetimes: ["table"], table: { schema: "k", tables: ["rows"], kind: "append-only" } }],
+    startsMidChain: true,
+    configSchema: z.object({}),
+    migrations: [{ id: "001", sql: "CREATE TABLE k.rows (height bigint PRIMARY KEY)" }],
+    points: {
+      async "on-db-write"(_p, _b, w) {
+        keeper.w = w;
       },
     },
   };

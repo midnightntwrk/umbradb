@@ -81,7 +81,8 @@
  * `COMMIT` that answered with an error; the lockstep wait stopping the loop; the cursor read after a lost `COMMIT`
  * finding the cursor before h). After a `COMMIT` whose answer was lost it is told nothing until that cursor read, and
  * nothing then either when the cursor is unexpected (neither h nor the one before it: processing halts without knowing
- * the outcome). A stop while such a height is held tells nothing: the next start's cursor read settles it, and its
+ * the outcome). Whether the answer was lost is the database's error, whatever failure the loop reports: a misuse
+ * recorded during the `COMMIT` is reported first and halts, and the follower is told nothing of h then. A stop while such a height is held tells nothing: the next start's cursor read settles it, and its
  * re-delivery tells the follower when it committed. One loop tells a block committed once: a run again after a retry,
  * which re-delivers the cursor's block, does not tell it again.
  *
@@ -481,6 +482,15 @@ function writerSessionReplaced(height: bigint, committedOn: number, now: number 
       `${now ?? "none"}): another writer may have held the writer lock in between, so height ${height} is made again`,
     { height, cause: "writer-session-replaced" },
   );
+}
+
+/**
+ * Whether `error`, with which a block transaction failed after its body ended, leaves its `COMMIT`'s outcome unknown:
+ * the connection was lost (a retryable `UmbraError`), so the server may have committed. Any other error is the
+ * server's answer, and the transaction rolled back. It is the database's error, not the failure the loop reports.
+ */
+function answerLost(error: unknown): boolean {
+  return error instanceof UmbraError && error.retryable;
 }
 
 /** Whether the process retries `failure`: a retryable `UmbraError`, itself or a callback's. */
@@ -1022,9 +1032,10 @@ export class FinalizedLoop {
       const failure = this.#failure(height, error, committed);
       if (!committed && run !== undefined) {
         this.#hold(run, failure);
-        // The transaction did not commit, unless held with its COMMIT's outcome unknown: the follower learns that
-        // outcome at the next run's cursor read (#settle).
-        if (!(this.#held?.uncertain === true && this.#held.run === run)) this.#tell("rolledBack", run.block);
+        // The transaction did not commit, unless its body ended and its COMMIT lost its answer: then its outcome is not
+        // known, whatever failure is reported (a misuse during the COMMIT comes first) and whether or not the height is
+        // held, and the follower learns it from a cursor read (#settle, or the next start's re-delivery).
+        if (!(this.#bodiesEnded.has(run) && answerLost(error))) this.#tell("rolledBack", run.block);
       }
       // Held with its COMMIT's outcome unknown, the height keeps its trace line for the run that learns it (#settle).
       if (!(this.#held?.uncertain === true && this.#held.run === run)) traceDropBlock();
