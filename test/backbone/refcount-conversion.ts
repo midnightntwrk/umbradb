@@ -132,11 +132,11 @@ export function conversionR3(run: ConversionRun, heights: readonly bigint[]): { 
   return { problems, outside };
 }
 
-/** The v8 states: the heights below the first block applied with v9, which must be `DEVNET_F`. */
+/** The v8 states: the heights below the first block applied with v9 (rc.5, the devnet's), which must be `DEVNET_F`. */
 export function v8Heights(run: ConversionRun): bigint[] {
   const first = [...run.ledgers].find(([, ledger]) => ledger !== "v8");
-  if (first === undefined || first[1] !== "v9" || first[0] !== DEVNET_F) {
-    throw new Error(`the first block not applied with v8 is ${first === undefined ? "none" : `${first[0]} (${first[1]})`}, not ${DEVNET_F} (v9)`);
+  if (first === undefined || first[1] !== "v9-rc5" || first[0] !== DEVNET_F) {
+    throw new Error(`the first block not applied with v8 is ${first === undefined ? "none" : `${first[0]} (${first[1]})`}, not ${DEVNET_F} (v9-rc5)`);
   }
   return Array.from({ length: Number(DEVNET_F) }, (_, i) => BigInt(i));
 }

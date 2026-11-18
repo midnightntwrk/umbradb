@@ -27,7 +27,7 @@ import { STAGENET } from "./v9-rc3-checks.js";
  */
 
 const LONG = 240_000;
-const LEDGERS = ["v8", "v9-rc3", "v9"] as const satisfies readonly Ledger[];
+const LEDGERS = ["v8", "v9-rc3", "v9-rc5", "v9"] as const satisfies readonly Ledger[];
 const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
 const upstream = (ledger: Ledger): { commit: string; versionName: string } =>
   JSON.parse(readFileSync(new URL(`../../vendor/ledger/${ledger}/upstream.json`, import.meta.url), "utf8")) as {
@@ -65,7 +65,7 @@ describe("the oracle's values: the ledger's Rust state at the vendored commits",
       expect(new Set([state.zswapRoot, state.dustCommitmentRoot, state.dustGenerationRoot]).size, state.name).toBe(3);
     }
     // Each version has a state whose DUST trees' first free indexes differ (after DUST spends: preview after block 687
-    // for v8, stagenet after block 4,950 for both v9 packages), so a first free index read from the other DUST tree
+    // for v8, stagenet after block 4,950 for the three v9 packages), so a first free index read from the other DUST tree
     // shows in every package.
     for (const ledger of LEDGERS) {
       const differing = TREES_ORACLE[ledger].states
@@ -82,6 +82,8 @@ describe("the oracle's values: the ledger's Rust state at the vendored commits",
       "v8 preview-687",
       "v9-rc3 stagenet-3",
       "v9-rc3 stagenet-4950",
+      "v9-rc5 stagenet-3",
+      "v9-rc5 stagenet-4950",
       "v9 stagenet-3",
       "v9 stagenet-4950",
     ]);

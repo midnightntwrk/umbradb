@@ -6,7 +6,8 @@
  *   also against the history of the database the file configures.
  * - `umbradb run [--config <file>] [--update-hash=<hash>]` starts the process of the configuration file, with the user
  *   modules it exports, until SIGTERM or SIGINT stops it (`./run.ts`). It exits 1 when startup refused or processing
- *   halted, else 0.
+ *   halted, else 0. With `UMBRADB_TRACE` set, it first opens the block trace's files, and exits 1 without starting
+ *   anything when it cannot.
  * - `--update-hash` takes a configuration hash (`0x` and 64 lowercase hex digits, as a start that stopped with
  *   `public-config-changed` names it): the public configuration hash a private process accepts at this start
  *.
@@ -30,6 +31,7 @@
  * - 3: a command this build does not provide yet.
  */
 
+import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { redactor } from "../config/redact.js";
 import { configCheck, errorText } from "./config-check.js";
@@ -37,6 +39,8 @@ import type { BackupSeams } from "../backup/backup.js";
 import { backupArguments, runBackup } from "./backup.js";
 import { type RestoreCommandSeams, restoreArguments, runRestore } from "./restore.js";
 import { type RunSeams, runFailed, runProcess } from "./run.js";
+import { fileTraceSink, TRACE_STEPS_VARIABLE, TRACE_VARIABLE } from "../trace/file-sink.js";
+import type { TraceSink } from "../trace/trace.js";
 
 /** The exit statuses. */
 export const EXIT = Object.freeze({ ok: 0, failed: 1, usage: 2, unavailable: 3 } as const);
@@ -69,7 +73,10 @@ Exit status:
 /** Where a command writes, and the working directory it reads relative paths from. */
 export interface CommandIo {
   readonly cwd: string;
-  /** The environment a command reads (`PATH`, `UMBRADB_PG_DUMP`); this process's unless given. */
+  /**
+   * The environment a command reads (`PATH`, `UMBRADB_PG_DUMP`, `UMBRADB_TRACE`, `UMBRADB_TRACE_STEPS`); this process's
+   * unless given.
+   */
   readonly env?: Readonly<Record<string, string | undefined>>;
   stdout(text: string): void;
   stderr(text: string): void;
@@ -183,14 +190,36 @@ function runArguments(args: readonly string[]): { readonly file?: string; readon
 /**
  * `umbradb run` (`./run.ts`): starts the process and resolves, once SIGTERM or SIGINT stopped it, with
  * {@link EXIT}`.failed` when startup refused or processing halted, else {@link EXIT}`.ok`; the process's log goes to
- * stderr. `seams` are a test's (its signals, a view of the handle, a negative control's modules).
+ * stderr. When `UMBRADB_TRACE` names a file, the block trace's files are opened first, relative to the working
+ * directory; if they cannot be, it says why on stderr and resolves with {@link EXIT}`.failed`, nothing started. `seams`
+ * are a test's (its signals, a view of the handle, a negative control's modules).
  */
 export function runProcessCommand(seams: RunSeams = {}): CommandHandler {
   return async (args, io) => {
     const parsed = runArguments(args);
     if (typeof parsed === "string") return usage(io, parsed);
+    const env = io.env ?? process.env;
+    const traceFile = env[TRACE_VARIABLE];
+    let trace: TraceSink | undefined;
+    if (traceFile !== undefined && traceFile !== "") {
+      // Before anything starts: a path that cannot be written refuses the command now, not a sync hours later.
+      try {
+        trace = fileTraceSink(resolve(io.cwd, traceFile));
+      } catch (error) {
+        const reason = shown(errorText(error));
+        io.stderr(`umbradb run: ${TRACE_VARIABLE} names a file that cannot be written, so nothing was started: ${reason}\n`);
+        return EXIT.failed;
+      }
+    }
     const end = await runProcess(
-      { file: parsed.file, updateHash: parsed.updateHash, cwd: io.cwd, log: (line) => io.stderr(`${line}\n`) },
+      {
+        file: parsed.file,
+        updateHash: parsed.updateHash,
+        cwd: io.cwd,
+        log: (line) => io.stderr(`${line}\n`),
+        trace,
+        traceSteps: env[TRACE_STEPS_VARIABLE] === "1",
+      },
       seams,
     );
     return runFailed(end) ? EXIT.failed : EXIT.ok;

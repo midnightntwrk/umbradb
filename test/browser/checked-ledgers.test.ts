@@ -19,7 +19,7 @@ afterAll(() => copy.remove());
 describe("checkedLedgers", () => {
   it("gives each version's manifest as recorded, its .wasm files, and a listed file's bytes", async () => {
     const ledgers = await checkedLedgers(VENDORED_ROOT);
-    for (const version of ["v8", "v9-rc3", "v9"]) {
+    for (const version of ["v8", "v9-rc3", "v9-rc5", "v9"]) {
       expect(ledgers.manifest(version), version).toBe(readFileSync(join(VENDORED_ROOT, version, "SHA256SUMS"), "utf8"));
       const wasm = ledgers.wasm(version);
       expect(wasm.length, version).toBe(1);

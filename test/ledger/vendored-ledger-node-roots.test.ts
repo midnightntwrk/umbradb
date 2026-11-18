@@ -4,8 +4,9 @@ import { describe, expect, it } from "vitest";
 import * as v8 from "../../vendor/ledger/v8/pkg/midnight_ledger_wasm_fs.js";
 import * as v9 from "../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js";
 import * as v9rc3 from "../../vendor/ledger/v9-rc3/pkg/midnight_ledger_wasm_v9_fs.js";
+import * as v9rc5 from "../../vendor/ledger/v9-rc5/pkg/midnight_ledger_wasm_v9_fs.js";
 import { runInFreshInstance, type StoredNode } from "./fresh-instance.js";
-import { V8_PACKAGE_PATH, V9_PACKAGE_PATH, V9_RC3_PACKAGE_PATH } from "./ledger-states.js";
+import { V8_PACKAGE_PATH, V9_PACKAGE_PATH, V9_RC3_PACKAGE_PATH, V9_RC5_PACKAGE_PATH } from "./ledger-states.js";
 import { free, hex, storedNodeKey } from "./node-format.js";
 
 // The vendored packages' state root against the value the node itself reports.
@@ -17,7 +18,7 @@ import { free, hex, storedNodeKey } from "./node-format.js";
 
 interface NodeRoot {
   file: string;
-  ledger: "v8" | "v9" | "v9-rc3";
+  ledger: "v8" | "v9" | "v9-rc3" | "v9-rc5";
   network: string;
   stateRoot: string;
   sha256: string;
@@ -27,7 +28,12 @@ const fixtures = new URL("./fixtures/genesis/", import.meta.url);
 const { states } = JSON.parse(readFileSync(new URL("node-roots.json", fixtures), "utf8")) as { states: NodeRoot[] };
 
 // What each package's instance flushed so far in this file: the store a caller would have written.
-const stores = { v8: new Map<string, StoredNode>(), v9: new Map<string, StoredNode>(), "v9-rc3": new Map<string, StoredNode>() };
+const stores = {
+  v8: new Map<string, StoredNode>(),
+  v9: new Map<string, StoredNode>(),
+  "v9-rc3": new Map<string, StoredNode>(),
+  "v9-rc5": new Map<string, StoredNode>(),
+};
 
 const packages = {
   v8: { api: v8, path: V8_PACKAGE_PATH, deserialize: (bytes: Uint8Array) => v8.LedgerState.deserialize(bytes) },
@@ -37,11 +43,16 @@ const packages = {
     path: V9_RC3_PACKAGE_PATH,
     deserialize: (bytes: Uint8Array) => v9rc3.LedgerState.deserialize(bytes) as unknown as v9.LedgerState,
   },
+  "v9-rc5": {
+    api: v9rc5,
+    path: V9_RC5_PACKAGE_PATH,
+    deserialize: (bytes: Uint8Array) => v9rc5.LedgerState.deserialize(bytes) as unknown as v9.LedgerState,
+  },
 } as const;
 
 describe("vendored ledger packages: the state root the node reports", () => {
   it("records a state root for each ledger version", () => {
-    expect(new Set(states.map((s) => s.ledger))).toEqual(new Set(["v8", "v9", "v9-rc3"]));
+    expect(new Set(states.map((s) => s.ledger))).toEqual(new Set(["v8", "v9", "v9-rc3", "v9-rc5"]));
   });
 
   for (const fixture of states) {

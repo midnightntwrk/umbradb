@@ -1,20 +1,26 @@
 /**
  * The ledger v9 adapters, through the shared implementation of `./adapter.ts`:
  *
- * - **`v9`**: ledger-9.1.0.0-rc.5 (runtime 2.1 on), vendored in `vendor/ledger/v9` with the ledger team's v8 → v9 state
- *   translation; `convertFromV8` runs the translation on the stored v8 state.
+ * - **`v9`**: ledger-9.1.0.1 (runtime 2.1.100 on, `midnight-node` 2.1.101), vendored in `vendor/ledger/v9` with the
+ *   ledger team's v8 → v9 state translation; `convertFromV8` runs the translation on the stored v8 state.
+ * - **`v9-rc5`**: ledger-9.1.0.0-rc.5, the v9 that runtime 2.1.0 built (`midnight-node` 2.1.0-rc.4), vendored in
+ *   `vendor/ledger/v9-rc5` with that node's translation. ledger-9.1.0.1 prices and fails some transactions otherwise
+ *   (a transcript's declared deletions no longer offset its writes), so a chain that ran runtime 2.1.0 replays with
+ *   the node's roots only in the package its node built.
  * - **`v9-rc3`**: ledger-9.1.0.0-rc.3, the v9 that runtime 2.0 built (`midnight-node` 2.0.0-rc.4), vendored in
- *   `vendor/ledger/v9-rc3`. It is the same adapter over the rc.3 package, whose API matches rc.5. Only the release and
- *   the package differ, and it has no `convertFromV8`, since the node that builds it carries no translation. Its states
+ *   `vendor/ledger/v9-rc3`. It has no `convertFromV8`, since the node that builds it carries no translation. Its states
  *   share rc.5's storage format: a state it stored loads in the rc.5 package with the same root, which is how a
- *   2.0 → 2.1 upgrade carries it over (the ledger worker's engine).
+ *   2.0 → 2.1.0 upgrade carries it over (the ledger worker's engine).
  *
- * Both decode contract logs with the VM's own decoding (`decodeLogItem`, which the v9 patches export). `apply` reports
- * each contract log an applied segment emitted, with its value in the ledger's serialization (`serializeStateValue`,
- * the input `decodeLogItem` takes).
+ * The three are the same adapter over packages with the same API; only the release and the package differ.
+ *
+ * All three decode contract logs with the VM's own decoding (`decodeLogItem`, which the v9 patches export). `apply`
+ * reports each contract log an applied segment emitted, with its value in the ledger's serialization
+ * (`serializeStateValue`, the input `decodeLogItem` takes).
  */
 
 import type * as V9Rc3Package from "../../vendor/ledger/v9-rc3/pkg/midnight_ledger_wasm_v9_fs.js";
+import type * as V9Rc5Package from "../../vendor/ledger/v9-rc5/pkg/midnight_ledger_wasm_v9_fs.js";
 import type * as V9Package from "../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js";
 import { type AdapterSpec, createLedgerAdapter } from "./adapter.js";
 import { LEDGER_RELEASES } from "./releases.js";
@@ -23,7 +29,7 @@ import type { LedgerPackage, LedgerPackageOptions } from "./types.js";
 /** What a v9 package needs for its contract logs: the VM's decoding and the serialization of a logged value. */
 type V9Logs = Pick<typeof V9Package, "decodeLogItem" | "StateValue" | "serializeStateValue">;
 
-/** The contract-log half of a v9 adapter's spec (both packages: the same exports). */
+/** The contract-log half of a v9 adapter's spec (the three packages: the same exports). */
 function v9Logs(raw: V9Logs): Pick<AdapterSpec, "decodeLogItem" | "loggedValue"> {
   return {
     decodeLogItem: (value) => raw.decodeLogItem(value),
@@ -36,7 +42,7 @@ function v9Logs(raw: V9Logs): Pick<AdapterSpec, "decodeLogItem" | "loggedValue">
   };
 }
 
-/** The v9 adapter over the loaded rc.5 package (its Node.js entry, or the browser's). */
+/** The v9 adapter over the loaded 9.1.0.1 package (its Node.js entry, or the browser's). */
 export function createV9Adapter(raw: typeof V9Package, options: LedgerPackageOptions): LedgerPackage {
   return createLedgerAdapter({
     ledger: "v9",
@@ -44,6 +50,18 @@ export function createV9Adapter(raw: typeof V9Package, options: LedgerPackageOpt
     raw,
     networkId: options.networkId,
     ...v9Logs(raw),
+    convertFromV8: (v8StateKey, store) => raw.convertFromV8(v8StateKey, store),
+  });
+}
+
+/** The v9-rc5 adapter over the loaded rc.5 package, with its translation (see the header). */
+export function createV9Rc5Adapter(raw: typeof V9Rc5Package, options: LedgerPackageOptions): LedgerPackage {
+  return createLedgerAdapter({
+    ledger: "v9-rc5",
+    release: LEDGER_RELEASES["v9-rc5"],
+    raw,
+    networkId: options.networkId,
+    ...v9Logs(raw as unknown as V9Logs),
     convertFromV8: (v8StateKey, store) => raw.convertFromV8(v8StateKey, store),
   });
 }

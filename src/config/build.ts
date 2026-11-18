@@ -13,10 +13,12 @@
 import { LEDGER_RELEASES } from "../ledger/releases.js";
 
 /**
- * A ledger version: a major version, or `v9-rc3`, which is ledger v9 as runtime 2.0 built it (`ledger-9.1.0.0-rc.3`, a
- * package of its own). `v9` is the rc.5 release that runtime 2.1 builds.
+ * A ledger version: a major version, or a v9 release candidate that a runtime built and that gives other state roots
+ * than the final release, each a package of its own: `v9-rc3`, ledger v9 as runtime 2.0 built it
+ * (`ledger-9.1.0.0-rc.3`), and `v9-rc5`, as runtime 2.1.0 built it (`ledger-9.1.0.0-rc.5`, `midnight-node`
+ * 2.1.0-rc.4). `v9` is `ledger-9.1.0.1`, which runtime 2.1.100 (`midnight-node` 2.1.101) builds.
  */
-export type LedgerName = "v8" | "v9-rc3" | "v9" | "v10";
+export type LedgerName = "v8" | "v9-rc3" | "v9-rc5" | "v9" | "v10";
 
 /** One WASM package of a ledger version, identified by its content hash. */
 export type LedgerPackageIdentity = {
@@ -49,8 +51,8 @@ export const UMBRADB_VERSION = "0.10.0";
  * This build's core version, as a new plain object at every call, so no caller's change reaches another's.
  *
  * Its `ledgers` lists the ledger versions the build carries, one item each, in version order: v8, then v9 as runtime
- * 2.0 built it (rc.3), then v9 (rc.5). Each item has the release name of its adapter (`versionName`) and each package's
- * name, version and SHA-256.
+ * 2.0 built it (rc.3), then v9 as runtime 2.1.0 built it (rc.5), then v9 (9.1.0.1). Each item has the release name of
+ * its adapter (`versionName`) and each package's name, version and SHA-256.
  *
  * A build that changes a ledger package is a new core version. An existing database then needs a `versionEntry` for
  * the old one and a revision starting above the cursor.

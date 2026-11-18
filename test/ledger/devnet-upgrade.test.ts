@@ -11,7 +11,7 @@ import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../
 import { type FoundTape, tapeTest } from "../tape/real/real-tapes.js";
 import { RAW, referenceReplay } from "./adapter-fixtures.js";
 import { runInFreshInstance, type StoredNode } from "./fresh-instance.js";
-import { V8_PACKAGE_PATH, V9_PACKAGE_PATH } from "./ledger-states.js";
+import { V8_PACKAGE_PATH, V9_PACKAGE_PATH, V9_RC5_PACKAGE_PATH } from "./ledger-states.js";
 import { TapeAnswers } from "./version-checks.js";
 
 /**
@@ -20,14 +20,16 @@ import { TapeAnswers } from "./version-checks.js";
  * checks that need a real upgrade; each test is skipped by name when the tape is absent.
  *
  * - **The conversion's root matches the node's at F**: the v8 state at U as the process
- *   stored it, loaded in a fresh instance of the vendored v8 package, has the node's root at U; the vendored v9
- *   package's `convertFromV8` run on it in a fresh instance (twice: the same state), with F applied to the result by
+ *   stored it, loaded in a fresh instance of the vendored v8 package, has the node's root at U; the devnet node's v9
+ *   package's (`v9-rc5`) `convertFromV8` run on it in a fresh instance (twice: the same state), with F applied to the result by
  *   the reference replay (`./adapter-fixtures.ts`, written from the official indexer's algorithm, not the adapters),
  *   gives the node's root at F (`midnight_ledgerStateRoot`), as the node converts at its upgrade and then executes F.
  *   F's inputs are the ones the process gave its ledger worker; neither the conversion nor F's application here goes
  *   through the worker's engine or the adapters. The node reports no root between the conversion and F, so the
  *   converted state alone is compared with none: its root, and the root after an F without its transactions, are
- *   checked to differ from the node's at F, so that only the conversion followed by F's transactions matches.
+ *   checked to differ from the node's at F, so that only the conversion followed by F's transactions matches. The
+ *   `v9` package (ledger-9.1.0.1 with `midnight-node` 2.1.101's translation) converts the same state to the same root,
+ *   and F on it gives the node's root too.
  * - **A configured table on a real devnet**, a network with no built-in table: the configuration's table "every
  *   `spec_version` → v8" selects v8 for every block of the devnet, and the process parses and applies every block its
  *   v8 runtime built (0 to U) with v8, each root the node's. At F, the first block runtime 2.1 built on ledger v9, the
@@ -156,11 +158,11 @@ describe("the devnet upgrade tape through the process (the conversion; skipped b
         found,
         f.height,
         {
-          // The devnet's own table, as a custom network sets it: runtime 1.0 → v8, 2.x → v9.
+          // The devnet's own table, as a custom network sets it: runtime 1.0 → v8, 2.x → v9 as its node built it (rc.5).
           ledgerTable: {
             rows: [
               { specVersionMin: 1_000_000, specVersionMax: 1_999_999, ledger: "v8" },
-              { specVersionMin: 2_000_000, specVersionMax: 2_999_999, ledger: "v9" },
+              { specVersionMin: 2_000_000, specVersionMax: 2_999_999, ledger: "v9-rc5" },
             ],
           },
           // The state at U stays in the window at cursor F, so the sweep keeps its nodes.
@@ -177,7 +179,7 @@ describe("the devnet upgrade tape through the process (the conversion; skipped b
           );
           expect(rows.map((row) => [row.h, row.ledger])).toEqual([
             [u.height, "v8"],
-            [f.height, "v9"],
+            [f.height, "v9-rc5"],
           ]);
           keyAtU = rows[0]!.key as string;
           storedAtF = rows[1]!.root as string;
@@ -196,21 +198,21 @@ describe("the devnet upgrade tape through the process (the conversion; skipped b
       expect(v8AtU.error).toBeUndefined();
       expect(hexOf(v8AtU.stateRoot as Uint8Array)).toBe(rootAtU);
 
-      // The conversion in a fresh v9 instance, twice: the same converted state.
-      const converted = await runInFreshInstance({ packagePath: V9_PACKAGE_PATH, op: "convert", key: bytesOf(keyAtU), nodes });
+      // The conversion in a fresh instance of the devnet's v9 (rc.5), twice: the same converted state.
+      const converted = await runInFreshInstance({ packagePath: V9_RC5_PACKAGE_PATH, op: "convert", key: bytesOf(keyAtU), nodes });
       expect(converted.error).toBeUndefined();
-      const again = await runInFreshInstance({ packagePath: V9_PACKAGE_PATH, op: "convert", key: bytesOf(keyAtU), nodes });
+      const again = await runInFreshInstance({ packagePath: V9_RC5_PACKAGE_PATH, op: "convert", key: bytesOf(keyAtU), nodes });
       expect([hexOf(again.stateRoot as Uint8Array), hexOf(again.stateKey as Uint8Array), hexOf(again.serialized as Uint8Array)]).toEqual([
         hexOf(converted.stateRoot as Uint8Array),
         hexOf(converted.stateKey as Uint8Array),
         hexOf(converted.serialized as Uint8Array),
       ]);
 
-      // F as the process gave it to its worker: v9, the node's three DUST reapply system transactions.
+      // F as the process gave it to its worker: v9-rc5, the node's three DUST reapply system transactions.
       const parsed = asked.parses.filter((parse) => parse.height === BigInt(f.height));
-      expect(parsed.map((parse) => [parse.ledger, parse.transactions.length])).toEqual([["v9", 3]]);
+      expect(parsed.map((parse) => [parse.ledger, parse.transactions.length])).toEqual([["v9-rc5", 3]]);
       const applied = asked.applies.filter((apply) => apply.height === BigInt(f.height));
-      expect(applied.map((apply) => apply.ledger)).toEqual(["v9"]);
+      expect(applied.map((apply) => apply.ledger)).toEqual(["v9-rc5"]);
       const block = applied[0]!;
       const input: ApplyInput = {
         transactions: parsed[0]!.transactions,
@@ -226,16 +228,25 @@ describe("the devnet upgrade tape through the process (the conversion; skipped b
       expect(hexOf(input.parentHash)).toBe(u.hash.slice(2));
 
       // F applied to the converted state by the reference replay: the node's root at F.
-      const convertedState = () => RAW.v9.LedgerState.deserialize(converted.serialized as Uint8Array);
-      const reference = referenceReplay(RAW.v9, convertedState(), input);
+      const rc5 = RAW["v9-rc5"];
+      const convertedState = () => rc5.LedgerState.deserialize(converted.serialized as Uint8Array);
+      const reference = referenceReplay(rc5, convertedState(), input);
       expect(reference.types).toEqual(["system", "system", "system"]);
-      expect(hexOf(RAW.v9.stateRoot(reference.state))).toBe(rootAtF);
+      expect(hexOf(rc5.stateRoot(reference.state))).toBe(rootAtF);
 
       // Neither the converted state alone nor an F without its transactions has the node's root at F.
       expect(hexOf(converted.stateRoot as Uint8Array)).not.toBe(rootAtF);
       const { outcomes: _outcomes, ...withoutOutcomes } = input;
-      const empty = referenceReplay(RAW.v9, convertedState(), { ...withoutOutcomes, transactions: [] });
-      expect(hexOf(RAW.v9.stateRoot(empty.state))).not.toBe(rootAtF);
+      const empty = referenceReplay(rc5, convertedState(), { ...withoutOutcomes, transactions: [] });
+      expect(hexOf(rc5.stateRoot(empty.state))).not.toBe(rootAtF);
+
+      // ledger-9.1.0.1's translation (the one midnight-node 2.1.101 pins) converts the same v8 state to the same state,
+      // and F on it gives the node's root too: Preprod's, mainnet's and preview's upgrades take this path.
+      const final = await runInFreshInstance({ packagePath: V9_PACKAGE_PATH, op: "convert", key: bytesOf(keyAtU), nodes });
+      expect(final.error).toBeUndefined();
+      expect(hexOf(final.stateRoot as Uint8Array)).toBe(hexOf(converted.stateRoot as Uint8Array));
+      const finalReference = referenceReplay(RAW.v9, RAW.v9.LedgerState.deserialize(final.serialized as Uint8Array), input);
+      expect(hexOf(RAW.v9.stateRoot(finalReference.state))).toBe(rootAtF);
     },
     { timeoutMs: REPLAY_MS },
   );

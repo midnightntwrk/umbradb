@@ -188,11 +188,11 @@ describe("on the devnet upgrade tape (skipped by name without the tape)", () => 
     return { boundary, answers, upgrade: devnetUpgradeOf(answers, boundary, found.tape.to) };
   }
 
-  /** The devnet's own table, as a custom network's: runtime 1.0 → v8, 2.x → v9; F pinned. */
+  /** The devnet's own table, as a custom network's: runtime 1.0 → v8, 2.x → v9 as its node built it (rc.5); F pinned. */
   const devnetTable = (boundary: Boundary): LedgerTable => ({
     rows: [
       { specVersionMin: 1_000_000, specVersionMax: 1_999_999, ledger: "v8" },
-      { specVersionMin: 2_000_000, specVersionMax: 2_999_999, ledger: "v9" },
+      { specVersionMin: 2_000_000, specVersionMax: 2_999_999, ledger: "v9-rc5" },
     ],
     pins: [{ height: boundary.f.height, hash: boundary.f.hash, specVersion: boundary.f.specVersion }],
   });

@@ -17,7 +17,7 @@ import { REPOSITORY } from "./resolver-boundary.js";
  * Comments and strings are never one; a type position (`typeof process`) is not a read.
  */
 
-/** A property of the global `process` a file may read: the heartbeat's and admin's clock, the backup's. */
+/** A property of the global `process` a file may read: the heartbeat's and admin's clock, the backup's, the trace's memory. */
 export interface AllowedRead {
   /** The file, relative to the repository. */
   readonly file: string;
@@ -36,6 +36,8 @@ export const ALLOWED: readonly AllowedRead[] = Object.freeze([
   { file: "src/backup/backup.ts", property: "env" },
   // The `node:sqlite` import's wrapper, which drops its ExperimentalWarning.
   { file: "src/db/pglite-lock.ts", property: "emitWarning" },
+  // The block trace's memory figures: a read that changes nothing.
+  { file: "src/trace/memory.ts", property: "memoryUsage" },
 ]);
 
 /** Whether `file` (relative to the repository) is one the check reads: under `src/`, not the command's or the entry. */

@@ -58,6 +58,7 @@ describe("the process-access check over src/", () => {
       "src/backup/backup.ts: pid",
       "src/backup/backup.ts: env",
       "src/db/pglite-lock.ts: emitWarning",
+      "src/trace/memory.ts: memoryUsage",
     ]);
   });
 

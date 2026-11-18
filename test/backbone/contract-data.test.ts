@@ -213,7 +213,8 @@ describe("contract data on the recorded devnet (skipped by name without its tape
   const settingsOf = (found: FoundTape): Readonly<Record<string, unknown>> => ({
     network: "custom",
     genesisHash: (found.tape.notes as { genesis: { hash: string } }).genesis.hash,
-    ledgerTable: { rows: [{ specVersionMin: 1_000_000, specVersionMax: 1_999_999, ledger: "v8" }, { specVersionMin: 2_000_000, specVersionMax: 2_999_999, ledger: "v9" }] },
+    // v9 as the devnet's node (2.1.0-rc.4, runtime 2_001_000) built it.
+    ledgerTable: { rows: [{ specVersionMin: 1_000_000, specVersionMax: 1_999_999, ledger: "v8" }, { specVersionMin: 2_000_000, specVersionMax: 2_999_999, ledger: "v9-rc5" }] },
   });
 
   /** The contracts the chain's events name deployed, called or maintained, by height (`0x` hex of the 32-byte address). */
