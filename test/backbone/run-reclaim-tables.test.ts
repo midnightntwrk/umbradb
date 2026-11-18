@@ -296,6 +296,57 @@ describe.each(BACKENDS)("the run computation's reads and net write on $name", (b
       expect(result.step.outcome).toBe("commits");
       expect(result.run).toEqual(result.step);
     }, 120_000);
+
+    it("others of the kind, each the same both ways: a count with no row that a written list references, a queued row with a root count or with a count, a root count with no row released, a row missing from the queue", async () => {
+      const [r, n] = [key(0x72), key(0x6e)];
+      const cases: [string, Parameters<typeof seed>[1], NodeBatch, string][] = [
+        // k has a count and no row; the block writes a new root r over k.
+        ["a count with no row, referenced", { refs: [[k, 1]] }, { inserts: [{ key: r, data: Uint8Array.of(1), children: list(k) }], rootCounts: [{ key: r, delta: 1 }] }, "missing-reference"],
+        // q is stored, persisted and queued.
+        ["a queued row with a root count", { rows: [[q, list()]], roots: [[q, 1]], queue: [q] }, { inserts: [], rootCounts: [] }, "commits"],
+        // q is stored, queued and counted once, though nothing references it.
+        ["a queued row with a count", { rows: [[q, list()]], refs: [[q, 1]], queue: [q] }, { inserts: [], rootCounts: [] }, "commits"],
+        // n has a root count and no row; the block releases it.
+        ["a root count with no row, released", { roots: [[n, 1]] }, { inserts: [], rootCounts: [{ key: n, delta: -1 }] }, "commits"],
+        // q is stored with no reference and no root count, and not queued.
+        ["a row missing from the queue", { rows: [[q, list()]] }, { inserts: [], rootCounts: [] }, "commits"],
+      ];
+      for (const [name, found, flush, outcome] of cases) {
+        const result = await both(found, flush);
+        expect(result.step.outcome, name).toBe(outcome);
+        expect(result.run, name).toEqual(result.step);
+      }
+    }, 300_000);
+
+    it("with sweep off, a queued key that should not be: the step takes it off the queue, the run, which reads the queue only for the keys it changes, leaves it", async () => {
+      // g is queued with no row; k is stored, counted once though nothing references it, and queued.
+      const result = await both({ rows: [[k, list()]], refs: [[k, 1]], queue: [g, k] }, { inserts: [], rootCounts: [] }, false);
+      expect([result.step.outcome, result.run.outcome]).toEqual(["commits", "commits"]);
+      expect(result.step.tables.queue).toEqual([]);
+      expect(result.run.tables.queue).toEqual([hex(k), hex(g)].sort());
+      expect({ ...result.run.tables, queue: [] }).toEqual(result.step.tables);
+    }, 120_000);
+
+    it("a count row lost (the TODO at the run's count read): the step reads the reached key's count as 0, deletes it and halts; the run does not read it and stores the block", async () => {
+      // q is stored and queued and references k; r, persisted, references k too; k has no count row. The block writes a new root
+      // p over k: deleting q takes back the reference p gives k, whose change is then 0.
+      const r = key(0x72);
+      const found: Parameters<typeof seed>[1] = { rows: [[q, list(k)], [r, list(k)], [k, list()]], roots: [[r, 1]], queue: [q] };
+      const result = await both(found, { inserts: [{ key: p, data: Uint8Array.of(1), children: list(k) }], rootCounts: [{ key: p, delta: 1 }] });
+      expect([result.step.outcome, result.run.outcome]).toEqual(["missing-reference", "commits"]);
+      expect(Object.keys(result.run.tables.rows).sort()).toEqual([hex(k), hex(p), hex(r)].sort());
+    }, 120_000);
+
+    it("tables that break closure: the step protects a new node in its block, the run does not, deletes it and halts", async () => {
+      // q is stored and queued and references n, which is no row and has no count. The block flushes n and a new root
+      // p over n: deleting q takes back the reference p gives n.
+      const n = key(0x6e);
+      const result = await both({ rows: [[q, list(n)]], queue: [q] }, {
+        inserts: [{ key: n, data: Uint8Array.of(1), children: list() }, { key: p, data: Uint8Array.of(2), children: list(n) }],
+        rootCounts: [{ key: p, delta: 1 }],
+      });
+      expect([result.step.outcome, result.run.outcome]).toEqual(["commits", "missing-reference"]);
+    }, 120_000);
   });
 
   it("rolls a run back whose net write affects other rows than computed: the tables are those before it", async () => {
