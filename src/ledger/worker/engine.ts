@@ -511,11 +511,11 @@ export class LedgerEngine {
    * two enforced here:
    * - `state` holds the contract: for a state that does not, the package is asked, whatever is kept.
    * - The kept key was built from `state` or from a state before it on the same chain. Every kept key is forgotten
-   *   ({@link #forgetZswapKeys}) when the engine abandons a state it may have built one from: pending states dropped
-   *   ({@link #dropPending}), the committed state replaced by one read from the database ({@link load}), a settle that
-   *   failed ({@link #settled}). So each kept key was built from the newest state the engine holds (the newest pending
-   *   one, else the committed one) or from one before it, and a block is applied only on that newest state: ahead on
-   *   the newest pending one, else on the committed one once a pending state for another block is dropped.
+   *   ({@link #forgetZswapKeys}) when the engine abandons a state it may have built one from: the pending state
+   *   dropped ({@link #dropPending}), the committed state replaced by one read from the database ({@link load}), a
+   *   settle that failed ({@link #settled}). So each kept key was built from the newest state the engine holds (the
+   *   pending one, else the committed one) or from one before it, and a block is applied only on the committed state,
+   *   once a pending state for another block is dropped.
    * - On one chain, an equal first free index and root are the same tree for the package's filter, which keeps a leaf
    *   by the contract address stored beside it. The root does not cover that address (it is computed from the leaves'
    *   hashes only), but the tree only grows, one leaf with its address at the first free index, so two states of one
