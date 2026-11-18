@@ -114,6 +114,9 @@ describe.each(PROCESS_BACKENDS)("negative controls on $name", (backend: ProcessB
       reason: { code: "ledger-refcount-invalid", height: 2n, module: "core-ledger-state", point: "on-settle" },
     });
     expect((halted.errors.at(-1) as UmbraError).details).toMatchObject({ reason: "unexpected-queued", height: 2n });
+    // The check throws before the eviction: nothing sent to the worker at 2, and nothing of 2 stored.
+    expect(halted.sent.has(2n)).toBe(false);
+    expect([...(halted.tables.get(1n)?.digests ?? [])]).toEqual([...(halted.watched.get(1n)?.digests ?? [])]);
     const run = await faulty(backend, "first-round-only", 2, false, "unexpected-queued");
     expect(run.status).toMatchObject({ cursor: 2n, reason: null });
     expect(firstProblem(run)).toBe(2);

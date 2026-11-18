@@ -7,13 +7,15 @@ import type { BlockWrites } from "../../src/db/write-handles.js";
 import type { LedgerName } from "../../src/ledger/types.js";
 import type { LedgerHost } from "../../src/ledger/worker/host.js";
 import { FinalizedLoop, type HeightRun, type LoopInput } from "../../src/runner/loop.js";
-import { LAST, rootOf } from "../ledger/fixtures/sweep-fixture.js";
+import { LAST, rootOf, TO_REF } from "../ledger/fixtures/sweep-fixture.js";
 import { COUNTERS, countersMemory } from "../ledger/fixtures/sweep-test-loader.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
 import { tableDifferences } from "./eviction-restart.js";
 import { PATIENCE_MS } from "./ingest-harness.js";
 import { NO_TABLES } from "./refcount-checks.js";
 import { type DagRun, type DagRunOptions, runDag, runProblems } from "./refcount-process.js";
+import { perBlockRun, recordingInputs, wholeRowDifferences, workerInputs } from "./refcount-per-block-run.js";
+import { nodeSet } from "./refcount-model.js";
 import { referenceProblems } from "./refcount-reference.js";
 
 /**
@@ -36,7 +38,16 @@ import { referenceProblems } from "./refcount-reference.js";
  *   PGlite a read of the database would wait behind the open transaction; the block commits;
  * - (g) a refused eviction, then a lost connection at the net write of the same attempt: the restart is once per
  *   attempt of the height. The retry loads the state after h − 1 in the new thread, applies h again, and its eviction
- *   is refused again by a package refusing in every thread: two restarts, h committed at the retry, one retry.
+ *   is refused again by a package refusing in every thread: two restarts, h committed at the retry, one retry;
+ * - (h) the refusal of (c) in the first thread only, against the per-block build run end to end with its own worker
+ *   (`./refcount-per-block-run.ts`: its restart applies h again in the new thread, and its flushes are its own): the
+ *   complete rows of `nodes`, `ref_counts`, `unreferenced` and `root_counts` after every block are equal. With a package
+ *   whose flush depends on what its thread holds (`keeps-old-copy`) and the refusal at TO_REF, where a stored node is
+ *   written again in another form, the two builds' bytes differ after TO_REF alone: there this build keeps the first
+ *   thread's flush, which kept the old form, and the per-block build applied TO_REF again in a new thread, which wrote
+ *   the new one. The node sets are equal after every block, both tables pass the check, and from TO_REF + 1 on the bytes
+ *   are equal again. The node tables are content-defined, so this is within what they guarantee (the module guide's
+ *   section on them).
  */
 
 /** What a run's loop and ledger worker did, in order: a word and the height it was for. */
@@ -147,6 +158,20 @@ async function referenceRunProblems(run: DagRun): Promise<string[]> {
   return problems;
 }
 
+/**
+ * The heights at which two runs differ in the complete rows of any table of `core_ledger_state` (each table's digest of
+ * its rows, the node tables' `data` and child lists included), with the tables that differ; none when equal throughout.
+ */
+function allRowDifferences(got: DagRun, want: DagRun): string[] {
+  const problems: string[] = [];
+  for (const [height, expected] of want.tables) {
+    const have = got.tables.get(height);
+    const tables = [...expected.digests.keys()].filter((table) => have?.digests.get(table) !== expected.digests.get(table));
+    if (have === undefined || tables.length > 0) problems.push(`after ${height}: ${have === undefined ? "no tables" : tables.join(", ")}`);
+  }
+  return problems;
+}
+
 /** The counters a refusal's run reads from the test package's threads. */
 function countersOf(memory: SharedArrayBuffer): Record<keyof typeof COUNTERS, number> {
   const shared = new Int32Array(memory);
@@ -210,6 +235,7 @@ describe.each(PROCESS_BACKENDS)("the reclamation through on-settle, on $name", (
     expect(countersOf(memory)).toMatchObject({ threads: 2, refusals: 2, storeLoads: 1, storeLoadHeight: Number(h) });
     expect(refused.evicted.get(h)).toBeUndefined();
     expect(tableDifferences(refused.tables, plain.tables)).toEqual([]);
+    expect(allRowDifferences(refused, plain)).toEqual([]);
     expect(runProblems(refused, "extended")).toEqual([]);
     expect(await referenceRunProblems(refused)).toEqual([]);
   }, PATIENCE_MS * 6);
@@ -303,7 +329,37 @@ describe.each(PROCESS_BACKENDS)("the reclamation through on-settle, on $name", (
     expect(countersOf(memory)).toMatchObject({ threads: 3, refusals: 4, storeLoads: 2, storeLoadHeight: Number(h) });
     expect(run.evicted.get(h)).toBeUndefined();
     expect(tableDifferences(run.tables, plain.tables)).toEqual([]);
+    expect(allRowDifferences(run, plain)).toEqual([]);
     expect(runProblems(run, "extended")).toEqual([]);
+  }, PATIENCE_MS * 6);
+
+  it("(h) a refused eviction: the complete rows of the node tables after every block are those of the per-block build run end to end with its own worker", async () => {
+    const h = await deletingHeight();
+    const inputs = workerInputs();
+    const built = await dagRun({ data: { counters: countersMemory(), refuseAt: `${h}`, threads: 1 }, worker: recordingInputs(inputs) });
+    expect(built.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
+    expect(built.restarts).toBe(1);
+    const reference = await perBlockRun(inputs, { dag: "extended", counters: countersMemory(), refuseAt: `${h}`, threads: 1 }, BigInt(LAST));
+    expect(reference.restarts).toBe(1);
+    expect(reference.tables.size).toBe(LAST + 1);
+    expect(wholeRowDifferences(built.tables, reference.tables)).toEqual([]);
+
+    // A package whose flush depends on what its thread holds, refusing where a stored node is written in another form.
+    const at = BigInt(TO_REF);
+    const kept = workerInputs();
+    const keeping = await dagRun({ data: { counters: countersMemory(), refuseAt: `${at}`, threads: 1, keeping: "keeps-old-copy" }, worker: recordingInputs(kept) });
+    expect(keeping.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
+    expect(keeping.restarts).toBe(1);
+    const keptReference = await perBlockRun(kept, { dag: "extended", counters: countersMemory(), refuseAt: `${at}`, threads: 1, keeping: "keeps-old-copy" }, BigInt(LAST));
+    expect(keptReference.restarts).toBe(1);
+    expect(wholeRowDifferences(keeping.tables, keptReference.tables)).toEqual([`after ${at}: nodes, ref_counts differ`]);
+    const keys = (rows: ReadonlyMap<string, Uint8Array>): string => [...nodeSet(rows)].sort().join(",");
+    for (let height = 0n; height <= BigInt(LAST); height++) {
+      expect(keys((keeping.tables.get(height) as { rows: ReadonlyMap<string, Uint8Array> }).rows), `the node set after ${height}`).toBe(
+        keys((keptReference.tables.get(height) as { rows: ReadonlyMap<string, Uint8Array> }).rows),
+      );
+    }
+    expect(runProblems(keeping, "extended")).toEqual([]);
   }, PATIENCE_MS * 6);
 
   it("(e) a lost connection in on-settle: the height is made again from on-compute, and the tables after every block are a clean run's", async () => {

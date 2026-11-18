@@ -6,7 +6,7 @@ import { CORE_LEDGER_STATE_ID } from "../../src/backbone/core-ledger-state/core-
 import type { BlockWriteHandle } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { extendedCases, TO_REF } from "../ledger/fixtures/sweep-fixture.js";
-import { UNKNOWN_KEY } from "../ledger/fixtures/sweep-test-loader.js";
+import { STRAY, UNKNOWN_KEY } from "../ledger/fixtures/sweep-test-loader.js";
 import type { ProcessDatabase } from "../runner/process-backends.js";
 import { modelOfBatches, modelProblems, sweepTables, type TableSnapshot } from "./ledger-graph-tapes.js";
 import type { DagRun, DagRunOptions } from "./refcount-process.js";
@@ -23,6 +23,10 @@ import { runDag, runProblems } from "./refcount-process.js";
  *   also persists a key no node has.
  * - `row-count-mismatch`: at 3 a seam has the queue's insert (the root of the state released at 3) send one key
  *   fewer, so it affects one row fewer than the step computed.
+ * - `unreached-node`: at 7 the test package's flush also writes a node no key the block raises reaches.
+ *
+ * The checks of the computation throw before the block's eviction, so no eviction is sent at their block; the
+ * row-count check is the net write's, after it.
  */
 
 const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
@@ -34,7 +38,7 @@ const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
 export interface Fault {
   readonly name: string;
   readonly height: number;
-  readonly reason: "negative-count" | "missing-reference" | "row-count-mismatch";
+  readonly reason: "negative-count" | "missing-reference" | "row-count-mismatch" | "unreached-node";
   readonly point: "on-settle";
   readonly details: Readonly<Record<string, unknown>>;
   /** The run's options beyond the extended DAG and its last height. */
@@ -94,6 +98,16 @@ export const ONE_ROW_FEWER: Fault = Object.freeze({
   point: "on-settle",
   details: { statement: "insert-unreferenced", expected: 1, actual: 0 },
   options: { core: { refcountWriter: oneRowFewer(3n) } },
+});
+
+/** The `unreached-node` fault. */
+export const UNREACHED: Fault = Object.freeze({
+  name: "a flush writing a node no raised key reaches",
+  height: 7,
+  reason: "unreached-node",
+  point: "on-settle",
+  details: { first: 7n, last: 7n, key: `0x${hex(STRAY.key)}` },
+  options: { data: { stray: "7" } },
 });
 
 /** The `negative-count` fault. */
@@ -189,9 +203,10 @@ export async function runFault(db: ProcessDatabase, fault: Fault, unchecked = fa
 
 /**
  * What differs from the halt for `fault` in `run`: halted at its block with `ledger-refcount-invalid`, the reason,
- * height and key or statement in the error's `details`, the log naming them, and nothing of the block stored — the
- * database at h − 1: the tables `lowered` held before the run, else those the watcher read at h − 1 before the block,
- * else the model fed the blocks before it, and the `states` and blocks of h − 1 the last. Empty when it holds.
+ * height and key or statement in the error's `details`, the log naming them, no eviction sent at the block for a check
+ * of the computation, and nothing of the block stored — the database at h − 1: the tables `lowered` held before the
+ * run, else those the watcher read at h − 1 before the block, else the model fed the blocks before it, and the
+ * `states` and blocks of h − 1 the last. Empty when it holds.
  */
 export async function haltProblems(db: ProcessDatabase, run: DagRun, fault: Fault, lowered: TableSnapshot | null): Promise<string[]> {
   const problems: string[] = [];
@@ -209,6 +224,7 @@ export async function haltProblems(db: ProcessDatabase, run: DagRun, fault: Faul
   if (!run.lines.some(named)) {
     problems.push("no log line names the halt");
   }
+  if (fault.reason !== "row-count-mismatch" && run.sent.has(h)) problems.push(`${run.sent.get(h)} eviction(s) sent to the worker at ${h} before the halt`);
   // Nothing of the block stored: the database at h − 1.
   const now = run.tables.get(h - 1n);
   const before = lowered ?? run.watched.get(h - 1n) ?? null;

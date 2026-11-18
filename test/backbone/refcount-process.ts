@@ -67,6 +67,8 @@ export interface DagRun {
   readonly batches: Map<bigint, NodeBatch>;
   /** The keys each height had the worker evict. */
   readonly evicted: Map<bigint, string[]>;
+  /** How many evictions each height sent to the worker, whatever their answer. */
+  readonly sent: ReadonlyMap<bigint, number>;
   /** What `core-ledger-state`'s callbacks threw, in order. */
   readonly errors: readonly unknown[];
   readonly restarts: number;
@@ -136,7 +138,7 @@ export async function runDag(db: ProcessDatabase, options: DagRunOptions = {}): 
   const tables = new Map([...seen.tables].filter(([height]) => height <= cursor));
   if (cursor >= 0n) tables.set(cursor, await sweepTables(db));
   const batches = new Map([...seen.batches].filter(([height]) => height <= cursor));
-  return { status, lines: process.lines, tables, watched: seen.tables, batches, evicted: record.evicted, errors, restarts, failure, cursor };
+  return { status, lines: process.lines, tables, watched: seen.tables, batches, evicted: record.evicted, sent: record.sent, errors, restarts, failure, cursor };
 }
 
 /** The problems on `run` after every height it committed (see `./refcount-checks.ts`). */
