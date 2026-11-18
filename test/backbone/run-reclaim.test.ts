@@ -568,6 +568,31 @@ describe("the run's record and its reads", () => {
     expect([outcome.newNodes, outcome.handed]).toEqual([2, 2]);
   });
 
+  it("gives back no inserted node's key as a view into a buffer it was given", async () => {
+    // Each key handed over is 32 bytes inside a 4,096-byte buffer, as a driver's or a package's pool would give it.
+    const viewOf = (key: Uint8Array): Uint8Array => {
+      const pool = new Uint8Array(4_096);
+      pool.set(key, 1_000);
+      return pool.subarray(1_000, 1_032);
+    };
+    const script = fc.sample(historyScripts({ oneForm: true }), { seed: SEED + 1, numRuns: 30 }).find((sample) => sample.blocks.length >= 15) as HistoryScript;
+    const blocks = modelBlocks({ ...script, blocks: script.blocks.map((block) => ({ ...block, on: true })) });
+    const last = blocks.at(-1) as ModelBlock;
+    const reclaim = new RunReclaim({ first: 0n, on: true });
+    for (const block of blocks) {
+      const flush = flushOf(block.flushed);
+      reclaim.collect(
+        BigInt(block.height),
+        { inserts: flush.inserts.map((node) => ({ ...node, key: viewOf(node.key) })), rootCounts: flush.rootCounts.map((change) => ({ ...change, key: viewOf(change.key) })) },
+        true,
+      );
+    }
+    const outcome = await reclaim.compute(runTables(NO_TABLES, last.step.after.roots));
+    expect(outcome.net.inserts.length).toBeGreaterThan(0);
+    for (const node of outcome.net.inserts) expect([node.key.byteOffset, node.key.buffer.byteLength]).toEqual([0, 32]);
+    expect(tableDifferences(applied(NO_TABLES, outcome.net).tables, last.step.after)).toEqual([]);
+  });
+
   it("gives back no key as a view into a buffer it was given", async () => {
     const script = fc.sample(historyScripts({ oneForm: true }), { seed: SEED + 1, numRuns: 30 }).find((sample) => sample.blocks.length >= 15) as HistoryScript;
     const blocks = modelBlocks({ ...script, blocks: script.blocks.map((block) => ({ ...block, on: true })) });

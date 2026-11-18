@@ -514,7 +514,8 @@ the key's text:
   nothing.
 - **Bytes are produced only at the edges:** a read's key list, the net write, the deleted keys. A key that came in
   as an array of its own is given back as it came; one that came as a view into a larger buffer (a driver's row) is
-  made again from its text, so nothing that leaves carries that buffer along.
+  made again from its text, so no key that leaves carries that buffer along, an inserted node's key included. A
+  node's payload and child list leave as they were handed over.
 
 A key is converted where it enters (a flushed node's key and child list, a root-count change, a row a read
 returns) and nowhere else. It is read with `Buffer`'s `toString("latin1", start, end)`. What the form costs against

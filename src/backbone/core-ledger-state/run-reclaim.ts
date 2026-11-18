@@ -321,6 +321,7 @@ const shown = (text: string): string => `0x${Buffer.from(text, "latin1").toStrin
 
 /** A node of the run: the last one flushed for its key. */
 interface RunNode {
+  /** Its key's bytes as the record holds them: never a view into a buffer it was handed. */
   readonly key: Uint8Array;
   readonly data: Uint8Array;
   readonly children: Uint8Array;
@@ -586,7 +587,7 @@ export class RunReclaim {
       if (held === null) {
         // Its references are marked once the database says whether this list is the row's own (`compute`).
         const unreached = reached.has(record) ? null : { at: height, children: node.children };
-        record.node = { key: node.key, data: node.data, children: node.children, refs, firstAt: height, at: height, earlier: [], unreached };
+        record.node = { key: this.#bytes(record), data: node.data, children: node.children, refs, firstAt: height, at: height, earlier: [], unreached };
         this.#nodes.push(record);
         continue;
       }
@@ -609,7 +610,7 @@ export class RunReclaim {
       held.earlier.push({ refs: held.refs, at: held.at, children: held.children });
       this.#historyWrites += 1;
       record.node = {
-        key: node.key,
+        key: this.#bytes(record),
         data: node.data,
         children: node.children,
         refs,
