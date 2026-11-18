@@ -285,6 +285,96 @@ describe("the ledger worker's engine", () => {
     );
   });
 
+  it("applies a block ahead on the pending state, with the result and batch of an apply after the commit", { timeout: LONG }, async () => {
+    // Everything of a result but the nodes its batch inserts: the engines of this thread share one package, so the
+    // second to apply a block flushes none of its nodes (`worker-host.test.ts` compares whole batches, between threads).
+    const facts = (applied: AppliedState) => ({ ...applied, batch: { rootCounts: applied.batch.rootCounts } });
+    const transactions = [zswapOutputTransaction(RAW.v9)];
+    const { engine } = await atGenesis();
+    await engine.parse("v9", at(1n), transactions);
+    await engine.parse("v9", at(2n), [systemTransaction("v9")]);
+    const one = await engine.apply(applyBlock(1n, 1));
+    // Without the mark the rule of the committed parent stands.
+    await expect(engine.apply(applyBlock(2n, 1))).rejects.toThrow(/at 0, not 1/);
+    const two = await engine.apply(applyBlock(2n, 1, { ahead: true }));
+    expect(two.batch.inserts.length).toBeGreaterThan(0);
+    // The oracle: an engine that applies block 2 after block 1 committed.
+    const serial = (await atGenesis()).engine;
+    await serial.parse("v9", at(1n), transactions);
+    const serialOne = await serial.apply(applyBlock(1n, 1));
+    serial.commit(at(1n));
+    await serial.parse("v9", at(2n), [systemTransaction("v9")]);
+    const serialTwo = await serial.apply(applyBlock(2n, 1));
+    expect(facts(one)).toEqual(facts(serialOne));
+    expect(facts(two)).toEqual(facts(serialTwo));
+    // Its batch releases the pending state's key when none is named, as an apply on a committed state does.
+    expect(two.batch.rootCounts.map((c) => [hex(c.key), c.delta]).sort()).toEqual(
+      [
+        [hex(two.stateKey), 1],
+        [hex(one.stateKey), -1],
+      ].sort(),
+    );
+    expect(engine.holds()).toMatchObject({ committed: at(0n), pending: at(1n), ahead: [at(2n)] });
+    // Both pending batches' nodes are the engine's to serve.
+    for (const node of [...one.batch.inserts, ...two.batch.inserts]) expect(engine.pendingNode(node.key)).toEqual(node);
+    // The same blocks again (a retried height, its settle sending the apply ahead again): the same results, nothing
+    // applied again.
+    const apply = vi.spyOn(RAW.v9.LedgerState.prototype, "apply");
+    try {
+      expect(await engine.apply(applyBlock(1n, 1))).toEqual(one);
+      expect(await engine.apply(applyBlock(2n, 1, { ahead: true }))).toEqual(two);
+      expect(apply.mock.calls.length).toBe(0);
+    } finally {
+      apply.mockRestore();
+    }
+    expect(engine.holds()).toMatchObject({ committed: at(0n), pending: at(1n), ahead: [at(2n)] });
+    // Only the oldest pending block commits; the block applied ahead then is the pending one, and asked for unmarked at
+    // its turn it is given back.
+    expect(engine.commit(at(2n))).toBe(false);
+    expect(engine.commit(at(1n))).toBe(true);
+    expect(engine.holds()).toMatchObject({ committed: at(1n), pending: at(2n), ahead: [] });
+    for (const node of one.batch.inserts) {
+      if (!two.batch.inserts.some((other) => hex(other.key) === hex(node.key))) expect(engine.pendingNode(node.key)).toBeUndefined();
+    }
+    expect(await engine.apply(applyBlock(2n, 1))).toEqual(two);
+    expect(engine.commit(at(2n))).toBe(true);
+    // With nothing pending, a block marked ahead is an ordinary apply on the committed state.
+    const three = await engine.apply(applyBlock(3n, 0, { ahead: true }));
+    const serialThree = (serial.commit(at(2n)), await serial.apply(applyBlock(3n, 0)));
+    expect(facts(three)).toEqual(facts(serialThree));
+    expect(engine.holds()).toMatchObject({ committed: at(2n), pending: at(3n), ahead: [] });
+  });
+
+  it("applies ahead only on the newest pending block, its parent, of the same ledger; an unmarked apply of another block drops every pending state", { timeout: LONG }, async () => {
+    const { engine } = await atGenesis();
+    await engine.apply(applyBlock(1n, 0));
+    await expect(engine.apply(applyBlock(3n, 0, { ahead: true }))).rejects.toThrow(/newest pending block is 1, which is not its parent/);
+    await expect(engine.apply(applyBlock(2n, 0, { ahead: true, parentHash: hash(0x77) }))).rejects.toThrow(/not its parent/);
+    await expect(engine.apply(applyBlock(2n, 0, { ahead: true, ledger: "v8" }))).rejects.toThrow(/never applied ahead/);
+    await expect(engine.apply(applyBlock(2n, 2, { ahead: true }))).rejects.toThrow(/parsed 0 transactions/);
+    expect(engine.holds()).toMatchObject({ committed: at(0n), pending: at(1n), ahead: [] });
+    // A chain: each block on the pending state of the one before.
+    const two = await engine.apply(applyBlock(2n, 0, { ahead: true }));
+    const three = await engine.apply(applyBlock(3n, 0, { ahead: true }));
+    await expect(engine.apply(applyBlock(5n, 0, { ahead: true }))).rejects.toThrow(/newest pending block is 3, which is not its parent/);
+    expect(engine.holds()).toMatchObject({ committed: at(0n), pending: at(1n), ahead: [at(2n), at(3n)] });
+    // Each releases the state before it, as the same blocks applied one commit at a time do.
+    expect(three.batch.rootCounts.map((c) => [hex(c.key), c.delta]).sort()).toEqual([[hex(three.stateKey), 1], [hex(two.stateKey), -1]].sort());
+    // Any of them again: its result, nothing applied.
+    expect(await engine.apply(applyBlock(3n, 0, { ahead: true }))).toEqual(three);
+    // The state at the pending block asked for as the committed one (its commit not yet delivered): it commits, and
+    // the blocks applied ahead stay.
+    const key = (await engine.apply(applyBlock(1n, 0))).stateKey;
+    expect((await engine.load({ ledger: "v9", ...at(1n), stateKey: key })).loaded).toBe(false);
+    expect(engine.holds()).toMatchObject({ committed: at(1n), pending: at(2n), ahead: [at(3n)] });
+    expect(engine.commit(at(2n))).toBe(true);
+    expect(engine.holds()).toMatchObject({ committed: at(2n), pending: at(3n), ahead: [] });
+    // Another block at the pending height, unmarked: applied anew on the committed state, every pending state dropped.
+    const other = await engine.apply(applyBlock(3n, 0, { hash: hash(0xee) }));
+    expect(hex(other.hash)).toBe(hex(hash(0xee)));
+    expect(engine.holds()).toMatchObject({ committed: at(2n), pending: { height: 3n, hash: hash(0xee) }, ahead: [] });
+  });
+
   it("gives block 0 again while pending, with its outcomes, and refuses a parse of another ledger", { timeout: LONG }, async () => {
     const engine = new LedgerEngine({ load: loadLedgerPackage });
     const transactions = [zswapOutputTransaction(RAW.v9)];

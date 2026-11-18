@@ -20,16 +20,25 @@
  * anything else fails the request with {@link LedgerTaskFailed}, naming the module and the task; a trap ends the
  * worker, as an apply's trap does.
  *
- * **The states.** The engine holds the state committed at a height (its cursor's) and at most one pending state: the
- * one after the block applied last, not yet committed ({@link LedgerEngine.commit}, which the host sends once the
- * `COMMIT` of the block's transaction answered, `./host.ts`). {@link LedgerEngine.apply} applies a block only on the
- * committed state at h − 1, of the block's ledger and with the committed block as its parent, and refuses anything
- * else, naming what it holds.
+ * **The states.** The engine holds the state committed at a height (its cursor's) and the pending states, oldest
+ * first: the one after the block applied on the committed state, not yet committed ({@link LedgerEngine.commit}, which
+ * the host sends once the `COMMIT` of the block's transaction answered, `./host.ts`), then the one of the block applied
+ * ahead on it (below). {@link LedgerEngine.apply} applies a block only on the committed state at h − 1, of the block's
+ * ledger and with the committed block as its parent, and refuses anything else, naming what it holds.
  *
- * The same block applied again while pending (a height whose transaction was lost and is processed again) gets the same
- * result back, batch included. The database rolled back, so the batch still has to be written; and the package's
- * memory already counts the batch's nodes as stored, so a second apply would flush none of them. A pending state for
- * another block is dropped.
+ * The same block applied again while pending (a height whose transaction was lost and is processed again, or a block
+ * applied ahead asked for again) gets the same result back, batch included, marked ahead or not. The database rolled
+ * back, or never held the batch, so it still has to be written; and the package's memory already counts the batch's
+ * nodes as stored, so a second apply would flush none of them. An apply that is not marked ahead and names another
+ * block drops every pending state.
+ *
+ * **A block applied ahead** ({@link ApplyBlock.ahead}). While the main thread runs block h's transaction,
+ * `core-ledger-state` has the worker apply h + 1 once h's eviction has been sent
+ * (`src/backbone/core-ledger-state/apply-ahead.ts`). The engine then holds the state after h − 1 (committed) and those
+ * after h and h + 1 (pending, in that order). An apply marked ahead takes the newest pending state as its parent, which
+ * must be its parent block's and of its ledger: a change of ledger is never applied ahead. With none pending it is an
+ * ordinary apply on the committed state. {@link LedgerEngine.commit} of h makes the state after h the committed one
+ * and leaves h + 1's pending. Whether the result is used is the main thread's decision.
  *
  * **The state at h − 1 from the database.** {@link LedgerEngine.load} makes the state the database stores for a block
  * (by its key, `core_ledger_state.states.state_key`) the committed one. If the engine holds it already (committed, or
@@ -173,6 +182,11 @@ export interface ApplyBlock extends BlockId {
   readonly release?: readonly Uint8Array[];
   /** The contracts whose state and zswap-state keys the block persists, never to be released. */
   readonly contracts?: readonly Uint8Array[];
+  /**
+   * True for a block applied ahead (see the module comment): its parent may be the newest pending block, not yet
+   * committed.
+   */
+  readonly ahead?: boolean;
 }
 
 /** A contract's keys after a block: null for a contract the state does not hold. */
@@ -253,7 +267,10 @@ export interface LoadedState {
 /** What the engine holds now (for the tests and the host's reports). */
 export interface EngineHolding {
   readonly committed: BlockId | null;
+  /** The oldest pending block. */
   readonly pending: BlockId | null;
+  /** The blocks applied ahead on the oldest pending one, in order; none without one. */
+  readonly ahead: readonly BlockId[];
   /** The hashes, `0x`-less hex, of the blocks whose parse it keeps, by height then hash. */
   readonly parsed: readonly string[];
 }
@@ -335,7 +352,8 @@ export class LedgerEngine {
   /** The adapters whose package has the node store installed. */
   readonly #installed = new WeakSet<LedgerPackage>();
   #committed: Held | null = null;
-  #pending: (Held & { readonly result: AppliedState }) | null = null;
+  /** The pending states, oldest first, each with its result and its batch's nodes by key (see the module comment). */
+  #pending: (Held & { readonly result: AppliedState; readonly nodes: ReadonlyMap<string, StoredNode> })[] = [];
 
   constructor(options: EngineOptions) {
     this.#load = options.load;
@@ -470,16 +488,15 @@ export class LedgerEngine {
     this.#installed.add(adapter);
   }
 
-  /** Drops the pending state, if any. */
+  /** Drops the pending states, if any. */
   #dropPending(): void {
-    if (this.#pending === null) return;
-    this.#pending.adapter.dispose(this.#pending.state);
-    this.#pending = null;
+    for (const pending of this.#pending) pending.adapter.dispose(pending.state);
+    this.#pending = [];
   }
 
-  /** Records `settled` as the pending state after `block`. */
+  /** Records `settled` as the newest pending state, after `block`. */
   #pend(adapter: LedgerPackage, block: BlockId & { readonly ledger: LedgerName }, settled: Settled): AppliedState {
-    this.#pending = {
+    this.#pending.push({
       ...idOf(block),
       ledger: block.ledger,
       adapter,
@@ -487,8 +504,14 @@ export class LedgerEngine {
       key: settled.key,
       root: settled.result.stateRoot,
       result: settled.result,
-    };
+      nodes: new Map(settled.result.batch.inserts.map((node) => [hexOf(node.key), node])),
+    });
     return settled.result;
+  }
+
+  /** The result of the pending block `block`, or undefined. */
+  #pendingResult(block: BlockId): AppliedState | undefined {
+    return this.#pending.find((pending) => same(pending, block))?.result;
   }
 
   /** The node store, which a load and a conversion read through; throws on the main thread, which has none. */
@@ -499,7 +522,8 @@ export class LedgerEngine {
 
   /** Applies block 0 (see the module comment). */
   async genesis(input: GenesisBlock): Promise<AppliedState> {
-    if (this.#pending !== null && same(this.#pending, input)) return this.#pending.result;
+    const again = this.#pendingResult(input);
+    if (again !== undefined) return again;
     if (input.height !== 0n) throw new RangeError(`the genesis apply is block 0's, not block ${input.height}'s`);
     if (this.#committed !== null) {
       throw new Error(`block 0 cannot be applied: the ledger worker holds the state at ${this.#committed.height} already`);
@@ -542,7 +566,9 @@ export class LedgerEngine {
 
   /** Applies a block after 0 (see the module comment). */
   async apply(input: ApplyBlock): Promise<AppliedState> {
-    if (this.#pending !== null && same(this.#pending, input)) return this.#pending.result;
+    const again = this.#pendingResult(input);
+    if (again !== undefined) return again;
+    if (input.ahead === true && this.#pending.length > 0) return this.#applyAhead(input);
     const committed = this.#committed;
     if (committed === null) {
       throw new Error(`block ${input.height} cannot be applied: the ledger worker holds no state (the stored state at h − 1 is loaded first)`);
@@ -598,12 +624,40 @@ export class LedgerEngine {
   }
 
   /**
-   * `block` committed (the host sends it once the `COMMIT` that holds the block answered): its pending state becomes
-   * the committed one. False when not pending.
+   * Applies `input` ahead (see the module comment): on the newest pending state, which must be its parent's and of its
+   * ledger. Its batch releases what {@link ApplyBlock.release} names, or that pending state's key.
+   */
+  #applyAhead(input: ApplyBlock): AppliedState {
+    const parent = this.#pending.at(-1) as Held;
+    if (parent.height !== input.height - 1n || !sameBytes(parent.hash, input.parentHash)) {
+      throw new Error(`block ${input.height} cannot be applied ahead: the ledger worker's newest pending block is ${parent.height}, which is not its parent`);
+    }
+    if (parent.ledger !== input.ledger) {
+      throw new Error(`block ${input.height} cannot be applied ahead: it is a ${input.ledger} block on a ${parent.ledger} state, and a change of ledger is never applied ahead`);
+    }
+    const transactions = this.#transactions(input, input.ledger, input.transactions);
+    const block: ApplyInput = {
+      transactions: [...transactions],
+      ...(input.outcomes === undefined ? {} : { outcomes: input.outcomes }),
+      height: input.height,
+      hash: input.hash,
+      parentHash: input.parentHash,
+      timestampMs: input.timestampMs,
+      parentTimestampMs: input.parentTimestampMs,
+      firstRegularAtParentTime: input.firstRegularAtParentTime,
+    };
+    const keys: Keys = { release: input.release ?? [parent.key], contracts: input.contracts ?? [] };
+    return this.#pend(parent.adapter, input, this.#applied(parent.adapter, input, parent.state, block, keys));
+  }
+
+  /**
+   * `block` committed (the host sends it once the `COMMIT` that holds the block answered): its pending state, the
+   * oldest, becomes the committed one, and the block applied ahead on it stays pending. False when it is not the oldest
+   * pending block.
    */
   commit(block: BlockId): boolean {
-    const pending = this.#pending;
-    if (pending === null || !same(pending, block)) return false;
+    const [pending] = this.#pending;
+    if (pending === undefined || !same(pending, block)) return false;
     if (this.#committed !== null) this.#committed.adapter.dispose(this.#committed.state);
     this.#committed = {
       ...idOf(pending),
@@ -613,7 +667,7 @@ export class LedgerEngine {
       key: pending.key,
       root: pending.root,
     };
-    this.#pending = null;
+    this.#pending.shift();
     return true;
   }
 
@@ -647,7 +701,8 @@ export class LedgerEngine {
   async load(input: LoadState): Promise<LoadedState> {
     const holds = (held: Held | null): boolean =>
       held !== null && same(held, input) && held.ledger === input.ledger && sameBytes(held.key, input.stateKey);
-    const { committed: before, pending } = { committed: this.#committed, pending: this.#pending };
+    const before = this.#committed;
+    const pending = this.#pending[0] ?? null;
     if (before !== null && holds(before)) return { stateRoot: before.root, loaded: false };
     if (pending !== null && holds(pending)) {
       this.commit(input);
@@ -789,14 +844,17 @@ export class LedgerEngine {
   }
 
   /**
-   * A node the pending block's batch inserts, or undefined: the database holds it only once the block committed, so the
+   * A node a pending block's batch inserts, or undefined: the database holds it only once the block committed, so the
    * worker's node store serves it from here (`./node-bridge.ts`); a retried height's batch, rolled back, too.
    */
   pendingNode(key: Uint8Array): StoredNode | undefined {
-    const pending = this.#pending;
-    if (pending === null) return undefined;
+    if (this.#pending.length === 0) return undefined;
     const wanted = hexOf(key);
-    return pending.result.batch.inserts.find((node) => hexOf(node.key) === wanted);
+    for (const pending of this.#pending) {
+      const node = pending.nodes.get(wanted);
+      if (node !== undefined) return node;
+    }
+    return undefined;
   }
 
   /** What the engine holds now. */
@@ -806,7 +864,8 @@ export class LedgerEngine {
       .map(([key]) => key);
     return Object.freeze({
       committed: this.#committed === null ? null : idOf(this.#committed),
-      pending: this.#pending === null ? null : idOf(this.#pending),
+      pending: this.#pending[0] === undefined ? null : idOf(this.#pending[0]),
+      ahead: Object.freeze(this.#pending.slice(1).map(idOf)),
       parsed: Object.freeze(parsed),
     });
   }

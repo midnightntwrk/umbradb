@@ -349,6 +349,41 @@ describe("the node-store bridge: the worker reads stored nodes through the main 
     expect(fourth.failure).toBeNull();
   });
 
+  it("applies a block ahead in its thread, with the whole result of an apply after the commit in another thread", { timeout: LONG }, async () => {
+    const genesis = RAW.v9.LedgerState.blank(NETWORK_ID).serialize();
+    const contract = await contractFixture(RAW.v9);
+    const first = [contract.deploy, zswapOutputTransaction(RAW.v9)];
+    const second = [callTransaction(RAW.v9, contract, logProgram([cellValue(Uint8Array.of(5))])), systemTransaction("v9")];
+    // The oracle: a thread that applies block 2 after block 1 committed.
+    const serial = started();
+    await serial.genesis(genesisInput(genesis));
+    await serial.commit(at(0n));
+    await serial.parse("v9", at(1n), first);
+    const serialOne = await serial.apply(applyBlock(1n, 2));
+    await serial.commit(at(1n));
+    await serial.parse("v9", at(2n), second);
+    const serialTwo = await serial.apply(applyBlock(2n, 2));
+    // Ahead: block 2 is sent behind block 1, before block 1 is answered or committed.
+    const host = started();
+    await host.genesis(genesisInput(genesis));
+    await host.commit(at(0n));
+    await host.parse("v9", at(1n), first);
+    await host.parse("v9", at(2n), second);
+    const applyingOne = host.apply(applyBlock(1n, 2));
+    const applyingTwo = host.apply({ ...applyBlock(2n, 2), ahead: true });
+    const [one, two] = await Promise.all([applyingOne, applyingTwo]);
+    expect(one).toEqual(serialOne);
+    expect(two).toEqual(serialTwo);
+    expect(two.batch.inserts.length).toBeGreaterThan(0);
+    expect(await host.commit(at(1n))).toBe(true);
+    // At its turn, unmarked, the block applied ahead is given back.
+    expect(await host.apply(applyBlock(2n, 2))).toEqual(serialTwo);
+    expect(await host.commit(at(2n))).toBe(true);
+    // The block after is applied on it as on any committed state.
+    await serial.commit(at(2n));
+    expect(await host.apply(applyBlock(3n, 0))).toEqual(await serial.apply(applyBlock(3n, 0)));
+  });
+
   it("reads the nodes of a request given no read through a read lent while the caller holds it, those already waiting included, until it is taken back", { timeout: LONG }, async () => {
     const { stateKey, stateRoot, nodes } = await storedState();
     const stored = new Map(nodes.map((node) => [hex(node.key), node]));
