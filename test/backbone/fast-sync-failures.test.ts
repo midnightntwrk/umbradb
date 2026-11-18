@@ -19,8 +19,8 @@ import { type DagRun, type DagRunOptions, runDag, runProblems } from "./refcount
  * 0.5.10: chunks of 5, a fault at block 12, in the middle of the chunk 10..14. After each, the sync runs to the end (a
  * failure that is not retried halts both modes at the same block), and every table of every schema is equal to the
  * reference's at every height the run hashed (`./fast-sync-equality.ts`): the mode off with the same fault, its
- * worker restarted with the cursor at 9 where the chunk rolled back after its worker was led past 10 and 11
- * (decision 11's reference).
+ * worker restarted with the cursor at 9 where the chunk rolled back after its worker was led past 10 and 11 (a worker
+ * restart can change the form a later node is stored in, in either mode).
  * - a retryable failure (a lost connection) at `on-compute`, `on-db-write`, `on-settle` and `on-after-db-write` of 12;
  * - a failure that is not retried, at `on-db-write` of 12: both halt at 12, cursor 11;
  * - a `COMMIT` answered with an error (a deferred constraint broken by 12's row): both halt at 12;
