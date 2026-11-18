@@ -191,6 +191,7 @@ export const MUTATION_TARGETS: Readonly<Record<string, readonly string[]>> = {
     "test/backbone/run-reclaim.test.ts",
     "test/backbone/run-reclaim.negative-control.test.ts",
     "test/backbone/run-reclaim-histories.test.ts",
+    "test/backbone/known-keys.test.ts",
   ],
   "src/backbone/core-block-fetch/node-source.ts": ["test/backbone/node-source.test.ts"],
 };

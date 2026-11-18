@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { childRefKeys } from "../../src/ledger/node-refs.js";
 import type { LedgerHost } from "../../src/ledger/worker/host.js";
 import { LAST } from "../ledger/fixtures/sweep-fixture.js";
 import { buildContentsHash, byteHashedTables, dagOptedOut, type ReadableDatabase } from "../backbone/refcount-contents.js";
@@ -22,6 +23,9 @@ import { addingUpProblems, sumOf, unaccountedMs, unaccountedOfBusy, type WorkerL
  * - The trace has one line per committed height, with the stages' times, the step's sizes and reads, and the chain of
  *   step outputs; one worker line per applied block, posted by the worker's thread; and the statements' totals.
  * - Two traced runs end with the same chain of step outputs.
+ * - The `missing` read records, at each height, the keys asked of the database once the set of keys found stored that
+ *   `core-ledger-state` keeps between runs answered the others, and `knownHits` those it answered: exactly as a model of
+ *   the set gives.
  * - The worker's lines say where the thread's whole time went: the parts of each add up to its span, the node waits
  *   are the node-store bridge's requests, and the main thread's lines hold each request type's round trips. The
  *   range bench's reader (`bench/range/worker-time.mjs`) reads the files such a run writes.
@@ -35,6 +39,51 @@ const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
 /** The ledger state's tables of every height as text, for comparing two runs. */
 const tablesText = (run: DagRun): string =>
   JSON.stringify([...run.tables].map(([h, t]) => [`${h}`, [...t.rows].map(([k, c]) => `${k}:${hex(c)}`), [...t.refs], [...t.roots], [...t.queue], [...t.digests]]));
+
+/**
+ * The `missing` reads each height of `run` should record, as `[keys asked, keys answered missing]`, and its
+ * `knownHits`. A height's settle needs the references of the nodes its block flushed with another child list than the
+ * row's after the height before (a list that is the row's own is not checked), and the keys it raised, less the keys
+ * it flushed; it asks the database about those the set lacks, at most one read a height and none when the set
+ * holds them all, and the set answers the others. The set learns the keys asked that the tables after the height
+ * before hold, and forgets the keys the height deleted (the keys it had the worker evict). Every key asked here is
+ * stored, so none is answered missing. Also how many keys the heights needed, and how many of them the set answered.
+ */
+function missingReads(run: DagRun): {
+  readonly reads: Map<number, [number, number][]>;
+  readonly hits: Map<number, number>;
+  readonly needed: number;
+  readonly answeredByTheSet: number;
+} {
+  const known = new Set<string>();
+  const reads = new Map<number, [number, number][]>();
+  const hits = new Map<number, number>();
+  let needed = 0;
+  let answeredByTheSet = 0;
+  for (let h = 0n; h <= run.cursor; h++) {
+    const rows = run.tables.get(h - 1n)?.rows ?? new Map<string, Uint8Array>();
+    const flush = run.batches.get(h);
+    const inserts = flush?.inserts ?? [];
+    const flushed = new Set(inserts.map((node) => hex(node.key)));
+    const referenced = inserts
+      .filter((node) => {
+        const row = rows.get(hex(node.key));
+        return row === undefined || Buffer.compare(row, node.children) !== 0;
+      })
+      .flatMap((node) => childRefKeys(node.children).map(hex));
+    const raised = (flush?.rootCounts ?? []).filter((change) => change.delta > 0).map((change) => hex(change.key));
+    const wanted = new Set([...referenced, ...raised].filter((key) => !flushed.has(key)));
+    const asked = [...wanted].filter((key) => !known.has(key));
+    const absent = asked.filter((key) => !rows.has(key));
+    reads.set(Number(h), asked.length === 0 ? [] : [[asked.length, absent.length]]);
+    hits.set(Number(h), wanted.size - asked.length);
+    needed += wanted.size;
+    answeredByTheSet += wanted.size - asked.length;
+    for (const key of asked) if (rows.has(key)) known.add(key);
+    for (const key of run.evicted.get(h) ?? []) known.delete(key);
+  }
+  return { reads, hits, needed, answeredByTheSet };
+}
 
 /**
  * The whole database at the last height: the build's contents hash, and each table it takes by its bytes as the MD5 of
@@ -114,6 +163,23 @@ describe("the block trace through the process, on PostgreSQL", () => {
     for (const line of first) {
       const sizes = line.st as number[] | undefined;
       if (sizes !== undefined) expect(sizes[4], `deleted at ${String(line.h)}`).toBe((traced[0]?.evicted.get(BigInt(line.h as number)) ?? []).length);
+    }
+    // The `missing` read records, at each height, the keys the database is asked about once the set of keys found
+    // stored answered the others, and how many it answered missing (none here); `knownHits` the keys the set answered:
+    // exactly as a model of the set gives. `knownEmptied` is on the process's first height only: its block does not
+    // continue a block before, and no later block fails.
+    const expected = missingReads(traced[0] as DagRun);
+    // Not vacuous: the set answers most keys the heights need, and most heights still ask about a few (a new root
+    // references the subtrees the height before wrote new, which no read found stored).
+    expect(expected.answeredByTheSet).toBeGreaterThan(expected.needed / 2);
+    expect([...expected.reads.values()].filter((reads) => reads.length > 0).length).toBeGreaterThan(LAST / 2);
+    for (const line of first) {
+      const missing = ((line.reads as [string, number, number, number][] | undefined) ?? []).filter(([kind]) => kind === "missing");
+      expect(missing.map(([, asked, , answered]) => [asked, answered]), `missing at ${String(line.h)}`).toEqual(expected.reads.get(line.h as number));
+    }
+    for (const line of first) {
+      expect(line.knownHits, `knownHits at ${String(line.h)}`).toBe(expected.hits.get(line.h as number));
+      expect(line.knownEmptied, `knownEmptied at ${String(line.h)}`).toBe(line.h === 0 ? 1 : undefined);
     }
     // The same heights give the same chain, and so the same last link.
     expect(second.map((line) => line.sh)).toEqual(first.map((line) => line.sh));

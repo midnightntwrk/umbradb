@@ -10,9 +10,11 @@ import { defineConfig } from "vitest/config";
  * run-reclaim.ts`, in the place of the per-block step, which moved to the tests as their reference, as the step had
  * taken the place of the sweep the `ledger-refcount` change removed) and the block fetch queue
  * (`src/backbone/core-block-fetch/node-source.ts`); `include` is the tests of each, which
- * `test/library-surface/retirement.ts` lists by target. The reclamation's are its unit tests, its negative controls
- * and its generated histories at the reduced size `env` sets below; its tests against PostgreSQL and PGlite
- * (`test/backbone/run-reclaim-tables.test.ts`) and the histories at full size run in the normal suite only.
+ * `test/library-surface/retirement.ts` lists by target. The reclamation's are its unit tests, its negative controls,
+ * its generated histories at the reduced size `env` sets below and the set of keys known to be rows
+ * (`test/backbone/known-keys.test.ts`); its tests against PostgreSQL and PGlite (`test/backbone/run-reclaim-tables.test.ts`),
+ * the histories at full size and the set's run at its bound (`test/backbone/known-keys-bound.test.ts`) run in the
+ * normal suite only.
  * Stryker's `vitest.related` (its default) runs, for each target, only the included tests that import it, and
  * `coverageAnalysis: "perTest"` then reruns, per mutant, only the tests that cover it. Coverage instrumentation is off
  * here (it would collide with Stryker's own instrumentation).
@@ -42,6 +44,7 @@ export default defineConfig({
       "test/backbone/run-reclaim.test.ts",
       "test/backbone/run-reclaim.negative-control.test.ts",
       "test/backbone/run-reclaim-histories.test.ts",
+      "test/backbone/known-keys.test.ts",
       "test/backbone/node-source.test.ts",
     ],
   },

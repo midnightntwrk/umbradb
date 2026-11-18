@@ -5,7 +5,7 @@ import postgres from "postgres";
 import { CORE_LEDGER_STATE_ID } from "../../src/backbone/core-ledger-state/core-ledger-state.js";
 import type { BlockWriteHandle } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
-import { extendedCases, TO_REF } from "../ledger/fixtures/sweep-fixture.js";
+import { CHANGE, extendedCases, type FixtureNode, REVERT, stateNodes, TO_REF } from "../ledger/fixtures/sweep-fixture.js";
 import { STRAY, UNKNOWN_KEY } from "../ledger/fixtures/sweep-test-loader.js";
 import type { ProcessDatabase } from "../runner/process-backends.js";
 import { modelOfBatches, modelProblems, sweepTables, type TableSnapshot } from "./ledger-graph-tapes.js";
@@ -24,6 +24,12 @@ import { runDag, runProblems } from "./refcount-process.js";
  * - `row-count-mismatch`: at 3 a seam has the queue's insert (the root of the state released at 3) send one key
  *   fewer, so it affects one row fewer than the step computed.
  * - `unreached-node`: at 7 the test package's flush also writes a node no key the block raises reaches.
+ * - `missing-reference` on a key the process had found stored ({@link REFERENCED_AGAIN}): subtree 0's first version is
+ *   referenced by every root up to CHANGE, so the set of keys found stored that `core-ledger-state` keeps between runs
+ *   holds it; a run after CHANGE deletes it; at REVERT the root references it again and the package's flush leaves it
+ *   out, with its leaves, which it flushes again too (left in, they would be new nodes no persisted key reaches, and
+ *   the run would halt with `unreached-node` first). Its control keeps the deleted keys in the set
+ *   (`core-ledger-state`'s `refcountFault: "deleted-kept-known"`).
  *
  * The checks of the computation throw before the block's eviction, so no eviction is sent at their block; the
  * row-count check is the net write's, after it.
@@ -89,6 +95,38 @@ export const MISSING: readonly Fault[] = Object.freeze([
     options: { data: { persistUnknown: "20" } },
   },
 ]);
+
+/** Subtree 0's first version in the extended DAG: its node, which the roots before CHANGE and from REVERT reference. */
+export const FIRST_VERSION: FixtureNode = (() => {
+  const named = (h: number): FixtureNode | undefined =>
+    stateNodes(h, "extended").find((node) => Buffer.from(node.data).toString("utf8") === "subtree 0 0");
+  const node = named(0);
+  const referencedBy = (h: number): boolean =>
+    (stateNodes(h, "extended")[0] as FixtureNode).refs.some((ref) => node !== undefined && hex(ref) === hex(node.key));
+  if (node === undefined || named(CHANGE) !== undefined || named(REVERT) === undefined || !referencedBy(1) || !referencedBy(REVERT)) {
+    throw new Error("the extended DAG no longer holds subtree 0's first version before CHANGE and from REVERT, under the root");
+  }
+  return node;
+})();
+
+/**
+ * `missing-reference` on a key the process found stored before a run deleted it: at REVERT the flush leaves out subtree
+ * 0's first version, which the new root references, and its leaves.
+ */
+export const REFERENCED_AGAIN: Fault = Object.freeze({
+  name: "a new node referencing a key that was found stored and then deleted",
+  height: REVERT,
+  reason: "missing-reference",
+  point: "on-settle",
+  details: { first: BigInt(REVERT), last: BigInt(REVERT), key: `0x${hex(FIRST_VERSION.key)}` },
+  options: { data: { withhold: { at: `${REVERT}`, key: hex(FIRST_VERSION.key), reached: true } } },
+});
+
+/** {@link REFERENCED_AGAIN} with the deleted keys kept in the set of keys found stored: its negative control's. */
+export const REFERENCED_AGAIN_KEPT: Fault = Object.freeze({
+  ...REFERENCED_AGAIN,
+  options: { ...REFERENCED_AGAIN.options, core: { refcountFault: "deleted-kept-known" as const } },
+});
 
 /** The `row-count-mismatch` fault. */
 export const ONE_ROW_FEWER: Fault = Object.freeze({
