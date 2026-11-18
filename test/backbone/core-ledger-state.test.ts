@@ -798,7 +798,7 @@ describe("the next block applied ahead: when h's settle sends it, and each event
     expect(early.asked).toEqual(["load 2", "apply 3", "ahead 4", "evict"]);
   });
 
-  it("sends none with the setting off, for a block the runner has not prepared or whose parent is not h, past a change of ledger, at the settle of block 0, and where the keys it releases are not known", async () => {
+  it("sends none with the setting off, for a block the runner has not prepared or whose parent is not h, past a change of ledger, for outcomes not one per transaction, for a block kept that is not h, at the settle of block 0, and where the keys it releases are not known", async () => {
     const off = setup({}, { core: { entries: [{ id: "core", start: 0, buildVersion: true, settings: { retainStates: 0, applyAhead: false } }] } as never });
     await through(off, 3n, false);
     expect(off.asked).not.toContain("ahead 4");
@@ -811,6 +811,13 @@ describe("the next block applied ahead: when h's settle sends it, and each event
     const converting = setup({ ledgerOf: (b, parent) => (b.height === 4n ? "v8" : parent) });
     await through(converting, 3n, false);
     expect(converting.asked).not.toContain("ahead 4");
+    // Outcomes that are not one per transaction (its turn fails on them), and a block kept that is not h.
+    const outcomes = setup({}, { ahead: (height) => block(height, { "tx-results": Object.freeze([{ outcome: "success" }]) }) });
+    await through(outcomes, 3n, false);
+    expect(outcomes.asked).not.toContain("ahead 4");
+    const unkept = setup({ keep: (kept) => ({ ...kept, height: kept.height + 10n }) });
+    await through(unkept, 3n, false);
+    expect(unkept.asked).not.toContain("ahead 4");
     const zero = setup();
     await zero.compute(at(0n, false));
     await zero.write(at(0n, false));
@@ -869,14 +876,14 @@ describe("the next block applied ahead: when h's settle sends it, and each event
     expect(made.asked).toEqual(["load 3", "apply 4"]);
   });
 
-  it("drops it when the worker thread was restarted since it was sent (a refused eviction), or when the apply ahead failed: applied at its turn, with no other restart", async () => {
+  it("drops it when the worker thread was restarted since it was sent (a refused eviction), or when the apply ahead failed (with an error or anything else): applied at its turn, with no other restart", async () => {
     const refused = setup({}, { evict: async () => Promise.reject(new EvictionRefused("still held")) });
     await through(refused, 3n, false);
     expect(refused.asked).toEqual(["load 2", "apply 3", "evict", "ahead 4", "restart"]);
     refused.asked.length = 0;
     await refused.compute(at(4n, true));
     expect(refused.asked).toEqual(["load 3", "apply 4"]);
-    const failed = setup({}, { apply: async (input) => (input.ahead === true ? Promise.reject(new Error("restarted while its apply request ran")) : resultOf(input)) });
+    const failed = setup({}, { apply: async (input) => (input.ahead === true ? Promise.reject("restarted while its apply request ran") : resultOf(input)) });
     await through(failed, 3n, false);
     failed.asked.length = 0;
     await failed.compute(at(4n, true));
