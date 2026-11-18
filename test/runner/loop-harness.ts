@@ -217,7 +217,8 @@ function heightOf(point: PointName, args: readonly unknown[]): bigint | undefine
 
 /**
  * A module `id` (from `test/modules/declarations.ts`'s `declaration`: one table `<schema>.rows (height)`) that registers
- * every point and records each call in `seen`; its `on-db-write` inserts the block's height into its table.
+ * every point but `on-settle` and records each call in `seen`; its `on-db-write` inserts the block's height into its
+ * table. `on-settle` is tested in `settle-point.test.ts`.
  */
 export function recordingModule(
   id: string,
