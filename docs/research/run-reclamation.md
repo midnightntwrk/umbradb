@@ -573,12 +573,16 @@ The package refuses to forget a node a live object holds; the worker frees every
 tries once more (`engine.ts`'s `evict`). If it still refuses (`EvictionRefused`):
 
 - `settleRun` ends the worker thread and starts a new one (`host.ts`'s `restart`), traces `evictRefused`, and goes
-  on: the net write and the `COMMIT`. The eviction is not sent again.
+  on: the net write and the `COMMIT`. The eviction is not sent again in this attempt of h.
 - The new thread holds no state. h + 1's `on-compute` loads the state after h from the database (`LedgerHost.load`
   in `applyBlock`): every node it reads is a row after h's `COMMIT`, and it holds as stored only what it read. So no
   node is wrongly believed stored, and the nodes h deleted were never in the new thread.
-- Nothing asks the engine to make a height again, so the refusal cannot repeat: a package that refuses in every
-  thread costs one restart, as one that refuses in the first only.
+- The restart is once per attempt of h. The refusal itself asks the engine to make no height again, so on its own a
+  package that refuses in every thread costs one restart, as one that refuses in the first only. A later failure of
+  the same attempt that the engine retries (a lost connection at the net write) makes h again: the new thread holds
+  no state, so h's `on-compute` loads the state after h − 1 from the database and applies h again, and the settle
+  sends the eviction again, which a package refusing in every thread refuses again: one more restart. The attempts
+  are bounded by the process's retries; nothing is kept from one attempt to the next.
 - With `restartOnRefusedEviction: false` the refusal is thrown in `on-settle`: h's transaction rolls back and
   processing halts at h with `callback-error`, the cursor at h − 1.
 
@@ -589,7 +593,7 @@ tries once more (`engine.ts`'s `evict`). If it still refuses (`EvictionRefused`)
 | A check of the computation (`negative-count`, `missing-reference`, `unreached-node`, `unexpected-queued`) | h's transaction: every module's rows of h | halt with `ledger-refcount-invalid`, not retryable. The check throws before the eviction, so the worker is told nothing |
 | `row-count-mismatch`, or another failed statement of the net write | h's transaction | halt. The worker has forgotten nodes the database still keeps, as after the per-block step's eviction before a failed transaction |
 | A refused eviction | nothing | section 5.3 |
-| A retryable failure (a lost connection) in h's transaction | h's transaction | the engine makes h again from `on-compute`: the worker gives the same result for h, still pending (`engine.ts`), a new record holds it, and the settle computes the same tables from the same inputs and sends the same eviction again |
+| A retryable failure (a lost connection) in h's transaction | h's transaction | the engine makes h again from `on-compute`, a new record holds it, and the settle computes the same tables from the same inputs and sends the same eviction again. The thread that applied h gives the same result for h, still pending (`engine.ts`); if the failed attempt restarted it after a refused eviction, the new thread loads the state after h − 1 from the database and applies h again (5.3) |
 | A crash before the `COMMIT` | h's transaction | a new process, with a new worker, starts from the database after h − 1 |
 
 ### 5.5 The checks and the trace

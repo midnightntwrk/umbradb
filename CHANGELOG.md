@@ -183,16 +183,16 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   block's flushed nodes and root-count changes over in memory at `on-compute`, writes only the block's own rows (root
   counts, `states`, segment results, events) at `on-db-write`, and computes the node tables once per run of blocks at
   `on-settle`, inside the transaction of the run's last block (a run is one block in this version): it reads `nodes`,
-  `ref_counts` and `unreferenced`, has the ledger worker evict what it deletes, then writes the nodes, counts, queue
-  and deleted rows. It reads the counts of the keys whose count falls, not of every key it reaches, so a block sends
-  far fewer count reads. A refused eviction now ends the worker thread and the block commits; the next block loads
-  the state from the database, and no block is applied again. The computation assumes undamaged count tables: on
-  tables that lost a count row a block can commit where the earlier per-block step halted, and the damage is found by
-  a later block (`ledger-refcount-invalid`) or by a backup's contents check. A reclamation check halts in `on-settle`,
-  its details naming the run's `first` and `last` heights, and two more reasons can halt it, `unreached-node` and
-  `unexpected-queued`. In the block trace `stepMs`, `evictMs` and `reads` (now also `missing` and `queued`) are
-  inside `txMs`, `writeBlockMs` is the block's own rows, `writeRefcountMs` the whole net write, `sh` has one link per
-  run, and `collectMs` and `evictRefused` are new; the operator guide lists them.
+  `ref_counts` and `unreferenced`, has the ledger worker evict what it deletes, then writes the nodes, counts, queue and
+  deleted rows. It reads the counts of the keys whose count falls, not of every key it reaches, so a block sends far
+  fewer count reads. A refused eviction now ends the worker thread, once per attempt of the height, and the block
+  commits; the next block loads the state from the database, and the refusal itself has no block applied again. The
+  computation assumes undamaged count tables: on tables that lost a count row a block can commit where the earlier
+  per-block step halted, and the damage is found by a later block (`ledger-refcount-invalid`) or by a backup's contents
+  check. A reclamation check halts in `on-settle`, its details naming the run's `first` and `last` heights, and two more
+  reasons can halt it, `unreached-node` and `unexpected-queued`. In the block trace `stepMs`, `evictMs` and `reads` (now
+  also `missing` and `queued`) are inside `txMs`, `writeBlockMs` is the block's own rows, `writeRefcountMs` the whole
+  net write, `sh` has one link per run, and `collectMs` and `evictRefused` are new; the operator guide lists them.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 

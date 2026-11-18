@@ -99,8 +99,11 @@
  * its apply is sent at its own `on-compute`, after the `COMMIT`.
  *
  * If the package still refuses the eviction after the worker freed what it can, the worker thread is ended and a new
- * one started, and the net write and the `COMMIT` go on: the eviction is sent once, never again. The new thread holds
- * no state, so the next block loads the state after the run from the database. With `restartOnRefusedEviction: false`
+ * one started, and the net write and the `COMMIT` go on: the eviction is sent once per attempt of the height, and the
+ * refusal itself has no height made again. The new thread holds no state, so the next block loads the state after the
+ * run from the database. A later failure of the same attempt that the engine retries makes the height again: the new
+ * thread loads the state before it and applies it again, and its settle sends the eviction again, which a package that
+ * refuses in every thread refuses again, one restart per attempt, the attempts bounded by the process's retries. With `restartOnRefusedEviction: false`
  * the refusal fails the block. A failure after the eviction (a write, the `COMMIT`) rolls the block back, the worker
  * having forgotten nodes the database keeps; it flushes such a node again when it needs it.
  *
@@ -567,8 +570,8 @@ export async function computeBlock(
  * the eviction of what it deletes, awaited, then the net write. The record is dropped whatever happens.
  *
  * When the package still refuses the eviction after the worker freed what it can (`EvictionRefused`), the worker
- * thread is ended and a new one started, and the net write goes on: the eviction is sent once. With
- * `restartOnRefusedEviction: false` the refusal is thrown.
+ * thread is ended and a new one started, and the net write goes on: the eviction is sent once per attempt of the height.
+ * With `restartOnRefusedEviction: false` the refusal is thrown.
  */
 export async function settleRun(
   p: ProcessContext,

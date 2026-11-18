@@ -33,7 +33,10 @@ import { referenceProblems } from "./refcount-reference.js";
  *   and its tables are a clean run's at every block, so the record the settle computed held that block alone;
  * - (f) a request given no read (a later block's parse at `on-parse`), sent to the worker before a block's eviction
  *   while that block's transaction is open, that reads a stored node: the worker answers it before the eviction, and on
- *   PGlite a read of the database would wait behind the open transaction; the block commits.
+ *   PGlite a read of the database would wait behind the open transaction; the block commits;
+ * - (g) a refused eviction, then a lost connection at the net write of the same attempt: the restart is once per
+ *   attempt of the height. The retry loads the state after h − 1 in the new thread, applies h again, and its eviction
+ *   is refused again by a package refusing in every thread: two restarts, h committed at the retry, one retry.
  */
 
 /** What a run's loop and ledger worker did, in order: a word and the height it was for. */
@@ -270,6 +273,38 @@ describe.each(PROCESS_BACKENDS)("the reclamation through on-settle, on $name", (
     expect(run.status).toMatchObject({ cursor: h + 1n, reason: null });
     expect(run.evicted.get(h)?.length ?? 0).toBeGreaterThan(0);
   }, PATIENCE_MS);
+
+  it("(g) a refused eviction, then a lost connection at the net write of that attempt: one restart per attempt of h, h committed at the retry, nothing more", async () => {
+    const h = await deletingHeight();
+    const { run: plain } = await cleanRun();
+    const memory = countersMemory();
+    let faults = 0;
+    // The net write's first count, queue or delete statement at h fails once, after the refused eviction's restart.
+    const failOnce = (w: Pick<BlockWriteHandle, "execute">, height: bigint): Pick<BlockWriteHandle, "execute"> =>
+      height !== h || faults > 0
+        ? w
+        : {
+            execute: async () => {
+              faults += 1;
+              throw new UmbraError("connection-lost", "the writer's connection was lost (the test's fault)");
+            },
+          };
+    const run = await dagRun({
+      data: { counters: memory, refuseAt: `${h}`, threads: 1_000 },
+      core: { refcountWriter: failOnce },
+      settings: { backoffCeilingMs: 20 },
+    });
+    expect(faults).toBe(1);
+    expect(run.lines.filter((line) => line.includes("retries in"))).toHaveLength(1);
+    expect(run.status).toMatchObject({ cursor: BigInt(LAST), reason: null, ended: null });
+    // Two restarts: one per attempt of h, each after its eviction was refused twice. The retry's thread loaded the state
+    // after h − 1 and applied h again; h + 1's thread loaded the state after h.
+    expect(run.restarts).toBe(2);
+    expect(countersOf(memory)).toMatchObject({ threads: 3, refusals: 4, storeLoads: 2, storeLoadHeight: Number(h) });
+    expect(run.evicted.get(h)).toBeUndefined();
+    expect(tableDifferences(run.tables, plain.tables)).toEqual([]);
+    expect(runProblems(run, "extended")).toEqual([]);
+  }, PATIENCE_MS * 6);
 
   it("(e) a lost connection in on-settle: the height is made again from on-compute, and the tables after every block are a clean run's", async () => {
     const h = await deletingHeight();
