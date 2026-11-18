@@ -18,6 +18,7 @@ import {
   writeBlockRows,
 } from "../../src/backbone/core-ledger-state/core-ledger-state.js";
 import { CORE_LEDGER_STATE_MIGRATIONS } from "../../src/backbone/core-ledger-state/sql.js";
+import type { BlockWriteHandle } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { type AppliedState, EvictionRefused } from "../../src/ledger/worker/engine.js";
 import type { LedgerHost } from "../../src/ledger/worker/host.js";
@@ -603,6 +604,67 @@ describe("the reclamation at on-settle", () => {
     await computeBlock(p, block(3n), reading([{ ms: 1n }]));
     await computeBlock(p, block(3n), reading([{ ms: 1n }]));
     await expect(settleRun(p, run3, sweeping())).resolves.toMatchObject({ evict: [hash(0x77)] });
+  });
+
+  it("sends the net write's node statement through nodeWriter, or the block's handle, and never through refcountWriter, which takes the count, queue and delete statements", async () => {
+    // Block 3 writes a new root N, persisted; the tables queue 0x77, which the run deletes. So the net write has a node
+    // statement, the queue's delete and the row's delete.
+    const N = hash(0x4e);
+    const first = applied(3n, { batch: { inserts: [{ key: N, data: Uint8Array.of(1), children: Uint8Array.of(0) }], rootCounts: [{ key: N, delta: 1 }] } });
+    const statement = (sql: string): string => sql.split(" ").slice(0, 3).join(" ");
+    /** A block write handle over those tables, recording every statement it runs. */
+    const handle = () => {
+      const base = sweeping();
+      const ran: string[] = [];
+      return {
+        ...base,
+        ran,
+        async query(sql: string, params: unknown[] = []) {
+          if (sql.includes("AS stored")) {
+            return (params[0] as Uint8Array[]).map((key) =>
+              key[0] === 0x4e ? { node_key: key, stored: false, refs: 0, roots: 1 } : { node_key: key, stored: true, refs: 0, roots: 0 },
+            );
+          }
+          return base.query(sql, params);
+        },
+        async execute(sql: string, params: unknown[] = []) {
+          ran.push(statement(sql));
+          return (params[0] as unknown[]).length;
+        },
+      };
+    };
+    /** A seam recording what passes through it, then running it on the block's handle. */
+    const seam = (through: string[]) => (w: Pick<BlockWriteHandle, "execute">) => ({
+      async execute(sql: string, params?: unknown[]) {
+        through.push(statement(sql));
+        return w.execute(sql, params);
+      },
+    });
+    const counts = ["DELETE FROM core_ledger_state.unreferenced", "DELETE FROM core_ledger_state.nodes"];
+
+    /** A bound fake worker giving `first` and taking evictions. */
+    const evicting = () => {
+      const made = bound(first.stateRoot, first);
+      Object.assign(made.host, { evict: async () => 1 });
+      return made;
+    };
+    // refcountWriter alone: the node statement runs on the block's handle.
+    const { p } = evicting();
+    await computeBlock(p, block(3n), reading([{ ms: 1n }]));
+    const w = handle();
+    const counted: string[] = [];
+    await settleRun(p, run3, w, { refcountWriter: seam(counted) });
+    expect(w.ran).toEqual(["INSERT INTO core_ledger_state.nodes", ...counts]);
+    expect(counted).toEqual(counts);
+
+    // Both: the node statement through nodeWriter, the others through refcountWriter.
+    const { p: q } = evicting();
+    await computeBlock(q, block(3n), reading([{ ms: 1n }]));
+    const nodes: string[] = [];
+    const others: string[] = [];
+    await settleRun(q, run3, handle(), { refcountWriter: seam(others), nodeWriter: seam(nodes) });
+    expect(nodes).toEqual(["INSERT INTO core_ledger_state.nodes"]);
+    expect(others).toEqual(counts);
   });
 
   it("drops the record when a block's hand-over fails", async () => {

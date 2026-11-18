@@ -610,7 +610,7 @@ export async function settleRun(
     const netFrom = performance.now();
     await writeNet(options.refcountWriter?.(w, run.last) ?? w, outcome.net, {
       ...(options.refcountUnchecked === "row-count-mismatch" ? { unchecked: options.refcountUnchecked } : {}),
-      ...(options.nodeWriter === undefined ? {} : { nodes: options.nodeWriter(w, run.last) }),
+      nodes: options.nodeWriter?.(w, run.last) ?? w,
     });
     traceAdd("writeRefcountMs", performance.now() - netFrom);
     if (tracing()) {
