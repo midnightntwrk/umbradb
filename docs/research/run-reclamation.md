@@ -549,15 +549,34 @@ run deletes is not written first, only deleted.
 ### 4.9 A run of one block against the per-block step: what differs
 
 On tables with I1 to I4 and blocks that follow P1 a run of one block gives the step's tables (Theorem 3), and T2
-holds every output of the step to it on generated histories. What remains different:
+holds every output of the step to it on generated histories. On damaged tables and on blocks that break P1, what
+remains different is below. Each damaged-table row is a test that runs the block by `refcountStep` with
+`writeRefcount` and as a run of one block with `writeNet`, each on a database of its own, on PostgreSQL and PGlite
+(`test/backbone/run-reclaim-tables.test.ts`), unless it names another test.
 
 | Difference | When it shows |
 |---|---|
-| A new node that no rising key reaches halts the run (`unreached-node`); the step keeps it one block, queued | blocks that break P1: generated histories only |
-| A queued key the block neither released nor dropped halts the run (`unexpected-queued`) | damaged tables only |
-| The cascade reads a reached key's counts only once its change is below 0 (the `TODO` at that line in `run-reclaim.ts`); the step reads every reached key's. On tables that lost a count row, a reached key whose change is 0 is then kept where the step reads its count as 0 and deletes it | damaged counts only |
-| A reference to a key the block's own cascade deletes: both halt with `missing-reference`. The run checks the lists of the written nodes it keeps; the step also those of written nodes it deletes. Under P1 a deleted written node has a kept written ancestor whose reference to it halts the run the same way | damaged counts only |
-| On tables that break closure (a stored list referencing a key that is no row), the step protects a new node in its block and the run does not: the run can delete it and halt with `missing-reference` where the step stores tables | damaged tables only |
-| A missing reference and a count the cascade takes below 0 at one block: both name `negative-count`. In a longer run whose earlier block has the reference, the run names `missing-reference` at that block, where the per-block step names the count at the same block; the run's one cascade cannot say at which block a count fell | damaged counts only |
+| A new node that no rising key reaches halts the run (`unreached-node`); the step keeps it one block, queued (T2) | blocks that break P1: generated histories only |
+| The cascade reads a reached key's counts only once its change is below 0 (the `TODO` at that line in `run-reclaim.ts`); the step reads every reached key's. On tables that lost a count row, a reached key whose change is 0 is kept by the run; the step reads its count as 0, deletes it, and halts with `missing-reference` when a list the block writes references it | damaged counts only |
+| On tables that break closure (a stored list referencing a key that is no row), the step protects a new node in its block and the run does not: the run deletes it and halts with `missing-reference` where the step stores the block | damaged tables only |
+| With `sweep` off, a queued key that should not be (no row, or a count above 0): the step takes it off the queue; the run reads the queue's membership only for the keys it changes, and leaves it. Aligning them would read the whole queue with `sweep` off, which the run does not | damaged tables only |
+| A reference to a key the block's own cascade deletes: both halt with `missing-reference`. The run checks the lists of the written nodes it keeps; the step also those of written nodes it deletes. Under P1 a deleted written node has a kept written ancestor whose reference to it halts the run the same way (`run-reclaim.test.ts`, by hand) | damaged counts only |
+| A missing reference and a count the cascade takes below 0 at one block: both name `negative-count`. In a longer run whose earlier block has the reference, the run names `missing-reference` at that block, where the per-block step names the count at the same block; the run's one cascade cannot say at which block a count fell (`run-reclaim.test.ts`, by hand) | damaged counts only |
 | The key and the words of a halt: the step names the first failing reference in the order of the keys of the lists it writes; the run names, for step 3, the first failing block and then the first key in byte order | any halt |
 | Reads: the run reads which referenced keys are no row (`missing`), and with `sweep` off the queue's membership by key; the step reads which are rows and the queue whole | always; the same tables |
+
+The same both ways, each a test of the same kind: a queued key with no row (both halt with `row-count-mismatch` on
+the node delete, which affects no row: step 6 deletes such a candidate as rule 5 does); a key with a count and no
+row that a deletion reaches (the same halt); a list flushed again unchanged that references a key stored nowhere
+(both store the block: step 3 does not check a list that is the row's own); a key with a count and no row that a
+written list references (both `missing-reference`); a queued row with a root count, and one with a count (both take
+it off the queue); a root count with no row, released (both store the block); a row with no reference and no root
+count missing from the queue (both leave it so).
+
+`unexpected-queued` is no difference from the step: in a build it never fires. A key the run queues has its counts
+read and was a candidate: step 8 evaluates the queue it found, the keys whose root count changed and the new nodes,
+which are the first round's candidates, and the keys whose count changed, of which those with a count of 0 after
+the run had a change below 0 and so were candidates when it fell. A candidate with a count of 0 is deleted unless
+protected, and a key protected with no root count after the last block is one that block released or a key its
+replaced lists referenced. The check guards the computation itself: the negative controls of steps 4 to 6 show
+it halting.
