@@ -159,9 +159,12 @@ export function stepTables(nodes: NodeTables, roots: ReadonlyMap<string, number>
   };
 }
 
-/** A model block's flush as a block hands it over. */
+/** The payload the tests give the node of key `key` (hex): its own, so a payload written under another key shows. */
+export const payloadOf = (key: string): Uint8Array => Uint8Array.from(Buffer.from(`payload of ${key}`, "utf8"));
+
+/** A model block's flush as a block hands it over, each node with its payload ({@link payloadOf}). */
 export const flushOf = (flushed: RefcountBatch): NodeBatch => ({
-  inserts: flushed.inserts.map(({ key, children }) => ({ key: bytes(key), data: Uint8Array.of(7), children })),
+  inserts: flushed.inserts.map(({ key, children }) => ({ key: bytes(key), data: payloadOf(key), children })),
   rootCounts: flushed.rootCounts.map(({ key, delta }) => ({ key: bytes(key), delta })),
 });
 
@@ -381,7 +384,7 @@ export const haltReason = (error: unknown): string | undefined =>
   error instanceof UmbraError && error.code === "ledger-refcount-invalid" ? String((error.details as { reason?: unknown }).reason) : undefined;
 
 /** What a run's outcome must hold whatever the history; the findings as text. */
-function outcomeProblems(found: NodeTables, after: NodeTables, outcome: RunOutcome, on: boolean): string[] {
+export function outcomeProblems(found: NodeTables, after: NodeTables, outcome: RunOutcome, on: boolean): string[] {
   const problems: string[] = [];
   const evicted = new Set(outcome.evict.map(hex));
   for (const key of outcome.net.deleted.map(hex)) if (!evicted.has(key)) problems.push(`the deleted row ${short(key)} is not in the deleted keys`);
@@ -390,6 +393,9 @@ function outcomeProblems(found: NodeTables, after: NodeTables, outcome: RunOutco
     if (found.rows.has(key) !== outcome.net.deleted.map(hex).includes(key)) problems.push(`the deleted key ${short(key)} is a row the net write does not delete, or the other way`);
   }
   if (!on && (evicted.size > 0 || outcome.rounds > 0)) problems.push("a run that does not sweep deletes");
+  for (const node of outcome.net.inserts) {
+    if (!same(node.data, payloadOf(hex(node.key)))) problems.push(`the inserted ${short(hex(node.key))} carries another node's payload`);
+  }
   return problems;
 }
 

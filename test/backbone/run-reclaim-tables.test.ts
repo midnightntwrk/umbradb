@@ -17,7 +17,7 @@ import type { NodeBatch } from "../../src/ledger/types.js";
 import { BACKENDS } from "../db/backends.js";
 import { encodeChildren, hex, nodeKey } from "../ledger/node-format.js";
 import { type HistoryScript, historyScripts, type RefcountTables as ModelTables } from "./refcount-model.js";
-import { flushOf, type ModelBlock, modelBlocks, runsOf } from "./run-reclaim.js";
+import { flushOf, made, madeBlocks, type MadeNode, type ModelBlock, modelBlocks, payloadOf, ref, runsOf } from "./run-reclaim.js";
 
 /**
  * The run computation's reads (`sqlRunTables`) and its net write (`writeNet`) on `core_ledger_state`'s own tables (its
@@ -38,16 +38,19 @@ const RUNS = 20;
 
 const SCHEMA = `CREATE SCHEMA core_ledger_state;\n${CORE_LEDGER_STATE_MIGRATIONS.map((m) => m.sql).join("\n")}`;
 
-/** Tables as hex: rows by key with their child list, the counts, the root counts, the queue. */
+/** Tables as hex: rows by key with their child list, and with their payload, the counts, the root counts, the queue. */
 interface Tables {
   readonly rows: Readonly<Record<string, string>>;
+  readonly data: Readonly<Record<string, string>>;
   readonly refs: Readonly<Record<string, number>>;
   readonly roots: Readonly<Record<string, number>>;
   readonly queue: readonly string[];
 }
 
-const tablesOfModel = (tables: ModelTables): Tables => ({
+/** The model's tables, each row with the payload `payload` gives its key ({@link payloadOf} unless given). */
+const tablesOfModel = (tables: ModelTables, payload: (key: string) => Uint8Array = payloadOf): Tables => ({
   rows: Object.fromEntries([...tables.rows].map(([k, children]) => [k, hex(children)])),
+  data: Object.fromEntries([...tables.rows.keys()].map((k) => [k, hex(payload(k))])),
   refs: Object.fromEntries(tables.refs),
   roots: Object.fromEntries(tables.roots),
   queue: [...tables.queue].sort(),
@@ -55,13 +58,14 @@ const tablesOfModel = (tables: ModelTables): Tables => ({
 
 async function tablesOf(db: Database): Promise<Tables> {
   return db.read(async (read) => {
-    const rows = await read.query(`SELECT node_key, children FROM ${NODES_TABLE}`);
+    const rows = await read.query(`SELECT node_key, data, children FROM ${NODES_TABLE}`);
     const refs = await read.query(`SELECT node_key, count FROM ${REF_COUNTS_TABLE}`);
     const roots = await read.query(`SELECT node_key, count FROM ${ROOT_COUNTS_TABLE}`);
     const queue = await read.query(`SELECT node_key FROM ${UNREFERENCED_TABLE}`);
     const k = (row: Record<string, unknown>): string => hex(row.node_key as Uint8Array);
     return {
       rows: Object.fromEntries(rows.map((row) => [k(row), hex(row.children as Uint8Array)])),
+      data: Object.fromEntries(rows.map((row) => [k(row), hex(row.data as Uint8Array)])),
       refs: Object.fromEntries(refs.map((row) => [k(row), row.count as number])),
       roots: Object.fromEntries(roots.map((row) => [k(row), row.count as number])),
       queue: queue.map(k).sort(),
@@ -86,11 +90,16 @@ async function writeOwnRows(w: Pick<BlockWriteHandle, "execute">, flushed: NodeB
  * `run`'s blocks handed over and their own rows written, then the computation through the transaction and, unless
  * `net` changes it, its net write; one transaction for the run.
  */
-async function settle(db: Database, run: readonly ModelBlock[], net: (computed: NetWrite) => NetWrite = (computed) => computed): Promise<void> {
+async function settle(
+  db: Database,
+  run: readonly ModelBlock[],
+  net: (computed: NetWrite) => NetWrite = (computed) => computed,
+  flushOfBlock: (block: ModelBlock) => NodeBatch = (block) => flushOf(block.flushed),
+): Promise<void> {
   await db.transaction(async (tx) => {
     const reclaim = new RunReclaim({ first: BigInt((run[0] as ModelBlock).height), on: (run[0] as ModelBlock).on });
     for (const block of run) {
-      const flushed = flushOf(block.flushed);
+      const flushed = flushOfBlock(block);
       reclaim.collect(BigInt(block.height), flushed, block.on);
       await writeOwnRows(tx, flushed);
     }
@@ -346,6 +355,62 @@ describe.each(BACKENDS)("the run computation's reads and net write on $name", (b
         rootCounts: [{ key: p, delta: 1 }],
       });
       expect([result.step.outcome, result.run.outcome]).toEqual(["commits", "missing-reference"]);
+    }, 120_000);
+  });
+
+  describe("each node's own payload, a fixture of nodes whose keys are their payloads' and children's", () => {
+    // A leaf and four states over it, each persisted by its block and released by the next.
+    const leaf = made("leaf payload");
+    const states = [0, 1, 2, 3].map((n) => made(`state ${n} payload`, [ref(leaf)]));
+    const blocks = madeBlocks(states.map((state, n) => ({ inserts: n === 0 ? [leaf, state] : [state], persist: [state], ...(n === 0 ? {} : { release: [states[n - 1] as MadeNode] }) })));
+    const byKey = new Map([leaf, ...states].map((node) => [node.key, node] as const));
+    /** A block's flush with each node's own payload. */
+    const withPayloads = (block: ModelBlock): NodeBatch => {
+      const flush = flushOf(block.flushed);
+      return { ...flush, inserts: flush.inserts.map((node) => ({ ...node, data: (byKey.get(hex(node.key)) as MadeNode).data })) };
+    };
+    /** The model's tables after `block`, each row with its node's own payload. */
+    const want = (block: ModelBlock): Tables => tablesOfModel(block.step.after, (key) => (byKey.get(key) as MadeNode).data);
+    const [first, second] = runsOf(blocks, 2) as [ModelBlock[], ModelBlock[]];
+
+    it("carries each node's own payload through the net write, and keeps the stored ones through a run rolled back", async () => {
+      const { db } = await backend.database(SCHEMA);
+      try {
+        await settle(db, first, undefined, withPayloads);
+        const afterFirst = await tablesOf(db);
+        expect(afterFirst).toEqual(want(first.at(-1) as ModelBlock));
+        expect(Object.keys(afterFirst.data).length).toBeGreaterThan(1);
+        // The second run's net write affects other rows than computed: rolled back, every payload as it was.
+        const halt = await settle(db, second, (net) => ({ ...net, counted: net.counted + 1 }), withPayloads).catch((error: unknown) => error);
+        expect(halt).toMatchObject({ details: { reason: "row-count-mismatch" } });
+        expect(await tablesOf(db)).toEqual(afterFirst);
+        await settle(db, second, undefined, withPayloads);
+        expect(await tablesOf(db)).toEqual(want(second.at(-1) as ModelBlock));
+      } finally {
+        await db.close();
+      }
+    }, 120_000);
+
+    it("a net write whose inserted payload is not the node's: the tables differ from the model's in nodes.data alone (a negative control of the comparison)", async () => {
+      const { db } = await backend.database(SCHEMA);
+      try {
+        await settle(db, first, undefined, withPayloads);
+        // The second run inserts states 2 and 3; the first insert's payload is made another.
+        let corrupted = "";
+        await settle(
+          db,
+          second,
+          (net) => ({ ...net, inserts: net.inserts.map((node, at) => (at === 0 ? ((corrupted = hex(node.key)), { ...node, data: Uint8Array.of(0xde, 0xad) }) : node)) }),
+          withPayloads,
+        );
+        const after = await tablesOf(db);
+        const wanted = want(second.at(-1) as ModelBlock);
+        expect(after).not.toEqual(wanted);
+        expect({ ...after, data: wanted.data }).toEqual(wanted);
+        expect(Object.entries(after.data).filter(([key, data]) => wanted.data[key] !== data)).toEqual([[corrupted, "dead"]]);
+      } finally {
+        await db.close();
+      }
     }, 120_000);
   });
 

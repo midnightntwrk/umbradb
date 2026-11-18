@@ -6,6 +6,7 @@ import { type HistoryScript, historyScripts } from "./refcount-model.js";
 import {
   againstModel,
   applied,
+  flushOf,
   embedded,
   haltReason,
   inconsistencies,
@@ -15,9 +16,11 @@ import {
   type ModelBlock,
   modelBlocks,
   NO_TABLES,
+  outcomeProblems,
   ref,
   remadeAgainstModel,
   runTables,
+  tableDifferences,
 } from "./run-reclaim.js";
 
 /**
@@ -317,6 +320,24 @@ describe("negative controls: a fault in the run computation", () => {
     );
     expect(cut.failed, String(cut.errorInstance)).toBe(false);
   }, 600_000);
+
+  it("a net write whose inserted payload is another node's is found by the comparison every run's outcome goes through", async () => {
+    const leafNode = made("leaf");
+    const blocks = madeBlocks([{ inserts: [leafNode, made("s0", [ref(leafNode)])], persist: [made("s0", [ref(leafNode)])] }]);
+    const reclaim = new RunReclaim({ first: 0n, on: true });
+    reclaim.collect(0n, flushOf((blocks[0] as ModelBlock).flushed), true);
+    const outcome = await reclaim.compute(runTables(NO_TABLES, (blocks[0] as ModelBlock).step.after.roots));
+    const after = applied(NO_TABLES, outcome.net).tables;
+    expect(outcomeProblems(NO_TABLES, after, outcome, true)).toEqual([]);
+    // The two inserted nodes' payloads swapped: keys and child lists are unchanged, so only the payload check sees it.
+    const [one, two] = outcome.net.inserts as [(typeof outcome.net.inserts)[number], (typeof outcome.net.inserts)[number]];
+    const swapped = { ...outcome, net: { ...outcome.net, inserts: [{ ...one, data: two.data }, { ...two, data: one.data }] } };
+    expect(tableDifferences(applied(NO_TABLES, swapped.net).tables, (blocks[0] as ModelBlock).step.after)).toEqual([]);
+    expect(outcomeProblems(NO_TABLES, after, swapped, true)).toEqual([
+      `the inserted ${hex(one.key).slice(0, 12)} carries another node's payload`,
+      `the inserted ${hex(two.key).slice(0, 12)} carries another node's payload`,
+    ]);
+  });
 
   it("gives every key back as its own bytes under a fault too", async () => {
     // The seams change what is computed, not how keys leave: a control's deleted keys are still plain keys.
