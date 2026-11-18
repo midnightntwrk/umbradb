@@ -4,6 +4,9 @@ import type { BlockContext, ModuleDeclaration, ProcessContext } from "../../src/
 import { LoopPauses, type PauseHold } from "../../src/runner/pause.js";
 import { declaration } from "../modules/declarations.js";
 import { entry } from "../modules/graph-fixtures.js";
+import type { Revision } from "../../src/modules/declaration.js";
+import { isBackbonePart } from "../../src/runner/dispatch.js";
+import { Contexts } from "./fixtures.js";
 import { byPoint, chunksOf, orderOf, runChunks } from "./loop-chunk-harness.js";
 import { cursorOf, RUNNER_BACKENDS } from "./loop-harness.js";
 
@@ -126,6 +129,26 @@ describe.each(RUNNER_BACKENDS)("where a chunk ends on $name", (backend) => {
     expect(boundaries).toEqual(["s on-start-height@6"]);
     expect(await cursorOf(run.db)).toBe(12n);
     expect(byPoint(run.seen).get("on-stop-height@5")).toEqual([{ point: "on-stop-height", height: 5n, readHeight: 5n }]);
+  }, 120_000);
+
+  it("a revision of the core entry ends a chunk: its last height is a chunk's last", async () => {
+    /** The backbone's revisions: the core entry's, a second from 6 (its settings are what the backbone reads at h). */
+    class TwoCoreRevisions extends Contexts {
+      readonly #made = new Map<string, ReturnType<Contexts["of"]>>();
+      override of(id: string) {
+        const context = super.of(id);
+        if (!isBackbonePart({ id })) return context;
+        const revisions: Revision[] = [
+          { start: 1n, stop: 5n, version: "core", settings: {} },
+          { start: 6n, stop: null, version: "core", settings: {} },
+        ];
+        const made = this.#made.get(id) ?? Object.freeze({ ...context, revisions: Object.freeze(revisions) });
+        this.#made.set(id, made);
+        return made;
+      }
+    }
+    const run = await runChunks(backend, { head: 14n, blocks: 7, contexts: new TwoCoreRevisions() });
+    expect(run.order).toEqual(orderOf([[1n, 5n], [6n, 12n], [13n, 14n]], 14n));
   }, 120_000);
 
   describe("blockBeforeCommitted()", () => {

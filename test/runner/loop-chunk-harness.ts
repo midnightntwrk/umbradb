@@ -197,6 +197,8 @@ export interface ChunkRunOptions {
   readonly modules?: readonly ModuleDeclaration[];
   /** The module whose process context holds the `db` item: the run's database, read-only. */
   readonly dbItem?: string;
+  /** The process contexts, when no `dbItem` is given; the fixtures' unless given. */
+  readonly contexts?: Contexts;
   /** Where the order of points and marks goes; a new list unless given (a module reads it while the loop runs). */
   readonly order?: string[];
   readonly follower?: TransactionFollower;
@@ -223,7 +225,7 @@ export async function runChunks(backend: RunnerBackend, options: ChunkRunOptions
   const order = options.order ?? [];
   const seen: Seen[] = [];
   const user = [recorder(order, seen, options.recorder), ...(options.modules ?? [])];
-  const contexts = options.dbItem === undefined ? new Contexts() : new WithItem(options.dbItem, "db", readOnlyDatabase(db));
+  const contexts = options.dbItem === undefined ? (options.contexts ?? new Contexts()) : new WithItem(options.dbItem, "db", readOnlyDatabase(db));
   const entries = user.map((part) => options.entries?.(part.id) ?? entry(part.id, 1));
   const started = await startWith(db, user, entries, { backbone: CHECKED_BACKBONE, contexts });
   const memory = new InMemoryBlockSource({ head: options.head });

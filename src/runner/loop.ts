@@ -161,8 +161,8 @@
  * **Chunks** (fast-sync mode, {@link LoopInput.fastSync}, `./fast-sync.ts`). Far behind the finalized head the loop
  * stores a chunk of consecutive heights a..b in one transaction; every block still runs every point, and with the mode
  * off, or for a height processed alone, nothing above changes. At each height the loop asks `chunkEnd` (with the head
- * read for this pass): a chunk holds at least two blocks, inside one range of the resolved graph, no closer to the head
- * than the setting's distance. A chunk:
+ * read for this pass): a chunk holds at least two blocks, inside one range of the resolved graph and one revision of
+ * the `core` entry, no closer to the head than the setting's distance. A chunk:
  * 1. takes all its blocks first, in height order, with nothing open: each from the source (`prepared`, the source's
  *    queue running its `on-fetch` and `on-parse`; else `block`, the loop running them), kept with its items as
  *    `on-parse` left them. A take that fails at j makes the chunk a..j − 1 (a alone when that is a), and the failure is
@@ -580,6 +580,16 @@ interface ChunkEnd {
 }
 
 /**
+ * A failure the loop keeps while blocks of a chunk are stored again (see the module comment): thrown when the loop
+ * reaches `at`, before anything of that height runs; dropped, and logged, when a block below `at` stops processing
+ * first.
+ */
+interface KeptFailure {
+  readonly failure: HeightFailure;
+  readonly at: bigint;
+}
+
+/**
  * A chunk a retryable failure stopped, or whose `COMMIT` lost its answer (`uncertain`), kept for the loop's next run
  * (see the module comment). Its runs are the blocks begun in its transaction, in height order: when not `uncertain`,
  * the last of them is the block that failed, retried alone from where it resumes. `carried` is a block whose
@@ -782,8 +792,11 @@ export class FinalizedLoop {
    * `on-compute`, with its items as `on-parse` left them), by height; kept across runs until the loop processes them.
    */
   readonly #remade = new Map<bigint, HeldHeight>();
-  /** The failure of a block above blocks stored again, thrown when the loop reaches it, the block not called again. */
-  #keptFailure: HeightFailure | undefined;
+  /**
+   * A failure kept while blocks of a chunk are stored again, thrown when the loop reaches the height `at` (the failing
+   * block's, which is not called again), unless one of those blocks fails first.
+   */
+  #keptFailure: KeptFailure | undefined;
   /** The chunk the last run held for the next. */
   #heldChunk: HeldChunk | undefined;
   /**
@@ -1307,11 +1320,11 @@ export class FinalizedLoop {
     this.#resume = undefined;
     this.#remade.delete(height);
     const kept = this.#keptFailure;
-    if (kept !== undefined && kept.height === height) {
+    if (kept !== undefined && kept.at === height) {
       // Its failure was kept while the blocks below it were stored again: it is not called again.
       this.#keptFailure = undefined;
       if (opened !== undefined) this.#unwatch(opened.watch, false);
-      throw kept;
+      throw kept.failure;
     }
     let run: HeightRun | undefined;
     // A chunk whose takes left this height alone hands over its window, open since the takes began.
@@ -1357,9 +1370,9 @@ export class FinalizedLoop {
       // A block stored again failed: a failure kept for a block above it is dropped, and logged, when this one stops
       // processing; it stays kept while this one is retried.
       const above = this.#keptFailure;
-      if (above !== undefined && above.height > height && !isRetryable(failure)) {
+      if (above !== undefined && above.at > height && !isRetryable(failure)) {
         this.#keptFailure = undefined;
-        this.input.observer?.dropped?.(above);
+        this.input.observer?.dropped?.(above.failure);
       }
       if (!committed && run !== undefined) {
         this.#hold(run, failure);
@@ -1409,8 +1422,21 @@ export class FinalizedLoop {
     const { fastSync, lockstep } = this.input;
     if (fastSync === undefined || lockstep !== undefined) return null;
     if (this.#resume?.run.height === first || this.#takeFailure?.height === first) return null;
-    const limits = { head, rangeEnd: this.#rangeAt(first).range.to, last: this.lastHeight(), alone: this.aloneUpTo() };
+    const limits = { head, rangeEnd: this.#rangeEndAt(first), last: this.lastHeight(), alone: this.aloneUpTo() };
     return chunkEnd(fastSync, first, limits);
+  }
+
+  /**
+   * The last height of `first`'s range of the resolved graph, or of the `core` entry's revision covering `first` if
+   * that ends first (the graph's ranges split at every module revision's start and stop, not at the core's, whose
+   * settings the backbone parts read at each height); null when neither ends.
+   */
+  #rangeEndAt(first: bigint): bigint | null {
+    const range = this.#rangeAt(first);
+    const backbone = range.order.find(isBackbonePart);
+    const core = backbone === undefined ? undefined : revisionAt(this.input.contextOf(backbone.id).revisions, first);
+    const ends = [range.range.to, core?.stop ?? null].filter((end): end is bigint => end !== null);
+    return ends.length === 0 ? null : ends.reduce((low, end) => (end < low ? end : low));
   }
 
   /**
@@ -1753,13 +1779,13 @@ export class FinalizedLoop {
       }
       const thrown = this.keptFailure(failure);
       this.#storeAgain(thrown === undefined ? runs : runs.slice(0, runs.indexOf(k)), runs.at(-1));
-      this.#keptFailure = thrown;
+      this.#keptFailure = thrown === undefined ? undefined : Object.freeze({ failure: thrown, at: k.height });
       return { cursor: previous, again: true };
     }
     // The COMMIT answered with an error: every block again, one per transaction; the block whose own COMMIT fails stops.
     this.#alone = (carried ?? (last as HeightRun)).height;
     this.#storeAgain(kept === undefined && carried !== undefined ? runs : stored, carried);
-    this.#keptFailure = kept;
+    this.#keptFailure = kept === undefined ? undefined : Object.freeze({ failure: kept, at: kept.height });
     return { cursor: previous, again: true };
   }
 
@@ -1829,7 +1855,7 @@ export class FinalizedLoop {
       if (held.carried !== undefined) {
         this.#alone = held.carried.height;
         if (held.kept === undefined) this.#storeAgain(carried);
-        this.#keptFailure = held.kept;
+        this.#keptFailure = held.kept === undefined ? undefined : Object.freeze({ failure: held.kept, at: held.kept.height });
       }
       return last.block;
     }
@@ -1851,7 +1877,7 @@ export class FinalizedLoop {
       for (const run of [...held.runs, ...carried]) this.#tell("rolledBack", run.block);
       this.#alone = (held.carried ?? last).height;
       this.#storeAgain(held.kept === undefined ? [...held.runs, ...carried] : held.runs);
-      this.#keptFailure = held.kept;
+      this.#keptFailure = held.kept === undefined ? undefined : Object.freeze({ failure: held.kept, at: held.kept.height });
     } else {
       // The block that failed, last, again alone from where it resumes; the blocks below it from on-compute.
       this.#alone = last.height;

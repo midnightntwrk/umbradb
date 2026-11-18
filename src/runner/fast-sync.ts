@@ -4,8 +4,8 @@
  *
  * A chunk forms only far behind the finalized head: it holds only heights `distance` or more behind the head the loop
  * read for its pass, so the cursor comes up to the head one block per transaction. A chunk stays inside one range of
- * the resolved graph, where no entry starts or stops and no revision's setting changes, and does not pass the loop's
- * last height. It holds two blocks or more; a height where none forms is processed alone, as with the mode off.
+ * the resolved graph, where no entry starts or stops and no module revision's setting changes, and inside one revision
+ * of the `core` entry; it does not pass the loop's last height. It holds two blocks or more; a height where none forms is processed alone, as with the mode off.
  */
 
 /** The `core` entry's `fastSync`: the most blocks per chunk (below 2: the mode is off), and the distance kept from the head. */
@@ -27,7 +27,10 @@ export const FAST_SYNC_MAX_BLOCKS = 1_000;
 export interface ChunkLimits {
   /** The finalized head the loop read for this pass. */
   readonly head: bigint;
-  /** The last height of the range of the resolved graph holding the chunk's first height; null for a range with no end. */
+  /**
+   * The last height of the range of the resolved graph holding the chunk's first height, or of the `core` entry's
+   * revision covering it if that ends first; null when neither ends.
+   */
   readonly rangeEnd: bigint | null;
   /** The loop's last height (the core's stop, the height before an upgrade boundary); null for none. */
   readonly last: bigint | null;
