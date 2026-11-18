@@ -1,7 +1,7 @@
 # Exact-fingerprint suppressions for `gitleaks detect` (format: commit:path:rule:line).
 #
-# These are the ONLY suppressed findings: the Preview wallet's two lines and the two WebSocket keys
-# below. G19 deliberately performs no git-history rewrite, so the
+# These are the ONLY suppressed findings: the Preview wallet's two lines, the two WebSocket keys
+# and the proof-of-concept branches' ten below. G19 deliberately performs no git-history rewrite, so the
 # valueless Preview testnet wallet secret committed before it was untracked recurs on every
 # full-history scan. Pinning fingerprints suppresses precisely those occurrences: a different
 # secret, the same file at a different commit, or either field in the working tree still fails.
@@ -28,3 +28,22 @@ be646fcff58052a77e848914a79ccef2279cf78f:nix/midnight-env/test-wallets/preview-t
 ba38a29fea6c4291859432520ddcbb30b1eb1b1d:test/library/mounted-fixtures.ts:generic-api-key:122
 770fcfd3a41c3c6fcf26cb93e05c13803ec8949e:test/library/start-umbradb.test.ts:generic-api-key:421
 cccdb2eb3878c624f59fca8328430b355a6cb280:.gitleaksignore:generic-api-key:21
+#
+# Ten findings in commits that only the branches of the private-shielded-sync proof of concept hold
+# (pull requests 35 to 37, under examples/private-shielded-sync/). This gate scans every branch's
+# history, so they fail every pull request, whatever it changes. None is a secret: six are the value a
+# published matrix is generated from, derived from the table's digest and sent to every client, in
+# recorded benchmark results (a JSON field the wallet-key rule matches by its name), two are TypeScript type declarations whose type name the stock rule matches, one is a
+# placeholder setting of a configuration test, and one is a public token type in a benchmark test.
+# Pinned to the commits that added the lines; the same lines in a later commit are new findings.
+# Verified after committing: a full-history scan of every branch reports no leaks.
+1a352384368a1bdde762a3d44806de7595a7eb67:examples/private-shielded-sync/bench/results/2026-11-16-preprod-schemes/cert/noise-real-nullifier.json:umbradb-wallet-seed-hex:1
+1a352384368a1bdde762a3d44806de7595a7eb67:examples/private-shielded-sync/bench/results/2026-11-16-preprod-schemes/cert/noise-1m-nullifier.json:umbradb-wallet-seed-hex:1
+1a352384368a1bdde762a3d44806de7595a7eb67:examples/private-shielded-sync/bench/results/2026-11-16-preprod-schemes/cert/noise-real-read.json:umbradb-wallet-seed-hex:1
+1a352384368a1bdde762a3d44806de7595a7eb67:examples/private-shielded-sync/bench/results/2026-11-16-preprod-schemes/cert/noise-1m-read.json:umbradb-wallet-seed-hex:1
+1a352384368a1bdde762a3d44806de7595a7eb67:examples/private-shielded-sync/bench/results/2026-11-16-preprod-schemes/cert/noise-1m-path.json:umbradb-wallet-seed-hex:1
+1a352384368a1bdde762a3d44806de7595a7eb67:examples/private-shielded-sync/bench/results/2026-11-16-preprod-schemes/cert/noise-real-path.json:umbradb-wallet-seed-hex:1
+9f29f63de8ffa32318c1b516c6082d23bba5ca87:examples/private-shielded-sync/client/ledger.ts:generic-api-key:20
+ae8e8c15fade27cd0ac2c2d6c7bede84e9d80ab1:examples/private-shielded-sync/test/server-config.test.ts:generic-api-key:97
+cb5a3fa5de4c53a393383913dd16544770760a0f:examples/private-shielded-sync/test/server-chain.ts:generic-api-key:32
+ad5e29731059183223ed4eafb56501a7cd8d914c:examples/private-shielded-sync/test/bench-run.test.ts:generic-api-key:50
