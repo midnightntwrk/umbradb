@@ -29,12 +29,16 @@
  * The same block applied again while pending (a height whose transaction was lost and is processed again) gets the same
  * result back, batch included. The database rolled back, so the batch still has to be written; and the package's
  * memory already counts the batch's nodes as stored, so a second apply would flush none of them. A pending state for
- * another block is dropped.
+ * another block is dropped. The package counts every node it flushed as stored, not only the pending state's: when a
+ * transaction that held several blocks rolls back, the host restarts the thread (`./host.ts`), so the blocks made
+ * again flush their nodes anew.
  *
  * **The state at h − 1 from the database.** {@link LedgerEngine.load} makes the state the database stores for a block
  * (by its key, `core_ledger_state.states.state_key`) the committed one. If the engine holds it already (committed, or
- * pending and committed in the database since, before the engine's commit reached it), this is immediate. Otherwise
- * the state is read through the node store from its key, as after a restart, and the pending block is dropped.
+ * pending under that key), this is immediate: a pending state is taken as the database's, which it is once its
+ * transaction commits, also when that transaction holds the next blocks too (the host restarts the thread if it rolls
+ * back instead). Otherwise the state is read through the node store from its key, as after a restart, and the pending
+ * block is dropped.
  * `core-ledger-state` asks for the state at h − 1 before every apply. So a restarted process, with a fresh worker
  * that holds nothing, loads the state at the cursor once, and a process that keeps running reads nothing.
  *
@@ -686,7 +690,8 @@ export class LedgerEngine {
 
   /**
    * `block` committed (the host sends it once the `COMMIT` that holds the block answered): its pending state becomes
-   * the committed one. False when not pending.
+   * the committed one. False when not pending: a block the engine has already moved past (a `load` made it the
+   * committed one, and a later block is pending) changes nothing.
    */
   commit(block: BlockId): boolean {
     const pending = this.#pending;
@@ -729,7 +734,8 @@ export class LedgerEngine {
 
   /**
    * Makes the state the database stores for block `input`, by its key, the committed state (see the module comment):
-   * the state held already when it is that block's with that key, else one read through the node store.
+   * the state held already when it is that block's with that key, committed or pending (a pending state is taken as
+   * the database's), else one read through the node store.
    */
   async load(input: LoadState): Promise<LoadedState> {
     const holds = (held: Held | null): boolean =>

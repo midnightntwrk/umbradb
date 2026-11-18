@@ -43,19 +43,33 @@
  *   `core-ledger-state` does not, or the cursor's block re-delivered after a restart) gets the release alone. Neither
  *   is awaited: the thread answers in order, so the next block's apply finds h committed, and a thread that failed
  *   fails that apply.
- * - `written(h)`: h's rows are in the open transaction. `rolledBack(h)`: h will not be committed by the transaction it
- *   was processed for, which ended without committing, or h's run ended before it was written. Neither sends anything:
- *   the host keeps the blocks written in the open transaction and not yet committed, which a commit or a rollback ends.
+ * - `written(h)`: h's rows are in the open transaction. Nothing is sent: the host keeps the blocks written in the open
+ *   transaction and not yet committed, which a commit or a rollback ends.
+ * - `rolledBack(h)`: h will not be committed by the transaction it was processed for, which ended without committing,
+ *   or h's run ended before it was written. Nothing is sent, unless the thread was led past a block of that transaction
+ *   (below): then the thread is restarted.
+ *
+ * **A thread led past a block not committed.** One transaction may hold several blocks (`src/runner/loop.ts`). The
+ * engine's `load` makes a pending state the committed one at once when it holds it (`./engine.ts`), and its package
+ * counts every node it flushed as stored. So the host notes each block written and not committed that a
+ * `load` it sent names, or that is the parent of an `apply` it sent: the thread then holds as its base a state the
+ * database holds only in the open transaction. `committed(h)` forgets the notes at or below h, and any restart all of
+ * them. At `rolledBack`, while a note is left, the host restarts the thread ({@link LedgerHost.restart}), not awaited,
+ * a rejection dropped (a thread that failed fails the next request as before): a request sent after `rolledBack`
+ * returns runs on a thread that holds no state and has the kept parses, so a block made again loads the state before
+ * it from the database, where it is committed, and flushes every node it needs again. With one block per
+ * transaction nothing is ever noted: `load(h − 1)` follows h − 1's `COMMIT`.
  *
  * The host's record of the facts ({@link followedRecord}) is bounded by the transactions not yet committed: a block
  * applied (its apply or genesis sent) stays until a block at or above it is committed, through `committed` or a
  * caller's own {@link LedgerHost.commit} that answered (the per-block reference runs of the tests commit directly); it
  * stays across a rollback, since the block is made again, and across a restart of the thread, since the record is the
- * host's. A block written stays until it is committed or its transaction rolls back.
+ * host's. A block written stays until it is committed or its transaction rolls back. A note stays until a block at or
+ * above it is committed, its transaction rolls back, or the thread is restarted.
  *
  * After a `COMMIT` whose answer was lost the host is told nothing until the engine's cursor read says what became of
- * it. A block made again after a rollback is applied on the same committed state, and the pending state the thread kept
- * serves it (`./engine.ts`).
+ * it. A block made again after a rollback of a transaction the thread was not led past is applied on the same committed
+ * state, and the pending state the thread kept serves it (`./engine.ts`).
  *
  * **The thread's entry** ({@link ledgerWorkerEntry}):
  * - next to a build, the compiled `entry.js`;
@@ -162,7 +176,8 @@ export interface LedgerHost {
   committed(block: BlockId): void;
   /**
    * `block` will not be committed by the transaction it was processed for: that transaction ended without committing,
-   * or the block's run ended before it was written (see the module comment). Nothing is sent.
+   * or the block's run ended before it was written (see the module comment). Nothing is sent, unless the thread was led
+   * past a block of that transaction: then it is restarted, not awaited.
    */
   rolledBack(block: BlockId): void;
   /**
@@ -321,10 +336,11 @@ class SentParses {
   }
 }
 
-/** The requests a host's facts send: the host's own commit and release. */
+/** The requests a host's facts send: the host's own commit and release, and its restart of the thread. */
 interface CommitRequests {
   commit(block: BlockId): Promise<boolean>;
   release(drop: { readonly upTo: bigint }): Promise<number>;
+  restart(): Promise<void>;
 }
 
 /** A host's facts of each block's transaction, told of every request the host sends ({@link transactionFacts}). */
@@ -335,16 +351,20 @@ interface TransactionFacts extends Pick<LedgerHost, "written" | "committed" | "r
   record(): FollowedRecord;
   /** A caller's own commit of `block` answered: it and every block below it are committed. */
   directlyCommitted(block: BlockId): void;
+  /** The thread was restarted: it holds no state, so it is led past no block. */
+  restarted(): void;
 }
 
 /**
  * What a host keeps of the facts (see the module comment): the blocks an apply or the genesis of which was sent and
- * that are not committed yet, and the blocks written in the open transaction and not committed yet, each in height
- * order. Each list holds the blocks of the transactions not yet committed, so it stays small.
+ * that are not committed yet, the blocks written in the open transaction and not committed yet, and of those the ones
+ * the thread was led past, each in height order. Each list holds the blocks of the transactions not yet committed, so
+ * it stays small.
  */
 export interface FollowedRecord {
   readonly applied: readonly BlockId[];
   readonly written: readonly BlockId[];
+  readonly ledPast: readonly BlockId[];
 }
 
 /** The facts of each host this module made, for {@link followedRecord}. */
@@ -358,16 +378,26 @@ export function followedRecord(host: LedgerHost): FollowedRecord | undefined {
 /**
  * A host's facts of each block's transaction, over its own requests (see the module comment): `committed` sends the
  * block's commit when an apply or the genesis of the block was sent, then the release up to its height, neither
- * awaited, a rejection dropped (a thread that failed fails the next block's apply); `written` and `rolledBack` keep
- * what the open transaction holds and send nothing.
+ * awaited, a rejection dropped (a thread that failed fails the next block's apply); `written` keeps what the open
+ * transaction holds and sends nothing; `rolledBack` restarts the thread, not awaited and a rejection dropped, when it
+ * was led past a block of the open transaction, and sends nothing otherwise.
  */
 function transactionFacts(requests: CommitRequests): TransactionFacts {
   /** The blocks an apply or the genesis of which was sent and that are not committed yet, by hash. */
   const applied = new Map<string, BlockId>();
   /** The blocks written in the open transaction and not yet committed. */
   let open: BlockId[] = [];
+  /** The blocks of {@link open} the thread was led past: a `load` sent names one, or one is an `apply`'s parent. */
+  let led: BlockId[] = [];
+  /** Notes the block of `open` at `height` with `hash`, if it is one, as led past. */
+  const lead = (height: bigint, hash: Uint8Array): void => {
+    const block = open.find((written) => written.height === height && hexOf(written.hash) === hexOf(hash));
+    if (block !== undefined && !led.includes(block)) led.push(block);
+  };
   return {
     sent(request) {
+      if (request.type === "load") lead(request.input.height, request.input.hash);
+      if (request.type === "apply") lead(request.input.height - 1n, request.input.parentHash);
       if (request.type !== "genesis" && request.type !== "apply") return;
       applied.set(hexOf(request.input.hash), Object.freeze({ height: request.input.height, hash: request.input.hash }));
     },
@@ -376,6 +406,7 @@ function transactionFacts(requests: CommitRequests): TransactionFacts {
     },
     committed(block) {
       open = open.filter((written) => written.height > block.height);
+      led = led.filter((noted) => noted.height > block.height);
       const wasApplied = applied.get(hexOf(block.hash))?.height === block.height;
       for (const [key, sent] of [...applied]) if (sent.height <= block.height) applied.delete(key);
       if (wasApplied) void requests.commit({ height: block.height, hash: block.hash }).catch(() => undefined);
@@ -383,13 +414,23 @@ function transactionFacts(requests: CommitRequests): TransactionFacts {
     },
     rolledBack() {
       open = [];
+      if (led.length === 0) return;
+      led = [];
+      void requests.restart().catch(() => undefined);
     },
     directlyCommitted(block) {
       for (const [key, sent] of [...applied]) if (sent.height <= block.height) applied.delete(key);
     },
+    restarted() {
+      led = [];
+    },
     record() {
       const byHeight = (a: BlockId, b: BlockId): number => (a.height < b.height ? -1 : a.height > b.height ? 1 : 0);
-      return Object.freeze({ applied: Object.freeze([...applied.values()].sort(byHeight)), written: Object.freeze([...open]) });
+      return Object.freeze({
+        applied: Object.freeze([...applied.values()].sort(byHeight)),
+        written: Object.freeze([...open]),
+        ledPast: Object.freeze([...led].sort(byHeight)),
+      });
     },
   };
 }
@@ -420,8 +461,8 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
   const entry = options.entry ?? ledgerWorkerEntry();
   const pending = new Map<number, Pending>();
   const parses = new SentParses();
-  // The host's facts of each block's transaction, over its own commit and release (made below).
-  const facts = transactionFacts({ commit: (block) => commit(block), release: (drop) => release(drop) });
+  // The host's facts of each block's transaction, over its own commit, release and restart (made below).
+  const facts = transactionFacts({ commit: (block) => commit(block), release: (drop) => release(drop), restart: () => host.restart() });
   let database: NodeDatabase | null = null;
   /** Node requests of requests given no read, waiting for a read (see the module comment). */
   const waiting = new Set<(read: NodeReader) => void>();
@@ -620,6 +661,7 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
       if (closed) throw new Error("the ledger worker is closed");
       const old = thread;
       old.retired = true;
+      facts.restarted();
       before.requests += old.bridge.stats.requests;
       before.nodes += old.bridge.stats.nodes;
       const inFlight = [...pending.values()];
@@ -702,8 +744,8 @@ export function inThreadLedger(options: InThreadLedgerOptions = {}): LedgerHost 
     return engine;
   };
   const parses = new SentParses();
-  // The host's facts of each block's transaction, over its own commit and release (made below).
-  const facts = transactionFacts({ commit: (block) => commit(block), release: (drop) => release(drop) });
+  // The host's facts of each block's transaction, over its own commit, release and restart (made below).
+  const facts = transactionFacts({ commit: (block) => commit(block), release: (drop) => release(drop), restart: () => host.restart() });
   let chain: Promise<unknown> = Promise.resolve();
   let closed = false;
   let restarts = 0;
@@ -752,11 +794,16 @@ export function inThreadLedger(options: InThreadLedgerOptions = {}): LedgerHost 
     probe: () => run({ type: "probe" }, () => null),
     async restart() {
       if (closed) throw new Error("the ledger worker is closed");
-      // A new engine (the old one, its states and parses, dropped), sent the kept parses again (see `startLedgerWorker`).
-      await chain;
-      engine = undefined;
+      // A new engine (the old one, its states and parses, dropped) once the work queued so far has run, sent the kept
+      // parses again (see `startLedgerWorker`); queued now, so every request made after this call runs on it.
+      const fresh = chain.then(() => {
+        engine = undefined;
+      });
+      chain = fresh.catch(() => undefined);
       restarts += 1;
+      facts.restarted();
       for (const request of parses.kept()) parse(request).catch(() => undefined);
+      await fresh;
     },
     get restarts() {
       return restarts;
