@@ -35,6 +35,7 @@ import {
  * | step 3 | `missing-reference` left out | the tables break closure |
  * | step 3, at the block that needs it | `judged-at-end` | a reference a later block supplies, and a count below 0 that a later block brings back, commit |
  * | step 4, the roots after the block before the last | `released-in-block` | the state the last block releases is gone |
+ * | step 4, those roots as the ones read less the last block's change | `roots-read-as-before` | the state the last block releases is gone |
  * | step 4, the last block's protection only | `run-as-one-block` | `unexpected-queued`; without that check, rows the model deleted |
  * | step 4, what the last block's replaced lists referenced | `dropped-unprotected` | a row the model keeps is gone |
  * | a run made again when only those lists keep a node | kept as computed (the test helper's `remakes` false) | on histories in two forms the rows are not the model's |
@@ -187,6 +188,21 @@ describe("negative controls: a fault in the run computation", () => {
 
   it(`released-in-block: without the roots after the block before the last, the state the last block releases is gone (seed ${SEED})`, async () => {
     expect(await finding(oneForm, [1, 2, 7], { fault: "released-in-block" })).toMatch(/nodes differs: 0 rows the model lacks \(\), \d+ it has and these lack/);
+  }, 600_000);
+
+  it(`roots-read-as-before: the root counts read after the last block taken as those before it: the state the last block releases is gone, and a key it lowers is queued with a root count (seed ${SEED})`, async () => {
+    // By hand: a state released by the run's one block is deleted, where the model keeps it one block more.
+    const leafNode = made("leaf");
+    const [s0, s1] = [made("s0", [ref(leafNode)]), made("s1", [ref(leafNode)])];
+    const blocks = madeBlocks([{ inserts: [leafNode, s0], persist: [s0] }, { inserts: [s1], persist: [s1], release: [s0] }]);
+    expect(await inRuns(blocks, { size: 1, feed: "per-block" })).toEqual([]);
+    const released = await inRuns(blocks, { size: 1, feed: "per-block", fault: "roots-read-as-before" });
+    expect(released.join("\n")).toMatch(new RegExp(`after 1, runs of 1, per-block: nodes differs: 0 rows the model lacks \\(\\), 1 it has and these lack \\(${s0.key.slice(0, 12)}\\)`));
+    // On the generated histories, in runs of one block and longer: the first finding is a key whose root count the
+    // last block lowers and does not take to 0, queued with a root count left.
+    for (const size of [1, 3]) {
+      expect(await finding(oneForm, [size], { fault: "roots-read-as-before" })).toMatch(/unreferenced differs: 1 rows the model lacks \(\w+\), 0 it has and these lack/);
+    }
   }, 600_000);
 
   it(`run-as-one-block: the per-block step's protection and frontier over a whole run keep what the model deleted (seed ${SEED})`, async () => {
