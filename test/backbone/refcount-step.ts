@@ -1,15 +1,20 @@
 /**
+ * The per-block reclamation step, as `core-ledger-state` ran it before it reclaimed through `on-settle`
+ * (`src/backbone/core-ledger-state/run-reclaim.ts`): kept as test code, the fixed side of the comparison. The tests hold
+ * the run computation, and the tables the process stores, to what this step gives on the same inputs, so it is not
+ * changed with the computation. Its reads and writes are those it sent on the real tables.
+ *
  * Reclamation of stored ledger nodes by reference counting: each block deletes the stored nodes that nothing stored
  * references and no root count persists, and every node only they referenced, while keeping, for one block, what the
  * state after h − 1 may still reach.
  *
- * **The tables** (`./sql.ts`): `nodes`, each stored node with the child list the ledger last wrote for it;
+ * **The tables** (`src/backbone/core-ledger-state/sql.ts`): `nodes`, each stored node with the child list the ledger last wrote for it;
  * `ref_counts`, the number of references to each key in the stored child lists, a row only while it is above 0;
  * `root_counts`; and `unreferenced`, the queue: the stored nodes with neither a reference nor a root count. A
- * reference is one occurrence of a key in a child list, through embedded children (`../../ledger/node-refs.ts`): a key
+ * reference is one occurrence of a key in a child list, through embedded children (`src/ledger/node-refs.ts`): a key
  * listed twice is two references.
  *
- * **One block's step** ({@link refcountStep}) is computed in `core-ledger-state`'s `on-compute`, from the tables as
+ * **One block's step** ({@link refcountStep}) was computed in `core-ledger-state`'s `on-compute`, from the tables as
  * committed at h − 1 ({@link RefcountTables}, read through on-compute's read) and the block's batch (its flushed nodes
  * and root count changes, held in memory). It keeps nothing between blocks. Its rules, for block h:
  * 1. The batch's nodes are classified: **new** (no row at h − 1), **rewritten** (a row with another child list, which
@@ -30,20 +35,26 @@
  *    of a new or rewritten node, or a key whose root count rises, that is not a row after the block
  *    (`missing-reference`), halt the block with `ledger-refcount-invalid`. Nothing is repaired.
  *
- * The deleted nodes are then evicted from the ledger worker (`LedgerHost.evict`) by the caller, before the block's
- * transaction. {@link writeRefcount} writes the step in `on-db-write`, after the batch's node writes (`writeBlock`): a
+ * The deleted nodes were then evicted from the ledger worker (`LedgerHost.evict`) by the caller, before the block's
+ * transaction. {@link writeRefcount} writes the step after the block's node writes, as `on-db-write` did: a
  * rewritten node can be deleted, and deleting it first would store it again. Each of its statements, like each read,
  * runs over at most {@link KEYS_PER_STATEMENT} keys, and must affect the rows the step computed, else the block halts
  * (`row-count-mismatch`) and its transaction rolls back.
  *
  * {@link RefcountFault} is the seam through which a negative control puts a fault into the step, and
- * {@link RefcountCheck} names the check one leaves out.
+ * {@link RefcountCheck} names the check one leaves out (both in `run-reclaim.ts`, which keeps the names it shares).
  */
 
-import type { BlockWriteHandle, ReadHandle } from "../../db/api.js";
-import { UmbraError } from "../../db/errors.js";
-import { childRefKeys } from "../../ledger/node-refs.js";
-import type { NodeBatch, StoredNode } from "../../ledger/types.js";
+import {
+  KEYS_PER_STATEMENT,
+  type RefcountCheck,
+  type RefcountFault,
+  type RefcountStatement,
+} from "../../src/backbone/core-ledger-state/run-reclaim.js";
+import type { BlockWriteHandle, ReadHandle } from "../../src/db/api.js";
+import { UmbraError } from "../../src/db/errors.js";
+import { childRefKeys } from "../../src/ledger/node-refs.js";
+import type { NodeBatch, StoredNode } from "../../src/ledger/types.js";
 import {
   addRefCounts,
   changedNodes,
@@ -54,13 +65,13 @@ import {
   nodeChildren,
   storedKeys,
   unreferencedKeys,
-} from "./sql.js";
+} from "../../src/backbone/core-ledger-state/sql.js";
 
-/** The keys (or nodes) one statement of the step reads or writes at most: a long list is sent in chunks. */
-export const KEYS_PER_STATEMENT = 1_000;
+export { KEYS_PER_STATEMENT, type RefcountCheck, type RefcountFault, type RefcountStatement };
 
-/**
- * A fault a negative control puts into the step through its tables seam; a build's tables carry none:
+/*
+ * A fault a negative control puts into the step through its tables seam ({@link RefcountFault}); a build's tables
+ * carry none:
  * - `second-occurrence-not-decremented`: a child repeated in a child list loses only one reference when the list is
  *   subtracted (rule 3, the cascade), so it leaks;
  * - `unchanged-counted`: the references of a node written again unchanged are counted again;
@@ -71,21 +82,10 @@ export const KEYS_PER_STATEMENT = 1_000;
  * - `referenced-queued-deleted`: a queued key loses, in the cascade's test, the references new nodes give it, so a
  *   queued key a new node references is deleted in that block;
  * - `first-round-only`: the cascade stops after its first round.
+ *
+ * The checks of the step ({@link RefcountCheck}), by the reason they halt with: rule 8's two, and the affected rows
+ * of {@link writeRefcount}'s statements.
  */
-export type RefcountFault =
-  | "second-occurrence-not-decremented"
-  | "unchanged-counted"
-  | "increment-once-per-parent"
-  | "released-in-block"
-  | "referenced-queued-deleted"
-  | "first-round-only";
-
-/**
- * The checks of the step, by the reason they halt with: rule 8's two, and the affected rows of
- * {@link writeRefcount}'s statements. A negative control leaves one out to show what it catches; a build runs every
- * one.
- */
-export type RefcountCheck = "negative-count" | "missing-reference" | "row-count-mismatch";
 
 /** A key at h − 1: whether it is a row, its reference count and its root count (0 where its table has no row). */
 export interface KeyCounts {
@@ -138,14 +138,6 @@ export interface RefcountStep {
   /** The keys that enter the queue. */
   readonly queued: readonly Uint8Array[];
 }
-
-/** The statements whose affected rows {@link writeRefcount} checks; `write-nodes` is the batch's node writes. */
-export type RefcountStatement =
-  | "write-nodes"
-  | "merge-ref-counts"
-  | "delete-unreferenced"
-  | "insert-unreferenced"
-  | "delete-nodes";
 
 const hexOf = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
 const bytesOf = (hex: string): Uint8Array => Uint8Array.from(Buffer.from(hex, "hex"));

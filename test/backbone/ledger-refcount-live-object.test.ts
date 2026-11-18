@@ -16,11 +16,11 @@ import { runProblems } from "./refcount-process.js";
  *
  * On the extended DAG fixture (`./refcount-live-object.ts`), the test package's live state holds x
  * (`small to-embedded`) by reference while the stored child list of its parent (`rewrite to-embedded`) embeds x, and x
- * is queued with no root and no stored reference. At the next block h the reclamation step deletes x; the package
- * refuses to forget x, refuses again once the worker freed its kept parses, and the worker thread is replaced; the new
- * one loads the state at h − 1 from the database and applies h again. The block commits with the node's root, R3
- * passes, the node set (and every table that is not content-defined) after every block is that of a run whose package
- * never held x by reference (`writes-again`), and the state after h loads from the database.
+ * is queued with no root and no stored reference. At the next block h the reclamation deletes x; the package refuses
+ * to forget x, refuses again once the worker freed its kept parses, and the worker thread is replaced, at h's
+ * `on-settle`. The block commits as computed, with the node's root, R3 passes, the node set (and every table that is
+ * not content-defined) after every block is that of a run whose package never held x by reference (`writes-again`),
+ * and the state after h loads from the database in a new worker.
  *
  * The committed negative control (the worker restart disabled) is in
  * `ledger-refcount-live-object.negative-control.test.ts`.
@@ -32,7 +32,7 @@ describe.each(PROCESS_BACKENDS)("a live object holding a deleted row, on $name",
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("x held by reference by a live state while its stored parent embeds it, queued with no root and no stored reference, is deleted at the next block; the package refuses to forget it on both tries, the worker is replaced, the new one loads the state at h − 1 from the database and applies h again; h commits with the node's root, R3 passing and the node set of a run that never held x by reference, and the state after h loads from the database", async () => {
+  it("x held by reference by a live state while its stored parent embeds it, queued with no root and no stored reference, is deleted at the next block; the package refuses to forget it on both tries and the worker is replaced; h commits as computed with the node's root, R3 passing and the node set of a run that never held x by reference, and the state after h loads from the database", async () => {
     const h = LIVE_AT;
     const x = hex(HELD.key);
     const reference = await runLiveObject(await backend.database(), { keeping: "writes-again" });
@@ -55,13 +55,12 @@ describe.each(PROCESS_BACKENDS)("a live object holding a deleted row, on $name",
     expect(hex(parent)).toBe(hex(PARENT.children));
     expect(nodeSet([[hex(PARENT.key), parent]]).has(x)).toBe(true);
 
-    // At h the step deleted x. The first thread refused to forget it on both tries (the second after freeing its kept
-    // parses), so the host ended it and started one more, which loaded the state at h − 1 from the database, applied h
-    // again, and evicted x.
+    // At h the reclamation deleted x. The first thread refused to forget it on both tries (the second after freeing its
+    // kept parses), so the host ended it and started one more; h was not applied again, and no thread took the
+    // eviction. x is gone from the rows all the same.
     expect(live.run.restarts).toBe(1);
-    expect(live.counters).toMatchObject({ threads: 2, refusals: 2, storeLoads: 1, storeLoadHeight: Number(h - 1n) });
-    expect(live.run.evicted.get(h)).toEqual(reference.run.evicted.get(h));
-    expect(live.run.evicted.get(h)).toContain(x);
+    expect(live.counters).toMatchObject({ refusals: 2, storeLoads: 0 });
+    expect(live.run.evicted.get(h)).toBeUndefined();
     expect((live.run.tables.get(h) as TableSnapshot).rows.has(x)).toBe(false);
 
     // h committed, its state root the node's (the tape's), with no halt.

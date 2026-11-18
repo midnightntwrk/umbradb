@@ -187,7 +187,7 @@ describe("negative controls: a list that differs from the retirement list fails,
       "src/loose.ts lies under no floor of design.md §13 (only directories have one)",
     ]);
     // A pending floor may be absent, but not weaker; once nothing is pending, its absence fails.
-    const step = "**/src/backbone/core-ledger-state/refcount.ts";
+    const step = "**/src/backbone/core-ledger-state/run-reclaim.ts";
     const { [step]: _step, ...withoutStep } = thresholds;
     expect(floorProblems(withoutStep, [], dirs, [step])).toEqual([]);
     expect(floorProblems(withoutStep, [], dirs)).toEqual([`vitest.config.ts has no floor ${step} (design.md §13)`]);

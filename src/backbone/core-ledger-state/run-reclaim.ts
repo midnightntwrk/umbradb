@@ -1,7 +1,7 @@
 /**
  * The reclamation of a run of blocks as one computation: what each block of a run hands over, and the node tables
- * after the run's last block (`docs/research/run-reclamation.md`). Core. Nothing calls it yet: the per-block step
- * (`./refcount.ts`) computes the same tables one block at a time.
+ * after the run's last block (`docs/research/run-reclamation.md`). Core. `core-ledger-state` hands each block over in
+ * its `on-compute` and computes the run in its `on-settle` (`./core-ledger-state.ts`).
  *
  * A run is one or more consecutive blocks settled together. Each block hands its flushed nodes and its root-count
  * changes to the run's record ({@link RunReclaim.collect}), in memory, with no statement, and writes its own rows,
@@ -13,7 +13,8 @@
  * child lists: the keys with a root count after the block before, the keys with a root count after the block, and
  * the keys that a child list replaced by the block referenced. A count is the number of references among the stored
  * lists, and the queue is the stored nodes with no reference and no root count. The per-block step keeps this at
- * every block; the run computation computes it for the run's last block only.
+ * every block (`test/backbone/refcount-step.ts`, kept as the tests' reference); the run computation computes it for
+ * the run's last block only.
  *
  * **What a block hands over** (`collect`):
  * - its nodes join the run's nodes, the last child list written for a key winning; a node flushed again with the list
@@ -76,7 +77,6 @@ import type { BlockWriteHandle, ReadHandle } from "../../db/api.js";
 import { UmbraError } from "../../db/errors.js";
 import { childRefOffsets } from "../../ledger/node-refs.js";
 import type { NodeBatch, StoredNode } from "../../ledger/types.js";
-import { KEYS_PER_STATEMENT, type RefcountCheck, type RefcountFault, type RefcountStatement } from "./refcount.js";
 import {
   addRefCounts,
   changedNodes,
@@ -91,6 +91,35 @@ import {
   storedKeys,
   unreferencedKeys,
 } from "./sql.js";
+
+/** The keys (or nodes) one statement reads or writes at most: a long list is sent in parts. */
+export const KEYS_PER_STATEMENT = 1_000;
+
+/**
+ * The six faults of the per-block step, each put into the computation in the step that holds its rule
+ * ({@link RunFault} says where).
+ */
+export type RefcountFault =
+  | "second-occurrence-not-decremented"
+  | "unchanged-counted"
+  | "increment-once-per-parent"
+  | "released-in-block"
+  | "referenced-queued-deleted"
+  | "first-round-only";
+
+/**
+ * The checks of the per-block step, by the reason they halt with: two of the computation's ({@link RunCheck}), and the
+ * affected rows of {@link writeNet}'s statements. A negative control leaves one out; a build runs every one.
+ */
+export type RefcountCheck = "negative-count" | "missing-reference" | "row-count-mismatch";
+
+/** The statements whose affected rows {@link writeNet} checks. */
+export type RefcountStatement =
+  | "write-nodes"
+  | "merge-ref-counts"
+  | "delete-unreferenced"
+  | "insert-unreferenced"
+  | "delete-nodes";
 
 /** What a run writes to the node tables after its last block (see the module comment): every key list in byte order. */
 export interface NetWrite {
@@ -114,14 +143,15 @@ export interface NetWrite {
 
 /**
  * Writes a run's net change to the node tables, in its transaction after its last block's own rows: the nodes, the
- * counts' changes, the queue's, then the deleted rows, each statement checked for the rows it must affect as
- * `./refcount.ts`'s `writeRefcount` checks one block's. A difference throws `ledger-refcount-invalid` (`row-count-mismatch`)
- * naming the statement; a negative control's `unchecked` `row-count-mismatch` leaves the check out.
+ * counts' changes, the queue's, then the deleted rows, each statement checked for the rows it must affect, as the
+ * per-block step's writes were. A difference throws `ledger-refcount-invalid` (`row-count-mismatch`) naming the
+ * statement; a negative control's `unchecked` `row-count-mismatch` leaves the check out. The node statement runs
+ * through `nodes` when given (a negative control's handle), the others through `w`.
  */
 export async function writeNet(
   w: Pick<BlockWriteHandle, "execute">,
   net: NetWrite,
-  options: { readonly unchecked?: RefcountCheck } = {},
+  options: { readonly unchecked?: RefcountCheck; readonly nodes?: Pick<BlockWriteHandle, "execute"> } = {},
 ): Promise<void> {
   const check = (statement: RefcountStatement, expected: number, actual: number): void => {
     if (actual === expected || options.unchecked === "row-count-mismatch") return;
@@ -136,7 +166,8 @@ export async function writeNet(
     for (let at = 0; at < items.length; at += KEYS_PER_STATEMENT) rows += await statement(items.slice(at, at + KEYS_PER_STATEMENT));
     return rows;
   };
-  check("write-nodes", net.written, await send(net.inserts, (part) => insertNodes(w, part)));
+  const nodes = options.nodes ?? w;
+  check("write-nodes", net.written, await send(net.inserts, (part) => insertNodes(nodes, part)));
   check("merge-ref-counts", net.counted, await send(net.deltas, (part) => addRefCounts(w, part)));
   check("delete-unreferenced", net.unqueued.length, await send(net.unqueued, (part) => deleteUnreferenced(w, part)));
   check("insert-unreferenced", net.queued.length, await send(net.queued, (part) => insertUnreferenced(w, part)));
@@ -286,6 +317,8 @@ export interface RunOutcome {
   readonly newNodes: number;
   readonly rewrittenNodes: number;
   readonly unchangedNodes: number;
+  /** The new nodes' keys, in byte order: `newNodes` of them. */
+  readonly newKeys: readonly Uint8Array[];
   /**
    * The keys left stored, queued, only because a child list the run's last block replaced referenced them (and no
    * root count after the block before the last): what the per-block step keeps only if it still stored that list's
@@ -956,7 +989,8 @@ export class RunReclaim {
       evict: evicted.map((record) => this.#bytes(record)),
       rounds,
       handed: nodes.length,
-      newNodes: nodes.filter((record) => record.kind === "new").length,
+      newNodes: fresh.length,
+      newKeys: inOrder(fresh).map((record) => nodeOf(record).key),
       rewrittenNodes: nodes.filter((record) => record.kind === "replaces").length,
       unchangedNodes: nodes.filter((record) => record.kind === "same").length,
       keptByReplaced,

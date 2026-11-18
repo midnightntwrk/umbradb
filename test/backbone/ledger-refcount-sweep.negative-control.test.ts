@@ -5,11 +5,12 @@ import { runDag } from "./refcount-process.js";
 import { sweepComparisonOf, WHOLE_CYCLE } from "./sweep-tapes.js";
 
 /**
- * The committed negative control, on PostgreSQL 18 and PGlite 0.5.10: a counting step with its cascade stopped after
+ * The committed negative control, on PostgreSQL 18 and PGlite 0.5.10: the reclamation with its cascade stopped after
  * the first round (`core-ledger-state`'s `refcountFault: "first-round-only"`) makes the equality with the sweep's
  * reference model fail on the DAG fixture without its rewrite cases. At 2 the state after 0's root is deleted, but the
  * rows only it reached are not: the counting run holds them, and the sweep's model, whose cycle fits the block, does
- * not.
+ * not. The computation's own check of those rows, left queued with nothing that released them, is left out
+ * (`unexpected-queued`): it would halt the block before the equality is reached.
  */
 
 describe.each(PROCESS_BACKENDS)("negative control on $name", (backend: ProcessBackend) => {
@@ -17,7 +18,7 @@ describe.each(PROCESS_BACKENDS)("negative control on $name", (backend: ProcessBa
   afterAll(() => backend.stop(), 60_000);
 
   it("with the cascade stopped after its first round, the counting run holds rows the sweep's model deleted, from 2 on", async () => {
-    const run = await runDag(await backend.database(), { dag: "one-form", core: { refcountFault: "first-round-only" }, last: 10 });
+    const run = await runDag(await backend.database(), { dag: "one-form", core: { refcountFault: "first-round-only", refcountUnchecked: "unexpected-queued" }, last: 10 });
     expect(run.status).toMatchObject({ cursor: 10n, reason: null });
     const { problems } = sweepComparisonOf(run.batches, run.tables, 10, WHOLE_CYCLE, "equal");
     expect(problems[0]).toMatch(/^node sets differ at height 2: only counting holds \[\w+, .*\], only the sweep \[\]$/);

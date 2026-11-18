@@ -219,15 +219,22 @@ export const ERROR_CODES = [
    * - `negative-count`: a reference count would fall below 0 at the block;
    * - `missing-reference`: a reference in the child list of a node the block writes new or rewritten, or a key whose
    *   root count rises, is not a stored node after the block;
+   * - `unreached-node`: a node the block writes new, or with another child list, is reached from no key whose root
+   *   count the block raises (the ledger package's flush rule);
+   * - `unexpected-queued`: a node would be left stored with no reference and no root count that the block neither
+   *   released nor dropped from a child list it replaced;
+   * - `kept-by-replaced`: a run of more than one block would keep a node only because a child list its last block
+   *   replaced referenced it (the engine settles runs of one block, which never meet it);
    * - `row-count-mismatch`: a write of the block affected another number of rows than computed, and its transaction
    *   rolled back;
    * - `tables-inconsistent`: the contents hash, reading the node tables, found a row whose key is not its content's, or
    *   counts, a queue or roots its rows do not give (`details.check`, and the key).
    *
-   * The first three halt processing at the block's height with nothing of the block stored, with `details.height` and
-   * either the key as `0x` hex (`details.key`: `negative-count`, `missing-reference`) or the statement's name and the
-   * expected and actual row counts (`details.statement`, `expected`, `actual`: `row-count-mismatch`). No reason carries
-   * a configuration value. Not retryable.
+   * All but the last halt processing at the block's height with nothing of the block stored, with `details.height`
+   * (the reclamation's checks also give the run's `first` and `last` heights) and the key as `0x` hex (`details.key`),
+   * the statement's name and the expected and actual row counts (`details.statement`, `expected`, `actual`:
+   * `row-count-mismatch`), or the nodes that would be kept (`details.kept`: `kept-by-replaced`). No reason carries a
+   * configuration value. Not retryable.
    */
   "ledger-refcount-invalid",
   /**

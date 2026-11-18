@@ -8,7 +8,7 @@ import { HELD, LIVE_AT, runLiveObject } from "./refcount-live-object.js";
 /**
  * The committed negative control of a live object holding a deleted row, on PostgreSQL 18 and PGlite 0.5.10: the run of
  * `ledger-refcount-live-object.test.ts` with the worker restart disabled (`restartOnRefusedEviction: false`). The
- * package's refusal to forget x fails block h with `callback-error` in `core-ledger-state`'s `on-compute`, and nothing
+ * package's refusal to forget x fails block h with `callback-error` in `core-ledger-state`'s `on-settle`, and nothing
  * of h is stored: the database is at h − 1, every table of `core_ledger_state` as a run that commits h (its package
  * writing the same batches) held it after h − 1, and x still a row.
  */

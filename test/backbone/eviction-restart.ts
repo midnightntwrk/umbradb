@@ -12,7 +12,8 @@ import { runDag } from "./refcount-process.js";
  * - The original DAG fixture runs through the real process (`./refcount-process.ts`: a new root every block, the rows
  *   of a released state deleted from the block after its release, {@link refusalHeight} the first).
  * - Its test package (`test/ledger/fixtures/sweep-test-loader.ts`) refuses every eviction after applying block h in
- *   the first `threads` worker threads, as if a live object the worker cannot free held a deleted node.
+ *   the first `threads` worker threads, as if a live object the worker cannot free held a deleted node. A thread
+ *   started after the refusal never applies h (h commits as computed), so only the first thread can refuse.
  * - The threads' counters are read from memory they share with this thread.
  */
 
@@ -102,9 +103,12 @@ export function tableDifferences(got: ReadonlyMap<bigint, TableSnapshot>, expect
   return problems;
 }
 
-/** The expected halt reason: `callback-error` at `height`, in `core-ledger-state`'s `on-compute`. */
-export const refusalHalt = (height: bigint) => ({
+/**
+ * The expected halt reason: `callback-error` at `height`, in `core-ledger-state`'s `point`: `on-settle`, where the
+ * eviction is sent, unless given.
+ */
+export const refusalHalt = (height: bigint, point: "on-settle" | "on-compute" = "on-settle") => ({
   state: "halted",
   cursor: height - 1n,
-  reason: { code: "callback-error", height, module: CORE_LEDGER_STATE_ID, point: "on-compute" },
+  reason: { code: "callback-error", height, module: CORE_LEDGER_STATE_ID, point },
 });

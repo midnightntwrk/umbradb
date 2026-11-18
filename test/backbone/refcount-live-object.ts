@@ -18,8 +18,8 @@ import { type DagRun, runDag } from "./refcount-process.js";
  * `small to-embedded` ({@link HELD}, x), whose row then has no stored reference and no root and is queued, while the
  * thread's live states still hold x by reference. At {@link LIVE_AT} the reclamation step deletes x and the worker is
  * told to evict it, which the package refuses as long as a live state holds it (`test/ledger/fixtures/
- * sweep-test-loader.ts`): on both tries, so the core ends the worker thread and applies the block again in a new one,
- * which loads the state at TO_EMBEDDED from the database (the path of `./eviction-restart.ts`).
+ * sweep-test-loader.ts`): on both tries, so the core ends the worker thread and the block commits as computed; a
+ * later block loads the state after it from the database in the new thread (the path of `./eviction-restart.ts`).
  */
 
 /** The block whose reclamation step deletes x: the one after TO_EMBEDDED. */

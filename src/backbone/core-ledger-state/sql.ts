@@ -1,7 +1,7 @@
 /**
- * The SQL of `core-ledger-state` (`./core-ledger-state.ts`, `./refcount.ts`): its tables, its migrations, the
- * statements it writes each block's batch, state, results, events and reclamation step with, and the reads of the
- * stored state and of reclamation's counts and queue.
+ * The SQL of `core-ledger-state` (`./core-ledger-state.ts`, `./run-reclaim.ts`): its tables, its migrations, the
+ * statements it writes each block's rows with and a run's reclamation with, and the reads of the stored state and of
+ * reclamation's counts and queue.
  *
  * **The tables**, created by its one migration, `001`, under the part's role:
  * - `core_ledger_state.nodes (node_key) → data, children` and `core_ledger_state.root_counts (node_key) → count`, the
@@ -275,8 +275,8 @@ export async function insertEvents(
 }
 
 /**
- * Reclamation's reads, of the tables as committed at h − 1, and its writes (`./refcount.ts`). Each is one statement
- * over a key list, which the caller sends in chunks.
+ * Reclamation's reads of the node tables, inside the transaction that holds a run's last block, and its writes
+ * (`./run-reclaim.ts`). Each is one statement over a key list, which the caller sends in parts.
  */
 const STORED_KEYS_SQL = `SELECT node_key FROM ${NODES_TABLE} WHERE node_key = ANY($1::bytea[])`;
 const CHILDREN_SQL = `SELECT node_key, children FROM ${NODES_TABLE} WHERE node_key = ANY($1::bytea[])`;

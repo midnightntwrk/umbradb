@@ -14,8 +14,8 @@ import { runDag, runProblems } from "./refcount-process.js";
 
 /**
  * The faults on the extended DAG fixture, shared by `ledger-refcount-halts.test.ts` and its negative controls. Each
- * makes one block's step fail one of its checks; the controls run the same fault with that check left out
- * (`core-ledger-state`'s `refcountUnchecked`). Imports nothing of Vitest.
+ * makes one block's reclamation fail one of its checks, at the block's `on-settle` (a run of that block); the controls
+ * run the same fault with that check left out (`core-ledger-state`'s `refcountUnchecked`). Imports nothing of Vitest.
  * - `negative-count`: a database is built to 5 and copied ({@link copyDatabase}), and the copy has the count of
  *   `repeat leaf 0` lowered from 4 to 1; at 6 the deletion of `repeat 0`, which lists it twice, takes it to −1.
  * - `missing-reference`, three test packages: at 10 the flush leaves out `shared leaf 2`, which the new `shared 1`
@@ -27,12 +27,15 @@ import { runDag, runProblems } from "./refcount-process.js";
 
 const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
 
-/** A fault of R11: the block it fails at, the reason, the point, its `details` beyond the reason and height. */
+/**
+ * A fault of R11: the block it fails at, the reason, the point, its `details` beyond the reason and height (for a
+ * check of the computation, the run's first and last heights first).
+ */
 export interface Fault {
   readonly name: string;
   readonly height: number;
   readonly reason: "negative-count" | "missing-reference" | "row-count-mismatch";
-  readonly point: "on-compute" | "on-db-write";
+  readonly point: "on-settle";
   readonly details: Readonly<Record<string, unknown>>;
   /** The run's options beyond the extended DAG and its last height. */
   readonly options: Omit<DagRunOptions, "dag" | "last" | "halts">;
@@ -61,24 +64,24 @@ export const MISSING: readonly Fault[] = Object.freeze([
     name: "a new node referencing a key not stored",
     height: 10,
     reason: "missing-reference",
-    point: "on-compute",
-    details: { key: `0x${hex(extendedCases(10).shared.leaves[1].key)}` },
+    point: "on-settle",
+    details: { first: 10n, last: 10n, key: `0x${hex(extendedCases(10).shared.leaves[1].key)}` },
     options: { data: { withhold: { at: "10", key: hex(extendedCases(10).shared.leaves[1].key) } } },
   },
   {
     name: "a stored node rewritten with a child list referencing a key not stored",
     height: TO_REF,
     reason: "missing-reference",
-    point: "on-compute",
-    details: { key: `0x${hex(extendedCases(TO_REF).toRef.small.key)}` },
+    point: "on-settle",
+    details: { first: BigInt(TO_REF), last: BigInt(TO_REF), key: `0x${hex(extendedCases(TO_REF).toRef.small.key)}` },
     options: { data: { withhold: { at: `${TO_REF}`, key: hex(extendedCases(TO_REF).toRef.small.key) } } },
   },
   {
     name: "a root count raised for a key neither flushed nor stored",
     height: 20,
     reason: "missing-reference",
-    point: "on-compute",
-    details: { key: `0x${hex(UNKNOWN_KEY)}` },
+    point: "on-settle",
+    details: { first: 20n, last: 20n, key: `0x${hex(UNKNOWN_KEY)}` },
     options: { data: { persistUnknown: "20" } },
   },
 ]);
@@ -88,7 +91,7 @@ export const ONE_ROW_FEWER: Fault = Object.freeze({
   name: "the queue's insert affecting one row fewer",
   height: 3,
   reason: "row-count-mismatch",
-  point: "on-db-write",
+  point: "on-settle",
   details: { statement: "insert-unreferenced", expected: 1, actual: 0 },
   options: { core: { refcountWriter: oneRowFewer(3n) } },
 });
@@ -98,8 +101,8 @@ export const NEGATIVE: Fault = Object.freeze({
   name: "a stored count lowered so that a deletion takes it below 0",
   height: LOWERED.at + 1,
   reason: "negative-count",
-  point: "on-compute",
-  details: { key: `0x${LOWERED.key}` },
+  point: "on-settle",
+  details: { first: BigInt(LOWERED.at + 1), last: BigInt(LOWERED.at + 1), key: `0x${LOWERED.key}` },
   options: {},
 });
 

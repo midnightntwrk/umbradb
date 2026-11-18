@@ -1,7 +1,7 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { keyBytes, keyText, KnownKeySet, RunReclaim, sqlRunTables } from "../../src/backbone/core-ledger-state/run-reclaim.js";
-import { refcountStep } from "../../src/backbone/core-ledger-state/refcount.js";
+import { refcountStep } from "./refcount-step.js";
 import type { NodeBatch } from "../../src/ledger/types.js";
 import { type FixtureDag, LAST, stateNodes } from "../ledger/fixtures/sweep-fixture.js";
 import { encodeChildren, hex, nodeKey } from "../ledger/node-format.js";
@@ -38,7 +38,7 @@ import {
 
 /**
  * The reclamation of a run of blocks (`src/backbone/core-ledger-state/run-reclaim.ts`) against the per-block step
- * (`refcountStep`, `src/backbone/core-ledger-state/refcount.ts`) and the reference model (`./refcount-model.ts`), the
+ * (`refcountStep`, `./refcount-step.ts`) and the reference model (`./refcount-model.ts`), the
  * computation on its own: nothing here runs the process.
  * - **T1.** At every run's end the node tables are the model's after the run's last block, in bytes: on the generated
  *   histories in one form and on the fixture DAGs, in runs of 1, 2, 3, 7 and 1,000 blocks, with the flushes of a
@@ -234,6 +234,7 @@ describe("T2: a run of one block is the per-block step", () => {
             expect(outcome.evict.map(hex), where).toEqual(step.deleted.map(hex));
             expect(outcome.rounds, where).toBe(step.rounds);
             expect([outcome.newNodes, outcome.rewrittenNodes, outcome.unchangedNodes], where).toEqual([step.newNodes.length, step.rewritten.length, step.unchanged.length]);
+            expect(outcome.newKeys.map(hex), where).toEqual(step.newNodes.map(hex));
             seen.followed += 1;
             seen.rewrites += step.rewritten.length;
             seen.deletions += step.deleted.length;
@@ -614,7 +615,7 @@ describe("by hand", () => {
     }
   });
 
-  it("says how it classified the run's nodes against the database: new, rewritten and unchanged, as the per-block step classifies them", async () => {
+  it("says how it classified the run's nodes against the database: new, rewritten and unchanged, as the per-block step classifies them, with the new nodes' keys", async () => {
     // Stored: r0 over w, which references c. The block writes w with c embedded under a new root r1, and c again
     // with the list its row holds.
     const r0 = over("r0", wReferencing);
@@ -631,6 +632,8 @@ describe("by hand", () => {
     expect([outcome.newNodes, outcome.rewrittenNodes, outcome.unchangedNodes, outcome.handed]).toEqual([1, 1, 1, 3]);
     const step = await refcountStep(stepTables(found, new Map([[r0.key, 1]])), flush, { height: 1n, on: true });
     expect([step.newNodes.map(hex), step.rewritten.map(hex), step.unchanged.map(hex)]).toEqual([[r1.key], [wReferencing.key], [c.key]]);
+    // The new nodes' keys: r1, not the rewritten w nor the unchanged c.
+    expect(outcome.newKeys.map(hex)).toEqual([r1.key]);
     // Only the new and rewritten nodes are written; c lost w's reference and keeps none, kept by the list w had.
     expect(outcome.net.inserts.map((node) => hex(node.key)).sort()).toEqual([r1.key, wEmbedding.key].sort());
     expect(outcome.net.queued.map(hex)).toEqual([c.key]);
@@ -641,6 +644,7 @@ describe("by hand", () => {
     two.collect(2n, { inserts: flushed(c), rootCounts: [] }, true);
     const both = await two.compute(runTables(found, new Map([[r0.key, 1], [r1.key, 1]])));
     expect([both.newNodes, both.rewrittenNodes, both.unchangedNodes, both.handed]).toEqual([1, 1, 1, 3]);
+    expect(both.newKeys.map(hex)).toEqual([r1.key]);
   });
 
   it("the last child list written for a key inside a run is the one stored", async () => {

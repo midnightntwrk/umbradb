@@ -6,8 +6,9 @@ import { defineConfig } from "vitest/config";
  * Mutation testing runs a mutated file's covering tests once PER mutant, so it runs a tight set of fast tests, never
  * the whole conformance suite. The targets are the: the graph
  * resolution, the order within a point (`src/runner/dispatch.ts`), the history comparison, the canonical CBOR encoder,
- * the digests, the two storage helpers, the ledger state's reclamation step (`src/backbone/core-ledger-state/
- * refcount.ts`, in the place of the sweep the `ledger-refcount` change removed) and the block fetch queue
+ * the digests, the two storage helpers, the ledger state's reclamation (`src/backbone/core-ledger-state/
+ * run-reclaim.ts`, in the place of the per-block step, which moved to the tests as their reference, as the step had
+ * taken the place of the sweep the `ledger-refcount` change removed) and the block fetch queue
  * (`src/backbone/core-block-fetch/node-source.ts`); `include` is the tests of each, which
  * `test/library-surface/retirement.ts` lists by target.
  * Stryker's `vitest.related` (its default) runs, for each target, only the included tests that import it, and
@@ -33,8 +34,9 @@ export default defineConfig({
       "test/helpers/height-versioned.property.test.ts",
       "test/helpers/cursor-table.test.ts",
       "test/helpers/cursor-table.property.test.ts",
-      "test/backbone/refcount-step.test.ts",
-      "test/backbone/refcount-tables.test.ts",
+      "test/backbone/run-reclaim.test.ts",
+      "test/backbone/run-reclaim.negative-control.test.ts",
+      "test/backbone/run-reclaim-tables.test.ts",
       "test/backbone/node-source.test.ts",
     ],
   },

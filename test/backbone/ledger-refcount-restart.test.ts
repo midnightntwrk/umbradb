@@ -35,10 +35,10 @@ import {
  *   node set, `root_counts`, `states`, the other byte-hashed tables and the contents hash of an uninterrupted run, and
  *   the check passes after every block. The bytes of the content-defined tables are not compared.
  *   R13 on the recorded preprod tape is in `ledger-refcount-restart-preprod-{postgres,pglite}.test.ts`.
- * - the extended DAG fixture crashed (SIGKILL) at each named point of a block — in `on-compute` before the
- *   step; after the eviction and before the block's transaction; in `on-db-write` after the node writes and before the
- *   step's other writes; between the step's writes; just before and just after the `COMMIT` — each reported reached at
- *   its height. The database is then the uninterrupted run's after h − 1 (before the `COMMIT`) or after h (after it):
+ * - the extended DAG fixture crashed (SIGKILL) at each named point of a block — in `on-compute` before the block is
+ *   handed over to the reclamation; in `on-settle` after the eviction, inside the block's transaction; in `on-settle`
+ *   after the net write's node statement and before its other writes; between those writes; just before and just
+ *   after the `COMMIT` — each reported reached at its height. The database is then the uninterrupted run's after h − 1 (before the `COMMIT`) or after h (after it):
  *   every `core_ledger_state` table, byte for byte, and the contents hash; and the restarted run's node set and
  *   byte-hashed tables (`core_ledger_state`'s rows, `core_digest.tables`) are the uninterrupted run's after every
  *   block, its contents hash after h − 1, h, h + 1 and the last height, and R3 passes after every block.

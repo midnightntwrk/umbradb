@@ -6,7 +6,7 @@ import {
   RunReclaim,
   type RunTables,
 } from "../../src/backbone/core-ledger-state/run-reclaim.js";
-import type { RefcountTables } from "../../src/backbone/core-ledger-state/refcount.js";
+import type { RefcountTables } from "./refcount-step.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { childRefKeys } from "../../src/ledger/node-refs.js";
 import type { NodeBatch } from "../../src/ledger/types.js";
@@ -123,7 +123,7 @@ export function runTables(nodes: NodeTables, roots: ReadonlyMap<string, number>,
   };
 }
 
-/** The per-block step's reads over the same tables (`refcount.ts`'s seam), the root counts after the block before. */
+/** The per-block step's reads over the same tables (`./refcount-step.ts`'s seam), the root counts after the block before. */
 export function stepTables(nodes: NodeTables, roots: ReadonlyMap<string, number>): RefcountTables {
   return {
     async rows(keys) {

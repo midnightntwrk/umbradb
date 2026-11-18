@@ -72,9 +72,9 @@
  * If a later block's kept transaction still holds one, it frees every kept parse's native objects and tries again
  * (those transactions are parsed again at their apply). A refusal after that rejects with {@link EvictionRefused}: an
  * object this thread cannot reach holds the node, or a live object holds it by reference where the stored child lists
- * embed it (the package keeps the child list it first cached for a key). The main thread then ends the thread, starts
- * a new one, and applies the block again there on the state at h − 1 loaded from the database (`./host.ts`'s
- * `restart`).
+ * embed it (the package keeps the child list it first cached for a key). The main thread then ends the thread and
+ * starts a new one (`./host.ts`'s `restart`), and the block commits: the new thread holds no state, so the next block
+ * is applied on the state after it loaded from the database.
  *
  * **The node store is installed from the first block on** (in the worker, the bridge's store). To the package, a
  * flushed node is a stored node, so its cache may drop the node's bytes while the state still uses it. When it later

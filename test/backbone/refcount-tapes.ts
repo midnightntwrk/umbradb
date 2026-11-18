@@ -14,6 +14,7 @@ import { committed, ingest } from "./ingest-harness.js";
 import { recordingWorker, sweepTables, type TableSnapshot, type WorkerRecord, workerRecord } from "./ledger-graph-tapes.js";
 import { cappedAt, devnetSettings } from "./ledger-restart.js";
 import { NO_TABLES, type StoredCheck, storedProblems } from "./refcount-checks.js";
+import { referenceProblems } from "./refcount-reference.js";
 
 /**
  * R3 on a recorded tape (`UMBRADB_TAPES`; the test skipped by name without its tape), on PostgreSQL 18 and PGlite
@@ -27,7 +28,11 @@ import { NO_TABLES, type StoredCheck, storedProblems } from "./refcount-checks.j
  * - at a sampled height h, it keeps the tables as committed at h − 1, read through the check's own queries
  *   (`sweepTables`, without digests), and the batch the worker flushed for h (`recordingWorker`);
  * - at h + 1, it reads the tables after h and runs the check, keeping only its problems and counts, so that a replay
- *   holds at most two heights' tables; the last height's tables are read once the process stopped.
+ *   holds at most two heights' tables; the last height's tables are read once the process stopped;
+ * - with the check, the reference (`./refcount-reference.ts`): the per-block step (`./refcount-step.ts`, the parent's
+ *   code) over the tables after h − 1 and h's recorded flush must give the build's `nodes` (with child lists),
+ *   `ref_counts`, `unreferenced` and `root_counts` after h, row for row. So at every sampled height the build stores
+ *   what the parent's code stores on the same inputs.
  *
  * (c)'s `R_{h−1}`, `R_h` and `K_h` come from the stored rows and the block's written nodes (`storedReach`), and the test
  * logs, per tape and backend, how many rows were outside `R_{h−1} ∪ R_h` at each height checked that had any (shown
@@ -80,7 +85,7 @@ class Sampler {
     let after: TableSnapshot | null = null;
     if (this.#pending?.height === height - 1n) {
       after = await sweepTables(read, { digests: false });
-      this.check(after);
+      await this.check(after);
     }
     if (this.sampled.has(height)) {
       const before = height === 0n ? NO_TABLES : (after ?? (await sweepTables(read, { digests: false })));
@@ -91,8 +96,8 @@ class Sampler {
     for (const recorded of [...this.record.evicted.keys()]) if (recorded < height) this.record.evicted.delete(recorded);
   }
 
-  /** The check of the pending height, given the tables after it; none without one. */
-  check(after: TableSnapshot): void {
+  /** The check of the pending height and the reference's, given the tables after it; none without one. */
+  async check(after: TableSnapshot): Promise<void> {
     const pending = this.#pending;
     if (pending === null) return;
     this.#pending = null;
@@ -101,7 +106,9 @@ class Sampler {
       return;
     }
     try {
-      this.checks.push(storedProblems(pending.height, pending.before, after, pending.batch));
+      const check = storedProblems(pending.height, pending.before, after, pending.batch);
+      const reference = await referenceProblems(pending.height, pending.before, after, pending.batch);
+      this.checks.push({ ...check, problems: [...check.problems, ...reference] });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.checks.push({ height: pending.height, rows: after.rows.size, outside: 0, problems: [`after ${pending.height}: the check failed: ${message}`] });
@@ -173,7 +180,7 @@ export async function replayRefcountTape(found: FoundTape, backend: ProcessBacke
     } finally {
       await process.close();
     }
-    sampler.check(await sweepTables(db, { digests: false }));
+    await sampler.check(await sweepTables(db, { digests: false }));
     return { status, last, checks: sampler.checks };
   } finally {
     await backend.stop();
@@ -194,7 +201,7 @@ export function refcountTapeTests(name: RefcountTape, kinds: readonly ProcessBac
   for (const backend of PROCESS_BACKENDS.filter((candidate) => kinds.includes(candidate.kind))) {
     tapeTest(
       name,
-      `on ${name}, ${backend.name}: after every 100th height and the last${name === "devnet-v8-v9-0-235" ? " (and the conversion's U, F, F + 1)" : ""}, the check of the database through its own queries finds (a)–(d), with R_{h−1}, R_h and K_h from the stored rows`,
+      `on ${name}, ${backend.name}: after every 100th height and the last${name === "devnet-v8-v9-0-235" ? " (and the conversion's U, F, F + 1)" : ""}, the check of the database through its own queries finds (a)–(d), with R_{h−1}, R_h and K_h from the stored rows, and the node tables are the reference step's over the tables before and the recorded flush`,
       async (found) => {
         const replay = await replayRefcountTape(found, backend);
         expect(replay.status).toMatchObject({ cursor: replay.last, reason: null });

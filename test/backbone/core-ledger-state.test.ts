@@ -9,23 +9,24 @@ import {
   computeBlock,
   CORE_LEDGER_STATE,
   itemsOf,
-  NODES_PER_STATEMENT,
   parentTimeOf,
   retainedStates,
   retainedStatesOf,
   revisionsOf,
+  settleRun,
   taggedAddress,
-  writeBlock,
+  writeBlockRows,
 } from "../../src/backbone/core-ledger-state/core-ledger-state.js";
 import { CORE_LEDGER_STATE_MIGRATIONS } from "../../src/backbone/core-ledger-state/sql.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { type AppliedState, EvictionRefused } from "../../src/ledger/worker/engine.js";
 import type { LedgerHost } from "../../src/ledger/worker/host.js";
 import type { BlockContext, ProcessContext } from "../../src/modules/declaration.js";
+import { encodeChildren } from "../ledger/node-format.js";
 
 // `core-ledger-state`'s parts on their own, over a fake ledger worker and block source: the binding, the checks before
-// a block's apply, the root check's error, and the writes of a block's batch and rows. The process tests
-// (`ledger-state.test.ts`) run the real ones.
+// a block's apply, the root check's error, the writes of a block's own rows, and the reclamation at `on-settle`. The
+// process tests (`ledger-state.test.ts`, `ledger-refcount-settle.test.ts`) run the real ones.
 
 const hash = (byte: number): Uint8Array => new Uint8Array(32).fill(byte);
 /** A `config` item whose `core` revisions have the `retainStates` of each `[start, retainStates]`. */
@@ -221,11 +222,11 @@ describe("core-ledger-state's parts", () => {
     expect(told[0]).toMatchObject({ genesis: { includesBlockZero: true } });
   });
 
-  it("writes a block's batch in chunks, its root counts as signed changes, and its rows; nothing for what it has not", async () => {
+  it("writes a block's own rows, its root counts first as signed changes, and no node; nothing for what it has not", async () => {
     const statements: { sql: string; params: unknown[] }[] = [];
     const w = { execute: async (sql: string, params: unknown[] = []) => (statements.push({ sql, params }), 1) };
-    const inserts = Array.from({ length: NODES_PER_STATEMENT + 1 }, (_, i) => ({ key: hash(i % 256), data: Uint8Array.of(i % 256), children: Uint8Array.of(0) }));
-    await writeBlock(
+    const inserts = Array.from({ length: 3 }, (_, i) => ({ key: hash(i), data: Uint8Array.of(i), children: Uint8Array.of(0) }));
+    await writeBlockRows(
       w,
       applied(5n, {
         batch: { inserts, rootCounts: [{ key: hash(1), delta: 1 }, { key: hash(2), delta: 0 }, { key: hash(3), delta: -1 }] },
@@ -242,17 +243,13 @@ describe("core-ledger-state's parts", () => {
       }),
     );
     expect(statements.map((s) => s.sql.split(" ").slice(0, 3).join(" "))).toEqual([
-      "INSERT INTO core_ledger_state.nodes",
-      "INSERT INTO core_ledger_state.nodes",
       "WITH d AS",
       "INSERT INTO core_ledger_state.states",
       "INSERT INTO core_ledger_state.segment_results",
       "INSERT INTO core_ledger_state.events",
     ]);
-    expect((statements[0]?.params[0] as unknown[]).length).toBe(NODES_PER_STATEMENT);
-    expect((statements[1]?.params[0] as unknown[]).length).toBe(1);
-    expect(statements[2]?.params).toEqual([[hash(1), hash(3)], [1, -1]]);
-    expect(statements[3]?.params).toEqual([
+    expect(statements[0]?.params).toEqual([[hash(1), hash(3)], [1, -1]]);
+    expect(statements[1]?.params).toEqual([
       5n,
       hash(0x40),
       applied(5n).stateRoot,
@@ -263,11 +260,11 @@ describe("core-ledger-state's parts", () => {
       5n,
       Uint8Array.of(0x73, 3),
     ]);
-    expect(statements[4]?.params).toEqual([5n, [0n, 0n], [0, 1], [true, false]]);
-    expect(statements[5]?.params.slice(0, 4)).toEqual([5n, [0n, 0n, 2n], [0n, 1n, 0n], ["zswap-output", "param-change", "contract-deploy"]]);
+    expect(statements[2]?.params).toEqual([5n, [0n, 0n], [0, 1], [true, false]]);
+    expect(statements[3]?.params.slice(0, 4)).toEqual([5n, [0n, 0n, 2n], [0n, 1n, 0n], ["zswap-output", "param-change", "contract-deploy"]]);
 
     statements.length = 0;
-    await writeBlock(w, applied(6n));
+    await writeBlockRows(w, applied(6n));
     expect(statements.map((s) => s.sql.split(" ").slice(0, 3).join(" "))).toEqual(["INSERT INTO core_ledger_state.states"]);
   });
 
@@ -447,7 +444,7 @@ describe("core-ledger-state's parts", () => {
 
   it("writes each of the six to its own column on a database, which refuses a null in any of them", async () => {
     const statements: { sql: string; params: unknown[] }[] = [];
-    await writeBlock({ execute: async (sql: string, params: unknown[] = []) => (statements.push({ sql, params }), 1) }, applied(5n));
+    await writeBlockRows({ execute: async (sql: string, params: unknown[] = []) => (statements.push({ sql, params }), 1) }, applied(5n));
     const [states] = statements;
     expect(states?.sql).toMatch(/^INSERT INTO core_ledger_state\.states /);
     const db = await PGlite.create();
@@ -501,38 +498,40 @@ describe("core-block-parsed in the ledger worker", () => {
   });
 });
 
-describe("a refused eviction", () => {
+describe("the reclamation at on-settle", () => {
   /**
-   * A read at h − 1 whose queue holds one stored node, 0x77…, with no reference, no root count and an empty child list,
-   * which the block's step deletes.
+   * A block write handle over tables whose queue holds one stored node, 0x77…, with no reference, no root count and an
+   * empty child list, which the run deletes. `statements` records each write; a write answers the keys it was given.
    */
   const sweeping = () => {
     const base = reading([{ ms: 1n }]);
+    const statements: string[] = [];
     return {
       ...base,
+      statements,
       async query(sql: string, params: unknown[] = []) {
-        if (sql.includes("FROM core_ledger_state.unreferenced")) return [{ node_key: hash(0x77) }];
-        if (sql.includes("AS stored")) return [{ node_key: hash(0x77), stored: true, refs: 0, roots: 0 }];
+        if (sql.startsWith("SELECT node_key FROM core_ledger_state.unreferenced")) return [{ node_key: hash(0x77) }];
+        if (sql.includes("AS stored")) {
+          return (params[0] as Uint8Array[]).filter((key) => key[0] === 0x77).map(() => ({ node_key: hash(0x77), stored: true, refs: 0, roots: 0 }));
+        }
         if (sql.startsWith("SELECT node_key, children FROM core_ledger_state.nodes")) return [{ node_key: hash(0x77), children: Uint8Array.of(0) }];
         return base.query(sql, params);
+      },
+      async execute(sql: string, params: unknown[] = []) {
+        statements.push(sql.split(" ").slice(0, 3).join(" "));
+        return (params[0] as unknown[]).length;
       },
     };
   };
   /** The fake worker of {@link bound}, its evictions answered by `answers` in turn, its restarts counted. */
   function refusing(...answers: readonly (Error | null)[]) {
     const first = applied(3n);
-    const again = applied(3n, { stateKey: hash(0x41) });
     const { p, asked, host } = bound(first.stateRoot, first);
-    let applies = 0;
     let restarts = 0;
     const evictions: Uint8Array[][] = [];
     Object.assign(host, {
-      async apply(input: unknown) {
-        asked.push({ apply: input });
-        applies += 1;
-        return applies === 1 ? first : again;
-      },
       async evict(keys: readonly Uint8Array[]) {
+        asked.push({ evict: keys.length });
         evictions.push([...keys]);
         const answer = answers[evictions.length - 1] ?? null;
         if (answer !== null) throw answer;
@@ -543,34 +542,116 @@ describe("a refused eviction", () => {
         restarts += 1;
       },
     });
-    return { p, asked, first, again, evictions, restarts: () => restarts };
+    return { p, asked, first, evictions, restarts: () => restarts };
   }
   const refusal = () => new EvictionRefused("still held by a live object");
+  const run3 = { first: 3n, last: 3n } as const;
 
-  it("ends the worker thread and computes the block again in a new one — the state at h − 1 loaded, the block applied, its step evicted — when the package refuses after the worker freed what it can", async () => {
-    const { p, asked, again, evictions, restarts } = refusing(refusal(), null);
-    const computed = await computeBlock(p, block(3n), sweeping());
-    expect(restarts()).toBe(1);
-    expect(computed.applied).toBe(again);
-    expect(computed.step.deleted).toEqual([hash(0x77)]);
-    expect(evictions).toEqual([[hash(0x77)], [hash(0x77)]]);
-    // load, apply, restart, then load and apply again (the new thread's state at h − 1 read from the database).
-    expect(asked.map((call) => Object.keys(call as object)[0])).toEqual(["load", "apply", "restart", "load", "apply"]);
+  it("computes the run the blocks handed over, evicts what it deletes, then writes the net change; the record is dropped", async () => {
+    const { p, asked, evictions, restarts } = refusing(null);
+    await computeBlock(p, block(3n), reading([{ ms: 1n }]));
+    const w = sweeping();
+    const outcome = await settleRun(p, run3, w);
+    expect(outcome.evict).toEqual([hash(0x77)]);
+    expect(evictions).toEqual([[hash(0x77)]]);
+    expect(restarts()).toBe(0);
+    // The queue's delete, then the row's: the net write after the eviction.
+    expect(w.statements).toEqual(["DELETE FROM core_ledger_state.unreferenced", "DELETE FROM core_ledger_state.nodes"]);
+    expect(asked.map((call) => Object.keys(call as object)[0])).toEqual(["load", "apply", "evict"]);
+    // The record went with the settle: a second one finds no block handed over.
+    await expect(settleRun(p, run3, sweeping())).rejects.toThrow(/the run 3 to 3: core-ledger-state's on-compute handed over no block/);
   });
 
-  it("fails the block with a refusal on the retry, after one restart; with any other error, or the restart turned off, at once", async () => {
-    const twice = refusing(refusal(), refusal());
-    await expect(computeBlock(twice.p, block(3n), sweeping())).rejects.toThrow(/still held by a live object/);
-    expect(twice.restarts()).toBe(1);
-    const other = refusing(new Error("the database went away"), null);
-    await expect(computeBlock(other.p, block(3n), sweeping())).rejects.toThrow(/the database went away/);
-    expect(other.restarts()).toBe(0);
-    const off = refusing(refusal(), null);
-    await expect(computeBlock(off.p, block(3n), sweeping(), { restartOnRefusedEviction: false })).rejects.toThrow(/still held/);
+  it("ends the worker thread and goes on when the package refuses after the worker freed what it can: the eviction sent once, the block not applied again, the net write made", async () => {
+    const { p, asked, evictions, restarts } = refusing(refusal(), refusal());
+    await computeBlock(p, block(3n), reading([{ ms: 1n }]));
+    const w = sweeping();
+    await settleRun(p, run3, w);
+    expect(restarts()).toBe(1);
+    expect(evictions).toEqual([[hash(0x77)]]);
+    expect(asked.map((call) => Object.keys(call as object)[0])).toEqual(["load", "apply", "evict", "restart"]);
+    expect(w.statements).toEqual(["DELETE FROM core_ledger_state.unreferenced", "DELETE FROM core_ledger_state.nodes"]);
+  });
+
+  it("throws the refusal with the restart turned off, any other error at once, writing nothing; a run that deletes nothing evicts nothing", async () => {
+    const off = refusing(refusal());
+    await computeBlock(off.p, block(3n), reading([{ ms: 1n }]));
+    const offWrites = sweeping();
+    await expect(settleRun(off.p, run3, offWrites, { restartOnRefusedEviction: false })).rejects.toThrow(/still held/);
     expect(off.restarts()).toBe(0);
-    // No eviction, no restart: a block whose step deletes nothing.
+    expect(offWrites.statements).toEqual([]);
+    const other = refusing(new Error("the database went away"));
+    await computeBlock(other.p, block(3n), reading([{ ms: 1n }]));
+    await expect(settleRun(other.p, run3, sweeping())).rejects.toThrow(/the database went away/);
+    expect(other.restarts()).toBe(0);
+    // No eviction, no restart: a run whose tables hold nothing to delete.
     const none = refusing(refusal());
-    expect((await computeBlock(none.p, block(3n), reading([{ ms: 1n }]))).applied).toBe(none.first);
+    await computeBlock(none.p, block(3n), reading([{ ms: 1n }]));
+    const noneWrites = { ...reading([{ ms: 1n }]), statements: [] as string[], async execute() { return 0; } };
+    const outcome = await settleRun(none.p, run3, noneWrites);
+    expect(outcome.evict).toEqual([]);
+    expect(none.evictions).toEqual([]);
     expect(none.restarts()).toBe(0);
+  });
+
+  it("refuses a run its record does not cover, and drops the record; a block made again is handed over to a new record", async () => {
+    const { p } = refusing(null);
+    await computeBlock(p, block(3n), reading([{ ms: 1n }]));
+    await expect(settleRun(p, { first: 3n, last: 4n }, sweeping())).rejects.toThrow(/the run 3 to 4: core-ledger-state's on-compute handed over the blocks 3 to 3/);
+    await expect(settleRun(p, run3, sweeping())).rejects.toThrow(/handed over no block/);
+    // Handed over twice (its on-compute ran again after a failure): the record holds it once.
+    await computeBlock(p, block(3n), reading([{ ms: 1n }]));
+    await computeBlock(p, block(3n), reading([{ ms: 1n }]));
+    await expect(settleRun(p, run3, sweeping())).resolves.toMatchObject({ evict: [hash(0x77)] });
+  });
+
+  it("drops the record when a block's hand-over fails", async () => {
+    const twice = applied(3n, { batch: { inserts: [{ key: hash(0x51), data: Uint8Array.of(1), children: Uint8Array.of(0) }, { key: hash(0x51), data: Uint8Array.of(1), children: Uint8Array.of(0) }], rootCounts: [] } });
+    const { p } = bound(twice.stateRoot, twice);
+    await expect(computeBlock(p, block(3n), reading([{ ms: 1n }]))).rejects.toThrow(/block 3: the block writes 0x51.* twice/);
+    await expect(settleRun(p, run3, sweeping())).rejects.toThrow(/handed over no block/);
+  });
+
+  it("hands the next block over to the record that expects it, and halts a longer run that keeps a node only a list its last block replaced referenced", async () => {
+    // P is a row whose stored list references K, K's only reference; block 4 rewrites P with an empty list, persisting
+    // P. The run 3 to 4 keeps K queued only because of that list: kept-by-replaced.
+    const P = hash(0x50);
+    const K = hash(0x4b);
+    const stored = encodeChildren([{ ref: K }]);
+    const rewritten = applied(4n, { batch: { inserts: [{ key: P, data: Uint8Array.of(1), children: Uint8Array.of(0) }], rootCounts: [{ key: P, delta: 1 }] } });
+    const p = context();
+    const host = {
+      async load() {
+        return { stateRoot: STORED_ROOT, loaded: false };
+      },
+      async apply(input: { height: bigint }) {
+        return input.height === 4n ? rewritten : applied(3n);
+      },
+      async evict() {
+        return 1;
+      },
+    } as unknown as LedgerHost;
+    bindCoreLedgerState(p, { ledger: host, source: { ledgerStateRoot: async () => applied(3n).stateRoot, genesisState: async () => Uint8Array.of(7) } });
+    await computeBlock(p, block(3n), reading([{ ms: 1n }]));
+    await computeBlock(p, block(4n), reading([{ ms: 1n }]));
+    const base = reading([{ ms: 1n }]);
+    const w = {
+      ...base,
+      async query(sql: string, params: unknown[] = []) {
+        if (sql.startsWith("SELECT node_key FROM core_ledger_state.nodes WHERE")) return [{ node_key: P }];
+        if (sql.includes("IS DISTINCT FROM b.children")) return [{ node_key: P, children: stored }];
+        if (sql.includes("AS stored")) {
+          return (params[0] as Uint8Array[]).map((key) => ({ node_key: key, stored: true, refs: key[0] === 0x4b ? 1 : 0, roots: key[0] === 0x50 ? 1 : 0 }));
+        }
+        if (sql.startsWith("SELECT node_key FROM core_ledger_state.unreferenced")) return [];
+        return base.query(sql, params);
+      },
+      async execute() {
+        throw new Error("nothing is written for a run that halts");
+      },
+    };
+    const error = await settleRun(p, { first: 3n, last: 4n }, w).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(UmbraError);
+    expect(error).toMatchObject({ code: "ledger-refcount-invalid", details: { reason: "kept-by-replaced", height: 4n, first: 3n, last: 4n, kept: 1 } });
   });
 });

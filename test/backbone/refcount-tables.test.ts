@@ -6,7 +6,7 @@ import {
   refcountStep,
   sqlRefcountTables,
   writeRefcount,
-} from "../../src/backbone/core-ledger-state/refcount.js";
+} from "./refcount-step.js";
 import {
   addRootCounts,
   CORE_LEDGER_STATE_MIGRATIONS,
