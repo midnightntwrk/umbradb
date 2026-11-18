@@ -1,16 +1,20 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { BlockWriteHandle, Database, Transaction } from "../../src/db/api.js";
+import { CORE_DIGEST as DIGESTS, digestBlock } from "../../src/backbone/core-digest/core-digest.js";
+import { capturedTables, tablesWithChanges } from "../../src/db/change-capture.js";
 import { UmbraError } from "../../src/db/errors.js";
+import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import { CallbackFailure } from "../../src/runner/dispatch.js";
 import { FinalizedLoop, HeightFailure } from "../../src/runner/loop.js";
+import { checkpointRows, digestRows } from "../backbone/core-digest/chain.js";
 import { declaration } from "../modules/declarations.js";
 import { entry } from "../modules/graph-fixtures.js";
 import {
   cursorOf,
+  DIGEST_BACKBONE,
   failureOf,
   heightsIn,
   InMemoryBlockSource,
-  type LoopClass,
   loopInput,
   RUNNER_BACKENDS,
   runUntilWaiting,
@@ -39,7 +43,10 @@ import {
  *   processed again, `on-settle` included, by the next run after a retryable failure (from `on-compute`) and by a
  *   restart after a halt;
  * - its handle, kept and used after its callback ended, fails naming `on-settle`;
- * - a loop whose modules declare no `on-settle` sends, per block, the statements of a loop without the point.
+ * - with no module declaring `on-settle`, each block sends the statements, in the same order, that it sent when
+ *   `core-digest` digested at `on-db-write`;
+ * - with the real `core-digest`, a block's digests and its checkpoint take what its `on-settle` callbacks wrote, and a
+ *   key written at both points counts as one change.
  * The negative control of the order (the point called after the `COMMIT`) is `settle-point.negative-control.test.ts`.
  */
 
@@ -89,10 +96,18 @@ function recordingStatements(db: Database): { readonly db: Database; readonly tr
   };
 }
 
-/** The loop without the `on-settle` point: as it was before the point existed. */
-class WithoutSettle extends FinalizedLoop {
-  protected override async settlePoint(): Promise<void> {}
-}
+/** `core-digest` as it was before it took its step at `on-settle`: the same step, last at `on-db-write`. */
+const DIGEST_AT_DB_WRITE: ModuleDeclaration = Object.freeze({
+  ...DIGESTS,
+  points: Object.freeze({
+    async "on-db-write"(p, b, w) {
+      await digestBlock(w, b.height, p);
+    },
+  } satisfies ModuleDeclaration["points"]),
+});
+
+/** How many statements each block of the statements test sends: the first block also reads the captured tables. */
+const DIGEST_STATEMENTS = [19, 17, 17];
 
 describe.each(RUNNER_BACKENDS)("the on-settle point on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
@@ -228,9 +243,73 @@ describe.each(RUNNER_BACKENDS)("the on-settle point on $name", (backend) => {
     expect(await cursorOf(db)).toBe(1n);
   }, 60_000);
 
-  it("a loop whose modules declare no on-settle sends per block the statements of a loop without the point", async () => {
-    /** The statements of each block transaction of `kind` over a new database with the module `plain`. */
-    async function statementsOf(kind: LoopClass): Promise<string[][]> {
+  it("the digests and the checkpoint of a block take its on-settle writes, and a key written at both points once", async () => {
+    const { db } = await backend.database();
+    const upsert = (schema: string) =>
+      `INSERT INTO ${schema}.kv (k, v) VALUES (1, $1) ON CONFLICT (k) DO UPDATE SET v = EXCLUDED.v`;
+    /** Module `id` with one mutable table `<id>.kv (k, v)`. */
+    const keyed = (id: string, points: ModuleDeclaration["points"]) =>
+      declaration(id, {
+        provides: [{ name: `${id}-kv`, lifetimes: ["table"], table: { schema: id, tables: ["kv"], kind: "mutable" } }],
+        migrations: [{ id: "001", sql: `CREATE TABLE ${id}.kv (k bigint PRIMARY KEY, v bigint NOT NULL)` }],
+        points,
+      });
+    // Two pairs whose tables change alike at every height, so their digests must be equal: early writes its row at
+    // on-db-write and late the same row at on-settle; once writes key 1 at on-db-write, twice writes it there and again
+    // at on-settle, to the value once writes.
+    const modules = [
+      declaration("early", {
+        points: {
+          async "on-db-write"(_p, b, w) {
+            await w.execute("INSERT INTO early.rows (height) VALUES ($1)", [b.height]);
+          },
+        },
+      }),
+      declaration("late", {
+        points: {
+          async "on-settle"(_p, run, w) {
+            await w.execute("INSERT INTO late.rows (height) VALUES ($1)", [run.last]);
+          },
+        },
+      }),
+      keyed("once", {
+        async "on-db-write"(_p, b, w) {
+          await w.execute(upsert("once"), [b.height + 1000n]);
+        },
+      }),
+      keyed("twice", {
+        async "on-db-write"(_p, b, w) {
+          await w.execute(upsert("twice"), [b.height]);
+        },
+        async "on-settle"(_p, _run, w) {
+          await w.execute("UPDATE twice.kv SET v = v + 1000 WHERE k = 1");
+        },
+      }),
+    ];
+    // From the height before a checkpoint height (14,400) to the one after it.
+    const [start, head] = [14_399n, 14_401n];
+    const entries = modules.map((m) => entry(m.id, Number(start)));
+    const started = await startWith(db, modules, entries, { start, backbone: DIGEST_BACKBONE });
+    await runUntilWaiting(started, new InMemoryBlockSource({ head }), head);
+    expect(await heightsIn(db, "late.rows")).toEqual([start, start + 1n, head]);
+    const digests = await digestRows(db);
+    for (const table of ["early.rows", "late.rows", "once.kv", "twice.kv"]) {
+      expect(digests[table]?.height, table).toBe(head);
+    }
+    expect(digests["late.rows"]).toEqual(digests["early.rows"]);
+    expect(digests["twice.kv"]).toEqual(digests["once.kv"]);
+    const checkpoint = (await checkpointRows(db))["14400"] ?? {};
+    expect(checkpoint["late.rows"]).toBe(checkpoint["early.rows"]);
+    expect(checkpoint["twice.kv"]).toBe(checkpoint["once.kv"]);
+    expect(checkpoint["late.rows"]).toEqual(expect.any(String));
+    expect(checkpoint["twice.kv"]).toEqual(expect.any(String));
+    // Every change was taken in its own block: no shadow row is left.
+    expect(await db.read(async (read) => tablesWithChanges(read, await capturedTables(read)))).toEqual([]);
+  }, 60_000);
+
+  it("with no module declaring on-settle, each block sends the statements it sent when core-digest digested at on-db-write", async () => {
+    /** The statements of each block transaction over a new database with the module `plain` and `backbone`. */
+    async function statementsOf(backbone: readonly ModuleDeclaration[]): Promise<string[][]> {
       const { db } = await backend.database();
       const plain = declaration("plain", {
         points: {
@@ -239,24 +318,29 @@ describe.each(RUNNER_BACKENDS)("the on-settle point on $name", (backend) => {
           },
         },
       });
-      const started = await startWith(db, [plain], [entry("plain", 1)]);
+      const started = await startWith(db, [plain], [entry("plain", 1)], { backbone });
       const recording = recordingStatements(started.db);
-      await runUntilWaiting({ ...started, db: recording.db }, new InMemoryBlockSource({ head: HEAD }), HEAD, kind);
+      await runUntilWaiting({ ...started, db: recording.db }, new InMemoryBlockSource({ head: HEAD }), HEAD);
       expect(await heightsIn(db, "plain.rows")).toEqual(HEIGHTS);
+      expect((await digestRows(db))["plain.rows"]?.height).toBe(HEAD);
       return recording.transactions;
     }
-    const withPoint = await statementsOf(FinalizedLoop);
-    const without = await statementsOf(WithoutSettle);
+    const now = await statementsOf(DIGEST_BACKBONE);
+    const before = await statementsOf(DIGEST_BACKBONE.map((part) => (part.id === "core-digest" ? DIGEST_AT_DB_WRITE : part)));
     // Each block: core-block-commit's role and rows (and from 2 on its parent check), plain's role and row, the reset
-    // to the login, and the cursor check's two reads. The texts and parameters are the same without the point.
-    expect(withPoint.map((sent) => sent.length)).toEqual([8, 9, 9]);
-    expect(withPoint).toEqual(without);
-    for (const sent of withPoint) {
+    // to the login, core-digest's reads and writes (at 1 also the captured tables, read once per process), and the
+    // cursor check's two reads. The texts, parameters and order are those of core-digest at on-db-write.
+    expect(now).toEqual(before);
+    expect(now.map((sent) => sent.length)).toEqual(DIGEST_STATEMENTS);
+    for (const sent of now) {
       expect(sent.filter((statement) => statement.startsWith("SET LOCAL ROLE") || statement.startsWith("RESET ROLE"))).toEqual([
         'SET LOCAL ROLE "umbradb_m_core_block_commit" []',
         'SET LOCAL ROLE "umbradb_m_plain" []',
         "RESET ROLE []",
       ]);
+      expect(sent.findIndex((statement) => statement.includes("core_digest."))).toBeGreaterThan(
+        sent.indexOf("RESET ROLE []"),
+      );
     }
   }, 60_000);
 });
