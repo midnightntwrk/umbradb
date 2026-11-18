@@ -33,6 +33,14 @@
  * module and the point. A failed request that is not a trap (a block the engine refuses, a package that will not load)
  * fails that request only.
  *
+ * **A trap in an apply marked ahead** (`ApplyBlock.ahead`) ends that thread only, and the host does not fail: the block
+ * is judged at its own turn, as a run without blocks applied ahead judges it. A new thread takes the old one's place,
+ * as at {@link LedgerHost.restart}, and is sent again, in their order, the parses kept and every request sent after the
+ * trapped one (the old thread ran none of them: it answers in order and runs nothing after a trap), but the applies
+ * marked ahead, which fail, as the trapped one does. `core-ledger-state` then drops the result applied ahead (the
+ * thread that applied it ended) and applies the block at its turn in the new thread: a block whose own apply traps
+ * there fails the host at its height.
+ *
  * **What became of each block's transaction** ({@link LedgerHost.written}, {@link LedgerHost.committed},
  * {@link LedgerHost.rolledBack}). The engine (`src/runner/loop.ts`) tells the host, as facts, what happened to the
  * transaction that holds each block, and the host alone decides what the thread is sent:
@@ -184,7 +192,7 @@ export interface LedgerHost {
    * fails. Rejects for a worker that failed or is closed.
    */
   restart(): Promise<void>;
-  /** How many times {@link LedgerHost.restart} started a new thread. */
+  /** How many times a new thread took the old one's place: at {@link LedgerHost.restart}, or after a trap ahead. */
   readonly restarts: number;
   /**
    * Runs one module's ledger tasks for block `input` and returns their results by task name (`../tasks.ts`). The
@@ -295,6 +303,9 @@ function heightOf(request: LedgerRequest): bigint | null {
 
 /** A parse request as sent. */
 type ParseRequest = Extract<LedgerRequest, { readonly type: "parse" }>;
+
+/** Whether `request` applies a block ahead (`ApplyBlock.ahead`). */
+const isAhead = (request: LedgerRequest): boolean => request.type === "apply" && request.input.ahead === true;
 
 const hexOf = (bytes: Uint8Array): string => Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 
@@ -545,7 +556,16 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
       pending.delete(message.id);
       request?.resolve(message.value);
     } else if (message.fatal) {
-      fail(new LedgerWorkerFailure(`the ledger worker's package failed and its thread ended: ${message.error.name}: ${message.error.message}`));
+      const trap = `the ledger worker's package failed and its thread ended: ${message.error.name}: ${message.error.message}`;
+      if (request === undefined || !isAhead(request.request) || failure !== null || closed) {
+        fail(new LedgerWorkerFailure(trap));
+        return;
+      }
+      // An apply marked ahead: the block is judged at its own turn (see the module comment).
+      pending.delete(message.id);
+      const old = replace((other) => !isAhead(other.request));
+      void old.worker.terminate();
+      request.reject(new LedgerWorkerFailure(`${trap}, while applying block ${heightOf(request.request)} ahead; a new thread took its place`));
     } else {
       pending.delete(message.id);
       request?.reject(errorOf(message.error));
@@ -553,6 +573,36 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
   };
 
   let thread = spawn();
+
+  /**
+   * Ends the current thread and starts a new one in its place: the parses kept for blocks not released are sent to it
+   * again in their order, a parse in flight answered by the new thread; every other request in flight is sent again in
+   * its order when `again` says so, and fails otherwise. Returns the ended thread, for its termination.
+   */
+  const replace = (again: (request: Pending) => boolean): Thread => {
+    const old = thread;
+    old.retired = true;
+    before.requests += old.bridge.stats.requests;
+    before.nodes += old.bridge.stats.nodes;
+    const inFlight = [...pending.values()];
+    pending.clear();
+    thread = spawn();
+    restarts += 1;
+    answeredAt = performance.now();
+    const parsing = new Map(inFlight.filter((request) => request.kind === "parse").map((request) => [hexOf((request.request as ParseRequest).block.hash), request]));
+    for (const request of parses.kept()) {
+      const key = hexOf(request.block.hash);
+      post(request, parsing.get(key) ?? { read: null, resolve: () => undefined, reject: () => undefined });
+      parsing.delete(key);
+    }
+    for (const request of parsing.values()) post(request.request, request);
+    for (const request of inFlight) {
+      if (request.kind === "parse") continue;
+      if (again(request)) post(request.request, request);
+      else request.reject(new Error(`the ledger worker was restarted while its ${request.kind} request ran`));
+    }
+    return old;
+  };
 
   /**
    * Posts `request` to the current thread under a new number, `entry` its pending record. In a traced process the
@@ -618,33 +668,12 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
     async restart() {
       if (failure !== null) throw failure;
       if (closed) throw new Error("the ledger worker is closed");
-      const old = thread;
-      old.retired = true;
-      before.requests += old.bridge.stats.requests;
-      before.nodes += old.bridge.stats.nodes;
-      const inFlight = [...pending.values()];
-      pending.clear();
-      thread = spawn();
-      restarts += 1;
-      answeredAt = performance.now();
       // The parses kept for blocks not released yet, sent again in their order, a parse still in flight answered by
-      // the new thread; any other request in flight but a ledger task's fails (it ran on the thread that ended).
-      const parsing = new Map(inFlight.filter((request) => request.kind === "parse").map((request) => [hexOf((request.request as ParseRequest).block.hash), request]));
-      for (const request of parses.kept()) {
-        const key = hexOf(request.block.hash);
-        post(request, parsing.get(key) ?? { read: null, resolve: () => undefined, reject: () => undefined });
-        parsing.delete(key);
-      }
-      for (const request of parsing.values()) post(request.request, request);
-      // A ledger task's request in flight — another block's, run at its module's `on-parse` while this one computed —
+      // the new thread; any other request in flight but a ledger task's fails (it ran on the thread that ended). A
+      // ledger task's request in flight — another block's, run at its module's `on-parse` while this one computed —
       // runs again there, on the parse sent again: a task keeps nothing between requests (one that needs the state
       // fails there, as the new thread holds none).
-      for (const request of inFlight) if (request.kind === "tasks") post(request.request, request);
-      for (const request of inFlight) {
-        if (request.kind !== "parse" && request.kind !== "tasks") {
-          request.reject(new Error(`the ledger worker was restarted while its ${request.kind} request ran`));
-        }
-      }
+      const old = replace((request) => request.kind === "tasks");
       await old.worker.terminate();
       await old.exited;
     },

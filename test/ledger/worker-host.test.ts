@@ -20,8 +20,8 @@ import type { TestLoaderData } from "./fixtures/ledger-test-loader.js";
 
 // The ledger worker (a worker thread running the engine of `worker-engine.test.ts`) and the node-store bridge, through
 // which the worker reads stored nodes synchronously from a database the main thread owns. What crosses is plain data.
-// A crash of the thread, or a trap of the package, fails every request from then on. A request's step is reported
-// while it runs.
+// A crash of the thread, or a trap of the package, fails every request from then on, but a trap in a block applied
+// ahead, which ends that thread only. A request's step is reported while it runs.
 
 const LONG = 240_000;
 const LOADER = new URL("./fixtures/ledger-test-loader.ts", import.meta.url);
@@ -166,6 +166,35 @@ describe("the ledger worker", () => {
     expect(error).toBeInstanceOf(LedgerWorkerFailure);
     expect((error as Error).message).toMatch(/RuntimeError: unreachable/);
     await expect(host.probe()).rejects.toBe(error);
+  });
+
+  it("ends only the thread when a block applied ahead traps: a new one runs the requests sent after it but the applies ahead, and a trap at a block's turn still fails the host", { timeout: LONG }, async () => {
+    const genesis = RAW.v9.LedgerState.blank(NETWORK_ID).serialize();
+    const host = started({ trapAt: "2" });
+    await host.genesis(genesisInput(genesis));
+    await host.commit(at(0n));
+    const one = host.apply(applyBlock(1n, 0));
+    const two = host.apply({ ...applyBlock(2n, 0), ahead: true }).catch((e: unknown) => e);
+    const three = host.apply({ ...applyBlock(3n, 0), ahead: true }).catch((e: unknown) => e);
+    const root = host.genesisRoot("v9", genesis);
+    expect((await one).height).toBe(1n);
+    const trapped = await two;
+    expect(trapped).toBeInstanceOf(LedgerWorkerFailure);
+    expect((trapped as Error).message).toMatch(/RuntimeError: unreachable, while applying block 2 ahead; a new thread took its place/);
+    expect(((await three) as Error).message).toMatch(/restarted while its apply request ran/);
+    // Sent after the trap, answered by the new thread.
+    expect(hex(await root)).toBe(hex(RAW.v9.stateRoot(RAW.v9.LedgerState.blank(NETWORK_ID))));
+    expect(host.failure).toBeNull();
+    expect(host.restarts).toBe(1);
+    // The new thread holds no state; block 2 applied at its turn there traps and fails the host.
+    await host.genesis(genesisInput(genesis));
+    await host.commit(at(0n));
+    await host.apply(applyBlock(1n, 0));
+    await host.commit(at(1n));
+    const error = await host.apply(applyBlock(2n, 0)).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(LedgerWorkerFailure);
+    expect((error as Error).message).toBe("the ledger worker's package failed and its thread ended: RuntimeError: unreachable");
+    expect(host.failure).toBe(error);
   });
 
   it("keeps working after a request that failed without a trap, and after a failed load of a package", { timeout: LONG }, async () => {
