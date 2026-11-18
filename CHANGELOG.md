@@ -195,6 +195,24 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   and `reads` (now also `missing` and `queued`) are inside `txMs`, `writeBlockMs` is the block's own rows,
   `writeRefcountMs` the whole net write, `sh` has one link per run, and `collectMs` and `evictRefused` are new; the
   operator guide lists them.
+- **The engine tells the ledger worker's host what became of each block's transaction; `continues`.** The engine tells
+  the host when a block is written in the open transaction, committed, or rolled back. When the block's `COMMIT`
+  answered, the host sends the worker the block's commit, if it had the worker apply the block, then the release of
+  the parses kept up to it. `core-ledger-state` and `core-block-parsed` no longer declare `on-after-db-write`, so a
+  slow-block report never names them there. The release now comes after the commit, where it came before it; a block
+  the worker did not apply (where `core-block-parsed` runs without `core-ledger-state`, and the last committed block
+  delivered again after a restart) gets the release alone. After a lost `COMMIT` the host is told nothing until the
+  cursor is read again: a cursor at the block tells it committed, one at the block before tells it rolled back, and
+  any other halts without telling the host anything, since the outcome is not known. A stop in between tells the host
+  nothing; the next start delivers the last committed block again.
+  A block context now has `continues`: true when the block before was committed by this process with no failure
+  between (its `COMMIT` answered in the same run of processing) and the writer still has the database session that
+  committed it, false at the first height after a start or a retry, for a height processed again, at the re-delivery
+  after a restart, once the writer's session was replaced (on PostgreSQL a connection lost while idle between two
+  blocks), and always at `on-fetch` and `on-parse`. A block whose callbacks were told true and whose transaction then
+  finds the writer's session replaced fails before it writes, as a lost connection (retryable), and is made again. A
+  database now says which session its writer has (`Database.writerSession`). It may be false at any block. The module
+  guide's §3 describes it.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 
