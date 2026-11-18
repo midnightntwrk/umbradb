@@ -283,11 +283,14 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   packages give the unpatched ledger's tree roots on the test states. The four packages are recorded again, so the
   core version changes: a database an earlier build synced continues as an upgrade, its `core` revision kept as a
   `versionEntry`. The patch is dropped once a ledger release keeps the pre-computation itself.
-- **Handles refuse transaction control.** A statement sent through a read handle or a block or schema write handle
-  whose first word ends or nests the transaction (`BEGIN`, `START`, `COMMIT`, `END`, `ROLLBACK`, `ABORT`, `SAVEPOINT`,
-  `RELEASE`, `PREPARE TRANSACTION`), or that sets the session authorization, is refused before it reaches the database
-  (`database-error`, `reason: control-refused`); the module guide's §5 lists them. The database layer also gains a
-  read-only view inside a transaction, which nothing uses yet.
+- **Handles refuse transaction control.** A statement sent through a read handle (a private process's reads through
+  the core among them) or a block or schema write handle whose first word ends or nests the transaction (`BEGIN`,
+  `START`, `COMMIT`, `END`, `ROLLBACK`, `ABORT`, `SAVEPOINT`, `RELEASE`, `PREPARE TRANSACTION`), also behind empty
+  statements (`; COMMIT`), or that sets the session authorization, however the setting's name is written, is refused
+  before it reaches the database (`database-error`, `reason: control-refused`); the module guide's §5 lists them. The
+  database layer also gains a read-only view inside a transaction, which nothing uses yet. It cannot change a
+  persistent object; as in any read-only transaction, a temporary sequence's value moved inside it stays, and a
+  change to a temporary table lasts until the view closes.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 
