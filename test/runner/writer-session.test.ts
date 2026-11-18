@@ -1,8 +1,10 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { cursorHeight } from "../../src/backbone/core-block-commit/sql.js";
 import type { Database } from "../../src/db/api.js";
 import { TAKE_WRITER_LOCK_SQL, WRITER_LOCK_CLASS, WRITER_LOCK_HOLDER_SQL, WRITER_LOCK_KEY } from "../../src/db/writer-lock.js";
+import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import { FinalizedLoop } from "../../src/runner/loop.js";
 import { startPgliteServer, type PgliteTestServer } from "../db/pglite-server.js";
 import { type PostgresTestDatabase, type PostgresTestServer, startPostgresServer } from "../db/postgres-server.js";
@@ -91,13 +93,14 @@ describe("the writer's session on PostgreSQL 18", () => {
     expect(db.writerSession()).toBeNull();
   }, 60_000);
 
-  /** Module `c` over a fresh database, a source and a loop over it. */
-  async function setUp(options: COptions = {}, head: bigint = HEAD) {
+  /** Module `c` (and `more`, each from 1) over a fresh database, a source and a loop over it. */
+  async function setUp(options: COptions = {}, head: bigint = HEAD, more: (log: string[]) => readonly ModuleDeclaration[] = () => []) {
     const database = await (server as PostgresTestServer).createDatabase();
     const db = database.open({ committedHeight: cursorHeight });
     const log: string[] = [];
     const module = continuesModule(log, options);
-    const started = await startWith(db, [module], [entry("c", 1)]);
+    const others = more(log);
+    const started = await startWith(db, [module, ...others], [entry("c", 1), ...others.map((other) => entry(other.id, 1))]);
     const source = new InMemoryBlockSource({ head });
     const stop = new AbortController();
     const loop = new FinalizedLoop(loopInput(started, source, stop));
@@ -168,7 +171,96 @@ describe("the writer's session on PostgreSQL 18", () => {
       await db.close();
     }
   }, 120_000);
+  /** One run of `loop` until it fails, ends, or waits for a head above `source`'s (then stopped): its failure or undefined. */
+  const runOnce = async (made: { readonly loop: FinalizedLoop; readonly source: InMemoryBlockSource; readonly stop: AbortController }): Promise<unknown> => {
+    const running = made.loop.run().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    if ((await Promise.race([made.source.waiting(HEAD).then(() => "waiting" as const), running])) === "waiting") made.stop.abort();
+    return running;
+  };
+
+  it("the session lost during h's on-fetch, another writer in between: h's on-compute and every later callback of h say false, and h is made once", async () => {
+    let done = false;
+    let context: { database: PostgresTestDatabase; db: Database } | undefined;
+    const made = await setUp({
+      atFetch: async (height) => {
+        if (height !== H || done || context === undefined) return;
+        done = true;
+        await anotherWriter(context.database, context.db, `UPDATE c.rows SET height = height WHERE height = ${H - 1n}`);
+      },
+    });
+    const { database, db, log } = made;
+    context = { database, db };
+    try {
+      expect(await runOnce(made)).toBeUndefined();
+      const expected = continuesExpected(HEAD, {
+        [`on-compute@${H}`]: [false],
+        [`on-db-write@${H}`]: [false],
+        [`on-after-db-write@${H}`]: [false],
+      });
+      expect(continuesProblems(continuesOf(log), expected)).toEqual([]);
+      expect(await cursorOf(db)).toBe(HEAD);
+    } finally {
+      await db.close();
+    }
+  }, 120_000);
+
+  it("the session lost between two of h's on-after-db-write callbacks, another writer in between: the later callback says false, and so does h + 1", async () => {
+    let done = false;
+    let context: { database: PostgresTestDatabase; db: Database } | undefined;
+    const made = await setUp(
+      {
+        atAfter: async (height) => {
+          if (height !== H || done || context === undefined) return;
+          done = true;
+          await anotherWriter(context.database, context.db, `UPDATE c.rows SET height = height WHERE height = ${H}`);
+        },
+      },
+      HEAD,
+      (log) => [afterModule(log)],
+    );
+    const { database, db, log } = made;
+    context = { database, db };
+    try {
+      expect(await runOnce(made)).toBeUndefined();
+      const expected = continuesExpected(HEAD, {
+        [`on-compute@${H + 1n}`]: [false],
+        [`on-db-write@${H + 1n}`]: [false],
+        [`on-after-db-write@${H + 1n}`]: [false],
+      });
+      expect(continuesProblems(continuesOf(log), expected)).toEqual([]);
+      // Module d's on-after-db-write runs after c's, at every height: true from 2, but at h, after the loss.
+      const afterD = log.filter((line) => line.startsWith("d on-after-db-write@"));
+      expect(afterD).toEqual(
+        [1n, 2n, 3n, 4n, 5n].map((height) => `d on-after-db-write@${height} ${String(height > 1n && height !== H && height !== H + 1n)}`),
+      );
+      expect(await cursorOf(db)).toBe(HEAD);
+    } finally {
+      await db.close();
+    }
+  }, 120_000);
 });
+
+/** Module `d`: requires `c`'s table, so its `on-after-db-write` runs after `c`'s; logs `d on-after-db-write@<h> <continues>`. */
+function afterModule(log: string[]): ModuleDeclaration {
+  return {
+    id: "d",
+    version: "1.0.0",
+    side: "public",
+    requires: ["block-header", "c-rows"],
+    provides: [{ name: "d-rows", lifetimes: ["table"], table: { schema: "d", tables: ["rows"], kind: "append-only" } }],
+    startsMidChain: true,
+    configSchema: z.object({}),
+    migrations: [{ id: "001", sql: "CREATE TABLE d.rows (height bigint PRIMARY KEY)" }],
+    points: {
+      async "on-after-db-write"(_p, b) {
+        log.push(`d on-after-db-write@${b.height} ${String(b.continues)}`);
+      },
+    },
+  };
+}
 
 describe("the writer's session on PGlite 0.5.10", () => {
   let server: PgliteTestServer | undefined;

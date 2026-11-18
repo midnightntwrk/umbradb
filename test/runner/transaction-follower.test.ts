@@ -4,11 +4,15 @@ import { writeBlockRow, writeHashRow } from "../../src/backbone/core-block-commi
 import type { BlockWriteHandle, Database, Transaction } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
 import type { BlockContext, ModuleDeclaration } from "../../src/modules/declaration.js";
+import type { EntryRange } from "../../src/modules/graph.js";
 import type { BlockRef } from "../../src/runner/block-source.js";
 import { type CommitOutcome, FinalizedLoop, type HeightRun, type HeldHeight, type LoopInput } from "../../src/runner/loop.js";
 import { entry } from "../modules/graph-fixtures.js";
 import { continuesModule, type COptions, H, HEAD, loggingFollower, losingCommits } from "./block-continues-harness.js";
+import { type ChainBlock, chainOf, finalized, opening, RUNTIME } from "../backbone/fetch-fixtures.js";
+import { halted, ingest, PATIENCE_MS, slow } from "../backbone/ingest-harness.js";
 import { cursorOf, InMemoryBlockSource, LOOP_BACKBONE, loopInput, RUNNER_BACKENDS, startWith } from "./loop-harness.js";
+import { PROCESS_BACKENDS } from "./process-backends.js";
 
 /**
  * What the finalized loop (`src/runner/loop.ts`) tells the follower of each block's transaction
@@ -29,9 +33,17 @@ import { cursorOf, InMemoryBlockSource, LOOP_BACKBONE, loopInput, RUNNER_BACKEND
  * - a failure at any point before the `COMMIT` (`on-fetch`, `on-parse`, `on-compute`, `on-db-write`, `on-settle`), or a
  *   `COMMIT` the database refused: `rolledBack h` exactly once (after `written h` for the refused `COMMIT`, whose body
  *   ended);
- * - a cursor read after a lost `COMMIT` that fails itself: nothing told until a later run's read succeeds;
+ * - a cursor read after a `COMMIT` lost before or after it landed that fails itself: nothing told until a later run's
+ *   read succeeds, which tells `rolledBack h` or `committed h`;
+ * - a misuse (a kept write handle used) while h's `COMMIT` runs, that `COMMIT` landing with its answer lost: the misuse
+ *   is the failure reported and halts, and nothing of h's outcome is told, since the loop does not know it; the next
+ *   start tells `committed h` at its re-delivery;
+ * - a failure in `on-start-height` of an entry starting at h: `rolledBack h`, never written; in `on-stop-height` of an
+ *   entry stopping at h, after the commit: `committed h` only;
  * - a stop while a height is held with its `COMMIT`'s answer lost: nothing told; the next start re-delivers the
  *   cursor's block and tells it committed, h when the `COMMIT` landed, h − 1 when it did not (and h is then made again);
+ * - through the process over the node source, whose queue prepares heights ahead of the loop: a failure in h's
+ *   `on-fetch` or `on-parse` there: `rolledBack h` once the loop takes h, never written;
  * - a retryable failure after the commit (in `on-after-db-write`), then the same loop's next run: `committed h` once,
  *   not again at that run's re-delivery of h, which this loop released already.
  * The loop also logs `COMMIT answered h` when h's block transaction resolved and `cursor read <outcome> h` after a lost
@@ -50,6 +62,8 @@ describe.each(RUNNER_BACKENDS)("what the loop tells the transaction's follower o
     build: {
       readonly backbone?: readonly ModuleDeclaration[];
       readonly modules?: (log: string[]) => readonly ModuleDeclaration[];
+      /** The entries of those modules: each from 1 unless given. */
+      readonly entries?: readonly EntryRange[];
       /** The loops' database over the one that can lose a `COMMIT`. */
       readonly wrap?: (db: Database) => Database;
     } = {},
@@ -61,7 +75,7 @@ describe.each(RUNNER_BACKENDS)("what the loop tells the transaction's follower o
     const started = await startWith(
       raw,
       [continuesModule(log, options), ...others],
-      [entry("c", 1), ...others.map((module) => entry(module.id, 1))],
+      [entry("c", 1), ...(build.entries ?? others.map((module) => entry(module.id, 1)))],
       build.backbone === undefined ? {} : { backbone: build.backbone },
     );
     const source = new InMemoryBlockSource({ head });
@@ -290,43 +304,88 @@ describe.each(RUNNER_BACKENDS)("what the loop tells the transaction's follower o
     expect(await cursorOf(raw)).toBe(H - 1n);
   }, 60_000);
 
-  it("a cursor read after a lost COMMIT that fails itself: nothing told then; the next run's read tells rolledBack", async () => {
+  it.each(["lost", "landed"] as const)("a cursor read after a COMMIT lost (%s) that fails itself: nothing told then; the next run's read tells the outcome", async (how) => {
     const armed = { done: false };
-    let failing: ReturnType<typeof failingNext> | undefined;
-    const wrap = (db: Database): Database => (failing = failingNext(db)).db;
+    const { raw, log, losing, loopOf, run } = await setUp({
+      atWrite: (height) => {
+        if (height === H && !armed.done) {
+          armed.done = true;
+          losing.state.armed = how;
+        }
+      },
+    });
+    const made = loopOf();
+    expect(await run(made)).toMatchObject({ height: H, committed: false });
+    losing.state.failNext = true;
+    // The cursor read of the next run fails: the height stays held, and nothing is told.
+    expect(await run(made)).toMatchObject({ height: H, committed: false });
+    expect(told(log)).toEqual([...plain(1n), ...plain(2n), `told written ${H}`]);
+    expect(await run(made)).toBeUndefined();
+    const outcome =
+      how === "lost"
+        ? [`cursor read not-committed ${H}`, `told rolledBack ${H}`, ...plain(H)]
+        : [`cursor read committed ${H}`, `told committed ${H}`];
+    expect(told(log)).toEqual([...plain(1n), ...plain(2n), `told written ${H}`, ...outcome, ...plain(4n), ...plain(5n)]);
+    expect(await cursorOf(raw)).toBe(HEAD);
+  }, 60_000);
+
+  it("a misuse while h's COMMIT runs, the COMMIT landed with its answer lost: the misuse halts, the follower is told nothing of h's outcome, and the next start tells h committed", async () => {
+    const keeper: { w?: BlockWriteHandle; misuse: boolean } = { misuse: false };
+    // After the loop's body ended and before the COMMIT: a use of the write handle module k kept (a timer of its).
+    const wrap = (db: Database): Database => ({
+      read: (body, options) => db.read(body, options),
+      transaction: <T>(body: (tx: Transaction) => Promise<T>): Promise<T> =>
+        db.transaction(async (tx) => {
+          const value = await body(tx);
+          if (keeper.misuse) {
+            keeper.misuse = false;
+            await keeper.w?.execute("SELECT 1").catch(() => undefined);
+          }
+          return value;
+        }),
+      writerSession: () => db.writerSession(),
+      close: () => db.close(),
+    });
+    const armed = { done: false };
     const { raw, log, losing, loopOf, run } = await setUp(
       {
         atWrite: (height) => {
           if (height === H && !armed.done) {
             armed.done = true;
-            losing.state.armed = "lost";
+            losing.state.armed = "landed";
+            keeper.misuse = true;
           }
         },
       },
       HEAD,
       {},
-      { wrap },
+      { modules: () => [keepingModule(keeper)], wrap },
     );
-    const made = loopOf();
-    expect(await run(made)).toMatchObject({ height: H, committed: false });
-    if (failing === undefined) throw new Error("the loop's database was not wrapped");
-    failing.state.failNext = true;
-    // The cursor read of the next run fails: the height stays held, and nothing is told.
-    expect(await run(made)).toMatchObject({ height: H, committed: false });
+    const failure = await run(loopOf());
+    expect(failure).toMatchObject({ height: H, committed: false });
+    expect(String((failure as { cause?: unknown }).cause)).toContain("handle");
     expect(told(log)).toEqual([...plain(1n), ...plain(2n), `told written ${H}`]);
-    expect(await run(made)).toBeUndefined();
-    expect(told(log)).toEqual([
-      ...plain(1n),
-      ...plain(2n),
-      `told written ${H}`,
-      `cursor read not-committed ${H}`,
-      `told rolledBack ${H}`,
-      ...plain(H),
-      ...plain(4n),
-      ...plain(5n),
-    ]);
-    expect(await cursorOf(raw)).toBe(HEAD);
+    // h committed: the next start re-delivers it and tells it committed.
+    expect(await cursorOf(raw)).toBe(H);
+    log.push("the next start");
+    expect(await run(loopOf())).toBeUndefined();
+    expect(told(log.slice(log.indexOf("the next start")))).toEqual([`told committed ${H}`, ...plain(4n), ...plain(5n)]);
   }, 60_000);
+
+  it("a failure in on-start-height of an entry starting at h: rolledBack, never written", async () => {
+    const { raw, log, loopOf, run } = await setUp({}, HEAD, {}, { modules: () => [edgeModule({ start: H })], entries: [entry("e", Number(H))] });
+    expect(await run(loopOf())).toMatchObject({ height: H, committed: false, point: "on-start-height", module: "e" });
+    expect(told(log)).toEqual([...plain(1n), ...plain(2n), `told rolledBack ${H}`]);
+    expect(await cursorOf(raw)).toBe(H - 1n);
+  }, 60_000);
+
+  it("a failure in on-stop-height of an entry stopping at h: committed once, nothing more", async () => {
+    const { raw, log, loopOf, run } = await setUp({}, HEAD, {}, { modules: () => [edgeModule({ stop: H })], entries: [entry("e", 1, Number(H))] });
+    expect(await run(loopOf())).toMatchObject({ height: H, committed: true, point: "on-stop-height", module: "e" });
+    expect(told(log)).toEqual([...plain(1n), ...plain(2n), ...plain(H)]);
+    expect(await cursorOf(raw)).toBe(H);
+  }, 60_000);
+
   it("a stop while a height is held with its COMMIT's answer lost: nothing told; the next start tells the cursor's block committed at its re-delivery", async () => {
     for (const how of ["landed", "lost"] as const) {
       const armed = { done: false };
@@ -411,22 +470,107 @@ function deferredModule(): ModuleDeclaration {
   };
 }
 
-/** `db`, whose next transaction fails with a lost connection before its body once `state.failNext` is set. */
-function failingNext(db: Database): { readonly db: Database; readonly state: { failNext: boolean } } {
-  const state = { failNext: false };
+/** Through the process over the node source and a tape node, whose queue prepares heights ahead of the loop. */
+describe.each(PROCESS_BACKENDS)("what the loop tells the follower of a height the node source prepared, through the process on $name", (backend) => {
+  beforeAll(() => backend.start(), 180_000);
+  afterAll(() => backend.stop(), 60_000);
+
+  const LAST = 8;
+
+  it.each(["on-fetch", "on-parse"] as const)("a failure in %s of h, run in the source's queue: rolledBack h once when the loop reaches h, never written", async (point) => {
+    const db = await backend.database();
+    const chain = chainOf(BigInt(LAST));
+    const records = [
+      ...opening(chain[0] as ChainBlock, chain[LAST] as ChainBlock),
+      ...chain.slice(1).flatMap((block, index) => finalized(block, RUNTIME, index === 0)),
+    ];
+    const log: string[] = [];
+    /** The process's loop, telling a logging follower. */
+    class Following extends FinalizedLoop {
+      constructor(input: LoopInput) {
+        super({ ...input, follower: loggingFollower(log) });
+      }
+    }
+    // A slow on-compute keeps the loop behind the prefetch, so h is prepared ahead of it.
+    const run = await ingest(db, records, {
+      start: 1n,
+      settings: { prefetchWindow: 8 },
+      user: [failingAt(point, H), slow(20)],
+      loop: Following,
+    });
+    let status: unknown;
+    try {
+      await halted(run);
+      status = run.handle.status();
+    } finally {
+      await run.close();
+    }
+    expect(status).toMatchObject({ state: "halted", cursor: H - 1n });
+    expect(log.filter((line) => line.startsWith("told "))).toEqual([
+      "told written 1",
+      "told committed 1",
+      "told written 2",
+      "told committed 2",
+      `told rolledBack ${H}`,
+    ]);
+  }, PATIENCE_MS * 2);
+});
+
+/** Module `f`, which fails at `point` of `height` every time it runs there (the queue may prepare a height twice). */
+function failingAt(point: "on-fetch" | "on-parse", height: bigint): ModuleDeclaration {
+  const fail = (b: BlockContext): void => {
+    if (b.height === height) throw new Error(`f cannot ${point} ${height}`);
+  };
   return {
-    state,
-    db: {
-      read: (body, options) => db.read(body, options),
-      async transaction<T>(body: (tx: Transaction) => Promise<T>): Promise<T> {
-        if (state.failNext) {
-          state.failNext = false;
-          throw new UmbraError("connection-lost", "the connection was lost before the transaction began (the test's database)");
-        }
-        return db.transaction(body);
+    id: "f",
+    version: "1.0.0",
+    side: "public",
+    requires: ["block-header"],
+    provides: [{ name: "f-rows", lifetimes: ["table"], table: { schema: "f", tables: ["rows"], kind: "append-only" } }],
+    startsMidChain: true,
+    configSchema: z.object({}),
+    migrations: [{ id: "001", sql: "CREATE TABLE f.rows (height bigint PRIMARY KEY)" }],
+    points: point === "on-fetch" ? { async "on-fetch"(_p, b) { fail(b); } } : { async "on-parse"(_p, b) { fail(b); } },
+  };
+}
+
+/** Module `k`, which keeps the block write handle of its `on-db-write` in `keeper` (a module that leaves a timer behind). */
+function keepingModule(keeper: { w?: BlockWriteHandle }): ModuleDeclaration {
+  return {
+    id: "k",
+    version: "1.0.0",
+    side: "public",
+    requires: ["block-header"],
+    provides: [{ name: "k-rows", lifetimes: ["table"], table: { schema: "k", tables: ["rows"], kind: "append-only" } }],
+    startsMidChain: true,
+    configSchema: z.object({}),
+    migrations: [{ id: "001", sql: "CREATE TABLE k.rows (height bigint PRIMARY KEY)" }],
+    points: {
+      async "on-db-write"(_p, _b, w) {
+        keeper.w = w;
       },
-      close: () => db.close(),
-      writerSession: () => db.writerSession(),
+    },
+  };
+}
+
+/** Module `e`, whose `on-start-height` fails at `failAt.start` and whose `on-stop-height` fails at `failAt.stop`. */
+function edgeModule(failAt: { readonly start?: bigint; readonly stop?: bigint }): ModuleDeclaration {
+  return {
+    id: "e",
+    version: "1.0.0",
+    side: "public",
+    requires: ["block-header"],
+    provides: [{ name: "e-rows", lifetimes: ["table"], table: { schema: "e", tables: ["rows"], kind: "append-only" } }],
+    startsMidChain: true,
+    configSchema: z.object({}),
+    migrations: [{ id: "001", sql: "CREATE TABLE e.rows (height bigint PRIMARY KEY)" }],
+    points: {
+      async "on-start-height"(_p, at) {
+        if (at.height === failAt.start) throw new Error("e cannot start at h");
+      },
+      async "on-stop-height"(_p, at) {
+        if (at.height === failAt.stop) throw new Error("e cannot stop at h");
+      },
     },
   };
 }
