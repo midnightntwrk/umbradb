@@ -37,7 +37,8 @@
  * 3. Block by block, as the per-block step checks each block: every reference of a list block h flushed, and every
  *    key h raised, is a row when the run began or a node that h or a block before it flushed (`missing-reference`);
  *    and each key's count, from the lists the blocks up to h flushed and replaced, is not below 0
- *    (`negative-count`). The first block that fails halts the run, named.
+ *    (`negative-count`). The first block that fails halts the run, named; a missing reference of the last block halts
+ *    it only after step 7's count check, which the per-block step makes first.
  * 4. Protected: the keys with a root count after the block before the last or after the last, and the keys that a
  *    list replaced by the last block referenced.
  * 5. Candidates: the queue as the run found it, the keys whose root count the run changed, the new nodes, and the
@@ -804,7 +805,11 @@ export class RunReclaim {
     }
     // The first block that fails, as the per-block step halts at it; at one block a count is checked first.
     if (below !== null && (missing === null || below.at <= missing.at)) throw below.error;
-    if (missing !== null) throw missing.error;
+    // A missing reference of an earlier block halts the run there. One of the last block waits for the cascade and
+    // step 7's counts, which are the last block's: the per-block step checks the counts after its cascade before the
+    // references.
+    if (missing !== null && missing.at < last) throw missing.error;
+    const pending = missing;
 
     // (4) Protection. A candidate's counts are read before it is asked.
     const inUniverse = (record: KeyRecord): boolean => record.node !== null || record.row === true;
@@ -899,6 +904,7 @@ export class RunReclaim {
         }
       }
     }
+    if (pending !== null) throw pending.error;
     // No list the run writes references a key the cascade deleted. With counts that hold the stored references none
     // does: a key a kept list references keeps a count above 0. On tables whose count of a key is too low, the
     // cascade can delete it while a list the run writes references it.

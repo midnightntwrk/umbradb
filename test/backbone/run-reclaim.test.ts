@@ -811,6 +811,31 @@ describe("by hand", () => {
     expect(outcome.evict.map(hex)).toEqual([q.key]);
   });
 
+  it("a block with both a reference stored nowhere and a count its cascade takes below 0 halts with negative-count, as the per-block step names it", async () => {
+    // Tables whose count of c is 0 though q's stored list references it; q is queued, c is not. The block writes a
+    // new root r over x, which is stored nowhere: the cascade deletes q, and c's count falls to -1.
+    const x = made("x");
+    const q = over("q", c);
+    const r = over("r", x);
+    const found: NodeTables = { rows: new Map([[q.key, q.children], [c.key, c.children]]), refs: new Map(), queue: new Set([q.key]) };
+    const flush = { inserts: flushed(r), rootCounts: raise(r) };
+    expect(await stepOf(found, new Map(), flush, 1n)).toBe("negative-count");
+    const one = new RunReclaim({ first: 1n, on: true });
+    one.collect(1n, flush, true);
+    expect(await haltOf(one.compute(runTables(found, new Map([[r.key, 1]]))))).toBe("negative-count at 1");
+    // With no count below 0 the same block halts for the reference.
+    const sound = new RunReclaim({ first: 1n, on: true });
+    sound.collect(1n, flush, true);
+    expect(await haltOf(sound.compute(runTables({ ...found, refs: new Map([[c.key, 1]]) }, new Map([[r.key, 1]]))))).toBe("missing-reference at 1");
+    // When the reference is an earlier block's, the run halts at that block for it, before its cascade: the run's
+    // cascade runs once, after its last block, and cannot say at which block a count it takes below 0 fell. The
+    // per-block step halts at the same block, for the count.
+    const longer = new RunReclaim({ first: 1n, on: true });
+    longer.collect(1n, flush, true);
+    longer.collect(2n, { inserts: [], rootCounts: [] }, true);
+    expect(await haltOf(longer.compute(runTables(found, new Map([[r.key, 1]]))))).toBe("missing-reference at 1");
+  });
+
   it("a state made and released inside a run is never written, and is deleted", async () => {
     const leafNode = made("leaf");
     const states = [0, 1, 2, 3].map((n) => over(`state ${n}`, leafNode));
