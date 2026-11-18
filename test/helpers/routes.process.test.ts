@@ -7,15 +7,18 @@ import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backend
 import { TEST_API_ID, testApi } from "./test-api.js";
 
 /**
- * Typed routes through the real process and its HTTP listener (`listen.api`), on PostgreSQL 18 and PGlite: the
- * `test-api` module (`./test-api.ts`) on an in-memory chain of 12 blocks. What a client sees:
- * - each route under `/test-api`, its answer read at the committed height with the chain-data headers and the
- *   listener's `X-Umbra-Version`, as ASCII JSON with the fixed headers;
- * - `GET` parameters (path and query) and a `POST` body checked against their schemas: 400 `invalid-request`;
- * - a handler's `RouteError` in the module API's envelope; an answer its schema refuses as the module API's 500
- *   `internal-error`, whose body holds nothing of the answer, and a line of the process log;
- * - paging with `pageCursor`, a forged cursor refused;
- * - the module API's own answers for what no typed route reaches (404 `not-found`, 405 `method-not-allowed`).
+ * Routes (`src/modules/route.ts`, registered with `api.route`) through the real process and its HTTP listener
+ * (`listen.api`), on PostgreSQL 18 and PGlite: the `test-api` module (`./test-api.ts`) on an in-memory chain of 12
+ * blocks. What a client sees:
+ * - each route under `/test-api` (one with no `http` hint at `POST /test-api/<name>`), its answer read at the
+ *   committed height with the chain-data headers and the listener's `X-Umbra-Version`, as ASCII JSON with the fixed
+ *   headers;
+ * - `GET` parameters (path and query) read as the numbers their schema asks for, and a `POST` body, checked against
+ *   their schemas: 400 `invalid-request`;
+ * - a handler's `RouteError` with its kind's status in the module API's envelope; an answer its schema refuses as the
+ *   module API's 500 `internal-error`, whose body holds nothing of the answer, and a line of the process log;
+ * - paging with `pageCursor`, text that is no cursor refused;
+ * - the module API's own answers for what no route reaches (404 `not-found`, 405 `method-not-allowed`).
  */
 
 const HEAD = 12;
@@ -44,7 +47,7 @@ async function ask(origin: string, method: "GET" | "POST" | "DELETE", path: stri
 
 const hashAt = (height: number) => `0x${Buffer.from(inMemoryBlock(BigInt(height)).hash).toString("hex")}`;
 
-describe.each(PROCESS_BACKENDS)("typed routes through the process on $name", (backend: ProcessBackend) => {
+describe.each(PROCESS_BACKENDS)("routes through the process on $name", (backend: ProcessBackend) => {
   let handle: UmbraDBHandle;
   let origin: string;
   let lines: string[];
@@ -75,7 +78,7 @@ describe.each(PROCESS_BACKENDS)("typed routes through the process on $name", (ba
 
   it("answers a GET with path parameters under the namespace, at one height, with the chain-data headers", async () => {
     const got = await ask(origin, "GET", "/test-api/v1/blocks/5");
-    expect([got.status, got.json]).toEqual([200, { height: "5", hash: hashAt(5) }]);
+    expect([got.status, got.json]).toEqual([200, { height: 5, hash: hashAt(5) }]);
     expect(got.headers).toMatchObject({
       "content-type": "application/json; charset=utf-8",
       "x-content-type-options": "nosniff",
@@ -92,51 +95,53 @@ describe.each(PROCESS_BACKENDS)("typed routes through the process on $name", (ba
       const got = await ask(origin, "GET", path);
       expect([path, got.status, got.json?.error?.code]).toEqual([path, 400, "invalid-request"]);
       expect(got.text).not.toContain("secret-param");
+      expect(got.headers).toMatchObject({ "x-content-type-options": "nosniff", "x-umbra-height": String(HEAD) });
     }
     for (const body of [{}, { text: 1 }, { text: "a", other: "secret-body" }, { text: "x".repeat(65) }]) {
-      const got = await ask(origin, "POST", "/test-api/v1/echo", body);
+      const got = await ask(origin, "POST", "/test-api/echo", body);
       expect([got.status, got.json?.error?.code]).toEqual([400, "invalid-request"]);
       expect(got.text).not.toContain("secret-body");
     }
+    const withParameter = await ask(origin, "POST", "/test-api/echo?text=a", { text: "a" });
+    expect([withParameter.status, withParameter.json?.error?.code]).toEqual([400, "invalid-request"]);
   });
 
   it("answers a POST's body, escaping non-ASCII text, and a handler's RouteError in the envelope", async () => {
-    const echo = await ask(origin, "POST", "/test-api/v1/echo", { text: "héllo <b>" });
+    const echo = await ask(origin, "POST", "/test-api/echo", { text: "héllo <b>" });
     expect([echo.status, echo.json]).toEqual([200, { text: "héllo <b>" }]);
     expect(echo.text).toBe('{"text":"h\\u00e9llo \\u003cb\\u003e"}');
-    const refused = await ask(origin, "POST", "/test-api/v1/echo", { text: "refuse" });
-    expect([refused.status, refused.json]).toEqual([409, { error: { code: "refused", message: "this text is refused" } }]);
+    const refused = await ask(origin, "POST", "/test-api/echo", { text: "refuse" });
+    expect([refused.status, refused.json]).toEqual([400, { error: { code: "refused", message: "this text is refused" } }]);
   });
 
   it("never sends an answer its schema refuses: the client gets the module API's 500, the process log the error", async () => {
     const failed = () => lines.filter((line) => line.includes("of test-api failed:"));
     const before = failed().length;
-    const got = await ask(origin, "POST", "/test-api/v1/echo", { text: "wrong-answer" });
+    const got = await ask(origin, "POST", "/test-api/echo", { text: "wrong-answer" });
     expect([got.status, got.json?.error?.code]).toEqual([500, "internal-error"]);
     expect(got.text).not.toContain("42");
     expect(failed().length).toBe(before + 1);
-    expect(failed().at(-1)).toContain("POST /test-api/v1/echo built an answer its schema refuses: answer/text");
+    expect(failed().at(-1)).toContain("the route test-api.echo built an answer its output schema refuses: answer/text");
   });
 
-  it("pages the blocks with page cursors, and refuses a forged cursor", async () => {
-    const seen: string[] = [];
+  it("pages the blocks with page cursors, and refuses text that is no cursor", async () => {
+    const seen: number[] = [];
     let path = "/test-api/v1/blocks?limit=5";
     for (let pages = 0; pages < 10; pages++) {
       const got = await ask(origin, "GET", path);
       expect(got.status).toBe(200);
-      seen.push(...got.json.items.map((b: { height: string }) => b.height));
+      seen.push(...got.json.items.map((b: { height: number }) => b.height));
       if (got.json.nextCursor === null) break;
       path = `/test-api/v1/blocks?limit=5&cursor=${got.json.nextCursor}`;
     }
-    expect(seen).toEqual(Array.from({ length: HEAD }, (_, i) => String(HEAD - i)));
+    expect(seen).toEqual(Array.from({ length: HEAD }, (_, i) => HEAD - i));
     const forged = await ask(origin, "GET", `/test-api/v1/blocks?cursor=${Buffer.from('{"below":"x"}').toString("base64url")}`);
-    expect([forged.status, forged.json?.error]).toEqual([400, { code: "invalid-request", message: "cursor: not a cursor this route issued" }]);
+    expect([forged.status, forged.json?.error]).toEqual([400, { code: "invalid-request", message: "cursor: not a cursor of this route" }]);
   });
 
-
-  it("leaves what no typed route reaches to the module API: 404 not-found, 405 method-not-allowed", async () => {
+  it("leaves what no route reaches to the module API: 404 not-found, 405 method-not-allowed", async () => {
     expect((await ask(origin, "GET", "/test-api/v1/nothing")).json?.error?.code).toBe("not-found");
-    const wrong = await ask(origin, "DELETE", "/test-api/v1/echo");
+    const wrong = await ask(origin, "DELETE", "/test-api/echo");
     expect([wrong.status, wrong.json?.error?.code]).toEqual([405, "method-not-allowed"]);
   });
 });

@@ -366,8 +366,9 @@ Headers UmbraDB adds to every answer:
 - `X-Umbra-Config-Hash`: the hash of the process's configuration data. It changes only when the process restarts with
   other configuration data, and holds no secret.
 
-Headers a module writes with the helpers (`answerChainData`, `chainDataHeaders`; `withViewExtensions` puts the same in
-a GraphQL response's `extensions`):
+Headers a route's own answers carry (`api.route`: its output, a `RouteError`, a refused input), and that a raw HTTP
+handler writes with the helpers (`answerChainData`, `chainDataHeaders`; `withViewExtensions` puts the same in a
+GraphQL response's `extensions`):
 
 - `X-Umbra-View`: `finalized`, the only view of this version.
 - `X-Umbra-Height` and `X-Umbra-Hash`: the committed height the request read, and its block hash.
@@ -467,7 +468,7 @@ the [module guide](docs/module-guide.md) walks through it. It imports from `"umb
 
 ```ts
 import { z } from "zod";
-import { answerChainData, defineModule, type ParsedTransaction, type ReadHandle } from "umbradb";
+import { defineModule, defineRoute, hexBytes, type ParsedTransaction, RouteError, uintText } from "umbradb";
 
 export const statsModule = defineModule({
   id: "stats-module", // its schema is stats_module
@@ -532,7 +533,7 @@ $ curl http://127.0.0.1:18080/stats-module/recent?limit=2
            {"height":"9997","hash":"0x4580…","block_time":"2026-07-17T08:06:30Z","tx_count":1,"total_tx":"289",…}]}
 
 $ curl http://127.0.0.1:18080/stats-module/blocks/abc
-{"error":"bad-height","message":"a height is a whole number"}
+{"error":{"code":"invalid-request","message":"input/height: expected an integer from 0 to 2^64 - 1, as digits in a string or as a JSON number"}}
 ```
 
 `countSystem` is a `data` setting: changing it in the entry from 0 after the process ran is refused (with the process

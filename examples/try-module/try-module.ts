@@ -7,10 +7,33 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { z } from "zod";
-import { answerChainData, coreEntry, defineConfig, defineModule, InMemoryBlockSource, startUmbraDB } from "umbradb";
+import {
+  coreEntry,
+  defineConfig,
+  defineModule,
+  defineRoute,
+  InMemoryBlockSource,
+  RouteError,
+  startUmbraDB,
+  uintText,
+} from "umbradb";
+
+// The module's route: the latest row. It names no transport; `http` says where HTTP serves it, under
+// /block-runtimes. uintText(64) is a bigint here and digits in a string to a client.
+const getLatest = defineRoute({
+  name: "getLatest",
+  input: z.object({}),
+  output: z.strictObject({ height: uintText(64), spec_version: z.int(), extrinsics: z.int() }),
+  http: { method: "GET", path: "/latest" },
+  async handle(_input, { read, height }) {
+    const [row] = await read.query("SELECT * FROM block_runtimes.rows WHERE height = $1", [height]);
+    if (row === undefined) throw new RouteError("not-found", "no-row", "no row at the committed height");
+    return { height: row.height as bigint, spec_version: row.spec_version as number, extrinsics: row.extrinsics as number };
+  },
+});
 
 // The module under test: for each height, the runtime version of its block and how many extrinsics it carried, and
-// one route that answers the latest row.
+// the route above.
 const blockRuntimes = defineModule({
   id: "block-runtimes",
   version: "1.0.0",
@@ -45,12 +68,7 @@ const blockRuntimes = defineModule({
       ]);
     },
     async "on-start-api"(_processContext, api) {
-      api.http("GET", "/block-runtimes/latest", async (_request, read) =>
-        answerChainData(read, async (view) => {
-          const [row] = await read.query("SELECT * FROM block_runtimes.rows WHERE height = $1", [view.height]);
-          return row === undefined ? { status: 404, body: { error: "no-row" } } : { status: 200, body: row };
-        }),
-      );
+      api.route(getLatest);
     },
   },
 });
