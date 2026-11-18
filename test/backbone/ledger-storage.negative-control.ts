@@ -34,7 +34,7 @@ import { type LedgerScenario, ledgerScenario, type LedgerTx, RUNTIME_2_1 } from 
  *   worker holds no state, so the next root is never the node's.
  * - Skipping the conversion, so F is applied with the state's own ledger (v8), gives another root at F than the
  *   node's: `root-mismatch` at F.
- * - A window that releases one state too early has the state at 4,000 released at cursor 5,000, so its load fails.
+ * - A window that releases one state too early has the state at 400 released at cursor 500, so its load fails.
  * - The contract run without persisting the contract's keys (no `core-contract-states`): the nodes of its state
  *   of 10 that only those keys held, stored while the states held them, are deleted once those states are released, and
  *   its keys do not load.
@@ -125,31 +125,31 @@ export const negativeControlTests = (backend: ProcessBackend): void => describe(
   }, PATIENCE_MS * 3);
 });
 
-export const windowControlTests = (): void => describe("control (PGlite: 5,000 blocks once)", () => {
+export const windowControlTests = (): void => describe("control (PGlite: 500 blocks once)", () => {
   const backend = PROCESS_BACKENDS.find((candidate) => candidate.kind === "pglite") as ProcessBackend;
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("a window that releases one state too early fails the load of 4,000 at cursor 5,000", async () => {
+  it("a window that releases one state too early fails the load of 400 at cursor 500", async () => {
     const scenario = await ledgerScenario({
       ledger: "v9",
       genesis: RAW.v9.LedgerState.blank(NETWORK_ID).serialize(),
       includesBlockZero: false,
-      blocks: Array.from({ length: 5_002 }, () => []),
+      blocks: Array.from({ length: 502 }, () => []),
       rootsOnly: true,
     });
     const db = await backend.database();
     const seen = retentionSeen();
     const process = await runUntil(db, scenario.records, scenario.head, {
-      // As in the window test's own run: the sweep off (it does not change the window, and makes 5,000 blocks several
-      // times slower).
-      settings: { retainStates: 1_000, sweep: "off" },
+      // As in the window test's own run: the sweep off (it does not change the window, and makes the run several times
+      // slower).
+      settings: { retainStates: 100, sweep: "off" },
       core: coreWith({ retainedFrom: (revisions, height) => retainedFrom(revisions, height) + 1n }),
-      user: [retentionWatcher(seen, new Map([[5_001n, [4_000n, 4_001n]]]))],
+      user: [retentionWatcher(seen, new Map([[501n, [400n, 401n]]]))],
     });
-    expect(process.status).toMatchObject({ cursor: 5_001n, reason: null });
-    // The window test requires the load of 4,000 to succeed: here it fails, and 4,001 is the oldest retained state.
-    expect(seen.loads.get(5_001n)).toEqual(["4000 state-not-retained", loaded(scenario, 4_001n)]);
-    expect(seen.loads.get(5_001n)?.[0]).not.toBe(loaded(scenario, 4_000n));
+    expect(process.status).toMatchObject({ cursor: 501n, reason: null });
+    // The window test requires the load of 400 to succeed: here it fails, and 401 is the oldest retained state.
+    expect(seen.loads.get(501n)).toEqual(["400 state-not-retained", loaded(scenario, 401n)]);
+    expect(seen.loads.get(501n)?.[0]).not.toBe(loaded(scenario, 400n));
   }, PATIENCE_MS * 12);
 });
