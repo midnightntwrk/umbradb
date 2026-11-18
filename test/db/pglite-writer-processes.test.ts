@@ -15,7 +15,7 @@ import {
  * `node --import tsx` (`pglite-writer.worker.ts`) in a temporary directory deleted afterwards.
  *
  * **The pause lasts the required 5 minutes** (300 s) unless `UMBRADB_A17_SIGSTOP_SECONDS` is set: a shorter pause is
- * for local iteration and mutation runs only, and the test's title says how long it ran. The pause costs one test
+ * for local iteration only, and the test's title says how long it ran. The pause costs one test
  * worker 5 minutes of waiting, not CPU, so the conformance run keeps the full length.
  *
  * "Stays up, not ready" (the refused process) and "processing halts" belong to the runner. "Continues from the cursor"
