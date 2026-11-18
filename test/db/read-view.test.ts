@@ -8,6 +8,7 @@ import {
   connectionListener,
   controlProblems,
   cursorsAndPreparedProblems,
+  deallocatedReadProblems,
   edgeProblems,
   failedStatementProblems,
   listenProblems,
@@ -16,6 +17,7 @@ import {
   notifyProblems,
   preparedTextProblems,
   SCHEMA,
+  secondSendingProblems,
   seesOuterRowsProblems,
   sessionAuthorizationProblems,
   sessionObjectProblems,
@@ -66,6 +68,23 @@ describe.each(BACKENDS)("the read view on $name", { timeout: 120_000 }, (backend
   it("answers the statements a settled body left unanswered inside the view, and refuses the handle while the close is pending without sending", async () => {
     const { db, sent } = await backend.counted(SCHEMA, TEST_CURSOR);
     expect(await unansweredProblems(db, sent)).toEqual([]);
+  });
+
+  // A statement with a parameter after DEALLOCATE ALL: PostgreSQL's session prepared its text by name, and the driver
+  // sends it a second time; PGlite prepares nothing by name.
+  it("waits for a write its body left unanswered that is sent a second time after DEALLOCATE ALL: no sending is behind the close, and its row is not stored", async () => {
+    const { db, sent } = await backend.counted(SCHEMA, TEST_CURSOR);
+    expect(await secondSendingProblems(db, sent, { prepares: !backend.singleQueue, first: false })).toEqual([]);
+  });
+
+  it("waits for such a write sent as the view's first statement, right behind the open", async () => {
+    const { db, sent } = await backend.counted(SCHEMA, TEST_CURSOR);
+    expect(await secondSendingProblems(db, sent, { prepares: !backend.singleQueue, first: true })).toEqual([]);
+  });
+
+  it("answers a statement with a parameter that its body awaits after DEALLOCATE ALL ahead of the close; the outer's own prepared text fails once after the view", async () => {
+    const { db, sent } = await backend.counted(SCHEMA, TEST_CURSOR);
+    expect(await deallocatedReadProblems(db, sent, !backend.singleQueue)).toEqual([]);
   });
 
   it("rejects with the body's own error, the same value, whatever it is", async () => {

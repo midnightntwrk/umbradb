@@ -6,8 +6,8 @@
  * between the two texts of `./read-view-sql.ts`, each sent as one simple-protocol text:
  * - `OPEN` (a savepoint, `SET TRANSACTION READ ONLY`, `RESET ALL`, `RESET ROLE`) goes with the body's first statement:
  *   both are sent at once, in that order, and the open is not awaited alone;
- * - `CLOSE` (`ROLLBACK TO SAVEPOINT`, `RELEASE SAVEPOINT`) is sent once the body settled, and awaited before the view
- *   returns.
+ * - `CLOSE` (`ROLLBACK TO SAVEPOINT`, `RELEASE SAVEPOINT`) is sent once the body settled and every statement its handle
+ *   sent was answered, and awaited before the view returns.
  * A body that sends no statement sends nothing.
  *
  * **What it guarantees.**
@@ -20,6 +20,12 @@
  * - A statement that fails inside it reaches the body as its own error and does not abort the transaction. The view's
  *   later statements, also those already sent behind it, fail with `25P02` and are not sent again; the close undoes the
  *   failure.
+ * - No statement of its handle runs after the close, not even one the body left unanswered when it settled: the close
+ *   waits for each to be answered or to fail. On PostgreSQL the driver sends a statement a second time by itself when
+ *   the name the session prepared it under is gone from the server (after a `DEALLOCATE ALL`), behind whatever was
+ *   sent meanwhile; the statement is answered only by that second sending, so the close is behind it too. Inside a
+ *   view the second sending is refused (the first failure aborted the view's statements) and the statement fails with
+ *   `26000`.
  * - It cannot change the session for later statements. Inside it the settings and the role are the session's own (the
  *   open's resets); a `SET`, `SET LOCAL`, `set_config` or `SET ROLE` is undone by the close, and the transaction's own
  *   `SET LOCAL ROLE` and local settings are back after it.
@@ -55,18 +61,23 @@
  * `set_config('session_authorization', …)` inside a `SELECT` is not caught, and nothing undoes it for the engine's
  * life.
  *
- * **Results and errors.** The view resolves with the body's result, or rejects with the body's own error unchanged. A
- * close that fails wins over both: the view rejects with the close's error, and the transaction refuses every later
- * statement with that error and rolls back at its end, never committing. A handle used after its body settled fails
- * with `handle-closed` (`handle: "read"`) and sends nothing. A view asked for while another view of the same
- * transaction is open throws a programming error before anything is sent, as does a `tx` no backend opened.
+ * **Results and errors.** The view resolves with the body's result, or rejects with the body's own error unchanged,
+ * after every statement its handle sent was answered, whether the body awaited it or not; what such a statement
+ * answered changes neither. A close that fails wins over both: the view rejects with the close's error, and the
+ * transaction refuses every later statement with that error and rolls back at its end, never committing. A statement
+ * that is never answered keeps the view, and so its transaction, open: the close would be answered only after it on the
+ * same session, and a lost session fails the statement. A handle used after its body settled fails with `handle-closed`
+ * (`handle: "read"`) and sends nothing. A view asked for while another view of the same transaction is open throws a
+ * programming error before anything is sent, as does a `tx` no backend opened.
  *
  * **A transaction already aborted.** The open fails (`25P02`): the view's first statement rejects with the open's
  * error, its later statements with the same error without being sent, and the close is not sent. The transaction
  * stays aborted, and its commit is refused (`commit-rolled-back`).
  *
  * The transaction's own statements sent while a view is open run inside the view: read-only, and failing behind a
- * failed statement of the view.
+ * failed statement of the view. The view does not wait for them: the caller awaits each statement of its own before
+ * the view's body settles. One still unanswered then can be answered after the close, and on PostgreSQL sent a second
+ * time behind it, where the transaction is read-write again.
  *
  * **The backends' path**, as for `./multi-statement.ts`: each backend registers, for every transaction it opens, how
  * to send a text inside it and how to mark it broken ({@link allowReadView}), keyed by the transaction object; nothing
@@ -142,15 +153,24 @@ async function view<T>(
   let opened: Promise<boolean> | undefined;
   /** The open's error, once it failed. */
   let openFailure: { readonly error: unknown } | undefined;
+  /** The statements the handle sent that are neither answered nor failed yet. */
+  const unanswered = new Set<Promise<unknown>>();
+  const send = (sql: string, params: unknown[] | undefined): Promise<Record<string, unknown>[]> => {
+    const statement = tx.query(sql, params);
+    const answered = () => unanswered.delete(statement);
+    unanswered.add(statement);
+    statement.then(answered, answered);
+    return statement;
+  };
   const query = async (sql: string, params?: unknown[]): Promise<Record<string, unknown>[]> => {
     if (settled) throw handleClosed("read");
     const command = controlStatement(sql);
     if (command !== null) throw controlRefused(command);
     if (openFailure !== undefined) throw openFailure.error;
-    if (opened !== undefined) return tx.query(sql, params);
+    if (opened !== undefined) return send(sql, params);
     // The first statement: the open is sent first and the statement right behind it, neither awaited alone.
     const open = path.control(OPEN);
-    const sent = tx.query(sql, params);
+    const sent = send(sql, params);
     opened = open.then(
       () => true,
       (error: unknown) => {
@@ -171,6 +191,10 @@ async function view<T>(
   } finally {
     settled = true;
   }
+  // The handle is closed, so no statement joins these. A statement the body left unanswered is waited for, whatever it
+  // answers: on PostgreSQL the driver may send it a second time (see the module comment), and a close sent before its
+  // last answer would be ahead of that sending.
+  await Promise.allSettled([...unanswered]);
   if (opened !== undefined && (await opened)) {
     try {
       await path.control(CLOSE);

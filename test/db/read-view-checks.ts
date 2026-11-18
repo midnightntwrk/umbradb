@@ -496,6 +496,118 @@ export async function unansweredProblems(db: Database, sent: readonly string[]):
 }
 
 /**
+ * A write with a parameter. On PostgreSQL the session prepares such a text by name at its first use and sends only
+ * the name afterwards; once the name is gone from the server (`DEALLOCATE ALL`), the driver sends the statement a
+ * second time by itself, behind whatever was sent meanwhile. PGlite prepares nothing by name.
+ */
+const PREPARED_WRITE = "INSERT INTO t.rows VALUES ($1, 'prepared at its first use') RETURNING height::int AS height";
+
+/** A read with a parameter, prepared in the same way. */
+const PREPARED_READ = "SELECT count(*)::int AS n FROM t.rows WHERE height < $1";
+
+/**
+ * A write the driver sends a second time does not run after the close. The outer runs {@link PREPARED_WRITE} once;
+ * `DEALLOCATE ALL` then runs inside the view (or, with `first`, in the outer before it, so that the write is the
+ * view's first statement, right behind the open); the body sends the write with another parameter, does not await it
+ * and returns. The view resolves after the write is answered; the write fails (`26000` where the driver prepares,
+ * its second sending refused behind the first failure; `25006` on PGlite); every sending of it reached the database
+ * ahead of the close (`sent`); the outer is read-write after the view and writes with the same text; and only the
+ * outer's two rows are stored.
+ */
+export async function secondSendingProblems(
+  db: Database,
+  sent: readonly string[],
+  options: { readonly prepares: boolean; readonly first: boolean },
+): Promise<string[]> {
+  const problems: string[] = [];
+  const order: string[] = [];
+  const sendings = options.prepares ? [PREPARED_WRITE, PREPARED_WRITE] : [PREPARED_WRITE];
+  try {
+    await db.transaction(async (tx) => {
+      const from = sent.length;
+      compare(problems, "the outer's write before the view", await tx.query(PREPARED_WRITE, [1]), [{ height: 1 }]);
+      if (options.first) await tx.execute("DEALLOCATE ALL");
+      let write: Promise<string> | undefined;
+      const result = await view(tx, problems, "a body that settles first", async (read) => {
+        if (!options.first) await read.query("DEALLOCATE ALL");
+        write = tried(() => read.query(PREPARED_WRITE, [2])).then((outcome) => {
+          order.push("the write");
+          return outcome;
+        });
+        return "the body's result";
+      });
+      order.push("the view");
+      const texts = sent.slice(from);
+      compare(problems, "the view's result", result, "the body's result");
+      compare(problems, "the write the body left unanswered", await write, options.prepares ? "26000" : "25006");
+      compare(problems, "the order of the answers", order, ["the write", "the view"]);
+      compare(
+        problems,
+        "the texts that reached the database, in order",
+        texts,
+        options.first
+          ? [PREPARED_WRITE, "DEALLOCATE ALL", OPEN, ...sendings, CLOSE]
+          : [PREPARED_WRITE, OPEN, "DEALLOCATE ALL", ...sendings, CLOSE],
+      );
+      const after = await tx.query("SELECT current_setting('transaction_read_only') AS read_only, count(*)::int AS n FROM t.rows");
+      compare(problems, "the outer after the view", after, [{ read_only: "off", n: 1 }]);
+      compare(problems, "the outer's write with the same text after the view", await tried(() => tx.query(PREPARED_WRITE, [3])), "ok");
+    });
+  } catch (error) {
+    problems.push(`the transaction failed: ${outcomeOf(error)}`);
+  }
+  compare(problems, "rows stored", await storedHeights(db), [1, 3]);
+  return problems;
+}
+
+/**
+ * A statement with a parameter that the body awaits after `DEALLOCATE ALL` is answered before the close, its second
+ * sending too. Where the driver prepares, {@link PREPARED_READ} fails with `26000` (the second sending is refused
+ * behind the first failure) and the view's next statement with `25P02`; on PGlite both are answered. Each sending
+ * reached the database ahead of the close (`sent`), and the outer reads with the same text after the view.
+ *
+ * The close does not bring the names back: where the driver prepares, the outer's next use of a text the view did not
+ * send, {@link PREPARED_WRITE}, fails once with `26000` (here inside a savepoint, which undoes the failure) and is
+ * answered at the use after it.
+ */
+export async function deallocatedReadProblems(db: Database, sent: readonly string[], prepares: boolean): Promise<string[]> {
+  const problems: string[] = [];
+  const next = "SELECT 1 AS next";
+  try {
+    await db.transaction(async (tx) => {
+      const from = sent.length;
+      compare(problems, "the outer's read before the view", await tx.query(PREPARED_READ, [100]), [{ n: 0 }]);
+      compare(problems, "the outer's write before the view", await tx.query(PREPARED_WRITE, [1]), [{ height: 1 }]);
+      const outcomes = await view(tx, problems, "a body that awaits its statements", async (read) => {
+        await read.query("DEALLOCATE ALL");
+        return [await tried(() => read.query(PREPARED_READ, [100])), await tried(() => read.query(next))];
+      });
+      const texts = sent.slice(from);
+      compare(problems, "the read and the statement after it", outcomes, prepares ? ["26000", "25P02"] : ["ok", "ok"]);
+      compare(problems, "the texts that reached the database, in order", texts, [
+        PREPARED_READ,
+        PREPARED_WRITE,
+        OPEN,
+        "DEALLOCATE ALL",
+        ...(prepares ? [PREPARED_READ, PREPARED_READ] : [PREPARED_READ]),
+        next,
+        CLOSE,
+      ]);
+      compare(problems, "the outer's read with the same text after the view", await tx.query(PREPARED_READ, [100]), [{ n: 1 }]);
+      await tx.execute("SAVEPOINT first_use");
+      compare(problems, "the outer's first use of its write after the view", await tried(() => tx.query(PREPARED_WRITE, [2])), prepares ? "26000" : "ok");
+      await tx.execute("ROLLBACK TO SAVEPOINT first_use");
+      await tx.execute("RELEASE SAVEPOINT first_use");
+      compare(problems, "the outer's next use of its write", await tried(() => tx.query(PREPARED_WRITE, [3])), "ok");
+    });
+  } catch (error) {
+    problems.push(`the transaction failed: ${outcomeOf(error)}`);
+  }
+  compare(problems, "rows stored", await storedHeights(db), [1, 3]);
+  return problems;
+}
+
+/**
  * The body's own error: whatever the body rejects with — an `Error`, a plain object, a string, `undefined` — is what
  * the view rejects with, the same value, whether the view sent a statement or none; so is a statement's error the
  * body lets through. The outer is usable after each.
