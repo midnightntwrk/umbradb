@@ -104,8 +104,11 @@
  * run from the database. A later failure of the same attempt that the engine retries makes the height again: the new
  * thread loads the state before it and applies it again, and its settle sends the eviction again, which a package that
  * refuses in every thread refuses again, one restart per attempt, the attempts bounded by the process's retries. With `restartOnRefusedEviction: false`
- * the refusal fails the block. A failure after the eviction (a write, the `COMMIT`) rolls the block back, the worker
- * having forgotten nodes the database keeps; it flushes such a node again when it needs it.
+ * the refusal fails the block. A failure after the eviction and before the `COMMIT` (a write, a lost connection) rolls
+ * the block back, the worker having forgotten nodes the database keeps; it flushes such a node again when it needs it.
+ * When the `COMMIT`'s answer is lost, the cursor read after the reconnection decides: a block that committed is not
+ * computed again, and its `on-after-db-write` tells the worker, which holds its state pending; one that did not is
+ * made again from `on-compute`, as after a rollback.
  *
  * The declaration ({@link CORE_LEDGER_STATE}) is a constant built over its rules. A negative control's build composes
  * its own with {@link coreLedgerState}, with one rule replaced.

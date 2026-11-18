@@ -588,13 +588,19 @@ tries once more (`engine.ts`'s `evict`). If it still refuses (`EvictionRefused`)
 
 ### 5.4 What a failure rolls back
 
+A failure before h's `COMMIT` rolls h's transaction back, and the engine knows it. A `COMMIT` whose answer is lost
+may have committed or not: the cursor read on the writer after the reconnection decides (the loop's
+`commitOutcome`).
+
 | Failure | Rolled back | Then |
 |---|---|---|
-| A check of the computation (`negative-count`, `missing-reference`, `unreached-node`, `unexpected-queued`) | h's transaction: every module's rows of h | halt with `ledger-refcount-invalid`, not retryable. The check throws before the eviction, so the worker is told nothing |
-| `row-count-mismatch`, or another failed statement of the net write | h's transaction | halt. The worker has forgotten nodes the database still keeps, as after the per-block step's eviction before a failed transaction |
+| A check of the computation (`negative-count`, `missing-reference`, `unreached-node`, `unexpected-queued`) | h's transaction, before its `COMMIT`: every module's rows of h | halt with `ledger-refcount-invalid`, not retryable. The check throws before the eviction, so the worker is told nothing |
+| `row-count-mismatch`, or another failed statement of the net write | h's transaction, before its `COMMIT` | halt. The worker has forgotten nodes the database still keeps, as after the per-block step's eviction before a failed transaction |
 | A refused eviction | nothing | section 5.3 |
-| A retryable failure (a lost connection) in h's transaction | h's transaction | the engine makes h again from `on-compute`, a new record holds it, and the settle computes the same tables from the same inputs and sends the same eviction again. The thread that applied h gives the same result for h, still pending (`engine.ts`); if the failed attempt restarted it after a refused eviction, the new thread loads the state after h − 1 from the database and applies h again (5.3) |
+| A retryable failure before the `COMMIT` (a lost connection at a statement of h's transaction) | h's transaction, before its `COMMIT` | the engine makes h again from `on-compute`, a new record holds it, and the settle computes the same tables from the same inputs and sends the same eviction again. The thread that applied h gives the same result for h, still pending (`engine.ts`); if the failed attempt restarted it after a refused eviction, the new thread loads the state after h − 1 from the database and applies h again (5.3) |
+| A `COMMIT` whose answer is lost (the connection lost while it ran) | not known until the cursor is read after the reconnection | the cursor at h with h's hash: h committed, is not computed again, and its `on-after-db-write` runs then, telling the worker, which holds the state after h pending, that it committed. The cursor at h − 1: h did not commit, and is made again from `on-compute`, as after a rollback before the `COMMIT`. Any other cursor halts with `unexpected-cursor` |
 | A crash before the `COMMIT` | h's transaction | a new process, with a new worker, starts from the database after h − 1 |
+| A crash after the server committed h | nothing | a new process, with a new worker, starts from the database after h |
 
 ### 5.5 The checks and the trace
 
@@ -604,7 +610,11 @@ tries once more (`engine.ts`'s `evict`). If it still refuses (`EvictionRefused`)
 - The trace (`core-ledger-state.ts`'s `traceSettle`): one link of `sh` per settle (the run's heights, its net write,
   the keys evicted, the rounds), `st` in the step's nine positions from the outcome, `collectMs` at `on-compute`, and
   `stepMs`, `evictMs`, the reads and `writeRefcountMs` inside the block's transaction.
-- `test/backbone/ledger-refcount-settle.test.ts` holds the order of 5.2 at every block, the tables after every block
-  to `refcount-step.ts` over the tables after h − 1 and h's recorded flush, the refusal of 5.3 and the rollbacks of
-  5.4; the tape replays (`test/backbone/refcount-tapes.ts`) hold the same reference at their sampled heights.
+- `test/backbone/ledger-refcount-settle.test.ts` holds the order of 5.2 at every block, the lent handle of 5.2 on
+  both backends, the tables after every block to `refcount-step.ts` over the tables after h − 1 and h's recorded
+  flush, the refusal of 5.3 alone and followed by a lost connection, a refused eviction against the per-block build
+  run end to end with its own worker (`test/backbone/refcount-per-block-run.ts`), and the rollbacks of 5.4;
+  `test/backbone/ledger-refcount-settle-lifecycle.test.ts` a stop and a pause asked for while the eviction is
+  awaited, and a lost `COMMIT` answer both ways; the tape replays (`test/backbone/refcount-tapes.ts`) hold the
+  reference at their sampled heights.
 
