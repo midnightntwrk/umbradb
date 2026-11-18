@@ -21,19 +21,29 @@ export const MAX_DIGITS = 78;
 /** The most bits of {@link uintText}: 2^256 − 1 has {@link MAX_DIGITS} digits. */
 export const MAX_BITS = 256;
 
+/** An integer's digits, with and without a sign: no leading zero, no `-0`. Their length is checked apart. */
+const SIGNED = /^(0|-?[1-9][0-9]*)$/;
+const UNSIGNED = /^(0|[1-9][0-9]*)$/;
+
 /**
- * The codec of the integers `accepts` takes. `digits` matches their text, which bounds its length before any is read
- * as a `bigint`; `expected` and `integer` describe them.
+ * The codec of the integers `accepts` takes, of at most `most` digits, with a sign or without. The text's length is
+ * checked before anything else, so no long text is matched or read as a `bigint`. `expected` describes them.
  */
-function integerText(digits: RegExp, expected: string, integer: Record<string, unknown>, accepts: (value: bigint) => boolean) {
+function integerText(signed: boolean, most: number, expected: string, accepts: (value: bigint) => boolean) {
   const message = `expected ${expected}, as digits in a string or as a JSON number`;
+  const digits = signed ? SIGNED : UNSIGNED;
+  const longest = most + (signed ? 1 : 0);
   // On the wire: digits in a string, a JSON integer, or one the module API's reader kept exact as a `bigint`.
   const isInteger = (value: unknown): boolean =>
-    (typeof value === "string" && digits.test(value)) || (typeof value === "number" && Number.isSafeInteger(value)) || typeof value === "bigint";
+    (typeof value === "string" && value.length <= longest && digits.test(value)) ||
+    (typeof value === "number" && Number.isSafeInteger(value)) ||
+    typeof value === "bigint";
+  // What the catalog shows: the same digits, with their length in the pattern.
+  const pattern = `^(0|${signed ? "-?" : ""}[1-9][0-9]{0,${most - 1}})$`;
   const wire = z
     .unknown()
     .refine(isInteger, message)
-    .meta({ anyOf: [{ type: "string", pattern: digits.source }, { type: "integer", ...integer }], format: "bigint" });
+    .meta({ anyOf: [{ type: "string", pattern }, { type: "integer", ...(signed ? {} : { minimum: 0 }) }], format: "bigint" });
   return z
     .codec(wire, z.bigint(), { decode: (value) => BigInt(value as string | number | bigint), encode: (value) => value.toString() })
     .refine(accepts, message);
@@ -42,7 +52,7 @@ function integerText(digits: RegExp, expected: string, integer: Record<string, u
 /** An integer of at most 78 digits, a `bigint` to the handler: `amount: bigintText()`. */
 export function bigintText() {
   const limit = 10n ** BigInt(MAX_DIGITS);
-  return integerText(new RegExp(`^(0|-?[1-9][0-9]{0,${MAX_DIGITS - 1}})$`), `an integer of at most ${MAX_DIGITS} digits`, {}, (value) => value > -limit && value < limit);
+  return integerText(true, MAX_DIGITS, `an integer of at most ${MAX_DIGITS} digits`, (value) => value > -limit && value < limit);
 }
 
 /**
@@ -54,7 +64,5 @@ export function uintText(bits: number) {
     throw new RangeError(`uintText takes a number of bits, an integer from 1 to ${MAX_BITS}, not ${String(bits)}`);
   }
   const limit = 1n << BigInt(bits);
-  const longest = (limit - 1n).toString().length;
-  const digits = new RegExp(`^(0|[1-9][0-9]{0,${longest - 1}})$`);
-  return integerText(digits, `an integer from 0 to 2^${bits} - 1`, { minimum: 0 }, (value) => value >= 0n && value < limit);
+  return integerText(false, (limit - 1n).toString().length, `an integer from 0 to 2^${bits} - 1`, (value) => value >= 0n && value < limit);
 }
