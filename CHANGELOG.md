@@ -256,10 +256,14 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   (`{ keys: 100000, verify: false }`): `keys` bounds the copy, in keys of counts and in child lists each (an update that
   would pass it empties the copy first; 71.9 MiB of heap at 100,000 with lists of 16 references, measured), 0 for no
   copy; `verify` also reads from the database every key the copy answers and halts with `ledger-refcount-invalid`
-  (`copy-mismatch`) on a difference. A count or node row changed by hand while the process runs is read at once if the
-  copy does not hold its key; if it does, the change goes unseen, but by `verify`, until a block that does not continue
-  the one before, or the bound, empties the copy. In the block trace, `counts` and `references` hold only the keys asked
-  of the database, and `copyHits`, `copyMisses` and `copyEmptied` are new; the operator guide lists them.
+  (`copy-mismatch`) on a difference. The copy equals the tables given tables that were undamaged when the process
+  started and that only this process writes. On tables already damaged it can differ from the database (a positive
+  reference count for a key that is no row, which a block then writes new without reading its counts), so the height
+  and the reason of a halt can change with no hand edit while the process runs; `verify` finds the difference at the
+  first read of that key. A count or node row changed by hand while the process runs is read at once if the copy does
+  not hold its key; if it does, the change goes unseen, but by `verify`, until a block that does not continue the one
+  before, or the bound, empties the copy. In the block trace, `counts` and `references` hold only the keys asked of the
+  database, and `copyHits`, `copyMisses` and `copyEmptied` are new; the operator guide lists them.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 
