@@ -7,7 +7,7 @@ import { committed, ingest } from "../backbone/ingest-harness.js";
 import { cappedAt, devnetSettings, LEDGER_CORE } from "../backbone/ledger-restart.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
 import { type FoundTape, tapeTest } from "../tape/real/real-tapes.js";
-import { V8_PACKAGE_PATH, V9_PACKAGE_PATH, V9_RC3_PACKAGE_PATH } from "./ledger-states.js";
+import { V8_PACKAGE_PATH, V9_PACKAGE_PATH, V9_RC3_PACKAGE_PATH, V9_RC5_PACKAGE_PATH } from "./ledger-states.js";
 import { hex } from "./node-format.js";
 import { byReference, walkInFreshInstance } from "./package-keys.js";
 
@@ -51,6 +51,7 @@ type NodeKeyTape = keyof typeof WALK_EVERY;
 const PACKAGE_PATHS: Readonly<Record<Exclude<LedgerName, "v10">, string>> = {
   v8: V8_PACKAGE_PATH,
   "v9-rc3": V9_RC3_PACKAGE_PATH,
+  "v9-rc5": V9_RC5_PACKAGE_PATH,
   v9: V9_PACKAGE_PATH,
 };
 

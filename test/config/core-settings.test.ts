@@ -39,7 +39,7 @@ const BASE: Readonly<Record<string, readonly [string, Absent]>> = {
   genesisHash: ["data", "absent"],
   // The network's built-in ledger table; the required settings below name preprod.
   ledgerTable: ["data", { default: builtInLedgerTable("preprod") }],
-  ledgerSources: ["data", { default: { v8: "vendored", "v9-rc3": "vendored", v9: "vendored", v10: "vendored" } }],
+  ledgerSources: ["data", { default: { v8: "vendored", "v9-rc3": "vendored", "v9-rc5": "vendored", v9: "vendored", v10: "vendored" } }],
   sweep: ["data", { default: "on" }],
   retainStates: ["data", { default: 0 }],
   // Operational, with its `password` part secret (`src/config/redact.ts`).

@@ -353,8 +353,8 @@ export class CountingNode implements MetadataNode {
 /** The repository's vendored ledger builds. */
 export const VENDORED_ROOT = fileURLToPath(new URL("../../vendor/ledger/", import.meta.url));
 
-/** Every vendored ledger version, in the core version's order (including v9 as runtime 2.0 built it). */
-export const VENDORED_LEDGERS = ["v8", "v9-rc3", "v9"] as const;
+/** Every vendored ledger version, in the core version's order (including v9 as runtimes 2.0 and 2.1.0 built it). */
+export const VENDORED_LEDGERS = ["v8", "v9-rc3", "v9-rc5", "v9"] as const;
 
 /** A copy of the vendored builds (each version's `SHA256SUMS` and `pkg/`) in a new temporary directory. */
 export function copyVendoredLedger(): { readonly root: string; readonly remove: () => void } {

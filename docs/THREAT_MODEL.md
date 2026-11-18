@@ -252,8 +252,8 @@ Its secret scan covers full history (`.github/workflows/supply-chain.yml:39`,
 
 Vendored ledger sources are commit-pinned, and their build image is digest-pinned
 (`vendor/ledger/v8/upstream.json:3`, `vendor/ledger/v9-rc3/upstream.json:3`,
-`vendor/ledger/v9/upstream.json:3`, `vendor/ledger/Dockerfile:16`).
-CI is configured to rebuild all three carried versions on amd64 and arm64 and compare them with `SHA256SUMS`
+`vendor/ledger/v9-rc5/upstream.json:3`, `vendor/ledger/v9/upstream.json:3`, `vendor/ledger/Dockerfile:16`).
+CI is configured to rebuild all four carried versions on amd64 and arm64 and compare them with `SHA256SUMS`
 (`.github/workflows/vendored-ledger.yml:30`, `.github/workflows/vendored-ledger.yml:44`).
 Runtime and browser package checks are described above.
 

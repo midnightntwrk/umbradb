@@ -3,7 +3,7 @@
 # indexer reads them) against an unpatched checkout of `midnight-ledger` at a vendored version's
 # pinned commit, inside the vendored ledger build image (`vendor/ledger/Dockerfile`), for the state
 # files it is given as `<name>=<path>`, and writes that version's JSON to `/out/<version>.json`
-# (`../expected.json` assembles the three versions' outputs):
+# (`../expected.json` assembles the four versions' outputs):
 #
 #   docker run --rm -v "$PWD/test/ledger/fixtures/state-trees/oracle:/oracle:ro" \
 #     -v "$PWD/test/ledger/fixtures:/fixtures:ro" \
@@ -19,7 +19,7 @@ commit=$2
 shift 2
 case "$version" in
   v8) ledger=midnight-ledger ;;
-  v9 | v9-rc3) ledger=midnight-ledger-v9 ;;
+  v9 | v9-rc3 | v9-rc5) ledger=midnight-ledger-v9 ;;
   *) echo "run.sh: unknown version $version" >&2; exit 2 ;;
 esac
 

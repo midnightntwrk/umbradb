@@ -1,0 +1,553 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index e1d6429..478749c 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -3183,6 +3183,7 @@ dependencies = [
+  "midnight-onchain-runtime-wasm",
+  "midnight-serialize",
+  "midnight-storage",
++ "midnight-storage-core 1.2.2",
+  "midnight-transient-crypto 2.2.0",
+  "midnight-transient-crypto 3.0.0",
+  "midnight-zkir",
+diff --git a/ledger-wasm/Cargo.toml b/ledger-wasm/Cargo.toml
+index 7b4f65c..ec57cd1 100644
+--- a/ledger-wasm/Cargo.toml
++++ b/ledger-wasm/Cargo.toml
+@@ -17,6 +17,8 @@ ledger = { path = "../ledger", package = "midnight-ledger-v9", default-features
+ onchain-runtime-wasm = { path = "../onchain-runtime-wasm", package = "midnight-onchain-runtime-wasm" }
+ onchain-runtime = { path = "../onchain-runtime", package = "midnight-onchain-runtime" }
+ storage = { path = "../storage", package = "midnight-storage" }
++# UmbraDB: the node's storage layout (layout-v2, gc-v1), so that node keys and roots match the node's.
++storage-core = { path = "../storage-core", package = "midnight-storage-core", features = ["layout-v2", "gc-v1"] }
+ serialize = { path = "../serialize", package = "midnight-serialize" }
+ coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
+ base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
+diff --git a/ledger-wasm/ledger-v9.template.d.ts b/ledger-wasm/ledger-v9.template.d.ts
+index 32d8f62..60b3436 100644
+--- a/ledger-wasm/ledger-v9.template.d.ts
++++ b/ledger-wasm/ledger-v9.template.d.ts
+@@ -2227,3 +2227,88 @@ export type FinalizedTransaction = Transaction<SignatureEnabled, Proof, Binding>
+  * A transaction with proofs erased.
+  */
+ export type ProofErasedTransaction = Transaction<Signaturish, NoProof, NoBinding>;
++
++// UmbraDB additions: keeping the ledger state in a node store outside this module.
++
++/**
++ * A synchronous store of ledger nodes, as in the node's `layout-v2` storage: a node is stored
++ * under its 32-byte key with its binary payload and the serialization of its child list.
++ * `get` must not call into this module.
++ */
++export interface NodeStore {
++  get(key: Uint8Array): { data: Uint8Array; children: Uint8Array } | null;
++}
++
++/**
++ * The nodes created since the previous flush that a key whose root count rose reaches, and the
++ * net root-count change of every key changed since then; both in key order.
++ */
++export interface NodeBatch {
++  inserts: { key: Uint8Array; data: Uint8Array; children: Uint8Array }[];
++  rootCounts: { key: Uint8Array; delta: number }[];
++}
++
++/** The event types of a contract log. */
++export type LogEventTypeName =
++  | 'ShieldedSpend'
++  | 'ShieldedReceive'
++  | 'ShieldedMint'
++  | 'ShieldedBurn'
++  | 'UnshieldedSpend'
++  | 'UnshieldedReceive'
++  | 'UnshieldedMint'
++  | 'UnshieldedBurn'
++  | 'Paused'
++  | 'Unpaused'
++  | 'Misc';
++
++/** A contract log as the VM emits it; `data` is the tagged serialization of the logged value. */
++export interface LogItem {
++  version: number;
++  eventType: LogEventTypeName;
++  data: Uint8Array;
++}
++
++/**
++ * Loads the ledger state whose root node has key `stateKey`, reading nodes from `store` as they
++ * are needed; the store stays installed for later reads. A node that does not match its key
++ * aborts the module.
++ */
++export function loadState(stateKey: Uint8Array, store: NodeStore): LedgerState;
++
++/** The state root the node reports for this state (`midnight_ledgerStateRoot`). */
++export function stateRoot(state: LedgerState): Uint8Array;
++
++/** The 32-byte key of this state's root node; the node is kept until the next `flushNodes`. */
++export function stateKey(state: LedgerState): Uint8Array;
++
++/** Takes the pending nodes reachable from keys persisted since the previous flush. */
++export function flushNodes(): NodeBatch;
++
++/** Raises the root count of `key` by one. */
++export function persistKey(key: Uint8Array): void;
++
++/** Lowers the root count of `key` by one. */
++export function releaseKey(key: Uint8Array): void;
++
++/** The keys of the by-reference children in a serialized child list, through embedded children. */
++export function childRefs(children: Uint8Array): Uint8Array[];
++
++/** Drops nodes deleted from the store from this module's caches; fails if one is still in use. */
++export function evictKeys(keys: Uint8Array[]): void;
++
++/** The key of the node holding a contract's state, or `null` without that contract. */
++export function contractStateKey(state: LedgerState, address: Uint8Array): Uint8Array | null;
++
++/** The key of the node holding a contract's zswap state, or `null` without that contract. */
++export function contractZswapStateKey(state: LedgerState, address: Uint8Array): Uint8Array | null;
++
++/**
++ * Decodes the value a `log` operation takes (the tagged serialization of a state value) as the
++ * VM does, or `null` when its data exceeds the VM's emitted-log bound.
++ */
++export function decodeLogItem(value: Uint8Array): LogItem | null;
++
++/** The tagged serialization of a state value, the input of `decodeLogItem`. */
++export function serializeStateValue(value: StateValue): Uint8Array;
++
+diff --git a/ledger-wasm/src/lib.rs b/ledger-wasm/src/lib.rs
+index f8ea4b5..6e415aa 100644
+--- a/ledger-wasm/src/lib.rs
++++ b/ledger-wasm/src/lib.rs
+@@ -22,6 +22,7 @@ pub mod state;
+ pub mod state_changes;
+ pub mod transcript;
+ pub mod tx;
++pub mod umbradb;
+ pub mod unshielded;
+ pub mod zswap_keys;
+ pub mod zswap_state;
+diff --git a/ledger-wasm/src/umbradb.rs b/ledger-wasm/src/umbradb.rs
+new file mode 100644
+index 0000000..0578478
+--- /dev/null
++++ b/ledger-wasm/src/umbradb.rs
+@@ -0,0 +1,417 @@
++// This file is part of midnight-ledger.
++// Copyright (C) Midnight Foundation
++// SPDX-License-Identifier: Apache-2.0
++// Licensed under the Apache License, Version 2.0 (the "License");
++// You may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++// http://www.apache.org/licenses/LICENSE-2.0
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++//! Exports for keeping the ledger state in a node store outside this module (UmbraDB).
++//!
++//! The ledger state is a DAG of content-addressed nodes, as in the node's `layout-v2` storage: a
++//! node is stored under its key with its binary payload (`data`) and the serialization of its
++//! child list (`children`, by-reference children and embedded children). Nodes are read on demand
++//! from a synchronous store the caller passes to `loadState`; the nodes the ledger creates are
++//! handed to the caller by `flushNodes`, which takes every pending node reachable from the keys
++//! persisted since the previous flush. Root counts are kept by the caller: `flushNodes` reports
++//! each key's net root-count change since the previous flush.
++
++use crate::onchain_runtime::StateValue as WasmStateValue;
++use crate::state::LedgerState;
++use base_crypto::hash::HashOutput;
++use coin_structure::contract::ContractAddress;
++use js_sys::{Array, Function, Object, Reflect, Uint8Array};
++use onchain_runtime::ops::LogEventType;
++use onchain_runtime::state::StateValue;
++use serialize::{Deserializable, Serializable, tagged_deserialize, tagged_serialize};
++use std::any::Any;
++use std::cell::RefCell;
++use std::collections::BTreeMap;
++use storage::DefaultHasher;
++use storage::Storable;
++use storage::arena::{ArenaHash, ArenaKey, BackendLoader, Sp};
++use storage::backend::{NodeSource, SourcedNode};
++use storage::db::InMemoryDB;
++use storage::storage::default_storage;
++use wasm_bindgen::prelude::*;
++use wasm_bindgen::{JsCast, JsError, JsValue};
++
++type Key = ArenaHash<DefaultHasher>;
++type V9LedgerState = ledger::structure::LedgerState<InMemoryDB>;
++
++thread_local! {
++    /// Objects whose keys this module handed out since the previous flush, kept alive so that
++    /// their pending nodes are still in memory when `flushNodes` runs.
++    static HELD: RefCell<Vec<Sp<dyn Any + Send + Sync, InMemoryDB>>> = const { RefCell::new(Vec::new()) };
++    /// Net root-count changes since the previous flush.
++    static ROOT_DELTAS: RefCell<BTreeMap<Key, i64>> = const { RefCell::new(BTreeMap::new()) };
++}
++
++#[wasm_bindgen]
++extern "C" {
++    #[wasm_bindgen(js_namespace = console, js_name = error)]
++    fn console_error(message: &str);
++}
++
++/// Writes a panic's message to the console before the module aborts. This build aborts on panic,
++/// so a panic is fatal to the module and the message is the only account of what failed — for
++/// example, a node from the store that does not match its key.
++fn report_panics() {
++    static INSTALLED: std::sync::Once = std::sync::Once::new();
++    INSTALLED.call_once(|| {
++        std::panic::set_hook(Box::new(|info| {
++            console_error(&format!("midnight-ledger: {info}"));
++        }));
++    });
++}
++
++/// The caller's synchronous node store: an object with `get(key: Uint8Array)` returning
++/// `{ data: Uint8Array, children: Uint8Array }` or `null`.
++struct JsNodeStore {
++    store: JsValue,
++    get: Function,
++}
++
++// SAFETY: this crate is built for wasm32-unknown-unknown without the `atomics` target feature, so
++// the module runs on exactly one thread and these JavaScript references are never shared across
++// threads. The bounds exist because the storage arena is designed for native multi-threaded use.
++unsafe impl Send for JsNodeStore {}
++unsafe impl Sync for JsNodeStore {}
++
++impl JsNodeStore {
++    fn lookup(&self, key: &Key) -> Option<SourcedNode<DefaultHasher>> {
++        let hex_key = hex::encode(&key.0[..]);
++        let found = self
++            .get
++            .call1(&self.store, &Uint8Array::from(&key.0[..]))
++            .unwrap_or_else(|e| panic!("node store: get({hex_key}) threw {e:?}"));
++        if found.is_null() || found.is_undefined() {
++            return None;
++        }
++        let bytes = |field: &str| -> Vec<u8> {
++            Reflect::get(&found, &JsValue::from_str(field))
++                .ok()
++                .and_then(|value| value.dyn_into::<Uint8Array>().ok())
++                .unwrap_or_else(|| panic!("node store: get({hex_key}).{field} is not a Uint8Array"))
++                .to_vec()
++        };
++        let data = bytes("data");
++        let children = decode_children(&bytes("children"))
++            .unwrap_or_else(|e| panic!("node store: get({hex_key}).children: {e}"));
++        Some((data, children))
++    }
++}
++
++fn arena() -> storage::arena::Arena<InMemoryDB> {
++    default_storage::<InMemoryDB>().arena.clone()
++}
++
++fn parse_key(bytes: &Uint8Array) -> Result<Key, JsError> {
++    let bytes = bytes.to_vec();
++    if bytes.len() != 32 {
++        return Err(JsError::new(&format!(
++            "a node key is 32 bytes, got {}",
++            bytes.len()
++        )));
++    }
++    Ok(Key::deserialize(&mut &bytes[..], 0)?)
++}
++
++fn key_bytes(key: &Key) -> Uint8Array {
++    Uint8Array::from(&key.0[..])
++}
++
++fn parse_contract_address(bytes: &Uint8Array) -> Result<ContractAddress, JsError> {
++    let bytes = bytes.to_vec();
++    let raw: [u8; 32] = bytes.as_slice().try_into().map_err(|_| {
++        JsError::new(&format!(
++            "a contract address is 32 bytes, got {}",
++            bytes.len()
++        ))
++    })?;
++    Ok(ContractAddress(HashOutput(raw)))
++}
++
++fn decode_children(bytes: &[u8]) -> Result<Vec<ArenaKey<DefaultHasher>>, std::io::Error> {
++    let mut reader = bytes;
++    let children = <Vec<ArenaKey<DefaultHasher>>>::deserialize(&mut reader, 0)?;
++    if !reader.is_empty() {
++        return Err(std::io::Error::new(
++            std::io::ErrorKind::InvalidData,
++            format!("{} bytes left after the child list", reader.len()),
++        ));
++    }
++    Ok(children)
++}
++
++fn set_field(object: &Object, field: &str, value: &JsValue) -> Result<(), JsError> {
++    Reflect::set(object, &JsValue::from_str(field), value)
++        .map_err(|e| JsError::new(&format!("cannot set {field}: {e:?}")))?;
++    Ok(())
++}
++
++fn install_store(store: JsValue) -> Result<(), JsError> {
++    let get = Reflect::get(&store, &JsValue::from_str("get"))
++        .ok()
++        .and_then(|value| value.dyn_into::<Function>().ok())
++        .ok_or_else(|| JsError::new("the node store has no get(key) function"))?;
++    let store = JsNodeStore { store, get };
++    let source = NodeSource::new(move |key: &Key| store.lookup(key));
++    arena().with_backend(|backend| backend.set_node_source(Some(source)));
++    Ok(())
++}
++
++/// Reads the root node of a state from memory or the store and deserializes it, with its children
++/// left lazy (read on first use).
++fn load_root<T: Storable<InMemoryDB>>(key: &Key, what: &str) -> Result<T, JsError> {
++    let arena = arena();
++    let node = arena
++        .with_backend(|backend| backend.get(key).cloned())
++        .ok_or_else(|| {
++            JsError::new(&format!(
++                "{what}: the node store has no node {}",
++                hex::encode(&key.0[..])
++            ))
++        })?;
++    let mut data = node.data();
++    let mut children = node.children.clone().into_iter();
++    let loader = BackendLoader::new(&arena, Some(0));
++    let value = T::from_binary_repr(&mut data, &mut children, &loader)?;
++    if !data.is_empty() || children.next().is_some() {
++        return Err(JsError::new(&format!(
++            "{what}: node {} is not a {}",
++            hex::encode(&key.0[..]),
++            std::any::type_name::<T>()
++        )));
++    }
++    Ok(value)
++}
++
++/// Allocates `value` as a stored node (also when it is small enough to be embedded in a parent),
++/// keeps it until the next flush, and returns its key.
++fn hold_as_node<T: Storable<InMemoryDB>>(value: T) -> Key {
++    let sp = Sp::new(value).into_tracked();
++    let key = sp.hash();
++    HELD.with(|held| held.borrow_mut().push(sp.upcast()));
++    key
++}
++
++fn change_root_count(key: &Uint8Array, change: i64) -> Result<(), JsError> {
++    let key = parse_key(key)?;
++    ROOT_DELTAS.with(|deltas| {
++        let mut deltas = deltas.borrow_mut();
++        let delta = deltas.entry(key.clone()).or_insert(0);
++        *delta += change;
++        if *delta == 0 {
++            deltas.remove(&key);
++        }
++    });
++    Ok(())
++}
++
++/// Loads the ledger state whose root node has key `stateKey`, reading nodes from `store`
++/// synchronously as they are needed. The store stays installed for later reads.
++///
++/// `store.get(key)` returns `{ data, children }` or `null`; every node it returns is checked
++/// against its key, and a node that does not match aborts the module (the store is corrupt). The
++/// store must not call into this module.
++#[wasm_bindgen(js_name = "loadState")]
++pub fn load_state(state_key: &Uint8Array, store: JsValue) -> Result<LedgerState, JsError> {
++    report_panics();
++    let key = parse_key(state_key)?;
++    install_store(store)?;
++    Ok(LedgerState(load_root::<V9LedgerState>(&key, "loadState")?))
++}
++
++/// The state root the node reports for this state (`midnight_ledgerStateRoot`): the serialized
++/// typed key of the ledger state.
++#[wasm_bindgen(js_name = "stateRoot")]
++pub fn state_root(state: &LedgerState) -> Result<Uint8Array, JsError> {
++    report_panics();
++    let sp = Sp::new(state.0.clone());
++    let mut bytes = Vec::new();
++    Serializable::serialize(&sp.as_typed_key(), &mut bytes)?;
++    Ok(Uint8Array::from(&bytes[..]))
++}
++
++/// The key of this state's root node (32 bytes). The root node is kept in memory until the next
++/// `flushNodes`, so persisting the key makes the flush take the state's new nodes.
++#[wasm_bindgen(js_name = "stateKey")]
++pub fn state_key(state: &LedgerState) -> Uint8Array {
++    report_panics();
++    key_bytes(&hold_as_node(state.0.clone()))
++}
++
++/// Takes the nodes created since the previous flush that are reachable from the keys whose root
++/// count rose since then, and the net root-count changes. Returns
++/// `{ inserts: { key, data, children }[], rootCounts: { key, delta }[] }`, both in key order;
++/// `delta` is the signed change of the key's root count.
++#[wasm_bindgen(js_name = "flushNodes")]
++pub fn flush_nodes() -> Result<JsValue, JsError> {
++    report_panics();
++    let deltas = ROOT_DELTAS.with(|deltas| std::mem::take(&mut *deltas.borrow_mut()));
++    let roots: Vec<Key> = deltas
++        .iter()
++        .filter(|(_, delta)| **delta > 0)
++        .map(|(key, _)| key.clone())
++        .collect();
++    let taken = arena().with_backend(|backend| backend.take_reachable_pending(roots));
++    HELD.with(|held| held.borrow_mut().clear());
++
++    let inserts = Array::new();
++    for (key, node) in taken {
++        let mut children = Vec::new();
++        node.children.serialize(&mut children)?;
++        let entry = Object::new();
++        set_field(&entry, "key", &key_bytes(&key))?;
++        set_field(&entry, "data", &Uint8Array::from(node.data()))?;
++        set_field(&entry, "children", &Uint8Array::from(&children[..]))?;
++        inserts.push(&entry);
++    }
++    let root_counts = Array::new();
++    for (key, delta) in deltas {
++        let entry = Object::new();
++        set_field(&entry, "key", &key_bytes(&key))?;
++        set_field(&entry, "delta", &JsValue::from_f64(delta as f64))?;
++        root_counts.push(&entry);
++    }
++    let batch = Object::new();
++    set_field(&batch, "inserts", &inserts)?;
++    set_field(&batch, "rootCounts", &root_counts)?;
++    Ok(batch.into())
++}
++
++/// Raises the root count of `key` by one (reported by the next `flushNodes`).
++#[wasm_bindgen(js_name = "persistKey")]
++pub fn persist_key(key: &Uint8Array) -> Result<(), JsError> {
++    report_panics();
++    change_root_count(key, 1)
++}
++
++/// Lowers the root count of `key` by one (reported by the next `flushNodes`).
++#[wasm_bindgen(js_name = "releaseKey")]
++pub fn release_key(key: &Uint8Array) -> Result<(), JsError> {
++    report_panics();
++    change_root_count(key, -1)
++}
++
++/// The keys of the by-reference children in a node's serialized child list, including those
++/// inside embedded children.
++#[wasm_bindgen(js_name = "childRefs")]
++pub fn child_refs(children: &Uint8Array) -> Result<Array, JsError> {
++    report_panics();
++    let children = decode_children(&children.to_vec())?;
++    let refs = Array::new();
++    for child in children.iter() {
++        for key in child.refs() {
++            refs.push(&key_bytes(key));
++        }
++    }
++    Ok(refs)
++}
++
++/// Drops nodes deleted from the store from this module's caches, so that a node needed again
++/// is created and flushed again. Fails, changing nothing, if a live object still holds one of
++/// them.
++#[wasm_bindgen(js_name = "evictKeys")]
++pub fn evict_keys(keys: Array) -> Result<(), JsError> {
++    report_panics();
++    let keys = keys
++        .iter()
++        .map(|key| {
++            key.dyn_into::<Uint8Array>()
++                .map_err(|_| JsError::new("evictKeys takes an array of Uint8Array keys"))
++                .and_then(|key| parse_key(&key))
++        })
++        .collect::<Result<Vec<_>, _>>()?;
++    arena().forget_stored(&keys).map_err(|live| {
++        JsError::new(&format!(
++            "evictKeys: node {} is still held by a live object",
++            hex::encode(&live.0[..])
++        ))
++    })
++}
++
++/// The key of the node holding the contract's state, or `null` if the state has no such
++/// contract. The node is kept until the next flush.
++#[wasm_bindgen(js_name = "contractStateKey")]
++pub fn contract_state_key(state: &LedgerState, address: &Uint8Array) -> Result<JsValue, JsError> {
++    report_panics();
++    let address = parse_contract_address(address)?;
++    Ok(match state.0.index(address) {
++        Some(contract) => key_bytes(&hold_as_node(contract)).into(),
++        None => JsValue::NULL,
++    })
++}
++
++/// The key of the node holding the contract's zswap state — the zswap state whose commitment tree
++/// keeps only the contract's commitments, as the node builds it — or `null` if the state has no
++/// such contract. The node is kept until the next flush.
++#[wasm_bindgen(js_name = "contractZswapStateKey")]
++pub fn contract_zswap_state_key(
++    state: &LedgerState,
++    address: &Uint8Array,
++) -> Result<JsValue, JsError> {
++    report_panics();
++    let address = parse_contract_address(address)?;
++    if state.0.contract.get(&address).is_none() {
++        return Ok(JsValue::NULL);
++    }
++    let mut zswap = zswap::ledger::State::<InMemoryDB>::new();
++    zswap.coin_coms = state.0.zswap.filter(&[address]);
++    Ok(key_bytes(&hold_as_node(zswap)).into())
++}
++
++fn log_event_type_name(event_type: LogEventType) -> &'static str {
++    match event_type {
++        LogEventType::ShieldedSpend => "ShieldedSpend",
++        LogEventType::ShieldedReceive => "ShieldedReceive",
++        LogEventType::ShieldedMint => "ShieldedMint",
++        LogEventType::ShieldedBurn => "ShieldedBurn",
++        LogEventType::UnshieldedSpend => "UnshieldedSpend",
++        LogEventType::UnshieldedReceive => "UnshieldedReceive",
++        LogEventType::UnshieldedMint => "UnshieldedMint",
++        LogEventType::UnshieldedBurn => "UnshieldedBurn",
++        LogEventType::Paused => "Paused",
++        LogEventType::Unpaused => "Unpaused",
++        LogEventType::Misc => "Misc",
++    }
++}
++
++/// Decodes the value a `log` operation takes (the tagged serialization of a state value) as the
++/// VM does: `{ version, eventType, data }`, where `data` is the tagged serialization of the logged
++/// state value, or `null` when the data exceeds the VM's emitted-log bound (no log is emitted).
++#[wasm_bindgen(js_name = "decodeLogItem")]
++pub fn decode_log_item(value: &Uint8Array) -> Result<JsValue, JsError> {
++    report_panics();
++    let value: StateValue<InMemoryDB> = tagged_deserialize(&mut &value.to_vec()[..])?;
++    let Some(item) = onchain_runtime::vm::decode_event(value) else {
++        return Ok(JsValue::NULL);
++    };
++    let mut data = Vec::new();
++    tagged_serialize(&item.data, &mut data)?;
++    let result = Object::new();
++    set_field(&result, "version", &JsValue::from_f64(f64::from(item.version)))?;
++    set_field(
++        &result,
++        "eventType",
++        &JsValue::from_str(log_event_type_name(item.event_type)),
++    )?;
++    set_field(&result, "data", &Uint8Array::from(&data[..]))?;
++    Ok(result.into())
++}
++
++/// The tagged serialization of a state value, the input of `decodeLogItem`.
++#[wasm_bindgen(js_name = "serializeStateValue")]
++pub fn serialize_state_value(value: &WasmStateValue) -> Result<Uint8Array, JsError> {
++    report_panics();
++    let value: StateValue<InMemoryDB> = value.clone().into();
++    let mut bytes = Vec::new();
++    tagged_serialize(&value, &mut bytes)?;
++    Ok(Uint8Array::from(&bytes[..]))
++}

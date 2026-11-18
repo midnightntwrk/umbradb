@@ -56,7 +56,7 @@ const blockRuntimes = defineModule({
 });
 
 test("block-runtimes stores every height and answers the latest", async () => {
-  // Blocks 0 to 10 in memory, each of runtime 2,001,000 with no extrinsics. The `custom` network's genesis is the
+  // Blocks 0 to 10 in memory, each of runtime 2,001,100 with no extrinsics. The `custom` network's genesis is the
   // chain's block 0, and its ledger table gives that runtime a ledger version (v9).
   const source = new InMemoryBlockSource({ head: 10n });
   const genesis = await source.block(0n);
@@ -97,7 +97,7 @@ test("block-runtimes stores every height and answers the latest", async () => {
     const answer = await fetch(`http://127.0.0.1:${port}/block-runtimes/latest`);
     assert.equal(answer.status, 200);
     assert.equal(answer.headers.get("x-umbra-height"), "10");
-    assert.deepEqual(await answer.json(), { height: "10", spec_version: 2_001_000, extrinsics: 0 });
+    assert.deepEqual(await answer.json(), { height: "10", spec_version: 2_001_100, extrinsics: 0 });
   } finally {
     server.close();
     await handle.stop();
