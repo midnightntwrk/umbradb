@@ -247,6 +247,19 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   that does not continue the one before, or the bound, empties the remembered keys. In the block trace, `missing`
   holds only the keys asked of the database, and `knownHits` and `knownEmptied` are new (`knownEmptied` is also set
   at a process's first height); the operator guide lists them.
+- **The ledger state's reclamation keeps the counts and child lists it read or wrote.** `core-ledger-state` keeps, from
+  block to block, a copy of what its reclamation's `counts` read gave (whether a key is a stored node, its reference
+  count, its root count) and of the child lists of the nodes it wrote, as the tables are after the block before,
+  brought up to date from each block's net write; a block's `counts` and `references` reads ask the database only what
+  the copy lacks. It is used only while each block continues the one before and is emptied otherwise, and when
+  `on-settle` fails, as the keys found stored are. A new operational setting of the `core` entry, `reclamationCache`
+  (`{ keys: 100000, verify: false }`): `keys` bounds the copy, in keys of counts and in child lists each (an update that
+  would pass it empties the copy first; 71.9 MiB of heap at 100,000 with lists of 16 references, measured), 0 for no
+  copy; `verify` also reads from the database every key the copy answers and halts with `ledger-refcount-invalid`
+  (`copy-mismatch`) on a difference. A count or node row changed by hand while the process runs is read at once if the
+  copy does not hold its key; if it does, the change goes unseen, but by `verify`, until a block that does not continue
+  the one before, or the bound, empties the copy. In the block trace, `counts` and `references` hold only the keys asked
+  of the database, and `copyHits`, `copyMisses` and `copyEmptied` are new; the operator guide lists them.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 
