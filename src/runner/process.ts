@@ -358,6 +358,7 @@ import type { BlockRef, BlockSource, SourceCondition } from "./block-source.js";
 import type { InMemoryBlockSource } from "./in-memory-source.js";
 import { configurationRefusalLines, shownRefusal } from "./configuration-refusal.js";
 import { CallbackFailure, isBackbonePart } from "./dispatch.js";
+import type { FastSync } from "./fast-sync.js";
 import { type ProcessReason, reasonOf, type RetryCode, retryOf, startupRejection } from "./failures.js";
 import { followSignal } from "./host-signal.js";
 import {
@@ -2199,6 +2200,8 @@ class Process implements ProcessHandle {
       pause: this.#pauses,
       // The ledger worker's host follows each block's transaction: it commits in the worker the blocks applied there.
       ...(this.#ledger === undefined ? {} : { follower: this.#ledger }),
+      // Chunks only on a public process that waits for no private instance at its blocks.
+      ...(this.#side === "public" && this.#lockstep === undefined ? { fastSync: settings.fastSync as unknown as FastSync } : {}),
       observer: {
         slow: (event) => this.#slowBlockEvent(event, settings.slowBlockMs as number),
         head: (head) => {

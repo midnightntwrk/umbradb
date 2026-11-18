@@ -185,6 +185,7 @@ import {
   startHeightSchedule,
   stopHeightSchedule,
 } from "./dispatch.js";
+import type { FastSync } from "./fast-sync.js";
 import type { LoopPause } from "./pause.js";
 import type { TransactionFollower } from "./transaction-follower.js";
 import { traceAdd, traceDropBlock, traceEndBlock } from "../trace/trace.js";
@@ -235,6 +236,11 @@ export interface LoopInput {
    * ledger worker host, when it has one. None unless given.
    */
   readonly follower?: TransactionFollower;
+  /**
+   * Fast-sync mode (`./fast-sync.ts`): far behind the head, chunks of heights in one transaction (see the module
+   * comment). Absent, or `blocks` below 2: every height in a transaction of its own.
+   */
+  readonly fastSync?: FastSync;
 }
 
 /** The lockstep wait (`src/private/lockstep.ts`'s `Lockstep`): before `BEGIN` of `height`. */

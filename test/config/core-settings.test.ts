@@ -70,6 +70,8 @@ const PUBLIC: Readonly<Record<string, readonly [string, Absent]>> = {
   lockstepInstances: ["operational", { default: [] }],
   // Its `password` part is secret; required with a PostgreSQL database and listen.privateLink.
   transportReader: ["operational", "absent"],
+  // Fast-sync mode: at most how many blocks per transaction (0 or 1: off), and how far from the head chunks stop.
+  fastSync: ["operational", { default: { blocks: 0, distance: 600 } }],
 };
 
 /** A private process's own fields. */
@@ -147,6 +149,31 @@ describe("the core entry's fields, kinds and defaults", () => {
     expect(PRIVATE_CORE_SCHEMA.safeParse({ ...REQUIRED_PRIVATE, reclamationCache: { keys: -1 } }).success).toBe(false);
   });
 
+  it("fastSync: blocks a whole number from 0 to 1,000, distance one from 0, each defaulted alone, nothing else", () => {
+    const fast = (value: unknown) => PUBLIC_CORE_SCHEMA.safeParse({ ...REQUIRED_PUBLIC, fastSync: value }).success;
+    expect([{}, { blocks: 0 }, { blocks: 1 }, { blocks: 1_000 }, { distance: 0 }, { blocks: 100, distance: 2 ** 53 - 1 }].map(fast)).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+    ]);
+    expect(
+      [{ blocks: 1_001 }, { blocks: -1 }, { blocks: 2.5 }, { distance: -1 }, { distance: 0.5 }, { blocks: "100" }, { size: 1 }, 100, null].map(fast),
+    ).toEqual([false, false, false, false, false, false, false, false, false]);
+    const parsed = (value: unknown) => (PUBLIC_CORE_SCHEMA.parse({ ...REQUIRED_PUBLIC, fastSync: value }) as { fastSync: unknown }).fastSync;
+    expect([parsed({ blocks: 100 }), parsed({ distance: 0 })]).toEqual([
+      { blocks: 100, distance: 600 },
+      { blocks: 0, distance: 0 },
+    ]);
+  });
+
+  it("fastSync is a public process's only: the private schema refuses it", () => {
+    expect(PRIVATE_CORE_SCHEMA.safeParse({ ...REQUIRED_PRIVATE, fastSync: { blocks: 100 } }).success).toBe(false);
+    expect(PRIVATE_CORE_SCHEMA.safeParse({ ...REQUIRED_PRIVATE, fastSync: {} }).success).toBe(false);
+  });
+
   it("accepts every field of the table, given, for a public and a private process", () => {
     expect(
       PUBLIC_CORE_SCHEMA.safeParse({
@@ -163,6 +190,7 @@ describe("the core entry's fields, kinds and defaults", () => {
         node: "wss://node.example:443",
         listen: { api: "0.0.0.0:8080", admin: "[::1]:8081", privateLink: "localhost:8082" },
         transportReader: { user: "umbradb_transport", password: "r" },
+        fastSync: { blocks: 100, distance: 0 },
         tipCap: 1,
         prefetchWindow: 0,
         backoffCeilingMs: 1,
@@ -323,7 +351,7 @@ type DeepReadonly<T> = T extends readonly (infer E)[]
 
 /** The fields one side's type declares `never`, to refuse the other side's. */
 type PrivateOnly = "instanceId" | "publicDatabase" | "privateLink";
-type PublicOnly = "node" | "lockstepInstances" | "transportReader";
+type PublicOnly = "node" | "lockstepInstances" | "transportReader" | "fastSync";
 
 describe("the builders' types and the schemas say the same", () => {
   it("a public process's CoreSettings is the public schema's input", () => {

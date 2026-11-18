@@ -24,8 +24,8 @@
  * - `ledgerSources` names each of the four ledger versions, `vendored` unless given;
  * - `listen.admin` defaults to `0.0.0.0:8081`, also when `listen` is given without it;
  * - addresses are `host:port`: a host name, an IPv4 address or a bracketed IPv6 address, and a port from 0 to 65535;
- * - the integers are the plain data's (0 to 2^53 − 1), and `apiReadTimeoutMs` is from 1 to
- *   {@link MAX_READ_TIMEOUT_MS}, the read option's bounds;
+ * - the integers are the plain data's (0 to 2^53 − 1), `apiReadTimeoutMs` is from 1 to {@link MAX_READ_TIMEOUT_MS},
+ *   the read option's bounds, and `fastSync.blocks` at most {@link FAST_SYNC_MAX_BLOCKS};
  * - every nested object is strict: a field it does not have is rejected, not dropped.
  *
  * **`ledgerTable`**: its default is the network's built-in table (`../ledger/networks.json`), and a configured table
@@ -60,6 +60,7 @@ import { ledgerTableIssuesOf, ledgerTableOf } from "../ledger/networks.js";
 import type { ConfiguredLedgerTable } from "../ledger/version-table.js";
 import { SEMVER } from "../modules/validation.js";
 import { instanceIdSchema } from "../private/instance-id.js";
+import { FAST_SYNC_MAX_BLOCKS } from "../runner/fast-sync.js";
 
 /** Which process a configuration is for: the public (core) process, or a private one. */
 export type ProcessSide = "public" | "private";
@@ -294,6 +295,14 @@ export const PUBLIC_CORE_SCHEMA = z
     // Each one an instance id as a `hello` carries it (`../private/instance-id.ts`).
     lockstepInstances: z.array(instanceIdSchema()).default([]).meta(OPERATIONAL),
     transportReader: transportReader().optional().meta(OPERATIONAL),
+    // Fast-sync mode (`../runner/fast-sync.ts`): far behind the finalized head, up to `blocks` consecutive heights in one
+    // transaction, never closer to the head than `distance`; off while `blocks` is below 2. Operational: what is stored
+    // at every height does not depend on it. A public process's only: a private process stores one block per
+    // transaction.
+    fastSync: z
+      .strictObject({ blocks: count().max(FAST_SYNC_MAX_BLOCKS).default(0), distance: count().default(600) })
+      .prefault({})
+      .meta(OPERATIONAL),
   })
   .superRefine(genesisHashRule)
   .superRefine(transportReaderRule)

@@ -107,6 +107,11 @@ export type PublicCoreSettings = CoreSettingsBase & {
   readonly lockstepInstances?: readonly string[];
   /** The login the transport reads with; required with a PostgreSQL database and `listen.privateLink`. */
   readonly transportReader?: TransportReader;
+  /**
+   * Fast-sync mode: far behind the finalized head, up to `blocks` consecutive heights (0 to 1,000; below 2 the mode is
+   * off, the default) stored in one transaction, never closer to the head than `distance` heights (600).
+   */
+  readonly fastSync?: { readonly blocks?: number; readonly distance?: number };
   readonly instanceId?: never;
   readonly publicDatabase?: never;
   readonly privateLink?: never;
@@ -122,6 +127,7 @@ export type PrivateCoreSettings = CoreSettingsBase & {
   readonly node?: never;
   readonly lockstepInstances?: never;
   readonly transportReader?: never;
+  readonly fastSync?: never;
 };
 
 /** The `core` entry's `config`. */

@@ -1046,6 +1046,7 @@ describe("absent fields take their declared defaults", () => {
       fullPageWritesOffAllowed: false,
       developmentOptIn: false,
       reclamationCache: { keys: 100_000, verify: false },
+      fastSync: { blocks: 0, distance: 600 },
     });
   });
 
