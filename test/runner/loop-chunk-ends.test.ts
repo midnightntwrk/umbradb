@@ -6,6 +6,7 @@ import { declaration } from "../modules/declarations.js";
 import { entry } from "../modules/graph-fixtures.js";
 import type { Revision } from "../../src/modules/declaration.js";
 import { isBackbonePart } from "../../src/runner/dispatch.js";
+import { loggingFollower } from "./block-continues-harness.js";
 import { Contexts } from "./fixtures.js";
 import { byPoint, chunksOf, orderOf, runChunks } from "./loop-chunk-harness.js";
 import { cursorOf, RUNNER_BACKENDS } from "./loop-harness.js";
@@ -243,6 +244,35 @@ describe.each(RUNNER_BACKENDS)("where a chunk ends on $name", (backend) => {
       for (const [key, entries] of points) expect(entries, key).toHaveLength(1);
       expect(points.get("on-compute@4")?.[0]).toMatchObject({ readHeight: 3n, sees: 3n, continues: true });
       expect(await cursorOf(run.db)).toBe(14n);
+    }, 120_000);
+
+    it("a failure after the commit of the blocks below a block carried over: the halt there, and the carried block told rolled back", async () => {
+      const log: string[] = [];
+      const facts: string[] = [];
+      const late = declaration("late", {
+        points: {
+          async "on-after-db-write"(_p, b: BlockContext) {
+            if (b.height === 2n) throw new Error("late failed at 2");
+          },
+        },
+      });
+      const failure = await runChunks(backend, {
+        head: 14n,
+        blocks: 7,
+        modules: [asking(log, (h) => (h === 4n ? "call-and-read" : undefined)), late],
+        dbItem: "bb",
+        follower: loggingFollower(facts),
+      }).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(failure).toMatchObject({ height: 2n, point: "on-after-db-write", module: "late", committed: true });
+      expect(facts.filter((fact) => !fact.startsWith("told written"))).toEqual([
+        "told committed 1",
+        "told committed 2",
+        "told committed 3",
+        "told rolledBack 4",
+      ]);
     }, 120_000);
 
     it("a programming error after a statement through the callback's read, and outside on-compute, in both modes", async () => {

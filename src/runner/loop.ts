@@ -1668,6 +1668,11 @@ export class FinalizedLoop {
       } catch (error) {
         traceDropHeld();
         traceDropBlock();
+        // A block carried over is not written: its run ends here, with the loop's.
+        if (carried !== undefined) {
+          this.#unwatch(windows.at(-1) as Watch, false);
+          this.#tell("rolledBack", carried.run.block);
+        }
         throw this.#failure(run.height, error, true);
       }
     }
