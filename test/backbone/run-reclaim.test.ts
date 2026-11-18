@@ -1,16 +1,16 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { keyBytes, keyText, KnownKeySet, RunReclaim, sqlRunTables } from "../../src/backbone/core-ledger-state/run-reclaim.js";
+import { keyBytes, keyText, KnownKeySet, type NetWrite, RunReclaim, sqlRunTables, writeNet } from "../../src/backbone/core-ledger-state/run-reclaim.js";
+import { NODES_TABLE, REF_COUNTS_TABLE, UNREFERENCED_TABLE } from "../../src/backbone/core-ledger-state/sql.js";
+import type { BlockWriteHandle } from "../../src/db/api.js";
 import { refcountStep } from "./refcount-step.js";
 import type { NodeBatch } from "../../src/ledger/types.js";
 import { type FixtureDag, LAST, stateNodes } from "../ledger/fixtures/sweep-fixture.js";
 import { encodeChildren, hex, nodeKey } from "../ledger/node-format.js";
 import { type HistoryScript, historyScripts, nodeSet, type RefcountBatch, RefcountModel } from "./refcount-model.js";
 import {
-  againstModel,
   applied,
   embedded,
-  type Feed,
   flushOf,
   followsFlushRule,
   haltReason,
@@ -23,14 +23,11 @@ import {
   NO_TABLES,
   type NodeTables,
   noReads,
-  nothingSeen,
-  onItsOwn,
   ref,
   type Remade,
   remadeAgainstModel,
   runsOf,
   runTables,
-  type Seen,
   stepped,
   stepTables,
   tableDifferences,
@@ -40,18 +37,18 @@ import {
 /**
  * The reclamation of a run of blocks (`src/backbone/core-ledger-state/run-reclaim.ts`) against the per-block step
  * (`refcountStep`, `./refcount-step.ts`) and the reference model (`./refcount-model.ts`), the
- * computation on its own: nothing here runs the process.
- * - **T1.** At every run's end the node tables are the model's after the run's last block, in bytes: on the generated
- *   histories in one form and on the fixture DAGs, in runs of 1, 2, 3, 7 and 1,000 blocks, with the flushes of a
- *   package told of deletions at every block and of one told at a run's end only.
+ * computation on its own: nothing here runs the process. These are the cases the mutation run takes for each mutant
+ * of the computation (`vitest.mutation.config.ts`); the long cases on the generated histories, in runs of many
+ * lengths, are in `./run-reclaim-histories.test.ts`.
+ * - **T1.** At every run's end the node tables are the model's after the run's last block, on the fixture DAGs: in
+ *   bytes while each key has one child list, and for a run of one block.
  * - **T2.** A run of one block gives the per-block step's result (`refcountStep`'s outputs and the model's tables)
  *   for every block of every generated history that follows the ledger package's flush rule, rewrites included; a
  *   block that does not follow it halts with `unreached-node`.
- * - **T3.** Histories whose nodes take two forms, in longer runs: the tables are sound at every run's end and hold the
- *   node set the roots of the last two heights give; and, each run made shorter one block at a time while its last
- *   block's replaced lists alone keep a node and it has more than one block, the model's tables in bytes.
- * - **T4.** A run that does not sweep deletes nothing and does not read the queue whole; a history whose `sweep`
- *   changes is the model's when a run ends at each change, and the record refuses a block of another setting.
+ * - **T4.** A run that does not sweep deletes nothing and does not read the queue whole, and the record refuses a
+ *   block of another setting.
+ * - **The net write's statements** (`writeNet`), on a handle that records them: lists in statements of 1,000 keys,
+ *   and a statement whose rows differ from the computed halts.
  * - **By hand:** the cases a rule turns on, each a few blocks: the last child list written wins; a key that a list
  *   replaced by the last block referenced is kept and queued, one replaced earlier is not; the flush rule and what
  *   it lets through; the checks that halt, a reference and a count judged at each block, so that the run halts
@@ -62,67 +59,11 @@ import {
 
 const SEED = 20261115;
 const RUNS = 120;
-/** The longest history of the families that sweep throughout, so that a run of 1,000 holds a whole history. */
-const LONG = 60;
-const SIZES = [1, 2, 3, 7, 1_000] as const;
-const FEEDS = ["per-block", "per-run"] as const satisfies readonly Feed[];
 
 const bytes = (key: string): Uint8Array => Uint8Array.from(Buffer.from(key, "hex"));
 const same = (a: Uint8Array, b: Uint8Array): boolean => Buffer.compare(a, b) === 0;
 
-/** A history with `sweep` on at every block: no run ends early. */
-const sweeping = (script: HistoryScript): HistoryScript => ({ ...script, blocks: script.blocks.map((block) => ({ ...block, on: true })) });
-
-/** The histories of T4: in one form, with `sweep` off over a stretch in the middle and on around it. */
-const stretchOff = (script: HistoryScript): HistoryScript => {
-  const from = Math.floor(script.blocks.length / 3);
-  const to = Math.max(from + 1, Math.floor((2 * script.blocks.length) / 3));
-  return { ...script, blocks: script.blocks.map((block, at) => ({ ...block, on: at < from || at >= to })) };
-};
-
 describe("T1: the run computation's tables are the reference model's at every run's end", () => {
-  for (const [name, histories_] of [
-    ["as drawn, a run ending at each change of sweep", historyScripts({ oneForm: true })],
-    [`sweeping throughout, up to ${LONG} blocks`, historyScripts({ oneForm: true, maxBlocks: LONG }).map(sweeping)],
-  ] as const) {
-    it(`on the generated histories in one form, ${name}, in runs of ${SIZES.join(", ")}, both ways of flushing (seed ${SEED}, ${RUNS} runs)`, async () => {
-      const seen = new Map<string, Seen>();
-      let histories = 0;
-      await fc.assert(
-        fc.asyncProperty(histories_, async (script) => {
-          histories += 1;
-          for (const feed of FEEDS) {
-            for (const size of SIZES) {
-              const name = `${feed} ${size}`;
-              if (!seen.has(name)) seen.set(name, nothingSeen());
-              expect(await againstModel(script, { size, feed }, seen.get(name) as Seen)).toEqual([]);
-            }
-          }
-        }),
-        { seed: SEED, numRuns: RUNS },
-      );
-      expect(histories).toBeGreaterThanOrEqual(RUNS);
-      const of = (feed: Feed, size: number): Seen => seen.get(`${feed} ${size}`) as Seen;
-      for (const feed of FEEDS) {
-        // Every size ran every block of every history.
-        expect(of(feed, 1).blocks).toBeGreaterThan(1_000);
-        for (const size of SIZES) expect(of(feed, size).blocks).toBe(of(feed, 1).blocks);
-        expect(of(feed, 1).runs).toBe(of(feed, 1).blocks);
-        expect(of(feed, 1_000).runs).toBeLessThan(of(feed, 7).runs);
-        // A long run never writes most of what its blocks hand over, deletes rows, and deletes more keys than rows:
-        // the nodes written and deleted inside it were never rows.
-        expect(of(feed, 1_000).written).toBeLessThan(of(feed, 1_000).handed * 0.9);
-        expect(of(feed, 7).deleted).toBeGreaterThan(100);
-        expect(of(feed, 7).evicted).toBeGreaterThan(of(feed, 7).deleted);
-        // No statement inside a run: the reads come once per run, whatever its length.
-        expect(of(feed, 1_000).reads.queue).toBe(of(feed, 1_000).runs - of(feed, 1_000).off);
-      }
-      // A package told of deletions at a run's end only flushes fewer nodes: it still holds what a block deleted.
-      expect(of("per-run", 7).handed).toBeLessThan(of("per-block", 7).handed);
-      expect(of("per-run", 1).handed).toBe(of("per-block", 1).handed);
-    }, 900_000);
-  }
-
   for (const dag of ["original", "extended", "one-form"] as const satisfies readonly FixtureDag[]) {
     it(`on the ${dag} fixture DAG: in bytes while each key has one child list, and for a run of one block; the same node set otherwise`, async () => {
       // Each block's flush is what a package storing exactly the model's rows flushes: the state's nodes the model
@@ -256,91 +197,7 @@ describe("T2: a run of one block is the per-block step", () => {
   }
 });
 
-describe("T3: histories in two forms, in longer runs", () => {
-  for (const [name, histories] of [
-    ["as drawn", historyScripts({ oneForm: false, flushRule: true })],
-    [`sweeping throughout, up to ${LONG} blocks`, historyScripts({ oneForm: false, flushRule: true, maxBlocks: LONG }).map(sweeping)],
-  ] as const) {
-    it(`${name}: sound at every run's end, with the node set of the roots of the last two heights, in runs of ${SIZES.join(", ")} (seed ${SEED}, ${RUNS} runs)`, async () => {
-      const seen = new Map(SIZES.map((size) => [size, nothingSeen()] as const));
-      await fc.assert(
-        fc.asyncProperty(histories, async (script) => {
-          for (const size of SIZES) expect(await onItsOwn(script, { size }, seen.get(size) as Seen)).toEqual([]);
-        }),
-        { seed: SEED, numRuns: RUNS },
-      );
-      for (const size of SIZES) {
-        const of = seen.get(size) as Seen;
-        expect(of.blocks).toBeGreaterThan(1_000);
-        // Not vacuous: rows are written over with another child list and rows are deleted (a whole history in one
-        // run finds no row), and nodes are deleted.
-        if (size <= 7) expect(of.replaced).toBeGreaterThan(50);
-        if (size <= 7) expect(of.deleted).toBeGreaterThan(100);
-        expect(of.evicted).toBeGreaterThan(1_000);
-      }
-    }, 900_000);
-  }
-});
-
-describe("T3: histories in two forms, each run made shorter while its last block's replaced lists alone keep a node", () => {
-  for (const [name, histories] of [
-    ["as drawn", historyScripts({ oneForm: false, flushRule: true })],
-    [`sweeping throughout, up to ${LONG} blocks`, historyScripts({ oneForm: false, flushRule: true, maxBlocks: LONG }).map(sweeping)],
-  ] as const) {
-    it(`${name}: the model's tables in bytes at every run's end, in runs of ${SIZES.filter((size) => size > 1).join(", ")} (seed ${SEED}, ${RUNS} runs)`, async () => {
-      // The flushes are the model's own (a package told of every block's deletions); a run whose last block's
-      // replaced lists alone keep a node is computed again without that block, as many times as that takes, down to
-      // one block.
-      const sizes = SIZES.filter((size) => size > 1);
-      const seen = new Map(sizes.map((size) => [size, { runs: 0, remade: 0, kept: 0, replaced: 0, longest: 0, oneBlockKept: 0 } as Remade] as const));
-      await fc.assert(
-        fc.asyncProperty(histories, async (script) => {
-          const blocks = modelBlocks(script);
-          for (const size of sizes) expect(await remadeAgainstModel(blocks, size, seen.get(size) as Remade)).toEqual([]);
-        }),
-        { seed: SEED, numRuns: RUNS },
-      );
-      for (const size of sizes) {
-        const of = seen.get(size) as Remade;
-        // Not vacuous: runs are made shorter, rows are written over with another child list.
-        expect(of.remade, `runs of ${size}`).toBeGreaterThan(20);
-        // One run is made shorter more than once where it can be, and runs of one block are committed with a node
-        // their block's replaced lists alone keep: the procedure's both ends are reached.
-        if (size >= 3) expect(of.longest, `runs of ${size}`).toBeGreaterThanOrEqual(2);
-        expect(of.oneBlockKept, `runs of ${size}`).toBeGreaterThan(0);
-        if (size <= 7) expect(of.replaced, `runs of ${size}`).toBeGreaterThan(50);
-      }
-    }, 900_000);
-  }
-});
-
 describe("T4: sweep off, and a change of sweep", () => {
-  it(`a history whose sweep is off over a stretch is the model's at every run's end, a run ending at each change (seed ${SEED}, ${RUNS} runs)`, async () => {
-    const seen = new Map<string, Seen>();
-    await fc.assert(
-      fc.asyncProperty(historyScripts({ oneForm: true }).map(stretchOff), async (script) => {
-        for (const feed of FEEDS) {
-          for (const size of SIZES) {
-            const name = `${feed} ${size}`;
-            if (!seen.has(name)) seen.set(name, nothingSeen());
-            expect(await againstModel(script, { size, feed }, seen.get(name) as Seen)).toEqual([]);
-          }
-        }
-      }),
-      { seed: SEED, numRuns: RUNS },
-    );
-    for (const feed of FEEDS) {
-      const whole = seen.get(`${feed} 1000`) as Seen;
-      // Each history is three runs at most: on, off, on.
-      expect(whole.runs).toBeLessThanOrEqual(3 * RUNS * 2);
-      expect(whole.off).toBeGreaterThanOrEqual(RUNS);
-      // The queue is read whole once per run that sweeps, and by key in the others.
-      expect(whole.reads.queue).toBe(whole.runs - whole.off);
-      expect(whole.reads.queued).toBeGreaterThan(0);
-      expect(whole.reads.queued).toBeLessThanOrEqual(whole.off);
-    }
-  }, 900_000);
-
   it("a run that does not sweep keeps every node, counts and queues, reads no queue whole, and deletes nothing", async () => {
     // A state over two leaves, then a second state over one of them: with sweep off the first state stays, queued.
     const leaf = (name: string) => ({ key: nodeKey(Buffer.from(name), []), children: encodeChildren([]) });
@@ -1020,5 +877,56 @@ describe("by hand", () => {
     expect(outcome.net.inserts.map((node) => hex(node.key))).toEqual([leafNode, states[2], states[3]].map((node) => (node as (typeof states)[number]).key).sort());
     expect(outcome.net.queued.map(hex)).toEqual([(states[2] as (typeof states)[number]).key]);
     expect(outcome.handed).toBe(5);
+  });
+});
+
+describe("writeNet's statements", () => {
+  const keys = Array.from({ length: 2_500 }, (_, n) => nodeKey(Buffer.from(`key ${n}`), []));
+  const net: NetWrite = {
+    height: 9n,
+    inserts: keys.map((key) => ({ key, data: Uint8Array.of(7), children: Uint8Array.of(0) })),
+    written: 2_500,
+    deltas: keys.map((key) => ({ key, delta: 1 })),
+    counted: 2_500,
+    unqueued: keys,
+    queued: keys,
+    deleted: keys,
+  };
+  /** A handle that answers each statement with the keys it was given, less `less` for the statements `which` picks. */
+  const answering = (ran: { sql: string; keys: number }[], which: (sql: string) => boolean = () => false, less = 0): Pick<BlockWriteHandle, "execute"> => ({
+    async execute(sql, params) {
+      const given = ((params ?? [])[0] as readonly unknown[]).length;
+      ran.push({ sql, keys: given });
+      return which(sql) ? given - less : given;
+    },
+  });
+
+  it("sends each list in statements of 1,000 keys, in its order of statements, and none for an empty list", async () => {
+    const ran: { sql: string; keys: number }[] = [];
+    await writeNet(answering(ran), net);
+    expect(ran.map((statement) => statement.keys)).toEqual(Array.from({ length: 5 }, () => [1_000, 1_000, 500]).flat());
+    const kinds = ran.map(({ sql }) => (sql.includes(`INTO ${NODES_TABLE}`) ? "nodes" : sql.includes(REF_COUNTS_TABLE) ? "counts" : sql.startsWith(`DELETE FROM ${UNREFERENCED_TABLE}`) ? "unqueue" : sql.includes(`INTO ${UNREFERENCED_TABLE}`) ? "queue" : "delete"));
+    expect([...new Set(kinds)]).toEqual(["nodes", "counts", "unqueue", "queue", "delete"]);
+    ran.length = 0;
+    await writeNet(answering(ran), { height: 9n, inserts: [], written: 0, deltas: [], counted: 0, unqueued: [], queued: [], deleted: [] });
+    expect(ran).toEqual([]);
+  });
+
+  it("halts with row-count-mismatch naming a statement whose rows, summed over its statements, differ from the computed; unless left out", async () => {
+    for (const [statement, which] of [
+      ["write-nodes", (sql: string) => sql.includes(`INTO ${NODES_TABLE}`)],
+      ["merge-ref-counts", (sql: string) => sql.includes(REF_COUNTS_TABLE)],
+      ["delete-unreferenced", (sql: string) => sql.startsWith(`DELETE FROM ${UNREFERENCED_TABLE}`)],
+      ["insert-unreferenced", (sql: string) => sql.includes(`INTO ${UNREFERENCED_TABLE}`)],
+      ["delete-nodes", (sql: string) => sql.startsWith(`DELETE FROM ${NODES_TABLE}`)],
+    ] as const) {
+      const halt = await writeNet(answering([], which, 1), net).catch((error: unknown) => error);
+      expect(halt, statement).toMatchObject({
+        code: "ledger-refcount-invalid",
+        details: { reason: "row-count-mismatch", height: 9n, statement, expected: 2_500, actual: 2_497 },
+      });
+      expect((halt as Error).message).toMatch(new RegExp(`^the run ending at block 9: ${statement} affected 2497 rows where 2500 were computed`));
+      await writeNet(answering([], which, 1), net, { unchecked: "row-count-mismatch" });
+    }
   });
 });

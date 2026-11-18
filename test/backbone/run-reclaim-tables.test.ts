@@ -14,16 +14,15 @@ import type { BlockWriteHandle, Database } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
 import type { NodeBatch } from "../../src/ledger/types.js";
 import { BACKENDS } from "../db/backends.js";
-import { encodeChildren, hex, nodeKey } from "../ledger/node-format.js";
+import { encodeChildren, hex } from "../ledger/node-format.js";
 import { type HistoryScript, historyScripts, type RefcountTables as ModelTables } from "./refcount-model.js";
 import { refcountStep, sqlRefcountTables, writeRefcount } from "./refcount-step.js";
 import { flushOf, made, madeBlocks, type MadeNode, type ModelBlock, modelBlocks, payloadOf, ref, runsOf } from "./run-reclaim.js";
 
 /**
  * The run computation's reads (`sqlRunTables`) and its net write (`writeNet`) on `core_ledger_state`'s own tables (its
- * migration), on PostgreSQL 18 and PGlite 0.5.10, through the database API:
- * - the net write's statements: each list in statements of 1,000 keys, each statement's rows summed and checked
- *   (`row-count-mismatch`, naming the statement; left out by a negative control's `unchecked`);
+ * migration), on PostgreSQL 18 and PGlite 0.5.10, through the database API (the net write's statements on a handle
+ * that records them are in `./run-reclaim.test.ts`):
  * - the property (fast-check): on the histories, each run in one transaction, each block's root-count changes written
  *   as its own rows, then the computation read through the transaction and its net write: the tables after every run
  *   are the reference model's after the run's last block;
@@ -175,57 +174,6 @@ async function byRun(db: Database, flush: NodeBatch, on: boolean): Promise<strin
 const key = (tag: number): Uint8Array => new Uint8Array(32).fill(tag);
 /** A child list referencing `keys`. */
 const list = (...keys: Uint8Array[]): Uint8Array => encodeChildren(keys.map((k) => ({ ref: k })));
-
-describe("writeNet's statements", () => {
-  const keys = Array.from({ length: 2_500 }, (_, n) => nodeKey(Buffer.from(`key ${n}`), []));
-  const net: NetWrite = {
-    height: 9n,
-    inserts: keys.map((key) => ({ key, data: Uint8Array.of(7), children: Uint8Array.of(0) })),
-    written: 2_500,
-    deltas: keys.map((key) => ({ key, delta: 1 })),
-    counted: 2_500,
-    unqueued: keys,
-    queued: keys,
-    deleted: keys,
-  };
-  /** A handle that answers each statement with the keys it was given, less `less` for the statements `which` picks. */
-  const answering = (ran: { sql: string; keys: number }[], which: (sql: string) => boolean = () => false, less = 0): Pick<BlockWriteHandle, "execute"> => ({
-    async execute(sql, params) {
-      const given = ((params ?? [])[0] as readonly unknown[]).length;
-      ran.push({ sql, keys: given });
-      return which(sql) ? given - less : given;
-    },
-  });
-
-  it("sends each list in statements of 1,000 keys, in its order of statements, and none for an empty list", async () => {
-    const ran: { sql: string; keys: number }[] = [];
-    await writeNet(answering(ran), net);
-    expect(ran.map((statement) => statement.keys)).toEqual(Array.from({ length: 5 }, () => [1_000, 1_000, 500]).flat());
-    const kinds = ran.map(({ sql }) => (sql.includes(`INTO ${NODES_TABLE}`) ? "nodes" : sql.includes(REF_COUNTS_TABLE) ? "counts" : sql.startsWith(`DELETE FROM ${UNREFERENCED_TABLE}`) ? "unqueue" : sql.includes(`INTO ${UNREFERENCED_TABLE}`) ? "queue" : "delete"));
-    expect([...new Set(kinds)]).toEqual(["nodes", "counts", "unqueue", "queue", "delete"]);
-    ran.length = 0;
-    await writeNet(answering(ran), { height: 9n, inserts: [], written: 0, deltas: [], counted: 0, unqueued: [], queued: [], deleted: [] });
-    expect(ran).toEqual([]);
-  });
-
-  it("halts with row-count-mismatch naming a statement whose rows, summed over its statements, differ from the computed; unless left out", async () => {
-    for (const [statement, which] of [
-      ["write-nodes", (sql: string) => sql.includes(`INTO ${NODES_TABLE}`)],
-      ["merge-ref-counts", (sql: string) => sql.includes(REF_COUNTS_TABLE)],
-      ["delete-unreferenced", (sql: string) => sql.startsWith(`DELETE FROM ${UNREFERENCED_TABLE}`)],
-      ["insert-unreferenced", (sql: string) => sql.includes(`INTO ${UNREFERENCED_TABLE}`)],
-      ["delete-nodes", (sql: string) => sql.startsWith(`DELETE FROM ${NODES_TABLE}`)],
-    ] as const) {
-      const halt = await writeNet(answering([], which, 1), net).catch((error: unknown) => error);
-      expect(halt, statement).toMatchObject({
-        code: "ledger-refcount-invalid",
-        details: { reason: "row-count-mismatch", height: 9n, statement, expected: 2_500, actual: 2_497 },
-      });
-      expect((halt as Error).message).toMatch(new RegExp(`^the run ending at block 9: ${statement} affected 2497 rows where 2500 were computed`));
-      await writeNet(answering([], which, 1), net, { unchecked: "row-count-mismatch" });
-    }
-  });
-});
 
 describe.each(BACKENDS)("the run computation's reads and net write on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);

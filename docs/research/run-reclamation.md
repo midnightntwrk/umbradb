@@ -446,7 +446,8 @@ Theorem 4 is about the same flushes. A package told of deletions at every block 
 told of them only at a run's end, which still holds it, does not; when the package spells it differently the second
 time, only the first stores the second spelling (section 3.9, point 5).
 
-**What the tests show of it** (`test/backbone/run-reclaim.test.ts`). On generated histories in one form and on the
+**What the tests show of it** (`test/backbone/run-reclaim.test.ts`; the generated histories of T1, T3 and the
+`sweep` stretch of 4.7 in `test/backbone/run-reclaim-histories.test.ts`). On generated histories in one form and on the
 fixture DAGs, in runs of 1, 2, 3, 7 and 1,000 blocks, flushed by a package told of deletions at every block and by
 one told at a run's end only, the tables are the model's at every run's end (T1). A run of one block gives
 `refcountStep`'s outputs on every generated block that follows the flush rule, rewrites included, and halts with
