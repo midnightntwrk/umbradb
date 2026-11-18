@@ -441,9 +441,10 @@ counts and queue (after a restart, for one).
   the setting's name unquoted, quoted (`"session_authorization"`) or a Unicode name (`U&"…"`). The call fails with
   `database-error`, `details.reason` `control-refused` and `details.command` naming the command, not retryable. Nothing
   was sent, so the transaction is not aborted and your next statement runs. `PREPARE name AS …` is accepted, whatever
-  the name. A text of two statements is refused by the database (`42601`), and neither runs. To go on after a write
-  that may fail, such as a row that may exist already, do not wrap it in a savepoint: use `INSERT … ON CONFLICT`, or
-  check first.
+  the name. A text of two statements whose first is none of these is sent and refused by the database (`42601`), and
+  neither runs; one whose first is one of them (`COMMIT; SELECT 1`) is refused as above, before it is sent. To go on
+  after a write that may fail, such as a row that may exist already, do not wrap it in a savepoint: use
+  `INSERT … ON CONFLICT`, or check first.
 - **Temporary tables and sequences are your own.** UmbraDB creates none. One you create (`CREATE TEMP …` in a
   migration or through a write handle) belongs to the database session that ran the statement, not to a transaction or
   to your schema, and a read handle's read-only transaction does not protect it where the handle runs on that session
