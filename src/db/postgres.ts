@@ -40,7 +40,9 @@
  * first transaction (`./writer-lock.ts`). The first one then runs the durability probe on the same session
  * (`./durability-probe.ts`): a refusal ends that session, so a refused writer holds no lock and wrote nothing. A
  * session opened after a lost one only takes the lock again; finding it taken is `writer-lock-lost`, after which the
- * writer never writes again. The read pool's sessions take no lock.
+ * writer never writes again. Each session that took the lock has a number of its own (`Database.writerSession`): a
+ * session lost while idle is replaced without an error, and another writer may have held the lock in between, which
+ * the number tells. The read pool's sessions take no lock.
  */
 
 import postgres, { type Sql } from "postgres";
@@ -568,6 +570,10 @@ class Writer {
   private started: readonly DurabilityWarning[] | undefined;
   /** Set when a new session found the lock taken: this writer never writes again. */
   private lost: UmbraError | undefined;
+  /** How many sessions took the writer lock: the number of the last one ({@link writerSession}). */
+  private sessions = 0;
+  /** The session that took the writer lock last. */
+  private held: Session | undefined;
 
   constructor(
     private readonly open: () => Session,
@@ -589,6 +595,12 @@ class Writer {
   async close(): Promise<void> {
     this.closed = true;
     await this.session?.end();
+  }
+
+  /** The number of the session holding the writer lock while it is usable; null otherwise (see `Database`). */
+  writerSession(): number | null {
+    const usable = !this.closed && this.session !== undefined && this.session.usable;
+    return usable && this.held === this.session ? this.sessions : null;
   }
 
   private enqueue<T>(job: () => Promise<T>): Promise<T> {
@@ -613,6 +625,8 @@ class Writer {
       } else {
         await takeWriterLock(statements, "again");
       }
+      this.sessions += 1;
+      this.held = session;
     } catch (error) {
       // A session without the lock, or whose server the probe refused, is never used: ending it releases what it took.
       this.session = undefined;
@@ -715,6 +729,7 @@ export function openPostgres(options: PostgresOptions): Database {
       if (closed) return Promise.reject(handleClosed("database"));
       return writer.transaction(body);
     },
+    writerSession: () => (closed ? null : writer.writerSession()),
     async close(): Promise<void> {
       closed = true;
       await Promise.all([writer.close(), pool.close()]);

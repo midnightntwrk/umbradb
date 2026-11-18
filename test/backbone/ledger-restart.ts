@@ -120,6 +120,9 @@ export function recordingLoads(host: LedgerHost, seen: SeenLoad[]): LedgerHost {
     apply: (input, read) => host.apply(input, read),
     commit: (block) => host.commit(block),
     release: (drop) => host.release(drop),
+    written: (block) => host.written(block),
+    committed: (block) => host.committed(block),
+    rolledBack: (block) => host.rolledBack(block),
     async load(input, read) {
       const result = await host.load(input, read);
       seen.push({ height: input.height, stateKey: input.stateKey, stateRoot: result.stateRoot, loaded: result.loaded });

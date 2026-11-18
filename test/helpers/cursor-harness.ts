@@ -165,6 +165,7 @@ export async function helperDatabase(
         items: standInItems(height),
         settings: Object.freeze({}),
         active: () => true,
+        continues: false,
       });
       const part = options.part ?? main;
       await db.transaction(async (tx) => {

@@ -23,8 +23,9 @@
  * **At `on-db-write`** it writes one row per transaction in one statement. **The table** and every statement are in
  * `./sql.ts`.
  *
- * **The worker's parses** are released once their block has committed (`on-after-db-write`), and when a queued best
- * block is dropped (`on-rollback`), so the worker keeps no block it will not apply.
+ * **The worker's parses** are released once their block has committed, by the worker's host when the engine tells it
+ * the `COMMIT` answered (`../../ledger/worker/host.ts`), and by this module when a queued best block is dropped
+ * (`on-rollback`), so the worker keeps no block it will not apply.
  *
  * The declaration ({@link CORE_BLOCK_PARSED}) is a constant. It finds the ledger worker through the process context,
  * which the runner binds to the process's worker ({@link bindLedgerParser}). A test's or a negative control's build
@@ -228,13 +229,6 @@ export const CORE_BLOCK_PARSED = defineModule({
     },
     async "on-db-write"(_p, b, w) {
       await writeTransactionRows(w, b);
-    },
-    async "on-after-db-write"(p, b) {
-      // Not awaited (as `core-ledger-state`'s commit): this callback holds a read, on PGlite the one queue, and the
-      // release may wait in the worker behind a parse whose stored nodes need it.
-      void BOUND.get(p)
-        ?.release({ upTo: b.height })
-        .catch(() => undefined);
     },
     async "on-rollback"(p, dropped) {
       void BOUND.get(p)

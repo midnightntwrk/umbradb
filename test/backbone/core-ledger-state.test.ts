@@ -50,6 +50,7 @@ function block(height: bigint, items: Record<string, unknown> = {}): BlockContex
     })),
     settings: {},
     active: () => true,
+    continues: false,
   };
 }
 
@@ -284,10 +285,9 @@ describe("core-ledger-state's parts", () => {
     await points["on-compute"]?.(p, block(1n), reading([{ ms: 1n }]) as never, { put: () => undefined });
     await points["on-db-write"]?.(p, block(1n), w);
     await expect(points["on-db-write"]?.(p, block(1n), w)).rejects.toThrow(/applied no such block/);
-    await points["on-after-db-write"]?.(p, block(1n), {} as never);
-    expect(asked.at(-1)).toEqual({ commit: { height: 1n, hash: hash(2) } });
-    // Unbound, the commit is no one's.
-    await points["on-after-db-write"]?.(context(), block(1n), {} as never);
+    // Nothing after the commit: the engine tells the worker's host, which commits the block in the worker.
+    expect(Object.keys(points)).not.toContain("on-after-db-write");
+    expect(asked.some((request) => typeof request === "object" && request !== null && "commit" in request)).toBe(false);
   });
 
   it("has the worker hold the state stored at h − 1 before the apply, and fails when its root is not the stored one", async () => {
@@ -478,7 +478,7 @@ describe("core-ledger-state's parts", () => {
 });
 
 describe("core-block-parsed in the ledger worker", () => {
-  it("parses through the worker bound to its process context, and releases its parses", async () => {
+  it("parses through the worker bound to its process context, and releases a dropped best block's parse", async () => {
     const { host, asked } = bound(Uint8Array.of(1));
     const p = context();
     bindLedgerParser(p, host);
@@ -486,11 +486,11 @@ describe("core-block-parsed in the ledger worker", () => {
     expect(boundLedgerParser(p)).toBe(host);
     expect(() => boundLedgerParser(context())).toThrow(/did not bind/);
     const points = CORE_BLOCK_PARSED.points;
-    await points["on-after-db-write"]?.(p, block(4n));
+    // A committed block's parses are released by the worker's host when the engine tells it the COMMIT answered.
+    expect(Object.keys(points)).not.toContain("on-after-db-write");
     await points["on-rollback"]?.(p, [{ height: 5n, hash: hash(5), parentHash: hash(4) }]);
-    await points["on-after-db-write"]?.(context(), block(4n));
     await points["on-rollback"]?.(context(), []);
-    expect(asked).toEqual([{ release: { upTo: 4n } }, { release: { hashes: [hash(5)] } }]);
+    expect(asked).toEqual([{ release: { hashes: [hash(5)] } }]);
     const parser = workerParser(host);
     await expect(parser.parse("v9", [Uint8Array.of(1)])).rejects.toThrow(TypeError);
     expect(await parser.parse("v9", [], { height: 1n, hash: hash(2) })).toEqual([]);

@@ -179,6 +179,7 @@ function landingCommits(db: Database): { readonly db: Database; readonly state: 
       return result;
     },
     close: () => db.close(),
+    writerSession: () => db.writerSession(),
   };
   return { db: wrapped, state };
 }

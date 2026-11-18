@@ -67,7 +67,7 @@ function contextAt(start: bigint): ProcessContext {
 
 /** The block context of `block`, with the stand-in's items unless `items` are given. */
 function contextOf(block: BlockRef, items: ReadonlyMap<string, unknown> = standInItems(block.height)): BlockContext {
-  return Object.freeze({ ...block, items, settings: Object.freeze({}), active: () => true });
+  return Object.freeze({ ...block, items, settings: Object.freeze({}), active: () => true, continues: false });
 }
 
 /** A block at `height` whose hash and parent are the given ones (the default chain's otherwise). */

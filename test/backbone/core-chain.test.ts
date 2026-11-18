@@ -688,7 +688,7 @@ describe("core-chain outside a process", () => {
     const handle = { height: null, query: async () => [], execute: async () => 0 };
     const startDb = CORE_CHAIN.points["on-start-db"] as NonNullable<typeof CORE_CHAIN.points["on-start-db"]>;
     const dbWrite = CORE_CHAIN.points["on-db-write"] as NonNullable<typeof CORE_CHAIN.points["on-db-write"]>;
-    const block = Object.freeze({ ...inMemoryBlock(S), items: new Map(), settings: {}, active: () => true });
+    const block = Object.freeze({ ...inMemoryBlock(S), items: new Map(), settings: {}, active: () => true, continues: false });
     for (const run of [() => startDb.call(CORE_CHAIN.points, context, handle), () => dbWrite.call(CORE_CHAIN.points, context, block, handle)]) {
       expect(((await rejectionOf(run())) as Error).message).toMatch(/bindCoreChain/);
     }

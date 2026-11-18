@@ -49,8 +49,9 @@
  * `unreferenced` content-defined (`./node-set.ts`): the contents hash takes `nodes` by its node set and checks the counts
  * and the queue against the rows, and no block captures or digests them.
  *
- * **At `on-after-db-write`** it tells the worker the block committed, so the state after h becomes the one h + 1 is
- * applied on. It does not wait for the answer, since that callback holds a read (see the callback).
+ * **After the commit** it does nothing: the engine tells the worker's host when the `COMMIT` that holds h answered, and
+ * the host commits the block in the worker, so the state after h becomes the one h + 1 is applied on
+ * (`../../ledger/worker/host.ts`).
  *
  * **The stored state.** Before each apply after block 0 it reads the state at h − 1 from `states` (its key and root),
  * with the block's ledger there (`core_block_commit.blocks`), and asks the worker to hold that state
@@ -107,8 +108,8 @@
  * the refusal fails the block. A failure after the eviction and before the `COMMIT` (a write, a lost connection) rolls
  * the block back, the worker having forgotten nodes the database keeps; it flushes such a node again when it needs it.
  * When the `COMMIT`'s answer is lost, the cursor read after the reconnection decides: a block that committed is not
- * computed again, and its `on-after-db-write` tells the worker, which holds its state pending; one that did not is
- * made again from `on-compute`, as after a rollback.
+ * computed again, and the engine tells the worker's host it committed, so the worker commits the state it holds
+ * pending; one that did not is made again from `on-compute`, as after a rollback.
  *
  * The declaration ({@link CORE_LEDGER_STATE}) is a constant built over its rules. A negative control's build composes
  * its own with {@link coreLedgerState}, with one rule replaced.
@@ -781,14 +782,6 @@ export function coreLedgerState(options: CoreLedgerStateOptions = {}): DefinedMo
       },
       async "on-settle"(p, run, w) {
         await settleRun(p, run, w, options);
-      },
-      async "on-after-db-write"(p, b) {
-        // Not awaited: this callback runs inside a read, which on PGlite holds the one queue, and the commit may wait
-        // in the worker behind a parse whose stored nodes need that queue; the worker answers requests in order, so
-        // the next block's apply still finds the state committed, and a worker that failed fails that apply.
-        void BOUND.get(p)
-          ?.ledger.commit({ height: b.height, hash: b.hash })
-          .catch(() => undefined);
       },
     },
   });

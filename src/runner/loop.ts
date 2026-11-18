@@ -62,7 +62,26 @@
  * **The block context** of each callback holds the block's height, hash and parent hash, the `block` items published
  * before the callback started (`./block-context.ts`: a callback's puts are published when it completes), the calling
  * module's settings for the revision covering h, and whether a module's entry is active at h. At `on-after-db-write` it
- * holds no items.
+ * holds no items. Its `continues` is true from `on-compute` to `on-after-db-write` when the `COMMIT` of h − 1 answered in
+ * the same run of the loop ({@link FinalizedLoop.run}), so no failure, retry or restart came between, and the writer's
+ * session that committed it is the one the writer still has (`Database.writerSession`), so no other writer can have
+ * held the writer lock since; false at a run's first height, for a held height processed again and the height after one
+ * whose `COMMIT` lost its answer, at the re-delivery, after the writer's session was replaced, and always at `on-fetch`
+ * and `on-parse`. A height whose callbacks were told true must commit on that same session: when its transaction finds
+ * another, the attempt fails before its first `on-db-write` callback with `connection-lost` (retryable, `cause`
+ * `writer-session-replaced`), and the height is made again, with `continues` false.
+ *
+ * **The transaction's follower** ({@link LoopInput.follower}: the process's ledger worker host, when it has one) is
+ * told what became of each block's transaction (`./transaction-follower.ts`): `written` once h's body ended (its
+ * `on-db-write` and `on-settle` callbacks, and the cursor check accepted the cursor), `committed` wherever the loop
+ * knows h committed (the `COMMIT`'s answer, the cursor read after a lost one, the re-delivery of the cursor's block at a
+ * run's start), and `rolledBack` once for a transaction that did not commit (a failure before the `COMMIT`, or of a
+ * `COMMIT` that answered with an error; the lockstep wait stopping the loop; the cursor read after a lost `COMMIT`
+ * finding the cursor before h). After a `COMMIT` whose answer was lost it is told nothing until that cursor read, and
+ * nothing then either when the cursor is unexpected (neither h nor the one before it: processing halts without knowing
+ * the outcome). A stop while such a height is held tells nothing: the next start's cursor read settles it, and its
+ * re-delivery tells the follower when it committed. One loop tells a block committed once: a run again after a retry,
+ * which re-delivers the cursor's block, does not tell it again.
  *
  * **Nothing is open while the loop waits** for the head: every read and the block transaction have ended.
  *
@@ -163,6 +182,7 @@ import {
   stopHeightSchedule,
 } from "./dispatch.js";
 import type { LoopPause } from "./pause.js";
+import type { TransactionFollower } from "./transaction-follower.js";
 import { traceAdd, traceDropBlock, traceEndBlock } from "../trace/trace.js";
 import type { MisuseReports } from "./process-context.js";
 
@@ -206,6 +226,11 @@ export interface LoopInput {
   readonly lockstep?: LockstepWait;
   /** The pause between heights (see the module comment); none unless given. */
   readonly pause?: LoopPause;
+  /**
+   * Told what became of each block's transaction (`./transaction-follower.ts`; see the module comment): the process's
+   * ledger worker host, when it has one. None unless given.
+   */
+  readonly follower?: TransactionFollower;
 }
 
 /** The lockstep wait (`src/private/lockstep.ts`'s `Lockstep`): before `BEGIN` of `height`. */
@@ -442,6 +467,20 @@ function isBlock(ref: BlockRef | null, block: BlockRef | null): boolean {
 /** A cursor as text, for a message. */
 const cursorText = (cursor: BlockRef | null): string => (cursor === null ? "none" : `height ${cursor.height}`);
 
+/**
+ * The failure of a height's attempt whose callbacks were told the block before continues, when its transaction runs on
+ * another writer's session than the one that committed that block (see the module comment): retryable, so the height
+ * is made again, from the database.
+ */
+function writerSessionReplaced(height: bigint, committedOn: number, now: number | null): UmbraError {
+  return new UmbraError(
+    "connection-lost",
+    `the writer's session was replaced since the block before height ${height} committed (session ${committedOn}, now ` +
+      `${now ?? "none"}): another writer may have held the writer lock in between, so height ${height} is made again`,
+    { height, cause: "writer-session-replaced" },
+  );
+}
+
 /** Whether the process retries `failure`: a retryable `UmbraError`, itself or a callback's. */
 function isRetryable(failure: HeightFailure): boolean {
   const cause = failure.cause instanceof CallbackFailure ? failure.cause.cause : failure.cause;
@@ -485,6 +524,19 @@ export class FinalizedLoop {
    * of the range declares the point, so its blocks skip it.
    */
   readonly #settleSchedules = new WeakMap<ResolvedRange, PointSchedule<"on-settle"> | null>();
+  /** The block whose `COMMIT` answered last in this run of the loop; null from the run's start until one does. */
+  #lastCommitted: BlockRef | null = null;
+  /** The writer's session that block's transaction ran on (`Database.writerSession`). */
+  #lastCommittedSession: number | null = null;
+  /**
+   * The heights' runs of this run of the loop whose block before committed in it ({@link continues}), each with the
+   * writer's session that committed it, which its own transaction must run on.
+   */
+  #continuing = new WeakMap<HeightRun, number>();
+  /** The writer's session each height's block transaction ran on, from its start. */
+  readonly #writtenOn = new WeakMap<HeightRun, number | null>();
+  /** The last block this loop told the follower committed, which it does not tell again ({@link #tell}). */
+  #toldCommitted: BlockRef | null = null;
 
   constructor(input: LoopInput) {
     this.input = input;
@@ -559,6 +611,10 @@ export class FinalizedLoop {
     const held = this.#held;
     this.#held = undefined;
     this.#resume = undefined;
+    // A new run: no block before continues into it, whatever an earlier run committed.
+    this.#lastCommitted = null;
+    this.#lastCommittedSession = null;
+    this.#continuing = new WeakMap();
     let cursor: BlockRef | null;
     if (held === undefined) {
       cursor = await db.read((read) => source.cursor(read));
@@ -618,11 +674,13 @@ export class FinalizedLoop {
   /**
    * The re-delivery at the cursor `cursor` after a restart, before its next height: `on-after-db-write` and
    * `on-stop-height` of its height ({@link after}), with its block context and no `block` items. A failure stops the
-   * loop with the height committed.
+   * loop with the height committed. The cursor's block committed before this run: the follower is told so, once per
+   * loop.
    */
   protected async redeliver(cursor: BlockRef): Promise<void> {
     const { height } = cursor;
     try {
+      this.#tell("committed", cursor);
       const range = this.#rangeAt(height);
       await this.after({ height, block: cursor, range, items: this.itemsAt(height), previous: null });
       this.#check();
@@ -742,13 +800,13 @@ export class FinalizedLoop {
     const open = this.input.source.fetchRead;
     if (point === "on-fetch" && open !== undefined) {
       await this.#dispatch(run.range, "on-fetch", (part, call) => {
-        const context = this.#context(run, part, run.items.visible());
+        const context = this.#context(run, part, run.items.visible(), false);
         return open((read) => run.items.collect(part, "on-fetch", (sink) => call(context, sink, read)), run.height);
       });
       return;
     }
     await this.#dispatch(run.range, point, (part, call) => {
-      const context = this.#context(run, part, run.items.visible());
+      const context = this.#context(run, part, run.items.visible(), false);
       return run.items.collect(part, point, (sink) => call(context, sink));
     });
   }
@@ -756,7 +814,7 @@ export class FinalizedLoop {
   /** `on-compute`: each callback with its block context, a read `open` opens for it, and an item sink. */
   protected async compute(run: HeightRun, open: ReadOpener): Promise<void> {
     await this.#dispatch(run.range, "on-compute", (part, call) => {
-      const context = this.#context(run, part, run.items.visible());
+      const context = this.#context(run, part, run.items.visible(), this.continues(run));
       return open((read) => run.items.collect(part, "on-compute", (sink) => call(context, read, sink)));
     });
   }
@@ -775,15 +833,22 @@ export class FinalizedLoop {
   /**
    * Inside the block transaction `tx`: every `on-db-write` callback with its block write handle, in order, then the
    * `on-settle` point ({@link settlePoint}); then, before the `COMMIT`, a misuse during the block fails it, and the block
-   * source's cursor, read in `tx`, must be the height with the block's hash.
+   * source's cursor, read in `tx`, must be the height with the block's hash. Then the block's rows are in the open
+   * transaction, and the follower is told so.
    */
   protected async write(tx: Transaction, run: HeightRun): Promise<void> {
+    // A height whose callbacks were told the block before continues commits only on the writer's session that
+    // committed that block: on another, another writer may have held the lock in between.
+    const session = this.input.db.writerSession();
+    const continuing = this.#continuing.get(run);
+    if (continuing !== undefined && session !== continuing) throw writerSessionReplaced(run.height, continuing, session);
+    this.#writtenOn.set(run, session);
     const writes = openBlockWrites(tx, this.input.plan, {
       height: run.previous?.height ?? null,
       onClosedUse: (error) => this.#closedUse(error),
     });
     await this.#dispatch(run.range, "on-db-write", (part, call) => {
-      const context = this.#context(run, part, run.items.visible());
+      const context = this.#context(run, part, run.items.visible(), this.continues(run));
       return writes.write(part.id, (w) => call(context, w));
     });
     if (this.#settleScheduleOf(run.range) !== null) await this.settlePoint(run, writes);
@@ -803,6 +868,7 @@ export class FinalizedLoop {
           "and core-private-source the private cursor on a private process",
       );
     }
+    this.#tell("written", run.block);
   }
 
   /**
@@ -839,7 +905,7 @@ export class FinalizedLoop {
    */
   protected async after(run: HeightRun): Promise<void> {
     await this.#dispatch(run.range, "on-after-db-write", (part, call) => {
-      const context = this.#context(run, part, this.afterWriteItems(run));
+      const context = this.#context(run, part, this.afterWriteItems(run), this.continues(run));
       return this.input.db.read((read) => call(context, read));
     });
     await this.stopHeight(run);
@@ -851,6 +917,16 @@ export class FinalizedLoop {
    */
   protected afterWriteItems(_run: HeightRun): ReadonlyMap<string, unknown> {
     return new Map();
+  }
+
+  /**
+   * Whether the block before `run`'s height continues into it, as its block context says from `on-compute` on
+   * (`BlockContext.continues`): its `COMMIT` answered in this run of the loop, so no failure, retry or restart came
+   * between, and on the writer's session still in use. False at a run's first height, for a held height processed
+   * again, at the re-delivery, and once the writer's session was replaced. A negative control's seam.
+   */
+  protected continues(run: HeightRun): boolean {
+    return this.#continuing.has(run);
   }
 
   /** The height kept for the next run when a retryable failure stopped `held`'s (see the module comment): a seam. */
@@ -883,6 +959,14 @@ export class FinalizedLoop {
     try {
       const beginFrom = performance.now();
       run = resume === undefined ? await this.#begin(height, previous) : this.#again(resume);
+      // The block before committed in this run, no failure since, on the writer's session still in use: its block
+      // contexts say it continues.
+      const session = this.input.db.writerSession();
+      const before = this.#lastCommitted;
+      const sameSession = session !== null && session === this.#lastCommittedSession;
+      if (resume === undefined && before !== null && isBlock(before, previous) && sameSession) {
+        this.#continuing.set(run, session);
+      }
       const prepareFrom = performance.now();
       // The wait for the block from its source, and the height's start.
       traceAdd("beginMs", prepareFrom - beginFrom);
@@ -892,6 +976,7 @@ export class FinalizedLoop {
         // Stopped at the lockstep wait: the height's run, and its window, end here.
         this.#unwatch(watch, false);
         traceDropBlock();
+        this.#tell("rolledBack", run.block);
         return null;
       }
       // For slow-height reports the block transaction is on-db-write's: its BEGIN, its callbacks, the cursor check, the
@@ -901,6 +986,10 @@ export class FinalizedLoop {
       await this.#transacting(this.commit(run));
       traceAdd("txMs", performance.now() - transactionFrom);
       committed = true;
+      // The COMMIT that holds the height answered: the follower is told, and the next height continues from it.
+      this.#tell("committed", run.block);
+      this.#lastCommitted = run.block;
+      this.#lastCommittedSession = this.#writtenOn.get(run) ?? null;
       this.input.observer?.committed?.(run.block);
       this.#unwatch(watch, true);
       await this.#afterCommit(run);
@@ -910,7 +999,12 @@ export class FinalizedLoop {
     } catch (error) {
       if (!committed) this.#unwatch(watch, false);
       const failure = this.#failure(height, error, committed);
-      if (!committed && run !== undefined) this.#hold(run, failure);
+      if (!committed && run !== undefined) {
+        this.#hold(run, failure);
+        // The transaction did not commit, unless held with its COMMIT's outcome unknown: the follower learns that
+        // outcome at the next run's cursor read (#settle).
+        if (!(this.#held?.uncertain === true && this.#held.run === run)) this.#tell("rolledBack", run.block);
+      }
       // Held with its COMMIT's outcome unknown, the height keeps its trace line for the run that learns it (#settle).
       if (!(this.#held?.uncertain === true && this.#held.run === run)) traceDropBlock();
       throw failure;
@@ -1081,6 +1175,9 @@ export class FinalizedLoop {
     const outcome = this.commitOutcome(held, cursor);
     // The height's trace line, kept through an uncertain COMMIT (#process): written if it committed, else dropped.
     if (outcome !== "committed") traceDropBlock();
+    // The follower learns now what became of an unknown COMMIT (one that failed before its COMMIT was told at the
+    // failure). An unexpected cursor tells nothing: the transaction's outcome is not known, and processing halts.
+    if (outcome === "not-committed" && held.uncertain) this.#tell("rolledBack", run.block);
     if (outcome === "not-committed") {
       // The height again, above the cursor before it (which the cursor read is).
       this.#resume = held;
@@ -1102,6 +1199,7 @@ export class FinalizedLoop {
         false,
       );
     }
+    this.#tell("committed", run.block);
     observer?.committed?.(run.block);
     try {
       await this.#afterCommit(run);
@@ -1138,7 +1236,7 @@ export class FinalizedLoop {
       await runSchedule(scheduleAt(run.range, point), {
         contextOf,
         invoke: tracked<"on-fetch" | "on-parse">(activity, (part, call) => {
-          const context = this.#context(run, part, run.items.visible());
+          const context = this.#context(run, part, run.items.visible(), false);
           return run.items.collect(part, point, (sink) => call(context, sink));
         }),
       });
@@ -1227,8 +1325,17 @@ export class FinalizedLoop {
       .map((part) => part.id);
   }
 
-  /** The block context of `part`'s callback at the height of `run`, with `items`. */
-  #context(run: HeightRun, part: ModuleDeclaration, items: ReadonlyMap<string, unknown>): BlockContext {
+  /**
+   * The block context of `part`'s callback at the height of `run`, with `items`; `continues` says whether the block
+   * before continues into it (always false at `on-fetch` and `on-parse`, which may run before the block before
+   * committed).
+   */
+  #context(
+    run: HeightRun,
+    part: ModuleDeclaration,
+    items: ReadonlyMap<string, unknown>,
+    continues: boolean,
+  ): BlockContext {
     const { block } = run;
     const { graph, contextOf } = this.input;
     return Object.freeze({
@@ -1241,7 +1348,20 @@ export class FinalizedLoop {
         (graph.segments.get(id) ?? []).some(
           (segment) => segment.from <= block.height && (segment.to === null || block.height <= segment.to),
         ),
+      continues,
     });
+  }
+
+  /**
+   * Tells the follower, if any, `fact` of `block` (see the module comment): its height and hash. A block this loop told
+   * committed already is not told again (a run again after a retry re-delivers it).
+   */
+  #tell(fact: keyof TransactionFollower, block: BlockRef): void {
+    if (fact === "committed") {
+      if (this.#toldCommitted !== null && isBlock(this.#toldCommitted, block)) return;
+      this.#toldCommitted = block;
+    }
+    this.input.follower?.[fact](Object.freeze({ height: block.height, hash: block.hash }));
   }
 
   /** The range of the graph holding `height`; throws for none (a graph resolved from another cursor). */

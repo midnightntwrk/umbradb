@@ -416,6 +416,9 @@ function pointWorker(host: LedgerHost, reached: (point: RestartPoint, height: bi
     },
     commit: (block) => host.commit(block),
     release: (drop) => host.release(drop),
+    written: (block) => host.written(block),
+    committed: (block) => host.committed(block),
+    rolledBack: (block) => host.rolledBack(block),
     load: (input, read) => host.load(input, read),
     retained: (input, read) => host.retained(input, read),
     async evict(keys) {

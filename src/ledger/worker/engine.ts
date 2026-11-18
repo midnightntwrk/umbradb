@@ -21,9 +21,10 @@
  * worker, as an apply's trap does.
  *
  * **The states.** The engine holds the state committed at a height (its cursor's) and at most one pending state: the
- * one after the block applied last, not yet committed ({@link LedgerEngine.commit}, called once the block's
- * transaction committed). {@link LedgerEngine.apply} applies a block only on the committed state at h − 1, of the
- * block's ledger and with the committed block as its parent, and refuses anything else, naming what it holds.
+ * one after the block applied last, not yet committed ({@link LedgerEngine.commit}, which the host sends once the
+ * `COMMIT` of the block's transaction answered, `./host.ts`). {@link LedgerEngine.apply} applies a block only on the
+ * committed state at h − 1, of the block's ledger and with the committed block as its parent, and refuses anything
+ * else, naming what it holds.
  *
  * The same block applied again while pending (a height whose transaction was lost and is processed again) gets the same
  * result back, batch included. The database rolled back, so the batch still has to be written; and the package's
@@ -596,7 +597,10 @@ export class LedgerEngine {
     }
   }
 
-  /** `block` committed (its `on-after-db-write`): its pending state becomes the committed one. False when not pending. */
+  /**
+   * `block` committed (the host sends it once the `COMMIT` that holds the block answered): its pending state becomes
+   * the committed one. False when not pending.
+   */
   commit(block: BlockId): boolean {
     const pending = this.#pending;
     if (pending === null || !same(pending, block)) return false;

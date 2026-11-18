@@ -141,6 +141,7 @@ export async function startPgliteServer(): Promise<PgliteTestServer> {
               return database.transaction(body);
             },
             close: () => database.close(),
+            writerSession: () => database.writerSession(),
           };
         },
       };

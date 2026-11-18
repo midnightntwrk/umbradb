@@ -130,6 +130,7 @@ export function loggingTransactions(db: Database, log: string[]): Database {
       }
     },
     close: () => db.close(),
+    writerSession: () => db.writerSession(),
   };
 }
 

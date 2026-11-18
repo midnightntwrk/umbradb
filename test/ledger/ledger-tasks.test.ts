@@ -257,6 +257,7 @@ describe("ledger tasks on the main thread", () => {
     items: new Map(Object.entries({ "block-parsed": { ledger: "v9", transactions: [{}, {}] }, ...items })),
     settings: {},
     active: () => true,
+    continues: false,
   });
   const context = (): ProcessContext => ({ items: new Map(), revisions: [], publish() {} });
   const sink = () => {
