@@ -11,9 +11,11 @@
  * A body that sends no statement sends nothing.
  *
  * **What it guarantees.**
- * - It cannot write. `INSERT`, `UPDATE`, `DELETE`, `SELECT … FOR UPDATE`, a writing `WITH`, `CREATE [TEMP] TABLE`,
- *   `TRUNCATE`, `nextval` and `setval` fail with `25006`; `SET TRANSACTION READ WRITE` and its `set_config` forms with
- *   `25001`.
+ * - It cannot change a persistent object. On a table or a sequence that is not temporary, `INSERT`, `UPDATE`,
+ *   `DELETE`, `SELECT … FOR UPDATE`, a writing `WITH`, `nextval` and `setval` fail with `25006`. So does a statement
+ *   that creates, alters, truncates or drops an object, a temporary one too (`CREATE [TEMP] TABLE`, `TRUNCATE`,
+ *   `DROP`, `COMMENT`). `SET TRANSACTION READ WRITE` and its `set_config` forms fail with `25001`. What it lets
+ *   through on temporary objects is below.
  * - It sees the transaction's own uncommitted writes: each view, the rows written before it.
  * - A statement that fails inside it reaches the body as its own error and does not abort the transaction. The view's
  *   later statements, also those already sent behind it, fail with `25P02` and are not sent again; the close undoes the
@@ -21,20 +23,37 @@
  * - It cannot change the session for later statements. Inside it the settings and the role are the session's own (the
  *   open's resets); a `SET`, `SET LOCAL`, `set_config` or `SET ROLE` is undone by the close, and the transaction's own
  *   `SET LOCAL ROLE` and local settings are back after it.
- * - It cannot end or leave the transaction: a statement whose first word is transaction control, or that sets the
- *   session authorization, is refused before it is sent (`./statement-refusal.ts`), and the server refuses `DO` and
- *   `CALL` that would end it (`2D000`) and two statements in one call (`42601`).
- * - It takes no transaction id and no subtransaction id; `now()` and the transaction id are the transaction's.
+ * - It cannot end or leave the transaction: a statement whose first word is transaction control, also behind empty
+ *   statements, or that sets the session authorization, is refused before it is sent (`./statement-refusal.ts`), and
+ *   the server refuses `DO` and `CALL` that would end it (`2D000`) and two statements in one call (`42601`).
+ * - A view whose statements only read takes no transaction id and no subtransaction id; `now()` and the transaction
+ *   id are the transaction's.
  * - On PostgreSQL the open and close go through a path of the session that never counts as a schema change, so the
  *   session's prepared texts stay prepared; a prepared write is refused inside the view and usable after it.
  *
+ * **What it lets through on temporary objects.** PostgreSQL's read-only transaction does not refuse changes to the
+ * temporary tables and sequences its session already has, and the view adds no check of its own (it does not read the
+ * body's SQL):
+ * - `nextval` and `setval` of a temporary sequence succeed, and the close does not undo them: a sequence's value is no
+ *   part of a transaction;
+ * - `INSERT`, `UPDATE`, `DELETE`, `SELECT … FOR UPDATE` and a writing `WITH` on a temporary table succeed inside the
+ *   view and are undone by the close; such a statement gives the view a subtransaction id, and the transaction an id
+ *   if it had none. `DISCARD TEMP` is accepted and undone the same way.
+ * UmbraDB's own SQL creates no temporary object. One exists on the writer's session only when a module made it, with
+ * `CREATE TEMP …` in a migration or through a write handle, and what a view's statements then do to it is that
+ * module's own doing.
+ *
  * **What it does not undo.** Functions that act outside the transaction run and stay: a session-level advisory lock
  * (`pg_advisory_lock`) taken in a view outlives it and the commit, and `pg_terminate_backend` or `pg_cancel_backend`
- * act at once. `txid_current()` gives the transaction an id, which stays. A statement prepared by name (`PREPARE`)
- * outlives the view, as through any handle; a cursor declared inside does not. A custom setting first made in a view
- * reads `''`, not NULL, after it: treat `''` as unset. `NOTIFY` is accepted and dropped with the rolled-back
- * subtransaction. On PGlite, `set_config('session_authorization', …)` inside a `SELECT` is not caught, and nothing
- * undoes it for the engine's life.
+ * act at once. `txid_current()` gives the transaction an id, which stays. The session's prepared statements and
+ * cursors are no part of a transaction either: a statement prepared by name (`PREPARE`) in a view outlives it, as
+ * through any handle, and one deallocated in a view (`DEALLOCATE`) stays deallocated; a cursor a view fetched from
+ * (the transaction's own, or one an earlier transaction declared `WITH HOLD`) keeps its place, and a holdable cursor
+ * closed in a view stays closed, while a cursor declared inside a view is gone after it. A custom setting first made
+ * in a view reads `''`, not NULL, after it: treat `''` as unset. `LISTEN` and `UNLISTEN` in a view are undone, and
+ * `NOTIFY` is accepted and dropped with the rolled-back subtransaction. On PGlite,
+ * `set_config('session_authorization', …)` inside a `SELECT` is not caught, and nothing undoes it for the engine's
+ * life.
  *
  * **Results and errors.** The view resolves with the body's result, or rejects with the body's own error unchanged. A
  * close that fails wins over both: the view rejects with the close's error, and the transaction refuses every later
