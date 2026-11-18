@@ -217,19 +217,24 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   database now says which session its writer has (`Database.writerSession`). It may be false at any block. The module
   guide's §3 describes it.
 - **`core-ledger-state` and `core-block-commit` take the block before from memory when the block continues it.** Each
-  keeps, when it has written a block's rows, its own copy of what the next block reads of them: `core-ledger-state` the
-  state's key and root, the block's hash, ledger and time, and the keys of the states of the retention window;
-  `core-block-commit` the block's hash. A block whose context says `continues` and whose kept block is the one at h − 1
-  takes them from memory, so per block three reads fewer at `core-ledger-state`'s `on-compute` (the state at h − 1, the
-  parent time, the keys of the states it releases) and one fewer at `core-block-commit`'s `on-db-write` (the parent's
-  hash). Those reads are sent only at a run's first block: after a start, any retry, a replaced writer's session, and
-  for a height made again. There `core-ledger-state`'s read of the keys also takes the window's, from the first state
-  the block releases to h − 1 (up to `retainStates` + 1 rows), in the same statement, which it now sends at a run's
-  first block also when that block releases nothing, so that no block continuing it reads a key. The block trace's
-  `sqlN` and the statement totals show the difference; the stored rows and the failures are the same, except that the
-  parent check does not see a block at h − 1 changed by a writer that ignores the writer lock. A new option of
-  `coreLedgerState` and of `core-block-commit`'s `coreBlockCommit`, `checkKept`, also reads every value taken from
-  memory and compares it, a difference failing the block; the tests and the replays of recorded chains use it.
+  keeps, once it has written a block's rows, its own copy of what the next block reads of them, taken before those
+  writes and the one the rows are written from: `core-ledger-state` the state's key and root, the block's hash, ledger
+  and time, and the keys of the states of the retention window; `core-block-commit` the block's hash. A block whose
+  context says `continues` and whose kept block is the one at h − 1 takes them from memory, so per block up to three
+  reads fewer at `core-ledger-state`'s `on-compute` (the state at h − 1 and the parent time, and the keys of the
+  states it releases where it releases any: while a retention window fills a block releases none, and no key read was
+  sent there before either) and one fewer at `core-block-commit`'s `on-db-write` (the parent's hash). Those reads are
+  sent only at a run's first block: after a start, any retry, a replaced writer's session, and for a height made
+  again. There `core-ledger-state`'s read of the keys also takes the window's, from the first state the block releases
+  to h − 1: the retention window after the block before, up to its `retainStates` + 1 rows (after a lowered
+  `retainStates` that is the earlier, larger window: 7 rows at a restart where 6 was lowered to 1), in the same
+  statement, which it now sends at a run's first block also when that block releases nothing, so that no block
+  continuing it reads a key. A row of that window missing from `states` fails only the block that releases it, as
+  before. The block trace's `sqlN` and the statement totals show the difference; the stored rows and the failures are
+  the same, except that the parent check does not see a block at h − 1 changed by a writer that ignores the writer
+  lock. A new option of `coreLedgerState` and of `core-block-commit`'s `coreBlockCommit`, `checkKept`, also reads every
+  value taken from memory, and at every block every key kept of the retention window, and compares them, a difference
+  failing the block; the tests and the replays of recorded chains use it.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 

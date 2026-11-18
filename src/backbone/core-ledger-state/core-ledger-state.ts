@@ -65,20 +65,25 @@
  * `core_block_commit.blocks` row), its state's key and root (its `states` row), and the key of each state of the
  * retention window after the block, L(h) to h. It keeps copies of those bytes, taken before the block's first write,
  * from which its state row is written: the published items and the block context hold the original buffers, which
- * another module may change, also while the writes go on. At the next block's `on-compute` it takes the state at
- * h − 1, the parent time and the keys the block releases from there, and sends none of those three reads, when two
- * things hold: the block context says the block before continues into it (`b.continues`: its `COMMIT` answered in this
- * run of processing, with no failure since, and the writer still has the database session that committed it, so no
- * other writer can have changed a row since), and the block kept is the one at h − 1. Otherwise it reads them, as at a
- * run's first height (a start, any retry, a replaced writer's session), for a height made again (the block kept is that
- * height's own), and for a block that does not continue the one before, and keeps again from that block. At such a
- * first height it reads in the same statement the keys of the states from the first one it releases to h − 1, so the
- * blocks that continue it find every key they release in memory: with `retainStates` R that is up to R + 1 rows, and a
- * statement also where the block releases nothing but R is above 0, which reading the block before at every block never
- * sent. What is kept is what the block's rows hold in its transaction, and a transaction that did not commit makes the
- * next block's `continues` false, so nothing kept is taken from a block that was rolled back. With the option
- * `checkKept` (the tests and the replays of recorded chains) each value taken from memory is also read and compared,
- * and a difference fails `on-compute`, naming the height, the field and both values.
+ * another module may change, also while the writes go on. At the next block's `on-compute` it takes the state at h − 1,
+ * the parent time and the keys the block releases from there, and sends none of those reads (up to three: a block that
+ * releases nothing, as while a retention window fills, sent no key read anyway), when two things hold: the block
+ * context says the block before continues into it (`b.continues`: its `COMMIT` answered in this run of processing, with
+ * no failure since, and the writer still has the database session that committed it, so no other writer can have
+ * changed a row since), and the block kept is the one at h − 1. Otherwise it reads them, as at a run's first height (a
+ * start, any retry, a replaced writer's session), for a height made again (the block kept is that height's own), and
+ * for a block that does not continue the one before, and keeps again from that block. At such a first height it reads
+ * in the same statement the keys of the states from the first one it releases, L(h − 1), to h − 1, so the blocks that
+ * continue it find every key they release in memory: the retention window after the block before, up to its
+ * `retainStates` + 1 rows (after a lowered `retainStates` the earlier, larger window: 7 rows where 6 was lowered to 1);
+ * that statement is sent also where the block releases nothing (as while a window fills), which reading the block
+ * before at every block never sent. They are kept by height: a row missing there stays missing, only a key the block
+ * releases must be stored, and a later block that releases a missing one reads the keys it releases, so a damaged
+ * `states` table fails at the block it failed at before. What is kept is what the block's rows hold in its transaction,
+ * and a transaction that did not commit makes the next block's `continues` false, so nothing kept is taken from a block
+ * that was rolled back. With the option `checkKept` (the tests and the replays of recorded chains) each value taken
+ * from memory is also read and compared, and at every block every key kept of the window after the block before,
+ * missing and extra heights included; a difference fails `on-compute`, naming the height, the field and both values.
  *
  * **The ledger conversion.** The first ledger v9 block on a v8 state is the conversion block F: the worker converts
  * the state first and applies F to it (`../../ledger/worker/engine.ts`).
@@ -292,8 +297,8 @@ export interface CoreLedgerStateOptions {
   readonly restartOnRefusedEviction?: boolean;
   /**
    * Whether each value `on-compute` takes from what it kept of the block before is also read from the database and
-   * compared, a difference failing it with the height, the field and both values; false by default. The tests and the
-   * replays of recorded chains build with it.
+   * compared, and at every block every key kept of the retention window, a difference failing it with the height, the
+   * field and both values; false by default. The tests and the replays of recorded chains build with it.
    */
   readonly checkKept?: boolean;
   /**
