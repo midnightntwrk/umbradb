@@ -212,11 +212,14 @@ export interface ChunkRunOptions {
   readonly entries?: (id: string) => EntryRange;
   /** Stops the loop; a new one unless given. */
   readonly controller?: AbortController;
+  /** Told the run's database once it is open, before the loop runs. */
+  readonly onDatabase?: (db: Database) => void;
 }
 
 /** Runs `r` (and `options.modules`) over heights 1 to `options.head` on a new database of `backend`, until the loop waits. */
 export async function runChunks(backend: RunnerBackend, options: ChunkRunOptions): Promise<ChunkRun> {
   const { db } = await backend.database();
+  options.onDatabase?.(db);
   const order = options.order ?? [];
   const seen: Seen[] = [];
   const user = [recorder(order, seen, options.recorder), ...(options.modules ?? [])];

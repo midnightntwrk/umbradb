@@ -39,6 +39,7 @@ export function blockAt(h: bigint): BlockContext {
     settings: {},
     active: () => true,
     continues: false,
+    blockBeforeCommitted: async () => undefined,
   };
 }
 

@@ -52,6 +52,11 @@ export interface PauseHold {
 /** What the loop is given to pause between heights (`LoopInput.pause`, `./loop.ts`). */
 export interface LoopPause {
   /**
+   * Whether a hold is kept now. Inside a chunk of blocks in one transaction the loop reads it before each block after
+   * the first: a hold ends the chunk there with a `COMMIT`, so the loop reaches the pause between heights.
+   */
+  readonly held: boolean;
+  /**
    * The loop is between two heights: resolves at once while no hold is kept, else once every hold is released or
    * `signal` aborts; each hold kept meanwhile is told it was reached.
    */

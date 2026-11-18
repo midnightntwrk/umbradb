@@ -4,7 +4,9 @@ import { UmbraError } from "../../src/db/errors.js";
 import type { BlockContext, ModuleDeclaration } from "../../src/modules/declaration.js";
 import { FinalizedLoop, type HeightRun } from "../../src/runner/loop.js";
 import { declaration } from "../modules/declarations.js";
-import { CHECKED_BACKBONE, marking } from "./loop-chunk-harness.js";
+import { LoopPauses, type PauseHold } from "../../src/runner/pause.js";
+import { CHECKED_BACKBONE, marking, runChunks } from "./loop-chunk-harness.js";
+import { cursorOf } from "./loop-harness.js";
 import { heightsIn, InMemoryBlockSource, RUNNER_BACKENDS, startWith } from "./loop-harness.js";
 import { entry } from "../modules/graph-fixtures.js";
 
@@ -15,13 +17,22 @@ import { entry } from "../modules/graph-fixtures.js";
  *   is stored;
  * - `continues` true after a rollback (whenever the height has a block before it, as
  *   `block-continues.negative-control.test.ts`'s): a module that keeps the block before and trusts `continues` finds
- *   its kept value differs from the database's.
+ *   its kept value differs from the database's;
+ * - a pause hold not read inside a chunk: a hold asked during block 3's writes is reached only at the chunk's planned
+ *   end, 7, not at 3.
  */
 
 /** The transaction itself as a later block's read. */
 class NoView extends FinalizedLoop {
   protected override openView<T>(tx: Transaction, height: bigint | null, body: (read: ReadHandle) => Promise<T>): Promise<T> {
     return body({ height, query: (sql, params) => tx.query(sql, params) });
+  }
+}
+
+/** A pause hold not read inside a chunk. */
+class IgnoresHold extends FinalizedLoop {
+  protected override pauseHeld(): boolean {
+    return false;
   }
 }
 
@@ -127,5 +138,39 @@ describe.each(RUNNER_BACKENDS)("the negative controls of chunks on $name", (back
     expect(await heightsIn(real.db, "trust.rows")).toEqual([1n, 2n, 3n, 4n, 5n, 6n, 7n, 8n, 9n, 10n]);
     const control = await run(KeepsContinuing, [trusting(9n)], 10n, 5);
     expect((control.failures[1] as Error).message).toMatch(/the kept value differs at height 6: kept 9, stored 5/);
+  }, 120_000);
+
+  it("a pause hold not read inside a chunk: a hold asked during block 3's writes is reached at 7, the planned end, not at 3", async () => {
+    /** The cursor when a hold asked at block 3's on-db-write is reached, with a loop of `Loop`. */
+    const reachedAt = async (Loop: typeof FinalizedLoop): Promise<bigint | null> => {
+      const pauses = new LoopPauses();
+      let hold: PauseHold | undefined;
+      let cursor: Promise<bigint | null> | undefined;
+      let db: Parameters<typeof cursorOf>[0] | undefined;
+      const run = await runChunks(backend, {
+        head: 14n,
+        blocks: 7,
+        pause: pauses,
+        loop: Loop,
+        recorder: {
+          async at(point, height, handle) {
+            if (point !== "on-db-write" || height !== 3n || hold !== undefined) return;
+            void handle;
+            hold = pauses.hold();
+            void hold.reached.then(() => {
+              cursor = db === undefined ? Promise.resolve(null) : cursorOf(db);
+              hold?.release();
+            });
+          },
+        },
+        onDatabase: (given) => {
+          db = given;
+        },
+      });
+      void run;
+      return (await cursor) ?? null;
+    };
+    expect(await reachedAt(FinalizedLoop)).toBe(3n);
+    expect(await reachedAt(IgnoresHold)).toBe(7n);
   }, 120_000);
 });

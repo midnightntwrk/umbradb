@@ -155,6 +155,7 @@ describe("withLedgerTasks' points", () => {
     settings: {},
     active: () => true,
     continues: false,
+    blockBeforeCommitted: async () => undefined,
   });
   const sink = () => {
     const put: [string, unknown][] = [];

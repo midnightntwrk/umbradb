@@ -97,6 +97,7 @@ export const BLOCK: BlockContext = Object.freeze({
   settings: Object.freeze({}),
   active: () => true,
   continues: false,
+  blockBeforeCommitted: async () => undefined,
 });
 
 export const SINK: ItemSink = Object.freeze({ put: () => undefined });

@@ -170,6 +170,7 @@ function blockAt(height: bigint, continues: boolean): BlockContext {
     settings: {},
     active: () => false,
     continues,
+    blockBeforeCommitted: async () => undefined,
   };
 }
 

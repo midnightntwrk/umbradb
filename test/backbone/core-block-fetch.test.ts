@@ -37,7 +37,7 @@ function recordingSink(): { readonly sink: ItemSink; readonly puts: [string, unk
   return { sink: { put: (item, value) => void puts.push([item, value]) }, puts };
 }
 
-const blockContext = (height: bigint) => Object.freeze({ ...inMemoryBlock(height), items: new Map(), settings: {}, active: () => true, continues: false });
+const blockContext = (height: bigint) => Object.freeze({ ...inMemoryBlock(height), items: new Map(), settings: {}, active: () => true, continues: false, blockBeforeCommitted: async () => undefined });
 
 describe("core-block-fetch's declaration", () => {
   it("is the second backbone part: it requires node-client and ledger-table and provides the four block items", () => {

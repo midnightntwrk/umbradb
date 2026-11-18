@@ -84,7 +84,9 @@
  * releases must be stored, and a later block that releases a missing one reads the keys it releases, so a damaged
  * `states` table fails at the block it failed at before. What is kept is what the block's rows hold in its transaction,
  * and a transaction that did not commit makes the next block's `continues` false, so nothing kept is taken from a block
- * that was rolled back. With the option `checkKept` (the tests and the replays of recorded chains) each value taken
+ * that was rolled back. When nothing is kept of the block before, or its ledger is not this block's (a conversion or an
+ * upgrade within v9 reads the whole state at h − 1 from the node tables), `on-compute` first awaits
+ * `b.blockBeforeCommitted()`, before any statement: those reads then see committed rows. With the option `checkKept` (the tests and the replays of recorded chains) each value taken
  * from memory is also read and compared, and at every block every key kept of the window after the block before,
  * missing and extra heights included; a difference fails `on-compute`, naming the height, the field and both values.
  *
@@ -724,6 +726,9 @@ export async function applyBlock(
   } else {
     // The block before: what on-db-write kept of it when b continues it, else its rows at h − 1.
     const kept = keptBefore(p, b);
+    // Nothing kept of it, or another ledger than this block's (a conversion or an upgrade within v9 reads the whole
+    // state at h − 1 from the node tables): the block before is committed first, before any statement.
+    if (kept === null || kept.ledger !== ledger) await b.blockBeforeCommitted();
     // The worker holds the stored state at h − 1, read from the database after a restart, with its root.
     const parent: StoredState = kept ?? (await stateAt(read, b.height - 1n));
     if (kept !== null && options.checkKept === true) checkKeptState(b, kept, await stateAt(read, b.height - 1n));

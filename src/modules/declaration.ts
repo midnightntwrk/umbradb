@@ -190,6 +190,15 @@ export interface BlockContext {
    * module that keeps the block before in memory reads it from the database then.
    */
   continues: boolean;
+  /**
+   * Resolves once the block before this one is committed. Allowed at `on-compute` only, before the callback's first
+   * statement through its read; anywhere else, or after such a statement, it throws a programming error. It resolves at
+   * once when the block before is committed already. Otherwise the engine commits it first; the callback then goes on,
+   * and its read, opened at its first statement, sees the block before committed. A callback that reads a large part of
+   * the state the block before left (the ledger's conversion) calls it first, so that its reads see committed rows and
+   * no transaction holding other blocks stays open meanwhile.
+   */
+  blockBeforeCommitted(): Promise<void>;
 }
 
 /**

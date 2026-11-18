@@ -166,6 +166,7 @@ export async function helperDatabase(
         settings: Object.freeze({}),
         active: () => true,
         continues: false,
+        blockBeforeCommitted: async () => undefined,
       });
       const part = options.part ?? main;
       await db.transaction(async (tx) => {
