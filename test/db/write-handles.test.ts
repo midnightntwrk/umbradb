@@ -754,16 +754,24 @@ describe.each(BACKENDS)("write handles and their closing on $name", { timeout: 3
         await tx.query("SELECT count(*)::int AS n FROM pg_temp.made_by_a_rows"),
       ]);
       expect(later).toEqual([[{ value: 1 }], [{ value: 2 }], [{ n: 1 }], [{ n: 0 }]]);
-      // A read handle: on PGlite it runs on the one session and moves the sequence too, and the read's rollback does
-      // not undo it; on PostgreSQL it runs on a session of the read pool, which has no such sequence.
-      const read = await db.read((read) =>
-        read.query(next).then(
+      // A read handle: on PGlite it runs on the one session, moves the sequence too and writes the table, and the
+      // read's rollback undoes the row, not the sequence; on PostgreSQL it runs on a session of the read pool, which
+      // has neither.
+      const answered = (run: Promise<Record<string, unknown>[]>): Promise<unknown> =>
+        run.then(
           (rows) => rows,
           (error: UmbraError) => error.details.sqlstate,
-        ),
-      );
-      const after = await db.transaction((tx) => tx.query(next));
-      expect([read, after]).toEqual(backend.singleQueue ? [[{ value: 3 }], [{ value: 4 }]] : ["42P01", [{ value: 3 }]]);
+        );
+      const read = await db.read(async (read) => [
+        await answered(read.query(next)),
+        await answered(read.query("INSERT INTO pg_temp.made_by_a_rows VALUES (2) RETURNING x")),
+      ]);
+      const after = await db.transaction(async (tx) => [
+        await tx.query(next),
+        await tx.query("SELECT count(*)::int AS n FROM pg_temp.made_by_a_rows"),
+      ]);
+      expect(read).toEqual(backend.singleQueue ? [[{ value: 3 }], [{ x: 2 }]] : ["42P01", "25P02"]);
+      expect(after).toEqual([[{ value: backend.singleQueue ? 4 : 3 }], [{ n: 0 }]]);
     });
 
     it("refuses a second callback started while one runs (in series), before it sends anything", async () => {

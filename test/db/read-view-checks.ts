@@ -202,11 +202,16 @@ export async function seesOuterRowsProblems(db: Database): Promise<string[]> {
   );
 }
 
-/** Changes to an existing temporary table that a view lets through, each with the table's values inside the view. */
+/**
+ * Statements on an existing temporary table that a view lets through (changes, and a row lock), each with the table's
+ * values inside the view after it.
+ */
 export const TEMPORARY_TABLE_CHANGES: readonly (readonly [string, readonly number[]])[] = [
   ["INSERT INTO pg_temp.read_view_temp VALUES (2)", [1, 2]],
   ["UPDATE pg_temp.read_view_temp SET x = 9", [9]],
   ["DELETE FROM pg_temp.read_view_temp", []],
+  ["WITH w AS (INSERT INTO pg_temp.read_view_temp VALUES (4) RETURNING x) SELECT * FROM w", [1, 4]],
+  ["SELECT x FROM pg_temp.read_view_temp FOR UPDATE", [1]],
 ];
 
 /** Statements on temporary objects a view refuses as it refuses them on persistent ones (`25006`). */
@@ -225,7 +230,8 @@ export const TEMPORARY_REFUSED: readonly string[] = [
  * - `nextval` and `setval` of the sequence succeed, and the close does not undo them: the outer's next value follows
  *   the view's;
  * - each of {@link TEMPORARY_TABLE_CHANGES} succeeds and is seen inside the view, and the close undoes it;
- * - each of {@link TEMPORARY_REFUSED} fails with `25006`.
+ * - each of {@link TEMPORARY_REFUSED} fails with `25006`;
+ * - `DISCARD TEMP` is accepted, and the close brings the table and the sequence back.
  */
 export async function temporaryObjectProblems(db: Database): Promise<string[]> {
   const next = "SELECT nextval('pg_temp.read_view_seq')::int AS value";
@@ -250,6 +256,10 @@ export async function temporaryObjectProblems(db: Database): Promise<string[]> {
       compare(problems, sql, outcome, "25006");
     }
     compare(problems, "the temporary table after the refused statements", (await tx.query(values))[0], { xs: [1] });
+    // DISCARD TEMP drops the session's temporary objects inside the view; the close brings them back.
+    compare(problems, "DISCARD TEMP in a view", await view(tx, problems, "DISCARD TEMP", (read) => tried(() => read.query("DISCARD TEMP"))), "ok");
+    compare(problems, "the temporary table after DISCARD TEMP", (await tx.query(values))[0], { xs: [1] });
+    compare(problems, "the outer's value after DISCARD TEMP", await tx.query(next), [{ value: 502 }]);
     // The session keeps temporary objects past the transaction: dropped here, as their maker must.
     await tx.execute("DROP TABLE pg_temp.read_view_temp");
     await tx.execute("DROP SEQUENCE pg_temp.read_view_seq");
