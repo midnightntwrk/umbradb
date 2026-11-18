@@ -283,7 +283,12 @@ const CHILDREN_SQL = `SELECT node_key, children FROM ${NODES_TABLE} WHERE node_k
 /** The given nodes stored with another child list, with the stored one: the database compares the bytes. */
 const CHANGED_SQL = `SELECT b.node_key, n.children FROM unnest($1::bytea[], $2::bytea[]) AS b (node_key, children)
   JOIN ${NODES_TABLE} n USING (node_key) WHERE n.children IS DISTINCT FROM b.children`;
+/** Those of the given keys that `nodes` does not hold: for keys nearly all stored, the answer is nearly empty. */
+const MISSING_KEYS_SQL = `SELECT k.node_key FROM unnest($1::bytea[]) AS k (node_key)
+  WHERE NOT EXISTS (SELECT 1 FROM ${NODES_TABLE} n WHERE n.node_key = k.node_key)`;
 const UNREFERENCED_KEYS_SQL = `SELECT node_key FROM ${UNREFERENCED_TABLE}`;
+/** Those of the given keys that `unreferenced` holds: the read of a run that does not sweep, which reads no queue whole. */
+const QUEUED_KEYS_SQL = `SELECT node_key FROM ${UNREFERENCED_TABLE} WHERE node_key = ANY($1::bytea[])`;
 const KEY_COUNTS_SQL = `SELECT k.node_key,
     EXISTS (SELECT 1 FROM ${NODES_TABLE} n WHERE n.node_key = k.node_key) AS stored,
     coalesce(r.count, 0) AS refs, coalesce(c.count, 0) AS roots
@@ -308,6 +313,11 @@ const keysOf = (rows: Record<string, unknown>[], table: string): Uint8Array[] =>
 /** Those of `keys` that `nodes` holds. */
 export async function storedKeys(read: Pick<ReadHandle, "query">, keys: readonly Uint8Array[]): Promise<Uint8Array[]> {
   return keysOf(await read.query(STORED_KEYS_SQL, [[...keys]]), NODES_TABLE);
+}
+
+/** Those of `keys` that `nodes` does not hold (a key given twice and missing is answered twice). */
+export async function missingKeys(read: Pick<ReadHandle, "query">, keys: readonly Uint8Array[]): Promise<Uint8Array[]> {
+  return keysOf(await read.query(MISSING_KEYS_SQL, [[...keys]]), NODES_TABLE);
 }
 
 /** Those of `nodes` that `nodes` holds with another child list, each with its stored one (see {@link CHANGED_SQL}). */
@@ -337,6 +347,11 @@ export async function nodeChildren(
 /** Every key of `unreferenced`. */
 export async function unreferencedKeys(read: Pick<ReadHandle, "query">): Promise<Uint8Array[]> {
   return keysOf(await read.query(UNREFERENCED_KEYS_SQL), UNREFERENCED_TABLE);
+}
+
+/** Those of `keys` that `unreferenced` holds. */
+export async function queuedKeys(read: Pick<ReadHandle, "query">, keys: readonly Uint8Array[]): Promise<Uint8Array[]> {
+  return keysOf(await read.query(QUEUED_KEYS_SQL, [[...keys]]), UNREFERENCED_TABLE);
 }
 
 /** Each of `keys` with whether `nodes` holds it, its reference count and its root count (0 without a row). */
