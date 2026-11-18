@@ -34,8 +34,9 @@
  *    or the same as the row. The universe is the rows and the new nodes.
  * 2. Count changes: plus one per reference in the run's lists of the new and replacing nodes, minus one per
  *    reference in the stored lists they replace.
- * 3. Block by block, as the per-block step checks each block: every reference of a list block h flushed, and every
- *    key h raised, is a row when the run began or a node that h or a block before it flushed (`missing-reference`);
+ * 3. Block by block, as the per-block step checks each block: every reference of a list block h flushed (but a key's
+ *    first list in the run when it is the row's own, which the step writes again unchanged), and every key h raised,
+ *    is a row when the run began or a node that h or a block before it flushed (`missing-reference`);
  *    and each key's count, from the lists the blocks up to h flushed and replaced, is not below 0
  *    (`negative-count`). The first block that fails halts the run, named; a missing reference of the last block halts
  *    it only after step 7's count check, which the per-block step makes first.
@@ -334,7 +335,7 @@ interface RunNode {
    * array per key, which `collect` appends to when it replaces the key's list and passes on to the new node: never
    * copied, so many replacements of one key cost one entry each.
    */
-  readonly earlier: { readonly refs: readonly KeyRecord[]; readonly at: bigint }[];
+  readonly earlier: { readonly refs: readonly KeyRecord[]; readonly at: bigint; readonly children: Uint8Array }[];
   /**
    * When that block did not reach the node from a key it raises: the block and the child list it flushed, which must
    * be the row's. Null when it reached the node.
@@ -371,7 +372,10 @@ interface KeyRecord {
   /** Whether a block of the run changed its root count; and the first block that raised it, if one did. */
   touched: boolean;
   raisedAt: bigint | null;
-  /** The first block that flushed a child list (new to the run, or another than the one it held) referencing it. */
+  /**
+   * The first block that flushed a child list referencing it that the per-block step checks: a list that replaces the
+   * one the run held, or a key's first list in the run unless it is the row's own.
+   */
   referencedAt: bigint | null;
   /**
    * Whether a list replaced by the run's last block (set when the run is computed), or by any block of the run,
@@ -580,7 +584,7 @@ export class RunReclaim {
       if (same) continue;
       const held = record.node;
       if (held === null) {
-        for (const ref of refs) ref.referencedAt ??= height;
+        // Its references are marked once the database says whether this list is the row's own (`compute`).
         const unreached = reached.has(record) ? null : { at: height, children: node.children };
         record.node = { key: node.key, data: node.data, children: node.children, refs, firstAt: height, at: height, earlier: [], unreached };
         this.#nodes.push(record);
@@ -602,7 +606,7 @@ export class RunReclaim {
         ref.dropped = true;
         ref.droppedAt = height;
       }
-      held.earlier.push({ refs: held.refs, at: held.at });
+      held.earlier.push({ refs: held.refs, at: held.at, children: held.children });
       this.#historyWrites += 1;
       record.node = {
         key: node.key,
@@ -688,6 +692,16 @@ export class RunReclaim {
           { key: shown(record.text) },
         );
       }
+    }
+    // A key's first list in the run is checked in step 3 unless it is the row's own: the per-block step writes such a
+    // list again unchanged and does not check it. Every later list replaced the one before it, and was marked when it
+    // was handed over.
+    for (const record of nodes) {
+      const node = nodeOf(record);
+      const first = node.earlier[0] ?? node;
+      const row = record.kind === "same" ? node.children : record.kind === "replaces" ? replaced.get(record) : undefined;
+      if (row !== undefined && Buffer.compare(row, first.children) === 0) continue;
+      for (const ref of first.refs) if (ref.referencedAt === null || first.at < ref.referencedAt) ref.referencedAt = first.at;
     }
 
     // (2) The count changes.

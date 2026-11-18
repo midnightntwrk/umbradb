@@ -274,7 +274,7 @@ describe.each(BACKENDS)("the run computation's reads and net write on $name", (b
       }
       return result;
     }
-    const [g, q, k] = [key(0x67), key(0x71), key(0x6b)];
+    const [g, q, k, p, x] = [key(0x67), key(0x71), key(0x6b), key(0x70), key(0x78)];
 
     it("a queued key with no row: both halt on the node delete, which affects no row, and store nothing", async () => {
       const result = await both({ queue: [g] }, { inserts: [], rootCounts: [] });
@@ -286,6 +286,14 @@ describe.each(BACKENDS)("the run computation's reads and net write on $name", (b
       // q is stored and queued and references k, which has a count and no row.
       const result = await both({ rows: [[q, list(k)]], refs: [[k, 1]], queue: [q] }, { inserts: [], rootCounts: [] });
       expect(result.step.outcome).toBe("row-count-mismatch (delete-nodes)");
+      expect(result.run).toEqual(result.step);
+    }, 120_000);
+
+    it("a list flushed again unchanged that references a key stored nowhere: both store the block", async () => {
+      // p is stored and persisted, and references x, which is no row; the block flushes p with its row's list and
+      // persists it again.
+      const result = await both({ rows: [[p, list(x)]], roots: [[p, 1]] }, { inserts: [{ key: p, data: Uint8Array.of(1), children: list(x) }], rootCounts: [{ key: p, delta: 1 }] });
+      expect(result.step.outcome).toBe("commits");
       expect(result.run).toEqual(result.step);
     }, 120_000);
   });

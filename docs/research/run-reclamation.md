@@ -294,8 +294,10 @@ The theorems below take R(b − 1) and R(b) as inputs; only where each comes fro
 2. **Count changes.** Plus one per reference in B's lists of Nb ∪ Wb; minus one per reference in the stored lists
    of Wb. (Rules 2 and 3, once for the run.)
 3. **Check what was flushed, block by block.** Every reference of every child list a block h flushed (the lists
-   replaced since included), and every key h raised, is stored by h: a row when the run began, or a key of B that h
-   or a block before it flushed. Else the run halts with `missing-reference`, naming the first such block, as the
+   replaced since included), but a key's first list in the run when it is the row's own, and every key h raised, is
+   stored by h: a row when the run began, or a key of B that h or a block before it flushed. (A list that is the
+   row's own is one the per-block step writes again unchanged, and checks nothing of; with I1 its references are
+   rows.) Else the run halts with `missing-reference`, naming the first such block, as the
    per-block step halts that block. **And each block's counts:** a key's count when the run began, plus the
    references of the lists the blocks up to h flushed, less those of the lists they replaced (the database's at a
    key's first flush, the run's own at each later one), is not below 0 at any h; else the run halts with
@@ -466,7 +468,7 @@ reads of the step, `missingKeys` and `queuedKeys`), sent in statements of at mos
 | Step | Read | Keys |
 |---|---|---|
 | 1 | which keys of B are rows; which hold another list, with it (`rows`, `changed`) | the distinct nodes the run flushed |
-| 3 | which referenced keys are no row (`missing`), less the keys of B and the keys known to be rows (`KnownKeys`) | the distinct references of the run's lists, and its rising keys |
+| 3 | which referenced keys are no row (`missing`), less the keys of B and the keys known to be rows (`KnownKeys`) | the distinct references of the lists step 3 checks, and the run's rising keys |
 | 3 | counts (`counts`), for the block-by-block counts | the keys a replaced list referenced whose count, followed block by block, falls below the one the run found; most are among step 5's |
 | 5 | the queue (`queue`) | the queue the run found: by Lemma 1, what the block before the run released or dropped |
 | 5, 6 | counts (`counts`) | the queue, T, the keys whose count fell, the keys the cascade reaches with a change below 0 |
