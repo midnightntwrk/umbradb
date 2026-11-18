@@ -134,9 +134,9 @@ export interface GraphInput {
 /** What runs in one range. */
 export interface ResolvedRange {
   readonly range: HeightRange;
-  /** The parts active in the range, in the order used at every point except `on-db-write`. */
+  /** The parts active in the range, in the order used at every point except `on-db-write` and `on-settle`. */
   readonly order: readonly ModuleDeclaration[];
-  /** The same parts in `on-db-write`'s order: `core-digest` last. */
+  /** The same parts in the order of `on-db-write` and `on-settle`: `core-digest` last. */
   readonly writeOrder: readonly ModuleDeclaration[];
   /**
    * Each item that exactly one active part provides, mapped to that part's id. In a range that ends at the cursor,

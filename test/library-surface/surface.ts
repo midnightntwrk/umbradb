@@ -29,12 +29,12 @@ export const EXPORTED_SURFACE: Surface = Object.freeze({
     "readChainDataView", "retainedStatesOf", "startUmbraDB", "versionEntry", "withViewExtensions",
   ]),
   types: Object.freeze([
-    "Address", "ApiRegistry", "BlockContext", "BlockRef", "BlockWriteHandle", "CoreVersion", "Entry", "ErrorCode",
-    "FieldKind", "FieldSchema", "ItemDeclaration", "ItemSink", "LedgerPackage", "LedgerTask", "Lifetime",
+    "Address", "ApiRegistry", "BlockContext", "BlockRef", "BlockRun", "BlockWriteHandle", "CoreVersion", "Entry",
+    "ErrorCode", "FieldKind", "FieldSchema", "ItemDeclaration", "ItemSink", "LedgerPackage", "LedgerTask", "Lifetime",
     "MessagePortLike", "Migration", "ModuleDeclaration", "NodeHttpHandler", "NodeUpgradeHandler", "ParsedTransaction",
-    "PointCallbacks", "PointName", "PrivateLinkChannel", "ProcessContext", "ReadHandle", "Revision", "SchemaWriteHandle",
-    "UmbraConfig", "UmbraDBBackup", "UmbraDBCondition", "UmbraDBEnd", "UmbraDBHandle", "UmbraDBNetwork",
-    "UmbraDBOptions", "UmbraDBReason", "UmbraDBStarted", "UmbraDBStatus",
+    "PointCallbacks", "PointName", "PrivateLinkChannel", "ProcessContext", "ReadHandle", "Revision",
+    "SchemaWriteHandle", "UmbraConfig", "UmbraDBBackup", "UmbraDBCondition", "UmbraDBEnd", "UmbraDBHandle",
+    "UmbraDBNetwork", "UmbraDBOptions", "UmbraDBReason", "UmbraDBStarted", "UmbraDBStatus",
   ]),
 });
 

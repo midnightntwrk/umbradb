@@ -12,8 +12,10 @@
  *    callback's failing statement aborts no other callback's read.
  * 3. The block transaction: one `BEGIN … COMMIT` holding every `on-db-write` callback of h, each with its block write
  *    handle (`src/db/write-handles.ts`), in the point's fixed callback order. `core-block-commit` runs first and writes
- *    the cursor row (on a private process, `core-private-source` does). Before the `COMMIT`, the loop checks that the
- *    block source's cursor is h with the block's hash. Nothing else of the loop writes.
+ *    the cursor row (on a private process, `core-private-source` does). Then every `on-settle` callback, in the same
+ *    order, each with the run of heights it settles and its block write handle. In this version a run is always one
+ *    block, `{ first: h, last: h }`. Before the `COMMIT`, the loop checks that the block source's cursor is h with the
+ *    block's hash. Nothing else of the loop writes.
  * 4. `on-after-db-write`: the block context without `block` items and a read handle at h, each callback in its own
  *    read.
  *
@@ -115,9 +117,10 @@
  *
  * While the window is open the loop knows the point the height is in and the modules whose callbacks run. The point is
  * the last of its points that began; from the block transaction's request on, it is `on-db-write` (its `BEGIN`, its
- * callbacks, the cursor check, the `COMMIT`). Once a window has been open longer than {@link LoopInput.slowBlockMs} (a
- * timer of the main thread, so not while a callback blocks it), {@link FinalizedLoop.slowBlock} gives the height, its
- * point and the first module running in the point's order, and the observer is told ({@link LoopObserver.slow}). The
+ * callbacks, the cursor check, the `COMMIT`), except while the callbacks of the `on-settle` point run. Once a window
+ * has been open longer than {@link LoopInput.slowBlockMs} (a timer of the main thread, so not while a callback blocks
+ * it), {@link FinalizedLoop.slowBlock} gives the height, its point and the first module running in the point's order,
+ * and the observer is told ({@link LoopObserver.slow}). The
  * window closes when the height commits, or when its run fails or stops (a halt, a retry, whose run opens a window of
  * its own, or a stop at the lockstep wait), and the observer is told again.
  *
@@ -136,9 +139,10 @@ import { BLOCKS_TABLE } from "../backbone/core-block-commit/sql.js";
 import type { Database, ReadHandle, Transaction } from "../db/api.js";
 import { UmbraError } from "../db/errors.js";
 import type { SchemaPlan } from "../db/roles.js";
-import { openBlockWrites } from "../db/write-handles.js";
+import { type BlockWrites, openBlockWrites } from "../db/write-handles.js";
 import type {
   BlockContext,
+  BlockRun,
   ModuleDeclaration,
   PointName,
   ProcessContext,
@@ -764,9 +768,9 @@ export class FinalizedLoop {
   }
 
   /**
-   * Inside the block transaction `tx`: every `on-db-write` callback with its block write handle, in order; then, before
-   * the `COMMIT`, a misuse during the block fails it, and the block source's cursor, read in `tx`, must be the height
-   * with the block's hash.
+   * Inside the block transaction `tx`: every `on-db-write` callback with its block write handle, in order, then the
+   * `on-settle` point ({@link settlePoint}); then, before the `COMMIT`, a misuse during the block fails it, and the block
+   * source's cursor, read in `tx`, must be the height with the block's hash.
    */
   protected async write(tx: Transaction, run: HeightRun): Promise<void> {
     const writes = openBlockWrites(tx, this.input.plan, {
@@ -777,6 +781,7 @@ export class FinalizedLoop {
       const context = this.#context(run, part, run.items.visible());
       return writes.write(part.id, (w) => call(context, w));
     });
+    await this.settlePoint(run, writes);
     await writes.end();
     this.#check();
     const cursor = await this.input.source.cursor(tx);
@@ -793,6 +798,22 @@ export class FinalizedLoop {
           "and core-private-source the private cursor on a private process",
       );
     }
+  }
+
+  /**
+   * The `on-settle` point, inside the block transaction of `run`, after its last `on-db-write` callback and before the
+   * cursor check: each callback in `on-db-write`'s order, with the run of heights it settles and a block write handle
+   * of `writes`. In this version a run is always one block, `{ first: h, last: h }`. When no part of the range declares
+   * the point, it returns at once: nothing is called or sent, and the slow-height window stays in `on-db-write`. While
+   * its callbacks run a slow-height report names `on-settle`, and `on-db-write` again for the cursor check and the
+   * `COMMIT`. A negative control's seam.
+   */
+  protected async settlePoint(run: HeightRun, writes: BlockWrites): Promise<void> {
+    const schedule = scheduleAt(run.range, "on-settle");
+    if (schedule.waves.length === 0) return;
+    const blocks: BlockRun = Object.freeze({ first: run.height, last: run.height });
+    await this.#schedule(schedule, (part, call) => writes.write(part.id, (w) => call(blocks, w), "on-settle"));
+    this.#enter("on-db-write");
   }
 
   /**
@@ -857,7 +878,7 @@ export class FinalizedLoop {
         return null;
       }
       // For slow-height reports the block transaction is on-db-write's: its BEGIN, its callbacks, the cursor check, the
-      // COMMIT.
+      // COMMIT; only the callbacks of the on-settle point inside it are reported as theirs.
       this.#enter("on-db-write");
       const transactionFrom = performance.now();
       await this.#transacting(this.commit(run));

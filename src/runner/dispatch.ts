@@ -4,7 +4,7 @@
  *
  * **Order.** A point calls the parts of the range that register it, in the range's order: the backbone parts in their
  * fixed order, then the other modules by Kahn's algorithm, taking first the ready one with the smallest id by UTF-8
- * bytes. At `on-db-write` the order is the range's `writeOrder`, with `core-digest` last.
+ * bytes. At `on-db-write` and `on-settle` the order is the range's `writeOrder`, with `core-digest` last.
  * - `on-start-height` calls the core's parts (the backbone, which runs with the core entry) when the core's entry
  *   starts, then the modules whose entries start, in that order.
  * - `on-stop-height` calls the stopping modules in reverse order, then the core's parts in their fixed order.
@@ -167,8 +167,9 @@ function moduleWaves(range: ResolvedRange, point: PointName): ModuleDeclaration[
 }
 
 /**
- * The schedule of `point` in `range`: its registered parts in the range's `order` (`writeOrder` at `on-db-write`, with
- * `core-digest` last), in series. At a parallel point, the backbone parts run in series, then the modules' Kahn waves.
+ * The schedule of `point` in `range`: its registered parts in the range's `order` (`writeOrder` at `on-db-write` and
+ * `on-settle`, with `core-digest` last), in series. At a parallel point, the backbone parts run in series, then the
+ * modules' Kahn waves.
  *
  * Throws for `on-start-db`, which the migration runner runs in the startup order, and for `on-start-height` and
  * `on-stop-height`, which need the entries ({@link startHeightSchedule}, {@link stopHeightSchedule}).
@@ -184,7 +185,7 @@ export function scheduleAt<P extends PointName>(range: ResolvedRange, point: P):
     const builder = point === "on-start-height" ? "startHeightSchedule" : "stopHeightSchedule";
     throw new Error(`scheduleAt: ${point} calls only the entries starting or stopping at a height: use ${builder}`);
   }
-  if (point === "on-db-write") return seriesOf(point, range.writeOrder);
+  if (point === "on-db-write" || point === "on-settle") return seriesOf(point, range.writeOrder);
   if (!isParallelPoint(point)) return seriesOf(point, range.order);
   const backbone = seriesOf(point, range.order.filter(isBackbonePart)).waves;
   return scheduled(point, [...backbone, ...moduleWaves(range, point)]);

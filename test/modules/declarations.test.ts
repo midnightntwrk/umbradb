@@ -8,6 +8,7 @@ import { UmbraError } from "../../src/db/errors.js";
 import {
   type ApiRegistry,
   type BlockContext,
+  type BlockRun,
   defineModule,
   type ItemSink,
   type ModuleDeclaration,
@@ -59,7 +60,7 @@ type WithUnknownPoint = Omit<ModuleDeclaration, "points"> & {
 type WithKnownPoints = Omit<ModuleDeclaration, "points"> & { points: { "on-fetch": () => Promise<void> } };
 
 describe("the points", () => {
-  it("are the twelve points in their order, frozen, and the point names and the callbacks' keys are their type", () => {
+  it("are the thirteen points in their order, frozen, and the point names and the callbacks' keys are their type", () => {
     expect(POINTS).toEqual([
       "on-start-db",
       "on-start-api",
@@ -71,10 +72,11 @@ describe("the points", () => {
       "on-start-height",
       "on-compute",
       "on-db-write",
+      "on-settle",
       "on-after-db-write",
       "on-stop-height",
     ]);
-    expect(POINTS).toHaveLength(12);
+    expect(POINTS).toHaveLength(13);
     expect(Object.isFrozen(POINTS)).toBe(true);
     expectTypeOf<PointName>().toEqualTypeOf<(typeof POINTS)[number]>();
     expectTypeOf<keyof PointCallbacks>().toEqualTypeOf<PointName>();
@@ -101,6 +103,10 @@ describe("the points", () => {
           "on-db-write": async (_p, _b, w) => {
             expectTypeOf(w).toEqualTypeOf<BlockWriteHandle>();
           },
+          "on-settle": async (_p, run, w) => {
+            expectTypeOf(run).toEqualTypeOf<BlockRun>();
+            expectTypeOf(w).toEqualTypeOf<BlockWriteHandle>();
+          },
           "on-after-db-write": async (_p, b, read) => {
             expectTypeOf(b).toEqualTypeOf<BlockContext>();
             expectTypeOf(read).toEqualTypeOf<ReadHandle>();
@@ -116,6 +122,10 @@ describe("the points", () => {
     expectTypeOf<Rest<"on-finalized">>().toEqualTypeOf<[head: { height: bigint; hash: Uint8Array }, read: ReadHandle]>();
     expectTypeOf<Rest<"on-start-height">>().toEqualTypeOf<[e: { entryId: string; height: bigint }, read: ReadHandle]>();
     expectTypeOf<Rest<"on-stop-height">>().toEqualTypeOf<[e: { entryId: string; height: bigint }, read: ReadHandle]>();
+    // on-settle gets the run of heights it settles, both included, and no block context.
+    expectTypeOf<Rest<"on-settle">>().toEqualTypeOf<
+      [run: { readonly first: bigint; readonly last: bigint }, w: BlockWriteHandle]
+    >();
     expectTypeOf(typed).toMatchTypeOf<ModuleDeclaration>();
   });
 });

@@ -23,11 +23,15 @@ export function handleClosed(handle: "read" | "transaction" | "database"): Umbra
 
 /**
  * `handle-closed` for a write handle used after its callback returned or threw (`./write-handles.ts`). It has the same
- * code as {@link handleClosed} and names the handle, the part whose callback it was given to, and the point. The runner
- * treats it as that part's callback error.
+ * code as {@link handleClosed} and names the handle, the part whose callback it was given to, and the point: a block
+ * write handle's is `on-db-write` unless `point` says `on-settle`. The runner treats it as that part's callback error.
  */
-export function writeHandleClosed(handle: "block-write" | "schema-write", part: string): UmbraError {
-  const [kind, point] = handle === "block-write" ? ["block", "on-db-write"] : ["schema", "on-start-db"];
+export function writeHandleClosed(
+  handle: "block-write" | "schema-write",
+  part: string,
+  point: "on-db-write" | "on-settle" | "on-start-db" = handle === "block-write" ? "on-db-write" : "on-start-db",
+): UmbraError {
+  const kind = handle === "block-write" ? "block" : "schema";
   return new UmbraError(
     "handle-closed",
     `a ${kind} write handle of ${part} was used after its ${point} callback ended: a write handle is valid only while ` +

@@ -184,6 +184,7 @@
         "on-start-height",
         "on-compute",
         "on-db-write",
+        "on-settle",
         "on-after-db-write",
         "on-stop-height"
       ]
