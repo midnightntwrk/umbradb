@@ -99,7 +99,7 @@ describe("the block trace through the process, on PostgreSQL", () => {
     // One line per committed height, in order.
     expect(first.map((line) => line.h)).toEqual(Array.from({ length: LAST + 1 }, (_, h) => h));
     for (const line of first.slice(1)) {
-      for (const stage of ["beginMs", "prepareMs", "applyMs", "rootWaitMs", "collectMs", "stepMs", "evictMs", "txMs", "writeBlockMs", "writeRefcountMs", "commitMs", "sqlMs", "encMs", "decMs"]) {
+      for (const stage of ["beginMs", "prepareMs", "applyMs", "rootWaitMs", "collectMs", "stepMs", "evictMs", "knownHits", "txMs", "writeBlockMs", "writeRefcountMs", "commitMs", "sqlMs", "encMs", "decMs"]) {
         expect(line[stage], `${stage} at ${String(line.h)}`).toBeGreaterThanOrEqual(0);
       }
       expect(line.sqlN).toBeGreaterThan(0);

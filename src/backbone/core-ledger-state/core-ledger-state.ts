@@ -130,6 +130,14 @@
  * computed again, and the engine tells the worker's host it committed, so the worker commits the state it holds
  * pending; one that did not is made again from `on-compute`, as after a rollback.
  *
+ * **The keys found stored** ({@link knownKeysOf}, `./stored-keys.ts`). For each process context, the keys the
+ * computation's `missing` read found stored, from one settle to the next, so that a block's references are asked about
+ * only when no earlier settle found them stored. They are used only while each block continues the one before
+ * (`b.continues`): a block whose context says otherwise empties them at `on-compute`, before it is handed over (a
+ * process's first block, a block made again after a failure, the block after a `COMMIT` whose answer was lost). Every
+ * key a run deletes leaves them before the net write, and they are emptied when a settle throws, before the error
+ * goes on. At most 500,000 keys: a key that would pass that empties them first.
+ *
  * The declaration ({@link CORE_LEDGER_STATE}) is a constant built over its rules. A negative control's build composes
  * its own with {@link coreLedgerState}, with one rule replaced.
  */
@@ -172,7 +180,17 @@ import {
   stateAt,
   stateKeysBetween,
 } from "./sql.js";
-import { type RunCheck, type RunFault, type RunOutcome, RunReclaim, type RunTables, sqlRunTables, writeNet } from "./run-reclaim.js";
+import { StoredKeys } from "./stored-keys.js";
+import {
+  type KnownKeys,
+  type RunCheck,
+  type RunFault,
+  type RunOutcome,
+  RunReclaim,
+  type RunTables,
+  sqlRunTables,
+  writeNet,
+} from "./run-reclaim.js";
 
 /** The module's id. */
 export const CORE_LEDGER_STATE_ID = "core-ledger-state";
@@ -330,6 +348,19 @@ const PENDING = new WeakMap<ProcessContext, ComputedBlock>();
 
 /** The run record of each process context: the blocks handed over since its last settle (see the module comment). */
 const RUNS = new WeakMap<ProcessContext, RunReclaim>();
+
+/** What each process context keeps from one run to the next: the keys found stored (see the module comment). */
+const KNOWN_KEYS = new WeakMap<ProcessContext, StoredKeys>();
+
+/** The keys found stored that `core-ledger-state` keeps for `p` (`./stored-keys.ts`), made empty at its first use. */
+export function knownKeysOf(p: ProcessContext): StoredKeys {
+  let keys = KNOWN_KEYS.get(p);
+  if (keys === undefined) {
+    keys = new StoredKeys();
+    KNOWN_KEYS.set(p, keys);
+  }
+  return keys;
+}
 
 /** The `core` revisions of each process context, read once from its `config` item. */
 const REVISIONS = new WeakMap<ProcessContext, readonly CoreRevision[]>();
@@ -734,7 +765,8 @@ function handOver(p: ProcessContext, height: bigint, flushed: NodeBatch, options
 
 /**
  * Block `b`'s `on-compute` work (see the module comment): the block is applied and its root checked, and its flush is
- * handed over to the run record of `p`. No statement touches the node tables.
+ * handed over to the run record of `p`, the keys found stored emptied first unless the block before continues into
+ * `b`. No statement touches the node tables.
  */
 export async function computeBlock(
   p: ProcessContext,
@@ -747,6 +779,7 @@ export async function computeBlock(
   traceAdd("applyMs", performance.now() - applyFrom);
   traceMark("tx", applied.output.results.length);
   const collectFrom = performance.now();
+  knownKeysOf(p).begin(b.continues);
   handOver(p, b.height, applied.batch, options);
   traceAdd("collectMs", performance.now() - collectFrom);
   return { applied };
@@ -755,7 +788,9 @@ export async function computeBlock(
 /**
  * `core-ledger-state`'s `on-settle` for the heights `run` (see the module comment), `w` the block write handle of the
  * transaction that holds the run's last block: the run record's computation over the node tables as `w` holds them,
- * the eviction of what it deletes, awaited, then the net write. The record is dropped whatever happens.
+ * with the keys found stored that `p` keeps ({@link knownKeysOf}), the eviction of what it deletes, awaited, then the
+ * net write. The record is dropped whatever happens; when anything throws, the keys found stored are emptied before the
+ * error goes on.
  *
  * When the package still refuses the eviction after the worker freed what it can (`EvictionRefused`), the worker
  * thread is ended and a new one started, and the net write goes on: the eviction is sent once per attempt of the height.
@@ -768,6 +803,7 @@ export async function settleRun(
   options: CoreLedgerStateOptions = {},
 ): Promise<RunOutcome> {
   const record = RUNS.get(p);
+  const keys = knownKeysOf(p);
   try {
     const handed = record?.heights;
     if (record === undefined || handed === undefined || handed.first !== run.first || handed.last !== run.last) {
@@ -778,7 +814,12 @@ export async function settleRun(
     }
     const stepFrom = performance.now();
     const tables = sqlRunTables(w);
-    const outcome = await record.compute(tracing() ? tracedRunTables(tables) : tables);
+    const hits = { count: 0 };
+    const emptiedBefore = keys.known.emptied;
+    const outcome = await record.compute(
+      tracing() ? tracedRunTables(tables) : tables,
+      tracing() ? countingHits(keys.known, hits) : keys.known,
+    );
     const evictFrom = performance.now();
     let refused = false;
     if (outcome.evict.length > 0) {
@@ -803,19 +844,44 @@ export async function settleRun(
       nodes: options.nodeWriter?.(w, run.last) ?? w,
     });
     traceAdd("writeRefcountMs", performance.now() - netFrom);
+    const afresh = keys.settled(emptiedBefore);
     if (tracing()) {
       traceAdd("stepMs", evictFrom - stepFrom);
       traceAdd("evictMs", netFrom - evictFrom);
       if (refused) traceMark("evictRefused", 1);
+      traceMark("knownHits", hits.count);
+      if (afresh) traceMark("knownEmptied", 1);
       traceSettle(run, outcome);
     }
     return outcome;
+  } catch (error) {
+    keys.failed();
+    throw error;
   } finally {
     RUNS.delete(p);
   }
 }
 
-/** The computation's reads, each recorded in the block trace (`src/trace/trace.ts`) by its name. */
+/**
+ * `known` with the keys step 3 finds in it counted in `hits`: the block trace's `knownHits`. The computation asks
+ * whether the set holds a key once per key it needs and did not flush.
+ */
+function countingHits(known: KnownKeys, hits: { count: number }): KnownKeys {
+  return {
+    has(text) {
+      const held = known.has(text);
+      if (held) hits.count += 1;
+      return held;
+    },
+    learn: (text) => known.learn(text),
+    forget: (text) => known.forget(text),
+  };
+}
+
+/**
+ * The computation's reads, each recorded in the block trace (`src/trace/trace.ts`) by its name. They are the
+ * database's: `missing` is given the keys the set of keys found stored did not answer.
+ */
 function tracedRunTables(tables: RunTables): RunTables {
   return {
     rows: tracedRead("rows", (keys) => tables.rows(keys)),
