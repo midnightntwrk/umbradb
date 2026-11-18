@@ -519,13 +519,15 @@ class ReadPool {
   ) {}
 
   async acquire(): Promise<Session> {
-    if (this.closed) throw handleClosed("database");
     const free = this.free();
     if (free !== undefined) return free;
     return new Promise((resolve, reject) => this.waiting.push({ resolve, reject }));
   }
 
-  /** A session free now (an idle one, or a new one while the pool is not full), or undefined: it never waits. */
+  /**
+   * A session free now (an idle one, or a new one while the pool is not full), or undefined: it never waits. Throws
+   * for a closed pool.
+   */
   free(): Session | undefined {
     if (this.closed) throw handleClosed("database");
     for (let session = this.idle.pop(); session !== undefined; session = this.idle.pop()) {
