@@ -24,6 +24,7 @@ import { referenceProblems } from "./refcount-reference.js";
  * reclamation is computed, its eviction sent and its net write made inside the block's transaction:
  * - (a) a loop and a ledger worker that record what they do show, at every block, the eviction sent after the block's
  *   `on-db-write` callbacks ended and before its `COMMIT`, and the next block's apply sent only after that `COMMIT`;
+ *   and `core-ledger-state`'s `on-settle` before `core-digest`'s, which takes the block's digests last;
  * - (b) the node tables after every block equal the per-block step (`./refcount-step.ts`, the reference) applied to
  *   the tables after the block before and the flush the worker recorded for the block, row for row;
  * - (c) a package that refuses one block's eviction in every thread: the worker thread is replaced once, the block
@@ -59,8 +60,16 @@ function recordingLoop(events: Event[], settling: { height: bigint | null }): ne
     protected override async settlePoint(run: HeightRun, writes: BlockWrites): Promise<void> {
       events.push(["writes-ended", run.height]);
       settling.height = run.height;
+      // Each part's `on-settle`, in the order the loop calls them.
+      const recorded: BlockWrites = {
+        write: (part, callback, point) => {
+          events.push([`settle:${part}`, run.height]);
+          return writes.write(part, callback, point);
+        },
+        end: () => writes.end(),
+      };
       try {
-        await super.settlePoint(run, writes);
+        await super.settlePoint(run, recorded);
       } finally {
         settling.height = null;
       }
@@ -214,6 +223,11 @@ describe.each(PROCESS_BACKENDS)("the reclamation through on-settle, on $name", (
     expect(evictions.length).toBeGreaterThan(5);
     expect(new Set(evictions.map(([, h]) => h)).size).toBe(evictions.length);
     expect(orderProblems(events, run.cursor)).toEqual([]);
+    // At every block `core-ledger-state`'s `on-settle` runs before `core-digest`'s, which is last.
+    for (let h = 0n; h <= run.cursor; h++) {
+      const settled = events.filter(([word, height]) => word.startsWith("settle:") && height === h).map(([word]) => word.slice("settle:".length));
+      expect(settled, `at ${h}`).toEqual(["core-ledger-state", "core-digest"]);
+    }
   }, PATIENCE_MS * 4);
 
   it("(b) the node tables after every block equal the reference step over the tables after the block before and the block's recorded flush", async () => {
