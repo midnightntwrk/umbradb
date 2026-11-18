@@ -23,7 +23,11 @@ export const CONTRACT_LOGS_SCHEMA = "contract_logs";
 /** Its table: one row per log. */
 export const LOGS_TABLE = "contract_logs.logs";
 
-/** Its table of unresolved log sites: one row per site `core-contract-logs-fast` cannot read exactly. */
+/**
+ * This is only for core-contract-logs-fast.
+ *
+ * Its table of unresolved log sites: one row per site `core-contract-logs-fast` cannot read exactly.
+ */
 export const UNRESOLVED_TABLE = "contract_logs.unresolved";
 
 /** The event types of a MIP-0002 log, as the ledger names them. */
@@ -42,6 +46,8 @@ export const LOG_EVENT_TYPES: readonly LogEventType[] = Object.freeze([
 ] as const);
 
 /**
+ * This is only for core-contract-logs-fast.
+ *
  * Why a log site is unresolved (`./contract-logs.ts`):
  * - `not-a-literal`: the value it logs is not a literal the transcript pushes right before it (read from the
  *   contract's state, or computed);
@@ -51,7 +57,11 @@ export const LOG_EVENT_TYPES: readonly LogEventType[] = Object.freeze([
  */
 export const UNRESOLVED_REASONS = Object.freeze(["not-a-literal", "conditional", "partial-transaction"] as const);
 
-/** One of {@link UNRESOLVED_REASONS}. */
+/**
+ * This is only for core-contract-logs-fast.
+ *
+ * One of {@link UNRESOLVED_REASONS}.
+ */
 export type UnresolvedReason = (typeof UNRESOLVED_REASONS)[number];
 
 const types = LOG_EVENT_TYPES.map((type) => `'${type}'`).join(", ");
@@ -78,6 +88,7 @@ export const CONTRACT_LOGS_MIGRATIONS: readonly { readonly id: string; readonly 
 ) PARTITION BY RANGE (height);
 ${heightPartitionsSql(LOGS_TABLE)}`,
   },
+  /** This is only for core-contract-logs-fast */
   {
     id: "002",
     sql: `CREATE TABLE ${UNRESOLVED_TABLE} (
@@ -123,6 +134,7 @@ export async function insertLogRows(
   ]);
 }
 
+/** This is only for core-contract-logs-fast */
 const INSERT_UNRESOLVED_SQL = `INSERT INTO ${UNRESOLVED_TABLE} (height, tx_index, log_index, contract_address, entry_point,
   reason, segment, fallible, call_index, op_index)
   SELECT $1::bigint, u.tx_index, u.log_index, u.contract_address, u.entry_point, u.reason, u.segment, u.fallible,
@@ -131,7 +143,11 @@ const INSERT_UNRESOLVED_SQL = `INSERT INTO ${UNRESOLVED_TABLE} (height, tx_index
     $9::bigint[], $10::bigint[])
     AS u (tx_index, log_index, contract_address, entry_point, reason, segment, fallible, call_index, op_index)`;
 
-/** Inserts `sites`, block `height`'s unresolved log sites, as rows of the unresolved table, in one statement. */
+/**
+ * This is only for core-contract-logs-fast.
+ *
+ * Inserts `sites`, block `height`'s unresolved log sites, as rows of the unresolved table, in one statement.
+ */
 export async function insertUnresolvedRows(
   w: Pick<BlockWriteHandle, "execute">,
   height: bigint,

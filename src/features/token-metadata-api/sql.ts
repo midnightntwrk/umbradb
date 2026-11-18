@@ -76,7 +76,11 @@ export const STATEMENTS = Object.freeze({
      FROM unnest($1::bytea[]) AS c(address)`,
   /** Each contract's first `$2` rejection reasons. */
   markReasons: firstOfContract("reject", "e.reason"),
-  /** Each contract's first `$2` unresolved positions. */
+  /**
+   * This is only for core-contract-logs-fast.
+   *
+   * Each contract's first `$2` unresolved positions.
+   */
   markPositions: firstOfContract("unresolved", "e.height::text AS height, e.tx_index::int AS tx_index, e.event_index::int AS event_index"),
   /** How many tokens of contract `$1` have the whole usable symbol `$2` (`tokens_symbol_idx`). */
   groupCount: `SELECT count(*)::int AS n FROM ${TOKEN_METADATA_SCHEMA}.tokens WHERE contract_address = $1 AND symbol = $2`,
@@ -154,6 +158,7 @@ export async function commonFields(read: ReadHandle, keys: readonly TokenKey[]):
 export interface MarkInputs {
   count: number;
   reasons: string[];
+  /** This is only for core-contract-logs-fast */
   unresolved: { count: number; positions: { height: number; txIndex: number; eventIndex: number }[] };
 }
 

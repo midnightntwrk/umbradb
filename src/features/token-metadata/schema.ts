@@ -31,7 +31,11 @@ export const TOKEN_METADATA_EVENTS_ITEM = "token-metadata-events";
 /** The `table` item of `tokens` and `fields` (mutable): the described tokens and their current fields. */
 export const TOKEN_METADATA_STATE_ITEM = "token-metadata-state";
 
-/** Migration `001`: the three tables and their indexes. Never edited once released; a change is a new migration. */
+/**
+ * Migration `001`: the three tables and their indexes. Never edited once released; a change is a new migration.
+ *
+ * The `unresolved` classification and `events_unresolved_idx` are only for core-contract-logs-fast.
+ */
 export const MIGRATION_001 = `CREATE TABLE ${TOKEN_METADATA_SCHEMA}.tokens (
   id bytea NOT NULL CHECK (octet_length(id) = 32),
   kind smallint NOT NULL CHECK (kind IN (1, 2, 3)),

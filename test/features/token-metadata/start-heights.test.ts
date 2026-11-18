@@ -265,6 +265,7 @@ const TAPES: readonly TapeStarts[] = [
   { tape: "mainnet-3346039-3346239", network: "mainnet", last: 3_346_239, f: 3_346_139, starts: [3_346_040, 3_346_139, 3_346_140] },
 ];
 
+/** This is only for core-contract-logs-fast */
 describe.each(PROCESS_BACKENDS)("token-metadata on the networks' tapes from varying start heights, on $name", (backend: ProcessBackend) => {
   for (const tape of TAPES) {
     for (const start of tape.starts) {

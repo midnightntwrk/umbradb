@@ -1,4 +1,6 @@
 /**
+ * This is only for core-contract-logs-fast.
+ *
  * The modules' latest starts (`ModuleDeclaration.latestStarts`) applied to a validated configuration: when a module
  * the configuration enables names, for the configuration's network, a height below the database's start S, the
  * database starts at that height instead, with every entry that starts at S. Pure, and applied by the resolver

@@ -83,6 +83,8 @@ export function revisionGap(revisions: readonly { readonly start: bigint; readon
 }
 
 /**
+ * This is only for core-contract-logs-fast.
+ *
  * The first block with contract logs on each official network: the first block of ledger v9 (runtime 2,001,100), the
  * delayed upgrade's first block (mainnet 3,346,139, preprod 3,348,434; preview 1,572 after its restart from genesis);
  * and 0 on `undeployed`, the local standalone network, whose chains each start anew. No MIP-0018 event exists before
@@ -116,6 +118,7 @@ export function tokenMetadataWith(reader: LogReader, latestStarts: Readonly<Reco
       },
     ],
     startsMidChain: true,
+    /** This is only for core-contract-logs-fast */
     latestStarts,
     configSchema: z.object({}),
     migrations: MIGRATIONS.map(({ id, sql }) => ({ id, sql })),

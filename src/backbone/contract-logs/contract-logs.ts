@@ -63,6 +63,8 @@ export interface ContractLog {
 }
 
 /**
+ * This is only for core-contract-logs-fast.
+ *
  * A log site `core-contract-logs-fast` cannot read exactly: a `log` op of a call's transcript whose log, if any, is not
  * known from the transcript and the chain alone. It is never a log, and nothing is guessed for it.
  */
@@ -89,6 +91,7 @@ export interface UnresolvedLogSite {
 /** The `block` item: a block's logs and its unresolved log sites (see the module comment). */
 export interface ContractLogsBlock {
   readonly logs: readonly ContractLog[];
+  /** This is only for core-contract-logs-fast */
   readonly unresolved: readonly UnresolvedLogSite[];
 }
 
@@ -134,7 +137,11 @@ export function contractLogsItemOf(b: BlockContext, module: string): readonly Co
   return blockItemOf(b, module).logs;
 }
 
-/** The unresolved log sites of `b`'s `contract-logs` item; throws a `TypeError` naming `module` when it has none. */
+/**
+ * This is only for core-contract-logs-fast.
+ *
+ * The unresolved log sites of `b`'s `contract-logs` item; throws a `TypeError` naming `module` when it has none.
+ */
 export function unresolvedLogSitesOf(b: BlockContext, module: string): readonly UnresolvedLogSite[] {
   return blockItemOf(b, module).unresolved;
 }
@@ -150,6 +157,8 @@ export async function writeLogRows(
 }
 
 /**
+ * This is only for core-contract-logs-fast.
+ *
  * Writes `sites`, block `height`'s unresolved log sites, as rows of `contract_logs.unresolved`, in one statement; none
  * for no sites.
  */

@@ -121,6 +121,8 @@ export interface ModuleDeclaration {
   /** Whether the module can start at a height after genesis, without the blocks before it. */
   startsMidChain: boolean;
   /**
+   * This is only for core-contract-logs-fast.
+   *
    * The latest height a new database with this module starts at, per network: a module whose rows must cover the
    * chain from some height (for example from the network's first block with contract logs) names it here, and a
    * configuration whose database would start above it starts there instead (the entries starting with the database

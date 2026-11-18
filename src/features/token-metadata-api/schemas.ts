@@ -24,6 +24,7 @@ export const DEFAULT_LIMIT = 100;
 export const MAX_TOKEN_FIELDS = 256;
 /** The most rejection reasons and unresolved positions listed in a mark (all are counted). */
 export const MAX_MARK_REASONS = 100;
+/** This is only for core-contract-logs-fast */
 export const MAX_MARK_UNRESOLVED = 100;
 /** The most members listed in a symbol group (all are counted in `memberCount`). */
 export const MAX_GROUP_MEMBERS = 100;
@@ -87,6 +88,7 @@ export const Mark = z.strictObject({
   mark: z.enum(["ok", "partial", "incorrect", "unresolved", "none"]),
   reasons: z.array(z.string()),
   reasonCount: z.int(),
+  /** This is only for core-contract-logs-fast */
   unresolved: z.strictObject({ count: z.int(), positions: z.array(Position) }),
   missing: z.array(z.string()),
   tags: z.array(z.string()),

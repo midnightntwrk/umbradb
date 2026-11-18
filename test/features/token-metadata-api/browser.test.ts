@@ -42,6 +42,7 @@ const BODIES = [{ contract: `0x${"00".repeat(32)}` }, { colors: [`0x${"00".repea
 
 const PRESENT = findTape(TAPE).found;
 
+/** This is only for core-contract-logs-fast */
 (PRESENT ? describe : describe.skip)("token-metadata in the browser build", () => {
   let server: PageServer;
   let node: TapeNode;

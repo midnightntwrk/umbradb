@@ -83,6 +83,7 @@ export function candidatesOf(
   height: bigint,
   logs: readonly ContractLog[],
   reader: LogReader = miscAtom,
+  /** This is only for core-contract-logs-fast */
   unresolved: readonly UnresolvedLogSite[] = [],
 ): Candidate[] {
   const first = new Map<number, number>();
@@ -147,6 +148,7 @@ export async function writeTokenMetadata(
   height: bigint,
   logs: readonly ContractLog[],
   reader: LogReader = miscAtom,
+  /** This is only for core-contract-logs-fast */
   unresolved: readonly UnresolvedLogSite[] = [],
 ): Promise<number> {
   const candidates = candidatesOf(height, logs, reader, unresolved);

@@ -203,6 +203,8 @@ export function symbolGroups(tokens: Iterable<GroupableToken>): SymbolGroup[] {
 export type MarkKind = "ok" | "partial" | "incorrect" | "unresolved" | "none";
 
 /**
+ * This is only for core-contract-logs-fast.
+ *
  * The reason a mark carries when the token's contract has unresolved log sites: `log` ops whose logged value the raw
  * transaction does not show, so the contract may have published, renamed or withdrawn metadata this indexer cannot
  * read.
@@ -240,7 +242,11 @@ export interface MarkInput {
    * (the mark only needs to know whether there is one).
    */
   contractRejections: readonly string[];
-  /** How many unresolved log sites the token's contract has (default 0). */
+  /**
+   * This is only for core-contract-logs-fast.
+   *
+   * How many unresolved log sites the token's contract has (default 0).
+   */
   contractUnresolvedLogs?: number;
 }
 
