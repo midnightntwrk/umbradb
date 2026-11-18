@@ -559,9 +559,13 @@ protected). This is the guarantee the per-block step gave its eviction before th
 (`engine.ts`'s module comment on evictions); the eviction is now sent inside the transaction, after the block's
 writes, with the worker in the same two states.
 
-The eviction is awaited. The worker is idle then (h's apply has answered and nothing else is sent before h's
-`COMMIT`), so the wait is the eviction's own time; and the refusal must be known, and the thread replaced, before the
-next block is applied.
+The eviction is awaited: the refusal must be known, and the thread replaced, before the next block is applied. The
+worker is not idle then. The source may have sent it later blocks' parses at their `on-parse`, given no read, and it
+answers in order, so the eviction waits behind them. A parse whose transaction shares a stored node asks the main
+thread for it. While the eviction is awaited, `settleRun` lends the block transaction's handle to the requests given
+no read (`host.ts`'s `lend`), those already waiting included: on PGlite a read of the database waits behind the open
+transaction, so without the lent handle the parse would wait for that read, the eviction for the parse, and the
+transaction for the eviction.
 
 ### 5.3 A refused eviction
 

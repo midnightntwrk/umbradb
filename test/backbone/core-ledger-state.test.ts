@@ -83,6 +83,7 @@ const STORED_ROOT = Uint8Array.of(0, ...hash(0x30));
 function bound(root: Uint8Array, result: AppliedState = applied(1n), p: ProcessContext = context()) {
   const asked: unknown[] = [];
   const host = {
+    lend: () => async () => undefined,
     async load(input: unknown, read: unknown) {
       asked.push({ load: input, read: read !== undefined });
       return { stateRoot: STORED_ROOT, loaded: false };

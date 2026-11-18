@@ -404,6 +404,7 @@ function pointWorker(host: LedgerHost, reached: (point: RestartPoint, height: bi
   let height: bigint | null = null;
   return {
     useDatabase: (database) => host.useDatabase(database),
+    lend: (read) => host.lend(read),
     parse: (ledger, block, transactions) => host.parse(ledger, block, transactions),
     genesisRoot: (ledger, bytes) => host.genesisRoot(ledger, bytes),
     genesis: (input, read) => host.genesis(input, read),

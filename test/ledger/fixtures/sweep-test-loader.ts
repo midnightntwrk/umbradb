@@ -38,6 +38,8 @@
 // flush that leaves out one node a node of its batch references (a new node's child, or the child a rewritten node now
 // references), and one that persists a key no node has. By `persist`, a flush also persists a node it holds and
 // never releases it: a queued key that a later block persists.
+// By `stray` a flush also writes a node no raised key reaches (the flush rule broken), and by `parseReads` a parse reads
+// a stored node through the node store the engine installed, then fails (the package has no transactions).
 // The one-form DAG (`dag: "one-form"`, the extended DAG without its rewrite cases) is served by the same package.
 // Erasable TypeScript only: the worker runs it through Node.js's type stripping.
 
@@ -59,6 +61,8 @@ export const COUNTERS = Object.freeze({
   storeLoadHeight: 3,
   /** Evictions taken (each `evict` the package did not refuse). */
   evictions: 4,
+  /** Parses that read a stored node ({@link FixtureData.parseReads}), counted before the read. */
+  parseReads: 5,
 });
 
 /** The counters' memory: {@link COUNTERS}' slots. */
@@ -95,7 +99,24 @@ export interface FixtureData extends RefusalData {
    * later flush releases.
    */
   readonly persist?: { readonly at: string; readonly key: string };
+  /**
+   * The extended DAG only: a parse reads the node `key` (hex) through the node store the package was given, then
+   * fails, as a parse whose transaction shares a stored node reads it. The package has no transactions otherwise.
+   */
+  readonly parseReads?: string;
+  /**
+   * The extended DAG only: the flush after the height `at` (decimal text) also writes {@link STRAY}, a node no key the
+   * block raises reaches (the flush rule broken).
+   */
+  readonly stray?: string;
 }
+
+/** A node of no state of the fixture: what `stray` writes. */
+export const STRAY = Object.freeze({
+  key: Uint8Array.from(createHash("sha256").update("a node of no state of the fixture").digest()),
+  data: Uint8Array.of(0x5a),
+  children: Uint8Array.of(0),
+});
 
 /** A key no node of the fixture has: what `persistUnknown` persists. */
 export const UNKNOWN_KEY: Uint8Array = Uint8Array.from(createHash("sha256").update("a key no node of the fixture has").digest());
@@ -247,6 +268,8 @@ function extendedPackage(ledger: LedgerName, data: FixtureData): LedgerPackage {
   const live = keeping === "holds-by-reference" ? carried : held;
   /** The child list the thread believes stored for each key. */
   const stored = new Map<string, string>();
+  /** The node store the engine installed through `load`, which a parse reads through. */
+  let installed: NodeStore | null = null;
   /** The height of each state the thread made or read, by its root key; the rows of each it read. */
   const roots = new Map<string, number>();
   const reads = new Map<string, ReadonlySet<string>>();
@@ -336,13 +359,19 @@ function extendedPackage(ledger: LedgerName, data: FixtureData): LedgerPackage {
     ledger,
     versionName: "sweep-fixture",
     rawPackages: () => ({}),
-    parseTransaction: unsupported("transactions"),
+    parseTransaction: () => {
+      if (data.parseReads === undefined || installed === null) return unsupported("transactions")();
+      Atomics.add(counters, COUNTERS.parseReads, 1);
+      const node = installed.get(Uint8Array.from(Buffer.from(data.parseReads, "hex")));
+      throw new Error(`the sweep test package parses no transaction (it read ${data.parseReads}: ${node === null ? "not stored" : "stored"})`);
+    },
     nativeTransaction: unsupported("transactions"),
     forgetTransactions: () => undefined,
     emptyState: () => build(0),
     genesisState: () => build(0),
     networkIdOf: () => "undeployed",
     load(key, store) {
+      installed = store;
       const height = roots.get(hex(key));
       if (height === undefined) return read(key, store);
       return handle(height, reads.get(hex(key)) ?? reach(hex(key), live));
@@ -386,6 +415,7 @@ function extendedPackage(ledger: LedgerName, data: FixtureData): LedgerPackage {
       const rootCounts = [...deltas.values()].filter((d) => d.delta !== 0).sort((a, b) => (hex(a.key) < hex(b.key) ? -1 : 1));
       deltas = new Map();
       const inserts = [...taken.values()].sort((a, b) => (hex(a.key) < hex(b.key) ? -1 : 1)).map((n) => ({ key: n.key, data: n.data, children: n.children }));
+      if (data.stray !== undefined && `${applied}` === data.stray) inserts.push({ key: STRAY.key, data: STRAY.data, children: STRAY.children });
       return { inserts, rootCounts };
     },
     persist: (key) => change(key, 1),

@@ -14,6 +14,12 @@
  * a single queue: `core-ledger-state`'s `on-compute` read holds it while its apply waits behind the parse in the
  * worker, so a new read of the database would wait for ever; the apply's open read answers instead.
  *
+ * A caller that awaits a request given no read while it holds an open read lends that read ({@link LedgerHost.lend}):
+ * it answers the node requests of every request given none, those already waiting for a read too, until it is taken
+ * back. `core-ledger-state` lends its block transaction's handle while it awaits its eviction: a request sent before
+ * the eviction and given no read (a later block's parse at `on-parse`) may wait in the worker for a stored node, and on
+ * PGlite a read of the database waits behind that open transaction.
+ *
  * **A step's time** is not bounded. A ledger step may take minutes (the v8 → v9 conversion, loading a large state),
  * and nothing cuts a height off for being slow. It is reported instead: {@link LedgerHost.activity} names the step in
  * progress, with its kind, its block's height and how long it has run (counted from when it began, since a request sent
@@ -97,6 +103,13 @@ export interface NodeDatabase {
 export interface LedgerHost {
   /** The database a request given no read has its stored nodes read from (see the module comment); none unless given. */
   useDatabase(database: NodeDatabase | null): void;
+  /**
+   * Lends `read` to the requests given none (see the module comment), those already waiting for a read included, until
+   * the returned function is called. That function resolves once no node request is still answered through `read`, so
+   * the caller awaits it before its read ends. One read is lent at a time: a second replaces the first until it is
+   * taken back.
+   */
+  lend(read: NodeReader): () => Promise<void>;
   /** Parses block `block`'s transactions once with `ledger` and keeps them for its apply. */
   parse(ledger: LedgerName, block: BlockId, transactions: readonly Uint8Array[]): Promise<readonly ParsedTransaction[]>;
   /** The root of a genesis state. It reads no stored node: at block 0 no node is stored yet. */
@@ -294,6 +307,10 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
   let database: NodeDatabase | null = null;
   /** Node requests of requests given no read, waiting for a read (see the module comment). */
   const waiting = new Set<(read: NodeReader) => void>();
+  /** The reads lent to the requests given none ({@link LedgerHost.lend}), the last one first to answer. */
+  const lent: NodeReader[] = [];
+  /** The node requests being answered through each lent read. */
+  const answering = new Map<NodeReader, Set<Promise<void>>>();
   let next = 1;
   /** When the worker last answered a request: the next one in order began then, if it was sent by then. */
   let answeredAt = performance.now();
@@ -346,6 +363,15 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
    */
   const answerTimed = (bridge: BridgeServer, read: NodeReader | null, from: number | null): Promise<void> => {
     const answer = bridge.answer(read);
+    // A lent read is not taken back while it answers a node request.
+    const running = read === null ? undefined : answering.get(read);
+    if (running !== undefined) {
+      running.add(answer);
+      void answer.then(
+        () => running.delete(answer),
+        () => running.delete(answer),
+      );
+    }
     if (from === null) return answer;
     return answer.then(() => {
       traceAdd("nodeReadMs", performance.now() - from);
@@ -361,7 +387,8 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
     const { bridge } = thread;
     const from = tracing() ? performance.now() : null;
     if (from !== null && at !== undefined) traceAdd("nodeNoticeMs", traceClock() - at);
-    const own = pending.get(id)?.read ?? [...pending.values()].find((request) => request.read !== null)?.read ?? null;
+    const own =
+      pending.get(id)?.read ?? lent.at(-1) ?? [...pending.values()].find((request) => request.read !== null)?.read ?? null;
     if (own !== null || database === null) {
       void answerTimed(bridge, own, from);
       return;
@@ -432,6 +459,19 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
   return {
     useDatabase(given) {
       database = given;
+    },
+    lend(read) {
+      lent.push(read);
+      if (!answering.has(read)) answering.set(read, new Set());
+      for (const waiter of [...waiting]) waiter(read);
+      return async () => {
+        const at = lent.lastIndexOf(read);
+        if (at >= 0) lent.splice(at, 1);
+        if (lent.includes(read)) return;
+        const running = answering.get(read);
+        answering.delete(read);
+        if (running !== undefined) await Promise.allSettled([...running]);
+      };
     },
     parse: (ledger, block, transactions) => send({ type: "parse", ledger, block, transactions: [...transactions] }),
     genesisRoot: (ledger, bytes) => send({ type: "genesis-root", ledger, bytes }),
@@ -550,6 +590,8 @@ export function inThreadLedger(options: InThreadLedgerOptions = {}): LedgerHost 
   const parse = (request: ParseRequest) => run(request, (e) => e.parse(request.ledger, request.block, request.transactions));
   return {
     useDatabase: () => undefined,
+    // The engine runs on this thread and reads no stored node through a bridge: nothing to lend.
+    lend: () => () => Promise.resolve(),
     parse: (ledger, block, transactions) => parse({ type: "parse", ledger, block, transactions: [...transactions] }),
     genesisRoot: (ledger, bytes) => run({ type: "genesis-root", ledger, bytes }, (e) => e.genesisRoot(ledger, bytes)),
     genesis: (input) => run({ type: "genesis", input }, (e) => e.genesis(input)),

@@ -124,6 +124,7 @@ export function recordingWorker(host: LedgerHost, record: WorkerRecord): LedgerH
   let height: bigint | null = null;
   return {
     useDatabase: (database) => host.useDatabase(database),
+    lend: (read) => host.lend(read),
     parse: (ledger, block, transactions) => host.parse(ledger, block, transactions),
     genesisRoot: (ledger, bytes) => host.genesisRoot(ledger, bytes),
     async genesis(input, read) {

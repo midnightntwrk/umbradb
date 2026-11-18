@@ -48,6 +48,7 @@ async function referenceHalt(height: bigint, before: TableSnapshot, flushed: Nod
 function keepingFlushes(flushes: Map<bigint, NodeBatch>): (host: LedgerHost) => LedgerHost {
   return (host) => ({
     useDatabase: (database) => host.useDatabase(database),
+    lend: (read) => host.lend(read),
     parse: (ledger, block, transactions) => host.parse(ledger, block, transactions),
     genesisRoot: (ledger, bytes) => host.genesisRoot(ledger, bytes),
     genesis: (input, read) => host.genesis(input, read),

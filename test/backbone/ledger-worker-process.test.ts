@@ -31,6 +31,7 @@ function counted() {
         record.databases.push(database);
         host.useDatabase(database);
       },
+      lend: (read) => host.lend(read),
       parse: (...args) => host.parse(...args),
       genesisRoot: (...args) => host.genesisRoot(...args),
       genesis: (...args) => host.genesis(...args),

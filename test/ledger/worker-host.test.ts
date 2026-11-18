@@ -349,6 +349,26 @@ describe("the node-store bridge: the worker reads stored nodes through the main 
     expect(fourth.failure).toBeNull();
   });
 
+  it("reads the nodes of a request given no read through a read lent while the caller holds it, those already waiting included, until it is taken back", { timeout: LONG }, async () => {
+    const { stateKey, stateRoot, nodes } = await storedState();
+    const stored = new Map(nodes.map((node) => [hex(node.key), node]));
+    const input = { ledger: "v9" as const, ...at(1n), stateKey };
+    // A database whose read cannot begin (PGlite's queue held by the caller's own open transaction).
+    const host = started();
+    host.useDatabase({ read: () => new Promise(() => undefined) });
+    const loading = host.load(input);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    // Waiting in the worker for a node; the caller lends the read it holds.
+    const lent = mapReader(stored);
+    const takeBack = host.lend(lent);
+    expect(hex((await loading).stateRoot)).toBe(hex(stateRoot));
+    expect(lent.queries[0]?.[0]).toBe(hex(stateKey));
+    await takeBack();
+    // Taken back: a second take-back of the same read changes nothing, and the in-thread host has nothing to lend.
+    await takeBack();
+    await inThreadLedger().lend(lent)();
+  });
+
   describe.each(BACKENDS)("on $name", (backend: TestBackend) => {
     beforeAll(() => backend.start(), 180_000);
     afterAll(() => backend.stop(), 60_000);

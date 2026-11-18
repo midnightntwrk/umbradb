@@ -1,11 +1,13 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CORE_LEDGER_STATE_ID } from "../../src/backbone/core-ledger-state/core-ledger-state.js";
 import type { BlockWriteHandle, Transaction } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
 import type { BlockWrites } from "../../src/db/write-handles.js";
+import type { LedgerName } from "../../src/ledger/types.js";
 import type { LedgerHost } from "../../src/ledger/worker/host.js";
 import { FinalizedLoop, type HeightRun, type LoopInput } from "../../src/runner/loop.js";
-import { LAST } from "../ledger/fixtures/sweep-fixture.js";
+import { LAST, rootOf } from "../ledger/fixtures/sweep-fixture.js";
 import { COUNTERS, countersMemory } from "../ledger/fixtures/sweep-test-loader.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
 import { tableDifferences } from "./eviction-restart.js";
@@ -28,7 +30,10 @@ import { referenceProblems } from "./refcount-reference.js";
  * - (d) the same with the restart turned off (`restartOnRefusedEviction: false`) halts at h in `on-settle` with nothing
  *   of h stored;
  * - (e) a lost connection in `on-settle`: the height is made again from `on-compute` (applied and handed over again),
- *   and its tables are a clean run's at every block, so the record the settle computed held that block alone.
+ *   and its tables are a clean run's at every block, so the record the settle computed held that block alone;
+ * - (f) a request given no read (a later block's parse at `on-parse`), sent to the worker before a block's eviction
+ *   while that block's transaction is open, that reads a stored node: the worker answers it before the eviction, and on
+ *   PGlite a read of the database would wait behind the open transaction; the block commits.
  */
 
 /** What a run's loop and ledger worker did, in order: a word and the height it was for. */
@@ -66,6 +71,7 @@ function recordingHost(events: Event[]): (host: LedgerHost) => LedgerHost {
     let height: bigint | null = null;
     return {
       useDatabase: (database) => host.useDatabase(database),
+      lend: (read) => host.lend(read),
       parse: (ledger, block, transactions) => host.parse(ledger, block, transactions),
       genesisRoot: (ledger, bytes) => host.genesisRoot(ledger, bytes),
       genesis(input, read) {
@@ -224,6 +230,46 @@ describe.each(PROCESS_BACKENDS)("the reclamation through on-settle, on $name", (
     expect([...(now?.digests ?? [])]).toEqual([...(before?.digests ?? [])]);
     expect(stateRows(run)).toBe(Number(h));
   }, PATIENCE_MS * 4);
+
+  it("(f) a parse given no read, sent to the worker before a block's eviction while its transaction is open, reads a stored node: the eviction is answered and the block commits", async () => {
+    const h = await deletingHeight();
+    const memory = countersMemory();
+    const gate = new Int32Array(memory);
+    // The stored root of the state after h − 1: a row while h's transaction is open.
+    const stored = Buffer.from(rootOf(Number(h - 1n), "extended").slice(1)).toString("hex");
+    let host: LedgerHost | undefined;
+    let ledger: LedgerName | undefined;
+    const capturing = (recording: LedgerHost): LedgerHost => {
+      host = recording;
+      return new Proxy(recording, {
+        get(target, name, receiver) {
+          if (name === "apply") {
+            return (input: Parameters<LedgerHost["apply"]>[0], read: Parameters<LedgerHost["apply"]>[1]) => {
+              ledger = input.ledger;
+              return target.apply(input, read);
+            };
+          }
+          return Reflect.get(target, name, receiver) as unknown;
+        },
+      });
+    };
+    class ParsingLoop extends FinalizedLoop {
+      protected override async settlePoint(run: HeightRun, writes: BlockWrites): Promise<void> {
+        if (run.height === h && host !== undefined && ledger !== undefined) {
+          // As the prefetch's `on-parse` of a later block: a parse given no read, ahead of the eviction in the worker.
+          void host.parse(ledger, { height: h, hash: new Uint8Array(32).fill(0xee) }, [Uint8Array.of(1)]).catch(() => undefined);
+          // Its node request is posted before the settle begins.
+          while (Atomics.load(gate, COUNTERS.parseReads) === 0) await sleep(5);
+          await sleep(50);
+        }
+        await super.settlePoint(run, writes);
+      }
+    }
+    const run = await dagRun({ data: { counters: memory, parseReads: stored }, last: Number(h) + 1, loop: ParsingLoop, worker: capturing });
+    expect(countersOf(memory).parseReads).toBe(1);
+    expect(run.status).toMatchObject({ cursor: h + 1n, reason: null });
+    expect(run.evicted.get(h)?.length ?? 0).toBeGreaterThan(0);
+  }, PATIENCE_MS);
 
   it("(e) a lost connection in on-settle: the height is made again from on-compute, and the tables after every block are a clean run's", async () => {
     const h = await deletingHeight();

@@ -599,12 +599,18 @@ export async function settleRun(
     let refused = false;
     if (outcome.evict.length > 0) {
       const { ledger } = boundLedger(p);
+      // The worker answers in order, and a request sent before the eviction and given no read (a later block's parse
+      // at `on-parse`) may wait in it for a stored node: this transaction's handle answers it, since on PGlite a read
+      // of the database would wait behind this transaction.
+      const unlend = ledger.lend(w);
       try {
         await ledger.evict(outcome.evict);
       } catch (error) {
         if (!isEvictionRefused(error) || options.restartOnRefusedEviction === false) throw error;
         await ledger.restart();
         refused = true;
+      } finally {
+        await unlend();
       }
     }
     const netFrom = performance.now();
