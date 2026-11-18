@@ -38,8 +38,11 @@
 // flush that leaves out one node a node of its batch references (a new node's child, or the child a rewritten node now
 // references), and one that persists a key no node has. By `persist`, a flush also persists a node it holds and
 // never releases it: a queued key that a later block persists.
-// By `stray` a flush also writes a node no raised key reaches (the flush rule broken), and by `parseReads` a parse reads
-// a stored node through the node store the engine installed, then fails (the package has no transactions).
+// By `stray` a flush also writes a node no raised key reaches (the flush rule broken), by `parseReads` a parse reads
+// a stored node through the node store the engine installed, then fails (the package has no transactions), and by
+// `applyReads` each apply reads a stored node through it.
+// The original DAG's package also takes `refuseKey` (an eviction naming one key refused) and `trapAt` (an apply that
+// traps), and serves the flip DAG (`dag: "flip"`).
 // The one-form DAG (`dag: "one-form"`, the extended DAG without its rewrite cases) is served by the same package.
 // Erasable TypeScript only: the worker runs it through Node.js's type stripping.
 
@@ -76,6 +79,18 @@ export interface RefusalData {
   readonly refuseAt?: string;
   /** … in the first `threads` threads that load it (1 unless given). */
   readonly threads?: number;
+  /**
+   * The original or the flip DAG only: an eviction that names this key (hex) is refused, with the worker's second try,
+   * in the first `threads` threads, whichever block the package applied last.
+   */
+  readonly refuseKey?: string;
+  /**
+   * The original or the flip DAG only: the apply of this height (decimal text) throws a WebAssembly `RuntimeError`, as
+   * a package that traps on the block does …
+   */
+  readonly trapAt?: string;
+  /** … in the first `trapThreads` threads that load it (every thread unless given). */
+  readonly trapThreads?: number;
 }
 
 /** How the package keeps the extended DAG's nodes (see the module comment). */
@@ -83,7 +98,7 @@ export type Keeping = "writes-again" | "keeps-old-copy" | "holds-by-reference";
 
 /** What a test asks of the package: a refusal ({@link RefusalData}), and the DAG and the way it keeps nodes. */
 export interface FixtureData extends RefusalData {
-  /** The DAG it serves: the original unless `"extended"` or `"one-form"`. */
+  /** The DAG it serves: the original unless `"extended"`, `"one-form"` or `"flip"`. */
   readonly dag?: FixtureDag;
   /** How it keeps the extended DAG's nodes: `"writes-again"` unless given; refused with the original DAG. */
   readonly keeping?: Keeping;
@@ -110,6 +125,12 @@ export interface FixtureData extends RefusalData {
    * block raises reaches (the flush rule broken).
    */
   readonly stray?: string;
+  /**
+   * The extended DAG only: the apply of each height h from 2 on reads the root node of the state after h − 2 through
+   * the node store the package was given, and fails if it is not there, as an apply reads a stored node it needs. That
+   * root is stored then: the state after h − 2 is released by h − 1 and its rows deleted by h's settle.
+   */
+  readonly applyReads?: boolean;
 }
 
 /** A node of no state of the fixture: what `stray` writes. */
@@ -137,14 +158,16 @@ export async function loadLedger(ledger: LedgerName, _options: LedgerPackageOpti
   }
   const counters = data?.counters === undefined ? new Int32Array(Object.keys(COUNTERS).length) : new Int32Array(data.counters);
   const thread = Atomics.add(counters, COUNTERS.threads, 1);
-  const refusing = data?.refuseAt !== undefined && thread < (data.threads ?? 1);
+  const refusing = (data?.refuseAt !== undefined || data?.refuseKey !== undefined) && thread < (data.threads ?? 1);
+  // The original DAG, or the flip DAG, which differs from it by one subtree's version at two heights.
+  const dag: FixtureDag = data?.dag === "flip" ? "flip" : "original";
   let applied: number | null = null;
   const nodes = new Map<string, FixtureNode>();
   const roots = new Map<string, number>();
   const stored = new Set<string>();
   let deltas = new Map<string, { key: Uint8Array; delta: number }>();
   const state = (height: number): StateHandle => {
-    const all = stateNodes(height);
+    const all = stateNodes(height, dag);
     for (const node of all) nodes.set(hex(node.key), node);
     roots.set(hex((all[0] as FixtureNode).key), height);
     return { height } as unknown as StateHandle;
@@ -175,7 +198,7 @@ export async function loadLedger(ledger: LedgerName, _options: LedgerPackageOpti
       const named = root === null ? null : /^state (\d+)$/.exec(Buffer.from(root.data).toString("utf8"));
       if (named === null || named === undefined) throw new Error(`the sweep test package finds no state ${hex(key)} in the node store`);
       const at = Number(named[1]);
-      for (const node of stateNodes(at)) {
+      for (const node of stateNodes(at, dag)) {
         const read = store.get(node.key);
         if (read === null || hex(read.data) !== hex(node.data) || hex(read.children) !== hex(node.children)) {
           throw new Error(`the node store lacks node ${hex(node.key)} of the state after ${at}, or holds other bytes`);
@@ -187,13 +210,14 @@ export async function loadLedger(ledger: LedgerName, _options: LedgerPackageOpti
       return state(at);
     },
     apply: (_state, input) => {
+      if (data?.trapAt === `${input.height}` && thread < (data.trapThreads ?? Number.POSITIVE_INFINITY)) throw new WebAssembly.RuntimeError("unreachable");
       applied = Number(input.height);
       return {
         state: state(Number(input.height)),
         output: { results: [], events: [], logs: [], parameters: Uint8Array.of(0) },
       };
     },
-    stateRoot: (handle) => rootOf(heightOf(handle)),
+    stateRoot: (handle) => rootOf(heightOf(handle), dag),
     // The six state tree values, none null: this package's states hold no trees, so empty ones' values.
     stateSummary: () => ({
       zswapFirstFree: 0n,
@@ -204,7 +228,7 @@ export async function loadLedger(ledger: LedgerName, _options: LedgerPackageOpti
       dustGenerationRoot: Uint8Array.of(0),
     }),
     dispose: () => undefined,
-    stateKey: (handle) => (stateNodes(heightOf(handle))[0] as FixtureNode).key,
+    stateKey: (handle) => (stateNodes(heightOf(handle), dag)[0] as FixtureNode).key,
     flush(): NodeBatch {
       const taken = new Map<string, FixtureNode>();
       const frontier = [...deltas.values()].filter((d) => d.delta > 0).map((d) => hex(d.key));
@@ -230,7 +254,8 @@ export async function loadLedger(ledger: LedgerName, _options: LedgerPackageOpti
       return refs;
     },
     evict(keys) {
-      if (refusing && `${applied}` === data?.refuseAt) {
+      const byKey = data?.refuseKey !== undefined && keys.some((key) => hex(key) === data.refuseKey);
+      if (refusing && (`${applied}` === data?.refuseAt || byKey)) {
         Atomics.add(counters, COUNTERS.refusals, 1);
         throw new Error(`the sweep test package refuses to forget ${keys.length} node(s) after ${applied}: still held by a live object (A160)`);
       }
@@ -378,7 +403,11 @@ function extendedPackage(ledger: LedgerName, data: FixtureData): LedgerPackage {
       return handle(height, reads.get(hex(key)) ?? reach(hex(key), live));
     },
     apply: (_state, input) => {
-      applied = Number(input.height);
+      const height = Number(input.height);
+      if (data.applyReads === true && height >= 2 && installed !== null && installed.get(rootKey(height - 2)) === null) {
+        throw new Error(`the sweep test package's apply of ${height} finds no root of the state after ${height - 2} in the node store`);
+      }
+      applied = height;
       return {
         state: build(applied),
         output: { results: [], events: [], logs: [], parameters: Uint8Array.of(0) },

@@ -601,6 +601,35 @@ describe("the finalized prefetch", () => {
     expect(node.count("chain_getBlock", [at(2).hex])).toBe(0);
   }, PATIENCE_MS);
 
+  it("gives a height above the loop's ahead once it is prepared, without taking it, and none outside a run", async () => {
+    const { source, node } = await open(catchUp(6), { prefetchWindow: 4, concurrency: 2 });
+    // Outside a run: none.
+    expect(source.ahead(2n)).toBeNull();
+    const runner = new Recorder();
+    const detach = source.attach(runner);
+    await source.finalizedHead();
+    const one = await source.prepared(1n);
+    // The prefetch prepares 2 to 4 (the window above the cursor 0) meanwhile; a height not prepared yet gives none.
+    while (source.ahead(2n) === null) await sleep(5);
+    const ahead = source.ahead(2n);
+    expect(ahead?.block).toEqual({ height: 2n, hash: at(2).hash, parentHash: at(1).hash });
+    expect(ahead?.items).toBeInstanceOf(BlockItems);
+    expect(source.ahead(6n)).toBeNull();
+    // Asked twice it is the same block, and the loop's own request gets that very block, fetched once.
+    expect(source.ahead(2n)).toBe(ahead);
+    expect(await source.prepared(2n)).toBe(ahead);
+    expect(node.count("chain_getBlock")).toBeLessThanOrEqual(6);
+    expect(runner.calls.filter((call) => call === "prepare 2")).toHaveLength(1);
+    // A height the loop took, or passed, is no longer ahead.
+    expect(source.ahead(1n)).toBeNull();
+    expect(source.ahead(2n)).toBeNull();
+    expect(one.block.height).toBe(1n);
+    // The run ended: none, and nothing prepared is kept.
+    while (source.ahead(3n) === null) await sleep(5);
+    detach();
+    expect(source.ahead(3n)).toBeNull();
+  }, PATIENCE_MS);
+
   it("prepares the loop's height even when the prefetch has not begun it", async () => {
     // No head read in this run (the loop reads it first): the window has no bound, and the height is begun when asked.
     const { source } = await open(hashAndBlock(at(1)));

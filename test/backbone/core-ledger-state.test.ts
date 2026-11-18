@@ -8,6 +8,8 @@ import {
   boundLedger,
   computeBlock,
   CORE_LEDGER_STATE,
+  coreLedgerState,
+  type CoreLedgerStateOptions,
   itemsOf,
   parentTimeOf,
   retainedStates,
@@ -22,7 +24,7 @@ import type { BlockWriteHandle } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { type AppliedState, EvictionRefused } from "../../src/ledger/worker/engine.js";
 import type { LedgerHost } from "../../src/ledger/worker/host.js";
-import type { BlockContext, ProcessContext } from "../../src/modules/declaration.js";
+import type { BlockContext, ItemSink, ProcessContext } from "../../src/modules/declaration.js";
 
 // `core-ledger-state`'s parts on their own, over a fake ledger worker and block source: the binding, the checks before
 // a block's apply, the root check's error, the writes of a block's own rows, and the reclamation at `on-settle`. The
@@ -672,5 +674,230 @@ describe("the reclamation at on-settle", () => {
     const { p } = bound(twice.stateRoot, twice);
     await expect(computeBlock(p, block(3n), reading([{ ms: 1n }]))).rejects.toThrow(/block 3: the block writes 0x51.* twice/);
     await expect(settleRun(p, run3, sweeping())).rejects.toThrow(/handed over no block/);
+  });
+});
+
+describe("the next block applied ahead: when h's settle sends it, and each event that drops it", () => {
+  /** The result the fake worker gives for `input`: its block, the state the reads store (0x30…), no node. */
+  const resultOf = (input: { readonly height: bigint; readonly hash: Uint8Array }): AppliedState =>
+    applied(input.height, { hash: input.hash, stateKey: hash(0x30), stateRoot: STORED_ROOT });
+  /** A sink taking `on-compute`'s items. */
+  const sink = (): ItemSink => ({ put: () => undefined }) as unknown as ItemSink;
+  /** `block(height)` with `continues`. */
+  const at = (height: bigint, continues: boolean): BlockContext => ({ ...block(height), continues });
+  /**
+   * A block write handle over tables whose queue holds one stored node, 0x77…, which every settle deletes (as the
+   * reclamation's tests' own); a write answers the keys it was given.
+   */
+  const sweeping = () => {
+    const base = reading([{ ms: 1n }]);
+    return {
+      ...base,
+      async query(sql: string, params: unknown[] = []) {
+        if (sql.startsWith("SELECT node_key FROM core_ledger_state.unreferenced")) return [{ node_key: hash(0x77) }];
+        if (sql.includes("AS stored")) {
+          return (params[0] as Uint8Array[]).filter((key) => key[0] === 0x77).map(() => ({ node_key: hash(0x77), stored: true, refs: 0, roots: 0 }));
+        }
+        if (sql.startsWith("SELECT node_key, children FROM core_ledger_state.nodes")) return [{ node_key: hash(0x77), children: Uint8Array.of(0) }];
+        return base.query(sql, params);
+      },
+      async execute(_sql: string, params: unknown[] = []) {
+        return Array.isArray(params[0]) ? params[0].length : 1;
+      },
+    };
+  };
+
+  /**
+   * A process context bound to a fake worker that records, in order, each eviction (`evict`), each apply (`apply <h>`
+   * or `ahead <h>`), each load (`load <h>`) and each restart; its evictions answered by `evict`, its applies by
+   * `apply`. The binding gives the block context of any height above as prepared (`ahead`), unless told otherwise.
+   */
+  function setup(
+    options: CoreLedgerStateOptions = {},
+    rest: {
+      readonly evict?: () => Promise<number>;
+      readonly apply?: (input: { readonly height: bigint; readonly hash: Uint8Array; readonly ahead?: boolean }) => Promise<AppliedState>;
+      readonly ahead?: (height: bigint) => BlockContext | null;
+      readonly core?: ReturnType<typeof config>;
+    } = {},
+  ) {
+    const p = context(rest.core);
+    const asked: string[] = [];
+    let restarts = 0;
+    const host = {
+      lend: () => async () => undefined,
+      async load(input: { readonly height: bigint }) {
+        asked.push(`load ${input.height}`);
+        return { stateRoot: STORED_ROOT, loaded: false };
+      },
+      async apply(input: { readonly height: bigint; readonly hash: Uint8Array; readonly ahead?: boolean }) {
+        asked.push(`${input.ahead === true ? "ahead" : "apply"} ${input.height}`);
+        return (rest.apply ?? (async (given) => resultOf(given)))(input);
+      },
+      async evict() {
+        asked.push("evict");
+        return (rest.evict ?? (async () => 1))();
+      },
+      async restart() {
+        asked.push("restart");
+        restarts += 1;
+      },
+      get restarts() {
+        return restarts;
+      },
+      async genesisRoot() {
+        return STORED_ROOT;
+      },
+      async genesis(input: { readonly height: bigint; readonly hash: Uint8Array }) {
+        asked.push(`genesis ${input.height}`);
+        return resultOf(input);
+      },
+      failure: null,
+    } as unknown as LedgerHost;
+    const source = { ledgerStateRoot: async () => STORED_ROOT, genesisState: async () => Uint8Array.of(7) };
+    bindCoreLedgerState(p, { ledger: host, source, ahead: rest.ahead ?? ((height) => block(height)) });
+    const points = coreLedgerState(options).points;
+    // What the blocks' rows hold, read as they were written: each block's time, and the state 0x30… after each.
+    const read = reading([{ ms: 1_750_000_006_000n }], {
+      keys: (from, to) => Array.from({ length: Number(to - from) }, (_, i) => ({ height: from + BigInt(i), state_key: hash(0x30) })),
+    });
+    return {
+      p,
+      asked,
+      compute: (b: BlockContext) => points["on-compute"]?.(p, b, read as never, sink()) as Promise<void>,
+      write: (b: BlockContext, w = sweeping()) => points["on-db-write"]?.(p, b, w as never) as Promise<void>,
+      settle: (height: bigint, w = sweeping()) => points["on-settle"]?.(p, { first: height, last: height }, w as never) as Promise<void>,
+    };
+  }
+
+  /** Block `height` computed (as `continues` says), written and settled. */
+  async function through(made: ReturnType<typeof setup>, height: bigint, continues: boolean): Promise<void> {
+    await made.compute(at(height, continues));
+    await made.write(at(height, continues));
+    await made.settle(height);
+  }
+
+  it("sends the apply of h + 1, marked ahead, right after h's eviction, and h + 1 takes its result at its turn, still asking the worker to hold the state at h", async () => {
+    const made = setup();
+    await through(made, 3n, false);
+    expect(made.asked).toEqual(["load 2", "apply 3", "evict", "ahead 4"]);
+    made.asked.length = 0;
+    await made.compute(at(4n, true));
+    expect(made.asked).toEqual(["load 3"]);
+  });
+
+  it("sends it right after the computation where h's settle evicts nothing, and with the option of the negative control before the computation", async () => {
+    const quiet = setup();
+    await quiet.compute(at(3n, false));
+    await quiet.write(at(3n, false));
+    // A queue with nothing to delete: no eviction.
+    await quiet.settle(3n, { ...sweeping(), query: reading([{ ms: 1n }]).query } as never);
+    expect(quiet.asked).toEqual(["load 2", "apply 3", "ahead 4"]);
+    const early = setup({ aheadSentBeforeEviction: true });
+    await through(early, 3n, false);
+    expect(early.asked).toEqual(["load 2", "apply 3", "ahead 4", "evict"]);
+  });
+
+  it("sends none with the setting off, for a block the runner has not prepared or whose parent is not h, past a change of ledger, at the settle of block 0, and where the keys it releases are not known", async () => {
+    const off = setup({}, { core: { entries: [{ id: "core", start: 0, buildVersion: true, settings: { retainStates: 0, applyAhead: false } }] } as never });
+    await through(off, 3n, false);
+    expect(off.asked).not.toContain("ahead 4");
+    const unprepared = setup({}, { ahead: () => null });
+    await through(unprepared, 3n, false);
+    expect(unprepared.asked).not.toContain("ahead 4");
+    const elsewhere = setup({}, { ahead: (height) => ({ ...block(height), parentHash: hash(0x66) }) });
+    await through(elsewhere, 3n, false);
+    expect(elsewhere.asked).not.toContain("ahead 4");
+    const converting = setup({ ledgerOf: (b, parent) => (b.height === 4n ? "v8" : parent) });
+    await through(converting, 3n, false);
+    expect(converting.asked).not.toContain("ahead 4");
+    const zero = setup();
+    await zero.compute(at(0n, false));
+    await zero.write(at(0n, false));
+    await zero.settle(0n);
+    expect(zero.asked.filter((word) => word.startsWith("ahead"))).toEqual([]);
+    // A window whose keys h did not keep (L(3) moved down to 2 after h kept the window from 3 on): h + 1 releases 2 and
+    // 3, so it is applied at its turn.
+    let moved = false;
+    const window = setup({ retainedFrom: (_revisions, h) => (moved && h === 3n ? 2n : h) });
+    await window.compute(at(3n, false));
+    await window.write(at(3n, false));
+    moved = true;
+    await window.settle(3n);
+    expect(window.asked).not.toContain("ahead 4");
+  });
+
+  it("drops it at once when h's settle fails after sending it: h + 1, even told it continues, is applied at its turn", async () => {
+    const made = setup();
+    await made.compute(at(3n, false));
+    await made.write(at(3n, false));
+    const failing = { ...sweeping(), execute: async () => Promise.reject(new UmbraError("connection-lost", "lost at the net write")) };
+    await expect(made.settle(3n, failing as never)).rejects.toThrow(/lost at the net write/);
+    expect(made.asked).toEqual(["load 2", "apply 3", "evict", "ahead 4"]);
+    made.asked.length = 0;
+    await made.compute(at(4n, true));
+    expect(made.asked).toEqual(["load 3", "apply 4"]);
+  });
+
+  it("drops it when h is made again (h's on-compute does not continue the block before), and h's settle sends it again", async () => {
+    const made = setup();
+    await through(made, 3n, false);
+    made.asked.length = 0;
+    // h made again after its transaction failed past its settle: its on-compute drops what its first attempt sent.
+    await made.compute(at(3n, false));
+    await made.write(at(3n, false));
+    expect(made.asked).toEqual(["load 2", "apply 3"]);
+    // The memory is gone: without the retried settle, h + 1 is applied at its turn.
+    const skipped = setup();
+    await through(skipped, 3n, false);
+    await skipped.compute(at(3n, false));
+    skipped.asked.length = 0;
+    await skipped.compute(at(4n, true));
+    expect(skipped.asked).toEqual(["load 3", "apply 4"]);
+    // With it, h's settle sends the apply ahead again, which h + 1 takes.
+    await made.settle(3n);
+    made.asked.length = 0;
+    await made.compute(at(4n, true));
+    expect(made.asked).toEqual(["load 3"]);
+  });
+
+  it("drops it when h + 1 does not continue h (h's COMMIT lost its answer, the writer's session replaced): h + 1 applied at its turn, no restart for the same input", async () => {
+    const made = setup();
+    await through(made, 3n, false);
+    made.asked.length = 0;
+    await made.compute(at(4n, false));
+    expect(made.asked).toEqual(["load 3", "apply 4"]);
+  });
+
+  it("drops it when the worker thread was restarted since it was sent (a refused eviction), or when the apply ahead failed: applied at its turn, with no other restart", async () => {
+    const refused = setup({}, { evict: async () => Promise.reject(new EvictionRefused("still held")) });
+    await through(refused, 3n, false);
+    expect(refused.asked).toEqual(["load 2", "apply 3", "evict", "ahead 4", "restart"]);
+    refused.asked.length = 0;
+    await refused.compute(at(4n, true));
+    expect(refused.asked).toEqual(["load 3", "apply 4"]);
+    const failed = setup({}, { apply: async (input) => (input.ahead === true ? Promise.reject(new Error("restarted while its apply request ran")) : resultOf(input)) });
+    await through(failed, 3n, false);
+    failed.asked.length = 0;
+    await failed.compute(at(4n, true));
+    expect(failed.asked).toEqual(["load 3", "apply 4"]);
+  });
+
+  it("drops it when its input differs from the one built at the block's turn (rule 1), restarting the worker thread first; the option of the negative control uses it", async () => {
+    let raised = false;
+    const window = { retainedFrom: (_revisions: unknown, h: bigint) => (raised && h >= 4n ? h - 1n : h) };
+    const made = setup(window);
+    await through(made, 3n, false);
+    raised = true;
+    made.asked.length = 0;
+    await made.compute(at(4n, true));
+    expect(made.asked).toEqual(["load 3", "restart", "load 3", "apply 4"]);
+    raised = false;
+    const unchecked = setup({ ...window, aheadChecksInput: false });
+    await through(unchecked, 3n, false);
+    raised = true;
+    unchecked.asked.length = 0;
+    await unchecked.compute(at(4n, true));
+    expect(unchecked.asked).toEqual(["load 3"]);
   });
 });
