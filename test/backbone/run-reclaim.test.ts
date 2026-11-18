@@ -1,6 +1,6 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { keyBytes, keyText, KnownKeySet, type NetWrite, RunReclaim, sqlRunTables, writeNet } from "../../src/backbone/core-ledger-state/run-reclaim.js";
+import { keyBytes, keyText, KnownKeySet, type NetWrite, RunReclaim, type RunTables, sqlRunTables, writeNet } from "../../src/backbone/core-ledger-state/run-reclaim.js";
 import { NODES_TABLE, REF_COUNTS_TABLE, UNREFERENCED_TABLE } from "../../src/backbone/core-ledger-state/sql.js";
 import type { BlockWriteHandle } from "../../src/db/api.js";
 import { refcountStep } from "./refcount-step.js";
@@ -18,6 +18,7 @@ import {
   inRuns,
   made,
   madeBlocks,
+  type MadeNode,
   type ModelBlock,
   modelBlocks,
   NO_TABLES,
@@ -47,12 +48,15 @@ import {
  *   block that does not follow it halts with `unreached-node`.
  * - **T4.** A run that does not sweep deletes nothing and does not read the queue whole, and the record refuses a
  *   block of another setting.
+ * - **What each read asks for:** on a few hand-made runs, every read with its keys, in order: each step asks for the
+ *   keys it needs, and no read is made for no key.
  * - **The net write's statements** (`writeNet`), on a handle that records them: lists in statements of 1,000 keys,
  *   and a statement whose rows differ from the computed halts.
  * - **By hand:** the cases a rule turns on, each a few blocks: the last child list written wins; a key that a list
  *   replaced by the last block referenced is kept and queued, one replaced earlier is not; the flush rule and what
  *   it lets through; the checks that halt, a reference and a count judged at each block, so that the run halts
- *   naming the block at which the per-block step halts.
+ *   naming the block at which the per-block step halts, and of several, the key it names; damaged tables where the
+ *   run is the per-block step.
  *
  * The negative controls are in `./run-reclaim.negative-control.test.ts`.
  */
@@ -239,7 +243,7 @@ describe("T4: sweep off, and a change of sweep", () => {
     reclaim.collect(10n, empty, true);
     expect(reclaim.heights).toEqual({ first: 10n, last: 10n });
     for (const height of [10n, 12n]) expect(() => reclaim.collect(height, empty, true)).toThrow(RangeError);
-    expect(() => reclaim.collect(11n, empty, false)).toThrow(/a run holds one setting of sweep/);
+    expect(() => reclaim.collect(11n, empty, false)).toThrow(/block 11: the run from block 10 sweeps and the block does not: a run holds one setting of sweep/);
     expect(() => new RunReclaim({ first: 0n, on: false }).collect(0n, empty, true)).toThrow(/does not sweep and the block does: a run holds one setting of sweep/);
     reclaim.collect(11n, empty, true);
     reclaim.collect(12n, empty, true);
@@ -256,10 +260,12 @@ describe("T4: sweep off, and a change of sweep", () => {
     expect(refuses({ inserts: [node, { ...node }], rootCounts: [] })).toThrow(/writes 0x0303\w+ twice/);
     expect(refuses({ inserts: [], rootCounts: [{ key, delta: 1 }, { key: key.slice(), delta: -1 }] })).toThrow(/changes the root count of 0x0303\w+ twice/);
     expect(refuses({ inserts: [{ ...node, key: key.subarray(0, 31) }], rootCounts: [] })).toThrow(/a node key is 32 bytes, not 31/);
-    // A root-count change of 0 is none.
+    // A root-count change of 0 is none: the key's counts are not read.
     const still = new RunReclaim({ first: 0n, on: true });
     still.collect(0n, { inserts: [], rootCounts: [{ key, delta: 0 }] }, true);
-    expect((await still.compute(runTables(NO_TABLES, new Map()))).net.queued).toEqual([]);
+    const reads = noReads();
+    expect((await still.compute(runTables(NO_TABLES, new Map(), reads))).net.queued).toEqual([]);
+    expect([reads.queue, reads.counts]).toEqual([1, 0]);
   });
 });
 
@@ -427,28 +433,46 @@ describe("the run's record and its reads", () => {
   });
 
   it("gives back no inserted node's key as a view into a buffer it was given", async () => {
-    // Each key handed over is 32 bytes inside a 4,096-byte buffer, as a driver's or a package's pool would give it.
-    const viewOf = (key: Uint8Array): Uint8Array => {
-      const pool = new Uint8Array(4_096);
-      pool.set(key, 1_000);
-      return pool.subarray(1_000, 1_032);
-    };
+    // Each key handed over is 32 bytes inside a 4,096-byte buffer, as a driver's or a package's pool would give it:
+    // in its middle, and at its start.
     const script = fc.sample(historyScripts({ oneForm: true }), { seed: SEED + 1, numRuns: 30 }).find((sample) => sample.blocks.length >= 15) as HistoryScript;
     const blocks = modelBlocks({ ...script, blocks: script.blocks.map((block) => ({ ...block, on: true })) });
     const last = blocks.at(-1) as ModelBlock;
+    for (const at of [1_000, 0]) {
+      const viewOf = (key: Uint8Array): Uint8Array => {
+        const pool = new Uint8Array(4_096);
+        pool.set(key, at);
+        return pool.subarray(at, at + 32);
+      };
+      const reclaim = new RunReclaim({ first: 0n, on: true });
+      for (const block of blocks) {
+        const flush = flushOf(block.flushed);
+        reclaim.collect(
+          BigInt(block.height),
+          { inserts: flush.inserts.map((node) => ({ ...node, key: viewOf(node.key) })), rootCounts: flush.rootCounts.map((change) => ({ ...change, key: viewOf(change.key) })) },
+          true,
+        );
+      }
+      const outcome = await reclaim.compute(runTables(NO_TABLES, last.step.after.roots));
+      expect(outcome.net.inserts.length).toBeGreaterThan(0);
+      for (const node of outcome.net.inserts) expect([node.key.byteOffset, node.key.buffer.byteLength], `at ${at}`).toEqual([0, 32]);
+      expect(tableDifferences(applied(NO_TABLES, outcome.net).tables, last.step.after)).toEqual([]);
+    }
+  });
+
+  it("keeps a key handed over as an array of its own: each inserted node's key is an array it was given, not a copy", async () => {
+    const script = fc.sample(historyScripts({ oneForm: true }), { seed: SEED + 1, numRuns: 30 }).find((sample) => sample.blocks.length >= 15) as HistoryScript;
+    const blocks = modelBlocks({ ...script, blocks: script.blocks.map((block) => ({ ...block, on: true })) });
+    const handed = new Set<Uint8Array>();
     const reclaim = new RunReclaim({ first: 0n, on: true });
     for (const block of blocks) {
       const flush = flushOf(block.flushed);
-      reclaim.collect(
-        BigInt(block.height),
-        { inserts: flush.inserts.map((node) => ({ ...node, key: viewOf(node.key) })), rootCounts: flush.rootCounts.map((change) => ({ ...change, key: viewOf(change.key) })) },
-        true,
-      );
+      for (const { key } of [...flush.inserts, ...flush.rootCounts]) handed.add(key);
+      reclaim.collect(BigInt(block.height), flush, true);
     }
-    const outcome = await reclaim.compute(runTables(NO_TABLES, last.step.after.roots));
+    const outcome = await reclaim.compute(runTables(NO_TABLES, (blocks.at(-1) as ModelBlock).step.after.roots));
     expect(outcome.net.inserts.length).toBeGreaterThan(0);
-    for (const node of outcome.net.inserts) expect([node.key.byteOffset, node.key.buffer.byteLength]).toEqual([0, 32]);
-    expect(tableDifferences(applied(NO_TABLES, outcome.net).tables, last.step.after)).toEqual([]);
+    for (const node of outcome.net.inserts) expect(handed.has(node.key), hex(node.key)).toBe(true);
   });
 
   it("gives back no key as a view into a buffer it was given", async () => {
@@ -465,6 +489,159 @@ describe("the run's record and its reads", () => {
   });
 });
 
+/**
+ * `tables` with each read logged as it is asked: the read's name and the names of its keys (`names`, by key; else the
+ * key's first bytes), sorted.
+ */
+function logged(tables: RunTables, names: ReadonlyMap<string, string>): { readonly tables: RunTables; readonly log: string[] } {
+  const log: string[] = [];
+  const note = (read: string, keys: readonly Uint8Array[]): void => {
+    log.push([read, ...keys.map((key) => names.get(hex(key)) ?? hex(key).slice(0, 12)).sort()].join(" "));
+  };
+  return {
+    log,
+    tables: {
+      rows: (keys) => (note("rows", keys), tables.rows(keys)),
+      changed: (nodes) => (note("changed", nodes.map((node) => node.key)), tables.changed(nodes)),
+      missing: (keys) => (note("missing", keys), tables.missing(keys)),
+      queue: () => (note("queue", []), tables.queue()),
+      queued: (keys) => (note("queued", keys), tables.queued(keys)),
+      counts: (keys) => (note("counts", keys), tables.counts(keys)),
+      children: (keys) => (note("children", keys), tables.children(keys)),
+    },
+  };
+}
+
+describe("what each read asks for: the keys its step needs, and no read for no key", () => {
+  const data = Uint8Array.of(7);
+  const over = (name: string, ...children: readonly MadeNode[]) => made(name, children.map(ref));
+  const flushed = (...nodes: readonly MadeNode[]) => nodes.map((node) => ({ key: node.keyBytes, data, children: node.children }));
+  const raise = (...nodes: readonly MadeNode[]) => nodes.map((node) => ({ key: node.keyBytes, delta: 1 }));
+  const release = (...nodes: readonly MadeNode[]) => nodes.map((node) => ({ key: node.keyBytes, delta: -1 }));
+  const rowsOf = (...nodes: readonly MadeNode[]): Map<string, Uint8Array> => new Map(nodes.map((node) => [node.key, node.children]));
+  /**
+   * A run of `blocks` from block 1 on `found`, `roots` the root counts after its last block: its reads, each key named
+   * after the node of `nodes` it is, and its outcome.
+   */
+  const readsOf = async (found: NodeTables, roots: ReadonlyMap<string, number>, blocks: readonly NodeBatch[], on: boolean, nodes: readonly MadeNode[]) => {
+    const reclaim = new RunReclaim({ first: 1n, on });
+    blocks.forEach((block, at) => reclaim.collect(BigInt(at + 1), block, on));
+    const { tables, log } = logged(runTables(found, roots), new Map(nodes.map((node) => [node.key, Buffer.from(node.data).toString("utf8")])));
+    const outcome = await reclaim.compute(tables);
+    return { log, outcome };
+  };
+  const [c, d] = [made("c"), made("d")];
+
+  it("an empty block: the queue alone when the run sweeps, and no read when it does not", async () => {
+    expect((await readsOf(NO_TABLES, new Map(), [{ inserts: [], rootCounts: [] }], true, [])).log).toEqual(["queue"]);
+    expect((await readsOf(NO_TABLES, new Map(), [{ inserts: [], rootCounts: [] }], false, [])).log).toEqual([]);
+  });
+
+  it("a block that writes a stored node in another form under a new root, and releases the old root", async () => {
+    // Stored: r0 over w, whose list references c and d. The block writes w in a form that references c and embeds d,
+    // under a new root r1, and releases r0.
+    const [w1, w2] = [made("w", [ref(c), ref(d)]), made("w", [ref(c), embedded(d)])];
+    const [r0, r1] = [over("r0", w1), over("r1", w2)];
+    const found: NodeTables = { rows: rowsOf(r0, w1, c, d), refs: new Map([[w1.key, 1], [c.key, 1], [d.key, 1]]), queue: new Set() };
+    const block = { inserts: flushed(w2, r1), rootCounts: [...raise(r1), ...release(r0)] };
+    const nodes = [c, d, w1, r0, r1];
+    const sweeping = await readsOf(found, new Map([[r1.key, 1]]), [block], true, nodes);
+    expect(sweeping.log).toEqual([
+      // Step 1: which of the run's nodes are rows, and which of those hold another list.
+      "rows r1 w",
+      "changed w",
+      // Step 3: what the lists it checks reference that is no node of the run (r1 references w, a node of the run).
+      "missing c",
+      // Step 3's counts block by block: d, which the replaced list referenced and the new one does not; not c, which
+      // both reference.
+      "counts d",
+      // Step 5: the queue, and the counts of the keys whose root count changed (d's are known).
+      "queue",
+      "counts r0 r1",
+    ]);
+    // r0 and d are queued: r0 released by the block, d kept by the list it replaced alone.
+    expect(sweeping.outcome.net.queued.map(hex)).toEqual([d.key, r0.key].sort());
+    expect(sweeping.outcome.keptByReplaced).toBe(1);
+    // Without sweep: no queue read whole; the membership and the counts of the keys whose place in it can change.
+    const off = await readsOf(found, new Map([[r1.key, 1]]), [block], false, nodes);
+    expect(off.log).toEqual(["rows r1 w", "changed w", "missing c", "counts d", "queued d r0 r1 w", "counts r0 r1"]);
+    expect(off.outcome.net.queued.map(hex)).toEqual([d.key, r0.key].sort());
+    expect(off.outcome.keptByReplaced).toBe(0);
+  });
+
+  it("a cascade over rows and over the run's own nodes: lists read for rows only, counts for keys whose count falls", async () => {
+    // Stored: q over k and m, queued; k over l. Block 1 writes s over l and persists it, block 2 releases s, block 3
+    // writes p over m and persists it. The cascade deletes q and s, then k, then l; m keeps p's reference.
+    const [l, m] = [made("l"), made("m")];
+    const k = over("k", l);
+    const [q, s, p] = [over("q", k, m), over("s", l), over("p", m)];
+    const found: NodeTables = { rows: rowsOf(q, k, l, m), refs: new Map([[k.key, 1], [l.key, 1], [m.key, 1]]), queue: new Set([q.key]) };
+    const roots = new Map([[p.key, 1]]);
+    const blocks = [
+      { inserts: flushed(s), rootCounts: raise(s) },
+      { inserts: [], rootCounts: release(s) },
+      { inserts: flushed(p), rootCounts: raise(p) },
+    ];
+    const { log, outcome } = await readsOf(found, roots, blocks, true, [q, k, l, m, s, p]);
+    expect(log).toEqual([
+      // No node of the run is a row: no list of one is compared.
+      "rows p s",
+      "missing l m",
+      "queue",
+      "counts p q s",
+      // Round 1 deletes q and s: q's list is read, s's is the run's.
+      "children q",
+      // k's count falls; l's and m's do not (s's and p's references).
+      "counts k",
+      "children k",
+      "counts l",
+      "children l",
+    ]);
+    expect(outcome.rounds).toBe(3);
+    expect(outcome.evict.map(hex)).toEqual([q, s, k, l].map((node) => node.key).sort());
+    expect(outcome.net.deleted.map(hex)).toEqual([q, k, l].map((node) => node.key).sort());
+    const next = applied(found, outcome.net);
+    expect(next.problems).toEqual([]);
+    expect(inconsistencies(next.tables, roots)).toEqual([]);
+  });
+
+  it("a stored node written again: unchanged, its list is not checked; replaced, its first list is not when it is the row's; in another form and back, the counts of what it referenced are followed", async () => {
+    const [wReferencing, wEmbedding] = [made("w", [ref(c)]), made("w", [embedded(c)])];
+    const r0 = over("r0", wReferencing);
+    const found: NodeTables = { rows: rowsOf(r0, wReferencing, c), refs: new Map([[wReferencing.key, 1], [c.key, 1]]), queue: new Set() };
+    // Written again with its row's list, under nothing: c is asked about by no read.
+    const unchanged = await readsOf(found, new Map([[r0.key, 1]]), [{ inserts: flushed(wReferencing), rootCounts: [] }], true, [c, wReferencing, r0]);
+    expect(unchanged.log).toEqual(["rows w", "changed w", "queue"]);
+    // Written again with its row's list, then in its other form under s2: the run replaces the row's list, and c,
+    // which only that list referenced, is followed block by block, not asked whether it is stored.
+    const s2 = over("s2", wEmbedding);
+    const replaced = await readsOf(
+      found,
+      new Map([[r0.key, 1], [s2.key, 1]]),
+      [{ inserts: flushed(wReferencing), rootCounts: [] }, { inserts: flushed(wEmbedding, s2), rootCounts: raise(s2) }],
+      true,
+      [c, wReferencing, r0, s2],
+    );
+    expect(replaced.log).toEqual(["rows s2 w", "changed w", "counts c", "queue", "counts s2"]);
+    // In its other form under r1, then back in its row's form under r2: the row's list stays. c, which the first list
+    // dropped and the second took back, is followed block by block, and asked whether it is stored: the second list
+    // replaced one the run held.
+    const [r1, r2] = [over("r1", wEmbedding), over("r2", wReferencing)];
+    const back = await readsOf(
+      found,
+      new Map([[r2.key, 1]]),
+      [
+        { inserts: flushed(wEmbedding, r1), rootCounts: [...raise(r1), ...release(r0)] },
+        { inserts: flushed(wReferencing, r2), rootCounts: [...raise(r2), ...release(r1)] },
+      ],
+      true,
+      [c, wReferencing, r0, r1, r2],
+    );
+    expect(back.log).toEqual(["rows r1 r2 w", "changed w", "missing c", "counts c", "queue", "counts r0 r1 r2", "children r0"]);
+    expect([back.outcome.unchangedNodes, back.outcome.evict.map(hex)]).toEqual([1, [r0.key]]);
+  });
+});
+
 describe("by hand", () => {
   const c = made("c");
   const wEmbedding = made("w", [embedded(c)]);
@@ -475,6 +652,24 @@ describe("by hand", () => {
   const raise = (...nodes: readonly ReturnType<typeof made>[]) => nodes.map((node) => ({ key: node.keyBytes, delta: 1 }));
   /** The reason a computation halts with, or what it gave. */
   const reasonOf = (work: Promise<unknown>): Promise<unknown> => work.then((given) => given, (error: unknown) => haltReason(error) ?? error);
+  /** What `refcountStep` gives for one block on `tables`: "no halt", or its halt's reason. */
+  const stepOf = (tables: NodeTables, roots: ReadonlyMap<string, number>, flush: Parameters<typeof refcountStep>[1], height: bigint): Promise<unknown> =>
+    refcountStep(stepTables(tables, roots), flush, { height, on: true }).then(
+      () => "no halt",
+      (error: unknown) => haltReason(error) ?? error,
+    );
+  /** The reason and the block a computation halts with, or "commits". */
+  const haltOf = (work: Promise<unknown>): Promise<unknown> =>
+    work.then(
+      () => "commits",
+      (error: unknown) => (haltReason(error) === undefined ? error : `${haltReason(error)} at ${String((error as { details: { height: bigint } }).details.height)}`),
+    );
+  /** The halt of `work`: its reason, block and key, and its message; none of them when it commits. */
+  const haltIn = async (work: Promise<unknown>) => {
+    const error = await work.then(() => undefined, (thrown: unknown) => thrown);
+    const details = (error as { details?: { height?: bigint; key?: string } } | undefined)?.details;
+    return { reason: haltReason(error), height: details?.height, key: details?.key, message: (error as Error | undefined)?.message ?? "" };
+  };
 
   it("the two forms of a node have one key", () => {
     expect(wEmbedding.key).toBe(wReferencing.key);
@@ -670,6 +865,17 @@ describe("by hand", () => {
     const halt = await reclaim.compute(runTables(NO_TABLES, new Map([[r1.key, 1]]))).catch((error: unknown) => error);
     expect(haltReason(halt)).toBe("unreached-node");
     expect((halt as { details: { height: bigint; key: string } }).details).toMatchObject({ height: 0n, key: `0x${orphan.key}` });
+    expect((halt as Error).message).toMatch(new RegExp(`0x${orphan.key}, a new node, and no key it persists reaches the node`));
+    // A stored node written in another form under nothing, at the run's first block: judged once the database says
+    // it is a row.
+    const rooted = over("rooted", wReferencing);
+    const stored: NodeTables = { rows: new Map([[rooted.key, rooted.children], [wReferencing.key, wReferencing.children], [c.key, c.children]]), refs: new Map([[wReferencing.key, 1], [c.key, 1]]), queue: new Set() };
+    const rewritten = new RunReclaim({ first: 4n, on: true });
+    rewritten.collect(4n, { inserts: flushed(wEmbedding), rootCounts: [] }, true);
+    rewritten.collect(5n, { inserts: [], rootCounts: [] }, true);
+    const unreachedRow = await rewritten.compute(runTables(stored, new Map([[rooted.key, 1]]))).catch((error: unknown) => error);
+    expect((unreachedRow as { details: { reason: string; height: bigint; key: string } }).details).toMatchObject({ reason: "unreached-node", height: 4n, key: `0x${wEmbedding.key}` });
+    expect((unreachedRow as Error).message).toMatch(new RegExp(`0x${wEmbedding.key}, with another child list than its row's, and no key it persists reaches the node`));
 
     // Written again unchanged, under nothing; then in its other form under a root, in the same run.
     const [s1, s2] = [over("s1", wReferencing), over("s2", wEmbedding)];
@@ -685,61 +891,100 @@ describe("by hand", () => {
     // Another child list for a key the run holds, under nothing: the block that writes it halts at once.
     const stray = new RunReclaim({ first: 0n, on: true });
     stray.collect(0n, { inserts: flushed(c, wReferencing, s1), rootCounts: raise(s1) }, true);
-    let reason: unknown;
+    let refused: unknown;
     try {
       stray.collect(1n, { inserts: flushed(wEmbedding), rootCounts: [] }, true);
     } catch (error) {
-      reason = haltReason(error);
+      refused = error;
     }
-    expect(reason).toBe("unreached-node");
+    expect(haltReason(refused)).toBe("unreached-node");
+    expect((refused as { details: { height: bigint; key: string } }).details).toMatchObject({ height: 1n, key: `0x${wEmbedding.key}` });
+    expect((refused as Error).message).toMatch(new RegExp(`the block writes 0x${wEmbedding.key} with another child list, and no key it persists reaches the node`));
+    // Left out (a negative control's seam), the check lets that block through.
+    const unchecked = new RunReclaim({ first: 0n, on: true, unchecked: "unreached-node" });
+    unchecked.collect(0n, { inserts: flushed(c, wReferencing, s1), rootCounts: raise(s1) }, true);
+    expect(() => unchecked.collect(1n, { inserts: flushed(wEmbedding), rootCounts: [] }, true)).not.toThrow();
   });
 
   it("a reference to a key stored nowhere, and a persisted key stored nowhere, halt with missing-reference", async () => {
     const [x, r] = [made("x"), over("r", made("x"))];
+    const nowhere = "which is neither stored when the run began nor flushed by the run";
     const referencing = new RunReclaim({ first: 0n, on: true });
     referencing.collect(0n, { inserts: flushed(r), rootCounts: raise(r) }, true);
-    expect(await reasonOf(referencing.compute(runTables(NO_TABLES, new Map([[r.key, 1]]))))).toBe("missing-reference");
+    const known = new KnownKeySet();
+    const referenced = await haltIn(referencing.compute(runTables(NO_TABLES, new Map([[r.key, 1]])), known));
+    expect(referenced).toMatchObject({ reason: "missing-reference", height: 0n, key: `0x${x.key}` });
+    expect(referenced.message).toContain(`0x${r.key}, which the block writes, references 0x${x.key}, ${nowhere}`);
+    // The set of keys known to be rows learns no key the read finds absent.
+    expect([known.has(keyText(x.keyBytes)), known.size]).toEqual([false, 0]);
     const persisting = new RunReclaim({ first: 0n, on: true });
     persisting.collect(0n, { inserts: [], rootCounts: raise(x) }, true);
-    expect(await reasonOf(persisting.compute(runTables(NO_TABLES, new Map([[x.key, 1]]))))).toBe("missing-reference");
-    // A reference of a list the run replaced is checked too: every list a block flushed is.
-    const [first, second] = [made("p", [ref(x)]), made("p", [embedded(x)])];
-    const top = over("top", first);
-    const replaced = new RunReclaim({ first: 0n, on: true });
-    replaced.collect(0n, { inserts: flushed(first, top), rootCounts: raise(top) }, true);
-    const again = over("again", second);
-    replaced.collect(1n, { inserts: flushed(second, again), rootCounts: raise(again) }, true);
-    expect(await reasonOf(replaced.compute(runTables(NO_TABLES, new Map([[top.key, 1], [again.key, 1]]))))).toBe("missing-reference");
+    const persisted = await haltIn(persisting.compute(runTables(NO_TABLES, new Map([[x.key, 1]]))));
+    expect(persisted).toMatchObject({ reason: "missing-reference", height: 0n, key: `0x${x.key}` });
+    expect(persisted.message).toContain(`the block persists 0x${x.key}, ${nowhere}`);
+    // A reference of a list the run replaced is checked too: every list a block flushed is. The halt names the key
+    // whose list it is, and the block of that list: the replaced one's, or the one that replaced it.
+    for (const [first, second, height] of [
+      [made("p", [ref(x)]), made("p", [embedded(x)]), 0n],
+      [made("p", [embedded(x)]), made("p", [ref(x)]), 1n],
+    ] as const) {
+      const top = over("top", first);
+      const replaced = new RunReclaim({ first: 0n, on: true });
+      replaced.collect(0n, { inserts: flushed(first, top), rootCounts: raise(top) }, true);
+      const again = over("again", second);
+      replaced.collect(1n, { inserts: flushed(second, again), rootCounts: raise(again) }, true);
+      const listed = await haltIn(replaced.compute(runTables(NO_TABLES, new Map([[top.key, 1], [again.key, 1]]))));
+      expect(listed).toMatchObject({ reason: "missing-reference", height, key: `0x${x.key}` });
+      expect(listed.message).toContain(`0x${first.key}, which the block writes, references 0x${x.key}, ${nowhere}`);
+    }
+    // A stored node written in another form whose list references a key stored nowhere.
+    const [vEmbedding, vReferencing] = [made("v", [embedded(x)]), made("v", [ref(x)])];
+    const [r0, r1] = [over("r0", vEmbedding), over("r1", vReferencing)];
+    const found: NodeTables = { rows: new Map([[r0.key, r0.children], [vEmbedding.key, vEmbedding.children]]), refs: new Map([[vEmbedding.key, 1]]), queue: new Set() };
+    const flush = { inserts: flushed(vReferencing, r1), rootCounts: raise(r1) };
+    expect(await stepOf(found, new Map([[r0.key, 1]]), flush, 1n)).toBe("missing-reference");
+    const rewriting = new RunReclaim({ first: 1n, on: true });
+    rewriting.collect(1n, flush, true);
+    const rewrote = await haltIn(rewriting.compute(runTables(found, new Map([[r0.key, 1], [r1.key, 1]]))));
+    expect(rewrote).toMatchObject({ reason: "missing-reference", height: 1n, key: `0x${x.key}` });
+    expect(rewrote.message).toContain(`0x${vReferencing.key}, which the block writes, references 0x${x.key}, ${nowhere}`);
   });
-
-  /** What `refcountStep` gives for one block on `tables`: "no halt", or its halt's reason. */
-  const stepOf = (tables: NodeTables, roots: ReadonlyMap<string, number>, flush: Parameters<typeof refcountStep>[1], height: bigint): Promise<unknown> =>
-    refcountStep(stepTables(tables, roots), flush, { height, on: true }).then(
-      () => "no halt",
-      (error: unknown) => haltReason(error) ?? error,
-    );
-  /** The reason and the block a computation halts with, or "commits". */
-  const haltOf = (work: Promise<unknown>): Promise<unknown> =>
-    work.then(
-      () => "commits",
-      (error: unknown) => (haltReason(error) === undefined ? error : `${haltReason(error)} at ${String((error as { details: { height: bigint } }).details.height)}`),
-    );
 
   it("a reference, or a persisted key, that only a later block of the run flushes halts the run at the block that needs it, as the per-block step halts that block", async () => {
     const x = made("x");
     const [r1, r2] = [over("r1", x), over("r2", x)];
     // Block 1 writes r1 over x and persists it; block 2 flushes x, writes r2 over it, persists r2 and releases r1.
     expect(await stepOf(NO_TABLES, new Map(), { inserts: flushed(r1), rootCounts: raise(r1) }, 1n)).toBe("missing-reference");
+    const later = "which is not stored when the run began, and first flushed by block 2";
     const referencing = new RunReclaim({ first: 1n, on: true });
     referencing.collect(1n, { inserts: flushed(r1), rootCounts: raise(r1) }, true);
     referencing.collect(2n, { inserts: flushed(x, r2), rootCounts: [...raise(r2), { key: r1.keyBytes, delta: -1 }] }, true);
-    expect(await haltOf(referencing.compute(runTables(NO_TABLES, new Map([[r2.key, 1]]))))).toBe("missing-reference at 1");
+    const referenced = await haltIn(referencing.compute(runTables(NO_TABLES, new Map([[r2.key, 1]]))));
+    expect(referenced).toMatchObject({ reason: "missing-reference", height: 1n, key: `0x${x.key}` });
+    expect(referenced.message).toContain(`0x${r1.key}, which the block writes, references 0x${x.key}, ${later}`);
     // Block 1 persists x, which block 2 first flushes, under r2.
     expect(await stepOf(NO_TABLES, new Map(), { inserts: [], rootCounts: raise(x) }, 1n)).toBe("missing-reference");
     const persisting = new RunReclaim({ first: 1n, on: true });
     persisting.collect(1n, { inserts: [], rootCounts: raise(x) }, true);
     persisting.collect(2n, { inserts: flushed(x, r2), rootCounts: raise(r2) }, true);
-    expect(await haltOf(persisting.compute(runTables(NO_TABLES, new Map([[x.key, 1], [r2.key, 1]]))))).toBe("missing-reference at 1");
+    const persisted = await haltIn(persisting.compute(runTables(NO_TABLES, new Map([[x.key, 1], [r2.key, 1]]))));
+    expect(persisted).toMatchObject({ reason: "missing-reference", height: 1n, key: `0x${x.key}` });
+    expect(persisted.message).toContain(`the block persists 0x${x.key}, ${later}`);
+    // Referenced at block 1, then flushed and persisted by block 2: the reference needs it first.
+    const raised = new RunReclaim({ first: 1n, on: true });
+    raised.collect(1n, { inserts: flushed(r1), rootCounts: raise(r1) }, true);
+    raised.collect(2n, { inserts: flushed(x), rootCounts: raise(x) }, true);
+    expect(await haltOf(raised.compute(runTables(NO_TABLES, new Map([[r1.key, 1], [x.key, 1]]))))).toBe("missing-reference at 1");
+    // Referenced by a key's list at block 1, and again by the list that replaces it at block 2, which flushes x: the
+    // first list needs it first.
+    const z = made("z");
+    const [p1, p2] = [made("p", [ref(x), embedded(z)]), made("p", [ref(x), ref(z)])];
+    const [top1, top2] = [over("top1", p1), over("top2", p2)];
+    expect(await stepOf(NO_TABLES, new Map(), { inserts: flushed(p1, top1), rootCounts: raise(top1) }, 1n)).toBe("missing-reference");
+    const relisted = new RunReclaim({ first: 1n, on: true });
+    relisted.collect(1n, { inserts: flushed(p1, top1), rootCounts: raise(top1) }, true);
+    relisted.collect(2n, { inserts: flushed(x, z, p2, top2), rootCounts: raise(top2) }, true);
+    expect(await haltOf(relisted.compute(runTables(NO_TABLES, new Map([[top1.key, 1], [top2.key, 1]]))))).toBe("missing-reference at 1");
     // Flushed by the block that references it, or by one before, it passes; so does a row the run found, which a
     // later block flushes again.
     const pairs: [NodeBatch, NodeBatch][] = [
@@ -781,6 +1026,12 @@ describe("by hand", () => {
     sound.collect(1n, { inserts: flushed(wEmbedding, r1), rootCounts: raise(r1) }, true);
     sound.collect(2n, { inserts: flushed(p), rootCounts: raise(p) }, true);
     expect(await haltOf(sound.compute(runTables({ ...found, refs: new Map([...found.refs, [c.key, 1]]), queue: new Set() }, new Map([...roots, [r1.key, 1], [p.key, 1]]))))).toBe("commits");
+    // With the count check left out (a negative control's seam), the cascade deletes c, queued with a count of 0 after
+    // the run, and the run halts at its last block for p's reference to it.
+    const unchecked = new RunReclaim({ first: 1n, on: true, unchecked: "negative-count" });
+    unchecked.collect(1n, { inserts: flushed(wEmbedding, r1), rootCounts: raise(r1) }, true);
+    unchecked.collect(2n, { inserts: flushed(p), rootCounts: raise(p) }, true);
+    expect(await haltOf(unchecked.compute(runTables(found, new Map([...roots, [r1.key, 1], [p.key, 1]]))))).toBe("missing-reference at 2");
   });
 
   it("of the blocks whose check fails, the first halts the run, a count before a reference at one block", async () => {
@@ -805,6 +1056,84 @@ describe("by hand", () => {
     expect(await compute({ count: 1n, reference: 1n })).toBe("negative-count at 1");
   });
 
+  it("of several references stored nowhere, the halt names the one the earliest block needs, at one block the first in byte order, and the node whose list references it", async () => {
+    const [y, x] = [made("y"), made("x")];
+    expect(y.key < x.key).toBe(true);
+    const nowhere = "which is neither stored when the run began nor flushed by the run";
+    // At one block, one list references both: y, as the per-block step names it.
+    const p = made("p", [ref(y), ref(x)]);
+    const top = over("top", p);
+    const flush = { inserts: flushed(p, top), rootCounts: raise(top) };
+    const step = await refcountStep(stepTables(NO_TABLES, new Map()), flush, { height: 0n, on: true }).catch((error: unknown) => error);
+    expect((step as { details: { reason: string; key: string } }).details).toMatchObject({ reason: "missing-reference", key: `0x${y.key}` });
+    const both = new RunReclaim({ first: 0n, on: true });
+    both.collect(0n, flush, true);
+    expect(await haltIn(both.compute(runTables(NO_TABLES, new Map([[top.key, 1]]))))).toMatchObject({ reason: "missing-reference", height: 0n, key: `0x${y.key}` });
+    // q references x at block 1; at block 2, p2 references y and p3 x. The halt is x's at block 1, through q, the
+    // last of the run's nodes in byte order: no other node's list at block 1 references x.
+    const [q, p2, p3] = [over("q", x), over("p2", y), over("p3", x)];
+    const [top1, top2] = [over("top1", q), over("top2", p2, p3)];
+    expect([top1, top2, p2, p3].every((node) => node.key < q.key)).toBe(true);
+    const two = new RunReclaim({ first: 1n, on: true });
+    two.collect(1n, { inserts: flushed(q, top1), rootCounts: raise(top1) }, true);
+    two.collect(2n, { inserts: flushed(p2, p3, top2), rootCounts: raise(top2) }, true);
+    const halt = await haltIn(two.compute(runTables(NO_TABLES, new Map([[top1.key, 1], [top2.key, 1]]))));
+    expect(halt).toMatchObject({ reason: "missing-reference", height: 1n, key: `0x${x.key}` });
+    expect(halt.message).toContain(`0x${q.key}, which the block writes, references 0x${x.key}, ${nowhere}`);
+  });
+
+  it("of several counts that fall below 0, the halt names the one at the earliest block, and at one block the first in byte order, as the per-block step names it", async () => {
+    // Tables that count y and x 0 though stored lists reference them, both queued.
+    const [y, x] = [made("y"), made("x")];
+    expect(y.key < x.key).toBe(true);
+    // At one block: u's list referencing both is replaced by one that embeds both.
+    const [u, uEmbedding] = [made("u", [ref(y), ref(x)]), made("u", [embedded(y), embedded(x)])];
+    const [r0, r1] = [over("r0", u), over("r1", uEmbedding)];
+    const found: NodeTables = { rows: new Map([r0, u, y, x].map((node) => [node.key, node.children])), refs: new Map([[u.key, 1]]), queue: new Set([y.key, x.key]) };
+    const flush = { inserts: flushed(uEmbedding, r1), rootCounts: raise(r1) };
+    const step = await refcountStep(stepTables(found, new Map([[r0.key, 1]])), flush, { height: 1n, on: true }).catch((error: unknown) => error);
+    expect((step as { details: { reason: string; key: string } }).details).toMatchObject({ reason: "negative-count", key: `0x${y.key}` });
+    const one = new RunReclaim({ first: 1n, on: true });
+    one.collect(1n, flush, true);
+    const tie = await haltIn(one.compute(runTables(found, new Map([[r0.key, 1], [r1.key, 1]]))));
+    expect(tie).toMatchObject({ reason: "negative-count", height: 1n, key: `0x${y.key}` });
+    expect(tie.message).toContain(`the reference count of 0x${y.key} would fall below 0`);
+    // At two blocks: u's list referencing x is replaced at block 1, v's referencing y at block 2.
+    const [ux, uxEmbedding, vy, vyEmbedding] = [made("u", [ref(x)]), made("u", [embedded(x)]), made("v", [ref(y)]), made("v", [embedded(y)])];
+    const [s0, s1, s2] = [over("s0", ux, vy), over("s1", uxEmbedding), over("s2", vyEmbedding)];
+    const tables: NodeTables = { rows: new Map([s0, ux, vy, y, x].map((node) => [node.key, node.children])), refs: new Map([[ux.key, 1], [vy.key, 1]]), queue: new Set([y.key, x.key]) };
+    const two = new RunReclaim({ first: 1n, on: true });
+    two.collect(1n, { inserts: flushed(uxEmbedding, s1), rootCounts: raise(s1) }, true);
+    two.collect(2n, { inserts: flushed(vyEmbedding, s2), rootCounts: raise(s2) }, true);
+    expect(await haltIn(two.compute(runTables(tables, new Map([[s0.key, 1], [s1.key, 1], [s2.key, 1]]))))).toMatchObject({ reason: "negative-count", height: 1n, key: `0x${x.key}` });
+  });
+
+  it("counts as kept by the last block's replaced lists only a node they alone keep: not one that block also releases, not one another list still references, and none without sweep", async () => {
+    // Stored: r0 over w, whose list references c and d; d is also a root. The block writes w in a form that references
+    // c and embeds d, under r1, and releases r0 and d: d is queued, released by the block.
+    const d = made("d");
+    const [w1, w2] = [made("w", [ref(c), ref(d)]), made("w", [ref(c), embedded(d)])];
+    const [r0, r1] = [over("r0", w1), over("r1", w2)];
+    const found: NodeTables = { rows: new Map([r0, w1, c, d].map((node) => [node.key, node.children])), refs: new Map([[w1.key, 1], [c.key, 1], [d.key, 1]]), queue: new Set() };
+    const released = { inserts: flushed(w2, r1), rootCounts: [...raise(r1), { key: r0.keyBytes, delta: -1 }, { key: d.keyBytes, delta: -1 }] };
+    const outcome = async (flush: NodeBatch, roots: ReadonlyMap<string, number>, on: boolean) => {
+      const reclaim = new RunReclaim({ first: 1n, on });
+      reclaim.collect(1n, flush, on);
+      return reclaim.compute(runTables(found, roots));
+    };
+    const both = await outcome(released, new Map([[r1.key, 1]]), true);
+    expect(both.net.queued.map(hex)).toEqual([d.key, r0.key].sort());
+    expect(both.keptByReplaced).toBe(0);
+    // d no root: the replaced list alone keeps it; c, which the new list references, is not queued.
+    const kept = { ...released, rootCounts: [...raise(r1), { key: r0.keyBytes, delta: -1 }] };
+    const roots = new Map([[r1.key, 1]]);
+    const one = await outcome(kept, roots, true);
+    expect([one.net.queued.map(hex), one.keptByReplaced]).toEqual([[d.key, r0.key].sort(), 1]);
+    // Without sweep nothing is deleted, so nothing is kept for it.
+    const off = await outcome(kept, roots, false);
+    expect([off.net.queued.map(hex), off.keptByReplaced]).toEqual([[d.key, r0.key].sort(), 0]);
+  });
+
   it("a count that would fall below 0 halts with negative-count", async () => {
     // Tables that hold a reference without its count: p references c, and c has no count.
     const p = over("p", c);
@@ -813,7 +1142,9 @@ describe("by hand", () => {
     const reclaim = new RunReclaim({ first: 8n, on: true });
     reclaim.collect(8n, { inserts: flushed(next), rootCounts: [...raise(next), { key: p.keyBytes, delta: -1 }] }, true);
     reclaim.collect(9n, { inserts: [], rootCounts: [] }, true);
-    expect(await reasonOf(reclaim.compute(runTables(found, new Map([[next.key, 1]]))))).toBe("negative-count");
+    const halt = await haltIn(reclaim.compute(runTables(found, new Map([[next.key, 1]]))));
+    expect(halt).toMatchObject({ reason: "negative-count", height: 9n, key: `0x${c.key}` });
+    expect(halt.message).toContain(`the reference count of 0x${c.key} would fall below 0`);
   });
 
   it("a reference to a key that the block's own cascade deletes halts with missing-reference, as the per-block step halts that block", async () => {
@@ -837,6 +1168,21 @@ describe("by hand", () => {
     sound.collect(1n, flush, true);
     const outcome = await sound.compute(runTables({ ...found, refs: new Map([[k.key, 1]]), queue: new Set([q.key]) }, new Map([[p.key, 1]])));
     expect(outcome.evict.map(hex)).toEqual([q.key]);
+    // The same when the list that references k is a stored node's, written in another form under a new root.
+    const [vEmbedding, vReferencing] = [made("v", [embedded(k)]), made("v", [ref(k)])];
+    const [r0, r1] = [over("r0", vEmbedding), over("r1", vReferencing)];
+    const stored: NodeTables = {
+      rows: new Map([[r0.key, r0.children], [vEmbedding.key, vEmbedding.children], ...found.rows]),
+      refs: new Map([[vEmbedding.key, 1]]),
+      queue: found.queue,
+    };
+    const rewrite = { inserts: flushed(vReferencing, r1), rootCounts: raise(r1) };
+    expect(await stepOf(stored, new Map([[r0.key, 1]]), rewrite, 1n)).toBe("missing-reference");
+    const rewriting = new RunReclaim({ first: 1n, on: true });
+    rewriting.collect(1n, rewrite, true);
+    const rewrote = await haltIn(rewriting.compute(runTables(stored, new Map([[r0.key, 1], [r1.key, 1]]))));
+    expect(rewrote).toMatchObject({ reason: "missing-reference", height: 1n, key: `0x${k.key}` });
+    expect(rewrote.message).toContain(`0x${vReferencing.key}, which the run writes, references 0x${k.key}, which the run deletes`);
   });
 
   it("a block with both a reference stored nowhere and a count its cascade takes below 0 halts with negative-count, as the per-block step names it", async () => {
@@ -871,12 +1217,48 @@ describe("by hand", () => {
     expect(await inRuns(blocks, { size: 4, feed: "per-block" })).toEqual([]);
     const reclaim = new RunReclaim({ first: 0n, on: true });
     for (const block of blocks) reclaim.collect(BigInt(block.height), flushOf(block.flushed), true);
-    const outcome = await reclaim.compute(runTables(NO_TABLES, (blocks[3] as ModelBlock).step.after.roots));
+    const reads = noReads();
+    const outcome = await reclaim.compute(runTables(NO_TABLES, (blocks[3] as ModelBlock).step.after.roots, reads));
     expect(outcome.evict.map(hex)).toEqual([states[0], states[1]].map((state) => (state as (typeof states)[number]).key).sort());
+    // The run's own nodes have their lists in memory: none is read.
+    expect(reads.children).toBe(0);
     expect(outcome.net.deleted).toEqual([]);
     expect(outcome.net.inserts.map((node) => hex(node.key))).toEqual([leafNode, states[2], states[3]].map((node) => (node as (typeof states)[number]).key).sort());
     expect(outcome.net.queued.map(hex)).toEqual([(states[2] as (typeof states)[number]).key]);
     expect(outcome.handed).toBe(5);
+  });
+
+  it("on damaged tables, as the per-block step: a queued key that is no row is deleted, and the net write's delete names it; with sweep off, a root count released for a key that is no row queues nothing", async () => {
+    const g = made("g");
+    // Queued, and no row.
+    const queued: NodeTables = { rows: new Map(), refs: new Map(), queue: new Set([g.key]) };
+    const empty = { inserts: [], rootCounts: [] };
+    const step = await refcountStep(stepTables(queued, new Map()), empty, { height: 1n, on: true });
+    expect(step.deleted.map(hex)).toEqual([g.key]);
+    const sweeping = new RunReclaim({ first: 1n, on: true });
+    sweeping.collect(1n, empty, true);
+    const outcome = await sweeping.compute(runTables(queued, new Map()));
+    expect([outcome.evict.map(hex), outcome.net.deleted.map(hex), outcome.net.unqueued.map(hex)]).toEqual([[g.key], [g.key], [g.key]]);
+    // The net write's delete affects no row: writeNet then halts with row-count-mismatch.
+    expect(applied(queued, outcome.net).problems).toEqual([`delete-nodes: ${g.key.slice(0, 12)} is no row`]);
+    // A root count of a key that is no row, released by a block that does not sweep.
+    const released = { inserts: [], rootCounts: [{ key: g.keyBytes, delta: -1 }] };
+    const stepOff = await refcountStep(stepTables(NO_TABLES, new Map([[g.key, 1]])), released, { height: 1n, on: false });
+    expect(stepOff.queued).toEqual([]);
+    const off = new RunReclaim({ first: 1n, on: false });
+    off.collect(1n, released, false);
+    expect((await off.compute(runTables(NO_TABLES, new Map()))).net.queued).toEqual([]);
+  });
+
+  it("the check of the queue after the run names the key left queued and the run's last block: a guard a build does not trip, tripped by a fault that cuts the cascade short", async () => {
+    // w over c persisted at block 0 and released at 1: the cascade deletes w, then c. Cut after its first round, it
+    // leaves c with no reference, queued, which no block released and no replaced list referenced.
+    const blocks = madeBlocks([{ inserts: [c, wReferencing], persist: [wReferencing] }, { inserts: [], release: [wReferencing] }, { inserts: [] }]);
+    const reclaim = new RunReclaim({ first: 0n, on: true, fault: "first-round-only" });
+    for (const block of blocks) reclaim.collect(BigInt(block.height), flushOf(block.flushed), true);
+    const halt = await haltIn(reclaim.compute(runTables(NO_TABLES, (blocks[2] as ModelBlock).step.after.roots)));
+    expect(halt).toMatchObject({ reason: "unexpected-queued", height: 2n, key: `0x${c.key}` });
+    expect(halt.message).toContain(`0x${c.key} is left stored with no reference and no root count`);
   });
 });
 
