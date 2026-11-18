@@ -19,7 +19,7 @@ import { core, entryOf, loggingModule, settle, startProcess, testBuild } from ".
  * The process raises the condition `database-retrying` or `node-retrying` (with the attempts and the height), waits
  * the back-off (1 s, doubling up to the process revision's `backoffCeilingMs`) and runs again:
  * - a height whose transaction was lost after its `on-compute` began is processed again from `on-compute`, keeping its
- *   items from before it (`recovery.test.ts`);
+ *   items from before it (`recovery.test.ts`), its `on-db-write` and `on-settle` again, and is stored once;
  * - any other failure runs the loop again from the cursor, whose callbacks it delivers again.
  *
  * The condition clears once a height commits or the loop finds nothing to process. A stop ends the wait at once. A
@@ -208,6 +208,52 @@ describe.each(PROCESS_BACKENDS)("retries on $name", (backend) => {
     // 3 again from on-compute: not fetched or parsed again, and the cursor's on-after-db-write (2) not re-delivered.
     expect(log).toEqual([...at(1), ...at(2), "w on-fetch@3", "w on-parse@3", "w on-compute@3", ...at(3).slice(2), ...at(4), ...at(5)]);
     expect(await cursorIn(db)).toBe(5);
+  }, 180_000);
+
+  it("a lost connection in on-settle of h is retried with database-retrying; h is processed again from on-compute, its on-db-write and on-settle again, and stored once", async () => {
+    const db = await backend.database();
+    const log: string[] = [];
+    const seen: ProcessStatus[] = [];
+    let handle!: ProcessHandle;
+    const base = loggingModule("w", log, ["on-fetch", "on-parse", "on-compute", "on-db-write", "on-settle", "on-after-db-write"]);
+    const w = loggingModule("w", log, [], {
+      ...base,
+      points: {
+        ...base.points,
+        async "on-settle"(p, run, writer) {
+          await base.points["on-settle"]?.(p, run, writer);
+          if (run.last !== 3n) return;
+          if (log.filter((line) => line === "w on-settle@3..3").length === 1) {
+            throw new UmbraError("connection-lost", "the writer's connection was lost in on-settle (the test's)");
+          }
+          seen.push(handle.status());
+        },
+      },
+    });
+    const source = new InMemoryBlockSource({ head: HEAD });
+    const started = start(db, [w], source);
+    handle = started.handle;
+    try {
+      expect(await settle(handle, source, HEAD)).toBe("waiting");
+      expect(handle.status()).toMatchObject({ state: "following", conditions: [], cursor: HEAD, reason: null });
+    } finally {
+      await handle.stop();
+    }
+    expect(seen.map((status) => status.conditions)).toEqual([[{ code: "database-retrying", attempts: 1, height: 3n }]]);
+    expect(started.lines[0]).toMatch(retryLine("processing", "database-retrying", 1));
+    expect(started.lines.slice(1)).toEqual(STOPPED_AT_HEAD);
+    const at = (height: number) =>
+      ["on-fetch", "on-parse", "on-compute", "on-db-write", "on-settle", "on-after-db-write"].map((p) =>
+        p === "on-settle" ? `w on-settle@${height}..${height}` : `w ${p}@${height}`,
+      );
+    // 3 again from on-compute: not fetched or parsed again; its on-db-write and on-settle once more.
+    expect(log).toEqual([...at(1), ...at(2), ...at(3).slice(0, 5), ...at(3).slice(2), ...at(4), ...at(5)]);
+    expect(await cursorIn(db)).toBe(5);
+    for (const table of ["rows", "settled"]) {
+      expect(await pairs(db, `SELECT height::int AS h, 0 AS v FROM w.${table} ORDER BY height`), table).toEqual(
+        [1, 2, 3, 4, 5].map((h) => [h, 0]),
+      );
+    }
   }, 180_000);
 
   it("the node client's own retries show node-retrying — its most attempts, at the height processed or waited for, none during startup — are logged, clear when it stops, and give way to the process's own node-retrying", async () => {
@@ -467,6 +513,58 @@ describe.each(PROCESS_BACKENDS)("retries on $name", (backend) => {
         [4, 2],
         [5, 2],
       ]);
+    }, 180_000);
+
+    it("the writer's connection terminated during on-settle of h: retried with database-retrying, h committed once, its settled row once", async () => {
+      const db = await backend.database();
+      const log: string[] = [];
+      const reached = signal();
+      const release = signal();
+      const seen: ProcessStatus[] = [];
+      let handle!: ProcessHandle;
+      let held = false;
+      const base = loggingModule("w", log, ["on-db-write", "on-settle", "on-after-db-write"]);
+      const w = loggingModule("w", log, [], {
+        ...base,
+        points: {
+          ...base.points,
+          async "on-settle"(p, run, writer) {
+            await base.points["on-settle"]?.(p, run, writer);
+            if (run.last !== 3n) return;
+            if (held) {
+              seen.push(handle.status());
+              return;
+            }
+            held = true;
+            reached.resolve();
+            await release.promise;
+            // A statement after the connection was terminated: the block transaction is lost here.
+            await writer.query("SELECT 1");
+          },
+        },
+      });
+      const source = new InMemoryBlockSource({ head: HEAD });
+      const started = start(db, [w], source);
+      handle = started.handle;
+      try {
+        await reached.promise;
+        await db.terminateWriter!();
+        release.resolve();
+        expect(await settle(handle, source, HEAD)).toBe("waiting");
+        expect(handle.status()).toMatchObject({ state: "following", conditions: [], cursor: HEAD, reason: null });
+      } finally {
+        await handle.stop();
+      }
+      expect(seen.map((status) => status.conditions)).toEqual([[{ code: "database-retrying", attempts: 1, height: 3n }]]);
+      expect(started.lines[0]).toMatch(retryLine("processing", "database-retrying", 1));
+      expect(started.lines.slice(1)).toEqual(STOPPED_AT_HEAD);
+      const at = (height: number) => [`w on-db-write@${height}`, `w on-settle@${height}..${height}`, `w on-after-db-write@${height}`];
+      expect(log).toEqual([...at(1), ...at(2), ...at(3).slice(0, 2), ...at(3), ...at(4), ...at(5)]);
+      for (const table of ["rows", "settled"]) {
+        expect(await pairs(db, `SELECT height::int AS h, 0 AS v FROM w.${table} ORDER BY height`), table).toEqual(
+          [1, 2, 3, 4, 5].map((h) => [h, 0]),
+        );
+      }
     }, 180_000);
 
     it("the writer's connection terminated during on-start-db: startup retried with database-retrying while starting", async () => {

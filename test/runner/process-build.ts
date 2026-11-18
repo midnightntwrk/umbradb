@@ -3,7 +3,7 @@ import { CORE_BLOCK_FETCH } from "../../src/backbone/core-block-fetch/index.js";
 import { CORE_CHAIN, coreChainStartDb } from "../../src/backbone/core-chain/index.js";
 import { coreEntry } from "../../src/config/entries.js";
 import type { HistoryOptions } from "../../src/config/history.js";
-import type { BlockContext, ModuleDeclaration, PointName } from "../../src/modules/declaration.js";
+import type { BlockContext, BlockRun, ModuleDeclaration, PointName } from "../../src/modules/declaration.js";
 import type { DeclarationSet } from "../../src/modules/validation.js";
 import { builtInLedgerTable } from "../../src/ledger/networks.js";
 import type { LedgerTable } from "../../src/ledger/version-table.js";
@@ -168,7 +168,11 @@ export function core(database: DatabaseParts, start = 1, rest: { readonly stop?:
   });
 }
 
-/** A module whose callbacks append `<id> <point>@<height>` to `log`, for the points given; `rest` as `defineModule`'s. */
+/**
+ * A module whose callbacks append `<id> <point>@<height>` to `log`, for the points given; `rest` as `defineModule`'s.
+ * Its `on-db-write` writes the block's row of `<schema>.rows`; its `on-settle`, logged `<id> on-settle@<first>..<last>`,
+ * writes the run's last height to `<schema>.settled`, a table it has only when it registers `on-settle`.
+ */
 export function loggingModule(
   id: string,
   log: string[],
@@ -176,26 +180,38 @@ export function loggingModule(
   rest: Partial<ModuleDeclaration> = {},
 ): ModuleDeclaration {
   const schema = id.replaceAll("-", "_");
+  const settles = points.includes("on-settle");
+  type Writer = { execute(sql: string, params: unknown[]): Promise<number> };
   const callbacks: Record<string, (...args: unknown[]) => Promise<void>> = {};
   for (const point of points) {
     callbacks[point] = async (_p: unknown, ...args: unknown[]) => {
+      if (point === "on-settle") {
+        const [run, w] = args as [BlockRun, Writer];
+        log.push(`${id} on-settle@${run.first}..${run.last}`);
+        await w.execute(`INSERT INTO ${schema}.settled (height) VALUES ($1)`, [run.last]);
+        return;
+      }
       const first = args[0] as { readonly height: bigint } | undefined;
       log.push(`${id} ${point}@${first?.height}`);
       if (point === "on-db-write") {
-        const [b, w] = args as [BlockContext, { execute(sql: string, params: unknown[]): Promise<number> }];
+        const [b, w] = args as [BlockContext, Writer];
         await w.execute(`INSERT INTO ${schema}.rows (height) VALUES ($1)`, [b.height]);
       }
     };
   }
+  const tables = settles ? ["rows", "settled"] : ["rows"];
   return {
     id,
     version: "1.0.0",
     side: "public",
     requires: ["block-header"],
-    provides: [{ name: `${id}-rows`, lifetimes: ["table"], table: { schema, tables: ["rows"], kind: "append-only" } }],
+    provides: [{ name: `${id}-rows`, lifetimes: ["table"], table: { schema, tables, kind: "append-only" } }],
     startsMidChain: true,
     configSchema: z.object({ pollMs: z.number().int().default(1).meta({ kind: "operational" }) }),
-    migrations: [{ id: "001", sql: `CREATE TABLE ${schema}.rows (height bigint PRIMARY KEY)` }],
+    migrations: [
+      { id: "001", sql: `CREATE TABLE ${schema}.rows (height bigint PRIMARY KEY)` },
+      ...(settles ? [{ id: "002", sql: `CREATE TABLE ${schema}.settled (height bigint PRIMARY KEY)` }] : []),
+    ],
     points: callbacks as ModuleDeclaration["points"],
     ...rest,
   };

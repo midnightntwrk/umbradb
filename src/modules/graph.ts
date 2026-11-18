@@ -41,9 +41,9 @@
  *
  * **Order.** In each range: the backbone parts present, in the fixed order {@link BACKBONE_ORDER}; then the other
  * active modules by Kahn's algorithm, picking among the ready modules the one whose id is smallest in UTF-8 bytes
- * ({@link utf8Order}). At `on-db-write`, `core-digest` runs last. Startup (each part's migrations and `on-start-db`)
- * runs every part of the database in a single order: the backbone, then Kahn's algorithm over the union of all ranges'
- * requirements.
+ * ({@link utf8Order}). At `on-db-write` and `on-settle`, `core-digest` runs last. Startup (each part's migrations and
+ * `on-start-db`) runs every part of the database in a single order: the backbone, then Kahn's algorithm over the union
+ * of all ranges' requirements.
  *
  * **Public items in a private process.** A private process's input may include the public core's `table` items with
  * their heights ({@link PublicItem}), read from the public database's configuration history. In each range, a public
@@ -68,7 +68,7 @@ import type { DeclarationOrigin, DeclarationSet } from "./validation.js";
 /**
  * The backbone parts' fixed order: the core process's parts, then the private process's, then `core-digest`, then the
  * admin endpoints' parts, which have no points. `core-digest` runs before every module at startup, so its tables exist
- * while modules migrate, and last at `on-db-write`.
+ * while modules migrate, and last at `on-db-write` and `on-settle`.
  */
 export const BACKBONE_ORDER: readonly string[] = Object.freeze([
   "core-chain",
@@ -81,7 +81,7 @@ export const BACKBONE_ORDER: readonly string[] = Object.freeze([
   "core-config",
 ]);
 
-/** The backbone part that runs last at `on-db-write`. */
+/** The backbone part that runs last at `on-db-write` and `on-settle`. */
 const LAST_AT_DB_WRITE = "core-digest";
 
 /** Heights `from` to `to`, both included; `to` null for no end. */

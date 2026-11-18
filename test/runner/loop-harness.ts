@@ -1,4 +1,5 @@
 import { CORE_BLOCK_COMMIT } from "../../src/backbone/core-block-commit/core-block-commit.js";
+import { CORE_DIGEST as DIGESTS } from "../../src/backbone/core-digest/core-digest.js";
 import { cursorHeight, readCursor } from "../../src/backbone/core-block-commit/sql.js";
 import type { BlockWriteHandle, Database, Transaction } from "../../src/db/api.js";
 import { startDatabase } from "../../src/db/migrate.js";
@@ -97,6 +98,12 @@ export const RUNNER_BACKENDS: readonly RunnerBackend[] = [postgresRunner(), pgli
  * row needs), the blocks table and `core-digest` (its schema, no points), in the backbone's fixed order.
  */
 export const LOOP_BACKBONE: readonly ModuleDeclaration[] = [CORE_CHAIN, blockFetchStandIn(), CORE_BLOCK_COMMIT, CORE_DIGEST];
+
+/**
+ * {@link LOOP_BACKBONE} with the real `core-digest` (`src/backbone/core-digest/`): every module table's changes captured
+ * and digested in each block, and checkpointed at the checkpoint heights.
+ */
+export const DIGEST_BACKBONE: readonly ModuleDeclaration[] = [CORE_CHAIN, blockFetchStandIn(), CORE_BLOCK_COMMIT, DIGESTS];
 
 /** A database started as the runner starts one, and what the loop is given. */
 export interface Started {

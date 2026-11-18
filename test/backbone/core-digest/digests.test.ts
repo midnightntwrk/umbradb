@@ -148,7 +148,7 @@ describe.each(BACKENDS)("core-digest's per-table digests and checkpoints, on $na
       ["digest-tables", "core_digest", ["tables"]],
       ["digest-checkpoints", "core_digest", ["checkpoints"]],
     ]);
-    expect(Object.keys(CORE_DIGEST.points)).toEqual(["on-db-write"]);
+    expect(Object.keys(CORE_DIGEST.points)).toEqual(["on-settle"]);
     expect(CORE_DIGEST.migrations).toEqual([...CORE_DIGEST_MIGRATIONS]);
   });
 

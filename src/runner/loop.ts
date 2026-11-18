@@ -480,6 +480,11 @@ export class FinalizedLoop {
   readonly #preparing = new Map<bigint, Activity>();
   /** The open block transaction ({@link blockTransaction}), settling when it has committed or rolled back. */
   #transaction: Promise<void> | undefined;
+  /**
+   * The `on-settle` schedule of each range this loop processed a block of, built at its first block: null when no part
+   * of the range declares the point, so its blocks skip it.
+   */
+  readonly #settleSchedules = new WeakMap<ResolvedRange, PointSchedule<"on-settle"> | null>();
 
   constructor(input: LoopInput) {
     this.input = input;
@@ -781,7 +786,7 @@ export class FinalizedLoop {
       const context = this.#context(run, part, run.items.visible());
       return writes.write(part.id, (w) => call(context, w));
     });
-    await this.settlePoint(run, writes);
+    if (this.#settleScheduleOf(run.range) !== null) await this.settlePoint(run, writes);
     await writes.end();
     this.#check();
     const cursor = await this.input.source.cursor(tx);
@@ -803,17 +808,29 @@ export class FinalizedLoop {
   /**
    * The `on-settle` point, inside the block transaction of `run`, after its last `on-db-write` callback and before the
    * cursor check: each callback in `on-db-write`'s order, with the run of heights it settles and a block write handle
-   * of `writes`. In this version a run is always one block, `{ first: h, last: h }`. When no part of the range declares
-   * the point, it returns at once: nothing is called or sent, and the slow-height window stays in `on-db-write`. While
-   * its callbacks run a slow-height report names `on-settle`, and `on-db-write` again for the cursor check and the
-   * `COMMIT`. A negative control's seam.
+   * of `writes`. In this version a run is always one block, `{ first: h, last: h }`. Its schedule is the range's, built
+   * once ({@link #settleScheduleOf}); in a range where no part declares the point, {@link write} does not call it, so a
+   * block schedules, sends and awaits nothing for it, and the slow-height window stays in `on-db-write`. While its
+   * callbacks run a slow-height report names `on-settle`, and `on-db-write` again for the cursor check and the `COMMIT`.
+   * A negative control's seam.
    */
   protected async settlePoint(run: HeightRun, writes: BlockWrites): Promise<void> {
-    const schedule = scheduleAt(run.range, "on-settle");
-    if (schedule.waves.length === 0) return;
+    const schedule = this.#settleScheduleOf(run.range);
+    if (schedule === null) return;
     const blocks: BlockRun = Object.freeze({ first: run.height, last: run.height });
     await this.#schedule(schedule, (part, call) => writes.write(part.id, (w) => call(blocks, w), "on-settle"));
     this.#enter("on-db-write");
+  }
+
+  /** The `on-settle` schedule of `range`, built at its first block and kept; null when no part of it declares the point. */
+  #settleScheduleOf(range: ResolvedRange): PointSchedule<"on-settle"> | null {
+    let schedule = this.#settleSchedules.get(range);
+    if (schedule === undefined) {
+      const built = scheduleAt(range, "on-settle");
+      schedule = built.waves.length === 0 ? null : built;
+      this.#settleSchedules.set(range, schedule);
+    }
+    return schedule;
   }
 
   /**

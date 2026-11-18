@@ -5,7 +5,7 @@ import { FinalizedLoop } from "../../src/runner/loop.js";
 import { LoopPauses, type PauseHold } from "../../src/runner/pause.js";
 import { declaration } from "../modules/declarations.js";
 import { entry } from "../modules/graph-fixtures.js";
-import { cursorOf, InMemoryBlockSource, loopInput, RUNNER_BACKENDS, startWith } from "./loop-harness.js";
+import { cursorOf, heightsIn, InMemoryBlockSource, loopInput, RUNNER_BACKENDS, startWith } from "./loop-harness.js";
 
 /**
  * The pause of the finalized loop between heights (`src/runner/pause.ts`, `src/runner/loop.ts`): the holds of
@@ -130,12 +130,21 @@ describe("LoopPauses: the holds of the pause between heights", () => {
 type Seen = string[];
 
 /** The points `rec` records. */
-const RECORDED: readonly PointName[] = ["on-finalized", "on-fetch", "on-parse", "on-compute", "on-db-write", "on-after-db-write"];
+const RECORDED: readonly PointName[] = [
+  "on-finalized",
+  "on-fetch",
+  "on-parse",
+  "on-compute",
+  "on-db-write",
+  "on-settle",
+  "on-after-db-write",
+];
 
 /**
  * Module `rec`: records each of its points (`<point>@<height>`) once its callback's work ended — at `on-finalized`,
- * `on-compute` and `on-after-db-write` after a statement on its read, at `on-db-write` after its row — and calls
- * `hooks[<point>@<height>]` there first (a test's hold asked for inside a height).
+ * `on-compute` and `on-after-db-write` after a statement on its read, at `on-db-write` after its row, at `on-settle`
+ * (named by the run's last height) after its row of `rec.settled` — and calls `hooks[<point>@<height>]` there first (a
+ * test's hold asked for inside a height).
  */
 function recorder(seen: Seen, hooks: Map<string, () => void>): ModuleDeclaration {
   const at = (point: PointName, height: bigint) => {
@@ -143,6 +152,11 @@ function recorder(seen: Seen, hooks: Map<string, () => void>): ModuleDeclaration
     seen.push(`${point}@${height}`);
   };
   return declaration("rec", {
+    provides: [{ name: "rec-rows", lifetimes: ["table"], table: { schema: "rec", tables: ["rows", "settled"], kind: "append-only" } }],
+    migrations: [
+      { id: "001", sql: "CREATE TABLE rec.rows (height bigint PRIMARY KEY)" },
+      { id: "002", sql: "CREATE TABLE rec.settled (height bigint PRIMARY KEY)" },
+    ],
     points: {
       async "on-finalized"(_p, head, read) {
         await read.query("SELECT 1");
@@ -161,6 +175,10 @@ function recorder(seen: Seen, hooks: Map<string, () => void>): ModuleDeclaration
       async "on-db-write"(_p, b, w) {
         await w.execute("INSERT INTO rec.rows (height) VALUES ($1)", [b.height]);
         at("on-db-write", b.height);
+      },
+      async "on-settle"(_p, run, w) {
+        await w.execute("INSERT INTO rec.settled (height) VALUES ($1)", [run.last]);
+        at("on-settle", run.last);
       },
       async "on-after-db-write"(_p, b, read) {
         await read.query("SELECT 1");
@@ -189,7 +207,7 @@ describe.each(RUNNER_BACKENDS)("the loop pauses between heights on $name", (back
   afterAll(() => backend.stop(), 60_000);
 
   it(
-    "a hold asked for at on-fetch, at on-compute or inside the block transaction is reached once that height " +
+    "a hold asked for at on-fetch, at on-compute or inside the block transaction (at on-db-write or on-settle) is reached once that height " +
       "committed and its later points ended, no transaction open; while waiting for the head at once; released, the " +
       "loop goes on, every height once",
     async () => {
@@ -198,14 +216,14 @@ describe.each(RUNNER_BACKENDS)("the loop pauses between heights on $name", (back
       const hooks = new Map<string, () => void>();
       const pauses = new LoopPauses();
       const holds: PauseHold[] = [];
-      for (const call of ["on-fetch@3", "on-compute@5", "on-db-write@7"]) hooks.set(call, () => holds.push(pauses.hold()));
+      for (const call of ["on-fetch@3", "on-compute@5", "on-db-write@7", "on-settle@9"]) hooks.set(call, () => holds.push(pauses.hold()));
       const started = await startWith(db, [recorder(seen, hooks)], [entry("rec", 1)]);
       const source = new InMemoryBlockSource({ head: 10n });
       const stop = new AbortController();
       const loop = new FinalizedLoop({ ...loopInput(started, source, stop), pause: pauses });
       const running = loop.run();
       try {
-        for (const [index, height] of [3n, 5n, 7n].entries()) {
+        for (const [index, height] of [3n, 5n, 7n, 9n].entries()) {
           while (holds[index] === undefined) await turns(1);
           const hold = holds[index] as PauseHold;
           await hold.reached;
@@ -242,6 +260,7 @@ describe.each(RUNNER_BACKENDS)("the loop pauses between heights on $name", (back
       expect(await running).toEqual({ kind: "signal" });
       expect(heightPoints(seen)).toEqual(eachHeightOnce(1n, 14n));
       expect(await cursorOf(db)).toBe(14n);
+      expect(await heightsIn(db, "rec.settled")).toEqual(Array.from({ length: 14 }, (_, index) => BigInt(index + 1)));
     },
     120_000,
   );

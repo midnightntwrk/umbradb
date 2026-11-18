@@ -6,6 +6,7 @@ import { type HistoryScript, historyScripts } from "./refcount-model.js";
 import {
   againstModel,
   applied,
+  flushOf,
   embedded,
   haltReason,
   inconsistencies,
@@ -15,9 +16,11 @@ import {
   type ModelBlock,
   modelBlocks,
   NO_TABLES,
+  outcomeProblems,
   ref,
   remadeAgainstModel,
   runTables,
+  tableDifferences,
 } from "./run-reclaim.js";
 
 /**
@@ -38,7 +41,7 @@ import {
  * | step 4, those roots as the ones read less the last block's change | `roots-read-as-before` | the state the last block releases is gone |
  * | step 4, the last block's protection only | `run-as-one-block` | `unexpected-queued`; without that check, rows the model deleted |
  * | step 4, what the last block's replaced lists referenced | `dropped-unprotected` | a row the model keeps is gone |
- * | a run made again when only those lists keep a node | kept as computed (the test helper's `remakes` false) | on histories in two forms the rows are not the model's |
+ * | a run made shorter while only those lists keep a node | kept as computed (the test helper's `remakes` false) | on histories in two forms the rows are not the model's |
  * | step 5 | `old-queue-only` | `unexpected-queued`; without that check, rows the model deleted |
  * | step 6 | `first-round-only`, `referenced-queued-deleted` | `unexpected-queued`; `missing-reference` (a list the run writes references the deleted key), and without that check a row the model keeps is gone |
  * | step 7 | each check left out, under a fault only it finds | a count of -1 reaches the net write; the nodes a cut cascade leaves are stored; a written list over a deleted key breaks closure (with `missing-reference`) |
@@ -281,7 +284,7 @@ describe("negative controls: a fault in the run computation", () => {
       fc.asyncProperty(twoForms, async (script) => {
         const blocks = modelBlocks(script);
         for (const size of [2, 3, 7]) {
-          const found = await remadeAgainstModel(blocks, size, { runs: 0, remade: 0, kept: 0, replaced: 0 }, false);
+          const found = await remadeAgainstModel(blocks, size, { runs: 0, remade: 0, kept: 0, replaced: 0, longest: 0, oneBlockKept: 0 }, false);
           if (found.length > 0) throw new Error(found.join("\n"));
         }
       }),
@@ -317,6 +320,24 @@ describe("negative controls: a fault in the run computation", () => {
     );
     expect(cut.failed, String(cut.errorInstance)).toBe(false);
   }, 600_000);
+
+  it("a net write whose inserted payload is another node's is found by the comparison every run's outcome goes through", async () => {
+    const leafNode = made("leaf");
+    const blocks = madeBlocks([{ inserts: [leafNode, made("s0", [ref(leafNode)])], persist: [made("s0", [ref(leafNode)])] }]);
+    const reclaim = new RunReclaim({ first: 0n, on: true });
+    reclaim.collect(0n, flushOf((blocks[0] as ModelBlock).flushed), true);
+    const outcome = await reclaim.compute(runTables(NO_TABLES, (blocks[0] as ModelBlock).step.after.roots));
+    const after = applied(NO_TABLES, outcome.net).tables;
+    expect(outcomeProblems(NO_TABLES, after, outcome, true)).toEqual([]);
+    // The two inserted nodes' payloads swapped: keys and child lists are unchanged, so only the payload check sees it.
+    const [one, two] = outcome.net.inserts as [(typeof outcome.net.inserts)[number], (typeof outcome.net.inserts)[number]];
+    const swapped = { ...outcome, net: { ...outcome.net, inserts: [{ ...one, data: two.data }, { ...two, data: one.data }] } };
+    expect(tableDifferences(applied(NO_TABLES, swapped.net).tables, (blocks[0] as ModelBlock).step.after)).toEqual([]);
+    expect(outcomeProblems(NO_TABLES, after, swapped, true)).toEqual([
+      `the inserted ${hex(one.key).slice(0, 12)} carries another node's payload`,
+      `the inserted ${hex(two.key).slice(0, 12)} carries another node's payload`,
+    ]);
+  });
 
   it("gives every key back as its own bytes under a fault too", async () => {
     // The seams change what is computed, not how keys leave: a control's deleted keys are still plain keys.

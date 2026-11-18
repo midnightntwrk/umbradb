@@ -31,6 +31,7 @@ import {
   runsOf,
   runTables,
   type Seen,
+  stepped,
   stepTables,
   tableDifferences,
   withChanges,
@@ -47,8 +48,8 @@ import {
  *   for every block of every generated history that follows the ledger package's flush rule, rewrites included; a
  *   block that does not follow it halts with `unreached-node`.
  * - **T3.** Histories whose nodes take two forms, in longer runs: the tables are sound at every run's end and hold the
- *   node set the roots of the last two heights give; and, each run made again without a last block whose replaced
- *   lists alone keep a node, the model's tables in bytes.
+ *   node set the roots of the last two heights give; and, each run made shorter one block at a time while its last
+ *   block's replaced lists alone keep a node and it has more than one block, the model's tables in bytes.
  * - **T4.** A run that does not sweep deletes nothing and does not read the queue whole; a history whose `sweep`
  *   changes is the model's when a run ends at each change, and the record refuses a block of another setting.
  * - **By hand:** the cases a rule turns on, each a few blocks: the last child list written wins; a key that a list
@@ -281,16 +282,17 @@ describe("T3: histories in two forms, in longer runs", () => {
   }
 });
 
-describe("T3: histories in two forms, each run made again without a last block whose replaced lists alone keep a node", () => {
+describe("T3: histories in two forms, each run made shorter while its last block's replaced lists alone keep a node", () => {
   for (const [name, histories] of [
     ["as drawn", historyScripts({ oneForm: false, flushRule: true })],
     [`sweeping throughout, up to ${LONG} blocks`, historyScripts({ oneForm: false, flushRule: true, maxBlocks: LONG }).map(sweeping)],
   ] as const) {
     it(`${name}: the model's tables in bytes at every run's end, in runs of ${SIZES.filter((size) => size > 1).join(", ")} (seed ${SEED}, ${RUNS} runs)`, async () => {
       // The flushes are the model's own (a package told of every block's deletions); a run whose last block's
-      // replaced lists alone keep a node is made again without that block.
+      // replaced lists alone keep a node is computed again without that block, as many times as that takes, down to
+      // one block.
       const sizes = SIZES.filter((size) => size > 1);
-      const seen = new Map(sizes.map((size) => [size, { runs: 0, remade: 0, kept: 0, replaced: 0 } as Remade] as const));
+      const seen = new Map(sizes.map((size) => [size, { runs: 0, remade: 0, kept: 0, replaced: 0, longest: 0, oneBlockKept: 0 } as Remade] as const));
       await fc.assert(
         fc.asyncProperty(histories, async (script) => {
           const blocks = modelBlocks(script);
@@ -300,8 +302,12 @@ describe("T3: histories in two forms, each run made again without a last block w
       );
       for (const size of sizes) {
         const of = seen.get(size) as Remade;
-        // Not vacuous: runs are made again, rows are written over with another child list.
+        // Not vacuous: runs are made shorter, rows are written over with another child list.
         expect(of.remade, `runs of ${size}`).toBeGreaterThan(20);
+        // One run is made shorter more than once where it can be, and runs of one block are committed with a node
+        // their block's replaced lists alone keep: the procedure's both ends are reached.
+        if (size >= 3) expect(of.longest, `runs of ${size}`).toBeGreaterThanOrEqual(2);
+        expect(of.oneBlockKept, `runs of ${size}`).toBeGreaterThan(0);
         if (size <= 7) expect(of.replaced, `runs of ${size}`).toBeGreaterThan(50);
       }
     }, 900_000);
@@ -542,6 +548,52 @@ describe("the run's record and its reads", () => {
     expect([known.has("a"), known.has("b"), known.size]).toEqual([false, true, 1]);
   });
 
+  it("hands over many replacements of one key's list with work that grows with them, not with their square", async () => {
+    // One parent flushed in every block, its list referencing and embedding a child by turns, its root count raised
+    // at every block; the child persisted once.
+    const blockCount = 2_000;
+    const child = made("child");
+    const [referencing, embedding] = [made("parent", [ref(child)]), made("parent", [embedded(child)])];
+    const blocks = madeBlocks(
+      Array.from({ length: blockCount }, (_, height) =>
+        height === 0 ? { inserts: [child, referencing], persist: [child, referencing] } : { inserts: [height % 2 === 1 ? embedding : referencing], persist: [referencing] },
+      ),
+    );
+    const reclaim = new RunReclaim({ first: 0n, on: true });
+    for (const block of blocks) reclaim.collect(BigInt(block.height), flushOf(block.flushed), true);
+    // One entry per replaced list.
+    expect(reclaim.historyWrites).toBe(blockCount - 1);
+    const last = blocks.at(-1) as ModelBlock;
+    const outcome = await reclaim.compute(runTables(NO_TABLES, last.step.after.roots));
+    expect(tableDifferences(applied(NO_TABLES, outcome.net).tables, last.step.after)).toEqual([]);
+    expect([outcome.newNodes, outcome.handed]).toEqual([2, 2]);
+  });
+
+  it("gives back no inserted node's key as a view into a buffer it was given", async () => {
+    // Each key handed over is 32 bytes inside a 4,096-byte buffer, as a driver's or a package's pool would give it.
+    const viewOf = (key: Uint8Array): Uint8Array => {
+      const pool = new Uint8Array(4_096);
+      pool.set(key, 1_000);
+      return pool.subarray(1_000, 1_032);
+    };
+    const script = fc.sample(historyScripts({ oneForm: true }), { seed: SEED + 1, numRuns: 30 }).find((sample) => sample.blocks.length >= 15) as HistoryScript;
+    const blocks = modelBlocks({ ...script, blocks: script.blocks.map((block) => ({ ...block, on: true })) });
+    const last = blocks.at(-1) as ModelBlock;
+    const reclaim = new RunReclaim({ first: 0n, on: true });
+    for (const block of blocks) {
+      const flush = flushOf(block.flushed);
+      reclaim.collect(
+        BigInt(block.height),
+        { inserts: flush.inserts.map((node) => ({ ...node, key: viewOf(node.key) })), rootCounts: flush.rootCounts.map((change) => ({ ...change, key: viewOf(change.key) })) },
+        true,
+      );
+    }
+    const outcome = await reclaim.compute(runTables(NO_TABLES, last.step.after.roots));
+    expect(outcome.net.inserts.length).toBeGreaterThan(0);
+    for (const node of outcome.net.inserts) expect([node.key.byteOffset, node.key.buffer.byteLength]).toEqual([0, 32]);
+    expect(tableDifferences(applied(NO_TABLES, outcome.net).tables, last.step.after)).toEqual([]);
+  });
+
   it("gives back no key as a view into a buffer it was given", async () => {
     const script = fc.sample(historyScripts({ oneForm: true }), { seed: SEED + 1, numRuns: 30 }).find((sample) => sample.blocks.length >= 15) as HistoryScript;
     const blocks = modelBlocks({ ...script, blocks: script.blocks.map((block) => ({ ...block, on: true })) });
@@ -673,6 +725,54 @@ describe("by hand", () => {
     for (const size of [1, 2, 3, 4]) expect(await inRuns(blocks, { size, feed: "per-block" }), `runs of ${size}`).toEqual([]);
   });
 
+  it("one block taken off is not always enough: a run is made shorter until its last block's replaced lists alone keep no node, or one block remains, and then holds the per-block step's tables", async () => {
+    // A over x and B over y, both persisted; block 1 releases both; the per-block step deletes A, B, x and y at 2;
+    // blocks 3 and 4 write A and B again in their other forms (x and y embedded) and persist them.
+    const [x, y] = [made("x"), made("y")];
+    const [aRef, aEmb, bRef, bEmb] = [made("A", [ref(x)]), made("A", [embedded(x)]), made("B", [ref(y)]), made("B", [embedded(y)])];
+    const blocks = madeBlocks([
+      { inserts: [x, aRef, y, bRef], persist: [aRef, bRef] },
+      { inserts: [], release: [aRef, bRef] },
+      { inserts: [] },
+      { inserts: [aEmb], persist: [aEmb] },
+      { inserts: [bEmb], persist: [bEmb] },
+    ]);
+    // The per-block step of src/, applied block by block, is the model at every block.
+    const steps = await stepped(blocks);
+    const at = (height: number) => steps[height] as (typeof steps)[number];
+    for (const block of blocks) expect(tableDifferences(at(block.height).tables, block.step.after), `block ${block.height}`).toEqual([]);
+    expect([...at(2).tables.rows.keys()]).toEqual([]);
+    const runOf = async (first: number, last: number) => {
+      const reclaim = new RunReclaim({ first: BigInt(first), on: true });
+      for (const block of blocks.slice(first, last + 1)) reclaim.collect(BigInt(block.height), flushOf(block.flushed), true);
+      return reclaim.compute(runTables(at(first - 1).tables, at(last).roots));
+    };
+    const extra = (key: string) => [
+      `nodes differs: 1 rows the model lacks (${key.slice(0, 12)}), 0 it has and these lack ()`,
+      `unreferenced differs: 1 rows the model lacks (${key.slice(0, 12)}), 0 it has and these lack ()`,
+    ];
+    // 1 to 4: block 4 replaces the list B's row holds, so y, which only that list referenced, is kept and queued.
+    const four = await runOf(1, 4);
+    expect(four.keptByReplaced).toBe(1);
+    expect(tableDifferences(applied(at(0).tables, four.net).tables, at(4).tables)).toEqual(extra(y.key));
+    // 1 to 3, one block off: block 3 replaces the list A's row holds, and x is kept the same way.
+    const three = await runOf(1, 3);
+    expect(three.keptByReplaced).toBe(1);
+    expect(tableDifferences(applied(at(0).tables, three.net).tables, at(3).tables)).toEqual(extra(x.key));
+    // 1 to 2, a second block off: nothing is replaced, and the tables are the step's.
+    const two = await runOf(1, 2);
+    expect(two.keptByReplaced).toBe(0);
+    expect(tableDifferences(applied(at(0).tables, two.net).tables, at(2).tables)).toEqual([]);
+    // The blocks taken off open the next run, from the step's tables after 2: A and B are new there.
+    const rest = await runOf(3, 4);
+    expect(rest.keptByReplaced).toBe(0);
+    expect(tableDifferences(applied(at(2).tables, rest.net).tables, at(4).tables)).toEqual([]);
+    // The test helper's procedure from block 0, in runs of 5: the first run is made shorter twice, then 3 to 4.
+    const seen: Remade = { runs: 0, remade: 0, kept: 0, replaced: 0, longest: 0, oneBlockKept: 0 };
+    expect(await remadeAgainstModel(blocks, 5, seen)).toEqual([]);
+    expect([seen.runs, seen.remade, seen.longest]).toEqual([2, 2, 2]);
+  });
+
   it("a node a run's last block writes in another form, after a block of the run released what reached it, keeps what only its old list referenced; the run made again without that block stores the model's tables", async () => {
     const [r0, r3] = [over("r0", wReferencing), over("r3", wEmbedding)];
     const blocks = madeBlocks([
@@ -696,9 +796,9 @@ describe("by hand", () => {
       `nodes differs: 1 rows the model lacks (${c.key.slice(0, 12)}), 0 it has and these lack ()`,
       `unreferenced differs: 1 rows the model lacks (${c.key.slice(0, 12)}), 0 it has and these lack ()`,
     ]);
-    // Made again without that block, every run stores the model's tables; the runs ending at 3 are made again.
+    // Made shorter, every run stores the model's tables; the runs ending at 3 are made shorter once.
     for (const [size, remade] of [[2, 1], [3, 0], [4, 1], [6, 0]] as const) {
-      const seen: Remade = { runs: 0, remade: 0, kept: 0, replaced: 0 };
+      const seen: Remade = { runs: 0, remade: 0, kept: 0, replaced: 0, longest: 0, oneBlockKept: 0 };
       expect(await remadeAgainstModel(blocks, size, seen), `runs of ${size}`).toEqual([]);
       expect(seen.remade, `runs of ${size}`).toBe(remade);
     }

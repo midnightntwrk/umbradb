@@ -278,11 +278,12 @@ export function directPublic(db: () => ReadOnlyDatabase): PublicDatabase {
 
 /** One row a private test module wrote, and how its `on-fetch` read public data at that height. */
 export interface PrivateSeen {
-  readonly point: "on-fetch" | "on-compute" | "on-db-write" | "on-after-db-write";
+  readonly point: "on-fetch" | "on-compute" | "on-db-write" | "on-settle" | "on-after-db-write";
+  /** The block's height; at `on-settle` the run's last. */
   readonly height: bigint;
   /**
    * `on-fetch`: the committed height of its read of public data; `on-compute` and `on-after-db-write`: of its read of
-   * the private database.
+   * the private database; `on-settle`: its block write handle's (the private cursor before the block).
    */
   readonly readHeight?: bigint | null;
 }

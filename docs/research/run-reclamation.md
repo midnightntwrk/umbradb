@@ -34,8 +34,10 @@ The per-block step's rules 1 to 8 are those of `refcount-step.ts`'s module comme
   bounded by what the run flushed and by what it deletes (section 4).
 - **What it gives.** For a run of one block, the per-block step's tables (section 4.3, Theorem 3). With the package's
   flush rule, the tables after a longer run are byte for byte the per-block step's for the same flushes, unless a
-  node is left stored only because a child list the run's last block replaced referenced it; the same run made again
-  without its last block meets that condition (Theorem 4). Where two runs' packages flush a key in different forms,
+  node is left stored only because a child list the run's last block replaced referenced it (Theorem 4). Such a run
+  is computed again one block shorter, as many times as that takes: it ends at a run that keeps no such node or at
+  one block, and either way holds the per-block step's tables (Theorem 5). One block off is not always enough.
+  Where two runs' packages flush a key in different forms,
   the tables are consistent and hold the same node set, and their bytes can differ, as they already can between two
   per-block runs whose packages held different nodes (section 3.9). Section 4.9 lists where a run of one block still
   differs from the step: on damaged tables, on blocks that break the flush rule, and in the words of a halt.
@@ -292,8 +294,10 @@ The theorems below take R(b − 1) and R(b) as inputs; only where each comes fro
 2. **Count changes.** Plus one per reference in B's lists of Nb ∪ Wb; minus one per reference in the stored lists
    of Wb. (Rules 2 and 3, once for the run.)
 3. **Check what was flushed, block by block.** Every reference of every child list a block h flushed (the lists
-   replaced since included), and every key h raised, is stored by h: a row when the run began, or a key of B that h
-   or a block before it flushed. Else the run halts with `missing-reference`, naming the first such block, as the
+   replaced since included), but a key's first list in the run when it is the row's own, and every key h raised, is
+   stored by h: a row when the run began, or a key of B that h or a block before it flushed. (A list that is the
+   row's own is one the per-block step writes again unchanged, and checks nothing of; with I1 its references are
+   rows.) Else the run halts with `missing-reference`, naming the first such block, as the
    per-block step halts that block. **And each block's counts:** a key's count when the run began, plus the
    references of the lists the blocks up to h flushed, less those of the lists they replaced (the database's at a
    key's first flush, the run's own at each later one), is not below 0 at any h; else the run halts with
@@ -308,9 +312,12 @@ The theorems below take R(b − 1) and R(b) as inputs; only where each comes fro
    its new nodes: P1 makes them redundant.)
 5. **Candidates** (`sweep` on): the whole queue as the run found it; T; Nb; the keys whose count change is below 0.
    Their counts are read: whether a row, C(a − 1, k), R(b, k). A key of Nb outside T has none of the three.
-6. **The cascade**, as rule 5: in rounds, every candidate that is in U, not in Pb, and whose count C(a − 1, k) plus
-   its change is 0 is deleted; each reference of its list in U subtracts 1 and makes its key a candidate, whose
-   counts are read once its change is below 0; until a round deletes none. D is the deleted keys.
+6. **The cascade**, as rule 5: in rounds, every candidate that is not in Pb and whose count C(a − 1, k) plus its
+   change is 0 is deleted; each reference of its list subtracts 1 and makes its key a candidate, whose counts are
+   read once its change is below 0; until a round deletes none. D is the deleted keys. On tables with I1 to I4 every
+   candidate is in U; a candidate outside it (a queued key that is no row, a key with a count and no row) is deleted
+   as rule 5 deletes it, and the net write's delete of its row halts the run (step 9), as `writeRefcount`'s halts the
+   block.
 7. **Checks before anything is written.** No count below 0 (`negative-count`). Then a missing reference of the last
    block held in step 3 (`missing-reference`). No list of a node of Nb ∪ Wb that is kept references a key of D
    (`missing-reference`, as the per-block step requires every reference of a list the block writes to be a row
@@ -318,10 +325,11 @@ The theorems below take R(b − 1) and R(b) as inputs; only where each comes fro
 8. **The queue after.** Membership is "in U, not deleted, count 0, R(b, k) = 0", evaluated for the queue the run
    found, Nb, the keys with a count change and T. (Rule 7.)
 9. **The net write** (`NetWrite`): B's nodes of Nb ∪ Wb that are not deleted; each key's count change, and how many
-   of those keys keep a count above 0; the keys leaving and entering the queue; the deleted keys that are rows.
+   of those keys keep a count above 0; the keys leaving and entering the queue; the deleted keys but the nodes of B
+   that are no row: the rows, and any key outside U, whose delete affects no row (`row-count-mismatch`).
 10. **The deleted keys:** D, rows or not (`RunOutcome.evict`).
 11. **What only the last block's replaced lists keep:** the keys of drop(b) left queued, with no root count after
-    b − 1 (`keptByReplaced`; Theorem 4).
+    b − 1 (`keptByReplaced`; Theorems 4 and 5).
 
 ### 4.3 Why it gives the per-block tables
 
@@ -377,7 +385,7 @@ step's (Corollary 3), and **for a run of one block they are the per-block step's
 | P1, one child list per key | equal bytes, any run length (Theorem 2) |
 | P1, lists replaced, a run of one block | equal bytes (Theorem 3) |
 | P1, lists replaced, a longer run, no node kept by the last block's replaced lists alone (`keptByReplaced` 0) | equal bytes (Theorem 4) |
-| P1, lists replaced, a longer run, a node kept by them alone | I1 to I4, the same node set, the same `root_counts`, and rows more, queued, that the per-block step keeps only if it still stored the replaced list's node at b − 1. The same run made again without its last block meets Theorem 4 |
+| P1, lists replaced, a longer run, a node kept by them alone | I1 to I4, the same node set, the same `root_counts`, and rows more, queued, that the per-block step keeps only if it still stored the replaced list's node at b − 1. Computed again one block shorter until no such node is kept or one block remains, equal bytes (Theorem 5) |
 | `sweep` off for the whole run | equal bytes: neither deletes, so the package flushes the same nodes in both, and steps 1, 2 and 8 are rules 1, 2, 3, 6 and 7 summed |
 | P1 broken by a block | the run halts (`unreached-node`); the per-block step would keep the node one block |
 
@@ -404,9 +412,35 @@ Theorem 2 is the case where no list is replaced. Without the assumption the run 
 only a replaced list referenced. Whether the per-block step keeps them too depends on whether it still stored the
 replaced list's node after b − 1, that is on S(b − 1), which the run form does not compute: it does where the node
 was stored there (a rewrite in both), and does not where a block of the run had deleted it (the per-block step then
-takes the last block's write for a new node). A run of more than one block whose `keptByReplaced` is above 0, made
-again up to the block before, with that block opening the next run where its replacement is not the last block's,
-meets Theorem 4 at every run's end.
+takes the last block's write for a new node).
+
+**One block off is not always enough.** A over x and B over y are stored and persisted; block 1 releases both; the
+per-block step deletes A, B, x and y at block 2; block 3 writes A again with x embedded and persists it, block 4 the
+same for B and y. The run of blocks 1 to 4 finds B's row with its old list, which block 4 replaces: y is kept,
+queued (`keptByReplaced` 1). The run of 1 to 3 finds A's row the same way, which block 3 replaces: x is kept
+(`keptByReplaced` 1 again). The run of 1 to 2 replaces nothing. Each block taken off can make the new last block
+the last replacement of another key.
+
+**Theorem 5 (a run made shorter).** Assume I1 to I4 after a − 1, A0, P1 for every block and the same flushes in
+both. Compute the run of blocks a to b; while its `keptByReplaced` is above 0 and it holds more than one block,
+compute it again without its last block. The run of a to b* this stops at holds the per-block step's `nodes`,
+`ref_counts` and `unreferenced` after b* in bytes; the blocks b* + 1 to b open the next run, from those tables, and
+every run's end, run after run, holds the per-block step's tables.
+
+- It stops: each turn takes one block off, and a run of one block is not computed again. So it computes a run at
+  most b − a + 1 times.
+- Where it stops, either `keptByReplaced` is 0 and the run has more than one block, or the run is the one block a.
+  In the first case, with `sweep` on, Theorem 4 gives the per-block step's tables after b*; with `sweep` off
+  `keptByReplaced` is always 0 and the run's bytes are equal (the table above). In the second case Theorem 3 gives
+  them, whatever `keptByReplaced` is; with `sweep` off, the table above again.
+- Both theorems ask of the tables after a − 1 only I1 to I4 (and A0), and of the blocks a to b* only P1 and the same
+  flushes. The tables after b* are the per-block step's, which have I1 to I4 (the claim of 3.1), and the next run's
+  blocks are the same flushes; so the next run starts where the theorems apply again, and by induction over the
+  runs every run's end holds the per-block step's tables.
+
+The cost of the procedure: a run of k blocks can be computed up to k times, each time over its blocks less the ones
+taken off. How often a real chain needs a second computation is not measured here; on the generated histories in
+two forms, one run is made shorter up to 3 times (T3).
 
 Theorem 4 is about the same flushes. A package told of deletions at every block can flush a node again where one
 told of them only at a run's end, which still holds it, does not; when the package spells it differently the second
@@ -418,9 +452,12 @@ one told at a run's end only, the tables are the model's at every run's end (T1)
 `refcountStep`'s outputs on every generated block that follows the flush rule, rewrites included, and halts with
 `unreached-node` on every other (T2). On generated histories in two forms under the flush rule (T3): flushed by a
 package told of deletions at a run's end only, the tables are sound at every run's end and hold the node set of the
-roots of the last two heights; flushed as the model flushes them, with each run that fails Theorem 4's assumption
-made again without its last block, they are the model's in bytes at every run's end, in runs of 2, 3, 7 and 1,000.
-Kept as computed instead (a negative control), some histories store rows more, queued.
+roots of the last two heights; flushed as the model flushes them, with each run made shorter as Theorem 5 states,
+they are the model's in bytes at every run's end, in runs of 2, 3, 7 and 1,000, where some runs are made shorter
+two and three times and some runs of one block are committed with a node kept by their block's replaced lists.
+Kept as computed instead (a negative control), some histories store rows more, queued. By hand, the history above:
+the runs of 1 to 4 and of 1 to 3 each keep one node the per-block step (`refcountStep` applied block by block) does
+not, the run of 1 to 2 and the run of 3 to 4 after it hold the step's tables.
 
 ### 4.4 The reads, and what bounds them
 
@@ -431,7 +468,7 @@ reads of the step, `missingKeys` and `queuedKeys`), sent in statements of at mos
 | Step | Read | Keys |
 |---|---|---|
 | 1 | which keys of B are rows; which hold another list, with it (`rows`, `changed`) | the distinct nodes the run flushed |
-| 3 | which referenced keys are no row (`missing`), less the keys of B and the keys known to be rows (`KnownKeys`) | the distinct references of the run's lists, and its rising keys |
+| 3 | which referenced keys are no row (`missing`), less the keys of B and the keys known to be rows (`KnownKeys`) | the distinct references of the lists step 3 checks, and the run's rising keys |
 | 3 | counts (`counts`), for the block-by-block counts | the keys a replaced list referenced whose count, followed block by block, falls below the one the run found; most are among step 5's |
 | 5 | the queue (`queue`) | the queue the run found: by Lemma 1, what the block before the run released or dropped |
 | 5, 6 | counts (`counts`) | the queue, T, the keys whose count fell, the keys the cascade reaches with a change below 0 |
@@ -477,7 +514,8 @@ the key's text:
   nothing.
 - **Bytes are produced only at the edges:** a read's key list, the net write, the deleted keys. A key that came in
   as an array of its own is given back as it came; one that came as a view into a larger buffer (a driver's row) is
-  made again from its text, so nothing that leaves carries that buffer along.
+  made again from its text, so no key that leaves carries that buffer along, an inserted node's key included. A
+  node's payload and child list leave as they were handed over.
 
 A key is converted where it enters (a flushed node's key and child list, a root-count change, a row a read
 returns) and nowhere else. It is read with `Buffer`'s `toString("latin1", start, end)`. What the form costs against
@@ -512,18 +550,37 @@ run deletes is not written first, only deleted.
 ### 4.9 A run of one block against the per-block step: what differs
 
 On tables with I1 to I4 and blocks that follow P1 a run of one block gives the step's tables (Theorem 3), and T2
-holds every output of the step to it on generated histories. What remains different:
+holds every output of the step to it on generated histories. On damaged tables and on blocks that break P1, what
+remains different is below. Each damaged-table row is a test that runs the block by `refcountStep` with
+`writeRefcount` and as a run of one block with `writeNet`, each on a database of its own, on PostgreSQL and PGlite
+(`test/backbone/run-reclaim-tables.test.ts`), unless it names another test.
 
 | Difference | When it shows |
 |---|---|
-| A new node that no rising key reaches halts the run (`unreached-node`); the step keeps it one block, queued | blocks that break P1: generated histories only |
-| A queued key the block neither released nor dropped halts the run (`unexpected-queued`) | damaged tables only |
-| The cascade reads a reached key's counts only once its change is below 0 (the `TODO` at that line in `run-reclaim.ts`); the step reads every reached key's. On tables that lost a count row, a reached key whose change is 0 is then kept where the step reads its count as 0 and deletes it | damaged counts only |
-| A reference to a key the block's own cascade deletes: both halt with `missing-reference`. The run checks the lists of the written nodes it keeps; the step also those of written nodes it deletes. Under P1 a deleted written node has a kept written ancestor whose reference to it halts the run the same way | damaged counts only |
-| On tables that break closure (a stored list referencing a key that is no row), the step protects a new node in its block and the run does not: the run can delete it and halt with `missing-reference` where the step stores tables | damaged tables only |
-| A missing reference and a count the cascade takes below 0 at one block: both name `negative-count`. In a longer run whose earlier block has the reference, the run names `missing-reference` at that block, where the per-block step names the count at the same block; the run's one cascade cannot say at which block a count fell | damaged counts only |
+| A new node that no rising key reaches halts the run (`unreached-node`); the step keeps it one block, queued (T2) | blocks that break P1: generated histories only |
+| The cascade reads a reached key's counts only once its change is below 0 (the `TODO` at that line in `run-reclaim.ts`); the step reads every reached key's. On tables that lost a count row, a reached key whose change is 0 is kept by the run; the step reads its count as 0, deletes it, and halts with `missing-reference` when a list the block writes references it | damaged counts only |
+| On tables that break closure (a stored list referencing a key that is no row), the step protects a new node in its block and the run does not: the run deletes it and halts with `missing-reference` where the step stores the block | damaged tables only |
+| With `sweep` off, a queued key that should not be (no row, or a count above 0): the step takes it off the queue; the run reads the queue's membership only for the keys it changes, and leaves it. Aligning them would read the whole queue with `sweep` off, which the run does not | damaged tables only |
+| A reference to a key the block's own cascade deletes: both halt with `missing-reference`. The run checks the lists of the written nodes it keeps; the step also those of written nodes it deletes. Under P1 a deleted written node has a kept written ancestor whose reference to it halts the run the same way (`run-reclaim.test.ts`, by hand) | damaged counts only |
+| A missing reference and a count the cascade takes below 0 at one block: both name `negative-count`. In a longer run whose earlier block has the reference, the run names `missing-reference` at that block, where the per-block step names the count at the same block; the run's one cascade cannot say at which block a count fell (`run-reclaim.test.ts`, by hand) | damaged counts only |
 | The key and the words of a halt: the step names the first failing reference in the order of the keys of the lists it writes; the run names, for step 3, the first failing block and then the first key in byte order | any halt |
 | Reads: the run reads which referenced keys are no row (`missing`), and with `sweep` off the queue's membership by key; the step reads which are rows and the queue whole | always; the same tables |
+
+The same both ways, each a test of the same kind: a queued key with no row (both halt with `row-count-mismatch` on
+the node delete, which affects no row: step 6 deletes such a candidate as rule 5 does); a key with a count and no
+row that a deletion reaches (the same halt); a list flushed again unchanged that references a key stored nowhere
+(both store the block: step 3 does not check a list that is the row's own); a key with a count and no row that a
+written list references (both `missing-reference`); a queued row with a root count, and one with a count (both take
+it off the queue); a root count with no row, released (both store the block); a row with no reference and no root
+count missing from the queue (both leave it so).
+
+`unexpected-queued` is no difference from the step: in a build it never fires. A key the run queues has its counts
+read and was a candidate: step 8 evaluates the queue it found, the keys whose root count changed and the new nodes,
+which are the first round's candidates, and the keys whose count changed, of which those with a count of 0 after
+the run had a change below 0 and so were candidates when it fell. A candidate with a count of 0 is deleted unless
+protected, and a key protected with no root count after the last block is one that block released or a key its
+replaced lists referenced. The check guards the computation itself: the negative controls of steps 4 to 6 show
+it halting.
 
 ## 5. The module's use
 
@@ -617,4 +674,3 @@ may have committed or not: the cursor read on the writer after the reconnection 
   `test/backbone/ledger-refcount-settle-lifecycle.test.ts` a stop and a pause asked for while the eviction is
   awaited, and a lost `COMMIT` answer both ways; the tape replays (`test/backbone/refcount-tapes.ts`) hold the
   reference at their sampled heights.
-

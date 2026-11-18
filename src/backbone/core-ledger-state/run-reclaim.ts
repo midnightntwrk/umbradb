@@ -35,8 +35,9 @@
  *    or the same as the row. The universe is the rows and the new nodes.
  * 2. Count changes: plus one per reference in the run's lists of the new and replacing nodes, minus one per
  *    reference in the stored lists they replace.
- * 3. Block by block, as the per-block step checks each block: every reference of a list block h flushed, and every
- *    key h raised, is a row when the run began or a node that h or a block before it flushed (`missing-reference`);
+ * 3. Block by block, as the per-block step checks each block: every reference of a list block h flushed (but a key's
+ *    first list in the run when it is the row's own, which the step writes again unchanged), and every key h raised,
+ *    is a row when the run began or a node that h or a block before it flushed (`missing-reference`);
  *    and each key's count, from the lists the blocks up to h flushed and replaced, is not below 0
  *    (`negative-count`). The first block that fails halts the run, named; a missing reference of the last block halts
  *    it only after step 7's count check, which the per-block step makes first.
@@ -44,8 +45,10 @@
  *    list replaced by the last block referenced.
  * 5. Candidates: the queue as the run found it, the keys whose root count the run changed, the new nodes, and the
  *    keys whose count change is below 0.
- * 6. The cascade, in rounds: every candidate in the universe, not protected, whose count is 0 is deleted; each
- *    reference of its list subtracts 1 and makes its key a candidate; until a round deletes none.
+ * 6. The cascade, in rounds: every candidate not protected whose count is 0 is deleted; each reference of its list
+ *    subtracts 1 and makes its key a candidate; until a round deletes none. On sound tables every candidate is in the
+ *    universe; one that is not (damaged tables) is deleted as the per-block step deletes it, and the net write's
+ *    delete of its row halts the run.
  * 7. No count is below 0 after the run, its deletions included (`negative-count`); no list the run writes
  *    references a key the cascade deleted (`missing-reference`, as the per-block step requires every reference of a
  *    list the block writes to be a row after it); and every key queued after the run is one the last block released
@@ -67,7 +70,9 @@
  * the flush rule and no node is left stored only because a child list the last block replaced referenced it
  * ({@link RunOutcome.keptByReplaced} is 0). Otherwise the tables are consistent and hold the same node set, and can
  * hold rows more: the per-block step keeps such a node only if it still stored the replaced list's node at the block
- * before, which the run computation cannot tell. The same run made again without its last block keeps none of them.
+ * before, which the run computation cannot tell. Computed again one block shorter, as many times as that takes, a run
+ * ends with `keptByReplaced` 0 or at one block, and then holds the per-block step's tables (the note's Theorem 5); one
+ * block off is not always enough, since the new last block can be the last replacement of another key.
  *
  * {@link RunFault} is the seam through which a negative control puts a fault into the computation, and
  * {@link RunCheck} names the check one leaves out. A build carries neither.
@@ -137,7 +142,10 @@ export interface NetWrite {
   readonly unqueued: readonly Uint8Array[];
   /** The keys queued after the run that were not before it. */
   readonly queued: readonly Uint8Array[];
-  /** The rows stored before the run that it deleted. */
+  /**
+   * The keys the run deleted that are rows when it began, and any it deleted that is neither a row nor a node of the
+   * run (damaged tables): their delete affects no row and halts the net write, as the per-block step's write halts.
+   */
   readonly deleted: readonly Uint8Array[];
 }
 
@@ -322,8 +330,9 @@ export interface RunOutcome {
   /**
    * The keys left stored, queued, only because a child list the run's last block replaced referenced them (and no
    * root count after the block before the last): what the per-block step keeps only if it still stored that list's
-   * node at the block before. The same run made again without its last block keeps none of them (see the module
-   * comment). None for a run that does not sweep.
+   * node at the block before. A caller that wants the per-block step's tables computes the run again one block
+   * shorter while this is above 0 and the run holds more than one block (see the module comment); one block off is
+   * not always enough. None for a run that does not sweep.
    */
   readonly keptByReplaced: number;
 }
@@ -345,6 +354,7 @@ const shown = (text: string): string => `0x${Buffer.from(text, "latin1").toStrin
 
 /** A node of the run: the last one flushed for its key. */
 interface RunNode {
+  /** Its key's bytes as the record holds them: never a view into a buffer it was handed. */
   readonly key: Uint8Array;
   readonly data: Uint8Array;
   readonly children: Uint8Array;
@@ -354,8 +364,12 @@ interface RunNode {
   readonly firstAt: bigint;
   /** The block that flushed this child list. */
   readonly at: bigint;
-  /** The child lists the run held for the key before this one, each with the block that flushed it, in order. */
-  readonly earlier: readonly { readonly refs: readonly KeyRecord[]; readonly at: bigint }[];
+  /**
+   * The child lists the run held for the key before this one, each with the block that flushed it, in order. One
+   * array per key, which `collect` appends to when it replaces the key's list and passes on to the new node: never
+   * copied, so many replacements of one key cost one entry each.
+   */
+  readonly earlier: { readonly refs: readonly KeyRecord[]; readonly at: bigint; readonly children: Uint8Array }[];
   /**
    * When that block did not reach the node from a key it raises: the block and the child list it flushed, which must
    * be the row's. Null when it reached the node.
@@ -392,7 +406,10 @@ interface KeyRecord {
   /** Whether a block of the run changed its root count; and the first block that raised it, if one did. */
   touched: boolean;
   raisedAt: bigint | null;
-  /** The first block that flushed a child list (new to the run, or another than the one it held) referencing it. */
+  /**
+   * The first block that flushed a child list referencing it that the per-block step checks: a list that replaces the
+   * one the run held, or a key's first list in the run unless it is the row's own.
+   */
   referencedAt: bigint | null;
   /**
    * Whether a list replaced by the run's last block (set when the run is computed), or by any block of the run,
@@ -440,6 +457,7 @@ export class RunReclaim {
   readonly #nodes: KeyRecord[] = [];
   #next: bigint;
   #computed = false;
+  #historyWrites = 0;
 
   constructor(options: RunReclaimOptions) {
     this.first = options.first;
@@ -457,6 +475,14 @@ export class RunReclaim {
   /** The next height it expects. */
   get next(): bigint {
     return this.#next;
+  }
+
+  /**
+   * How many entries `collect` has written into the lists of the child lists the run held for a key before its last:
+   * a test's measure of the record's work against what it was handed.
+   */
+  get historyWrites(): number {
+    return this.#historyWrites;
   }
 
   /**
@@ -592,9 +618,9 @@ export class RunReclaim {
       if (same) continue;
       const held = record.node;
       if (held === null) {
-        for (const ref of refs) ref.referencedAt ??= height;
+        // Its references are marked once the database says whether this list is the row's own (`compute`).
         const unreached = reached.has(record) ? null : { at: height, children: node.children };
-        record.node = { key: node.key, data: node.data, children: node.children, refs, firstAt: height, at: height, earlier: [], unreached };
+        record.node = { key: this.#bytes(record), data: node.data, children: node.children, refs, firstAt: height, at: height, earlier: [], unreached };
         this.#nodes.push(record);
         continue;
       }
@@ -614,14 +640,16 @@ export class RunReclaim {
         ref.dropped = true;
         ref.droppedAt = height;
       }
+      held.earlier.push({ refs: held.refs, at: held.at, children: held.children });
+      this.#historyWrites += 1;
       record.node = {
-        key: node.key,
+        key: this.#bytes(record),
         data: node.data,
         children: node.children,
         refs,
         firstAt: held.firstAt,
         at: height,
-        earlier: [...held.earlier, { refs: held.refs, at: held.at }],
+        earlier: held.earlier,
         unreached: held.unreached,
       };
     }
@@ -699,6 +727,16 @@ export class RunReclaim {
         );
       }
     }
+    // A key's first list in the run is checked in step 3 unless it is the row's own: the per-block step writes such a
+    // list again unchanged and does not check it. Every later list replaced the one before it, and was marked when it
+    // was handed over.
+    for (const record of nodes) {
+      const node = nodeOf(record);
+      const first = node.earlier[0] ?? node;
+      const row = record.kind === "same" ? node.children : record.kind === "replaces" ? replaced.get(record) : undefined;
+      if (row !== undefined && Buffer.compare(row, first.children) === 0) continue;
+      for (const ref of first.refs) if (ref.referencedAt === null || first.at < ref.referencedAt) ref.referencedAt = first.at;
+    }
 
     // (2) The count changes.
     const change = (record: KeyRecord, by: number): void => {
@@ -755,7 +793,7 @@ export class RunReclaim {
       if (first !== null) {
         const at = neededAt(first);
         const flushedAt = (list: { readonly refs: readonly KeyRecord[]; readonly at: bigint }): boolean => (atEnd || list.at === at) && list.refs.includes(first);
-        const parent = first.referencedAt === null || (!atEnd && first.referencedAt !== at) ? undefined : inOrder(nodes).find((candidate) => [...nodeOf(candidate).earlier, nodeOf(candidate)].some(flushedAt));
+        const parent = first.referencedAt === null || (!atEnd && first.referencedAt !== at) ? undefined : inOrder(nodes).find((candidate) => nodeOf(candidate).earlier.some(flushedAt) || flushedAt(nodeOf(candidate)));
         const where = first.node === null ? "neither stored when the run began nor flushed by the run" : `not stored when the run began, and first flushed by block ${first.node.firstAt}`;
         const message =
           parent !== undefined
@@ -868,9 +906,10 @@ export class RunReclaim {
       let frontier = new Set<KeyRecord>(fault === "old-queue-only" || fault === "run-as-one-block" ? queueFound : [...queueFound, ...touched, ...fresh, ...fell]);
       for (;;) {
         // Which candidates go is settled before any of them goes, so the order within a round does not matter.
-        const round = [...frontier].filter(
-          (record) => !record.deleted && record.counts !== null && inUniverse(record) && !isProtected(record) && left(record) === 0,
-        );
+        // A candidate that is neither a row nor a node of the run (a queued key with no row, a key with a count and
+        // no row: damaged tables) is deleted as the per-block step deletes it, and the net write's delete of its row,
+        // which affects none, halts the run where the step's halts the block.
+        const round = [...frontier].filter((record) => !record.deleted && record.counts !== null && !isProtected(record) && left(record) === 0);
         if (round.length === 0) break;
         rounds += 1;
         for (const record of round) {
@@ -982,7 +1021,9 @@ export class RunReclaim {
       counted: changes.filter((record) => countAfter(record) > 0).length,
       unqueued: unqueued.map((record) => this.#bytes(record)),
       queued: queued.map((record) => this.#bytes(record)),
-      deleted: evicted.filter((record) => record.row === true).map((record) => this.#bytes(record)),
+      // Every deleted key but a node the run flushed and never wrote: a row, or (on damaged tables) a key the run
+      // believes nothing of, whose delete then affects no row.
+      deleted: evicted.filter((record) => record.row === true || record.node === null).map((record) => this.#bytes(record)),
     });
     return Object.freeze({
       net,

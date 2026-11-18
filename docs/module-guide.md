@@ -308,9 +308,10 @@ Next: types §4, chain data §6 and §9, routes §7, settings §8, ready-made ta
   is always one block. Runs follow one another (each `first` is the last run's `last + 1n`), so every height is in
   exactly one; accept a run of any length. A failure is one of `on-db-write`: nothing of the run is stored, and
   processing halts or retries; the heights are then processed again, and `on-settle` is called again for them. Use it
-  for work over what a run of blocks wrote that costs less once per run than once per block. Its tables must not
-  depend on where the runs were cut: `on-settle` of a..c leaves what `on-settle` of a..b and then of b + 1..c leave.
-  Here `stats_module.failures` holds one row, the failures counted up to `height`:
+  for work over what a run of blocks wrote that costs less once per run than once per block. A module's tables must
+  not depend on where the runs were cut: `on-settle` of a..c leaves what `on-settle` of a..b and then of b + 1..c
+  leave. UmbraDB's `core-digest` declares it too, last: a block's digests and checkpoint take what every `on-settle`
+  wrote. Here `stats_module.failures` holds one row, the failures counted up to `height`:
 
   ```ts
       async "on-settle"(_processContext, run, writer) {
@@ -416,8 +417,8 @@ counts and queue (after a restart, for one).
   writes; the block's handle also sees what earlier callbacks of the block wrote. The other points get a read handle
   (`query` only) at the height §3 gives; `read.height` says which. One statement per call; await each before you
   return. Inside a callback, use the handle it is given: the handles of the points are never cut off by a timeout.
-- **Keep no handle.** A handle closes when its callback returns: one kept and used later fails with `handle-closed`
-  and halts processing, even if your code catches the error.
+- **Keep no handle.** A handle closes when the callback it was given to returns or throws: one kept and used later
+  fails with `handle-closed`, naming that callback's point, and halts processing, even if your code catches the error.
 - **Parameters** are sent as text: numbers and `bigint`s as digits, a `Uint8Array` as `bytea`, a plain object as JSON.
   Cast where the statement does not give the type (`$1::bigint`).
 - **Your schema and names.** Your schema is your id with `-` replaced by `_`. Write every name with its schema, in

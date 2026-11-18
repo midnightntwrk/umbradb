@@ -59,7 +59,7 @@ interface Recorded {
 /**
  * Module `rec`: logs every point it has, puts the block item `rec-parsed` (`{ n }`, the count of its `on-parse` calls) in
  * `on-parse`, reads it in `on-compute`, writes a row in `on-db-write` — where, at H the first time, `fault` runs after
- * the row.
+ * the row — and a row of `rec.settled` in `on-settle` (named by the run's last height), inside the same transaction.
  */
 function recorder(seen: Recorded, fault: () => Promise<void>, status: () => ProcessStatus): ModuleDeclaration {
   let parses = 0;
@@ -72,11 +72,14 @@ function recorder(seen: Recorded, fault: () => Promise<void>, status: () => Proc
     requires: ["block-header"],
     provides: [
       { name: "rec-parsed", lifetimes: ["block"] },
-      { name: "rec-rows", lifetimes: ["table"], table: { schema: "rec", tables: ["rows"], kind: "append-only" } },
+      { name: "rec-rows", lifetimes: ["table"], table: { schema: "rec", tables: ["rows", "settled"], kind: "append-only" } },
     ],
     startsMidChain: true,
     configSchema: z.object({}),
-    migrations: [{ id: "001", sql: "CREATE TABLE rec.rows (height bigint PRIMARY KEY)" }],
+    migrations: [
+      { id: "001", sql: "CREATE TABLE rec.rows (height bigint PRIMARY KEY)" },
+      { id: "002", sql: "CREATE TABLE rec.settled (height bigint PRIMARY KEY)" },
+    ],
     points: {
       async "on-fetch"(_p, b) {
         note("on-fetch", b.height);
@@ -100,6 +103,10 @@ function recorder(seen: Recorded, fault: () => Promise<void>, status: () => Proc
           await fault();
         }
       },
+      async "on-settle"(_p, run, w) {
+        note("on-settle", run.last);
+        await w.execute("INSERT INTO rec.settled (height) VALUES ($1)", [run.last]);
+      },
       async "on-after-db-write"(_p, b) {
         note("on-after-db-write", b.height);
       },
@@ -112,8 +119,9 @@ interface RecoveryObservation {
   readonly seen: Recorded;
   readonly status: ProcessStatus;
   readonly lines: readonly string[];
-  /** `rec.rows` and the blocks table's heights. */
+  /** `rec.rows`, `rec.settled` and the blocks table's heights. */
   readonly rows: readonly number[];
+  readonly settled: readonly number[];
   readonly blocks: readonly number[];
   /** The writers terminated: by `on-db-write` (`"terminated"`), or the proxy's faults at the `COMMIT`. */
   readonly faults: readonly string[];
@@ -173,6 +181,7 @@ async function recoveryRun(fault: Fault, loop?: new (input: LoopInput) => Finali
     status,
     lines,
     rows: await heights("SELECT height::int AS h FROM rec.rows ORDER BY height"),
+    settled: await heights("SELECT height::int AS h FROM rec.settled ORDER BY height"),
     blocks: await heights("SELECT height::int AS h FROM core_block_commit.blocks ORDER BY height"),
     faults: [...terminated, ...proxy.faults],
   };
@@ -183,6 +192,7 @@ async function rewindTo(db: ProcessDatabase, height: bigint): Promise<void> {
   await db.query(`DELETE FROM core_block_commit.hashes WHERE height > ${height}`);
   await db.query(`DELETE FROM core_block_commit.blocks WHERE height > ${height}`);
   await db.query(`DELETE FROM rec.rows WHERE height > ${height}`);
+  await db.query(`DELETE FROM rec.settled WHERE height > ${height}`);
 }
 
 /** The calls of `point` at `height`. */
@@ -204,9 +214,10 @@ function committedProblems(observed: RecoveryObservation, fault: string): string
     problems.push(`the process is ${observed.status.state} with ${text(observed.status.reason)}`);
   }
   if (text(observed.rows) !== text(all)) problems.push(`rec.rows holds ${observed.rows}`);
+  if (text(observed.settled) !== text(all)) problems.push(`rec.settled holds ${observed.settled}`);
   if (text(observed.blocks) !== text(all)) problems.push(`the blocks table holds ${observed.blocks}`);
   for (const height of [1n, 2n, 4n, 5n]) {
-    for (const point of ["on-fetch", "on-parse", "on-compute", "on-db-write", "on-after-db-write"]) {
+    for (const point of ["on-fetch", "on-parse", "on-compute", "on-db-write", "on-settle", "on-after-db-write"]) {
       if (count(observed, point, height) !== 1) problems.push(`${point} ran ${count(observed, point, height)} times at ${height}`);
     }
   }
@@ -233,6 +244,7 @@ function processedAgainProblems(observed: RecoveryObservation, fault: string): s
     ["on-parse", 1],
     ["on-compute", 2],
     ["on-db-write", 2],
+    ["on-settle", fault === "terminated" ? 1 : 2],
     ["on-after-db-write", 1],
   ] as const) {
     if (count(observed, point, H) !== times) problems.push(`${point} ran ${count(observed, point, H)} times at ${H}, not ${times}`);
@@ -255,7 +267,8 @@ function processedAgainProblems(observed: RecoveryObservation, fault: string): s
  */
 function landedProblems(observed: RecoveryObservation): string[] {
   const problems = committedProblems(observed, "after");
-  for (const point of ["on-fetch", "on-parse", "on-compute", "on-db-write", "on-after-db-write"]) {
+  // on-settle of H ran once, in the transaction that landed: the run that finds it committed does not settle it again.
+  for (const point of ["on-fetch", "on-parse", "on-compute", "on-db-write", "on-settle", "on-after-db-write"]) {
     if (count(observed, point, H) !== 1) problems.push(`${point} ran ${count(observed, point, H)} times at ${H}, not once`);
   }
   if (observed.seen.calls.indexOf(`on-after-db-write@${H}`) > observed.seen.calls.indexOf(`on-fetch@${H + 1n}`)) {
@@ -276,6 +289,8 @@ function neitherProblems(observed: RecoveryObservation): string[] {
   if (reason !== text({ code: "unexpected-cursor", height: H, module: null, point: null })) problems.push(`the reason is ${reason}`);
   if (text(observed.blocks) !== "[1]") problems.push(`the blocks table holds ${observed.blocks}`);
   if (count(observed, "on-compute", H) !== 1) problems.push(`on-compute ran ${count(observed, "on-compute", H)} times at ${H}`);
+  if (count(observed, "on-settle", H) !== 1) problems.push(`on-settle ran ${count(observed, "on-settle", H)} times at ${H}`);
+  if (text(observed.settled) !== "[1]") problems.push(`rec.settled holds ${observed.settled}`);
   if (count(observed, "on-after-db-write", H) !== 0) problems.push(`on-after-db-write ran at ${H}`);
   if (!observed.lines.some((line) => /^processing halted \(unexpected-cursor\): /.test(line))) {
     problems.push(`no halt logged: ${text(observed.lines)}`);
