@@ -547,6 +547,27 @@ describe("the run's record and its reads", () => {
     expect([known.has("a"), known.has("b"), known.size]).toEqual([false, true, 1]);
   });
 
+  it("hands over many replacements of one key's list with work that grows with them, not with their square", async () => {
+    // One parent flushed in every block, its list referencing and embedding a child by turns, its root count raised
+    // at every block; the child persisted once.
+    const blockCount = 2_000;
+    const child = made("child");
+    const [referencing, embedding] = [made("parent", [ref(child)]), made("parent", [embedded(child)])];
+    const blocks = madeBlocks(
+      Array.from({ length: blockCount }, (_, height) =>
+        height === 0 ? { inserts: [child, referencing], persist: [child, referencing] } : { inserts: [height % 2 === 1 ? embedding : referencing], persist: [referencing] },
+      ),
+    );
+    const reclaim = new RunReclaim({ first: 0n, on: true });
+    for (const block of blocks) reclaim.collect(BigInt(block.height), flushOf(block.flushed), true);
+    // One entry per replaced list.
+    expect(reclaim.historyWrites).toBe(blockCount - 1);
+    const last = blocks.at(-1) as ModelBlock;
+    const outcome = await reclaim.compute(runTables(NO_TABLES, last.step.after.roots));
+    expect(tableDifferences(applied(NO_TABLES, outcome.net).tables, last.step.after)).toEqual([]);
+    expect([outcome.newNodes, outcome.handed]).toEqual([2, 2]);
+  });
+
   it("gives back no key as a view into a buffer it was given", async () => {
     const script = fc.sample(historyScripts({ oneForm: true }), { seed: SEED + 1, numRuns: 30 }).find((sample) => sample.blocks.length >= 15) as HistoryScript;
     const blocks = modelBlocks({ ...script, blocks: script.blocks.map((block) => ({ ...block, on: true })) });

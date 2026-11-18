@@ -324,8 +324,12 @@ interface RunNode {
   readonly firstAt: bigint;
   /** The block that flushed this child list. */
   readonly at: bigint;
-  /** The child lists the run held for the key before this one, each with the block that flushed it, in order. */
-  readonly earlier: readonly { readonly refs: readonly KeyRecord[]; readonly at: bigint }[];
+  /**
+   * The child lists the run held for the key before this one, each with the block that flushed it, in order. One
+   * array per key, which `collect` appends to when it replaces the key's list and passes on to the new node: never
+   * copied, so many replacements of one key cost one entry each.
+   */
+  readonly earlier: { readonly refs: readonly KeyRecord[]; readonly at: bigint }[];
   /**
    * When that block did not reach the node from a key it raises: the block and the child list it flushed, which must
    * be the row's. Null when it reached the node.
@@ -410,6 +414,7 @@ export class RunReclaim {
   readonly #nodes: KeyRecord[] = [];
   #next: bigint;
   #computed = false;
+  #historyWrites = 0;
 
   constructor(options: RunReclaimOptions) {
     this.first = options.first;
@@ -427,6 +432,14 @@ export class RunReclaim {
   /** The next height it expects. */
   get next(): bigint {
     return this.#next;
+  }
+
+  /**
+   * How many entries `collect` has written into the lists of the child lists the run held for a key before its last:
+   * a test's measure of the record's work against what it was handed.
+   */
+  get historyWrites(): number {
+    return this.#historyWrites;
   }
 
   /**
@@ -584,6 +597,8 @@ export class RunReclaim {
         ref.dropped = true;
         ref.droppedAt = height;
       }
+      held.earlier.push({ refs: held.refs, at: held.at });
+      this.#historyWrites += 1;
       record.node = {
         key: node.key,
         data: node.data,
@@ -591,7 +606,7 @@ export class RunReclaim {
         refs,
         firstAt: held.firstAt,
         at: height,
-        earlier: [...held.earlier, { refs: held.refs, at: held.at }],
+        earlier: held.earlier,
         unreached: held.unreached,
       };
     }
@@ -725,7 +740,7 @@ export class RunReclaim {
       if (first !== null) {
         const at = neededAt(first);
         const flushedAt = (list: { readonly refs: readonly KeyRecord[]; readonly at: bigint }): boolean => (atEnd || list.at === at) && list.refs.includes(first);
-        const parent = first.referencedAt === null || (!atEnd && first.referencedAt !== at) ? undefined : inOrder(nodes).find((candidate) => [...nodeOf(candidate).earlier, nodeOf(candidate)].some(flushedAt));
+        const parent = first.referencedAt === null || (!atEnd && first.referencedAt !== at) ? undefined : inOrder(nodes).find((candidate) => nodeOf(candidate).earlier.some(flushedAt) || flushedAt(nodeOf(candidate)));
         const where = first.node === null ? "neither stored when the run began nor flushed by the run" : `not stored when the run began, and first flushed by block ${first.node.firstAt}`;
         const message =
           parent !== undefined
