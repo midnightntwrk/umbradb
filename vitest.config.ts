@@ -96,6 +96,9 @@ export default defineConfig({
     // budget above neither run failed, so there is no cap. On a crowded machine, `npm run test:conformance --
     // --maxWorkers=<n>` sets one for a run.
     testTimeout: 60_000,
+    // Node 24's V8 can abort a worker ("Check failed: jit_page.has_value()") while freeing a Wasm-to-JS wrapper it
+    // tiered up (PGlite's, the ledger's). Never tiering wrappers up avoids that path; Wasm code itself still tiers up.
+    execArgv: ["--wasm-wrapper-tiering-budget=2147483647"],
     coverage: {
       provider: "v8",
       // Setting `include` also makes Vitest report every matching file no test loaded, at 0 %, so such a file is held
