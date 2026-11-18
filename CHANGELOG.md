@@ -227,6 +227,17 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   parent check does not see a block at h − 1 changed by a writer that ignores the writer lock. A new option of
   `coreLedgerState` and of `core-block-commit`'s `coreBlockCommit`, `checkKept`, also reads every value taken from
   memory and compares it, a difference failing the block; the tests and the replays of recorded chains use it.
+- **The ledger state's reclamation remembers the keys it finds stored.** `core-ledger-state` keeps, from block to
+  block, the keys its reclamation's `missing` read found stored, so a block's references are asked about only when no
+  earlier block found them stored. It uses them only while each block continues the one before (`continues`: the
+  block before's `COMMIT` answered in the same run of processing, on the same writer's session) and empties them
+  otherwise: at a process's first block, at a block made again after a failure, and after a `COMMIT` whose answer was
+  lost, so a height another writer committed meanwhile is never taken from memory. The keys a block deletes leave
+  them, and they are emptied when `on-settle` fails. At most 500,000 keys (32.9 MiB of heap at that bound, measured):
+  a key that would pass the bound empties them first. A node row deleted by hand while the process runs is not seen
+  until a block does not continue the one before. In the block trace, `missing` holds only the keys asked of the
+  database, and `knownHits` and `knownEmptied` are new (`knownEmptied` is also set at a process's first height); the
+  operator guide lists them.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 
