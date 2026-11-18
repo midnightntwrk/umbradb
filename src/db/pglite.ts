@@ -17,7 +17,7 @@
  *   body rejects, with the body's own error. A `COMMIT` that PostgreSQL answers with `ROLLBACK` (a failed statement
  *   aborted the transaction and the body caught its error) is an error, never a commit. A migration's text of several
  *   statements runs in it through the engine's `exec`, by the path only the migration runner takes
- *   (`./multi-statement.ts`).
+ *   (`./multi-statement.ts`), and so do a read view's open and close (`./read-view.ts`).
  *
  * A read handle or transaction used after its job ended fails with `handle-closed`, before anything reaches the engine.
  * A job's body runs in the async context of the code that asked for it, as on PostgreSQL.
@@ -77,6 +77,7 @@ import { allowMultiStatement } from "./multi-statement.js";
 import { READS_BYPASS_QUEUE } from "./pglite-build-flags.js";
 import { acquirePgliteLock } from "./pglite-lock.js";
 import { readTimeoutMs } from "./read-options.js";
+import { allowReadView } from "./read-view.js";
 import { controlStatement } from "./statement-refusal.js";
 import { allowWriterStart } from "./writer-lock.js";
 
@@ -474,8 +475,14 @@ class PgliteDatabase implements Database {
       try {
         await this.statement("BEGIN");
         let open = true;
-        const statement = (sql: string, params: unknown[] | undefined): Promise<Outcome> => {
+        /** Set when a read view's close failed: later statements are refused with it, and the job rolls back. */
+        let brokenBy: UmbraError | undefined;
+        const usable = () => {
           if (!open) throw handleClosed("transaction");
+          if (brokenBy !== undefined) throw brokenBy;
+        };
+        const statement = (sql: string, params: unknown[] | undefined): Promise<Outcome> => {
+          usable();
           return this.statement(sql, params);
         };
         const tx: Transaction = {
@@ -483,8 +490,17 @@ class PgliteDatabase implements Database {
           execute: async (sql, params) => (await statement(sql, params)).count,
         };
         allowMultiStatement(tx, async (sql) => {
-          if (!open) throw handleClosed("transaction");
+          usable();
           await this.script(sql);
+        });
+        allowReadView(tx, {
+          control: async (text) => {
+            usable();
+            await this.script(text);
+          },
+          broken: (error) => {
+            brokenBy ??= error;
+          },
         });
         let result: T;
         try {
@@ -497,6 +513,10 @@ class PgliteDatabase implements Database {
         }
         open = false;
         job.running = false;
+        if (brokenBy !== undefined) {
+          await this.end();
+          throw brokenBy;
+        }
         const commit = await this.statement("COMMIT");
         // PostgreSQL answers COMMIT with ROLLBACK when a failed statement aborted the transaction.
         if (commit.command !== "COMMIT") throw commitRolledBack();

@@ -10,7 +10,8 @@
  * transaction opens a new one.
  * - The **writer** is one session: transactions run on it one at a time, in the order asked for. A statement runs on
  *   the extended protocol, one per call. A migration's text of several statements runs on the simple protocol, inside
- *   the transaction, through the path only the migration runner takes (`./multi-statement.ts`).
+ *   the transaction, through the path only the migration runner takes (`./multi-statement.ts`). A read view's open and
+ *   close (`./read-view.ts`) run on the simple protocol too, through a path that counts no schema change.
  * - **Reads** use a pool of up to `readConnections` sessions (default 10); a read waits for a free one.
  *
  * **Reads.** `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY`, then the committed height read by the process's
@@ -62,6 +63,7 @@ import {
 } from "./errors.js";
 import { allowMultiStatement } from "./multi-statement.js";
 import { readTimeoutMs } from "./read-options.js";
+import { allowReadView } from "./read-view.js";
 import { controlStatement } from "./statement-refusal.js";
 import { traceAdd, traceStatement } from "../trace/trace.js";
 import { allowWriterStart, takeWriterLock, type WriterSession } from "./writer-lock.js";
@@ -405,6 +407,15 @@ class Session {
     }
   }
 
+  /**
+   * Sends a text of one or more statements on the simple protocol inside the session's open transaction (the read
+   * view's open and close, `./read-view.ts`); its results are not read. Unlike {@link script} it never counts as a
+   * schema change: those texts change no table's columns, and counting them would retire every prepared text.
+   */
+  async control(text: string): Promise<void> {
+    await this.send(text, [], true);
+  }
+
   /** Sends a text to the server unless the session ended or was lost; a driver error as an {@link UmbraError}. */
   private async send(text: string, args: readonly (string | null)[], simple: boolean): Promise<unknown> {
     if (this.state === "ended") throw handleClosed("database");
@@ -651,8 +662,14 @@ class Writer {
     const session = await this.ready();
     await session.run("BEGIN", [], true);
     let ended = false;
-    const statement = (sql: string, params: unknown[] | undefined) => {
+    /** Set when a read view's close failed: later statements are refused with it, and the transaction rolls back. */
+    let brokenBy: UmbraError | undefined;
+    const usable = () => {
       if (ended) throw handleClosed("transaction");
+      if (brokenBy !== undefined) throw brokenBy;
+    };
+    const statement = (sql: string, params: unknown[] | undefined) => {
+      usable();
       return session.run(sql, params);
     };
     const tx: Transaction = {
@@ -660,8 +677,17 @@ class Writer {
       execute: async (sql, params) => (await statement(sql, params)).count,
     };
     allowMultiStatement(tx, async (sql) => {
-      if (ended) throw handleClosed("transaction");
+      usable();
       await session.script(sql);
+    });
+    allowReadView(tx, {
+      control: async (text) => {
+        usable();
+        await session.control(text);
+      },
+      broken: (error) => {
+        brokenBy ??= error;
+      },
     });
     let result: T;
     try {
@@ -672,6 +698,10 @@ class Writer {
       throw error;
     }
     ended = true;
+    if (brokenBy !== undefined) {
+      await rollBack(session);
+      throw brokenBy;
+    }
     const commit = await session.run("COMMIT", [], true);
     // PostgreSQL answers COMMIT with ROLLBACK when a failed statement aborted the transaction.
     if (commit.command !== "COMMIT") throw commitRolledBack();
