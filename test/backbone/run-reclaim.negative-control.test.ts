@@ -142,7 +142,7 @@ describe("negative controls: a fault in the run computation", () => {
     const compute = async (unchecked?: RunCheck) => {
       const reclaim = new RunReclaim({ first: 0n, last: 0n, on: true, ...(unchecked === undefined ? {} : { unchecked }) });
       reclaim.collect(0n, { inserts: [{ key: r.keyBytes, data: r.data, children: r.children }], rootCounts: [{ key: r.keyBytes, delta: 1 }] }, true);
-      return reclaim.compute(runTables(NO_TABLES, new Map()));
+      return reclaim.compute(runTables(NO_TABLES, new Map([[r.key, 1]])));
     };
     expect(haltReason(await compute().catch((error: unknown) => error))).toBe("missing-reference");
     const outcome = await compute("missing-reference");
@@ -162,7 +162,7 @@ describe("negative controls: a fault in the run computation", () => {
       const reclaim = new RunReclaim({ first: 1n, last: 2n, on: true, ...(fault === undefined ? {} : { fault }) });
       reclaim.collect(1n, { inserts: flushed(r1), rootCounts: raise(r1) }, true);
       reclaim.collect(2n, { inserts: flushed(x, r2), rootCounts: [...raise(r2), { key: r1.keyBytes, delta: -1 }] }, true);
-      return outcomeOf(reclaim.compute(runTables(NO_TABLES, new Map([[r1.key, 1]]))));
+      return outcomeOf(reclaim.compute(runTables(NO_TABLES, new Map([[r2.key, 1]]))));
     };
     expect(await late()).toBe("missing-reference at 1");
     expect(typeof (await late("judged-at-end"))).toBe("object");
@@ -175,7 +175,7 @@ describe("negative controls: a fault in the run computation", () => {
       const reclaim = new RunReclaim({ first: 1n, last: 2n, on: true, ...(fault === undefined ? {} : { fault }) });
       reclaim.collect(1n, { inserts: flushed(wEmbedding, s1), rootCounts: raise(s1) }, true);
       reclaim.collect(2n, { inserts: flushed(p), rootCounts: raise(p) }, true);
-      return outcomeOf(reclaim.compute(runTables(found, roots)));
+      return outcomeOf(reclaim.compute(runTables(found, new Map([...roots, [p.key, 1]]))));
     };
     expect(await falls()).toBe("negative-count at 1");
     // With the fault the run commits, and its tables break closure: the cascade deleted c, which p references.
@@ -288,7 +288,7 @@ describe("negative controls: a fault in the run computation", () => {
     const blocks = madeBlocks([{ inserts: [c, wReferencing], persist: [wReferencing] }, { inserts: [], release: [wReferencing] }, { inserts: [] }]);
     const reclaim = new RunReclaim({ first: 0n, last: 2n, on: true, fault: "first-round-only", unchecked: "unexpected-queued" });
     for (const block of blocks) reclaim.collect(BigInt(block.height), { inserts: block.flushed.inserts.map(({ key, children }) => ({ key: Uint8Array.from(Buffer.from(key, "hex")), data: Uint8Array.of(7), children })), rootCounts: block.flushed.rootCounts.map(({ key, delta }) => ({ key: Uint8Array.from(Buffer.from(key, "hex")), delta })) }, true);
-    const outcome = await reclaim.compute(runTables(NO_TABLES, (blocks[2] as ModelBlock).before.roots));
+    const outcome = await reclaim.compute(runTables(NO_TABLES, (blocks[2] as ModelBlock).step.after.roots));
     // One round: the node goes, and the child only it referenced stays.
     expect(outcome.evict.map(hex)).toEqual([wReferencing.key]);
     expect(outcome.rounds).toBe(1);

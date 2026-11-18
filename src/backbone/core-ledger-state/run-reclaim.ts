@@ -4,10 +4,10 @@
  * (`./refcount.ts`) computes the same tables one block at a time.
  *
  * A run is one or more consecutive blocks settled together. Each block hands its flushed nodes and its root-count
- * changes to the run's record ({@link RunReclaim.collect}), in memory, with no statement. Once every block of the run
- * has handed its own over, {@link RunReclaim.compute} computes `nodes`, `ref_counts` and `unreferenced` as they are
- * after the run's last block, from those tables as the block before the run left them, and gives the net write
- * ({@link NetWrite}, {@link writeNet}) and every key the run deletes.
+ * changes to the run's record ({@link RunReclaim.collect}), in memory, with no statement, and writes its own rows,
+ * `root_counts` among them. After the last block's own rows, {@link RunReclaim.compute} computes `nodes`,
+ * `ref_counts` and `unreferenced` as they are after that block, from those tables as the block before the run left
+ * them, and gives the net write ({@link NetWrite}, {@link writeNet}) and every key the run deletes.
  *
  * **The rule it computes.** After a block that sweeps, the stored nodes are what these keys reach through the stored
  * child lists: the keys with a root count after the block before, the keys with a root count after the block, and
@@ -26,7 +26,8 @@
  *   (`unreached-node`). A node written again with the list already held may be anywhere.
  *
  * **The computation** (`compute`), over the node tables as the block before the run left them (`nodes`,
- * `ref_counts`, `unreferenced`) and `root_counts` as the blocks before the last wrote it:
+ * `ref_counts`, `unreferenced`) and `root_counts` as the run's last block left it. So a root count read is the one
+ * after the last block, and the one before that block is the read one less the block's own change:
  * 1. The run's nodes are classified against the database: new (no row), replacing (a row with another child list),
  *    or the same as the row. The universe is the rows and the new nodes.
  * 2. Count changes: plus one per reference in the run's lists of the new and replacing nodes, minus one per
@@ -153,6 +154,8 @@ export async function writeNet(
  * - `first-round-only`: the cascade stops after its first round (step 6).
  *
  * And the run computation's own:
+ * - `roots-read-as-before`: the root counts read, which are after the run's last block, taken as those before it
+ *   (step 4), so a state the last block releases has no root count before it and is deleted by its run;
  * - `first-list-kept`: the run keeps the first child list flushed for a key, not the last;
  * - `run-as-one-block`: the per-block step's protection and frontier applied to the run as if it were one block:
  *   protected are the keys with a root count before the run or after it, every new node and every key a replaced
@@ -165,6 +168,7 @@ export async function writeNet(
  */
 export type RunFault =
   | RefcountFault
+  | "roots-read-as-before"
   | "first-list-kept"
   | "run-as-one-block"
   | "dropped-unprotected"
@@ -179,9 +183,9 @@ export type RunFault =
 export type RunCheck = "unreached-node" | "missing-reference" | "negative-count" | "unexpected-queued";
 
 /**
- * What the computation reads: the node tables as the block before the run left them, and `root_counts` as the blocks
- * before the run's last wrote it. Keys go and come back as bytes; each read is one statement's shape (`./sql.ts`), and
- * the one who gives the tables sends a long key list in parts.
+ * What the computation reads: the node tables as the block before the run left them, and `root_counts` as the run's
+ * last block left it. Keys go and come back as bytes; each read is one statement's shape (`./sql.ts`), and the one
+ * who gives the tables sends a long key list in parts.
  */
 export interface RunTables {
   /** Those of `keys` that `nodes` holds. */
@@ -343,7 +347,7 @@ interface KeyRecord {
   row: boolean | undefined;
   /** The references of its stored child list, once read. */
   stored: readonly KeyRecord[] | null;
-  /** Its reference count when the run began and its root count after the block before the last, once read. */
+  /** Its reference count when the run began and its root count after the run's last block, once read. */
   counts: { readonly refs: number; readonly roots: number } | null;
   /** Its count's change in the run so far. */
   delta: number;
@@ -594,8 +598,9 @@ export class RunReclaim {
   }
 
   /**
-   * The node tables after the run's last block (see the module comment): `tables` are the tables as the block before
-   * the run left them, read inside the run's transaction; `known` the keys known to be rows, if the caller has them.
+   * The node tables after the run's last block (see the module comment): `tables` are the node tables as the block
+   * before the run left them and `root_counts` as the last block left it, read inside the run's transaction after the
+   * last block's own rows; `known` the keys known to be rows, if the caller has them.
    * Every block of the run must have handed its own over. Throws `ledger-refcount-invalid` when a check fails, before
    * anything is written.
    */
@@ -771,11 +776,14 @@ export class RunReclaim {
 
     // (4) Protection. A candidate's counts are read before it is asked.
     const inUniverse = (record: KeyRecord): boolean => record.node !== null || record.row === true;
-    const rootsBefore = (record: KeyRecord): number => record.counts?.roots ?? 0;
+    // A root count read is the one after the last block: before that block it is the one read less the block's own
+    // change. (A key whose counts were not read is asked neither whether it is protected nor whether it is queued.)
+    const rootsBefore = (record: KeyRecord): number =>
+      record.counts === null ? 0 : record.counts.roots - (fault === "roots-read-as-before" ? 0 : record.lastRootChange);
     const rootsAfter = (record: KeyRecord): number => rootsBefore(record) + record.lastRootChange;
     const isProtected = (record: KeyRecord): boolean => {
       if (fault === "run-as-one-block") {
-        // The root count before the run: the one read, less what the blocks before the last added.
+        // The root count before the run: the one before the last block, less what the blocks before it added.
         const rootsFound = rootsBefore(record) - (record.rootChange - record.lastRootChange);
         return rootsFound > 0 || rootsAfter(record) > 0 || record.kind === "new" || record.dropped;
       }

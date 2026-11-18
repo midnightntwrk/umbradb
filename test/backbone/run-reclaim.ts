@@ -70,8 +70,8 @@ export const noReads = (): Reads => ({ rows: 0, changed: 0, missing: 0, queue: 0
 
 /**
  * The computation's reads over `nodes` (the node tables as the block before the run left them) and `roots` (the root
- * counts after the block before the run's last). Each key comes back as a view into a larger buffer, as a driver's
- * rows do.
+ * counts after the run's last block: the computation runs after that block's own rows are written). Each key comes
+ * back as a view into a larger buffer, as a driver's rows do.
  */
 export function runTables(nodes: NodeTables, roots: ReadonlyMap<string, number>, reads: Reads = noReads()): RunTables {
   const back = (key: string): Uint8Array => {
@@ -435,7 +435,7 @@ export async function inRuns(blocks: readonly ModelBlock[], cut: InRuns, seen: S
         // A run not cut at a change of sweep is given as its first block's setting throughout.
         reclaim.collect(BigInt(block.height), flushOf(flushed), cut.cutAtSweep === false ? first.on : block.on);
       }
-      outcome = await reclaim.compute(runTables(mine, last.before.roots, seen.reads));
+      outcome = await reclaim.compute(runTables(mine, last.step.after.roots, seen.reads));
     } catch (error) {
       const reason = haltReason(error);
       if (reason === undefined) throw error;
@@ -487,7 +487,7 @@ export async function remadeAgainstModel(blocks: readonly ModelBlock[], size: nu
       let outcome: RunOutcome;
       try {
         for (const block of blocks.slice(start, end + 1)) reclaim.collect(BigInt(block.height), flushOf(block.flushed), on);
-        outcome = await reclaim.compute(runTables(mine, last.before.roots));
+        outcome = await reclaim.compute(runTables(mine, last.step.after.roots));
       } catch (error) {
         const reason = haltReason(error);
         if (reason === undefined) throw error;
@@ -510,6 +510,17 @@ export async function remadeAgainstModel(blocks: readonly ModelBlock[], size: nu
     }
   }
   return [];
+}
+
+/** `roots` with a block's root-count changes added: the root counts after that block. */
+export function withChanges(roots: ReadonlyMap<string, number>, changes: readonly { readonly key: string; readonly delta: number }[]): Map<string, number> {
+  const after = new Map(roots);
+  for (const { key, delta } of changes) {
+    const count = (after.get(key) ?? 0) + delta;
+    if (count === 0) after.delete(key);
+    else after.set(key, count);
+  }
+  return after;
 }
 
 /** The node set under `starts`: the keys they reach through `lists`, and the nodes those keys' child lists embed. */
@@ -553,7 +564,7 @@ export async function onItsOwn(script: HistoryScript, cut: Omit<InRuns, "feed">,
         reclaim.collect(BigInt(height), flushOf({ inserts: generated.inserts.map(({ key, children }) => ({ key, children })), rootCounts: generated.rootCounts }), on);
         if (height !== last) world.commit(generated, []);
       }
-      outcome = await reclaim.compute(runTables(mine, rootsBefore, seen.reads));
+      outcome = await reclaim.compute(runTables(mine, withChanges(rootsBefore, (generated as GeneratedBlock).rootCounts), seen.reads));
     } catch (error) {
       const reason = haltReason(error);
       if (reason === undefined) throw error;

@@ -33,6 +33,7 @@ import {
   type Seen,
   stepTables,
   tableDifferences,
+  withChanges,
 } from "./run-reclaim.js";
 
 /**
@@ -126,7 +127,7 @@ describe("T1: the run computation's tables are the reference model's at every ru
       // Each block's flush is what a package storing exactly the model's rows flushes: the state's nodes the model
       // does not hold with that child list, the new root persisted and the one before released.
       const model = new RefcountModel();
-      const blocks: { height: number; on: boolean; before: NodeTables; roots: ReadonlyMap<string, number>; flushed: RefcountBatch; after: NodeTables; afterRoots: ReadonlyMap<string, number> }[] = [];
+      const blocks: { height: number; on: boolean; before: NodeTables; flushed: RefcountBatch; after: NodeTables; afterRoots: ReadonlyMap<string, number> }[] = [];
       const lists = new Map<string, Uint8Array>();
       let twoFormsFrom: number | null = null;
       let previous: string | null = null;
@@ -150,7 +151,7 @@ describe("T1: the run computation's tables are the reference model's at every ru
           rootCounts: [{ key: root, delta: 1 }, ...(previous === null || previous === root ? [] : [{ key: previous, delta: -1 }])],
         };
         const step = model.block(flushed, true);
-        blocks.push({ height: h, on: true, before, roots: before.roots, flushed, after: step.after, afterRoots: step.after.roots });
+        blocks.push({ height: h, on: true, before, flushed, after: step.after, afterRoots: step.after.roots });
         previous = root;
       }
       // The extended DAG alone rewrites a node in its other form.
@@ -166,7 +167,7 @@ describe("T1: the run computation's tables are the reference model's at every ru
           const last = run.at(-1) as (typeof blocks)[number];
           const reclaim = new RunReclaim({ first: BigInt(first.height), last: BigInt(last.height), on: true });
           for (const block of run) reclaim.collect(BigInt(block.height), flushOf(block.flushed), true);
-          const outcome = await reclaim.compute(runTables(mine, last.roots));
+          const outcome = await reclaim.compute(runTables(mine, last.afterRoots));
           const next = applied(mine, outcome.net);
           const where = `after ${last.height}, runs of ${size}`;
           expect(next.problems, where).toEqual([]);
@@ -203,7 +204,7 @@ describe("T2: a run of one block is the per-block step", () => {
             const reclaim = new RunReclaim({ first: BigInt(block.height), last: BigInt(block.height), on: block.on });
             const compute = async () => {
               reclaim.collect(BigInt(block.height), flushOf(block.flushed), block.on);
-              return reclaim.compute(runTables(block.before, block.before.roots));
+              return reclaim.compute(runTables(block.before, block.step.after.roots));
             };
             if (!followsFlushRule(block.before.rows, block.flushed)) {
               const reason = await compute().then(
@@ -347,7 +348,7 @@ describe("T4: sweep off, and a change of sweep", () => {
     const reclaim = new RunReclaim({ first: 5n, last: 6n, on: false });
     reclaim.collect(5n, { inserts: [a, b, one].map((node) => ({ ...node, data })), rootCounts: [{ key: one.key, delta: 1 }] }, false);
     reclaim.collect(6n, { inserts: [{ ...two, data }], rootCounts: [{ key: two.key, delta: 1 }, { key: one.key, delta: -1 }] }, false);
-    const outcome = await reclaim.compute(runTables(NO_TABLES, new Map([[hex(one.key), 1]]), reads));
+    const outcome = await reclaim.compute(runTables(NO_TABLES, new Map([[hex(two.key), 1]]), reads));
     expect([outcome.evict, outcome.net.deleted, outcome.rounds]).toEqual([[], [], 0]);
     expect(outcome.net.inserts.map((node) => hex(node.key)).sort()).toEqual([a, b, one, two].map((node) => hex(node.key)).sort());
     expect(outcome.net.queued.map(hex)).toEqual([hex(one.key)]);
@@ -357,7 +358,7 @@ describe("T4: sweep off, and a change of sweep", () => {
     const sweepingRun = new RunReclaim({ first: 5n, last: 6n, on: true });
     sweepingRun.collect(5n, { inserts: [a, b, one].map((node) => ({ ...node, data })), rootCounts: [{ key: one.key, delta: 1 }] }, true);
     sweepingRun.collect(6n, { inserts: [{ ...two, data }], rootCounts: [{ key: two.key, delta: 1 }, { key: one.key, delta: -1 }] }, true);
-    const swept = await sweepingRun.compute(runTables(NO_TABLES, new Map([[hex(one.key), 1]])));
+    const swept = await sweepingRun.compute(runTables(NO_TABLES, new Map([[hex(two.key), 1]])));
     expect([swept.evict, swept.net.queued.map(hex)]).toEqual([[], [hex(one.key)]]);
   });
 
@@ -416,8 +417,8 @@ describe("the run's record and its reads", () => {
           const outcome = await reclaim.compute(runTables(found, roots, reads));
           return { reads, outcome };
         };
-        const small = await ask(first.before, last.before.roots);
-        const large = await ask(more(first.before), new Map([...last.before.roots, [hex(top.key), 1]]));
+        const small = await ask(first.before, last.step.after.roots);
+        const large = await ask(more(first.before), new Map([...last.step.after.roots, [hex(top.key), 1]]));
         expect(large.reads).toEqual(small.reads);
         expect(large.outcome.evict.map(hex)).toEqual(small.outcome.evict.map(hex));
         expect(large.outcome.net.deltas.length).toBe(small.outcome.net.deltas.length);
@@ -473,7 +474,7 @@ describe("the run's record and its reads", () => {
     const last = blocks.at(-1) as ModelBlock;
     const reclaim = new RunReclaim({ first: 0n, last: BigInt(last.height), on: true });
     for (const block of blocks) reclaim.collect(BigInt(block.height), flushOf(block.flushed), true);
-    const outcome = await reclaim.compute(runTables(NO_TABLES, last.before.roots));
+    const outcome = await reclaim.compute(runTables(NO_TABLES, last.step.after.roots));
     const given = [...outcome.evict, ...outcome.net.deleted, ...outcome.net.queued, ...outcome.net.unqueued, ...outcome.net.deltas.map(({ key }) => key)];
     expect(given.length).toBeGreaterThan(0);
     for (const key of given) expect([key.byteOffset, key.buffer.byteLength]).toEqual([0, 32]);
@@ -495,6 +496,28 @@ describe("by hand", () => {
   it("the two forms of a node have one key", () => {
     expect(wEmbedding.key).toBe(wReferencing.key);
     expect(same(wEmbedding.children, wReferencing.children)).toBe(false);
+  });
+
+  it("is computed after the last block's own rows: root_counts holds the counts after that block, and a state the last block releases is kept one block more, queued, as the per-block step keeps it", async () => {
+    const leafNode = made("leaf");
+    const [s0, s1] = [over("s0", leafNode), over("s1", leafNode)];
+    const blocks = madeBlocks([
+      { inserts: [leafNode, s0], persist: [s0] },
+      { inserts: [s1], persist: [s1], release: [s0] },
+      { inserts: [] },
+    ]);
+    const releasing = blocks[1] as ModelBlock;
+    // The per-block step keeps s0 at the block that releases it, queued, and deletes it at the next.
+    expect([releasing.step.after.rows.has(s0.key), releasing.step.after.queue.has(s0.key), (blocks[2] as ModelBlock).step.deleted]).toEqual([true, true, [s0.key]]);
+    // A run of that one block, given root_counts as that block's own rows left them: s0 has no root count there.
+    expect(releasing.step.after.roots.has(s0.key)).toBe(false);
+    const reclaim = new RunReclaim({ first: 1n, last: 1n, on: true });
+    reclaim.collect(1n, flushOf(releasing.flushed), true);
+    const outcome = await reclaim.compute(runTables(releasing.before, releasing.step.after.roots));
+    expect([outcome.evict.map(hex), outcome.net.queued.map(hex)]).toEqual([[], [s0.key]]);
+    expect(tableDifferences(applied(releasing.before, outcome.net).tables, releasing.step.after)).toEqual([]);
+    // In runs of 1, 2 and 3, every run's end holds the model's tables.
+    for (const size of [1, 2, 3]) expect(await inRuns(blocks, { size, feed: "per-block" }), `runs of ${size}`).toEqual([]);
   });
 
   it("the last child list written for a key inside a run is the one stored", async () => {
@@ -540,7 +563,7 @@ describe("by hand", () => {
     const found = (blocks[0] as ModelBlock).step.after;
     const reclaim = new RunReclaim({ first: 1n, last: 3n, on: true });
     for (const block of blocks.slice(1, 4)) reclaim.collect(BigInt(block.height), flushOf(block.flushed), true);
-    const outcome = await reclaim.compute(runTables(found, (blocks[3] as ModelBlock).before.roots));
+    const outcome = await reclaim.compute(runTables(found, (blocks[3] as ModelBlock).step.after.roots));
     expect(outcome.keptByReplaced).toBe(1);
     expect(tableDifferences(applied(found, outcome.net).tables, (blocks[3] as ModelBlock).step.after)).toEqual([
       `nodes differs: 1 rows the model lacks (${c.key.slice(0, 12)}), 0 it has and these lack ()`,
@@ -591,10 +614,10 @@ describe("by hand", () => {
     const [x, r] = [made("x"), over("r", made("x"))];
     const referencing = new RunReclaim({ first: 0n, last: 0n, on: true });
     referencing.collect(0n, { inserts: flushed(r), rootCounts: raise(r) }, true);
-    expect(await reasonOf(referencing.compute(runTables(NO_TABLES, new Map())))).toBe("missing-reference");
+    expect(await reasonOf(referencing.compute(runTables(NO_TABLES, new Map([[r.key, 1]]))))).toBe("missing-reference");
     const persisting = new RunReclaim({ first: 0n, last: 0n, on: true });
     persisting.collect(0n, { inserts: [], rootCounts: raise(x) }, true);
-    expect(await reasonOf(persisting.compute(runTables(NO_TABLES, new Map())))).toBe("missing-reference");
+    expect(await reasonOf(persisting.compute(runTables(NO_TABLES, new Map([[x.key, 1]]))))).toBe("missing-reference");
     // A reference of a list the run replaced is checked too: every list a block flushed is.
     const [first, second] = [made("p", [ref(x)]), made("p", [embedded(x)])];
     const top = over("top", first);
@@ -602,7 +625,7 @@ describe("by hand", () => {
     replaced.collect(0n, { inserts: flushed(first, top), rootCounts: raise(top) }, true);
     const again = over("again", second);
     replaced.collect(1n, { inserts: flushed(second, again), rootCounts: raise(again) }, true);
-    expect(await reasonOf(replaced.compute(runTables(NO_TABLES, new Map([[top.key, 1]]))))).toBe("missing-reference");
+    expect(await reasonOf(replaced.compute(runTables(NO_TABLES, new Map([[top.key, 1], [again.key, 1]]))))).toBe("missing-reference");
   });
 
   /** What `refcountStep` gives for one block on `tables`: "no halt", or its halt's reason. */
@@ -626,13 +649,13 @@ describe("by hand", () => {
     const referencing = new RunReclaim({ first: 1n, last: 2n, on: true });
     referencing.collect(1n, { inserts: flushed(r1), rootCounts: raise(r1) }, true);
     referencing.collect(2n, { inserts: flushed(x, r2), rootCounts: [...raise(r2), { key: r1.keyBytes, delta: -1 }] }, true);
-    expect(await haltOf(referencing.compute(runTables(NO_TABLES, new Map([[r1.key, 1]]))))).toBe("missing-reference at 1");
+    expect(await haltOf(referencing.compute(runTables(NO_TABLES, new Map([[r2.key, 1]]))))).toBe("missing-reference at 1");
     // Block 1 persists x, which block 2 first flushes, under r2.
     expect(await stepOf(NO_TABLES, new Map(), { inserts: [], rootCounts: raise(x) }, 1n)).toBe("missing-reference");
     const persisting = new RunReclaim({ first: 1n, last: 2n, on: true });
     persisting.collect(1n, { inserts: [], rootCounts: raise(x) }, true);
     persisting.collect(2n, { inserts: flushed(x, r2), rootCounts: raise(r2) }, true);
-    expect(await haltOf(persisting.compute(runTables(NO_TABLES, new Map([[x.key, 1]]))))).toBe("missing-reference at 1");
+    expect(await haltOf(persisting.compute(runTables(NO_TABLES, new Map([[x.key, 1], [r2.key, 1]]))))).toBe("missing-reference at 1");
     // Flushed by the block that references it, or by one before, it passes; so does a row the run found, which a
     // later block flushes again.
     const pairs: [NodeBatch, NodeBatch][] = [
@@ -643,12 +666,13 @@ describe("by hand", () => {
       const reclaim = new RunReclaim({ first: 1n, last: 2n, on: true });
       reclaim.collect(1n, first, true);
       reclaim.collect(2n, second, true);
-      expect(await haltOf(reclaim.compute(runTables(NO_TABLES, new Map(first.rootCounts.map(({ key }) => [hex(key), 1])))))).toBe("commits");
+      const roots = withChanges(new Map(), [...first.rootCounts, ...second.rootCounts].map(({ key, delta }) => ({ key: hex(key), delta })));
+      expect(await haltOf(reclaim.compute(runTables(NO_TABLES, roots)))).toBe("commits");
     }
     const stored = applied(NO_TABLES, (await (async () => {
       const reclaim = new RunReclaim({ first: 0n, last: 0n, on: true });
       reclaim.collect(0n, { inserts: flushed(x), rootCounts: raise(x) }, true);
-      return reclaim.compute(runTables(NO_TABLES, new Map()));
+      return reclaim.compute(runTables(NO_TABLES, new Map([[x.key, 1]])));
     })()).net).tables;
     const again = new RunReclaim({ first: 1n, last: 2n, on: true });
     again.collect(1n, { inserts: flushed(r1), rootCounts: raise(r1) }, true);
@@ -667,12 +691,12 @@ describe("by hand", () => {
     const reclaim = new RunReclaim({ first: 1n, last: 2n, on: true });
     reclaim.collect(1n, { inserts: flushed(wEmbedding, r1), rootCounts: raise(r1) }, true);
     reclaim.collect(2n, { inserts: flushed(p), rootCounts: raise(p) }, true);
-    expect(await haltOf(reclaim.compute(runTables(found, new Map([...roots, [r1.key, 1]]))))).toBe("negative-count at 1");
+    expect(await haltOf(reclaim.compute(runTables(found, new Map([...roots, [r1.key, 1], [p.key, 1]]))))).toBe("negative-count at 1");
     // On sound tables (c counted once) the same blocks commit.
     const sound = new RunReclaim({ first: 1n, last: 2n, on: true });
     sound.collect(1n, { inserts: flushed(wEmbedding, r1), rootCounts: raise(r1) }, true);
     sound.collect(2n, { inserts: flushed(p), rootCounts: raise(p) }, true);
-    expect(await haltOf(sound.compute(runTables({ ...found, refs: new Map([...found.refs, [c.key, 1]]), queue: new Set() }, new Map([...roots, [r1.key, 1]]))))).toBe("commits");
+    expect(await haltOf(sound.compute(runTables({ ...found, refs: new Map([...found.refs, [c.key, 1]]), queue: new Set() }, new Map([...roots, [r1.key, 1], [p.key, 1]]))))).toBe("commits");
   });
 
   it("of the blocks whose check fails, the first halts the run, a count before a reference at one block", async () => {
@@ -682,7 +706,7 @@ describe("by hand", () => {
     const r0 = over("r0", wReferencing);
     const [r1, r2, r3] = [over("r1", wEmbedding), over("r2", x), over("r3", c, x)];
     const found: NodeTables = { rows: new Map([[r0.key, r0.children], [wReferencing.key, wReferencing.children], [c.key, c.children]]), refs: new Map([[wReferencing.key, 1]]), queue: new Set([c.key]) };
-    const roots = new Map([[r0.key, 1], [r1.key, 1], [r2.key, 1]]);
+    const roots = new Map([[r0.key, 1], [r1.key, 1], [r2.key, 1], [r3.key, 1]]);
     const compute = (heights: { readonly count: bigint; readonly reference: bigint }) => {
       const reclaim = new RunReclaim({ first: 1n, last: 3n, on: true });
       for (const height of [1n, 2n, 3n]) {
@@ -715,7 +739,7 @@ describe("by hand", () => {
     expect(await inRuns(blocks, { size: 4, feed: "per-block" })).toEqual([]);
     const reclaim = new RunReclaim({ first: 0n, last: 3n, on: true });
     for (const block of blocks) reclaim.collect(BigInt(block.height), flushOf(block.flushed), true);
-    const outcome = await reclaim.compute(runTables(NO_TABLES, (blocks[3] as ModelBlock).before.roots));
+    const outcome = await reclaim.compute(runTables(NO_TABLES, (blocks[3] as ModelBlock).step.after.roots));
     expect(outcome.evict.map(hex)).toEqual([states[0], states[1]].map((state) => (state as (typeof states)[number]).key).sort());
     expect(outcome.net.deleted).toEqual([]);
     expect(outcome.net.inserts.map((node) => hex(node.key))).toEqual([leafNode, states[2], states[3]].map((node) => (node as (typeof states)[number]).key).sort());
