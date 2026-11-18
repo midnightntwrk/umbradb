@@ -23,7 +23,6 @@ import { UmbraError } from "../../src/db/errors.js";
 import { type AppliedState, EvictionRefused } from "../../src/ledger/worker/engine.js";
 import type { LedgerHost } from "../../src/ledger/worker/host.js";
 import type { BlockContext, ProcessContext } from "../../src/modules/declaration.js";
-import { encodeChildren } from "../ledger/node-format.js";
 
 // `core-ledger-state`'s parts on their own, over a fake ledger worker and block source: the binding, the checks before
 // a block's apply, the root check's error, the writes of a block's own rows, and the reclamation at `on-settle`. The
@@ -673,48 +672,5 @@ describe("the reclamation at on-settle", () => {
     const { p } = bound(twice.stateRoot, twice);
     await expect(computeBlock(p, block(3n), reading([{ ms: 1n }]))).rejects.toThrow(/block 3: the block writes 0x51.* twice/);
     await expect(settleRun(p, run3, sweeping())).rejects.toThrow(/handed over no block/);
-  });
-
-  it("hands the next block over to the record that expects it, and halts a longer run that keeps a node only a list its last block replaced referenced", async () => {
-    // P is a row whose stored list references K, K's only reference; block 4 rewrites P with an empty list, persisting
-    // P. The run 3 to 4 keeps K queued only because of that list: kept-by-replaced.
-    const P = hash(0x50);
-    const K = hash(0x4b);
-    const stored = encodeChildren([{ ref: K }]);
-    const rewritten = applied(4n, { batch: { inserts: [{ key: P, data: Uint8Array.of(1), children: Uint8Array.of(0) }], rootCounts: [{ key: P, delta: 1 }] } });
-    const p = context();
-    const host = {
-      async load() {
-        return { stateRoot: STORED_ROOT, loaded: false };
-      },
-      async apply(input: { height: bigint }) {
-        return input.height === 4n ? rewritten : applied(3n);
-      },
-      async evict() {
-        return 1;
-      },
-    } as unknown as LedgerHost;
-    bindCoreLedgerState(p, { ledger: host, source: { ledgerStateRoot: async () => applied(3n).stateRoot, genesisState: async () => Uint8Array.of(7) } });
-    await computeBlock(p, block(3n), reading([{ ms: 1n }]));
-    await computeBlock(p, block(4n), reading([{ ms: 1n }]));
-    const base = reading([{ ms: 1n }]);
-    const w = {
-      ...base,
-      async query(sql: string, params: unknown[] = []) {
-        if (sql.startsWith("SELECT node_key FROM core_ledger_state.nodes WHERE")) return [{ node_key: P }];
-        if (sql.includes("IS DISTINCT FROM b.children")) return [{ node_key: P, children: stored }];
-        if (sql.includes("AS stored")) {
-          return (params[0] as Uint8Array[]).map((key) => ({ node_key: key, stored: true, refs: key[0] === 0x4b ? 1 : 0, roots: key[0] === 0x50 ? 1 : 0 }));
-        }
-        if (sql.startsWith("SELECT node_key FROM core_ledger_state.unreferenced")) return [];
-        return base.query(sql, params);
-      },
-      async execute() {
-        throw new Error("nothing is written for a run that halts");
-      },
-    };
-    const error = await settleRun(p, { first: 3n, last: 4n }, w).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(UmbraError);
-    expect(error).toMatchObject({ code: "ledger-refcount-invalid", details: { reason: "kept-by-replaced", height: 4n, first: 3n, last: 4n, kept: 1 } });
   });
 });

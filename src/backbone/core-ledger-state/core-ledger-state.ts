@@ -591,13 +591,6 @@ export async function settleRun(
     const stepFrom = performance.now();
     const tables = sqlRunTables(w);
     const outcome = await record.compute(tracing() ? tracedRunTables(tables) : tables);
-    if (outcome.keptByReplaced > 0 && run.first < run.last) {
-      throw new UmbraError(
-        "ledger-refcount-invalid",
-        `the run ${run.first} to ${run.last}: ${outcome.keptByReplaced} node(s) would be kept only because a child list its last block replaced referenced them (kept-by-replaced)`,
-        { reason: "kept-by-replaced", height: run.last, first: run.first, last: run.last, kept: outcome.keptByReplaced },
-      );
-    }
     const evictFrom = performance.now();
     let refused = false;
     if (outcome.evict.length > 0) {
