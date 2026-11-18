@@ -6,7 +6,7 @@ import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import { chainDataHeaders, readChainDataView } from "../../src/runner/envelope.js";
 import { FinalizedLoop, HeightFailure, type LoopInput } from "../../src/runner/loop.js";
 import type { ProcessingEnd, ProcessStatus } from "../../src/runner/process.js";
-import { createdDirectory, cursorIn, PROCESS_BACKENDS, type ProcessDatabase } from "./process-backends.js";
+import { createdDirectory, cursorIn, pairs, PROCESS_BACKENDS, type ProcessDatabase } from "./process-backends.js";
 import { core, entryOf, loggingModule, settle, startProcess, testBuild } from "./process-build.js";
 import type { DatabaseParts } from "../../src/config/database-parts.js";
 
@@ -23,6 +23,7 @@ const POINTS: readonly PointName[] = [
   "on-start-height",
   "on-compute",
   "on-db-write",
+  "on-settle",
   "on-after-db-write",
   "on-stop-height",
 ];
@@ -128,7 +129,7 @@ function a45Problems(first: RunObservation, restart: RunObservation): string[] {
     if (observed.servedHeight !== "10") problems.push(`${name} served reads at ${observed.servedHeight}, not at 10`);
   }
   if (restart.cursor !== 10) problems.push(`the restart left the cursor at ${restart.cursor}`);
-  if (restart.log.some((line) => / on-(fetch|compute|db-write|start-height)@/.test(line))) {
+  if (restart.log.some((line) => / on-(fetch|compute|db-write|settle|start-height)@/.test(line))) {
     problems.push("the restart processed a height");
   }
   if (!restart.log.includes("core-chain on-stop-height@10 core")) {
@@ -287,6 +288,20 @@ describe.each(PROCESS_BACKENDS)("start and stop heights on $name", (backend) => 
       expect(at(first.log, "on-stop-height", 6)).toEqual(["d on-stop-height@6"]);
       expect(first.log.indexOf("d on-stop-height@6")).toBeGreaterThan(first.log.indexOf("d on-after-db-write@6"));
       expect(first.log.some((line) => line.startsWith("d ") && /@(7|8|9|10)$/.test(line))).toBe(false);
+      // on-settle follows the entries too: e's first at its start 4, after its on-db-write there; d's last at its stop 6,
+      // before its on-after-db-write and on-stop-height there; each module's settled rows are its heights.
+      const settles = (id: string) => first.log.filter((line) => line.startsWith(`${id} on-settle@`));
+      expect(settles("e")[0]).toBe("e on-settle@4..4");
+      expect(first.log.indexOf("e on-settle@4..4")).toBeGreaterThan(first.log.indexOf("e on-db-write@4"));
+      expect(settles("d").at(-1)).toBe("d on-settle@6..6");
+      expect(first.log.indexOf("d on-settle@6..6")).toBeLessThan(first.log.indexOf("d on-after-db-write@6"));
+      const settled = async (id: string) =>
+        (await pairs(db, `SELECT height::int AS h, 0 AS v FROM ${id}.settled ORDER BY height`)).map(([h]) => h);
+      const span = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, index) => from + index);
+      expect(settles("e")).toEqual(span(4, 10).map((h) => `e on-settle@${h}..${h}`));
+      expect(settles("d")).toEqual(span(1, 6).map((h) => `d on-settle@${h}..${h}`));
+      expect(await settled("e")).toEqual(span(4, 10));
+      expect(await settled("d")).toEqual(span(1, 6));
     }, 180_000);
 
     it("gives on-start-height a read at h − 1 and on-stop-height a read at h, each with its entry", async () => {

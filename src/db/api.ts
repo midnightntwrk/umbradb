@@ -32,8 +32,9 @@ export interface ReadHandle {
 }
 
 /**
- * Inside the block transaction, under the module's role. It reads committed data plus what earlier callbacks wrote in
- * the block, and is closed once its `on-db-write` callback ends (`handle-closed`). Built in `./write-handles.ts`.
+ * Inside the block transaction, under the module's role: what `on-db-write` and `on-settle` get. It reads committed data
+ * plus what earlier callbacks wrote in the block, and is closed once the callback it was given to returns or throws:
+ * every later use fails with `handle-closed`, naming that callback's point. Built in `./write-handles.ts`.
  */
 export interface BlockWriteHandle extends ReadHandle {
   /** Runs one statement and returns the number of rows it affected; own schema only. */

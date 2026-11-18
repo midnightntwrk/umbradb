@@ -176,9 +176,10 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   `"on-settle"(processContext, run, writer)`. UmbraDB calls it for a run of heights, `{ first, last }` both included,
   inside the transaction that holds the run's last block: after every module's `on-db-write` of that block and before
   the `COMMIT`, in `on-db-write`'s order, with that transaction's block write handle. A failure there is handled as
-  one of `on-db-write`. The engine chooses the runs. In this version a run is always one block. No part of UmbraDB
-  declares the point yet, and a sync whose modules do not declare it sends the same statements as before. `BlockRun`,
-  the run's type, is exported. The module guide's §3 describes the point.
+  one of `on-db-write`. The engine chooses the runs. In this version a run is always one block. `core-digest` now
+  computes a block's digests and checkpoint at `on-settle`, last, so they take what every module's `on-settle` wrote;
+  a sync whose modules declare no `on-settle` sends the same statements, in the same order, as before. `BlockRun`, the
+  run's type, is exported. The module guide's §3 describes the point.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 

@@ -25,9 +25,9 @@ import { Contexts } from "../runner/fixtures.js";
  * - the test module `token-scan`, which writes nothing of its own;
  * - the real `core-digest`, so that change capture runs on the helper's table as on any module table.
  *
- * A block, as the runner writes one: one transaction of the database API, with its `on-db-write` callbacks run through
- * the real block write handles (`openBlockWrites`). `core-block-commit`'s row comes first, then one module's callback,
- * then `core-digest`'s.
+ * A block, as the runner writes one: one transaction of the database API, with its callbacks run through the real block
+ * write handles (`openBlockWrites`). `core-block-commit`'s `on-db-write` comes first, then one module's callback, then
+ * `core-digest`'s `on-settle`, with the run of that one block.
  *
  * The height-versioned table's tests (`height-versioned-harness.ts`) start the same way with their own modules,
  * through {@link helperDatabase}.
@@ -147,7 +147,7 @@ export async function helperDatabase(
   const main = modules[0].id;
   const [row] = await db.transaction((tx) => tx.query("SELECT current_user AS login"));
   const commitRow = CORE_BLOCK_COMMIT.points["on-db-write"] as PointCallbacks["on-db-write"];
-  const digest = CORE_DIGEST.points["on-db-write"] as PointCallbacks["on-db-write"];
+  const digest = CORE_DIGEST.points["on-settle"] as PointCallbacks["on-settle"];
   let committed: bigint | null = null;
   return {
     db,
@@ -174,7 +174,8 @@ export async function helperDatabase(
         });
         await writes.write(CORE_BLOCK_COMMIT.id, (w) => commitRow(contexts.of(CORE_BLOCK_COMMIT.id), b, w));
         await writes.write(part, (w) => body(w, b));
-        await writes.write(CORE_DIGEST.id, (w) => digest(contexts.of(CORE_DIGEST.id), b, w));
+        const run = Object.freeze({ first: height, last: height });
+        await writes.write(CORE_DIGEST.id, (w) => digest(contexts.of(CORE_DIGEST.id), run, w), "on-settle");
       });
       committed = height;
     },

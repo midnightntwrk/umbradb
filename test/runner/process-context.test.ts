@@ -496,7 +496,7 @@ function watching(): { readonly seen: [string, unknown][]; readonly contexts: Se
 }
 
 /** A provider that publishes `client` in its `on-start-db` and `late` from `point` (catching the refusal or not). */
-function latePublisher(point: "on-compute" | "on-after-db-write" | "on-start-api", caught: boolean): ModuleDeclaration {
+function latePublisher(point: "on-compute" | "on-settle" | "on-after-db-write" | "on-start-api", caught: boolean): ModuleDeclaration {
   const late = (p: ProcessContext): void => {
     try {
       p.publish("late", "too late");
@@ -685,12 +685,17 @@ describe.each(RUNNER_BACKENDS)("process items through the runner on $name", (bac
     expect((error as Error).message).toMatch(/^provider published the item stranger, which it does not declare/);
   }, 60_000);
 
-  it("fails the height when on-compute publishes, caught or not; nothing of it commits", async () => {
-    for (const caught of [false, true]) {
+  it("fails the height when on-compute or on-settle publishes, caught or not, naming that point; nothing of it commits", async () => {
+    for (const [late, caught] of [
+      ["on-compute", false],
+      ["on-compute", true],
+      ["on-settle", false],
+      ["on-settle", true],
+    ] as const) {
       const { db } = await backend.database();
       const process = await startProcess(
         db,
-        [latePublisher("on-compute", caught), consumer({})],
+        [latePublisher(late, caught), consumer({})],
         [entry("provider", 1), entry("consumer", 1)],
         { listen: null },
       );
@@ -698,9 +703,9 @@ describe.each(RUNNER_BACKENDS)("process items through the runner on $name", (bac
       await process.close();
       expect(failure).toBeInstanceOf(HeightFailure);
       const { height, point, module, committed } = failure as HeightFailure;
-      expect({ height, point, module, committed }).toEqual({
+      expect({ height, point, module, committed }, `${late} ${caught}`).toEqual({
         height: 1n,
-        point: "on-compute",
+        point: late,
         module: "provider",
         committed: false,
       });

@@ -63,8 +63,9 @@ loop processes every height from the cursor + 1 to the head, one at a time:
    at the same time. Compute here.
 4. **`on-db-write`, then `on-settle`**: one `BEGIN … COMMIT` for every module's writes. Each module's `on-db-write`
    writes the block's rows; then each `on-settle` gets the run of heights it settles, which ends at h. The engine
-   chooses the runs. In this version a run is always one block. Before the `COMMIT` the cursor is checked to be h with
-   this block's hash.
+   chooses the runs. In this version a run is always one block. `core-digest`'s `on-settle` runs last and takes the
+   block's digests from every change of the transaction. Before the `COMMIT` the cursor is checked to be h with this
+   block's hash.
 5. **`on-after-db-write`**: reads the committed state at h. Notify subscribers here.
 6. **`on-stop-height`**: once, after the height where a module's entry stops has committed.
 
