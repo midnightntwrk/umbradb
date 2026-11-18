@@ -125,7 +125,11 @@ describe.each(PROCESS_BACKENDS)("the block before, kept in memory, through the p
     expect(off.run.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
     expect(readsOf(off.calls)).toEqual(readsAt(heightsFrom(1n, BigInt(LAST))));
     expect(loadedKeys(off.loads)).toEqual(loadedKeys(before.loads));
-    expect(off.applies).toEqual(before.applies);
+    // The same input at every height. Each block from 2 on is applied ahead by the settle of the block before; with the
+    // memory off no block continues the one before, so that result is dropped and the block asked for again at its
+    // turn, with the same input (the worker gives its pending result back).
+    expect(before.applies.map((apply) => apply.height)).toEqual(heightsFrom(1n, BigInt(LAST)).map(({ height }) => height));
+    expect(off.applies).toEqual(before.applies.flatMap((apply) => (apply.height >= 2n ? [apply, apply] : [apply])));
     expect(rowDifferences(before.rows, off.rows)).toEqual([]);
     expect(await everyRow(db)).toEqual(await everyRow(offDb));
   }, PATIENCE_MS * 4);

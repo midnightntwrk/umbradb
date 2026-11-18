@@ -212,6 +212,9 @@ const BASE = {
     .strictObject({ keys: count().default(100_000), verify: z.boolean().default(false) })
     .prefault({})
     .meta(OPERATIONAL),
+  // Whether `core-ledger-state` has the ledger worker apply the next block while a block's transaction runs, once that
+  // block's eviction is sent. Operational: what is stored does not depend on it.
+  applyAhead: z.boolean().default(true).meta(OPERATIONAL),
 };
 
 /** `genesisHash` is required with the network `custom`, and only then. */

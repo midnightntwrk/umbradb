@@ -39,8 +39,10 @@ import { type DagRun, runDag } from "./refcount-process.js";
  * applied it and was sent its eviction once, and its commit reaches the worker once that cursor read found h committed,
  * before h's `on-after-db-write` (the engine tells the worker's host, which sends it); when it did
  * not, h is made again from `on-compute`: applied again (the worker gives its pending result) and its eviction sent
- * again. Either way the worker loads no state from the database, and the tables after every block are a run's with no
- * fault.
+ * again. h + 1, applied ahead by h's settle, is not taken from that apply after the lost answer (h + 1 does not
+ * continue h, or h was made again): it is applied at its turn, which the worker answers from the state it holds
+ * pending. Either way the worker loads no state from the database, and the tables after every block are a run's with
+ * no fault.
  */
 
 /** The tables whose rows are compared whole: every table of `core_ledger_state`, by its digest. */
@@ -163,6 +165,7 @@ describe("a COMMIT whose answer is lost, with the ledger worker in the process, 
     const proxy = await CommitProxy.start(db.setting as PostgresParts);
     const memory = countersMemory();
     const applies = new Map<bigint, number>();
+    const aheads = new Map<bigint, number>();
     const evictions = new Map<bigint, number>();
     let armed = false;
     class ArmingLoop extends FinalizedLoop {
@@ -182,6 +185,7 @@ describe("a COMMIT whose answer is lost, with the ledger worker in the process, 
             return (input: Parameters<LedgerHost["apply"]>[0], read: Parameters<LedgerHost["apply"]>[1]) => {
               height = input.height;
               applies.set(input.height, (applies.get(input.height) ?? 0) + 1);
+              if (input.ahead === true) aheads.set(input.height, (aheads.get(input.height) ?? 0) + 1);
               return target.apply(input, read);
             };
           }
@@ -205,7 +209,7 @@ describe("a COMMIT whose answer is lost, with the ledger worker in the process, 
       await proxy.close();
     }
     const shared = new Int32Array(memory);
-    return { run, faults: proxy.faults, applies, evictions, storeLoads: Atomics.load(shared, COUNTERS.storeLoads), threads: Atomics.load(shared, COUNTERS.threads) };
+    return { run, faults: proxy.faults, applies, aheads, evictions, storeLoads: Atomics.load(shared, COUNTERS.storeLoads), threads: Atomics.load(shared, COUNTERS.threads) };
   }
 
   for (const [fault, outcome] of [
@@ -222,7 +226,9 @@ describe("a COMMIT whose answer is lost, with the ledger worker in the process, 
       const times = fault === "after" ? 1 : 2;
       expect(lost.applies.get(h)).toBe(times);
       expect(lost.evictions.get(h)).toBe(times);
-      expect(lost.applies.get(h + 1n)).toBe(1);
+      // h + 1: applied ahead by h's settle (the first attempt's, either way), then at its turn after the lost answer.
+      expect(lost.applies.get(h + 1n)).toBe(2);
+      expect(lost.aheads.get(h + 1n)).toBe(1);
       // The worker never loaded a state from the database: it held the state after h, pending, throughout.
       expect({ threads: lost.threads, storeLoads: lost.storeLoads }).toEqual({ threads: 1, storeLoads: 0 });
       for (let height = 0n; height <= BigInt(LAST); height++) {

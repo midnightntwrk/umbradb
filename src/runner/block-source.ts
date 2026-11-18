@@ -94,6 +94,12 @@ export interface BlockSource {
    * failure: a node's, or a callback's (`CallbackFailure`), which halts at that height.
    */
   prepared?(height: bigint): Promise<PreparedBlock>;
+  /**
+   * Optional, with {@link prepared}: the finalized block at `height`, above the loop's next height, when the source has
+   * it prepared already; null otherwise. It never waits and takes nothing: the loop still asks for the height with
+   * {@link prepared}, and gets that block.
+   */
+  ahead?(height: bigint): PreparedBlock | null;
   /** Optional: the source's conditions now, such as `finality-stall` while its queue is full. */
   conditions?(): readonly SourceCondition[];
   /**

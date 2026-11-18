@@ -27,7 +27,8 @@
  * there is one, or else runs `chain_getBlock`, `on-fetch` and `on-parse` through the runner (`QueueRunner.prepare`).
  *
  * The loop takes each prepared height (`prepared`) in order, so every height is still committed in its own
- * transaction. A queued block at the height with another hash is dropped, with everything queued above it
+ * transaction. A height above the loop's that is prepared already is also given, without taking it, to `ahead`: the
+ * loop's block context of the next height, for its apply ahead (`src/runner/loop.ts`'s `FinalizedLoop.ahead`). A queued block at the height with another hash is dropped, with everything queued above it
  * (`on-rollback`), and the finalized block is fetched. The heights look into the queue in height order, so such a drop
  * is one `on-rollback`, from the lowest.
  *
@@ -144,6 +145,8 @@ interface QueuedBlock {
 /** A finalized height the prefetch prepares. */
 interface Prefetch {
   readonly promise: Promise<PreparedBlock>;
+  /** The block once prepared ({@link NodeBlockSource.ahead}). */
+  ready?: PreparedBlock;
 }
 
 /** A pending {@link NodeBlockSource.waitForHead}. */
@@ -349,6 +352,16 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     const prepared = await prefetch.promise;
     this.#prefetch.delete(height);
     return prepared;
+  }
+
+  /**
+   * The finalized block at `height` once the prefetch prepared it, while the loop runs and the source has not failed;
+   * null otherwise (`BlockSource.ahead`). It never waits and takes nothing: the loop's own request for the height gets
+   * that block, and a run that ends drops it with the rest of the prefetch.
+   */
+  ahead(height: bigint): PreparedBlock | null {
+    if (this.#runner === undefined || this.#failure !== undefined) return null;
+    return this.#prefetch.get(height)?.ready ?? null;
   }
 
   /** Resolves once the queue's work asked for so far is done (each best block, each head's check): for tests. */
@@ -609,8 +622,13 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     });
     const promise = this.#prepareFinalized(runner, height, epoch, below, taken);
     // The loop awaits it when it reaches the height; a run that ended leaves it unawaited.
-    promise.catch(() => undefined);
     const prefetch: Prefetch = { promise };
+    promise.then(
+      (prepared) => {
+        prefetch.ready = prepared;
+      },
+      () => undefined,
+    );
     this.#prefetch.set(height, prefetch);
     return prefetch;
   }

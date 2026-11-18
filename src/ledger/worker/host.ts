@@ -18,7 +18,10 @@
  * it answers the node requests of every request given none, those already waiting for a read too, until it is taken
  * back. `core-ledger-state` lends its block transaction's handle while it awaits its eviction: a request sent before
  * the eviction and given no read (a later block's parse at `on-parse`) may wait in the worker for a stored node, and on
- * PGlite a read of the database waits behind that open transaction.
+ * PGlite a read of the database waits behind that open transaction. It sends the apply of the next block, marked ahead
+ * (`ApplyBlock.ahead`), with no read, since it outlives the callback that sends it; that block's `on-compute` lends
+ * its read while it awaits the result, which on PGlite holds the one queue the apply's node requests would otherwise
+ * wait for.
  *
  * **A step's time** is not bounded. A ledger step may take minutes (the v8 → v9 conversion, loading a large state),
  * and nothing cuts a height off for being slow. It is reported instead: {@link LedgerHost.activity} names the step in
@@ -46,11 +49,11 @@
  * transaction that holds each block, and the host alone decides what the thread is sent:
  * - `committed(h)`: the `COMMIT` that holds h answered, or the cursor read after a lost answer found h committed. When
  *   the host sent the thread an apply or the genesis of h (`core-ledger-state` applies every block it is active at), it
- *   sends the commit of h, so that the state after h becomes the one h + 1 is applied on; then, always, the release of
- *   the parses kept up to h. So a block nothing applied (a height where `core-block-parsed` runs and
- *   `core-ledger-state` does not, or the cursor's block re-delivered after a restart) gets the release alone. Neither
- *   is awaited: the thread answers in order, so the next block's apply finds h committed, and a thread that failed
- *   fails that apply.
+ *   sends the commit of h, so that the state after h becomes the committed one (h + 1, if applied ahead on h's pending
+ *   state before, stays pending on it); then, always, the release of the parses kept up to h. So a block nothing
+ *   applied (a height where `core-block-parsed` runs and `core-ledger-state` does not, or the cursor's block
+ *   re-delivered after a restart) gets the release alone. Neither is awaited: the thread answers in order, so a later
+ *   request (h + 1's load and its apply at its turn) finds h committed, and a thread that failed fails it.
  * - `written(h)`: h's rows are in the open transaction. `rolledBack(h)`: h will not be committed by the transaction it
  *   was processed for, which ended without committing, or h's run ended before it was written. Neither sends anything:
  *   the host keeps the blocks written in the open transaction and not yet committed, which a commit or a rollback ends.

@@ -121,8 +121,8 @@
  *
  * At the eviction the worker holds two states: the one committed after the block before the run, and the one after
  * its last block, pending. The computation deletes nothing that either reaches through the stored child lists
- * (`docs/research/run-reclamation.md`, section 5). No block above the run is applied before the eviction is sent:
- * its apply is sent at its own `on-compute`, after the `COMMIT`.
+ * (`docs/research/run-reclamation.md`, section 5). No block above the run is applied before the eviction is sent: the
+ * next block's apply ahead is sent right after it (below).
  *
  * If the package still refuses the eviction after the worker freed what it can, the worker thread is ended and a new
  * one started, and the net write and the `COMMIT` go on: the eviction is sent once per attempt of the height, and the
@@ -153,6 +153,21 @@
  * tables for the keys it holds given tables undamaged when the process started and written by this process only. With
  * `reclamationCache.verify` every key it answers is also read, and a difference halts with `copy-mismatch`.
  *
+ * **The next block applied ahead** (`./apply-ahead.ts`). Right after the settle of h sends its eviction (after its
+ * computation when it evicts nothing), it sends the apply of h + 1, marked ahead and given no read, when the runner has
+ * h + 1 prepared ({@link LedgerBinding.ahead}), h + 1 is not 0 or 1 and does not change the ledger (a conversion or an
+ * upgrade within v9), and the keys of the states h + 1 releases are among those kept of the block before; its input is
+ * built from h + 1's `block` items and what h's rows hold (the block before, from memory), and kept, as owned copies,
+ * with the worker's restart count and the result, until h + 1's `on-compute`. The worker answers in order, so it has
+ * forgotten what h deleted before it applies h + 1. h + 1's `on-compute` builds its input as always, still asks the
+ * worker to hold the state at h, lends its read while it awaits, and uses the result applied ahead when h + 1
+ * continues h (`b.continues`), the worker thread is the same, the two inputs are equal and the apply did not fail;
+ * otherwise it drops it and applies h + 1 at its turn, first restarting the thread when that thread holds the result
+ * of another input (it would give it back for the same block). The result is dropped at once when h's `on-settle`
+ * throws, and at the next `on-compute` when that block does not continue the one before (h made again, h's `COMMIT`
+ * lost its answer, a replaced writer's session); a dropped result is kept only for that restart decision. The `core`
+ * entry's `applyAhead` turns it off. The block trace marks `aheadUsed` and `aheadDropped`.
+ *
  * The declaration ({@link CORE_LEDGER_STATE}) is a constant built over its rules. A negative control's build composes
  * its own with {@link coreLedgerState}, with one rule replaced.
  */
@@ -164,7 +179,7 @@ import type { BlockWriteHandle, ReadHandle } from "../../db/api.js";
 import { UmbraError } from "../../db/errors.js";
 import { firstRegularAtParentTime, parentTimestampMs } from "../../ledger/replay.js";
 import type { ChainOutcome, LedgerEvent, LedgerName, NodeBatch, StateSummary, TransactionResult, VmLog } from "../../ledger/types.js";
-import { type AppliedState, type ContractKeys, convertsFromV8, isEvictionRefused } from "../../ledger/worker/engine.js";
+import { type AppliedState, type ApplyBlock, type ContractKeys, convertsFromV8, isEvictionRefused } from "../../ledger/worker/engine.js";
 import type { LedgerHost } from "../../ledger/worker/host.js";
 import { traceAdd, traceChain, tracedRead, traceMark, traceSteps, tracing } from "../../trace/trace.js";
 import {
@@ -195,6 +210,7 @@ import {
   stateAt,
   stateKeysByHeight,
 } from "./sql.js";
+import { type AheadApply, applyAheadOf, ownedApplyInput, sameApplyInput } from "./apply-ahead.js";
 import { type CopyCounted, type CopyFault, CountsCopy, reclamationCacheOf, withCountsCopy } from "./counts-copy.js";
 import { StoredKeys } from "./stored-keys.js";
 import {
@@ -263,6 +279,11 @@ export interface RetainedStates {
 export interface LedgerBinding {
   readonly ledger: LedgerHost;
   readonly source: BlockLedgerSource;
+  /**
+   * The block context `core-ledger-state` will get at `height`, a height above the one in progress, when the runner has
+   * it prepared (`FinalizedLoop.ahead`); null otherwise. Without it no block is applied ahead.
+   */
+  readonly ahead?: (height: bigint) => BlockContext | null;
 }
 
 const BOUND = new WeakMap<ProcessContext, LedgerBinding>();
@@ -336,6 +357,21 @@ export interface CoreLedgerStateOptions {
   readonly keep?: (kept: KeptBlock) => KeptBlock;
   /** A fault put into the use of the copy of the counts and child lists (`./counts-copy.ts`); none in a build. */
   readonly copyFault?: CopyFault;
+  /**
+   * Whether the result of the block applied ahead is dropped when its input differs from the one built at the block's
+   * turn (`./apply-ahead.ts`, rule 1); true by default. A negative control's false uses the result all the same.
+   */
+  readonly aheadChecksInput?: boolean;
+  /**
+   * Whether the result of the block applied ahead is dropped when the worker thread that applied it has been replaced
+   * since (`./apply-ahead.ts`, rule 2); true by default. A negative control's false uses the result all the same.
+   */
+  readonly aheadChecksThread?: boolean;
+  /**
+   * A negative control's true sends the apply of the next block ahead at the start of a settle, before its computation
+   * and eviction, breaking the rule of `./apply-ahead.ts`; false by default.
+   */
+  readonly aheadSentBeforeEviction?: boolean;
 }
 
 const hex = (bytes: Uint8Array): string => `0x${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
@@ -398,6 +434,32 @@ export function countsCopyOf(p: ProcessContext): CountsCopy | null {
     COPIES.set(p, copy);
   }
   return copy;
+}
+
+/**
+ * The apply ahead each process context's last settle sent, until that block's `on-compute` (`./apply-ahead.ts`), and
+ * whether its result may still be used: once dropped as a result it is kept only for what it says the worker may hold
+ * pending, which decides whether the block's apply at its turn needs a new thread ({@link resultAhead}).
+ */
+const AHEAD = new WeakMap<ProcessContext, { readonly apply: AheadApply; readonly usable: boolean }>();
+
+/** Drops `p`'s apply ahead as a result: it is never used, and is kept for what the worker may hold pending. */
+function dropAhead(p: ProcessContext): void {
+  const ahead = AHEAD.get(p);
+  if (ahead !== undefined) AHEAD.set(p, { apply: ahead.apply, usable: false });
+}
+
+/** Each process context's `applyAhead`, read once from its `config` item. */
+const APPLY_AHEAD = new WeakMap<ProcessContext, boolean>();
+
+/** Whether `p`'s process applies the next block ahead: the `core` entry's `applyAhead` (`./apply-ahead.ts`). */
+function appliesAhead(p: ProcessContext): boolean {
+  let on = APPLY_AHEAD.get(p);
+  if (on === undefined) {
+    on = applyAheadOf(configOf(p));
+    APPLY_AHEAD.set(p, on);
+  }
+  return on;
 }
 
 /** The `core` revisions of each process context, read once from its `config` item. */
@@ -719,26 +781,33 @@ export async function applyBlock(
       read,
     );
   } else {
-    // The block before: what on-db-write kept of it when b continues it, else its rows at h − 1.
-    const kept = keptBefore(p, b);
-    // The worker holds the stored state at h − 1, read from the database after a restart, with its root.
-    const parent: StoredState = kept ?? (await stateAt(read, b.height - 1n));
-    if (kept !== null && options.checkKept === true) checkKeptState(b, kept, await stateAt(read, b.height - 1n));
-    if (options.loadParent !== false) {
-      const held = await host.load({ ledger: parent.ledger, height: b.height - 1n, hash: b.parentHash, stateKey: parent.stateKey }, read);
-      if (!sameBytes(held.stateRoot, parent.stateRoot)) {
-        throw new Error(
-          `the ledger state loaded for block ${b.height - 1n} has the root ${hex(held.stateRoot)}, and ${STATES_TABLE} ` +
-            `stores ${hex(parent.stateRoot)} for it`,
-        );
-      }
-    }
-    const persists = (options.persistsContracts ?? ((c: BlockContext) => c.active(CORE_CONTRACT_STATES_ID)))(b);
-    const applyWith = (options.ledgerOf ?? (() => ledger))(b, parent.ledger);
-    // At the conversion block F the worker converts the v8 state first, so every contract it holds gets new keys.
-    const others = persists ? [maintainedOf(b), convertsFromV8(parent.ledger, applyWith) ? await deployedBelow(read, b.height) : []] : [];
-    applied = await host.apply(
-      {
+    // The result of b's apply ahead, sent by the settle of the block before, if any: taken now, used or dropped below.
+    const ahead = takeAhead(p, b);
+    // Sent with no read: while this callback awaits it, its node requests read through this callback's read, which on
+    // PGlite holds the one queue. An apply ahead in a thread replaced since makes no request.
+    const unlend = ahead === null || ahead.apply.restarts !== host.restarts ? null : host.lend(read as Pick<ReadHandle, "query">);
+    try {
+      // The block before: what on-db-write kept of it when b continues it, else its rows at h − 1.
+      const kept = keptBefore(p, b);
+      // The worker holds the stored state at h − 1, read from the database after a restart, with its root.
+      const parent: StoredState = kept ?? (await stateAt(read, b.height - 1n));
+      if (kept !== null && options.checkKept === true) checkKeptState(b, kept, await stateAt(read, b.height - 1n));
+      const loadParent = async (): Promise<void> => {
+        if (options.loadParent === false) return;
+        const held = await host.load({ ledger: parent.ledger, height: b.height - 1n, hash: b.parentHash, stateKey: parent.stateKey }, read);
+        if (!sameBytes(held.stateRoot, parent.stateRoot)) {
+          throw new Error(
+            `the ledger state loaded for block ${b.height - 1n} has the root ${hex(held.stateRoot)}, and ${STATES_TABLE} ` +
+              `stores ${hex(parent.stateRoot)} for it`,
+          );
+        }
+      };
+      await loadParent();
+      const persists = (options.persistsContracts ?? ((c: BlockContext) => c.active(CORE_CONTRACT_STATES_ID)))(b);
+      const applyWith = (options.ledgerOf ?? (() => ledger))(b, parent.ledger);
+      // At the conversion block F the worker converts the v8 state first, so every contract it holds gets new keys.
+      const others = persists ? [maintainedOf(b), convertsFromV8(parent.ledger, applyWith) ? await deployedBelow(read, b.height) : []] : [];
+      const input: ApplyBlock = {
         ledger: applyWith,
         ...block,
         parentHash: b.parentHash,
@@ -752,9 +821,13 @@ export async function applyBlock(
         ...(outcomes === undefined ? {} : { outcomes }),
         release: await releasesOf(p, b, read, options, kept),
         contracts: persists ? contractsOf(transactions, ...others) : [],
-      },
-      read,
-    );
+      };
+      const taken = ahead === null ? null : await resultAhead(p, b, ahead, input, options, loadParent);
+      applied = taken ?? (await host.apply(input, read));
+    } finally {
+      // Once no node request is still answered through this read, which ends with this callback.
+      await unlend?.();
+    }
   }
   // Traced apart: the wait for the node's root once the worker has answered is the node's time, not the apply's.
   const rootFrom = performance.now();
@@ -769,6 +842,125 @@ export async function applyBlock(
     );
   }
   return applied;
+}
+
+/**
+ * The apply ahead `p`'s last settle sent, taken at `b`'s `on-compute` when it is `b`'s; null otherwise. One of the block
+ * after `b` was sent by an attempt of `b` that did not commit, `b` being made again now: it is dropped as a result and
+ * kept for what the worker holds, until the block after `b` (whose apply ahead `b`'s settle may send again) or a
+ * settle that replaces it. Any other is dropped.
+ */
+function takeAhead(p: ProcessContext, b: BlockContext): { readonly apply: AheadApply; readonly usable: boolean } | null {
+  const ahead = AHEAD.get(p);
+  if (ahead !== undefined && ahead.apply.block.height === b.height + 1n) {
+    dropAhead(p);
+    return null;
+  }
+  AHEAD.delete(p);
+  return ahead !== undefined && ahead.apply.block.height === b.height ? ahead : null;
+}
+
+/**
+ * The result of `b`'s apply ahead, `taken`, when it is what the apply of `input` at `b`'s turn gives (see the module
+ * comment and `./apply-ahead.ts`): it was not dropped as a result, `b` continues the block it was applied on top of, the
+ * worker thread is the one that applied it, its input is `input`, and it did not fail. Null otherwise, and `b` is
+ * applied at its turn: when the thread that applied it is still the worker's and holds the result of another input for
+ * the same block, which it would give back, a new thread is started first and the state at h − 1 loaded in it
+ * (`reload`).
+ */
+async function resultAhead(
+  p: ProcessContext,
+  b: BlockContext,
+  taken: { readonly apply: AheadApply; readonly usable: boolean },
+  input: ApplyBlock,
+  options: CoreLedgerStateOptions,
+  reload: () => Promise<void>,
+): Promise<AppliedState | null> {
+  const { ledger: host } = boundLedger(p);
+  const ahead = taken.apply;
+  const result = await ahead.result;
+  const sameThread = ahead.restarts === host.restarts;
+  const sameInput = sameApplyInput(ahead.input, input);
+  const onParent = ahead.on.height === b.height - 1n && sameBytes(ahead.on.hash, b.parentHash);
+  if (
+    taken.usable &&
+    b.continues &&
+    onParent &&
+    !(result instanceof Error) &&
+    (options.aheadChecksThread === false || sameThread) &&
+    (options.aheadChecksInput === false || sameInput)
+  ) {
+    traceMark("aheadUsed", 1);
+    return result;
+  }
+  traceMark("aheadDropped", 1);
+  if (sameThread && !(result instanceof Error) && !sameInput) {
+    await host.restart();
+    await reload();
+  }
+  return null;
+}
+
+/**
+ * Sends the apply of the block after `height`, marked ahead, and keeps it for that block's `on-compute` (see the module
+ * comment), when the process applies ahead, the runner has that block prepared on top of the block `height` kept, and
+ * its input can be built now ({@link aheadInputOf}). Sends nothing otherwise, and never throws: that block is then
+ * applied at its turn, whose `on-compute` builds the input again and fails there if it must.
+ */
+function sendAhead(p: ProcessContext, height: bigint, options: CoreLedgerStateOptions): void {
+  const binding = boundLedger(p);
+  if (height < 1n || binding.ahead === undefined || options.loadParent === false || !appliesAhead(p)) return;
+  try {
+    const kept = KEPT.get(p);
+    if (kept === undefined || kept.height !== height) return;
+    const next = binding.ahead(height + 1n);
+    if (next === null || next.height !== height + 1n || !sameBytes(next.parentHash, kept.hash)) return;
+    const built = aheadInputOf(p, next, kept, options);
+    if (built === null) return;
+    const input = ownedApplyInput(built);
+    const restarts = binding.ledger.restarts;
+    const result = binding.ledger.apply({ ...input, ahead: true }).then(
+      (applied) => applied,
+      (error: unknown) => (error instanceof Error ? error : new Error(String(error))),
+    );
+    const apply: AheadApply = Object.freeze({ on: Object.freeze({ height, hash: kept.hash }), block: Object.freeze({ height: input.height, hash: input.hash }), input, restarts, result });
+    AHEAD.set(p, { apply, usable: true });
+  } catch {
+    // Nothing here fails the block whose settle runs: the next block is applied at its turn.
+  }
+}
+
+/**
+ * The input of the apply of `next` ahead, as its `on-compute` builds it when it continues the block before (see
+ * {@link applyBlock}), from `next`'s `block` items and what `kept` holds of the block before; null when it is applied at
+ * its turn instead: a change of ledger (a conversion or an upgrade within v9), its outcomes not one per transaction, or a
+ * state it releases whose key `kept` does not hold.
+ */
+function aheadInputOf(p: ProcessContext, next: BlockContext, kept: KeptBlock, options: CoreLedgerStateOptions): ApplyBlock | null {
+  const header = blockHeaderOf(next);
+  const ledger = ledgerVersionOf(next) as LedgerName;
+  const { transactions } = blockParsedItemOf(next, CORE_LEDGER_STATE_ID);
+  const outcomes = (options.outcomes ?? chainOutcomesOf)(next);
+  if (outcomes !== undefined && outcomes.length !== transactions.length) return null;
+  const applyWith = (options.ledgerOf ?? (() => ledger))(next, kept.ledger);
+  if (applyWith !== kept.ledger) return null;
+  const { from, to } = releasedBy(revisionsOf(p), next.height, options.retainedFrom ?? retainedFrom);
+  const release = from >= to ? [] : keysIn(kept.stateKeys, from, to);
+  if (release === null) return null;
+  const persists = (options.persistsContracts ?? ((c: BlockContext) => c.active(CORE_CONTRACT_STATES_ID)))(next);
+  return {
+    ledger: applyWith,
+    height: next.height,
+    hash: next.hash,
+    parentHash: next.parentHash,
+    timestampMs: header.timestampMs,
+    parentTimestampMs: parentTimestampMs(kept.timestampMs, header.timestampMs),
+    firstRegularAtParentTime: firstRegularAtParentTime(next.height, header.specVersion),
+    transactions: transactions.length,
+    ...(outcomes === undefined ? {} : { outcomes }),
+    release,
+    contracts: persists ? contractsOf(transactions, maintainedOf(next), []) : [],
+  };
 }
 
 /** The `block` items of an applied block (see the module comment). */
@@ -900,6 +1092,8 @@ export async function settleRun(
   const keys = knownKeysOf(p);
   const copy = countsCopyOf(p);
   try {
+    // A negative control's: the next block applied before this settle's eviction is sent.
+    if (options.aheadSentBeforeEviction === true) sendAhead(p, run.last, options);
     const handed = record?.heights;
     if (record === undefined || handed === undefined || handed.first !== run.first || handed.last !== run.last) {
       throw new Error(
@@ -923,6 +1117,7 @@ export async function settleRun(
     const outcome = await record.compute(tables, tracing() ? countingHits(keys.known, hits) : keys.known);
     const evictFrom = performance.now();
     let refused = false;
+    const ahead = options.aheadSentBeforeEviction !== true;
     if (outcome.evict.length > 0) {
       const { ledger } = boundLedger(p);
       // The worker answers in order, and a request sent before the eviction and given no read (a later block's parse
@@ -930,7 +1125,10 @@ export async function settleRun(
       // of the database would wait behind this transaction.
       const unlend = ledger.lend(w);
       try {
-        await ledger.evict(outcome.evict);
+        const evicting = ledger.evict(outcome.evict);
+        // Right after the eviction is sent, the next block's apply ahead: the worker runs it after the eviction.
+        if (ahead) sendAhead(p, run.last, options);
+        await evicting;
       } catch (error) {
         if (!isEvictionRefused(error) || options.restartOnRefusedEviction === false) throw error;
         await ledger.restart();
@@ -938,6 +1136,9 @@ export async function settleRun(
       } finally {
         await unlend();
       }
+    } else if (ahead) {
+      // Nothing to evict: the next block's apply ahead right after the computation.
+      sendAhead(p, run.last, options);
     }
     const netFrom = performance.now();
     await writeNet(options.refcountWriter?.(w, run.last) ?? w, outcome.net, {
@@ -965,6 +1166,8 @@ export async function settleRun(
   } catch (error) {
     keys.failed();
     copy?.failed();
+    // The block applied ahead rests on this block committing: dropped at once as a result.
+    dropAhead(p);
     throw error;
   } finally {
     RUNS.delete(p);

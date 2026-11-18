@@ -62,6 +62,7 @@ const BASE: Readonly<Record<string, readonly [string, Absent]>> = {
   // core-ledger-state's copy of the counts and child lists its reclamation reads: at most how many keys, and whether
   // every read is also made on the database.
   reclamationCache: ["operational", { default: { keys: 100_000, verify: false } }],
+  applyAhead: ["operational", { default: true }],
 };
 
 const PUBLIC: Readonly<Record<string, readonly [string, Absent]>> = {
@@ -147,6 +148,15 @@ describe("the core entry's fields, kinds and defaults", () => {
     expect(PRIVATE_CORE_SCHEMA.safeParse({ ...REQUIRED_PRIVATE, reclamationCache: { keys: -1 } }).success).toBe(false);
   });
 
+  it("applyAhead: true or false, true unless given, nothing else", () => {
+    const ahead = (value: unknown) => PUBLIC_CORE_SCHEMA.safeParse({ ...REQUIRED_PUBLIC, applyAhead: value }).success;
+    expect([true, false].map(ahead)).toEqual([true, true]);
+    expect([1, 0, "true", "off", null, {}].map(ahead)).toEqual([false, false, false, false, false, false]);
+    const parsed = (value: Record<string, unknown>) => (PUBLIC_CORE_SCHEMA.parse({ ...REQUIRED_PUBLIC, ...value }) as unknown as { applyAhead: unknown }).applyAhead;
+    expect([parsed({}), parsed({ applyAhead: false })]).toEqual([true, false]);
+    expect(PRIVATE_CORE_SCHEMA.safeParse({ ...REQUIRED_PRIVATE, applyAhead: 1 }).success).toBe(false);
+  });
+
   it("accepts every field of the table, given, for a public and a private process", () => {
     expect(
       PUBLIC_CORE_SCHEMA.safeParse({
@@ -178,6 +188,7 @@ describe("the core entry's fields, kinds and defaults", () => {
         fullPageWritesOffAllowed: true,
         developmentOptIn: true,
         reclamationCache: { keys: 0, verify: true },
+        applyAhead: false,
       }).error,
     ).toBeUndefined();
     expect(

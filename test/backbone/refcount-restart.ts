@@ -39,7 +39,9 @@ import { type RefcountStep, refcountStep, sqlRefcountTables, writeRefcount } fro
  * crash), or stops the process, which ends after the height (a restart). The points of `core-ledger-state`'s block are
  * put through the seams the process already has:
  * - `before-step`: in `on-compute`, once the ledger worker answered the block's apply, before the block is handed over
- *   to the reclamation (computed at `on-settle`);
+ *   to the reclamation (computed at `on-settle`). A block applied ahead (by the settle of the block before) has its
+ *   apply answered there, so the point is reported once the block's `on-compute` has the worker hold the state before
+ *   it, which the worker answers after that apply;
  * - `after-eviction`: in `on-settle`, once the worker answered the run's eviction: inside the block's transaction,
  *   before the net write, so the database after a crash there is still the one after h − 1;
  * - `after-node-writes`: in `on-settle`, after the net write's node statement, before its first count, queue or
@@ -399,9 +401,14 @@ function restartWatcher(
   };
 }
 
-/** `host` reporting, through `reached`, its block's apply answered and its eviction answered. */
+/**
+ * `host` reporting, through `reached`, its block's apply answered (for a block applied ahead, the load of the state
+ * before it that the block's `on-compute` asks for, answered after that apply) and its eviction answered.
+ */
 function pointWorker(host: LedgerHost, reached: (point: RestartPoint, height: bigint) => Promise<void>): LedgerHost {
   let height: bigint | null = null;
+  /** The blocks applied ahead whose apply was answered, until their `on-compute` asks for the state before them. */
+  const ahead = new Set<bigint>();
   return {
     useDatabase: (database) => host.useDatabase(database),
     lend: (read) => host.lend(read),
@@ -410,6 +417,10 @@ function pointWorker(host: LedgerHost, reached: (point: RestartPoint, height: bi
     genesis: (input, read) => host.genesis(input, read),
     async apply(input, read) {
       const applied = await host.apply(input, read);
+      if (input.ahead === true) {
+        ahead.add(input.height);
+        return applied;
+      }
       height = input.height;
       await reached("before-step", input.height);
       return applied;
@@ -419,7 +430,15 @@ function pointWorker(host: LedgerHost, reached: (point: RestartPoint, height: bi
     written: (block) => host.written(block),
     committed: (block) => host.committed(block),
     rolledBack: (block) => host.rolledBack(block),
-    load: (input, read) => host.load(input, read),
+    async load(input, read) {
+      const loaded = await host.load(input, read);
+      const next = input.height + 1n;
+      if (ahead.delete(next)) {
+        height = next;
+        await reached("before-step", next);
+      }
+      return loaded;
+    },
     retained: (input, read) => host.retained(input, read),
     async evict(keys) {
       const taken = await host.evict(keys);

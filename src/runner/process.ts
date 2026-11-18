@@ -2092,7 +2092,12 @@ class Process implements ProcessHandle {
       if (parses) bindLedgerParser(contexts.of(CORE_BLOCK_PARSED_ID), this.#ledger);
       for (const part of graph.modules) if (hasLedgerTasks(part)) bindLedgerTasks(contexts.of(part.id), this.#ledger);
       if (applies && isBlockLedgerSource(source)) {
-        bindCoreLedgerState(contexts.of(CORE_LEDGER_STATE_ID), { ledger: this.#ledger, source });
+        bindCoreLedgerState(contexts.of(CORE_LEDGER_STATE_ID), {
+          ledger: this.#ledger,
+          source,
+          // The next height's block context, for its apply ahead (the loop is made below).
+          ahead: (height) => this.#loop?.ahead(height, CORE_LEDGER_STATE_ID) ?? null,
+        });
       }
     }
     await startDatabase(db, {

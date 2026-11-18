@@ -130,6 +130,14 @@
  * goes on to `on-start-height` and `on-compute` with them. The queue's callbacks run outside the loop's points, each
  * with its block context as the loop builds it.
  *
+ * **The height above, ahead.** While the loop processes h, from the start of its processing to its `COMMIT`,
+ * {@link FinalizedLoop.ahead} gives a core part the block context its callbacks will get at a height above h, when the
+ * source has that height prepared already (`BlockSource.ahead`), it is in h's range of the graph, holds the part, and is
+ * not past the loop's last height. The context has the `block` items the source's `on-fetch` and `on-parse` published
+ * and `continues` false: the loop decides `continues` when the height's own callbacks run. The loop runs no point with
+ * it and changes nothing for it: `core-ledger-state` has the ledger worker apply that height during h's `on-settle`, and
+ * uses the result at the height's own `on-compute` only (`src/backbone/core-ledger-state/apply-ahead.ts`).
+ *
  * **A slow height** is reported, never cut off: nothing here cancels, times out or retries a height for its time. Each
  * run of a height has a window, from its first callback after `on-finalized` to its `COMMIT`. Where the window starts:
  * - normally, at its `on-fetch`;
@@ -558,6 +566,8 @@ export class FinalizedLoop {
   readonly #toldContinuing = new WeakMap<HeightRun, number>();
   /** The last block this loop told the follower committed, which it does not tell again ({@link #tell}). */
   #toldCommitted: BlockRef | null = null;
+  /** The height's run in progress, from its start to its commit or its failure ({@link ahead}). */
+  #current: HeightRun | undefined;
 
   constructor(input: LoopInput) {
     this.input = input;
@@ -591,6 +601,26 @@ export class FinalizedLoop {
    */
   blockTransaction(): Promise<void> | null {
     return this.#transaction ?? null;
+  }
+
+  /**
+   * The block context `part`'s callbacks will get at `height` (see the module comment), with the `block` items its
+   * `on-fetch` and `on-parse` published and `continues` false; null unless the loop processes a height below `height`
+   * now, the source has `height` prepared, and `height` is in the same range of the graph, holds `part`, and is not past
+   * the loop's last height.
+   */
+  ahead(height: bigint, part: string): BlockContext | null {
+    const current = this.#current;
+    if (current === undefined || height <= current.height) return null;
+    const last = this.lastHeight();
+    if (last !== null && height > last) return null;
+    if (this.input.graph.rangeAt(height) !== current.range) return null;
+    const declaration = current.range.order.find((candidate) => candidate.id === part);
+    if (declaration === undefined) return null;
+    const prepared = this.input.source.ahead?.(height) ?? null;
+    if (prepared === null || prepared.block.height !== height) return null;
+    const run: HeightRun = { height, block: prepared.block, range: current.range, items: prepared.items, previous: null };
+    return this.#context(run, declaration, prepared.items.visible(), false);
   }
 
   /**
@@ -996,6 +1026,7 @@ export class FinalizedLoop {
     try {
       const beginFrom = performance.now();
       run = resume === undefined ? await this.#begin(height, previous) : this.#again(resume);
+      this.#current = run;
       // The block before committed in this run, no failure since, on the writer's session still in use: its block
       // contexts say it continues.
       const session = this.input.db.writerSession();
@@ -1011,6 +1042,7 @@ export class FinalizedLoop {
       traceAdd("prepareMs", performance.now() - prepareFrom);
       if (!(await this.lockstepWait(run))) {
         // Stopped at the lockstep wait: the height's run, and its window, end here.
+        this.#current = undefined;
         this.#unwatch(watch, false);
         traceDropBlock();
         this.#tell("rolledBack", run.block);
@@ -1023,6 +1055,7 @@ export class FinalizedLoop {
       await this.#transacting(this.commit(run));
       traceAdd("txMs", performance.now() - transactionFrom);
       committed = true;
+      this.#current = undefined;
       // The COMMIT that holds the height answered: the follower is told, and the next height continues from it.
       this.#tell("committed", run.block);
       this.#lastCommitted = run.block;
@@ -1034,6 +1067,7 @@ export class FinalizedLoop {
       this.#check();
       return run.block;
     } catch (error) {
+      this.#current = undefined;
       if (!committed) this.#unwatch(watch, false);
       const failure = this.#failure(height, error, committed);
       if (!committed && run !== undefined) {
