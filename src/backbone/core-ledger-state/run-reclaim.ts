@@ -876,6 +876,10 @@ export class RunReclaim {
         // A reached key whose change is not below 0 had no reference when the run began, if its count is 0 now: it
         // was queued, or the run changed its root count, or it is new, and its counts are known; or it has a root
         // count the run did not change, and is no candidate.
+        // TODO: the stricter read, the counts of every key whose count after the run is not above 0, could be an
+        // optional setting. It gives a halt with `missing-reference` on tables that lost a count row. It costs 169
+        // count keys read per block against 9.7 on Preprod heights 0 to 10,000. A cheaper form reads that way only at
+        // a run's first block after a start.
         await this.#learnCounts(tables, [...reached].filter((record) => record.delta < 0));
         frontier = reached;
         if (fault === "first-round-only") break;
