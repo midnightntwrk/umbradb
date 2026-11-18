@@ -3,6 +3,7 @@ import type { BlockWriteHandle, Database, SchemaWriteHandle, Transaction } from 
 import { UmbraError } from "../../src/db/errors.js";
 import { type MigrationPart, startDatabase } from "../../src/db/migrate.js";
 import { runMultiStatement } from "../../src/db/multi-statement.js";
+import { readView } from "../../src/db/read-view.js";
 import { planSchemas, type SchemaModule, type SchemaPlan, setModuleRole } from "../../src/db/roles.js";
 import {
   type BlockWrites,
@@ -700,6 +701,69 @@ describe.each(BACKENDS)("write handles and their closing on $name", { timeout: 3
       expect(refused?.details.sqlstate).toBe("42601");
       // Had the COMMIT run, the row written before it would be stored.
       expect(await rows(db, "a.t")).toEqual([]);
+    });
+
+    it("a read view opened inside a write callback reads as the login and sees the callback's row; the callback's handle cannot write while the view is open, and writes under its role after it", async () => {
+      const { db, plan, login } = await setUp();
+      const seen: Record<string, unknown> = {};
+      await block(db, plan, async (writes, tx) => {
+        await writes.write("a", async (w) => {
+          await w.execute(INSERT_A, [1]);
+          seen.before = await w.query("SELECT current_user::text AS who");
+          seen.inside = await readView(tx, { height: 4n }, async (read) => {
+            const [row] = await read.query("SELECT current_user::text AS who, (SELECT count(*)::int FROM a.t) AS n");
+            // The callback's own handle on the same transaction, used while the view is open: its statement runs
+            // inside the view, read-only, and the view's next statement fails behind it.
+            const write = await failure(() => w.execute(INSERT_A, [2]));
+            const behind = await failure(() => read.query("SELECT 1 AS one"));
+            return { ...row, write: write.details.sqlstate, behind: behind.details.sqlstate };
+          });
+          seen.after = await w.query("SELECT current_user::text AS who");
+          await w.execute(INSERT_A, [3]);
+        });
+        await writes.end();
+      });
+      expect(seen).toEqual({
+        before: [{ who: "umbradb_m_a" }],
+        inside: { who: login, n: 1, write: "25006", behind: "25P02" },
+        after: [{ who: "umbradb_m_a" }],
+      });
+      expect(await rows(db, "a.t")).toEqual([
+        { k: 1n, who: "umbradb_m_a" },
+        { k: 3n, who: "umbradb_m_a" },
+      ]);
+    });
+
+    it("lets a module make a temporary sequence and table through its write handle: they stay on the session, where a read-only transaction moves the sequence and no rollback undoes it", async () => {
+      const { db, plan } = await setUp();
+      const next = "SELECT nextval('pg_temp.made_by_a')::int AS value";
+      await block(db, plan, (writes) =>
+        writes.write("a", async (w) => {
+          await w.execute("CREATE TEMP SEQUENCE made_by_a");
+          await w.execute("CREATE TEMP TABLE made_by_a_rows (x int)");
+        }),
+      );
+      // A later transaction on the writer's session: a read view moves the sequence, and its close does not undo it.
+      const later = await db.transaction(async (tx) => [
+        await readView(tx, { height: 5n }, (read) => read.query(next)),
+        await tx.query(next),
+        await readView(tx, { height: 5n }, async (read) => {
+          await read.query("INSERT INTO pg_temp.made_by_a_rows VALUES (1)");
+          return read.query("SELECT count(*)::int AS n FROM pg_temp.made_by_a_rows");
+        }),
+        await tx.query("SELECT count(*)::int AS n FROM pg_temp.made_by_a_rows"),
+      ]);
+      expect(later).toEqual([[{ value: 1 }], [{ value: 2 }], [{ n: 1 }], [{ n: 0 }]]);
+      // A read handle: on PGlite it runs on the one session and moves the sequence too, and the read's rollback does
+      // not undo it; on PostgreSQL it runs on a session of the read pool, which has no such sequence.
+      const read = await db.read((read) =>
+        read.query(next).then(
+          (rows) => rows,
+          (error: UmbraError) => error.details.sqlstate,
+        ),
+      );
+      const after = await db.transaction((tx) => tx.query(next));
+      expect([read, after]).toEqual(backend.singleQueue ? [[{ value: 3 }], [{ value: 4 }]] : ["42P01", [{ value: 3 }]]);
     });
 
     it("refuses a second callback started while one runs (in series), before it sends anything", async () => {

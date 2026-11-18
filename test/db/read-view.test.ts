@@ -3,20 +3,26 @@ import { BACKENDS, TEST_CURSOR } from "./backends.js";
 import {
   abortedOuterProblems,
   behindAFailureProblems,
+  bodyErrorProblems,
   cannotWriteProblems,
+  connectionListener,
   controlProblems,
   cursorsAndPreparedProblems,
   edgeProblems,
   failedStatementProblems,
   listenProblems,
+  noSubtransactionIdProblems,
   noTransactionIdProblems,
   notifyProblems,
   preparedTextProblems,
   SCHEMA,
   seesOuterRowsProblems,
   sessionAuthorizationProblems,
+  sessionObjectProblems,
   settingsProblems,
+  temporaryObjectProblems,
   traceProblems,
+  unansweredProblems,
 } from "./read-view-checks.js";
 
 /**
@@ -32,8 +38,16 @@ describe.each(BACKENDS)("the read view on $name", { timeout: 120_000 }, (backend
 
   const fresh = async () => (await backend.database(SCHEMA, TEST_CURSOR)).db;
 
-  it("cannot write: each write, sequence change and switch to read-write fails with its SQLSTATE", async () => {
+  it("cannot change a persistent object: each write, sequence change and switch to read-write fails with its SQLSTATE", async () => {
     expect(await cannotWriteProblems(await fresh())).toEqual([]);
+  });
+
+  it("lets an existing temporary sequence move, which the close does not undo, and an existing temporary table change, which it undoes", async () => {
+    expect(await temporaryObjectProblems(await fresh())).toEqual([]);
+  });
+
+  it("does not undo a DEALLOCATE or a CLOSE of the session's own prepared statement and holdable cursor, and undoes an UNLISTEN", async () => {
+    expect(await sessionObjectProblems(await fresh())).toEqual([]);
   });
 
   it("sees the outer transaction's uncommitted rows, each of 100 views exactly those written before it", async () => {
@@ -44,15 +58,25 @@ describe.each(BACKENDS)("the read view on $name", { timeout: 120_000 }, (backend
     expect(await failedStatementProblems(await fresh())).toEqual([]);
   });
 
-  it("fails three statements sent behind a slow failure with 25P02, and sends none of them again", async () => {
-    expect(await behindAFailureProblems(await fresh())).toEqual([]);
+  it("fails three statements sent behind a slow failure with 25P02; each of them, the open and the close reaches the database once", async () => {
+    const { db, sent } = await backend.counted(SCHEMA, TEST_CURSOR);
+    expect(await behindAFailureProblems(db, sent)).toEqual([]);
+  });
+
+  it("answers the statements a settled body left unanswered inside the view, and refuses the handle while the close is pending without sending", async () => {
+    const { db, sent } = await backend.counted(SCHEMA, TEST_CURSOR);
+    expect(await unansweredProblems(db, sent)).toEqual([]);
+  });
+
+  it("rejects with the body's own error, the same value, whatever it is", async () => {
+    expect(await bodyErrorProblems(await fresh())).toEqual([]);
   });
 
   it("undoes every setting and role a view changes, and gives the outer its own role and local settings back", async () => {
     expect(await settingsProblems(await fresh())).toEqual([]);
   });
 
-  it("refuses transaction control and a session authorization before sending them, and the server refuses DO, CALL and two statements", async () => {
+  it("refuses transaction control and a session authorization before sending them, each in a transaction of its own; the server refuses DO, CALL, two statements and a prepared COMMIT", async () => {
     expect(await controlProblems(await fresh())).toEqual([]);
   });
 
@@ -64,12 +88,18 @@ describe.each(BACKENDS)("the read view on $name", { timeout: 120_000 }, (backend
     expect(await noTransactionIdProblems(await fresh())).toEqual([]);
   });
 
-  it("refuses a nested view, a handle used after its body and a transaction no backend opened, and sends nothing for an empty view", async () => {
-    expect(await edgeProblems(await fresh())).toEqual([]);
+  it("takes no subtransaction id over 200 views in a transaction that has its id; a writing savepoint and a view that writes a temporary table take one", async () => {
+    expect(await noSubtransactionIdProblems(await fresh())).toEqual([]);
   });
 
-  it("in an aborted transaction: an empty view resolves, a first statement fails with 25P02, and the commit is refused", async () => {
-    expect(await abortedOuterProblems(await fresh())).toEqual([]);
+  it("refuses a nested view, a handle used after its body and a transaction no backend opened; an empty view and its handle used late send nothing", async () => {
+    const { db, sent } = await backend.counted(SCHEMA, TEST_CURSOR);
+    expect(await edgeProblems(db, sent)).toEqual([]);
+  });
+
+  it("in an aborted transaction: an empty view sends nothing, a first statement fails with 25P02, nothing is sent after the failed open, and the commit is refused", async () => {
+    const { db, sent } = await backend.counted(SCHEMA, TEST_CURSOR);
+    expect(await abortedOuterProblems(db, sent)).toEqual([]);
   });
 
   it("undoes a LISTEN sent in a view", async () => {
@@ -81,13 +111,15 @@ describe.each(BACKENDS)("the read view on $name", { timeout: 120_000 }, (backend
     expect(await sessionAuthorizationProblems(await fresh())).toEqual([]);
   });
 
-  // PostgreSQL only: another connection, the block trace (PGlite records no statement in it) and prepared texts
-  // (PGlite keeps none).
+  it("does not deliver a NOTIFY sent in a view, while the outer's own is delivered after the commit", async () => {
+    const { db, url, listen } = await backend.database(SCHEMA, TEST_CURSOR);
+    // PostgreSQL: a listener on another connection. PGlite: a listener of the engine's one session.
+    const listener = listen === undefined ? connectionListener(url as string) : { listen, stop: async () => undefined };
+    expect(await notifyProblems(db, listener)).toEqual([]);
+  });
+
+  // PostgreSQL only: the block trace (PGlite records no statement in it) and prepared texts (PGlite keeps none).
   if (!backend.singleQueue) {
-    it("does not deliver a NOTIFY sent in a view, while the outer's own is delivered after the commit", async () => {
-      const { db, url } = await backend.database(SCHEMA, TEST_CURSOR);
-      expect(await notifyProblems(db, url as string)).toEqual([]);
-    });
 
     it("counts a view's open and close once each in the block trace", async () => {
       expect(await traceProblems(await fresh())).toEqual([]);

@@ -26,7 +26,8 @@ import {
  * - **B, a close that only releases:** `CLOSE` as `RELEASE SAVEPOINT` alone. After a failed statement the release is
  *   refused, so the view fails with the close's error and the outer transaction is rolled back; a setting, a role or a
  *   `LISTEN` of a view stays.
- * - **C, a check that refuses nothing:** transaction control and a session authorization reach the server.
+ * - **C, a check that refuses nothing:** transaction control and a session authorization reach the server, each
+ *   command in a transaction of its own.
  *
  * `vi.mock` replaces the texts of `src/db/read-view-sql.ts` and the check of `src/db/statement-refusal.ts` in this
  * file's module graph only; with `variant.current = "real"` both are the real ones, and every named check passes in
@@ -126,11 +127,52 @@ describe.each(BACKENDS)("negative controls of the read view on $name", { timeout
     expect(await db.read((read) => read.query("SELECT count(*)::int AS n FROM t.rows"))).toEqual([{ n: 0 }]);
   });
 
+  it("B, shown directly: the close's error wins over the body's own error too", async () => {
+    variant.current = "B";
+    const db = await fresh();
+    const own = new Error("the body's own error");
+    let viewError: unknown;
+    const outcome = await db
+      .transaction(async (tx) => {
+        await tx.execute("INSERT INTO t.rows VALUES (1, 'outer')");
+        viewError = await readView(tx, { height: null }, async (read) => {
+          await read.query("SELECT 1/0 AS x").catch(() => undefined);
+          throw own;
+        }).catch((error: unknown) => error);
+      })
+      .then(
+        () => "committed",
+        (error: unknown) => error,
+      );
+    expect(viewError).toBeInstanceOf(UmbraError);
+    expect(viewError).not.toBe(own);
+    expect((viewError as UmbraError).details.sqlstate).toBe("25P02");
+    expect(outcome).toBe(viewError);
+    // The control in this build: with the real close, the same body's own error is what the view rejects with.
+    variant.current = "real";
+    const real = await fresh();
+    const rejected = await real.transaction((tx) =>
+      readView(tx, { height: null }, async (read) => {
+        await read.query("SELECT 1/0 AS x").catch(() => undefined);
+        throw own;
+      }).catch((error: unknown) => error),
+    );
+    expect(rejected).toBe(own);
+  });
+
   it("C: a check that refuses nothing makes the control and session-authorization checks fail", async () => {
     variant.current = "C";
     const control = await controlProblems(await fresh());
-    for (const [sql, command] of CONTROL_REFUSED.slice(0, 4)) {
-      expect(control).toContainEqual(expect.stringMatching(new RegExp(`^${sql}: (?!\\["control-refused ${command}","ok"\\])`)));
+    // Every command, in its own transaction, was answered by the server (`ok` or an SQLSTATE), not by the check.
+    for (const [sql] of CONTROL_REFUSED) {
+      const outcomes = control.find((problem) => problem.startsWith(`${sql}: its two outcomes: [`));
+      expect(outcomes, sql).toBeDefined();
+      expect(outcomes, sql).not.toContain('its two outcomes: ["control-refused');
+    }
+    // What the commands that end the transaction did, each to its own transaction: the close failed, and the view with it.
+    for (const sql of ["COMMIT", "END", "ROLLBACK", "ABORT", "; COMMIT"]) {
+      expect(control, sql).toContain(`${sql}: its two outcomes: ["ok","ok"], not ["control-refused ${sql.replace("; ", "")}","ok"]`);
+      expect(control, sql).toContain(`${sql}: its view: the view failed: 25P01`);
     }
     const authorization = await sessionAuthorizationProblems(await fresh());
     expect(authorization).toContainEqual(expect.stringMatching(/^through a read handle: \["ok"/));

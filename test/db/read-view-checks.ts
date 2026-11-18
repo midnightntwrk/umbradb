@@ -70,6 +70,11 @@ function compare(problems: string[], name: string, got: unknown, expected: unkno
   if (shown(got) !== shown(expected)) problems.push(`${name}: ${shown(got)}, not ${shown(expected)}`);
 }
 
+/** How often each of `texts` is in `sent`, what reached the database (`backends.ts`, `counted`), from `from` on. */
+function submissions(sent: readonly string[], from: number, texts: readonly string[]): number[] {
+  return texts.map((text) => sent.slice(from).filter((one) => one === text).length);
+}
+
 /** The heights stored in `t.rows`, in order. */
 async function storedHeights(db: Database): Promise<number[]> {
   const rows = await db.read((read) => read.query("SELECT height::int AS height FROM t.rows ORDER BY height"));
@@ -149,7 +154,7 @@ export const WRITES_REFUSED: readonly (readonly [string, string])[] = [
 ];
 
 /**
- * A view cannot write: it reads `transaction_read_only` as `on`, and each of {@link WRITES_REFUSED}, in a view of its
+ * A view cannot change a persistent object: it reads `transaction_read_only` as `on`, and each of {@link WRITES_REFUSED}, in a view of its
  * own, fails with its SQLSTATE. Afterwards the outer is read-write and nothing is changed.
  */
 export async function cannotWriteProblems(db: Database): Promise<string[]> {
@@ -197,6 +202,180 @@ export async function seesOuterRowsProblems(db: Database): Promise<string[]> {
   );
 }
 
+/** Changes to an existing temporary table that a view lets through, each with the table's values inside the view. */
+export const TEMPORARY_TABLE_CHANGES: readonly (readonly [string, readonly number[]])[] = [
+  ["INSERT INTO pg_temp.read_view_temp VALUES (2)", [1, 2]],
+  ["UPDATE pg_temp.read_view_temp SET x = 9", [9]],
+  ["DELETE FROM pg_temp.read_view_temp", []],
+];
+
+/** Statements on temporary objects a view refuses as it refuses them on persistent ones (`25006`). */
+export const TEMPORARY_REFUSED: readonly string[] = [
+  "CREATE TEMP SEQUENCE read_view_other",
+  "CREATE TEMP TABLE read_view_other (x int)",
+  "TRUNCATE pg_temp.read_view_temp",
+  "DROP TABLE pg_temp.read_view_temp",
+  "ALTER SEQUENCE pg_temp.read_view_seq RESTART WITH 900",
+];
+
+/**
+ * What a view lets through: PostgreSQL's read-only transaction does not refuse changes to the temporary objects the
+ * session has. The outer transaction makes a temporary sequence and a temporary table (the engine makes none; a
+ * module can, through a write handle), then, each in a view of its own:
+ * - `nextval` and `setval` of the sequence succeed, and the close does not undo them: the outer's next value follows
+ *   the view's;
+ * - each of {@link TEMPORARY_TABLE_CHANGES} succeeds and is seen inside the view, and the close undoes it;
+ * - each of {@link TEMPORARY_REFUSED} fails with `25006`.
+ */
+export async function temporaryObjectProblems(db: Database): Promise<string[]> {
+  const next = "SELECT nextval('pg_temp.read_view_seq')::int AS value";
+  const values = "SELECT coalesce(array_agg(x ORDER BY x), '{}') AS xs FROM pg_temp.read_view_temp";
+  return inOuter(db, async (tx, problems) => {
+    await tx.execute("CREATE TEMP SEQUENCE read_view_seq");
+    await tx.execute("CREATE TEMP TABLE read_view_temp (x int)");
+    await tx.execute("INSERT INTO read_view_temp VALUES (1)");
+    compare(problems, "the outer's first value", await tx.query(next), [{ value: 1 }]);
+    compare(problems, "nextval in a view", await view(tx, problems, "nextval", (read) => read.query(next)), [{ value: 2 }]);
+    compare(problems, "the outer's value after the view's nextval", await tx.query(next), [{ value: 3 }]);
+    const set = await view(tx, problems, "setval", (read) => tried(() => read.query("SELECT setval('pg_temp.read_view_seq', 500)")));
+    compare(problems, "setval in a view", set, "ok");
+    compare(problems, "the outer's value after the view's setval", await tx.query(next), [{ value: 501 }]);
+    for (const [sql, inside] of TEMPORARY_TABLE_CHANGES) {
+      const seen = await view(tx, problems, sql, async (read) => [await tried(() => read.query(sql)), (await read.query(values))[0]]);
+      compare(problems, sql, seen, ["ok", { xs: inside }]);
+      compare(problems, `the temporary table after ${sql}`, (await tx.query(values))[0], { xs: [1] });
+    }
+    for (const sql of TEMPORARY_REFUSED) {
+      const outcome = await view(tx, problems, sql, (read) => tried(() => read.query(sql)));
+      compare(problems, sql, outcome, "25006");
+    }
+    compare(problems, "the temporary table after the refused statements", (await tx.query(values))[0], { xs: [1] });
+    // The session keeps temporary objects past the transaction: dropped here, as their maker must.
+    await tx.execute("DROP TABLE pg_temp.read_view_temp");
+    await tx.execute("DROP SEQUENCE pg_temp.read_view_seq");
+  });
+}
+
+/**
+ * What the close does and does not undo of the session's own objects, made by an earlier transaction: a prepared
+ * statement deallocated in a view stays deallocated, and a cursor declared `WITH HOLD` and closed in a view stays
+ * closed (neither is part of a transaction); a holdable cursor fetched from in a view keeps its place; one declared
+ * in a view is gone after it; an `UNLISTEN` in a view is undone, so the session still listens after the commit.
+ */
+export async function sessionObjectProblems(db: Database): Promise<string[]> {
+  const prepared = "SELECT coalesce(array_agg(name::text ORDER BY name), '{}') AS names FROM pg_prepared_statements WHERE name LIKE 'read_view_%'";
+  const cursors = "SELECT coalesce(array_agg(name::text ORDER BY name), '{}') AS names FROM pg_cursors WHERE name LIKE 'read_view_%'";
+  const channels = "SELECT coalesce(array_agg(channel ORDER BY channel), '{}') AS names FROM pg_listening_channels() AS channel";
+  const setup: string[] = [];
+  try {
+    await db.transaction(async (tx) => {
+      await tx.execute("PREPARE read_view_kept AS SELECT 1 AS one");
+      await tx.execute("PREPARE read_view_dropped AS SELECT 1 AS one");
+      await tx.execute("DECLARE read_view_held CURSOR WITH HOLD FOR SELECT g::int AS g FROM generate_series(1, 9) AS g");
+      await tx.execute("DECLARE read_view_closed CURSOR WITH HOLD FOR SELECT 1 AS one");
+      await tx.execute("LISTEN read_view_kept_channel");
+    });
+  } catch (error) {
+    setup.push(`making the session's objects failed: ${outcomeOf(error)}`);
+  }
+  const problems = await inOuter(db, async (tx, problems) => {
+    compare(problems, "the outer's first fetch", await tx.query("FETCH 1 FROM read_view_held"), [{ g: 1 }]);
+    const inside = await view(tx, problems, "a view that changes the session's objects", async (read) => [
+      await tried(() => read.query("DEALLOCATE read_view_dropped")),
+      await tried(() => read.query("CLOSE read_view_closed")),
+      await read.query("FETCH 2 FROM read_view_held"),
+      await tried(() => read.query("DECLARE read_view_inner CURSOR WITH HOLD FOR SELECT 1 AS one")),
+      await tried(() => read.query("UNLISTEN read_view_kept_channel")),
+    ]);
+    compare(problems, "inside the view", inside, ["ok", "ok", [{ g: 2 }, { g: 3 }], "ok", "ok"]);
+    compare(problems, "the prepared statements after the view", (await tx.query(prepared))[0], { names: ["read_view_kept"] });
+    compare(problems, "the cursors after the view", (await tx.query(cursors))[0], { names: ["read_view_held"] });
+    compare(problems, "the outer's fetch after the view", await tx.query("FETCH 1 FROM read_view_held"), [{ g: 4 }]);
+  });
+  try {
+    await db.transaction(async (tx) => {
+      compare(problems, "the channels listened to after the commit", (await tx.query(channels))[0], { names: ["read_view_kept_channel"] });
+      await tx.execute("DEALLOCATE read_view_kept");
+      await tx.execute("CLOSE read_view_held");
+      await tx.execute("UNLISTEN *");
+    });
+  } catch (error) {
+    problems.push(`the transaction after the view failed: ${outcomeOf(error)}`);
+  }
+  return [...setup, ...problems];
+}
+
+/** The subtransaction ids its own session holds now, read through `handle`. */
+async function subtransactions(handle: { query(sql: string): Promise<Record<string, unknown>[]> }): Promise<unknown> {
+  // A session reads the sessions' state once per transaction unless told to read it again.
+  await handle.query("SELECT pg_stat_clear_snapshot()");
+  const [row] = await handle.query(
+    `SELECT s.subxact_count::int AS n FROM pg_stat_get_backend_idset() AS b (id)
+       CROSS JOIN LATERAL pg_stat_get_backend_subxact(b.id) AS s WHERE pg_stat_get_backend_pid(b.id) = pg_backend_pid()`,
+  );
+  return row?.n;
+}
+
+/**
+ * A view whose statements only read takes no subtransaction id, also when its transaction has a transaction id: over
+ * 200 views in a transaction that has written, each reads no subtransaction of its session from inside, the
+ * transaction's id stays, and the next transaction's id is the one after it (no id went to a view). The control: a
+ * savepoint that writes shows one subtransaction from inside, and the id after its transaction is two on.
+ *
+ * A view that writes a temporary table an earlier transaction made does take one: its session shows one
+ * subtransaction from inside, and its transaction, which had written nothing, has an id after it.
+ */
+export async function noSubtransactionIdProblems(db: Database): Promise<string[]> {
+  const problems: string[] = [];
+  const assigned = "SELECT pg_current_xact_id_if_assigned()::text AS xid";
+  const nextId = async (): Promise<bigint> =>
+    BigInt((await db.transaction((tx) => tx.query("SELECT pg_current_xact_id()::text AS xid")))[0]?.xid as string);
+  try {
+    let own = 0n;
+    await db.transaction(async (tx) => {
+      await tx.execute("INSERT INTO t.rows VALUES ($1, 'outer, before the views')", [BEFORE]);
+      const [before] = await tx.query(assigned);
+      own = BigInt(before?.xid as string);
+      const inside = new Set<string>();
+      for (let i = 0; i < 200; i++) {
+        inside.add(shown(await readView(tx, OPTIONS, async (read) => [await read.query("SELECT count(*)::int AS n FROM t.rows"), await subtransactions(read)])));
+      }
+      compare(problems, "inside the views: the rows, and the session's subtransactions", [...inside], [shown([[{ n: 1 }], 0])]);
+      compare(problems, "the transaction's id after the views", (await tx.query(assigned))[0], before);
+      await tx.execute("INSERT INTO t.rows VALUES ($1, 'outer, after the views')", [AFTER]);
+    });
+    compare(problems, "the next transaction's id, after 200 views", (await nextId()) - own, 1n);
+    // The control: a savepoint that writes takes a subtransaction id.
+    await db.transaction(async (tx) => {
+      await tx.execute("UPDATE t.rows SET label = 'control' WHERE height = $1", [BEFORE]);
+      own = BigInt((await tx.query(assigned))[0]?.xid as string);
+      await tx.execute("SAVEPOINT writes");
+      await tx.execute("UPDATE t.rows SET label = 'control, in a savepoint' WHERE height = $1", [AFTER]);
+      compare(problems, "control: the session's subtransactions inside a savepoint that wrote", await subtransactions(tx), 1);
+      await tx.execute("RELEASE SAVEPOINT writes");
+    });
+    compare(problems, "control: the next transaction's id, after one writing savepoint", (await nextId()) - own, 2n);
+    // A view that writes an existing temporary table takes a subtransaction id, and gives its transaction an id.
+    await db.transaction((tx) => tx.execute("CREATE TEMP TABLE read_view_ids (x int)"));
+    await db.transaction(async (tx) => {
+      compare(problems, "the id of a transaction that wrote nothing", (await tx.query(assigned))[0], { xid: null });
+      const seen = await readView(tx, OPTIONS, async (read) => {
+        await read.query("INSERT INTO pg_temp.read_view_ids VALUES (1)");
+        return subtransactions(read);
+      });
+      compare(problems, "the session's subtransactions inside a view that wrote a temporary table", seen, 1);
+      const [after] = await tx.query(assigned);
+      if (after?.xid === null) problems.push("a view that wrote a temporary table left its transaction without an id");
+      compare(problems, "the temporary table after the view", await tx.query("SELECT count(*)::int AS n FROM pg_temp.read_view_ids"), [{ n: 0 }]);
+      await tx.execute("DROP TABLE pg_temp.read_view_ids");
+    });
+  } catch (error) {
+    problems.push(`the subtransaction check failed: ${outcomeOf(error)}`);
+  }
+  compare(problems, "rows stored", await storedHeights(db), [BEFORE, AFTER]);
+  return problems;
+}
+
 /** Seven ways a statement fails inside a view, each with its SQLSTATE. */
 export const FAILURES: readonly (readonly [string, readonly unknown[], string])[] = [
   ["SELECT 1/0 AS x", [], "22012"],
@@ -229,21 +408,130 @@ export async function failedStatementProblems(db: Database): Promise<string[]> {
 
 /**
  * Three statements sent without waiting behind a statement that fails 0.2 s after it starts each fail `25P02` and are
- * not sent again; the outer reads its row after the view.
+ * not sent again; the outer reads its row after the view. With `sent` (what reached the database), each of the four
+ * texts, the open and the close reached it once.
  */
-export async function behindAFailureProblems(db: Database): Promise<string[]> {
+export async function behindAFailureProblems(db: Database, sent?: readonly string[]): Promise<string[]> {
+  const behind = ["SELECT label FROM t.rows WHERE height = $1 AND label <> 'behind'", "SELECT count(*) AS behind FROM t.rows", "SELECT 1 AS behind"];
   return inOuter(db, async (tx, problems) => {
+    const from = sent?.length ?? 0;
     const outcomes = await view(tx, problems, "behind a failure", (read) =>
       Promise.all([
         tried(() => read.query(SLOW_FAILURE)),
-        tried(() => read.query("SELECT label FROM t.rows WHERE height = $1", [BEFORE])),
-        tried(() => read.query("SELECT count(*) AS n FROM t.rows")),
-        tried(() => read.query("SELECT 1 AS one")),
+        tried(() => read.query(behind[0] as string, [BEFORE])),
+        tried(() => read.query(behind[1] as string)),
+        tried(() => read.query(behind[2] as string)),
       ]),
     );
     if (outcomes !== undefined) compare(problems, "the four statements", outcomes, ["22012", "25P02", "25P02", "25P02"]);
     const [row] = await tx.query("SELECT label FROM t.rows WHERE height = $1", [BEFORE]).catch(() => []);
     compare(problems, "the outer's row after the view", row, { label: "outer, before the views" });
+    if (sent !== undefined) {
+      compare(problems, "submissions of the open, the four statements and the close", submissions(sent, from, [OPEN, SLOW_FAILURE, ...behind, CLOSE]), [1, 1, 1, 1, 1, 1]);
+    }
+  });
+}
+
+/** A statement answered 0.2 s after it starts, with the transaction's read-only state. */
+const SLOW_ANSWER = "SELECT current_setting('transaction_read_only') AS read_only FROM pg_sleep(0.2)";
+
+/** How a use of `read` after its body settled fails. */
+async function lateUse(read: ReadHandle, sql: string): Promise<string> {
+  return read.query(sql).then(
+    () => "resolved",
+    (error: unknown) => (error instanceof UmbraError ? shown([error.code, error.details]) : outcomeOf(error)),
+  );
+}
+
+/**
+ * A body that settles while two of its statements are unanswered, a slow read and a write behind it: both are answered
+ * inside the view (the read sees the read-only state, the write fails `25006`), the view resolves after them with the
+ * body's result, and the outer is usable. A use of the handle while the close is pending (from the slow read's answer:
+ * the body has settled, the view has not resolved) fails with `handle-closed` and reaches the database never. Every
+ * other text reached it once (`sent`).
+ */
+export async function unansweredProblems(db: Database, sent: readonly string[]): Promise<string[]> {
+  const write = "INSERT INTO t.rows VALUES (3, 'unanswered when the body settled')";
+  const late = "SELECT 'used while the close is pending' AS late";
+  return inOuter(db, async (tx, problems) => {
+    const from = sent.length;
+    const order: string[] = [];
+    let resolved = false;
+    let slow: Promise<unknown> | undefined;
+    let written: Promise<string> | undefined;
+    let pending: { resolved: boolean; late: string } | undefined;
+    const viewing = view(tx, problems, "a body that settles first", async (read) => {
+      slow = read.query(SLOW_ANSWER).then(async (rows) => {
+        order.push("the slow read");
+        pending = { resolved, late: await lateUse(read, late) };
+        return rows;
+      }, outcomeOf);
+      written = tried(() => read.query(write)).then((outcome) => {
+        order.push("the write");
+        return outcome;
+      });
+      return "the body's result";
+    }).then((result) => {
+      order.push("the view");
+      resolved = true;
+      return result;
+    });
+    compare(problems, "the view's result", await viewing, "the body's result");
+    compare(problems, "the statements unanswered when the body settled", [await slow, await written], [[{ read_only: "on" }], "25006"]);
+    compare(problems, "the order of the answers", order, ["the slow read", "the write", "the view"]);
+    compare(problems, "a handle used while the close is pending", pending, { resolved: false, late: shown(["handle-closed", { handle: "read" }]) });
+    compare(problems, "the outer after the view", await tried(() => tx.query("SELECT count(*) AS n FROM t.rows")), "ok");
+    compare(problems, "submissions of the open, the slow read, the write, the close and the late use", submissions(sent, from, [OPEN, SLOW_ANSWER, write, CLOSE, late]), [1, 1, 1, 1, 0]);
+  });
+}
+
+/**
+ * The body's own error: whatever the body rejects with — an `Error`, a plain object, a string, `undefined` — is what
+ * the view rejects with, the same value, whether the view sent a statement or none; so is a statement's error the
+ * body lets through. The outer is usable after each.
+ */
+export async function bodyErrorProblems(db: Database): Promise<string[]> {
+  const values: readonly (readonly [string, unknown])[] = [
+    ["an Error", new Error("the body's own error")],
+    ["a plain object", { not: "an Error" }],
+    ["a string", "the body's own text"],
+    ["undefined", undefined],
+  ];
+  const rejection = (run: Promise<unknown>): Promise<unknown> =>
+    run.then(
+      () => ({ resolved: true }),
+      (error: unknown) => error,
+    );
+  return inOuter(db, async (tx, problems) => {
+    for (const [name, value] of values) {
+      const afterAStatement = await rejection(
+        readView(tx, OPTIONS, async (read) => {
+          await read.query("SELECT 1 AS one");
+          throw value;
+        }),
+      );
+      if (afterAStatement !== value) problems.push(`${name}, thrown after a statement: the view rejected with ${shown(afterAStatement)}`);
+      const sendingNothing = await rejection(
+        readView(tx, OPTIONS, async () => {
+          throw value;
+        }),
+      );
+      if (sendingNothing !== value) problems.push(`${name}, thrown by a body that sent nothing: the view rejected with ${shown(sendingNothing)}`);
+      compare(problems, `the outer after ${name}`, await tried(() => tx.query("SELECT count(*) AS n FROM t.rows")), "ok");
+    }
+    let statementError: unknown;
+    const letThrough = await rejection(
+      readView(tx, OPTIONS, async (read) => {
+        await read.query("SELECT 1/0 AS x").catch((error: unknown) => {
+          statementError = error;
+          throw error;
+        });
+      }),
+    );
+    if (!(statementError instanceof UmbraError) || letThrough !== statementError) {
+      problems.push(`a statement's error the body let through: the view rejected with ${outcomeOf(letThrough)}, not the statement's own error`);
+    }
+    compare(problems, "the outer after a statement's error", await tried(() => tx.query("SELECT count(*) AS n FROM t.rows")), "ok");
   });
 }
 
@@ -337,39 +625,69 @@ export const CONTROL_REFUSED: readonly (readonly [string, string])[] = [
   ["COMMIT PREPARED 'read_view_check'", "COMMIT"],
   ["ROLLBACK PREPARED 'read_view_check'", "ROLLBACK"],
   ["/* a comment */ -- another\n  commit", "COMMIT"],
+  ["; COMMIT", "COMMIT"],
+  [";; /* behind two empty statements */ ROLLBACK", "ROLLBACK"],
+  ["; RELEASE SAVEPOINT umbradb_read_view", "RELEASE"],
   ["SET SESSION AUTHORIZATION DEFAULT", "SET SESSION AUTHORIZATION"],
   ["SET LOCAL session_authorization TO DEFAULT", "SET SESSION AUTHORIZATION"],
+  ['SET U&"session_authorization" TO DEFAULT', "SET SESSION AUTHORIZATION"],
+  ['SET LOCAL U&"\\0073ession_authorization" TO DEFAULT', "SET SESSION AUTHORIZATION"],
+  ['SET U&"!0073ession_authorization" UESCAPE \'!\' TO DEFAULT', "SET SESSION AUTHORIZATION"],
 ];
 
 /** Statements the check lets through and the server refuses inside a view, each with its SQLSTATE. */
 export const SERVER_REFUSED: readonly (readonly [string, string])[] = [
   ["DO $$ BEGIN COMMIT; END $$", "2D000"],
   ["DO $$ BEGIN ROLLBACK; END $$", "2D000"],
+  ["DO $$ BEGIN EXECUTE 'COMMIT'; END $$", "0A000"],
   ["CALL t.commits()", "2D000"],
   ["SELECT 1 AS one; COMMIT", "42601"],
+  ["SELECT $1::int AS one; COMMIT", "42601"],
+  ["PREPARE read_view_commit AS COMMIT", "42601"],
 ];
 
 /**
- * A view cannot end or leave the outer transaction: each of {@link CONTROL_REFUSED}, in a view of its own, is refused
- * with `control-refused` and its command before it is sent, so the view's next statement is answered; each of
- * {@link SERVER_REFUSED} fails with its SQLSTATE. The outer reads its one row after every view.
+ * A view cannot end or leave the outer transaction. Each of {@link CONTROL_REFUSED}, in a view and a transaction of
+ * its own (so that a command let through cannot decide the next one's outcome), is refused with `control-refused` and
+ * its command before it is sent: the view's next statement is answered, and the transaction commits its two rows. Each
+ * of {@link SERVER_REFUSED} fails with its SQLSTATE, and a statement prepared under the name `transaction` is
+ * accepted. The outer reads its one row after those views.
+ *
+ * A problem of a refused command starts with its text: `<sql>: <the two outcomes>, not …`, or `<sql>: …` for what
+ * its view or its transaction did.
  */
 export async function controlProblems(db: Database): Promise<string[]> {
-  return inOuter(db, async (tx, problems) => {
-    for (const [sql, command] of CONTROL_REFUSED) {
-      const outcomes = await view(tx, problems, sql, async (read) => [
-        await tried(() => read.query(sql)),
-        await tried(() => read.query("SELECT 1 AS one")),
+  const problems: string[] = [];
+  for (const [sql, command] of CONTROL_REFUSED) {
+    const own = await inOuter(db, async (tx, problems) => {
+      const outcomes: string[] = [];
+      await view(tx, problems, "its view", async (read) => {
+        outcomes.push(await tried(() => read.query(sql)));
+        outcomes.push(await tried(() => read.query("SELECT 1 AS one")));
+      });
+      compare(problems, "its two outcomes", outcomes, [`control-refused ${command}`, "ok"]);
+    });
+    problems.push(...own.map((problem) => `${sql}: ${problem}`));
+    await emptied(db, problems);
+  }
+  problems.push(
+    ...(await inOuter(db, async (tx, problems) => {
+      for (const [sql, sqlstate] of SERVER_REFUSED) {
+        const outcome = await view(tx, problems, sql, (read) => tried(() => read.query(sql, sql.includes("$1") ? [1] : [])));
+        if (outcome !== undefined) compare(problems, sql, outcome, sqlstate);
+      }
+      const named = await view(tx, problems, "a statement named transaction", async (read) => [
+        await tried(() => read.query("PREPARE transaction AS SELECT 1 AS one")),
+        await tried(() => read.query("PREPARE transaction_typed (int) AS SELECT $1 AS one")),
+        await read.query("EXECUTE transaction").catch((error: unknown) => outcomeOf(error)),
       ]);
-      if (outcomes !== undefined) compare(problems, sql, outcomes, [`control-refused ${command}`, "ok"]);
-    }
-    for (const [sql, sqlstate] of SERVER_REFUSED) {
-      const outcome = await view(tx, problems, sql, (read) => tried(() => read.query(sql)));
-      if (outcome !== undefined) compare(problems, sql, outcome, sqlstate);
-    }
-    const counted = await tx.query("SELECT count(*)::int AS n FROM t.rows").catch((error: unknown) => outcomeOf(error));
-    compare(problems, "the outer after the views", counted, [{ n: 1 }]);
-  });
+      compare(problems, "a statement named transaction", named, ["ok", "ok", [{ one: 1 }]]);
+      for (const name of ["transaction", "transaction_typed"]) await tx.execute(`DEALLOCATE ${name}`).catch(() => undefined);
+      const counted = await tx.query("SELECT count(*)::int AS n FROM t.rows").catch((error: unknown) => outcomeOf(error));
+      compare(problems, "the outer after the views", counted, [{ n: 1 }]);
+    })),
+  );
+  return problems;
 }
 
 /**
@@ -462,10 +780,11 @@ export async function noTransactionIdProblems(db: Database): Promise<string[]> {
 /**
  * The view's own edges: a view asked for while one is open on the same transaction throws a programming error before
  * anything is sent, and the open view goes on; a handle reports the height it was given and, used after its body
- * settled, fails with `handle-closed` (`handle: "read"`) and sends nothing; a view that sends no statement resolves; a
- * view of an object no backend opened throws before its body runs.
+ * settled, fails with `handle-closed` (`handle: "read"`) and sends nothing; a view that sends no statement resolves,
+ * and with `sent` (what reached the database) neither it nor its handle used late reached it; a view of an object no
+ * backend opened throws before its body runs.
  */
-export async function edgeProblems(db: Database): Promise<string[]> {
+export async function edgeProblems(db: Database, sent?: readonly string[]): Promise<string[]> {
   return inOuter(db, async (tx, problems) => {
     let nestedRan = false;
     const nested = await view(tx, problems, "the outer view", async (read) => {
@@ -501,11 +820,14 @@ export async function edgeProblems(db: Database): Promise<string[]> {
     compare(problems, "the kept handle's height", kept?.height, 7n);
 
     let emptyKept: ReadHandle | undefined;
+    const before = sent?.length;
     compare(problems, "a view that sends nothing", await view(tx, problems, "empty", async (read) => {
       emptyKept = read;
       return "nothing sent";
     }), "nothing sent");
     compare(problems, "its handle used after it", await tried(async () => emptyKept?.query("SELECT 1")), "handle-closed");
+    // Nothing reached the database: no open, no close, and not the statement of the handle used late.
+    compare(problems, "what a view that sends nothing, and its handle used late, sent", sent?.slice(before), sent === undefined ? undefined : []);
 
     // An object shaped as a transaction, which no backend opened, forwarding to the real one.
     const lookalike: Transaction = { query: (sql, params) => tx.query(sql, params), execute: (sql, params) => tx.execute(sql, params) };
@@ -525,24 +847,33 @@ export async function edgeProblems(db: Database): Promise<string[]> {
 /**
  * The outer transaction already aborted: a view that sends nothing resolves; a view's first statement fails with the
  * open's error (`25P02`), the close is not sent, and the transaction is reported as rolled back
- * (`commit-rolled-back`), with nothing stored.
+ * (`commit-rolled-back`), with nothing stored. With `sent` (what reached the database): the empty view sent nothing,
+ * and after the open failed neither the view's second statement nor the close was sent.
  */
-export async function abortedOuterProblems(db: Database): Promise<string[]> {
+export async function abortedOuterProblems(db: Database, sent?: readonly string[]): Promise<string[]> {
   const problems: string[] = [];
+  const first = "SELECT 'first in a view of an aborted transaction' AS first";
+  const second = "SELECT 'after the open failed' AS second";
   const outcome = await tried(() =>
     db.transaction(async (tx) => {
       await tx.execute("INSERT INTO t.rows VALUES ($1, 'outer')", [BEFORE]);
       compare(problems, "the failing outer statement", await tried(() => tx.query("SELECT 1/0 AS x")), "22012");
+      const beforeEmpty = sent?.length;
       compare(problems, "an empty view", await tried(() => readView(tx, OPTIONS, async () => "nothing sent")), "ok");
+      compare(problems, "what an empty view sent", sent?.slice(beforeEmpty), sent === undefined ? undefined : []);
       compare(problems, "a view's first statement", await tried(() => readView(tx, OPTIONS, (read) => read.query("SELECT 1 AS one"))), "25P02");
+      const from = sent?.length ?? 0;
       const caught = await tried(() =>
         readView(tx, OPTIONS, async (read) => {
-          const first = await tried(() => read.query("SELECT 1 AS one"));
-          const second = await tried(() => read.query("SELECT 2 AS two"));
-          compare(problems, "a view's statements when its first failed", [first, second], ["25P02", "25P02"]);
+          const outcomes = [await tried(() => read.query(first)), await tried(() => read.query(second))];
+          compare(problems, "a view's statements when its first failed", outcomes, ["25P02", "25P02"]);
         }),
       );
       compare(problems, "a view whose body caught its first statement's error", caught, "ok");
+      if (sent !== undefined) {
+        // The open and the first statement went together; after the open's failure nothing more did, the close neither.
+        compare(problems, "submissions of the open, the first statement, the second and the close", submissions(sent, from, [OPEN, first, second, CLOSE]), [1, 1, 0, 0]);
+      }
     }),
   );
   compare(problems, "the transaction", outcome, "commit-rolled-back");
@@ -571,12 +902,30 @@ export async function listenProblems(db: Database): Promise<string[]> {
   return problems;
 }
 
+/** A listener on a channel outside the view's transaction, and how it ends. */
+export interface Listener {
+  /** Calls `heard` with the payload of every notification of `channel` from now on. */
+  listen(channel: string, heard: (payload: string) => void): Promise<void>;
+  stop(): Promise<void>;
+}
+
+/** PostgreSQL: a listener on another connection to the database at `url`. */
+export function connectionListener(url: string): Listener {
+  const connection = postgres(url, { max: 1, onnotice: () => undefined });
+  return {
+    async listen(channel, heard) {
+      await connection.listen(channel, heard);
+    },
+    stop: () => connection.end({ timeout: 5 }),
+  };
+}
+
 /**
- * PostgreSQL: a `NOTIFY` sent in a view is not delivered to a listener on another connection after the commit, while
- * the outer's own `NOTIFY` is (the control that the listener hears).
+ * A `NOTIFY` sent in a view is not delivered after the commit, while the outer's own `NOTIFY` is (the control that
+ * the listener hears): on PostgreSQL to a listener on another connection, on PGlite to a listener of the engine's one
+ * session.
  */
-export async function notifyProblems(db: Database, url: string): Promise<string[]> {
-  const listener = postgres(url, { max: 1, onnotice: () => undefined });
+export async function notifyProblems(db: Database, listener: Listener): Promise<string[]> {
   const heard: string[] = [];
   try {
     await listener.listen("read_view_notify", (payload) => heard.push(payload));
@@ -591,7 +940,7 @@ export async function notifyProblems(db: Database, url: string): Promise<string[
     compare(problems, "notifications heard after the commit", heard, ["from the outer"]);
     return problems;
   } finally {
-    await listener.end({ timeout: 5 });
+    await listener.stop();
   }
 }
 
@@ -720,6 +1069,11 @@ export async function sessionAuthorizationProblems(db: Database): Promise<string
     `SET LOCAL SESSION AUTHORIZATION ${ROLE}`,
     `SET session_authorization = '${ROLE}'`,
     `SET LOCAL "session_authorization" TO '${ROLE}'`,
+    `; SET SESSION AUTHORIZATION ${ROLE}`,
+    `SET U&"session_authorization" = '${ROLE}'`,
+    `SET U&"\\0073ession_authorization" = '${ROLE}'`,
+    `SET LOCAL U&"sess\\+000069on_authorization" TO '${ROLE}'`,
+    `SET U&"!0073ession_authorization" UESCAPE '!' = '${ROLE}'`,
   ];
   const expected = forms.map(() => "control-refused SET SESSION AUTHORIZATION");
   try {

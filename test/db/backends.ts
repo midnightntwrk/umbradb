@@ -1,4 +1,5 @@
 import type { CommittedHeight, Database } from "../../src/db/api.js";
+import { type DriverConnectionOptions, driverConnectionOptions } from "../../src/db/postgres.js";
 import { type PgliteTestServer, startPgliteServer } from "./pglite-server.js";
 import { type PostgresTestServer, startPostgresServer } from "./postgres-server.js";
 
@@ -24,6 +25,13 @@ export interface TestBackend {
    * API's own session settings win over them.
    */
   database(setup: string, committedHeight?: CommittedHeight, defaults?: Settings): Promise<TestDatabase>;
+  /**
+   * As {@link database}, with every text that reaches the database through the API recorded in `sent`, in order: on
+   * PostgreSQL each text the driver writes to a connection of the API (its `debug` hook; a text written again is
+   * recorded again), the writer's and the readers' alike; on PGlite each call of the engine's `query` and `exec`. The
+   * API's own statements (`BEGIN`, the committed height, `COMMIT`, …) are among them.
+   */
+  counted(setup: string, committedHeight?: CommittedHeight): Promise<TestDatabase & { readonly sent: string[] }>;
 }
 
 /** Setting names with their values, `[name, value]`, as PostgreSQL's `SET` takes them. */
@@ -38,6 +46,12 @@ export interface TestDatabase {
   readonly url?: string;
   /** Runs SQL (several statements allowed) outside the API, committed when it returns; never while a read is open. */
   exec(sql: string): Promise<void>;
+  /**
+   * PGlite only: calls `heard` with the payload of every notification of `channel` the engine's one session receives
+   * from now on (the engine's own `listen`, outside the API; never while a read or a transaction is open). On
+   * PostgreSQL a test listens on a connection of its own to `url`.
+   */
+  listen?(channel: string, heard: (payload: string) => void): Promise<void>;
   /**
    * With `defaults`: what a session that pins nothing starts with, for each of their names (`current_setting`), read
    * outside the API once the defaults were set — the control that they are in effect. Empty without `defaults`.
@@ -68,6 +82,25 @@ function postgresBackend(): TestBackend {
         unpinned,
       };
     },
+    async counted(setup, committedHeight) {
+      if (server === undefined) throw new Error("backend not started");
+      const database = await server.createDatabase();
+      await database.exec(setup);
+      const sent: string[] = [];
+      // The driver calls `debug` with each text as it builds the message it writes to the connection.
+      const driverOptions = (connection: Parameters<typeof driverConnectionOptions>[0]) =>
+        ({
+          ...driverConnectionOptions(connection),
+          debug: (_connection: number, text: string) => sent.push(text),
+        }) as DriverConnectionOptions;
+      return {
+        db: database.open({ ...(committedHeight === undefined ? {} : { committedHeight }), driverOptions }),
+        url: database.url,
+        exec: (sql) => database.exec(sql),
+        unpinned: {},
+        sent,
+      };
+    },
   };
 }
 
@@ -89,7 +122,33 @@ function pgliteBackend(): TestBackend {
       return {
         db: await database.open(committedHeight === undefined ? {} : { committedHeight }),
         exec: (sql) => database.exec(sql),
+        listen: async (channel, heard) => {
+          await database.engine.listen(channel, heard);
+        },
         unpinned: database.unpinned,
+      };
+    },
+    async counted(setup, committedHeight) {
+      if (server === undefined) throw new Error("backend not started");
+      const database = await server.createDatabase();
+      await database.exec(setup);
+      const sent: string[] = [];
+      const { engine } = database;
+      const query = engine.query.bind(engine);
+      const exec = engine.exec.bind(engine);
+      engine.query = ((text: string, ...rest: unknown[]) => {
+        sent.push(text);
+        return (query as (...all: unknown[]) => unknown)(text, ...rest);
+      }) as typeof engine.query;
+      engine.exec = ((text: string, ...rest: unknown[]) => {
+        sent.push(text);
+        return (exec as (...all: unknown[]) => unknown)(text, ...rest);
+      }) as typeof engine.exec;
+      return {
+        db: await database.open(committedHeight === undefined ? {} : { committedHeight }),
+        exec: (sql) => database.exec(sql),
+        unpinned: database.unpinned,
+        sent,
       };
     },
   };
