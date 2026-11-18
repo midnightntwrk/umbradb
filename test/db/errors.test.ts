@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
-import { ERROR_CODES, type ErrorCode, UmbraError } from "../../src/db/errors.js";
+import { ERROR_CODES, type ErrorCode, UmbraError, writeHandleClosed } from "../../src/db/errors.js";
 import { type CanonicalEncodingFailure, CanonicalEncodingError, encodeCanonical } from "../../src/determinism/cbor.js";
 import { type ModuleContentsFailure, ModuleContentsError } from "../../src/determinism/module-tables.js";
 import { classifyPgliteError } from "../../src/db/pglite.js";
@@ -87,6 +87,17 @@ describe("the determinism errors are UmbraErrors (the package exports UmbraError
   it("covers every reason of both in ErrorCode", () => {
     expectTypeOf<CanonicalEncodingFailure>().toExtend<ErrorCode>();
     expectTypeOf<ModuleContentsFailure>().toExtend<ErrorCode>();
+  });
+});
+
+describe("a write handle used after its callback", () => {
+  it("names on-db-write for a block write handle and on-start-db for a schema write handle unless a point is given", () => {
+    expect(writeHandleClosed("block-write", "m").details).toEqual({ handle: "block-write", module: "m", point: "on-db-write" });
+    expect(writeHandleClosed("schema-write", "m").details).toEqual({ handle: "schema-write", module: "m", point: "on-start-db" });
+    const settle = writeHandleClosed("block-write", "m", "on-settle");
+    expect(settle.details).toEqual({ handle: "block-write", module: "m", point: "on-settle" });
+    expect(settle.code).toBe("handle-closed");
+    expect(settle.message).toContain("a block write handle of m was used after its on-settle callback ended");
   });
 });
 
