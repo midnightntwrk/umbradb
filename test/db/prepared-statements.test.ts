@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Database } from "../../src/db/api.js";
 import { runMultiStatement } from "../../src/db/multi-statement.js";
 import { repeatedStatement } from "../../src/db/repeated-statements.js";
+import { startTrace, stopTrace } from "../../src/trace/trace.js";
 import { type PostgresTestServer, startPostgresServer } from "./postgres-server.js";
 
 /**
@@ -378,6 +379,106 @@ describe("prepared statements on PostgreSQL (00033 F2)", () => {
     }
     expect(await preparedCount(db)).toBeLessThanOrEqual(256);
     expect(await preparedCount(db)).toBeGreaterThanOrEqual(200);
+    await db.close();
+  });
+
+  it("runs a marked text right at every execution after a schema change, its retired statement never again", async () => {
+    const { db } = await database();
+    const all = marked("SELECT * FROM t.rows ORDER BY height");
+    const runsOf = async (): Promise<Record<string, unknown>[]> =>
+      db.transaction((tx) =>
+        tx.query(
+          "SELECT (generic_plans + custom_plans)::int AS runs FROM pg_prepared_statements WHERE statement = $1",
+          [all],
+        ),
+      );
+    for (let i = 0; i < 2; i++) await db.transaction((tx) => tx.query(all));
+    expect(await runsOf()).toEqual([{ runs: 2 }]);
+    await db.transaction((tx) => tx.execute("ALTER TABLE t.rows ADD COLUMN extra integer NOT NULL DEFAULT 7"));
+    for (let i = 0; i < 3; i++) {
+      expect(await db.transaction((tx) => tx.query(all))).toEqual([{ height: 1n, label: "one", extra: 7 }]);
+    }
+    // The statement prepared before the change ran no more, and none other was prepared for the text on this session.
+    expect(await runsOf()).toEqual([{ runs: 2 }]);
+    await db.close();
+  });
+
+  it("runs an unmarked text against the table the search path finds at each execution, a temporary one among them", async () => {
+    const { db } = await database();
+    const rows = await db.transaction(async (tx) => {
+      await tx.execute("SET LOCAL search_path = t");
+      const before = await tx.query("SELECT * FROM rows");
+      await tx.query("SELECT * FROM rows");
+      await tx.execute("CREATE TEMPORARY TABLE rows (height bigint, note text) ON COMMIT DROP");
+      await tx.execute("INSERT INTO pg_temp.rows VALUES (9, 'temporary')");
+      return [before, await tx.query("SELECT * FROM rows")];
+    });
+    expect(rows).toEqual([[{ height: 1n, label: "one" }], [{ height: 9n, note: "temporary" }]]);
+    await db.close();
+  });
+
+  it("gives a replaced writer's session a bound of its own: a marked text is prepared there after the session before used it all", async () => {
+    const created = await server.createDatabase();
+    await created.exec(SCHEMA);
+    const db = created.open({ committedHeight, readConnections: 1 });
+    const text = marked("SELECT count(*)::int AS n FROM t.rows");
+    const ofText =
+      "SELECT pg_backend_pid() AS pid, count(*)::int AS n FROM pg_prepared_statements WHERE statement = $1";
+    const pid = await db.transaction(async (tx) => {
+      for (let i = 0; i < 300; i++) await tx.query(`SELECT $1::int + ${i} AS n`, [1]);
+      await tx.query(text);
+      await tx.query(text);
+      const [row] = await tx.query(ofText, [text]);
+      expect(row?.n).toBe(0);
+      return row?.pid as number;
+    });
+    const before = db.writerSession();
+    await created.terminate(pid);
+    // The first transaction may find the session lost (retryable); a later one runs on a new session.
+    let after: Record<string, unknown> | undefined;
+    for (let attempt = 0; attempt < 5 && after === undefined; attempt++) {
+      after = await db
+        .transaction(async (tx) => {
+          await tx.query(text);
+          await tx.query(text);
+          return (await tx.query(ofText, [text]))[0];
+        })
+        .catch((error: unknown) => {
+          expect(error).toMatchObject({ code: "connection-lost" });
+          return undefined;
+        });
+    }
+    expect(after?.pid).not.toBe(pid);
+    expect(after?.n).toBe(1);
+    expect(db.writerSession()).not.toBe(before);
+    await db.close();
+  });
+
+  it("counts every execution of a marked text in the trace's statements, named or unnamed, with its time", async () => {
+    const { db } = await database();
+    const text = marked("SELECT count(*)::int AS traced FROM t.rows");
+    let totals = "[]";
+    startTrace({ blocks: () => undefined, statements: (json) => void (totals = json), worker: () => undefined });
+    let runs: unknown;
+    try {
+      runs = await db.transaction(async (tx) => {
+        await tx.query(text);
+        await tx.query(text);
+        // The first of these is alone and runs by name; the two sent beside it run unnamed.
+        await Promise.all([tx.query(text), tx.query(text), tx.query(text)]);
+        const [row] = await tx.query(
+          "SELECT (generic_plans + custom_plans)::int AS runs FROM pg_prepared_statements WHERE statement = $1",
+          [text],
+        );
+        return row?.runs;
+      });
+    } finally {
+      stopTrace();
+    }
+    expect(runs).toBe(3);
+    const entry = (JSON.parse(totals) as { q: string; n: number; ms: number }[]).find((total) => total.q === text);
+    expect(entry?.n).toBe(5);
+    expect(entry?.ms).toBeGreaterThan(0);
     await db.close();
   });
 
