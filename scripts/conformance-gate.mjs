@@ -50,9 +50,6 @@ const env = { ...process.env };
 // Belt-and-suspenders: the crash/soak/differential suites run on Testcontainers, not the live
 // tier — make sure the live gate is unset so nothing self-skips behind it.
 delete env.UMBRADB_LIVE_PREPROD;
-// Read by `vitest.config.ts`: a shard's coverage is partial, so it skips the floors.
-if (shard) env.UMBRADB_COVERAGE_SHARD = "1";
-else delete env.UMBRADB_COVERAGE_SHARD;
 
 const reporters = shard
   ? ["--reporter=default", "--reporter=blob"]

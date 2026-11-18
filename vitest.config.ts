@@ -66,8 +66,9 @@ const CORE_ARCH = {
   "**/src/deterministic-postgresql/errors.ts": { lines: 95, branches: 91, perFile: true },
 } as const;
 
-// Set by `conformance-gate.mjs --shard`. A shard's coverage is partial, so floors are checked only after the merge.
-const coverageShard = process.env.UMBRADB_COVERAGE_SHARD === "1";
+// A shard's coverage is partial, so floors are checked only after `--merge-reports`. Read from Vitest's own arguments,
+// not the environment, which test workers inherit: tests that import this config must see the floors.
+const coverageShard = process.argv.some((arg) => arg === "--shard" || arg.startsWith("--shard="));
 
 export default defineConfig({
   test: {
