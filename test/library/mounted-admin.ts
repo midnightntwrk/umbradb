@@ -15,7 +15,7 @@ import type { EngineOptions } from "../../src/runner/process.js";
 import { ANSWER_MS, ask, gate } from "../admin/admin-harness.js";
 import { SECRET_NODE, SECRET_TEXT, secretDatabase, secretProblems } from "../admin/secrets.js";
 import { spawnChild } from "../child-processes.js";
-import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../runner/process-backends.js";
+import { type ProcessBackend, type ProcessDatabase } from "../runner/process-backends.js";
 import { startProcess } from "../runner/process-build.js";
 import { cursorReaches, libraryData, rowsModule } from "./library-fixtures.js";
 import { exchange, type MapiHooks, mapiModule, mountHandlers } from "./mounted-fixtures.js";
@@ -128,7 +128,7 @@ function adminOf(handle: UmbraDBHandle): string {
   return `http://${admin.host}:${admin.port}`;
 }
 
-describe.each(PROCESS_BACKENDS)("mounted admin on $name", (backend: ProcessBackend) => {
+export const mountedAdminTests = (backend: ProcessBackend): void => describe(`mounted admin on ${backend.name}`, () => {
   const postgres = backend.kind === "postgres";
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
@@ -449,7 +449,7 @@ async function hostEndsByItself(mode: "library" | "control", ms: number): Promis
   }
 }
 
-describe("the heartbeat's timer does not keep a library host's event loop alive", () => {
+export const heartbeatTests = (): void => describe("the heartbeat's timer does not keep a library host's event loop alive", () => {
   it("a host that returns without stopping UmbraDB ends by itself; the control's referenced heartbeat keeps it running", async () => {
     // PGlite's own timer of 10 s may hold the process that long after its last query; nothing of UmbraDB's may.
     expect(await hostEndsByItself("library", 30_000)).toEqual({ reached: true, ended: true, code: 0 });

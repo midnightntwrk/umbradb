@@ -56,7 +56,7 @@ import { closureProblems, reachIn, retainedProblems } from "./refcount-checks.js
  * - With `retainStates` 0, a contract's state and zswap-state keys persisted at 10 stay held and load from their keys
  *   alone. This holds after the contract changed at 20, every state holding them was released, and the blocks after
  *   their releases deleted their unused rows. The run without persisting them is in
- *   `ledger-storage.negative-control.test.ts`.
+ *   `ledger-storage.negative-control.ts`.
  */
 
 const WORKER = fileURLToPath(new URL("./ledger-restart.worker.ts", import.meta.url));
@@ -138,7 +138,7 @@ async function killedAt(db: ProcessDatabase, records: readonly TapeRecord[], cur
   }
 }
 
-describe.each(PROCESS_BACKENDS)("core-ledger-state's stored state through the process on $name", (backend: ProcessBackend) => {
+export const storedStateTests = (backend: ProcessBackend): void => describe(`core-ledger-state's stored state through the process on ${backend.name}`, () => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
@@ -274,7 +274,7 @@ describe.each(PROCESS_BACKENDS)("core-ledger-state's stored state through the pr
   }, PATIENCE_MS * 4);
 });
 
-describe("core-ledger-state's tables hold a node layout, and no table stores a whole serialized state", () => {
+export const nodeLayoutTests = (): void => describe("core-ledger-state's tables hold a node layout, and no table stores a whole serialized state", () => {
   /** The columns `core-ledger-state`'s migrations create in each table. */
   function migrationColumns(): Map<string, string[]> {
     const tables = new Map<string, string[]>();

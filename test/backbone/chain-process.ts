@@ -27,7 +27,7 @@ import type { BlockRef } from "../../src/runner/block-source.js";
 import { InMemoryBlockSource, inMemoryBlock } from "../../src/runner/in-memory-source.js";
 import { HeightFailure } from "../../src/runner/loop.js";
 import type { EngineInput, EngineOptions, ProcessHandle } from "../../src/runner/process.js";
-import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../runner/process-backends.js";
+import { type ProcessBackend, type ProcessDatabase } from "../runner/process-backends.js";
 import { core, entryOf, settle, startProcess } from "../runner/process-build.js";
 import { workModule } from "../runner/sigterm-module.js";
 import { STAND_IN_SPEC_VERSION } from "./block-fetch-stand-in.js";
@@ -193,7 +193,7 @@ async function identityOf(db: ProcessDatabase, start: bigint) {
   return row;
 }
 
-describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backend: ProcessBackend) => {
+export const chainProcessTests = (backend: ProcessBackend): void => describe(`the chain through the process on ${backend.name}`, () => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 

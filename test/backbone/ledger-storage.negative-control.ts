@@ -45,7 +45,7 @@ const plain = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
 /** The ledger's core modules with `core-ledger-state`'s rules `options` replaced. */
 const coreWith = (options: CoreLedgerStateOptions): readonly ModuleDeclaration[] => [CORE_CHAIN_EVENTS, CORE_BLOCK_PARSED, CORE_TX_RESULTS, coreLedgerState(options)];
 
-/** The upgrade scenario of `ledger-storage.test.ts`: v8 to U = 3, F = 4 with no transaction, then v9 to 7. */
+/** The upgrade scenario of `ledger-storage.ts`: v8 to U = 3, F = 4 with no transaction, then v9 to 7. */
 async function upgradeScenario(): Promise<LedgerScenario> {
   const v8 = (): LedgerTx => ({ bytes: zswapOutputTransaction(RAW.v8), kind: "regular" });
   const v9 = (): LedgerTx => ({ bytes: zswapOutputTransaction(RAW.v9), kind: "regular" });
@@ -71,7 +71,7 @@ async function runUntil(db: ProcessDatabase, records: readonly TapeRecord[], hea
   return { ...process, status };
 }
 
-describe.each(PROCESS_BACKENDS)("the negative controls on $name", (backend: ProcessBackend) => {
+export const negativeControlTests = (backend: ProcessBackend): void => describe(`the negative controls on ${backend.name}`, () => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
@@ -125,7 +125,7 @@ describe.each(PROCESS_BACKENDS)("the negative controls on $name", (backend: Proc
   }, PATIENCE_MS * 3);
 });
 
-describe("control (PGlite: 5,000 blocks once)", () => {
+export const windowControlTests = (): void => describe("control (PGlite: 5,000 blocks once)", () => {
   const backend = PROCESS_BACKENDS.find((candidate) => candidate.kind === "pglite") as ProcessBackend;
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);

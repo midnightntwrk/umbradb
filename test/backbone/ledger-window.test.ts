@@ -21,8 +21,8 @@ import { BACKUP_AT, continueToHead, HEAD, restoreOnPostgres, syncAndBackUp, type
  * The window does not depend on the backend: each block's releases are computed from the configuration
  * (`src/backbone/core-ledger-state/retention.ts`). What does depend on it is checked here on both: the released states'
  * root counts, and a retained state's load through the node-store bridge. The window's revisions test
- * (`ledger-storage.test.ts`) checks the same on both from genesis. The committed negative control (a window one state
- * short) is in `ledger-storage.negative-control.test.ts`.
+ * (`ledger-storage.ts`) checks the same on both from genesis. The committed negative control (a window one state
+ * short) is in `ledger-storage.negative-control.ts`.
  */
 
 const backends = new Map(PROCESS_BACKENDS.map((backend) => [backend.kind, backend])) as Map<"postgres" | "pglite", ProcessBackend>;
