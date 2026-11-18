@@ -470,10 +470,10 @@ reads of the step, `missingKeys` and `queuedKeys`), sent in statements of at mos
 |---|---|---|
 | 1 | which keys of B are rows; which hold another list, with it (`rows`, `changed`) | the distinct nodes the run flushed |
 | 3 | which referenced keys are no row (`missing`), less the keys of B and the keys known to be rows (`KnownKeys`) | the distinct references of the lists step 3 checks, and the run's rising keys |
-| 3 | counts (`counts`), for the block-by-block counts | the keys a replaced list referenced whose count, followed block by block, falls below the one the run found; most are among step 5's |
+| 3 | counts (`counts`), for the block-by-block counts, less those the copy holds (section 5.7) | the keys a replaced list referenced whose count, followed block by block, falls below the one the run found; most are among step 5's |
 | 5 | the queue (`queue`) | the queue the run found: by Lemma 1, what the block before the run released or dropped |
-| 5, 6 | counts (`counts`) | the queue, T, the keys whose count fell, the keys the cascade reaches with a change below 0 |
-| 6 | child lists of deleted rows that B does not hold (`children`) | the rows the run deletes |
+| 5, 6 | counts (`counts`), less those the copy holds | the queue, T, the keys whose count fell, the keys the cascade reaches with a change below 0 |
+| 6 | child lists of deleted rows that B does not hold (`children`), less those the copy holds | the rows the run deletes |
 | 8, `sweep` off | which of some keys are queued (`queued`) | the keys step 8 evaluates |
 
 None of these grows with the stored state: each is bounded by what the run flushed (nodes, their references,
@@ -487,6 +487,12 @@ The keys known to be rows (`KnownKeySet`) are the set `core-ledger-state` keeps 
 does not hold and teaches it those the `missing` read finds stored, and the run's deleted keys leave it (step 10). A
 block's references are mostly those of the blocks before it, so with the set kept the `missing` read asks about the
 keys no earlier run found stored, and none at a block whose needed keys the set holds.
+
+The counts and child lists kept between runs (`counts-copy.ts`, section 5.7) answer the `counts` and `children`
+reads where they hold the key: the counts of every key an earlier run read, and of every node it wrote new, and the
+references of the child list of every node it wrote, each brought up to date from the runs' net writes. The reads
+then ask the database the keys the copy lacks: mostly the nodes the run's own blocks flushed new and raised, and the
+keys the process met for the first time. Verifying, they ask every key, and the copy's answers are compared.
 
 The deletions are a net change, not a pass: the rows a run deletes are the rows the per-block step deletes over the
 same heights and does not write again. Three blocks delete a lot at once either way: the block after a conversion
@@ -669,8 +675,8 @@ may have committed or not: the cursor read on the writer after the reconnection 
   key. Section 4.9 lists where a run of one block still differs from the step.
 - The trace (`core-ledger-state.ts`'s `traceSettle`): one link of `sh` per settle (the run's heights, its net write,
   the keys evicted, the rounds), `st` in the step's nine positions from the outcome, `collectMs` at `on-compute`, and
-  `stepMs`, `evictMs`, the reads, `knownHits`, `knownEmptied` (section 5.6) and `writeRefcountMs` inside the block's
-  transaction.
+  `stepMs`, `evictMs`, the reads, `knownHits`, `knownEmptied` (section 5.6), `copyHits`, `copyMisses`, `copyEmptied`
+  (section 5.7) and `writeRefcountMs` inside the block's transaction.
 - `test/backbone/ledger-refcount-settle.test.ts` holds the order of 5.2 at every block, the lent handle of 5.2 on
   both backends, the tables after every block to `refcount-step.ts` over the tables after h − 1 and h's recorded
   flush, the refusal of 5.3 alone and followed by a lost connection, a refused eviction against the per-block build
@@ -740,3 +746,74 @@ committing the height while this process's `COMMIT` of it is lost, with its cont
 table's rows for a restart, a restore, `sweep` turning off or on, and a hand edit are argued, not tested for the set: a
 restart and a restore make a new process context, and the restart, backup and `sweep` tests hold the tables, not the
 set.
+
+### 5.7 The counts and child lists, from one settle to the next
+
+`core-ledger-state` keeps, for each process context, a copy of what the computation's `counts` and `children` reads
+give (`counts-copy.ts`, `CountsCopy`, through `countsCopyOf`), and gives the computation tables that answer those two
+reads from it where it holds the key (`withCountsCopy`); the keys it lacks are read from the database in one read, and
+their counts held. No other read is answered from it.
+
+**What it holds.** Per key, whether it is a row of `nodes`, its reference count and its root count, as the tables are
+after the last settle; per node a run wrote (new, or with another child list), the references of its child list in
+order, as key texts (section 4.5), which the strings own. A child list is mostly embedded payload (1.9 KB and 2.2
+references a node on Preprod), so its bytes are not held; a held list is answered as a list of its references alone,
+which is all the computation takes from it. A list the `children` read gives is not held: that read asks only for the
+lists of rows the run deletes.
+
+**Exact, not refreshed.** After the net write the copy changes as the tables did: each held key's count takes the run's
+change of it, and its root count the run's root-count change (`RunReclaim.rootChanges`); each node the run wrote new
+enters as a row, its count change as its count and its root-count change as its root count; a node written with
+another list has its list replaced; every key the run deleted leaves (counts and list). A new node's count and root
+count before the run are 0: once a settle committed, a key that is no row has no reference and no root count, since a
+run that left one fails its `missing-reference` check. While a run computes, `root_counts` already holds the run's own
+changes (each block's `on-db-write` writes them, and nothing else writes the table), so a held root count is answered
+as held plus the run's change, and a root count read from the database is held less it. The update reads only the
+run's keys, never the whole copy.
+
+**Its values decide what a run deletes.** Unlike the keys found stored, which only skip a check, a held count, root
+count or row flag is what the computation computes with. Unless the copy verifies, one kind of difference shows:
+a count the run changes, held wrong by enough that the held and the stored count lie on two sides of 0 after the run,
+makes the count merge affect another number of rows (`row-count-mismatch`). A count wrong on the same side of 0, a root
+count held wrong (which can keep a node stored, or delete one a root holds) or a row flag held wrong changes no row
+count. So the computation is right only while the copy is exact, which the update above and these events keep:
+
+| Event | The copy | Test |
+|---|---|---|
+| A run deletes a key | the key leaves (counts and list), at the update | `counts-copy.test.ts` (by hand; generated histories) |
+| A node's child list replaced | the new list | `counts-copy.test.ts`; `ledger-refcount-copy.test.ts`, verifying, on the extended fixture's rewrites |
+| A block whose context says the block before does not continue into it (`b.continues` false), as in section 5.6 | emptied at the block's `on-compute`, before it is handed over | `stored-keys.test.ts`: through the callbacks; a rollback after the settle, with its negative control (`kept-after-failure`: verifying, `copy-mismatch`; not, a node deleted a block early); through the process, verifying, a lost connection at the net write and a lost `COMMIT` both ways; `ledger-refcount-copy.test.ts`, on PostgreSQL, the writer's session replaced between two blocks by another writer, and its control (a loop that says every block continues: the copy is used) |
+| `on-settle` throws (a check, a refusal with restarts off, a failed read or write) | emptied before the error goes on | `stored-keys.test.ts` |
+| The process restarts; a restore | a new process context: empty | `ledger-refcount-copy.test.ts` (a verifying run stopped and started again) |
+| `sweep` off, then on; a conversion or upgrade block; a worker restart after a refused eviction | nothing: only net writes change counts and lists, and the copy follows each | `stored-keys.test.ts` (the restart); the generated histories of `counts-copy.test.ts` (`sweep` drawn per block) |
+| The bound, `reclamationCache.keys` | a read above it is answered and not held; an update that would pass it empties the copy first; it never holds more than the bound of counts or of lists | `counts-copy.test.ts`; `stored-keys.test.ts` (a continuing block whose update meets the bound: `copyEmptied` on its line, not the next's, and the set not emptied); `ledger-refcount-copy.test.ts` (a copy of 30 keys, verifying) |
+| A count or node row changed by hand while the process runs | read at once if the copy does not hold its key; if it does, unseen, but by a verifying copy at its first read of that key, until a block that does not continue the one before, or the bound, empties the copy | the verifying copy's tests in `counts-copy.test.ts` |
+
+**Verifying** (`reclamationCache.verify`): every key the copy answers is also read, and a held value that
+differs (a row flag, a count, a root count, a list, a list held for a key that is no row, a key the read leaves out)
+halts the run with `ledger-refcount-invalid` (`copy-mismatch`), naming the key, which read, the held value and the
+stored one. It costs the reads the copy saves. The tests' processes run in it when `UMBRADB_TEST_VERIFY_RECLAMATION=1`
+is set (`test/runner/process-build.ts`); no workflow of the repository sets it.
+
+**The bound.** 100,000 keys of counts and 100,000 child lists unless `reclamationCache.keys` says otherwise; 0 for no
+copy. Emptying, not closing it to new keys, as the set of section 5.6, since a block's keys are mostly those of the
+blocks just before it. Filled with 100,000 random keys of counts and 100,000 child lists of 16 references each, the copy
+holds 71.9 MiB of heap: 12.7 MiB for the counts (133 bytes a key) and 59.2 MiB for the lists (620 bytes a list; Node.js
+24.9; `heapUsed` before and after, with garbage collection forced). A list on Preprod has 2.2 references on average.
+
+**The trace.** `copyHits` and `copyMisses`: of the keys the `counts` and `references` reads asked, those the copy held
+and those it did not; the database is asked the missed ones (verifying, all), so the trace's reads give what the
+database was asked. `copyEmptied`: 1 on the line of a height whose settle did not start from what earlier heights
+left, as `knownEmptied`, or whose copy the bound emptied while it ran. `st` and `sh` do not change.
+
+**Tests.** `test/backbone/counts-copy.test.ts` (the copy on its own; its reads, every key named, with no copy, the copy
+and a verifying copy; the verifying copy's halts; the generated histories with each fault of the computation; the reads
+measured; its negative controls); `test/backbone/stored-keys.test.ts` (each emptying through the callbacks, the bound
+among them; the process-level runs through a lost connection, verifying); `test/backbone/ledger-refcount-copy.test.ts`
+and its negative control (four runs alike through the process; a stop and a start; the writer's session replaced
+between two blocks, with its control; `net-not-applied` and `roots-not-added`); `test/trace/traced-process.test.ts`
+(the statements saved). The table's rows for `sweep` turning off or on and for a conversion block are held on the
+computation's generated histories (`sweep` drawn per block) and by `ledger-refcount-sweep-off.test.ts` and
+`ledger-refcount-conversion.test.ts` run with `UMBRADB_TEST_VERIFY_RECLAMATION=1`, not by a test of their own; the row
+for a hand edit is argued, the verifying copy's halts being tested on the reads.
+
