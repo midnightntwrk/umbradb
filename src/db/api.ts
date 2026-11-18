@@ -26,7 +26,9 @@ export interface ReadHandle {
   readonly height: bigint | null;
   /**
    * Runs one statement. Parameters are sent as the component's `parameterText` makes them, and rows come back through
-   * the component's result mapping.
+   * the component's result mapping. A statement that would end or nest the handle's transaction, or set the session
+   * authorization, is refused before it is sent (`database-error`, `reason: control-refused`;
+   * `./statement-refusal.ts`).
    */
   query(sql: string, params?: unknown[]): Promise<Record<string, unknown>[]>;
 }

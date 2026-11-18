@@ -225,8 +225,11 @@ describe.each(BACKENDS)("TRUNCATE in a block transaction is refused, on $name", 
 
   it("refuses TRUNCATE after a mark that was rolled back with its savepoint, or that is not this transaction's", async () => {
     const { db, plan } = await guarded();
+    // A module's handle refuses SAVEPOINT (control-refused), so the savepoint is set by a transaction directly, under
+    // the module's role, as the mark's other rules are shown.
     const rolledBack = await outcome(
-      block(db, plan, async (tx) => {
+      db.transaction(async (tx) => {
+        await setModuleRole(tx, plan, "a");
         await tx.execute("SAVEPOINT s");
         await markMigration(tx);
         await tx.execute("ROLLBACK TO SAVEPOINT s");

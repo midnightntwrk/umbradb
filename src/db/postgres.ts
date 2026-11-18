@@ -15,7 +15,9 @@
  *
  * **Reads.** `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY`, then the committed height read by the process's
  * {@link CommittedHeight} as the first statement (which takes the snapshot), then the body's statements, then
- * `ROLLBACK`, which also undoes any `SET` the body ran, so no setting outlives the read.
+ * `ROLLBACK`, which also undoes any `SET` the body ran, so no setting outlives the read. A statement that would end or
+ * nest the read's transaction, or set the session authorization, is refused before it is sent
+ * (`./statement-refusal.ts`).
  *
  * **Timeouts by connection role.** Every session starts with every server-side timeout at 0 (the component's zero
  * timeouts, part of its session settings below). So the writer (migrations, setup, block transactions) and the reads
@@ -50,9 +52,17 @@ import type { SslMode } from "../config/database-parts.js";
 import { mapRows, parameterText, type Row, SESSION_SETTINGS } from "../deterministic-postgresql/index.js";
 import type { CommittedHeight, Database, ReadHandle, ReadOptions, Transaction } from "./api.js";
 import { type DurabilityWarning, probeDurability } from "./durability-probe.js";
-import { commitRolledBack, handleClosed, queryTimeout, statementRefused, UmbraError } from "./errors.js";
+import {
+  commitRolledBack,
+  controlRefused,
+  handleClosed,
+  queryTimeout,
+  statementRefused,
+  UmbraError,
+} from "./errors.js";
 import { allowMultiStatement } from "./multi-statement.js";
 import { readTimeoutMs } from "./read-options.js";
+import { controlStatement } from "./statement-refusal.js";
 import { traceAdd, traceStatement } from "../trace/trace.js";
 import { allowWriterStart, takeWriterLock, type WriterSession } from "./writer-lock.js";
 
@@ -707,6 +717,8 @@ export function openPostgres(options: PostgresOptions): Database {
         else await bound.begin();
         const query = async (sql: string, params?: unknown[]): Promise<Row[]> => {
           if (!open) throw handleClosed("read");
+          const command = controlStatement(sql);
+          if (command !== null) throw controlRefused(command);
           return (await (bound ?? reader).run(sql, params)).rows;
         };
         let result: T;

@@ -72,6 +72,20 @@ export function commitRolledBack(): UmbraError {
 }
 
 /**
+ * A statement a module's handle refused before sending it (`./statement-refusal.ts`): `command` (`COMMIT`,
+ * `SAVEPOINT`, `SET SESSION AUTHORIZATION`, …) would end or nest the transaction the handle runs in, or set the session
+ * authorization. Nothing was sent, so the transaction is neither ended nor aborted. `database-error`, not retryable.
+ */
+export function controlRefused(command: string): UmbraError {
+  return new UmbraError(
+    "database-error",
+    `${command} was refused before it was sent: a statement through a handle cannot end or nest the transaction the ` +
+      "handle runs in, nor set the session authorization",
+    { reason: "control-refused", command },
+  );
+}
+
+/**
  * A statement the server refused, as both backends report it: `truncate-not-allowed` when the
  * `deterministic_postgresql` component's `TRUNCATE` trigger raised it (its SQLSTATE is in `details.sqlstate`), and
  * `database-error` otherwise. Neither is retryable.

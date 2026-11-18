@@ -10,7 +10,9 @@
  *   setting or role a transaction left on the one session does not reach the read (on PostgreSQL a read runs on a
  *   connection of its own and never sees one); then the committed height, read by the process's
  *   {@link CommittedHeight}; then the body's statements; then `ROLLBACK`, which also undoes the resets and any `SET`
- *   the body ran. Nothing commits while the job runs, so every statement sees the height the read reports.
+ *   the body ran. Nothing commits while the job runs, so every statement sees the height the read reports. A statement
+ *   that would end or nest the read's transaction, or set the session authorization (which nothing on PGlite undoes),
+ *   is refused before it is sent (`./statement-refusal.ts`).
  * - A **transaction**: `BEGIN`; the body's statements; then `COMMIT` when the body resolves, or `ROLLBACK` when the
  *   body rejects, with the body's own error. A `COMMIT` that PostgreSQL answers with `ROLLBACK` (a failed statement
  *   aborted the transaction and the body caught its error) is an error, never a commit. A migration's text of several
@@ -69,12 +71,13 @@ import { AsyncLocalStorage, AsyncResource } from "node:async_hooks";
 import { PGlite, type QueryOptions, types } from "@electric-sql/pglite";
 import { mapRows, parameterText, type Row, SESSION_SETTINGS } from "../deterministic-postgresql/index.js";
 import type { CommittedHeight, Database, ReadHandle, ReadOptions, Transaction } from "./api.js";
-import { commitRolledBack, handleClosed, statementRefused, UmbraError } from "./errors.js";
+import { commitRolledBack, controlRefused, handleClosed, statementRefused, UmbraError } from "./errors.js";
 import { pgliteNeedsDevelopmentOptIn } from "./durability-probe.js";
 import { allowMultiStatement } from "./multi-statement.js";
 import { READS_BYPASS_QUEUE } from "./pglite-build-flags.js";
 import { acquirePgliteLock } from "./pglite-lock.js";
 import { readTimeoutMs } from "./read-options.js";
+import { controlStatement } from "./statement-refusal.js";
 import { allowWriterStart } from "./writer-lock.js";
 
 /**
@@ -401,6 +404,8 @@ class PgliteDatabase implements Database {
       await this.script("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; RESET ALL; RESET ROLE");
       const query = async (sql: string, params?: unknown[]): Promise<Row[]> => {
         if (!open) throw handleClosed("read");
+        const command = controlStatement(sql);
+        if (command !== null) throw controlRefused(command);
         return (await this.statement(sql, params)).rows;
       };
       const height = await this.committedHeight({ query });

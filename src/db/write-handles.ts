@@ -29,6 +29,10 @@
  * part's role in the same way, with a schema write handle. The migration runner calls it after the part's migrations
  * (`./migrate.ts`).
  *
+ * **Transaction control.** A statement that would end or nest the transaction the handle runs in, or set the session
+ * authorization, is refused before it is sent (`./statement-refusal.ts`), so the transaction is neither ended nor
+ * aborted.
+ *
  * **Closing.** A handle offers `height`, `query` and `execute`, nothing else: no way to the transaction it forwards to,
  * nor to the migrations' script path (`./multi-statement.ts`). Once its callback returns or throws, every call fails at
  * once with `handle-closed` (`details: { handle, module, point }`) before anything is sent. This holds for a call from
@@ -44,8 +48,9 @@
  */
 
 import type { BlockWriteHandle, Database, SchemaWriteHandle, Transaction } from "./api.js";
-import { type UmbraError, writeHandleClosed } from "./errors.js";
+import { controlRefused, type UmbraError, writeHandleClosed } from "./errors.js";
 import { OWN_PARTS, type SchemaPlan, setModuleRole } from "./roles.js";
+import { controlStatement } from "./statement-refusal.js";
 
 /** What every write handle a block or a startup hands out reports, and whom it tells of a use after closing. */
 export interface WriteHandleOptions {
@@ -123,14 +128,19 @@ async function runHandle<T>(
     options.onClosedUse?.(error);
     return error;
   };
+  const usable = (sql: string): void => {
+    if (!open) throw refuse();
+    const command = controlStatement(sql);
+    if (command !== null) throw controlRefused(command);
+  };
   const handle: BlockWriteHandle = {
     height: options.height,
     async query(sql, params) {
-      if (!open) throw refuse();
+      usable(sql);
       return tx.query(sql, params);
     },
     async execute(sql, params) {
-      if (!open) throw refuse();
+      usable(sql);
       return tx.execute(sql, params);
     },
   };
