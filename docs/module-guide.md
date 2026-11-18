@@ -432,6 +432,15 @@ counts and queue (after a restart, for one).
   writes; the block's handle also sees what earlier callbacks of the block wrote. The other points get a read handle
   (`query` only) at the height §3 gives; `read.height` says which. One statement per call; await each before you
   return. Inside a callback, use the handle it is given: the handles of the points are never cut off by a timeout.
+- **No transaction control.** Every handle, `db.read`'s included, runs your statements in a transaction UmbraDB opens
+  and ends. A statement whose first word would end or nest it is refused before it reaches the database: `BEGIN`,
+  `START TRANSACTION`, `COMMIT` (also `COMMIT AND CHAIN`, `COMMIT PREPARED`), `END`, `ROLLBACK` (also `ROLLBACK AND
+  CHAIN`, `ROLLBACK TO SAVEPOINT`, `ROLLBACK PREPARED`), `ABORT`, `SAVEPOINT`, `RELEASE [SAVEPOINT]` and `PREPARE
+  TRANSACTION`, also after comments. So is a statement that sets the session authorization: `SET [LOCAL | SESSION]
+  SESSION AUTHORIZATION …` and `SET [LOCAL | SESSION] session_authorization …`. The call fails with `database-error`,
+  `details.reason` `control-refused` and `details.command` naming the command, not retryable. Nothing was sent, so the
+  transaction is not aborted and your next statement runs. To go on after a write that may fail, such as a row that may
+  exist already, do not wrap it in a savepoint: use `INSERT … ON CONFLICT`, or check first.
 - **Keep no handle.** A handle closes when the callback it was given to returns or throws: one kept and used later
   fails with `handle-closed`, naming that callback's point, and halts processing, even if your code catches the error.
 - **Parameters** are sent as text: numbers and `bigint`s as digits, a `Uint8Array` as `bytea`, a plain object as JSON.
