@@ -16,14 +16,15 @@ flowchart TD
   bestfetch -. reused at finality .-> fetch
   fetch --> starth["on-start-height<br/>only at the entry's start"]
   starth --> compute["on-compute<br/>reads h − 1, in parallel"]
-  compute --> write["on-db-write<br/>one transaction, then commit"]
-  write --> after["on-after-db-write<br/>reads h, after the commit"]
+  compute --> write["on-db-write<br/>one transaction"]
+  write --> settle["on-settle<br/>the same transaction, then commit"]
+  settle --> after["on-after-db-write<br/>reads h, after the commit"]
   after -- next height, or wait --> node
   after -. once .-> stoph["on-stop-height<br/>after the entry's stop"]
   classDef unfinalized fill:#EEEDFE,stroke:#534AB7,color:#3C3489
   classDef finalized fill:#E1F5EE,stroke:#0F6E56,color:#085041
   class best,bestfetch,rollback unfinalized
-  class fin,fetch,starth,compute,write,after,stoph finalized
+  class fin,fetch,starth,compute,write,settle,after,stoph finalized
 ```
 
 Purple: best blocks, worked on early and never stored. Green: finalized heights, the only path that writes.
@@ -60,8 +61,10 @@ loop processes every height from the cursor + 1 to the head, one at a time:
 2. **`on-start-height`**: only at the height where a module's entry starts.
 3. **`on-compute`**: reads the state at h − 1, outside any transaction; modules that do not depend on one another run
    at the same time. Compute here.
-4. **`on-db-write`**: one `BEGIN … COMMIT` for every module's writes, the only point inside the block's transaction.
-   Before the `COMMIT` the cursor is checked to be h with this block's hash.
+4. **`on-db-write`, then `on-settle`**: one `BEGIN … COMMIT` for every module's writes. Each module's `on-db-write`
+   writes the block's rows; then each `on-settle` gets the run of heights it settles, which ends at h. The engine
+   chooses the runs. In this version a run is always one block. Before the `COMMIT` the cursor is checked to be h with
+   this block's hash.
 5. **`on-after-db-write`**: reads the committed state at h. Notify subscribers here.
 6. **`on-stop-height`**: once, after the height where a module's entry stops has committed.
 
