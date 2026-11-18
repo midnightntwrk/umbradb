@@ -522,16 +522,43 @@ async function releasesOf(
     WINDOW.set(p, { height: b.height, keys });
     return releasedIn(b, keys, from, to);
   }
+  if (kept !== null && options.checkKept === true) {
+    // The checking option: every key kept of the window after the block before against what `states` holds, at every
+    // block, also where it releases none; then the released ones as stored.
+    const stored = await stateKeysByHeight(read, from, b.height);
+    checkKeptKeys(b, kept, stored, from, to);
+    return releasedIn(b, stored, from, to);
+  }
   if (from >= to) return [];
   const held = kept === null ? null : keysIn(kept.stateKeys, from, to);
-  if (held !== null && options.checkKept !== true) return held;
-  const stored = releasedIn(b, await stateKeysByHeight(read, from, to), from, to);
-  for (const [index, key] of (held ?? []).entries()) {
-    const database = stored[index] as Uint8Array;
-    const field = `the released key of the state after block ${from + BigInt(index)}`;
-    if (!sameBytes(key, database)) throw keptDiffers(b, field, hex(key), hex(database));
+  // Not all of them kept (a row missing when the window was read): the keys it releases, read.
+  return held ?? releasedIn(b, await stateKeysByHeight(read, from, to), from, to);
+}
+
+/**
+ * With the checking option: the keys `kept` holds, which are those of the window after the block before, `from`
+ * (L(h − 1)) to h − 1, against `stored`, what `states` holds for those heights. A height kept and not stored, stored
+ * and not kept, kept with another key, or kept outside the window fails block `b`, naming the key and both values
+ * (`none` for a missing one).
+ */
+function checkKeptKeys(
+  b: BlockContext,
+  kept: KeptBlock,
+  stored: ReadonlyMap<bigint, Uint8Array>,
+  from: bigint,
+  to: bigint,
+): void {
+  const heights = [...new Set([...kept.stateKeys.keys(), ...stored.keys()])].sort((x, y) => (x < y ? -1 : x > y ? 1 : 0));
+  for (const height of heights) {
+    const inWindow = height >= from && height < b.height;
+    const memory = kept.stateKeys.get(height);
+    const database = inWindow ? stored.get(height) : undefined;
+    if (memory === undefined ? database === undefined : database !== undefined && sameBytes(memory, database)) continue;
+    const what = inWindow && height < to ? "released key" : "kept key";
+    const outside = inWindow ? "" : `, outside the window ${from} to ${b.height - 1n}`;
+    const field = `the ${what} of the state after block ${height}${outside}`;
+    throw keptDiffers(b, field, memory === undefined ? "none" : hex(memory), database === undefined ? "none" : hex(database));
   }
-  return stored;
 }
 
 /**

@@ -357,6 +357,42 @@ describe.each(PROCESS_BACKENDS)("the block before, kept in memory, through the p
     expect(before.rows.get(10n)).toEqual(await rowsOf(referenceDb));
   }, PATIENCE_MS * 4);
 
+  /** A kept key of the window a test changes or removes, with retainStates 2, where block 1 releases nothing. */
+  const windowChanges: readonly { readonly name: string; readonly memory: RegExp; readonly change: (kept: KeptBlock) => KeptBlock }[] = [
+    {
+      name: "an unreleased kept key changed",
+      memory: /^0xee/,
+      change: (kept) =>
+        kept.height !== 0n
+          ? kept
+          : { ...kept, stateKeys: new Map([...kept.stateKeys].map(([height, key]) => [height, height === 0n ? new Uint8Array(32).fill(0xee) : key])) },
+    },
+    {
+      name: "a kept key removed",
+      memory: /^none$/,
+      change: (kept) => (kept.height !== 0n ? kept : { ...kept, stateKeys: new Map([...kept.stateKeys].filter(([height]) => height !== 0n)) }),
+    },
+  ];
+
+  it.each(windowChanges)("with the checking option and retainStates 2, $name fails block 1's on-compute, naming the key and both values", async ({ memory, change }) => {
+    const before = await beforeRun(await backend.database(), {
+      last: LAST,
+      settings: { retainStates: 2 },
+      core: { checkKept: true, keep: change },
+      halts: true,
+    });
+    expect(before.run.status).toMatchObject({
+      state: "halted",
+      cursor: 0n,
+      reason: { code: "callback-error", height: 1n, module: "core-ledger-state", point: "on-compute" },
+    });
+    const message = (before.run.errors.at(-1) as Error | undefined)?.message ?? "";
+    const named = /^block 1: the block before as core-ledger-state kept it in memory differs from the database: (.+) is (\S+) in memory and (\S+) in the database$/.exec(message);
+    expect(named?.[1], message).toBe("the kept key of the state after block 0");
+    expect(named?.[2]).toMatch(memory);
+    expect(named?.[3]).toMatch(/^0x[0-9a-f]{64}$/);
+  }, PATIENCE_MS * 2);
+
   /** Each kept value a test changes, with how, and the field the failure names. */
   const changes: readonly { readonly field: string; readonly change: (kept: KeptBlock) => KeptBlock }[] = [
     { field: "the state key after block 0", change: (kept) => ({ ...kept, stateKey: new Uint8Array(32).fill(0xee) }) },
