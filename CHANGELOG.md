@@ -291,6 +291,20 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   database layer also gains a read-only view inside a transaction, which nothing uses yet. It cannot change a
   persistent object; as in any read-only transaction, a temporary sequence's value moved inside it stays, and a
   change to a temporary table lasts until the view closes.
+- **Fast-sync mode, off by default: chunks of blocks in one transaction far behind the head.** The `core` entry's
+  `fastSync: { blocks, distance }` (operational; `blocks` 0 to 1,000, below 2 off; `distance` 600) lets a public
+  process store up to `blocks` consecutive heights in one transaction while they are at least `distance` heights
+  behind the finalized head, inside one range of the configuration and one revision of the `core` entry. Every block
+  still runs every point: a chunk takes its blocks first, then runs its first block's `on-compute` with its own read,
+  each later block's `on-compute` with a read-only view of the transaction at the block before, every block's writes in
+  the one transaction, and every block's `on-after-db-write` after the `COMMIT`, in height order, its read at the
+  chunk's last height. A block's context gains `blockBeforeCommitted()`, which `core-ledger-state` calls before a
+  conversion; `continues` is also true for a block whose block before was written in the open transaction. A failure
+  is handled as with the mode off at the same block; blocks that rolled back are stored again one per transaction, and
+  the ledger worker's thread is restarted when a transaction it was led past rolls back. What is stored at every
+  height is what the mode off stores, for the same history of worker restarts. The block trace gains `chunk`. A
+  private process, and a public one with `lockstepInstances`, store one block per transaction. The operator guide
+  describes the setting and what an operator sees.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 
