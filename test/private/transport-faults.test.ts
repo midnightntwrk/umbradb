@@ -677,7 +677,7 @@ describe("a private process's side against a stand-in core", () => {
   });
 
   it.each([
-    [{ statement: 0, reason: "command", name: "COMMIT" }, "COMMIT is not a read (only SELECT, WITH, VALUES or TABLE runs through the core)"],
+    [{ statement: 0, reason: "command", name: "DELETE" }, "DELETE is not a read (only SELECT, WITH, VALUES or TABLE runs through the core)"],
     [{ statement: 0, reason: "command", name: null }, "it is not a read (only SELECT, WITH, VALUES or TABLE runs through the core)"],
     [{ statement: 0, reason: "function", name: "pg_advisory_lock" }, "it names pg_advisory_lock, which the core refuses in a read"],
     [{ statement: 0, reason: "statements", name: null }, "it holds more than one statement"],
@@ -695,7 +695,8 @@ describe("a private process's side against a stand-in core", () => {
     });
     const { transport } = client(core.address);
     try {
-      const failed = transport.read((read) => read.query("COMMIT"));
+      // A statement the handle's own check lets through: the core's gate is what refuses it.
+      const failed = transport.read((read) => read.query("DELETE FROM pub.rows"));
       await expect(failed).rejects.toMatchObject({
         code: "read-refused",
         retryable: false,
@@ -703,6 +704,50 @@ describe("a private process's side against a stand-in core", () => {
         details: { transportCode: "read-refused", ...refused },
       });
       expect(reads).toBe(1);
+      expect(transport.state).toBe("connected");
+    } finally {
+      await transport.close();
+      await core.close();
+    }
+  });
+
+  it("refuses transaction control and a session authorization before it sends a read: control-refused, and the core receives none of them", async () => {
+    const received: string[][] = [];
+    const core = await standIn((socket, message) => {
+      if (message.type === "hello") socket.send(messageText(ACK));
+      if (message.type !== "read") return;
+      received.push(message.statements.map((statement) => statement.sql));
+      const results = message.statements.map(() => ({ columns: [], rows: [] }));
+      socket.send(messageText({ v: 1, type: "read-result", id: message.id, height: null, configHash: CONFIG, results }));
+    });
+    const { transport } = client(core.address);
+    const spellings: readonly (readonly [string, string])[] = [
+      ["COMMIT", "COMMIT"],
+      ["; COMMIT", "COMMIT"],
+      ["/* a comment */ rollback", "ROLLBACK"],
+      ["SAVEPOINT s", "SAVEPOINT"],
+      ["PREPARE TRANSACTION 'x'", "PREPARE TRANSACTION"],
+      ["SET SESSION AUTHORIZATION r", "SET SESSION AUTHORIZATION"],
+      ["SET U&\"\\0073ession_authorization\" = 'r'", "SET SESSION AUTHORIZATION"],
+    ];
+    try {
+      const refused = await transport.read(async (read) => {
+        const seen: unknown[] = [];
+        for (const [sql] of spellings) {
+          seen.push(
+            await read.query(sql).then(
+              () => "resolved",
+              (error: UmbraError) => [error.code, error.retryable, error.details],
+            ),
+          );
+        }
+        // The handle goes on: its next statement is sent.
+        await read.query("SELECT 1 AS one");
+        return seen;
+      });
+      expect(refused).toEqual(spellings.map(([, command]) => ["database-error", false, { reason: "control-refused", command }]));
+      // What the core received: the read's first request, which holds no statement, and the statement after the refusals.
+      expect(received).toEqual([[], ["SELECT 1 AS one"]]);
       expect(transport.state).toBe("connected");
     } finally {
       await transport.close();

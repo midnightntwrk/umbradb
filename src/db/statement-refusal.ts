@@ -1,8 +1,8 @@
 /**
  * The check every handle a module's statements reach runs before it sends a statement: a read handle
- * (`Database.read` on both backends, and the reads of PGlite's exclusive job), a block or schema write handle
- * (`./write-handles.ts`), and the read view (`./read-view.ts`). Core. The engine's own `Transaction` is not checked: no
- * module receives one.
+ * (`Database.read` on both backends, the reads of PGlite's exclusive job, and a private process's reads through the
+ * core, `../private/private-transport.ts`), a block or schema write handle (`./write-handles.ts`), and the read view
+ * (`./read-view.ts`). Core. The engine's own `Transaction` is not checked: no module receives one.
  *
  * Refused, by the first words of the text's first statement:
  * - a statement that ends or nests the transaction the handle runs in: `BEGIN`, `START`, `COMMIT`, `END`,

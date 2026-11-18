@@ -62,6 +62,11 @@
  * by height; a lockstep instance also checks that the read's height is its block's height
  * (`src/backbone/core-private-source/`).
  *
+ * A statement that would end or nest a transaction, or set the session authorization, is refused by the handle itself
+ * before it sends a `read`, as every read handle refuses it (`database-error`, `reason: control-refused`;
+ * `../db/statement-refusal.ts`). The core's gate stays what confines a read: it refuses every statement that is not
+ * one read, those among them.
+ *
  * A `read-result` with `error` fails the query with that code (`connection-lost` among them, which is retried). For
  * `read-refused` (a statement that is not one read, of which the core runs nothing), the error has `details`
  * `statement`, `reason` and `name`, and its message names the statement. It is not retried: the same statement would
@@ -73,7 +78,8 @@
  */
 
 import type { ReadHandle } from "../db/api.js";
-import { ERROR_CODES, type ErrorCode, UmbraError } from "../db/errors.js";
+import { controlRefused, ERROR_CODES, type ErrorCode, UmbraError } from "../db/errors.js";
+import { controlStatement } from "../db/statement-refusal.js";
 import { backoffDelay } from "../node/backoff.js";
 import { CLOSE_PROTOCOL, type Received, REPORT_HASH_MISMATCH } from "./core-transport.js";
 import {
@@ -355,6 +361,8 @@ export class PrivateTransport {
     const handle: ReadHandle = Object.freeze({
       height,
       query: async (sql: string, params: unknown[] = []) => {
+        const command = controlStatement(sql);
+        if (command !== null) throw controlRefused(command);
         const answer = await this.#request([{ sql, params: params.map((param) => encodeParameter(param)) }]);
         return rowsOf((answer.results as StatementResult[])[0] as StatementResult);
       },

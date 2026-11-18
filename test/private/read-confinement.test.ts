@@ -15,7 +15,8 @@ import { confinementProblems, PUB, PUB_ENTRY, publicState, stateProblems } from 
  * - The next `read` on the same connection is answered.
  * - The public database's contents hash, row counts and sequences are unchanged, and no advisory lock is left held.
  * - Reads whose write the database itself refuses (the read-only transaction) are answered `database-error`.
- * - A private process's own client gets the refusal as an `UmbraError` `read-refused` naming the statement.
+ * - A private process's own client refuses transaction control itself (`control-refused`), before it asks the core,
+ *   and gets the core's refusal of any other statement as an `UmbraError` `read-refused` naming the statement.
  *
  * The committed negative control is `read-confinement.negative-control.test.ts`.
  */
@@ -44,7 +45,7 @@ describe.each(PRIVATE_BACKENDS)("a transport read is confined to reads on $name"
     expect(refusals.some((line) => line.includes("INSERT INTO"))).toBe(false);
   }, TEST_TIMEOUT_MS);
 
-  it("a private process's own client gets read-refused naming the statement; its next read is served", async () => {
+  it("a private process's own client refuses transaction control itself and gets read-refused naming any other statement that is not a read; its next read is served", async () => {
     const before = await publicState(core.db());
     const transport = privateSocketTransport({
       address: core.transport(),
@@ -55,13 +56,19 @@ describe.each(PRIVATE_BACKENDS)("a transport read is confined to reads on $name"
       log: () => undefined,
     });
     try {
-      const refused = transport.read((read) => read.query("COMMIT"));
+      // The handle refuses transaction control itself, before it asks the core.
+      await expect(transport.read((read) => read.query("COMMIT"))).rejects.toMatchObject({
+        code: "database-error",
+        retryable: false,
+        details: { reason: "control-refused", command: "COMMIT" },
+      });
+      const refused = transport.read((read) => read.query("DELETE FROM pub.rows"));
       await expect(refused).rejects.toMatchObject({
         code: "read-refused",
         retryable: false,
-        details: { statement: 0, reason: "command", name: "COMMIT" },
+        details: { statement: 0, reason: "command", name: "DELETE" },
       });
-      await expect(refused).rejects.toThrow(/^the core refused statement 1 of the read: COMMIT is not a read/);
+      await expect(refused).rejects.toThrow(/^the core refused statement 1 of the read: DELETE is not a read/);
       await expect(transport.read((read) => read.query("SELECT pg_advisory_lock(7)"))).rejects.toMatchObject({
         code: "read-refused",
         details: { reason: "function", name: "pg_advisory_lock" },
