@@ -269,10 +269,13 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   session and run by name, as a text with parameters already was, within the session's bound of 256 texts. While its
   statement stays valid, an execution by name is not parsed again, and PostgreSQL reuses the plan it keeps for it
   where it chooses to. Each of these texts names its tables with their schema and holds no literal whose value depends
-  on a setting. Every other text without parameters, a module's among them, runs unnamed as before. One of these texts
-  also runs unnamed when it is sent while another statement of its session has no answer yet; on a session where it
-  ran before a schema change the process made (a migration, a writer's rollback); and on a session where an
-  execution of it by name failed.
+  on a setting. UmbraDB's own code hands each of them to its handle as a marked statement, an object only that code
+  makes, and a handle's `query` takes one where it takes a text. Every text without parameters handed over as a
+  string, a module's among them and one equal to a marked text, runs unnamed as before. A marked statement also runs
+  unnamed when it is asked for while another statement of its session has no answer yet; on a session that held it
+  prepared when a schema change the process made was counted (a migration, a writer's rollback); and on a session
+  where an execution of it by name failed. While a marked statement's execution by name has no answer, its session
+  sends nothing else: a statement asked for meanwhile is sent after that answer.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 
