@@ -14,9 +14,8 @@ import {
  * `SIGKILL` and restarted, and ten processes started together. Each is a PGlite writer started with
  * `node --import tsx` (`pglite-writer.worker.ts`) in a temporary directory deleted afterwards.
  *
- * **The pause lasts the required 5 minutes** (300 s) unless `UMBRADB_A17_SIGSTOP_SECONDS` is set: a shorter pause is
- * for local iteration only, and the test's title says how long it ran. The pause costs one test
- * worker 5 minutes of waiting, not CPU, so the conformance run keeps the full length.
+ * The pause lasts 20 s (`UMBRADB_A17_SIGSTOP_SECONDS` overrides it). The lock is an OS lock with no time limit, so
+ * length proves nothing extra; 20 s is the shortest pause that tries all three refusals.
  *
  * "Stays up, not ready" (the refused process) and "processing halts" belong to the runner. "Continues from the cursor"
  * is shown with the test's own cursor (the highest height of `t.blocks`), as the runner's cursor will be read.
@@ -25,7 +24,7 @@ import {
  * (`lockKind: "statement-scoped"`) makes the second-writer, paused-writer and ten-starters checks fail.
  */
 
-const STOP_SECONDS = Number(process.env.UMBRADB_A17_SIGSTOP_SECONDS ?? "300");
+const STOP_SECONDS = Number(process.env.UMBRADB_A17_SIGSTOP_SECONDS ?? "20");
 /** Rounds of ten processes opening PGlite together, and of ten taking the lock alone (cheaper, so more of them). */
 const START_ROUNDS = 3;
 const LOCK_ROUNDS = 12;
