@@ -11,7 +11,9 @@
  * - The **writer** is one session: transactions run on it one at a time, in the order asked for. A statement runs on
  *   the extended protocol, one per call. A migration's text of several statements runs on the simple protocol, inside
  *   the transaction, through the path only the migration runner takes (`./multi-statement.ts`).
- * - **Reads** use a pool of up to `readConnections` sessions (default 10); a read waits for a free one.
+ * - **Reads** use a pool of up to `readConnections` sessions (default 10); a read waits for a free one. The spare read
+ *   (`./spare-read.ts`, the ledger worker's node reads) takes a pooled session when one is free, and otherwise runs on
+ *   one more session, kept apart from the pool and opened at its first use, so it never waits for the pool's reads.
  *
  * **Reads.** `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY`, then the committed height read by the process's
  * {@link CommittedHeight} as the first statement (which takes the snapshot), then the body's statements, then
@@ -54,6 +56,7 @@ import { commitRolledBack, handleClosed, queryTimeout, statementRefused, UmbraEr
 import { allowMultiStatement } from "./multi-statement.js";
 import { readTimeoutMs } from "./read-options.js";
 import { traceAdd, traceStatement } from "../trace/trace.js";
+import { allowSpareRead } from "./spare-read.js";
 import { allowWriterStart, takeWriterLock, type WriterSession } from "./writer-lock.js";
 
 /**
@@ -517,12 +520,19 @@ class ReadPool {
 
   async acquire(): Promise<Session> {
     if (this.closed) throw handleClosed("database");
+    const free = this.free();
+    if (free !== undefined) return free;
+    return new Promise((resolve, reject) => this.waiting.push({ resolve, reject }));
+  }
+
+  /** A session free now (an idle one, or a new one while the pool is not full), or undefined: it never waits. */
+  free(): Session | undefined {
+    if (this.closed) throw handleClosed("database");
     for (let session = this.idle.pop(); session !== undefined; session = this.idle.pop()) {
       if (session.usable) return session;
       this.drop(session);
     }
-    if (this.all.size < this.size) return this.add();
-    return new Promise((resolve, reject) => this.waiting.push({ resolve, reject }));
+    return this.all.size < this.size ? this.add() : undefined;
   }
 
   release(session: Session): void {
@@ -693,13 +703,19 @@ export function openPostgres(options: PostgresOptions): Database {
     new Session(connection, role, options.connectTimeoutSeconds, schemaChanges, preparedLimit);
   const writer = new Writer(session("writer"), options.fullPageWritesOffAllowed ?? false);
   const pool = new ReadPool(readConnections, session("reader"), options.onReadSessionLost);
+  // The spare read's own session, for when no pooled one is free (`./spare-read.ts`): one, opened at its first use.
+  const spare = new ReadPool(1, session("reader"), options.onReadSessionLost);
   let closed = false;
 
-  const database: Database = {
-    async read<T>(body: (read: ReadHandle) => Promise<T>, readOptions?: ReadOptions): Promise<T> {
+  /** A read on a session of `from`: the pool's, or for the spare read a free pooled one, else the spare's own. */
+  const readOn =
+    (spared: boolean) =>
+    async <T>(body: (read: ReadHandle) => Promise<T>, readOptions?: ReadOptions): Promise<T> => {
       const timeoutMs = readTimeoutMs(readOptions);
       if (closed) throw handleClosed("database");
-      const reader = await pool.acquire();
+      const pooled = spared ? pool.free() : await pool.acquire();
+      const from = pooled === undefined ? spare : pool;
+      const reader = pooled ?? (await spare.acquire());
       const bound = timeoutMs === undefined ? undefined : new BoundedRead(reader, timeoutMs);
       let open = true;
       try {
@@ -722,9 +738,12 @@ export function openPostgres(options: PostgresOptions): Database {
       } finally {
         open = false;
         await rollBack(reader);
-        pool.release(reader);
+        from.release(reader);
       }
-    },
+    };
+
+  const database: Database = {
+    read: readOn(false),
     transaction<T>(body: (tx: Transaction) => Promise<T>): Promise<T> {
       if (closed) return Promise.reject(handleClosed("database"));
       return writer.transaction(body);
@@ -732,10 +751,11 @@ export function openPostgres(options: PostgresOptions): Database {
     writerSession: () => (closed ? null : writer.writerSession()),
     async close(): Promise<void> {
       closed = true;
-      await Promise.all([writer.close(), pool.close()]);
+      await Promise.all([writer.close(), pool.close(), spare.close()]);
     },
   };
   // A closed database's writer refuses with `handle-closed` itself (`close` closes it first).
   allowWriterStart(database, async () => ({ durabilityWarnings: await writer.start() }));
+  allowSpareRead(database, readOn(true));
   return database;
 }

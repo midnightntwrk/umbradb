@@ -1,7 +1,9 @@
 import type { Sql } from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { ReadHandle } from "../../src/db/api.js";
 import { openPostgres } from "../../src/db/postgres.js";
-import { TEST_CURSOR, TEST_SCHEMA } from "./backends.js";
+import { spareRead } from "../../src/db/spare-read.js";
+import { settlesWithin, TEST_CURSOR, TEST_SCHEMA } from "./backends.js";
 import { type PostgresTestServer, startPostgresServer } from "./postgres-server.js";
 
 /**
@@ -131,6 +133,83 @@ describe("a reader never sees a block's rows before its COMMIT", () => {
     await Promise.all([first, second]);
     expect(order).toEqual(["first starts", "first ends", "second starts"]);
   }, 60_000);
+});
+
+describe("the spare read (the ledger worker's node reads) does not wait for the reader pool", () => {
+  const pidOf = async (read: ReadHandle): Promise<number> => Number((await read.query("SELECT pg_backend_pid() AS pid"))[0]?.pid);
+
+  it("takes a pooled reader while one is free, and runs on one more session, opened then, while every pooled reader is held", async () => {
+    const database = await server.createDatabase();
+    await database.exec(`${TEST_SCHEMA} INSERT INTO t.blocks VALUES (7);`);
+    const db = database.open({ committedHeight: TEST_CURSOR, readConnections: 1 });
+    const spare = spareRead(db);
+    // The pooled reader is free: the spare read runs on it, and opens no session.
+    const pooled = await db.read(pidOf);
+    expect(await spare(pidOf)).toBe(pooled);
+    expect(await apiBackends(database.admin)).toEqual([pooled]);
+    // The one pooled reader held: a read of the pool waits for it, the spare read does not.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let holding = false;
+    const held = db.read(async (read) => {
+      holding = true;
+      await gate;
+      return pidOf(read);
+    });
+    await expect.poll(() => holding, { timeout: 10_000, interval: 5 }).toBe(true);
+    const waiting = db.read(pidOf);
+    expect(await settlesWithin(waiting, 200)).toBe(false);
+    const spared = await spare(async (read) => ({ pid: await pidOf(read), height: read.height }));
+    // A read like any other: it sees the committed height, on a session that is not the pool's.
+    expect(spared.height).toBe(7n);
+    expect(spared.pid).not.toBe(pooled);
+    expect((await apiBackends(database.admin)).sort()).toEqual([pooled, spared.pid].sort());
+    // There is one such session: two spare reads at once run on it one after the other.
+    const order: string[] = [];
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const first = spare(async (read) => {
+      order.push("first starts");
+      await firstGate;
+      order.push("first ends");
+      return pidOf(read);
+    });
+    await expect.poll(() => order.includes("first starts"), { timeout: 10_000, interval: 5 }).toBe(true);
+    const second = spare(async (read) => {
+      order.push("second starts");
+      return pidOf(read);
+    });
+    expect(await settlesWithin(second, 200)).toBe(false);
+    releaseFirst();
+    expect(await Promise.all([first, second])).toEqual([spared.pid, spared.pid]);
+    expect(order).toEqual(["first starts", "first ends", "second starts"]);
+    // The pool's reads go on as they were: the one waiting gets the pooled reader once it is free.
+    release();
+    expect(await Promise.all([held, waiting])).toEqual([pooled, pooled]);
+    expect((await apiBackends(database.admin)).length).toBe(2);
+    // Its options are the read's, and a closed database refuses it.
+    await expect(spare(pidOf, { timeoutMs: 0 })).rejects.toMatchObject({ code: "invalid-configuration" });
+    expect(await spare(pidOf, { timeoutMs: 60_000 })).toBe(pooled);
+    await db.close();
+    await expect(spare(pidOf)).rejects.toMatchObject({ code: "handle-closed" });
+    await expect.poll(() => apiBackends(database.admin), { timeout: 10_000, interval: 20 }).toEqual([]);
+  }, 60_000);
+
+  it("is a database's own read where its backend has none (PGlite's one queue, a database of another make)", async () => {
+    const calls: unknown[][] = [];
+    const other = {
+      read: async <T>(body: (read: ReadHandle) => Promise<T>, options?: unknown): Promise<T> => {
+        calls.push([options]);
+        return body({ height: 3n, query: async () => [] });
+      },
+    };
+    expect(await spareRead(other)(async (read) => read.height, { timeoutMs: 5 })).toBe(3n);
+    expect(calls).toEqual([[{ timeoutMs: 5 }]]);
+  });
 });
 
 describe("the database's parts (the `database`)", () => {
