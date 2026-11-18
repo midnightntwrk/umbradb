@@ -26,10 +26,20 @@ import { addingUpProblems, sumOf, unaccountedMs, unaccountedOfBusy, type WorkerL
  * - The `missing` read records, at each height, the keys asked of the database once the set of keys found stored that
  *   `core-ledger-state` keeps between runs answered the others, and `knownHits` those it answered: exactly as a model of
  *   the set gives.
+ * - The copy of the counts and child lists that `core-ledger-state` keeps between runs: each height has `copyHits` and
+ *   `copyMisses`, `copyEmptied` is on the first height only, and a traced run with no copy (`reclamationCache.keys`
+ *   0) stores the same tables and sends, at every height, at least as many `counts` and `references` statements: the
+ *   totals below are the statements the copy saves.
  * - The worker's lines say where the thread's whole time went: the parts of each add up to its span, the node waits
  *   are the node-store bridge's requests, and the main thread's lines hold each request type's round trips. The
  *   range bench's reader (`bench/range/worker-time.mjs`) reads the files such a run writes.
  */
+
+/**
+ * The `counts` and `references` statements the extended DAG's 101 heights send on PostgreSQL, as
+ * `[without the copy of the counts and child lists, with it]` (measured).
+ */
+const STATEMENTS_SAVED: Readonly<Record<string, readonly [number, number]>> = { counts: [301, 101], references: [297, 0] };
 
 /** The height the second test's first process stops at; the traced one goes on from there. */
 const RESUMED = 40;
@@ -135,7 +145,8 @@ describe("the block trace through the process, on PostgreSQL", () => {
       // The second with the steps' detail, which changes neither the chain nor what is stored.
       startTrace(trace.sink, { steps: index === 1 });
       const db = await postgres.database();
-      const run = await runDag(db, { dag: "extended" });
+      // Not verifying even with UMBRADB_TEST_VERIFY_RECLAMATION=1: the statements below are the copy's own.
+      const run = await runDag(db, { dag: "extended", settings: { reclamationCache: { verify: false } } });
       stopTrace();
       expect(run.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
       expect(runProblems(run, "extended")).toEqual([]);
@@ -148,7 +159,7 @@ describe("the block trace through the process, on PostgreSQL", () => {
     // One line per committed height, in order.
     expect(first.map((line) => line.h)).toEqual(Array.from({ length: LAST + 1 }, (_, h) => h));
     for (const line of first.slice(1)) {
-      for (const stage of ["beginMs", "prepareMs", "applyMs", "rootWaitMs", "collectMs", "stepMs", "evictMs", "knownHits", "txMs", "writeBlockMs", "writeRefcountMs", "commitMs", "sqlMs", "encMs", "decMs"]) {
+      for (const stage of ["beginMs", "prepareMs", "applyMs", "rootWaitMs", "collectMs", "stepMs", "evictMs", "knownHits", "copyHits", "copyMisses", "txMs", "writeBlockMs", "writeRefcountMs", "commitMs", "sqlMs", "encMs", "decMs"]) {
         expect(line[stage], `${stage} at ${String(line.h)}`).toBeGreaterThanOrEqual(0);
       }
       expect(line.sqlN).toBeGreaterThan(0);
@@ -180,7 +191,28 @@ describe("the block trace through the process, on PostgreSQL", () => {
     for (const line of first) {
       expect(line.knownHits, `knownHits at ${String(line.h)}`).toBe(expected.hits.get(line.h as number));
       expect(line.knownEmptied, `knownEmptied at ${String(line.h)}`).toBe(line.h === 0 ? 1 : undefined);
+      expect(line.copyEmptied, `copyEmptied at ${String(line.h)}`).toBe(line.h === 0 ? 1 : undefined);
     }
+
+    // The same heights with no copy of the counts and child lists: the same tables, and at every height at least as
+    // many `counts` and `references` statements as with the copy (on these heights each read is one statement).
+    const bare = memorySink();
+    startTrace(bare.sink);
+    const bareRun = await runDag(await postgres.database(), { dag: "extended", settings: { reclamationCache: { keys: 0 } } });
+    stopTrace();
+    expect(bareRun.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
+    expect(tablesText(bareRun)).toBe(tablesText(plain));
+    const statementsOf = (lines: readonly Record<string, unknown>[], kind: string): number[] =>
+      lines.map((line) => ((line.reads as [string, number, number, number][] | undefined) ?? []).filter(([read]) => read === kind).length);
+    const saved: Record<string, [number, number]> = {};
+    for (const kind of ["counts", "references"]) {
+      const without = statementsOf(bare.blocks(), kind);
+      const withCopy = statementsOf(first, kind);
+      for (const [h, sent] of withCopy.entries()) expect(sent, `${kind} at ${h}`).toBeLessThanOrEqual(without[h] as number);
+      saved[kind] = [without.reduce((sum, sent) => sum + sent, 0), withCopy.reduce((sum, sent) => sum + sent, 0)];
+    }
+    // Over the 101 heights: [without the copy, with it].
+    expect(saved).toEqual(STATEMENTS_SAVED);
     // The same heights give the same chain, and so the same last link.
     expect(second.map((line) => line.sh)).toEqual(first.map((line) => line.sh));
     expect(new Set(first.slice(1).map((line) => line.sh)).size).toBe(LAST);

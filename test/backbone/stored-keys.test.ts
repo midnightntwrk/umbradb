@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { bindCoreLedgerState, CORE_LEDGER_STATE_ID, coreLedgerState, knownKeysOf } from "../../src/backbone/core-ledger-state/core-ledger-state.js";
+import { bindCoreLedgerState, CORE_LEDGER_STATE_ID, coreLedgerState, countsCopyOf, knownKeysOf } from "../../src/backbone/core-ledger-state/core-ledger-state.js";
+import type { CopyFault } from "../../src/backbone/core-ledger-state/counts-copy.js";
 import { KNOWN_KEYS_MAX, KnownKeySet, keyText } from "../../src/backbone/core-ledger-state/run-reclaim.js";
 import {
   CORE_LEDGER_STATE_MIGRATIONS,
@@ -60,6 +61,16 @@ import { made, ref } from "./run-reclaim.js";
  *   before, the set is emptied, and the `missing` read halts 85 with `missing-reference`. The negative control has the
  *   loop tell every block it continues: A answers K from its set and commits 85 with a reference to a key that is no
  *   row.
+ * - **The copy of the counts and child lists** (`src/backbone/core-ledger-state/counts-copy.ts`), emptied at the same
+ *   events, through the same callbacks on both backends, each block above 1 also releasing the node the block before
+ *   persisted: blocks that continue have it answer what the settles before read or wrote (verifying, nothing
+ *   differs); it is emptied by a block that does not continue the one before, by a settle that throws (its net
+ *   write; a refused eviction with restarts off), and by its bound at a continuing block's update (`copyEmptied` on that
+ *   line, not the next, and the set not emptied), not by a refused eviction's restart; a height made again after a
+ *   rollback reads every count and list, and with the negative control `kept-after-failure` reads a root count its
+ *   rolled-back settle had already changed: verifying, it halts with `copy-mismatch`; not, it deletes a node a block
+ *   early. The runs through a lost connection or a lost `COMMIT` above verify the copy, and it answers nothing at the
+ *   height that lost it.
  */
 
 const hash = (byte: number): Uint8Array => new Uint8Array(32).fill(byte);
@@ -160,9 +171,13 @@ function blockAt(height: bigint, continues: boolean): BlockContext {
   };
 }
 
-/** Block `height` as the fake worker applies it: one new node, persisted, that references c; nothing when `empty`. */
-function appliedAt(height: bigint, empty: boolean): AppliedState {
+/**
+ * Block `height` as the fake worker applies it: one new node, persisted, that references c; nothing when `empty`. With
+ * `releasing`, a block above 1 also releases the node the block before persisted.
+ */
+function appliedAt(height: bigint, empty: boolean, releasing = false): AppliedState {
   const fresh = made(`n${height}`, [ref(C)]);
+  const released = releasing && height > 1n ? [{ key: made(`n${height - 1n}`, [ref(C)]).keyBytes, delta: -1 }] : [];
   return {
     ledger: "v9",
     height,
@@ -181,7 +196,7 @@ function appliedAt(height: bigint, empty: boolean): AppliedState {
     contracts: [],
     batch: empty
       ? { inserts: [], rootCounts: [] }
-      : { inserts: [{ key: fresh.keyBytes, data: fresh.data, children: fresh.children }], rootCounts: [{ key: fresh.keyBytes, delta: 1 }] },
+      : { inserts: [{ key: fresh.keyBytes, data: fresh.data, children: fresh.children }], rootCounts: [{ key: fresh.keyBytes, delta: 1 }, ...released] },
   };
 }
 
@@ -218,6 +233,12 @@ interface ChainOptions {
   readonly lentRead?: boolean;
   /** The heights whose block flushes nothing and changes no root count. */
   readonly empty?: readonly bigint[];
+  /** Each block above 1 also releases the node the block before persisted (`appliedAt`). */
+  readonly releasing?: boolean;
+  /** The `core` entry's `reclamationCache`: the copy of the counts and child lists; its defaults unless given. */
+  readonly reclamationCache?: { readonly keys?: number; readonly verify?: boolean };
+  /** A fault put into the copy's use (a negative control's). */
+  readonly copyFault?: CopyFault;
 }
 
 /**
@@ -238,6 +259,7 @@ async function chainOn(backend: TestBackend, options: ChainOptions = {}) {
   let failQueueRead = false;
   const module = coreLedgerState({
     ...(options.noRestart === true ? { restartOnRefusedEviction: false } : {}),
+    ...(options.copyFault === undefined ? {} : { copyFault: options.copyFault }),
     refcountWriter: (w) =>
       failNetWrite
         ? {
@@ -248,7 +270,21 @@ async function chainOn(backend: TestBackend, options: ChainOptions = {}) {
         : w,
   });
   const p: ProcessContext = {
-    items: new Map([["config", { entries: [{ id: "core", start: 0, settings: { retainStates: 1_000 } }] }]]),
+    items: new Map([
+      [
+        "config",
+        {
+          entries: [
+            {
+              id: "core",
+              start: 0,
+              buildVersion: true,
+              settings: { retainStates: 1_000, ...(options.reclamationCache === undefined ? {} : { reclamationCache: options.reclamationCache }) },
+            },
+          ],
+        },
+      ],
+    ]),
     revisions: [],
     publish() {},
   };
@@ -263,7 +299,7 @@ async function chainOn(backend: TestBackend, options: ChainOptions = {}) {
       return { stateRoot: ROOT, loaded: false };
     },
     async apply(input: { readonly height: bigint }) {
-      return appliedAt(input.height, empty.has(input.height));
+      return appliedAt(input.height, empty.has(input.height), options.releasing === true);
     },
     lend(read: NodeReader) {
       lent.push(read);
@@ -345,6 +381,19 @@ async function chainOn(backend: TestBackend, options: ChainOptions = {}) {
     },
     /** Whether the set holds c. */
     holdsC: (): boolean => knownKeysOf(p).known.has(keyText(C.keyBytes)),
+    /** How many keys' counts and child lists the copy holds. */
+    copySize: () => countsCopyOf(p)?.size,
+    /** Puts the copy's counts at its bound with keys no block meets. */
+    fillCopy(): void {
+      const copy = countsCopyOf(p);
+      if (copy === null) throw new Error("the chain has no copy");
+      for (let n = 0; copy.size.counts < copy.max; n++) copy.learnCounts(`another key ${n}`.padEnd(32, "."), { row: true, refs: 1, roots: 0 });
+    },
+    /** Whether the database holds the row of block `height`'s node. */
+    async stored(height: bigint): Promise<boolean> {
+      const rows = await db.read((read) => read.query(`SELECT 1 FROM ${NODES_TABLE} WHERE node_key = $1`, [made(`n${height}`, [ref(C)]).keyBytes]));
+      return rows.length === 1;
+    },
     size: (): number => knownKeysOf(p).known.size,
     restarts: (): number => restarts,
     /** How many reads were lent and taken back, and the keys read through a lent read while evicting. */
@@ -521,6 +570,8 @@ describe.each(BACKENDS)("the keys found stored, through the module's callbacks, 
         [2, 0, 1],
         [3, 1, undefined],
       ]);
+      // The mark at 2 is the set's: the copy of the counts and child lists, far from its bound, was not emptied there.
+      expect(trace.lines().map((line) => line.copyEmptied)).toEqual([1, undefined, undefined]);
     } finally {
       await chain.close();
     }
@@ -560,6 +611,186 @@ describe.each(BACKENDS)("the keys found stored, through the module's callbacks, 
   }, 120_000);
 });
 
+/** The lines `[h, copyHits, copyMisses, copyEmptied]` of a trace. */
+const copyLines = (lines: readonly Record<string, unknown>[]): unknown[][] => lines.map((line) => [line.h, line.copyHits, line.copyMisses, line.copyEmptied]);
+
+/**
+ * The copy of the counts and child lists (`src/backbone/core-ledger-state/counts-copy.ts`) through the same callbacks:
+ * each block above 1 also releases the node the block before persisted, so a settle reads the counts of the node its
+ * block persists (new), of the one it releases and of the one queued since the block before, and the child list of
+ * that queued one, which it deletes. The copy holds all but the first from the settles before.
+ */
+describe.each(BACKENDS)("the copy of the counts and child lists, through the module's callbacks, on $name", (backend: TestBackend) => {
+  beforeAll(() => backend.start(), 180_000);
+  afterAll(() => backend.stop(), 60_000);
+  afterEach(() => stopTrace());
+
+  it("control: consecutive blocks that continue, verifying: the copy answers what the settles before read or wrote, the new node's counts are read, nothing differs; copyEmptied only at the first", async () => {
+    const chain = await chainOn(backend, { releasing: true, reclamationCache: { verify: true } });
+    const trace = memoryTrace();
+    try {
+      startTrace(trace.sink);
+      for (const height of [1n, 2n, 3n, 4n]) expect((await chain.block(height)).error, `block ${height}`).toBeNull();
+      stopTrace();
+      expect(copyLines(trace.lines())).toEqual([
+        [1, 0, 1, 1],
+        [2, 1, 1, undefined],
+        [3, 3, 1, undefined],
+        [4, 3, 1, undefined],
+      ]);
+      // n3 and n4, each with its list; n1 and n2 deleted, and gone from it.
+      expect(chain.copySize()).toEqual({ counts: 2, lists: 2 });
+    } finally {
+      await chain.close();
+    }
+  }, 120_000);
+
+  it("a block whose context says the block before does not continue into it empties the copy at its on-compute: its settle reads every count and list from the database", async () => {
+    const chain = await chainOn(backend, { releasing: true });
+    const trace = memoryTrace();
+    try {
+      startTrace(trace.sink);
+      await chain.block(1n);
+      await chain.block(2n);
+      expect(chain.copySize()).toEqual({ counts: 2, lists: 2 });
+      expect((await chain.block(3n, { continues: false })).error).toBeNull();
+      for (const height of [4n, 5n]) expect((await chain.block(height)).error).toBeNull();
+      stopTrace();
+      expect(copyLines(trace.lines())).toEqual([
+        [1, 0, 1, 1],
+        [2, 1, 1, undefined],
+        // Emptied: the counts of n1, n2 and n3, and n1's list, read.
+        [3, 0, 4, 1],
+        // n2's list, written at 2, was emptied with the rest: read at 4, when n2 is deleted.
+        [4, 2, 2, undefined],
+        [5, 3, 1, undefined],
+      ]);
+    } finally {
+      await chain.close();
+    }
+  }, 120_000);
+
+  it("on-settle that throws (its net write failed) empties the copy before its error goes on, the counts it read among them; the height made again reads them all", async () => {
+    const chain = await chainOn(backend, { releasing: true });
+    const trace = memoryTrace();
+    try {
+      startTrace(trace.sink);
+      await chain.block(1n);
+      await chain.block(2n);
+      chain.failNetWrite(true);
+      expect(String((await chain.block(3n)).error)).toMatch(/the net write failed/);
+      expect(chain.copySize()).toEqual({ counts: 0, lists: 0 });
+      chain.failNetWrite(false);
+      expect((await chain.block(3n)).error).toBeNull();
+      stopTrace();
+      expect(copyLines(trace.lines())).toEqual([
+        [1, 0, 1, 1],
+        [2, 1, 1, undefined],
+        [3, 0, 4, 1],
+      ]);
+    } finally {
+      await chain.close();
+    }
+  }, 120_000);
+
+  it("a refused eviction with restarts off throws in on-settle and empties the copy", async () => {
+    const chain = await chainOn(backend, { queued: true, refuse: true, noRestart: true, releasing: true });
+    try {
+      expect(String((await chain.block(1n)).error)).toMatch(/still held by a live object/);
+      expect(chain.copySize()).toEqual({ counts: 0, lists: 0 });
+    } finally {
+      await chain.close();
+    }
+  }, 120_000);
+
+  it("a refused eviction's worker restart leaves the copy: the next height answers the released node's counts from it", async () => {
+    const chain = await chainOn(backend, { queued: true, refuse: true, releasing: true });
+    const trace = memoryTrace();
+    try {
+      startTrace(trace.sink);
+      expect((await chain.block(1n)).error).toBeNull();
+      expect(chain.restarts()).toBe(1);
+      expect((await chain.block(2n)).error).toBeNull();
+      stopTrace();
+      // Block 1 read q's counts (queued) and n1's, and q's list; q is deleted. Block 2 answers n1's from the copy.
+      expect(copyLines(trace.lines())).toEqual([
+        [1, 0, 3, 1],
+        [2, 1, 1, undefined],
+      ]);
+    } finally {
+      await chain.close();
+    }
+  }, 120_000);
+
+  it("a continuing block whose net write would take the copy past its bound: the copy is emptied before the new node enters, that height's line has copyEmptied 1, the next block's none, and the set is not emptied", async () => {
+    const chain = await chainOn(backend, { releasing: true, reclamationCache: { keys: 4, verify: true } });
+    const trace = memoryTrace();
+    try {
+      startTrace(trace.sink);
+      expect((await chain.block(1n)).error).toBeNull();
+      chain.fillCopy();
+      expect(chain.copySize()).toEqual({ counts: 4, lists: 1 });
+      // Block 2 continues block 1: n2's counts are read and not held (the copy is full); n2 entering at the update
+      // would pass the bound, so the copy is emptied first.
+      expect((await chain.block(2n)).error).toBeNull();
+      expect(chain.copySize()).toEqual({ counts: 1, lists: 1 });
+      expect((await chain.block(3n)).error).toBeNull();
+      stopTrace();
+      expect(copyLines(trace.lines())).toEqual([
+        [1, 0, 1, 1],
+        [2, 1, 1, 1],
+        // n1's counts and list were emptied at 2: read again, with n3's.
+        [3, 1, 3, undefined],
+      ]);
+      expect(trace.lines().map((line) => line.knownEmptied)).toEqual([1, undefined, undefined]);
+    } finally {
+      await chain.close();
+    }
+  }, 120_000);
+
+  /**
+   * Blocks 1 and 2, then 3 rolled back after its settle and made again (`continues` false), verifying or not, with the
+   * copy's fault when given: the error of 3 made again, its trace line, and whether n2's row is stored after it.
+   */
+  async function remade(verify: boolean, copyFault?: CopyFault) {
+    const chain = await chainOn(backend, { releasing: true, reclamationCache: { verify }, ...(copyFault === undefined ? {} : { copyFault }) });
+    const trace = memoryTrace();
+    try {
+      startTrace(trace.sink);
+      await chain.block(1n);
+      await chain.block(2n);
+      expect((await chain.block(3n, { rollBack: true })).error).toBeNull();
+      // The settle of the rolled-back 3 had updated the copy: n3 held new, n2 released.
+      expect(chain.copySize()).toEqual({ counts: 2, lists: 2 });
+      const { error } = await chain.block(3n);
+      stopTrace();
+      return { error, lines: copyLines(trace.lines()), n2Stored: await chain.stored(2n) };
+    } finally {
+      await chain.close();
+    }
+  }
+
+  it("a block whose transaction rolled back after its settle: the height made again does not continue, empties the copy and reads every count and list; the verifying copy finds nothing, and n2 stays stored, queued", async () => {
+    for (const verify of [false, true]) {
+      const { error, lines, n2Stored } = await remade(verify);
+      expect(error, `verify ${verify}`).toBeNull();
+      expect(lines.at(-1), `verify ${verify}`).toEqual([3, 0, 4, 1]);
+      expect(n2Stored, `verify ${verify}`).toBe(true);
+    }
+  }, 120_000);
+
+  it("control: with kept-after-failure (the copy not emptied for a block that does not continue), 3 made again reads root counts its rolled-back settle already changed: the verifying copy halts with copy-mismatch, and without it n2 is deleted a block early", async () => {
+    const verifying = await remade(true, "kept-after-failure");
+    expect(verifying.error).toBeInstanceOf(UmbraError);
+    const details = (verifying.error as UmbraError).details as Record<string, unknown>;
+    expect(details).toMatchObject({ reason: "copy-mismatch", height: 3n, what: "counts" });
+    expect([`0x${made("n2", [ref(C)]).key}`, `0x${made("n3", [ref(C)]).key}`]).toContain(details.key);
+    const quiet = await remade(false, "kept-after-failure");
+    expect(quiet.error).toBeNull();
+    expect(quiet.n2Stored).toBe(false);
+  }, 120_000);
+});
+
 /**
  * The keys height `h`'s settle needed: the references of the nodes the block flushed with another child list than the
  * row's after h − 1 (a list that is the row's own is not checked), and the keys it raised, less those it flushed.
@@ -594,7 +825,9 @@ async function traced(db: ProcessDatabase, options: Omit<DagRunOptions, "dag"> =
 /**
  * The checks of a run that lost the set at height `at`, against `clean` (the same run with no fault): the run reached
  * the last height, the tables after every block are the clean run's, `at` asked the database about every key it
- * needed and the set answered none, and `knownEmptied` is on the first height and `at` only.
+ * needed and the set answered none, and `knownEmptied` is on the first height and `at` only. The faulted runs verify
+ * the copy of the counts and child lists (`reclamationCache.verify`), which was emptied at the same heights and answered
+ * nothing at `at`.
  */
 function lostAt(clean: { readonly run: DagRun; readonly lines: Record<string, unknown>[] }, faulted: { readonly run: DagRun; readonly lines: Record<string, unknown>[] }, at: bigint): void {
   const { run, lines } = faulted;
@@ -612,6 +845,8 @@ function lostAt(clean: { readonly run: DagRun; readonly lines: Record<string, un
   expect(plain?.knownHits as number).toBeGreaterThan(0);
   expect(((missingOf(plain)[0] ?? [0])[0] as number) + (plain?.knownHits as number)).toBe(neededAt(clean.run, at).size);
   expect(emptiedAt(lines)).toEqual([0, Number(at)]);
+  expect(lines.filter((candidate) => candidate.copyEmptied !== undefined).map((candidate) => candidate.h)).toEqual([0, Number(at)]);
+  expect(line?.copyHits).toBe(0);
 }
 
 /**
@@ -629,6 +864,9 @@ function faultHeight(lines: readonly Record<string, unknown>[], options: { reado
   expect(line).toBeDefined();
   return BigInt(line?.h as number);
 }
+
+/** The settings of a faulted run: the copy of the counts and child lists verifying each answer. */
+const VERIFYING = { reclamationCache: { verify: true } } as const;
 
 /** A loss of the writer's connection at a statement of a block's net write. */
 const lossAtNetWrite = (at: bigint, state: { lost: boolean }): DagRunOptions["core"] => ({
@@ -655,7 +893,7 @@ describe.each(PROCESS_BACKENDS)("the keys found stored through a lost connection
     const plain = await cleanRun();
     const h = faultHeight(plain.lines);
     const state = { lost: false };
-    const run = await traced(await backend.database(), { settings: { backoffCeilingMs: 20 }, core: lossAtNetWrite(h, state) });
+    const run = await traced(await backend.database(), { settings: { backoffCeilingMs: 20, ...VERIFYING }, core: lossAtNetWrite(h, state) });
     expect(state.lost).toBe(true);
     lostAt(plain, run, h);
   }, PATIENCE_MS * 4);
@@ -666,7 +904,7 @@ describe.each(PROCESS_BACKENDS)("the keys found stored through a lost connection
     const state = { lost: false };
     const run = await traced(await backend.database(), {
       data: { counters: countersMemory(), refuseAt: `${h}`, threads: 1_000 },
-      settings: { backoffCeilingMs: 20 },
+      settings: { backoffCeilingMs: 20, ...VERIFYING },
       core: lossAtNetWrite(h, state),
     });
     expect(state.lost).toBe(true);
@@ -721,7 +959,7 @@ describe("the keys found stored through a lost COMMIT answer and another writer,
     const uncertain: boolean[] = [];
     try {
       const run = await traced({ ...db, setting: proxy.setting(db.setting as PostgresParts) }, {
-        settings: { backoffCeilingMs: 20 },
+        settings: { backoffCeilingMs: 20, ...VERIFYING },
         loop: armingLoop(proxy, db, at, fault, uncertain),
       });
       return { ...run, uncertain, faults: proxy.faults };
