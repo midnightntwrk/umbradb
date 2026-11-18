@@ -128,7 +128,7 @@ function adminOf(handle: UmbraDBHandle): string {
   return `http://${admin.host}:${admin.port}`;
 }
 
-export const mountedAdminTests = (backend: ProcessBackend): void => describe(`mounted admin on ${backend.name}`, () => {
+export const mountedAdminTests = (backend: ProcessBackend) => describe(`mounted admin on ${backend.name}`, () => {
   const postgres = backend.kind === "postgres";
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
@@ -449,7 +449,7 @@ async function hostEndsByItself(mode: "library" | "control", ms: number): Promis
   }
 }
 
-export const heartbeatTests = (): void => describe("the heartbeat's timer does not keep a library host's event loop alive", () => {
+export const heartbeatTests = () => describe("the heartbeat's timer does not keep a library host's event loop alive", () => {
   it("a host that returns without stopping UmbraDB ends by itself; the control's referenced heartbeat keeps it running", async () => {
     // PGlite's own timer of 10 s may hold the process that long after its last query; nothing of UmbraDB's may.
     expect(await hostEndsByItself("library", 30_000)).toEqual({ reached: true, ended: true, code: 0 });

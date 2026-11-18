@@ -237,7 +237,7 @@ function afterCommitProblems(observed: Observed, lines: readonly string[], slowB
   return problems;
 }
 
-export const slowBlockCaseTests = (backend: ProcessBackend): void => describe(`slow-block's settled cases on ${backend.name}`, () => {
+export const slowBlockCaseTests = (backend: ProcessBackend) => describe(`slow-block's settled cases on ${backend.name}`, () => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 

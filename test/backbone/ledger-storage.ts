@@ -138,7 +138,7 @@ async function killedAt(db: ProcessDatabase, records: readonly TapeRecord[], cur
   }
 }
 
-export const storedStateTests = (backend: ProcessBackend): void => describe(`core-ledger-state's stored state through the process on ${backend.name}`, () => {
+export const storedStateTests = (backend: ProcessBackend) => describe(`core-ledger-state's stored state through the process on ${backend.name}`, () => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
@@ -274,7 +274,7 @@ export const storedStateTests = (backend: ProcessBackend): void => describe(`cor
   }, PATIENCE_MS * 4);
 });
 
-export const nodeLayoutTests = (): void => describe("core-ledger-state's tables hold a node layout, and no table stores a whole serialized state", () => {
+export const nodeLayoutTests = () => describe("core-ledger-state's tables hold a node layout, and no table stores a whole serialized state", () => {
   /** The columns `core-ledger-state`'s migrations create in each table. */
   function migrationColumns(): Map<string, string[]> {
     const tables = new Map<string, string[]>();

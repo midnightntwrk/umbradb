@@ -71,7 +71,7 @@ async function runUntil(db: ProcessDatabase, records: readonly TapeRecord[], hea
   return { ...process, status };
 }
 
-export const negativeControlTests = (backend: ProcessBackend): void => describe(`the negative controls on ${backend.name}`, () => {
+export const negativeControlTests = (backend: ProcessBackend) => describe(`the negative controls on ${backend.name}`, () => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
@@ -125,7 +125,7 @@ export const negativeControlTests = (backend: ProcessBackend): void => describe(
   }, PATIENCE_MS * 3);
 });
 
-export const windowControlTests = (): void => describe("control (PGlite: 500 blocks once)", () => {
+export const windowControlTests = () => describe("control (PGlite: 500 blocks once)", () => {
   const backend = PROCESS_BACKENDS.find((candidate) => candidate.kind === "pglite") as ProcessBackend;
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);

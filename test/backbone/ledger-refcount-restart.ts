@@ -75,7 +75,7 @@ const SEGMENT_MS = PATIENCE_MS * 2;
 /** Where a segment stops: at `point` of block `height`, held there for the kill or its process stopped. */
 const holdAt = (point: RestartPoint, height: number, then: Hold["then"]): Hold => ({ point, height, then });
 
-export const restartTests = (backend: ProcessBackend): void => describe(`restarts and crashes at named points, on ${backend.name}`, () => {
+export const restartTests = (backend: ProcessBackend) => describe(`restarts and crashes at named points, on ${backend.name}`, () => {
   let directory: string;
   let uninterrupted: Promise<ObservedRun> | undefined;
   let runs = 0;
@@ -147,7 +147,7 @@ export const restartTests = (backend: ProcessBackend): void => describe(`restart
   }
 });
 
-export const contentsHashTests = (): void => describe("a contents hash compares equal only to another hash", () => {
+export const contentsHashTests = () => describe("a contents hash compares equal only to another hash", () => {
   const light: Light = { nodeSet: "n", nodes: 1, rows: 1, roots: "r", state: "s", states: 1, digests: "d" };
   const tables: TableSnapshot = { rows: new Map(), refs: new Map(), roots: new Map(), queue: new Set(), states: new Map(), contracts: [], digests: new Map() };
   /** A run observed after height 0 only, with the contents hash `contents`. */

@@ -148,7 +148,7 @@ function rowsOfStateAt(lists: ReadonlyMap<number, ReadonlyMap<string, Uint8Array
 /** The test package's counter `name` in `memory`. */
 const counter = (memory: SharedArrayBuffer, name: keyof typeof COUNTERS): number => Atomics.load(new Int32Array(memory), COUNTERS[name]);
 
-export const reclamationTests = (backend: ProcessBackend): void => describe(`the reclamation step's rules through the process on ${backend.name}`, () => {
+export const reclamationTests = (backend: ProcessBackend) => describe(`the reclamation step's rules through the process on ${backend.name}`, () => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 

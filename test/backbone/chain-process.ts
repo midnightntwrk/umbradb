@@ -193,7 +193,7 @@ async function identityOf(db: ProcessDatabase, start: bigint) {
   return row;
 }
 
-export const chainProcessTests = (backend: ProcessBackend): void => describe(`the chain through the process on ${backend.name}`, () => {
+export const chainProcessTests = (backend: ProcessBackend) => describe(`the chain through the process on ${backend.name}`, () => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
