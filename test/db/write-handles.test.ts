@@ -635,6 +635,8 @@ describe.each(BACKENDS)("write handles and their closing on $name", { timeout: 3
         ["; COMMIT", "COMMIT"],
         [";; ROLLBACK", "ROLLBACK"],
         [" ; /* a comment */ ; SAVEPOINT s", "SAVEPOINT"],
+        // Two statements, the first one transaction control: refused here, not by the server.
+        ["COMMIT; SELECT 1", "COMMIT"],
         ["; SET SESSION AUTHORIZATION umbradb_m_b", "SET SESSION AUTHORIZATION"],
         ["SET U&\"session_authorization\" = 'umbradb_m_b'", "SET SESSION AUTHORIZATION"],
         ["SET U&\"\\0073ession_authorization\" = 'umbradb_m_b'", "SET SESSION AUTHORIZATION"],
@@ -728,6 +730,37 @@ describe.each(BACKENDS)("write handles and their closing on $name", { timeout: 3
         inside: { who: login, n: 1, write: "25006", behind: "25P02" },
         after: [{ who: "umbradb_m_a" }],
       });
+      expect(await rows(db, "a.t")).toEqual([
+        { k: 1n, who: "umbradb_m_a" },
+        { k: 3n, who: "umbradb_m_a" },
+      ]);
+    });
+
+    it("a callback's handle used before the view's first statement writes outside the view; used once the view's body settled, while a statement of the view is unanswered, it is refused as inside the view", async () => {
+      const { db, plan } = await setUp();
+      const slow = "SELECT 1 AS one FROM pg_sleep(0.2)";
+      const seen: Record<string, unknown> = {};
+      await block(db, plan, async (writes, tx) => {
+        await writes.write("a", async (w) => {
+          let late: Promise<UmbraError> | undefined;
+          seen.inside = await readView(tx, { height: 4n }, async (read) => {
+            // Nothing of the view was sent yet: the write runs in the callback's transaction, under its role.
+            await w.execute(INSERT_A, [1]);
+            const [row] = await read.query("SELECT current_user::text = session_user::text AS login, (SELECT count(*)::int FROM a.t) AS n");
+            // Two statements left unanswered. At the first one's answer the body has settled and the second is
+            // unanswered, so the view has not sent its close: the write is sent inside the view.
+            void read.query(slow).then(() => {
+              late = failure(() => w.execute(INSERT_A, [2]));
+            });
+            void read.query(slow);
+            return row;
+          });
+          seen.late = (await late)?.details.sqlstate;
+          await w.execute(INSERT_A, [3]);
+        });
+        await writes.end();
+      });
+      expect(seen).toEqual({ inside: { login: true, n: 1 }, late: "25006" });
       expect(await rows(db, "a.t")).toEqual([
         { k: 1n, who: "umbradb_m_a" },
         { k: 3n, who: "umbradb_m_a" },

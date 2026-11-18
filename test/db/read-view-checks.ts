@@ -146,6 +146,10 @@ export const WRITES_REFUSED: readonly (readonly [string, string])[] = [
   ["CREATE TEMP TABLE scratch (x int)", "25006"],
   ["COMMENT ON TABLE t.rows IS 'changed'", "25006"],
   ["TRUNCATE t.rows", "25006"],
+  ["ALTER TABLE t.rows ADD COLUMN added int", "25006"],
+  ["ALTER SEQUENCE t.seq RESTART WITH 50", "25006"],
+  ["DROP TABLE t.rows", "25006"],
+  ["DROP SEQUENCE t.seq", "25006"],
   ["SELECT nextval('t.seq')", "25006"],
   ["SELECT setval('t.seq', 50)", "25006"],
   ["SET TRANSACTION READ WRITE", "25001"],
@@ -168,7 +172,8 @@ export async function cannotWriteProblems(db: Database): Promise<string[]> {
     const [after] = await tx.query(
       `SELECT current_setting('transaction_read_only') AS ro, (SELECT count(*)::int FROM t.rows) AS n,
               (SELECT label FROM t.rows WHERE height = ${BEFORE}) AS label, to_regclass('t.made') IS NOT NULL AS made,
-              (SELECT is_called FROM t.seq) AS called, obj_description('t.rows'::regclass) AS comment`,
+              (SELECT is_called FROM t.seq) AS called, obj_description('t.rows'::regclass) AS comment,
+              (SELECT count(*)::int FROM pg_attribute WHERE attrelid = 't.rows'::regclass AND attnum > 0) AS columns`,
     );
     compare(problems, "the outer after the views", after, {
       ro: "off",
@@ -177,6 +182,7 @@ export async function cannotWriteProblems(db: Database): Promise<string[]> {
       made: false,
       called: false,
       comment: null,
+      columns: 2,
     });
   });
 }
@@ -750,6 +756,7 @@ export const CONTROL_REFUSED: readonly (readonly [string, string])[] = [
   ["; COMMIT", "COMMIT"],
   [";; /* behind two empty statements */ ROLLBACK", "ROLLBACK"],
   ["; RELEASE SAVEPOINT umbradb_read_view", "RELEASE"],
+  ["COMMIT; SELECT 1 AS one", "COMMIT"],
   ["SET SESSION AUTHORIZATION DEFAULT", "SET SESSION AUTHORIZATION"],
   ["SET LOCAL session_authorization TO DEFAULT", "SET SESSION AUTHORIZATION"],
   ['SET U&"session_authorization" TO DEFAULT', "SET SESSION AUTHORIZATION"],
@@ -766,6 +773,11 @@ export const SERVER_REFUSED: readonly (readonly [string, string])[] = [
   ["SELECT 1 AS one; COMMIT", "42601"],
   ["SELECT $1::int AS one; COMMIT", "42601"],
   ["PREPARE read_view_commit AS COMMIT", "42601"],
+  // Texts the check lets through because their first word is no transaction control as the server reads them.
+  ["(COMMIT)", "42601"],
+  ["\u00A0COMMIT", "42601"],
+  ["\uFEFFCOMMIT", "42601"],
+  ["/* an unterminated comment COMMIT", "42601"],
 ];
 
 /**
@@ -868,6 +880,37 @@ export async function cursorsAndPreparedProblems(db: Database): Promise<string[]
 }
 
 /**
+ * Cursors after a failure inside a view. The outer's cursor a view fetched from before one of its statements failed
+ * keeps the place that fetch left it at. A cursor whose own fetch failed inside a view stays unusable after the
+ * close: a fetch from it fails with `55000` (here inside a savepoint, which undoes that failure), while the other
+ * cursor goes on.
+ */
+export async function cursorAfterFailureProblems(db: Database): Promise<string[]> {
+  return inOuter(db, async (tx, problems) => {
+    await tx.execute("DECLARE read_view_kept CURSOR FOR SELECT g::int AS g FROM generate_series(1, 9) AS g");
+    // Its third row divides by zero.
+    await tx.execute("DECLARE read_view_failing CURSOR FOR SELECT (10 / (3 - g))::int AS q FROM generate_series(1, 9) AS g");
+    compare(problems, "the outer's first fetch", await tx.query("FETCH 1 FROM read_view_kept"), [{ g: 1 }]);
+    const first = await view(tx, problems, "a view with a failed statement", async (read) => [
+      await read.query("FETCH 1 FROM read_view_kept"),
+      await read.query("FETCH 1 FROM read_view_failing"),
+      await tried(() => read.query("SELECT 1/0 AS x")),
+      await tried(() => read.query("FETCH 1 FROM read_view_kept")),
+    ]);
+    compare(problems, "inside the view with a failed statement", first, [[{ g: 2 }], [{ q: 5 }], "22012", "25P02"]);
+    const after = [await tx.query("FETCH 1 FROM read_view_kept"), await tx.query("FETCH 1 FROM read_view_failing")];
+    compare(problems, "the outer's fetches after it", after, [[{ g: 3 }], [{ q: 10 }]]);
+    const failed = await view(tx, problems, "a view whose fetch fails", (read) => tried(() => read.query("FETCH 1 FROM read_view_failing")));
+    compare(problems, "a fetch that fails inside a view", failed, "22012");
+    await tx.execute("SAVEPOINT probe");
+    compare(problems, "the failed cursor after the view", await tried(() => tx.query("FETCH 1 FROM read_view_failing")), "55000");
+    await tx.execute("ROLLBACK TO SAVEPOINT probe");
+    await tx.execute("RELEASE SAVEPOINT probe");
+    compare(problems, "the other cursor after the view", await tx.query("FETCH 1 FROM read_view_kept"), [{ g: 4 }]);
+  });
+}
+
+/**
  * A view takes no transaction id and leaves the locks as they were, and `now()` is the outer's: 1,000 views, each
  * reading `pg_current_xact_id_if_assigned()` and `now()`, in a transaction that has written nothing; it writes its two
  * rows afterwards.
@@ -950,6 +993,19 @@ export async function edgeProblems(db: Database, sent?: readonly string[]): Prom
     compare(problems, "its handle used after it", await tried(async () => emptyKept?.query("SELECT 1")), "handle-closed");
     // Nothing reached the database: no open, no close, and not the statement of the handle used late.
     compare(problems, "what a view that sends nothing, and its handle used late, sent", sent?.slice(before), sent === undefined ? undefined : []);
+
+    // A text of two statements whose first is transaction control: refused by the check, so nothing reaches the
+    // database, and the view's next statement is answered.
+    const two = await view(tx, problems, "COMMIT; SELECT 1", async (read) => {
+      await read.query("SELECT 1 AS one");
+      const at = sent?.length;
+      return [await tried(() => read.query("COMMIT; SELECT 1")), sent?.slice(at), await tried(() => read.query("SELECT 1 AS one"))];
+    });
+    compare(problems, "COMMIT; SELECT 1: its outcome, what it sent, and the next statement", two, [
+      "control-refused COMMIT",
+      sent === undefined ? undefined : [],
+      "ok",
+    ]);
 
     // An object shaped as a transaction, which no backend opened, forwarding to the real one.
     const lookalike: Transaction = { query: (sql, params) => tx.query(sql, params), execute: (sql, params) => tx.execute(sql, params) };

@@ -7,6 +7,7 @@ import {
   cannotWriteProblems,
   connectionListener,
   controlProblems,
+  cursorAfterFailureProblems,
   cursorsAndPreparedProblems,
   deallocatedReadProblems,
   edgeProblems,
@@ -40,7 +41,7 @@ describe.each(BACKENDS)("the read view on $name", { timeout: 120_000 }, (backend
 
   const fresh = async () => (await backend.database(SCHEMA, TEST_CURSOR)).db;
 
-  it("cannot change a persistent object: each write, sequence change and switch to read-write fails with its SQLSTATE", async () => {
+  it("cannot change a persistent object: each write, ALTER, DROP, sequence change and switch to read-write fails with its SQLSTATE", async () => {
     expect(await cannotWriteProblems(await fresh())).toEqual([]);
   });
 
@@ -95,12 +96,16 @@ describe.each(BACKENDS)("the read view on $name", { timeout: 120_000 }, (backend
     expect(await settingsProblems(await fresh())).toEqual([]);
   });
 
-  it("refuses transaction control and a session authorization before sending them, each in a transaction of its own; the server refuses DO, CALL, two statements and a prepared COMMIT", async () => {
+  it("refuses transaction control and a session authorization before sending them, each in a transaction of its own; the server refuses DO, CALL, two statements, a prepared COMMIT and the texts the check lets through", async () => {
     expect(await controlProblems(await fresh())).toEqual([]);
   });
 
   it("keeps the outer's cursor position and prepared statements; a cursor declared inside is gone after it", async () => {
     expect(await cursorsAndPreparedProblems(await fresh())).toEqual([]);
+  });
+
+  it("keeps the place of a cursor fetched from before a statement of the view failed; a cursor whose own fetch failed in a view stays unusable (55000)", async () => {
+    expect(await cursorAfterFailureProblems(await fresh())).toEqual([]);
   });
 
   it("takes no transaction id over 1,000 views in a transaction that wrote nothing, and keeps the outer's clock and locks", async () => {
@@ -111,7 +116,7 @@ describe.each(BACKENDS)("the read view on $name", { timeout: 120_000 }, (backend
     expect(await noSubtransactionIdProblems(await fresh())).toEqual([]);
   });
 
-  it("refuses a nested view, a handle used after its body and a transaction no backend opened; an empty view and its handle used late send nothing", async () => {
+  it("refuses a nested view, a handle used after its body and a transaction no backend opened; an empty view, its handle used late and COMMIT; SELECT 1 send nothing", async () => {
     const { db, sent } = await backend.counted(SCHEMA, TEST_CURSOR);
     expect(await edgeProblems(db, sent)).toEqual([]);
   });
