@@ -704,7 +704,7 @@ commit; a key missing from the set costs one read. So the set is used only while
 | A worker restart after a refused eviction | nothing | it changes no table |
 | A read through the block transaction's handle lent to the worker while the eviction is awaited | nothing | it reads; the set is not told |
 | The set reaches its bound | emptied before the key that would pass it | it never holds more than its bound |
-| A node row deleted by hand while the process runs | not seen until a block does not continue the one before | only `core-ledger-state` writes `nodes`; a hand edit is damage to the tables, as a lost count row is (section 4.9) |
+| A node row deleted by hand while the process runs | seen at once if its key is not remembered; if it is, the deletion goes unseen while the key stays remembered, until a block that does not continue the one before, or the bound, empties the remembered keys | only `core-ledger-state` writes `nodes`; a hand edit is damage to the tables, as a lost count row is (section 4.9) |
 
 **Another writer.** A `COMMIT` whose answer was lost is decided by the cursor read after the reconnection, and a
 cursor at h with h's hash is taken as h committed (section 5.4). Another process may have committed h in between: one
@@ -728,8 +728,15 @@ says so, whatever the attempts before it did. `st` and `sh` do not change: the s
 deleted by hand forgotten as a candidate that is no row, and three runs on one set: a key found stored, deleted by the
 second, referenced by the third without a flush halts the third, and its control, `deleted-kept-known`, passes it);
 `test/backbone/known-keys-bound.test.ts` (a read finding more keys stored than the set has room for);
-`test/backbone/stored-keys.test.ts` (on its own; each emptying through the module's callbacks on PostgreSQL and
-PGlite; lost connections through the process; on PostgreSQL a `COMMIT` lost before and after the server, and another
-writer committing the height while this process's `COMMIT` of it is lost, with its control);
+`test/backbone/stored-keys.test.ts` (on its own; through the module's callbacks on PostgreSQL and PGlite, the
+emptying by a block that does not continue the one before, by a rollback after the settle, by a settle that throws at
+its net write, at a read and at a refused eviction with restarts off, and by the bound at a continuing block's settle,
+with `knownEmptied` on the line where the trace is held (the block that does not continue, the height made again, the
+block that meets the bound), and none by a refused eviction's restart or a read through the lent handle; lost
+connections through the process; on PostgreSQL a `COMMIT` lost before and after the server, and another writer
+committing the height while this process's `COMMIT` of it is lost, with its control);
 `test/backbone/ledger-refcount-halts.test.ts` and its negative control (the three-run case through the process);
-`test/trace/traced-process.test.ts` (each height's `missing` read and `knownHits` against a model of the set).
+`test/trace/traced-process.test.ts` (each height's `missing` read and `knownHits` against a model of the set). The
+table's rows for a restart, a restore, `sweep` turning off or on, and a hand edit are argued, not tested for the set: a
+restart and a restore make a new process context, and the restart, backup and `sweep` tests hold the tables, not the
+set.

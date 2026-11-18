@@ -20,8 +20,9 @@
  * - by its bound, before a key that would pass it ({@link KnownKeySet}).
  *
  * A worker restart after a refused eviction changes no table and empties nothing; nor does `sweep` turning off or on,
- * since a run that does not sweep deletes no row. A node row deleted by hand while the process runs is not seen until
- * the block after a failure or a restart.
+ * since a run that does not sweep deletes no row. A node row deleted by hand while the process runs is seen at once if
+ * its key is not remembered; if it is, the deletion goes unseen while the key stays remembered, until a block that does
+ * not continue the one before, or the bound, empties the remembered keys.
  *
  * **The trace's `knownEmptied`** ({@link StoredKeys.settled}): a settle did not start from what earlier heights
  * learned, because the block before did not continue into its block or because the bound emptied the set while it ran.
