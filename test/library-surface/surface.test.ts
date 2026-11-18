@@ -24,9 +24,9 @@ const INDEX = path.join(fileURLToPath(new URL("../../", import.meta.url)), "src/
 const expected = EXPORTED_SURFACE;
 
 describe("src/index.ts exports exactly the pinned surface", () => {
-  it("the pinned surface is 39 values and 42 types, sorted, the core modules' declarations among the values", () => {
-    expect(expected.values).toHaveLength(39);
-    expect(expected.types).toHaveLength(42);
+  it("the pinned surface is 40 values and 44 types, sorted, the core modules' declarations among the values", () => {
+    expect(expected.values).toHaveLength(40);
+    expect(expected.types).toHaveLength(44);
     expect([...expected.values].sort()).toEqual(expected.values);
     expect([...expected.types].sort()).toEqual(expected.types);
     for (const name of Object.keys(CORE_MODULE_EXPORTS)) expect(expected.values).toContain(name);

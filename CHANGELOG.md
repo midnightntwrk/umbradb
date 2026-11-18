@@ -9,21 +9,27 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- Typed routes for a module's HTTP API (`src/helpers/typed-routes.ts`): `typedRoute` declares a route's method, path,
-  input and answer as TypeBox schemas, and `registerTypedRoutes(api, namespace, routes)` serves them under
-  `/<namespace>` from `on-start-api`. The input (a `GET`'s parameters, a `POST`'s body) is checked before the handler
-  runs (400 `invalid-request`, naming paths and rules, never values), and the answer before it is sent (a wrong one is
-  the module API's 500). A handler refuses with `RouteError`; each answer is read at one committed height with the
-  chain-data headers, and answers are ASCII-escaped JSON. `pageCursor(schema)` gives keyset pages' opaque cursors.
-  `typebox` 1.4.3 is a new runtime dependency.
+- Routes for a module's API (`src/modules/route.ts`): `defineRoute({ name, input, output, http?, handle })` declares
+  one operation with zod schemas and no transport, and `api.route(route)` registers it from `on-start-api`. The core
+  keeps every route with its schemas as JSON Schema and serves it over HTTP under `/<module-id>` (`POST
+  /<module-id>/<name>` unless `http` gives a method and path). A `GET`'s parameters are read as the numbers and
+  booleans the input schema asks for; the input is checked before the handler runs (400 `invalid-request`, naming
+  paths and rules, never values) and the output before it is sent (a wrong one is the module API's 500). A handler
+  refuses with `RouteError(kind, code, message)`, each kind having its HTTP status; each answer is read at one
+  committed height with the chain-data headers, as ASCII-escaped JSON. `bigintText()` (at most 78 digits) and
+  `uintText(bits)` (up to 256 bits) are schemas of integers beyond 2^53: a `bigint` to the handler, digits in a string
+  to a client (a JSON number is taken too). A route's numbers are read exactly: an integer however it is written, and
+  never a fraction rounded to one. `pageCursor(schema)` gives keyset pages' opaque cursors. `api.http` stays for raw
+  HTTP handlers. The module API's 404 and 405 messages no longer repeat the request's method and path. The
+  `stats-module` and `try-module` examples' APIs are routes.
 - MIP-0018 token metadata as two public modules: `token-metadata` (`TOKEN_METADATA`) creates, fills and guards its
   tables, and refuses a start above its database's first height with `TokenMetadataStartAfterDatabase` as the cause;
-  `token-metadata-api` (`TOKEN_METADATA_API`) serves them on one route, `POST /token-metadata-api/v1/tokens`
-  (`docs/token-metadata-api.md`), whose TypeBox-checked body selects tokens by colors, contract, domain separator
-  and kind, through the core's typed routes.
+  `token-metadata-api` (`TOKEN_METADATA_API`) serves them on one route, `getTokens` (`POST
+  /token-metadata-api/v1/tokens`, `docs/token-metadata-api.md`), whose input selects tokens by colors, contract,
+  domain separator and kind. Its bytes are `0x` lowercase hex and its heights and `UInt` values digits in a string.
   `TokenMetadataRevisionGap` is the cause of a refused gap between its revisions.
 - `contractLogsItemOf` and `unresolvedLogSitesOf`, with the types `ContractLog` and `UnresolvedLogSite`: a module's
-  reads of the `contract-logs` item. The exported surface is 81 names, 39 values and 42 types.
+  reads of the `contract-logs` item. The exported surface is 84 names, 40 values and 44 types.
 - A module declaration's optional `latestStarts` (`{ [network]: height }`): a new database whose start would be above
   an enabled module's height on its network starts there, with the entries starting with it; the process logs the
   move and `umbradb config check` notes it. `token-metadata` declares each official network's first block with

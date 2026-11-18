@@ -154,8 +154,11 @@ function parseDateText(text: string): string {
  * commit 93cd21e (https://github.com/v8/v8/commit/93cd21e8254b65c15ff131b2dcadf19beadb559d); the Node.js backport is
  * https://github.com/nodejs/node/pull/66542. Once every Node.js version UmbraDB supports carries the fix, this reader
  * may be replaced by `JSON.parse` with a source-text reviver.
+ *
+ * `readNumber`, when given, reads every number instead of the rule above: it gets the number's text, a JSON number
+ * token, and returns its value or throws (the module API's routes, `src/runner/api-json.ts`).
  */
-export function parseJsonLossless(text: string): unknown {
+export function parseJsonLossless(text: string, readNumber?: (token: string) => unknown): unknown {
   let at = 0;
   const unreadable = (): UmbraError => malformed("json", text);
   const skipSpace = (): void => {
@@ -215,6 +218,7 @@ export function parseJsonLossless(text: string): unknown {
     const token = JSON_NUMBER.exec(text)?.[0];
     if (token === undefined) throw unreadable();
     at += token.length;
+    if (readNumber !== undefined) return readNumber(token);
     const value = Number(token);
     return Number.isSafeInteger(value) || !/^-?[0-9]+$/.test(token) ? value : BigInt(token);
   };
