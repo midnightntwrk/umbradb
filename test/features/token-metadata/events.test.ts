@@ -144,7 +144,7 @@ describe.each(PROCESS_BACKENDS)("token-metadata's event rows on $name", (backend
     const unresolved = new Map([[BigInt(S + 1), [site(0, 0, "not-a-literal"), site(1, 2, "partial-transaction")]]]);
     const logs = new Map([[BigInt(S + 1), [log(0, 1, A, valid), log(1, 3, A, otherValid)]]]);
     const identity = await serve(db, { start: S, head: S + 2, logs, unresolved }, async (origin) =>
-      (await post(origin, TOKENS_PATH, { contract: hex(A), domainSep: hex(D), kind: 1 })).json.items[0],
+      (await post(origin, TOKENS_PATH, { contract: `0x${hex(A)}`, domainSep: `0x${hex(D)}`, kind: 1 })).json.items[0],
     );
     expect(await db.query("SELECT tx_index, event_index, classification, reason FROM token_metadata.events ORDER BY tx_index, event_index")).toEqual([
       { tx_index: 0, event_index: 0, classification: "unresolved", reason: "not-a-literal" },
@@ -155,7 +155,7 @@ describe.each(PROCESS_BACKENDS)("token-metadata's event rows on $name", (backend
     expect(identity.mark).toMatchObject({
       mark: "unresolved",
       reasons: ["unresolved-log"],
-      unresolved: { count: 2, positions: [{ height: S + 1, txIndex: 0, eventIndex: 0 }, { height: S + 1, txIndex: 1, eventIndex: 0 }] },
+      unresolved: { count: 2, positions: [{ height: String(S + 1), txIndex: 0, eventIndex: 0 }, { height: String(S + 1), txIndex: 1, eventIndex: 0 }] },
     });
   }, 240_000);
 

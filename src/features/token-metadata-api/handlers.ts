@@ -1,6 +1,8 @@
 /**
- * `POST /token-metadata-api/v1/tokens`: the tokens a request selects (`./schemas.ts`, {@link TokensRequest}), each with
- * every defined field up to {@link MAX_TOKEN_FIELDS}, its common fields, symbol group, mark and image.
+ * The route `getTokens` (`POST /token-metadata-api/v1/tokens`): the tokens an input selects (`./schemas.ts`,
+ * {@link TokensRequest}), each with every defined field up to {@link MAX_TOKEN_FIELDS}, its common fields, symbol
+ * group, mark and image. Bytes leave as `0x` lowercase hex ({@link hex0x}) and wide integers as `bigint`s, which the
+ * output schema writes as digits in a string.
  *
  * A token is a described identity: one with at least one defined field (MIP "Applying records"); a withdrawn one is
  * referenced nowhere. Reads are bounded whatever the request selects: the selection is one statement, then a token's
@@ -10,11 +12,11 @@
 
 import type { ReadHandle } from "../../db/api.js";
 import { COMMON_KEY_HEX, type Field as StateField, fieldUsable, IMAGE_KEY_HEX, parseStandards, tokenMark } from "../token-metadata/rules.js";
-import { decodeUtf8, fromHex, toHex } from "../token-metadata/codec/index.js";
+import { decodeUtf8, toHex } from "../token-metadata/codec/index.js";
 import { hasColor } from "../token-metadata/color.js";
 import { commonFields, tokenMapKey, markInputs, type MarkInputs, symbolGroup, type TokenKey, tokenFields, tokensOfColors, tokensOfContract, tokensOfDomain } from "./sql.js";
 import { pageCursor } from "../../helpers/page-cursor.js";
-import { invalidRequest } from "../../helpers/typed-routes.js";
+import { invalidRequest } from "../../modules/route.js";
 import {
   type Common,
   ContractCursor,
@@ -22,6 +24,7 @@ import {
   type Field,
   type Group,
   type Image,
+  type Kind,
   type KindName,
   type Mark,
   MAX_GROUP_MEMBERS,
@@ -38,22 +41,25 @@ const KIND_NAMES: Record<number, KindName> = { 1: "shielded-utxo", 2: "unshielde
 
 const utf8OrNull = (b: Uint8Array): string | null => decodeUtf8(b) ?? null;
 
+/** Bytes as a route writes them: `0x` and lowercase hex. */
+export const hex0x = (b: Uint8Array): string => `0x${toHex(b)}`;
+
 /** One served field: hex always; a text view for the text types, an integer view for type 2 — never another type. */
 export function fieldJson(f: StateField): Field {
-  const value: Field["value"] = { hex: toHex(f.value) };
+  const value: Field["value"] = { hex: hex0x(f.value) };
   if (f.valType === 1 || f.valType === 3 || f.valType === 4) {
     const text = utf8OrNull(f.value);
     if (text !== null) value.text = text;
   } else if (f.valType === 2 && f.integer !== undefined) {
-    value.integer = f.integer.toString();
+    value.integer = f.integer;
   }
   return {
-    key: { hex: toHex(f.key), utf8: utf8OrNull(f.key) },
+    key: { hex: hex0x(f.key), utf8: utf8OrNull(f.key) },
     valType: f.valType,
     valTypeName: VAL_TYPE_NAMES[f.valType] ?? "reserved",
     value,
     usable: f.usable ?? null,
-    updatedAt: { height: f.position.block, txIndex: f.position.tx, eventIndex: f.position.event, record: f.position.record },
+    updatedAt: { height: BigInt(f.position.block), txIndex: f.position.tx, eventIndex: f.position.event, record: f.position.record },
   };
 }
 
@@ -72,7 +78,7 @@ export function commonJson(fields: ReadonlyMap<string, StateField>): Common {
   return {
     name: text("name"),
     symbol: text("symbol"),
-    decimals: decimals?.integer === undefined ? null : decimals.integer.toString(),
+    decimals: decimals?.integer ?? null,
     standards: standards === undefined ? null : (parseStandards(standards.value) ?? null),
   };
 }
@@ -91,7 +97,7 @@ export function markJson(common: ReadonlyMap<string, StateField>, inputs: MarkIn
     mark: m.mark,
     reasons: [...m.reasons],
     reasonCount: inputs.count,
-    unresolved: { count: inputs.unresolved.count, positions: inputs.unresolved.positions.map((p) => ({ ...p })) },
+    unresolved: { count: inputs.unresolved.count, positions: inputs.unresolved.positions.map((p) => ({ ...p, height: BigInt(p.height) })) },
     missing: [...m.missing],
     tags: [...m.tags],
   };
@@ -118,18 +124,18 @@ async function tokensOf(read: ReadHandle, keys: readonly TokenKey[]): Promise<To
           at,
           found === undefined
             ? null
-            : { symbol: { hex: toHex(symbol.value), utf8: utf8OrNull(symbol.value) }, memberCount: found.memberCount, members: found.members.map((m) => ({ domainSep: m.domainSep, kind: m.kind as 1 | 2 | 3 })) },
+            : { symbol: { hex: hex0x(symbol.value), utf8: utf8OrNull(symbol.value) }, memberCount: found.memberCount, members: found.members.map((m) => ({ domainSep: `0x${m.domainSep}`, kind: m.kind as Kind })) },
         );
       }
       group = groups.get(at) ?? null;
     }
     const own = fields.get(tokenMapKey(k))!;
     out.push({
-      contractAddress: k.contractAddress,
-      domainSep: k.domainSep,
-      kind: k.kind as 1 | 2 | 3,
+      contractAddress: `0x${k.contractAddress}`,
+      domainSep: `0x${k.domainSep}`,
+      kind: k.kind as Kind,
       kindName: KIND_NAMES[k.kind]!,
-      color: hasColor(k.kind) ? k.id : null,
+      color: hasColor(k.kind) ? `0x${k.id}` : null,
       common: commonJson(common),
       fields: own.fields.map(fieldJson),
       fieldCount: own.count,
@@ -156,7 +162,10 @@ export function decodeCursor(raw: string, contract: string): ContractCursor {
   return value;
 }
 
-/** The handler of `POST /token-metadata-api/v1/tokens`. */
+/**
+ * The handler of `getTokens`. The input's bytes are `0x` hex, which `./sql.ts` reads either way; a cursor holds them
+ * as the input gave them.
+ */
 export async function selectTokens(body: TokensRequest, read: ReadHandle): Promise<TokensResponse> {
   if ("colors" in body) return { items: await tokensOf(read, await tokensOfColors(read, body.colors)), nextCursor: null };
   if ("domainSep" in body) {
@@ -170,6 +179,6 @@ export async function selectTokens(body: TokensRequest, read: ReadHandle): Promi
   const last = page.at(-1);
   return {
     items: await tokensOf(read, page),
-    nextCursor: keys.length > limit && last !== undefined ? encodeCursor({ c: body.contract, k: [last.domainSep, last.kind as ContractCursor["k"][1]] }) : null,
+    nextCursor: keys.length > limit && last !== undefined ? encodeCursor({ c: body.contract, k: [`0x${last.domainSep}`, last.kind as Kind] }) : null,
   };
 }

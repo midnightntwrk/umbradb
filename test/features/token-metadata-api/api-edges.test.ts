@@ -1,38 +1,28 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { TOKEN_METADATA_API } from "../../../src/features/token-metadata-api/token-metadata-api.js";
 import { encodeCursor } from "../../../src/features/token-metadata-api/handlers.js";
 import { tokenColor } from "../../../src/features/token-metadata/color.js";
 import { servedIdentities } from "../token-metadata/served-state.js";
 import { commonRecords } from "../../../src/features/token-metadata/codec/index.js";
 import type { ReadHandle } from "../../../src/db/api.js";
-import type { ApiRegistry } from "../../../src/modules/declaration.js";
 import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../../runner/process-backends.js";
-import { blockLogs, contract, domain, eventData, readStopped, runTo, TOKENS_PATH } from "../token-metadata/harness.js";
+import { type ApiHandler, blockLogs, contract, domain, eventData, readStopped, runTo, tokensHandler } from "../token-metadata/harness.js";
 
 /**
  * The API's edges no chain of the harness reaches, on PostgreSQL 18 and PGlite: rows written straight into a stopped
  * database — an `unresolved` event (as the indexer stores an unresolved log site), a type-4 value that is not UTF-8
  * (which the codec never accepts; it shows the text view following the bytes), two symbol groups on one contract —
- * answered through the route's handler as the module registers it; cursors of the right shape but another contract or
+ * answered through the route as the module registers it and the core binds it to HTTP; cursors of the right shape but another contract or
  * kind, and ones that are no cursor; a read that fails (not the handler's own error) passed on to the module API; and
  * the served field (`fieldOf`) without a `usable` answer.
  */
 
 const S = 5_000;
 const A = contract(0xa5);
-const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
+/** Bytes as SQL writes them (`raw`) and as the route takes and gives them (`hex`: `0x` and lowercase hex). */
+const raw = (b: Uint8Array) => Buffer.from(b).toString("hex");
+const hex = (b: Uint8Array) => `0x${raw(b)}`;
 type Json = any;
-type Handler = Parameters<ApiRegistry["http"]>[2];
-
-/** The tokens route's handler, as `token-metadata-api` registers it on the module API. */
-async function tokensHandler(): Promise<Handler> {
-  const handlers = new Map<string, Handler>();
-  await TOKEN_METADATA_API.points["on-start-api"]!(
-    { items: new Map(), revisions: [], publish: () => undefined } as never,
-    { http: (_m, path, handler) => void handlers.set(path, handler), subscription: () => undefined },
-  );
-  return handlers.get(TOKENS_PATH)!;
-}
+type Handler = ApiHandler;
 
 describe.each(PROCESS_BACKENDS)("the API's edges on $name", (backend: ProcessBackend) => {
   let db: ProcessDatabase;
@@ -62,11 +52,11 @@ describe.each(PROCESS_BACKENDS)("the API's edges on $name", (backend: ProcessBac
     await runTo(db, { start: S, head: S + 2, logs });
     await db.query(
       `INSERT INTO token_metadata.events (height, tx_index, event_index, contract_address, classification, reason)
-       VALUES (${S + 1}, 7, 0, '\\x${hex(A)}'::bytea, 'unresolved', 'not-a-literal')`,
+       VALUES (${S + 1}, 7, 0, '\\x${raw(A)}'::bytea, 'unresolved', 'not-a-literal')`,
     );
     await db.query(
       `INSERT INTO token_metadata.fields (token_id, kind, key, val_type, value, uint_value, usable, set_height, set_tx, set_event, set_record)
-       VALUES ('\\x${hex(tokenColor(domain(1), A))}'::bytea, 1, convert_to('image', 'UTF8'), 4, '\\xff00ff'::bytea, NULL, false, ${S + 1}, 0, 0, 9)`,
+       VALUES ('\\x${raw(tokenColor(domain(1), A))}'::bytea, 1, convert_to('image', 'UTF8'), 4, '\\xff00ff'::bytea, NULL, false, ${S + 1}, 0, 0, 9)`,
     );
   }, 240_000);
   afterAll(() => backend.stop(), 60_000);
@@ -77,7 +67,7 @@ describe.each(PROCESS_BACKENDS)("the API's edges on $name", (backend: ProcessBac
       mark: "unresolved",
       reasons: ["unresolved-log"],
       reasonCount: 0,
-      unresolved: { count: 1, positions: [{ height: S + 1, txIndex: 7, eventIndex: 0 }] },
+      unresolved: { count: 1, positions: [{ height: String(S + 1), txIndex: 7, eventIndex: 0 }] },
       missing: [],
       tags: [],
     });
@@ -89,7 +79,7 @@ describe.each(PROCESS_BACKENDS)("the API's edges on $name", (backend: ProcessBac
     // URL as the bytes' Latin-1 text.
     const [token] = (await tokens({ contract: hex(A), domainSep: hex(domain(1)), kind: 1 })).json.items;
     const image = token.fields.find((f: Json) => f.key.utf8 === "image");
-    expect(image).toMatchObject({ valType: 4, valTypeName: "uri", value: { hex: "ff00ff" }, usable: false });
+    expect(image).toMatchObject({ valType: 4, valTypeName: "uri", value: { hex: "0xff00ff" }, usable: false });
     expect(image.value.text).toBeUndefined();
     expect(token.image).toEqual({ url: "ÿ\u0000ÿ", status: "pending", imageUrl: null });
   }, 60_000);
@@ -113,7 +103,8 @@ describe.each(PROCESS_BACKENDS)("the API's edges on $name", (backend: ProcessBac
     const refused = [
       encodeCursor({ c: hex(contract(0xb0)), k: [hex(domain(1)), 1] }),
       Buffer.from(JSON.stringify({ c: hex(A), k: [hex(domain(1)), 4] })).toString("base64url"),
-      encodeCursor({ c: hex(A), k: ["zz", 1] }),
+      Buffer.from(JSON.stringify({ c: hex(A), k: ["zz", 1] })).toString("base64url"),
+      Buffer.from(JSON.stringify({ c: raw(A), k: [raw(domain(1)), 1] })).toString("base64url"),
       Buffer.from(JSON.stringify({ c: hex(A), k: [hex(domain(1)), 1], extra: 1 })).toString("base64url"),
       Buffer.from("not json").toString("base64url"),
       "abc",

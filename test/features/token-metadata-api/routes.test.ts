@@ -21,7 +21,9 @@ const Y = contract(0x32);
 const Z = contract(0x33);
 const U = contract(0x34);
 const D = domain(1);
-const hex = (b: Uint8Array) => toHex(b);
+/** Bytes as SQL writes them (`raw`) and as the route takes and gives them (`hex`: `0x` and lowercase hex). */
+const raw = (b: Uint8Array) => toHex(b);
+const hex = (b: Uint8Array) => `0x${toHex(b)}`;
 const text = (s: string) => new TextEncoder().encode(s);
 const one = (c: Uint8Array, kind: number) => ({ contract: hex(c), domainSep: hex(D), kind });
 const COMMON = commonRecords({ name: "Old", symbol: "OLD", decimals: 6, standards: "a b" });
@@ -77,7 +79,7 @@ describe.each(PROCESS_BACKENDS)("the withdrawal, usability and truncation scenar
         expect(y.common).toEqual({ name: null, symbol: "G", decimals: null, standards: null });
         const byKey = Object.fromEntries(y.fields.map((f: { key: { utf8: string } }) => [f.key.utf8, f]));
         for (const key of ["name", "decimals", "standards", "image_sha256"]) expect([key, byKey[key].usable]).toEqual([key, false]);
-        expect(byKey.name.value).toEqual({ hex: "", text: "" });
+        expect(byKey.name.value).toEqual({ hex: "0x", text: "" });
         expect(byKey.decimals.value).toEqual({ hex: hex(text("6")), text: "6" });
         expect(y.mark).toMatchObject({ mark: "partial", missing: ["name", "decimals"] });
 
@@ -99,14 +101,14 @@ describe.each(PROCESS_BACKENDS)("the withdrawal, usability and truncation scenar
         expect((await at(one(U, 1))).items).toEqual([]);
         expect((await at({ contract: hex(U) })).items).toEqual([]);
         // Its event is accepted (no rejection row) and stores nothing: an undefined key is not kept.
-        expect(await db.query(`SELECT count(*)::int AS n FROM token_metadata.events WHERE contract_address = '\\x${hex(U)}'::bytea`)).toEqual([{ n: 0 }]);
-        expect(await db.query(`SELECT count(*)::int AS n FROM token_metadata.tokens WHERE contract_address = '\\x${hex(U)}'::bytea`)).toEqual([{ n: 0 }]);
+        expect(await db.query(`SELECT count(*)::int AS n FROM token_metadata.events WHERE contract_address = '\\x${raw(U)}'::bytea`)).toEqual([{ n: 0 }]);
+        expect(await db.query(`SELECT count(*)::int AS n FROM token_metadata.tokens WHERE contract_address = '\\x${raw(U)}'::bytea`)).toEqual([{ n: 0 }]);
         return (await at(one(X, 3))).items;
       });
       expect(
         await db.query(
           `SELECT octet_length(f.value) AS n FROM token_metadata.tokens t JOIN token_metadata.fields f ON f.token_id = t.id AND f.kind = t.kind
-           WHERE t.contract_address = '\\x${hex(Z)}'::bytea ORDER BY t.domain_sep, f.key`,
+           WHERE t.contract_address = '\\x${raw(Z)}'::bytea ORDER BY t.domain_sep, f.key`,
         ),
       ).toEqual([
         { n: 70 },

@@ -23,7 +23,7 @@ const HEAD = 104;
 const A = contract(1);
 const DS = domain(3);
 const logs = new Map([[BigInt(S + 2), blockLogs([0, A, eventData(DS, 1, commonRecords({ name: "Acme Gold", symbol: "AG", decimals: 6 }))])]]);
-const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
+const hex = (b: Uint8Array) => `0x${Buffer.from(b).toString("hex")}`;
 const BODIES = [{ contract: hex(A) }, { contract: hex(A), domainSep: hex(DS) }, { contract: hex(A), domainSep: hex(DS), kind: 1 }];
 
 describe.each(PROCESS_BACKENDS)("token-metadata and token-metadata-api on $name", (backend: ProcessBackend) => {

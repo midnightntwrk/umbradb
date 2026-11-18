@@ -149,7 +149,7 @@ describe.each(PROCESS_BACKENDS)("token-metadata from varying start heights on $n
   it.each(STARTS)("from S = %i serves the model of the events at or above S, stores their rows, and reports S", async (start) => {
     const db = await backend.database();
     const seen = new Map<bigint, string>();
-    const answer = await serve(db, { start, head: HEAD, logs, unresolved, modules: [...MODULES, probe(seen)] }, (origin) => post(origin, TOKENS_PATH, { contract: "01".repeat(32) }));
+    const answer = await serve(db, { start, head: HEAD, logs, unresolved, modules: [...MODULES, probe(seen)] }, (origin) => post(origin, TOKENS_PATH, { contract: `0x${"01".repeat(32)}` }));
     expect(seen.get(BigInt(HEAD)), `served state from ${start}`).toBe(modelFrom(start));
     expect(await db.query("SELECT count(*)::int AS n, min(height)::int AS lo FROM token_metadata.events")).toEqual([
       { n: expectedRows(start), lo: expectedLowest(start) },
@@ -174,7 +174,7 @@ describe.each(PROCESS_BACKENDS)("a new database configured above the module's la
       const db = await backend.database();
       const seen = new Map<bigint, string>();
       const answer = await serve(db, { start: configured, head: HEAD, logs, unresolved, modules: [BACKFILLING, TOKEN_METADATA_API as ModuleDeclaration, probe(seen)] }, (origin) =>
-        post(origin, TOKENS_PATH, { contract: "01".repeat(32) }),
+        post(origin, TOKENS_PATH, { contract: `0x${"01".repeat(32)}` }),
       );
       const [identity] = await db.query("SELECT start_height::int AS s FROM core_chain.identity");
       const events = await db.query("SELECT height::int AS h, tx_index, event_index, classification, reason FROM token_metadata.events ORDER BY 1, 2, 3");
@@ -218,7 +218,7 @@ describe.each(PROCESS_BACKENDS)("a new database on undeployed, the local network
     const seen = new Map<bigint, string>();
     const modules = [TOKEN_METADATA as ModuleDeclaration, TOKEN_METADATA_API as ModuleDeclaration, probe(seen)];
     const answer = await serve(db, { start: HEAD - 1, head: HEAD, logs, unresolved, modules, network: "undeployed" }, (origin) =>
-      post(origin, TOKENS_PATH, { contract: "01".repeat(32) }),
+      post(origin, TOKENS_PATH, { contract: `0x${"01".repeat(32)}` }),
     );
     expect(await db.query("SELECT start_height::int AS s, encode(genesis_hash, 'hex') AS g FROM core_chain.identity")).toEqual([
       { s: 0, g: hex(inMemoryBlock(0n).hash) },
@@ -289,7 +289,7 @@ describe.each(PROCESS_BACKENDS)("token-metadata on the networks' tapes from vary
             try {
               await committed(run, BigInt(tape.last), 600_000);
               const api = run.handle.listening().api!;
-              const answer = await post(`http://${api.host.includes(":") ? `[${api.host}]` : api.host}:${api.port}`, TOKENS_PATH, { contract: "00".repeat(32) });
+              const answer = await post(`http://${api.host.includes(":") ? `[${api.host}]` : api.host}:${api.port}`, TOKENS_PATH, { contract: `0x${"00".repeat(32)}` });
               expect([answer.status, answer.headers["x-umbra-height"], answer.json.items]).toEqual([200, String(tape.last), []]);
             } finally {
               await run.close();

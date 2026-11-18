@@ -86,8 +86,8 @@ describe.each(PROCESS_BACKENDS)("no network request, on $name", (backend: Proces
         ],
       ]);
       const answers = await serve(db, { start: S, head: S + 2, logs }, async (origin) => ({
-        identity: (await post(origin, TOKENS_PATH, { contract: Buffer.from(A).toString("hex"), domainSep: Buffer.from(D).toString("hex"), kind: 1 })).json.items[0],
-        list: (await post(origin, TOKENS_PATH, { contract: Buffer.from(A).toString("hex") })).json,
+        identity: (await post(origin, TOKENS_PATH, { contract: `0x${Buffer.from(A).toString("hex")}`, domainSep: `0x${Buffer.from(D).toString("hex")}`, kind: 1 })).json.items[0],
+        list: (await post(origin, TOKENS_PATH, { contract: `0x${Buffer.from(A).toString("hex")}` })).json,
       }));
       expect(answers.identity.image).toEqual({ url: IMAGE, status: "pending", imageUrl: null });
       expect(answers.list.items.at(-1).image).toEqual({ url: IMAGE, status: "pending", imageUrl: null });

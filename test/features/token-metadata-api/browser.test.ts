@@ -38,7 +38,7 @@ const STOP = 3_348_534;
 const STORAGE = "token-metadata";
 const CONFIGURATION = fileURLToPath(new URL("./fixtures/browser-configuration.ts", import.meta.url));
 /** What the page and the server are asked: one contract's tokens (preprod has no MIP-0018 event), and many colors. */
-const BODIES = [{ contract: "00".repeat(32) }, { colors: ["00".repeat(32), "11".repeat(32)] }];
+const BODIES = [{ contract: `0x${"00".repeat(32)}` }, { colors: [`0x${"00".repeat(32)}`, `0x${"11".repeat(32)}`] }];
 
 const PRESENT = findTape(TAPE).found;
 

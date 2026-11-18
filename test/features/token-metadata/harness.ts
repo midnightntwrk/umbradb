@@ -17,14 +17,15 @@ import type { BlockRef } from "../../../src/runner/block-source.js";
 import { openPglite } from "../../../src/db/pglite.js";
 import { openPostgres } from "../../../src/db/postgres.js";
 import { startUmbraDB, type UmbraDBHandle } from "../../../src/library/start-umbradb.js";
-import { defineModule, type ModuleDeclaration } from "../../../src/modules/declaration.js";
+import { type ApiRegistry, defineModule, type ModuleDeclaration } from "../../../src/modules/declaration.js";
+import { bindRoute } from "../../../src/runner/route-http.js";
 import { InMemoryBlockSource, type InMemoryItems } from "../../../src/runner/in-memory-source.js";
 import {
   EVENT_NAME,
   encodePayload,
   type MetadataRecord,
 } from "../../../src/features/token-metadata/codec/index.js";
-import { TOKEN_METADATA_API } from "../../../src/features/token-metadata-api/token-metadata-api.js";
+import { TOKEN_METADATA_API, TOKEN_METADATA_API_ID } from "../../../src/features/token-metadata-api/token-metadata-api.js";
 import { TOKEN_METADATA } from "../../../src/features/token-metadata/token-metadata.js";
 import * as v9 from "../../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js";
 import { cursorReaches, libraryData } from "../../library/library-fixtures.js";
@@ -238,8 +239,30 @@ export async function post(origin: string, path: string, body: unknown): Promise
   return { status: response.status, headers: Object.fromEntries(response.headers), text, json };
 }
 
-/** The tokens route of `token-metadata-api`. */
+/** The tokens route of `token-metadata-api`, where HTTP serves it. */
 export const TOKENS_PATH = "/token-metadata-api/v1/tokens";
+
+/** An HTTP handler of the module API. */
+export type ApiHandler = Parameters<ApiRegistry["http"]>[2];
+
+/**
+ * The tokens route's HTTP handler without a listener: the route `token-metadata-api` registers at `on-start-api`,
+ * bound to HTTP as the core binds it (`bindRoute`).
+ */
+export async function tokensHandler(): Promise<ApiHandler> {
+  const handlers = new Map<string, ApiHandler>();
+  await TOKEN_METADATA_API.points["on-start-api"]!({ items: new Map(), revisions: [], publish: () => undefined } as never, {
+    route: (route) => {
+      const bound = bindRoute(TOKEN_METADATA_API_ID, route);
+      handlers.set(bound.entry.http.path, bound.handler);
+    },
+    http: () => undefined,
+    subscription: () => undefined,
+  });
+  const handler = handlers.get(TOKENS_PATH);
+  if (handler === undefined) throw new Error(`token-metadata-api registered no route at ${TOKENS_PATH}`);
+  return handler;
+}
 
 /**
  * Runs the process on `db` up to the head with the module API listening on a free port, then runs `body` with its

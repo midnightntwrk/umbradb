@@ -1,12 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { TOKEN_METADATA_API } from "../../../src/features/token-metadata-api/token-metadata-api.js";
 import { MAX_TOKEN_FIELDS } from "../../../src/features/token-metadata-api/schemas.js";
 import { commonRecords } from "../../../src/features/token-metadata/codec/index.js";
 import { tokenColor } from "../../../src/features/token-metadata/color.js";
 import type { ReadHandle } from "../../../src/db/api.js";
-import type { ApiRegistry } from "../../../src/modules/declaration.js";
 import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../../runner/process-backends.js";
-import { blockLogs, contract, domain, eventData, readStopped, runTo, TOKENS_PATH } from "../token-metadata/harness.js";
+import { type ApiHandler, blockLogs, contract, domain, eventData, readStopped, runTo, tokensHandler } from "../token-metadata/harness.js";
 
 /**
  * Bounded cost of the API, on PostgreSQL 18 and PGlite. Large cardinalities are written straight into the
@@ -25,9 +23,11 @@ const MEMBERS = 1_000;
 const MAX_ROWS = 1_000;
 const X = contract(0xc0);
 const DA = domain(0xda);
-const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
+/** Bytes as SQL writes them (`raw`) and as the route takes and gives them (`hex`: `0x` and lowercase hex). */
+const raw = (b: Uint8Array) => Buffer.from(b).toString("hex");
+const hex = (b: Uint8Array) => `0x${raw(b)}`;
 type Json = any;
-type Handler = Parameters<ApiRegistry["http"]>[2];
+type Handler = ApiHandler;
 
 /** A token's id in SQL: `sha256(pad(32, "midnight:derive_token") ‖ domain_sep ‖ contract_address)`. */
 const ID_SQL = (domainSep: string, contract: string) =>
@@ -39,8 +39,8 @@ const ID_SQL = (domainSep: string, contract: string) =>
  * of the contract with the symbol, and 10,000 rejected events of the contract.
  */
 async function seed(db: ProcessDatabase, symbol: string): Promise<void> {
-  const x = `'\\x${hex(X)}'::bytea`;
-  const id = `'\\x${hex(tokenColor(DA, X))}'::bytea`;
+  const x = `'\\x${raw(X)}'::bytea`;
+  const id = `'\\x${raw(tokenColor(DA, X))}'::bytea`;
   await db.query(
     `INSERT INTO token_metadata.fields (token_id, kind, key, val_type, value, uint_value, usable, set_height, set_tx, set_event, set_record)
      SELECT ${id}, 3, convert_to('k' || lpad(i::text, 6, '0'), 'UTF8'), 1, '\\x76'::bytea, NULL, NULL, ${S + 1}, 0, 0, i
@@ -91,12 +91,7 @@ describe.each(PROCESS_BACKENDS)("bounded cost on $name", (backend: ProcessBacken
     });
 
   beforeAll(async () => {
-    const handlers = new Map<string, Handler>();
-    await TOKEN_METADATA_API.points["on-start-api"]!({ items: new Map(), revisions: [], publish: () => undefined } as never, {
-      http: (_m, path, h) => void handlers.set(path, h),
-      subscription: () => undefined,
-    });
-    handler = handlers.get(TOKENS_PATH)!;
+    handler = await tokensHandler();
     await backend.start();
     const logs = new Map([[BigInt(S + 1), blockLogs([0, X, eventData(DA, 3, commonRecords({ name: "Big", symbol: "SPAM", decimals: 6 }))])]]);
     db = await backend.database();
@@ -131,7 +126,7 @@ describe.each(PROCESS_BACKENDS)("bounded cost on $name", (backend: ProcessBacken
   }, 120_000);
 
   it("a hundred colors take a fixed number of statements", async () => {
-    const colors = Array.from({ length: 100 }, (_, i) => i.toString(16).padStart(64, "0"));
+    const colors = Array.from({ length: 100 }, (_, i) => `0x${i.toString(16).padStart(64, "0")}`);
     const got = await tokens(db, { colors });
     expect([got.status, got.json.items.length]).toEqual([200, 0]);
     expect(got.statements).toBeLessThanOrEqual(3);

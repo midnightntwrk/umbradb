@@ -2,10 +2,14 @@
 
 The JSON API of the `token-metadata-api` module over `token-metadata`'s tables: MIP-0018 token metadata, one route.
 
-- **Route:** `POST /token-metadata-api/v1/tokens`, under the module's own namespace, on the module API (`listen.api`,
-  or the page's worker in the browser build). Implementation: `src/features/token-metadata-api/`.
-- **Schemas:** the request body and the answer are TypeBox schemas (`schemas.ts`). Every request is checked against
-  the request schema before it is answered, and every answer against the answer schema before it is sent.
+- **Route:** `token-metadata-api.getTokens`, a route registered with the core (module guide §7), which serves it over
+  HTTP at `POST /token-metadata-api/v1/tokens`, under the module's own namespace, on the module API (`listen.api`, or
+  the page's worker in the browser build). Implementation: `src/features/token-metadata-api/`.
+- **Schemas:** the input and the output are zod schemas (`schemas.ts`), which the core keeps as JSON Schema. Every
+  input is checked against its schema before the handler runs, and every output is written with its schema before it
+  is sent.
+- **Bytes and integers:** bytes are `0x` and lowercase hex, in a request and in an answer. A height and a `UInt`
+  value are digits in a string, which no JSON reader rounds.
 - **One state per answer:** each answer is one read at the latest committed height, and carries the core's
   `X-Umbra-View`, `X-Umbra-Height` and `X-Umbra-Hash`. Before block S commits, the route answers 503
   `no-committed-height`.
@@ -14,7 +18,7 @@ The JSON API of the `token-metadata-api` module over `token-metadata`'s tables: 
 
 ## Request
 
-A JSON body with exactly one of four selectors. Every 32-byte value is 64 lowercase hex digits, without `0x`.
+A JSON body with exactly one of four selectors. Every 32-byte value is `0x` and 64 lowercase hex digits.
 
 | Selector | Body | Answers |
 |---|---|---|
@@ -39,11 +43,11 @@ withdrawn) is in no answer: an empty `items` is a valid answer.
 
 ```json
 {
-  "contractAddress": "a1a1…", "domainSep": "0101…", "kind": 1, "kindName": "shielded-utxo",
-  "color": "bf1b…",
+  "contractAddress": "0xa1a1…", "domainSep": "0x0101…", "kind": 1, "kindName": "shielded-utxo",
+  "color": "0xbf1b…",
   "common": { "name": "Acme Gold", "symbol": "AGLD", "decimals": "6", "standards": null },
   "fields": [ Field, … ], "fieldCount": 4, "fieldsTruncated": false,
-  "group": { "symbol": { "hex": "41474c44", "utf8": "AGLD" }, "memberCount": 2, "members": [ { "domainSep": "0101…", "kind": 1 }, … ] },
+  "group": { "symbol": { "hex": "0x41474c44", "utf8": "AGLD" }, "memberCount": 2, "members": [ { "domainSep": "0x0101…", "kind": 1 }, … ] },
   "mark": { "mark": "ok", "reasons": [], "reasonCount": 0, "unresolved": { "count": 0, "positions": [] }, "missing": [], "tags": [] },
   "image": { "url": "https://example.com/agld.png", "status": "pending", "imageUrl": null }
 }
@@ -61,20 +65,21 @@ withdrawn) is in no answer: an empty `items` is a valid answer.
 **Field**
 
 ```json
-{ "key": { "hex": "6e616d65", "utf8": "name" }, "valType": 1, "valTypeName": "utf8",
-  "value": { "hex": "41636d6520476f6c64", "text": "Acme Gold" }, "usable": true,
-  "updatedAt": { "height": 101, "txIndex": 0, "eventIndex": 0, "record": 0 } }
+{ "key": { "hex": "0x6e616d65", "utf8": "name" }, "valType": 1, "valTypeName": "utf8",
+  "value": { "hex": "0x41636d6520476f6c64", "text": "Acme Gold" }, "usable": true,
+  "updatedAt": { "height": "101", "txIndex": 0, "eventIndex": 0, "record": 0 } }
 ```
 
 `value.text` is given for the text types (1, 3, 4) when the bytes are valid UTF-8, `value.integer` (a decimal string)
 for type 2. `usable` answers the common-field rule for a common key, else `null`. `updatedAt` is where the value was
-set; `eventIndex` is the event's position among its transaction's log sites.
+set: `height` is a decimal string, and `eventIndex` is the event's position among its transaction's log sites. A
+mark's unresolved positions give `height` the same way.
 
 ## Rules
 
 | Rule | Meaning |
 |---|---|
-| Defined keys only | A key is served only when MIP-0018 defines it: `name`, `symbol`, `decimals`, `standards`, `image`, `image_sha256`. Other keys are stored but never served and never make a token exist. |
+| Defined keys only | A key is served only when MIP-0018 defines it: `name`, `symbol`, `decimals`, `standards`, `image`, `image_sha256`. Other keys are not stored, so they are never served and never make a token exist. |
 | Withdrawal | A token exists only while one of its defined fields has a value; after its last is deleted it is in no answer, exactly as if it had never been described. |
 | Lengths | `name` and `symbol` are served as their first 64 and 12 characters (grapheme clusters, UAX #29); they are stored whole. |
 | Marks | `incorrect` the token's contract has a rejected MIP-0018 event (first 100 reasons, in chain order); else `unresolved` it has a log `core-contract-logs-fast` could not read (reason `unresolved-log`, first 100 positions); else `partial` `name`, `symbol` or `decimals` missing or unusable; else `ok`. Usable `standards` identifiers are `tags` (self-declared, never proof). |
@@ -84,11 +89,11 @@ set; `eventIndex` is the event's position among its transaction's log sites.
 ## Errors
 
 Every error is `{ "error": { "code": <string>, "message": <string> } }`, the module API's envelope; a message never
-echoes the input. The route is one of the core's typed routes (module guide §7), so its codes are the module API's.
+echoes the input. The core serves the route (module guide §7), so its codes are the module API's.
 
 | Status | Code | When |
 |---|---|---|
-| 400 | `invalid-request` | the body matches no selector (the message names the schema path and rule), or a cursor this API did not issue for that contract |
+| 400 | `invalid-request` | the body matches no selector (the message names the input's path and rule), or a cursor this route did not give for that contract |
 | 404 | `not-found` | a path the module has no route for (the module API's answer) |
 | 405 | `method-not-allowed` | a method other than `POST` (`Allow: POST`) |
 | 413 | `request-too-large` | a body over the listener's limit |

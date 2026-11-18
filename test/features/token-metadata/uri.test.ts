@@ -1,16 +1,14 @@
-import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { isRfc3986Uri } from "../../../src/features/token-metadata/codec/index.js";
-import { RFC3986_URI } from "./rfc3986.js";
 
 /**
- * The codec's URI check (valType 4), TypeBox's `IsUri`, against the RFC 3986 `URI` rule transcribed from Appendix A
- * (`./rfc3986.ts`): the same verdict on every case below and on generated texts built from the grammar's pieces, and a
- * bounded time on the longest values a payload holds. The MIP's informative URI vectors run through the codec in
+ * The codec's URI check (valType 4): the RFC 3986 `URI` rule, transcribed from Appendix A into one regular expression
+ * (`src/features/token-metadata/codec/uri.ts`). Each case below has the verdict the grammar gives it, and the longest
+ * values a payload holds are answered in bounded time. The MIP's informative URI vectors run through the codec in
  * `vectors.test.ts`.
  */
 
-const CASES = [
+const ACCEPTED = [
   // Accepted: a scheme, then any hier-part.
   "ipfs://bafy/x.png",
   "https://example.com/logo.png?size=64#top",
@@ -33,6 +31,9 @@ const CASES = [
   "a://",
   "a:/",
   "a:///",
+];
+
+const REFUSED = [
   // Refused: no scheme, a bad scheme, a character outside the grammar, a bad escape or IP literal.
   "",
   "no scheme",
@@ -59,27 +60,15 @@ const CASES = [
   "a:`",
 ];
 
-const PIECES = [
-  "//", "/", "?", "#", ":", "@", "[", "]", "%", "%2F", "%g1", "[::1]", "[v1.x]", "[1:2:3:4:5:6:7:8]", "1.2.3.4",
-  "256.1.1.1", ":80", "http:", "a:", "a", "Z", "0", "9", "-", ".", "_", "~", "!", "$", "&", "'", "(", ")", "*", "+",
-  ",", ";", "=", "é", " ", "\\", "\u0000",
-];
-
-describe("the codec's URI check against RFC 3986 Appendix A", () => {
-  it("agrees with the transcribed grammar on every case", () => {
-    const disagree = CASES.filter((text) => isRfc3986Uri(text) !== RFC3986_URI.test(text));
-    expect(disagree).toEqual([]);
-    expect(CASES.filter(isRfc3986Uri).length).toBeGreaterThan(10);
-    expect(CASES.filter((text) => !isRfc3986Uri(text)).length).toBeGreaterThan(10);
+describe("the codec's URI check, RFC 3986 Appendix A", () => {
+  it("accepts a scheme followed by any hier-part, query and fragment", () => {
+    expect(ACCEPTED.filter((text) => !isRfc3986Uri(text))).toEqual([]);
+    expect(ACCEPTED.length).toBeGreaterThan(10);
   });
 
-  it("agrees with the transcribed grammar on generated texts", () => {
-    const text = fc.array(fc.constantFrom(...PIECES), { maxLength: 12 }).map((pieces) => pieces.join(""));
-    const withScheme = fc.tuple(fc.constantFrom("a:", "http://", "x-y.z+1:", "urn:"), text).map(([s, t]) => s + t);
-    fc.assert(
-      fc.property(fc.oneof(text, withScheme), (t) => isRfc3986Uri(t) === RFC3986_URI.test(t)),
-      { numRuns: 50_000 },
-    );
+  it("refuses a relative reference, a bad scheme, a character outside the grammar, a bad escape or IP literal", () => {
+    expect(REFUSED.filter(isRfc3986Uri)).toEqual([]);
+    expect(REFUSED.length).toBeGreaterThan(10);
   });
 
   it("answers the longest values a payload holds in bounded time", () => {

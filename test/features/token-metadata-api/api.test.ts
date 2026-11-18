@@ -1,8 +1,7 @@
-import Value from "typebox/value";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { tokenColor } from "../../../src/features/token-metadata/color.js";
 import { TokensRequest, TokensResponse } from "../../../src/features/token-metadata-api/schemas.js";
-import { encodeCursor, markJson } from "../../../src/features/token-metadata-api/handlers.js";
+import { markJson } from "../../../src/features/token-metadata-api/handlers.js";
 import { commonRecords, EVENT_NAME, metadataRecord, toHex, withdrawRecords } from "../../../src/features/token-metadata/codec/index.js";
 import type { Field } from "../../../src/features/token-metadata/rules.js";
 import type { UmbraDBHandle } from "../../../src/library/start-umbradb.js";
@@ -13,7 +12,7 @@ import { blockLogs, contract, domain, eventData, get, type Got, miscData, post, 
 /**
  * `token-metadata-api`'s one route, `POST /token-metadata-api/v1/tokens`, on the module API listener, on PostgreSQL 18
  * and PGlite, over one chain with a token per mark, a symbol group, hostile text, an image and a withdrawn token.
- * Every answer is checked against the route's own answer schema.
+ * Every answer is checked against the route's own output schema.
  *
  * - **The four selectors:** colors (both kinds of a color, several colors at once), a contract (paged, its cursor bound
  *   to it), a contract and domain separator (its kinds), and all three with the kind.
@@ -37,7 +36,8 @@ const D8 = domain(8);
 const HOSTILE_NAME = "‮evil<script>&é";
 const IMAGE = "https://example.invalid/a.png";
 
-const hex = (b: Uint8Array) => toHex(b);
+/** Bytes as the route takes and gives them: `0x` and lowercase hex. */
+const hex = (b: Uint8Array) => `0x${toHex(b)}`;
 const colorOf = (c: Uint8Array, d: Uint8Array) => hex(tokenColor(d, c));
 
 const LOGS = new Map([
@@ -68,10 +68,10 @@ describe.each(PROCESS_BACKENDS)("token-metadata-api on $name", (backend: Process
   /** POSTs `body` to the tokens route; a 200 answer is checked against the answer schema. */
   const tokens = async (body: unknown): Promise<Got> => {
     const got = await post(origin, TOKENS_PATH, body);
-    if (got.status === 200) expect(Value.Check(TokensResponse, got.json), JSON.stringify(got.json).slice(0, 300)).toBe(true);
+    if (got.status === 200) expect(TokensResponse.safeParse(got.json).success, JSON.stringify(got.json).slice(0, 300)).toBe(true);
     return got;
   };
-  const ids = (got: Got) => got.json.items.map((t: { contractAddress: string; domainSep: string; kind: number }) => `${t.contractAddress.slice(0, 2)}/${t.domainSep.slice(0, 2)}/${t.kind}`);
+  const ids = (got: Got) => got.json.items.map((t: { contractAddress: string; domainSep: string; kind: number }) => `${t.contractAddress.slice(2, 4)}/${t.domainSep.slice(2, 4)}/${t.kind}`);
 
   beforeAll(async () => {
     await backend.start();
@@ -106,7 +106,7 @@ describe.each(PROCESS_BACKENDS)("token-metadata-api on $name", (backend: Process
       image: { url: IMAGE, status: "pending", imageUrl: null },
     });
     expect(token.fields.map((f: { key: { utf8: string } }) => f.key.utf8)).toEqual(["decimals", "image", "name", "symbol"]);
-    expect(token.fields[0]).toMatchObject({ valType: 2, valTypeName: "uint", value: { hex: "06", integer: "6" }, usable: true, updatedAt: { height: S + 1, txIndex: 0, eventIndex: 0 } });
+    expect(token.fields[0]).toMatchObject({ valType: 2, valTypeName: "uint", value: { hex: "0x06", integer: "6" }, usable: true, updatedAt: { height: String(S + 1), txIndex: 0, eventIndex: 0 } });
   }, 60_000);
 
   it("by colors: both kinds of a color, several colors at once; a contract token (kind 3) has none", async () => {
@@ -114,7 +114,7 @@ describe.each(PROCESS_BACKENDS)("token-metadata-api on $name", (backend: Process
     expect(ids(one)).toEqual(["a1/07/1", "a1/07/2"]);
     const many = await tokens({ colors: [colorOf(A, D7), colorOf(H, D7), colorOf(A, D8), colorOf(A, D7)] });
     expect(ids(many)).toEqual(["a1/07/1", "a1/07/2", "a1/08/1", "d4/07/1"]);
-    expect(ids(await tokens({ colors: [colorOf(W, D7), "00".repeat(32)] }))).toEqual([]);
+    expect(ids(await tokens({ colors: [colorOf(W, D7), `0x${"00".repeat(32)}`] }))).toEqual([]);
   }, 60_000);
 
   it("by contract and domain separator: its described kinds; with the kind: that one, or none", async () => {
@@ -185,7 +185,7 @@ describe.each(PROCESS_BACKENDS)("token-metadata-api on $name", (backend: Process
       { colors: [SECRET] },
       { contract: SECRET },
       { contract: hex(A).toUpperCase() },
-      { contract: `0x${hex(A)}` },
+      { contract: toHex(A) },
       { contract: hex(A), kind: 1 },
       { contract: hex(A), domainSep: hex(D7), kind: 4 },
       { contract: hex(A), domainSep: hex(D7), kind: "1" },
@@ -193,7 +193,7 @@ describe.each(PROCESS_BACKENDS)("token-metadata-api on $name", (backend: Process
       { contract: hex(A), limit: 501 },
       { contract: hex(A), limit: 1.5 },
       { contract: hex(A), cursor: "not a cursor!" },
-      { contract: hex(A), cursor: encodeCursor({ c: hex(A), k: ["x", 1] }) },
+      { contract: hex(A), cursor: Buffer.from(JSON.stringify({ c: hex(A), k: ["x", 1] })).toString("base64url") },
       { contract: hex(A), domainSep: hex(D7), limit: 1 },
       { colors: [colorOf(A, D7)], contract: hex(A) },
       { contract: hex(A), extra: 1 },
@@ -203,7 +203,7 @@ describe.each(PROCESS_BACKENDS)("token-metadata-api on $name", (backend: Process
       expect([JSON.stringify(body)?.slice(0, 80), got.status, got.json?.error?.code]).toEqual([JSON.stringify(body)?.slice(0, 80), 400, "invalid-request"]);
       expect(got.text).not.toContain(SECRET);
     }
-    expect((await tokens({ colors: [SECRET] })).json.error.message).toMatch(/^input\/colors\/0: must match pattern/);
+    expect((await tokens({ colors: [SECRET] })).json.error.message).toMatch(/^input\/colors\/0: expected a 32-byte hash/);
   }, 60_000);
 
   it("the module API's own answers: an unknown path 404, another method 405 with Allow; no route outside the namespace", async () => {
@@ -217,9 +217,9 @@ describe.each(PROCESS_BACKENDS)("token-metadata-api on $name", (backend: Process
 
 describe("the request schema's four selectors", () => {
   it("accepts exactly the four shapes", () => {
-    const h = "a".repeat(64);
+    const h = `0x${"a".repeat(64)}`;
     for (const ok of [{ colors: [h] }, { contract: h }, { contract: h, limit: 10, cursor: "abc" }, { contract: h, domainSep: h }, { contract: h, domainSep: h, kind: 3 }]) {
-      expect([ok, Value.Check(TokensRequest, ok)]).toEqual([ok, true]);
+      expect([ok, TokensRequest.safeParse(ok).success]).toEqual([ok, true]);
     }
   });
 });
@@ -232,9 +232,9 @@ describe("the marks no chain of the harness gives here", () => {
   });
   const usable = (text: string): Field => ({ key: new Uint8Array(), valType: 1, value: new TextEncoder().encode(text), usable: true, position: { block: 1, tx: 0, event: 0, record: 0 } });
   const fields = new Map<string, Field>([
-    [hex(new TextEncoder().encode("name")), usable("N")],
-    [hex(new TextEncoder().encode("symbol")), usable("S")],
-    [hex(new TextEncoder().encode("decimals")), { ...usable("x"), valType: 2, integer: 6n }],
+    [toHex(new TextEncoder().encode("name")), usable("N")],
+    [toHex(new TextEncoder().encode("symbol")), usable("S")],
+    [toHex(new TextEncoder().encode("decimals")), { ...usable("x"), valType: 2, integer: 6n }],
   ]);
 
   it("unresolved: a complete token of a contract with an unresolved site, with reason unresolved-log and the position", () => {
@@ -242,7 +242,7 @@ describe("the marks no chain of the harness gives here", () => {
       mark: "unresolved",
       reasons: ["unresolved-log"],
       reasonCount: 0,
-      unresolved: { count: 1, positions: [{ height: 5, txIndex: 0, eventIndex: 0 }] },
+      unresolved: { count: 1, positions: [{ height: 5n, txIndex: 0, eventIndex: 0 }] },
       missing: [],
       tags: [],
     });
