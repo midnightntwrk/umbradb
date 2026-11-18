@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { CoreLedgerStateOptions } from "../../src/backbone/core-ledger-state/core-ledger-state.js";
+import { CORE_LEDGER_STATE_ID, type CoreLedgerStateOptions } from "../../src/backbone/core-ledger-state/core-ledger-state.js";
 import type { CoreRevision } from "../../src/backbone/core-ledger-state/retention.js";
 import type { BlockWriteHandle } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
@@ -9,6 +9,7 @@ import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import { FinalizedLoop, type HeightRun, type LoopInput } from "../../src/runner/loop.js";
 import type { TraceSink } from "../../src/trace/trace.js";
 import { type LostCommit, losingCommits } from "../runner/block-continues-harness.js";
+import { COUNTERS } from "../ledger/fixtures/sweep-test-loader.js";
 import type { DagRun } from "./refcount-process.js";
 
 /**
@@ -16,8 +17,10 @@ import type { DagRun } from "./refcount-process.js";
  * `ledger-apply-ahead-failures.test.ts` and their negative control): the `core` settings that turn it on and off, a
  * block trace kept in memory, a run's tables as text, a loop and a worker that record the order of each block's settle,
  * eviction, apply ahead and `COMMIT`, a net write that loses its connection once, a loop whose `COMMIT` is lost once, a
- * retention window raised at a block's turn, and a worker whose restart waits for the applies ahead in flight. Imports
- * nothing of Vitest.
+ * retention window raised at a block's turn, a worker whose restart waits for the applies ahead in flight, an
+ * `on-compute` read that loses its connection once, a loop that still gives the next block's context when a height is
+ * made again, a retention window raised when a net write is lost, and a worker that arms the test package's failing
+ * release for one apply ahead. Imports nothing of Vitest.
  */
 
 /** The `core` settings of a run that applies each block at its own turn, and of one that applies the next ahead. */
@@ -265,3 +268,99 @@ export const evictedAt = (run: DagRun, height: number): Set<string> => new Set(r
 /** Whether `run`'s batch of `height` holds again a node of `keys`. */
 export const holdsAgain = (run: DagRun, height: number, keys: ReadonlySet<string>): boolean =>
   (run.batches.get(BigInt(height))?.inserts ?? []).some((node) => keys.has(hex(node.key)));
+
+/**
+ * Each core module as the process gets it (`DagRunOptions.modules`), `core-ledger-state`'s `on-compute` at `height`
+ * given a read whose first statement throws `connection-lost`, once: the callback fails after it looked at the apply
+ * ahead of its block and before it read the block before, and the process makes the height again after its back-off.
+ */
+export function losesComputeReadOnce(height: bigint): (module: ModuleDeclaration) => ModuleDeclaration {
+  let lost = false;
+  return (module) => {
+    const compute = module.points["on-compute"];
+    if (module.id !== CORE_LEDGER_STATE_ID || compute === undefined) return module;
+    const points: ModuleDeclaration["points"] = {
+      ...module.points,
+      async "on-compute"(p, b, read, out) {
+        if (b.height !== height || lost) return compute(p, b, read, out);
+        const losing = {
+          height: read.height,
+          async query(...args: Parameters<typeof read.query>) {
+            if (lost) return read.query(...args);
+            lost = true;
+            throw new UmbraError("connection-lost", `the read's connection was lost at the on-compute of block ${height} (the test's)`);
+          },
+        };
+        return compute(p, b, losing, out);
+      },
+    };
+    return { ...module, points };
+  };
+}
+
+/**
+ * A loop whose {@link FinalizedLoop.ahead} still gives a height's block context once it gave it, also when the source no
+ * longer has that height prepared: the node source drops what it prepared above a height made again, while the
+ * interface (`BlockSource.ahead`) lets a source keep it. So the settle of a height made again finds the next block.
+ */
+export function keepsAheadLoop(): new (input: LoopInput) => FinalizedLoop {
+  const given = new Map<string, NonNullable<ReturnType<FinalizedLoop["ahead"]>>>();
+  return class KeepsAhead extends FinalizedLoop {
+    override ahead(height: bigint, part: string): ReturnType<FinalizedLoop["ahead"]> {
+      const context = super.ahead(height, part);
+      if (context !== null) given.set(`${part} ${height}`, context);
+      return context ?? given.get(`${part} ${height}`) ?? null;
+    }
+  };
+}
+
+/**
+ * `core-ledger-state`'s rules for a net write of `height` that loses its connection once (as {@link losesNetWriteOnce})
+ * and a retention window raised at that moment: L(h), the lowest height retained after h, is h before, and h − 1 for
+ * the heights above `height` from then on. So the apply ahead of `height` + 1 that the first settle of `height` sent
+ * releases the state after `height`, and the input of that block built after the loss releases none. `window` is L for
+ * the checks.
+ */
+export function windowRaisedWhenNetWriteLost(height: bigint): {
+  readonly core: Pick<CoreLedgerStateOptions, "retainedFrom" | "nodeWriter">;
+  readonly window: (h: number) => number;
+} {
+  let lost = false;
+  return {
+    core: {
+      retainedFrom: (_revisions: readonly CoreRevision[], h: bigint) => (lost && h > height ? h - 1n : h),
+      nodeWriter: (w, at) =>
+        at !== height || lost
+          ? w
+          : ({
+              async execute(...args: Parameters<BlockWriteHandle["execute"]>) {
+                if (lost) return w.execute(...args);
+                lost = true;
+                throw new UmbraError("connection-lost", `the writer's connection was lost at the net write of block ${height} (the test's)`);
+              },
+            } as Pick<BlockWriteHandle, "execute">),
+    },
+    window: (h) => (h > Number(height) ? h - 1 : h),
+  };
+}
+
+/**
+ * `host` arming the test package's failing release (`RefusalData.releaseFailsAt`, through `counters`) when the apply of
+ * `height` marked ahead is sent, so that this apply fails after the engine persisted the new state's key, and no apply
+ * at a block's turn does.
+ */
+export function failsAheadAfterPersist(height: bigint, counters: SharedArrayBuffer): (host: LedgerHost) => LedgerHost {
+  return (host) =>
+    new Proxy(host, {
+      get(target, name) {
+        if (name === "apply") {
+          return (input: Parameters<LedgerHost["apply"]>[0], read?: Parameters<LedgerHost["apply"]>[1]) => {
+            if (input.ahead === true && input.height === height) Atomics.store(new Int32Array(counters), COUNTERS.releaseArmed, 1);
+            return target.apply(input, read);
+          };
+        }
+        const value: unknown = Reflect.get(target, name, target);
+        return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+      },
+    });
+}

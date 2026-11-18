@@ -22,7 +22,7 @@ import {
 import { CORE_LEDGER_STATE_MIGRATIONS } from "../../src/backbone/core-ledger-state/sql.js";
 import type { BlockWriteHandle } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
-import { type AppliedState, EvictionRefused } from "../../src/ledger/worker/engine.js";
+import { type AppliedState, ApplyNeedsNewThread, EvictionRefused } from "../../src/ledger/worker/engine.js";
 import type { LedgerHost } from "../../src/ledger/worker/host.js";
 import type { BlockContext, ItemSink, ProcessContext } from "../../src/modules/declaration.js";
 
@@ -719,6 +719,7 @@ describe("the next block applied ahead: when h's settle sends it, and each event
       readonly apply?: (input: { readonly height: bigint; readonly hash: Uint8Array; readonly ahead?: boolean }) => Promise<AppliedState>;
       readonly ahead?: (height: bigint) => BlockContext | null;
       readonly core?: ReturnType<typeof config>;
+      readonly genesis?: (input: { readonly height: bigint; readonly hash: Uint8Array }) => Promise<AppliedState>;
     } = {},
   ) {
     const p = context(rest.core);
@@ -750,7 +751,7 @@ describe("the next block applied ahead: when h's settle sends it, and each event
       },
       async genesis(input: { readonly height: bigint; readonly hash: Uint8Array }) {
         asked.push(`genesis ${input.height}`);
-        return resultOf(input);
+        return (rest.genesis ?? (async (given) => resultOf(given)))(input);
       },
       failure: null,
     } as unknown as LedgerHost;
@@ -764,7 +765,8 @@ describe("the next block applied ahead: when h's settle sends it, and each event
     return {
       p,
       asked,
-      compute: (b: BlockContext) => points["on-compute"]?.(p, b, read as never, sink()) as Promise<void>,
+      compute: (b: BlockContext, through: unknown = read) => points["on-compute"]?.(p, b, through as never, sink()) as Promise<void>,
+      restart: () => host.restart(),
       write: (b: BlockContext, w = sweeping()) => points["on-db-write"]?.(p, b, w as never) as Promise<void>,
       settle: (height: bigint, w = sweeping()) => points["on-settle"]?.(p, { first: height, last: height }, w as never) as Promise<void>,
     };
@@ -846,7 +848,7 @@ describe("the next block applied ahead: when h's settle sends it, and each event
     expect(made.asked).toEqual(["load 3", "apply 4"]);
   });
 
-  it("drops it when h is made again (h's on-compute does not continue the block before), and h's settle sends it again", async () => {
+  it("drops it when h is made again (h's on-compute does not continue the block before); h's settle sends none again in the same thread, which may hold the block, and sends it again in a new one", async () => {
     const made = setup();
     await through(made, 3n, false);
     made.asked.length = 0;
@@ -854,18 +856,83 @@ describe("the next block applied ahead: when h's settle sends it, and each event
     await made.compute(at(3n, false));
     await made.write(at(3n, false));
     expect(made.asked).toEqual(["load 2", "apply 3"]);
-    // The memory is gone: without the retried settle, h + 1 is applied at its turn.
-    const skipped = setup();
-    await through(skipped, 3n, false);
-    await skipped.compute(at(3n, false));
-    skipped.asked.length = 0;
-    await skipped.compute(at(4n, true));
-    expect(skipped.asked).toEqual(["load 3", "apply 4"]);
-    // With it, h's settle sends the apply ahead again, which h + 1 takes.
+    // Its settle sends no second apply ahead of h + 1: the thread may hold h + 1 pending from the first.
     await made.settle(3n);
+    expect(made.asked).toEqual(["load 2", "apply 3", "evict"]);
+    // h + 1, though it continues h, does not use the dropped result: it is applied at its turn (the worker answers
+    // with what it holds pending for the same input).
     made.asked.length = 0;
     await made.compute(at(4n, true));
-    expect(made.asked).toEqual(["load 3"]);
+    expect(made.asked).toEqual(["load 3", "apply 4"]);
+    // A thread replaced since the first attempt holds nothing: the settle of h made again sends the apply ahead.
+    const replaced = setup();
+    await through(replaced, 3n, false);
+    await replaced.restart();
+    await replaced.compute(at(3n, false));
+    await replaced.write(at(3n, false));
+    replaced.asked.length = 0;
+    await replaced.settle(3n);
+    expect(replaced.asked).toEqual(["evict", "ahead 4"]);
+    replaced.asked.length = 0;
+    await replaced.compute(at(4n, true));
+    expect(replaced.asked).toEqual(["load 3"]);
+  });
+
+  it("keeps it until the block is applied: an on-compute that fails before it read the block before, run again, still restarts the thread for another input", async () => {
+    let raised = false;
+    const window = { retainedFrom: (_revisions: unknown, h: bigint) => (raised && h >= 4n ? h - 1n : h), checkKept: true };
+    const made = setup(window);
+    await through(made, 3n, false);
+    raised = true;
+    made.asked.length = 0;
+    const losing = { query: async () => Promise.reject(new UmbraError("connection-lost", "lost at the read of the block before")) };
+    await expect(made.compute(at(4n, true), losing)).rejects.toThrow(/lost at the read of the block before/);
+    expect(made.asked).toEqual([]);
+    // Run again, the block does not continue the one before: what the settle sent is still known, its input differs
+    // from the turn's, and the thread that may hold it is restarted before the block is applied.
+    await made.compute(at(4n, false));
+    expect(made.asked).toEqual(["load 3", "restart", "load 3", "apply 4"]);
+    // Applied: nothing is kept of it, and the same block computed again asks for it with no restart.
+    made.asked.length = 0;
+    await made.compute(at(4n, false));
+    expect(made.asked).toEqual(["load 3", "apply 4"]);
+    // What is kept of another height's apply ahead (neither this block's nor the next one's) is dropped for good.
+    const other = setup(window);
+    raised = false;
+    await through(other, 3n, false);
+    raised = true;
+    await other.compute(at(7n, false));
+    other.asked.length = 0;
+    await other.compute(at(4n, false));
+    expect(other.asked).toEqual(["load 3", "apply 4"]);
+  });
+
+  it("applies a block in a new thread when the worker's thread refuses it at its turn (it holds the block from another input, or an apply failed in it): a restart, the state before loaded again, the apply once more; block 0 too", async () => {
+    let refusals = 1;
+    const refusing = async (input: { readonly height: bigint; readonly hash: Uint8Array }) => {
+      if (refusals > 0) {
+        refusals -= 1;
+        throw new ApplyNeedsNewThread(`block ${input.height} cannot be applied in this ledger worker thread`);
+      }
+      return resultOf(input);
+    };
+    const made = setup({}, { apply: refusing });
+    await made.compute(at(3n, false));
+    expect(made.asked).toEqual(["load 2", "apply 3", "restart", "load 2", "apply 3"]);
+    // Refused again in the new thread: the refusal is the block's failure, with one restart.
+    refusals = 2;
+    made.asked.length = 0;
+    await expect(made.compute(at(5n, false))).rejects.toThrow(/block 5 cannot be applied in this ledger worker thread/);
+    expect(made.asked).toEqual(["load 4", "apply 5", "restart", "load 4", "apply 5"]);
+    // Any other failure of the apply is the block's, with no restart.
+    const failing = setup({}, { apply: async () => Promise.reject(new Error("the package failed")) });
+    await expect(failing.compute(at(3n, false))).rejects.toThrow(/the package failed/);
+    expect(failing.asked).toEqual(["load 2", "apply 3"]);
+    // Block 0: no state to load in the new thread.
+    refusals = 1;
+    const zero = setup({}, { genesis: refusing });
+    await zero.compute(at(0n, false));
+    expect(zero.asked).toEqual(["genesis 0", "restart", "genesis 0"]);
   });
 
   it("drops it when h + 1 does not continue h (h's COMMIT lost its answer, the writer's session replaced): h + 1 applied at its turn, no restart for the same input", async () => {

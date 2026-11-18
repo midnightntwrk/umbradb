@@ -41,8 +41,9 @@
 // By `stray` a flush also writes a node no raised key reaches (the flush rule broken), by `parseReads` a parse reads
 // a stored node through the node store the engine installed, then fails (the package has no transactions), and by
 // `applyReads` each apply reads a stored node through it.
-// The original DAG's package also takes `refuseKey` (an eviction naming one key refused) and `trapAt` (an apply that
-// traps), and serves the flip DAG (`dag: "flip"`).
+// The original DAG's package also takes `refuseKey` (an eviction naming one key refused), `trapAt` (an apply that
+// traps) and `releaseFailsAt` (the release of a state key that throws once a test armed it, after the engine persisted
+// the new state's key), and serves the flip DAG (`dag: "flip"`).
 // The one-form DAG (`dag: "one-form"`, the extended DAG without its rewrite cases) is served by the same package.
 // Erasable TypeScript only: the worker runs it through Node.js's type stripping.
 
@@ -66,6 +67,10 @@ export const COUNTERS = Object.freeze({
   evictions: 4,
   /** Parses that read a stored node ({@link FixtureData.parseReads}), counted before the read. */
   parseReads: 5,
+  /** Set to 1 by a test to arm {@link RefusalData.releaseFailsAt}; the package sets it back to 0 when it throws. */
+  releaseArmed: 6,
+  /** Releases that threw ({@link RefusalData.releaseFailsAt}). */
+  releaseFailures: 7,
 });
 
 /** The counters' memory: {@link COUNTERS}' slots. */
@@ -91,6 +96,12 @@ export interface RefusalData {
   readonly trapAt?: string;
   /** … in the first `trapThreads` threads that load it (every thread unless given). */
   readonly trapThreads?: number;
+  /**
+   * The original or the flip DAG only: after the apply of this height (decimal text), the first release of a key
+   * throws an ordinary error, once, when the test armed it ({@link COUNTERS}' `releaseArmed` set to 1): the engine has
+   * persisted the new state's key by then, and has flushed nothing, as when a package throws between the two.
+   */
+  readonly releaseFailsAt?: string;
 }
 
 /** How the package keeps the extended DAG's nodes (see the module comment). */
@@ -247,7 +258,13 @@ export async function loadLedger(ledger: LedgerName, _options: LedgerPackageOpti
       return { inserts, rootCounts };
     },
     persist: (key) => change(key, 1),
-    release: (key) => change(key, -1),
+    release: (key) => {
+      if (data?.releaseFailsAt === `${applied}` && Atomics.compareExchange(counters, COUNTERS.releaseArmed, 1, 0) === 1) {
+        Atomics.add(counters, COUNTERS.releaseFailures, 1);
+        throw new Error(`the sweep test package fails the release of ${hex(key)} after ${applied} (the test armed it)`);
+      }
+      change(key, -1);
+    },
     childRefs: (children) => {
       const refs: Uint8Array[] = [];
       for (let at = 1; at < children.length; at += 33) refs.push(children.slice(at + 1, at + 33));

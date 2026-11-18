@@ -163,10 +163,19 @@
  * worker to hold the state at h, lends its read while it awaits, and uses the result applied ahead when h + 1
  * continues h (`b.continues`), the worker thread is the same, the two inputs are equal and the apply did not fail;
  * otherwise it drops it and applies h + 1 at its turn, first restarting the thread when that thread holds the result
- * of another input (it would give it back for the same block). The result is dropped at once when h's `on-settle`
- * throws, and at the next `on-compute` when that block does not continue the one before (h made again, h's `COMMIT`
- * lost its answer, a replaced writer's session); a dropped result is kept only for that restart decision. The `core`
- * entry's `applyAhead` turns it off. The block trace marks `aheadUsed` and `aheadDropped`.
+ * of another input. The result is dropped at once when h's `on-settle` throws, and at the next `on-compute` when that
+ * block does not continue the one before (h made again, h's `COMMIT` lost its answer, a replaced writer's session); a
+ * dropped result is kept only for that restart decision, until h + 1 has been applied: an `on-compute` of h + 1 that
+ * fails before then and is run again still finds it. The settle of a height made again sends no second apply ahead to
+ * a thread that may hold the block from the first, and leaves what was kept. The `core` entry's `applyAhead` turns it
+ * off. The block trace marks `aheadUsed` and `aheadDropped`.
+ *
+ * **A block the worker's thread refuses at its turn.** The engine gives a pending block's result back only for the
+ * input it was applied from, and applies no block after an apply failed once its state was made
+ * (`../../ledger/worker/engine.ts`); in both cases it refuses with `ApplyNeedsNewThread`. `on-compute` then ends the
+ * thread, starts a new one, has it load the state at h − 1 from the database and applies the block there, once
+ * ({@link inANewThreadWhenRefused}). So what is kept of an apply ahead is not the only guard: a block is never given
+ * the result of another input, and never applied in a package that holds a part of a failed apply, whatever was kept.
  *
  * The declaration ({@link CORE_LEDGER_STATE}) is a constant built over its rules. A negative control's build composes
  * its own with {@link coreLedgerState}, with one rule replaced.
@@ -179,7 +188,14 @@ import type { BlockWriteHandle, ReadHandle } from "../../db/api.js";
 import { UmbraError } from "../../db/errors.js";
 import { firstRegularAtParentTime, parentTimestampMs } from "../../ledger/replay.js";
 import type { ChainOutcome, LedgerEvent, LedgerName, NodeBatch, StateSummary, TransactionResult, VmLog } from "../../ledger/types.js";
-import { type AppliedState, type ApplyBlock, type ContractKeys, convertsFromV8, isEvictionRefused } from "../../ledger/worker/engine.js";
+import {
+  type AppliedState,
+  type ApplyBlock,
+  type ContractKeys,
+  convertsFromV8,
+  isApplyNeedsNewThread,
+  isEvictionRefused,
+} from "../../ledger/worker/engine.js";
 import type { LedgerHost } from "../../ledger/worker/host.js";
 import { traceAdd, traceChain, tracedRead, traceMark, traceSteps, tracing } from "../../trace/trace.js";
 import {
@@ -437,9 +453,10 @@ export function countsCopyOf(p: ProcessContext): CountsCopy | null {
 }
 
 /**
- * The apply ahead each process context's last settle sent, until that block's `on-compute` (`./apply-ahead.ts`), and
- * whether its result may still be used: once dropped as a result it is kept only for what it says the worker may hold
- * pending, which decides whether the block's apply at its turn needs a new thread ({@link resultAhead}).
+ * The apply ahead each process context's last settle sent, until that block has been applied at its `on-compute`
+ * (`./apply-ahead.ts`), and whether its result may still be used: once dropped as a result it is kept only for what it
+ * says the worker may hold pending, which decides whether the block's apply at its turn needs a new thread
+ * ({@link resultAhead}).
  */
 const AHEAD = new WeakMap<ProcessContext, { readonly apply: AheadApply; readonly usable: boolean }>();
 
@@ -767,22 +784,22 @@ export async function applyBlock(
     const genesisState = await source.genesisState();
     const genesisRoot = await host.genesisRoot(ledger, genesisState);
     const includesBlockZero = (options.includesBlockZero ?? sameBytes)(genesisRoot, await nodeRoot);
-    applied = await host.genesis(
-      {
-        ledger,
-        ...block,
-        parentHash: b.parentHash,
-        timestampMs: header.timestampMs,
-        transactions: transactions.length,
-        ...(outcomes === undefined ? {} : { outcomes }),
-        genesisState,
-        includesBlockZero,
-      },
-      read,
-    );
+    const genesis = {
+      ledger,
+      ...block,
+      parentHash: b.parentHash,
+      timestampMs: header.timestampMs,
+      transactions: transactions.length,
+      ...(outcomes === undefined ? {} : { outcomes }),
+      genesisState,
+      includesBlockZero,
+    };
+    // A new thread holds no state, which is what block 0 is applied on.
+    applied = await inANewThreadWhenRefused(host, () => host.genesis(genesis, read), async () => undefined);
   } else {
-    // The result of b's apply ahead, sent by the settle of the block before, if any: taken now, used or dropped below.
-    const ahead = takeAhead(p, b);
+    // b's apply ahead, sent by the settle of the block before, if any: used or dropped below, and kept until b is
+    // applied, so that a failure before then leaves what it says the worker holds.
+    const ahead = aheadOf(p, b);
     // Sent with no read: while this callback awaits it, its node requests read through this callback's read, which on
     // PGlite holds the one queue. An apply ahead in a thread replaced since makes no request.
     const unlend = ahead === null || ahead.apply.restarts !== host.restarts ? null : host.lend(read as Pick<ReadHandle, "query">);
@@ -823,7 +840,9 @@ export async function applyBlock(
         contracts: persists ? contractsOf(transactions, ...others) : [],
       };
       const taken = ahead === null ? null : await resultAhead(p, b, ahead, input, options, loadParent);
-      applied = taken ?? (await host.apply(input, read));
+      applied = taken ?? (await inANewThreadWhenRefused(host, () => host.apply(input, read), loadParent));
+      // b is applied from `input`, which the worker holds pending now: its apply ahead says nothing more.
+      if (ahead !== null && AHEAD.get(p)?.apply === ahead.apply) AHEAD.delete(p);
     } finally {
       // Once no node request is still answered through this read, which ends with this callback.
       await unlend?.();
@@ -845,19 +864,35 @@ export async function applyBlock(
 }
 
 /**
- * The apply ahead `p`'s last settle sent, taken at `b`'s `on-compute` when it is `b`'s; null otherwise. One of the block
- * after `b` was sent by an attempt of `b` that did not commit, `b` being made again now: it is dropped as a result and
- * kept for what the worker holds, until the block after `b` (whose apply ahead `b`'s settle may send again) or a
- * settle that replaces it. Any other is dropped.
+ * `apply`'s result, the apply of a block at its turn; when the worker's thread refuses it (`ApplyNeedsNewThread`: the
+ * thread holds the block pending from another input, or an apply failed in it after its state was made,
+ * `src/ledger/worker/engine.ts`), the thread is ended, a new one started, the state before the block loaded in it
+ * (`reload`), and the block applied there, once.
  */
-function takeAhead(p: ProcessContext, b: BlockContext): { readonly apply: AheadApply; readonly usable: boolean } | null {
-  const ahead = AHEAD.get(p);
-  if (ahead !== undefined && ahead.apply.block.height === b.height + 1n) {
-    dropAhead(p);
-    return null;
+async function inANewThreadWhenRefused(host: LedgerHost, apply: () => Promise<AppliedState>, reload: () => Promise<void>): Promise<AppliedState> {
+  try {
+    return await apply();
+  } catch (error) {
+    if (!isApplyNeedsNewThread(error)) throw error;
+    await host.restart();
+    await reload();
+    return apply();
   }
-  AHEAD.delete(p);
-  return ahead !== undefined && ahead.apply.block.height === b.height ? ahead : null;
+}
+
+/**
+ * The apply ahead `p`'s last settle sent, at `b`'s `on-compute`, when it is of a block at `b`'s height; null otherwise.
+ * It stays `p`'s until `b` is applied ({@link applyBlock}): an `on-compute` that fails before then, and is run again,
+ * finds it. One of the block after `b` was sent by an attempt of `b` that did not commit, `b` being made again now: it is
+ * dropped as a result and kept for what the worker holds, until the block after `b`. Any other is dropped.
+ */
+function aheadOf(p: ProcessContext, b: BlockContext): { readonly apply: AheadApply; readonly usable: boolean } | null {
+  const ahead = AHEAD.get(p);
+  if (ahead === undefined) return null;
+  if (ahead.apply.block.height === b.height) return ahead;
+  if (ahead.apply.block.height === b.height + 1n) dropAhead(p);
+  else AHEAD.delete(p);
+  return null;
 }
 
 /**
@@ -894,6 +929,8 @@ async function resultAhead(
     return result;
   }
   traceMark("aheadDropped", 1);
+  // Never a result from here on, whatever becomes of this `on-compute`.
+  dropAhead(p);
   if (sameThread && !(result instanceof Error) && !sameInput) {
     await host.restart();
     await reload();
@@ -915,6 +952,11 @@ function sendAhead(p: ProcessContext, height: bigint, options: CoreLedgerStateOp
     if (kept === undefined || kept.height !== height) return;
     const next = binding.ahead(height + 1n);
     if (next === null || next.height !== height + 1n || !sameBytes(next.parentHash, kept.hash)) return;
+    // An apply ahead at that height sent in the worker's current thread (by an attempt of this height that did not
+    // commit): the thread may hold that block pending, from the input kept with it. Nothing is sent, and what is kept
+    // stays, dropped as a result: the block is applied at its turn, which compares its input with the one kept.
+    const sent = AHEAD.get(p);
+    if (sent !== undefined && sent.apply.block.height === next.height && sent.apply.restarts === binding.ledger.restarts) return;
     const built = aheadInputOf(p, next, kept, options);
     if (built === null) return;
     const input = ownedApplyInput(built);
