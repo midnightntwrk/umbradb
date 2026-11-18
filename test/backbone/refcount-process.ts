@@ -2,6 +2,7 @@ import { CORE_LEDGER_STATE_ID, type CoreLedgerStateOptions } from "../../src/bac
 import type { NodeBatch } from "../../src/ledger/types.js";
 import { type LedgerHost, startLedgerWorker } from "../../src/ledger/worker/host.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
+import type { FinalizedLoop, LoopInput } from "../../src/runner/loop.js";
 import { type FixtureDag, LAST } from "../ledger/fixtures/sweep-fixture.js";
 import type { FixtureData } from "../ledger/fixtures/sweep-test-loader.js";
 import type { ProcessDatabase } from "../runner/process-backends.js";
@@ -50,6 +51,8 @@ export interface DagRunOptions {
   readonly atLast?: (process: Ingest) => Promise<void>;
   /** The ledger worker as the process gets it: the recording one, wrapped by an instrument of the test's. */
   readonly worker?: (host: LedgerHost) => LedgerHost;
+  /** The process's finalized loop (one recording its points); the runner's unless given. */
+  readonly loop?: new (input: LoopInput) => FinalizedLoop;
 }
 
 /** What a run gave. */
@@ -107,6 +110,7 @@ export async function runDag(db: ProcessDatabase, options: DagRunOptions = {}): 
     user: [sweepWatcher(seen, record), ...(options.user ?? [])],
     ...(options.settings === undefined ? {} : { settings: options.settings }),
     ...(options.revisions === undefined ? {} : { revisions: options.revisions }),
+    ...(options.loop === undefined ? {} : { loop: options.loop }),
     ledgerWorker: () => {
       const recording = recordingWorker(startLedgerWorker({ loader: SWEEP_LOADER, loaderData: data }), record);
       host = options.worker === undefined ? recording : options.worker(recording);
