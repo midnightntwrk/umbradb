@@ -601,6 +601,107 @@ describe.each(BACKENDS)("write handles and their closing on $name", { timeout: 3
       expect(await rows(db, "b.t")).toEqual([{ k: 2n, who: "umbradb_m_b" }]);
     });
 
+    it("refuses a COMMIT behind an empty statement through a block write handle: what a failed callback wrote is not stored", async () => {
+      const { db, plan, login } = await setUp();
+      // The control, through the engine's own transaction, which is not checked: the server drops the empty statement
+      // and commits, so the row stays although the transaction's body failed.
+      await expect(
+        db.transaction(async (tx) => {
+          await tx.execute(INSERT_A, [1]);
+          await tx.execute("; COMMIT");
+          throw new Error("the body failed");
+        }),
+      ).rejects.toThrow("the body failed");
+      expect(await rows(db, "a.t")).toEqual([{ k: 1n, who: login }]);
+      // Through the block write handle it is refused before it is sent, and the block's rollback undoes the row.
+      let refused: UmbraError | undefined;
+      await expect(
+        block(db, plan, (writes) =>
+          writes.write("a", async (w) => {
+            await w.execute(INSERT_A, [2]);
+            refused = await failure(() => w.execute("; COMMIT"));
+            throw new Error("the callback failed");
+          }),
+        ),
+      ).rejects.toThrow("the callback failed");
+      expect(refused?.details).toEqual({ reason: "control-refused", command: "COMMIT" });
+      expect(await rows(db, "a.t")).toEqual([{ k: 1n, who: login }]);
+    });
+
+    it("refuses transaction control behind empty statements and a session authorization under a Unicode name, through both methods of a block and a schema write handle", async () => {
+      const { db, plan, login } = await setUp();
+      const spellings: readonly (readonly [string, string])[] = [
+        ["; COMMIT", "COMMIT"],
+        [";; ROLLBACK", "ROLLBACK"],
+        [" ; /* a comment */ ; SAVEPOINT s", "SAVEPOINT"],
+        ["; SET SESSION AUTHORIZATION umbradb_m_b", "SET SESSION AUTHORIZATION"],
+        ["SET U&\"session_authorization\" = 'umbradb_m_b'", "SET SESSION AUTHORIZATION"],
+        ["SET U&\"\\0073ession_authorization\" = 'umbradb_m_b'", "SET SESSION AUTHORIZATION"],
+        ["SET LOCAL U&\"!0073ession_authorization\" UESCAPE '!' = 'umbradb_m_b'", "SET SESSION AUTHORIZATION"],
+      ];
+      const refused: unknown[] = [];
+      const through = async (w: BlockWriteHandle | SchemaWriteHandle): Promise<void> => {
+        for (const [sql] of spellings) {
+          refused.push((await failure(() => w.execute(sql))).details);
+          refused.push((await failure(() => w.query(sql))).details);
+        }
+      };
+      await block(db, plan, (writes) =>
+        writes.write("a", async (w) => {
+          await through(w);
+          await w.execute(INSERT_A, [1]);
+        }),
+      );
+      await runOnStartDb(db, plan, "b", NO_HANDLES, async (w) => {
+        await through(w);
+        await w.execute(INSERT_B, [2]);
+      });
+      const once = spellings.flatMap(([, command]) => [command, command]);
+      expect(refused).toEqual([...once, ...once].map((command) => ({ reason: "control-refused", command })));
+      // Nothing was sent: both transactions committed under their roles, and the session is the login's.
+      expect(await rows(db, "a.t")).toEqual([{ k: 1n, who: "umbradb_m_a" }]);
+      expect(await rows(db, "b.t")).toEqual([{ k: 2n, who: "umbradb_m_b" }]);
+      expect(await db.transaction((tx) => tx.query("SELECT session_user::text AS login"))).toEqual([{ login }]);
+    });
+
+    it("accepts a statement prepared under the name transaction", async () => {
+      const { db, plan } = await setUp();
+      const seen: unknown[] = [];
+      await block(db, plan, (writes) =>
+        writes.write("a", async (w) => {
+          await w.execute("PREPARE transaction AS SELECT 7 AS n");
+          seen.push(await w.query("EXECUTE transaction"));
+          await w.execute("DEALLOCATE transaction");
+          await w.execute("PREPARE transaction (int) AS SELECT $1 + 1 AS n");
+          seen.push(await w.query("EXECUTE transaction (7)"));
+          await w.execute("DEALLOCATE transaction");
+        }),
+      );
+      expect(seen).toEqual([[{ n: 7 }], [{ n: 8 }]]);
+    });
+
+    it.each([
+      ["execute", "SELECT 1 AS one; COMMIT", []],
+      ["query", "SELECT 1 AS one; COMMIT", []],
+      ["execute", "SELECT $1::int AS one; COMMIT", [1]],
+      ["query", "SELECT $1::int AS one; COMMIT", [1]],
+    ] as const)("a text of two statements through %s is refused by the server (42601), and its COMMIT does not run: %s", async (method, sql, params) => {
+      const { db, plan } = await setUp();
+      let refused: UmbraError | undefined;
+      await expect(
+        block(db, plan, (writes) =>
+          writes.write("a", async (w) => {
+            await w.execute(INSERT_A, [1]);
+            refused = await failure(() => (method === "execute" ? w.execute(sql, [...params]) : w.query(sql, [...params])));
+            throw new Error("the callback failed");
+          }),
+        ),
+      ).rejects.toThrow("the callback failed");
+      expect(refused?.details.sqlstate).toBe("42601");
+      // Had the COMMIT run, the row written before it would be stored.
+      expect(await rows(db, "a.t")).toEqual([]);
+    });
+
     it("refuses a second callback started while one runs (in series), before it sends anything", async () => {
       const { db, plan } = await setUp();
       let refused: unknown;

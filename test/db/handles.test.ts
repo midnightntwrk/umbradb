@@ -138,6 +138,61 @@ for (const backend of BACKENDS) {
       expect(await db.read((read) => read.query("SELECT count(*) AS n FROM t.rows"))).toEqual([{ n: 0n }]);
     });
 
+    it("refuses transaction control behind empty statements and a session authorization under a Unicode name through a read handle, and the session keeps its login", async () => {
+      const role = "umbradb_handles_check";
+      const { db } = await backend.database(
+        `${TEST_SCHEMA} DO $$ BEGIN CREATE ROLE ${role} NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+        TEST_CURSOR,
+      );
+      const who = "SELECT current_user::text AS current_user, session_user::text AS session_user";
+      const [before] = await db.read((read) => read.query(who));
+      const spellings: readonly (readonly [string, string])[] = [
+        ["; COMMIT", "COMMIT"],
+        [";; ROLLBACK", "ROLLBACK"],
+        [" ; /* a comment */ ; SAVEPOINT s", "SAVEPOINT"],
+        [`; SET SESSION AUTHORIZATION ${role}`, "SET SESSION AUTHORIZATION"],
+        [`SET U&"session_authorization" = '${role}'`, "SET SESSION AUTHORIZATION"],
+        [`SET U&"\\0073ession_authorization" = '${role}'`, "SET SESSION AUTHORIZATION"],
+        [`SET LOCAL U&"!0073ession_authorization" UESCAPE '!' = '${role}'`, "SET SESSION AUTHORIZATION"],
+      ];
+      const seen = await db.read(async (read) => {
+        const refused: unknown[] = [];
+        for (const [sql] of spellings) refused.push((await failure(() => read.query(sql))).details);
+        return {
+          refused,
+          // Nothing was sent: the read's transaction is neither ended nor aborted, and still read-only.
+          who: await read.query(who),
+          insert: await failure(() => read.query("INSERT INTO t.rows VALUES (77, 'through a read handle')")),
+        };
+      });
+      expect(seen.refused).toEqual(spellings.map(([, command]) => ({ reason: "control-refused", command })));
+      expect(seen.who).toEqual([before]);
+      expect(seen.insert.details.sqlstate).toBe("25006");
+      expect(await db.read((read) => read.query(who))).toEqual([before]);
+      expect(await db.read((read) => read.query("SELECT count(*) AS n FROM t.rows"))).toEqual([{ n: 0n }]);
+    });
+
+    it("accepts a statement prepared under the name transaction through a read handle; a text of two statements is refused by the server (42601)", async () => {
+      const { db } = await backend.database(TEST_SCHEMA, TEST_CURSOR);
+      const executed = await db.read(async (read) => {
+        await read.query("PREPARE transaction AS SELECT 7 AS n");
+        const plain = await read.query("EXECUTE transaction");
+        await read.query("DEALLOCATE transaction");
+        await read.query("PREPARE transaction (int) AS SELECT $1 + 1 AS n");
+        const typed = await read.query("EXECUTE transaction (7)");
+        await read.query("DEALLOCATE transaction");
+        return [plain, typed];
+      });
+      expect(executed).toEqual([[{ n: 7 }], [{ n: 8 }]]);
+      for (const [sql, params] of [
+        ["SELECT 1 AS one; COMMIT", []],
+        ["SELECT $1::int AS one; COMMIT", [1]],
+      ] as const) {
+        const refused = await db.read((read) => failure(() => read.query(sql, [...params])));
+        expect(refused.details.sqlstate).toBe("42601");
+      }
+    });
+
     it("refuses a read handle used after its read ended (handle-closed)", async () => {
       const { db } = await backend.database(TEST_SCHEMA, TEST_CURSOR);
       const kept = await db.read(async (read) => read);

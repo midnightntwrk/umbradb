@@ -91,6 +91,35 @@ describe("the PGlite exclusive job", () => {
     await expect(kept?.(async () => "ran")).rejects.toMatchObject({ code: "handle-closed" });
   });
 
+  it("refuses transaction control and a session authorization through the job's reads before sending them, and the read goes on", async () => {
+    const spellings: readonly (readonly [string, string])[] = [
+      ["COMMIT", "COMMIT"],
+      ["; COMMIT", "COMMIT"],
+      ["SAVEPOINT s", "SAVEPOINT"],
+      ["SET SESSION AUTHORIZATION DEFAULT", "SET SESSION AUTHORIZATION"],
+      ['SET U&"session_authorization" TO DEFAULT', "SET SESSION AUTHORIZATION"],
+    ];
+    const seen = await exclusiveJob(db, ({ read }) =>
+      read(async (r) => {
+        const refused: unknown[] = [];
+        for (const [sql] of spellings) {
+          refused.push(
+            await r.query(sql).then(
+              () => "resolved",
+              (error: { code?: unknown; details?: unknown }) => [error.code, error.details],
+            ),
+          );
+        }
+        // Nothing was sent: the read's transaction is open and read-only.
+        return { refused, next: await r.query("SELECT current_setting('transaction_read_only') AS read_only") };
+      }),
+    );
+    expect(seen).toEqual({
+      refused: spellings.map(([, command]) => ["database-error", { reason: "control-refused", command }]),
+      next: [{ read_only: "on" }],
+    });
+  });
+
   it("passes its body's error on, the session reset and the queue running on", async () => {
     const failure = new Error("the body failed");
     await expect(
