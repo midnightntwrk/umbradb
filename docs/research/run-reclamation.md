@@ -482,9 +482,11 @@ Each key costs one index lookup, whose depth grows with the logarithm of the tab
 test holds the count of reads to this: the same run on its tables, and on those tables with 3,000 rows more that it
 does not touch, asks for the same keys.
 
-The keys known to be rows are a set made for the run unless the caller gives one (`KnownKeySet`), dropped with it;
-step 3 asks the database only about the keys it does not hold, and the run's deleted keys leave it. A set made for
-the run holds nothing when step 3 asks, so it saves no read on its own.
+The keys known to be rows (`KnownKeySet`) are the set `core-ledger-state` keeps from one run to the next (section
+5.6); a caller that gives none gets a set made for the run. Step 3 asks the database only about the keys the set
+does not hold and teaches it those the `missing` read finds stored, and the run's deleted keys leave it (step 10). A
+block's references are mostly those of the blocks before it, so with the set kept the `missing` read asks about the
+keys no earlier run found stored, and none at a block whose needed keys the set holds.
 
 The deletions are a net change, not a pass: the rows a run deletes are the rows the per-block step deletes over the
 same heights and does not write again. Three blocks delete a lot at once either way: the block after a conversion
@@ -597,7 +599,7 @@ engine passes a run of one block, so below the run is block h, and its settle ha
 | R(h) | `root_counts` as h's `on-db-write` left it: `writeBlockRows` writes the root-count changes first |
 | R(h − 1) | R(h) less h's own changes (section 4.2) |
 | `nodes`, `ref_counts`, `unreferenced` after h − 1 | the block's transaction at `on-settle` (`sqlRunTables` over the block write handle): no statement of h wrote them before, since `on-db-write` writes the block's own rows only |
-| The keys known stored | a set made for the run and dropped with it (`RunReclaim.compute`'s default) |
+| The keys known stored | the set the process context keeps between settles (`knownKeysOf`, section 5.6) |
 
 The record is made at h's `on-compute` unless the one held expects h, and dropped at `on-settle` whatever happens
 (`settleRun`). `on-settle` refuses a run the record does not cover. A block made again after a failure finds the
@@ -667,7 +669,8 @@ may have committed or not: the cursor read on the writer after the reconnection 
   key. Section 4.9 lists where a run of one block still differs from the step.
 - The trace (`core-ledger-state.ts`'s `traceSettle`): one link of `sh` per settle (the run's heights, its net write,
   the keys evicted, the rounds), `st` in the step's nine positions from the outcome, `collectMs` at `on-compute`, and
-  `stepMs`, `evictMs`, the reads and `writeRefcountMs` inside the block's transaction.
+  `stepMs`, `evictMs`, the reads, `knownHits`, `knownEmptied` (section 5.6) and `writeRefcountMs` inside the block's
+  transaction.
 - `test/backbone/ledger-refcount-settle.test.ts` holds the order of 5.2 at every block, the lent handle of 5.2 on
   both backends, the tables after every block to `refcount-step.ts` over the tables after h − 1 and h's recorded
   flush, the refusal of 5.3 alone and followed by a lost connection, a refused eviction against the per-block build
@@ -675,3 +678,58 @@ may have committed or not: the cursor read on the writer after the reconnection 
   `test/backbone/ledger-refcount-settle-lifecycle.test.ts` a stop and a pause asked for while the eviction is
   awaited, and a lost `COMMIT` answer both ways; the tape replays (`test/backbone/refcount-tapes.ts`) hold the
   reference at their sampled heights.
+
+### 5.6 The keys found stored, from one settle to the next
+
+`core-ledger-state` keeps, for each process context, the keys the computation's `missing` read found stored
+(`stored-keys.ts`, `StoredKeys`, through `knownKeysOf`), and gives that set to the computation of each run. A process
+context is one database. The set holds keys as their text (section 4.5), learned only from the `missing` read: step 3
+learns the keys it asked that the read did not answer missing, never a key from what a run writes.
+
+**What it holds.** A key in the set was a row of `nodes` when a settle of this process found it stored; the settles
+since then all committed, on the writer's session that committed the one before; and none of them deleted it. Step 10
+takes every key a run deletes out of the set before the net write, whose `DELETE` (`sql.ts`'s `deleteNodes`) is the
+only statement in `src/` that deletes rows of `nodes`; that covers the cascade's candidates that are no row (on damaged
+tables) too. A key wrongly held would let a block whose child list references a missing node pass step 3's check and
+commit; a key missing from the set costs one read. So the set is used only while that holds:
+
+| Event | The set | Why |
+|---|---|---|
+| A run deletes a key | the key leaves it, in step 10, before the net write | the net write's `DELETE` is the only statement that deletes rows of `nodes` |
+| A block whose context says the block before does not continue into it (`b.continues` false): a process's first block, every block made again after a failure (a rollback, a lost connection, a `COMMIT` that did not land), the block after a `COMMIT` whose answer was lost, a block on another writer's session than the one that committed the block before | emptied at the block's `on-compute`, before it is handed over | nothing the set learned is known to hold: the block before may have rolled back, or another writer may have held the database in between (below) |
+| `on-settle` throws (a check, a refusal with restarts off, a failed read or write) | emptied before the error goes on | nothing a failed settle learned is kept; the block made again does not continue either |
+| The process restarts | a new process context: empty | the set is the context's |
+| A restore | the process after it starts empty | `umbradb restore` loads an empty database that no process holds (`src/backup/restore.ts`) |
+| `sweep` off, then on | nothing | a run that does not sweep deletes nothing, and the switch writes no row |
+| A worker restart after a refused eviction | nothing | it changes no table |
+| A read through the block transaction's handle lent to the worker while the eviction is awaited | nothing | it reads; the set is not told |
+| The set reaches its bound | emptied before the key that would pass it | it never holds more than its bound |
+| A node row deleted by hand while the process runs | not seen until a block does not continue the one before | only `core-ledger-state` writes `nodes`; a hand edit is damage to the tables, as a lost count row is (section 4.9) |
+
+**Another writer.** A `COMMIT` whose answer was lost is decided by the cursor read after the reconnection, and a
+cursor at h with h's hash is taken as h committed (section 5.4). Another process may have committed h in between: one
+that took the writer lock while this process was away, with a configuration that sweeps at h, and deleted keys this
+process's set holds, then released the lock. The block after h does not continue (the engine sets `continues` only
+after a `COMMIT` answered in the same run of the loop), so the set is emptied before it is used, and a reference to a
+key the other writer deleted halts with `missing-reference`, as it would without the set.
+
+**The bound.** At most 500,000 keys (`KNOWN_KEYS_MAX`): a key that would take the set past it empties it first, so it
+never holds more. Emptying, not closing it to new keys, since a block's references are mostly those of the blocks just
+before it. Filled with 500,000 random 32-byte keys, the set holds 32.9 MiB of heap (69 bytes a key, Node.js 24.9;
+`heapUsed` before and after, with garbage collection forced).
+
+**The trace.** `knownHits`: the keys step 3 needed that the set answered, which the `missing` read then does not ask.
+`knownEmptied`: 1 on the line of a height whose settle did not start from what earlier heights learned: its block did
+not continue the block before (a process's first height among them), or the bound emptied the set while it ran. Every
+attempt of a height after a failure does not continue, so the attempt that commits, the only one whose line is kept,
+says so, whatever the attempts before it did. `st` and `sh` do not change: the set changes no output.
+
+**Tests.** `test/backbone/known-keys.test.ts` (the bound, the reads asked through the computation, a key whose row was
+deleted by hand forgotten as a candidate that is no row, and three runs on one set: a key found stored, deleted by the
+second, referenced by the third without a flush halts the third, and its control, `deleted-kept-known`, passes it);
+`test/backbone/known-keys-bound.test.ts` (a read finding more keys stored than the set has room for);
+`test/backbone/stored-keys.test.ts` (on its own; each emptying through the module's callbacks on PostgreSQL and
+PGlite; lost connections through the process; on PostgreSQL a `COMMIT` lost before and after the server, and another
+writer committing the height while this process's `COMMIT` of it is lost, with its control);
+`test/backbone/ledger-refcount-halts.test.ts` and its negative control (the three-run case through the process);
+`test/trace/traced-process.test.ts` (each height's `missing` read and `knownHits` against a model of the set).
