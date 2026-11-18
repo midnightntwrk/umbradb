@@ -222,7 +222,8 @@ export const ERROR_CODES = [
    * - `unreached-node`: a node the block writes new, or with another child list, is reached from no key whose root
    *   count the block raises (the ledger package's flush rule);
    * - `unexpected-queued`: a node would be left stored with no reference and no root count that the block neither
-   *   released nor dropped from a child list it replaced;
+   *   released nor dropped from a child list it replaced: a guard of the reclamation's own computation, which its
+   *   rules leave unreached in a build;
    * - `row-count-mismatch`: a write of the block affected another number of rows than computed, and its transaction
    *   rolled back;
    * - `tables-inconsistent`: the contents hash, reading the node tables, found a row whose key is not its content's, or

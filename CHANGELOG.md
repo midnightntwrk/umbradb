@@ -190,10 +190,11 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   commits; the next block loads the state from the database, and the refusal itself has no block applied again. The
   computation assumes undamaged count tables: on tables that lost a count row a block can commit where the earlier
   per-block step halted, and the damage is found by a later block (`ledger-refcount-invalid`) or by a backup's contents
-  check. A reclamation check halts in `on-settle`, its details naming the run's `first` and `last` heights, and two more
-  reasons can halt it, `unreached-node` and `unexpected-queued`. In the block trace `stepMs`, `evictMs` and `reads` (now
-  also `missing` and `queued`) are inside `txMs`, `writeBlockMs` is the block's own rows, `writeRefcountMs` the whole
-  net write, `sh` has one link per run, and `collectMs` and `evictRefused` are new; the operator guide lists them.
+  check. A reclamation check halts in `on-settle`, its details naming the run's `first` and `last` heights, and a block
+  that breaks the ledger package's flush rule halts it too (`unreached-node`). In the block trace `stepMs`, `evictMs`
+  and `reads` (now also `missing` and `queued`) are inside `txMs`, `writeBlockMs` is the block's own rows,
+  `writeRefcountMs` the whole net write, `sh` has one link per run, and `collectMs` and `evictRefused` are new; the
+  operator guide lists them.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 
