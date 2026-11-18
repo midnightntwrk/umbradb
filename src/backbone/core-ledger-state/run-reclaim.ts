@@ -64,6 +64,10 @@
  * it. `core-ledger-state` keeps one set for each process context from one run to the next, bounded
  * (`./stored-keys.ts`); a caller that gives none gets a set made for the run.
  *
+ * **The counts and child lists kept between runs** are not the computation's: `core-ledger-state` gives it tables
+ * whose `counts` and `children` reads a copy answers where it holds the key (`./counts-copy.ts`), the copy brought up
+ * to date from each run's outcome; {@link RunReclaim.rootChanges} gives the copy the run's root-count changes.
+ *
  * **Each key in one form.** A key is made into text once, where it enters (a flushed node's key, a reference in a
  * child list, a root-count change, a row a read returns): its 32 bytes as 32 characters, one per byte, whose order is
  * the bytes'. Each distinct key has one record, found by that text, holding everything the computation knows of it;
@@ -256,7 +260,10 @@ export interface RunTables {
   counts(
     keys: readonly Uint8Array[],
   ): Promise<readonly { readonly key: Uint8Array; readonly row: boolean; readonly refs: number; readonly roots: number }[]>;
-  /** The stored child lists of those of `keys` that `nodes` holds. */
+  /**
+   * The stored child lists of those of `keys` that `nodes` holds. The computation takes only a list's references, so a
+   * list of the same references by reference, payload left out, is the same to it (`./counts-copy.ts` answers so).
+   */
   children(keys: readonly Uint8Array[]): Promise<readonly { readonly key: Uint8Array; readonly children: Uint8Array }[]>;
 }
 
@@ -529,6 +536,17 @@ export class RunReclaim {
    */
   get heights(): { readonly first: bigint; readonly last: bigint } | undefined {
     return this.#next === this.first ? undefined : { first: this.first, last: this.#next - 1n };
+  }
+
+  /**
+   * Each key's root-count change summed over the blocks handed over, by its text ({@link keyText}), where the sum is not
+   * 0: what the run's blocks added to `root_counts`. A copy of the counts held as after the settle before the run
+   * answers a root count as after its last block by adding it (`./counts-copy.ts`).
+   */
+  get rootChanges(): ReadonlyMap<string, number> {
+    const changes = new Map<string, number>();
+    for (const record of this.#records.values()) if (record.rootChange !== 0) changes.set(record.text, record.rootChange);
+    return changes;
   }
 
   /** `ledger-refcount-invalid` at block `height` of the run that ends, so far, at block `last`. */

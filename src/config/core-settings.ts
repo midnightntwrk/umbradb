@@ -205,6 +205,13 @@ const BASE = {
   readinessLag: count().optional().meta(OPERATIONAL),
   fullPageWritesOffAllowed: z.boolean().default(false).meta(OPERATIONAL),
   developmentOptIn: z.boolean().default(false).meta(OPERATIONAL),
+  // `core-ledger-state`'s copy of the counts and child lists its reclamation reads: at most how many keys of each (0: no
+  // copy), and whether every key it answers is also read from the database. Operational: what is stored does not
+  // depend on it.
+  reclamationCache: z
+    .strictObject({ keys: count().default(100_000), verify: z.boolean().default(false) })
+    .prefault({})
+    .meta(OPERATIONAL),
 };
 
 /** `genesisHash` is required with the network `custom`, and only then. */

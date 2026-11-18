@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { LAST, REQUEUE } from "../ledger/fixtures/sweep-fixture.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
+import { VERIFY_RECLAMATION_ENV } from "../runner/process-build.js";
 import { PATIENCE_MS } from "./ingest-harness.js";
 import {
   databaseNow,
@@ -27,7 +28,9 @@ import {
  *   block's transaction before `on-settle`, so that its computation reads the tables after h − 1 and the crash point
  *   is reached), crashed between the two commits at REQUEUE + 1, is detected: the database the crash left is a mix (`ref_counts` and `unreferenced` after h, the rest after
  *   h − 1, its contents hash refused with `ledger-refcount-invalid`), and after the restart the node sets differ from
- *   h on.
+ *   h on, until h + 8 halts with `row-count-mismatch`: `core-ledger-state`'s copy of the counts takes a node new at h
+ *   in with h's count change as its count, while the mix holds that change twice, and at h + 8 the count merge
+ *   affects more rows than computed (a verifying copy halts at h + 7 with `copy-mismatch`).
  */
 
 /** How long one segment on the DAG fixture may take on a loaded machine. */
@@ -95,7 +98,12 @@ describe.each(PROCESS_BACKENDS)("negative controls, on $name", (backend: Process
       expect.stringMatching(/^the database the crash left refused its contents hash: /),
     ]);
     const restarted = await runSegment(db, await jobFor(db, plan), SEGMENT_MS);
-    expect(restarted.ended).toMatchObject({ why: "last", cursor: `${LAST}` });
+    // The copy of the counts holds a node new at h with h's change as its count, while the mix holds that change twice:
+    // a later count merge affects more rows than computed, and the run halts there. A verifying copy
+    // (UMBRADB_TEST_VERIFY_RECLAMATION=1) halts one block sooner, at the first read of such a key.
+    const [halt, reason] = process.env[VERIFY_RECLAMATION_ENV] === "1" ? [h + 7, "copy-mismatch"] : [h + 8, "row-count-mismatch"];
+    expect(restarted.ended).toMatchObject({ why: "ended", state: "halted", cursor: `${halt - 1}` });
+    expect(restarted.ended).toMatchObject({ log: expect.arrayContaining([expect.stringMatching(new RegExp(`at height ${halt} in on-settle .*\\(${reason}\\)$`))]) });
     // Detected after the restart: the restarted block counts its references again, so its deletions and the node set
     // differ from the uninterrupted run's from h on.
     const problems = restartProblems(observedRun(plan.observe), expected, "extended", LAST);

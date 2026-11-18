@@ -91,6 +91,11 @@ export type CoreSettingsBase = {
   /** The durability probe's override, passed to `openPostgres`. */
   readonly fullPageWritesOffAllowed?: boolean;
   readonly developmentOptIn?: boolean;
+  /**
+   * `core-ledger-state`'s copy of the counts and child lists its reclamation reads: the keys it holds at most of each
+   * (100,000; 0 for no copy), and `verify`, which also reads every key it answers and halts on a difference.
+   */
+  readonly reclamationCache?: { readonly keys?: number; readonly verify?: boolean };
 };
 
 /** The public (core) process's `core` entry: `node` and `lockstepInstances`, none of a private one's fields. */

@@ -28,11 +28,7 @@ import type { CheckedConfig, CheckedEntry } from "./validate.js";
  * `versionEntry`. Nothing then gives the process a validated `database`, `node` or any other operational field.
  */
 export function processCoreEntry(config: CheckedConfig): CheckedEntry {
-  const own = config.entries.filter((entry) => entry.id === CORE_ENTRY_ID && entry.buildVersion);
-  const latest = own.reduce<CheckedEntry | undefined>(
-    (found, entry) => (found === undefined || entry.start > found.start ? entry : found),
-    undefined,
-  );
+  const latest = latestBuildCoreEntry(config);
   if (latest !== undefined) return latest;
   const where = config.file === null ? "the configuration" : `the configuration ${config.file}`;
   throw new UmbraError(
@@ -43,4 +39,13 @@ export function processCoreEntry(config: CheckedConfig): CheckedEntry {
       "another version; add coreEntry({ start, config }) for this build",
     { file: config.file, reason: "no-build-core-revision" },
   );
+}
+
+/**
+ * The revision {@link processCoreEntry} takes, or undefined when the configuration has none: for a reader of an
+ * operational setting that has defaults of its own (`core-ledger-state`'s `reclamationCache`).
+ */
+export function latestBuildCoreEntry(config: Pick<CheckedConfig, "entries">): CheckedEntry | undefined {
+  const own = config.entries.filter((entry) => entry.id === CORE_ENTRY_ID && entry.buildVersion);
+  return own.reduce<CheckedEntry | undefined>((found, entry) => (found === undefined || entry.start > found.start ? entry : found), undefined);
 }

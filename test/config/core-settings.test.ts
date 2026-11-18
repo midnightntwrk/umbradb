@@ -59,6 +59,9 @@ const BASE: Readonly<Record<string, readonly [string, Absent]>> = {
   readinessLag: ["operational", "absent"],
   fullPageWritesOffAllowed: ["operational", { default: false }],
   developmentOptIn: ["operational", { default: false }],
+  // core-ledger-state's copy of the counts and child lists its reclamation reads: at most how many keys, and whether
+  // every read is also made on the database.
+  reclamationCache: ["operational", { default: { keys: 100_000, verify: false } }],
 };
 
 const PUBLIC: Readonly<Record<string, readonly [string, Absent]>> = {
@@ -123,6 +126,27 @@ describe("the core entry's fields, kinds and defaults", () => {
     expect([0, MAX_READ_TIMEOUT_MS + 1, 1.5, "1000"].map(read)).toEqual([false, false, false, false]);
   });
 
+  it("reclamationCache: keys a whole number from 0 (0: no copy), verify a boolean, each defaulted alone, nothing else", () => {
+    const cache = (value: unknown) => PUBLIC_CORE_SCHEMA.safeParse({ ...REQUIRED_PUBLIC, reclamationCache: value }).success;
+    expect([{}, { keys: 0 }, { keys: 1, verify: true }, { verify: false }, { keys: 2 ** 53 - 1 }].map(cache)).toEqual([true, true, true, true, true]);
+    expect([{ keys: -1 }, { keys: 1.5 }, { keys: "100000" }, { verify: "yes" }, { verify: 1 }, { size: 1 }, 100_000, null].map(cache)).toEqual([
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]);
+    const parsed = (value: unknown) => (PUBLIC_CORE_SCHEMA.parse({ ...REQUIRED_PUBLIC, reclamationCache: value }) as { reclamationCache: unknown }).reclamationCache;
+    expect([parsed({ verify: true }), parsed({ keys: 30 })]).toEqual([
+      { keys: 100_000, verify: true },
+      { keys: 30, verify: false },
+    ]);
+    expect(PRIVATE_CORE_SCHEMA.safeParse({ ...REQUIRED_PRIVATE, reclamationCache: { keys: -1 } }).success).toBe(false);
+  });
+
   it("accepts every field of the table, given, for a public and a private process", () => {
     expect(
       PUBLIC_CORE_SCHEMA.safeParse({
@@ -153,6 +177,7 @@ describe("the core entry's fields, kinds and defaults", () => {
         readinessLag: 10,
         fullPageWritesOffAllowed: true,
         developmentOptIn: true,
+        reclamationCache: { keys: 0, verify: true },
       }).error,
     ).toBeUndefined();
     expect(

@@ -156,8 +156,20 @@ const TEST_NETWORK = Object.freeze({
  */
 export function coreSettings(database: DatabaseParts, extra: Readonly<Record<string, unknown>> = {}): Record<string, unknown> {
   const network = extra.network === undefined || extra.network === "custom" ? TEST_NETWORK : {};
-  return { ...network, database, node: "ws://127.0.0.1:9/node", developmentOptIn: true, ...extra };
+  return { ...network, database, node: "ws://127.0.0.1:9/node", developmentOptIn: true, ...VERIFYING, ...extra };
 }
+
+/** The environment variable that has `core-ledger-state`'s copy verify in every test process. */
+export const VERIFY_RECLAMATION_ENV = "UMBRADB_TEST_VERIFY_RECLAMATION";
+
+/**
+ * With `UMBRADB_TEST_VERIFY_RECLAMATION=1`, every process these tests start has `reclamationCache.verify` on, unless the
+ * test sets `reclamationCache` itself: each count and child list the copy answers is also read from the database, and
+ * a difference halts the block (`src/backbone/core-ledger-state/counts-copy.ts`). A run of the suites with it set shows
+ * whether any test's history makes the copy differ. No workflow of the repository sets it: such a run is made by hand.
+ */
+const VERIFYING: Readonly<Record<string, unknown>> =
+  process.env[VERIFY_RECLAMATION_ENV] === "1" ? { reclamationCache: { verify: true } } : {};
 
 /** A `core` entry from `start`: `coreEntry` with {@link coreSettings}. */
 export function core(database: DatabaseParts, start = 1, rest: { readonly stop?: number; readonly extra?: Readonly<Record<string, unknown>> } = {}) {

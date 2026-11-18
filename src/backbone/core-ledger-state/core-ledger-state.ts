@@ -144,6 +144,14 @@
  * key a run deletes leaves them before the net write, and they are emptied when a settle throws, before the error
  * goes on. At most 500,000 keys: a key that would pass that empties them first.
  *
+ * **The counts and child lists kept** ({@link countsCopyOf}, `./counts-copy.ts`). For each process context, a copy of
+ * the counts the computation's `counts` read gave and of the child lists of the nodes its runs wrote, as the tables are
+ * after the last settle, so that a settle reads from the database only the counts and lists the copy lacks. After the
+ * net write it is brought up to date from the run's outcome. It is emptied at the same events as the keys found stored
+ * (a block that does not continue the one before, at its `on-compute`; a settle that throws, at once) and by its bound,
+ * the `core` entry's `reclamationCache.keys` (100,000 keys of counts and as many lists; 0 for no copy). With
+ * `reclamationCache.verify` every key it answers is also read, and a difference halts with `copy-mismatch`.
+ *
  * The declaration ({@link CORE_LEDGER_STATE}) is a constant built over its rules. A negative control's build composes
  * its own with {@link coreLedgerState}, with one rule replaced.
  */
@@ -186,6 +194,7 @@ import {
   stateAt,
   stateKeysByHeight,
 } from "./sql.js";
+import { type CopyCounted, type CopyFault, CountsCopy, reclamationCacheOf, withCountsCopy } from "./counts-copy.js";
 import { StoredKeys } from "./stored-keys.js";
 import {
   type KnownKeys,
@@ -324,6 +333,8 @@ export interface CoreLedgerStateOptions {
    * changes a value.
    */
   readonly keep?: (kept: KeptBlock) => KeptBlock;
+  /** A fault put into the use of the copy of the counts and child lists (`./counts-copy.ts`); none in a build. */
+  readonly copyFault?: CopyFault;
 }
 
 const hex = (bytes: Uint8Array): string => `0x${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
@@ -368,16 +379,41 @@ export function knownKeysOf(p: ProcessContext): StoredKeys {
   return keys;
 }
 
+/**
+ * The copy of the counts and child lists each process context keeps from one run to the next (see the module comment);
+ * null where the `core` entry's `reclamationCache.keys` is 0.
+ */
+const COPIES = new WeakMap<ProcessContext, CountsCopy | null>();
+
+/**
+ * The copy of the counts and child lists that `core-ledger-state` keeps for `p` (`./counts-copy.ts`), made empty at its
+ * first use with the process's `reclamationCache`; null when that setting's `keys` is 0.
+ */
+export function countsCopyOf(p: ProcessContext): CountsCopy | null {
+  let copy = COPIES.get(p);
+  if (copy === undefined) {
+    const cache = reclamationCacheOf(configOf(p));
+    copy = cache.keys === 0 ? null : new CountsCopy(cache);
+    COPIES.set(p, copy);
+  }
+  return copy;
+}
+
 /** The `core` revisions of each process context, read once from its `config` item. */
 const REVISIONS = new WeakMap<ProcessContext, readonly CoreRevision[]>();
+
+/** `p`'s `config` item (`core-chain`'s); throws when there is none. */
+function configOf(p: ProcessContext): Pick<CheckedConfig, "entries"> {
+  const config = p.items.get("config") as Pick<CheckedConfig, "entries"> | undefined;
+  if (config === undefined) throw new Error("core-ledger-state ran without the config item (core-chain's), which it requires");
+  return config;
+}
 
 /** The `core` revisions of `p`'s configuration (the `config` item, `./retention.ts`). */
 export function revisionsOf(p: ProcessContext): readonly CoreRevision[] {
   let revisions = REVISIONS.get(p);
   if (revisions === undefined) {
-    const config = p.items.get("config") as Pick<CheckedConfig, "entries"> | undefined;
-    if (config === undefined) throw new Error("core-ledger-state ran without the config item (core-chain's), which it requires");
-    revisions = Object.freeze(coreRevisionsOf(config));
+    revisions = Object.freeze(coreRevisionsOf(configOf(p)));
     REVISIONS.set(p, revisions);
   }
   return revisions;
@@ -819,8 +855,8 @@ function handOver(p: ProcessContext, height: bigint, flushed: NodeBatch, options
 
 /**
  * Block `b`'s `on-compute` work (see the module comment): the block is applied and its root checked, and its flush is
- * handed over to the run record of `p`, the keys found stored emptied first unless the block before continues into
- * `b`. No statement touches the node tables.
+ * handed over to the run record of `p`, the keys found stored and the copy of the counts and child lists emptied first
+ * unless the block before continues into `b`. No statement touches the node tables.
  */
 export async function computeBlock(
   p: ProcessContext,
@@ -834,6 +870,7 @@ export async function computeBlock(
   traceMark("tx", applied.output.results.length);
   const collectFrom = performance.now();
   knownKeysOf(p).begin(b.continues);
+  countsCopyOf(p)?.begin(b.continues || options.copyFault === "kept-after-failure");
   handOver(p, b.height, applied.batch, options);
   traceAdd("collectMs", performance.now() - collectFrom);
   return { applied };
@@ -842,9 +879,11 @@ export async function computeBlock(
 /**
  * `core-ledger-state`'s `on-settle` for the heights `run` (see the module comment), `w` the block write handle of the
  * transaction that holds the run's last block: the run record's computation over the node tables as `w` holds them,
- * with the keys found stored that `p` keeps ({@link knownKeysOf}), the eviction of what it deletes, awaited, then the
- * net write. The record is dropped whatever happens; when anything throws, the keys found stored are emptied before the
- * error goes on.
+ * with the keys found stored that `p` keeps ({@link knownKeysOf}) and its `counts` and `children` reads answered from
+ * the copy of the counts and child lists where it holds the key ({@link countsCopyOf}), the eviction of what it
+ * deletes, awaited, then the net write, after which the copy is brought up to date from the outcome. The record is
+ * dropped whatever happens; when anything throws, the keys found stored and the copy are emptied before the error goes
+ * on.
  *
  * When the package still refuses the eviction after the worker freed what it can (`EvictionRefused`), the worker
  * thread is ended and a new one started, and the net write goes on: the eviction is sent once per attempt of the height.
@@ -858,6 +897,7 @@ export async function settleRun(
 ): Promise<RunOutcome> {
   const record = RUNS.get(p);
   const keys = knownKeysOf(p);
+  const copy = countsCopyOf(p);
   try {
     const handed = record?.heights;
     if (record === undefined || handed === undefined || handed.first !== run.first || handed.last !== run.last) {
@@ -867,13 +907,19 @@ export async function settleRun(
       );
     }
     const stepFrom = performance.now();
-    const tables = sqlRunTables(w);
+    const sql = sqlRunTables(w);
+    // The copy over the traced tables, so that the trace's reads are the database's.
+    const read = tracing() ? tracedRunTables(sql) : sql;
+    const rootChanges = copy === null ? new Map<string, number>() : record.rootChanges;
+    const counted: CopyCounted = { hits: 0, misses: 0 };
+    const tables =
+      copy === null
+        ? read
+        : withCountsCopy(read, copy, { height: run.last, rootChanges, counted, ...(options.copyFault === undefined ? {} : { fault: options.copyFault }) });
     const hits = { count: 0 };
     const emptiedBefore = keys.known.emptied;
-    const outcome = await record.compute(
-      tracing() ? tracedRunTables(tables) : tables,
-      tracing() ? countingHits(keys.known, hits) : keys.known,
-    );
+    const copyEmptiedBefore = copy?.emptied ?? 0;
+    const outcome = await record.compute(tables, tracing() ? countingHits(keys.known, hits) : keys.known);
     const evictFrom = performance.now();
     let refused = false;
     if (outcome.evict.length > 0) {
@@ -898,18 +944,26 @@ export async function settleRun(
       nodes: options.nodeWriter?.(w, run.last) ?? w,
     });
     traceAdd("writeRefcountMs", performance.now() - netFrom);
+    if (copy !== null && options.copyFault !== "net-not-applied") copy.apply(outcome, rootChanges);
     const afresh = keys.settled(emptiedBefore);
+    const copyAfresh = copy?.settled(copyEmptiedBefore) === true;
     if (tracing()) {
       traceAdd("stepMs", evictFrom - stepFrom);
       traceAdd("evictMs", netFrom - evictFrom);
       if (refused) traceMark("evictRefused", 1);
       traceMark("knownHits", hits.count);
       if (afresh) traceMark("knownEmptied", 1);
+      if (copy !== null) {
+        traceMark("copyHits", counted.hits);
+        traceMark("copyMisses", counted.misses);
+        if (copyAfresh) traceMark("copyEmptied", 1);
+      }
       traceSettle(run, outcome);
     }
     return outcome;
   } catch (error) {
     keys.failed();
+    copy?.failed();
     throw error;
   } finally {
     RUNS.delete(p);
@@ -934,7 +988,8 @@ function countingHits(known: KnownKeys, hits: { count: number }): KnownKeys {
 
 /**
  * The computation's reads, each recorded in the block trace (`src/trace/trace.ts`) by its name. They are the
- * database's: `missing` is given the keys the set of keys found stored did not answer.
+ * database's: `missing` is given the keys the set of keys found stored did not answer, and `counts` and `references`
+ * the keys the copy of the counts and child lists did not hold (verifying, every key).
  */
 function tracedRunTables(tables: RunTables): RunTables {
   return {

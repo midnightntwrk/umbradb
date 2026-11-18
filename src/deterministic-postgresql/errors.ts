@@ -226,6 +226,9 @@ export const ERROR_CODES = [
    *   rules leave unreached in a build;
    * - `row-count-mismatch`: a write of the block affected another number of rows than computed, and its transaction
    *   rolled back;
+   * - `copy-mismatch`: with the `core` entry's `reclamationCache.verify`, the in-memory copy of a key's counts or of a
+   *   node's child list differs from the database's (`details.what`: `counts` or `references`; `details.held` and
+   *   `details.stored`, null for a list of a key that is no row);
    * - `tables-inconsistent`: the contents hash, reading the node tables, found a row whose key is not its content's, or
    *   counts, a queue or roots its rows do not give (`details.check`, and the key).
    *

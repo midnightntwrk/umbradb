@@ -195,7 +195,14 @@ describe.each(PROCESS_BACKENDS)("the block before, kept in memory, through the p
   }, PATIENCE_MS * 4);
 
   it("a height whose kept block is not h − 1 reads the block before even when its block context says continues (h made again after a rollback)", async () => {
-    const before = await beforeRun(await backend.database(), { last: LAST, lose: { at: H, how: "lost" }, continues: "always" });
+    // The copy of the counts and child lists is used on `continues` alone, which this loop says wrongly after the
+    // rollback (its settle had updated the copy): it is off here, so that the run shows the block before's own check.
+    const before = await beforeRun(await backend.database(), {
+      last: LAST,
+      lose: { at: H, how: "lost" },
+      continues: "always",
+      settings: { reclamationCache: { keys: 0 } },
+    });
     expect(before.run.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
     expect(readsOf(before.calls)).toEqual(readsAt([{ height: H, compute: 2 }]));
     expect(rowDifferences(before.rows, (await uninterrupted()).before.rows)).toEqual([]);

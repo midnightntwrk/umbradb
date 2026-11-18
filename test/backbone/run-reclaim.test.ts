@@ -317,6 +317,16 @@ describe("the run's record and its reads", () => {
     expect(keyText(padded.subarray(4, 36))).toBe(keyText(keys[3] as Uint8Array));
   });
 
+  it("gives each key's root-count change summed over the blocks handed over, by the key's text, where the sum is not 0", () => {
+    const [a, b, c, d] = ["a", "b", "c", "d"].map((name) => made(name).keyBytes) as [Uint8Array, Uint8Array, Uint8Array, Uint8Array];
+    const run = new RunReclaim({ first: 1n, on: true });
+    expect(run.rootChanges.size).toBe(0);
+    // a raised at 1 and at 2; b raised at 1 and released at 2, 0 in all; c released at 2; d given a change of 0.
+    run.collect(1n, { inserts: [], rootCounts: [{ key: a, delta: 1 }, { key: b, delta: 1 }] }, true);
+    run.collect(2n, { inserts: [], rootCounts: [{ key: a, delta: 1 }, { key: b, delta: -1 }, { key: c, delta: -1 }, { key: d, delta: 0 }] }, true);
+    expect([...run.rootChanges].sort()).toEqual([[keyText(a), 2], [keyText(c), -1]].sort());
+  });
+
   it("reads the database in statements of 1,000 keys at most, none for no key, and the queue in one", async () => {
     const asked: { sql: string; keys: number }[] = [];
     const tables = sqlRunTables({
