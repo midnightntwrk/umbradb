@@ -1,6 +1,6 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { keyBytes, keyText, RunReclaim, sqlRunTables } from "../../src/backbone/core-ledger-state/run-reclaim.js";
+import { keyBytes, keyText, KnownKeySet, RunReclaim, sqlRunTables } from "../../src/backbone/core-ledger-state/run-reclaim.js";
 import { refcountStep } from "../../src/backbone/core-ledger-state/refcount.js";
 import type { NodeBatch } from "../../src/ledger/types.js";
 import { type FixtureDag, LAST, stateNodes } from "../ledger/fixtures/sweep-fixture.js";
@@ -472,6 +472,73 @@ describe("the run's record and its reads", () => {
     asked.length = 0;
     await tables.queued(keys.slice(0, 3));
     expect(asked).toEqual([{ sql: "SELECT node_key FROM core_ledger_state.unreferenced WHERE node_key = ANY($1::bytea[])", keys: 3 }]);
+  });
+
+  it("keeps the keys known to be rows in a set of the run's own: after the run it holds rows of the tables after it only, none the run deleted", async () => {
+    const script = fc.sample(historyScripts({ oneForm: true }), { seed: SEED, numRuns: 30 }).find((sample) => sample.blocks.length >= 15) as HistoryScript;
+    const blocks = modelBlocks({ ...script, blocks: script.blocks.map((block) => ({ ...block, on: true })) });
+    let mine: NodeTables = NO_TABLES;
+    let learned = 0;
+    let deleted = 0;
+    for (const run of runsOf(blocks, 3)) {
+      const last = run.at(-1) as ModelBlock;
+      const reclaim = new RunReclaim({ first: BigInt((run[0] as ModelBlock).height), on: true });
+      for (const block of run) reclaim.collect(BigInt(block.height), flushOf(block.flushed), true);
+      const known = new KnownKeySet();
+      const outcome = await reclaim.compute(runTables(mine, last.step.after.roots), known);
+      const next = applied(mine, outcome.net);
+      expect(tableDifferences(next.tables, last.step.after)).toEqual([]);
+      // What it learned is rows the run found; each key it holds is a row after the run, and no row the run deleted.
+      const held = [...mine.rows.keys()].filter((key) => known.has(keyText(bytes(key))));
+      expect(held.length).toBe(known.size);
+      for (const key of held) expect(next.tables.rows.has(key), key).toBe(true);
+      for (const key of outcome.net.deleted) expect(known.has(keyText(key))).toBe(false);
+      learned += held.length;
+      deleted += outcome.net.deleted.length;
+      mine = next.tables;
+    }
+    expect(learned).toBeGreaterThan(0);
+    expect(deleted).toBeGreaterThan(0);
+  });
+
+  it("asks the database about no key the set it is given holds, and stores the same tables", async () => {
+    const script = fc.sample(historyScripts({ oneForm: true }), { seed: SEED, numRuns: 30 }).find((sample) => sample.blocks.length >= 15) as HistoryScript;
+    const blocks = modelBlocks({ ...script, blocks: script.blocks.map((block) => ({ ...block, on: true })) });
+    let mine: NodeTables = NO_TABLES;
+    let asked = 0;
+    let unasked = 0;
+    for (const run of runsOf(blocks, 3)) {
+      const last = run.at(-1) as ModelBlock;
+      const outcomes = [];
+      for (const given of [new KnownKeySet(), new KnownKeySet()]) {
+        // The second set holds every row of the tables before the run.
+        if (outcomes.length === 1) for (const key of mine.rows.keys()) given.learn(keyText(bytes(key)));
+        const reclaim = new RunReclaim({ first: BigInt((run[0] as ModelBlock).height), on: true });
+        for (const block of run) reclaim.collect(BigInt(block.height), flushOf(block.flushed), true);
+        const tables = runTables(mine, last.step.after.roots);
+        let missing = 0;
+        outcomes.push(await reclaim.compute({ ...tables, missing: async (wanted) => ((missing += wanted.length), tables.missing(wanted)) }, given));
+        if (outcomes.length === 1) asked += missing;
+        else unasked += missing;
+      }
+      const [plain, told] = outcomes as [Awaited<ReturnType<RunReclaim["compute"]>>, Awaited<ReturnType<RunReclaim["compute"]>>];
+      expect(tableDifferences(applied(mine, told.net).tables, applied(mine, plain.net).tables)).toEqual([]);
+      mine = applied(mine, plain.net).tables;
+    }
+    // With an empty set the rows a run's lists reference are asked; with the rows held, only keys that are no row.
+    expect(asked).toBeGreaterThan(0);
+    expect(unasked).toBeLessThan(asked);
+  });
+
+  it("the set of keys known to be rows learns, forgets and counts its keys", () => {
+    const known = new KnownKeySet();
+    known.learn("a");
+    known.learn("b");
+    known.learn("a");
+    expect([known.has("a"), known.has("b"), known.has("c"), known.size]).toEqual([true, true, false, 2]);
+    known.forget("a");
+    known.forget("c");
+    expect([known.has("a"), known.has("b"), known.size]).toEqual([false, true, 1]);
   });
 
   it("gives back no key as a view into a buffer it was given", async () => {

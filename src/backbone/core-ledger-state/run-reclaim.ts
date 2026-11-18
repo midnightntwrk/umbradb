@@ -235,7 +235,8 @@ export function sqlRunTables(read: Pick<ReadHandle, "query">): RunTables {
 
 /**
  * Keys known to be rows, by their text ({@link keyText}): step 3 asks the database only about the others, teaches it
- * those found stored, and the keys the run deletes leave it. It only saves a read.
+ * those found stored, and the keys the run deletes leave it. It only saves a read. The computation reaches it through
+ * this interface alone.
  */
 export interface KnownKeys {
   has(text: string): boolean;
@@ -244,16 +245,11 @@ export interface KnownKeys {
 }
 
 /**
- * A {@link KnownKeys} that never holds more than its bound: a key that would take it past empties it before it
- * enters.
+ * The {@link KnownKeys} of one run: {@link RunReclaim.compute} makes one unless it is given one, and it is dropped
+ * with the run. Nothing in the computation needs it to hold a key from before the run.
  */
 export class KnownKeySet implements KnownKeys {
   readonly #texts = new Set<string>();
-  readonly #max: number;
-
-  constructor(max = 500_000) {
-    this.#max = max;
-  }
 
   /** How many keys it holds. */
   get size(): number {
@@ -264,23 +260,12 @@ export class KnownKeySet implements KnownKeys {
     return this.#texts.has(text);
   }
 
-  /**
-   * A read found `text` stored. A key that would take the set past its bound empties it first; at a bound of 0 none
-   * enters.
-   */
   learn(text: string): void {
-    if (this.#texts.has(text)) return;
-    if (this.#texts.size + 1 > this.#max) this.#texts.clear();
-    if (this.#texts.size < this.#max) this.#texts.add(text);
+    this.#texts.add(text);
   }
 
   forget(text: string): void {
     this.#texts.delete(text);
-  }
-
-  /** Empties it. */
-  clear(): void {
-    this.#texts.clear();
   }
 }
 
@@ -629,11 +614,11 @@ export class RunReclaim {
   /**
    * The node tables after the run's last block (see the module comment): `tables` are the node tables as the block
    * before the run left them and `root_counts` as the last block left it, read inside the run's transaction after the
-   * last block's own rows; `known` the keys known to be rows, if the caller has them. The run is the blocks handed
-   * over, at least one; the last of them is its last block. Throws `ledger-refcount-invalid` when a check fails, before
-   * anything is written.
+   * last block's own rows; `known` the keys known to be rows, a set made for this run unless one is given. The run is
+   * the blocks handed over, at least one; the last of them is its last block. Throws `ledger-refcount-invalid` when a
+   * check fails, before anything is written.
    */
-  async compute(tables: RunTables, known?: KnownKeys): Promise<RunOutcome> {
+  async compute(tables: RunTables, known: KnownKeys = new KnownKeySet()): Promise<RunOutcome> {
     if (this.#computed) throw new Error(`the run from block ${this.first} is computed already`);
     if (this.#next === this.first) throw new Error(`the run from block ${this.first} has no block handed over`);
     this.#computed = true;
@@ -719,7 +704,7 @@ export class RunReclaim {
     const needed = [...this.#records.values()].filter((record) => record.referencedAt !== null || record.raisedAt !== null);
     const asked = inOrder(needed.filter((record) => record.node === null && record.row === undefined));
     const unknown = asked.filter((record) => {
-      if (known?.has(record.text) !== true) return true;
+      if (!known.has(record.text)) return true;
       record.row = true;
       return false;
     });
@@ -727,7 +712,7 @@ export class RunReclaim {
       const absent = new Set((await tables.missing(unknown.map((record) => this.#bytes(record)))).map((key) => this.#recordOf(key)));
       for (const record of unknown) {
         record.row = !absent.has(record);
-        if (record.row) known?.learn(record.text);
+        if (record.row) known.learn(record.text);
       }
     }
     let missing: { readonly at: bigint; readonly error: UmbraError } | null = null;
@@ -955,7 +940,7 @@ export class RunReclaim {
     });
     const changes = inOrder(all.filter((record) => record.delta !== 0));
     const evicted = inOrder(deleted);
-    if (known !== undefined) for (const record of evicted) known.forget(record.text);
+    for (const record of evicted) known.forget(record.text);
     const net: NetWrite = Object.freeze({
       height: last,
       inserts,
