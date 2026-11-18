@@ -203,14 +203,17 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   the worker did not apply (where `core-block-parsed` runs without `core-ledger-state`, and the last committed block
   delivered again after a restart) gets the release alone. After a lost `COMMIT` the host is told nothing until the
   cursor is read again: a cursor at the block tells it committed, one at the block before tells it rolled back, and
-  any other halts without telling the host anything, since the outcome is not known. A stop in between tells the host
-  nothing; the next start delivers the last committed block again.
+  any other halts without telling the host anything, since the outcome is not known. The same holds when another
+  failure is reported first (a module's handle used while the `COMMIT` runs). A stop in between tells the host
+  nothing; the next start delivers the last committed block again. A block whose `on-fetch` or `on-parse` failed
+  while the node source prepared it ahead is told rolled back when processing reaches its height.
   A block context now has `continues`: true when the block before was committed by this process with no failure
   between (its `COMMIT` answered in the same run of processing) and the writer still has the database session that
-  committed it, false at the first height after a start or a retry, for a height processed again, at the re-delivery
-  after a restart, once the writer's session was replaced (on PostgreSQL a connection lost while idle between two
-  blocks), and always at `on-fetch` and `on-parse`. A block whose callbacks were told true and whose transaction then
-  finds the writer's session replaced fails before it writes, as a lost connection (retryable), and is made again. A
+  committed it when the callback's context is made, false at the first height after a start or a retry, for a height
+  processed again, at the re-delivery after a restart, from the first context made after the writer's session was
+  replaced (on PostgreSQL a connection lost while idle, also during a block's own callbacks or after its `COMMIT`), and
+  always at `on-fetch` and `on-parse`. A block some of whose callbacks were told true and whose transaction then finds
+  the writer's session replaced fails before it writes, as a lost connection (retryable), and is made again. A
   database now says which session its writer has (`Database.writerSession`). It may be false at any block. The module
   guide's §3 describes it.
 
