@@ -44,9 +44,10 @@
  *    keys whose count change is below 0.
  * 6. The cascade, in rounds: every candidate in the universe, not protected, whose count is 0 is deleted; each
  *    reference of its list subtracts 1 and makes its key a candidate; until a round deletes none.
- * 7. No count is below 0 after the run, its deletions included (`negative-count`), and every key queued after the
- *    run is one the last block released or dropped from a replaced list (`unexpected-queued`): anything else would
- *    be a node kept that the rule deletes.
+ * 7. No count is below 0 after the run, its deletions included (`negative-count`); no list the run writes
+ *    references a key the cascade deleted (`missing-reference`, as the per-block step requires every reference of a
+ *    list the block writes to be a row after it); and every key queued after the run is one the last block released
+ *    or dropped from a replaced list (`unexpected-queued`): anything else would be a node kept that the rule deletes.
  * 8. The queue after: the nodes left with no reference and no root count.
  * 9. The net write, and 10. every deleted key, a row or a node the run never writes.
  *
@@ -896,6 +897,22 @@ export class RunReclaim {
         if (countAfter(record) < 0) {
           throw this.#invalid("negative-count", last, last, `the reference count of ${shown(record.text)} would fall below 0`, { key: shown(record.text) });
         }
+      }
+    }
+    // No list the run writes references a key the cascade deleted. With counts that hold the stored references none
+    // does: a key a kept list references keeps a count above 0. On tables whose count of a key is too low, the
+    // cascade can delete it while a list the run writes references it.
+    if (unchecked !== "missing-reference") {
+      for (const record of inOrder(nodes.filter((node) => (node.kind === "new" || node.kind === "replaces") && !node.deleted))) {
+        const gone = nodeOf(record).refs.find((ref) => ref.deleted);
+        if (gone === undefined) continue;
+        throw this.#invalid(
+          "missing-reference",
+          last,
+          last,
+          `${shown(record.text)}, which the run writes, references ${shown(gone.text)}, which the run deletes`,
+          { key: shown(gone.text) },
+        );
       }
     }
     const unqueued: KeyRecord[] = [];

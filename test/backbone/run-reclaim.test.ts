@@ -788,6 +788,29 @@ describe("by hand", () => {
     expect(await reasonOf(reclaim.compute(runTables(found, new Map([[next.key, 1]]))))).toBe("negative-count");
   });
 
+  it("a reference to a key that the block's own cascade deletes halts with missing-reference, as the per-block step halts that block", async () => {
+    // Tables whose count of k is 0 though q's stored list references it, q and k queued. The block writes a new root
+    // p over k: the cascade deletes q, which takes back the reference p gave k, and then k, which p references.
+    const k = made("k");
+    const [q, p] = [over("q", k), over("p", k)];
+    const found: NodeTables = { rows: new Map([[q.key, q.children], [k.key, k.children]]), refs: new Map(), queue: new Set([q.key, k.key]) };
+    const flush = { inserts: flushed(p), rootCounts: raise(p) };
+    expect(await stepOf(found, new Map(), flush, 1n)).toBe("missing-reference");
+    const halt = await (async () => {
+      const reclaim = new RunReclaim({ first: 1n, on: true });
+      reclaim.collect(1n, flush, true);
+      return reclaim.compute(runTables(found, new Map([[p.key, 1]]))).catch((error: unknown) => error);
+    })();
+    expect(haltReason(halt)).toBe("missing-reference");
+    expect((halt as { details: { height: bigint; key: string } }).details).toMatchObject({ height: 1n, key: `0x${k.key}` });
+    expect((halt as Error).message).toMatch(new RegExp(`0x${p.key}, which the run writes, references 0x${k.key}, which the run deletes`));
+    // On sound tables (k counted once, not queued) the block commits and k stays.
+    const sound = new RunReclaim({ first: 1n, on: true });
+    sound.collect(1n, flush, true);
+    const outcome = await sound.compute(runTables({ ...found, refs: new Map([[k.key, 1]]), queue: new Set([q.key]) }, new Map([[p.key, 1]])));
+    expect(outcome.evict.map(hex)).toEqual([q.key]);
+  });
+
   it("a state made and released inside a run is never written, and is deleted", async () => {
     const leafNode = made("leaf");
     const states = [0, 1, 2, 3].map((n) => over(`state ${n}`, leafNode));

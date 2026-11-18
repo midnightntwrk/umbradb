@@ -33,15 +33,15 @@ import {
  * | step 1 | `unchanged-counted` | `ref_counts` is not the model's |
  * | step 2 | `increment-once-per-parent`, `second-occurrence-not-decremented` | `ref_counts` is not the model's |
  * | step 3 | `missing-reference` left out | the tables break closure |
- * | step 3, at the block that needs it | `judged-at-end` | a reference a later block supplies, and a count below 0 that a later block brings back, commit |
+ * | step 3, at the block that needs it | `judged-at-end` | a reference a later block supplies commits; a count below 0 that a later block brings back halts at the last block, not at its own, and without step 7's reference check commits |
  * | step 4, the roots after the block before the last | `released-in-block` | the state the last block releases is gone |
  * | step 4, those roots as the ones read less the last block's change | `roots-read-as-before` | the state the last block releases is gone |
  * | step 4, the last block's protection only | `run-as-one-block` | `unexpected-queued`; without that check, rows the model deleted |
  * | step 4, what the last block's replaced lists referenced | `dropped-unprotected` | a row the model keeps is gone |
  * | a run made again when only those lists keep a node | kept as computed (the test helper's `remakes` false) | on histories in two forms the rows are not the model's |
  * | step 5 | `old-queue-only` | `unexpected-queued`; without that check, rows the model deleted |
- * | step 6 | `first-round-only`, `referenced-queued-deleted` | `unexpected-queued`; a row the model keeps is gone |
- * | step 7 | each check left out, under a fault only it finds | a count of -1 reaches the net write; the nodes a cut cascade leaves are stored |
+ * | step 6 | `first-round-only`, `referenced-queued-deleted` | `unexpected-queued`; `missing-reference` (a list the run writes references the deleted key), and without that check a row the model keeps is gone |
+ * | step 7 | each check left out, under a fault only it finds | a count of -1 reaches the net write; the nodes a cut cascade leaves are stored; a written list over a deleted key breaks closure (with `missing-reference`) |
  * | step 8 | `queue-change-dropped` | `unreferenced` is not the model's |
  * | one setting of sweep per run | a run not ended at a change of sweep | the tables are not the model's |
  *
@@ -149,6 +149,19 @@ describe("negative controls: a fault in the run computation", () => {
     const outcome = await compute("missing-reference");
     const next = applied(NO_TABLES, outcome.net);
     expect(inconsistencies(next.tables, new Map([[r.key, 1]])).join("\n")).toMatch(new RegExp(`closure: ${r.key.slice(0, 12)} references ${x.key.slice(0, 12)}, which is no row`));
+    // A reference to a key the block's own cascade deletes, on tables whose count of k is 0 though q references it:
+    // left out, the run commits and its tables break closure.
+    const k = made("k");
+    const [q, p] = [made("q", [ref(k)]), made("p", [ref(k)])];
+    const found = { rows: new Map([[q.key, q.children], [k.key, k.children]]), refs: new Map<string, number>(), queue: new Set([q.key, k.key]) };
+    const cascade = async (unchecked?: RunCheck) => {
+      const reclaim = new RunReclaim({ first: 1n, on: true, ...(unchecked === undefined ? {} : { unchecked }) });
+      reclaim.collect(1n, { inserts: [{ key: p.keyBytes, data: p.data, children: p.children }], rootCounts: [{ key: p.keyBytes, delta: 1 }] }, true);
+      return reclaim.compute(runTables(found, new Map([[p.key, 1]])));
+    };
+    expect(haltReason(await cascade().catch((error: unknown) => error))).toBe("missing-reference");
+    const left = applied(found, (await cascade("missing-reference")).net);
+    expect(inconsistencies(left.tables, new Map([[p.key, 1]])).join("\n")).toMatch(new RegExp(`closure: ${p.key.slice(0, 12)} references ${k.key.slice(0, 12)}, which is no row`));
   });
 
   it("judged-at-end: step 3 judged once at the run's end lets through a reference a later block supplies, and a count below 0 that a later block brings back", async () => {
@@ -172,15 +185,18 @@ describe("negative controls: a fault in the run computation", () => {
     const [s1, p] = [made("s1", [ref(wEmbedding)]), made("p", [ref(c)])];
     const found = { rows: new Map([[r0.key, r0.children], [wReferencing.key, wReferencing.children], [c.key, c.children]]), refs: new Map([[wReferencing.key, 1]]), queue: new Set([c.key]) };
     const roots = new Map([[r0.key, 1], [s1.key, 1]]);
-    const falls = async (fault?: RunFault) => {
-      const reclaim = new RunReclaim({ first: 1n, on: true, ...(fault === undefined ? {} : { fault }) });
+    const falls = async (fault?: RunFault, unchecked?: RunCheck) => {
+      const reclaim = new RunReclaim({ first: 1n, on: true, ...(fault === undefined ? {} : { fault }), ...(unchecked === undefined ? {} : { unchecked }) });
       reclaim.collect(1n, { inserts: flushed(wEmbedding, s1), rootCounts: raise(s1) }, true);
       reclaim.collect(2n, { inserts: flushed(p), rootCounts: raise(p) }, true);
       return outcomeOf(reclaim.compute(runTables(found, new Map([...roots, [p.key, 1]]))));
     };
     expect(await falls()).toBe("negative-count at 1");
-    // With the fault the run commits, and its tables break closure: the cascade deleted c, which p references.
-    const outcome = await falls("judged-at-end");
+    // With the fault the count is not followed block by block, and the cascade deletes c, which p references: the
+    // check of what the run writes halts the run at its last block, not where the per-block step halts. With that
+    // check left out too, the run commits, and its tables break closure.
+    expect(await falls("judged-at-end")).toBe("missing-reference at 2");
+    const outcome = await falls("judged-at-end", "missing-reference");
     expect(typeof outcome).toBe("object");
     const next = applied(found, (outcome as Awaited<ReturnType<RunReclaim["compute"]>>).net);
     expect(inconsistencies(next.tables, new Map([...roots, [p.key, 1]])).join("\n")).toMatch(new RegExp(`closure: ${p.key.slice(0, 12)} references ${c.key.slice(0, 12)}, which is no row`));
@@ -232,7 +248,10 @@ describe("negative controls: a fault in the run computation", () => {
 
   it(`first-round-only, referenced-queued-deleted: the cascade cut short, and a queued key deleted though a new node references it (seed ${SEED})`, async () => {
     expect(await finding(oneForm, [1, 3], { fault: "first-round-only" })).toMatch(/halt unexpected-queued/);
-    expect(await finding(oneForm, [1, 3], { fault: "referenced-queued-deleted" })).toMatch(/nodes differs: 0 rows the model lacks \(\), \d+ it has and these lack/);
+    // The new node the run writes references the queued key the fault deletes: the check of what the run writes
+    // halts. Without that check the row the model keeps is gone.
+    expect(await finding(oneForm, [1, 3], { fault: "referenced-queued-deleted" })).toMatch(/halt missing-reference: .*, which the run writes, references 0x\w+, which the run deletes/);
+    expect(await finding(oneForm, [1, 3], { fault: "referenced-queued-deleted", unchecked: "missing-reference" })).toMatch(/nodes differs: 0 rows the model lacks \(\), \d+ it has and these lack/);
   }, 600_000);
 
   it(`the two checks of step 7 left out, each under a fault only it finds (seed ${SEED})`, async () => {
