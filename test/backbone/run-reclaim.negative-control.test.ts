@@ -38,7 +38,7 @@ import {
  * | step 4, those roots as the ones read less the last block's change | `roots-read-as-before` | the state the last block releases is gone |
  * | step 4, the last block's protection only | `run-as-one-block` | `unexpected-queued`; without that check, rows the model deleted |
  * | step 4, what the last block's replaced lists referenced | `dropped-unprotected` | a row the model keeps is gone |
- * | a run made again when only those lists keep a node | kept as computed (the test helper's `remakes` false) | on histories in two forms the rows are not the model's |
+ * | a run made shorter while only those lists keep a node | kept as computed (the test helper's `remakes` false) | on histories in two forms the rows are not the model's |
  * | step 5 | `old-queue-only` | `unexpected-queued`; without that check, rows the model deleted |
  * | step 6 | `first-round-only`, `referenced-queued-deleted` | `unexpected-queued`; `missing-reference` (a list the run writes references the deleted key), and without that check a row the model keeps is gone |
  * | step 7 | each check left out, under a fault only it finds | a count of -1 reaches the net write; the nodes a cut cascade leaves are stored; a written list over a deleted key breaks closure (with `missing-reference`) |
@@ -281,7 +281,7 @@ describe("negative controls: a fault in the run computation", () => {
       fc.asyncProperty(twoForms, async (script) => {
         const blocks = modelBlocks(script);
         for (const size of [2, 3, 7]) {
-          const found = await remadeAgainstModel(blocks, size, { runs: 0, remade: 0, kept: 0, replaced: 0 }, false);
+          const found = await remadeAgainstModel(blocks, size, { runs: 0, remade: 0, kept: 0, replaced: 0, longest: 0, oneBlockKept: 0 }, false);
           if (found.length > 0) throw new Error(found.join("\n"));
         }
       }),

@@ -66,7 +66,9 @@
  * the flush rule and no node is left stored only because a child list the last block replaced referenced it
  * ({@link RunOutcome.keptByReplaced} is 0). Otherwise the tables are consistent and hold the same node set, and can
  * hold rows more: the per-block step keeps such a node only if it still stored the replaced list's node at the block
- * before, which the run computation cannot tell. The same run made again without its last block keeps none of them.
+ * before, which the run computation cannot tell. Computed again one block shorter, as many times as that takes, a run
+ * ends with `keptByReplaced` 0 or at one block, and then holds the per-block step's tables (the note's Theorem 5); one
+ * block off is not always enough, since the new last block can be the last replacement of another key.
  *
  * {@link RunFault} is the seam through which a negative control puts a fault into the computation, and
  * {@link RunCheck} names the check one leaves out. A build carries neither.
@@ -289,8 +291,9 @@ export interface RunOutcome {
   /**
    * The keys left stored, queued, only because a child list the run's last block replaced referenced them (and no
    * root count after the block before the last): what the per-block step keeps only if it still stored that list's
-   * node at the block before. The same run made again without its last block keeps none of them (see the module
-   * comment). None for a run that does not sweep.
+   * node at the block before. A caller that wants the per-block step's tables computes the run again one block
+   * shorter while this is above 0 and the run holds more than one block (see the module comment); one block off is
+   * not always enough. None for a run that does not sweep.
    */
   readonly keptByReplaced: number;
 }

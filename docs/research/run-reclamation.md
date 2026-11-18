@@ -34,8 +34,10 @@ The per-block step's rules 1 to 8 are those of `refcount.ts`'s module comment.
   bounded by what the run flushed and by what it deletes (section 4).
 - **What it gives.** For a run of one block, the per-block step's tables (section 4.3, Theorem 3). With the package's
   flush rule, the tables after a longer run are byte for byte the per-block step's for the same flushes, unless a
-  node is left stored only because a child list the run's last block replaced referenced it; the same run made again
-  without its last block meets that condition (Theorem 4). Where two runs' packages flush a key in different forms,
+  node is left stored only because a child list the run's last block replaced referenced it (Theorem 4). Such a run
+  is computed again one block shorter, as many times as that takes: it ends at a run that keeps no such node or at
+  one block, and either way holds the per-block step's tables (Theorem 5). One block off is not always enough.
+  Where two runs' packages flush a key in different forms,
   the tables are consistent and hold the same node set, and their bytes can differ, as they already can between two
   per-block runs whose packages held different nodes (section 3.9). Section 4.9 lists where a run of one block still
   differs from the step: on damaged tables, on blocks that break the flush rule, and in the words of a halt.
@@ -321,7 +323,7 @@ The theorems below take R(b − 1) and R(b) as inputs; only where each comes fro
    of those keys keep a count above 0; the keys leaving and entering the queue; the deleted keys that are rows.
 10. **The deleted keys:** D, rows or not (`RunOutcome.evict`).
 11. **What only the last block's replaced lists keep:** the keys of drop(b) left queued, with no root count after
-    b − 1 (`keptByReplaced`; Theorem 4).
+    b − 1 (`keptByReplaced`; Theorems 4 and 5).
 
 ### 4.3 Why it gives the per-block tables
 
@@ -377,7 +379,7 @@ step's (Corollary 3), and **for a run of one block they are the per-block step's
 | P1, one child list per key | equal bytes, any run length (Theorem 2) |
 | P1, lists replaced, a run of one block | equal bytes (Theorem 3) |
 | P1, lists replaced, a longer run, no node kept by the last block's replaced lists alone (`keptByReplaced` 0) | equal bytes (Theorem 4) |
-| P1, lists replaced, a longer run, a node kept by them alone | I1 to I4, the same node set, the same `root_counts`, and rows more, queued, that the per-block step keeps only if it still stored the replaced list's node at b − 1. The same run made again without its last block meets Theorem 4 |
+| P1, lists replaced, a longer run, a node kept by them alone | I1 to I4, the same node set, the same `root_counts`, and rows more, queued, that the per-block step keeps only if it still stored the replaced list's node at b − 1. Computed again one block shorter until no such node is kept or one block remains, equal bytes (Theorem 5) |
 | `sweep` off for the whole run | equal bytes: neither deletes, so the package flushes the same nodes in both, and steps 1, 2 and 8 are rules 1, 2, 3, 6 and 7 summed |
 | P1 broken by a block | the run halts (`unreached-node`); the per-block step would keep the node one block |
 
@@ -404,9 +406,35 @@ Theorem 2 is the case where no list is replaced. Without the assumption the run 
 only a replaced list referenced. Whether the per-block step keeps them too depends on whether it still stored the
 replaced list's node after b − 1, that is on S(b − 1), which the run form does not compute: it does where the node
 was stored there (a rewrite in both), and does not where a block of the run had deleted it (the per-block step then
-takes the last block's write for a new node). A run of more than one block whose `keptByReplaced` is above 0, made
-again up to the block before, with that block opening the next run where its replacement is not the last block's,
-meets Theorem 4 at every run's end.
+takes the last block's write for a new node).
+
+**One block off is not always enough.** A over x and B over y are stored and persisted; block 1 releases both; the
+per-block step deletes A, B, x and y at block 2; block 3 writes A again with x embedded and persists it, block 4 the
+same for B and y. The run of blocks 1 to 4 finds B's row with its old list, which block 4 replaces: y is kept,
+queued (`keptByReplaced` 1). The run of 1 to 3 finds A's row the same way, which block 3 replaces: x is kept
+(`keptByReplaced` 1 again). The run of 1 to 2 replaces nothing. Each block taken off can make the new last block
+the last replacement of another key.
+
+**Theorem 5 (a run made shorter).** Assume I1 to I4 after a − 1, A0, P1 for every block and the same flushes in
+both. Compute the run of blocks a to b; while its `keptByReplaced` is above 0 and it holds more than one block,
+compute it again without its last block. The run of a to b* this stops at holds the per-block step's `nodes`,
+`ref_counts` and `unreferenced` after b* in bytes; the blocks b* + 1 to b open the next run, from those tables, and
+every run's end, run after run, holds the per-block step's tables.
+
+- It stops: each turn takes one block off, and a run of one block is not computed again. So it computes a run at
+  most b − a + 1 times.
+- Where it stops, either `keptByReplaced` is 0 and the run has more than one block, or the run is the one block a.
+  In the first case, with `sweep` on, Theorem 4 gives the per-block step's tables after b*; with `sweep` off
+  `keptByReplaced` is always 0 and the run's bytes are equal (the table above). In the second case Theorem 3 gives
+  them, whatever `keptByReplaced` is; with `sweep` off, the table above again.
+- Both theorems ask of the tables after a − 1 only I1 to I4 (and A0), and of the blocks a to b* only P1 and the same
+  flushes. The tables after b* are the per-block step's, which have I1 to I4 (the claim of 3.1), and the next run's
+  blocks are the same flushes; so the next run starts where the theorems apply again, and by induction over the
+  runs every run's end holds the per-block step's tables.
+
+The cost of the procedure: a run of k blocks can be computed up to k times, each time over its blocks less the ones
+taken off. How often a real chain needs a second computation is not measured here; on the generated histories in
+two forms, one run is made shorter up to 3 times (T3).
 
 Theorem 4 is about the same flushes. A package told of deletions at every block can flush a node again where one
 told of them only at a run's end, which still holds it, does not; when the package spells it differently the second
@@ -418,9 +446,12 @@ one told at a run's end only, the tables are the model's at every run's end (T1)
 `refcountStep`'s outputs on every generated block that follows the flush rule, rewrites included, and halts with
 `unreached-node` on every other (T2). On generated histories in two forms under the flush rule (T3): flushed by a
 package told of deletions at a run's end only, the tables are sound at every run's end and hold the node set of the
-roots of the last two heights; flushed as the model flushes them, with each run that fails Theorem 4's assumption
-made again without its last block, they are the model's in bytes at every run's end, in runs of 2, 3, 7 and 1,000.
-Kept as computed instead (a negative control), some histories store rows more, queued.
+roots of the last two heights; flushed as the model flushes them, with each run made shorter as Theorem 5 states,
+they are the model's in bytes at every run's end, in runs of 2, 3, 7 and 1,000, where some runs are made shorter
+two and three times and some runs of one block are committed with a node kept by their block's replaced lists.
+Kept as computed instead (a negative control), some histories store rows more, queued. By hand, the history above:
+the runs of 1 to 4 and of 1 to 3 each keep one node the per-block step (`refcountStep` applied block by block) does
+not, the run of 1 to 2 and the run of 3 to 4 after it hold the step's tables.
 
 ### 4.4 The reads, and what bounds them
 

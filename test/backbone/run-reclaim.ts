@@ -6,7 +6,7 @@ import {
   RunReclaim,
   type RunTables,
 } from "../../src/backbone/core-ledger-state/run-reclaim.js";
-import type { RefcountTables } from "../../src/backbone/core-ledger-state/refcount.js";
+import { refcountStep, type RefcountTables } from "../../src/backbone/core-ledger-state/refcount.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { childRefKeys } from "../../src/ledger/node-refs.js";
 import type { NodeBatch } from "../../src/ledger/types.js";
@@ -457,21 +457,27 @@ export async function inRuns(blocks: readonly ModelBlock[], cut: InRuns, seen: S
   return [];
 }
 
-/** What a history run in runs that are made again without their last block saw. */
+/** What a history run in runs made shorter saw. */
 export interface Remade {
   runs: number;
-  /** The runs made again without their last block, and the nodes they would have kept. */
+  /** The times a run was made one block shorter, and the nodes the longer runs would have kept. */
   remade: number;
   kept: number;
+  /** The most times one run was made shorter. */
+  longest: number;
+  /** The runs of one block committed though their block's replaced lists alone keep a node. */
+  oneBlockKept: number;
   /** The nodes written over a row with another child list. */
   replaced: number;
 }
 
 /**
- * Runs blocks the model already ran in runs of at most `size` (a run ending where `sweep` changes): a run of more
- * than one block whose last block's replaced lists alone keep a node (`RunOutcome.keptByReplaced`) is made again
- * without that block, which starts the next run. With `remakes` false (a negative control) such a run is kept as
- * computed. At every run's end the tables must be the model's in bytes. The findings, as {@link inRuns}'s.
+ * Runs blocks the model already ran in runs of at most `size` (a run ending where `sweep` changes), made shorter as
+ * the note's Theorem 5 states: while a run of more than one block has a last block whose replaced lists alone keep a
+ * node (`RunOutcome.keptByReplaced` above 0), it is computed again without that block, as many times as that takes;
+ * a run of one block is committed as computed. The blocks taken off open the next run. With `remakes` false (a
+ * negative control) every run is committed as computed. At every run's end the tables must be the model's in bytes.
+ * The findings, as {@link inRuns}'s.
  */
 export async function remadeAgainstModel(blocks: readonly ModelBlock[], size: number, seen: Remade, remakes = true): Promise<string[]> {
   let mine: NodeTables = NO_TABLES;
@@ -479,6 +485,7 @@ export async function remadeAgainstModel(blocks: readonly ModelBlock[], size: nu
     const on = (blocks[start] as ModelBlock).on;
     let end = Math.min(start + size, blocks.length) - 1;
     for (let at = start + 1; at <= end; at++) if ((blocks[at] as ModelBlock).on !== on) end = Math.min(end, at - 1);
+    let cuts = 0;
     for (;;) {
       const last = blocks[end] as ModelBlock;
       const where = `after ${last.height}, runs of ${size}`;
@@ -495,9 +502,12 @@ export async function remadeAgainstModel(blocks: readonly ModelBlock[], size: nu
       if (outcome.keptByReplaced > 0 && end > start && remakes) {
         seen.remade += 1;
         seen.kept += outcome.keptByReplaced;
+        cuts += 1;
         end -= 1;
         continue;
       }
+      seen.longest = Math.max(seen.longest, cuts);
+      if (outcome.keptByReplaced > 0 && end === start) seen.oneBlockKept += 1;
       const next = applied(mine, outcome.net);
       const problems = [...next.problems, ...outcomeProblems(mine, next.tables, outcome, on), ...tableDifferences(next.tables, last.step.after)];
       if (problems.length > 0) return problems.map((problem) => `${where}: ${problem}`);
@@ -509,6 +519,38 @@ export async function remadeAgainstModel(blocks: readonly ModelBlock[], size: nu
     }
   }
   return [];
+}
+
+/**
+ * The tables after each of `blocks` as the per-block step of `src/` (`refcountStep`) computes them from the tables the
+ * block before left, applied in memory as `writeRefcount` and the node writes change them; with the root counts after
+ * each block.
+ */
+export async function stepped(blocks: readonly ModelBlock[]): Promise<{ readonly tables: NodeTables; readonly roots: ReadonlyMap<string, number> }[]> {
+  let tables: NodeTables = NO_TABLES;
+  let roots: ReadonlyMap<string, number> = new Map();
+  const after: { tables: NodeTables; roots: ReadonlyMap<string, number> }[] = [];
+  for (const block of blocks) {
+    const flush = flushOf(block.flushed);
+    const step = await refcountStep(stepTables(tables, roots), flush, { height: BigInt(block.height), on: block.on });
+    const rows = new Map(tables.rows);
+    const written = new Set([...step.newNodes, ...step.rewritten].map(hex));
+    for (const node of flush.inserts) if (written.has(hex(node.key))) rows.set(hex(node.key), node.children);
+    for (const key of step.deleted) rows.delete(hex(key));
+    const refs = new Map(tables.refs);
+    for (const { key, delta } of step.deltas) {
+      const count = (refs.get(hex(key)) ?? 0) + delta;
+      if (count === 0) refs.delete(hex(key));
+      else refs.set(hex(key), count);
+    }
+    const queue = new Set(tables.queue);
+    for (const key of step.unqueued) queue.delete(hex(key));
+    for (const key of step.queued) queue.add(hex(key));
+    roots = withChanges(roots, block.flushed.rootCounts);
+    tables = { rows, refs, queue };
+    after.push({ tables, roots });
+  }
+  return after;
 }
 
 /** `roots` with a block's root-count changes added: the root counts after that block. */
