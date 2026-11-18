@@ -310,9 +310,12 @@ The theorems below take R(b − 1) and R(b) as inputs; only where each comes fro
    its new nodes: P1 makes them redundant.)
 5. **Candidates** (`sweep` on): the whole queue as the run found it; T; Nb; the keys whose count change is below 0.
    Their counts are read: whether a row, C(a − 1, k), R(b, k). A key of Nb outside T has none of the three.
-6. **The cascade**, as rule 5: in rounds, every candidate that is in U, not in Pb, and whose count C(a − 1, k) plus
-   its change is 0 is deleted; each reference of its list in U subtracts 1 and makes its key a candidate, whose
-   counts are read once its change is below 0; until a round deletes none. D is the deleted keys.
+6. **The cascade**, as rule 5: in rounds, every candidate that is not in Pb and whose count C(a − 1, k) plus its
+   change is 0 is deleted; each reference of its list subtracts 1 and makes its key a candidate, whose counts are
+   read once its change is below 0; until a round deletes none. D is the deleted keys. On tables with I1 to I4 every
+   candidate is in U; a candidate outside it (a queued key that is no row, a key with a count and no row) is deleted
+   as rule 5 deletes it, and the net write's delete of its row halts the run (step 9), as `writeRefcount`'s halts the
+   block.
 7. **Checks before anything is written.** No count below 0 (`negative-count`). Then a missing reference of the last
    block held in step 3 (`missing-reference`). No list of a node of Nb ∪ Wb that is kept references a key of D
    (`missing-reference`, as the per-block step requires every reference of a list the block writes to be a row
@@ -320,7 +323,8 @@ The theorems below take R(b − 1) and R(b) as inputs; only where each comes fro
 8. **The queue after.** Membership is "in U, not deleted, count 0, R(b, k) = 0", evaluated for the queue the run
    found, Nb, the keys with a count change and T. (Rule 7.)
 9. **The net write** (`NetWrite`): B's nodes of Nb ∪ Wb that are not deleted; each key's count change, and how many
-   of those keys keep a count above 0; the keys leaving and entering the queue; the deleted keys that are rows.
+   of those keys keep a count above 0; the keys leaving and entering the queue; the deleted keys but the nodes of B
+   that are no row: the rows, and any key outside U, whose delete affects no row (`row-count-mismatch`).
 10. **The deleted keys:** D, rows or not (`RunOutcome.evict`).
 11. **What only the last block's replaced lists keep:** the keys of drop(b) left queued, with no root count after
     b − 1 (`keptByReplaced`; Theorems 4 and 5).

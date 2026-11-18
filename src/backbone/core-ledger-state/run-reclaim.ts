@@ -43,8 +43,10 @@
  *    list replaced by the last block referenced.
  * 5. Candidates: the queue as the run found it, the keys whose root count the run changed, the new nodes, and the
  *    keys whose count change is below 0.
- * 6. The cascade, in rounds: every candidate in the universe, not protected, whose count is 0 is deleted; each
- *    reference of its list subtracts 1 and makes its key a candidate; until a round deletes none.
+ * 6. The cascade, in rounds: every candidate not protected whose count is 0 is deleted; each reference of its list
+ *    subtracts 1 and makes its key a candidate; until a round deletes none. On sound tables every candidate is in the
+ *    universe; one that is not (damaged tables) is deleted as the per-block step deletes it, and the net write's
+ *    delete of its row halts the run.
  * 7. No count is below 0 after the run, its deletions included (`negative-count`); no list the run writes
  *    references a key the cascade deleted (`missing-reference`, as the per-block step requires every reference of a
  *    list the block writes to be a row after it); and every key queued after the run is one the last block released
@@ -110,7 +112,10 @@ export interface NetWrite {
   readonly unqueued: readonly Uint8Array[];
   /** The keys queued after the run that were not before it. */
   readonly queued: readonly Uint8Array[];
-  /** The rows stored before the run that it deleted. */
+  /**
+   * The keys the run deleted that are rows when it began, and any it deleted that is neither a row nor a node of the
+   * run (damaged tables): their delete affects no row and halts the net write, as the per-block step's write halts.
+   */
   readonly deleted: readonly Uint8Array[];
 }
 
@@ -853,9 +858,10 @@ export class RunReclaim {
       let frontier = new Set<KeyRecord>(fault === "old-queue-only" || fault === "run-as-one-block" ? queueFound : [...queueFound, ...touched, ...fresh, ...fell]);
       for (;;) {
         // Which candidates go is settled before any of them goes, so the order within a round does not matter.
-        const round = [...frontier].filter(
-          (record) => !record.deleted && record.counts !== null && inUniverse(record) && !isProtected(record) && left(record) === 0,
-        );
+        // A candidate that is neither a row nor a node of the run (a queued key with no row, a key with a count and
+        // no row: damaged tables) is deleted as the per-block step deletes it, and the net write's delete of its row,
+        // which affects none, halts the run where the step's halts the block.
+        const round = [...frontier].filter((record) => !record.deleted && record.counts !== null && !isProtected(record) && left(record) === 0);
         if (round.length === 0) break;
         rounds += 1;
         for (const record of round) {
@@ -967,7 +973,9 @@ export class RunReclaim {
       counted: changes.filter((record) => countAfter(record) > 0).length,
       unqueued: unqueued.map((record) => this.#bytes(record)),
       queued: queued.map((record) => this.#bytes(record)),
-      deleted: evicted.filter((record) => record.row === true).map((record) => this.#bytes(record)),
+      // Every deleted key but a node the run flushed and never wrote: a row, or (on damaged tables) a key the run
+      // believes nothing of, whose delete then affects no row.
+      deleted: evicted.filter((record) => record.row === true || record.node === null).map((record) => this.#bytes(record)),
     });
     return Object.freeze({
       net,
