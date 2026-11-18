@@ -225,6 +225,46 @@ describe.each(PROCESS_BACKENDS)("the block before, kept in memory, through the p
     expect(rowDifferences(before.rows, (await uninterrupted()).before.rows)).toEqual([]);
   }, PATIENCE_MS * 2);
 
+  it("a published ledger-state item's bytes changed after h's state row was written and before its on-db-write ended: the next block takes what was written", async () => {
+    let changed = 0;
+    const before = await beforeRun(await backend.database(), {
+      last: LAST,
+      afterWriteStatement: (module, b, sql) => {
+        if (module !== CORE_LEDGER_STATE_ID || b.height !== H || !sql.includes("INSERT INTO core_ledger_state.states")) return;
+        // Another module holding the published item changes it in place while the block's writes go on.
+        const item = b.items.get(LEDGER_STATE_ITEM) as LedgerStateItem;
+        item.stateKey[0] = (item.stateKey[0] ?? 0) ^ 0xff;
+        item.stateRoot[0] = (item.stateRoot[0] ?? 0) ^ 0xff;
+        changed++;
+      },
+    });
+    expect(changed).toBe(1);
+    expect(before.run.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
+    expect(before.run.errors).toEqual([]);
+    expect(readsOf(before.calls)).toEqual(readsAt([]));
+    expect(rowDifferences(before.rows, (await uninterrupted()).before.rows)).toEqual([]);
+  }, PATIENCE_MS * 2);
+
+  it("the block context's hash changed after h's blocks row was written and before core-block-commit's on-db-write ended: both its rows and the next block's parent check take the hash it was given", async () => {
+    let changed = 0;
+    const before = await beforeRun(await backend.database(), {
+      last: LAST,
+      halts: true,
+      afterWriteStatement: (module, b, sql) => {
+        if (module !== "core-block-commit" || b.height !== H) return;
+        // Flipped after the blocks row and back after the hashes row: the loop's own block reference is the same buffer.
+        if (sql.includes("INSERT INTO core_block_commit.blocks") || sql.includes("INSERT INTO core_block_commit.hashes")) {
+          b.hash[0] = (b.hash[0] ?? 0) ^ 0xff;
+          changed++;
+        }
+      },
+    });
+    expect(changed).toBe(2);
+    expect(before.run.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
+    expect(readsOf(before.calls)).toEqual(readsAt([]));
+    expect(rowDifferences(before.rows, (await uninterrupted()).before.rows)).toEqual([]);
+  }, PATIENCE_MS * 2);
+
   it("the keys kept are the retention window's, L(h) to h, after every block of a long run with retainStates raised and lowered and a retried height", async () => {
     const revisions = [
       { start: 15n, settings: { retainStates: 6 } },

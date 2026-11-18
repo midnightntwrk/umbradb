@@ -83,6 +83,36 @@ export function recordingStatements(module: ModuleDeclaration, calls: SentCall[]
   return { ...module, points: points as ModuleDeclaration["points"] };
 }
 
+/** `module`, whose `on-db-write` handle calls `after` once each statement it sent resolved (see {@link BeforeRunOptions}). */
+export function afterWriteStatements(
+  module: ModuleDeclaration,
+  after: (module: string, b: BlockContext, sql: string) => void,
+): ModuleDeclaration {
+  const write = module.points["on-db-write"];
+  if (write === undefined) return module;
+  type Statement = (sql: string, params?: readonly unknown[]) => Promise<unknown>;
+  const points = {
+    ...module.points,
+    "on-db-write": (p: unknown, b: BlockContext, w: Record<string, unknown>) => {
+      const execute = w.execute as Statement;
+      const query = w.query as Statement;
+      const handle = Object.freeze({
+        get height(): unknown {
+          return w.height;
+        },
+        query: (sql: string, params?: readonly unknown[]) => query.call(w, sql, params),
+        execute: async (sql: string, params?: readonly unknown[]) => {
+          const result = await execute.call(w, sql, params);
+          after(module.id, b, sql);
+          return result;
+        },
+      });
+      return (write as (...args: unknown[]) => Promise<void>).call(module.points, p, b, handle);
+    },
+  };
+  return { ...module, points: points as unknown as ModuleDeclaration["points"] };
+}
+
 /**
  * `module`, its callbacks given block contexts that say the block before continues at every height above 0: a
  * negative control's build that uses what it kept whenever the kept block is h − 1.
@@ -255,6 +285,11 @@ export interface BeforeRunOptions {
   readonly ignoring?: boolean;
   /** Wait for a halt as well as the last height. */
   readonly halts?: boolean;
+  /**
+   * Called once each statement `core-ledger-state`'s or `core-block-commit`'s `on-db-write` sent through its handle has
+   * resolved, before that callback goes on: the module's id, the block context and the statement's text.
+   */
+  readonly afterWriteStatement?: (module: string, b: BlockContext, sql: string) => void;
 }
 
 /** What a run gave. */
@@ -438,7 +473,8 @@ export async function beforeRun(db: ProcessDatabase, options: BeforeRunOptions):
     ...(options.commit === undefined ? {} : { commit: coreBlockCommit(options.commit) }),
     modules: (module) => {
       if (!ids.has(module.id)) return module;
-      return recordingStatements(options.ignoring === true ? ignoringContinues(module) : module, calls);
+      const after = options.afterWriteStatement === undefined ? module : afterWriteStatements(module, options.afterWriteStatement);
+      return recordingStatements(options.ignoring === true ? ignoringContinues(after) : after, calls);
     },
     worker: (host: LedgerHost) => recordingApplies(recordingLoads(host, loads), applies),
   });

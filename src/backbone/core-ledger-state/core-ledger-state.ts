@@ -63,8 +63,9 @@
  * **The block before, from memory.** Once `on-db-write` has written a block's rows, it keeps in memory, per process
  * context, what the next block takes of them ({@link KeptBlock}): the block's height, hash, ledger and time (its
  * `core_block_commit.blocks` row), its state's key and root (its `states` row), and the key of each state of the
- * retention window after the block, L(h) to h. It keeps copies of those bytes: the published items and the block
- * context hold the same buffers, which a module may change. At the next block's `on-compute` it takes the state at
+ * retention window after the block, L(h) to h. It keeps copies of those bytes, taken before the block's first write,
+ * from which its state row is written: the published items and the block context hold the original buffers, which
+ * another module may change, also while the writes go on. At the next block's `on-compute` it takes the state at
  * h − 1, the parent time and the keys the block releases from there, and sends none of those three reads, when two
  * things hold: the block context says the block before continues into it (`b.continues`: its `COMMIT` answered in this
  * run of processing, with no failure since, and the writer still has the database session that committed it, so no
@@ -386,11 +387,31 @@ function keptBefore(p: ProcessContext, b: BlockContext): KeptBlock | null {
 }
 
 /**
- * Keeps block `b`, whose rows `applied` describes and which `on-db-write` has just written, for the next block (see the
- * module comment): the keys kept before it stay when `b` continues the block kept, less those below the retention
- * window after `b`; otherwise they are dropped.
+ * The bytes block `b`'s rows are written with, as copies `on-db-write` owns, taken before its first write: the published
+ * `ledger-state` item and the block context hold the original buffers, which another module may change while the writes
+ * go on. The state row is written from them, and they are kept once the writes succeeded ({@link keepBlock}).
  */
-function keepBlock(p: ProcessContext, b: BlockContext, applied: AppliedState, options: CoreLedgerStateOptions): void {
+interface OwnedBytes {
+  readonly hash: Uint8Array;
+  readonly stateKey: Uint8Array;
+  readonly stateRoot: Uint8Array;
+}
+
+/** Block `b`'s {@link OwnedBytes}, from `applied` and its block context. */
+function ownedBytes(b: BlockContext, applied: AppliedState): OwnedBytes {
+  return Object.freeze({
+    hash: Uint8Array.from(b.hash),
+    stateKey: Uint8Array.from(applied.stateKey),
+    stateRoot: Uint8Array.from(applied.stateRoot),
+  });
+}
+
+/**
+ * Keeps block `b`, whose rows `on-db-write` has just written from `owned`, for the next block (see the module comment):
+ * the keys kept before it stay when `b` continues the block kept, less those below the retention window after `b`;
+ * otherwise they are dropped.
+ */
+function keepBlock(p: ProcessContext, b: BlockContext, owned: OwnedBytes, options: CoreLedgerStateOptions): void {
   const window = WINDOW.get(p);
   WINDOW.delete(p);
   const read = window?.height === b.height ? window.keys : undefined;
@@ -401,17 +422,15 @@ function keepBlock(p: ProcessContext, b: BlockContext, applied: AppliedState, op
     if (height >= low) break;
     stateKeys.delete(height);
   }
-  // Copies of the bytes the block's rows were written with: the published items and the block context hold the same
-  // buffers, which a module may change.
-  const stateKey = Uint8Array.from(applied.stateKey);
-  stateKeys.set(b.height, stateKey);
+  // The copies the block's rows were written from (ownedBytes), never the shared buffers.
+  stateKeys.set(b.height, owned.stateKey);
   const kept: KeptBlock = Object.freeze({
     height: b.height,
-    hash: Uint8Array.from(b.hash),
+    hash: owned.hash,
     ledger: ledgerVersionOf(b) as LedgerName,
     timestampMs: blockHeaderOf(b).timestampMs,
-    stateKey,
-    stateRoot: Uint8Array.from(applied.stateRoot),
+    stateKey: owned.stateKey,
+    stateRoot: owned.stateRoot,
     stateKeys,
   });
   KEPT.set(p, options.keep?.(kept) ?? kept);
@@ -960,10 +979,12 @@ export function coreLedgerState(options: CoreLedgerStateOptions = {}): DefinedMo
       },
       async "on-db-write"(p, b, w) {
         const { applied } = pendingOf(p, b);
+        // Copies taken before the first write: the state row is written from them, and the same are kept.
+        const owned = ownedBytes(b, applied);
         const writeFrom = performance.now();
-        await writeBlockRows(w, applied);
+        await writeBlockRows(w, { ...applied, stateKey: owned.stateKey, stateRoot: owned.stateRoot });
         traceAdd("writeBlockMs", performance.now() - writeFrom);
-        keepBlock(p, b, applied, options);
+        keepBlock(p, b, owned, options);
       },
       async "on-settle"(p, run, w) {
         await settleRun(p, run, w, options);
