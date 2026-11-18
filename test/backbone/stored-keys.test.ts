@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { bindCoreLedgerState, CORE_LEDGER_STATE_ID, coreLedgerState, knownKeysOf } from "../../src/backbone/core-ledger-state/core-ledger-state.js";
-import { KnownKeySet, keyText } from "../../src/backbone/core-ledger-state/run-reclaim.js";
+import { KNOWN_KEYS_MAX, KnownKeySet, keyText } from "../../src/backbone/core-ledger-state/run-reclaim.js";
 import {
   CORE_LEDGER_STATE_MIGRATIONS,
   NODES_TABLE,
@@ -44,9 +44,10 @@ import { made, ref } from "./run-reclaim.js";
  *   stored key c (but the blocks made empty), so the `missing` read asks the database about c exactly when the set
  *   lacks it. Consecutive blocks that continue keep c and do not ask about it again (the control); the set is emptied
  *   by a block that does not continue the one before, after `on-settle` throws (its net write, its computation's read,
- *   a refused eviction with restarts off); it is not emptied by a refused eviction's worker restart, nor by a read
- *   through the handle lent to the worker while the eviction is awaited. `knownEmptied` is 1 on the committed line of
- *   a height made again after attempts that failed with nothing learned between.
+ *   a refused eviction with restarts off), and by its bound at a continuing block's settle; it is not emptied by a
+ *   refused eviction's worker restart, nor by a read through the handle lent to the worker while the eviction is
+ *   awaited. `knownEmptied` is 1 on the committed line of a height made again after attempts that failed with nothing
+ *   learned between, and on the line of a continuing block whose settle met the bound, not on the next.
  * - **Through the process**, on the extended DAG fixture (`./refcount-process.ts`), on both backends: a lost connection
  *   at a height's net write, alone and after a refused eviction, empties the set, and the height made again asks the
  *   database about every key it needs. On PostgreSQL through a proxy that ends the writer's backend at a `COMMIT`
@@ -336,6 +337,12 @@ async function chainOn(backend: TestBackend, options: ChainOptions = {}) {
     failQueueRead(on: boolean): void {
       failQueueRead = on;
     },
+    /** Puts the set at its bound without c: c forgotten, other keys learned up to {@link KNOWN_KEYS_MAX}. */
+    fillWithoutC(): void {
+      const { known } = knownKeysOf(p);
+      known.forget(keyText(C.keyBytes));
+      for (let n = 0; known.size < KNOWN_KEYS_MAX; n++) known.learn(`another key ${n}`.padEnd(32, "."));
+    },
     /** Whether the set holds c. */
     holdsC: (): boolean => knownKeysOf(p).known.has(keyText(C.keyBytes)),
     size: (): number => knownKeysOf(p).known.size,
@@ -490,6 +497,29 @@ describe.each(BACKENDS)("the keys found stored, through the module's callbacks, 
         [1, 0, 1],
         [2, 0, 1],
         [3, 0, undefined],
+      ]);
+    } finally {
+      await chain.close();
+    }
+  }, 120_000);
+
+  it("a continuing block whose settle finds c stored when the set holds its bound without c: the set is emptied before c enters, that height's line has knownEmptied 1, and the next block's has none", async () => {
+    const chain = await chainOn(backend);
+    const trace = memoryTrace();
+    try {
+      startTrace(trace.sink);
+      expect(await chain.block(1n)).toEqual({ asked: [C.key], error: null });
+      chain.fillWithoutC();
+      expect([chain.size(), chain.holdsC()]).toEqual([KNOWN_KEYS_MAX, false]);
+      // Block 2 continues block 1; its settle asks about c, finds it stored, and learning it empties the full set first.
+      expect(await chain.block(2n)).toEqual({ asked: [C.key], error: null });
+      expect([chain.size(), chain.holdsC()]).toEqual([1, true]);
+      expect(await chain.block(3n)).toEqual({ asked: [], error: null });
+      stopTrace();
+      expect(hitsAndEmptied(trace.lines())).toEqual([
+        [1, 0, 1],
+        [2, 0, 1],
+        [3, 1, undefined],
       ]);
     } finally {
       await chain.close();
