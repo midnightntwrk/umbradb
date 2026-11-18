@@ -15,24 +15,83 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    # F5 (audit finding): the Pg-only conformance suite (`test/postgres/**`, `test/db/**` and the
-    # other database suites) uses testcontainers (`@testcontainers/postgresql`), which
-    # starts its OWN disposable Postgres container via the Docker daemon already present on
-    # ubuntu-latest runners -- no `services: postgres` block is needed or used. This is the
-    # required merge gate; it never runs the env-gated live tier (`test:live`), which needs a real
-    # preprod network, a funded seed, and a built midnight-wallet checkout none of which are
-    # available (or wanted) in CI. TransactionHistory's tests, the live tier among
-    # them, are kept in `legacy/transaction-history/` outside this run.
-    #
-    # Timeout posture: 0.10.0's suite (345 files, about 5,600 tests, with v8 coverage) takes 10 to 16 minutes on a
-    # many-core host and about 8,800 CPU-seconds in all; on the first pull request run (PR #16, 2026-10-28) a hosted
-    # runner finished 137 of 345 files in 30 minutes, all passing, and was cancelled. `timeout-minutes: 120`, as the
-    # mutation job's, until the suite is split across jobs. StrykerJS mutation is a SEPARATE still-required job (below)
-    # so its cost never competes with this one's clock.
+  shard:
+    # Each shard runs a slice of the test files (by path hash, not duration) and uploads a blob report; the `test`
+    # job merges them. Postgres comes from Testcontainers on the runner's Docker; the live tier never runs here.
+    strategy:
+      fail-fast: false # let every shard finish, so one run reports every failure
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8] # the shard count is this list's length
+    name: test (shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 60
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Chrome for the browser build's tests
+        run: |
+          google-chrome --version
+          echo "UMBRADB_CHROME=$(command -v google-chrome)" >> "$GITHUB_ENV"
+
+      - name: Run conformance gate (one shard)
+        # Coverage floors and the required-tests check run in the `test` job, on the merged reports.
+        env:
+          UMBRADB_CONFORMANCE_DEADLINE_MS: "3000000" # 50 min, under the job timeout; catches a hung worker
+          SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
+        run: npm run test:conformance -- "--shard=$SHARD"
+
+      - name: Upload the shard's blob report
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: conformance-blob-${{ matrix.shard }}
+          path: .vitest-reports/
+          include-hidden-files: true # the directory is hidden, so it is skipped without this
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Why a run failed (out-of-memory kills, memory, containers)
+        # A dead worker or container prints nothing; this tells an OOM kill from a crash.
+        if: failure()
+        continue-on-error: true
+        run: |
+          echo "::group::Kernel out-of-memory kills"
+          sudo dmesg --ctime | grep -iE "out of memory|oom-kill|killed process" || echo "none in the kernel log"
+          echo "::endgroup::"
+          echo "::group::Memory"
+          free -m
+          echo "::endgroup::"
+          echo "::group::Containers"
+          docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Status}}'
+          echo "::endgroup::"
+
+  test:
+    # The required check: merges the shards, then fails on any failed test, missed coverage floor or required test
+    # that didn't pass.
+    needs: shard
+    # Run even when a shard failed: a skipped required check counts as passing.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Every shard passed
+        # The merge can't tell: a shard that never uploaded is just missing from it.
+        env:
+          SHARDS: ${{ needs.shard.result }}
+        run: |
+          if [ "$SHARDS" != "success" ]; then
+            echo "::error::The conformance shards ended '$SHARDS', not 'success'; see the shard jobs."
+            exit 1
+          fi
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -47,96 +106,12 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Chrome for the browser build's tests
-        # `test/browser/` drives the runner image's Google Chrome headless over the
-        # DevTools protocol (`test/browser/chrome.ts`; no test dependency). Its version is printed for the record.
-        run: |
-          google-chrome --version
-          echo "UMBRADB_CHROME=$(command -v google-chrome)" >> "$GITHUB_ENV"
-
-      - name: Run conformance gate (tests + coverage + required-test skip-enforcement)
-        # `npm run test:conformance` is now `scripts/conformance-gate.mjs` (Task 7.1): it runs
-        # `vitest run --coverage` with `UMBRADB_LIVE_PREPROD` UNSET (so the crash/soak/differential
-        # suites execute and do NOT self-skip), emits a Jest-compatible JSON report, then runs the
-        # `check-required-tests.ts` reconciliation over that report. The gate fails if EITHER a test
-        # fails, a `vitest.config.ts` coverage threshold is missed, OR
-        # any manifest `"required"` id did not execute-and-pass (a re-introduced `describe.skipIf`
-        # turns the gate red BY ID, not by luck). The one `WHERE`-gated optional-feature id
-        # (`crash.pg-kill-save.no-duplicate-with-idempotency-key`) is in the manifest's `"deferred"`
-        # section and reconciles as `skipped-pending-feature` — it does NOT fail the gate.
-        #
-        # Suites that ALWAYS self-skip in CI (reported SKIPPED, never silently counted as passed;
-        # none are `"required"` manifest ids, so they cannot make the reconciliation red):
-        #   - test/integration/chain-archive-replay-decode.integration.test.ts (needs a built
-        #     sibling midnight-wallet checkout + a captured indexer SQLite DB, absent in CI).
-        # A green CI run therefore says NOTHING about those suites beyond clean collection.
-        #
-        # The gate's deadline (`UMBRADB_CONFORMANCE_DEADLINE_MS`, default 60 minutes; it catches a hung worker) is 105
-        # minutes here, under the job's 120: on a hosted runner the suite (387 files, about 6,200 tests) takes about 75
-        # minutes. The suite is not split across jobs.
-        env:
-          UMBRADB_CONFORMANCE_DEADLINE_MS: "6300000"
-        run: npm run test:conformance
-
-      - name: Why a run failed (out-of-memory kills, memory, containers)
-        # Runs only when an earlier step failed, and never fails the job itself. A test worker that dies prints
-        # nothing ("Worker exited unexpectedly"), nor does a PostgreSQL container that stops mid-run: the kernel's
-        # out-of-memory kills, the runner's memory and the containers' exit states tell a memory kill from a crash.
-        if: failure()
-        continue-on-error: true
-        run: |
-          echo "::group::Kernel out-of-memory kills"
-          sudo dmesg --ctime | grep -iE "out of memory|oom-kill|killed process" || echo "none in the kernel log"
-          echo "::endgroup::"
-          echo "::group::Memory"
-          free -m
-          echo "::endgroup::"
-          echo "::group::Containers"
-          docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Status}}'
-          echo "::endgroup::"
-
-  mutation:
-    # The StrykerJS mutation gate: a SEPARATE still-required job
-    # (never optional, never live-gated) so mutation cost is off the `test` job's clock. SCOPE: the nine targets
-    # `stryker.conf.json` mutates (graph, dispatch, history, cbor, digest, height-versioned, cursor-table, refcount,
-    # node-source), each with its fast tests in `vitest.mutation.config.ts`; `break` is 65 on the AGGREGATE over
-    # valid mutants, which `scripts/mutation-per-adapter.mjs` sums over one `stryker run --mutate <file>` per target.
-    #
-    # RUNTIME / TIMEOUT: a run on 2026-10-27 measured `npm run test:mutation:ci` at about 58 min in all (3,163 valid
-    # mutants; node-source alone 1,446 s with 121 timed-out mutants, graph 1,068 s, cbor 494 s) on a loaded 24-core
-    # machine with Stryker's fixed `concurrency: 3`. The 45 minutes this job had for 0.9.5's five adapters (~23 min)
-    # would end the gate before its verdict, so the job has 120 minutes: about twice the measurement, for a slower
-    # runner. Uses Testcontainers through the runner's Docker daemon, like the `test` job.
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Download the shards' blob reports
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          persist-credentials: false
+          pattern: conformance-blob-*
+          path: .vitest-reports/
+          merge-multiple: true
 
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "24"
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run StrykerJS mutation gate (nine targets, one run each; aggregate break:65)
-        run: npm run test:mutation:ci
-
-      - name: Why a run failed (out-of-memory kills, memory, containers)
-        # Runs only when an earlier step failed, and never fails the job itself. A test worker that dies prints
-        # nothing ("Worker exited unexpectedly"), nor does a PostgreSQL container that stops mid-run: the kernel's
-        # out-of-memory kills, the runner's memory and the containers' exit states tell a memory kill from a crash.
-        if: failure()
-        continue-on-error: true
-        run: |
-          echo "::group::Kernel out-of-memory kills"
-          sudo dmesg --ctime | grep -iE "out of memory|oom-kill|killed process" || echo "none in the kernel log"
-          echo "::endgroup::"
-          echo "::group::Memory"
-          free -m
-          echo "::endgroup::"
-          echo "::group::Containers"
-          docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Status}}'
-          echo "::endgroup::"
+      - name: Run conformance gate (merge shards, coverage floors, required tests)
+        run: npm run test:conformance -- --merge-reports

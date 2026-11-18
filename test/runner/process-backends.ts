@@ -118,6 +118,10 @@ function pgliteBackend(): ProcessBackend {
 /** PostgreSQL 18 and PGlite 0.5.10. */
 export const PROCESS_BACKENDS: readonly ProcessBackend[] = [postgresBackend(), pgliteBackend()];
 
+/** The backend of `kind`, for a test file that runs on one backend so that the two can go to different CI shards. */
+export const processBackend = (kind: ProcessBackend["kind"]): ProcessBackend =>
+  PROCESS_BACKENDS.find((backend) => backend.kind === kind) as ProcessBackend;
+
 /** `[height, value]` pairs of `sql`'s rows, whose columns `h` and `v` the query casts to integers or text. */
 export async function pairs(db: ProcessDatabase, sql: string): Promise<[number, unknown][]> {
   return (await db.query(sql)).map((row) => [Number(row.h), row.v]);

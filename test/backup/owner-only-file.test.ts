@@ -8,7 +8,7 @@ import { openPglite } from "../../src/db/pglite.js";
 
 /**
  * The backup's owner-only file in this process, without changing the umask (`file-mode.test.ts` sets one, which a
- * worker thread cannot, so a mutation run cannot run it): a `chmod` the file system refuses fails the backup with that
+ * worker thread cannot): a `chmod` the file system refuses fails the backup with that
  * error, the temporary file removed and nothing written.
  */
 

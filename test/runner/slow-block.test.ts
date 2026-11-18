@@ -13,7 +13,7 @@ import { a142Problems, HOLD_MS, holding, observe, quietProblems, type Seen, SLOW
  * With `slowBlockMs` 5000 it never appears.
  *
  * The oracles are `./slow-block-harness.ts`'s. The cases the requirement leaves to the design are
- * `./slow-block-cases.test.ts`, the committed negative controls `./slow-block.negative-control.test.ts`.
+ * `./slow-block-cases.ts`, the committed negative controls `./slow-block.negative-control.test.ts`.
  *
  * Each test waits on purpose (the callback's 3 s, then 1.5 s after the commit): its budget is that plus Vitest's 60 s.
  */

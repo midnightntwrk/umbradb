@@ -363,7 +363,7 @@ The current defaults are:
 - **PostgreSQL:** the database's parts, `ssl` passed to the driver explicitly: `require` unless the host is loopback
   or a socket directory, where it is `disable` (`src/config/database.ts:66`, `src/db/postgres.ts:250`,
   `src/config/database-parts.ts:76`).
-  The lockfile pins `postgres` 3.4.9 (`package-lock.json:5054`).
+  The lockfile pins `postgres` 3.4.9 (`package-lock.json:3377`).
 - **API reads:** a default 30-second PostgreSQL statement and idle timeout; PGlite validates the option but does
   not apply it (`src/config/core-settings.ts:183`, `src/db/postgres.ts:376`, `src/db/pglite.ts:307`).
 - **Development features:** opt-in defaults to false; PGlite and private backups require it
