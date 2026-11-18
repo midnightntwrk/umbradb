@@ -4,7 +4,7 @@ import { CORE_LEDGER_STATE_ID, type KeptBlock, LEDGER_STATE_ITEM, type LedgerSta
 import { type CoreRevision, retainedFrom } from "../../src/backbone/core-ledger-state/retention.js";
 import type { PostgresParts } from "../../src/config/database-parts.js";
 import { UmbraError } from "../../src/db/errors.js";
-import type { Database } from "../../src/db/api.js";
+import type { Database, Transaction } from "../../src/db/api.js";
 import { WRITER_LOCK_CLASS, WRITER_LOCK_KEY } from "../../src/db/writer-lock.js";
 import type { LedgerName } from "../../src/ledger/types.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
@@ -20,6 +20,7 @@ import {
   readsAt,
   readsOf,
   rowDifferences,
+  rowsOf,
   storedKeys,
 } from "./block-before.js";
 import { PATIENCE_MS } from "./ingest-harness.js";
@@ -335,6 +336,26 @@ describe.each(PROCESS_BACKENDS)("the block before, kept in memory, through the p
       expect(rowDifferences(before.rows, (await uninterrupted()).before.rows), fault).toEqual([]);
     }
   }, PATIENCE_MS * 6);
+
+  it("with retainStates 2, the state row of 8 deleted by another writer while 9's COMMIT answer was lost: 10 commits and 11 halts releasing 8, as reading the released keys alone does; the rows at the halt are an uninterrupted run's to 10 less that row", async () => {
+    const settings = { retainStates: 2 };
+    const deleted = async (tx: Transaction): Promise<void> => {
+      await tx.execute("DELETE FROM core_ledger_state.states WHERE height = 8");
+    };
+    const before = await beforeRun(await backend.database(), { last: 12, settings, lose: { at: 9n, how: "landed", then: deleted }, halts: true });
+    expect(before.run.status).toMatchObject({
+      state: "halted",
+      cursor: 10n,
+      reason: { code: "callback-error", height: 11n, module: CORE_LEDGER_STATE_ID, point: "on-compute" },
+    });
+    expect(String(before.run.errors.at(-1))).toContain("block 11 releases the states of 8 to 8, and core_ledger_state.states holds 0 of them");
+    // What a build that reads only the keys a block releases leaves: an uninterrupted run to 10, less the deleted row.
+    const referenceDb = await backend.database();
+    const reference = await beforeRun(referenceDb, { last: 10, settings });
+    expect(reference.run.status).toMatchObject({ cursor: 10n, reason: null });
+    await referenceDb.query("DELETE FROM core_ledger_state.states WHERE height = 8");
+    expect(before.rows.get(10n)).toEqual(await rowsOf(referenceDb));
+  }, PATIENCE_MS * 4);
 
   /** Each kept value a test changes, with how, and the field the failure names. */
   const changes: readonly { readonly field: string; readonly change: (kept: KeptBlock) => KeptBlock }[] = [

@@ -183,14 +183,19 @@ export async function stateAt(read: Pick<ReadHandle, "query">, height: bigint): 
   };
 }
 
-/** The keys of the states stored after the blocks `from` to `to` − 1, in height order (see {@link KEYS_SQL}). */
-export async function stateKeysBetween(
+/**
+ * The keys of the states stored after the blocks `from` to `to` − 1, by height, in height order (see {@link KEYS_SQL}):
+ * a height without a row is absent.
+ */
+export async function stateKeysByHeight(
   read: Pick<ReadHandle, "query">,
   from: bigint,
   to: bigint,
-): Promise<Uint8Array[]> {
+): Promise<Map<bigint, Uint8Array>> {
   const rows = await read.query(KEYS_SQL, [from, to]);
-  return rows.map((row) => bytesOf(row.state_key, `${STATES_TABLE}.state_key`));
+  return new Map(
+    rows.map((row) => [BigInt(row.height as bigint | number | string), bytesOf(row.state_key, `${STATES_TABLE}.state_key`)]),
+  );
 }
 
 /** The contracts deployed below `height` (see {@link DEPLOYED_SQL}), read at h − 1. */

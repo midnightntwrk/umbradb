@@ -171,7 +171,7 @@ import {
   STATES_TABLE,
   type StoredState,
   stateAt,
-  stateKeysBetween,
+  stateKeysByHeight,
 } from "./sql.js";
 import { type RunCheck, type RunFault, type RunOutcome, RunReclaim, type RunTables, sqlRunTables, writeNet } from "./run-reclaim.js";
 
@@ -489,6 +489,18 @@ function keysIn(keys: ReadonlyMap<bigint, Uint8Array>, from: bigint, to: bigint)
 }
 
 /**
+ * The keys of the states block `b` releases, those of `from` to `to` − 1, from `keys` (by height); fails when one is
+ * missing, naming how many of them there are.
+ */
+function releasedIn(b: BlockContext, keys: ReadonlyMap<bigint, Uint8Array>, from: bigint, to: bigint): Uint8Array[] {
+  const released = keysIn(keys, from, to);
+  if (released !== null) return released;
+  let held = 0;
+  for (let height = from; height < to; height++) if (keys.has(height)) held++;
+  throw new Error(`block ${b.height} releases the states of ${from} to ${to - 1n}, and ${STATES_TABLE} holds ${held} of them`);
+}
+
+/**
  * The keys of the states that block `b` releases from the retention window (see the module comment): from what was
  * kept of the block before, `kept`, when it holds every one of them, else read from `states`.
  */
@@ -502,33 +514,24 @@ async function releasesOf(
   const low = options.retainedFrom ?? retainedFrom;
   const { from, to } = releasedBy(revisionsOf(p), b.height, low);
   if (kept === null && b.height > 0n) {
-    // A run's first height: one read of the keys of the states from the one it releases first to h − 1, so that the
-    // blocks continuing it find in memory every key they release (see the module comment).
-    const keys = await stateKeysBetween(read, from, b.height);
-    if (keys.length !== Number(b.height - from)) {
-      const released = from < to ? `releases the states of ${from} to ${to - 1n}` : "releases no state";
-      const next = to < b.height ? `, and reads for the blocks after it those of ${to} to ${b.height - 1n}` : "";
-      throw new Error(`block ${b.height} ${released}${next}, and ${STATES_TABLE} holds ${keys.length} of them`);
-    }
-    WINDOW.set(p, { height: b.height, keys: new Map(keys.map((key, index) => [from + BigInt(index), key])) });
-    return keys.slice(0, Math.max(0, Number(to - from)));
+    // A run's first height: one read of the keys of the states from the one it releases first to h − 1, by height, so
+    // that the blocks continuing it find in memory every key they release (see the module comment). A height whose row
+    // is missing stays missing: only the keys this block releases must all be there, as when it read those alone, and
+    // a later block that releases a missing one reads it (below), as it would have.
+    const keys = await stateKeysByHeight(read, from, b.height);
+    WINDOW.set(p, { height: b.height, keys });
+    return releasedIn(b, keys, from, to);
   }
   if (from >= to) return [];
   const held = kept === null ? null : keysIn(kept.stateKeys, from, to);
   if (held !== null && options.checkKept !== true) return held;
-  const keys = await stateKeysBetween(read, from, to);
-  if (keys.length !== Number(to - from)) {
-    throw new Error(
-      `block ${b.height} releases the states of ${from} to ${to - 1n}, ` +
-        `and ${STATES_TABLE} holds ${keys.length} of them`,
-    );
-  }
+  const stored = releasedIn(b, await stateKeysByHeight(read, from, to), from, to);
   for (const [index, key] of (held ?? []).entries()) {
-    const stored = keys[index] as Uint8Array;
+    const database = stored[index] as Uint8Array;
     const field = `the released key of the state after block ${from + BigInt(index)}`;
-    if (!sameBytes(key, stored)) throw keptDiffers(b, field, hex(key), hex(stored));
+    if (!sameBytes(key, database)) throw keptDiffers(b, field, hex(key), hex(database));
   }
-  return keys;
+  return stored;
 }
 
 /**
