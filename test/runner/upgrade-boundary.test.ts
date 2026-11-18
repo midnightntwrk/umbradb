@@ -8,6 +8,7 @@ import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import { chainDataHeaders, readChainDataView } from "../../src/runner/envelope.js";
 import { FinalizedLoop, type LoopInput } from "../../src/runner/loop.js";
 import type { ProcessingEnd, ProcessStatus } from "../../src/runner/process.js";
+import { C_POINTS, continuesExpected, continuesModule, continuesOf, continuesProblems } from "./block-continues-harness.js";
 import { cursorIn, pairs, PROCESS_BACKENDS, type ProcessDatabase } from "./process-backends.js";
 import { core, entryOf, loggingModule, settle, startProcess, testBuild } from "./process-build.js";
 
@@ -242,6 +243,32 @@ describe.each(PROCESS_BACKENDS)("the upgrade boundary on $name", (backend) => {
     const { log } = observed.boundary;
     expect(log.indexOf("n on-stop-height@49")).toBeGreaterThan(log.indexOf("n on-after-db-write@49"));
     expect(log.indexOf("n on-after-db-write@49")).toBeGreaterThan(log.indexOf("m on-db-write@49 k=1"));
+  }, 300_000);
+
+  it("continues across the boundary: false at the 1.0.0 build's first height, true to 49; false at the 1.1.0 build's re-delivery of 49 and at 50, true from 51", async () => {
+    const db = await backend.database();
+    const listen = { extra: { listen: { api: "127.0.0.1:0" } } };
+    const withC = (version: Version) => (log: string[]) => [...buildOf(version)(log), continuesModule(log)];
+    const c = continuesModule([]);
+    const old = [core(db.setting, 1, listen), moduleM("1.0.0", []).entry({ start: 1, config: { k: 1 } }), entryOf(moduleN([]), 1, {}, 49), entryOf(c, 1)];
+    const scheduled = versionEntry({ id: "m", start: 50, version: "1.1.0" });
+    const upgraded = [
+      core(db.setting, 1, listen),
+      versionEntry({ id: "m", start: 1, version: "1.0.0", config: { k: 1 } }),
+      moduleM("1.1.0", []).entry({ start: 50, config: { k: 2 } }),
+      entryOf(moduleN([]), 1, {}, 49),
+      entryOf(c, 1),
+    ];
+    const boundary = await phase(db, withC("1.0.0"), [...old, scheduled], 60n);
+    expect(boundary.cursor).toBe(49);
+    expect(continuesProblems(continuesOf(boundary.log), continuesExpected(49n))).toEqual([]);
+    const after = await phase(db, withC("1.1.0"), upgraded, 60n);
+    expect(after.cursor).toBe(60);
+    const expected: Record<string, boolean[]> = { "on-after-db-write@49": [false] };
+    for (let height = 50n; height <= 60n; height++) {
+      for (const point of C_POINTS) expected[`${point}@${height}`] = [point !== "on-fetch" && point !== "on-parse" && height > 50n];
+    }
+    expect(continuesProblems(continuesOf(after.log), expected)).toEqual([]);
   }, 300_000);
 
   it("refuses the 1.0.0 build at a restart once the cursor is at the boundary", async () => {
