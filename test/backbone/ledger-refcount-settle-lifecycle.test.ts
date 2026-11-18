@@ -36,7 +36,8 @@ import { type DagRun, runDag } from "./refcount-process.js";
  * And on PostgreSQL 18, a `COMMIT` of block h whose answer is lost, with the ledger worker in the process (a proxy
  * between the process and the server ends the writer's backend at that `COMMIT`, `../runner/commit-proxy.ts`): the
  * cursor read after the reconnection decides. When the server committed h, h is not computed again: the worker
- * applied it and was sent its eviction once, and its commit reaches the worker at h's `on-after-db-write`; when it did
+ * applied it and was sent its eviction once, and its commit reaches the worker once that cursor read found h committed,
+ * before h's `on-after-db-write` (the engine tells the worker's host, which sends it); when it did
  * not, h is made again from `on-compute`: applied again (the worker gives its pending result) and its eviction sent
  * again. Either way the worker loads no state from the database, and the tables after every block are a run's with no
  * fault.
