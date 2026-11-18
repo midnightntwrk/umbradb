@@ -17,12 +17,18 @@
  *
  * **Exact, not refreshed.** After a run's net write, {@link CountsCopy.apply} changes the copy as the net write changed
  * the tables: each held key's count takes its change, and its root count the run's root-count change; each node the
- * run wrote new enters, a row, with its count change as its count and its root-count change as its root count (once a
- * settle committed, a key that is no row has no reference and no root count: a run that left one would have failed its
- * `missing-reference` check), and with its list; a node written with another child list has its list replaced; every
+ * run wrote new enters, a row, with its count change as its count and its root-count change as its root count (on
+ * undamaged tables, once a settle committed, a key that is no row has no reference and no root count: a run that left
+ * one would have failed its `missing-reference` check), and with its list; a node written with another child list has its list replaced; every
  * key the run deleted leaves. While a run computes, `root_counts` already holds the run's own changes (each block's
  * `on-db-write` writes them, and nothing else writes the table), so a held root count is answered as held plus the
  * run's change (`RunReclaim.rootChanges`), and one read from the database is held less it.
+ *
+ * The copy equals the tables for the keys it holds given tables that were undamaged when the process started and that
+ * only this process writes. On tables already damaged it can differ from the database: a positive reference count for a
+ * key that is no row, for instance, which a run then writes new without reading its counts (the database adds the run's
+ * change to the stale count, the copy takes the change alone). The height and the reason of a halt can then change,
+ * with no hand edit while the process runs; `verify` finds the difference at the first read of that key.
  *
  * **Its values decide what a run deletes and what its checks pass**, unlike the keys found stored (`./stored-keys.ts`),
  * which only skip a check. Unless it verifies, what finds a copy that differs from the tables is only the net

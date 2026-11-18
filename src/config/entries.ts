@@ -93,7 +93,8 @@ export type CoreSettingsBase = {
   readonly developmentOptIn?: boolean;
   /**
    * `core-ledger-state`'s copy of the counts and child lists its reclamation reads: the keys it holds at most of each
-   * (100,000; 0 for no copy), and `verify`, which also reads every key it answers and halts on a difference.
+   * (100,000; 0 for no copy), and `verify`, which also reads every key it answers and halts on a difference. The copy
+   * equals the tables given tables undamaged when the process started and written by this process only.
    */
   readonly reclamationCache?: { readonly keys?: number; readonly verify?: boolean };
 };

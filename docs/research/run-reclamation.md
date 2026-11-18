@@ -765,11 +765,18 @@ lists of rows the run deletes.
 change of it, and its root count the run's root-count change (`RunReclaim.rootChanges`); each node the run wrote new
 enters as a row, its count change as its count and its root-count change as its root count; a node written with
 another list has its list replaced; every key the run deleted leaves (counts and list). A new node's count and root
-count before the run are 0: once a settle committed, a key that is no row has no reference and no root count, since a
-run that left one fails its `missing-reference` check. While a run computes, `root_counts` already holds the run's own
+count before the run are 0 on undamaged tables: once a settle committed, a key that is no row has no reference and no
+root count, since a run that left one fails its `missing-reference` check. While a run computes, `root_counts` already holds the run's own
 changes (each block's `on-db-write` writes them, and nothing else writes the table), so a held root count is answered
 as held plus the run's change, and a root count read from the database is held less it. The update reads only the
 run's keys, never the whole copy.
+
+The copy equals the tables for the keys it holds given tables that were undamaged when the process started and
+that only this process writes. On tables already damaged it can differ from the database: a positive reference count
+for a key that is no row, for instance, which a run then writes new without reading its counts (the database adds the
+run's change to the stale count, the copy takes the change alone; `ledger-refcount-restart.negative-control.test.ts`
+has such tables after its torn write). The height and the reason of a halt can then change, with no hand edit while
+the process runs; `verify` finds the difference at the first read of that key.
 
 **Its values decide what a run deletes.** Unlike the keys found stored, which only skip a check, a held count, root
 count or row flag is what the computation computes with. Unless the copy verifies, one kind of difference shows:
@@ -787,6 +794,7 @@ count. So the computation is right only while the copy is exact, which the updat
 | The process restarts; a restore | a new process context: empty | `ledger-refcount-copy.test.ts` (a verifying run stopped and started again) |
 | `sweep` off, then on; a conversion or upgrade block; a worker restart after a refused eviction | nothing: only net writes change counts and lists, and the copy follows each | `stored-keys.test.ts` (the restart); the generated histories of `counts-copy.test.ts` (`sweep` drawn per block) |
 | The bound, `reclamationCache.keys` | a read above it is answered and not held; an update that would pass it empties the copy first; it never holds more than the bound of counts or of lists | `counts-copy.test.ts`; `stored-keys.test.ts` (a continuing block whose update meets the bound: `copyEmptied` on its line, not the next's, and the set not emptied); `ledger-refcount-copy.test.ts` (a copy of 30 keys, verifying) |
+| Tables already damaged when the process started (a positive count for a key that is no row, written new by a run) | can differ from the database; the halt's height and reason can change | `ledger-refcount-restart.negative-control.test.ts` (its torn write's tables: `row-count-mismatch` at h + 8, verifying `copy-mismatch` at h + 7) |
 | A count or node row changed by hand while the process runs | read at once if the copy does not hold its key; if it does, unseen, but by a verifying copy at its first read of that key, until a block that does not continue the one before, or the bound, empties the copy | the verifying copy's tests in `counts-copy.test.ts` |
 
 **Verifying** (`reclamationCache.verify`): every key the copy answers is also read, and a held value that

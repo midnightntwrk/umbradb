@@ -149,7 +149,8 @@
  * after the last settle, so that a settle reads from the database only the counts and lists the copy lacks. After the
  * net write it is brought up to date from the run's outcome. It is emptied at the same events as the keys found stored
  * (a block that does not continue the one before, at its `on-compute`; a settle that throws, at once) and by its bound,
- * the `core` entry's `reclamationCache.keys` (100,000 keys of counts and as many lists; 0 for no copy). With
+ * the `core` entry's `reclamationCache.keys` (100,000 keys of counts and as many lists; 0 for no copy). It equals the
+ * tables for the keys it holds given tables undamaged when the process started and written by this process only. With
  * `reclamationCache.verify` every key it answers is also read, and a difference halts with `copy-mismatch`.
  *
  * The declaration ({@link CORE_LEDGER_STATE}) is a constant built over its rules. A negative control's build composes
