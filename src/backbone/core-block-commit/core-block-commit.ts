@@ -19,7 +19,7 @@
  *    and is not checked. The part takes S from its process context's revisions ({@link startOf}), in memory.
  *
  * **The block before, from memory.** The part keeps, per process context, the height and a copy of the hash of the last
- * block it wrote. A block whose context says the block before continues into it (`b.continues`: its `COMMIT` answered
+ * block it wrote, taken before that block's first write, from which both its rows are written. A block whose context says the block before continues into it (`b.continues`: its `COMMIT` answered
  * in this run of processing, with no failure since, and the writer still has the database session that committed it)
  * and whose kept block is the one at h − 1 is checked against the kept hash, and the check sends no statement; a block
  * that does not extend the kept one fails with the same `parent-mismatch`, naming the kept hash as the stored one. Any
@@ -275,9 +275,11 @@ export function coreBlockCommit(options: CoreBlockCommitOptions = {}) {
         // The block before, written by this part in this process, when b continues it and it is the block at h − 1.
         const written = b.continues ? WRITTEN.get(p) : undefined;
         const kept = written !== undefined && written.height === b.height - 1n ? written.hash : null;
-        await commitBlock(w, b, startOf(p), kept, options.checkKept === true);
-        // A copy: the block context's hash is a buffer modules share.
-        WRITTEN.set(p, Object.freeze({ height: b.height, hash: Uint8Array.from(b.hash) }));
+        // A copy taken before the first write: the block context's hash is a buffer modules share, which one may change
+        // while the writes go on. Both rows are written from it, and the same is kept.
+        const hash = Uint8Array.from(b.hash);
+        await commitBlock(w, Object.freeze({ ...b, hash }), startOf(p), kept, options.checkKept === true);
+        WRITTEN.set(p, Object.freeze({ height: b.height, hash }));
       },
     },
   });

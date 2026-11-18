@@ -63,21 +63,27 @@
  * **The block before, from memory.** Once `on-db-write` has written a block's rows, it keeps in memory, per process
  * context, what the next block takes of them ({@link KeptBlock}): the block's height, hash, ledger and time (its
  * `core_block_commit.blocks` row), its state's key and root (its `states` row), and the key of each state of the
- * retention window after the block, L(h) to h. It keeps copies of those bytes: the published items and the block
- * context hold the same buffers, which a module may change. At the next block's `on-compute` it takes the state at
- * h − 1, the parent time and the keys the block releases from there, and sends none of those three reads, when two
- * things hold: the block context says the block before continues into it (`b.continues`: its `COMMIT` answered in this
- * run of processing, with no failure since, and the writer still has the database session that committed it, so no
- * other writer can have changed a row since), and the block kept is the one at h − 1. Otherwise it reads them, as at a
- * run's first height (a start, any retry, a replaced writer's session), for a height made again (the block kept is that
- * height's own), and for a block that does not continue the one before, and keeps again from that block. At such a
- * first height it reads in the same statement the keys of the states from the first one it releases to h − 1, so the
- * blocks that continue it find every key they release in memory: with `retainStates` R that is up to R + 1 rows, and a
- * statement also where the block releases nothing but R is above 0, which reading the block before at every block never
- * sent. What is kept is what the block's rows hold in its transaction, and a transaction that did not commit makes the
- * next block's `continues` false, so nothing kept is taken from a block that was rolled back. With the option
- * `checkKept` (the tests and the replays of recorded chains) each value taken from memory is also read and compared,
- * and a difference fails `on-compute`, naming the height, the field and both values.
+ * retention window after the block, L(h) to h. It keeps copies of those bytes, taken before the block's first write,
+ * from which its state row is written: the published items and the block context hold the original buffers, which
+ * another module may change, also while the writes go on. At the next block's `on-compute` it takes the state at h − 1,
+ * the parent time and the keys the block releases from there, and sends none of those reads (up to three: a block that
+ * releases nothing, as while a retention window fills, sent no key read anyway), when two things hold: the block
+ * context says the block before continues into it (`b.continues`: its `COMMIT` answered in this run of processing, with
+ * no failure since, and the writer still has the database session that committed it, so no other writer can have
+ * changed a row since), and the block kept is the one at h − 1. Otherwise it reads them, as at a run's first height (a
+ * start, any retry, a replaced writer's session), for a height made again (the block kept is that height's own), and
+ * for a block that does not continue the one before, and keeps again from that block. At such a first height it reads
+ * in the same statement the keys of the states from the first one it releases, L(h − 1), to h − 1, so the blocks that
+ * continue it find every key they release in memory: the retention window after the block before, up to its
+ * `retainStates` + 1 rows (after a lowered `retainStates` the earlier, larger window: 7 rows where 6 was lowered to 1);
+ * that statement is sent also where the block releases nothing (as while a window fills), which reading the block
+ * before at every block never sent. They are kept by height: a row missing there stays missing, only a key the block
+ * releases must be stored, and a later block that releases a missing one reads the keys it releases, so a damaged
+ * `states` table fails at the block it failed at before. What is kept is what the block's rows hold in its transaction,
+ * and a transaction that did not commit makes the next block's `continues` false, so nothing kept is taken from a block
+ * that was rolled back. With the option `checkKept` (the tests and the replays of recorded chains) each value taken
+ * from memory is also read and compared, and at every block every key kept of the window after the block before,
+ * missing and extra heights included; a difference fails `on-compute`, naming the height, the field and both values.
  *
  * **The ledger conversion.** The first ledger v9 block on a v8 state is the conversion block F: the worker converts
  * the state first and applies F to it (`../../ledger/worker/engine.ts`).
@@ -178,7 +184,7 @@ import {
   STATES_TABLE,
   type StoredState,
   stateAt,
-  stateKeysBetween,
+  stateKeysByHeight,
 } from "./sql.js";
 import { StoredKeys } from "./stored-keys.js";
 import {
@@ -309,8 +315,8 @@ export interface CoreLedgerStateOptions {
   readonly restartOnRefusedEviction?: boolean;
   /**
    * Whether each value `on-compute` takes from what it kept of the block before is also read from the database and
-   * compared, a difference failing it with the height, the field and both values; false by default. The tests and the
-   * replays of recorded chains build with it.
+   * compared, and at every block every key kept of the retention window, a difference failing it with the height, the
+   * field and both values; false by default. The tests and the replays of recorded chains build with it.
    */
   readonly checkKept?: boolean;
   /**
@@ -417,11 +423,31 @@ function keptBefore(p: ProcessContext, b: BlockContext): KeptBlock | null {
 }
 
 /**
- * Keeps block `b`, whose rows `applied` describes and which `on-db-write` has just written, for the next block (see the
- * module comment): the keys kept before it stay when `b` continues the block kept, less those below the retention
- * window after `b`; otherwise they are dropped.
+ * The bytes block `b`'s rows are written with, as copies `on-db-write` owns, taken before its first write: the published
+ * `ledger-state` item and the block context hold the original buffers, which another module may change while the writes
+ * go on. The state row is written from them, and they are kept once the writes succeeded ({@link keepBlock}).
  */
-function keepBlock(p: ProcessContext, b: BlockContext, applied: AppliedState, options: CoreLedgerStateOptions): void {
+interface OwnedBytes {
+  readonly hash: Uint8Array;
+  readonly stateKey: Uint8Array;
+  readonly stateRoot: Uint8Array;
+}
+
+/** Block `b`'s {@link OwnedBytes}, from `applied` and its block context. */
+function ownedBytes(b: BlockContext, applied: AppliedState): OwnedBytes {
+  return Object.freeze({
+    hash: Uint8Array.from(b.hash),
+    stateKey: Uint8Array.from(applied.stateKey),
+    stateRoot: Uint8Array.from(applied.stateRoot),
+  });
+}
+
+/**
+ * Keeps block `b`, whose rows `on-db-write` has just written from `owned`, for the next block (see the module comment):
+ * the keys kept before it stay when `b` continues the block kept, less those below the retention window after `b`;
+ * otherwise they are dropped.
+ */
+function keepBlock(p: ProcessContext, b: BlockContext, owned: OwnedBytes, options: CoreLedgerStateOptions): void {
   const window = WINDOW.get(p);
   WINDOW.delete(p);
   const read = window?.height === b.height ? window.keys : undefined;
@@ -432,17 +458,15 @@ function keepBlock(p: ProcessContext, b: BlockContext, applied: AppliedState, op
     if (height >= low) break;
     stateKeys.delete(height);
   }
-  // Copies of the bytes the block's rows were written with: the published items and the block context hold the same
-  // buffers, which a module may change.
-  const stateKey = Uint8Array.from(applied.stateKey);
-  stateKeys.set(b.height, stateKey);
+  // The copies the block's rows were written from (ownedBytes), never the shared buffers.
+  stateKeys.set(b.height, owned.stateKey);
   const kept: KeptBlock = Object.freeze({
     height: b.height,
-    hash: Uint8Array.from(b.hash),
+    hash: owned.hash,
     ledger: ledgerVersionOf(b) as LedgerName,
     timestampMs: blockHeaderOf(b).timestampMs,
-    stateKey,
-    stateRoot: Uint8Array.from(applied.stateRoot),
+    stateKey: owned.stateKey,
+    stateRoot: owned.stateRoot,
     stateKeys,
   });
   KEPT.set(p, options.keep?.(kept) ?? kept);
@@ -501,6 +525,18 @@ function keysIn(keys: ReadonlyMap<bigint, Uint8Array>, from: bigint, to: bigint)
 }
 
 /**
+ * The keys of the states block `b` releases, those of `from` to `to` − 1, from `keys` (by height); fails when one is
+ * missing, naming how many of them there are.
+ */
+function releasedIn(b: BlockContext, keys: ReadonlyMap<bigint, Uint8Array>, from: bigint, to: bigint): Uint8Array[] {
+  const released = keysIn(keys, from, to);
+  if (released !== null) return released;
+  let held = 0;
+  for (let height = from; height < to; height++) if (keys.has(height)) held++;
+  throw new Error(`block ${b.height} releases the states of ${from} to ${to - 1n}, and ${STATES_TABLE} holds ${held} of them`);
+}
+
+/**
  * The keys of the states that block `b` releases from the retention window (see the module comment): from what was
  * kept of the block before, `kept`, when it holds every one of them, else read from `states`.
  */
@@ -514,33 +550,51 @@ async function releasesOf(
   const low = options.retainedFrom ?? retainedFrom;
   const { from, to } = releasedBy(revisionsOf(p), b.height, low);
   if (kept === null && b.height > 0n) {
-    // A run's first height: one read of the keys of the states from the one it releases first to h − 1, so that the
-    // blocks continuing it find in memory every key they release (see the module comment).
-    const keys = await stateKeysBetween(read, from, b.height);
-    if (keys.length !== Number(b.height - from)) {
-      const released = from < to ? `releases the states of ${from} to ${to - 1n}` : "releases no state";
-      const next = to < b.height ? `, and reads for the blocks after it those of ${to} to ${b.height - 1n}` : "";
-      throw new Error(`block ${b.height} ${released}${next}, and ${STATES_TABLE} holds ${keys.length} of them`);
-    }
-    WINDOW.set(p, { height: b.height, keys: new Map(keys.map((key, index) => [from + BigInt(index), key])) });
-    return keys.slice(0, Math.max(0, Number(to - from)));
+    // A run's first height: one read of the keys of the states from the one it releases first to h − 1, by height, so
+    // that the blocks continuing it find in memory every key they release (see the module comment). A height whose row
+    // is missing stays missing: only the keys this block releases must all be there, as when it read those alone, and
+    // a later block that releases a missing one reads it (below), as it would have.
+    const keys = await stateKeysByHeight(read, from, b.height);
+    WINDOW.set(p, { height: b.height, keys });
+    return releasedIn(b, keys, from, to);
+  }
+  if (kept !== null && options.checkKept === true) {
+    // The checking option: every key kept of the window after the block before against what `states` holds, at every
+    // block, also where it releases none; then the released ones as stored.
+    const stored = await stateKeysByHeight(read, from, b.height);
+    checkKeptKeys(b, kept, stored, from, to);
+    return releasedIn(b, stored, from, to);
   }
   if (from >= to) return [];
   const held = kept === null ? null : keysIn(kept.stateKeys, from, to);
-  if (held !== null && options.checkKept !== true) return held;
-  const keys = await stateKeysBetween(read, from, to);
-  if (keys.length !== Number(to - from)) {
-    throw new Error(
-      `block ${b.height} releases the states of ${from} to ${to - 1n}, ` +
-        `and ${STATES_TABLE} holds ${keys.length} of them`,
-    );
+  // Not all of them kept (a row missing when the window was read): the keys it releases, read.
+  return held ?? releasedIn(b, await stateKeysByHeight(read, from, to), from, to);
+}
+
+/**
+ * With the checking option: the keys `kept` holds, which are those of the window after the block before, `from`
+ * (L(h − 1)) to h − 1, against `stored`, what `states` holds for those heights. A height kept and not stored, stored
+ * and not kept, kept with another key, or kept outside the window fails block `b`, naming the key and both values
+ * (`none` for a missing one).
+ */
+function checkKeptKeys(
+  b: BlockContext,
+  kept: KeptBlock,
+  stored: ReadonlyMap<bigint, Uint8Array>,
+  from: bigint,
+  to: bigint,
+): void {
+  const heights = [...new Set([...kept.stateKeys.keys(), ...stored.keys()])].sort((x, y) => (x < y ? -1 : x > y ? 1 : 0));
+  for (const height of heights) {
+    const inWindow = height >= from && height < b.height;
+    const memory = kept.stateKeys.get(height);
+    const database = inWindow ? stored.get(height) : undefined;
+    if (memory === undefined ? database === undefined : database !== undefined && sameBytes(memory, database)) continue;
+    const what = inWindow && height < to ? "released key" : "kept key";
+    const outside = inWindow ? "" : `, outside the window ${from} to ${b.height - 1n}`;
+    const field = `the ${what} of the state after block ${height}${outside}`;
+    throw keptDiffers(b, field, memory === undefined ? "none" : hex(memory), database === undefined ? "none" : hex(database));
   }
-  for (const [index, key] of (held ?? []).entries()) {
-    const stored = keys[index] as Uint8Array;
-    const field = `the released key of the state after block ${from + BigInt(index)}`;
-    if (!sameBytes(key, stored)) throw keptDiffers(b, field, hex(key), hex(stored));
-  }
-  return keys;
 }
 
 /**
@@ -1026,10 +1080,12 @@ export function coreLedgerState(options: CoreLedgerStateOptions = {}): DefinedMo
       },
       async "on-db-write"(p, b, w) {
         const { applied } = pendingOf(p, b);
+        // Copies taken before the first write: the state row is written from them, and the same are kept.
+        const owned = ownedBytes(b, applied);
         const writeFrom = performance.now();
-        await writeBlockRows(w, applied);
+        await writeBlockRows(w, { ...applied, stateKey: owned.stateKey, stateRoot: owned.stateRoot });
         traceAdd("writeBlockMs", performance.now() - writeFrom);
-        keepBlock(p, b, applied, options);
+        keepBlock(p, b, owned, options);
       },
       async "on-settle"(p, run, w) {
         await settleRun(p, run, w, options);

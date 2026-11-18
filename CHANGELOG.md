@@ -203,30 +203,38 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   the worker did not apply (where `core-block-parsed` runs without `core-ledger-state`, and the last committed block
   delivered again after a restart) gets the release alone. After a lost `COMMIT` the host is told nothing until the
   cursor is read again: a cursor at the block tells it committed, one at the block before tells it rolled back, and
-  any other halts without telling the host anything, since the outcome is not known. A stop in between tells the host
-  nothing; the next start delivers the last committed block again.
+  any other halts without telling the host anything, since the outcome is not known. The same holds when another
+  failure is reported first (a module's handle used while the `COMMIT` runs). A stop in between tells the host
+  nothing; the next start delivers the last committed block again. A block whose `on-fetch` or `on-parse` failed
+  while the node source prepared it ahead is told rolled back when processing reaches its height.
   A block context now has `continues`: true when the block before was committed by this process with no failure
   between (its `COMMIT` answered in the same run of processing) and the writer still has the database session that
-  committed it, false at the first height after a start or a retry, for a height processed again, at the re-delivery
-  after a restart, once the writer's session was replaced (on PostgreSQL a connection lost while idle between two
-  blocks), and always at `on-fetch` and `on-parse`. A block whose callbacks were told true and whose transaction then
-  finds the writer's session replaced fails before it writes, as a lost connection (retryable), and is made again. A
+  committed it when the callback's context is made, false at the first height after a start or a retry, for a height
+  processed again, at the re-delivery after a restart, from the first context made after the writer's session was
+  replaced (on PostgreSQL a connection lost while idle, also during a block's own callbacks or after its `COMMIT`), and
+  always at `on-fetch` and `on-parse`. A block some of whose callbacks were told true and whose transaction then finds
+  the writer's session replaced fails before it writes, as a lost connection (retryable), and is made again. A
   database now says which session its writer has (`Database.writerSession`). It may be false at any block. The module
   guide's §3 describes it.
 - **`core-ledger-state` and `core-block-commit` take the block before from memory when the block continues it.** Each
-  keeps, when it has written a block's rows, its own copy of what the next block reads of them: `core-ledger-state` the
-  state's key and root, the block's hash, ledger and time, and the keys of the states of the retention window;
-  `core-block-commit` the block's hash. A block whose context says `continues` and whose kept block is the one at h − 1
-  takes them from memory, so per block three reads fewer at `core-ledger-state`'s `on-compute` (the state at h − 1, the
-  parent time, the keys of the states it releases) and one fewer at `core-block-commit`'s `on-db-write` (the parent's
-  hash). Those reads are sent only at a run's first block: after a start, any retry, a replaced writer's session, and
-  for a height made again. There `core-ledger-state`'s read of the keys also takes the window's, from the first state
-  the block releases to h − 1 (up to `retainStates` + 1 rows), in the same statement, which it now sends at a run's
-  first block also when that block releases nothing, so that no block continuing it reads a key. The block trace's
-  `sqlN` and the statement totals show the difference; the stored rows and the failures are the same, except that the
-  parent check does not see a block at h − 1 changed by a writer that ignores the writer lock. A new option of
-  `coreLedgerState` and of `core-block-commit`'s `coreBlockCommit`, `checkKept`, also reads every value taken from
-  memory and compares it, a difference failing the block; the tests and the replays of recorded chains use it.
+  keeps, once it has written a block's rows, its own copy of what the next block reads of them, taken before those
+  writes and the one the rows are written from: `core-ledger-state` the state's key and root, the block's hash, ledger
+  and time, and the keys of the states of the retention window; `core-block-commit` the block's hash. A block whose
+  context says `continues` and whose kept block is the one at h − 1 takes them from memory, so per block up to three
+  reads fewer at `core-ledger-state`'s `on-compute` (the state at h − 1 and the parent time, and the keys of the
+  states it releases where it releases any: while a retention window fills a block releases none, and no key read was
+  sent there before either) and one fewer at `core-block-commit`'s `on-db-write` (the parent's hash). Those reads are
+  sent only at a run's first block: after a start, any retry, a replaced writer's session, and for a height made
+  again. There `core-ledger-state`'s read of the keys also takes the window's, from the first state the block releases
+  to h − 1: the retention window after the block before, up to its `retainStates` + 1 rows (after a lowered
+  `retainStates` that is the earlier, larger window: 7 rows at a restart where 6 was lowered to 1), in the same
+  statement, which it now sends at a run's first block also when that block releases nothing, so that no block
+  continuing it reads a key. A row of that window missing from `states` fails only the block that releases it, as
+  before. The block trace's `sqlN` and the statement totals show the difference; the stored rows and the failures are
+  the same, except that the parent check does not see a block at h − 1 changed by a writer that ignores the writer
+  lock. A new option of `coreLedgerState` and of `core-block-commit`'s `coreBlockCommit`, `checkKept`, also reads every
+  value taken from memory, and at every block every key kept of the retention window, and compares them, a difference
+  failing the block; the tests and the replays of recorded chains use it.
 - **The ledger state's reclamation remembers the keys it finds stored.** `core-ledger-state` keeps, from block to
   block, the keys its reclamation's `missing` read found stored, so a block's references are asked about only when no
   earlier block found them stored. It uses them only while each block continues the one before (`continues`: the

@@ -303,17 +303,19 @@ Next: types §4, chain data §6 and §9, routes §7, settings §8, ready-made ta
   the height is committed. Set up in `on-start-db`; register routes in `on-start-api`.
 - **The block before, from memory: `block.continues`.** True exactly when the block before was committed by this
   process in the same run of processing (its `COMMIT` answered, no failure, retry or restart since) and the writer
-  still has the database session that committed it. That session holds the writer lock, so no other writer can have
-  changed a row since, and what your module kept in memory while it processed that block is what the database holds.
-  Then you may use that memory instead of reading the block before from the database. It is false at the first height
-  after a start or a retry, for a height processed again after a failure (§12), for the height after one whose
-  `COMMIT` lost its answer, at the re-delivery after a restart, once the writer's session was replaced (on PostgreSQL,
-  a connection lost while idle between two blocks is replaced by the next block's, and another writer may have held
-  the lock in between; on PGlite the session lasts as long as the process), and always at `on-fetch` and `on-parse`,
-  which may run before the block before committed. If the writer's session is replaced after your callbacks were told
-  true, the block is not written on the new session: that attempt fails as a lost connection does (retryable), and the
-  block is made again with `continues` false. It may be false at any block: read the block before from the database
-  then, and drop what you kept.
+  still has the database session that committed it when your callback's context is made (at `on-compute` and
+  `on-after-db-write` once its read is open). That session holds the writer lock, so no other writer can have changed
+  a row since, and what your module kept in memory while it processed that block is what the database holds. Then you
+  may use that memory instead of reading the block before from the database. It is false at the first height after a
+  start or a retry, for a height processed again after a failure (§12), for the height after one whose `COMMIT` lost
+  its answer, at the re-delivery after a restart, from the first context made after the writer's session was replaced
+  to the end of that block (on PostgreSQL, a connection lost while idle is replaced by the next transaction's, and
+  another writer may have held the lock in between, also during the block's own callbacks or after its `COMMIT`; on
+  PGlite the session lasts as long as the process), and always at `on-fetch` and `on-parse`, which may run before the
+  block before committed. If the writer's session is replaced after some of your callbacks were told true, the block
+  is not written on the new session: that attempt fails as a lost connection does (retryable), and the block is made
+  again with `continues` false. It may be false at any block: read the block before from the database then, and drop
+  what you kept.
 - **`on-settle`.** `"on-settle"(processContext, run, writer)` gets `run`, `{ first, last }`: heights, `bigint`s as
   `block.height` is, both included, `first <= last`. UmbraDB calls it inside the transaction that holds the run's last
   block, after every module's `on-db-write` of that block and before the `COMMIT`, in `on-db-write`'s order. `writer`

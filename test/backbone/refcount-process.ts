@@ -63,6 +63,8 @@ export interface DagRunOptions {
   readonly commit?: ModuleDeclaration;
   /** The start of each module's entry, by id (an activation above S); S unless given. */
   readonly startOf?: (id: string) => number;
+  /** The stop of each module's entry (`ingest`'s); none unless given. */
+  readonly stopOf?: (id: string) => number | undefined;
   /** The `core` entry's stop: the process stops there. */
   readonly stop?: bigint;
   /**
@@ -136,6 +138,7 @@ export async function runDag(db: ProcessDatabase, options: DagRunOptions = {}): 
     ...(options.loop === undefined ? {} : { loop: options.loop }),
     ...(commit === undefined ? {} : { commit }),
     ...(options.startOf === undefined ? {} : { startOf: options.startOf }),
+    ...(options.stopOf === undefined ? {} : { stopOf: options.stopOf }),
     ...(options.stop === undefined ? {} : { stop: options.stop }),
     ledgerWorker: () => {
       const recording = recordingWorker(startLedgerWorker(options.loader?.(data) ?? { loader: SWEEP_LOADER, loaderData: data }), record);

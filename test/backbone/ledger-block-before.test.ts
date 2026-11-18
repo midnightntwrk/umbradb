@@ -4,7 +4,7 @@ import { CORE_LEDGER_STATE_ID, type KeptBlock, LEDGER_STATE_ITEM, type LedgerSta
 import { type CoreRevision, retainedFrom } from "../../src/backbone/core-ledger-state/retention.js";
 import type { PostgresParts } from "../../src/config/database-parts.js";
 import { UmbraError } from "../../src/db/errors.js";
-import type { Database } from "../../src/db/api.js";
+import type { Database, Transaction } from "../../src/db/api.js";
 import { WRITER_LOCK_CLASS, WRITER_LOCK_KEY } from "../../src/db/writer-lock.js";
 import type { LedgerName } from "../../src/ledger/types.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
@@ -20,6 +20,7 @@ import {
   readsAt,
   readsOf,
   rowDifferences,
+  rowsOf,
   storedKeys,
 } from "./block-before.js";
 import { PATIENCE_MS } from "./ingest-harness.js";
@@ -52,7 +53,15 @@ import { runProblems } from "./refcount-process.js";
  * - every row of the backbone's and the ledger modules' tables (`nodes` with its payloads, the counts and the queue
  *   included) is compared after every height and at each halt, with an uninterrupted run or a run with the memory off;
  * - what `core-ledger-state` keeps is its own: a module that changes the bytes of a published `ledger-state` item after
- *   the block changes nothing the next block takes;
+ *   the block, or right after the block's state row was written and before its `on-db-write` ended, changes nothing
+ *   the next block takes; the block context's hash changed between `core-block-commit`'s two rows changes neither row;
+ * - with `retainStates` 2 and the `states` row of 8 deleted while 9's `COMMIT` answer was lost, 10 commits and 11 halts
+ *   releasing 8, as reading the released keys alone does, with the rows of an uninterrupted run to 10 less that row;
+ * - with the checking option and `retainStates` 2, a kept key the next block does not release, changed or removed,
+ *   fails that block's `on-compute`, naming it;
+ * - a pause between h − 1 and h inside the run: h takes the block before from memory; a failure in `on-stop-height` of
+ *   an entry stopping at h: h + 1 reads it; a kept block two heights below (a skipped height): h reads
+ *   `core-ledger-state`'s block before, and `core-block-commit`, which kept h − 1, does not;
  * - the keys it keeps are the retention window's and no more, through a long run, a `retainStates` raised and lowered,
  *   and a retried height; the block before is read again after an activation boundary of another module (not: no
  *   height of the run is a first one), a stop as before an upgrade, and failures after the block was kept: at
@@ -225,6 +234,46 @@ describe.each(PROCESS_BACKENDS)("the block before, kept in memory, through the p
     expect(rowDifferences(before.rows, (await uninterrupted()).before.rows)).toEqual([]);
   }, PATIENCE_MS * 2);
 
+  it("a published ledger-state item's bytes changed after h's state row was written and before its on-db-write ended: the next block takes what was written", async () => {
+    let changed = 0;
+    const before = await beforeRun(await backend.database(), {
+      last: LAST,
+      afterWriteStatement: (module, b, sql) => {
+        if (module !== CORE_LEDGER_STATE_ID || b.height !== H || !sql.includes("INSERT INTO core_ledger_state.states")) return;
+        // Another module holding the published item changes it in place while the block's writes go on.
+        const item = b.items.get(LEDGER_STATE_ITEM) as LedgerStateItem;
+        item.stateKey[0] = (item.stateKey[0] ?? 0) ^ 0xff;
+        item.stateRoot[0] = (item.stateRoot[0] ?? 0) ^ 0xff;
+        changed++;
+      },
+    });
+    expect(changed).toBe(1);
+    expect(before.run.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
+    expect(before.run.errors).toEqual([]);
+    expect(readsOf(before.calls)).toEqual(readsAt([]));
+    expect(rowDifferences(before.rows, (await uninterrupted()).before.rows)).toEqual([]);
+  }, PATIENCE_MS * 2);
+
+  it("the block context's hash changed after h's blocks row was written and before core-block-commit's on-db-write ended: both its rows and the next block's parent check take the hash it was given", async () => {
+    let changed = 0;
+    const before = await beforeRun(await backend.database(), {
+      last: LAST,
+      halts: true,
+      afterWriteStatement: (module, b, sql) => {
+        if (module !== "core-block-commit" || b.height !== H) return;
+        // Flipped after the blocks row and back after the hashes row: the loop's own block reference is the same buffer.
+        if (sql.includes("INSERT INTO core_block_commit.blocks") || sql.includes("INSERT INTO core_block_commit.hashes")) {
+          b.hash[0] = (b.hash[0] ?? 0) ^ 0xff;
+          changed++;
+        }
+      },
+    });
+    expect(changed).toBe(2);
+    expect(before.run.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
+    expect(readsOf(before.calls)).toEqual(readsAt([]));
+    expect(rowDifferences(before.rows, (await uninterrupted()).before.rows)).toEqual([]);
+  }, PATIENCE_MS * 2);
+
   it("the keys kept are the retention window's, L(h) to h, after every block of a long run with retainStates raised and lowered and a retried height", async () => {
     const revisions = [
       { start: 15n, settings: { retainStates: 6 } },
@@ -295,6 +344,93 @@ describe.each(PROCESS_BACKENDS)("the block before, kept in memory, through the p
       expect(rowDifferences(before.rows, (await uninterrupted()).before.rows), fault).toEqual([]);
     }
   }, PATIENCE_MS * 6);
+
+  it("with retainStates 2, the state row of 8 deleted by another writer while 9's COMMIT answer was lost: 10 commits and 11 halts releasing 8, as reading the released keys alone does; the rows at the halt are an uninterrupted run's to 10 less that row", async () => {
+    const settings = { retainStates: 2 };
+    const deleted = async (tx: Transaction): Promise<void> => {
+      await tx.execute("DELETE FROM core_ledger_state.states WHERE height = 8");
+    };
+    const before = await beforeRun(await backend.database(), { last: 12, settings, lose: { at: 9n, how: "landed", then: deleted }, halts: true });
+    expect(before.run.status).toMatchObject({
+      state: "halted",
+      cursor: 10n,
+      reason: { code: "callback-error", height: 11n, module: CORE_LEDGER_STATE_ID, point: "on-compute" },
+    });
+    expect(String(before.run.errors.at(-1))).toContain("block 11 releases the states of 8 to 8, and core_ledger_state.states holds 0 of them");
+    // What a build that reads only the keys a block releases leaves: an uninterrupted run to 10, less the deleted row.
+    const referenceDb = await backend.database();
+    const reference = await beforeRun(referenceDb, { last: 10, settings });
+    expect(reference.run.status).toMatchObject({ cursor: 10n, reason: null });
+    await referenceDb.query("DELETE FROM core_ledger_state.states WHERE height = 8");
+    expect(before.rows.get(10n)).toEqual(await rowsOf(referenceDb));
+  }, PATIENCE_MS * 4);
+
+  /** A kept key of the window a test changes or removes, with retainStates 2, where block 1 releases nothing. */
+  const windowChanges: readonly { readonly name: string; readonly memory: RegExp; readonly change: (kept: KeptBlock) => KeptBlock }[] = [
+    {
+      name: "an unreleased kept key changed",
+      memory: /^0xee/,
+      change: (kept) =>
+        kept.height !== 0n
+          ? kept
+          : { ...kept, stateKeys: new Map([...kept.stateKeys].map(([height, key]) => [height, height === 0n ? new Uint8Array(32).fill(0xee) : key])) },
+    },
+    {
+      name: "a kept key removed",
+      memory: /^none$/,
+      change: (kept) => (kept.height !== 0n ? kept : { ...kept, stateKeys: new Map([...kept.stateKeys].filter(([height]) => height !== 0n)) }),
+    },
+  ];
+
+  it.each(windowChanges)("with the checking option and retainStates 2, $name fails block 1's on-compute, naming the key and both values", async ({ memory, change }) => {
+    const before = await beforeRun(await backend.database(), {
+      last: LAST,
+      settings: { retainStates: 2 },
+      core: { checkKept: true, keep: change },
+      halts: true,
+    });
+    expect(before.run.status).toMatchObject({
+      state: "halted",
+      cursor: 0n,
+      reason: { code: "callback-error", height: 1n, module: "core-ledger-state", point: "on-compute" },
+    });
+    const message = (before.run.errors.at(-1) as Error | undefined)?.message ?? "";
+    const named = /^block 1: the block before as core-ledger-state kept it in memory differs from the database: (.+) is (\S+) in memory and (\S+) in the database$/.exec(message);
+    expect(named?.[1], message).toBe("the kept key of the state after block 0");
+    expect(named?.[2]).toMatch(memory);
+    expect(named?.[3]).toMatch(/^0x[0-9a-f]{64}$/);
+  }, PATIENCE_MS * 2);
+
+  it("a pause between h − 1 and h, held and released inside the run: h takes the block before from memory, and the rows are an uninterrupted run's", async () => {
+    let paused = 0;
+    const before = await beforeRun(await backend.database(), { last: LAST, pauseAfter: { at: H - 1n, reached: () => paused++ } });
+    expect(paused).toBe(1);
+    expect(before.run.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
+    expect(readsOf(before.calls)).toEqual(readsAt([]));
+    expect(loadedKeys(before.loads)).toEqual(loadsOf(before, LAST));
+    expect(rowDifferences(before.rows, (await uninterrupted()).before.rows)).toEqual([]);
+  }, PATIENCE_MS * 2);
+
+  it("a failure in on-stop-height of an entry stopping at h, after h committed: h + 1, the next run's first height, reads the block before; the rows are an uninterrupted run's", async () => {
+    const before = await beforeRun(await backend.database(), {
+      last: LAST,
+      faultsStop: Number(H),
+      faults: new Map([[`on-stop-height@${H}`, connectionLost()]]),
+    });
+    expect(before.run.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
+    expect(before.run.lines.some((line) => line.startsWith("processing retries in"))).toBe(true);
+    expect(readsOf(before.calls)).toEqual(readsAt([{ height: H + 1n }]));
+    expect(rowDifferences(before.rows, (await uninterrupted()).before.rows)).toEqual([]);
+  }, PATIENCE_MS * 4);
+
+  it("a kept block two heights below (a skipped height): h reads core-ledger-state's block before though its context says continues, and core-block-commit, which kept h − 1, does not", async () => {
+    const skipped = (kept: KeptBlock): KeptBlock => (kept.height === H - 1n ? { ...kept, height: H - 2n } : kept);
+    const before = await beforeRun(await backend.database(), { last: LAST, core: { keep: skipped } });
+    expect(before.run.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
+    const at = `ledger on-compute@${H}#1`;
+    expect(readsOf(before.calls)).toEqual({ ...readsAt([]), state: [at], time: [at], keys: [at] });
+    expect(rowDifferences(before.rows, (await uninterrupted()).before.rows)).toEqual([]);
+  }, PATIENCE_MS * 2);
 
   /** Each kept value a test changes, with how, and the field the failure names. */
   const changes: readonly { readonly field: string; readonly change: (kept: KeptBlock) => KeptBlock }[] = [

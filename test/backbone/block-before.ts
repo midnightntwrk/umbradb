@@ -6,6 +6,7 @@ import { UmbraError } from "../../src/db/errors.js";
 import type { LedgerHost } from "../../src/ledger/worker/host.js";
 import type { BlockContext, BlockRun, ModuleDeclaration } from "../../src/modules/declaration.js";
 import { FinalizedLoop, type HeightRun, type LoopInput } from "../../src/runner/loop.js";
+import type { LoopPauses } from "../../src/runner/pause.js";
 import type { LostCommit } from "../runner/block-continues-harness.js";
 import type { ProcessDatabase } from "../runner/process-backends.js";
 import { recordingLoads, type SeenLoad } from "./ledger-restart.js";
@@ -81,6 +82,36 @@ export function recordingStatements(module: ModuleDeclaration, calls: SentCall[]
     ]),
   );
   return { ...module, points: points as ModuleDeclaration["points"] };
+}
+
+/** `module`, whose `on-db-write` handle calls `after` once each statement it sent resolved (see {@link BeforeRunOptions}). */
+export function afterWriteStatements(
+  module: ModuleDeclaration,
+  after: (module: string, b: BlockContext, sql: string) => void,
+): ModuleDeclaration {
+  const write = module.points["on-db-write"];
+  if (write === undefined) return module;
+  type Statement = (sql: string, params?: readonly unknown[]) => Promise<unknown>;
+  const points = {
+    ...module.points,
+    "on-db-write": (p: unknown, b: BlockContext, w: Record<string, unknown>) => {
+      const execute = w.execute as Statement;
+      const query = w.query as Statement;
+      const handle = Object.freeze({
+        get height(): unknown {
+          return w.height;
+        },
+        query: (sql: string, params?: readonly unknown[]) => query.call(w, sql, params),
+        execute: async (sql: string, params?: readonly unknown[]) => {
+          const result = await execute.call(w, sql, params);
+          after(module.id, b, sql);
+          return result;
+        },
+      });
+      return (write as (...args: unknown[]) => Promise<void>).call(module.points, p, b, handle);
+    },
+  };
+  return { ...module, points: points as unknown as ModuleDeclaration["points"] };
 }
 
 /**
@@ -232,7 +263,7 @@ export interface BeforeRunOptions {
   readonly lose?: LoseCommit;
   /**
    * What module `block-before-faults` throws, once each: `<point>@<h>` (`on-compute`, `on-db-write`, `on-settle`,
-   * `on-after-db-write`) to the error.
+   * `on-after-db-write`, `on-stop-height`) to the error.
    */
   readonly faults?: ReadonlyMap<string, Error>;
   /** Called at module `block-before-faults`'s `on-db-write` of each height, before its fault. */
@@ -243,6 +274,13 @@ export interface BeforeRunOptions {
   readonly between?: { readonly after: bigint; readonly act: (db: Database) => Promise<void> };
   /** Module `block-before-faults`'s entry starts here (an activation boundary); S unless given. */
   readonly faultsFrom?: number;
+  /** Module `block-before-faults`'s entry stops here (its `on-stop-height` runs there); none unless given. */
+  readonly faultsStop?: number;
+  /**
+   * A pause between `at` and the height after it: once `at`'s `COMMIT` answered the test holds the process's pause
+   * (the loop's `LoopPauses`), and releases it 50 ms after the loop paused, calling `reached` then.
+   */
+  readonly pauseAfter?: { readonly at: bigint; readonly reached: () => void };
   /** The `core` entry's stop: the process stops there, as before an upgrade. */
   readonly stop?: bigint;
   /** Later revisions of the `core` entry (a `retainStates` change). */
@@ -255,6 +293,11 @@ export interface BeforeRunOptions {
   readonly ignoring?: boolean;
   /** Wait for a halt as well as the last height. */
   readonly halts?: boolean;
+  /**
+   * Called once each statement `core-ledger-state`'s or `core-block-commit`'s `on-db-write` sent through its handle has
+   * resolved, before that callback goes on: the module's id, the block context and the statement's text.
+   */
+  readonly afterWriteStatement?: (module: string, b: BlockContext, sql: string) => void;
 }
 
 /** What a run gave. */
@@ -380,14 +423,22 @@ function faultsModule(options: BeforeRunOptions, holder: { db?: Database }): Mod
       async "on-after-db-write"(_p, b) {
         fail(`on-after-db-write@${b.height}`);
       },
+      async "on-stop-height"(_p, at) {
+        fail(`on-stop-height@${at.height}`);
+      },
     },
   };
 }
 
 /** The loop of a run (see the module comment). */
 function loopOf(options: BeforeRunOptions, holder: { db?: Database }): new (input: LoopInput) => FinalizedLoop {
-  const { lose, continues, between } = options;
-  const state: { armed: LoseCommit | undefined; done: boolean; acted: boolean } = { armed: undefined, done: false, acted: false };
+  const { lose, continues, between, pauseAfter } = options;
+  const state: { armed: LoseCommit | undefined; done: boolean; acted: boolean; paused: boolean } = {
+    armed: undefined,
+    done: false,
+    acted: false,
+    paused: false,
+  };
   return class extends FinalizedLoop {
     constructor(input: LoopInput) {
       const db = losing(input.db, state);
@@ -404,6 +455,15 @@ function loopOf(options: BeforeRunOptions, holder: { db?: Database }): new (inpu
       if (between !== undefined && run.height === between.after && !state.acted && holder.db !== undefined) {
         state.acted = true;
         await between.act(holder.db);
+      }
+      if (pauseAfter !== undefined && run.height === pauseAfter.at && !state.paused) {
+        state.paused = true;
+        const hold = (this.input.pause as LoopPauses | undefined)?.hold("pause");
+        if (hold === undefined) throw new Error("the process gave its loop no pause to hold");
+        void hold.reached.then(() => {
+          pauseAfter.reached();
+          setTimeout(() => hold.release(), 50);
+        });
       }
     }
 
@@ -432,13 +492,15 @@ export async function beforeRun(db: ProcessDatabase, options: BeforeRunOptions):
     ...(options.stop === undefined ? {} : { stop: options.stop }),
     ...(options.revisions === undefined ? {} : { revisions: options.revisions }),
     ...(options.faultsFrom === undefined ? {} : { startOf: (id: string) => (id === "block-before-faults" ? (options.faultsFrom as number) : 0) }),
+    ...(options.faultsStop === undefined ? {} : { stopOf: (id: string) => (id === "block-before-faults" ? options.faultsStop : undefined) }),
     settings: { backoffCeilingMs: 20, ...options.settings },
     user: [faultsModule(options, holder), rowsWatcher(rows), ...(options.user ?? [])],
     loop: loopOf(options, holder),
     ...(options.commit === undefined ? {} : { commit: coreBlockCommit(options.commit) }),
     modules: (module) => {
       if (!ids.has(module.id)) return module;
-      return recordingStatements(options.ignoring === true ? ignoringContinues(module) : module, calls);
+      const after = options.afterWriteStatement === undefined ? module : afterWriteStatements(module, options.afterWriteStatement);
+      return recordingStatements(options.ignoring === true ? ignoringContinues(after) : after, calls);
     },
     worker: (host: LedgerHost) => recordingApplies(recordingLoads(host, loads), applies),
   });
