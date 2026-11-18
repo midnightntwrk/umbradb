@@ -42,8 +42,8 @@ import { type RefcountStep, refcountStep, sqlRefcountTables, writeRefcount } fro
  *   to the reclamation (computed at `on-settle`);
  * - `after-eviction`: in `on-settle`, once the worker answered the run's eviction: inside the block's transaction,
  *   before the net write, so the database after a crash there is still the one after h − 1;
- * - `after-node-writes`: in `on-settle`, after the net write's node statement, before its first count or queue
- *   statement (`refcountWriter`, the handle those statements run through);
+ * - `after-node-writes`: in `on-settle`, after the net write's node statement, before its first count, queue or
+ *   delete statement (`refcountWriter`, the handle those statements run through, the node statement not among them);
  * - `between-step-writes`: after that first statement, before its second;
  * - `before-commit`: the block transaction's body ended (every `on-db-write`, the cursor check), before its `COMMIT`
  *   (a `FinalizedLoop` whose `write` reports it);

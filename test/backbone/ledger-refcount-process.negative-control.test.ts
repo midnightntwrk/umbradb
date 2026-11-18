@@ -138,13 +138,15 @@ describe.each(PROCESS_BACKENDS)("negative controls on $name", (backend: ProcessB
     };
     const before = reach(at - 1);
     const only = [...reach(at)].filter((key) => !before.has(key));
-    let deleted = 0;
+    // The delete runs once, before the first count, queue or delete statement of the net write at 20, which comes
+    // after its node statement: so every row it names is written by then.
+    let deleted = -1;
     const writer = (w: Pick<BlockWriteHandle, "execute">, height: bigint): Pick<BlockWriteHandle, "execute"> =>
       height !== BigInt(at)
         ? w
         : {
             async execute(sql, params) {
-              if (deleted === 0) {
+              if (deleted < 0) {
                 deleted = await w.execute("DELETE FROM core_ledger_state.nodes WHERE node_key = ANY($1::bytea[])", [
                   only.map((key) => Uint8Array.from(Buffer.from(key, "hex"))),
                 ]);
