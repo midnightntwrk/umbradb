@@ -428,7 +428,7 @@ counts and queue (after a restart, for one).
 | `block-header` | `core-block-fetch` | block | `on-fetch` | height, hashes, roots, `specVersion`, `timestampMs` |
 | `block-body` | `core-block-fetch` | block | `on-fetch` | the extrinsics; an unsigned one's call decoded |
 | `runtime-metadata` | `core-block-fetch` | block | `on-fetch` | the runtime's `spec_version` and metadata bytes |
-| `ledger-version` | `core-block-fetch` | block | `on-fetch` | the block's ledger version (`v8`, `v9`) |
+| `ledger-version` | `core-block-fetch` | block | `on-fetch` | the block's ledger version (`v8`, `v9-rc3`, `v9-rc5`, `v9`) |
 | `blocks` | `core-block-commit` | table | any read | `core_block_commit.blocks`: hashes, versions, `block_time` |
 | `chain-events` | `core-chain-events` | both | `on-fetch` | `System::Events`; `core_chain_events.events` |
 | `block-parsed` | `core-block-parsed` | both | `on-parse` | transactions; `core_block_parsed.transactions` |
@@ -454,17 +454,58 @@ counts and queue (after a restart, for one).
 
 ## 7. The module API
 
-- **Routes.** `api.http(method, path, handler)` takes `GET` or `POST` and a path of `/` and segments, each a literal
-  (letters, digits and ``-._~!$&'()*+,;=@``) or a parameter `:name`; a literal wins over a parameter. The handler gets
-  `{ params, body }` and a read handle: `params` holds the query's and the path's parameters (the path's win), and a
-  `POST`'s `body` is its parsed JSON (integers beyond 2^53 as `bigint`). Two registrations of one method and path, by
-  you or another module, refuse startup with `duplicate-api-route`, even when the two modules run at different heights.
+- **Routes.** `api.http(method, path, handler, options?)` takes `GET` or `POST` and a path of `/` and segments, each a
+  literal (letters, digits and ``-._~!$&'()*+,;=@``) or a parameter `:name`; a literal wins over a parameter. The
+  handler gets `{ params, headers, body }` and a read handle: `params` holds the query's and the path's parameters (the
+  path's win); `headers` the request's headers, names in lower case, the first value of a repeated one; and a `POST`'s
+  `body` its parsed JSON (integers beyond 2^53 as `bigint`; undefined when empty). A GET's body is ignored. Two
+  registrations of one method and path, by you or another module, refuse startup with `duplicate-api-route`, even when
+  the two modules run at different heights and whatever their options.
+- **Binary bodies and body limits.** `options` is `{ body?: "json" | "binary", maxBodyBytes? }`. With
+  `body: "binary"` the handler's `body` is a `Uint8Array` of the request's bytes, neither decoded nor parsed (empty when
+  there are none, and for a GET), in a buffer of its own at offset 0, so a `DataView` or typed array over `body.buffer`
+  sees exactly the body. A body is limited to 1 MiB unless the route sets `maxBodyBytes`, above or below that; a body
+  over the limit is answered 413 `request-too-large` before the handler runs.
+
+  ```ts
+  api.http(
+    "POST",
+    "/my-module/query",
+    async ({ headers, body }) => {
+      if (headers["content-type"] !== "application/octet-stream") return { status: 415, body: { error: "binary only" } };
+      const view = new DataView(body.buffer); // the body's own buffer: offset 0, its length
+      const count = view.getUint16(0, true); // little-endian, whatever the platform's order
+      return { status: 200, headers: { "Content-Type": "application/octet-stream" }, body: answerFor(view, count) };
+    },
+    { body: "binary", maxBodyBytes: 8 * 1_048_576 },
+  );
+  ```
 - **Answers.** Return `{ status, headers?, body }`, the status from 200 to 599. The body is sent as JSON unless you set
   a `Content-Type` and give a string or bytes; UmbraDB changes no body. It adds two headers to every answer:
   `X-Umbra-Version` (the build) and `X-Umbra-Config-Hash` (it changes when the process restarts with other
   configuration data). Name your own headers without `X-Umbra-`. A handler that throws is answered 500
   `internal-error` with a fixed message, its error going to the log. On PostgreSQL a request's read is bounded by the
   core entry's `apiReadTimeoutMs` (504 `query-timeout`).
+- **Files.** Return `{ status: 200, headers?, file: { path, contentType? } }` to answer with a file on disk: `path` is
+  absolute, `contentType` is `application/octet-stream` unless given. UmbraDB streams the file after the request's
+  read is released, a chunk at a time as the client takes it, so a file of hundreds of MB is never held in memory. It
+  sets `Content-Type`, `Content-Length` and `Accept-Ranges: bytes` itself, replacing yours of those names, and keeps
+  your other headers (`ETag`, `Cache-Control`). A GET with one range of bytes — `Range: bytes=a-b`, `bytes=a-` or
+  `bytes=-n` — is answered 206 with that part and `Content-Range`; a range that holds none of the file is answered 416
+  `range-not-satisfiable` with `Content-Range: bytes */size`. Several ranges, another unit, a malformed range, a POST's
+  range, and an `If-Range` that is not your answer's own strong `ETag` get the whole file (200). A path that is not
+  absolute, or a file that is missing or not a regular file, is answered 500 `internal-error`, its error going to the
+  log; delete a file only once no answer can still name it. A client that goes away, or a read error mid-file, ends the
+  connection.
+
+  ```ts
+  api.http("GET", "/my-module/blob/:digest", async ({ params }) => {
+    const path = artifacts.get(params.digest ?? ""); // absolute paths of the files you wrote
+    if (path === undefined) return { status: 404, body: { error: "no-such-artifact" } };
+    const headers = { ETag: `"${params.digest}"`, "Cache-Control": "public, max-age=31536000, immutable" };
+    return { status: 200, headers, file: { path } };
+  });
+  ```
 - **Stating the height you read.** `answerChainData(read, answer)` as in §2.4. For other shapes:
   `readChainDataView(read)` gives `{ view, height, hash }`, `chainDataHeaders(view)` the three headers, and
   `withViewExtensions(body, view)` puts them in a GraphQL response's `extensions`, its `data` unchanged.
@@ -508,6 +549,22 @@ configSchema: z.object({
   trees' first free indexes and roots); `ledger-events` (every ledger event but contract logs: zswap inputs and
   outputs, deploys, DUST events, …); `segment-results` (per transaction, its outcome and each segment's success);
   `vm-logs` (the contract logs of the applied segments; none on ledger `v8`).
+- **Ledger events.** `ledger-events` is an array of `LedgerEvent` (a type of the package entry), one per event in
+  application order, and `core_ledger_state.events` (a public table) holds the same, one row each keyed
+  `(height, tx_index, event_index)`: `kind`, `logical_segment`, `physical_segment`, `bytes` (the ledger's serialization
+  of the event), and what is read from it — `nullifier` (a zswap input's, a DUST spend's), `commitment` (a zswap
+  output's, a DUST spend's new one), `tree_index` (a zswap output's position in the commitment tree, a DUST spend's
+  commitment index, a DUST initial UTXO's generation index), `contract_address`, and, for a `zswap-output` only:
+  - `evidence` (`ZswapEvidence`): `ciphertext` (the coin encrypted to its recipient), `public` (the coin and
+    recipient in the clear, as system transactions make outputs) or `none` (an output a contract owns); null for every
+    other kind;
+  - `ciphertext`: for `ciphertext` evidence, its 224 bytes, null otherwise: the sender's one-time point in its 32-byte
+    compressed encoding, then six elements, each its 32-byte little-endian integer. Element 0 encrypts 0, which is
+    the recipient's ownership test (point × encryption secret → `k = Poseidon(k*.x, k*.y)`; element 0 = `Poseidon(k,
+    0)`); elements 1–5 encrypt the coin's value, token type and nonce.
+  The table's constraints keep them consistent (`evidence` set exactly for zswap outputs, `ciphertext` exactly for
+  `ciphertext` evidence, 224 bytes). A database synced by a build without these columns is synced again: the
+  migration that adds them refuses one that holds a zswap output.
 - **Earlier states.** The core entry's `retainStates` (default 0) keeps the states of that many blocks before the
   latest. With `ledger-state` required, `retainedStatesOf(p).load(height, read)` loads the state after `height` and
   gives its key and root; outside the window it rejects with `state-not-retained`, which your code may catch.
@@ -723,7 +780,7 @@ const blockRuntimes = defineModule({
 });
 
 test("block-runtimes stores every height and answers the latest", async () => {
-  // Blocks 0 to 10 in memory, each of runtime 2,001,000 with no extrinsics. The `custom` network's genesis is the
+  // Blocks 0 to 10 in memory, each of runtime 2,001,100 with no extrinsics. The `custom` network's genesis is the
   // chain's block 0, and its ledger table gives that runtime a ledger version (v9).
   const source = new InMemoryBlockSource({ head: 10n });
   const genesis = await source.block(0n);
@@ -764,7 +821,7 @@ test("block-runtimes stores every height and answers the latest", async () => {
     const answer = await fetch(`http://127.0.0.1:${port}/block-runtimes/latest`);
     assert.equal(answer.status, 200);
     assert.equal(answer.headers.get("x-umbra-height"), "10");
-    assert.deepEqual(await answer.json(), { height: "10", spec_version: 2_001_000, extrinsics: 0 });
+    assert.deepEqual(await answer.json(), { height: "10", spec_version: 2_001_100, extrinsics: 0 });
   } finally {
     server.close();
     await handle.stop();
@@ -774,7 +831,7 @@ test("block-runtimes stores every height and answers the latest", async () => {
 ```
 
 The `custom` network's genesis hash is the in-memory chain's block 0, and its ledger table gives the chain's runtime
-(2,001,000: every in-memory block's unless the source's `items` option gives another) a ledger version. `node` is
+(2,001,100: every in-memory block's unless the source's `items` option gives another) a ledger version. `node` is
 checked as a setting and never contacted: with a `source`, UmbraDB makes no node client. The core's `stop` ends the run
 once height 10 is committed: `ended` resolves `stopped`, and the module API answers reads at that height until
 `stop()`. Put your module in place of `blockRuntimes` (its declaration in `modules`, its entry in `entries`), with the
@@ -878,7 +935,8 @@ command ignores it. `/config` shows the addresses as bound and, in `network`, ea
 `connecting`, `mounted`, `channels`, `connect` or `none`.
 
 - **Mounted handlers.** `api.http(request, response)` and `api.upgrade(request, socket, head)` are the module API's,
-  with its listener's rules: the 1 MiB body limit (413), the read timeout on PostgreSQL (504), the 64 KiB message limit,
+  with its listener's rules: the 1 MiB body limit or the route's own (413), binary bodies, file answers with `Range`
+  (§7), the read timeout on PostgreSQL (504), the 64 KiB message limit,
   a subscriber more than 1 MiB behind disconnected, and `X-Umbra-Version` on every answer, `X-Umbra-Config-Hash` from
   `on-start-db` on. Pass the request unread: a request whose body your server read first (a body parser) is answered 400
   `invalid-request`. While the process is `starting`, `refused`, or `stopping` once its height in progress is done, they
@@ -938,7 +996,8 @@ command ignores it. `/config` shows the addresses as bound and, in `network`, ea
   listed twice, an id of UmbraDB's own or an element that is no declaration is refused, and an entry needs its module
   in `modules`.
 - **A.5 Module API wire format.** UmbraDB's own errors are `{ "error": { "code", "message" } }`: 400
-  `invalid-request`, 404 `not-found`, 405 `method-not-allowed`, 413 `request-too-large` (a body over 1 MiB), 500
-  `internal-error`, 503 `no-committed-height`, 504 `query-timeout`. WebSocket, on the API address, any path:
+  `invalid-request`, 404 `not-found`, 405 `method-not-allowed`, 413 `request-too-large` (a body over 1 MiB, or over the
+  route's `maxBodyBytes`), 416 `range-not-satisfiable` (a file answer's range outside the file), 500 `internal-error`,
+  503 `no-committed-height`, 504 `query-timeout`. WebSocket, on the API address, any path:
   `subscribe` (`id`, `name`, `args`) is answered `subscribed`, then `next` with each `value`; `unsubscribe` (`id`) is
   answered `complete`; what cannot be done, `error`. A message has at most 64 KiB.

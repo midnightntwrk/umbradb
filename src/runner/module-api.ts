@@ -28,18 +28,29 @@
  * `answerChainData`). Before block S commits, `readChainDataView` fails with `no-committed-height`, answered 503 when
  * the handler does not catch it.
  *
- * A POST's body is read as JSON by the component's own reader, which returns integers beyond ±(2^53 − 1) as `bigint`; a
- * GET's body is ignored.
+ * **Request bodies.** A route takes its body as JSON (the default) or as bytes (`{ body: "binary" }`), and may set its own
+ * body limit (`maxBodyBytes`) in place of the transport's. A transport learns both before it reads a body
+ * ({@link ModuleApi.bodyRule}); a request no route answers is read as a JSON route's, with the transport's limit, so its
+ * refusals come in their order: the limit (413), a body that is no UTF-8 (400), then the path (400, 404, 405). A JSON
+ * route's POST body is read as JSON by the component's own reader, which returns integers beyond ±(2^53 − 1) as
+ * `bigint`; a binary route's is its bytes, neither decoded nor parsed, empty when there are none. A GET's body is
+ * ignored on every route (a binary GET gets no bytes). Every handler also gets the request's headers: names in lower
+ * case, the first value of a repeated header, in an object without a prototype.
  *
  * **Bodies.** An answer's body is written as JSON, with `Content-Type: application/json; charset=utf-8`: a `bigint` as
  * decimal text and bytes as `0x`-prefixed lowercase hex, as the envelope writes heights and hashes. If the handler gave
  * a `Content-Type` and its body is text or bytes, the body is sent as it is. An `undefined` body is empty.
  *
+ * **Files.** A handler may answer `{ status: 200, headers?, file: { path, contentType? } }` instead: the answer carries
+ * the file ({@link ApiFile}), and the transport serves it after the read is released (the Node.js handlers stream it
+ * with `Range` support, `./api-socket.ts`; the fetch-style handler, which has no file system, answers 500). A file
+ * answer with a body, a status other than 200, or a path that is no non-empty text is no answer (500).
+ *
  * **Errors** are `{ "error": { "code", "message" } }` with the status of {@link API_ERROR_STATUS}:
  * - a path no route has: 404 `not-found`;
  * - a method the path lacks: 405 `method-not-allowed`, with `Allow`;
  * - a path or body that cannot be read: 400 `invalid-request`;
- * - a body over the listener's limit: 413 `request-too-large`;
+ * - a body over the route's or the listener's limit: 413 `request-too-large`;
  * - the read's timeout: 504 `query-timeout`, with the database API's message;
  * - a `no-committed-height` the handler did not catch: 503 `no-committed-height`, with the envelope's message;
  * - anything else (a handler that throws or answers what is no answer, a database error): 500 `internal-error` with a
@@ -55,7 +66,7 @@
 import type { ReadHandle, ReadOptions } from "../db/api.js";
 import { UmbraError } from "../db/errors.js";
 import { parseJsonLossless } from "../deterministic-postgresql/index.js";
-import type { ApiRegistry } from "../modules/declaration.js";
+import type { ApiRegistry, HttpHandler as DeclaredHttpHandler } from "../modules/declaration.js";
 import type { ResolvedGraph } from "../modules/graph.js";
 import { runSchedule, seriesOf } from "./dispatch.js";
 import type { ChainDataAnswer } from "./envelope.js";
@@ -64,8 +75,19 @@ import type { ProcessContexts } from "./process-context.js";
 /** A route's method. */
 export type HttpMethod = "GET" | "POST";
 
-/** A module's HTTP handler. */
-export type HttpHandler = Parameters<ApiRegistry["http"]>[2];
+/** A module's HTTP handler: a JSON route's body is any value, a binary route's a `Uint8Array`. */
+export type HttpHandler = DeclaredHttpHandler<unknown>;
+
+/** How a route takes its body. */
+export type BodyKind = "json" | "binary";
+
+/** How a transport reads a request's body ({@link ModuleApi.bodyRule}). */
+export interface BodyRule {
+  /** Its bytes as they are (a binary route's), or as UTF-8 text (a JSON route's, and a request no route answers). */
+  readonly binary: boolean;
+  /** The route's own limit, or undefined for the transport's. */
+  readonly maxBodyBytes: number | undefined;
+}
 
 /** A module's subscription handler: returns its unsubscribe. */
 export type SubscriptionHandler = Parameters<ApiRegistry["subscription"]>[1];
@@ -81,6 +103,10 @@ export interface HttpRoute {
   readonly path: string;
   readonly segments: readonly PathSegment[];
   readonly handler: HttpHandler;
+  /** How it takes its body: `json` unless registered `binary`. */
+  readonly body: BodyKind;
+  /** Its own body limit, or undefined for the transport's. */
+  readonly maxBodyBytes: number | undefined;
 }
 
 /** A subscription a module registered. */
@@ -132,8 +158,23 @@ export interface ApiRequest {
   readonly path: string;
   /** The URL's query parameters, in order (a `URLSearchParams` will do). */
   readonly query?: Iterable<readonly [string, string]>;
-  /** The body as text; a POST's only. */
-  readonly body?: string;
+  /** The request's headers, in order, as name and value in any letter case (a `Headers` will do); none unless given. */
+  readonly headers?: Iterable<readonly [string, string]>;
+  /**
+   * The body, a POST's only: text, or bytes. A binary route takes either as bytes (text as its UTF-8); a JSON route
+   * reads bytes as UTF-8 (400 when they are none).
+   */
+  readonly body?: string | Uint8Array;
+}
+
+/** A file answer's file, which the transport serves in place of the answer's (empty) body. */
+export interface ApiFile {
+  /** As the handler gave it: non-empty text; the transport refuses one that is not absolute. */
+  readonly path: string;
+  /** The handler's, or `application/octet-stream`. */
+  readonly contentType: string;
+  /** Tells `onError`, with the route, that the file could not be served; the transport then answers 500. */
+  readonly failed: (error: unknown) => void;
 }
 
 /** An answer, as the transport sends it. */
@@ -141,6 +182,8 @@ export interface ApiResponse {
   readonly status: number;
   readonly headers: Readonly<Record<string, string>>;
   readonly body: string | Uint8Array;
+  /** A file answer's file (see the module comment); its `body` is empty. */
+  readonly file?: ApiFile;
 }
 
 /** What a module API reads through and how. */
@@ -189,6 +232,44 @@ export function apiErrorResponse(code: ApiErrorCode, message: string, headers: R
     headers: { "Content-Type": JSON_CONTENT_TYPE, ...headers },
     body: encodeJson({ error: { code, message } }) as string,
   };
+}
+
+/** The 500 `internal-error` the module API answers a failure with: a fixed message, no failure's text. */
+export const internalErrorResponse = (): ApiResponse => apiErrorResponse("internal-error", INTERNAL);
+
+/** `bytes` as UTF-8 text, or null when they are none. */
+export function utf8Text(bytes: Uint8Array): string | null {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+/** The content type of a file answer that gives none. */
+export const FILE_CONTENT_TYPE = "application/octet-stream";
+
+/** A file answer as {@link ModuleApi.handle} passes it on, in the place of a body: the module API encodes it. */
+class ServedFile {
+  constructor(
+    readonly path: string,
+    readonly contentType: string,
+  ) {}
+}
+
+/** The options a route was registered with, checked; throws a `TypeError` for options that are none. */
+function routeOptions(module: string, method: HttpMethod, path: string, options: unknown): Pick<HttpRoute, "body" | "maxBodyBytes"> {
+  if (options === undefined) return { body: "json", maxBodyBytes: undefined };
+  const refuse = (why: string) => new TypeError(`${module} registered ${method} ${path} with ${why}`);
+  if (typeof options !== "object" || options === null || Array.isArray(options)) throw refuse("options that are not an object");
+  const unknown = Object.keys(options).filter((key) => key !== "body" && key !== "maxBodyBytes");
+  if (unknown.length > 0) throw refuse(`the option ${unknown[0]}, which is not body or maxBodyBytes`);
+  const { body, maxBodyBytes } = options as { body?: unknown; maxBodyBytes?: unknown };
+  if (body !== undefined && body !== "json" && body !== "binary") throw refuse(`the body ${String(body)}, which is neither json nor binary`);
+  if (maxBodyBytes !== undefined && !(Number.isSafeInteger(maxBodyBytes) && (maxBodyBytes as number) >= 0)) {
+    throw refuse(`the body limit ${String(maxBodyBytes)}, which is not a whole number of bytes`);
+  }
+  return { body: (body as BodyKind | undefined) ?? "json", maxBodyBytes: maxBodyBytes as number | undefined };
 }
 
 /** The segments of `path`, registered by `module` with `method`; throws a `TypeError` for a path that is none. */
@@ -245,7 +326,7 @@ export class ApiRoutes {
           "startup",
       );
     const registry: ApiRegistry = Object.freeze({
-      http: (method: HttpMethod, path: string, handler: HttpHandler): void => {
+      http: (method: HttpMethod, path: string, handler: unknown, options?: unknown): void => {
         if (!open) throw after(`${String(method)} ${String(path)}`);
         if (method !== "GET" && method !== "POST") {
           throw new TypeError(`${module} registered the method ${String(method)}, which is neither GET nor POST`);
@@ -254,9 +335,10 @@ export class ApiRoutes {
         if (typeof handler !== "function") {
           throw new TypeError(`${module} registered ${method} ${path} with a handler that is not a function`);
         }
+        const rule = routeOptions(module, method, path, options);
         this.#registrations.push({
           kind: "http",
-          route: Object.freeze({ module, method, path, segments: Object.freeze(segments), handler }),
+          route: Object.freeze({ module, method, path, segments: Object.freeze(segments), handler: handler as HttpHandler, ...rule }),
         });
       },
       subscription: (name: string, handler: SubscriptionHandler): void => {
@@ -331,35 +413,64 @@ export class ModuleApi {
     this.#options = options;
   }
 
-  /** Answers `request` (see the module comment); never rejects. */
-  async answer(request: ApiRequest): Promise<ApiResponse> {
+  /** The route that answers `method` at `path` (percent-encoded, as sent) and the path's segments, or the refusal. */
+  #resolve(
+    method: string,
+    path: string,
+  ): { readonly route: HttpRoute; readonly segments: readonly string[] } | { readonly refused: ApiResponse } {
     let segments: string[];
     try {
-      segments = request.path === "/" ? [] : request.path.slice(1).split("/").map(decodeURIComponent);
+      segments = path === "/" ? [] : path.slice(1).split("/").map(decodeURIComponent);
     } catch {
-      return apiErrorResponse("invalid-request", "the request path is not valid percent-encoded UTF-8");
+      return { refused: apiErrorResponse("invalid-request", "the request path is not valid percent-encoded UTF-8") };
     }
-    const candidates = request.path.startsWith("/") ? this.#http.filter((route) => matches(route, segments)) : [];
+    const candidates = path.startsWith("/") ? this.#http.filter((route) => matches(route, segments)) : [];
     if (candidates.length === 0) {
-      return apiErrorResponse("not-found", `no module API route answers ${request.method} ${request.path}`);
+      return { refused: apiErrorResponse("not-found", `no module API route answers ${method} ${path}`) };
     }
     // Checked routes that match one path with one method differ in a literal against a parameter: one is the most specific.
     const route = candidates
-      .filter((candidate) => candidate.method === request.method)
+      .filter((candidate) => candidate.method === method)
       .reduce<HttpRoute | undefined>(
         (best, candidate) => (best === undefined || specificity(candidate) < specificity(best) ? candidate : best),
         undefined,
       );
     if (route === undefined) {
       const allow = [...new Set(candidates.map((candidate) => candidate.method))].sort().join(", ");
-      return apiErrorResponse("method-not-allowed", `${request.path} answers ${allow}, not ${request.method}`, { Allow: allow });
+      return { refused: apiErrorResponse("method-not-allowed", `${path} answers ${allow}, not ${method}`, { Allow: allow }) };
     }
+    return { route, segments };
+  }
+
+  /**
+   * How a transport reads the body of a request of `method` at `path` (percent-encoded, as sent), before it reads it:
+   * the answering route's kind and limit; a JSON route's with the transport's limit when no route answers it, so the
+   * refusals keep their order (see the module comment).
+   */
+  bodyRule(method: string, path: string): BodyRule {
+    const resolved = this.#resolve(method, path);
+    if ("refused" in resolved) return { binary: false, maxBodyBytes: undefined };
+    return { binary: resolved.route.body === "binary", maxBodyBytes: resolved.route.maxBodyBytes };
+  }
+
+  /** Answers `request` (see the module comment); never rejects. */
+  async answer(request: ApiRequest): Promise<ApiResponse> {
+    const resolved = this.#resolve(request.method, request.path);
+    if ("refused" in resolved) return resolved.refused;
+    const { route, segments } = resolved;
     let body: unknown;
-    if (request.method === "POST" && request.body !== undefined && request.body !== "") {
-      try {
-        body = parseJsonLossless(request.body);
-      } catch {
-        return apiErrorResponse("invalid-request", "the request body is not JSON");
+    if (route.body === "binary") {
+      const given = request.method === "POST" ? request.body : undefined;
+      body = typeof given === "string" ? new TextEncoder().encode(given) : (given ?? new Uint8Array(0));
+    } else if (request.method === "POST" && request.body !== undefined) {
+      const text = typeof request.body === "string" ? request.body : utf8Text(request.body);
+      if (text === null) return apiErrorResponse("invalid-request", "the request body is not UTF-8");
+      if (text !== "") {
+        try {
+          body = parseJsonLossless(text);
+        } catch {
+          return apiErrorResponse("invalid-request", "the request body is not JSON");
+        }
       }
     }
     const params: Record<string, string> = Object.create(null);
@@ -367,12 +478,17 @@ export class ModuleApi {
     route.segments.forEach((segment, index) => {
       if ("param" in segment) params[segment.param] = segments[index] as string;
     });
-    const req = Object.freeze({ params: Object.freeze(params), body });
+    const headers: Record<string, string> = Object.create(null);
+    for (const [name, value] of request.headers ?? []) {
+      const lower = name.toLowerCase();
+      if (!(lower in headers)) headers[lower] = value;
+    }
+    const req = Object.freeze({ params: Object.freeze(params), headers: Object.freeze(headers), body });
     try {
       const answered = await this.#options.db.read((read) => this.handle(route, req, read), {
         timeoutMs: this.#options.timeoutMs,
       });
-      return this.#encode(answered);
+      return this.#encode(answered, route);
     } catch (error) {
       if (error instanceof UmbraError && error.code === "query-timeout") return apiErrorResponse("query-timeout", error.message);
       // The view of a read before block S (`readChainDataView`), which the handler did not catch.
@@ -443,7 +559,7 @@ export class ModuleApi {
     if (typeof answer !== "object" || answer === null) {
       throw new Error(`${where} answered ${answer === null ? "null" : String(answer)}, not { status, headers?, body }`);
     }
-    const { status, headers, body } = answer as { status?: unknown; headers?: unknown; body?: unknown };
+    const { status, headers, body, file } = answer as { status?: unknown; headers?: unknown; body?: unknown; file?: unknown };
     if (typeof status !== "number" || !Number.isInteger(status) || status < 200 || status > 599) {
       throw new Error(`${where} answered the status ${String(status)}, not an integer from 200 to 599`);
     }
@@ -458,11 +574,32 @@ export class ModuleApi {
         }
       }
     }
-    return { status, headers: { ...(headers as Record<string, string> | undefined) }, body };
+    if (file === undefined) return { status, headers: { ...(headers as Record<string, string> | undefined) }, body };
+    // A file answer: its file goes on in the body's place, which the module API encodes as the answer's file.
+    if (body !== undefined) throw new Error(`${where} answered both a body and a file`);
+    if (status !== 200) throw new Error(`${where} answered a file with the status ${status}, not 200`);
+    const { path, contentType } = (typeof file === "object" && file !== null ? file : {}) as { path?: unknown; contentType?: unknown };
+    if (typeof path !== "string" || path === "" || path.includes("\0")) {
+      throw new Error(`${where} answered a file whose path is not a non-empty text, not { path, contentType? }`);
+    }
+    if (contentType !== undefined && (typeof contentType !== "string" || contentType === "" || !HEADER_VALUE.test(contentType))) {
+      throw new Error(`${where} answered a file whose contentType HTTP cannot carry (RFC 9110 §5)`);
+    }
+    return {
+      status,
+      headers: { ...(headers as Record<string, string> | undefined) },
+      body: new ServedFile(path, contentType ?? FILE_CONTENT_TYPE),
+    };
   }
 
-  /** `answered` as the transport sends it (see the module comment). */
-  #encode(answered: ChainDataAnswer): ApiResponse {
+  /** `answered` as the transport sends it (see the module comment); `route` is the route that answered. */
+  #encode(answered: ChainDataAnswer, route: HttpRoute): ApiResponse {
+    if (answered.body instanceof ServedFile) {
+      const { path, contentType } = answered.body;
+      const where = { module: route.module, route: `${route.method} ${route.path}` };
+      const failed = (error: unknown): void => this.#report(error, where);
+      return { status: answered.status, headers: { ...answered.headers }, body: "", file: Object.freeze({ path, contentType, failed }) };
+    }
     const headers: Record<string, string> = { ...answered.headers };
     const typed = Object.keys(headers).some((name) => name.toLowerCase() === "content-type");
     const { status, body } = answered;

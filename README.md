@@ -384,8 +384,9 @@ X-Umbra-Config-Hash: 0xbe1cfe852fbf5c1ca04b855da86b697bf9d5bba861330d83f9e1834d7
 ```
 
 UmbraDB's own errors are `{ "error": { "code", "message" } }`: 400 `invalid-request`, 404 `not-found`, 405
-`method-not-allowed`, 413 `request-too-large` (over 1 MiB), 500 `internal-error` (a handler that threw), 503
-`no-committed-height` (before the first block commits), 504 `query-timeout`.
+`method-not-allowed`, 413 `request-too-large` (over 1 MiB, or over the route's own limit), 416 `range-not-satisfiable`
+(a file answer's range outside the file), 500 `internal-error` (a handler that threw), 503 `no-committed-height`
+(before the first block commits), 504 `query-timeout`.
 
 Subscriptions are JSON messages over WebSocket, on any path:
 

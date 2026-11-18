@@ -3,19 +3,23 @@
  * statements it writes each block's batch, state, results, events and reclamation step with, and the reads of the
  * stored state and of reclamation's counts and queue.
  *
- * **The tables**, created by its one migration, `001`, under the part's role:
+ * **The tables**, created by its migration `001` under the part's role (`002` adds the events' evidence columns):
  * - `core_ledger_state.nodes (node_key) → data, children` and `core_ledger_state.root_counts (node_key) → count`, the
  *   stored nodes and the positive root counts (keys are 32 bytes); `core_ledger_state.states (height)`, the state after
  *   each block (its key and root, and the first free index and root of the zswap tree and of the DUST commitment and
  *   generation trees); `core_ledger_state.segment_results (height, tx_index, segment) → success` and
- *   `core_ledger_state.events (height, tx_index, event_index)`, whose `kind` is one of {@link EVENT_KINDS}. The last
- *   three are range-partitioned by height (`../height-partitions.ts`).
+ *   `core_ledger_state.events (height, tx_index, event_index)`, whose `kind` is one of {@link EVENT_KINDS}; a zswap
+ *   output's row also holds its preimage evidence kind (`evidence`: `ciphertext`, `public` or `none`, null for every
+ *   other kind) and, for a ciphertext, its 224 bytes (`ciphertext`). The last three are range-partitioned by height
+ *   (`../height-partitions.ts`).
  * - `core_ledger_state.ref_counts (node_key) → count`, the number of references to each key in the stored nodes' child
  *   lists, a row only while it is above 0, and `core_ledger_state.unreferenced (node_key)`, the stored nodes with
  *   neither a reference nor a root count: reclamation's counts and queue.
  *
- * A database an earlier build wrote recorded another `001` (and, before one migration per part, a `002`), so startup
- * refuses it before any migration runs (`migration-checksum-changed`).
+ * A database an earlier build wrote recorded another `001` (and, before one migration per part, another `002`), so
+ * startup refuses it before any migration runs (`migration-checksum-changed`). A database whose `001` is this one but
+ * that has no `002` holds zswap outputs without their evidence: `002` refuses it when it holds one (its constraints do
+ * not hold), and it is synced again.
  */
 
 import type { BlockWriteHandle, ReadHandle } from "../../db/api.js";
@@ -48,8 +52,9 @@ export const EVENT_KINDS = Object.freeze([
 const kinds = EVENT_KINDS.map((kind) => `'${kind}'`).join(", ");
 
 /**
- * `core-ledger-state`'s migrations: its one, `001`, which creates every table of the part. Applied once, recorded under
- * `core-ledger-state`, never changed; a later version adds its own after it.
+ * `core-ledger-state`'s migrations: `001`, which creates every table of the part, and `002`, which adds a zswap
+ * output's preimage evidence to `core_ledger_state.events`. Each applied once, recorded under `core-ledger-state`,
+ * never changed; a later version adds its own after them.
  */
 export const CORE_LEDGER_STATE_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
   {
@@ -111,6 +116,16 @@ CREATE TABLE ${UNREFERENCED_TABLE} (
   PRIMARY KEY (node_key)
 );`,
   },
+  {
+    id: "002",
+    sql: `ALTER TABLE ${EVENTS_TABLE}
+  ADD COLUMN evidence text,
+  ADD COLUMN ciphertext bytea,
+  ADD CONSTRAINT events_evidence_kind CHECK (evidence IN ('ciphertext', 'public', 'none')),
+  ADD CONSTRAINT events_evidence_of_zswap_output CHECK ((kind = 'zswap-output') = (evidence IS NOT NULL)),
+  ADD CONSTRAINT events_ciphertext_of_ciphertext CHECK ((evidence IS NOT DISTINCT FROM 'ciphertext') = (ciphertext IS NOT NULL)),
+  ADD CONSTRAINT events_ciphertext_length CHECK (octet_length(ciphertext) = 224);`,
+  },
 ]);
 
 const PARENT_TIME_SQL =
@@ -144,13 +159,13 @@ const SEGMENTS_SQL = `INSERT INTO ${SEGMENT_RESULTS_TABLE} (height, tx_index, se
   SELECT $1::bigint, s.tx_index, s.segment, s.success FROM unnest($2::bigint[], $3::integer[], $4::boolean[])
     AS s (tx_index, segment, success)`;
 const EVENTS_SQL = `INSERT INTO ${EVENTS_TABLE} (height, tx_index, event_index, kind, logical_segment, physical_segment, bytes,
-  nullifier, commitment, tree_index, contract_address)
+  nullifier, commitment, tree_index, contract_address, evidence, ciphertext)
   SELECT $1::bigint, e.tx_index, e.event_index, e.kind, e.logical_segment, e.physical_segment, e.bytes, e.nullifier,
-    e.commitment, e.tree_index, e.contract_address
+    e.commitment, e.tree_index, e.contract_address, e.evidence, e.ciphertext
   FROM unnest($2::bigint[], $3::bigint[], $4::text[], $5::integer[], $6::integer[], $7::bytea[], $8::bytea[], $9::bytea[],
-    $10::bigint[], $11::bytea[])
+    $10::bigint[], $11::bytea[], $12::text[], $13::bytea[])
     AS e (tx_index, event_index, kind, logical_segment, physical_segment, bytes, nullifier, commitment, tree_index,
-      contract_address)`;
+      contract_address, evidence, ciphertext)`;
 
 const bytesOf = (value: unknown, what: string): Uint8Array => {
   if (!(value instanceof Uint8Array)) throw new TypeError(`${what} is not bytes`);
@@ -271,6 +286,8 @@ export async function insertEvents(
     events.map((e) => e.commitment),
     events.map((e) => e.treeIndex),
     events.map((e) => e.contractAddress),
+    events.map((e) => e.evidence),
+    events.map((e) => e.ciphertext),
   ]);
 }
 

@@ -1,0 +1,8 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "erasableSyntaxOnly": false
+  },
+  "include": ["*.ts", "../test/server-*.ts", "../test/client-*.ts", "../test/bench-*.ts", "../bench/bench*.ts"],
+  "exclude": []
+}

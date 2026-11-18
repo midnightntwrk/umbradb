@@ -222,6 +222,7 @@ describe("core-ledger-state's parts", () => {
   });
 
   it("writes a block's batch in chunks, its root counts as signed changes, and its rows; nothing for what it has not", async () => {
+    const CIPHERTEXT = new Uint8Array(224).fill(5);
     const statements: { sql: string; params: unknown[] }[] = [];
     const w = { execute: async (sql: string, params: unknown[] = []) => (statements.push({ sql, params }), 1) };
     const inserts = Array.from({ length: NODES_PER_STATEMENT + 1 }, (_, i) => ({ key: hash(i % 256), data: Uint8Array.of(i % 256), children: Uint8Array.of(0) }));
@@ -232,9 +233,9 @@ describe("core-ledger-state's parts", () => {
         output: {
           results: [{ outcome: "partial", segments: [{ segment: 0, success: true }, { segment: 1, success: false }] }],
           events: [
-            { transaction: 0, kind: "zswap-output", logicalSegment: 0, physicalSegment: 0, bytes: Uint8Array.of(1), nullifier: null, commitment: hash(9), treeIndex: 4n, contractAddress: null },
-            { transaction: 0, kind: "param-change", logicalSegment: 1, physicalSegment: 1, bytes: Uint8Array.of(2), nullifier: null, commitment: null, treeIndex: null, contractAddress: null },
-            { transaction: 2, kind: "contract-deploy", logicalSegment: 1, physicalSegment: 1, bytes: Uint8Array.of(3), nullifier: null, commitment: null, treeIndex: null, contractAddress: hash(8) },
+            { transaction: 0, kind: "zswap-output", logicalSegment: 0, physicalSegment: 0, bytes: Uint8Array.of(1), nullifier: null, commitment: hash(9), treeIndex: 4n, contractAddress: null, evidence: "ciphertext", ciphertext: CIPHERTEXT },
+            { transaction: 0, kind: "param-change", logicalSegment: 1, physicalSegment: 1, bytes: Uint8Array.of(2), nullifier: null, commitment: null, treeIndex: null, contractAddress: null, evidence: null, ciphertext: null },
+            { transaction: 2, kind: "contract-deploy", logicalSegment: 1, physicalSegment: 1, bytes: Uint8Array.of(3), nullifier: null, commitment: null, treeIndex: null, contractAddress: hash(8), evidence: null, ciphertext: null },
           ],
           logs: [],
           parameters: Uint8Array.of(1),
@@ -265,6 +266,8 @@ describe("core-ledger-state's parts", () => {
     ]);
     expect(statements[4]?.params).toEqual([5n, [0n, 0n], [0, 1], [true, false]]);
     expect(statements[5]?.params.slice(0, 4)).toEqual([5n, [0n, 0n, 2n], [0n, 1n, 0n], ["zswap-output", "param-change", "contract-deploy"]]);
+    // A zswap output's evidence and ciphertext, null for the other kinds.
+    expect(statements[5]?.params.slice(11)).toEqual([["ciphertext", null, null], [CIPHERTEXT, null, null]]);
 
     statements.length = 0;
     await writeBlock(w, applied(6n));

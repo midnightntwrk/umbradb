@@ -70,10 +70,12 @@ async function startOn(db: ProcessDatabase, records: readonly TapeRecord[], head
 }
 
 describe("the parts that had two migrations", () => {
-  it("core-chain, core-ledger-state and core-private-source each declare one migration, 001", () => {
-    for (const part of ["core-chain", "core-ledger-state", "core-private-source"] as const) {
+  it("core-chain, core-ledger-state and core-private-source each declare one migration, 001, and core-ledger-state a later 002", () => {
+    for (const part of ["core-chain", "core-private-source"] as const) {
       expect(THIS_BUILD[part].map((row) => row.id), part).toEqual(["001"]);
     }
+    // 002 adds a zswap output's preimage evidence to core_ledger_state.events; 001 is the folded one.
+    expect(THIS_BUILD["core-ledger-state"].map((row) => row.id)).toEqual(["001", "002"]);
   });
 });
 

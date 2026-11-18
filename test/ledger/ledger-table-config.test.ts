@@ -125,7 +125,8 @@ describe("adding and replacing rows and pins", () => {
       { specVersionMin: 0, specVersionMax: 999_999, ledger: "v9" },
       { specVersionMin: 1_000_000, specVersionMax: 1_999_999, ledger: "v8" },
       { specVersionMin: 2_000_000, specVersionMax: 2_000_999, ledger: "v9-rc3" },
-      { specVersionMin: 2_001_000, specVersionMax: 2_999_999, ledger: "v9" },
+      { specVersionMin: 2_001_000, specVersionMax: 2_001_099, ledger: "v9-rc5" },
+      { specVersionMin: 2_001_100, specVersionMax: 2_999_999, ledger: "v9" },
       { specVersionMin: 3_000_000, specVersionMax: 3_999_999, ledger: "v9" },
     ]);
   });

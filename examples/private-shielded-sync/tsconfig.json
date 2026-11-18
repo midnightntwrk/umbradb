@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "paths": { "umbradb": ["../../src/index.ts"] }
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["server/**", "test/server-*.ts", "test/client-*.ts", "test/bench-*.ts", "bench/bench*.ts", "client/sdk/**", "client/node_modules/**", "gpu/**", "web/**"]
+}

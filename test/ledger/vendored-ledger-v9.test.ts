@@ -6,7 +6,7 @@ import { bigCell, cell, contractAddress, makeV8State, makeV9State, V9_PACKAGE_PA
 import { decodeChildren, free, hex, refsOf, storedNodeKey, taggedRootKey } from "./node-format.js";
 import { describeNodeStoreExports, nodesOf } from "./node-store-suite.js";
 
-// The vendored ledger v9 package (ledger-9.1.0.0-rc.5 with the patches in vendor/ledger/v9/patches), exercised on the
+// The vendored ledger v9 package (ledger-9.1.0.1 with the patches in vendor/ledger/v9/patches), exercised on the
 // built package.
 
 describeNodeStoreExports("vendored ledger v9", {
@@ -50,7 +50,8 @@ describe("vendored ledger v9: decodeLogItem, the VM's own log decoding", () => {
     expect(item!.version).toBe(1);
     expect(item!.eventType).toBe("UnshieldedReceive");
     expect(hex(item!.data)).toBe(hex(v9.serializeStateValue(data)));
-    expect(taggedRootKey(item!.data).tag).toBe("impact-state-value[v2]");
+    // Since ledger-9.1.0.0-rc.6, `StateValue` is generic over its value kind, which its tag names.
+    expect(taggedRootKey(item!.data).tag).toBe("impact-state-value[v2](fab-aligned-value[v1])");
 
     const misc = v9.decodeLogItem(v9.serializeStateValue(logValue(7, 10, data)));
     expect([misc!.version, misc!.eventType]).toEqual([7, "Misc"]);

@@ -1,0 +1,1161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Private shielded sync, step by step</title>
+<style>
+  :root {
+    --bg: #e9ecf1; --slide: #ffffff; --ink: #1b1f24; --muted: #5b6573; --line: #d5dae0; --soft: #f4f6f9;
+    --wallet: #2457d6; --server: #7b3fe4; --wire: #0f7b6c;
+    --secret: #b26a00; --secret-bg: #fff3d6; --public: #4a5565; --public-bg: #eef1f5; --sent: #0f7b6c; --sent-bg: #dcf4ee;
+    --mine: #fff1c2; --mine-line: #d39b00; --sel: #d9f2ec; --pad: #e9edf2; --gpu: #e8590c; --ok: #137a3a; --bad: #b42318;
+    --p1: #0d9488; --p2: #2563eb; --p3: #d97706; --p4: #7c3aed;
+  }
+  @media (prefers-color-scheme: dark) { :root {
+    --bg: #0b0e12; --slide: #151a20; --ink: #e6e9ee; --muted: #9aa4b2; --line: #2a3039; --soft: #1b2129;
+    --wallet: #7aa2ff; --server: #b48cff; --wire: #3cc4ae;
+    --secret: #f0b44c; --secret-bg: #3a2c0c; --public: #b8c1cd; --public-bg: #222933; --sent: #3cc4ae; --sent-bg: #0f3029;
+    --mine: #4a3b10; --mine-line: #e0b02e; --sel: #12372f; --pad: #262c35; --ok: #4cc27a; --bad: #ff7a6e;
+    --p1: #2dd4bf; --p2: #60a5fa; --p3: #fbbf24; --p4: #a78bfa; } }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; }
+  a { color: var(--wallet); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; }
+
+  /* the stage: a 1280 × 720 canvas scaled to the window */
+  .stage { position: absolute; left: 50%; top: 50%; width: 1280px; height: 720px; transform-origin: center; display: grid; grid-template-rows: 40px 1fr 34px;
+    background: var(--slide); border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,.18); overflow: hidden; }
+  .strip { display: flex; gap: 4px; align-items: center; padding: 0 20px; border-bottom: 1px solid var(--line); font-size: 12px; }
+  .strip .st { padding: 3px 9px; border-radius: 999px; color: var(--muted); white-space: nowrap; cursor: pointer; }
+  .strip .st.on { background: var(--ink); color: var(--slide); }
+  .strip .st.done { color: var(--ink); }
+  .strip .sep { color: var(--line); }
+  .foot { display: flex; align-items: center; gap: 12px; padding: 0 20px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+  .foot button { background: transparent; border: 1px solid var(--line); color: var(--ink); border-radius: 6px; padding: 2px 10px; font: inherit; cursor: pointer; }
+  .foot .bar { flex: 1; height: 4px; background: var(--soft); border-radius: 2px; overflow: hidden; }
+  .foot .bar i { display: block; height: 100%; background: var(--wallet); width: 0; }
+  .slides { position: relative; overflow: hidden; }
+  .slide { position: absolute; inset: 0; padding: 22px 44px 16px; display: none; flex-direction: column; gap: 10px; }
+  .slide.active { display: flex; }
+  .top { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
+  .where { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; padding: 2px 8px; border-radius: 4px; border: 1px solid currentColor; }
+  .where.w { color: var(--wallet); } .where.s { color: var(--server); } .where.c { color: var(--wire); }
+  h1 { font-size: 36px; line-height: 1.15; margin: 0; }
+  h2 { font-size: 26px; line-height: 1.2; margin: 0; }
+  .lead { margin: 0; color: var(--muted); font-size: 16px; max-width: 1120px; }
+  .body { flex: 1; min-height: 0; display: grid; gap: 14px; align-content: start; }
+  .g2 { grid-template-columns: 1fr 1fr; } .g3 { grid-template-columns: 1fr 1fr 1fr; } .g21 { grid-template-columns: 1.55fr 1fr; } .g12 { grid-template-columns: 1fr 1.4fr; }
+  .box { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; background: var(--slide); min-width: 0; }
+  .box.w { border-left: 4px solid var(--wallet); } .box.s { border-left: 4px solid var(--server); } .box.c { border-left: 4px solid var(--wire); }
+  .box h3 { margin: 0 0 6px; font-size: 15px; }
+  .box p { margin: 4px 0; font-size: 14px; }
+  .box ul { margin: 4px 0; padding-left: 20px; font-size: 14px; }
+  .box li { margin: 2px 0; }
+  .muted { color: var(--muted); }
+  .small { font-size: 13px; }
+
+  /* kinds of data */
+  .b { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 4px; white-space: nowrap; vertical-align: 1px; }
+  .b.secret { color: var(--secret); background: var(--secret-bg); }
+  .b.public { color: var(--public); background: var(--public-bg); }
+  .b.sent { color: var(--sent); background: var(--sent-bg); }
+  .b.server { color: var(--server); background: var(--public-bg); }
+  .v-secret { color: var(--secret); } .v-public { color: var(--public); } .v-sent { color: var(--sent); }
+
+  /* inputs and outputs */
+  .io { border-collapse: collapse; width: 100%; font-size: 13px; }
+  .io th { text-align: left; color: var(--muted); font-weight: 500; padding: 3px 8px 3px 0; border-bottom: 1px solid var(--line); }
+  .io td { padding: 4px 8px 4px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .io td.sym { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; white-space: nowrap; }
+  .from { white-space: nowrap; font-size: 12px; }
+
+  /* the privacy band */
+  .sees { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .sees > div { border-radius: 8px; padding: 7px 12px; font-size: 13.5px; }
+  .sees .sv { background: var(--public-bg); }
+  .sees .wl { background: var(--secret-bg); }
+  .sees b { display: block; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; margin-bottom: 2px; }
+  .sees .sv b { color: var(--server); } .sees .wl b { color: var(--secret); }
+
+  /* diagrams */
+  .grid { display: inline-grid; gap: 4px; }
+  .cell { border: 1px solid var(--line); border-radius: 5px; padding: 3px 8px; text-align: center; background: var(--slide); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  .cell.mine { background: var(--mine); border-color: var(--mine-line); font-weight: 700; }
+  .cell.sel { background: var(--sel); }
+  .cell.pad { background: var(--pad); }
+  .cell.dim { opacity: .45; }
+  .colhead { text-align: center; color: var(--muted); font-size: 11px; }
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .arrow { color: var(--muted); }
+  .buckets { display: flex; gap: 8px; flex-wrap: wrap; }
+  .bucket { border: 1px solid var(--line); border-radius: 7px; padding: 5px 7px; min-width: 86px; }
+  .bucket .h { font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+  .bucket .cell { margin: 3px 0; }
+  .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .tile { border: 1px solid var(--line); border-radius: 7px; padding: 5px 8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .tile.mine { background: var(--mine); border-color: var(--mine-line); }
+  .tile .ok { color: var(--ok); font-weight: 700; }
+  .tree { display: grid; gap: 5px; justify-items: center; }
+  .tree .row { display: flex; gap: 5px; justify-content: center; flex-wrap: wrap; }
+  .tree .blk { border: 1px dashed var(--line); border-radius: 7px; padding: 3px; display: flex; gap: 3px; }
+  .tbl { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  .tbl th { text-align: left; color: var(--muted); font-weight: 500; padding: 4px 10px 4px 0; border-bottom: 1px solid var(--line); }
+  .tbl td { padding: 5px 10px 5px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .tbl td.r, .tbl th.r { text-align: right; }
+  .tbl tr.mine td { background: var(--mine); }
+
+  /* the wire */
+  .lanes { display: grid; grid-template-columns: 1fr 1.15fr 1fr; gap: 12px; }
+  .msg { position: relative; margin: 2px 0 8px; padding-bottom: 11px; }
+  .msg .label { font-size: 13px; text-align: center; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .msg .size { font-size: 12px; color: var(--muted); text-align: center; }
+  .msg .line { position: absolute; left: 0; right: 0; bottom: 4px; height: 2px; background: var(--wire); }
+  .msg.right .line::after { content: ""; position: absolute; right: -2px; top: -5px; border: 6px solid transparent; border-left-color: var(--wire); }
+  .msg.left .line::before { content: ""; position: absolute; left: -2px; top: -5px; border: 6px solid transparent; border-right-color: var(--wire); }
+  .lanehead { font-size: 12px; font-weight: 700; text-align: center; letter-spacing: .04em; text-transform: uppercase; }
+  .lanehead.w { color: var(--wallet); } .lanehead.c { color: var(--wire); } .lanehead.s { color: var(--server); }
+
+  /* numbers */
+  .math { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 15px; }
+  .math table { border-collapse: collapse; display: inline-table; vertical-align: middle; }
+  .math td { padding: 1px 6px; text-align: right; }
+  .math .m { border-left: 2px solid var(--muted); border-right: 2px solid var(--muted); border-radius: 4px; display: inline-block; vertical-align: middle; margin: 2px; }
+  .math .eq { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: 5px 0; }
+  .math .lbl { color: var(--muted); font-family: system-ui, sans-serif; font-size: 13.5px; }
+  .math td.hit { background: var(--mine); font-weight: 700; }
+  .math td.selrow { background: var(--sel); }
+  .math td.nm { color: var(--muted); text-align: left; padding-left: 0; font-family: system-ui, sans-serif; font-size: 11.5px; }
+  .math .m.secret { border-color: var(--secret); } .math .m.public { border-color: var(--public); } .math .m.sent { border-color: var(--sent); }
+  .work { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; background: var(--soft); border-radius: 6px; padding: 6px 9px; margin-top: 6px; line-height: 1.6; }
+  .work .r { color: var(--muted); }
+  /* the four pieces of the data */
+  .mk { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; color: #fff; font: 700 12px/1 system-ui, sans-serif; margin-right: 6px; vertical-align: 1px; }
+  .mk.p1 { background: var(--p1); } .mk.p2 { background: var(--p2); } .mk.p3 { background: var(--p3); } .mk.p4 { background: var(--p4); }
+  .pc { border-left: 5px solid var(--line); } .pc.p1 { border-left-color: var(--p1); } .pc.p2 { border-left-color: var(--p2); } .pc.p3 { border-left-color: var(--p3); } .pc.p4 { border-left-color: var(--p4); }
+  .cell.p1 { box-shadow: inset 0 0 0 2px var(--p1); } .cell.p2 { box-shadow: inset 0 0 0 2px var(--p2); } .cell.p3 { box-shadow: inset 0 0 0 2px var(--p3); } .cell.p4 { box-shadow: inset 0 0 0 2px var(--p4); }
+  .bytes { display: flex; height: 30px; border-radius: 6px; overflow: hidden; font: 600 11.5px/1 system-ui, sans-serif; margin: 6px 0 3px; }
+  .bytes > div { display: flex; align-items: center; justify-content: center; color: #fff; white-space: nowrap; overflow: hidden; border-right: 1px solid var(--slide); }
+  .bytes .p1 { background: var(--p1); } .bytes .p2 { background: var(--p2); }
+  .bytes .x { background: repeating-linear-gradient(45deg, var(--pad), var(--pad) 4px, var(--soft) 4px, var(--soft) 8px); color: var(--muted); }
+  .g4 { grid-template-columns: repeat(4, 1fr); }
+  .pieces { display: grid; gap: 8px; align-content: start; }
+  .pieces .box p { margin: 2px 0; font-size: 13px; }
+  .pieces .box h3 { margin-bottom: 2px; }
+  .big { font: 600 20px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .big .who { display: inline-block; min-width: 150px; font: 700 11px/1 system-ui, sans-serif; letter-spacing: .05em; text-transform: uppercase; vertical-align: 4px; }
+  .big .who.w { color: var(--wallet); } .big .who.s { color: var(--server); }
+  .big .why { font: 400 13px/1.4 system-ui, sans-serif; color: var(--muted); margin: 0 0 6px 150px; }
+  .big .cont { padding-left: 150px; }
+  .v-server { color: var(--server); }
+  .claim { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; font-size: 14px; background: var(--soft); }
+
+  .gpu-tag { display: inline-block; background: var(--gpu); color: #fff; font: 600 10px/16px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .06em; padding: 0 6px; border-radius: 3px; cursor: help; vertical-align: 2px; }
+  .sz { border-bottom: 1px dashed currentColor; cursor: help; }
+  .tooltip { position: fixed; z-index: 20; max-width: 480px; background: var(--slide); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.2); padding: 10px 12px; font-size: 13px; pointer-events: none; }
+  .tooltip b { display: block; margin-bottom: 6px; }
+  .tooltip table { border-collapse: collapse; width: 100%; }
+  .tooltip th, .tooltip td { text-align: left; padding: 2px 10px 2px 0; white-space: nowrap; }
+  .tooltip th { color: var(--muted); font-weight: 500; }
+  .tooltip .n { color: var(--muted); margin-top: 6px; white-space: normal; }
+
+  /* the list of slides */
+  .overview { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; place-items: center; z-index: 30; }
+  .overview.open { display: grid; }
+  .overview .panel { background: var(--slide); color: var(--ink); border-radius: 12px; padding: 18px 22px; width: min(900px, 92vw); max-height: 86vh; overflow: auto; }
+  .overview ol { columns: 2; margin: 8px 0 0; padding-left: 22px; font-size: 14px; }
+  .overview li { margin: 3px 0; break-inside: avoid; }
+  .overview li.on a { font-weight: 700; }
+
+  @media print {
+    html, body { overflow: visible; background: #fff; }
+    .stage { position: static; transform: none !important; box-shadow: none; border-radius: 0; display: block; width: 1280px; height: auto; }
+    .strip, .foot, .overview { display: none !important; }
+    .slides { overflow: visible; }
+    .slide { position: relative; display: flex !important; height: 680px; page-break-after: always; break-after: page; }
+    @page { size: 1280px 720px; margin: 20px; }
+  }
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <div class="strip" id="strip"></div>
+  <div class="slides" id="slides">
+
+<!-- ═══════════════════════════════════════════════════ introduction -->
+<section class="slide" id="s-title" data-step="" data-title="Title">
+  <div class="top">Private shielded sync · a proof of concept on Midnight Preprod</div>
+  <div style="flex: 1; display: grid; align-content: center; gap: 18px; max-width: 1060px">
+    <h1>How a wallet finds, reads and checks its shielded coins without the server learning which</h1>
+    <p class="lead" style="font-size: 19px">One small example, followed from the server's snapshot to the wallet's balance. Every number on these slides is computed by this page, and every value says where it came from, so each step can be checked by hand.</p>
+    <p class="muted">The same steps run live, against Preprod, on the <a href="index.html">step-by-step page</a>.</p>
+  </div>
+</section>
+
+<section class="slide" id="s-goal" data-step="" data-title="What the wallet needs, what the server must not learn">
+  <div class="top">The problem</div>
+  <h2>What the wallet needs, and what the server must not learn</h2>
+  <p class="lead">Today a wallet either gives its viewing key to an indexer, which then sees every coin it owns, or replays every ledger event itself. This proof of concept is a third way.</p>
+  <div class="body g2">
+    <div class="box w"><h3>The wallet needs to learn</h3>
+      <ul>
+        <li>which shielded outputs on the chain are its own;</li>
+        <li>for each one, its commitment, its ciphertext and its Merkle path: to read the coin and, later, to spend it;</li>
+        <li>whether each coin is already spent: whether its nullifier is on the chain.</li>
+      </ul>
+    </div>
+    <div class="box s"><h3>The server must not learn</h3>
+      <ul>
+        <li>the wallet's keys;</li>
+        <li>which outputs are the wallet's;</li>
+        <li>which records the wallet reads;</li>
+        <li>which nullifiers it looks up, so which of its coins are spent.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="claim"><b>Scope.</b> Privacy only. The server is assumed curious: it records everything it receives and tries to learn from it. It is assumed to answer correctly; checking that its answers are right is outside this proof of concept. No protocol change: everything runs on Midnight's existing outputs and nullifiers.</div>
+</section>
+
+<section class="slide" id="s-tools" data-step="" data-title="Three mechanisms">
+  <div class="top">The approach</div>
+  <h2>Three mechanisms, and why each one hides the wallet</h2>
+  <div class="body">
+    <table class="tbl">
+      <tr><th style="width: 32%">Mechanism</th><th style="width: 18%">Steps</th><th>Why the server learns nothing</th></tr>
+      <tr><td><b>The same download for every wallet</b>: the manifest, the scan file, the block roots, the setup data, the tail</td><td>2 (files), 6 (tail)</td><td>What is downloaded does not depend on the wallet. The server sees "someone downloaded the snapshot", as from every other wallet.</td></tr>
+      <tr><td><b>Local trial decryption</b> of every output's scan entry</td><td>3 (scan)</td><td>Nothing is sent. The wallet tests all entries with its own key, on its own device.</td></tr>
+      <tr><td><b>Private information retrieval (SimplePIR)</b>, with a fixed number of query vectors per call</td><td>4 (records), 5 (nullifiers)</td><td>Each query vector hides the column it asks for behind a mask that only the wallet can remove, because only the wallet knows the secret the mask is made from (SimplePIR, explained from <a data-to="s-pir"></a>). Every call has the same number of vectors, so the count says nothing either.</td></tr>
+    </table>
+    <div class="claim">The server still multiplies its whole table by each vector and sends back an answer; only the wallet, which holds s, can turn that answer into the column it asked for.</div>
+  </div>
+</section>
+
+<section class="slide" id="s-pir" data-step="pir" data-title="SimplePIR: the query, part by part">
+  <div class="top">SimplePIR · 1 of 2 · the query</div>
+  <h2>SimplePIR: the query, part by part</h2>
+  <p class="lead">SimplePIR (Henzinger et al., USENIX Security 2023) is the private information retrieval scheme used here. To ask for one column of the server's table without saying which, the wallet sends a query vector q, one number per table column:</p>
+  <div style="display: flex; justify-content: center; align-items: baseline; gap: 14px; font: 600 28px/1.15 ui-monospace, SFMono-Regular, Menlo, monospace">
+    <span class="v-sent">q</span><span>=</span>
+    <span><span class="v-public">A</span>·<span class="v-secret">s</span></span><span>+</span>
+    <span class="v-secret">e</span><span>+</span>
+    <span><span class="v-public">Δ</span>·<span class="v-secret">u</span></span>
+  </div>
+  <div class="body g2" style="gap: 12px">
+    <table class="io" style="font-size: 13px">
+      <tr><th>Part</th><th>Kind</th><th>What it is</th><th>Its job</th></tr>
+      <tr><td class="sym">u</td><td><span class="b secret">secret</span></td><td>set by the wallet from what it wants: all 0s, a 1 at the wanted column</td><td><b>selects</b> the column</td></tr>
+      <tr><td class="sym">Δ</td><td><span class="b public">public</span></td><td>a large constant (4,096 here)</td><td><b>lifts</b> the 1 far above the noise, so it survives to the end</td></tr>
+      <tr><td class="sym">A</td><td><span class="b public">public</span></td><td>random numbers, one row per table column, from a public seed</td><td>with s, <b>makes the mask</b></td></tr>
+      <tr><td class="sym">s</td><td><span class="b secret">secret</span></td><td>made up by the wallet: random numbers (2 here, 1,024 for real), new per vector, never sent</td><td>the <b>key</b> to the mask</td></tr>
+      <tr><td class="sym">A·s</td><td><span class="b secret">secret</span></td><td>one number per column</td><td>the <b>mask</b>: random-looking numbers laid over Δ·u</td></tr>
+      <tr><td class="sym">e</td><td><span class="b secret">secret</span></td><td>made up by the wallet: tiny random noise (−2 … 2 here), new per vector</td><td>makes the mask impossible to strip without s (Learning With Errors)</td></tr>
+      <tr><td class="sym">q</td><td><span class="b sent">sent</span></td><td>the sum, one number per column</td><td>what the server receives</td></tr>
+    </table>
+    <div style="display: grid; gap: 10px; align-content: start">
+      <div class="box"><h3>The example's numbers: where is the 4,096?</h3><div class="math" id="m-pir-demo"></div></div>
+      <div class="box"><h3>Then</h3><p class="small">The server multiplies its table by q, and the wallet removes the mask from the answer: <a data-to="s-roundtrip"></a></p></div>
+    </div>
+  </div>
+  <div class="sees"><div class="sv"><b>Server sees</b>q and the table. q looks random, so it cannot tell which entry carries Δ, and it cannot remove the mask without s.</div><div class="wl"><b>Stays on the wallet</b>s, e and u: the wallet makes all three for each vector and drops them after decoding. Only s removes the mask.</div></div>
+</section>
+
+<section class="slide" id="s-roundtrip" data-step="pir" data-title="SimplePIR: the round trip">
+  <div class="top">SimplePIR · 2 of 2 · the round trip</div>
+  <h2>SimplePIR: the server returns M·q, the wallet removes the mask</h2>
+  <p class="lead">M is the server's table (rows × columns). u has a 1 at one column, so M·u is exactly that column: what the wallet wants.</p>
+  <div class="body" style="grid-template-columns: 1.25fr 1fr">
+    <div class="box big">
+      <div><span class="who w">① Wallet sends</span><span class="v-sent">q</span> = <span class="v-public">A</span>·<span class="v-secret">s</span> + <span class="v-secret">e</span> + <span class="v-public">Δ</span>·<span class="v-secret">u</span></div>
+      <div class="why">s, e, u made up by the wallet (slide before); q looks random.</div>
+      <div><span class="who s">② Server returns</span><span class="v-sent">ans</span> = <span class="v-server">M</span> · <span class="v-sent">q</span></div>
+      <div class="why">Its whole table times q: the same work whatever q asks for. It knows M and q, not s, e or u.</div>
+      <div><span class="who w">③ Wallet unmasks</span><span class="v-sent">ans</span> − <span class="v-public">H</span>·<span class="v-secret">s</span></div>
+      <div class="why">H = M·A is the setup data every wallet downloads; s is the wallet's own.</div>
+      <div class="cont">= <span class="v-server">M</span>·(<span class="v-public">A</span>·<span class="v-secret">s</span> + <span class="v-secret">e</span> + <span class="v-public">Δ</span>·<span class="v-secret">u</span>) − <span class="v-server">M</span>·<span class="v-public">A</span>·<span class="v-secret">s</span></div>
+      <div class="cont">= <span class="v-public">Δ</span>·(<span class="v-server">M</span>·<span class="v-secret">u</span>) + <span class="v-server">M</span>·<span class="v-secret">e</span></div>
+      <div class="cont">÷ <span class="v-public">Δ</span>, round → <b><span class="v-server">M</span>·<span class="v-secret">u</span></b> &nbsp;<span style="font: 400 14px system-ui, sans-serif">= the wanted column</span></div>
+      <div class="why" style="margin-top: 4px">The mask M·A·s cancels; M·e is small (here at most 3 × 15 × 2 = 90, far below Δ / 2 = 2,048), so rounding drops it.</div>
+    </div>
+    <div class="box"><h3>The same, with the example's numbers (column 0)</h3><div class="math" id="m-roundtrip" style="font-size: 13.5px"></div></div>
+  </div>
+  <div class="sees"><div class="sv"><b>Server sees</b>q, and the ans it computed. Step ③ needs s, which it never gets.</div><div class="wl"><b>Stays on the wallet</b>s, e, u, and the decoded column.</div></div>
+</section>
+
+<section class="slide" id="s-example" data-step="" data-title="The example chain">
+  <div class="top">The example</div>
+  <h2>The example chain: 9 outputs, 5 spends, one wallet</h2>
+  <p class="lead">A real record is 627 numbers (the commitment, ciphertext elements 1–5 and the lower Merkle path); here each record is one number from 0 to 15, so every computation fits on a slide.</p>
+  <div class="body g21">
+    <table class="tbl">
+      <tr><th>Position</th><th>Commitment</th><th>Ciphertext</th><th class="r">Record value</th><th>Owner</th></tr>
+      <tr><td>0</td><td class="mono">c0</td><td>yes</td><td class="r">r0 = 7</td><td class="muted">someone else</td></tr>
+      <tr><td>1</td><td class="mono">c1</td><td>yes</td><td class="r">r1 = 12</td><td class="muted">someone else</td></tr>
+      <tr class="mine"><td><b>2</b></td><td class="mono">c2</td><td>yes</td><td class="r"><b>r2 = 3</b></td><td><b>the wallet</b>: 1,000 pssUSD, already spent</td></tr>
+      <tr><td>3</td><td class="mono">c3</td><td>yes</td><td class="r">r3 = 9</td><td class="muted">someone else</td></tr>
+      <tr><td>4</td><td class="mono">c4</td><td>yes</td><td class="r">r4 = 14</td><td class="muted">someone else</td></tr>
+      <tr><td>5</td><td class="mono">c5</td><td>yes</td><td class="r">r5 = 5</td><td class="muted">someone else</td></tr>
+      <tr class="mine"><td><b>6</b></td><td class="mono">c6</td><td>yes</td><td class="r"><b>r6 = 11</b></td><td><b>the wallet</b>: 250 pssUSD</td></tr>
+      <tr><td>7</td><td class="mono">c7</td><td>yes</td><td class="r">r7 = 2</td><td class="muted">someone else</td></tr>
+      <tr><td>8</td><td class="mono">c8</td><td>yes</td><td class="r">r8 = 8</td><td class="muted">someone else</td></tr>
+    </table>
+    <div style="display: grid; gap: 12px; align-content: start">
+      <div class="box"><h3>Spends on the chain: 5 nullifiers</h3>
+        <p class="mono">n1 = 5 · n2 = 9 · <b>n3 = 13</b> · n4 = 6 · n5 = 11</p>
+        <p class="small muted">n3 is the nullifier of the wallet's output 2: that coin is spent. Each nullifier is one number here too.</p>
+      </div>
+      <div class="box"><h3>Time</h3>
+        <p class="small">The server's snapshot is taken after output 8. Output 9 arrives later and is sent in the tail (step 6).</p>
+      </div>
+      <div class="box w"><h3>At the start the wallet knows</h3>
+        <p class="small">only its mnemonic. It does not know it owns outputs 2 and 6, nor that 2 is spent. The slides follow how it finds out.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════ step 0 -->
+<section class="slide" id="s-split" data-step="0" data-title="Step 0: how the ledger's data is split">
+  <div class="top">Step 0 · The server builds a snapshot · 1 of 4 <span class="where s">Server</span></div>
+  <h2>How the ledger's data is split into four pieces</h2>
+  <p class="lead">The ledger keeps every shielded output as a leaf of one Merkle tree of commitments, with its ciphertext, and every spend as a nullifier. The server cuts this into four pieces, each served in the way that keeps the wallet private.</p>
+  <div class="body" style="grid-template-columns: 1.05fr 1fr">
+    <div class="box"><h3>The ledger</h3>
+      <div class="tree">
+        <div class="row"><div class="cell">root</div></div>
+        <div class="row"><div class="cell">h(R0, R1)</div><div class="cell p4">h(R2, 0)</div></div>
+        <div class="row"><div class="cell">R0</div><div class="cell p4">R1</div><div class="cell">R2</div><div class="cell dim">0</div></div>
+        <div class="row">
+          <div class="blk" style="flex-direction: column; align-items: center"><div class="row"><div class="cell p2">h(c0, c1)</div><div class="cell">h(c2, c3)</div></div><div class="row"><div class="cell">c0</div><div class="cell">c1</div><div class="cell mine">c2</div><div class="cell p2">c3</div></div></div>
+          <div class="blk" style="align-self: end"><div class="cell">c4</div><div class="cell">c5</div><div class="cell">c6</div><div class="cell">c7</div></div>
+          <div class="blk" style="align-self: end"><div class="cell">c8</div><div class="cell dim">·</div><div class="cell dim">·</div><div class="cell dim">·</div></div>
+        </div>
+      </div>
+      <p class="small" style="margin-top: 6px">Output 2's path to the root: <span class="mk p2">②</span><span class="mono">c3, h(c0, c1)</span>, inside its block, kept in its record; <span class="mk p4">④</span><span class="mono">R1, h(R2, 0)</span>, above the blocks, from the block roots.</p>
+      <p class="small" style="margin: 10px 0 0"><b>Output 2 on the chain: 256 bytes</b> <span class="muted">(widths not to scale)</span></p>
+      <div class="bytes">
+        <div class="p2" style="flex: 0 0 112px">commitment 32 B</div>
+        <div class="p1" style="flex: 0 0 82px">point 32 B</div>
+        <div class="p1" style="flex: 0 0 30px">4 B</div>
+        <div class="x" style="flex: 0 0 70px">rest of e0</div>
+        <div class="p2" style="flex: 1">ciphertext elements 1–5: 160 B</div>
+      </div>
+      <p class="small muted">Element 0 encrypts zero: the wallet recomputes it from the scan, so only its first 4 bytes are kept, in the scan file.</p>
+      <p class="small" style="margin-top: 8px"><b>Spends:</b> nullifiers <span class="mono">n1 … n5</span> → <span class="mk p3">③</span></p>
+    </div>
+    <div class="pieces">
+      <div class="box pc p1"><h3><span class="mk p1">①</span>Scan file <span class="b public">downloaded whole</span></h3>
+        <p>Per output: the point and element 0's first 4 bytes, <b>36 B</b>.</p><p class="muted">Finds the wallet's outputs (step 3). Example: 9 × 36 B; Preprod: about 2.5 MB.</p></div>
+      <div class="box pc p2"><h3><span class="mk p2">②</span>Commitment matrix <span class="b sent">read by PIR</span></h3>
+        <p>Per output, one record: the commitment, elements 1–5 and the lower Merkle path inside its block, <b>705 B</b> (32 + 160 + 16 × 32 + 1).</p><p class="muted">Gives the coin and the lower half of its path (step 4). Records are stacked 3 to a column here.</p></div>
+      <div class="box pc p3"><h3><span class="mk p3">③</span>Nullifier buckets <span class="b sent">read by PIR</span></h3>
+        <p>Each spend's nullifier with its height and transaction, grouped by the nullifier's first bits, <b>40 B</b> each.</p><p class="muted">Tells whether a coin is spent (step 5).</p></div>
+      <div class="box pc p4"><h3><span class="mk p4">④</span>Block roots <span class="b public">downloaded whole</span></h3>
+        <p>One 32-byte root per block of 65,536 outputs (4 here).</p><p class="muted">The upper half of every path (steps 2 and 6).</p></div>
+      <p class="small muted" style="margin: 0">Anything newer than the snapshot comes in the tail, in full (step 6).</p>
+    </div>
+  </div>
+</section>
+
+<section class="slide" id="s-tables" data-step="0" data-title="Step 0: the example's data in the four pieces">
+  <div class="top">Step 0 · The server builds a snapshot · 2 of 4 <span class="where s">Server</span></div>
+  <h2>The example's data in the four pieces</h2>
+  <div class="body g4">
+    <div class="box pc p1"><h3><span class="mk p1">①</span>Scan file</h3>
+      <p class="small">9 entries of 36 B, one per output, in position order.</p>
+      <div class="grid" style="grid-template-columns: repeat(3, auto)">
+        <div class="cell">0</div><div class="cell">1</div><div class="cell">2</div>
+        <div class="cell">3</div><div class="cell">4</div><div class="cell">5</div>
+        <div class="cell">6</div><div class="cell">7</div><div class="cell">8</div>
+      </div>
+      <p class="small muted">Each: point ‖ 4 bytes of element 0.</p>
+    </div>
+    <div class="box pc p2"><h3><span class="mk p2">②</span>Commitment matrix</h3>
+      <p class="small">Column c holds records 3c, 3c + 1, 3c + 2, top to bottom. PIR returns whole columns.</p>
+      <div class="grid" style="grid-template-columns: repeat(3, auto)">
+        <div class="colhead">column 0</div><div class="colhead">column 1</div><div class="colhead">column 2</div>
+        <div class="cell">r0 = 7</div><div class="cell">r3 = 9</div><div class="cell">r6 = 11</div>
+        <div class="cell">r1 = 12</div><div class="cell">r4 = 14</div><div class="cell">r7 = 2</div>
+        <div class="cell">r2 = 3</div><div class="cell">r5 = 5</div><div class="cell">r8 = 8</div>
+      </div>
+      <p class="small muted">Each record is one number here (a real one is 705 B). As a matrix: <span class="mono">[[7, 9, 11], [12, 14, 2], [3, 5, 8]]</span>.</p>
+    </div>
+    <div class="box pc p3"><h3><span class="mk p3">③</span>Nullifier buckets</h3>
+      <p class="small">Bucket = the nullifier's first 2 bits; one column per bucket, two slots, 0 when empty.</p>
+      <div class="buckets">
+        <div class="bucket"><div class="h">bucket 0</div><div class="cell">n1 = 5</div><div class="cell">n3 = 13</div></div>
+        <div class="bucket"><div class="h">bucket 1</div><div class="cell">n2 = 9</div><div class="cell dim">0</div></div>
+        <div class="bucket"><div class="h">bucket 2</div><div class="cell">n4 = 6</div><div class="cell dim">0</div></div>
+        <div class="bucket"><div class="h">bucket 3</div><div class="cell">n5 = 11</div><div class="cell dim">0</div></div>
+      </div>
+      <p class="small muted">As a matrix: <span class="mono">[[5, 9, 6, 11], [13, 0, 0, 0]]</span>.</p>
+    </div>
+    <div class="box pc p4"><h3><span class="mk p4">④</span>Block roots</h3>
+      <p class="small">R0, R1, R2: the roots of the blocks of 4 leaves. Below them, each record holds its own path.</p>
+      <div class="tree">
+        <div class="row"><div class="cell">root</div></div>
+        <div class="row"><div class="cell">R0</div><div class="cell">R1</div><div class="cell">R2</div></div>
+        <div class="row"><div class="blk"><div class="cell">c0</div><div class="cell">c1</div><div class="cell">c2</div><div class="cell">c3</div></div></div>
+        <div class="row"><div class="blk"><div class="cell">c4</div><div class="cell">c5</div><div class="cell">c6</div><div class="cell">c7</div></div></div>
+        <div class="row"><div class="blk"><div class="cell">c8</div><div class="cell dim">·</div><div class="cell dim">·</div><div class="cell dim">·</div></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="body g2" style="flex: none">
+    <div class="box"><h3>Inputs</h3><table class="io">
+      <tr><td class="sym">outputs 0–8</td><td><span class="b public">public</span></td><td>commitments and ciphertexts, split as on the previous slide</td><td class="from"><a data-to="s-example"></a></td></tr>
+      <tr><td class="sym">n1–n5</td><td><span class="b public">public</span></td><td>the nullifiers of every spend, from the same tables</td><td class="from"><a data-to="s-example"></a></td></tr>
+    </table></div>
+    <div class="box"><h3>Outputs</h3><table class="io">
+      <tr><td class="sym">commitment matrix</td><td><span class="b server">server</span></td><td>kept to answer read calls; also used for H</td><td class="from"><a data-to="s-setup"></a></td></tr>
+      <tr><td class="sym">nullifier table</td><td><span class="b server">server</span></td><td>kept to answer nullifier calls; also used for H′</td><td class="from"><a data-to="s-setup"></a></td></tr>
+      <tr><td class="sym">scan file, R0–R2</td><td><span class="b public">public</span></td><td>downloaded by every wallet</td><td class="from"><a data-to="s-files"></a></td></tr>
+    </table></div>
+  </div>
+</section>
+
+<section class="slide" id="s-setup" data-step="0" data-title="Step 0: the public matrices and the setup data">
+  <div class="top">Step 0 · The server builds a snapshot · 3 of 4 <span class="where s">Server</span></div>
+  <h2>The public matrices A, A′ and the setup data H, H′ <span class="gpu-tag" data-tip="setup">gpu</span></h2>
+  <p class="lead">A is a matrix of random numbers, one row per table column and n columns (n = 2 here, 1,024 on the real server). It is generated from a random seed written in the manifest, so every wallet rebuilds the same A; nobody downloads it. A is public: the query is hidden by the wallet's secret s, not by A. The setup data H = table × A lets a wallet decode an answer.</p>
+  <div class="body g2">
+    <div class="box s"><h3>For the commitment matrix</h3><div class="math" id="m-setup-read"></div><div class="work" id="w-setup-read"></div></div>
+    <div class="box s"><h3>For the nullifier table</h3><div class="math" id="m-setup-nf"></div><div class="work" id="w-setup-nf"></div></div>
+  </div>
+  <div class="body g2" style="flex: none">
+    <div class="box"><h3>Inputs</h3><table class="io">
+      <tr><td class="sym">seed, seed′</td><td><span class="b public">public</span></td><td>random, chosen by the server for this snapshot, written in the manifest</td><td class="from">this slide</td></tr>
+      <tr><td class="sym">tables</td><td><span class="b server">server</span></td><td>the read and nullifier tables</td><td class="from"><a data-to="s-tables"></a></td></tr>
+    </table></div>
+    <div class="box"><h3>Outputs</h3><table class="io">
+      <tr><td class="sym">A, A′</td><td><span class="b public">public</span></td><td>rebuilt from the seeds by every wallet</td><td class="from"><a data-to="s-files"></a></td></tr>
+      <tr><td class="sym">H, H′</td><td><span class="b public">public</span></td><td>downloaded by every wallet; used to decode</td><td class="from"><a data-to="s-decode"></a></td></tr>
+    </table></div>
+  </div>
+</section>
+
+<section class="slide" id="s-snapshot" data-step="0" data-title="Step 0: the snapshot's files">
+  <div class="top">Step 0 · The server builds a snapshot · 4 of 4 <span class="where s">Server</span></div>
+  <h2>The snapshot: a manifest and six files</h2>
+  <p class="lead">Built once per snapshot, for every wallet alike. The times are a real build on Preprod at height 720,058 (6,861 outputs, 3,910 nullifiers): 1.7 s in all, on the CPU.</p>
+  <div class="body">
+    <table class="tbl">
+      <tr><th>File</th><th>What it holds</th><th>Who uses it</th><th class="r">In the example</th><th class="r">Built in (Preprod)</th></tr>
+      <tr><td>manifest</td><td>height, tree root, parameters, the seeds of A and A′, the SHA-256 of each file</td><td>fetched first by every wallet</td><td class="r"><span class="sz" data-tip="manifest">1.4 KB</span></td><td class="r">2 ms</td></tr>
+      <tr><td>scan file</td><td>per output: the ciphertext's point and the first 4 bytes of its element 0</td><td>downloaded by every wallet</td><td class="r"><span class="sz" data-tip="scanfile">9 × 36 B = 324 B</span></td><td class="r">4 ms</td></tr>
+      <tr><td>block roots</td><td>R0, R1, R2</td><td>downloaded by every wallet</td><td class="r"><span class="sz" data-tip="blockroots">3 × 32 B = 96 B</span></td><td class="r">506 ms (tree)</td></tr>
+      <tr><td>read setup <span class="mono">H</span></td><td>commitment matrix × A</td><td>downloaded by every wallet</td><td class="r"><span class="sz" data-tip="setup-size">3 × 2 numbers</span></td><td class="r">951 ms <span class="gpu-tag" data-tip="setup">gpu</span></td></tr>
+      <tr><td>nullifier setup <span class="mono">H′</span></td><td>nullifier table × A′</td><td>downloaded by every wallet</td><td class="r"><span class="sz" data-tip="setup-size">2 × 2 numbers</span></td><td class="r">66 ms</td></tr>
+      <tr><td>commitment matrix</td><td>the records</td><td>kept by the server, to answer</td><td class="r">3 × 3 numbers</td><td class="r">56 ms</td></tr>
+      <tr><td>nullifier table</td><td>the buckets</td><td>kept by the server, to answer</td><td class="r">2 × 4 numbers</td><td class="r">10 ms</td></tr>
+    </table>
+  </div>
+  <div class="sees"><div class="sv"><b>Server sees</b>Only public chain data; no wallet has done anything yet.</div><div class="wl"><b>Stays on the wallet</b>Nothing yet.</div></div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════ step 1 -->
+<section class="slide" id="s-keys" data-step="1" data-title="Step 1: the wallet's keys">
+  <div class="top">Step 1 · Wallet keys <span class="where w">Wallet</span></div>
+  <h2>The wallet derives its keys, on the device</h2>
+  <div class="body">
+    <div class="box w"><div class="flow" style="font-size: 15px">
+      <span class="cell">24 words</span><span class="arrow">→</span><span class="cell">BIP-39 seed</span><span class="arrow">→</span><span class="cell">HD path m/44'/2400'/0'/3/0</span><span class="arrow">→</span><span class="cell">Zswap seed</span><span class="arrow">→</span>
+      <span class="cell mine">scan secret</span><span class="cell mine">coin secret key</span><span class="arrow">→</span><span class="cell">shielded address</span>
+    </div></div>
+  </div>
+  <div class="body g2" style="flex: none">
+    <div class="box"><h3>Inputs</h3><table class="io">
+      <tr><td class="sym">mnemonic</td><td><span class="b secret">secret</span></td><td>the user's 24 words</td><td class="from">the user</td></tr>
+    </table></div>
+    <div class="box"><h3>Outputs</h3><table class="io">
+      <tr><td class="sym">scan secret</td><td><span class="b secret">secret</span></td><td>the encryption secret key: tests outputs</td><td class="from"><a data-to="s-scan"></a></td></tr>
+      <tr><td class="sym">coin secret key</td><td><span class="b secret">secret</span></td><td>derives nullifiers</td><td class="from"><a data-to="s-nf-local"></a></td></tr>
+      <tr><td class="sym">address</td><td><span class="b public">public</span></td><td>what payers send to</td><td class="from">—</td></tr>
+    </table></div>
+  </div>
+  <div class="sees"><div class="sv"><b>Server sees</b>Nothing: no request is made.</div><div class="wl"><b>Stays on the wallet</b>The mnemonic and both secret keys, for the whole session.</div></div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════ step 2 -->
+<section class="slide" id="s-files" data-step="2" data-title="Step 2: the same download for every wallet">
+  <div class="top">Step 2 · Get the files <span class="where c">Wire</span></div>
+  <h2>The same download for every wallet</h2>
+  <div class="body lanes">
+    <div><div class="lanehead w">Wallet</div>
+      <div class="box w"><h3>Checks what it got</h3><p class="small">Each file's SHA-256 equals the manifest's; <span class="mono">h(h(R0, R1), h(R2, 0))</span> equals its root.</p></div>
+      <div class="box w"><h3>Rebuilds A, A′ from the seeds; keeps the downloaded H, H′</h3><div class="math" id="m-files" style="font-size: 13px"></div></div>
+    </div>
+    <div><div class="lanehead c">On the wire</div>
+      <div class="msg right"><div class="label">GET /manifest</div><div class="line"></div></div>
+      <div class="msg left"><div class="label">manifest</div><div class="size"><span class="sz" data-tip="manifest">1.4 KB</span>: root, seeds, file digests</div><div class="line"></div></div>
+      <div class="msg left"><div class="label">scan file</div><div class="size"><span class="sz" data-tip="scanfile">9 × 36 B</span></div><div class="line"></div></div>
+      <div class="msg left"><div class="label">block roots</div><div class="size"><span class="sz" data-tip="blockroots">3 × 32 B</span></div><div class="line"></div></div>
+      <div class="msg left"><div class="label">setup data H, H′</div><div class="size"><span class="sz" data-tip="setup-size">3 × 2 and 2 × 2 numbers</span></div><div class="line"></div></div>
+    </div>
+    <div><div class="lanehead s">Server</div>
+      <div class="box s"><h3>Serves files by their SHA-256</h3><p class="small">The same files, byte for byte, to every wallet that asks.</p></div>
+    </div>
+  </div>
+  <div class="body g2" style="flex: none">
+    <div class="box"><h3>Inputs</h3><table class="io">
+      <tr><td class="sym">files</td><td><span class="b public">public</span></td><td>the snapshot's manifest and four files</td><td class="from"><a data-to="s-snapshot"></a></td></tr>
+    </table></div>
+    <div class="box"><h3>Outputs</h3><table class="io">
+      <tr><td class="sym">scan file</td><td><span class="b public">public</span></td><td>tested in the scan</td><td class="from"><a data-to="s-scan"></a></td></tr>
+      <tr><td class="sym">A, H, A′, H′</td><td><span class="b public">public</span></td><td>for the queries and the decoding</td><td class="from"><a data-to="s-query"></a></td></tr>
+    </table></div>
+  </div>
+  <div class="sees"><div class="sv"><b>Server sees</b>Someone downloaded this snapshot's files, as every wallet does.</div><div class="wl"><b>Stays on the wallet</b>Everything about the keys; the download does not depend on them.</div></div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════ step 3 -->
+<section class="slide" id="s-scan" data-step="3" data-title="Step 3: finding the wallet's outputs">
+  <div class="top">Step 3 · Find my outputs <span class="where w">Wallet</span></div>
+  <h2>The wallet tests all 9 scan entries locally <span class="gpu-tag" data-tip="scan">gpu</span></h2>
+  <p class="lead">An entry is the ciphertext's point and the first 4 bytes of its element 0. Element 0 encrypts zero, so for the wallet's own outputs it equals Poseidon(point × scan secret). A false match has a chance of about 1 in 4 billion; the full check comes in step 4.</p>
+  <div class="body g12">
+    <div class="box w"><h3>The test, per entry</h3>
+      <p class="small mono">pad = Poseidon(point × scan secret)<br>mine ⇔ first 4 bytes of pad = the entry's 4 bytes</p>
+      <p class="small muted">Bytes on the right are illustrative.</p>
+    </div>
+    <div class="box w"><div class="tiles" id="tiles"></div></div>
+  </div>
+  <div class="body g2" style="flex: none">
+    <div class="box"><h3>Inputs</h3><table class="io">
+      <tr><td class="sym">scan file</td><td><span class="b public">public</span></td><td>9 entries of 36 bytes</td><td class="from"><a data-to="s-files"></a></td></tr>
+      <tr><td class="sym">scan secret</td><td><span class="b secret">secret</span></td><td>the encryption secret key</td><td class="from"><a data-to="s-keys"></a></td></tr>
+    </table></div>
+    <div class="box"><h3>Outputs</h3><table class="io">
+      <tr><td class="sym">matches {2, 6}</td><td><span class="b secret">secret</span></td><td>the wallet's outputs</td><td class="from"><a data-to="s-columns"></a></td></tr>
+    </table></div>
+  </div>
+  <div class="sees"><div class="sv"><b>Server sees</b>Nothing: the scan sends no request.</div><div class="wl"><b>Stays on the wallet</b>Which outputs matched: 2 and 6.</div></div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════ step 4 -->
+<section class="slide" id="s-columns" data-step="4" data-title="Step 4: which columns to ask for">
+  <div class="top">Step 4 · Fetch my records by PIR · 1 of 5 <span class="where w">Wallet</span></div>
+  <h2>Which columns to ask for, and why one extra</h2>
+  <div class="body g12">
+    <div class="box w"><h3>The commitment matrix, as the wallet sees it</h3>
+      <div class="grid" style="grid-template-columns: repeat(3, auto)">
+        <div class="colhead">column 0</div><div class="colhead">column 1</div><div class="colhead">column 2</div>
+        <div class="cell sel">r0</div><div class="cell pad">r3</div><div class="cell sel mine">r6</div>
+        <div class="cell sel">r1</div><div class="cell pad">r4</div><div class="cell sel">r7</div>
+        <div class="cell sel mine">r2</div><div class="cell pad">r5</div><div class="cell sel">r8</div>
+      </div>
+      <p class="small muted">The wallet knows the layout (column c holds 3c … 3c + 2), not the values.</p>
+    </div>
+    <div class="box w"><h3>The plan</h3>
+      <ul>
+        <li>Output 2 is in <b>column 0</b>, output 6 in <b>column 2</b>. PIR returns whole columns, so the wallet will get r0–r2 and r6–r8 and keep r2 and r6.</li>
+        <li>One query vector fetches one column. If the wallet sent only 2, the server would learn it owns about 2 outputs; a wallet with nothing would send none.</li>
+        <li>So <b>every call carries the same number of vectors</b>: 3 in this example, 32 on the real server. The wallet adds <b>column 1</b> as padding, at random; its answer is thrown away. Which column the padding asks for makes no difference: the server cannot see the column of any vector.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="body g2" style="flex: none">
+    <div class="box"><h3>Inputs</h3><table class="io">
+      <tr><td class="sym">matches {2, 6}</td><td><span class="b secret">secret</span></td><td>from the scan</td><td class="from"><a data-to="s-scan"></a></td></tr>
+      <tr><td class="sym">layout</td><td><span class="b public">public</span></td><td>3 records per column, from the manifest</td><td class="from"><a data-to="s-snapshot"></a></td></tr>
+    </table></div>
+    <div class="box"><h3>Outputs</h3><table class="io">
+      <tr><td class="sym">columns 0, 2 + 1</td><td><span class="b secret">secret</span></td><td>one query vector each</td><td class="from"><a data-to="s-query"></a></td></tr>
+    </table></div>
+  </div>
+  <div class="sees"><div class="sv"><b>Server sees</b>Nothing yet.</div><div class="wl"><b>Stays on the wallet</b>Which columns are real and which is padding.</div></div>
+</section>
+
+<section class="slide" id="s-query" data-step="4" data-title="Step 4: the query vector for column 0">
+  <div class="top">Step 4 · Fetch my records by PIR · 2 of 5 <span class="where w">Wallet</span></div>
+  <h2>The query vector for column 0: q = A·s + e + Δ·u</h2>
+  <div class="body g21">
+    <div class="box w"><div class="math" id="m-query"></div><div class="work" id="w-query"></div></div>
+    <div style="display: grid; gap: 10px; align-content: start">
+      <div class="box"><h3>Inputs</h3><table class="io">
+        <tr><td class="sym">A</td><td><span class="b public">public</span></td><td>rebuilt from the seed</td><td class="from"><a data-to="s-setup"></a></td></tr>
+        <tr><td class="sym">s</td><td><span class="b secret">secret</span></td><td>2 random numbers, picked now, new for each vector</td><td class="from">this slide</td></tr>
+        <tr><td class="sym">e</td><td><span class="b secret">secret</span></td><td>small random noise, −2 … 2, picked now</td><td class="from">this slide</td></tr>
+        <tr><td class="sym">u</td><td><span class="b secret">secret</span></td><td>(1, 0, 0): a 1 at the wanted column 0</td><td class="from"><a data-to="s-columns"></a></td></tr>
+        <tr><td class="sym">Δ</td><td><span class="b public">public</span></td><td>4,096 = 65,536 / 16: values go up to 15</td><td class="from">parameter</td></tr>
+      </table></div>
+      <div class="box"><h3>Outputs</h3><table class="io">
+        <tr><td class="sym">q</td><td><span class="b sent">sent</span></td><td>to the server</td><td class="from"><a data-to="s-answer"></a></td></tr>
+        <tr><td class="sym">s</td><td><span class="b secret">secret</span></td><td>kept, to decode</td><td class="from"><a data-to="s-decode"></a></td></tr>
+      </table></div>
+    </div>
+  </div>
+  <div class="sees"><div class="sv"><b>Server sees</b>Nothing yet; next it receives q. Without s, A·s + e cannot be told apart from random numbers (the Learning With Errors assumption), so adding Δ to one entry cannot be spotted.</div><div class="wl"><b>Stays on the wallet</b>s, e and u: which column this vector asks for.</div></div>
+</section>
+
+<section class="slide" id="s-answer" data-step="4" data-title="Step 4: the server's answer">
+  <div class="top">Step 4 · Fetch my records by PIR · 3 of 5 <span class="where c">Wire</span> <span class="where s">Server</span></div>
+  <h2>The server multiplies its table by every vector <span class="gpu-tag" data-tip="readcall">gpu</span></h2>
+  <div class="body lanes">
+    <div><div class="lanehead w">Wallet</div>
+      <div class="box w"><h3>Sends 3 vectors</h3><p class="small">q for column 0 (previous slide), and the same for column 2 and for the padding column 1, each with its own s and e.</p></div>
+    </div>
+    <div><div class="lanehead c">On the wire</div>
+      <div class="msg right"><div class="label">POST /query/read</div><div class="size"><span class="sz" data-tip="readup">3 vectors × 3 numbers</span></div><div class="line"></div></div>
+      <div class="msg left"><div class="label">answer</div><div class="size"><span class="sz" data-tip="readdown">3 vectors × 3 numbers</span></div><div class="line"></div></div>
+      <div class="box c"><div class="math" id="m-wire"></div></div>
+    </div>
+    <div><div class="lanehead s">Server</div>
+      <div class="box s"><div class="math" id="m-answer"></div><div class="work" id="w-answer"></div></div>
+    </div>
+  </div>
+  <div class="body g2" style="flex: none">
+    <div class="box"><h3>Inputs</h3><table class="io">
+      <tr><td class="sym">commitment matrix</td><td><span class="b server">server</span></td><td>[[7, 9, 11], [12, 14, 2], [3, 5, 8]]</td><td class="from"><a data-to="s-tables"></a></td></tr>
+      <tr><td class="sym">q</td><td><span class="b sent">sent</span></td><td>from the wallet</td><td class="from"><a data-to="s-query"></a></td></tr>
+    </table></div>
+    <div class="box"><h3>Outputs</h3><table class="io">
+      <tr><td class="sym">answer</td><td><span class="b sent">sent</span></td><td>back to the wallet</td><td class="from"><a data-to="s-decode"></a></td></tr>
+    </table></div>
+  </div>
+  <div class="sees"><div class="sv"><b>Server sees</b>3 vectors that look random and the 3 answers it computed. It does the same work for every vector of every wallet.</div><div class="wl"><b>Stays on the wallet</b>s, so only the wallet can remove A·s from the answer.</div></div>
+</section>
+
+<section class="slide" id="s-decode" data-step="4" data-title="Step 4: decoding the answer">
+  <div class="top">Step 4 · Fetch my records by PIR · 4 of 5 <span class="where w">Wallet</span></div>
+  <h2>Decoding: subtract H·s, divide by Δ, round</h2>
+  <div class="body g21">
+    <div class="box w">
+      <div class="claim" style="margin-bottom: 6px"><b>Why it works.</b> answer = table × (A·s + e + Δ·u) = <b>(table × A)·s</b> + table·e + Δ·(table·u) = <b>H·s</b> + small noise + Δ·(column 0). The wallet knows H and s, so it removes H·s; the server does not know s, so it cannot.</div>
+      <div class="math" id="m-decode"></div><div class="work" id="w-decode"></div>
+    </div>
+    <div style="display: grid; gap: 10px; align-content: start">
+      <div class="box"><h3>Inputs</h3><table class="io">
+        <tr><td class="sym">answer</td><td><span class="b sent">sent</span></td><td>from the server</td><td class="from"><a data-to="s-answer"></a></td></tr>
+        <tr><td class="sym">H</td><td><span class="b public">public</span></td><td>the setup data, downloaded</td><td class="from"><a data-to="s-setup"></a></td></tr>
+        <tr><td class="sym">s</td><td><span class="b secret">secret</span></td><td>the vector's secret</td><td class="from"><a data-to="s-query"></a></td></tr>
+      </table></div>
+      <div class="box"><h3>Outputs</h3><table class="io">
+        <tr><td class="sym">column 0</td><td><span class="b secret">secret</span></td><td>r0, r1, r2; the wallet keeps r2</td><td class="from"><a data-to="s-records"></a></td></tr>
+      </table></div>
+    </div>
+  </div>
+  <div class="sees"><div class="sv"><b>Server sees</b>Nothing new: decoding is local.</div><div class="wl"><b>Stays on the wallet</b>The decoded column, and that r2 is the record it wanted.</div></div>
+</section>
+
+<section class="slide" id="s-records" data-step="4" data-title="Step 4: the other vectors and the coins">
+  <div class="top">Step 4 · Fetch my records by PIR · 5 of 5 <span class="where w">Wallet</span></div>
+  <h2>The other two vectors, and the coins inside the records</h2>
+  <div class="body g2">
+    <div class="box w"><h3>Each vector decodes to its whole column</h3><div class="math" id="m-others"></div></div>
+    <div class="box w"><h3>Opening the records</h3>
+      <ul>
+        <li>Record 2's ciphertext decrypts with the scan secret → <b>1,000 pssUSD</b>; record 6's → <b>250 pssUSD</b>.</li>
+        <li>For each coin, the wallet recomputes the commitment from the decrypted coin and its own public key; it equals the record's. This rules out a false match from the scan.</li>
+        <li>Each record also carries its lower Merkle path (inside its block of 4), needed later to spend the coin.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="body g2" style="flex: none">
+    <div class="box"><h3>Inputs</h3><table class="io">
+      <tr><td class="sym">answers</td><td><span class="b sent">sent</span></td><td>for columns 2 and 1</td><td class="from"><a data-to="s-answer"></a></td></tr>
+      <tr><td class="sym">records 2, 6</td><td><span class="b secret">secret</span></td><td>decoded</td><td class="from"><a data-to="s-decode"></a></td></tr>
+    </table></div>
+    <div class="box"><h3>Outputs</h3><table class="io">
+      <tr><td class="sym">coins 2, 6</td><td><span class="b secret">secret</span></td><td>values, token types, nonces</td><td class="from"><a data-to="s-nf-local"></a></td></tr>
+      <tr><td class="sym">lower paths</td><td><span class="b secret">secret</span></td><td>for the full path</td><td class="from"><a data-to="s-tail"></a></td></tr>
+    </table></div>
+  </div>
+  <div class="sees"><div class="sv"><b>Server sees</b>In all of step 4: one call of 3 vectors in, 3 answers out. The same for any wallet.</div><div class="wl"><b>Stays on the wallet</b>The coins: 1,000 and 250 pssUSD.</div></div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════ step 5 -->
+<section class="slide" id="s-nf-local" data-step="5" data-title="Step 5: the coins' nullifiers">
+  <div class="top">Step 5 · Check my nullifiers by PIR · 1 of 4 <span class="where w">Wallet</span></div>
+  <h2>The wallet computes its coins' nullifiers and picks buckets</h2>
+  <div class="body g2">
+    <div class="box w"><h3>Nullifiers, computed locally</h3>
+      <p>nf = the ledger's coin nullifier of (coin, coin secret key).</p>
+      <p class="mono">nf(coin 2) = 13 → bucket 0<br>nf(coin 6) = 3 → bucket 2</p>
+      <p class="small muted">If a coin has been spent, its nullifier is on the chain, so it is in the server's nullifier table. The nullifiers themselves are never sent.</p>
+    </div>
+    <div class="box w"><h3>Buckets to ask for</h3>
+      <div class="buckets">
+        <div class="bucket"><div class="h">bucket 0</div><div class="cell sel">?</div><div class="cell sel">?</div></div>
+        <div class="bucket"><div class="h">bucket 1 (padding)</div><div class="cell pad">?</div><div class="cell pad">?</div></div>
+        <div class="bucket"><div class="h">bucket 2</div><div class="cell sel">?</div><div class="cell sel">?</div></div>
+        <div class="bucket"><div class="h">bucket 3</div><div class="cell dim">?</div><div class="cell dim">?</div></div>
+      </div>
+      <p class="small">The same fixed number of vectors as before: 3 here, 32 on the real server. A wallet with no coins sends the same call.</p>
+    </div>
+  </div>
+  <div class="body g2" style="flex: none">
+    <div class="box"><h3>Inputs</h3><table class="io">
+      <tr><td class="sym">coins 2, 6</td><td><span class="b secret">secret</span></td><td>decrypted in step 4</td><td class="from"><a data-to="s-records"></a></td></tr>
+      <tr><td class="sym">coin secret key</td><td><span class="b secret">secret</span></td><td>from the keys</td><td class="from"><a data-to="s-keys"></a></td></tr>
+    </table></div>
+    <div class="box"><h3>Outputs</h3><table class="io">
+      <tr><td class="sym">buckets 0, 2 + 1</td><td><span class="b secret">secret</span></td><td>one query vector each</td><td class="from"><a data-to="s-nf-query"></a></td></tr>
+    </table></div>
+  </div>
+  <div class="sees"><div class="sv"><b>Server sees</b>Nothing yet.</div><div class="wl"><b>Stays on the wallet</b>The nullifiers 13 and 3, and which buckets are real.</div></div>
+</section>
+
+<section class="slide" id="s-nf-query" data-step="5" data-title="Step 5: the query for bucket 0">
+  <div class="top">Step 5 · Check my nullifiers by PIR · 2 of 4 <span class="where w">Wallet</span></div>
+  <h2>The query vector for bucket 0: q = A′·s + e + Δ·u</h2>
+  <div class="body g21">
+    <div class="box w"><div class="math" id="m-nf-query"></div><div class="work" id="w-nf-query"></div></div>
+    <div style="display: grid; gap: 10px; align-content: start">
+      <div class="box"><h3>Inputs</h3><table class="io">
+        <tr><td class="sym">A′</td><td><span class="b public">public</span></td><td>4 buckets × 2, from its seed</td><td class="from"><a data-to="s-setup"></a></td></tr>
+        <tr><td class="sym">s, e</td><td><span class="b secret">secret</span></td><td>picked now, new for this vector</td><td class="from">this slide</td></tr>
+        <tr><td class="sym">u</td><td><span class="b secret">secret</span></td><td>(1, 0, 0, 0): a 1 at bucket 0</td><td class="from"><a data-to="s-nf-local"></a></td></tr>
+      </table></div>
+      <div class="box"><h3>Outputs</h3><table class="io">
+        <tr><td class="sym">q</td><td><span class="b sent">sent</span></td><td>to the server</td><td class="from"><a data-to="s-nf-answer"></a></td></tr>
+      </table></div>
+    </div>
+  </div>
+  <div class="sees"><div class="sv"><b>Server sees</b>Next: four numbers that look random, one per bucket. Nothing in them names a bucket or a nullifier.</div><div class="wl"><b>Stays on the wallet</b>s, e, u: which bucket this vector asks for.</div></div>
+</section>
+
+<section class="slide" id="s-nf-answer" data-step="5" data-title="Step 5: the server's answer">
+  <div class="top">Step 5 · Check my nullifiers by PIR · 3 of 4 <span class="where c">Wire</span> <span class="where s">Server</span></div>
+  <h2>The server multiplies its nullifier table by every vector <span class="gpu-tag" data-tip="nfcall">gpu</span></h2>
+  <div class="body lanes">
+    <div><div class="lanehead w">Wallet</div>
+      <div class="box w"><h3>Sends 3 vectors</h3><p class="small">Buckets 0 and 2, and bucket 1 as padding, each with its own s and e.</p></div>
+    </div>
+    <div><div class="lanehead c">On the wire</div>
+      <div class="msg right"><div class="label">POST /query/nullifier</div><div class="size"><span class="sz" data-tip="nfup">3 vectors × 4 numbers</span></div><div class="line"></div></div>
+      <div class="msg left"><div class="label">answer</div><div class="size"><span class="sz" data-tip="nfdown">3 vectors × 2 numbers</span></div><div class="line"></div></div>
+      <div class="box c"><div class="math" id="m-nf-wire"></div></div>
+    </div>
+    <div><div class="lanehead s">Server</div>
+      <div class="box s"><div class="math" id="m-nf-answer"></div><div class="work" id="w-nf-answer"></div></div>
+    </div>
+  </div>
+  <div class="body g2" style="flex: none">
+    <div class="box"><h3>Inputs</h3><table class="io">
+      <tr><td class="sym">nullifier table</td><td><span class="b server">server</span></td><td>[[5, 9, 6, 11], [13, 0, 0, 0]]</td><td class="from"><a data-to="s-tables"></a></td></tr>
+      <tr><td class="sym">q</td><td><span class="b sent">sent</span></td><td>from the wallet</td><td class="from"><a data-to="s-nf-query"></a></td></tr>
+    </table></div>
+    <div class="box"><h3>Outputs</h3><table class="io">
+      <tr><td class="sym">answer</td><td><span class="b sent">sent</span></td><td>back to the wallet</td><td class="from"><a data-to="s-nf-decode"></a></td></tr>
+    </table></div>
+  </div>
+  <div class="sees"><div class="sv"><b>Server sees</b>3 vectors that look random; the same work whichever bucket each asks for. Not which coins, and not whether they are spent.</div><div class="wl"><b>Stays on the wallet</b>s, so only the wallet can read the buckets.</div></div>
+</section>
+
+<section class="slide" id="s-nf-decode" data-step="5" data-title="Step 5: decoding the buckets">
+  <div class="top">Step 5 · Check my nullifiers by PIR · 4 of 4 <span class="where w">Wallet</span></div>
+  <h2>Decoding the buckets: spent or not</h2>
+  <div class="body g21">
+    <div class="box w"><div class="math" id="m-nf-decode"></div><div class="work" id="w-nf-decode"></div></div>
+    <div style="display: grid; gap: 10px; align-content: start">
+      <div class="box w"><h3>Result</h3>
+        <p><b>13</b> is in bucket 0: coin 2 is <b>spent</b>. A real slot also gives the height and the transaction of the spend.</p>
+        <p><b>3</b> is not in bucket 2: coin 6 is <b>unspent</b> at the snapshot.</p>
+      </div>
+      <div class="box"><h3>Inputs</h3><table class="io">
+        <tr><td class="sym">answers</td><td><span class="b sent">sent</span></td><td>from the server</td><td class="from"><a data-to="s-nf-answer"></a></td></tr>
+        <tr><td class="sym">H′</td><td><span class="b public">public</span></td><td>downloaded</td><td class="from"><a data-to="s-setup"></a></td></tr>
+        <tr><td class="sym">s</td><td><span class="b secret">secret</span></td><td>each vector's secret</td><td class="from"><a data-to="s-nf-query"></a></td></tr>
+      </table></div>
+    </div>
+  </div>
+  <div class="sees"><div class="sv"><b>Server sees</b>Nothing new: decoding is local.</div><div class="wl"><b>Stays on the wallet</b>That coin 2 is spent and coin 6 is not.</div></div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════ step 6 -->
+<section class="slide" id="s-tail" data-step="6" data-title="Step 6: the tail and the full paths">
+  <div class="top">Step 6 · Get the tail <span class="where c">Wire</span> <span class="where w">Wallet</span></div>
+  <h2>The tail: everything since the snapshot, the same for everyone</h2>
+  <div class="body lanes">
+    <div><div class="lanehead w">Wallet</div>
+      <div class="box w"><h3>Scans output 9</h3><p class="small">Tested like any scan entry: not the wallet's. No new spend touches coin 6.</p></div>
+      <div class="box w"><h3>Builds each coin's full path</h3>
+        <div class="tree">
+          <div class="row"><div class="cell sel">root′</div></div>
+          <div class="row"><div class="cell">R0</div><div class="cell">R1</div><div class="cell sel">R2′</div></div>
+          <div class="row"><div class="blk"><div class="cell sel">h(c0,c1)</div><div class="cell mine">c2</div><div class="cell sel">c3</div></div>
+          <div class="blk"><div class="cell sel">h(c4,c5)</div><div class="cell mine">c6</div><div class="cell sel">c7</div></div></div>
+        </div>
+        <p class="small">Coin 2: c3, h(c0, c1) from its record, then R1, h(R2′, 0). Coin 6: c7, h(c4, c5), then R0, h(R2′, 0). Both give root′, the tail's root, which a spend proves against.</p>
+      </div>
+    </div>
+    <div><div class="lanehead c">On the wire</div>
+      <div class="msg right"><div class="label">GET /tail</div><div class="line"></div></div>
+      <div class="msg left"><div class="label">tail</div><div class="size"><span class="sz" data-tip="tail">c8, output 9, no spends, R2′</span></div><div class="line"></div></div>
+    </div>
+    <div><div class="lanehead s">Server</div>
+      <div class="box s"><h3>Sends everything after the snapshot</h3><p class="small">The unfinished block's commitments (c8), each new output with its ciphertext (9), each new spend (none), the new block roots (R2′).</p></div>
+    </div>
+  </div>
+  <div class="body g2" style="flex: none">
+    <div class="box"><h3>Inputs</h3><table class="io">
+      <tr><td class="sym">tail</td><td><span class="b public">public</span></td><td>c8, output 9, R2′</td><td class="from">this slide</td></tr>
+      <tr><td class="sym">lower paths</td><td><span class="b secret">secret</span></td><td>from the records</td><td class="from"><a data-to="s-records"></a></td></tr>
+    </table></div>
+    <div class="box"><h3>Outputs</h3><table class="io">
+      <tr><td class="sym">full paths</td><td><span class="b secret">secret</span></td><td>ready to spend coin 6</td><td class="from"><a data-to="s-result"></a></td></tr>
+    </table></div>
+  </div>
+  <div class="sees"><div class="sv"><b>Server sees</b>A tail download: the same bytes for every wallet.</div><div class="wl"><b>Stays on the wallet</b>That output 9 is not its own; its coins' paths.</div></div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════ step 7 -->
+<section class="slide" id="s-result" data-step="7" data-title="Step 7: the result and what crossed the wire">
+  <div class="top">Step 7 · Result</div>
+  <h2>The wallet's balance, and everything that crossed the wire</h2>
+  <div class="body g12">
+    <div class="box w"><h3>The wallet now knows</h3>
+      <ul>
+        <li>coin 6: <b>250 pssUSD</b>, unspent, with a full Merkle path: ready to spend;</li>
+        <li>coin 2: 1,000 pssUSD, spent.</li>
+      </ul>
+      <p><b>Balance: 250 pssUSD.</b></p>
+    </div>
+    <div class="box s"><h3>Every request the server received</h3>
+      <table class="tbl">
+        <tr><th>Request</th><th>In the example</th><th>Depends on what the wallet owns?</th></tr>
+        <tr><td>GET manifest and 4 files</td><td>1.4 KB + 324 B + 96 B + setup</td><td>No: the same for everyone</td></tr>
+        <tr><td>POST /query/read</td><td>3 vectors in, 3 out</td><td>No: always the same number of vectors, each looking random</td></tr>
+        <tr><td>POST /query/nullifier</td><td>3 vectors in, 3 out</td><td>No: the same</td></tr>
+        <tr><td>GET /tail</td><td>c8, output 9, R2′</td><td>No: the same for everyone</td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="sees"><div class="sv"><b>Server sees</b>The same four kinds of request, of the same sizes, from every wallet.</div><div class="wl"><b>Stays on the wallet</b>Keys, matches, columns, buckets, coins, which coins are spent.</div></div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════ closing -->
+<section class="slide" id="s-why" data-step="" data-title="Why the server learns nothing">
+  <div class="top">Review</div>
+  <h2>Why the server learns nothing, step by step</h2>
+  <div class="body">
+    <table class="tbl">
+      <tr><th>Step</th><th>What is sent</th><th>Why it reveals nothing</th></tr>
+      <tr><td>1 Keys</td><td>nothing</td><td>—</td></tr>
+      <tr><td>2 Files</td><td>requests for the snapshot's manifest and files</td><td>Every wallet asks for the same files; the download does not depend on the keys.</td></tr>
+      <tr><td>3 Scan</td><td>nothing</td><td>The whole scan file is tested on the device.</td></tr>
+      <tr><td>4 Records</td><td>q = A·s + e + Δ·u, a fixed number per call</td><td>Without s, A·s + e looks random (Learning With Errors), so q hides u, the column. The count is fixed, so it hides how many outputs the wallet owns. Removing A·s needs s, which never leaves the wallet.</td></tr>
+      <tr><td>5 Nullifiers</td><td>the same, over the nullifier table</td><td>The same argument; the nullifiers are computed and compared on the device.</td></tr>
+      <tr><td>6 Tail</td><td>a request for the tail</td><td>Every wallet gets the same bytes and checks them on the device.</td></tr>
+    </table>
+    <div class="claim">The real parameters: n = 1,024, q = 2<sup>32</sup>, noise σ = 6.4, values of 9 bits, 32 vectors per call; SimplePIR's published choice for this security level. The slides use n = 2 and q = 65,536 so the numbers fit.</div>
+  </div>
+</section>
+
+<section class="slide" id="s-limits" data-step="" data-title="What still shows">
+  <div class="top">Review</div>
+  <h2>What still shows, and what is out of scope</h2>
+  <div class="body">
+    <table class="tbl">
+      <tr><th style="width: 26%">What</th><th>Why</th><th style="width: 32%">How to close it</th></tr>
+      <tr><td><b>A rough count above 32</b></td><td>A wallet needing more than 32 columns (or buckets) sends a second call, so the server learns "more than 32".</td><td>Always send a fixed number of calls, or raise the vectors per call; costs bytes for everyone.</td></tr>
+      <tr><td><b>When and how often a wallet syncs, and its IP address</b></td><td>PIR hides what is asked, not that someone asked.</td><td>A relay or Tor; syncing on a regular schedule.</td></tr>
+      <tr><td><b>Timing around a spend</b></td><td>If the same operator runs the node a transaction is sent to, "this client synced, then a new nullifier appeared" can be correlated.</td><td>Submit transactions through another path.</td></tr>
+      <tr><td><b>Correct answers</b> (out of scope)</td><td>A dishonest server cannot learn which coins a wallet has, but it could answer wrongly, for example "unspent" for a spent coin.</td><td>Checks against a trusted root, or attestation; not part of this proof of concept. A wrong "unspent" shows when the spend is refused on chain.</td></tr>
+    </table>
+  </div>
+</section>
+
+<section class="slide" id="s-scale" data-step="" data-title="At scale">
+  <div class="top">Review</div>
+  <h2>At scale: sizes and times for 1 million and 10 million outputs</h2>
+  <p class="lead">Measured on an Apple M4 Max where stated; otherwise scaled from those measurements with the server's sizing rule. Preprod today has about 69,000 outputs.</p>
+  <div class="body g2">
+    <div class="box"><h3>What every wallet downloads or sends</h3>
+      <table class="tbl">
+        <tr><th></th><th class="r">1M</th><th class="r">10M</th></tr>
+        <tr><td>scan file</td><td class="r">36 MB</td><td class="r">360 MB</td></tr>
+        <tr><td>read setup H (once per snapshot)</td><td class="r">≈ 103 MB</td><td class="r">≈ 326 MB</td></tr>
+        <tr><td>nullifier setup H′ (once per snapshot)</td><td class="r">≈ 25 MB</td><td class="r">≈ 105 MB</td></tr>
+        <tr><td>one read call, up / down</td><td class="r">≈ 3.2 / 3.2 MB</td><td class="r">≈ 10 / 10.2 MB</td></tr>
+        <tr><td>one nullifier call, up / down</td><td class="r">≈ 1 / 0.77 MB</td><td class="r">≈ 2 / 3.3 MB</td></tr>
+        <tr><td>block roots</td><td class="r">512 B</td><td class="r">4.9 KB</td></tr>
+      </table>
+    </div>
+    <div class="box"><h3>Time <span class="muted small">(GPU / CPU on 8 threads)</span></h3>
+      <table class="tbl">
+        <tr><th></th><th class="r">1M</th><th class="r">10M</th></tr>
+        <tr><td>wallet: scan <span class="gpu-tag" data-tip="scan">gpu</span></td><td class="r">≈ 3 s / 70 s</td><td class="r">≈ 30 s / 11 min</td></tr>
+        <tr><td>server: one read call <span class="gpu-tag" data-tip="readcall">gpu</span></td><td class="r">≈ 50 ms / 0.65 s</td><td class="r">≈ 0.5 s / 6.5 s</td></tr>
+        <tr><td>server: one nullifier call <span class="gpu-tag" data-tip="nfcall">gpu</span></td><td class="r">≈ 5 ms / 60 ms</td><td class="r">≈ 40 ms / 0.6 s</td></tr>
+        <tr><td>server: read setup, per snapshot <span class="gpu-tag" data-tip="setup">gpu</span></td><td class="r">≈ 1.4 s / 31 s</td><td class="r">≈ 14 s / 5 min</td></tr>
+      </table>
+      <p class="small muted">Hover a gpu tag for where each figure comes from.</p>
+    </div>
+  </div>
+</section>
+
+  </div>
+  <div class="foot">
+    <button id="prev" title="Previous (←)">←</button><button id="next" title="Next (→)">→</button>
+    <span id="count"></span><span id="title" class="muted"></span>
+    <div class="bar"><i id="bar"></i></div>
+    <button id="list" title="List of slides (O)">Slides</button>
+  </div>
+</div>
+
+<div class="overview" id="overview"><div class="panel"><b>Slides</b> <span class="muted small">— click to go, Esc to close</span><ol id="olist"></ol></div></div>
+
+<script>
+  // ── 1M / 10M figures for the gpu tags and the sizes ─────────────────────────────────────────────────────────────
+  const TIPS = {
+    setup: { title: "Building the setup data (table × A, 1,024 vectors)", head: ["entries", "GPU", "CPU, 8 threads"],
+      rows: [["1,000,000 outputs (read setup)", "≈ 1.4 s", "≈ 31 s"], ["10,000,000 outputs (read setup)", "≈ 14 s", "≈ 5 min"],
+        ["1,000,000 nullifiers (nullifier setup)", "≈ 0.1 s", "≈ 2 s"], ["10,000,000 nullifiers (nullifier setup)", "≈ 1 s", "≈ 20 s"]],
+      note: "Scaled from the Preprod-size check on an Apple M4 Max (69k outputs: GPU 100 ms, CPU 2.15 s). Kernel: gpu/multiply.ts, byte-equal to the CPU; the Node server module runs the CPU one." },
+    scan: { title: "Scanning for the wallet's outputs", head: ["entries", "GPU (WebGPU)", "CPU, 8 threads", "CPU, 1 thread"],
+      rows: [["1,000,000", "≈ 3 s", "≈ 70 s", "≈ 7.2 min"], ["10,000,000", "≈ 30 s", "≈ 11 min", "≈ 72 min"]],
+      note: "Measured per entry on an Apple M4 Max: WebGPU 2.3–3.2 µs in Chromium and 2.9 µs in Deno, WebAssembly 66 µs on 8 threads and 430 µs on one browser thread. Kernel: gpu/scan.ts." },
+    readcall: { title: "One read call on the server: table × 32 query vectors", head: ["outputs", "GPU", "CPU, 8 threads"],
+      rows: [["1,000,000", "≈ 50 ms", "≈ 0.65 s"], ["10,000,000", "≈ 0.5 s", "≈ 6.5 s"]],
+      note: "1M measured in Chromium's WebGPU (704-byte records, 32 vectors); 10M and the CPU column scaled from the Preprod-size check (69k outputs: CPU 45 ms). Kernel: gpu/multiply.ts." },
+    nfcall: { title: "One nullifier call on the server: table × 32 query vectors", head: ["nullifiers", "GPU", "CPU, 8 threads"],
+      rows: [["1,000,000", "≈ 5 ms", "≈ 60 ms"], ["10,000,000", "≈ 40 ms", "≈ 0.6 s"]],
+      note: "Scaled from the Preprod-size check (58k nullifiers: CPU 3.4 ms, GPU 0.4 ms of execution) and Chromium's WebGPU rate. Small calls are bound by the GPU's per-call overhead." },
+    manifest: { title: "The manifest", head: ["entries", "size"], rows: [["1,000,000 outputs", "≈ 1.4 KB"], ["10,000,000 outputs", "≈ 1.4 KB"]],
+      note: "It does not grow with the chain: height, root, PIR parameters, the seeds of A and A′, four file digests." },
+    scanfile: { title: "The scan file (36 bytes per output)", head: ["entries", "size"], rows: [["1,000,000 outputs", "36 MB"], ["10,000,000 outputs", "360 MB"]],
+      note: "Every wallet downloads the whole file: the price of finding outputs without telling the server which." },
+    blockroots: { title: "The block roots (32 bytes per block of 65,536 outputs)", head: ["entries", "size"], rows: [["1,000,000 outputs", "16 blocks: 512 B"], ["10,000,000 outputs", "153 blocks: 4.9 KB"]],
+      note: "The example uses blocks of 4 outputs; the server uses 2^16." },
+    "setup-size": { title: "The setup data of both PIR tables", head: ["entries", "read setup", "nullifier setup"], rows: [["1,000,000", "≈ 103 MB", "≈ 25 MB"], ["10,000,000", "≈ 326 MB", "≈ 105 MB"]],
+      note: "Grows with the square root of the table: rows ≈ 627 cells × √(outputs / 627) for the commitment matrix. Estimated with the server's sizing rule; Preprod today: 27 MB and 6.6 MB." },
+    readup: { title: "One read call, up (32 vectors × columns × 4 B)", head: ["entries", "size"], rows: [["1,000,000 outputs", "≈ 3.2 MB"], ["10,000,000 outputs", "≈ 10 MB"]],
+      note: "The real client sends 32 vectors per call; the example shows 3. Preprod today: 806 KB." },
+    readdown: { title: "One read call, down (32 vectors × rows × 4 B)", head: ["entries", "size"], rows: [["1,000,000 outputs", "≈ 3.2 MB"], ["10,000,000 outputs", "≈ 10.2 MB"]], note: "Preprod today: 883 KB." },
+    nfup: { title: "One nullifier call, up (32 vectors × buckets × 4 B)", head: ["entries", "size"], rows: [["1,000,000 nullifiers", "≈ 1 MB"], ["10,000,000 nullifiers", "≈ 2 MB"]],
+      note: "Estimated with the server's bucket sizing (8,192 and 16,384 buckets). Preprod today: 262 KB." },
+    nfdown: { title: "One nullifier call, down (32 vectors × rows × 4 B)", head: ["entries", "size"], rows: [["1,000,000 nullifiers", "≈ 0.77 MB"], ["10,000,000 nullifiers", "≈ 3.3 MB"]], note: "Preprod today: 207 KB." },
+    tail: { title: "The tail", head: ["part", "size"], rows: [["commitments of the snapshot's unfinished block", "up to 65,536 × 32 B = 2 MB"], ["each new output", "257 B"], ["each new spend", "40 B"], ["block roots", "32 B per block"]],
+      note: "It does not grow with the chain's size, only with what happened since the snapshot." },
+  };
+
+  const tip = document.createElement("div");
+  tip.className = "tooltip";
+  tip.hidden = true;
+  document.body.appendChild(tip);
+  const esc = (t) => String(t).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+  document.addEventListener("mouseover", (e) => {
+    const el = e.target.closest("[data-tip]");
+    if (!el || !TIPS[el.dataset.tip]) return;
+    const d = TIPS[el.dataset.tip];
+    tip.innerHTML = `<b>${esc(d.title)}</b><table><tr>${d.head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr>${d.rows
+      .map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</table>${d.note ? `<div class="n">${esc(d.note)}</div>` : ""}`;
+    tip.hidden = false;
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (tip.hidden) return;
+    const w = tip.offsetWidth, h = tip.offsetHeight;
+    tip.style.left = `${Math.max(8, Math.min(e.clientX + 14, innerWidth - w - 8))}px`;
+    tip.style.top = `${e.clientY + 16 + h > innerHeight ? e.clientY - h - 12 : e.clientY + 16}px`;
+  });
+  document.addEventListener("mouseout", (e) => {
+    if (e.target.closest("[data-tip]") && !e.relatedTarget?.closest?.("[data-tip]")) tip.hidden = true;
+  });
+
+  // ── the example's SimplePIR, computed here so every number is exact ─────────────────────────────────────────────
+  // The order of the random draws is fixed, so the numbers stay the same from one load to the next.
+  const Q = 65536, DELTA = 4096, N = 2; // values mod p = Q / Δ = 16
+  const mod = (x) => ((x % Q) + Q) % Q;
+  let seed = 20261113;
+  const rand = () => ((seed = (Math.imul(seed ^ (seed >>> 15), 2246822507) + 0x9e3779b9) >>> 0) / 4294967296);
+  const randMod = () => Math.floor(rand() * Q);
+  const noise = () => Math.floor(rand() * 5) - 2; // −2 … 2
+
+  const RECORD = [7, 12, 3, 9, 14, 5, 11, 2, 8];
+  const D = [0, 1, 2].map((r) => [0, 1, 2].map((c) => RECORD[3 * c + r])); // rows × columns
+  const A = [0, 1, 2].map(() => Array.from({ length: N }, randMod)); // columns × n
+  const H = D.map((row) => Array.from({ length: N }, (_, k) => mod(row.reduce((acc, d, c) => acc + d * A[c][k], 0))));
+
+  function pir(table, pub, setup, column) {
+    const cols = pub.length;
+    const s = Array.from({ length: N }, randMod);
+    const e = Array.from({ length: cols }, noise);
+    const u = Array.from({ length: cols }, (_, c) => (c === column ? 1 : 0));
+    const As = pub.map((row) => mod(row.reduce((acc, a, k) => acc + a * s[k], 0)));
+    const q = As.map((v, c) => mod(v + e[c] + DELTA * u[c]));
+    const ans = table.map((row) => mod(row.reduce((acc, d, c) => acc + d * q[c], 0)));
+    const Hs = setup.map((row) => mod(row.reduce((acc, h, k) => acc + h * s[k], 0)));
+    const diff = ans.map((v, r) => mod(v - Hs[r]));
+    const rounded = diff.map((v) => Math.round(v / DELTA));
+    const out = rounded.map((x) => ((x % 16) + 16) % 16);
+    const noiseLeft = diff.map((v, r) => v - DELTA * rounded[r]);
+    return { column, s, e, u, As, q, ans, Hs, diff, rounded, out, noiseLeft };
+  }
+  const v0 = pir(D, A, H, 0), v2 = pir(D, A, H, 2), v1 = pir(D, A, H, 1);
+
+  const DN = [[5, 9, 6, 11], [13, 0, 0, 0]];
+  const AN = [0, 1, 2, 3].map(() => Array.from({ length: N }, randMod));
+  const HN = DN.map((row) => Array.from({ length: N }, (_, k) => mod(row.reduce((acc, d, c) => acc + d * AN[c][k], 0))));
+  const w0 = pir(DN, AN, HN, 0), w2 = pir(DN, AN, HN, 2), w1 = pir(DN, AN, HN, 1);
+
+  // ── rendering helpers ───────────────────────────────────────────────────────────────────────────────────────────
+  const n = (x) => x.toLocaleString("en-US");
+  const sgn = (x) => (x < 0 ? `(${n(x)})` : n(x));
+  const vec = (xs, kind = "", cls = () => "") => `<span class="m ${kind}"><table>${xs.map((x, i) => `<tr><td class="${cls(i)}">${x}</td></tr>`).join("")}</table></span>`;
+  const mat = (rows, kind = "", cls = () => "") => `<span class="m ${kind}"><table>${rows.map((r, i) => `<tr>${r.map((x, j) => `<td class="${cls(i, j)}">${x}</td>`).join("")}</tr>`).join("")}</table></span>`;
+  const vecL = (xs, names, hit = () => false, kind = "") =>
+    `<span class="m ${kind}"><table>${xs.map((x, i) => `<tr><td class="${hit(i) ? "hit" : ""}">${x}</td><td class="nm">${names[i]}</td></tr>`).join("")}</table></span>`;
+  const eq = (...parts) => `<div class="eq">${parts.join("")}</div>`;
+  const lbl = (t) => `<span class="lbl">${t}</span>`;
+  /** "a × b + c × d = total = k × 65,536 + rest" for one row, as a worked line. */
+  function worked(name, terms, extra = []) {
+    const products = terms.map(([a, b]) => `${sgn(a)} × ${sgn(b)}`);
+    const total = terms.reduce((acc, [a, b]) => acc + a * b, 0) + extra.reduce((acc, [, v]) => acc + v, 0);
+    const parts = [...products, ...extra.map(([t]) => t)].join(" + ");
+    const k = Math.floor(total / Q);
+    return `${name} = ${parts} = ${n(total)} = ${n(k)} × 65,536 + <b>${n(mod(total))}</b>`;
+  }
+  const set = (id, html) => (document.getElementById(id).innerHTML = html);
+
+  // the equation slide: the mask hides where Δ was added
+  set("m-pir-demo",
+    eq(lbl("A·s + e ="), vec(v0.As.map((x, i) => mod(x + v0.e[i])), "secret"), lbl("+ Δ·u ="), vec(v0.u.map((x) => x * DELTA), "secret", (i) => (v0.u[i] ? "selrow" : "")), lbl("= q ="), vec(v0.q, "sent")) +
+    `<div class="lbl">The server gets only q. Without s, nothing shows which number carries the 4,096. (The query worked out in step 4.)</div>`);
+
+  // the round trip slide: ② ans = M·q, ③ unmask, and M·u is the column
+  set("m-roundtrip",
+    eq(lbl("② ans = M·q ="), mat(D, "public"), lbl("·"), vec(v0.q, "sent"), lbl("="), vec(v0.ans, "sent")) +
+    eq(lbl("③ ans − H·s ="), vec(v0.ans, "sent"), lbl("−"), vec(v0.Hs), lbl("="), vec(v0.diff), lbl("÷ Δ, round →"), vec(v0.out, "secret")) +
+    eq(lbl("check: M·u ="), mat(D, "public", (i, j) => (j === 0 ? "selrow" : "")), lbl("·"), vec(v0.u, "secret", (i) => (v0.u[i] ? "selrow" : "")), lbl("="), vecL(D.map((row) => row[0]), ["r0", "r1", "r2"], (i) => i === 2, "secret")) +
+    `<div class="lbl">mod 65,536. Rounding gives ${v0.out.join(", ")}: column 0 of M, which holds r2 = 3, the wallet's record. H·s is worked out entry by entry in step 4.</div>`);
+
+  // step 0: A, H; A′, H′
+  set("m-setup-read", eq(lbl("seed →"), lbl("A ="), mat(A, "public"), lbl("&nbsp;&nbsp; H = commitment matrix × A ="), mat(H, "public")) +
+    `<div class="lbl">A: one row per column of the commitment matrix (3) × n = 2. H: one row per table row (3) × n = 2.</div>`);
+  set("w-setup-read", `<div class="r">One entry of H, worked: row 0 of the table [7, 9, 11] times column 0 of A.</div>` +
+    worked("H[0][0]", [[D[0][0], A[0][0]], [D[0][1], A[1][0]], [D[0][2], A[2][0]]]));
+  set("m-setup-nf", eq(lbl("seed′ →"), lbl("A′ ="), mat(AN, "public"), lbl("&nbsp;&nbsp; H′ = nullifier table × A′ ="), mat(HN, "public")) +
+    `<div class="lbl">A′: one row per bucket (4) × n = 2. H′: one row per slot (2) × n = 2.</div>`);
+  set("w-setup-nf", `<div class="r">H′[0][0]: slot row 0 [5, 9, 6, 11] times column 0 of A′.</div>` +
+    worked("H′[0][0]", DN[0].map((d, c) => [d, AN[c][0]])));
+
+  // step 2
+  set("m-files", eq(lbl("A ="), mat(A, "public"), lbl("H ="), mat(H, "public")) + eq(lbl("A′ ="), mat(AN, "public"), lbl("H′ ="), mat(HN, "public")));
+
+  // step 3: the scan tiles (illustrative bytes; drawn after the PIR numbers so those stay fixed)
+  const hx = (k) => Array.from({ length: k }, () => Math.floor(rand() * 256).toString(16).padStart(2, "0")).join("");
+  set("tiles", Array.from({ length: 9 }, (_, i) => {
+    const mine = i === 2 || i === 6;
+    const prefix = hx(4);
+    const pad = mine ? prefix : hx(4);
+    return `<div class="tile${mine ? " mine" : ""}"><b>${i}</b> ${hx(3)}…‖${prefix}<br>pad ${pad} ${mine ? '<span class="ok">✓ mine</span>' : "✗"}</div>`;
+  }).join(""));
+
+  // step 4: the query for column 0
+  set("m-query",
+    eq(lbl("A ="), mat(A, "public"), lbl("s ="), vec(v0.s, "secret"), lbl("e ="), vec(v0.e, "secret"), lbl("u ="), vec(v0.u, "secret", (i) => (v0.u[i] ? "selrow" : ""))) +
+    eq(lbl("A·s ="), vec(v0.As), lbl("+ e"), vec(v0.e, "secret"), lbl("+ Δ·u"), vec(v0.u.map((x) => x * DELTA), "secret", (i) => (v0.u[i] ? "selrow" : "")), lbl("= q ="), vec(v0.q, "sent")) +
+    `<div class="lbl">mod 65,536 · Δ = 4,096 · the 1 in u marks column 0, the column holding record 2.</div>`);
+  set("w-query", `<div class="r">Entry 0 of q, worked (row 0 of A times s, plus e[0], plus Δ × u[0]):</div>` +
+    worked("q[0]", [[A[0][0], v0.s[0]], [A[0][1], v0.s[1]]], [[`${sgn(v0.e[0])}`, v0.e[0]], [`4,096 × ${v0.u[0]}`, DELTA * v0.u[0]]]) +
+    `<div class="r">Entry 1 (u[1] = 0, no Δ):</div>` +
+    worked("q[1]", [[A[1][0], v0.s[0]], [A[1][1], v0.s[1]]], [[`${sgn(v0.e[1])}`, v0.e[1]], [`4,096 × ${v0.u[1]}`, 0]]));
+
+  // step 4: the server's answer
+  set("m-wire", eq(lbl("→ q ="), vec(v0.q, "sent"), lbl("← answer ="), vec(v0.ans, "sent")) + `<div class="lbl">Shown for the vector of column 0; the other two look the same.</div>`);
+  set("m-answer", eq(lbl("table ="), mat(D, "public"), lbl("×"), vec(v0.q, "sent"), lbl("="), vec(v0.ans, "sent")));
+  set("w-answer", `<div class="r">Entry 0 of the answer, worked (table row 0 [7, 9, 11] times q):</div>` +
+    worked("answer[0]", D[0].map((d, c) => [d, v0.q[c]])));
+
+  // step 4: decoding
+  set("m-decode",
+    eq(lbl("answer"), vec(v0.ans, "sent"), lbl("− H·s"), vec(v0.Hs), lbl("="), vec(v0.diff), lbl("÷ Δ, round, mod 16 →"), vecL(v0.out, ["r0", "r1", "r2"], (i) => i === 2, "secret"),
+      lbl("noise left:"), vec(v0.noiseLeft)) +
+    `<div class="lbl">Column 0 top to bottom: r0 = ${v0.out[0]}, r1 = ${v0.out[1]}, r2 = ${v0.out[2]}. The wallet wanted r2. The noise (table·e) stays far below Δ/2 = 2,048, so rounding is exact.</div>`);
+  set("w-decode", `<div class="r">H·s, worked (row 0 of H [${n(H[0][0])}, ${n(H[0][1])}] times s):</div>` +
+    worked("(H·s)[0]", [[H[0][0], v0.s[0]], [H[0][1], v0.s[1]]]) +
+    `<div class="r">Then: answer[0] − (H·s)[0] = ${n(v0.ans[0])} − ${n(v0.Hs[0])} = <b>${n(v0.diff[0])}</b> (mod 65,536) ≈ ${n(v0.rounded[0])} × 4,096 ${v0.noiseLeft[0] < 0 ? "−" : "+"} ${Math.abs(v0.noiseLeft[0])} → r0 = ${v0.out[0]}</div>`);
+
+  // step 4: the other vectors
+  set("m-others",
+    eq(lbl("column 2 →"), vecL(v2.out, ["r6", "r7", "r8"], (i) => i === 0, "secret")) + `<div class="lbl">The wallet wanted r6 (output 6): the first number of column 2, ${v2.out[0]}.</div>` +
+    eq(lbl("column 1 →"), vecL(v1.out, ["r3", "r4", "r5"])) + `<div class="lbl">Padding: r3, r4, r5, decoded and dropped.</div>`);
+
+  // step 5
+  set("m-nf-query",
+    eq(lbl("A′ ="), mat(AN, "public"), lbl("s ="), vec(w0.s, "secret"), lbl("e ="), vec(w0.e, "secret"), lbl("u ="), vec(w0.u, "secret", (i) => (w0.u[i] ? "selrow" : ""))) +
+    eq(lbl("A′·s ="), vec(w0.As), lbl("+ e"), vec(w0.e, "secret"), lbl("+ Δ·u"), vec(w0.u.map((x) => x * DELTA), "secret", (i) => (w0.u[i] ? "selrow" : "")), lbl("= q ="), vec(w0.q, "sent")) +
+    `<div class="lbl">The 1 in u marks bucket 0, where nf(coin 2) = 13 would be.</div>`);
+  set("w-nf-query", `<div class="r">Entry 0 of q, worked:</div>` +
+    worked("q[0]", [[AN[0][0], w0.s[0]], [AN[0][1], w0.s[1]]], [[`${sgn(w0.e[0])}`, w0.e[0]], [`4,096 × ${w0.u[0]}`, DELTA * w0.u[0]]]));
+  set("m-nf-wire", eq(lbl("→ q ="), vec(w0.q, "sent"), lbl("← answer ="), vec(w0.ans, "sent")) + `<div class="lbl">Shown for the vector of bucket 0.</div>`);
+  set("m-nf-answer", eq(lbl("table ="), mat(DN, "public"), lbl("×"), vec(w0.q, "sent"), lbl("="), vec(w0.ans, "sent")));
+  set("w-nf-answer", `<div class="r">Entry 0, worked (slot row 0 [5, 9, 6, 11] times q):</div>` + worked("answer[0]", DN[0].map((d, c) => [d, w0.q[c]])));
+  set("m-nf-decode",
+    eq(lbl("bucket 0:"), vec(w0.ans, "sent"), lbl("− H′·s"), vec(w0.Hs), lbl("="), vec(w0.diff), lbl("→"), vecL(w0.out, ["n1", "n3"], (i) => w0.out[i] === 13, "secret")) +
+    eq(lbl("bucket 2 →"), vecL(w2.out, ["n4", "empty"], () => false, "secret"), lbl("&nbsp; bucket 1 (padding) →"), vecL(w1.out, ["n2", "empty"])) +
+    `<div class="lbl">Bucket 0 holds 5 and 13; bucket 2 holds 6 and an empty slot; bucket 1 is dropped.</div>`);
+  set("w-nf-decode", `<div class="r">H′·s for bucket 0, worked (row 0 of H′ times s):</div>` +
+    worked("(H′·s)[0]", [[HN[0][0], w0.s[0]], [HN[0][1], w0.s[1]]]) +
+    `<div class="r">answer[0] − (H′·s)[0] = ${n(w0.ans[0])} − ${n(w0.Hs[0])} = <b>${n(w0.diff[0])}</b> ≈ ${n(w0.rounded[0])} × 4,096 ${w0.noiseLeft[0] < 0 ? "−" : "+"} ${Math.abs(w0.noiseLeft[0])} → ${w0.out[0]}</div>`);
+
+  // ── the deck ────────────────────────────────────────────────────────────────────────────────────────────────────
+  const slides = [...document.querySelectorAll(".slide")];
+  const indexOf = (id) => slides.findIndex((s) => s.id === id);
+  for (const a of document.querySelectorAll("a[data-to]")) {
+    const i = indexOf(a.dataset.to);
+    a.href = `#${a.dataset.to}`;
+    a.textContent = i < 0 ? "?" : `slide ${i + 1} →`;
+    a.title = i < 0 ? "" : slides[i].dataset.title;
+  }
+  const STEPS = [["pir", "SimplePIR"], ["0", "0 Snapshot"], ["1", "1 Keys"], ["2", "2 Files"], ["3", "3 Scan"], ["4", "4 Records"], ["5", "5 Nullifiers"], ["6", "6 Tail"], ["7", "7 Result"]];
+  const order = (k) => (k === "pir" ? -1 : k === "" ? NaN : Number(k));
+  const strip = document.getElementById("strip");
+  strip.innerHTML = STEPS.map(([k, t], i) => `${i ? '<span class="sep">›</span>' : ""}<span class="st" data-step="${k}">${t}</span>`).join("");
+  strip.addEventListener("click", (e) => {
+    const st = e.target.closest(".st");
+    if (st) show(slides.findIndex((s) => s.dataset.step === st.dataset.step));
+  });
+  const olist = document.getElementById("olist");
+  olist.innerHTML = slides.map((s, i) => `<li><a href="#${s.id}">${esc(s.dataset.title)}</a></li>`).join("");
+  let current = 0;
+  function show(i) {
+    current = Math.max(0, Math.min(slides.length - 1, i));
+    slides.forEach((s, k) => s.classList.toggle("active", k === current));
+    const step = slides[current].dataset.step;
+    strip.querySelectorAll(".st").forEach((el) => {
+      el.classList.toggle("on", el.dataset.step === step);
+      el.classList.toggle("done", order(el.dataset.step) < order(step));
+    });
+    document.getElementById("count").textContent = `${current + 1} / ${slides.length}`;
+    document.getElementById("title").textContent = slides[current].dataset.title;
+    document.getElementById("bar").style.width = `${(100 * (current + 1)) / slides.length}%`;
+    olist.querySelectorAll("li").forEach((li, k) => li.classList.toggle("on", k === current));
+    if (location.hash !== `#${slides[current].id}`) history.replaceState(null, "", `#${slides[current].id}`);
+    tip.hidden = true;
+  }
+  function fromHash() {
+    const h = decodeURIComponent(location.hash.slice(1));
+    const i = /^\d+$/.test(h) ? Number(h) - 1 : indexOf(h);
+    show(i >= 0 ? i : 0);
+  }
+  window.addEventListener("hashchange", fromHash);
+  const overview = document.getElementById("overview");
+  const toggleList = (open) => overview.classList.toggle("open", open ?? !overview.classList.contains("open"));
+  overview.addEventListener("click", (e) => { if (e.target === overview || e.target.closest("a")) toggleList(false); });
+  document.getElementById("list").onclick = () => toggleList();
+  document.getElementById("prev").onclick = () => show(current - 1);
+  document.getElementById("next").onclick = () => show(current + 1);
+  document.addEventListener("keydown", (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (["ArrowRight", "PageDown", " ", "Enter"].includes(e.key)) { e.preventDefault(); show(current + 1); }
+    else if (["ArrowLeft", "PageUp", "Backspace"].includes(e.key)) { e.preventDefault(); show(current - 1); }
+    else if (e.key === "Home") show(0);
+    else if (e.key === "End") show(slides.length - 1);
+    else if (e.key === "o" || e.key === "O") toggleList();
+    else if (e.key === "Escape") toggleList(false);
+  });
+  // Scale the 1280 × 720 stage to the window.
+  const stage = document.getElementById("stage");
+  function fit() {
+    const k = Math.min(innerWidth / 1300, innerHeight / 740);
+    stage.style.transform = `translate(-50%, -50%) scale(${k})`;
+  }
+  window.addEventListener("resize", fit);
+  fit();
+  fromHash();
+</script>
+</body>
+</html>
