@@ -89,9 +89,11 @@ export interface BlockSource {
    */
   attach?(runner: QueueRunner): () => void;
   /**
-   * Optional, with {@link attach}: the finalized block at `height` (the loop's next height, the cursor + 1), prepared:
-   * its `on-fetch` and `on-parse` have run through the runner and their items are published. Rejects with the height's
-   * failure: a node's, or a callback's (`CallbackFailure`), which halts at that height.
+   * Optional, with {@link attach}: the finalized block at `height`, prepared: its `on-fetch` and `on-parse` have run
+   * through the runner and their items are published. The loop asks for heights in order, each the one after the last
+   * it took: the cursor + 1, or above it when the loop takes the blocks of a chunk before their transaction
+   * (`./loop.ts`). Rejects with the height's failure: a node's, or a callback's (`CallbackFailure`), which halts at that
+   * height.
    */
   prepared?(height: bigint): Promise<PreparedBlock>;
   /** Optional: the source's conditions now, such as `finality-stall` while its queue is full. */
@@ -135,7 +137,8 @@ export interface QueueRunner {
   rollback(dropped: readonly BlockRef[]): Promise<void>;
   /**
    * The hash of the block the database holds at `height` (the blocks table's row), or null. The finality check compares
-   * it with the finalized block's hash.
+   * it with the finalized block's hash. A height the loop has taken and not committed yet (a chunk's) is answered from
+   * the block it took, which its transaction writes.
    */
   storedHash(height: bigint): Promise<Uint8Array | null>;
 }

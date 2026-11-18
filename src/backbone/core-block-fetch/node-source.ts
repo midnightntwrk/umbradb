@@ -26,8 +26,9 @@
  * time. For each height it reads `chain_getBlockHash` (the finalized hash), then takes the queued block of that hash if
  * there is one, or else runs `chain_getBlock`, `on-fetch` and `on-parse` through the runner (`QueueRunner.prepare`).
  *
- * The loop takes each prepared height (`prepared`) in order, so every height is still committed in its own
- * transaction. A queued block at the height with another hash is dropped, with everything queued above it
+ * The loop takes each prepared height (`prepared`) in order, one after the last taken, which may be above the cursor
+ * + 1 when the loop takes several heights before their transaction; the source's cursor is then the height below the
+ * last taken. A queued block at the height with another hash is dropped, with everything queued above it
  * (`on-rollback`), and the finalized block is fetched. The heights look into the queue in height order, so such a drop
  * is one `on-rollback`, from the lowest.
  *

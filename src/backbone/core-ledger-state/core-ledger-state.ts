@@ -49,9 +49,11 @@
  * `unreferenced` content-defined (`./node-set.ts`): the contents hash takes `nodes` by its node set and checks the counts
  * and the queue against the rows, and no block captures or digests them.
  *
- * **After the commit** it does nothing: the engine tells the worker's host when the `COMMIT` that holds h answered, and
- * the host commits the block in the worker, so the state after h becomes the one h + 1 is applied on
- * (`../../ledger/worker/host.ts`).
+ * **After the commit** it does nothing: the engine tells the worker's host what became of the transaction that holds h
+ * (written, committed, rolled back), and the host commits the block in the worker once that transaction committed, so
+ * the state after h becomes the one h + 1 is applied on (`../../ledger/worker/host.ts`). The block after h may be
+ * applied before h's transaction commits, when the same transaction holds both: the worker holds the state after h
+ * pending, and the `load` of h before h + 1's apply takes it.
  *
  * **The stored state.** Before each apply after block 0 it takes the state at h − 1 (its key and root, in `states`),
  * with the block's ledger there (`core_block_commit.blocks`), read from the database or taken from memory (below), and
@@ -68,9 +70,10 @@
  * another module may change, also while the writes go on. At the next block's `on-compute` it takes the state at h − 1,
  * the parent time and the keys the block releases from there, and sends none of those reads (up to three: a block that
  * releases nothing, as while a retention window fills, sent no key read anyway), when two things hold: the block
- * context says the block before continues into it (`b.continues`: its `COMMIT` answered in this run of processing, with
- * no failure since, and the writer still has the database session that committed it, so no other writer can have
- * changed a row since), and the block kept is the one at h − 1. Otherwise it reads them, as at a run's first height (a
+ * context says the block before continues into it (`b.continues`: it was stored in this run of processing, committed or
+ * written in the transaction this block is written in, with no failure since, and the writer still has the database
+ * session that wrote it, so no other writer can have changed a row since), and the block kept is the one at h − 1.
+ * Otherwise it reads them, as at a run's first height (a
  * start, any retry, a replaced writer's session), for a height made again (the block kept is that height's own), and
  * for a block that does not continue the one before, and keeps again from that block. At such a first height it reads
  * in the same statement the keys of the states from the first one it releases, L(h − 1), to h − 1, so the blocks that
@@ -119,10 +122,10 @@
  * anew at a block's `on-compute` unless it expects that block, and dropped at `on-settle`; a block made again after a
  * failure is handed over to a new record, which holds it alone.
  *
- * At the eviction the worker holds two states: the one committed after the block before the run, and the one after
- * its last block, pending. The computation deletes nothing that either reaches through the stored child lists
+ * At the eviction the worker holds two states: the one after the block before the run, and the one after its last
+ * block, pending. The computation deletes nothing that either reaches through the stored child lists
  * (`docs/research/run-reclamation.md`, section 5). No block above the run is applied before the eviction is sent:
- * its apply is sent at its own `on-compute`, after the `COMMIT`.
+ * its apply is sent at its own `on-compute`, after the run's `on-settle`.
  *
  * If the package still refuses the eviction after the worker freed what it can, the worker thread is ended and a new
  * one started, and the net write and the `COMMIT` go on: the eviction is sent once per attempt of the height, and the

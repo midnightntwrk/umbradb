@@ -566,6 +566,55 @@ describe("a callback that fails: what the dispatch gives back for the halt", () 
     expect([failure.module, failure.cause]).toEqual(["a", late]);
   });
 
+  it("in series (inSeries): each callback of a wave awaited before the next starts, every one run, the first failure in the wave's order", async () => {
+    const recorder = new Recorder();
+    const error = new Error("b failed");
+    const user = [
+      registering(part("a", ["block-header"], ["a-out"]), recorder, ["on-compute"], { "on-compute": 8 }),
+      declaration("b", {
+        requires: ["block-header"],
+        provides: [],
+        migrations: [],
+        points: { "on-compute": recording(recorder, "b", "on-compute", 1, () => Promise.reject(error)) },
+      }),
+      registering(part("c", ["block-header"]), recorder, ["on-compute"], { "on-compute": 12 }),
+      registering(part("d", ["a-out"]), recorder, ["on-compute"]),
+    ];
+    const schedule = scheduleAt(rangeOf(user), "on-compute");
+    expect(waveIds(schedule)).toEqual([["a", "b", "c"], ["d"]]);
+    const failure = (await rejection(runSchedule(schedule, runOf("on-compute"), { inSeries: true }))) as CallbackFailure;
+    expect([failure.point, failure.module, failure.cause]).toEqual(["on-compute", "b", error]);
+    // a ended before b started, b before c: one at a time; c ran after b failed; the next wave never started.
+    expect(recorder.at("b", "on-compute", "start")).toBeGreaterThan(recorder.at("a", "on-compute", "end"));
+    expect(recorder.at("c", "on-compute", "start")).toBeGreaterThan(recorder.at("b", "on-compute", "end"));
+    expect(recorder.at("c", "on-compute", "end")).toBeGreaterThan(-1);
+    expect(recorder.at("d", "on-compute", "start")).toBe(-1);
+    // Without a failure every wave runs, in the same order, one callback at a time.
+    const quiet = new Recorder();
+    const calm = ["a-mod", "b-mod", "c-mod"].map((id, index) => registering(consumer(id, ["block-header"]), quiet, ["on-compute"], { "on-compute": 6 - index }));
+    await runSchedule(scheduleAt(rangeOf(calm), "on-compute"), runOf("on-compute"), { inSeries: true });
+    const order = quiet.events.map((event) => `${event.module} ${event.kind}`);
+    expect(order).toEqual(["a-mod start", "a-mod end", "b-mod start", "b-mod end", "c-mod start", "c-mod end"]);
+  });
+
+  it("in series (inSeries), two failures in a wave: the first in the point's order", async () => {
+    const recorder = new Recorder();
+    const first = new Error("a failed");
+    const second = new Error("b failed");
+    const user = ["a", "b"].map((id, index) =>
+      declaration(id, {
+        requires: ["block-header"],
+        provides: [],
+        migrations: [],
+        points: { "on-compute": recording(recorder, id, "on-compute", 1, () => Promise.reject(index === 0 ? first : second)) },
+      }),
+    );
+    const failure = (await rejection(runSchedule(scheduleAt(rangeOf(user), "on-compute"), runOf("on-compute"), { inSeries: true }))) as CallbackFailure;
+    expect([failure.module, failure.cause]).toEqual(["a", first]);
+    // b still ran, after a had failed.
+    expect(recorder.at("b", "on-compute", "start")).toBeGreaterThan(recorder.at("a", "on-compute", "start"));
+  });
+
   it("in a wave: does not settle while another callback of the wave has not settled, never cancelling it", async () => {
     let release: () => void = () => undefined;
     const held = new Promise<void>((resolve) => {

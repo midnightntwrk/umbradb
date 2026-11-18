@@ -62,13 +62,14 @@
  * **The block context** of each callback holds the block's height, hash and parent hash, the `block` items published
  * before the callback started (`./block-context.ts`: a callback's puts are published when it completes), the calling
  * module's settings for the revision covering h, and whether a module's entry is active at h. At `on-after-db-write` it
- * holds no items. Its `continues` is true from `on-compute` to `on-after-db-write` when the `COMMIT` of h − 1 answered in
- * the same run of the loop ({@link FinalizedLoop.run}), so no failure, retry or restart came between, and the writer's
- * session that committed it is the one the writer has when the context is made (`Database.writerSession`; at
+ * holds no items. Its `continues` is true from `on-compute` to `on-after-db-write` when h − 1 was stored in the same run
+ * of the loop ({@link FinalizedLoop.run}) — the `COMMIT` of h − 1 answered, or h − 1 was written in the chunk's
+ * transaction h is written in, still open —, so no failure, retry, rollback or restart came between, and the writer's
+ * session that wrote it is the one the writer has when the context is made (`Database.writerSession`; at
  * `on-compute` and `on-after-db-write` once the callback's read is open), so no other writer can have held the writer
- * lock since; false at a run's first height, for a held height processed again and the height after one whose `COMMIT`
- * lost its answer, at the re-delivery, from the first context made after the writer's session was replaced (to the end
- * of the height), and always at `on-fetch` and `on-parse`. A height some of whose callbacks were told true must commit
+ * lock since; false at a run's first height, for a held height processed again, for every height made again after a
+ * chunk's rollback, and the height after one whose `COMMIT` lost its answer, at the re-delivery, from the first context
+ * made after the writer's session was replaced (to the end of the height), and always at `on-fetch` and `on-parse`. A height some of whose callbacks were told true must commit
  * on that same session: when its transaction finds another, the attempt fails before its first `on-db-write` callback
  * with `connection-lost` (retryable, `cause` `writer-session-replaced`), and the height is made again, with
  * `continues` false. A session lost after the `COMMIT` makes the later `on-after-db-write` callbacks say false.
@@ -156,11 +157,36 @@
  * - the re-delivery at a run's start, named by the cursor's height.
  *
  * One window is open at a time: the loop awaits them in series.
+ *
+ * **Chunks** (fast-sync mode, {@link LoopInput.fastSync}, `./fast-sync.ts`). Far behind the finalized head the loop
+ * stores a chunk of consecutive heights a..b in one transaction; every block still runs every point, and with the mode
+ * off, or for a height processed alone, nothing above changes. At each height the loop asks `chunkEnd` (with the head
+ * read for this pass): a chunk holds at least two blocks, inside one range of the resolved graph, no closer to the head
+ * than the setting's distance. A chunk:
+ * 1. takes all its blocks first, in height order, with nothing open: each from the source (`prepared`, the source's
+ *    queue running its `on-fetch` and `on-parse`; else `block`, the loop running them), kept with its items as
+ *    `on-parse` left them. A take that fails at j makes the chunk a..j − 1 (a alone when that is a), and the failure is
+ *    thrown when the loop reaches j, the source not asked again;
+ * 2. runs a's `on-start-height` and `on-compute` with their own reads, as a height alone does;
+ * 3. opens one transaction: a's writes (`on-db-write`, `on-settle` with the run `{ a, a }`, the cursor check); then for
+ *    each k > a, `on-compute` (its callbacks one at a time, each with a read at k − 1 that is a read-only view of the
+ *    transaction, `../db/read-view.ts`, opened at its first statement), then k's writes;
+ * 4. at the `COMMIT`'s answer tells the follower `committed` for a..b in height order and the observer once, with b;
+ *    then runs each block's `on-after-db-write` (its read at b, the chunk's last height) and `on-stop-height`, in
+ *    height order, each in an `after-commit` window of its own.
+ *
+ * The transaction has one user at a time, in the order they asked: a block's writes, one `on-compute` callback's read,
+ * or one read of {@link FinalizedLoop.read}, which the process's ledger worker host reads stored nodes through (a view
+ * of the transaction while it is open). The source's finality check is answered, for a height taken and not committed,
+ * from the block taken ({@link QueueRunner.storedHash}). A block's trace record is held when its writes end and written
+ * after the `COMMIT` (`../trace/trace.ts`), and a block's slow window is held until the `COMMIT` or the rollback, which
+ * tells its `ended`. In this version a failure inside a chunk rolls it back and stops the loop at the block in progress.
  */
 
 import { BLOCKS_TABLE } from "../backbone/core-block-commit/sql.js";
 import type { Database, ReadHandle, Transaction } from "../db/api.js";
-import { UmbraError } from "../db/errors.js";
+import { handleClosed, UmbraError } from "../db/errors.js";
+import { readView } from "../db/read-view.js";
 import type { SchemaPlan } from "../db/roles.js";
 import { type BlockWrites, openBlockWrites } from "../db/write-handles.js";
 import type {
@@ -181,14 +207,23 @@ import {
   type PointArguments,
   type PointSchedule,
   runSchedule,
+  type ScheduleOptions,
   scheduleAt,
   startHeightSchedule,
   stopHeightSchedule,
 } from "./dispatch.js";
-import type { FastSync } from "./fast-sync.js";
+import { chunkEnd, type FastSync } from "./fast-sync.js";
 import type { LoopPause } from "./pause.js";
 import type { TransactionFollower } from "./transaction-follower.js";
-import { traceAdd, traceDropBlock, traceEndBlock } from "../trace/trace.js";
+import {
+  traceAdd,
+  traceCommitHeld,
+  traceDropBlock,
+  traceDropHeld,
+  traceEndBlock,
+  traceHoldBlock,
+  traceResumeHeld,
+} from "../trace/trace.js";
 import type { MisuseReports } from "./process-context.js";
 
 /** What the loop runs over. */
@@ -405,6 +440,69 @@ export type CommitOutcome = "committed" | "not-committed" | "unexpected";
 export type ReadOpener = <T>(body: (read: ReadHandle) => Promise<T>) => Promise<T>;
 
 /**
+ * The users of a chunk's transaction, one at a time, in the order they asked (see the module comment): a block's write
+ * phase, one `on-compute` callback's read, or one read the loop opens for itself ({@link FinalizedLoop.read}).
+ */
+class Turns {
+  #tail: Promise<void> = Promise.resolve();
+
+  /** Resolves, once every earlier turn ended, with the function that ends this one; ending it again does nothing. */
+  take(): Promise<() => void> {
+    let end!: () => void;
+    const ended = new Promise<void>((resolve) => {
+      end = resolve;
+    });
+    const before = this.#tail;
+    this.#tail = before.then(() => ended);
+    return before.then(() => end);
+  }
+
+  /** Runs `body` in a turn of its own. */
+  async run<T>(body: () => Promise<T>): Promise<T> {
+    const end = await this.take();
+    try {
+      return await body();
+    } finally {
+      end();
+    }
+  }
+}
+
+/** A chunk whose transaction the loop has asked for, until it has committed or rolled back. */
+interface OpenChunk {
+  /** The transaction, from its `BEGIN`. */
+  tx: Transaction | undefined;
+  readonly turns: Turns;
+  /** True while the transaction's body runs: from then on its users read through views of it. */
+  open: boolean;
+  /** The height its reads see: the last block written in it, or the cursor before its first. */
+  height: bigint | null;
+}
+
+/** A block taken for a chunk before its transaction (see the module comment), with its items as `on-parse` left them. */
+interface Taken {
+  readonly block: BlockRef;
+  readonly items: BlockItems;
+}
+
+/** A take that failed, kept until the loop reaches its height: the error, and the block to tell rolled back. */
+interface TakeFailure {
+  readonly height: bigint;
+  readonly error: unknown;
+  readonly block: BlockRef | undefined;
+}
+
+/**
+ * The last block this run of the loop stored ({@link FinalizedLoop.continues}): its block, the writer's session it was
+ * written on, and the chunk whose transaction holds it while that is not committed (null once committed).
+ */
+interface Stored {
+  readonly block: BlockRef;
+  readonly session: number | null;
+  readonly chunk: OpenChunk | null;
+}
+
+/**
  * The halt `unexpected-cursor`. It is raised when the loop's check before the `COMMIT`, that the block transaction left
  * the cursor at the height with the block's hash, failed; or when the cursor read after a held height's failure was
  * neither the height nor the one before it.
@@ -543,10 +641,19 @@ export class FinalizedLoop {
    * of the range declares the point, so its blocks skip it.
    */
   readonly #settleSchedules = new WeakMap<ResolvedRange, PointSchedule<"on-settle"> | null>();
-  /** The block whose `COMMIT` answered last in this run of the loop; null from the run's start until one does. */
-  #lastCommitted: BlockRef | null = null;
-  /** The writer's session that block's transaction ran on (`Database.writerSession`). */
-  #lastCommittedSession: number | null = null;
+  /**
+   * The last block stored in this run of the loop, committed or written in the chunk's transaction still open; null
+   * from the run's start, and after a rollback, until one is.
+   */
+  #lastStored: Stored | null = null;
+  /** The chunk whose transaction is asked for or open, if any. */
+  #chunkOpen: OpenChunk | undefined;
+  /** The blocks taken for a chunk and not begun yet, by height. */
+  readonly #taken = new Map<bigint, Taken>();
+  /** A take that failed, until the loop reaches its height. */
+  #takeFailure: TakeFailure | undefined;
+  /** The blocks taken and not committed yet, by height: what the source's finality check is answered from. */
+  readonly #uncommitted = new Map<bigint, BlockRef>();
   /**
    * The heights' runs of this run of the loop whose block before committed in it ({@link continues}), each with the
    * writer's session that committed it, which the writer must still have when a block context says true; a run leaves
@@ -600,6 +707,19 @@ export class FinalizedLoop {
   }
 
   /**
+   * Runs `body` with a read: while a chunk's transaction is open, a read-only view of it at its last written height,
+   * taken as one turn of the transaction (see the module comment), so it sees what the chunk wrote; otherwise its own
+   * read (`Database.read`). The process's ledger worker host reads stored nodes through it for a request given no read.
+   */
+  read<T>(body: (read: ReadHandle) => Promise<T>): Promise<T> {
+    const chunk = this.#chunkOpen;
+    if (chunk === undefined || !chunk.open) return this.input.db.read(body);
+    return chunk.turns.run(() =>
+      chunk.open && chunk.tx !== undefined ? readView(chunk.tx, { height: chunk.height }, body) : this.input.db.read(body),
+    );
+  }
+
+  /**
    * The slow-window threshold for a window of the kind `_window`: the input's `slowBlockMs`, null for none (a negative
    * control's seam).
    */
@@ -638,10 +758,12 @@ export class FinalizedLoop {
     const held = this.#held;
     this.#held = undefined;
     this.#resume = undefined;
-    // A new run: no block before continues into it, whatever an earlier run committed.
-    this.#lastCommitted = null;
-    this.#lastCommittedSession = null;
+    // A new run: no block before continues into it, whatever an earlier run committed, and nothing taken is kept.
+    this.#lastStored = null;
     this.#continuing = new WeakMap();
+    this.#taken.clear();
+    this.#takeFailure = undefined;
+    this.#uncommitted.clear();
     let cursor: BlockRef | null;
     if (held === undefined) {
       cursor = await db.read((read) => source.cursor(read));
@@ -678,10 +800,13 @@ export class FinalizedLoop {
         // Between heights: before this one, after on-finalized or the height before's points.
         await this.pauseBetween();
         if (this.#signal.aborted) return SIGNALLED;
-        const done = await this.#process(height, cursor);
+        // Far behind the head, a chunk of heights in one transaction; otherwise this height alone.
+        const end = this.#chunkEndAt(height, head.height);
+        const done = end === null ? await this.#process(height, cursor) : await this.#chunk(height, end, cursor);
         // Stopped at the lockstep wait: the height's transaction never began.
         if (done === null) return SIGNALLED;
         cursor = done;
+        height = done.height;
         if (height === last) return this.#stopped(height);
       }
     }
@@ -842,14 +967,19 @@ export class FinalizedLoop {
    * `on-compute`: each callback with its block context, a read `open` opens for it, and an item sink. Its `continues`
    * is decided once the read is open, against the writer's session then ({@link continues}).
    */
-  protected async compute(run: HeightRun, open: ReadOpener): Promise<void> {
-    await this.#dispatch(run.range, "on-compute", (part, call) => {
-      const items = run.items.visible();
-      return open((read) => {
-        const context = this.#context(run, part, items, this.continues(run));
-        return run.items.collect(part, "on-compute", (sink) => call(context, read, sink));
-      });
-    });
+  protected async compute(run: HeightRun, open: ReadOpener, options: ScheduleOptions = {}): Promise<void> {
+    await this.#dispatch(
+      run.range,
+      "on-compute",
+      (part, call) => {
+        const items = run.items.visible();
+        return open((read) => {
+          const context = this.#context(run, part, items, this.continues(run));
+          return run.items.collect(part, "on-compute", (sink) => call(context, read, sink));
+        });
+      },
+      options,
+    );
   }
 
   /**
@@ -993,23 +1123,23 @@ export class FinalizedLoop {
    * Processes `height` above the cursor `previous` — a held height again from where it resumes —; resolves with the new
    * cursor, or null when the loop's signal stopped it at the lockstep wait, before its transaction.
    */
-  async #process(height: bigint, previous: BlockRef | null): Promise<BlockRef | null> {
+  async #process(
+    height: bigint,
+    previous: BlockRef | null,
+    opened?: { readonly watch: Watch; readonly beginFrom: number },
+  ): Promise<BlockRef | null> {
     let committed = false;
     const resume = this.#resume?.run.height === height ? this.#resume : undefined;
     this.#resume = undefined;
     let run: HeightRun | undefined;
-    const watch = this.#watchHeight(height);
+    // A chunk whose takes left this height alone hands over its window, open since the takes began.
+    const watch = opened?.watch ?? this.#watchHeight(height);
     try {
-      const beginFrom = performance.now();
+      const beginFrom = opened?.beginFrom ?? performance.now();
       run = resume === undefined ? await this.#begin(height, previous) : this.#again(resume);
       // The block before committed in this run, no failure since, on the writer's session still in use: its block
       // contexts say it continues.
-      const session = this.input.db.writerSession();
-      const before = this.#lastCommitted;
-      const sameSession = session !== null && session === this.#lastCommittedSession;
-      if (resume === undefined && before !== null && isBlock(before, previous) && sameSession) {
-        this.#continuing.set(run, session);
-      }
+      if (resume === undefined) this.#continueFrom(run, previous, null);
       const prepareFrom = performance.now();
       // The wait for the block from its source, and the height's start.
       traceAdd("beginMs", prepareFrom - beginFrom);
@@ -1031,8 +1161,8 @@ export class FinalizedLoop {
       committed = true;
       // The COMMIT that holds the height answered: the follower is told, and the next height continues from it.
       this.#tell("committed", run.block);
-      this.#lastCommitted = run.block;
-      this.#lastCommittedSession = this.#writtenOn.get(run) ?? null;
+      this.#uncommitted.delete(run.height);
+      this.#lastStored = Object.freeze({ block: run.block, session: this.#writtenOn.get(run) ?? null, chunk: null });
       this.input.observer?.committed?.(run.block);
       this.#unwatch(watch, true);
       await this.#afterCommit(run);
@@ -1068,8 +1198,321 @@ export class FinalizedLoop {
     }
   }
 
-  /** A new run of `height` above `previous`: its block from the source, prepared by it when it prepares heights. */
+  /**
+   * Records whether the block before `run` continues into it ({@link continues}): the last block stored in this run of
+   * the loop is `previous`, on the writer's session in use now, and committed, or written in `chunk`, whose transaction
+   * is still open. Not called for a height processed again.
+   */
+  #continueFrom(run: HeightRun, previous: BlockRef | null, chunk: OpenChunk | null): void {
+    const session = this.input.db.writerSession();
+    const before = this.#lastStored;
+    if (session === null || before === null || before.session !== session || !isBlock(before.block, previous)) return;
+    if (before.chunk !== null && (before.chunk !== chunk || !before.chunk.open)) return;
+    this.#continuing.set(run, session);
+  }
+
+  /**
+   * The last height of the chunk that starts at `first` under the head `head` read for this pass (`./fast-sync.ts`), or
+   * null to process `first` alone: the mode is off, the loop waits for private instances at every block, `first` is a
+   * held height processed again, or a take of `first` failed.
+   */
+  #chunkEndAt(first: bigint, head: bigint): bigint | null {
+    const { fastSync, lockstep } = this.input;
+    if (fastSync === undefined || lockstep !== undefined) return null;
+    if (this.#resume?.run.height === first || this.#takeFailure?.height === first) return null;
+    const limits = { head, rangeEnd: this.#rangeAt(first).range.to, last: this.lastHeight(), alone: null };
+    return chunkEnd(fastSync, first, limits);
+  }
+
+  /**
+   * The chunk `first`..`end` above the cursor `previous` (see the module comment): its blocks taken first, in height
+   * order, within `first`'s window. A take that fails at j makes the chunk `first`..j − 1, and `first` is processed
+   * alone ({@link #process}) when that leaves it alone. Resolves with the new cursor.
+   */
+  async #chunk(first: bigint, end: bigint, previous: BlockRef | null): Promise<BlockRef | null> {
+    const watch = this.#watchHeight(first);
+    const beginFrom = performance.now();
+    let last = end;
+    for (let height = first; height <= end; height++) {
+      if (this.#taken.has(height)) continue;
+      // A stop asked meanwhile ends the takes; the blocks taken are stored as the loop's signal says.
+      if (this.#signal.aborted || !(await this.#take(height))) {
+        last = height - 1n;
+        break;
+      }
+    }
+    if (last <= first) return this.#process(first, previous, { watch, beginFrom });
+    return this.#storeChunk(first, last, previous, watch, beginFrom);
+  }
+
+  /**
+   * Takes the block at `height` for a chunk (see the module comment): as the source prepared it when it prepares
+   * heights, else from the source with `on-fetch` and `on-parse` run by the loop; kept with its items until the loop
+   * begins its run. False when the take failed: the failure is kept, and thrown when the loop reaches the height
+   * ({@link #begin}).
+   */
+  async #take(height: bigint): Promise<boolean> {
+    const { source } = this.input;
+    let block: BlockRef | undefined;
+    try {
+      let items: BlockItems;
+      if (source.prepared === undefined) {
+        block = await source.block(height);
+        const run: HeightRun = { height, block, range: this.#rangeAt(height), items: this.itemsAt(height), previous: null };
+        await this.blockPoint(run, "on-fetch");
+        await this.blockPoint(run, "on-parse");
+        items = run.items;
+      } else {
+        const prepared = await source.prepared(height);
+        block = prepared.block;
+        items = prepared.items;
+      }
+      this.#taken.set(height, Object.freeze({ block, items }));
+      this.#uncommitted.set(height, block);
+      return true;
+    } catch (error) {
+      // Told rolled back when the loop reaches it: the block whose callbacks failed, in the queue or here.
+      const told = source.prepared === undefined ? block : this.#failedPreparations.get(height);
+      this.#takeFailure = Object.freeze({ height, error, block: told });
+      return false;
+    } finally {
+      for (const at of this.#failedPreparations.keys()) if (at <= height) this.#failedPreparations.delete(at);
+    }
+  }
+
+  /**
+   * Stores the chunk `first`..`last` above the cursor `previous`, its blocks taken (see the module comment): `first`'s
+   * points before the transaction, then one transaction holding every block's writes, each block after the first
+   * computed after the block before's cursor check, with reads of the transaction; then, at the `COMMIT`'s answer, the
+   * follower, the observer and each block's points after the commit, in height order. Resolves with the new cursor.
+   */
+  async #storeChunk(
+    first: bigint,
+    last: bigint,
+    previous: BlockRef | null,
+    watch: Watch,
+    beginFrom: number,
+  ): Promise<BlockRef> {
+    const chunk: OpenChunk = { tx: undefined, turns: new Turns(), open: false, height: previous?.height ?? null };
+    /** The chunk's runs begun, in height order. */
+    const runs: HeightRun[] = [];
+    /** Their windows, ended at the COMMIT or the rollback. */
+    const windows: Watch[] = [watch];
+    let current: HeightRun | undefined;
+    let bodyEnd: number | undefined;
+    try {
+      const head = await this.#begin(first, previous);
+      current = head;
+      runs.push(head);
+      this.#continueFrom(head, previous, null);
+      const prepareFrom = performance.now();
+      // The takes of every block of the chunk, and its first height's start.
+      traceAdd("beginMs", prepareFrom - beginFrom);
+      await this.prepare(head);
+      traceAdd("prepareMs", performance.now() - prepareFrom);
+      this.#enter("on-db-write");
+      const transactionFrom = performance.now();
+      this.#chunkOpen = chunk;
+      await this.#transacting(
+        this.input.db.transaction(async (tx) => {
+          chunk.tx = tx;
+          chunk.open = true;
+          try {
+            let writeFrom = transactionFrom;
+            for (let run = head; ; ) {
+              const written = run;
+              await chunk.turns.run(() => this.write(tx, written));
+              this.#lastStored = Object.freeze({ block: run.block, session: this.#writtenOn.get(run) ?? null, chunk });
+              chunk.height = run.height;
+              // The block's own part of the transaction, the first's with the BEGIN; its line is held for the COMMIT.
+              traceAdd("txMs", performance.now() - writeFrom);
+              traceHoldBlock();
+              if (run.height >= last) break;
+              run = await this.#begin(run.height + 1n, run.block);
+              current = run;
+              runs.push(run);
+              windows.push(this.#nextWindow(run.height));
+              this.#continueFrom(run, run.previous, chunk);
+              const computeFrom = performance.now();
+              this.#reached(run, "on-start-height");
+              this.#reached(run, "on-compute");
+              await this.compute(run, this.#viewOpener(chunk, run), { inSeries: true });
+              traceAdd("prepareMs", performance.now() - computeFrom);
+              this.#enter("on-db-write");
+              writeFrom = performance.now();
+            }
+            for (const run of runs) this.#bodiesEnded.add(run);
+          } finally {
+            chunk.open = false;
+            bodyEnd = performance.now();
+          }
+        }),
+      );
+    } catch (error) {
+      this.#chunkOpen = undefined;
+      throw this.#chunkFailed(error, runs, current, windows, bodyEnd !== undefined);
+    }
+    this.#chunkOpen = undefined;
+    const commitMs = performance.now() - (bodyEnd as number);
+    // The COMMIT answered: the follower is told of every block in height order, the observer once, of the new cursor.
+    for (const run of runs) {
+      this.#tell("committed", run.block);
+      this.#uncommitted.delete(run.height);
+    }
+    const lastRun = runs.at(-1) as HeightRun;
+    this.#lastStored = Object.freeze({ block: lastRun.block, session: this.#writtenOn.get(lastRun) ?? null, chunk: null });
+    this.input.observer?.committed?.(lastRun.block);
+    this.#endWindows(windows, true);
+    traceCommitHeld([first, lastRun.height], commitMs);
+    for (const run of runs) {
+      traceResumeHeld();
+      try {
+        await this.#afterCommit(run);
+        traceEndBlock(run.height);
+        this.#check();
+      } catch (error) {
+        traceDropHeld();
+        traceDropBlock();
+        throw this.#failure(run.height, error, true);
+      }
+    }
+    return lastRun.block;
+  }
+
+  /**
+   * A chunk's transaction did not commit, or its `first` block failed before it: the failure of the block in progress
+   * (`current`), its windows closed, its lines dropped, the follower told of each block begun, unless the `COMMIT`'s
+   * answer was lost (`bodyEnded` and a retryable error: its outcome is not known); the first block held for a retry
+   * when the failure came before or in its own writes, as for a height processed alone.
+   */
+  #chunkFailed(
+    error: unknown,
+    runs: readonly HeightRun[],
+    current: HeightRun | undefined,
+    windows: readonly Watch[],
+    bodyEnded: boolean,
+  ): HeightFailure {
+    const failing = current ?? runs[0];
+    const failure = this.#failure(failing?.height ?? 0n, error, false);
+    this.#endWindows(windows, false);
+    traceDropHeld();
+    traceDropBlock();
+    this.#lastStored = null;
+    if (!(bodyEnded && answerLost(error))) for (const run of runs) this.#tell("rolledBack", run.block);
+    if (failing !== undefined && failing === runs[0] && !bodyEnded) this.#hold(failing, failure);
+    return failure;
+  }
+
+  /** The window of `height`, a block after its chunk's first: the window before it is held, its timer stopped. */
+  #nextWindow(height: bigint): Watch {
+    const before = this.#watch;
+    if (before !== undefined) clearTimeout(before.timer);
+    return this.#watchHeight(height);
+  }
+
+  /**
+   * Closes a chunk's `windows` — `completed`: its `COMMIT` answered; else it rolled back —, the observer told of each
+   * that was slow.
+   */
+  #endWindows(windows: readonly Watch[], completed: boolean): void {
+    for (const watch of windows) {
+      if (this.#watch === watch) this.#watch = undefined;
+      clearTimeout(watch.timer);
+      if (!watch.raised) continue;
+      const ms = performance.now() - (watch.began as number);
+      this.input.observer?.slow?.({ kind: "ended", window: watch.window, height: watch.height, completed, ms });
+    }
+  }
+
+  /**
+   * The reads of `run`'s `on-compute` callbacks, a block after its chunk's first: each callback takes a turn of the
+   * transaction, and its read at the block before opens at its first statement, as a read-only view of the transaction
+   * (`../db/read-view.ts`), or as its own read once the transaction has ended. It closes when the callback settles.
+   */
+  #viewOpener(chunk: OpenChunk, run: HeightRun): ReadOpener {
+    const height = run.previous?.height ?? null;
+    return async (body) => {
+      const end = await chunk.turns.take();
+      try {
+        return await this.#lazyRead(chunk, height, body);
+      } finally {
+        end();
+      }
+    };
+  }
+
+  /**
+   * Runs `body` with a read-only view of the chunk's transaction `tx` reporting `height` (`../db/read-view.ts`): what
+   * a later block's `on-compute` callback reads through. A negative control's seam.
+   */
+  protected openView<T>(tx: Transaction, height: bigint | null, body: (read: ReadHandle) => Promise<T>): Promise<T> {
+    return readView(tx, { height }, body);
+  }
+
+  /** Runs `body` with a read reporting `height`, opened at its first statement (see {@link #viewOpener}). */
+  async #lazyRead<T>(chunk: OpenChunk, height: bigint | null, body: (read: ReadHandle) => Promise<T>): Promise<T> {
+    let settled = false;
+    let opened: { readonly handle: Promise<ReadHandle>; readonly done: Promise<void>; readonly release: () => void } | undefined;
+    const open = (): Promise<ReadHandle> => {
+      if (opened === undefined) {
+        let release!: () => void;
+        const until = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        let give!: (read: ReadHandle) => void;
+        const given = new Promise<ReadHandle>((resolve) => {
+          give = resolve;
+        });
+        const hold = async (read: ReadHandle): Promise<void> => {
+          give(read);
+          await until;
+        };
+        const done = chunk.open && chunk.tx !== undefined ? this.openView(chunk.tx, height, hold) : this.input.db.read(hold);
+        // A read that fails before it opened rejects the statement that asked for it.
+        opened = { handle: Promise.race([given, done.then(() => given)]), done, release };
+      }
+      return opened.handle;
+    };
+    const read: ReadHandle = {
+      height,
+      query: async (sql, params) => {
+        if (settled) throw handleClosed("read");
+        return (await open()).query(sql, params);
+      },
+    };
+    let outcome: { readonly result: T } | { readonly error: unknown };
+    try {
+      outcome = { result: await body(read) };
+    } catch (error) {
+      outcome = { error };
+    } finally {
+      settled = true;
+    }
+    if (opened !== undefined) {
+      opened.release();
+      // A close that failed wins over the body's outcome, as the view's own.
+      await opened.done;
+    }
+    if ("error" in outcome) throw outcome.error;
+    return outcome.result;
+  }
+
+  /**
+   * A new run of `height` above `previous`: its block taken for a chunk, or from the source, prepared by it when it
+   * prepares heights. A take of the height that failed is thrown here, the source not asked again.
+   */
   async #begin(height: bigint, previous: BlockRef | null): Promise<HeightRun> {
+    const failed = this.#takeFailure;
+    if (failed !== undefined && failed.height === height) {
+      this.#takeFailure = undefined;
+      if (failed.block !== undefined) this.#tell("rolledBack", failed.block);
+      throw failed.error;
+    }
+    const taken = this.#taken.get(height);
+    if (taken !== undefined) {
+      this.#taken.delete(height);
+      return { height, block: taken.block, range: this.#rangeAt(height), items: taken.items, previous, prepared: true };
+    }
     const { source } = this.input;
     const prepared = source.prepared === undefined ? undefined : await this.#prepared(source.prepared.bind(source), height);
     const block = prepared?.block ?? (await source.block(height));
@@ -1346,29 +1789,42 @@ export class FinalizedLoop {
           invoke: (_part, call) => call(headers),
         });
       },
-      storedHash: (height: bigint) =>
-        db.read(async (read) => {
+      // A height taken and not committed is answered from the block taken: a read does not see the chunk's rows.
+      storedHash: (height: bigint) => {
+        const taken = this.#uncommitted.get(height);
+        if (taken !== undefined) return Promise.resolve(taken.hash);
+        return db.read(async (read) => {
           const [row] = await read.query(`SELECT hash FROM ${BLOCKS_TABLE} WHERE height = $1`, [height]);
           return row === undefined ? null : (row.hash as Uint8Array);
-        }),
+        });
+      },
     });
   }
 
   /** Runs `point` in `range`, each callback through `invoke`, after checking no misuse is pending. */
-  async #dispatch<P extends PointName>(range: ResolvedRange, point: P, invoke: Invoke<P>): Promise<void> {
-    await this.#schedule(scheduleAt(range, point), invoke);
+  async #dispatch<P extends PointName>(
+    range: ResolvedRange,
+    point: P,
+    invoke: Invoke<P>,
+    options: ScheduleOptions = {},
+  ): Promise<void> {
+    await this.#schedule(scheduleAt(range, point), invoke, options);
   }
 
   /**
    * Runs `schedule`, each callback through `invoke`, after checking no misuse is pending; for the height in progress,
    * recording the point and its running callbacks.
    */
-  async #schedule<P extends PointName>(schedule: PointSchedule<P>, invoke: Invoke<P>): Promise<void> {
+  async #schedule<P extends PointName>(
+    schedule: PointSchedule<P>,
+    invoke: Invoke<P>,
+    options: ScheduleOptions = {},
+  ): Promise<void> {
     this.#check();
     this.#point = schedule.point;
     const activity = this.#enter(schedule.point);
     try {
-      await runSchedule(schedule, { contextOf: this.input.contextOf, invoke: tracked(activity, invoke) });
+      await runSchedule(schedule, { contextOf: this.input.contextOf, invoke: tracked(activity, invoke) }, options);
     } finally {
       this.#point = undefined;
     }

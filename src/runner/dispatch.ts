@@ -17,7 +17,9 @@
  * - A module goes in the wave after the latest registered module on a requirement path from it. The path may pass
  *   through modules that do not register the point, so a module still waits for a provider two steps away.
  * - Each wave starts its callbacks one after another in the range's order, and awaits them all
- *   (`Promise.allSettled`) before the next wave starts.
+ *   (`Promise.allSettled`) before the next wave starts. Given {@link ScheduleOptions.inSeries} (`on-compute` of a
+ *   block after a chunk's first, `./loop.ts`), each callback of a wave is awaited before the next one starts; every
+ *   callback of the wave still runs.
  *
  * So no callback starts before every callback of a module it requires, directly or through others, has completed. A
  * module may also wait for modules of the previous wave that it does not require; this is allowed, since modules
@@ -240,12 +242,44 @@ async function call<P extends PointName>(point: P, part: ModuleDeclaration, run:
   });
 }
 
+/** How {@link runSchedule} runs each wave. */
+export interface ScheduleOptions {
+  /**
+   * Each callback of a wave awaited before the next one starts, in the wave's order (see the module comment). Every
+   * callback of the wave still runs, and the failure is still the first failing part in the wave's order.
+   */
+  readonly inSeries?: boolean;
+}
+
+/** Runs `wave`'s callbacks one after another, each awaited: their outcomes, in the wave's order. */
+async function oneAtATime<P extends PointName>(
+  point: P,
+  wave: readonly ModuleDeclaration[],
+  run: PointRun<P>,
+): Promise<PromiseSettledResult<void>[]> {
+  const outcomes: PromiseSettledResult<void>[] = [];
+  for (const part of wave) {
+    try {
+      await call(point, part, run);
+      outcomes.push({ status: "fulfilled", value: undefined });
+    } catch (reason) {
+      outcomes.push({ status: "rejected", reason });
+    }
+  }
+  return outcomes;
+}
+
 /**
- * Runs `schedule` (see the module comment): each wave's callbacks started in order and all awaited, then the next
- * wave; rejects with a {@link CallbackFailure} for the first failing part of the first wave with a failure, after the
- * rest of that wave has settled. Throws, calling nothing, for a schedule with a part that does not register its point.
+ * Runs `schedule` (see the module comment): each wave's callbacks started in order and all awaited (with
+ * `options.inSeries`, each awaited before the next starts), then the next wave; rejects with a {@link CallbackFailure}
+ * for the first failing part of the first wave with a failure, after the rest of that wave has settled. Throws,
+ * calling nothing, for a schedule with a part that does not register its point.
  */
-export async function runSchedule<P extends PointName>(schedule: PointSchedule<P>, run: PointRun<P>): Promise<void> {
+export async function runSchedule<P extends PointName>(
+  schedule: PointSchedule<P>,
+  run: PointRun<P>,
+  options: ScheduleOptions = {},
+): Promise<void> {
   const { point, waves } = schedule;
   for (const part of waves.flat()) {
     if (!registers(part, point)) {
@@ -255,7 +289,8 @@ export async function runSchedule<P extends PointName>(schedule: PointSchedule<P
     }
   }
   for (const wave of waves) {
-    const outcomes = await Promise.allSettled(wave.map((part) => call(point, part, run)));
+    const outcomes =
+      options.inSeries === true ? await oneAtATime(point, wave, run) : await Promise.allSettled(wave.map((part) => call(point, part, run)));
     const failed = outcomes.findIndex((outcome) => outcome.status === "rejected");
     if (failed >= 0) {
       const { reason } = outcomes[failed] as PromiseRejectedResult;

@@ -2021,6 +2021,8 @@ class Process implements ProcessHandle {
   }
 
   async #open({ declarations, checked, core, source, db }: Opened): Promise<Startup> {
+    /** The loop this startup makes, once made: the ledger worker reads stored nodes through it. */
+    const opened: { loop?: FinalizedLoop } = {};
     const input = this.#input;
     const settings = core.settings as PlainObject;
     const { durabilityWarnings } = await startWriter(db);
@@ -2088,8 +2090,9 @@ class Process implements ProcessHandle {
       const sources = settings.ledgerSources as VerifyLedgerPackagesOptions["sources"];
       (input.checkLedgerPackages ?? checkLedgerPackages)(sources === undefined ? {} : { sources });
       this.#ledger ??= ledgerWorkerOf(input, this.#workerOutput())();
-      // A request given no read (a parse) reads stored nodes through the process's database.
-      this.#ledger.useDatabase({ read: (body) => db.read(body) });
+      // A request given no read (a parse) reads stored nodes through this startup's loop once it exists: while a
+      // chunk's transaction is open, a view of it, so a parse of a block above the chunk finds the nodes the chunk wrote.
+      this.#ledger.useDatabase({ read: (body) => (opened.loop === undefined ? db.read(body) : opened.loop.read(body)) });
       if (parses) bindLedgerParser(contexts.of(CORE_BLOCK_PARSED_ID), this.#ledger);
       for (const part of graph.modules) if (hasLedgerTasks(part)) bindLedgerTasks(contexts.of(part.id), this.#ledger);
       if (applies && isBlockLedgerSource(source)) {
@@ -2218,6 +2221,7 @@ class Process implements ProcessHandle {
       },
     });
     this.#loop = loop;
+    opened.loop = loop;
     const { server } = this.#api;
     const api = server === null ? null : Object.freeze({ host: server.host, port: server.port });
     // Not stopping (the step above): from here on a stop finds the loop running.

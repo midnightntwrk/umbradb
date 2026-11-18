@@ -9,7 +9,8 @@
  * of `nodes`.
  *
  * What the set holds: a key in it was a row of `nodes` when a settle of this process found it stored, the settles since
- * then all committed on the writer's session that committed the one before, and none of them deleted it. A key wrongly
+ * then all ran on the writer's session that ran the one before, each in a transaction that committed or is still open
+ * (the one this settle runs in), and none of them deleted it. A key wrongly
  * held as a row would let a block whose child list references a missing node commit; a key missing from the set costs
  * one read. So the set is used only while that holds, and emptied otherwise:
  * - at a block's `on-compute`, before the block is handed over, when its context says the block before does not
