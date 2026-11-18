@@ -20,6 +20,7 @@ import {
 import { CORE_LEDGER_STATE_MIGRATIONS } from "../../src/backbone/core-ledger-state/sql.js";
 import type { BlockWriteHandle } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
+import { type Statement, statementText } from "../../src/db/repeated-statements.js";
 import { type AppliedState, EvictionRefused } from "../../src/ledger/worker/engine.js";
 import type { LedgerHost } from "../../src/ledger/worker/host.js";
 import type { BlockContext, ProcessContext } from "../../src/modules/declaration.js";
@@ -139,7 +140,8 @@ function reading(
   return {
     height: rest.height ?? null,
     queries,
-    async query(sql: string, params: unknown[] = []) {
+    async query(statement: Statement, params: unknown[] = []) {
+      const sql = statementText(statement);
       queries.push(params);
       if (sql.includes("extract(epoch")) return rows;
       if (sql.includes("JOIN core_block_commit.blocks")) {
@@ -510,13 +512,14 @@ describe("the reclamation at on-settle", () => {
     return {
       ...base,
       statements,
-      async query(sql: string, params: unknown[] = []) {
+      async query(statement: Statement, params: unknown[] = []) {
+        const sql = statementText(statement);
         if (sql.startsWith("SELECT node_key FROM core_ledger_state.unreferenced")) return [{ node_key: hash(0x77) }];
         if (sql.includes("AS stored")) {
           return (params[0] as Uint8Array[]).filter((key) => key[0] === 0x77).map(() => ({ node_key: hash(0x77), stored: true, refs: 0, roots: 0 }));
         }
         if (sql.startsWith("SELECT node_key, children FROM core_ledger_state.nodes")) return [{ node_key: hash(0x77), children: Uint8Array.of(0) }];
-        return base.query(sql, params);
+        return base.query(statement, params);
       },
       async execute(sql: string, params: unknown[] = []) {
         statements.push(sql.split(" ").slice(0, 3).join(" "));
@@ -619,8 +622,8 @@ describe("the reclamation at on-settle", () => {
       return {
         ...base,
         ran,
-        async query(sql: string, params: unknown[] = []) {
-          if (sql.includes("AS stored")) {
+        async query(sql: Statement, params: unknown[] = []) {
+          if (statementText(sql).includes("AS stored")) {
             return (params[0] as Uint8Array[]).map((key) =>
               key[0] === 0x4e ? { node_key: key, stored: false, refs: 0, roots: 1 } : { node_key: key, stored: true, refs: 0, roots: 0 },
             );

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ReadHandle, ReadOptions, SchemaWriteHandle } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
+import { type Statement, statementText } from "../../src/db/repeated-statements.js";
 import type { ApiRegistry, ModuleDeclaration, ProcessContext } from "../../src/modules/declaration.js";
 import { resolveGraph } from "../../src/modules/graph.js";
 import { CallbackFailure } from "../../src/runner/dispatch.js";
@@ -43,8 +44,8 @@ function fakeDb(height: bigint | null = 7n, fail?: unknown) {
   const options: (ReadOptions | undefined)[] = [];
   const read: ReadHandle = Object.freeze({
     height,
-    query: async (sql: string) => {
-      if (sql.startsWith("SELECT hash FROM core_block_commit.blocks")) return [{ hash: HASH }];
+    query: async (sql: Statement) => {
+      if (statementText(sql).startsWith("SELECT hash FROM core_block_commit.blocks")) return [{ hash: HASH }];
       if (fail !== undefined) throw fail;
       return [{ n: 1n }];
     },

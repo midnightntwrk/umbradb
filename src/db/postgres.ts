@@ -48,7 +48,7 @@
 import postgres, { type Sql } from "postgres";
 import type { SslMode } from "../config/database-parts.js";
 import { mapRows, parameterText, type Row, SESSION_SETTINGS } from "../deterministic-postgresql/index.js";
-import { isRepeatedStatement } from "./repeated-statements.js";
+import { RepeatedStatement, type Statement, statementText } from "./repeated-statements.js";
 import type { CommittedHeight, Database, ReadHandle, ReadOptions, Transaction } from "./api.js";
 import { type DurabilityWarning, probeDurability } from "./durability-probe.js";
 import { commitRolledBack, handleClosed, queryTimeout, statementRefused, UmbraError } from "./errors.js";
@@ -250,11 +250,12 @@ const PREPARED_TEXTS = 256;
 
 /**
  * Which texts a session prepares: every statement with parameters, and the statements without parameters that UmbraDB's
- * own code repeats at every block and marks as such (`./repeated-statements.ts`: the head read, the queue read of a run
- * that sweeps, the digest read, the shadow tables' probe and drains), up to {@link PREPARED_TEXTS} in the session's
- * life, none it retired (below). Sent unprepared, each of those is parsed and planned again at every execution. Every
- * other text without parameters, a module's among them, runs unnamed as it always did. A text retired on a session runs
- * unnamed there for the rest of the session's life.
+ * own code repeats at every block and hands over marked as such (a `RepeatedStatement`, `./repeated-statements.ts`: the
+ * head read, the queue read of a run that sweeps, the digest read, the shadow tables' probe and drains), up to
+ * {@link PREPARED_TEXTS} in the session's life, none it retired (below). Sent unprepared, each of those is parsed and
+ * planned again at every execution. Every text without parameters handed over as a string, a module's among them and
+ * one equal to a marked text, runs unnamed as it always did. A text retired on a session runs unnamed there for the
+ * rest of the session's life.
  *
  * Counts the statements that may change a table's columns (DDL) on any session this process opened to one database,
  * through any pool: a session reuses only the texts it prepared since the last one. PostgreSQL re-plans a prepared
@@ -306,7 +307,7 @@ class Session {
       // A statement is prepared once per session, by name, and reused. Without it the driver describes every statement
       // with parameters before running it, a second round trip each time, and the server parses and plans every
       // statement again. The sessions are UmbraDB's own, pinned for their life with no pooler between, so a named
-      // statement stays theirs; `send` decides which texts (`isRepeatedStatement`, `prepares`).
+      // statement stays theirs; `send` decides which texts (a marked statement, `prepares`).
       prepare: true,
       // Never recycled: the writer's connection holds the writer lock for as long as it lives (./writer-lock.ts).
       max_lifetime: null,
@@ -369,7 +370,7 @@ class Session {
    * Runs one statement: on the extended protocol (one statement, parameters as text), or, for transaction control, on
    * the simple protocol. Its parameters are checked before anything is sent.
    */
-  async run(text: string, params: readonly unknown[] = [], simple = false): Promise<Outcome> {
+  async run(statement: Statement, params: readonly unknown[] = [], simple = false): Promise<Outcome> {
     const encodeFrom = performance.now();
     const args = params.map((value, index) => parameterText(value, index));
     traceAdd("encMs", performance.now() - encodeFrom);
@@ -378,7 +379,8 @@ class Session {
       count: number | null;
       command: string;
     };
-    const result = (await this.send(text, args, simple)) as Raw;
+    const marked = statement instanceof RepeatedStatement;
+    const result = (await this.send(statementText(statement), args, simple, false, marked)) as Raw;
     const decodeFrom = performance.now();
     const columns = (result.columns ?? []).map((column) => ({ name: column.name, type: column.type }));
     const rows = mapRows(
@@ -402,19 +404,20 @@ class Session {
    * statement that may change a table's columns counts as a schema change ({@link SchemaChanges}) once it settled: one
    * whose command tag says so, a writer's `ROLLBACK`, and a migration's `script` whatever it ran.
    *
-   * A marked text without parameters (`./repeated-statements.ts`) is named only when no other statement of this
-   * session is unsettled. Every statement sent before it then settled, so a schema change among them is counted before
-   * `prepares` looks, and no named execution of the text is unanswered: the driver learns a prepared statement only
-   * from the server's answer, and would give a second execution sent before it a new name, which the server keeps for
-   * the session's life. Sent beside others (a caller sending several at once on one handle), it runs unnamed, in its
-   * place in the order. UmbraDB's own code awaits each statement on a handle before the next, so its marked texts run
-   * named.
+   * A marked statement without parameters (`marked`: handed over as a `RepeatedStatement`) is named only when no other
+   * statement of this session is unsettled. Every statement sent before it then settled, so a schema change among them
+   * is counted before `prepares` looks, and no named execution of the text is unanswered: the driver learns a prepared
+   * statement only from the server's answer, and would give a second execution sent before it a new name, which the
+   * server keeps for the session's life. Asked for beside others (a caller sending several at once on one handle), it
+   * runs unnamed, in its place in the order. UmbraDB's own code awaits each statement on a handle before the next, so
+   * its marked statements run named.
    */
   private async send(
     text: string,
     args: readonly (string | null)[],
     simple: boolean,
     script = false,
+    marked = false,
   ): Promise<unknown> {
     if (this.state === "ended") throw handleClosed("database");
     if (this.state === "lost") {
@@ -427,7 +430,7 @@ class Session {
     this.unsettled += 1;
     let schemaChange = script;
     try {
-      const prepare = !simple && (args.length > 0 || (alone && isRepeatedStatement(text))) && this.prepares(text);
+      const prepare = !simple && (args.length > 0 || (alone && marked)) && this.prepares(text);
       // `simple` is a runtime option of `unsafe` the driver's types do not declare (`postgres` 3.4.9 `index.js`).
       const options = { simple, prepare } as unknown as postgres.UnsafeQueryOptions;
       const sent = performance.now();
@@ -514,7 +517,7 @@ class BoundedRead {
   }
 
   /** Runs one statement of the read, unless a timeout ended the read. */
-  async run(text: string, params?: readonly unknown[]): Promise<Outcome> {
+  async run(text: Statement, params?: readonly unknown[]): Promise<Outcome> {
     this.check();
     this.idleSince = undefined;
     try {
@@ -678,7 +681,7 @@ class Writer {
     const session = await this.ready();
     await session.run("BEGIN", [], true);
     let ended = false;
-    const statement = (sql: string, params: unknown[] | undefined) => {
+    const statement = (sql: Statement, params: unknown[] | undefined) => {
       if (ended) throw handleClosed("transaction");
       return session.run(sql, params);
     };
@@ -742,7 +745,7 @@ export function openPostgres(options: PostgresOptions): Database {
       try {
         if (bound === undefined) await reader.run(READ_BEGIN, [], true);
         else await bound.begin();
-        const query = async (sql: string, params?: unknown[]): Promise<Row[]> => {
+        const query = async (sql: Statement, params?: unknown[]): Promise<Row[]> => {
           if (!open) throw handleClosed("read");
           return (await (bound ?? reader).run(sql, params)).rows;
         };

@@ -13,6 +13,7 @@ import { WebSocket } from "ws";
 import { UMBRADB_VERSION } from "../../src/config/build.js";
 import type { BlockWriteHandle, Database, ReadHandle, ReadOptions } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
+import { type Statement, statementText } from "../../src/db/repeated-statements.js";
 import type { ApiRegistry, ModuleDeclaration } from "../../src/modules/declaration.js";
 import {
   CLOSE_TIMEOUT_MS,
@@ -852,7 +853,7 @@ const FAKE_DB = {
   read<T>(body: (read: ReadHandle) => Promise<T>, _options?: ReadOptions): Promise<T> {
     return body({
       height: 7n,
-      query: async (sql: string) => (sql.startsWith("SELECT hash") ? [{ hash: HASH }] : []),
+      query: async (sql: Statement) => (statementText(sql).startsWith("SELECT hash") ? [{ hash: HASH }] : []),
     });
   },
 };

@@ -1,21 +1,22 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Database } from "../../src/db/api.js";
 import { runMultiStatement } from "../../src/db/multi-statement.js";
-import { repeatedStatement } from "../../src/db/repeated-statements.js";
+import { type RepeatedStatement, repeatedStatement, statementText } from "../../src/db/repeated-statements.js";
 import { startTrace, stopTrace } from "../../src/trace/trace.js";
 import { type PostgresTestServer, startPostgresServer } from "./postgres-server.js";
 
 /**
  * PostgreSQL's prepared statements (00033 F2): a session prepares a parameterized text once and reuses it, at most 256
- * texts in its life. A text without parameters is prepared only where UmbraDB's own code marks it as one it repeats
- * at every block (`src/db/repeated-statements.ts`), under the same bound and the same rule for schema changes, and only
- * when it is sent with no other statement of the session unsettled; a marked text whose named execution failed is
- * retired.
- * Every other text without parameters runs unnamed, under the session's settings at each execution, as transaction
- * control and `SET` do. A schema change on any session the process opened to the database, through any pool, or a
- * writer's rollback, retires the texts prepared before it, so a reused text never meets `cached plan must not change
- * result type` inside a transaction. Privileges are checked at each execution, under the role then current. A pool
- * opened with `preparedStatements: false` prepares nothing.
+ * texts in its life. A text without parameters is prepared only where UmbraDB's own code hands it over marked as one
+ * it repeats at every block (a `RepeatedStatement`, `src/db/repeated-statements.ts`), under the same bound and the
+ * same rule for schema changes, and only when it is asked for with no other statement of the session unsettled; a
+ * marked statement whose named execution failed is retired.
+ * Every text without parameters handed over as a string, one equal to a marked text among them, runs unnamed, under
+ * the session's settings at each execution, as transaction control and `SET` do. A schema change on any session the
+ * process opened to the database, through any pool, or a writer's rollback, retires the texts a session holds
+ * prepared, so a reused text never meets `cached plan must not change result type` inside a transaction. Privileges are
+ * checked at each execution, under the role then current. A pool opened with `preparedStatements: false` prepares
+ * nothing.
  */
 
 const SCHEMA = `
@@ -44,7 +45,11 @@ async function database(): Promise<{ db: Database; exec(sql: string): Promise<vo
 }
 
 /** `text`, marked as the engine marks its own repeated statements without parameters. */
-const marked = (text: string): string => repeatedStatement(text);
+const marked = (text: string): RepeatedStatement => repeatedStatement(text);
+
+/** How many times the prepared statements of a text ran on the session asked, one row for each statement of it. */
+const RUNS_OF =
+  "SELECT (generic_plans + custom_plans)::int AS runs FROM pg_prepared_statements WHERE statement = $1 ORDER BY prepare_time";
 
 /** What a promise rejects with, or "resolved". */
 const outcome = (running: Promise<unknown>): Promise<unknown> =>
@@ -101,7 +106,7 @@ describe("prepared statements on PostgreSQL (00033 F2)", () => {
     // Each marked text once, on the writer's session, and each of the four executions ran that prepared statement:
     // PostgreSQL counts a plan of it for each. No other text without parameters (the writer lock's have some).
     expect(prepared.filter((row) => !String(row.statement).includes("$"))).toEqual(
-      [head, blocks].sort().map((statement) => ({ statement, runs: 4 })),
+      [head.text, blocks.text].sort().map((statement) => ({ statement, runs: 4 })),
     );
     await db.close();
   });
@@ -156,9 +161,8 @@ describe("prepared statements on PostgreSQL (00033 F2)", () => {
       return tx.query("SELECT statement FROM pg_prepared_statements");
     });
     const statements = prepared.map((row) => String(row.statement));
-    expect([...texts, READ_ROW].map((text) => statements.filter((statement) => statement === text).length)).toEqual([
-      1, 1, 1, 1,
-    ]);
+    const sent = [...texts.map((text) => text.text), READ_ROW];
+    expect(sent.map((text) => statements.filter((statement) => statement === text).length)).toEqual([1, 1, 1, 1]);
     await db.close();
   });
 
@@ -186,10 +190,60 @@ describe("prepared statements on PostgreSQL (00033 F2)", () => {
         ]);
         return answer;
       });
-      expect(rows, text).toEqual([{ height: 1n, label: "one", extra: 7 }]);
-      expect(await db.transaction((tx) => tx.query(text)), text).toEqual([{ height: 1n, label: "one", extra: 7 }]);
+      expect(rows, statementText(text)).toEqual([{ height: 1n, label: "one", extra: 7 }]);
+      expect(await db.transaction((tx) => tx.query(text)), statementText(text)).toEqual([
+        { height: 1n, label: "one", extra: 7 },
+      ]);
       await db.close();
     }
+  });
+
+  it("runs a string equal to a marked text unnamed, also on a session that holds the marked statement prepared", async () => {
+    const { db } = await database();
+    const text = "SELECT height, label FROM t.rows ORDER BY height";
+    const statement = marked(text);
+    // On the reader, which never ran the marked statement: the same string, one built from parts, and the marked
+    // statement's own text.
+    const equals = [text, ["SELECT height, label ", "FROM t.rows ORDER BY height"].join(""), statement.text];
+    await db.read(async (read) => {
+      for (const equal of equals) {
+        for (let i = 0; i < 3; i++) expect(await read.query(equal)).toEqual([{ height: 1n, label: "one" }]);
+      }
+      expect(await read.query(RUNS_OF, [text])).toEqual([]);
+    });
+    // On the writer, which holds the marked statement prepared: the string's executions are not that statement's.
+    await db.transaction(async (tx) => {
+      for (let i = 0; i < 2; i++) await tx.query(statement);
+      for (const equal of equals) expect(await tx.query(equal)).toEqual([{ height: 1n, label: "one" }]);
+      expect(await tx.query(RUNS_OF, [text])).toEqual([{ runs: 2 }]);
+    });
+    await db.close();
+  });
+
+  it("prepares a marked statement given parameters as any text with parameters, also asked for beside another", async () => {
+    const { db } = await database();
+    const statement = marked(READ_ROW);
+    await db.transaction(async (tx) => {
+      // Beside another statement, where a marked statement without parameters runs unnamed.
+      const [, beside] = await Promise.all([tx.query("SELECT 1 AS one"), tx.query(statement, [1n])]);
+      expect(beside).toEqual([{ height: 1n, label: "one" }]);
+      expect(await tx.query(statement, [1n])).toEqual([{ height: 1n, label: "one" }]);
+      // The string with the same parameter runs the same prepared statement.
+      expect(await tx.query(READ_ROW, [1n])).toEqual([{ height: 1n, label: "one" }]);
+      expect(await tx.query(RUNS_OF, [READ_ROW])).toEqual([{ runs: 3 }]);
+    });
+    await db.close();
+  });
+
+  it("prepares a statement marked after any number of others: 1,100 marked before it in the process", async () => {
+    const { db } = await database();
+    for (let i = 0; i < 1_100; i++) marked(`SELECT ${i} AS never_run`);
+    const statement = marked("SELECT height FROM t.rows ORDER BY height");
+    await db.transaction(async (tx) => {
+      for (let i = 0; i < 3; i++) expect(await tx.query(statement)).toEqual([{ height: 1n }]);
+      expect(await tx.query(RUNS_OF, [statement.text])).toEqual([{ runs: 3 }]);
+    });
+    await db.close();
   });
 
   it("retires a marked text whose named execution failed: the server keeps one statement of it, whatever is sent after", async () => {
@@ -216,7 +270,7 @@ describe("prepared statements on PostgreSQL (00033 F2)", () => {
     const [counts] = await db.read((read) =>
       read.query(
         "SELECT count(*)::int AS n, count(*) FILTER (WHERE statement = $1)::int AS of_text FROM pg_prepared_statements",
-        [text],
+        [text.text],
       ),
     );
     expect(counts).toEqual({ n: 2, of_text: 1 });
@@ -362,12 +416,19 @@ describe("prepared statements on PostgreSQL (00033 F2)", () => {
     });
   });
 
-  it("prepares nothing on a pool opened with preparedStatements: false", async () => {
+  it("prepares nothing on a pool opened with preparedStatements: false, a marked statement neither", async () => {
     const created = await server.createDatabase();
     await created.exec(SCHEMA);
     const db = created.open({ committedHeight, readConnections: 1, preparedStatements: false });
-    for (let i = 0; i < 3; i++) await db.read((read) => read.query(READ_ROW, [1n]));
+    const statement = marked("SELECT height, label FROM t.rows ORDER BY height");
+    for (let i = 0; i < 3; i++) {
+      await db.read((read) => read.query(READ_ROW, [1n]));
+      expect(await db.read((read) => read.query(statement))).toEqual([{ height: 1n, label: "one" }]);
+      expect(await db.transaction((tx) => tx.query(statement))).toEqual([{ height: 1n, label: "one" }]);
+    }
     expect(await preparedCount(db)).toBe(0);
+    const onWriter = await db.transaction((tx) => tx.query("SELECT count(*)::int AS n FROM pg_prepared_statements"));
+    expect(onWriter).toEqual([{ n: 0 }]);
     await db.close();
   });
 
@@ -389,7 +450,7 @@ describe("prepared statements on PostgreSQL (00033 F2)", () => {
       db.transaction((tx) =>
         tx.query(
           "SELECT (generic_plans + custom_plans)::int AS runs FROM pg_prepared_statements WHERE statement = $1",
-          [all],
+          [all.text],
         ),
       );
     for (let i = 0; i < 2; i++) await db.transaction((tx) => tx.query(all));
@@ -428,7 +489,7 @@ describe("prepared statements on PostgreSQL (00033 F2)", () => {
       for (let i = 0; i < 300; i++) await tx.query(`SELECT $1::int + ${i} AS n`, [1]);
       await tx.query(text);
       await tx.query(text);
-      const [row] = await tx.query(ofText, [text]);
+      const [row] = await tx.query(ofText, [text.text]);
       expect(row?.n).toBe(0);
       return row?.pid as number;
     });
@@ -441,7 +502,7 @@ describe("prepared statements on PostgreSQL (00033 F2)", () => {
         .transaction(async (tx) => {
           await tx.query(text);
           await tx.query(text);
-          return (await tx.query(ofText, [text]))[0];
+          return (await tx.query(ofText, [text.text]))[0];
         })
         .catch((error: unknown) => {
           expect(error).toMatchObject({ code: "connection-lost" });
@@ -468,7 +529,7 @@ describe("prepared statements on PostgreSQL (00033 F2)", () => {
         await Promise.all([tx.query(text), tx.query(text), tx.query(text)]);
         const [row] = await tx.query(
           "SELECT (generic_plans + custom_plans)::int AS runs FROM pg_prepared_statements WHERE statement = $1",
-          [text],
+          [text.text],
         );
         return row?.runs;
       });
@@ -476,7 +537,7 @@ describe("prepared statements on PostgreSQL (00033 F2)", () => {
       stopTrace();
     }
     expect(runs).toBe(3);
-    const entry = (JSON.parse(totals) as { q: string; n: number; ms: number }[]).find((total) => total.q === text);
+    const entry = (JSON.parse(totals) as { q: string; n: number; ms: number }[]).find((total) => total.q === text.text);
     expect(entry?.n).toBe(5);
     expect(entry?.ms).toBeGreaterThan(0);
     await db.close();

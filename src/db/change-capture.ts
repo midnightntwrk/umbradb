@@ -61,7 +61,7 @@ import {
   TRUNCATE_GUARD_TABLES_SQL,
 } from "../deterministic-postgresql/index.js";
 import type { TouchedRow } from "../determinism/digest.js";
-import type { Transaction } from "./api.js";
+import type { ReadHandle, Transaction } from "./api.js";
 import { repeatedStatement } from "./repeated-statements.js";
 import type { SchemaPlan } from "./roles.js";
 
@@ -205,7 +205,10 @@ export async function capturedTables(read: ConsistentRead): Promise<CapturedTabl
  * Those of `tables` whose shadow table holds a row, this transaction's or any other's, in their order, read in one
  * statement. {@link takeChanges} of any other table finds nothing and deletes nothing, so the caller may skip it.
  */
-export async function tablesWithChanges(read: ConsistentRead, tables: readonly CapturedTable[]): Promise<CapturedTable[]> {
+export async function tablesWithChanges(
+  read: Pick<ReadHandle, "query">,
+  tables: readonly CapturedTable[],
+): Promise<CapturedTable[]> {
   if (tables.length === 0) return [];
   // Repeated at every block, the same text while the captured tables stay: prepared on PostgreSQL
   // (./repeated-statements.ts).
@@ -230,7 +233,7 @@ function shadowOf(table: CapturedTable): string {
  * transaction first touched it and as it is now (null where there is no row), as canonical row-encoding values. The
  * table's shadow rows are deleted, this transaction's and any other's. `core-digest` calls it last in the block.
  */
-export async function takeChanges(read: ConsistentRead, table: CapturedTable): Promise<TouchedRow[]> {
+export async function takeChanges(read: Pick<ReadHandle, "query">, table: CapturedTable): Promise<TouchedRow[]> {
   const shadow = shadowOf(table);
   const target = `${table.partitioned ? "" : "ONLY "}${quoteIdentifier(table.schema)}.${quoteIdentifier(table.name)}`;
   const old = table.columns.map((_, i) => `d.c${i} AS o${i}`);
