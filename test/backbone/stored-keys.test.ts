@@ -65,8 +65,10 @@ import { made, ref } from "./run-reclaim.js";
  *   events, through the same callbacks on both backends, each block above 1 also releasing the node the block before
  *   persisted: blocks that continue have it answer what the settles before read or wrote (verifying, nothing
  *   differs); it is emptied by a block that does not continue the one before, by a settle that throws (its net
- *   write; a refused eviction with restarts off), and by its bound at a continuing block's update (`copyEmptied` on that
- *   line, not the next, and the set not emptied), not by a refused eviction's restart; a height made again after a
+ *   write; a read; a refused eviction with restarts off), and by its bound at a continuing block's update
+ *   (`copyEmptied` on that line, not the next, and the set not emptied); a refused eviction's restart leaves it: refused
+ *   at 4 after 1 to 3 filled it, 5 answers from it what 3 wrote and 4 did not write again, which a restart that empties
+ *   it (the control) does not; a height made again after a
  *   rollback reads every count and list, and with the negative control `kept-after-failure` reads a root count its
  *   rolled-back settle had already changed: verifying, it halts with `copy-mismatch`; not, it deletes a node a block
  *   early. The runs through a lost connection or a lost `COMMIT` above verify the copy, and it answers nothing at the
@@ -227,6 +229,10 @@ interface ChainOptions {
   readonly queued?: boolean;
   /** The fake worker refuses every eviction. */
   readonly refuse?: boolean;
+  /** The fake worker refuses the eviction of this height only. */
+  readonly refuseAt?: bigint;
+  /** The worker restart after a refused eviction also empties the copy (a negative control's seam). */
+  readonly clearAtRestart?: boolean;
   /** `restartOnRefusedEviction: false`. */
   readonly noRestart?: boolean;
   /** The fake worker reads c's row through the lent handle while it evicts, as for a parse given no read. */
@@ -294,11 +300,14 @@ async function chainOn(backend: TestBackend, options: ChainOptions = {}) {
   let unlent = 0;
   const readWhileEvicting: string[] = [];
   const empty = new Set(options.empty ?? []);
+  /** The height the fake worker applied last: the one whose settle evicts. */
+  let applying: bigint | null = null;
   const host = {
     async load() {
       return { stateRoot: ROOT, loaded: false };
     },
     async apply(input: { readonly height: bigint }) {
+      applying = input.height;
       return appliedAt(input.height, empty.has(input.height), options.releasing === true);
     },
     lend(read: NodeReader) {
@@ -312,11 +321,14 @@ async function chainOn(backend: TestBackend, options: ChainOptions = {}) {
         const rows = await (lent.at(-1) as NodeReader).query(NODES_SQL, [[C.keyBytes]]);
         readWhileEvicting.push(...rows.map((row) => hex(row.node_key as Uint8Array)));
       }
-      if (options.refuse === true) throw new EvictionRefused("still held by a live object (the test's fault)");
+      if (options.refuse === true || (options.refuseAt !== undefined && applying === options.refuseAt)) {
+        throw new EvictionRefused("still held by a live object (the test's fault)");
+      }
       return 1;
     },
     async restart() {
       restarts += 1;
+      if (options.clearAtRestart === true) countsCopyOf(p)?.clear();
     },
     async commit() {
       return true;
@@ -693,6 +705,20 @@ describe.each(BACKENDS)("the copy of the counts and child lists, through the mod
     }
   }, 120_000);
 
+  it("on-settle that throws in its computation (a read failed) empties the copy at once, the counts and lists of the blocks before among them", async () => {
+    const chain = await chainOn(backend, { releasing: true });
+    try {
+      await chain.block(1n);
+      await chain.block(2n);
+      expect(chain.copySize()).toEqual({ counts: 2, lists: 2 });
+      chain.failQueueRead(true);
+      expect(String((await chain.block(3n)).error)).toMatch(/the queue's read failed/);
+      expect(chain.copySize()).toEqual({ counts: 0, lists: 0 });
+    } finally {
+      await chain.close();
+    }
+  }, 120_000);
+
   it("a refused eviction with restarts off throws in on-settle and empties the copy", async () => {
     const chain = await chainOn(backend, { queued: true, refuse: true, noRestart: true, releasing: true });
     try {
@@ -703,23 +729,44 @@ describe.each(BACKENDS)("the copy of the counts and child lists, through the mod
     }
   }, 120_000);
 
-  it("a refused eviction's worker restart leaves the copy: the next height answers the released node's counts from it", async () => {
-    const chain = await chainOn(backend, { queued: true, refuse: true, releasing: true });
+  /**
+   * Blocks 1 to 5, each above 1 releasing the node the block before persisted, the eviction of 4 (which deletes n2)
+   * refused once: the trace's `[h, copyHits, copyMisses, copyEmptied]` lines, and the worker restarts. With
+   * `clearAtRestart`, the restart also empties the copy (the negative control).
+   */
+  async function refusedAt4(clearAtRestart: boolean) {
+    const chain = await chainOn(backend, { releasing: true, refuseAt: 4n, clearAtRestart, reclamationCache: { verify: true } });
     const trace = memoryTrace();
     try {
       startTrace(trace.sink);
-      expect((await chain.block(1n)).error).toBeNull();
-      expect(chain.restarts()).toBe(1);
-      expect((await chain.block(2n)).error).toBeNull();
+      for (const height of [1n, 2n, 3n, 4n, 5n]) expect((await chain.block(height)).error, `block ${height}`).toBeNull();
       stopTrace();
-      // Block 1 read q's counts (queued) and n1's, and q's list; q is deleted. Block 2 answers n1's from the copy.
-      expect(copyLines(trace.lines())).toEqual([
-        [1, 0, 3, 1],
-        [2, 1, 1, undefined],
-      ]);
+      return { lines: copyLines(trace.lines()), restarts: chain.restarts() };
     } finally {
       await chain.close();
     }
+  }
+
+  it("a refused eviction's worker restart leaves the copy: refused at 4, after the copy was filled by 1 to 3, 5 answers from it the counts and list of n3, which 3 wrote and 4 did not write again", async () => {
+    const { lines, restarts } = await refusedAt4(false);
+    expect(restarts).toBe(1);
+    expect(lines).toEqual([
+      [1, 0, 1, 1],
+      [2, 1, 1, undefined],
+      [3, 3, 1, undefined],
+      [4, 3, 1, undefined],
+      // n3's counts (queued at 4) and its list, and n4's counts, from the copy; n5's read.
+      [5, 3, 1, undefined],
+    ]);
+  }, 120_000);
+
+  it("control: a restart that empties the copy fails that case: 4's line says the copy was emptied, and 5 reads n3's counts and list again", async () => {
+    const { lines, restarts } = await refusedAt4(true);
+    expect(restarts).toBe(1);
+    expect(lines.slice(3)).toEqual([
+      [4, 3, 1, 1],
+      [5, 1, 3, undefined],
+    ]);
   }, 120_000);
 
   it("a continuing block whose net write would take the copy past its bound: the copy is emptied before the new node enters, that height's line has copyEmptied 1, the next block's none, and the set is not emptied", async () => {

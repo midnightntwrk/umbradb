@@ -22,17 +22,23 @@ import { applied, embedded, flushOf, haltReason, made, type MadeNode, type Model
  *   by the net write as the tables are (its count's and its root count's changes, a new node entering with its list, a
  *   rewritten node's list replaced, a deleted key leaving); an update that would pass the bound empties it first, so it
  *   never holds more; emptied by a block that does not continue the one before and by a failed settle, and a settle
- *   that started from an emptied copy says so once.
+ *   that started from an emptied copy says so once. It owns what it holds: the keys, child-list buffers (views at a
+ *   nonzero offset among them), count objects and root changes it was given, changed after the update, and the counts
+ *   and lists it answered, changed before the next read, change none of its answers (a build that keeps a caller's
+ *   buffer or count object fails this).
  * - **Its reads** (`withCountsCopy`): every read of a hand-made run with its keys, with no copy, with a copy the runs
  *   before filled, and with a verifying copy: the copy answers the counts and the child lists it holds, the database
- *   is asked the others, and the outcome is the same. A held list is answered as its references by reference, for
+ *   is asked the others, and the outcome is the same. A candidate that is no row is held from its counts read, leaves
+ *   when its run evicts it unwritten, and is held again, a row with its list, once a later run writes it. A held list
+ *   is answered as its references by reference, for
  *   each form of a list's length. A root count is held as after the last settle and answered with
  *   the run's change added; a verifying copy also reads every key it holds and halts with `copy-mismatch` on any
  *   difference: a row flag, a count, a root count, a child list, a list held for a key that is no row, a key the
  *   database leaves out.
  * - **The generated histories**, with no fault and with each fault of the computation, in runs of one and of three
  *   blocks: the outcome with a copy kept from run to run, and with a verifying one, is the outcome without a copy at
- *   every run; the keys the `counts` and `children` reads ask the database fall to the numbers below, measured on a copy
+ *   every run, and, with no fault, after each run every count and list the copy holds is the tables' (whether a later
+ *   read asks for it or not); the keys the `counts` and `children` reads ask the database fall to the numbers below, measured on a copy
  *   no verifying run filled. Negative controls: a copy emptied at every run reads what no copy reads; a copy the net
  *   write does not update (`net-not-applied`) or that answers a root count without the run's change
  *   (`roots-not-added`) gives another outcome, and its verifying form halts with `copy-mismatch`.
@@ -153,6 +159,63 @@ describe("the copy on its own", () => {
     // A rewritten node not held keeps no counts: its count before the run is not known.
     expect(copy.counts(t(e1))).toBeUndefined();
     expect(copy.size).toEqual({ counts: 4, lists: 3 });
+  });
+
+  it("owns what it holds: the keys, child-list buffers, count objects and root changes it was given, changed after apply, and the counts and lists it answered, changed before the next read, change none of its answers", async () => {
+    const [a, b] = [made("a"), made("b")];
+    const n = made("n", [ref(a), ref(b)]);
+    // n's key and child list as views at a nonzero offset into larger buffers, as a driver's rows are.
+    const listBuffer = new Uint8Array(n.children.length + 9);
+    listBuffer.set(n.children, 5);
+    const children = listBuffer.subarray(5, 5 + n.children.length);
+    const keyBuffer = new Uint8Array(40);
+    keyBuffer.set(n.keyBytes, 3);
+    const key = keyBuffer.subarray(3, 35);
+    const deltaKey = Uint8Array.from(a.keyBytes);
+    const freshKey = Uint8Array.from(n.keyBytes);
+    const counts = { row: true, refs: 2, roots: 1 };
+    const copy = new CountsCopy({ keys: 10, verify: false });
+    copy.learnCounts(keyText(a.keyBytes), counts);
+    const rootChanges = new Map([[keyText(n.keyBytes), 1]]);
+    const outcome = { net: { deltas: [{ key: deltaKey, delta: 1 }], inserts: [{ key, data: n.data, children }] }, evict: [], newKeys: [freshKey] };
+    copy.apply(outcome as unknown as RunOutcome, rootChanges);
+    /** What the copy answers of a and n, through its reads and directly. */
+    const answers = async () => {
+      const tables = withCountsCopy(runTables(NO_TABLES, new Map()), copy, { height: 1n, rootChanges: new Map() });
+      const held = (await tables.counts([a.keyBytes, n.keyBytes])).map(({ key: k, row, refs, roots }) => [hex(k), { row, refs, roots }]);
+      const lists = (await tables.children([n.keyBytes])).map(({ key: k, children: list }) => [hex(k), childRefKeys(list).map(hex)]);
+      return { held, lists, direct: [copy.counts(keyText(a.keyBytes)), copy.references(keyText(n.keyBytes))?.map((text) => hex(Buffer.from(text, "latin1")))] };
+    };
+    const before = await answers();
+    expect(before).toEqual({
+      held: [
+        [a.key, { row: true, refs: 3, roots: 1 }],
+        [n.key, { row: true, refs: 0, roots: 1 }],
+      ],
+      lists: [[n.key, [a.key, b.key]]],
+      direct: [{ row: true, refs: 3, roots: 1 }, [a.key, b.key]],
+    });
+    // What it was given, changed after apply.
+    listBuffer.fill(0xdd);
+    keyBuffer.fill(0);
+    deltaKey.fill(0);
+    freshKey.fill(0);
+    counts.row = false;
+    counts.refs = 99;
+    rootChanges.set(keyText(n.keyBytes), 50);
+    outcome.net.deltas[0] = { key: deltaKey, delta: 7 };
+    expect(await answers()).toEqual(before);
+    // What it answered, changed before the next read.
+    const direct = copy.counts(keyText(a.keyBytes)) as { refs: number };
+    direct.refs = 42;
+    const listed = copy.references(keyText(n.keyBytes)) as string[];
+    listed[0] = "x".repeat(32);
+    const tables = withCountsCopy(runTables(NO_TABLES, new Map()), copy, { height: 1n, rootChanges: new Map() });
+    const [answered] = await tables.counts([a.keyBytes]);
+    (answered as { refs: number }).refs = 41;
+    const [list] = await tables.children([n.keyBytes]);
+    (list as { children: Uint8Array }).children.fill(0xcc);
+    expect(await answers()).toEqual(before);
   });
 
   it("an update that would take it past its bound, of counts or of lists, empties it first; it never holds more than its bound", () => {
@@ -310,6 +373,40 @@ describe("the reads with a copy: what the database is asked, every key named", (
     expect(copy.size).toEqual({ counts: 0, lists: 0 });
   });
 
+  it("a candidate that is no row: held from its counts read, gone once its run evicts it unwritten, and held again, a row with its list, once a later run writes it", async () => {
+    // Stored: c, persisted. Run 1, blocks 1 to 3: x over c written and persisted, then released, then nothing: x is
+    // a new node of the run, its counts read (no row), and the cascade deletes it, never written. Run 2, block 4: x
+    // written and persisted again.
+    const c = made("c");
+    const x = made("x", [ref(c)]);
+    const t = keyText(x.keyBytes);
+    const copy = new CountsCopy({ keys: 10, verify: true });
+    let tables: NodeTables = { rows: new Map([[c.key, c.children]]), refs: new Map(), queue: new Set() };
+    const settle = async (first: bigint, blocks: readonly NodeBatch[], roots: ReadonlyMap<string, number>) => {
+      const reclaim = new RunReclaim({ first, on: true });
+      blocks.forEach((block, at) => reclaim.collect(first + BigInt(at), block, true));
+      const rootChanges = reclaim.rootChanges;
+      const outcome = await reclaim.compute(withCountsCopy(runTables(tables, roots), copy, { height: first + BigInt(blocks.length - 1), rootChanges }));
+      const held = copy.counts(t);
+      copy.apply(outcome, rootChanges);
+      const next = applied(tables, outcome.net);
+      expect(next.problems).toEqual([]);
+      tables = next.tables;
+      return { outcome, held };
+    };
+    const write = { inserts: [{ key: x.keyBytes, data: x.data, children: x.children }], rootCounts: [{ key: x.keyBytes, delta: 1 }] };
+    const one = await settle(1n, [write, { inserts: [], rootCounts: [{ key: x.keyBytes, delta: -1 }] }, { inserts: [], rootCounts: [] }], new Map([[c.key, 1]]));
+    // Held after its read, before the update; evicted, never a row, and gone after it.
+    expect(one.held).toEqual({ row: false, refs: 0, roots: 0 });
+    expect([one.outcome.evict.map(hex), one.outcome.net.deleted.map(hex), one.outcome.net.inserts.length]).toEqual([[x.key], [], 0]);
+    expect([copy.counts(t), copy.references(t)]).toEqual([undefined, undefined]);
+    // Written again: read again (the copy lacks it), then held as a row, with its root count and its list.
+    const two = await settle(4n, [write], new Map([[c.key, 1], [x.key, 1]]));
+    expect(two.held).toEqual({ row: false, refs: 0, roots: 0 });
+    expect([copy.counts(t), copy.references(t)?.map((ref_) => hex(Buffer.from(ref_, "latin1")))]).toEqual([{ row: true, refs: 0, roots: 1 }, [c.key]]);
+    expect(tables.rows.has(x.key)).toBe(true);
+  });
+
   it("a root count is held as after the last settle and answered with the run's change added; the database's is learned less the change", async () => {
     const copy = new CountsCopy({ keys: 10, verify: false });
     const tables = runTables({ rows: new Map([[hex(keyOf(1)), Uint8Array.of(0)]]), refs: new Map(), queue: new Set() }, new Map([[hex(keyOf(1)), 3]]));
@@ -454,6 +551,8 @@ interface WithCopy {
   /** The net write not applied to it (`net-not-applied`, a negative control). */
   readonly unapplied?: boolean;
   readonly copyFault?: CopyFault;
+  /** After each run's update, every count and list the copy holds compared with the tables ({@link heldProblems}). */
+  readonly checkHeld?: boolean;
 }
 
 /** What a history run with a copy gave: each run's outcome or halt, and the keys the reads asked the database. */
@@ -463,6 +562,44 @@ interface Copied {
   children: number;
   hits: number;
   misses: number;
+  /** With `checkHeld`: where a held count or list differed from the tables after a run, and how many were compared. */
+  readonly problems: string[];
+  compared: number;
+}
+
+/**
+ * Where what `copy` holds differs from `tables` and `roots` (the root counts after the run's last block) after the run
+ * that ended at `height`, every key the history met (`met`, as hex) looked up: each held count against the tables'
+ * row, count and root count, each held list against the row's references. The copy must hold no key outside `met`.
+ */
+function heldProblems(copy: CountsCopy, met: ReadonlySet<string>, tables: NodeTables, roots: ReadonlyMap<string, number>, height: number, seen: Copied): string[] {
+  const problems: string[] = [];
+  let counts = 0;
+  let lists = 0;
+  for (const key of met) {
+    const text = keyText(Uint8Array.from(Buffer.from(key, "hex")));
+    const held = copy.counts(text);
+    if (held !== undefined) {
+      counts += 1;
+      const want = { row: tables.rows.has(key), refs: tables.refs.get(key) ?? 0, roots: roots.get(key) ?? 0 };
+      if (held.row !== want.row || held.refs !== want.refs || held.roots !== want.roots) {
+        problems.push(`after ${height}: the copy holds the counts of ${key.slice(0, 12)} as ${JSON.stringify(held)}, the tables ${JSON.stringify(want)}`);
+      }
+    }
+    const list = copy.references(text);
+    if (list !== undefined) {
+      lists += 1;
+      const stored = tables.rows.get(key);
+      const want = stored === undefined ? null : childRefKeys(stored).map(hex);
+      const got = list.map((ref_) => hex(Buffer.from(ref_, "latin1")));
+      if (JSON.stringify(got) !== JSON.stringify(want)) problems.push(`after ${height}: the copy holds the list of ${key.slice(0, 12)} as ${got.length} references, the tables ${want === null ? "no row" : want.length}`);
+    }
+  }
+  if (counts !== copy.size.counts || lists !== copy.size.lists) {
+    problems.push(`after ${height}: the copy holds ${copy.size.counts} counts and ${copy.size.lists} lists, of which ${counts} and ${lists} are of keys the history met`);
+  }
+  seen.compared += counts + lists;
+  return problems;
 }
 
 /** A run's outcome as text, for comparing two ways of running it. */
@@ -484,9 +621,18 @@ const outcomeText = (outcome: RunOutcome): string =>
  * them, with `how.copy` kept from run to run. A halt, or a net write that would not apply, ends the history.
  */
 async function withCopy(blocks: readonly ModelBlock[], how: WithCopy): Promise<Copied> {
-  const seen: Copied = { outcomes: [], counts: 0, children: 0, hits: 0, misses: 0 };
+  const seen: Copied = { outcomes: [], counts: 0, children: 0, hits: 0, misses: 0, problems: [], compared: 0 };
   let mine: NodeTables = NO_TABLES;
+  /** Every key the history's flushes named so far, as hex: no other key can enter the copy. */
+  const met = new Set<string>();
   for (const run of runsOf(blocks, how.size)) {
+    for (const block of run) {
+      for (const node of block.flushed.inserts) {
+        met.add(node.key);
+        for (const ref_ of childRefKeys(node.children)) met.add(hex(ref_));
+      }
+      for (const { key } of block.flushed.rootCounts) met.add(key);
+    }
     const first = run[0] as ModelBlock;
     const last = run.at(-1) as ModelBlock;
     const reclaim = new RunReclaim({ first: BigInt(first.height), on: first.on, ...(how.fault === undefined ? {} : { fault: how.fault }) });
@@ -525,6 +671,7 @@ async function withCopy(blocks: readonly ModelBlock[], how: WithCopy): Promise<C
     }
     if (how.copy !== null && how.unapplied !== true) how.copy.apply(outcome, rootChanges);
     if (how.emptied === true) how.copy?.clear();
+    if (how.checkHeld === true && how.copy !== null) seen.problems.push(...heldProblems(how.copy, met, next.tables, last.step.after.roots, last.height, seen));
     mine = next.tables;
   }
   return seen;
@@ -539,40 +686,53 @@ describe("the generated histories with a copy kept from run to run", () => {
    * `small`) with a verifying copy of 5 keys equal to those without one, and the keys each asks the database. How many
    * runs and halts it saw.
    */
-  async function alike(blocks: readonly ModelBlock[], fault: RunFault | undefined, small: boolean): Promise<{ runs: number; halts: number }> {
+  async function alike(blocks: readonly ModelBlock[], fault: RunFault | undefined, small: boolean): Promise<{ runs: number; halts: number; compared: number }> {
     let runs = 0;
     let halts = 0;
+    let compared = 0;
     for (const size of [1, 3]) {
-      const base = { size, ...(fault === undefined ? {} : { fault }) };
+      // Without a fault, every count and list held is compared with the tables after each run.
+      const base = { size, ...(fault === undefined ? { checkHeld: true } : { fault }) };
       const where = `runs of ${size}, ${fault ?? "no fault"}`;
       const none = await withCopy(blocks, { ...base, copy: null });
       const kept = await withCopy(blocks, { ...base, copy: new CountsCopy({ keys: 100_000, verify: false }) });
       const verifying = await withCopy(blocks, { ...base, copy: new CountsCopy({ keys: 100_000, verify: true }) });
       expect(kept.outcomes, where).toEqual(none.outcomes);
       expect(verifying.outcomes, `${where}, verifying`).toEqual(none.outcomes);
-      if (small) expect((await withCopy(blocks, { ...base, copy: new CountsCopy({ keys: 5, verify: true }) })).outcomes, `${where}, a copy of 5 keys`).toEqual(none.outcomes);
+      expect([kept.problems, verifying.problems], where).toEqual([[], []]);
+      compared += kept.compared;
+      if (small) {
+        const five = await withCopy(blocks, { ...base, copy: new CountsCopy({ keys: 5, verify: true }) });
+        expect(five.outcomes, `${where}, a copy of 5 keys`).toEqual(none.outcomes);
+        expect(five.problems, `${where}, a copy of 5 keys`).toEqual([]);
+      }
       // The verifying copy asks the database every key, as no copy does; the copy asks only those it lacks.
       expect([verifying.counts + verifying.children, verifying.hits + verifying.misses], where).toEqual([none.counts + none.children, none.counts + none.children]);
       expect(kept.counts + kept.children, where).toBe(kept.misses);
       runs += none.outcomes.length;
       halts += none.outcomes.filter((outcome) => outcome.startsWith("halt")).length;
     }
-    return { runs, halts };
+    return { runs, halts, compared };
   }
 
   for (const [family, histories] of [
     ["in one form", sweepingOrNot],
     ["in two forms", twoForms],
   ] as const) {
-    it(`${family}, no fault: in runs of 1 and 3, the outcome with a copy, a verifying copy and a verifying copy of 5 keys is the outcome without one at every run (seed ${SEED}, ${HISTORIES} histories)`, async () => {
+    it(`${family}, no fault: in runs of 1 and 3, the outcome with a copy, a verifying copy and a verifying copy of 5 keys is the outcome without one at every run, and after each run every count and list each holds is the tables' (seed ${SEED}, ${HISTORIES} histories)`, async () => {
       let runs = 0;
+      let compared = 0;
       await fc.assert(
         fc.asyncProperty(histories, async (script: HistoryScript) => {
-          runs += (await alike(modelBlocks(script), undefined, true)).runs;
+          const seen = await alike(modelBlocks(script), undefined, true);
+          runs += seen.runs;
+          compared += seen.compared;
         }),
         { seed: SEED, numRuns: HISTORIES },
       );
       expect(runs).toBeGreaterThan(800);
+      // Not vacuous: many held entries compared.
+      expect(compared).toBeGreaterThan(10_000);
     }, 300_000);
 
     it(`${family}, each fault of the computation: in runs of 1 and 3, the outcome with a copy and with a verifying copy is the outcome without one at every run (seed ${SEED}, ${FAULT_HISTORIES} histories)`, async () => {
