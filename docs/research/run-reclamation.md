@@ -2,15 +2,15 @@
 
 What the reclamation of stored ledger nodes computes after a block, proved from the per-block step's own rules, and
 the computation of the node tables after a run of consecutive blocks built on it:
-`src/backbone/core-ledger-state/run-reclaim.ts`, with its tests. Nothing calls the computation yet: the per-block
-step (`refcount.ts`) is what `core-ledger-state` runs. Every statement about the code names a file and the function,
-rule or check it rests on.
+`src/backbone/core-ledger-state/run-reclaim.ts`, with its tests, and how `core-ledger-state` uses it through the
+`on-settle` point (section 5). The per-block step it replaced is kept as the tests' reference
+(`refcount-step.ts`). Every statement about the code names a file and the function, rule or check it rests on.
 
-Paths are short for: `refcount.ts`, `core-ledger-state.ts`, `node-set.ts`, `retention.ts`, `sql.ts`,
-`run-reclaim.ts` in `src/backbone/core-ledger-state/`; `engine.ts` in `src/ledger/worker/`; `model` for
-`test/backbone/refcount-model.ts`; `patch 0001` and `patch 0003` for
+Paths are short for: `core-ledger-state.ts`, `node-set.ts`, `retention.ts`, `sql.ts`, `run-reclaim.ts` in
+`src/backbone/core-ledger-state/`; `engine.ts` and `host.ts` in `src/ledger/worker/`; `refcount-step.ts` for
+`test/backbone/refcount-step.ts`; `model` for `test/backbone/refcount-model.ts`; `patch 0001` and `patch 0003` for
 `vendor/ledger/v9/patches/0001-storage-core-external-node-store.patch` and `0003-ledger-wasm-node-store-exports.patch`.
-The per-block step's rules 1 to 8 are those of `refcount.ts`'s module comment.
+The per-block step's rules 1 to 8 are those of `refcount-step.ts`'s module comment.
 
 ## 1. In short
 
@@ -47,7 +47,7 @@ For the tables as committed after block h (`sql.ts`'s migrations):
 | Name | Meaning |
 |---|---|
 | S(h) | the keys of the rows of `nodes` |
-| L(h, k) | the child list stored for k ∈ S(h). A **reference** is one occurrence of a key in a child list, through embedded children (`refcount.ts`'s module comment) |
+| L(h, k) | the child list stored for k ∈ S(h). A **reference** is one occurrence of a key in a child list, through embedded children (`refcount-step.ts`'s module comment) |
 | C(h, k) | k's row in `ref_counts`, 0 without one |
 | R(h, k) | k's row in `root_counts`, 0 without one. roots(h) is the keys with R(h, k) > 0 |
 | Q(h) | the keys of `unreferenced` |
@@ -146,7 +146,7 @@ It does not say what the stored set is, since the queue is defined by it. Lemma 
 > S(h) = Reach(h, P(h)), with P(h) = roots(h − 1) ∪ roots(h) ∪ N(h) ∪ drop(h).
 > L(h, k) is the child list last written for k. C(h, ·) is the number of references among those lists (I2).
 > Q(h) is the keys of S(h) with no reference and no root count (I3), all of them in N(h) ∪ rel(h) ∪ drop(h).
-> R(h, ·) = R(h − 1, ·) plus the block's root-count changes (`core-ledger-state.ts`'s `writeBlock`).
+> R(h, ·) = R(h − 1, ·) plus the block's root-count changes (`core-ledger-state.ts`'s `writeBlockRows`).
 
 Every key of P(h) is a row after h: a new node is inserted and protected; a key with a root count at h − 1 is a row
 by I4, a key of drop(h) is a row by I1, and both are protected; a key with a root count at h is a row by I4 after
@@ -174,8 +174,8 @@ Reach(h, roots(h)). `model` calls such a block admissible.
 **Corollary 1.** With P1: S(h) = Reach(h, roots(h − 1) ∪ roots(h) ∪ drop(h)), and Q(h) ⊆ rel(h) ∪ drop(h).
 
 **Corollary 2.** With P1 and no list replaced at h (W(h) empty): S(h) = Reach(h, roots(h − 1)) ∪ Reach(h, roots(h)),
-and Q(h) ⊆ rel(h). This is `refcount.ts`'s first sentence, "keeping, for one block, what the state after h − 1 may
-still reach", as an equality.
+and Q(h) ⊆ rel(h). This is the first sentence of the step's rules in `refcount-step.ts`, "keeping, for one block, what
+the state after h − 1 may still reach", as an equality.
 
 **What the roots are** (`engine.ts`'s persists and releases): the key of the state after each height of the
 retention window, persisted once by its block and released once by the block at which it leaves the window; and the
@@ -227,7 +227,7 @@ With `sweep` off the queue depends on every block since it was turned off.
 1. **`sweep` off:** no closed form (3.7).
 2. **Tables that break I1 to I4 before the block.** The proofs start from them. One such case: a row with no
    reference and no root count that is missing from the queue is no candidate of the cascade unless a deletion
-   reaches it (`refcount.ts`, rule 5), so it stays stored.
+   reaches it (`refcount-step.ts`, rule 5), so it stays stored.
 3. **A row whose key is not its content's** (A0): references could then form a cycle, which counting never frees
    and Lemma 2 does not cover.
 4. **A block that breaks P1:** Theorem 1 holds, Corollaries 1 to 3 do not.
@@ -241,8 +241,8 @@ With `sweep` off the queue depends on every block since it was turned off.
 ## 4. The run form
 
 Instead of the per-block step at each block of a run, each block only hands over what it flushed and writes its own
-rows; one computation after the run's last block gives the node tables after it (`run-reclaim.ts`). Nothing calls it
-yet.
+rows; one computation after the run's last block gives the node tables after it (`run-reclaim.ts`). Section 5 says
+where `core-ledger-state` calls each part.
 
 ### 4.1 What each block of a run hands over
 
@@ -273,7 +273,7 @@ when it is computed, the last of them its last block (`RunReclaim.heights` gives
 
 Each child list is parsed once, here. Nothing else is computed per block: no count, no queue, no deletion. The
 computation expects each block's root-count changes to be in `root_counts` when it runs, as `core-ledger-state.ts`'s
-`writeBlock` writes them, so that it holds R(b); and `nodes`, `ref_counts` and `unreferenced` to be as the block
+`writeBlockRows` writes them, so that it holds R(b); and `nodes`, `ref_counts` and `unreferenced` to be as the block
 before the run left them.
 
 ### 4.2 The computation after the run's last block
@@ -425,7 +425,7 @@ Kept as computed instead (a negative control), some histories store rows more, q
 ### 4.4 The reads, and what bounds them
 
 All after the last block, through `RunTables` (`run-reclaim.ts`): each read is one statement's shape (`sql.ts`'s
-reads of the step, `missingKeys` and `queuedKeys`), sent in statements of at most 1,000 keys (`refcount.ts`'s
+reads of the step, `missingKeys` and `queuedKeys`), sent in statements of at most 1,000 keys (`run-reclaim.ts`'s
 `KEYS_PER_STATEMENT`) by whoever gives the tables (`sqlRunTables`).
 
 | Step | Read | Keys |
@@ -459,7 +459,7 @@ and, per run, the reads above and the five writes of the net write. Not measured
 
 ### 4.5 Each key in one form
 
-The per-block step turns a key into hexadecimal text in every map it keeps (`refcount.ts`), and `Buffer.from`
+The per-block step turns a key into hexadecimal text in every map it keeps (`refcount-step.ts`), and `Buffer.from`
 copies its 32 bytes first.
 
 The run computation uses one record per distinct key, made the first time the key is met in the run and found by
@@ -524,3 +524,79 @@ holds every output of the step to it on generated histories. What remains differ
 | A missing reference and a count the cascade takes below 0 at one block: both name `negative-count`. In a longer run whose earlier block has the reference, the run names `missing-reference` at that block, where the per-block step names the count at the same block; the run's one cascade cannot say at which block a count fell | damaged counts only |
 | The key and the words of a halt: the step names the first failing reference in the order of the keys of the lists it writes; the run names, for step 3, the first failing block and then the first key in byte order | any halt |
 | Reads: the run reads which referenced keys are no row (`missing`), and with `sweep` off the queue's membership by key; the step reads which are rows and the queue whole | always; the same tables |
+
+## 5. The module's use
+
+`core-ledger-state` runs the computation for each run of blocks the engine settles (`core-ledger-state.ts`). The
+engine passes a run of one block, so below the run is block h, and its settle happens inside h's transaction.
+
+### 5.1 Where each input comes from
+
+| The computation takes | Where `core-ledger-state` gets it |
+|---|---|
+| h's flushed nodes and root-count changes, with its rising keys | h's apply in its `on-compute`, handed over in memory (`computeBlock`, `handOver`, `RunReclaim.collect`); no statement |
+| The `sweep` setting | the `core` entry's revision at h (`revisionAt`), one setting per record |
+| R(h) | `root_counts` as h's `on-db-write` left it: `writeBlockRows` writes the root-count changes first |
+| R(h − 1) | R(h) less h's own changes (section 4.2) |
+| `nodes`, `ref_counts`, `unreferenced` after h − 1 | the block's transaction at `on-settle` (`sqlRunTables` over the block write handle): no statement of h wrote them before, since `on-db-write` writes the block's own rows only |
+| The keys known stored | a set made for the run and dropped with it (`RunReclaim.compute`'s default) |
+
+The record is made at h's `on-compute` unless the one held expects h, and dropped at `on-settle` whatever happens
+(`settleRun`). `on-settle` refuses a run the record does not cover. A block made again after a failure finds the
+record of the failed attempt expecting h + 1, so it is handed over to a new record, which holds it alone.
+
+### 5.2 What the worker holds at the eviction
+
+At h's `on-settle` the engine holds two states: the one committed after h − 1 and the one after h, pending
+(`engine.ts`'s states). h's `on-compute` has the worker hold the stored state after h − 1 (`LedgerHost.load`) before
+h's apply, and the worker answers in order, so once h's apply has answered, the state after h − 1 is the committed
+one.
+
+No block above h is applied yet: h + 1's apply is sent at its own `on-compute`, which runs after h's `COMMIT`. So no
+state the engine holds was made after the computation's inputs, and the keys the computation deletes are disjoint from
+what the two held states reach through the stored child lists (Lemma 3: the roots after h − 1 and after h are
+protected). This is the guarantee the per-block step gave its eviction before the block's transaction
+(`engine.ts`'s module comment on evictions); the eviction is now sent inside the transaction, after the block's
+writes, with the worker in the same two states.
+
+The eviction is awaited. The worker is idle then (h's apply has answered and nothing else is sent before h's
+`COMMIT`), so the wait is the eviction's own time; and the refusal must be known, and the thread replaced, before the
+next block is applied.
+
+### 5.3 A refused eviction
+
+The package refuses to forget a node a live object holds; the worker frees every kept parse's native objects and
+tries once more (`engine.ts`'s `evict`). If it still refuses (`EvictionRefused`):
+
+- `settleRun` ends the worker thread and starts a new one (`host.ts`'s `restart`), traces `evictRefused`, and goes
+  on: the net write and the `COMMIT`. The eviction is not sent again.
+- The new thread holds no state. h + 1's `on-compute` loads the state after h from the database (`LedgerHost.load`
+  in `applyBlock`): every node it reads is a row after h's `COMMIT`, and it holds as stored only what it read. So no
+  node is wrongly believed stored, and the nodes h deleted were never in the new thread.
+- Nothing asks the engine to make a height again, so the refusal cannot repeat: a package that refuses in every
+  thread costs one restart, as one that refuses in the first only.
+- With `restartOnRefusedEviction: false` the refusal is thrown in `on-settle`: h's transaction rolls back and
+  processing halts at h with `callback-error`, the cursor at h − 1.
+
+### 5.4 What a failure rolls back
+
+| Failure | Rolled back | Then |
+|---|---|---|
+| A check of the computation (`negative-count`, `missing-reference`, `unreached-node`, `unexpected-queued`) | h's transaction: every module's rows of h | halt with `ledger-refcount-invalid`, not retryable. The check throws before the eviction, so the worker is told nothing |
+| `row-count-mismatch`, or another failed statement of the net write | h's transaction | halt. The worker has forgotten nodes the database still keeps, as after the per-block step's eviction before a failed transaction |
+| A refused eviction | nothing | section 5.3 |
+| A retryable failure (a lost connection) in h's transaction | h's transaction | the engine makes h again from `on-compute`: the worker gives the same result for h, still pending (`engine.ts`), a new record holds it, and the settle computes the same tables from the same inputs and sends the same eviction again |
+| A crash before the `COMMIT` | h's transaction | a new process, with a new worker, starts from the database after h − 1 |
+
+### 5.5 The checks and the trace
+
+- The computation's checks halt at h's `on-settle` (the per-block step's halted at `on-compute`, before the
+  transaction). The error's details name the run's `first` and `last` heights besides the reason, the height and the
+  key. Section 4.9 lists where a run of one block still differs from the step.
+- The trace (`core-ledger-state.ts`'s `traceSettle`): one link of `sh` per settle (the run's heights, its net write,
+  the keys evicted, the rounds), `st` in the step's nine positions from the outcome, `collectMs` at `on-compute`, and
+  `stepMs`, `evictMs`, the reads and `writeRefcountMs` inside the block's transaction.
+- `test/backbone/ledger-refcount-settle.test.ts` holds the order of 5.2 at every block, the tables after every block
+  to `refcount-step.ts` over the tables after h − 1 and h's recorded flush, the refusal of 5.3 and the rollbacks of
+  5.4; the tape replays (`test/backbone/refcount-tapes.ts`) hold the same reference at their sampled heights.
+

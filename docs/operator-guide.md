@@ -340,7 +340,7 @@ UMBRADB_TRACE=run/trace.jsonl umbradb run [--config umbradb.config.ts]
 | Variable | What it does |
 |---|---|
 | `UMBRADB_TRACE=<file>` | Writes the trace to `<file>` (relative to the working directory, in a folder that exists) and two files beside it. Unset or empty: no trace. |
-| `UMBRADB_TRACE_STEPS=1` | Beside `UMBRADB_TRACE`: each height's line also holds its reclamation step's count changes (`d`), new nodes (`nn`) and deleted nodes (`del`), each key by its first 6 bytes. A line is then several kB long. |
+| `UMBRADB_TRACE_STEPS=1` | Beside `UMBRADB_TRACE`: each height's line also holds its reclamation's count changes (`d`), new nodes (`nn`) and deleted nodes (`del`), each key by its first 6 bytes. A line is then several kB long. |
 
 The trace only measures. A process that is not traced computes, stores, logs and sends between its threads what it
 did before; a traced one stores the same tables. Only the command starts it: a host program's process
@@ -356,7 +356,7 @@ command's end, the command fails with that error.
 
 | File | Holds |
 |---|---|
-| `<file>` | One JSON line per committed height: what the main thread's time went to. A height whose work after its commit (`on-after-db-write`) fails has none. A height that failed and was made again has the line of the run that committed it, and its step is in `sh` once. A height whose `COMMIT` lost its answer has its line once the next run finds it committed (none if it did not commit); that line also holds what was sent until then, and no `txMs`. |
+| `<file>` | One JSON line per committed height: what the main thread's time went to. A height whose work after its commit (`on-after-db-write`) fails has none. A height that failed and was made again has the line of the run that committed it, and its reclamation is in `sh` once. A height whose `COMMIT` lost its answer has its line once the next run finds it committed (none if it did not commit); that line also holds what was sent until then, and no `txMs`. |
 | `<file>.stmts.json` | One entry per statement text (`q`, its first 260 characters) the main thread sent on PostgreSQL: how many times it was sent (`n`, those that failed included), its client time from send to answer or failure in ms (`ms`) and its slowest call (`max`). The first 1,024 texts sent are kept by name; the statements of any other text are counted together in a last entry whose `q` is `(other statement texts)`, present once it counts one. On PGlite statements are not traced, so it is `[]`. |
 | `<file>.worker.jsonl` | One JSON line per block the ledger worker applied: what the worker thread's time went to since the line before. |
 
@@ -367,15 +367,17 @@ that height.
 |---|---|
 | `h`, `t` | The height, and the process's clock when it ended. |
 | `beginMs` | The wait for the block from its source, and the height's start. |
-| `prepareMs` | The points before the block's transaction (`on-fetch` to `on-compute`). It holds `applyMs`, `stepMs` and `evictMs`. |
+| `prepareMs` | The points before the block's transaction (`on-fetch` to `on-compute`). It holds `applyMs` and `collectMs`. |
 | `applyMs`, `tx` | The block applied by the ledger worker, as the main thread waited for it, and the block's number of transactions. |
 | `rootWaitMs` | Of `applyMs`: the wait for the node's state root once the worker had answered. It is the node's time. |
-| `stepMs`, `evictMs` | The reclamation step, and the eviction of the nodes it deletes from the worker. |
-| `reads` | The step's reads, each as `[name, keys asked, ms, entries answered]`; the names are `rows`, `changed`, `queue`, `counts` and `references`. |
-| `st` | The step's sizes: new, rewritten and unchanged nodes, count changes, deleted nodes, rounds, keys queued, keys unqueued, and keys whose count stays above 0. |
-| `sh` | The chain of step outputs: 16 hex digits of a SHA-256 over what every height so far gave. Two runs of the same heights whose last `sh` are equal computed the same step at every height. |
+| `collectMs` | The block's flush handed over to the reclamation, in memory. |
+| `stepMs`, `evictMs` | Inside `txMs`, at `on-settle`: the reclamation of the run of blocks the height ends (one block), its reads included, and the eviction of the nodes it deletes from the worker, awaited. |
+| `evictRefused` | 1 when the ledger package refused that eviction: the worker thread was ended and the block committed. |
+| `reads` | The reclamation's reads, inside `txMs`, each as `[name, keys asked, ms, entries answered]`; the names are `rows`, `changed`, `missing`, `queue`, `queued`, `counts` and `references`. |
+| `st` | The reclamation's sizes: new, rewritten and unchanged nodes, count changes, deleted nodes, rounds, keys queued, keys unqueued, and keys whose count stays above 0. |
+| `sh` | The chain of reclamation outputs: 16 hex digits of a SHA-256 over what every height so far gave, one link per run settled (its first and last heights, its net write, the keys evicted, the rounds). Two runs of the same heights whose last `sh` are equal computed the same reclamation at every height. A build that ran a reclamation step per block in `on-compute` chained other links, so its `sh` does not compare with this one's. |
 | `txMs` | The block's transaction, from its `BEGIN` to its `COMMIT` answered. |
-| `writeBlockMs`, `writeRefcountMs` | Inside it: the ledger state's node writes, and the step's writes. |
+| `writeBlockMs`, `writeRefcountMs` | Inside it: the ledger state's own rows of the block (root counts, `states`, segment results, events) at `on-db-write`, and the reclamation's net write at `on-settle` (nodes, counts, queue, deleted rows). |
 | `commitMs` | The client time of the last `COMMIT` sent since the line before: the block's own, unless the process committed another write after it. |
 | `sqlN`, `sqlMs` | The statements the main thread sent on PostgreSQL since the line before, and their client time from send to answer or failure. A run's first line also holds the startup's statements, and a module API request's or the admin endpoints' reads during a sync count in the height then in progress. A height that does not commit drops what it counted (the statements' file keeps them). |
 | `encMs`, `decMs` | Those statements' parameters encoded, and their rows decoded. |

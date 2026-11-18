@@ -395,6 +395,10 @@ The ledger can write one node two ways, a small child embedded in it or referenc
 held; so two machines fed the same chain hold the same nodes there, but not always in the same bytes, nor with the same
 counts and queue (after a restart, for one).
 
+- **When they are written.** `core-ledger-state` writes `root_counts` and its `states` row at its `on-db-write`, and
+  `nodes`, `ref_counts` and `unreferenced` at its `on-settle`, once the run's last block wrote its rows and before the
+  `COMMIT`. A callback that runs before that settle in the block's transaction (any `on-db-write`) reads these three
+  tables as they were after the block before the run.
 - **Not part of the determinism contract.** The bytes of `nodes`, `ref_counts` and `unreferenced` are not: the
   contents hash takes `nodes` by the nodes it holds (the keys of its rows and of every node embedded in them) and checks
   the other two against it, and no block digests them.
