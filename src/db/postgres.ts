@@ -48,6 +48,7 @@
 import postgres, { type Sql } from "postgres";
 import type { SslMode } from "../config/database-parts.js";
 import { mapRows, parameterText, type Row, SESSION_SETTINGS } from "../deterministic-postgresql/index.js";
+import { isRepeatedStatement } from "./repeated-statements.js";
 import type { CommittedHeight, Database, ReadHandle, ReadOptions, Transaction } from "./api.js";
 import { type DurabilityWarning, probeDurability } from "./durability-probe.js";
 import { commitRolledBack, handleClosed, queryTimeout, statementRefused, UmbraError } from "./errors.js";
@@ -248,21 +249,12 @@ interface Outcome {
 const PREPARED_TEXTS = 256;
 
 /**
- * A statement PostgreSQL plans, by its first word after spaces, in any case. Such a text is prepared even when it takes
- * no parameter: sent unprepared it is parsed and planned again at every execution, which for the statements a block
- * repeats (the head read, the queue read of a run that sweeps, the digest read, the shadow tables' probe and drains)
- * costs several times their execution. Prepared, it is parsed once on its session, and PostgreSQL reuses the plan it
- * keeps for it where it chooses to, planning again after a change to what it reads. A text without parameters that
- * starts with anything else (a comment, a parenthesis, `SET`, transaction control) is not matched, and runs as before:
- * unprepared, or on the simple protocol.
- */
-const PLANNED = /^\s*(SELECT|WITH|INSERT|UPDATE|DELETE|MERGE|VALUES|TABLE)\b/i;
-
-/**
- * Which texts a session prepares: every statement with parameters, and every statement PostgreSQL plans
- * ({@link PLANNED}), up to {@link PREPARED_TEXTS} in the session's life, none it retired (below). A text retired on a
- * session, such as one a reader ran at startup before the writer's migrations, runs unprepared on that session for the
- * rest of its life: parsed and planned at every execution, as before.
+ * Which texts a session prepares: every statement with parameters, and the statements without parameters that UmbraDB's
+ * own code repeats at every block and marks as such (`./repeated-statements.ts`: the head read, the queue read of a run
+ * that sweeps, the digest read, the shadow tables' probe and drains), up to {@link PREPARED_TEXTS} in the session's
+ * life, none it retired (below). Sent unprepared, each of those is parsed and planned again at every execution. Every
+ * other text without parameters, a module's among them, runs unnamed as it always did. A text retired on a session runs
+ * unnamed there for the rest of the session's life.
  *
  * Counts the statements that may change a table's columns (DDL) on any session this process opened to one database,
  * through any pool: a session reuses only the texts it prepared since the last one. PostgreSQL re-plans a prepared
@@ -314,7 +306,7 @@ class Session {
       // A statement is prepared once per session, by name, and reused. Without it the driver describes every statement
       // with parameters before running it, a second round trip each time, and the server parses and plans every
       // statement again. The sessions are UmbraDB's own, pinned for their life with no pooler between, so a named
-      // statement stays theirs; `send` decides which texts (`PLANNED`, `prepares`).
+      // statement stays theirs; `send` decides which texts (`isRepeatedStatement`, `prepares`).
       prepare: true,
       // Never recycled: the writer's connection holds the writer lock for as long as it lives (./writer-lock.ts).
       max_lifetime: null,
@@ -338,42 +330,29 @@ class Session {
 
   /** The texts this session prepared since the last schema change it knows of ({@link SchemaChanges}). */
   private readonly preparedTexts = new Set<string>();
-  /** The texts it prepared before a schema change: never prepared again on this session. */
+  /** The texts it prepared before a schema change, or whose named execution without parameters failed: never again. */
   private readonly retiredTexts = new Set<string>();
-  /** Prepared texts without parameters a named execution of which was answered: the driver holds their statement. */
-  private readonly answeredTexts = new Set<string>();
-  /** Prepared texts without parameters whose first named execution is in flight. */
-  private readonly namingTexts = new Set<string>();
+  /** The statements sent on this session and not yet settled (answered or failed, the schema-change count updated). */
+  private unsettled = 0;
   private seenSchemaChanges = 0;
 
   /**
-   * Whether `text` runs as a named prepared statement (`"first"` for the execution that prepares a text without
-   * parameters): one prepared since the last schema change, or a new one while this session has prepared fewer than
-   * {@link PREPARED_TEXTS} in its life. The driver keeps each without limit for the session's life (it keys them by
-   * text, every parameter typed alike). A caller sending ever new texts, such as a private client's reads or a module's
-   * built SQL, so costs the server at most that many; the rest run as now, described first.
-   *
-   * A text without parameters is named by one execution at a time until one is answered. The driver learns a prepared
-   * statement only from the server's answer, and gives every execution sent before it a new name, which the server
-   * keeps for the session's life. So an execution sent while the text's first is unanswered (a caller sending several
-   * at once on one handle) runs unnamed, in its place in the order, as such a text ran before it was prepared. A text
-   * with parameters needs none of this: the driver describes it first and sends nothing behind it until it is answered.
+   * Whether `text` runs as a named prepared statement: one prepared since the last schema change, or a new one while
+   * this session has prepared fewer than {@link PREPARED_TEXTS} in its life. The driver keeps each without limit for
+   * the session's life (it keys them by text, every parameter typed alike). A caller sending ever new texts, such as a
+   * private client's reads or a module's built SQL, so costs the server at most that many; the rest run as now,
+   * described first.
    */
-  private prepares(text: string, parameterless: boolean): boolean | "first" {
+  private prepares(text: string): boolean {
     if (this.seenSchemaChanges !== this.schemaChanges.count) {
       this.seenSchemaChanges = this.schemaChanges.count;
       for (const known of this.preparedTexts) this.retiredTexts.add(known);
       this.preparedTexts.clear();
-      this.answeredTexts.clear();
     }
-    if (!this.preparedTexts.has(text)) {
-      if (this.retiredTexts.has(text) || this.preparedTexts.size + this.retiredTexts.size >= this.preparedLimit) return false;
-      this.preparedTexts.add(text);
-    }
-    if (!parameterless || this.answeredTexts.has(text)) return true;
-    if (this.namingTexts.has(text)) return false;
-    this.namingTexts.add(text);
-    return "first";
+    if (this.preparedTexts.has(text)) return true;
+    if (this.retiredTexts.has(text) || this.preparedTexts.size + this.retiredTexts.size >= this.preparedLimit) return false;
+    this.preparedTexts.add(text);
+    return true;
   }
 
   /** True until the connection is lost or ended. */
@@ -401,9 +380,6 @@ class Session {
     };
     const result = (await this.send(text, args, simple)) as Raw;
     const decodeFrom = performance.now();
-    if (SCHEMA_CHANGE.test(result.command) || (this.role === "writer" && result.command === "ROLLBACK")) {
-      this.schemaChanges.count += 1;
-    }
     const columns = (result.columns ?? []).map((column) => ({ name: column.name, type: column.type }));
     const rows = mapRows(
       columns,
@@ -418,16 +394,28 @@ class Session {
    * migration's, `./multi-statement.ts`); its results are not read (the driver gives one per statement).
    */
   async script(text: string): Promise<void> {
-    try {
-      await this.send(text, [], true);
-    } finally {
-      // A migration's script: whatever it ran, the tables it names may have other columns now.
-      this.schemaChanges.count += 1;
-    }
+    await this.send(text, [], true, true);
   }
 
-  /** Sends a text to the server unless the session ended or was lost; a driver error as an {@link UmbraError}. */
-  private async send(text: string, args: readonly (string | null)[], simple: boolean): Promise<unknown> {
+  /**
+   * Sends a text to the server unless the session ended or was lost; a driver error as an {@link UmbraError}. A
+   * statement that may change a table's columns counts as a schema change ({@link SchemaChanges}) once it settled: one
+   * whose command tag says so, a writer's `ROLLBACK`, and a migration's `script` whatever it ran.
+   *
+   * A marked text without parameters (`./repeated-statements.ts`) is named only when no other statement of this
+   * session is unsettled. Every statement sent before it then settled, so a schema change among them is counted before
+   * `prepares` looks, and no named execution of the text is unanswered: the driver learns a prepared statement only
+   * from the server's answer, and would give a second execution sent before it a new name, which the server keeps for
+   * the session's life. Sent beside others (a caller sending several at once on one handle), it runs unnamed, in its
+   * place in the order. UmbraDB's own code awaits each statement on a handle before the next, so its marked texts run
+   * named.
+   */
+  private async send(
+    text: string,
+    args: readonly (string | null)[],
+    simple: boolean,
+    script = false,
+  ): Promise<unknown> {
     if (this.state === "ended") throw handleClosed("database");
     if (this.state === "lost") {
       throw new UmbraError("connection-lost", `the ${this.role} connection to PostgreSQL was lost`, {
@@ -435,17 +423,28 @@ class Session {
         cause: "lost-earlier",
       });
     }
-    let first = false;
+    const alone = this.unsettled === 0;
+    this.unsettled += 1;
+    let schemaChange = script;
     try {
-      const prepare = !simple && (args.length > 0 || PLANNED.test(text)) && this.prepares(text, args.length === 0);
-      first = prepare === "first";
+      const prepare = !simple && (args.length > 0 || (alone && isRepeatedStatement(text))) && this.prepares(text);
       // `simple` is a runtime option of `unsafe` the driver's types do not declare (`postgres` 3.4.9 `index.js`).
-      const options = { simple, prepare: prepare !== false } as unknown as postgres.UnsafeQueryOptions;
+      const options = { simple, prepare } as unknown as postgres.UnsafeQueryOptions;
       const sent = performance.now();
       try {
         const result = await this.sql.unsafe(text, args as string[], options).raw();
-        if (first && this.preparedTexts.has(text)) this.answeredTexts.add(text);
+        const command = (result as { command?: string }).command ?? "";
+        schemaChange ||= SCHEMA_CHANGE.test(command) || (this.role === "writer" && command === "ROLLBACK");
         return result;
+      } catch (error) {
+        // After some failures of a named statement the driver drops it and would prepare the text again under a
+        // new name (`retry`, `postgres` 3.4.9 `connection.js`), the old one staying on the server. A marked text
+        // whose named execution failed is retired, so each such text leaves at most one statement on the server.
+        if (prepare && args.length === 0) {
+          this.preparedTexts.delete(text);
+          this.retiredTexts.add(text);
+        }
+        throw error;
       } finally {
         // Answered or failed (a timeout, a lost connection), the statement took this time of the session.
         traceStatement(text, performance.now() - sent);
@@ -456,8 +455,8 @@ class Session {
       if (classified.code === "connection-lost") this.state = "lost";
       throw classified;
     } finally {
-      // Answered or failed: the next execution names it (the driver reuses its statement if the server parsed it).
-      if (first) this.namingTexts.delete(text);
+      if (schemaChange) this.schemaChanges.count += 1;
+      this.unsettled -= 1;
     }
   }
 

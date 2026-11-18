@@ -62,6 +62,7 @@ import {
 } from "../deterministic-postgresql/index.js";
 import type { TouchedRow } from "../determinism/digest.js";
 import type { Transaction } from "./api.js";
+import { repeatedStatement } from "./repeated-statements.js";
 import type { SchemaPlan } from "./roles.js";
 
 /** The tables of `plan` whose changes are not captured: those declared `deterministic: false`, and the content-defined. */
@@ -206,10 +207,14 @@ export async function capturedTables(read: ConsistentRead): Promise<CapturedTabl
  */
 export async function tablesWithChanges(read: ConsistentRead, tables: readonly CapturedTable[]): Promise<CapturedTable[]> {
   if (tables.length === 0) return [];
+  // Repeated at every block, the same text while the captured tables stay: prepared on PostgreSQL
+  // (./repeated-statements.ts).
   const rows = await read.query(
-    tables
-      .map((table, i) => `SELECT ${i} AS i WHERE EXISTS (SELECT 1 FROM ${shadowOf(table)})`)
-      .join("\nUNION ALL\n"),
+    repeatedStatement(
+      tables
+        .map((table, i) => `SELECT ${i} AS i WHERE EXISTS (SELECT 1 FROM ${shadowOf(table)})`)
+        .join("\nUNION ALL\n"),
+    ),
   );
   const listed = new Set(rows.map((row) => Number(row.i)));
   return tables.filter((_, i) => listed.has(i));
@@ -233,14 +238,16 @@ export async function takeChanges(read: ConsistentRead, table: CapturedTable): P
   const first = table.columns[table.key[0] as number] as CaptureColumn;
   const join = table.key.map((i) => `t.${quoteIdentifier((table.columns[i] as CaptureColumn).name)} = d.c${i}`);
   const order = table.key.map((i) => keyOrderTerm(`o${i}`, (table.columns[i] as CaptureColumn).type));
+  // Repeated at every block that changed the table, the same text while its columns stay: prepared on PostgreSQL
+  // (./repeated-statements.ts).
   const rows = await read.query(
-    `WITH d AS (DELETE FROM ${shadow} RETURNING *)
+    repeatedStatement(`WITH d AS (DELETE FROM ${shadow} RETURNING *)
 SELECT * FROM (
   SELECT d.existed AS e, t.${quoteIdentifier(first.name)} IS NOT NULL AS p, ${[...old, ...now].join(", ")}
     FROM d LEFT JOIN ${target} AS t ON ${join.join(" AND ")}
    WHERE d.xact = pg_catalog.pg_current_xact_id()::text::bigint
 ) AS x
-ORDER BY ${order.join(", ")}`,
+ORDER BY ${order.join(", ")}`),
   );
   return rows.map((row) => ({
     before: row.e === true ? table.columns.map((_, i) => row[`o${i}`]) : null,

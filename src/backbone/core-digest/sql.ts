@@ -15,6 +15,7 @@
 
 import type { BlockWriteHandle } from "../../db/api.js";
 import { SHADOW_SCHEMA } from "../../db/change-capture.js";
+import { repeatedStatement } from "../../db/repeated-statements.js";
 
 /**
  * `core-digest`'s migrations: applied once, in order, and recorded under `core-digest`. They never change, since each
@@ -42,7 +43,8 @@ CREATE TABLE core_digest.checkpoints (
   },
 ]);
 
-const DIGESTS_SQL = `SELECT "schema", "table", digest FROM core_digest.tables`;
+/** The digest read, at every block: prepared on PostgreSQL (`../../db/repeated-statements.ts`). */
+const DIGESTS_SQL = repeatedStatement(`SELECT "schema", "table", digest FROM core_digest.tables`);
 
 const SET_DIGEST_SQL = `INSERT INTO core_digest.tables ("schema", "table", height, digest) VALUES ($1, $2, $3, $4)
   ON CONFLICT ("schema", "table") DO UPDATE SET height = EXCLUDED.height, digest = EXCLUDED.digest`;
