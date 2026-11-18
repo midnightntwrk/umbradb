@@ -141,7 +141,7 @@ describe("negative controls: a fault in the run computation", () => {
     const x = made("x");
     const r = made("r", [ref(x)]);
     const compute = async (unchecked?: RunCheck) => {
-      const reclaim = new RunReclaim({ first: 0n, last: 0n, on: true, ...(unchecked === undefined ? {} : { unchecked }) });
+      const reclaim = new RunReclaim({ first: 0n, on: true, ...(unchecked === undefined ? {} : { unchecked }) });
       reclaim.collect(0n, { inserts: [{ key: r.keyBytes, data: r.data, children: r.children }], rootCounts: [{ key: r.keyBytes, delta: 1 }] }, true);
       return reclaim.compute(runTables(NO_TABLES, new Map([[r.key, 1]])));
     };
@@ -160,7 +160,7 @@ describe("negative controls: a fault in the run computation", () => {
     const x = made("x");
     const [r1, r2] = [made("r1", [ref(x)]), made("r2", [ref(x)])];
     const late = async (fault?: RunFault) => {
-      const reclaim = new RunReclaim({ first: 1n, last: 2n, on: true, ...(fault === undefined ? {} : { fault }) });
+      const reclaim = new RunReclaim({ first: 1n, on: true, ...(fault === undefined ? {} : { fault }) });
       reclaim.collect(1n, { inserts: flushed(r1), rootCounts: raise(r1) }, true);
       reclaim.collect(2n, { inserts: flushed(x, r2), rootCounts: [...raise(r2), { key: r1.keyBytes, delta: -1 }] }, true);
       return outcomeOf(reclaim.compute(runTables(NO_TABLES, new Map([[r2.key, 1]]))));
@@ -173,7 +173,7 @@ describe("negative controls: a fault in the run computation", () => {
     const found = { rows: new Map([[r0.key, r0.children], [wReferencing.key, wReferencing.children], [c.key, c.children]]), refs: new Map([[wReferencing.key, 1]]), queue: new Set([c.key]) };
     const roots = new Map([[r0.key, 1], [s1.key, 1]]);
     const falls = async (fault?: RunFault) => {
-      const reclaim = new RunReclaim({ first: 1n, last: 2n, on: true, ...(fault === undefined ? {} : { fault }) });
+      const reclaim = new RunReclaim({ first: 1n, on: true, ...(fault === undefined ? {} : { fault }) });
       reclaim.collect(1n, { inserts: flushed(wEmbedding, s1), rootCounts: raise(s1) }, true);
       reclaim.collect(2n, { inserts: flushed(p), rootCounts: raise(p) }, true);
       return outcomeOf(reclaim.compute(runTables(found, new Map([...roots, [p.key, 1]]))));
@@ -302,7 +302,7 @@ describe("negative controls: a fault in the run computation", () => {
   it("gives every key back as its own bytes under a fault too", async () => {
     // The seams change what is computed, not how keys leave: a control's deleted keys are still plain keys.
     const blocks = madeBlocks([{ inserts: [c, wReferencing], persist: [wReferencing] }, { inserts: [], release: [wReferencing] }, { inserts: [] }]);
-    const reclaim = new RunReclaim({ first: 0n, last: 2n, on: true, fault: "first-round-only", unchecked: "unexpected-queued" });
+    const reclaim = new RunReclaim({ first: 0n, on: true, fault: "first-round-only", unchecked: "unexpected-queued" });
     for (const block of blocks) reclaim.collect(BigInt(block.height), { inserts: block.flushed.inserts.map(({ key, children }) => ({ key: Uint8Array.from(Buffer.from(key, "hex")), data: Uint8Array.of(7), children })), rootCounts: block.flushed.rootCounts.map(({ key, delta }) => ({ key: Uint8Array.from(Buffer.from(key, "hex")), delta })) }, true);
     const outcome = await reclaim.compute(runTables(NO_TABLES, (blocks[2] as ModelBlock).step.after.roots));
     // One round: the node goes, and the child only it referenced stays.

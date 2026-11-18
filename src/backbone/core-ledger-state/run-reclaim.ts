@@ -19,8 +19,10 @@
  * - its nodes join the run's nodes, the last child list written for a key winning; a node flushed again with the list
  *   the run holds changes nothing. Each list is kept with the block that flushed it, and a replaced one with its
  *   block too, for step 3;
- * - its root-count changes: which keys the run changed, and the last block's own changes; each key's first block
- *   that raised it, and each referenced key's first block that referenced it;
+ * - its root-count changes: which keys the run changed, and each key's latest change with its block, so that the
+ *   last block's own changes are known when the run is computed; each key's first block that raised it, and each
+ *   referenced key's first block that referenced it. The record is made with the run's first height only: the run is
+ *   the blocks handed over when it is computed, the last of them its last block;
  * - the flush rule: a node that is new, or that replaces a child list, must be reached from a key whose root count
  *   the block raises, through the block's own nodes, as the ledger package walks when it flushes
  *   (`unreached-node`). A node written again with the list already held may be anywhere.
@@ -353,17 +355,25 @@ interface KeyRecord {
   delta: number;
   /** The references the run's new nodes give it (a fault's). */
   fromNew: number;
-  /** The sum of its root-count changes in the run, and the last block's own. */
+  /**
+   * The sum of its root-count changes in the run; its latest change, with the block that made it; and the run's last
+   * block's own change, set when the run is computed (the record learns which block is the last only then).
+   */
   rootChange: number;
+  latestRootChange: { readonly at: bigint; readonly delta: number } | null;
   lastRootChange: number;
   /** Whether a block of the run changed its root count; and the first block that raised it, if one did. */
   touched: boolean;
   raisedAt: bigint | null;
   /** The first block that flushed a child list (new to the run, or another than the one it held) referencing it. */
   referencedAt: bigint | null;
-  /** Whether a list replaced by the last block, or by any block of the run, referenced it. */
+  /**
+   * Whether a list replaced by the run's last block (set when the run is computed), or by any block of the run,
+   * referenced it; and the latest block of the run that replaced a list the run held referencing it.
+   */
   droppedLast: boolean;
   dropped: boolean;
+  droppedAt: bigint | null;
   /** Whether `unreferenced` held it when the run began; undefined until a read says. */
   queued: boolean | undefined;
   deleted: boolean;
@@ -376,11 +386,10 @@ const inOrder = (records: Iterable<KeyRecord>): KeyRecord[] =>
 /** Each record once, in its first place. */
 const once = (records: readonly KeyRecord[]): readonly KeyRecord[] => [...new Set(records)];
 
-/** What a {@link RunReclaim} is made with. */
+/** What a {@link RunReclaim} is made with. Its last height is not among them: it is the last block handed over. */
 export interface RunReclaimOptions {
-  /** The run's first and last heights. */
+  /** The run's first height. */
   readonly first: bigint;
-  readonly last: bigint;
   /** The `core` entry's `sweep` at the run's heights: one setting for the whole run. */
   readonly on: boolean;
   /** The fault a negative control puts into the computation; none in a build. */
@@ -389,10 +398,13 @@ export interface RunReclaimOptions {
   readonly unchecked?: RunCheck;
 }
 
-/** One run's record and its computation (see the module comment). One is made per run and dropped with it. */
+/**
+ * One run's record and its computation (see the module comment). One is made per run and dropped with it. It is made
+ * with the run's first height; blocks are handed over one at a time, each the one after the block before, and the run
+ * is the blocks handed over when it is computed.
+ */
 export class RunReclaim {
   readonly first: bigint;
-  readonly last: bigint;
   readonly on: boolean;
   readonly #fault: RunFault | undefined;
   readonly #unchecked: RunCheck | undefined;
@@ -403,9 +415,7 @@ export class RunReclaim {
   #computed = false;
 
   constructor(options: RunReclaimOptions) {
-    if (options.last < options.first) throw new RangeError(`a run ends at or above its first height, not ${options.first} to ${options.last}`);
     this.first = options.first;
-    this.last = options.last;
     this.on = options.on;
     this.#fault = options.fault;
     this.#unchecked = options.unchecked;
@@ -422,11 +432,20 @@ export class RunReclaim {
     return this.#next;
   }
 
-  #invalid(reason: RunCheck, height: bigint, message: string, details: Record<string, unknown>): UmbraError {
+  /**
+   * The heights handed over: the run's first and the last block handed over, which is the run's last when it is
+   * computed. Undefined before the first block, so that a caller can check the record against a run it is given.
+   */
+  get heights(): { readonly first: bigint; readonly last: bigint } | undefined {
+    return this.#next === this.first ? undefined : { first: this.first, last: this.#next - 1n };
+  }
+
+  /** `ledger-refcount-invalid` at block `height` of the run that ends, so far, at block `last`. */
+  #invalid(reason: RunCheck, height: bigint, last: bigint, message: string, details: Record<string, unknown>): UmbraError {
     return new UmbraError(
       "ledger-refcount-invalid",
-      `the run ${this.first} to ${this.last}, at block ${height}: ${message} (${reason})`,
-      { reason, height, first: this.first, last: this.last, ...details },
+      `the run ${this.first} to ${last}, at block ${height}: ${message} (${reason})`,
+      { reason, height, first: this.first, last, ...details },
     );
   }
 
@@ -445,12 +464,14 @@ export class RunReclaim {
         delta: 0,
         fromNew: 0,
         rootChange: 0,
+        latestRootChange: null,
         lastRootChange: 0,
         touched: false,
         raisedAt: null,
         referencedAt: null,
         droppedLast: false,
         dropped: false,
+        droppedAt: null,
         queued: undefined,
         deleted: false,
       };
@@ -485,23 +506,21 @@ export class RunReclaim {
   }
 
   /**
-   * Block `height` hands over what the ledger package flushed for it, `flushed` (see the module comment): `on` is the
-   * `core` entry's `sweep` at the block, which must be the run's. Throws `ledger-refcount-invalid` (`unreached-node`)
-   * for a node that replaces a list the run holds and that no key the block raises reaches; a node the run did not
-   * hold is judged at the end, once the database says whether it is new.
+   * Block `height` hands over what the ledger package flushed for it, `flushed` (see the module comment): the block
+   * after the one before, from the run's first height (a `RangeError` otherwise). `on` is the `core` entry's `sweep`
+   * at the block, which must be the run's. Throws `ledger-refcount-invalid` (`unreached-node`) for a node that
+   * replaces a list the run holds and that no key the block raises reaches; a node the run did not hold is judged when
+   * the run is computed, once the database says whether it is new.
    */
   collect(height: bigint, flushed: NodeBatch, on: boolean): void {
-    if (this.#computed) throw new Error(`block ${height}: the run ${this.first} to ${this.last} is computed already`);
-    if (height !== this.#next || height > this.last) {
-      throw new Error(`block ${height}: the run ${this.first} to ${this.last} expects block ${this.#next > this.last ? "none" : this.#next}`);
-    }
+    if (this.#computed) throw new Error(`block ${height}: the run from block ${this.first} is computed already`);
+    if (height !== this.#next) throw new RangeError(`block ${height}: the run from block ${this.first} expects block ${this.#next}`);
     if (on !== this.on) {
       throw new Error(
-        `block ${height}: the run ${this.first} to ${this.last} ${this.on ? "sweeps" : "does not sweep"} and the block ` +
+        `block ${height}: the run from block ${this.first} ${this.on ? "sweeps" : "does not sweep"} and the block ` +
           `${on ? "does" : "does not"}: a run holds one setting of sweep`,
       );
     }
-    const last = height === this.last;
 
     // The block's nodes, each with its references. A list the run holds already is not read again.
     const own = new Map<KeyRecord, { readonly node: StoredNode; readonly refs: readonly KeyRecord[]; readonly same: boolean }>();
@@ -523,7 +542,7 @@ export class RunReclaim {
       if (delta === 0) continue;
       record.touched = true;
       record.rootChange += delta;
-      if (last) record.lastRootChange = delta;
+      record.latestRootChange = { at: height, delta };
       if (delta > 0) {
         record.raisedAt ??= height;
         rising.push(record);
@@ -557,6 +576,7 @@ export class RunReclaim {
         throw this.#invalid(
           "unreached-node",
           height,
+          height,
           `the block writes ${shown(record.text)} with another child list, and no key it persists reaches the node`,
           { key: shown(record.text) },
         );
@@ -565,7 +585,7 @@ export class RunReclaim {
       for (const ref of refs) ref.referencedAt ??= height;
       for (const ref of held.refs) {
         ref.dropped = true;
-        if (last) ref.droppedLast = true;
+        ref.droppedAt = height;
       }
       record.node = {
         key: node.key,
@@ -600,20 +620,23 @@ export class RunReclaim {
   /**
    * The node tables after the run's last block (see the module comment): `tables` are the node tables as the block
    * before the run left them and `root_counts` as the last block left it, read inside the run's transaction after the
-   * last block's own rows; `known` the keys known to be rows, if the caller has them.
-   * Every block of the run must have handed its own over. Throws `ledger-refcount-invalid` when a check fails, before
+   * last block's own rows; `known` the keys known to be rows, if the caller has them. The run is the blocks handed
+   * over, at least one; the last of them is its last block. Throws `ledger-refcount-invalid` when a check fails, before
    * anything is written.
    */
   async compute(tables: RunTables, known?: KnownKeys): Promise<RunOutcome> {
-    if (this.#computed) throw new Error(`the run ${this.first} to ${this.last} is computed already`);
-    if (this.#next !== this.last + 1n) {
-      throw new Error(`the run ${this.first} to ${this.last} is computed after its last block, and block ${this.#next} has not handed its own over`);
-    }
+    if (this.#computed) throw new Error(`the run from block ${this.first} is computed already`);
+    if (this.#next === this.first) throw new Error(`the run from block ${this.first} has no block handed over`);
     this.#computed = true;
     const fault = this.#fault;
     const unchecked = this.#unchecked;
-    const last = this.last;
+    const last = this.#next - 1n;
     const nodes = this.#nodes;
+    // The last block's own root-count changes, and the keys the lists it replaced in the run referenced.
+    for (const record of this.#records.values()) {
+      record.lastRootChange = record.latestRootChange?.at === last ? record.latestRootChange.delta : 0;
+      record.droppedLast = record.droppedAt === last;
+    }
     const nodeOf = (record: KeyRecord): RunNode => record.node as RunNode;
 
     // (1) The run's nodes against the database.
@@ -643,6 +666,7 @@ export class RunReclaim {
         throw this.#invalid(
           "unreached-node",
           unreached.at,
+          last,
           `the block writes ${shown(record.text)}, ${stored === undefined ? "a new node" : "with another child list than its row's"}, and no key it persists reaches the node`,
           { key: shown(record.text) },
         );
@@ -712,7 +736,7 @@ export class RunReclaim {
             : first.raisedAt !== null
               ? `the block persists ${shown(first.text)}, which is ${where}`
               : `a child list the block flushed references ${shown(first.text)}, which is ${where}`;
-        missing = { at, error: this.#invalid("missing-reference", at, message, { key: shown(first.text) }) };
+        missing = { at, error: this.#invalid("missing-reference", at, last, message, { key: shown(first.text) }) };
       }
     }
 
@@ -766,7 +790,7 @@ export class RunReclaim {
         for (const record of inOrder(lows.keys())) {
           const fell = (lows.get(record) as readonly { readonly at: bigint; readonly change: number }[]).find(({ change }) => (record.counts?.refs ?? 0) + change < 0);
           if (fell === undefined || (below !== null && below.at <= fell.at)) continue;
-          below = { at: fell.at, error: this.#invalid("negative-count", fell.at, `the reference count of ${shown(record.text)} would fall below 0`, { key: shown(record.text) }) };
+          below = { at: fell.at, error: this.#invalid("negative-count", fell.at, last, `the reference count of ${shown(record.text)} would fall below 0`, { key: shown(record.text) }) };
         }
       }
     }
@@ -863,7 +887,7 @@ export class RunReclaim {
     if (unchecked !== "negative-count") {
       for (const record of inOrder(all.filter((candidate) => candidate.delta !== 0))) {
         if (countAfter(record) < 0) {
-          throw this.#invalid("negative-count", last, `the reference count of ${shown(record.text)} would fall below 0`, { key: shown(record.text) });
+          throw this.#invalid("negative-count", last, last, `the reference count of ${shown(record.text)} would fall below 0`, { key: shown(record.text) });
         }
       }
     }
@@ -880,6 +904,7 @@ export class RunReclaim {
         if (!released && !record.droppedLast) {
           throw this.#invalid(
             "unexpected-queued",
+            last,
             last,
             `${shown(record.text)} is left stored with no reference and no root count, and the run's last block neither released it nor replaced a child list that referenced it`,
             { key: shown(record.text) },

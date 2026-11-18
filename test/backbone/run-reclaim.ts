@@ -415,7 +415,6 @@ export async function inRuns(blocks: readonly ModelBlock[], cut: InRuns, seen: S
     const where = `after ${last.height}, runs of ${cut.size}, ${cut.feed}`;
     const reclaim = new RunReclaim({
       first: BigInt(first.height),
-      last: BigInt(last.height),
       on: first.on,
       ...(cut.fault === undefined ? {} : { fault: cut.fault }),
       ...(cut.unchecked === undefined ? {} : { unchecked: cut.unchecked }),
@@ -483,7 +482,7 @@ export async function remadeAgainstModel(blocks: readonly ModelBlock[], size: nu
     for (;;) {
       const last = blocks[end] as ModelBlock;
       const where = `after ${last.height}, runs of ${size}`;
-      const reclaim = new RunReclaim({ first: BigInt(start), last: BigInt(end), on });
+      const reclaim = new RunReclaim({ first: BigInt(start), on });
       let outcome: RunOutcome;
       try {
         for (const block of blocks.slice(start, end + 1)) reclaim.collect(BigInt(block.height), flushOf(block.flushed), on);
@@ -546,7 +545,6 @@ export async function onItsOwn(script: HistoryScript, cut: Omit<InRuns, "feed">,
     const where = `after ${last}, runs of ${cut.size}`;
     const reclaim = new RunReclaim({
       first: BigInt(first),
-      last: BigInt(last),
       on,
       ...(cut.fault === undefined ? {} : { fault: cut.fault }),
       ...(cut.unchecked === undefined ? {} : { unchecked: cut.unchecked }),
