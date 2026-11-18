@@ -333,8 +333,14 @@ class Session {
   private readonly preparedTexts = new Set<string>();
   /** The texts it prepared before a schema change, or whose named execution without parameters failed: never again. */
   private readonly retiredTexts = new Set<string>();
-  /** The statements sent on this session and not yet settled (answered or failed, the schema-change count updated). */
+  /** The statements asked of this session and not yet settled (answered or failed, the schema-change count updated). */
   private unsettled = 0;
+  /**
+   * Settles when the named execution of a marked statement without parameters has: every statement asked of the
+   * session after that one waits for it before it is sent (`send`). Kept, settled, until no statement of the session
+   * is unsettled, so that a statement asked for while others still wait is sent after them.
+   */
+  private named: Promise<void> | undefined;
   private seenSchemaChanges = 0;
 
   /**
@@ -411,6 +417,19 @@ class Session {
    * server keeps for the session's life. Asked for beside others (a caller sending several at once on one handle), it
    * runs unnamed, in its place in the order. UmbraDB's own code awaits each statement on a handle before the next, so
    * its marked statements run named.
+   *
+   * While such a named execution is unanswered, nothing else is sent on the session: a statement asked for meanwhile
+   * waits for it, and the waiting ones are then sent in the order they were asked for. The driver answers some
+   * failures of a statement it holds prepared by sending it again under a new name, behind whatever was sent meanwhile
+   * (`retry`, `postgres` 3.4.9 `connection.js`: `cached plan must not change result type`, a statement the server no
+   * longer has). With nothing sent behind the first sending, the second follows the failure at once, inside the
+   * transaction the failure aborted (every statement of a handle runs inside a read's or the writer's transaction):
+   * the server refuses it and keeps no statement of it, and the driver reports the first failure, which retires the
+   * text here. A statement sent behind the first sending could end the aborted state (`ROLLBACK TO SAVEPOINT`); the
+   * second sending would then be answered after it, as a success, with rows the first never saw, and with a second
+   * statement kept on the server. A statement that waited is refused, not sent, when the session ended or was lost
+   * meanwhile: the driver would open a new connection for it, outside the transaction. Nothing waits behind a text
+   * with parameters: that path is as it was.
    */
   private async send(
     text: string,
@@ -419,47 +438,57 @@ class Session {
     script = false,
     marked = false,
   ): Promise<unknown> {
-    if (this.state === "ended") throw handleClosed("database");
-    if (this.state === "lost") {
-      throw new UmbraError("connection-lost", `the ${this.role} connection to PostgreSQL was lost`, {
-        connection: this.role,
-        cause: "lost-earlier",
-      });
-    }
     const alone = this.unsettled === 0;
     this.unsettled += 1;
-    let schemaChange = script;
+    let schemaChange = false;
+    let answered: (() => void) | undefined;
     try {
-      const prepare = !simple && (args.length > 0 || (alone && marked)) && this.prepares(text);
-      // `simple` is a runtime option of `unsafe` the driver's types do not declare (`postgres` 3.4.9 `index.js`).
-      const options = { simple, prepare } as unknown as postgres.UnsafeQueryOptions;
-      const sent = performance.now();
-      try {
-        const result = await this.sql.unsafe(text, args as string[], options).raw();
-        const command = (result as { command?: string }).command ?? "";
-        schemaChange ||= SCHEMA_CHANGE.test(command) || (this.role === "writer" && command === "ROLLBACK");
-        return result;
-      } catch (error) {
-        // After some failures of a named statement the driver drops it and would prepare the text again under a
-        // new name (`retry`, `postgres` 3.4.9 `connection.js`), the old one staying on the server. A marked text
-        // whose named execution failed is retired, so each such text leaves at most one statement on the server.
-        if (prepare && args.length === 0) {
-          this.preparedTexts.delete(text);
-          this.retiredTexts.add(text);
-        }
-        throw error;
-      } finally {
-        // Answered or failed (a timeout, a lost connection), the statement took this time of the session.
-        traceStatement(text, performance.now() - sent);
+      if (this.named !== undefined) await this.named;
+      if (this.state === "ended") throw handleClosed("database");
+      if (this.state === "lost") {
+        throw new UmbraError("connection-lost", `the ${this.role} connection to PostgreSQL was lost`, {
+          connection: this.role,
+          cause: "lost-earlier",
+        });
       }
-    } catch (error) {
-      if (this.ended) throw handleClosed("database");
-      const classified = classifyDriverError(error, this.role);
-      if (classified.code === "connection-lost") this.state = "lost";
-      throw classified;
+      schemaChange = script;
+      try {
+        const prepare = !simple && (args.length > 0 || (alone && marked)) && this.prepares(text);
+        const namedAlone = prepare && args.length === 0;
+        if (namedAlone) this.named = new Promise((resolve) => void (answered = resolve));
+        // `simple` is a runtime option of `unsafe` the driver's types do not declare (`postgres` 3.4.9 `index.js`).
+        const options = { simple, prepare } as unknown as postgres.UnsafeQueryOptions;
+        const sent = performance.now();
+        try {
+          const result = await this.sql.unsafe(text, args as string[], options).raw();
+          const command = (result as { command?: string }).command ?? "";
+          schemaChange ||= SCHEMA_CHANGE.test(command) || (this.role === "writer" && command === "ROLLBACK");
+          return result;
+        } catch (error) {
+          // A marked statement whose named execution failed is retired. The server may keep the statement that
+          // failed, and after some failures the driver forgets it (`retry`), so a later named execution would get a
+          // new name. Retired, the text is never named again on this session, and leaves at most one statement on
+          // the server.
+          if (namedAlone) {
+            this.preparedTexts.delete(text);
+            this.retiredTexts.add(text);
+          }
+          throw error;
+        } finally {
+          // Answered or failed (a timeout, a lost connection), the statement took this time of the session.
+          traceStatement(text, performance.now() - sent);
+        }
+      } catch (error) {
+        if (this.ended) throw handleClosed("database");
+        const classified = classifyDriverError(error, this.role);
+        if (classified.code === "connection-lost") this.state = "lost";
+        throw classified;
+      }
     } finally {
       if (schemaChange) this.schemaChanges.count += 1;
       this.unsettled -= 1;
+      answered?.();
+      if (this.unsettled === 0) this.named = undefined;
     }
   }
 

@@ -10,7 +10,9 @@ import { type PostgresTestServer, startPostgresServer } from "./postgres-server.
  * texts in its life. A text without parameters is prepared only where UmbraDB's own code hands it over marked as one
  * it repeats at every block (a `RepeatedStatement`, `src/db/repeated-statements.ts`), under the same bound and the
  * same rule for schema changes, and only when it is asked for with no other statement of the session unsettled; a
- * marked statement whose named execution failed is retired.
+ * marked statement whose named execution failed is retired. While a marked statement's named execution is unanswered,
+ * the session sends nothing else: what is asked for meanwhile waits, so the driver's second sending of a failed named
+ * statement is never answered after later statements.
  * Every text without parameters handed over as a string, one equal to a marked text among them, runs unnamed, under
  * the session's settings at each execution, as transaction control and `SET` do. A schema change on any session the
  * process opened to the database, through any pool, or a writer's rollback, retires the texts a session holds
@@ -243,6 +245,105 @@ describe("prepared statements on PostgreSQL (00033 F2)", () => {
       for (let i = 0; i < 3; i++) expect(await tx.query(statement)).toEqual([{ height: 1n }]);
       expect(await tx.query(RUNS_OF, [statement.text])).toEqual([{ runs: 3 }]);
     });
+    await db.close();
+  });
+
+  it("sends nothing behind a marked statement's named execution until it is answered: a failure reaches the caller before a rollback to a savepoint and an update asked for with it run", async () => {
+    const created = await server.createDatabase();
+    await created.exec(SCHEMA);
+    const db = created.open({ committedHeight, readConnections: 1 });
+    const statement = marked("SELECT * FROM t.rows ORDER BY height");
+    for (let i = 0; i < 2; i++) await db.transaction((tx) => tx.query(statement));
+    // A change of the table's columns the process does not see (another client's): the writer's statement is stale.
+    // The driver answers that failure of a named statement by sending the text again under a new name.
+    await created.exec("ALTER TABLE t.rows ADD COLUMN extra integer NOT NULL DEFAULT 7");
+    const order: string[] = [];
+    const noted = <T>(label: string, running: Promise<T>): Promise<T> =>
+      running.finally(() => void order.push(label));
+    const onWriter = await db.transaction(async (tx) => {
+      await tx.execute("SAVEPOINT s");
+      const settled = await Promise.allSettled([
+        noted("read", tx.query(statement)),
+        noted("rollback", tx.execute("ROLLBACK TO SAVEPOINT s")),
+        noted("update", tx.execute("UPDATE t.rows SET label = 'two'")),
+        noted("label", tx.query("SELECT label FROM t.rows")),
+      ]);
+      return { settled, statements: await tx.query(RUNS_OF, [statement.text]) };
+    });
+    // The read's failure is its answer, not rows read after the update; the others ran after it, in their order.
+    expect(onWriter.settled).toEqual([
+      { status: "rejected", reason: expect.objectContaining({ code: "database-error" }) },
+      { status: "fulfilled", value: 0 },
+      { status: "fulfilled", value: 1 },
+      { status: "fulfilled", value: [{ label: "two" }] },
+    ]);
+    expect((onWriter.settled[0] as PromiseRejectedResult).reason).toMatchObject({
+      message: expect.stringMatching(/cached plan must not change result type/),
+    });
+    expect(order).toEqual(["read", "rollback", "update", "label"]);
+    // The server keeps the one statement the session prepared, which ran twice; the text runs unnamed from here on.
+    expect(onWriter.statements).toEqual([{ runs: 2 }]);
+    const later = await db.transaction(async (tx) => ({
+      rows: await tx.query(statement),
+      statements: await tx.query(RUNS_OF, [statement.text]),
+    }));
+    expect(later).toEqual({ rows: [{ height: 1n, label: "two", extra: 7 }], statements: [{ runs: 2 }] });
+    await db.close();
+  });
+
+  it("retires a marked statement on a read's session by its failed named execution alone, a rollback to a savepoint asked for with it: further changes of the columns leave one statement on the server", async () => {
+    const created = await server.createDatabase();
+    await created.exec(SCHEMA);
+    const db = created.open({ committedHeight, readConnections: 1 });
+    const statement = marked("SELECT * FROM t.rows ORDER BY height");
+    for (let i = 0; i < 2; i++) await db.read((read) => read.query(statement));
+    // A read's rollbacks count no schema change, and the changes are another client's: only the failure retires.
+    const columns: Record<string, unknown> = { height: 1n, label: "one" };
+    for (let round = 0; round < 3; round++) {
+      await created.exec(`ALTER TABLE t.rows ADD COLUMN c${round} integer NOT NULL DEFAULT ${round}`);
+      columns[`c${round}`] = round;
+      const [read, rollback] = await db.read(async (read) => {
+        await read.query("SAVEPOINT s");
+        return Promise.allSettled([read.query(statement), read.query("ROLLBACK TO SAVEPOINT s")]);
+      });
+      if (round === 0) {
+        expect(read).toMatchObject({
+          status: "rejected",
+          reason: { message: expect.stringMatching(/cached plan must not change result type/) },
+        });
+      } else {
+        expect(read).toEqual({ status: "fulfilled", value: [columns] });
+      }
+      expect(rollback).toEqual({ status: "fulfilled", value: [] });
+      expect(await db.read((reading) => reading.query(RUNS_OF, [statement.text]))).toEqual([{ runs: 2 }]);
+    }
+    await db.close();
+  });
+
+  it("refuses a statement that waited behind a marked statement's named execution when that execution lost the session: nothing of it is sent on a new one", async () => {
+    const created = await server.createDatabase();
+    await created.exec(SCHEMA);
+    const db = created.open({ committedHeight, readConnections: 1 });
+    const slow = marked("SELECT pg_catalog.pg_sleep(60)");
+    let settled: PromiseSettledResult<unknown>[] = [];
+    const transaction = await outcome(
+      db.transaction(async (tx) => {
+        const [session] = await tx.query("SELECT pg_backend_pid() AS pid");
+        const sent = Promise.allSettled([tx.query(slow), tx.execute("INSERT INTO t.rows VALUES (2, 'two')")]);
+        await created.terminate(session?.pid as number);
+        settled = await sent;
+      }),
+    );
+    expect(transaction).toMatchObject({ code: "connection-lost" });
+    expect(settled).toEqual([
+      { status: "rejected", reason: expect.objectContaining({ code: "connection-lost" }) },
+      {
+        status: "rejected",
+        reason: expect.objectContaining({ code: "connection-lost", details: expect.objectContaining({ cause: "lost-earlier" }) }),
+      },
+    ]);
+    // Sent after the loss, the driver would have run the insert on a new connection, outside any transaction.
+    expect(await db.read((read) => read.query("SELECT height FROM t.rows ORDER BY height"))).toEqual([{ height: 1n }]);
     await db.close();
   });
 
@@ -539,6 +640,33 @@ describe("prepared statements on PostgreSQL (00033 F2)", () => {
     expect(runs).toBe(3);
     const entry = (JSON.parse(totals) as { q: string; n: number; ms: number }[]).find((total) => total.q === text.text);
     expect(entry?.n).toBe(5);
+    expect(entry?.ms).toBeGreaterThan(0);
+    await db.close();
+  });
+
+  it("counts a marked statement's failed named execution once in the trace's statements, with its time", async () => {
+    const created = await server.createDatabase();
+    await created.exec(SCHEMA);
+    const db = created.open({ committedHeight, readConnections: 1 });
+    const statement = marked("SELECT * FROM t.rows ORDER BY label");
+    let totals = "[]";
+    startTrace({ blocks: () => undefined, statements: (json) => void (totals = json), worker: () => undefined });
+    let failed: unknown;
+    try {
+      for (let i = 0; i < 2; i++) await db.transaction((tx) => tx.query(statement));
+      // Another client's change of the columns: the named execution fails, and the driver's second sending with it.
+      await created.exec("ALTER TABLE t.rows ADD COLUMN extra integer NOT NULL DEFAULT 7");
+      failed = await outcome(db.transaction((tx) => tx.query(statement)));
+      // Retired, the text runs unnamed.
+      expect(await db.transaction((tx) => tx.query(statement))).toEqual([{ height: 1n, label: "one", extra: 7 }]);
+    } finally {
+      stopTrace();
+    }
+    expect(failed).toMatchObject({ message: expect.stringMatching(/cached plan must not change result type/) });
+    const entry = (JSON.parse(totals) as { q: string; n: number; ms: number }[]).find(
+      (total) => total.q === statement.text,
+    );
+    expect(entry?.n).toBe(4);
     expect(entry?.ms).toBeGreaterThan(0);
     await db.close();
   });
