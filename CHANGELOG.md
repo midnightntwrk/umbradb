@@ -234,10 +234,11 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   otherwise: at a process's first block, at a block made again after a failure, and after a `COMMIT` whose answer was
   lost, so a height another writer committed meanwhile is never taken from memory. The keys a block deletes leave
   them, and they are emptied when `on-settle` fails. At most 500,000 keys (32.9 MiB of heap at that bound, measured):
-  a key that would pass the bound empties them first. A node row deleted by hand while the process runs is not seen
-  until a block does not continue the one before. In the block trace, `missing` holds only the keys asked of the
-  database, and `knownHits` and `knownEmptied` are new (`knownEmptied` is also set at a process's first height); the
-  operator guide lists them.
+  a key that would pass the bound empties them first. A node row deleted by hand while the process runs is seen at
+  once if its key is not remembered; if it is, the deletion goes unseen while the key stays remembered, until a block
+  that does not continue the one before, or the bound, empties the remembered keys. In the block trace, `missing`
+  holds only the keys asked of the database, and `knownHits` and `knownEmptied` are new (`knownEmptied` is also set
+  at a process's first height); the operator guide lists them.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 
