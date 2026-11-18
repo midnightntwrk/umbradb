@@ -626,6 +626,13 @@ protected). This is the guarantee the per-block step gave its eviction before th
 (`engine.ts`'s module comment on evictions); the eviction is now sent inside the transaction, after the block's
 writes, with the worker in the same two states.
 
+A height made again is the one case with a third state. When h's transaction fails after its settle sent h + 1's apply
+ahead, h is made again, and its settle sends h's eviction again while the engine may hold the state after h + 1,
+pending, made after the first attempt's eviction. The computation runs on the tables the rollback restored and on h's
+pending result, so it deletes the keys the first attempt named. The state after h + 1 may reach one of them (a node h
+deletes and h + 1 brings back, which h + 1's batch then holds): the package forgets it again or refuses, and
+`docs/research/apply-ahead.md`, section 3, says what follows in each case.
+
 The eviction is awaited: the refusal must be known, and the thread replaced, before the block commits. The apply ahead
 of h + 1, sent after it, is then failed by the restart, and h + 1 is applied at its turn in the new thread. While the
 eviction is awaited the worker is not idle. The source may have sent it later blocks' parses at their `on-parse`, given no read, and it
