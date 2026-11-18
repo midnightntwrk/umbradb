@@ -248,6 +248,23 @@ describe("prepared statements on PostgreSQL (00033 F2)", () => {
     await db.close();
   });
 
+  it("prepares a marked statement after a schema change when the session ran it only unnamed before: it holds no statement of it to go stale", async () => {
+    const { db } = await database();
+    const statement = marked("SELECT * FROM t.rows ORDER BY height DESC");
+    await db.transaction(async (tx) => {
+      // Asked for beside another statement, it runs unnamed.
+      const [, rows] = await Promise.all([tx.query("SELECT 1 AS one"), tx.query(statement)]);
+      expect(rows).toEqual([{ height: 1n, label: "one" }]);
+      expect(await tx.query(RUNS_OF, [statement.text])).toEqual([]);
+    });
+    await db.transaction((tx) => tx.execute("ALTER TABLE t.rows ADD COLUMN extra integer NOT NULL DEFAULT 7"));
+    await db.transaction(async (tx) => {
+      for (let i = 0; i < 2; i++) expect(await tx.query(statement)).toEqual([{ height: 1n, label: "one", extra: 7 }]);
+      expect(await tx.query(RUNS_OF, [statement.text])).toEqual([{ runs: 2 }]);
+    });
+    await db.close();
+  });
+
   it("sends nothing behind a marked statement's named execution until it is answered: a failure reaches the caller before a rollback to a savepoint and an update asked for with it run", async () => {
     const created = await server.createDatabase();
     await created.exec(SCHEMA);

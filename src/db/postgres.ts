@@ -260,12 +260,13 @@ const PREPARED_TEXTS = 256;
  * Counts the statements that may change a table's columns (DDL) on any session this process opened to one database,
  * through any pool: a session reuses only the texts it prepared since the last one. PostgreSQL re-plans a prepared
  * statement after DDL, but refuses one whose result columns changed (`cached plan must not change result type`), which
- * aborts the transaction it runs in; the driver's retry cannot recover that. A text prepared before such DDL is never
- * prepared again on that session, since the driver would reuse its stale entry: it runs unprepared, as without
- * preparing. A writer's `ROLLBACK` counts too, since the DDL it undoes changes the columns back. Schema changes come
- * from the writer's migrations at startup, under the writer lock. A private process's pool on its public database,
- * which the public process migrates unseen, prepares nothing, nor does the transport's pool, which runs the SQL
- * private clients send (`preparedStatements: false`).
+ * aborts the transaction it runs in; the driver's retry cannot recover that. A text a session holds prepared when such
+ * DDL is counted is never prepared again on that session, since the driver would reuse its stale entry: it runs
+ * unprepared, as without preparing. A text the session never prepared before the DDL (one it ran only unnamed) has no
+ * statement to go stale, and may be prepared after it. A writer's `ROLLBACK` counts too, since the DDL it undoes
+ * changes the columns back. Schema changes come from the writer's migrations at startup, under the writer lock. A
+ * private process's pool on its public database, which the public process migrates unseen, prepares nothing, nor does
+ * the transport's pool, which runs the SQL private clients send (`preparedStatements: false`).
  */
 interface SchemaChanges {
   count: number;
