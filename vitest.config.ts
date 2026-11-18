@@ -66,6 +66,9 @@ const CORE_ARCH = {
   "**/src/deterministic-postgresql/errors.ts": { lines: 95, branches: 91, perFile: true },
 } as const;
 
+// Set by `conformance-gate.mjs --shard`. A shard's coverage is partial, so floors are checked only after the merge.
+const coverageShard = process.env.UMBRADB_COVERAGE_SHARD === "1";
+
 export default defineConfig({
   test: {
     // TransactionHistory's source and tests are kept in `legacy/transaction-history/`, outside the build, the package
@@ -125,9 +128,9 @@ export default defineConfig({
         // match anywhere would otherwise take `browser/src/` in, held to `src/**`'s floors by its Node.js tests alone.
         "browser/**",
       ],
-      reporter: ["text", "json-summary", "html"],
+      reporter: coverageShard ? ["text-summary"] : ["text", "json-summary", "html"],
       reportsDirectory: "./coverage",
-      thresholds: {
+      thresholds: coverageShard ? undefined : {
         // Repo-wide floor, checked PER FILE (`perFile: true`). Applies to every included file no glob of CORE_ARCH
         // matches.
         perFile: true,

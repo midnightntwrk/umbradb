@@ -11,6 +11,8 @@ test/integration/soak/artifacts/
 # v1.0.0-recovery-testing Task 7: coverage gate runtime outputs (not source)
 coverage/
 .conformance-report.json
+# Sharded runs' blob reports
+.vitest-reports/
 reports/
 
 # Build output (declaration + JS emitted by `npm run build`; never committed)
