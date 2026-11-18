@@ -9,6 +9,7 @@ import type { LedgerHost } from "../../src/ledger/worker/host.js";
 import { LAST } from "../ledger/fixtures/sweep-fixture.js";
 import { buildContentsHash, byteHashedTables, dagOptedOut, type ReadableDatabase } from "../backbone/refcount-contents.js";
 import { type DagRun, runDag, runProblems } from "../backbone/refcount-process.js";
+import { PATIENCE_MS } from "../backbone/ingest-harness.js";
 import { BACKUP_BACKENDS, type BackupBackend } from "../backup/backup-fixtures.js";
 import { fileTraceSink } from "../../src/trace/file-sink.js";
 import { startTrace, stopTrace, type TraceSink } from "../../src/trace/trace.js";
@@ -270,6 +271,37 @@ describe("the block trace through the process, on PostgreSQL", () => {
     expect(statements.some((statement) => statement.q.includes("core_ledger_state.ref_counts"))).toBe(true);
     expect(first.reduce((sum, line) => sum + ((line.sqlN as number | undefined) ?? 0), 0)).toBeLessThanOrEqual(statements.reduce((sum, statement) => sum + statement.n, 0));
   }, 600_000);
+
+  it("a traced process with chunks of 7: a line per height, each with its chunk, the same sh and database as the mode off", async () => {
+    const traces = [memorySink(), memorySink()];
+    const databases = [];
+    for (const [index, trace] of traces.entries()) {
+      startTrace(trace.sink);
+      const db = await postgres.database();
+      const run = await runDag(db, { dag: "extended", settings: index === 0 ? {} : { fastSync: { blocks: 7, distance: 0 } } });
+      stopTrace();
+      expect(run.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
+      expect(runProblems(run, "extended")).toEqual([]);
+      databases.push(await databaseOf(db));
+    }
+    expect(databases[1]).toEqual(databases[0]);
+    const [off, on] = traces.map((trace) => trace.blocks()) as [Record<string, unknown>[], Record<string, unknown>[]];
+    expect(on.map((line) => line.h)).toEqual(Array.from({ length: LAST + 1 }, (_, h) => h));
+    expect(on.map((line) => line.sh)).toEqual(off.map((line) => line.sh));
+    // Chunks of 7 from 0: 0..6, …, 91..97, then 98..100. Each line names its chunk; the COMMIT is the last line's.
+    for (const line of on) {
+      const h = line.h as number;
+      const first = h - (h % 7);
+      const last = Math.min(first + 6, LAST);
+      expect(line.chunk, `chunk at ${h}`).toEqual([first, last]);
+      // The run's first line also holds the startup's statements, its COMMITs among them.
+      if (h === last) expect(line.commitMs, `commitMs at ${h}`).toBeGreaterThanOrEqual(0);
+      else if (h !== 0) expect(line, `commitMs at ${h}`).not.toHaveProperty("commitMs");
+      if (h === first) expect(line.beginMs, `beginMs at ${h}`).toBeGreaterThanOrEqual(0);
+      else expect(line, `beginMs at ${h}`).not.toHaveProperty("beginMs");
+      for (const stage of ["prepareMs", "applyMs", "stepMs", "txMs"]) expect(line[stage], `${stage} at ${h}`).toBeGreaterThanOrEqual(0);
+    }
+  }, PATIENCE_MS * 3);
 
   it("a worker that reads stored nodes: the waits its lines record are the bridge's requests, and the bench's reader reads the run's files", async () => {
     const directory = mkdtempSync(join(tmpdir(), "umbradb-worker-time-"));

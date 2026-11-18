@@ -860,7 +860,7 @@ export class FinalizedLoop {
     const chunk = this.#chunkOpen;
     if (chunk === undefined || !chunk.open) return this.input.db.read(body);
     return chunk.turns.run(() =>
-      chunk.open && chunk.tx !== undefined ? readView(chunk.tx, { height: chunk.height }, body) : this.input.db.read(body),
+      chunk.open && chunk.tx !== undefined ? this.openView(chunk.tx, chunk.height, body) : this.input.db.read(body),
     );
   }
 
@@ -1581,7 +1581,7 @@ export class FinalizedLoop {
               chunk.height = run.height;
               // The block's own part of the transaction, the first's with the BEGIN; its line is held for the COMMIT.
               traceAdd("txMs", performance.now() - writeFrom);
-              traceHoldBlock();
+              this.holdTrace(run);
               // The planned end, the loop's signal, or a pause hold: the chunk commits here.
               if (run.height >= last || this.#signal.aborted || this.pauseHeld()) break;
               run = await this.#begin(run.height + 1n, run.block);
@@ -1698,6 +1698,14 @@ export class FinalizedLoop {
     chunk.endTurn?.();
     chunk.asked.resolve();
     return chunk.committed.promise;
+  }
+
+  /**
+   * Holds the trace record of `run`, a block of a chunk whose writes ended, until the chunk's `COMMIT` (see the module
+   * comment). A negative control's seam.
+   */
+  protected holdTrace(_run: HeightRun): void {
+    traceHoldBlock();
   }
 
   /**
@@ -1927,8 +1935,9 @@ export class FinalizedLoop {
   }
 
   /**
-   * Runs `body` with a read-only view of the chunk's transaction `tx` reporting `height` (`../db/read-view.ts`): what
-   * a later block's `on-compute` callback reads through. A negative control's seam.
+   * Runs `body` with a read-only view of the chunk's transaction `tx` reporting `height` (`../db/read-view.ts`): every
+   * view of a chunk's transaction opens here, a later block's `on-compute` callback's ({@link #lazyRead}, whose handle
+   * every statement of the callback goes through) and {@link read}'s. A negative control's seam.
    */
   protected openView<T>(tx: Transaction, height: bigint | null, body: (read: ReadHandle) => Promise<T>): Promise<T> {
     return readView(tx, { height }, body);

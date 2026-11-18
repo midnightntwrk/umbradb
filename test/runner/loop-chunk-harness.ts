@@ -4,7 +4,7 @@ import type { BlockWriteHandle, Database, ReadHandle, Transaction } from "../../
 import type { BlockContext, BlockRun, ModuleDeclaration, ProcessContext } from "../../src/modules/declaration.js";
 import type { BlockSource, QueueRunner } from "../../src/runner/block-source.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
-import { FinalizedLoop, type LoopInput } from "../../src/runner/loop.js";
+import { FinalizedLoop, type LoopInput, type LoopObserver } from "../../src/runner/loop.js";
 import type { LoopPause } from "../../src/runner/pause.js";
 import type { EntryRange } from "../../src/modules/graph.js";
 import type { TransactionFollower } from "../../src/runner/transaction-follower.js";
@@ -216,6 +216,10 @@ export interface ChunkRunOptions {
   readonly controller?: AbortController;
   /** Told the run's database once it is open, before the loop runs. */
   readonly onDatabase?: (db: Database) => void;
+  /** The loop's observer. */
+  readonly observer?: LoopObserver;
+  /** The loop's slow-window threshold. */
+  readonly slowBlockMs?: number;
 }
 
 /** Runs `r` (and `options.modules`) over heights 1 to `options.head` on a new database of `backend`, until the loop waits. */
@@ -243,6 +247,8 @@ export async function runChunks(backend: RunnerBackend, options: ChunkRunOptions
     ...(options.follower === undefined ? {} : { follower: options.follower }),
     ...(options.pause === undefined ? {} : { pause: options.pause }),
     ...(options.coreStop === undefined ? {} : { coreStop: options.coreStop }),
+    ...(options.observer === undefined ? {} : { observer: options.observer }),
+    ...(options.slowBlockMs === undefined ? {} : { slowBlockMs: options.slowBlockMs }),
   });
   const running = loop.run();
   try {

@@ -3,6 +3,7 @@ import type { ReadHandle, Transaction } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
 import type { BlockContext, ModuleDeclaration } from "../../src/modules/declaration.js";
 import { FinalizedLoop, type HeightRun } from "../../src/runner/loop.js";
+import { startTrace, stopTrace, traceEndBlock } from "../../src/trace/trace.js";
 import { declaration } from "../modules/declarations.js";
 import { LoopPauses, type PauseHold } from "../../src/runner/pause.js";
 import { CHECKED_BACKBONE, marking, runChunks } from "./loop-chunk-harness.js";
@@ -19,13 +20,22 @@ import { entry } from "../modules/graph-fixtures.js";
  *   `block-continues.negative-control.test.ts`'s): a module that keeps the block before and trusts `continues` finds
  *   its kept value differs from the database's;
  * - a pause hold not read inside a chunk: a hold asked during block 3's writes is reached only at the chunk's planned
- *   end, 7, not at 3.
+ *   end, 7, not at 3;
+ * - a block's trace line written when its writes end, not held for the `COMMIT`: a chunk that rolls back leaves lines,
+ *   and the blocks stored again have a second line each.
  */
 
 /** The transaction itself as a later block's read. */
 class NoView extends FinalizedLoop {
   protected override openView<T>(tx: Transaction, height: bigint | null, body: (read: ReadHandle) => Promise<T>): Promise<T> {
     return body({ height, query: (sql, params) => tx.query(sql, params) });
+  }
+}
+
+/** A block's trace line written when its writes end. */
+class WritesLinesEarly extends FinalizedLoop {
+  protected override holdTrace(run: HeightRun): void {
+    traceEndBlock(run.height);
   }
 }
 
@@ -66,6 +76,21 @@ function trusting(failAt: bigint): ModuleDeclaration {
           failed = true;
           throw new UmbraError("connection-lost", "the connection was lost (the test's module)");
         }
+      },
+    },
+  });
+}
+
+/** Module `once`: at `on-db-write` of `at`, after its write, fails once (not retryable). */
+function failingOnce(at: bigint): ModuleDeclaration {
+  let failed = false;
+  return declaration("once", {
+    points: {
+      async "on-db-write"(_p, b: BlockContext, w) {
+        await w.execute("INSERT INTO once.rows (height) VALUES ($1)", [b.height]);
+        if (b.height !== at || failed) return;
+        failed = true;
+        throw new Error(`once failed at ${b.height}`);
       },
     },
   });
@@ -172,5 +197,24 @@ describe.each(RUNNER_BACKENDS)("the negative controls of chunks on $name", (back
     };
     expect(await reachedAt(FinalizedLoop)).toBe(3n);
     expect(await reachedAt(IgnoresHold)).toBe(7n);
+  }, 120_000);
+
+  it("a trace line written when a block's writes end: a chunk that rolls back leaves lines", async () => {
+    /** The heights of the trace's lines of a run whose block 8 fails in its writes, chunks of 5 to 10, with `Loop`. */
+    const lines = async (Loop: typeof FinalizedLoop): Promise<number[]> => {
+      const texts: string[] = [];
+      startTrace({ blocks: (text) => void texts.push(text), statements: () => undefined, worker: () => undefined });
+      try {
+        await run(Loop, [failingOnce(8n)], 10n, 5);
+      } finally {
+        stopTrace();
+      }
+      return texts.flatMap((text) => text.trimEnd().split("\n")).map((line) => (JSON.parse(line) as { h: number }).h);
+    };
+    // 8 fails once: the loop runs again after it (this file's runs), and 8 passes alone.
+    expect(await lines(FinalizedLoop)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    // Each block's line at its writes' end, and an empty one after its commit; the rolled-back chunk's 6 and 7 have
+    // lines before those of 6 and 7 stored again.
+    expect(await lines(WritesLinesEarly)).toEqual([1, 2, 3, 4, 5, 1, 2, 3, 4, 5, 6, 7, 6, 7, 8, 9, 10, 9, 10]);
   }, 120_000);
 });
