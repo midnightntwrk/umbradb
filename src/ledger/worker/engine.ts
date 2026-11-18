@@ -27,10 +27,23 @@
  * ledger and with the committed block as its parent, and refuses anything else, naming what it holds.
  *
  * The same block applied again while pending (a height whose transaction was lost and is processed again, or a block
- * applied ahead asked for again) gets the same result back, batch included, marked ahead or not. The database rolled
- * back, or never held the batch, so it still has to be written; and the package's memory already counts the batch's
- * nodes as stored, so a second apply would flush none of them. An apply that is not marked ahead and names another
- * block drops every pending state.
+ * applied ahead asked for again) gets the same result back, batch included, marked ahead or not, when it is asked for
+ * with the input it was applied from: each pending state keeps a copy of that input, and every member is compared, the
+ * `ahead` mark apart ({@link sameInput}). The database rolled back, or never held the batch, so it still has to be
+ * written; and the package's memory already counts the batch's nodes as stored, so a second apply would flush none of
+ * them. For the same reason a pending block asked for with another input is refused with {@link ApplyNeedsNewThread}:
+ * this thread can give neither the pending result (it is another input's) nor a new one. An apply that is not marked
+ * ahead and names another block drops every pending state.
+ *
+ * **An apply that failed after its state was made.** Once the adapter has returned a block's new state, the engine
+ * persists the state's key, reads and persists the contracts' keys, releases the keys the block names and flushes
+ * ({@link LedgerEngine}'s `#settled`). A failure there leaves the package with a part of that work: a key persisted and
+ * not flushed is counted again by the next flush, which would then give a root count of 2 where one apply gives 1. So
+ * after such a failure the engine applies no block: every later apply, and block 0's, is refused with
+ * {@link ApplyNeedsNewThread}, while a pending block asked for again with its input still gets its result. A failure
+ * before that (a block the engine refuses, a missing parse, the adapter's own apply throwing) changes nothing a flush
+ * writes, and the engine goes on. The main thread answers {@link ApplyNeedsNewThread} by ending this thread and applying
+ * the block in a new one, from the state the database stores (`core-ledger-state`).
  *
  * **A block applied ahead** ({@link ApplyBlock.ahead}). While the main thread runs block h's transaction,
  * `core-ledger-state` has the worker apply h + 1 once h's eviction has been sent
@@ -140,6 +153,24 @@ export class EvictionRefused extends Error {
     this.name = EVICTION_REFUSED;
   }
 }
+
+/** The name of {@link ApplyNeedsNewThread}, which an error keeps when it crosses from the worker. */
+export const APPLY_NEEDS_NEW_THREAD = "ApplyNeedsNewThread";
+
+/**
+ * This thread cannot apply the block (see the module comment): it holds the block pending, applied from another input,
+ * or an earlier apply failed after its state was made. The main thread ends the thread and applies the block in a new
+ * one.
+ */
+export class ApplyNeedsNewThread extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = APPLY_NEEDS_NEW_THREAD;
+  }
+}
+
+/** Whether `error` is an {@link ApplyNeedsNewThread}, here or as it crossed from the worker (its name kept). */
+export const isApplyNeedsNewThread = (error: unknown): boolean => error instanceof Error && error.name === APPLY_NEEDS_NEW_THREAD;
 
 /** The name of {@link LedgerTaskFailed}, which an error keeps when it crosses from the worker. */
 export const LEDGER_TASK_FAILED = "LedgerTaskFailed";
@@ -287,6 +318,16 @@ export interface EngineOptions {
    * negative control's).
    */
   readonly checkPlainData?: boolean;
+  /**
+   * Whether a pending block asked for again gets its result only for the input it was applied from; true (false: a
+   * negative control's, which gives the result back for any input).
+   */
+  readonly checkSameInput?: boolean;
+  /**
+   * Whether the engine applies no block after an apply failed once its state was made; true (false: a negative
+   * control's, which goes on in the same package).
+   */
+  readonly refuseAfterFailedApply?: boolean;
 }
 
 /** A state the engine holds, with the block it is after. */
@@ -325,6 +366,59 @@ const sameBytes = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.leng
 const same = (a: BlockId, b: BlockId): boolean => a.height === b.height && sameBytes(a.hash, b.hash);
 const idOf = (block: BlockId): BlockId => Object.freeze({ height: block.height, hash: block.hash });
 
+/** Whether two plain values (what an apply's input holds) are equal: bytes by content, arrays and objects by member. */
+function plainEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a instanceof Uint8Array || b instanceof Uint8Array) {
+    return a instanceof Uint8Array && b instanceof Uint8Array && a.length === b.length && a.every((byte, i) => byte === b[i]);
+  }
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((item, i) => plainEqual(item, b[i]));
+  }
+  if (a === null || b === null || typeof a !== "object" || typeof b !== "object") return false;
+  const left = Object.entries(a).filter(([, value]) => value !== undefined);
+  const right = new Map(Object.entries(b).filter(([, value]) => value !== undefined));
+  return left.length === right.size && left.every(([key, value]) => right.has(key) && plainEqual(value, right.get(key)));
+}
+
+/**
+ * A copy of the plain value `value`: each byte string copied to a buffer of its own length (a view into a larger buffer
+ * keeps none of it), arrays and objects member by member.
+ */
+function ownedCopy(value: unknown): unknown {
+  if (value instanceof Uint8Array) return Uint8Array.from(value);
+  if (Array.isArray(value)) return value.map(ownedCopy);
+  if (value !== null && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, member]) => [key, ownedCopy(member)]));
+  return value;
+}
+
+/** An apply's input: a block's after 0, or block 0's. */
+type BlockInput = ApplyBlock | GenesisBlock;
+
+/**
+ * The members in which `a` and `b`, two inputs of an apply, differ, the `ahead` mark apart: bytes compared by content,
+ * lists member by member in their order, an absent member equal to an undefined one only.
+ */
+export function inputDifferences(a: BlockInput, b: BlockInput): string[] {
+  const left = a as unknown as Record<string, unknown>;
+  const right = b as unknown as Record<string, unknown>;
+  return [...new Set([...Object.keys(left), ...Object.keys(right)])].filter((name) => name !== "ahead" && !plainEqual(left[name], right[name])).sort();
+}
+
+/** Whether `a` and `b` are the same input of an apply, the `ahead` mark apart ({@link inputDifferences}). */
+export function sameInput(a: BlockInput, b: BlockInput): boolean {
+  return inputDifferences(a, b).length === 0;
+}
+
+/**
+ * `input` without an `ahead` mark, as a copy that owns every byte string it holds: the buffers it was built from are
+ * the caller's, which may change them later.
+ */
+export function ownedInput<T extends BlockInput>(input: T): T {
+  const { ahead: _mark, ...rest } = input as T & { readonly ahead?: boolean };
+  return ownedCopy(rest) as T;
+}
+
 /** Block 0's keys: nothing released, no contract. */
 const NO_KEYS: Keys = Object.freeze({ release: [], contracts: [] });
 
@@ -347,19 +441,28 @@ export class LedgerEngine {
   readonly #store: NodeStore | undefined;
   readonly #tasks: ReadonlyMap<string, readonly LedgerTask[]>;
   readonly #checkPlainData: boolean;
+  readonly #checkSameInput: boolean;
+  readonly #refuseAfterFailedApply: boolean;
   readonly #adapters = new Map<LedgerName, Promise<LedgerPackage>>();
   readonly #kept = new Map<string, Kept>();
   /** The adapters whose package has the node store installed. */
   readonly #installed = new WeakSet<LedgerPackage>();
   #committed: Held | null = null;
-  /** The pending states, oldest first, each with its result and its batch's nodes by key (see the module comment). */
-  #pending: (Held & { readonly result: AppliedState; readonly nodes: ReadonlyMap<string, StoredNode> })[] = [];
+  /**
+   * The pending states, oldest first, each with its result, its batch's nodes by key and a copy of the input it was
+   * applied from (see the module comment).
+   */
+  #pending: (Held & { readonly result: AppliedState; readonly nodes: ReadonlyMap<string, StoredNode>; readonly input: BlockInput })[] = [];
+  /** The apply that failed after its state was made, as later applies name it; null while none did. */
+  #failed: string | null = null;
 
   constructor(options: EngineOptions) {
     this.#load = options.load;
     this.#store = options.store;
     this.#tasks = options.tasks ?? new Map();
     this.#checkPlainData = options.checkPlainData !== false;
+    this.#checkSameInput = options.checkSameInput !== false;
+    this.#refuseAfterFailedApply = options.refuseAfterFailedApply !== false;
   }
 
   /** `value` as it leaves the worker, checked as plain data (see {@link EngineOptions.checkPlainData}); throws `fail`'s. */
@@ -435,9 +538,26 @@ export class LedgerEngine {
 
   /**
    * `state` after `block` persisted, `keys.release` released and `keys.contracts`' keys persisted, flushed, and
-   * described as plain data.
+   * described as plain data. When any of it throws, the package may hold a part of it, and the engine applies no block
+   * afterwards (see the module comment).
    */
   #settled(
+    adapter: LedgerPackage,
+    block: BlockId & { readonly ledger: LedgerName },
+    state: StateHandle,
+    output: ApplyOutput,
+    keys: Keys,
+  ): Settled {
+    try {
+      return this.#settle(adapter, block, state, output, keys);
+    } catch (error) {
+      this.#failed = `the apply of block ${block.height} failed after its state was made (${error instanceof Error ? error.message : String(error)})`;
+      throw error;
+    }
+  }
+
+  /** {@link #settled}'s work. */
+  #settle(
     adapter: LedgerPackage,
     block: BlockId & { readonly ledger: LedgerName },
     state: StateHandle,
@@ -494,10 +614,11 @@ export class LedgerEngine {
     this.#pending = [];
   }
 
-  /** Records `settled` as the newest pending state, after `block`. */
-  #pend(adapter: LedgerPackage, block: BlockId & { readonly ledger: LedgerName }, settled: Settled): AppliedState {
+  /** Records `settled` as the newest pending state, after `block`, applied from `block` as its input. */
+  #pend(adapter: LedgerPackage, block: BlockInput, settled: Settled): AppliedState {
     this.#pending.push({
       ...idOf(block),
+      input: ownedInput(block),
       ledger: block.ledger,
       adapter,
       state: settled.state,
@@ -509,9 +630,31 @@ export class LedgerEngine {
     return settled.result;
   }
 
-  /** The result of the pending block `block`, or undefined. */
-  #pendingResult(block: BlockId): AppliedState | undefined {
-    return this.#pending.find((pending) => same(pending, block))?.result;
+  /**
+   * The result of the pending block `input` names when it was applied from `input`, or undefined when the block is not
+   * pending; a pending block asked for with another input is refused (see the module comment).
+   */
+  #pendingResult(input: BlockInput): AppliedState | undefined {
+    const pending = this.#pending.find((held) => same(held, input));
+    if (pending === undefined) return undefined;
+    const differs = this.#checkSameInput ? inputDifferences(pending.input, input) : [];
+    if (differs.length > 0) {
+      throw new ApplyNeedsNewThread(
+        `block ${input.height} is pending in this ledger worker thread, applied from another input (it differs in ` +
+          `${differs.join(", ")}): the thread gives a pending block's result back only for the input it was applied from, ` +
+          "and cannot apply the block anew, since its package counts the first apply's flush as stored",
+      );
+    }
+    return pending.result;
+  }
+
+  /** Refuses the apply of block `height` once an apply failed after its state was made (see the module comment). */
+  #refuseAfterFailure(height: bigint): void {
+    if (this.#failed === null || !this.#refuseAfterFailedApply) return;
+    throw new ApplyNeedsNewThread(
+      `block ${height} cannot be applied in this ledger worker thread: ${this.#failed}, so its package may hold a part ` +
+        "of that apply (a key persisted or released, a part of a flush), which the next flush would carry",
+    );
   }
 
   /** The node store, which a load and a conversion read through; throws on the main thread, which has none. */
@@ -528,6 +671,7 @@ export class LedgerEngine {
     if (this.#committed !== null) {
       throw new Error(`block 0 cannot be applied: the ledger worker holds the state at ${this.#committed.height} already`);
     }
+    this.#refuseAfterFailure(0n);
     this.#dropPending();
     const adapter = await this.#adapter(input.ledger);
     const transactions = this.#transactions(input, input.ledger, input.transactions);
@@ -568,6 +712,7 @@ export class LedgerEngine {
   async apply(input: ApplyBlock): Promise<AppliedState> {
     const again = this.#pendingResult(input);
     if (again !== undefined) return again;
+    this.#refuseAfterFailure(input.height);
     if (input.ahead === true && this.#pending.length > 0) return this.#applyAhead(input);
     const committed = this.#committed;
     if (committed === null) {
