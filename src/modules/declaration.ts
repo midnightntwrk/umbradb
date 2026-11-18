@@ -178,14 +178,15 @@ export interface BlockContext {
   /**
    * Whether the block before this one was committed by this process with no failure between, and nothing else wrote
    * the database since: true when its `COMMIT` answered in the same run of processing and the writer still has the
-   * session that committed it (so it held the writer lock all along, and no other writer can have changed a row), so
-   * what a module kept in memory of it is what the database holds. False at a run's first height (a start, any retry),
-   * for a height processed again after a failure, for the height after one whose `COMMIT` lost its answer, at the
-   * re-delivery after a restart, once the writer's session was replaced (on PostgreSQL, a connection lost between two
-   * blocks), and always at `on-fetch` and `on-parse`, which may run before the block before committed. A block told
-   * true whose transaction then finds the writer's session replaced is not written: that attempt fails, retryable,
-   * and the block is made again with `continues` false. It may be false at any block: a module that keeps the block
-   * before in memory reads it from the database then.
+   * session that committed it when this context is made (so it held the writer lock all along, and no other writer can
+   * have changed a row), so what a module kept in memory of it is what the database holds. False at a run's first
+   * height (a start, any retry), for a height processed again after a failure, for the height after one whose `COMMIT`
+   * lost its answer, at the re-delivery after a restart, from the first context made after the writer's session was
+   * replaced (on PostgreSQL, a connection lost while idle, also during the block's own callbacks), and always at
+   * `on-fetch` and `on-parse`, which may run before the block before committed. A block some of whose callbacks were
+   * told true and whose transaction then finds the writer's session replaced is not written: that attempt fails,
+   * retryable, and the block is made again with `continues` false. It may be false at any block: a module that keeps
+   * the block before in memory reads it from the database then.
    */
   continues: boolean;
 }

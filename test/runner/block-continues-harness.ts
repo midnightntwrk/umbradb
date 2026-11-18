@@ -75,6 +75,10 @@ export interface COptions {
   readonly atWrite?: (height: bigint) => void;
   /** Awaited at its `on-compute` of each height, after logging (a test acts on the database while it runs). */
   readonly atCompute?: (height: bigint) => Promise<void>;
+  /** Awaited at its `on-fetch` of each height, after logging. */
+  readonly atFetch?: (height: bigint) => Promise<void>;
+  /** Awaited at its `on-after-db-write` of each height, after logging. */
+  readonly atAfter?: (height: bigint) => Promise<void>;
 }
 
 /** Module `c` over `log` (see the module comment). */
@@ -100,6 +104,7 @@ export function continuesModule(log: string[], options: COptions = {}): ModuleDe
     points: {
       async "on-fetch"(_p, b) {
         at("on-fetch", b);
+        await options.atFetch?.(b.height);
       },
       async "on-parse"(_p, b) {
         at("on-parse", b);
@@ -115,6 +120,7 @@ export function continuesModule(log: string[], options: COptions = {}): ModuleDe
       },
       async "on-after-db-write"(_p, b) {
         at("on-after-db-write", b);
+        await options.atAfter?.(b.height);
       },
     },
   };
