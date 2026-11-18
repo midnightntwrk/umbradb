@@ -25,6 +25,7 @@ import {
   type Faults,
   HEAD,
   heightLog,
+  LoggedSource,
   loggingTransactions,
   orderProblems,
   seen as newSeen,
@@ -36,13 +37,15 @@ import {
  * calls it once per height, for the run `{ first: h, last: h }`, inside the block transaction after every `on-db-write`
  * callback and before the cursor check and the `COMMIT`, in `on-db-write`'s order, each callback with a block write
  * handle:
- * - the order of a height's callbacks and its `COMMIT`, and the run each callback is given;
+ * - the order of a height's callbacks, the cursor check and the `COMMIT`, and the run each callback is given;
  * - a row written through its handle is stored with the block, and `on-after-db-write` reads it;
  * - it reads the rows the block's `on-db-write` callbacks wrote;
  * - a failure in it stores nothing of the block, leaves the cursor, and names the module and the point; the height is
  *   processed again, `on-settle` included, by the next run after a retryable failure (from `on-compute`) and by a
  *   restart after a halt;
- * - its handle, kept and used after its callback ended, fails naming `on-settle`;
+ * - its handle, kept and used after its callback ended — after the commit, or in the next block while another callback
+ *   holds that block's transaction —, fails naming the module and `on-settle`; a write outside the module's own schema
+ *   is refused by the database and rolls the block back;
  * - with no module declaring `on-settle`, each block sends the statements, in the same order, that it sent when
  *   `core-digest` digested at `on-db-write`;
  * - with the real `core-digest`, a block's digests and its checkpoint take what its `on-settle` callbacks wrote, and a
@@ -119,7 +122,7 @@ describe.each(RUNNER_BACKENDS)("the on-settle point on $name", (backend) => {
     const seen = newSeen();
     const started = await startWith(db, settlingModules(seen, faults), [entry("alpha", 1), entry("beta", 1)]);
     const logged: Started = { ...started, db: loggingTransactions(started.db, seen.log) };
-    return { db, seen, started: logged, source: new InMemoryBlockSource({ head: HEAD }) };
+    return { db, seen, started: logged, source: new LoggedSource(seen.log, { head: HEAD }) };
   }
 
   it("calls on-settle once per height with { first: h, last: h }: after every on-db-write, before the COMMIT, in on-db-write's order", async () => {
@@ -165,9 +168,10 @@ describe.each(RUNNER_BACKENDS)("the on-settle point on $name", (backend) => {
     // Neither module's on-db-write row of 2 nor alpha's on-settle row of 2 is stored; 1 is.
     for (const table of TABLES) expect(await heightsIn(db, table), table).toEqual([1n]);
     expect(await cursorOf(db)).toBe(1n);
-    // Height 2 went as far as beta's on-settle, then its transaction rolled back: no COMMIT, no on-after-db-write.
+    // Height 2 went as far as beta's on-settle, then its transaction rolled back: no cursor check, no COMMIT, no
+    // on-after-db-write.
     const two = heightLog(2n);
-    expect(seen.log).toEqual([...heightLog(1n), ...two.slice(0, two.indexOf("COMMIT")), "ROLLBACK"]);
+    expect(seen.log).toEqual(["cursor", ...heightLog(1n), ...two.slice(0, two.indexOf("cursor")), "ROLLBACK"]);
   }, 60_000);
 
   it("a retryable failure in on-settle: the next run processes the height again from on-compute, on-settle included", async () => {
@@ -186,7 +190,7 @@ describe.each(RUNNER_BACKENDS)("the on-settle point on $name", (backend) => {
     expect(await runOnce(loop, source, stop)).toBeUndefined();
     // The next run reads the cursor in a transaction of its own, then takes 2 again from on-compute (its on-parse items
     // kept): on-compute, on-db-write and on-settle run again, each once more.
-    expect(seen.log.slice(mark)).toEqual(["BEGIN", "COMMIT", ...heightLog(2n).slice(2), ...heightLog(3n)]);
+    expect(seen.log.slice(mark)).toEqual(["BEGIN", "cursor", "COMMIT", ...heightLog(2n).slice(2), ...heightLog(3n)]);
     for (const id of ["alpha", "beta"]) {
       expect(seen.log.filter((line) => line === `${id} on-parse@2`), id).toHaveLength(1);
       for (const call of [`${id} on-compute@2`, `${id} on-db-write@2`, `${id} on-settle@2..2`]) {
@@ -205,8 +209,9 @@ describe.each(RUNNER_BACKENDS)("the on-settle point on $name", (backend) => {
     expect(await failureOf(started, source, HEAD)).toMatchObject({ height: 2n, point: "on-settle", module: "beta" });
     const mark = seen.log.length;
     await runUntilWaiting(started, source, HEAD);
-    // A new loop: the cursor's on-after-db-write is delivered again, then 2 is fetched and processed again whole.
+    // A new loop: the cursor read and its on-after-db-write delivered again, then 2 fetched and processed again whole.
     expect(seen.log.slice(mark)).toEqual([
+      "cursor",
       "alpha on-after-db-write@1",
       "beta on-after-db-write@1",
       ...heightLog(2n),
@@ -241,6 +246,67 @@ describe.each(RUNNER_BACKENDS)("the on-settle point on $name", (backend) => {
     });
     expect((refusal as UmbraError).message).toContain("used after its on-settle callback ended");
     expect(await cursorOf(db)).toBe(1n);
+  }, 60_000);
+
+  it("an on-settle handle kept and used in the next block while another module's callback holds its transaction fails that block before its COMMIT, naming the module and on-settle", async () => {
+    const { db } = await backend.database();
+    let kept: BlockWriteHandle | undefined;
+    const keeper = declaration("keeper", {
+      points: {
+        async "on-db-write"(_p, b, w) {
+          await w.execute("INSERT INTO keeper.rows (height) VALUES ($1)", [b.height]);
+        },
+        async "on-settle"(_p, run, w) {
+          if (run.last === 1n) kept = w;
+        },
+      },
+    });
+    const other = declaration("other", {
+      points: {
+        async "on-db-write"(_p, b, w) {
+          // In the next block, under other's role: the kept handle is refused before anything is sent, and other
+          // catches the refusal, which still fails the block.
+          if (b.height === 2n) await kept?.execute("INSERT INTO keeper.rows (height) VALUES (99)").catch(() => undefined);
+          await w.execute("INSERT INTO other.rows (height) VALUES ($1)", [b.height]);
+        },
+      },
+    });
+    const started = await startWith(db, [keeper, other], [entry("keeper", 1), entry("other", 1)]);
+    const failure = await failureOf(started, new InMemoryBlockSource({ head: HEAD }), HEAD);
+    expect(failure).toMatchObject({ height: 2n, point: "on-settle", module: "keeper", committed: false });
+    expect((failure as HeightFailure).cause).toMatchObject({
+      code: "handle-closed",
+      details: { handle: "block-write", module: "keeper", point: "on-settle" },
+    });
+    expect(await heightsIn(db, "keeper.rows")).toEqual([1n]);
+    expect(await heightsIn(db, "other.rows")).toEqual([1n]);
+    expect(await cursorOf(db)).toBe(1n);
+  }, 60_000);
+
+  it("an on-settle write outside the module's own schema is refused by the database: the block rolls back, the failure names the module and on-settle", async () => {
+    const { db } = await backend.database();
+    const owner = declaration("owner", {
+      points: {
+        async "on-db-write"(_p, b, w) {
+          await w.execute("INSERT INTO owner.rows (height) VALUES ($1)", [b.height]);
+        },
+      },
+    });
+    const intruder = declaration("intruder", {
+      points: {
+        async "on-settle"(_p, run, w) {
+          await w.execute("INSERT INTO owner.rows (height) VALUES ($1)", [run.last + 100n]);
+        },
+      },
+    });
+    const started = await startWith(db, [owner, intruder], [entry("owner", 1), entry("intruder", 1)]);
+    const failure = await failureOf(started, new InMemoryBlockSource({ head: HEAD }), HEAD);
+    expect(failure).toMatchObject({ height: 1n, point: "on-settle", module: "intruder", committed: false });
+    const refused = ((failure as HeightFailure).cause as CallbackFailure).cause;
+    expect(refused).toBeInstanceOf(UmbraError);
+    expect((refused as UmbraError).details.sqlstate).toBe("42501");
+    expect(await heightsIn(db, "owner.rows")).toEqual([]);
+    expect(await cursorOf(db)).toBeNull();
   }, 60_000);
 
   it("the digests and the checkpoint of a block take its on-settle writes, and a key written at both points once", async () => {

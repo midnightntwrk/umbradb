@@ -1,12 +1,14 @@
-import type { Database, Transaction } from "../../src/db/api.js";
+import type { Database, ReadHandle, Transaction } from "../../src/db/api.js";
 import { schemaName } from "../../src/db/roles.js";
 import type { BlockRun, ModuleDeclaration, PointName } from "../../src/modules/declaration.js";
+import type { BlockRef } from "../../src/runner/block-source.js";
+import { InMemoryBlockSource, type InMemorySourceOptions } from "../../src/runner/in-memory-source.js";
 import { declaration } from "../modules/declarations.js";
 
 /**
  * What the tests of the `on-settle` point share (`settle-point.test.ts` and its negative control): the modules `alpha`
- * and `beta`, a database that logs each transaction's `BEGIN` and its end, and the order a height's callbacks and its
- * block transaction keep.
+ * and `beta`, a database that logs each transaction's `BEGIN` and its end, a block source that logs each read of its
+ * cursor, and the order a height's callbacks and its block transaction keep.
  *
  * Each module writes its row of the block at `on-db-write` (`<schema>.rows`). At `on-settle` it counts the rows of the
  * run that the block's `on-db-write` callbacks wrote and stores that count in `<schema>.settled`, at the run's last
@@ -23,8 +25,9 @@ export const MODULES = ["alpha", "beta"] as const;
 /** What the modules saw. */
 export interface Seen {
   /**
-   * The calls, as `<module> <point>@<height>` (`@<first>..<last>` at `on-settle`), and each transaction's `BEGIN` and
-   * its end (`COMMIT`, or `ROLLBACK` when it failed), in the order they happened.
+   * The calls, as `<module> <point>@<height>` (`@<first>..<last>` at `on-settle`), each transaction's `BEGIN` and its
+   * end (`COMMIT`, or `ROLLBACK` when it failed), and each read of the block source's cursor (`cursor`: a run's first,
+   * and the check before each block's `COMMIT`), in the order they happened.
    */
   readonly log: string[];
   /** Each `on-settle` call's run, as given, by module. */
@@ -130,10 +133,25 @@ export function loggingTransactions(db: Database, log: string[]): Database {
   };
 }
 
+/** An in-memory block source that logs `cursor` in `log` each time its cursor is read. */
+export class LoggedSource extends InMemoryBlockSource {
+  readonly #log: string[];
+
+  constructor(log: string[], options: InMemorySourceOptions) {
+    super(options);
+    this.#log = log;
+  }
+
+  override cursor(read: Pick<ReadHandle, "query">): Promise<BlockRef | null> {
+    this.#log.push("cursor");
+    return super.cursor(read);
+  }
+}
+
 /**
  * The log of one committed height `h` when both modules run every point there: `on-parse` and `on-compute`, the block
- * transaction with every `on-db-write`, then every `on-settle` of the run `h..h`, its `COMMIT`, then every
- * `on-after-db-write`.
+ * transaction with every `on-db-write`, then every `on-settle` of the run `h..h`, the cursor check, its `COMMIT`, then
+ * every `on-after-db-write`.
  */
 export function heightLog(h: bigint): string[] {
   const each = (point: string, at: string) => MODULES.map((id) => `${id} ${point}@${at}`);
@@ -143,6 +161,7 @@ export function heightLog(h: bigint): string[] {
     "BEGIN",
     ...each("on-db-write", `${h}`),
     ...each("on-settle", `${h}..${h}`),
+    "cursor",
     "COMMIT",
     ...each("on-after-db-write", `${h}`),
   ];
@@ -155,12 +174,13 @@ const runText = ({ module, run, args }: Seen["runs"][number]): string =>
     .join(",")} args=${args}`;
 
 /**
- * The oracle of the order: one sentence per problem, none when `seen` holds exactly the log of the heights `heights`
- * ({@link heightLog}) and each `on-settle` was given `{ first: h, last: h }`, both `bigint`s, and nothing else.
+ * The oracle of the order: one sentence per problem, none when `seen` holds exactly a run's first cursor read and the
+ * log of the heights `heights` ({@link heightLog}), and each `on-settle` was given `{ first: h, last: h }`, both
+ * `bigint`s, and nothing else.
  */
 export function orderProblems(seen: Seen, heights: readonly bigint[]): string[] {
   const problems: string[] = [];
-  const expected = heights.flatMap(heightLog);
+  const expected = ["cursor", ...heights.flatMap(heightLog)];
   const first = expected.findIndex((line, index) => seen.log[index] !== line);
   if (first >= 0 || seen.log.length !== expected.length) {
     const at = first >= 0 ? first : Math.min(seen.log.length, expected.length);

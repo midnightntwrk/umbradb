@@ -1,7 +1,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
-import { cursorIn, PROCESS_BACKENDS, type ProcessBackend } from "./process-backends.js";
+import { cursorIn, pairs, PROCESS_BACKENDS, type ProcessBackend } from "./process-backends.js";
 import { core, entryOf, loggingModule, startProcess, testBuild } from "./process-build.js";
 import {
   a169Problems,
@@ -26,8 +26,9 @@ import { NodeWatch, type StartVia, type StopBy } from "./startup-stop-harness.js
  * On PostgreSQL 18.6 and PGlite 0.5.10, each run on a new database (`loop-stop-harness.ts`: what is observed, and the
  * oracle `a169Problems`). The committed negative control is `loop-stop.negative-control.test.ts`.
  *
- * Also, with the SIGTERM-in-transaction case unchanged: a stop while a block transaction is open closes the node client
- * only once it has committed, since an open block transaction is let commit or roll back first.
+ * Also, with the SIGTERM-in-transaction case unchanged: a stop while a block transaction is open — in a module's
+ * `on-db-write` or in its `on-settle` — closes the node client only once it has committed, since an open block
+ * transaction is let commit or roll back first; the height committed is whole, its `on-settle` rows included.
  */
 
 /** No problem on either backend. */
@@ -37,11 +38,12 @@ const NONE = Object.fromEntries(PROCESS_BACKENDS.map((backend) => [backend.name,
 const RUN_TIMEOUT_MS = 2 * PATIENCE_MS + 60_000;
 
 /**
- * A stop while `on-db-write` of 3 holds the block transaction open (an in-memory source to 5, the process's node
- * client made through a {@link NodeWatch}): every problem, none when the client stays open until the transaction has
- * committed — 3 committed, processing ended by the signal — and is closed then.
+ * A stop while `point` of 3 holds the block transaction open (an in-memory source to 5, the process's node client made
+ * through a {@link NodeWatch}): every problem, none when the client stays open until the transaction has committed — 3
+ * committed, with `gate`'s rows of both points, processing ended by the signal — and is closed then. `gate` writes a
+ * row per height at `on-db-write` and one at `on-settle`, and logs its calls.
  */
-async function openTransactionProblems(backend: ProcessBackend): Promise<string[]> {
+async function openTransactionProblems(backend: ProcessBackend, point: "on-db-write" | "on-settle"): Promise<string[]> {
   const db = await backend.database();
   let reached!: () => void;
   const inTransaction = new Promise<void>((resolve) => {
@@ -51,12 +53,23 @@ async function openTransactionProblems(backend: ProcessBackend): Promise<string[
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const gate = loggingModule("gate", [], [], {
+  const log: string[] = [];
+  const base = loggingModule("gate", log, ["on-db-write", "on-settle"]);
+  const holding = async (height: bigint): Promise<void> => {
+    if (height !== 3n) return;
+    reached();
+    await held;
+  };
+  const gate = loggingModule("gate", log, [], {
+    ...base,
     points: {
-      async "on-db-write"(_p, b) {
-        if (b.height !== 3n) return;
-        reached();
-        await held;
+      async "on-db-write"(p, b, w) {
+        await base.points["on-db-write"]?.(p, b, w);
+        if (point === "on-db-write") await holding(b.height);
+      },
+      async "on-settle"(p, run, w) {
+        await base.points["on-settle"]?.(p, run, w);
+        if (point === "on-settle") await holding(run.last);
       },
     },
   });
@@ -88,6 +101,13 @@ async function openTransactionProblems(backend: ProcessBackend): Promise<string[
   }
   const cursor = await cursorIn(db);
   if (cursor !== 3) problems.push(`the cursor after the stop is ${cursor}, not 3 (the open transaction committed)`);
+  for (const table of ["rows", "settled"]) {
+    const stored = (await pairs(db, `SELECT height::int AS h, 0 AS v FROM gate.${table} ORDER BY height`)).map(([h]) => h);
+    if (stored.join(",") !== "1,2,3") problems.push(`gate's ${table} hold ${stored.join(",")}, not 1,2,3`);
+  }
+  const calls = log.filter((line) => / on-(db-write|settle)@/.test(line));
+  const expected = [1, 2, 3].flatMap((h) => [`gate on-db-write@${h}`, `gate on-settle@${h}..${h}`]);
+  if (calls.join(", ") !== expected.join(", ")) problems.push(`gate was called ${calls.join(", ")}`);
   return problems;
 }
 
@@ -150,11 +170,11 @@ describe("a stop while the running loop waits on an unreachable node ends the pr
     4 * RUN_TIMEOUT_MS,
   );
 
-  it(
-    "unchanged: a stop while a block transaction is open closes the node client only once it has committed — the height committed, ended by the signal; on PostgreSQL and on PGlite",
-    async () => {
+  it.each<["on-db-write" | "on-settle"]>([["on-db-write"], ["on-settle"]])(
+    "unchanged: a stop while %s holds a block transaction open closes the node client only once it has committed — the height committed whole, ended by the signal; on PostgreSQL and on PGlite",
+    async (point) => {
       const found: Record<string, string[]> = {};
-      for (const backend of PROCESS_BACKENDS) found[backend.name] = await openTransactionProblems(backend);
+      for (const backend of PROCESS_BACKENDS) found[backend.name] = await openTransactionProblems(backend, point);
       expect(found).toEqual(NONE);
     },
     RUN_TIMEOUT_MS,

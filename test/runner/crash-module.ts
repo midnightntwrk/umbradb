@@ -4,7 +4,8 @@ import type { BlockContext, ModuleDeclaration, PointName } from "../../src/modul
 /**
  * The module of the crash tests (`crash.test.ts`): `c` logs every point it registers with what
  * its callback was given — the height, and for a block context its hash, its `block` items and its settings —, puts its
- * `block` item `c-note` in `on-parse` and writes one row per height in `on-db-write`. At the point and height to hold
+ * `block` item `c-note` in `on-parse`, writes one row per height in `on-db-write` and one in `c.settled` in `on-settle`
+ * (at the run's last height, a run being one block). At the point and height to hold
  * it reports that it holds there and waits for ever, so the test kills the process at exactly that point. Shared by the
  * worker process (`crash.worker.ts`) and the test's restart in its own process, so both run the same declaration (the
  * same migration checksum).
@@ -17,6 +18,7 @@ export const CRASH_POINTS = [
   "on-start-height",
   "on-compute",
   "on-db-write",
+  "on-settle",
   "on-after-db-write",
   "on-stop-height",
 ] as const satisfies readonly PointName[];
@@ -36,7 +38,7 @@ export type CrashEvent = CrashCall | { readonly event: "hold"; readonly point: P
 
 /** How `c` behaves. */
 export interface CrashOptions {
-  /** Where `c` holds for ever, after its work there (the row written, at `on-db-write`); none: it never holds. */
+  /** Where `c` holds for ever, after its work there (the row written, at `on-db-write` and `on-settle`); none: never. */
   readonly hold?: { readonly point: PointName; readonly height: number };
   readonly report: (event: CrashEvent) => void;
 }
@@ -67,12 +69,15 @@ export function crashModule(options: CrashOptions): ModuleDeclaration {
     side: "public",
     requires: ["block-header"],
     provides: [
-      { name: "c-rows", lifetimes: ["table"], table: { schema: "c", tables: ["rows"], kind: "append-only" } },
+      { name: "c-rows", lifetimes: ["table"], table: { schema: "c", tables: ["rows", "settled"], kind: "append-only" } },
       { name: "c-note", lifetimes: ["block"] },
     ],
     startsMidChain: true,
     configSchema: z.object({ k: z.number().int().default(0).meta({ kind: "data" }) }),
-    migrations: [{ id: "001", sql: "CREATE TABLE c.rows (height bigint PRIMARY KEY)" }],
+    migrations: [
+      { id: "001", sql: "CREATE TABLE c.rows (height bigint PRIMARY KEY)" },
+      { id: "002", sql: "CREATE TABLE c.settled (height bigint PRIMARY KEY)" },
+    ],
     points: {
       async "on-fetch"(_p, b) {
         await called("on-fetch", b, b);
@@ -90,6 +95,10 @@ export function crashModule(options: CrashOptions): ModuleDeclaration {
       async "on-db-write"(_p, b, w) {
         await w.execute("INSERT INTO c.rows (height) VALUES ($1)", [b.height]);
         await called("on-db-write", b, b);
+      },
+      async "on-settle"(_p, run, w) {
+        await w.execute("INSERT INTO c.settled (height) VALUES ($1)", [run.last]);
+        await called("on-settle", { height: run.last });
       },
       async "on-after-db-write"(_p, b) {
         await called("on-after-db-write", b, b);
