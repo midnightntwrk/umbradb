@@ -52,6 +52,10 @@ import { type RefcountStep, refcountStep, sqlRefcountTables, writeRefcount } fro
  * - `after-commit`: the `COMMIT` returned, before `on-after-db-write` (its `commit`);
  * - `between-commits`: The negative control only, between its own transaction's commit and the block's.
  *
+ * Each report also says what had become of the apply ahead of the next block ({@link AheadSeen}): the settle of h sends
+ * it right after h's eviction, so from `after-eviction` of h to `after-commit` of h the worker has that apply in flight
+ * or answered, and a crash there leaves it so.
+ *
  * **What a segment records.** Its module `restart-watch` appends, after every block it commits (its `on-after-db-write`,
  * a read at h), one line to the run's observation file ({@link Observed}): every block, what can be read cheaply on
  * a recorded tape — the node set (kept from one full read of `nodes` when the process starts, then from the rows the
@@ -83,6 +87,13 @@ export type RestartPoint =
   | "before-commit"
   | "after-commit"
   | "between-commits";
+
+/**
+ * What a point's report says of the apply ahead of the block after its height, sent by that height's settle and not
+ * yet taken by the block's `on-compute`: `none` when no such apply was sent, `in-flight` while the worker has not
+ * answered it, `answered` once it has. A crash at the point then happens with that apply pending or done in the worker.
+ */
+export type AheadSeen = "none" | "in-flight" | "answered";
 
 /** Where a segment stops: the point, the height, and whether it holds there for the kill or stops the process. */
 export interface Hold {
@@ -126,7 +137,13 @@ export interface SegmentJob {
 
 /** What a segment reports on its standard output, one JSON line each; and what an inspection reports. */
 export type SegmentEvent =
-  | { readonly event: "reached"; readonly point: RestartPoint; readonly height: number }
+  | {
+      readonly event: "reached";
+      readonly point: RestartPoint;
+      readonly height: number;
+      /** What had become of the apply ahead of the block after `height` when the point was reached ({@link AheadSeen}). */
+      readonly ahead: AheadSeen;
+    }
   | { readonly event: "inspected"; readonly cursor: number | null; readonly tables: SnapshotJson; readonly contents: ContentsHash }
   | {
       readonly event: "ended";
@@ -403,12 +420,13 @@ function restartWatcher(
 
 /**
  * `host` reporting, through `reached`, its block's apply answered (for a block applied ahead, the load of the state
- * before it that the block's `on-compute` asks for, answered after that apply) and its eviction answered.
+ * before it that the block's `on-compute` asks for, answered after that apply) and its eviction answered; `aheads`
+ * holds the blocks whose apply ahead was sent and those whose apply ahead was answered, each until the block's turn.
  */
-function pointWorker(host: LedgerHost, reached: (point: RestartPoint, height: bigint) => Promise<void>): LedgerHost {
+function pointWorker(host: LedgerHost, reached: (point: RestartPoint, height: bigint) => Promise<void>, aheads: Aheads): LedgerHost {
   let height: bigint | null = null;
   /** The blocks applied ahead whose apply was answered, until their `on-compute` asks for the state before them. */
-  const ahead = new Set<bigint>();
+  const ahead = aheads.answered;
   return {
     useDatabase: (database) => host.useDatabase(database),
     lend: (read) => host.lend(read),
@@ -416,11 +434,20 @@ function pointWorker(host: LedgerHost, reached: (point: RestartPoint, height: bi
     genesisRoot: (ledger, bytes) => host.genesisRoot(ledger, bytes),
     genesis: (input, read) => host.genesis(input, read),
     async apply(input, read) {
-      const applied = await host.apply(input, read);
       if (input.ahead === true) {
-        ahead.add(input.height);
-        return applied;
+        aheads.sent.add(input.height);
+        try {
+          const applied = await host.apply(input, read);
+          ahead.add(input.height);
+          return applied;
+        } catch (error) {
+          aheads.sent.delete(input.height);
+          throw error;
+        }
       }
+      const applied = await host.apply(input, read);
+      aheads.sent.delete(input.height);
+      ahead.delete(input.height);
       height = input.height;
       await reached("before-step", input.height);
       return applied;
@@ -434,6 +461,7 @@ function pointWorker(host: LedgerHost, reached: (point: RestartPoint, height: bi
       const loaded = await host.load(input, read);
       const next = input.height + 1n;
       if (ahead.delete(next)) {
+        aheads.sent.delete(next);
         height = next;
         await reached("before-step", next);
       }
@@ -458,6 +486,12 @@ function pointWorker(host: LedgerHost, reached: (point: RestartPoint, height: bi
     },
     close: () => host.close(),
   };
+}
+
+/** The applies ahead a segment's worker was sent ({@link pointWorker}), by the block applied. */
+interface Aheads {
+  readonly sent: Set<bigint>;
+  readonly answered: Set<bigint>;
 }
 
 /** Whether `sql` is the step's deletion of rows from `nodes` (the one statement of the step on another table). */
@@ -552,9 +586,12 @@ export async function startSegment(job: SegmentJob, report: (event: SegmentEvent
   let stopping = false;
   let run: Ingest | undefined;
   const forever = new Promise<never>(() => undefined);
+  const aheads: Aheads = { sent: new Set(), answered: new Set() };
   const reached = async (point: RestartPoint, height: bigint): Promise<void> => {
     if (job.hold?.point !== point || BigInt(job.hold.height) !== height) return;
-    report({ event: "reached", point, height: Number(height) });
+    const next = height + 1n;
+    const ahead: AheadSeen = aheads.answered.has(next) ? "answered" : aheads.sent.has(next) ? "in-flight" : "none";
+    report({ event: "reached", point, height: Number(height), ahead });
     if (job.hold.then === "hold") await forever;
     stopping = true;
     void run?.handle.stop();
@@ -605,7 +642,7 @@ export async function startSegment(job: SegmentJob, report: (event: SegmentEvent
     core,
     user,
     ...(settings === undefined ? {} : { settings }),
-    ledgerWorker: () => recordingWorker(pointWorker(worker(), reached), record),
+    ledgerWorker: () => recordingWorker(pointWorker(worker(), reached, aheads), record),
     loop: pointLoop(reached, control),
   });
   const started = run;

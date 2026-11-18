@@ -121,7 +121,7 @@ describe.each(PROCESS_BACKENDS)("restarts and crashes at named points, on $name"
     const plan = dagPlan();
     for (const stop of DAG_STOPS) {
       const outcome = await runSegment(db, await jobFor(db, plan, { hold: holdAt("after-commit", stop, "stop") }), SEGMENT_MS);
-      expect(outcome.reached, `the stop at ${stop}`).toEqual({ event: "reached", point: "after-commit", height: stop });
+      expect(outcome.reached, `the stop at ${stop}`).toMatchObject({ event: "reached", point: "after-commit", height: stop });
       expect(outcome.ended, `the stop at ${stop}`).toMatchObject({ why: "stopped", cursor: `${stop}`, reason: null });
     }
     const last = await runSegment(db, await jobFor(db, plan), SEGMENT_MS);
@@ -137,7 +137,10 @@ describe.each(PROCESS_BACKENDS)("restarts and crashes at named points, on $name"
       // The contents hash where the crash left the database and the restart went on, and at the end.
       const plan = dagPlan([height - 1, height, height + 1, LAST]);
       const killed = await runSegment(db, await jobFor(db, plan, { hold: holdAt(point, height, "hold") }), SEGMENT_MS);
-      expect(killed.reached).toEqual({ event: "reached", point, height });
+      expect(killed.reached).toMatchObject({ event: "reached", point, height });
+      // The crash happened with the next block's apply ahead in the worker, in flight or answered: the settle of this
+      // block sends it right after its eviction, so only a point before the settle (`before-step`) has none.
+      expect(killed.reached?.ahead === "none", `the apply ahead of ${height + 1} at ${point}: ${killed.reached?.ahead}`).toBe(point === "before-step");
       expect(killed.killed).toBe(true);
       expect(mixProblems(await databaseNow(db, PATIENCE_MS), expected, point === "after-commit" ? height : height - 1)).toEqual([]);
       const restarted = await runSegment(db, await jobFor(db, plan), SEGMENT_MS);
