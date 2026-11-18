@@ -575,6 +575,32 @@ describe.each(BACKENDS)("write handles and their closing on $name", { timeout: 3
       expect(await rows(db, "b.t")).toEqual([{ k: 2n, who: "umbradb_m_b" }]);
     });
 
+    it("refuses COMMIT and SAVEPOINT through a block and a schema write handle before sending them, and the block commits", async () => {
+      const { db, plan } = await setUp();
+      const refused: UmbraError[] = [];
+      await block(db, plan, (writes) =>
+        writes.write("a", async (w) => {
+          refused.push(await failure(() => w.execute("COMMIT")));
+          refused.push(await failure(() => w.query("SAVEPOINT s")));
+          await w.execute(INSERT_A, [1]);
+        }),
+      );
+      await runOnStartDb(db, plan, "b", NO_HANDLES, async (w) => {
+        refused.push(await failure(() => w.execute("COMMIT")));
+        refused.push(await failure(() => w.query("SAVEPOINT s")));
+        await w.execute(INSERT_B, [2]);
+      });
+      expect(refused.map((error) => [error.code, error.retryable, error.details])).toEqual(
+        ["COMMIT", "SAVEPOINT", "COMMIT", "SAVEPOINT"].map((command) => [
+          "database-error",
+          false,
+          { reason: "control-refused", command },
+        ]),
+      );
+      expect(await rows(db, "a.t")).toEqual([{ k: 1n, who: "umbradb_m_a" }]);
+      expect(await rows(db, "b.t")).toEqual([{ k: 2n, who: "umbradb_m_b" }]);
+    });
+
     it("refuses a second callback started while one runs (in series), before it sends anything", async () => {
       const { db, plan } = await setUp();
       let refused: unknown;

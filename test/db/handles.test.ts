@@ -116,6 +116,28 @@ for (const backend of BACKENDS) {
       expect(await db.read(async (read) => read.height)).toBeNull();
     });
 
+    it("refuses COMMIT and SAVEPOINT through a read handle before sending them: the read goes on, and the INSERT after the COMMIT is refused as a write", async () => {
+      const { db } = await backend.database(TEST_SCHEMA, TEST_CURSOR);
+      const seen = await db.read(async (read) => ({
+        commit: await failure(() => read.query("COMMIT")),
+        savepoint: await failure(() => read.query("SAVEPOINT s")),
+        // Nothing was sent: the read's transaction is neither ended nor aborted.
+        next: await read.query("SELECT count(*) AS n FROM t.rows"),
+        insert: await failure(() => read.query("INSERT INTO t.rows VALUES (77, 'through a read handle')")),
+      }));
+      for (const [error, command] of [
+        [seen.commit, "COMMIT"],
+        [seen.savepoint, "SAVEPOINT"],
+      ] as const) {
+        expect(error.code).toBe("database-error");
+        expect(error.retryable).toBe(false);
+        expect(error.details).toEqual({ reason: "control-refused", command });
+      }
+      expect(seen.next).toEqual([{ n: 0n }]);
+      expect(seen.insert.details.sqlstate).toBe("25006");
+      expect(await db.read((read) => read.query("SELECT count(*) AS n FROM t.rows"))).toEqual([{ n: 0n }]);
+    });
+
     it("refuses a read handle used after its read ended (handle-closed)", async () => {
       const { db } = await backend.database(TEST_SCHEMA, TEST_CURSOR);
       const kept = await db.read(async (read) => read);
