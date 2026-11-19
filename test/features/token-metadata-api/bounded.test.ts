@@ -12,7 +12,8 @@ import { type ApiHandler, blockLogs, contract, domain, eventData, readStopped, r
  * no answer reads), and 1,000 tokens of that contract sharing its symbol — then the route's handler answers through a read handle that counts the
  * rows each answer reads back. Every answer is small: the first {@link MAX_TOKEN_FIELDS} fields with `fieldCount` and
  * `fieldsTruncated`, the first 100 members with their count, a contract a page at a time, a
- * hundred colors in a fixed number of statements; none reads back more than {@link MAX_ROWS} rows. **Negative control:**
+ * hundred colors in a fixed number of statements, and a page of tokens with different symbols in the same number of
+ * statements whatever its size; none reads back more than {@link MAX_ROWS} rows. **Negative control:**
  * the same group under a 12-character symbol, which may be the cut of longer ones, reads every row sharing it, and the
  * bound sees it.
  */
@@ -22,6 +23,9 @@ const N = 10_000;
 const MEMBERS = 1_000;
 const MAX_ROWS = 1_000;
 const X = contract(0xc0);
+/** A contract whose tokens each have a symbol of their own. */
+const Y = contract(0xc1);
+const DISTINCT = 300;
 const DA = domain(0xda);
 /** Bytes as SQL writes them (`raw`) and as the route takes and gives them (`hex`: `0x` and lowercase hex). */
 const raw = (b: Uint8Array) => Buffer.from(b).toString("hex");
@@ -66,6 +70,22 @@ async function seed(db: ProcessDatabase, symbol: string): Promise<void> {
   await db.query("ANALYZE token_metadata.events");
 }
 
+/** Seeds contract {@link Y} with {@link DISTINCT} tokens, each with a different symbol (`S1`, `S2`, …). */
+async function seedDistinctSymbols(db: ProcessDatabase): Promise<void> {
+  const y = `'\\x${raw(Y)}'::bytea`;
+  await db.query(
+    `INSERT INTO token_metadata.tokens (id, kind, contract_address, domain_sep, symbol)
+     SELECT ${ID_SQL("d", y)}, 3, ${y}, d, convert_to('S' || i::text, 'UTF8')
+     FROM (SELECT i, decode('dd' || lpad(to_hex(i), 62, '0'), 'hex') AS d FROM generate_series(1, ${DISTINCT}) AS i) AS m`,
+  );
+  await db.query(
+    `INSERT INTO token_metadata.fields (token_id, kind, key, val_type, value, uint_value, usable, set_height, set_tx, set_event, set_record)
+     SELECT id, 3, convert_to('symbol', 'UTF8'), 1, symbol, NULL, true, ${S + 1}, 0, 2, 0 FROM token_metadata.tokens WHERE contract_address = ${y}`,
+  );
+  await db.query("ANALYZE token_metadata.tokens");
+  await db.query("ANALYZE token_metadata.fields");
+}
+
 describe.each(PROCESS_BACKENDS)("bounded cost on $name", (backend: ProcessBackend) => {
   let db: ProcessDatabase;
   let spam: ProcessDatabase;
@@ -97,6 +117,7 @@ describe.each(PROCESS_BACKENDS)("bounded cost on $name", (backend: ProcessBacken
     db = await backend.database();
     await runTo(db, { start: S, head: S + 2, logs });
     await seed(db, "SPAM");
+    await seedDistinctSymbols(db);
     spam = await backend.database();
     await runTo(spam, { start: S, head: S + 2, logs });
     await seed(spam, "SPAMSPAMSPAM");
@@ -130,6 +151,16 @@ describe.each(PROCESS_BACKENDS)("bounded cost on $name", (backend: ProcessBacken
     const got = await tokens(db, { colors });
     expect([got.status, got.json.items.length]).toEqual([200, 0]);
     expect(got.statements).toBeLessThanOrEqual(3);
+  }, 120_000);
+
+  it("a page of tokens with different symbols takes the same number of statements whatever its size", async () => {
+    const small = await tokens(db, { contract: hex(Y), limit: 10 });
+    const large = await tokens(db, { contract: hex(Y), limit: DISTINCT });
+    expect([small.json.items.length, large.json.items.length]).toEqual([10, DISTINCT]);
+    expect(large.json.items.every((t: Json) => t.group === null && t.common.symbol.startsWith("S"))).toBe(true);
+    // One count for all the page's symbols: thirty times the tokens, not one statement more.
+    expect(large.statements).toBe(small.statements);
+    expect(large.statements).toBeLessThanOrEqual(8);
   }, 120_000);
 
   it("[NEG] a group under a 12-character symbol reads every row sharing it, and the bound sees it", async () => {

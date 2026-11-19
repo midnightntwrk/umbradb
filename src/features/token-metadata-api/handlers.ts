@@ -6,15 +6,15 @@
  *
  * A token is a described identity: one with at least one defined field (MIP "Applying records"); a withdrawn one is
  * referenced nowhere. Reads are bounded whatever the request selects: the selection is one statement, then a token's
- * fields and common fields take two and one statements for all the selected tokens together; a group takes one or
- * two per distinct (contract, symbol). Nothing here fetches anything.
+ * fields, common fields and the counts of its symbols take two, one and one statements for all the selected tokens
+ * together; a group that exists (two or more tokens share the symbol) takes one more for its members. Nothing here fetches anything.
  */
 
 import type { ReadHandle } from "../../db/api.js";
 import { COMMON_KEY_HEX, type Field as StateField, IMAGE_KEY_HEX, parseStandards } from "../token-metadata/rules.js";
 import { decodeUtf8, toHex } from "../token-metadata/codec/index.js";
 import { hasColor } from "../token-metadata/color.js";
-import { commonFields, tokenMapKey, symbolGroup, type TokenKey, tokenFields, tokensOfColors, tokensOfContract, tokensOfDomain } from "./sql.js";
+import { commonFields, groupCounts, groupKey, isWholeSymbol, tokenMapKey, symbolGroup, type TokenKey, tokenFields, tokensOfColors, tokensOfContract, tokensOfDomain } from "./sql.js";
 import { pageCursor } from "../../helpers/page-cursor.js";
 import { invalidRequest } from "../../modules/route.js";
 import {
@@ -88,6 +88,12 @@ export function commonJson(fields: ReadonlyMap<string, StateField>): Common {
 async function tokensOf(read: ReadHandle, keys: readonly TokenKey[]): Promise<TokenJson[]> {
   const fields = await tokenFields(read, keys, MAX_TOKEN_FIELDS);
   const commons = await commonFields(read, keys);
+  // One count for every whole symbol of the page: only a symbol that two or more tokens share is read further.
+  const symbols = keys.flatMap((k) => {
+    const symbol = commons.get(tokenMapKey(k))!.get(COMMON_KEY_HEX.symbol);
+    return symbol !== undefined && symbol.usable === true && isWholeSymbol(symbol.value) ? [{ contract: k.contractAddress, symbol: symbol.value }] : [];
+  });
+  const counts = await groupCounts(read, symbols);
   const groups = new Map<string, Group | null>();
   const out: TokenJson[] = [];
   for (const k of keys) {
@@ -95,9 +101,9 @@ async function tokensOf(read: ReadHandle, keys: readonly TokenKey[]): Promise<To
     const symbol = common.get(COMMON_KEY_HEX.symbol);
     let group: Group | null = null;
     if (symbol !== undefined && symbol.usable === true) {
-      const at = `${k.contractAddress}/${toHex(symbol.value)}`;
+      const at = groupKey(k.contractAddress, symbol.value);
       if (!groups.has(at)) {
-        const found = await symbolGroup(read, k.contractAddress, symbol.value, MAX_GROUP_MEMBERS);
+        const found = await symbolGroup(read, k.contractAddress, symbol.value, MAX_GROUP_MEMBERS, counts.get(at));
         groups.set(
           at,
           found === undefined

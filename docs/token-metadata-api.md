@@ -83,7 +83,7 @@ set: `height` is a decimal string, and `eventIndex` is the event's position amon
 | Lengths | `name` and `symbol` are served as their first 64 and 12 characters (grapheme clusters, UAX #29); they are stored whole. |
 | No verdict | An answer gives a token's fields and says nothing about them: a client decides what a missing or unusable field means. A rejected event of the token's contract changes nothing in the answer. |
 | Hostile text | The body is pure ASCII: every non-ASCII character and `<`, `>`, `&` are `\uXXXX` escapes; parsing gives the exact text back. |
-| Bounded cost | Each answer reads in a fixed number of statements, through the indexer's indexes. One accepted exception: the group of a served 12-character symbol reads every symbol of its contract starting with it (`apiReadTimeoutMs` bounds the request). |
+| Bounded cost | Each answer reads through the indexer's indexes in a fixed number of statements, whatever the page's size: its tokens, their fields, and one count of all the page's symbols. A symbol that two or more tokens share takes one more read, for its members. One accepted exception: the group of a served 12-character symbol reads every symbol of its contract starting with it (`apiReadTimeoutMs` bounds the request). |
 
 ## Errors
 

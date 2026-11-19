@@ -2,8 +2,9 @@
  * Every statement `token-metadata-api` sends to `token-metadata`'s tables (`../token-metadata/sql.ts`: `tokens` and
  * `fields`), by name ({@link STATEMENTS}): the catalog
  * `test/features/token-metadata/sql-plans.test.ts` plans on both backends (no scan of a `token_metadata` table, every
- * index used). Each is static: a variant is its own statement. The functions below only bind and map, and each answer
- * reads in a fixed number of statements, except the group of a served 12-character symbol (see {@link symbolGroup}).
+ * index used). Each is static: a variant is its own statement. The functions below only bind and map. An answer reads
+ * in a fixed number of statements, plus one for each symbol group it shows (its members), and plus one for each served
+ * 12-character symbol (see {@link symbolGroup}).
  */
 
 import type { ReadHandle } from "../../db/api.js";
@@ -69,9 +70,11 @@ export const STATEMENTS = Object.freeze({
   commonFields: `SELECT ${FIELD_COLUMNS} FROM ${BY_IDS}
      JOIN ${TOKEN_METADATA_SCHEMA}.fields f ON f.token_id = i.id AND f.kind = i.k AND f.key = ANY($3::bytea[])
      ORDER BY f.token_id, f.kind, f.set_height, f.set_tx, f.set_event, f.set_record`,
-  /** How many tokens of contract `$1` have the whole usable symbol `$2` (`tokens_symbol_idx`). */
-  groupCount: `SELECT count(*)::int AS n FROM ${TOKEN_METADATA_SCHEMA}.tokens WHERE contract_address = $1 AND symbol = $2`,
-  /** The first `$3` of them, by (domainSep, kind). */
+  /** How many tokens have each (contract `$1[i]`, whole usable symbol `$2[i]`), for every pair at once (`tokens_symbol_idx`). */
+  groupCounts: `SELECT p.address, p.symbol,
+       (SELECT count(*) FROM ${TOKEN_METADATA_SCHEMA}.tokens t WHERE t.contract_address = p.address AND t.symbol = p.symbol)::int AS n
+     FROM unnest($1::bytea[], $2::bytea[]) AS p(address, symbol)`,
+  /** The first `$3` tokens of contract `$1` with the whole usable symbol `$2`, by (domainSep, kind). */
   groupMembers: `SELECT domain_sep, kind::int AS kind FROM ${TOKEN_METADATA_SCHEMA}.tokens WHERE contract_address = $1 AND symbol = $2
      ORDER BY domain_sep, kind LIMIT $3`,
   /** The tokens of contract `$1` whose usable symbol starts with `$2` (below `$3`), unordered: `symbolGroups` orders them. */
@@ -156,25 +159,49 @@ export function prefixEnd(prefix: Uint8Array): Uint8Array {
 /** The served length of a symbol, in characters. */
 const SYMBOL_CHARACTERS = 12;
 
+/** The key of a contract's symbol in the maps the group reads give and take. */
+export const groupKey = (contract: string, symbol: Uint8Array): string => `${contract}/${toHex(symbol)}`;
+
+/** Whether a served symbol is whole: under 12 characters, so no longer symbol is cut to it. */
+export function isWholeSymbol(symbol: Uint8Array): boolean {
+  const text = decodeUtf8(symbol);
+  return text !== undefined && firstCharacters(text, SYMBOL_CHARACTERS - 1) === text;
+}
+
+/**
+ * How many tokens have each of `pairs`' (contract, whole symbol), by {@link groupKey}: one statement however many
+ * pairs, none for none. A page's symbols are counted together, so a page of tokens with different symbols costs one
+ * read, not one per symbol.
+ */
+export async function groupCounts(read: ReadHandle, pairs: readonly { readonly contract: string; readonly symbol: Uint8Array }[]): Promise<Map<string, number>> {
+  const unique = new Map(pairs.map((pair) => [groupKey(pair.contract, pair.symbol), pair]));
+  const out = new Map<string, number>();
+  if (unique.size === 0) return out;
+  const asked = [...unique.values()];
+  const rows = await read.query(STATEMENTS.groupCounts, [asked.map((pair) => bytes(pair.contract)), asked.map((pair) => pair.symbol)]);
+  for (const r of rows) out.set(groupKey(toHex(r.address as Uint8Array), r.symbol as Uint8Array), num(r.n));
+  return out;
+}
+
 /**
  * The group of the tokens of `contract` whose served `symbol` is `symbol` (cut): its member count and first `limit`
  * members by (domainSep, kind), or `undefined` with fewer than two. `tokens.symbol` holds each token's whole usable
- * symbol. A served symbol under 12 characters is whole, so the group is the tokens with exactly that symbol: an
- * index-only count and the first `limit` members (`tokens_symbol_idx`). One of 12 characters may be the cut of longer
- * ones, so the tokens read are those whose symbol starts with it (a range of the same index), kept when their own cut
- * equals it: that read grows with the contract's symbols sharing the prefix (accepted; `apiReadTimeoutMs` bounds it).
+ * symbol. A served symbol under 12 characters is whole, so the group is the tokens with exactly that symbol: its
+ * count (`counted`, from {@link groupCounts} for the page; read here when not given) and, for two or more, the first
+ * `limit` members (`tokens_symbol_idx`). One of 12 characters may be the cut of longer ones, so the tokens read are
+ * those whose symbol starts with it (a range of the same index), kept when their own cut equals it: that read grows
+ * with the contract's symbols sharing the prefix (accepted; `apiReadTimeoutMs` bounds it).
  */
 export async function symbolGroup(
   read: ReadHandle,
   contract: string,
   symbol: Uint8Array,
   limit: number,
+  counted?: number,
 ): Promise<{ memberCount: number; members: { domainSep: string; kind: number }[] } | undefined> {
-  const text = decodeUtf8(symbol);
   const address = bytes(contract);
-  if (text !== undefined && firstCharacters(text, SYMBOL_CHARACTERS - 1) === text) {
-    const [c] = await read.query(STATEMENTS.groupCount, [address, symbol]);
-    const memberCount = num(c?.n ?? 0);
+  if (isWholeSymbol(symbol)) {
+    const memberCount = counted ?? (await groupCounts(read, [{ contract, symbol }])).get(groupKey(contract, symbol)) ?? 0;
     if (memberCount < 2) return undefined;
     const rows = await read.query(STATEMENTS.groupMembers, [address, symbol, limit]);
     return { memberCount, members: rows.map((r) => ({ domainSep: toHex(r.domain_sep as Uint8Array), kind: num(r.kind) })) };
