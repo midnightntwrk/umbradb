@@ -125,6 +125,20 @@ export function allowReadView(tx: Transaction, path: ReadViewPath): void {
 }
 
 /**
+ * Sends `text`, one or more statements, inside the transaction `tx` on the path a view's open and close take
+ * ({@link ReadViewPath.control}): one simple-protocol text, its results not read. For the engine's own statements
+ * between two blocks of one transaction (`./block-end.ts`); no module's statement goes this way. Throws, sending
+ * nothing, when `tx` is not a transaction a backend opened or a view of it is open (the text would run inside the
+ * view, and the view's close would undo it).
+ */
+export function controlText(tx: Transaction, text: string): Promise<void> {
+  const entry = registered.get(tx);
+  if (entry === undefined) throw new Error("controlText: the handle is not a transaction the database API opened");
+  if (entry.viewing) throw new Error("controlText: a view of this transaction is open; its close would undo the text");
+  return entry.path.control(text);
+}
+
+/**
  * Runs `body` with a read-only view of the transaction `tx` (see the module comment) and resolves with its result.
  * Throws, sending nothing, when `tx` is not a transaction a backend opened or a view of it is open.
  */
