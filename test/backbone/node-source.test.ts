@@ -2,6 +2,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { afterEach, describe, expect, it } from "vitest";
 import { NodeBlockSource, nodeSourceOf } from "../../src/backbone/core-block-fetch/node-source.js";
 import { UmbraError } from "../../src/db/errors.js";
+import { type Statement, statementText } from "../../src/db/repeated-statements.js";
 import { ledgerTableOf } from "../../src/ledger/networks.js";
 import { type ConnectSocket, connectWebSocket, NodeClient } from "../../src/node/index.js";
 import { BlockItems } from "../../src/runner/block-context.js";
@@ -125,10 +126,10 @@ async function open(
 }
 
 /** A read that answers `readCursor` with `cursor` (null: no blocks table). */
-function cursorRead(cursor: ChainBlock | null): { query(sql: string): Promise<Record<string, unknown>[]> } {
+function cursorRead(cursor: ChainBlock | null): { query(sql: Statement): Promise<Record<string, unknown>[]> } {
   return {
     query: async (sql) => {
-      if (sql.includes("to_regclass")) return [{ present: cursor !== null }];
+      if (statementText(sql).includes("to_regclass")) return [{ present: cursor !== null }];
       return cursor === null ? [] : [{ height: cursor.height, hash: cursor.hash, parent_hash: cursor.parentHash }];
     },
   };

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { statementText } from "../../src/db/repeated-statements.js";
 import type { BlockSource } from "../../src/runner/block-source.js";
 import { InMemoryBlockSource, inMemoryBlock } from "../../src/runner/in-memory-source.js";
 import { settlesWithin } from "../db/backends.js";
@@ -180,7 +181,7 @@ describe("InMemoryBlockSource: the block source over blocks in memory", () => {
     const asked: string[] = [];
     const none = await source.cursor({
       query: async (sql) => {
-        asked.push(sql);
+        asked.push(statementText(sql));
         return [{ present: false }];
       },
     });
@@ -189,7 +190,7 @@ describe("InMemoryBlockSource: the block source over blocks in memory", () => {
     const hash = new Uint8Array(32).fill(1);
     const parentHash = new Uint8Array(32).fill(2);
     const cursor = await source.cursor({
-      query: async (sql) => (sql.startsWith("SELECT to_regclass") ? [{ present: true }] : [{ height: 4n, hash, parent_hash: parentHash }]),
+      query: async (sql) => (statementText(sql).startsWith("SELECT to_regclass") ? [{ present: true }] : [{ height: 4n, hash, parent_hash: parentHash }]),
     });
     expect(cursor).toEqual({ height: 4n, hash, parentHash });
   });

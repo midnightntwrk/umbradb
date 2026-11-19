@@ -278,6 +278,18 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   not hold its key; if it does, the change goes unseen, but by `verify`, until a block that does not continue the one
   before, or the bound, empties the copy. In the block trace, `counts` and `references` hold only the keys asked of the
   database, and `copyHits`, `copyMisses` and `copyEmptied` are new; the operator guide lists them.
+- **PostgreSQL sessions prepare the statements without parameters that every block repeats.** The head read, the
+  queue read of a run that sweeps, the digest read, and the shadow tables' probe and drains are now prepared once per
+  session and run by name, as a text with parameters already was, within the session's bound of 256 texts. While its
+  statement stays valid, an execution by name is not parsed again, and PostgreSQL reuses the plan it keeps for it
+  where it chooses to. Each of these texts names its tables with their schema and holds no literal whose value depends
+  on a setting. UmbraDB's own code hands each of them to its handle as a marked statement, an object only that code
+  makes, and a handle's `query` takes one where it takes a text. Every text without parameters handed over as a
+  string, a module's among them and one equal to a marked text, runs unnamed as before. A marked statement also runs
+  unnamed when it is asked for while another statement of its session has no answer yet; on a session that held it
+  prepared when a schema change the process made was counted (a migration, a writer's rollback); and on a session
+  where an execution of it by name failed. While a marked statement's execution by name has no answer, its session
+  sends nothing else: a statement asked for meanwhile is sent after that answer.
 - **The ledger worker applies the next block while a block's transaction runs.** `core-ledger-state`'s `on-settle` of
   a block sends the apply of the next block to the ledger worker right after it sends the block's eviction (right after
   its computation when it evicts nothing), when the node source has that block prepared; the worker answers in order,
