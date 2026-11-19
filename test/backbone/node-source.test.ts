@@ -1312,6 +1312,84 @@ describe("the ledger roots' prefetch (00033 F1)", () => {
     expect(rootCalls(node, failing)).toBe(1);
   }, PATIENCE_MS);
 
+  it("keeps the roots of heights taken ahead until on-compute asks for each, then drops those below the block before the one asked", async () => {
+    const { source, node } = await open(catchUpWithRoots(12), { prefetchWindow: 4 });
+    source.attach(new Recorder());
+    await source.finalizedHead();
+    await source.prepared(1n);
+    await source.ledgerStateRoot(refOf(at(1)));
+    // Heights 2 to 9 are taken before any of them is computed, as for one transaction: each root is prefetched once.
+    for (let height = 2n; height <= 9n; height++) await source.prepared(height);
+    for (let height = 2; height <= 9; height++) await until(() => rootCalls(node, at(height)) === 1, `root ${height} prefetched`);
+    for (let height = 2; height <= 9; height++) {
+      expect(hex(await source.ledgerStateRoot(refOf(at(height))))).toBe(root(at(height)));
+      expect(rootCalls(node, at(height)), `root ${height}`).toBe(1);
+    }
+    // Once 9's was asked: 8, the block before, is still held; 7 is passed, and asking for it again calls the node.
+    expect(hex(await source.ledgerStateRoot(refOf(at(8))))).toBe(root(at(8)));
+    expect(rootCalls(node, at(8))).toBe(1);
+    void source.ledgerStateRoot(refOf(at(7))).catch(() => undefined);
+    await until(() => rootCalls(node, at(7)) === 2, "root 7 asked anew");
+  }, PATIENCE_MS);
+
+  it("answered: resolves at once, with no call, while no root was asked in the run", async () => {
+    const { source, node } = await open(catchUpWithRoots(8), { prefetchWindow: 2 });
+    source.attach(new Recorder());
+    await source.finalizedHead();
+    await source.prepared(1n);
+    await source.answered(refOf(at(1)));
+    await source.answered(refOf(at(6)));
+    await sleep(50);
+    expect(rootCalls(node)).toBe(0);
+  }, PATIENCE_MS);
+
+  it("answered: once a root was asked, waits for the block's root, asks it when no prefetch did, and on-compute gets it with no second call", async () => {
+    const { source, node } = await open(catchUpWithRoots(10, { delayMs: 300 }), { prefetchWindow: 2 });
+    source.attach(new Recorder());
+    await source.finalizedHead();
+    await source.prepared(1n);
+    await source.ledgerStateRoot(refOf(at(1)));
+    // A root the prefetch asked is waited for, not asked again.
+    await source.prepared(2n);
+    await until(() => rootCalls(node, at(2)) === 1, "root 2 prefetched");
+    await source.answered(refOf(at(2)));
+    expect(rootCalls(node, at(2))).toBe(1);
+    expect(hex(await source.ledgerStateRoot(refOf(at(2))))).toBe(root(at(2)));
+    expect(rootCalls(node, at(2))).toBe(1);
+    // Height 6 is above the window: no prefetch asked its root.
+    expect(rootCalls(node, at(6))).toBe(0);
+    const from = Date.now();
+    await source.answered(refOf(at(6)));
+    expect(Date.now() - from).toBeGreaterThanOrEqual(250);
+    expect(rootCalls(node, at(6))).toBe(1);
+    const taken = Date.now();
+    expect(hex(await source.ledgerStateRoot(refOf(at(6))))).toBe(root(at(6)));
+    expect(Date.now() - taken).toBeLessThan(200);
+    expect(rootCalls(node, at(6))).toBe(1);
+  }, PATIENCE_MS);
+
+  it("answered: resolves when the root's call fails, and on-compute gets the node's error, asked once", async () => {
+    const failing = at(4);
+    const records: TapeRecord[] = [
+      ...subscriptions(),
+      ...headRead(at(6)),
+      ...chain.slice(1, 7).flatMap((block) =>
+        block === failing
+          ? [...hashAndBlock(block), { method: "midnight_ledgerStateRoot", params: [block.hex], error: { code: -32000, message: "state unavailable" } }]
+          : [...hashAndBlock(block), rootRecord(block)],
+      ),
+    ];
+    const { source, node } = await open(records, { prefetchWindow: 1 });
+    source.attach(new Recorder());
+    await source.finalizedHead();
+    await source.prepared(1n);
+    await source.ledgerStateRoot(refOf(at(1)));
+    await source.answered(refOf(failing));
+    expect(rootCalls(node, failing)).toBe(1);
+    expect(await rejection(source.ledgerStateRoot(refOf(failing)))).toMatchObject({ code: "node-error", retryable: false });
+    expect(rootCalls(node, failing)).toBe(1);
+  }, PATIENCE_MS);
+
   /**
    * The run-end check: with every root slow (5 s) and one slot, a run asks a root at on-compute (height 1, nothing
    * prefetched it), the prefetch asks the next ones, and further ones wait for the slot. When the run ends every root

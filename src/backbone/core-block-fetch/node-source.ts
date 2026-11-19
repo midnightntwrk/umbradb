@@ -90,10 +90,16 @@
  * each finalized height it fetches itself (never a queued best block's), in a slot of its own after the block's take.
  * `on-compute` then finds the answer waiting instead of paying the node's latency in every block. It is the same call,
  * with the same retries, at the same finalized hash, so its answer or its error is the one `on-compute` gets. It is kept
- * until the loop passes the height, so a block applied again (the restart after a refused eviction) asks no second
- * time. A root `on-compute` asks for before any prefetch did (a run's first heights, a block taken from the queue) is
- * asked at once, outside the slots as before, and kept the same way. A run that ends aborts all its roots' calls
- * through their `signal`, as it drops the prefetch.
+ * until `on-compute` has asked for the root two heights above it, so a block applied again (the restart after a refused
+ * eviction) asks no second time, and a root asked while the loop took heights ahead of its transaction stays until its
+ * block's `on-compute`. A root `on-compute` asks for before any prefetch did (a run's first heights, a block taken from
+ * the queue) is asked at once, outside the slots as before, and kept the same way. A run that ends aborts all its
+ * roots' calls through their `signal`, as it drops the prefetch.
+ *
+ * **Roots held before a transaction of several heights.** The loop may ask that a block's answers be held before it
+ * opens a transaction that will hold that block after others ({@link NodeBlockSource.answered}): the source then waits
+ * for the block's root, asking it if no prefetch did, so that `on-compute` inside that transaction gets it without a
+ * call to the node. Only once a root was asked for in the run: without `core-ledger-state` no root is ever asked.
  */
 
 import { UmbraError } from "../../db/errors.js";
@@ -340,7 +346,6 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     this.#cursor = height - 1n;
     for (const key of this.#prefetch.keys()) if (key < height) this.#prefetch.delete(key);
     for (const key of this.#finalized.keys()) if (key < height - 1n) this.#finalized.delete(key);
-    for (const [key, { height: at }] of this.#roots) if (at < height - 1n) this.#roots.delete(key);
     for (const key of this.#fetchedFinalized.keys()) if (key < height) this.#fetchedFinalized.delete(key);
     this.#queued(async () => {
       this.#queue = this.#queue.filter((queued) => queued.block.height >= height);
@@ -427,9 +432,11 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     if (!this.#rootsWanted && this.#runner !== undefined) {
       this.#rootsWanted = true;
       // The heights the prefetch fetched before this first ask, all within the window, get their roots asked now.
-      for (const [height, hash] of this.#fetchedFinalized) if (height > block.height) this.#prefetchRoot(height, hash);
+      for (const [height, hash] of this.#fetchedFinalized) if (height > block.height) void this.#prefetchRoot(height, hash);
     }
     if (this.#runner === undefined) return this.client.ledgerStateRoot(block.hash);
+    // The roots below the block before this one are passed: the loop asks for them in height order.
+    for (const [passed, { height: at }] of this.#roots) if (at < block.height - 1n) this.#roots.delete(passed);
     const key = hexOf(block.hash);
     const known = this.#roots.get(key);
     if (known !== undefined) return known.root;
@@ -439,6 +446,20 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     root.catch(() => undefined);
     this.#roots.set(key, { height: block.height, root });
     return root;
+  }
+
+  /**
+   * Resolves once the source holds `block`'s ledger state root, or the failure of its call, when a root was asked for
+   * in this run (`core-ledger-state` asks for one at every block's `on-compute`); at once otherwise. The root is asked
+   * in a slot unless it was asked already, and kept: {@link ledgerStateRoot} then gives that answer, or that failure,
+   * without a wait. Never rejects.
+   */
+  async answered(block: BlockRef): Promise<void> {
+    if (!this.#rootsWanted) return;
+    await this.#prefetchRoot(block.height, block.hash).then(
+      () => undefined,
+      () => undefined,
+    );
   }
 
   /** The genesis ledger state: `system_properties.genesis_state`, with the client's retries. */
@@ -660,7 +681,7 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     live();
     if (queued !== undefined) return queued;
     this.#fetchedFinalized.set(height, hash);
-    if (this.#rootsWanted) this.#prefetchRoot(height, hash);
+    if (this.#rootsWanted) void this.#prefetchRoot(height, hash);
     return this.#slot(async () => {
       const node = await this.client.block(hash);
       live();
@@ -669,10 +690,14 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     });
   }
 
-  /** Asks, in a slot, for the ledger root at the finalized `hash` of `height`, for `ledgerStateRoot` to take. */
-  #prefetchRoot(height: bigint, hash: Uint8Array): void {
+  /**
+   * Asks, in a slot, for the ledger root at the finalized `hash` of `height`, for `ledgerStateRoot` to take, unless it
+   * was asked already; resolves or rejects with its answer.
+   */
+  #prefetchRoot(height: bigint, hash: Uint8Array): Promise<Uint8Array> {
     const key = hexOf(hash);
-    if (this.#roots.has(key)) return;
+    const known = this.#roots.get(key);
+    if (known !== undefined) return known.root;
     const signal = this.#rootsAbort.signal;
     const root = this.#slot(async () => {
       // A root queued for a slot by a run that ended is never asked.
@@ -682,6 +707,7 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     // `ledgerStateRoot` awaits it when it takes it; a root the loop passed, or a run that ended, leaves it unawaited.
     root.catch(() => undefined);
     this.#roots.set(key, { height, root });
+    return root;
   }
 
   /** `on-fetch` and `on-parse` for `block`, fetched as `node`, through `runner`. */

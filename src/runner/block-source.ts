@@ -96,6 +96,15 @@ export interface BlockSource {
    * height.
    */
   prepared?(height: bigint): Promise<PreparedBlock>;
+  /**
+   * Optional (a source its modules' callbacks ask about a block from `on-compute` on; the node source: the ledger
+   * state root `core-ledger-state` compares): resolves once the source holds every such answer about `block`, or the
+   * failure of one, which the callback that asks then gets as it would have. Never rejects. The loop awaits it for each
+   * block after the first of a chunk (`./loop.ts`), after the first block's `on-compute` and before the chunk's
+   * `BEGIN`, so that no callback waits for the chain while a transaction holding several blocks is open. It is not
+   * called for a block processed alone.
+   */
+  answered?(block: BlockRef): Promise<void>;
   /** Optional: the source's conditions now, such as `finality-stall` while its queue is full. */
   conditions?(): readonly SourceCondition[];
   /**
