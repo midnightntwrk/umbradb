@@ -287,7 +287,7 @@ export class MetadataState {
     return symbolGroups(this.identities());
   }
 
-  /** Rejected MIP-0018 events of a contract on a network, in chain order (for the mark). */
+  /** Rejected MIP-0018 events of a contract on a network, in chain order. */
   rejections(network: string, contractAddress: string): Rejection[] {
     const contract = contractAddress.toLowerCase();
     return (this.retained.get(network) ?? [])
@@ -296,7 +296,7 @@ export class MetadataState {
   }
 
   /**
-   * Whether the contract has any accepted or rejected MIP-0018 event on the network. Never an input to a mark or a
+   * Whether the contract has any accepted or rejected MIP-0018 event on the network. Never an input to a
    * listing: it stays `true` after every identity of the contract was withdrawn.
    */
   hasEvents(network: string, contractAddress: string): boolean {

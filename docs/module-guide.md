@@ -1060,7 +1060,7 @@ UmbraDB's package carries two public modules that are not core modules, for the 
 - `token-metadata` reads the `contract-logs` item (§9) and keeps each token's current metadata fields in its tables,
   which it provides as two `table` items (§13), `token-metadata-events` and `token-metadata-state`
   (`src/features/token-metadata/`).
-- `token-metadata-api` requires those two items and serves them on one route, `POST /token-metadata-api/v1/tokens`
+- `token-metadata-api` requires `token-metadata-state` and serves its tables on one route, `POST /token-metadata-api/v1/tokens`
   ([docs/token-metadata-api.md](token-metadata-api.md)), the route `getTokens`, registered with the core (§7), with zod schemas of its input and output (`src/features/token-metadata-api/`). It holds no state:
   no tables, no migrations, only `on-start-api`.
 
@@ -1103,7 +1103,7 @@ export default defineConfig({
   by its id, the hash of domain separator and contract, which is its color for kinds 1 and 2, and its kind; the row
   is deleted with the token's last field), `fields` (mutable: each token's current defined fields, whole; keys
   MIP-0018 does not define are not stored) and `events` (append-only: each rejected event and unresolved log
-  site, with its position, contract and reason, for marks). They are deterministic module tables (§4): names and symbols are
+  site, with its position, contract and reason; the API does not read it). They are deterministic module tables (§4): names and symbols are
   stored whole and cut to 64 and 12 characters only when served, since the cut depends on the platform's Unicode data.
 - **The API holds no state.** Startup refuses it without the indexer (`item-no-provider`); added to a database whose
   indexer already ran, from a height above the cursor like any added entry, it answers as if it had run from S. Every

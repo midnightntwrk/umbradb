@@ -9,9 +9,9 @@
  * - **Files by role**: `./schemas.ts` the request and answer schemas and their types, `./routes.ts` the routes,
  *   `./handlers.ts` what each route answers, and `./sql.ts` every statement it sends. A route names no transport
  *   (`../../modules/route.ts`): the core serves it over HTTP, checks inputs and outputs and maps errors.
- * - **Requires** `token-metadata`'s two `table` items (`../token-metadata/schema.ts`), so startup refuses it in a
- *   configuration without `token-metadata` at its heights, and it reads those tables at each answer's committed
- *   height (`./sql.ts`).
+ * - **Requires** `token-metadata`'s `token-metadata-state` item, the tables `tokens` and `fields`
+ *   (`../token-metadata/schema.ts`), so startup refuses it in a configuration without `token-metadata` at its
+ *   heights, and it reads those tables at each answer's committed height (`./sql.ts`).
  * - **Holds no state**: no tables, no migrations, nothing per block, only `on-start-api`. Added to a database whose
  *   indexer already ran (from a height above the cursor, as any added entry), it answers as if it had run from S.
  */
@@ -19,7 +19,7 @@
 import { z } from "zod";
 import { UMBRADB_VERSION } from "../../config/build.js";
 import { defineModule } from "../../modules/declaration.js";
-import { TOKEN_METADATA_EVENTS_ITEM, TOKEN_METADATA_STATE_ITEM } from "../token-metadata/schema.js";
+import { TOKEN_METADATA_STATE_ITEM } from "../token-metadata/schema.js";
 import { ROUTES } from "./routes.js";
 
 /** The module's id. */
@@ -30,7 +30,7 @@ export const TOKEN_METADATA_API = defineModule({
   id: TOKEN_METADATA_API_ID,
   version: UMBRADB_VERSION,
   side: "public",
-  requires: [TOKEN_METADATA_EVENTS_ITEM, TOKEN_METADATA_STATE_ITEM],
+  requires: [TOKEN_METADATA_STATE_ITEM],
   provides: [],
   startsMidChain: true,
   configSchema: z.object({}),

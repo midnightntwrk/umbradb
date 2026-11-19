@@ -61,16 +61,10 @@ describe.each(PROCESS_BACKENDS)("the API's edges on $name", (backend: ProcessBac
   }, 240_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("an unresolved event marks its contract's complete tokens unresolved, with its position", async () => {
-    const got = await tokens({ contract: hex(A), domainSep: hex(domain(3)), kind: 1 });
-    expect(got.json.items[0].mark).toEqual({
-      mark: "unresolved",
-      reasons: ["unresolved-log"],
-      reasonCount: 0,
-      unresolved: { count: 1, positions: [{ height: String(S + 1), txIndex: 7, eventIndex: 0 }] },
-      missing: [],
-      tags: [],
-    });
+  it("an unresolved event of a contract changes nothing in its tokens' answers", async () => {
+    const [token] = (await tokens({ contract: hex(A), domainSep: hex(domain(3)), kind: 1 })).json.items;
+    expect(token.common).toEqual({ name: "Three", symbol: "ZZ", decimals: "0", standards: null });
+    expect("mark" in token).toBe(false);
   }, 60_000);
 
   it("a type-4 value that is not UTF-8 is served as hex only, with no text view", async () => {

@@ -81,7 +81,6 @@ describe.each(PROCESS_BACKENDS)("the withdrawal, usability and truncation scenar
         for (const key of ["name", "decimals", "standards", "image_sha256"]) expect([key, byKey[key].usable]).toEqual([key, false]);
         expect(byKey.name.value).toEqual({ hex: "0x", text: "" });
         expect(byKey.decimals.value).toEqual({ hex: hex(text("6")), text: "6" });
-        expect(y.mark).toMatchObject({ mark: "partial", missing: ["name", "decimals"] });
 
         // S11: served cut, stored whole.
         const [z] = (await at(one(Z, 1))).items;
@@ -122,7 +121,6 @@ describe.each(PROCESS_BACKENDS)("the withdrawal, usability and truncation scenar
         const [x1] = (await at(one(X, 1))).items;
         expect(x1.fields.map((f: { key: { utf8: string } }) => f.key.utf8)).toEqual(["name"]);
         expect(x1.common).toEqual({ name: "New", symbol: null, decimals: null, standards: null });
-        expect(x1.mark).toMatchObject({ mark: "partial", missing: ["symbol", "decimals"] });
         expect((await at(one(X, 3))).items).toEqual(kind3);
       });
     } finally {

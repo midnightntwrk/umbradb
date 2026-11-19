@@ -22,10 +22,6 @@ export const MAX_LIMIT = 500;
 export const DEFAULT_LIMIT = 100;
 /** The most defined fields served per token, in key byte order; `fieldsTruncated` says when a token has more. */
 export const MAX_TOKEN_FIELDS = 256;
-/** The most rejection reasons and unresolved positions listed in a mark (all are counted). */
-export const MAX_MARK_REASONS = 100;
-/** This is only for core-contract-logs-fast */
-export const MAX_MARK_UNRESOLVED = 100;
 /** The most members listed in a symbol group (all are counted in `memberCount`). */
 export const MAX_GROUP_MEMBERS = 100;
 
@@ -82,19 +78,6 @@ export const Field = z.strictObject({
 });
 export type Field = z.output<typeof Field>;
 
-const Position = z.strictObject({ height: height(), txIndex: z.int(), eventIndex: z.int() });
-
-export const Mark = z.strictObject({
-  mark: z.enum(["ok", "partial", "incorrect", "unresolved", "none"]),
-  reasons: z.array(z.string()),
-  reasonCount: z.int(),
-  /** This is only for core-contract-logs-fast */
-  unresolved: z.strictObject({ count: z.int(), positions: z.array(Position) }),
-  missing: z.array(z.string()),
-  tags: z.array(z.string()),
-});
-export type Mark = z.output<typeof Mark>;
-
 export const Common = z.strictObject({
   name: z.string().nullable(),
   symbol: z.string().nullable(),
@@ -116,7 +99,7 @@ export type Image = z.output<typeof Image>;
 export const KindName = z.enum(["shielded-utxo", "unshielded-utxo", "contract-token"]);
 export type KindName = z.output<typeof KindName>;
 
-/** A token with every defined field (up to {@link MAX_TOKEN_FIELDS}), its common fields, group, mark and image. */
+/** A token with every defined field (up to {@link MAX_TOKEN_FIELDS}), its common fields, group and image. */
 export const TokenJson = z.strictObject({
   contractAddress: hash32(),
   domainSep: hash32(),
@@ -128,7 +111,6 @@ export const TokenJson = z.strictObject({
   fieldCount: z.int().min(1),
   fieldsTruncated: z.boolean(),
   group: Group.nullable(),
-  mark: Mark,
   image: Image.nullable(),
 });
 export type TokenJson = z.output<typeof TokenJson>;

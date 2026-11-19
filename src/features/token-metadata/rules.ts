@@ -12,8 +12,6 @@
  *   indexer stores values whole; the API cuts them where it serves them, and a cut value stays usable.
  * - **Symbol grouping** (MIP "Symbol grouping"): the tokens of one contract with the same usable `symbol` bytes form a
  *   group when there are two or more.
- * - **Marks**: ✓ ok, ⚠ partial, ⚠ incorrect, ⚠ unresolved or none, from the token's current fields and its contract's
- *   rejected events and unresolved log sites ({@link tokenMark}).
  */
 
 import { decodeUtf8, toHex, ValType } from "./codec/index.js";
@@ -22,7 +20,7 @@ const enc = new TextEncoder();
 
 // ── Common fields ────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** The common keys a token's summary and mark read (`name`, `symbol`, `decimals`, `standards`), as hex. */
+/** The common keys a token's summary reads (`name`, `symbol`, `decimals`, `standards`), as hex. */
 export const COMMON_KEY_HEX = {
   name: toHex(enc.encode("name")),
   symbol: toHex(enc.encode("symbol")),
@@ -30,7 +28,7 @@ export const COMMON_KEY_HEX = {
   standards: toHex(enc.encode("standards")),
 } as const;
 
-/** The image keys of the common fields (`image`, `image_sha256`), as hex. Neither affects a mark. */
+/** The image keys of the common fields (`image`, `image_sha256`), as hex. */
 export const IMAGE_KEY_HEX = {
   image: toHex(enc.encode("image")),
   imageSha256: toHex(enc.encode("image_sha256")),
@@ -42,7 +40,7 @@ const COMMON_KEYS: ReadonlySet<string> = new Set([...Object.values(COMMON_KEY_HE
 /** `image_sha256` is usable only as exactly this many bytes. */
 const IMAGE_SHA256_BYTES = 32;
 
-/** A field's current value, as the API reads it and the mark and groups take it. */
+/** A field's current value, as the API reads it and groups take it. */
 export interface Field {
   key: Uint8Array;
   valType: number;
@@ -196,90 +194,4 @@ export function symbolGroups(tokens: Iterable<GroupableToken>): SymbolGroup[] {
     .filter((g) => g.members.length >= 2)
     .map((g) => ({ ...g, members: g.members.sort((a, b) => byString(a.domainSep, b.domainSep) || a.kind - b.kind) }))
     .sort((a, b) => byString(a.contractAddress, b.contractAddress) || byString(a.symbol, b.symbol));
-}
-
-// ── Marks ────────────────────────────────────────────────────────────────────────────────────────────────────────
-
-export type MarkKind = "ok" | "partial" | "incorrect" | "unresolved" | "none";
-
-/**
- * This is only for core-contract-logs-fast.
- *
- * The reason a mark carries when the token's contract has unresolved log sites: `log` ops whose logged value the raw
- * transaction does not show, so the contract may have published, renamed or withdrawn metadata this indexer cannot
- * read.
- */
-export const UNRESOLVED_LOG_REASON = "unresolved-log";
-
-export interface TokenMark {
-  /** ✓ ok, ⚠ partial, ⚠ incorrect, ⚠ unresolved, or no mark. */
-  mark: MarkKind;
-  /**
-   * The reasons of the contract's rejected MIP-0018 events, in chain order (`incorrect`), followed by
-   * {@link UNRESOLVED_LOG_REASON} once when the contract has unresolved log sites (`unresolved`, or `incorrect` with
-   * both).
-   */
-  reasons: string[];
-  /** `partial`: which of `name`, `symbol`, `decimals` are missing or unusable. */
-  missing: Array<"name" | "symbol" | "decimals">;
-  /** The usable `standards` identifiers, deduplicated in order (shown as tags; self-declared, never proof). */
-  tags: string[];
-}
-
-export interface MarkInput {
-  /**
-   * The token's fields, or `undefined` when it has none (never described, or withdrawn). An empty map means the same
-   * as `undefined`.
-   */
-  fields: ReadonlyMap<string, Pick<Field, "valType" | "value" | "usable">> | undefined;
-  /**
-   * Whether the token exists (has a defined field), when `fields` holds only some of them (the API reads only the
-   * common keys); omitted = decided from `fields`.
-   */
-  described?: boolean;
-  /**
-   * Reasons of the rejected MIP-0018 events of the token's contract, in chain order: all of them, or the first ones
-   * (the mark only needs to know whether there is one).
-   */
-  contractRejections: readonly string[];
-  /**
-   * This is only for core-contract-logs-fast.
-   *
-   * How many unresolved log sites the token's contract has (default 0).
-   */
-  contractUnresolvedLogs?: number;
-}
-
-/**
- * The one place that decides a token's mark:
- * - ⚠ incorrect: the token's contract has a rejected MIP-0018 event (the reasons are shown);
- * - ⚠ unresolved: the contract has no rejected event but has an unresolved log site; the reason `unresolved-log` is
- *   shown. Nothing says the contract published anything malformed, only that UmbraDB cannot verify what it published,
- *   so a token of such a contract never keeps a clean ✓;
- * - ✓ ok: the token exists with usable `name`, `symbol` and `decimals` (the keys issuers SHOULD publish) and its
- *   contract has no rejected event and no unresolved log site;
- * - ⚠ partial: the token exists but one of the three is missing or unusable;
- * - no mark: none of these (no MIP-0018 event, or a token withdrawn and never described again).
- *
- * Precedence: incorrect, then unresolved, then the token's own fields; with both rejected events and unresolved log
- * sites, the mark is ⚠ incorrect and its reasons end with `unresolved-log`. The mark depends on current state only: a
- * token never described or withdrawn has no fields, no `missing` list and no tags, and is marked from its contract's
- * rejections and unresolved log sites alone. Usable `standards` identifiers are returned as tags; no standard changes
- * what the marks mean yet.
- */
-export function tokenMark(input: MarkInput): TokenMark {
-  const described = input.described ?? (input.fields !== undefined && input.fields.size > 0);
-  const fields = described ? (input.fields ?? new Map<string, Pick<Field, "valType" | "value" | "usable">>()) : undefined;
-  const tags: string[] = [];
-  const standards = fields?.get(COMMON_KEY_HEX.standards);
-  if (standards !== undefined && standards.usable === true)
-    for (const id of parseStandards(standards.value) ?? []) if (!tags.includes(id)) tags.push(id);
-  const missing: TokenMark["missing"] = [];
-  if (fields !== undefined)
-    for (const name of ["name", "symbol", "decimals"] as const) if (fields.get(COMMON_KEY_HEX[name])?.usable !== true) missing.push(name);
-  const unresolved = (input.contractUnresolvedLogs ?? 0) > 0 ? [UNRESOLVED_LOG_REASON] : [];
-  if (input.contractRejections.length > 0) return { mark: "incorrect", reasons: [...input.contractRejections, ...unresolved], missing, tags };
-  if (unresolved.length > 0) return { mark: "unresolved", reasons: unresolved, missing, tags };
-  if (fields === undefined) return { mark: "none", reasons: [], missing: [], tags: [] };
-  return { mark: missing.length === 0 ? "ok" : "partial", reasons: [], missing, tags };
 }

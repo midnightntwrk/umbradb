@@ -23,7 +23,7 @@ import { blockLogs, causes, contract, domain, eventData, log, miscData, post, ru
  *   and tag; the negative control, a reader that skips unknown tags, lets the block commit.
  * - S7: two candidates in one transaction, one malformed, stores one `reject` with its reason and applies the other;
  *   and an unresolved log site (as `core-contract-logs-fast` gives one) is stored `unresolved` with the provider's
- *   reason at its own position in its transaction, never applied, and marks its contract's tokens `unresolved`.
+ *   reason at its own position in its transaction, never applied, and no answer of the route changes.
  *   **Negative control:** numbering a transaction's events from its first log alone, as before unresolved sites, moves
  *   the valid event onto the site's position.
  */
@@ -139,7 +139,7 @@ describe.each(PROCESS_BACKENDS)("token-metadata's event rows on $name", (backend
     }
   }, 240_000);
 
-  it("an unresolved site is stored unresolved at its position, never applied, and marks the contract's tokens", async () => {
+  it("an unresolved site is stored unresolved at its position, never applied, and changes no answer", async () => {
     const db = await backend.database();
     const unresolved = new Map([[BigInt(S + 1), [site(0, 0, "not-a-literal"), site(1, 2, "partial-transaction")]]]);
     const logs = new Map([[BigInt(S + 1), [log(0, 1, A, valid), log(1, 3, A, otherValid)]]]);
@@ -152,11 +152,9 @@ describe.each(PROCESS_BACKENDS)("token-metadata's event rows on $name", (backend
     ]);
     // The valid events beside them (event_index 1 of each transaction) are applied: two tokens.
     expect(await db.query("SELECT encode(domain_sep, 'hex') AS d FROM token_metadata.tokens ORDER BY d")).toEqual([{ d: hex(D) }, { d: hex(D2) }]);
-    expect(identity.mark).toMatchObject({
-      mark: "unresolved",
-      reasons: ["unresolved-log"],
-      unresolved: { count: 2, positions: [{ height: String(S + 1), txIndex: 0, eventIndex: 0 }, { height: String(S + 1), txIndex: 1, eventIndex: 0 }] },
-    });
+    // The route serves the token as its fields say; the unresolved sites are in the indexer's table only.
+    expect(identity.fields.length).toBeGreaterThan(0);
+    expect("mark" in identity).toBe(false);
   }, 240_000);
 
   it("a Misc log with an unknown tag halts its block with callback-error naming height, transaction, log and tag", async () => {

@@ -48,7 +48,6 @@ withdrawn) is in no answer: an empty `items` is a valid answer.
   "common": { "name": "Acme Gold", "symbol": "AGLD", "decimals": "6", "standards": null },
   "fields": [ Field, … ], "fieldCount": 4, "fieldsTruncated": false,
   "group": { "symbol": { "hex": "0x41474c44", "utf8": "AGLD" }, "memberCount": 2, "members": [ { "domainSep": "0x0101…", "kind": 1 }, … ] },
-  "mark": { "mark": "ok", "reasons": [], "reasonCount": 0, "unresolved": { "count": 0, "positions": [] }, "missing": [], "tags": [] },
   "image": { "url": "https://example.com/agld.png", "status": "pending", "imageUrl": null }
 }
 ```
@@ -72,8 +71,7 @@ withdrawn) is in no answer: an empty `items` is a valid answer.
 
 `value.text` is given for the text types (1, 3, 4) when the bytes are valid UTF-8, `value.integer` (a decimal string)
 for type 2. `usable` answers the common-field rule for a common key, else `null`. `updatedAt` is where the value was
-set: `height` is a decimal string, and `eventIndex` is the event's position among its transaction's log sites. A
-mark's unresolved positions give `height` the same way.
+set: `height` is a decimal string, and `eventIndex` is the event's position among its transaction's log sites.
 
 ## Rules
 
@@ -82,7 +80,7 @@ mark's unresolved positions give `height` the same way.
 | Defined keys only | A key is served only when MIP-0018 defines it: `name`, `symbol`, `decimals`, `standards`, `image`, `image_sha256`. Other keys are not stored, so they are never served and never make a token exist. |
 | Withdrawal | A token exists only while one of its defined fields has a value; after its last is deleted it is in no answer, exactly as if it had never been described. |
 | Lengths | `name` and `symbol` are served as their first 64 and 12 characters (grapheme clusters, UAX #29); they are stored whole. |
-| Marks | `incorrect` the token's contract has a rejected MIP-0018 event (first 100 reasons, in chain order); else `unresolved` it has a log `core-contract-logs-fast` could not read (reason `unresolved-log`, first 100 positions); else `partial` `name`, `symbol` or `decimals` missing or unusable; else `ok`. Usable `standards` identifiers are `tags` (self-declared, never proof). |
+| No verdict | An answer gives a token's fields and says nothing about them: a client decides what a missing or unusable field means. A rejected event of the token's contract changes nothing in the answer. |
 | Hostile text | The body is pure ASCII: every non-ASCII character and `<`, `>`, `&` are `\uXXXX` escapes; parsing gives the exact text back. |
 | Bounded cost | Each answer reads in a fixed number of statements, through the indexer's indexes. One accepted exception: the group of a served 12-character symbol reads every symbol of its contract starting with it (`apiReadTimeoutMs` bounds the request). |
 

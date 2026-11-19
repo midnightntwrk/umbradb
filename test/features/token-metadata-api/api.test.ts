@@ -1,9 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { tokenColor } from "../../../src/features/token-metadata/color.js";
 import { TokensRequest, TokensResponse } from "../../../src/features/token-metadata-api/schemas.js";
-import { markJson } from "../../../src/features/token-metadata-api/handlers.js";
 import { commonRecords, EVENT_NAME, metadataRecord, toHex, withdrawRecords } from "../../../src/features/token-metadata/codec/index.js";
-import type { Field } from "../../../src/features/token-metadata/rules.js";
 import type { UmbraDBHandle } from "../../../src/library/start-umbradb.js";
 import { cursorReaches } from "../../library/library-fixtures.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../../runner/process-backends.js";
@@ -11,14 +9,15 @@ import { blockLogs, contract, domain, eventData, get, type Got, miscData, post, 
 
 /**
  * `token-metadata-api`'s one route, `POST /token-metadata-api/v1/tokens`, on the module API listener, on PostgreSQL 18
- * and PGlite, over one chain with a token per mark, a symbol group, hostile text, an image and a withdrawn token.
+ * and PGlite, over one chain with complete and partial tokens, a contract with a rejected event, a symbol group,
+ * hostile text, an image and a withdrawn token.
  * Every answer is checked against the route's own output schema.
  *
  * - **The four selectors:** colors (both kinds of a color, several colors at once), a contract (paged, its cursor bound
  *   to it), a contract and domain separator (its kinds), and all three with the kind.
- * - **A token:** every defined field in key order, the common fields, its group by symbol, its mark, its image pending.
- * - **Marks:** `ok`, `partial` and `incorrect` through the route; `unresolved` through `markJson` (an unresolved site
- *   through the process: `events.test.ts`).
+ * - **A token:** every defined field in key order, the common fields, its group by symbol, its image pending.
+ * - **No verdict:** an answer gives a token's fields and nothing about them; a rejected event of its contract changes
+ *   nothing in it.
  * - **Input:** a body that matches no selector is 400 `invalid-request`, naming the rule and never the input; a forged or
  *   foreign cursor is 400. The module API's own 404 and 405 are as they are.
  * - **Output:** ASCII JSON with hostile text, the response headers and the core's `X-Umbra-*`.
@@ -87,7 +86,7 @@ describe.each(PROCESS_BACKENDS)("token-metadata-api on $name", (backend: Process
     await backend.stop();
   }, 60_000);
 
-  it("a token: every defined field in key order, its common fields, group by symbol, mark and image", async () => {
+  it("a token: every defined field in key order, its common fields, group by symbol and image", async () => {
     const got = await tokens({ contract: hex(A), domainSep: hex(D7), kind: 1 });
     expect(got.status).toBe(200);
     expect(got.json.nextCursor).toBeNull();
@@ -102,7 +101,6 @@ describe.each(PROCESS_BACKENDS)("token-metadata-api on $name", (backend: Process
       fieldCount: 4,
       fieldsTruncated: false,
       group: { symbol: { hex: hex(new TextEncoder().encode("AG")), utf8: "AG" }, memberCount: 2, members: [{ domainSep: hex(D7), kind: 1 }, { domainSep: hex(D8), kind: 1 }] },
-      mark: { mark: "ok", reasons: [], reasonCount: 0, unresolved: { count: 0, positions: [] }, missing: [], tags: [] },
       image: { url: IMAGE, status: "pending", imageUrl: null },
     });
     expect(token.fields.map((f: { key: { utf8: string } }) => f.key.utf8)).toEqual(["decimals", "image", "name", "symbol"]);
@@ -144,12 +142,14 @@ describe.each(PROCESS_BACKENDS)("token-metadata-api on $name", (backend: Process
     expect(await tokens({ contract: hex(B), cursor: first })).toMatchObject({ status: 400, json: { error: { code: "invalid-request" } } });
   }, 60_000);
 
-  it("marks: ok, partial (the missing common fields) and incorrect (the contract's rejection reasons)", async () => {
+  it("an answer carries no verdict: a missing field is null, and a rejected event of the contract changes nothing", async () => {
     const [partial] = (await tokens({ contract: hex(B), domainSep: hex(D7), kind: 1 })).json.items;
-    expect(partial.mark).toMatchObject({ mark: "partial", missing: ["symbol", "decimals"], reasons: [] });
-    const [incorrect] = (await tokens({ contract: hex(C), domainSep: hex(D7), kind: 1 })).json.items;
-    expect(incorrect.mark).toMatchObject({ mark: "incorrect", reasonCount: 1, missing: [] });
-    expect(incorrect.mark.reasons).toHaveLength(1);
+    expect(partial.common).toEqual({ name: "Only a name", symbol: null, decimals: null, standards: null });
+    expect("mark" in partial).toBe(false);
+    // Contract C emitted a malformed event beside this token's: the token is served as its own fields say.
+    const [beside] = (await tokens({ contract: hex(C), domainSep: hex(D7), kind: 1 })).json.items;
+    expect(beside.common).toEqual({ name: "Cee", symbol: "C", decimals: "0", standards: null });
+    expect("mark" in beside).toBe(false);
   }, 60_000);
 
   it("hostile text travels as ASCII escapes and parses back exactly", async () => {
@@ -223,35 +223,3 @@ describe("the request schema's four selectors", () => {
     }
   });
 });
-
-describe("the marks no chain of the harness gives here", () => {
-  const inputs = (unresolved: number, reasons: string[] = []) => ({
-    count: reasons.length,
-    reasons,
-    unresolved: { count: unresolved, positions: Array.from({ length: unresolved }, (_, i) => ({ height: 5, txIndex: 0, eventIndex: i })) },
-  });
-  const usable = (text: string): Field => ({ key: new Uint8Array(), valType: 1, value: new TextEncoder().encode(text), usable: true, position: { block: 1, tx: 0, event: 0, record: 0 } });
-  const fields = new Map<string, Field>([
-    [toHex(new TextEncoder().encode("name")), usable("N")],
-    [toHex(new TextEncoder().encode("symbol")), usable("S")],
-    [toHex(new TextEncoder().encode("decimals")), { ...usable("x"), valType: 2, integer: 6n }],
-  ]);
-
-  it("unresolved: a complete token of a contract with an unresolved site, with reason unresolved-log and the position", () => {
-    expect(markJson(fields, inputs(1))).toEqual({
-      mark: "unresolved",
-      reasons: ["unresolved-log"],
-      reasonCount: 0,
-      unresolved: { count: 1, positions: [{ height: 5n, txIndex: 0, eventIndex: 0 }] },
-      missing: [],
-      tags: [],
-    });
-  });
-
-  it("precedence: incorrect over unresolved (its reasons end with unresolved-log), unresolved over partial", () => {
-    expect(markJson(fields, inputs(1, ["truncated"]))).toMatchObject({ mark: "incorrect", reasons: ["truncated", "unresolved-log"] });
-    expect(markJson(new Map(), inputs(1))).toMatchObject({ mark: "unresolved" });
-    expect(markJson(fields, inputs(0))).toMatchObject({ mark: "ok" });
-  });
-});
-

@@ -1,20 +1,20 @@
 /**
  * The route `getTokens` (`POST /token-metadata-api/v1/tokens`): the tokens an input selects (`./schemas.ts`,
  * {@link TokensRequest}), each with every defined field up to {@link MAX_TOKEN_FIELDS}, its common fields, symbol
- * group, mark and image. Bytes leave as `0x` lowercase hex ({@link hex0x}) and wide integers as `bigint`s, which the
+ * group and image. Bytes leave as `0x` lowercase hex ({@link hex0x}) and wide integers as `bigint`s, which the
  * output schema writes as digits in a string.
  *
  * A token is a described identity: one with at least one defined field (MIP "Applying records"); a withdrawn one is
  * referenced nowhere. Reads are bounded whatever the request selects: the selection is one statement, then a token's
- * fields, common fields and marks take two, one and up to three statements for all the selected tokens together; a
- * group takes one or two per distinct (contract, symbol). Nothing here fetches anything.
+ * fields and common fields take two and one statements for all the selected tokens together; a group takes one or
+ * two per distinct (contract, symbol). Nothing here fetches anything.
  */
 
 import type { ReadHandle } from "../../db/api.js";
-import { COMMON_KEY_HEX, type Field as StateField, fieldUsable, IMAGE_KEY_HEX, parseStandards, tokenMark } from "../token-metadata/rules.js";
+import { COMMON_KEY_HEX, type Field as StateField, fieldUsable, IMAGE_KEY_HEX, parseStandards } from "../token-metadata/rules.js";
 import { decodeUtf8, toHex } from "../token-metadata/codec/index.js";
 import { hasColor } from "../token-metadata/color.js";
-import { commonFields, tokenMapKey, markInputs, type MarkInputs, symbolGroup, type TokenKey, tokenFields, tokensOfColors, tokensOfContract, tokensOfDomain } from "./sql.js";
+import { commonFields, tokenMapKey, symbolGroup, type TokenKey, tokenFields, tokensOfColors, tokensOfContract, tokensOfDomain } from "./sql.js";
 import { pageCursor } from "../../helpers/page-cursor.js";
 import { invalidRequest } from "../../modules/route.js";
 import {
@@ -26,10 +26,7 @@ import {
   type Image,
   type Kind,
   type KindName,
-  type Mark,
   MAX_GROUP_MEMBERS,
-  MAX_MARK_REASONS,
-  MAX_MARK_UNRESOLVED,
   MAX_TOKEN_FIELDS,
   type TokenJson,
   type TokensRequest,
@@ -90,26 +87,10 @@ function imageJson(fields: ReadonlyMap<string, StateField>): Image | null {
   return { url: String.fromCharCode(...image.value), status: "pending", imageUrl: null };
 }
 
-/** The mark of a described token from its common fields and its contract's mark inputs (`tokenMark`, `../token-metadata/rules.ts`). */
-export function markJson(common: ReadonlyMap<string, StateField>, inputs: MarkInputs): Mark {
-  const m = tokenMark({ fields: common, described: true, contractRejections: inputs.reasons, contractUnresolvedLogs: inputs.unresolved.count });
-  return {
-    mark: m.mark,
-    reasons: [...m.reasons],
-    reasonCount: inputs.count,
-    unresolved: { count: inputs.unresolved.count, positions: inputs.unresolved.positions.map((p) => ({ ...p, height: BigInt(p.height) })) },
-    missing: [...m.missing],
-    tags: [...m.tags],
-  };
-}
-
-const NO_MARK_INPUTS: MarkInputs = { count: 0, reasons: [], unresolved: { count: 0, positions: [] } };
-
 /** The full answer object of each token in `keys`, in that order. */
 async function tokensOf(read: ReadHandle, keys: readonly TokenKey[]): Promise<TokenJson[]> {
   const fields = await tokenFields(read, keys, MAX_TOKEN_FIELDS);
   const commons = await commonFields(read, keys);
-  const marks = await markInputs(read, keys.map((k) => k.contractAddress), MAX_MARK_REASONS, MAX_MARK_UNRESOLVED);
   const groups = new Map<string, Group | null>();
   const out: TokenJson[] = [];
   for (const k of keys) {
@@ -141,7 +122,6 @@ async function tokensOf(read: ReadHandle, keys: readonly TokenKey[]): Promise<To
       fieldCount: own.count,
       fieldsTruncated: own.count > own.fields.length,
       group,
-      mark: markJson(common, marks.get(k.contractAddress) ?? NO_MARK_INPUTS),
       image: imageJson(common),
     });
   }

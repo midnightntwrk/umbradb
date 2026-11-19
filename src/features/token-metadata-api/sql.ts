@@ -1,6 +1,6 @@
 /**
- * Every statement `token-metadata-api` sends to `token-metadata`'s tables (`../token-metadata/sql.ts`: `tokens`,
- * `fields`, `events`), by name ({@link STATEMENTS}): the catalog
+ * Every statement `token-metadata-api` sends to `token-metadata`'s tables (`../token-metadata/sql.ts`: `tokens` and
+ * `fields`), by name ({@link STATEMENTS}): the catalog
  * `test/features/token-metadata/sql-plans.test.ts` plans on both backends (no scan of a `token_metadata` table, every
  * index used). Each is static: a variant is its own statement. The functions below only bind and map, and each answer
  * reads in a fixed number of statements, except the group of a served 12-character symbol (see {@link symbolGroup}).
@@ -41,12 +41,6 @@ const FIELD_COLUMNS = `f.token_id AS id, f.kind::int AS kind, f.key, f.val_type:
   f.uint_value::text AS uint_value, f.usable, f.set_height::text AS set_height, f.set_tx::int AS set_tx,
   f.set_event::int AS set_event, f.set_record::int AS set_record`;
 const BY_IDS = "unnest($1::bytea[], $2::int[]) AS i(id, k)";
-const firstOfContract = (classification: "reject" | "unresolved", columns: string) =>
-  `SELECT c.address, ${columns} FROM unnest($1::bytea[]) AS c(address) CROSS JOIN LATERAL (
-     SELECT reason, height, tx_index, event_index FROM ${TOKEN_METADATA_SCHEMA}.events e
-     WHERE e.contract_address = c.address AND e.classification = '${classification}'
-     ORDER BY height, tx_index, event_index LIMIT $2) e
-   ORDER BY c.address, e.height, e.tx_index, e.event_index`;
 
 /** Every statement the API sends, by name; each is static (`$n` parameters only). */
 export const STATEMENTS = Object.freeze({
@@ -75,19 +69,6 @@ export const STATEMENTS = Object.freeze({
   commonFields: `SELECT ${FIELD_COLUMNS} FROM ${BY_IDS}
      JOIN ${TOKEN_METADATA_SCHEMA}.fields f ON f.token_id = i.id AND f.kind = i.k AND f.key = ANY($3::bytea[])
      ORDER BY f.token_id, f.kind, f.set_height, f.set_tx, f.set_event, f.set_record`,
-  /** Each contract's rejected and unresolved event counts. */
-  markCounts: `SELECT c.address,
-       (SELECT count(*) FROM ${TOKEN_METADATA_SCHEMA}.events e WHERE e.contract_address = c.address AND e.classification = 'reject')::int AS rejected,
-       (SELECT count(*) FROM ${TOKEN_METADATA_SCHEMA}.events e WHERE e.contract_address = c.address AND e.classification = 'unresolved')::int AS unresolved
-     FROM unnest($1::bytea[]) AS c(address)`,
-  /** Each contract's first `$2` rejection reasons. */
-  markReasons: firstOfContract("reject", "e.reason"),
-  /**
-   * This is only for core-contract-logs-fast.
-   *
-   * Each contract's first `$2` unresolved positions.
-   */
-  markPositions: firstOfContract("unresolved", "e.height::text AS height, e.tx_index::int AS tx_index, e.event_index::int AS event_index"),
   /** How many tokens of contract `$1` have the whole usable symbol `$2` (`tokens_symbol_idx`). */
   groupCount: `SELECT count(*)::int AS n FROM ${TOKEN_METADATA_SCHEMA}.tokens WHERE contract_address = $1 AND symbol = $2`,
   /** The first `$3` of them, by (domainSep, kind). */
@@ -149,50 +130,12 @@ export async function tokenFields(read: ReadHandle, keys: readonly TokenKey[], l
   return out;
 }
 
-/** The common fields of each token (for its mark), in the order they were last set: one statement. */
+/** The common fields of each token, in the order they were last set: one statement. */
 export async function commonFields(read: ReadHandle, keys: readonly TokenKey[]): Promise<Map<string, Map<string, Field>>> {
   const out = new Map(keys.map((k) => [tokenMapKey(k), new Map<string, Field>()]));
   if (keys.length === 0) return out;
   const common = [...Object.values(COMMON_KEY_HEX), ...Object.values(IMAGE_KEY_HEX)].map(bytes);
   for (const r of await read.query(STATEMENTS.commonFields, [...idsParams(keys), common])) out.get(fieldKeyOf(r))!.set(toHex(r.key as Uint8Array), fieldOf(r));
-  return out;
-}
-
-// ── Marks ────────────────────────────────────────────────────────────────────────────────────────────────────────
-
-/** What a mark needs of a contract: its rejected events (count, first reasons) and unresolved sites (count, first positions). */
-export interface MarkInputs {
-  count: number;
-  reasons: string[];
-  /** This is only for core-contract-logs-fast */
-  unresolved: { count: number; positions: { height: number; txIndex: number; eventIndex: number }[] };
-}
-
-/**
- * The mark inputs of each of `contracts`, in at most three statements however many contracts: the counts, then the
- * first reasons and the first positions of the contracts that have any, each contract's through a `LATERAL` keyset read.
- */
-export async function markInputs(read: ReadHandle, contracts: readonly string[], maxReasons: number, maxPositions: number): Promise<Map<string, MarkInputs>> {
-  const unique = [...new Set(contracts)];
-  const out = new Map<string, MarkInputs>(unique.map((c) => [c, { count: 0, reasons: [], unresolved: { count: 0, positions: [] } }]));
-  if (unique.length === 0) return out;
-  const rejecting: Uint8Array[] = [];
-  const unresolving: Uint8Array[] = [];
-  for (const r of await read.query(STATEMENTS.markCounts, [unique.map(bytes)])) {
-    const inputs = out.get(toHex(r.address as Uint8Array))!;
-    inputs.count = num(r.rejected);
-    inputs.unresolved.count = num(r.unresolved);
-    if (inputs.count > 0) rejecting.push(r.address as Uint8Array);
-    if (inputs.unresolved.count > 0) unresolving.push(r.address as Uint8Array);
-  }
-  if (rejecting.length > 0) {
-    for (const r of await read.query(STATEMENTS.markReasons, [rejecting, maxReasons])) out.get(toHex(r.address as Uint8Array))!.reasons.push(r.reason as string);
-  }
-  if (unresolving.length > 0) {
-    for (const r of await read.query(STATEMENTS.markPositions, [unresolving, maxPositions])) {
-      out.get(toHex(r.address as Uint8Array))!.unresolved.positions.push({ height: num(r.height), txIndex: num(r.tx_index), eventIndex: num(r.event_index) });
-    }
-  }
   return out;
 }
 

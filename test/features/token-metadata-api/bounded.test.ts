@@ -8,10 +8,10 @@ import { type ApiHandler, blockLogs, contract, domain, eventData, readStopped, r
 
 /**
  * Bounded cost of the API, on PostgreSQL 18 and PGlite. Large cardinalities are written straight into the
- * indexer's tables of a stopped database — a token with 10,000 fields, 10,000 rejected events of its contract, and 1,000
- * tokens of that contract sharing its symbol — then the route's handler answers through a read handle that counts the
+ * indexer's tables of a stopped database — a token with 10,000 fields, 10,000 rejected events of its contract (which
+ * no answer reads), and 1,000 tokens of that contract sharing its symbol — then the route's handler answers through a read handle that counts the
  * rows each answer reads back. Every answer is small: the first {@link MAX_TOKEN_FIELDS} fields with `fieldCount` and
- * `fieldsTruncated`, the first 100 reasons and the first 100 members with their counts, a contract a page at a time, a
+ * `fieldsTruncated`, the first 100 members with their count, a contract a page at a time, a
  * hundred colors in a fixed number of statements; none reads back more than {@link MAX_ROWS} rows. **Negative control:**
  * the same group under a 12-character symbol, which may be the cut of longer ones, reads every row sharing it, and the
  * bound sees it.
@@ -103,14 +103,14 @@ describe.each(PROCESS_BACKENDS)("bounded cost on $name", (backend: ProcessBacken
   }, 300_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("a token: its first 256 fields with fieldCount, its common fields, a group of 100 members, 100 reasons", async () => {
+  it("a token: its first 256 fields with fieldCount, its common fields, a group of 100 members", async () => {
     const got = await tokens(db, { contract: hex(X), domainSep: hex(DA), kind: 3 });
     expect(got.status).toBe(200);
     const [token] = got.json.items;
     expect([token.fields.length, token.fieldCount, token.fieldsTruncated]).toEqual([MAX_TOKEN_FIELDS, N + 3, true]);
     expect(token.fields.every((f: Json, i: number) => i === 0 || f.key.hex > token.fields[i - 1].key.hex)).toBe(true);
     expect(token.common).toEqual({ name: "Big", symbol: "SPAM", decimals: "6", standards: null });
-    expect([token.group.memberCount, token.group.members.length, token.mark.reasonCount, token.mark.reasons.length]).toEqual([MEMBERS, 100, N, 100]);
+    expect([token.group.memberCount, token.group.members.length]).toEqual([MEMBERS, 100]);
     expect(got.size).toBeLessThan(96_000);
     expect(got.rows).toBeLessThan(MAX_ROWS);
   }, 120_000);

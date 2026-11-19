@@ -17,7 +17,7 @@
  *   `token-metadata-start-after-database`. For the same reason it refuses revisions with a gap between them (a stop
  *   below the next start minus one): `token-metadata-revision-gap`, a {@link TokenMetadataRevisionGap}.
  * - **Provides** its tables as two `table` items (`./schema.ts`): `token-metadata-events` (append-only) and
- *   `token-metadata-state` (mutable), which `token-metadata-api` and any other module may require to read them.
+ *   `token-metadata-state` (mutable). `token-metadata-api` requires the state item; any module may require either.
  * - **Per block** it writes in `on-db-write` (`./apply.ts`): its accepted events' effect on `tokens` and
  *   `fields`, and its rejected events and unresolved log sites (from `core-contract-logs-fast`, never applied) as
  *   `events` rows, in chain order, reading its own rows inside the block transaction. A v8 block has no contract

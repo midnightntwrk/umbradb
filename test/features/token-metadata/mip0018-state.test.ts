@@ -1,10 +1,10 @@
 /**
  * UmbraDB's MIP-0018 state rules, beyond what the vectors cover: per-key tombstones at row
- * level, "not referenced at all", chain order, rollback, common fields, display and the mark.
+ * level, "not referenced at all", chain order, rollback, common fields and display.
  */
 import { describe, expect, it } from "vitest";
 import { EVENT_NAME, encodePayload, type MetadataRecord, metadataRecord } from "../../../src/features/token-metadata/codec/index.js";
-import { COMMON_KEY_HEX, fieldUsable, firstCharacters, IMAGE_KEY_HEX, lengthLimited, parseStandards, tokenMark, UNRESOLVED_LOG_REASON } from "../../../src/features/token-metadata/rules.js";
+import { COMMON_KEY_HEX, fieldUsable, firstCharacters, IMAGE_KEY_HEX, lengthLimited, parseStandards } from "../../../src/features/token-metadata/rules.js";
 import { ChainOrderError, formatAmount, MetadataState, recordEffects, symbolGroups, toHex, type IdentityRef } from "./model.js";
 
 const NET = "testnet-a";
@@ -125,7 +125,6 @@ describe("defined keys (MIP Keys)", () => {
     expect(s.identity(ref(3))).toBeUndefined();
     expect(s.identities()).toEqual([]);
     expect([...s.storedFields(ref(3))!.keys()].map((k) => Buffer.from(k, "hex").toString())).toEqual(["foo"]);
-    expect(tokenMark({ fields: s.identity(ref(3))?.fields, contractRejections: [] }).mark).toBe("none");
     // A defined key makes it exist; only defined keys are served.
     emit(3, [metadataRecord.utf8("name", "Acme"), metadataRecord.utf8("symbol", "ACME")]);
     expect(keys(s, ref(3))).toEqual(["name", "symbol"]);
@@ -190,7 +189,7 @@ describe("common fields (MIP Common fields)", () => {
     expect(parseStandards(enc("x y x\u0085y"))).toEqual(["x y", "x\u0085y"]);
   });
 
-  it("image keys (MIP Common fields, S12): `image` is usable only as a URI (type 4), `image_sha256` only as exactly 32 bytes (type 0); a 31-byte hash or a text image is unusable; neither changes a mark", () => {
+  it("image keys (MIP Common fields, S12): `image` is usable only as a URI (type 4), `image_sha256` only as exactly 32 bytes (type 0); a 31-byte hash or a text image is unusable", () => {
     expect(fieldUsable(IMAGE_KEY_HEX.image, 4, enc("https://example.org/acme.png"))).toBe(true);
     expect(fieldUsable(IMAGE_KEY_HEX.image, 1, enc("https://example.org/acme.png"))).toBe(false);
     expect(fieldUsable(IMAGE_KEY_HEX.image, 0, enc("https://example.org/acme.png"))).toBe(false);
@@ -199,7 +198,7 @@ describe("common fields (MIP Common fields)", () => {
     expect(fieldUsable(IMAGE_KEY_HEX.imageSha256, 0, new Uint8Array(33).fill(7))).toBe(false);
     expect(fieldUsable(IMAGE_KEY_HEX.imageSha256, 1, enc("a".repeat(32)))).toBe(false);
 
-    // Through the state (A6 and S12's unusable hash), and the mark of a complete token with usable, unusable or no images.
+    // Through the state (A6 and S12's unusable hash): a complete token with usable, unusable or no images.
     const s = new MetadataState();
     const emit = emitter(s);
     const common = [metadataRecord.utf8("name", "Acme"), metadataRecord.utf8("symbol", "ACME"), metadataRecord.uint("decimals", 6)];
@@ -208,12 +207,9 @@ describe("common fields (MIP Common fields)", () => {
     emit(3, [...common, metadataRecord.utf8("image", "acme.png"), metadataRecord.bytes("image_sha256", new Uint8Array(31).fill(0xab))], { domainSep: DS3 });
     const usable = (domainSep: string) => [IMAGE_KEY_HEX.image, IMAGE_KEY_HEX.imageSha256].map((k) => s.identity(ref(3, domainSep))!.fields.get(k)?.usable);
     expect([usable(DS1), usable(DS2), usable(DS3)]).toEqual([[true, true], [undefined, undefined], [false, false]]);
-    for (const d of [DS1, DS2, DS3])
-      expect(tokenMark({ fields: s.identity(ref(3, d))!.fields, contractRejections: [] }), d).toEqual({ mark: "ok", reasons: [], missing: [], tags: [] });
-    // Image keys are common fields: an identity described only by `image` exists, and its mark is partial.
+    // Image keys are common fields: an identity described only by `image` exists.
     emit(1, [metadataRecord.uri("image", "https://example.org/x.png")], { domainSep: DS2 });
     expect(keys(s, ref(1, DS2))).toEqual(["image"]);
-    expect(tokenMark({ fields: s.identity(ref(1, DS2))!.fields, contractRejections: [] }).mark).toBe("partial");
   });
 
   it("name keeps its first 64 and symbol its first 12 characters (grapheme clusters, UAX #29), cut before storing: a 70-character name and a 15-character symbol (S11) stay usable as 64 / 12; emoji ZWJ sequences, flags and combining marks are never split; two symbols that share their first 12 characters form one group", () => {
@@ -272,72 +268,5 @@ describe("common fields (MIP Common fields)", () => {
     expect(effects[1]).toMatchObject({ op: "set", keyHex: "ff6b", record: 1 });
     expect("usable" in (effects[1] as object)).toBe(false);
     expect(effects[2]).toMatchObject({ op: "delete", keyHex: "73796d626f6c00", record: 2 });
-  });
-});
-
-describe("marks (one function)", () => {
-  const fieldsOf = (s: MetadataState, r: IdentityRef) => s.identity(r)?.fields;
-
-  it("✓ complete, ⚠ partial, ⚠ incorrect (contract rejection, reasons shown), ⚠ unresolved (the contract has unresolved logs: reason unresolved-log, never a clean ✓), no mark without events or after withdrawal; usable standards as tags", () => {
-    const s = new MetadataState();
-    const emit = emitter(s);
-    emit(3, [metadataRecord.utf8("name", "Acme"), metadataRecord.utf8("symbol", "ACME"), metadataRecord.uint("decimals", 6), metadataRecord.utf8("standards", "mip-0004 mip-0004 x")]);
-    expect(tokenMark({ fields: fieldsOf(s, ref(3)), contractRejections: [] })).toEqual({ mark: "ok", reasons: [], missing: [], tags: ["mip-0004", "x"] });
-
-    emit(3, [metadataRecord.utf8("name", "Half")], { domainSep: DS2 });
-    expect(tokenMark({ fields: fieldsOf(s, ref(3, DS2)), contractRejections: [] })).toMatchObject({ mark: "partial", missing: ["symbol", "decimals"] });
-
-    emit(3, [metadataRecord.utf8("symbol", "")], { domainSep: DS2 });
-    expect(tokenMark({ fields: fieldsOf(s, ref(3, DS2)), contractRejections: [] }).missing).toEqual(["symbol", "decimals"]);
-
-    expect(tokenMark({ fields: fieldsOf(s, ref(3)), contractRejections: ["reserved-valtype", "invalid-utf8"] })).toEqual({
-      mark: "incorrect",
-      reasons: ["reserved-valtype", "invalid-utf8"],
-      missing: [],
-      tags: ["mip-0004", "x"],
-    });
-    expect(tokenMark({ fields: undefined, contractRejections: ["no-records"] }).mark).toBe("incorrect");
-
-    expect(tokenMark({ fields: undefined, contractRejections: [] })).toEqual({ mark: "none", reasons: [], missing: [], tags: [] });
-
-    emit(3, [metadataRecord.tombstone("name"), metadataRecord.tombstone("symbol"), metadataRecord.tombstone("decimals"), metadataRecord.tombstone("standards")]);
-    expect(tokenMark({ fields: fieldsOf(s, ref(3)), contractRejections: [] }).mark).toBe("none");
-
-    emit(3, [metadataRecord.utf8("standards", "mip-0004  x")]);
-    expect(tokenMark({ fields: fieldsOf(s, ref(3)), contractRejections: [] })).toMatchObject({ mark: "partial", tags: [] });
-
-    // Unresolved logs of the contract — ⚠ unresolved for a complete, a partial and an absent
-    // identity (the unresolved log may have described, renamed or withdrawn it); ⚠ incorrect wins, its reasons end with
-    // `unresolved-log`; zero unresolved logs change nothing.
-    expect(tokenMark({ fields: fieldsOf(s, ref(3, DS2)), contractRejections: [], contractUnresolvedLogs: 0 }).mark).toBe("partial");
-    emit(3, [metadataRecord.utf8("name", "Acme"), metadataRecord.utf8("symbol", "ACME"), metadataRecord.uint("decimals", 6)], { domainSep: DS3 });
-    expect(tokenMark({ fields: fieldsOf(s, ref(3, DS3)), contractRejections: [] }).mark).toBe("ok");
-    expect(tokenMark({ fields: fieldsOf(s, ref(3, DS3)), contractRejections: [], contractUnresolvedLogs: 2 }))
-      .toEqual({ mark: "unresolved", reasons: [UNRESOLVED_LOG_REASON], missing: [], tags: [] });
-    expect(tokenMark({ fields: fieldsOf(s, ref(3, DS2)), contractRejections: [], contractUnresolvedLogs: 1 }))
-      .toEqual({ mark: "unresolved", reasons: ["unresolved-log"], missing: ["symbol", "decimals"], tags: [] });
-    expect(tokenMark({ fields: undefined, contractRejections: [], contractUnresolvedLogs: 1 }))
-      .toEqual({ mark: "unresolved", reasons: ["unresolved-log"], missing: [], tags: [] });
-    expect(tokenMark({ fields: fieldsOf(s, ref(3, DS3)), contractRejections: ["no-records"], contractUnresolvedLogs: 1 }))
-      .toEqual({ mark: "incorrect", reasons: ["no-records", "unresolved-log"], missing: [], tags: [] });
-  });
-
-  it("a withdrawn identity is marked exactly like one never described (current state only): ⚠ incorrect from its contract's rejections, otherwise none; an empty field map is the same as none", () => {
-    const s = new MetadataState();
-    const emit = emitter(s);
-    emit(3, [metadataRecord.utf8("name", "Gone"), metadataRecord.utf8("symbol", "GONE"), metadataRecord.uint("decimals", 2), metadataRecord.utf8("standards", "mip-0004")]);
-    emit(3, [metadataRecord.tombstone("name"), metadataRecord.tombstone("symbol"), metadataRecord.tombstone("decimals"), metadataRecord.tombstone("standards")]);
-    const withdrawn = fieldsOf(s, ref(3));
-    const never = fieldsOf(s, ref(3, DS3));
-    expect(withdrawn).toBeUndefined();
-    expect(never).toBeUndefined();
-    for (const rejections of [[], ["reserved-valtype"]]) {
-      const forms = [withdrawn, never, new Map()].map((fields) => tokenMark({ fields, contractRejections: rejections }));
-      expect(forms[0]).toEqual(rejections.length === 0
-        ? { mark: "none", reasons: [], missing: [], tags: [] }
-        : { mark: "incorrect", reasons: ["reserved-valtype"], missing: [], tags: [] });
-      expect(forms[1]).toEqual(forms[0]);
-      expect(forms[2]).toEqual(forms[0]);
-    }
   });
 });
