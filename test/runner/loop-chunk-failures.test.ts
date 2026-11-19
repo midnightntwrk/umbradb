@@ -14,8 +14,9 @@ import { InMemoryBlockSource, type RunnerBackend, RUNNER_BACKENDS, startWith } f
  * The failure rule of chunks in the finalized loop (`src/runner/loop.ts`, fast-sync mode), on PostgreSQL 18 and
  * PGlite 0.5.10: heights 1 to 10 in chunks of 5 (1..5, 6..10), against the mode off with the same fault, at block 8,
  * in the middle of the chunk 6..10. A fault at `on-fetch`, `on-parse`, `on-compute`, `on-db-write`, `on-settle`, the
- * cursor check and `on-after-db-write`, retryable (a lost connection, `connection-lost`) and not, once; a `COMMIT`
- * answered with an error (a deferred constraint), a `COMMIT` whose answer is lost after it landed and with the
+ * cursor check and `on-after-db-write`, retryable (a lost connection, `connection-lost`) and not, once; a deferred
+ * constraint broken at 8 (its end fails) and at 10 (the chunk's `COMMIT` answers with the error), a `COMMIT` whose
+ * answer is lost after it landed and with the
  * transaction rolled back (both backends, through a database that loses it), and a lost connection inside the chunk
  * (PostgreSQL, the writer's backend terminated). The process's retry is the test's: the loop runs again after a
  * retryable failure.
@@ -51,8 +52,8 @@ interface Case {
   readonly fault?: { readonly at: FaultAt; readonly retryable: boolean };
   /** A `COMMIT` lost after it landed or rolled back, armed at `f`'s `on-db-write` of K. */
   readonly lostCommit?: LostCommit;
-  /** `f` inserts a value its deferred unique constraint refuses at K's `COMMIT`. */
-  readonly deferred?: boolean;
+  /** `f` inserts, at this block, a value its deferred unique constraint refuses at the block's `COMMIT`. */
+  readonly deferred?: bigint;
   /** PostgreSQL: the writer's backend terminated at `f`'s `on-db-write` of K, before its write. */
   readonly terminate?: boolean;
 }
@@ -74,7 +75,7 @@ async function snapshot(db: Database): Promise<string> {
   });
 }
 
-/** Module `f`: logs its calls, writes `(height, k)` at `on-db-write` (k 1 at 6 and, when `deferred`, at K), and faults. */
+/** Module `f`: logs its calls, writes `(height, k)` at `on-db-write` (k 1 at 6 and at the block `deferred`), and faults. */
 function faulting(calls: string[], options: Case, arm: { cursor: boolean; lost: () => void; terminate?: () => Promise<void> }): ModuleDeclaration {
   let fired = false;
   const fault = (point: FaultAt, height: bigint): void => {
@@ -106,7 +107,7 @@ function faulting(calls: string[], options: Case, arm: { cursor: boolean; lost: 
           fired = true;
           await arm.terminate?.();
         }
-        const k = b.height === 6n || (options.deferred === true && b.height === K) ? 1 : null;
+        const k = b.height === 6n || b.height === options.deferred ? 1 : null;
         await w.execute("INSERT INTO f.rows (height, k) VALUES ($1, $2)", [b.height, k]);
         if (b.height === K && options.lostCommit !== undefined && !fired) {
           fired = true;
@@ -311,15 +312,31 @@ describe.each(RUNNER_BACKENDS)("the failure rule of chunks on $name", (backend) 
     }
   }
 
-  it("a COMMIT answered with an error (a deferred constraint): every block stored again, the block whose own COMMIT fails halts", async () => {
-    const off = await runCase(backend, { deferred: true });
-    const on = await runCase(backend, { deferred: true, blocks: 5 });
+  it("a deferred constraint broken by a block in the middle of the chunk: the block fails at its end, where its COMMIT would; 6 and 7 are stored again, and it halts", async () => {
+    const off = await runCase(backend, { deferred: K });
+    const on = await runCase(backend, { deferred: K, blocks: 5 });
     expect(on.failures.map(where)).toEqual(off.failures.map(where));
     expect(on.failures.map((failure) => failure.height)).toEqual([K]);
     expect(on.cursor).toBe(K - 1n);
-    expect(on.facts).toEqual([...committed(1n, 5n), ...rolledBack(6n, 7n, 8n, 9n, 10n), ...committed(6n, 7n), ...rolledBack(K)]);
-    // 6 and 7 stored again from on-compute, nothing taken again.
+    // The mode off: 8's own COMMIT answers with the error. In the chunk 8's end does, with 6 and 7 written before it.
+    expect(off.facts).toEqual([...committed(1n, 7n), ...rolledBack(K)]);
+    expect(on.facts).toEqual([...committed(1n, 5n), ...rolledBack(6n, 7n, K), ...committed(6n, 7n)]);
+    // 6 and 7 stored again from on-compute, nothing taken again, and 8's callbacks called once.
     for (let h = 1n; h <= HEAD; h++) expect(count(on.order, `on-fetch@${h}`), `on-fetch@${h}`).toBe(1);
+    expect(count(on.calls, `on-db-write@${K}`)).toBe(1);
+    sameTables(on, off);
+  }, 120_000);
+
+  it("a COMMIT answered with an error (a deferred constraint broken by the chunk's last block): every block stored again, the block whose own COMMIT fails halts", async () => {
+    const off = await runCase(backend, { deferred: HEAD });
+    const on = await runCase(backend, { deferred: HEAD, blocks: 5 });
+    expect(on.failures.map(where)).toEqual(off.failures.map(where));
+    expect(on.failures.map((failure) => failure.height)).toEqual([HEAD]);
+    expect(on.cursor).toBe(HEAD - 1n);
+    expect(on.facts).toEqual([...committed(1n, 5n), ...rolledBack(6n, 7n, 8n, 9n, 10n), ...committed(6n, 9n), ...rolledBack(HEAD)]);
+    // 6 to 9 stored again from on-compute, nothing taken again; 10 is called again, alone, and its own COMMIT fails.
+    for (let h = 1n; h <= HEAD; h++) expect(count(on.order, `on-fetch@${h}`), `on-fetch@${h}`).toBe(1);
+    expect(count(on.calls, `on-db-write@${HEAD}`)).toBe(2);
     sameTables(on, off);
   }, 120_000);
 

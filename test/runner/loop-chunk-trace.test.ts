@@ -3,7 +3,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { BlockWriteHandle, ReadHandle } from "../../src/db/api.js";
 import type { BlockContext, ModuleDeclaration } from "../../src/modules/declaration.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
-import { startTrace, stopTrace, traceAdd, traceChain, traceMark, type TraceSink } from "../../src/trace/trace.js";
+import { CONSTRAINTS, STATE } from "../../src/db/block-end.js";
+import { STATEMENT_KEY_LENGTH, startTrace, stopTrace, traceAdd, traceChain, traceMark, type TraceSink } from "../../src/trace/trace.js";
 import { declaration } from "../modules/declarations.js";
 import { chunksOf, runChunks } from "./loop-chunk-harness.js";
 import { RUNNER_BACKENDS } from "./loop-harness.js";
@@ -16,8 +17,9 @@ import { core, entryOf, startProcess, testBuild } from "./process-build.js";
  * - through the loop, on PostgreSQL 18 and PGlite 0.5.10, chunks of 1, 2 and 7 over heights 1 to 20 against the mode
  *   off: one line per height, in order, each with its own block's work and the same `sh`, `chunk` on every line of a
  *   chunk of two blocks or more, `beginMs` on its first line only, `txMs` on every line, `commitMs` (PostgreSQL) on its
- *   last only; no line for a chunk that rolled back, a block stored again chained once; a slow window of a block of a
- *   chunk told `ended` at the `COMMIT`;
+ *   last only; no line for a chunk that rolled back, a block stored again chained once; the statements of a block's
+ *   end counted between the blocks of a chunk only (PostgreSQL); a slow window of a block of a chunk told `ended` at
+ *   the `COMMIT`;
  * - through the process: while a chunk is open, the status's cursor and a module API route answer the last committed
  *   height on PostgreSQL, and on PGlite the route answers once the chunk committed; a chunk that rolled back is never
  *   seen.
@@ -118,6 +120,31 @@ describe.each(RUNNER_BACKENDS)("the trace of chunks through the loop on $name", 
     expect(on.lines.map((line) => line.sh)).toEqual(off.lines.map((line) => line.sh));
     // 6 and 7, stored again one per transaction, have lines of their own, as the mode off's.
     expect(on.lines.slice(5).map((line) => line.chunk)).toEqual([undefined, undefined]);
+  }, 120_000);
+
+  it.runIf(postgres)("the statements of a block's end are counted: one read after each block of a chunk but its last, the constraints' text once per chunk, none with the mode off or for a height alone", async () => {
+    /** How often each statement text was sent in a traced run over heights 1 to 20, by its text as the trace keeps it. */
+    const sent = async (blocks: number | undefined): Promise<Map<string, number>> => {
+      let totals = "[]";
+      startTrace({ blocks: () => undefined, statements: (json) => void (totals = json), worker: () => undefined });
+      try {
+        await runChunks(backend, { head: 20n, ...(blocks === undefined ? {} : { blocks, distance: 5 }) });
+      } finally {
+        stopTrace();
+      }
+      return new Map((JSON.parse(totals) as { q: string; n: number }[]).map((entry) => [entry.q, entry.n]));
+    };
+    const key = (text: string): string => text.replace(/\s+/g, " ").slice(0, STATEMENT_KEY_LENGTH);
+    const off = await sent(undefined);
+    const on = await sent(7);
+    // Chunks 1..7 and 8..14, then 15 to 20 each alone: six ends in each chunk, none anywhere else. No constraint of this
+    // database is deferrable, so the constraints' text goes with the first end of each chunk only.
+    expect(on.get(key(STATE))).toBe(12);
+    expect(on.get(key(CONSTRAINTS))).toBe(2);
+    expect(off.has(key(CONSTRAINTS))).toBe(false);
+    expect(off.has(key(STATE))).toBe(false);
+    // One transaction for each chunk and each height alone.
+    expect(on.get("COMMIT")).toBe((off.get("COMMIT") as number) - 12);
   }, 120_000);
 
   it("a slow window of a block of a chunk is told ended at the COMMIT", async () => {

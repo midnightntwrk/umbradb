@@ -174,14 +174,21 @@
  *    (`BlockSource.answered`: the node source's ledger state roots). The loop's signal ends that wait;
  * 3. opens one transaction: a's writes (`on-db-write`, `on-settle` with the run `{ a, a }`, the cursor check); then for
  *    each k > a, `on-compute` (its callbacks one at a time, each with a read at k − 1 that is a read-only view of the
- *    transaction, `../db/read-view.ts`, opened at its first statement), then k's writes;
+ *    transaction, `../db/read-view.ts`, opened at its first statement), then k's writes. After the writes of each block
+ *    but the chunk's last comes the block's end (`../db/block-end.ts`), where a block alone would `COMMIT`: every
+ *    deferred constraint is checked and every deferred trigger fired, a failure being that block's, and the constraints
+ *    are deferred again for the next block;
  * 4. at the `COMMIT`'s answer tells the follower `committed` for a..b in height order and the observer once, with b;
  *    then runs each block's `on-after-db-write` (its read at b, the chunk's last height) and `on-stop-height`, in
  *    height order, each in an `after-commit` window of its own.
  *
  * Before each block k > a, after k − 1's cursor check, the loop's signal or a pause hold ({@link LoopPause.held}) ends
  * the chunk at k − 1 with its `COMMIT` and points after it; the loop then returns, or pauses between heights, the
- * blocks taken above k − 1 kept for when it goes on. A callback of k's `on-compute` that calls
+ * blocks taken above k − 1 kept for when it goes on. So does a block's end that finds what the transaction cannot give
+ * the next block as a new one would (a constraint that is deferrable and initially immediate, a temporary table of
+ * the writer's session, a cursor left open): the chunk commits at that block, and the heights up to its planned end
+ * are stored one per transaction. Nothing in an open chunk waits for the chain, so a stop, a pause or a lost
+ * connection is met within the time of the chunk's own work. A callback of k's `on-compute` that calls
  * `blockBeforeCommitted()` before its first statement ends the chunk at k − 1 too: its turn ends, the transaction's
  * body ends and commits, the follower and the observer are told, and the call resolves; the rest of k's `on-compute`
  * runs with no transaction open (each later callback with its own read at k − 1), then the points after the commit of
@@ -203,8 +210,8 @@
  * - k > a fails before its first write (its `on-compute`, a misuse found there, the worker failing its apply): the
  *   chunk commits at k − 1, the follower is told `committed` a..k − 1 and `rolledBack` k, the points after the commit
  *   of a..k − 1 run, then k's failure stops the loop (a retryable one holds k, as a held height);
- * - k's writes fail, not retryable (a callback, the cursor check, a misuse, a statement that aborted the
- *   transaction): the transaction rolls back, the follower is told `rolledBack` a..k, a..k − 1 are stored again in
+ * - k's writes fail, not retryable (a callback, the cursor check, the block's end, a misuse, a statement that aborted
+ *   the transaction): the transaction rolls back, the follower is told `rolledBack` a..k, a..k − 1 are stored again in
  *   this run, then k's failure, kept, is thrown, k not called again;
  * - a retryable failure while the transaction is open (a lost connection, the writer's session replaced, a callback's
  *   retryable error in k's writes): the follower is told `rolledBack` a..k and the chunk is held ({@link HeldChunk}); the
@@ -227,6 +234,7 @@
 import { BLOCKS_TABLE } from "../backbone/core-block-commit/sql.js";
 import type { Database, ReadHandle, Transaction } from "../db/api.js";
 import { handleClosed, UmbraError } from "../db/errors.js";
+import { endBlock } from "../db/block-end.js";
 import { readView } from "../db/read-view.js";
 import type { SchemaPlan } from "../db/roles.js";
 import { type BlockWrites, openBlockWrites } from "../db/write-handles.js";
@@ -815,7 +823,11 @@ export class FinalizedLoop {
   readonly #takeFailures = new Map<bigint, TakeFailure>();
   /** The blocks taken and not committed yet, by height: what the source's finality check is answered from. */
   readonly #uncommitted = new Map<bigint, BlockRef>();
-  /** The highest height of a chunk that did not commit, until the cursor reaches it: no chunk forms at or below it. */
+  /**
+   * The highest height the loop stores one block per transaction up to, until the cursor reaches it: no chunk forms at
+   * or below it. It is the highest height of a chunk that did not commit, or the planned end of a chunk that ended at a
+   * block whose transaction could not hold another ({@link endBlock}).
+   */
   #alone: bigint | null = null;
   /**
    * The blocks of a chunk that did not commit, stored again one per transaction from where each resumes (from
@@ -1566,9 +1578,12 @@ export class FinalizedLoop {
    * points before the transaction (unless `computed`, `first`'s run whose `on-compute` ran already), then one
    * transaction holding every block's writes, each block after the first computed after the block before's cursor
    * check, with reads of the transaction; then, at the `COMMIT`'s answer, the follower, the observer and each block's
-   * points after the commit, in height order. Before each block after the first, the loop's signal or a pause hold
-   * ends the chunk at the block before, and a callback of the block's `on-compute` asking that the block before be
-   * committed (`blockBeforeCommitted`) does too, the block then carried over. Resolves with the new cursor.
+   * points after the commit, in height order. Before the transaction it waits for what the later blocks ask of the
+   * source ({@link #answered}); after the writes of each block that is not the chunk's last comes the block's end
+   * ({@link endBlock}). Before each block after the first, the loop's signal, a pause hold or a block's end that the
+   * transaction cannot go on from ends the chunk at the block before, and a callback of the block's `on-compute`
+   * asking that the block before be committed (`blockBeforeCommitted`) does too, the block then carried over. Resolves
+   * with the new cursor.
    */
   async #storeChunk(
     first: bigint,
@@ -1591,6 +1606,8 @@ export class FinalizedLoop {
      * at the block before it, and it is carried over (or its failure thrown), not written here.
      */
     let carried: { readonly run: HeightRun; readonly computing: Promise<void>; readonly computeFrom: number } | undefined;
+    /** True when the chunk ended at a block whose transaction could not hold another ({@link endBlock}). */
+    let unheld = false;
     try {
       const head = computed ?? (await this.#begin(first, previous));
       current = head;
@@ -1616,9 +1633,16 @@ export class FinalizedLoop {
             let writeFrom = transactionFrom;
             for (let run = head; ; ) {
               const written = run;
+              /** True when the chunk commits at this block. */
+              let ends = false;
               await chunk.turns.run(async () => {
                 try {
                   await this.write(tx, written);
+                  // The planned end, the loop's signal, or a pause hold: the chunk commits here.
+                  ends = written.height >= last || this.#signal.aborted || this.pauseHeld();
+                  // Else the block ends where a block alone would commit: its deferred constraints are checked, and
+                  // a failure is this block's. A transaction that cannot hold another block commits here too.
+                  if (!ends && !(await this.endBlock(tx, written))) ends = unheld = true;
                 } catch (error) {
                   // Nothing else reads through a transaction that fails.
                   chunk.open = false;
@@ -1630,8 +1654,7 @@ export class FinalizedLoop {
               // The block's own part of the transaction, the first's with the BEGIN; its line is held for the COMMIT.
               traceAdd("txMs", performance.now() - writeFrom);
               this.holdTrace(run);
-              // The planned end, the loop's signal, or a pause hold: the chunk commits here.
-              if (run.height >= last || this.#signal.aborted || this.pauseHeld()) break;
+              if (ends) break;
               run = await this.#begin(run.height + 1n, run.block);
               current = run;
               runs.push(run);
@@ -1682,6 +1705,8 @@ export class FinalizedLoop {
       return this.#notCommitted(error, { first, previous, runs, current, windows, bodyDone, carried: carried?.run, carriedFailure });
     }
     this.#chunkOpen = undefined;
+    // The blocks up to the planned end are stored one per transaction: what ended this chunk would end the next.
+    if (unheld) this.#alone = last;
     const commitMs = performance.now() - (bodyEnd as number);
     const stored = carried === undefined ? runs : runs.slice(0, -1);
     // The COMMIT answered: the follower is told of every block in height order, the observer once, of the new cursor.
@@ -1775,6 +1800,17 @@ export class FinalizedLoop {
     const asked: Promise<void>[] = [];
     for (let height = first + 1n; height <= last; height++) asked.push(source.answered((this.#taken.get(height) as Taken).block));
     await untilAborted(Promise.allSettled(asked), this.#signal);
+  }
+
+  /**
+   * Ends `run`, a block of a chunk that goes on, in the transaction `tx`, where a block alone would commit
+   * (`../db/block-end.ts`): every deferred constraint is checked and every deferred trigger fired, a failure being this
+   * block's, and the constraints are deferred again for the next block. False when the transaction cannot give the
+   * next block what a new one would (a constraint that is deferrable and initially immediate, a temporary table of the
+   * session, a cursor left open): the chunk then commits at this block. A negative control's seam.
+   */
+  protected endBlock(tx: Transaction, _run: HeightRun): Promise<boolean> {
+    return endBlock(tx);
   }
 
   /**
