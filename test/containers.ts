@@ -19,7 +19,7 @@ import { guardContainers } from "./child-processes.js";
  * (PostgreSQL's waits for its health check and its listening ports), which stops and removes the container itself before
  * it throws: the host's mapped port never reached although the container is healthy ("Port 34248 not bound after
  * 120000ms", seen under Docker Desktop's port forwarding), and the container no longer running while the wait checks its
- * port from inside it (Docker's HTTP 409 "container stopped/paused", seen on a hosted runner in Stryker's dry run). Any
+ * port from inside it (Docker's HTTP 409 "container stopped/paused", seen on a hosted runner). Any
  * other error, and the last attempt's, is the test's, its container removed too. {@link startContainers} starts several
  * at once and stops those that started when another fails.
  *

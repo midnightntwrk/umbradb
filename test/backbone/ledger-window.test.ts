@@ -6,43 +6,38 @@ import type { LedgerScenario } from "./ledger-tapes.js";
 import { BACKUP_AT, continueToHead, HEAD, restoreOnPostgres, syncAndBackUp, type WindowBackup, windowScenario } from "./ledger-window.js";
 
 /**
- * With `retainStates` 1,000 at cursor 5,000, loading the state at 4,000 succeeds and 3,999 fails with
- * `state-not-retained`. Checked on PGlite 0.5.10 and PostgreSQL 18, through the real process, sized to fit a loaded
- * machine.
+ * With `retainStates` 100 at cursor 500, loading the state at 400 succeeds and 399 fails with `state-not-retained`.
+ * Checked on PGlite 0.5.10 and PostgreSQL 18, through the real process.
  *
- * The 5,000 blocks run once, on PGlite, to 4,990, where the process backs up. PGlite then continues to 5,001.
- * PostgreSQL continues from that backup, restored: a backup restores on the other backend, and the restored database
- * continues like one that never stopped.
- *
- * So PostgreSQL processes only the window's last 11 blocks and the loads. It runs several statements per block through
- * Docker's port proxy: about 4 blocks a second at load averages near 40, against PGlite's 30, and 1.3 in a loaded
- * conformance run, which took the 5,000-block run past an hour.
+ * The blocks run once, on PGlite, to 490, where the process backs up. PGlite then continues to 501. PostgreSQL
+ * continues from that backup, restored, so it processes only the last 11 blocks (it is several times slower per block)
+ * and also shows that a backup restores on the other backend and continues like a database that never stopped.
  *
  * The window does not depend on the backend: each block's releases are computed from the configuration
  * (`src/backbone/core-ledger-state/retention.ts`). What does depend on it is checked here on both: the released states'
  * root counts, and a retained state's load through the node-store bridge. The window's revisions test
- * (`ledger-storage.test.ts`) checks the same on both from genesis. The committed negative control (a window one state
- * short) is in `ledger-storage.negative-control.test.ts`.
+ * (`ledger-storage.ts`) checks the same on both from genesis. The committed negative control (a window one state
+ * short) is in `ledger-storage.negative-control.ts`.
  */
 
 const backends = new Map(PROCESS_BACKENDS.map((backend) => [backend.kind, backend])) as Map<"postgres" | "pglite", ProcessBackend>;
 
 /**
- * The window checks on `db` after the run reached 5,001 (the loads its watcher made at 5,001's `on-compute`).
+ * The window checks on `db` after the run reached 501 (the loads its watcher made at 501's `on-compute`).
  */
 async function a103(db: ProcessDatabase, scenario: LedgerScenario, status: { cursor: bigint | null; reason: unknown }, loads: readonly string[] | undefined): Promise<void> {
   expect(status).toMatchObject({ cursor: HEAD, reason: null });
-  expect(loads).toEqual([loaded(scenario, 4_000n), "3999 state-not-retained", loaded(scenario, 5_000n), "5001 state-not-retained", "0 state-not-retained"]);
-  // After 5,001: the states of 4,001 to 5,001 held, each once.
+  expect(loads).toEqual([loaded(scenario, 400n), "399 state-not-retained", loaded(scenario, 500n), "501 state-not-retained", "0 state-not-retained"]);
+  // After 501: the states of 401 to 501 held, each once.
   const counts = await db.query(
     "SELECT min(s.height)::text AS lo, max(s.height)::text AS hi, count(*)::text AS n, max(r.count)::text AS c FROM core_ledger_state.states s JOIN core_ledger_state.root_counts r ON r.node_key = s.state_key",
   );
-  expect(counts[0]).toEqual({ lo: "4001", hi: "5001", n: "1001", c: "1" });
-  expect((await db.query("SELECT count(*)::text AS n FROM core_ledger_state.root_counts"))[0]?.n).toBe("1001");
+  expect(counts[0]).toEqual({ lo: "401", hi: "501", n: "101", c: "1" });
+  expect((await db.query("SELECT count(*)::text AS n FROM core_ledger_state.root_counts"))[0]?.n).toBe("101");
   expect((await db.query("SELECT count(*)::text AS n FROM core_ledger_state.states"))[0]?.n).toBe(`${HEAD + 1n}`);
 }
 
-describe("retainStates 1,000 at cursor 5,000, on PGlite and on PostgreSQL", () => {
+describe("retainStates 100 at cursor 500, on PGlite and on PostgreSQL", () => {
   let scenario: LedgerScenario;
   let backup: WindowBackup | undefined;
   let pglite: ProcessDatabase;
@@ -56,7 +51,7 @@ describe("retainStates 1,000 at cursor 5,000, on PGlite and on PostgreSQL", () =
     await Promise.all(PROCESS_BACKENDS.map((backend) => backend.stop()));
   }, 60_000);
 
-  it("on PGlite: synced from genesis (backed up at 4,990 and continued), the state at 4,000 loads at cursor 5,000 and 3,999 fails with state-not-retained", async () => {
+  it("on PGlite: synced from genesis (backed up at 490 and continued), the state at 400 loads at cursor 500 and 399 fails with state-not-retained", async () => {
     pglite = await (backends.get("pglite") as ProcessBackend).database();
     const before = retentionSeen();
     backup = await syncAndBackUp(pglite, scenario, before);
@@ -67,17 +62,17 @@ describe("retainStates 1,000 at cursor 5,000, on PGlite and on PostgreSQL", () =
     await a103(pglite, scenario, status, seen.loads.get(HEAD));
   }, PATIENCE_MS * 6);
 
-  it("on PostgreSQL: from the PGlite backup at 4,990 restored, the state at 4,000 loads at cursor 5,000 and 3,999 fails with state-not-retained", async () => {
+  it("on PostgreSQL: from the PGlite backup at 490 restored, the state at 400 loads at cursor 500 and 399 fails with state-not-retained", async () => {
     expect(backup, "the PGlite run's backup (the test before)").toBeDefined();
     const postgres = await (backends.get("postgres") as ProcessBackend).database();
     const seen = retentionSeen();
     const restored = await restoreOnPostgres(postgres, backup as WindowBackup, scenario, seen);
     expect(restored.manifest.height).toBe(`${BACKUP_AT}`);
-    // The restored database is the backup's: the states of 0 to 4,990 stored, those of 3,990 to 4,990 held.
+    // The restored database is the backup's: the states of 0 to 490 stored, those of 390 to 490 held.
     const held = await postgres.query(
       "SELECT min(s.height)::text AS lo, max(s.height)::text AS hi, count(*)::text AS n FROM core_ledger_state.states s JOIN core_ledger_state.root_counts r ON r.node_key = s.state_key",
     );
-    expect(held[0]).toEqual({ lo: "3990", hi: "4990", n: "1001" });
+    expect(held[0]).toEqual({ lo: "390", hi: "490", n: "101" });
     const { status } = await continueToHead(postgres, scenario, seen);
     await a103(postgres, scenario, status, seen.loads.get(HEAD));
   }, PATIENCE_MS * 6);
