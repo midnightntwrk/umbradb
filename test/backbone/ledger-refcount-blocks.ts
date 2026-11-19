@@ -4,7 +4,7 @@ import type { NodeBatch } from "../../src/ledger/types.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import { AGAIN, CHANGE, extendedCases, LAST, LEAVES, REQUEUE, REVERT, rootOf, stateNodes, TO_EMBEDDED } from "../ledger/fixtures/sweep-fixture.js";
 import { COUNTERS, countersMemory } from "../ledger/fixtures/sweep-test-loader.js";
-import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
+import type { ProcessBackend } from "../runner/process-backends.js";
 import { PATIENCE_MS } from "./ingest-harness.js";
 import { modelOfBatches, modelProblems, type TableSnapshot } from "./ledger-graph-tapes.js";
 import { fixtureProblems, fixtureReach, type Reach, reachIn, referencesOf } from "./refcount-checks.js";
@@ -148,7 +148,7 @@ function rowsOfStateAt(lists: ReadonlyMap<number, ReadonlyMap<string, Uint8Array
 /** The test package's counter `name` in `memory`. */
 const counter = (memory: SharedArrayBuffer, name: keyof typeof COUNTERS): number => Atomics.load(new Int32Array(memory), COUNTERS[name]);
 
-describe.each(PROCESS_BACKENDS)("the reclamation step's rules through the process on $name", (backend: ProcessBackend) => {
+export const reclamationTests = (backend: ProcessBackend) => describe(`the reclamation step's rules through the process on ${backend.name}`, () => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 

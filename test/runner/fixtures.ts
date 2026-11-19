@@ -102,7 +102,7 @@ export const SINK: ItemSink = Object.freeze({ put: () => undefined });
 export const READ: ReadHandle = Object.freeze({ height: 0n, query: async () => [] });
 export const WRITE: BlockWriteHandle = Object.freeze({ height: 0n, query: async () => [], execute: async () => 0 });
 const HEADER: BlockHeader = Object.freeze({ height: 2n, hash: HASH, parentHash: HASH });
-const API: ApiRegistry = Object.freeze({ http: () => undefined, subscription: () => undefined });
+const API: ApiRegistry = Object.freeze({ route: () => undefined, http: () => undefined, subscription: () => undefined });
 
 /** Stand-in arguments of every point, after the process context (`PointCallbacks`). */
 export const ARGUMENTS: { readonly [P in PointName]: PointArguments<P> } = Object.freeze({

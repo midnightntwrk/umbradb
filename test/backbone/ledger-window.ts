@@ -24,8 +24,8 @@ import { type RetentionSeen, retentionWatcher } from "./ledger-storage-checks.js
 import { type LedgerScenario, ledgerScenario } from "./ledger-tapes.js";
 
 /**
- * The retention-window long run, shared by `ledger-window.test.ts`, sized to fit a loaded machine. v9's empty blocks
- * from genesis, with `retainStates` 1,000 and the sweep off:
+ * The retention-window run, shared by `ledger-window.test.ts`. v9's empty blocks from genesis, with `retainStates` 100
+ * and the sweep off:
  * - synced through the real process on PGlite to {@link BACKUP_AT}, and backed up there by the process
  *   (`ProcessHandle.backup`, `pglite-tools`' `pg_dump`);
  * - then continued to the head on that PGlite database (a restart, which loads the state at the cursor);
@@ -34,22 +34,24 @@ import { type LedgerScenario, ledgerScenario } from "./ledger-tapes.js";
  *   that never stopped.
  *
  * On PostgreSQL every block costs several statements through Docker's port proxy, so this way it processes only the
- * window's last blocks and its loads at cursor 5,000, not 5,000 blocks. The configuration is the same throughout: the
- * ledger's core modules, and a retention watcher loading the planned heights at 5,001's `on-compute`.
+ * window's last blocks and its loads at cursor 500. The configuration is the same throughout: the ledger's core
+ * modules, and a retention watcher loading the planned heights at 501's `on-compute`.
+ *
+ * The window is plain arithmetic (`retention.ts`), so its size proves nothing; 100 keeps the run short.
  */
 
 /** The heights of the run: the head, and the backup's. */
-export const HEAD = 5_001n;
-export const BACKUP_AT = 4_990n;
+export const HEAD = 501n;
+export const BACKUP_AT = 490n;
 
-/** The run's settings: `retainStates` 1,000; the sweep off, since the window does not depend on it. */
-export const WINDOW_SETTINGS = Object.freeze({ retainStates: 1_000, sweep: "off" });
+/** The run's settings: `retainStates` 100; the sweep off, since the window does not depend on it. */
+export const WINDOW_SETTINGS = Object.freeze({ retainStates: 100, sweep: "off" });
 
 /**
- * At 5,001's `on-compute` the read is at the cursor 5,000: the loads the window check asks for, and two more outside
- * the window.
+ * At 501's `on-compute` the read is at the cursor 500: the loads the window check asks for, and two more outside the
+ * window.
  */
-export const WINDOW_PLAN: ReadonlyMap<bigint, readonly bigint[]> = new Map([[HEAD, [4_000n, 3_999n, 5_000n, 5_001n, 0n]]]);
+export const WINDOW_PLAN: ReadonlyMap<bigint, readonly bigint[]> = new Map([[HEAD, [400n, 399n, 500n, 501n, 0n]]]);
 
 /** The scenario: v9's empty blocks from genesis to {@link HEAD}, roots only. */
 export function windowScenario(): Promise<LedgerScenario> {

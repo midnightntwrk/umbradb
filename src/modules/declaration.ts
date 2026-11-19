@@ -18,6 +18,7 @@ import type { z } from "zod";
 import { type EntryBuilder, moduleEntryBuilder } from "../config/entries.js";
 import type { BlockWriteHandle, ReadHandle, SchemaWriteHandle } from "../db/api.js";
 import type { ContentFunction } from "../determinism/contents-hash.js";
+import type { Route } from "./route.js";
 
 /** The points: the runner's steps where module callbacks attach, in the order the runner reaches them. */
 export const POINTS = Object.freeze([
@@ -193,8 +194,17 @@ export interface ItemSink {
   put(item: string, value: unknown): void;
 }
 
-/** Where `on-start-api` registers the module's HTTP routes and subscriptions. */
+/** Where `on-start-api` registers the module's routes, raw HTTP handlers and subscriptions. */
 export interface ApiRegistry {
+  /**
+   * Registers a route (`./route.ts`): a named operation with an input and an output schema and no transport. The core
+   * serves it under `/<module-id>` over HTTP, and over any transport added later. The way to write an API.
+   */
+  route<I extends z.ZodType, O extends z.ZodType>(route: Route<I, O>): void;
+  /**
+   * Registers a raw HTTP handler at `path` as given: for what is HTTP by nature (a GraphQL endpoint, a file). The
+   * module owns its path, status and headers, and no other transport serves it.
+   */
   http(
     method: "GET" | "POST",
     path: string,

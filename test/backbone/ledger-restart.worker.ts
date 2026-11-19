@@ -5,7 +5,7 @@ import { watched, watcher } from "./ingest-harness.js";
 import { LEDGER_CORE } from "./ledger-restart.js";
 
 /**
- * A process for the ledger restart test, started by `ledger-storage.test.ts` with `node --import tsx` and one JSON
+ * A process for the ledger restart test, started by `ledger-storage.ts` with `node --import tsx` and one JSON
  * argument ({@link RestartJob}).
  * - It is the process as `umbradb run` starts it: `startProcess` with the configuration file and the node source
  *   (`nodeSourceOf`) over the tape node the test serves, with the ledger in its worker thread.
