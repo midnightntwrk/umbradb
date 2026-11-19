@@ -19,7 +19,7 @@ import {
 } from "./refcount-restart.js";
 
 /**
- * The committed negative controls of R13 and R14 (`ledger-refcount-restart.test.ts`), on PostgreSQL 18 and PGlite
+ * The committed negative controls of R13 and R14 (`ledger-refcount-restart.ts`), on PostgreSQL 18 and PGlite
  * 0.5.10, each run against an uninterrupted run of the extended DAG fixture:
  * - A restart that empties `unreferenced` (the segment's `emptiesQueue` seam) after the stop at 37 makes the
  *   node sets differ after the next block, 38: the rows queued at 37 are deleted at 38 by the uninterrupted run only.

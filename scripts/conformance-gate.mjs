@@ -16,6 +16,9 @@
  * failed so a skipped required id is still NAMED. Extra CLI args are forwarded to vitest
  * (e.g. a file filter for a scoped local run).
  *
+ * Sharded runs (CI): `--shard=<i>/<n>` runs one slice and writes a blob report, skipping the coverage floors and the
+ * reconciliation; `--merge-reports` merges the blobs, then checks floors and reconciles like a whole run.
+ *
  * vitest runs under a deadline, `UMBRADB_CONFORMANCE_DEADLINE_MS` (default 60 minutes; a loaded full run takes about
  * 13). A test worker can hang where no test timeout reaches it — V8 stuck in its fatal path while freeing WebAssembly, a
  * busy loop inside PGlite — and the run would then never end. Past the deadline the gate sends SIGTERM to vitest's whole
@@ -35,10 +38,22 @@ const reportPath = resolve(repoRoot, ".conformance-report.json");
 const checker = resolve(repoRoot, "test/integration/check-required-tests.ts");
 const forwarded = process.argv.slice(2);
 
+const forwards = (flag) => forwarded.some((arg) => arg === flag || arg.startsWith(`${flag}=`));
+const shard = forwards("--shard");
+const merge = forwards("--merge-reports");
+if (shard && merge) {
+  console.error("conformance-gate: --shard and --merge-reports are separate steps; give one of them.");
+  process.exit(2);
+}
+
 const env = { ...process.env };
 // Belt-and-suspenders: the crash/soak/differential suites run on Testcontainers, not the live
 // tier — make sure the live gate is unset so nothing self-skips behind it.
 delete env.UMBRADB_LIVE_PREPROD;
+
+const reporters = shard
+  ? ["--reporter=default", "--reporter=blob"]
+  : ["--reporter=default", "--reporter=json", `--outputFile=${reportPath}`];
 
 // Both children run on this Node binary directly, never through a shell: `npx` is a `.cmd` shim on
 // Windows, which only a shell can launch, so vitest's own CLI entry is invoked instead.
@@ -75,15 +90,7 @@ const windows = process.platform === "win32";
 
 const vitest = spawn(
   process.execPath,
-  [
-    vitestCli,
-    "run",
-    "--coverage",
-    "--reporter=default",
-    "--reporter=json",
-    `--outputFile=${reportPath}`,
-    ...forwarded,
-  ],
+  [vitestCli, "run", "--coverage", ...reporters, ...forwarded],
   { cwd: repoRoot, env, stdio: "inherit", detached: !windows },
 );
 
@@ -183,6 +190,12 @@ if (interruptedBy !== undefined) {
   process.exit(128 + constants.signals[interruptedBy]);
 }
 const vitestExit = vitestResult.code ?? 1;
+
+if (shard) {
+  // A shard runs only some required ids; the merge reconciles them all.
+  if (vitestExit !== 0) console.error(`conformance-gate: vitest exited ${vitestExit} (a test in this shard failed).`);
+  process.exit(vitestExit);
+}
 
 if (!existsSync(reportPath)) {
   console.error(

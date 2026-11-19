@@ -53,7 +53,7 @@ import { STAND_IN_LEDGER, STAND_IN_SPEC_VERSION, standInHeader, standInItems } f
  *
  * The blocks here are written as the finalized loop writes them: `core-block-commit`'s `on-db-write` through its block
  * write handle (`openBlockWrites`), one block transaction per block, with the block items the stand-in `core-block-fetch`
- * puts (`./block-fetch-stand-in.ts`). The same checks through the real process are in `chain-process.test.ts`.
+ * puts (`./block-fetch-stand-in.ts`). The same checks through the real process are in `chain-process.ts`.
  */
 
 /**

@@ -6,7 +6,7 @@ import { posix } from "node:path";
  *
  * Every function here takes repository-relative POSIX paths and returns one sentence per problem, empty when there is
  * none, so `./legacy-excluded.test.ts` runs the same checks on the real lists (`npm pack --dry-run --json`, the
- * TypeScript programs, `vitest list`, the coverage and mutation configurations) and on the negative controls' lists.
+ * TypeScript programs, `vitest list`, the coverage configuration) and on the negative controls' lists.
  */
 
 /** Where TransactionHistory lives until the private wallet-data feature refactors it. */

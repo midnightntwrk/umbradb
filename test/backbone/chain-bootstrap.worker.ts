@@ -6,7 +6,7 @@ import { chainDeclarations } from "./chain-build.js";
 /**
  * A process for the check that a bootstrap killed before S commits is repeated on the next start.
  *
- * `chain-process.test.ts` starts it with `node --import tsx` and one JSON argument ({@link Job}). It reports each event
+ * `chain-process.ts` starts it with `node --import tsx` and one JSON argument ({@link Job}). It reports each event
  * as one JSON line on stdout ({@link WorkerEvent}), and the test kills it with SIGKILL. The modes:
  * - `wait`: S is above the source's finalized head, so the process waits (`starting` with `waiting-for-node`) after
  *   the bootstrap's migrations and `core-chain`'s `on-start-db` have committed. It reports `waiting`.
