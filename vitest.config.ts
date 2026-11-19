@@ -43,8 +43,9 @@ const CORE_ARCH = {
   // `core-block-commit`'s cursor table).
   "**/src/backbone/**": { lines: 90, branches: 85, perFile: true },
   // The 95/90 floor for the ledger state's reclamation: first the sweep's (`src/ledger/sweep*`), given by the
-  // change that removed the sweep to the step that replaced it.
-  "**/src/backbone/core-ledger-state/refcount.ts": { lines: 95, branches: 90, perFile: true },
+  // change that removed the sweep to the step that replaced it, then by the change that moved the step to the tests
+  // to the run computation that replaced it.
+  "**/src/backbone/core-ledger-state/run-reclaim.ts": { lines: 95, branches: 90, perFile: true },
   // The default for `src/**`, added with the node client's directory.
   "**/src/node/**": { lines: 90, branches: 85, perFile: true },
   // The default for `src/**`, added with the admin endpoints' directory.

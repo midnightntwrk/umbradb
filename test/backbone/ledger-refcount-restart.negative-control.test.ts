@@ -23,8 +23,9 @@ import {
  * - A restart that empties `unreferenced` (the segment's `emptiesQueue` seam) after the stop at 37 makes the
  *   node sets differ after the next block, 38: the rows queued at 37 are deleted at 38 by the uninterrupted run only.
  * - A build that writes `ref_counts` and `unreferenced` in a transaction of their own, committed before the
- *   block's (`./refcount-restart.ts`, `control: "own-transaction"`), crashed between the two commits at REQUEUE + 1,
- *   is detected: the database the crash left is a mix (`ref_counts` and `unreferenced` after h, the rest after
+ *   block's (`./refcount-restart.ts`, `control: "own-transaction"`; its loop takes those writes back inside the
+ *   block's transaction before `on-settle`, so that its computation reads the tables after h − 1 and the crash point
+ *   is reached), crashed between the two commits at REQUEUE + 1, is detected: the database the crash left is a mix (`ref_counts` and `unreferenced` after h, the rest after
  *   h − 1, its contents hash refused with `ledger-refcount-invalid`), and after the restart the node sets differ from
  *   h on.
  */

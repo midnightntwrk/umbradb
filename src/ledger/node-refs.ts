@@ -13,6 +13,10 @@
  * the package's `childRefs` gives, though it lists them in the order of its own walk (`test/ledger/node-refs.test.ts`
  * checks they are equal as sets). {@link readChildList} reads a list for other readers, `./node-key.ts` among them.
  * Pure: no Node.js import.
+ *
+ * {@link childRefOffsets} gives where those keys are in the list, so that a reader can make each key into what it keeps
+ * from the list's own bytes, copying no key. Most of a list is embedded payload (1.9 KB and 2.2 references a node on
+ * Preprod at height 261,843), so only the keys' bytes need be read, never the whole list.
  */
 
 /** A reader over a child list's bytes; every refusal names what was read. */
@@ -44,10 +48,16 @@ class ChildReader {
 
   /** The next `length` bytes, not copied (an embedded node's payload, which its reader hashes and does not keep). */
   view(length: number): Uint8Array {
+    const start = this.pass(length);
+    return this.bytes.subarray(start, start + length);
+  }
+
+  /** Passes the next `length` bytes and gives where they start. */
+  pass(length: number): number {
     if (this.#offset + length > this.bytes.length) throw this.#refuse(`${length} bytes are announced`);
     const start = this.#offset;
     this.#offset += length;
-    return this.bytes.subarray(start, start + length);
+    return start;
   }
 
   /**
@@ -140,4 +150,33 @@ export function childRefKeys(children: Uint8Array): Uint8Array[] {
     embedded: () => undefined,
   });
   return keys;
+}
+
+/** The length of a node key, in bytes. */
+const KEY_LENGTH = 32;
+
+/** The offsets of the by-reference keys of one list, through embedded children, added to `offsets` in the list's order. */
+function readRefOffsets(reader: ChildReader, offsets: number[]): void {
+  const count = reader.length();
+  for (let i = 0; i < count; i++) {
+    const discriminant = reader.byte();
+    if (discriminant === 0) offsets.push(reader.pass(KEY_LENGTH));
+    else if (discriminant === 1) {
+      reader.pass(reader.length());
+      readRefOffsets(reader, offsets);
+    } else throw reader.refuseHere(`a child of kind ${discriminant}`);
+  }
+}
+
+/**
+ * Where the by-reference keys of a serialized child list are, through embedded children, in the list's order: the
+ * offset of each key's 32 bytes in `children`. The keys {@link childRefKeys} gives, not copied. Refuses what
+ * {@link readChildList} refuses.
+ */
+export function childRefOffsets(children: Uint8Array): number[] {
+  const reader = new ChildReader(children);
+  const offsets: number[] = [];
+  readRefOffsets(reader, offsets);
+  if (!reader.done) throw reader.refuseHere("bytes are left after it");
+  return offsets;
 }

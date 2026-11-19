@@ -328,6 +328,11 @@ class PgliteDatabase implements Database {
     return this.queue.add(() => this.runTransaction(body, outer));
   }
 
+  /** One session serves the database from its opening to its close (see `Database.writerSession`). */
+  writerSession(): number | null {
+    return this.closed ? null : 1;
+  }
+
   close(): Promise<void> {
     if (this.closing === undefined) {
       this.closed = true;

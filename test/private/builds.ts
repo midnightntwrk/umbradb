@@ -286,6 +286,8 @@ export interface PrivateSeen {
    * the private database; `on-settle`: its block write handle's (the private cursor before the block).
    */
   readonly readHeight?: bigint | null;
+  /** The block context's `continues` (none at `on-settle`, which gets no block context). */
+  readonly continues?: boolean;
 }
 
 /** The SQL of a private test module's table: each height with the public block's hash it read and its setting `salt`. */
@@ -319,14 +321,14 @@ export function privateModule(id: string, seen: PrivateSeen[], rest: Partial<Mod
         if (read === undefined) throw new Error(`${id}'s on-fetch got no read of public data`);
         const [row] = await read.query("SELECT hash FROM core_block_commit.blocks WHERE height = $1", [b.height]);
         if (row === undefined) throw new Error(`no public block at ${b.height} in a read at ${read.height}`);
-        seen.push({ point: "on-fetch", height: b.height, readHeight: read.height });
+        seen.push({ point: "on-fetch", height: b.height, readHeight: read.height, continues: b.continues });
         out.put(`${id}-public`, row.hash);
       },
       async "on-compute"(_p, b, read) {
-        seen.push({ point: "on-compute", height: b.height, readHeight: read.height });
+        seen.push({ point: "on-compute", height: b.height, readHeight: read.height, continues: b.continues });
       },
       async "on-db-write"(_p, b, w) {
-        seen.push({ point: "on-db-write", height: b.height });
+        seen.push({ point: "on-db-write", height: b.height, continues: b.continues });
         await w.execute(`INSERT INTO ${schema}.rows (height, public_hash, salt) VALUES ($1, $2, $3)`, [
           b.height,
           b.items.get(`${id}-public`),
@@ -334,7 +336,7 @@ export function privateModule(id: string, seen: PrivateSeen[], rest: Partial<Mod
         ]);
       },
       async "on-after-db-write"(_p, b, read) {
-        seen.push({ point: "on-after-db-write", height: b.height, readHeight: read.height });
+        seen.push({ point: "on-after-db-write", height: b.height, readHeight: read.height, continues: b.continues });
       },
     },
     ...rest,

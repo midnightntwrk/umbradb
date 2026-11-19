@@ -109,21 +109,24 @@ export async function sweepTables(read: Reader, options: { readonly digests?: bo
 
 /**
  * What a run's ledger worker answered, in the main thread: each height's flushed batch (the last apply of the height:
- * a worker restarted at h applies h again) and the keys each height had evicted (an eviction refused records none).
+ * a worker restarted at h applies h again) and the keys each height had evicted (an eviction refused records none);
+ * and how many evictions were sent at each height, whatever their answer.
  */
 export interface WorkerRecord {
   readonly batches: Map<bigint, NodeBatch>;
   readonly evicted: Map<bigint, string[]>;
+  readonly sent: Map<bigint, number>;
 }
 
 /** An empty {@link WorkerRecord}. */
-export const workerRecord = (): WorkerRecord => ({ batches: new Map(), evicted: new Map() });
+export const workerRecord = (): WorkerRecord => ({ batches: new Map(), evicted: new Map(), sent: new Map() });
 
 /** `host`, its every block's batch and eviction recorded in `record` (the other calls passed through as they are). */
 export function recordingWorker(host: LedgerHost, record: WorkerRecord): LedgerHost {
   let height: bigint | null = null;
   return {
     useDatabase: (database) => host.useDatabase(database),
+    lend: (read) => host.lend(read),
     parse: (ledger, block, transactions) => host.parse(ledger, block, transactions),
     genesisRoot: (ledger, bytes) => host.genesisRoot(ledger, bytes),
     async genesis(input, read) {
@@ -140,9 +143,13 @@ export function recordingWorker(host: LedgerHost, record: WorkerRecord): LedgerH
     },
     commit: (block) => host.commit(block),
     release: (drop) => host.release(drop),
+    written: (block) => host.written(block),
+    committed: (block) => host.committed(block),
+    rolledBack: (block) => host.rolledBack(block),
     load: (input, read) => host.load(input, read),
     retained: (input, read) => host.retained(input, read),
     async evict(keys) {
+      if (height !== null) record.sent.set(height, (record.sent.get(height) ?? 0) + 1);
       const taken = await host.evict(keys);
       if (height !== null) record.evicted.set(height, [...(record.evicted.get(height) ?? []), ...keys.map(hex)].sort());
       return taken;

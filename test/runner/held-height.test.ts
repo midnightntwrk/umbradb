@@ -169,6 +169,7 @@ function losingCommits(db: Database) {
       return result;
     },
     close: () => db.close(),
+    writerSession: () => db.writerSession(),
   };
   return { db: wrapped, state };
 }

@@ -33,23 +33,25 @@
  * - `segment-results`: each transaction's outcome and segments;
  * - `vm-logs`: the contract logs of applied segments, numbered in the block in emission order (none on ledger v8).
  *
- * **At `on-db-write`** it writes, in the block's transaction:
- * - the batch the worker flushed: the nodes created since the previous block that the new state reaches
- *   (`core_ledger_state.nodes`; a stored key written with another child list takes it, as the node's own storage does,
- *   and one written with its stored child list is left untouched), and each changed root count as a signed change
- *   added to the stored one, a count that reaches 0 being deleted (`core_ledger_state.root_counts`);
+ * **At `on-db-write`** it writes the block's own rows, in the block's transaction:
+ * - each changed root count as a signed change added to the stored one, a count that reaches 0 being deleted
+ *   (`core_ledger_state.root_counts`), first: the reclamation at `on-settle` reads the counts after the block;
  * - the block's `states` row: the state key and root, and the first free index and root of the zswap tree and of the
  *   DUST commitment and generation trees, none null, read as the official indexer reads them (the packages'
  *   `stateTrees`);
- * - its `segment_results`, and its ledger `events` (each transaction's numbered from 0 in emission order);
- * - then the block's reclamation step (see below).
+ * - its `segment_results`, and its ledger `events` (each transaction's numbered from 0 in emission order).
+ *
+ * It writes no node there: the nodes the worker flushed are written at `on-settle` (see "Reclamation" below), a stored
+ * key written with another child list taking it, as the node's own storage does, and one written with its stored child
+ * list left untouched.
  *
  * **The tables** and every statement are in `./sql.ts`. The `ledger-state` item declares `nodes`, `ref_counts` and
  * `unreferenced` content-defined (`./node-set.ts`): the contents hash takes `nodes` by its node set and checks the counts
  * and the queue against the rows, and no block captures or digests them.
  *
- * **At `on-after-db-write`** it tells the worker the block committed, so the state after h becomes the one h + 1 is
- * applied on. It does not wait for the answer, since that callback holds a read (see the callback).
+ * **After the commit** it does nothing: the engine tells the worker's host when the `COMMIT` that holds h answered, and
+ * the host commits the block in the worker, so the state after h becomes the one h + 1 is applied on
+ * (`../../ledger/worker/host.ts`).
  *
  * **The stored state.** Before each apply after block 0 it reads the state at h − 1 from `states` (its key and root),
  * with the block's ledger there (`core_block_commit.blocks`), and asks the worker to hold that state
@@ -77,16 +79,37 @@
  * `on-start-db`). A module that requires it loads the state after a height inside the window at its read's cursor, in
  * the worker, and gets it as plain data. Outside the window the load fails with `state-not-retained`.
  *
- * **Reclamation** (`./refcount.ts`). After the root check, `on-compute` computes the block's reference-counting step
- * from `nodes`, `ref_counts`, `root_counts` and `unreferenced` as committed at h − 1 and the block's batch. It has the
- * worker evict the nodes the step deletes (`LedgerHost.evict`) before the block's transaction; `on-db-write` writes
- * the step after the batch's node writes, since a rewritten node can be deleted. A failed check halts the block with
- * `ledger-refcount-invalid` before anything of it is stored. With the `core` entry's `sweep` off at h the step deletes
- * nothing and evicts nothing, and still counts and queues; no reset is written when it turns off or on.
+ * **Reclamation** (`./run-reclaim.ts`). After the root check, `on-compute` hands the block's flush (the nodes the
+ * worker flushed and the root-count changes) over, in memory, to the run record of the process context; it sends no
+ * statement. At `on-settle`, for the run of heights the engine settles, after every `on-db-write` of the run's last
+ * block and before its `COMMIT`, it computes the node tables after the run from `nodes`, `ref_counts` and
+ * `unreferenced` as the transaction holds them (as the block before the run left them) and `root_counts` (as the run's
+ * last block left them). It has the worker evict the nodes the computation deletes (`LedgerHost.evict`), awaited, then
+ * writes the net change: the nodes, the count changes, the queue's changes, then the deleted rows ({@link settleRun}).
+ * A failed check halts with `ledger-refcount-invalid` before anything is sent to the worker, and the block's
+ * transaction rolls back, so nothing of it is stored. With the `core` entry's `sweep` off nothing is deleted or
+ * evicted, and the counts and the queue still change; no reset is written when it turns off or on.
  *
- * If the package still refuses an eviction after the worker freed what it can, the worker thread is ended. A new one
- * loads the state at h − 1 from the database, applies h again and computes its step again; only a second refusal
- * fails the block ({@link computeBlock}).
+ * The engine passes a run of one block, so this happens once per block, inside its transaction. The record is made
+ * anew at a block's `on-compute` unless it expects that block, and dropped at `on-settle`; a block made again after a
+ * failure is handed over to a new record, which holds it alone.
+ *
+ * At the eviction the worker holds two states: the one committed after the block before the run, and the one after
+ * its last block, pending. The computation deletes nothing that either reaches through the stored child lists
+ * (`docs/research/run-reclamation.md`, section 5). No block above the run is applied before the eviction is sent:
+ * its apply is sent at its own `on-compute`, after the `COMMIT`.
+ *
+ * If the package still refuses the eviction after the worker freed what it can, the worker thread is ended and a new
+ * one started, and the net write and the `COMMIT` go on: the eviction is sent once per attempt of the height, and the
+ * refusal itself has no height made again. The new thread holds no state, so the next block loads the state after the
+ * run from the database. A later failure of the same attempt that the engine retries makes the height again: the new
+ * thread loads the state before it and applies it again, and its settle sends the eviction again, which a package that
+ * refuses in every thread refuses again, one restart per attempt, the attempts bounded by the process's retries. With `restartOnRefusedEviction: false`
+ * the refusal fails the block. A failure after the eviction and before the `COMMIT` (a write, a lost connection) rolls
+ * the block back, the worker having forgotten nodes the database keeps; it flushes such a node again when it needs it.
+ * When the `COMMIT`'s answer is lost, the cursor read after the reconnection decides: a block that committed is not
+ * computed again, and the engine tells the worker's host it committed, so the worker commits the state it holds
+ * pending; one that did not is made again from `on-compute`, as after a rollback.
  *
  * The declaration ({@link CORE_LEDGER_STATE}) is a constant built over its rules. A negative control's build composes
  * its own with {@link coreLedgerState}, with one rule replaced.
@@ -98,11 +121,18 @@ import type { CheckedConfig } from "../../config/validate.js";
 import type { BlockWriteHandle, ReadHandle } from "../../db/api.js";
 import { UmbraError } from "../../db/errors.js";
 import { firstRegularAtParentTime, parentTimestampMs } from "../../ledger/replay.js";
-import type { ChainOutcome, LedgerEvent, LedgerName, StateSummary, TransactionResult, VmLog } from "../../ledger/types.js";
+import type { ChainOutcome, LedgerEvent, LedgerName, NodeBatch, StateSummary, TransactionResult, VmLog } from "../../ledger/types.js";
 import { type AppliedState, type ContractKeys, convertsFromV8, isEvictionRefused } from "../../ledger/worker/engine.js";
 import type { LedgerHost } from "../../ledger/worker/host.js";
 import { traceAdd, traceChain, tracedRead, traceMark, traceSteps, tracing } from "../../trace/trace.js";
-import { type BlockContext, type DefinedModule, defineModule, type ModuleDeclaration, type ProcessContext } from "../../modules/declaration.js";
+import {
+  type BlockContext,
+  type BlockRun,
+  type DefinedModule,
+  defineModule,
+  type ModuleDeclaration,
+  type ProcessContext,
+} from "../../modules/declaration.js";
 import { blockHeaderOf, ledgerVersionOf } from "../core-block-commit/core-block-commit.js";
 import type { BlockLedgerSource } from "../core-block-fetch/ledger-source.js";
 import { blockParsedItemOf } from "../core-block-parsed/core-block-parsed.js";
@@ -116,22 +146,13 @@ import {
   CORE_LEDGER_STATE_MIGRATIONS,
   deployedBelow,
   insertEvents,
-  insertNodes,
   insertSegmentResults,
   insertStateRow,
   STATES_TABLE,
   stateAt,
   stateKeysBetween,
 } from "./sql.js";
-import {
-  type RefcountCheck,
-  type RefcountFault,
-  type RefcountStep,
-  type RefcountTables,
-  refcountStep,
-  sqlRefcountTables,
-  writeRefcount,
-} from "./refcount.js";
+import { type RunCheck, type RunFault, type RunOutcome, RunReclaim, type RunTables, sqlRunTables, writeNet } from "./run-reclaim.js";
 
 /** The module's id. */
 export const CORE_LEDGER_STATE_ID = "core-ledger-state";
@@ -145,9 +166,6 @@ export const LEDGER_EVENTS_ITEM = "ledger-events";
 export const SEGMENT_RESULTS_ITEM = "segment-results";
 /** A `block` item only: the logs' table, `contract_logs.logs`, belongs to the `core-contract-logs-*` modules. */
 export const VM_LOGS_ITEM = "vm-logs";
-
-/** The nodes written per statement: a block's batch is chunked so no statement's parameters grow without bound. */
-export const NODES_PER_STATEMENT = 1_000;
 
 /** The `ledger-state` item: the state after the block as plain data; the state itself stays in the worker. */
 export interface LedgerStateItem extends StateSummary {
@@ -232,23 +250,23 @@ export interface CoreLedgerStateOptions {
   readonly retainedFrom?: (revisions: readonly CoreRevision[], height: bigint) => bigint;
   /** Whether the block's contracts' keys are persisted: while `core-contract-states` is active. */
   readonly persistsContracts?: (b: BlockContext) => boolean;
-  /** A fault put into the reclamation step through its tables (`./refcount.ts`); none in a build. */
-  readonly refcountFault?: RefcountFault;
-  /** A check of the reclamation step left out; every check runs in a build. */
-  readonly refcountUnchecked?: RefcountCheck;
+  /** A fault put into the reclamation's computation (`./run-reclaim.ts`); none in a build. */
+  readonly refcountFault?: RunFault;
+  /** A check of the reclamation left out: one of the computation's, or the net write's `row-count-mismatch`. */
+  readonly refcountUnchecked?: RunCheck | "row-count-mismatch";
   /**
-   * The handle the block's reclamation statements run through, given the block's own and its height: that handle. A
-   * negative control's changes what a statement affects.
+   * The handle the net write's count, queue and delete statements run through at `on-settle`, given the block write
+   * handle and the run's last height: that handle. A negative control's changes what a statement affects.
    */
   readonly refcountWriter?: (w: Pick<BlockWriteHandle, "execute">, height: bigint) => Pick<BlockWriteHandle, "execute">;
   /**
-   * The handle the block's node writes run through, given the block's own and its height: that handle. A negative
-   * control's changes how a stored node is written again.
+   * The handle the net write's node statement runs through at `on-settle`, given the block write handle and the run's
+   * last height: that handle. A negative control's changes how a stored node is written again.
    */
   readonly nodeWriter?: (w: Pick<BlockWriteHandle, "execute">, height: bigint) => Pick<BlockWriteHandle, "execute">;
   /**
-   * Whether an eviction the package still refuses after the worker freed what it can ends the worker thread and
-   * applies the block again in a new one; true by default. False halts at the first refusal.
+   * Whether an eviction the package still refuses after the worker freed what it can ends the worker thread while the
+   * run commits; true by default. False fails the run at the refusal.
    */
   readonly restartOnRefusedEviction?: boolean;
 }
@@ -271,14 +289,16 @@ export async function parentTimeOf(read: Pick<ReadHandle, "query">, b: BlockCont
   return parentTimestampMs(ms, ownMs);
 }
 
-/** What `on-compute` computed for a block, for its `on-db-write`: the applied block and its reclamation step. */
+/** What `on-compute` computed for a block, for its `on-db-write`: the applied block. */
 export interface ComputedBlock {
   readonly applied: AppliedState;
-  readonly step: RefcountStep;
 }
 
 /** The pending writes of each process context: the block `on-compute` computed, for its `on-db-write`. */
 const PENDING = new WeakMap<ProcessContext, ComputedBlock>();
+
+/** The run record of each process context: the blocks handed over since its last settle (see the module comment). */
+const RUNS = new WeakMap<ProcessContext, RunReclaim>();
 
 /** The `core` revisions of each process context, read once from its `config` item. */
 const REVISIONS = new WeakMap<ProcessContext, readonly CoreRevision[]>();
@@ -471,16 +491,11 @@ export function itemsOf(applied: AppliedState): {
 }
 
 /**
- * Writes the block `applied` describes, in its transaction (see the module comment). Resolves with the nodes it wrote,
- * summed over its statements: the batch's new nodes and those it rewrote with another child list.
+ * Writes the block `applied` describes, its own rows, in its transaction (see the module comment): its root-count
+ * changes first, its `states` row, its `segment_results` and its ledger `events`. Not its nodes: `on-settle` writes them.
  */
-export async function writeBlock(w: Pick<BlockWriteHandle, "execute">, applied: AppliedState): Promise<number> {
+export async function writeBlockRows(w: Pick<BlockWriteHandle, "execute">, applied: AppliedState): Promise<void> {
   const { batch, output, summary, height, stateKey, stateRoot } = applied;
-  let written = 0;
-  for (let at = 0; at < batch.inserts.length; at += NODES_PER_STATEMENT) {
-    const chunk = batch.inserts.slice(at, at + NODES_PER_STATEMENT);
-    written += await insertNodes(w, chunk);
-  }
   const counts = batch.rootCounts.filter((count) => count.delta !== 0);
   if (counts.length > 0) await addRootCounts(w, counts);
   await insertStateRow(w, { ...summary, height, stateKey, stateRoot });
@@ -495,7 +510,6 @@ export async function writeBlock(w: Pick<BlockWriteHandle, "execute">, applied: 
     });
     await insertEvents(w, height, output.events, indexes);
   }
-  return written;
 }
 
 /** The block `on-compute` computed for `b`, taken for its `on-db-write`; throws when it is not `b`'s. */
@@ -509,96 +523,34 @@ function pendingOf(p: ProcessContext, b: BlockContext): ComputedBlock {
 }
 
 /**
- * Block `b`'s reclamation step (`./refcount.ts`), from the tables as `read` holds them at h − 1 and the block's batch,
- * the `core` entry's `sweep` at h saying whether it deletes. The nodes it deletes are evicted from the worker before the
- * block's transaction.
+ * Hands block `height`'s flush over to the run record of `p` (see the module comment): the record held when it expects
+ * this height, else a new one from it. `sweep` at the height says whether the run deletes. A record whose hand-over
+ * failed is dropped.
  */
-export async function refcountOf(
-  p: ProcessContext,
-  b: BlockContext,
-  read: Pick<ReadHandle, "query">,
-  applied: AppliedState,
-  options: CoreLedgerStateOptions = {},
-): Promise<RefcountStep> {
-  const on = revisionAt(revisionsOf(p), b.height)?.sweep !== "off";
-  const stepFrom = performance.now();
-  const tables = tracing() ? tracedTables(sqlRefcountTables(read)) : sqlRefcountTables(read);
-  const step = await refcountStep(
-    options.refcountFault === undefined ? tables : { ...tables, fault: options.refcountFault },
-    applied.batch,
-    { height: b.height, on, ...(options.refcountUnchecked === undefined ? {} : { unchecked: options.refcountUnchecked }) },
-  );
-  const evictFrom = performance.now();
-  if (step.deleted.length > 0) await boundLedger(p).ledger.evict(step.deleted);
-  if (tracing()) {
-    traceAdd("stepMs", evictFrom - stepFrom);
-    traceAdd("evictMs", performance.now() - evictFrom);
-    traceStep(step);
+function handOver(p: ProcessContext, height: bigint, flushed: NodeBatch, options: CoreLedgerStateOptions): void {
+  const on = revisionAt(revisionsOf(p), height)?.sweep !== "off";
+  let record = RUNS.get(p);
+  if (record === undefined || record.next !== height) {
+    const unchecked = options.refcountUnchecked === "row-count-mismatch" ? undefined : options.refcountUnchecked;
+    record = new RunReclaim({
+      first: height,
+      on,
+      ...(options.refcountFault === undefined ? {} : { fault: options.refcountFault }),
+      ...(unchecked === undefined ? {} : { unchecked }),
+    });
+    RUNS.set(p, record);
   }
-  return step;
-}
-
-/** `tables` with each read recorded in the block trace (`src/trace/trace.ts`), by its name. */
-function tracedTables(tables: RefcountTables): RefcountTables {
-  return {
-    rows: tracedRead("rows", (keys) => tables.rows(keys)),
-    changed: tracedRead("changed", (nodes) => tables.changed(nodes)),
-    queue: tracedRead("queue", () => tables.queue()),
-    counts: tracedRead("counts", (keys) => tables.counts(keys)),
-    references: tracedRead("references", (keys) => tables.references(keys)),
-  };
+  try {
+    record.collect(height, flushed, on);
+  } catch (error) {
+    RUNS.delete(p);
+    throw error;
+  }
 }
 
 /**
- * Records `step` in the block trace: its outputs extend the chain of step outputs (`sh`), and `st` is its sizes, in
- * order the new, rewritten and unchanged nodes, the count changes, the deleted nodes, the rounds, the keys queued and
- * unqueued, and the keys whose count stays above 0. A trace of the steps' detail also gets the count changes (`d`), the
- * new nodes (`nn`) and the deleted nodes (`del`), each key by its first 6 bytes.
- */
-function traceStep(step: RefcountStep): void {
-  const hex = (key: Uint8Array): string => Buffer.from(key).toString("hex");
-  traceChain([
-    String(step.height),
-    step.newNodes.map(hex),
-    step.rewritten.map(hex),
-    step.unchanged.map(hex),
-    step.deltas.map((change) => [hex(change.key), change.delta]),
-    step.counted,
-    step.deleted.map(hex),
-    step.rounds,
-    step.unqueued.map(hex),
-    step.queued.map(hex),
-  ]);
-  traceMark("st", [
-    step.newNodes.length,
-    step.rewritten.length,
-    step.unchanged.length,
-    step.deltas.length,
-    step.deleted.length,
-    step.rounds,
-    step.queued.length,
-    step.unqueued.length,
-    step.counted,
-  ]);
-  if (!traceSteps()) return;
-  const short = (key: Uint8Array): string => Buffer.from(key.subarray(0, 6)).toString("hex");
-  traceMark("d", step.deltas.map((change) => [short(change.key), change.delta]));
-  traceMark("nn", step.newNodes.map(short));
-  traceMark("del", step.deleted.map(short));
-}
-
-/**
- * Block `b`'s `on-compute` work (see the module comment): the block is applied, its root checked, its reclamation step
- * computed, and the nodes the step deletes evicted.
- *
- * When the package still refuses that eviction after the worker freed what it can (`EvictionRefused`), the worker
- * thread is ended and a new one started. The new one loads the state at h − 1 from the database (the apply's usual
- * load) and applies the block again, and the step is computed again from the same read at h − 1 and the new thread's
- * batch, and evicted; a refusal then fails the block.
- *
- * The stored node set and roots do not depend on the restart: the new thread applies the same block to the same stored
- * state; a node it writes again with its stored child list touches no row and changes no count, and one it writes with
- * another child list replaces the stored one, as any write of the block does.
+ * Block `b`'s `on-compute` work (see the module comment): the block is applied and its root checked, and its flush is
+ * handed over to the run record of `p`. No statement touches the node tables.
  */
 export async function computeBlock(
   p: ProcessContext,
@@ -610,14 +562,127 @@ export async function computeBlock(
   const applied = await applyBlock(p, b, read, options);
   traceAdd("applyMs", performance.now() - applyFrom);
   traceMark("tx", applied.output.results.length);
+  const collectFrom = performance.now();
+  handOver(p, b.height, applied.batch, options);
+  traceAdd("collectMs", performance.now() - collectFrom);
+  return { applied };
+}
+
+/**
+ * `core-ledger-state`'s `on-settle` for the heights `run` (see the module comment), `w` the block write handle of the
+ * transaction that holds the run's last block: the run record's computation over the node tables as `w` holds them,
+ * the eviction of what it deletes, awaited, then the net write. The record is dropped whatever happens.
+ *
+ * When the package still refuses the eviction after the worker freed what it can (`EvictionRefused`), the worker
+ * thread is ended and a new one started, and the net write goes on: the eviction is sent once per attempt of the height.
+ * With `restartOnRefusedEviction: false` the refusal is thrown.
+ */
+export async function settleRun(
+  p: ProcessContext,
+  run: BlockRun,
+  w: Pick<BlockWriteHandle, "query" | "execute">,
+  options: CoreLedgerStateOptions = {},
+): Promise<RunOutcome> {
+  const record = RUNS.get(p);
   try {
-    return { applied, step: await refcountOf(p, b, read, applied, options) };
-  } catch (error) {
-    if (!isEvictionRefused(error) || options.restartOnRefusedEviction === false) throw error;
-    await boundLedger(p).ledger.restart();
-    const again = await applyBlock(p, b, read, options);
-    return { applied: again, step: await refcountOf(p, b, read, again, options) };
+    const handed = record?.heights;
+    if (record === undefined || handed === undefined || handed.first !== run.first || handed.last !== run.last) {
+      throw new Error(
+        `the run ${run.first} to ${run.last}: core-ledger-state's on-compute handed over ` +
+          (handed === undefined ? "no block" : `the blocks ${handed.first} to ${handed.last}`),
+      );
+    }
+    const stepFrom = performance.now();
+    const tables = sqlRunTables(w);
+    const outcome = await record.compute(tracing() ? tracedRunTables(tables) : tables);
+    const evictFrom = performance.now();
+    let refused = false;
+    if (outcome.evict.length > 0) {
+      const { ledger } = boundLedger(p);
+      // The worker answers in order, and a request sent before the eviction and given no read (a later block's parse
+      // at `on-parse`) may wait in it for a stored node: this transaction's handle answers it, since on PGlite a read
+      // of the database would wait behind this transaction.
+      const unlend = ledger.lend(w);
+      try {
+        await ledger.evict(outcome.evict);
+      } catch (error) {
+        if (!isEvictionRefused(error) || options.restartOnRefusedEviction === false) throw error;
+        await ledger.restart();
+        refused = true;
+      } finally {
+        await unlend();
+      }
+    }
+    const netFrom = performance.now();
+    await writeNet(options.refcountWriter?.(w, run.last) ?? w, outcome.net, {
+      ...(options.refcountUnchecked === "row-count-mismatch" ? { unchecked: options.refcountUnchecked } : {}),
+      nodes: options.nodeWriter?.(w, run.last) ?? w,
+    });
+    traceAdd("writeRefcountMs", performance.now() - netFrom);
+    if (tracing()) {
+      traceAdd("stepMs", evictFrom - stepFrom);
+      traceAdd("evictMs", netFrom - evictFrom);
+      if (refused) traceMark("evictRefused", 1);
+      traceSettle(run, outcome);
+    }
+    return outcome;
+  } finally {
+    RUNS.delete(p);
   }
+}
+
+/** The computation's reads, each recorded in the block trace (`src/trace/trace.ts`) by its name. */
+function tracedRunTables(tables: RunTables): RunTables {
+  return {
+    rows: tracedRead("rows", (keys) => tables.rows(keys)),
+    changed: tracedRead("changed", (nodes) => tables.changed(nodes)),
+    missing: tracedRead("missing", (keys) => tables.missing(keys)),
+    queue: tracedRead("queue", () => tables.queue()),
+    queued: tracedRead("queued", (keys) => tables.queued(keys)),
+    counts: tracedRead("counts", (keys) => tables.counts(keys)),
+    children: tracedRead("references", (keys) => tables.children(keys)),
+  };
+}
+
+/**
+ * Records a settle in the block trace. Its outputs extend the chain of step outputs (`sh`) by one link: the run's
+ * first and last heights and its net write (the nodes written, the count changes and how many keys keep a count, the
+ * rows deleted, the keys evicted, the rounds, the keys leaving and entering the queue). `st` is its sizes, in order the
+ * new, rewritten and unchanged nodes, the count changes, the deleted nodes, the rounds, the keys queued and unqueued,
+ * and the keys whose count stays above 0. A trace of the steps' detail also gets the count changes (`d`), the new
+ * nodes (`nn`) and the deleted nodes (`del`), each key by its first 6 bytes.
+ */
+function traceSettle(run: BlockRun, outcome: RunOutcome): void {
+  const hex = (key: Uint8Array): string => Buffer.from(key).toString("hex");
+  const { net } = outcome;
+  traceChain([
+    String(run.first),
+    String(run.last),
+    net.inserts.map((node) => hex(node.key)),
+    net.deltas.map((change) => [hex(change.key), change.delta]),
+    net.counted,
+    net.deleted.map(hex),
+    outcome.evict.map(hex),
+    outcome.rounds,
+    net.unqueued.map(hex),
+    net.queued.map(hex),
+  ]);
+  traceMark("st", [
+    outcome.newNodes,
+    outcome.rewrittenNodes,
+    outcome.unchangedNodes,
+    net.deltas.length,
+    outcome.evict.length,
+    outcome.rounds,
+    net.queued.length,
+    net.unqueued.length,
+    net.counted,
+  ]);
+  if (!traceSteps()) return;
+  const short = (key: Uint8Array): string => Buffer.from(key.subarray(0, 6)).toString("hex");
+  traceMark("d", net.deltas.map((change) => [short(change.key), change.delta]));
+  traceMark("nn", outcome.newKeys.map(short));
+  traceMark("del", outcome.evict.map(short));
 }
 
 /** The {@link RetainedStates} of core-ledger-state's context `p` (see the module comment). */
@@ -710,27 +775,13 @@ export function coreLedgerState(options: CoreLedgerStateOptions = {}): DefinedMo
         out.put(VM_LOGS_ITEM, items.logs);
       },
       async "on-db-write"(p, b, w) {
-        const { applied, step } = pendingOf(p, b);
-        // The node writes first: a rewritten node can be among those the step deletes.
+        const { applied } = pendingOf(p, b);
         const writeFrom = performance.now();
-        const written = await writeBlock(options.nodeWriter?.(w, b.height) ?? w, applied);
-        const refcountFrom = performance.now();
-        traceAdd("writeBlockMs", refcountFrom - writeFrom);
-        await writeRefcount(
-          options.refcountWriter?.(w, b.height) ?? w,
-          step,
-          written,
-          options.refcountUnchecked === undefined ? {} : { unchecked: options.refcountUnchecked },
-        );
-        traceAdd("writeRefcountMs", performance.now() - refcountFrom);
+        await writeBlockRows(w, applied);
+        traceAdd("writeBlockMs", performance.now() - writeFrom);
       },
-      async "on-after-db-write"(p, b) {
-        // Not awaited: this callback runs inside a read, which on PGlite holds the one queue, and the commit may wait
-        // in the worker behind a parse whose stored nodes need that queue; the worker answers requests in order, so
-        // the next block's apply still finds the state committed, and a worker that failed fails that apply.
-        void BOUND.get(p)
-          ?.ledger.commit({ height: b.height, hash: b.hash })
-          .catch(() => undefined);
+      async "on-settle"(p, run, w) {
+        await settleRun(p, run, w, options);
       },
     },
   });

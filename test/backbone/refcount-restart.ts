@@ -6,10 +6,12 @@ import { createInterface } from "node:readline";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { refcountStep, sqlRefcountTables, writeRefcount } from "../../src/backbone/core-ledger-state/refcount.js";
+import { CORE_LEDGER_STATE_ID } from "../../src/backbone/core-ledger-state/core-ledger-state.js";
+import { addRefCounts, deleteUnreferenced, insertUnreferenced } from "../../src/backbone/core-ledger-state/sql.js";
 import type { DatabaseParts } from "../../src/config/database-parts.js";
 import { openConfiguredDatabase } from "../../src/config/database.js";
 import type { BlockWriteHandle, Database, ReadHandle, Transaction } from "../../src/db/api.js";
+import type { BlockWrites } from "../../src/db/write-handles.js";
 import { WRITER_LOCK_HOLDER_SQL } from "../../src/db/writer-lock.js";
 import type { NodeBatch } from "../../src/ledger/types.js";
 import { type LedgerHost, startLedgerWorker } from "../../src/ledger/worker/host.js";
@@ -25,6 +27,7 @@ import { recordingWorker, SWEEP_LOADER, sweepCore, sweepTables, sweepTape, type 
 import { cappedAt, restartAt } from "./ledger-restart.js";
 import { fixtureProblems, storedProblems } from "./refcount-checks.js";
 import { nodeSet } from "./refcount-model.js";
+import { type RefcountStep, refcountStep, sqlRefcountTables, writeRefcount } from "./refcount-step.js";
 
 /**
  * Restarts and crashes of the process at named points, for R13 and R14: a run is one or more **segments**, each a
@@ -35,11 +38,13 @@ import { nodeSet } from "./refcount-model.js";
  * reached (one JSON line on its standard output), then either holds for ever, for the test to kill it with SIGKILL (a
  * crash), or stops the process, which ends after the height (a restart). The points of `core-ledger-state`'s block are
  * put through the seams the process already has:
- * - `before-step`: in `on-compute`, once the ledger worker answered the block's apply, before the reclamation step;
- * - `after-eviction`: in `on-compute`, once the worker answered the step's eviction, before the block's transaction;
- * - `after-node-writes`: in `on-db-write`, after the block's node writes, before the step's first statement
- *   (`refcountWriter`, the handle the step's statements run through);
- * - `between-step-writes`: after the step's first statement, before its second;
+ * - `before-step`: in `on-compute`, once the ledger worker answered the block's apply, before the block is handed over
+ *   to the reclamation (computed at `on-settle`);
+ * - `after-eviction`: in `on-settle`, once the worker answered the run's eviction: inside the block's transaction,
+ *   before the net write, so the database after a crash there is still the one after h − 1;
+ * - `after-node-writes`: in `on-settle`, after the net write's node statement, before its first count, queue or
+ *   delete statement (`refcountWriter`, the handle those statements run through, the node statement not among them);
+ * - `between-step-writes`: after that first statement, before its second;
  * - `before-commit`: the block transaction's body ended (every `on-db-write`, the cursor check), before its `COMMIT`
  *   (a `FinalizedLoop` whose `write` reports it);
  * - `after-commit`: the `COMMIT` returned, before `on-after-db-write` (its `commit`);
@@ -55,10 +60,14 @@ import { nodeSet } from "./refcount-model.js";
  * it). A line is written synchronously, so a killed segment loses none.
  *
  * **The negative controls' seams.** the ({@link SegmentJob.emptiesQueue}): a segment that empties `unreferenced`
- * before its process starts. The ({@link SegmentJob.control}): a build whose `ref_counts` and `unreferenced`
- * statements run in a transaction of their own, committed before the block's (the loop computes the block's step from
- * the read at h − 1 and the block's batch, as `core-ledger-state` does, and writes those two tables), while the block's
- * transaction writes the rest.
+ * before its process starts. The ({@link SegmentJob.control}): a build that commits the counts and the queue in a
+ * transaction of its own before the block's, so that a crash between the two commits leaves `ref_counts` and
+ * `unreferenced` after h beside the nodes and the cursor after h − 1. Its loop computes the block's step from the read
+ * at h − 1 and the block's flush with the per-block step (`./refcount-step.ts`, which gives the tables the run
+ * computation gives for one block), writes those two tables and commits. Inside the block's transaction, before
+ * `on-settle`, it takes those changes back, so that the build's computation still reads the tables after h − 1 and
+ * the block commits (its net write writes the two tables again); without that the computation would read them after
+ * h and the run would end before the crash point. The block's transaction writes the rest.
  *
  * Imports nothing of Vitest, so that the worker process runs the same build.
  */
@@ -395,6 +404,7 @@ function pointWorker(host: LedgerHost, reached: (point: RestartPoint, height: bi
   let height: bigint | null = null;
   return {
     useDatabase: (database) => host.useDatabase(database),
+    lend: (read) => host.lend(read),
     parse: (ledger, block, transactions) => host.parse(ledger, block, transactions),
     genesisRoot: (ledger, bytes) => host.genesisRoot(ledger, bytes),
     genesis: (input, read) => host.genesis(input, read),
@@ -406,6 +416,9 @@ function pointWorker(host: LedgerHost, reached: (point: RestartPoint, height: bi
     },
     commit: (block) => host.commit(block),
     release: (drop) => host.release(drop),
+    written: (block) => host.written(block),
+    committed: (block) => host.committed(block),
+    rolledBack: (block) => host.rolledBack(block),
     load: (input, read) => host.load(input, read),
     retained: (input, read) => host.retained(input, read),
     async evict(keys) {
@@ -432,12 +445,13 @@ function pointWorker(host: LedgerHost, reached: (point: RestartPoint, height: bi
 const deletesNodes = (sql: string): boolean => /^DELETE FROM core_ledger_state\.nodes\b/.test(sql);
 
 /**
- * A `FinalizedLoop` reporting `before-commit` and `after-commit`; with `own`, the negative control's, which writes the
- * block's `ref_counts` and `unreferenced` in a transaction of its own before the block's and reports `between-commits`.
+ * A `FinalizedLoop` reporting `before-commit` and `after-commit`; with `control`, the negative control's, which writes
+ * the block's `ref_counts` and `unreferenced` in a transaction of its own before the block's, reports
+ * `between-commits`, and takes those writes back inside the block's transaction before `on-settle`.
  */
 function pointLoop(
   reached: (point: RestartPoint, height: bigint) => Promise<void>,
-  own?: (db: Database, run: HeightRun) => Promise<void>,
+  control?: OwnTransaction,
 ): new (input: LoopInput) => FinalizedLoop {
   return class PointLoop extends FinalizedLoop {
     protected override async write(tx: Transaction, run: HeightRun): Promise<void> {
@@ -445,9 +459,14 @@ function pointLoop(
       await reached("before-commit", run.height);
     }
 
+    protected override async settlePoint(run: HeightRun, writes: BlockWrites): Promise<void> {
+      if (control !== undefined) await writes.write(CORE_LEDGER_STATE_ID, (w) => control.takeBack(w, run.height), "on-settle");
+      await super.settlePoint(run, writes);
+    }
+
     protected override async commit(run: HeightRun): Promise<void> {
-      if (own !== undefined) {
-        await own(this.input.db, run);
+      if (control !== undefined) {
+        await control.own(this.input.db, run);
         await reached("between-commits", run.height);
       }
       await super.commit(run);
@@ -456,41 +475,42 @@ function pointLoop(
   };
 }
 
-/**
- * The negative control's two halves (see the module comment): the loop's own transaction, which computes the block's
- * step as `core-ledger-state` does and runs its `ref_counts` and `unreferenced` statements, and the handle the block's
- * step runs through, which answers those statements with the rows they affected there and runs the rest.
- */
-function ownTransaction(record: WorkerRecord): {
+/** The negative control's build (see the module comment): its own transaction, and what takes it back. */
+interface OwnTransaction {
+  /** Computes the block's step from the read at h − 1 and commits its `ref_counts` and `unreferenced` changes. */
   readonly own: (db: Database, run: HeightRun) => Promise<void>;
-  readonly writer: (w: Pick<BlockWriteHandle, "execute">) => Pick<BlockWriteHandle, "execute">;
-} {
-  const affected: number[] = [];
+  /** Inside the block's transaction: those changes taken back, so the tables are as after h − 1 again. */
+  readonly takeBack: (w: Pick<BlockWriteHandle, "execute">, height: bigint) => Promise<void>;
+}
+
+/** The negative control's two halves (see the module comment). */
+function ownTransaction(record: WorkerRecord): OwnTransaction {
+  const steps = new Map<bigint, RefcountStep>();
   return {
     async own(db, run) {
       const batch = record.batches.get(run.height);
       if (batch === undefined) throw new Error(`the control's loop has no batch for ${run.height}`);
       const step = await db.read((read) => refcountStep(sqlRefcountTables(read), batch, { height: run.height, on: true }));
       await db.transaction(async (tx) => {
-        const diverted: Pick<BlockWriteHandle, "execute"> = {
+        // The counts and the queue only: the block's own transaction writes the nodes and deletes the rows.
+        const counted: Pick<BlockWriteHandle, "execute"> = {
           async execute(sql, params) {
             if (deletesNodes(sql)) return ((params?.[0] as readonly unknown[] | undefined) ?? []).length;
-            const rows = await tx.execute(sql, params);
-            affected.push(rows);
-            return rows;
+            return tx.execute(sql, params);
           },
         };
-        await writeRefcount(diverted, step, step.newNodes.length + step.rewritten.length);
+        await writeRefcount(counted, step, step.newNodes.length + step.rewritten.length);
       });
+      steps.set(run.height, step);
     },
-    writer: (w) => ({
-      async execute(sql, params) {
-        if (deletesNodes(sql)) return w.execute(sql, params);
-        const rows = affected.shift();
-        if (rows === undefined) throw new Error("the control's block ran a statement its own transaction did not");
-        return rows;
-      },
-    }),
+    async takeBack(w, height) {
+      const step = steps.get(height);
+      if (step === undefined) throw new Error(`the control's loop wrote no counts for ${height}`);
+      steps.delete(height);
+      if (step.deltas.length > 0) await addRefCounts(w, step.deltas.map(({ key, delta }) => ({ key, delta: -delta })));
+      if (step.queued.length > 0) await deleteUnreferenced(w, step.queued);
+      if (step.unqueued.length > 0) await insertUnreferenced(w, step.unqueued);
+    },
   };
 }
 
@@ -523,14 +543,13 @@ export async function startSegment(job: SegmentJob, report: (event: SegmentEvent
   const control = job.control === "own-transaction" ? ownTransaction(record) : undefined;
   const core = sweepCore({
     refcountWriter: (w, height) => {
-      const through = control?.writer(w) ?? w;
       let statements = 0;
       return {
         async execute(sql, params) {
           if (statements === 0) await reached("after-node-writes", height);
           else if (statements === 1) await reached("between-step-writes", height);
           statements += 1;
-          return through.execute(sql, params);
+          return w.execute(sql, params);
         },
       };
     },
@@ -568,7 +587,7 @@ export async function startSegment(job: SegmentJob, report: (event: SegmentEvent
     user,
     ...(settings === undefined ? {} : { settings }),
     ledgerWorker: () => recordingWorker(pointWorker(worker(), reached), record),
-    loop: pointLoop(reached, control?.own),
+    loop: pointLoop(reached, control),
   });
   const started = run;
   return {

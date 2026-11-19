@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
 import { PATIENCE_MS } from "./ingest-harness.js";
-import { type Fault, haltProblems, MISSING, NEGATIVE, ONE_ROW_FEWER, runFault } from "./ledger-refcount-halts.js";
+import { type Fault, haltProblems, MISSING, NEGATIVE, ONE_ROW_FEWER, runFault, UNREACHED } from "./ledger-refcount-halts.js";
 
 /**
  * `[CI]` Each check of the reclamation step halts its block with `ledger-refcount-invalid`, on PostgreSQL 18 and PGlite
@@ -10,8 +10,9 @@ import { type Fault, haltProblems, MISSING, NEGATIVE, ONE_ROW_FEWER, runFault } 
  * those of `./ledger-refcount-halts.ts`: a stored count lowered so that a deletion takes it below 0
  * (`negative-count`); three test packages, flushing a new node that references a key not stored, rewriting a stored
  * node with a child list that references a key not stored, and raising the root count of a key they neither flush nor
- * have stored (`missing-reference`); a seam making one of the step's statements affect one row fewer
- * (`row-count-mismatch`).
+ * have stored (`missing-reference`); a test package whose flush also writes a node no raised key reaches
+ * (`unreached-node`); a seam making one of the step's statements affect one row fewer (`row-count-mismatch`). A check
+ * of the computation halts before the block's eviction: no eviction is sent at its block.
  *
  * The committed negative controls (each check left out: the block commits and R3 reports the damage, or another code
  * halts it) are in `ledger-refcount-halts.negative-control.test.ts`.
@@ -43,6 +44,11 @@ describe.each(PROCESS_BACKENDS)("each reclamation check halts its block with led
       await expectHalt(backend, fault);
     }
   }, PATIENCE_MS * 4);
+
+  it("a test package whose flush writes a node no key the block raises reaches halts at that block with ledger-refcount-invalid (unreached-node), naming the key and the height; nothing is sent to the worker and nothing of the block is stored", async () => {
+    expect(UNREACHED.reason).toBe("unreached-node");
+    await expectHalt(backend, UNREACHED);
+  }, PATIENCE_MS * 3);
 
   it("a test seam making one of the step's statements affect one row fewer halts at that block with ledger-refcount-invalid (row-count-mismatch), naming the statement, the rows computed and affected, and the height; the block's transaction rolls back", async () => {
     expect(ONE_ROW_FEWER.reason).toBe("row-count-mismatch");

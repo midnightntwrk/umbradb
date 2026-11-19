@@ -35,6 +35,7 @@ function blockAt(h: bigint): BlockContext {
     items: new Map(),
     settings: {},
     active: () => true,
+    continues: false,
   };
 }
 

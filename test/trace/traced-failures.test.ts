@@ -158,8 +158,9 @@ describe("the block trace when something fails or overflows, on PostgreSQL", () 
     expect(failed).toBeDefined();
     expect(differs).toBeDefined();
 
-    // The step's first write at that height fails once, as a lost connection does: the process rolls the block back
-    // and makes it again from on-compute, which computes and chains the same step again.
+    // The net write's first count statement at that height fails once, in on-settle, as a lost connection does: the
+    // process rolls the block back and makes it again from on-compute, and its on-settle computes and chains the same
+    // run again.
     let faults = 0;
     const failOnce = (w: Pick<BlockWriteHandle, "execute">, height: bigint): Pick<BlockWriteHandle, "execute"> =>
       height !== failed || faults > 0

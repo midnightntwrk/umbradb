@@ -95,6 +95,7 @@ function recordingStatements(db: Database): { readonly db: Database; readonly tr
         );
       },
       close: () => db.close(),
+      writerSession: () => db.writerSession(),
     },
   };
 }

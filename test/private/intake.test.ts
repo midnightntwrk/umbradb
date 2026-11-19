@@ -28,7 +28,8 @@ import { TestLink } from "./link.js";
  *   heights in order.
  * - An independent instance stopped for 100 blocks never pauses the core, and catches up from public data.
  * - A private module's `on-settle` runs in each private block transaction, after its `on-db-write`, with the run of that
- *   one height, and what it writes is stored with the block.
+ *   one height, and what it writes is stored with the block; its block contexts' `continues` is false at `on-fetch`
+ *   and at the private process's first height, true at its other points after it.
  */
 
 /** The heights of a private module's `on-db-write` calls, in order, from `from` on in `seen`. */
@@ -348,6 +349,15 @@ async function settledProblems(backend: PrivateBackend): Promise<string[]> {
     `on-after-db-write@${h}`,
   ]);
   if (calls.join(", ") !== expected.join(", ")) problems.push(`pm was called ${calls.join(", ")}`);
+  // A block context's continues in the private process: false at on-fetch and at its first height, true after.
+  const continuing = seen
+    .filter((call) => call.point !== "on-settle")
+    .map((call) => `${call.point}@${call.height} ${String(call.continues)}`)
+    .sort();
+  const wantContinues = heights(1, SETTLED_TO).flatMap((h) =>
+    (["on-fetch", "on-compute", "on-db-write", "on-after-db-write"] as const).map((point) => `${point}@${h} ${String(point !== "on-fetch" && h > 1n)}`),
+  ).sort();
+  if (continuing.join(", ") !== wantContinues.join(", ")) problems.push(`pm's block contexts said continues ${continuing.join(", ")}`);
   const settled = await privateDb.read(
     (read) => read.query("SELECT height::int AS h, block_rows FROM pm.settled ORDER BY height"),
     privateCursorHeight,

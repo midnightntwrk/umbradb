@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { RefcountFault } from "../../src/backbone/core-ledger-state/refcount.js";
+import type { RefcountFault, RunCheck } from "../../src/backbone/core-ledger-state/run-reclaim.js";
 import type { BlockWriteHandle } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { AGAIN, extendedCases, type FixtureNode, REQUEUE, stateNodes } from "../ledger/fixtures/sweep-fixture.js";
@@ -11,7 +11,7 @@ import { type DagRun, runDag, runProblems } from "./refcount-process.js";
  * The committed negative controls of the reclamation check and its model check, on PostgreSQL 18 and PGlite 0.5.10: each runs the extended DAG
  * fixture through the process with one fault, and the check it controls must fail for that fault's own reason.
  *
- * The six faults, each put into the reclamation step through its tables seam (`core-ledger-state`'s `refcountFault`):
+ * The six faults, each put into the reclamation's computation (`core-ledger-state`'s `refcountFault`):
  * - (a) the second occurrence of a repeated child not decremented: `repeat leaf 0`, which `repeat 0` lists twice, keeps
  *   a count when `repeat 0` is deleted (at 6), and is not deleted with `repeat 1` (at 16): R3 (a) and (d);
  * - (b) the references of a node written again unchanged counted: `again`'s leaves at AGAIN: R3 (a);
@@ -20,7 +20,9 @@ import { type DagRun, runDag, runProblems } from "./refcount-process.js";
  * - (d) a released state's rows deleted in the block that releases it: the state after 0's own rows at 1: R3 (c);
  * - (e) a queued key that a new node references deleted in that block: `requeued` at REQUEUE + 1: The
  *   `missing-reference` halt;
- * - (f) the cascade stopped after its first round: the rows only the state after 0 reached are left at 2: R3 (d).
+ * - (f) the cascade stopped after its first round: the rows only the state after 0 reached are left at 2, queued with
+ *   nothing that released them, so the computation halts the block (`unexpected-queued`); with that check left out
+ *   (`refcountUnchecked`), R3 (d).
  *
  * The own: a test seam that, at one block, deletes the state's newly persisted root and the rows only it reaches,
  * inside the block's transaction, makes (b) and (c) fail at that block.
@@ -28,9 +30,11 @@ import { type DagRun, runDag, runProblems } from "./refcount-process.js";
 
 const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
 
-/** Runs the extended DAG to `last` with `fault`. */
-const faulty = (backend: ProcessBackend, fault: RefcountFault, last: number, halts = false): Promise<DagRun> =>
-  backend.database().then((db) => runDag(db, { dag: "extended", core: { refcountFault: fault }, last, halts }));
+/** Runs the extended DAG to `last` with `fault`, and `unchecked` left out when given. */
+const faulty = (backend: ProcessBackend, fault: RefcountFault, last: number, halts = false, unchecked?: RunCheck): Promise<DagRun> =>
+  backend
+    .database()
+    .then((db) => runDag(db, { dag: "extended", core: { refcountFault: fault, ...(unchecked === undefined ? {} : { refcountUnchecked: unchecked }) }, last, halts }));
 
 /** The problems of `run` at `height` alone, by clause: `"(a)"`, `"(b)"`, `"(c)"`, `"(d)"`. */
 function clausesAt(run: DagRun, height: number): Map<string, string[]> {
@@ -95,15 +99,25 @@ describe.each(PROCESS_BACKENDS)("negative controls on $name", (backend: ProcessB
     expect(run.status).toMatchObject({
       state: "halted",
       cursor: BigInt(REQUEUE),
-      reason: { code: "ledger-refcount-invalid", height: BigInt(REQUEUE + 1), module: "core-ledger-state", point: "on-compute" },
+      reason: { code: "ledger-refcount-invalid", height: BigInt(REQUEUE + 1), module: "core-ledger-state", point: "on-settle" },
     });
     const error = run.errors.at(-1);
     expect(error).toBeInstanceOf(UmbraError);
     expect((error as UmbraError).details).toMatchObject({ reason: "missing-reference", height: BigInt(REQUEUE + 1), key: requeued });
   }, PATIENCE_MS * 2);
 
-  it("a cascade stopped after its first round leaves the rows only the deleted ones referenced: R3 (d) at 2", async () => {
-    const run = await faulty(backend, "first-round-only", 2);
+  it("a cascade stopped after its first round leaves the rows only the deleted ones referenced: the block halts with unexpected-queued; with that check left out, R3 (d) at 2", async () => {
+    const halted = await faulty(backend, "first-round-only", 2, true);
+    expect(halted.status).toMatchObject({
+      state: "halted",
+      cursor: 1n,
+      reason: { code: "ledger-refcount-invalid", height: 2n, module: "core-ledger-state", point: "on-settle" },
+    });
+    expect((halted.errors.at(-1) as UmbraError).details).toMatchObject({ reason: "unexpected-queued", height: 2n });
+    // The check throws before the eviction: nothing sent to the worker at 2, and nothing of 2 stored.
+    expect(halted.sent.has(2n)).toBe(false);
+    expect([...(halted.tables.get(1n)?.digests ?? [])]).toEqual([...(halted.watched.get(1n)?.digests ?? [])]);
+    const run = await faulty(backend, "first-round-only", 2, false, "unexpected-queued");
     expect(run.status).toMatchObject({ cursor: 2n, reason: null });
     expect(firstProblem(run)).toBe(2);
     const found = clausesAt(run, 2).get("(d)") ?? [];
@@ -127,13 +141,15 @@ describe.each(PROCESS_BACKENDS)("negative controls on $name", (backend: ProcessB
     };
     const before = reach(at - 1);
     const only = [...reach(at)].filter((key) => !before.has(key));
-    let deleted = 0;
+    // The delete runs once, before the first count, queue or delete statement of the net write at 20, which comes
+    // after its node statement: so every row it names is written by then.
+    let deleted = -1;
     const writer = (w: Pick<BlockWriteHandle, "execute">, height: bigint): Pick<BlockWriteHandle, "execute"> =>
       height !== BigInt(at)
         ? w
         : {
             async execute(sql, params) {
-              if (deleted === 0) {
+              if (deleted < 0) {
                 deleted = await w.execute("DELETE FROM core_ledger_state.nodes WHERE node_key = ANY($1::bytea[])", [
                   only.map((key) => Uint8Array.from(Buffer.from(key, "hex"))),
                 ]);

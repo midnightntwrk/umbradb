@@ -96,6 +96,7 @@ export const BLOCK: BlockContext = Object.freeze({
   items: new Map<string, unknown>(),
   settings: Object.freeze({}),
   active: () => true,
+  continues: false,
 });
 
 export const SINK: ItemSink = Object.freeze({ put: () => undefined });

@@ -194,6 +194,42 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   computes a block's digests and checkpoint at `on-settle`, last, so they take what every module's `on-settle` wrote;
   a sync whose modules declare no `on-settle` sends the same statements, in the same order, as before. `BlockRun`, the
   run's type, is exported. The module guide's §3 describes the point.
+- **The ledger state's reclamation runs at `on-settle`.** `core-ledger-state` now declares the point. It hands each
+  block's flushed nodes and root-count changes over in memory at `on-compute`, writes only the block's own rows (root
+  counts, `states`, segment results, events) at `on-db-write`, and computes the node tables once per run of blocks at
+  `on-settle`, inside the transaction of the run's last block (a run is one block in this version): it reads `nodes`,
+  `ref_counts` and `unreferenced`, has the ledger worker evict what it deletes, then writes the nodes, counts, queue and
+  deleted rows. It reads the counts of the keys whose count falls, not of every key it reaches, so a block sends far
+  fewer count reads. A refused eviction now ends the worker thread, once per attempt of the height, and the block
+  commits; the next block loads the state from the database, and the refusal itself has no block applied again. The
+  computation assumes undamaged count tables: on tables that lost a count row a block can commit where the earlier
+  per-block step halted, and the damage is found by a later block (`ledger-refcount-invalid`) or by a backup's contents
+  check. A reclamation check halts in `on-settle`, its details naming the run's `first` and `last` heights, and a block
+  that breaks the ledger package's flush rule halts it too (`unreached-node`). In the block trace `stepMs`, `evictMs`
+  and `reads` (now also `missing` and `queued`) are inside `txMs`, `writeBlockMs` is the block's own rows,
+  `writeRefcountMs` the whole net write, `sh` has one link per run, and `collectMs` and `evictRefused` are new; the
+  operator guide lists them.
+- **The engine tells the ledger worker's host what became of each block's transaction; `continues`.** The engine tells
+  the host when a block is written in the open transaction, committed, or rolled back. When the block's `COMMIT`
+  answered, the host sends the worker the block's commit, if it had the worker apply the block, then the release of
+  the parses kept up to it. `core-ledger-state` and `core-block-parsed` no longer declare `on-after-db-write`, so a
+  slow-block report never names them there. The release now comes after the commit, where it came before it; a block
+  the worker did not apply (where `core-block-parsed` runs without `core-ledger-state`, and the last committed block
+  delivered again after a restart) gets the release alone. After a lost `COMMIT` the host is told nothing until the
+  cursor is read again: a cursor at the block tells it committed, one at the block before tells it rolled back, and
+  any other halts without telling the host anything, since the outcome is not known. The same holds when another
+  failure is reported first (a module's handle used while the `COMMIT` runs). A stop in between tells the host
+  nothing; the next start delivers the last committed block again. A block whose `on-fetch` or `on-parse` failed
+  while the node source prepared it ahead is told rolled back when processing reaches its height.
+  A block context now has `continues`: true when the block before was committed by this process with no failure
+  between (its `COMMIT` answered in the same run of processing) and the writer still has the database session that
+  committed it when the callback's context is made, false at the first height after a start or a retry, for a height
+  processed again, at the re-delivery after a restart, from the first context made after the writer's session was
+  replaced (on PostgreSQL a connection lost while idle, also during a block's own callbacks or after its `COMMIT`), and
+  always at `on-fetch` and `on-parse`. A block some of whose callbacks were told true and whose transaction then finds
+  the writer's session replaced fails before it writes, as a lost connection (retryable), and is made again. A
+  database now says which session its writer has (`Database.writerSession`). It may be false at any block. The module
+  guide's §3 describes it.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 

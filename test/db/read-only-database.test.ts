@@ -152,6 +152,7 @@ describe("readOnlyDatabase over any Database", () => {
       }) as Database["read"],
       transaction: () => Promise.reject(new Error("the db item must never open a transaction")),
       close: () => Promise.reject(new Error("the db item must never close the database")),
+      writerSession: () => null,
     };
     return { db, calls };
   }

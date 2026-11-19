@@ -31,12 +31,16 @@ function counted() {
         record.databases.push(database);
         host.useDatabase(database);
       },
+      lend: (read) => host.lend(read),
       parse: (...args) => host.parse(...args),
       genesisRoot: (...args) => host.genesisRoot(...args),
       genesis: (...args) => host.genesis(...args),
       apply: (...args) => host.apply(...args),
       commit: (...args) => host.commit(...args),
       release: (...args) => host.release(...args),
+      written: (...args) => host.written(...args),
+      committed: (...args) => host.committed(...args),
+      rolledBack: (...args) => host.rolledBack(...args),
       load: (...args) => host.load(...args),
       retained: (...args) => host.retained(...args),
       evict: (...args) => host.evict(...args),

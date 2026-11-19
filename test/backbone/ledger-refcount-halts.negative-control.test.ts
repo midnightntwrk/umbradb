@@ -27,7 +27,7 @@ describe.each(PROCESS_BACKENDS)("negative controls on $name", (backend: ProcessB
       expect(run.status).toMatchObject({
         state: "halted",
         cursor: BigInt(LOWERED.at),
-        reason: { code: "database-error", height: BigInt(NEGATIVE.height), point: "on-db-write" },
+        reason: { code: "database-error", height: BigInt(NEGATIVE.height), point: "on-settle" },
       });
       // The assertion fails: another code.
       expect(await haltProblems(db, run, NEGATIVE, lowered)).toContainEqual(expect.stringMatching(/^the process is .*database-error/));

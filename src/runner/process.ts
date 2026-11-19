@@ -2197,6 +2197,8 @@ class Process implements ProcessHandle {
       slowBlockMs: settings.slowBlockMs as number,
       ...(this.#lockstep === undefined ? {} : { lockstep: this.#lockstep }),
       pause: this.#pauses,
+      // The ledger worker's host follows each block's transaction: it commits in the worker the blocks applied there.
+      ...(this.#ledger === undefined ? {} : { follower: this.#ledger }),
       observer: {
         slow: (event) => this.#slowBlockEvent(event, settings.slowBlockMs as number),
         head: (head) => {

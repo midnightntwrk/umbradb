@@ -273,6 +273,7 @@ export function countingTransactions(db: Database): { readonly db: Database; rea
         return db.transaction(body);
       },
       close: () => db.close(),
+      writerSession: () => db.writerSession(),
     },
     count: () => count,
   };

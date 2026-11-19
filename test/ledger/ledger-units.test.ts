@@ -154,6 +154,7 @@ describe("withLedgerTasks' points", () => {
     items: new Map([["block-parsed", { ledger: "v9", transactions: [] }]]),
     settings: {},
     active: () => true,
+    continues: false,
   });
   const sink = () => {
     const put: [string, unknown][] = [];
