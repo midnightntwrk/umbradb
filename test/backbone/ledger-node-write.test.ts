@@ -1,9 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { NODES_PER_STATEMENT, writeBlock } from "../../src/backbone/core-ledger-state/core-ledger-state.js";
+import { KEYS_PER_STATEMENT, type NetWrite, writeNet } from "../../src/backbone/core-ledger-state/run-reclaim.js";
 import { CORE_LEDGER_STATE_MIGRATIONS, insertNodes } from "../../src/backbone/core-ledger-state/sql.js";
-import type { Database } from "../../src/db/api.js";
+import type { BlockWriteHandle, Database } from "../../src/db/api.js";
 import type { StoredNode } from "../../src/ledger/types.js";
-import type { AppliedState } from "../../src/ledger/worker/engine.js";
 import { BACKENDS } from "../db/backends.js";
 
 /**
@@ -13,7 +12,8 @@ import { BACKENDS } from "../db/backends.js";
  *   counted;
  * - a node written with another child list replaces the stored one and is counted;
  * - a new node is inserted and counted;
- * - `writeBlock` returns the nodes it wrote, summed over its statements of {@link NODES_PER_STATEMENT} nodes.
+ * - the net write's node statement (`writeNet`, at `on-settle`) affects the nodes it writes, summed over its statements
+ *   of {@link KEYS_PER_STATEMENT} nodes, and runs through the handle given for it.
  *
  * The node is its key's content, so a row's `data` never changes: only its child list (its form) can.
  */
@@ -45,26 +45,9 @@ async function rowsOf(db: Database): Promise<Map<string, { readonly data: string
   );
 }
 
-/** A block `height` whose batch inserts `inserts`, with no root count, result or event: its state row only besides. */
-function applied(height: bigint, inserts: readonly StoredNode[]): AppliedState {
-  return {
-    height,
-    hash: key(0xb0, Number(height)),
-    ledger: "v9",
-    stateKey: key(0xc0, Number(height)),
-    stateRoot: Uint8Array.of(0xc1),
-    summary: {
-      zswapFirstFree: 0n,
-      zswapRoot: Uint8Array.of(1),
-      dustCommitmentFirstFree: 0n,
-      dustCommitmentRoot: Uint8Array.of(2),
-      dustGenerationFirstFree: 0n,
-      dustGenerationRoot: Uint8Array.of(3),
-    },
-    output: { results: [], events: [], logs: [], parameters: Uint8Array.of(0) },
-    batch: { inserts: [...inserts], rootCounts: [] },
-    contracts: [],
-  };
+/** A net write of run ending at `height` that writes `inserts`, `written` of them new or with another child list. */
+function netOf(height: bigint, inserts: readonly StoredNode[], written: number): NetWrite {
+  return { height, inserts: [...inserts], written, deltas: [], counted: 0, unqueued: [], queued: [], deleted: [] };
 }
 
 describe.each(BACKENDS)("the node write replaces a changed child list, on $name", (backend) => {
@@ -104,24 +87,46 @@ describe.each(BACKENDS)("the node write replaces a changed child list, on $name"
   );
 
   it(
-    "writeBlock returns the nodes it wrote, new or with another child list, summed over its statements",
+    "the net write's node statement affects the nodes it writes, new or with another child list, summed over its statements, through the handle given for it",
     async () => {
       const db = await tables();
       try {
-        // More than one statement's nodes: NODES_PER_STATEMENT + 2, in two statements.
-        const count = NODES_PER_STATEMENT + 2;
+        /** The net write through a node handle counting the node statements and the rows they affected. */
+        const written = async (net: NetWrite): Promise<{ readonly statements: number; readonly rows: number }> => {
+          let statements = 0;
+          let rows = 0;
+          await db.transaction(async (tx) => {
+            const nodes: Pick<BlockWriteHandle, "execute"> = {
+              async execute(sql, params) {
+                statements += 1;
+                const affected = await tx.execute(sql, params);
+                rows += affected;
+                return affected;
+              },
+            };
+            await writeNet(tx, net, { nodes });
+          });
+          return { statements, rows };
+        };
+        // More than one statement's nodes: KEYS_PER_STATEMENT + 2, in two statements.
+        const count = KEYS_PER_STATEMENT + 2;
         const first = Array.from({ length: count }, (_, i) => node(i % 256, 0x01, Math.floor(i / 256)));
-        expect(await db.transaction((tx) => writeBlock(tx, applied(1n, first)))).toBe(count);
+        expect(await written(netOf(1n, first, count))).toEqual({ statements: 2, rows: count });
         // Again: one node in each statement with another child list, two new ones, the rest unchanged.
-        const changed = new Set([0, NODES_PER_STATEMENT + 1]);
+        const changed = new Set([0, KEYS_PER_STATEMENT + 1]);
         const second = [
           ...first.map((stored, i) => (changed.has(i) ? { ...stored, children: Uint8Array.of(0x02) } : stored)),
           node(0xfe, 0x01, 0xfe),
           node(0xff, 0x01, 0xfe),
         ];
-        expect(await db.transaction((tx) => writeBlock(tx, applied(2n, second)))).toBe(changed.size + 2);
-        // A block with no node writes none.
-        expect(await db.transaction((tx) => writeBlock(tx, applied(3n, [])))).toBe(0);
+        expect(await written(netOf(2n, second, changed.size + 2))).toEqual({ statements: 2, rows: changed.size + 2 });
+        // A net write with no node sends no node statement.
+        expect(await written(netOf(3n, [], 0))).toEqual({ statements: 0, rows: 0 });
+        // Rows that are not those computed fail the write, naming the statement.
+        await expect(written(netOf(4n, [node(0xfd, 0x01, 0xfd)], 0))).rejects.toMatchObject({
+          code: "ledger-refcount-invalid",
+          details: { reason: "row-count-mismatch", statement: "write-nodes", expected: 0, actual: 1 },
+        });
         const rows = await rowsOf(db);
         expect(rows.size).toBe(count + 2);
         for (const at of changed) expect(rows.get(hex(first[at]?.key as Uint8Array))?.children).toBe("02");

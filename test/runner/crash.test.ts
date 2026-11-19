@@ -11,6 +11,7 @@ import type { PointName } from "../../src/modules/declaration.js";
 import type { BlockRef } from "../../src/runner/block-source.js";
 import type { EntryBoundary } from "../../src/runner/dispatch.js";
 import { InMemoryBlockSource, inMemoryBlock } from "../../src/runner/in-memory-source.js";
+import type { BlockWrites } from "../../src/db/write-handles.js";
 import { FinalizedLoop, type HeightRun, type LoopInput } from "../../src/runner/loop.js";
 import { type CrashCall, type CrashEvent, crashModule } from "./crash-module.js";
 import type { CrashJob, CrashWorkerEvent } from "./crash.worker.js";
@@ -30,6 +31,10 @@ import { spawnChild } from "../child-processes.js";
  *   `on-after-db-write` fires for h before any callback of h + 1, with h's height, hash and settings and no `block`
  *   items. No `on-after-db-write` ever receives `block` items, delivered again or not, though `c` puts one in each
  *   height's `on-parse`.
+ * - **Killed in the block transaction's `on-settle`**: inside `c`'s `on-settle` of h (4), its settled row written.
+ *   Nothing of h is stored, neither `c`'s row nor its settled row. The restart, a full start of the process, processes h
+ *   again: `c`'s `on-db-write` and `on-settle` of h once each, in that order, and every height's settled row is stored
+ *   once.
  */
 
 const WORKER = fileURLToPath(new URL("./crash.worker.ts", import.meta.url));
@@ -81,13 +86,15 @@ interface CrashObservation {
   /** `c`'s events in the killed process, up to its hold. */
   readonly killed: readonly CrashWorkerEvent[];
   readonly exit: { readonly code: number | null; readonly signal: NodeJS.Signals | null };
-  /** The cursor and `c`'s rows after the kill. */
+  /** The cursor, `c`'s rows and its settled rows after the kill. */
   readonly cursor: number | null;
   readonly rows: readonly number[];
+  readonly settled: readonly number[];
   /** `c`'s calls in the restart, in order, and the cursor and rows once it reached the head. */
   readonly restart: readonly CrashCall[];
   readonly restartCursor: number | null;
   readonly restartRows: readonly number[];
+  readonly restartSettled: readonly number[];
 }
 
 /**
@@ -115,9 +122,11 @@ async function crashRun(
       if (worker.child.exitCode === null && worker.child.signalCode === null) worker.child.kill("SIGKILL");
     }
     const exit = await worker.exited;
-    const rowsOf = async () => (await pairs(db, "SELECT height::int AS h, 0 AS v FROM c.rows ORDER BY height")).map(([h]) => h);
+    const rowsOf = async (table = "rows") =>
+      (await pairs(db, `SELECT height::int AS h, 0 AS v FROM c.${table} ORDER BY height`)).map(([h]) => h);
     const cursor = await cursorIn(db);
     const rows = await rowsOf();
+    const settled = await rowsOf("settled");
 
     const seen: CrashEvent[] = [];
     const build = testBuild([crashModule({ report: (event) => seen.push(event) })]);
@@ -135,7 +144,17 @@ async function crashRun(
       await handle.stop();
     }
     const restart = seen.filter((event): event is CrashCall => event.event === "call");
-    return { killed: [...worker.events], exit, cursor, rows, restart, restartCursor: await cursorIn(db), restartRows: await rowsOf() };
+    return {
+      killed: [...worker.events],
+      exit,
+      cursor,
+      rows,
+      settled,
+      restart,
+      restartCursor: await cursorIn(db),
+      restartRows: await rowsOf(),
+      restartSettled: await rowsOf("settled"),
+    };
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -166,6 +185,7 @@ function killAndEnd(observed: CrashObservation, hold: CrashJob["hold"], from: nu
 
 const A44_HOLD = { point: "on-db-write", height: 4 } as const;
 const A46_HOLD = { point: "on-after-db-write", height: 5 } as const;
+const SETTLE_HOLD = { point: "on-settle", height: 4 } as const;
 
 /** The oracle for a kill before the commit (c from 4, killed in its `on-db-write` of 4): every problem, none when it
  *  holds. */
@@ -235,6 +255,46 @@ function a46Problems(observed: CrashObservation): string[] {
   return problems;
 }
 
+/**
+ * The oracle for a kill in the block transaction's `on-settle` (c from 1, killed in its `on-settle` of 4 with its settled
+ * row written): every problem, none when it holds.
+ */
+function settleProblems(observed: CrashObservation): string[] {
+  const h = SETTLE_HOLD.height;
+  const problems = killAndEnd(observed, SETTLE_HOLD, 1, h - 1);
+  if (observed.settled.join(",") !== range(1, h - 1).join(",")) {
+    problems.push(`the kill left c's settled rows ${observed.settled.join(",")}, not ${range(1, h - 1).join(",")}`);
+  }
+  if (observed.restartSettled.join(",") !== range(1, HEAD).join(",")) {
+    problems.push(`the restart left c's settled rows ${observed.restartSettled.join(",")}`);
+  }
+  const before = calls(observed.killed);
+  if (before.filter(at("on-settle", h)).length !== 1 || before.findIndex(at("on-db-write", h)) > before.findIndex(at("on-settle", h))) {
+    problems.push(`the killed process had not run c's on-db-write and then its on-settle of ${h}`);
+  }
+  const writes = observed.restart.filter(at("on-db-write", h)).length;
+  const settles = observed.restart.filter(at("on-settle", h)).length;
+  if (writes !== 1 || settles !== 1) {
+    problems.push(`the restart ran c's on-db-write of ${h} ${writes} times and its on-settle ${settles} times, not once each`);
+  } else if (observed.restart.findIndex(at("on-settle", h)) < observed.restart.findIndex(at("on-db-write", h))) {
+    problems.push(`the restart ran c's on-settle of ${h} before its on-db-write`);
+  }
+  const settledHeights = observed.restart.filter((call) => call.point === "on-settle").map((call) => call.height);
+  if (settledHeights.join(",") !== range(h, HEAD).join(",")) {
+    problems.push(`the restart's on-settle ran at ${settledHeights.join(",")}`);
+  }
+  return problems;
+}
+
+/** A negative control's loop: at a restart it skips the `on-settle` point at the first height it processes. */
+class SkipsSettleAtRestart extends FinalizedLoop {
+  #skipped = false;
+  protected override async settlePoint(run: HeightRun, writes: BlockWrites): Promise<void> {
+    if (this.#skipped) return super.settlePoint(run, writes);
+    this.#skipped = true;
+  }
+}
+
 /** A negative control's loop: at a restart it fires no module's on-start-height at the first height it processes. */
 class SkipsStartAtRestart extends FinalizedLoop {
   #first: bigint | undefined;
@@ -297,6 +357,22 @@ describe("delivery after a crash, with a real process killed by SIGKILL", () => 
         "in the restart on-after-db-write at 6 received block items c-note",
         "in the restart on-after-db-write at 7 received block items c-note",
         "in the restart on-after-db-write at 8 received block items c-note",
+      ]);
+    }
+  }, 600_000);
+
+  it("killed in c's on-settle of h with its settled row written, nothing of h is stored; the full start after it processes h again, its on-db-write and on-settle once each; on PostgreSQL and on PGlite", async () => {
+    for (const backend of PROCESS_BACKENDS) {
+      expect(settleProblems(await crashRun(backend, SETTLE_HOLD, 1)), backend.name).toEqual([]);
+    }
+  }, 600_000);
+
+  it("negative control: a restart that skips on-settle at the height it processes again fails", async () => {
+    for (const backend of PROCESS_BACKENDS) {
+      expect(settleProblems(await crashRun(backend, SETTLE_HOLD, 1, SkipsSettleAtRestart)), backend.name).toEqual([
+        "the restart left c's settled rows 1,2,3,5,6,7,8",
+        "the restart ran c's on-db-write of 4 1 times and its on-settle 0 times, not once each",
+        "the restart's on-settle ran at 5,6,7,8",
       ]);
     }
   }, 600_000);

@@ -32,8 +32,9 @@ export interface ReadHandle {
 }
 
 /**
- * Inside the block transaction, under the module's role. It reads committed data plus what earlier callbacks wrote in
- * the block, and is closed once its `on-db-write` callback ends (`handle-closed`). Built in `./write-handles.ts`.
+ * Inside the block transaction, under the module's role: what `on-db-write` and `on-settle` get. It reads committed data
+ * plus what earlier callbacks wrote in the block, and is closed once the callback it was given to returns or throws:
+ * every later use fails with `handle-closed`, naming that callback's point. Built in `./write-handles.ts`.
  */
 export interface BlockWriteHandle extends ReadHandle {
   /** Runs one statement and returns the number of rows it affected; own schema only. */
@@ -105,6 +106,15 @@ export interface Database {
    * no connection to lose.
    */
   transaction<T>(body: (tx: Transaction) => Promise<T>): Promise<T>;
+  /**
+   * Which session the writer has: a number that changes whenever the writer's session is replaced, and stays the same
+   * while it is not; null while the writer has none it can use (before its first transaction, once the session it had
+   * was lost, once closed). Inside a transaction it is that transaction's session. On PostgreSQL a session lost between
+   * two transactions is replaced by the next one, which takes the writer lock again, so another writer may have held
+   * the lock in between; on PGlite one session serves the database from its opening to its close, and the number
+   * never changes.
+   */
+  writerSession(): number | null;
   /** Closes every connection; later reads and transactions fail with `handle-closed`. Closing twice is harmless. */
   close(): Promise<void>;
 }

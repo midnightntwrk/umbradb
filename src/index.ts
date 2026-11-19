@@ -72,6 +72,7 @@ export {
 export {
   type ApiRegistry,
   type BlockContext,
+  type BlockRun,
   defineModule,
   type FieldKind,
   type FieldSchema,

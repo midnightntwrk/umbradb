@@ -10,21 +10,23 @@ import { fixtureProblems } from "./refcount-checks.js";
 /**
  * `[FAULT]` A refused eviction restarts the ledger worker, on PostgreSQL 18 and PGlite 0.5.10.
  * - A test package refuses one eviction at block h, on every try, so also after the worker freed what it can. The
- *   worker thread ends and a new one starts, which loads the state at h − 1 from the database and applies h again,
- *   the reclamation step computed again. The process does not halt, and its stored rows of the tables that are not
- *   content-defined, its node set, the checks and its state roots equal an uninterrupted run's.
- * - A package that refuses again on that retry fails the block with `callback-error`.
+ *   eviction is sent once, in h's `on-settle`: the worker thread ends and a new one starts, and h commits as computed,
+ *   without being applied again. The new thread holds no state, so h + 1 loads the state after h from the database.
+ *   The process does not halt, and its stored rows of the tables that are not content-defined, its node set, the
+ *   checks and its state roots equal an uninterrupted run's.
+ * - A package that refuses in every thread changes nothing of that: the eviction is not sent again, and the new
+ *   thread never applies h.
  *
  * The runs use the DAG fixture through the real process (`./eviction-restart.ts`); h is its first block whose
- * reclamation step deletes nodes. The committed negative controls (a halt without a restart; a retry without the state
- * at h − 1) are in `ledger-eviction-restart.negative-control.test.ts`.
+ * reclamation deletes nodes. The committed negative controls (a halt without a restart; the next block without the
+ * state after h) are in `ledger-eviction-restart.negative-control.test.ts`.
  */
 
 describe.each(PROCESS_BACKENDS)("a refused eviction restarts the ledger worker, on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("refused at h by the first thread, a new thread loads the state at h − 1 from the database and applies h again with the reclamation step computed again; no halt, and the rows of the tables that are not content-defined, the node set, the checks and the roots are an uninterrupted run's", async () => {
+  it("refused at h by the first thread, a new thread starts, h commits as computed and h + 1 loads the state after h from the database; no halt, and the rows of the tables that are not content-defined, the node set, the checks and the roots are an uninterrupted run's", async () => {
     const h = refusalHeight();
     const uninterrupted = await runFixture(await backend.database());
     expect(uninterrupted.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
@@ -40,16 +42,15 @@ describe.each(PROCESS_BACKENDS)("a refused eviction restarts the ledger worker, 
     expect(restarted.status).toMatchObject({ cursor: BigInt(LAST), reason: null, ended: null });
     expect(restarted.failure).toBeNull();
     // The first thread refused both tries of h's eviction (the second after freeing every kept parse); the host ended
-    // it and started one more, which loaded the state at h − 1 from the database (the node store) and evicted.
+    // it and started one more, which loaded the state after h from the database (the node store) for h + 1.
     expect(restarted.restarts).toBe(1);
-    expect(restarted.counters).toMatchObject({ threads: 2, refusals: 2, storeLoads: 1, storeLoadHeight: Number(h - 1n) });
-    expect(restarted.counters.evictions).toBe(uninterrupted.counters.evictions);
-    // The step was computed again on the new thread's batch: it deleted, and the worker evicted, what the uninterrupted
-    // run's step at h did.
+    expect(restarted.counters).toMatchObject({ threads: 2, refusals: 2, storeLoads: 1, storeLoadHeight: Number(h) });
+    // h's eviction was taken by no thread; every other one as in the uninterrupted run.
+    expect(restarted.counters.evictions).toBe(uninterrupted.counters.evictions - 1);
     const deleted = modelOfFixture()[Number(h)]?.deleted ?? [];
     expect(deleted.length).toBeGreaterThan(0);
     expect(uninterrupted.evicted.get(h)).toEqual(deleted);
-    expect(restarted.evicted.get(h)).toEqual(deleted);
+    expect(restarted.evicted.get(h)).toBeUndefined();
     // Its rows of the tables that are not content-defined and its node set are the uninterrupted run's after every
     // block, the check passes after every block, and every `states` row (key and root) is the uninterrupted run's.
     expect(tableDifferences(restarted.tables, uninterrupted.tables)).toEqual([]);
@@ -59,16 +60,15 @@ describe.each(PROCESS_BACKENDS)("a refused eviction restarts the ledger worker, 
     expect(await heldNodeProblems(db)).toEqual([]);
   }, PATIENCE_MS * 6);
 
-  it("a package that refuses again on the retry fails block h with callback-error in core-ledger-state's on-compute; nothing of h is stored", async () => {
+  it("a package that refuses in every thread: still one restart and no halt, since the eviction is not sent again and the new thread never applies h", async () => {
     const h = refusalHeight();
     const db = await backend.database();
-    const run = await runFixture(db, { refuse: { at: h, threads: 2 }, halts: true });
-    expect(run.status).toMatchObject(refusalHalt(h));
-    expect(run.lines.some((line) => /processing halted \(callback-error\).*refuses to forget/.test(line))).toBe(true);
-    // One restart: the second thread loaded the state at h − 1 and refused both its tries too; no third thread.
+    const run = await runFixture(db, { refuse: { at: h, threads: 2 } });
+    expect(run.status).toMatchObject({ cursor: BigInt(LAST), reason: null, ended: null });
+    expect(run.lines.some((line) => /processing halted/.test(line))).toBe(false);
     expect(run.restarts).toBe(1);
-    expect(run.counters).toMatchObject({ threads: 2, refusals: 4, storeLoads: 1, storeLoadHeight: Number(h - 1n) });
-    expect(run.states).toHaveLength(Number(h));
-    expect(run.states.at(-1)?.startsWith(`${h - 1n} `)).toBe(true);
+    expect(run.counters).toMatchObject({ threads: 2, refusals: 2, storeLoads: 1, storeLoadHeight: Number(h) });
+    expect(run.states).toHaveLength(LAST + 1);
+    expect(fixtureProblems("original", run.tables, run.batches, LAST)).toEqual([]);
   }, PATIENCE_MS * 4);
 });

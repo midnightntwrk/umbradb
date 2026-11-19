@@ -20,7 +20,8 @@ import { validateDeclarations } from "../../../src/modules/validation.js";
  *
  * The orders are the fixed backbone order as the requirement graph gives them (`src/modules/graph.ts`):
  * - at startup, the backbone first (`core-digest` right after `core-block-commit`), then the modules;
- * - at `on-db-write`, `core-block-commit` first and `core-digest` last.
+ * - at `on-db-write` and `on-settle`, `core-block-commit` first and `core-digest` last: every part's `on-db-write`,
+ *   then every part's `on-settle`, as the runner calls them with a run of one block.
  */
 
 /** One process context per test chain: the digests need no items, revisions or published items. */
@@ -37,6 +38,7 @@ export function blockAt(h: bigint): BlockContext {
     items: new Map(),
     settings: {},
     active: () => true,
+    continues: false,
   };
 }
 
@@ -88,7 +90,7 @@ export interface Chain {
   readonly plan: SchemaPlan;
   /** Startup's order. */
   readonly startup: readonly ModuleDeclaration[];
-  /** `on-db-write`'s order: `core-digest` last. */
+  /** The order of `on-db-write` and `on-settle`: `core-digest` last. */
   readonly writeOrder: readonly ModuleDeclaration[];
   /** The first height processed (S). */
   readonly start: bigint;
@@ -134,7 +136,10 @@ export async function startChain(
   };
 }
 
-/** Runs the block of the next height: one transaction, every part's `on-db-write` in order. */
+/**
+ * Runs the block of the next height: one transaction, every part's `on-db-write` in order, then every part's
+ * `on-settle` in the same order, with the run of that one block.
+ */
 export async function runBlock(chain: Chain): Promise<bigint> {
   const h = chain.cursor === null ? chain.start : chain.cursor + 1n;
   const context = processContext();
@@ -144,6 +149,11 @@ export async function runBlock(chain: Chain): Promise<bigint> {
       const write = part.points["on-db-write"];
       if (write === undefined) continue;
       await writes.write(part.id, (w) => write.call(part.points, context, blockAt(h), w));
+    }
+    for (const part of chain.writeOrder) {
+      const settle = part.points["on-settle"];
+      if (settle === undefined) continue;
+      await writes.write(part.id, (w) => settle.call(part.points, context, { first: h, last: h }, w), "on-settle");
     }
   });
   chain.cursor = h;

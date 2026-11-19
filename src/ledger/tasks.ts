@@ -12,8 +12,9 @@
  *   block's parse. It also runs for a queued best block, so its item is published before `on-compute` and kept when a
  *   height is processed again from `on-compute`.
  * - A task with `needsState` runs at the module's `on-compute`, after `core-ledger-state`'s, whose item `ledger-state`
- *   the module requires. It runs on the state before the block, which the worker holds as committed until the block's
- *   `on-after-db-write` (after a restart, the worker loads it at `core-ledger-state`'s `on-compute`).
+ *   the module requires. It runs on the state before the block, which the worker holds as committed until the worker's
+ *   host commits the block, once the `COMMIT` that holds it answered (`./worker/host.ts`; after a restart, the worker
+ *   loads it at `core-ledger-state`'s `on-compute`).
  *
  * Each result is put as the module's `block` item named after the task, before the module's own callback at that point
  * runs; that callback sees it among its block context's items.

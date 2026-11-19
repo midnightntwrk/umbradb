@@ -20,8 +20,8 @@ import {
 /**
  * One transaction per finalized height, and none while the loop waits.
  * - A catch-up of 100 heights commits each in its own `BEGIN … COMMIT` with the cursor inside, in ascending order. The
- *   transaction ids PostgreSQL recorded on each height's rows (`xmin`) are one per height, the same for the cursor row
- *   and the module's row of that height, and ascending.
+ *   transaction ids PostgreSQL recorded on each height's rows (`xmin`) are one per height, the same for the cursor row,
+ *   the module's row of that height and the row its `on-settle` wrote for it, and ascending.
  * - With the source's head at the cursor no transaction is open (PostgreSQL's `pg_stat_activity`; PGlite's one
  *   engine), and processing resumes when the head rises.
  *
@@ -29,34 +29,54 @@ import {
  * that commits two heights in one transaction, and one that waits inside a read.
  */
 
-/** A module writing one row per height (`tx_probe.rows`). */
+/** A module writing one row per height (`tx_probe.rows`) at `on-db-write`, and one (`tx_probe.settled`) at `on-settle`. */
 const PROBE = declaration("tx-probe", {
+  provides: [
+    { name: "tx-probe-rows", lifetimes: ["table"], table: { schema: "tx_probe", tables: ["rows", "settled"], kind: "append-only" } },
+  ],
+  migrations: [
+    { id: "001", sql: "CREATE TABLE tx_probe.rows (height bigint PRIMARY KEY)" },
+    { id: "002", sql: "CREATE TABLE tx_probe.settled (height bigint PRIMARY KEY)" },
+  ],
   points: {
     async "on-db-write"(_p, b, w) {
       await w.execute("INSERT INTO tx_probe.rows (height) VALUES ($1)", [b.height]);
     },
+    async "on-settle"(_p, run, w) {
+      await w.execute("INSERT INTO tx_probe.settled (height) VALUES ($1)", [run.last]);
+    },
   },
 });
 
-/** Per committed height: the transaction ids of its cursor row and of the probe's row. */
-async function transactionIds(db: Database): Promise<{ height: bigint; cursor: bigint; probe: bigint }[]> {
+/** One committed height's transaction ids: of its cursor row, the probe's row and the probe's settled row. */
+interface HeightIds {
+  readonly height: bigint;
+  readonly cursor: bigint;
+  readonly probe: bigint;
+  readonly settled: bigint;
+}
+
+/** Per committed height: the transaction ids of its cursor row, of the probe's row and of its settled row. */
+async function transactionIds(db: Database): Promise<HeightIds[]> {
   const rows = await db.read((read) =>
     read.query(
-      "SELECT b.height, b.xmin::text AS cursor, r.xmin::text AS probe FROM core_block_commit.blocks b " +
-        "FULL JOIN tx_probe.rows r USING (height) ORDER BY height",
+      "SELECT b.height, b.xmin::text AS cursor, r.xmin::text AS probe, s.xmin::text AS settled " +
+        "FROM core_block_commit.blocks b FULL JOIN tx_probe.rows r USING (height) " +
+        "FULL JOIN tx_probe.settled s USING (height) ORDER BY height",
     ),
   );
   const id = (text: unknown): bigint => (text === null ? -1n : BigInt(text as string));
-  return rows.map((row) => ({ height: row.height as bigint, cursor: id(row.cursor), probe: id(row.probe) }));
+  return rows.map((row) => ({ height: row.height as bigint, cursor: id(row.cursor), probe: id(row.probe), settled: id(row.settled) }));
 }
 
 /** The one-transaction-per-height oracle: the problems found (none when each height committed alone, in ascending
  *  order). */
-function oneTransactionPerHeight(ids: readonly { height: bigint; cursor: bigint; probe: bigint }[], heights: number): string[] {
+function oneTransactionPerHeight(ids: readonly HeightIds[], heights: number): string[] {
   const problems: string[] = [];
   if (ids.length !== heights) problems.push(`${ids.length} heights committed, not ${heights}`);
   for (const [index, id] of ids.entries()) {
     if (id.cursor !== id.probe) problems.push(`height ${id.height}: the cursor and the module's row are in two transactions`);
+    if (id.cursor !== id.settled) problems.push(`height ${id.height}: the cursor and the module's settled row are in two transactions`);
     const previous = ids[index - 1];
     if (previous !== undefined && previous.cursor >= id.cursor) {
       problems.push(`heights ${previous.height} and ${id.height} share a transaction or commit out of order`);

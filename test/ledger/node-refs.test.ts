@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { childRefKeys } from "../../src/ledger/node-refs.js";
+import { childRefKeys, childRefOffsets } from "../../src/ledger/node-refs.js";
 import { RAW } from "./adapter-fixtures.js";
 import { type Child, decodeChildren, encodeChildren, free, hex, LENGTH_BOUNDARIES, refsOf, scaleIn, spellingsOf } from "./node-format.js";
 
@@ -22,6 +22,16 @@ const child: fc.Arbitrary<Child> = fc.letrec<{ child: Child }>((tie) => ({
       .map((direct): Child => ({ direct })),
   ),
 })).child;
+
+/** The keys at `offsets` of `children`, copied for the comparison. */
+const keysAt = (children: Uint8Array, offsets: readonly number[]): string[] => offsets.map((at) => hex(children.subarray(at, at + 32)));
+/** Each key at `offsets` as text read in place, one character per byte: the form the run computation keeps a key in. */
+const textsAt = (children: Uint8Array, offsets: readonly number[]): string[] => {
+  const view = Buffer.from(children.buffer, children.byteOffset, children.byteLength);
+  return offsets.map((at) => view.toString("latin1", at, at + 32));
+};
+/** The same text of a key's own bytes. */
+const textOf = (key: Uint8Array): string => Buffer.from(key).toString("latin1");
 
 describe("childRefKeys: a stored node's referenced keys, read on the main thread", () => {
   it(`gives the by-reference keys of any child list, through embedded children, in order (seed ${SEED})`, () => {
@@ -48,6 +58,8 @@ describe("childRefKeys: a stored node's referenced keys, read on the main thread
         // The package lists them in another order (its own walk); the keys are the same.
         expect(childRefKeys(node.children).map(hex).sort()).toEqual(raw.childRefs(node.children).map(hex).sort());
         expect(childRefKeys(node.children).map(hex)).toEqual(refsOf(decodeChildren(node.children)).map(hex));
+        // Where the keys are, read in place (a package flushes a state's nodes once, so they are compared here).
+        expect(keysAt(node.children, childRefOffsets(node.children))).toEqual(childRefKeys(node.children).map(hex));
       }
       raw.releaseKey(raw.stateKey(state));
       raw.flushNodes();
@@ -99,5 +111,60 @@ describe("childRefKeys: a stored node's referenced keys, read on the main thread
     const big = new Uint8Array(20_000).fill(3);
     const embedded: Child[] = [{ direct: { data: big, children: [{ ref: new Uint8Array(32).fill(9) }] } }];
     expect(childRefKeys(encodeChildren(embedded)).map(hex)).toEqual([hex(new Uint8Array(32).fill(9))]);
+  });
+});
+
+describe("childRefOffsets: where a child list's referenced keys are, with no copy of a key", () => {
+  it(`gives childRefKeys's keys, in its order, for any child list (seed ${SEED})`, () => {
+    fc.assert(
+      fc.property(fc.array(child, { maxLength: 6 }), (children) => {
+        const bytes = encodeChildren(children);
+        const keys = childRefKeys(bytes);
+        const offsets = childRefOffsets(bytes);
+        expect(keysAt(bytes, offsets)).toEqual(keys.map(hex));
+        expect(textsAt(bytes, offsets)).toEqual(keys.map(textOf));
+      }),
+      { seed: SEED, numRuns: 300 },
+    );
+  });
+
+  it("reads a list that is a view into a larger buffer, and keeps every byte value of a key apart as text", () => {
+    // Every byte value once over eight keys: 0x80 to 0x9F are where a windows-1252 decoder would differ.
+    const refs = Array.from({ length: 8 }, (_, k) => ({ ref: Uint8Array.from({ length: 32 }, (_, i) => k * 32 + i) }));
+    const list = encodeChildren(refs);
+    const padded = new Uint8Array(list.length + 11);
+    padded.set(list, 7);
+    const view = padded.subarray(7, 7 + list.length);
+    const offsets = childRefOffsets(view);
+    expect(offsets).toEqual(childRefOffsets(list));
+    expect(keysAt(view, offsets)).toEqual(refs.map(({ ref }) => hex(ref)));
+    const texts = textsAt(view, offsets);
+    expect(texts).toEqual(refs.map(({ ref }) => textOf(ref)));
+    expect(texts.map((text) => hex(Uint8Array.from(Buffer.from(text, "latin1"))))).toEqual(refs.map(({ ref }) => hex(ref)));
+    expect(texts.every((text) => text.length === 32)).toBe(true);
+    // The text's order is the bytes' order.
+    expect([...texts].reverse().sort()).toEqual([...refs].map(({ ref }) => ref).sort((a, b) => Buffer.compare(a, b)).map(textOf));
+  });
+
+  it("refuses what childRefKeys refuses, with its words", () => {
+    for (const bad of [
+      Uint8Array.of(),
+      Uint8Array.of(4, 2),
+      Uint8Array.of(4, 0, 1, 2),
+      Uint8Array.from([4, 0, ...new Array<number>(32).fill(7), 9]),
+      Uint8Array.of(0b11, 0xff, 0xff, 0xff, 0xff),
+      Uint8Array.of(0xfd, 0x03),
+      Uint8Array.of(4, 1, 0b01, 0),
+    ]) {
+      let refusal = "";
+      try {
+        childRefKeys(bad);
+      } catch (error) {
+        refusal = (error as Error).message;
+      }
+      expect(refusal).toMatch(/child list/);
+      expect(() => childRefOffsets(bad)).toThrow(refusal);
+    }
+    expect(childRefOffsets(Uint8Array.of(0))).toEqual([]);
   });
 });

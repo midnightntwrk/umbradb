@@ -440,7 +440,14 @@ export type OutsidePoint = "on-after-db-write" | "on-finalized";
  * window outside a height. No test holds these points, but on a loaded machine a height's `on-db-write` and `COMMIT`
  * can pass `slowBlockMs` 1000 and raise the condition, correctly.
  */
-export const HEIGHT_POINTS: ReadonlySet<string> = new Set(["on-fetch", "on-parse", "on-start-height", "on-compute", "on-db-write"]);
+export const HEIGHT_POINTS: ReadonlySet<string> = new Set([
+  "on-fetch",
+  "on-parse",
+  "on-start-height",
+  "on-compute",
+  "on-db-write",
+  "on-settle",
+]);
 
 /** Whether `condition` (a `slow-block`, in `status()` or `/status`) is outside a height's processing. */
 const outsideHeight = (condition: Readonly<Record<string, unknown>> | undefined): boolean =>

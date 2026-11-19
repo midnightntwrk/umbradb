@@ -113,12 +113,16 @@ export interface SeenLoad {
 export function recordingLoads(host: LedgerHost, seen: SeenLoad[]): LedgerHost {
   return {
     useDatabase: (database) => host.useDatabase(database),
+    lend: (read) => host.lend(read),
     parse: (ledger, block, transactions) => host.parse(ledger, block, transactions),
     genesisRoot: (ledger, bytes) => host.genesisRoot(ledger, bytes),
     genesis: (input, read) => host.genesis(input, read),
     apply: (input, read) => host.apply(input, read),
     commit: (block) => host.commit(block),
     release: (drop) => host.release(drop),
+    written: (block) => host.written(block),
+    committed: (block) => host.committed(block),
+    rolledBack: (block) => host.rolledBack(block),
     async load(input, read) {
       const result = await host.load(input, read);
       seen.push({ height: input.height, stateKey: input.stateKey, stateRoot: result.stateRoot, loaded: result.loaded });

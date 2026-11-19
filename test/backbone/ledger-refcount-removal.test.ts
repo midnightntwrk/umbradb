@@ -67,7 +67,7 @@ describe("the runtime sweep removed", () => {
 
     expect(existsSync(path.join(ROOT, "src/backbone/core-ledger-state/sweep.ts"))).toBe(false);
     const files = sourceFiles();
-    expect(files).toContain("src/backbone/core-ledger-state/refcount.ts");
+    expect(files).toContain("src/backbone/core-ledger-state/run-reclaim.ts");
     const named = files.flatMap((file) =>
       sweepNamesIn(readFileSync(path.join(ROOT, file), "utf8")).map((name) => `${file} names ${name}`),
     );

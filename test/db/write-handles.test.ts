@@ -16,8 +16,9 @@ import { askedLater, BACKENDS, settlesWithin } from "./backends.js";
 /**
  * The write handles and their closing, on both backends.
  *
- * - A block write handle is what one part's `on-db-write` gets inside the block transaction. It runs under the part's
- *   role; a shared item's provider runs under the item's role, and UmbraDB's own parts as the writer's login.
+ * - A block write handle is what one part's `on-db-write` or `on-settle` gets inside the block transaction. It runs
+ *   under the part's role; a shared item's provider runs under the item's role, and UmbraDB's own parts as the writer's
+ *   login.
  * - A schema write handle is what a part's `on-start-db` gets, in a transaction of its own (`src/db/migrate.ts` runs
  *   it after the part's migrations).
  *
@@ -77,7 +78,7 @@ function expectWriteHandleClosed(
   error: unknown,
   handle: "block-write" | "schema-write",
   part: string,
-  point: "on-db-write" | "on-start-db",
+  point: "on-db-write" | "on-settle" | "on-start-db",
 ): void {
   expect(error).toBeInstanceOf(UmbraError);
   const closed = error as UmbraError;
@@ -683,6 +684,88 @@ describe.each(BACKENDS)("write handles and their closing on $name", { timeout: 3
         await expect(runMultiStatement(w as unknown as Transaction, "SELECT 1; SELECT 2")).rejects.toThrow(/not a transaction/);
       });
       for (const handle of handles) expect(Object.keys(handle).sort()).toEqual(["execute", "height", "query"]);
+    });
+  });
+
+  describe("a block write handle given at on-settle, after the block's on-db-write callbacks", () => {
+    it("is closed once its on-settle returns: kept and used in another part's on-settle while the block is open, it fails at once naming on-settle, and never writes under that part's role", async () => {
+      const { db, plan } = await setUp();
+      let kept: BlockWriteHandle | undefined;
+      let result: unknown;
+      await block(db, plan, async (writes) => {
+        await writes.write("a", (w) => w.execute(INSERT_A, [1]));
+        await writes.write("a", async (w) => {
+          kept = w;
+        }, "on-settle");
+        await writes.write("b", async (w) => {
+          const use = (kept as BlockWriteHandle).execute(INSERT_B, [7]);
+          expect(await settlesWithin(use, 1_000)).toBe(true);
+          result = await outcome(use);
+          await w.execute(INSERT_B, [8]);
+        }, "on-settle");
+        await writes.end();
+      });
+      expectWriteHandleClosed(result, "block-write", "a", "on-settle");
+      expect(await rows(db, "a.t")).toEqual([{ k: 1n, who: "umbradb_m_a" }]);
+      expect(await rows(db, "b.t")).toEqual([{ k: 8n, who: "umbradb_m_b" }]);
+    });
+
+    it("is closed once its on-settle throws: the error passes through unchanged, the block rolls back, and the kept handle names on-settle", async () => {
+      const { db, plan } = await setUp();
+      const thrown = new Error("the settle failed (the test's)");
+      let kept: BlockWriteHandle | undefined;
+      const result = await outcome(
+        block(db, plan, async (writes) => {
+          await writes.write("a", (w) => w.execute(INSERT_A, [1]));
+          await writes.write("a", async (w) => {
+            kept = w;
+            await w.execute(INSERT_A, [2]);
+            throw thrown;
+          }, "on-settle");
+        }),
+      );
+      expect(result).toBe(thrown);
+      expectWriteHandleClosed(await failure(() => (kept as BlockWriteHandle).query("SELECT 1")), "block-write", "a", "on-settle");
+      expect(await rows(db, "a.t")).toEqual([]);
+    });
+
+    it("writes its own schema only: another part's table is refused by the database at on-settle and the block rolls back", async () => {
+      const { db, plan } = await setUp();
+      const result = await outcome(
+        block(db, plan, async (writes) => {
+          await writes.write("b", (w) => w.execute(INSERT_B, [1]));
+          await writes.write("a", (w) => w.execute(INSERT_A, [1]));
+          await writes.write("a", (w) => w.execute(INSERT_B, [2]), "on-settle");
+        }),
+      );
+      expect(result).toBeInstanceOf(UmbraError);
+      expect((result as UmbraError).details.sqlstate).toBe("42501");
+      expect(await rows(db, "a.t")).toEqual([]);
+      expect(await rows(db, "b.t")).toEqual([]);
+    });
+
+    it("runs each on-settle callback under its part's role, reads the block's on-db-write rows, and returns to the login", async () => {
+      const { db, plan, login } = await setUp();
+      const seen: unknown[] = [];
+      await block(db, plan, async (writes, tx) => {
+        await writes.write("a", (w) => w.execute(INSERT_A, [1]));
+        await writes.write("b", (w) => w.execute(INSERT_B, [1]));
+        for (const part of ["a", "b", "core-digest"]) {
+          await writes.write(part, async (w) => {
+            const [row] = await w.query("SELECT current_user AS role, (SELECT count(*)::int FROM a.t) + (SELECT count(*)::int FROM b.t) AS n");
+            seen.push([part, row?.role, row?.n]);
+          }, "on-settle");
+        }
+        await writes.end();
+        const [after] = await tx.query("SELECT current_user AS role");
+        seen.push(["end", after?.role]);
+      });
+      expect(seen).toEqual([
+        ["a", "umbradb_m_a", 2],
+        ["b", "umbradb_m_b", 2],
+        ["core-digest", login, 2],
+        ["end", login],
+      ]);
     });
   });
 

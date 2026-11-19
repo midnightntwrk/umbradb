@@ -99,16 +99,16 @@ describe("the block trace through the process, on PostgreSQL", () => {
     // One line per committed height, in order.
     expect(first.map((line) => line.h)).toEqual(Array.from({ length: LAST + 1 }, (_, h) => h));
     for (const line of first.slice(1)) {
-      for (const stage of ["beginMs", "prepareMs", "applyMs", "rootWaitMs", "stepMs", "evictMs", "txMs", "writeBlockMs", "writeRefcountMs", "commitMs", "sqlMs", "encMs", "decMs"]) {
+      for (const stage of ["beginMs", "prepareMs", "applyMs", "rootWaitMs", "collectMs", "stepMs", "evictMs", "txMs", "writeBlockMs", "writeRefcountMs", "commitMs", "sqlMs", "encMs", "decMs"]) {
         expect(line[stage], `${stage} at ${String(line.h)}`).toBeGreaterThanOrEqual(0);
       }
       expect(line.sqlN).toBeGreaterThan(0);
       expect(line.sh).toMatch(/^[0-9a-f]{16}$/);
       expect(line.st).toHaveLength(9);
-      // The step's reads, by their names; the queue is read in every block.
+      // The reclamation's reads, by their names; the queue is read in every block.
       const kinds = (line.reads as [string, number, number, number][]).map(([kind]) => kind);
       expect(kinds).toContain("queue");
-      for (const kind of kinds) expect(["rows", "changed", "queue", "counts", "references"]).toContain(kind);
+      for (const kind of kinds) expect(["rows", "changed", "missing", "queue", "queued", "counts", "references"]).toContain(kind);
     }
     // The step's sizes are the run's: the deleted nodes of each height are those the worker was told to evict.
     for (const line of first) {

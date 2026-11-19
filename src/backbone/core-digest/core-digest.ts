@@ -5,12 +5,14 @@
  *
  * **The tables** and every statement are in `./sql.ts`.
  *
- * A module that requires `digest-tables` or `digest-checkpoints` reads them in its `on-db-write`, which runs before
- * `core-digest`'s, so it sees the digests of h − 1.
+ * A module that requires `digest-tables` or `digest-checkpoints` reads them in its `on-db-write` or `on-settle`, which
+ * run before `core-digest`'s, so it sees the digests of h − 1.
  *
- * **Its `on-db-write`** runs last in the block. The runner calls it through `writes.write("core-digest", …)`, which
- * runs it as the login. It reads which tables are captured once per process, and asks in one statement which of them
- * hold shadow rows. For each such table, in the fixed table order:
+ * **Its `on-settle`** runs last in the block: after every part's `on-db-write` and every other part's `on-settle`
+ * (`core-digest` is last in the order of both points), so it takes every change of the block's transaction once. The
+ * runner calls it through `writes.write("core-digest", …)`, which runs it as the login. In this version a run is always
+ * one block, and its digests are that block's, at its height. It reads which tables are captured once per process, and
+ * asks in one statement which of them hold shadow rows. For each such table, in the fixed table order:
  * - it takes the keys the block touched, with their rows before and after ({@link takeChanges}, which also empties the
  *   shadow table);
  * - it computes the table's changes and new digest (`src/determinism/digest.ts`);
@@ -51,7 +53,7 @@ async function capturedOf(w: BlockWriteHandle, process: object | undefined): Pro
 
 /**
  * `core-digest`'s work for the block at `height` (see the module comment), on the block's write handle, after every
- * other part's `on-db-write`.
+ * part's `on-db-write` and every other part's `on-settle`.
  */
 export async function digestBlock(w: BlockWriteHandle, height: bigint, process?: object): Promise<void> {
   const tables = await capturedOf(w, process);
@@ -100,8 +102,8 @@ export const CORE_DIGEST = defineModule({
   configSchema: z.object({}),
   migrations: CORE_DIGEST_MIGRATIONS.map(({ id, sql }) => ({ id, sql })),
   points: {
-    async "on-db-write"(p, b, w) {
-      await digestBlock(w, b.height, p);
+    async "on-settle"(p, run, w) {
+      await digestBlock(w, run.last, p);
     },
   },
 });

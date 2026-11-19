@@ -32,6 +32,7 @@ export const POINTS = Object.freeze([
   "on-start-height",
   "on-compute",
   "on-db-write",
+  "on-settle",
   "on-after-db-write",
   "on-stop-height",
 ] as const);
@@ -184,6 +185,31 @@ export interface BlockContext {
   settings: Readonly<Record<string, unknown>>;
   /** Whether the module with this id has an entry covering this height. */
   active: (moduleId: string) => boolean;
+  /**
+   * Whether the block before this one was committed by this process with no failure between, and nothing else wrote
+   * the database since: true when its `COMMIT` answered in the same run of processing and the writer still has the
+   * session that committed it when this context is made (so it held the writer lock all along, and no other writer can
+   * have changed a row), so what a module kept in memory of it is what the database holds. False at a run's first
+   * height (a start, any retry), for a height processed again after a failure, for the height after one whose `COMMIT`
+   * lost its answer, at the re-delivery after a restart, from the first context made after the writer's session was
+   * replaced (on PostgreSQL, a connection lost while idle, also during the block's own callbacks), and always at
+   * `on-fetch` and `on-parse`, which may run before the block before committed. A block some of whose callbacks were
+   * told true and whose transaction then finds the writer's session replaced is not written: that attempt fails,
+   * retryable, and the block is made again with `continues` false. It may be false at any block: a module that keeps
+   * the block before in memory reads it from the database then.
+   */
+  continues: boolean;
+}
+
+/**
+ * The heights `on-settle` settles: a run of consecutive heights from `first` to `last`, both included (`first <= last`).
+ * The engine chooses the runs. They follow one another without a gap, each `first` the last run's `last + 1`, so every
+ * processed height is in exactly one run. After a failure that rolled the transaction back, its heights are processed
+ * again and are in a run again. A module must accept a run of any length.
+ */
+export interface BlockRun {
+  readonly first: bigint;
+  readonly last: bigint;
 }
 
 /** Where a module puts each `block` item it provides, once per block. */
@@ -219,6 +245,11 @@ export interface ApiRegistry {
  * `on-finalized` at the cursor, `on-start-height` at h − 1, and `on-stop-height` at h. In a private process,
  * `on-fetch` gets a read of the public database at its committed height (the public cursor, which is at least h), so
  * the module must select the public rows it needs by height. In the core, `on-fetch` gets no read handle.
+ *
+ * `on-settle` gets no block context: it is called for a run of heights ({@link BlockRun}), inside the transaction that
+ * holds the run's last block, after every `on-db-write` of that block and before its `COMMIT`, with a block write
+ * handle of that transaction. Its tables must not depend on where the engine cut the runs: `on-settle` of a..c leaves
+ * the tables `on-settle` of a..b then of b + 1..c leaves.
  */
 export interface PointCallbacks {
   "on-start-db"(p: ProcessContext, w: SchemaWriteHandle): Promise<void>;
@@ -231,6 +262,7 @@ export interface PointCallbacks {
   "on-start-height"(p: ProcessContext, e: { entryId: string; height: bigint }, read: ReadHandle): Promise<void>;
   "on-compute"(p: ProcessContext, b: BlockContext, read: ReadHandle, out: ItemSink): Promise<void>;
   "on-db-write"(p: ProcessContext, b: BlockContext, w: BlockWriteHandle): Promise<void>;
+  "on-settle"(p: ProcessContext, run: BlockRun, w: BlockWriteHandle): Promise<void>;
   "on-after-db-write"(p: ProcessContext, b: BlockContext, read: ReadHandle): Promise<void>;
   "on-stop-height"(p: ProcessContext, e: { entryId: string; height: bigint }, read: ReadHandle): Promise<void>;
 }

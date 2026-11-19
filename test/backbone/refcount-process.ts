@@ -2,6 +2,7 @@ import { CORE_LEDGER_STATE_ID, type CoreLedgerStateOptions } from "../../src/bac
 import type { NodeBatch } from "../../src/ledger/types.js";
 import { type LedgerHost, startLedgerWorker } from "../../src/ledger/worker/host.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
+import type { FinalizedLoop, LoopInput } from "../../src/runner/loop.js";
 import { type FixtureDag, LAST } from "../ledger/fixtures/sweep-fixture.js";
 import type { FixtureData } from "../ledger/fixtures/sweep-test-loader.js";
 import type { ProcessDatabase } from "../runner/process-backends.js";
@@ -50,6 +51,18 @@ export interface DagRunOptions {
   readonly atLast?: (process: Ingest) => Promise<void>;
   /** The ledger worker as the process gets it: the recording one, wrapped by an instrument of the test's. */
   readonly worker?: (host: LedgerHost) => LedgerHost;
+  /**
+   * The worker's loader and its data, given the test package's data: the test package with that data unless given (a
+   * loader that records the requests the thread receives around it).
+   */
+  readonly loader?: (data: FixtureData) => { readonly loader: URL; readonly loaderData: unknown };
+  /** The process's finalized loop (one recording its points); the runner's unless given. */
+  readonly loop?: new (input: LoopInput) => FinalizedLoop;
+  /**
+   * Each core module as the process gets it, given the module: wrapped by an instrument of the test's; as it is unless
+   * given.
+   */
+  readonly modules?: (module: ModuleDeclaration) => ModuleDeclaration;
 }
 
 /** What a run gave. */
@@ -64,6 +77,8 @@ export interface DagRun {
   readonly batches: Map<bigint, NodeBatch>;
   /** The keys each height had the worker evict. */
   readonly evicted: Map<bigint, string[]>;
+  /** How many evictions each height sent to the worker, whatever their answer. */
+  readonly sent: ReadonlyMap<bigint, number>;
   /** What `core-ledger-state`'s callbacks threw, in order. */
   readonly errors: readonly unknown[];
   readonly restarts: number;
@@ -97,7 +112,10 @@ export async function runDag(db: ProcessDatabase, options: DagRunOptions = {}): 
   const record = workerRecord();
   const seen = seenTables();
   const errors: unknown[] = [];
-  const core = sweepCore(options.core).map((module) => (module.id === CORE_LEDGER_STATE_ID ? capturing(module, errors) : module));
+  const wrap = options.modules ?? ((module: ModuleDeclaration) => module);
+  const core = sweepCore(options.core)
+    .map(wrap)
+    .map((module) => (module.id === CORE_LEDGER_STATE_ID ? capturing(module, errors) : module));
   const data: FixtureData = { ...options.data, ...(dag === "original" ? {} : { dag }) };
   let host: LedgerHost | undefined;
   const { records } = sweepTape(last, dag);
@@ -107,8 +125,9 @@ export async function runDag(db: ProcessDatabase, options: DagRunOptions = {}): 
     user: [sweepWatcher(seen, record), ...(options.user ?? [])],
     ...(options.settings === undefined ? {} : { settings: options.settings }),
     ...(options.revisions === undefined ? {} : { revisions: options.revisions }),
+    ...(options.loop === undefined ? {} : { loop: options.loop }),
     ledgerWorker: () => {
-      const recording = recordingWorker(startLedgerWorker({ loader: SWEEP_LOADER, loaderData: data }), record);
+      const recording = recordingWorker(startLedgerWorker(options.loader?.(data) ?? { loader: SWEEP_LOADER, loaderData: data }), record);
       host = options.worker === undefined ? recording : options.worker(recording);
       return host;
     },
@@ -132,7 +151,7 @@ export async function runDag(db: ProcessDatabase, options: DagRunOptions = {}): 
   const tables = new Map([...seen.tables].filter(([height]) => height <= cursor));
   if (cursor >= 0n) tables.set(cursor, await sweepTables(db));
   const batches = new Map([...seen.batches].filter(([height]) => height <= cursor));
-  return { status, lines: process.lines, tables, watched: seen.tables, batches, evicted: record.evicted, errors, restarts, failure, cursor };
+  return { status, lines: process.lines, tables, watched: seen.tables, batches, evicted: record.evicted, sent: record.sent, errors, restarts, failure, cursor };
 }
 
 /** The problems on `run` after every height it committed (see `./refcount-checks.ts`). */

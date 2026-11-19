@@ -6,7 +6,7 @@ import type { TableSnapshot } from "./ledger-graph-tapes.js";
 /**
  * The database check: what the database holds after a block, read through the check's own queries (the snapshots of
  * `./ledger-graph-tapes.ts`, `sweepTables`) and its child lists parsed by `test/ledger/node-format.ts`, never through
- * the step's code (`src/backbone/core-ledger-state/refcount.ts`). Each clause lists what it finds broken, none when it
+ * the step's code (`./refcount-step.ts`). Each clause lists what it finds broken, none when it
  * holds:
  * - (a) I1, I2 and I3, each count recomputed from every stored child list with repeats counted
  *   ({@link closureProblems});

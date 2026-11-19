@@ -16,7 +16,9 @@
  *   unreachable node (`./process.ts`, `./failures.ts`);
  * - the slow-block watchdog: the loop's window of each height and of the callbacks it awaits outside a height's
  *   processing, and `slow-block` (`./loop.ts`, `./process.ts`);
- * - the pause between heights and the backup on SIGUSR2 (`./pause.ts`, `./loop.ts`, `./process.ts`).
+ * - the pause between heights and the backup on SIGUSR2 (`./pause.ts`, `./loop.ts`, `./process.ts`);
+ * - the follower of each block's transaction: what the loop tells of each block's `COMMIT`
+ *   (`./transaction-follower.ts`).
  */
 
 export * from "./api-server.js";
@@ -32,3 +34,4 @@ export * from "./pause.js";
 export * from "./process.js";
 export * from "./resolve.js";
 export * from "./process-context.js";
+export * from "./transaction-follower.js";

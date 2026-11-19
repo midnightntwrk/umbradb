@@ -96,6 +96,7 @@ export const BLOCK: BlockContext = Object.freeze({
   items: new Map<string, unknown>(),
   settings: Object.freeze({}),
   active: () => true,
+  continues: false,
 });
 
 export const SINK: ItemSink = Object.freeze({ put: () => undefined });
@@ -116,6 +117,7 @@ export const ARGUMENTS: { readonly [P in PointName]: PointArguments<P> } = Objec
   "on-start-height": [{ entryId: "m", height: 1n }, READ],
   "on-compute": [BLOCK, READ, SINK],
   "on-db-write": [BLOCK, WRITE],
+  "on-settle": [{ first: 1n, last: 1n }, WRITE],
   "on-after-db-write": [BLOCK, READ],
   "on-stop-height": [{ entryId: "m", height: 1n }, READ],
 });

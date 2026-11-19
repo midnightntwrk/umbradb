@@ -32,7 +32,7 @@ import { ARGUMENTS, Contexts, Recorder, recording, runOf, yields } from "./fixtu
 /**
  * The runner's point dispatch. Given a resolved range, a point and how to call one part, the dispatch calls the parts
  * registered at the point in the range's order:
- * - in series, each awaited before the next;
+ * - in series, each awaited before the next (at `on-db-write` and `on-settle` with `core-digest` last);
  * - or, at `on-fetch`, `on-parse` and `on-compute`, the backbone parts in series and then the other modules in Kahn
  *   waves restricted to the modules registered at the point. A module waits for every registered module on a
  *   requirement path from it (through modules that do not register the point too).
@@ -217,8 +217,18 @@ describe("in series: the registered parts in the range's order, each awaited bef
     expect(waveIds(scheduleAt(range, "on-db-write"))).toEqual(recorder.starts("on-db-write").map((id) => [id]));
   });
 
+  it("uses on-db-write's order at on-settle: the backbone parts, then the modules, core-digest last", async () => {
+    const recorder = new Recorder();
+    const range = world(recorder);
+    await dispatch(range, "on-settle", runOf("on-settle"));
+    expect(recorder.starts("on-settle")).toEqual(["core-chain", "core-block-commit", "a-mod", "b-mod", "core-digest"]);
+    expect(waveIds(scheduleAt(range, "on-settle"))).toEqual(recorder.starts("on-settle").map((id) => [id]));
+    // The same parts as on-db-write's in the same order, less ch-mod, which registers on-db-write only.
+    expect(waveIds(scheduleAt(range, "on-db-write")).flat().filter((id) => id !== "ch-mod")).toEqual(recorder.starts("on-settle"));
+  });
+
   it("uses the range's order at every other point in series, core-digest in its backbone place", async () => {
-    for (const point of SERIES.filter((p) => p !== "on-db-write")) {
+    for (const point of SERIES.filter((p) => p !== "on-db-write" && p !== "on-settle")) {
       const recorder = new Recorder();
       await dispatch(world(recorder), point, runOf(point));
       expect(recorder.starts(point), point).toEqual(["core-chain", "core-block-commit", "core-digest", "a-mod", "b-mod"]);

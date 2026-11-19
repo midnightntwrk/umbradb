@@ -5,7 +5,7 @@ import {
   type RefcountStep,
   refcountStep,
   type RefcountTables,
-} from "../../src/backbone/core-ledger-state/refcount.js";
+} from "./refcount-step.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { childRefKeys } from "../../src/ledger/node-refs.js";
 import type { NodeBatch } from "../../src/ledger/types.js";
@@ -21,7 +21,7 @@ import {
 } from "./refcount-model.js";
 
 /**
- * `core-ledger-state`'s reclamation step (`src/backbone/core-ledger-state/refcount.ts`) against the reference model
+ * The per-block reclamation step (`./refcount-step.ts`, the tests' reference) against the reference model
  * (`./refcount-model.ts`), through a tables seam that answers the step's reads from the model's tables at h − 1 as the
  * database would.
  *

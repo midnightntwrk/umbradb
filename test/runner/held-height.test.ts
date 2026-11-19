@@ -62,9 +62,10 @@ function fault(faults: Faults, module: string, point: PointName, height: bigint)
 
 /**
  * Module `keep`, from 1: puts `keep-parsed` (`{ n }`, its `on-parse` count) at `on-parse` and `keep-computed` (its
- * `on-compute` count) at `on-compute`, reads both later, writes its row at `on-db-write`; `late`, from H, has an
- * `on-start-height`. Each callback may throw its planted fault — `on-db-write`'s after the row; `arm` runs at `keep`'s
- * `on-db-write` of H, the first time.
+ * `on-compute` count) at `on-compute`, reads both later, writes its row at `on-db-write` and its settled row at
+ * `on-settle` (named by the run's last height); `late`, from H, has an `on-start-height`. Each callback may throw its
+ * planted fault — `on-db-write`'s and `on-settle`'s after their row; `arm` runs at `keep`'s `on-db-write` of H, the
+ * first time.
  */
 function modules(seen: Seen, faults: Faults, arm: () => void = () => undefined): ModuleDeclaration[] {
   let parses = 0;
@@ -78,7 +79,11 @@ function modules(seen: Seen, faults: Faults, arm: () => void = () => undefined):
     provides: [
       { name: "keep-parsed", lifetimes: ["block"] },
       { name: "keep-computed", lifetimes: ["block"] },
-      { name: "keep-rows", lifetimes: ["table"], table: { schema: "keep", tables: ["rows"], kind: "append-only" } },
+      { name: "keep-rows", lifetimes: ["table"], table: { schema: "keep", tables: ["rows", "settled"], kind: "append-only" } },
+    ],
+    migrations: [
+      { id: "001", sql: "CREATE TABLE keep.rows (height bigint PRIMARY KEY)" },
+      { id: "002", sql: "CREATE TABLE keep.settled (height bigint PRIMARY KEY)" },
     ],
     points: {
       async "on-fetch"(_p, b) {
@@ -104,6 +109,10 @@ function modules(seen: Seen, faults: Faults, arm: () => void = () => undefined):
           arm();
         }
         note("keep", "on-db-write", b.height);
+      },
+      async "on-settle"(_p, run, w) {
+        await w.execute("INSERT INTO keep.settled (height) VALUES ($1)", [run.last]);
+        note("keep", "on-settle", run.last);
       },
       async "on-after-db-write"(_p, b) {
         note("keep", "on-after-db-write", b.height);
@@ -160,6 +169,7 @@ function losingCommits(db: Database) {
       return result;
     },
     close: () => db.close(),
+    writerSession: () => db.writerSession(),
   };
   return { db: wrapped, state };
 }
@@ -214,7 +224,9 @@ describe.each(RUNNER_BACKENDS)("a height held for a retry on $name", (backend) =
       if (count(seen, call) !== expected) problems.push(`${call} ran ${count(seen, call)} times, not ${expected}`);
     };
     for (const height of [1n, 2n, 4n, 5n]) {
-      for (const point of ["on-fetch", "on-parse", "on-compute", "on-db-write", "on-after-db-write"]) times(`keep ${point}@${height}`, 1);
+      for (const point of ["on-fetch", "on-parse", "on-compute", "on-db-write", "on-settle", "on-after-db-write"]) {
+        times(`keep ${point}@${height}`, 1);
+      }
     }
     times(`keep on-fetch@${H}`, 1);
     times(`keep on-parse@${H}`, 1);
@@ -240,7 +252,28 @@ describe.each(RUNNER_BACKENDS)("a height held for a retry on $name", (backend) =
     ]);
     // Each on-db-write of H saw its own on-compute's item: the third on-compute (H's first try), then the fourth.
     expect(seen.written.filter((line) => line.startsWith(`${H}:`))).toEqual([`${H}: computed 3`, `${H}: computed 4`]);
+    // The first try failed before its on-settle: on-settle of H ran once, in the second.
+    expect(count(seen, `keep on-settle@${H}`)).toBe(1);
     expect(await heightsIn(db, "keep.rows")).toEqual([1n, 2n, 3n, 4n, 5n]);
+    expect(await heightsIn(db, "keep.settled")).toEqual([1n, 2n, 3n, 4n, 5n]);
+    expect(await cursorOf(db)).toBe(HEAD);
+  }, 60_000);
+
+  it("a connection lost in on-settle of h, its row written: the next run processes h from on-compute, on-db-write and on-settle again, h stored once", async () => {
+    const faults: Faults = new Map([[`keep on-settle@${H}`, new UmbraError("connection-lost", "the writer's connection was lost")]]);
+    const { db, seen, started, source } = await setUp(faults);
+    const { loop, stop } = loopOver(started, source);
+    const failure = await runOnce(loop, source, stop);
+    expectRetryable(failure);
+    expect(failure).toMatchObject({ point: "on-settle", module: "keep" });
+    expect(await cursorOf(db)).toBe(H - 1n);
+    expect(await heightsIn(db, "keep.settled")).toEqual([1n, 2n]);
+    expect(await runOnce(loop, source, stop)).toBeUndefined();
+    expect(fromComputeProblems(seen)).toEqual([]);
+    expect(count(seen, `keep on-db-write@${H}`)).toBe(2);
+    expect(count(seen, `keep on-settle@${H}`)).toBe(2);
+    expect(await heightsIn(db, "keep.rows")).toEqual([1n, 2n, 3n, 4n, 5n]);
+    expect(await heightsIn(db, "keep.settled")).toEqual([1n, 2n, 3n, 4n, 5n]);
     expect(await cursorOf(db)).toBe(HEAD);
   }, 60_000);
 
@@ -329,11 +362,13 @@ describe.each(RUNNER_BACKENDS)("a height held for a retry on $name", (backend) =
     expect(await runOnce(loop, source, stop)).toBeUndefined();
     expect(losing.state.calls[calls]).toBe("transaction");
     expect(committed).toEqual([1n, 2n, 3n, 4n, 5n]);
-    for (const point of ["on-fetch", "on-parse", "on-compute", "on-db-write", "on-after-db-write"]) {
+    // Its on-settle, inside the transaction that landed, ran once: the next run does not settle h again.
+    for (const point of ["on-fetch", "on-parse", "on-compute", "on-db-write", "on-settle", "on-after-db-write"]) {
       expect(count(seen, `keep ${point}@${H}`), point).toBe(1);
     }
     expect(seen.calls.indexOf(`keep on-after-db-write@${H}`)).toBeLessThan(seen.calls.indexOf(`keep on-fetch@${H + 1n}`));
     expect(await heightsIn(raw, "keep.rows")).toEqual([1n, 2n, 3n, 4n, 5n]);
+    expect(await heightsIn(raw, "keep.settled")).toEqual([1n, 2n, 3n, 4n, 5n]);
   }, 60_000);
 
   it("a COMMIT lost after it landed, then on-after-db-write of h failing in the next run: it stops at h with h committed", async () => {
@@ -349,8 +384,10 @@ describe.each(RUNNER_BACKENDS)("a height held for a retry on $name", (backend) =
     expect(failure).toBeInstanceOf(HeightFailure);
     expect(failure).toMatchObject({ height: H, committed: true, point: "on-after-db-write", module: "keep" });
     expect(count(seen, `keep on-after-db-write@${H}`)).toBe(1);
+    expect(count(seen, `keep on-settle@${H}`)).toBe(1);
     expect(count(seen, `keep on-fetch@${H + 1n}`)).toBe(0);
     expect(await cursorOf(raw)).toBe(H);
+    expect(await heightsIn(raw, "keep.settled")).toEqual([1n, 2n, 3n]);
   }, 60_000);
 
   it("a COMMIT lost with its transaction rolled back: the next run finds h − 1 and processes h again from on-compute", async () => {
@@ -366,7 +403,10 @@ describe.each(RUNNER_BACKENDS)("a height held for a retry on $name", (backend) =
     expect(losing.state.calls[calls]).toBe("transaction");
     expect(fromComputeProblems(seen)).toEqual([]);
     expect(count(seen, `keep on-db-write@${H}`)).toBe(2);
+    // The rolled-back try settled h too: on-settle of H ran in both tries, and its row is stored once.
+    expect(count(seen, `keep on-settle@${H}`)).toBe(2);
     expect(await heightsIn(raw, "keep.rows")).toEqual([1n, 2n, 3n, 4n, 5n]);
+    expect(await heightsIn(raw, "keep.settled")).toEqual([1n, 2n, 3n, 4n, 5n]);
   }, 60_000);
 
   it("a COMMIT lost, then the cursor moved by another writer: the next run halts with unexpected-cursor at h", async () => {
@@ -387,8 +427,11 @@ describe.each(RUNNER_BACKENDS)("a height held for a retry on $name", (backend) =
     expect((failure as HeightFailure).cause).toBeInstanceOf(UnexpectedCursor);
     expect((failure as HeightFailure).message).toMatch(/after the COMMIT of height 3 was lost the cursor is at height 1/);
     expect(count(seen, `keep on-compute@${H}`)).toBe(1);
+    expect(count(seen, `keep on-settle@${H}`)).toBe(1);
     expect(count(seen, `keep on-after-db-write@${H}`)).toBe(0);
     expect(await cursorOf(raw)).toBe(1n);
+    // H's settled row was rolled back with its block; 2's, committed before, is the other writer's to leave.
+    expect(await heightsIn(raw, "keep.settled")).toEqual([1n, 2n]);
   }, 60_000);
 
   it("a lost connection on the way to the held h (on-finalized of the head) keeps h held for the run after it", async () => {
@@ -437,9 +480,13 @@ describe.each(RUNNER_BACKENDS)("a height held for a retry on $name", (backend) =
     const failure = await runOnce(loop, source, stop);
     expectRetryable(failure);
     expect(((failure as HeightFailure).cause as UmbraError).code).toBe("connection-lost");
+    // The failed cursor read ran no callback of H.
+    expect(count(seen, `keep on-settle@${H}`)).toBe(1);
     expect(await runOnce(loop, source, stop)).toBeUndefined();
     expect(fromComputeProblems(seen)).toEqual([]);
+    expect(count(seen, `keep on-settle@${H}`)).toBe(2);
     expect(await cursorOf(raw)).toBe(HEAD);
+    expect(await heightsIn(raw, "keep.settled")).toEqual([1n, 2n, 3n, 4n, 5n]);
   }, 60_000);
 });
 

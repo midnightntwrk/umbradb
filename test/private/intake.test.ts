@@ -7,6 +7,8 @@ import { FinalizedLoop, type HeightRun, type LoopInput } from "../../src/runner/
 import { PRIVATE_BACKENDS, type PrivateBackend, START_TIMEOUT_MS, type TestDatabase, TEST_TIMEOUT_MS } from "./backends.js";
 import {
   launchPrivate,
+  PRIVATE_ROWS_SQL,
+  privateModule,
   type PrivateOptions,
   type PrivateProcess,
   type PrivateSeen,
@@ -25,6 +27,9 @@ import { TestLink } from "./link.js";
  *   and every `committed` message of those heights is lost; after reconnecting, the private process processes the 50
  *   heights in order.
  * - An independent instance stopped for 100 blocks never pauses the core, and catches up from public data.
+ * - A private module's `on-settle` runs in each private block transaction, after its `on-db-write`, with the run of that
+ *   one height, and what it writes is stored with the block; its block contexts' `continues` is false at `on-fetch`
+ *   and at the private process's first height, true at its other points after it.
  */
 
 /** The heights of a private module's `on-db-write` calls, in order, from `from` on in `seen`. */
@@ -288,6 +293,82 @@ async function a116Run(backend: PrivateBackend, waits = false): Promise<A116Obse
   }
 }
 
+// ── A private module that settles ───────────────────────────────────────────────────────────────────────────────────
+
+const SETTLED_TO = 5;
+
+/**
+ * `pm` (`privateModule`) with an `on-settle`: it counts the rows of the run in `pm.rows`, which the block's `on-db-write`
+ * wrote, and stores the count in `pm.settled` at the run's last height; its calls go to `seen`.
+ */
+function settlingPrivate(seen: PrivateSeen[]): ReturnType<typeof privateModule> {
+  const base = privateModule("pm", seen);
+  return privateModule("pm", seen, {
+    provides: [
+      { name: "pm-public", lifetimes: ["block"] },
+      { name: "pm-rows", lifetimes: ["table"], table: { schema: "pm", tables: ["rows", "settled"], kind: "append-only" } },
+    ],
+    migrations: [
+      { id: "001", sql: PRIVATE_ROWS_SQL("pm") },
+      { id: "002", sql: "CREATE TABLE pm.settled (height bigint PRIMARY KEY, block_rows integer NOT NULL)" },
+    ],
+    points: {
+      ...base.points,
+      async "on-settle"(_p, run, w) {
+        seen.push({ point: "on-settle", height: run.last, readHeight: w.height });
+        const [row] = await w.query("SELECT count(*)::int AS n FROM pm.rows WHERE height BETWEEN $1 AND $2", [run.first, run.last]);
+        await w.execute("INSERT INTO pm.settled (height, block_rows) VALUES ($1, $2)", [run.last, row?.n]);
+      },
+    },
+  });
+}
+
+/** The settling run's problems: each height's calls in order with on-settle once, and its settled rows stored. */
+async function settledProblems(backend: PrivateBackend): Promise<string[]> {
+  const publicDb = await backend.database("public");
+  const privateDb = await backend.database("private");
+  const core = await startPublicCore({ database: publicDb.setting, head: BigInt(SETTLED_TO) });
+  const seen: PrivateSeen[] = [];
+  try {
+    const running = await startPrivate(against(backend, publicDb, core, { database: privateDb.setting, seen, modules: [settlingPrivate(seen)] }));
+    try {
+      await running.reach(BigInt(SETTLED_TO));
+    } finally {
+      await running.stop();
+    }
+  } finally {
+    await core.stop();
+  }
+  const problems: string[] = [];
+  const calls = seen
+    .filter((call) => call.point === "on-db-write" || call.point === "on-settle" || call.point === "on-after-db-write")
+    .map((call) => `${call.point}@${call.height}${call.point === "on-settle" ? ` read ${call.readHeight}` : ""}`);
+  const expected = heights(1, SETTLED_TO).flatMap((h) => [
+    `on-db-write@${h}`,
+    `on-settle@${h} read ${h === 1n ? null : h - 1n}`,
+    `on-after-db-write@${h}`,
+  ]);
+  if (calls.join(", ") !== expected.join(", ")) problems.push(`pm was called ${calls.join(", ")}`);
+  // A block context's continues in the private process: false at on-fetch and at its first height, true after.
+  const continuing = seen
+    .filter((call) => call.point !== "on-settle")
+    .map((call) => `${call.point}@${call.height} ${String(call.continues)}`)
+    .sort();
+  const wantContinues = heights(1, SETTLED_TO).flatMap((h) =>
+    (["on-fetch", "on-compute", "on-db-write", "on-after-db-write"] as const).map((point) => `${point}@${h} ${String(point !== "on-fetch" && h > 1n)}`),
+  ).sort();
+  if (continuing.join(", ") !== wantContinues.join(", ")) problems.push(`pm's block contexts said continues ${continuing.join(", ")}`);
+  const settled = await privateDb.read(
+    (read) => read.query("SELECT height::int AS h, block_rows FROM pm.settled ORDER BY height"),
+    privateCursorHeight,
+  );
+  const stored = settled.map((row) => `${row.h}: ${row.block_rows}`);
+  const wanted = heights(1, SETTLED_TO).map((h) => `${h}: 1`);
+  if (stored.join(", ") !== wanted.join(", ")) problems.push(`pm.settled holds ${stored.join(", ")}`);
+  problems.push(...rowProblems(await rowsIn(privateDb), SETTLED_TO));
+  return problems;
+}
+
 describe.each(PRIVATE_BACKENDS)("private block intake ($name)", (backend) => {
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
@@ -316,6 +397,15 @@ describe.each(PRIVATE_BACKENDS)("private block intake ($name)", (backend) => {
     "an independent instance stopped for 100 blocks never pauses the core and catches up from public data",
     async () => {
       expect(a116Problems(await a116Run(backend))).toEqual([]);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "a private module's on-settle runs in each block transaction after its on-db-write, with that height's run, and " +
+      "what it writes is stored with the block",
+    async () => {
+      expect(await settledProblems(backend)).toEqual([]);
     },
     TEST_TIMEOUT_MS,
   );

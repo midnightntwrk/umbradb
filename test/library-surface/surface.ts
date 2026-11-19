@@ -32,8 +32,8 @@ export const EXPORTED_SURFACE: Surface = Object.freeze({
     "withViewExtensions",
   ]),
   types: Object.freeze([
-    "Address", "ApiRegistry", "BlockContext", "BlockRef", "BlockWriteHandle", "ContractLog", "CoreVersion", "Entry",
-    "ErrorCode", "FieldKind", "FieldSchema", "ItemDeclaration", "ItemSink", "LedgerPackage", "LedgerTask", "Lifetime",
+    "Address", "ApiRegistry", "BlockContext", "BlockRef", "BlockRun", "BlockWriteHandle", "ContractLog", "CoreVersion",
+    "Entry",     "ErrorCode", "FieldKind", "FieldSchema", "ItemDeclaration", "ItemSink", "LedgerPackage", "LedgerTask", "Lifetime",
     "MessagePortLike", "Migration", "ModuleDeclaration", "NodeHttpHandler", "NodeUpgradeHandler", "PageCursor",
     "ParsedTransaction", "PointCallbacks", "PointName", "PrivateLinkChannel", "ProcessContext", "ReadHandle",
     "Revision", "Route", "RouteContext", "RouteErrorKind", "SchemaWriteHandle", "UmbraConfig", "UmbraDBBackup",

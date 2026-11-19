@@ -425,13 +425,14 @@ flowchart TD
   fetch --> starth["on-start-height"]
   starth --> compute["on-compute"]
   compute --> write["on-db-write<br/>one transaction"]
-  write --> after["on-after-db-write"]
+  write --> settle["on-settle<br/>the same transaction"]
+  settle --> after["on-after-db-write"]
   after -- next height, or wait --> node
   after -. once .-> stoph["on-stop-height"]
   classDef unfinalized fill:#EEEDFE,stroke:#534AB7,color:#3C3489
   classDef finalized fill:#E1F5EE,stroke:#0F6E56,color:#085041
   class best,bestfetch,rollback unfinalized
-  class fin,fetch,starth,compute,write,after,stoph finalized
+  class fin,fetch,starth,compute,write,settle,after,stoph finalized
 ```
 
 [UmbraDB node architecture](docs/node-architecture.md) explains each step: the best-block queue and rollbacks, the
@@ -448,7 +449,8 @@ A module is one `defineModule({ … })` declaration in TypeScript:
   PostgreSQL (a primary key, no floats, no `now()` defaults), so every machine holds the same rows.
 - `configSchema`: its settings, a zod object, each field `data`, `operational` or `secret`.
 - `points`: its callbacks. At startup `on-start-db` and `on-start-api`; for each finalized height `on-fetch`,
-  `on-parse`, `on-compute`, `on-db-write` (inside the block's transaction) and `on-after-db-write` (after the commit).
+  `on-parse`, `on-compute`, `on-db-write` and `on-settle` (both inside the block's transaction), then
+  `on-after-db-write` (after the commit).
   A callback that throws halts processing, and nothing of that height is stored.
 
 Modules are trusted code: database roles stop one from writing another's tables by mistake, and nothing more.
