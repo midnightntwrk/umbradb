@@ -308,7 +308,7 @@ describe("prepared statements on PostgreSQL (00033 F2)", () => {
     await db.close();
   });
 
-  it("retires a marked statement on a read's session by its failed named execution alone, a rollback to a savepoint asked for with it: further changes of the columns leave one statement on the server", async () => {
+  it("retires a marked statement on a read's session by its failed named execution alone: further changes of the columns leave one statement on the server", async () => {
     const created = await server.createDatabase();
     await created.exec(SCHEMA);
     const db = created.open({ committedHeight, readConnections: 1 });
@@ -319,10 +319,11 @@ describe("prepared statements on PostgreSQL (00033 F2)", () => {
     for (let round = 0; round < 3; round++) {
       await created.exec(`ALTER TABLE t.rows ADD COLUMN c${round} integer NOT NULL DEFAULT ${round}`);
       columns[`c${round}`] = round;
-      const [read, rollback] = await db.read(async (read) => {
-        await read.query("SAVEPOINT s");
-        return Promise.allSettled([read.query(statement), read.query("ROLLBACK TO SAVEPOINT s")]);
-      });
+      // A read handle refuses a savepoint (`control-refused`), so nothing can be asked for behind the read that would
+      // end the failed state: the read's own failure is all there is.
+      const [read, savepoint] = await db.read(async (read) =>
+        Promise.allSettled([read.query(statement), read.query("SAVEPOINT s")]),
+      );
       if (round === 0) {
         expect(read).toMatchObject({
           status: "rejected",
@@ -331,7 +332,7 @@ describe("prepared statements on PostgreSQL (00033 F2)", () => {
       } else {
         expect(read).toEqual({ status: "fulfilled", value: [columns] });
       }
-      expect(rollback).toEqual({ status: "fulfilled", value: [] });
+      expect(savepoint).toMatchObject({ status: "rejected", reason: { details: { reason: "control-refused" } } });
       expect(await db.read((reading) => reading.query(RUNS_OF, [statement.text]))).toEqual([{ runs: 2 }]);
     }
     await db.close();
