@@ -118,6 +118,55 @@ export function marking(db: Database, order: string[]): Database {
   };
 }
 
+/** A statement's parameters as text: a `bigint` as its digits, bytes as hexadecimal. */
+function parametersText(params: readonly unknown[] | undefined): string {
+  return JSON.stringify(params ?? [], (_key, value: unknown) => {
+    if (typeof value === "bigint") return `${value}n`;
+    if (value instanceof Uint8Array) return `0x${Buffer.from(value).toString("hex")}`;
+    return value;
+  });
+}
+
+/**
+ * `db`, each statement sent through a read handle or a transaction of it pushed into `order` as
+ * `sql <handle> <text> <parameters>`, when it is sent. A transaction is recorded in place (the object the backend made
+ * keeps its identity, which the read view and the block's end look up).
+ */
+export function recordingStatements(db: Database, order: string[]): Database {
+  const note = (handle: string, sql: string, params: readonly unknown[] | undefined): void => {
+    order.push(`sql ${handle} ${sql.replace(/\s+/g, " ").trim()} ${parametersText(params)}`);
+  };
+  return {
+    read: (body, options) =>
+      db.read(
+        (read) =>
+          body({
+            height: read.height,
+            query: (sql, params) => {
+              note("read", sql, params);
+              return read.query(sql, params);
+            },
+          }),
+        options,
+      ),
+    transaction: (body) =>
+      db.transaction((tx) => {
+        const { query, execute } = tx;
+        tx.query = (sql, params) => {
+          note("tx", sql, params);
+          return query(sql, params);
+        };
+        tx.execute = (sql, params) => {
+          note("tx", sql, params);
+          return execute(sql, params);
+        };
+        return body(tx);
+      }),
+    writerSession: () => db.writerSession(),
+    close: () => db.close(),
+  };
+}
+
 /** The in-memory chain as a source that keeps the loop's queue runner while a run of the loop holds it. */
 export function attachedSource(memory: InMemoryBlockSource): { readonly source: BlockSource; runner(): QueueRunner } {
   let runner: QueueRunner | undefined;
@@ -216,6 +265,8 @@ export interface ChunkRunOptions {
   readonly controller?: AbortController;
   /** Told the run's database once it is open, before the loop runs. */
   readonly onDatabase?: (db: Database) => void;
+  /** The database the loop is given, from the run's; the run's own unless given ({@link recordingStatements}). */
+  readonly database?: (db: Database) => Database;
   /** The loop's observer. */
   readonly observer?: LoopObserver;
   /** The loop's slow-window threshold. */
@@ -237,7 +288,7 @@ export async function runChunks(backend: RunnerBackend, options: ChunkRunOptions
   const controller = options.controller ?? new AbortController();
   const Loop = options.loop ?? FinalizedLoop;
   const loop = new Loop({
-    db: marking(db, order),
+    db: marking(options.database?.(db) ?? db, order),
     graph: started.graph,
     plan: started.plan,
     source,

@@ -10,6 +10,7 @@ import {
   byPoint,
   chunksOf,
   orderOf,
+  recordingStatements,
   runChunks,
   type Seen,
 } from "./loop-chunk-harness.js";
@@ -34,7 +35,8 @@ import { askedSource, preparingSource } from "./slow-block-harness.js";
  * - The finality check's stored hash of a height taken, written and committed.
  * - A source that prepares ahead: a chunk of 7 taken before its `BEGIN`; on PGlite a `db.read` at `on-parse` resolves
  *   inside the chunk's blocks, and after the `COMMIT` for a block above the open chunk.
- * - A block processed alone sends the statements of the mode off (PostgreSQL, through the block trace).
+ * - A block processed alone sends the statements of the mode off: the same texts with the same parameters in the same
+ *   order, through every handle of the database API, and the same count in its trace line (PostgreSQL).
  */
 
 const HEAD = 20n;
@@ -240,23 +242,41 @@ describe.each(RUNNER_BACKENDS)("chunks in the finalized loop on $name", (backend
     expect(await cursorOf(run.db)).toBe(HEAD);
   }, 120_000);
 
-  it.runIf(!pglite)("a block processed alone sends the statements of the mode off: the same statements at each such height", async () => {
-    /** Each line's statements, by height, from a traced run. */
-    const traced = async (blocks: number | undefined): Promise<Map<number, number>> => {
+  it("a block processed alone sends the statements of the mode off: the same texts with the same parameters, in the same order, at each such height", async () => {
+    /** A run's points, transaction marks and statements in the order they happened, and each trace line's statement count by height. */
+    const recorded = async (blocks: number | undefined): Promise<{ order: string[]; sqlN: Map<number, number | undefined> }> => {
+      const order: string[] = [];
       const lines: string[] = [];
       const sink: TraceSink = { blocks: (text) => void lines.push(text), statements: () => undefined, worker: () => undefined };
       startTrace(sink);
       try {
-        await runChunks(backend, { head: HEAD, ...(blocks === undefined ? {} : { blocks, distance: 5 }) });
+        await runChunks(backend, {
+          head: HEAD,
+          order,
+          database: (db) => recordingStatements(db, order),
+          ...(blocks === undefined ? {} : { blocks, distance: 5 }),
+        });
       } finally {
         stopTrace();
       }
-      const parsed = lines.flatMap((text) => text.trimEnd().split("\n")).map((line) => JSON.parse(line) as { h: number; sqlN: number });
-      return new Map(parsed.map((line) => [line.h, line.sqlN]));
+      const parsed = lines.flatMap((text) => text.trimEnd().split("\n")).map((line) => JSON.parse(line) as { h: number; sqlN?: number });
+      return { order, sqlN: new Map(parsed.map((line) => [line.h, line.sqlN])) };
     };
-    const off = await traced(undefined);
-    const on = await traced(7);
-    // Chunks 1..7 and 8..14; 15 to 20 are within 5 of the head, each alone.
-    for (let h = 15; h <= 20; h++) expect(on.get(h), `height ${h}`).toBe(off.get(h));
+    const off = await recorded(undefined);
+    const on = await recorded(7);
+    // Chunks 1..7 and 8..14; 15 to 20 are within 5 of the head, each alone: from 15's first point on, the two runs send
+    // the same statements, between the same points and the same BEGINs and COMMITs.
+    const alone = (order: readonly string[]): string[] => order.slice(order.indexOf("on-fetch@15"));
+    expect(alone(on.order)).toEqual(alone(off.order));
+    const statements = alone(on.order).filter((entry) => entry.startsWith("sql "));
+    // Each of the six heights: a read at on-compute, its writes and the cursor check in its transaction, a read after.
+    expect(statements.filter((entry) => entry.startsWith("sql tx ")).length).toBeGreaterThanOrEqual(6 * 3);
+    expect(statements.filter((entry) => entry.startsWith("sql read ")).length).toBeGreaterThanOrEqual(6 * 2);
+    expect(statements.some((entry) => entry.includes("INSERT INTO r.rows (height) VALUES ($1) [\"20n\"]"))).toBe(true);
+    // Inside the chunks the runs differ: the mode on sends the block's end between two blocks of a chunk.
+    expect(on.order.slice(0, on.order.indexOf("on-fetch@15"))).not.toEqual(off.order.slice(0, off.order.indexOf("on-fetch@15")));
+    // And, where the backend traces statements, the same number of them in each such height's line, the BEGIN and the
+    // COMMIT among them.
+    for (let h = 15; h <= 20; h++) expect(on.sqlN.get(h), `height ${h}`).toBe(off.sqlN.get(h));
   }, 120_000);
 });
