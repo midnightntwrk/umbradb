@@ -19,7 +19,13 @@ export interface TokenKey {
   readonly domainSep: string;
 }
 
-export const tokenMapKey = (k: Pick<TokenKey, "id" | "kind">): string => `${k.id}/${k.kind}`;
+/** What names a token's row: its id and kind. */
+type TokenId = Pick<TokenKey, "id" | "kind">;
+
+/** The key of a token in the maps these reads return: its id and kind. */
+export function tokenMapKey(k: TokenId): string {
+  return [k.id, k.kind].join("/");
+}
 const bytes = (hex: string): Uint8Array => fromHex(hex);
 const num = (v: unknown): number => Number(v);
 const tokenKeyOf = (r: Record<string, unknown>): TokenKey => ({
