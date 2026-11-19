@@ -3,11 +3,18 @@
  * no transport of its own, so the browser build can carry the same requests over `postMessage`; Node.js's HTTP and
  * WebSocket listener on `listen.api` is `./api-server.ts`.
  *
+ * **Routes and raw handlers.** A module registers its API two ways. `registry.route(route)` gives the core a route
+ * (`../modules/route.ts`): a named operation with schemas and no transport, which the core keeps
+ * ({@link ApiRoutes.routes}) and serves over HTTP through `./route-http.ts`, under `/<module-id>`. `registry.http(…)`
+ * gives a raw HTTP handler, for what is HTTP by nature (a GraphQL endpoint, a file): the module owns its path, its
+ * status and its headers. Both end as HTTP routes here, matched and answered alike.
+ *
  * **Registration.** {@link registerModuleApis} runs `on-start-api` once, at startup, after the process contexts are
  * sealed. It runs for the parts this process may run: those active in a range of the graph's `ranges`, the cursor's
  * included. A part whose revisions all ended below the cursor runs no point in this process and serves no API. The
  * callbacks run in the startup order, in series, each with its module's process context and a registry of its own,
- * closed when the callback ends ({@link ApiRoutes.open}). A malformed registration throws at the call. Once every
+ * closed when the callback ends ({@link ApiRoutes.open}). A malformed registration throws at the call, as does a route
+ * name the module already registered. Once every
  * `on-start-api` has run, two registrations of one method and path (parameters' names aside), or of one subscription
  * name, refuse startup with `duplicate-api-route`, naming the route and both modules, before anything listens.
  *
@@ -29,13 +36,15 @@
  * the handler does not catch it.
  *
  * A POST's body is read as JSON by the component's own reader, which returns integers beyond ±(2^53 − 1) as `bigint`; a
- * GET's body is ignored.
+ * GET's body is ignored. A route's body is read exactly (`readExactNumber`, `./api-json.ts`): an integer is exact however
+ * it is written, and a number that would be read as another value is 400 `invalid-request`.
  *
  * **Bodies.** An answer's body is written as JSON, with `Content-Type: application/json; charset=utf-8`: a `bigint` as
  * decimal text and bytes as `0x`-prefixed lowercase hex, as the envelope writes heights and hashes. If the handler gave
  * a `Content-Type` and its body is text or bytes, the body is sent as it is. An `undefined` body is empty.
  *
- * **Errors** are `{ "error": { "code", "message" } }` with the status of {@link API_ERROR_STATUS}:
+ * **Errors** are `{ "error": { "code", "message" } }` with the status of {@link API_ERROR_STATUS}; no message repeats the
+ * request's path, method or body:
  * - a path no route has: 404 `not-found`;
  * - a method the path lacks: 405 `method-not-allowed`, with `Allow`;
  * - a path or body that cannot be read: 400 `invalid-request`;
@@ -57,9 +66,15 @@ import { UmbraError } from "../db/errors.js";
 import { parseJsonLossless } from "../deterministic-postgresql/index.js";
 import type { ApiRegistry } from "../modules/declaration.js";
 import type { ResolvedGraph } from "../modules/graph.js";
+import type { Route } from "../modules/route.js";
+import { encodeJson, readExactNumber, UnreadableNumber } from "./api-json.js";
 import { runSchedule, seriesOf } from "./dispatch.js";
 import type { ChainDataAnswer } from "./envelope.js";
 import type { ProcessContexts } from "./process-context.js";
+import { bindRoute, type RouteEntry } from "./route-http.js";
+
+export { encodeJson } from "./api-json.js";
+export type { JsonSchema, RouteEntry } from "./route-http.js";
 
 /** A route's method. */
 export type HttpMethod = "GET" | "POST";
@@ -81,6 +96,8 @@ export interface HttpRoute {
   readonly path: string;
   readonly segments: readonly PathSegment[];
   readonly handler: HttpHandler;
+  /** A route's (`registry.route`): the numbers of its JSON body are read exactly (`readExactNumber`, `./api-json.ts`). */
+  readonly exact: boolean;
 }
 
 /** A subscription a module registered. */
@@ -165,23 +182,6 @@ const HEADER_VALUE = /^[\t\x20-\x7e\x80-\xff]*$/;
 const PATH_RULE =
   `"/" or "/" and segments, each of letters, digits and -._~!$&'()*+,;=@, or :name for a parameter`;
 
-/** `0x` and `bytes` in lowercase hex. */
-const hex = (bytes: Uint8Array): string => `0x${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
-
-/**
- * `value` as the module API writes JSON: a `bigint` as its decimal text, bytes (a `Uint8Array`, a `Buffer`) as `0x`
- * and lowercase hex, everything else as `JSON.stringify` writes it; undefined where `JSON.stringify` gives nothing.
- * Throws `JSON.stringify`'s `TypeError` for a cyclic value.
- */
-export function encodeJson(value: unknown): string | undefined {
-  return JSON.stringify(value, function (this: Record<string, unknown>, key: string, replaced: unknown) {
-    const raw = this[key];
-    if (typeof raw === "bigint") return raw.toString();
-    if (raw instanceof Uint8Array) return hex(raw);
-    return replaced;
-  });
-}
-
 /** The answer to a request the module API refuses with `code` (see the module comment). */
 export function apiErrorResponse(code: ApiErrorCode, message: string, headers: Record<string, string> = {}): ApiResponse {
   return {
@@ -225,6 +225,12 @@ const shapeOf = (route: HttpRoute): string =>
 /** What the modules register in `on-start-api` (see the module comment). */
 export class ApiRoutes {
   readonly #registrations: Registration[] = [];
+  readonly #routes = new Map<string, RouteEntry>();
+
+  /** The routes registered with `registry.route`, in registration order: the catalog every transport serves from. */
+  get routes(): readonly RouteEntry[] {
+    return Object.freeze([...this.#routes.values()]);
+  }
 
   /** The HTTP routes registered, in registration order. */
   get http(): readonly HttpRoute[] {
@@ -244,20 +250,31 @@ export class ApiRoutes {
         `${module} registered ${what} after its on-start-api callback ended: modules register their API once, at ` +
           "startup",
       );
+    const http = (method: HttpMethod, path: string, handler: HttpHandler, exact = false): void => {
+      if (method !== "GET" && method !== "POST") {
+        throw new TypeError(`${module} registered the method ${String(method)}, which is neither GET nor POST`);
+      }
+      const segments = parsePath(module, method, path);
+      if (typeof handler !== "function") {
+        throw new TypeError(`${module} registered ${method} ${path} with a handler that is not a function`);
+      }
+      this.#registrations.push({
+        kind: "http",
+        route: Object.freeze({ module, method, path, segments: Object.freeze(segments), handler, exact }),
+      });
+    };
     const registry: ApiRegistry = Object.freeze({
+      route: (route: Route): void => {
+        if (!open) throw after(`the route ${String((route as { name?: unknown } | null)?.name)}`);
+        const bound = bindRoute(module, route);
+        const { id } = bound.entry;
+        if (this.#routes.has(id)) throw new TypeError(`${module} registered the route ${bound.entry.name} twice: a route's name is registered once`);
+        http(bound.entry.http.method, bound.entry.http.path, bound.handler, true);
+        this.#routes.set(id, bound.entry);
+      },
       http: (method: HttpMethod, path: string, handler: HttpHandler): void => {
         if (!open) throw after(`${String(method)} ${String(path)}`);
-        if (method !== "GET" && method !== "POST") {
-          throw new TypeError(`${module} registered the method ${String(method)}, which is neither GET nor POST`);
-        }
-        const segments = parsePath(module, method, path);
-        if (typeof handler !== "function") {
-          throw new TypeError(`${module} registered ${method} ${path} with a handler that is not a function`);
-        }
-        this.#registrations.push({
-          kind: "http",
-          route: Object.freeze({ module, method, path, segments: Object.freeze(segments), handler }),
-        });
+        http(method, path, handler);
       },
       subscription: (name: string, handler: SubscriptionHandler): void => {
         if (!open) throw after(`the subscription ${String(name)}`);
@@ -341,7 +358,7 @@ export class ModuleApi {
     }
     const candidates = request.path.startsWith("/") ? this.#http.filter((route) => matches(route, segments)) : [];
     if (candidates.length === 0) {
-      return apiErrorResponse("not-found", `no module API route answers ${request.method} ${request.path}`);
+      return apiErrorResponse("not-found", "no module API route answers this method and path");
     }
     // Checked routes that match one path with one method differ in a literal against a parameter: one is the most specific.
     const route = candidates
@@ -352,14 +369,14 @@ export class ModuleApi {
       );
     if (route === undefined) {
       const allow = [...new Set(candidates.map((candidate) => candidate.method))].sort().join(", ");
-      return apiErrorResponse("method-not-allowed", `${request.path} answers ${allow}, not ${request.method}`, { Allow: allow });
+      return apiErrorResponse("method-not-allowed", `this path answers ${allow}, not this method`, { Allow: allow });
     }
     let body: unknown;
     if (request.method === "POST" && request.body !== undefined && request.body !== "") {
       try {
-        body = parseJsonLossless(request.body);
-      } catch {
-        return apiErrorResponse("invalid-request", "the request body is not JSON");
+        body = parseJsonLossless(request.body, route.exact ? readExactNumber : undefined);
+      } catch (error) {
+        return apiErrorResponse("invalid-request", error instanceof UnreadableNumber ? error.message : "the request body is not JSON");
       }
     }
     const params: Record<string, string> = Object.create(null);

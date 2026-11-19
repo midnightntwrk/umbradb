@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AGAIN, LAST, REQUEUE, REVERT, TO_EMBEDDED, TO_REF } from "../ledger/fixtures/sweep-fixture.js";
-import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
+import type { ProcessBackend } from "../runner/process-backends.js";
 import { PATIENCE_MS } from "./ingest-harness.js";
 import type { TableSnapshot } from "./ledger-graph-tapes.js";
 import {
@@ -75,7 +75,7 @@ const SEGMENT_MS = PATIENCE_MS * 2;
 /** Where a segment stops: at `point` of block `height`, held there for the kill or its process stopped. */
 const holdAt = (point: RestartPoint, height: number, then: Hold["then"]): Hold => ({ point, height, then });
 
-describe.each(PROCESS_BACKENDS)("restarts and crashes at named points, on $name", (backend: ProcessBackend) => {
+export const restartTests = (backend: ProcessBackend) => describe(`restarts and crashes at named points, on ${backend.name}`, () => {
   let directory: string;
   let uninterrupted: Promise<ObservedRun> | undefined;
   let runs = 0;
@@ -147,7 +147,7 @@ describe.each(PROCESS_BACKENDS)("restarts and crashes at named points, on $name"
   }
 });
 
-describe("a contents hash compares equal only to another hash", () => {
+export const contentsHashTests = () => describe("a contents hash compares equal only to another hash", () => {
   const light: Light = { nodeSet: "n", nodes: 1, rows: 1, roots: "r", state: "s", states: 1, digests: "d" };
   const tables: TableSnapshot = { rows: new Map(), refs: new Map(), roots: new Map(), queue: new Set(), states: new Map(), contracts: [], digests: new Map() };
   /** A run observed after height 0 only, with the contents hash `contents`. */
