@@ -65,7 +65,11 @@ export const STATEMENTS = Object.freeze({
       set_tx = EXCLUDED.set_tx, set_event = EXCLUDED.set_event, set_record = EXCLUDED.set_record`,
   /** Deletes one field. */
   deleteField: `DELETE FROM ${TOKEN_METADATA_SCHEMA}.fields WHERE token_id = $1 AND kind = $2 AND key = $3`,
-  /** S, the database's first height (the core's one-row table). */
+  /**
+   * This is only for core-contract-logs-fast.
+   *
+   * S, the database's first height (the core's one-row table).
+   */
   databaseStart: "SELECT start_height FROM core_chain.identity WHERE id = 1",
 });
 

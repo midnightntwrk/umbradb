@@ -117,12 +117,19 @@ export function tokenMetadataWith(reader: LogReader, latestStarts: Readonly<Reco
         table: { schema: TOKEN_METADATA_SCHEMA, tables: ["tokens", "fields"], kind: "mutable" },
       },
     ],
+    /** This is only for core-contract-logs-fast */
     startsMidChain: true,
     /** This is only for core-contract-logs-fast */
     latestStarts,
     configSchema: z.object({}),
     migrations: MIGRATIONS.map(({ id, sql }) => ({ id, sql })),
     points: {
+      /**
+       * This is only for core-contract-logs-fast.
+       *
+       * A database starts above 0 only with it, and the two refusals below guard that start. With
+       * core-contract-logs-full the database starts at 0.
+       */
       async "on-start-db"(p, w) {
         // The first revision is where the module started; a later one (a new version, new settings) continues it.
         const start = await databaseStart(w);
