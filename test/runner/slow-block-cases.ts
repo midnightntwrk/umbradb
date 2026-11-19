@@ -5,7 +5,7 @@ import { UmbraError } from "../../src/db/errors.js";
 import type { BlockContext, ModuleDeclaration } from "../../src/modules/declaration.js";
 import { FinalizedLoop, type HeightRun, type LoopInput } from "../../src/runner/loop.js";
 import { type ProbeRecord, startProber, statusWhen } from "../admin/admin-harness.js";
-import { PROCESS_BACKENDS } from "./process-backends.js";
+import type { ProcessBackend } from "./process-backends.js";
 import { loggingModule } from "./process-build.js";
 import {
   type AskedSource,
@@ -237,7 +237,7 @@ function afterCommitProblems(observed: Observed, lines: readonly string[], slowB
   return problems;
 }
 
-describe.each(PROCESS_BACKENDS)("slow-block's settled cases on $name", (backend) => {
+export const slowBlockCaseTests = (backend: ProcessBackend) => describe(`slow-block's settled cases on ${backend.name}`, () => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
