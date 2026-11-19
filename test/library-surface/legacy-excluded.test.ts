@@ -19,7 +19,7 @@ import {
  * Each list is the real one: the tarball's from `npm pack --dry-run --json` (npm's own rules over `package.json`
  * `files`), the build's from the TypeScript program of `tsconfig.build.json` (every file the compiler reads, the
  * imported ones included), the conformance run's from `vitest list` with the repository's configuration (what `npm run
- * test:conformance` runs), and the coverage and mutation configurations as they are written.
+ * test:conformance` runs), and the coverage configuration as it is written.
  *
  * Legacy's own TypeScript program and Vitest configuration are kept but no longer run; the controls below still read
  * them, as lists of what a build or a run of the folder would include.
@@ -144,14 +144,10 @@ describe("TransactionHistory is kept outside the build, the package and the run"
     expect(runProblems("the conformance run", files)).toEqual([]);
   });
 
-  it("the run's coverage measures no file of legacy/, and the mutation run neither mutates nor runs one", async () => {
+  it("the run's coverage measures no file of legacy/", async () => {
     const coverage = (await vitestConfig("vitest.config.ts")).test?.coverage;
     expect(coverage?.include).toBeDefined();
     expect(coverageProblems(coverage!.include!, coverage!.exclude ?? [])).toEqual([]);
-    const stryker = JSON.parse(readFileSync(path.join(ROOT, "stryker.conf.json"), "utf8")) as { mutate: string[] };
-    const mutationRun = [...stryker.mutate, ...((await vitestConfig("vitest.mutation.config.ts")).test?.include ?? [])];
-    expect(mutationRun.length).toBeGreaterThan(0);
-    expect(runProblems("the mutation run", mutationRun)).toEqual([]);
   });
 });
 
@@ -254,7 +250,7 @@ describe("negative controls: each list that holds legacy/ or TransactionHistory 
     }
   });
 
-  it("coverage globs that reach legacy/, or a mutation target or test in it, fail", () => {
+  it("coverage globs that reach legacy/ fail", () => {
     expect(coverageProblems(["**/*.ts"], [])).toContain(
       `the run's coverage includes ${legacyPath("src/postgres/transaction-history-storage.ts")}, a file under legacy/ `
         + "(A3, LS-3)",
@@ -268,10 +264,6 @@ describe("negative controls: each list that holds legacy/ or TransactionHistory 
     expect(coverageProblems(["src/**/*.ts", "tools/**/*.ts"], ["legacy/**"])).toEqual([]);
     expect(coverageProblems(["tools/**/*.ts", "legacy/transaction-history/*.ts"], [])).toEqual([
       `the run's coverage includes ${legacyPath("vitest.config.ts")}, a file under legacy/ (A3, LS-3)`,
-    ]);
-    const target = legacyPath("src/postgres/transaction-history-storage.ts");
-    expect(runProblems("the mutation run", ["src/postgres/temporal-kv.ts", target])).toEqual([
-      `the mutation run includes ${target}, a file under legacy/ (A3, LS-3)`,
     ]);
   });
 

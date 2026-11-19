@@ -59,7 +59,7 @@ import { chainDeclarations } from "./chain-build.js";
  *   `process` items published (`config`, `node-client`, `db` (read-only) and `ledger-table`). In `on-db-write` of block
  *   S: the anchor hash, in S's own transaction.
  *
- * The same through the real process are in `chain-process.test.ts`.
+ * The same through the real process are in `chain-process.ts`.
  */
 
 const S = 5n;
