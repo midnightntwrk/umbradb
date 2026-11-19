@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Database, ReadHandle, ReadOnlyDatabase } from "../../src/db/api.js";
 import type { BlockContext, ModuleDeclaration, ProcessContext } from "../../src/modules/declaration.js";
@@ -290,6 +291,75 @@ describe.each(RUNNER_BACKENDS)("where a chunk ends on $name", (backend) => {
           "on-db-write@2 refused",
           "on-after-db-write@2 refused",
         ]);
+      }
+    }, 120_000);
+
+    it("called twice by one callback of a later block: both calls resolve once the block before committed, the second not before the first", async () => {
+      const log: string[] = [];
+      const twice = declaration("bb", {
+        points: {
+          async "on-compute"(p: ProcessContext, b: BlockContext) {
+            if (b.height !== 4n) return;
+            let firstSettled = false;
+            const first = b.blockBeforeCommitted();
+            void first.then(() => {
+              firstSettled = true;
+            });
+            await b.blockBeforeCommitted();
+            log.push(`the second call resolved with the first ${firstSettled ? "resolved" : "pending"}`);
+            await first;
+            const db = p.items.get("db") as ReadOnlyDatabase;
+            log.push(`cursor ${await db.read(async (other) => other.height)}`);
+            // Once it resolved, a later call of the same callback resolves too: the block before is committed.
+            await b.blockBeforeCommitted();
+            log.push("a third call resolved");
+          },
+        },
+      });
+      const run = await runChunks(backend, { head: 14n, blocks: 7, modules: [twice], dbItem: "bb" });
+      expect(log).toEqual(["the second call resolved with the first resolved", "cursor 3", "a third call resolved"]);
+      // One commit at 3, then 4 as the first block of the chunk 4..10, then 11..14.
+      expect(run.order.filter((mark) => mark === "COMMIT")).toHaveLength(3);
+      expect(await cursorOf(run.db)).toBe(14n);
+    }, 120_000);
+
+    it("kept and called after its callback returned: refused in both modes, from the module's later point and from another module's on-compute of the block, and no chunk ends by it", async () => {
+      for (const blocks of [undefined, 7]) {
+        const log: string[] = [];
+        const kept = new Map<bigint, BlockContext>();
+        const call = async (label: string, height: bigint): Promise<void> => {
+          try {
+            await (kept.get(height) as BlockContext).blockBeforeCommitted();
+            log.push(`${label}@${height} resolved`);
+          } catch (error) {
+            log.push(`${label}@${height} ${(error as Error).message.includes("after its callback returned") ? "refused" : "other"}`);
+          }
+        };
+        // aa's on-compute keeps its context; zz's uses it once aa's has returned, for the same block.
+        const aa = declaration("aa", {
+          points: {
+            async "on-compute"(_p, b: BlockContext) {
+              kept.set(b.height, b);
+            },
+            async "on-db-write"(_p, b: BlockContext) {
+              if (b.height === 4n) await call("aa on-db-write", b.height);
+            },
+          },
+        });
+        const zz = declaration("zz", {
+          points: {
+            async "on-compute"(_p, b: BlockContext) {
+              if (b.height !== 4n) return;
+              // With the mode off both callbacks run at once: wait until aa's has returned.
+              while (!kept.has(b.height)) await sleep(1);
+              await sleep(20);
+              await call("zz on-compute", b.height);
+            },
+          },
+        });
+        const run = await runChunks(backend, { head: 14n, modules: [aa, zz], ...(blocks === undefined ? {} : { blocks }) });
+        expect(log, `blocks ${blocks}`).toEqual(["zz on-compute@4 refused", "aa on-db-write@4 refused"]);
+        expect(run.order, `blocks ${blocks}`).toEqual(orderOf(blocks === undefined ? chunksOf(1, 14n) : chunksOf(7, 14n), 14n));
       }
     }, 120_000);
   });

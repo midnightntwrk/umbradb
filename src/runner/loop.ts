@@ -193,8 +193,9 @@
  * body ends and commits, the follower and the observer are told, and the call resolves; the rest of k's `on-compute`
  * runs with no transaction open (each later callback with its own read at k − 1), then the points after the commit of
  * a..k − 1, then k's writes open the next transaction, k the first block of a chunk or alone. No callback runs twice.
- * With the mode off, and at a chunk's first block, `blockBeforeCommitted()` resolves at once; it throws a programming
- * error at any other point, or after the callback's first statement through its read.
+ * With the mode off, and at a chunk's first block, `blockBeforeCommitted()` resolves at once. Every call for one block
+ * gets the same commit, pending or settled. It throws a programming error at any other point, after the callback's
+ * first statement through its read, and once the callback it was given to has returned.
  *
  * The transaction has one user at a time, in the order they asked: a block's writes, one `on-compute` callback's read,
  * or one read of {@link FinalizedLoop.read}, which the process's ledger worker host reads stored nodes through (a view
@@ -617,11 +618,13 @@ export interface HeldChunk {
   readonly kept?: HeightFailure;
 }
 
-/** The programming error of `blockBeforeCommitted()` called where it is not allowed. */
-function blockBeforeRefused(): Error {
-  return new Error(
-    "blockBeforeCommitted() is allowed at on-compute only, before the callback's first statement through its read",
-  );
+/**
+ * The programming error of `blockBeforeCommitted()` called where it is not allowed; `returned` when the callback it
+ * was given to has returned, as a handle kept past its callback is refused.
+ */
+function blockBeforeRefused(returned = false): Error {
+  const allowed = "it is allowed at on-compute only, before the callback's first statement through its read";
+  return new Error(returned ? `blockBeforeCommitted() was called after its callback returned: ${allowed}` : `blockBeforeCommitted(): ${allowed}`);
 }
 
 /** A block taken for a chunk before its transaction (see the module comment), with its items as `on-parse` left them. */
@@ -821,6 +824,11 @@ export class FinalizedLoop {
   readonly #taken = new Map<bigint, Taken>();
   /** The takes that failed, by height, each until the loop reaches its height or a block below it stops processing. */
   readonly #takeFailures = new Map<bigint, TakeFailure>();
+  /**
+   * The commit each block asked for with `blockBeforeCommitted()` inside a chunk, by its run: every later call for that
+   * block gets the same promise ({@link #blockBefore}).
+   */
+  readonly #askedBefore = new WeakMap<HeightRun, Promise<void>>();
   /** The blocks taken and not committed yet, by height: what the source's finality check is answered from. */
   readonly #uncommitted = new Map<bigint, BlockRef>();
   /**
@@ -1201,9 +1209,11 @@ export class FinalizedLoop {
       "on-compute",
       (part, call) => {
         const items = run.items.visible();
-        return open((read) => {
-          // blockBeforeCommitted() is allowed until the callback's first statement through its read.
+        return open(async (read) => {
+          // blockBeforeCommitted() is allowed until the callback's first statement through its read, and until the
+          // callback returned: kept and called later, it is refused, as a handle is.
           let sent = false;
+          let returned = false;
           const tracked: ReadHandle = {
             height: read.height,
             query: (sql, params) => {
@@ -1212,11 +1222,16 @@ export class FinalizedLoop {
             },
           };
           const before = (): Promise<void> => {
+            if (returned) throw blockBeforeRefused(true);
             if (sent) throw blockBeforeRefused();
             return this.#blockBefore(run);
           };
           const context = this.#context(run, part, items, this.continues(run), before);
-          return run.items.collect(part, "on-compute", (sink) => call(context, tracked, sink));
+          try {
+            return await run.items.collect(part, "on-compute", (sink) => call(context, tracked, sink));
+          } finally {
+            returned = true;
+          }
         });
       },
       options,
@@ -1767,14 +1782,19 @@ export class FinalizedLoop {
    * `blockBeforeCommitted()` of an `on-compute` callback of `run` (see `BlockContext`): at once unless `run` is a block
    * after its chunk's first, computed inside the transaction; then the chunk ends at the block before: the callback's
    * turn ends, the transaction's body ends and commits, and this resolves once the `COMMIT` answered and was told, or
-   * rejects with its failure.
+   * rejects with its failure. A second call for the block, while that commit is pending or after it settled, gets the
+   * same promise.
    */
   #blockBefore(run: HeightRun): Promise<void> {
+    // Every call for a block shares the commit its first call asked for, pending or settled.
+    const asked = this.#askedBefore.get(run);
+    if (asked !== undefined) return asked;
     const chunk = this.#chunkOpen;
     if (chunk === undefined || chunk.computing !== run) return Promise.resolve();
     chunk.computing = undefined;
     chunk.endTurn?.();
     chunk.asked.resolve();
+    this.#askedBefore.set(run, chunk.committed.promise);
     return chunk.committed.promise;
   }
 
