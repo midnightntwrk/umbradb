@@ -92,6 +92,7 @@
 import type { ReadHandle, Transaction } from "./api.js";
 import { controlRefused, handleClosed, type UmbraError } from "./errors.js";
 import { CLOSE, OPEN } from "./read-view-sql.js";
+import { type Statement, statementText } from "./repeated-statements.js";
 import { controlStatement } from "./statement-refusal.js";
 
 /** Options of one view. */
@@ -160,16 +161,16 @@ async function view<T>(
   let openFailure: { readonly error: unknown } | undefined;
   /** The statements the handle sent that are neither answered nor failed yet. */
   const unanswered = new Set<Promise<unknown>>();
-  const send = (sql: string, params: unknown[] | undefined): Promise<Record<string, unknown>[]> => {
+  const send = (sql: Statement, params: unknown[] | undefined): Promise<Record<string, unknown>[]> => {
     const statement = tx.query(sql, params);
     const answered = () => unanswered.delete(statement);
     unanswered.add(statement);
     statement.then(answered, answered);
     return statement;
   };
-  const query = async (sql: string, params?: unknown[]): Promise<Record<string, unknown>[]> => {
+  const query = async (sql: Statement, params?: unknown[]): Promise<Record<string, unknown>[]> => {
     if (settled) throw handleClosed("read");
-    const command = controlStatement(sql);
+    const command = controlStatement(statementText(sql));
     if (command !== null) throw controlRefused(command);
     if (openFailure !== undefined) throw openFailure.error;
     if (opened !== undefined) return send(sql, params);

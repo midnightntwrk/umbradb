@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { type WebSocket, WebSocketServer } from "ws";
 import type { ReadHandle } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
+import { type Statement, statementText } from "../../src/db/repeated-statements.js";
 import { type ResultColumn, RESULT_COLUMNS } from "../../src/deterministic-postgresql/index.js";
 import { type CoreTransport, type CoreTransportOptions, splitAddress, startCoreTransport } from "../../src/private/core-socket.js";
 import { Lockstep } from "../../src/private/lockstep.js";
@@ -53,7 +54,7 @@ function rowsOf(columns: readonly ResultColumn[], values: readonly Record<string
 function fakeDb(answer: (sql: string, params: readonly unknown[]) => Promise<Record<string, unknown>[]>): CoreTransportOptions["db"] {
   return {
     read: async <T>(body: (read: ReadHandle) => Promise<T>) =>
-      body({ height: 9n, query: (sql: string, params: unknown[] = []) => answer(sql, params) }),
+      body({ height: 9n, query: (sql: Statement, params: unknown[] = []) => answer(statementText(sql), params) }),
   } as CoreTransportOptions["db"];
 }
 

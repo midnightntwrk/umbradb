@@ -15,6 +15,7 @@
  */
 
 import type { BlockWriteHandle, CommittedHeight, ReadHandle } from "../../db/api.js";
+import { repeatedStatement } from "../../db/repeated-statements.js";
 import type { BlockRef } from "../../runner/block-source.js";
 import { heightPartitionsSql } from "../height-partitions.js";
 
@@ -56,7 +57,10 @@ CREATE TABLE ${HASHES_TABLE} (
 ]);
 
 const PRESENT_SQL = "SELECT to_regclass('core_block_commit.blocks') IS NOT NULL AS present";
-const CURSOR_SQL = `SELECT height, hash, parent_hash FROM ${BLOCKS_TABLE} ORDER BY height DESC LIMIT 1`;
+/** The head read, at every block and every read: prepared on PostgreSQL (`../../db/repeated-statements.ts`). */
+const CURSOR_SQL = repeatedStatement(
+  `SELECT height, hash, parent_hash FROM ${BLOCKS_TABLE} ORDER BY height DESC LIMIT 1`,
+);
 const BLOCK_SQL = `INSERT INTO ${BLOCKS_TABLE} (height, hash, parent_hash, spec_version, ledger_version, block_time)
   VALUES ($1, $2, $3, $4, $5, timestamptz 'epoch' + ($6::bigint::text || ' milliseconds')::interval)`;
 const HASH_SQL = `INSERT INTO ${HASHES_TABLE} (hash, height) VALUES ($1, $2)`;

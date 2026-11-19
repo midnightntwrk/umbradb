@@ -3,6 +3,7 @@ import { type CoreBlockCommitOptions, coreBlockCommit } from "../../src/backbone
 import { CORE_LEDGER_STATE_ID, type CoreLedgerStateOptions } from "../../src/backbone/core-ledger-state/core-ledger-state.js";
 import type { Database, Transaction } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
+import { type Statement, statementText } from "../../src/db/repeated-statements.js";
 import type { LedgerHost } from "../../src/ledger/worker/host.js";
 import type { BlockContext, BlockRun, ModuleDeclaration } from "../../src/modules/declaration.js";
 import { FinalizedLoop, type HeightRun, type LoopInput } from "../../src/runner/loop.js";
@@ -41,25 +42,25 @@ export interface SentCall {
 /** The points whose callbacks are given a handle, the third argument: a read or the block write handle. */
 const HANDLE_POINTS: ReadonlySet<string> = new Set(["on-compute", "on-db-write", "on-settle"]);
 
-type Statement = (sql: string, ...rest: unknown[]) => Promise<unknown>;
+type Send = (sql: Statement, ...rest: unknown[]) => Promise<unknown>;
 
-/** `handle`, each statement sent through it recorded in `texts` before it is sent. */
+/** `handle`, the text of each statement sent through it recorded in `texts` before it is sent, the statement passed on as it came. */
 function recordingHandle(handle: Record<string, unknown>, texts: string[]): unknown {
-  const query = handle.query as Statement;
-  const execute = handle.execute as Statement | undefined;
+  const query = handle.query as Send;
+  const execute = handle.execute as Send | undefined;
   return Object.freeze({
     get height(): unknown {
       return handle.height;
     },
-    query: (sql: string, ...rest: unknown[]) => {
-      texts.push(sql);
+    query: (sql: Statement, ...rest: unknown[]) => {
+      texts.push(statementText(sql));
       return query.call(handle, sql, ...rest);
     },
     ...(execute === undefined
       ? {}
       : {
-          execute: (sql: string, ...rest: unknown[]) => {
-            texts.push(sql);
+          execute: (sql: Statement, ...rest: unknown[]) => {
+            texts.push(statementText(sql));
             return execute.call(handle, sql, ...rest);
           },
         }),
