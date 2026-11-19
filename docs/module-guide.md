@@ -323,8 +323,10 @@ Next: types §4, chain data §6 and §9, routes §7, settings §8, ready-made ta
   before as committed rows (it reads a large part of the state it left, which may take minutes) awaits
   `block.blockBeforeCommitted()` before its first statement through its read. It resolves once the block before is
   committed: at once when it is already; otherwise UmbraDB commits it first, and your read, opened at your first
-  statement, sees it committed. Called anywhere else, or after a statement through your read, it throws (a
-  programming error). UmbraDB's `core-ledger-state` calls it before a ledger conversion.
+  statement, sees it committed. Calling it again in the same callback gives the same promise, which never resolves
+  before the commit. Called anywhere else, after a statement through your read, or after your callback returned (a
+  function you kept), it throws (a programming error). UmbraDB's `core-ledger-state` calls it before a ledger
+  conversion.
 - **`on-settle`.** `"on-settle"(processContext, run, writer)` gets `run`, `{ first, last }`: heights, `bigint`s as
   `block.height` is, both included, `first <= last`. UmbraDB calls it inside the transaction that holds the run's last
   block, after every module's `on-db-write` of that block and before the `COMMIT`, in `on-db-write`'s order. `writer`
@@ -656,8 +658,20 @@ const then = await metadata.read(read, "token-1", block.height - 10n);  // as of
 
 - **Several heights in one transaction.** UmbraDB may write several consecutive heights in one database transaction.
   Your callbacks are called for every block as described above; what differs:
-  - `now()`, the transaction id, `SET LOCAL`, temporary tables, transaction advisory locks, deferred constraints and
-    `NOTIFY` belong to the transaction, not to the block: do not rely on them per block.
+  - Deferred constraints and deferred constraint triggers are yours per block: UmbraDB checks and fires them at the
+    end of every block, so a block that leaves one violated fails there with the error its `COMMIT` would give, and
+    each block starts with every `INITIALLY DEFERRED` constraint deferred, whatever your callback set with
+    `SET CONSTRAINTS`.
+  - A constraint you declare `DEFERRABLE INITIALLY IMMEDIATE`, a temporary table or sequence you keep in the writer's
+    session, and a cursor you leave open make UmbraDB commit every block on its own: nothing changes for your
+    callbacks, and heights are stored more slowly. Close a cursor in the callback that declared it. A deferrable
+    constraint you create in a callback may be deferred until that block's end whatever its declaration: create
+    constraints in a migration.
+  - `now()`, the transaction id, a setting made for the transaction (`SET LOCAL`, `set_config(…, true)`,
+    `SET TRANSACTION`), transaction advisory locks and `NOTIFY` belong to the transaction, not to the block: a
+    setting one block made is still there for the next, other sessions wait for a lock until the transaction commits,
+    and notifications arrive then, equal ones once. Set what a callback reads in that callback, and do not store
+    `now()` or a sequence's value as if it were the block's.
   - A retained ledger state (§9) loads where the retention window at your read's height holds it: at
     `on-after-db-write`, that height may be above the block's, and a state below its window fails with
     `state-not-retained`.
