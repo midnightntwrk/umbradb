@@ -76,7 +76,7 @@ describe.each(PROCESS_BACKENDS)("the withdrawal, usability and truncation scenar
 
         // S5, S12: unusable values served unusable, no common value, no earlier value.
         const [y] = (await at(one(Y, 1))).items;
-        expect(y.common).toEqual({ name: null, symbol: "G", decimals: null, standards: null });
+        expect(y.common).toEqual({ name: null, symbol: "G", decimals: null, standards: null, image: null, imageSha256: null });
         const byKey = Object.fromEntries(y.fields.map((f: { key: { utf8: string } }) => [f.key.utf8, f]));
         for (const key of ["name", "decimals", "standards", "image_sha256"]) expect([key, byKey[key].usable]).toEqual([key, false]);
         expect(byKey.name.value).toEqual({ hex: "0x", text: "" });
@@ -120,7 +120,7 @@ describe.each(PROCESS_BACKENDS)("the withdrawal, usability and truncation scenar
         // S3, after the revival: only `name`; kind 3 unchanged throughout.
         const [x1] = (await at(one(X, 1))).items;
         expect(x1.fields.map((f: { key: { utf8: string } }) => f.key.utf8)).toEqual(["name"]);
-        expect(x1.common).toEqual({ name: "New", symbol: null, decimals: null, standards: null });
+        expect(x1.common).toEqual({ name: "New", symbol: null, decimals: null, standards: null, image: null, imageSha256: null });
         expect((await at(one(X, 3))).items).toEqual(kind3);
       });
     } finally {

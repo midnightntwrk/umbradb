@@ -8,7 +8,7 @@ import { blockLogs, contract, domain, eventData, post, serve, TOKENS_PATH } from
  * No network request. While the module runs and serves, every outbound connection of this process —
  * `net` sockets (`net.Socket.prototype.connect`, which TLS and HTTP use too) and `fetch` — is refused unless it goes to
  * the loopback interface, where the tests' node, database and listener are. An identity with an `image` URI (and an
- * `image_sha256`) is described, listed and served (`image` pending, no `imageUrl`) with nothing refused. **Negative
+ * `image_sha256`) is described, listed and served (its URI and hash in `common`, as published) with nothing refused. **Negative
  * control:** a `fetch` of the image's URI under the same guard is refused and recorded.
  */
 
@@ -89,8 +89,9 @@ describe.each(PROCESS_BACKENDS)("no network request, on $name", (backend: Proces
         identity: (await post(origin, TOKENS_PATH, { contract: `0x${Buffer.from(A).toString("hex")}`, domainSep: `0x${Buffer.from(D).toString("hex")}`, kind: 1 })).json.items[0],
         list: (await post(origin, TOKENS_PATH, { contract: `0x${Buffer.from(A).toString("hex")}` })).json,
       }));
-      expect(answers.identity.image).toEqual({ url: IMAGE, status: "pending", imageUrl: null });
-      expect(answers.list.items.at(-1).image).toEqual({ url: IMAGE, status: "pending", imageUrl: null });
+      const published = { image: IMAGE, imageSha256: `0x${"07".repeat(32)}` };
+      expect(answers.identity.common).toMatchObject(published);
+      expect(answers.list.items.at(-1).common).toMatchObject(published);
       expect(guard.refused).toEqual([]);
       expect(guard.allowed.filter((a) => a.startsWith("fetch ")).length).toBeGreaterThanOrEqual(2);
       expect(guard.allowed.filter((a) => a.startsWith("socket ")).length).toBeGreaterThanOrEqual(2);

@@ -109,7 +109,7 @@ describe.each(PROCESS_BACKENDS)("bounded cost on $name", (backend: ProcessBacken
     const [token] = got.json.items;
     expect([token.fields.length, token.fieldCount, token.fieldsTruncated]).toEqual([MAX_TOKEN_FIELDS, N + 3, true]);
     expect(token.fields.every((f: Json, i: number) => i === 0 || f.key.hex > token.fields[i - 1].key.hex)).toBe(true);
-    expect(token.common).toEqual({ name: "Big", symbol: "SPAM", decimals: "6", standards: null });
+    expect(token.common).toEqual({ name: "Big", symbol: "SPAM", decimals: "6", standards: null, image: null, imageSha256: null });
     expect([token.group.memberCount, token.group.members.length]).toEqual([MEMBERS, 100]);
     expect(got.size).toBeLessThan(96_000);
     expect(got.rows).toBeLessThan(MAX_ROWS);

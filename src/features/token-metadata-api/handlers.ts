@@ -1,7 +1,7 @@
 /**
  * The route `getTokens` (`POST /token-metadata-api/v1/tokens`): the tokens an input selects (`./schemas.ts`,
- * {@link TokensRequest}), each with every defined field up to {@link MAX_TOKEN_FIELDS}, its common fields, symbol
- * group and image. Bytes leave as `0x` lowercase hex ({@link hex0x}) and wide integers as `bigint`s, which the
+ * {@link TokensRequest}), each with every defined field up to {@link MAX_TOKEN_FIELDS}, its common fields and its
+ * symbol group. Bytes leave as `0x` lowercase hex ({@link hex0x}) and wide integers as `bigint`s, which the
  * output schema writes as digits in a string.
  *
  * A token is a described identity: one with at least one defined field (MIP "Applying records"); a withdrawn one is
@@ -11,7 +11,7 @@
  */
 
 import type { ReadHandle } from "../../db/api.js";
-import { COMMON_KEY_HEX, type Field as StateField, fieldUsable, IMAGE_KEY_HEX, parseStandards } from "../token-metadata/rules.js";
+import { COMMON_KEY_HEX, type Field as StateField, IMAGE_KEY_HEX, parseStandards } from "../token-metadata/rules.js";
 import { decodeUtf8, toHex } from "../token-metadata/codec/index.js";
 import { hasColor } from "../token-metadata/color.js";
 import { commonFields, tokenMapKey, symbolGroup, type TokenKey, tokenFields, tokensOfColors, tokensOfContract, tokensOfDomain } from "./sql.js";
@@ -23,7 +23,6 @@ import {
   DEFAULT_LIMIT,
   type Field,
   type Group,
-  type Image,
   type Kind,
   type KindName,
   MAX_GROUP_MEMBERS,
@@ -62,29 +61,27 @@ export function fieldJson(f: StateField): Field {
 
 /** The usable common fields only (MIP "Common fields": no fallback, no default). */
 export function commonJson(fields: ReadonlyMap<string, StateField>): Common {
-  const usable = (key: keyof typeof COMMON_KEY_HEX): StateField | undefined => {
-    const f = fields.get(COMMON_KEY_HEX[key]);
+  const KEYS = { ...COMMON_KEY_HEX, ...IMAGE_KEY_HEX };
+  const usable = (key: keyof typeof KEYS): StateField | undefined => {
+    const f = fields.get(KEYS[key]);
     return f !== undefined && f.usable === true ? f : undefined;
   };
-  const text = (key: "name" | "symbol"): string | null => {
+  const text = (key: "name" | "symbol" | "image"): string | null => {
     const f = usable(key);
     return f === undefined ? null : utf8OrNull(f.value);
   };
   const decimals = usable("decimals");
   const standards = usable("standards");
+  const imageSha256 = usable("imageSha256");
   return {
     name: text("name"),
     symbol: text("symbol"),
     decimals: decimals?.integer ?? null,
     standards: standards === undefined ? null : (parseStandards(standards.value) ?? null),
+    // What the contract published, served as it is: nothing is fetched, and the hash is the client's to check.
+    image: text("image"),
+    imageSha256: imageSha256 === undefined ? null : hex0x(imageSha256.value),
   };
-}
-
-/** The token's `image` from a usable `image` field (no fetcher yet, so always `pending`); else `null`. */
-function imageJson(fields: ReadonlyMap<string, StateField>): Image | null {
-  const image = fields.get(IMAGE_KEY_HEX.image);
-  if (image === undefined || fieldUsable(IMAGE_KEY_HEX.image, image.valType, image.value) !== true) return null;
-  return { url: String.fromCharCode(...image.value), status: "pending", imageUrl: null };
 }
 
 /** The full answer object of each token in `keys`, in that order. */
@@ -122,7 +119,6 @@ async function tokensOf(read: ReadHandle, keys: readonly TokenKey[]): Promise<To
       fieldCount: own.count,
       fieldsTruncated: own.count > own.fields.length,
       group,
-      image: imageJson(common),
     });
   }
   return out;

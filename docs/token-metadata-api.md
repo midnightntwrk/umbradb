@@ -45,21 +45,22 @@ withdrawn) is in no answer: an empty `items` is a valid answer.
 {
   "contractAddress": "0xa1a1…", "domainSep": "0x0101…", "kind": 1, "kindName": "shielded-utxo",
   "color": "0xbf1b…",
-  "common": { "name": "Acme Gold", "symbol": "AGLD", "decimals": "6", "standards": null },
-  "fields": [ Field, … ], "fieldCount": 4, "fieldsTruncated": false,
-  "group": { "symbol": { "hex": "0x41474c44", "utf8": "AGLD" }, "memberCount": 2, "members": [ { "domainSep": "0x0101…", "kind": 1 }, … ] },
-  "image": { "url": "https://example.com/agld.png", "status": "pending", "imageUrl": null }
+  "common": { "name": "Acme Gold", "symbol": "AGLD", "decimals": "6", "standards": null,
+              "image": "https://example.com/agld.png", "imageSha256": "0xab12…" },
+  "fields": [ Field, … ], "fieldCount": 5, "fieldsTruncated": false,
+  "group": { "symbol": { "hex": "0x41474c44", "utf8": "AGLD" }, "memberCount": 2, "members": [ { "domainSep": "0x0101…", "kind": 1 }, … ] }
 }
 ```
 
 - `kindName`: `shielded-utxo` (1), `unshielded-utxo` (2), `contract-token` (3).
 - `color`: `tokenType(domainSep, contractAddress)` for kinds 1 and 2; `null` for kind 3.
-- `common`: the usable common fields; one never set or unusable is `null`, with no default.
+- `common`: MIP-0018's six common fields, usable values only; one never set or unusable is `null`, with no default.
+  `image` is the URI the contract published and `imageSha256` the hash it published for the file there. The module
+  fetches nothing and checks nothing: a client that shows the image fetches it and compares its SHA-256 itself.
 - `fields`: every defined field, in key byte order, up to 256; `fieldCount` counts them all, and `fieldsTruncated`
   is true when there are more than 256.
 - `group`: the tokens of the same contract whose served `symbol` is the same, when there are two or more (up to 100
   members listed, `memberCount` counts them all); else `null`.
-- `image`: from a usable `image` field, always `pending` (nothing is fetched); else `null`.
 
 **Field**
 
@@ -109,6 +110,5 @@ Every answer carries `Content-Type: application/json; charset=utf-8`, `Cache-Con
 |---|---|---|---|
 | A color of a minted but undescribed token | not in `colors` answers | answered through the color table filled from native mints | the color table |
 | Mints and activity (`minted`, first seen, evidence) | not served | served | the activity change |
-| `image` | `pending`, nothing fetched | a fetcher's result | the image change |
 
 MIP-0018 is pinned at commit `eb94bc182221cd937a84ed66a5f903b060f165ab`.

@@ -15,7 +15,7 @@ import { blockLogs, contract, domain, eventData, get, type Got, miscData, post, 
  *
  * - **The four selectors:** colors (both kinds of a color, several colors at once), a contract (paged, its cursor bound
  *   to it), a contract and domain separator (its kinds), and all three with the kind.
- * - **A token:** every defined field in key order, the common fields, its group by symbol, its image pending.
+ * - **A token:** every defined field in key order, the six common fields (its image URI among them), its group by symbol.
  * - **No verdict:** an answer gives a token's fields and nothing about them; a rejected event of its contract changes
  *   nothing in it.
  * - **Input:** a body that matches no selector is 400 `invalid-request`, naming the rule and never the input; a forged or
@@ -86,7 +86,7 @@ describe.each(PROCESS_BACKENDS)("token-metadata-api on $name", (backend: Process
     await backend.stop();
   }, 60_000);
 
-  it("a token: every defined field in key order, its common fields, group by symbol and image", async () => {
+  it("a token: every defined field in key order, its common fields with its image, and its group by symbol", async () => {
     const got = await tokens({ contract: hex(A), domainSep: hex(D7), kind: 1 });
     expect(got.status).toBe(200);
     expect(got.json.nextCursor).toBeNull();
@@ -97,12 +97,12 @@ describe.each(PROCESS_BACKENDS)("token-metadata-api on $name", (backend: Process
       kind: 1,
       kindName: "shielded-utxo",
       color: colorOf(A, D7),
-      common: { name: "Acme Gold", symbol: "AG", decimals: "6", standards: null },
+      common: { name: "Acme Gold", symbol: "AG", decimals: "6", standards: null, image: IMAGE, imageSha256: null },
       fieldCount: 4,
       fieldsTruncated: false,
       group: { symbol: { hex: hex(new TextEncoder().encode("AG")), utf8: "AG" }, memberCount: 2, members: [{ domainSep: hex(D7), kind: 1 }, { domainSep: hex(D8), kind: 1 }] },
-      image: { url: IMAGE, status: "pending", imageUrl: null },
     });
+    expect("image" in token).toBe(false);
     expect(token.fields.map((f: { key: { utf8: string } }) => f.key.utf8)).toEqual(["decimals", "image", "name", "symbol"]);
     expect(token.fields[0]).toMatchObject({ valType: 2, valTypeName: "uint", value: { hex: "0x06", integer: "6" }, usable: true, updatedAt: { height: String(S + 1), txIndex: 0, eventIndex: 0 } });
   }, 60_000);
@@ -144,11 +144,11 @@ describe.each(PROCESS_BACKENDS)("token-metadata-api on $name", (backend: Process
 
   it("an answer carries no verdict: a missing field is null, and a rejected event of the contract changes nothing", async () => {
     const [partial] = (await tokens({ contract: hex(B), domainSep: hex(D7), kind: 1 })).json.items;
-    expect(partial.common).toEqual({ name: "Only a name", symbol: null, decimals: null, standards: null });
+    expect(partial.common).toEqual({ name: "Only a name", symbol: null, decimals: null, standards: null, image: null, imageSha256: null });
     expect("mark" in partial).toBe(false);
     // Contract C emitted a malformed event beside this token's: the token is served as its own fields say.
     const [beside] = (await tokens({ contract: hex(C), domainSep: hex(D7), kind: 1 })).json.items;
-    expect(beside.common).toEqual({ name: "Cee", symbol: "C", decimals: "0", standards: null });
+    expect(beside.common).toEqual({ name: "Cee", symbol: "C", decimals: "0", standards: null, image: null, imageSha256: null });
     expect("mark" in beside).toBe(false);
   }, 60_000);
 

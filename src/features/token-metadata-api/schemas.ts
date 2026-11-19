@@ -78,11 +78,18 @@ export const Field = z.strictObject({
 });
 export type Field = z.output<typeof Field>;
 
+/**
+ * The six common fields of MIP-0018, each `null` when it has no usable value. `image` is the URI the contract published
+ * and `imageSha256` the hash it published for the file there: nothing is fetched or checked here, so a client that
+ * shows the image fetches it and compares its SHA-256 itself.
+ */
 export const Common = z.strictObject({
   name: z.string().nullable(),
   symbol: z.string().nullable(),
   decimals: uintValue().nullable(),
   standards: z.array(z.string()).nullable(),
+  image: z.string().nullable(),
+  imageSha256: hash32().nullable(),
 });
 export type Common = z.output<typeof Common>;
 
@@ -93,13 +100,10 @@ export const Group = z.strictObject({
 });
 export type Group = z.output<typeof Group>;
 
-export const Image = z.strictObject({ url: z.string(), status: z.literal("pending"), imageUrl: z.null() });
-export type Image = z.output<typeof Image>;
-
 export const KindName = z.enum(["shielded-utxo", "unshielded-utxo", "contract-token"]);
 export type KindName = z.output<typeof KindName>;
 
-/** A token with every defined field (up to {@link MAX_TOKEN_FIELDS}), its common fields, group and image. */
+/** A token with every defined field (up to {@link MAX_TOKEN_FIELDS}), its common fields and its group. */
 export const TokenJson = z.strictObject({
   contractAddress: hash32(),
   domainSep: hash32(),
@@ -111,7 +115,6 @@ export const TokenJson = z.strictObject({
   fieldCount: z.int().min(1),
   fieldsTruncated: z.boolean(),
   group: Group.nullable(),
-  image: Image.nullable(),
 });
 export type TokenJson = z.output<typeof TokenJson>;
 

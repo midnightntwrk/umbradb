@@ -63,19 +63,18 @@ describe.each(PROCESS_BACKENDS)("the API's edges on $name", (backend: ProcessBac
 
   it("an unresolved event of a contract changes nothing in its tokens' answers", async () => {
     const [token] = (await tokens({ contract: hex(A), domainSep: hex(domain(3)), kind: 1 })).json.items;
-    expect(token.common).toEqual({ name: "Three", symbol: "ZZ", decimals: "0", standards: null });
+    expect(token.common).toEqual({ name: "Three", symbol: "ZZ", decimals: "0", standards: null, image: null, imageSha256: null });
     expect("mark" in token).toBe(false);
   }, 60_000);
 
   it("a type-4 value that is not UTF-8 is served as hex only, with no text view", async () => {
     // The codec rejects a type-4 value that is not an RFC 3986 URI, so no chain stores this row; written here, it shows
-    // the field's text view following the bytes. Its `image` follows the type (an accepted type-4 value is a URI), its
-    // URL as the bytes' Latin-1 text.
+    // the field's text view following the bytes. The row is not usable, so `common.image` is null.
     const [token] = (await tokens({ contract: hex(A), domainSep: hex(domain(1)), kind: 1 })).json.items;
     const image = token.fields.find((f: Json) => f.key.utf8 === "image");
     expect(image).toMatchObject({ valType: 4, valTypeName: "uri", value: { hex: "0xff00ff" }, usable: false });
     expect(image.value.text).toBeUndefined();
-    expect(token.image).toEqual({ url: "ÿ\u0000ÿ", status: "pending", imageUrl: null });
+    expect(token.common.image).toBeNull();
   }, 60_000);
 
   it("each token of a contract carries its own group, by symbol bytes", async () => {
