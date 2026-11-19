@@ -8,6 +8,7 @@ import type {
   Transaction,
 } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
+import type { RepeatedStatement } from "../../src/db/repeated-statements.js";
 import type { ConsistentRead } from "../../src/determinism/module-tables.js";
 import { askedLater, BACKENDS, settlesWithin, TEST_CURSOR, TEST_SCHEMA } from "./backends.js";
 
@@ -38,18 +39,21 @@ const commitHeight = (db: Database, height: bigint) =>
   });
 
 describe("the handles' types", () => {
-  it("are the database API's interfaces, and the determinism code's ConsistentRead is exactly their query", () => {
+  it("are the database API's interfaces, and each serves as the determinism code's ConsistentRead", () => {
     expectTypeOf<ReadHandle["height"]>().toEqualTypeOf<bigint | null>();
+    // A statement's text, or one of the engine's marked statements (`src/db/repeated-statements.ts`).
     expectTypeOf<ReadHandle["query"]>().toEqualTypeOf<
-      (sql: string, params?: unknown[]) => Promise<Record<string, unknown>[]>
+      (sql: string | RepeatedStatement, params?: unknown[]) => Promise<Record<string, unknown>[]>
     >();
+    expectTypeOf<Transaction["query"]>().toEqualTypeOf<ReadHandle["query"]>();
+    expectTypeOf<Transaction["execute"]>().toEqualTypeOf<(sql: string, params?: unknown[]) => Promise<number>>();
     expectTypeOf<BlockWriteHandle>().toExtend<ReadHandle>();
     expectTypeOf<BlockWriteHandle["execute"]>().toEqualTypeOf<(sql: string, params?: unknown[]) => Promise<number>>();
     expectTypeOf<SchemaWriteHandle>().toEqualTypeOf<BlockWriteHandle>();
     expectTypeOf<ReadHandle>().toExtend<ConsistentRead>();
     expectTypeOf<BlockWriteHandle>().toExtend<ConsistentRead>();
     expectTypeOf<Transaction>().toExtend<ConsistentRead>();
-    expectTypeOf<CommittedHeight>().parameter(0).toEqualTypeOf<ConsistentRead>();
+    expectTypeOf<CommittedHeight>().parameter(0).toEqualTypeOf<Pick<ReadHandle, "query">>();
   });
 });
 

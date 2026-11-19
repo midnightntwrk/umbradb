@@ -49,6 +49,7 @@
 
 import type { BlockWriteHandle, Database, SchemaWriteHandle, Transaction } from "./api.js";
 import { controlRefused, type UmbraError, writeHandleClosed } from "./errors.js";
+import { type Statement, statementText } from "./repeated-statements.js";
 import { OWN_PARTS, type SchemaPlan, setModuleRole } from "./roles.js";
 import { controlStatement } from "./statement-refusal.js";
 
@@ -128,9 +129,9 @@ async function runHandle<T>(
     options.onClosedUse?.(error);
     return error;
   };
-  const usable = (sql: string): void => {
+  const usable = (sql: Statement): void => {
     if (!open) throw refuse();
-    const command = controlStatement(sql);
+    const command = controlStatement(statementText(sql));
     if (command !== null) throw controlRefused(command);
   };
   const handle: BlockWriteHandle = {

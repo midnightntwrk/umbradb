@@ -2,6 +2,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { afterEach, describe, expect, it } from "vitest";
 import { isBlockEventSource } from "../../src/backbone/core-block-fetch/events.js";
 import { NodeBlockSource } from "../../src/backbone/core-block-fetch/node-source.js";
+import { type Statement, statementText } from "../../src/db/repeated-statements.js";
 import { type ConnectSocket, connectWebSocket, type NodeCallOptions, NodeClient } from "../../src/node/index.js";
 import { BlockItems } from "../../src/runner/block-context.js";
 import type { BlockRef, QueueRunner } from "../../src/runner/block-source.js";
@@ -69,8 +70,8 @@ async function until(check: () => boolean, what: string): Promise<void> {
 const chain = chainOf(101n);
 const at = (h: number): ChainBlock => chain[h] as ChainBlock;
 const cursorAt = (block: ChainBlock) => ({
-  query: async (sql: string) =>
-    sql.includes("to_regclass") ? [{ present: true }] : [{ height: block.height, hash: block.hash, parent_hash: block.parentHash }],
+  query: async (sql: Statement) =>
+    statementText(sql).includes("to_regclass") ? [{ present: true }] : [{ height: block.height, hash: block.hash, parent_hash: block.parentHash }],
 });
 const fetched = (block: ChainBlock): TapeRecord => ({ method: "chain_getBlock", params: [block.hex], result: block.block });
 

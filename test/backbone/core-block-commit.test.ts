@@ -27,6 +27,7 @@ import { UMBRADB_VERSION } from "../../src/config/build.js";
 import type { BlockWriteHandle, Database } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { startDatabase } from "../../src/db/migrate.js";
+import { type Statement, statementText } from "../../src/db/repeated-statements.js";
 import type { SchemaPlan } from "../../src/db/roles.js";
 import { openBlockWrites } from "../../src/db/write-handles.js";
 import { migrationPart, schemaPlan } from "../../src/modules/adapters.js";
@@ -223,7 +224,7 @@ describe("the block items core-block-commit reads (the block-header and ledger-v
       w: {
         height: null,
         query: async (sql) => {
-          sent.push(sql);
+          sent.push(statementText(sql));
           return [];
         },
         execute: async (sql) => {
@@ -695,7 +696,7 @@ function keptWrites(p: ProcessContext, options: Parameters<typeof coreBlockCommi
       get height() {
         return w.height;
       },
-      query: async (sql: string, params?: unknown[]) => {
+      query: async (sql: Statement, params?: unknown[]) => {
         if (sql === "SELECT hash FROM core_block_commit.blocks WHERE height = $1") reads.push(`${b.height} read ${String(params?.[0])}`);
         return w.query(sql, params);
       },
@@ -740,8 +741,8 @@ describe("the committed height of one opened database (00033 F3c)", () => {
     return {
       checks: () => checks,
       read: {
-        query: async (sql: string) => {
-          if (sql.includes("to_regclass")) {
+        query: async (sql: Statement) => {
+          if (statementText(sql).includes("to_regclass")) {
             checks += 1;
             return [{ present: present() }];
           }

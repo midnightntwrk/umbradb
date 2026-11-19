@@ -79,6 +79,7 @@ import { acquirePgliteLock } from "./pglite-lock.js";
 import { readTimeoutMs } from "./read-options.js";
 import { allowReadView } from "./read-view.js";
 import { controlStatement } from "./statement-refusal.js";
+import { type Statement, statementText } from "./repeated-statements.js";
 import { allowWriterStart } from "./writer-lock.js";
 
 /**
@@ -403,11 +404,13 @@ class PgliteDatabase implements Database {
     try {
       // One call to the engine for the three: they are sent in this order either way.
       await this.script("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; RESET ALL; RESET ROLE");
-      const query = async (sql: string, params?: unknown[]): Promise<Row[]> => {
+      // PGlite prepares nothing: one of the engine's marked statements (`./repeated-statements.ts`) runs as its text.
+      const query = async (sql: Statement, params?: unknown[]): Promise<Row[]> => {
         if (!open) throw handleClosed("read");
-        const command = controlStatement(sql);
+        const text = statementText(sql);
+        const command = controlStatement(text);
         if (command !== null) throw controlRefused(command);
-        return (await this.statement(sql, params)).rows;
+        return (await this.statement(text, params)).rows;
       };
       const height = await this.committedHeight({ query });
       return await body({ height, query });
@@ -486,7 +489,7 @@ class PgliteDatabase implements Database {
           return this.statement(sql, params);
         };
         const tx: Transaction = {
-          query: async (sql, params) => (await statement(sql, params)).rows,
+          query: async (sql, params) => (await statement(statementText(sql), params)).rows,
           execute: async (sql, params) => (await statement(sql, params)).count,
         };
         allowMultiStatement(tx, async (sql) => {

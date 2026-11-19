@@ -18,6 +18,7 @@ import {
 } from "../../src/backbone/core-ledger-state/sql.js";
 import type { BlockWriteHandle, Database, ReadHandle } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
+import { statementText } from "../../src/db/repeated-statements.js";
 import type { NodeBatch, StoredNode } from "../../src/ledger/types.js";
 import { BACKENDS } from "../db/backends.js";
 import { encodeChildren, hex } from "../ledger/node-format.js";
@@ -159,7 +160,7 @@ function counting(read: Pick<ReadHandle, "query">): {
   readonly asked: string[];
 } {
   const asked: string[] = [];
-  return { asked, read: { query: (sql, params) => (asked.push(sql), read.query(sql, params)) } };
+  return { asked, read: { query: (sql, params) => (asked.push(statementText(sql)), read.query(sql, params)) } };
 }
 
 /** The statements of {@link writeRefcount}, told apart by what they do, with the rows each reported, chunks summed. */
