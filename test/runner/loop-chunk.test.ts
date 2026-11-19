@@ -56,7 +56,8 @@ describe.each(RUNNER_BACKENDS)("chunks in the finalized loop on $name", (backend
       const chunks = chunksOf(blocks, HEAD);
       expect(off.order).toEqual(orderOf(chunksOf(1, HEAD), HEAD));
       expect(on.order).toEqual(orderOf(chunks, HEAD));
-      expect(on.order.filter((mark) => mark === "BEGIN")).toHaveLength(chunks.length);
+      // One transaction for each chunk, and the one of the read before the first.
+      expect(on.order.filter((mark) => mark === "BEGIN")).toHaveLength(chunks.length + 1);
       // Every point and height once, with the same handles, rows seen and continues, but for on-after-db-write.
       const offPoints = byPoint(unchanged(off.seen));
       const onPoints = byPoint(unchanged(on.seen));
@@ -214,8 +215,9 @@ describe.each(RUNNER_BACKENDS)("chunks in the finalized loop on $name", (backend
       points: {
         async "on-parse"(context: ProcessContext, b: BlockContext) {
           const db = context.items.get("db") as ReadOnlyDatabase;
-          // Above the first chunk: read once its transaction is open.
-          if (b.height > 7n && b.height <= 10n) while (!order.includes("BEGIN")) await new Promise((resolve) => setTimeout(resolve, 5));
+          // Above the first chunk: read once its transaction is open (the second BEGIN: the first is the read's that
+          // says a chunk may form).
+          if (b.height > 7n && b.height <= 10n) while (order.filter((mark) => mark === "BEGIN").length < 2) await new Promise((resolve) => setTimeout(resolve, 5));
           const height = await db.read(async (read) => read.height);
           parsed.push(`parse@${b.height} read ${height} after ${order.filter((mark) => mark === "COMMIT").length} commits`);
         },
@@ -229,15 +231,17 @@ describe.each(RUNNER_BACKENDS)("chunks in the finalized loop on $name", (backend
       order,
       source: (memory) => preparingSource(askedSource(HEAD, memory), 4).source,
     });
-    // The first chunk's blocks were all taken before its BEGIN, their reads answered then.
-    const begin = run.order.indexOf("BEGIN");
+    // The first chunk's blocks were all taken before its BEGIN, their reads answered then: nothing was stored yet, and
+    // at most the transaction of the read before the chunk had committed.
+    const begin = run.order.indexOf("BEGIN", run.order.indexOf("BEGIN") + 1);
+    expect(begin).toBeGreaterThan(0);
     for (let h = 1n; h <= 7n; h++) expect(run.order.indexOf(`on-parse@${h}`), `on-parse@${h}`).toBeLessThan(begin);
-    for (let h = 1n; h <= 7n; h++) expect(parsed.find((line) => line.startsWith(`parse@${h} `))).toMatch(/ after 0 commits$/);
+    for (let h = 1n; h <= 7n; h++) expect(parsed.find((line) => line.startsWith(`parse@${h} `))).toMatch(/ read null after [01] commits$/);
     for (let h = 8n; h <= 10n; h++) {
       const line = parsed.find((entry) => entry.startsWith(`parse@${h} `));
       // On PGlite the read waits for the open chunk's COMMIT; on PostgreSQL it reads what is committed, at once.
-      if (pglite) expect(line, `parse@${h}`).toBe(`parse@${h} read 7 after 1 commits`);
-      else expect(line, `parse@${h}`).toMatch(/^parse@\d+ read (null|7) after [01] commits$/);
+      if (pglite) expect(line, `parse@${h}`).toBe(`parse@${h} read 7 after 2 commits`);
+      else expect(line, `parse@${h}`).toMatch(/^parse@\d+ read (null|7) after [12] commits$/);
     }
     expect(await cursorOf(run.db)).toBe(HEAD);
   }, 120_000);

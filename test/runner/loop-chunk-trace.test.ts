@@ -3,7 +3,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { BlockWriteHandle, ReadHandle } from "../../src/db/api.js";
 import type { BlockContext, ModuleDeclaration } from "../../src/modules/declaration.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
-import { CONSTRAINTS, STATE } from "../../src/db/block-end.js";
+import { STATE } from "../../src/db/block-end.js";
 import { STATEMENT_KEY_LENGTH, startTrace, stopTrace, traceAdd, traceChain, traceMark, type TraceSink } from "../../src/trace/trace.js";
 import { declaration } from "../modules/declarations.js";
 import { chunksOf, runChunks } from "./loop-chunk-harness.js";
@@ -122,7 +122,7 @@ describe.each(RUNNER_BACKENDS)("the trace of chunks through the loop on $name", 
     expect(on.lines.slice(5).map((line) => line.chunk)).toEqual([undefined, undefined]);
   }, 120_000);
 
-  it.runIf(postgres)("the statements of a block's end are counted: one read after each block of a chunk but its last, the constraints' text once per chunk, none with the mode off or for a height alone", async () => {
+  it.runIf(postgres)("the read at a block's end is counted: once before the run's first chunk, then after each block of a chunk; none with the mode off or at a height where no chunk would form", async () => {
     /** How often each statement text was sent in a traced run over heights 1 to 20, by its text as the trace keeps it. */
     const sent = async (blocks: number | undefined): Promise<Map<string, number>> => {
       let totals = "[]";
@@ -137,14 +137,12 @@ describe.each(RUNNER_BACKENDS)("the trace of chunks through the loop on $name", 
     const key = (text: string): string => text.replace(/\s+/g, " ").slice(0, STATEMENT_KEY_LENGTH);
     const off = await sent(undefined);
     const on = await sent(7);
-    // Chunks 1..7 and 8..14, then 15 to 20 each alone: six ends in each chunk, none anywhere else. No constraint of this
-    // database is deferrable, so the constraints' text goes with the first end of each chunk only.
-    expect(on.get(key(STATE))).toBe(12);
-    expect(on.get(key(CONSTRAINTS))).toBe(2);
-    expect(off.has(key(CONSTRAINTS))).toBe(false);
+    // Chunks 1..7 and 8..14, then 15 to 20 each alone, too close to the head for a chunk: the read once in a transaction
+    // of its own before the first chunk, then at each of the 14 blocks' ends, and nowhere else.
+    expect(on.get(key(STATE))).toBe(15);
     expect(off.has(key(STATE))).toBe(false);
-    // One transaction for each chunk and each height alone.
-    expect(on.get("COMMIT")).toBe((off.get("COMMIT") as number) - 12);
+    // One transaction for each chunk and each height alone, and the one of the first read.
+    expect(on.get("COMMIT")).toBe((off.get("COMMIT") as number) - 12 + 1);
   }, 120_000);
 
   it("a slow window of a block of a chunk is told ended at the COMMIT", async () => {

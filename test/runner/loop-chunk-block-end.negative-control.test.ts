@@ -1,33 +1,24 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { BlockWriteHandle, Transaction } from "../../src/db/api.js";
-import { endBlock } from "../../src/db/block-end.js";
+import type { BlockWriteHandle } from "../../src/db/api.js";
 import type { BlockContext, ModuleDeclaration } from "../../src/modules/declaration.js";
-import { FinalizedLoop, type HeightRun } from "../../src/runner/loop.js";
+import { FinalizedLoop } from "../../src/runner/loop.js";
 import { declaration } from "../modules/declarations.js";
 import { runCase, where } from "./loop-chunk-runs.js";
 import { RUNNER_BACKENDS } from "./loop-harness.js";
 
 /**
  * The negative controls of `loop-chunk-block-end.test.ts`, on PostgreSQL 18 and PGlite 0.5.10, heights 1 to 10 in
- * chunks of 5, each turning one part of a block's end off through the loop's protected seam:
- * - no end sent between the blocks of a chunk: a deferred foreign key that block 8 violates and block 9 repairs is
- *   checked only at the chunk's `COMMIT`, so both blocks are stored, where the real loop halts at 8;
- * - the end sent, its answer that the transaction must end ignored: a constraint that is deferrable and initially
- *   immediate stays deferred for the chunk's later blocks, so block 8, which breaks it for one statement, is stored,
- *   where the real loop halts at 8.
+ * chunks of 5, with the read at a block's end answering that nothing is there for a `COMMIT`, through the loop's
+ * protected seam. Chunks then form over blocks whose transaction's end has work to do:
+ * - a deferred foreign key that block 8 violates and block 9 repairs is checked only at the chunk's `COMMIT`, so both
+ *   blocks are stored, where the real loop halts at 8;
+ * - a cursor `WITH HOLD` whose query fails, declared by block 6 and closed unfetched by block 7, is never run to its
+ *   end, so both blocks are stored, where the real loop halts at 6.
  */
 
-/** Nothing is sent where a block of a chunk ends. */
+/** The read is not sent: every block's end says the transaction may go on. */
 class NoBlockEnd extends FinalizedLoop {
   protected override async endBlock(): Promise<boolean> {
-    return true;
-  }
-}
-
-/** The end is sent, and the transaction goes on whatever it answers. */
-class GoesOn extends FinalizedLoop {
-  protected override async endBlock(tx: Transaction, _run: HeightRun): Promise<boolean> {
-    await endBlock(tx);
     return true;
   }
 }
@@ -55,19 +46,17 @@ const deferredKey = (): ModuleDeclaration =>
     },
   );
 
-const immediateKey = (): ModuleDeclaration =>
-  constrained("CREATE TABLE c.once (height bigint PRIMARY KEY, k bigint NOT NULL, CONSTRAINT k_once UNIQUE (k) DEFERRABLE INITIALLY IMMEDIATE)", ["once"], async (w, height) => {
-    await w.execute("INSERT INTO c.once (height, k) VALUES ($1, $2)", [height, height]);
-    if (height !== 8n) return;
-    await w.execute("UPDATE c.once SET k = 7 WHERE height = 8");
-    await w.execute("UPDATE c.once SET k = 70 WHERE height = 7");
+const heldCursor = (): ModuleDeclaration =>
+  constrained("CREATE TABLE c.denominators (d bigint PRIMARY KEY); INSERT INTO c.denominators (d) VALUES (0)", ["denominators"], async (w, height) => {
+    if (height === 6n) await w.execute("DECLARE held CURSOR WITH HOLD FOR SELECT 10 / d FROM c.denominators");
+    if (height === 7n) await w.execute("CLOSE held");
   });
 
-describe.each(RUNNER_BACKENDS)("the negative controls of a block's end inside a chunk, on $name", (backend) => {
+describe.each(RUNNER_BACKENDS)("the negative controls of the read at a block's end, on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("no end sent between blocks: the deferred key block 8 violates and block 9 repairs is not checked at 8, and both are stored", async () => {
+  it("the read not sent: the deferred key block 8 violates and block 9 repairs is not checked at 8, and both are stored", async () => {
     const real = await runCase(backend, { head: 10n, blocks: 5, modules: [deferredKey()] });
     expect(real.failures.map(where)).toEqual([{ height: 8n, point: undefined, module: undefined, committed: false }]);
     expect(real.cursor).toBe(7n);
@@ -76,11 +65,11 @@ describe.each(RUNNER_BACKENDS)("the negative controls of a block's end inside a 
     expect(control.cursor).toBe(10n);
   }, 120_000);
 
-  it("the end's answer ignored: the constraint declared initially immediate stays deferred, and block 8, which breaks it for one statement, is stored", async () => {
-    const real = await runCase(backend, { head: 10n, blocks: 5, modules: [immediateKey()] });
-    expect(real.failures.map(where)).toEqual([{ height: 8n, point: "on-db-write", module: "c", committed: false }]);
-    expect(real.cursor).toBe(7n);
-    const control = await runCase(backend, { head: 10n, blocks: 5, modules: [immediateKey()], loop: GoesOn });
+  it("the read not sent: the cursor WITH HOLD block 6 declares and block 7 closes is never run to its end, and both are stored", async () => {
+    const real = await runCase(backend, { head: 10n, blocks: 5, modules: [heldCursor()] });
+    expect(real.failures.map(where)).toEqual([{ height: 6n, point: undefined, module: undefined, committed: false }]);
+    expect(real.cursor).toBe(5n);
+    const control = await runCase(backend, { head: 10n, blocks: 5, modules: [heldCursor()], loop: NoBlockEnd });
     expect(control.failures).toEqual([]);
     expect(control.cursor).toBe(10n);
   }, 120_000);

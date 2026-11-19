@@ -27,8 +27,8 @@ class FormsAgain extends FinalizedLoop {
 
 /** The block whose writes failed is stored again alone, its failure not kept. */
 class CallsAgain extends FinalizedLoop {
-  protected override keptFailure(): HeightFailure | undefined {
-    return undefined;
+  protected override keep(): boolean {
+    return false;
   }
 }
 

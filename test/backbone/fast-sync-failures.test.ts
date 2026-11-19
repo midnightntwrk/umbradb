@@ -23,10 +23,10 @@ import { type DagRun, type DagRunOptions, runDag, runProblems } from "./refcount
  * restart can change the form a later node is stored in, in either mode).
  * - a retryable failure (a lost connection) at `on-compute`, `on-db-write`, `on-settle` and `on-after-db-write` of 12;
  * - a failure that is not retried, at `on-db-write` of 12: both halt at 12, cursor 11;
- * - a deferred constraint broken by 12's row (with the mode off, 12's `COMMIT` answers with the error): both halt at
- *   12;
- * - a deferred foreign key that 12's row violates and 13's row would repair: both halt at 12, though the chunk's own
- *   `COMMIT` would have found nothing to refuse;
+ * - with a deferred constraint in the module's schema, which keeps every block in a transaction of its own: the
+ *   constraint broken by 12's row, and a deferred foreign key that 12's row violates and 13's row would repair. In both
+ *   12's own `COMMIT` answers with the error, as with the mode off: both halt at 12, and no chunk rolled back, so the
+ *   worker is not restarted and the reference is the plain mode off;
  * - PostgreSQL only: the writer's connection lost with the transaction open (its backend terminated at 12's
  *   writes), and the chunk's `COMMIT` lost before and after the server committed it (a proxy terminating the writer
  *   at that `COMMIT`).
@@ -36,10 +36,11 @@ const K = 12n;
 const BLOCKS = 5;
 
 /**
- * Module `fault`: writes `(height, k)` at `on-db-write` (k 1 at 10 and, when `deferred`, at K: its deferred unique
- * constraint then breaks K's `COMMIT`); when `orphan`, a child row at K whose parent row it writes at K + 1 (its
- * deferred foreign key is violated at K's end, and no longer at K + 1's); at `point` of K fails once, after its write,
- * with a lost connection when `retryable`, or calls `at` there.
+ * Module `fault`: writes `(height, k)` at `on-db-write` (k 1 at 10 and, when `deferred`, at K: its unique constraint,
+ * then declared deferred, breaks K's `COMMIT`); when `orphan`, a child row at K whose parent row it writes at K + 1
+ * (its foreign key, then declared deferred, is violated at K's `COMMIT`, and would not be at K + 1's); at `point` of K
+ * fails once, after its write, with a lost connection when `retryable`, or calls `at` there. Its schema has a
+ * deferrable constraint only with `deferred` or `orphan`.
  */
 function faulting(options: {
   readonly point?: PointName;
@@ -75,10 +76,10 @@ function faulting(options: {
       {
         id: "001",
         sql:
-          "CREATE TABLE fault.rows (height bigint PRIMARY KEY, k int, CONSTRAINT k_once UNIQUE (k) DEFERRABLE INITIALLY DEFERRED); " +
+          `CREATE TABLE fault.rows (height bigint PRIMARY KEY, k int${options.deferred === true ? ", CONSTRAINT k_once UNIQUE (k) DEFERRABLE INITIALLY DEFERRED" : ""}); ` +
           "CREATE TABLE fault.parents (height bigint PRIMARY KEY, id bigint NOT NULL UNIQUE); " +
-          "CREATE TABLE fault.children (height bigint PRIMARY KEY, parent bigint NOT NULL, " +
-          "CONSTRAINT child_parent FOREIGN KEY (parent) REFERENCES fault.parents (id) DEFERRABLE INITIALLY DEFERRED)",
+          "CREATE TABLE fault.children (height bigint PRIMARY KEY, parent bigint NOT NULL" +
+          `${options.orphan === true ? ", CONSTRAINT child_parent FOREIGN KEY (parent) REFERENCES fault.parents (id) DEFERRABLE INITIALLY DEFERRED" : ""})`,
       },
     ],
     points: {
@@ -162,32 +163,25 @@ describe("fast-sync mode's failure rule through the process, on PostgreSQL and o
     }, PATIENCE_MS * 3);
 
     it(`on ${backend.name}, a deferred foreign key that ${K} violates and ${K + 1n} would repair: both modes halt at ${K}, the tables the same`, async () => {
-      // With the mode off 12's COMMIT fails. In the chunk 10..14 the key is checked at 12's end, where that COMMIT would
-      // be: the chunk rolls back after its worker was led past 10 and 11, and 12 is not called again.
-      const reference = await watched(await backend.database(), {
-        settings: plain,
-        user: [faulting({ orphan: true })],
-        halts: true,
-        worker: (host) => restartingBefore(host, 9n),
-      });
+      // The key is deferrable, so no chunk forms: 12's own COMMIT fails in both modes, nothing rolled back but 12, and
+      // the worker is not restarted.
+      const reference = await watched(await backend.database(), { settings: plain, user: [faulting({ orphan: true })], halts: true });
       const on = await watched(await backend.database(), { settings: chunked, user: [faulting({ orphan: true })], halts: true });
-      expect(on.run.restarts).toBe(1);
+      expect(on.run.restarts).toBe(0);
       for (const run of [reference.run, on.run]) {
         expect(run.status).toMatchObject({ state: "halted", cursor: K - 1n, reason: { height: K, code: "database-error", point: null, module: null } });
       }
       sameAsReference(on, reference, backend.name);
     }, PATIENCE_MS * 3);
 
-    it(`on ${backend.name}, a deferred constraint broken by ${K}'s row: both modes halt at ${K}, whose own COMMIT fails with the mode off, the tables the same`, async () => {
-      const reference = await watched(await backend.database(), {
-        settings: plain,
-        user: [faulting({ deferred: true })],
-        halts: true,
-        worker: (host) => restartingBefore(host, 9n),
-      });
+    it(`on ${backend.name}, a deferred constraint broken by ${K}'s row: both modes halt at ${K}, whose own COMMIT fails, the tables the same`, async () => {
+      // The constraint is deferrable, so no chunk forms: as the case above.
+      const reference = await watched(await backend.database(), { settings: plain, user: [faulting({ deferred: true })], halts: true });
       const on = await watched(await backend.database(), { settings: chunked, user: [faulting({ deferred: true })], halts: true });
-      expect(on.run.restarts).toBe(1);
-      for (const run of [reference.run, on.run]) expect(run.status).toMatchObject({ state: "halted", cursor: K - 1n, reason: { height: K } });
+      expect(on.run.restarts).toBe(0);
+      for (const run of [reference.run, on.run]) {
+        expect(run.status).toMatchObject({ state: "halted", cursor: K - 1n, reason: { height: K, code: "database-error", point: null, module: null } });
+      }
       sameAsReference(on, reference, backend.name);
     }, PATIENCE_MS * 3);
 

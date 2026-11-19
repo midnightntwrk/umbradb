@@ -72,7 +72,8 @@ describe.each(RUNNER_BACKENDS)("a failure kept for a block taken for a chunk, on
     // 6 committed alone at the pause, then 7 alone: 8, whose failure is kept, ends every chunk planned below it.
     expect(on.facts).toEqual([...[1n, 2n, 3n, 4n, 5n, 6n, 7n].map((h) => `told committed ${h}`), "told rolledBack 8"]);
     expect(on.facts).toEqual(off.facts);
-    expect(on.order.filter((mark) => mark === "COMMIT")).toHaveLength(3);
+    // The read before the first chunk, 1..5, 6, 7.
+    expect(on.order.filter((mark) => mark === "COMMIT")).toHaveLength(4);
     expect(tablesCompared(on, off).differing).toEqual([]);
   }, 120_000);
 

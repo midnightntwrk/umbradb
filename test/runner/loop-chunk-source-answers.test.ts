@@ -19,7 +19,9 @@ import { cursorOf, type InMemoryBlockSource, RUNNER_BACKENDS, type RunnerBackend
  *   read.
  * - The loop's stop ends the wait: the chunk's first block, whose `on-compute` had its answer, is stored, and the loop
  *   returns.
- * - A pause asked meanwhile is reached once the answer came, after the chunk's first block.
+ * - A pause asked meanwhile ends the wait too: the chunk's first block is stored alone and the pause is reached after
+ *   it, the answer still missing. Released, the loop waits for the answer in the next block's turn, as the mode off
+ *   does at that block's `on-compute`.
  * - An answer that is a failure reaches the block's `on-compute`, which fails as with the mode off: the blocks below
  *   it are committed, and the loop halts there.
  * - With the mode off, for a chunk's first block, and once the loop's stop came, the source is not asked ahead.
@@ -139,9 +141,11 @@ describe.each(RUNNER_BACKENDS)("what a chunk's blocks ask of the source, on $nam
     const outcome = await on.outcome;
     expect(outcome.failures).toEqual([]);
     expect(outcome.cursor).toBe(HEAD);
-    // Each chunk: its first block's on-compute, then the answers of its later blocks, then the BEGIN.
+    // The transaction of the read before the first chunk; then each chunk: its first block's on-compute, the answers
+    // of its later blocks, the BEGIN.
     const marks = on.order.filter((mark) => mark.startsWith("answered@") || mark === "BEGIN" || /^on-compute@(1|6)$/.test(mark));
     expect(marks).toEqual([
+      "BEGIN",
       "on-compute@1",
       ...[2n, 3n, 4n, 5n].map((h) => `answered@${h}`),
       "BEGIN",
@@ -164,7 +168,8 @@ describe.each(RUNNER_BACKENDS)("what a chunk's blocks ask of the source, on $nam
       await sleep(200);
       expect(run.loop().blockTransaction()).toBeNull();
       expect(await within(cursorOf(run.db()))).toBe(5n);
-      expect(run.order.filter((mark) => mark === "BEGIN")).toHaveLength(1);
+      // The read before the first chunk, and the chunk 1..5: none for 6..10.
+      expect(run.order.filter((mark) => mark === "BEGIN")).toHaveLength(2);
     } finally {
       // The stop: the loop's signal, then the process closes the node client, which fails the pending call.
       run.controller().abort();
@@ -176,7 +181,7 @@ describe.each(RUNNER_BACKENDS)("what a chunk's blocks ask of the source, on $nam
     expect((outcome as CaseOutcome).cursor).toBe(6n);
   }, 120_000);
 
-  it("is waited for with no transaction open; a pause asked meanwhile is reached after the chunk's first block once the answer came", async () => {
+  it("is waited for with no transaction open; a pause asked meanwhile ends the wait, stores the chunk's first block, and is reached with the answer still missing", async () => {
     const pauses = new LoopPauses();
     const run = start(backend, { blocks: 5, pause: pauses });
     let hold: PauseHold | undefined;
@@ -184,18 +189,23 @@ describe.each(RUNNER_BACKENDS)("what a chunk's blocks ask of the source, on $nam
       expect(await within(run.answers.awaited.promise)).not.toBe("late");
       await sleep(200);
       expect(run.loop().blockTransaction()).toBeNull();
-      // Asked while the loop waits for the answer: it is inside a height, so the hold is not reached yet.
+      expect(await within(cursorOf(run.db()))).toBe(5n);
+      // Asked while the loop waits for the answer about block 8, which does not come.
       hold = pauses.hold();
-      let reachedAt: bigint | null | undefined;
-      const reached = hold.reached.then(async () => {
-        reachedAt = await cursorOf(run.db());
-      });
-      await sleep(200);
-      expect(reachedAt).toBeUndefined();
+      expect(await within(hold.reached)).not.toBe("late");
+      // Paused between 6 and 7: 6, whose on-compute had run, is stored alone; nothing of 7 began.
+      expect(pauses.paused).toBe(true);
+      expect(await within(cursorOf(run.db()))).toBe(6n);
       expect(run.loop().blockTransaction()).toBeNull();
-      run.answers.stuck.resolve(`answer ${STUCK}`);
-      expect(await within(reached)).not.toBe("late");
-      expect(reachedAt).toBe(6n);
+      expect(run.got).toEqual(["answer 1", "answer 2", "answer 3", "answer 4", "answer 5", "answer 6"]);
+      // Released with the answer still missing: 7 is stored (the next chunk's first block), and the loop waits again
+      // before the BEGIN that would hold 8, where the mode off waits at 8's on-compute.
+      hold.release();
+      hold = undefined;
+      await sleep(500);
+      expect(run.loop().blockTransaction()).toBeNull();
+      expect(await within(cursorOf(run.db()))).toBe(6n);
+      expect(run.got.at(-1)).toBe("answer 7");
     } finally {
       run.answers.stuck.resolve(`answer ${STUCK}`);
       hold?.release();
@@ -203,6 +213,62 @@ describe.each(RUNNER_BACKENDS)("what a chunk's blocks ask of the source, on $nam
     const outcome = await run.outcome;
     expect(outcome.failures).toEqual([]);
     expect(outcome.cursor).toBe(HEAD);
+    expect(run.got).toEqual(Array.from({ length: Number(HEAD) }, (_, i) => `answer ${i + 1}`));
+  }, 120_000);
+
+  it("is not waited for when a pause is already asked: the chunk's first block is stored alone, with nothing asked ahead", async () => {
+    const pauses = new LoopPauses();
+    let hold: PauseHold | undefined;
+    const run = start(backend, {
+      blocks: 5,
+      pause: pauses,
+      // Asked during block 6's on-compute, before the loop would wait for the answers of 7 to 10.
+      async at(point, height) {
+        if (point !== "on-compute" || height !== 6n || hold !== undefined) return;
+        hold = pauses.hold();
+        void hold.reached.then(() => {
+          asked = run.order.filter((mark) => mark.startsWith("answered@"));
+          hold?.release();
+        });
+      },
+    });
+    let asked: string[] | undefined;
+    run.answers.stuck.resolve(`answer ${STUCK}`);
+    const outcome = await run.outcome;
+    expect(outcome.failures).toEqual([]);
+    expect(outcome.cursor).toBe(HEAD);
+    // When the pause was reached, after 6, only the first chunk's answers had been asked for.
+    expect(asked).toEqual(["answered@2", "answered@3", "answered@4", "answered@5"]);
+  }, 120_000);
+
+  it("a pause asked while a chunk's blocks are taken ends the takes: the blocks above the one being taken are not fetched before the pause, and the first is stored alone", async () => {
+    const pauses = new LoopPauses();
+    let hold: PauseHold | undefined;
+    let fetched: string[] | undefined;
+    let cursor: bigint | null | undefined;
+    const run = start(backend, {
+      blocks: 5,
+      pause: pauses,
+      // Asked while block 8 is taken, of 6 to 10.
+      async at(point, height) {
+        if (point !== "on-fetch" || height !== 8n || hold !== undefined) return;
+        hold = pauses.hold();
+        void hold.reached.then(async () => {
+          fetched = run.order.filter((mark) => /^on-fetch@(9|10)$/.test(mark));
+          cursor = await cursorOf(run.db());
+          hold?.release();
+        });
+      },
+    });
+    run.answers.stuck.resolve(`answer ${STUCK}`);
+    const outcome = await run.outcome;
+    expect(outcome.failures).toEqual([]);
+    expect(outcome.cursor).toBe(HEAD);
+    // Reached after 6, stored alone, with 9 and 10 not taken yet and nothing asked ahead for 7 and 8.
+    expect(cursor).toBe(6n);
+    expect(fetched).toEqual([]);
+    // Each block fetched once: 7 and 8, taken before the pause, are not taken again.
+    for (let h = 1n; h <= HEAD; h++) expect(run.order.filter((mark) => mark === `on-fetch@${h}`), `on-fetch@${h}`).toHaveLength(1);
   }, 120_000);
 
   it("is not asked for once the loop's stop came: a stop during the takes stores the chunk's first block with nothing asked ahead", async () => {

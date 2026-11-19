@@ -73,7 +73,8 @@ describe.each(RUNNER_BACKENDS)("a finality conflict recorded while a chunk is op
     expect(on.cursor).toBe(10n);
     // The whole chunk committed in its one transaction, and nothing above it was begun.
     expect(on.facts).toEqual(Array.from({ length: 10 }, (_, i) => `told committed ${i + 1}`));
-    expect(on.order.filter((mark) => mark === "BEGIN")).toHaveLength(2);
+    // The read before the first chunk, then 1..5 and 6..10.
+    expect(on.order.filter((mark) => mark === "BEGIN")).toHaveLength(3);
     expect(on.order.filter((mark) => /^on-(fetch|parse)@(1[1-9]|20)$/.test(mark))).toEqual([]);
   }, 120_000);
 });

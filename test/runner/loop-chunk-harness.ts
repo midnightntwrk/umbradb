@@ -209,11 +209,15 @@ export function chunksOf(blocks: number, head: bigint, distance = 0n): (readonly
  * The order of `r`'s points and the transactions' marks over `chunks` (heights from 1, `r` starting at 1), the
  * source not preparing ahead: `on-finalized` of the head; for each chunk, every block's `on-fetch` and `on-parse`,
  * the first block's `on-start-height` at 1 and `on-compute`, `BEGIN`, each block's writes (a later block's
- * `on-compute` first), `COMMIT`, then each block's `on-after-db-write`.
+ * `on-compute` first), `COMMIT`, then each block's `on-after-db-write`. Before a chunk of two blocks or more that no
+ * such chunk comes right before, the transaction of the read that says a chunk may form: `BEGIN`, `COMMIT`.
  */
 export function orderOf(chunks: readonly (readonly [bigint, bigint])[], head: bigint): string[] {
   const order = [`on-finalized@${head}`];
+  let known = false;
   for (const [first, last] of chunks) {
+    if (last > first && !known) order.push("BEGIN", "COMMIT");
+    known = last > first;
     for (let h = first; h <= last; h++) order.push(`on-fetch@${h}`, `on-parse@${h}`);
     if (first === 1n) order.push("on-start-height@1");
     order.push(`on-compute@${first}`, "BEGIN");

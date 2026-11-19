@@ -1,7 +1,8 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { Database, ReadHandle, ReadOnlyDatabase } from "../../src/db/api.js";
+import type { Database, ReadHandle, ReadOnlyDatabase, Transaction } from "../../src/db/api.js";
 import type { BlockContext, ModuleDeclaration, ProcessContext } from "../../src/modules/declaration.js";
+import { FinalizedLoop } from "../../src/runner/loop.js";
 import { LoopPauses, type PauseHold } from "../../src/runner/pause.js";
 import { declaration } from "../modules/declarations.js";
 import { entry } from "../modules/graph-fixtures.js";
@@ -21,7 +22,8 @@ import { cursorOf, RUNNER_BACKENDS } from "./loop-harness.js";
  *   height; `on-start-height` only at a chunk's first block, `on-stop-height` only at its last;
  * - `blockBeforeCommitted()`: at once with the mode off and at a chunk's first block; at a later block the chunk
  *   commits at the block before, the callback goes on with that block committed and visible to another reader, every
- *   callback runs once, in decision order; a programming error after a statement, or outside `on-compute`.
+ *   callback runs once, in decision order; called after a read through the callback's handle, that read ends first
+ *   and the callback's later reads see the block before committed; a programming error outside `on-compute`.
  */
 
 /**
@@ -74,11 +76,12 @@ describe.each(RUNNER_BACKENDS)("where a chunk ends on $name", (backend) => {
         },
       },
     });
-    expect(pausedOrder).toEqual(["on-finalized@14", ...chunkOrder(1n, 3n, range(1n, 7n))]);
+    expect(pausedOrder).toEqual(["on-finalized@14", "BEGIN", "COMMIT", ...chunkOrder(1n, 3n, range(1n, 7n))]);
     expect(await pausedCursor).toBe(3n);
     // After the pause: 4 to 7, taken before it, are not fetched or parsed again.
     expect(order).toEqual([
       "on-finalized@14",
+      ...["BEGIN", "COMMIT"],
       ...chunkOrder(1n, 3n, range(1n, 7n)),
       ...chunkOrder(4n, 10n, range(8n, 10n)),
       ...chunkOrder(11n, 14n, range(11n, 14n)),
@@ -97,7 +100,7 @@ describe.each(RUNNER_BACKENDS)("where a chunk ends on $name", (backend) => {
         },
       },
     });
-    expect(run.order).toEqual(["on-finalized@14", ...chunkOrder(1n, 3n, range(1n, 7n))]);
+    expect(run.order).toEqual(["on-finalized@14", "BEGIN", "COMMIT", ...chunkOrder(1n, 3n, range(1n, 7n))]);
     expect(await cursorOf(run.db)).toBe(3n);
   }, 120_000);
 
@@ -155,11 +158,11 @@ describe.each(RUNNER_BACKENDS)("where a chunk ends on $name", (backend) => {
 
   describe("blockBeforeCommitted()", () => {
     /**
-     * Module `bb`: at `on-compute` of each height `at` names it calls `blockBeforeCommitted()` (after a statement through
-     * its read for `after-statement`), and for `call-and-read` then reads the cursor's height through its own `db` item;
-     * at its other points of those heights it calls it too. It records each outcome in `log`.
+     * Module `bb`: at `on-compute` of each height `at` names it calls `blockBeforeCommitted()`, and for `call-and-read`
+     * then reads the cursor's height through its own `db` item; at its other points of those heights it calls it too.
+     * It records each outcome in `log`.
      */
-    function asking(log: string[], at: (height: bigint) => "call" | "call-and-read" | "after-statement" | undefined): ModuleDeclaration {
+    function asking(log: string[], at: (height: bigint) => "call" | "call-and-read" | undefined): ModuleDeclaration {
       const outside = async (label: string, b: BlockContext): Promise<void> => {
         try {
           await b.blockBeforeCommitted();
@@ -173,16 +176,10 @@ describe.each(RUNNER_BACKENDS)("where a chunk ends on $name", (backend) => {
           async "on-fetch"(_p, b: BlockContext) {
             if (at(b.height) !== undefined) await outside("on-fetch", b);
           },
-          async "on-compute"(p: ProcessContext, b: BlockContext, read: ReadHandle) {
+          async "on-compute"(p: ProcessContext, b: BlockContext) {
             const how = at(b.height);
             if (how === undefined) return;
-            if (how === "after-statement") await read.query("SELECT 1");
-            try {
-              await b.blockBeforeCommitted();
-            } catch (error) {
-              log.push(`on-compute@${b.height} ${(error as Error).message.includes("statement") ? "refused" : "other"}`);
-              return;
-            }
+            await b.blockBeforeCommitted();
             if (how !== "call-and-read") {
               log.push(`on-compute@${b.height} resolved`);
               return;
@@ -230,6 +227,7 @@ describe.each(RUNNER_BACKENDS)("where a chunk ends on $name", (backend) => {
       const first = chunkOrder(1n, 3n, range(1n, 7n));
       expect(run.order).toEqual([
         "on-finalized@14",
+        ...["BEGIN", "COMMIT"],
         ...first.slice(0, first.indexOf("COMMIT")),
         "COMMIT",
         "on-compute@4",
@@ -276,22 +274,111 @@ describe.each(RUNNER_BACKENDS)("where a chunk ends on $name", (backend) => {
       ]);
     }, 120_000);
 
-    it("a programming error after a statement through the callback's read, and outside on-compute, in both modes", async () => {
+    it("a programming error outside on-compute, in both modes", async () => {
       for (const blocks of [undefined, 3]) {
         const log: string[] = [];
         await runChunks(backend, {
           head: 3n,
-          modules: [asking(log, (h) => (h === 2n ? "after-statement" : undefined))],
+          modules: [asking(log, (h) => (h === 2n ? "call" : undefined))],
           dbItem: "bb",
           ...(blocks === undefined ? {} : { blocks }),
         });
-        expect(log, `blocks ${blocks}`).toEqual([
-          "on-fetch@2 refused",
-          "on-compute@2 refused",
-          "on-db-write@2 refused",
-          "on-after-db-write@2 refused",
-        ]);
+        expect(log, `blocks ${blocks}`).toEqual(["on-fetch@2 refused", "on-compute@2 resolved", "on-db-write@2 refused", "on-after-db-write@2 refused"]);
       }
+    }, 120_000);
+
+    /**
+     * Module `bb` at `on-compute` of block 4: reads the last block stored through its read handle and calls
+     * `blockBeforeCommitted()`, in the order `steps` gives; after its first call it reads the cursor through its own
+     * `db` item when `outside` (another reader's view, asked while the callback's handle has no read open). It records
+     * each step in `log`.
+     */
+    function reading(log: string[], steps: readonly ("read" | "call")[], outside: boolean): ModuleDeclaration {
+      return declaration("bb", {
+        points: {
+          async "on-compute"(p: ProcessContext, b: BlockContext, read: ReadHandle) {
+            if (b.height !== 4n) return;
+            const db = p.items.get("db") as ReadOnlyDatabase;
+            let called = false;
+            for (const step of steps) {
+              if (step === "read") {
+                const [row] = await read.query("SELECT max(height) AS h FROM core_block_commit.blocks");
+                log.push(`read ${row?.h} at ${read.height}`);
+              } else {
+                await b.blockBeforeCommitted();
+                log.push(outside && !called ? `resolved, cursor ${await db.read(async (other) => other.height)}` : "resolved");
+                called = true;
+              }
+            }
+          },
+        },
+      });
+    }
+
+    for (const steps of [
+      ["read", "call", "read"],
+      ["call", "read", "call", "read"],
+      ["read", "call", "call", "read"],
+    ] as const) {
+      it(`called after a read through the callback's handle (${steps.join(", ")}): resolves in both modes; at a later block the chunk commits at the block before, and the later reads see it`, async () => {
+        const firstCall = steps.indexOf("call");
+        const expected = (outside: boolean): string[] =>
+          steps.map((step, index) => (step === "read" ? "read 3 at 3" : outside && index === firstCall ? "resolved, cursor 3" : "resolved"));
+        // The mode off: the block before is committed already, and nothing ends.
+        const offLog: string[] = [];
+        const off = await runChunks(backend, { head: 14n, modules: [reading(offLog, steps, false)], dbItem: "bb" });
+        expect(offLog).toEqual(expected(false));
+        expect(off.order).toEqual(orderOf(chunksOf(1, 14n), 14n));
+        // A later block of the chunk 1..7: the commit at 3, seen by another reader once the call resolved.
+        const log: string[] = [];
+        const run = await runChunks(backend, { head: 14n, blocks: 7, modules: [reading(log, steps, true)], dbItem: "bb" });
+        expect(log).toEqual(expected(true));
+        const writes = (from: bigint, to: bigint): string[] => range(from, to).map((h) => `on-db-write@${h}`);
+        expect(run.order.filter((mark) => mark === "BEGIN" || mark === "COMMIT" || mark.startsWith("on-db-write@"))).toEqual([
+          ...["BEGIN", "COMMIT"],
+          ...["BEGIN", ...writes(1n, 3n), "COMMIT"],
+          ...["BEGIN", ...writes(4n, 10n), "COMMIT"],
+          ...["BEGIN", ...writes(11n, 14n), "COMMIT"],
+        ]);
+        for (const [key, entries] of byPoint(run.seen)) expect(entries, key).toHaveLength(1);
+        expect(await cursorOf(run.db)).toBe(14n);
+      }, 120_000);
+    }
+
+    it("called after a read whose view then fails to close: the chunk still commits at the block before, the call rejects with the close's failure, and the block fails as its own", async () => {
+      /** The view a callback of block 4 reads through closes, then reports a failure of its close. */
+      class FailingClose extends FinalizedLoop {
+        protected override async openView<T>(tx: Transaction, height: bigint | null, body: (read: ReadHandle) => Promise<T>): Promise<T> {
+          const result = await super.openView(tx, height, body);
+          if (height === 3n) throw new Error("the view's close failed (the test's loop)");
+          return result;
+        }
+      }
+      const log: string[] = [];
+      const bb = declaration("bb", {
+        points: {
+          async "on-compute"(_p: ProcessContext, b: BlockContext, read: ReadHandle) {
+            if (b.height !== 4n) return;
+            await read.query("SELECT 1");
+            try {
+              await b.blockBeforeCommitted();
+              log.push("resolved");
+            } catch (error) {
+              log.push(`rejected: ${(error as Error).message}`);
+              throw error;
+            }
+          },
+        },
+      });
+      const facts: string[] = [];
+      const failure = await runChunks(backend, { head: 14n, blocks: 7, modules: [bb], loop: FailingClose, follower: loggingFollower(facts) }).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(log).toEqual(["rejected: the view's close failed (the test's loop)"]);
+      // 1..3 committed by the chunk; 4's on-compute failed before its first write, and the loop halts there.
+      expect(failure).toMatchObject({ height: 4n, point: "on-compute", module: "bb", committed: false });
+      expect(facts.filter((fact) => !fact.startsWith("told written"))).toEqual(["told committed 1", "told committed 2", "told committed 3", "told rolledBack 4"]);
     }, 120_000);
 
     it("called twice by one callback of a later block: both calls resolve once the block before committed, the second not before the first", async () => {
@@ -318,8 +405,8 @@ describe.each(RUNNER_BACKENDS)("where a chunk ends on $name", (backend) => {
       });
       const run = await runChunks(backend, { head: 14n, blocks: 7, modules: [twice], dbItem: "bb" });
       expect(log).toEqual(["the second call resolved with the first resolved", "cursor 3", "a third call resolved"]);
-      // One commit at 3, then 4 as the first block of the chunk 4..10, then 11..14.
-      expect(run.order.filter((mark) => mark === "COMMIT")).toHaveLength(3);
+      // The read before the first chunk, one commit at 3, then 4 as the first block of the chunk 4..10, then 11..14.
+      expect(run.order.filter((mark) => mark === "COMMIT")).toHaveLength(4);
       expect(await cursorOf(run.db)).toBe(14n);
     }, 120_000);
 

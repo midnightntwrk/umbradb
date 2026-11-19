@@ -48,6 +48,8 @@ export interface CaseOptions {
   readonly loop?: new (input: LoopInput) => FinalizedLoop;
   /** Told the loop once it is made. */
   readonly onLoop?: (loop: FinalizedLoop, db: Database, controller: AbortController) => void;
+  /** The database whose transactions the loop's run on, from the case's; the case's own unless given (one that loses a `COMMIT`). */
+  readonly database?: (db: Database) => Database;
 }
 
 /** What a case gave. */
@@ -129,10 +131,11 @@ export async function runCase(backend: RunnerBackend, options: CaseOptions): Pro
   const user = [recorder(order, seen), faultingModule(calls, options), ...(options.modules ?? [])];
   const started = await startWith(raw, user, user.map((part) => entry(part.id, 1)), { backbone: CHECKED_BACKBONE });
   const memory = new InMemoryBlockSource({ head: options.head });
+  const inner = options.database?.(raw) ?? raw;
   const db: Database = {
     read: (body, readOptions) => raw.read(body, readOptions),
     async transaction<T>(body: (tx: Transaction) => Promise<T>): Promise<T> {
-      const result = await raw.transaction((tx) => {
+      const result = await inner.transaction((tx) => {
         order.push("BEGIN");
         return body(tx);
       });

@@ -191,14 +191,14 @@ export interface BlockContext {
    */
   continues: boolean;
   /**
-   * Resolves once the block before this one is committed. Allowed at `on-compute` only, before the callback's first
-   * statement through its read and until the callback returns; anywhere else, after such a statement, or kept and
-   * called after the callback returned, it throws a programming error. It resolves at once when the block before is
-   * committed already. Otherwise the engine commits it first; the callback then goes on, and its read, opened at its
-   * first statement, sees the block before committed. Every call for one block gets the same promise: a second call
-   * never resolves before the commit the first one asked for. A callback that reads a large part of
-   * the state the block before left (the ledger's conversion) calls it first, so that its reads see committed rows and
-   * no transaction holding other blocks stays open meanwhile.
+   * Resolves once the block before this one is committed. Allowed at `on-compute` only, until the callback returns;
+   * anywhere else, or kept and called after the callback returned, it throws a programming error. It resolves at once
+   * when the block before is committed already. Otherwise the engine commits it first: what the callback read through
+   * its read until then stays read, the read it has open ends, and its statements after the call read the block before
+   * committed, at the same height. Every call for one block gets the same promise: a second call never resolves before
+   * the commit the first one asked for. A callback that reads a large part of the state the block before left (the
+   * ledger's conversion) calls it first, so that its reads see committed rows and no transaction holding other blocks
+   * stays open meanwhile.
    */
   blockBeforeCommitted(): Promise<void>;
 }

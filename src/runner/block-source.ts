@@ -101,8 +101,9 @@ export interface BlockSource {
    * state root `core-ledger-state` compares): resolves once the source holds every such answer about `block`, or the
    * failure of one, which the callback that asks then gets as it would have. Never rejects. The loop awaits it for each
    * block after the first of a chunk (`./loop.ts`), after the first block's `on-compute` and before the chunk's
-   * `BEGIN`, so that no callback waits for the chain while a transaction holding several blocks is open. It is not
-   * called for a block processed alone.
+   * `BEGIN`, so that no callback waits for the chain while a transaction holding several blocks is open; its signal or
+   * a pause asked meanwhile ends that wait, the answers then asked for again when those blocks come. It is not called
+   * for a block processed alone.
    */
   answered?(block: BlockRef): Promise<void>;
   /** Optional: the source's conditions now, such as `finality-stall` while its queue is full. */
