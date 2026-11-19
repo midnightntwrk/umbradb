@@ -368,7 +368,8 @@ that height.
 | `h`, `t` | The height, and the process's clock when it ended. |
 | `beginMs` | The wait for the block from its source, and the height's start. |
 | `prepareMs` | The points before the block's transaction (`on-fetch` to `on-compute`). It holds `applyMs` and `collectMs`. |
-| `applyMs`, `tx` | The block applied by the ledger worker, as the main thread waited for it, and the block's number of transactions. |
+| `applyMs`, `tx` | The block applied by the ledger worker, as the main thread waited for it, and the block's number of transactions. For a block applied ahead, the wait for that result at its `on-compute`. |
+| `aheadUsed`, `aheadDropped` | 1 when the block was applied ahead, by the ledger worker during the block before's transaction once that block's eviction was sent, and the result was used, or dropped and the block applied at its turn (its block did not continue the block before, the worker thread was replaced, its input at its turn differed, or the apply ahead failed). Absent with the `core` entry's `applyAhead` false, and where no block was applied ahead (the next block not prepared yet, a change of ledger). |
 | `rootWaitMs` | Of `applyMs`: the wait for the node's state root once the worker had answered. It is the node's time. |
 | `collectMs` | The block's flush handed over to the reclamation, in memory. |
 | `stepMs`, `evictMs` | Inside `txMs`, at `on-settle`: the reclamation of the run of blocks the height ends (one block), its reads included, and the eviction of the nodes it deletes from the worker, awaited. |

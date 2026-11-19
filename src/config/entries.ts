@@ -97,6 +97,11 @@ export type CoreSettingsBase = {
    * equals the tables given tables undamaged when the process started and written by this process only.
    */
   readonly reclamationCache?: { readonly keys?: number; readonly verify?: boolean };
+  /**
+   * Whether `core-ledger-state` has the ledger worker apply the next block while a block's transaction runs, once that
+   * block's eviction is sent (true); false applies each block at its own turn.
+   */
+  readonly applyAhead?: boolean;
 };
 
 /** The public (core) process's `core` entry: `node` and `lockstepInstances`, none of a private one's fields. */

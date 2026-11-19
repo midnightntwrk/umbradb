@@ -255,6 +255,7 @@ describe("the core entry's settings are typed as the settings table lists them",
         fullPageWritesOffAllowed: false,
         developmentOptIn: false,
         reclamationCache: { keys: 100_000, verify: false },
+        applyAhead: true,
       },
     });
     const privateCore = coreEntry({

@@ -30,6 +30,7 @@ import { addingUpProblems, sumOf, unaccountedMs, unaccountedOfBusy, type WorkerL
  *   `copyMisses`, `copyEmptied` is on the first height only, and a traced run with no copy (`reclamationCache.keys`
  *   0) stores the same tables and sends, at every height, at least as many `counts` and `references` statements: the
  *   totals below are the statements the copy saves.
+ * - The next block applied ahead: `aheadUsed` 1 at nearly every height from 2 on, `aheadDropped` at none.
  * - The worker's lines say where the thread's whole time went: the parts of each add up to its span, the node waits
  *   are the node-store bridge's requests, and the main thread's lines hold each request type's round trips. The
  *   range bench's reader (`bench/range/worker-time.mjs`) reads the files such a run writes.
@@ -193,6 +194,12 @@ describe("the block trace through the process, on PostgreSQL", () => {
       expect(line.knownEmptied, `knownEmptied at ${String(line.h)}`).toBe(line.h === 0 ? 1 : undefined);
       expect(line.copyEmptied, `copyEmptied at ${String(line.h)}`).toBe(line.h === 0 ? 1 : undefined);
     }
+    // The next block applied ahead at the settle of the block before: its result used at nearly every height from 2 on
+    // (where the source had it prepared), never dropped.
+    expect(first.filter((line) => line.aheadUsed === 1).length).toBeGreaterThan(LAST / 2);
+    expect(first.filter((line) => line.aheadUsed !== undefined && line.aheadUsed !== 1)).toEqual([]);
+    expect(first.filter((line) => line.aheadDropped !== undefined)).toEqual([]);
+    expect(Math.min(...first.filter((line) => line.aheadUsed === 1).map((line) => line.h as number))).toBeGreaterThanOrEqual(2);
 
     // The same heights with no copy of the counts and child lists: the same tables, and at every height at least as
     // many `counts` and `references` statements as with the copy (on these heights each read is one statement).

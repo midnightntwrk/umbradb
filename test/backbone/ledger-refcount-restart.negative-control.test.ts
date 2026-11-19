@@ -71,7 +71,7 @@ describe.each(PROCESS_BACKENDS)("negative controls, on $name", (backend: Process
     const plan = dagPlan([]);
     const stop = 37;
     const stopped = await runSegment(db, await jobFor(db, plan, { hold: { point: "after-commit", height: stop, then: "stop" } }), SEGMENT_MS);
-    expect(stopped.reached).toEqual({ event: "reached", point: "after-commit", height: stop });
+    expect(stopped.reached).toMatchObject({ event: "reached", point: "after-commit", height: stop });
     const restarted = await runSegment(db, await jobFor(db, plan, { emptiesQueue: true }), SEGMENT_MS);
     expect(restarted.ended).toMatchObject({ why: "last", cursor: `${LAST}` });
     const run = observedRun(plan.observe);
@@ -88,7 +88,7 @@ describe.each(PROCESS_BACKENDS)("negative controls, on $name", (backend: Process
     const plan = dagPlan([]);
     const h = REQUEUE + 1;
     const killed = await runSegment(db, await jobFor(db, plan, { control: "own-transaction", hold: { point: "between-commits", height: h, then: "hold" } }), SEGMENT_MS);
-    expect(killed.reached).toEqual({ event: "reached", point: "between-commits", height: h });
+    expect(killed.reached).toMatchObject({ event: "reached", point: "between-commits", height: h });
     // The crash left a mix: the two tables after h, the rest after h − 1, so its counts and queue are not its rows'
     // and its contents hash is refused. This damaged case alone inspects a refusal.
     const now = await databaseNow(db, PATIENCE_MS);

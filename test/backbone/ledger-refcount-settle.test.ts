@@ -23,8 +23,10 @@ import { referenceProblems } from "./refcount-reference.js";
  * DAG fixture through the real process (`./refcount-process.ts`). The engine passes a run of one block, so the block's
  * reclamation is computed, its eviction sent and its net write made inside the block's transaction:
  * - (a) a loop and a ledger worker that record what they do show, at every block, the eviction sent after the block's
- *   `on-db-write` callbacks ended and before its `COMMIT`, and the next block's apply sent only after that `COMMIT`;
- *   and `core-ledger-state`'s `on-settle` before `core-digest`'s, which takes the block's digests last;
+ *   `on-db-write` callbacks ended and before its `COMMIT`, and no apply of the next block sent before that eviction: it
+ *   is sent inside the block's `on-settle` point, after the eviction (the next block applied ahead,
+ *   `src/backbone/core-ledger-state/apply-ahead.ts`), or after the `COMMIT`; and `core-ledger-state`'s `on-settle`
+ *   before `core-digest`'s, which takes the block's digests last;
  * - (b) the node tables after every block equal the per-block step (`./refcount-step.ts`, the reference) applied to
  *   the tables after the block before and the flush the worker recorded for the block, row for row;
  * - (c) a package that refuses one block's eviction in every thread: the worker thread is replaced once, the block
@@ -148,8 +150,28 @@ function orderProblems(events: readonly Event[], cursor: bigint): string[] {
       if (word !== "evict" || height !== h) continue;
       if (!(ended < index && index < settled)) problems.push(`at ${h}: an eviction sent outside on-settle (after the on-db-write callbacks, before the COMMIT)`);
     }
-    const next = at("apply", h + 1n);
-    if (next >= 0 && next < committed) problems.push(`at ${h}: the apply of ${h + 1n} sent before ${h}'s COMMIT`);
+    // No apply of h + 1 before h's eviction: each is sent after h's on-db-write callbacks ended, and after the eviction
+    // of the attempt of h it follows when that attempt sends one.
+    for (const [index, [word, height]] of events.entries()) {
+      if (word !== "apply" || height !== h + 1n) continue;
+      let begun = -1;
+      for (let back = index - 1; back >= 0; back--) {
+        const [w, at] = events[back] as Event;
+        if (w === "writes-ended" && at === h) {
+          begun = back;
+          break;
+        }
+      }
+      if (begun < 0) {
+        problems.push(`at ${h}: an apply of ${h + 1n} sent before ${h}'s on-db-write callbacks ended`);
+        continue;
+      }
+      const ends = events.findIndex(([w, at], i) => i > begun && w === "settled" && at === h);
+      const attempt = events.slice(begun, ends < 0 ? events.length : ends);
+      const evicts = attempt.some(([w, at]) => w === "evict" && at === h);
+      const before = events.slice(begun, index).some(([w, at]) => w === "evict" && at === h);
+      if (evicts && !before) problems.push(`at ${h}: an apply of ${h + 1n} sent before ${h}'s eviction`);
+    }
   }
   return problems;
 }
@@ -217,7 +239,7 @@ describe.each(PROCESS_BACKENDS)("the reclamation through on-settle, on $name", (
     return found[0] as bigint;
   };
 
-  it("(a) at every block the eviction is sent after its on-db-write callbacks and before its COMMIT, and the next block's apply after that COMMIT", async () => {
+  it("(a) at every block the eviction is sent after its on-db-write callbacks and before its COMMIT, and no apply of the next block before that eviction", async () => {
     const { run, events } = await cleanRun();
     expect(run.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
     expect(runProblems(run, "extended")).toEqual([]);
@@ -226,6 +248,13 @@ describe.each(PROCESS_BACKENDS)("the reclamation through on-settle, on $name", (
     expect(evictions.length).toBeGreaterThan(5);
     expect(new Set(evictions.map(([, h]) => h)).size).toBe(evictions.length);
     expect(orderProblems(events, run.cursor)).toEqual([]);
+    // Not vacuous: most blocks are applied ahead, inside the on-settle point of the block before, before its COMMIT.
+    const ahead = [...Array(Number(run.cursor)).keys()].map(BigInt).filter((h) => {
+      const apply = events.findIndex(([word, height]) => word === "apply" && height === h + 1n);
+      const committed = events.findIndex(([word, height]) => word === "committed" && height === h);
+      return apply >= 0 && apply < committed;
+    });
+    expect(ahead.length).toBeGreaterThan(LAST / 2);
     // At every block `core-ledger-state`'s `on-settle` runs before `core-digest`'s, which is last.
     for (let h = 0n; h <= run.cursor; h++) {
       const settled = events.filter(([word, height]) => word.startsWith("settle:") && height === h).map(([word]) => word.slice("settle:".length));

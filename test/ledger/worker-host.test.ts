@@ -20,8 +20,8 @@ import type { TestLoaderData } from "./fixtures/ledger-test-loader.js";
 
 // The ledger worker (a worker thread running the engine of `worker-engine.test.ts`) and the node-store bridge, through
 // which the worker reads stored nodes synchronously from a database the main thread owns. What crosses is plain data.
-// A crash of the thread, or a trap of the package, fails every request from then on. A request's step is reported
-// while it runs.
+// A crash of the thread, or a trap of the package, fails every request from then on, but a trap in a block applied
+// ahead, which ends that thread only. A request's step is reported while it runs.
 
 const LONG = 240_000;
 const LOADER = new URL("./fixtures/ledger-test-loader.ts", import.meta.url);
@@ -166,6 +166,35 @@ describe("the ledger worker", () => {
     expect(error).toBeInstanceOf(LedgerWorkerFailure);
     expect((error as Error).message).toMatch(/RuntimeError: unreachable/);
     await expect(host.probe()).rejects.toBe(error);
+  });
+
+  it("ends only the thread when a block applied ahead traps: a new one runs the requests sent after it but the applies ahead, and a trap at a block's turn still fails the host", { timeout: LONG }, async () => {
+    const genesis = RAW.v9.LedgerState.blank(NETWORK_ID).serialize();
+    const host = started({ trapAt: "2" });
+    await host.genesis(genesisInput(genesis));
+    await host.commit(at(0n));
+    const one = host.apply(applyBlock(1n, 0));
+    const two = host.apply({ ...applyBlock(2n, 0), ahead: true }).catch((e: unknown) => e);
+    const three = host.apply({ ...applyBlock(3n, 0), ahead: true }).catch((e: unknown) => e);
+    const root = host.genesisRoot("v9", genesis);
+    expect((await one).height).toBe(1n);
+    const trapped = await two;
+    expect(trapped).toBeInstanceOf(LedgerWorkerFailure);
+    expect((trapped as Error).message).toMatch(/RuntimeError: unreachable, while applying block 2 ahead; a new thread took its place/);
+    expect(((await three) as Error).message).toMatch(/restarted while its apply request ran/);
+    // Sent after the trap, answered by the new thread.
+    expect(hex(await root)).toBe(hex(RAW.v9.stateRoot(RAW.v9.LedgerState.blank(NETWORK_ID))));
+    expect(host.failure).toBeNull();
+    expect(host.restarts).toBe(1);
+    // The new thread holds no state; block 2 applied at its turn there traps and fails the host.
+    await host.genesis(genesisInput(genesis));
+    await host.commit(at(0n));
+    await host.apply(applyBlock(1n, 0));
+    await host.commit(at(1n));
+    const error = await host.apply(applyBlock(2n, 0)).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(LedgerWorkerFailure);
+    expect((error as Error).message).toBe("the ledger worker's package failed and its thread ended: RuntimeError: unreachable");
+    expect(host.failure).toBe(error);
   });
 
   it("keeps working after a request that failed without a trap, and after a failed load of a package", { timeout: LONG }, async () => {
@@ -347,6 +376,41 @@ describe("the node-store bridge: the worker reads stored nodes through the main 
     fourth.useDatabase({ read: async () => Promise.reject(new Error("closed")) });
     await expect(fourth.load(input)).rejects.toThrow(/has no node/);
     expect(fourth.failure).toBeNull();
+  });
+
+  it("applies a block ahead in its thread, with the whole result of an apply after the commit in another thread", { timeout: LONG }, async () => {
+    const genesis = RAW.v9.LedgerState.blank(NETWORK_ID).serialize();
+    const contract = await contractFixture(RAW.v9);
+    const first = [contract.deploy, zswapOutputTransaction(RAW.v9)];
+    const second = [callTransaction(RAW.v9, contract, logProgram([cellValue(Uint8Array.of(5))])), systemTransaction("v9")];
+    // The oracle: a thread that applies block 2 after block 1 committed.
+    const serial = started();
+    await serial.genesis(genesisInput(genesis));
+    await serial.commit(at(0n));
+    await serial.parse("v9", at(1n), first);
+    const serialOne = await serial.apply(applyBlock(1n, 2));
+    await serial.commit(at(1n));
+    await serial.parse("v9", at(2n), second);
+    const serialTwo = await serial.apply(applyBlock(2n, 2));
+    // Ahead: block 2 is sent behind block 1, before block 1 is answered or committed.
+    const host = started();
+    await host.genesis(genesisInput(genesis));
+    await host.commit(at(0n));
+    await host.parse("v9", at(1n), first);
+    await host.parse("v9", at(2n), second);
+    const applyingOne = host.apply(applyBlock(1n, 2));
+    const applyingTwo = host.apply({ ...applyBlock(2n, 2), ahead: true });
+    const [one, two] = await Promise.all([applyingOne, applyingTwo]);
+    expect(one).toEqual(serialOne);
+    expect(two).toEqual(serialTwo);
+    expect(two.batch.inserts.length).toBeGreaterThan(0);
+    expect(await host.commit(at(1n))).toBe(true);
+    // At its turn, unmarked, the block applied ahead is given back.
+    expect(await host.apply(applyBlock(2n, 2))).toEqual(serialTwo);
+    expect(await host.commit(at(2n))).toBe(true);
+    // The block after is applied on it as on any committed state.
+    await serial.commit(at(2n));
+    expect(await host.apply(applyBlock(3n, 0))).toEqual(await serial.apply(applyBlock(3n, 0)));
   });
 
   it("reads the nodes of a request given no read through a read lent while the caller holds it, those already waiting included, until it is taken back", { timeout: LONG }, async () => {

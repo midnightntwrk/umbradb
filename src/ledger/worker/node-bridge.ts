@@ -58,8 +58,12 @@ export const BRIDGE_MAX_BYTES = 256 << 20;
 /** The statement reading stored nodes by key from `core_ledger_state.nodes`. */
 export const NODES_SQL = "SELECT node_key, data, children FROM core_ledger_state.nodes WHERE node_key = ANY($1::bytea[])";
 
-/** What the main thread reads nodes through: a read handle's `query`. */
-export type NodeReader = Pick<ReadHandle, "query">;
+/**
+ * What the main thread reads nodes through: a read handle's `query`, and, for a read that sees one committed height
+ * (`ReadHandle.height`), that height, which decides whether it may serve the node requests of a block applied ahead
+ * (`./host.ts`). A block transaction's handle has none.
+ */
+export type NodeReader = Pick<ReadHandle, "query"> & { readonly height?: bigint | null };
 
 /** The layout of the shared memory's header (see the module comment), for the tests. */
 export const BRIDGE_LAYOUT = Object.freeze({ STATE, LENGTH, STATUS, HEADER_BYTES, KEY_BYTES, IDLE, ASKED, ANSWERED, NODES, ERROR });

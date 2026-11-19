@@ -8,17 +8,33 @@
  * The main thread never blocks on the worker: it awaits its answers, and answers the worker's node requests
  * (`./node-bridge.ts`) from the read handle the request was given. Some requests are given none, such as a parse at
  * `on-parse`, which has no database handle but whose deploys' addresses serialize nodes a stored state shares. Such a
- * request is answered from the read of another request in flight, if one has a read: a node's bytes depend only on
- * its key, so any read of committed data serves. Otherwise it is answered from a read of the process's database
- * ({@link LedgerHost.useDatabase}), or from the read of a request that arrives first. This matters on PGlite, which has
- * a single queue: `core-ledger-state`'s `on-compute` read holds it while its apply waits behind the parse in the
- * worker, so a new read of the database would wait for ever; the apply's open read answers instead.
+ * request is answered from a read lent for it (below), else from the read of another request in flight, if one has a
+ * read, else from a read of the process's database ({@link LedgerHost.useDatabase}), or from a read that is lent or
+ * that a request brings first. On PGlite, which has a single queue, `core-ledger-state`'s `on-compute` read holds it
+ * while its apply waits behind the parse in the worker, so a new read of the database would wait for ever; the apply's
+ * open read answers instead.
  *
  * A caller that awaits a request given no read while it holds an open read lends that read ({@link LedgerHost.lend}):
  * it answers the node requests of every request given none, those already waiting for a read too, until it is taken
  * back. `core-ledger-state` lends its block transaction's handle while it awaits its eviction: a request sent before
  * the eviction and given no read (a later block's parse at `on-parse`) may wait in the worker for a stored node, and on
- * PGlite a read of the database waits behind that open transaction.
+ * PGlite a read of the database waits behind that open transaction. It sends the apply of the next block, marked ahead
+ * (`ApplyBlock.ahead`), with no read, since it outlives the callback that sends it; that block's `on-compute` lends
+ * its read while it awaits the result.
+ *
+ * **The reads that serve a block applied ahead.** The apply of block n marked ahead runs on the pending state after
+ * n − 1, whose batch the worker serves itself, so every other node it reads was stored by a block up to n − 2 and is
+ * not deleted before n settles. A read that sees the committed height n − 2 or a later one holds each of them; an older
+ * one may lack a node written since, and a missing node inside the package can pass for a transaction that failed. So a
+ * node request of an apply ahead is answered only through: a read lent while it runs (the block transaction's handle of
+ * n − 1, then n's `on-compute` read); the read of another request in flight that reports a committed height
+ * (`NodeReader.height`) of n − 2 or more; or a read of the process's database, opened for that request, which sees
+ * the height committed then, n − 2 or n − 1. It is never answered through an older read or one that reports no height,
+ * and while it waits for the database's read it takes a lent read or such a request's read that comes first. On PGlite
+ * every read open while an apply ahead runs is the queue's current job, which began after the transaction of n − 1
+ * ended, so it sees n − 2 or n − 1, and a request it brings answers the node request that waits behind it for the
+ * queue. On PostgreSQL the process gives a read that does not wait for the reader pool (`src/db/postgres.ts`), so the
+ * node request is answered while every pooled reader is held by reads whose own requests wait behind the apply ahead.
  *
  * **A step's time** is not bounded. A ledger step may take minutes (the v8 → v9 conversion, loading a large state),
  * and nothing cuts a height off for being slow. It is reported instead: {@link LedgerHost.activity} names the step in
@@ -33,16 +49,25 @@
  * module and the point. A failed request that is not a trap (a block the engine refuses, a package that will not load)
  * fails that request only.
  *
+ * **A trap in an apply marked ahead** (`ApplyBlock.ahead`) ends that thread only, and the host does not fail: the block
+ * is judged at its own turn, as a run without blocks applied ahead judges it. A new thread takes the old one's place,
+ * as at {@link LedgerHost.restart}, and is sent again, in their order, the parses kept and every request sent after the
+ * trapped one (the old thread ran none of them: it answers in order and runs nothing after a trap), but the applies
+ * marked ahead, which fail, as the trapped one does. `core-ledger-state` then drops the result applied ahead (the
+ * thread that applied it ended) and applies the block at its turn in the new thread: a block whose own apply traps
+ * there fails the host at its height. An apply that the engine refuses with `ApplyNeedsNewThread` (`./engine.ts`)
+ * fails that request only, like any failure that is not a trap: the caller restarts the thread.
+ *
  * **What became of each block's transaction** ({@link LedgerHost.written}, {@link LedgerHost.committed},
  * {@link LedgerHost.rolledBack}). The engine (`src/runner/loop.ts`) tells the host, as facts, what happened to the
  * transaction that holds each block, and the host alone decides what the thread is sent:
  * - `committed(h)`: the `COMMIT` that holds h answered, or the cursor read after a lost answer found h committed. When
  *   the host sent the thread an apply or the genesis of h (`core-ledger-state` applies every block it is active at), it
- *   sends the commit of h, so that the state after h becomes the one h + 1 is applied on; then, always, the release of
- *   the parses kept up to h. So a block nothing applied (a height where `core-block-parsed` runs and
- *   `core-ledger-state` does not, or the cursor's block re-delivered after a restart) gets the release alone. Neither
- *   is awaited: the thread answers in order, so the next block's apply finds h committed, and a thread that failed
- *   fails that apply.
+ *   sends the commit of h, so that the state after h becomes the committed one (h + 1, if applied ahead on h's pending
+ *   state before, stays pending on it); then, always, the release of the parses kept up to h. So a block nothing
+ *   applied (a height where `core-block-parsed` runs and `core-ledger-state` does not, or the cursor's block
+ *   re-delivered after a restart) gets the release alone. Neither is awaited: the thread answers in order, so a later
+ *   request (h + 1's load and its apply at its turn) finds h committed, and a thread that failed fails it.
  * - `written(h)`: h's rows are in the open transaction. `rolledBack(h)`: h will not be committed by the transaction it
  *   was processed for, which ended without committing, or h's run ended before it was written. Neither sends anything:
  *   the host keeps the blocks written in the open transaction and not yet committed, which a commit or a rollback ends.
@@ -184,7 +209,7 @@ export interface LedgerHost {
    * fails. Rejects for a worker that failed or is closed.
    */
   restart(): Promise<void>;
-  /** How many times {@link LedgerHost.restart} started a new thread. */
+  /** How many times a new thread took the old one's place: at {@link LedgerHost.restart}, or after a trap ahead. */
   readonly restarts: number;
   /**
    * Runs one module's ledger tasks for block `input` and returns their results by task name (`../tasks.ts`). The
@@ -216,6 +241,12 @@ export interface LedgerWorkerOptions {
   readonly bridgeBytes?: number;
   /** The thread's entry ({@link ledgerWorkerEntry} unless given). */
   readonly entry?: URL;
+  /**
+   * Whether a node request of a block applied ahead is answered only through a read that sees the block before its
+   * parent or a later one (see the module comment); true (false: a negative control's, which answers it through the
+   * read of any request in flight).
+   */
+  readonly aheadReadsCurrent?: boolean;
   /**
    * A module whose `modules` export lists the host's user modules, which UmbraDB's entry (`./entry.ts`) imports in the
    * thread for their ledger tasks. For the `umbradb` command it is the configuration file.
@@ -295,6 +326,15 @@ function heightOf(request: LedgerRequest): bigint | null {
 
 /** A parse request as sent. */
 type ParseRequest = Extract<LedgerRequest, { readonly type: "parse" }>;
+
+/** Whether `request` applies a block ahead (`ApplyBlock.ahead`). */
+const isAhead = (request: LedgerRequest): boolean => request.type === "apply" && request.input.ahead === true;
+
+/**
+ * Whether `read` holds every stored node the apply of block `height` marked ahead reads (see the module comment): it
+ * reports a committed height of `height` − 2 or more.
+ */
+const servesAhead = (read: NodeReader, height: bigint): boolean => typeof read.height === "bigint" && read.height >= height - 2n;
 
 const hexOf = (bytes: Uint8Array): string => Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 
@@ -423,8 +463,12 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
   // The host's facts of each block's transaction, over its own commit and release (made below).
   const facts = transactionFacts({ commit: (block) => commit(block), release: (drop) => release(drop) });
   let database: NodeDatabase | null = null;
-  /** Node requests of requests given no read, waiting for a read (see the module comment). */
-  const waiting = new Set<(read: NodeReader) => void>();
+  /**
+   * Node requests of requests given no read, waiting for a read (see the module comment): each is offered a read that
+   * is lent (`lent` true) or that a request brings, and takes it when it may be answered through it.
+   */
+  const waiting = new Set<(read: NodeReader, lent: boolean) => void>();
+  const aheadReadsCurrent = options.aheadReadsCurrent !== false;
   /** The reads lent to the requests given none ({@link LedgerHost.lend}), the last one first to answer. */
   const lent: NodeReader[] = [];
   /** The node requests being answered through each lent read. */
@@ -505,8 +549,11 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
     const { bridge } = thread;
     const from = tracing() ? performance.now() : null;
     if (from !== null && at !== undefined) traceAdd("nodeNoticeMs", traceClock() - at);
-    const own =
-      pending.get(id)?.read ?? lent.at(-1) ?? [...pending.values()].find((request) => request.read !== null)?.read ?? null;
+    const request = pending.get(id);
+    // The block a node request of an apply ahead is for: only a read that sees the block before its parent serves it.
+    const ahead = aheadReadsCurrent && request !== undefined && isAhead(request.request) ? request.height : null;
+    const serves = (read: NodeReader): boolean => ahead === null || servesAhead(read, ahead);
+    const own = request?.read ?? lent.at(-1) ?? [...pending.values()].find((other) => other.read !== null && serves(other.read))?.read ?? null;
     if (own !== null || database === null) {
       void answerTimed(bridge, own, from);
       return;
@@ -515,11 +562,13 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
     const once = async (read: NodeReader | null): Promise<void> => {
       if (answered) return;
       answered = true;
-      waiting.delete(viaRequest);
+      waiting.delete(offered);
       await answerTimed(bridge, read, from);
     };
-    const viaRequest = (read: NodeReader): void => void once(read);
-    waiting.add(viaRequest);
+    const offered = (read: NodeReader, lentRead: boolean): void => {
+      if (lentRead || serves(read)) void once(read);
+    };
+    waiting.add(offered);
     database.read((read) => once(read)).catch(() => once(null));
   };
 
@@ -545,7 +594,16 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
       pending.delete(message.id);
       request?.resolve(message.value);
     } else if (message.fatal) {
-      fail(new LedgerWorkerFailure(`the ledger worker's package failed and its thread ended: ${message.error.name}: ${message.error.message}`));
+      const trap = `the ledger worker's package failed and its thread ended: ${message.error.name}: ${message.error.message}`;
+      if (request === undefined || !isAhead(request.request) || failure !== null || closed) {
+        fail(new LedgerWorkerFailure(trap));
+        return;
+      }
+      // An apply marked ahead: the block is judged at its own turn (see the module comment).
+      pending.delete(message.id);
+      const old = replace((other) => !isAhead(other.request));
+      void old.worker.terminate();
+      request.reject(new LedgerWorkerFailure(`${trap}, while applying block ${heightOf(request.request)} ahead; a new thread took its place`));
     } else {
       pending.delete(message.id);
       request?.reject(errorOf(message.error));
@@ -553,6 +611,36 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
   };
 
   let thread = spawn();
+
+  /**
+   * Ends the current thread and starts a new one in its place: the parses kept for blocks not released are sent to it
+   * again in their order, a parse in flight answered by the new thread; every other request in flight is sent again in
+   * its order when `again` says so, and fails otherwise. Returns the ended thread, for its termination.
+   */
+  const replace = (again: (request: Pending) => boolean): Thread => {
+    const old = thread;
+    old.retired = true;
+    before.requests += old.bridge.stats.requests;
+    before.nodes += old.bridge.stats.nodes;
+    const inFlight = [...pending.values()];
+    pending.clear();
+    thread = spawn();
+    restarts += 1;
+    answeredAt = performance.now();
+    const parsing = new Map(inFlight.filter((request) => request.kind === "parse").map((request) => [hexOf((request.request as ParseRequest).block.hash), request]));
+    for (const request of parses.kept()) {
+      const key = hexOf(request.block.hash);
+      post(request, parsing.get(key) ?? { read: null, resolve: () => undefined, reject: () => undefined });
+      parsing.delete(key);
+    }
+    for (const request of parsing.values()) post(request.request, request);
+    for (const request of inFlight) {
+      if (request.kind === "parse") continue;
+      if (again(request)) post(request.request, request);
+      else request.reject(new Error(`the ledger worker was restarted while its ${request.kind} request ran`));
+    }
+    return old;
+  };
 
   /**
    * Posts `request` to the current thread under a new number, `entry` its pending record. In a traced process the
@@ -571,7 +659,7 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
     facts.sent(request);
     return new Promise<T>((resolve, reject) => {
       post(request, { read: read ?? null, resolve: resolve as (value: unknown) => void, reject });
-      if (read !== undefined) for (const waiter of [...waiting]) waiter(read);
+      if (read !== undefined) for (const waiter of [...waiting]) waiter(read, false);
     });
   };
 
@@ -586,7 +674,7 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
     lend(read) {
       lent.push(read);
       if (!answering.has(read)) answering.set(read, new Set());
-      for (const waiter of [...waiting]) waiter(read);
+      for (const waiter of [...waiting]) waiter(read, true);
       return async () => {
         const at = lent.lastIndexOf(read);
         if (at >= 0) lent.splice(at, 1);
@@ -618,33 +706,12 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
     async restart() {
       if (failure !== null) throw failure;
       if (closed) throw new Error("the ledger worker is closed");
-      const old = thread;
-      old.retired = true;
-      before.requests += old.bridge.stats.requests;
-      before.nodes += old.bridge.stats.nodes;
-      const inFlight = [...pending.values()];
-      pending.clear();
-      thread = spawn();
-      restarts += 1;
-      answeredAt = performance.now();
       // The parses kept for blocks not released yet, sent again in their order, a parse still in flight answered by
-      // the new thread; any other request in flight but a ledger task's fails (it ran on the thread that ended).
-      const parsing = new Map(inFlight.filter((request) => request.kind === "parse").map((request) => [hexOf((request.request as ParseRequest).block.hash), request]));
-      for (const request of parses.kept()) {
-        const key = hexOf(request.block.hash);
-        post(request, parsing.get(key) ?? { read: null, resolve: () => undefined, reject: () => undefined });
-        parsing.delete(key);
-      }
-      for (const request of parsing.values()) post(request.request, request);
-      // A ledger task's request in flight — another block's, run at its module's `on-parse` while this one computed —
+      // the new thread; any other request in flight but a ledger task's fails (it ran on the thread that ended). A
+      // ledger task's request in flight — another block's, run at its module's `on-parse` while this one computed —
       // runs again there, on the parse sent again: a task keeps nothing between requests (one that needs the state
       // fails there, as the new thread holds none).
-      for (const request of inFlight) if (request.kind === "tasks") post(request.request, request);
-      for (const request of inFlight) {
-        if (request.kind !== "parse" && request.kind !== "tasks") {
-          request.reject(new Error(`the ledger worker was restarted while its ${request.kind} request ran`));
-        }
-      }
+      const old = replace((request) => request.kind === "tasks");
       await old.worker.terminate();
       await old.exited;
     },

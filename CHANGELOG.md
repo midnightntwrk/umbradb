@@ -290,6 +290,32 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   prepared when a schema change the process made was counted (a migration, a writer's rollback); and on a session
   where an execution of it by name failed. While a marked statement's execution by name has no answer, its session
   sends nothing else: a statement asked for meanwhile is sent after that answer.
+- **The ledger worker applies the next block while a block's transaction runs.** `core-ledger-state`'s `on-settle` of
+  a block sends the apply of the next block to the ledger worker right after it sends the block's eviction (right after
+  its computation when it evicts nothing), when the node source has that block prepared; the worker answers in order,
+  so it has forgotten the nodes the block deleted before it applies the next one. It applies it while the main thread
+  writes the block's net change, commits, and runs the next block's points before its `on-compute`, which then takes
+  the result instead of asking for the apply. No block is applied before the eviction of the block below it is sent,
+  and never more than one ahead. The result is used only when the next block continues the block before (`continues`),
+  the worker thread is the one that applied it and its input is the one built at its turn; otherwise the block is
+  applied at its turn: after a failure of the block's transaction or of its `on-settle`, a block made again, a `COMMIT`
+  whose answer was lost, a replaced writer's session, a refused eviction's restart, a trap in the apply ahead (which
+  now ends that worker thread only, the block judged at its turn), or an input that differs, which also restarts the
+  worker thread. Blocks 0 and 1, a v8 → v9 conversion and an upgrade within v9 are applied at their turn. What is
+  stored at a height does not change. The worker's engine keeps, with each state it holds pending, the input the block
+  was applied from, and gives a pending block's result back only for that input; it applies no block after an apply
+  failed once its state was made (the package may hold a key it persisted and did not flush). In both cases it refuses
+  with `ApplyNeedsNewThread`, and `core-ledger-state` applies the block in a new worker thread, from the state the
+  database stores. This also holds for a height made again without blocks applied ahead. The node requests of a block
+  applied ahead are answered through a read lent for it, a read of another request that sees the block before its
+  parent or a later one, or a read of the database; never through an older read of another request, in which a node
+  written since is missing. On PostgreSQL the ledger worker's reads of the database for a request given no read do not
+  wait for the reader pool: they take a pooled reader when one is free, and otherwise run on one more reader session,
+  opened at its first use, so the process may hold `readConnections` + 1 reader sessions. A new operational setting of
+  the `core` entry, `applyAhead` (`true`), turns it
+  off with `false`. In the block trace, `aheadUsed` and `aheadDropped` are new, and `applyMs` is the wait for the
+  result at the block's `on-compute`; the operator guide lists them. `docs/research/apply-ahead.md` describes the rule
+  and why a result applied ahead is the one an apply at the block's turn gives.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 

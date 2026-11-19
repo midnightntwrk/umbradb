@@ -9,7 +9,7 @@
 // Shared by the test package the ledger worker loads (`sweep-test-loader.ts`) and the tests' reference model
 // (`test/backbone/sweep-model.ts`). Erasable TypeScript only: the worker runs it through Node.js's type stripping.
 //
-// Three DAGs, selected by name ({@link FixtureDag}); every function takes the name, `"original"` unless given:
+// Four DAGs, selected by name ({@link FixtureDag}); every function takes the name, `"original"` unless given:
 // - `"original"`: the DAG above, which the sweep's tests run, unchanged.
 // - `"extended"`: the same states with more children under each root, the cases of the reference-counting tests
 //   ({@link extendedCases}). Their child lists also embed children (`ArenaKey::Direct`: the byte 1, the payload as a
@@ -38,6 +38,10 @@
 //   with `requeued`, its leaf and `requeue holder`); every other case as there. Each key is written with one child list
 //   throughout, deletions and re-insertions included, which the comparison with the sweep's model needs (the sweep
 //   keeps a node's first child list).
+// - `"flip"`: the original DAG, but subtree 1 has a version of its own at {@link FLIP} and the height after it, then
+//   its version before again. So the block after those two brings back nodes that the block before it deleted
+//   (content reused right after its deletion), which an apply of that block made before that deletion reached the
+//   ledger worker would leave out of its flush (`src/backbone/core-ledger-state/apply-ahead.ts`).
 
 import { createHash } from "node:crypto";
 
@@ -62,10 +66,13 @@ export const REQUEUE = 63;
 export const AGAIN = 71;
 
 /**
- * Which DAG: the original, which the sweep's tests run; the one extended with the reference-counting cases; or that one
- * without its rewrite cases, every key in one form.
+ * Which DAG: the original, which the sweep's tests run; the one extended with the reference-counting cases; that one
+ * without its rewrite cases, every key in one form; or the original with subtree 1 flipped at {@link FLIP}.
  */
-export type FixtureDag = "original" | "extended" | "one-form";
+export type FixtureDag = "original" | "extended" | "one-form" | "flip";
+
+/** The flip DAG: subtree 1 has its own version at this height and the next, between two heights of one version. */
+export const FLIP = 41;
 
 /** A node of the fixture: its key, payload and serialized child list, and its children's keys. */
 export interface FixtureNode {
@@ -95,9 +102,14 @@ function node(data: Uint8Array, refs: readonly Uint8Array[]): FixtureNode {
   return { key: Uint8Array.from(hash.digest()), data, children, refs };
 }
 
-/** The version subtree `i` has at height `h`. */
-export function versionOf(i: number, h: number): number {
+/** The DAGs built as the original, the flip DAG's subtree 1 apart. */
+type OriginalDag = "original" | "flip";
+const isOriginal = (dag: FixtureDag): dag is OriginalDag => dag === "original" || dag === "flip";
+
+/** The version subtree `i` has at height `h` (with `flip`, subtree 1's own at {@link FLIP} and the height after). */
+export function versionOf(i: number, h: number, flip = false): number {
   if (i === 0) return h >= CHANGE && h < REVERT ? 1 : 0;
+  if (flip && i === 1 && h >= FLIP && h < FLIP + 2) return -1;
   return Math.floor((h + 3 * i) / 7);
 }
 
@@ -117,8 +129,8 @@ function subtree(i: number, v: number): FixtureNode[] {
 
 /** The state after height `h` of `dag`: its root node first, then every node it holds as a row. */
 export function stateNodes(h: number, dag: FixtureDag = "original"): FixtureNode[] {
-  if (dag !== "original") return extendedStateNodes(h, dag);
-  const parts = Array.from({ length: WIDTH }, (_, i) => subtree(i, versionOf(i, h)));
+  if (!isOriginal(dag)) return extendedStateNodes(h, dag);
+  const parts = Array.from({ length: WIDTH }, (_, i) => subtree(i, versionOf(i, h, dag === "flip")));
   const root = node(utf8(`state ${h}`), parts.map((part) => (part[0] as FixtureNode).key));
   return [root, ...parts.flat()];
 }
@@ -257,7 +269,7 @@ const extendedStates = new Map<string, FixtureNode[]>();
  * The extended DAG's state after `h` (or the one-form DAG's): its root (the original's subtrees, then the cases'
  * nodes), then its rows.
  */
-function extendedStateNodes(h: number, dag: Exclude<FixtureDag, "original">): FixtureNode[] {
+function extendedStateNodes(h: number, dag: Exclude<FixtureDag, OriginalDag>): FixtureNode[] {
   let nodes = extendedStates.get(`${dag} ${h}`);
   if (nodes === undefined) {
     nodes = buildExtendedState(h, dag);
@@ -267,7 +279,7 @@ function extendedStateNodes(h: number, dag: Exclude<FixtureDag, "original">): Fi
 }
 
 /** {@link extendedStateNodes}, built: the one-form DAG leaves the rewrite cases out of the root. */
-function buildExtendedState(h: number, dag: Exclude<FixtureDag, "original">): FixtureNode[] {
+function buildExtendedState(h: number, dag: Exclude<FixtureDag, OriginalDag>): FixtureNode[] {
   const parts = Array.from({ length: WIDTH }, (_, i) => subtree(i, versionOf(i, h)));
   const c = extendedCases(h);
   const rewrites = dag === "extended" ? [c.toRef.node, c.toEmbedded.node, c.requeue.node] : [];

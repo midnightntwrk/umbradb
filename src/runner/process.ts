@@ -304,6 +304,7 @@ import type { ProcessSide } from "../config/core-settings.js";
 import { openConfiguredDatabase } from "../config/database.js";
 import { type DatabaseParts, databaseText, type TransportReader } from "../config/database-parts.js";
 import { openPostgres } from "../db/postgres.js";
+import { spareRead } from "../db/spare-read.js";
 import { refuseWritingReader, transportReaderFacts, type TransportReaderFacts } from "../private/transport-reader.js";
 import { CORE_ENTRY_ID } from "../config/entries.js";
 import { checkHistory, graphInputOf, type HistoryCheck, versionText } from "../config/history.js";
@@ -2087,12 +2088,19 @@ class Process implements ProcessHandle {
       const sources = settings.ledgerSources as VerifyLedgerPackagesOptions["sources"];
       (input.checkLedgerPackages ?? checkLedgerPackages)(sources === undefined ? {} : { sources });
       this.#ledger ??= ledgerWorkerOf(input, this.#workerOutput())();
-      // A request given no read (a parse) reads stored nodes through the process's database.
-      this.#ledger.useDatabase({ read: (body) => db.read(body) });
+      // A request given no read (a parse, a block applied ahead) reads stored nodes through the process's database,
+      // on a read that does not wait for the reader pool: a pooled read may wait for a request of this same worker.
+      const nodeRead = spareRead(db);
+      this.#ledger.useDatabase({ read: (body) => nodeRead(body) });
       if (parses) bindLedgerParser(contexts.of(CORE_BLOCK_PARSED_ID), this.#ledger);
       for (const part of graph.modules) if (hasLedgerTasks(part)) bindLedgerTasks(contexts.of(part.id), this.#ledger);
       if (applies && isBlockLedgerSource(source)) {
-        bindCoreLedgerState(contexts.of(CORE_LEDGER_STATE_ID), { ledger: this.#ledger, source });
+        bindCoreLedgerState(contexts.of(CORE_LEDGER_STATE_ID), {
+          ledger: this.#ledger,
+          source,
+          // The next height's block context, for its apply ahead (the loop is made below).
+          ahead: (height) => this.#loop?.ahead(height, CORE_LEDGER_STATE_ID) ?? null,
+        });
       }
     }
     await startDatabase(db, {
