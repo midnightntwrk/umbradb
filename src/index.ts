@@ -8,7 +8,8 @@
  *   declarations, whose `entry` writes their entries (`CORE_BLOCK_PARSED.entry({ start, config: {} })`).
  * - **A module**: {@link defineModule} and its types, the points ({@link POINTS}), the handles, the cursor-table and
  *   height-versioned-table helpers, the canonical encodings and the contents hash (with the content-defined tables of
- *   UmbraDB's own declarations), the module API's envelope helpers, `hexBytes` for a settings schema, and
+ *   UmbraDB's own declarations), routes ({@link defineRoute}, registered with `api.route`), their page cursors and
+ *   `bigint` schemas, the module API's envelope helpers for a raw HTTP handler, `hexBytes` for a settings schema, and
  *   `retainedStatesOf`.
  * - **A host program**: {@link startUmbraDB}, UmbraDB run in the host's own process, with its options, its handle and
  *   their types (the network request, the mounted handlers, the private link's channel); {@link finalizedHeight}, a
@@ -33,8 +34,10 @@ export type { BlockWriteHandle, ReadHandle, SchemaWriteHandle } from "./db/api.j
 export { type ErrorCode, UmbraError } from "./db/errors.js";
 export { contentsHash } from "./library/contents-hash.js";
 export { encodeCanonical, encodeRow } from "./determinism/cbor.js";
+export { bigintText, uintText } from "./helpers/bigint-text.js";
 export { cursorTable } from "./helpers/cursor-table.js";
 export { heightVersionedTable } from "./helpers/height-versioned.js";
+export { type PageCursor, pageCursor } from "./helpers/page-cursor.js";
 export type { LedgerPackage, LedgerTask, ParsedTransaction } from "./ledger/types.js";
 export { type MessagePortLike, messagePortChannel, type PrivateLinkChannel } from "./library/channels.js";
 export { finalizedHeight } from "./library/finalized-height.js";
@@ -71,6 +74,7 @@ export {
   type ProcessContext,
   type Revision,
 } from "./modules/declaration.js";
+export { defineRoute, invalidRequest, type Route, type RouteContext, RouteError, type RouteErrorKind } from "./modules/route.js";
 export type { BlockRef } from "./runner/block-source.js";
 export { answerChainData, chainDataHeaders, readChainDataView, withViewExtensions } from "./runner/envelope.js";
 export { InMemoryBlockSource } from "./runner/in-memory-source.js";
