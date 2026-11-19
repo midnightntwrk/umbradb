@@ -8,12 +8,12 @@ Formal/Lean/.lake/
 # v1.0.0-recovery-testing soak: per-run GC-pass duration artifact (runtime output, not source)
 test/integration/soak/artifacts/
 
-# v1.0.0-recovery-testing Task 7: coverage + mutation gate runtime outputs (not source)
+# v1.0.0-recovery-testing Task 7: coverage gate runtime outputs (not source)
 coverage/
 .conformance-report.json
-.stryker-tmp/
+# Sharded runs' blob reports
+.vitest-reports/
 reports/
-stryker.log
 
 # Build output (declaration + JS emitted by `npm run build`; never committed)
 dist/

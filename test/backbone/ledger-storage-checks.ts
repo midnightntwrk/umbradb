@@ -11,7 +11,7 @@ import type { SeenLoad } from "./ledger-restart.js";
 import { type LedgerScenario, ledgerScenario, type LedgerTx } from "./ledger-tapes.js";
 
 /**
- * The oracles of the ledger storage tests, shared by `ledger-storage.test.ts` and its negative controls. Each reads
+ * The oracles of the ledger storage tests, shared by `ledger-storage.ts` and its negative controls. Each reads
  * the database after a process ran a scenario (`./ledger-tapes.ts`) and lists what differs from what the scenario's
  * chain and its reference replay hold; the list is empty when the criterion holds. Imports nothing of Vitest.
  *
