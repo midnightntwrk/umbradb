@@ -60,7 +60,7 @@ import { ledgerTableIssuesOf, ledgerTableOf } from "../ledger/networks.js";
 import type { ConfiguredLedgerTable } from "../ledger/version-table.js";
 import { SEMVER } from "../modules/validation.js";
 import { instanceIdSchema } from "../private/instance-id.js";
-import { FAST_SYNC_MAX_BLOCKS } from "../runner/fast-sync.js";
+import { FAST_SYNC_DEFAULT, FAST_SYNC_MAX_BLOCKS } from "../runner/fast-sync.js";
 
 /** Which process a configuration is for: the public (core) process, or a private one. */
 export type ProcessSide = "public" | "private";
@@ -300,7 +300,10 @@ export const PUBLIC_CORE_SCHEMA = z
     // at every height does not depend on it. A public process's only: a private process stores one block per
     // transaction.
     fastSync: z
-      .strictObject({ blocks: count().max(FAST_SYNC_MAX_BLOCKS).default(0), distance: count().default(600) })
+      .strictObject({
+        blocks: count().max(FAST_SYNC_MAX_BLOCKS).default(FAST_SYNC_DEFAULT.blocks),
+        distance: count().default(FAST_SYNC_DEFAULT.distance),
+      })
       .prefault({})
       .meta(OPERATIONAL),
   })

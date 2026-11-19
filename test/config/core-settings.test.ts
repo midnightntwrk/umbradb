@@ -18,6 +18,7 @@ import { fieldKinds } from "../../src/config/validate.js";
 import { MAX_READ_TIMEOUT_MS } from "../../src/db/read-options.js";
 import { builtInLedgerTable } from "../../src/ledger/networks.js";
 import { validateDeclarations } from "../../src/modules/validation.js";
+import { chunkEnd, FAST_SYNC_DEFAULT } from "../../src/runner/fast-sync.js";
 import { declaration } from "../modules/declarations.js";
 
 /**
@@ -167,6 +168,14 @@ describe("the core entry's fields, kinds and defaults", () => {
       { blocks: 100, distance: 600 },
       { blocks: 0, distance: 0 },
     ]);
+  });
+
+  it("fastSync's defaults are the one definition the loop's policy exports, and that definition is off", () => {
+    const absent = (PUBLIC_CORE_SCHEMA.parse(REQUIRED_PUBLIC) as { fastSync: unknown }).fastSync;
+    const empty = (PUBLIC_CORE_SCHEMA.parse({ ...REQUIRED_PUBLIC, fastSync: {} }) as { fastSync: unknown }).fastSync;
+    expect(absent).toEqual(FAST_SYNC_DEFAULT);
+    expect(empty).toEqual(FAST_SYNC_DEFAULT);
+    expect(chunkEnd(FAST_SYNC_DEFAULT, 1n, { head: 1_000_000n, rangeEnd: null, last: null, alone: null })).toBeNull();
   });
 
   it("fastSync is a public process's only: the private schema refuses it", () => {

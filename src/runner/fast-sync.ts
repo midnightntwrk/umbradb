@@ -14,7 +14,7 @@ export interface FastSync {
   readonly distance: number;
 }
 
-/** The setting's defaults (`src/config/core-settings.ts`): off. */
+/** The setting's defaults, which the `core` entry's schema takes from here (`src/config/core-settings.ts`): off. */
 export const FAST_SYNC_DEFAULT: FastSync = Object.freeze({ blocks: 0, distance: 600 });
 
 /**
