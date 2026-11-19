@@ -1093,11 +1093,16 @@ export default defineConfig({
   heights as its `latestStarts` (§11): a new database configured above one starts there and backfills from the chain,
   and every database started at or below it, on any machine, holds the same rows (`FIRST_CONTRACT_LOG_HEIGHTS`). The
   node must serve those blocks and the state at their parents (an archive node, or one that kept that state).
-- **The indexer starts with its database.** Its rows are materialized state — each token's current fields — so they depend on
-  where it started. It may start at any S (`startsMidChain: true`), but its first entry may not start above S: a
-  database that has run without it refuses it at startup (`callback-error` at `on-start-db` of `token-metadata`, its
-  cause a `TokenMetadataStartAfterDatabase` with the code `token-metadata-start-after-database`). Add it to a new
-  database. A gap between its revisions (§11) is refused the same way, with `token-metadata-revision-gap`.
+- **The indexer starts with its database, or later when that loses nothing.** Its rows are materialized state — each
+  token's current fields — so they depend on where it started. It may start at any S (`startsMidChain: true`). A
+  first entry above S (the module added to a database that already ran) is checked in `on-start-db`, once, before its
+  first block: the module reads the stored rows of the `contract-logs` item below its start and starts only when the
+  logs providers' revisions cover every height from S, no site is unresolved, and no stored `Misc` log is an event it
+  would have applied (`laterStartRefusal`). A rejected event changes nothing, so it does not count. Otherwise startup
+  is refused (`callback-error` at `on-start-db` of `token-metadata`, its cause a `TokenMetadataStartAfterDatabase`
+  with the code `token-metadata-start-after-database` and, in `why`, what was found). This is how a module whose
+  state is a fold over an item can be added later: read the item's stored rows and prove the fold would be empty. A
+  gap between its revisions (§11) is refused the same way, with `token-metadata-revision-gap`.
 - **Its tables** (schema `token_metadata`), related by keys: `tokens` (mutable: one row per described token, keyed
   by its id, the hash of domain separator and contract, which is its color for kinds 1 and 2, and its kind; the row
   is deleted with the token's last field) and `fields` (mutable: each token's current defined fields, whole; keys

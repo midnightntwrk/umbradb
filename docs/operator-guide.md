@@ -195,11 +195,20 @@ TOKEN_METADATA_API.entry({ start, config: {} }),
   (`the database starts at …`), and `config check` notes it. Every database started at or below that block holds the
   same token metadata, on any machine. The node must serve those blocks and the state at their parents: an archive
   node, or one that kept that state. A `custom` network is not moved.
-- **The indexer starts with its database.** Give it the same start as the core entry, in a new database. A database that has
-  already run from a lower height refuses it: startup ends with `callback-error` at `on-start-db` of
-  `token-metadata`, and the log names the cause, `token-metadata-start-after-database`, with both heights. Its state is
-  built from the database's first block, so to add it later, start a new database with it. For the same reason a configuration
-  that stops it and starts it again later (a revision's `stop` below the next one's start minus one) is refused:
+- **The indexer starts with its database, or later when nothing was published yet.** Its state is built from every
+  MIP-0018 event since the database's first block. In a new database, give it the same start as the core entry. To
+  add it to a database that already ran, give its entry a start above the cursor, like any added entry: at startup
+  it reads the contract logs the database stored below that start, and starts when none of them is a MIP-0018 event
+  it would have applied (it then holds what a run from the first block would hold). The read happens once, before
+  its first block. It is refused when:
+  - a stored log below its start is an event it would have applied (the log names it: log, transaction and height);
+  - the database stored no contract logs for some height below its start (no logs provider was configured there);
+  - with `core-contract-logs-fast`, a log site below its start is unresolved, since that site may be an event.
+
+  A refused startup ends with `callback-error` at `on-start-db` of `token-metadata`; the log names the cause,
+  `token-metadata-start-after-database`, with both heights and which of the three it found. To serve token metadata
+  from such a database, start a new one with the indexer in it. A configuration that stops the indexer and starts it
+  again later (a revision's `stop` below the next one's start minus one) is refused the same way:
   `callback-error` at `on-start-db`, caused by `token-metadata-revision-gap`, naming the stop and the next start.
 - **Which logs provider.** `core-contract-logs-full` gives every log from the ledger but starts only at 0 (it needs
   `core-ledger-state`). `core-contract-logs-fast` starts anywhere but is development only (the core entry's

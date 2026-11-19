@@ -1,6 +1,6 @@
 /**
- * The statements of `token-metadata`'s write path, by name ({@link STATEMENTS}), and the functions that bind them. The
- * tables they write are `./schema.ts`'s.
+ * The statements of `token-metadata`, by name ({@link STATEMENTS}), and the functions that bind them: its write path,
+ * whose tables are `./schema.ts`'s, and the reads its start makes of the core's and the `contract-logs` item's tables.
  */
 
 import type { BlockWriteHandle, SchemaWriteHandle } from "../../db/api.js";
@@ -55,12 +55,20 @@ export const STATEMENTS = Object.freeze({
       set_tx = EXCLUDED.set_tx, set_event = EXCLUDED.set_event, set_record = EXCLUDED.set_record`,
   /** Deletes one field. */
   deleteField: `DELETE FROM ${TOKEN_METADATA_SCHEMA}.fields WHERE token_id = $1 AND kind = $2 AND key = $3`,
-  /**
-   * This is only for core-contract-logs-fast.
-   *
-   * S, the database's first height (the core's one-row table).
-   */
+  /** S, the database's first height (the core's one-row table). */
   databaseStart: "SELECT start_height FROM core_chain.identity WHERE id = 1",
+  /** The revisions of every entry that provides the item `$1`, in start order (the core's configuration history). */
+  providerRevisions: 'SELECT start, stop FROM core_chain.config WHERE $1 = ANY(provides) ORDER BY start',
+  /**
+   * A page of the stored `Misc` logs below height `$1` whose data holds the bytes `$2`, in chain order: the first `$6`
+   * after the log (`$3`, `$4`, `$5`). It reads the stored logs below `$1` once over its pages; a start runs it once.
+   */
+  earlierNamedLogs: `SELECT height, tx_index, log_index, data FROM contract_logs.logs
+     WHERE (height, tx_index, log_index) > ($3::bigint, $4::int, $5::int) AND height < $1 AND event_type = 'Misc'
+       AND position($2::bytea in data) > 0
+     ORDER BY height, tx_index, log_index LIMIT $6`,
+  /** The first stored unresolved log site below height `$1`. */
+  earlierUnresolvedSite: "SELECT height FROM contract_logs.unresolved WHERE height < $1 ORDER BY height LIMIT 1",
 });
 
 const tokenParams = (t: TokenRef): unknown[] => [t.id, t.kind];
@@ -110,4 +118,38 @@ export async function deleteField(w: Write, t: TokenRef, key: Uint8Array): Promi
 export async function databaseStart(read: Pick<SchemaWriteHandle, "query">): Promise<bigint | null> {
   const [row] = await read.query(STATEMENTS.databaseStart);
   return row === undefined ? null : (row.start_height as bigint);
+}
+
+/** The revisions of every entry that provides `item`, in start order. */
+export async function providerRevisions(read: Pick<SchemaWriteHandle, "query">, item: string): Promise<{ start: bigint; stop: bigint | null }[]> {
+  return (await read.query(STATEMENTS.providerRevisions, [item])).map((r) => ({ start: r.start as bigint, stop: (r.stop as bigint | null) ?? null }));
+}
+
+/** One stored log, as a later start reads it. */
+export interface StoredLog {
+  readonly height: bigint;
+  readonly transaction: number;
+  readonly index: number;
+  readonly data: Uint8Array;
+}
+
+/** How many stored logs one read of {@link earlierNamedLogs} takes. */
+export const EARLIER_LOGS_PAGE = 500;
+
+/** The stored `Misc` logs below `height` whose data holds `bytes`, in chain order, read a page at a time. */
+export async function* earlierNamedLogs(read: Pick<SchemaWriteHandle, "query">, height: bigint, bytes: Uint8Array, page = EARLIER_LOGS_PAGE): AsyncGenerator<StoredLog> {
+  let after: readonly [bigint, number, number] = [-1n, 0, 0];
+  for (;;) {
+    const rows = await read.query(STATEMENTS.earlierNamedLogs, [height, bytes, ...after, page]);
+    for (const r of rows) yield { height: BigInt(r.height as bigint | string), transaction: Number(r.tx_index), index: Number(r.log_index), data: r.data as Uint8Array };
+    const last = rows.at(-1);
+    if (last === undefined || rows.length < page) return;
+    after = [BigInt(last.height as bigint | string), Number(last.tx_index), Number(last.log_index)];
+  }
+}
+
+/** The height of the first stored unresolved log site below `height`, or null. */
+export async function earlierUnresolvedSite(read: Pick<SchemaWriteHandle, "query">, height: bigint): Promise<bigint | null> {
+  const [row] = await read.query(STATEMENTS.earlierUnresolvedSite, [height]);
+  return row === undefined ? null : (row.height as bigint);
 }

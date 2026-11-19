@@ -8,6 +8,7 @@ import {
   contractLogsMigrations,
   type UnresolvedLogSite,
   writeLogRows,
+  writeUnresolvedRows,
 } from "../../../src/backbone/contract-logs/contract-logs.js";
 import { cursorHeight } from "../../../src/backbone/core-block-commit/sql.js";
 import { UMBRADB_VERSION } from "../../../src/config/build.js";
@@ -65,6 +66,7 @@ export function logsProvider(
       },
       async "on-db-write"(_p, b, w) {
         await writeLogRows(w, b.height, logs.get(b.height) ?? []);
+        await writeUnresolvedRows(w, b.height, unresolved.get(b.height) ?? []);
       },
     },
   }) as ModuleDeclaration;

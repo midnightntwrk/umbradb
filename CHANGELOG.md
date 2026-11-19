@@ -23,7 +23,8 @@ adheres to [Semantic Versioning](https://semver.org/).
   HTTP handlers. The module API's 404 and 405 messages no longer repeat the request's method and path. The
   `stats-module` and `try-module` examples' APIs are routes.
 - MIP-0018 token metadata as two public modules: `token-metadata` (`TOKEN_METADATA`) creates, fills and guards its
-  tables, and refuses a start above its database's first height with `TokenMetadataStartAfterDatabase` as the cause;
+  tables. Added to a database that already ran, it starts when the stored contract logs hold no MIP-0018 event below
+  its start, and is refused otherwise with `TokenMetadataStartAfterDatabase` as the cause;
   `token-metadata-api` (`TOKEN_METADATA_API`) serves them on one route, `getTokens` (`POST
   /token-metadata-api/v1/tokens`, `docs/token-metadata-api.md`), whose input selects tokens by colors, contract,
   domain separator and kind. Its bytes are `0x` lowercase hex and its heights and `UInt` values digits in a string.
