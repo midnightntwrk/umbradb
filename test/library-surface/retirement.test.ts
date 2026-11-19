@@ -9,15 +9,15 @@ import {
   EXPECTED_DEFERRED_COUNT, EXPECTED_REQUIRED_COUNT, type RequiredTestsManifest,
 } from "../integration/check-required-tests.js";
 import {
-  exportProblems, floorProblems, KEPT_REQUIRED_IDS, LEAN_FILES, LEAN_ROOT, leanProblems, MUTATION_TARGETS,
-  mutationProblems, PENDING_FLOORS, RETIRED_DEFERRED_IDS, RETIRED_EXPORTS, RETIRED_MUTATION_TARGETS, RETIRED_PATHS,
+  exportProblems, floorProblems, KEPT_REQUIRED_IDS, LEAN_FILES, LEAN_ROOT, leanProblems, PENDING_FLOORS,
+  RETIRED_DEFERRED_IDS, RETIRED_EXPORTS, RETIRED_PATHS,
   RETIRED_REQUIRED_IDS, retiredFileProblems, retiredPath, scriptProblems, TRUST_IMPORTS,
 } from "./retirement.js";
 
 /**
- * The required-test manifest, `stryker.conf.json` `mutate`, the coverage floors of `vitest.config.ts` and the file list
- * of `Formal/Lean` are compared with the design's retirement list, and any difference fails. Each list is read from the
- * tree as the gates read it (the manifest's JSON, Stryker's JSON, the Vitest configurations as Vitest loads them, the
+ * The required-test manifest, the coverage floors of `vitest.config.ts` and the file list of `Formal/Lean` are compared
+ * with the design's retirement list, and any difference fails. Each list is read from the tree as the gates read it
+ * (the manifest's JSON, the Vitest configuration as Vitest loads it, the
  * files below `Formal/Lean`). It is compared with the retirement list's lists, transcribed in `./retirement.ts`.
  *
  * The retirement list's other rows are checked the same way: no retired file is left in the tree (git's list),
@@ -103,13 +103,6 @@ describe("the gates match the retirement list", () => {
     for (const entry of manifest.required) expect(read(entry.file!)).toContain(`[[${entry.id}]]`);
   });
 
-  it("stryker.conf.json mutates exactly the targets, at break 65, and the mutation run runs their tests", async () => {
-    const stryker = JSON.parse(read("stryker.conf.json")) as { mutate: string[]; thresholds: { break: number } };
-    const include = (await vitestConfig("vitest.mutation.config.ts")).test?.include ?? [];
-    expect(mutationProblems(stryker.mutate, include, stryker.thresholds.break)).toEqual([]);
-    for (const file of [...stryker.mutate, ...include]) expect(statSync(path.join(ROOT, file)).isFile(), file).toBe(true);
-  });
-
   it("vitest.config.ts: the retired floors gone, the moved and added ones held, every src/ directory at 90/85", async () => {
     const coverage = (await vitestConfig("vitest.config.ts")).test?.coverage;
     expect(coverage?.thresholds).toBeDefined();
@@ -148,23 +141,6 @@ describe("the gates match the retirement list", () => {
 });
 
 describe("negative controls: a list that differs from the retirement list fails, naming the difference", () => {
-  it("a mutate list with a 0.9.5 adapter, without a target, another break, or a stray test fails", () => {
-    const targets = Object.keys(MUTATION_TARGETS);
-    const tests = Object.values(MUTATION_TARGETS).flat();
-    expect(mutationProblems(targets, tests, 65)).toEqual([]);
-    expect(mutationProblems([...targets, "src/postgres/temporal-kv.ts"], tests, 65)).toEqual([
-      "stryker.conf.json still mutates src/postgres/temporal-kv.ts, retired",
-    ]);
-    expect(mutationProblems(targets.slice(1), tests, 65)).toEqual([
-      `stryker.conf.json does not mutate ${targets[0]}, a target of design.md §13`,
-    ]);
-    expect(mutationProblems(targets, [...tests, "test/postgres/watermarks.test.ts"], 60)).toEqual([
-      "the mutation run includes test/postgres/watermarks.test.ts, not a test of a target of design.md §13",
-      "stryker.conf.json breaks at 60, design.md §13 keeps 65",
-    ]);
-    expect(mutationProblems(RETIRED_MUTATION_TARGETS, tests, 65)).toHaveLength(5 + targets.length);
-  });
-
   it("floors: a retired key, a missing or weakened floor, a src/ directory without one, the exclusion, fail", async () => {
     const real = (await vitestConfig("vitest.config.ts")).test!.coverage!;
     const thresholds = real.thresholds!;

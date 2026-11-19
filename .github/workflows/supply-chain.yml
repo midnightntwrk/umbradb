@@ -72,7 +72,7 @@ jobs:
 
       - name: npm audit -- blocking, runtime dependencies only (G18 D3)
         # Runtime deps are exactly `@electric-sql/pglite`, `postgres`, `typescript`, `ws` + `zod`
-        # (package.json). --omit=dev keeps the large dev graph (vitest/testcontainers/stryker/esbuild/...)
+        # (package.json). --omit=dev keeps the large dev graph (vitest/testcontainers/esbuild/...)
         # out of the blocking gate, so a dev-only advisory cannot fail it; a HIGH/CRITICAL advisory in a
         # RUNTIME dep does.
         run: npm audit --audit-level=high --omit=dev
