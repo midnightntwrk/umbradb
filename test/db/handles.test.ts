@@ -150,6 +150,8 @@ for (const backend of BACKENDS) {
         ["; COMMIT", "COMMIT"],
         [";; ROLLBACK", "ROLLBACK"],
         [" ; /* a comment */ ; SAVEPOINT s", "SAVEPOINT"],
+        // Two statements, the first one transaction control: refused here, not by the server.
+        ["COMMIT; SELECT 1", "COMMIT"],
         [`; SET SESSION AUTHORIZATION ${role}`, "SET SESSION AUTHORIZATION"],
         [`SET U&"session_authorization" = '${role}'`, "SET SESSION AUTHORIZATION"],
         [`SET U&"\\0073ession_authorization" = '${role}'`, "SET SESSION AUTHORIZATION"],

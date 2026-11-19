@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { UmbraError } from "../../src/db/errors.js";
+import { runMultiStatement } from "../../src/db/multi-statement.js";
 import { readView } from "../../src/db/read-view.js";
 import type * as Sql from "../../src/db/read-view-sql.js";
 import type * as Refusal from "../../src/db/statement-refusal.js";
@@ -102,11 +103,11 @@ describe.each(BACKENDS)("negative controls of the read view on $name", { timeout
     expect(await listenProblems(await fresh())).toContain("listening after the view's transaction: {\"n\":1}, not {\"n\":0}");
   });
 
-  it("B, shown directly: the close's error wins over the body's result, and the transaction refuses every later statement and rolls back", async () => {
+  it("B, shown directly: the close's error wins over the body's result, and the transaction refuses every later statement, through execute, query, a script and a view, and rolls back", async () => {
     variant.current = "B";
     const db = await fresh();
     let viewError: unknown;
-    let later: unknown;
+    let later: unknown[] = [];
     const outcome = await db
       .transaction(async (tx) => {
         await tx.execute("INSERT INTO t.rows VALUES (1, 'outer')");
@@ -114,7 +115,13 @@ describe.each(BACKENDS)("negative controls of the read view on $name", { timeout
           await read.query("SELECT 1/0 AS x").catch(() => undefined);
           return "the body's result";
         }).catch((error: unknown) => error);
-        later = await tx.execute("INSERT INTO t.rows VALUES (2, 'outer')").catch((error: unknown) => error);
+        const refused = (error: unknown): unknown => error;
+        later = [
+          await tx.execute("INSERT INTO t.rows VALUES (2, 'outer')").catch(refused),
+          await tx.query("SELECT 1 AS one").catch(refused),
+          await runMultiStatement(tx, "SELECT 1; SELECT 2").catch(refused),
+          await readView(tx, { height: null }, (read) => read.query("SELECT 1 AS one")).catch(refused),
+        ];
       })
       .then(
         () => "committed",
@@ -122,7 +129,8 @@ describe.each(BACKENDS)("negative controls of the read view on $name", { timeout
       );
     expect(viewError).toBeInstanceOf(UmbraError);
     expect((viewError as UmbraError).details.sqlstate).toBe("25P02");
-    expect(later).toBe(viewError);
+    expect(later).toHaveLength(4);
+    for (const error of later) expect(error).toBe(viewError);
     expect(outcome).toBe(viewError);
     expect(await db.read((read) => read.query("SELECT count(*)::int AS n FROM t.rows"))).toEqual([{ n: 0 }]);
   });

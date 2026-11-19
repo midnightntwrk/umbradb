@@ -57,6 +57,9 @@ describe("the statements a module's handles refuse", () => {
     [" ; /* a comment */ ; -- another\n ; commit", "COMMIT"],
     ["; SET SESSION AUTHORIZATION r", "SET SESSION AUTHORIZATION"],
     [";; PREPARE TRANSACTION 'x'", "PREPARE TRANSACTION"],
+    // A text of two statements is refused by its first.
+    ["COMMIT; SELECT 1", "COMMIT"],
+    ["SAVEPOINT s; INSERT INTO t.rows VALUES (1, 'x')", "SAVEPOINT"],
     // PREPARE TRANSACTION and its string, however the string is written; without `AS` or a type list after it, also
     // when the server would refuse the text.
     ["PREPARE TRANSACTION E'x'", "PREPARE TRANSACTION"],
