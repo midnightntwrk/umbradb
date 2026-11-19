@@ -59,6 +59,15 @@
  * With `sweep` off (one setting for a whole run) nothing is deleted, steps 5 and 6 are skipped, and the queue is not
  * read whole: the membership of the keys step 8 evaluates is read by key.
  *
+ * **The keys known to be rows** ({@link KnownKeys}): step 3 asks the database only about the keys the caller's set
+ * does not hold, and teaches it those the `missing` read finds stored; step 10 takes every key the run deletes out of
+ * it. `core-ledger-state` keeps one set for each process context from one run to the next, bounded
+ * (`./stored-keys.ts`); a caller that gives none gets a set made for the run.
+ *
+ * **The counts and child lists kept between runs** are not the computation's: `core-ledger-state` gives it tables
+ * whose `counts` and `children` reads a copy answers where it holds the key (`./counts-copy.ts`), the copy brought up
+ * to date from each run's outcome; {@link RunReclaim.rootChanges} gives the copy the run's root-count changes.
+ *
  * **Each key in one form.** A key is made into text once, where it enters (a flushed node's key, a reference in a
  * child list, a root-count change, a row a read returns): its 32 bytes as 32 characters, one per byte, whose order is
  * the bytes'. Each distinct key has one record, found by that text, holding everything the computation knows of it;
@@ -207,7 +216,10 @@ export async function writeNet(
  * - `old-queue-only`: the cascade starts from the queue the run found only (step 5);
  * - `queue-change-dropped`: one key's change of the queue is left out of the net write (step 8);
  * - `judged-at-end`: step 3 judges at the run's last block what it judges at each block: a reference, or a raised
- *   key, passes when any block of the run flushes its node, and no block's count is followed.
+ *   key, passes when any block of the run flushes its node, and no block's count is followed;
+ * - `deleted-kept-known`: step 10 leaves the keys the run deletes in the set of keys known to be rows, so a later run
+ *   that references one of them without flushing it is answered from the set, and its `missing-reference` check
+ *   passes.
  */
 export type RunFault =
   | RefcountFault
@@ -217,7 +229,8 @@ export type RunFault =
   | "dropped-unprotected"
   | "old-queue-only"
   | "queue-change-dropped"
-  | "judged-at-end";
+  | "judged-at-end"
+  | "deleted-kept-known";
 
 /**
  * The checks of the run computation, by the reason they halt with. A negative control leaves one out to show what it
@@ -247,7 +260,10 @@ export interface RunTables {
   counts(
     keys: readonly Uint8Array[],
   ): Promise<readonly { readonly key: Uint8Array; readonly row: boolean; readonly refs: number; readonly roots: number }[]>;
-  /** The stored child lists of those of `keys` that `nodes` holds. */
+  /**
+   * The stored child lists of those of `keys` that `nodes` holds. The computation takes only a list's references, so a
+   * list of the same references by reference, payload left out, is the same to it (`./counts-copy.ts` answers so).
+   */
   children(keys: readonly Uint8Array[]): Promise<readonly { readonly key: Uint8Array; readonly children: Uint8Array }[]>;
 }
 
@@ -273,9 +289,10 @@ export function sqlRunTables(read: Pick<ReadHandle, "query">): RunTables {
 }
 
 /**
- * Keys known to be rows, by their text ({@link keyText}): step 3 asks the database only about the others, teaches it
- * those found stored, and the keys the run deletes leave it. It only saves a read. The computation reaches it through
- * this interface alone.
+ * Keys known to be rows, by their text ({@link keyText}): step 3 asks the database only about the others and teaches
+ * it those found stored, and step 10 takes every key the run deletes out of it. It only saves a read while every key
+ * it holds is a row: its caller keeps it from one run to the next and empties it wherever that may not hold
+ * (`./stored-keys.ts`). The computation reaches it through this interface alone.
  */
 export interface KnownKeys {
   has(text: string): boolean;
@@ -283,28 +300,56 @@ export interface KnownKeys {
   forget(text: string): void;
 }
 
+/** The most keys a {@link KnownKeySet} holds unless it is made with another bound. */
+export const KNOWN_KEYS_MAX = 500_000;
+
 /**
- * The {@link KnownKeys} of one run: {@link RunReclaim.compute} makes one unless it is given one, and it is dropped
- * with the run. Nothing in the computation needs it to hold a key from before the run.
+ * The {@link KnownKeys} `core-ledger-state` keeps from one run to the next (`./stored-keys.ts`), or one run's
+ * own, which {@link RunReclaim.compute} makes when it is given none. It holds at most its bound: a key that would take
+ * it past the bound empties it before the key enters. It is emptied rather than closed to new keys, since a block's
+ * references are mostly those of the blocks just before it.
  */
 export class KnownKeySet implements KnownKeys {
   readonly #texts = new Set<string>();
+  readonly #max: number;
+  #emptied = 0;
+
+  /** A set of at most `max` keys, a whole number from 1; {@link KNOWN_KEYS_MAX} unless given. */
+  constructor(max: number = KNOWN_KEYS_MAX) {
+    if (!Number.isSafeInteger(max) || max < 1) throw new RangeError(`a set of keys known to be rows holds at least one key, not ${max}`);
+    this.#max = max;
+  }
 
   /** How many keys it holds. */
   get size(): number {
     return this.#texts.size;
   }
 
+  /** How many times it was emptied while it held a key: by {@link clear} or by its bound. */
+  get emptied(): number {
+    return this.#emptied;
+  }
+
   has(text: string): boolean {
     return this.#texts.has(text);
   }
 
+  /** A read found `text` stored. A key it does not hold, when it holds its bound, empties it first. */
   learn(text: string): void {
+    if (this.#texts.has(text)) return;
+    if (this.#texts.size >= this.#max) this.clear();
     this.#texts.add(text);
   }
 
   forget(text: string): void {
     this.#texts.delete(text);
+  }
+
+  /** Empties it. */
+  clear(): void {
+    if (this.#texts.size === 0) return;
+    this.#texts.clear();
+    this.#emptied += 1;
   }
 }
 
@@ -493,6 +538,17 @@ export class RunReclaim {
     return this.#next === this.first ? undefined : { first: this.first, last: this.#next - 1n };
   }
 
+  /**
+   * Each key's root-count change summed over the blocks handed over, by its text ({@link keyText}), where the sum is not
+   * 0: what the run's blocks added to `root_counts`. A copy of the counts held as after the settle before the run
+   * answers a root count as after its last block by adding it (`./counts-copy.ts`).
+   */
+  get rootChanges(): ReadonlyMap<string, number> {
+    const changes = new Map<string, number>();
+    for (const record of this.#records.values()) if (record.rootChange !== 0) changes.set(record.text, record.rootChange);
+    return changes;
+  }
+
   /** `ledger-refcount-invalid` at block `height` of the run that ends, so far, at block `last`. */
   #invalid(reason: RunCheck, height: bigint, last: bigint, message: string, details: Record<string, unknown>): UmbraError {
     return new UmbraError(
@@ -675,9 +731,10 @@ export class RunReclaim {
   /**
    * The node tables after the run's last block (see the module comment): `tables` are the node tables as the block
    * before the run left them and `root_counts` as the last block left it, read inside the run's transaction after the
-   * last block's own rows; `known` the keys known to be rows, a set made for this run unless one is given. The run is
-   * the blocks handed over, at least one; the last of them is its last block. Throws `ledger-refcount-invalid` when a
-   * check fails, before anything is written.
+   * last block's own rows; `known` the keys known to be rows: the set its caller keeps from one run to the next, or
+   * one made for this run when none is given. The run is the blocks handed over, at least one; the last of them is its
+   * last block. Throws `ledger-refcount-invalid` when a check fails, before anything is written; the keys step 3
+   * learned before the check stay in `known`, each found stored.
    */
   async compute(tables: RunTables, known: KnownKeys = new KnownKeySet()): Promise<RunOutcome> {
     if (this.#computed) throw new Error(`the run from block ${this.first} is computed already`);
@@ -1012,7 +1069,8 @@ export class RunReclaim {
     });
     const changes = inOrder(all.filter((record) => record.delta !== 0));
     const evicted = inOrder(deleted);
-    for (const record of evicted) known.forget(record.text);
+    // Before the net write deletes them: a key the set holds must be a row.
+    if (fault !== "deleted-kept-known") for (const record of evicted) known.forget(record.text);
     const net: NetWrite = Object.freeze({
       height: last,
       inserts,

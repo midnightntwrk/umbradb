@@ -1,5 +1,6 @@
 import { expect } from "vitest";
 import { z } from "zod";
+import { coreBlockCommit } from "../../src/backbone/core-block-commit/core-block-commit.js";
 import { CORE_BLOCK_PARSED } from "../../src/backbone/core-block-parsed/core-block-parsed.js";
 import { CORE_CHAIN_EVENTS } from "../../src/backbone/core-chain-events/core-chain-events.js";
 import { CORE_CONTRACT_STATES } from "../../src/backbone/core-contract-states/core-contract-states.js";
@@ -41,6 +42,10 @@ import { referenceProblems } from "./refcount-reference.js";
  * The rows stored after a block are few (hundreds on stagenet and preprod, tens on the devnet), most of a state's nodes
  * being embedded in them, so the replay itself takes most of the time: on this machine, at a load average near 30, a
  * 10,001-height replay took about 28 minutes on PostgreSQL and 6 on PGlite (2026-11-03).
+ *
+ * The replays build `core-ledger-state` and `core-block-commit` with their checking option: every value either takes
+ * from what it kept in memory of the block before is also read from the database and compared, and a difference halts
+ * the replay at that height, so a recorded chain shows that what is kept is what the rows hold.
  */
 
 /** The recorded tapes R3 is checked on. */
@@ -143,7 +148,10 @@ export const tapeSettings = (found: FoundTape): Readonly<Record<string, unknown>
 export interface TapeReplayOptions {
   /** The last height: the tape's end unless given. */
   readonly last?: bigint;
-  /** `core-ledger-state`'s rules (a negative control's), given the worker's record of the run. */
+  /**
+   * `core-ledger-state`'s rules (a negative control's), given the worker's record of the run, on top of the checking
+   * option.
+   */
   readonly core?: (record: WorkerRecord) => CoreLedgerStateOptions;
 }
 
@@ -161,7 +169,14 @@ export async function replayRefcountTape(found: FoundTape, backend: ProcessBacke
   const last = options.last ?? BigInt(found.tape.to);
   const record = workerRecord();
   const sampler = new Sampler(new Set(sampledHeights(name, last)), record);
-  const core = [CORE_CHAIN_EVENTS, CORE_BLOCK_PARSED, CORE_TX_RESULTS, coreLedgerState(options.core?.(record) ?? {}), CORE_CONTRACT_STATES];
+  // The checking option on: every value taken from the block before kept in memory is also read and compared.
+  const core = [
+    CORE_CHAIN_EVENTS,
+    CORE_BLOCK_PARSED,
+    CORE_TX_RESULTS,
+    coreLedgerState({ checkKept: true, ...options.core?.(record) }),
+    CORE_CONTRACT_STATES,
+  ];
   await backend.start();
   try {
     const db = await backend.database();
@@ -169,6 +184,7 @@ export async function replayRefcountTape(found: FoundTape, backend: ProcessBacke
       start: 0n,
       stop: last,
       core,
+      commit: coreBlockCommit({ checkKept: true }),
       user: [sampling(sampler)],
       settings: tapeSettings(found),
       ledgerWorker: () => recordingWorker(startLedgerWorker(), record),

@@ -1,3 +1,4 @@
+import { CORE_BLOCK_COMMIT } from "../../src/backbone/core-block-commit/core-block-commit.js";
 import { CORE_LEDGER_STATE_ID, type CoreLedgerStateOptions } from "../../src/backbone/core-ledger-state/core-ledger-state.js";
 import type { NodeBatch } from "../../src/ledger/types.js";
 import { type LedgerHost, startLedgerWorker } from "../../src/ledger/worker/host.js";
@@ -58,9 +59,17 @@ export interface DagRunOptions {
   readonly loader?: (data: FixtureData) => { readonly loader: URL; readonly loaderData: unknown };
   /** The process's finalized loop (one recording its points); the runner's unless given. */
   readonly loop?: new (input: LoopInput) => FinalizedLoop;
+  /** A `core-block-commit` in place of the real one (one built with its checking option). */
+  readonly commit?: ModuleDeclaration;
+  /** The start of each module's entry, by id (an activation above S); S unless given. */
+  readonly startOf?: (id: string) => number;
+  /** The stop of each module's entry (`ingest`'s); none unless given. */
+  readonly stopOf?: (id: string) => number | undefined;
+  /** The `core` entry's stop: the process stops there. */
+  readonly stop?: bigint;
   /**
-   * Each core module as the process gets it, given the module: wrapped by an instrument of the test's; as it is unless
-   * given.
+   * Each core module and `core-block-commit` as the process gets them, given the module: wrapped by an instrument of
+   * the test's (one recording the statements its callbacks send); as they are unless given.
    */
   readonly modules?: (module: ModuleDeclaration) => ModuleDeclaration;
 }
@@ -116,6 +125,7 @@ export async function runDag(db: ProcessDatabase, options: DagRunOptions = {}): 
   const core = sweepCore(options.core)
     .map(wrap)
     .map((module) => (module.id === CORE_LEDGER_STATE_ID ? capturing(module, errors) : module));
+  const commit = options.commit === undefined && options.modules === undefined ? undefined : wrap(options.commit ?? CORE_BLOCK_COMMIT);
   const data: FixtureData = { ...options.data, ...(dag === "original" ? {} : { dag }) };
   let host: LedgerHost | undefined;
   const { records } = sweepTape(last, dag);
@@ -126,6 +136,10 @@ export async function runDag(db: ProcessDatabase, options: DagRunOptions = {}): 
     ...(options.settings === undefined ? {} : { settings: options.settings }),
     ...(options.revisions === undefined ? {} : { revisions: options.revisions }),
     ...(options.loop === undefined ? {} : { loop: options.loop }),
+    ...(commit === undefined ? {} : { commit }),
+    ...(options.startOf === undefined ? {} : { startOf: options.startOf }),
+    ...(options.stopOf === undefined ? {} : { stopOf: options.stopOf }),
+    ...(options.stop === undefined ? {} : { stop: options.stop }),
     ledgerWorker: () => {
       const recording = recordingWorker(startLedgerWorker(options.loader?.(data) ?? { loader: SWEEP_LOADER, loaderData: data }), record);
       host = options.worker === undefined ? recording : options.worker(recording);

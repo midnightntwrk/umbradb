@@ -16,8 +16,19 @@
  * 2. its hash's row ({@link writeHashRow}); a primary-key violation fails the block with `duplicate-block-hash`.
  * 3. the parent check ({@link checkParent}): a block whose parent hash is not the hash of the block stored at h − 1,
  *    or that has no block stored at h − 1, fails with `parent-mismatch`. Only the anchor, block S, has no stored parent
- *    and is not checked. The part takes S from its process context's revisions ({@link startOf}), in memory, so the
- *    check still sends one statement per block.
+ *    and is not checked. The part takes S from its process context's revisions ({@link startOf}), in memory.
+ *
+ * **The block before, from memory.** The part keeps, per process context, the height and a copy of the hash of the last
+ * block it wrote, taken before that block's first write, from which both its rows are written. A block whose context says the block before continues into it (`b.continues`: its `COMMIT` answered
+ * in this run of processing, with no failure since, and the writer still has the database session that committed it)
+ * and whose kept block is the one at h − 1 is checked against the kept hash, and the check sends no statement; a block
+ * that does not extend the kept one fails with the same `parent-mismatch`, naming the kept hash as the stored one. Any
+ * other block reads the hash at h − 1: a run's first height (a start, any retry, a replaced writer's session), a height
+ * made again (the block kept is its own). So the check reads the database once per run of processing, not once per
+ * block. Another writer can change the row at h − 1 only while it holds the writer lock, so only after the process's
+ * session was lost, which makes the next block read it; a writer that ignores the lock is not seen. With the option
+ * `checkKept` ({@link coreBlockCommit}: the tests and the replays of recorded chains) the hash is also read and
+ * compared, and a difference fails the block naming both values.
  *
  * The duplicate check comes first, so an earlier block delivered again (its hash repeated, its parent not the cursor)
  * is named for what it is. Both failures are halts: the part's `on-db-write` rejects with the `UmbraError`, the block
@@ -177,10 +188,26 @@ export function startOf(p: Pick<ProcessContext, "revisions">): bigint {
  * With no block stored at h − 1 the block fails too, its stored hash null: committed, it would leave a missing height
  * that every later block extends. That happens when the loop's cursor is not the database's (a bug), when another
  * writer deleted the rows below the block, or for a first block that is not S.
+ *
+ * Given the hash the part kept of the block at h − 1 (`kept`, see the module comment), it is the stored hash and no
+ * statement is sent; with `check` it is also read and compared, and a difference fails the block naming both values.
  */
-export async function checkParent(w: Pick<BlockWriteHandle, "query">, b: BlockContext, start: bigint): Promise<void> {
+export async function checkParent(
+  w: Pick<BlockWriteHandle, "query">,
+  b: BlockContext,
+  start: bigint,
+  kept: Uint8Array | null = null,
+  check = false,
+): Promise<void> {
   if (b.height === start) return;
-  const stored = await hashAt(w, b.height - 1n);
+  const stored = kept !== null && !check ? kept : await hashAt(w, b.height - 1n);
+  if (kept !== null && (stored === undefined || !sameBytes(stored, kept))) {
+    const database = stored === undefined ? "none" : hex(stored);
+    throw new Error(
+      `block ${b.height}: the block before as core-block-commit kept it in memory differs from the database: ` +
+        `the hash of block ${b.height - 1n} is ${hex(kept)} in memory and ${database} in the database`,
+    );
+  }
   if (stored !== undefined && sameBytes(stored, b.parentHash)) return;
   const found =
     stored === undefined
@@ -194,40 +221,69 @@ export async function checkParent(w: Pick<BlockWriteHandle, "query">, b: BlockCo
   );
 }
 
-/** `core-block-commit`'s work for block `b` of a database whose S is `start`, in its order (see the module comment). */
+/**
+ * `core-block-commit`'s work for block `b` of a database whose S is `start`, in its order (see the module comment); the
+ * parent check given the hash kept of the block at h − 1, if any, and whether to check it ({@link checkParent}).
+ */
 export async function commitBlock(
   w: Pick<BlockWriteHandle, "query" | "execute">,
   b: BlockContext,
   start: bigint,
+  kept: Uint8Array | null = null,
+  check = false,
 ): Promise<void> {
   await writeBlockRow(w, b);
   await writeHashRow(w, b);
-  await checkParent(w, b, start);
+  await checkParent(w, b, start, kept, check);
+}
+
+/** The last block each process context's `core-block-commit` wrote, its height and hash (see the module comment). */
+const WRITTEN = new WeakMap<ProcessContext, { readonly height: bigint; readonly hash: Uint8Array }>();
+
+/** What {@link coreBlockCommit} takes. */
+export interface CoreBlockCommitOptions {
+  /**
+   * Whether the hash the parent check takes from memory is also read from the database and compared, a difference
+   * failing the block with both values; false by default. The tests and the replays of recorded chains build with it.
+   */
+  readonly checkKept?: boolean;
 }
 
 /**
- * `core-block-commit` (see the module comment). It is a backbone part: it runs with the core from S, which is a
- * mid-chain start whenever S is above 0. It requires the `block` items `block-header` and `ledger-version` (from
- * `core-block-fetch`) and provides the `table` item `blocks`: its two tables, in its own schema.
+ * `core-block-commit` with `options` (see the module comment). It is a backbone part: it runs with the core from S,
+ * which is a mid-chain start whenever S is above 0. It requires the `block` items `block-header` and `ledger-version`
+ * (from `core-block-fetch`) and provides the `table` item `blocks`: its two tables, in its own schema.
  */
-export const CORE_BLOCK_COMMIT = defineModule({
-  id: "core-block-commit",
-  version: UMBRADB_VERSION,
-  side: "public",
-  requires: ["block-header", "ledger-version"],
-  provides: [
-    {
-      name: "blocks",
-      lifetimes: ["table"],
-      table: { schema: "core_block_commit", tables: ["blocks", "hashes"], kind: "append-only" },
+export function coreBlockCommit(options: CoreBlockCommitOptions = {}) {
+  return defineModule({
+    id: "core-block-commit",
+    version: UMBRADB_VERSION,
+    side: "public",
+    requires: ["block-header", "ledger-version"],
+    provides: [
+      {
+        name: "blocks",
+        lifetimes: ["table"],
+        table: { schema: "core_block_commit", tables: ["blocks", "hashes"], kind: "append-only" },
+      },
+    ],
+    startsMidChain: true,
+    configSchema: z.object({}),
+    migrations: CORE_BLOCK_COMMIT_MIGRATIONS.map(({ id, sql }) => ({ id, sql })),
+    points: {
+      async "on-db-write"(p, b, w) {
+        // The block before, written by this part in this process, when b continues it and it is the block at h − 1.
+        const written = b.continues ? WRITTEN.get(p) : undefined;
+        const kept = written !== undefined && written.height === b.height - 1n ? written.hash : null;
+        // A copy taken before the first write: the block context's hash is a buffer modules share, which one may change
+        // while the writes go on. Both rows are written from it, and the same is kept.
+        const hash = Uint8Array.from(b.hash);
+        await commitBlock(w, Object.freeze({ ...b, hash }), startOf(p), kept, options.checkKept === true);
+        WRITTEN.set(p, Object.freeze({ height: b.height, hash }));
+      },
     },
-  ],
-  startsMidChain: true,
-  configSchema: z.object({}),
-  migrations: CORE_BLOCK_COMMIT_MIGRATIONS.map(({ id, sql }) => ({ id, sql })),
-  points: {
-    async "on-db-write"(p, b, w) {
-      await commitBlock(w, b, startOf(p));
-    },
-  },
-});
+  });
+}
+
+/** `core-block-commit` (see the module comment). */
+export const CORE_BLOCK_COMMIT = coreBlockCommit();

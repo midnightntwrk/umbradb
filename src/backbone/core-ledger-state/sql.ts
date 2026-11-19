@@ -20,6 +20,7 @@
 
 import type { BlockWriteHandle, ReadHandle } from "../../db/api.js";
 import type { LedgerEvent, LedgerName, NodeBatch, StateSummary } from "../../ledger/types.js";
+import { repeatedStatement } from "../../db/repeated-statements.js";
 import { BLOCKS_TABLE } from "../core-block-commit/sql.js";
 import { heightPartitionsSql } from "../height-partitions.js";
 
@@ -183,14 +184,19 @@ export async function stateAt(read: Pick<ReadHandle, "query">, height: bigint): 
   };
 }
 
-/** The keys of the states stored after the blocks `from` to `to` − 1, in height order (see {@link KEYS_SQL}). */
-export async function stateKeysBetween(
+/**
+ * The keys of the states stored after the blocks `from` to `to` − 1, by height, in height order (see {@link KEYS_SQL}):
+ * a height without a row is absent.
+ */
+export async function stateKeysByHeight(
   read: Pick<ReadHandle, "query">,
   from: bigint,
   to: bigint,
-): Promise<Uint8Array[]> {
+): Promise<Map<bigint, Uint8Array>> {
   const rows = await read.query(KEYS_SQL, [from, to]);
-  return rows.map((row) => bytesOf(row.state_key, `${STATES_TABLE}.state_key`));
+  return new Map(
+    rows.map((row) => [BigInt(row.height as bigint | number | string), bytesOf(row.state_key, `${STATES_TABLE}.state_key`)]),
+  );
 }
 
 /** The contracts deployed below `height` (see {@link DEPLOYED_SQL}), read at h − 1. */
@@ -286,7 +292,8 @@ const CHANGED_SQL = `SELECT b.node_key, n.children FROM unnest($1::bytea[], $2::
 /** Those of the given keys that `nodes` does not hold: for keys nearly all stored, the answer is nearly empty. */
 const MISSING_KEYS_SQL = `SELECT k.node_key FROM unnest($1::bytea[]) AS k (node_key)
   WHERE NOT EXISTS (SELECT 1 FROM ${NODES_TABLE} n WHERE n.node_key = k.node_key)`;
-const UNREFERENCED_KEYS_SQL = `SELECT node_key FROM ${UNREFERENCED_TABLE}`;
+/** The queue read of a run that sweeps, at every block: prepared on PostgreSQL (`../../db/repeated-statements.ts`). */
+const UNREFERENCED_KEYS_SQL = repeatedStatement(`SELECT node_key FROM ${UNREFERENCED_TABLE}`);
 /** Those of the given keys that `unreferenced` holds: the read of a run that does not sweep, which reads no queue whole. */
 const QUEUED_KEYS_SQL = `SELECT node_key FROM ${UNREFERENCED_TABLE} WHERE node_key = ANY($1::bytea[])`;
 const KEY_COUNTS_SQL = `SELECT k.node_key,

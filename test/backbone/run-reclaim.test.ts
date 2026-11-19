@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { keyBytes, keyText, KnownKeySet, type NetWrite, RunReclaim, type RunTables, sqlRunTables, writeNet } from "../../src/backbone/core-ledger-state/run-reclaim.js";
 import { NODES_TABLE, REF_COUNTS_TABLE, UNREFERENCED_TABLE } from "../../src/backbone/core-ledger-state/sql.js";
 import type { BlockWriteHandle } from "../../src/db/api.js";
+import { statementText } from "../../src/db/repeated-statements.js";
 import { refcountStep } from "./refcount-step.js";
 import type { NodeBatch } from "../../src/ledger/types.js";
 import { type FixtureDag, LAST, stateNodes } from "../ledger/fixtures/sweep-fixture.js";
@@ -317,11 +318,21 @@ describe("the run's record and its reads", () => {
     expect(keyText(padded.subarray(4, 36))).toBe(keyText(keys[3] as Uint8Array));
   });
 
+  it("gives each key's root-count change summed over the blocks handed over, by the key's text, where the sum is not 0", () => {
+    const [a, b, c, d] = ["a", "b", "c", "d"].map((name) => made(name).keyBytes) as [Uint8Array, Uint8Array, Uint8Array, Uint8Array];
+    const run = new RunReclaim({ first: 1n, on: true });
+    expect(run.rootChanges.size).toBe(0);
+    // a raised at 1 and at 2; b raised at 1 and released at 2, 0 in all; c released at 2; d given a change of 0.
+    run.collect(1n, { inserts: [], rootCounts: [{ key: a, delta: 1 }, { key: b, delta: 1 }] }, true);
+    run.collect(2n, { inserts: [], rootCounts: [{ key: a, delta: 1 }, { key: b, delta: -1 }, { key: c, delta: -1 }, { key: d, delta: 0 }] }, true);
+    expect([...run.rootChanges].sort()).toEqual([[keyText(a), 2], [keyText(c), -1]].sort());
+  });
+
   it("reads the database in statements of 1,000 keys at most, none for no key, and the queue in one", async () => {
     const asked: { sql: string; keys: number }[] = [];
     const tables = sqlRunTables({
       query: async (sql, params) => {
-        asked.push({ sql, keys: ((params ?? [])[0] as readonly unknown[] | undefined)?.length ?? 0 });
+        asked.push({ sql: statementText(sql), keys: ((params ?? [])[0] as readonly unknown[] | undefined)?.length ?? 0 });
         return [];
       },
     });
@@ -521,13 +532,13 @@ describe("what each read asks for: the keys its step needs, and no read for no k
   const rowsOf = (...nodes: readonly MadeNode[]): Map<string, Uint8Array> => new Map(nodes.map((node) => [node.key, node.children]));
   /**
    * A run of `blocks` from block 1 on `found`, `roots` the root counts after its last block: its reads, each key named
-   * after the node of `nodes` it is, and its outcome.
+   * after the node of `nodes` it is, and its outcome; with `known`, the set of keys known to be rows it is given.
    */
-  const readsOf = async (found: NodeTables, roots: ReadonlyMap<string, number>, blocks: readonly NodeBatch[], on: boolean, nodes: readonly MadeNode[]) => {
+  const readsOf = async (found: NodeTables, roots: ReadonlyMap<string, number>, blocks: readonly NodeBatch[], on: boolean, nodes: readonly MadeNode[], known?: KnownKeySet) => {
     const reclaim = new RunReclaim({ first: 1n, on });
     blocks.forEach((block, at) => reclaim.collect(BigInt(at + 1), block, on));
     const { tables, log } = logged(runTables(found, roots), new Map(nodes.map((node) => [node.key, Buffer.from(node.data).toString("utf8")])));
-    const outcome = await reclaim.compute(tables);
+    const outcome = await reclaim.compute(tables, known);
     return { log, outcome };
   };
   const [c, d] = [made("c"), made("d")];
@@ -567,6 +578,27 @@ describe("what each read asks for: the keys its step needs, and no read for no k
     expect(off.log).toEqual(["rows r1 w", "changed w", "missing c", "counts d", "queued d r0 r1 w", "counts r0 r1"]);
     expect(off.outcome.net.queued.map(hex)).toEqual([d.key, r0.key].sort());
     expect(off.outcome.keptByReplaced).toBe(0);
+  });
+
+  it("the same block with a set of keys known to be rows (the one core-ledger-state keeps between settles): a key it holds is not asked, none when it holds them all; the outcome is the same", async () => {
+    const [w1, w2] = [made("w", [ref(c), ref(d)]), made("w", [ref(c), embedded(d)])];
+    const [r0, r1] = [over("r0", w1), over("r1", w2)];
+    const found: NodeTables = { rows: rowsOf(r0, w1, c, d), refs: new Map([[w1.key, 1], [c.key, 1], [d.key, 1]]), queue: new Set() };
+    const block = { inserts: flushed(w2, r1), rootCounts: [...raise(r1), ...release(r0)] };
+    const nodes = [c, d, w1, r0, r1];
+    const plain = await readsOf(found, new Map([[r1.key, 1]]), [block], true, nodes);
+    // A set holding d, which the run does not ask about: the same reads, and c, found stored, learned.
+    const other = new KnownKeySet();
+    other.learn(keyText(d.keyBytes));
+    const besides = await readsOf(found, new Map([[r1.key, 1]]), [block], true, nodes, other);
+    expect(besides.log).toEqual(plain.log);
+    expect([other.has(keyText(c.keyBytes)), other.size]).toEqual([true, 2]);
+    // A set holding c: no missing read is sent.
+    const holding = new KnownKeySet();
+    holding.learn(keyText(c.keyBytes));
+    const answered = await readsOf(found, new Map([[r1.key, 1]]), [block], true, nodes, holding);
+    expect(answered.log).toEqual(["rows r1 w", "changed w", "counts d", "queue", "counts r0 r1"]);
+    expect(answered.outcome).toEqual(plain.outcome);
   });
 
   it("a cascade over rows and over the run's own nodes: lists read for rows only, counts for keys whose count falls", async () => {

@@ -4,6 +4,7 @@ import {
   checkParent,
   commitBlock,
   CORE_BLOCK_COMMIT,
+  coreBlockCommit,
   MAX_BLOCK_TIME_MS,
   writeBlockRow,
   writeHashRow,
@@ -26,6 +27,7 @@ import { UMBRADB_VERSION } from "../../src/config/build.js";
 import type { BlockWriteHandle, Database } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { startDatabase } from "../../src/db/migrate.js";
+import { type Statement, statementText } from "../../src/db/repeated-statements.js";
 import type { SchemaPlan } from "../../src/db/roles.js";
 import { openBlockWrites } from "../../src/db/write-handles.js";
 import { migrationPart, schemaPlan } from "../../src/modules/adapters.js";
@@ -65,9 +67,12 @@ function contextAt(start: bigint): ProcessContext {
   return Object.freeze({ items: new Map(), revisions: Object.freeze([core]), publish: () => undefined });
 }
 
-/** The block context of `block`, with the stand-in's items unless `items` are given. */
-function contextOf(block: BlockRef, items: ReadonlyMap<string, unknown> = standInItems(block.height)): BlockContext {
-  return Object.freeze({ ...block, items, settings: Object.freeze({}), active: () => true, continues: false });
+/**
+ * The block context of `block`, with the stand-in's items unless `items` are given; `continues` false (a run's first
+ * height) unless given.
+ */
+function contextOf(block: BlockRef, items: ReadonlyMap<string, unknown> = standInItems(block.height), continues = false): BlockContext {
+  return Object.freeze({ ...block, items, settings: Object.freeze({}), active: () => true, continues });
 }
 
 /** A block at `height` whose hash and parent are the given ones (the default chain's otherwise). */
@@ -219,7 +224,7 @@ describe("the block items core-block-commit reads (the block-header and ledger-v
       w: {
         height: null,
         query: async (sql) => {
-          sent.push(sql);
+          sent.push(statementText(sql));
           return [];
         },
         execute: async (sql) => {
@@ -612,7 +617,102 @@ describe.each(BACKENDS)("core_block_commit's tables on $name", (backend) => {
       details: { sqlstate: "23505" },
     });
   }, 60_000);
+
+  it("keeps the hash of the block it wrote: a block that continues it, the kept block at h − 1, sends no read of h − 1; any other reads it", async () => {
+    const { block } = await committed(backend, 5n);
+    const writes = keptWrites(contextAt(5n));
+    const at = (height: bigint, continues: boolean) => block(contextOf(inMemoryBlock(height), standInItems(height), continues), writes.commit);
+    // S, then two blocks that continue the one before: no read of h − 1 at 6 and 7.
+    for (const [height, continues] of [[5n, false], [6n, true], [7n, true]] as const) await at(height, continues);
+    // A block whose context says it does not continue (a run's first height): it reads h − 1.
+    await at(8n, false);
+    // Block 9 written, then its transaction rolled back by a later failure; made again with continues said, the kept
+    // block is 9 itself, not 8: it reads 8.
+    expect(await failureOf(block(contextOf(inMemoryBlock(9n), standInItems(9n), true), writes.failingAfter))).toBeInstanceOf(Error);
+    await at(9n, true);
+    expect(writes.parentReads()).toEqual(["8 read 7", "9 read 8"]);
+  }, 60_000);
+
+  it("keeps its own copy of the hash: the block context's hash changed after its write changes nothing the next block's check takes", async () => {
+    const { block } = await committed(backend, 5n);
+    const writes = keptWrites(contextAt(5n));
+    const five = blockAt(5n);
+    await block(contextOf(five, standInItems(5n), false), writes.commit);
+    // The buffer the block context held, changed by whoever shares it.
+    five.hash[0] = (five.hash[0] ?? 0) ^ 0xff;
+    await block(contextOf(inMemoryBlock(6n), standInItems(6n), true), writes.commit);
+    expect(writes.parentReads()).toEqual([]);
+  }, 60_000);
+
+  it("refuses a block that does not extend the kept block with the same parent-mismatch, naming the kept hash, and sends no read", async () => {
+    const { block } = await committed(backend, 5n);
+    const writes = keptWrites(contextAt(5n));
+    await block(contextOf(inMemoryBlock(5n), standInItems(5n), false), writes.commit);
+    const other = new Uint8Array(32).fill(9);
+    const error = await failureOf(block(contextOf(blockAt(6n, { parentHash: other }), standInItems(6n), true), writes.commit));
+    expect(codeOf(error)).toBe("parent-mismatch");
+    expect((error as UmbraError).details).toEqual({ height: 6n, parentHash: hex(other), stored: hex(inMemoryBlock(5n).hash) });
+    expect(writes.parentReads()).toEqual([]);
+  }, 60_000);
+
+  it("another writer deleting h − 1 while the hash is kept: the block commits on the kept hash; with the checking option it fails naming the kept hash and the database's", async () => {
+    const { block, exec, rows } = await committed(backend, 5n);
+    const plain = keptWrites(contextAt(5n));
+    for (const [height, continues] of [[5n, false], [6n, true]] as const) {
+      await block(contextOf(inMemoryBlock(height), standInItems(height), continues), plain.commit);
+    }
+    await exec("DELETE FROM core_block_commit.hashes WHERE height = 6; DELETE FROM core_block_commit.blocks WHERE height = 6");
+    // The writer lock refuses such a writer; without the checking option nothing reads h − 1 to see it.
+    await block(contextOf(inMemoryBlock(7n), standInItems(7n), true), plain.commit);
+    expect(await rows("SELECT height FROM core_block_commit.blocks ORDER BY height")).toEqual([{ height: 5n }, { height: 7n }]);
+    // The same with the checking option: the kept hash is read and compared.
+    const { block: checkedBlock, exec: checkedExec } = await committed(backend, 5n);
+    const checked = keptWrites(contextAt(5n), { checkKept: true });
+    for (const [height, continues] of [[5n, false], [6n, true]] as const) {
+      await checkedBlock(contextOf(inMemoryBlock(height), standInItems(height), continues), checked.commit);
+    }
+    expect(checked.parentReads()).toEqual(["6 read 5"]);
+    await checkedExec("DELETE FROM core_block_commit.hashes WHERE height = 6; DELETE FROM core_block_commit.blocks WHERE height = 6");
+    const error = await failureOf(checkedBlock(contextOf(inMemoryBlock(7n), standInItems(7n), true), checked.commit));
+    expect((error as Error).message).toBe(
+      `block 7: the block before as core-block-commit kept it in memory differs from the database: the hash of block 6 is ` +
+        `${hex(inMemoryBlock(6n).hash)} in memory and none in the database`,
+    );
+  }, 60_000);
 });
+
+/**
+ * `core-block-commit`'s `on-db-write` in one process context `p` (so that what it keeps carries from block to block),
+ * built with `options`, its parent reads recorded as `<h> read <h − 1>`; and the same followed by a failure, which rolls
+ * the block back after the part's write.
+ */
+function keptWrites(p: ProcessContext, options: Parameters<typeof coreBlockCommit>[0] = {}) {
+  const part = coreBlockCommit(options);
+  const reads: string[] = [];
+  const commit: Commit = async (w, b) => {
+    const write = part.points["on-db-write"];
+    if (write === undefined) throw new Error("core-block-commit registers no on-db-write");
+    const recording = {
+      get height() {
+        return w.height;
+      },
+      query: async (sql: Statement, params?: unknown[]) => {
+        if (sql === "SELECT hash FROM core_block_commit.blocks WHERE height = $1") reads.push(`${b.height} read ${String(params?.[0])}`);
+        return w.query(sql, params);
+      },
+      execute: (sql: string, params?: unknown[]) => w.execute(sql, params),
+    };
+    await write.call(part.points, p, b, recording);
+  };
+  return {
+    commit,
+    failingAfter: (async (w, b) => {
+      await commit(w, b);
+      throw new Error("a later part failed");
+    }) as Commit,
+    parentReads: () => [...reads],
+  };
+}
 
 /** The block times under test: the milliseconds, and the RFC 3339 text the database API reads back. */
 const A145_TIMES: readonly { readonly ms: bigint; readonly text: string }[] = [
@@ -641,8 +741,8 @@ describe("the committed height of one opened database (00033 F3c)", () => {
     return {
       checks: () => checks,
       read: {
-        query: async (sql: string) => {
-          if (sql.includes("to_regclass")) {
+        query: async (sql: Statement) => {
+          if (statementText(sql).includes("to_regclass")) {
             checks += 1;
             return [{ present: present() }];
           }

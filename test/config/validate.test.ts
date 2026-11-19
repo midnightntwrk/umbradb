@@ -1045,6 +1045,7 @@ describe("absent fields take their declared defaults", () => {
       followingThreshold: 3,
       fullPageWritesOffAllowed: false,
       developmentOptIn: false,
+      reclamationCache: { keys: 100_000, verify: false },
     });
   });
 
@@ -1067,6 +1068,7 @@ describe("absent fields take their declared defaults", () => {
       followingThreshold: 3,
       fullPageWritesOffAllowed: false,
       developmentOptIn: false,
+      reclamationCache: { keys: 100_000, verify: false },
       instanceId: "wallet-1",
     });
   });

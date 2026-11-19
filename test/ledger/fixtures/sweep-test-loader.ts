@@ -89,9 +89,10 @@ export interface FixtureData extends RefusalData {
   readonly keeping?: Keeping;
   /**
    * The extended DAG only: the flush after the height `at` (decimal text) leaves out the node `key` (hex), which it then
-   * believes stored.
+   * believes stored. With `reached`, it also leaves out every node of the flush that node reaches through the flush's
+   * nodes, so that no node it flushes hangs below the one left out.
    */
-  readonly withhold?: { readonly at: string; readonly key: string };
+  readonly withhold?: { readonly at: string; readonly key: string; readonly reached?: boolean };
   /** The extended DAG only: the flush after this height (decimal text) also persists {@link UNKNOWN_KEY}. */
   readonly persistUnknown?: string;
   /**
@@ -410,8 +411,16 @@ function extendedPackage(ledger: LedgerName, data: FixtureData): LedgerPackage {
         for (const ref of node.refs) frontier.push(hex(ref));
       }
       for (const [key, node] of taken) stored.set(key, hex(node.children));
-      // A node left out of the batch, though the package now believes it stored.
-      if (data.withhold !== undefined && `${applied}` === data.withhold.at) taken.delete(data.withhold.key);
+      // A node left out of the flush, though the package now believes it stored; with `reached`, its nodes below too.
+      if (data.withhold !== undefined && `${applied}` === data.withhold.at) {
+        const left = [data.withhold.key];
+        for (let key = left.pop(); key !== undefined; key = left.pop()) {
+          const node = taken.get(key);
+          if (node === undefined) continue;
+          taken.delete(key);
+          if (data.withhold.reached === true) for (const ref of node.refs) left.push(hex(ref));
+        }
+      }
       const rootCounts = [...deltas.values()].filter((d) => d.delta !== 0).sort((a, b) => (hex(a.key) < hex(b.key) ? -1 : 1));
       deltas = new Map();
       const inserts = [...taken.values()].sort((a, b) => (hex(a.key) < hex(b.key) ? -1 : 1)).map((n) => ({ key: n.key, data: n.data, children: n.children }));

@@ -1,9 +1,19 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { extendedCases, TO_REF } from "../ledger/fixtures/sweep-fixture.js";
+import { extendedCases, REVERT, stateNodes, TO_REF } from "../ledger/fixtures/sweep-fixture.js";
 import { UNKNOWN_KEY } from "../ledger/fixtures/sweep-test-loader.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
 import { PATIENCE_MS } from "./ingest-harness.js";
-import { damageAt, haltProblems, LOWERED, MISSING, NEGATIVE, ONE_ROW_FEWER, runFault } from "./ledger-refcount-halts.js";
+import {
+  damageAt,
+  FIRST_VERSION,
+  haltProblems,
+  LOWERED,
+  MISSING,
+  NEGATIVE,
+  ONE_ROW_FEWER,
+  REFERENCED_AGAIN_KEPT,
+  runFault,
+} from "./ledger-refcount-halts.js";
 
 /**
  * The committed negative controls, on PostgreSQL 18 and PGlite 0.5.10: each runs one of the faults with the check
@@ -12,7 +22,9 @@ import { damageAt, haltProblems, LOWERED, MISSING, NEGATIVE, ONE_ROW_FEWER, runF
  *   `database-error`;
  * - without `missing-reference`, each package's block commits, and R3 reports the damage: a stored child list
  *   referencing a key that is no row, a root count of a key that is no row;
- * - without `row-count-mismatch`, the block commits with the queue short of the released root, and R3 reports it.
+ * - without `row-count-mismatch`, the block commits with the queue short of the released root, and R3 reports it;
+ * - with the keys a run deletes kept in the set of keys found stored (`refcountFault: "deleted-kept-known"`), the block
+ *   that references a deleted key again commits, and R3 reports the reference that is no row.
  */
 
 const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
@@ -49,6 +61,15 @@ describe.each(PROCESS_BACKENDS)("negative controls on $name", (backend: ProcessB
       expect(damageAt(run, fault.height), fault.name).toContain(`after ${fault.height}: ${expected[i] as string}`);
     }
   }, PATIENCE_MS * 4);
+
+  it("control: with the deleted keys kept in the set of keys found stored (deleted-kept-known), the block referencing a deleted key again commits and R3 finds the reference that is no row", async () => {
+    const { run, db, lowered } = await runFault(await backend.database(), REFERENCED_AGAIN_KEPT);
+    // The assertion fails: the block commits, its check answered from the set.
+    expect(run.status).toMatchObject({ cursor: BigInt(REVERT), reason: null });
+    expect(await haltProblems(db, run, REFERENCED_AGAIN_KEPT, lowered)).not.toEqual([]);
+    const root = hex((stateNodes(REVERT, "extended")[0] as { key: Uint8Array }).key);
+    expect(damageAt(run, REVERT)).toContain(`after ${REVERT}: (a) I1: ${root} references ${hex(FIRST_VERSION.key)}, which is not a row`);
+  }, PATIENCE_MS * 6);
 
   it("control: without the row-count-mismatch check, the block commits with the queue short of the released root, which R3 finds", async () => {
     const { run } = await runFault(await backend.database(), ONE_ROW_FEWER, true);

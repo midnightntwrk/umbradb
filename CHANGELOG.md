@@ -230,6 +230,66 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   the writer's session replaced fails before it writes, as a lost connection (retryable), and is made again. A
   database now says which session its writer has (`Database.writerSession`). It may be false at any block. The module
   guide's §3 describes it.
+- **`core-ledger-state` and `core-block-commit` take the block before from memory when the block continues it.** Each
+  keeps, once it has written a block's rows, its own copy of what the next block reads of them, taken before those
+  writes and the one the rows are written from: `core-ledger-state` the state's key and root, the block's hash, ledger
+  and time, and the keys of the states of the retention window; `core-block-commit` the block's hash. A block whose
+  context says `continues` and whose kept block is the one at h − 1 takes them from memory, so per block up to three
+  reads fewer at `core-ledger-state`'s `on-compute` (the state at h − 1 and the parent time, and the keys of the
+  states it releases where it releases any: while a retention window fills a block releases none, and no key read was
+  sent there before either) and one fewer at `core-block-commit`'s `on-db-write` (the parent's hash). Those reads are
+  sent only at a run's first block: after a start, any retry, a replaced writer's session, and for a height made
+  again. There `core-ledger-state`'s read of the keys also takes the window's, from the first state the block releases
+  to h − 1: the retention window after the block before, up to its `retainStates` + 1 rows (after a lowered
+  `retainStates` that is the earlier, larger window: 7 rows at a restart where 6 was lowered to 1), in the same
+  statement, which it now sends at a run's first block also when that block releases nothing, so that no block
+  continuing it reads a key. A row of that window missing from `states` fails only the block that releases it, as
+  before. The block trace's `sqlN` and the statement totals show the difference; the stored rows and the failures are
+  the same, except that the parent check does not see a block at h − 1 changed by a writer that ignores the writer
+  lock. A new option of `coreLedgerState` and of `core-block-commit`'s `coreBlockCommit`, `checkKept`, also reads every
+  value taken from memory, and at every block every key kept of the retention window, and compares them, a difference
+  failing the block; the tests and the replays of recorded chains use it.
+- **The ledger state's reclamation remembers the keys it finds stored.** `core-ledger-state` keeps, from block to
+  block, the keys its reclamation's `missing` read found stored, so a block's references are asked about only when no
+  earlier block found them stored. It uses them only while each block continues the one before (`continues`: the
+  block before's `COMMIT` answered in the same run of processing, on the same writer's session) and empties them
+  otherwise: at a process's first block, at a block made again after a failure, and after a `COMMIT` whose answer was
+  lost, so a height another writer committed meanwhile is never taken from memory. The keys a block deletes leave
+  them, and they are emptied when `on-settle` fails. At most 500,000 keys (32.9 MiB of heap at that bound, measured):
+  a key that would pass the bound empties them first. A node row deleted by hand while the process runs is seen at
+  once if its key is not remembered; if it is, the deletion goes unseen while the key stays remembered, until a block
+  that does not continue the one before, or the bound, empties the remembered keys. In the block trace, `missing`
+  holds only the keys asked of the database, and `knownHits` and `knownEmptied` are new (`knownEmptied` is also set
+  at a process's first height); the operator guide lists them.
+- **The ledger state's reclamation keeps the counts and child lists it read or wrote.** `core-ledger-state` keeps, from
+  block to block, a copy of what its reclamation's `counts` read gave (whether a key is a stored node, its reference
+  count, its root count) and of the child lists of the nodes it wrote, as the tables are after the block before,
+  brought up to date from each block's net write; a block's `counts` and `references` reads ask the database only what
+  the copy lacks. It is used only while each block continues the one before and is emptied otherwise, and when
+  `on-settle` fails, as the keys found stored are. A new operational setting of the `core` entry, `reclamationCache`
+  (`{ keys: 100000, verify: false }`): `keys` bounds the copy, in keys of counts and in child lists each (an update that
+  would pass it empties the copy first; 71.9 MiB of heap at 100,000 with lists of 16 references, measured), 0 for no
+  copy; `verify` also reads from the database every key the copy answers and halts with `ledger-refcount-invalid`
+  (`copy-mismatch`) on a difference. The copy equals the tables given tables that were undamaged when the process
+  started and that only this process writes. On tables already damaged it can differ from the database (a positive
+  reference count for a key that is no row, which a block then writes new without reading its counts), so the height
+  and the reason of a halt can change with no hand edit while the process runs; `verify` finds the difference at the
+  first read of that key. A count or node row changed by hand while the process runs is read at once if the copy does
+  not hold its key; if it does, the change goes unseen, but by `verify`, until a block that does not continue the one
+  before, or the bound, empties the copy. In the block trace, `counts` and `references` hold only the keys asked of the
+  database, and `copyHits`, `copyMisses` and `copyEmptied` are new; the operator guide lists them.
+- **PostgreSQL sessions prepare the statements without parameters that every block repeats.** The head read, the
+  queue read of a run that sweeps, the digest read, and the shadow tables' probe and drains are now prepared once per
+  session and run by name, as a text with parameters already was, within the session's bound of 256 texts. While its
+  statement stays valid, an execution by name is not parsed again, and PostgreSQL reuses the plan it keeps for it
+  where it chooses to. Each of these texts names its tables with their schema and holds no literal whose value depends
+  on a setting. UmbraDB's own code hands each of them to its handle as a marked statement, an object only that code
+  makes, and a handle's `query` takes one where it takes a text. Every text without parameters handed over as a
+  string, a module's among them and one equal to a marked text, runs unnamed as before. A marked statement also runs
+  unnamed when it is asked for while another statement of its session has no answer yet; on a session that held it
+  prepared when a schema change the process made was counted (a migration, a writer's rollback); and on a session
+  where an execution of it by name failed. While a marked statement's execution by name has no answer, its session
+  sends nothing else: a statement asked for meanwhile is sent after that answer.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 

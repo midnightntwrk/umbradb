@@ -3,6 +3,7 @@ import type { BlockWriteHandle, Database, Transaction } from "../../src/db/api.j
 import { CORE_DIGEST as DIGESTS, digestBlock } from "../../src/backbone/core-digest/core-digest.js";
 import { capturedTables, tablesWithChanges } from "../../src/db/change-capture.js";
 import { UmbraError } from "../../src/db/errors.js";
+import { type Statement, statementText } from "../../src/db/repeated-statements.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import { CallbackFailure } from "../../src/runner/dispatch.js";
 import { FinalizedLoop, HeightFailure } from "../../src/runner/loop.js";
@@ -78,8 +79,8 @@ const shown = (value: unknown): string => (value instanceof Uint8Array ? Buffer.
  */
 function recordingStatements(db: Database): { readonly db: Database; readonly transactions: string[][] } {
   const transactions: string[][] = [];
-  const record = (sent: string[], sql: string, params: unknown[] = []) =>
-    sent.push(`${sql.replace(/\s+/g, " ").trim()} [${params.map(shown).join(", ")}]`);
+  const record = (sent: string[], sql: Statement, params: unknown[] = []) =>
+    sent.push(`${statementText(sql).replace(/\s+/g, " ").trim()} [${params.map(shown).join(", ")}]`);
   return {
     transactions,
     db: {
@@ -111,7 +112,7 @@ const DIGEST_AT_DB_WRITE: ModuleDeclaration = Object.freeze({
 });
 
 /** How many statements each block of the statements test sends: the first block also reads the captured tables. */
-const DIGEST_STATEMENTS = [19, 17, 17];
+const DIGEST_STATEMENTS = [19, 16, 16];
 
 describe.each(RUNNER_BACKENDS)("the on-settle point on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
@@ -394,9 +395,10 @@ describe.each(RUNNER_BACKENDS)("the on-settle point on $name", (backend) => {
     }
     const now = await statementsOf(DIGEST_BACKBONE);
     const before = await statementsOf(DIGEST_BACKBONE.map((part) => (part.id === "core-digest" ? DIGEST_AT_DB_WRITE : part)));
-    // Each block: core-block-commit's role and rows (and from 2 on its parent check), plain's role and row, the reset
-    // to the login, core-digest's reads and writes (at 1 also the captured tables, read once per process), and the
-    // cursor check's two reads. The texts, parameters and order are those of core-digest at on-db-write.
+    // Each block: core-block-commit's role and rows, plain's role and row, the reset to the login, core-digest's reads
+    // and writes (at 1 also the captured tables, read once per process), and the cursor check's two reads. Block 1 is
+    // S, and 2 and 3 continue the block before, so core-block-commit's parent check sends nothing at any of them. The
+    // texts, parameters and order are those of core-digest at on-db-write.
     expect(now).toEqual(before);
     expect(now.map((sent) => sent.length)).toEqual(DIGEST_STATEMENTS);
     for (const sent of now) {
