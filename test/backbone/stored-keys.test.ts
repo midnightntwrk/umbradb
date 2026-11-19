@@ -12,6 +12,7 @@ import { StoredKeys } from "../../src/backbone/core-ledger-state/stored-keys.js"
 import type { PostgresParts } from "../../src/config/database-parts.js";
 import type { BlockWriteHandle, ReadHandle, Transaction } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
+import { statementText } from "../../src/db/repeated-statements.js";
 import { childRefKeys } from "../../src/ledger/node-refs.js";
 import { type AppliedState, EvictionRefused } from "../../src/ledger/worker/engine.js";
 import type { LedgerHost } from "../../src/ledger/worker/host.js";
@@ -209,7 +210,8 @@ function appliedAt(height: bigint, empty: boolean, releasing = false): AppliedSt
 function parentRead(height: bigint): ReadHandle {
   return {
     height: height - 1n,
-    async query(sql, params = []) {
+    async query(statement, params = []) {
+      const sql = statementText(statement);
       if (sql.includes("extract(epoch")) return [{ ms: 1n }];
       if (sql.includes("JOIN core_block_commit.blocks")) return [{ state_key: hash(0x30), state_root: ROOT, hash: hash(Number(height)), ledger_version: "v9" }];
       if (sql.includes("height >= $1 AND height < $2")) {
@@ -357,10 +359,11 @@ async function chainOn(backend: TestBackend, options: ChainOptions = {}) {
         await db.transaction(async (tx: Transaction) => {
           const w: BlockWriteHandle = {
             height: height - 1n,
-            async query(sql, params = []) {
+            async query(statement, params = []) {
+              const sql = statementText(statement);
               if (sql.includes("WHERE NOT EXISTS")) asked.push(...(params[0] as Uint8Array[]).map(hex));
               if (failQueueRead && sql.startsWith(`SELECT node_key FROM ${UNREFERENCED_TABLE}`)) throw new Error("the queue's read failed (the test's fault)");
-              return tx.query(sql, params);
+              return tx.query(statement, params);
             },
             execute: (sql, params) => tx.execute(sql, params),
           };

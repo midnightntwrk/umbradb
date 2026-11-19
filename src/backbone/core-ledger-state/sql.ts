@@ -20,6 +20,7 @@
 
 import type { BlockWriteHandle, ReadHandle } from "../../db/api.js";
 import type { LedgerEvent, LedgerName, NodeBatch, StateSummary } from "../../ledger/types.js";
+import { repeatedStatement } from "../../db/repeated-statements.js";
 import { BLOCKS_TABLE } from "../core-block-commit/sql.js";
 import { heightPartitionsSql } from "../height-partitions.js";
 
@@ -291,7 +292,8 @@ const CHANGED_SQL = `SELECT b.node_key, n.children FROM unnest($1::bytea[], $2::
 /** Those of the given keys that `nodes` does not hold: for keys nearly all stored, the answer is nearly empty. */
 const MISSING_KEYS_SQL = `SELECT k.node_key FROM unnest($1::bytea[]) AS k (node_key)
   WHERE NOT EXISTS (SELECT 1 FROM ${NODES_TABLE} n WHERE n.node_key = k.node_key)`;
-const UNREFERENCED_KEYS_SQL = `SELECT node_key FROM ${UNREFERENCED_TABLE}`;
+/** The queue read of a run that sweeps, at every block: prepared on PostgreSQL (`../../db/repeated-statements.ts`). */
+const UNREFERENCED_KEYS_SQL = repeatedStatement(`SELECT node_key FROM ${UNREFERENCED_TABLE}`);
 /** Those of the given keys that `unreferenced` holds: the read of a run that does not sweep, which reads no queue whole. */
 const QUEUED_KEYS_SQL = `SELECT node_key FROM ${UNREFERENCED_TABLE} WHERE node_key = ANY($1::bytea[])`;
 const KEY_COUNTS_SQL = `SELECT k.node_key,

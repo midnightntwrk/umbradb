@@ -3,6 +3,7 @@ import type { BlockWriteHandle, Database, Transaction } from "../../src/db/api.j
 import { CORE_DIGEST as DIGESTS, digestBlock } from "../../src/backbone/core-digest/core-digest.js";
 import { capturedTables, tablesWithChanges } from "../../src/db/change-capture.js";
 import { UmbraError } from "../../src/db/errors.js";
+import { type Statement, statementText } from "../../src/db/repeated-statements.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import { CallbackFailure } from "../../src/runner/dispatch.js";
 import { FinalizedLoop, HeightFailure } from "../../src/runner/loop.js";
@@ -78,8 +79,8 @@ const shown = (value: unknown): string => (value instanceof Uint8Array ? Buffer.
  */
 function recordingStatements(db: Database): { readonly db: Database; readonly transactions: string[][] } {
   const transactions: string[][] = [];
-  const record = (sent: string[], sql: string, params: unknown[] = []) =>
-    sent.push(`${sql.replace(/\s+/g, " ").trim()} [${params.map(shown).join(", ")}]`);
+  const record = (sent: string[], sql: Statement, params: unknown[] = []) =>
+    sent.push(`${statementText(sql).replace(/\s+/g, " ").trim()} [${params.map(shown).join(", ")}]`);
   return {
     transactions,
     db: {

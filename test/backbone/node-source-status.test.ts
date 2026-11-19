@@ -1,6 +1,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterEach, describe, expect, it } from "vitest";
 import { NodeBlockSource } from "../../src/backbone/core-block-fetch/node-source.js";
+import { type Statement, statementText } from "../../src/db/repeated-statements.js";
 import { type ConnectSocket, connectWebSocket, NodeClient } from "../../src/node/index.js";
 import { BlockItems } from "../../src/runner/block-context.js";
 import type { BlockRef, QueueRunner } from "../../src/runner/block-source.js";
@@ -68,10 +69,10 @@ const B = (h: number) => b[h - 101] as ChainBlock;
 const fetched = (block: ChainBlock): TapeRecord => ({ method: "chain_getBlock", params: [block.hex], result: block.block });
 
 /** A read that answers `readCursor` with `cursor`. */
-function cursorRead(cursor: ChainBlock): { query(sql: string): Promise<Record<string, unknown>[]> } {
+function cursorRead(cursor: ChainBlock): { query(sql: Statement): Promise<Record<string, unknown>[]> } {
   return {
     query: async (sql) =>
-      sql.includes("to_regclass") ? [{ present: true }] : [{ height: cursor.height, hash: cursor.hash, parent_hash: cursor.parentHash }],
+      statementText(sql).includes("to_regclass") ? [{ present: true }] : [{ height: cursor.height, hash: cursor.hash, parent_hash: cursor.parentHash }],
   };
 }
 
