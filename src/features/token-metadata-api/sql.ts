@@ -48,6 +48,13 @@ export const STATEMENTS = Object.freeze({
   /** The kind 1 and 2 tokens of colors `$1`: a token's id is its color (`tokens`' primary key). */
   tokensOfColors: `SELECT ${TOKEN_COLUMNS} FROM ${TOKEN_METADATA_SCHEMA}.tokens t WHERE t.id = ANY($1::bytea[]) AND t.kind IN (1, 2)
      ORDER BY t.contract_address, t.domain_sep, t.kind`,
+  /**
+   * The first `$1` tokens after (contract `$2`, domainSep `$3`, kind `$4`), by (contract, domainSep, kind)
+   * (`tokens_contract_idx`). A first page starts after the empty contract, which is before every address.
+   */
+  tokensAfter: `SELECT ${TOKEN_COLUMNS} FROM ${TOKEN_METADATA_SCHEMA}.tokens t
+     WHERE (t.contract_address, t.domain_sep, t.kind) > ($2::bytea, $3::bytea, $4::smallint)
+     ORDER BY t.contract_address, t.domain_sep, t.kind LIMIT $1`,
   /** The first `$1` tokens of contract `$2`, by (domainSep, kind) (`tokens_contract_idx`). */
   tokensOfContract: `SELECT ${TOKEN_COLUMNS} FROM ${TOKEN_METADATA_SCHEMA}.tokens t WHERE t.contract_address = $2
      ORDER BY t.domain_sep, t.kind LIMIT $1`,
@@ -97,6 +104,12 @@ const fieldKeyOf = (r: Record<string, unknown>): string => tokenMapKey({ id: toH
 /** The kind 1 and 2 tokens whose color is one of `colors`, by (contract, domainSep, kind). */
 export async function tokensOfColors(read: ReadHandle, colors: readonly string[]): Promise<TokenKey[]> {
   return (await read.query(STATEMENTS.tokensOfColors, [[...new Set(colors)].map(bytes)])).map(tokenKeyOf);
+}
+
+/** Up to `limit` tokens of every contract after `after` (contract, domainSep, kind); from the first without it. */
+export async function tokensAfter(read: ReadHandle, limit: number, after?: readonly [string, string, number]): Promise<TokenKey[]> {
+  const from = after === undefined ? [new Uint8Array(), new Uint8Array(), 0] : [bytes(after[0]), bytes(after[1]), after[2]];
+  return (await read.query(STATEMENTS.tokensAfter, [limit, ...from])).map(tokenKeyOf);
 }
 
 /** Up to `limit` tokens of `contract` after `after` (domainSep, kind). */

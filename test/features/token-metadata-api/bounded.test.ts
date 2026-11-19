@@ -150,6 +150,21 @@ describe.each(PROCESS_BACKENDS)("bounded cost on $name", (backend: ProcessBacken
     expect(large.statements).toBeLessThanOrEqual(8);
   }, 120_000);
 
+  it("with no parameter: a page of every contract's tokens holds 500, in a fixed number of statements, and the next continues it", async () => {
+    const first = await tokens(db, {});
+    expect([first.status, first.json.items.length, typeof first.json.nextCursor]).toEqual([200, 500, "string"]);
+    // The members of a group are read once for the page, whatever the number of its tokens that carry them.
+    expect(first.statements).toBeLessThanOrEqual(8);
+    expect(first.rows).toBeLessThan(5_000);
+    // The worst page: 500 tokens that each carry the first 100 members of one group. About 4.9 MB.
+    expect(first.size).toBeLessThan(6_000_000);
+    const few = await tokens(db, { limit: 10 });
+    expect(few.json.items).toEqual(first.json.items.slice(0, 10));
+    const second = await tokens(db, { cursor: first.json.nextCursor });
+    expect(second.json.items.length).toBe(500);
+    expect(second.json.items[0]).not.toEqual(first.json.items[499]);
+  }, 120_000);
+
   it("[NEG] a group under a 12-character symbol reads every row sharing it, and the bound sees it", async () => {
     const got = await tokens(spam, { contract: hex(X), domainSep: hex(DA), kind: 3 });
     const [token] = got.json.items;

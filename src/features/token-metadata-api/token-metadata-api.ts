@@ -3,7 +3,8 @@
  * configuration enables it with `TOKEN_METADATA_API.entry(...)`, beside `TOKEN_METADATA`'s entry.
  *
  * - **One route**, under the module's namespace: `GET /token-metadata-api/v1/tokens`, whose query parameters select tokens
- *   by colors, by contract, by contract and domain separator, or by all three with the kind, and whose answer gives
+ *   by colors, by contract, by contract and domain separator, or by all three with the kind (and every token, a page
+ *   at a time, with none), and whose answer gives
  *   each token with every defined field. It is the route `getTokens`, registered with the core, which checks
  *   its input and output against their zod schemas; the documentation is `docs/token-metadata-api.md`.
  * - **Files by role**: `./schemas.ts` the request and answer schemas and their types, `./routes.ts` the routes,

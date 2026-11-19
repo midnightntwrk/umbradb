@@ -11,7 +11,7 @@ import { TokensRequest, TokensResponse } from "./schemas.js";
 /** `token-metadata-api.getTokens`, over HTTP `GET /token-metadata-api/v1/tokens`, its input in the query. */
 export const getTokens = defineRoute({
   name: "getTokens",
-  description: "The described tokens a selector names (colors, a contract, a contract and domain separator, or one token), each with its fields and symbol group.",
+  description: "The described tokens a selector names (every token, colors, a contract, a contract and domain separator, or one token), each with its fields and symbol group.",
   input: TokensRequest,
   output: TokensResponse,
   http: { method: "GET", path: "/v1/tokens" },

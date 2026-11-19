@@ -1,6 +1,6 @@
 /**
  * The shapes of `token-metadata-api`'s one route, `getTokens` (`GET /token-metadata-api/v1/tokens`), as zod schemas:
- * its input (the parameters of one of four selectors), its output, and the cursor of a contract's pages. The core checks every input
+ * its input (the parameters of one of five selectors), its output, and the cursors of its pages. The core checks every input
  * against {@link TokensRequest} and writes every output with {@link TokensResponse}, and the TypeScript types come
  * from the same schemas, so the handler cannot return a shape the documentation does not describe.
  *
@@ -17,9 +17,8 @@ import { UINT_MAX_BYTES } from "../token-metadata/codec/index.js";
 
 /** The most colors one request may carry. */
 export const MAX_COLORS = 100;
-/** A page of a contract's tokens: at most this many, `DEFAULT_LIMIT` unless the request says. */
+/** A page of tokens: this many unless the request's `limit` asks for fewer. */
 export const MAX_LIMIT = 500;
-export const DEFAULT_LIMIT = 100;
 /** The most members listed in a symbol group (all are counted in `memberCount`). */
 export const MAX_GROUP_MEMBERS = 100;
 
@@ -41,8 +40,13 @@ const height = () => uintText(64);
 export const ContractCursor = z.strictObject({ c: hash32(), k: z.tuple([hash32(), Kind]) });
 export type ContractCursor = z.output<typeof ContractCursor>;
 
-/** One of the four selectors, as the handler takes it. */
+/** The cursor of a page of every token: the last (contract, domainSep, kind) it gave (`a`). Neither cursor is the other's. */
+export const AllCursor = z.strictObject({ a: z.tuple([hash32(), hash32(), Kind]) });
+export type AllCursor = z.output<typeof AllCursor>;
+
+/** One of the five selectors, as the handler takes it. */
 export type TokensSelector =
+  | { readonly limit?: number; readonly cursor?: string }
   | { readonly colors: readonly string[] }
   | { readonly contract: string; readonly limit?: number; readonly cursor?: string }
   | { readonly contract: string; readonly domainSep: string }
@@ -52,7 +56,9 @@ const COLOR_LIST = /^0x[0-9a-f]{64}(,0x[0-9a-f]{64})*$/;
 
 /**
  * The input: the route is a `GET`, so its input is its parameters, each one text or a number. Together they are
- * exactly one of four selectors, which is what the handler takes ({@link TokensSelector}):
+ * exactly one of five selectors, which is what the handler takes ({@link TokensSelector}):
+ * - no parameter, or `limit` and `cursor` alone: every described token, by (contract, domainSep, kind), a page at a
+ *   time. A page holds {@link MAX_LIMIT} tokens unless `limit` asks for fewer.
  * - `colors`: the described kind 1 and 2 tokens of each color (a color covers both kinds). One parameter, the colors
  *   separated by commas, up to {@link MAX_COLORS}; given alone.
  * - `contract`, with `limit` and `cursor` or neither: a contract's described tokens, a page at a time.
@@ -88,12 +94,15 @@ export const TokensRequest = z
       if (Object.keys(given).length > 1) return refuse("colors is given alone");
       return { colors: colors.split(",") };
     }
-    if (contract === undefined) return refuse("expected colors or contract");
+    if (contract === undefined) {
+      if (domainSep !== undefined || kind !== undefined) return refuse("domainSep and kind are given with contract");
+      return { ...(limit === undefined ? {} : { limit }), ...(cursor === undefined ? {} : { cursor }) };
+    }
     if (domainSep === undefined) {
       if (kind !== undefined) return refuse("kind is given with domainSep");
       return { contract, ...(limit === undefined ? {} : { limit }), ...(cursor === undefined ? {} : { cursor }) };
     }
-    if (limit !== undefined || cursor !== undefined) return refuse("limit and cursor page a contract's tokens: not given with domainSep");
+    if (limit !== undefined || cursor !== undefined) return refuse("limit and cursor page a list of tokens: not given with domainSep");
     return kind === undefined ? { contract, domainSep } : { contract, domainSep, kind };
   });
 export type TokensRequest = z.output<typeof TokensRequest>;

@@ -13,7 +13,7 @@ import { blockLogs, contract, domain, eventData, get, getTokens, type Got, miscD
  * hostile text, an image and a withdrawn token.
  * Every answer is checked against the route's own output schema.
  *
- * - **The four selectors:** colors (both kinds of a color, several colors at once), a contract (paged, its cursor bound
+ * - **The five selectors:** every token (no parameter, paged), colors (both kinds of a color, several colors at once), a contract (paged, its cursor bound
  *   to it), a contract and domain separator (its kinds), and all three with the kind.
  * - **A token:** every defined field in key order, the six common fields (its image URI among them), its group by symbol.
  * - **No verdict:** an answer gives a token's fields and nothing about them; a rejected event of its contract changes
@@ -140,6 +140,39 @@ describe.each(PROCESS_BACKENDS)("token-metadata-api on $name", (backend: Process
     expect(await tokens({ contract: hex(B), cursor: first })).toMatchObject({ status: 400, json: { error: { code: "invalid-request" } } });
   }, 60_000);
 
+  it("with no parameter: every described token of every contract, by (contract, domainSep, kind); the same in pages of any limit", async () => {
+    const all = await tokens({});
+    expect(all.status).toBe(200);
+    expect(all.json.nextCursor).toBeNull();
+    const keyOf = (t: { contractAddress: string; domainSep: string; kind: number }) => `${t.contractAddress}/${t.domainSep}/${t.kind}`;
+    const keys: string[] = all.json.items.map(keyOf);
+    expect(keys).toEqual([...keys].sort());
+    // Every contract's own page is in it, and nothing else: the withdrawn token (W) is in neither.
+    const perContract: string[] = [];
+    for (const address of [...new Set<string>(all.json.items.map((t: { contractAddress: string }) => t.contractAddress))]) {
+      perContract.push(...(await tokens({ contract: address })).json.items.map(keyOf));
+    }
+    expect(perContract.sort()).toEqual(keys);
+    expect(new Set(all.json.items.map((t: { contractAddress: string }) => t.contractAddress)).size).toBeGreaterThan(1);
+    expect(keys.some((key) => key.startsWith(hex(W)))).toBe(false);
+    for (const limit of [1, 2, 500]) {
+      const paged: unknown[] = [];
+      let cursor: string | undefined;
+      do {
+        const page: Got = await tokens({ limit, ...(cursor ? { cursor } : {}) });
+        expect(page.json.items.length).toBeLessThanOrEqual(limit);
+        paged.push(...page.json.items);
+        cursor = page.json.nextCursor ?? undefined;
+      } while (cursor !== undefined);
+      expect(paged).toEqual(all.json.items);
+    }
+    // A cursor belongs to the list that gave it: a contract's page refuses this one, and this list a contract's.
+    const ofAll = (await tokens({ limit: 1 })).json.nextCursor as string;
+    const ofContract = (await tokens({ contract: hex(A), limit: 1 })).json.nextCursor as string;
+    expect((await tokens({ contract: hex(A), cursor: ofAll })).status).toBe(400);
+    expect((await tokens({ cursor: ofContract })).status).toBe(400);
+  }, 60_000);
+
   it("an answer carries no verdict: a missing field is null, and a rejected event of the contract changes nothing", async () => {
     const [partial] = (await tokens({ contract: hex(B), domainSep: hex(D7), kind: 1 })).json.items;
     expect(partial.common).toEqual({ name: "Only a name", symbol: null, decimals: null, standards: null, image: null, imageSha256: null });
@@ -174,7 +207,6 @@ describe.each(PROCESS_BACKENDS)("token-metadata-api on $name", (backend: Process
   it("parameters that are no selector are 400 invalid-request naming the rule, never the input", async () => {
     const SECRET = "f".repeat(63) + "x";
     const bad: object[] = [
-      {},
       { colors: "" },
       { colors: Array.from({ length: 101 }, () => colorOf(A, D7)) },
       { colors: [SECRET] },
@@ -184,6 +216,10 @@ describe.each(PROCESS_BACKENDS)("token-metadata-api on $name", (backend: Process
       { contract: hex(A).toUpperCase() },
       { contract: toHex(A) },
       { domainSep: hex(D7) },
+      { kind: 1 },
+      { limit: 0 },
+      { limit: 501 },
+      { cursor: "not a cursor!" },
       { contract: hex(A), kind: 1 },
       { contract: hex(A), domainSep: hex(D7), kind: 4 },
       { contract: hex(A), domainSep: hex(D7), kind: "one" },
@@ -206,10 +242,10 @@ describe.each(PROCESS_BACKENDS)("token-metadata-api on $name", (backend: Process
     const message = async (selector: object) => (await tokens(selector)).json.error.message;
     expect(await message({ colors: [SECRET] })).toMatch(/^input\/colors: expected 32-byte hashes/);
     expect(await message({ colors: Array.from({ length: 101 }, () => colorOf(A, D7)) })).toBe("input/colors: expected at most 100 colors");
-    expect(await message({})).toBe("input: expected colors or contract");
+    expect(await message({ domainSep: hex(D7) })).toBe("input: domainSep and kind are given with contract");
     expect(await message({ colors: [colorOf(A, D7)], contract: hex(A) })).toBe("input: colors is given alone");
     expect(await message({ contract: hex(A), kind: 1 })).toBe("input: kind is given with domainSep");
-    expect(await message({ contract: hex(A), domainSep: hex(D7), limit: 1 })).toBe("input: limit and cursor page a contract's tokens: not given with domainSep");
+    expect(await message({ contract: hex(A), domainSep: hex(D7), limit: 1 })).toBe("input: limit and cursor page a list of tokens: not given with domainSep");
     expect(await message({ contract: hex(A), extra: 1 })).toBe("input/extra: not an input of this route");
   }, 60_000);
 
@@ -232,9 +268,11 @@ describe.each(PROCESS_BACKENDS)("token-metadata-api on $name", (backend: Process
   }, 60_000);
 });
 
-describe("the request schema's four selectors", () => {
+describe("the request schema's five selectors", () => {
   const h = `0x${"a".repeat(64)}`;
-  it("reads the parameters of each of the four as its selector", () => {
+  it("reads the parameters of each of the five as its selector", () => {
+    expect(TokensRequest.parse({})).toEqual({});
+    expect(TokensRequest.parse({ limit: 10, cursor: "abc" })).toEqual({ limit: 10, cursor: "abc" });
     expect(TokensRequest.parse({ colors: `${h},${h}` })).toEqual({ colors: [h, h] });
     expect(TokensRequest.parse({ contract: h })).toEqual({ contract: h });
     expect(TokensRequest.parse({ contract: h, limit: 10, cursor: "abc" })).toEqual({ contract: h, limit: 10, cursor: "abc" });
@@ -242,7 +280,7 @@ describe("the request schema's four selectors", () => {
     expect(TokensRequest.parse({ contract: h, domainSep: h, kind: 3 })).toEqual({ contract: h, domainSep: h, kind: 3 });
   });
   it("refuses a list of colors (a GET parameter is text) and every mix of selectors", () => {
-    for (const bad of [{ colors: [h] }, {}, { domainSep: h }, { kind: 1 }, { colors: h, limit: 1 }, { contract: h, kind: 1 }, { contract: h, domainSep: h, cursor: "abc" }]) {
+    for (const bad of [{ colors: [h] }, { domainSep: h }, { kind: 1 }, { colors: h, limit: 1 }, { contract: h, kind: 1 }, { contract: h, domainSep: h, cursor: "abc" }]) {
       expect([bad, TokensRequest.safeParse(bad).success]).toEqual([bad, false]);
     }
   });

@@ -14,18 +14,19 @@ import type { ReadHandle } from "../../db/api.js";
 import { COMMON_KEY_HEX, type Field as StateField, IMAGE_KEY_HEX, parseStandards } from "../token-metadata/rules.js";
 import { decodeUtf8, toHex } from "../token-metadata/codec/index.js";
 import { hasColor } from "../token-metadata/color.js";
-import { groupCounts, groupKey, isWholeSymbol, tokenMapKey, symbolGroup, type TokenKey, tokenFields, tokensOfColors, tokensOfContract, tokensOfDomain } from "./sql.js";
+import { groupCounts, groupKey, isWholeSymbol, tokenMapKey, symbolGroup, type TokenKey, tokenFields, tokensAfter, tokensOfColors, tokensOfContract, tokensOfDomain } from "./sql.js";
 import { pageCursor } from "../../helpers/page-cursor.js";
 import { invalidRequest } from "../../modules/route.js";
 import {
   type Common,
+  AllCursor,
   ContractCursor,
-  DEFAULT_LIMIT,
   type Field,
   type Group,
   type Kind,
   type KindName,
   MAX_GROUP_MEMBERS,
+  MAX_LIMIT,
   type TokenJson,
   type TokensRequest,
   type TokensResponse,
@@ -125,7 +126,7 @@ async function tokensOf(read: ReadHandle, keys: readonly TokenKey[]): Promise<To
   return out;
 }
 
-// ── Cursors of a contract's pages ────────────────────────────────────────────────────────────────────────────────
+// ── Cursors of the pages ─────────────────────────────────────────────────────────────────────────────────────────
 
 /** A contract page's cursors (the core's page cursors, of {@link ContractCursor}). */
 const contractCursors = pageCursor(ContractCursor);
@@ -139,6 +140,11 @@ export function decodeCursor(raw: string, contract: string): ContractCursor {
   return value;
 }
 
+/** The cursors of a page of every token (of {@link AllCursor}): one a contract's page gave is refused, and the reverse. */
+const allCursors = pageCursor(AllCursor);
+
+export const encodeAllCursor = (cursor: AllCursor): string => allCursors.encode(cursor);
+
 /**
  * The handler of `getTokens`. The input's bytes are `0x` hex, which `./sql.ts` reads either way; a cursor holds them
  * as the input gave them.
@@ -149,7 +155,18 @@ export async function selectTokens(body: TokensRequest, read: ReadHandle): Promi
     const keys = await tokensOfDomain(read, body.contract, body.domainSep, "kind" in body ? body.kind : undefined);
     return { items: await tokensOf(read, keys), nextCursor: null };
   }
-  const limit = body.limit ?? DEFAULT_LIMIT;
+  const limit = body.limit ?? MAX_LIMIT;
+  if (!("contract" in body)) {
+    const after = body.cursor === undefined ? undefined : allCursors.decode(body.cursor).a;
+    const keys = await tokensAfter(read, limit + 1, after);
+    const page = keys.slice(0, limit);
+    const last = page.at(-1);
+    return {
+      items: await tokensOf(read, page),
+      nextCursor:
+        keys.length > limit && last !== undefined ? encodeAllCursor({ a: [`0x${last.contractAddress}`, `0x${last.domainSep}`, last.kind as Kind] }) : null,
+    };
+  }
   const after = body.cursor === undefined ? undefined : decodeCursor(body.cursor, body.contract).k;
   const keys = await tokensOfContract(read, body.contract, limit + 1, after);
   const page = keys.slice(0, limit);
