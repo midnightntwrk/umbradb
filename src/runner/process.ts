@@ -1686,6 +1686,7 @@ class Process implements ProcessHandle {
   /**
    * A stop once startup has completed: ends every node call the loop awaits outside a block transaction (the next
    * height's block through the node source's prefetch, the state root that `core-ledger-state`'s `on-compute` awaits,
+   * the blocks and the state roots of a chunk, which the loop waits for before the chunk's `BEGIN`,
    * a module's node call), rather than once the loop has ended, which it does not while such a call retries an
    * unreachable node without limit.
    *

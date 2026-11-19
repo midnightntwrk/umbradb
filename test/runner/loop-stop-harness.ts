@@ -74,7 +74,17 @@ export interface LoopStopScenario {
   readonly core: readonly ModuleDeclaration[];
   /** The tables holding a row per committed height (`height` their column): none may hold h + 1 after the stop. */
   readonly tables: readonly string[];
+  /** More settings of the `core` entry (`fastSync`); none unless given. */
+  readonly settings?: Readonly<Record<string, unknown>>;
+  /**
+   * The cursor the process shows while it waits on the node gone, when that is not h: null for none, where the stop
+   * itself stores h (a chunk whose first block is h, `loop-stop-chunk.test.ts`).
+   */
+  readonly waitsAt?: bigint | null;
 }
+
+/** The cursor the process shows while it waits on the node gone: h, unless the scenario says another. */
+const waitCursor = (scenario: LoopStopScenario): bigint | null => (scenario.waitsAt === undefined ? scenario.height : scenario.waitsAt);
 
 /** The synthetic chain's head and h (the block scenario). */
 const CHAIN_HEAD = 6n;
@@ -215,10 +225,10 @@ export function a169Problems(scenario: LoopStopScenario, observed: A169Observati
   const { before } = observed;
   const h = scenario.height;
   const running = before.state === "syncing" || before.state === "following";
-  if (!running || before.cursor !== h || before.retrying === null || observed.refused < 2) {
+  if (!running || before.cursor !== waitCursor(scenario) || before.retrying === null || observed.refused < 2) {
     problems.push(
       `before the stop the process was ${before.state} at cursor ${before.cursor} with node-retrying at ` +
-        `${before.retrying} after ${observed.refused} refused connections, not running at ${h} and retrying the node`,
+        `${before.retrying} after ${observed.refused} refused connections, not running at ${waitCursor(scenario)} and retrying the node`,
     );
   }
   if (observed.atStop !== "stopping") problems.push(`the stop left the process ${observed.atStop}, not stopping`);
@@ -237,7 +247,7 @@ export function a169Problems(scenario: LoopStopScenario, observed: A169Observati
 /** The `core` entry and the build's entries for `scenario` against the node at `url` on `db`. */
 function entriesOf(db: ProcessDatabase, scenario: LoopStopScenario, url: string): Record<string, unknown>[] {
   const genesisHash = genesisOf(scenario.records) as string;
-  const extra = { node: url, genesisHash, backoffCeilingMs: CEILING_MS, prefetchWindow: 1 };
+  const extra = { node: url, genesisHash, backoffCeilingMs: CEILING_MS, prefetchWindow: 1, ...scenario.settings };
   return [
     core(db.setting, Number(scenario.start), { extra }),
     ...scenario.core.map((module) => entryOf(module, Number(scenario.start))),
@@ -281,7 +291,7 @@ async function waitingAt(handle: Pick<ProcessHandle, "status">, scenario: LoopSt
   for (;;) {
     const status = handle.status();
     const retrying = retryingOf(handle);
-    if (status.cursor === scenario.height && outage.cutAt !== null && retrying !== null && retrying >= 2 && outage.refused >= 2) {
+    if (status.cursor === waitCursor(scenario) && outage.cutAt !== null && retrying !== null && retrying >= 2 && outage.refused >= 2) {
       return;
     }
     if (status.ended !== null || status.state === "halted" || Date.now() > deadline) {

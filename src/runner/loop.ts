@@ -165,9 +165,13 @@
  * the `core` entry, no closer to the head than the setting's distance. A chunk:
  * 1. takes all its blocks first, in height order, with nothing open: each from the source (`prepared`, the source's
  *    queue running its `on-fetch` and `on-parse`; else `block`, the loop running them), kept with its items as
- *    `on-parse` left them. A take that fails at j makes the chunk a..j − 1 (a alone when that is a), and the failure is
- *    thrown when the loop reaches j, the source not asked again;
- * 2. runs a's `on-start-height` and `on-compute` with their own reads, as a height alone does;
+ *    `on-parse` left them. A take that fails at j makes the chunk a..j − 1 (a alone when that is a). The failure is
+ *    kept for j until the loop reaches j, whatever becomes of the blocks below it meanwhile (a retry, a new run of the
+ *    loop, a chunk that ends early): no chunk is planned across j, the source is not asked for j again, and j is
+ *    processed alone, where the failure is thrown as j's;
+ * 2. runs a's `on-start-height` and `on-compute` with their own reads, as a height alone does; then waits, still with
+ *    nothing open, until the source holds what the callbacks of the blocks after a ask it for from `on-compute` on
+ *    (`BlockSource.answered`: the node source's ledger state roots). The loop's signal ends that wait;
  * 3. opens one transaction: a's writes (`on-db-write`, `on-settle` with the run `{ a, a }`, the cursor check); then for
  *    each k > a, `on-compute` (its callbacks one at a time, each with a read at k − 1 that is a read-only view of the
  *    transaction, `../db/read-view.ts`, opened at its first statement), then k's writes;
@@ -621,6 +625,20 @@ interface TakeFailure {
   readonly height: bigint;
   readonly error: unknown;
   readonly block: BlockRef | undefined;
+}
+
+/** Resolves once `work` settled or `signal`, not aborted yet, aborts, whichever comes first. */
+async function untilAborted(work: Promise<unknown>, signal: AbortSignal): Promise<void> {
+  let stop!: () => void;
+  const aborted = new Promise<void>((resolve) => {
+    stop = resolve;
+  });
+  signal.addEventListener("abort", stop, { once: true });
+  try {
+    await Promise.race([work, aborted]);
+  } finally {
+    signal.removeEventListener("abort", stop);
+  }
 }
 
 /**
@@ -1555,8 +1573,10 @@ export class FinalizedLoop {
       if (computed === undefined) {
         this.#continueFrom(head, previous, null);
         await this.prepare(head);
-        traceAdd("prepareMs", performance.now() - prepareFrom);
       }
+      // What the later blocks' callbacks ask of the source is answered before the BEGIN, with nothing open.
+      await this.#answered(first, last);
+      traceAdd("prepareMs", performance.now() - prepareFrom);
       this.#enter("on-db-write");
       const transactionFrom = performance.now();
       this.#chunkOpen = chunk;
@@ -1711,6 +1731,22 @@ export class FinalizedLoop {
    */
   protected holdTrace(_run: HeightRun): void {
     traceHoldBlock();
+  }
+
+  /**
+   * Waits until the source holds what the callbacks of the chunk's blocks after `first`, up to `last`, ask it for from
+   * `on-compute` on (`BlockSource.answered`: the node source's ledger state roots), each block as it was taken; or
+   * until the loop's signal aborts, and not at all when it has: the chunk then ends at its first block. It comes after
+   * `first`'s `on-compute` and before the chunk's `BEGIN`, so a transaction that holds several blocks never waits for
+   * the chain, and neither does a stop or a pause behind it. An answer that is a failure is the callback's that asks
+   * for it, at its block.
+   */
+  async #answered(first: bigint, last: bigint): Promise<void> {
+    const { source } = this.input;
+    if (source.answered === undefined || this.#signal.aborted) return;
+    const asked: Promise<void>[] = [];
+    for (let height = first + 1n; height <= last; height++) asked.push(source.answered((this.#taken.get(height) as Taken).block));
+    await untilAborted(Promise.allSettled(asked), this.#signal);
   }
 
   /**
