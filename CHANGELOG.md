@@ -186,6 +186,14 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   reads two runs side by side; `equal.sh`, `contents-hash.sh` and `tables.sh` say whether two builds stored the same.
   It is not part of the package and changes nothing under `src/`. `bench/range/README.md` says how to make a template,
   choose a range, make a run and read it.
+- **`on-settle`, a module point for a run of blocks.** A module can now declare
+  `"on-settle"(processContext, run, writer)`. UmbraDB calls it for a run of heights, `{ first, last }` both included,
+  inside the transaction that holds the run's last block: after every module's `on-db-write` of that block and before
+  the `COMMIT`, in `on-db-write`'s order, with that transaction's block write handle. A failure there is handled as
+  one of `on-db-write`. The engine chooses the runs. In this version a run is always one block. `core-digest` now
+  computes a block's digests and checkpoint at `on-settle`, last, so they take what every module's `on-settle` wrote;
+  a sync whose modules declare no `on-settle` sends the same statements, in the same order, as before. `BlockRun`, the
+  run's type, is exported. The module guide's §3 describes the point.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 

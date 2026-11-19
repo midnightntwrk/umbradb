@@ -19,7 +19,9 @@ import type { DatabaseParts } from "../../src/config/database-parts.js";
 /**
  * Callback failures halt processing, tested through the process from its configuration, on PostgreSQL 18 and PGlite.
  * A thrown error in each of `on-fetch`, `on-parse`, `on-start-height`, `on-compute`, the first and the last
- * `on-db-write` callback leaves no row of h, the cursor h − 1, and the state `halted` with h, the module and the point.
+ * `on-db-write` callback, and the first and the last module's `on-settle` callback, leaves no row of h — neither the
+ * `on-db-write` rows nor the `on-settle` ones —, the cursor h − 1, and the state `halted` with h, the module and the
+ * point.
  * An error in `on-after-db-write` (or in `on-stop-height`, the other point after the commit) halts with h committed.
  * The process stays up: its module API keeps answering at the cursor until it is stopped.
  *
@@ -28,9 +30,10 @@ import type { DatabaseParts } from "../../src/config/database-parts.js";
  * for any other failure.
  *
  * The build: `a-first`, `early` (1–5), `late` (from 5), `m-mid` and `z-last`, each writing one row per height in its
- * `on-db-write` and logging every point, in that order — so at `on-db-write` `core-block-commit` is the first callback
- * of the block transaction (it writes the cursor row) and `z-last` the last, after every other module wrote its row —,
- * and `reader`, whose module API answers with the height it read.
+ * `on-db-write` and one in its `on-settle` and logging every point, in that order — so at `on-db-write`
+ * `core-block-commit` is the first callback of the block transaction (it writes the cursor row) and `z-last` the last,
+ * after every other module wrote its row; at `on-settle` `a-first` is the first and `z-last` the last module, before
+ * `core-digest` —, and `reader`, whose module API answers with the height it read.
  */
 
 const H = 5;
@@ -43,6 +46,7 @@ const POINTS: readonly PointName[] = [
   "on-start-height",
   "on-compute",
   "on-db-write",
+  "on-settle",
   "on-after-db-write",
   "on-stop-height",
 ];
@@ -63,11 +67,16 @@ const A43_CASES: readonly A43Case[] = [
   { name: "on-compute", point: "on-compute", module: "m-mid", committed: false },
   { name: "the first on-db-write callback", point: "on-db-write", module: "core-block-commit", committed: false },
   { name: "the last on-db-write callback", point: "on-db-write", module: "z-last", committed: false },
+  { name: "the first on-settle callback", point: "on-settle", module: "a-first", committed: false },
+  { name: "the last module's on-settle callback", point: "on-settle", module: "z-last", committed: false },
   { name: "on-after-db-write", point: "on-after-db-write", module: "m-mid", committed: true },
   { name: "on-stop-height", point: "on-stop-height", module: "early", committed: true },
 ];
 
-/** `declaration` whose `point` callback, at `height`, does its work and then throws `error`, after telling `failed`. */
+/**
+ * `declaration` whose `point` callback, at `height` (at `on-settle` the run's last), does its work and then throws
+ * `error`, after telling `failed`.
+ */
 function failingAt(
   declaration: ModuleDeclaration,
   point: PointName,
@@ -80,7 +89,8 @@ function failingAt(
     ...declaration.points,
     async [point](...args: unknown[]) {
       await callback.apply(points, args);
-      if ((args[1] as { readonly height: bigint }).height === BigInt(height)) {
+      const given = args[1] as { readonly height?: bigint; readonly last?: bigint };
+      if ((given.height ?? given.last) === BigInt(height)) {
         failed();
         throw error;
       }
@@ -180,12 +190,12 @@ async function a43Run(
     await handle.stop();
   }
   const rows: Record<string, { at: number; above: number }> = {};
-  for (const table of TABLES) {
+  for (const table of TABLES.flatMap((schema) => [`${schema}.rows`, `${schema}.settled`])) {
     const [row] = await db.query(
       `SELECT count(*) FILTER (WHERE height = ${H})::int AS at, count(*) FILTER (WHERE height > ${H})::int AS above ` +
-        `FROM ${table}.rows`,
+        `FROM ${table}`,
     );
-    rows[`${table}.rows`] = { at: Number(row?.at), above: Number(row?.above) };
+    rows[table] = { at: Number(row?.at), above: Number(row?.above) };
   }
   return { ...observed, cursor: await cursorIn(db), rows };
 }
@@ -424,15 +434,20 @@ describe("a failure before COMMIT leaves nothing and halts; after it, halts with
         "processing ended with the source waiting at the head, not failed",
         "the cursor is 8, not 4",
         "the state's cursor is 8, not 4",
+        // The committed block of H skipped the settle point with the failure: no settled row of H, but rows above it.
         `a_first.rows holds 1 rows of ${H}`,
         `a_first.rows holds rows above ${H}`,
+        `a_first.settled holds rows above ${H}`,
         `early.rows holds 1 rows of ${H}`,
         `late.rows holds 1 rows of ${H}`,
         `late.rows holds rows above ${H}`,
+        `late.settled holds rows above ${H}`,
         `m_mid.rows holds 1 rows of ${H}`,
         `m_mid.rows holds rows above ${H}`,
+        `m_mid.settled holds rows above ${H}`,
         `z_last.rows holds 1 rows of ${H}`,
         `z_last.rows holds rows above ${H}`,
+        `z_last.settled holds rows above ${H}`,
         `a callback ran above ${H}`,
         `a point after the commit ran at ${H}`,
         "the module API answered at 8, not at 4",

@@ -30,7 +30,7 @@ export const EXPORTED_SURFACE: Surface = Object.freeze({
     "versionEntry", "withViewExtensions",
   ]),
   types: Object.freeze([
-    "Address", "ApiRegistry", "BlockContext", "BlockRef", "BlockWriteHandle", "CoreVersion", "Entry", "ErrorCode",
+    "Address", "ApiRegistry", "BlockContext", "BlockRef", "BlockRun", "BlockWriteHandle", "CoreVersion", "Entry", "ErrorCode",
     "FieldKind", "FieldSchema", "ItemDeclaration", "ItemSink", "LedgerPackage", "LedgerTask", "Lifetime",
     "MessagePortLike", "Migration", "ModuleDeclaration", "NodeHttpHandler", "NodeUpgradeHandler", "PageCursor", "ParsedTransaction",
     "PointCallbacks", "PointName", "PrivateLinkChannel", "ProcessContext", "ReadHandle", "Revision", "Route",

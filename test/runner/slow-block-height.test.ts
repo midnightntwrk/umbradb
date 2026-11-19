@@ -1,19 +1,23 @@
 import { performance } from "node:perf_hooks";
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { ReadHandle } from "../../src/db/api.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
-import { FinalizedLoop, type LoopEnd, type LoopInput, type SlowBlockEvent } from "../../src/runner/loop.js";
+import type { BlockRef } from "../../src/runner/block-source.js";
+import { FinalizedLoop, type HeightActivity, type LoopEnd, type LoopInput, type SlowBlockEvent } from "../../src/runner/loop.js";
 import { LoopPauses } from "../../src/runner/pause.js";
 import { declaration } from "../modules/declarations.js";
 import { entry } from "../modules/graph-fixtures.js";
-import { InMemoryBlockSource, loopInput, RUNNER_BACKENDS, type Started, startWith } from "./loop-harness.js";
+import { heightsIn, InMemoryBlockSource, loopInput, RUNNER_BACKENDS, type Started, startWith } from "./loop-harness.js";
 
 /**
  * Tests for the mutation pass over a height's own window at the loop level on PGlite:
  * - the event that ends it says whether the height committed and how long the window was open;
  * - a window of a failed height ends not completed;
  * - no timer at all when `slowBlockMs` is off;
- * - an observer without `slow`, or none, is not called.
+ * - an observer without `slow`, or none, is not called;
+ * - a slow `on-settle` is reported in `on-settle` with its module, and the window is back in `on-db-write` for the
+ *   cursor check and the `COMMIT` after it.
  *
  * And, for the pause's mutation pass: `LoopPauses.idle` leaves the loop no longer between heights once its wait ends.
  *
@@ -83,6 +87,60 @@ describe("a height's own slow-block window at the loop level on PGlite", () => {
     expect(outcome).toBeInstanceOf(Error);
     const ended = events.filter((event) => event.kind === "ended" && event.window === "height" && event.height === 2n);
     expect(ended).toEqual([expect.objectContaining({ completed: false })]);
+  }, 120_000);
+
+  it("reports a slow on-settle in on-settle with its module, and in on-db-write again at the cursor check after it", async () => {
+    const { db } = await PGLITE.database();
+    let settledAt2 = false;
+    let loop: FinalizedLoop | undefined;
+    // What the watchdog shows at the end of s's on-settle of 2, once that has run longer than slowBlockMs, and at the
+    // block source's cursor check of 2 after it.
+    const inSettle: (HeightActivity | null)[] = [];
+    const atCheck: (HeightActivity | null)[] = [];
+    const settler = declaration("s", {
+      provides: [{ name: "s-rows", lifetimes: ["table"], table: { schema: "s", tables: ["rows", "settled"], kind: "append-only" } }],
+      migrations: [
+        { id: "001", sql: "CREATE TABLE s.rows (height bigint PRIMARY KEY)" },
+        { id: "002", sql: "CREATE TABLE s.settled (height bigint PRIMARY KEY)" },
+      ],
+      points: {
+        async "on-db-write"(_p, b, w) {
+          await w.execute("INSERT INTO s.rows (height) VALUES ($1)", [b.height]);
+        },
+        async "on-settle"(_p, run, w) {
+          await w.execute("INSERT INTO s.settled (height) VALUES ($1)", [run.last]);
+          if (run.last !== 2n) return;
+          const start = performance.now();
+          while (performance.now() < start + 600) await sleep(Math.ceil(start + 600 - performance.now()));
+          inSettle.push(loop?.slowBlock() ?? null);
+          settledAt2 = true;
+        },
+      },
+    });
+    const started = await startWith(db, [settler], [entry("s", 1)]);
+    class CheckedSource extends InMemoryBlockSource {
+      override cursor(read: Pick<ReadHandle, "query">): Promise<BlockRef | null> {
+        if (settledAt2) {
+          settledAt2 = false;
+          atCheck.push(loop?.slowBlock() ?? null);
+        }
+        return super.cursor(read);
+      }
+    }
+    const source = new CheckedSource({ head: 2n });
+    const events: SlowBlockEvent[] = [];
+    const stop = new AbortController();
+    loop = new FinalizedLoop({ ...loopInput(started, source, stop), slowBlockMs: 200, observer: { slow: (event) => void events.push(event) } });
+    const running = loop.run();
+    await Promise.race([source.waiting(2n), running]);
+    stop.abort();
+    expect(await running).toEqual({ kind: "signal" });
+    expect(inSettle).toEqual([expect.objectContaining({ window: "height", height: 2n, point: "on-settle", module: "s" })]);
+    expect(atCheck).toEqual([expect.objectContaining({ window: "height", height: 2n, point: "on-db-write", module: null })]);
+    expect(events.filter((event) => event.kind === "ended" && event.height === 2n)).toEqual([
+      expect.objectContaining({ window: "height", completed: true }),
+    ]);
+    expect(await heightsIn(db, "s.settled")).toEqual([1n, 2n]);
   }, 120_000);
 
   it("starts no timer with slowBlockMs off, and calls no observer that has no slow, or none", async () => {

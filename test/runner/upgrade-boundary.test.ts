@@ -8,7 +8,7 @@ import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import { chainDataHeaders, readChainDataView } from "../../src/runner/envelope.js";
 import { FinalizedLoop, type LoopInput } from "../../src/runner/loop.js";
 import type { ProcessingEnd, ProcessStatus } from "../../src/runner/process.js";
-import { cursorIn, PROCESS_BACKENDS, type ProcessDatabase } from "./process-backends.js";
+import { cursorIn, pairs, PROCESS_BACKENDS, type ProcessDatabase } from "./process-backends.js";
 import { core, entryOf, loggingModule, settle, startProcess, testBuild } from "./process-build.js";
 
 /**
@@ -63,9 +63,12 @@ function moduleM(version: Version, log: string[]) {
   });
 }
 
-/** Module `n`, which stops at 49: it shows the boundary's height completing its `on-stop-height`. */
+/**
+ * Module `n`, which stops at 49: it shows the boundary's height completing its `on-stop-height`, and settling the
+ * height before the boundary in its block transaction (`on-settle`, a row of `n.settled` per height).
+ */
 const moduleN = (log: string[]): ModuleDeclaration =>
-  loggingModule("n", log, ["on-db-write", "on-after-db-write", "on-stop-height"] as PointName[]);
+  loggingModule("n", log, ["on-db-write", "on-settle", "on-after-db-write", "on-stop-height"] as PointName[]);
 
 /** The build carrying `version` of `m`, and `n`, logging into `log`. */
 const buildOf = (version: Version) => (log: string[]) => [moduleM(version, log) as ModuleDeclaration, moduleN(log)];
@@ -171,7 +174,7 @@ function a47Problems({ first, boundary, upgraded }: A47Observation): string[] {
   if (boundary.servedHeight !== "49") problems.push(`the 1.0.0 build served reads at ${boundary.servedHeight}, not 49`);
   if (boundary.cursor !== 49) problems.push(`the 1.0.0 build committed up to ${boundary.cursor}, not 49`);
   if (boundary.log.some((line) => line.includes("@50"))) problems.push("the 1.0.0 build ran a callback at 50");
-  for (const line of ["m on-after-db-write@49", "n on-after-db-write@49", "n on-stop-height@49"]) {
+  for (const line of ["n on-settle@49..49", "m on-after-db-write@49", "n on-after-db-write@49", "n on-stop-height@49"]) {
     if (!boundary.log.includes(line)) problems.push(`the 1.0.0 build did not complete ${line} before stopping`);
   }
   if (!boundary.history.includes("m from 50: 1.1.0, null")) {
@@ -220,8 +223,15 @@ describe.each(PROCESS_BACKENDS)("the upgrade boundary on $name", (backend) => {
   afterAll(() => backend.stop(), 60_000);
 
   it("1.0.0 records the scheduled 1.1.0 revision without configuration, commits 49, stops with upgrade-required, ready; 1.1.0 records the revision's data fields and continues from 50", async () => {
-    const observed = await a47Run(await backend.database());
+    const db = await backend.database();
+    const observed = await a47Run(db);
     expect(a47Problems(observed)).toEqual([]);
+    // n settled each of its heights once, the one before the boundary in its own block transaction, and none after.
+    expect(observed.boundary.log.indexOf("n on-settle@49..49")).toBeLessThan(observed.boundary.log.indexOf("n on-after-db-write@49"));
+    expect(observed.upgraded.log.some((line) => line.startsWith("n on-settle@"))).toBe(false);
+    expect((await pairs(db, "SELECT height::int AS h, 0 AS v FROM n.settled ORDER BY height")).map(([h]) => h)).toEqual(
+      Array.from({ length: 49 }, (_, index) => index + 1),
+    );
     // The 1.1.0 build delivered 49's on-after-db-write and n's on-stop-height again, then went on at 50.
     expect(observed.upgraded.log.slice(0, 4)).toEqual([
       "m on-after-db-write@49",

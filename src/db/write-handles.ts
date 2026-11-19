@@ -3,8 +3,8 @@
  *
  * **Block write handles.** {@link openBlockWrites} takes the block transaction the runner opened with
  * {@link Database.transaction} (on PostgreSQL the writer's, on PGlite one exclusive job of the queue). It runs the
- * parts' `on-db-write` callbacks in it, one at a time, in the fixed order in which the runner calls
- * {@link BlockWrites.write}.
+ * parts' `on-db-write` callbacks in it, then their `on-settle` callbacks, one at a time, in the fixed order in which the
+ * runner calls {@link BlockWrites.write}. Both points get the same kind of handle, with the same guarantees.
  *
  * For each callback:
  * - The part's role is set first, so that whatever the callback before it left, a callback never runs under another
@@ -20,10 +20,10 @@
  * UmbraDB's own code selects no role. The block's start is not trusted, as PGlite's one session carries whatever the
  * job before left.
  *
- * A callback asked for while another runs is rejected before anything is sent: `on-db-write` runs in series, so this is
- * a programming error. A block write handle is the block's transaction, so it reads committed data plus what earlier
- * callbacks wrote in the block. It writes what its role may, which is its own schema. It never carries the migration
- * mark, so `TRUNCATE` of a guarded table is rejected in it.
+ * A callback asked for while another runs is rejected before anything is sent: `on-db-write` and `on-settle` run in
+ * series, so this is a programming error. A block write handle is the block's transaction, so it reads committed data
+ * plus what earlier callbacks wrote in the block. It writes what its role may, which is its own schema. It never
+ * carries the migration mark, so `TRUNCATE` of a guarded table is rejected in it.
  *
  * **Schema write handles.** {@link runOnStartDb} runs a part's `on-start-db` in a transaction of its own, under the
  * part's role in the same way, with a schema write handle. The migration runner calls it after the part's migrations
@@ -63,20 +63,23 @@ export interface WriteHandleOptions {
   readonly onClosedUse?: (error: UmbraError) => void;
 }
 
-/** The `on-db-write` callbacks of one block transaction, in series. */
+/** The points whose callbacks get a block write handle, both inside the block transaction. */
+export type BlockWritePoint = "on-db-write" | "on-settle";
+
+/** The `on-db-write` and `on-settle` callbacks of one block transaction, in series. */
 export interface BlockWrites {
   /**
-   * Runs `part`'s `on-db-write` callback with a block write handle under the part's role, and resolves with its result;
-   * the handle closes when the callback settles. Rejects with the callback's own error unchanged (the runner rolls the
-   * block back and halts). Throws, before anything is sent, for a part neither in the plan nor UmbraDB's own, and for a
-   * call made while another part's callback runs.
+   * Runs `part`'s callback at `point` (`on-db-write` unless given) with a block write handle under the part's role, and
+   * resolves with its result; the handle closes when the callback settles, and a later use names `point`. Rejects with
+   * the callback's own error unchanged (the runner rolls the block back and halts). Throws, before anything is sent,
+   * for a part neither in the plan nor UmbraDB's own, and for a call made while another part's callback runs.
    */
-  write<T>(part: string, callback: (w: BlockWriteHandle) => Promise<T>): Promise<T>;
+  write<T>(part: string, callback: (w: BlockWriteHandle) => Promise<T>, point?: BlockWritePoint): Promise<T>;
   /** Takes the block back to the writer's login (`RESET ROLE`) unless it is known to be there; after the last callback. */
   end(): Promise<void>;
 }
 
-type Point = "on-db-write" | "on-start-db";
+type Point = BlockWritePoint | "on-start-db";
 
 /**
  * Sets the role `part` writes under, for the rest of the transaction or until another is set: its write role for a
@@ -116,7 +119,7 @@ async function runHandle<T>(
 ): Promise<T> {
   let open = true;
   const refuse = (): UmbraError => {
-    const error = writeHandleClosed(point === "on-db-write" ? "block-write" : "schema-write", part);
+    const error = writeHandleClosed(point === "on-start-db" ? "schema-write" : "block-write", part, point);
     options.onClosedUse?.(error);
     return error;
   };
@@ -139,8 +142,8 @@ async function runHandle<T>(
 }
 
 /**
- * Opens the `on-db-write` calls of the block transaction `tx` (see the module comment). The runner calls
- * {@link BlockWrites.write} once per part, in the fixed callback order, awaiting each.
+ * Opens the `on-db-write` and `on-settle` calls of the block transaction `tx` (see the module comment). The runner
+ * calls {@link BlockWrites.write} once per part and point, in the fixed callback order, awaiting each.
  */
 export function openBlockWrites(tx: Transaction, plan: SchemaPlan, options: WriteHandleOptions): BlockWrites {
   let running: string | undefined;
@@ -150,20 +153,20 @@ export function openBlockWrites(tx: Transaction, plan: SchemaPlan, options: Writ
    */
   let atLogin = false;
   return {
-    async write(part, callback) {
+    async write(part, callback, point = "on-db-write") {
       if (running !== undefined) {
         throw new Error(
-          `openBlockWrites: the on-db-write of ${part} was asked for while the one of ${running} runs; the callbacks of ` +
-            "on-db-write run in series, each awaited before the next",
+          `openBlockWrites: the ${point} of ${part} was asked for while the ${running} runs; the callbacks of ` +
+            "on-db-write and on-settle run in series, each awaited before the next",
         );
       }
-      running = part;
+      running = `${point} of ${part}`;
       try {
         const own = OWN_PARTS.includes(part);
         if (!own) await setModuleRole(tx, plan, part);
         else if (!atLogin) await tx.execute("RESET ROLE");
         atLogin = false;
-        const result = await runHandle(tx, part, "on-db-write", options, callback);
+        const result = await runHandle(tx, part, point, options, callback);
         atLogin = own;
         return result;
       } finally {
@@ -171,7 +174,7 @@ export function openBlockWrites(tx: Transaction, plan: SchemaPlan, options: Writ
       }
     },
     async end() {
-      if (running !== undefined) throw new Error(`openBlockWrites: end was asked for while the on-db-write of ${running} runs`);
+      if (running !== undefined) throw new Error(`openBlockWrites: end was asked for while the ${running} runs`);
       if (!atLogin) await tx.execute("RESET ROLE");
       atLogin = true;
     },

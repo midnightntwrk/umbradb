@@ -21,11 +21,11 @@ each finalized block, writes rows, and serves them over its own API. This guide 
 
   ```text
   startup     migrations ─▶ on-start-db ─▶ on-start-api
-  per height  on-fetch ─▶ on-parse ─▶ on-compute ─▶ on-db-write ══ COMMIT ══▶ on-after-db-write
-                                      (reads h − 1)  (block transaction)      (reads h; notifies)
+  per height  on-fetch ─▶ on-parse ─▶ on-compute ─▶ on-db-write ─▶ on-settle ══ COMMIT ══▶ on-after-db-write
+                                      (reads h − 1)  (block transaction)                   (reads h; notifies)
   ```
 
-  Most modules need only `on-db-write`, `on-start-api` and, for subscriptions, `on-after-db-write` (all twelve: §3).
+  Most modules need only `on-db-write`, `on-start-api` and, for subscriptions, `on-after-db-write` (all thirteen: §3).
 - **Items.** Modules exchange data as named items, each with one or more lifetimes: `block`, one block's data, read
   from `block.items` (`block-parsed`); `table`, tables its provider writes and others read with SQL (`blocks` is
   `core_block_commit.blocks`); `process`, a value set once per process (`db`, a read-only database). A module lists
@@ -326,14 +326,37 @@ Next: types §4, chain data §6 and §9, routes §7, settings §8, ready-made ta
 | `on-start-height` | your entry's start height | read at h − 1 | in series |
 | `on-compute` | before the block transaction opens | read at h − 1, item sink | in waves |
 | `on-db-write` | inside the block transaction | block write handle | in series |
+| `on-settle` | inside the block transaction, after every `on-db-write` | block write handle | in series |
 | `on-after-db-write` | after the commit; no `block` items | read at h | in series |
 | `on-stop-height` | after your entry's stop height committed | read at h | in series |
 
 - **Arguments.** Every callback gets the process context `processContext` first (§8, §13). The block points get `block`:
   `height`, `hash`, `parentHash`, `items`, `settings` (your revision's at this height) and `active(moduleId)`.
+  `on-settle` gets `run` instead (below).
 - **Which point for which job.** Compute in `on-compute`: it reads the state before the block, and modules there run in
-  parallel. Write in `on-db-write`, the only point inside the block's transaction. Notify in `on-after-db-write`, once
+  parallel. Write a block's rows in `on-db-write`, inside the block's transaction. Notify in `on-after-db-write`, once
   the height is committed. Set up in `on-start-db`; register routes in `on-start-api`.
+- **`on-settle`.** `"on-settle"(processContext, run, writer)` gets `run`, `{ first, last }`: heights, `bigint`s as
+  `block.height` is, both included, `first <= last`. UmbraDB calls it inside the transaction that holds the run's last
+  block, after every module's `on-db-write` of that block and before the `COMMIT`, in `on-db-write`'s order. `writer`
+  is that transaction's block write handle, as `on-db-write` gets. The engine chooses the runs. In this version a run
+  is always one block. Runs follow one another (each `first` is the last run's `last + 1n`), so every height is in
+  exactly one; accept a run of any length. A failure is one of `on-db-write`: nothing of the run is stored, and
+  processing halts or retries; the heights are then processed again, and `on-settle` is called again for them. Use it
+  for work over what a run of blocks wrote that costs less once per run than once per block. A module's tables must
+  not depend on where the runs were cut: `on-settle` of a..c leaves what `on-settle` of a..b and then of b + 1..c
+  leave. UmbraDB's `core-digest` declares it too, last: a block's digests and checkpoint take what every `on-settle`
+  wrote. Here `stats_module.failures` holds one row, the failures counted up to `height`:
+
+  ```ts
+      async "on-settle"(_processContext, run, writer) {
+        await writer.execute(
+          `UPDATE stats_module.failures SET height = $2::bigint, failed_total = failed_total + (SELECT
+             coalesce(sum(failed_count), 0) FROM stats_module.blocks WHERE height BETWEEN $1::bigint AND $2::bigint)`,
+          [run.first, run.last], // bigints, sent as digits
+        );
+      },
+  ```
 - **Order between modules.** A module's callback runs after those of the modules it requires, directly or through
   others. "In waves" means modules that do not depend on one another run at the same time. A failing callback ends the
   point: nothing after it runs.
@@ -420,13 +443,13 @@ counts and queue (after a restart, for one).
 
 ## 5. Reading and writing tables
 
-- **The handles.** `on-db-write` gets the block write handle and `on-start-db` a schema write handle: `query(sql,
-  params)` returns rows, `execute(sql, params)` the number of rows changed. They see their transaction's writes; the
-  block's handle also sees what earlier callbacks of the block wrote. The other points get a read handle (`query`
-  only) at the height §3 gives; `read.height` says which. One statement per call; await each before you return.
-  Inside a callback, use the handle it is given: the handles of the points are never cut off by a timeout.
-- **Keep no handle.** A handle closes when its callback returns: one kept and used later fails with `handle-closed`
-  and halts processing, even if your code catches the error.
+- **The handles.** `on-db-write` and `on-settle` get the block write handle, `on-start-db` a schema write handle:
+  `query(sql, params)` returns rows, `execute(sql, params)` the number of rows changed. They see their transaction's
+  writes; the block's handle also sees what earlier callbacks of the block wrote. The other points get a read handle
+  (`query` only) at the height §3 gives; `read.height` says which. One statement per call; await each before you
+  return. Inside a callback, use the handle it is given: the handles of the points are never cut off by a timeout.
+- **Keep no handle.** A handle closes when the callback it was given to returns or throws: one kept and used later
+  fails with `handle-closed`, naming that callback's point, and halts processing, even if your code catches the error.
 - **Parameters** are sent as text: numbers and `bigint`s as digits, a `Uint8Array` as `bytea`, a plain object as JSON.
   Cast where the statement does not give the type (`$1::bigint`).
 - **Your schema and names.** Your schema is your id with `-` replaced by `_`. Write every name with its schema, in
@@ -680,7 +703,7 @@ const then = await metadata.read(read, "token-1", block.height - 10n);  // as of
 
 ## 12. When a callback fails
 
-- **A failing callback halts.** Before the commit (`on-fetch` to `on-db-write`) nothing of the height is stored; after
+- **A failing callback halts.** Before the commit (`on-fetch` to `on-settle`) nothing of the height is stored; after
   it (`on-after-db-write`, `on-stop-height`) the height stays. The process stays up in the state `halted`, its API
   answering at the last committed height, until it is stopped: fix the cause and restart it. `/status` shows the code
   (`callback-error`, or the error's own code), the height, the module and the point, never your error's message, which
@@ -695,7 +718,7 @@ const then = await metadata.read(read, "token-1", block.height - 10n);  // as of
 |---|---|---|
 | `on-fetch`, `on-parse` | fetched ahead, for best blocks, after a lost connection | keep no state past the block |
 | `on-start-height` | after a restart, if the start height had not committed | make it idempotent |
-| `on-compute`, `on-db-write` | after a lost connection; only a committed run's writes stay | no outside effects |
+| `on-compute`, `on-db-write`, `on-settle` | after a lost connection; only a committed run's writes stay | no outside effects |
 | `on-after-db-write`, `on-stop-height` | after a restart, for the last committed height | a notification may repeat |
 
 ## 13. Providing items to other modules
