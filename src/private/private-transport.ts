@@ -74,6 +74,7 @@
 
 import type { ReadHandle } from "../db/api.js";
 import { ERROR_CODES, type ErrorCode, UmbraError } from "../db/errors.js";
+import { type Statement, statementText } from "../db/repeated-statements.js";
 import { backoffDelay } from "../node/backoff.js";
 import { CLOSE_PROTOCOL, type Received, REPORT_HASH_MISMATCH } from "./core-transport.js";
 import {
@@ -354,8 +355,10 @@ export class PrivateTransport {
     const height = first.height === null ? null : BigInt(first.height);
     const handle: ReadHandle = Object.freeze({
       height,
-      query: async (sql: string, params: unknown[] = []) => {
-        const answer = await this.#request([{ sql, params: params.map((param) => encodeParameter(param)) }]);
+      query: async (sql: Statement, params: unknown[] = []) => {
+        // The core is sent the statement's text; one of the engine's marks (`../db/repeated-statements.ts`) stays here.
+        const statement = { sql: statementText(sql), params: params.map((param) => encodeParameter(param)) };
+        const answer = await this.#request([statement]);
         return rowsOf((answer.results as StatementResult[])[0] as StatementResult);
       },
     });

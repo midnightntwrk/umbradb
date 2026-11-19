@@ -61,7 +61,8 @@ import {
   TRUNCATE_GUARD_TABLES_SQL,
 } from "../deterministic-postgresql/index.js";
 import type { TouchedRow } from "../determinism/digest.js";
-import type { Transaction } from "./api.js";
+import type { ReadHandle, Transaction } from "./api.js";
+import { repeatedStatement } from "./repeated-statements.js";
 import type { SchemaPlan } from "./roles.js";
 
 /** The tables of `plan` whose changes are not captured: those declared `deterministic: false`, and the content-defined. */
@@ -204,12 +205,19 @@ export async function capturedTables(read: ConsistentRead): Promise<CapturedTabl
  * Those of `tables` whose shadow table holds a row, this transaction's or any other's, in their order, read in one
  * statement. {@link takeChanges} of any other table finds nothing and deletes nothing, so the caller may skip it.
  */
-export async function tablesWithChanges(read: ConsistentRead, tables: readonly CapturedTable[]): Promise<CapturedTable[]> {
+export async function tablesWithChanges(
+  read: Pick<ReadHandle, "query">,
+  tables: readonly CapturedTable[],
+): Promise<CapturedTable[]> {
   if (tables.length === 0) return [];
+  // Repeated at every block, the same text while the captured tables stay: prepared on PostgreSQL
+  // (./repeated-statements.ts).
   const rows = await read.query(
-    tables
-      .map((table, i) => `SELECT ${i} AS i WHERE EXISTS (SELECT 1 FROM ${shadowOf(table)})`)
-      .join("\nUNION ALL\n"),
+    repeatedStatement(
+      tables
+        .map((table, i) => `SELECT ${i} AS i WHERE EXISTS (SELECT 1 FROM ${shadowOf(table)})`)
+        .join("\nUNION ALL\n"),
+    ),
   );
   const listed = new Set(rows.map((row) => Number(row.i)));
   return tables.filter((_, i) => listed.has(i));
@@ -225,7 +233,7 @@ function shadowOf(table: CapturedTable): string {
  * transaction first touched it and as it is now (null where there is no row), as canonical row-encoding values. The
  * table's shadow rows are deleted, this transaction's and any other's. `core-digest` calls it last in the block.
  */
-export async function takeChanges(read: ConsistentRead, table: CapturedTable): Promise<TouchedRow[]> {
+export async function takeChanges(read: Pick<ReadHandle, "query">, table: CapturedTable): Promise<TouchedRow[]> {
   const shadow = shadowOf(table);
   const target = `${table.partitioned ? "" : "ONLY "}${quoteIdentifier(table.schema)}.${quoteIdentifier(table.name)}`;
   const old = table.columns.map((_, i) => `d.c${i} AS o${i}`);
@@ -233,14 +241,16 @@ export async function takeChanges(read: ConsistentRead, table: CapturedTable): P
   const first = table.columns[table.key[0] as number] as CaptureColumn;
   const join = table.key.map((i) => `t.${quoteIdentifier((table.columns[i] as CaptureColumn).name)} = d.c${i}`);
   const order = table.key.map((i) => keyOrderTerm(`o${i}`, (table.columns[i] as CaptureColumn).type));
+  // Repeated at every block that changed the table, the same text while its columns stay: prepared on PostgreSQL
+  // (./repeated-statements.ts).
   const rows = await read.query(
-    `WITH d AS (DELETE FROM ${shadow} RETURNING *)
+    repeatedStatement(`WITH d AS (DELETE FROM ${shadow} RETURNING *)
 SELECT * FROM (
   SELECT d.existed AS e, t.${quoteIdentifier(first.name)} IS NOT NULL AS p, ${[...old, ...now].join(", ")}
     FROM d LEFT JOIN ${target} AS t ON ${join.join(" AND ")}
    WHERE d.xact = pg_catalog.pg_current_xact_id()::text::bigint
 ) AS x
-ORDER BY ${order.join(", ")}`,
+ORDER BY ${order.join(", ")}`),
   );
   return rows.map((row) => ({
     before: row.e === true ? table.columns.map((_, i) => row[`o${i}`]) : null,

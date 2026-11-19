@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { keyBytes, keyText, KnownKeySet, type NetWrite, RunReclaim, type RunTables, sqlRunTables, writeNet } from "../../src/backbone/core-ledger-state/run-reclaim.js";
 import { NODES_TABLE, REF_COUNTS_TABLE, UNREFERENCED_TABLE } from "../../src/backbone/core-ledger-state/sql.js";
 import type { BlockWriteHandle } from "../../src/db/api.js";
+import { statementText } from "../../src/db/repeated-statements.js";
 import { refcountStep } from "./refcount-step.js";
 import type { NodeBatch } from "../../src/ledger/types.js";
 import { type FixtureDag, LAST, stateNodes } from "../ledger/fixtures/sweep-fixture.js";
@@ -331,7 +332,7 @@ describe("the run's record and its reads", () => {
     const asked: { sql: string; keys: number }[] = [];
     const tables = sqlRunTables({
       query: async (sql, params) => {
-        asked.push({ sql, keys: ((params ?? [])[0] as readonly unknown[] | undefined)?.length ?? 0 });
+        asked.push({ sql: statementText(sql), keys: ((params ?? [])[0] as readonly unknown[] | undefined)?.length ?? 0 });
         return [];
       },
     });

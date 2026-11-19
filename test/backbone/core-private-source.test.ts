@@ -32,6 +32,7 @@ import { PRIVATE_CORE_DIGEST, privateBackbone } from "../../src/backbone/private
 import type { CheckedEntry } from "../../src/config/validate.js";
 import type { ReadHandle, SchemaWriteHandle } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
+import { statementText } from "../../src/db/repeated-statements.js";
 import type { ModuleDeclaration, ProcessContext } from "../../src/modules/declaration.js";
 import type { HelloAck } from "../../src/private/messages.js";
 import type { BlockRef } from "../../src/runner/block-source.js";
@@ -44,7 +45,7 @@ import type { BlockRef } from "../../src/runner/block-source.js";
 
 /** A read whose statements `answer` answers, by their SQL and parameters. */
 function fakeRead(answer: (sql: string, params: readonly unknown[]) => Record<string, unknown>[], height: bigint | null = null): ReadHandle {
-  return { height, query: async (sql, params = []) => answer(sql, params) };
+  return { height, query: async (sql, params = []) => answer(statementText(sql), params) };
 }
 
 /**
