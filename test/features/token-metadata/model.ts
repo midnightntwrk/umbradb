@@ -1,7 +1,7 @@
 /**
  * The tests' reference model of MIP-0018 metadata state: pure, in memory, over any number of networks, with
  * reorganization. The module's database path (`src/features/token-metadata/apply.ts`) is held to it by the vector,
- * property and start-height tests. It classifies through the module's own `classify.ts` and applies the module's own
+ * property and start-height tests. It classifies with the module's own codec and applies the module's own
  * rules (`rules.ts`), so the two differ only in where the state lives.
  *
  * - Applying records: accepted events in chain order (block, transaction, event, then record). A non-Null record sets
@@ -17,13 +17,13 @@
 
 import {
   type Classification,
+  classifyEvent,
   type DecodedRecord,
   fromHex,
   type Header,
   toHex,
   ValType,
 } from "../../../src/features/token-metadata/codec/index.js";
-import { classifyMip0018Event } from "../../../src/features/token-metadata/classify.js";
 import {
   COMMON_KEY_HEX,
   type Field,
@@ -207,7 +207,7 @@ export class MetadataState {
     if (previous !== undefined && comparePosition(event.position, previous) <= 0)
       throw new ChainOrderError(`event at ${JSON.stringify(event.position)} does not follow ${JSON.stringify(previous)} on ${event.network}`);
     this.last.set(event.network, { ...event.position });
-    const classification = classifyMip0018Event({ type: event.type, name: event.name, payload: event.payload });
+    const classification = classifyEvent({ type: event.type, name: event.name, payload: event.payload });
     if (classification.result === "ignore") return classification;
     const list = this.retained.get(event.network) ?? [];
     list.push({ event, classification });

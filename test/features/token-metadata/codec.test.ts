@@ -21,8 +21,8 @@ import { loadVectors, runVectors } from "./vector-runner/runner-core.js";
 /**
  * The codec on its own (`src/features/token-metadata/codec/`).
  *
- * - **Each MIP rule is needed.** With every rule on, the codec alone passes every reference payload vector (it has no
- *   UTF-8 key rule, which `classify.ts` adds, so A3c is accepted as the reference expects). With any one rule off,
+ * - **Each MIP rule is needed.** With every rule on, the codec alone passes every reference payload vector. With any
+ *   one rule off,
  *   at least one normative payload vector fails (an informative one for zero extension, which the MIP tests only
  *   informatively): no rule is dead code the vectors do not reach.
  * - **The encoder** refuses each header, record and size the MIP forbids, before writing anything, and what it writes

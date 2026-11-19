@@ -24,8 +24,7 @@
  *   logs, so nothing.
  * - **Files by role**: `./schema.ts` the tables (migration `001`) and items, `./sql.ts` every statement the write path
  *   sends, `./apply.ts` the write path, `./log-reader.ts` a log's bytes, `./codec/` the MIP-0018 event codec,
- *   `./classify.ts` its classification with the UTF-8 key rule, `./rules.ts` the rules the indexer and the API share,
- *   and `./color.ts` a token's color.
+ *   `./rules.ts` the rules the indexer and the API share, and `./color.ts` a token's color.
  */
 
 import { z } from "zod";

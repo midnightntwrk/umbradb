@@ -1,33 +1,31 @@
 /**
- * The two sets of MIP-0018 vectors the module is checked against: the MIP's reference vectors
- * (`test/fixtures/mip0018/vectors`), except the ids UmbraDB keeps its own versions of, and UmbraDB's own versions of
- * those ids (`test/fixtures/mip0018/vectors-umbradb`: vectors whose expectation differs under the pinned MIP-0018 text;
- * see its README), so each id runs exactly once, from UmbraDB's version when one exists.
+ * The MIP-0018 vectors the module is checked against: the reference implementation's
+ * (`test/fixtures/mip0018/vectors`, a copy of `vectors/` of midnight-experiments/mip-0018 at 3252703), and the few of
+ * them whose expectation UmbraDB does not meet, each with its reason.
  */
-import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REFERENCE_VECTORS_DIR = join(HERE, "..", "..", "fixtures", "mip0018", "vectors");
-export const UMBRADB_VECTORS_DIR = join(HERE, "..", "..", "fixtures", "mip0018", "vectors-umbradb");
 
-interface ManifestEntry {
-  id: string;
-  normative: boolean;
-}
+/**
+ * Vectors about displaying an image's content (MIP "Common fields", S12): UmbraDB serves the URI and the hash a
+ * contract published and fetches nothing, so it displays no image and the check does not apply to it.
+ */
+export const IMAGE_VECTORS: readonly string[] = Object.freeze(["INF-IMG-1", "INF-IMG-2", "S12a"]);
 
-function manifestIds(dir: string): ManifestEntry[] {
-  const m = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8")) as { vectors: ManifestEntry[] };
-  return m.vectors.map((v) => ({ id: v.id, normative: v.normative }));
-}
+/**
+ * The informative vector UmbraDB answers differently on purpose. `INF-LEN-3` groups by the symbol as stored, so two
+ * symbols over 12 characters that share their first 12 are two groups. UmbraDB reads "consumers SHOULD discard any
+ * extra characters" as: only the first 12 characters are the symbol, so both are one group.
+ */
+export const GROUPED_BY_SERVED_SYMBOL = "INF-LEN-3";
 
-/** The two selections: the reference ids minus UmbraDB's own ids, and UmbraDB's own ids. */
-export function vectorSets(): { reference: ManifestEntry[]; overridden: string[]; umbradb: ManifestEntry[] } {
-  const umbradb = manifestIds(UMBRADB_VECTORS_DIR);
-  const own = new Set(umbradb.map((v) => v.id));
-  const reference = manifestIds(REFERENCE_VECTORS_DIR);
-  const missing = [...own].filter((id) => !reference.some((v) => v.id === id));
-  if (missing.length > 0) throw new Error(`UmbraDB vectors without a reference counterpart: ${missing.join(", ")}`);
-  return { reference: reference.filter((v) => !own.has(v.id)), overridden: [...own], umbradb };
-}
+/**
+ * The normative vectors about a key a standard defines (MIP "Keys", Testing S10). Each loads a test standard,
+ * `test-s10`, that defines a key `k`, and expects `k` served while the token declares the standard, also when `k` was
+ * sent before the declaration. No MIP defines such a key, and `token-metadata` keeps only the keys MIP-0018 defines,
+ * so a record for `k` is not stored and cannot be served later. S10a, S10b and S10d, where `k` is not served, pass.
+ */
+export const STANDARD_KEY_VECTORS: readonly string[] = Object.freeze(["S10c", "S10e"]);

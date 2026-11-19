@@ -1,11 +1,10 @@
 /**
  * The MIP-0018 vector adapter: answers the vectors' `decode` and `state` requests with the module's codec, its
- * classification (`classify.ts`, with the UTF-8 key rule) and the reference model (`./model.ts`), with no database.
+ * classification (with the UTF-8 key rule) and the reference model (`./model.ts`), with no database.
  * `vectors.test.ts` runs every payload and state vector through it, and `state-vectors.test.ts` and `property.test.ts`
  * use its request parsing and response shapes.
  */
-import type { Classification } from "../../../src/features/token-metadata/codec/index.js";
-import { classifyMip0018Event } from "../../../src/features/token-metadata/classify.js";
+import { type Classification, classifyEvent } from "../../../src/features/token-metadata/codec/index.js";
 import { fromHex, type IdentityRef, type IdentityState, MetadataState, type ObservedEvent, type SymbolGroup, toHex } from "./model.js";
 
 export type Json = Record<string, unknown>;
@@ -115,7 +114,7 @@ export function stateResponse(
 // ── The pure adapter ─────────────────────────────────────────────────────────────────────────────────────────────
 
 function decode(req: Json): Json {
-  return decodeResponse(classifyMip0018Event(decodeInput(req)));
+  return decodeResponse(classifyEvent(decodeInput(req)));
 }
 
 function state(req: Json): Json {

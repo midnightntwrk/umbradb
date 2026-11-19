@@ -5,7 +5,7 @@
  * - **Candidates.** Only a `Misc` log whose value the log reader gives as one atom of at most 288 bytes;
  *   its name and payload are the atom zero-extended to 288 bytes, split 32 + 256 (`splitMiscData`). An unknown
  *   serialization halts the block with an error naming the height, transaction, log and tag.
- * - **Classification.** `classifyMip0018Event` (the codec plus the UTF-8 key rule); `ignore` (another name) stores
+ * - **Classification.** The codec's `classifyEvent` (`./codec/`); `ignore` (another name) stores
  *   nothing, `reject` stores an event row with its reason, `accept` applies its records and stores no row.
  * - **Records.** Only a defined key's record is kept (`isDefinedKey`; MIP "Keys"): a non-Null record sets its field
  *   (latest wins), creating the token's row with its first field; a Null record deletes it (nothing for a key without
@@ -22,7 +22,6 @@
 
 import type { ContractLog, UnresolvedLogSite } from "../../backbone/contract-logs/contract-logs.js";
 import type { BlockWriteHandle } from "../../db/api.js";
-import { classifyMip0018Event } from "./classify.js";
 import { miscAtom, UnknownLogSerialization } from "./log-reader.js";
 import { tokenColor } from "./color.js";
 import {
@@ -38,7 +37,7 @@ import {
   tokenHasFields,
 } from "./sql.js";
 import { COMMON_KEY_HEX, fieldUsable, isDefinedKey, STANDARD_KEYS } from "./rules.js";
-import { type DecodedRecord, splitMiscData, toHex, ValType } from "./codec/index.js";
+import { classifyEvent, type DecodedRecord, splitMiscData, toHex, ValType } from "./codec/index.js";
 
 if (STANDARD_KEYS.size !== 0) {
   throw new Error("token-metadata's write path does not re-flag keys on a standards change; the registry must be empty");
@@ -109,7 +108,7 @@ export function candidatesOf(
     if (atom === null) continue;
     const split = splitMiscData(atom);
     if (split === undefined) continue;
-    const classified = classifyMip0018Event({ type: "Misc", name: split.name, payload: split.payload });
+    const classified = classifyEvent({ type: "Misc", name: split.name, payload: split.payload });
     if (classified.result === "ignore") continue;
     const at = positionOf(log.transaction, log.index);
     out.push(

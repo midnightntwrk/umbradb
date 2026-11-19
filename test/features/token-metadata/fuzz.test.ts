@@ -1,8 +1,8 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { classifyMip0018Event } from "../../../src/features/token-metadata/classify.js";
 import { decodePayloadWith } from "../../../src/features/token-metadata/codec/decode.js";
 import {
+  classifyEvent,
   decodePayload,
   encodePayload,
   EVENT_NAME,
@@ -91,7 +91,7 @@ describe("the classifier on generated payloads", () => {
   it(`never throws and reads only inside the 256 bytes, for ${RUNS} payloads`, () => {
     fc.assert(
       fc.property(payloads, (payload) => {
-        const classified = classifyMip0018Event({ type: "Misc", name: EVENT_NAME, payload });
+        const classified = classifyEvent({ type: "Misc", name: EVENT_NAME, payload });
         expect(["accept", "reject"]).toContain(classified.result);
         if (classified.result === "reject") expect(classified.reason).toMatch(/^[a-z0-9-]{1,64}$/);
         decodePayload(payload);

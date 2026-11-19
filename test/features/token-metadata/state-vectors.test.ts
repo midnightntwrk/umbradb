@@ -10,11 +10,14 @@ import { cellData, log, runTo } from "./harness.js";
 import { type Json, stateInput, stateResponse } from "./vector-adapter.js";
 import { compareState } from "./vector-runner/compare.js";
 import { loadVectors, requestFor } from "./vector-runner/runner-core.js";
+import { GROUPED_BY_SERVED_SYMBOL, IMAGE_VECTORS, STANDARD_KEY_VECTORS } from "./vector-sets.js";
 
 /**
  * Every MIP-0018 reference state vector (normative and informative), through `token-metadata` in the real process on
  * PostgreSQL 18 and PGlite, gives its expected state; and it equals the pure `MetadataState` on the
- * same steps.
+ * same steps. The exceptions are the ones `vector-sets.ts` names: two normative vectors expect a key a test standard
+ * defines, which is not stored; the image vectors' display check does not apply (no image is displayed); and one
+ * informative vector groups symbols over 12 characters by their stored bytes.
  *
  * **How a vector becomes a chain.** Each network of a vector is a database of its own (a database holds one chain).
  * Its `apply` steps are logs at height `BASE + block`, in transaction `tx`, at the transaction's position `event`
@@ -31,12 +34,20 @@ interface Vector {
   readonly normative: boolean;
   readonly request: Json;
   readonly expect: Json;
+  /** The keys a test standard of the vector defines, which a consumer that loaded them must report. */
+  readonly definedKeys: Record<string, Array<{ key: string }>>;
 }
 
-/** Every state vector of the reference manifest, normative and informative (no state vector has an UmbraDB version). */
+/** Every state vector of the reference manifest, normative and informative. */
 const vectors: Vector[] = loadVectors({ informative: true })
   .filter((v) => v.entry.kind === "state")
-  .map((v) => ({ id: v.entry.id, normative: v.entry.normative, request: requestFor(v), expect: v.data.expect as Json }));
+  .map((v) => ({
+    id: v.entry.id,
+    normative: v.entry.normative,
+    request: requestFor(v),
+    expect: v.data.expect as Json,
+    definedKeys: (v.data.definedKeys ?? {}) as Record<string, Array<{ key: string }>>,
+  }));
 
 type Step = ReturnType<typeof stateInput>["steps"][number];
 type Applied = Extract<Step, { op: "apply" }>["event"];
@@ -120,10 +131,10 @@ function comparable(response: Json): Json {
 }
 
 describe("the vectors at hand", () => {
-  it("are every state vector of the reference manifest (S1–S9 and the informative ones)", () => {
-    expect(vectors.length).toBe(36);
-    expect(vectors.filter((v) => v.normative).length).toBe(27);
-    expect(vectors.map((v) => v.id)).toEqual(expect.arrayContaining(["S1a", "S3d", "S4a", "S4b", "S6a", "S7a", "S8", "S9d", "INF-ZEXT-S1"]));
+  it("are every state vector of the reference manifest (S1–S12 and the informative ones)", () => {
+    expect(vectors.length).toBe(51);
+    expect(vectors.filter((v) => v.normative).length).toBe(37);
+    expect(vectors.map((v) => v.id)).toEqual(expect.arrayContaining(["S1a", "S3d", "S4a", "S4b", "S6a", "S7a", "S8", "S9d", "S10a", "S11b", "S12b", "INF-ZEXT-S1"]));
   });
 });
 
@@ -148,9 +159,19 @@ describe.each(PROCESS_BACKENDS)("the state vectors through token-metadata on $na
       return { ...d, shown: displayAmount(identity?.fields, BigInt(d.raw)) };
     });
     const response = stateResponse(identities, groups, shown);
-    const comparison = compareState(vector.expect, response);
-    expect(comparison.failures).toEqual([]);
-    expect(comparison.notApplicable).toEqual([]);
+    const comparison = compareState(vector.expect, response, vector.definedKeys);
+    if (STANDARD_KEY_VECTORS.includes(vector.id)) {
+      // The test standard's key `k` is not a key MIP-0018 defines, so it is not stored and not served.
+      expect(comparison.failures).toEqual([expect.stringMatching(/: field 6b \(k\) missing$/)]);
+    } else if (vector.id === GROUPED_BY_SERVED_SYMBOL) {
+      // One group under the served symbol where the vector has two under the stored ones, and nothing else.
+      expect(comparison.failures.length).toBeGreaterThan(0);
+      expect(comparison.failures.every((f) => f.startsWith("group "))).toBe(true);
+    } else {
+      expect(comparison.failures).toEqual([]);
+    }
+    if (IMAGE_VECTORS.includes(vector.id)) expect(comparison.notApplicable).toEqual([expect.stringMatching(/^images: not reported/)]);
+    else expect(comparison.notApplicable).toEqual([]);
     const got = comparable(response);
     const model = new MetadataState();
     for (const step of steps) {
