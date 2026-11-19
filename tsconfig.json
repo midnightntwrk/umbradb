@@ -17,7 +17,6 @@
     "bench/**/*.ts",
     "tools/**/*.ts",
     "browser/**/*.ts",
-    "vitest.config.ts",
-    "vitest.mutation.config.ts"
+    "vitest.config.ts"
   ]
 }

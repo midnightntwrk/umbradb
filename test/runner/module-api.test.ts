@@ -295,11 +295,11 @@ describe("ModuleApi.answer: one request, one bounded read, the module's answer",
     const api = new ModuleApi(routes, fakeDb());
     const missing = await api.answer(request("GET", "/nothing/here"));
     expect(missing.status).toBe(404);
-    expect(errorOf(missing)).toEqual({ code: "not-found", message: "no module API route answers GET /nothing/here" });
+    expect(errorOf(missing)).toEqual({ code: "not-found", message: "no module API route answers this method and path" });
     const method = await api.answer(request("GET", "/only"));
     expect(method.status).toBe(405);
     expect(method.headers).toEqual({ "Content-Type": JSON_TYPE, Allow: "POST" });
-    expect(errorOf(method)).toEqual({ code: "method-not-allowed", message: "/only answers POST, not GET" });
+    expect(errorOf(method)).toEqual({ code: "method-not-allowed", message: "this path answers POST, not this method" });
     const put = await api.answer(request("PUT", "/q"));
     expect(put.headers.Allow).toBe("GET, POST");
     const undecodable = await api.answer(request("GET", "/q%E0"));
