@@ -18,7 +18,9 @@ import { runDag } from "./refcount-process.js";
  *   open, the one that then rolls back, where the real loop runs every such callback with no block transaction open;
  * - `continues` true at the first block stored again after the rollback (whenever the height has a block before it):
  *   with `reclamationCache.verify` the copy of the counts and child lists, kept from the rolled-back chunk, halts with
- *   `copy-mismatch`; without it the tables differ from the reference's.
+ *   `copy-mismatch`; without it the stale copy is merged at block 11, the second block stored again, and its
+ *   `on-settle` halts with `ledger-refcount-invalid` (`row-count-mismatch`), where the real loop, with the same fault
+ *   and settings, reaches the end with the reference's tables.
  */
 
 /** The loop the last run made: the test's module asks it whether its block transaction is open. */
@@ -114,7 +116,7 @@ describe("the negative controls of fast-sync mode's equality, through the proces
       ]);
     }, PATIENCE_MS * 3);
 
-    it(`on ${backend.name}, continues true at the first block stored again after a rollback: copy-mismatch with the verification, tables that differ without it`, async () => {
+    it(`on ${backend.name}, continues true at the first block stored again after a rollback: copy-mismatch with the verification, ledger-refcount-invalid at block 11 without it`, async () => {
       const reference = hashed();
       await runDag(await backend.database(), {
         dag: "extended",
@@ -132,16 +134,33 @@ describe("the negative controls of fast-sync mode's equality, through the proces
       expect(verifying.status.state).toBe("halted");
       const reason = JSON.stringify(verifying.status.reason, (_key, value: unknown) => (typeof value === "bigint" ? `${value}` : value));
       expect(`${reason} ${verifying.lines.join(" ")}`).toContain("copy-mismatch");
+      // Without the verification, the real loop first: no halt, and the reference's tables at every height it hashed.
+      const unverified = { ...chunked, reclamationCache: { verify: false } };
+      const real = hashed();
+      const whole = await runDag(await backend.database(), {
+        dag: "extended",
+        settings: unverified,
+        user: [equalityWatcher(real, { where: ["committed"] }), faulting([])],
+      });
+      expect(whole.status.state).not.toBe("halted");
+      expect(real.committed.size).toBeGreaterThan(3);
+      expect(hashDifferences(real.committed, reference.committed)).toEqual([]);
       const quiet = hashed();
       const run = await runDag(await backend.database(), {
         dag: "extended",
-        settings: { ...chunked, reclamationCache: { verify: false } },
+        settings: unverified,
         user: [equalityWatcher(quiet, { where: ["committed"] }), faulting([])],
         loop: KeepsContinuing as new (input: LoopInput) => FinalizedLoop,
         halts: true,
       });
-      const broken = run.status.state === "halted" || hashDifferences(quiet.committed, reference.committed).length > 0;
-      expect(broken).toBe(true);
+      // The control: block 10 is stored again with the copy the rolled-back chunk left, and block 11's merge of the
+      // count changes finds another number of rows than it computed.
+      expect(run.status.state).toBe("halted");
+      expect(run.status.reason).toMatchObject({ code: "ledger-refcount-invalid", height: 11n, module: "core-ledger-state", point: "on-settle" });
+      expect(run.lines.join(" ")).toContain("row-count-mismatch");
+      // What it committed before the halt: the chunks 0..4 and 5..9, then 10 alone, each with the reference's tables.
+      expect([...quiet.committed.keys()]).toEqual([4n, 9n, 10n]);
+      expect(hashDifferences(quiet.committed, reference.committed)).toEqual([]);
     }, PATIENCE_MS * 4);
   }
 });
