@@ -21,13 +21,6 @@ export interface Position {
   readonly event: number;
 }
 
-/** One `events` row: a rejected event or an unresolved log site of a contract. */
-export interface EventRow extends Position {
-  readonly contract: Uint8Array;
-  readonly classification: "reject" | "unresolved";
-  readonly reason: string;
-}
-
 /** One `fields` row's value and where it was set. */
 export interface FieldRow {
   readonly key: Uint8Array;
@@ -45,9 +38,6 @@ type Write = Pick<BlockWriteHandle, "execute" | "query">;
  * both backends (no scan of a `token_metadata` table, every index used). The functions below only bind and map.
  */
 export const STATEMENTS = Object.freeze({
-  /** One rejected event or unresolved log site. */
-  insertEvent: `INSERT INTO ${TOKEN_METADATA_SCHEMA}.events (height, tx_index, event_index, contract_address, classification, reason)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
   /** A token's row, if it has none. */
   insertToken: `INSERT INTO ${TOKEN_METADATA_SCHEMA}.tokens (id, kind, contract_address, domain_sep) VALUES ($1, $2, $3, $4)
      ON CONFLICT (id, kind) DO NOTHING`,
@@ -74,11 +64,6 @@ export const STATEMENTS = Object.freeze({
 });
 
 const tokenParams = (t: TokenRef): unknown[] => [t.id, t.kind];
-
-/** Writes one rejected event or unresolved log site. */
-export async function insertEvent(w: Write, row: EventRow): Promise<void> {
-  await w.execute(STATEMENTS.insertEvent, [row.height, row.tx, row.event, row.contract, row.classification, row.reason]);
-}
 
 /** Creates the token's row unless it has one. */
 export async function insertToken(w: Write, t: TokenRef): Promise<void> {

@@ -99,8 +99,7 @@ describe.each(PROCESS_BACKENDS)("the withdrawal, usability and truncation scenar
         // Only undefined keys: referenced nowhere, its event accepted.
         expect((await at(one(U, 1))).items).toEqual([]);
         expect((await at({ contract: hex(U) })).items).toEqual([]);
-        // Its event is accepted (no rejection row) and stores nothing: an undefined key is not kept.
-        expect(await db.query(`SELECT count(*)::int AS n FROM token_metadata.events WHERE contract_address = '\\x${raw(U)}'::bytea`)).toEqual([{ n: 0 }]);
+        // Its event is accepted and stores nothing: an undefined key is not kept.
         expect(await db.query(`SELECT count(*)::int AS n FROM token_metadata.tokens WHERE contract_address = '\\x${raw(U)}'::bytea`)).toEqual([{ n: 0 }]);
         return (await at(one(X, 3))).items;
       });

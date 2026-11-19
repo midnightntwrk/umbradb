@@ -21,9 +21,9 @@ import { blockLogs, causes, contract, domain, eventData, log, miscData, post, ru
  *   other MIP-0002 type store no row.
  * - A `Misc` log with an unknown tag halts the block with `callback-error` naming height, transaction, log
  *   and tag; the negative control, a reader that skips unknown tags, lets the block commit.
- * - S7: two candidates in one transaction, one malformed, stores one `reject` with its reason and applies the other;
- *   and an unresolved log site (as `core-contract-logs-fast` gives one) is stored `unresolved` with the provider's
- *   reason at its own position in its transaction, never applied, and no answer of the route changes.
+ * - S7: of two candidates in one transaction, one malformed, the malformed one leaves nothing and the other is
+ *   applied; and an unresolved log site (as `core-contract-logs-fast` gives one) is never applied and leaves nothing,
+ *   while it still counts among its transaction's sites.
  *   **Negative control:** numbering a transaction's events from its first log alone, as before unresolved sites, moves
  *   the valid event onto the site's position.
  */
@@ -112,14 +112,13 @@ describe.each(PROCESS_BACKENDS)("token-metadata's event rows on $name", (backend
       ],
     ]);
     await runTo(db, { start: S, head: S + 2, logs });
-    // The valid event alone describes a token; nothing else stores anything, and an accepted event leaves no event row.
-    expect(await db.query("SELECT count(*)::int AS n FROM token_metadata.events")).toEqual([{ n: 0 }]);
+    // The valid event alone describes a token; nothing else stores anything.
     expect(await db.query("SELECT encode(contract_address, 'hex') AS c, encode(domain_sep, 'hex') AS d, kind FROM token_metadata.tokens")).toEqual([
       { c: hex(A), d: hex(D), kind: 1 },
     ]);
   }, 240_000);
 
-  it("two candidates in one transaction, one malformed: one reject with its reason, the other applied", async () => {
+  it("two candidates in one transaction, one malformed: the malformed one leaves nothing, the other is applied", async () => {
     for (const id of ["S7a", "S7b"]) {
       const vector = JSON.parse(readFileSync(`test/fixtures/mip0018/vectors/state/${id}.json`, "utf8")) as {
         steps: { contractAddress: string; name_hex: string; payload_hex: string }[];
@@ -128,9 +127,10 @@ describe.each(PROCESS_BACKENDS)("token-metadata's event rows on $name", (backend
       const data = vector.steps.map((step) => miscData(fromHex(step.name_hex), fromHex(step.payload_hex)));
       const address = fromHex(vector.steps[0]!.contractAddress);
       await runTo(db, { start: S, head: S + 2, logs: new Map([[BigInt(S + 1), blockLogs([0, address, data[0]!], [0, address, data[1]!])]]) });
-      const bad = id === "S7a" ? 0 : 1;
-      expect(await db.query("SELECT event_index, classification, reason FROM token_metadata.events"), id).toEqual([
-        { event_index: bad, classification: "reject", reason: "reserved-valtype" },
+      // The module keeps two tables and no record of what it did not apply.
+      expect(await db.query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'token_metadata' ORDER BY 1"), id).toEqual([
+        { table_name: "fields" },
+        { table_name: "tokens" },
       ]);
       expect(await db.query("SELECT kind FROM token_metadata.tokens"), id).toEqual([{ kind: 3 }]);
       expect(await db.query("SELECT convert_from(key, 'UTF8') AS key, convert_from(value, 'UTF8') AS value FROM token_metadata.fields"), id).toEqual([
@@ -139,22 +139,21 @@ describe.each(PROCESS_BACKENDS)("token-metadata's event rows on $name", (backend
     }
   }, 240_000);
 
-  it("an unresolved site is stored unresolved at its position, never applied, and changes no answer", async () => {
+  it("an unresolved site is never applied, leaves nothing, and keeps its place in the count of its transaction's sites", async () => {
     const db = await backend.database();
     const unresolved = new Map([[BigInt(S + 1), [site(0, 0, "not-a-literal"), site(1, 2, "partial-transaction")]]]);
     const logs = new Map([[BigInt(S + 1), [log(0, 1, A, valid), log(1, 3, A, otherValid)]]]);
     const identity = await serve(db, { start: S, head: S + 2, logs, unresolved }, async (origin) =>
       (await post(origin, TOKENS_PATH, { contract: `0x${hex(A)}`, domainSep: `0x${hex(D)}`, kind: 1 })).json.items[0],
     );
-    expect(await db.query("SELECT tx_index, event_index, classification, reason FROM token_metadata.events ORDER BY tx_index, event_index")).toEqual([
-      { tx_index: 0, event_index: 0, classification: "unresolved", reason: "not-a-literal" },
-      { tx_index: 1, event_index: 0, classification: "unresolved", reason: "partial-transaction" },
-    ]);
-    // The valid events beside them (event_index 1 of each transaction) are applied: two tokens.
+    // The valid events beside them are applied: two tokens, each set by the second site of its transaction (the
+    // unresolved one is the first, and is counted).
     expect(await db.query("SELECT encode(domain_sep, 'hex') AS d FROM token_metadata.tokens ORDER BY d")).toEqual([{ d: hex(D) }, { d: hex(D2) }]);
-    // The route serves the token as its fields say; the unresolved sites are in the indexer's table only.
+    expect(await db.query("SELECT DISTINCT set_tx, set_event FROM token_metadata.fields ORDER BY 1, 2")).toEqual([
+      { set_tx: 0, set_event: 1 },
+      { set_tx: 1, set_event: 1 },
+    ]);
     expect(identity.fields.length).toBeGreaterThan(0);
-    expect("mark" in identity).toBe(false);
   }, 240_000);
 
   it("a Misc log with an unknown tag halts its block with callback-error naming height, transaction, log and tag", async () => {

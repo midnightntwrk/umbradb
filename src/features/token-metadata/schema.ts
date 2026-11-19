@@ -1,7 +1,7 @@
 /**
  * The tables `token-metadata` writes and `token-metadata-api` reads: the contract between the two modules. The
- * indexer owns them (its migrations, below); the API module requires the state item below and reads `tokens` and
- * `fields` through it, and every index its reads use is the indexer's (a module creates nothing in another's schema).
+ * indexer owns them (its migrations, below); the API module requires the item below and reads the tables through it,
+ * and every index its reads use is the indexer's (a module creates nothing in another's schema).
  *
  * **The tables** (schema `token_metadata`), related by keys:
  *
@@ -13,30 +13,21 @@
  *   stored), holding only its current value, whole (names and symbols are cut when served, never when stored), and
  *   where it was set. `uint_value` is a `UInt` value as a number; `usable` is the common-field rule's answer for a
  *   common key, else null. Its rows belong to their token (`ON DELETE CASCADE`).
- * - `events`, append-only: the indexer's record of what it did not apply — each rejected MIP-0018 event and each
- *   unresolved log site, at its chain position (`event_index`: its position among its transaction's log sites), with
- *   its contract and reason. Accepted events leave no row: their effect is the fields. The API does not read it; it is
- *   read by its primary key.
+ *
+ * Only current values are kept: no history of a field, and nothing of an event that was rejected (MIP-0018: none of
+ * its records applies) or of a log the provider could not read. A module that wants either keeps it itself.
  *
  * There is no `network` column (a database holds one chain) and no raw payload (nothing is recomputed: UmbraDB follows
- * finalized blocks only). Text columns hold only UmbraDB's own vocabulary (CHECKs keep them ASCII); chain bytes are
- * `bytea`.
+ * finalized blocks only). Chain bytes are `bytea`.
  */
 
 /** The indexer's schema: its id with `-` replaced by `_`. */
 export const TOKEN_METADATA_SCHEMA = "token_metadata";
 
-/** The `table` item of `events` (append-only): rejected events and unresolved log sites. */
-export const TOKEN_METADATA_EVENTS_ITEM = "token-metadata-events";
-
 /** The `table` item of `tokens` and `fields` (mutable): the described tokens and their current fields. */
 export const TOKEN_METADATA_STATE_ITEM = "token-metadata-state";
 
-/**
- * Migration `001`: the three tables and their indexes. Never edited once released; a change is a new migration.
- *
- * The `unresolved` classification is only for core-contract-logs-fast.
- */
+/** Migration `001`: the two tables and their indexes. Never edited once released; a change is a new migration. */
 export const MIGRATION_001 = `CREATE TABLE ${TOKEN_METADATA_SCHEMA}.tokens (
   id bytea NOT NULL CHECK (octet_length(id) = 32),
   kind smallint NOT NULL CHECK (kind IN (1, 2, 3)),
@@ -62,15 +53,6 @@ CREATE TABLE ${TOKEN_METADATA_SCHEMA}.fields (
   CHECK ((val_type = 2) = (uint_value IS NOT NULL)),
   PRIMARY KEY (token_id, kind, key),
   FOREIGN KEY (token_id, kind) REFERENCES ${TOKEN_METADATA_SCHEMA}.tokens (id, kind) ON DELETE CASCADE
-);
-CREATE TABLE ${TOKEN_METADATA_SCHEMA}.events (
-  height bigint NOT NULL CHECK (height >= 0),
-  tx_index integer NOT NULL CHECK (tx_index >= 0),
-  event_index integer NOT NULL CHECK (event_index >= 0),
-  contract_address bytea NOT NULL CHECK (octet_length(contract_address) = 32),
-  classification text NOT NULL CHECK (classification IN ('reject', 'unresolved')),
-  reason text NOT NULL CHECK (reason ~ '^[a-z0-9-]{1,64}$'),
-  PRIMARY KEY (height, tx_index, event_index)
 );`;
 
 /** The module's migrations, in order. */

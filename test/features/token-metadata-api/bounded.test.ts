@@ -7,8 +7,7 @@ import { type ApiHandler, blockLogs, contract, domain, eventData, readStopped, r
 
 /**
  * Bounded cost of the API, on PostgreSQL 18 and PGlite. Large cardinalities are written straight into the
- * indexer's tables of a stopped database — 10,000 rejected events of a contract (which no answer reads) and 1,000
- * tokens of that contract sharing its symbol — then the route's handler answers through a read handle that counts the
+ * indexer's tables of a stopped database — 1,000 tokens of a contract sharing its symbol — then the route's handler answers through a read handle that counts the
  * rows each answer reads back. Every answer is small: a token's own fields, the first 100 members of its group with
  * their count, a contract a page at a time, a
  * hundred colors in a fixed number of statements, and a page of tokens with different symbols in the same number of
@@ -18,7 +17,6 @@ import { type ApiHandler, blockLogs, contract, domain, eventData, readStopped, r
  */
 
 const S = 3_000;
-const N = 10_000;
 const MEMBERS = 1_000;
 const MAX_ROWS = 1_000;
 const X = contract(0xc0);
@@ -37,8 +35,8 @@ const ID_SQL = (domainSep: string, contract: string) =>
   `sha256('\\x6d69646e696768743a6465726976655f746f6b656e0000000000000000000000'::bytea || ${domainSep} || ${contract})`;
 
 /**
- * Seeds the hostile cardinalities, the group's members with `symbol`: 999 more tokens of the contract with the
- * symbol, and 10,000 rejected events of the contract. A token's own fields cannot be many: the indexer stores at most
+ * Seeds the hostile cardinality, the group's members with `symbol`: 999 more tokens of the contract with the symbol.
+ * A token's own fields cannot be many: the indexer stores at most
  * the six keys MIP-0018 defines.
  */
 async function seed(db: ProcessDatabase, symbol: string): Promise<void> {
@@ -55,13 +53,8 @@ async function seed(db: ProcessDatabase, symbol: string): Promise<void> {
     `INSERT INTO token_metadata.fields (token_id, kind, key, val_type, value, uint_value, usable, set_height, set_tx, set_event, set_record)
      SELECT id, 3, convert_to('symbol', 'UTF8'), 1, symbol, NULL, true, ${S + 1}, 0, 1, 0 FROM token_metadata.tokens WHERE id <> ${id}`,
   );
-  await db.query(
-    `INSERT INTO token_metadata.events (height, tx_index, event_index, contract_address, classification, reason)
-     SELECT ${S + 1}, 100 + i, 0, ${x}, 'reject', 'no-records' FROM generate_series(1, ${N}) AS i`,
-  );
   await db.query("ANALYZE token_metadata.tokens");
   await db.query("ANALYZE token_metadata.fields");
-  await db.query("ANALYZE token_metadata.events");
 }
 
 /** Seeds contract {@link Y} with {@link DISTINCT} tokens, each with a different symbol (`S1`, `S2`, …). */

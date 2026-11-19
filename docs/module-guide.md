@@ -1058,8 +1058,7 @@ UmbraDB's package carries two public modules that are not core modules, for the 
 [MIP-0018](https://github.com/midnightntwrk/midnight-improvement-proposals/blob/eb94bc182221cd937a84ed66a5f903b060f165ab/mips/mip-0018-on-chain-token-metadata.md):
 
 - `token-metadata` reads the `contract-logs` item (§9) and keeps each token's current metadata fields in its tables,
-  which it provides as two `table` items (§13), `token-metadata-events` and `token-metadata-state`
-  (`src/features/token-metadata/`).
+  which it provides as one `table` item (§13), `token-metadata-state` (`src/features/token-metadata/`).
 - `token-metadata-api` requires `token-metadata-state` and serves its tables on one route, `POST /token-metadata-api/v1/tokens`
   ([docs/token-metadata-api.md](token-metadata-api.md)), the route `getTokens`, registered with the core (§7), with zod schemas of its input and output (`src/features/token-metadata-api/`). It holds no state:
   no tables, no migrations, only `on-start-api`.
@@ -1101,9 +1100,9 @@ export default defineConfig({
   database. A gap between its revisions (§11) is refused the same way, with `token-metadata-revision-gap`.
 - **Its tables** (schema `token_metadata`), related by keys: `tokens` (mutable: one row per described token, keyed
   by its id, the hash of domain separator and contract, which is its color for kinds 1 and 2, and its kind; the row
-  is deleted with the token's last field), `fields` (mutable: each token's current defined fields, whole; keys
-  MIP-0018 does not define are not stored) and `events` (append-only: each rejected event and unresolved log
-  site, with its position, contract and reason; the API does not read it). They are deterministic module tables (§4): names and symbols are
+  is deleted with the token's last field) and `fields` (mutable: each token's current defined fields, whole; keys
+  MIP-0018 does not define are not stored). Only current values are kept: no history, and nothing of a rejected
+  event. They are deterministic module tables (§4): names and symbols are
   stored whole and cut to 64 and 12 characters only when served, since the cut depends on the platform's Unicode data.
 - **The API holds no state.** Startup refuses it without the indexer (`item-no-provider`); added to a database whose
   indexer already ran, from a height above the cursor like any added entry, it answers as if it had run from S. Every

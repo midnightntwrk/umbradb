@@ -9,7 +9,7 @@ import { type ApiHandler, blockLogs, contract, domain, eventData, readStopped, r
 
 /**
  * The API's edges no chain of the harness reaches, on PostgreSQL 18 and PGlite: rows written straight into a stopped
- * database — an `unresolved` event (as the indexer stores an unresolved log site), a type-4 value that is not UTF-8
+ * database — a type-4 value that is not UTF-8
  * (which the codec never accepts; it shows the text view following the bytes), two symbol groups on one contract —
  * answered through the route as the module registers it and the core binds it to HTTP; cursors of the right shape but another contract or
  * kind, and ones that are no cursor; a read that fails (not the handler's own error) passed on to the module API; and
@@ -51,21 +51,11 @@ describe.each(PROCESS_BACKENDS)("the API's edges on $name", (backend: ProcessBac
     ]);
     await runTo(db, { start: S, head: S + 2, logs });
     await db.query(
-      `INSERT INTO token_metadata.events (height, tx_index, event_index, contract_address, classification, reason)
-       VALUES (${S + 1}, 7, 0, '\\x${raw(A)}'::bytea, 'unresolved', 'not-a-literal')`,
-    );
-    await db.query(
       `INSERT INTO token_metadata.fields (token_id, kind, key, val_type, value, uint_value, usable, set_height, set_tx, set_event, set_record)
        VALUES ('\\x${raw(tokenColor(domain(1), A))}'::bytea, 1, convert_to('image', 'UTF8'), 4, '\\xff00ff'::bytea, NULL, false, ${S + 1}, 0, 0, 9)`,
     );
   }, 240_000);
   afterAll(() => backend.stop(), 60_000);
-
-  it("an unresolved event of a contract changes nothing in its tokens' answers", async () => {
-    const [token] = (await tokens({ contract: hex(A), domainSep: hex(domain(3)), kind: 1 })).json.items;
-    expect(token.common).toEqual({ name: "Three", symbol: "ZZ", decimals: "0", standards: null, image: null, imageSha256: null });
-    expect("mark" in token).toBe(false);
-  }, 60_000);
 
   it("a type-4 value that is not UTF-8 is served as hex only, with no text view", async () => {
     // The codec rejects a type-4 value that is not an RFC 3986 URI, so no chain stores this row; written here, it shows

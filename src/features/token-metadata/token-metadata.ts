@@ -16,12 +16,12 @@
  *   `token-metadata`; the error itself is a {@link TokenMetadataStartAfterDatabase}, whose code is
  *   `token-metadata-start-after-database`. For the same reason it refuses revisions with a gap between them (a stop
  *   below the next start minus one): `token-metadata-revision-gap`, a {@link TokenMetadataRevisionGap}.
- * - **Provides** its tables as two `table` items (`./schema.ts`): `token-metadata-events` (append-only) and
- *   `token-metadata-state` (mutable). `token-metadata-api` requires the state item; any module may require either.
- * - **Per block** it writes in `on-db-write` (`./apply.ts`): its accepted events' effect on `tokens` and
- *   `fields`, and its rejected events and unresolved log sites (from `core-contract-logs-fast`, never applied) as
- *   `events` rows, in chain order, reading its own rows inside the block transaction. A v8 block has no contract
- *   logs, so nothing.
+ * - **Provides** its tables as one `table` item (`./schema.ts`): `token-metadata-state` (mutable), which
+ *   `token-metadata-api` requires and any other module may.
+ * - **Per block** it writes in `on-db-write` (`./apply.ts`): its accepted events' effect on `tokens` and `fields`,
+ *   in chain order, reading its own rows inside the block transaction. A rejected event changes nothing and leaves
+ *   nothing, and neither does a log site `core-contract-logs-fast` could not read. A v8 block has no contract logs,
+ *   so nothing.
  * - **Files by role**: `./schema.ts` the tables (migration `001`) and items, `./sql.ts` every statement the write path
  *   sends, `./apply.ts` the write path, `./log-reader.ts` a log's bytes, `./codec/` the MIP-0018 event codec,
  *   `./rules.ts` the rules the indexer and the API share, and `./color.ts` a token's color.
@@ -33,7 +33,7 @@ import { CONTRACT_LOGS_ITEM, contractLogsItemOf, unresolvedLogSitesOf } from "..
 import { defineModule } from "../../modules/declaration.js";
 import { type LogReader, writeTokenMetadata } from "./apply.js";
 import { miscAtom } from "./log-reader.js";
-import { TOKEN_METADATA_EVENTS_ITEM, MIGRATIONS, TOKEN_METADATA_SCHEMA, TOKEN_METADATA_STATE_ITEM } from "./schema.js";
+import { MIGRATIONS, TOKEN_METADATA_SCHEMA, TOKEN_METADATA_STATE_ITEM } from "./schema.js";
 import { databaseStart } from "./sql.js";
 
 
@@ -109,7 +109,6 @@ export function tokenMetadataWith(reader: LogReader, latestStarts: Readonly<Reco
     side: "public",
     requires: [CONTRACT_LOGS_ITEM],
     provides: [
-      { name: TOKEN_METADATA_EVENTS_ITEM, lifetimes: ["table"], table: { schema: TOKEN_METADATA_SCHEMA, tables: ["events"], kind: "append-only" } },
       {
         name: TOKEN_METADATA_STATE_ITEM,
         lifetimes: ["table"],

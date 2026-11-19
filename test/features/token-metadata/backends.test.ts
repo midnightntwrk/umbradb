@@ -23,7 +23,7 @@ function digestProbe(seen: string[]): ModuleDeclaration {
     id: "token-metadata-digests",
     version: "1.0.0",
     side: "public",
-    requires: ["token-metadata-state", "token-metadata-events"],
+    requires: ["token-metadata-state"],
     provides: [{ name: "token-metadata-digests-rows", lifetimes: ["table"], table: { schema: "token_metadata_digests", tables: ["rows"], kind: "append-only" } }],
     startsMidChain: true,
     configSchema: z.object({}),
@@ -67,7 +67,7 @@ describe("token-metadata on PostgreSQL 18 and PGlite", () => {
       }),
       { seed: 18_0002, numRuns: 10 },
     );
-    // The chains reached every one of the module's tables (events, fields, withdrawals).
-    expect(tablesSeen).toBe(3);
+    // The chains reached both of the module's tables (tokens, fields).
+    expect(tablesSeen).toBe(2);
   }, 900_000);
 });
