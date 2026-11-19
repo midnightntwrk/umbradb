@@ -9,6 +9,7 @@ import {
   SHADOW_SCHEMA,
   shadowTableName,
 } from "../../../src/db/change-capture.js";
+import { statementText } from "../../../src/db/repeated-statements.js";
 import type { ModuleDeclaration } from "../../../src/modules/declaration.js";
 import { BACKENDS } from "../../db/backends.js";
 import { concatBytes, fromHex } from "../../determinism/cbor-decoder.js";
@@ -266,7 +267,7 @@ describe.each(BACKENDS)("change capture across startups, on $name", (backend) =>
         const w: BlockWriteHandle = {
           height: height - 1n,
           query: (sql, params) => {
-            if (sql.includes("pg_trigger")) reads += 1;
+            if (statementText(sql).includes("pg_trigger")) reads += 1;
             return tx.query(sql, params);
           },
           execute: (sql, params) => tx.execute(sql, params),

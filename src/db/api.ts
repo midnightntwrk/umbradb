@@ -15,7 +15,7 @@
  *   (`./read-only.ts`).
  */
 
-import type { ConsistentRead } from "../deterministic-postgresql/index.js";
+import type { Statement } from "./repeated-statements.js";
 
 export type { Row } from "../deterministic-postgresql/index.js";
 export { ERROR_CODES, type ErrorCode, type ErrorDetails, UmbraError } from "./errors.js";
@@ -26,9 +26,11 @@ export interface ReadHandle {
   readonly height: bigint | null;
   /**
    * Runs one statement. Parameters are sent as the component's `parameterText` makes them, and rows come back through
-   * the component's result mapping.
+   * the component's result mapping. `sql` is the statement's text. UmbraDB's own code also passes its marked
+   * statements (`./repeated-statements.ts`), which a module cannot make; a handle built on another passes `sql` on as
+   * it came, or takes its text with `statementText`.
    */
-  query(sql: string, params?: unknown[]): Promise<Record<string, unknown>[]>;
+  query(sql: Statement, params?: unknown[]): Promise<Record<string, unknown>[]>;
 }
 
 /**
@@ -48,8 +50,11 @@ export interface SchemaWriteHandle extends BlockWriteHandle {}
 
 /** One transaction on the writer connection: what the write handles, migrations and the runner's commit build on. */
 export interface Transaction {
-  /** Runs one statement in the transaction and returns its rows; it sees the transaction's own writes. */
-  query(sql: string, params?: unknown[]): Promise<Record<string, unknown>[]>;
+  /**
+   * Runs one statement in the transaction and returns its rows; it sees the transaction's own writes. `sql` as
+   * {@link ReadHandle.query} takes it.
+   */
+  query(sql: Statement, params?: unknown[]): Promise<Record<string, unknown>[]>;
   /** Runs one statement in the transaction and returns the number of rows it affected. */
   execute(sql: string, params?: unknown[]): Promise<number>;
 }
@@ -60,7 +65,7 @@ export interface Transaction {
  * so the height and the read's snapshot are the same. It must read the database, not a value held in memory. Null
  * before any height commits.
  */
-export type CommittedHeight = (read: ConsistentRead) => Promise<bigint | null>;
+export type CommittedHeight = (read: Pick<ReadHandle, "query">) => Promise<bigint | null>;
 
 /**
  * Options of one read (`Database.read`). Without them a read is not bounded: the read handles given to callbacks, like

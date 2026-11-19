@@ -48,6 +48,7 @@
 import postgres, { type Sql } from "postgres";
 import type { SslMode } from "../config/database-parts.js";
 import { mapRows, parameterText, type Row, SESSION_SETTINGS } from "../deterministic-postgresql/index.js";
+import { RepeatedStatement, type Statement, statementText } from "./repeated-statements.js";
 import type { CommittedHeight, Database, ReadHandle, ReadOptions, Transaction } from "./api.js";
 import { type DurabilityWarning, probeDurability } from "./durability-probe.js";
 import { commitRolledBack, handleClosed, queryTimeout, statementRefused, UmbraError } from "./errors.js";
@@ -248,15 +249,24 @@ interface Outcome {
 const PREPARED_TEXTS = 256;
 
 /**
+ * Which texts a session prepares: every statement with parameters, and the statements without parameters that UmbraDB's
+ * own code repeats at every block and hands over marked as such (a `RepeatedStatement`, `./repeated-statements.ts`: the
+ * head read, the queue read of a run that sweeps, the digest read, the shadow tables' probe and drains), up to
+ * {@link PREPARED_TEXTS} in the session's life, none it retired (below). Sent unprepared, each of those is parsed and
+ * planned again at every execution. Every text without parameters handed over as a string, a module's among them and
+ * one equal to a marked text, runs unnamed as it always did. A text retired on a session runs unnamed there for the
+ * rest of the session's life.
+ *
  * Counts the statements that may change a table's columns (DDL) on any session this process opened to one database,
  * through any pool: a session reuses only the texts it prepared since the last one. PostgreSQL re-plans a prepared
  * statement after DDL, but refuses one whose result columns changed (`cached plan must not change result type`), which
- * aborts the transaction it runs in; the driver's retry cannot recover that. A text prepared before such DDL is never
- * prepared again on that session, since the driver would reuse its stale entry: it runs unprepared, as without
- * preparing. A writer's `ROLLBACK` counts too, since the DDL it undoes changes the columns back. Schema changes come
- * from the writer's migrations at startup, under the writer lock. A private process's pool on its public database,
- * which the public process migrates unseen, prepares nothing, nor does the transport's pool, which runs the SQL
- * private clients send (`preparedStatements: false`).
+ * aborts the transaction it runs in; the driver's retry cannot recover that. A text a session holds prepared when such
+ * DDL is counted is never prepared again on that session, since the driver would reuse its stale entry: it runs
+ * unprepared, as without preparing. A text the session never prepared before the DDL (one it ran only unnamed) has no
+ * statement to go stale, and may be prepared after it. A writer's `ROLLBACK` counts too, since the DDL it undoes
+ * changes the columns back. Schema changes come from the writer's migrations at startup, under the writer lock. A
+ * private process's pool on its public database, which the public process migrates unseen, prepares nothing, nor does
+ * the transport's pool, which runs the SQL private clients send (`preparedStatements: false`).
  */
 interface SchemaChanges {
   count: number;
@@ -295,10 +305,10 @@ class Session {
       ...connection,
       max: 1,
       fetch_types: false,
-      // A statement with parameters is prepared once per session, by name, and reused: without it the driver describes
-      // every such statement before running it, a second round trip each time. The sessions are UmbraDB's own, pinned
-      // for their life with no pooler between, so a named statement stays theirs; `send` decides which texts
-      // (`prepares`).
+      // A statement is prepared once per session, by name, and reused. Without it the driver describes every statement
+      // with parameters before running it, a second round trip each time, and the server parses and plans every
+      // statement again. The sessions are UmbraDB's own, pinned for their life with no pooler between, so a named
+      // statement stays theirs; `send` decides which texts (a marked statement, `prepares`).
       prepare: true,
       // Never recycled: the writer's connection holds the writer lock for as long as it lives (./writer-lock.ts).
       max_lifetime: null,
@@ -322,14 +332,22 @@ class Session {
 
   /** The texts this session prepared since the last schema change it knows of ({@link SchemaChanges}). */
   private readonly preparedTexts = new Set<string>();
-  /** The texts it prepared before a schema change: never prepared again on this session. */
+  /** The texts it prepared before a schema change, or whose named execution without parameters failed: never again. */
   private readonly retiredTexts = new Set<string>();
+  /** The statements asked of this session and not yet settled (answered or failed, the schema-change count updated). */
+  private unsettled = 0;
+  /**
+   * Settles when the named execution of a marked statement without parameters has: every statement asked of the
+   * session after that one waits for it before it is sent (`send`). Kept, settled, until no statement of the session
+   * is unsettled, so that a statement asked for while others still wait is sent after them.
+   */
+  private named: Promise<void> | undefined;
   private seenSchemaChanges = 0;
 
   /**
    * Whether `text` runs as a named prepared statement: one prepared since the last schema change, or a new one while
-   * this session has prepared fewer than {@link PREPARED_TEXTS} in its life. The driver keeps each without limit for the
-   * session's life (it keys them by text, every parameter typed alike). A caller sending ever new texts, such as a
+   * this session has prepared fewer than {@link PREPARED_TEXTS} in its life. The driver keeps each without limit for
+   * the session's life (it keys them by text, every parameter typed alike). A caller sending ever new texts, such as a
    * private client's reads or a module's built SQL, so costs the server at most that many; the rest run as now,
    * described first.
    */
@@ -359,7 +377,7 @@ class Session {
    * Runs one statement: on the extended protocol (one statement, parameters as text), or, for transaction control, on
    * the simple protocol. Its parameters are checked before anything is sent.
    */
-  async run(text: string, params: readonly unknown[] = [], simple = false): Promise<Outcome> {
+  async run(statement: Statement, params: readonly unknown[] = [], simple = false): Promise<Outcome> {
     const encodeFrom = performance.now();
     const args = params.map((value, index) => parameterText(value, index));
     traceAdd("encMs", performance.now() - encodeFrom);
@@ -368,11 +386,9 @@ class Session {
       count: number | null;
       command: string;
     };
-    const result = (await this.send(text, args, simple)) as Raw;
+    const marked = statement instanceof RepeatedStatement;
+    const result = (await this.send(statementText(statement), args, simple, false, marked)) as Raw;
     const decodeFrom = performance.now();
-    if (SCHEMA_CHANGE.test(result.command) || (this.role === "writer" && result.command === "ROLLBACK")) {
-      this.schemaChanges.count += 1;
-    }
     const columns = (result.columns ?? []).map((column) => ({ name: column.name, type: column.type }));
     const rows = mapRows(
       columns,
@@ -387,39 +403,93 @@ class Session {
    * migration's, `./multi-statement.ts`); its results are not read (the driver gives one per statement).
    */
   async script(text: string): Promise<void> {
-    try {
-      await this.send(text, [], true);
-    } finally {
-      // A migration's script: whatever it ran, the tables it names may have other columns now.
-      this.schemaChanges.count += 1;
-    }
+    await this.send(text, [], true, true);
   }
 
-  /** Sends a text to the server unless the session ended or was lost; a driver error as an {@link UmbraError}. */
-  private async send(text: string, args: readonly (string | null)[], simple: boolean): Promise<unknown> {
-    if (this.state === "ended") throw handleClosed("database");
-    if (this.state === "lost") {
-      throw new UmbraError("connection-lost", `the ${this.role} connection to PostgreSQL was lost`, {
-        connection: this.role,
-        cause: "lost-earlier",
-      });
-    }
+  /**
+   * Sends a text to the server unless the session ended or was lost; a driver error as an {@link UmbraError}. A
+   * statement that may change a table's columns counts as a schema change ({@link SchemaChanges}) once it settled: one
+   * whose command tag says so, a writer's `ROLLBACK`, and a migration's `script` whatever it ran.
+   *
+   * A marked statement without parameters (`marked`: handed over as a `RepeatedStatement`) is named only when no other
+   * statement of this session is unsettled. Every statement sent before it then settled, so a schema change among them
+   * is counted before `prepares` looks, and no named execution of the text is unanswered: the driver learns a prepared
+   * statement only from the server's answer, and would give a second execution sent before it a new name, which the
+   * server keeps for the session's life. Asked for beside others (a caller sending several at once on one handle), it
+   * runs unnamed, in its place in the order. UmbraDB's own code awaits each statement on a handle before the next, so
+   * its marked statements run named.
+   *
+   * While such a named execution is unanswered, nothing else is sent on the session: a statement asked for meanwhile
+   * waits for it, and the waiting ones are then sent in the order they were asked for. The driver answers some
+   * failures of a statement it holds prepared by sending it again under a new name, behind whatever was sent meanwhile
+   * (`retry`, `postgres` 3.4.9 `connection.js`: `cached plan must not change result type`, a statement the server no
+   * longer has). With nothing sent behind the first sending, the second follows the failure at once, inside the
+   * transaction the failure aborted (every statement of a handle runs inside a read's or the writer's transaction):
+   * the server refuses it and keeps no statement of it, and the driver reports the first failure, which retires the
+   * text here. A statement sent behind the first sending could end the aborted state (`ROLLBACK TO SAVEPOINT`); the
+   * second sending would then be answered after it, as a success, with rows the first never saw, and with a second
+   * statement kept on the server. A statement that waited is refused, not sent, when the session ended or was lost
+   * meanwhile: the driver would open a new connection for it, outside the transaction. Nothing waits behind a text
+   * with parameters: that path is as it was.
+   */
+  private async send(
+    text: string,
+    args: readonly (string | null)[],
+    simple: boolean,
+    script = false,
+    marked = false,
+  ): Promise<unknown> {
+    const alone = this.unsettled === 0;
+    this.unsettled += 1;
+    let schemaChange = false;
+    let answered: (() => void) | undefined;
     try {
-      // `simple` is a runtime option of `unsafe` the driver's types do not declare (`postgres` 3.4.9 `index.js`).
-      const prepare = !simple && args.length > 0 && this.prepares(text);
-      const options = { simple, prepare } as unknown as postgres.UnsafeQueryOptions;
-      const sent = performance.now();
-      try {
-        return await this.sql.unsafe(text, args as string[], options).raw();
-      } finally {
-        // Answered or failed (a timeout, a lost connection), the statement took this time of the session.
-        traceStatement(text, performance.now() - sent);
+      if (this.named !== undefined) await this.named;
+      if (this.state === "ended") throw handleClosed("database");
+      if (this.state === "lost") {
+        throw new UmbraError("connection-lost", `the ${this.role} connection to PostgreSQL was lost`, {
+          connection: this.role,
+          cause: "lost-earlier",
+        });
       }
-    } catch (error) {
-      if (this.ended) throw handleClosed("database");
-      const classified = classifyDriverError(error, this.role);
-      if (classified.code === "connection-lost") this.state = "lost";
-      throw classified;
+      schemaChange = script;
+      try {
+        const prepare = !simple && (args.length > 0 || (alone && marked)) && this.prepares(text);
+        const namedAlone = prepare && args.length === 0;
+        if (namedAlone) this.named = new Promise((resolve) => void (answered = resolve));
+        // `simple` is a runtime option of `unsafe` the driver's types do not declare (`postgres` 3.4.9 `index.js`).
+        const options = { simple, prepare } as unknown as postgres.UnsafeQueryOptions;
+        const sent = performance.now();
+        try {
+          const result = await this.sql.unsafe(text, args as string[], options).raw();
+          const command = (result as { command?: string }).command ?? "";
+          schemaChange ||= SCHEMA_CHANGE.test(command) || (this.role === "writer" && command === "ROLLBACK");
+          return result;
+        } catch (error) {
+          // A marked statement whose named execution failed is retired. The server may keep the statement that
+          // failed, and after some failures the driver forgets it (`retry`), so a later named execution would get a
+          // new name. Retired, the text is never named again on this session, and leaves at most one statement on
+          // the server.
+          if (namedAlone) {
+            this.preparedTexts.delete(text);
+            this.retiredTexts.add(text);
+          }
+          throw error;
+        } finally {
+          // Answered or failed (a timeout, a lost connection), the statement took this time of the session.
+          traceStatement(text, performance.now() - sent);
+        }
+      } catch (error) {
+        if (this.ended) throw handleClosed("database");
+        const classified = classifyDriverError(error, this.role);
+        if (classified.code === "connection-lost") this.state = "lost";
+        throw classified;
+      }
+    } finally {
+      if (schemaChange) this.schemaChanges.count += 1;
+      this.unsettled -= 1;
+      answered?.();
+      if (this.unsettled === 0) this.named = undefined;
     }
   }
 
@@ -477,7 +547,7 @@ class BoundedRead {
   }
 
   /** Runs one statement of the read, unless a timeout ended the read. */
-  async run(text: string, params?: readonly unknown[]): Promise<Outcome> {
+  async run(text: Statement, params?: readonly unknown[]): Promise<Outcome> {
     this.check();
     this.idleSince = undefined;
     try {
@@ -641,7 +711,7 @@ class Writer {
     const session = await this.ready();
     await session.run("BEGIN", [], true);
     let ended = false;
-    const statement = (sql: string, params: unknown[] | undefined) => {
+    const statement = (sql: Statement, params: unknown[] | undefined) => {
       if (ended) throw handleClosed("transaction");
       return session.run(sql, params);
     };
@@ -705,7 +775,7 @@ export function openPostgres(options: PostgresOptions): Database {
       try {
         if (bound === undefined) await reader.run(READ_BEGIN, [], true);
         else await bound.begin();
-        const query = async (sql: string, params?: unknown[]): Promise<Row[]> => {
+        const query = async (sql: Statement, params?: unknown[]): Promise<Row[]> => {
           if (!open) throw handleClosed("read");
           return (await (bound ?? reader).run(sql, params)).rows;
         };
