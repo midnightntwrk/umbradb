@@ -43,7 +43,7 @@ its `exports`. `npx umbradb` does not work here, because the package's own comma
 
 After pulling new commits, run `npm ci && npm run build` again.
 
-`npm ci` in a clone reports moderate advisories in development tooling only (the mutation tester Stryker, the test
+`npm ci` in a clone reports moderate advisories in development tooling only (the test
 containers' archive dependencies, typedoc), for which no compatible fixed version exists yet. The package's own
 dependencies have none: `npm audit --omit=dev` reports 0, and CI blocks on it at `high`.
 

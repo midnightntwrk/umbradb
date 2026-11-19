@@ -48,8 +48,6 @@
     "test": "vitest run",
     "test:conformance": "node scripts/conformance-gate.mjs",
     "test:coverage": "vitest run --coverage",
-    "test:mutation": "stryker run",
-    "test:mutation:ci": "node scripts/mutation-per-adapter.mjs",
     "test:smoke": "npm run build && node test/smoke/pack-install.mjs",
     "bench": "tsx bench/harness.ts",
     "bench:smoke": "tsx bench/smoke.ts",
@@ -74,8 +72,6 @@
   "devDependencies": {
     "@electric-sql/pglite-tools": "0.4.10",
     "@midnightntwrk/wallet-sdk-abstractions": "3.0.0-canary.20260716150734-e744d99",
-    "@stryker-mutator/core": "^9.6.1",
-    "@stryker-mutator/vitest-runner": "^9.6.1",
     "@testcontainers/postgresql": "^12.0.4",
     "@types/node": "^26.1.1",
     "@types/ws": "8.18.2",
