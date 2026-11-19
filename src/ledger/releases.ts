@@ -33,7 +33,7 @@ export const LEDGER_RELEASES = Object.freeze({
       Object.freeze({
         name: "@umbradb/vendored-ledger-v8",
         version: "8.1.2",
-        sha256: "0x4ed03c1f848dc4c1af01333b90512fec5d6879e040afa1da1196b2bcc439a2eb",
+        sha256: "0xb193681813bcc22d7789d4060b0c578ae1c9fcd47be5f4d0760e1b23a240a775",
       }),
     ] as const),
   }),
@@ -44,7 +44,7 @@ export const LEDGER_RELEASES = Object.freeze({
       Object.freeze({
         name: "@umbradb/vendored-ledger-v9-rc3",
         version: "1.0.0-rc.3",
-        sha256: "0x805a9dadcf004e582a3e4e9bb2fca84d168e10c33bebb731f618a045649ef08f",
+        sha256: "0xeafe8b0053c08858775df53932d3632e64ee8f09d7f420fcd86856eee93f2e6e",
       }),
     ] as const),
   }),
@@ -55,7 +55,7 @@ export const LEDGER_RELEASES = Object.freeze({
       Object.freeze({
         name: "@umbradb/vendored-ledger-v9-rc5",
         version: "1.0.0-rc.5",
-        sha256: "0x836641470f4a9edb2914a511d9f6a2aa03e0dcdc3bc2b3e1ad449954ffbbc287",
+        sha256: "0x8aa03dda19b5128b10e09ec577a9b507d9b6ed0d6440737f809292e46c02b54b",
       }),
     ] as const),
   }),
@@ -66,7 +66,7 @@ export const LEDGER_RELEASES = Object.freeze({
       Object.freeze({
         name: "@umbradb/vendored-ledger-v9",
         version: "1.0.1",
-        sha256: "0x24d82569c42bc2f0921a47b8188e73a8c5361d64355fddb06f85c76d8fb254f7",
+        sha256: "0xaf06a8968d47773b1bf5f586ac155dd2c195502d7c7529d49edabdf646ca70dc",
       }),
     ] as const),
   }),

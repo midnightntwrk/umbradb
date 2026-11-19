@@ -72,9 +72,9 @@ Its patches are v9's where they apply:
 - `0006-ledger-wasm-state-trees.patch` — the tree values, as v8's `0005-…` and v9's `0007-…` (below).
 
 v9's `0004-…` (the translation's timers) and `0005-…` (the conversion) do not apply: `midnight-node` 2.0.0-rc.4 carries
-no v8 → v9 translation, and the rc.3 package has no `convertFromV8`. The build takes about a minute and a half on this
-repository's arm64 Mac (77 s recording, 64 s rebuilding, both from a clean container); the package is 10 MB (its `.wasm`
-10.2 MB, without the translation and the v8 ledger the v9 package carries).
+no v8 → v9 translation, and the rc.3 package has no `convertFromV8`. The build takes about three minutes on this
+repository's arm64 Mac (175 s recording, 183 s rebuilding, both from a clean container); the package is 21 MB (its `.wasm`
+21.3 MB, without the translation and the v8 ledger the v9 package carries).
 
 ### v9 and v9-rc5: ledger 9.1.0.1, and ledger v9 as runtime 2.1.0 built it
 
@@ -107,7 +107,7 @@ exactly `node-2.1.101`'s: `midnight-ledger` 8.1.3, `midnight-storage` 2.0.5, `mi
 `StateValue` is generic over its value kind, and its tag names it: a state value's tagged serialization starts
 `midnight:impact-state-value[v2](fab-aligned-value[v1]):` in the `v9` package. The test fixtures' contract calls
 declare, for `v9`, the bytes they write and no deletion (`test/ledger/adapter-fixtures.ts` `fixtureGas`). The build
-takes about 80 s on an arm64 Mac.
+takes about four minutes on this repository's arm64 Mac (220 s recording, 238 s rebuilding).
 
 ## Rebuilding
 
@@ -128,7 +128,14 @@ outputs); `v8/patches/0002-…` moves it to 0.2.108, the version ledger-9.1.0.0-
 six runs. The build follows
 upstream's own release recipe (`midnight-ledger` `bagel.nix`): `cargo build --profile wasm` for
 `wasm32-unknown-unknown`, `wasm-bindgen --target bundler --omit-default-module-path --weak-refs --reference-types`,
-`wasm-opt -Os --enable-reference-types`, the hand-written declarations assembled from the template. Paths inside the
+`wasm-opt -Os --enable-reference-types`, the hand-written declarations assembled from the template. It differs from
+that recipe in two settings, for speed: the `wasm` profile's `opt-level = "z"` is overridden to 3
+(`CARGO_PROFILE_WASM_OPT_LEVEL`), and blst's C code, which its build script compiles at `-O2`, is compiled at `-O3`
+with a high inline threshold (`CFLAGS_wasm32_unknown_unknown`), meant to inline its field multiplication into its
+fixed-size callers. `test/ledger/vendored-ledger-files.test.ts` runs `build-in-container.sh` with stand-ins for `git`,
+`jq` and `cargo` and checks that its one `cargo build` receives both settings; what the compiler does with them (the
+inlining among it) and what they gain are not tested. Neither changes a source, and the packages built with them give
+the oracles' values (below); the `.wasm` about doubles. Paths inside the
 container are fixed, so the bytes do not depend on where the repository is checked out. Each host runs the image's
 native variant (the amd64 Rust toolchain cannot run under emulation on an arm64 Mac); CI rebuilds on amd64 and arm64
 runners and compares both with `SHA256SUMS` (`.github/workflows/vendored-ledger.yml`), and uploads a build that differs.
