@@ -14,7 +14,8 @@ its defaults from): off while `blocks` is below 2, `blocks` at most 1,000. `chun
 (`src/runner/fast-sync.ts`) gives a chunk's last height as the lowest of first + `blocks` − 1; the head less
 `distance` (the head the loop read for its pass, so a chunk holds only heights at least `distance` behind it); the end
 of the range of the resolved graph holding first, or of the `core` entry's revision covering it; and the loop's last
-height. A chunk holds two blocks or more; any other height is processed alone.
+height. A chunk holds two blocks or more; any other height is processed alone. A chunk forms only while nothing exists
+in the database that a `COMMIT` would act on (§4a).
 
 The graph's ranges split at every module revision's start and stop, so inside a chunk no entry starts or stops and no
 setting a callback reads changes: `on-start-height` can fall only on a chunk's first block and `on-stop-height` only
@@ -29,12 +30,8 @@ held trace records. A private process, and a public process that waits for priva
 it prepared it (`on-fetch` and `on-parse` run by the source's queue), else from the source with those points run by
 the loop. It keeps each with its items as `on-parse` left them for the rest of its run.
 
-**A take that fails** at j makes the chunk a..j − 1. The failure is kept for j until the loop reaches j:
-- a retry or a new run of the blocks below j keeps it;
-- no chunk is planned across j, so j is never taken again and its callbacks are not called again;
-- the loop processes j alone, and the failure is thrown there, as j's;
-- it is dropped, and logged, only when a block below j stops processing (a failure that is not retried).
-A kept failure that is retryable is retried once it was thrown at j, as with the mode off.
+**A take that fails** at j makes the chunk a..j − 1. The failure is kept for j until the loop reaches j (§7): j is
+not taken again, and its callbacks are not called again.
 
 **The answers.** After the first block's `on-compute` and before the `BEGIN`, the loop waits until the source holds
 what the callbacks of the later blocks ask it for from `on-compute` on (`BlockSource.answered`). The node source holds
@@ -48,10 +45,24 @@ root asked in a run, which a chunk's first block asks before the `BEGIN`.
 
 **So nothing in an open transaction waits for the chain.** A stop, a pause or a lost database connection met while a
 chunk is open is bounded by the chunk's own work: the stop and the pause end the chunk before its next block (§8), a
-lost connection fails the next statement. While the loop waits for a block or an answer, no transaction is open: the
-process's stop closes the node client at once, the pending calls fail, the loop's signal ends the wait, and the
-chunk's first block, already computed, is stored alone before the loop returns. On PGlite a module's read at
-`on-fetch` or `on-parse` cannot wait behind a transaction that waits for that block.
+lost connection fails the next statement. On PGlite a module's read at `on-fetch` or `on-parse` cannot wait behind a
+transaction that waits for that block.
+
+**A stop or a pause asked before the `BEGIN`** ends what the chunk waits for, and the chunk is then its first block,
+stored as a height alone is:
+- during the takes, no block is taken after the one in flight;
+- during the wait for the answers, the wait ends at once, and nothing is asked ahead when the stop or the pause came
+  before it.
+The blocks taken above the first are kept for when the loop goes on, and the source is asked for their answers again
+then. So a pause is reached after the first block, and a stop returns after it, without the node.
+
+**A node that does not answer.** With the mode off, a block's `on-compute` that waits for a root the node does not
+give waits: the node client retries without limit; a stop ends the call and the loop; a pause is reached only once
+that block is done, so it waits as long as the node does. With chunks, the wait for the roots of a + 1..b comes one
+block earlier, before a's `BEGIN`: the node client retries the same way, a stop ends the wait, and a pause ends it
+too. Once a is stored alone the loop is where the mode off is: at the next block, whose root is not there. One
+difference remains (§10): while neither a stop nor a pause is asked, a is computed and not yet stored for as long as
+the node does not answer, where the mode off has stored it.
 
 The cost: with `prefetchWindow` below `blocks`, a chunk waits for the heights above the window before its `BEGIN`. A
 root the prefetch asked is kept until `on-compute` has asked for the root two heights above it, so the takes of a
@@ -68,7 +79,7 @@ chunk do not drop the roots of its blocks.
 | `on-compute` | k = a: before the `BEGIN`; k > a: after k − 1's cursor check, its callbacks one at a time | k = a: own read at a − 1; k > a: a read-only view of the transaction at k − 1, opened at the callback's first statement |
 | `on-db-write` | in the transaction, in order | block write handle at k − 1 |
 | `on-settle` | after k's `on-db-write`, before its cursor check; the run `{ k, k }` | block write handle |
-| the block's end | k < b: after k's cursor check, where a block alone would `COMMIT` (§4a) | the engine's own statements |
+| the read at the block's end | after k's cursor check, at every block of the chunk (§4a) | the engine's own statement |
 | `on-after-db-write` | after the chunk's `COMMIT`, each block in height order | own read at b |
 | `on-stop-height` | at b only, after its `on-after-db-write` | own read at b |
 
@@ -87,56 +98,81 @@ answered from the block taken, any other through a read. The chunk's callbacks r
 so on PGlite a module's `db.read` there is refused with `nested-call`, as with one block. Other readers see committed
 data on PostgreSQL, up to `blocks` heights behind what is written, and wait for the `COMMIT` on PGlite.
 
-## 4a. A block's end inside a chunk
+## 4a. What a transaction's end does, and why a chunk holds no block that needs it
 
 With one block per transaction, the `COMMIT` ends the block: it checks the deferred constraints, fires the deferred
-triggers, and the next block starts in a new transaction. Inside a chunk, after the cursor check of each block that is
-not the chunk's last, the engine sends the block's end (`src/db/block-end.ts`):
+triggers, runs the `ON COMMIT` action of temporary tables, closes or keeps the open cursors, and the next block starts
+in a new transaction. No statement inside a transaction does what its end does. `SET CONSTRAINTS ALL IMMEDIATE` is
+not it: it makes every constraint immediate before the pending triggers fire, where a `COMMIT` fires them with the
+constraints still deferred, so a deferred trigger that inserts a child row and then its parent through a deferred
+foreign key passes at a `COMMIT` and fails with `23503` under that statement. So nothing of a transaction's end is
+done inside a chunk. The rule instead: **a chunk holds only blocks for which a transaction's end has nothing to do but
+make their writes durable.**
 
-1. One read, at every end: whether any constraint is deferrable, and what the transaction cannot give the next block
-   as a new one would. When it finds any of the three things below, the chunk commits at this block, and the heights
-   up to its planned end are stored one per transaction.
-2. `SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED`, one text on the transaction's control path, sent
-   just before the read and together with it. The first statement checks every pending deferred constraint and fires
-   every pending deferred constraint trigger. One that fails gives the error the `COMMIT` gives (the same SQLSTATE)
-   and aborts the transaction: the failure is this block's, handled as a failure of its writes (§7). The second puts
-   every deferrable constraint in deferred mode again, which is the mode a new transaction gives the constraints
-   declared `INITIALLY DEFERRED`, whatever a callback set with `SET CONSTRAINTS`. The text is left out while the
-   transaction's last end read that no constraint is deferrable, since nothing can then be pending; if this end's
-   read finds one after all (the block made it), the text is sent then and the read once more.
+**The read.** One statement (`STATE` of `src/db/block-end.ts`, the same text on both backends, with one parameter)
+answers whether anything exists that a `COMMIT` acts on:
 
-The chunk's last block gets no end: its `COMMIT` follows. A height stored alone, and every height with the mode off,
-sends none.
+```sql
+SELECT EXISTS (SELECT FROM pg_catalog.pg_constraint WHERE condeferrable)
+  OR EXISTS (SELECT FROM pg_catalog.pg_trigger WHERE NOT tgisinternal AND (tgconstraint <> 0 OR tgdeferrable))
+  OR (pg_catalog.pg_my_temp_schema() <> 0 AND EXISTS (SELECT FROM pg_catalog.pg_class WHERE relnamespace = pg_catalog.pg_my_temp_schema()))
+  OR EXISTS (SELECT FROM pg_catalog.pg_cursors WHERE name <> $1) AS acts
+```
 
-| What a transaction's end does | Inside a chunk, at a block's end |
+The parameter is the empty name, the protocol's unnamed cursor the statement itself runs in. It changes nothing.
+
+**Where it is sent.**
+- Once, in a transaction of its own on the writer, before a run's first chunk would form (and again whenever the last
+  answer is not known: after a block stored without the read, after a transaction that did not commit).
+- At the end of each block of a chunk, its last block included, after the cursor check. When it finds something the
+  chunk commits at that block, so whatever the block left for its transaction's end is done by a real `COMMIT`, at its
+  own block, as with the mode off.
+- While it finds something, at the end of each block stored alone where a chunk would otherwise have formed. Every
+  block is then stored one per transaction, with the statements of the mode off and that one read more; chunks form
+  again when a block's end finds nothing.
+
+A height where no chunk would form anyway (too close to the head, a range of one height, a block stored again) and
+every height with the mode off send none.
+
+**What it finds, and why nothing a block does is deferred past its own end without it.**
+
+| What a transaction's end acts on | How it can exist | What the read sees |
+|---|---|---|
+| a deferred constraint check | only a deferrable constraint can be deferred, declared `INITIALLY DEFERRED` or set so with `SET CONSTRAINTS … DEFERRED` | any deferrable constraint (`condeferrable`), whatever its mode: one declared so, made so by `ALTER TABLE … ALTER CONSTRAINT … DEFERRABLE`, or created by the block |
+| a deferred trigger | only a constraint trigger can be deferred | any constraint trigger that is not PostgreSQL's own, deferrable or not |
+| a temporary table's `ON COMMIT` action | the session has a temporary table | any temporary relation of the writer's session (no catalog says which action a table has) |
+| an open cursor: closed, or its query run to its end when declared `WITH HOLD` | a block declared one and left it open, or an earlier transaction left one `WITH HOLD` | any open cursor of the session, with or without hold |
+
+Each is read from the catalogs as the transaction sees them, so what block k creates or leaves open is found at k's
+end and committed at k; what it creates and removes is not found, and leaves nothing for a `COMMIT`. A database that
+has such an object when a run starts never forms a chunk. UmbraDB's own SQL makes none of them.
+
+Rules run with their statement and event triggers with their command, never at a transaction's end. A module's handle
+refuses `SAVEPOINT`, `RELEASE`, `ROLLBACK TO` and `PREPARE TRANSACTION` in both modes.
+
+**What the read does not find**, each the transaction's until its `COMMIT`, and none of them a change of stored data by
+itself. These are stated differences from the mode off (§10):
+
+| What a transaction's end does | Inside a chunk |
 |---|---|
-| checks the deferred constraints | checked by the engine; a failure is the block's, with the `COMMIT`'s error |
-| fires the deferred constraint triggers | fired by the same statement; the next block reads what they wrote |
-| returns each constraint to its declared mode | `INITIALLY DEFERRED`: deferred again by the engine. `DEFERRABLE INITIALLY IMMEDIATE`: no statement restores one constraint's mode, so the chunk ends at this block |
-| runs the `ON COMMIT` action of temporary tables | no catalog says which action a table has, so the chunk ends at a block that leaves a temporary table or sequence in the writer's session |
-| closes the cursors declared without `WITH HOLD` | the chunk ends at a block that leaves one open |
-| ends `SET LOCAL`, `set_config(…, true)`, `SET TRANSACTION` | not restored: the setting lasts to the chunk's `COMMIT` (a difference, §10) |
-| releases transaction-level advisory locks and row locks | not released: other sessions wait until the chunk's `COMMIT`; the writer's own blocks hold them already |
-| delivers `NOTIFY` | delivered at the chunk's `COMMIT`, equal notifications of its blocks once |
-| sequences | nothing at either end: a sequence's value is no part of a transaction. A chunk that rolls back has advanced it by the values of all its blocks |
-| savepoints, prepared transactions | a module's handle refuses `SAVEPOINT`, `RELEASE`, `ROLLBACK TO` and `PREPARE TRANSACTION` in both modes |
+| ends `SET LOCAL`, `set_config(…, true)` | the setting lasts to the chunk's `COMMIT` |
+| releases transaction-level advisory locks, row and table locks | other sessions wait for them until the chunk's `COMMIT` |
+| delivers `NOTIFY`, and starts a `LISTEN` | at the chunk's `COMMIT`, equal notifications of its blocks once |
+| closes a large object's descriptor | it stays valid until the chunk's `COMMIT` |
 | `now()`, the transaction id | the chunk's, the same for all its blocks |
+| sequences | nothing at either end: a sequence's value is no part of a transaction. A chunk that rolls back has advanced it by the values of all its blocks |
 
-A deferrable constraint that a block creates after the chunk's first block is deferred until that block's end,
-whatever its declaration; the chunk then ends there if it is initially immediate.
+**The cost**, measured on the tests' servers (3,000 reads in one transaction, three times; a schema of one table, 196
+rows in `pg_constraint`; a one-parameter `SELECT` took 0.15 to 0.16 ms there on PostgreSQL 18 and 0.10 to 0.11 ms on
+PGlite 0.5.10):
 
-The cost per block of a chunk but its last, measured on the tests' servers (3,000 ends in one transaction, about 375
-rows in `pg_constraint`; a one-parameter `SELECT` took 0.15 to 0.20 ms there on PostgreSQL 18 and 0.11 ms on PGlite
-0.5.10):
-
-| The database has | Statements per end | PostgreSQL 18 | PGlite 0.5.10 |
+| The database has | Statements per block's end | PostgreSQL 18 | PGlite 0.5.10 |
 |---|---|---|---|
-| no deferrable constraint (UmbraDB's own schema) | 1, the read (3 at a chunk's first end) | 0.18 to 0.21 ms | 0.22 ms |
-| a deferrable constraint | 3: the text of two and the read, sent together | 0.20 to 0.21 ms | 0.31 to 0.34 ms |
+| nothing the read looks for | 1 | 0.17 to 0.18 ms | 0.17 ms |
+| a deferrable constraint | 1 | 0.16 ms | 0.16 to 0.17 ms |
 
-Through the loop, traced, 600 heights of the tests' modules in chunks of 100 on PostgreSQL: the read was sent 594
-times, 0.22 ms each, and the text 6 times, or 594 times, 0.18 ms each, with a deferrable constraint; a block's trace
-line held 22.4 statements (23.3 with the constraint) against 25.3 with the mode off.
+The scan of `pg_constraint` grows with the number of constraints; it was not measured on a database with UmbraDB's
+whole schema in this form.
 
 ## 5. `continues` inside a chunk
 
@@ -174,32 +210,54 @@ A failure of block k is handled as a block alone handles it at k; what was writt
 transaction allows, and stored again one block per transaction where it does not. A block stored again runs from
 `on-compute` with its items as `on-parse` left them and `continues` false; nothing is fetched or parsed again.
 
+**One store of kept failures.** A failure that is a block's own and cannot be thrown at once is kept for its height,
+in one place (`FinalizedLoop.keep`), whatever its kind: the block's take, its `on-compute`, its `on-db-write`, its
+`on-settle`, its cursor check, the read at its end, its `COMMIT`. It is kept the moment it is known, before anything
+else runs: before the `COMMIT` of the blocks below it, before their callbacks after the commit, before a later run's
+cursor read. A kept failure:
+- is thrown when the loop reaches its height, processed alone, before anything of that height runs, so the failing
+  callback is not called again. One the process retries (a lost connection) is then retried as with the mode off: a
+  take is taken again, an `on-compute` resumes from `on-compute`;
+- stays kept through a retry or a new run of the blocks below it, a lost or failed `COMMIT`, a pause and a stop;
+- ends every chunk planned below it: no chunk forms across its height;
+- is dropped, and logged, only when a block below it stops processing (a failure that is not retried).
+
 | Failure | What happens | Against one block per transaction |
 |---|---|---|
-| taking block j | the chunk is a..j − 1; j's failure is kept for j, and thrown when the loop reaches j, alone (§2) | the same |
-| k > a before its first write | `COMMIT` at k − 1, its callbacks, then k's failure (a retryable one holds k) | the same |
-| k's writes, not retryable (its end among them, §4a) | rollback; a..k − 1 stored again; k's kept failure thrown, k not called again | the same halt |
+| taking block j | the chunk is a..j − 1; the failure is kept for j | the same |
+| k > a before its first write | the failure is kept for k; `COMMIT` at k − 1, its callbacks; then k's failure | the same |
+| k's writes, not retryable (the read at its end among them) | rollback; the failure is kept for k; a..k − 1 stored again | the same halt |
+| the `COMMIT` answered with an error | as the row above, with k the chunk's last block | the same halt: the block whose `COMMIT` it is |
 | retryable while open | rollback; the chunk held; the next run stores a..k − 1 again and k alone | the same from the retry on |
-| the `COMMIT` answered with an error | a..b stored again; the block whose own `COMMIT` fails halts | the same |
 | the `COMMIT`'s answer lost | held; the next run's cursor read decides: committed, or stored again | as a held height |
 | `on-after-db-write` of block j | halt at j, committed; the blocks above j get no such callbacks | the cursor is b, not j |
 | the worker traps in a block's writes | the blocks stored again fail at a | the cursor is a − 1, not k − 1 |
 | a crash | the database at a − 1 | as before, from a − 1 |
 
+**A `COMMIT` answered with an error is the chunk's last block's.** Each block below the last ended with a read that
+found nothing for a `COMMIT` to act on, so the error can only come from what the last block left (a constraint it
+made and violated, a cursor `WITH HOLD` whose query fails) or from the server itself. Either way it is the failure of
+the block whose `COMMIT` it is, which is what the mode off reports: the error is kept for that block, the blocks
+below it are stored again, and the block halts with the error, not called again. If one of the blocks stored again
+then fails at its own `COMMIT` (a server that refuses every `COMMIT`), that failure is its own, the loop halts there,
+and the kept one is dropped and logged.
+
 No chunk forms at or below the highest height of a chunk that did not commit until the cursor reaches it, so a
 failed chunk is never formed again and every remake goes through the path of a block alone. A failure of a block
-stored again is its own. A failure kept for a block above it (of that block's writes, or of its take) stays kept while
-the blocks below are retried, and is dropped and logged only when one of them stops processing.
+stored again is its own.
 
 ## 8. Where a chunk ends early
 
-Before each block k > a, the loop's signal or a pause hold ends the chunk at k − 1 with its `COMMIT`, and so does a
-block's end that the transaction cannot go on from (§4a). A callback of k's `on-compute` that calls
-`blockBeforeCommitted()` before its first statement ends it there too: the transaction commits, the call resolves, the
-rest of k's `on-compute` runs with no transaction open, then the callbacks after the commit of a..k − 1, then k's
-writes open the next transaction. No callback runs twice. Every call for one block gets the same commit: a second call
-made while the commit is pending resolves with it, not before. The function is the callback's: kept and called after
-the callback returned, or at another point, it throws and ends no chunk. `core-ledger-state` calls it when nothing is
+Before each block k > a, the loop's signal or a pause hold ends the chunk at k − 1 with its `COMMIT`, and so does the
+read at k − 1's end when it finds something (§4a). A callback of k's `on-compute` that calls `blockBeforeCommitted()`
+ends it there too: the view of the transaction the callback read through, if it had opened one, ends; the transaction
+commits; the call resolves; the rest of k's `on-compute` runs with no transaction open, the callback's later
+statements with a read of their own at k − 1, which now sees that block committed; then the callbacks after the
+commit of a..k − 1, then k's writes open the next transaction. No callback runs twice. A call after a read is allowed,
+in both modes: with the mode off, and at a chunk's first block, the block before is committed already and the call
+resolves at once. Every call for one block gets the same commit: a second call made while the commit is pending
+resolves with it, not before. The function is the callback's: kept and called after the callback returned, or at
+another point, it throws and ends no chunk. `core-ledger-state` calls it when nothing is
 kept of the block before or its ledger differs: the conversion reads the whole state at h − 1 from the node tables and
 may take minutes, so it reads committed rows and no transaction holding other blocks stays open.
 
@@ -208,8 +266,8 @@ may take minutes, so it reads committed rows and no transaction holding other bl
 A block's trace record is held when its writes end, marked `chunk: [a, b]` at the `COMMIT` (with more than one block),
 and written in height order with the block's own work after it, so `sh` at every line is what the mode off gives.
 `beginMs` of the first line holds every block's take, and its `prepareMs` the wait for the source's answers; `txMs`
-is each block's part, the first's with the `BEGIN`, the last one's with the `COMMIT`, and a block's end is counted in
-its own line (`sqlN`, `txMs`). A rolled-back chunk leaves no line. A block's slow window is told `ended` at the
+is each block's part, the first's with the `BEGIN`, the last one's with the `COMMIT`, and the read at a block's end is
+counted in its own line (`sqlN`, `txMs`). A rolled-back chunk leaves no line. A block's slow window is told `ended` at the
 `COMMIT` or the rollback. `/status`'s cursor moves at the `COMMIT`.
 
 ## 10. Equality, and where the modes differ
@@ -217,15 +275,16 @@ its own line (`sqlN`, `txMs`). A rolled-back chunk leaves no line. A block's slo
 At every height the database holds, row for row in every table of every schema, what the mode off holds, with the
 same digests and checkpoints, for the same history of worker restarts, provided no callback's writes depend on what
 §4a lists as lasting to the chunk's `COMMIT` (a transaction-scoped setting an earlier block made, `now()`, the
-transaction id, a sequence's value). The module guide tells authors so.
+transaction id, a sequence's value, a large object's descriptor). The module guide tells authors so.
 
 - Every block runs the same callbacks, with the same handles at the same heights, but `on-after-db-write`, which
   changes nothing stored.
 - A read through a view of the open transaction at k − 1 sees exactly the rows a read of the committed height k − 1
-  sees with the mode off: nothing else writes between, the view cannot write, and the deferred triggers of k − 1
-  fired at its end.
-- A block that the mode off refuses at its `COMMIT` is refused at its end with the same error, and a block that
-  breaks and repairs a deferred constraint itself is stored at every place in a chunk.
+  sees with the mode off: nothing else writes between, the view cannot write, and k − 1 left nothing for a `COMMIT`
+  to do (its end read found nothing, or the chunk would have committed there).
+- A block that leaves something for its transaction's end is committed at that block, in a database that had nothing
+  of the kind before; in any other database every block is committed alone. So a block that the mode off refuses at
+  its `COMMIT` is refused by a `COMMIT` at the same block, with the same error.
 - `continues` is true only where what a module kept is what the database holds.
 - Every `on-settle` run is `{ k, k }`, and `core-digest` takes a block's captured changes at its settle, deleting the
   shadow rows it reads, so each height's digest is its own.
@@ -233,32 +292,42 @@ transaction id, a sequence's value). The module guide tells authors so.
   off restarted at a − 1 matches. A worker restart can change the form a later node is stored in, in either mode, so a
   rolled-back chunk is compared with such a run, and every other path with the plain run.
 
-Where the modes differ:
+Where the modes differ, each in one line:
 1. A failure of `on-after-db-write` of block j leaves the cursor at the chunk's last block, not at j, and the blocks
    above j get no such callbacks.
 2. A ledger worker that traps in a block's writes leaves the cursor at a − 1, not at k − 1.
-3. A finality conflict the source records while a chunk is open stops the loop at its next call to the source, once
-   the chunk committed: at the height above the chunk, at most `blocks` heights later than the mode off, which halts at
-   the next height.
-4. What lasts to the chunk's `COMMIT` (§4a): transaction-scoped settings, locks other sessions wait for, `NOTIFY`,
-   `now()` and the transaction id; and a sequence a rolled-back chunk advanced.
-5. A stop met while the loop waits for a chunk's later blocks or their answers stores the chunk's first block, whose
-   `on-compute` has run, before the loop returns; the mode off stores nothing of the height it waits for.
+3. A finality conflict the source records while a chunk is open stops the loop at the height above the chunk, at most
+   `blocks` heights later than the mode off.
+4. A setting made for the transaction (`SET LOCAL`, `set_config(…, true)`) lasts to the chunk's `COMMIT`.
+5. Transaction-level advisory locks, row locks and table locks are held to the chunk's `COMMIT`.
+6. `NOTIFY` is delivered, and a `LISTEN` starts, at the chunk's `COMMIT`.
+7. A large object's descriptor stays valid until the chunk's `COMMIT`.
+8. `now()` and the transaction id are the chunk's, the same for all its blocks.
+9. A chunk that rolls back has advanced a sequence by the values of all its blocks.
+10. A stop met while the loop takes a chunk's blocks or waits for their answers stores the chunk's first block before
+    the loop returns; the mode off stores nothing of the height it waits for.
+11. While a node does not answer for a chunk's later blocks and neither a stop nor a pause is asked, the chunk's
+    first block is computed and not yet stored; the mode off has stored it (§2).
+12. A database with a deferrable constraint, a constraint trigger, a temporary table or an open cursor gets one read
+    more per block than the mode off where a chunk would otherwise form, and a transaction of that read before a
+    run's first chunk would form.
 
 The tests check the equality at every height inside the transaction, after each block's cursor check, and at every
 committed height, on both backends: `test/backbone/fast-sync-equality.test.ts`, `fast-sync-failures.test.ts`,
 `fast-sync-feature-module.test.ts`, `fast-sync-worker.test.ts` and, on the recorded devnet,
-`fast-sync-tape-devnet.test.ts`. The block's end: `test/db/block-end.test.ts`,
-`test/runner/loop-chunk-block-end.test.ts`. A kept take failure: `test/runner/loop-chunk-preparation.test.ts`. The
-source's answers and a stop: `test/runner/loop-chunk-source-answers.test.ts`, `loop-stop-chunk.test.ts`. A failure at a
+`fast-sync-tape-devnet.test.ts`. The read at a block's end: `test/db/block-end.test.ts`,
+`test/runner/loop-chunk-block-end.test.ts`. Kept failures: `test/runner/loop-chunk-preparation.test.ts`,
+`loop-chunk-kept-failures.test.ts`. The source's answers, a stop and a pause:
+`test/runner/loop-chunk-source-answers.test.ts`, `loop-stop-chunk.test.ts`. A failure at a
 chunk's first and last block: `test/runner/loop-chunk-positions.test.ts`. The third difference:
 `test/runner/loop-chunk-finality.test.ts`.
 
 ## 11. Measured
 
 Preprod, four ranges of 1,500 heights (A to D), PostgreSQL 18, the block trace on, every row of every table hashed;
-the build before the block's end and the source's answers were added (the block's end adds one statement per block,
-§4a). Chunks of 100 and of 1,000 against the mode off on the same build.
+the build before the read at a block's end and the source's answers were added. Chunks of 100 and of 1,000 against
+the mode off on the same build. Not measured again since: the block's end is now one read per block of a chunk (§4a,
+about 0.17 ms), and one transaction of that read per run, which these figures do not hold.
 
 - **Data.** All 30 tables were equal, row for row, between chunks of 100 and the mode off (9 pairs of runs) and
   between chunks of 1,000 and the mode off (2 pairs), with the same chain of step outputs at every height. No run
