@@ -1,5 +1,6 @@
 import { coreBlockCommit } from "../../src/backbone/core-block-commit/core-block-commit.js";
 import { readOnlyDatabase } from "../../src/db/read-only.js";
+import { type Statement, statementText } from "../../src/db/repeated-statements.js";
 import type { BlockWriteHandle, Database, ReadHandle, Transaction } from "../../src/db/api.js";
 import type { BlockContext, BlockRun, ModuleDeclaration, ProcessContext } from "../../src/modules/declaration.js";
 import type { BlockSource, QueueRunner } from "../../src/runner/block-source.js";
@@ -133,8 +134,8 @@ function parametersText(params: readonly unknown[] | undefined): string {
  * keeps its identity, which the read view and the block's end look up).
  */
 export function recordingStatements(db: Database, order: string[]): Database {
-  const note = (handle: string, sql: string, params: readonly unknown[] | undefined): void => {
-    order.push(`sql ${handle} ${sql.replace(/\s+/g, " ").trim()} ${parametersText(params)}`);
+  const note = (handle: string, sql: Statement, params: readonly unknown[] | undefined): void => {
+    order.push(`sql ${handle} ${statementText(sql).replace(/\s+/g, " ").trim()} ${parametersText(params)}`);
   };
   return {
     read: (body, options) =>
