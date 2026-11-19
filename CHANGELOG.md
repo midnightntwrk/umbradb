@@ -300,14 +300,17 @@ number changes it, and a custom ledger table that covers 2,001,000 only halts on
   the one transaction, and every block's `on-after-db-write` after the `COMMIT`, in height order, its read at the
   chunk's last height. Nothing in an open chunk waits for the node: its blocks, and the ledger state roots its later
   blocks compare (`BlockSource.answered`), are fetched before its `BEGIN`, so a stop or a pause ends an open chunk
-  before its next block. Between two blocks of a chunk the engine checks the deferred constraints and fires the
-  deferred triggers, as each block's own `COMMIT` does, and a chunk ends at a block that leaves what only a `COMMIT`
-  ends (a `DEFERRABLE INITIALLY IMMEDIATE` constraint, a temporary table, an open cursor). A block's context gains
-  `blockBeforeCommitted()`, which `core-ledger-state` calls before a conversion; `continues` is also true for a block
-  whose block before was written in the open transaction. A failure is handled as with the mode off at the same block:
-  a block whose fetch or parse failed while it was taken for a chunk fails when processing reaches it; blocks that
-  rolled back are stored again one per transaction, and the ledger worker's thread is restarted when a transaction it
-  was led past rolls back. What is stored at every height is what the mode off stores, for the same history of worker
+  before its next block, and one asked while those are fetched ends the wait and stores the chunk's first block alone.
+  A chunk holds only blocks for which a `COMMIT` has nothing to do but make their writes durable: one read at each
+  block's end says whether the database has a deferrable constraint, a constraint trigger, a temporary table of the
+  writer's session or an open cursor, and while it finds one every block is stored in a transaction of its own, so a
+  deferred check, a deferred trigger and a cursor `WITH HOLD` are handled by that block's own `COMMIT`. A block's
+  context gains `blockBeforeCommitted()`, which `core-ledger-state` calls before a conversion; `continues` is also
+  true for a block whose block before was written in the open transaction. A failure is handled as with the mode off
+  at the same block: a block that failed while the blocks below it were not yet committed (its fetch or parse while
+  it was taken for a chunk, its computation, its writes, the chunk's `COMMIT` for its last block) fails when
+  processing reaches it, its callbacks not called a second time; blocks that rolled back are stored again one per
+  transaction, and the ledger worker's thread is restarted when a transaction it was led past rolls back. What is stored at every height is what the mode off stores, for the same history of worker
   restarts, as long as no module's writes depend on what belongs to the transaction rather than to the block
   (`SET LOCAL`, `now()`, a sequence's value). The block trace gains `chunk`. A private process, and a public one with
   `lockstepInstances`, store one block per transaction. The operator guide describes the setting and what an operator
