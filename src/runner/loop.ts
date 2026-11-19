@@ -198,7 +198,8 @@
  *
  * **A failure inside a chunk** is handled as a height alone handles it at the same block k; what was written below k
  * is committed where the transaction allows, and stored again one block per transaction where it does not:
- * - taking block j fails: the chunk is a..j − 1, and j fails when the loop reaches it, as a height alone;
+ * - taking block j fails: the chunk is a..j − 1, and j fails when the loop reaches it, as a height alone, its callbacks
+ *   not called again;
  * - k > a fails before its first write (its `on-compute`, a misuse found there, the worker failing its apply): the
  *   chunk commits at k − 1, the follower is told `committed` a..k − 1 and `rolledBack` k, the points after the commit
  *   of a..k − 1 run, then k's failure stops the loop (a retryable one holds k, as a held height);
@@ -218,8 +219,9 @@
  *   the blocks above j get no such callbacks.
  * A block stored again runs from `on-compute` with its items as `on-parse` left them, nothing fetched or parsed again,
  * and its `continues` is false. No chunk forms again at or below the highest height of a chunk that did not commit,
- * until the cursor reaches it, so a failed chunk is never formed again. A failure of a block stored again is its own;
- * a failure kept for a block above it is dropped and logged when that one stops processing ({@link LoopObserver.dropped}).
+ * until the cursor reaches it, so a failed chunk is never formed again. A failure of a block stored again is its own.
+ * A failure kept for a block above (of its writes, or of its take) stays kept while the blocks below it are retried,
+ * and is dropped and logged only when one of them stops processing ({@link LoopObserver.dropped}).
  */
 
 import { BLOCKS_TABLE } from "../backbone/core-block-commit/sql.js";
@@ -332,8 +334,8 @@ export interface LoopObserver {
   /** A window became slow, or a slow window closed (see the module comment). */
   slow?(event: SlowBlockEvent): void;
   /**
-   * A failure kept for a block above blocks stored again after a chunk's rollback, dropped because one of those blocks
-   * failed first and stops processing (see the module comment): the process logs it.
+   * A failure kept for a block (of its writes in a chunk that rolled back, or of its take for a chunk), dropped because
+   * a block below it failed first and stops processing (see the module comment): the process logs it.
    */
   dropped?(failure: HeightFailure): void;
 }
@@ -620,7 +622,11 @@ interface Taken {
   readonly items: BlockItems;
 }
 
-/** A take that failed, kept until the loop reaches its height: the error, and the block to tell rolled back. */
+/**
+ * A take that failed, kept until the loop reaches its height (see the module comment): the error, and the block to
+ * tell rolled back. It is the height's own: a retry or a new run of the blocks below it keeps it, no chunk is planned
+ * across its height, and the source is not asked for that height again while it is kept.
+ */
 interface TakeFailure {
   readonly height: bigint;
   readonly error: unknown;
@@ -753,6 +759,12 @@ function isRetryable(failure: HeightFailure): boolean {
   return cause instanceof UmbraError && cause.retryable;
 }
 
+/** The failure of `height` for `error`: a callback's failure with its point and module. */
+function heightFailure(height: bigint, error: unknown, committed: boolean): HeightFailure {
+  if (error instanceof CallbackFailure) return new HeightFailure(height, error, { point: error.point, module: error.module, committed });
+  return new HeightFailure(height, error, { committed });
+}
+
 /** How far a height's run got before `on-compute`: what holding it needs (see {@link HeldHeight}). */
 interface Progress {
   /** Its items when it reached `on-start-height`: as `on-fetch` and `on-parse` left them. */
@@ -799,8 +811,8 @@ export class FinalizedLoop {
   #chunkOpen: OpenChunk | undefined;
   /** The blocks taken for a chunk and not begun yet, by height. */
   readonly #taken = new Map<bigint, Taken>();
-  /** A take that failed, until the loop reaches its height. */
-  #takeFailure: TakeFailure | undefined;
+  /** The takes that failed, by height, each until the loop reaches its height or a block below it stops processing. */
+  readonly #takeFailures = new Map<bigint, TakeFailure>();
   /** The blocks taken and not committed yet, by height: what the source's finality check is answered from. */
   readonly #uncommitted = new Map<bigint, BlockRef>();
   /** The highest height of a chunk that did not commit, until the cursor reaches it: no chunk forms at or below it. */
@@ -900,9 +912,21 @@ export class FinalizedLoop {
     const unwatch = this.input.misuses?.watch((error, module) => this.#misused({ error, module, point: this.#point }));
     try {
       return await this.#run();
+    } catch (error) {
+      // Processing stops at a block below every take still kept, unless the failure is retried: each is dropped, and
+      // logged.
+      if (error instanceof HeightFailure && !isRetryable(error)) this.#dropTakeFailures();
+      throw error;
     } finally {
       unwatch?.();
     }
+  }
+
+  /** Drops the take failures kept, the observer told of each ({@link LoopObserver.dropped}). */
+  #dropTakeFailures(): void {
+    const kept = [...this.#takeFailures.values()];
+    this.#takeFailures.clear();
+    for (const { height, error } of kept) this.input.observer?.dropped?.(heightFailure(height, error, false));
   }
 
   /** {@link run}, while the process contexts' refusals are reported to the loop, and the source has its queue runner. */
@@ -923,11 +947,11 @@ export class FinalizedLoop {
     const heldChunk = this.#heldChunk;
     this.#heldChunk = undefined;
     this.#resume = undefined;
-    // A new run: no block before continues into it, whatever an earlier run committed, and nothing taken is kept.
+    // A new run: no block before continues into it, whatever an earlier run committed, and no block taken is kept. A
+    // take that failed stays kept for its height: the blocks below it are processed first.
     this.#lastStored = null;
     this.#continuing = new WeakMap();
     this.#taken.clear();
-    this.#takeFailure = undefined;
     this.#uncommitted.clear();
     for (const run of heldChunk === undefined ? [] : [...heldChunk.runs, ...(heldChunk.carried === undefined ? [] : [heldChunk.carried])]) {
       this.#uncommitted.set(run.height, run.block);
@@ -1434,14 +1458,18 @@ export class FinalizedLoop {
   /**
    * The last height of the chunk that starts at `first` under the head `head` read for this pass (`./fast-sync.ts`), or
    * null to process `first` alone: the mode is off, the loop waits for private instances at every block, `first` is a
-   * held height processed again, or a take of `first` failed.
+   * held height processed again, or a take of `first` failed. A height whose take failed ends the chunk at the height
+   * below it: it is not taken again, and its failure is thrown when the loop reaches it, alone.
    */
   #chunkEndAt(first: bigint, head: bigint): bigint | null {
     const { fastSync, lockstep } = this.input;
     if (fastSync === undefined || lockstep !== undefined) return null;
-    if (this.#resume?.run.height === first || this.#takeFailure?.height === first) return null;
+    if (this.#resume?.run.height === first) return null;
     const limits = { head, rangeEnd: this.#rangeEndAt(first), last: this.lastHeight(), alone: this.aloneUpTo() };
-    return chunkEnd(fastSync, first, limits);
+    let end = chunkEnd(fastSync, first, limits);
+    if (end === null) return null;
+    for (const failed of this.#takeFailures.keys()) if (failed >= first && failed <= end) end = failed - 1n;
+    return end > first ? end : null;
   }
 
   /**
@@ -1526,7 +1554,7 @@ export class FinalizedLoop {
     } catch (error) {
       // Told rolled back when the loop reaches it: the block whose callbacks failed, in the queue or here.
       const told = source.prepared === undefined ? block : this.#failedPreparations.get(height);
-      this.#takeFailure = Object.freeze({ height, error, block: told });
+      this.#takeFailures.set(height, Object.freeze({ height, error, block: told }));
       return false;
     } finally {
       for (const at of this.#failedPreparations.keys()) if (at <= height) this.#failedPreparations.delete(at);
@@ -2037,9 +2065,9 @@ export class FinalizedLoop {
    * prepares heights. A take of the height that failed is thrown here, the source not asked again.
    */
   async #begin(height: bigint, previous: BlockRef | null): Promise<HeightRun> {
-    const failed = this.#takeFailure;
-    if (failed !== undefined && failed.height === height) {
-      this.#takeFailure = undefined;
+    const failed = this.#takeFailures.get(height);
+    if (failed !== undefined) {
+      this.#takeFailures.delete(height);
       if (failed.block !== undefined) this.#tell("rolledBack", failed.block);
       throw failed.error;
     }
@@ -2459,10 +2487,7 @@ export class FinalizedLoop {
     if (misuse !== undefined) {
       return new HeightFailure(height, misuse.error, { point: misuse.point, module: misuse.module, committed });
     }
-    if (error instanceof CallbackFailure) {
-      return new HeightFailure(height, error, { point: error.point, module: error.module, committed });
-    }
-    return new HeightFailure(height, error, { committed });
+    return heightFailure(height, error, committed);
   }
 }
 
