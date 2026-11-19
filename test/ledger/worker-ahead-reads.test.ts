@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { CommittedHeight, Database } from "../../src/db/api.js";
+import { statementText } from "../../src/db/repeated-statements.js";
 import { spareRead } from "../../src/db/spare-read.js";
 import type { StoredNode } from "../../src/ledger/types.js";
 import type { AppliedState } from "../../src/ledger/worker/engine.js";
@@ -140,8 +141,8 @@ describe("the reads that answer the node requests of a block applied ahead", () 
       async query(sql, params) {
         asked += 1;
         if (asked === 1) await held;
-        if (closed) afterClose.push(sql);
-        return inner.query(sql, params);
+        if (closed) afterClose.push(statementText(sql));
+        return inner.query(statementText(sql), params);
       },
     };
     const takeBack = host.lend(lent);

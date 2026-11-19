@@ -696,13 +696,14 @@ describe("the next block applied ahead: when h's settle sends it, and each event
     const base = reading([{ ms: 1n }]);
     return {
       ...base,
-      async query(sql: string, params: unknown[] = []) {
+      async query(statement: Statement, params: unknown[] = []) {
+        const sql = statementText(statement);
         if (sql.startsWith("SELECT node_key FROM core_ledger_state.unreferenced")) return [{ node_key: hash(0x77) }];
         if (sql.includes("AS stored")) {
           return (params[0] as Uint8Array[]).filter((key) => key[0] === 0x77).map(() => ({ node_key: hash(0x77), stored: true, refs: 0, roots: 0 }));
         }
         if (sql.startsWith("SELECT node_key, children FROM core_ledger_state.nodes")) return [{ node_key: hash(0x77), children: Uint8Array.of(0) }];
-        return base.query(sql, params);
+        return base.query(statement, params);
       },
       async execute(_sql: string, params: unknown[] = []) {
         return Array.isArray(params[0]) ? params[0].length : 1;
