@@ -25,9 +25,9 @@ adheres to [Semantic Versioning](https://semver.org/).
 - MIP-0018 token metadata as two public modules: `token-metadata` (`TOKEN_METADATA`) creates, fills and guards its
   tables. Added to a database that already ran, it starts when the stored contract logs hold no MIP-0018 event below
   its start, and is refused otherwise with `TokenMetadataStartAfterDatabase` as the cause;
-  `token-metadata-api` (`TOKEN_METADATA_API`) serves them on one route, `getTokens` (`POST
-  /token-metadata-api/v1/tokens`, `docs/token-metadata-api.md`), whose input selects tokens by colors, contract,
-  domain separator and kind. Its bytes are `0x` lowercase hex and its heights and `UInt` values digits in a string.
+  `token-metadata-api` (`TOKEN_METADATA_API`) serves them on one route, `getTokens` (`GET
+  /token-metadata-api/v1/tokens`, `docs/token-metadata-api.md`), whose query parameters select tokens by colors,
+  contract, domain separator and kind. Its bytes are `0x` lowercase hex and its heights and `UInt` values digits in a string.
   `TokenMetadataRevisionGap` is the cause of a refused gap between its revisions.
 - `contractLogsItemOf` and `unresolvedLogSitesOf`, with the types `ContractLog` and `UnresolvedLogSite`: a module's
   reads of the `contract-logs` item. The exported surface is 84 names, 40 values and 44 types.

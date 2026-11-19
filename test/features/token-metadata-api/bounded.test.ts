@@ -3,7 +3,7 @@ import { commonRecords } from "../../../src/features/token-metadata/codec/index.
 import { tokenColor } from "../../../src/features/token-metadata/color.js";
 import type { ReadHandle } from "../../../src/db/api.js";
 import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../../runner/process-backends.js";
-import { type ApiHandler, blockLogs, contract, domain, eventData, readStopped, runTo, tokensHandler } from "../token-metadata/harness.js";
+import { type ApiHandler, blockLogs, contract, domain, eventData, readStopped, runTo, tokensHandler, tokensParams } from "../token-metadata/harness.js";
 
 /**
  * Bounded cost of the API, on PostgreSQL 18 and PGlite. Large cardinalities are written straight into the
@@ -92,7 +92,7 @@ describe.each(PROCESS_BACKENDS)("bounded cost on $name", (backend: ProcessBacken
           return out;
         },
       };
-      const got = await handler({ params: {}, body }, counting);
+      const got = await handler({ params: tokensParams(body as object), body: undefined }, counting);
       const text = got.body as string;
       return { status: got.status, size: text.length, json: JSON.parse(text), rows, statements };
     });

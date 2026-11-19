@@ -2,7 +2,7 @@
  * The `token-metadata-api` module: `token-metadata`'s tokens over HTTP. A public module, not one of the core's: a
  * configuration enables it with `TOKEN_METADATA_API.entry(...)`, beside `TOKEN_METADATA`'s entry.
  *
- * - **One route**, under the module's namespace: `POST /token-metadata-api/v1/tokens`, whose JSON body selects tokens
+ * - **One route**, under the module's namespace: `GET /token-metadata-api/v1/tokens`, whose query parameters select tokens
  *   by colors, by contract, by contract and domain separator, or by all three with the kind, and whose answer gives
  *   each token with every defined field. It is the route `getTokens`, registered with the core, which checks
  *   its input and output against their zod schemas; the documentation is `docs/token-metadata-api.md`.

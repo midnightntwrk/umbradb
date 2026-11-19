@@ -1059,7 +1059,7 @@ UmbraDB's package carries two public modules that are not core modules, for the 
 
 - `token-metadata` reads the `contract-logs` item (§9) and keeps each token's current metadata fields in its tables,
   which it provides as one `table` item (§13), `token-metadata-state` (`src/features/token-metadata/`).
-- `token-metadata-api` requires `token-metadata-state` and serves its tables on one route, `POST /token-metadata-api/v1/tokens`
+- `token-metadata-api` requires `token-metadata-state` and serves its tables on one route, `GET /token-metadata-api/v1/tokens`
   ([docs/token-metadata-api.md](token-metadata-api.md)), the route `getTokens`, registered with the core (§7), with zod schemas of its input and output (`src/features/token-metadata-api/`). It holds no state:
   no tables, no migrations, only `on-start-api`.
 

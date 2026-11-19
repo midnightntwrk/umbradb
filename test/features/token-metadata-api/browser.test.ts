@@ -9,7 +9,7 @@ import { FIRST_CONTRACT_LOG_HEIGHTS, TOKEN_METADATA } from "../../../src/feature
 import type { ModuleDeclaration } from "../../../src/modules/declaration.js";
 import { TapeNode, type TapeRecord } from "../../../tools/tape/index.js";
 import { FAST_CORE } from "../../backbone/contract-data-checks.js";
-import { genesisRecords, TOKENS_PATH } from "../token-metadata/harness.js";
+import { genesisRecords, tokensUrl } from "../token-metadata/harness.js";
 import { committed, ingest } from "../../backbone/ingest-harness.js";
 import { BROWSER_TEST_TIMEOUT_MS, call, eventWhen, pageUrl, statusWhen, tabReport } from "../../browser/browser-harness.js";
 import { type ChromeBrowser, chromeVersion, launchChrome } from "../../browser/chrome.js";
@@ -81,7 +81,7 @@ const PRESENT = findTape(TAPE).found;
       });
       const inChrome: { status: number; headers: Record<string, string>; body: string }[] = [];
       for (const body of BODIES) {
-        inChrome.push((await call<{ status: number; headers: Record<string, string>; body: string }>(tab, "core", "api", { method: "POST", path: TOKENS_PATH, body: JSON.stringify(body) }))!);
+        inChrome.push((await call<{ status: number; headers: Record<string, string>; body: string }>(tab, "core", "api", { method: "GET", path: tokensUrl(body) }))!);
       }
       // The page's database starts at the first contract-log block, not the start it asked for.
       const pageStart = await call<{ rows: { s: number }[] }>(tab, "core", "read", "SELECT start_height::int AS s FROM core_chain.identity");
@@ -106,7 +106,7 @@ const PRESENT = findTape(TAPE).found;
           expect(await db.query("SELECT start_height::int AS s FROM core_chain.identity")).toEqual([{ s: S }]);
           for (const [i, request] of BODIES.entries()) {
             const at = JSON.stringify(request);
-            const response = await fetch(`${origin}${TOKENS_PATH}`, { method: "POST", headers: { "content-type": "application/json" }, body: at });
+            const response = await fetch(`${origin}${tokensUrl(request)}`);
             const body = await response.text();
             expect([at, inChrome[i]!.status, inChrome[i]!.body]).toEqual([at, response.status, body]);
             expect([at, response.status, JSON.parse(body).items]).toEqual([at, 200, []]);

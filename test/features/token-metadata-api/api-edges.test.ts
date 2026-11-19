@@ -5,7 +5,7 @@ import { servedIdentities } from "../token-metadata/served-state.js";
 import { commonRecords } from "../../../src/features/token-metadata/codec/index.js";
 import type { ReadHandle } from "../../../src/db/api.js";
 import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../../runner/process-backends.js";
-import { type ApiHandler, blockLogs, contract, domain, eventData, readStopped, runTo, tokensHandler } from "../token-metadata/harness.js";
+import { type ApiHandler, blockLogs, contract, domain, eventData, readStopped, runTo, tokensHandler, tokensParams } from "../token-metadata/harness.js";
 
 /**
  * The API's edges no chain of the harness reaches, on PostgreSQL 18 and PGlite: rows written straight into a stopped
@@ -30,7 +30,7 @@ describe.each(PROCESS_BACKENDS)("the API's edges on $name", (backend: ProcessBac
   /** Answers `body` through the handler at the stopped database's cursor. */
   const tokens = (body: unknown): Promise<{ status: number; json: Json }> =>
     readStopped(db, async (read) => {
-      const got = await handler({ params: {}, body }, read);
+      const got = await handler({ params: tokensParams(body as object), body: undefined }, read);
       return { status: got.status, json: JSON.parse(got.body as string) };
     });
 
@@ -103,7 +103,7 @@ describe.each(PROCESS_BACKENDS)("the API's edges on $name", (backend: ProcessBac
         throw new Error("the database went away");
       },
     };
-    await expect(handler({ params: {}, body: { contract: hex(A) } }, failing)).rejects.toThrow("the database went away");
+    await expect(handler({ params: { contract: hex(A) }, body: undefined }, failing)).rejects.toThrow("the database went away");
   });
 });
 

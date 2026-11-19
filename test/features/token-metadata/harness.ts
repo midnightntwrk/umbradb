@@ -244,6 +244,19 @@ export async function post(origin: string, path: string, body: unknown): Promise
 /** The tokens route of `token-metadata-api`, where HTTP serves it. */
 export const TOKENS_PATH = "/token-metadata-api/v1/tokens";
 
+/** A selector as the tokens route's parameters: each value as text, a list of colors joined by commas. */
+export const tokensParams = (selector: object): Record<string, string> =>
+  Object.fromEntries(Object.entries(selector).map(([key, value]) => [key, Array.isArray(value) ? value.join(",") : String(value)]));
+
+/** The tokens route's path and query for `selector`. */
+export const tokensUrl = (selector: object): string => {
+  const query = new URLSearchParams(tokensParams(selector)).toString();
+  return query === "" ? TOKENS_PATH : `${TOKENS_PATH}?${query}`;
+};
+
+/** GETs the tokens `selector` names from a listener at `origin`. */
+export const getTokens = (origin: string, selector: object): Promise<Got> => get(origin, tokensUrl(selector));
+
 /** An HTTP handler of the module API. */
 export type ApiHandler = Parameters<ApiRegistry["http"]>[2];
 

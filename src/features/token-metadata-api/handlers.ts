@@ -1,5 +1,5 @@
 /**
- * The route `getTokens` (`POST /token-metadata-api/v1/tokens`): the tokens an input selects (`./schemas.ts`,
+ * The route `getTokens` (`GET /token-metadata-api/v1/tokens`): the tokens an input selects (`./schemas.ts`,
  * {@link TokensRequest}), each with its fields (at most the six keys MIP-0018 defines), its common fields and its
  * symbol group. Bytes leave as `0x` lowercase hex ({@link hex0x}) and wide integers as `bigint`s, which the
  * output schema writes as digits in a string.

@@ -4,7 +4,7 @@ import { commonRecords } from "../../../src/features/token-metadata/codec/index.
 import { TOKEN_METADATA } from "../../../src/features/token-metadata/token-metadata.js";
 import type { ModuleDeclaration } from "../../../src/modules/declaration.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../../runner/process-backends.js";
-import { blockLogs, contract, domain, eventData, post, runTo, serve, startRun, TOKENS_PATH } from "../token-metadata/harness.js";
+import { blockLogs, contract, domain, eventData, getTokens, runTo, serve, startRun } from "../token-metadata/harness.js";
 
 /**
  * The two modules, through the real process on PostgreSQL 18 and PGlite: `token-metadata` creates and fills the
@@ -46,7 +46,7 @@ describe.each(PROCESS_BACKENDS)("token-metadata and token-metadata-api on $name"
 
   it("fills the tables with the indexer alone, which serves no tokens route", async () => {
     const db = await backend.database();
-    const answer = await serve(db, { start: S, head: HEAD, logs, modules: [INDEXER] }, (origin) => post(origin, TOKENS_PATH, { contract: hex(A) }));
+    const answer = await serve(db, { start: S, head: HEAD, logs, modules: [INDEXER] }, (origin) => getTokens(origin, { contract: hex(A) }));
     expect(answer.status).toBe(404);
     expect(answer.json).toMatchObject({ error: { code: "not-found" } });
     expect(await db.query("SELECT count(*)::int AS n FROM token_metadata.tokens")).toEqual([{ n: 1 }]);
@@ -54,7 +54,7 @@ describe.each(PROCESS_BACKENDS)("token-metadata and token-metadata-api on $name"
   }, 240_000);
 
   it("answers the same when the API is added, above the cursor, to a database whose indexer already ran", async () => {
-    const answersOf = (origin: string) => Promise.all(BODIES.map((body) => post(origin, TOKENS_PATH, body)));
+    const answersOf = (origin: string) => Promise.all(BODIES.map((body) => getTokens(origin, body)));
     const both = await backend.database();
     const fromS = await serve(both, { start: S, head: HEAD + 2, logs, modules: [INDEXER, API] }, answersOf);
     const later = await backend.database();

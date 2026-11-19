@@ -3,7 +3,7 @@
 The JSON API of the `token-metadata-api` module over `token-metadata`'s tables: MIP-0018 token metadata, one route.
 
 - **Route:** `token-metadata-api.getTokens`, a route registered with the core (module guide §7), which serves it over
-  HTTP at `POST /token-metadata-api/v1/tokens`, under the module's own namespace, on the module API (`listen.api`, or
+  HTTP at `GET /token-metadata-api/v1/tokens`, under the module's own namespace, on the module API (`listen.api`, or
   the page's worker in the browser build). Implementation: `src/features/token-metadata-api/`.
 - **Schemas:** the input and the output are zod schemas (`schemas.ts`), which the core keeps as JSON Schema. Every
   input is checked against its schema before the handler runs, and every output is written with its schema before it
@@ -18,17 +18,26 @@ The JSON API of the `token-metadata-api` module over `token-metadata`'s tables: 
 
 ## Request
 
-A JSON body with exactly one of four selectors. Every 32-byte value is `0x` and 64 lowercase hex digits.
+A `GET` whose query parameters are exactly one of four selectors. Every 32-byte value is `0x` and 64 lowercase hex
+digits. A request has no body.
 
-| Selector | Body | Answers |
+| Selector | Parameters | Answers |
 |---|---|---|
-| Colors | `{ "colors": [<color>, …] }`, 1 to 100 | the described kind 1 and 2 tokens of each color (one color covers a token's shielded and unshielded kinds) |
-| Contract | `{ "contract": <address>, "limit"?: 1–500, "cursor"?: <string> }` | the contract's described tokens by (domainSep, kind), 100 a page unless `limit` says |
-| Contract and domain separator | `{ "contract": <address>, "domainSep": <hex> }` | that token's described kinds |
-| One token | `{ "contract": <address>, "domainSep": <hex>, "kind": 1 \| 2 \| 3 }` | that token, or none |
+| Colors | `colors=<color>,<color>,…`: 1 to 100 colors in one parameter, separated by commas; given alone | the described kind 1 and 2 tokens of each color (one color covers a token's shielded and unshielded kinds) |
+| Contract | `contract=<address>`, and optionally `limit=<1–500>` and `cursor=<string>` | the contract's described tokens by (domainSep, kind), 100 a page unless `limit` says |
+| Contract and domain separator | `contract=<address>&domainSep=<hex>` | that token's described kinds |
+| One token | `contract=<address>&domainSep=<hex>&kind=<1, 2 or 3>` | that token, or none |
 
-Any other property, a missing one, or a value outside its rule is 400 `invalid-request`. A `cursor` is the `nextCursor` of
-an earlier answer for the same contract; any other is 400.
+```
+GET /token-metadata-api/v1/tokens?contract=0x3c9f…6a61
+GET /token-metadata-api/v1/tokens?contract=0x3c9f…6a61&domainSep=0x6d69…0000&kind=3
+GET /token-metadata-api/v1/tokens?colors=0x5ff3…,0x827c…
+```
+
+Any other parameter, a missing one, a value outside its rule, or a mix of selectors (`colors` with `contract`, `kind`
+without `domainSep`, `limit` or `cursor` with `domainSep`) is 400 `invalid-request`. A `cursor` is the `nextCursor` of
+an earlier answer for the same contract; any other is 400. A hundred colors make a query of about 6.7 kB, which a
+proxy in front of the listener must let through.
 
 ## Answer
 
@@ -81,7 +90,7 @@ set: `height` is a decimal string, and `eventIndex` is the event's position amon
 | Withdrawal | A token exists only while one of its defined fields has a value; after its last is deleted it is in no answer, exactly as if it had never been described. |
 | Lengths | `name` and `symbol` are served as their first 64 and 12 characters (grapheme clusters, UAX #29); they are stored whole. |
 | No verdict | An answer gives a token's fields and says nothing about them: a client decides what a missing or unusable field means. A rejected event of the token's contract changes nothing in the answer. |
-| Hostile text | The body is pure ASCII: every non-ASCII character and `<`, `>`, `&` are `\uXXXX` escapes; parsing gives the exact text back. |
+| Hostile text | The answer's body is pure ASCII: every non-ASCII character and `<`, `>`, `&` are `\uXXXX` escapes; parsing gives the exact text back. |
 | Bounded cost | Each answer reads through the indexer's indexes in three statements, whatever the page's size: its tokens, their fields, and one count of all the page's symbols. A symbol that two or more tokens share takes one more read, for its members. One accepted exception: the group of a served 12-character symbol reads every symbol of its contract starting with it (`apiReadTimeoutMs` bounds the request). |
 
 ## Errors
@@ -91,10 +100,9 @@ echoes the input. The core serves the route (module guide §7), so its codes are
 
 | Status | Code | When |
 |---|---|---|
-| 400 | `invalid-request` | the body matches no selector (the message names the input's path and rule), or a cursor this route did not give for that contract |
+| 400 | `invalid-request` | the parameters are no selector (the message names the input's path and rule), or a cursor this route did not give for that contract |
 | 404 | `not-found` | a path the module has no route for (the module API's answer) |
-| 405 | `method-not-allowed` | a method other than `POST` (`Allow: POST`) |
-| 413 | `request-too-large` | a body over the listener's limit |
+| 405 | `method-not-allowed` | a method other than `GET` (`Allow: GET`) |
 | 503 | `no-committed-height` | before block S commits |
 | 504 | `query-timeout` | a read past `apiReadTimeoutMs` |
 | 500 | `internal-error` | anything else, with a fixed message |

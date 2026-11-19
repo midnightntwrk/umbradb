@@ -5,10 +5,10 @@ import { commonRecords, EVENT_NAME, metadataRecord, toHex, withdrawRecords } fro
 import type { UmbraDBHandle } from "../../../src/library/start-umbradb.js";
 import { cursorReaches } from "../../library/library-fixtures.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../../runner/process-backends.js";
-import { blockLogs, contract, domain, eventData, get, type Got, miscData, post, startRun, TOKENS_PATH } from "../token-metadata/harness.js";
+import { blockLogs, contract, domain, eventData, get, getTokens, type Got, miscData, startRun, TOKENS_PATH } from "../token-metadata/harness.js";
 
 /**
- * `token-metadata-api`'s one route, `POST /token-metadata-api/v1/tokens`, on the module API listener, on PostgreSQL 18
+ * `token-metadata-api`'s one route, `GET /token-metadata-api/v1/tokens`, on the module API listener, on PostgreSQL 18
  * and PGlite, over one chain with complete and partial tokens, a contract with a rejected event, a symbol group,
  * hostile text, an image and a withdrawn token.
  * Every answer is checked against the route's own output schema.
@@ -64,9 +64,9 @@ const LOGS = new Map([
 describe.each(PROCESS_BACKENDS)("token-metadata-api on $name", (backend: ProcessBackend) => {
   let handle: UmbraDBHandle;
   let origin: string;
-  /** POSTs `body` to the tokens route; a 200 answer is checked against the answer schema. */
-  const tokens = async (body: unknown): Promise<Got> => {
-    const got = await post(origin, TOKENS_PATH, body);
+  /** GETs the tokens `selector` names (its values as the query's parameters); a 200 answer is checked against the answer schema. */
+  const tokens = async (selector: object): Promise<Got> => {
+    const got = await getTokens(origin, selector);
     if (got.status === 200) expect(TokensResponse.safeParse(got.json).success, JSON.stringify(got.json).slice(0, 300)).toBe(true);
     return got;
   };
@@ -171,53 +171,79 @@ describe.each(PROCESS_BACKENDS)("token-metadata-api on $name", (backend: Process
     expect(got.headers["x-umbra-hash"]).toMatch(/^0x[0-9a-f]{64}$/);
   }, 60_000);
 
-  it("a body that matches no selector is 400 invalid-request naming the rule, never the input", async () => {
+  it("parameters that are no selector are 400 invalid-request naming the rule, never the input", async () => {
     const SECRET = "f".repeat(63) + "x";
-    const bad: unknown[] = [
-      undefined,
+    const bad: object[] = [
       {},
-      [],
-      "tokens",
-      { colors: [] },
+      { colors: "" },
       { colors: Array.from({ length: 101 }, () => colorOf(A, D7)) },
       { colors: [SECRET] },
+      { colors: `${colorOf(A, D7)},` },
+      { colors: `${colorOf(A, D7)} ${colorOf(A, D8)}` },
       { contract: SECRET },
       { contract: hex(A).toUpperCase() },
       { contract: toHex(A) },
+      { domainSep: hex(D7) },
       { contract: hex(A), kind: 1 },
       { contract: hex(A), domainSep: hex(D7), kind: 4 },
-      { contract: hex(A), domainSep: hex(D7), kind: "1" },
+      { contract: hex(A), domainSep: hex(D7), kind: "one" },
       { contract: hex(A), limit: 0 },
       { contract: hex(A), limit: 501 },
       { contract: hex(A), limit: 1.5 },
       { contract: hex(A), cursor: "not a cursor!" },
       { contract: hex(A), cursor: Buffer.from(JSON.stringify({ c: hex(A), k: ["x", 1] })).toString("base64url") },
       { contract: hex(A), domainSep: hex(D7), limit: 1 },
+      { contract: hex(A), domainSep: hex(D7), cursor: "abc" },
       { colors: [colorOf(A, D7)], contract: hex(A) },
       { contract: hex(A), extra: 1 },
     ];
-    for (const body of bad) {
-      const got = body === undefined ? await post(origin, TOKENS_PATH, undefined) : await tokens(body);
-      expect([JSON.stringify(body)?.slice(0, 80), got.status, got.json?.error?.code]).toEqual([JSON.stringify(body)?.slice(0, 80), 400, "invalid-request"]);
+    for (const selector of bad) {
+      const got = await tokens(selector);
+      const at = JSON.stringify(selector).slice(0, 80);
+      expect([at, got.status, got.json?.error?.code]).toEqual([at, 400, "invalid-request"]);
       expect(got.text).not.toContain(SECRET);
     }
-    expect((await tokens({ colors: [SECRET] })).json.error.message).toMatch(/^input\/colors\/0: expected a 32-byte hash/);
+    const message = async (selector: object) => (await tokens(selector)).json.error.message;
+    expect(await message({ colors: [SECRET] })).toMatch(/^input\/colors: expected 32-byte hashes/);
+    expect(await message({ colors: Array.from({ length: 101 }, () => colorOf(A, D7)) })).toBe("input/colors: expected at most 100 colors");
+    expect(await message({})).toBe("input: expected colors or contract");
+    expect(await message({ colors: [colorOf(A, D7)], contract: hex(A) })).toBe("input: colors is given alone");
+    expect(await message({ contract: hex(A), kind: 1 })).toBe("input: kind is given with domainSep");
+    expect(await message({ contract: hex(A), domainSep: hex(D7), limit: 1 })).toBe("input: limit and cursor page a contract's tokens: not given with domainSep");
+    expect(await message({ contract: hex(A), extra: 1 })).toBe("input/extra: not an input of this route");
+  }, 60_000);
+
+  it("a hundred colors in one request are answered, and a JSON body is not an input", async () => {
+    const hundred = [colorOf(A, D7), ...Array.from({ length: 99 }, (_, i) => `0x${(i + 1).toString(16).padStart(64, "0")}`)];
+    const got = await tokens({ colors: hundred });
+    expect(got.status).toBe(200);
+    expect(got.json.items.length).toBeGreaterThan(0);
+    // The route is a GET: a POST is another method, and the selector is never read from a body.
+    const posted = await fetch(`${origin}${TOKENS_PATH}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ contract: hex(A) }) });
+    expect([posted.status, posted.headers.get("allow")]).toEqual([405, "GET"]);
   }, 60_000);
 
   it("the module API's own answers: an unknown path 404, another method 405 with Allow; no route outside the namespace", async () => {
     expect(await get(origin, "/v1/tokens")).toMatchObject({ status: 404, json: { error: { code: "not-found" } } });
     expect(await get(origin, "/token-metadata-api/v1/nothing")).toMatchObject({ status: 404 });
-    const got = await get(origin, TOKENS_PATH);
+    const got = await get(origin, TOKENS_PATH, "POST");
     expect(got).toMatchObject({ status: 405, json: { error: { code: "method-not-allowed" } } });
-    expect(got.headers.allow).toBe("POST");
+    expect(got.headers.allow).toBe("GET");
   }, 60_000);
 });
 
 describe("the request schema's four selectors", () => {
-  it("accepts exactly the four shapes", () => {
-    const h = `0x${"a".repeat(64)}`;
-    for (const ok of [{ colors: [h] }, { contract: h }, { contract: h, limit: 10, cursor: "abc" }, { contract: h, domainSep: h }, { contract: h, domainSep: h, kind: 3 }]) {
-      expect([ok, TokensRequest.safeParse(ok).success]).toEqual([ok, true]);
+  const h = `0x${"a".repeat(64)}`;
+  it("reads the parameters of each of the four as its selector", () => {
+    expect(TokensRequest.parse({ colors: `${h},${h}` })).toEqual({ colors: [h, h] });
+    expect(TokensRequest.parse({ contract: h })).toEqual({ contract: h });
+    expect(TokensRequest.parse({ contract: h, limit: 10, cursor: "abc" })).toEqual({ contract: h, limit: 10, cursor: "abc" });
+    expect(TokensRequest.parse({ contract: h, domainSep: h })).toEqual({ contract: h, domainSep: h });
+    expect(TokensRequest.parse({ contract: h, domainSep: h, kind: 3 })).toEqual({ contract: h, domainSep: h, kind: 3 });
+  });
+  it("refuses a list of colors (a GET parameter is text) and every mix of selectors", () => {
+    for (const bad of [{ colors: [h] }, {}, { domainSep: h }, { kind: 1 }, { colors: h, limit: 1 }, { contract: h, kind: 1 }, { contract: h, domainSep: h, cursor: "abc" }]) {
+      expect([bad, TokensRequest.safeParse(bad).success]).toEqual([bad, false]);
     }
   });
 });

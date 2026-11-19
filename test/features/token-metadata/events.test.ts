@@ -13,7 +13,7 @@ import {
 import type { ModuleDeclaration } from "../../../src/modules/declaration.js";
 import * as v9 from "../../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../../runner/process-backends.js";
-import { blockLogs, causes, contract, domain, eventData, log, miscData, post, runTo, runToHalt, serve, TOKENS_PATH } from "./harness.js";
+import { blockLogs, causes, contract, domain, eventData, getTokens, log, miscData, runTo, runToHalt, serve } from "./harness.js";
 
 /**
  * The module's event rows through the real process on PostgreSQL 18 and PGlite:
@@ -144,7 +144,7 @@ describe.each(PROCESS_BACKENDS)("token-metadata's event rows on $name", (backend
     const unresolved = new Map([[BigInt(S + 1), [site(0, 0, "not-a-literal"), site(1, 2, "partial-transaction")]]]);
     const logs = new Map([[BigInt(S + 1), [log(0, 1, A, valid), log(1, 3, A, otherValid)]]]);
     const identity = await serve(db, { start: S, head: S + 2, logs, unresolved }, async (origin) =>
-      (await post(origin, TOKENS_PATH, { contract: `0x${hex(A)}`, domainSep: `0x${hex(D)}`, kind: 1 })).json.items[0],
+      (await getTokens(origin, { contract: `0x${hex(A)}`, domainSep: `0x${hex(D)}`, kind: 1 })).json.items[0],
     );
     // The valid events beside them are applied: two tokens, each set by the second site of its transaction (the
     // unresolved one is the first, and is counted).

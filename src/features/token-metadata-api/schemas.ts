@@ -1,6 +1,6 @@
 /**
- * The shapes of `token-metadata-api`'s one route, `getTokens` (`POST /token-metadata-api/v1/tokens`), as zod schemas:
- * its input (one of four selectors), its output, and the cursor of a contract's pages. The core checks every input
+ * The shapes of `token-metadata-api`'s one route, `getTokens` (`GET /token-metadata-api/v1/tokens`), as zod schemas:
+ * its input (the parameters of one of four selectors), its output, and the cursor of a contract's pages. The core checks every input
  * against {@link TokensRequest} and writes every output with {@link TokensResponse}, and the TypeScript types come
  * from the same schemas, so the handler cannot return a shape the documentation does not describe.
  *
@@ -41,26 +41,61 @@ const height = () => uintText(64);
 export const ContractCursor = z.strictObject({ c: hash32(), k: z.tuple([hash32(), Kind]) });
 export type ContractCursor = z.output<typeof ContractCursor>;
 
+/** One of the four selectors, as the handler takes it. */
+export type TokensSelector =
+  | { readonly colors: readonly string[] }
+  | { readonly contract: string; readonly limit?: number; readonly cursor?: string }
+  | { readonly contract: string; readonly domainSep: string }
+  | { readonly contract: string; readonly domainSep: string; readonly kind: Kind };
+
+const COLOR_LIST = /^0x[0-9a-f]{64}(,0x[0-9a-f]{64})*$/;
+
 /**
- * The input: exactly one of four selectors.
- * - `{ colors }`: the described kind 1 and 2 tokens of each color (a color covers both kinds), up to {@link MAX_COLORS}.
- * - `{ contract, limit?, cursor? }`: a contract's described tokens, a page at a time.
- * - `{ contract, domainSep }`: the described kinds of one token.
- * - `{ contract, domainSep, kind }`: one token.
+ * The input: the route is a `GET`, so its input is its parameters, each one text or a number. Together they are
+ * exactly one of four selectors, which is what the handler takes ({@link TokensSelector}):
+ * - `colors`: the described kind 1 and 2 tokens of each color (a color covers both kinds). One parameter, the colors
+ *   separated by commas, up to {@link MAX_COLORS}; given alone.
+ * - `contract`, with `limit` and `cursor` or neither: a contract's described tokens, a page at a time.
+ * - `contract` and `domainSep`: the described kinds of one token.
+ * - `contract`, `domainSep` and `kind`: one token.
+ *
+ * A combination that is none of them is refused with a message that names the rule and nothing of the request.
  */
-export const TokensRequest = z.union([
-  z.strictObject({ colors: z.array(hash32()).min(1).max(MAX_COLORS) }),
-  z.strictObject({
-    contract: hash32(),
+export const TokensRequest = z
+  .strictObject({
+    colors: z
+      .string()
+      .regex(COLOR_LIST, { error: "expected 32-byte hashes (0x and 64 lowercase hex digits each) separated by commas" })
+      .refine((list) => list.length <= MAX_COLORS * 67 - 1, { error: `expected at most ${MAX_COLORS} colors` })
+      .optional()
+      .describe("colors as 0x-prefixed lowercase hex, separated by commas; given alone"),
+    contract: hash32().optional(),
+    domainSep: hash32().optional(),
+    kind: Kind.optional(),
     limit: z.int().min(1).max(MAX_LIMIT).optional(),
     cursor: z
       .string()
       .regex(/^[A-Za-z0-9_-]{1,2048}$/, { error: "expected a cursor this route gave" })
       .optional(),
-  }),
-  z.strictObject({ contract: hash32(), domainSep: hash32() }),
-  z.strictObject({ contract: hash32(), domainSep: hash32(), kind: Kind }),
-]);
+  })
+  .transform((given, context): TokensSelector => {
+    const refuse = (message: string): never => {
+      context.addIssue({ code: "custom", message });
+      return z.NEVER;
+    };
+    const { colors, contract, domainSep, kind, limit, cursor } = given;
+    if (colors !== undefined) {
+      if (Object.keys(given).length > 1) return refuse("colors is given alone");
+      return { colors: colors.split(",") };
+    }
+    if (contract === undefined) return refuse("expected colors or contract");
+    if (domainSep === undefined) {
+      if (kind !== undefined) return refuse("kind is given with domainSep");
+      return { contract, ...(limit === undefined ? {} : { limit }), ...(cursor === undefined ? {} : { cursor }) };
+    }
+    if (limit !== undefined || cursor !== undefined) return refuse("limit and cursor page a contract's tokens: not given with domainSep");
+    return kind === undefined ? { contract, domainSep } : { contract, domainSep, kind };
+  });
 export type TokensRequest = z.output<typeof TokensRequest>;
 
 const Bytes = z.strictObject({ hex: hexBytes(), utf8: z.string().nullable() });

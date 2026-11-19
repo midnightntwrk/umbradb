@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { tokenColor } from "../../../src/features/token-metadata/color.js";
 import { commonRecords, metadataRecord, toHex, withdrawRecords } from "../../../src/features/token-metadata/codec/index.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../../runner/process-backends.js";
-import { blockLogs, contract, domain, eventData, post, serve, TOKENS_PATH } from "../token-metadata/harness.js";
+import { blockLogs, contract, domain, eventData, getTokens, serve } from "../token-metadata/harness.js";
 
 /**
  * The withdrawal, usability and truncation scenarios read through the tokens route, on PostgreSQL 18 and PGlite.
@@ -67,7 +67,7 @@ describe.each(PROCESS_BACKENDS)("the withdrawal, usability and truncation scenar
     try {
       const db = await backend.database();
       const kind3 = await serve(db, { start: S, head: S + 3, logs: LOGS }, async (origin) => {
-        const at = async (body: unknown) => (await post(origin, TOKENS_PATH, body)).json;
+        const at = async (selector: object) => (await getTokens(origin, selector)).json;
         // S3, after the tombstones: kind 1 is referenced nowhere, by any selector.
         expect((await at(one(X, 1))).items).toEqual([]);
         expect((await at({ contract: hex(X) })).items.map((t: { kind: number; group: unknown }) => [t.kind, t.group])).toEqual([[3, null]]);
@@ -115,7 +115,7 @@ describe.each(PROCESS_BACKENDS)("the withdrawal, usability and truncation scenar
       ]);
 
       await serve(db, { start: S, head: S + 5, logs: LOGS }, async (origin) => {
-        const at = async (body: unknown) => (await post(origin, TOKENS_PATH, body)).json;
+        const at = async (selector: object) => (await getTokens(origin, selector)).json;
         // S3, after the revival: only `name`; kind 3 unchanged throughout.
         const [x1] = (await at(one(X, 1))).items;
         expect(x1.fields.map((f: { key: { utf8: string } }) => f.key.utf8)).toEqual(["name"]);

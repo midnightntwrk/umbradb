@@ -2,7 +2,7 @@ import net from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { commonRecords, metadataRecord } from "../../../src/features/token-metadata/codec/index.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../../runner/process-backends.js";
-import { blockLogs, contract, domain, eventData, post, serve, TOKENS_PATH } from "./harness.js";
+import { blockLogs, contract, domain, eventData, getTokens, serve } from "./harness.js";
 
 /**
  * No network request. While the module runs and serves, every outbound connection of this process —
@@ -86,8 +86,8 @@ describe.each(PROCESS_BACKENDS)("no network request, on $name", (backend: Proces
         ],
       ]);
       const answers = await serve(db, { start: S, head: S + 2, logs }, async (origin) => ({
-        identity: (await post(origin, TOKENS_PATH, { contract: `0x${Buffer.from(A).toString("hex")}`, domainSep: `0x${Buffer.from(D).toString("hex")}`, kind: 1 })).json.items[0],
-        list: (await post(origin, TOKENS_PATH, { contract: `0x${Buffer.from(A).toString("hex")}` })).json,
+        identity: (await getTokens(origin, { contract: `0x${Buffer.from(A).toString("hex")}`, domainSep: `0x${Buffer.from(D).toString("hex")}`, kind: 1 })).json.items[0],
+        list: (await getTokens(origin, { contract: `0x${Buffer.from(A).toString("hex")}` })).json,
       }));
       const published = { image: IMAGE, imageSha256: `0x${"07".repeat(32)}` };
       expect(answers.identity.common).toMatchObject(published);
